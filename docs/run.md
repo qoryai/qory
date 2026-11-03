@@ -26,8 +26,14 @@ such as `qory run: composed 42 entries from 3 modules for claude`. `-f`/`--file`
 `qory.yaml` and `harness.yaml`. A compose that fails stops the run before the agent
 starts, with the exit status of `qory harness compose`. The run's record shows that the
 run failed with no session started (`no_session`), and qory prints the path of the run's
-record after the error line. In a folder that is not a git working tree, `qory run` starts
-only with the home outside the folder, as `qory harness compose` composes only then.
+record after the error line. Four stops of a run from a run code, right after the
+compose, close with their reason in place of `no_session`: `workflow_not_in_harness` (see
+[What the run takes from the response](#what-the-run-takes-from-the-response)), or
+`read_needs_wall`, `read_needs_setup_outside` or `read_needs_no_nested_docker` (see [Read
+workflows](#read-workflows)). A read run whose setup container was not removed stops after
+the setup and closes with `read_needs_setup_removed`. In a folder that is not a git
+working tree, `qory run` starts only with the home outside the folder, as `qory harness
+compose` composes only then.
 
 A run with a run key writes no harness into the folder it runs in. The harness goes into
 a home under `qory/homes` in your cache directory: `~/.cache/qory/homes/<name>-<hash>` on
@@ -1478,6 +1484,30 @@ run <run id> starts the workflow <workflow> of the workspace's harness on claude
 run whose documents contain a harness, or `… of the checkout's harness on claude` for one
 whose documents contain none.
 
+When the composed harness has no skill or command of the workflow's name, the run stops
+before the agent starts, exit 1, and qory closes the run `failed` with the reason
+`workflow_not_in_harness`, in place of `no_session`:
+
+```
+add a skill or command <workflow> to <harness>, or set another workflow in Qory Apiary: the composed harness has no skill or command <workflow> (workflow_not_in_harness); the code is used
+```
+
+`<harness>` is `the workspace's harness` for a run whose documents contain a harness. For
+one whose documents contain none, it is `the checkout's harness`, with the target's
+`path` after it when the documents have a target: `the checkout's harness in the
+repository <path>` when the target's `system` is `QORY_RUN_SYSTEM`, and `the checkout's
+harness for the target <path>` on any other system. A workflow whose skill or command
+the runtime runs by no name from a headless start closes the run with `no_session`.
+
+A run sees the checkout read-only when `access` in its documents is `read`, or when
+`workflows` of the stack declares its workflow's access as `read`. Such a run with no
+wall, with `wall.setup: inside` or on an image with nested Docker stops after the compose,
+exit 1, and qory closes it `failed` with `read_needs_wall`, `read_needs_setup_outside` or
+`read_needs_no_nested_docker`. A writable mount that contains the checkout, lies inside it
+or links to it also stops the run, later, and the agent does not start. qory removes the
+setup container of such a run before the agent starts, and closes the run `failed` with
+`read_needs_setup_removed` when the removal fails. See [Read workflows](#read-workflows).
+
 The documents of a run with a target may set `target_version`: the version at which Qory
 Apiary checked the target for a harness file. When the target's `system` is
 `QORY_RUN_SYSTEM`, the target is the run's repository: Qory Apiary lists the target's
@@ -1493,6 +1523,39 @@ repositories are fetched at the head of their default branches.
 
 When the target is on another system than `QORY_RUN_SYSTEM`, or `QORY_RUN_SYSTEM` is
 not set, qory does not use `target_version`.
+
+A run of a work item at a `target_version` of a target on `QORY_RUN_SYSTEM` works on the
+branch `qory/<work item id>`. qory reads the work item and its artifacts through the run API
+before the fetch, and picks one version of the artifact type `branch`:
+
+1. The newest version of the artifact named `main`, if the work item's stage wrote it.
+2. Else, the version that a gate approved, of any artifact name, if the stage lists
+   `branch` as an input.
+3. Else, the newest version of the artifact named `main`.
+4. With no version, the run creates the branch at `target_version`.
+
+qory composes the harness at `target_version` and with the further repositories at their
+default branches, so a branch does not change the harness of its work item's runs. The
+fetch step also fetches each repository's commit by id, at depth 1. After the compose, and
+after the record of a walled run's places, qory checks out the branch with no request to a
+remote: at the commit in the version, or where the fetch left a repository with no entry
+in the version. The working folder then has the commit's files. qory leaves the ref
+`refs/qory/target-version` at the target version, so a file that the branch removed stays
+out when the run starts from an image's copy.
+
+A run stops before the agent starts when:
+
+- the version does not match the [branch format](../contracts/harness/v1/README.md#the-branch-format),
+  or its `ref` is another work item's;
+- a commit is not on its repository;
+- the target's commit has another `.qory` than `target_version`;
+- git does not check out a commit.
+
+An instance without the feature `workflow_model` returns 404 with no error code to the run
+API. The run then works on `target_version` with no branch.
+
+A write run on the branch pushes what the agent left to it: see [The push step of a write
+run](#the-push-step-of-a-write-run).
 
 Each of these stops the run before the compose, exit 1, and the run's record shows the
 run as failed with no session. `<commit>` is the commit's first 12 characters:
@@ -1634,9 +1697,29 @@ These stop it after the redemption, exit 1. The code is used, so each needs a ne
   again: qory starts a run code's workflow with a runtime's headless start, and has none
   for <runtime>; the code is used`, before anything is fetched
 - `add a skill or command <workflow> to <harness>, or set another workflow in Qory
-  Apiary: the composed harness has no skill or command <workflow>; the code is used`,
-  after the compose, where `<harness>` is `the workspace's harness` or `the checkout's
-  harness`
+  Apiary: the composed harness has no skill or command <workflow>
+  (workflow_not_in_harness); the code is used`, after the compose, which closes the run
+  with the reason `workflow_not_in_harness`; [What the run takes from the
+  response](#what-the-run-takes-from-the-response) lists the values of `<harness>`
+- `run this workflow with a wall: this run of workflow <workflow> only reads the checkout,
+  and a run with no wall mounts nothing read-only (read_needs_wall); the code is used`,
+  after the compose, for a read run with no wall, which closes the run with the reason
+  `read_needs_wall`
+- `set wall.setup to outside in forager.yaml, or remove it: this run of workflow
+  <workflow> only reads the checkout, and setup inside runs in the agent's container,
+  which sees the checkout read-only (read_needs_setup_outside); the code is used`, after
+  the compose, for a read run with `wall.setup: inside`, which closes the run with the
+  reason `read_needs_setup_outside`
+- `use an image without nested Docker: this run of workflow <workflow> only reads the
+  checkout, and image <image> has nested Docker, so the checkout cannot be made read-only
+  (read_needs_no_nested_docker); the code is used`, after the compose, for a read run on
+  an image with `docker: true`, which closes the run with the reason
+  `read_needs_no_nested_docker`; see [Read workflows](#read-workflows)
+- `start the run again from the work item in Qory Apiary: the setup container of this
+  read run was not removed, so a process in the container can write the checkout: <error>
+  (read_needs_setup_removed); the code is used`, after the setup, for a read run whose
+  setup container was not removed, which closes the run with the reason
+  `read_needs_setup_removed`; see [Read workflows](#read-workflows)
 - `add a command <workflow> to <harness>, or set another runtime in Qory Apiary:
   <runtime> runs no skill by its name from a headless start; the code is used`, after the
   compose, for a workflow that is only a skill on `gemini` or `opencode`
@@ -1878,6 +1961,186 @@ limits. Each error starts with its fix:
 
 When `harness_hidden` is `false`, the home of a run without a wall keeps its links to
 the modules, as the home of a run started without a run code does.
+
+### The push step of a write run
+
+A write run of a work item ends with a push step: qory commits what the agent left, pushes
+it to the branch `qory/<work item id>`, and stores a new version of the artifact `branch`.
+The next run in the same stage starts at that commit. A run of another stage starts at the
+version a gate approved when its stage lists `branch` as an input, and at that commit
+otherwise. The step runs after the agent exits and before the run closes. A setup container
+is gone by then: qory removes it before the step, in the wall step `remove the setup
+container`, so no process in it writes the working folder after the check. Its kind is `push` and its name is `push qory/<work item
+id> to <system>/<path>`, followed by ` and 1 further repository` or ` and <n> further
+repositories` for a run with more repositories.
+
+The step runs when the run works on the branch of its work item, its documents set `access`
+to `write`, `workflows` of the stack declares the workflow's access as `write`, and an agent
+session ran, however it ended. A workflow that the stack does not declare counts as `read`.
+A session that failed, timed out or was cancelled gets the same step and the same checks as
+one that succeeded. The commit keeps its subject and gets the body line `The run ended
+<state>: <reason>.`, and the version's note is the same line. `<reason>` is `exit <code>`
+for a session with no reason. A session that succeeded has neither.
+
+A run has no step in these cases, and what the agent left stays in the working folder only:
+
+- A read run.
+- A run whose session did not start, or stopped with an error of the session itself.
+- A run that Qory Apiary ended during its session. What the agent left stays on the machine
+  and is deleted with it, so nothing reaches the branch.
+- A run on a machine that is lost: nothing is left to run the step.
+
+The step does this, in order:
+
+1. qory checks each repository again, because the agent could write to each `.git`. The
+   check stops on a key in a configuration file in `.git` that neither `git init` nor the
+   fetch writes, apart from `user.name` and `user.email` in `.git/config`, which the commit
+   of this step does not use, on such a file that is not a regular file, on `alternates`, on
+   `info/grafts`, on a `commondir` file, on a `.git` with no `HEAD`, `objects` or `refs`,
+   on a link in `.git` or on the way to a further repository, and on a hard link in `.git`
+   outside `objects`. A walled run's target also gets the settings check of the place the
+   run used, which stops on a `remote.origin.url` other than the one it recorded.
+2. qory removes `.git/index.lock` of each repository, a file that an agent killed in a git
+   command leaves behind, and prints `qory run: removed .git/index.lock of <path>, which the
+   agent left when it stopped`. qory does this only for a walled run, whose container the
+   session removed: when it could not, the run's host proxy does not open, and the step
+   runs no git. With an agent on the host, the stop of the agent is not proven, and a lock
+   fails the step. qory removes only that file, and only as a regular file in a `.git`
+   directory, so a link stops the check and any other lock stays.
+3. qory commits what the agent left in each repository, with the message `Changes left by
+   run <run number>` and the author and committer `qory <qory@localhost>`. A new file is in
+   the commit unless git ignores it through `.gitignore` or `.git/info/exclude`. `.qory`
+   and the links into it stay out, also when the agent staged them. When a commit of the
+   agent has them, qory's commit puts them back as they were at the start of the run, and
+   the file stays in the working folder. A repository inside a repository stays out, as
+   its files and as a gitlink, and qory prints `have the agent leave plain files in <folder>
+   of <path> to push them: that folder is a repository, so qory left it out of the commit,
+   and what it has stays in the working folder`. A path that the setup
+   changed stays out while it is as the setup left it: after a setup outside the agent's
+   container, qory records each changed path and its content, and commits a path only if
+   the agent changed it again. With `wall.setup: inside`, the setup runs in the agent's
+   container, so what it changed counts as what the agent left. No hook in `.git` runs.
+   The commits of all repositories come before the first push, so a failed commit pushes
+   nothing.
+4. qory pushes each repository whose `HEAD` is past the commit the run started at to
+   `refs/heads/qory/<work item id>`, through the run's host proxy, with no force. It
+   prints `qory run: pushed qory/<work item id> to <path> at <commit>`, where `<commit>`
+   is the commit's first 12 characters. With no new commit in any repository, it prints
+   `qory run: no new commits to push`, and the step ends with no push and no version.
+5. qory stores a new version of the artifact `main` of the type `branch`, with one file,
+   `branch.json`, in the [branch format](../contracts/harness/v1/README.md#the-branch-format):
+   the version the run read, with the commit of each pushed repository replaced, or added
+   when the version has no entry for it. After a 429, qory waits for `Retry-After`, at
+   most 60 seconds, and sends the request again, at most 5 requests in all. After a request
+   with no answer, or with a status of 500 or above, qory reads the work item's artifacts
+   first, and sends the request again only when no version of this run has the file.
+
+A run's policy with path rules must allow `/<path>.git/git-receive-pack` for the push.
+
+The step counts toward the run's time limit, and has 120 seconds when the run has less left,
+also after the session used up the limit. A run can pass its time limit by up to 120
+seconds. A first signal, before or during the step, cuts the step to at most 15 seconds. A
+second signal ends the step at once. A step that one of these ended has the state
+`cancelled`, and the commits it made stay in the working folder.
+
+The run closes as its session ended, whatever the step did: a session that timed out closes
+`cancelled` with the reason `timeout`, exit 124, and a session that failed closes `failed`.
+The line of a failed step is printed after the run's end. After a session that succeeded,
+the step sets the close:
+
+- A failed step closes the run `failed`, exit 1.
+- A step stopped at the time limit closes the run `cancelled` with the reason `timeout`,
+  exit 124.
+- A step stopped after a signal closes the run `cancelled` with the reason `interrupted`,
+  exit 1.
+
+`qory run pool` stops a run with SIGTERM, and with SIGKILL 30 seconds later. The step gets
+its 15 seconds when the agent's runtime stops within the 10 seconds of the default
+`--stop-grace`. A longer `--stop-grace` takes time from the step, and SIGKILL ends it.
+
+One repository can be pushed before another fails, and a push can succeed before its version
+is stored. The branch is then past every version of the artifact, and the next run's push
+fails as a branch that moved. Each line for that state gives both ways out: add a version
+with the head of the branch, or delete the branch.
+
+On a run that can push, each of these lines stops the run after the setup, before the
+agent starts, and closes it `failed` with `no_session`:
+
+- `take the work item in again in Qory Apiary: after the setup, the check of repository
+  <path> failed, so the agent did not start: <cause>; the code is used`
+- `take the work item in again in Qory Apiary: the record of what the setup changed in
+  <path> failed: <error>; the code is used`
+
+When a push fails, the step's log has each `remote:` line of the forge as `qory run:
+remote: <line>`, and each commit that did not reach the branch as `qory run: not pushed
+from <path>: <commit> <subject>`, at most 50 of each, then `qory run: <n> further lines
+left out`. A URL's login and password and the run's secret values are hidden.
+
+Each of these lines fails the step. `<commit>` is the commit's first 12 characters:
+
+- `take the work item in again in Qory Apiary: after the agent exited, the check of
+  repository <path> failed, so qory committed and pushed nothing: <cause>; the code is
+  used`, before any commit
+- `take the work item in again in Qory Apiary: the commit of what the agent left in <path>
+  failed: <error>; the code is used`
+- `take the work item in again in Qory Apiary: the check that HEAD of <path> descends from
+  commit <commit> failed: <error>; the code is used`
+- `take the work item in again in Qory Apiary, and keep the run's commits on top of commit
+  <commit>: HEAD of <path> is at <commit>, which does not descend from it, so a push would
+  not be a fast-forward; the code is used`, when the agent replaced the commit the run
+  started at
+- `add a new version of the artifact branch in Qory Apiary with the head of qory/<work item
+  id> on <path>, or delete that branch on <system>, then take the work item in again: the
+  branch moved since the run fetched it, and the push failed: <error>; the code is used`
+- `change the rule on <system> that stops a push to qory/<work item id> of <path>, then take
+  the work item in again: the push failed: <error>; the code is used`, when a rule or a
+  hook on the system stops the update
+- `add /<path>.git/git-receive-pack to the path rules of the run's policy for <system>, and
+  give the run's credential for <system> write access to <path>, then take the work item in
+  again: the push through the run's gateway returned 403: <error>; the code is used`
+- `give the run's credential for <system> write access to <path>, then take the work item in
+  again: the push through the run's gateway failed: <error>; the code is used`
+- `check that the run's policy allows <system> and that <system> is reachable, then take
+  the work item in again: the push of <path> through the run's gateway failed: <error>;
+  the code is used`
+- `take the work item in again in Qory Apiary: the run's host proxy, through which qory
+  pushes the run's commits, did not open: <error>; the code is used`
+- `take the work item in again in Qory Apiary: the run API, which stores the version of the
+  artifact branch, is not reachable from this run: <error>; the code is used`
+- `Define the artifact type branch in the workspace's Artifact types, then add a new version
+  of the artifact branch in Qory Apiary with the head of qory/<work item id> on <path>, or
+  delete that branch on <system>, then run the round again`, when the workspace has no
+  artifact type `branch`
+- `add a new version of the artifact branch in Qory Apiary with the head of qory/<work item
+  id> on <path>, or delete that branch on <system>, then take the work item in again: qory
+  pushed <branch>, and the version of the artifact branch was not stored: <error>; the code
+  is used`
+- `check the artifact branch of the work item in Qory Apiary; with no version of this run,
+  add a new version of the artifact branch in Qory Apiary with the head of qory/<work item
+  id> on <path>, or delete that branch on <system>; then take the work item in again: qory
+  pushed <branch>, and the request that stores its version ended with no response, so the
+  version may or may not be stored: <error>; the code is used`
+- `add a new version of the artifact branch in Qory Apiary with the head of qory/<work item
+  id> on <path>, or delete that branch on <system>: qory pushed <path> and stored no version,
+  because the push of the next repository failed: <line of that failure>`
+
+A removal of the setup container that failed runs no step: qory commits nothing and pushes
+nothing, and the run ends as a failed step ends it, with this line:
+
+- `take the work item in again in Qory Apiary: the setup container of this run was not
+  removed, so a process in it could write the working folder, and qory pushed nothing:
+  <error>; the code is used`
+
+A step that the time limit or a signal stopped prints one of these, where `<cause>` is `qory
+run got a second signal`, `qory run got <signal>, and the step reached its limit of 15s`,
+`the step reached its limit of 2m0s`, or `the run reached its time limit of <limit>`:
+
+- `take the work item in again in Qory Apiary: <cause> during the push step, and the run's
+  commits may not have reached the branch; the code is used`
+- `check the artifact branch of the work item in Qory Apiary; with no version of this run,
+  add a new version of the artifact branch in Qory Apiary with the head of qory/<work item
+  id> on <path>, or delete that branch on <system>; then take the work item in again: qory
+  pushed <branch>, and <cause>, so the version may or may not be stored; the code is used`
 
 ### Runs of a node pool
 
@@ -2325,6 +2588,66 @@ the requests, so with `gateway.egress.paths` set, every run on the machine needs
 
 The access key's secret stays Forager's: see [The access key and the
 instance](#the-access-key-and-the-instance).
+
+## Commands of a work item
+
+A skill reads its work item and stores what it made with four commands. Each command
+works in a run and on a laptop. A wall mounts `qory` at `/qory/qory` and does not add it to
+`PATH`, so a skill calls `/qory/qory` in a run with a wall and `qory` on a laptop.
+
+| Command | In a run | Outside a run |
+| ------- | -------- | ------------- |
+| `qory work-item show` | Prints the work item as JSON. | Prints `.qory/work-item.json`. With no file, exits 3. |
+| `qory artifact pull [<type>] [--version <N>]` | Fetches artifacts into the store, under `<type>/<name>/v<N>/`, writes `index.json` there, and prints the store's directory. | Fetches nothing, and says so. |
+| `qory artifact push <type> <file>... [--name <name>] [--note <text>]` | Stores the files as one new version, keeps a copy in the store, and prints the version. | Keeps the files in `.qory/artifacts`, and sends nothing. |
+| `qory run verdict passed\|changes-requested\|escalate [--gaps <file>]` | Stores the verdict. Qory Apiary acts on it when the run ends. | Prints the verdict and keeps it in `.qory/artifacts/verdict/`. Nothing acts on it. |
+
+A run with a control plane sets `QORY_RUN_API` to
+`http://run-api.qory.invalid/v1/runs/<run id>`. The commands send their requests there
+through `HTTP_PROXY`. The gateway signs them, so the run has no key. With the variable
+absent, the commands work on the checkout's `.qory` directory.
+
+The store is the folder of a run's artifact files. It is `.qory/artifacts` in the checkout.
+In a run that cannot write its checkout, such as a [read run](#read-workflows), it is
+`/tmp/qory-artifacts` in the agent's container, and it ends with the container. `qory
+artifact pull` and `qory artifact push` check whether they can write the checkout, so no
+setting is needed. In a wall they find the checkout from the folder the run started in, so
+a `cd` does not change the store. On an image with nested Docker, and with no wall, they
+find it from the working folder. In a run, read the files from the directory that `qory
+artifact pull` prints, which is a whole path. Outside a run the store is `.qory/artifacts`.
+
+`qory artifact pull` fetches the newest version of each output of the stage, and the
+version of each input that its gate approved. A type that is both counts as an output. For
+any other artifact it fetches the approved version, or the newest when none is approved.
+`<type>` limits the fetch to one type. `--version` needs `<type>`.
+
+`-` as a file of `qory artifact push` reads one file from standard input. Its name is
+`stdin` with the extension of its content, such as `stdin.md`. One version is at most
+32 MiB encoded through the run API, about 24 MiB of files, whatever the type's size limit.
+
+`qory artifact push` exits 4, with the type and the limit, for a type that the workspace
+does not have, for too many files, and for files over a limit. One version has at most 100
+files through the run API, whatever the type's maximum.
+`qory run verdict` exits 4 for a request over its limit too. `qory work-item show` exits 3
+with no work item. These numbers mean a collision and a foreign path on `qory harness`.
+
+`.qory/artifacts/.gitignore` keeps the artifacts out of git, also in a run's checkout,
+which has no exclude line for `.qory`. `/tmp/qory-artifacts` has no `.gitignore`, because
+it lies outside the checkout. qory makes that folder with mode 700 as the run's user. If
+another user owns a folder at that path, or its mode has a group or other bit,
+`qory artifact pull` and `qory artifact push` stop with exit 1, and the push sends nothing.
+Remove the folder to run the command again. A directory link at `.qory`,
+`.qory/artifacts` or `/tmp/qory-artifacts` stops `qory artifact push` with exit 1 before it
+sends anything. A directory link further
+down stops `qory artifact pull` and a push outside a run with exit 1. In a run, a push has
+stored the version by that point, so it keeps no local copy, prints a line on standard
+error, and exits 0. A write replaces a link at a file's path, and never follows it.
+
+With a home in the checkout, `qory harness remove` deletes the directory with the rest of
+`.qory`. `--runtime` does the same when it removes the last composed runtime.
+
+The client sends a POST once. If the response is lost, the version may be stored: read the
+artifact index with `qory artifact pull` before you push again.
 
 ## Credentials the agent never has
 
@@ -3072,6 +3395,130 @@ What to know:
   runtime's hooks do not reach the session. So a walled run there has no hook events. The
   log, the egress record and the structured output are there. On a Linux host, the hooks
   cross.
+
+### Read workflows
+
+Two values set what a run of a workflow from a run code may do on the checkout:
+
+- The workflow's access in the stack, `workflows.<name>.access`: `read` or `write`. A
+  workflow that sets no access, and one the stack does not declare, is `read` (see
+  `workflows` in `contracts/harness/v1/README.md`).
+- `access` in the run's documents, from Qory Apiary: `read` or `write`. Documents with no
+  target have no `access`, and the workflow's access applies alone.
+
+A read run is a run where either value is `read`. A workflow declared `write` with
+`access: read` in the documents gives a read run, and so does a workflow declared `read`
+with `access: write`. A read run sees the checkout read-only:
+
+- Forager binds the workspace read-only in the agent's container, and the checkout's
+  mount is read-only. A write into the checkout inside fails with `Read-only file
+  system`.
+- `qory artifact pull` and `qory artifact push` keep their files in `/tmp/qory-artifacts`,
+  the store of a run that cannot write its checkout. `qory artifact pull` prints that
+  directory. See
+  [Commands of a work item](#commands-of-a-work-item).
+- On Claude Code, the run's settings deny `NotebookEdit` and every edit under the
+  checkout, with `Edit(//<checkout>/**)` and `Edit(//workspace/**)`. They allow
+  `Bash(/qory/qory artifact *)`, `Bash(/qory/qory run verdict *)`,
+  `Bash(/qory/qory work-item *)`, `Read(//tmp/qory-artifacts/**)` and
+  `Edit(//tmp/qory-artifacts/**)`, add `/tmp/qory-artifacts` to
+  `permissions.additionalDirectories`, and set `permissions.defaultMode` to `dontAsk`,
+  beside what the composed settings contain. Inside the wall, `qory` is at `/qory/qory` and
+  not on `PATH`. On the other runtimes, the read-only mount is the only change.
+
+  `permissions.additionalDirectories` keeps the store readable when the composed settings
+  set `permissions.blockReadsOutsideWorkingDirectories`. A folder on that list must exist
+  when Claude Code starts, so qory makes `/tmp/qory-artifacts` in the container before the
+  agent starts. If the image has something at that path, the run stops before the agent
+  starts, and the error line starts with the fix.
+
+  So the agent reads what it pulled and makes what it pushes in `/tmp/qory-artifacts`, with
+  Claude Code's `Read` and `Write` tools:
+
+  ```
+  /qory/qory artifact push review /tmp/qory-artifacts/review.md
+  /qory/qory run verdict changes-requested --gaps /tmp/qory-artifacts/gaps.md
+  ```
+
+  Every other write stops at `dontAsk`, apart from Claude Code's memory folder,
+  `/tmp/qory-agent-home/projects/<project>/memory/`, which Claude Code lets the agent write
+  with no rule. That folder stays in the container and does not reach the checkout. An
+  `Edit` or `Write` allow in the composed settings opens the rest of the container, and the
+  deny rules and the read-only mount still stop a write to the checkout.
+- The setup and the host steps write the checkout, so the checkout stays among the places
+  the run may write, and the record lists it.
+- qory removes the setup container after the setup and before the agent starts, in the
+  wall step `remove the setup container`, so every process in that container has ended
+  when the agent starts. A read run's agent cannot reach a service that the setup started:
+  the name `qory-setup` does not resolve, so a connection to `qory-setup:5432` fails. A run
+  that gets the push step keeps the setup container until its session ended, and qory
+  removes it before the step. Any other run keeps it until the run closes. If a workflow's
+  agent needs such a service, declare the workflow `write`, and check that `access` in the
+  run's documents is not `read`.
+
+A read run with no wall, with `wall.setup: inside` or on an image with nested Docker
+cannot see the checkout read-only. It stops after the compose, before the image's fetch,
+the setup and the agent, exit 1. qory closes the run `failed` with the
+reason in the line, in place of `no_session`:
+
+- With no wall, as a run with `--run-code-file` and `--gateway` and no `wall` section
+  has, `read_needs_wall`:
+
+  ```
+  run this workflow with a wall: this run of workflow <workflow> only reads the checkout, and a run with no wall mounts nothing read-only (read_needs_wall); the code is used
+  ```
+
+- With `wall.setup: inside`, `read_needs_setup_outside`:
+
+  ```
+  set wall.setup to outside in forager.yaml, or remove it: this run of workflow <workflow> only reads the checkout, and setup inside runs in the agent's container, which sees the checkout read-only (read_needs_setup_outside); the code is used
+  ```
+
+- On an image of `wall.images` with `docker: true`, `read_needs_no_nested_docker`:
+
+  ```
+  use an image without nested Docker: this run of workflow <workflow> only reads the checkout, and image <image> has nested Docker, so the checkout cannot be made read-only (read_needs_no_nested_docker); the code is used
+  ```
+
+  qory checks the image chosen at the run's open, whichever way it was selected: by the
+  run's policy, which with a server is the run configuration's, or by `--image` or
+  `wall.image` when the policy selects none. A policy that selects an entry with
+  `docker: true` stops the run even when `wall.image` is a pinned reference. An image
+  selected by its reference runs no nested Docker.
+
+A read run whose setup container was not removed stops before the agent starts, exit 1,
+because a process in the container can still write the checkout. qory closes the run
+`failed` with the reason `read_needs_setup_removed`:
+
+```
+start the run again from the work item in Qory Apiary: the setup container of this read run was not removed, so a process in the container can write the checkout: <error> (read_needs_setup_removed); the code is used
+```
+
+A time limit or a signal that ends the removal closes the run as it closes a setup that
+it cuts short: `cancelled` with `timeout`, exit 124, or `cancelled` with `interrupted`,
+exit 1.
+
+A writable mount from `--mount` or `wall.mounts` that contains the checkout, lies inside
+it or links to it also stops a read run, later, and the agent does not start. The run
+stops after the image's fetch, exit 1, with a line that ends `(mount_mode_conflict)`:
+
+- When the run configuration lists no repositories, the run has no setup and stops at the
+  join. The session closes `failed` with `mount_mode_conflict`, and the run closes
+  `failed` with no reason.
+- When it lists repositories, the setup runs first, with the checkout writable and
+  without the mount, and the run stops at the join in the same way.
+- When it lists repositories and the run's policy selects the image by its reference,
+  the run stops before the setup and closes `failed` with `no_session`.
+
+A mount folder that exists in the checkout before the fetch, outside `.git` and `.qory`,
+stops a run whose run configuration lists repositories at the fetch instead, with
+`no_session`: the fetch needs an empty working folder. `--mount <checkout>/.qory/sub`, a
+mount in `.git`, and a `wall.mounts` folder that the fetch creates pass the fetch and stop
+as in the last two cases. A writable mount at the checkout's exact path stops nothing:
+qory makes it read-only.
+
+A run of a workflow from a run code where neither value is `read`, a run given a run key
+with no run code, and a run you start yourself see the checkout writable.
 
 ### Qory's images
 

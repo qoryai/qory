@@ -1,0 +1,1 @@
+Write bind as bind.agents.coder: rails-coder in qory.yaml: bind keys are kinds, and agents/coder is a kind and a role.

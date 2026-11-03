@@ -410,6 +410,7 @@ func TestPrintHidesASecretInNamesAndSources(t *testing.T) {
 	}
 	r.Entries = []report.Entry{{Kind: "skills", Name: "qak_s", Module: "qak_m", For: "agents/qak_a", References: []string{"skills/qak_r", "skills/ship"}}}
 	r.Bind = map[string]string{"agents/qak_role": "qak_agent"}
+	r.Roles = []report.Role{{Role: "agents/qak_role", Agent: "qak_agent", From: "provides qak_m"}}
 	r.Excludes = []report.Exclude{{Module: "qak_m", Kind: "skills", Name: "qak_old"}}
 	r.Egress = []report.Egress{{Host: "api.example.com", Modules: []string{"qak_m"}}}
 	name := "(a name that contains an access key secret)"
@@ -421,7 +422,7 @@ func TestPrintHidesASecretInNamesAndSources(t *testing.T) {
 		name+" https://u:(hidden)@git.example/h.git#main abc1234 variant "+name+" linked as "+name+" "+value,
 		"core "+value+" working-tree",
 		name+" "+name+" required by "+name+" references "+name+", skills/ship",
-		name+" "+name,
+		name+" "+name+" provides "+name,
 		"api.example.com "+name,
 	)
 }

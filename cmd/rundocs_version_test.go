@@ -15,14 +15,16 @@ import (
 
 // versionRepository is a run from a control plane, as [newHostFetch] makes it, whose
 // server serves acme/site as well, on its default branch main: a first commit whose
-// qory.yaml lists the module hello, with the command hello, then a head commit that
-// removes the command. It returns the run, both commits and the files of the first.
+// qory.yaml lists the module hello, with the command hello, and declares the workflow
+// hello write, so a run with no wall joins, then a head commit that removes the command
+// and the workflow. It returns the run, both commits and the files of the first.
 func versionRepository(t *testing.T) (h *hostFetch, first, head string, files map[string]string) {
 	t.Helper()
 	hello := helloFiles(t)
 	h = newHostFetch(t, "", "main")
+	stack := "apiVersion: qory.dev/v1alpha1\ntarget:\n  runtime: claude\nmodules:\n  - name: hello\n    source: {path: modules/hello}\n"
 	files = map[string]string{
-		"qory.yaml":                       ownStack("apiVersion: qory.dev/v1alpha1\ntarget:\n  runtime: claude\nmodules:\n  - name: hello\n    source: {path: modules/hello}\n"),
+		"qory.yaml":                       ownStack(stack + "workflows:\n  hello:\n    access: write\n"),
 		"modules/hello/qory-module.yaml":  hello["examples/hello/modules/hello/qory-module.yaml"],
 		"modules/hello/commands/hello.md": hello["examples/hello/modules/hello/commands/hello.md"],
 	}
@@ -30,6 +32,8 @@ func versionRepository(t *testing.T) (h *hostFetch, first, head string, files ma
 	work := tempDir(t)
 	proxygittest.Git(t, work, "clone", "--quiet", filepath.Join(h.server.Root, "acme", "site.git"), ".")
 	proxygittest.Git(t, work, "rm", "--quiet", "modules/hello/commands/hello.md")
+	writeFile(t, filepath.Join(work, "qory.yaml"), ownStack(stack))
+	proxygittest.Git(t, work, "add", "qory.yaml")
 	proxygittest.Git(t, work, "-c", "user.name=Example", "-c", "user.email=example@example.com", "commit", "--quiet", "-m", "head")
 	proxygittest.Git(t, work, "push", "--quiet", "origin", "main")
 	return h, first, proxygittest.Git(t, work, "rev-parse", "HEAD"), files
@@ -91,15 +95,20 @@ func TestARunCodeWorksAtItsTargetVersion(t *testing.T) {
 
 // TestARunCodeAtItsBranchHeadComposesTheHead is the run of
 // [TestARunCodeWorksAtItsTargetVersion] at the head commit: qory run composes the head's
-// qory.yaml, which has no command hello, so the run stops before the join.
+// qory.yaml, which has no command hello, so the run stops before the join, exit 1, and
+// closes failed with the reason workflow_not_in_harness. The line shows the checkout's
+// harness in the target's repository.
 func TestARunCodeAtItsBranchHeadComposesTheHead(t *testing.T) {
 	h, _, head, _ := versionRepository(t)
 	out, err, n, _ := runAtVersion(t, h, "acme/site", head)
-	if cmd.ExitCode(err) != 1 || !n.stoppedBeforeJoin() {
+	if cmd.ExitCode(err) != 1 || n.joined {
 		t.Fatalf("%v (exit %d), want exit 1 before the join\n%s", err, cmd.ExitCode(err), out)
 	}
+	if want := []session.Outcome{{State: "failed", Reason: "workflow_not_in_harness", ExitCode: -1}}; !slices.Equal(n.closes, want) {
+		t.Errorf("the run closed with %v, want %v", n.closes, want)
+	}
 	wants(t, out, "qory run: fetched acme/site at "+head[:12]+" in ")
-	wants(t, out+err.Error(), "the composed harness has no skill or command hello; the code is used")
+	wants(t, out+err.Error(), "add a skill or command hello to the checkout's harness in the repository acme/site, or set another workflow in Qory Apiary: the composed harness has no skill or command hello (workflow_not_in_harness); the code is used")
 }
 
 // TestARunCodeAtACommitTheServerLacksStops is a run from a run code whose documents set

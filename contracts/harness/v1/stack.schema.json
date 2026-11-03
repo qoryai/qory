@@ -17,10 +17,14 @@
     "description": {"type": "string"},
     "modules": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/module"}},
     "bind": {
-      "description": "The entry that fills each role a document references: <kind>/<role> to the name of an entry of that kind, so a module writes ${qory:agents/coder} and the stack defines which agent that is.",
+      "description": "The entry that fills each role a document references, by kind and then by role: agents, commands or skills, each a map of a role to the name of one entry of that kind. A module writes ${qory:agents/coder}, and bind: {agents: {coder: rails-coder}} sets which agent that is.",
       "type": "object",
-      "propertyNames": {"pattern": "^(agents|commands|skills)/[^/\\\\@ .][^/\\\\@ ]*$"},
-      "additionalProperties": {"type": "string", "pattern": "^[^/\\\\@ .][^/\\\\@ ]*$"}
+      "additionalProperties": false,
+      "properties": {
+        "agents": {"$ref": "#/$defs/bindRoles"},
+        "commands": {"$ref": "#/$defs/bindRoles"},
+        "skills": {"$ref": "#/$defs/bindRoles"}
+      }
     },
     "extensions": {
       "description": "Values qory copies into the report and does not read: keys of the author's choosing, each a value of any shape.",
@@ -41,7 +45,7 @@
             "not": {"pattern": "^([0.]+(ns|us|ms|s|m|h))+$"}
           },
           "access": {
-            "description": "The access level the workflow declares for what a dispatched run of it works on: read or write. Left out, it is read. qory checks the value and grants no permission from it.",
+            "description": "The access level the workflow declares for what a dispatched run of it works on: read or write. Left out, it is read. A dispatched run from a run code sees the checkout read-only when this access is read or access in the run's documents is read, and on Claude Code its settings deny Edit, Write and NotebookEdit; such a run with no wall, with wall.setup: inside, or whose image chosen at the run's open has nested Docker, whichever way it was selected, stops before the agent starts (docs/run.md, §Read workflows). The run sees the checkout writable only when both are write, or when this access is write and the documents have no access, as documents with no target do.",
             "enum": ["read", "write"]
           }
         }
@@ -71,6 +75,12 @@
   },
   "$defs": {
     "names": {"type": "array", "items": {"type": "string", "minLength": 1}},
+    "bindRoles": {
+      "description": "The roles of one kind, each to the name of the one entry of that kind that fills the role.",
+      "type": "object",
+      "propertyNames": {"pattern": "^[^/\\\\@ .][^/\\\\@ ]*$"},
+      "additionalProperties": {"type": "string", "pattern": "^[^/\\\\@ .][^/\\\\@ ]*$"}
+    },
     "oneOrMore": {
       "description": "One name, or a list of them.",
       "oneOf": [

@@ -40,16 +40,16 @@ var wrapsAgentEnv = func(freshHome, walled bool) bool { return freshHome && wall
 // them. Forager's environment file wins over the image's value for every name it sets,
 // so the names it sets are the ones kept: the wall's, the session's, the runtime's
 // declared and reserved variables and the ones it reads a model key and its model
-// endpoint from, the harness's fixed values, and the run's variables
-// as resolved, which are known once the gateway answered. They go, names alone, into a file in a folder qory
-// makes for it, outside the checkout and the run directory, which the container sees
-// read-only at the same path; the run's resolved names are added when Forager resolves
-// them, before the wall starts. A gateway's placeholder whose name qory does not know is
-// kept by its value when its name has one of [agentenv.Prefixes], see
-// [preparation.AgentEnv]. This guards against the values the image's environment leaves
-// in place, not against the image's programs or the repository's commands, which run as
-// the agent's user in the agent's container and can change what the agent reads by other
-// means; against them, the boundary is the wall. The verb's words, before the launch's,
+// endpoint from, the fixed variables of the runtime's descriptor, the harness's fixed
+// values, and the run's variables as resolved, which are known once the gateway
+// answered. They go, names alone, into a file in a folder qory makes for it, outside
+// the checkout and the run directory, which the container sees read-only at the same
+// path; the run's resolved names are added when Forager resolves them, before the wall
+// starts. A gateway's placeholder whose name qory does not know is kept by its value
+// when its name has one of [agentenv.Prefixes], see [preparation.AgentEnv]. This guards
+// against the values the image's environment leaves in place, not against the image's
+// programs or the repository's commands, which run as the agent's user in the agent's
+// container and can change what the agent reads by other means; against them, the boundary is the wall. The verb's words, before the launch's,
 // hold no -p, --print or --settings, so Forager reads the launch's arguments as before.
 // It returns what removes the folder once the run is over.
 func wrapAgentEnv(spec *runSpec, report func(string)) (func(), error) {
@@ -72,7 +72,11 @@ func wrapAgentEnv(spec *runSpec, report func(string)) (func(), error) {
 		return nil, err
 	}
 	file := filepath.Join(dir, keptFile)
-	always, ca := keptNames(spec, d)
+	always, ca, err := keptNames(spec, d)
+	if err != nil {
+		done()
+		return nil, err
+	}
 	if err := writeKept(file, always, ca); err != nil {
 		done()
 		return nil, err
@@ -104,9 +108,10 @@ func wrapAgentEnv(spec *runSpec, report func(string)) (func(), error) {
 // it reads a model key from, which Forager sets behind a wall to a placeholder or to a
 // value passed for them, or unsets them, the variable it reads its model endpoint from,
 // which Forager sets to the start key's endpoint or to a passed value its endpoint rule
-// keeps, or unsets, and the harness's fixed values; and ca, the names the wall sets
-// only when the run has an authority.
-func keptNames(spec *runSpec, d *wall.Docker) (always, ca []string) {
+// keeps, or unsets, the fixed variables of the runtime's descriptor, which Forager sets
+// in every launch, read from runtimes.json, and the harness's fixed values; and ca, the
+// names the wall sets only when the run has an authority.
+func keptNames(spec *runSpec, d *wall.Docker) (always, ca []string, err error) {
 	ca = d.CAEnv
 	if ca == nil {
 		ca = wall.DefaultCAEnv
@@ -129,11 +134,15 @@ func keptNames(spec *runSpec, d *wall.Docker) (always, ca []string) {
 			always = append(always, model.Endpoint.Variable)
 		}
 	}
-	for _, kv := range spec.LaunchFixed {
+	fixed, err := foragerFixed(spec.Runtime.Name())
+	if err != nil {
+		return nil, nil, err
+	}
+	for _, kv := range slices.Concat(fixed, spec.LaunchFixed) {
 		name, _, _ := strings.Cut(kv, "=")
 		always = append(always, name)
 	}
-	return always, slices.Clone(ca)
+	return always, slices.Clone(ca), nil
 }
 
 // writeKept writes the file of kept names through a file beside it, renamed over it, so
@@ -152,7 +161,8 @@ func writeKept(file string, always, ca []string) error {
 // newAgentEnv builds the hidden agent-env verb, what a dispatched walled run of Claude
 // Code starts the agent through, after the setup commands when they run inside the wall:
 // it first makes the agent's home fresh, [preparation.FreshHome], and fails on anything
-// the image or the setup commands put there; it then reads the kept names from the file
+// the image or the setup commands put there, and makes the store's folder for a run that
+// cannot write its checkout, which is the verb's working folder; it then reads the kept names from the file
 // its first argument names, removes from its environment every [preparation.Dropped] name the file
 // does not keep, but a prefixed name holding the gateway's placeholder, and executes the
 // launch after -- with its arguments unchanged. It parses no flag. It prints nothing; on
@@ -166,7 +176,7 @@ func newAgentEnv() *cobra.Command {
 		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Last before the agent: its home, made fresh.
-			err := preparation.FreshHome(os.Getenv)
+			err := preparation.FreshHome(os.Getenv, !checkoutWritable("."))
 			var path string
 			var argv, env []string
 			if err == nil {

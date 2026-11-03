@@ -88,7 +88,19 @@ const (
 	textAlternates     = "qory run: start the run in a new empty git working tree, then run again: the working folder's .git has %s, which makes git read objects from outside the working folder"
 	textGitLink        = "qory run: start the run in a new empty git working tree, or remove the link %s, then run again: git would read and write through that link"
 	textHardLink       = "qory run: start the run in a new empty git working tree, or remove the hard link %s, then run again: a write to it would change another file"
+	textGrafts         = "qory run: start the run in a new empty git working tree, then run again: the working folder's .git has info/grafts, which gives commits other parents"
 	textCommonDir      = "qory run: start the run in a new empty git working tree, then run again: the working folder's .git has a commondir file, which makes git read the configuration of another repository"
+	// The cause of each of these lines alone, for the line after the agent exited.
+	causeConfigKey     = "it has %s in %s, and the check stops on each key that neither git init nor the fetch writes, because a key such as a filter, a proxy or http.sslVerify changes what git on this machine does"
+	causeConfigNotFile = "its %s is not a regular file"
+	causeAlternates    = "its .git has %s, which makes git read objects from outside the working folder"
+	causeGitLink       = "it has the link %s, and git would read and write through that link"
+	causeHardLink      = "it has the hard link %s, and a write to it would change another file"
+	causeCommonDir     = "its .git has a commondir file, which makes git read the configuration of another repository"
+	causeGrafts        = "its .git has info/grafts, which gives commits other parents, so a push that overwrites a branch would pass as a fast-forward"
+	causeGitFailed     = "git failed: %s"
+	causeLocal         = "the read of its files failed: %s"
+	causeNoGitPart     = "its .git has no %s, so git would take a folder above it for the repository"
 	textFetched        = "qory run: fetched %s at %s in %s"
 	textFetchedOne     = "qory run: fetched %s at %s and 1 further repository in %s"
 	textFetchedMany    = "qory run: fetched %s at %s and %d further repositories in %s"
@@ -162,6 +174,9 @@ func Run(ctx context.Context, dir string, base []string, getenv func(string) str
 // target_version.
 type Target struct {
 	System, Path, Version string
+	// Branch is the branch of the run's work item, nil for none. It is used only when
+	// the fetch uses Version.
+	Branch *WorkBranch
 }
 
 // RunAt is [Run] with the target's repository fetched at at.Version, when at sets a
@@ -177,7 +192,8 @@ type Target struct {
 // the commit, or serves no fetch of a commit by its id, stops the fetch with
 // [textNoCommit] or [textNoFetchByID]. The further repositories are fetched at the head
 // of their default branches. A version of a target on another system, which is not one
-// of the run's repositories, is not used.
+// of the run's repositories, is not used. With at.Branch set, the commit of the branch in
+// each repository is fetched too, and [Switch] checks it out after the compose.
 func RunAt(ctx context.Context, dir string, base []string, getenv func(string) string, at Target, p proxygit.Proxy, report io.Writer) (bool, error) {
 	ctx = hostgit.WithBase(ctx, base)
 	list := getenv(EnvRepositories)
@@ -223,6 +239,17 @@ func RunAt(ctx context.Context, dir string, base []string, getenv func(string) s
 	if err != nil {
 		return false, notFetched(paths[0], system, err)
 	}
+	branch := at.Branch
+	if commit == "" {
+		branch = nil
+	}
+	if branch != nil {
+		branch.system = system
+		branch.Repositories = []WorkRepository{{Path: paths[0], Dir: ".", Commit: strings.TrimSpace(head)}}
+		if err := fetchBranchCommit(ctx, g, dir, system, paths[0], branch); err != nil {
+			return false, err
+		}
+	}
 	// The line shows the commit HEAD is at, which is commit when it is set.
 	shown := strings.TrimSpace(head)
 	if len(shown) > 12 {
@@ -240,6 +267,17 @@ func RunAt(ctx context.Context, dir string, base []string, getenv func(string) s
 			dest := filepath.Join(dir, filepath.FromSlash(Repositories), filepath.FromSlash(path))
 			if _, err := g(ctx, dir, "clone", "--quiet", "--depth", "1", "--", repoURL(system, path), dest); err != nil {
 				return false, notFetched(path, system, err)
+			}
+			if branch != nil {
+				if err := fetchBranchCommit(ctx, g, dest, system, path, branch); err != nil {
+					return false, err
+				}
+				head, err := g(ctx, dest, "rev-parse", "HEAD")
+				if err != nil {
+					return false, notFetched(path, system, err)
+				}
+				at := filepath.ToSlash(filepath.Join(filepath.FromSlash(Repositories), filepath.FromSlash(path)))
+				branch.Repositories = append(branch.Repositories, WorkRepository{Path: path, Dir: at, Commit: strings.TrimSpace(head)})
 			}
 		}
 	}
@@ -595,11 +633,13 @@ func exclude(ctx context.Context, git gitRunner, dir string) error {
 	return nil
 }
 
-// gitError is a git that failed: its first line on stderr, or what stopped it, and
-// the status git exited with, or -1 when git did not exit by itself.
+// gitError is a git that failed: its first line on stderr, or what stopped it, the status
+// git exited with, or -1 when git did not exit by itself, and every line it wrote on
+// stderr, which a push needs: its first line is the remote's address.
 type gitError struct {
-	line string
-	exit int
+	line   string
+	exit   int
+	output string
 }
 
 func (e *gitError) Error() string { return e.line }
@@ -642,15 +682,25 @@ func git(ctx context.Context, dir string, args ...string) (string, error) {
 // makes for p, which sets the proxy and the CA bundle and reads no configuration but
 // the repository's. No error's text
 // contains the password of p's URL.
-func hostRunner(p *proxygit.Proxy) gitRunner {
+func hostRunner(p *proxygit.Proxy) gitRunner { return hostRunnerWith(p, "") }
+
+// hostRunnerWith is [hostRunner] with input on git's stdin and env added to its
+// environment.
+func hostRunnerWith(p *proxygit.Proxy, input string, env ...string) gitRunner {
+	return hostRunnerOf(p, nil, input, env)
+}
+
+// hostRunnerOf is [hostRunnerWith] with options added to git's options.
+func hostRunnerOf(p *proxygit.Proxy, options []string, input string, env []string) gitRunner {
 	return func(ctx context.Context, dir string, args ...string) (string, error) {
 		return runGit(ctx, p, func(ctx context.Context) (*exec.Cmd, error) {
-			full := append(append(slices.Clone(hardened), protocols...), args...)
+			full := slices.Concat(hardened, protocols, options, args)
 			cmd, err := hostgit.Unchecked(ctx, dir, hostgit.Base(ctx), full...)
 			if err != nil {
 				return nil, err
 			}
-			cmd.Env = proxygit.Env(cmd.Env, p)
+			cmd.Env = append(proxygit.Env(cmd.Env, p), env...)
+			cmd.Stdin = strings.NewReader(input)
 			return cmd, nil
 		}, args[0])
 	}
@@ -667,7 +717,7 @@ func runGit(ctx context.Context, p *proxygit.Proxy, make func(context.Context) (
 	defer cancel()
 	cmd, err := make(call)
 	if err != nil {
-		return "", &gitError{proxygit.Hide(err.Error(), p), -1}
+		return "", &gitError{line: proxygit.Hide(err.Error(), p), exit: -1}
 	}
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
@@ -679,19 +729,20 @@ func runGit(ctx context.Context, p *proxygit.Proxy, make func(context.Context) (
 	if err != nil {
 		switch {
 		case errors.Is(context.Cause(call), errLimit):
-			return "", &gitError{fmt.Sprintf(textStopped, subcommand, limit), -1}
+			return "", &gitError{line: fmt.Sprintf(textStopped, subcommand, limit), exit: -1}
 		case ctx.Err() != nil:
-			return "", &gitError{fmt.Sprintf(textCut, subcommand), -1}
+			return "", &gitError{line: fmt.Sprintf(textCut, subcommand), exit: -1}
 		}
 		exit := -1
 		var ee *exec.ExitError
 		if errors.As(err, &ee) {
 			exit = ee.ExitCode()
 		}
-		if line := firstLine(stderr.String()); line != "" {
-			return "", &gitError{proxygit.Hide(line, p), exit}
+		output := proxygit.Hide(stderr.String(), p)
+		if line := firstLine(output); line != "" {
+			return "", &gitError{line, exit, output}
 		}
-		return "", &gitError{proxygit.Hide(err.Error(), p), exit}
+		return "", &gitError{line: proxygit.Hide(err.Error(), p), exit: exit}
 	}
 	return stdout.String(), nil
 }
@@ -786,12 +837,14 @@ var answered = regexp.MustCompile(`(?i)authentication failed|could not read (use
 // gitFailed is [textGitFailed] with git's line, or what kept git from running, made
 // printable.
 func gitFailed(err error) error {
-	return fmt.Errorf(textGitFailed, integration.Printable(exports.HideURLError(err).Error()))
+	shown := integration.Printable(exports.HideURLError(err).Error())
+	return &unsafeError{fmt.Sprintf(textGitFailed, shown), fmt.Sprintf(causeGitFailed, shown)}
 }
 
 // local is [textLocal]: a failure on the machine, not of a fetch.
 func local(err error) error {
-	return fmt.Errorf(textLocal, integration.Printable(exports.HideError(err).Error()))
+	shown := integration.Printable(exports.HideError(err).Error())
+	return &unsafeError{fmt.Sprintf(textLocal, shown), fmt.Sprintf(causeLocal, shown)}
 }
 
 // The words of a failure of qory run prepare inside the wall that is not of a fetch:

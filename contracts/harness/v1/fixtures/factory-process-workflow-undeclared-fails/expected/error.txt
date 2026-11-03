@@ -1,0 +1,1 @@
+modules/software-factory/process.yaml: declare explore-a-ticket under workflows in stacks/software/qory-stack.yaml, or remove it from stage Explore: stack software does not declare it

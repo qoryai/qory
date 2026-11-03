@@ -94,7 +94,8 @@ harness:
       source: {path: ./harness}
 ```
 
-The delivered modules cannot be changed.
+The delivered modules cannot be changed. You can only leave out an entry of one: see
+[Leave out an entry of a delivered module](#leave-out-an-entry-of-a-delivered-module).
 
 A runner may already have the stack tree. It selects the base with
 `qory harness compose -f <stack>` instead. The repository's file then contains no
@@ -139,8 +140,32 @@ exports:
   modules: [core, nextjs, marketing]
 ```
 
+A listed module with a `process.yaml` at its folder root is a factory. The file is a
+process template: a name, a summary, a description, a workspace type, a stack that
+`exports.stacks` lists, a `qory.process/v1` process, and optionally `artifact_types`, the
+artifact types the workspaces use. Every command that reads the
+configuration, `qory config` among them, checks the file, and checks that the stack
+declares under `workflows` each workflow that the process runs. The fields and their
+limits are in [the contract's section on a factory's
+process.yaml](../contracts/harness/v1/README.md#a-factorys-processyaml).
+
 The harness repository states the qory it needs once, in its `qory.yaml`:
 `qory: ">=0.5.0"`. That requirement applies to every stack it delivers.
+
+### Declare a workflow
+
+A stack lists under `workflows` the workflows that a run from a run code may start. A
+workflow's name is its skill's name: the run starts the skill or command of that name.
+So the stack ships a skill or command for each workflow it lists. When none of the
+stack's modules composes one, after their `exclude` and `only`, the compose fails with
+exit 2:
+
+```
+add a skill or command deploy to a module of the base stack core@4b8e2f1a9c7d, or remove deploy from the workflows of its qory-stack.yaml: the stack declares the workflow deploy, and none of its modules ships a skill or command deploy
+```
+
+A module that a checkout adds to the stack does not count, because the stack lists the
+workflows.
 
 ## See a collision
 
@@ -189,6 +214,44 @@ the agent it calls. The rest of the module stays out.
 
 Sometimes `only` pulls in a required entry that you take from another module instead.
 Leave it out with one `exclude` line beside the `only`.
+
+### Leave out an entry of a delivered module
+
+To use your version of an entry that a delivered module also ships, list the delivered
+module by its name with `exclude` alone:
+
+```yaml
+harness:
+  extends: {git: https://github.com/acme/harness, ref: v2.4.0, stack: nextjs}
+  target: {runtime: claude}
+  modules:
+    - name: core               # a module of the stack you extend
+      exclude: {skills: [explore-a-ticket]}
+    - name: app                # ships skills/explore-a-ticket too
+      source: {path: ./harness}
+```
+
+The compose leaves the delivered `explore-a-ticket` out of `core` and takes the one in
+`app`. `qory harness inspect` lists `core  skills/explore-a-ticket` under **Excludes**,
+and the skill from `app` under **Entries**. The report, `.qory/harness-report.json`,
+records the same.
+
+The rules:
+
+- Use the name the delivered stack lists the module under: its `name`, or the
+  `module` its source selects. A module that the stack lists by a `path` or `git`
+  source alone cannot be reached this way: rename your entry instead.
+- The entry contains `name` and `exclude` only. A `source`, `only`, `variant` or `link`
+  fails the compose.
+- The exclude lists entries of the kinds the stack's `extending` block lets your modules
+  ship, and files under its `extending.files` prefixes. The delivered hooks, MCP
+  servers, instructions, settings and variables stay as they are.
+- An entry the delivered module does not compose fails the compose, `remove skills/x
+  from the exclude of module core in qory.yaml: …`.
+
+Without the exclude, the two skills collide. The compose fails, exit 3, and prints the
+entry to write. When `qory.yaml` lists the module already, it prints the whole entry to
+replace it with.
 
 ## The composed tree
 
@@ -328,8 +391,8 @@ cd <checkout> && eval "$(qory harness launch --runtime claude)"
 
 `--json` prints the command, the arguments and all those variables as one JSON object. It is
 for a launcher that starts the program without a shell. Under `addresses`, it lists the
-name the session gives each composed agent, skill and command, per kind. A bound role is
-listed beside them, as the entry it is bound to.
+name the session gives each composed agent, skill and command, per kind. A role is
+listed beside them, as the entry that fills it, from a `bind` or a module's `provides`.
 
 - For Claude Code, the plugin prefixes every name: `harness:<name>`.
 - For the other tools, the name is the one the module wrote.
@@ -386,12 +449,14 @@ A tier's entry may also set an effort value: `{model: claude-opus-5-5, effort: m
 
 ## Removing the harness
 
-`qory harness remove` removes the composed tree and its links from the checkout.
+`qory harness remove` removes the composed tree and its links from the checkout. A home
+in the checkout goes with the whole `.qory` directory, also `.qory/artifacts` and
+`.qory/work-item.json`.
 
 - A home outside the checkout is removed with its report. The checkout is not touched:
   nothing was written there.
 - `--runtime <name>` removes that runtime's links and directory only. The rest stays
-  composed.
+  composed. For the last composed runtime, it removes the whole home, as above.
 
 ## The qory.yaml files
 

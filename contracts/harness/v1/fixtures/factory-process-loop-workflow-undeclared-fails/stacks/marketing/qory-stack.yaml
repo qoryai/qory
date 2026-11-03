@@ -1,0 +1,6 @@
+apiVersion: qory.dev/v1alpha1
+modules:
+  - name: ad-campaigns
+extending: {}
+workflows:
+  write-an-ad: {access: write}

@@ -11,6 +11,8 @@ qory gets your coding agent ready to work, and keeps it in check.
   run         run the agent behind a proxy: recorded; behind a wall, fenced, no tokens inside
   access-key  make the key this machine signs its runs to the server with
   apiary      debug runs on a Qory Apiary server
+  work-item   read the work item of this run
+  artifact    pull and push the artifacts of a work item
 
 It serves Claude Code, Codex, Gemini CLI, OpenCode, Cursor, Copilot CLI, Amp, Goose, and
 any tool that reads AGENTS.md.
@@ -39,6 +41,7 @@ More: https://github.com/qoryai/qory
 
 * [qory access-key](qory_access-key.md)	 - Make this machine's access key for its server
 * [qory apiary](qory_apiary.md)	 - Debug runs on a Qory Apiary server
+* [qory artifact](qory_artifact.md)	 - Pull and push the artifacts of a work item
 * [qory config](qory_config.md)	 - Show every setting, its value, and the file it came from
 * [qory gateway](qory_gateway.md)	 - Run this machine's gateway for the runs of other machines
 * [qory harness](qory_harness.md)	 - Build the agent's harness from modules
@@ -47,5 +50,6 @@ More: https://github.com/qoryai/qory
 * [qory setup](qory_setup.md)	 - Set up a repository, this machine, or your shell
 * [qory update](qory_update.md)	 - Install the newest release of qory
 * [qory version](qory_version.md)	 - Print the version, the build and the harness format this qory reads
+* [qory work-item](qory_work-item.md)	 - Read the work item of this run
 * [qory worktree](qory_worktree.md)	 - Add, remove and list worktrees
 

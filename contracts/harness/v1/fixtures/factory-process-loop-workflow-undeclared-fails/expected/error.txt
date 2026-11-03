@@ -1,0 +1,3 @@
+modules/ad-campaigns/process.yaml: declare review-the-ad under workflows in stacks/marketing/qory-stack.yaml, or remove it from stage Draft: stack marketing does not declare it
+modules/ad-campaigns/process.yaml: declare measure-reach under workflows in stacks/marketing/qory-stack.yaml, or remove it from stage Draft: stack marketing does not declare it
+modules/ad-campaigns/process.yaml: declare measure-reach under workflows in stacks/marketing/qory-stack.yaml, or remove it from stage Approve: stack marketing does not declare it

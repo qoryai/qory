@@ -2,8 +2,10 @@ package compose
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -56,6 +58,9 @@ type Module struct {
 	Link string
 	// Base marks a module of the base stack, when a checkout's qory.yaml extends one.
 	Base bool
+	// BaseName, on a base module, is the name the checkout's qory.yaml lists it by to
+	// exclude from it, [stack.Module.BaseName]: "" for one the checkout cannot list.
+	BaseName string
 	// RetiredAPIVersion is the apiVersion the module's manifest declared when it is a
 	// retired spelling of the current one, "" otherwise, so the command can report that
 	// the manifest wants the line rewritten.
@@ -131,6 +136,10 @@ type Exclude struct {
 	// Path is the absolute path of the dropped entry, AGENTS.md or settings fragment in
 	// the module, which a copy of the module leaves out; "" for an exported variable.
 	Path string
+	// Listed is set when the exclude of the checkout's qory.yaml left the entry out of a
+	// base module: the name qory.yaml lists the module by. It is "" for an entry the
+	// module's exclude or only block left out.
+	Listed string
 }
 
 // Result is a composed stack: what a renderer writes and what the report records.
@@ -151,10 +160,12 @@ type Result struct {
 	MCP map[string]map[string]any
 	// Instructions are the modules' AGENTS.md files joined by a blank line, or "".
 	Instructions string
-	// Bind is the stack's bindings, <kind>/<role> to the name of the entry that fills the
-	// role, every one checked against the composed entries; nil when the stack binds
-	// none.
+	// Bind is the harness's roles, <kind>/<role> to the name of the entry that fills the
+	// role, every one checked against the composed entries; nil when no role is set.
+	// Roles is the same, with where each name comes from.
 	Bind map[string]string
+	// Roles are the roles of Bind, sorted by role, each with the layer that set it.
+	Roles []Role
 	// Env are the variables the harness exports, name to value, with every
 	// $QORY_HARNESS_HOME as written, before substitution: what the module manifests
 	// export, as $QORY_HARNESS_HOME/modules/<name>/<path>, and the configuration's
@@ -215,6 +226,10 @@ type Options struct {
 	// Hidden is set for the compose of a run whose harness is hidden, whose Copies copies
 	// every module as well, so the home contains no link.
 	Hidden bool
+	// StackAs, when set, is the stack as an error of the compose shows it in place of its
+	// file, for a stack whose file is a copy that the person does not edit, such as the
+	// workspace's harness in Qory Apiary.
+	StackAs string
 }
 
 // beforeManifest and afterManifest, when a test sets them, run with each module's
@@ -238,25 +253,16 @@ func ComposeWith(p *stack.Stack, opts Options) (_ *Result, err error) {
 			res.Close()
 		}
 	}()
-	if len(p.Bind) > 0 {
-		res.Bind = map[string]string{}
-		for role, to := range p.Bind {
-			res.Bind[role] = to
-		}
-	}
 	if opts.Memo == nil {
 		opts.Memo = source.NewMemo()
 	}
-	owners := map[string][]string{}
-	paths := map[string]string{}
-	fors := map[string]string{}
-	refs := map[string][]string{}
-	tiers := map[string]string{}
-	servers := map[string]map[string]any{}
-	exporters := map[string]string{}
-	var instructions []string
+	// Every module's manifest is read before the first module's entries, so that the
+	// roles the modules provide are set before an only follows a reference.
+	opened := make([]openedModule, 0, len(p.Modules))
 	dirs := map[string]string{}
-	requires := map[string]map[string][]Need{}
+	// declared is every entry, as <kind>/<name>, that the modules of the stack whose
+	// workflows the compose checks compose, see [workflowsShipped].
+	declared := map[string]bool{}
 	for _, pl := range p.Modules {
 		ps := p.SourceOf(pl)
 		who := "module " + accesskey.ShownName(pl.Name, false)
@@ -278,24 +284,20 @@ func ComposeWith(p *stack.Stack, opts Options) (_ *Result, err error) {
 			// The directory of a module listed by name is that name.
 			return nil, fmt.Errorf("%s: %w", who, exports.HideError(err))
 		}
-		var root *os.Root
-		var rootInfo fs.FileInfo
-		var realDir string
-		copied := false
+		o := openedModule{pl: pl, ps: ps, src: src}
 		if opts.Copies != nil {
 			if abs, err := filepath.Abs(src.Dir); err == nil && opts.Copies(abs) {
-				copied = true
-				root, rootInfo, realDir = openRoot(res, src.Dir)
+				o.copied = true
+				o.root, o.rootInfo, o.realDir = openRoot(res, src.Dir)
 			}
 		}
 		if beforeManifest != nil {
 			beforeManifest(src.Dir)
 		}
-		var m *module.Manifest
-		if root != nil {
-			m, err = module.ReadManifestIn(root, src.Dir)
+		if o.root != nil {
+			o.m, err = module.ReadManifestIn(o.root, src.Dir)
 		} else {
-			m, err = module.ReadManifest(src.Dir)
+			o.m, err = module.ReadManifest(src.Dir)
 		}
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", who, err)
@@ -303,14 +305,39 @@ func ComposeWith(p *stack.Stack, opts Options) (_ *Result, err error) {
 		if afterManifest != nil {
 			afterManifest(src.Dir)
 		}
-		if pl.Name != "" && m.Name != pl.Name {
-			return nil, fmt.Errorf("module %s: the module at %s has the name %s in its %s", accesskey.ShownName(pl.Name, false), ps.Shown(), accesskey.ShownName(m.Name, false), module.ManifestName)
+		if pl.Name != "" && o.m.Name != pl.Name {
+			return nil, fmt.Errorf("module %s: the module at %s has the name %s in its %s", accesskey.ShownName(pl.Name, false), ps.Shown(), accesskey.ShownName(o.m.Name, false), module.ManifestName)
 		}
+		if other, ok := dirs[o.m.Name]; ok {
+			return nil, fmt.Errorf("module %s is composed twice, from %s and from %s", accesskey.ShownName(o.m.Name, false), other, ps.Shown())
+		}
+		dirs[o.m.Name] = ps.Shown()
+		if !pl.Base && opts.Base != nil {
+			if err := checkProvides(o.m, opts.Base); err != nil {
+				return nil, err
+			}
+		}
+		opened = append(opened, o)
+	}
+	// The roles before the selection: a provided entry that the providing module's exclude
+	// lists provides nothing, and a role that two modules provide keeps the name of the
+	// layer below. The roles are set again once the selection is known.
+	roles, _ := setRoles(p, opened, excludedBy, true)
+	res.Bind = flatRoles(roles)
+	owners := map[string][]string{}
+	paths := map[string]string{}
+	fors := map[string]string{}
+	refs := map[string][]string{}
+	tiers := map[string]string{}
+	servers := map[string]map[string]any{}
+	exporters := map[string]string{}
+	var instructions []string
+	requires := map[string]map[string][]Need{}
+	read := map[string]*module.Module{}
+	checkoutExcludes := map[string]map[string][]string{}
+	for _, o := range opened {
+		pl, ps, src, root, rootInfo, realDir, copied, m := o.pl, o.ps, o.src, o.root, o.rootInfo, o.realDir, o.copied, o.m
 		name := m.Name
-		if other, ok := dirs[name]; ok {
-			return nil, fmt.Errorf("module %s is composed twice, from %s and from %s", accesskey.ShownName(name, false), other, ps.Shown())
-		}
-		dirs[name] = ps.Shown()
 		variant, err := selectVariant(m, pl, p.Target.Runtimes, name)
 		if err != nil {
 			return nil, fmt.Errorf("module %s: %w", accesskey.ShownName(name, false), err)
@@ -326,13 +353,27 @@ func ComposeWith(p *stack.Stack, opts Options) (_ *Result, err error) {
 		if err != nil {
 			return nil, err
 		}
-		rl := Module{Name: name, Description: m.Description, Dir: l.Dir, Source: ps.String(), Pin: src.Pin, Commit: src.Commit, Ref: ps.Ref, Previous: src.Previous, Warning: src.Warning, Dirty: src.Dirty, Variant: variant, Link: pl.Link, Base: pl.Base, RetiredAPIVersion: m.RetiredAPIVersion, Egress: m.Egress, Copy: copied, Walled: copied && opts.Walled, Hidden: copied && opts.Hidden, Root: root, RealDir: realDir, DirInfo: rootInfo}
+		read[name] = l
+		rl := Module{Name: name, Description: m.Description, Dir: l.Dir, Source: ps.String(), Pin: src.Pin, Commit: src.Commit, Ref: ps.Ref, Previous: src.Previous, Warning: src.Warning, Dirty: src.Dirty, Variant: variant, Link: pl.Link, Base: pl.Base, BaseName: pl.BaseName, RetiredAPIVersion: m.RetiredAPIVersion, Egress: m.Egress, Copy: copied, Walled: copied && opts.Walled, Hidden: copied && opts.Hidden, Root: root, RealDir: realDir, DirInfo: rootInfo}
 		requires[name] = needs(l, m.Requires, res.Bind)
 		// The selection comes first, so that what the base allows and what the module
 		// exports are checked on what the module contributes, not on what it ships.
 		env, pulled, err := applySelection(l, pl, m.Env, requires[name], res)
 		if err != nil {
 			return nil, err
+		}
+		// The base's workflows are checked on what its modules ship, before a checkout's
+		// exclude drops an entry that a module of the repository may ship instead.
+		if pl.Base || opts.Base == nil {
+			for _, e := range l.Entries {
+				declared[e.Kind+"/"+e.Name] = true
+			}
+		}
+		if err := applyCheckoutExclude(l, pl, res, opts.Base); err != nil {
+			return nil, err
+		}
+		if !pl.CheckoutExclude.Empty() {
+			checkoutExcludes[name] = pl.CheckoutExclude.Kinds
 		}
 		if !pl.Base && opts.Base != nil {
 			if err := checkExtending(l, opts.Base); err != nil {
@@ -377,7 +418,7 @@ func ComposeWith(p *stack.Stack, opts Options) (_ *Result, err error) {
 			instructions = append(instructions, strings.TrimRight(string(data), "\n"))
 		}
 	}
-	if err := collisions(owners, res.Modules, opts.Base); err != nil {
+	if err := collisions(owners, res.Modules, opts.Base, checkoutExcludes); err != nil {
 		return nil, err
 	}
 	if err := exportsAgainstSettings(res, exporters, opts.Env); err != nil {
@@ -404,7 +445,27 @@ func ComposeWith(p *stack.Stack, opts Options) (_ *Result, err error) {
 		}
 		return res.Entries[i].Name < res.Entries[j].Name
 	})
-	if err := checkResolved(res, requires); err != nil {
+	// The roles again, now that the selection is known: a provided entry that a block
+	// left out provides nothing.
+	composed := map[string]bool{}
+	for _, e := range res.Entries {
+		composed[e.Kind+"/"+e.Name] = true
+	}
+	leftOut := func(_ openedModule, kind, name string) bool {
+		return !composed[kind+"/"+name] && excludeOf(res, kind, name) != nil
+	}
+	res.Roles, err = setRoles(p, opened, leftOut, false)
+	if err != nil {
+		return nil, err
+	}
+	res.Bind = flatRoles(res.Roles)
+	for _, o := range opened {
+		requires[o.m.Name] = needs(read[o.m.Name], o.m.Requires, res.Bind)
+	}
+	if err := checkResolved(res, requires, droppedProviders(opened, leftOut)); err != nil {
+		return nil, err
+	}
+	if err := workflowsShipped(p, declared, opts.Base, opts.StackAs); err != nil {
 		return nil, err
 	}
 	if len(instructions) > 0 {
@@ -414,6 +475,39 @@ func ComposeWith(p *stack.Stack, opts Options) (_ *Result, err error) {
 		res.Env[name] = value
 	}
 	return res, nil
+}
+
+// workflowsShipped checks that each workflow of p is a skill or command that composed
+// contains, the entries of the modules of the stack that lists the workflows, after
+// their exclude or only blocks: base's modules for a stack that extends base, and
+// p's modules for one that extends none. A module that a checkout adds to a base does not
+// count, since the base lists the workflows. Each workflow without one is a line of the
+// error, in sorted order, which shows a stack that extends none as as, when set, and
+// otherwise by its file.
+func workflowsShipped(p *stack.Stack, composed map[string]bool, base *Base, as string) error {
+	var lines []string
+	for _, name := range slices.Sorted(maps.Keys(p.Workflows)) {
+		if composed["skills/"+name] || composed["commands/"+name] {
+			continue
+		}
+		w := shown(name)
+		if base != nil {
+			lines = append(lines, fmt.Sprintf("add a skill or command %s to a module of the base stack %s, or remove %s from the workflows of its %s: the stack declares the workflow %s, and none of its modules ships a skill or command %s", w, base.String(), w, stack.FileName, w, w))
+			continue
+		}
+		in := "the stack"
+		switch {
+		case as != "":
+			in = as
+		case p.File != "":
+			in += " in " + filepath.Base(p.File)
+		}
+		lines = append(lines, fmt.Sprintf("add a skill or command %s to a module of %s, or remove %s from its workflows: the stack declares the workflow %s, and none of its modules ships a skill or command %s", w, in, w, w, w))
+	}
+	if len(lines) == 0 {
+		return nil
+	}
+	return errors.New(strings.Join(lines, "\n"))
 }
 
 // exportEnv adds a module's exported variables to the result, each as
@@ -630,38 +724,48 @@ type UnresolvedError struct {
 
 func (e *UnresolvedError) Error() string { return strings.Join(e.Lines, "\n") }
 
-// checkResolved refuses a compose in which a binding, a requirement or a reference does
-// not resolve. requires holds each module's needs by module name, keyed <kind>/<name>. A
-// needed entry may come from any module, since a name is composed once; an entry that
-// was left out has no needs to meet. A bound role is checked once, under bind, and a
-// reference through it says nothing more: the binding is what there is to fix. The
-// message says why an entry is missing: a module's exclude left it out, or no module
-// ships it, and for a reference that the stack binds no role of that name either.
-func checkResolved(res *Result, requires map[string]map[string][]Need) error {
+// checkResolved returns an error for a compose in which a role, a requirement or a
+// reference does not resolve. requires holds each module's needs by module name, keyed
+// <kind>/<name>. A needed entry may come from any module, since a name is composed once;
+// an entry that was left out has no needs to meet. A role is checked once, with the layer
+// that set it, and a reference through it adds no line: the role is what there is to fix.
+// The message says why an entry is missing: a module's exclude left it out, a module
+// provides the role with an entry a block left out (dropped, keyed by role), or no
+// module ships it, and for a reference that no role of that name is set either.
+func checkResolved(res *Result, requires map[string]map[string][]Need, dropped map[string][]Role) error {
 	composed := map[string]bool{}
 	for _, e := range res.Entries {
 		composed[e.Kind+"/"+e.Name] = true
 	}
 	leftOut := func(kind, name string) string {
-		for _, x := range res.Excludes {
-			if x.Kind == kind && x.Name == name {
-				return x.Module
-			}
+		x := excludeOf(res, kind, name)
+		if x == nil {
+			return ""
 		}
-		return ""
+		return x.Module
 	}
 	var lines []string
-	for _, role := range sortedKeys(res.Bind) {
+	for _, r := range res.Roles {
+		role, to := r.Role, r.Name
 		kind, name, _ := strings.Cut(role, "/")
-		to := res.Bind[role]
 		if composed[role] {
 			for _, e := range res.Entries {
-				if e.Kind == kind && e.Name == name {
-					lines = append(lines, fmt.Sprintf("bind %s defines a role, and module %s ships %s; a role's name is no entry's", shown(role), shown(e.Module), described(kind, name)))
+				if e.Kind != kind || e.Name != name {
+					continue
 				}
+				if r.Module != "" {
+					lines = append(lines, fmt.Sprintf("Rename role %s in the provides of module %s: module %s ships %s, and a role's name is no entry's.", shown(role), shown(r.Module), shown(e.Module), described(kind, name)))
+					continue
+				}
+				lines = append(lines, fmt.Sprintf("bind %s defines a role, and module %s ships %s; a role's name is no entry's", shown(role), shown(e.Module), described(kind, name)))
 			}
 		}
 		if composed[kind+"/"+to] {
+			continue
+		}
+		if r.Module != "" {
+			// A provided entry that an exclude left out provides nothing, see [setRoles].
+			lines = append(lines, fmt.Sprintf("Ship %s in a module, or remove provides.%s.%s from module %s: no module ships %s.", described(kind, to), shown(kind), shown(name), shown(r.Module), described(kind, to)))
 			continue
 		}
 		if by := leftOut(kind, to); by != "" {
@@ -680,13 +784,28 @@ func checkResolved(res *Result, requires map[string]map[string][]Need) error {
 			if need.Reference {
 				verb = "references"
 			}
+			if x := excludeOf(res, kind, name); x != nil && x.Listed != "" {
+				lines = append(lines, fmt.Sprintf("remove %s from the exclude of module %s in qory.yaml, or ship it in a module of the repository: module %s: %s %s %s, which the exclude of module %s in qory.yaml leaves out", shownKey(need.Key), shown(x.Listed), shown(e.Module), described(e.Kind, e.Name), verb, described(kind, name), shown(x.Listed)))
+				continue
+			}
 			if by := leftOut(kind, name); by != "" {
 				lines = append(lines, fmt.Sprintf("module %s: %s %s %s, which module %s leaves out", shown(e.Module), described(e.Kind, e.Name), verb, described(kind, name), shown(by)))
 				continue
 			}
+			if ps := dropped[need.Key]; need.Reference && len(ps) > 0 {
+				for _, r := range ps {
+					provided := fmt.Sprintf("module %s: %s %s %s, which module %s provides as %s", shown(e.Module), described(e.Kind, e.Name), verb, described(kind, name), shown(r.Module), described(kind, r.Name))
+					if x := excludeOf(res, kind, r.Name); x != nil && x.Listed != "" {
+						lines = append(lines, fmt.Sprintf("remove %s from the exclude of module %s in qory.yaml, or ship it in a module of the repository: %s, which the exclude of module %s in qory.yaml leaves out", shownKey(kind+"/"+r.Name), shown(x.Listed), provided, shown(x.Listed)))
+						continue
+					}
+					lines = append(lines, fmt.Sprintf("%s, which module %s leaves out", provided, shown(leftOut(kind, r.Name))))
+				}
+				continue
+			}
 			why := "which no module ships"
 			if need.Reference {
-				why += " and the stack does not bind"
+				why += " or provides and the stack does not bind"
 			}
 			lines = append(lines, fmt.Sprintf("module %s: %s %s %s, %s", shown(e.Module), described(e.Kind, e.Name), verb, described(kind, name), why))
 		}
@@ -697,8 +816,19 @@ func checkResolved(res *Result, requires map[string]map[string][]Need) error {
 	return &UnresolvedError{Lines: lines}
 }
 
-// Resolve is the entry a reference to kind and name means: the entry the stack binds the
-// role to, when the name is a bound role of that kind, else the name itself.
+// excludeOf is the first exclude in res that left out the entry of kind and name, nil
+// when none did.
+func excludeOf(res *Result, kind, name string) *Exclude {
+	for i, x := range res.Excludes {
+		if x.Kind == kind && x.Name == name {
+			return &res.Excludes[i]
+		}
+	}
+	return nil
+}
+
+// Resolve is the entry a reference to kind and name means: the entry that fills the role,
+// when the name is a role of that kind in [Result.Bind], else the name itself.
 func (r *Result) Resolve(kind, name string) (string, string) {
 	if to, ok := r.Bind[kind+"/"+name]; ok {
 		return kind, to
@@ -860,6 +990,57 @@ func applySelection(l *module.Module, pl stack.Module, env map[string]string, re
 	return remaining, pulled, nil
 }
 
+// applyCheckoutExclude leaves out of base module l, listed as pl, the entries the
+// checkout's qory.yaml excludes from it, [stack.Module.CheckoutExclude], after the base's
+// exclude or only block, and records each one in res. An entry the base module does not
+// compose is an error, so a base that stops shipping an entry is noticed. Kinds and
+// names are walked in sorted order.
+func applyCheckoutExclude(l *module.Module, pl stack.Module, res *Result, base *Base) error {
+	sel := pl.CheckoutExclude
+	if sel.Empty() {
+		return nil
+	}
+	named := map[string]bool{}
+	for _, kind := range sel.KindNames() {
+		for _, name := range sel.Kinds[kind] {
+			named[kind+"/"+name] = true
+		}
+	}
+	composed := map[string]bool{}
+	for _, e := range l.Entries {
+		composed[e.Kind+"/"+e.Name] = true
+	}
+	for _, key := range sortedKeys(named) {
+		if !composed[key] {
+			stackText := "the base stack"
+			if base != nil {
+				stackText += " " + base.String()
+			}
+			return fmt.Errorf("remove %s from the exclude of module %s in qory.yaml: %s composes no %s from module %s", shownKey(key), shown(pl.BaseName), stackText, shownKey(key), shown(l.Name))
+		}
+	}
+	var kept []module.Entry
+	for _, e := range l.Entries {
+		if named[e.Kind+"/"+e.Name] {
+			res.Excludes = append(res.Excludes, Exclude{Module: l.Name, Kind: e.Kind, Name: e.Name, Path: e.Path, Listed: pl.BaseName})
+			continue
+		}
+		kept = append(kept, e)
+	}
+	l.Entries = kept
+	return nil
+}
+
+// shownKey is a <kind>/<name> key for a message: a file's path as [exports.HidePath]
+// shows it, any other name as [shown] does.
+func shownKey(key string) string {
+	kind, name, _ := strings.Cut(key, "/")
+	if kind == "files" {
+		return "files/" + exports.HidePath(name)
+	}
+	return shown(kind) + "/" + shown(name)
+}
+
 // Collision is one entry name that more than one module provides.
 type Collision struct {
 	// Kind is the entry kind the collision is in.
@@ -868,9 +1049,14 @@ type Collision struct {
 	Name string
 	// Modules provide the entry, in stack order.
 	Modules []string
-	// Base is the base stack, as <name>@<pin>, when one of the modules is the base's:
-	// no exclude resolves that collision, the extending module renames its entry.
+	// Base is the base stack, as <name>@<pin>, when one of the modules is the base's: the
+	// exclude that resolves the collision for a base module goes in the checkout's
+	// qory.yaml, on an entry that lists the base module by its name.
 	Base string
+	// Rename is set when a module to exclude the entry from is a base module the
+	// checkout's qory.yaml cannot list, [Module.BaseName] "": no exclude resolves the
+	// collision, and the extending module renames its entry.
+	Rename bool
 }
 
 // CollisionError is the compose refusing an undeclared collision. [Compose] returns it
@@ -885,17 +1071,27 @@ type CollisionError struct {
 	Sources map[string]string
 	// Order lists the module names in stack order, for [CollisionError.Suggest].
 	Order []string
+	// InBase marks the base's modules that the checkout's qory.yaml can list to exclude
+	// from them, by module name.
+	InBase map[string]bool
+	// Listed maps the name of each module InBase marks to the name qory.yaml lists it by,
+	// [Module.BaseName], which differs from the module's name for a module the base
+	// lists by an export of another name.
+	Listed map[string]string
+	// Excluded is the exclude the checkout's qory.yaml lists for a base module, by the
+	// module's name, then by kind, absent for a module it lists none for.
+	Excluded map[string]map[string][]string
 }
 
 // Suggest returns, per module, the excludes that resolve every collision by keeping the
 // last module that ships each. The modules result contains the names that need an
 // exclude, in the order of the order argument, which a caller passes in stack order. The
 // excludes result is keyed by module name, then by kind, and contains the entry names
-// that module excludes.
+// that module excludes. A collision with [Collision.Rename] set has no exclude.
 func (e *CollisionError) Suggest(order []string) (modules []string, excludes map[string]map[string][]string) {
 	excludes = map[string]map[string][]string{}
 	for _, c := range e.Collisions {
-		if c.Base != "" {
+		if c.Rename {
 			continue
 		}
 		for _, l := range c.Modules[:len(c.Modules)-1] {
@@ -913,11 +1109,42 @@ func (e *CollisionError) Suggest(order []string) (modules []string, excludes map
 	return modules, excludes
 }
 
+// ExcludeName is the name an exclude for module l is written under: the name qory.yaml
+// lists a base module by, the module's name otherwise.
+func (e *CollisionError) ExcludeName(l string) string {
+	if e.InBase[l] {
+		return e.Listed[l]
+	}
+	return l
+}
+
+// ExcludeOf is the whole exclude to write for module l, with excludes from
+// [CollisionError.Suggest]: for a base module, the exclude qory.yaml lists for it with the
+// suggested entries added, each name once; for another module, the suggested entries.
+func (e *CollisionError) ExcludeOf(l string, excludes map[string]map[string][]string) map[string][]string {
+	if !e.InBase[l] || len(e.Excluded[l]) == 0 {
+		return excludes[l]
+	}
+	out := map[string][]string{}
+	for _, from := range []map[string][]string{e.Excluded[l], excludes[l]} {
+		for kind, names := range from {
+			for _, name := range names {
+				if !slices.Contains(out[kind], name) {
+					out[kind] = append(out[kind], name)
+				}
+			}
+		}
+	}
+	return out
+}
+
 // Error is the plain-text form: each collision with the modules that ship it and their
 // pins, then the excludes that resolve it. Collisions are separated by a blank line and
 // the text has no trailing newline. The fixtures under contracts/harness/v1 contain it
-// verbatim.
+// verbatim. The line for a base module contains the whole exclude to write for it in
+// qory.yaml, the entries of every collision included.
 func (e *CollisionError) Error() string {
+	_, excludes := e.Suggest(e.Order)
 	var b strings.Builder
 	for i, c := range e.Collisions {
 		if i > 0 {
@@ -927,35 +1154,67 @@ func (e *CollisionError) Error() string {
 		width := 0
 		for _, l := range c.Modules {
 			named = append(named, shown(l)+"@"+e.Pins[l])
-			if len(shown(l))+1 > width {
-				width = len(shown(l)) + 1
+			if len(shown(e.ExcludeName(l)))+1 > width {
+				width = len(shown(e.ExcludeName(l))) + 1
 			}
 		}
 		fmt.Fprintf(&b, "%s/%s is provided by %d modules: %s\n", shown(c.Kind), shown(c.Name), len(c.Modules), strings.Join(named, ", "))
-		if c.Base != "" {
+		if c.Rename {
 			fmt.Fprintf(&b, "  it belongs to the base stack %s; rename yours\n", shown(c.Base))
 			continue
 		}
 		b.WriteString("  keep one and exclude the others, for example\n")
+		var replaced []string
 		for _, l := range c.Modules[:len(c.Modules)-1] {
-			fmt.Fprintf(&b, "    %-*s exclude: {%s: [%s]}\n", width, shown(l)+":", shown(c.Kind), shown(c.Name))
+			block := "{" + shown(c.Kind) + ": [" + shown(c.Name) + "]}"
+			if e.InBase[l] {
+				block = flowBlock(e.ExcludeOf(l, excludes))
+				if len(e.Excluded[l]) > 0 {
+					replaced = append(replaced, shown(e.ExcludeName(l)))
+				}
+			}
+			fmt.Fprintf(&b, "    %-*s exclude: %s\n", width, shown(e.ExcludeName(l))+":", block)
+		}
+		if c.Base != "" {
+			fmt.Fprintf(&b, "  write the exclude for a module of the base stack %s in qory.yaml, under harness.modules", shown(c.Base))
+			if len(replaced) > 0 {
+				fmt.Fprintf(&b, ", in place of the exclude qory.yaml lists for %s", strings.Join(replaced, ", "))
+			}
+			b.WriteString("\n")
 		}
 	}
 	return strings.TrimRight(b.String(), "\n")
 }
 
+// flowBlock writes an exclude in YAML's flow form, kinds sorted: {agents: [a], skills:
+// [b, c]}.
+func flowBlock(kinds map[string][]string) string {
+	var parts []string
+	for _, kind := range sortedKeys(kinds) {
+		parts = append(parts, shown(kind)+": ["+strings.Join(accesskey.ShownNames(kinds[kind]), ", ")+"]")
+	}
+	return "{" + strings.Join(parts, ", ") + "}"
+}
+
 // collisions builds the CollisionError for every entry more than one module owns, and
-// returns nil when no name is owned twice. Keys are sorted, so the message does not
-// follow map order.
-func collisions(owners map[string][]string, modules []Module, base *Base) error {
+// returns nil when no name is owned twice. checkoutExcludes is the exclude qory.yaml lists
+// for each base module, by module name. Keys are sorted, so the message does not follow
+// map order.
+func collisions(owners map[string][]string, modules []Module, base *Base, checkoutExcludes map[string]map[string][]string) error {
 	pin := map[string]string{}
 	sources := map[string]string{}
 	inBase := map[string]bool{}
+	listable := map[string]bool{}
+	listed := map[string]string{}
 	var order []string
 	for _, l := range modules {
 		pin[l.Name] = l.Pin
 		sources[l.Name] = l.Source
 		inBase[l.Name] = l.Base
+		if l.Base && l.BaseName != "" {
+			listable[l.Name] = true
+			listed[l.Name] = l.BaseName
+		}
 		order = append(order, l.Name)
 	}
 	var keys []string
@@ -968,13 +1227,16 @@ func collisions(owners map[string][]string, modules []Module, base *Base) error 
 		return nil
 	}
 	sort.Strings(keys)
-	e := &CollisionError{Pins: pin, Sources: sources, Order: order}
+	e := &CollisionError{Pins: pin, Sources: sources, Order: order, InBase: listable, Listed: listed, Excluded: checkoutExcludes}
 	for _, key := range keys {
 		kind, name, _ := strings.Cut(key, "/")
 		c := Collision{Kind: kind, Name: name, Modules: owners[key]}
-		for _, l := range owners[key] {
+		for i, l := range owners[key] {
 			if inBase[l] && base != nil {
 				c.Base = base.String()
+				if i < len(owners[key])-1 && !listable[l] {
+					c.Rename = true
+				}
 			}
 		}
 		e.Collisions = append(e.Collisions, c)

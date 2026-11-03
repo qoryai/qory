@@ -18,6 +18,36 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Added
 
+- A run of a work item works on the branch `qory/<work item id>`, at the commit of the
+  artifact `branch` that its stage starts from. The harness still comes from
+  `target_version`.
+- A write run of a work item ends with a push step: qory commits what the agent left,
+  pushes each repository with new commits to `qory/<work item id>`, and stores a new
+  version of the artifact `branch`. The next run in the same stage starts at that commit. A
+  session that failed, timed out or was cancelled gets the same step, and its commit and
+  version show how it ended. See The push step of a write run in `docs/run.md`.
+- A skill reads its work item and stores what it made with `qory work-item show`, `qory
+  artifact pull`, `qory artifact push` and `qory run verdict`. In a run they use Qory
+  Apiary through the gateway, at `QORY_RUN_API`. Outside a run they use the checkout's
+  `.qory` directory. `qory work-item show` exits 3 with no work item, and `qory artifact
+  push` exits 4 for a type or a limit. In a run that cannot write its checkout, such as a
+  read run, `qory artifact pull` and `qory artifact push` keep their files in
+  `/tmp/qory-artifacts`, and `pull` prints that directory. In a run, `pull` prints a whole
+  path. A folder at `/tmp/qory-artifacts` that another user owns, or whose mode has a group
+  or other bit, stops both commands with exit 1. See Commands of a work item in
+  `docs/run.md`.
+- Every command that reads the configuration checks the `process.yaml` at the folder
+  root of each module that `exports.modules` lists: its fields and their limits, that
+  `stack` is one of `exports.stacks`, and that the stack declares each workflow the
+  process runs. See §Exports in `contracts/harness/v1/README.md`.
+- List the artifact types a factory's workspaces use with `artifact_types` in its
+  `process.yaml`: a standard type by its name alone, a custom type with `base_view`,
+  `size_limit`, `max_files` and, for `base_view: structured`, `json_schema`. Every command
+  that reads the configuration checks each entry and compiles each `json_schema`. See
+  Artifact types in `contracts/harness/v1/README.md`.
+- Version 1 of the branch format, `contracts/harness/v1/branch.schema.json`: a work
+  item's branch, `qory/<work item id>`, and the commit in each repository. A software
+  factory can use it as the `json_schema` of a custom artifact type `branch`.
 - `-f` on `qory harness compose`, `qory run` and `qory worktree add` takes a stack by
   reference, `<https URL>#<ref>:<folder>`: qory fetches the folder as it fetches a git
   module and composes its `qory-stack.yaml`. `examples/hello` has one, so a run takes it
@@ -45,7 +75,25 @@ release may change what an existing document does, and states it under Upgrading
   from its workflow's `time_limit`, else 3 hours.
 - Declare a workflow's access level with `workflows.<name>.access` in its
   `qory-stack.yaml`, `read` or `write`, and `read` when left out. qory stops on any
-  other value and grants no permission from it.
+  other value.
+- A run of a workflow from a run code sees the checkout read-only when `access` in its
+  documents is `read`, or when its workflow's access in the stack is `read`, which is also
+  a workflow that sets no access or that the stack does not declare. Forager binds the
+  workspace read-only and the checkout's mount is read-only, so a write into the checkout
+  fails with `Read-only file system`. On Claude Code, its settings also deny
+  `NotebookEdit` and every edit under the checkout, allow the commands of a work item in
+  Bash, with `Bash(/qory/qory artifact *)`, `Bash(/qory/qory run verdict *)` and
+  `Bash(/qory/qory work-item *)`, allow reads and edits in `/tmp/qory-artifacts`, add that
+  folder to `permissions.additionalDirectories`, and set `permissions.defaultMode` to
+  `dontAsk`. Such
+  a run with no wall, with `wall.setup:
+  inside`, or whose image chosen at the run's open has `docker: true`, whichever way it
+  was selected, stops after the compose, exit 1, and closes `failed` with
+  `read_needs_wall`, `read_needs_setup_outside` or `read_needs_no_nested_docker`. qory
+  removes the setup container of such a run before the agent starts, so no process in
+  that container runs while the agent works, and the agent cannot reach a service that
+  the setup started. A removal that fails closes the run `failed` with
+  `read_needs_setup_removed`. See §Read workflows in `docs/run.md`.
 - See the fetch and the compose of `qory run` as steps in the run's record, each with
   its lines and its end: a failed step ends `failed` with the exit status of `qory run`,
   after its error line.
@@ -135,8 +183,9 @@ release may change what an existing document does, and states it under Upgrading
   the descriptor close-on-exec. Linux and macOS only. See The run key from a run code in
   `docs/run.md`.
 - Print a run's diagnostics document from Qory Apiary with `qory apiary run diagnose
-  <run id>`. qory signs the request with the diagnostics key in
-  `~/.config/qory/apiary/<host>/` and prints the document to stdout only after its
+  <run number or id>`: the run's number, such as `18342` from "Run 18342" on the run's
+  page in Qory Apiary, or its `rn_` id. qory signs the request with the diagnostics key
+  in `~/.config/qory/apiary/<host>/` and prints the document to stdout only after its
   signature verifies under the server key pinned there. Pass `--server <url>` when keys
   for several servers are on this computer. See `docs/apiary.md`.
 - Make and enrol that diagnostics key with `qory apiary enrol <server> <code>`, using a
@@ -144,10 +193,64 @@ release may change what an existing document does, and states it under Upgrading
   Qory Apiary. qory writes the key to `~/.config/qory/apiary/<host>/` and never to
   `forager.yaml`. If the command stops after Qory Apiary enrolled the key, the same
   command finishes the enrolment without sending the code again.
+- Leave an entry out of a module of the stack you extend: in the harness section of
+  `qory.yaml`, list the module by its name with `exclude` alone, such as `{name: core,
+  exclude: {skills: [explore-a-ticket]}}`, and a module of your repository can ship that
+  entry instead. This works for a module the stack lists by `name` or by the `module` its
+  source selects. The exclude lists entries of the kinds the stack's `extending` block
+  lets your modules ship. A collision with an entry of such a module prints that exclude
+  in place of `rename yours`. See Leave out an entry of a delivered module in
+  `docs/harness.md`.
+- A module fills a role with `provides` in its `qory-module.yaml`, by kind and then by
+  role: `provides: {agents: {developer: typescript-developer}}` makes a workflow skill's
+  `${qory:agents/developer}` the agent `typescript-developer`, with no `bind` in the
+  checkout. A role's name comes from the base's `bind`, then the modules' `provides`,
+  then the checkout's `bind`, each replacing the one before. Two modules that provide one
+  role with different names stop the compose unless the checkout's `bind` sets it. A
+  provided entry that an `exclude` leaves out provides nothing, and a module appended to
+  a base provides only the kinds the base's `extending.kinds` lists.
+- `roles` in a module's `qory-module.yaml` lists the roles its documents reference, by
+  kind and then by role, each set to `one`.
+- The report has `roles`, each role with the entry that fills it and `from`: `base`,
+  `provides <module>` or `bind`. `bind` in the report contains provided roles too, so
+  `qory harness launch --json` and `--address` print them. The Bind table that
+  `qory harness inspect` and `qory harness compose --dry-run` print has a third column,
+  `from`.
 
 ### Changed
 
+- The compose fails, exit 2, for each entry of a stack's `workflows` that no module of
+  the stack composes as a skill or command.
+- A run from a run code whose composed harness has no skill or command of the
+  workflow's name closes `failed` with the reason `workflow_not_in_harness`, not
+  `no_session`, and its line shows the target's path after the checkout's harness.
+- `bind` nests roles by kind: `bind: {agents: {coder: rails-coder}}`. A flat key stops
+  the compose with `Write bind as bind.agents.coder: rails-coder in qory.yaml: bind keys
+  are kinds, and agents/coder is a kind and a role.`, and a list as a role's value stops
+  it too. The harness section of a run code's documents writes `bind` the same way.
+- A reference to a role that nothing fills ends with `which no module ships or provides
+  and the stack does not bind`. When a module provides the role with an entry that an
+  `exclude` or an `only` left out, it ends with `which module web provides as agent
+  core-developer, which module core leaves out`, one line per such module.
 - The `agent` image contains Claude Code 2.1.316, up from 2.1.273.
+- Claude Code runs with `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` and
+  `CLAUDE_CODE_DISABLE_OFFICIAL_MARKETPLACE_AUTOINSTALL=1` in every run,
+  walled or not, and the `env` of its `--settings` copy sets both.
+  Forager fixes the two values, so a value from the server's run
+  configuration, `--env`, `wall.env`, `env` in `qory.yaml`, the `env` of
+  `harness.launch.claude`, a settings fragment, a module's export or the
+  shell `qory run` starts in is not used.
+- In a run from a run code, `events.jsonl` in the run's record has
+  `dev.qory.runtime.text` for each text and thinking block of the main
+  conversation, `dev.qory.runtime.tool_result` for each tool result the
+  model gets, and `dev.qory.runtime.tool_denied` for each tool call
+  denied without a prompt. Each event from Claude Code's output has
+  `line`, its line number in Claude Code's standard output. A text or a
+  tool result over 64 KiB is cut and has `truncated: true`. In every run
+  of Claude Code, `dev.qory.runtime.tool_started`, `tool_finished` and
+  `tool_failed` have `summary` for a built-in tool that Forager's
+  descriptor lists, such as a Bash call's command.
+  `dev.qory.runtime.message` is gone.
 - With `wall.engine_proxy_file` set, a run's wall creates the agent's and the relay's
   containers with `--pull=never`: a missing one of those images fails the run with
   `Pull the image on this machine before you set the engine proxy: …`. Pull them, and
@@ -317,7 +420,8 @@ release may change what an existing document does, and states it under Upgrading
   repositories, which adds a prebuilt image's copy and runs the repository's
   `postCreateCommand` and `postStartCommand`, is one `setup` step of the run's record,
   `prepare`, with its lines and its exit status. It runs in a separate container of the
-  run's image, which runs until the run closes, unless `wall.setup` is `inside`; outside,
+  run's image, which runs until the run closes, or on a read run until qory removes it
+  before the agent starts, unless `wall.setup` is `inside`; outside,
   its lines go to the record alone. Before, it ran in the agent's container before the
   agent, as no step. Outside, the setup container gets the agent's variables, from the
   server's run configuration, `--env`, `wall.env` and the harness's defaults, with the

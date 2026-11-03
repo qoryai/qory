@@ -29,6 +29,26 @@
         ]
       }
     },
+    "roles": {
+      "description": "The roles the module's documents reference, by kind and then by role, each set to one: one entry fills the role.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "agents": {"$ref": "#/$defs/roleCounts"},
+        "commands": {"$ref": "#/$defs/roleCounts"},
+        "skills": {"$ref": "#/$defs/roleCounts"}
+      }
+    },
+    "provides": {
+      "description": "The roles the module fills, by kind and then by role, each to the name of one entry of that kind. A provided role fills a reference such as ${qory:agents/developer} unless the checkout's bind sets the role.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "agents": {"$ref": "#/$defs/roleNames"},
+        "commands": {"$ref": "#/$defs/roleNames"},
+        "skills": {"$ref": "#/$defs/roleNames"}
+      }
+    },
     "requires": {
       "description": "One item per entry of this module that needs other entries composed beside it: the entry by its singular kind, what it needs under the plural kinds, from any module.",
       "type": "array",
@@ -74,6 +94,18 @@
           "files": {"type": "string", "minLength": 1}
         }
       }
+    }
+  },
+  "$defs": {
+    "roleCounts": {
+      "type": "object",
+      "propertyNames": {"pattern": "^[^/\\\\@ .][^/\\\\@ ]*$"},
+      "additionalProperties": {"const": "one"}
+    },
+    "roleNames": {
+      "type": "object",
+      "propertyNames": {"pattern": "^[^/\\\\@ .][^/\\\\@ ]*$"},
+      "additionalProperties": {"type": "string", "pattern": "^[^/\\\\@ .][^/\\\\@ ]*$"}
     }
   }
 }

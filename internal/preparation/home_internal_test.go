@@ -137,12 +137,44 @@ func TestFreshHomeIsOnlyForTheAgentHome(t *testing.T) {
 			}
 			return ""
 		}
-		if err := FreshHome(getenv); err != nil {
+		if err := FreshHome(getenv, true); err != nil {
 			t.Errorf("CLAUDE_CONFIG_DIR=%q: %v", v, err)
 		}
 	}
 	if _, err := os.Lstat(other); !os.IsNotExist(err) {
 		t.Errorf("another CLAUDE_CONFIG_DIR was made: %v", err)
+	}
+}
+
+// TestFreshFolderOfTheStore is the folder of a read run's artifact files: made with mode
+// 0700 where nothing is, and with anything at the path, or a link above it, the line of
+// the store and not the line of the agent's home.
+func TestFreshFolderOfTheStore(t *testing.T) {
+	path := filepath.Join(realTemp(t), "qory-artifacts")
+	if err := freshFolder(path, storeWords); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Lstat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !info.IsDir() || info.Mode().Perm() != 0o700 {
+		t.Errorf("the folder has mode %v", info.Mode())
+	}
+
+	want := "remove " + path + " from the image: qory makes the folder of a run's artifact files only where nothing is, so a read run does not start"
+	if err := freshFolder(path, storeWords); err == nil || err.Error() != want {
+		t.Errorf("a folder at the path: %v, want %q", err, want)
+	}
+
+	above := filepath.Join(realTemp(t), "above")
+	if err := os.Symlink(realTemp(t), above); err != nil {
+		t.Fatal(err)
+	}
+	under := filepath.Join(above, "qory-artifacts")
+	want = "replace the symbolic link " + above + " with a folder in the image: the folder of a run's artifact files, " + under + ", is made only where no link leads"
+	if err := freshFolder(under, storeWords); err == nil || err.Error() != want {
+		t.Errorf("a link above: %v, want %q", err, want)
 	}
 }
 

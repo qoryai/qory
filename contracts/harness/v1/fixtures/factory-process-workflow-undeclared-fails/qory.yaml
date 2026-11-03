@@ -1,0 +1,10 @@
+apiVersion: qory.dev/v1alpha1
+exports:
+  stacks: [core, software]
+  modules: [software-factory]
+harness:
+  target:
+    runtime: claude
+  modules:
+    - name: software-factory
+      source: {path: ., module: software-factory}

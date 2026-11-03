@@ -96,9 +96,14 @@ func TestAComposeRefusalPrintsNoSecretName(t *testing.T) {
 			"modules/b/settings/claude/settings.json": "{\"qak_k\": 2}\n",
 		}, "settings/claude/settings.json: " + name + " is set by modules a and b with different values"},
 		{map[string]string{
-			stack.FileName:                   "apiVersion: qory.dev/v1alpha1\nbind:\n  skills/r: qak_x\nmodules:\n  - name: core\n",
+			stack.FileName:                   "apiVersion: qory.dev/v1alpha1\nbind:\n  skills:\n    r: qak_x\nmodules:\n  - name: core\n",
 			"modules/core/skills/a/SKILL.md": "# a\n",
 		}, "bind skills/r selects skill " + name + ", which no module ships"},
+		{map[string]string{
+			stack.FileName:                   head + "  - name: core\n",
+			"modules/core/qory-module.yaml":  "apiVersion: qory.dev/v1alpha1\nname: core\nprovides:\n  skills:\n    r: qak_x\n",
+			"modules/core/skills/a/SKILL.md": "# a\n",
+		}, "Ship skill " + name + " in a module, or remove provides.skills.r from module core: no module ships skill " + name + "."},
 	} {
 		err := composeWritten(t, c.files)
 		if err == nil || !strings.Contains(err.Error(), c.want) {

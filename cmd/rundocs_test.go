@@ -27,7 +27,8 @@ import (
 
 // codeDocuments are the documents of an answer to a run code: the contract's run/v1
 // documents fixture explore-workflow.json, the workflow hello, harness_hidden true and
-// a target_version among them, with change applied to its members.
+// a target_version among them, with access set to write, so the workflow's access in the
+// stack decides whether the run reads only, and change applied to its members.
 func codeDocuments(t *testing.T, change func(map[string]any)) json.RawMessage {
 	t.Helper()
 	b, err := fs.ReadFile(contracts.RunFS, "fixtures/documents/explore-workflow.json")
@@ -38,6 +39,7 @@ func codeDocuments(t *testing.T, change func(map[string]any)) json.RawMessage {
 	if err := json.Unmarshal(b, &doc); err != nil {
 		t.Fatal(err)
 	}
+	doc["access"] = "write"
 	if change != nil {
 		change(doc)
 	}
@@ -159,8 +161,8 @@ func TestARunCodeWhoseAnswerQoryDoesNotRunStops(t *testing.T) {
 // codeRun is what a run from a run code came to, opened nowhere: its output and error,
 // the run's spec at the open, the session's spec at the join, the inputs.json and the
 // modes the join found, the folder of the inputs, the URL of the stack's repository,
-// which the output has as <url>, the stack's commit in the documents, and the calls the
-// run got.
+// which the output has as <url>, the stack's commit in the documents, the calls the run
+// got, and the outcomes it closed with.
 type codeRun struct {
 	out      string
 	err      error
@@ -173,11 +175,36 @@ type codeRun struct {
 	url      string
 	commit   string
 	calls    []string
+	closes   []session.Outcome
+	// image is the last value the run's Image returned, the zero Image when nothing read it.
+	image session.Image
 }
 
 // codeFetchImage is the FetchImage of each run [runFromCodeGiven] opens; nil is one
 // that succeeds. A test sets it.
 var codeFetchImage func(context.Context) error
+
+// codeAtGateway, when set, has [runFromCodeGiven] open each run at a gateway of
+// Forager's in this process as well, as [cmd.Nowhere] AtGateway does. A test sets it.
+var codeAtGateway bool
+
+// codePolicyImage is the image the policy of each run [runFromCodeGiven] opens selects,
+// as [cmd.Nowhere] PolicyImage is; "" selects none. A test sets it.
+var codePolicyImage string
+
+// codeRepositories is the run configuration's repositories of each run
+// [runFromCodeGiven] opens, as [cmd.Nowhere] Repositories is; "" lists none. A test sets
+// it.
+var codeRepositories string
+
+// codeReal, when set, has each run [runFromCodeGiven] opens use a real wall for its
+// setup, the removal of its setup container and its join, as [cmd.Nowhere] Real does. A
+// test sets it.
+var codeReal bool
+
+// codeRemoveSetup is the RemoveSetup of each run [runFromCodeGiven] opens; nil is one
+// that succeeds. A test sets it.
+var codeRemoveSetup func(context.Context) error
 
 // runFromCode runs qory run from a run code whose documents start the workflow of a
 // harness document that extends the stack examples/hello of a repository that the
@@ -243,11 +270,17 @@ func runFromCodeGiven(t *testing.T, before func(code string) []string, args []st
 	if before != nil {
 		args = append(slices.Clip(args), before(g.code())...)
 	}
-	_, calls, restore := cmd.OpenNowhereWith(cmd.Nowhere{
-		System: proxygittest.Host, Proxy: h.server.Proxy.URL, CABundle: h.server.Proxy.CABundle, Dir: h.runDir,
+	closes, calls, restore := cmd.OpenNowhereWith(cmd.Nowhere{
+		System: proxygittest.Host, Repositories: codeRepositories,
+		Proxy: h.server.Proxy.URL, CABundle: h.server.Proxy.CABundle, Dir: h.runDir,
 		StackProxy: h.server.Proxy.URL, StackCABundle: h.server.Proxy.CABundle,
-		OnOpen:     func(s session.OpenSpec) { r.open = s },
-		FetchImage: codeFetchImage,
+		OnOpen:      func(s session.OpenSpec) { r.open = s },
+		FetchImage:  codeFetchImage,
+		RemoveSetup: codeRemoveSetup,
+		Real:        codeReal,
+		AtGateway:   codeAtGateway,
+		PolicyImage: codePolicyImage,
+		OnImage:     func(i session.Image) { r.image = i },
 	})
 	defer restore()
 	if given == nil {
@@ -256,7 +289,7 @@ func runFromCodeGiven(t *testing.T, before func(code string) []string, args []st
 		file, stdin := given(g.code())
 		r.out, r.err = runReading(t, stdin, append([]string{"run", "--run-code-file", file, "--gateway", g.URL}, args...)...)
 	}
-	r.calls = calls()
+	r.calls, r.closes = calls(), closes()
 	r.out, r.url = strings.ReplaceAll(r.out, url, "<url>"), url
 	return r
 }
@@ -277,7 +310,7 @@ func TestARunCodeStartsItsWorkflow(t *testing.T) {
 	if err := json.Unmarshal(want, &doc); err != nil {
 		t.Fatal(err)
 	}
-	r := runFromCode(t, func(s string) string { return s + "workflows:\n  hello:\n    time_limit: 7h\n" }, func(d map[string]any) {
+	r := runFromCode(t, func(s string) string { return s + "workflows:\n  hello:\n    time_limit: 7h\n    access: write\n" }, func(d map[string]any) {
 		d["run_settings"] = map[string]any{"runtime": "claude", "model": "example-large", "provider_models": []any{map[string]any{"id": "example-large"}}}
 	})
 	if !errors.Is(r.err, cmd.ErrJoinedNowhere) || !r.joined {
@@ -311,7 +344,7 @@ func TestARunCodeStartsItsWorkflow(t *testing.T) {
 // TestARunCodeWithoutAWorkflowTimeLimitRunsThreeHours is a run from a run code whose
 // base sets no time_limit for its workflow: the session's time limit is 3 hours.
 func TestARunCodeWithoutAWorkflowTimeLimitRunsThreeHours(t *testing.T) {
-	r := runFromCode(t, nil, nil)
+	r := runFromCode(t, writesHello, nil)
 	if !r.joined {
 		t.Fatalf("%v (exit %d), want the join\n%s", r.err, cmd.ExitCode(r.err), r.out)
 	}
@@ -322,13 +355,45 @@ func TestARunCodeWithoutAWorkflowTimeLimitRunsThreeHours(t *testing.T) {
 
 // TestARunCodeWhoseHarnessHasNoWorkflowStops is a run from a run code whose workflow is
 // no skill or command of the composed harness: the run stops before the session joins,
-// exit 1, with a line that starts with its fix.
+// exit 1, with a line that starts with its fix, and closes failed with the reason
+// workflow_not_in_harness.
 func TestARunCodeWhoseHarnessHasNoWorkflowStops(t *testing.T) {
 	r := runFromCode(t, nil, func(d map[string]any) { d["workflow"] = "deploy" })
 	if r.joined || cmd.ExitCode(r.err) != 1 {
 		t.Fatalf("%v (exit %d), want exit 1 before the join\n%s", r.err, cmd.ExitCode(r.err), r.out)
 	}
-	wants(t, r.out+r.err.Error(), "add a skill or command deploy to the workspace's harness, or set another workflow in Qory Apiary: the composed harness has no skill or command deploy; the code is used")
+	if want := []session.Outcome{{State: "failed", Reason: "workflow_not_in_harness", ExitCode: -1}}; !slices.Equal(r.closes, want) {
+		t.Errorf("the run closed with %v, want %v", r.closes, want)
+	}
+	wants(t, r.out+r.err.Error(), "add a skill or command deploy to the workspace's harness, or set another workflow in Qory Apiary: the composed harness has no skill or command deploy (workflow_not_in_harness); the code is used")
+}
+
+// TestAGatewayTakesTheCloseOfARunCodeWhoseHarnessHasNoWorkflow is the run of
+// [TestARunCodeWhoseHarnessHasNoWorkflowStops] opened and closed at a gateway of
+// Forager's in this process: exit 1 before the join, and the gateway accepts the close,
+// so the last run.exited of the gateway's record, events.jsonl, and of the session's,
+// session.jsonl, is failed with workflow_not_in_harness and -1, and neither record
+// contains batch_refused.
+func TestAGatewayTakesTheCloseOfARunCodeWhoseHarnessHasNoWorkflow(t *testing.T) {
+	codeAtGateway = true
+	t.Cleanup(func() { codeAtGateway = false })
+	r := runFromCode(t, nil, func(d map[string]any) { d["workflow"] = "deploy" })
+	if r.joined || cmd.ExitCode(r.err) != 1 {
+		t.Fatalf("%v (exit %d), want exit 1 before the join\n%s", r.err, cmd.ExitCode(r.err), r.out)
+	}
+	wants(t, r.out+r.err.Error(), "(workflow_not_in_harness); the code is used")
+	dir := filepath.Join(r.open.RunsDir, r.open.RunID)
+	for _, file := range []string{"events.jsonl", "session.jsonl"} {
+		b, err := os.ReadFile(filepath.Join(dir, file))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := lastExited(t, b); got != "failed/workflow_not_in_harness/-1" {
+			t.Errorf("%s ends the run %s, want failed/workflow_not_in_harness/-1\n%s", file, got, b)
+		}
+		lacks(t, string(b), "batch_refused")
+	}
+	lacks(t, r.out, "batch_refused")
 }
 
 // TestAWalledRunCodeMountsItsInputsReadOnly is a walled run from a run code: the folder
@@ -383,7 +448,7 @@ func TestARunCodeDescriptorIsClosedBeforeTheRunStartsAProgram(t *testing.T) {
 		}
 		t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 		return []string{"--run-code-file", "/dev/fd/" + strconv.Itoa(n)}
-	}, nil, nil, nil)
+	}, nil, writesHello, nil)
 	if !errors.Is(r.err, cmd.ErrJoinedNowhere) || !r.joined {
 		t.Fatalf("%v (exit %d), want the join\n%s", r.err, cmd.ExitCode(r.err), r.out)
 	}

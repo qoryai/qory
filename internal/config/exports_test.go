@@ -52,6 +52,28 @@ func TestExportsOfTheRootFileAreReadAndChecked(t *testing.T) {
 	}
 }
 
+// TestLoadChecksAFactoryModulesProcess is an exported module with a process.yaml whose
+// stage runs a workflow the stack does not declare: the load fails with the file and
+// the fix, and passes once the stack declares the workflow.
+func TestLoadChecksAFactoryModulesProcess(t *testing.T) {
+	hermetic(t)
+	root := t.TempDir()
+	write(t, filepath.Join(root, "qory.yaml"), "exports:\n  stacks: [care]\n  modules: [desk]\n")
+	write(t, filepath.Join(root, "stacks", "care", "qory-stack.yaml"), "modules: [{name: desk}]\n")
+	write(t, filepath.Join(root, "modules", "desk", "qory-module.yaml"), "name: desk\n")
+	file := filepath.Join(root, "modules", "desk", "process.yaml")
+	write(t, file, "name: Support desk\nsummary: Agents draft answers.\ndescription: An agent drafts each answer.\ntype: customer-care\nstack: care\nprocess:\n  schema: qory.process/v1\n  stages: [{name: Answer, sequence: [{workflow: draft-an-answer}]}]\n")
+	_, err := config.Load(root, true)
+	want := file + ": declare draft-an-answer under workflows in stacks/care/qory-stack.yaml, or remove it from stage Answer: stack care does not declare it"
+	if err == nil || err.Error() != want {
+		t.Fatalf("%v\nwant %s", err, want)
+	}
+	write(t, filepath.Join(root, "stacks", "care", "qory-stack.yaml"), "modules: [{name: desk}]\nworkflows: {draft-an-answer: {}}\n")
+	if _, err := config.Load(root, true); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // TestExportsElsewhereAreNotARepositorys is an exports section in the user's file: it
 // is read, so a mistake in it is refused, and it is not the checkout's exports.
 func TestExportsElsewhereAreNotARepositorys(t *testing.T) {

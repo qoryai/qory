@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -275,8 +276,8 @@ func TestExtendsReadsTheOwnFileAndNamesWhatItLeavesOut(t *testing.T) {
 
 // TestExtendsGovernsFilesByPrefix is the base opening claude/rules to consumers: a rule
 // file lands in .claude/rules through the link, a file under another path is refused
-// naming the prefixes, a consumer naming a base module to exclude from it is told the
-// module belongs to the base, and the machine keys of the checkout's qory.yaml are
+// naming the prefixes, a consumer giving a base module a source is told the module
+// belongs to the base, and the machine keys of the checkout's qory.yaml are
 // announced as not read.
 func TestExtendsGovernsFilesByPrefix(t *testing.T) {
 	url := baseRepo(t)
@@ -320,10 +321,59 @@ func TestExtendsGovernsFilesByPrefix(t *testing.T) {
 		t.Fatalf("a longer segment: err = %v", err)
 	}
 	os.RemoveAll(filepath.Join(root, "modules", "app", "files", "claude", "rules-private"))
-	writeFile(t, compose, strings.Replace(consumerCompose(openBase), "    - name: app\n", "    - name: app\n    - name: core\n      exclude: {skills: [review]}\n", 1))
+	writeFile(t, compose, strings.Replace(consumerCompose(openBase), "    - name: app\n", "    - name: app\n    - name: core\n      source: {path: ./core}\n", 1))
 	_, err = run(t, "harness", "compose")
-	if err == nil || !strings.Contains(err.Error(), "module core belongs to the base stack; a checkout's qory.yaml cannot list a base module, exclude from it or replace it") || cmd.ExitCode(err) != cmd.ExitInput {
-		t.Fatalf("a base module named: err = %v, exit %d", err, cmd.ExitCode(err))
+	if err == nil || !strings.Contains(err.Error(), "list module core with its name and exclude only: it belongs to the base stack, and a checkout's qory.yaml cannot change its source, only, variant or link") || cmd.ExitCode(err) != cmd.ExitInput {
+		t.Fatalf("a base module re-sourced: err = %v, exit %d", err, cmd.ExitCode(err))
+	}
+}
+
+// TestExtendsExcludesABaseEntry is the consumer shipping review, a skill the base's core
+// ships too: the compose fails and prints the exclude for core in qory.yaml; with that
+// exclude, the consumer's skill is composed, the link leads to it, and the report and
+// inspect list the base's skill as left out of core; an exclude of a skill core does not
+// ship fails with status 2.
+func TestExtendsExcludesABaseEntry(t *testing.T) {
+	url := baseRepo(t)
+	root := consumerCheckout(t, url)
+	writeFile(t, filepath.Join(root, "modules", "app", "skills", "review", "SKILL.md"), "# mine\n")
+	out, err := run(t, "harness", "compose")
+	if err == nil || cmd.ExitCode(err) != cmd.ExitCollision {
+		t.Fatalf("err = %v, exit %d; want a collision\n%s", err, cmd.ExitCode(err), out)
+	}
+	wants(t, out, "skills/review is provided by 2 modules", "Module core belongs to the base stack nextjs-15@", "Keep one and exclude it from the others. For example, in qory.yaml, under harness.modules:", "- name: core\n", "  exclude:\n", "    skills: [review]")
+	if strings.Contains(out, "rename yours") || strings.Contains(out, "- name: core\n  ...") {
+		t.Fatalf("the fix for a base module:\n%s", out)
+	}
+	writeFile(t, filepath.Join(root, "qory.yaml"), strings.Replace(consumerCompose(url), "    - name: app\n", "    - name: app\n    - name: core\n      exclude: {skills: [review]}\n", 1))
+	out, err = run(t, "harness", "compose")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if data, err := os.ReadFile(filepath.Join(root, ".claude", "skills", "review", "SKILL.md")); err != nil || string(data) != "# mine\n" {
+		t.Fatalf("the skill through the link: %q, %v", data, err)
+	}
+	rep := readReport(t, root)
+	if len(rep.Excludes) != 1 || rep.Excludes[0].Module != "core" || rep.Excludes[0].Kind != "skills" || rep.Excludes[0].Name != "review" {
+		t.Fatalf("excludes = %+v, want core's skills/review", rep.Excludes)
+	}
+	for _, e := range rep.Entries {
+		if e.Kind == "skills" && e.Name == "review" && e.Module != "app" {
+			t.Fatalf("skills/review from %s, want app", e.Module)
+		}
+	}
+	out, err = run(t, "harness", "inspect")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantsRow(t, out, "skills/review", "app")
+	if !regexp.MustCompile(`(?m)^\s+core\s+skills/review$`).MatchString(out) {
+		t.Fatalf("inspect lists no exclude of core's skills/review:\n%s", out)
+	}
+	writeFile(t, filepath.Join(root, "qory.yaml"), strings.Replace(consumerCompose(url), "    - name: app\n", "    - name: app\n    - name: core\n      exclude: {skills: [review, triage]}\n", 1))
+	_, err = run(t, "harness", "compose")
+	if err == nil || !strings.Contains(err.Error(), "remove skills/triage from the exclude of module core in qory.yaml: the base stack nextjs-15@") || cmd.ExitCode(err) != cmd.ExitInput {
+		t.Fatalf("an entry core does not ship: err = %v, exit %d", err, cmd.ExitCode(err))
 	}
 }
 

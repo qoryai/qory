@@ -55,6 +55,7 @@ const deadProxy = "http://qory:nowhere@127.0.0.1:9"
 // repository that the run's stack proxy serves and its host proxy does not. With
 // checkout set, the documents contain no harness document, and the checkout's qory.yaml
 // extends that folder, which the run's host proxy serves and its stack proxy does not.
+// The base's stack declares the workflow hello write, see [writesHello].
 type codeHarness struct {
 	// stack changes the base's stack file, nil for none; files are further files of the
 	// base's repository, and tools, when not nil, the files of the repository of the
@@ -160,7 +161,7 @@ func (c codeHarness) run(t *testing.T) harnessRun {
 	if c.stack != nil {
 		files[folder+"/qory-stack.yaml"] = c.stack(files[folder+"/qory-stack.yaml"])
 	}
-	files[folder+"/qory-stack.yaml"] = withExtendable(files[folder+"/qory-stack.yaml"])
+	files[folder+"/qory-stack.yaml"] = withExtendable(writesHello(files[folder+"/qory-stack.yaml"]))
 	for name := range c.links {
 		delete(files, name)
 	}
@@ -298,7 +299,7 @@ func (r harnessRun) noHarnessFile(t *testing.T) {
 func TestARunCodeComposesTheWorkspacesHarnessThroughTheStackProxy(t *testing.T) {
 	r := codeHarness{
 		stack: func(s string) string {
-			return withTools(toolsURL, toolsRef)(s) + "workflows:\n  hello:\n    time_limit: 5h\n"
+			return withTools(toolsURL, toolsRef)(s) + "workflows:\n  hello:\n    time_limit: 5h\n    access: write\n"
 		},
 		tools: toolsModule(),
 		before: func() []string {
@@ -382,6 +383,19 @@ func TestARunCodeComposesAHarnessDocumentThatDefinesAStack(t *testing.T) {
 			r.noAddress(t)
 		})
 	}
+}
+
+// TestARunCodesHarnessDocumentWithAWorkflowItsModulesLackStops is a run from a run code
+// whose harness document defines a stack whose workflow deploy no module composes: the
+// compose fails, exit 2, before the join, with a line that shows the stack as the
+// workspace's harness in Qory Apiary, not by the file in the run directory.
+func TestARunCodesHarnessDocumentWithAWorkflowItsModulesLackStops(t *testing.T) {
+	r := codeHarness{defines: map[string]any{"deploy": map[string]any{}}}.run(t)
+	if r.joined || cmd.ExitCode(r.err) != cmd.ExitInput {
+		t.Fatalf("%v (exit %d), want exit 2 before the join\n%s", r.err, cmd.ExitCode(r.err), r.out)
+	}
+	wants(t, r.out+r.err.Error(), "add a skill or command deploy to a module of "+workspaceHarness+" in Qory Apiary, or remove deploy from its workflows: the stack declares the workflow deploy, and none of its modules ships a skill or command deploy")
+	lacks(t, r.out+r.err.Error(), "harness.yaml")
 }
 
 // TestARunCodesShownHarnessDocumentShowsAddresses is a run from a run code whose
@@ -532,7 +546,7 @@ func TestARunCodeOfAHiddenHarnessThatFailsShowsNoAddress(t *testing.T) {
 			"modules/tools/skills/greet/SKILL.md": "---\nname: greet\ndescription: Greets.\n---\nHello.\n",
 		}}, 3, []string{"skills/greet is provided by 2 modules", "tools  the module tools  ", "world  " + workspaceBase + "  "}},
 		{"the workflow is not in the harness", codeHarness{change: func(d map[string]any) { d["workflow"] = "deploy" }}, 1,
-			[]string{"add a skill or command deploy to " + workspaceHarness + ", or set another workflow in Qory Apiary: the composed harness has no skill or command deploy; the code is used"}},
+			[]string{"add a skill or command deploy to " + workspaceHarness + ", or set another workflow in Qory Apiary: the composed harness has no skill or command deploy (workflow_not_in_harness); the code is used"}},
 		{"the stack proxy does not open", codeHarness{nowhere: func(n *cmd.Nowhere) { n.StackProxyErr = errors.New("the run is closed") }}, 1,
 			[]string{"qory run: take the work item in again in Qory Apiary: the run's stack proxy, through which qory fetches " + workspaceHarness + ", did not open: the run is closed; the code is used\n"}},
 	} {
@@ -564,7 +578,7 @@ func TestARunCodeOfAHiddenHarnessThatFailsShowsNoAddress(t *testing.T) {
 func TestARunCodeWithoutAHarnessDocumentComposesTheCheckoutsFile(t *testing.T) {
 	for _, shown := range []bool{false, true} {
 		t.Run(fmt.Sprintf("shown %v", shown), func(t *testing.T) {
-			r := codeHarness{checkout: true, shown: shown, stack: func(s string) string { return s + "workflows:\n  hello:\n    time_limit: 5h\n" }}.run(t)
+			r := codeHarness{checkout: true, shown: shown, stack: func(s string) string { return s + "workflows:\n  hello:\n    time_limit: 5h\n    access: write\n" }}.run(t)
 			if !errors.Is(r.err, cmd.ErrJoinedNowhere) || !r.joined {
 				t.Fatalf("%v (exit %d), want the join\n%s", r.err, cmd.ExitCode(r.err), r.out)
 			}
@@ -1015,5 +1029,35 @@ func TestAHarnessDocumentWhosePathLeadsOutStops(t *testing.T) {
 			r.noHarnessFile(t)
 			r.noAddress(t)
 		})
+	}
+}
+
+// TestARunCodeWhoseHarnessBindsByKindComposes is a run from a run code whose harness
+// document binds a role of each of two kinds, by kind and then by role: the documents
+// pass qory's checks and the harness composes, so the session joins.
+func TestARunCodeWhoseHarnessBindsByKindComposes(t *testing.T) {
+	writes := func(s string) string { return s + "workflows:\n  hello:\n    access: write\n" }
+	r := runFromCode(t, writes, harnessBind(map[string]any{"commands": map[string]any{"greeting": "hello"}, "skills": map[string]any{"welcome": "greet"}}))
+	if !errors.Is(r.err, cmd.ErrJoinedNowhere) || !r.joined {
+		t.Fatalf("%v (exit %d), want the join\n%s", r.err, cmd.ExitCode(r.err), r.out)
+	}
+	wants(t, r.out, "qory run: composed ")
+}
+
+// TestARunCodeWhoseHarnessBindsFlatStops is a run from a run code whose harness
+// document writes a bind key as <kind>/<role>: the documents fail qory's checks, and the
+// run stops before the session joins, exit 1.
+func TestARunCodeWhoseHarnessBindsFlatStops(t *testing.T) {
+	r := runFromCode(t, nil, harnessBind(map[string]any{"commands/greeting": "hello"}))
+	if r.joined || cmd.ExitCode(r.err) != 1 {
+		t.Fatalf("%v (exit %d), want exit 1 before the join\n%s", r.err, cmd.ExitCode(r.err), r.out)
+	}
+	wants(t, r.err.Error(), "the response to the run code does not pass qory's checks")
+}
+
+// harnessBind sets the bind of the harness document of a run code's documents to b.
+func harnessBind(b map[string]any) func(map[string]any) {
+	return func(d map[string]any) {
+		d["harness"].(map[string]any)["harness"].(map[string]any)["bind"] = b
 	}
 }

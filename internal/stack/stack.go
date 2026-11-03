@@ -137,6 +137,16 @@ type Module struct {
 	// It is set by [Extend], not by the YAML, which also rewrites the module's source so
 	// it resolves from the checkout's qory.yaml.
 	Base bool `yaml:"-"`
+	// CheckoutExclude, on a base module, lists the entries the checkout's qory.yaml
+	// leaves out of it: the exclude of the entry there that lists the base module by its
+	// name. It is set by [Extend], not by the YAML, and the compose applies it after the
+	// base's exclude or only block.
+	CheckoutExclude Selection `yaml:"-"`
+	// BaseName, on a base module, is the name a checkout's qory.yaml lists it by to
+	// exclude from it: the name the base stack sets for it, else the export its source
+	// selects; "" for a module the base lists by a path or a git source alone, which the
+	// checkout cannot list. It is set by [Extend], not by the YAML.
+	BaseName string `yaml:"-"`
 	// Variant forces one of the module's variants instead of the one named like the
 	// runtime.
 	Variant string `yaml:"variant,omitempty"`
@@ -369,7 +379,8 @@ type Stack struct {
 	Description string `yaml:"description,omitempty"`
 	// Extends, in a checkout's qory.yaml, selects the base stack it appends to: a
 	// directory that contains a qory-stack.yaml, as a path or inside a git repository at
-	// a ref. The base's modules come first and cannot be changed.
+	// a ref. The base's modules come first and cannot be changed; the checkout may only
+	// leave entries out of them, see [Extend].
 	Extends Source `yaml:"extends,omitempty"`
 	// Target is the runtime and model the harness is rendered for, in a checkout's
 	// qory.yaml: required for its own stack, and beside Extends the target the checkout
@@ -381,11 +392,16 @@ type Stack struct {
 	Tiers map[string]any `yaml:"tiers,omitempty"`
 	// Modules are the modules to compose, in the order they merge.
 	Modules []Module `yaml:"modules"`
-	// Bind selects the entry that fills each role a document references, <kind>/<role> to
-	// the entry's name in that kind, so a module writes ${qory:agents/coder} and the
-	// stack selects which agent that is. A document that extends a stack adds to the
-	// base's bindings and may rebind a role of the base's.
-	Bind map[string]string `yaml:"bind,omitempty"`
+	// Bind selects the entry that fills each role a document references, by kind and
+	// then by role, to the entry's name in that kind: a module writes
+	// ${qory:agents/coder}, and bind: {agents: {coder: rails-coder}} selects which agent
+	// that is. After [Extend], it is the bind of the checkout's qory.yaml, and BaseBind
+	// is the base's.
+	Bind Roles `yaml:"bind,omitempty"`
+	// BaseBind is the bind of the stack a checkout's qory.yaml extends, set by
+	// [Extend]; nil for a stack that extends none. The compose sets each role from
+	// BaseBind first, then from the modules' provides, then from Bind.
+	BaseBind Roles `yaml:"-"`
 	// Extending, on a stack, is what a checkout's own modules may ship. A stack that
 	// leaves it out cannot be extended.
 	Extending *Extending `yaml:"extending,omitempty"`
@@ -524,7 +540,7 @@ func loadFile(path string) (*Stack, error) {
 		return nil, err
 	}
 	if err := p.validate(false); err != nil {
-		return nil, fmt.Errorf("%s: %w", path, err)
+		return nil, inPath(path, err)
 	}
 	// The repository delivering the stack states the qory it needs once, in its
 	// qory.yaml; every stack it holds is held to that range beside its own.
@@ -566,9 +582,19 @@ func NewCompose(path string, p *Stack) (*Stack, error) {
 		return nil, err
 	}
 	if err := p.validate(true); err != nil {
-		return nil, fmt.Errorf("%s: %w", path, err)
+		return nil, inPath(path, err)
 	}
 	return p, nil
+}
+
+// inPath is err, an error about the document at path, with path in front, or for an
+// [exports.InFile], with path inside its text.
+func inPath(path string, err error) error {
+	var in exports.InFile
+	if errors.As(err, &in) {
+		return in.In(exports.HidePath(path))
+	}
+	return fmt.Errorf("%s: %w", path, err)
 }
 
 // extends reports whether the document names a stack to extend.
@@ -672,17 +698,8 @@ func (p *Stack) validate(compose bool) error {
 		w.TimeLimit = d
 		p.Workflows[name] = w
 	}
-	for _, role := range sortedKeys(p.Bind) {
-		kind, name, ok := strings.Cut(role, "/")
-		if !ok || !isReferable(kind) {
-			return fmt.Errorf("bind %s: a role is <kind>/<name>, the kind one of %s", accesskey.ShownName(role, false), strings.Join(Referable, ", "))
-		}
-		if !segment(name) || strings.Contains(name, " ") {
-			return fmt.Errorf("bind %s: %s is not an entry name; a name is one path segment", accesskey.ShownName(role, false), accesskey.ShownName(name, true))
-		}
-		if to := p.Bind[role]; !segment(to) || strings.Contains(to, " ") || strings.Contains(to, "/") {
-			return fmt.Errorf("bind %s: %s is not an entry name; a role is bound to the name of an entry of its kind", accesskey.ShownName(role, false), accesskey.ShownName(to, true))
-		}
+	if err := CheckRoles(p.Bind, "bind"); err != nil {
+		return err
 	}
 	// A document that extends a stack may append nothing and carry only what is the
 	// repository's own beside the base, its extensions say; a stack, and a document
@@ -888,6 +905,70 @@ func filePrefix(s string) bool {
 	return true
 }
 
+// baseName is the name a checkout's qory.yaml lists base module l by: the name the base
+// stack sets for it, else the export its source selects; "" for a module the base lists by
+// a path or a git source alone, whose name only its manifest defines.
+func baseName(l Module) string {
+	if l.Name != "" {
+		return l.Name
+	}
+	return l.Source.Module
+}
+
+// checkoutExclude checks entry l of a checkout's qory.yaml, which lists a module of the
+// base by its name: the entry has an exclude and nothing beside it, and the exclude lists
+// entries of the kinds and under the file prefixes extending lets an appended module
+// ship, since a checkout leaves out only what its modules may replace. The base's
+// hooks, MCP servers, instructions, settings and variables stay as the base composes
+// them. Whether the base module composes each entry is the compose's check.
+func checkoutExclude(l Module, extending *Extending) error {
+	name := accesskey.ShownName(l.Name, false)
+	if l.Source.Path != "" || l.Source.Git != "" || l.Source.exported() || !l.Only.Empty() || l.Variant != "" || l.Link != "" {
+		return fmt.Errorf("list module %s with its name and exclude only: it belongs to the base stack, and a checkout's qory.yaml cannot change its source, only, variant or link", name)
+	}
+	if l.Exclude.Empty() {
+		return fmt.Errorf("add an exclude to module %s, or remove its entry: it belongs to the base stack, and a checkout's qory.yaml lists a base module only to exclude entries from it", name)
+	}
+	for _, part := range []struct {
+		key string
+		set bool
+	}{{"instructions", l.Exclude.Instructions}, {"settings", l.Exclude.Settings.Set()}, {"env", l.Exclude.Env.Set()}} {
+		if part.set {
+			return fmt.Errorf("remove %s from the exclude of module %s: it belongs to the base stack, and a checkout's qory.yaml excludes entries from a base module, not its instructions, settings or env", part.key, name)
+		}
+	}
+	for _, kind := range l.Exclude.KindNames() {
+		for _, entry := range l.Exclude.Kinds[kind] {
+			if kind == "files" {
+				if !FileAllowed(entry, extending.Files) {
+					return fmt.Errorf("remove files/%s from the exclude of module %s: a checkout excludes from a base module only files where an extending module may ship them, and the base stack lets an extending module ship files under %s", exports.HidePath(entry), name, prefixesText(extending.Files))
+				}
+				continue
+			}
+			if !slices.Contains(extending.Kinds, kind) {
+				return fmt.Errorf("remove %s/%s from the exclude of module %s: a checkout excludes from a base module only entries of the kinds an extending module may ship, and the base stack lets an extending module ship %s", accesskey.ShownName(kind, false), accesskey.ShownName(entry, false), name, kindsListText(extending.Kinds))
+			}
+		}
+	}
+	return nil
+}
+
+// kindsListText lists kinds for a message, "no entries" for none.
+func kindsListText(kinds []string) string {
+	if len(kinds) == 0 {
+		return "no entries"
+	}
+	return strings.Join(accesskey.ShownNames(kinds), ", ")
+}
+
+// prefixesText lists file prefixes for a message, "no path" for none.
+func prefixesText(prefixes []string) string {
+	if len(prefixes) == 0 {
+		return "no path"
+	}
+	return strings.Join(exports.Values(prefixes), ", ")
+}
+
 // FileAllowed reports whether a files entry name, <runtime>/<path>, is one of the
 // prefixes or under one, by path segment: claude/rules and claude/rules/ both cover
 // claude/rules/a/b.md and neither covers claude/rules-private/x.md, and a prefix that is
@@ -904,11 +985,14 @@ func FileAllowed(name string, prefixes []string) bool {
 
 // Extend returns the stack the checkout's qory.yaml p composes on base: the base's
 // modules first, marked [Module.Base], each with its source rewritten to resolve from p,
-// then p's modules; p's target, since a base has none; both files' extensions. The
+// then p's modules; p's target, since a base has none; both files' extensions; the
+// base's bind in [Stack.BaseBind] and p's in [Stack.Bind], kept apart. The
 // result's Qory is p's; the base's range is the caller's to keep and check, as
 // [Base.Qory] does. It refuses a base that extends another and a base without an
-// extending block. An extension key both files set is p's. The result's File and Root are
-// p's.
+// extending block. An entry of p that lists a base module by its name is no module of
+// the result: its exclude becomes that base module's [Module.CheckoutExclude], under the
+// rules of [checkoutExclude]. An extension key both files set is p's. The result's File
+// and Root are p's.
 func Extend(base, p *Stack) (*Stack, error) {
 	if base.Extends.Path != "" || base.Extends.Git != "" {
 		return nil, &BaseExtendsError{File: base.File, Extends: base.Extends}
@@ -920,6 +1004,8 @@ func Extend(base, p *Stack) (*Stack, error) {
 	out.Modules = nil
 	for _, l := range base.Modules {
 		l.Base = true
+		// The name is taken before the source is rewritten for the checkout.
+		l.BaseName = baseName(l)
 		if l.Source.Git == "" {
 			// A base module read by path: inside the base's repository, which is the
 			// extends source's clone for a git base, so the module becomes a git source
@@ -944,25 +1030,25 @@ func Extend(base, p *Stack) (*Stack, error) {
 		}
 		out.Modules = append(out.Modules, l)
 	}
-	inBase := map[string]bool{}
-	for _, l := range out.Modules {
-		inBase[l.Name] = true
+	byName := map[string]int{}
+	for i, l := range out.Modules {
+		if l.BaseName != "" {
+			byName[l.BaseName] = i
+		}
 	}
 	for _, l := range p.Modules {
-		if inBase[l.Name] {
-			return nil, fmt.Errorf("module %s belongs to the base stack; a checkout's qory.yaml cannot list a base module, exclude from it or replace it", accesskey.ShownName(l.Name, false))
+		if i, ok := byName[l.Name]; ok {
+			if err := checkoutExclude(l, base.Extending); err != nil {
+				return nil, err
+			}
+			out.Modules[i].CheckoutExclude = l.Exclude
+			continue
 		}
+		// A module the base lists by a path alone is named by its manifest, and the
+		// compose fails on a checkout module of the same name, as composed twice.
+		out.Modules = append(out.Modules, l)
 	}
-	out.Modules = append(out.Modules, p.Modules...)
-	if len(base.Bind) > 0 || len(p.Bind) > 0 {
-		out.Bind = map[string]string{}
-		for role, to := range base.Bind {
-			out.Bind[role] = to
-		}
-		for role, to := range p.Bind {
-			out.Bind[role] = to
-		}
-	}
+	out.BaseBind = base.Bind
 	out.Workflows = base.Workflows
 	out.Extensions = map[string]any{}
 	for key, v := range base.Extensions {

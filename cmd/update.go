@@ -199,9 +199,10 @@ func runTool(cmd *cobra.Command, u *ui.UI, waiting, landed, name string, args ..
 	return nil
 }
 
-// walledVerb reports whether args select a verb the wall runs inside a container, one
-// that carries [inWall]: qory run nest, relay, forward, prepare, exec, agent-env, hold,
-// setup-command, seed or prebuild-step. The command tree finds it, so a flag before it,
+// walledVerb reports whether args select a verb that runs inside a container, one that
+// carries [inWall]: qory run nest, relay, forward, prepare, exec, agent-env, hold,
+// setup-command, seed or prebuild-step, which the wall starts, and the commands of a work
+// item, which an agent starts. The command tree finds it, so a flag before it,
 // such as -v, is read as the tree reads it.
 func walledVerb(args []string) bool {
 	c, _, err := Root().Find(args)
@@ -219,7 +220,7 @@ var noticeOff bool
 //
 // Nothing is looked for when QORY_NO_UPDATE_CHECK or CI is set, when w is not a terminal,
 // when the build has no version, when args, the command line without the program, select
-// a verb the wall starts inside a container, or when the command is qory update. Inside
+// a verb that runs inside a container, or when the command is qory update. Inside
 // a container the look would be a connection in the run's record that the agent did not
 // make, and qory run nest, at a terminal there, runs as the container's root. A
 // pseudo-version is compared like a release, so a build from main sees a notice only

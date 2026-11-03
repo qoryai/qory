@@ -1,0 +1,14 @@
+apiVersion: qory.dev/v1alpha1
+harness:
+  extends: {path: stack}
+  target:
+    runtime: claude
+  modules:
+    - name: ts
+      source: {path: modules/ts}
+      only:
+        agents: [ts-reviewer]
+    - name: ex
+      source: {path: modules/ex}
+      only:
+        agents: [ex-reviewer]

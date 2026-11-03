@@ -511,6 +511,10 @@ type composeOptions struct {
 	// and [compose.CheckAddresses] the modules' URLs once the base is read, before any
 	// module is fetched.
 	checkedAs string
+	// fromDocuments is set for the compose of the harness document of a run from a run
+	// code, whose file is the copy in the run directory: the compose's errors show a
+	// stack that the document defines as checkedAs in Qory Apiary.
+	fromDocuments bool
 }
 
 // named is the harness o composes with no address shown, see [source.Named]; nil for any
@@ -945,6 +949,9 @@ func prepare(out, errOut io.Writer, o composeOptions) (pr *prepared, err error) 
 		}
 	}
 	opts := compose.Options{Update: update, Pins: pins, Cache: conf.Git.Cache, Timeout: conf.Git.Timeout, Env: conf.Env, Memo: memo, Tiers: resolveTiers(flagTiers, conf), Copies: copies(at, o.walled || o.hidden), Walled: o.walled, Hidden: o.hidden}
+	if o.fromDocuments && o.checkedAs != "" {
+		opts.StackAs = o.checkedAs + " in Qory Apiary"
+	}
 	if o.git != nil {
 		opts.Git, opts.Cache = o.git, o.cache
 	}
@@ -1217,7 +1224,7 @@ func ownFileRows(own string, doc *stack.Stack, conf config.Config) [][2]string {
 		if n := len(doc.Modules); n > 0 {
 			read = append(read, count(n, "module", "modules"))
 		}
-		if n := len(doc.Bind); n > 0 {
+		if n := doc.Bind.Len(); n > 0 {
 			read = append(read, count(n, "binding", "bindings"))
 		}
 		if n := len(doc.Extensions); n > 0 {
@@ -1532,11 +1539,19 @@ const (
 	// ExitStale is a --check that found the home behind the stack and modules, or
 	// nothing composed.
 	ExitStale = 6
+	// ExitNoWorkItem is qory work-item show with no work item, on a command that has no
+	// collision: the harness verbs use the same number for ExitCollision.
+	ExitNoWorkItem = 3
+	// ExitArtifactRefused is a push that failed the run API's check of its type or a
+	// limit, on a command that has no foreign path: the harness verbs use the same number
+	// for ExitForeign.
+	ExitArtifactRefused = 4
 )
 
 // ExitCode is the status a process exits with for err: 0 for nil, the runtime's own
 // status for a qory run whose runtime exited with one, [ExitInput], [ExitCollision],
-// [ExitForeign], [ExitVersion] or [ExitStale] for the errors each stands for, and 1 for
+// [ExitForeign], [ExitVersion], [ExitStale], [ExitNoWorkItem] or [ExitArtifactRefused] for
+// the errors each stands for, and 1 for
 // every other failure, such as a git source that could not be fetched or a file that could not be
 // written. A command unknown to the tree is an input error too; cobra reports it as a
 // plain error whose text starts with "unknown command", which is the one place this
@@ -1548,12 +1563,17 @@ func ExitCode(err error) int {
 	var version *versionError
 	var stale *staleError
 	var git *hostgit.GitVersionError
+	var noWorkItem noWorkItemError
 	switch {
 	case err == nil:
 		return 0
 	case exitStatusOf(err):
 		code, _ := exitStatus(err)
 		return code
+	case errors.As(err, &noWorkItem):
+		return ExitNoWorkItem
+	case artifactRefused(err):
+		return ExitArtifactRefused
 	case errors.As(err, &collision):
 		return ExitCollision
 	case errors.As(err, &foreign):
@@ -1680,7 +1700,8 @@ func flagRefuses(force bool) string {
 }
 
 // printCollision prints what happened, the modules involved, and the stack lines that
-// resolve it by keeping the last module that ships each entry.
+// resolve it by keeping the last module that ships each entry. A base module's lines
+// are the whole entry to write in qory.yaml, with the exclude qory.yaml lists for it.
 func printCollision(u *ui.UI, e *compose.CollisionError, n *source.Named) {
 	for _, c := range e.Collisions {
 		u.Fail(fmt.Errorf("%s is provided by %d modules", accesskey.ShownName(c.Kind+"/"+c.Name, false), len(c.Modules)))
@@ -1693,8 +1714,19 @@ func printCollision(u *ui.UI, e *compose.CollisionError, n *source.Named) {
 			rows = append(rows, []string{accesskey.ShownName(l, false), from, e.Pins[l]})
 		}
 		u.Table(rows)
-		if c.Base != "" {
+		if c.Rename {
 			u.Text("It belongs to the base stack " + accesskey.ShownName(c.Base, false) + "; rename yours.")
+			continue
+		}
+		for _, l := range c.Modules {
+			if !e.InBase[l] || c.Base == "" {
+				continue
+			}
+			line := "Module " + accesskey.ShownName(l, false) + " belongs to the base stack " + accesskey.ShownName(c.Base, false)
+			if e.ExcludeName(l) != l {
+				line += "; list it in qory.yaml as " + accesskey.ShownName(e.ExcludeName(l), false)
+			}
+			u.Text(line + ".")
 		}
 	}
 	modules, excludes := e.Suggest(e.Order)
@@ -1703,17 +1735,35 @@ func printCollision(u *ui.UI, e *compose.CollisionError, n *source.Named) {
 	}
 	u.Blank()
 	u.Heading("Fix")
-	u.Text("Keep one and exclude it from the others. For example, in qory-stack.yaml:")
+	where := "qory-stack.yaml"
+	for _, l := range modules {
+		if e.InBase[l] {
+			where = "qory.yaml, under harness.modules"
+		}
+	}
+	u.Text("Keep one and exclude it from the others. For example, in " + where + ":")
 	for _, l := range modules {
 		u.Blank()
-		u.Code("- name: "+accesskey.ShownName(l, false), "  ...", "  exclude:")
+		name := accesskey.ShownName(e.ExcludeName(l), false)
+		switch {
+		case e.InBase[l] && len(e.Excluded[l]) > 0:
+			// qory.yaml lists the module already: a second entry would list it twice.
+			u.Text("Replace the entry of module " + name + " with:")
+			u.Code("- name: "+name, "  exclude:")
+		case e.InBase[l]:
+			// A base module is listed by its name with the exclude alone.
+			u.Code("- name: "+name, "  exclude:")
+		default:
+			u.Code("- name: "+name, "  ...", "  exclude:")
+		}
+		block := e.ExcludeOf(l, excludes)
 		var kinds []string
-		for k := range excludes[l] {
+		for k := range block {
 			kinds = append(kinds, k)
 		}
 		sort.Strings(kinds)
 		for _, k := range kinds {
-			u.Code("    " + k + ": [" + strings.Join(accesskey.ShownNames(excludes[l][k]), ", ") + "]")
+			u.Code("    " + k + ": [" + strings.Join(accesskey.ShownNames(block[k]), ", ") + "]")
 		}
 	}
 }
@@ -1842,7 +1892,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/harness.md#a-home-outside-th
 				kind, entry, _ := strings.Cut(address, "/")
 				registered, ok := addresses[kind][entry]
 				if !ok {
-					return input(fmt.Errorf("%s is not an agent, skill, command or bound role the harness is composed with for %s; --json lists them under addresses", exports.Value(address, false), name))
+					return input(fmt.Errorf("%s is not an agent, skill, command or role the harness is composed with for %s; --json lists them under addresses", exports.Value(address, false), name))
 				}
 				_, err = fmt.Fprintln(cmd.OutOrStdout(), registered)
 				return err
@@ -1861,7 +1911,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/harness.md#a-home-outside-th
 	}
 	c.Flags().StringVar(&runtime, "runtime", "", "the runtime to start, one the harness is composed for; the only one when left out")
 	c.Flags().BoolVar(&asJSON, "json", false, "print the command, arguments, variables and registered names as one JSON object")
-	c.Flags().StringVar(&address, "address", "", "print only the name the session gives this <kind>/<name> or bound role, such as skills/deploy")
+	c.Flags().StringVar(&address, "address", "", "print only the name the session gives this <kind>/<name> or role, such as skills/deploy")
 	homeFlags(c, &h)
 	return c
 }
@@ -1938,7 +1988,9 @@ func newRemove(use string, aliases ...string) *cobra.Command {
 		Use:     use,
 		Aliases: aliases,
 		Short:   "Remove the harness and its links from the checkout",
-		Long: `Remove the composed harness and its links from the checkout.
+		Long: `Remove the composed harness and its links from the checkout. A home in the checkout goes with
+the whole .qory directory, also .qory/artifacts and .qory/work-item.json. --runtime does the
+same when it removes the last composed runtime.
 
 A home outside the checkout, under --home or harness.home, is removed with its report.
 The checkout is not touched: nothing was written there.`,
@@ -1991,7 +2043,7 @@ The checkout is not touched: nothing was written there.`,
 			return unlinkErr
 		},
 	}
-	c.Flags().StringVar(&runtime, "runtime", "", "remove this runtime's links and directory only, and keep the rest composed")
+	c.Flags().StringVar(&runtime, "runtime", "", "remove this runtime's links and directory only, and keep the rest composed; the last composed runtime removes the whole home")
 	homeFlags(c, &h)
 	return c
 }

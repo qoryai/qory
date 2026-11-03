@@ -18,6 +18,7 @@ import (
 
 	"github.com/qoryai/qory/internal/config"
 	"github.com/qoryai/qory/internal/exports"
+	"github.com/qoryai/qory/internal/integration"
 	"github.com/qoryai/qory/internal/preparation"
 	"github.com/qoryai/qory/internal/provisioner"
 	"github.com/qoryai/qory/internal/render"
@@ -80,7 +81,7 @@ func fromAnswerOnly(cmd *cobra.Command, runtime string, extra []string) error {
 // settings' time_limit_minutes, 0 for none, and harness_hidden. named is set when
 // harness_hidden is true: no text of the run shows the address of a harness source.
 // target is the documents' target and target_version, which the fetch uses for the
-// target's repository.
+// target's repository. workItem is the id of the documents' work item, "" for none.
 type codeRun struct {
 	runtime  string
 	settings []provisioner.Setting
@@ -96,6 +97,14 @@ type codeRun struct {
 	minutes  int
 	hidden   bool
 	target   preparation.Target
+	// access is what the run may do on its target: [stack.AccessRead] or
+	// [stack.AccessWrite], from the documents' access. It is empty when the documents have
+	// no target.
+	access   string
+	workItem string
+
+	// runNumber is the run's number on the server, set by [codeRun.readBranch].
+	runNumber int
 }
 
 // The harness of a run from a run code as a text shows it: the documents' harness
@@ -166,11 +175,21 @@ func codeRunOf(doc contracts.Documents) (*codeRun, error) {
 	if doc.Target != nil {
 		target = preparation.Target{System: doc.Target.System, Path: doc.Target.Path, Version: doc.TargetVersion}
 	}
-	r := &codeRun{runtime: runtime, settings: settings, harness: harness, defines: defines, workflow: doc.Workflow, inputs: doc.Inputs, minutes: minutes, hidden: hidden, target: target}
+	r := &codeRun{runtime: runtime, settings: settings, harness: harness, defines: defines, workflow: doc.Workflow, inputs: doc.Inputs, minutes: minutes, hidden: hidden, target: target, access: doc.Access}
+	if doc.WorkItem != nil {
+		r.workItem = doc.WorkItem.ID
+	}
 	if hidden {
 		r.named = source.NewNamed(r.phrase())
 	}
 	return r, nil
+}
+
+// writes reports whether the run r may write to its target: its access is
+// [stack.AccessWrite]. A run not from a run code has no access, and neither does a run
+// whose documents have no target.
+func (r *codeRun) writes() bool {
+	return r != nil && r.access == stack.AccessWrite
 }
 
 // definedHarness is a harness document whose section defines a stack, as qory writes it
@@ -197,8 +216,10 @@ type definedTarget struct {
 // scheme that has a user part, a user name or a password, or an @ between :// and the
 // first / after it; one that url.Parse cannot read; one whose host has a character
 // outside ASCII; one that is not https; and a path that is absolute, the repository's
-// root, or leads out of the repository. The schema of the documents allows no folder;
-// this check does not depend on it. Each error is an input error and starts with the
+// root, or leads out of the repository. A module with no source and an exclude, beside
+// extends, is the form that excludes from a base module in a checkout's qory.yaml, and is
+// stopped with an error that does not call it a folder. The schema of the documents
+// allows no folder; this check does not depend on it. Each error is an input error and starts with the
 // fix in the workspace's settings in Qory Apiary. No error shows a path. Only the error
 // of a URL that is not https shows the URL, and only when the harness is not hidden:
 // then an scp form such as git@host:path shows with its user.
@@ -212,6 +233,11 @@ func harnessChecked(h *contracts.HarnessDocument, hidden bool) error {
 		what := fmt.Sprintf("modules[%d]", i)
 		if m.Name != "" {
 			what = "the module " + accesskey.ShownName(m.Name, false)
+		}
+		if h.Harness.Extends != nil && m.Source == (contracts.HarnessSource{}) && m.Exclude != nil {
+			// The form of a checkout's qory.yaml that excludes from a module of the base;
+			// a module of a harness document has a source.
+			return input(fmt.Errorf("give %s %s an https source: a module of a harness document has a source, so the document cannot exclude entries from a module of the stack it extends%s", what, inSettings, codeUsed))
 		}
 		if err := sourceChecked(what, m.Source.Git, m.Source.Path, hidden); err != nil {
 			return err
@@ -437,14 +463,20 @@ func (r *codeRun) writeInputs() (string, func(), error) {
 	return in, remove, f.Close()
 }
 
+// reasonWorkflowNotInHarness is the reason a run from a run code closes with, failed,
+// when the composed harness has no skill or command with the workflow's name.
+const reasonWorkflowNotInHarness = "workflow_not_in_harness"
+
 // workflowArgs are the arguments after -- that start r's workflow on the runtime name,
 // as the harness rep was composed for it, with the inputs in the folder in: the
 // runtime's headless start, see [render.Headless], with the prompt that invokes the
 // skill or command named like the workflow, by the name the runtime registers it
 // under, with the path of inputs.json. A runtime with no headless start, a workflow that
 // is only of a kind the runtime renders or invokes by no name, and a harness with no
-// such skill or command, stop the run.
-func (r *codeRun) workflowArgs(name string, rep report.Report, in string) ([]string, error) {
+// such skill or command, stop the run. The last is a [*reasonError] of
+// [reasonWorkflowNotInHarness], whose line shows the harness as [codeRun.harnessAt]
+// does for system, the system the run's repositories are on.
+func (r *codeRun) workflowArgs(name string, rep report.Report, in, system string) ([]string, error) {
 	rt, err := render.Lookup(name)
 	if err != nil {
 		return nil, input(err)
@@ -476,7 +508,23 @@ func (r *codeRun) workflowArgs(name string, rep report.Report, in string) ([]str
 		}
 		return nil, fmt.Errorf("add a %s %s to %s, or set another runtime in Qory Apiary: %s runs no %s by its name from a headless start%s", add, r.workflow, r.phrase(), accesskey.ShownName(name, false), runsNo, codeUsed)
 	}
-	return nil, fmt.Errorf("add a skill or command %s to %s, or set another workflow in Qory Apiary: the composed harness has no skill or command %s%s", r.workflow, r.phrase(), r.workflow, codeUsed)
+	text := fmt.Sprintf("add a skill or command %s to %s, or set another workflow in Qory Apiary: the composed harness has no skill or command %s (%s)%s", r.workflow, r.harnessAt(system), r.workflow, reasonWorkflowNotInHarness, codeUsed)
+	return nil, &reasonError{code: reasonWorkflowNotInHarness, text: text}
+}
+
+// harnessAt is r's harness as the line of a missing workflow shows it: [codeRun.phrase],
+// and for the checkout's harness the path of the documents' target after it. The target
+// is "the repository" when it is on system, the system the run's repositories are on,
+// which the run's fetch puts in the working folder, and "the target" on any other.
+func (r *codeRun) harnessAt(system string) string {
+	if r.harness != nil || r.target.Path == "" {
+		return r.phrase()
+	}
+	path := integration.Printable(exports.Value(r.target.Path, false))
+	if system != "" && r.target.System == system {
+		return checkoutHarness + " in the repository " + path
+	}
+	return checkoutHarness + " for the target " + path
 }
 
 // noHeadless is the error of a run from a run code on the runtime name, which has no

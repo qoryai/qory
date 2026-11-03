@@ -245,7 +245,8 @@ func (e *Exports) Module(name string) (string, error) {
 
 // Verify checks that every export is there: a qory-stack.yaml in each stack's directory,
 // a qory-module.yaml in each module's. The error contains the file that is missing and
-// the export that wants it.
+// the export that wants it. A module whose folder has a process.yaml at its root, a
+// factory, has that file checked too, as [Exports.checkProcess] describes.
 func (e *Exports) Verify() error {
 	for _, name := range e.Stacks {
 		dir, _ := e.Stack(name)
@@ -257,6 +258,15 @@ func (e *Exports) Verify() error {
 		dir, _ := e.Module(name)
 		if !isFile(filepath.Join(e.Root, dir, ModuleFileName)) {
 			return fmt.Errorf("%s: exports.modules lists %s, and %s contains no %s", e.File, accesskey.ShownName(name, false), HidePath(dir), ModuleFileName)
+		}
+		data, file, err := e.readProcess(dir)
+		if err != nil {
+			return err
+		}
+		if data != nil {
+			if err := e.checkProcess(file, data); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
@@ -364,7 +374,15 @@ var (
 	syntaxLine   = regexp.MustCompile(`^yaml: line (\d+):`)
 )
 
-// DecodeError prefixes a decode error with path. An unknown key is reported by
+// InFile is an error whose text contains the path of the file it is about. In returns
+// the error with that path set; [DecodeError] returns it so, without the path in front.
+type InFile interface {
+	error
+	In(file string) error
+}
+
+// DecodeError prefixes a decode error with path, except an [InFile], which it returns
+// with path inside its text. An unknown key is reported by
 // [KeyNotRead] as one the file at path does not read, with the decoder's line number
 // when it gives one. A key written twice whose name contains an access key secret or a
 // run key is reported in the decoder's words without the name. Any other error is
@@ -372,6 +390,10 @@ var (
 // or a run key, as a key whose name has a newline in it does: then [withoutSecrets]
 // says it.
 func DecodeError(path string, err error) error {
+	var in InFile
+	if errors.As(err, &in) {
+		return in.In(HidePath(path))
+	}
 	text := err.Error()
 	rest := " " + filepath.Base(path) + " reads"
 	if m := UnknownKey.FindStringSubmatch(text); m != nil {

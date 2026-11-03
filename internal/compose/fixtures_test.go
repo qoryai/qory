@@ -15,6 +15,7 @@ import (
 
 	"github.com/qoryai/qory/internal/compose"
 	"github.com/qoryai/qory/internal/config"
+	"github.com/qoryai/qory/internal/exports"
 )
 
 const fixtures = "../../contracts/harness/v1/fixtures"
@@ -90,7 +91,8 @@ func TestFixtures(t *testing.T) {
 				expectText(t, "expected/AGENTS.md", res.Instructions)
 			}
 			// expected/references.txt lists the entries that reference others, and
-			// expected/bind.txt the bindings; each when the fixture has any.
+			// expected/bind.txt the roles, each with the entry that fills it and the
+			// layer that set it; each when the fixture has any.
 			b.Reset()
 			for _, e := range res.Entries {
 				if len(e.References) > 0 {
@@ -101,8 +103,14 @@ func TestFixtures(t *testing.T) {
 				expectText(t, "expected/references.txt", b.String())
 			}
 			b.Reset()
-			for _, role := range sortedKeys(res.Bind) {
-				fmt.Fprintf(&b, "%s %s\n", role, res.Bind[role])
+			for _, r := range res.Roles {
+				if res.Bind[r.Role] != r.Name {
+					t.Fatalf("Bind %s is %s, and Roles has %s", r.Role, res.Bind[r.Role], r.Name)
+				}
+				fmt.Fprintf(&b, "%s %s %s\n", r.Role, r.Name, r.From)
+			}
+			if len(res.Bind) != len(res.Roles) {
+				t.Fatalf("Bind has %d roles, and Roles %d", len(res.Bind), len(res.Roles))
 			}
 			if _, err := os.Stat("expected/bind.txt"); err == nil || b.Len() > 0 {
 				expectText(t, "expected/bind.txt", b.String())
@@ -143,7 +151,23 @@ func TestFixtures(t *testing.T) {
 	}
 }
 
+// load composes the fixture in the working directory. It first checks the fixture's
+// exports, as config.Load checks them at a repository root, so a fixture can expect an
+// exports refusal, such as one of a module's process.yaml.
 func load() (*compose.Result, error) {
+	root, err := os.Getwd()
+	if err != nil {
+		return nil, err
+	}
+	e, err := exports.Read(root)
+	if err != nil {
+		return nil, err
+	}
+	if e != nil {
+		if err := e.Verify(); err != nil {
+			return nil, err
+		}
+	}
 	p, err := config.Compose(config.FileName)
 	if err != nil {
 		return nil, err
@@ -167,13 +191,4 @@ func expectText(t *testing.T, path, got string) {
 	if got != string(want) {
 		t.Fatalf("%s:\n%s\nwant:\n%s", path, got, want)
 	}
-}
-
-func sortedKeys(m map[string]string) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	return keys
 }

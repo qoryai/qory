@@ -1,0 +1,1 @@
+modules/support-desk/process.yaml: set process to an object, the template's process document: process is a list

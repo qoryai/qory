@@ -1,0 +1,4 @@
+agents/core-developer core
+agents/ts-reviewer ts
+commands/serve web
+skills/deploy core

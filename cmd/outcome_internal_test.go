@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"os"
 	"strings"
 	"syscall"
@@ -11,6 +12,7 @@ import (
 	"github.com/qoryai/forager/event"
 	"github.com/qoryai/forager/session"
 
+	"github.com/qoryai/qory/internal/preparation"
 	"github.com/qoryai/qory/internal/ui"
 )
 
@@ -192,7 +194,7 @@ func TestGatewayEndedResendSaysTheOutcome(t *testing.T) {
 // TestSignalContextNamesTheSignal is qory run's context, which ends at SIGTERM and says
 // so, and says nothing before a signal or after one it no longer watches.
 func TestSignalContextNamesTheSignal(t *testing.T) {
-	ctx, got, stop := signalContext(context.Background())
+	ctx, again, got, stop := signalContext(context.Background())
 	if got() != "" {
 		t.Errorf("before a signal: %q", got())
 	}
@@ -207,9 +209,20 @@ func TestSignalContextNamesTheSignal(t *testing.T) {
 	if got() != "SIGTERM" {
 		t.Errorf("after SIGTERM: %q, want SIGTERM", got())
 	}
+	if again.Err() != nil {
+		t.Error("one signal ended the context of a second")
+	}
+	if err := syscall.Kill(os.Getpid(), syscall.SIGTERM); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-again.Done():
+	case <-time.After(10 * time.Second):
+		t.Fatal("a second SIGTERM did not end the context of a second")
+	}
 	stop()
 	stop()
-	ctx, got, stop = signalContext(context.Background())
+	ctx, _, got, stop = signalContext(context.Background())
 	stop()
 	if ctx.Err() == nil || got() != "" {
 		t.Errorf("stopped with no signal: %v, %q", ctx.Err(), got())
@@ -306,6 +319,184 @@ func TestEndsAsSaysTheResendsEnd(t *testing.T) {
 	} {
 		if got := endsAs(c.state, c.reason); got != c.want {
 			t.Errorf("%q, %q: %q, want %q", c.state, c.reason, got, c.want)
+		}
+	}
+}
+
+// endsWithin reports whether ctx ends within d.
+func endsWithin(ctx context.Context, d time.Duration) bool {
+	select {
+	case <-ctx.Done():
+		return true
+	case <-time.After(d):
+		return false
+	}
+}
+
+// TestPushContext is the bound of the push step for each way a session stops, with bounds
+// short enough for a test: a limit not reached ends the step, a spent limit leaves
+// afterLimit, a signal leaves afterSignal and cuts a longer time to it, and a second signal
+// ends the step at once.
+func TestPushContext(t *testing.T) {
+	const (
+		afterLimit  = time.Hour
+		afterSignal = 200 * time.Millisecond
+		short       = 50 * time.Millisecond
+		sure        = 10 * time.Second
+	)
+	signalled, signal := context.WithCancel(context.Background())
+	signal()
+	var none time.Time
+	alive := context.Background()
+	start := func(t *testing.T, ctx, again context.Context, limit time.Time) context.Context {
+		push, done := pushContext(ctx, again, limit, afterLimit, afterSignal)
+		t.Cleanup(done)
+		return push
+	}
+	endsAfterShort := func(t *testing.T, push context.Context) {
+		t.Helper()
+		if endsWithin(push, short) {
+			t.Error("the step ended at once")
+		}
+		if !endsWithin(push, sure) {
+			t.Error("the step did not end")
+		}
+	}
+
+	t.Run("no limit and no stop", func(t *testing.T) {
+		if endsWithin(start(t, alive, alive, none), 2*afterSignal) {
+			t.Error("the step ended with no stop")
+		}
+	})
+	t.Run("a limit ahead", func(t *testing.T) {
+		push, done := pushContext(alive, alive, time.Now().Add(3*afterSignal), afterSignal, afterSignal)
+		defer done()
+		if endsWithin(push, 2*afterSignal) {
+			t.Error("the step ended before the limit")
+		}
+		if !endsWithin(push, sure) {
+			t.Error("the step did not end at the limit")
+		}
+	})
+	t.Run("a spent limit", func(t *testing.T) {
+		push, done := pushContext(alive, alive, time.Now().Add(-time.Hour), afterSignal, time.Hour)
+		defer done()
+		endsAfterShort(t, push)
+	})
+	t.Run("less of the limit left than the time after it", func(t *testing.T) {
+		if endsWithin(start(t, alive, alive, time.Now().Add(short)), 3*short) {
+			t.Error("the step ended at the limit")
+		}
+	})
+	t.Run("a signal before the step", func(t *testing.T) {
+		endsAfterShort(t, start(t, signalled, alive, none))
+	})
+	t.Run("a signal during the step", func(t *testing.T) {
+		ctx, stop := context.WithCancel(alive)
+		defer stop()
+		push := start(t, ctx, alive, time.Now().Add(time.Hour))
+		stop()
+		endsAfterShort(t, push)
+	})
+	t.Run("a signal after a spent limit cuts the time", func(t *testing.T) {
+		ctx, stop := context.WithCancel(alive)
+		defer stop()
+		push := start(t, ctx, alive, time.Now().Add(-time.Hour))
+		stop()
+		endsAfterShort(t, push)
+	})
+	t.Run("a signal does not lengthen the time left", func(t *testing.T) {
+		ctx, stop := context.WithCancel(alive)
+		defer stop()
+		push, done := pushContext(ctx, alive, time.Now().Add(-time.Hour), short, time.Hour)
+		defer done()
+		stop()
+		if !endsWithin(push, sure) {
+			t.Error("the signal lengthened the time left")
+		}
+	})
+	t.Run("a second signal", func(t *testing.T) {
+		again, second := context.WithCancel(alive)
+		push := start(t, signalled, again, none)
+		second()
+		if !endsWithin(push, short) {
+			t.Error("the step did not end at once")
+		}
+	})
+	t.Run("a second signal after a spent limit", func(t *testing.T) {
+		again, second := context.WithCancel(alive)
+		push := start(t, alive, again, time.Now().Add(-time.Hour))
+		second()
+		if !endsWithin(push, short) {
+			t.Error("the step did not end at once")
+		}
+	})
+}
+
+// TestPushEndingOutcome is the close of a run for each end of its session and its step.
+func TestPushEndingOutcome(t *testing.T) {
+	succeeded := session.Outcome{State: event.StateSucceeded}
+	timedOut := session.Outcome{State: event.StateCancelled, Reason: event.ReasonTimeout, ExitCode: exitTimeout}
+	failed := session.Outcome{State: event.StateFailed, ExitCode: 3}
+	refused := &exitError{code: 2}
+	for _, c := range []struct {
+		name   string
+		ending pushEnding
+		want   session.Outcome
+	}{
+		{"failed step, succeeded session", pushEnding{session: succeeded}, session.Outcome{State: event.StateFailed, ExitCode: 2}},
+		{"step at the time limit", pushEnding{session: succeeded, cut: true}, timedOut},
+		{"step cut after a signal", pushEnding{session: succeeded, cut: true, stopped: true}, session.Outcome{State: event.StateCancelled, Reason: event.ReasonInterrupted, ExitCode: -1}},
+		{"failed step, failed session", pushEnding{session: failed}, failed},
+		{"cut step, failed session", pushEnding{session: failed, cut: true}, failed},
+		{"cut step, timed out session", pushEnding{session: timedOut, cut: true, stopped: true}, timedOut},
+	} {
+		if got := c.ending.outcome(refused); got != c.want {
+			t.Errorf("%s: %+v, want %+v", c.name, got, c.want)
+		}
+	}
+}
+
+// TestPushEndingLines is the line of a cut step, with and without a push that landed, and
+// the exit status of each end.
+func TestPushEndingLines(t *testing.T) {
+	succeeded := session.Outcome{State: event.StateSucceeded}
+	failed := session.Outcome{State: event.StateFailed, ExitCode: 3}
+	timedOut := session.Outcome{State: event.StateCancelled, Reason: event.ReasonTimeout, ExitCode: exitTimeout}
+	sessionEnd := reported(&exitError{code: 3})
+	for _, c := range []struct {
+		name   string
+		ending pushEnding
+		cause  string
+		code   int
+	}{
+		{"second signal", pushEnding{session: succeeded, cut: true, stopped: true, again: true, got: "SIGTERM"}, "qory run got a second signal", 1},
+		{"first signal", pushEnding{session: succeeded, cut: true, stopped: true, got: "SIGTERM"}, "qory run got SIGTERM, and the step reached its limit of 15s", 1},
+		{"run's limit", pushEnding{session: succeeded, cut: true, limit: time.Hour}, "the run reached its time limit of 1h0m0s", exitTimeout},
+		{"a failed session at the run's limit", pushEnding{session: failed, cut: true, limit: time.Hour}, "the run reached its time limit of 1h0m0s", 3},
+		{"after a timeout", pushEnding{session: timedOut, cut: true, limit: time.Hour}, "the step reached its limit of 2m0s", 3},
+	} {
+		var out strings.Builder
+		err := c.ending.ended(ui.New(&out), func(string) {}, errors.New("cut"), &preparation.WorkBranch{}, sessionEnd)
+		if got := out.String(); !strings.Contains(got, c.cause+" during the push step") {
+			t.Errorf("%s: %q, want %q", c.name, got, c.cause)
+		}
+		if got := ExitCode(err); got != c.code {
+			t.Errorf("%s: exit %d, want %d", c.name, got, c.code)
+		}
+	}
+}
+
+// TestFailedEnd is the one text of a run that did not succeed.
+func TestFailedEnd(t *testing.T) {
+	for out, want := range map[session.Outcome]string{
+		{State: event.StateSucceeded}:                                  "",
+		{State: event.StateFailed, ExitCode: 3}:                        "The run ended failed: exit 3.",
+		{State: event.StateCancelled, Reason: event.ReasonTimeout}:     "The run ended cancelled: timeout.",
+		{State: event.StateCancelled, Reason: event.ReasonInterrupted}: "The run ended cancelled: interrupted.",
+	} {
+		if got := failedEnd(out); got != want {
+			t.Errorf("%+v: %q, want %q", out, got, want)
 		}
 	}
 }

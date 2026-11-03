@@ -2,9 +2,11 @@ package report_test
 
 import (
 	"bytes"
+	"encoding/json"
 	"strings"
 	"testing"
 
+	"github.com/qoryai/qory/internal/compose"
 	"github.com/qoryai/qory/internal/report"
 )
 
@@ -63,24 +65,36 @@ func TestPrintNamesALinklessCompose(t *testing.T) {
 	}
 }
 
-// TestNewCarriesBindingsAndReferences is a result whose stack binds a role and whose
-// skill references it: the report carries both, Print shows them, and a report without
-// them prints no Bind section.
+// TestNewCarriesBindingsAndReferences is a result with a role a module provides and a
+// role the checkout binds, and a skill that references one: the report carries the
+// roles in bind and, with where each name comes from, in roles; Print shows them with a
+// from column; and a report without them prints no Bind section.
 func TestNewCarriesBindingsAndReferences(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 	t.Setenv("HOME", t.TempDir())
 	res := result()
-	res.Bind = map[string]string{"agents/coder": "rails-coder"}
+	res.Bind = map[string]string{"agents/coder": "rails-coder", "agents/developer": "typescript-developer"}
+	res.Roles = []compose.Role{
+		{Role: "agents/coder", Name: "rails-coder", From: "bind"},
+		{Role: "agents/developer", Name: "typescript-developer", From: "provides typescript", Module: "typescript"},
+	}
 	res.Entries[0].References = []string{"agents/coder", "skills/test"}
 	r := report.New(res, "app", "/work/app", "/work/app/.qory/harness")
-	if r.Bind["agents/coder"] != "rails-coder" || len(r.Entries[0].References) != 2 {
+	if r.Bind["agents/coder"] != "rails-coder" || r.Bind["agents/developer"] != "typescript-developer" || len(r.Entries[0].References) != 2 {
 		t.Errorf("report: %+v", r)
+	}
+	data, err := json.Marshal(r.Roles)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := `[{"role":"agents/coder","agent":"rails-coder","from":"bind"},{"role":"agents/developer","agent":"typescript-developer","from":"provides typescript"}]`; string(data) != want {
+		t.Errorf("roles = %s, want %s", data, want)
 	}
 	var buf bytes.Buffer
 	if err := r.Print(&buf); err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"references agents/coder, skills/test", "Bind", "agents/coder  rails-coder"} {
+	for _, want := range []string{"references agents/coder, skills/test", "Bind", "agents/coder      rails-coder           bind", "agents/developer  typescript-developer  provides typescript"} {
 		if !strings.Contains(buf.String(), want) {
 			t.Errorf("print lacks %q:\n%s", want, buf.String())
 		}

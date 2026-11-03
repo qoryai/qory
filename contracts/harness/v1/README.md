@@ -2,13 +2,15 @@
 
 What `qory harness compose` reads and what it writes.
 
-## Three files
+## Five files
 
 | File | Lives in | Defines |
 |---|---|---|
 | `qory-stack.yaml` | a directory that `extends` or `-f` selects; an ancestor directory covering several repositories; the root of the harness repository that delivers it | a stack delivered to be extended: the ordered modules, the excludes, what a checkout extending it may add and the runtimes and models it is written for |
 | `qory-module.yaml` | the root of a module | the module: its name, its variants per runtime, the variables it exports |
+| `process.yaml` | optional; the folder root of a module that `exports.modules` lists, which makes the module a factory | a process template: its name, summary and description, the workspace type, the exported stack its workflows run on, its `qory.process/v1` process, and optionally the artifact types its workspaces use. Every command that reads the configuration checks it; the compose does not read it (§Exports) |
 | `qory.yaml`, or `harness.yaml` | the repository root, committed; the user's configuration directory and the checkout's ancestor directories, for the machine | the repository's document and the machine's: under `harness`, this repository's stack, its target and modules, or the stack it extends, the target it composes it for and the modules it appends, and the runtime and model this machine composes for; under `worktree`, what a worktree of the repository needs and where the machine puts one; under `exports`, the stacks and modules this repository publishes for others, by name (§Exports); `git` and `env` (§The configuration) |
+| a branch document | the file of a version of a structured artifact type `branch` | a work item's branch and the commit in each repository (§The branch format). No compose reads it |
 
 Every module has a `qory-module.yaml`; it defines the module's name, and a directory
 without one is not a module. `qory.yaml` is optional: every setting has a default. It has
@@ -20,8 +22,8 @@ with its `qory-stack.yaml`. A directory contains `qory-stack.yaml` or a `qory.ya
 and one of the two names, never both; the file name defines which document a file
 contains, and no document has a kind.
 
-A `qory-stack.yaml` and a `qory-module.yaml` contain `apiVersion`; they are delivered
-files. A `qory.yaml` or `harness.yaml` may leave it out, and is then read as the newest
+A `qory-stack.yaml`, a `qory-module.yaml` and a `process.yaml` contain `apiVersion`;
+they are delivered files. A `qory.yaml` or `harness.yaml` may leave it out, and is then read as the newest
 format this qory reads, `qory.dev/v1alpha1`. A reader refuses a version it does not read
 and lists the versions it does. `v1alpha1` marks the format as subject to change.
 
@@ -188,11 +190,11 @@ schema is [config.schema.json](config.schema.json).
 | `modules[].only` | no | the only things of this module that are composed, with the same keys as `exclude`, plus what the listed entries require from this module (`requires` in its manifest, followed transitively). Everything else is left out: a kind not listed contributes no entry beyond those, a part not listed is left out. `only: {skills: [deploy]}` is the deploy skill, what it needs, and nothing else. An `exclude` beside it lists entries the `only` brought in, to leave them out after all; a requirement left out that way has to come from another module (rule 4). It lists no part, and nothing the `only` lists |
 | `modules[].variant` | no | forces one of the module's variants instead of the one with the targeted runtime's name |
 | `modules[].link` | no | a name at the checkout root, one path segment, linked to the module's directory in the composed tree, so a permission rule or a script refers to the module's files by a checkout-relative path: `harness/scripts/check.sh`. A hard link (§Rendering), each name used once across the modules |
-| `bind` | no | the entry that fills each role a document references (§References): `<kind>/<role>` to the name of an entry of that kind, `agents/coder: rails-coder`. The kind is `agents`, `skills` or `commands`. A checkout extending a stack adds to the base's bindings and may rebind a role of the base's |
+| `bind` | no | the entry that fills each role a document references (§References), by kind and then by role, to the name of one entry of that kind: `bind: {agents: {coder: rails-coder}}`. The kind is `agents`, `skills` or `commands`. A role's value is one name; a list is refused. A flat key, `agents/coder: rails-coder`, is refused with `Write bind as bind.agents.coder: rails-coder in qory.yaml: bind keys are kinds, and agents/coder is a kind and a role.` A checkout's `bind` sets a role over the base's `bind` and over the modules' `provides` |
 | `extensions` | no | a map of keys the author chooses, each a value of any shape, a scalar, a list or a map of any depth; written into the report as it is and printed by `qory harness inspect`; qory reads nothing in it |
-| `workflows` | no | the settings of each workflow of the stack, by its name: a lower-case letter, then up to 63 lower-case letters, digits and hyphens. A run that Qory Apiary dispatches from a run code starts the skill or command named like its workflow (docs/run.md, §The run key from a run code). The harness section of a `qory.yaml` that defines a stack lists them with the same keys and checks; a section that extends a stack takes the base's and lists none |
+| `workflows` | no | the settings of each workflow of the stack, by its name: a lower-case letter, then up to 63 lower-case letters, digits and hyphens. A run that Qory Apiary dispatches from a run code starts the skill or command named like its workflow (docs/run.md, §The run key from a run code). The compose fails with status 2 for each workflow that no module of the stack composes as a skill or command, after the modules' `exclude` and `only`: `add a skill or command <name> to a module of the base stack <stack>, or remove <name> from the workflows of its qory-stack.yaml: the stack declares the workflow <name>, and none of its modules ships a skill or command <name>`, or, for a stack that extends none, `add a skill or command <name> to a module of the stack in <file>, or remove <name> from its workflows: …`, where `<file>` is the `qory-stack.yaml` or the `qory.yaml` that defines the stack. For a stack that the harness document of a run from a run code defines, the line has `the workspace's harness in Qory Apiary` in place of `the stack in <file>`. A module that a checkout adds to the stack it extends does not count. The harness section of a `qory.yaml` that defines a stack lists them with the same keys and checks; a section that extends a stack takes the base's and lists none |
 | `workflows.<name>.time_limit` | no | how long a dispatched run of the workflow may run, counted from the run's open, as a Go duration above zero, such as `7h`, `45m` or `1h30m`; qory stops with an error on any other value: `set workflows.<name>.time_limit to a duration above zero, such as 7h or 45m: <value> is not one`. The run's `run_settings.time_limit_minutes`, when Qory Apiary sets it, applies instead, and a workflow without it runs for at most 3 hours |
-| `workflows.<name>.access` | no | the access level the workflow declares for what a dispatched run of it works on, `read` or `write`, and `read` when left out; qory stops with an error on any other value: `set workflows.<name>.access to read or write: <value> is neither`. qory checks the value, does not change it and grants no permission from it |
+| `workflows.<name>.access` | no | the access level the workflow declares for what a dispatched run of it works on, `read` or `write`, and `read` when left out; qory stops with an error on any other value: `set workflows.<name>.access to read or write: <value> is neither`. A dispatched run from a run code sees the checkout read-only when this access is `read` or `access` in the run's documents is `read`, and on Claude Code its settings deny `Edit`, `Write` and `NotebookEdit`; such a run with no wall, with `wall.setup: inside`, or whose image chosen at the run's open has nested Docker, whichever way it was selected, stops before the agent starts (docs/run.md, §Read workflows). The run sees the checkout writable only when both are `write`, or when this access is `write` and the documents have no `access`, as documents with no target do |
 | `extending` | no | what a module of a checkout extending this stack may ship: `kinds`, `instructions`, `settings`, `files` (§Extending a stack). A base without the block cannot be extended |
 | `extending.target` | no | the runtimes and the models the stack is written for, `runtime` and `model`, each one name or a list, one of the two at least. A checkout's resolved target outside either list fails the compose; listed models make the model required, since a target without one runs whatever the runtime defaults to, which is a model the stack did not list. Left out, every target is accepted, a model left out included (§Extending a stack) |
 
@@ -209,7 +211,23 @@ checkout appends:
 
 - The base's modules come first, in the base's order, with the base's excludes, variants
   and links; a relative source of the base resolves inside the base's repository. The
-  checkout cannot list, exclude, reorder or re-source a base module.
+  checkout cannot reorder, re-source or replace a base module, or change its files.
+- The checkout may leave entries out of a base module: its `modules` lists the base
+  module by the name the base lists it under, its `name` or the `module` its source
+  selects, with `exclude` and no other key, `{name: core, exclude: {skills:
+  [explore-a-ticket]}}`. The entry is no module of the composed stack: its exclude
+  applies to the base module after the base's exclude or only block, and the report
+  lists each entry it leaves out under `excludes`, by the base module's name. The
+  exclude lists entries of the kinds in the base's `extending.kinds` and files under its
+  `extending.files` prefixes; an instruction section, a settings fragment, a variable, a
+  hook or an MCP server of a base module stays. Anything else on that entry fails with
+  status 2, and `qory harness compose` prints the path of the `qory.yaml`, then the
+  message, which starts with its fix: `list module <module> with its name and exclude
+  only: …`, `add an exclude to module <module>, or remove its entry: …`, `remove <part>
+  from the exclude of module <module>: …`, or `remove <kind>/<entry> from the exclude of
+  module <module>: …`. An entry the base module does not compose fails with status 2 and
+  `remove <kind>/<entry> from the exclude of module <module> in qory.yaml: the base stack
+  <stack>@<pin> composes no <kind>/<entry> from module <manifest name>`.
 - The target is the document's. A delivered stack has none, and the checkout defines
   what it composes the base for under `target` beside `extends`; the runner's
   `harness.runtime` and `harness.model` override the document's, and `--runtime` and
@@ -239,16 +257,28 @@ checkout appends:
   such as `claude/rules/`, matched by path segment, so `claude/rules` covers
   `claude/rules/a/b.md` and not `claude/rules-private/x.md`, and a prefix that is a file's
   path covers that file only. A module shipping anything else fails the compose and the
-  message lists it. A base without the block is closed to extension.
-- An entry of an appended module that collides with a base entry fails with status 3, and
-  the message states that the entry belongs to the base, `<name>@<pin>`, and that it needs
-  a new name;
-  no exclude resolves it. The message lists that one entry and nothing else of the base.
+  message lists it. An appended module's `provides` (§The module manifest) fills roles of
+  the `kinds` alone; a module that provides another kind fails with `Remove
+  provides.agents from module typescript, or use a base that allows agents: the base's
+  extending.kinds is [skills].` A base without the block is closed to extension.
+- An entry of an appended module that collides with a base entry fails with status 3.
+  The message lists that one entry and nothing else of the base. For a base module the
+  base lists by `name` or by an export, `qory harness compose` prints `Module <module>
+  belongs to the base stack <name>@<pin>.`, and under `Fix` the entry to write in
+  `qory.yaml`, under `harness.modules`, or `Replace the entry of module <module> with:`
+  when `qory.yaml` lists the module already. The error's text, which the fixtures contain
+  (§Composition rules), has the exclude line for the base module and `write the exclude
+  for a module of the base stack <name>@<pin> in qory.yaml, under harness.modules`. For a
+  base module the base lists by a path or a git source alone, which `qory.yaml` cannot
+  list, `qory harness compose` prints `It belongs to the base stack <name>@<pin>; rename
+  yours.`, and the error's text has `it belongs to the base stack <name>@<pin>; rename
+  yours`.
 - Both stacks' `extensions` go into the report, merged by top-level key: a key the
   checkout sets replaces the base's value whole, and a key it leaves alone stays the
   base's. Nothing under a key is merged.
-- The base's `bind` applies, and the checkout's `bind` adds to it and may rebind a role of
-  the base's: which entry fills a role is a target's choice, like the model.
+- The base's `bind` applies, then the `provides` of the modules, then the checkout's
+  `bind`, each layer replacing the name a role has from the one before (§References):
+  which entry fills a role is a target's choice, like the model.
 - The report records the base with its source and pin, and marks the base's modules.
 - The base may come from `-f` in place of `extends` (§Discovery): `qory harness compose
   -f <stack>` in a checkout whose document extends a stack composes the document on that
@@ -260,7 +290,8 @@ checkout appends:
 - A base does not extend another.
 
 The base's hooks and deny rules reach every extending checkout unchanged: `hooks` and
-`permissions` concatenate (§Composition rules) and nothing of the base can be excluded.
+`permissions` concatenate (§Composition rules), and no hook, MCP server, settings
+fragment, instruction section or variable of the base can be excluded.
 What the kinds list removes is the code that runs without the agent's involvement; a
 script inside an appended skill runs when the agent runs it, under the base's hooks and
 rules. A wide `files` prefix, such as `claude/`, is safe for the same reason: the paths a
@@ -335,6 +366,158 @@ selects an export the repository does not list is refused with the list of what 
 repository exports; one that selects an export of a repository without the section is
 refused with a message to select its directories with `path`.
 
+### A factory's process.yaml
+
+A module that `exports.modules` lists and that has a `process.yaml` at its folder root is
+a factory. The file is a process template: the texts, the workspace type, the stack and
+the process that a workspace made from it starts with
+([process.schema.json](process.schema.json)). It may also list the artifact types its
+workspaces use. Every command that reads the
+configuration checks the file, once it finds each export. A module without the file is
+not checked for it.
+
+```yaml
+# harness/modules/support-desk/process.yaml
+apiVersion: qory.dev/v1alpha1
+name: Support desk               # at most 60 characters
+summary: Agents draft answers to support tickets. A person checks each answer.   # at most 200
+description: >-                  # at most 1200 characters and 80 words
+  Each ticket goes through two stages. In Answer, an agent drafts an answer and
+  then checks its tone. In Check, a person reads the draft and sends it or sends it back.
+type: qory.software              # the workspace type key
+stack: support                   # a stack that exports.stacks of this repository lists
+process:                         # a qory.process/v1 document
+  schema: qory.process/v1
+  stages:
+    - id: st_0000000001
+      name: Answer
+      sequence:
+        - workflow: draft-an-answer          # declared under workflows in harness/stacks/support/qory-stack.yaml
+        - loop: {rounds: 3, body: [{workflow: check-the-tone}]}
+      gate: {kind: none}
+    - id: st_0000000002
+      name: Check
+      sequence: []
+      gate: {kind: person, approvers: members}
+artifact_types:                  # optional; the artifact types the workspaces use
+  - name: screenshot             # a standard type: the name alone
+  - name: reply-draft            # a custom type: the full definition
+    base_view: document
+    size_limit: 65536
+    max_files: 1
+  - name: customer-facts         # a structured custom type also has a JSON Schema
+    base_view: structured
+    size_limit: 65536
+    max_files: 1
+    json_schema:
+      type: object
+      required: [customer]
+      properties:
+        customer: {type: string}
+```
+
+| Key | Meaning |
+|---|---|
+| `apiVersion` | `qory.dev/v1alpha1`, required as in every delivered file |
+| `name` | the template's name, at most 60 characters |
+| `summary` | what a workspace made from the template does, at most 200 characters |
+| `description` | how such a workspace works, at most 1200 characters and at most 80 words |
+| `type` | the workspace type of a workspace made from the template: a workspace type key, such as `qory.software` |
+| `stack` | the stack the workspace's workflows run on, one that `exports.stacks` of the same repository lists |
+| `process` | the workspace's process, a `qory.process/v1` document. qory checks that it is an object with `schema: qory.process/v1` and a list of `stages`; that each `workflow` of a stage's `sequence`, a loop's `body` included, is a non-empty string of one line that the stack's `qory-stack.yaml` declares under `workflows`; and that each stage `name` has no line break or other control character. qory checks nothing else in it |
+| `artifact_types` | optional; the list of the artifact types the workspaces use, as [Artifact types](#artifact-types) has it. A list with no entries is valid |
+
+Every key but `artifact_types` is required, and the file has no other key. A key left out, a text over its
+limit, a `stack` that `exports.stacks` does not list, and a `process` that is not such an
+object are refused with the file and the fix in the message. Each workflow that the
+stack does not declare is refused with one line, which has the stage, the workflow and
+the stack file:
+
+```text
+/src/acme-harness/harness/modules/support-desk/process.yaml: declare check-the-tone under workflows in harness/stacks/support/qory-stack.yaml, or remove it from stage Answer: stack support does not declare it
+```
+
+A workflow that is empty, null, not a string, such as `123` or `true`, or has a line
+break or another control character, is refused the same way, with the entry's place in the stage, such as `entry
+2 in the loop of entry 3`. A stage name and a `stack` with a line break or another
+control character are refused too. qory reads the file through the module's folder, as
+the compose reads a module's files: a link to a file inside the folder is followed, and
+a link to a place outside it is refused without reading the place it leads to.
+
+A character is a Unicode code point, and a word is a run of characters without white
+space. The compose does not read the file: in the composed tree it is one of the
+module's other files (§The module manifest).
+
+#### Artifact types
+
+An artifact is a typed, versioned result of a work item. Each entry of `artifact_types`
+is a standard type, `name` alone, or a custom type, with these keys and no others:
+
+| Key | Meaning |
+|---|---|
+| `name` | required: lowercase letters and digits in groups joined by single hyphens, 1 to 64 bytes, such as `reply-draft`. Each name is listed once |
+| `base_view` | `document`, `image`, `video`, `file` or `structured`, how a version's files are shown |
+| `size_limit` | the most bytes of all files of one version, a whole number from 1 to the base view's most: 10 MiB for `document`, 50 MiB for `image`, 2 GiB for `video`, 1 GiB for `file` and 1 MiB for `structured` |
+| `max_files` | the most files of one version, a whole number from 1 to 20; exactly 1 for `structured` |
+| `json_schema` | the JSON Schema of the file, exactly when `base_view` is `structured` |
+
+A custom type has `base_view`, `size_limit` and `max_files`. qory has no list of standard
+types: a name alone passes for any name of the right form.
+
+With no `artifact_types`, a workspace made from the template shows every standard type. A
+list, also an empty one, hides each standard type it leaves out in a new workspace, except
+`proposal`, `questions` and `verdict`, which no workspace can hide. A person can switch a
+hidden type on in the workspace. Qory Apiary refuses a template whose stage has an input
+or output that is neither in the list nor one of those three.
+
+A `json_schema` is an object that compiles as a JSON Schema. It is draft 2020-12 unless its
+`$schema` sets draft-07, the only other draft. A reference to a file or URL outside the
+schema fails when the schema reaches it, and qory reads no file or URL for one. The JSON
+Schema metaschemas are built in, so a reference to one passes. A `pattern` is a Go
+regular expression (RE2). A
+`json_schema` has at most 65,536 bytes as compact JSON, 4096 values in all,
+1024 entries in a list, 1024 members in an object, 16,384 bytes in a string or a member
+name, and 64 lists and objects nested in one another. The patterns of all custom types in
+one `process.yaml` are at most 16 MiB by qory's estimate from each pattern's parts: a
+group repeated 1000 times counts 1000 times. qory parses each pattern and compiles none.
+
+An entry that breaks a rule stops the command with one line, which starts with the file
+and then the fix:
+
+```text
+/src/acme-harness/harness/modules/support-desk/process.yaml: add size_limit and max_files to artifact type reply-draft, or leave only its name: a custom type has base_view, size_limit and max_files
+```
+
+## The branch format
+
+A branch document records a work item's branch and the commit in each repository. This
+is version 1 of the format ([branch.schema.json](branch.schema.json)):
+
+```json
+{"ref": "qory/wi_7k2m9pq4xt3a8b1c",
+ "repositories": [{"system": "github.com", "path": "acme/web", "commit": "5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e"}]}
+```
+
+| Member | Meaning |
+|---|---|
+| `ref` | the branch's name, the same in each repository: `qory/` followed by the work item's id |
+| `repositories` | each repository with the commit of the branch in it, at least one |
+| `system` | the host the repository is on, a lower-case host name of at most 253 characters |
+| `path` | the repository's path on the host: at most 200 characters of segments joined by slashes, with no `.`, `..` or `.git` segment |
+| `commit` | a full commit id, 40 or 64 lower-case hexadecimal digits |
+
+A document has no other member. A software factory can use the format as the JSON Schema
+of a custom artifact type in its `process.yaml`:
+
+```yaml
+artifact_types:
+  - name: branch
+    base_view: structured
+    size_limit: 65536
+    max_files: 1
+    json_schema: {…}             # the content of branch.schema.json
+```
+
 ## The module manifest
 
 ```yaml
@@ -356,6 +539,12 @@ requires:
 egress:                          # the hosts the module's skills, hooks and servers reach
   - api.example.com
   - "*.github.com"               # every host below github.com, not github.com itself
+roles:                           # the roles the module's documents reference
+  agents:
+    reviewer: one                # one entry fills the role
+provides:                        # the roles the module fills
+  agents:
+    developer: nextjs-developer  # ${qory:agents/developer} is the agent nextjs-developer
 ```
 
 `description`, optional, describes what the module is for; the report contains it and `qory harness
@@ -391,6 +580,19 @@ two: the declaration decides nothing, the policy alone defines what the run reac
 A module with no `egress` key declares nothing, and a harness in which no module declares
 passes Forager no list. `egress: []` is a declaration that the module reaches
 nothing.
+`roles`, optional, lists the roles the module's documents reference, by kind, `agents`,
+`skills` or `commands`, and then by role, each set to `one`: one entry fills the role.
+Any other value fails the compose, `module core: Set roles.agents.developer to one in
+modules/core/qory-module.yaml: a role is filled by one entry, and the value is "many".`,
+and so does a list. The compose reads `roles` and checks this value; it checks nothing else
+against it.
+`provides`, optional, fills roles (§References), by kind and then by role, each to the
+name of one entry of that kind, as `bind` does: a technology module `typescript` writes
+`provides: {agents: {developer: typescript-developer}}`, and a workflow skill's
+`${qory:agents/developer}` resolves to `typescript-developer` with no `bind` in the
+checkout. The name is a composed entry of any module. A list as a value, a flat
+`agents/developer` key and a kind other than the three are refused, each with the
+manifest's path.
 
 A module's tree contains these entry kinds:
 
@@ -404,6 +606,7 @@ hooks/<file>                     atomic; scripts that a settings fragment refers
 mcp/<name>.json                  atomic; one MCP server: the object a runtime's MCP configuration contains under the server's name
 files/<runtime>/<path>           atomic; one file the runtime reads at <path> under its directory, any depth
 settings/<runtime>/<file>       merged; one fragment per target file of one runtime, in that runtime's format
+process.yaml                     a factory's process template, checked when exports.modules lists the module (§Exports); composed as one of the other files
 <anything else>                  the module's other files, reached as $QORY_HARNESS_HOME/modules/<name>/<path>
 ```
 
@@ -464,12 +667,27 @@ program puts before a skill writes `/${qory:skills/review}`.
 
 `${qory:<tier>}`, with no slash, is a tier, not a reference. It is allowed only as the whole value of an agent's frontmatter `model`. Anywhere else, and with a name that is not a tier, it fails the compose.
 
-A reference selects an entry of that name, or a role. A role is a name no entry has, bound
-per stack under `bind` to the entry that fills it: core writes `${qory:agents/coder}`,
-one stack binds `agents/coder: rails-coder` and another binds a different agent, and the
-same core module serves both. A reference resolves within the stack's composed entries
-and its bindings, and nowhere else: it never brings in a module the stack did not list,
-and never an entry a module's `only` or `exclude` left out. A reference is a requirement
+A reference selects an entry of that name, or a role. A role is a name no entry has, set
+to the entry that fills it: core writes `${qory:agents/coder}`, one stack binds `bind:
+{agents: {coder: rails-coder}}` and another binds a different agent, and the same core
+module serves both. A role's name is set in three layers, each replacing the name of the
+one before: the `bind` of the stack a checkout extends, then the `provides` of the
+composed modules (§The module manifest), then the `bind` of the checkout's `qory.yaml`,
+or of the stack composed when it extends none. Every module's manifest is read before
+the compose reads any module's entries, so an `only` of one module follows a role that
+a later module provides, when the role has one name while the `only` blocks are
+followed. While the `only` blocks are followed, a provided entry that the providing
+module's `exclude` lists, or the exclude that a checkout's `qory.yaml` lists for it,
+provides nothing. One that the providing module's `only` leaves out still counts: it
+fills its role, or, when another module provides a different name, the role keeps the
+name of the layer below, and the `only` blocks follow neither provider. To drop a
+provider, list its entry under `exclude`. After the last module, a provided entry that
+an `exclude` or an `only` left out provides nothing. Two modules that provide one role with different names fail the
+compose, unless the checkout's `bind` sets the role: `Bind agents.developer in qory.yaml,
+or compose one of typescript and elixir: both modules provide agents/developer
+(typescript-developer, elixir-developer).` A reference resolves within the stack's
+composed entries and its roles, and nowhere else: it never brings in a module the stack
+did not list, and never an entry a module's `only` or `exclude` left out. A reference is a requirement
 (rule 4), so an entry needs no `requires` line for what its documents reference, and an
 `only` follows references the way it follows `requires`.
 
@@ -508,18 +726,32 @@ runtime: the resolution happens in the composed tree, per path.
 4. **A requirement that is not composed fails.** After the excludes and the collision
    check, every composed entry's `requires` items from its manifest and the references in
    its documents (§References) are checked against the composed entries, a reference to
-   a bound role against the entry it is bound to. One that is missing fails the compose
+   a role against the entry that fills it. One that is missing fails the compose
    with `module core: skill deploy requires command ship, which module core leaves out`
    when an `exclude` or an `only` dropped it, with the module whose block did, and with
    `module core: skill deploy requires command ship, which no module ships` otherwise; a
-   reference's message has `references` for `requires`, and `which no module ships and the
-   stack does not bind` when neither an entry nor a binding answers to the name. A binding
+   reference's message has `references` for `requires`, and `which no module ships or
+   provides and the stack does not bind` when neither an entry nor a role matches the
+   name. When a module provides the role with an entry that an `exclude` or an `only`
+   left out, the message has one line per such module: `module core: skill deploy
+   references agent developer, which module web provides as agent core-developer, which
+   module core leaves out`. When the
+   exclude a checkout's `qory.yaml` lists for a base module dropped it, the message is
+   `remove commands/ship from the exclude of module core in qory.yaml, or ship it in a
+   module of the repository: module core: skill deploy requires command ship, which the
+   exclude of module core in qory.yaml leaves out`, and for a provided entry it ends
+   `which module ts provides as agent ts-developer, which the exclude of module ts in
+   qory.yaml leaves out`. A binding
    is checked first: one that selects an entry that is not composed fails with `bind agents/coder
    selects agent rails-coder, which no module ships`, or `which module rails leaves out`,
    and a role whose name an entry has fails with `bind agents/reviewer defines a role, and
    module core ships agent reviewer; a role's name is no entry's`, since such a role
-   cannot be rebound. Every failure of this rule comes at once, one per line, the
-   bindings first and then the entries in their sorted order, so one compose lists every
+   cannot be rebound. A role a module provides is checked the same way, with `Ship agent
+   typescript-developer in a module, or remove provides.agents.developer from module
+   typescript: no module ships agent typescript-developer.` and `Rename role
+   agents/reviewer in the provides of module typescript: module core ships agent reviewer,
+   and a role's name is no entry's.` Every failure of this rule comes at once, one per
+   line, the roles first and then the entries in their sorted order, so one compose lists every
    site there is to fix. An entry that was left out has no requirements to meet. A
    manifest whose `requires` lists an entry the module does not ship fails as the module
    is read: `module core: requires lists skill release, which the module does not ship`.
@@ -542,7 +774,7 @@ runtime: the resolution happens in the composed tree, per path.
    `default: fail`, fails the compose.
 7. **Everything is reported.** The report lists every module with its pin, every entry with
    its module and, for one an `only` brought in, the entry that required it, the
-   references each entry's documents contain, the bindings, every entry
+   references each entry's documents contain, the roles with the layer that set each, every entry
    and part a block left out, as `<kind>/<name>`, `instructions/AGENTS.md`,
    `settings/<runtime>/<file>` or `env/<NAME>`, and every variant chosen. `qory harness
    inspect` prints it.
@@ -756,8 +988,8 @@ cd <checkout> && eval "$(qory harness launch --runtime claude)"
 ```
 
 `addresses` is, per kind, the name the session started by that line registers each
-composed agent, skill and command under, and each bound role as the entry it is bound to
-(§References): `{"agents": {"coder": "harness:rails-coder", "reviewer":
+composed agent, skill and command under, and each role as the entry that fills it, from
+a `bind` or a module's `provides` (§References): `{"agents": {"coder": "harness:rails-coder", "reviewer":
 "harness:reviewer"}, "skills": {"implement": "harness:implement"}}` for claude, whose
 plugin prefixes every kind, the names as the modules wrote them for every other runtime,
 and a kind the runtime skips left out. `--address <kind>/<name>` prints that one
@@ -811,7 +1043,7 @@ reports it with status 2: `goose` and `any`.
 
 | `target.runtime` | Template | Rendered for it under the runtime's directory | Reaches the session from outside | Read from the checkout alone |
 |---|---|---|---|---|
-| `claude` | `claude --plugin-dir ${dir}/plugin --settings ${dir}/settings.json --mcp-config ${dir}/mcp.json --append-system-prompt-file ${dir}/launch/CLAUDE.md --setting-sources user` | `plugin/`, a plugin in Claude Code's layout: the skills and commands linked, or written where a document contains a reference, the agents copied, since Claude Code passes over a link in a plugin's `agents/` where it follows one everywhere else, the output styles under `output-styles/` with the manifest's `outputStyles` pointing there, `.claude-plugin/plugin.json` setting its name to `harness`, so a skill is `/harness:<name>` and an agent `harness:<name>`, and every reference in the plugin resolves to that name; `launch/CLAUDE.md`, the instructions with their references resolved the same way and, after them, the names the session registers, per kind, with each bound role | everything: the plugin, the permissions, hooks and model in `settings.json`, the environment the line sets, the servers, the instructions appended to the system prompt; `--setting-sources user` keeps every `.claude` of the checkout and of the directories above it out | nothing |
+| `claude` | `claude --plugin-dir ${dir}/plugin --settings ${dir}/settings.json --mcp-config ${dir}/mcp.json --append-system-prompt-file ${dir}/launch/CLAUDE.md --setting-sources user` | `plugin/`, a plugin in Claude Code's layout: the skills and commands linked, or written where a document contains a reference, the agents copied, since Claude Code passes over a link in a plugin's `agents/` where it follows one everywhere else, the output styles under `output-styles/` with the manifest's `outputStyles` pointing there, `.claude-plugin/plugin.json` setting its name to `harness`, so a skill is `/harness:<name>` and an agent `harness:<name>`, and every reference in the plugin resolves to that name; `launch/CLAUDE.md`, the instructions with their references resolved the same way and, after them, the names the session registers, per kind, with each role | everything: the plugin, the permissions, hooks and model in `settings.json`, the environment the line sets, the servers, the instructions appended to the system prompt; `--setting-sources user` keeps every `.claude` of the checkout and of the directories above it out | nothing |
 | `cursor` | `cursor-agent --plugin-dir ${dir}/plugin` | `plugin/`, the same layout under `.cursor-plugin/plugin.json`, with the agents in Cursor's shape, a copy of `hooks.json` as `hooks/hooks.json` and of `mcp.json` as `.mcp.json`, since the CLI takes no settings file | the skills, agents, hooks and servers | the instructions, `AGENTS.md` |
 | `copilot` | `copilot --add-dir ${dir}/workspace --additional-mcp-config @${dir}/mcp.json` | `workspace/.github/skills` linked and `workspace/.github/agents` written, which `--add-dir` loads as trusted configuration, and `mcp.json` with the servers under `mcpServers`, so the MCP kind has a place in copilot | the skills, agents and servers | the hooks and the instructions |
 | `codex` | `env CODEX_HOME=${dir} codex` | `skills/` linked and the instructions as `AGENTS.md`, ending with the names the session registers, which a Codex home registers as the modules wrote them, beside `config.toml` and the agents, so the directory is a Codex home | everything | nothing; Codex keeps its login in the same home, `auth.json`, so a launcher authenticates through `OPENAI_API_KEY` or puts `auth.json` there |
@@ -844,8 +1076,13 @@ entries, and `base` when it is the base stack's. A
 source that selects an export is written as the stack wrote it, `<url>#<ref> module
 <name>`. An entry an `only` brought in has `for`, the `<kind>/<name>` that required it,
 and an entry whose documents reference others has `references`, the `<kind>/<name>` keys
-as written, a role's included; the stack's bindings are `bind`, `<kind>/<role>` to the
-entry's name, absent when there are none. An agent with a tier has `tier`. `tiers` lists each tier the agents use that has a map, with `model`, `effort` when set, and `from`: `--tier`, for an entry of `--tier` and `--tier-effort`, or the file that set it. `egress` is the union of the hosts the modules
+as written, a role's included; the roles are `bind`, `<kind>/<role>` to the name of the
+entry that fills it, from the base's `bind`, the modules' `provides` and the checkout's
+`bind`, absent when there are none; and `roles`, the same roles sorted, each `{role,
+agent, from}`, `from` being `base`, `provides <module>` or `bind`:
+`[{"role": "agents/developer", "agent": "typescript-developer", "from": "provides
+typescript"}]`. `qory harness inspect` and `qory harness compose --dry-run` print them in
+the Bind table, with `from` as the third column. An agent with a tier has `tier`. `tiers` lists each tier the agents use that has a map, with `model`, `effort` when set, and `from`: `--tier`, for an entry of `--tier` and `--tier-effort`, or the file that set it. `egress` is the union of the hosts the modules
 declared (§The module manifest), sorted by host, each with the `modules` that declared it
 in stack order, and absent when no module declares; when one does, the target runtime's
 hosts, the model endpoint for `claude`, join under the runtime's name, so a stack
@@ -1030,7 +1267,7 @@ wall:                            # the container the runtime starts in; absent: 
 | `wall.user` | `qory run`'s | the `uid:gid` the container runs as. Root is refused, so a machine where qory runs as root sets another, one that can write the checkout |
 | `wall.mounts` | none | what the container sees of the machine beside the checkout and the composed home, each at the same path as on the machine: an absolute path, with `:ro` after it for one the container cannot change; `--mount` adds to them. A socket, or a directory containing a container runtime's, is refused |
 | `wall.cpus`, `wall.memory`, `wall.pids_limit`, `wall.shm_size` | the engine's | what the container may use, as `docker run`'s flags of those names read them: `3.5`, `14g`, `4096`, `2g`. A flag of the same name sets another for one run |
-| `wall.setup` | `outside` | where the setup of a run from a control plane whose run configuration lists repositories runs, after qory fetched them and composed the harness, before the agent starts: `outside`, in a separate container of the run's image on the wall's network, which runs until the run closes, or `inside`, in the agent's container. The setup is one `setup` step, `prepare`: it adds the files of a prebuilt image's copy of the repository and runs the repository's `postCreateCommand` and `postStartCommand`. Outside, the setup container gets the working folder, the agent's container's limits, the wall's proxy and authority variables, the run's placeholders, and the agent's variables from sources 2 to 5 of [a run's variables](../../../docs/run.md#a-runs-variables), with the same deny lists, `QORY_RUN_SYSTEM` and `QORY_RUN_REPOSITORIES` among them; a service that a setup command starts keeps running there, and the agent reaches it by the name `qory-setup`. A setup command that exits otherwise than 0 fails the run before the agent starts |
+| `wall.setup` | `outside` | where the setup of a run from a control plane whose run configuration lists repositories runs, after qory fetched them and composed the harness, before the agent starts: `outside`, in a separate container of the run's image on the wall's network, which runs until the run closes, or until qory removes it: on a read run (docs/run.md, §Read workflows) before the agent starts, and on a run with a push step (docs/run.md, §The push step of a write run) before that step, or `inside`, in the agent's container. The setup is one `setup` step, `prepare`: it adds the files of a prebuilt image's copy of the repository and runs the repository's `postCreateCommand` and `postStartCommand`. Outside, the setup container gets the working folder, the agent's container's limits, the wall's proxy and authority variables, the run's placeholders, and the agent's variables from sources 2 to 5 of [a run's variables](../../../docs/run.md#a-runs-variables), with the same deny lists, `QORY_RUN_SYSTEM` and `QORY_RUN_REPOSITORIES` among them; a service that a setup command starts keeps running there, and the agent reaches it by the name `qory-setup`. A read run's agent cannot reach such a service. A setup command that exits otherwise than 0 fails the run before the agent starts |
 | `session.run.timeout` | none | how long a runtime may run, a duration such as `5h30m`. At the limit Forager stops it, `dev.qory.run.exited` contains `reason: timeout`, and `qory run` exits 124. `--timeout` sets another for one run, and `--timeout 0` none |
 | `session.run.stop_signal` | the runtime's descriptor's, else `SIGTERM` | the signal that requests a runtime to stop when Forager stops it, at the limit or on a signal to `qory run`: `SIGTERM`, `SIGINT`, `SIGHUP`, `SIGQUIT`, `SIGUSR1` or `SIGUSR2`. Runtimes differ in what a signal means, one closes its session on SIGINT and drops it on SIGTERM, so the runtime's descriptor defines which and the machine may set another; `--stop-signal` sets another for one run |
 | `session.run.stop_grace` | the runtime's descriptor's, else `10s` | how long a runtime gets between the stop signal and SIGKILL; `--stop-grace` sets another |

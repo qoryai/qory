@@ -579,7 +579,7 @@ func TestLaunchPrintsTheRegisteredNames(t *testing.T) {
 	if err == nil {
 		t.Fatalf("--address commands/ship for codex printed %q; want a refusal, codex has no commands", out)
 	}
-	wants(t, err.Error(), "commands/ship is not an agent, skill, command or bound role the harness is composed with for codex")
+	wants(t, err.Error(), "commands/ship is not an agent, skill, command or role the harness is composed with for codex")
 }
 
 // TestLaunchCarriesTheHarnessEnv is codex composed on a module exporting CORE_SCRIPTS and
@@ -1074,5 +1074,46 @@ func TestCopiedModuleRowHidesASecret(t *testing.T) {
 	wantsRow(t, out, "copied", "./"+name+"  (module "+name+" lies in the checkout, which a walled run can write, so the home contains copies; an edit reaches it on the next compose)")
 	if strings.Contains(strings.ToLower(out), "qak_") {
 		t.Errorf("the compose prints qak_:\n%s", out)
+	}
+}
+
+// TestLaunchPrintsAProvidedRole is a role that a module's provides fills: the report
+// printed by --dry-run has it in its Bind table with provides and the module, the report
+// file has it in bind and roles, --json carries it in the launch's addresses, and
+// --address prints the entry the session registers it under.
+func TestLaunchPrintsAProvidedRole(t *testing.T) {
+	root := newCheckout(t)
+	copyFixture(t, "provides-fills-role", root)
+	out, err := run(t, "harness", "compose", "--runtime", "claude", "--no-links", "--dry-run")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	wantsRow(t, out, "agents/developer", "typescript-developer  provides typescript")
+	if out, err = run(t, "harness", "compose", "--runtime", "claude", "--no-links"); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	rep, err := report.Read(filepath.Join(root, ".qory", "harness-report.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.Bind["agents/developer"] != "typescript-developer" || !reflect.DeepEqual(rep.Roles, []report.Role{{Role: "agents/developer", Agent: "typescript-developer", From: "provides typescript"}}) {
+		t.Errorf("bind %v, roles %v", rep.Bind, rep.Roles)
+	}
+	out, err = run(t, "harness", "launch", "--runtime", "claude", "--json")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	var launch struct {
+		Addresses map[string]map[string]string `json:"addresses"`
+	}
+	if err := json.Unmarshal([]byte(out), &launch); err != nil {
+		t.Fatalf("%v:\n%s", err, out)
+	}
+	if got := launch.Addresses["agents"]["developer"]; got != "harness:typescript-developer" {
+		t.Errorf("addresses %v, want agents/developer as harness:typescript-developer", launch.Addresses)
+	}
+	out, err = run(t, "harness", "launch", "--runtime", "claude", "--address", "agents/developer")
+	if err != nil || strings.TrimSpace(out) != "harness:typescript-developer" {
+		t.Errorf("--address agents/developer: %v, %q", err, out)
 	}
 }

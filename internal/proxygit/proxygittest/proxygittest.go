@@ -58,6 +58,7 @@ type Server struct {
 	denied       int
 	required     *Credential
 	stackSets    *Credential
+	refused      string
 	gitAuth      int
 }
 
@@ -83,6 +84,14 @@ func (s *Server) Require(c Credential) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.required = &c
+}
+
+// Refuse makes the server return 403 to each request for path, as a run's proxy does for
+// a path that no path rule covers.
+func (s *Server) Refuse(path string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.refused = path
 }
 
 // StackSets makes the stand-in stack proxy, [Server.Stack], read each request it leads
@@ -196,8 +205,12 @@ func (s *Server) countGitAuthorization(r *http.Request) {
 // of [Server.Require] without its credential.
 func (s *Server) check(git http.Handler, w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
-	c := s.required
+	c, refused := s.required, s.refused
 	s.mu.Unlock()
+	if refused != "" && r.URL.Path == refused {
+		w.WriteHeader(http.StatusForbidden)
+		return
+	}
 	if c.covers(r.URL.Path) && r.Header.Get("Authorization") != c.header() {
 		w.Header().Set("WWW-Authenticate", `Basic realm="git"`)
 		w.WriteHeader(http.StatusUnauthorized)

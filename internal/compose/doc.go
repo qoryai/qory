@@ -3,7 +3,9 @@
 // A stack, [stack.Stack], defines an ordered list of modules and a target runtime. A
 // compose file selects a base stack to take both from: [LoadBase] fetches the base and
 // puts its modules first, closed, and [ComposeWith] refuses what an appended module ships
-// beyond the base's extending block and any entry colliding with the base's. A module is
+// beyond the base's extending block and any entry colliding with the base's. The compose
+// file may leave entries out of a base module, [stack.Module.CheckoutExclude], which
+// [ComposeWith] applies after the base's exclude or only block. A module is
 // one directory of harness material. An entry is one atomic thing a module ships,
 // identified by kind and name; the kinds are skills, agents, commands, output-styles,
 // hooks, mcp and files. A module may also ship an AGENTS.md instruction file and settings
@@ -27,8 +29,9 @@
 //  4. Reads the entries, the settings fragments, the MCP servers and AGENTS.md with
 //     [module.Read]. A variant redirects entry kinds only; settings and AGENTS.md come
 //     from the module root.
-//  5. Applies the module's excludes. An exclude that selects nothing the module ships
-//     fails the compose, so a module that stops shipping an entry is noticed.
+//  5. Applies the module's excludes, then, for a base module, the excludes of the
+//     compose file. An exclude that selects nothing the module ships fails the compose,
+//     so a module that stops shipping an entry is noticed.
 //  6. Merges the module's settings fragments into the result, appends its AGENTS.md, and
 //     adds the variables its manifest exports, each as
 //     $QORY_HARNESS_HOME/modules/<name>/<path>. Two modules exporting one name with
@@ -39,7 +42,7 @@
 // module provides after its excludes fails with a [*CollisionError]. There is no
 // last-wins, no rename and no precedence by module order. Excludes are applied per module
 // before the check, so an exclude is the only way to resolve a collision. Compose then
-// sorts the entries by kind and name, checks that every binding, requirement and
+// sorts the entries by kind and name, checks that every role, requirement and
 // reference resolves against them, failing with an [*UnresolvedError] that lists every
 // one that does not, and joins the instruction files with a blank line between them and a
 // trailing newline.
@@ -50,11 +53,22 @@
 // which [module.Read] collects per entry into [Entry.References]. A reference is a
 // requirement: it joins the manifest's requires as a [Need], an only follows it within
 // the module, and the check after the last module wants it composed. The name may be a
-// role, one no entry has, that the stack binds under bind to the entry filling it,
-// [Result.Bind]; a reference to a bound role is checked against the bound entry, and a
-// binding is checked to select a composed entry and no entry's name. A reference resolves
-// within the composed entries and the bindings alone: it never brings in a module the
-// stack did not list. The text is left as written in the result; a renderer resolves it
+// role, one no entry has, set to the entry filling it in three layers, each replacing
+// the name of the one before: the bind of the base, the provides of the modules, and the
+// bind of the document composed, [Result.Bind] and [Result.Roles]. Every manifest is read
+// before the first module's entries, so an only follows a role a later module provides,
+// when the role has one name while the only blocks are followed. While they are, a
+// provided entry that the providing module's exclude lists, or the exclude that a
+// checkout's qory.yaml lists for it, provides nothing. One that the providing module's
+// only leaves out still counts: it fills its role, or, when another module provides a
+// different name, the role keeps the name of the layer below, and the only blocks follow
+// neither provider. To drop a provider, list its entry under exclude. The roles are
+// set again after the last module, when a provided entry that a block left out provides
+// nothing and two modules that provide one role with different names fail, unless the
+// document's bind sets it. A reference to a role is checked against the entry
+// that fills it, and a role is checked to select a composed entry and no entry's name. A
+// reference resolves within the composed entries and the roles alone: it never brings in
+// a module the stack did not list. The text is left as written in the result; a renderer resolves it
 // per delivery path with [Result.Substitute], passing in the name the program registers
 // an entry under on that path.
 //

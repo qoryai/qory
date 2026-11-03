@@ -5,8 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
+	"path/filepath"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -104,6 +107,35 @@ func SetJoinSession(f func(session.SessionSpec)) func() {
 	return func() { joinSession = before }
 }
 
+// SetJoinResult makes the join of each run return what f returns, with no session, as a
+// session that ended that way does, and returns what restores the default.
+func SetJoinResult(f func(session.SessionSpec) (*session.Result, error)) func() {
+	before := joinSession
+	joinSession = func(_ openedRun, _ context.Context, spec session.SessionSpec) (*session.Result, error) {
+		return f(spec)
+	}
+	return func() { joinSession = before }
+}
+
+// SetPushTimes sets the time the push step has past a time limit and after a signal, and
+// returns what restores the defaults.
+func SetPushTimes(limit, signal time.Duration) func() {
+	before := pushTimes
+	pushTimes.limit, pushTimes.signal = limit, signal
+	return func() { pushTimes = before }
+}
+
+// SetBranchWait makes the push step pass each wait to f in place of waiting, and returns
+// what restores the default.
+func SetBranchWait(f func(time.Duration)) func() {
+	before := branchWait
+	branchWait = func(_ context.Context, d time.Duration) error {
+		f(d)
+		return nil
+	}
+	return func() { branchWait = before }
+}
+
 // ErrJoinedNowhere is the error of the join of a run [OpenNowhere] opened.
 var ErrJoinedNowhere = errors.New("the run was opened nowhere, so no session joins it")
 
@@ -126,10 +158,21 @@ func OpenNowhere() (outcomes func() []session.Outcome, restore func()) {
 // when not nil, gets each event of the run's host steps, as Forager writes them,
 // Setup, which, when not nil, gets the spec of the run's Setup and returns its error,
 // OnOpen, which, when not nil, gets the spec of each open, FetchImage, which, when not
-// nil, is the run's FetchImage, and AgentEnv, which, when
+// nil, is the run's FetchImage, RemoveSetup, which, when not nil, is the run's
+// RemoveSetup, and AgentEnv, which, when
 // not nil, gets the spec of the run's AgentEnv and returns its result. With AgentEnv
 // nil, AgentEnv returns System and Repositories, each when set, as QORY_RUN_SYSTEM and
-// QORY_RUN_REPOSITORIES, sorted by name.
+// QORY_RUN_REPOSITORIES, sorted by name. With AtGateway set, each open also opens the
+// run at a gateway of Forager's that starts in this process for it, over the
+// gateway's local link, and Close closes the run there with qory's outcome and then
+// ends that gateway: the gateway writes its record, events.jsonl, and the session
+// writes session.jsonl, in the folder of the run's id under the open's RunsDir.
+// PolicyImage is the image the run's policy selects, "" for none: the gateway of
+// AtGateway runs under a policy that selects it, and a run with no gateway resolves it
+// against the open's images, as that gateway does. Image returns what the gateway
+// answered, and OnImage, when not nil, gets each value Image returns. With Real set,
+// which needs AtGateway, the run's Setup, RemoveSetup and Join are those of the run at
+// that gateway, so they use a real wall, and every other call is the fake's.
 type Nowhere struct {
 	System, Repositories string
 	Proxy, CABundle      string
@@ -143,6 +186,18 @@ type Nowhere struct {
 	AgentEnv             func(session.SessionSpec) ([]string, error)
 	OnOpen               func(session.OpenSpec)
 	FetchImage           func(context.Context) error
+	RemoveSetup          func(context.Context) error
+	// HostProxyErr, when not nil, is called by each HostProxy, which returns its error, as
+	// Forager's returns one once a wall could not be removed.
+	HostProxyErr func() error
+	AtGateway    bool
+	Real         bool
+	PolicyImage  string
+	OnImage      func(session.Image)
+	// RunAPI is the base URL of the run's run API, "" for a server that returns 404 with
+	// no error code to every request, as Qory Apiary does with its feature workflow_model
+	// off.
+	RunAPI string
 }
 
 // StepEvent is one event of a host step of a run [OpenNowhereWith] opened: Type is
@@ -158,7 +213,7 @@ type StepEvent struct {
 // is n.Dir, or a new temporary folder, which restore removes. Besides the outcomes, it
 // returns the calls the runs got, in order: "host proxy" for each HostProxy, "host
 // proxy closed" for each close of one, "stack proxy" and "stack proxy closed" for each
-// StackProxy and close of one, "fetch image", "setup" and "join".
+// StackProxy and close of one, "fetch image", "setup", "remove setup" and "join".
 func OpenNowhereWith(n Nowhere) (outcomes func() []session.Outcome, calls func() []string, restore func()) {
 	before := openRun
 	var mu sync.Mutex
@@ -170,9 +225,16 @@ func OpenNowhereWith(n Nowhere) (outcomes func() []session.Outcome, calls func()
 		defer mu.Unlock()
 		did = append(did, call)
 	}
-	openRun = func(_ context.Context, spec session.OpenSpec) (openedRun, error) {
+	openRun = func(ctx context.Context, spec session.OpenSpec) (openedRun, error) {
 		if n.OnOpen != nil {
 			n.OnOpen(spec)
+		}
+		var at *gatewayRun
+		if n.AtGateway {
+			var err error
+			if at, err = openAtGateway(ctx, spec, n.PolicyImage); err != nil {
+				return nil, err
+			}
 		}
 		dir := n.Dir
 		if dir == "" {
@@ -184,7 +246,7 @@ func OpenNowhereWith(n Nowhere) (outcomes func() []session.Outcome, calls func()
 			made = append(made, dir)
 			mu.Unlock()
 		}
-		return &nowhere{id: spec.RunID, dir: dir, values: n, note: note, closed: func(o session.Outcome) {
+		return &nowhere{id: spec.RunID, dir: dir, values: n, image: answeredImage(spec, n.PolicyImage), note: note, at: at, closed: func(o session.Outcome) {
 			mu.Lock()
 			defer mu.Unlock()
 			got = append(got, o)
@@ -216,27 +278,125 @@ type nowhere struct {
 	id     string
 	dir    string
 	values Nowhere
+	image  session.Image
 	note   func(string)
 	closed func(session.Outcome)
+	at     *gatewayRun
 	steps  int
 	open   *nowhereStep
+	ended  bool
 }
 
-func (n *nowhere) Join(context.Context, session.SessionSpec) (*session.Result, error) {
+// errNowhereClosed is what [Run.HostProxy] and [Run.RunAPI] of Forager return after Close.
+var errNowhereClosed = errors.New("the run is closed")
+
+// gatewayRun is a run [Nowhere.AtGateway] opened at a gateway of Forager's in this
+// process, and that gateway.
+type gatewayRun struct {
+	run *session.Run
+	g   *gateway.Gateway
+}
+
+// answeredImage is the image a gateway's run answer sets for the run of spec under a
+// policy that selects selected, "" for none: the entry of spec.Images of that name, or
+// of the default's, or the name as a reference; the zero Image with no wall.
+func answeredImage(spec session.OpenSpec, selected string) session.Image {
+	if spec.Wall == nil {
+		return session.Image{}
+	}
+	if selected == "" {
+		selected = spec.Image
+	}
+	if i := slices.IndexFunc(spec.Images, func(d session.Image) bool { return d.Name == selected }); i >= 0 {
+		return spec.Images[i]
+	}
+	return session.Image{Ref: selected}
+}
+
+// openAtGateway starts a gateway in this process with no server, which keeps the
+// record of each run in the folder of its id under spec.RunsDir and runs each under a
+// policy that selects image, "" for no policy, and opens the run of spec there, over
+// the gateway's local link.
+func openAtGateway(ctx context.Context, spec session.OpenSpec, image string) (*gatewayRun, error) {
+	var pol *gateway.Policy
+	if image != "" {
+		pol = &gateway.Policy{Version: 1, Image: image, Egress: gateway.PolicyEgress{Mode: "observe"}}
+	}
+	g, err := gateway.Start(ctx, gateway.Config{
+		RunDir:       func(id string) string { return filepath.Join(spec.RunsDir, id) },
+		NoLinkSocket: true,
+		Report:       func(string) {},
+		Policy:       pol,
+	})
+	if err != nil {
+		return nil, err
+	}
+	spec.Gateway = session.LocalGateway(g.LocalLink())
+	r, err := session.Open(ctx, spec)
+	if err != nil {
+		g.Close(ctx)
+		return nil, err
+	}
+	return &gatewayRun{run: r, g: g}, nil
+}
+
+// RunAPI is the client and base URL of [Nowhere.RunAPI].
+func (n *nowhere) RunAPI() (*http.Client, string, error) {
+	if n.ended {
+		return nil, "", errNowhereClosed
+	}
+	if n.values.RunAPI != "" {
+		return http.DefaultClient, n.values.RunAPI, nil
+	}
+	return &http.Client{Transport: noRunAPI{}}, "http://run-api.qory.invalid/v1/runs/" + n.id, nil
+}
+
+// noRunAPI is a transport that returns 404 with an error page to every request.
+type noRunAPI struct{}
+
+// RoundTrip returns the response.
+func (noRunAPI) RoundTrip(r *http.Request) (*http.Response, error) {
+	return &http.Response{
+		StatusCode: http.StatusNotFound, Header: http.Header{}, Request: r,
+		Body: io.NopCloser(strings.NewReader("<html>Not found</html>")),
+	}, nil
+}
+
+func (n *nowhere) Join(ctx context.Context, spec session.SessionSpec) (*session.Result, error) {
 	if n.open != nil {
 		return nil, fmt.Errorf("exit step %d before the join", n.open.n)
 	}
 	n.note("join")
+	if n.values.Real {
+		return n.at.run.Join(ctx, spec)
+	}
 	return nil, ErrJoinedNowhere
 }
 
-func (n *nowhere) Setup(_ context.Context, spec session.SetupSpec) error {
+func (n *nowhere) Setup(ctx context.Context, spec session.SetupSpec) error {
 	if n.open != nil {
 		return fmt.Errorf("exit step %d before the setup", n.open.n)
 	}
 	n.note("setup")
+	if n.values.Real {
+		return n.at.run.Setup(ctx, spec)
+	}
 	if n.values.Setup != nil {
 		return n.values.Setup(spec)
+	}
+	return nil
+}
+
+func (n *nowhere) RemoveSetup(ctx context.Context) error {
+	if n.open != nil {
+		return fmt.Errorf("exit step %d before the setup container's removal", n.open.n)
+	}
+	n.note("remove setup")
+	if n.values.Real {
+		return n.at.run.RemoveSetup(ctx)
+	}
+	if n.values.RemoveSetup != nil {
+		return n.values.RemoveSetup(ctx)
 	}
 	return nil
 }
@@ -270,18 +430,32 @@ func (n *nowhere) AgentEnv(spec session.SessionSpec) ([]string, error) {
 	return env, nil
 }
 
-func (n *nowhere) Close(_ context.Context, out session.Outcome) (*session.Closed, error) {
+func (n *nowhere) Close(ctx context.Context, out session.Outcome) (*session.Closed, error) {
 	if n.open != nil {
 		n.open.Exit("cancelled", -1)
 	}
+	n.ended = true
 	n.closed(out)
+	if n.at != nil {
+		closed, err := n.at.run.Close(ctx, out)
+		_, endErr := n.at.g.Close(ctx)
+		return closed, errors.Join(err, endErr)
+	}
 	return &session.Closed{RunID: n.id, State: out.State, Reason: out.Reason, ExitCode: out.ExitCode}, nil
 }
 
 func (n *nowhere) HostProxy() (hostProxy, error) {
 	n.note("host proxy")
+	if n.ended {
+		return hostProxy{}, errNowhereClosed
+	}
 	if n.values.ProxyErr != nil {
 		return hostProxy{}, n.values.ProxyErr
+	}
+	if n.values.HostProxyErr != nil {
+		if err := n.values.HostProxyErr(); err != nil {
+			return hostProxy{}, err
+		}
 	}
 	var once sync.Once
 	return hostProxy{proxy: proxygit.Proxy{URL: n.values.Proxy, CABundle: n.values.CABundle}, close: func() error {
@@ -346,6 +520,19 @@ func (s *nowhereStep) Exit(state string, exitCode int) error {
 	s.r.open = nil
 	s.r.event(StepEvent{Type: "step_exited", Step: s.n, State: state, ExitCode: exitCode})
 	return nil
+}
+
+// Image is the image of the gateway's run answer: with AtGateway, the answer of the
+// gateway in this process; otherwise [answeredImage].
+func (n *nowhere) Image() session.Image {
+	img := n.image
+	if n.at != nil {
+		img = n.at.run.Image()
+	}
+	if n.values.OnImage != nil {
+		n.values.OnImage(img)
+	}
+	return img
 }
 
 func (n *nowhere) System() string       { return n.values.System }
@@ -426,3 +613,26 @@ func SetLaunchPrebuild(f func(ctx context.Context, s prebuild.Settings, r prebui
 // mounts against the home folder and the state directory, which qory run makes before
 // the run starts anything.
 func WalledPlaces(root string, mounts []wall.Mount) error { return walledPlaces(root, mounts) }
+
+// SetTempStoreDir sets the store of a run whose checkout is read-only to dir, and returns
+// a function that restores it.
+func SetTempStoreDir(dir string) func() {
+	before := tempStoreDir
+	tempStoreDir = dir
+	return func() { tempStoreDir = before }
+}
+
+// SetRunStartFolder sets the folder that a run in a wall started in, and returns a
+// function that restores the check.
+func SetRunStartFolder(dir string) func() {
+	before := runStartFolder
+	runStartFolder = func() string { return dir }
+	return func() { runStartFolder = before }
+}
+
+// SetCheckoutUnwritable makes a run read every checkout as one it cannot write, as a
+// read-only mount does for root too, and returns a function that restores the check.
+func SetCheckoutUnwritable() func() {
+	checkoutWritable = func(string) bool { return false }
+	return func() { checkoutWritable = canWrite }
+}

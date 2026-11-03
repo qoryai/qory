@@ -1723,3 +1723,27 @@ func TestAGitFolderGitLooksPastToABareRepositoryKeepsNoMatch(t *testing.T) {
 	git(t, x, "config", "core.sshCommand", "touch ran")
 	refusedKey(t, check(), x, "core.sshcommand")
 }
+
+// TestWithIdentityTakesTheIdentityAlone is a repository in a recorded place with the two
+// keys of a commit's identity. The check with [hostgit.WithIdentity] takes them and no
+// other key, and what it passed does not carry over to a check without it.
+func TestWithIdentityTakesTheIdentityAlone(t *testing.T) {
+	hermetic(t)
+	dir := newRepo(t)
+	record(t, dir)
+	git(t, dir, "config", "user.name", "Agent")
+	git(t, dir, "config", "user.email", "agent@example.com")
+	ctx := hostgit.WithIdentity(context.Background())
+	hold, err := hostgit.Hold(ctx, dir)
+	if err != nil {
+		t.Fatalf("the check with the identity: %v", err)
+	}
+	hold.Release()
+	refusedKey(t, run(t, dir), dir, "user.name")
+
+	git(t, dir, "config", "core.sshcommand", "false")
+	if hold, err := hostgit.Hold(ctx, dir); err == nil {
+		hold.Release()
+		t.Error("the check with the identity took another key")
+	}
+}

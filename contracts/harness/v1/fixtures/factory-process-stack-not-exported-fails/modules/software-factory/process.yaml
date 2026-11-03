@@ -1,0 +1,14 @@
+apiVersion: qory.dev/v1alpha1
+name: Software factory
+summary: Agents explore each ticket before a person plans the change.
+description: In Explore, an agent reads the ticket and the code and writes what it found.
+type: software
+stack: softwre
+process:
+  schema: qory.process/v1
+  stages:
+    - id: st_0000000001
+      name: Explore
+      sequence:
+        - workflow: explore-a-ticket
+      gate: {kind: person, approvers: members}

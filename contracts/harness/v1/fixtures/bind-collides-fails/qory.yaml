@@ -6,4 +6,5 @@ harness:
     - name: core
       source: {path: modules/core}
   bind:
-    agents/reviewer: strict-reviewer
+    agents:
+      reviewer: strict-reviewer

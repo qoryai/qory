@@ -1,0 +1,11 @@
+apiVersion: qory.dev/v1alpha1
+name: base
+modules:
+  - name: core
+    source: {path: core}
+    only:
+      skills: [deploy]
+  - name: ts
+    source: {path: ts}
+extending:
+  kinds: [agents]
