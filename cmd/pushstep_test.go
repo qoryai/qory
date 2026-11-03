@@ -2,6 +2,7 @@ package cmd_test
 
 import (
 	"cmp"
+	"context"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
@@ -206,8 +207,11 @@ type pushRepo struct {
 	waits        []time.Duration
 	setup        func(dir string)
 	mask         string
-	// pushStarted, when set, runs as the push step starts.
+	// pushStarted, when set, runs as the push step starts. removeSetup, when set, is the
+	// run's RemoveSetup, and proxyErr the error of the run's HostProxy.
 	pushStarted func()
+	removeSetup func(context.Context) error
+	proxyErr    func() error
 }
 
 // newPushRepo serves acme/site at one commit, whose stack declares the workflow hello
@@ -279,6 +283,7 @@ func (p *pushRepo) run(t *testing.T, agent func(dir string), result func() (*ses
 	closes, calls, restore := cmd.OpenNowhereWith(cmd.Nowhere{
 		System: proxygittest.Host, Repositories: p.repositories, RunAPI: p.api.base(),
 		Proxy: p.h.server.Proxy.URL, CABundle: p.h.server.Proxy.CABundle, Dir: p.h.runDir,
+		RemoveSetup: p.removeSetup, HostProxyErr: p.proxyErr,
 		Setup: func(session.SetupSpec) error {
 			if p.setup != nil {
 				p.setup(p.h.dir)
@@ -1693,5 +1698,206 @@ func TestTheStepMasksThePasswordOfItsProxy(t *testing.T) {
 	r.wantsClose(t, event.StateSucceeded, 0)
 	if got := secretmask.Default().Replace(proxygittest.Password); strings.Contains(got, proxygittest.Password) {
 		t.Error("the step did not add the password of its proxy to the secret values")
+	}
+}
+
+// allSessionEnds are the ends of a session that get the push step.
+var allSessionEnds = map[string]func() (*session.Result, error){
+	"succeeded": succeeded,
+	"failed":    func() (*session.Result, error) { return &session.Result{State: event.StateFailed, ExitCode: 3}, nil },
+	"timed out": func() (*session.Result, error) {
+		return &session.Result{State: event.StateCancelled, TimedOut: true, ExitCode: 124}, nil
+	},
+	"cancelled": func() (*session.Result, error) {
+		return &session.Result{State: event.StateCancelled, Cancelled: true, ExitCode: 130}, nil
+	},
+}
+
+// TestTheSetupContainerGoesBeforeTheStep is a run with a setup container, for each end of
+// its session: the removal comes after the session and before the step.
+func TestTheSetupContainerGoesBeforeTheStep(t *testing.T) {
+	for name, result := range allSessionEnds {
+		t.Run(name, func(t *testing.T) {
+			p := walledPush(t)
+			var joined, removed bool
+			p.removeSetup = func(context.Context) error {
+				if !joined {
+					t.Error("the removal came before the session")
+				}
+				removed = true
+				return nil
+			}
+			p.pushStarted = func() {
+				if !removed {
+					t.Error("the step started with the setup container there")
+				}
+			}
+			r := p.run(t, func(dir string) {
+				joined = true
+				writeFile(t, filepath.Join(dir, "left.txt"), "left\n")
+			}, result)
+			if !removed {
+				t.Error("no removal")
+			}
+			if _, state := r.step(); state != event.StateSucceeded {
+				t.Errorf("the step ended %q\n%s", state, r.out)
+			}
+		})
+	}
+}
+
+// TestAProcessOfTheSetupCannotWriteAfterTheCheck is a process in the setup container that
+// outlives the session and writes a filter key into .git/config as soon as git takes the
+// lock of the index, after the check. The removal ends it before the step.
+func TestAProcessOfTheSetupCannotWriteAfterTheCheck(t *testing.T) {
+	p := walledPush(t)
+	canary := filepath.Join(tempDir(t), "canary")
+	stop, done := make(chan struct{}), make(chan struct{})
+	armed := make(chan string, 1)
+	go func() {
+		defer close(done)
+		var dir string
+		select {
+		case dir = <-armed:
+		case <-stop:
+			return
+		}
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			if _, err := os.Stat(filepath.Join(dir, ".git", "index.lock")); err == nil {
+				config, _ := os.ReadFile(filepath.Join(dir, ".git", "config"))
+				os.WriteFile(filepath.Join(dir, ".git", "config"), append(config, []byte("[filter \"x\"]\n\tclean = .qory/program.sh\n")...), 0o644)
+				return
+			}
+		}
+	}()
+	p.removeSetup = func(context.Context) error {
+		close(stop)
+		<-done
+		return nil
+	}
+	r := p.run(t, func(dir string) {
+		writeFile(t, filepath.Join(dir, ".qory", "program.sh"), "#!/bin/sh\nenv > "+canary+"\ncat\n")
+		if err := os.Chmod(filepath.Join(dir, ".qory", "program.sh"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		writeFile(t, filepath.Join(dir, ".gitattributes"), "* filter=x\n")
+		writeFile(t, filepath.Join(dir, "left.txt"), "left\n")
+		armed <- dir
+	}, nil)
+	r.wantsClose(t, event.StateSucceeded, 0)
+	if _, err := os.Stat(canary); err == nil {
+		t.Error("a program of the process ran on this machine")
+	}
+	config, err := os.ReadFile(filepath.Join(p.h.dir, ".git", "config"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	lacks(t, string(config), "filter")
+}
+
+// TestAFailedRemovalOfTheSetupContainerRunsNoPush is a removal that failed, also cut by a
+// second signal: the run has no step, commits nothing and pushes nothing, though the host
+// proxy and the steps still work. The close follows the rules of a failed step.
+func TestAFailedRemovalOfTheSetupContainerRunsNoPush(t *testing.T) {
+	const line = "take the work item in again in Qory Apiary: the setup container of this run was not removed, so a process in it could write the working folder, and qory pushed nothing: "
+	timedOut := allSessionEnds["timed out"]
+	for name, c := range map[string]struct {
+		result      func() (*session.Result, error)
+		remove      func(ctx context.Context) error
+		state, want string
+		code        int
+	}{
+		"after a session that succeeded": {
+			remove: func(context.Context) error { return errors.New("the engine failed") },
+			state:  event.StateFailed, want: line + "the engine failed", code: 1,
+		},
+		"after a session that timed out": {
+			result: timedOut, remove: func(context.Context) error { return errors.New("the engine failed") },
+			state: event.StateCancelled, want: line + "the engine failed", code: 124,
+		},
+		"cut by a second signal": {
+			remove: func(ctx context.Context) error {
+				term(t)
+				term(t)
+				<-ctx.Done()
+				return ctx.Err()
+			},
+			state: event.StateCancelled, want: line, code: 1,
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			p := walledPush(t)
+			p.removeSetup = c.remove
+			r := p.run(t, writesAndCommits(t), c.result)
+			r.wantsClose(t, c.state, c.code)
+			wants(t, r.out, c.want)
+			if name, _ := r.step(); name != "" {
+				t.Errorf("a push step %q", name)
+			}
+			if head := p.branchHead(t); head != "" {
+				t.Errorf("the forge has the branch at %s", head)
+			}
+			if posts, _, _ := p.api.counts(); posts != 0 {
+				t.Errorf("%d POST, want 0", posts)
+			}
+			if got := gitOut(t, p.h.dir, "status", "--porcelain"); !strings.Contains(got, "left.txt") {
+				t.Errorf("the agent's file was committed: %q", got)
+			}
+		})
+	}
+}
+
+// TestAWallThatStaysRunsNoGit is a HostProxy that fails because the wall of a session could
+// not be removed, for each end of the session: the agent may still run, so the step runs
+// no git, and a lock stays.
+func TestAWallThatStaysRunsNoGit(t *testing.T) {
+	const refused = "Open a new run. The wall of session 1 could not be removed and may still run, so this run takes no more sessions."
+	for name, result := range allSessionEnds {
+		t.Run(name, func(t *testing.T) {
+			p := walledPush(t)
+			empty := filepath.Join(tempDir(t), "gitconfig")
+			writeFile(t, empty, "")
+			calls := recordGit(t, empty)
+			var after int64 = -1
+			p.proxyErr = func() error {
+				if after < 0 {
+					return nil
+				}
+				return errors.New(refused)
+			}
+			var lock string
+			r := p.run(t, func(dir string) {
+				lock = filepath.Join(dir, ".git", "index.lock")
+				writeFile(t, filepath.Join(dir, "left.txt"), "left\n")
+				writeFile(t, lock, "")
+				info, err := os.Stat(calls)
+				if err != nil {
+					t.Fatal(err)
+				}
+				after = info.Size()
+			}, result)
+			if _, state := r.step(); state != event.StateFailed {
+				t.Errorf("the step ended %q, want failed\n%s", state, r.out)
+			}
+			wants(t, r.out, refused)
+			log, err := os.ReadFile(calls)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := string(log[after:]); got != "" {
+				t.Errorf("git ran after the session:\n%s", got)
+			}
+			if _, err := os.Lstat(lock); err != nil {
+				t.Errorf("the lock is gone: %v", err)
+			}
+			if head := p.branchHead(t); head != "" {
+				t.Errorf("the forge has the branch at %s", head)
+			}
+		})
 	}
 }

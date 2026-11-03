@@ -187,10 +187,13 @@ type Nowhere struct {
 	OnOpen               func(session.OpenSpec)
 	FetchImage           func(context.Context) error
 	RemoveSetup          func(context.Context) error
-	AtGateway            bool
-	Real                 bool
-	PolicyImage          string
-	OnImage              func(session.Image)
+	// HostProxyErr, when not nil, is called by each HostProxy, which returns its error, as
+	// Forager's returns one once a wall could not be removed.
+	HostProxyErr func() error
+	AtGateway    bool
+	Real         bool
+	PolicyImage  string
+	OnImage      func(session.Image)
 	// RunAPI is the base URL of the run's run API, "" for a server that returns 404 with
 	// no error code to every request, as Qory Apiary does with its feature workflow_model
 	// off.
@@ -448,6 +451,11 @@ func (n *nowhere) HostProxy() (hostProxy, error) {
 	}
 	if n.values.ProxyErr != nil {
 		return hostProxy{}, n.values.ProxyErr
+	}
+	if n.values.HostProxyErr != nil {
+		if err := n.values.HostProxyErr(); err != nil {
+			return hostProxy{}, err
+		}
 	}
 	var once sync.Once
 	return hostProxy{proxy: proxygit.Proxy{URL: n.values.Proxy, CABundle: n.values.CABundle}, close: func() error {

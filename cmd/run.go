@@ -1024,9 +1024,10 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			// pushWork is the push step of a run with an agent session that may write, see
 			// [keepsWork], before the close: Qory Apiary takes no version of a run that ended.
 			// The step runs under [pushContext], since a stop has ended ctx or spent the time
-			// limit. A failed step changes the close only of a session that succeeded. The join
-			// removes the container of a walled agent, and an unwalled agent's process leaves
-			// no proof that it stopped.
+			// limit. A failed step changes the close only of a session that succeeded. The stop
+			// of a walled agent is proven: the join removes its container, and when it could
+			// not, the step's [openedRun.HostProxy] fails, so the step runs no git. An unwalled
+			// agent's process leaves no proof that it stopped.
 			ending := pushEnding{session: out, limit: timeout}
 			var pushErr error
 			if keepsWork(fromCode, readOnly, branch, res, err) {
@@ -1035,7 +1036,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					limit = opened.Add(timeout)
 				}
 				pushCtx, cancel := pushContext(ctx, again, limit, pushTimes.limit, pushTimes.signal)
-				pushErr = pushWork(pushCtx, run, streams.errOut, branch, cwd, spec.RunID, out, walled)
+				ending.noStep, pushErr = removeThenPush(pushCtx, run, streams.errOut, branch, cwd, spec.RunID, out, walled)
 				ending.stopped = ctx.Err() != nil
 				ending.again, ending.got = again.Err() != nil, got()
 				ending.cut = pushCtx.Err() != nil
@@ -1246,7 +1247,8 @@ type openedRun interface {
 	Join(ctx context.Context, spec session.SessionSpec) (*session.Result, error)
 	// Setup runs the run's setup commands in the setup container, before the join.
 	Setup(ctx context.Context, spec session.SetupSpec) error
-	// RemoveSetup removes the run's setup container, if it has one, before the first join.
+	// RemoveSetup removes the run's setup container, if it has one: before the first join
+	// of a read run, and after the session of a run that gets the push step.
 	RemoveSetup(ctx context.Context) error
 	// FetchImage fetches a walled run's image by reference as the run's image step,
 	// before the first join; see [fetchImage].

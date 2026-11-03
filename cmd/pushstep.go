@@ -39,6 +39,7 @@ const (
 	textNoBranchType    = "Define the artifact type " + branchType + " in the workspace's Artifact types, then %s, then run the round again"
 	textNotStored       = "%s, then take the work item in again: qory pushed %s, and the version of the artifact " + branchType + " was not stored: %s" + codeUsed
 	textStoreUnknown    = "check the artifact " + branchType + " of the work item in Qory Apiary; with no version of this run, %s; then take the work item in again: qory pushed %s, and the request that stores its version ended with no response, so the version may or may not be stored: %s" + codeUsed
+	textSetupStays      = "take the work item in again in Qory Apiary: the setup container of this run was not removed, so a process in it could write the working folder, and qory pushed nothing: %s" + codeUsed
 	textPushCut         = "take the work item in again in Qory Apiary: %s during the push step, and the run's commits may not have reached the branch" + codeUsed
 	textPushCutPushed   = "check the artifact " + branchType + " of the work item in Qory Apiary; with no version of this run, %s; then take the work item in again: qory pushed %s, and %s, so the version may or may not be stored" + codeUsed
 	textCutSecondSignal = "qory run got a second signal"
@@ -132,6 +133,18 @@ func failedEnd(out session.Outcome) string {
 // canPush reports whether the run has a push step if its session succeeds.
 func canPush(fromCode *codeRun, readOnly bool, branch *preparation.WorkBranch) bool {
 	return fromCode.writes() && !readOnly && branch != nil
+}
+
+// removeThenPush removes the setup container of a run that gets the push step, then runs
+// [pushWork], with ctx as the bound of both. A process in that container can write the
+// working folder, so the check of the step holds only once the container is gone. After a
+// failed removal [openedRun.HostProxy] and [openedRun.StartStep] still work, so this
+// check alone stops the push, and the run has no step.
+func removeThenPush(ctx context.Context, run openedRun, stderr io.Writer, branch *preparation.WorkBranch, dir, runID string, out session.Outcome, agentStopped bool) (noStep bool, err error) {
+	if err := run.RemoveSetup(ctx); err != nil {
+		return true, fmt.Errorf(textSetupStays, shownError(err))
+	}
+	return false, pushWork(ctx, run, stderr, branch, dir, runID, out, agentStopped)
 }
 
 // pushWork is the run's step of kind push: it pushes what the agent left, through the
@@ -321,9 +334,10 @@ type pushEnding struct {
 	session session.Outcome
 	limit   time.Duration
 	// stopped is whether qory run got a signal, again whether it got a second, and cut
-	// whether the step's context ended, each as the step exited. got is the first signal.
-	stopped, again, cut bool
-	got                 string
+	// whether the step's context ended, each as the step exited. got is the first signal,
+	// and noStep whether the removal of the setup container failed, so no step ran.
+	stopped, again, cut, noStep bool
+	got                         string
 }
 
 // outcome is the outcome a run closes with after its push step failed with err. A session
@@ -360,7 +374,7 @@ func (e pushEnding) cutBy() string {
 // [exitTimeout] for a step cut at the run's time limit, and 1 otherwise. Each cut line
 // has the two ways out when a push landed with no version stored.
 func (e pushEnding) ended(u *ui.UI, said func(string), err error, branch *preparation.WorkBranch, ended error) error {
-	if e.cut {
+	if e.cut && !e.noStep {
 		if pushed := branch.PushedPaths(); pushed != "" {
 			u.Fail(fmt.Errorf(textPushCutPushed, branch.VersionWays(), pushed, e.cutBy()))
 		} else {

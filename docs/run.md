@@ -1968,7 +1968,9 @@ A write run of a work item ends with a push step: qory commits what the agent le
 it to the branch `qory/<work item id>`, and stores a new version of the artifact `branch`.
 The next run in the same stage starts at that commit. A run of another stage starts at the
 version a gate approved when its stage lists `branch` as an input, and at that commit
-otherwise. The step runs after the agent exits and before the run closes. Its kind is `push` and its name is `push qory/<work item
+otherwise. The step runs after the agent exits and before the run closes. A setup container
+is gone by then: qory removes it before the step, in the wall step `remove the setup
+container`, so no process in it writes the working folder after the check. Its kind is `push` and its name is `push qory/<work item
 id> to <system>/<path>`, followed by ` and 1 further repository` or ` and <n> further
 repositories` for a run with more repositories.
 
@@ -2001,8 +2003,9 @@ The step does this, in order:
 2. qory removes `.git/index.lock` of each repository, a file that an agent killed in a git
    command leaves behind, and prints `qory run: removed .git/index.lock of <path>, which the
    agent left when it stopped`. qory does this only for a walled run, whose container the
-   session removed. With an agent on the host, the stop of the agent is not proven, and a
-   lock fails the step. qory removes only that file, and only as a regular file in a `.git`
+   session removed: when it could not, the run's host proxy does not open, and the step
+   runs no git. With an agent on the host, the stop of the agent is not proven, and a lock
+   fails the step. qory removes only that file, and only as a regular file in a `.git`
    directory, so a link stops the check and any other lock stays.
 3. qory commits what the agent left in each repository, with the message `Changes left by
    run <run id>` and the author and committer `qory <qory@localhost>`. A new file is in
@@ -2120,6 +2123,13 @@ Each of these lines fails the step. `<commit>` is the commit's first 12 characte
 - `add a new version of the artifact branch in Qory Apiary with the head of qory/<work item
   id> on <path>, or delete that branch on <system>: qory pushed <path> and stored no version,
   because the push of the next repository failed: <line of that failure>`
+
+A removal of the setup container that failed runs no step: qory commits nothing and pushes
+nothing, and the run ends as a failed step ends it, with this line:
+
+- `take the work item in again in Qory Apiary: the setup container of this run was not
+  removed, so a process in it could write the working folder, and qory pushed nothing:
+  <error>; the code is used`
 
 A step that the time limit or a signal stopped prints one of these, where `<cause>` is `qory
 run got a second signal`, `qory run got <signal>, and the step reached its limit of 15s`,
@@ -3397,10 +3407,11 @@ with `access: write`. A read run sees the checkout read-only:
 - qory removes the setup container after the setup and before the agent starts, in the
   wall step `remove the setup container`, so every process in that container has ended
   when the agent starts. A read run's agent cannot reach a service that the setup started:
-  the name `qory-setup` does not resolve, so a connection to `qory-setup:5432` fails. Any
-  other run keeps the setup container until the run closes. If a workflow's agent needs
-  such a service, declare the workflow `write`, and check that `access` in the run's
-  documents is not `read`.
+  the name `qory-setup` does not resolve, so a connection to `qory-setup:5432` fails. A run
+  that gets the push step keeps the setup container until its session ended, and qory
+  removes it before the step. Any other run keeps it until the run closes. If a workflow's
+  agent needs such a service, declare the workflow `write`, and check that `access` in the
+  run's documents is not `read`.
 
 A read run with no wall, with `wall.setup: inside` or on an image with nested Docker
 cannot see the checkout read-only. It stops after the compose, before the image's fetch,
