@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -212,22 +213,37 @@ type pushRepo struct {
 	pushStarted func()
 	removeSetup func(context.Context) error
 	proxyErr    func() error
+	// real has the run's setup, removal and join use a real wall at a gateway in this
+	// process. runID and runsDir are those of the last open.
+	real           bool
+	runID, runsDir string
 }
+
+// record is the path of the session's record of the last run.
+func (p *pushRepo) record() string { return filepath.Join(p.runsDir, p.runID, "session.jsonl") }
 
 // newPushRepo serves acme/site at one commit, whose stack declares the workflow hello
 // with access, and takes a push.
 func newPushRepo(t *testing.T, access string) *pushRepo {
 	t.Helper()
+	return newPushRepoWith(t, access, nil)
+}
+
+// newPushRepoWith is [newPushRepo] with the files extra in the repository.
+func newPushRepoWith(t *testing.T, access string, extra map[string]string) *pushRepo {
+	t.Helper()
 	hello := helloFiles(t)
 	h := newHostFetch(t, "", "main")
 	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
 	stack := "apiVersion: qory.dev/v1alpha1\ntarget:\n  runtime: claude\nmodules:\n  - name: hello\n    source: {path: modules/hello}\n"
-	first := h.server.Repository(t, "acme/site", "main", map[string]string{
+	files := map[string]string{
 		"qory.yaml":                       ownStack(stack + "workflows:\n  hello:\n    access: " + access + "\n"),
 		"README.md":                       "acme/site\n",
 		"modules/hello/qory-module.yaml":  hello["examples/hello/modules/hello/qory-module.yaml"],
 		"modules/hello/commands/hello.md": hello["examples/hello/modules/hello/commands/hello.md"],
-	})
+	}
+	maps.Copy(files, extra)
+	first := h.server.Repository(t, "acme/site", "main", files)
 	p := &pushRepo{h: h, api: newPushAPI(t), first: first, bare: filepath.Join(h.server.Root, "acme", "site.git"), repositories: "acme/site"}
 	proxygittest.Git(t, p.bare, "config", "http.receivepack", "true")
 	t.Cleanup(cmd.SetBranchWait(func(d time.Duration) { p.waits = append(p.waits, d) }))
@@ -268,22 +284,24 @@ func (p *pushRepo) run(t *testing.T, agent func(dir string), result func() (*ses
 	if result == nil {
 		result = succeeded
 	}
-	t.Cleanup(cmd.SetJoinResult(func(spec session.SessionSpec) (*session.Result, error) {
-		// The session has registered the run, as a join does before the runtime starts.
-		if spec.OnVariables != nil {
-			spec.OnVariables(session.Applied{})
-		}
-		if agent != nil {
-			agent(p.h.dir)
-		}
-		return result()
-	}))
+	if !p.real {
+		t.Cleanup(cmd.SetJoinResult(func(spec session.SessionSpec) (*session.Result, error) {
+			// The session has registered the run, as a join does before the runtime starts.
+			if spec.OnVariables != nil {
+				spec.OnVariables(session.Applied{})
+			}
+			if agent != nil {
+				agent(p.h.dir)
+			}
+			return result()
+		}))
+	}
 	t.Setenv("QORY_RUN_KEY", "")
 	var got pushed
 	closes, calls, restore := cmd.OpenNowhereWith(cmd.Nowhere{
 		System: proxygittest.Host, Repositories: p.repositories, RunAPI: p.api.base(),
 		Proxy: p.h.server.Proxy.URL, CABundle: p.h.server.Proxy.CABundle, Dir: p.h.runDir,
-		RemoveSetup: p.removeSetup, HostProxyErr: p.proxyErr,
+		RemoveSetup: p.removeSetup, HostProxyErr: p.proxyErr, AtGateway: p.real, Real: p.real,
 		Setup: func(session.SetupSpec) error {
 			if p.setup != nil {
 				p.setup(p.h.dir)
@@ -300,7 +318,7 @@ func (p *pushRepo) run(t *testing.T, agent func(dir string), result func() (*ses
 			if p.mask != "" {
 				secretmask.Default().Add(p.mask)
 			}
-			got.runID = spec.RunID
+			got.runID, p.runID, p.runsDir = spec.RunID, spec.RunID, spec.RunsDir
 			p.api.mu.Lock()
 			defer p.api.mu.Unlock()
 			p.api.runID = spec.RunID
