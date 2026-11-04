@@ -328,6 +328,12 @@ func copyFile(src, dst *os.Root, name string) error {
 	return nil
 }
 
+// CopyFile is [copyFile] for a caller outside the preparation.
+func CopyFile(src, dst *os.Root, name string) error { return copyFile(src, dst, name) }
+
+// KeepMode is [keepMode] for a caller outside the preparation.
+func KeepMode(dst *os.Root, name string, fi fs.FileInfo) error { return keepMode(dst, name, fi) }
+
 // keepMode gives the entry name of dst the permission bits and the time of change of
 // fi, the entry it was copied from.
 func keepMode(dst *os.Root, name string, fi fs.FileInfo) error {

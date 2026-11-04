@@ -479,6 +479,31 @@ func emptyTree(ctx context.Context, git gitRunner, dir string) (hold *places.Hol
 	return hold, nil
 }
 
+// branchName reports whether branch is a branch name: one that does not start with a
+// dash and that git check-ref-format takes after refs/heads/, by git in dir. The error is
+// git's when check-ref-format fails in another way than its exit 1, a stop among them.
+func branchName(ctx context.Context, git gitRunner, dir, branch string) (bool, error) {
+	if strings.HasPrefix(branch, "-") {
+		return false, nil
+	}
+	if _, err := git(ctx, dir, "check-ref-format", "refs/heads/"+branch); err != nil {
+		// check-ref-format exits 1 for a name that is no valid ref name; any other
+		// failure, a stop among them, is git's.
+		var ge *gitError
+		if errors.As(err, &ge) && ge.exit == 1 {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
+}
+
+// BranchName is [branchName] for a caller outside the preparation, with the git of the
+// push step, which reaches no remote.
+func BranchName(ctx context.Context, dir, branch string) (bool, error) {
+	return branchName(ctx, stepGit(noRemote, ""), dir, branch)
+}
+
 // fetchRun fetches the run's repository into dir with git: origin is its URL, and the
 // remote's default branch is fetched at depth one and checked out as the local branch of
 // its name, tracking origin. With commit set, the commit is fetched by its id at depth
@@ -509,17 +534,10 @@ func fetchRun(ctx context.Context, git gitRunner, dir, system, path, commit stri
 	// The branch is the remote's word, so it is checked as a branch name, which never
 	// starts with a dash, and it follows "--" where git takes it as a refspec.
 	notBranch := fmt.Errorf(textNotBranch, integration.Printable(exports.Value(branch, false)))
-	if strings.HasPrefix(branch, "-") {
-		return notFetched(path, system, notBranch)
-	}
-	if _, err := git(ctx, dir, "check-ref-format", "refs/heads/"+branch); err != nil {
-		// check-ref-format exits 1 for a name it refuses; any other failure, a stop
-		// among them, is git's.
-		var ge *gitError
-		if errors.As(err, &ge) && ge.exit == 1 {
-			return notFetched(path, system, notBranch)
-		}
+	if ok, err := branchName(ctx, git, dir, branch); err != nil {
 		return notFetched(path, system, err)
+	} else if !ok {
+		return notFetched(path, system, notBranch)
 	}
 	if commit != "" {
 		if _, err := git(ctx, dir, "fetch", "--quiet", "--depth", "1", "origin", "--", commit); err != nil {

@@ -225,6 +225,9 @@ func checkFailed(text string, r WorkRepository, err error) error {
 // shownPath is path as a line shows a repository.
 func shownPath(path string) string { return integration.Printable(exports.Value(path, false)) }
 
+// ShownPath is [shownPath] for a caller outside the preparation.
+func ShownPath(path string) string { return shownPath(path) }
+
 // commitLeft commits what the agent left in r, the repository at dir, with message, as
 // [commitName]. The index starts from HEAD, so what the agent staged counts only through
 // the file it left. The commit has each path git status lists, by git's rules for
