@@ -2,7 +2,7 @@
 
 What `qory harness compose` reads and what it writes.
 
-## Five files
+## Seven files
 
 | File | Lives in | Defines |
 |---|---|---|
@@ -11,6 +11,8 @@ What `qory harness compose` reads and what it writes.
 | `process.yaml` | optional; the folder root of a module that `exports.modules` lists, which makes the module a factory | a process template: its name, summary and description, the workspace type, the exported stack its workflows run on, its `qory.process/v1` process, and optionally the artifact types its workspaces use. Every command that reads the configuration checks it; the compose does not read it (§Exports) |
 | `qory.yaml`, or `harness.yaml` | the repository root, committed; the user's configuration directory and the checkout's ancestor directories, for the machine | the repository's document and the machine's: under `harness`, this repository's stack, its target and modules, or the stack it extends, the target it composes it for and the modules it appends, and the runtime and model this machine composes for; under `worktree`, what a worktree of the repository needs and where the machine puts one; under `exports`, the stacks and modules this repository publishes for others, by name (§Exports); `git` and `env` (§The configuration) |
 | a branch document | the file of a version of a structured artifact type `branch` | a work item's branch and the commit in each repository (§The branch format). No compose reads it |
+| a questions document | the file of a version of the artifact type `questions` | a work item's questions and their answers (§The questions format). No compose reads it |
+| a review comments document | the file of a version of the artifact type `review-comments` | a work item's review comments on its artifact versions and the replies to them (§The review comments format). No compose reads it |
 
 Every module has a `qory-module.yaml`; it defines the module's name, and a directory
 without one is not a module. `qory.yaml` is optional: every setting has a default. It has
@@ -517,6 +519,22 @@ artifact_types:
     max_files: 1
     json_schema: {…}             # the content of branch.schema.json
 ```
+
+## The questions format
+
+A questions document records every question of a work item and its answer, one document
+per work item and at most 1 MiB. A run adds, withdraws or reopens questions with `qory
+artifact push questions`, and the control plane writes the answers. This is version 1 of
+the format ([questions.schema.json](questions.schema.json)).
+
+## The review comments format
+
+A review comments document records the members' review comments on a work item's artifact
+versions, such as a proposal, and the replies to them, one document per work item. The
+control plane writes the members' review comments and replies. A version that a run
+pushes only adds the run's reply to each open review comment and closes that review
+comment: it changes no member's text, drops no id and adds no review comment. This is
+version 1 of the format ([review-comments.schema.json](review-comments.schema.json)).
 
 ## The module manifest
 

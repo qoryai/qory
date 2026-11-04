@@ -48,6 +48,17 @@ release may change what an existing document does, and states it under Upgrading
 - Version 1 of the branch format, `contracts/harness/v1/branch.schema.json`: a work
   item's branch, `qory/<work item id>`, and the commit in each repository. A software
   factory can use it as the `json_schema` of a custom artifact type `branch`.
+- Version 1 of the questions format, `contracts/harness/v1/questions.schema.json`: every
+  question of a work item and its answer, the file of the artifact type `questions`. A run
+  adds, withdraws or reopens questions with `qory artifact push`, and the control plane
+  writes the answers. See The questions format in `contracts/harness/v1/README.md`.
+- Version 1 of the review comments format,
+  `contracts/harness/v1/review-comments.schema.json`: the members' review comments on a
+  work item's artifact versions and the replies to them, the file of the artifact type
+  `review-comments`. The control plane writes the members' review comments and replies.
+  A version that a run pushes only adds the run's reply to each open review comment and
+  closes that review comment. See The review comments format in
+  `contracts/harness/v1/README.md`.
 - `-f` on `qory harness compose`, `qory run` and `qory worktree add` takes a stack by
   reference, `<https URL>#<ref>:<folder>`: qory fetches the folder as it fetches a git
   module and composes its `qory-stack.yaml`. `examples/hello` has one, so a run takes it

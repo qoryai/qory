@@ -141,8 +141,7 @@ func newWorkItemShow() *cobra.Command {
 		Use:   "show",
 		Short: "Print the work item as JSON",
 		Long: `Print the work item as JSON: the ticket, the stage's name, the round, the stage's inputs and
-outputs with each output's check, the newest verdict and gaps, answers, and notes from
-people.
+outputs with each output's check, the newest verdict and gaps, and notes from people.
 
 In a run, qory reads the work item from Qory Apiary through the gateway. Outside a run,
 qory prints .qory/work-item.json, and exits ` + strconv.Itoa(ExitNoWorkItem) + ` when that file does not exist.

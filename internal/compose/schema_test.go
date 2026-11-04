@@ -372,3 +372,221 @@ func TestConfigSchemaKnowsTiers(t *testing.T) {
 		}
 	}
 }
+
+// questionsDocument is a document of questions.schema.json that passes: an answered
+// question with an earlier answer that a run reopened, and an open question that follows
+// from it.
+const questionsDocument = `{"questions": [
+ {"id": "q1", "question": "Which database does the service use?",
+  "context": "The service reads ` + "`DATABASE_URL`" + `.\n\n- one\n- two",
+  "options": [{"title": "PostgreSQL", "explanation": "The database of the other services."}],
+  "state": "answered", "asked": {"run": 1, "at": "2026-11-04T10:00:00Z"},
+  "answer": {"text": "PostgreSQL", "custom": false, "by": {"name": "Sam Example"}, "at": "2026-11-04T11:00:00Z"},
+  "history": [{"text": "Not\nsure", "custom": true, "by": {"name": "Sam Example"}, "at": "2026-11-04T10:30:00Z", "reopened": {"run": 2, "at": "2026-11-04T10:45:00Z"}}]},
+ {"id": "q-2", "question": "Which port does it listen on?", "options": [],
+  "state": "open", "asked": {"run": 2, "at": "2026-11-04T10:45:00Z"}, "follows": ["q1"]}
+]}`
+
+// TestQuestionsSchema is each document that questions.schema.json takes or does not take.
+func TestQuestionsSchema(t *testing.T) {
+	schema, err := jsonschema.NewCompiler().Compile("../../contracts/harness/v1/questions.schema.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	replace := func(from, to string) string {
+		if !strings.Contains(questionsDocument, from) {
+			t.Fatalf("the document has no %s", from)
+		}
+		return strings.Replace(questionsDocument, from, to, 1)
+	}
+	option := `{"title": "PostgreSQL", "explanation": "The database of the other services."}`
+	options := func(n int) string {
+		return replace(option, strings.TrimSuffix(strings.Repeat(option+", ", n), ", "))
+	}
+	question := "Which database does the service use?"
+	for _, c := range []struct {
+		doc   string
+		valid bool
+	}{
+		{questionsDocument, true},
+		{`{"questions": []}`, true},
+		{`{}`, false},
+		{`[]`, false},
+		{`{"questions": {}}`, false},
+		// answer is present exactly when state is answered.
+		{replace(`"state": "answered"`, `"state": "open"`), false},
+		{replace(`"state": "answered"`, `"state": "withdrawn"`), false},
+		{replace(`"state": "open"`, `"state": "answered"`), false},
+		{replace(`"state": "open"`, `"state": "withdrawn"`), true},
+		{replace(`"state": "open"`, `"state": "closed"`), false},
+		{replace(`"state": "open", `, ``), false},
+		// id
+		{replace(`"id": "q-2"`, `"id": "`+strings.Repeat("a", 32)+`"`), true},
+		{replace(`"id": "q-2"`, `"id": "`+strings.Repeat("a", 33)+`"`), false},
+		{replace(`"id": "q-2"`, `"id": "Q2"`), false},
+		{replace(`"id": "q-2"`, `"id": "q_2"`), false},
+		{replace(`"id": "q-2"`, `"id": ""`), false},
+		{replace(`"id": "q-2"`, `"id": 2`), false},
+		{replace(`"id": "q-2", `, ``), false},
+		// question
+		{replace(question, strings.Repeat("a", 500)), true},
+		{replace(question, strings.Repeat("a", 501)), false},
+		{replace(question, strings.Repeat("ä", 500)), true},
+		{replace(question, ""), false},
+		{replace(question, `Which\ndatabase?`), false},
+		{replace(question, `Which\tdatabase?`), false},
+		{replace(question, `Which ‮database?`), false},
+		// context
+		{replace(`"context": "The service`, `"context": "`+strings.Repeat("a", 20000-len("The service reads `DATABASE_URL`.\n\n- one\n- two"))+`The service`), true},
+		{replace(`"context": "The service`, `"context": "`+strings.Repeat("a", 20001-len("The service reads `DATABASE_URL`.\n\n- one\n- two"))+`The service`), false},
+		{replace("The service reads `DATABASE_URL`.", `\u0007`), false},
+		{replace("The service reads `DATABASE_URL`.\\n\\n- one\\n- two", ""), false},
+		// options
+		{options(10), true},
+		{options(11), false},
+		{replace(`"options": [],`, ``), false},
+		{replace(`"title": "PostgreSQL"`, `"title": "`+strings.Repeat("a", 200)+`"`), true},
+		{replace(`"title": "PostgreSQL"`, `"title": "`+strings.Repeat("a", 201)+`"`), false},
+		{replace(`"title": "PostgreSQL"`, `"title": ""`), false},
+		{replace(`"explanation": "The database of the other services."`, `"explanation": "`+strings.Repeat("a", 2000)+`"`), true},
+		{replace(`"explanation": "The database of the other services."`, `"explanation": "`+strings.Repeat("a", 2001)+`"`), false},
+		{replace(`, "explanation": "The database of the other services."`, ``), false},
+		// asked
+		{replace(`"asked": {"run": 1, `, `"asked": {"run": 0, `), false},
+		{replace(`"asked": {"run": 1, `, `"asked": {"run": 1.5, `), false},
+		{replace(`"asked": {"run": 1, `, `"asked": {`), false},
+		{replace(`"2026-11-04T10:00:00Z"`, `"2026-11-04T10:00:00+01:00"`), false},
+		{replace(`"2026-11-04T10:00:00Z"`, `"2026-11-04T10:00:00.5Z"`), false},
+		{replace(`"2026-11-04T10:00:00Z"`, `"2026-11-04T24:00:00Z"`), false},
+		{replace(`"2026-11-04T10:00:00Z"`, `"2026-11-04t10:00:00z"`), false},
+		{replace(`, "asked": {"run": 2, "at": "2026-11-04T10:45:00Z"}`, ``), false},
+		// answer
+		{replace(`"custom": false, `, ``), false},
+		{replace(`"custom": false`, `"custom": "no"`), false},
+		{replace(`"text": "PostgreSQL"`, `"text": ""`), false},
+		{replace(`"text": "PostgreSQL"`, `"text": "`+strings.Repeat("a", 2001)+`"`), false},
+		{replace(`"by": {"name": "Sam Example"}`, `"by": {}`), false},
+		{replace(`"by": {"name": "Sam Example"}`, `"by": {"name": "`+strings.Repeat("a", 160)+`"}`), true},
+		{replace(`"by": {"name": "Sam Example"}`, `"by": {"name": "`+strings.Repeat("a", 161)+`"}`), false},
+		{replace(`"by": {"name": "Sam Example"}`, `"by": {"name": "Sam\nExample"}`), false},
+		// follows
+		{replace(`"follows": ["q1"]`, `"follows": []`), true},
+		{replace(`"follows": ["q1"]`, `"follows": ["q1", "q1"]`), false},
+		{replace(`"follows": ["q1"]`, `"follows": ["Q1"]`), false},
+		{replace(`"follows": ["q1"]`, `"follows": "q1"`), false},
+		// history
+		{replace(`, "reopened": {"run": 2, "at": "2026-11-04T10:45:00Z"}`, ``), false},
+		{replace(`"reopened": {"run": 2, `, `"reopened": {"run": 0, `), false},
+		{replace(`"history": [{"text": "Not\nsure"`, `"history": [{"text": ""`), false},
+		// a member this schema does not define, at each level
+		{replace(`{"questions": [`, `{"version": 1, "questions": [`), false},
+		{replace(`"id": "q-2"`, `"id": "q-2", "priority": 1`), false},
+		{replace(`"title": "PostgreSQL"`, `"title": "PostgreSQL", "default": true`), false},
+		{replace(`"custom": false`, `"custom": false, "note": "a"`), false},
+		{replace(`"by": {"name": "Sam Example"}`, `"by": {"name": "Sam Example", "email": "sam@example.com"}`), false},
+		{replace(`"asked": {"run": 1, `, `"asked": {"step": "explore", "run": 1, `), false},
+		{replace(`"reopened": {"run": 2, `, `"reopened": {"note": "a", "run": 2, `), false},
+		{replace(`"history": [{"text": "Not\nsure"`, `"history": [{"note": "a", "text": "Not\nsure"`), false},
+	} {
+		var doc any
+		if err := json.Unmarshal([]byte(c.doc), &doc); err != nil {
+			t.Fatalf("%s: %v", c.doc, err)
+		}
+		if err := schema.Validate(doc); (err == nil) != c.valid {
+			t.Errorf("%s: valid=%v err=%v", c.doc, c.valid, err)
+		}
+	}
+}
+
+// reviewCommentsDocument is a document of review-comments.schema.json that passes: a
+// closed review comment with a member's reply and a run's reply, and an open review
+// comment with no reply.
+const reviewCommentsDocument = `{"review_comments": [
+ {"id": "c1", "on": {"artifact": "proposal", "version": 2},
+  "text": "Keep the old ` + "`/v1`" + ` route.\n\n- one\n- two",
+  "by": {"name": "Sam Example"}, "at": "2026-11-04T10:00:00Z", "state": "closed",
+  "replies": [
+   {"text": "Agreed.", "by": {"name": "Kim Example"}, "at": "2026-11-04T10:05:00Z"},
+   {"text": "The proposal keeps ` + "`/v1`" + `.", "by": {"run": 3}, "at": "2026-11-04T10:30:00Z", "outcome": "changed"}]},
+ {"id": "c-2", "on": {"artifact": "reply-draft", "version": 1},
+  "text": "Why two steps?", "by": {"name": "Sam Example"}, "at": "2026-11-04T11:00:00Z", "state": "open"}
+]}`
+
+// TestReviewCommentsSchema is each document that review-comments.schema.json takes or
+// does not take.
+func TestReviewCommentsSchema(t *testing.T) {
+	schema, err := jsonschema.NewCompiler().Compile("../../contracts/harness/v1/review-comments.schema.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	replace := func(from, to string) string {
+		if !strings.Contains(reviewCommentsDocument, from) {
+			t.Fatalf("the document has no %s", from)
+		}
+		return strings.Replace(reviewCommentsDocument, from, to, 1)
+	}
+	memberReply := `"by": {"name": "Kim Example"}, "at": "2026-11-04T10:05:00Z"`
+	runReply := `"by": {"run": 3}, "at": "2026-11-04T10:30:00Z", "outcome": "changed"`
+	for _, c := range []struct {
+		doc   string
+		valid bool
+	}{
+		{reviewCommentsDocument, true},
+		{`{"review_comments": []}`, true},
+		{`{}`, false},
+		{`{"comments": []}`, false},
+		{`[]`, false},
+		{replace(`, "state": "open"`, `, "state": "open", "replies": []`), true},
+		// outcome is present exactly when a run wrote the reply.
+		{replace(runReply, `"by": {"run": 3}, "at": "2026-11-04T10:30:00Z"`), false},
+		{replace(memberReply, memberReply+`, "outcome": "answered"`), false},
+		{replace(`"outcome": "changed"`, `"outcome": "answered"`), true},
+		{replace(`"outcome": "changed"`, `"outcome": "declined"`), true},
+		{replace(`"outcome": "changed"`, `"outcome": "done"`), false},
+		{replace(`"by": {"run": 3}`, `"by": {"run": 0}`), false},
+		{replace(`"by": {"run": 3}`, `"by": {"run": 3, "name": "Sam Example"}`), false},
+		{replace(`"by": {"run": 3}`, `"by": {}`), false},
+		// state
+		{replace(`"state": "open"`, `"state": "closed"`), true},
+		{replace(`"state": "open"`, `"state": "resolved"`), false},
+		{replace(`, "state": "open"`, ``), false},
+		// id
+		{replace(`"id": "c-2"`, `"id": "`+strings.Repeat("a", 32)+`"`), true},
+		{replace(`"id": "c-2"`, `"id": "`+strings.Repeat("a", 33)+`"`), false},
+		{replace(`"id": "c-2"`, `"id": "C2"`), false},
+		{replace(`"id": "c-2", `, ``), false},
+		// on
+		{replace(`, "version": 1}`, `}`), false},
+		{replace(`"artifact": "reply-draft", `, ``), false},
+		{replace(`"version": 1}`, `"version": 0}`), false},
+		{replace(`"artifact": "reply-draft"`, `"artifact": "Reply-draft"`), false},
+		{replace(`"artifact": "reply-draft"`, `"artifact": "reply--draft"`), false},
+		{replace(`"artifact": "reply-draft"`, `"artifact": "`+strings.Repeat("a", 64)+`"`), true},
+		{replace(`"artifact": "reply-draft"`, `"artifact": "`+strings.Repeat("a", 65)+`"`), false},
+		// text
+		{replace(`"Why two steps?"`, `"`+strings.Repeat("a", 2000)+`"`), true},
+		{replace(`"Why two steps?"`, `"`+strings.Repeat("a", 2001)+`"`), false},
+		{replace(`"Why two steps?"`, `""`), false},
+		{replace(`"Why two steps?"`, `"Why ‮two steps?"`), false},
+		{replace(`"text": "Agreed."`, `"text": "`+strings.Repeat("a", 2001)+`"`), false},
+		// by and at
+		{replace(`"by": {"name": "Sam Example"}`, `"by": {"run": 3}`), false},
+		{replace(`"by": {"name": "Sam Example"}`, `"by": {"name": "Sam\nExample"}`), false},
+		{replace(`"2026-11-04T10:00:00Z"`, `"2026-11-04T10:00:00+01:00"`), false},
+		{replace(`, "at": "2026-11-04T11:00:00Z"`, ``), false},
+		// a member this schema does not define, at each level
+		{replace(`{"review_comments": [`, `{"version": 1, "review_comments": [`), false},
+		{replace(`"id": "c-2"`, `"id": "c-2", "anchor": "line 4"`), false},
+		{replace(`"version": 2}`, `"version": 2, "file": "a.md"}`), false},
+		{replace(`"text": "Agreed."`, `"text": "Agreed.", "note": "a"`), false},
+		{replace(`"by": {"name": "Kim Example"}`, `"by": {"name": "Kim Example", "email": "kim@example.com"}`), false},
+	} {
+		var doc any
+		if err := json.Unmarshal([]byte(c.doc), &doc); err != nil {
+			t.Fatalf("%s: %v", c.doc, err)
+		}
+		if err := schema.Validate(doc); (err == nil) != c.valid {
+			t.Errorf("%s: valid=%v err=%v", c.doc, c.valid, err)
+		}
+	}
+}
