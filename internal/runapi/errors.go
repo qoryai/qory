@@ -45,7 +45,8 @@ type Error struct {
 	// Names has the members or files that failed, such as `files[0].filename`.
 	Names []string
 	// Message is the response's `message`, written for a person. Where a fix exists, the
-	// message starts with it; `run_ended` has none.
+	// message starts with it. A `run_ended` response has a message too, with no fix, since
+	// the run has ended.
 	Message string
 	// RetryAfter is the `Retry-After` header in seconds, 0 for none.
 	RetryAfter int

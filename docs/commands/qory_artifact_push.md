@@ -6,8 +6,9 @@ Upload files as one new version of an artifact
 
 Upload the files as one new version of the artifact <type>/<name>, keep a copy in the store
 under <type>/<name>/v<N>/, and print the version. - reads one file from standard input.
---name separates several artifacts of one type, such as mockups of two screens. The store
-is .qory/artifacts, or /tmp/qory-artifacts when the run's checkout is read-only.
+--name separates several artifacts of one type, such as mockups of two screens. The types
+questions and review-comments take only the name main. The store is .qory/artifacts, or
+/tmp/qory-artifacts when the run's checkout is read-only.
 
 qory exits 4 with the type and the limit for a type that the workspace does not have,
 for too many files, and for files over the type's size limit. One version is at most about
@@ -34,7 +35,7 @@ qory artifact push <type> <file>... [flags]
 
 ```
   -h, --help          help for push
-      --name string   the artifact's name, for several artifacts of one type (default main)
+      --name string   the artifact's name, for several artifacts of one type (default main; only main for questions and review-comments)
       --note string   a note on this version, for a person to read
 ```
 

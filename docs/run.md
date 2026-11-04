@@ -2602,6 +2602,8 @@ works in a run and on a laptop. A wall mounts `qory` at `/qory/qory` and does no
 | `qory artifact push <type> <file>... [--name <name>] [--note <text>]` | Stores the files as one new version, keeps a copy in the store, and prints the version. | Keeps the files in `.qory/artifacts`, and sends nothing. |
 | `qory run verdict passed\|changes-requested\|escalate [--gaps <file>]` | Stores the verdict. Qory Apiary acts on it when the run ends. | Prints the verdict and keeps it in `.qory/artifacts/verdict/`. Nothing acts on it. |
 
+The types `questions` and `review-comments` take only the name `main`.
+
 A run with a control plane sets `QORY_RUN_API` to
 `http://run-api.qory.invalid/v1/runs/<run id>`. The commands send their requests there
 through `HTTP_PROXY`. The gateway signs them, so the run has no key. With the variable
