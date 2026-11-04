@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path"
+	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -35,11 +37,26 @@ type LeftOut struct {
 	// Links are the links qory wrote, as render.OwnLink finds them. The commit also
 	// sets each back to what the base commit has, as the push step does.
 	Links []string
-	// Setup are the paths the setup changed, as RecordSetup lists them. The git session
-	// cannot compare a path with the setup's digest of it, so a path listed here stays
-	// out even when the agent changed it after the setup.
-	Setup []string
+	// Setup are the paths the setup changed, as RecordSetup lists them, each with what
+	// the setup left there, as [Dir.SetupStates] reads it. As in the push step, a path
+	// stays out only while the copy still has what the setup left; a path the agent
+	// changed after the setup goes into the commit.
+	Setup []SetupPath
 }
+
+// SetupPath is a path the setup changed, relative to the top of the copy with forward
+// slashes, and what the setup left there.
+type SetupPath struct {
+	Path string
+	// State is what the setup left at Path: missing; other, for a folder or a file that
+	// is neither regular nor a link; or file:, exec: or link: and the git blob id of the
+	// content or of the link's target. exec: is a regular file with the owner's execute
+	// bit.
+	State string
+}
+
+// setupState is the form of [SetupPath.State].
+var setupState = regexp.MustCompile(`^(?:missing|other|(?:file|exec|link):(?:[0-9a-f]{40}|[0-9a-f]{64}))$`)
 
 // GitSession is the bare session that runs after the agent: the program, its arguments
 // and its environment, for a Forager SessionSpec with no Runtime. The arguments contain
@@ -61,10 +78,11 @@ type GitSession struct {
 // The script makes a git folder in the bundle folder, with an empty configuration, no
 // hooks and the copy's objects as its alternates, and runs every git with that folder
 // as GIT_DIR and the copy as GIT_WORK_TREE. So no setting of the copy's .git applies,
-// and a filter that .gitattributes lists has no driver. It reads the branch's commit
-// from the copy's ref files with no git, starts the index from it, adds every change
-// but [LeftOut]'s, and commits when anything changed. With no commit past base, it
-// writes no bundle.
+// and a filter that .gitattributes lists has no driver. One git reads the branch's
+// commit with the copy's .git, and its configuration, as git dir: inside the wall that
+// git has no more access than the agent had. The script starts the index from that
+// commit, adds every change but [LeftOut]'s, and commits when anything changed. With no
+// commit past base, it writes no bundle.
 func (d Dir) GitSession(ctx context.Context, branch, base string, out LeftOut) (GitSession, error) {
 	if err := checkBranch(ctx, branch); err != nil {
 		return GitSession{}, err
@@ -72,7 +90,14 @@ func (d Dir) GitSession(ctx context.Context, branch, base string, out LeftOut) (
 	if !objectID.MatchString(base) {
 		return GitSession{}, fmt.Errorf("give the base commit in full: %s is no commit id", shown(base))
 	}
-	for _, p := range append(append([]string{}, out.Links...), out.Setup...) {
+	paths := slices.Clone(out.Links)
+	for _, s := range out.Setup {
+		if !setupState.MatchString(s.State) {
+			return GitSession{}, fmt.Errorf("give each setup path's state as Dir.SetupStates reads it: %s is not such a state", shown(s.State))
+		}
+		paths = append(paths, s.Path)
+	}
+	for _, p := range paths {
 		if !cleanRel(p) {
 			return GitSession{}, fmt.Errorf("give each path left out of the run's commit relative to the top of the copy: %s is not such a path", shown(p))
 		}
@@ -81,7 +106,10 @@ func (d Dir) GitSession(ctx context.Context, branch, base string, out LeftOut) (
 		return GitSession{}, err
 	}
 	args := []string{"-c", sessionScript, "qory-git-session", sessionPath, d.Work(), d.Bundle(), branch, base}
-	args = append(append(append(args, out.Links...), "--"), out.Setup...)
+	args = append(append(args, out.Links...), "--")
+	for _, s := range out.Setup {
+		args = append(args, s.Path, s.State)
+	}
 	return GitSession{
 		Command: "/bin/sh",
 		Args:    args,
@@ -108,7 +136,7 @@ func cleanRel(p string) bool {
 
 // sessionScript is the git session's script, run with sh -c. Its arguments are the
 // PATH, the copy, the bundle folder, the branch, the base commit, the links qory wrote,
-// --, and the paths the setup changed.
+// --, and each path the setup changed followed by its state.
 const sessionScript = `set -eu
 PATH=$1 W=$2 B=$3 branch=$4 base=$5
 shift 5
@@ -137,18 +165,9 @@ fi
 printf '%s\n' "$W/.git/objects" > "$G/objects/info/alternates"
 printf 'ref: refs/heads/%s\n' "$branch" > "$G/HEAD"
 
-# The branch's commit, from the copy's ref files: no git opens the copy's .git.
-if [ ! -d "$W/.git" ] || [ -h "$W/.git" ]; then
-	echo "qory: the copy has no .git folder" >&2
-	exit 1
-fi
-head=
-ref=$W/.git/refs/heads/$branch
-if [ -f "$ref" ] && [ ! -h "$ref" ]; then
-	head=$(cat "$ref")
-elif [ -f "$W/.git/packed-refs" ] && [ ! -h "$W/.git/packed-refs" ]; then
-	head=$(awk -v r="refs/heads/$branch" '$2 == r { print $1; exit }' "$W/.git/packed-refs")
-fi
+# The branch's commit, read by git with the copy's .git, so packed refs and reftable
+# both work. This git reads the copy's configuration, inside the wall.
+head=$(g --git-dir="$W/.git" rev-parse --verify --quiet "refs/heads/$branch^{commit}") || head=
 case $head in
 '' | *[!0-9a-f]*)
 	echo "qory: the copy has no commit on branch $branch" >&2
@@ -173,15 +192,41 @@ printf ':(top,literal).qory\0' > "$R"
 		d=${p%/.git}
 		printf ":(exclude,top,literal)%s\0" "${d#./}"
 	done' sh {} +) >> "$P"
+# state prints what the copy has at a path, in the form of SetupPath.State.
+state() {
+	f=$W/$1
+	if [ -h "$f" ]; then
+		t=$(readlink "$f")
+		printf 'link:%s' "$(printf '%s' "$t" | g hash-object --no-filters --stdin)"
+	elif [ -f "$f" ]; then
+		k=file
+		if [ -x "$f" ]; then
+			k=exec
+		fi
+		printf '%s:%s' "$k" "$(g hash-object --no-filters -- "$f")"
+	elif [ -e "$f" ]; then
+		printf other
+	else
+		printf missing
+	fi
+}
 links=1
-for p do
-	if [ "$links" = 1 ] && [ "$p" = -- ]; then
-		links=0
+while [ $# -gt 0 ]; do
+	p=$1
+	shift
+	if [ "$links" = 1 ]; then
+		if [ "$p" = -- ]; then
+			links=0
+			continue
+		fi
+		printf ':(exclude,top,literal)%s\0' "$p" >> "$P"
+		printf ':(top,literal)%s\0' "$p" >> "$R"
 		continue
 	fi
-	printf ':(exclude,top,literal)%s\0' "$p" >> "$P"
-	if [ "$links" = 1 ]; then
-		printf ':(top,literal)%s\0' "$p" >> "$R"
+	want=$1
+	shift
+	if [ "$(state "$p")" = "$want" ]; then
+		printf ':(exclude,top,literal)%s\0' "$p" >> "$P"
 	fi
 done
 g add -A --pathspec-from-file="$P" --pathspec-file-nul

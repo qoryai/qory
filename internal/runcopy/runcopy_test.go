@@ -457,12 +457,135 @@ func TestGitSessionChecksItsArguments(t *testing.T) {
 		{"a..b", base, LeftOut{}},
 		{"main", "HEAD", LeftOut{}},
 		{"main", base, LeftOut{Links: []string{"../x"}}},
-		{"main", base, LeftOut{Setup: []string{"/etc/x"}}},
-		{"main", base, LeftOut{Setup: []string{"a//b"}}},
+		{"main", base, LeftOut{Setup: []SetupPath{{Path: "/etc/x", State: "missing"}}}},
+		{"main", base, LeftOut{Setup: []SetupPath{{Path: "a//b", State: "missing"}}}},
+		{"main", base, LeftOut{Setup: []SetupPath{{Path: "a", State: "file:xyz"}}}},
+		{"main", base, LeftOut{Setup: []SetupPath{{Path: "a", State: ""}}}},
 	} {
 		if _, err := d.GitSession(ctx, c.branch, c.base, c.out); err == nil {
 			t.Errorf("%v: no error", c)
 		}
+	}
+}
+
+// sessionFiles runs the git session on the copy of d, with out, fetches the run's branch
+// into the person's repository at src, and returns the files of the run's commit and
+// the commit.
+func sessionFiles(t *testing.T, d Dir, src, base string, out LeftOut) ([]string, string) {
+	t.Helper()
+	ctx := context.Background()
+	s, err := d.GitSession(ctx, "qory/run-1", base, out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runSession(t, s)
+	q, err := d.Quarantine(ctx, src, "qory/run-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := q.FetchInto(ctx, src, "refs/heads/qory/run-1"); err != nil {
+		t.Fatal(err)
+	}
+	return strings.Split(testGit(t, src, "ls-tree", "-r", "--name-only", q.Head), "\n"), q.Head
+}
+
+func TestGitSessionCommitsASetupPathTheAgentChanged(t *testing.T) {
+	isolate(t)
+	sessionGit(t)
+	ctx := context.Background()
+	src, base := person(t)
+	d := newDir(t)
+	if _, err := d.Clone(ctx, src, "qory/run-1"); err != nil {
+		t.Fatal(err)
+	}
+	work := d.Work()
+	// What the setup leaves.
+	write(t, work, "setup/same.txt", "setup\n")
+	write(t, work, "setup/edited.txt", "setup\n")
+	write(t, work, "setup/tool", "#!/bin/sh\n")
+	if err := os.Chmod(filepath.Join(work, "setup", "tool"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("README.md", filepath.Join(work, "setup-link")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(work, "CLAUDE.md")); err != nil {
+		t.Fatal(err)
+	}
+	paths := []string{"setup/same.txt", "setup/edited.txt", "setup/tool", "setup-link", "CLAUDE.md", "setup/none"}
+	states, err := d.SetupStates(ctx, src, paths)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, want := range []string{"file:", "file:", "exec:", "link:", "missing", "missing"} {
+		if !strings.HasPrefix(states[i].State, want) {
+			t.Errorf("%s: state %s, want %s", paths[i], states[i].State, want)
+		}
+	}
+	// What the agent does after.
+	write(t, work, "setup/edited.txt", "edited by the agent\n")
+	write(t, work, "setup/none", "written by the agent\n")
+	write(t, work, "new.txt", "new\n")
+
+	files, head := sessionFiles(t, d, src, base, LeftOut{Setup: states})
+	for _, in := range []string{"setup/edited.txt", "setup/none", "new.txt", "CLAUDE.md"} {
+		if !slices.Contains(files, in) {
+			t.Errorf("the run's commit has no %s: %v", in, files)
+		}
+	}
+	for _, out := range []string{"setup/same.txt", "setup/tool", "setup-link"} {
+		if slices.Contains(files, out) {
+			t.Errorf("the run's commit has %s, which the setup left: %v", out, files)
+		}
+	}
+	if got := testGit(t, src, "show", head+":setup/edited.txt"); got != "edited by the agent" {
+		t.Errorf("setup/edited.txt is %q", got)
+	}
+}
+
+func TestGitSessionReadsPackedRefs(t *testing.T) {
+	isolate(t)
+	sessionGit(t)
+	src, base := person(t)
+	d := newDir(t)
+	if _, err := d.Clone(context.Background(), src, "qory/run-1"); err != nil {
+		t.Fatal(err)
+	}
+	write(t, d.Work(), "agent.txt", "committed\n")
+	testGit(t, d.Work(), "add", "-A")
+	testGit(t, d.Work(), "commit", "--quiet", "-m", "agent")
+	testGit(t, d.Work(), "pack-refs", "--all")
+	if _, err := os.Lstat(filepath.Join(d.Work(), ".git", "refs", "heads", "qory", "run-1")); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("the branch still has a loose ref: %v", err)
+	}
+	files, _ := sessionFiles(t, d, src, base, LeftOut{})
+	if !slices.Contains(files, "agent.txt") {
+		t.Errorf("the run's commit has no agent.txt: %v", files)
+	}
+}
+
+func TestGitSessionReadsReftable(t *testing.T) {
+	isolate(t)
+	sessionGit(t)
+	src, base := person(t)
+	d := newDir(t)
+	if _, err := d.Clone(context.Background(), src, "qory/run-1"); err != nil {
+		t.Fatal(err)
+	}
+	write(t, d.Work(), "agent.txt", "committed\n")
+	testGit(t, d.Work(), "add", "-A")
+	testGit(t, d.Work(), "commit", "--quiet", "-m", "agent")
+	c := exec.Command("git", "refs", "migrate", "--ref-format=reftable")
+	c.Dir = d.Work()
+	if out, err := c.CombinedOutput(); err != nil {
+		t.Skipf("this git does not move a repository to reftable: %v\n%s", err, out)
+	}
+	if got := testGit(t, d.Work(), "rev-parse", "--show-ref-format"); got != "reftable" {
+		t.Fatalf("ref format %s, want reftable", got)
+	}
+	files, _ := sessionFiles(t, d, src, base, LeftOut{})
+	if !slices.Contains(files, "agent.txt") {
+		t.Errorf("the run's commit has no agent.txt: %v", files)
 	}
 }
 

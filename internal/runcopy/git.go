@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -41,6 +42,11 @@ func git(ctx context.Context, dir string, args ...string) (string, error) {
 
 // gitIn is [git] with env added to git's environment.
 func gitIn(ctx context.Context, dir string, env []string, args ...string) (string, error) {
+	return gitWith(ctx, dir, env, nil, args...)
+}
+
+// gitWith is [gitIn] with stdin as git's input; nil is none.
+func gitWith(ctx context.Context, dir string, env []string, stdin io.Reader, args ...string) (string, error) {
 	full := slices.Concat(proxygit.Hardened, localOnly, noMaintenance, args)
 	cmd, err := hostgit.Unchecked(ctx, dir, hostgit.Base(ctx), full...)
 	if err != nil {
@@ -48,6 +54,7 @@ func gitIn(ctx context.Context, dir string, env []string, args ...string) (strin
 	}
 	cmd.Env = append(proxygit.Env(cmd.Env, &proxygit.Proxy{}), "GIT_CEILING_DIRECTORIES="+filepath.Dir(dir))
 	cmd.Env = append(cmd.Env, env...)
+	cmd.Stdin = stdin
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	// A helper left holding the output is not waited for past this.
@@ -109,4 +116,18 @@ func checkRef(ctx context.Context, ref string) error {
 		return fmt.Errorf("give a ref name that git check-ref-format takes: %s is not one", shown(ref))
 	}
 	return nil
+}
+
+// blobID is the git blob id of what r has, by git hash-object --stdin --no-filters in
+// the repository at dir, which sets the object format.
+func blobID(ctx context.Context, dir string, r io.Reader) (string, error) {
+	out, err := gitWith(ctx, dir, nil, r, "hash-object", "--no-filters", "--stdin")
+	if err != nil {
+		return "", err
+	}
+	id := strings.TrimSpace(out)
+	if !objectID.MatchString(id) {
+		return "", fmt.Errorf("git hash-object printed %s, which is no object id", shown(id))
+	}
+	return id, nil
 }

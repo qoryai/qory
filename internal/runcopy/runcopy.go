@@ -7,7 +7,8 @@
 // The run binds that copy in place of the person's checkout. After the agent ends, a
 // bare session in the wall runs the script of [Dir.GitSession]: it commits what the
 // agent left in the copy and writes the run's branch to a git bundle, through a git
-// folder that the script makes, so no setting in the copy's .git applies. Once the
+// folder that the script makes, so no setting in the copy's .git applies to the add,
+// the commit or the bundle. Once the
 // run's containers are gone, [Dir.Quarantine] checks the bundle file and fetches it into
 // a new bare repository with git's object checks on; [Quarantine.FetchInto] fetches the
 // run's branch from there into the person's repository, and [Quarantine.ActingChanges]
