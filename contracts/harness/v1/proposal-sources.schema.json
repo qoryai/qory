@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://qory.dev/contracts/harness/v1/proposal-sources.schema.json",
+  "title": "The proposal sources format, version 1",
+  "description": "Every source that a run used to write a proposal, with the reason for each: the file sources.json of each version of the artifact type proposal, beside proposal.md, for the agent of the next stage. A source is anything the run read, such as a web page, a ticket, a record in another system, a document or a file in a repository. The file is at most 1 MiB (1,048,576 bytes), which a JSON Schema cannot check. No object has a member this schema does not define.",
+  "type": "object",
+  "required": ["sources"],
+  "additionalProperties": false,
+  "properties": {
+    "sources": {
+      "description": "The sources the run used: empty when it used none.",
+      "type": "array",
+      "items": {"$ref": "#/$defs/source"}
+    }
+  },
+  "$defs": {
+    "source": {
+      "description": "One source.",
+      "type": "object",
+      "required": ["kind", "ref", "why"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {"description": "What kind of source it is, such as file, page, ticket, record or document: a lower-case letter, then up to 31 lower-case letters, digits and hyphens. The list of kinds is open; each factory uses the kinds of its work.", "type": "string", "pattern": "^[a-z][a-z0-9-]{0,31}$"},
+        "ref": {"description": "Where the source is, in the form its kind needs, such as a path, a URL or an id: 1 to 2048 characters on one line. The schema does not check the form for each kind.", "$ref": "#/$defs/line", "minLength": 1, "maxLength": 2048},
+        "system": {"description": "The host name of the system the source is in, such as crm.example.com or a repository host: labels of letters, digits and hyphens joined by dots, at most 253 characters. Absent when ref is enough to find the source.", "type": "string", "maxLength": 253, "pattern": "^[A-Za-z0-9-]{1,63}(\\.[A-Za-z0-9-]{1,63})*$"},
+        "container": {"description": "The place inside the system that ref is relative to, such as a mailbox, a table or the folder of a further repository: 1 to 200 characters on one line.", "$ref": "#/$defs/line", "minLength": 1, "maxLength": 200},
+        "locator": {"description": "The part of the source the run used, such as lines 40-48, a section title or a field name: 1 to 500 characters on one line.", "$ref": "#/$defs/line", "minLength": 1, "maxLength": 500},
+        "why": {"description": "Why the source matters for the proposal, plain text on one line, 1 to 500 characters.", "$ref": "#/$defs/line", "minLength": 1, "maxLength": 500}
+      }
+    },
+    "line": {
+      "description": "Text on one line. It has no control character: none of U+0000 to U+001F, U+007F and U+0080 to U+009F, so no tab, line feed or carriage return. It has none of the bidirectional controls, the marks U+061C, U+200E and U+200F, the embeddings and overrides U+202A to U+202E and the isolates U+2066 to U+2069; the separators U+2028 and U+2029; and the format characters U+00AD, U+180E, U+200B, U+2060 to U+2064, U+FEFF and U+FFF9 to U+FFFB.",
+      "type": "string",
+      "pattern": "^[^\u0000-\u001f\u007f\u0080-\u009f\u00ad\u061c\u180e\u200b\u200e\u200f\u2028\u2029\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff\ufff9-\ufffb]*$"
+    }
+  }
+}

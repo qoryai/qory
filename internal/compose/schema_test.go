@@ -617,3 +617,97 @@ func TestReviewCommentsSchema(t *testing.T) {
 		}
 	}
 }
+
+// proposalSourcesDocument is a document of proposal-sources.schema.json that passes: a
+// file in a further repository, a web page, and a record in another system.
+const proposalSourcesDocument = `{"sources": [
+ {"kind": "file", "ref": "src/cart.ts", "system": "git.example.com", "container": "web", "locator": "lines 40-48", "why": "The cart total is computed here."},
+ {"kind": "page", "ref": "https://docs.example.com/api?v=2#auth", "why": "The limits of the API."},
+ {"kind": "record", "ref": "ACC-1042", "system": "crm.example.com", "container": "Accounts", "locator": "renewal date", "why": "The renewal date of the account."}
+]}`
+
+// TestProposalSourcesSchema is each document that proposal-sources.schema.json takes or
+// does not take.
+func TestProposalSourcesSchema(t *testing.T) {
+	schema, err := jsonschema.NewCompiler().Compile("../../contracts/harness/v1/proposal-sources.schema.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	replace := func(from, to string) string {
+		if !strings.Contains(proposalSourcesDocument, from) {
+			t.Fatalf("the document has no %s", from)
+		}
+		return strings.Replace(proposalSourcesDocument, from, to, 1)
+	}
+	rlo := string(rune(0x202e)) // a right-to-left override, invisible
+	page := `{"kind": "page", "ref": "https://docs.example.com/api?v=2#auth", "why": "The limits of the API."}`
+	why := `"why": "The limits of the API."`
+	for _, c := range []struct {
+		doc   string
+		valid bool
+	}{
+		{proposalSourcesDocument, true},
+		{`{"sources": []}`, true},
+		{`{"sources": [` + page + `]}`, true},
+		{`{"sources": [{"kind": "document", "ref": "Q3 plan", "why": "The budget."}]}`, true},
+		{`{}`, false},
+		{`[]`, false},
+		{`{"sources": {}}`, false},
+		// kind
+		{replace(`"kind": "page"`, `"kind": "a`+strings.Repeat("b", 31)+`"`), true},
+		{replace(`"kind": "page"`, `"kind": "a`+strings.Repeat("b", 32)+`"`), false},
+		{replace(`"kind": "page"`, `"kind": "Page"`), false},
+		{replace(`"kind": "page"`, `"kind": "1page"`), false},
+		{replace(`"kind": "page"`, `"kind": "web page"`), false},
+		{replace(`"kind": "page"`, `"kind": ""`), false},
+		{replace(`"kind": "page", `, ``), false},
+		// ref
+		{replace(`"ref": "ACC-1042"`, `"ref": "`+strings.Repeat("a", 2048)+`"`), true},
+		{replace(`"ref": "ACC-1042"`, `"ref": "`+strings.Repeat("a", 2049)+`"`), false},
+		{replace(`"ref": "ACC-1042"`, `"ref": ""`), false},
+		{replace(`"ref": "ACC-1042"`, `"ref": "ACC\n1042"`), false},
+		{replace(`"ref": "ACC-1042"`, `"ref": "ACC\t1042"`), false},
+		{replace(`"ref": "ACC-1042"`, `"ref": "ACC-`+rlo+`1042"`), false},
+		{replace(`"ref": "ACC-1042", `, ``), false},
+		// system
+		{replace(`"system": "crm.example.com"`, `"system": "CRM-1.Example.com"`), true},
+		{replace(`"system": "crm.example.com"`, `"system": "localhost"`), true},
+		{replace(`"system": "crm.example.com"`, `"system": "`+strings.Repeat("a", 63)+`"`), true},
+		{replace(`"system": "crm.example.com"`, `"system": "`+strings.Repeat("a", 64)+`"`), false},
+		{replace(`"system": "crm.example.com"`, `"system": "`+strings.TrimSuffix(strings.Repeat("a.", 127), ".")+`"`), true},
+		{replace(`"system": "crm.example.com"`, `"system": "`+strings.Repeat("a.", 127)+`a"`), false},
+		{replace(`"system": "crm.example.com"`, `"system": "https://crm.example.com"`), false},
+		{replace(`"system": "crm.example.com"`, `"system": "crm.example.com:8443"`), false},
+		{replace(`"system": "crm.example.com"`, `"system": "crm..example.com"`), false},
+		{replace(`"system": "crm.example.com"`, `"system": "crm.example.com."`), false},
+		{replace(`"system": "crm.example.com"`, `"system": "crm_1.example.com"`), false},
+		{replace(`"system": "crm.example.com"`, `"system": ""`), false},
+		// container
+		{replace(`"container": "Accounts"`, `"container": "`+strings.Repeat("a", 200)+`"`), true},
+		{replace(`"container": "Accounts"`, `"container": "`+strings.Repeat("a", 201)+`"`), false},
+		{replace(`"container": "Accounts"`, `"container": ""`), false},
+		{replace(`"container": "Accounts"`, `"container": "Acc\nounts"`), false},
+		// locator
+		{replace(`"locator": "renewal date"`, `"locator": "`+strings.Repeat("a", 500)+`"`), true},
+		{replace(`"locator": "renewal date"`, `"locator": "`+strings.Repeat("a", 501)+`"`), false},
+		{replace(`"locator": "renewal date"`, `"locator": ""`), false},
+		{replace(`"locator": "renewal date"`, `"locator": "renewal\ndate"`), false},
+		// why
+		{replace(why, `"why": "`+strings.Repeat("a", 500)+`"`), true},
+		{replace(why, `"why": "`+strings.Repeat("a", 501)+`"`), false},
+		{replace(why, `"why": ""`), false},
+		{replace(why, `"why": "The limits\nof the API."`), false},
+		{replace(`, `+why, ``), false},
+		// a member this schema does not define, at each level
+		{replace(`{"sources": [`, `{"version": 1, "sources": [`), false},
+		{replace(why, why+`, "title": "API"`), false},
+	} {
+		var doc any
+		if err := json.Unmarshal([]byte(c.doc), &doc); err != nil {
+			t.Fatalf("%s: %v", c.doc, err)
+		}
+		if err := schema.Validate(doc); (err == nil) != c.valid {
+			t.Errorf("%s: valid=%v err=%v", c.doc, c.valid, err)
+		}
+	}
+}

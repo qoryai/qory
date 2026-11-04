@@ -59,6 +59,12 @@ release may change what an existing document does, and states it under Upgrading
   A version that a run pushes only adds the run's reply to each open review comment and
   closes that review comment. See The review comments format in
   `contracts/harness/v1/README.md`.
+- Version 1 of the proposal sources format,
+  `contracts/harness/v1/proposal-sources.schema.json`: the file `sources.json` of a
+  version of the artifact type `proposal`, with every source the run used to write the
+  proposal and the reason for each. A source has an open `kind`, such as `page`, `record`
+  or `file`, and a `ref` in the form that its kind needs. See The proposal sources format
+  in `contracts/harness/v1/README.md`.
 - `-f` on `qory harness compose`, `qory run` and `qory worktree add` takes a stack by
   reference, `<https URL>#<ref>:<folder>`: qory fetches the folder as it fetches a git
   module and composes its `qory-stack.yaml`. `examples/hello` has one, so a run takes it

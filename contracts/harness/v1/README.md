@@ -2,7 +2,7 @@
 
 What `qory harness compose` reads and what it writes.
 
-## Seven files
+## Eight files
 
 | File | Lives in | Defines |
 |---|---|---|
@@ -13,6 +13,7 @@ What `qory harness compose` reads and what it writes.
 | a branch document | the file of a version of a structured artifact type `branch` | a work item's branch and the commit in each repository (§The branch format). No compose reads it |
 | a questions document | the file of a version of the artifact type `questions` | a work item's questions and their answers (§The questions format). No compose reads it |
 | a review comments document | the file of a version of the artifact type `review-comments` | a work item's review comments on its artifact versions and the replies to them (§The review comments format). No compose reads it |
+| a proposal sources document | the file `sources.json` of a version of the artifact type `proposal` | every source a run used to write the proposal, with the reason for each (§The proposal sources format). No compose reads it |
 
 Every module has a `qory-module.yaml`; it defines the module's name, and a directory
 without one is not a module. `qory.yaml` is optional: every setting has a default. It has
@@ -547,6 +548,17 @@ reply has an `outcome`:
 
 A member's reply has no `outcome` and no `question`. This is version 1 of the format
 ([review-comments.schema.json](review-comments.schema.json)).
+
+## The proposal sources format
+
+A proposal sources document is the file `sources.json` of a version of the artifact type
+`proposal`, beside `proposal.md`. It records every source the run used to write the
+proposal, with the reason for each, for the agent of the next stage. A source is anything
+the run read: a web page, a ticket, a record in another system, a document or a file in a
+repository. Each source has a `kind` from an open list, such as `page` or `record`, a
+`ref` in the form that its kind needs, and a `why`; `system`, `container` and `locator`
+are optional. This is version 1 of the format
+([proposal-sources.schema.json](proposal-sources.schema.json)).
 
 ## The module manifest
 
