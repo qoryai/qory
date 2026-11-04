@@ -110,13 +110,13 @@ func branchNoCommit(path, system, commit, line string) error {
 	return fmt.Errorf(textBranchNoCommit, shortCommit(commit), shown, host, integration.Printable(exports.HideURLError(errors.New(line)).Error()))
 }
 
-// Switch checks out b in dir, the working folder, and in each further repository: at
-// the commit of the version that [RunAt] fetched, or where the repository is when the
-// version has no entry for it. A caller runs it after the compose, so no file of the
-// branch reaches the harness. No git here reaches a remote. A commit with another .qory stops
-// with [textQoryInBranch], and a commit that git does not check out with [textNoCheckout].
-// On success it prints the branch and the target's commit on report, and sets each
-// [WorkRepository.Commit].
+// Switch checks out b in dir, the working folder, and in each further repository: at the
+// commit of the version that [RunAt] fetched, or where the repository is when the version
+// has no entry for it. A caller runs it after the compose, so no file of the branch
+// reaches the harness. No git here reaches a remote. A commit with another .qory stops
+// with [textQoryInBranch], and a commit that git does not check out with
+// [textNoCheckout]. On success it prints the branch and the target's commit on report,
+// and sets each [WorkRepository.Commit].
 func Switch(ctx context.Context, dir string, base []string, b *WorkBranch, report io.Writer) error {
 	ctx = hostgit.WithBase(ctx, base)
 	dir, err := filepath.Abs(dir)

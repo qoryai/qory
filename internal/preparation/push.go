@@ -102,13 +102,11 @@ func stepGit(p *proxygit.Proxy, input string, env ...string) gitRunner {
 // repository, since the agent could write each .git. Every git runs with the environment
 // [proxygit.Env] makes, so it reads no system or global configuration file, and with
 // [proxygit.Hardened], which turns off the hooks in .git, fsmonitor and credential
-// helpers. The one exception is git config --file in the checks, which uses the flags of
-// hostgit and reaches no remote. No option turns a filter off: the
-// check stops on each key that git init and the fetch do not write, filter keys among
-// them, so a filter stays out only while no process writes .git/config after the check.
-// The commits of every repository come before the first push, so
-// a failed commit pushes nothing. A path that [RecordSetup] recorded and that is as the
-// setup left it stays out of the commit.
+// helpers. No option turns a filter off: the check stops on each key that git init and
+// the fetch do not write, filter keys among them, so a filter stays out only while no
+// process writes .git/config after the check. The commits of every repository come
+// before the first push, so a failed commit pushes nothing. A path that [RecordSetup]
+// recorded and that is as the setup left it stays out of the commit.
 //
 // An agent that was killed can leave .git/index.lock, which would stop the commit. After
 // the checks, [clearIndexLocks] removes that one file of each repository when

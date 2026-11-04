@@ -480,8 +480,8 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				return err
 			}
 			defer runLock.Release()
-			// What the session holds until the run is over, such as the agent's environment
-			// folder, is let go in the reverse order.
+			// What the session keeps open until the run is over, such as the agent's
+			// environment folder, is let go in the reverse order.
 			var cleanups []func()
 			defer func() {
 				for i := len(cleanups) - 1; i >= 0; i-- {
@@ -1962,9 +1962,10 @@ func (p passed) modes(path string) (writable, readOnly, changed bool) {
 // Dir; for two paths, the outer's one mode decides, else that same entry.
 //
 // mount_through_link is a place, writable or read-only, reached through a link inside a
-// writable mount or the workspace, where its path resolves outside that place: the agent could repoint the link. The text names the
-// place, the link and the place that holds it; a place that is the link itself, its
-// absolute, cleaned form equal to the link, is named as a link inside that place.
+// writable mount or the workspace, where its path resolves outside that place: the agent
+// could repoint the link. The text names the place, the link and the place that holds it;
+// a place that is the link itself, its absolute, cleaned form equal to the link, is named
+// as a link inside that place.
 //
 // mount_shared_with_run is a place that is, holds or lies inside one another walled run
 // also uses, its mounts or its run directory, while that run is still going or its

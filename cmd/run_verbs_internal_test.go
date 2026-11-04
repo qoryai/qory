@@ -421,8 +421,9 @@ func TestRunsDirIsTheCheckoutsFolder(t *testing.T) {
 		}
 	}
 	t.Setenv("XDG_STATE_HOME", "relative/state")
-	if got, err := stateDir(); got != "" || !errors.Is(err, errRelativeStateHome) {
-		t.Errorf("XDG_STATE_HOME=relative/state: %q, %v", got, err)
+	const relative = "set XDG_STATE_HOME to an absolute path, or unset it: qory keeps its state only in an absolute path, so that the state does not move with the working folder"
+	if got, err := stateDir(); got != "" || !errors.Is(err, errRelativeStateHome) || err.Error() != relative {
+		t.Errorf("XDG_STATE_HOME=relative/state: %q, %v; want %q", got, err, relative)
 	}
 	t.Setenv("XDG_STATE_HOME", "")
 	real, err := filepath.EvalSymlinks(t.TempDir())

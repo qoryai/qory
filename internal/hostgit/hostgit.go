@@ -8,12 +8,15 @@
 //     left alone, and replace refs and the commit-graph not read, through -c flags that
 //     win over every configuration file. A replace ref or a commit-graph can give a
 //     commit other parents, so that git on this machine reads a branch's commits as on
-//     its base;
+//     its base.
+//     core.hooksPath covers only the hooks directory: a hook that a configuration
+//     defines, hook.<name>.command with hook.<name>.event, still runs;
 //   - with the variables that would add configuration or choose another repository or
 //     git's programs dropped from the environment, and the pager and the editors set to
 //     programs that do nothing. GIT_SSH, GIT_SSH_COMMAND, GIT_ASKPASS,
 //     GIT_PROXY_COMMAND, GIT_EXTERNAL_DIFF and XDG_CONFIG_HOME are kept from the
-//     person's environment.
+//     person's environment, which is sound only while nothing loads qory's environment
+//     from a file a run wrote.
 //
 // [Unchecked] makes git for a command that reads no repository, such as git config
 // --file, with the same flags and the same rules for the environment, applied to an
@@ -45,8 +48,8 @@ var flags = []string{
 }
 
 // dropped are the variables taken out of git's environment: the ones that add
-// configuration git would read after the checked files, the one that chooses git's
-// programs, and the ones that choose another repository than the one checked. The
+// configuration git would read after the repository's files, the one that chooses git's
+// programs, and the ones that choose another repository than the one in dir. The
 // variables that choose the global and the system configuration file stay: those
 // files are the person's.
 var dropped = []string{
@@ -151,7 +154,8 @@ func drop(name string) bool {
 }
 
 // Command returns git with args, to run in dir. A caller sets the output, adds to Env and
-// runs it. The error is that of [Ready]: no git, or one older than 2.36.
+// runs it. The error is the [*GitVersionError] of a git older than 2.36; with no git, the
+// returned command fails when it runs.
 func Command(ctx context.Context, dir string, args ...string) (*exec.Cmd, error) {
 	if err := Ready(ctx); err != nil {
 		return nil, err

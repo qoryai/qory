@@ -16,7 +16,7 @@ import (
 
 // errRelativeStateHome is the refusal of an XDG_STATE_HOME that is no absolute path,
 // which [stateDir] returns before anything is read from the directory it would name.
-var errRelativeStateHome = errors.New("qory: XDG_STATE_HOME is not an absolute path; qory keeps its state only in an absolute one, so that it does not change with the working folder")
+var errRelativeStateHome = errors.New("set XDG_STATE_HOME to an absolute path, or unset it: qory keeps its state only in an absolute path, so that the state does not move with the working folder")
 
 // errNoStateDir is a state directory that cannot be found: HOME and XDG_STATE_HOME are
 // both unset.
@@ -62,15 +62,15 @@ func writtenPlaces(root string, mounts []wall.Mount) []string {
 	return out
 }
 
-// reservedMounts stops a walled run with an input error when one of the read-write
-// mounts of mounts, other than its checkout at root, is the person's home folder or
-// qory's state directory, or an ancestor of either: a walled run may change any file in
-// a read-write mount. A read-only mount and the checkout's mount are not compared. The paths are compared as written, made absolute,
-// and again with the links of their nearest existing ancestor resolved, see
-// [resolvedUp]: a home folder or a state directory reached through a link inside the
-// mount lies in it as written, and one that does not exist yet, below a link, lies in it
-// where the link leads. A home folder that cannot be found, or that is a relative path,
-// and a state directory that cannot be found, are not compared.
+// reservedMounts stops a walled run with an input error when one of the read-write mounts
+// of mounts, other than its checkout at root, is the person's home folder or qory's state
+// directory, or an ancestor of either: a walled run may change any file in a read-write
+// mount. A read-only mount and the checkout's mount are not compared. The paths are
+// compared as written, made absolute, and again with the links of their nearest existing
+// ancestor resolved, see [resolvedUp]: a home folder or a state directory reached through
+// a link inside the mount lies in it as written, and one that does not exist yet, below a
+// link, lies in it where the link leads. A home folder that cannot be found, or that is a
+// relative path, and a state directory that cannot be found, are not compared.
 func reservedMounts(root string, mounts []wall.Mount) error {
 	for _, m := range mounts {
 		if m.ReadOnly || m.Path == root {

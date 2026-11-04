@@ -1527,10 +1527,11 @@ before the fetch, and picks one version of the artifact type `branch`:
 qory composes the harness at `target_version` and with the further repositories at their
 default branches, so a branch does not change the harness of its work item's runs. The
 fetch step also fetches each repository's commit by id, at depth 1. After the compose,
-qory checks out the branch with no request to a remote: at the commit in the version, or where the fetch left a repository with no entry
-in the version. The working folder then has the commit's files. qory leaves the ref
-`refs/qory/target-version` at the target version, so a file that the branch removed stays
-out when the run starts from an image's copy.
+qory checks out the branch with no request to a remote: at the commit in the version, or
+where the fetch left a repository with no entry in the version. The working folder then
+has the commit's files. qory leaves the ref `refs/qory/target-version` at the target
+version, so a file that the branch removed stays out when the run starts from an image's
+copy.
 
 A run stops before the agent starts when:
 

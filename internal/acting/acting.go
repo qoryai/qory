@@ -1,7 +1,7 @@
-// Package acting holds the keys of qory's files that qory acts on: the commands it runs,
-// the paths it follows and the sources it fetches. A walled run can change a qory.yaml
-// and a stack file, and qory on this machine reads those files afterwards, so a caller
-// compares the acting keys a file sets before and after a run.
+// Package acting returns the acting keys of qory's files: the keys whose values set the
+// commands qory runs, the paths it follows and the sources it fetches. [Entries] returns
+// the acting keys a file sets, each with its value and hash, [Hashes] their sorted
+// hashes, and [Base] the stack file that a file extends by a path.
 //
 // The acting keys of a qory.yaml, or harness.yaml, are worktree.run.add and
 // worktree.run.remove, worktree.link, worktree.copy and worktree.dir; harness.launch.*,

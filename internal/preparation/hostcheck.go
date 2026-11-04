@@ -22,12 +22,13 @@ import (
 )
 
 // safeRepository stops on a working folder whose repository git on this machine must not
-// fetch into, before any git runs there with the run's host proxy: the fetch runs on
-// this machine, and an earlier run could have written the working folder's .git. A key of the repository's configuration can make git run a program, as
-// a filter does on checkout, or take the fetch past the gateway or past its check of
-// the host's certificate, as remote.<name>.proxy and http.sslVerify do. A link under
-// .git can send git's reads and writes outside the working folder, and alternates make
-// git read objects from a store outside it.
+// fetch into, before any git runs there with the run's host proxy: the fetch runs on this
+// machine, and an earlier run could have written the working folder's .git. A key of the
+// repository's configuration can make git run a program, as a filter does on checkout, or
+// take the fetch past the gateway or past its check of the host's certificate, as
+// remote.<name>.proxy and http.sslVerify do. A link under .git can send git's reads and
+// writes outside the working folder, and alternates make git read objects from a store
+// outside it.
 //
 // It stops on the folder, in this order, when:
 //   - its .git has a link anywhere under it ([textGitLink]); it, outside objects, or

@@ -60,11 +60,10 @@ func fetchedNothing(t *testing.T, name, dir, marker string) {
 	}
 }
 
-// TestStopsOnAWorkingFolderGitWouldActOn is a working folder, in no place a walled run
-// used, whose .git a run could have written: a filter that runs a program on checkout,
-// a proxy for origin, a check of the host's certificate turned off, an include, a
-// config.worktree, a commondir, a config that is a link or a folder, a link anywhere
-// under .git, and alternates. The fetch stops on each before git fetches, with a line
+// TestStopsOnAWorkingFolderGitWouldActOn is a working folder whose .git a run could have
+// written: a filter that runs a program on checkout, a proxy for origin, a check of the
+// host's certificate turned off, an include, a config.worktree, a commondir, a config
+// that is a link or a folder, a link anywhere under .git, and alternates. The fetch stops on each before git fetches, with a line
 // that starts with its fix, no program runs, and git writes nothing through a link.
 func TestStopsOnAWorkingFolderGitWouldActOn(t *testing.T) {
 	needGit(t)

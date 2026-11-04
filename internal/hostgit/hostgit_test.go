@@ -2,6 +2,7 @@ package hostgit_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -100,7 +101,8 @@ func newRepo(t *testing.T) string {
 
 // TestEnvDropsWhatAddsConfigurationOrChoosesARepository keeps the person's choice of
 // global and system file, and drops the variables that would add settings after the
-// checked files, choose git's programs or choose another repository.
+// repository's files, choose git's programs or choose another repository than the one
+// in dir.
 func TestEnvDropsWhatAddsConfigurationOrChoosesARepository(t *testing.T) {
 	hermetic(t)
 	for _, name := range []string{"GIT_CONFIG", "GIT_CONFIG_PARAMETERS", "GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_0", "GIT_CONFIG_VALUE_0", "GIT_EXEC_PATH", "GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_NAMESPACE", "GIT_PAGER", "GIT_EDITOR", "GIT_SEQUENCE_EDITOR"} {
@@ -184,25 +186,100 @@ func TestEnvKeepsOnlyTheAbsoluteEntriesOfThePath(t *testing.T) {
 
 // TestGitRunsByItsResolvedPath puts on the PATH a link to the folder of the git found
 // before: git runs by its path with the symbolic links resolved, so a link pointed
-// elsewhere after the search is not followed again.
+// elsewhere after [hostgit.Command] or [hostgit.Unchecked] made the command is not
+// followed again, and the git in the folder it leads to now does not run.
 func TestGitRunsByItsResolvedPath(t *testing.T) {
 	hermetic(t)
 	real, err := exec.LookPath("git")
 	if err != nil {
 		t.Skip("no git")
 	}
-	dir := newRepo(t)
-	link := filepath.Join(t.TempDir(), "tools")
-	if err := os.Symlink(filepath.Dir(real), link); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("PATH", link)
-	c, err := hostgit.Command(context.Background(), dir, "status")
+	resolved, err := filepath.EvalSymlinks(real)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if resolved, err := filepath.EvalSymlinks(real); err != nil || c.Path != resolved {
-		t.Errorf("git is %s, want %s (%v)", c.Path, resolved, err)
+	dir := newRepo(t)
+	tmp := t.TempDir()
+	marker := filepath.Join(tmp, "ran")
+	other := filepath.Join(tmp, "other")
+	if err := os.MkdirAll(other, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(other, "git"), []byte("#!/bin/sh\ntouch "+marker+"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(tmp, "tools")
+	point := func(target string) {
+		t.Helper()
+		if err := os.Remove(link); err != nil && !os.IsNotExist(err) {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(target, link); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("PATH", link)
+	for _, c := range []struct {
+		name string
+		make func() (*exec.Cmd, error)
+	}{
+		{"Command", func() (*exec.Cmd, error) { return hostgit.Command(context.Background(), dir, "status") }},
+		{"Unchecked", func() (*exec.Cmd, error) {
+			return hostgit.Unchecked(context.Background(), dir, os.Environ(), "version")
+		}},
+	} {
+		point(filepath.Dir(real))
+		cmd, err := c.make()
+		if err != nil {
+			t.Fatalf("%s: %v", c.name, err)
+		}
+		if cmd.Path != resolved {
+			t.Errorf("%s: git is %s, want %s", c.name, cmd.Path, resolved)
+		}
+		point(other)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Errorf("%s: %v\n%s", c.name, err, out)
+		}
+		if _, err := os.Stat(marker); err == nil {
+			t.Errorf("%s: the git the link leads to now ran", c.name)
+		}
+	}
+}
+
+// TestCommandWithNoGitFailsWhenItRuns empties the PATH of git: [hostgit.Command] returns
+// a command, and the command fails with [exec.ErrNotFound] when it runs.
+func TestCommandWithNoGitFailsWhenItRuns(t *testing.T) {
+	hermetic(t)
+	t.Setenv("PATH", t.TempDir())
+	c, err := hostgit.Command(context.Background(), t.TempDir(), "status")
+	if err != nil {
+		t.Fatalf("Command: %v", err)
+	}
+	if err := c.Run(); !errors.Is(err, exec.ErrNotFound) {
+		t.Errorf("the command ran with %v, want %v", err, exec.ErrNotFound)
+	}
+}
+
+// TestShownQuotesWhatGoDoesNotPrint shows a printable text as it is, and quotes, as Go
+// does, one with a character Go does not print: a control character, a mark that
+// changes the direction of the text, a space of no width or a space that is not ASCII.
+func TestShownQuotesWhatGoDoesNotPrint(t *testing.T) {
+	for _, plain := range []string{"acme/shop", "/home/you/my shop", "café/日本"} {
+		if got := hostgit.Shown(plain); got != plain {
+			t.Errorf("%q shows as %q", plain, got)
+		}
+	}
+	for s, want := range map[string]string{
+		"alias.a\x1b[2Jb.x":     `"alias.a\x1b[2Jb.x"`,
+		"acme/\u202epohs":       `"acme/\u202epohs"`,
+		"acme/sh\u200bop":       `"acme/sh\u200bop"`,
+		"acme/\u2066shop\u2069": `"acme/\u2066shop\u2069"`,
+		"acme/\ufeffshop":       `"acme/\ufeffshop"`,
+		"acme/\u00a0shop":       `"acme/\u00a0shop"`,
+	} {
+		if got := hostgit.Shown(s); got != want {
+			t.Errorf("%q shows as %s, want %s", s, got, want)
+		}
 	}
 }
 

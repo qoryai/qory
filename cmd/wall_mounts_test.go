@@ -181,8 +181,8 @@ func TestReservedMountsSkipsARelativeHome(t *testing.T) {
 }
 
 // writtenOf runs qory run with args behind the fake wall, the harness's Claude Code
-// settings in its home, and returns the SessionSpec.Written and the Args of its one session,
-// with its output. The run must reach the container: exit 4.
+// settings in its home, and returns the SessionSpec.Written and the Args of its one
+// session, with its output. The run must reach the container: exit 4.
 func writtenOf(t *testing.T, root string, args ...string) (written, launch []string, out string) {
 	t.Helper()
 	var specs []session.SessionSpec
@@ -205,7 +205,7 @@ func realSet(paths []string) []string {
 }
 
 // TestAWalledRunIsGivenItsPlaces runs walled with a read-write and a read-only mount:
-// SessionSpec.Written holds the run's checkout and its read-write mount, and nothing
+// SessionSpec.Written contains the run's checkout and its read-write mount, and nothing
 // else; the read-only mount is none. Forager adds the writable binds of the other walled
 // runs it lists and, behind the wall, this run's writable binds itself, outside
 // SessionSpec.Written. The harness's Claude Code settings go to the session once,
