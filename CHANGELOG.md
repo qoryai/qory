@@ -251,12 +251,13 @@ release may change what an existing document does, and states it under Upgrading
   core-developer, which module core leaves out`, one line per such module.
 - For Claude Code, the checkout gets `.claude/rules/qory-harness.md`, a link to the
   home's `AGENTS.md`, in place of `.claude/CLAUDE.md`. qory writes no file named
-  `CLAUDE.md`. A repository's `AGENTS.md` now loads in a Claude Code session when the
-  repository has no `CLAUDE.md`, and rules the repository keeps in `.claude/rules` stay
-  beside qory's. The claude launch line appends `${dir}/launch/AGENTS.md` in place of
-  `${dir}/launch/CLAUDE.md`. A module's `files/claude/CLAUDE.md`,
-  `files/claude/AGENTS.md` or `files/claude/rules/qory-harness.md`, or a file at
-  `files/claude/rules`, fails the compose.
+  `CLAUDE.md`. A repository's `AGENTS.md` now loads in a session of Claude Code
+  2.1.277 or later when the repository has no `CLAUDE.md`. Rules the repository keeps
+  in `.claude/rules` stay beside qory's. The claude launch line appends
+  `${dir}/launch/AGENTS.md` in place of `${dir}/launch/CLAUDE.md`. A module's
+  `files/claude/CLAUDE.md`, `files/claude/AGENTS.md` or
+  `files/claude/rules/qory-harness.md`, or a file at `files/claude/rules`, fails the
+  compose.
 - The `agent` image contains Claude Code 2.1.316, up from 2.1.273.
 - Claude Code runs with `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` and
   `CLAUDE_CODE_DISABLE_OFFICIAL_MARKETPLACE_AUTOINSTALL=1` in every run,

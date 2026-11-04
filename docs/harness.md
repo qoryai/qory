@@ -293,8 +293,9 @@ The checkout contains links too:
 - `.claude/rules` is a real directory in the same way. It contains
   `qory-harness.md`, a symlink to the home's `AGENTS.md`, and the rules the modules
   ship. Rules your repository keeps there stay. Claude Code loads the instructions as
-  this rule, beside your repository's `CLAUDE.md` or `AGENTS.md`. qory writes no
-  `CLAUDE.md`.
+  this rule, beside your repository's `CLAUDE.md`. Claude Code 2.1.277 or later also
+  reads your repository's `AGENTS.md` when the repository has no `CLAUDE.md`. qory
+  writes no `CLAUDE.md`.
 - `.mcp.json` and a root `AGENTS.md` are symlinks.
 
 A tool that walks the tree has to follow the links:

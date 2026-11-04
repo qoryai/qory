@@ -1,13 +1,13 @@
-// Package claude renders for Claude Code, which reads a project's .claude directory: the
-// skills, agents, commands, output styles and hooks under it, its settings.json, and the
-// rules under .claude/rules, and .mcp.json at the checkout root for the MCP servers. The
-// checkout gets .claude, a real directory containing one link per file of the runtime's
-// directory in the home, so Claude Code's settings.local.json stays beside them;
-// .claude/rules, a real directory in the same way, so a repository's rules stay beside
-// qory's; and a soft .mcp.json when the compose contains a server. The target model is
-// written into settings.json as model. Claude Code has a place for every entry kind, so
-// nothing is skipped, and a files entry named claude/<path> lands at .claude/<path>,
-// which is how a module ships .claude/rules/nextjs-15.md.
+// Package claude renders for Claude Code, which reads a project's .claude directory and
+// .mcp.json at the checkout root. Under .claude it reads the skills, agents, commands,
+// output styles and hooks, settings.json, and the rules in .claude/rules; .mcp.json lists
+// the MCP servers. The checkout gets .claude, a real directory containing one link per
+// file of the runtime's directory in the home, so Claude Code's settings.local.json stays
+// beside them; .claude/rules, a real directory in the same way, so a repository's rules
+// stay beside qory's; and a soft .mcp.json when the compose contains a server. The target
+// model is written into settings.json as model. Claude Code has a place for every entry
+// kind, so nothing is skipped, and a files entry named claude/<path> lands at
+// .claude/<path>, which is how a module ships .claude/rules/nextjs-15.md.
 //
 // qory writes no file named CLAUDE.md. The instructions reach a session in the checkout
 // as the rule rules/qory-harness.md, a link to the home's AGENTS.md, which every runtime
@@ -40,10 +40,10 @@
 //
 // The paths under .claude a files entry may not take, see [render.Reserved]:
 //
-//	CLAUDE.md              qory adds no CLAUDE.md to a checkout; ship the instructions as AGENTS.md at the module root
-//	AGENTS.md              qory adds no AGENTS.md under .claude; ship the instructions as AGENTS.md at the module root
+//	CLAUDE.md              qory adds none to a checkout; the instructions are a module's AGENTS.md
+//	AGENTS.md              qory adds none under .claude; the instructions are a module's AGENTS.md
 //	rules/qory-harness.md  qory links the instructions there
-//	rules                  the path alone: rules is a directory qory links one file at a time; ship each rule as rules/<name>
+//	rules                  as a file alone: qory links the directory one file at a time
 //	settings.json          qory writes it
 //	mcp.json               qory writes it
 //	plugin                 qory writes the plugin there
@@ -135,16 +135,19 @@ func writesRules(res *compose.Result) bool {
 // Skips is empty: Claude Code has a place for every kind.
 func (claude) Skips() []string { return nil }
 
-// Reserved are CLAUDE.md and AGENTS.md, which qory does not write here and a module may
-// not add, the rule and the two files Render writes, the rules directory as a file, the plugin and launch directories,
-// the settings file Claude Code writes and reads beside them, and the five kind
-// directories Render links.
+// Reserved are the paths a files entry may not take:
+//   - CLAUDE.md and AGENTS.md, which qory does not write here and a module may not add;
+//   - the rule and the two files Render writes;
+//   - rules itself as a file, since the checkout links that directory one file at a time;
+//   - the plugin and launch directories;
+//   - the settings file Claude Code writes and reads beside them;
+//   - the five kind directories Render links.
 func (claude) Reserved() []render.Reserved {
 	return []render.Reserved{
 		{Path: "CLAUDE.md", Why: "qory adds no CLAUDE.md to a checkout; ship the instructions as AGENTS.md at the module root"},
 		{Path: "AGENTS.md", Why: "qory adds no AGENTS.md under .claude; ship the instructions as AGENTS.md at the module root"},
 		{Path: Rules + "/" + HarnessRule, Why: "qory links the instructions there"},
-		{Path: Rules, Why: "rules is a directory qory links one file at a time; ship each rule as rules/<name>", Exact: true},
+		{Path: Rules, Why: "rules is a directory qory links one file at a time; ship each rule as files/claude/rules/<name>", Exact: true},
 		{Path: "settings.json", Why: "qory writes it"},
 		{Path: "mcp.json", Why: "qory writes it"},
 		{Path: Plugin, Why: "qory writes the plugin there"},
@@ -165,7 +168,8 @@ func (claude) Reserved() []render.Reserved {
 // references [render.BuildAt] resolved to the bare names, see [writeRule]. The rule is a
 // link and has no @AGENTS.md import: Claude Code resolves a link to its real path and
 // treats an import found through it as external, which it shows an approval prompt for
-// on every start. Then it writes the plugin, see [Plugin], and the launch instructions, see [Launch].
+// on every start. Then it writes the plugin, see [Plugin], and the launch instructions,
+// see [Launch].
 func (claude) Render(res *compose.Result, dir, home string) error {
 	if err := render.PlaceEntries(res, dir, render.Bare, "skills", "agents", "commands", "output-styles", "hooks"); err != nil {
 		return err

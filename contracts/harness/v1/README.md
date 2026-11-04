@@ -962,7 +962,7 @@ segment. The refusal lists the module, the entry and the reason, with status 2:
 
 | `target.runtime` | qory writes | The program reads as settings | A kind is linked at | Runs without the agent |
 |---|---|---|---|---|
-| `claude` | `rules/qory-harness.md`, `settings.json`, `mcp.json`, `plugin`, `launch`; `CLAUDE.md` and `AGENTS.md`, which qory does not write here; `rules` as a file, since qory links that directory one file at a time | `settings.local.json` | `skills`, `agents`, `commands`, `hooks`, `output-styles` | |
+| `claude` | `rules/qory-harness.md`, `settings.json`, `mcp.json`, `plugin`, `launch`; `rules` as a file, since qory links that directory one file at a time | `settings.local.json` | `skills`, `agents`, `commands`, `hooks`, `output-styles` | |
 | `codex` | `config.toml`, `AGENTS.md` | | `agents`, `skills` | |
 | `gemini` | `settings.json` | | `skills`, `hooks`, `agents`, `commands` | |
 | `opencode` | `opencode.json` | | `commands`, `hooks`, `agents`, `skills` | |
@@ -971,6 +971,9 @@ segment. The refusal lists the module, the entry and the reason, with status 2:
 | `amp` | | `settings.json` | | |
 | `goose` | | | `agents` | |
 | `any` | | | | |
+
+claude also reserves `CLAUDE.md` and `AGENTS.md`. qory does not write them under `.claude`,
+and a module ships its instructions as `AGENTS.md` at the module root.
 
 Per runtime, the files written into its directory:
 

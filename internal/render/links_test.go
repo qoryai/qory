@@ -133,6 +133,58 @@ func TestRulesLinkKeepsTheRepositorysTrackedRules(t *testing.T) {
 	}
 }
 
+// TestRulesLinkReplacesTheWholeDirectoryLinkOfAnEarlierCompose is a checkout composed by
+// a qory that linked .claude/rules whole: the link goes, and a real directory with one
+// link per rule takes its place.
+func TestRulesLinkReplacesTheWholeDirectoryLinkOfAnEarlierCompose(t *testing.T) {
+	res, root, home := composeFixture(t, "claude")
+	claude := lookup(t, "claude")
+	if err := render.Build(res, home, claude); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, ".claude"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join("..", ".qory", "harness", "claude", "rules"), filepath.Join(root, ".claude", "rules")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := render.LinkInto(claude, res, root, home, false); err != nil {
+		t.Fatal(err)
+	}
+	if info, err := os.Lstat(filepath.Join(root, ".claude", "rules")); err != nil || !info.IsDir() {
+		t.Fatalf(".claude/rules is not a real directory: %v", err)
+	}
+	checkLink(t, root, home, ".claude/rules/qory-harness.md", "AGENTS.md", readExclude(t, root))
+}
+
+// TestTrackedHarnessRuleIsForeign is a repository that tracks a file at
+// .claude/rules/qory-harness.md: without force the compose fails on it, and under force
+// the file is replaced by the link and listed, as for any other link.
+func TestTrackedHarnessRuleIsForeign(t *testing.T) {
+	res, root, home := composeFixture(t, "claude")
+	claude := lookup(t, "claude")
+	theirs := filepath.Join(root, ".claude", "rules", "qory-harness.md")
+	write(t, theirs, "theirs\n")
+	gitIn(t, root, "add", "-A")
+	gitIn(t, root, "-c", "user.name=T", "-c", "user.email=t@example.com", "commit", "-q", "-m", "rules")
+	if err := render.Build(res, home, claude); err != nil {
+		t.Fatal(err)
+	}
+	_, err := render.LinkInto(claude, res, root, home, false)
+	var foreign *render.ForeignPathError
+	if !errorsAs(err, &foreign) || foreign.Path != theirs {
+		t.Fatalf("err = %v, want a ForeignPathError for %s", err, theirs)
+	}
+	if data, _ := os.ReadFile(theirs); string(data) != "theirs\n" {
+		t.Errorf("the tracked file changed without force: %q", data)
+	}
+	linked, err := render.LinkInto(claude, res, root, home, true)
+	if err != nil || len(linked.Replaced) != 1 || linked.Replaced[0] != ".claude/rules/qory-harness.md" {
+		t.Fatalf("force: linked=%+v err=%v", linked, err)
+	}
+	checkLink(t, root, home, ".claude/rules/qory-harness.md", "AGENTS.md", readExclude(t, root))
+}
+
 // TestNoRuleWithoutInstructions is a compose whose modules have no AGENTS.md: the home
 // has no AGENTS.md and no claude/rules, and the checkout gets no .claude/rules, so no
 // link points at a file that is not there.
@@ -179,9 +231,10 @@ func TestDirectoryLinkReplacesTheWholeDirectoryLinkOfAnEarlierRelease(t *testing
 }
 
 // TestLinkIntoPrunesWhatTheComposeNoLongerAsksFor composes twice, the second time with no
-// instructions: the AGENTS.override.md link and the .claude/rules/qory-harness.md link
-// both go, and .claude/rules with it, since nothing else is in it, and nothing else does. A kind directory left empty stays linked, so a runtime keeps every
-// place it reads.
+// instructions. Three paths go: the AGENTS.override.md link, the
+// .claude/rules/qory-harness.md link, and .claude/rules, which is then empty. Every other
+// link stays. A kind directory left empty stays linked, so a runtime keeps every place it
+// reads.
 func TestLinkIntoPrunesWhatTheComposeNoLongerAsksFor(t *testing.T) {
 	res, root, home := composeFixture(t, "claude", "codex")
 	claude, codex := lookup(t, "claude"), lookup(t, "codex")

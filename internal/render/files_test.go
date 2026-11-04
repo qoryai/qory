@@ -262,7 +262,7 @@ func TestCheckFilesRefusesReservedPaths(t *testing.T) {
 		{"claude/CLAUDE.md", "module nextjs ships files/claude/CLAUDE.md, and qory adds no CLAUDE.md to a checkout; ship the instructions as AGENTS.md at the module root"},
 		{"claude/AGENTS.md", "module nextjs ships files/claude/AGENTS.md, and qory adds no AGENTS.md under .claude; ship the instructions as AGENTS.md at the module root"},
 		{"claude/rules/qory-harness.md", "module nextjs ships files/claude/rules/qory-harness.md, and qory links the instructions there"},
-		{"claude/rules", "module nextjs ships files/claude/rules, and rules is a directory qory links one file at a time; ship each rule as rules/<name>"},
+		{"claude/rules", "module nextjs ships files/claude/rules, and rules is a directory qory links one file at a time; ship each rule as files/claude/rules/<name>"},
 		{"claude/settings.local.json", "module nextjs ships files/claude/settings.local.json, and Claude Code reads it as settings; a module sets those through settings/claude/settings.json"},
 		{"claude/skills/review/SKILL.md", "module nextjs ships files/claude/skills/review/SKILL.md, and skills are linked there; ship it as skills/<name>"},
 		{"copilot/workflows/ci.yml", "module nextjs ships files/copilot/workflows/ci.yml, and GitHub runs it on every push"},
@@ -300,6 +300,8 @@ func TestCheckFilesMatchesByPathSegment(t *testing.T) {
 		{"claude/skills-private/x.md", false},
 		{"claude/rules/x.md", false},
 		{"claude/rules/web/x.md", false},
+		{"claude/rules-x", false},
+		{"claude/rulesx", false},
 		{"claude/skills/x.md", true},
 		{"claude/skills", true},
 	} {
