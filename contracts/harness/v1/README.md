@@ -527,17 +527,18 @@ A questions document records every question of a work item and its answer, one d
 per work item and at most 1 MiB. A run adds, withdraws or reopens questions with `qory
 artifact push questions`, and the control plane writes the answers. An answer has
 `option`, the title of the option the member chose, or `null`, and `note`, added detail on
-the chosen option, or the member's answer when `option` is `null`. This is version 1 of
+the chosen option, or the member's answer when `option` is `null`. `note` is optional when
+the member chose an option and required when `option` is `null`. This is version 1 of
 the format ([questions.schema.json](questions.schema.json)).
 
 ## The review comments format
 
 A review comments document records the members' review comments on a work item's artifact
-versions, such as a proposal, and the replies to them, one document per work item. The
-control plane writes the members' review comments and replies. A version that a run
-pushes only adds the run's reply to each open review comment and closes that review
-comment: it changes no member's text, drops no id and adds no review comment. A run's
-reply has an `outcome`:
+versions, such as a proposal, and the replies to them, one document per work item and at
+most 1 MiB. The control plane writes the members' review comments and replies. A version
+that a run pushes only adds the run's reply to each open review comment and closes that
+review comment: it changes no member's text, drops no id and adds no review comment. A
+run's reply has an `outcome`:
 
 | `outcome` | Meaning |
 |---|---|
@@ -552,12 +553,12 @@ A member's reply has no `outcome` and no `question`. This is version 1 of the fo
 ## The proposal sources format
 
 A proposal sources document is the file `sources.json` of a version of the artifact type
-`proposal`, beside `proposal.md`. It records every source the run used to write the
-proposal, with the reason for each, for the agent of the next stage. A source is anything
-the run read: a web page, a ticket, a record in another system, a document or a file in a
-repository. Each source has a `kind` from an open list, such as `page` or `record`, a
-`ref` in the form that its kind needs, and a `why`; `system`, `container` and `locator`
-are optional. This is version 1 of the format
+`proposal`, beside `proposal.md`, and at most 1 MiB. It records every source the run used
+to write the proposal, with the reason for each, for the agent of the next stage. A source
+is anything the run read: a web page, a ticket, a record in another system, a document or
+a file in a repository. Each source has a `kind` from an open list, such as `page` or
+`record`, a `ref` in the form that its kind needs, and a `why`; `system`, `container` and
+`locator` are optional. This is version 1 of the format
 ([proposal-sources.schema.json](proposal-sources.schema.json)).
 
 ## The module manifest

@@ -387,7 +387,7 @@ const questionsDocument = `{"questions": [
   "state": "open", "asked": {"run": 2, "at": "2026-11-04T10:45:00Z"}, "follows": ["q1"]}
 ]}`
 
-// TestQuestionsSchema is each document that questions.schema.json takes or does not take.
+// TestQuestionsSchema is each document that questions.schema.json passes or fails.
 func TestQuestionsSchema(t *testing.T) {
 	schema, err := jsonschema.NewCompiler().Compile("../../contracts/harness/v1/questions.schema.json")
 	if err != nil {
@@ -471,6 +471,7 @@ func TestQuestionsSchema(t *testing.T) {
 		{replace(answerStart, `"answer": {"option": null`), false},
 		{replace(answerStart, `"answer": {"option": "PostgreSQL", "custom": false`), false},
 		{replace(answerStart, `"answer": {"option": "PostgreSQL", "text": "PostgreSQL"`), false},
+		{replace(answerStart, `"answer": {"option": "PostgreSQL", "note": "`+strings.Repeat("a", 2000)+`"`), true},
 		{replace(answerStart, `"answer": {"option": "PostgreSQL", "note": "`+strings.Repeat("a", 2001)+`"`), false},
 		{replace(answerStart, `"answer": {"option": "PostgreSQL", "note": ""`), false},
 		{replace(answerStart, `"answer": {"note": "PostgreSQL"`), false},
@@ -495,6 +496,7 @@ func TestQuestionsSchema(t *testing.T) {
 		{replace(historyStart, `"history": [{"option": null`), false},
 		{replace(historyStart, historyStart+`, "custom": true`), false},
 		{replace(historyStart, historyStart+`, "text": "Not sure"`), false},
+		{replace(historyStart, `"history": [{"option": null, "note": "`+strings.Repeat("a", 2000)+`"`), true},
 		{replace(historyStart, `"history": [{"option": null, "note": "`+strings.Repeat("a", 2001)+`"`), false},
 		{replace(historyStart, `"history": [{"option": null, "note": ""`), false},
 		{replace(historyStart, `"history": [{"note": "Not\nsure"`), false},
@@ -532,8 +534,8 @@ const reviewCommentsDocument = `{"review_comments": [
   "text": "Why two steps?", "by": {"name": "Sam Example"}, "at": "2026-11-04T11:00:00Z", "state": "open"}
 ]}`
 
-// TestReviewCommentsSchema is each document that review-comments.schema.json takes or
-// does not take.
+// TestReviewCommentsSchema is each document that review-comments.schema.json passes or
+// fails.
 func TestReviewCommentsSchema(t *testing.T) {
 	schema, err := jsonschema.NewCompiler().Compile("../../contracts/harness/v1/review-comments.schema.json")
 	if err != nil {
@@ -567,7 +569,10 @@ func TestReviewCommentsSchema(t *testing.T) {
 		{replace(`"outcome": "changed"`, `"outcome": "asked", "question": "q-3"`), true},
 		{replace(`"outcome": "changed"`, `"outcome": "asked"`), false},
 		{replace(`"outcome": "changed"`, `"outcome": "changed", "question": "q-3"`), false},
+		{replace(`"outcome": "changed"`, `"outcome": "answered", "question": "q-3"`), false},
+		{replace(`"outcome": "changed"`, `"outcome": "declined", "question": "q-3"`), false},
 		{replace(memberReply, memberReply+`, "question": "q-3"`), false},
+		{replace(memberReply, memberReply+`, "outcome": "asked", "question": "q-3"`), false},
 		{replace(`"outcome": "changed"`, `"outcome": "asked", "question": "Q_3"`), false},
 		{replace(`"outcome": "changed"`, `"outcome": "asked", "question": "`+strings.Repeat("a", 33)+`"`), false},
 		{replace(`"by": {"run": 3}`, `"by": {"run": 0}`), false},
@@ -626,8 +631,8 @@ const proposalSourcesDocument = `{"sources": [
  {"kind": "record", "ref": "ACC-1042", "system": "crm.example.com", "container": "Accounts", "locator": "renewal date", "why": "The renewal date of the account."}
 ]}`
 
-// TestProposalSourcesSchema is each document that proposal-sources.schema.json takes or
-// does not take.
+// TestProposalSourcesSchema is each document that proposal-sources.schema.json passes
+// or fails.
 func TestProposalSourcesSchema(t *testing.T) {
 	schema, err := jsonschema.NewCompiler().Compile("../../contracts/harness/v1/proposal-sources.schema.json")
 	if err != nil {
@@ -675,7 +680,7 @@ func TestProposalSourcesSchema(t *testing.T) {
 		{replace(`"system": "crm.example.com"`, `"system": "`+strings.Repeat("a", 63)+`"`), true},
 		{replace(`"system": "crm.example.com"`, `"system": "`+strings.Repeat("a", 64)+`"`), false},
 		{replace(`"system": "crm.example.com"`, `"system": "`+strings.TrimSuffix(strings.Repeat("a.", 127), ".")+`"`), true},
-		{replace(`"system": "crm.example.com"`, `"system": "`+strings.Repeat("a.", 127)+`a"`), false},
+		{replace(`"system": "crm.example.com"`, `"system": "`+strings.TrimSuffix(strings.Repeat("a.", 127), ".")+`a"`), false},
 		{replace(`"system": "crm.example.com"`, `"system": "https://crm.example.com"`), false},
 		{replace(`"system": "crm.example.com"`, `"system": "crm.example.com:8443"`), false},
 		{replace(`"system": "crm.example.com"`, `"system": "crm..example.com"`), false},
