@@ -18,7 +18,7 @@ func TestDiffNamesEveryWayTwoTreesDiffer(t *testing.T) {
 	want, have := t.TempDir(), t.TempDir()
 	for _, dir := range []string{want, have} {
 		write(t, filepath.Join(dir, "same.md"), "same\n")
-		write(t, filepath.Join(dir, "claude", "CLAUDE.md"), "rules\n")
+		write(t, filepath.Join(dir, "claude", "launch", "AGENTS.md"), "rules\n")
 		if err := os.MkdirAll(filepath.Join(dir, "claude", "skills"), 0o755); err != nil {
 			t.Fatal(err)
 		}

@@ -891,10 +891,12 @@ symlink. A link to a directory, such as `.claude`, is a real directory in the ch
 containing one symlink per entry of the tree's directory, `.claude/skills` and
 `.claude/settings.json` alike, so the checkout's files there stay: Claude Code's
 `.claude/settings.local.json` survives every compose, and a repository may keep its
-agents under `.github/agents` beside the linked ones. A directory a module's files make in
-the tree, such as `.claude/rules`, is one such symlink, like `.claude/skills`: a repository
-that keeps its rules there moves them into a module, under `extends` into a module it
-appends, with `claude/rules/` in the base's `files` list. A compose also removes what a
+agents under `.github/agents` beside the linked ones. `.claude/rules` is a second
+directory link of this kind, so the rules a repository keeps there stay beside
+`qory-harness.md` and the rules the modules ship. Any other directory a module's files make
+in the tree is one such symlink, like `.claude/skills`: a repository that keeps files there
+moves them into a module, under `extends` into a module it appends, with that directory in
+the base's `files` list. A compose also removes what a
 previous one linked and this one does not. `qory harness remove --runtime <name>` takes one
 runtime's links and leaves a link another composed runtime shares, such as `.agents/skills`.
 A link is written, pruned or removed only where the checkout is: a directory on the way
@@ -918,6 +920,7 @@ without a report, so a `.qory` deleted by hand leaves no link behind.
 
 The links listed below are the full set; a link to a file the compose did not produce is
 left out, `AGENTS.md`, `AGENTS.override.md` and `GEMINI.md` without instructions,
+`.claude/rules` without instructions and without a module's `files/claude/rules/` entry,
 `.mcp.json` without a server or a `settings/claude/mcp.json` fragment, `opencode.json`
 without a model, a server or a fragment.
 
@@ -935,7 +938,7 @@ so the hint is not lost.
 
 | `target.runtime` | Program | Links in the checkout | Model written to | MCP servers written to | A fragment's variables, set in the launch | Files land in | Kinds with no place |
 |---|---|---|---|---|---|---|---|
-| `claude` | Claude Code | `.claude`, `.mcp.json` | `.claude/settings.json` `model` | `.mcp.json` `mcpServers` | `settings/claude/settings.json` `env` | `.claude/<path>` | none |
+| `claude` | Claude Code | `.claude`, `.claude/rules`, `.mcp.json` | `.claude/settings.json` `model` | `.mcp.json` `mcpServers` | `settings/claude/settings.json` `env` | `.claude/<path>` | none |
 | `codex` | Codex CLI | `.codex`, `.agents/skills`, `AGENTS.override.md` | `.codex/config.toml` `model` | `.codex/config.toml` `mcp_servers` | `settings/codex/config.toml` `shell_environment_policy.set` | `.codex/<path>` | commands, output-styles |
 | `gemini` | Gemini CLI | `.gemini`, `GEMINI.md` | `.gemini/settings.json` `model.name` | `.gemini/settings.json` `mcpServers` | none | `.gemini/<path>` | output-styles |
 | `opencode` | OpenCode | `.opencode`, `.agents/skills`, `opencode.json`, `AGENTS.md` | `opencode.json` `model` | `opencode.json` `mcp`, in OpenCode's shape | none | `.opencode/<path>` | output-styles |
@@ -959,7 +962,7 @@ segment. The refusal lists the module, the entry and the reason, with status 2:
 
 | `target.runtime` | qory writes | The program reads as settings | A kind is linked at | Runs without the agent |
 |---|---|---|---|---|
-| `claude` | `CLAUDE.md`, `settings.json`, `mcp.json`, `plugin`, `launch` | `settings.local.json` | `skills`, `agents`, `commands`, `hooks`, `output-styles` | |
+| `claude` | `rules/qory-harness.md`, `settings.json`, `mcp.json`, `plugin`, `launch`; `CLAUDE.md` and `AGENTS.md`, which qory does not write here; `rules` as a file, since qory links that directory one file at a time | `settings.local.json` | `skills`, `agents`, `commands`, `hooks`, `output-styles` | |
 | `codex` | `config.toml`, `AGENTS.md` | | `agents`, `skills` | |
 | `gemini` | `settings.json` | | `skills`, `hooks`, `agents`, `commands` | |
 | `opencode` | `opencode.json` | | `commands`, `hooks`, `agents`, `skills` | |
@@ -972,14 +975,17 @@ segment. The refusal lists the module, the entry and the reason, with status 2:
 Per runtime, the files written into its directory:
 
 - **claude**: links for every kind, `settings.json` with the model and without `env`,
-  whose variables are the launch's, `mcp.json` with the servers, linked as `.mcp.json` at the checkout root, and the
-  instructions written in full as `CLAUDE.md`. They are not imported from `AGENTS.md`,
-  because Claude Code resolves a link to its real path and prompts about an import found
-  through one on every start. `plugin/` is the launch spec, a plugin in Claude Code's
-  layout, and `launch/CLAUDE.md` the instructions a launch reads, with the plugin's names
-  and the names the session registers after the modules' text (§Launching); neither is
-  linked into the checkout, whose `.claude/CLAUDE.md` and `.claude/agents` register the
-  bare names.
+  whose variables are the launch's, `mcp.json` with the servers, linked as `.mcp.json` at the checkout root, and
+  `rules/qory-harness.md`, a relative symlink to the tree's `AGENTS.md`, or a copy of it in
+  the tree of a hidden harness, linked as `.claude/rules/qory-harness.md`. qory writes no `CLAUDE.md`. Claude Code loads a rule
+  without `paths` frontmatter at launch, beside a repository's `CLAUDE.md`, and a rule
+  does not hide a repository's `AGENTS.md`, as a `.claude/CLAUDE.md` does. The rule is a
+  link with no `@AGENTS.md` import, because Claude Code resolves a link to its real path
+  and prompts about an import found through one on every start. `plugin/` is the launch
+  spec, a plugin in Claude Code's layout, and `launch/AGENTS.md` the instructions a launch
+  reads, with the plugin's names and the names the session registers after the modules'
+  text (§Launching); neither is linked into the checkout, whose
+  `.claude/rules/qory-harness.md` and `.claude/agents` register the bare names.
 - **codex**: `config.toml` with the model, the servers as `[mcp_servers.<name>]` tables,
   and any other `settings/codex/` file, without `shell_environment_policy.set`, whose
   variables are the launch's, one `agents/<name>.toml` per agent with the body as
@@ -1087,7 +1093,7 @@ reports it with status 2: `goose` and `any`.
 
 | `target.runtime` | Template | Rendered for it under the runtime's directory | Reaches the session from outside | Read from the checkout alone |
 |---|---|---|---|---|
-| `claude` | `claude --plugin-dir ${dir}/plugin --settings ${dir}/settings.json --mcp-config ${dir}/mcp.json --append-system-prompt-file ${dir}/launch/CLAUDE.md --setting-sources user` | `plugin/`, a plugin in Claude Code's layout: the skills and commands linked, or written where a document contains a reference, the agents copied, since Claude Code passes over a link in a plugin's `agents/` where it follows one everywhere else, the output styles under `output-styles/` with the manifest's `outputStyles` pointing there, `.claude-plugin/plugin.json` setting its name to `harness`, so a skill is `/harness:<name>` and an agent `harness:<name>`, and every reference in the plugin resolves to that name; `launch/CLAUDE.md`, the instructions with their references resolved the same way and, after them, the names the session registers, per kind, with each role | everything: the plugin, the permissions, hooks and model in `settings.json`, the environment the line sets, the servers, the instructions appended to the system prompt; `--setting-sources user` keeps every `.claude` of the checkout and of the directories above it out | nothing |
+| `claude` | `claude --plugin-dir ${dir}/plugin --settings ${dir}/settings.json --mcp-config ${dir}/mcp.json --append-system-prompt-file ${dir}/launch/AGENTS.md --setting-sources user` | `plugin/`, a plugin in Claude Code's layout: the skills and commands linked, or written where a document contains a reference, the agents copied, since Claude Code passes over a link in a plugin's `agents/` where it follows one everywhere else, the output styles under `output-styles/` with the manifest's `outputStyles` pointing there, `.claude-plugin/plugin.json` setting its name to `harness`, so a skill is `/harness:<name>` and an agent `harness:<name>`, and every reference in the plugin resolves to that name; `launch/AGENTS.md`, the instructions with their references resolved the same way and, after them, the names the session registers, per kind, with each role | everything: the plugin, the permissions, hooks and model in `settings.json`, the environment the line sets, the servers, the instructions appended to the system prompt; `--setting-sources user` keeps every `.claude` of the checkout and of the directories above it out | nothing |
 | `cursor` | `cursor-agent --plugin-dir ${dir}/plugin` | `plugin/`, the same layout under `.cursor-plugin/plugin.json`, with the agents in Cursor's shape, a copy of `hooks.json` as `hooks/hooks.json` and of `mcp.json` as `.mcp.json`, since the CLI takes no settings file | the skills, agents, hooks and servers | the instructions, `AGENTS.md` |
 | `copilot` | `copilot --add-dir ${dir}/workspace --additional-mcp-config @${dir}/mcp.json` | `workspace/.github/skills` linked and `workspace/.github/agents` written, which `--add-dir` loads as trusted configuration, and `mcp.json` with the servers under `mcpServers`, so the MCP kind has a place in copilot | the skills, agents and servers | the hooks and the instructions |
 | `codex` | `env CODEX_HOME=${dir} codex` | `skills/` linked and the instructions as `AGENTS.md`, ending with the names the session registers, which a Codex home registers as the modules wrote them, beside `config.toml` and the agents, so the directory is a Codex home | everything | nothing; Codex keeps its login in the same home, `auth.json`, so a launcher authenticates through `OPENAI_API_KEY` or puts `auth.json` there |

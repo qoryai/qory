@@ -35,8 +35,9 @@ func dropFiles(res *compose.Result) {
 
 // TestFileReachesClaudeThroughTheDirectoryLink is a module shipping
 // files/claude/rules/nextjs-15.md: the home holds it under claude/rules, the checkout's
-// .claude/rules is one link like .claude/skills, and Claude Code reads the file through
-// it. A remove takes the link with the rest of .claude.
+// .claude/rules is a real directory with one link per rule, the file's beside
+// qory-harness.md, and Claude Code reads the file through it. A remove takes the links
+// and the directory with the rest of .claude.
 func TestFileReachesClaudeThroughTheDirectoryLink(t *testing.T) {
 	res, root, home := composeFixture(t, "claude")
 	claude := lookup(t, "claude")
@@ -54,8 +55,13 @@ func TestFileReachesClaudeThroughTheDirectoryLink(t *testing.T) {
 	if err != nil || len(linked.Skipped) != 0 {
 		t.Fatalf("linked=%+v err=%v", linked, err)
 	}
-	if !isLink(t, filepath.Join(root, ".claude", "rules")) {
-		t.Error(".claude/rules is not one link")
+	if info, err := os.Lstat(filepath.Join(root, ".claude", "rules")); err != nil || !info.IsDir() {
+		t.Errorf(".claude/rules is not a real directory: %v", err)
+	}
+	for _, name := range []string{"nextjs-15.md", "qory-harness.md"} {
+		if !isLink(t, filepath.Join(root, ".claude", "rules", name)) {
+			t.Errorf(".claude/rules/%s is not a link", name)
+		}
 	}
 	data, err := os.ReadFile(filepath.Join(root, ".claude", "rules", "nextjs-15.md"))
 	if err != nil || string(data) != "# Next.js 15\n" {
@@ -70,8 +76,8 @@ func TestFileReachesClaudeThroughTheDirectoryLink(t *testing.T) {
 }
 
 // TestFileWithANestedPath is a files entry three directories deep: every directory
-// between is created in the home, and the checkout reads the file through the one link
-// at .claude/rules.
+// between is created in the home, and the checkout reads the file through the link
+// at .claude/rules/web.
 func TestFileWithANestedPath(t *testing.T) {
 	res, root, home := composeFixture(t, "claude")
 	claude := lookup(t, "claude")
@@ -235,7 +241,7 @@ func TestAnotherRuntimesFileIsNeitherRenderedNorSkipped(t *testing.T) {
 	if err := render.Build(res, home, claude, goose); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Lstat(filepath.Join(home, "claude", "rules")); err == nil {
+	if _, err := os.Lstat(filepath.Join(home, "claude", "rules", "nextjs-15.mdc")); err == nil {
 		t.Error("claude rendered a file shipped for cursor")
 	}
 	for _, p := range []render.Runtime{claude, goose} {
@@ -253,6 +259,10 @@ func TestAnotherRuntimesFileIsNeitherRenderedNorSkipped(t *testing.T) {
 func TestCheckFilesRefusesReservedPaths(t *testing.T) {
 	for _, c := range []struct{ name, want string }{
 		{"claude/settings.json", "module nextjs ships files/claude/settings.json, and qory writes it"},
+		{"claude/CLAUDE.md", "module nextjs ships files/claude/CLAUDE.md, and qory adds no CLAUDE.md to a checkout; ship the instructions as AGENTS.md at the module root"},
+		{"claude/AGENTS.md", "module nextjs ships files/claude/AGENTS.md, and qory adds no AGENTS.md under .claude; ship the instructions as AGENTS.md at the module root"},
+		{"claude/rules/qory-harness.md", "module nextjs ships files/claude/rules/qory-harness.md, and qory links the instructions there"},
+		{"claude/rules", "module nextjs ships files/claude/rules, and rules is a directory qory links one file at a time; ship each rule as rules/<name>"},
 		{"claude/settings.local.json", "module nextjs ships files/claude/settings.local.json, and Claude Code reads it as settings; a module sets those through settings/claude/settings.json"},
 		{"claude/skills/review/SKILL.md", "module nextjs ships files/claude/skills/review/SKILL.md, and skills are linked there; ship it as skills/<name>"},
 		{"copilot/workflows/ci.yml", "module nextjs ships files/copilot/workflows/ci.yml, and GitHub runs it on every push"},
@@ -288,6 +298,8 @@ func TestCheckFilesMatchesByPathSegment(t *testing.T) {
 		refused bool
 	}{
 		{"claude/skills-private/x.md", false},
+		{"claude/rules/x.md", false},
+		{"claude/rules/web/x.md", false},
 		{"claude/skills/x.md", true},
 		{"claude/skills", true},
 	} {
@@ -315,13 +327,13 @@ func TestCheckFilesChecksEveryRuntimesEntries(t *testing.T) {
 }
 
 // TestBuildRefusesAFileWhereRenderWrote is a files entry at a path a runtime's reserved
-// table missed, here CLAUDE.md with the check not run: the build fails naming the entry
-// rather than replacing what Render wrote.
+// table missed, here rules/qory-harness.md with the check not run: the build fails
+// naming the entry rather than replacing what Render wrote.
 func TestBuildRefusesAFileWhereRenderWrote(t *testing.T) {
 	res, _, home := composeFixture(t, "claude")
-	shipFile(t, res, "claude/CLAUDE.md", "theirs\n")
+	shipFile(t, res, "claude/rules/qory-harness.md", "theirs\n")
 	err := render.Build(res, home, lookup(t, "claude"))
-	if err == nil || !strings.Contains(err.Error(), "files/claude/CLAUDE.md from module nextjs") {
+	if err == nil || !strings.Contains(err.Error(), "files/claude/rules/qory-harness.md from module nextjs") {
 		t.Fatalf("err = %v, want a refusal naming the entry", err)
 	}
 	if _, err := os.Lstat(home + ".tmp"); err == nil {

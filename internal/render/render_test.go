@@ -32,7 +32,7 @@ func TestRuntimes(t *testing.T) {
 		t.Fatal(err)
 	}
 	expect := map[string][]string{
-		"claude":   {"claude/skills/review/SKILL.md", "claude/agents/reviewer.md", "claude/commands/ship.md", "claude/output-styles/terse.md", "claude/hooks/guard.sh", "claude/settings.json", "claude/CLAUDE.md", "claude/mcp.json"},
+		"claude":   {"claude/skills/review/SKILL.md", "claude/agents/reviewer.md", "claude/commands/ship.md", "claude/output-styles/terse.md", "claude/hooks/guard.sh", "claude/settings.json", "claude/rules/qory-harness.md", "claude/launch/AGENTS.md", "claude/mcp.json"},
 		"codex":    {"codex/config.toml", "codex/agents/reviewer.toml"},
 		"gemini":   {"gemini/settings.json", "gemini/skills/review/SKILL.md", "gemini/agents/reviewer.md", "gemini/commands/ship.toml"},
 		"opencode": {"opencode/opencode.json", "opencode/agents/reviewer.md", "opencode/commands/ship.md"},

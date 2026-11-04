@@ -35,21 +35,32 @@ func TestComposeWritesTheHomeAndLinksIt(t *testing.T) {
 	)
 	// The links are printed under the runtime that needs them.
 	wantsRow(t, out, "home", ".qory/harness")
-	wantsRow(t, out, "claude", ".claude  .mcp.json")
+	wantsRow(t, out, "claude", ".claude  .claude/rules  .mcp.json")
 	// Without --verbose the entries stay out of the output.
 	lacks(t, out, "skills/e2e", "output-styles/terse")
 
 	home := filepath.Join(root, ".qory", "harness")
-	for _, name := range []string{"AGENTS.md", "claude/CLAUDE.md", "claude/settings.json", "claude/skills/test", "skills/test", "modules/core/scripts/db.py"} {
+	for _, name := range []string{"AGENTS.md", "claude/rules/qory-harness.md", "claude/settings.json", "claude/skills/test", "skills/test", "modules/core/scripts/db.py"} {
 		if _, err := os.Stat(filepath.Join(home, name)); err != nil {
 			t.Errorf("home lacks %s: %v", name, err)
 		}
 	}
 	// .claude is a real directory, one link per file the home's claude directory holds.
-	targets := dirLinks(t, root, ".claude", "skills", "agents", "commands", "output-styles", "hooks", "settings.json", "CLAUDE.md")
+	targets := dirLinks(t, root, ".claude", "skills", "agents", "commands", "output-styles", "hooks", "settings.json")
 	if targets["settings.json"] != filepath.Join("..", ".qory", "harness", "claude", "settings.json") {
 		t.Errorf(".claude/settings.json links to %q", targets["settings.json"])
 	}
+	// .claude/rules is a real directory too, and its qory-harness.md leads to the home's
+	// AGENTS.md. No CLAUDE.md is written.
+	rules := dirLinks(t, root, filepath.Join(".claude", "rules"), "qory-harness.md")
+	if rules["qory-harness.md"] != filepath.Join("..", "..", ".qory", "harness", "claude", "rules", "qory-harness.md") {
+		t.Errorf(".claude/rules/qory-harness.md links to %q", rules["qory-harness.md"])
+	}
+	if data, err := os.ReadFile(filepath.Join(root, ".claude", "rules", "qory-harness.md")); err != nil || !strings.Contains(string(data), "# Core") {
+		t.Errorf(".claude/rules/qory-harness.md = %q, %v", data, err)
+	}
+	gone(t, root, ".claude/CLAUDE.md")
+	gone(t, home, "claude/CLAUDE.md")
 	if target := linkTarget(t, root, ".mcp.json"); target != filepath.Join(".qory", "harness", "claude", "mcp.json") {
 		t.Errorf(".mcp.json links to %q", target)
 	}

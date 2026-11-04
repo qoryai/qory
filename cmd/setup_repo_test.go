@@ -38,7 +38,7 @@ func TestSetupRepoSetsTheRepositoryUp(t *testing.T) {
 		t.Fatal(err, out)
 	}
 	wants(t, out, "🐝 my-app · claude", "composed 0 entries from 1 module")
-	data, err := os.ReadFile(filepath.Join(root, ".claude", "CLAUDE.md"))
+	data, err := os.ReadFile(filepath.Join(root, ".claude", "rules", "qory-harness.md"))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -44,7 +44,7 @@ func TestComposeForSeveralRuntimesFromTheStack(t *testing.T) {
 		t.Fatalf("%v\n%s", err, out)
 	}
 	wants(t, out, ui.Mark+" acme/app · claude, codex", "composed 8 entries from 2 modules")
-	wantsRow(t, out, "claude", claudeLink+"  .mcp.json")
+	wantsRow(t, out, "claude", claudeLink+"  .claude/rules  .mcp.json")
 	wantsRow(t, out, "codex", strings.Join(codexLinks, "  "))
 	linkedFor(t, root, "claude", "codex")
 	for _, dir := range []string{"claude", "codex"} {
@@ -79,7 +79,7 @@ func TestComposeKeepsARuntimeComposedEarlier(t *testing.T) {
 		t.Fatalf("%v\n%s", err, out)
 	}
 	wants(t, out, ui.Mark+" acme/app · codex", "(composed here by a previous compose, refreshed)")
-	wantsRow(t, out, "claude", claudeLink+"  .mcp.json  (composed here by a previous compose, refreshed)")
+	wantsRow(t, out, "claude", claudeLink+"  .claude/rules  .mcp.json  (composed here by a previous compose, refreshed)")
 	linkedFor(t, root, "claude", "codex")
 	// The report names every runtime the home holds, the target first.
 	if rep := readReport(t, root); !slices.Equal(rep.Target.Runtimes, []string{"codex", "claude"}) {

@@ -85,7 +85,7 @@ func TestComposeOutsideTheCheckoutLeavesItUntouched(t *testing.T) {
 	if rep.Modules[0].Link != "harness" {
 		t.Errorf("the report lost the stack's link: %+v", rep.Modules[0])
 	}
-	for _, name := range []string{"AGENTS.md", "hooks/guard.sh", "modules/core/scripts/db.py", "claude/settings.json", "claude/mcp.json", "claude/CLAUDE.md", "claude/launch/CLAUDE.md", "claude/skills/review/SKILL.md", "claude/plugin/.claude-plugin/plugin.json", "claude/plugin/skills/review/SKILL.md", "claude/plugin/skills/e2e/SKILL.md", "claude/plugin/agents/reviewer.md", "claude/plugin/commands/ship.md", "claude/plugin/output-styles/terse.md"} {
+	for _, name := range []string{"AGENTS.md", "hooks/guard.sh", "modules/core/scripts/db.py", "claude/settings.json", "claude/mcp.json", "claude/rules/qory-harness.md", "claude/launch/AGENTS.md", "claude/skills/review/SKILL.md", "claude/plugin/.claude-plugin/plugin.json", "claude/plugin/skills/review/SKILL.md", "claude/plugin/skills/e2e/SKILL.md", "claude/plugin/agents/reviewer.md", "claude/plugin/commands/ship.md", "claude/plugin/output-styles/terse.md"} {
 		if _, err := os.Stat(filepath.Join(home, name)); err != nil {
 			t.Errorf("home lacks %s: %v", name, err)
 		}
@@ -107,7 +107,7 @@ func TestComposeOutsideTheCheckoutLeavesItUntouched(t *testing.T) {
 		t.Fatalf("%v\n%s", err, out)
 	}
 	claude := filepath.Join(home, "claude")
-	want := strings.Join([]string{"env", "QORY_HARNESS_HOME=" + home, "A=core", "B=1", "claude", "--plugin-dir", filepath.Join(claude, "plugin"), "--settings", filepath.Join(claude, "settings.json"), "--mcp-config", filepath.Join(claude, "mcp.json"), "--append-system-prompt-file", filepath.Join(claude, "launch", "CLAUDE.md"), "--setting-sources", "user"}, " ")
+	want := strings.Join([]string{"env", "QORY_HARNESS_HOME=" + home, "A=core", "B=1", "claude", "--plugin-dir", filepath.Join(claude, "plugin"), "--settings", filepath.Join(claude, "settings.json"), "--mcp-config", filepath.Join(claude, "mcp.json"), "--append-system-prompt-file", filepath.Join(claude, "launch", "AGENTS.md"), "--setting-sources", "user"}, " ")
 	if strings.TrimSpace(out) != want {
 		t.Errorf("launch printed\n%s\nwant\n%s", out, want)
 	}
@@ -394,7 +394,7 @@ func TestLaunchPerRuntime(t *testing.T) {
 	// Every line starts with the home; claude's carries its fragments' A and B.
 	at := "env QORY_HARNESS_HOME=" + home + " "
 	lines := map[string]string{
-		"claude":   at + "A=core B=1 claude --plugin-dir " + dir("claude") + "/plugin --settings " + dir("claude") + "/settings.json --mcp-config " + dir("claude") + "/mcp.json --append-system-prompt-file " + dir("claude") + "/launch/CLAUDE.md --setting-sources user",
+		"claude":   at + "A=core B=1 claude --plugin-dir " + dir("claude") + "/plugin --settings " + dir("claude") + "/settings.json --mcp-config " + dir("claude") + "/mcp.json --append-system-prompt-file " + dir("claude") + "/launch/AGENTS.md --setting-sources user",
 		"codex":    at + "CODEX_HOME=" + dir("codex") + " codex",
 		"opencode": at + "OPENCODE_CONFIG_DIR=" + dir("opencode") + " opencode",
 		"amp":      at + "amp --settings-file " + dir("amp") + "/settings.json",
