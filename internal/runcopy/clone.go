@@ -4,17 +4,17 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
+	"strings"
 
 	"github.com/qoryai/qory/internal/checkout"
 )
 
 // repositories is the folder, relative to the checkout, that the further repositories
-// of a run are cloned under, as preparation.Repositories sets it. This package does not
-// import preparation, whose push step may come to use it.
+// of a run are cloned under, as preparation.Repositories sets it.
 const repositories = checkout.Dir + "/repositories"
 
 // Repository is one repository of the copy and the commit it starts at.
@@ -24,74 +24,205 @@ type Repository struct {
 	Path string
 	// Base is the commit the copy checks out: the one the person's checkout has at HEAD.
 	Base string
+	// index is the repository's number: 0 for the person's, and from 1 for the further
+	// ones, which is in the name of its bare source and of its quarantine.
+	index int
+	// filtered are the files a filter changed at the checkout, such as a Git LFS file,
+	// with what the checkout wrote: the git session runs no filter, so it leaves each
+	// out while the copy still has what the checkout wrote.
+	filtered []SetupPath
 }
 
-// Clone clones the person's repository at checkout, the top of its working tree, into
-// [Dir.Work], and checks out branch there at the commit the checkout has at HEAD. It
-// clones each repository under .qory/repositories in the checkout the same way, into
-// the same path in the copy, at that repository's HEAD. It returns the repositories,
-// the person's first.
+// Clone copies the person's repository at checkout, the top of its working tree, and
+// each repository under .qory/repositories in it, for a run that works on branch. It
+// returns the repositories, the person's first.
 //
-// Each clone is git clone --no-local, which copies the objects and links none of them
-// into the person's .git, and never --shared or --reference; git runs as [git] runs it,
-// with hooks off. The copy has commits alone: no uncommitted, untracked or ignored file
-// of the checkout, and no submodule checked out.
+// For each, git clone --no-local first clones the repository into a bare repository
+// under the run's folder that no run binds, and fetches HEAD into it as branch. git
+// clone --no-local then clones that bare repository into the copy, [Dir.Work] or the
+// same path under it, and checks out branch with the person's git environment, so a
+// filter such as Git LFS applies; no run has written the copy yet. --no-local copies
+// the objects and links none of them, and no clone uses --shared or --reference. Each
+// submodule of the person's repository whose repository is under its .git/modules is
+// cloned the same way at the commit its gitlink records. The copy has commits alone:
+// no uncommitted, untracked or ignored file of the checkout.
 func (d Dir) Clone(ctx context.Context, checkout, branch string) ([]Repository, error) {
 	if err := checkBranch(ctx, branch); err != nil {
 		return nil, err
 	}
 	checkout, err := filepath.Abs(checkout)
 	if err != nil {
-		return nil, err
+		return nil, fileErr(checkout, err)
 	}
-	main, err := cloneOne(ctx, d.root, checkout, d.Work(), branch)
+	for _, p := range []string{d.Work(), filepath.Join(d.root, sourcesName)} {
+		if _, err := os.Lstat(p); err == nil {
+			return nil, fmt.Errorf(textExists, shown(p))
+		}
+	}
+	if err := os.Mkdir(filepath.Join(d.root, sourcesName), 0o700); err != nil {
+		return nil, fileErr(d.root, err)
+	}
+	first, err := d.cloneOne(ctx, 0, checkout, d.Work(), branch)
 	if err != nil {
 		return nil, err
 	}
-	repos := []Repository{{Base: main}}
+	if err := d.cloneSubmodules(ctx, checkout, d.Work(), first.Base); err != nil {
+		return nil, err
+	}
+	repos := []Repository{first}
 	further, err := furtherRepositories(checkout)
 	if err != nil {
 		return nil, err
 	}
-	for _, rel := range further {
+	for i, rel := range further {
 		src := filepath.Join(checkout, filepath.FromSlash(rel))
 		dest := filepath.Join(d.Work(), filepath.FromSlash(rel))
 		if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
-			return nil, err
+			return nil, fileErr(filepath.Dir(dest), err)
 		}
-		base, err := cloneOne(ctx, d.root, src, dest, branch)
+		r, err := d.cloneOne(ctx, i+1, src, dest, branch)
 		if err != nil {
 			return nil, err
 		}
-		repos = append(repos, Repository{Path: rel, Base: base})
+		r.Path = rel
+		repos = append(repos, r)
 	}
 	return repos, nil
 }
 
-// cloneOne clones the repository at src into dest, a path that does not exist, and
-// checks out branch at the commit src has at HEAD, which it returns. git clone runs in
-// root, which is in no repository.
-func cloneOne(ctx context.Context, root, src, dest, branch string) (string, error) {
-	base, err := commitOf(ctx, src, "HEAD")
+// cloneOne copies the repository at src, as [Dir.Clone] describes, through the bare
+// repository number i, into dest, a path that does not exist, and returns it with the
+// commit it checks out, the one src has at HEAD, and its filtered files.
+func (d Dir) cloneOne(ctx context.Context, i int, src, dest, branch string) (Repository, error) {
+	base, err := d.cloneAt(ctx, i, src, dest, branch)
 	if err != nil {
-		return "", fmt.Errorf("commit in %s, or start the run in a repository with a commit at HEAD: the run works in a copy of the commit at HEAD, and git found none: %w", shown(src), err)
+		return Repository{}, err
 	}
-	if _, err := git(ctx, root, "clone", "--quiet", "--no-local", "--no-hardlinks", "--no-checkout", "--no-recurse-submodules", "--", src, dest); err != nil {
-		return "", fmt.Errorf("check that git can clone %s: qory copies it for the run with git clone, which failed: %w", shown(src), err)
+	filtered, err := d.filteredFiles(ctx, i, dest)
+	if err != nil {
+		return Repository{}, fmt.Errorf(textNoCheckout, base, shown(src), err)
 	}
-	if _, err := git(ctx, dest, "cat-file", "-e", base+"^{commit}"); err != nil {
-		// A HEAD on no branch: git clone copies the branches, so fetch the commit by it.
-		if _, err := git(ctx, dest, "fetch", "--quiet", "--no-tags", "--no-recurse-submodules", "--no-write-fetch-head", "--", src, "HEAD"); err != nil {
-			return "", fmt.Errorf("check that git can fetch HEAD from %s: qory copies it for the run, and the fetch of HEAD failed: %w", shown(src), err)
-		}
-		if _, err := git(ctx, dest, "cat-file", "-e", base+"^{commit}"); err != nil {
-			return "", fmt.Errorf("start the run again: HEAD of %s moved while qory copied it, and the copy has no commit %s", shown(src), base)
-		}
+	return Repository{Base: base, index: i, filtered: filtered}, nil
+}
+
+// cloneAt is [Dir.cloneOne] without the filtered files.
+func (d Dir) cloneAt(ctx context.Context, i int, src, dest, branch string) (string, error) {
+	bare := d.source(i)
+	if _, err := git(ctx, d.root, "clone", "--quiet", "--bare", "--no-local", "--no-hardlinks", "--", src, bare); err != nil {
+		return "", fmt.Errorf(textNoClone, shown(src), err)
 	}
-	if _, err := git(ctx, dest, "checkout", "--quiet", "--force", "--no-recurse-submodules", "-B", branch, base); err != nil {
-		return "", fmt.Errorf("check that git can check out %s in a clone of %s: the run works on that commit, and the checkout failed: %w", base, shown(src), err)
+	// HEAD by its name, as the branch of the run: the clone copies the branches alone,
+	// and a HEAD on no branch would not be among them.
+	ref := "refs/heads/" + branch
+	if _, err := git(ctx, bare, "fetch", "--quiet", "--no-tags", "--no-recurse-submodules", "--no-write-fetch-head", "--", src, "+HEAD:"+ref); err != nil {
+		return "", fmt.Errorf(textNoHead, shown(src), err)
+	}
+	base, err := commitOf(ctx, bare, ref)
+	if err != nil {
+		return "", fmt.Errorf(textNoHead, shown(src), err)
+	}
+	if _, err := git(ctx, d.root, "clone", "--quiet", "--no-local", "--no-hardlinks", "--no-checkout", "--no-recurse-submodules", "--branch", branch, "--", bare, dest); err != nil {
+		return "", fmt.Errorf(textNoClone, shown(src), err)
+	}
+	if _, err := personGit(ctx, dest, "checkout", "--quiet", "--force", "--no-recurse-submodules", "-B", branch, base); err != nil {
+		return "", fmt.Errorf(textNoCheckout, base, shown(src), err)
 	}
 	return base, nil
+}
+
+// filteredFiles is each file of the copy at dest, the repository number i just checked
+// out, that .gitattributes sets a filter for, with what the checkout wrote there. git
+// ls-files and git check-attr read the copy before any run writes it.
+func (d Dir) filteredFiles(ctx context.Context, i int, dest string) ([]SetupPath, error) {
+	files, err := git(ctx, dest, "ls-files", "-z")
+	if err != nil || files == "" {
+		return nil, err
+	}
+	out, err := gitWith(ctx, dest, nil, strings.NewReader(files), "check-attr", "-z", "--stdin", "filter")
+	if err != nil {
+		return nil, err
+	}
+	var paths []string
+	fields := strings.Split(out, "\x00")
+	for j := 0; j+2 < len(fields); j += 3 {
+		if v := fields[j+2]; v != "unspecified" && v != "unset" && cleanRel(fields[j]) {
+			paths = append(paths, fields[j])
+		}
+	}
+	if len(paths) == 0 {
+		return nil, nil
+	}
+	return d.setupStatesAt(ctx, dest, i, paths)
+}
+
+// cloneSubmodules clones, into the copy at dest, each submodule that .gitmodules at
+// commit base lists, whose repository the person's checkout at src has under its git
+// folder's modules, at the commit its gitlink in base records. A submodule with no
+// such repository stays an empty folder, as git leaves one that is not set up.
+func (d Dir) cloneSubmodules(ctx context.Context, src, dest, base string) error {
+	listed, err := git(ctx, dest, "ls-tree", "-z", "--full-tree", base, "--", ".gitmodules")
+	if err != nil {
+		return fmt.Errorf(textSubmodules, base, shown(src), err)
+	}
+	if listed == "" {
+		return nil
+	}
+	out, err := git(ctx, dest, "config", "--blob", base+":.gitmodules", "-z", "--get-regexp", `^submodule\..*\.path$`)
+	if err != nil {
+		if exitOf(err) == 1 {
+			return nil
+		}
+		return fmt.Errorf(textSubmodules, base, shown(src), err)
+	}
+	gitDir, err := git(ctx, src, "rev-parse", "--path-format=absolute", "--git-dir")
+	if err != nil {
+		return fmt.Errorf(textGitInRepo, shown(src), err)
+	}
+	modules := filepath.Join(strings.TrimSpace(gitDir), "modules")
+	for entry := range strings.SplitSeq(out, "\x00") {
+		key, sub, ok := strings.Cut(entry, "\n")
+		if !ok {
+			continue
+		}
+		name := strings.TrimSuffix(strings.TrimPrefix(key, "submodule."), ".path")
+		if !cleanRel(name) || !cleanRel(sub) {
+			continue
+		}
+		commit, ok, err := gitlinkAt(ctx, dest, base, sub)
+		if err != nil {
+			return fmt.Errorf(textSubmodules, base, shown(src), err)
+		}
+		from := filepath.Join(modules, filepath.FromSlash(name))
+		if info, err := os.Lstat(from); !ok || err != nil || !info.IsDir() {
+			continue
+		}
+		to := filepath.Join(dest, filepath.FromSlash(sub))
+		if _, err := git(ctx, d.root, "clone", "--quiet", "--no-local", "--no-hardlinks", "--no-checkout", "--no-recurse-submodules", "--", from, to); err != nil {
+			return fmt.Errorf(textNoSubmodule, shown(sub), shown(src), shown(from), err)
+		}
+		if _, err := git(ctx, to, "fetch", "--quiet", "--no-tags", "--no-recurse-submodules", "--no-write-fetch-head", "--", from, commit); err != nil {
+			return fmt.Errorf(textNoSubmodule, shown(sub), shown(src), shown(from), err)
+		}
+		if _, err := personGit(ctx, to, "checkout", "--quiet", "--force", "--detach", commit); err != nil {
+			return fmt.Errorf(textNoSubmodule, shown(sub), shown(src), shown(from), err)
+		}
+	}
+	return nil
+}
+
+// gitlinkAt is the commit the gitlink at rel in commit records, and whether there is
+// one.
+func gitlinkAt(ctx context.Context, dir, commit, rel string) (string, bool, error) {
+	out, err := gitWith(ctx, dir, []string{"GIT_LITERAL_PATHSPECS=1"}, nil, "ls-tree", "-z", "--full-tree", commit, "--", rel)
+	if err != nil {
+		return "", false, err
+	}
+	about, name, _ := strings.Cut(strings.TrimSuffix(out, "\x00"), "\t")
+	fields := strings.Fields(about)
+	if len(fields) != 3 || fields[0] != "160000" || name != rel || !objectID.MatchString(fields[2]) {
+		return "", false, nil
+	}
+	return fields[2], true, nil
 }
 
 // furtherRepositories is the path of each repository under .qory/repositories in the
@@ -106,19 +237,19 @@ func furtherRepositories(checkout string) ([]string, error) {
 			return nil, nil
 		}
 		if err != nil {
-			return nil, err
+			return nil, fileErr(p, err)
 		}
 	}
 	var out []string
-	err := filepath.WalkDir(top, func(path string, e fs.DirEntry, err error) error {
+	err := filepath.WalkDir(top, func(p string, e fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
-		if !e.IsDir() || path == top {
+		if !e.IsDir() || p == top {
 			return nil
 		}
-		if _, err := os.Lstat(filepath.Join(path, ".git")); err == nil {
-			rel, err := filepath.Rel(checkout, path)
+		if _, err := os.Lstat(filepath.Join(p, ".git")); err == nil {
+			rel, err := filepath.Rel(checkout, p)
 			if err != nil {
 				return err
 			}
@@ -127,75 +258,22 @@ func furtherRepositories(checkout string) ([]string, error) {
 		}
 		return nil
 	})
-	return out, err
+	if err != nil {
+		return nil, fileErr(top, err)
+	}
+	return out, nil
 }
 
-// CopyFolder copies the folder src, which is not a repository, into [Dir.Work]: its
-// folders, its regular files with their permission bits, and its links as links, never
-// followed. Any other kind of file, such as a pipe or a socket, stays out.
-func (d Dir) CopyFolder(src string) error {
-	src, err := filepath.Abs(src)
-	if err != nil {
-		return err
+// cleanRel reports whether p is a clean relative path with forward slashes that stays
+// in the folder it is relative to, with no . or .. part.
+func cleanRel(p string) bool {
+	if p == "" || strings.HasPrefix(p, "/") || path.Clean(p) != p || strings.ContainsRune(p, 0) {
+		return false
 	}
-	info, err := os.Lstat(src)
-	if err != nil {
-		return err
-	}
-	if !info.IsDir() {
-		return fmt.Errorf("start the run in a folder: %s is no folder", shown(src))
-	}
-	dest := d.Work()
-	return filepath.WalkDir(src, func(path string, e fs.DirEntry, err error) error {
-		if err != nil {
-			return err
+	for part := range strings.SplitSeq(p, "/") {
+		if part == "." || part == ".." {
+			return false
 		}
-		rel, err := filepath.Rel(src, path)
-		if err != nil {
-			return err
-		}
-		to := filepath.Join(dest, rel)
-		info, err := e.Info()
-		if err != nil {
-			return err
-		}
-		switch mode := info.Mode(); {
-		case mode.IsDir():
-			// The owner keeps write access, so the run can write in every folder.
-			return os.Mkdir(to, mode.Perm()|0o700)
-		case mode&fs.ModeSymlink != 0:
-			target, err := os.Readlink(path)
-			if err != nil {
-				return err
-			}
-			return os.Symlink(target, to)
-		case mode.IsRegular():
-			return copyFile(path, to, mode.Perm())
-		}
-		return nil
-	})
-}
-
-// copyFile copies the regular file at src, opened without following a link, to dest, a
-// path that does not exist, with permission bits perm.
-func copyFile(src, dest string, perm fs.FileMode) error {
-	in, err := openNoFollow(src)
-	if err != nil {
-		return err
 	}
-	defer in.Close()
-	if info, err := in.Stat(); err != nil {
-		return err
-	} else if !info.Mode().IsRegular() {
-		return fmt.Errorf("%s changed while qory copied it: it is no regular file now", shown(src))
-	}
-	out, err := os.OpenFile(dest, os.O_WRONLY|os.O_CREATE|os.O_EXCL|noFollow, perm)
-	if err != nil {
-		return err
-	}
-	if _, err := io.Copy(out, in); err != nil {
-		out.Close()
-		return err
-	}
-	return out.Close()
+	return true
 }

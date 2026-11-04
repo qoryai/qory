@@ -7,71 +7,75 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"golang.org/x/sys/unix"
 )
 
-// SetupStates reads what the copy has at each of paths, the paths the setup changed as
-// RecordSetup lists them, for [LeftOut.Setup]. Call it after the setup and before the
-// agent's session. It opens each folder on the way from the one above it with
+// SetupStates reads what the copy of the repository r, as [Dir.Clone] returned it, has
+// at each of paths, the paths the setup changed as RecordSetup lists them, for
+// [LeftOut.Setup]. Call it after the setup and before the agent's session. A trailing
+// / of a path is dropped. It opens each folder on the way from the one above it with
 // O_NOFOLLOW, so it follows no link, and hashes a file's content, or a link's target,
-// with git hash-object --stdin --no-filters in checkout, the person's repository, which
-// sets the object format. No git opens the copy.
-func (d Dir) SetupStates(ctx context.Context, checkout string, paths []string) ([]SetupPath, error) {
+// with git hash-object --stdin --no-filters in the bare source of r, which sets the
+// object format. No git opens the copy.
+func (d Dir) SetupStates(ctx context.Context, r Repository, paths []string) ([]SetupPath, error) {
+	rel, err := repositoryRel(r)
+	if err != nil {
+		return nil, err
+	}
+	return d.setupStatesAt(ctx, filepath.Join(d.Work(), filepath.FromSlash(rel)), r.index, paths)
+}
+
+// setupStatesAt is [Dir.SetupStates] for the repository number index at top.
+func (d Dir) setupStatesAt(ctx context.Context, top string, index int, paths []string) ([]SetupPath, error) {
+	root, err := unix.Open(top, dirFlags, 0)
+	if err != nil {
+		return nil, fileErr(top, err)
+	}
+	defer unix.Close(root)
 	out := make([]SetupPath, 0, len(paths))
 	for _, p := range paths {
+		p = strings.TrimSuffix(p, "/")
 		if !cleanRel(p) {
-			return nil, fmt.Errorf("give each setup path relative to the top of the copy: %s is not such a path", shown(p))
+			return nil, fmt.Errorf(textSetupPath, shown(p))
 		}
-		state, err := d.setupState(ctx, checkout, p)
+		state, err := d.setupState(ctx, root, index, p)
 		if err != nil {
-			return nil, err
+			return nil, fileErr(filepath.Join(top, filepath.FromSlash(p)), err)
 		}
 		out = append(out, SetupPath{Path: p, State: state})
 	}
 	return out, nil
 }
 
-// setupState is what the copy has at rel, in the form of [SetupPath.State].
-func (d Dir) setupState(ctx context.Context, checkout, rel string) (string, error) {
-	dir, err := unix.Open(d.Work(), dirFlags, 0)
-	if err != nil {
-		return "", &os.PathError{Op: "open", Path: d.Work(), Err: err}
+// setupState is what the folder root has at rel, in the form of [SetupPath.State].
+func (d Dir) setupState(ctx context.Context, root, index int, rel string) (string, error) {
+	dir, name, err := lookup(root, rel)
+	if errors.Is(err, errNoEntry) {
+		return "missing", nil
 	}
-	parts := strings.Split(rel, "/")
-	for _, name := range parts[:len(parts)-1] {
-		next, err := unix.Openat(dir, name, dirFlags, 0)
-		unix.Close(dir)
-		switch {
-		case errors.Is(err, unix.ENOENT):
-			return "missing", nil
-		case errors.Is(err, unix.ELOOP), errors.Is(err, unix.ENOTDIR):
-			// A link or a file where a folder was: the path's file is not there.
-			return "missing", nil
-		case err != nil:
-			return "", &os.PathError{Op: "open", Path: rel, Err: err}
-		}
-		dir = next
+	if err != nil {
+		return "", err
 	}
 	defer unix.Close(dir)
-	name := parts[len(parts)-1]
 	var st unix.Stat_t
 	err = unix.Fstatat(dir, name, &st, unix.AT_SYMLINK_NOFOLLOW)
 	if errors.Is(err, unix.ENOENT) {
 		return "missing", nil
 	}
 	if err != nil {
-		return "", &os.PathError{Op: "lstat", Path: rel, Err: err}
+		return "", err
 	}
 	switch st.Mode & unix.S_IFMT {
 	case unix.S_IFLNK:
 		buf := make([]byte, unix.PathMax)
 		n, err := unix.Readlinkat(dir, name, buf)
 		if err != nil {
-			return "", &os.PathError{Op: "readlink", Path: rel, Err: err}
+			return "", err
 		}
-		id, err := blobID(ctx, checkout, strings.NewReader(string(buf[:n])))
+		id, err := blobID(ctx, d.source(index), strings.NewReader(string(buf[:n])))
 		return "link:" + id, err
 	case unix.S_IFREG:
 		f, err := openFileAt(dir, name, rel)
@@ -86,8 +90,17 @@ func (d Dir) setupState(ctx context.Context, checkout, rel string) (string, erro
 		if st.Mode&0o100 != 0 {
 			kind = "exec:"
 		}
-		id, err := blobID(ctx, checkout, f)
+		id, err := blobID(ctx, d.source(index), f)
 		return kind + id, err
 	}
 	return "other", nil
+}
+
+// openRoot opens the folder at path with O_NOFOLLOW, for [lookup].
+func openRoot(path string) (int, error) {
+	fd, err := unix.Open(path, dirFlags, 0)
+	if err != nil {
+		return -1, &os.PathError{Op: "open", Path: path, Err: err}
+	}
+	return fd, nil
 }

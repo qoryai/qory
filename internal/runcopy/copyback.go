@@ -6,30 +6,19 @@ import (
 	"github.com/qoryai/qory/internal/checkout"
 )
 
-// CopyBackResult is what [Dir.CopyBack] did, each path relative to the folder with
-// forward slashes, in order.
-type CopyBackResult struct {
-	// Copied are the new and changed regular files it wrote.
-	Copied []string
-	// Skipped are the entries of the copy it left out: a link, a .git, a .qory, a file
-	// that is not regular, and a path whose folder in the destination is a link or no
-	// folder.
-	Skipped []string
-}
-
-// leftOutName reports whether a file or folder named name stays out of a copy-back
-// anywhere in the tree: .git, where git on this machine would find a repository, and
-// .qory, where qory would find a checkout's files. The names match as a file system that
-// ignores letter case, and the code points macOS ignores in a name, would match them.
-func leftOutName(name string) bool {
-	plain := strings.Map(func(r rune) rune {
+// folded is name as a file system that ignores letter case, and the code points macOS
+// ignores in a name, compares it: lower case, without those code points.
+func folded(name string) string {
+	return strings.ToLower(strings.Map(func(r rune) rune {
 		if ignorable(r) {
 			return -1
 		}
 		return r
-	}, name)
-	return strings.EqualFold(plain, ".git") || strings.EqualFold(plain, checkout.Dir)
+	}, name))
 }
+
+// folds reports whether name and want are one name as [folded] compares them.
+func folds(name, want string) bool { return folded(name) == folded(want) }
 
 // ignorable reports whether r is a code point HFS+ leaves out when it compares names,
 // the list git checks for .git: zero-width joiners and marks of direction.
@@ -39,4 +28,20 @@ func ignorable(r rune) bool {
 		return true
 	}
 	return false
+}
+
+// leftOutName reports whether a file or folder named name stays out of a copy-back
+// anywhere in the tree, as [folds] compares names: .git, where git on this machine
+// would find a repository, and .qory, where qory would find a checkout's files.
+func leftOutName(name string) bool { return folds(name, ".git") || folds(name, checkout.Dir) }
+
+// gitDirLike reports whether a folder with the entries names is one git takes as a git
+// folder, as [folds] compares names: one with HEAD and objects or refs, or one with
+// commondir.
+func gitDirLike(names []string) bool {
+	has := map[string]bool{}
+	for _, n := range names {
+		has[folded(n)] = true
+	}
+	return has["head"] && (has["objects"] || has["refs"]) || has["commondir"]
 }

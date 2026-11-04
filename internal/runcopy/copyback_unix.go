@@ -3,8 +3,8 @@
 package runcopy
 
 import (
-	"bytes"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -12,140 +12,441 @@ import (
 	"os"
 	"path"
 	"slices"
+	"sort"
+	"strings"
 
 	"golang.org/x/sys/unix"
 )
 
-// dirFlags open a folder without following a link at its name.
-const dirFlags = unix.O_RDONLY | unix.O_DIRECTORY | unix.O_NOFOLLOW | unix.O_CLOEXEC
+// maxCopyBackFiles is the most files [Dir.CopyBack] writes from one run.
+// 100,000 files is more than a person reviews from one run; past it, the run wrote a flood.
+const maxCopyBackFiles = 100_000
 
-// fileFlags open a file to read without following a link at its name, waiting on a pipe
-// there, or making it the terminal of the process.
-const fileFlags = unix.O_RDONLY | unix.O_NOFOLLOW | unix.O_NONBLOCK | unix.O_NOCTTY | unix.O_CLOEXEC
+// maxCopyBackBytes is the most bytes [Dir.CopyBack] writes from one run.
+// 8 GiB keeps a run from filling the person's disk with files nobody asked for.
+const maxCopyBackBytes = 8 << 30
 
-// CopyBack copies the new and changed regular files of the copy of a plain folder,
-// [Dir.Work], into dest, the person's folder. Call it once the run's containers are
-// gone. It leaves out every link, every .git and .qory at any depth, and every file
-// that is not regular, and follows no link on any part of a path, in the copy or in
-// dest: it opens each folder from the one above it with O_NOFOLLOW. A folder that is a
-// link or no folder in dest is left out with everything in it. It deletes nothing in
-// dest. A changed file keeps the permission bits it has in dest, and a new one gets the
-// process's umask, with the execute bits when the copy has one.
+// CopyBackResult is what [Dir.CopyBack] did, each path relative to the folder with
+// forward slashes, in order.
+type CopyBackResult struct {
+	// Copied are the new and changed regular files it wrote.
+	Copied []string
+	// Deleted are the files the run deleted that it deleted in the folder too.
+	Deleted []string
+	// Conflicts are the files that the run and the person both changed, or that one
+	// changed and the other deleted, since the copy. The person's file stays.
+	Conflicts []string
+	// Skipped are the entries of the copy it left out: a link, a .git, a .qory, a file
+	// that is not regular, a folder that git would take as a git folder, a folder too
+	// deep, and a path whose folder in the destination is a link or no folder.
+	Skipped []string
+	// Acting are the acting keys of the qory files the run changed. Each such file
+	// stays as the person has it.
+	Acting []ActingChange
+}
+
+// copyBack is the state of one [Dir.CopyBack].
+type copyBack struct {
+	// maxFiles and maxBytes are the budget: [maxCopyBackFiles] and [maxCopyBackBytes].
+	maxFiles int
+	maxBytes int64
+	rec      folderRecord
+	result   *CopyBackResult
+	qory     map[string]bool
+	skipped  map[string]bool
+	bytes    int64
+}
+
+// errBudget is a copy-back past [maxCopyBackFiles] or [maxCopyBackBytes].
+var errBudget = errors.New("past the budget")
+
+// CopyBack brings the run's changes to the copy of a plain folder, [Dir.Work], into
+// dest, the person's folder. Call it once the run's containers are gone.
+//
+//   - It copies a regular file that the run added or changed since [Dir.CopyFolder]
+//     recorded it, when the person did not change it since then. When the person did,
+//     the person's file stays, and the file is listed as a conflict.
+//   - It deletes a regular file that was in the folder at the copy, that the person did
+//     not change since, and that is gone from the copy.
+//   - It leaves out every link, every .git and .qory at any depth, every file that is
+//     not regular, and every folder that git would take as a git folder, in the copy or
+//     once copied.
+//   - It compares the acting keys of the qory files at the top, and of the stack files
+//     they extend by a path, between the folder and the copy, and leaves out each file
+//     whose acting keys changed.
+//
+// It follows no link on any part of a path, in the copy or in dest: it opens each
+// folder from the one above it with O_NOFOLLOW, and keeps at most [maxOpenFolders]
+// levels open. It stops past [maxCopyBackFiles] files or [maxCopyBackBytes] bytes, with
+// an error that lists what it copied. A changed file keeps the permission bits it has
+// in dest, with the run's change to the owner's execute bit, and a new one gets the
+// process's umask, with the execute bits when the copy has the owner's.
 func (d Dir) CopyBack(dest string) (CopyBackResult, error) {
-	src, err := unix.Open(d.Work(), dirFlags, 0)
+	return d.copyBackWith(dest, maxCopyBackFiles, maxCopyBackBytes)
+}
+
+// copyBackWith is [Dir.CopyBack] with a budget of maxFiles files and maxBytes bytes.
+func (d Dir) copyBackWith(dest string, maxFiles int, maxBytes int64) (CopyBackResult, error) {
+	var result CopyBackResult
+	rec, err := d.readRecord()
 	if err != nil {
-		return CopyBackResult{}, &os.PathError{Op: "open", Path: d.Work(), Err: err}
+		return result, err
+	}
+	src, err := openRoot(d.Work())
+	if err != nil {
+		return result, fileErr(d.Work(), err)
 	}
 	defer unix.Close(src)
 	dst, err := unix.Open(dest, dirFlags, 0)
 	if err != nil {
-		return CopyBackResult{}, fmt.Errorf("give the folder the run started in by a path with no link at its end: qory copies the run's files back there, and the open of %s failed: %w", shown(dest), err)
+		return result, fmt.Errorf(textCopyBackOpen, shown(dest), err)
 	}
 	defer unix.Close(dst)
-	var r CopyBackResult
-	err = copyBackDir(src, dst, "", &r)
-	return r, err
+	c := &copyBack{maxFiles: maxFiles, maxBytes: maxBytes, rec: rec, result: &result, qory: map[string]bool{}, skipped: map[string]bool{}}
+	if err := c.compareQory(src, dst); err != nil {
+		return result, err
+	}
+	err = c.dir(src, dst, "", 0)
+	if errors.Is(err, errBudget) {
+		return result, fmt.Errorf(textCopyBackLimit, shown(d.Work()), maxFiles, maxBytes, strings.Join(result.Copied, ", "))
+	}
+	if err != nil {
+		return result, err
+	}
+	if err := c.deletions(src, dst); err != nil {
+		return result, err
+	}
+	return result, nil
 }
 
-// copyBackDir copies back the entries of the folder src, at rel, into the folder dst.
-func copyBackDir(src, dst int, rel string, r *CopyBackResult) error {
-	names, err := readNames(src)
+// compareQory lists the acting changes of the qory files between dst, the person's
+// folder, and src, the copy, and marks each changed file to leave out.
+func (c *copyBack) compareQory(src, dst int) error {
+	srcTop, err := readNames(src)
 	if err != nil {
 		return err
+	}
+	dstTop, err := readNames(dst)
+	if err != nil {
+		return err
+	}
+	changes, err := qoryChanges(dstTop, folderReader(dst), srcTop, folderReader(src))
+	if err != nil {
+		return err
+	}
+	c.result.Acting = changes
+	for _, ch := range changes {
+		c.qory[folded(ch.File)] = true
+	}
+	return nil
+}
+
+// folderReader reads a qory file in the folder root, following no link.
+func folderReader(root int) readQoryFile {
+	return func(rel string) (qoryFile, []byte, error) {
+		dir, name, err := lookup(root, rel)
+		if errors.Is(err, errNoEntry) {
+			return qoryFile{shape: shapeMissing}, nil, nil
+		}
+		if err != nil {
+			return qoryFile{}, nil, err
+		}
+		defer unix.Close(dir)
+		var st unix.Stat_t
+		err = unix.Fstatat(dir, name, &st, unix.AT_SYMLINK_NOFOLLOW)
+		if errors.Is(err, unix.ENOENT) {
+			return qoryFile{shape: shapeMissing}, nil, nil
+		}
+		if err != nil {
+			return qoryFile{}, nil, &os.PathError{Op: "lstat", Path: rel, Err: err}
+		}
+		switch st.Mode & unix.S_IFMT {
+		case unix.S_IFLNK:
+			buf := make([]byte, unix.PathMax)
+			n, err := unix.Readlinkat(dir, name, buf)
+			if err != nil {
+				return qoryFile{}, nil, &os.PathError{Op: "readlink", Path: rel, Err: err}
+			}
+			return qoryFile{shape: shapeOther, id: "link " + string(buf[:n])}, nil, nil
+		case unix.S_IFREG:
+			f, err := openFileAt(dir, name, rel)
+			if err != nil {
+				return qoryFile{}, nil, err
+			}
+			defer f.Close()
+			data, err := io.ReadAll(io.LimitReader(f, maxQoryFile+1))
+			if err != nil {
+				return qoryFile{}, nil, err
+			}
+			sum := sha256.Sum256(data)
+			id := hex.EncodeToString(sum[:])
+			if len(data) > maxQoryFile {
+				return qoryFile{shape: shapeOther, id: "large " + id}, nil, nil
+			}
+			return qoryFile{shape: shapeYAML, id: id}, data, nil
+		}
+		return qoryFile{shape: shapeOther, id: "other"}, nil, nil
+	}
+}
+
+// dir copies back the folder src, at rel, "" for the top, into the folder dst.
+func (c *copyBack) dir(src, dst int, rel string, depth int) error {
+	shownRel := rel
+	if shownRel == "" {
+		shownRel = "."
+	}
+	if depth > maxOpenFolders {
+		c.skip(shownRel, true)
+		return nil
+	}
+	names, err := readNames(src)
+	if err != nil {
+		return fileErr(shownRel, err)
+	}
+	have, err := readNames(dst)
+	if err != nil {
+		return fileErr(shownRel, err)
+	}
+	if gitDirLike(names) || gitDirLike(append(slices.Clone(names), have...)) {
+		c.skip(shownRel, true)
+		return nil
 	}
 	for _, name := range names {
 		at := path.Join(rel, name)
 		if leftOutName(name) {
-			r.Skipped = append(r.Skipped, at)
+			c.skip(at, true)
 			continue
 		}
 		var st unix.Stat_t
 		if err := unix.Fstatat(src, name, &st, unix.AT_SYMLINK_NOFOLLOW); err != nil {
-			return &os.PathError{Op: "lstat", Path: at, Err: err}
+			return fileErr(at, err)
 		}
 		switch st.Mode & unix.S_IFMT {
 		case unix.S_IFDIR:
-			if err := copyBackSub(src, dst, name, at, r); err != nil {
+			if err := c.sub(src, dst, name, at, depth); err != nil {
 				return err
 			}
 		case unix.S_IFREG:
-			if err := copyBackFile(src, dst, name, at, uint32(st.Mode), r); err != nil {
+			if c.qory[folded(at)] {
+				continue
+			}
+			if err := c.file(src, dst, name, at, st.Mode&0o100 != 0); err != nil {
 				return err
 			}
 		default:
-			r.Skipped = append(r.Skipped, at)
+			c.skip(at, false)
 		}
 	}
 	return nil
 }
 
-// copyBackSub copies back the folder name in src, at rel, into the folder of that name
-// in dst, which it makes when there is none.
-func copyBackSub(src, dst int, name, rel string, r *CopyBackResult) error {
-	sub, err := unix.Openat(src, name, dirFlags, 0)
-	if err != nil {
-		return &os.PathError{Op: "open", Path: rel, Err: err}
+// skip lists rel among the skipped entries. When folder is true, nothing below rel is
+// deleted.
+func (c *copyBack) skip(rel string, folder bool) {
+	c.result.Skipped = append(c.result.Skipped, rel)
+	if folder {
+		c.skipped[rel] = true
 	}
-	defer unix.Close(sub)
+}
+
+// sub copies back the folder name in src, at rel, into the folder of that name in dst,
+// which it makes when there is none.
+func (c *copyBack) sub(src, dst int, name, rel string, depth int) error {
+	from, err := unix.Openat(src, name, dirFlags, 0)
+	if err != nil {
+		return fileErr(rel, err)
+	}
+	defer unix.Close(from)
+	names, err := readNames(from)
+	if err != nil {
+		return fileErr(rel, err)
+	}
+	if gitDirLike(names) {
+		// Before the folder is made in dst, so not even an empty one is.
+		c.skip(rel, true)
+		return nil
+	}
 	if err := unix.Mkdirat(dst, name, 0o777); err != nil && !errors.Is(err, unix.EEXIST) {
-		return &os.PathError{Op: "mkdir", Path: rel, Err: err}
+		return fileErr(rel, err)
 	}
 	to, err := unix.Openat(dst, name, dirFlags, 0)
 	if errors.Is(err, unix.ELOOP) || errors.Is(err, unix.ENOTDIR) {
 		// A link or a file of the person's stands there.
-		r.Skipped = append(r.Skipped, rel)
+		c.skip(rel, true)
 		return nil
 	}
 	if err != nil {
-		return &os.PathError{Op: "open", Path: rel, Err: err}
+		return fileErr(rel, err)
 	}
 	defer unix.Close(to)
-	return copyBackDir(sub, to, rel, r)
+	return c.dir(from, to, rel, depth+1)
 }
 
-// copyBackFile copies the regular file name in src, at rel, with mode, into dst, when
-// dst has no entry of that name or a regular file with other content.
-func copyBackFile(src, dst int, name, rel string, mode uint32, r *CopyBackResult) error {
+// file copies back the regular file name in src, at rel, whose owner may run it when
+// exec is true, into dst, by the rules of [Dir.CopyBack].
+func (c *copyBack) file(src, dst int, name, rel string, exec bool) error {
 	in, err := openFileAt(src, name, rel)
 	if err != nil {
-		return err
+		return fileErr(rel, err)
 	}
 	defer in.Close()
-	if info, err := in.Stat(); err != nil {
-		return err
-	} else if !info.Mode().IsRegular() {
-		r.Skipped = append(r.Skipped, rel)
+	if info, err := in.Stat(); err != nil || !info.Mode().IsRegular() {
+		c.skip(rel, false)
 		return nil
 	}
-	perm := uint32(0o666)
-	if mode&0o111 != 0 {
-		perm = 0o777
+	now, err := hashState(in, exec)
+	if err != nil {
+		return fileErr(rel, err)
 	}
+	was, recorded := c.rec.Files[rel]
+	if recorded && now == was {
+		return nil
+	}
+	have, perm, err := destState(dst, name, rel)
+	switch {
+	case errors.Is(err, errNotRegular):
+		c.skip(rel, false)
+		return nil
+	case err != nil:
+		return fileErr(rel, err)
+	case have != nil && *have == now:
+		return nil
+	case recorded && (have == nil || *have != was), !recorded && have != nil:
+		c.result.Conflicts = append(c.result.Conflicts, rel)
+		return nil
+	}
+	if len(c.result.Copied)+1 > c.maxFiles || c.bytes+now.Size > c.maxBytes {
+		return errBudget
+	}
+	if _, err := in.Seek(0, io.SeekStart); err != nil {
+		return fileErr(rel, err)
+	}
+	mode, replaces := uint32(0o666), have != nil
+	if exec {
+		mode = 0o777
+	}
+	if replaces {
+		mode = perm
+		switch {
+		case now.Exec && !was.Exec:
+			mode |= (mode & 0o444) >> 2
+		case !now.Exec && was.Exec:
+			mode &^= 0o111
+		}
+	}
+	if err := writeAt(dst, name, rel, in, mode, replaces); err != nil {
+		return err
+	}
+	c.bytes += now.Size
+	c.result.Copied = append(c.result.Copied, rel)
+	return nil
+}
+
+// errNotRegular is an entry in the destination that is no regular file.
+var errNotRegular = errors.New("no regular file")
+
+// destState is the state of the entry name in dst and its permission bits: nil when
+// there is none, and [errNotRegular] when it is no regular file.
+func destState(dst int, name, rel string) (*fileState, uint32, error) {
 	var st unix.Stat_t
-	err = unix.Fstatat(dst, name, &st, unix.AT_SYMLINK_NOFOLLOW)
-	replaces := err == nil
+	err := unix.Fstatat(dst, name, &st, unix.AT_SYMLINK_NOFOLLOW)
 	switch {
 	case errors.Is(err, unix.ENOENT):
+		return nil, 0, nil
 	case err != nil:
-		return &os.PathError{Op: "lstat", Path: rel, Err: err}
+		return nil, 0, err
 	case st.Mode&unix.S_IFMT != unix.S_IFREG:
-		r.Skipped = append(r.Skipped, rel)
-		return nil
-	default:
-		same, err := sameContent(in, dst, name, rel)
-		if err != nil || same {
-			return err
-		}
-		if _, err := in.Seek(0, io.SeekStart); err != nil {
-			return err
-		}
-		perm = uint32(st.Mode) & 0o7777
+		return nil, 0, errNotRegular
 	}
-	if err := writeAt(dst, name, rel, in, perm, replaces); err != nil {
-		return err
+	f, err := openFileAt(dst, name, rel)
+	if err != nil {
+		return nil, 0, err
 	}
-	r.Copied = append(r.Copied, rel)
+	defer f.Close()
+	state, err := hashState(f, st.Mode&0o100 != 0)
+	if err != nil {
+		return nil, 0, err
+	}
+	return &state, uint32(st.Mode) & 0o7777, nil
+}
+
+// deletions deletes in dst each recorded file that is gone from src, by the rules of
+// [Dir.CopyBack].
+func (c *copyBack) deletions(src, dst int) error {
+	paths := make([]string, 0, len(c.rec.Files))
+	for p := range c.rec.Files {
+		paths = append(paths, p)
+	}
+	sort.Strings(paths)
+	for _, rel := range paths {
+		if !cleanRel(rel) || c.leftOut(rel) {
+			continue
+		}
+		gone, err := missingAt(src, rel)
+		if err != nil {
+			return fileErr(rel, err)
+		}
+		if !gone {
+			continue
+		}
+		dir, name, err := lookup(dst, rel)
+		if errors.Is(err, errNoEntry) {
+			continue
+		}
+		if err != nil {
+			return fileErr(rel, err)
+		}
+		have, _, err := destState(dir, name, rel)
+		switch {
+		case errors.Is(err, errNotRegular) || err == nil && have != nil && *have != c.rec.Files[rel]:
+			c.result.Conflicts = append(c.result.Conflicts, rel)
+		case err != nil:
+			unix.Close(dir)
+			return fileErr(rel, err)
+		case have != nil:
+			if err := unix.Unlinkat(dir, name, 0); err != nil {
+				unix.Close(dir)
+				return fileErr(rel, err)
+			}
+			c.result.Deleted = append(c.result.Deleted, rel)
+		}
+		unix.Close(dir)
+	}
+	sort.Strings(c.result.Conflicts)
 	return nil
+}
+
+// leftOut reports whether rel, or a folder above it, is left out of the copy-back: a
+// .git or .qory part, a skipped folder, or a qory file whose acting keys changed.
+func (c *copyBack) leftOut(rel string) bool {
+	if c.qory[folded(rel)] {
+		return true
+	}
+	parts := strings.Split(rel, "/")
+	for i, part := range parts {
+		if leftOutName(part) || c.skipped[strings.Join(parts[:i+1], "/")] {
+			return true
+		}
+	}
+	return c.skipped["."]
+}
+
+// missingAt reports whether root has no entry at rel, following no link.
+func missingAt(root int, rel string) (bool, error) {
+	dir, name, err := lookup(root, rel)
+	if errors.Is(err, errNoEntry) {
+		return true, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	defer unix.Close(dir)
+	var st unix.Stat_t
+	err = unix.Fstatat(dir, name, &st, unix.AT_SYMLINK_NOFOLLOW)
+	if errors.Is(err, unix.ENOENT) {
+		return true, nil
+	}
+	return false, err
 }
 
 // writeAt writes what in has to a new file in dst and renames it to name, over what
@@ -159,7 +460,7 @@ func writeAt(dst int, name, rel string, in io.Reader, perm uint32, replaces bool
 	tmp := ".qory-copy-" + hex.EncodeToString(b)
 	fd, err := unix.Openat(dst, tmp, unix.O_WRONLY|unix.O_CREAT|unix.O_EXCL|unix.O_NOFOLLOW|unix.O_CLOEXEC, perm)
 	if err != nil {
-		return &os.PathError{Op: "create", Path: rel, Err: err}
+		return fileErr(rel, err)
 	}
 	out := os.NewFile(uintptr(fd), rel)
 	_, err = io.Copy(out, in)
@@ -174,60 +475,7 @@ func writeAt(dst int, name, rel string, in io.Reader, perm uint32, replaces bool
 	}
 	if err != nil {
 		_ = unix.Unlinkat(dst, tmp, 0)
-		return &os.PathError{Op: "write", Path: rel, Err: err}
+		return fileErr(rel, err)
 	}
 	return nil
-}
-
-// sameContent reports whether in, read from its start, has what the regular file name
-// in dst has.
-func sameContent(in *os.File, dst int, name, rel string) (bool, error) {
-	other, err := openFileAt(dst, name, rel)
-	if err != nil {
-		return false, err
-	}
-	defer other.Close()
-	a, b := make([]byte, 64<<10), make([]byte, 64<<10)
-	for {
-		n, errA := io.ReadFull(in, a)
-		m, errB := io.ReadFull(other, b)
-		if n != m || !bytes.Equal(a[:n], b[:m]) {
-			return false, nil
-		}
-		endA := errA == io.EOF || errA == io.ErrUnexpectedEOF
-		endB := errB == io.EOF || errB == io.ErrUnexpectedEOF
-		switch {
-		case errA != nil && !endA:
-			return false, errA
-		case errB != nil && !endB:
-			return false, errB
-		case endA || endB:
-			return endA && endB, nil
-		}
-	}
-}
-
-// openFileAt opens the file name in the folder dir to read, as [fileFlags] has it.
-func openFileAt(dir int, name, rel string) (*os.File, error) {
-	fd, err := unix.Openat(dir, name, fileFlags, 0)
-	if err != nil {
-		return nil, &os.PathError{Op: "open", Path: rel, Err: err}
-	}
-	return os.NewFile(uintptr(fd), rel), nil
-}
-
-// readNames is the names in the folder dir, sorted. dir stays open.
-func readNames(dir int) ([]string, error) {
-	fd, err := unix.Dup(dir)
-	if err != nil {
-		return nil, err
-	}
-	f := os.NewFile(uintptr(fd), "")
-	defer f.Close()
-	if _, err := f.Seek(0, io.SeekStart); err != nil {
-		return nil, err
-	}
-	names, err := f.Readdirnames(-1)
-	slices.Sort(names)
-	return names, err
 }

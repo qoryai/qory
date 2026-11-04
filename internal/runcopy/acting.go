@@ -3,188 +3,150 @@ package runcopy
 import (
 	"context"
 	"fmt"
-	"path"
-	"path/filepath"
-	"sort"
 	"strconv"
 	"strings"
-
-	"github.com/qoryai/qory/internal/acting"
-	"github.com/qoryai/qory/internal/exports"
 )
 
-// maxQoryFiles is the most qory files [Quarantine.ActingChanges] reads at one commit:
-// the files at the top and the stack files they extend by a path, one after another.
-const maxQoryFiles = 32
-
-// maxQoryFile is the largest qory file, in bytes, that [Quarantine.ActingChanges] reads
-// as YAML. A blob from the run can inflate far past its size in the bundle; a larger
-// file counts as a change to the file.
-const maxQoryFile = 1 << 20
-
-// ActingChange is an acting key of a qory file that the run's commits change: set, set
-// to another value, or no longer set.
-type ActingChange struct {
-	// File is the file, relative to the top of the repository with forward slashes:
-	// qory.yaml.
-	File string
-	// Key is the key, as acting.Entry's Key is: env.TOKEN. It is empty when the file
-	// changed in a way that no key covers: it became or stopped being a link or a
-	// folder, its YAML no longer reads, or it grew past 1 MiB.
-	Key string
+// ActingChanges lists the acting keys, by package acting's list, that differ between
+// the qory files at the repository's base commit and at the run's head, both in the
+// quarantine: qory.yaml, harness.yaml and qory-stack.yaml at the top, by a name that
+// matches regardless of letter case, and each stack file in the repository that one of
+// them extends by a path. It also lists each link the run's commits add or change.
+//
+// Every file is read from the commit's tree with git ls-tree and git cat-file, which
+// run no filter, part by part of its path, so a link or a submodule on the way counts
+// as a change to the file. Path values are compared as written: nothing is resolved on
+// this machine. The list is sorted by file, then by key.
+func (q *Quarantine) ActingChanges(ctx context.Context) ([]ActingChange, error) {
+	before, err := q.topNames(ctx, q.Repo.Base)
+	if err != nil {
+		return nil, fmt.Errorf(textActingFailed, shown(q.Path), err)
+	}
+	after, err := q.topNames(ctx, q.Head)
+	if err != nil {
+		return nil, fmt.Errorf(textActingFailed, shown(q.Path), err)
+	}
+	out, err := qoryChanges(before, q.treeReader(ctx, q.Repo.Base), after, q.treeReader(ctx, q.Head))
+	if err != nil {
+		return nil, fmt.Errorf(textActingFailed, shown(q.Path), err)
+	}
+	links, err := q.changedLinks(ctx)
+	if err != nil {
+		return nil, fmt.Errorf(textActingFailed, shown(q.Path), err)
+	}
+	for _, l := range links {
+		out = append(out, ActingChange{File: l})
+	}
+	return sortChanges(out), nil
 }
 
-// ActingChanges lists the acting keys, by the list in package acting, that differ
-// between the qory files at commit base and at commit head, both in the quarantine:
-// qory.yaml, harness.yaml and qory-stack.yaml at the top, and each stack file in the
-// repository that one of them extends by a path. git cat-file reads each file, so no
-// filter runs. checkout is the person's repository: a path in a file resolves as if the
-// file were there. The list is sorted by file, then by key.
-func (q *Quarantine) ActingChanges(ctx context.Context, checkout, base, head string) ([]ActingChange, error) {
-	for _, c := range []string{base, head} {
-		if !objectID.MatchString(c) {
-			return nil, fmt.Errorf("give each commit in full: %s is no commit id", shown(c))
-		}
-	}
-	checkout, err := filepath.Abs(checkout)
+// topNames is the names at the top of commit's tree.
+func (q *Quarantine) topNames(ctx context.Context, commit string) ([]string, error) {
+	top, err := q.treeEntries(ctx, commit+"^{tree}", "")
 	if err != nil {
 		return nil, err
 	}
-	before, err := q.qoryFiles(ctx, checkout, base)
+	names := make([]string, 0, len(top))
+	for _, e := range top {
+		names = append(names, e.name)
+	}
+	return names, nil
+}
+
+// treeReader reads a qory file at commit.
+func (q *Quarantine) treeReader(ctx context.Context, commit string) readQoryFile {
+	return func(rel string) (qoryFile, []byte, error) { return q.readTreeFile(ctx, commit, rel) }
+}
+
+// treeEntry is one entry of a tree, as git ls-tree prints it.
+type treeEntry struct{ mode, kind, id, name string }
+
+// treeEntries is the entries of tree that are named name, or all of them for "".
+func (q *Quarantine) treeEntries(ctx context.Context, tree, name string) ([]treeEntry, error) {
+	args := []string{"ls-tree", "-z", "--full-tree", tree}
+	if name != "" {
+		args = append(args, "--", name)
+	}
+	out, err := gitWith(ctx, q.Path, []string{"GIT_LITERAL_PATHSPECS=1"}, nil, args...)
 	if err != nil {
 		return nil, err
 	}
-	after, err := q.qoryFiles(ctx, checkout, head)
-	if err != nil {
-		return nil, err
-	}
-	var out []ActingChange
-	for _, file := range unionKeys(before, after) {
-		b, a := before[file], after[file]
-		if (b.shape == shapeOther || a.shape == shapeOther) && (b.shape != a.shape || b.blob != a.blob) {
-			out = append(out, ActingChange{File: file})
-		}
-		for _, key := range unionKeys(b.keys, a.keys) {
-			bv, bok := b.keys[key]
-			av, aok := a.keys[key]
-			if bok != aok || bv != av {
-				out = append(out, ActingChange{File: file, Key: key})
-			}
-		}
-	}
-	sort.SliceStable(out, func(i, j int) bool {
-		if out[i].File != out[j].File {
-			return out[i].File < out[j].File
-		}
-		return out[i].Key < out[j].Key
-	})
-	return out, nil
-}
-
-// shape is what a qory file is at a commit.
-type shape int
-
-const (
-	// shapeMissing is no entry at the path.
-	shapeMissing shape = iota
-	// shapeYAML is a regular file whose YAML reads.
-	shapeYAML
-	// shapeOther is a link, a folder, a submodule, or a regular file larger than
-	// [maxQoryFile] or whose YAML does not read.
-	shapeOther
-)
-
-// qoryFile is one qory file at a commit: its shape, its blob, and each acting key it
-// sets, with its value and where a path that leads out through a link leads.
-type qoryFile struct {
-	shape shape
-	blob  string
-	keys  map[string]string
-}
-
-// qoryFiles reads the qory files at commit in the quarantine, by path relative to the
-// top: the files at the top, then each stack file one of them extends by a path that
-// stays in the repository.
-func (q *Quarantine) qoryFiles(ctx context.Context, checkout, commit string) (map[string]qoryFile, error) {
-	files := map[string]qoryFile{}
-	queue := []string{exports.FileName, exports.AltFileName, exports.StackFileName}
-	for len(queue) > 0 && len(files) < maxQoryFiles {
-		rel := queue[0]
-		queue = queue[1:]
-		if _, seen := files[rel]; seen {
+	var entries []treeEntry
+	for entry := range strings.SplitSeq(out, "\x00") {
+		if entry == "" {
 			continue
 		}
-		f, data, err := q.readFile(ctx, commit, rel)
-		if err != nil {
-			return nil, err
+		about, n, ok := strings.Cut(entry, "\t")
+		fields := strings.Fields(about)
+		if !ok || len(fields) != 3 {
+			return nil, &gitError{subcommand: "ls-tree", line: "printed " + shown(entry), exit: -1}
 		}
-		if f.shape == shapeYAML {
-			at := filepath.Join(checkout, filepath.FromSlash(rel))
-			entries, err := acting.Entries(at, data, checkout)
-			if err != nil {
-				f.shape = shapeOther
-			} else {
-				f.keys = make(map[string]string, len(entries))
-				for _, e := range entries {
-					f.keys[e.Key] = e.Value + "\n" + e.Leads
-				}
-				if next := acting.Base(at, data); next != "" {
-					if r, err := filepath.Rel(checkout, next); err == nil && cleanRel(filepath.ToSlash(r)) {
-						queue = append(queue, filepath.ToSlash(r))
-					}
-				}
-			}
-		}
-		files[rel] = f
+		entries = append(entries, treeEntry{fields[0], fields[1], fields[2], n})
 	}
-	return files, nil
+	return entries, nil
 }
 
-// readFile reads the entry rel at commit with git ls-tree and git cat-file, which runs
-// no filter: its shape and blob, and the content of a regular file.
-func (q *Quarantine) readFile(ctx context.Context, commit, rel string) (qoryFile, []byte, error) {
-	out, err := gitIn(ctx, q.Path, []string{"GIT_LITERAL_PATHSPECS=1"}, "ls-tree", "-z", "--full-tree", commit, "--", rel)
-	if err != nil {
-		return qoryFile{}, nil, err
+// readTreeFile reads the entry rel at commit, part by part of its path: its shape, its
+// id, and the content of a regular file of at most [maxQoryFile] bytes.
+func (q *Quarantine) readTreeFile(ctx context.Context, commit, rel string) (qoryFile, []byte, error) {
+	tree := commit + "^{tree}"
+	parts := strings.Split(rel, "/")
+	for i, part := range parts {
+		entries, err := q.treeEntries(ctx, tree, part)
+		if err != nil {
+			return qoryFile{}, nil, err
+		}
+		if len(entries) != 1 || entries[0].name != part {
+			return qoryFile{shape: shapeMissing}, nil, nil
+		}
+		e := entries[0]
+		switch {
+		case e.mode == "120000" || e.mode == "160000":
+			// A link or a submodule, on the way or at the end.
+			return qoryFile{shape: shapeOther, id: strings.Join(parts[:i+1], "/") + " " + e.mode + " " + e.id}, nil, nil
+		case i < len(parts)-1 && e.kind == "tree":
+			tree = e.id
+		case i < len(parts)-1:
+			return qoryFile{shape: shapeMissing}, nil, nil
+		case e.kind != "blob" || e.mode != "100644" && e.mode != "100755":
+			return qoryFile{shape: shapeOther, id: e.mode + " " + e.id}, nil, nil
+		default:
+			return q.readBlob(ctx, e.id)
+		}
 	}
-	entry := strings.TrimSuffix(out, "\x00")
-	if entry == "" {
-		return qoryFile{shape: shapeMissing}, nil, nil
-	}
-	about, name, _ := strings.Cut(entry, "\t")
-	fields := strings.Fields(about)
-	if len(fields) != 3 || path.Clean(name) != rel {
-		return qoryFile{}, nil, fmt.Errorf("git ls-tree printed %s for %s at %s", shown(entry), shown(rel), commit)
-	}
-	mode, typ, blob := fields[0], fields[1], fields[2]
-	if typ != "blob" || mode != "100644" && mode != "100755" {
-		return qoryFile{shape: shapeOther, blob: mode + " " + blob}, nil, nil
-	}
-	size, err := git(ctx, q.Path, "cat-file", "-s", blob)
+	return qoryFile{shape: shapeMissing}, nil, nil
+}
+
+// readBlob reads the blob id as a qory file, when it has at most [maxQoryFile] bytes.
+func (q *Quarantine) readBlob(ctx context.Context, id string) (qoryFile, []byte, error) {
+	size, err := git(ctx, q.Path, "cat-file", "-s", id)
 	if err != nil {
 		return qoryFile{}, nil, err
 	}
 	if n, err := strconv.ParseInt(strings.TrimSpace(size), 10, 64); err != nil || n > maxQoryFile {
-		return qoryFile{shape: shapeOther, blob: blob}, nil, nil
+		return qoryFile{shape: shapeOther, id: id}, nil, nil
 	}
-	data, err := git(ctx, q.Path, "cat-file", "blob", blob)
+	data, err := git(ctx, q.Path, "cat-file", "blob", id)
 	if err != nil {
 		return qoryFile{}, nil, err
 	}
-	return qoryFile{shape: shapeYAML, blob: blob}, []byte(data), nil
+	return qoryFile{shape: shapeYAML, id: id}, []byte(data), nil
 }
 
-// unionKeys is the keys of a and b, sorted, each once.
-func unionKeys[V any](a, b map[string]V) []string {
-	keys := make([]string, 0, len(a)+len(b))
-	for k := range a {
-		keys = append(keys, k)
+// changedLinks is each path whose entry at the run's head is a link that the base
+// commit does not have there as it is, by git diff-tree.
+func (q *Quarantine) changedLinks(ctx context.Context) ([]string, error) {
+	out, err := git(ctx, q.Path, "diff-tree", "-r", "-z", "--no-renames", "--no-commit-id", q.Repo.Base, q.Head)
+	if err != nil {
+		return nil, err
 	}
-	for k := range b {
-		if _, ok := a[k]; !ok {
-			keys = append(keys, k)
+	var links []string
+	fields := strings.Split(out, "\x00")
+	for i := 0; i+1 < len(fields); i += 2 {
+		meta := strings.Fields(strings.TrimPrefix(fields[i], ":"))
+		if len(meta) == 5 && meta[1] == "120000" && meta[4] != "D" {
+			links = append(links, fields[i+1])
 		}
 	}
-	sort.Strings(keys)
-	return keys
+	return links, nil
 }
