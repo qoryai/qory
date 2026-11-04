@@ -373,16 +373,16 @@ func TestConfigSchemaKnowsTiers(t *testing.T) {
 	}
 }
 
-// questionsDocument is a document of questions.schema.json that passes: an answered
-// question with an earlier answer that a run reopened, and an open question that follows
-// from it.
+// questionsDocument is a document of questions.schema.json that passes: a question
+// answered with an option, with an earlier answer of a note alone that a run reopened,
+// and an open question that follows from it.
 const questionsDocument = `{"questions": [
  {"id": "q1", "question": "Which database does the service use?",
   "context": "The service reads ` + "`DATABASE_URL`" + `.\n\n- one\n- two",
   "options": [{"title": "PostgreSQL", "explanation": "The database of the other services."}],
   "state": "answered", "asked": {"run": 1, "at": "2026-11-04T10:00:00Z"},
-  "answer": {"text": "PostgreSQL", "custom": false, "by": {"name": "Sam Example"}, "at": "2026-11-04T11:00:00Z"},
-  "history": [{"text": "Not\nsure", "custom": true, "by": {"name": "Sam Example"}, "at": "2026-11-04T10:30:00Z", "reopened": {"run": 2, "at": "2026-11-04T10:45:00Z"}}]},
+  "answer": {"option": "PostgreSQL", "by": {"name": "Sam Example"}, "at": "2026-11-04T11:00:00Z"},
+  "history": [{"option": null, "note": "Not\nsure", "by": {"name": "Sam Example"}, "at": "2026-11-04T10:30:00Z", "reopened": {"run": 2, "at": "2026-11-04T10:45:00Z"}}]},
  {"id": "q-2", "question": "Which port does it listen on?", "options": [],
   "state": "open", "asked": {"run": 2, "at": "2026-11-04T10:45:00Z"}, "follows": ["q1"]}
 ]}`
@@ -404,6 +404,11 @@ func TestQuestionsSchema(t *testing.T) {
 		return replace(option, strings.TrimSuffix(strings.Repeat(option+", ", n), ", "))
 	}
 	question := "Which database does the service use?"
+	// answerStart and historyStart start the answer and the history entry of the document.
+	const (
+		answerStart  = `"answer": {"option": "PostgreSQL"`
+		historyStart = `"history": [{"option": null, "note": "Not\nsure"`
+	)
 	for _, c := range []struct {
 		doc   string
 		valid bool
@@ -461,10 +466,18 @@ func TestQuestionsSchema(t *testing.T) {
 		{replace(`"2026-11-04T10:00:00Z"`, `"2026-11-04t10:00:00z"`), false},
 		{replace(`, "asked": {"run": 2, "at": "2026-11-04T10:45:00Z"}`, ``), false},
 		// answer
-		{replace(`"custom": false, `, ``), false},
-		{replace(`"custom": false`, `"custom": "no"`), false},
-		{replace(`"text": "PostgreSQL"`, `"text": ""`), false},
-		{replace(`"text": "PostgreSQL"`, `"text": "`+strings.Repeat("a", 2001)+`"`), false},
+		{replace(answerStart, `"answer": {"option": "PostgreSQL", "note": "Use the **shared** one."`), true},
+		{replace(answerStart, `"answer": {"option": null, "note": "We use SQLite."`), true},
+		{replace(answerStart, `"answer": {"option": null`), false},
+		{replace(answerStart, `"answer": {"option": "PostgreSQL", "custom": false`), false},
+		{replace(answerStart, `"answer": {"option": "PostgreSQL", "text": "PostgreSQL"`), false},
+		{replace(answerStart, `"answer": {"option": "PostgreSQL", "note": "`+strings.Repeat("a", 2001)+`"`), false},
+		{replace(answerStart, `"answer": {"option": "PostgreSQL", "note": ""`), false},
+		{replace(answerStart, `"answer": {"note": "PostgreSQL"`), false},
+		{replace(answerStart, `"answer": {"option": "`+strings.Repeat("a", 200)+`"`), true},
+		{replace(answerStart, `"answer": {"option": "`+strings.Repeat("a", 201)+`"`), false},
+		{replace(answerStart, `"answer": {"option": ""`), false},
+		{replace(answerStart, `"answer": {"option": false`), false},
 		{replace(`"by": {"name": "Sam Example"}`, `"by": {}`), false},
 		{replace(`"by": {"name": "Sam Example"}`, `"by": {"name": "`+strings.Repeat("a", 160)+`"}`), true},
 		{replace(`"by": {"name": "Sam Example"}`, `"by": {"name": "`+strings.Repeat("a", 161)+`"}`), false},
@@ -477,16 +490,23 @@ func TestQuestionsSchema(t *testing.T) {
 		// history
 		{replace(`, "reopened": {"run": 2, "at": "2026-11-04T10:45:00Z"}`, ``), false},
 		{replace(`"reopened": {"run": 2, `, `"reopened": {"run": 0, `), false},
-		{replace(`"history": [{"text": "Not\nsure"`, `"history": [{"text": ""`), false},
+		{replace(historyStart, `"history": [{"option": "PostgreSQL"`), true},
+		{replace(historyStart, `"history": [{"option": "PostgreSQL", "note": "Not\nsure"`), true},
+		{replace(historyStart, `"history": [{"option": null`), false},
+		{replace(historyStart, historyStart+`, "custom": true`), false},
+		{replace(historyStart, historyStart+`, "text": "Not sure"`), false},
+		{replace(historyStart, `"history": [{"option": null, "note": "`+strings.Repeat("a", 2001)+`"`), false},
+		{replace(historyStart, `"history": [{"option": null, "note": ""`), false},
+		{replace(historyStart, `"history": [{"note": "Not\nsure"`), false},
 		// a member this schema does not define, at each level
 		{replace(`{"questions": [`, `{"version": 1, "questions": [`), false},
 		{replace(`"id": "q-2"`, `"id": "q-2", "priority": 1`), false},
 		{replace(`"title": "PostgreSQL"`, `"title": "PostgreSQL", "default": true`), false},
-		{replace(`"custom": false`, `"custom": false, "note": "a"`), false},
+		{replace(answerStart, answerStart+`, "rank": 1`), false},
 		{replace(`"by": {"name": "Sam Example"}`, `"by": {"name": "Sam Example", "email": "sam@example.com"}`), false},
 		{replace(`"asked": {"run": 1, `, `"asked": {"step": "explore", "run": 1, `), false},
 		{replace(`"reopened": {"run": 2, `, `"reopened": {"note": "a", "run": 2, `), false},
-		{replace(`"history": [{"text": "Not\nsure"`, `"history": [{"note": "a", "text": "Not\nsure"`), false},
+		{replace(historyStart, historyStart+`, "rank": 1`), false},
 	} {
 		var doc any
 		if err := json.Unmarshal([]byte(c.doc), &doc); err != nil {

@@ -524,7 +524,9 @@ artifact_types:
 
 A questions document records every question of a work item and its answer, one document
 per work item and at most 1 MiB. A run adds, withdraws or reopens questions with `qory
-artifact push questions`, and the control plane writes the answers. This is version 1 of
+artifact push questions`, and the control plane writes the answers. An answer has
+`option`, the title of the option the member chose, or `null`, and `note`, added detail on
+the chosen option, or the member's answer when `option` is `null`. This is version 1 of
 the format ([questions.schema.json](questions.schema.json)).
 
 ## The review comments format

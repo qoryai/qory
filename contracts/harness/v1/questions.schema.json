@@ -43,15 +43,18 @@
           "type": "array",
           "items": {
             "type": "object",
-            "required": ["text", "custom", "by", "at", "reopened"],
+            "description": "An earlier answer: the members of an answer, and reopened.",
+            "required": ["option", "by", "at", "reopened"],
             "additionalProperties": false,
             "properties": {
-              "text": {"$ref": "#/$defs/answer/properties/text"},
-              "custom": {"$ref": "#/$defs/answer/properties/custom"},
+              "option": {"$ref": "#/$defs/answer/properties/option"},
+              "note": {"$ref": "#/$defs/answer/properties/note"},
               "by": {"$ref": "#/$defs/answer/properties/by"},
               "at": {"$ref": "#/$defs/answer/properties/at"},
               "reopened": {"description": "The run that reopened the question, and when.", "$ref": "#/$defs/run_at"}
-            }
+            },
+            "if": {"required": ["option"], "properties": {"option": {"type": "null"}}},
+            "then": {"required": ["note"]}
           }
         }
       },
@@ -65,21 +68,29 @@
       "required": ["title", "explanation"],
       "additionalProperties": false,
       "properties": {
-        "title": {"description": "The option's title, plain text, 1 to 200 characters.", "$ref": "#/$defs/text", "minLength": 1, "maxLength": 200},
+        "title": {"description": "The option's title.", "$ref": "#/$defs/option_title"},
         "explanation": {"description": "A short explanation of the option, plain text.", "$ref": "#/$defs/short_text"}
       }
     },
     "answer": {
-      "description": "A member's answer to a question.",
+      "description": "A member's answer to a question: an option the member chose, or null and a note. note is required when option is null.",
       "type": "object",
-      "required": ["text", "custom", "by", "at"],
+      "required": ["option", "by", "at"],
       "additionalProperties": false,
       "properties": {
-        "text": {"description": "The answer, plain text.", "$ref": "#/$defs/short_text"},
-        "custom": {"description": "true when the answer is the text the member wrote; false when the answer is the title of one of the question's options.", "type": "boolean"},
+        "option": {"description": "The title of the option the member chose, or null when the member wrote the answer in note. The title is one of the question's option titles, which a JSON Schema cannot check.", "anyOf": [{"$ref": "#/$defs/option_title"}, {"type": "null"}]},
+        "note": {"description": "Added detail on the chosen option, or the member's answer when option is null, as Markdown.", "$ref": "#/$defs/short_text"},
         "by": {"description": "The member who answered.", "$ref": "#/$defs/member"},
         "at": {"description": "When the member answered.", "$ref": "#/$defs/time"}
-      }
+      },
+      "if": {"required": ["option"], "properties": {"option": {"type": "null"}}},
+      "then": {"required": ["note"]}
+    },
+    "option_title": {
+      "description": "An option's title, plain text, 1 to 200 characters.",
+      "$ref": "#/$defs/text",
+      "minLength": 1,
+      "maxLength": 200
     },
     "run_at": {
       "description": "A run and a time.",
@@ -122,7 +133,7 @@
       "pattern": "^[^\u0000-\u001f\u007f\u0080-\u009f­؜᠎​‎‏  ‪-‮⁠-⁤⁦-⁩﻿￹-￻]*$"
     },
     "short_text": {
-      "description": "A short text, such as an option's explanation or an answer: 1 to 2000 characters.",
+      "description": "A short text, such as an option's explanation or a note: 1 to 2000 characters.",
       "$ref": "#/$defs/text",
       "minLength": 1,
       "maxLength": 2000
