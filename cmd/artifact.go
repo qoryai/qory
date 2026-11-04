@@ -259,7 +259,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md#commands-of-a-work-it
 			}
 
 			if client == nil {
-				_, err := fmt.Fprintln(c.OutOrStdout(), "Not signed in to Qory Apiary; .qory/artifacts/ has the local versions only.")
+				_, err := fmt.Fprintln(c.OutOrStdout(), "Nothing pulled: outside a Qory Apiary run, qory uses only the local folder .qory/artifacts.")
 
 				return err
 			}
@@ -656,7 +656,7 @@ func keepPush(c *cobra.Command, artifactType, name string, sources []pushSource)
 		return err
 	}
 
-	_, err = fmt.Fprintf(c.OutOrStdout(), "Kept in %s%c; not sent, because you are not signed in to Qory Apiary.\n",
+	_, err = fmt.Fprintf(c.OutOrStdout(), "Kept in %s%c; not sent: outside a Qory Apiary run, qory keeps versions only in .qory/artifacts.\n",
 		store.shown(dir), filepath.Separator)
 
 	return err
