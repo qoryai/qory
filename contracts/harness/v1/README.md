@@ -536,9 +536,10 @@ the format ([questions.schema.json](questions.schema.json)).
 A review comments document records the members' review comments on a work item's artifact
 versions, such as a proposal, and the replies to them, one document per work item and at
 most 1 MiB. The control plane writes the members' review comments and replies. A version
-that a run pushes only adds the run's reply to each open review comment and closes that
-review comment: it changes no member's text, drops no id and adds no review comment. A
-closed review comment has at least one reply by a run. A run's reply has an `outcome`:
+that a run pushes only adds the run's reply to any of the open review comments, at most
+one reply to each, and closes each review comment it adds a reply to: it changes no
+member's text, drops no id and adds no review comment. A closed review comment has at
+least one reply by a run. A run's reply has an `outcome`:
 
 | `outcome` | Meaning |
 |---|---|
