@@ -533,8 +533,18 @@ A review comments document records the members' review comments on a work item's
 versions, such as a proposal, and the replies to them, one document per work item. The
 control plane writes the members' review comments and replies. A version that a run
 pushes only adds the run's reply to each open review comment and closes that review
-comment: it changes no member's text, drops no id and adds no review comment. This is
-version 1 of the format ([review-comments.schema.json](review-comments.schema.json)).
+comment: it changes no member's text, drops no id and adds no review comment. A run's
+reply has an `outcome`:
+
+| `outcome` | Meaning |
+|---|---|
+| `changed` | the run changed the artifact for the review comment |
+| `answered` | the review comment is a question, and the reply contains the answer |
+| `declined` | the review comment is a request for a change that the run did not make, and the reply contains the reason |
+| `asked` | the run could not settle the review comment and added a question for a person to the `questions` artifact; the reply's `question` is the id of that question |
+
+A member's reply has no `outcome` and no `question`. This is version 1 of the format
+([review-comments.schema.json](review-comments.schema.json)).
 
 ## The module manifest
 

@@ -43,7 +43,7 @@
       }
     },
     "reply": {
-      "description": "A reply to a review comment, by a member or by a run. outcome is present exactly when a run wrote the reply.",
+      "description": "A reply to a review comment, by a member or by a run. outcome is present exactly when a run wrote the reply, and question exactly when outcome is asked.",
       "type": "object",
       "required": ["text", "by", "at"],
       "additionalProperties": false,
@@ -51,11 +51,21 @@
         "text": {"description": "The reply, as Markdown.", "$ref": "#/$defs/short_text"},
         "by": {"description": "Who wrote the reply: a member, or a run.", "oneOf": [{"$ref": "#/$defs/member"}, {"$ref": "#/$defs/run"}]},
         "at": {"description": "When the reply was written.", "$ref": "#/$defs/time"},
-        "outcome": {"description": "What the run did about the review comment: changed when the run changed the artifact for the review comment; answered when the review comment is a question and the reply contains the answer; declined when the review comment is a request for a change that the run did not make.", "enum": ["changed", "answered", "declined"]}
+        "outcome": {"description": "What the run did about the review comment: changed when the run changed the artifact for the review comment; answered when the review comment is a question and the reply contains the answer; declined when the review comment is a request for a change that the run did not make, and the reply contains the reason; asked when the run could not settle the review comment and added a question for a person to the questions artifact.", "enum": ["changed", "answered", "declined", "asked"]},
+        "question": {"description": "The id of the question that the run added to the questions artifact, when outcome is asked: 1 to 32 lower-case letters, digits and hyphens.", "type": "string", "pattern": "^[a-z0-9-]{1,32}$"}
       },
-      "if": {"required": ["by"], "properties": {"by": {"required": ["run"]}}},
-      "then": {"required": ["outcome"]},
-      "else": {"not": {"required": ["outcome"]}}
+      "allOf": [
+        {
+          "if": {"required": ["by"], "properties": {"by": {"required": ["run"]}}},
+          "then": {"required": ["outcome"]},
+          "else": {"not": {"required": ["outcome"]}}
+        },
+        {
+          "if": {"required": ["outcome"], "properties": {"outcome": {"const": "asked"}}},
+          "then": {"required": ["question"]},
+          "else": {"not": {"required": ["question"]}}
+        }
+      ]
     },
     "run": {
       "description": "A run.",

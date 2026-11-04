@@ -543,6 +543,13 @@ func TestReviewCommentsSchema(t *testing.T) {
 		{replace(`"outcome": "changed"`, `"outcome": "answered"`), true},
 		{replace(`"outcome": "changed"`, `"outcome": "declined"`), true},
 		{replace(`"outcome": "changed"`, `"outcome": "done"`), false},
+		// question is present exactly when outcome is asked.
+		{replace(`"outcome": "changed"`, `"outcome": "asked", "question": "q-3"`), true},
+		{replace(`"outcome": "changed"`, `"outcome": "asked"`), false},
+		{replace(`"outcome": "changed"`, `"outcome": "changed", "question": "q-3"`), false},
+		{replace(memberReply, memberReply+`, "question": "q-3"`), false},
+		{replace(`"outcome": "changed"`, `"outcome": "asked", "question": "Q_3"`), false},
+		{replace(`"outcome": "changed"`, `"outcome": "asked", "question": "`+strings.Repeat("a", 33)+`"`), false},
 		{replace(`"by": {"run": 3}`, `"by": {"run": 0}`), false},
 		{replace(`"by": {"run": 3}`, `"by": {"run": 3, "name": "Sam Example"}`), false},
 		{replace(`"by": {"run": 3}`, `"by": {}`), false},
