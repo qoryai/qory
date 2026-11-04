@@ -383,7 +383,7 @@ const questionsDocument = `{"questions": [
   "state": "answered", "asked": {"run": 1, "at": "2026-11-04T10:00:00Z"},
   "answer": {"option": "PostgreSQL", "by": {"name": "Sam Example"}, "at": "2026-11-04T11:00:00Z"},
   "history": [{"option": null, "note": "Not\nsure", "by": {"name": "Sam Example"}, "at": "2026-11-04T10:30:00Z", "reopened": {"run": 2, "at": "2026-11-04T10:45:00Z"}}]},
- {"id": "q-2", "question": "Which port does it listen on?", "options": [{"title": "8080", "explanation": "The port of the other services."}],
+ {"id": "q-2", "question": "Which port does it listen on?", "options": [],
   "state": "open", "asked": {"run": 2, "at": "2026-11-04T10:45:00Z"}, "follows": ["q1"]}
 ]}`
 
@@ -400,7 +400,6 @@ func TestQuestionsSchema(t *testing.T) {
 		return strings.Replace(questionsDocument, from, to, 1)
 	}
 	option := `{"title": "PostgreSQL", "explanation": "The database of the other services."}`
-	portOption := `{"title": "8080", "explanation": "The port of the other services."}`
 	recommended := func(value string) string {
 		return strings.Replace(option, `}`, `, "recommended": `+value+`}`, 1)
 	}
@@ -453,11 +452,8 @@ func TestQuestionsSchema(t *testing.T) {
 		// options
 		{options(10), true},
 		{options(11), false},
-		{replace(`"options": [`+portOption+`],`, ``), false},
-		// An open or answered question has at least 1 option, and a withdrawn one may have none.
-		{replace(portOption, ``), false},
-		{replace(option, ``), false},
-		{strings.Replace(replace(portOption, ``), `"state": "open"`, `"state": "withdrawn"`, 1), true},
+		{replace(`"options": [],`, ``), false},
+		{replace(option, ``), true},
 		// recommended is a boolean, and true on at most one option of a question.
 		{replace(option, recommended(`true`)), true},
 		{replace(option, recommended(`false`)), true},
@@ -467,7 +463,7 @@ func TestQuestionsSchema(t *testing.T) {
 		{replace(option, recommended(`true`)+`, `+recommended(`true`)), false},
 		{replace(option, recommended(`"true"`)), false},
 		{replace(option, recommended(`null`)), false},
-		{strings.Replace(replace(portOption, recommended(`true`)), option, recommended(`true`), 1), true},
+		{strings.Replace(replace(`"options": []`, `"options": [`+recommended(`true`)+`]`), option, recommended(`true`), 1), true},
 		{replace(`"title": "PostgreSQL"`, `"title": "`+strings.Repeat("a", 200)+`"`), true},
 		{replace(`"title": "PostgreSQL"`, `"title": "`+strings.Repeat("a", 201)+`"`), false},
 		{replace(`"title": "PostgreSQL"`, `"title": ""`), false},

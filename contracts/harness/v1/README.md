@@ -525,10 +525,9 @@ artifact_types:
 
 A questions document records every question of a work item and its answer, one document
 per work item and at most 1 MiB. A run adds, withdraws or reopens questions with `qory
-artifact push questions`, and the control plane writes the answers. An open or answered
-question has 1 to 10 options, and 1 is enough. A withdrawn question may have none. The run
-sets `recommended` to `true` on the option it recommends, on at most one option of a
-question. An answer has
+artifact push questions`, and the control plane writes the answers. A question has 0 to
+10 options. The run sets `recommended` to `true` on the option it recommends, on at most
+one option of a question. An answer has
 `option`, the title of the option the member chose, or `null`, and `note`, added detail on
 the chosen option, or the member's answer when `option` is `null`. `note` is optional when
 the member chose an option and required when `option` is `null`. This is version 1 of
