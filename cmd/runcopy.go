@@ -438,4 +438,3 @@ func shownPaths(paths []string) string {
 	}
 	return strings.Join(shown, ", ")
 }
-

@@ -43,10 +43,6 @@ type WorkBranch struct {
 
 	// system is the host of the run's repositories.
 	system string
-	// setupChanges is, by [WorkRepository.Dir], each path that the setup left changed, as
-	// git status lists it, with the digest of its entry. [RecordSetup] sets it, and it is
-	// nil with no setup outside the agent's container.
-	setupChanges map[string]map[string]string
 	// pushed is each repository [Push] pushed, as a line shows it.
 	pushed []string
 }
