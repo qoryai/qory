@@ -538,7 +538,7 @@ versions, such as a proposal, and the replies to them, one document per work ite
 most 1 MiB. The control plane writes the members' review comments and replies. A version
 that a run pushes only adds the run's reply to each open review comment and closes that
 review comment: it changes no member's text, drops no id and adds no review comment. A
-run's reply has an `outcome`:
+closed review comment has at least one reply by a run. A run's reply has an `outcome`:
 
 | `outcome` | Meaning |
 |---|---|
