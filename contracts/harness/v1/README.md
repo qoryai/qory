@@ -972,8 +972,8 @@ segment. The refusal lists the module, the entry and the reason, with status 2:
 | `goose` | | | `agents` | |
 | `any` | | | | |
 
-claude also reserves `CLAUDE.md` and `AGENTS.md`. qory does not write them under `.claude`,
-and a module ships its instructions as `AGENTS.md` at the module root.
+`claude` also reserves `CLAUDE.md` and `AGENTS.md`. qory does not write them under
+`.claude`, and a module ships its instructions as `AGENTS.md` at the module root.
 
 Per runtime, the files written into its directory:
 

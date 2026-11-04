@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -134,8 +135,9 @@ func TestRulesLinkKeepsTheRepositorysTrackedRules(t *testing.T) {
 }
 
 // TestRulesLinkReplacesTheWholeDirectoryLinkOfAnEarlierCompose is a checkout composed by
-// a qory that linked .claude/rules whole: the link goes, and a real directory with one
-// link per rule takes its place.
+// a qory that linked .claude/rules whole: the link and its exclude line go, and a real
+// directory with one link per rule takes its place. Without the line gone, git would
+// ignore every untracked rule a person adds there.
 func TestRulesLinkReplacesTheWholeDirectoryLinkOfAnEarlierCompose(t *testing.T) {
 	res, root, home := composeFixture(t, "claude")
 	claude := lookup(t, "claude")
@@ -148,13 +150,20 @@ func TestRulesLinkReplacesTheWholeDirectoryLinkOfAnEarlierCompose(t *testing.T) 
 	if err := os.Symlink(filepath.Join("..", ".qory", "harness", "claude", "rules"), filepath.Join(root, ".claude", "rules")); err != nil {
 		t.Fatal(err)
 	}
+	if err := render.Exclude(root, "/.claude/rules"); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := render.LinkInto(claude, res, root, home, false); err != nil {
 		t.Fatal(err)
 	}
 	if info, err := os.Lstat(filepath.Join(root, ".claude", "rules")); err != nil || !info.IsDir() {
 		t.Fatalf(".claude/rules is not a real directory: %v", err)
 	}
-	checkLink(t, root, home, ".claude/rules/qory-harness.md", "AGENTS.md", readExclude(t, root))
+	exclude := readExclude(t, root)
+	if slices.Contains(strings.Split(exclude, "\n"), "/.claude/rules") {
+		t.Errorf("the exclude file still contains /.claude/rules:\n%s", exclude)
+	}
+	checkLink(t, root, home, ".claude/rules/qory-harness.md", "AGENTS.md", exclude)
 }
 
 // TestTrackedHarnessRuleIsForeign is a repository that tracks a file at
