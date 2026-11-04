@@ -137,9 +137,10 @@ func TestRunSaysASignalThatStoppedARuntimeThatExited0(t *testing.T) {
 		}
 	}()
 	out, err := run(t, "run")
-	if cmd.ExitCode(err) != 1 || !strings.Contains(out, "\n✗ the run was cancelled: qory run got SIGINT, and claude was stopped\nqory run: the record is in ") {
+	if cmd.ExitCode(err) != 1 || !strings.Contains(out, "\n✗ the run was cancelled: qory run got SIGINT, and claude was stopped\n") {
 		t.Errorf("%v (exit %d)\n%s", err, cmd.ExitCode(err), out)
 	}
+	wants(t, out, "qory run: the record is in ")
 	lacks(t, out, "exited 0", "interrupted", "context canceled")
 	if state, reason, exit := exitedOf(t, root); state != "cancelled" || reason != "interrupted" || exit != 0 {
 		t.Errorf("the record's run.exited is %s, %q, exit %v", state, reason, exit)

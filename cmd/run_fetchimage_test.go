@@ -568,7 +568,6 @@ func TestAMountThatCoversTheEngineProxyFileStopsTheRun(t *testing.T) {
 	}
 	resolved := filepath.Join(dir, filepath.Base(file))
 	for mount, want := range map[string]string{
-		dir:         "the mount " + dir + " contains " + resolved + ", which holds one of Forager's files; the agent could change it, so the run does not start. Mount a narrower path",
 		dir + ":ro": "the mount " + dir + " contains " + resolved + ", which holds one of Forager's files; the agent could read it, so the run does not start. Mount a narrower path",
 	} {
 		out, err := run(t, "run", "claude", "--mount", mount)

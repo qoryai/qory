@@ -77,6 +77,7 @@ func TestMain(m *testing.M) {
 		os.Exit(enginePull(args[0], args[1], args[2]))
 	}
 	cmd.ShortenSocketGrace(10 * time.Millisecond)
+	cmd.RunGitSessionsOnHost()
 	os.Exit(m.Run())
 }
 
@@ -153,6 +154,8 @@ func newCheckout(t *testing.T) string {
 	runGit(t, root, "config", "user.name", "Tester")
 	runGit(t, root, "config", "user.email", "tester@example.com")
 	runGit(t, root, "remote", "add", "origin", "https://git.example.com/acme/app.git")
+	// A walled run that may write works in a copy of the commit at HEAD.
+	runGit(t, root, "commit", "--quiet", "--allow-empty", "-m", "first")
 	return root
 }
 

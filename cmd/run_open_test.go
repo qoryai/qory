@@ -195,29 +195,28 @@ func TestRunCancelsARunStoppedBeforeTheJoin(t *testing.T) {
 	}
 }
 
-// TestRunClosesARunWhoseJoinCheckFails is a walled run with a read-only mount inside the
-// checkout, which the container sees writable: the join check fails, the session records
-// its session.exited with the code mount_mode_conflict, and the run closes failed with
-// no reason and -1, since a join started; qory says why, names the record and exits 1.
+// TestRunClosesARunWhoseJoinCheckFails is a walled run with a read-only mount that contains
+// the file GITHUB_ENV names: the join check fails, the session records its session.exited
+// with the code mount_contains_forager_files, and the run closes failed with no reason and
+// -1, since a join started; qory says why, names the record and exits 1.
 func TestRunClosesARunWhoseJoinCheckFails(t *testing.T) {
 	root := newCheckout(t)
 	copyFixture(t, "two-modules", root)
 	composedForFake(t, root, "claude")
 	docker, _ := fakeDocker(t)
 	writeFile(t, filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "forager.yaml"), "wall:\n  adapter: docker\n  image: example.com/agent:1\n  command: "+docker+"\n  helper: "+staticELF(t)+"\n  user: \"1000:1000\"\n")
-	vendor := filepath.Join(root, "vendor")
-	if err := os.MkdirAll(vendor, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	out, err := run(t, "run", "claude", "--mount", vendor+":ro")
-	if cmd.ExitCode(err) != 1 || !strings.Contains(out, "(mount_mode_conflict)\nqory run: the record is in ") {
+	runner := tempDir(t)
+	writeFile(t, filepath.Join(runner, "github_env"), "")
+	t.Setenv("GITHUB_ENV", filepath.Join(runner, "github_env"))
+	out, err := run(t, "run", "claude", "--mount", runner+":ro")
+	if cmd.ExitCode(err) != 1 || !strings.Contains(out, "(mount_contains_forager_files)\nqory run: the record is in ") {
 		t.Fatalf("%v (exit %d)\n%s", err, cmd.ExitCode(err), out)
 	}
 	rec := sessionRecord(t, root)
 	if got, want := typesOf(rec), []string{"run.started", "session.exited", "run.exited"}; !slices.Equal(got, want) {
 		t.Errorf("the record's events are %q, want %q", got, want)
 	}
-	if state, reason, exit := endOf(dataOf(rec, "dev.qory.session.exited")); state != "failed" || reason != "mount_mode_conflict" || exit != -1 {
+	if state, reason, exit := endOf(dataOf(rec, "dev.qory.session.exited")); state != "failed" || reason != "mount_contains_forager_files" || exit != -1 {
 		t.Errorf("session.exited is %s, %q, %v", state, reason, exit)
 	}
 	if state, reason, exit := endOf(dataOf(rec, "dev.qory.run.exited")); state != "failed" || reason != "" || exit != -1 {

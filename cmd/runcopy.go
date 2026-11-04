@@ -248,11 +248,9 @@ func (c *runCopy) recordSetup(ctx context.Context) error {
 // gitSession is the bare session after the agent: it commits what the agent left in the copy
 // and writes the run's bundles, with no agent, no model key and no bind but the copy and the
 // bundle folder. It ends at [runcopy.SessionLimit] at the latest. message is the message of
-// its commit, "" for the default.
+// its commit, "" for the default. The caller has removed the setup container: a process in
+// it could write the copy during the session.
 func (c *runCopy) gitSession(ctx context.Context, run openedRun, spec *runSpec, message string) error {
-	if err := run.RemoveSetup(ctx); err != nil {
-		return fmt.Errorf(textCopyNoSession, exports.Value(c.dir.Work(), false), shownError(err))
-	}
 	gs, err := c.dir.GitSession(ctx, c.branch, message, c.repos, c.out)
 	if err != nil {
 		return fmt.Errorf(textCopyNoSession, exports.Value(c.dir.Work(), false), shownError(err))

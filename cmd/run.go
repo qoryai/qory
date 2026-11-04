@@ -1086,7 +1086,12 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				copied.keep = true
 				sessionErr = fmt.Errorf(textCopyClosed, exports.Value(copied.dir.Work(), false))
 			case returns:
-				sessionErr = copied.gitSession(backCtx, run, &spec, "")
+				if sessionErr = run.RemoveSetup(backCtx); sessionErr != nil {
+					copied.keep = true
+					sessionErr = fmt.Errorf(textCopyNoSession, exports.Value(copied.dir.Work(), false), shownError(sessionErr))
+				} else {
+					sessionErr = copied.gitSession(backCtx, run, &spec, "")
+				}
 			}
 			if pushes {
 				pushCtx, cancel := pushContext(ctx, again, limit, pushTimes.limit, pushTimes.signal)

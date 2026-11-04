@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -68,7 +69,9 @@ func SetPrepareSeed(dir string) func() {
 func SetJoinSession(f func(session.SessionSpec)) func() {
 	before := joinSession
 	joinSession = func(r openedRun, ctx context.Context, spec session.SessionSpec) (*session.Result, error) {
-		f(spec)
+		if !isGitSession(spec) {
+			f(spec)
+		}
 		return before(r, ctx, spec)
 	}
 	return func() { joinSession = before }
@@ -78,8 +81,98 @@ func SetJoinSession(f func(session.SessionSpec)) func() {
 // session that ended that way does, and returns what restores the default.
 func SetJoinResult(f func(session.SessionSpec) (*session.Result, error)) func() {
 	before := joinSession
-	joinSession = func(_ openedRun, _ context.Context, spec session.SessionSpec) (*session.Result, error) {
+	joinSession = func(r openedRun, ctx context.Context, spec session.SessionSpec) (*session.Result, error) {
+		if isGitSession(spec) {
+			return before(r, ctx, spec)
+		}
 		return f(spec)
+	}
+	return func() { joinSession = before }
+}
+
+// isGitSession is whether spec is a run's git session, see [runcopy.Dir.GitSession].
+func isGitSession(spec session.SessionSpec) bool {
+	return len(spec.Args) > 2 && spec.Args[2] == "qory-git-session"
+}
+
+// hostGitFolder is the folder of this machine's git, for the PATH of a git session in a
+// test: the run's image has its git in other folders. The third of the session's
+// arguments after -c and the script is that PATH.
+func hostGitFolder(spec session.SessionSpec) (session.SessionSpec, error) {
+	path, err := exec.LookPath("git")
+	if err != nil {
+		return spec, err
+	}
+	folders := filepath.Dir(path) + ":/usr/bin:/bin"
+	spec.Args = slices.Clone(spec.Args)
+	spec.Args[3] = folders
+	spec.Env = slices.Clone(spec.Env)
+	for i, e := range spec.Env {
+		if strings.HasPrefix(e, "PATH=") {
+			spec.Env[i] = "PATH=" + folders
+		}
+	}
+	return spec, nil
+}
+
+// RunGitSessionsOnHost makes every git session of a test run as a process on this machine,
+// since a test has no image with git and runs no docker. A test that wants the session to
+// reach its join uses [SetGitSession].
+func RunGitSessionsOnHost() {
+	before := joinSession
+	joinSession = func(r openedRun, ctx context.Context, spec session.SessionSpec) (*session.Result, error) {
+		if !isGitSession(spec) {
+			return before(r, ctx, spec)
+		}
+		spec, err := hostGitFolder(spec)
+		if err != nil {
+			return nil, err
+		}
+		c := exec.CommandContext(ctx, spec.Command, spec.Args...)
+		c.Dir, c.Env, c.Stdout, c.Stderr = spec.Dir, spec.Env, spec.Stdout, spec.Stderr
+		res := &session.Result{}
+		if err := c.Run(); err != nil {
+			if ctx.Err() != nil {
+				res.TimedOut = true
+				return res, nil
+			}
+			var exit *exec.ExitError
+			if !errors.As(err, &exit) {
+				return nil, err
+			}
+			res.ExitCode = exit.ExitCode()
+		}
+		return res, nil
+	}
+}
+
+// SetGitSession makes the join of a git session return what f returns, and returns what
+// restores the default.
+func SetGitSession(f func(context.Context, session.SessionSpec) (*session.Result, error)) func() {
+	before := joinSession
+	joinSession = func(r openedRun, ctx context.Context, spec session.SessionSpec) (*session.Result, error) {
+		if isGitSession(spec) {
+			return f(ctx, spec)
+		}
+		return before(r, ctx, spec)
+	}
+	return func() { joinSession = before }
+}
+
+// GitSessionThroughJoin makes a git session join its run as any session does, with this
+// machine's git on its PATH, for a test with a wall that runs its containers on this
+// machine. It returns what restores the default.
+func GitSessionThroughJoin() func() {
+	before := joinSession
+	joinSession = func(r openedRun, ctx context.Context, spec session.SessionSpec) (*session.Result, error) {
+		if !isGitSession(spec) {
+			return before(r, ctx, spec)
+		}
+		spec, err := hostGitFolder(spec)
+		if err != nil {
+			return nil, err
+		}
+		return r.Join(ctx, spec)
 	}
 	return func() { joinSession = before }
 }

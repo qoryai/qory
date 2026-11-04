@@ -144,6 +144,11 @@ func canPush(fromCode *codeRun, readOnly bool, branch *preparation.WorkBranch) b
 // [openedRun.StartStep] still work, so this check alone stops the push, and the run has no
 // step. A git session that fails stops the push the same way.
 func removeThenPush(ctx context.Context, run openedRun, stderr io.Writer, branch *preparation.WorkBranch, dir, runID string, runNumber int, out session.Outcome, agentStopped bool, copied *runCopy, spec *runSpec, said func(string)) (noStep bool, err error) {
+	defer func() {
+		if err != nil && copied != nil {
+			copied.kept(said)
+		}
+	}()
 	if err := run.RemoveSetup(ctx); err != nil {
 		return true, fmt.Errorf(textSetupStays, shownError(err))
 	}
@@ -195,9 +200,6 @@ func pushWork(ctx context.Context, run openedRun, stderr io.Writer, branch *prep
 		var document *branchformat.Branch
 		if copied != nil {
 			document, err = pushCopy(ctx, copied, branch, h.proxy, w)
-			if err != nil {
-				copied.kept(said)
-			}
 		} else {
 			document, err = preparation.Push(ctx, dir, os.Environ(), branch, commitMessage(runNumber, out), h.proxy, agentStopped, w)
 		}

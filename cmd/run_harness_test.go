@@ -62,7 +62,7 @@ func TestRunTakesAModuleExportAsADefault(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wants(t, string(data), "env: CORE_SCRIPTS=/elsewhere\n", "env: LOG_DIR=from-server\n", "env: CODEX_HOME="+home+"/codex\n")
+	wants(t, string(data), "env: CORE_SCRIPTS=/elsewhere\n", "env: LOG_DIR=from-server\n", "env: CODEX_HOME="+copyWork(t, string(data))+"/.qory/harness/codex\n")
 	lacks(t, string(data), "DOCKER_HOST=", "/not-the-template", "LOG_DIR="+home)
 	_, evs := events(t, root)
 	got, _ := json.Marshal(sessionApplied(t, evs)["variables"])
@@ -163,9 +163,6 @@ func TestRunComposesOverAReportNamingAnotherHome(t *testing.T) {
 	if out, err := run(t, "run", "claude"); cmd.ExitCode(err) != 4 {
 		t.Fatalf("a report naming another home: %v (exit %d)\n%s", err, cmd.ExitCode(err), out)
 	}
-	if rep, err := report.Read(path); err != nil || rep.Home != home {
-		t.Errorf("the run left the report naming the home %q (%v), want %s", rep.Home, err, home)
-	}
 	data, err := os.ReadFile(log)
 	if err != nil {
 		t.Fatal(err)
@@ -203,7 +200,7 @@ func TestRunComposesOverAReportNamingAnotherHome(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wants(t, string(data), "--mount type=bind,src="+root+",dst="+root+" ")
+	wants(t, string(data), "--mount type=bind,src="+copyWork(t, string(data))+",dst="+copyWork(t, string(data))+" ")
 	lacks(t, string(data), forged)
 	if out, err := run(t, "run", "claude", "--home", home); cmd.ExitCode(err) != 4 {
 		t.Fatalf("--home naming the composed home: %v (exit %d)\n%s", err, cmd.ExitCode(err), out)

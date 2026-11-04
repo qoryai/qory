@@ -240,6 +240,13 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Changed
 
+- A walled run that may write works in a copy of the checkout, under `qory/runs` in your cache
+  folder, and starts from your commit at `HEAD`, so it never gets write access to your
+  `.git`. Its commits land on the branch `qory/run-<run id>`, which qory never checks out,
+  and one line prints that branch and any qory settings they change. A write run of a work
+  item pushes from a checked repository. A read-write `--mount` or `wall.mounts` entry
+  stops such a run. A folder that is not a repository gets its regular files back. See A run
+  that may write works in a copy in `docs/run.md`.
 - The compose fails, exit 2, for each entry of a stack's `workflows` that no module of
   the stack composes as a skill or command.
 - A run from a run code whose composed harness has no skill or command of the

@@ -80,13 +80,8 @@ func TestRunGuardsTheRunnersStepFiles(t *testing.T) {
 			file := filepath.Join(runner, strings.ToLower(name))
 			writeFile(t, file, "")
 			t.Setenv(name, file)
-			out, err := run(t, "run", "claude", "--mount", runner, "--", "-p", "hi")
-			want := "the mount " + runner + " contains " + file + ", the file " + name + " names for the runner's next steps; the agent could change what they run, so the run does not start. Mount a narrower path (mount_contains_forager_files)"
-			if err == nil || err.Error() != want || cmd.ExitCode(err) != 1 {
-				t.Errorf("writable: %v (exit %d), want %q\n%s", err, cmd.ExitCode(err), want, out)
-			}
-			out, err = run(t, "run", "claude", "--mount", runner+":ro", "--", "-p", "hi")
-			want = "the mount " + runner + " contains " + file + ", the file " + name + " names for the runner's next steps; the agent could read it, so the run does not start. Mount a narrower path (mount_contains_forager_files)"
+			out, err := run(t, "run", "claude", "--mount", runner+":ro", "--", "-p", "hi")
+			want := "the mount " + runner + " contains " + file + ", the file " + name + " names for the runner's next steps; the agent could read it, so the run does not start. Mount a narrower path (mount_contains_forager_files)"
 			if err == nil || err.Error() != want || cmd.ExitCode(err) != 1 {
 				t.Errorf("read-only: %v (exit %d), want %q\n%s", err, cmd.ExitCode(err), want, out)
 			}
@@ -97,7 +92,7 @@ func TestRunGuardsTheRunnersStepFiles(t *testing.T) {
 	for _, name := range []string{"GITHUB_ENV", "GITHUB_PATH", "GITHUB_OUTPUT", "GITHUB_STATE", "GITHUB_STEP_SUMMARY"} {
 		t.Setenv(name, "")
 	}
-	if out, err := run(t, "run", "claude", "--mount", runner, "--", "-p", "hi"); cmd.ExitCode(err) != 4 {
+	if out, err := run(t, "run", "claude", "--mount", runner+":ro", "--", "-p", "hi"); cmd.ExitCode(err) != 4 {
 		t.Errorf("unset: %v (exit %d)\n%s", err, cmd.ExitCode(err), out)
 	}
 }
@@ -118,13 +113,8 @@ func TestRunGuardsALinkToARunnersStepFile(t *testing.T) {
 	}
 	file := filepath.Join(runner, "commands", "set_env")
 	t.Setenv("GITHUB_ENV", file)
-	out, err := run(t, "run", "claude", "--mount", runner, "--", "-p", "hi")
-	want := "the mount " + runner + " leads through a link to " + file + ", the file GITHUB_ENV names for the runner's next steps; the agent could point it elsewhere, so the run does not start. Mount a narrower path (mount_contains_forager_files)"
-	if err == nil || err.Error() != want || cmd.ExitCode(err) != 1 {
-		t.Errorf("writable: %v (exit %d), want %q\n%s", err, cmd.ExitCode(err), want, out)
-	}
-	out, err = run(t, "run", "claude", "--mount", runner+":ro", "--", "-p", "hi")
-	want = "the mount " + runner + " leads through a link to " + file + ", the file GITHUB_ENV names for the runner's next steps; the agent could read it, so the run does not start. Mount a narrower path (mount_contains_forager_files)"
+	out, err := run(t, "run", "claude", "--mount", runner+":ro", "--", "-p", "hi")
+	want := "the mount " + runner + " leads through a link to " + file + ", the file GITHUB_ENV names for the runner's next steps; the agent could read it, so the run does not start. Mount a narrower path (mount_contains_forager_files)"
 	if err == nil || err.Error() != want || cmd.ExitCode(err) != 1 {
 		t.Errorf("read-only: %v (exit %d), want %q\n%s", err, cmd.ExitCode(err), want, out)
 	}

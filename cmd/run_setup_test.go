@@ -159,6 +159,7 @@ func TestAWalledRunWithNoRepositoriesHasNoSetup(t *testing.T) {
 	for _, where := range []string{"outside", "inside"} {
 		t.Run(where, func(t *testing.T) {
 			h := newHostFetch(t, "", "main")
+			firstCommit(t, h.dir)
 			r := runSetUp(t, h, where, "", nil)
 			if !errors.Is(r.err, cmd.ErrJoinedNowhere) || len(r.joins) != 1 {
 				t.Fatalf("%d joins, %v (exit %d)\n%s", len(r.joins), r.err, cmd.ExitCode(r.err), r.out)

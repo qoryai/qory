@@ -1199,3 +1199,80 @@ func TestGitHelpers(t *testing.T) {
 		t.Errorf("subcommand %q, want fetch", got)
 	}
 }
+
+// TestSetupChangesListsWhatTheSetupChanged is a setup that adds, changes and deletes files,
+// and plants a monitor in the copy's .git: the list has the three paths and no .qory, and no
+// program of the copy runs.
+func TestSetupChangesListsWhatTheSetupChanged(t *testing.T) {
+	isolate(t)
+	src, _ := person(t)
+	write(t, src, "kept.txt", "first\n")
+	write(t, src, "changed.txt", "first\n")
+	write(t, src, "gone.txt", "first\n")
+	commitAll(t, src, "more")
+	d, repos := cloneRun(t, src)
+	program, ran := marker(t)
+	testGit(t, d.Work(), "config", "core.fsmonitor", program)
+	write(t, d.Work(), "changed.txt", "the setup\n")
+	write(t, d.Work(), "added/new.txt", "the setup\n")
+	write(t, d.Work(), ".qory/harness/entry", "the compose\n")
+	if err := os.Remove(filepath.Join(d.Work(), "gone.txt")); err != nil {
+		t.Fatal(err)
+	}
+	got, err := d.SetupChanges(context.Background(), repos[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	slices.Sort(got)
+	if want := []string{"added/new.txt", "changed.txt", "gone.txt"}; !slices.Equal(got, want) {
+		t.Errorf("the setup changed %v, want %v", got, want)
+	}
+	if _, err := os.Stat(ran); err == nil {
+		t.Error("a program the copy's .git names ran on this machine")
+	}
+}
+
+// TestAShallowRepositoryComesBack is a person's repository cloned with a depth of 1: the
+// quarantine reads the run's commits, though the parent of the first commit is not there.
+func TestAShallowRepositoryComesBack(t *testing.T) {
+	isolate(t)
+	full, _ := person(t)
+	write(t, full, "second.txt", "second\n")
+	commitAll(t, full, "second")
+	src := filepath.Join(t.TempDir(), "shallow")
+	testGit(t, "", "clone", "--quiet", "--depth", "1", "file://"+full, src)
+	testGit(t, src, "config", "user.name", "Tester")
+	testGit(t, src, "config", "user.email", "tester@example.com")
+	sessionGit(t)
+	d, repos := cloneRun(t, src)
+	write(t, d.Work(), "left.txt", "left\n")
+	bringBack(t, d, src, repos, nil)
+	if got := files(t, src, branch); !slices.Contains(got, "left.txt") {
+		t.Errorf("the run's branch has %v, want left.txt", got)
+	}
+}
+
+// TestTheGitSessionUsesTheMessageItIsGiven is the message of a run on a work branch, with a
+// second line: the commit has it, and without one the commit has the default.
+func TestTheGitSessionUsesTheMessageItIsGiven(t *testing.T) {
+	isolate(t)
+	sessionGit(t)
+	src, _ := person(t)
+	d, repos := cloneRun(t, src)
+	write(t, d.Work(), "left.txt", "left\n")
+	s, err := d.GitSession(context.Background(), branch, "Changes left by run 7\n\nThe run ended failed.", repos, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runSession(t, s)
+	qs, err := d.Quarantine(context.Background(), branch, repos)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := qs[0].FetchInto(context.Background(), src, "refs/heads/"+branch); err != nil {
+		t.Fatal(err)
+	}
+	if got := testGit(t, src, "log", "-1", "--format=%B", branch); !strings.Contains(got, "Changes left by run 7\n\nThe run ended failed.") {
+		t.Errorf("the commit's message is %q", got)
+	}
+}

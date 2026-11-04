@@ -65,8 +65,8 @@ func TestAWalledRunWithAMountOfTheHomeFolderStopsFirst(t *testing.T) {
 	if out, err := run(t, "run", "claude", "--mount", home+":ro", "--", "-p", "hi"); err == nil || cmd.ExitCode(err) != 1 || !strings.Contains(err.Error(), "(mount_contains_forager_files)") {
 		t.Fatalf("a read-only mount of the home folder: %v (exit %d)\n%s", err, cmd.ExitCode(err), out)
 	}
-	if out, err := run(t, "run", "claude", "--mount", repo, "--", "-p", "hi"); cmd.ExitCode(err) != 4 {
-		t.Fatalf("a mount of a repository under the home folder: %v\n%s", err, out)
+	if out, err := run(t, "run", "claude", "--mount", repo+":ro", "--", "-p", "hi"); cmd.ExitCode(err) != 4 {
+		t.Fatalf("a read-only mount of a repository under the home folder: %v\n%s", err, out)
 	}
 }
 
@@ -204,9 +204,9 @@ func realSet(paths []string) []string {
 	return slices.Compact(out)
 }
 
-// TestAWalledRunIsGivenItsPlaces runs walled with a read-write and a read-only mount:
-// SessionSpec.Written contains the run's checkout and its read-write mount, and nothing
-// else; the read-only mount is none. Forager adds the writable binds of the other walled
+// TestAWalledRunIsGivenItsPlaces runs walled with a read-only mount: SessionSpec.Written
+// contains the run's copy and the folder of the runs' copies, and nothing else; the
+// read-only mount and the person's checkout are none. Forager adds the writable binds of the other walled
 // runs it lists and, behind the wall, this run's writable binds itself, outside
 // SessionSpec.Written. The harness's Claude Code settings go to the session once,
 // inline, as their JSON.
@@ -215,10 +215,20 @@ func TestAWalledRunIsGivenItsPlaces(t *testing.T) {
 	copyFixture(t, "two-modules", root)
 	composedForFake(t, root, "claude")
 	walledSection(t)
-	mounted, readOnly := tempDir(t), tempDir(t)
-	written, args, out := writtenOf(t, root, "--mount", mounted, "--mount", readOnly+":ro", "--", "-p", "hi")
-	if got, want := realSet(written), realSet([]string{root, mounted}); !slices.Equal(got, want) {
-		t.Errorf("SessionSpec.Written %q\nwant %q", written, want)
+	readOnly := tempDir(t)
+	written, args, out := writtenOf(t, root, "--mount", readOnly+":ro", "--", "-p", "hi")
+	cache, err := os.UserCacheDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	runs := filepath.Join(cache, "qory", "runs")
+	if len(written) != 2 || !slices.Contains(written, runs) {
+		t.Errorf("SessionSpec.Written %q, want one copy and %s", written, runs)
+	}
+	for _, place := range written {
+		if strings.Contains(realpath.Real(place), realpath.Real(root)) || strings.Contains(realpath.Real(place), realpath.Real(readOnly)) {
+			t.Errorf("SessionSpec.Written has %s, of the person's folders", place)
+		}
 	}
 	wants(t, out, "inside the container")
 	settings := 0

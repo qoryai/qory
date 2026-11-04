@@ -146,7 +146,13 @@ func TestAReadRunOpensTheStoreToAComposedBlock(t *testing.T) {
 // the workspace and the checkout's mount stay writable, and Claude Code's settings get
 // no rules from qory.
 func TestAWriteWorkflowSeesTheCheckoutWritable(t *testing.T) {
-	r, _ := readRun(t, declares("write"), readImage, "")
+	r := runFromCodeWith(t, func(string) []string {
+		firstCommit(t, ".")
+		docker, _ := fakeDocker(t)
+		writeFile(t, filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "forager.yaml"),
+			"wall:\n  adapter: docker\n  command: "+docker+"\n  helper: "+staticELF(t)+"\n  user: \"1000:1000\"\n  image: "+readImage+"\n")
+		return nil
+	}, []string{"--home", filepath.Join(tempDir(t), "home")}, declares("write"), nil)
 	if !r.joined {
 		t.Fatalf("%v (exit %d), want the join\n%s", r.err, cmd.ExitCode(r.err), r.out)
 	}
@@ -173,6 +179,7 @@ func settingsOf(t *testing.T, args []string) string {
 // code, which starts no workflow: the workspace and the checkout's mount stay writable.
 func TestARunKeyRunSeesTheCheckoutWritable(t *testing.T) {
 	h := newHostFetch(t, "", "main")
+	firstCommit(t, h.dir)
 	r := runSetUp(t, h, "", "", nil)
 	if len(r.joins) != 1 {
 		t.Fatalf("%d joins, %v (exit %d)\n%s", len(r.joins), r.err, cmd.ExitCode(r.err), r.out)
