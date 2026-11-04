@@ -1,0 +1,48 @@
+package runcopy
+
+// The texts of the errors this package returns. Each starts with its fix.
+const (
+	textRunID     = "give a run id of letters, digits, dots, dashes and underscores that starts with a letter or a digit: the run's copy goes to a folder named after it, and %s is not such a name"
+	textNoCache   = "set HOME: the copy of a walled run's checkout goes under the user's cache folder, and the lookup of that folder failed: %w"
+	textOverlap   = "set XDG_STATE_HOME to a folder outside %s: a walled run writes its copy in %s, and that folder overlaps %s, which no walled run may write"
+	textRunExists = "remove %s, or start the run again with another id: a run's copy goes into a new folder, and that folder exists"
+	textFile      = "check that you can read and write %s: %v"
+	textExists    = "remove %s: qory makes it new for each run, and it exists"
+
+	textNoHead       = "commit in %s, or start the run in a repository with a commit at HEAD: the run works in a copy of the commit at HEAD, and the fetch of HEAD failed: %w"
+	textNoClone      = "check that git can clone %s: qory copies it for the run with git clone, which failed: %w"
+	textNoCheckout   = "check that git can check out %s in a clone of %s: the run works on that commit, and the checkout failed: %w"
+	textNoSubmodule  = "check the submodule %s in %s: qory copies it for the run from %s, and the copy failed: %w"
+	textSubmodules   = "check .gitmodules at %s in %s: qory reads it to copy the submodules, and git config failed: %w"
+	textFolderOnly   = "start the run in a folder: %s is no folder"
+	textFolderHolds  = "start the run in a folder that does not contain %s: a run's copy goes there, and qory would copy it into itself"
+	textNoFolderCopy = "check that you can read every file in %s: qory copies the folder for the run, and the copy failed: %w"
+
+	textBranch    = "give a branch name that git check-ref-format takes and that does not start with a dash: %s is no branch name for the run"
+	textRef       = "give a full ref name under refs/ that git check-ref-format takes: %s is not one"
+	textGitFailed = "check git on this machine: git check-ref-format failed: %w"
+	textBase      = "give the base commit of %s in full: %s is no commit id"
+	textLeftOut   = "give each path left out of the run's commit relative to the top of its repository: %s is not such a path"
+	textState     = "give each setup path's state as Dir.SetupStates reads it: %s is not such a state"
+	textRepoPath  = "give each repository of the run as Dir.Clone returned it: %s is no folder in the copy"
+
+	textNoBundle        = "look at the git session's output: it wrote no bundle and no record of an empty change for %s, so the session failed or ran past its limit, and nothing came back from the run"
+	textBundleOpen      = "look at %s: qory reads the run's bundle there only as a regular file, and the open failed: %w"
+	textBundleKind      = "look at %s: qory reads the run's bundle only from a regular file, and it is a %s"
+	textBundleMoved     = "look at %s: it changed while qory opened it, so qory read nothing from it"
+	textBundleSize      = "look at %s: qory reads a bundle of at most %d bytes from a run, and it has %d"
+	textBundleGrew      = "look at %s: qory reads a bundle of at most %d bytes from a run, and it grew past that while qory read it"
+	textBundleChecks    = "look at the run's copy in %s: the run's bundle for %s failed git's checks, so no commit of the run reached your repository: %w"
+	textTopEntry        = "look at the run's copy in %s: the run's commit %s in %s adds %s at the top of the repository, where git or qory would act on it, so no commit of the run reached your repository"
+	textQuarantine      = "check that you can write %s: qory fetches the run's commits there first, and git failed: %w"
+	textFetchExists     = "delete %[2]s in %[3]s with git update-ref -d %[2]s, then fetch %[4]s from %[1]s: %[2]s exists, and git fetch moves it only forward: %[5]w"
+	textFetchCheckedOut = "give the run's commits a ref other than %[1]s, which is checked out in %[2]s, then fetch %[3]s from %[4]s: git fetch writes no branch that is checked out: %[5]w"
+	textFetchFailed     = "fetch %[4]s from %[1]s by hand, or check out another branch: qory fetched the run's commits there, and the fetch into %[2]s in %[3]s failed: %[5]w"
+	textGitInRepo       = "check that %s is a git repository: qory reads it for the run, and git failed: %w"
+	textActingFailed    = "check that git can read the quarantine %s: qory compares the acting keys of the run's commits there, and git failed: %w"
+	textCopyBackOpen    = "give the folder the run started in by a path with no link at its end: qory copies the run's files back there, and the open of %s failed: %w"
+	textCopyBackLimit   = "copy the rest from %s by hand: qory copies back at most %d files and %d bytes from a run, and the run left more; it copied %s"
+	textRecord          = "start the run again: qory reads the record of the files it copied in %s, and the read failed: %w"
+	textSetupPath       = "give each setup path relative to the top of the copy: %s is not such a path"
+	textTooDeep         = "remove %s by hand: it has folders more than %d deep, more than qory opens at once"
+)
