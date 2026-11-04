@@ -233,6 +233,10 @@ release may change what an existing document does, and states it under Upgrading
   `qory harness launch --json` and `--address` print them. The Bind table that
   `qory harness inspect` and `qory harness compose --dry-run` print has a third column,
   `from`.
+- A walled run whose read-write `--mount` or `wall.mounts` entry is your home folder or
+  qory's state directory, or a folder that contains either, stops with exit 2 before
+  anything starts, as `mount a narrower folder: the mount <path> is your home folder, and
+  a walled run may change any file in a read-write mount`.
 
 ### Changed
 
@@ -561,15 +565,9 @@ release may change what an existing document does, and states it under Upgrading
   such a folder, they stop with exit 2 and the line `set --home or harness.home to a
   folder outside <folder>, or run git init in <folder>: a home inside a folder needs a
   git working tree there, and <folder> is not one`.
-- qory keeps no record of the places a walled run may write, and reads none: files under
-  `~/.local/state/qory/places/` are ignored. `qory setup repo --accept-checkout` is gone.
 
 ### Fixed
 
-- A walled run whose read-write `--mount` or `wall.mounts` entry is your home folder or
-  qory's state directory, or a folder that contains either, stops with exit 2 before
-  anything starts, as `mount a narrower folder: the mount <path> is your home folder, and
-  a walled run may change any file in a read-write mount`.
 - A run from a run code mounts its inputs from a `qory-inputs-` folder, so the wall no
   longer stops the run as it mounts a folder that Forager reserves for its record
   sockets.
