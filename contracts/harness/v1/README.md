@@ -546,7 +546,7 @@ least one reply by a run. A run's reply has an `outcome`:
 | `changed` | the run changed the artifact for the review comment |
 | `answered` | the review comment is a question, and the reply contains the answer |
 | `declined` | the review comment is a request for a change that the run did not make, and the reply contains the reason |
-| `asked` | the run could not settle the review comment and added a question for a person to the `questions` artifact; the reply's `question` is the id of that question |
+| `asked` | the run could not settle the review comment and added a question for a person to the `questions` artifact; the reply's `question` is the id of that question in the newest `questions` version, so the run pushes the questions before the review comments |
 
 A member's reply has no `outcome` and no `question`. This is version 1 of the format
 ([review-comments.schema.json](review-comments.schema.json)).
