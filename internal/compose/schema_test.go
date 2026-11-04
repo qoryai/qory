@@ -440,7 +440,7 @@ func TestQuestionsSchema(t *testing.T) {
 		{replace(question, ""), false},
 		{replace(question, `Which\ndatabase?`), false},
 		{replace(question, `Which\tdatabase?`), false},
-		{replace(question, `Which ‮database?`), false},
+		{replace(question, `Which \u202edatabase?`), false},
 		// context
 		{replace(`"context": "The service`, `"context": "`+strings.Repeat("a", 20000-len("The service reads `DATABASE_URL`.\n\n- one\n- two"))+`The service`), true},
 		{replace(`"context": "The service`, `"context": "`+strings.Repeat("a", 20001-len("The service reads `DATABASE_URL`.\n\n- one\n- two"))+`The service`), false},
@@ -594,7 +594,7 @@ func TestReviewCommentsSchema(t *testing.T) {
 		{replace(`"Why two steps?"`, `"`+strings.Repeat("a", 2000)+`"`), true},
 		{replace(`"Why two steps?"`, `"`+strings.Repeat("a", 2001)+`"`), false},
 		{replace(`"Why two steps?"`, `""`), false},
-		{replace(`"Why two steps?"`, `"Why ‮two steps?"`), false},
+		{replace(`"Why two steps?"`, `"Why \u202etwo steps?"`), false},
 		{replace(`"text": "Agreed."`, `"text": "`+strings.Repeat("a", 2001)+`"`), false},
 		// by and at
 		{replace(`"by": {"name": "Sam Example"}`, `"by": {"run": 3}`), false},

@@ -125,12 +125,12 @@
     "text": {
       "description": "Text that may span lines. Tab, line feed and carriage return are its only control characters: it has none of U+0000 to U+0008, U+000B, U+000C, U+000E to U+001F, U+007F and U+0080 to U+009F. It has none of the bidirectional controls, the marks U+061C, U+200E and U+200F, the embeddings and overrides U+202A to U+202E and the isolates U+2066 to U+2069; the separators U+2028 and U+2029; and the format characters U+00AD, U+180E, U+200B, U+2060 to U+2064, U+FEFF and U+FFF9 to U+FFFB.",
       "type": "string",
-      "pattern": "^[^\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f\u0080-\u009f­؜᠎​‎‏  ‪-‮⁠-⁤⁦-⁩﻿￹-￻]*$"
+      "pattern": "^[^\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f\u0080-\u009f\u00ad\u061c\u180e\u200b\u200e\u200f\u2028\u2029\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff\ufff9-\ufffb]*$"
     },
     "line": {
       "description": "Text on one line: text as $defs text defines it, with no control character at all, so no tab, line feed or carriage return.",
       "type": "string",
-      "pattern": "^[^\u0000-\u001f\u007f\u0080-\u009f­؜᠎​‎‏  ‪-‮⁠-⁤⁦-⁩﻿￹-￻]*$"
+      "pattern": "^[^\u0000-\u001f\u007f\u0080-\u009f\u00ad\u061c\u180e\u200b\u200e\u200f\u2028\u2029\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff\ufff9-\ufffb]*$"
     },
     "short_text": {
       "description": "A short text, such as an option's explanation or a note: 1 to 2000 characters.",
