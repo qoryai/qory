@@ -1812,7 +1812,7 @@ func unexclude(root, line string) error {
 // heldElsewhere reports whether a worktree of the repository other than root has
 // something, a dangling link included, at the path an exclude line names. Git lists
 // worktrees by their real paths, so root is told apart by its real path. The error is
-// the settings check's refusal of the repository.
+// that of [checkout.Worktrees]: a git older than 2.36.
 func heldElsewhere(root, line string) (bool, error) {
 	self := root
 	if resolved, err := filepath.EvalSymlinks(root); err == nil {

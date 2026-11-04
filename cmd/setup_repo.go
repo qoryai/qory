@@ -102,7 +102,6 @@ var notAName = regexp.MustCompile(`[^a-z0-9._-]+`)
 // newSetupRepo builds the setup repo verb, which sets the repository up for qory: a
 // qory.yaml holding its own stack, and the module that stack names.
 func newSetupRepo() *cobra.Command {
-	var accept bool
 	c := &cobra.Command{
 		Use:   "repo",
 		Short: "Write the repository's qory.yaml and its module",
@@ -122,9 +121,6 @@ what a worktree needs. Your settings go in the qory.yaml that setup machine writ
 			dir, err := os.Getwd()
 			if err != nil {
 				return err
-			}
-			if accept {
-				return acceptCheckout(cmd.Context(), dir, cmd.InOrStdin(), cmd.OutOrStdout())
 			}
 			u := ui.New(cmd.OutOrStdout())
 			name := repositoryName(dir)
@@ -172,7 +168,6 @@ what a worktree needs. Your settings go in the qory.yaml that setup machine writ
 			return nil
 		},
 	}
-	c.Flags().BoolVar(&accept, "accept-checkout", false, "accept the checkout's git settings and qory.yaml commands and paths as they are now, after you checked them")
 	return c
 }
 

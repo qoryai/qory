@@ -437,11 +437,9 @@ release may change what an existing document does, and states it under Upgrading
   fetch stops the run before the agent starts, with exit 1, or 2 for a ref the remote
   does not have and a git source that is not https. Before the fetch, qory stops on a
   working folder whose git configuration has a key git init does not write, such as a
-  filter, `remote.origin.proxy` or `http.sslVerify`, whose `.git` has a link or
-  alternates, or that a walled run used and changed. A walled run that starts in the
-  working folder waits until the fetch and the checkout end. The lines of the fetch start
-  with `qory run:`, where they started with `qory run prepare:`, and each error line
-  starts with its fix.
+  filter, `remote.origin.proxy` or `http.sslVerify`, or whose `.git` has a link or
+  alternates. The lines of the fetch start with `qory run:`, where they started with
+  `qory run prepare:`, and each error line starts with its fix.
 - The setup of a walled run from a control plane whose run configuration lists
   repositories, which adds a prebuilt image's copy and runs the repository's
   `postCreateCommand` and `postStartCommand`, is one `setup` step of the run's record,
@@ -563,15 +561,11 @@ release may change what an existing document does, and states it under Upgrading
   such a folder, they stop with exit 2 and the line `set --home or harness.home to a
   folder outside <folder>, or run git init in <folder>: a home inside a folder needs a
   git working tree there, and <folder> is not one`.
+- qory keeps no record of the places a walled run may write, and reads none: files under
+  `~/.local/state/qory/places/` are ignored. `qory setup repo --accept-checkout` is gone.
 
 ### Fixed
 
-- A walled run whose checkout or read-write mount is your home folder or qory's state
-  directory, or a folder that contains either, stops with exit 2 before anything starts,
-  as `start the walled run from a repository folder: its checkout <path> is your home
-  folder, …` or `mount a narrower folder: the mount <path> is your home folder, …`. Until
-  now, the run recorded the folder as a place it may write, and qory then stopped `git`
-  commands in every repository under the home folder.
 - A run from a run code mounts its inputs from a `qory-inputs-` folder, so the wall no
   longer stops the run as it mounts a folder that Forager reserves for its record
   sockets.

@@ -47,9 +47,7 @@ var scheme = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9+.-]*:`)
 // git reads each file with git config --file --no-includes --list -z: no other
 // configuration, from the temporary folder, which is in no repository. qory runs it
 // through [hostgit.Unchecked], so git is the one the PATH the build's programs get
-// finds after hostgit's rules, never one whose path, with its symbolic links resolved,
-// lies in a place a walled run used (a hard link is not seen), and a git older than
-// 2.36 stops the build. Neither a value nor what git prints is shown; a refusal
+// finds after hostgit's rules, and a git older than 2.36 stops the build. Neither a value nor what git prints is shown; a refusal
 // names the file and the key, with * in place of a subsection.
 func (b *build) checkGitConfig(ctx context.Context) error {
 	files := gitConfigs(b.repo)

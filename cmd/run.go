@@ -386,17 +386,11 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			if key != nil && key.inEnvironment() && spec.Wall == nil {
 				return runKeyNeedsWall()
 			}
-			if spec.Wall == nil {
-				if err := unwalledHere(at.root, cwd); err != nil {
-					return err
-				}
-			}
-			// A walled run records its checkout and its read-write mounts, and the record
-			// stays after the run: the home folder or the state directory stops the run
+			// A read-write mount of the home folder or the state directory stops the run
 			// here, before a run code is redeemed or anything starts. The mounts added
 			// later are read-only.
 			if spec.Wall != nil {
-				if err := walledPlaces(at.root, spec.Mounts); err != nil {
+				if err := reservedMounts(at.root, spec.Mounts); err != nil {
 					return err
 				}
 			}
@@ -486,8 +480,8 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				return err
 			}
 			defer runLock.Release()
-			// What the session holds until the run is over, the agent's environment folder
-			// and the hold on the walled run's places, is let go in the reverse order.
+			// What the session holds until the run is over, such as the agent's environment
+			// folder, is let go in the reverse order.
 			var cleanups []func()
 			defer func() {
 				for i := len(cleanups) - 1; i >= 0; i-- {
@@ -530,10 +524,8 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			}
 			if r := conf.Forager; r != nil && !remote {
 				gw.LockMemory, gw.RunLimits, gw.StackHosts = r.LockMemory, gatewayRunLimits(r), r.StackHosts
-				e, err := expansion(r, pol, server != nil && !local, at.root, cwd, spec.Mounts)
-				if err != nil {
-					return err
-				}
+				e := expansion(r, pol, server != nil && !local, at.root, cwd, spec.Mounts)
+				var err error
 				if gw.Credentials, err = machineCredentials(ctx, r, e, "run", stderr); err != nil {
 					return err
 				}
@@ -624,11 +616,6 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					dropKeptRunKey(spec.RunID, said)
 				}
 				return failed(err)
-			}
-			// The open listed a walled run among the walled runs going under its id, which
-			// no other run can be listed under: the entry of that id is this run's.
-			if walled {
-				defer openingRun(spec.RunID)()
 			}
 			// The run's time limit counts from its open: the compose and the session.
 			opened := time.Now()
@@ -732,7 +719,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				return freshHome, nil
 			}
 			// prepareSession makes the rest of the session's spec once its launch is made:
-			// for a walled run the record of each place the container may write.
+			// for a walled run the places the container may write.
 			prepareSession := func(freshHome bool) error {
 				if wrapsAgentEnv(freshHome, walled) {
 					done, err := wrapAgentEnv(&spec, said)
@@ -741,29 +728,11 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					}
 					cleanups = append(cleanups, done)
 				}
-				// Every place the container may write is recorded before the session starts,
-				// so qory reads what a run could have written there against what the place
-				// held before, and held until the session has registered the run, from when
-				// qory's checks find it.
+				// Forager ends the join before the runtime starts when it reads a file for
+				// the run from any place the container may write, or reaches a mount or
+				// workspace through a link inside one.
 				if walled {
-					hold, err := recordPlaces(ctx, &spec, at.root, at)
-					if err != nil {
-						return err
-					}
-					cleanups = append(cleanups, hold.Release)
-					registered := spec.OnVariables
-					spec.OnVariables = func(a session.Applied) {
-						hold.Release()
-						if registered != nil {
-							registered(a)
-						}
-					}
-					// Forager ends the join before the runtime starts when it reads a file for
-					// the run from any of those places, or reaches a mount or workspace through
-					// a link inside one.
-					if spec.Written, err = writtenPlaces(at.root, spec.Mounts); err != nil {
-						return err
-					}
+					spec.Written = writtenPlaces(at.root, spec.Mounts)
 				}
 				return nil
 			}
@@ -789,8 +758,8 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			// that commit, and stops before the compose when the run configuration lists no
 			// repository while the target is on its system. A run of a work item at that
 			// version reads the work item's branch first: the fetch takes its commit, the
-			// compose reads the target version, and the branch is checked out last, after
-			// the record of the run's places, so no file of the branch counts as the person's.
+			// compose reads the target version, and the branch is checked out last, so no
+			// file of the branch reaches the harness.
 			hostWork := func() error {
 				if run.Repositories() != "" {
 					var err error
@@ -884,12 +853,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					switchCtx, cancel = context.WithDeadline(ctx, opened.Add(timeout))
 				}
 				defer cancel()
-				// A walled run's record holds the working folder until its session registers.
-				checkOut := preparation.Switch
-				if walled {
-					checkOut = preparation.SwitchHeld
-				}
-				if err := checkOut(switchCtx, cwd, os.Environ(), branch, stderr); err != nil {
+				if err := preparation.Switch(switchCtx, cwd, os.Environ(), branch, stderr); err != nil {
 					return &runLineError{err}
 				}
 				return nil
@@ -1613,13 +1577,9 @@ func (e *saidError) Unwrap() error { return e.err }
 // integration whose key the credentials section defines itself defines nothing for the
 // run and is not described. A program the run may write is refused: one in the
 // checkout, in the working directory when that is inside the checkout, or in a
-// read-write mount of the wall's container, or in a place a walled run has used.
-func expansion(r *config.Forager, pol *gateway.Policy, fromServer bool, root, cwd string, mounts []wall.Mount) (config.Expansion, error) {
-	recorded, err := recordedPlaces()
-	if err != nil {
-		return config.Expansion{}, err
-	}
-	e := config.Expansion{Workspace: append([]string{root}, recorded...)}
+// read-write mount of the wall's container.
+func expansion(r *config.Forager, pol *gateway.Policy, fromServer bool, root, cwd string, mounts []wall.Mount) config.Expansion {
+	e := config.Expansion{Workspace: []string{root}}
 	if cwd != root && reallyWithin(root, cwd) {
 		e.Workspace = append(e.Workspace, cwd)
 	}
@@ -1638,7 +1598,7 @@ func expansion(r *config.Forager, pol *gateway.Policy, fromServer bool, root, cw
 	e.Only = func(key string) bool {
 		return !slices.Contains(shadowed, key) && (fromServer || selected[key])
 	}
-	return e, nil
+	return e
 }
 
 // shadowed is the line that reports that the credentials section defines the credential
@@ -1938,11 +1898,6 @@ func (p passed) workspace(path string) bool {
 	return path == p.root && slices.ContainsFunc(p.spec.Mounts, func(m wall.Mount) bool { return m.Path == p.root })
 }
 
-// ofRun reports whether path is one of the run's places: the workspace, or a mount.
-func (p passed) ofRun(path string) bool {
-	return p.workspace(path) || slices.ContainsFunc(p.spec.Mounts, func(m wall.Mount) bool { return m.Path == path })
-}
-
 // place is how a refusal names one of the run's places: the workspace, or a mount.
 func (p passed) place(path string) string {
 	if p.workspace(path) {
@@ -2007,8 +1962,7 @@ func (p passed) modes(path string) (writable, readOnly, changed bool) {
 // Dir; for two paths, the outer's one mode decides, else that same entry.
 //
 // mount_through_link is a place, writable or read-only, reached through a link inside a
-// writable mount, the workspace or a place a walled run has used, where its path
-// resolves outside that place: the agent could repoint the link. The text names the
+// writable mount or the workspace, where its path resolves outside that place: the agent could repoint the link. The text names the
 // place, the link and the place that holds it; a place that is the link itself, its
 // absolute, cleaned form equal to the link, is named as a link inside that place.
 //
@@ -2116,10 +2070,6 @@ func mountRefused(err error, p passed) error {
 		// The link and the places are paths a walled agent could have named, so each is
 		// printed through hostgit.Shown.
 		inside := p.placeShown(outer)
-		if !p.ofRun(outer) {
-			// A place of SessionSpec.Written that is none of this run's: an earlier walled run used it.
-			inside = hostgit.Shown(outer) + ", a place a walled run has used"
-		}
 		text = fmt.Sprintf("%s is reached through the link %s inside %s, which a walled agent can change, so the run does not start. List the link's target itself", p.placeShown(place), hostgit.Shown(link), inside)
 		if abs, err := filepath.Abs(place); err == nil && abs == link {
 			text = fmt.Sprintf("%s is a link inside %s, which a walled agent can change, so the run does not start. List the link's target itself", p.placeShown(place), inside)

@@ -10,40 +10,6 @@ import (
 	"github.com/qoryai/qory/cmd"
 )
 
-// forgetPlaces removes the records of every place, as a person may, so a test that ran
-// walled can run without a wall in the same checkout.
-func forgetPlaces(t *testing.T) {
-	t.Helper()
-	if err := os.RemoveAll(filepath.Join(os.Getenv("XDG_STATE_HOME"), "qory", "places")); err != nil {
-		t.Fatal(err)
-	}
-}
-
-// TestNoAgentWithoutAWallInARecordedPlace refuses qory harness launch and an unwalled
-// qory run in a checkout a walled run used, and from a working folder inside one.
-func TestNoAgentWithoutAWallInARecordedPlace(t *testing.T) {
-	root := newCheckout(t)
-	copyFixture(t, "two-modules", root)
-	composedForFake(t, root, fakeRuntime(t))
-	if out, err := run(t, "harness", "launch"); err != nil {
-		t.Fatalf("before a walled run: %v\n%s", err, out)
-	}
-	recordCheckout(t, root)
-	want := "a walled run has used " + root + ", so qory runs no agent there without a wall, since the run could have left settings, hooks or scripts the agent would run; run it behind a wall, or in another clone or worktree"
-	for _, args := range [][]string{{"harness", "launch"}, {"harness", "launch", "--json"}, {"run", "claude", "--local"}, {"run", "claude", "--local", "--wall", "none"}} {
-		out, err := run(t, args...)
-		if err == nil || err.Error() != want || cmd.ExitCode(err) != 1 {
-			t.Errorf("%v: %v (exit %d)\n%s", args, err, cmd.ExitCode(err), out)
-		}
-		if strings.Contains(out, "env ") {
-			t.Errorf("%v printed a launch:\n%s", args, out)
-		}
-	}
-	if ids := recorded(t, root); len(ids) != 0 {
-		t.Errorf("a refused run left records %v", ids)
-	}
-}
-
 // TestLaunchLeavesOutWhatTheDenyListHolds composes a harness whose launch sets PATH and
 // a proxy among its variables: the launch line leaves both out, as a run does, and keeps
 // the rest.

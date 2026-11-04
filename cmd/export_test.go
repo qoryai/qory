@@ -20,7 +20,6 @@ import (
 	"github.com/qoryai/forager/wall"
 
 	"github.com/qoryai/qory/internal/foragerdir"
-	walled "github.com/qoryai/qory/internal/places"
 	"github.com/qoryai/qory/internal/pool/prebuild"
 	"github.com/qoryai/qory/internal/preparation"
 	"github.com/qoryai/qory/internal/proxygit"
@@ -46,38 +45,6 @@ func SetAfterStep(f func(step string) error) func() {
 func SetStartGateway(f func(gateway.Config) error) func() {
 	startGateway = func(_ context.Context, cfg gateway.Config) (*gateway.Gateway, error) { return nil, f(cfg) }
 	return func() { startGateway = gateway.Start }
-}
-
-// RecordCheckout records the checkout at root as the place of a walled run, the way qory
-// run does before its session: its git settings, its qory files and its harness.
-func RecordCheckout(root string) error {
-	at, err := placesAt(root)
-	if err != nil {
-		return err
-	}
-	files, err := qoryFiles(root)
-	if err != nil {
-		return err
-	}
-	return recordPlace(context.Background(), root, walled.KindCheckout, "run-1", files, at, nil)
-}
-
-// RecordPlaces records the places a walled run in the checkout at root with mounts may
-// write, the way qory run does before its session, and returns the hold on them.
-func RecordPlaces(root string, mounts []wall.Mount) (*walled.Hold, error) {
-	at, err := placesAt(root)
-	if err != nil {
-		return nil, err
-	}
-	spec := &runSpec{OpenSpec: session.OpenSpec{RunID: "run-2"}, SessionSpec: session.SessionSpec{Mounts: mounts}}
-	return recordPlaces(context.Background(), spec, root, at)
-}
-
-// SetTerminal makes qory take stdin for a terminal when terminal is set, and returns
-// what restores the default.
-func SetTerminal(terminal bool) func() {
-	askTerminal = func(any) bool { return terminal }
-	return func() { askTerminal = isTerminal }
 }
 
 // ShortenSocketGrace has every run's socket keep accepting for d after the runtime
@@ -609,10 +576,12 @@ func SetLaunchPrebuild(f func(ctx context.Context, s prebuild.Settings, r prebui
 	return func() { launchPrebuild = before }
 }
 
-// WalledPlaces is the check of a walled run's checkout at root and of its read-write
-// mounts against the home folder and the state directory, which qory run makes before
-// the run starts anything.
-func WalledPlaces(root string, mounts []wall.Mount) error { return walledPlaces(root, mounts) }
+// ReservedMounts is the check of a walled run's read-write mounts, other than its
+// checkout at root, against the home folder and the state directory, which qory run
+// makes before the run starts anything.
+func ReservedMounts(root string, mounts []wall.Mount) error {
+	return reservedMounts(root, mounts)
+}
 
 // SetTempStoreDir sets the store of a run whose checkout is read-only to dir, and returns
 // a function that restores it.

@@ -1,22 +1,20 @@
 // Package acting holds the keys of qory's files that qory acts on: the commands it runs,
-// the paths it follows and the sources it fetches. A walled run can write every file of
-// its checkout and of a read-write mount, a qory.yaml and a stack file among them, and
-// qory on this machine reads those files afterwards. The record of the place holds the
-// hashes of the acting keys each such file set when a walled run first used the place
-// ([places.Qory]); [Check] refuses a file that sets one since, until the person accepts
-// it.
+// the paths it follows and the sources it fetches. A walled run can change a qory.yaml
+// and a stack file, and qory on this machine reads those files afterwards, so a caller
+// compares the acting keys a file sets before and after a run.
 //
 // The acting keys of a qory.yaml, or harness.yaml, are worktree.run.add and
 // worktree.run.remove, worktree.link, worktree.copy and worktree.dir; harness.launch.*,
 // harness.home, env.* and git.cache; harness.extends.git and harness.modules[].source.git;
 // and harness.extends.path and harness.modules[].source.path when they lead outside the
 // place. A stack file's are extends and modules[].source, the same way. Every other key
-// changes freely, so a pull or an edit of the stack's modules is not refused.
+// changes freely, so a pull or an edit of the stack's modules changes no acting key.
 package acting
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -24,12 +22,10 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/qoryai/forager/accesskey"
 	"gopkg.in/yaml.v3"
 
 	"github.com/qoryai/qory/internal/exports"
-	"github.com/qoryai/qory/internal/hostgit"
-	"github.com/qoryai/qory/internal/places"
+	"github.com/qoryai/qory/internal/realpath"
 )
 
 // Entry is one acting key a file sets.
@@ -50,38 +46,19 @@ type Entry struct {
 	target string
 }
 
-// Hash is the entry's hash, as the record holds it: of its key and its value, and of
-// where a path outside the place resolves.
+// Hash is the entry's hash: the SHA-256 of its key, without a module's place in the
+// list, and its value, and of where a path outside the place resolves.
 func (e Entry) Hash() string {
 	v := e.Value
 	if e.target != "" {
 		// A value as JSON holds no line break, so the target follows one.
 		v += "\n" + e.target
 	}
-	return places.Setting("qory."+e.id, &v)
-}
-
-// ChangedError is a file in a recorded place that sets an acting key it did not set when
-// a walled run first used the place, or sets it to another value. Its line names the
-// file by its path: a qory.yaml, a qory-stack.yaml, a harness.yaml or a stack file one
-// of them extends.
-type ChangedError struct {
-	// File is the file.
-	File string
-	// Key is the key, as [Entry.Key].
-	Key string
-}
-
-// Error prints the key as [accesskey.ShownName] prints it: a key whose name, such as an
-// env variable's, contains an access key secret or a run key prints as Forager's phrase.
-func (e *ChangedError) Error() string {
-	return hostgit.Shown(e.File) + " changes " + hostgit.Shown(accesskey.ShownName(e.Key, false)) + " since a walled run began here; qory does not act on it, since the run could have written it. qory setup repo --accept-checkout accepts it"
-}
-
-// Refused reports whether err is, or wraps, a [ChangedError].
-func Refused(err error) bool {
-	var c *ChangedError
-	return errors.As(err, &c)
+	h := sha256.New()
+	h.Write([]byte("qory." + e.id))
+	h.Write([]byte{0})
+	h.Write([]byte(v))
+	return hex.EncodeToString(h.Sum(nil))
 }
 
 // document reports whether path is read as a qory.yaml, through its sections, rather
@@ -141,11 +118,11 @@ func Entries(path string, data []byte, place string) ([]Entry, error) {
 			}
 			// A path inside the place as written that leads out of it through a link is
 			// outside: qory follows the link.
-			if places.Inside(place, s) {
+			if realpath.Inside(place, s) {
 				return false, "", ""
 			}
 		}
-		target = places.Real(s)
+		target = realpath.Real(s)
 		if target != filepath.Clean(s) {
 			leads = target
 		}
@@ -252,9 +229,9 @@ func atPlace(dir, place string) string {
 	if place == "" {
 		return dir
 	}
-	real := places.Real(place)
+	real := realpath.Real(place)
 	for q := dir; ; q = filepath.Dir(q) {
-		if !within(place, q) && !within(real, q) && places.Real(q) == real {
+		if !within(place, q) && !within(real, q) && realpath.Real(q) == real {
 			rel, err := filepath.Rel(q, dir)
 			if err != nil {
 				return dir
@@ -282,7 +259,7 @@ func sortedKeys(m map[string]any) []string {
 	return keys
 }
 
-// Hashes is the sorted hashes of entries, as the record holds them.
+// Hashes is the sorted hashes of entries, each once.
 func Hashes(entries []Entry) []string {
 	out := make([]string, 0, len(entries))
 	for _, e := range entries {
@@ -295,94 +272,14 @@ func Hashes(entries []Entry) []string {
 	return out
 }
 
-// Rel is the name the record gives the file at path in the place: relative to the
-// place, with forward slashes, both with their links resolved.
+// Rel is the path of the file at path in the place: relative to the place, with forward
+// slashes, both with their links resolved.
 func Rel(place, path string) string {
-	rel, err := filepath.Rel(places.Real(place), places.Real(path))
+	rel, err := filepath.Rel(realpath.Real(place), realpath.Real(path))
 	if err != nil {
 		return filepath.ToSlash(path)
 	}
 	return filepath.ToSlash(rel)
-}
-
-// Fingerprint is the qory section of the record of the place: the hashes of the acting
-// keys of each of files that lies in the place and can be read. A file that is not there
-// or is not YAML gets none, so any acting key it sets later is refused.
-func Fingerprint(place string, files []string) *places.Qory {
-	q := &places.Qory{}
-	for _, f := range files {
-		if !places.Within(place, f) {
-			continue
-		}
-		data, err := os.ReadFile(f)
-		if err != nil {
-			continue
-		}
-		entries, err := Entries(f, data, place)
-		if err != nil {
-			continue
-		}
-		if q.Files == nil {
-			q.Files = map[string][]string{}
-		}
-		q.Files[Rel(place, f)] = Hashes(entries)
-	}
-	return q
-}
-
-// Changes lists the acting keys the file at path, data being its content, sets that the
-// record rec does not hold for it, in the order the file sets them.
-func Changes(rec places.Record, path string, data []byte) ([]Entry, error) {
-	_, changed, err := Read(rec, path, data)
-	return changed, err
-}
-
-// Read lists the acting keys the file at path, data being its content, sets, against
-// the record rec of the place it lies in: all of them, whose [Hashes] are what an accept
-// of the file takes, and changed, the ones rec does not hold for it, each in the order
-// the file sets them.
-func Read(rec places.Record, path string, data []byte) (all, changed []Entry, err error) {
-	all, err = Entries(path, data, rec.Path)
-	if err != nil {
-		return nil, nil, err
-	}
-	var held []string
-	if rec.Qory != nil {
-		held = rec.Qory.Files[Rel(rec.Path, path)]
-	}
-	for _, e := range all {
-		if !places.Holds(held, e.Hash()) {
-			changed = append(changed, e)
-		}
-	}
-	return all, changed, nil
-}
-
-// Check refuses the file at path, data being its content, when it lies in a recorded
-// place and sets an acting key the nearest such place's record does not hold for it. A
-// file outside every recorded place, or one that is not YAML, passes: the reader reports
-// what is wrong with it.
-func Check(path string, data []byte) error {
-	recs, err := places.Cached()
-	if err != nil {
-		return err
-	}
-	if len(recs) == 0 {
-		return nil
-	}
-	abs, err := filepath.Abs(path)
-	if err != nil {
-		return err
-	}
-	found := places.Containing(recs, abs)
-	if len(found) == 0 {
-		return nil
-	}
-	changed, err := Changes(found[0], abs, data)
-	if err != nil || len(changed) == 0 {
-		return nil
-	}
-	return &ChangedError{File: abs, Key: changed[0].Key}
 }
 
 // Base is the stack file the file at path, data being its content, extends by a path:

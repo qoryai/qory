@@ -383,7 +383,7 @@ func TestARelativeLinkIsFollowedFromWhereItStands(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := conf.Forager.Expand(context.Background(), config.Expansion{Workspace: []string{program}}); err == nil || !strings.HasSuffix(err.Error(), "gateway.integrations.rel: "+program+", which a run may write; qory runs an integration from outside the checkout, the container's read-write mounts and the places a walled run has used") {
+	if err := conf.Forager.Expand(context.Background(), config.Expansion{Workspace: []string{program}}); err == nil || !strings.HasSuffix(err.Error(), "gateway.integrations.rel: "+program+", which a run may write; qory runs an integration from outside the checkout and the container's read-write mounts") {
 		t.Errorf("a program that is a mounted file: %v", err)
 	}
 }
@@ -571,7 +571,7 @@ func TestProgramFindsTheProgramWhereItRuns(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", bin)
-	want := "a-tool, inside " + workspace + ", which a run may write; qory runs a tool from outside the checkout, the container's read-write mounts and the places a walled run has used"
+	want := "a-tool, inside " + workspace + ", which a run may write; qory runs a tool from outside the checkout and the container's read-write mounts"
 	if _, err := config.Program("a-tool", []string{workspace}, "a tool"); err == nil || err.Error() != want {
 		t.Errorf("a bare name on the PATH: %v, want %q", err, want)
 	}
@@ -581,7 +581,7 @@ func TestProgramFindsTheProgramWhereItRuns(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Chdir(cwd)
-	want = "tools/a-tool, inside " + workspace + ", which a run may write; qory runs a tool from outside the checkout, the container's read-write mounts and the places a walled run has used"
+	want = "tools/a-tool, inside " + workspace + ", which a run may write; qory runs a tool from outside the checkout and the container's read-write mounts"
 	if _, err := config.Program("tools/a-tool", []string{workspace}, "a tool"); err == nil || err.Error() != want {
 		t.Errorf("a relative name through a link: %v, want %q", err, want)
 	}

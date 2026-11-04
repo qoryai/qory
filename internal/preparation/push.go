@@ -99,12 +99,11 @@ func stepGit(p *proxygit.Proxy, input string, env ...string) gitRunner {
 // added for one with no entry. It prints a line on report for each repository pushed.
 //
 // Before any git writes, [safeAfterRun] checks the target and [safeFurther] each further
-// repository, since the agent could write each .git, and the hold on the working folder
-// lasts until Push returns. Every git runs with the environment [proxygit.Env] makes, so
-// it reads no system or global configuration file, and with [proxygit.Hardened], which
-// turns off the hooks in .git, fsmonitor and credential helpers. The two exceptions are
-// the checks of a recorded place in [hostgit.Hold], git config --file and git rev-parse,
-// which use the flags of hostgit and reach no remote. No option turns a filter off: the
+// repository, since the agent could write each .git. Every git runs with the environment
+// [proxygit.Env] makes, so it reads no system or global configuration file, and with
+// [proxygit.Hardened], which turns off the hooks in .git, fsmonitor and credential
+// helpers. The one exception is git config --file in the checks, which uses the flags of
+// hostgit and reaches no remote. No option turns a filter off: the
 // check stops on each key that git init and the fetch do not write, filter keys among
 // them, so a filter stays out only while no process writes .git/config after the check.
 // The commits of every repository come before the first push, so
@@ -129,11 +128,9 @@ func Push(ctx context.Context, dir string, base []string, b *WorkBranch, message
 			}
 			continue
 		}
-		hold, err := safeAfterRun(ctx, folders[i])
-		if err != nil {
+		if err := safeAfterRun(ctx, folders[i]); err != nil {
 			return nil, notSafe(r, err)
 		}
-		defer hold.Release()
 	}
 	if err := clearIndexLocks(b.Repositories, folders, agentStopped, report); err != nil {
 		return nil, err
@@ -377,12 +374,12 @@ func leftOut(dir, path string, setup map[string]string) (bool, error) {
 }
 
 // RecordSetup records what the setup of a run that can push left changed in each
-// repository of b, in dir, the working folder, for [Push]. A caller runs it
-// after the setup and before the session joins, under the hold of a walled run's record.
-// The setup container is still up, and git status runs a filter that .git/config has, so
-// a process in that container could add one after any check of the live file. git status
-// therefore reads a copy that no process in the container can write, see [privateGitDir].
-// git runs as in [Push], so both read the same list of ignored files.
+// repository of b, in dir, the working folder, for [Push]. A caller runs it after the
+// setup and before the session joins. The setup container is still up, and git status
+// runs a filter that .git/config has, so a process in that container could add one after
+// any check of the live file. git status therefore reads a copy that no process in the
+// container can write, see [privateGitDir]. git runs as in [Push], so both read the same
+// list of ignored files.
 func RecordSetup(ctx context.Context, dir string, base []string, b *WorkBranch) error {
 	return recordWith(ctx, dir, base, b, func(env ...string) gitRunner { return stepGit(noRemote, "", env...) })
 }

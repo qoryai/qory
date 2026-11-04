@@ -1050,21 +1050,11 @@ func TestRunBehindAWall(t *testing.T) {
 	}
 	wants(t, string(settings), "/qory/qory run forward")
 
-	// --wall none in the checkout a walled run used is refused, and starts nothing.
 	if err := os.RemoveAll(runsDir(t, root)); err != nil {
 		t.Fatal(err)
 	}
 	composedForFake(t, root, fakeRuntime(t))
-	want := "a walled run has used " + root + ", so qory runs no agent there without a wall, since the run could have left settings, hooks or scripts the agent would run; run it behind a wall, or in another clone or worktree"
-	if out, err := run(t, "run", "claude", "--wall", "none"); err == nil || err.Error() != want || cmd.ExitCode(err) != 1 {
-		t.Fatalf("--wall none after a walled run: %v (exit %d)\n%s", err, cmd.ExitCode(err), out)
-	}
-	if _, err := os.Stat(runsDir(t, root)); err == nil {
-		t.Error("the refused run left records")
-	}
-	// --wall none runs without the section's wall, as this machine's process, in a
-	// checkout no walled run used.
-	forgetPlaces(t)
+	// --wall none runs without the section's wall, as this machine's process.
 	if out, err := run(t, "run", "claude", "--wall", "none"); cmd.ExitCode(err) != 3 {
 		t.Fatalf("--wall none: %v (exit %d)\n%s", err, cmd.ExitCode(err), out)
 	}
@@ -1185,9 +1175,8 @@ func TestRunRefusesAMountOfAnIntegrationsSettingFile(t *testing.T) {
 // Forager's files, or read it through a read-only mount. A mount of a directory Forager keeps its own files in, the tools'
 // sockets, says so, in either mode, and one of qory's state directory says the agent could change the
 // run records, or read them through a read-only mount. A run refused so has a record
-// that shows it failed, and its last line contains the record's path. A checkout that
-// contains the state directory stops the run with exit 2 before the run opens, so the
-// run has no record.
+// that shows it failed, and its last line contains the record's path. Forager stops a
+// run whose checkout contains the state directory too.
 func TestRunRefusesAMountOfForagersFiles(t *testing.T) {
 	root := newCheckout(t)
 	copyFixture(t, "two-modules", root)
@@ -1232,12 +1221,8 @@ func TestRunRefusesAMountOfForagersFiles(t *testing.T) {
 		t.Errorf("the refused runs ended %v", ends)
 	}
 	t.Setenv("XDG_STATE_HOME", filepath.Join(root, "state"))
-	want := "start the walled run from a repository folder: its checkout " + root + " contains qory's state directory " + filepath.Join(root, "state", "qory") + ", and a walled run may change any file in its checkout, the record of the places walled runs used among them"
-	if out, err := run(t, "run", "claude"); err == nil || err.Error() != want || cmd.ExitCode(err) != cmd.ExitInput {
-		t.Errorf("the state directory in the checkout: %v (exit %d), want %q\n%s", err, cmd.ExitCode(err), want, out)
-	}
-	if ids := recorded(t, root); len(ids) != 0 {
-		t.Errorf("the stopped run left records %v", ids)
+	if out, err := run(t, "run", "claude"); err == nil || cmd.ExitCode(err) != 1 || !strings.HasSuffix(err.Error(), "(mount_contains_forager_files)") {
+		t.Errorf("the state directory in the checkout: %v (exit %d)\n%s", err, cmd.ExitCode(err), out)
 	}
 	if _, err := os.Stat(log); err == nil {
 		data, _ := os.ReadFile(log)
@@ -1273,9 +1258,9 @@ func TestRunRefusesAMountOfALinkOnTheWayToTheRecords(t *testing.T) {
 		state, mount, want string
 		exit               int
 	}{
-		{home, links, "mount a narrower folder: the mount " + links + " contains qory's state directory " + filepath.Join(home, "qory") + ", and a walled run may change any file in a read-write mount, the record of the places walled runs used among them", cmd.ExitInput},
+		{home, links, "mount a narrower folder: the mount " + links + " contains qory's state directory " + filepath.Join(home, "qory") + ", and a walled run may change any file in a read-write mount", cmd.ExitInput},
 		{home, links + ":ro", "the mount " + links + " contains " + home + ", which leads to qory's run records, so the run does not start. Mount a narrower path (mount_contains_forager_files)", 1},
-		{filepath.Join(user, ".local", "state"), above, "mount a narrower folder: the mount " + above + " contains qory's state directory " + filepath.Join(user, ".local", "state", "qory") + ", and a walled run may change any file in a read-write mount, the record of the places walled runs used among them", cmd.ExitInput},
+		{filepath.Join(user, ".local", "state"), above, "mount a narrower folder: the mount " + above + " contains qory's state directory " + filepath.Join(user, ".local", "state", "qory") + ", and a walled run may change any file in a read-write mount", cmd.ExitInput},
 	} {
 		t.Setenv("XDG_STATE_HOME", c.state)
 		out, err := run(t, "run", "claude", "--mount", c.mount)
@@ -2152,13 +2137,13 @@ rules:
 	}
 }
 
-// TestRunInACheckoutOfARunWhoseContainerCannotBeCheckedStopsAtGit runs a walled run
-// whose wall the script in place of docker cannot remove, so Forager keeps its entry.
-// While docker ps lists none of that run's containers, the next walled run of the same
-// checkout starts. Once docker ps exits 1, the git qory runs in the checkout before the
-// wall returns the refusal that lists the earlier run's id, the docker ps command and
-// the registry entry to delete, and the wall runs nothing.
-func TestRunInACheckoutOfARunWhoseContainerCannotBeCheckedStopsAtGit(t *testing.T) {
+// TestRunInACheckoutOfARunWhoseContainerCannotBeCheckedStops runs a walled run whose
+// wall the script in place of docker cannot remove, so Forager keeps its entry. While
+// docker ps lists none of that run's containers, the next walled run of the same
+// checkout starts. Once docker ps exits 1, Forager stops the next run before the wall
+// with the line that lists the docker ps command and the registry entry to delete, and
+// the wall runs nothing.
+func TestRunInACheckoutOfARunWhoseContainerCannotBeCheckedStops(t *testing.T) {
 	root := newCheckout(t)
 	copyFixture(t, "two-modules", root)
 	composedForFake(t, root, "claude")
@@ -2213,7 +2198,7 @@ esac
 	if _, statErr := os.Stat(entry); statErr != nil {
 		t.Fatalf("no registry entry for the second run: %v", statErr)
 	}
-	want := "The check for a container of the walled run " + ids[len(ids)-1] + " failed. That run used " + root + ", so qory runs no git there. If docker ps --all --filter label=dev.qory.run=" + ids[len(ids)-1] + " lists no container, or the Docker engine of that run no longer exists, delete " + entry
+	want := "The check for a container of an earlier walled run failed, so the run does not start. If docker ps --all --filter label=dev.qory.run=" + ids[len(ids)-1] + " lists no container, or the Docker engine of that run no longer exists, delete " + entry + " (engine_unreachable)"
 	if err == nil || err.Error() != want {
 		t.Fatalf("a run beside an earlier one the engine cannot be asked about: %v, want %q", err, want)
 	}

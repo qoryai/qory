@@ -5,77 +5,9 @@ package preparation
 import (
 	"context"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"testing"
-	"time"
-
-	"github.com/qoryai/qory/internal/places"
 )
-
-// TestHoldsTheWorkingFolderUntilTheFetchEnds is a fetch that a stand-in git stops at
-// git fetch: a walled run that starts in the working folder meanwhile waits until the
-// fetch and the checkout end, so it cannot change the configuration qory checked.
-func TestHoldsTheWorkingFolderUntilTheFetchEnds(t *testing.T) {
-	needGit(t)
-	isolatedPlaces(t)
-	gitPath, err := exec.LookPath("git")
-	if err != nil {
-		t.Fatal(err)
-	}
-	base := t.TempDir()
-	remote(t, base, "acme/shop", "main", map[string]string{"README.md": "shop\n"})
-	dir, err := filepath.EvalSymlinks(emptyFolder(t))
-	if err != nil {
-		t.Fatal(err)
-	}
-	flags := t.TempDir()
-	started, proceed := filepath.Join(flags, "started"), filepath.Join(flags, "proceed")
-	bin := t.TempDir()
-	write(t, filepath.Join(bin, "git"), "#!/bin/sh\nfor a; do [ \"$a\" = fetch ] && { touch '"+started+"'; i=0; while [ ! -e '"+proceed+"' ] && [ $i -lt 300 ]; do sleep 0.1; i=$((i+1)); done; break; }; done\nexec "+gitPath+" \"$@\"\n")
-	if err := os.Chmod(filepath.Join(bin, "git"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
-
-	fetched := make(chan error, 1)
-	go func() {
-		_, err := prepare(context.Background(), dir, env("github.com", "acme/shop"))
-		fetched <- err
-	}()
-	for deadline := time.Now().Add(20 * time.Second); ; time.Sleep(50 * time.Millisecond) {
-		if _, err := os.Stat(started); err == nil {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("the fetch did not start")
-		}
-	}
-	walled := make(chan *places.Hold, 1)
-	go func() {
-		h, err := places.Starting([]string{dir})
-		if err != nil {
-			t.Error(err)
-		}
-		walled <- h
-	}()
-	select {
-	case h := <-walled:
-		h.Release()
-		t.Fatal("a walled run started in the working folder during the fetch")
-	case <-time.After(500 * time.Millisecond):
-	}
-	write(t, proceed, "")
-	if err := <-fetched; err != nil {
-		t.Fatal(err)
-	}
-	select {
-	case h := <-walled:
-		h.Release()
-	case <-time.After(10 * time.Second):
-		t.Fatal("a walled run still waits after the fetch ended")
-	}
-}
 
 // TestStopsOnAHardLink is a working folder with a hard link to a file outside it, at
 // .git/info/exclude, which qory writes in place for a further repository, at
@@ -83,7 +15,6 @@ func TestHoldsTheWorkingFolderUntilTheFetchEnds(t *testing.T) {
 // fetch, with a line that starts with its fix, and the outside file is as it was.
 func TestStopsOnAHardLink(t *testing.T) {
 	needGit(t)
-	isolatedPlaces(t)
 	base := t.TempDir()
 	remote(t, base, "acme/shop", "main", nil)
 	remote(t, base, "acme/lib", "main", nil)

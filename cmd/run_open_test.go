@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
-	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -17,7 +16,6 @@ import (
 	"github.com/qoryai/forager/session"
 
 	"github.com/qoryai/qory/cmd"
-	"github.com/qoryai/qory/internal/places"
 )
 
 // runEvent is one event of a run's record: its type and its data.
@@ -291,33 +289,5 @@ func TestARunKeySaysItsGatewayBeforeTheCompose(t *testing.T) {
 	}
 	if !n.joined {
 		t.Errorf("the run did not go on to the join\n%s", out)
-	}
-}
-
-// TestRunLeavesOutTheWalledRunItOpened is a run opened nowhere, unwalled and then
-// walled. Between the open and the join, the places' checks leave out the walled run's
-// id, which its open listed among the walled runs going, and no id for the unwalled
-// run, which Forager lists nowhere. Once the run ends, the checks leave out no run.
-func TestRunLeavesOutTheWalledRunItOpened(t *testing.T) {
-	root := newCheckout(t)
-	copyFixture(t, "two-modules", root)
-	composedForFake(t, root, "claude")
-	_, restore := cmd.OpenNowhere()
-	defer restore()
-	var seen []string
-	defer cmd.SetBeforeJoin(func() { seen = append(seen, places.ThisRun()) })()
-	const unwalled, walled = "0191f2a4-3c5e-7b8d-9e0f-1a2b3c4d5e01", "0191f2a4-3c5e-7b8d-9e0f-1a2b3c4d5e02"
-	if out, err := run(t, "run", "claude", "--run-id", unwalled); !errors.Is(err, cmd.ErrJoinedNowhere) {
-		t.Fatalf("the unwalled run: %v\n%s", err, out)
-	}
-	walledSection(t)
-	if out, err := run(t, "run", "claude", "--run-id", walled); !errors.Is(err, cmd.ErrJoinedNowhere) {
-		t.Fatalf("the walled run: %v\n%s", err, out)
-	}
-	if want := []string{"", walled}; !slices.Equal(seen, want) {
-		t.Errorf("the checks left out %q before the joins, want %q", seen, want)
-	}
-	if id := places.ThisRun(); id != "" {
-		t.Errorf("after the runs, the checks leave out %q", id)
 	}
 }

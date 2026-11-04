@@ -11,7 +11,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/qoryai/qory/cmd"
 	"github.com/qoryai/qory/internal/hostgit"
 )
 
@@ -70,11 +69,11 @@ func forgeParent(t *testing.T, gitDir, child, parent string) {
 	}
 }
 
-// TestWorktreeRemoveReadsTheBranchAsItIsInTheObjects records a checkout, as a walled run
-// there does, and gives the branch of its worktree a commit that nothing else has. The
-// run then writes, in turn, a replace ref and a commit-graph, each of which gives the
-// base's tip the branch's commit as its parent. With either, git on this machine reads every commit of the branch as on the
-// base. remove without a terminal still finds the commit only on the branch and
+// TestWorktreeRemoveReadsTheBranchAsItIsInTheObjects gives the branch of a worktree a
+// commit that nothing else has. A run then writes, in turn, a replace ref and a
+// commit-graph, each of which gives the base's tip the branch's commit as its parent.
+// With either, git on this machine reads every commit of the branch as on the base.
+// remove without a terminal still finds the commit only on the branch and
 // removes nothing, and git log through hostgit shows the commits as they are in the
 // objects.
 func TestWorktreeRemoveReadsTheBranchAsItIsInTheObjects(t *testing.T) {
@@ -100,9 +99,6 @@ func TestWorktreeRemoveReadsTheBranchAsItIsInTheObjects(t *testing.T) {
 			branch := commitOn(t, wt, "feature.txt", "work on feature")
 			tip := gitOut(t, root, "rev-parse", "origin/main")
 			parent := gitOut(t, root, "log", "-1", "--format=%P", tip)
-			if err := cmd.RecordCheckout(root); err != nil {
-				t.Fatal(err)
-			}
 			c.write(root, branch, tip)
 			if got := gitOut(t, root, "rev-list", "feature", "--not", "--remotes"); got != "" {
 				t.Fatalf("git still reads %s as only on the branch", got)

@@ -1,48 +1,24 @@
 // Package hostgit is the one way qory runs git on this machine.
 //
-// A walled run's container has the run's checkout, and every read-write mount, open for
-// writing. Git on this machine reads a repository's configuration from inside it, so a
-// run could set a key there that makes git on this machine run a program: a hook, an
-// fsmonitor, a filter, an ssh command. [Command] makes every git command qory runs:
+// Git on this machine reads a repository's configuration from inside it, so a key there
+// can make git run a program: a hook, an fsmonitor, a filter, an ssh command. [Command]
+// makes every git command qory runs:
 //
 //   - with the hooks directory and fsmonitor off, the ext:: transport off, submodules
 //     left alone, and replace refs and the commit-graph not read, through -c flags that
-//     win over every configuration file. A run could write a replace ref or a
-//     commit-graph that gives a commit other parents, so that git on this machine reads
-//     a branch's commits as on its base.
-//     core.hooksPath covers only the hooks directory: a hook a configuration defines,
-//     hook.<name>.command with hook.<name>.event, runs whatever it says, and the
-//     settings check refuses those keys in a place a walled run used, as it refuses
-//     every key qory and git do not write;
+//     win over every configuration file. A replace ref or a commit-graph can give a
+//     commit other parents, so that git on this machine reads a branch's commits as on
+//     its base;
 //   - with the variables that would add configuration or choose another repository or
 //     git's programs dropped from the environment, and the pager and the editors set to
 //     programs that do nothing. GIT_SSH, GIT_SSH_COMMAND, GIT_ASKPASS,
 //     GIT_PROXY_COMMAND, GIT_EXTERNAL_DIFF and XDG_CONFIG_HOME are kept from the
-//     person's environment, which is sound only while nothing loads qory's environment
-//     from a file a run wrote;
-//   - after the settings check, when the repository's configuration lies in a place a
-//     walled run could write, as package places records them, or a .git or commondir
-//     in such a place leads to it.
+//     person's environment.
 //
 // [Unchecked] makes git for a command that reads no repository, such as git config
 // --file, with the same flags and the same rules for the environment, applied to an
-// environment its caller gives, and without the settings check. Both run the first git
-// on the PATH whose path, with its symbolic links resolved, lies in no recorded place,
-// by that resolved path; a hard link to a file in a place is not seen.
-//
-// The check reads the configuration files without letting git act on them, and accepts
-// the keys qory and git write, with any value, and the settings the place held when it
-// was first recorded. A remote's URL is accepted only as the fingerprint holds it, and
-// a remote's other keys only when the configuration gives it a URL. Any other key is a
-// [*RefusedError], and qory runs no git there. So is a configuration git cannot read,
-// and a .git that points somewhere other than it did when the place was recorded. An
-// include is accepted only when it was there then and names a file outside every
-// recorded place.
-//
-// The check runs before every command. A repository whose files are byte for byte what
-// the last full check in this process read is not read again. The places the check
-// finds no walled run using stay held until git has run, so that a walled run that
-// starts in one waits for it.
+// environment its caller gives. Both run the first git on the PATH, by its path with its
+// symbolic links resolved.
 package hostgit
 
 import (
@@ -52,8 +28,6 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
-
-	"github.com/qoryai/qory/internal/places"
 )
 
 // flags are the -c flags every git command gets. A -c flag is read after every
@@ -87,24 +61,22 @@ var quiet = []string{"GIT_PAGER=cat", "GIT_EDITOR=:", "GIT_SEQUENCE_EDITOR=:"}
 
 // Env is the environment of every git command [Command] makes: this process's, without
 // the [dropped] variables and every GIT_CONFIG_KEY_<n> and GIT_CONFIG_VALUE_<n>, with
-// the PATH's empty and relative entries taken out, and every entry that lies in a
-// recorded place, as written or with its links resolved, /usr/bin:/bin when none is left
-// or there is no PATH, and with the pager and the editors set to programs that do
-// nothing. git finds its helpers and the programs it runs through the PATH, such as ssh:
-// an empty or relative entry is taken from the working folder, which is the checkout, an
-// entry in a recorded place holds what a walled run could have written, and a shell git
-// starts with no PATH takes a default one, which may end in the working folder. When
-// qory cannot read the records, the PATH is /usr/bin:/bin.
+// the PATH's empty and relative entries taken out, /usr/bin:/bin when none is left or
+// there is no PATH, and with the pager and the editors set to programs that do nothing.
+// git finds its helpers and the programs it runs through the PATH, such as ssh: an
+// empty or relative entry is taken from the working folder, which is the checkout, and
+// a shell git starts with no PATH takes a default one, which may end in the working
+// folder.
 func Env() []string { return envFrom(os.Environ()) }
 
 // baseKey is the key of the environment [WithBase] adds to a context.
 type baseKey struct{}
 
 // WithBase returns ctx with base as the environment that every git started with it
-// starts from, in place of this process's: [Ready], [Hold] and [Command], and the
-// checks they run, take base as [Env] takes this process's. A pool that fetches a run's
-// code in its process sets the environment of its commands, whose PATH lists no entry
-// in the folder walled runs write to.
+// starts from, in place of this process's: [Ready] and [Command] take base as [Env]
+// takes this process's. A pool that fetches a run's code in its process sets the
+// environment of its commands, whose PATH lists no entry in the folder walled runs
+// write to.
 func WithBase(ctx context.Context, base []string) context.Context {
 	return context.WithValue(ctx, baseKey{}, slices.Clone(base))
 }
@@ -124,7 +96,6 @@ func envOf(ctx context.Context) []string { return envFrom(Base(ctx)) }
 
 // envFrom is [Env] with base in place of this process's environment.
 func envFrom(base []string) []string {
-	recs, err := places.Cached()
 	var env []string
 	path := false
 	for _, kv := range base {
@@ -133,11 +104,7 @@ func envFrom(base []string) []string {
 			continue
 		}
 		if name == "PATH" {
-			kept := fallbackPath
-			if err == nil {
-				kept = absoluteEntries(value, recs)
-			}
-			kv, path = name+"="+kept, true
+			kv, path = name+"="+absoluteEntries(value), true
 		}
 		env = append(env, kv)
 	}
@@ -147,14 +114,13 @@ func envFrom(base []string) []string {
 	return append(env, quiet...)
 }
 
-// absoluteEntries is the PATH value path with only its absolute entries that lie in no
-// place of recs, as written or with their links resolved, in order; with none,
-// [fallbackPath], since a shell git starts may search its working folder for an empty
-// PATH.
-func absoluteEntries(path string, recs []places.Record) string {
+// absoluteEntries is the PATH value path with only its absolute entries, in order; with
+// none, [fallbackPath], since a shell git starts may search its working folder for an
+// empty PATH.
+func absoluteEntries(path string) string {
 	var kept []string
 	for _, dir := range filepath.SplitList(path) {
-		if filepath.IsAbs(dir) && len(places.Containing(recs, dir)) == 0 {
+		if filepath.IsAbs(dir) {
 			kept = append(kept, dir)
 		}
 	}
@@ -184,55 +150,18 @@ func drop(name string) bool {
 	return false
 }
 
-// Command returns git with args, to run in dir, after the settings check of dir's
-// repository. A caller sets the output, adds to Env and runs it, by [Cmd.Run],
-// [Cmd.Output] or [Cmd.CombinedOutput], or releases it unrun by [Cmd.Release]. The
-// error is a [*RefusedError] when the check refuses, a state directory qory cannot take
-// among the refusals, or the error that kept the check from reading a record of the
-// places.
-func Command(ctx context.Context, dir string, args ...string) (*Cmd, error) {
+// Command returns git with args, to run in dir. A caller sets the output, adds to Env and
+// runs it. The error is that of [Ready]: no git, or one older than 2.36.
+func Command(ctx context.Context, dir string, args ...string) (*exec.Cmd, error) {
 	if err := Ready(ctx); err != nil {
 		return nil, err
 	}
-	h, err := check(ctx, dir)
-	if err != nil {
-		return nil, err
-	}
-	return &Cmd{Cmd: command(ctx, dir, args...), hold: h}, nil
+	return command(ctx, dir, args...), nil
 }
 
-// Cmd is git that [Command] returns, with the places its check found no walled run
-// using held until git has run, or the Cmd is released.
-type Cmd struct {
-	*exec.Cmd
-	hold *places.Hold
-}
-
-// Run runs git as [exec.Cmd.Run] does, and then releases the places.
-func (c *Cmd) Run() error {
-	defer c.Release()
-	return c.Cmd.Run()
-}
-
-// Output runs git as [exec.Cmd.Output] does, and then releases the places.
-func (c *Cmd) Output() ([]byte, error) {
-	defer c.Release()
-	return c.Cmd.Output()
-}
-
-// CombinedOutput runs git as [exec.Cmd.CombinedOutput] does, and then releases the
-// places.
-func (c *Cmd) CombinedOutput() ([]byte, error) {
-	defer c.Release()
-	return c.Cmd.CombinedOutput()
-}
-
-// Release releases the places the check holds for git, for a Cmd that is not run.
-func (c *Cmd) Release() { c.hold.Release() }
-
-// command is git with the flags and environment of [Command], without the check: the
-// git [gitIn] finds on the PATH of [Env], made from [Base] of ctx, never one on that
-// PATH that Env leaves out.
+// command is git with the flags and environment of [Command], without [Ready]: the git
+// [gitIn] finds on the PATH of [Env], made from [Base] of ctx, never one on that PATH
+// that Env leaves out.
 func command(ctx context.Context, dir string, args ...string) *exec.Cmd {
 	return commandIn(ctx, dir, envOf(ctx), args...)
 }
@@ -253,9 +182,9 @@ func commandIn(ctx context.Context, dir string, env []string, args ...string) *e
 
 // Unchecked returns git with args, to run in dir, for a command that reads no
 // repository, such as git config --file with GIT_CEILING_DIRECTORIES set so that dir is
-// in none: [Command] without the settings check. Its environment is base, as [Env]
-// takes this process's: the git it runs is the one the PATH of base finds after Env's
-// rules, and it stops, as Command does, on a git older than 2.36.
+// in none. Its environment is base, as [Env] takes this process's: the git it runs is
+// the one the PATH of base finds after Env's rules, and it stops, as Command does, on a
+// git older than 2.36.
 func Unchecked(ctx context.Context, dir string, base []string, args ...string) (*exec.Cmd, error) {
 	env := envFrom(base)
 	if err := ready(ctx, env); err != nil {
@@ -265,16 +194,10 @@ func Unchecked(ctx context.Context, dir string, base []string, args ...string) (
 }
 
 // gitIn returns the git that the PATH of env finds: the first entry that holds a file
-// named git that is regular and may be run, and whose path, with every symbolic link of
-// the entry and of the file resolved, lies in no recorded place. It returns that
-// resolved path, so git runs the file it checked: a symbolic link a walled run could
-// point elsewhere after the check is not followed again. A git that resolves into a
-// recorded place runs what a walled run could have written there, and is passed over;
-// when the PATH holds no other git, the entries of [fallbackPath] are searched the same
-// way, as [Env] gives git that PATH when it leaves out every entry. A hard link is not
-// seen. When qory cannot read the records, no git resolves to a place: [Env] then gives
-// git only [fallbackPath]. With none, the error is an [*exec.Error] for
-// [exec.ErrNotFound].
+// named git that is regular and may be run, by its path with every symbolic link of the
+// entry and of the file resolved, so git runs the file found: a symbolic link pointed
+// elsewhere after the search is not followed again. With none, the error is an
+// [*exec.Error] for [exec.ErrNotFound].
 func gitIn(env []string) (string, error) {
 	path := ""
 	for _, kv := range env {
@@ -282,31 +205,17 @@ func gitIn(env []string) (string, error) {
 			path = value
 		}
 	}
-	recs, _ := places.Cached()
-	skipped := false
-	find := func(path string) string {
-		for _, dir := range filepath.SplitList(path) {
-			file := filepath.Join(dir, "git")
-			info, err := os.Stat(file)
-			if err != nil || !info.Mode().IsRegular() || info.Mode()&0o111 == 0 {
-				continue
-			}
-			real, err := filepath.EvalSymlinks(file)
-			if err != nil || !filepath.IsAbs(real) || len(places.Containing(recs, real)) > 0 {
-				skipped = true
-				continue
-			}
-			return real
+	for _, dir := range filepath.SplitList(path) {
+		file := filepath.Join(dir, "git")
+		info, err := os.Stat(file)
+		if err != nil || !info.Mode().IsRegular() || info.Mode()&0o111 == 0 {
+			continue
 		}
-		return ""
-	}
-	if file := find(path); file != "" {
-		return file, nil
-	}
-	if skipped {
-		if file := find(fallbackPath); file != "" {
-			return file, nil
+		real, err := filepath.EvalSymlinks(file)
+		if err != nil || !filepath.IsAbs(real) {
+			continue
 		}
+		return real, nil
 	}
 	return "git", &exec.Error{Name: "git", Err: exec.ErrNotFound}
 }

@@ -7,20 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/qoryai/qory/internal/hostgit"
-	"github.com/qoryai/qory/internal/places"
 )
-
-// isolatedPlaces keeps the records of the places a walled run used in a folder of the
-// test alone, read afresh.
-func isolatedPlaces(t *testing.T) {
-	t.Helper()
-	t.Setenv("XDG_STATE_HOME", t.TempDir())
-	hostgit.Forget()
-	places.Forget()
-	t.Cleanup(func() { hostgit.Forget(); places.Forget() })
-}
 
 // smudging plants in dir's repository a filter whose smudge program writes marker, and
 // attributes that give every file the filter, as a walled run could.
@@ -81,7 +68,6 @@ func fetchedNothing(t *testing.T, name, dir, marker string) {
 // that starts with its fix, no program runs, and git writes nothing through a link.
 func TestStopsOnAWorkingFolderGitWouldActOn(t *testing.T) {
 	needGit(t)
-	isolatedPlaces(t)
 	base := t.TempDir()
 	remote(t, base, "acme/shop", "main", map[string]string{"README.md": "shop\n"})
 	const configKey = "qory run: start the run in a new empty git working tree, or remove %s from .git/%s, then run again. qory fetches only into a repository whose configuration has only the keys git init writes, since git on this machine would use any other key, such as a filter, a proxy or http.sslVerify"
@@ -148,38 +134,11 @@ func TestStopsOnAWorkingFolderGitWouldActOn(t *testing.T) {
 	}
 }
 
-// TestStopsOnARecordedPlaceWithAFilterKey is a working folder a walled run used, whose
-// repository's configuration has a filter key the run wrote after the place was
-// recorded: hostgit's settings check stops the fetch before git runs there, and the line
-// starts with its fix and has the key.
-func TestStopsOnARecordedPlaceWithAFilterKey(t *testing.T) {
-	needGit(t)
-	isolatedPlaces(t)
-	base := t.TempDir()
-	remote(t, base, "acme/shop", "main", map[string]string{"README.md": "shop\n"})
-	dir, err := filepath.EvalSymlinks(emptyFolder(t))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := hostgit.Record(context.Background(), dir, places.KindCheckout, "run-1"); err != nil {
-		t.Fatal(err)
-	}
-	marker := filepath.Join(t.TempDir(), "ran")
-	smudging(t, dir, marker)
-	_, err = prepare(context.Background(), dir, env("github.com", "acme/shop"))
-	want := "qory run: start the run in a new empty git working tree that no walled run used, then run again. The check of the working folder's git configuration failed: "
-	if err == nil || !strings.HasPrefix(err.Error(), want) || !strings.Contains(err.Error(), "filter.x.smudge") {
-		t.Errorf("%v\nwant %s… with filter.x.smudge", err, want)
-	}
-	fetchedNothing(t, "a recorded place", dir, marker)
-}
-
 // TestAKeyWithAPasswordIsShownWithoutIt is a working folder whose configuration has
 // http.<url>.sslVerify for a URL with a password: the line has the key without the
 // password, and the rest of the key.
 func TestAKeyWithAPasswordIsShownWithoutIt(t *testing.T) {
 	needGit(t)
-	isolatedPlaces(t)
 	base := t.TempDir()
 	remote(t, base, "acme/shop", "main", nil)
 	dir := emptyFolder(t)

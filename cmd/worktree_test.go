@@ -1,18 +1,13 @@
 package cmd_test
 
 import (
-	"errors"
-	"io"
-	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/qoryai/qory/cmd"
-	"github.com/qoryai/qory/internal/places"
 	"github.com/qoryai/qory/internal/report"
 )
 
@@ -655,136 +650,6 @@ func TestWorktreeRemoveRowPrintsABranchNameAsItCanBePrinted(t *testing.T) {
 		t.Fatalf("%v\n%s", err, out)
 	}
 	wantsRow(t, out, "branch", `landed  (deleted; landed on "origin/ba\u200bse" as `+squash[:7]+")")
-}
-
-// TestWorktreeRemoveSaysAWalledRunHoldsTheWorktree records a worktree as a walled run's
-// place and holds it as the run does: remove stops with the settings check's line that
-// the worktree is in use, not with one that it is no worktree, and removes nothing.
-func TestWorktreeRemoveSaysAWalledRunHoldsTheWorktree(t *testing.T) {
-	root := worktreeRepo(t)
-	if _, err := run(t, "wa", "feature", "--no-compose"); err != nil {
-		t.Fatal(err)
-	}
-	wt := filepath.Join(filepath.Dir(root), "wt-feature")
-	if err := cmd.RecordCheckout(wt); err != nil {
-		t.Fatal(err)
-	}
-	live, err := places.Starting([]string{wt})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer live.Release()
-	out, err := runIn(t, "", "wr", wt, "--force")
-	want := wt + " is in use by a walled run; qory runs no git there until the run ends, since the run could change git's configuration between qory's check and git's read"
-	if err == nil || err.Error() != want {
-		t.Fatalf("%v, want %q\n%s", err, want, out)
-	}
-	if _, err := os.Stat(wt); err != nil {
-		t.Errorf("the worktree went: %v", err)
-	}
-}
-
-// answerLater is the standard input of a command that asks one question: the first read
-// closes asked, and returns answer once answering is closed.
-type answerLater struct {
-	asked, answering chan struct{}
-	answer           string
-	once             bool
-}
-
-func (a *answerLater) Read(p []byte) (int, error) {
-	if a.once {
-		return 0, io.EOF
-	}
-	a.once = true
-	close(a.asked)
-	<-a.answering
-	return copy(p, a.answer), nil
-}
-
-// TestWorktreeRemoveHoldsTheWorktreeWhileItAsks removes a worktree whose branch has a
-// commit nothing else has, at a terminal. While remove waits for the answer, a walled
-// run that starts in the worktree waits; it starts once the worktree is removed.
-func TestWorktreeRemoveHoldsTheWorktreeWhileItAsks(t *testing.T) {
-	root := worktreeRepo(t)
-	if _, err := run(t, "wa", "feature", "--no-compose"); err != nil {
-		t.Fatal(err)
-	}
-	wt := filepath.Join(filepath.Dir(root), "wt-feature")
-	commitOn(t, wt, "feature.txt", "work on feature")
-	in := &answerLater{asked: make(chan struct{}), answering: make(chan struct{}), answer: "d\n"}
-	done := make(chan error, 1)
-	var out strings.Builder
-	go func() {
-		root := cmd.Root()
-		root.SetArgs([]string{"wr", "feature"})
-		root.SetOut(&out)
-		root.SetErr(&out)
-		root.SetIn(in)
-		done <- root.Execute()
-	}()
-	select {
-	case <-in.asked:
-	case err := <-done:
-		t.Fatalf("remove asked nothing: %v\n%s", err, out.String())
-	}
-	started := make(chan *places.Hold, 1)
-	go func() {
-		h, err := places.Starting([]string{wt})
-		if err != nil {
-			t.Error(err)
-		}
-		started <- h
-	}()
-	waited := true
-	select {
-	case h := <-started:
-		h.Release()
-		waited = false
-		t.Errorf("a walled run started in the worktree while remove asked")
-	case <-time.After(300 * time.Millisecond):
-	}
-	close(in.answering)
-	if err := <-done; err != nil {
-		t.Fatalf("%v\n%s", err, out.String())
-	}
-	if _, err := os.Stat(wt); !errors.Is(err, fs.ErrNotExist) {
-		t.Errorf("the worktree stayed: %v", err)
-	}
-	if !waited {
-		return
-	}
-	select {
-	case h := <-started:
-		h.Release()
-	case <-time.After(10 * time.Second):
-		t.Fatal("the walled run did not start once remove was done")
-	}
-}
-
-// TestWorktreeAddSaysAWalledRunHoldsTheWorktree records an existing worktree as a
-// walled run's place and holds it as the run does: add of its branch again stops with
-// the settings check's line that the worktree is in use, not with one that it is no
-// worktree of this repository.
-func TestWorktreeAddSaysAWalledRunHoldsTheWorktree(t *testing.T) {
-	root := worktreeRepo(t)
-	if _, err := run(t, "wa", "feature", "--no-compose"); err != nil {
-		t.Fatal(err)
-	}
-	wt := filepath.Join(filepath.Dir(root), "wt-feature")
-	if err := cmd.RecordCheckout(wt); err != nil {
-		t.Fatal(err)
-	}
-	live, err := places.Starting([]string{wt})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer live.Release()
-	out, err := run(t, "wa", "feature", "--no-compose")
-	want := wt + " is in use by a walled run; qory runs no git there until the run ends, since the run could change git's configuration between qory's check and git's read"
-	if err == nil || err.Error() != want {
-		t.Fatalf("%v, want %q\n%s", err, want, out)
-	}
 }
 
 // TestWorktreeRemoveFindsTheBranchLanded is remove on branches whose pull requests

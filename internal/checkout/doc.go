@@ -14,6 +14,5 @@
 // back instead: [Root] to the directory itself, [RepoKey] to its base name, [ExcludeFile]
 // to "", [Worktrees] to nil, [Restorable] to a reason. A caller reads a checkout it cannot
 // identify, and writes no exclude, rather than refusing to run. The one error they return
-// is the settings check refusing the repository, a [*hostgit.RefusedError]: qory then runs
-// no git there, and the caller stops.
+// is a git older than 2.36, a [*hostgit.GitVersionError]: the caller stops.
 package checkout

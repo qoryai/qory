@@ -42,7 +42,6 @@ import (
 	"github.com/qoryai/qory/internal/exports"
 	"github.com/qoryai/qory/internal/hostgit"
 	"github.com/qoryai/qory/internal/integration"
-	"github.com/qoryai/qory/internal/places"
 	"github.com/qoryai/qory/internal/proxygit"
 )
 
@@ -82,7 +81,6 @@ const (
 	textHasRemote      = "qory run: start the run in a git working tree with no remote: the working folder's repository has a remote already, and the run's repository is fetched only into an empty git working tree"
 	textGitFailed      = "qory run: check that git on this machine can read the working folder, then run again. git failed: %s"
 	textLocal          = "qory run: check that this machine can read and write the working folder, then run again. The step failed: %s"
-	textPlaceRefused   = "qory run: start the run in a new empty git working tree that no walled run used, then run again. The check of the working folder's git configuration failed: %s"
 	textConfigKey      = "qory run: start the run in a new empty git working tree, or remove %s from %s, then run again. qory fetches only into a repository whose configuration has only the keys git init writes, since git on this machine would use any other key, such as a filter, a proxy or http.sslVerify"
 	textConfigNotFile  = "qory run: start the run in a new empty git working tree, then run again: the working folder's %s is not a regular file, and qory fetches only into a repository whose configuration it can read"
 	textAlternates     = "qory run: start the run in a new empty git working tree, then run again: the working folder's .git has %s, which makes git read objects from outside the working folder"
@@ -223,13 +221,9 @@ func RunAt(ctx context.Context, dir string, base []string, getenv func(string) s
 		return false, local(err)
 	}
 	g := hostRunner(&p)
-	hold, err := emptyTree(ctx, g, dir)
-	if err != nil {
+	if err := emptyTree(ctx, g, dir); err != nil {
 		return false, err
 	}
-	// The working folder stays held until the fetches and the checkout end: a walled run
-	// that starts there waits, so it cannot change what [safeRepository] checked.
-	defer hold.Release()
 	start := time.Now()
 	first := integration.Printable(exports.Value(paths[0], false))
 	if err := fetchRun(ctx, g, dir, system, paths[0], commit); err != nil {
@@ -422,61 +416,54 @@ func repoURL(system, path string) string {
 // worktree's or a separate git directory's, whose path is the host's; then on one with
 // no .git, which is outside a working tree or nested in one; then on one whose
 // repository [safeRepository] stops on; then on one that is not the top of its working
-// tree, whose repository has a commit, or has a remote. Otherwise it returns the hold
-// [safeRepository] took on the folder, which its caller releases once the fetch ends. A git
-// that fails to read the folder is [textGitFailed], not a refusal of the folder.
-func emptyTree(ctx context.Context, git gitRunner, dir string) (hold *places.Hold, err error) {
-	defer func() {
-		if err != nil {
-			hold.Release()
-			hold = nil
-		}
-	}()
+// tree, whose repository has a commit, or has a remote. A git that fails to read the
+// folder is [textGitFailed], not a refusal of the folder.
+func emptyTree(ctx context.Context, git gitRunner, dir string) error {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		return hold, local(err)
+		return local(err)
 	}
 	hasGit := false
 	for _, e := range entries {
 		switch e.Name() {
 		case ".git":
 			if !e.IsDir() {
-				return hold, errors.New(textGitNotDir)
+				return errors.New(textGitNotDir)
 			}
 			hasGit = true
 		case checkout.Dir:
 		default:
-			return hold, errors.New(textNotEmpty)
+			return errors.New(textNotEmpty)
 		}
 	}
 	if !hasGit {
-		return hold, errors.New(textNotTree)
+		return errors.New(textNotTree)
 	}
-	if hold, err = safeRepository(ctx, dir); err != nil {
-		return nil, err
+	if err := safeRepository(ctx, dir); err != nil {
+		return err
 	}
 	top, err := git(ctx, dir, "rev-parse", "--show-toplevel")
 	if err != nil {
-		return hold, gitFailed(err)
+		return gitFailed(err)
 	}
 	if !samePath(strings.TrimSpace(top), dir) {
-		return hold, errors.New(textNotTree)
+		return errors.New(textNotTree)
 	}
 	commits, err := git(ctx, dir, "rev-list", "-n", "1", "--all")
 	if err != nil {
-		return hold, gitFailed(err)
+		return gitFailed(err)
 	}
 	if strings.TrimSpace(commits) != "" {
-		return hold, errors.New(textNotTree)
+		return errors.New(textNotTree)
 	}
 	remotes, err := git(ctx, dir, "remote")
 	if err != nil {
-		return hold, gitFailed(err)
+		return gitFailed(err)
 	}
 	if strings.TrimSpace(remotes) != "" {
-		return hold, errors.New(textHasRemote)
+		return errors.New(textHasRemote)
 	}
-	return hold, nil
+	return nil
 }
 
 // fetchRun fetches the run's repository into dir with git: origin is its URL, and the

@@ -54,8 +54,7 @@ an error. An integration whose name gateway.credentials defines too is listed as
 				fmt.Fprintln(cmd.ErrOrStderr(), "qory config:", shadowed(key))
 			}
 			// A directory outside a git working tree is no checkout. The wall's read-write
-			// mounts, and every place a walled run has used, are what a run may write
-			// besides.
+			// mounts are what a run may write besides.
 			var workspace []string
 			if file, err := checkout.ExcludeFile(root); err != nil {
 				return err
@@ -69,11 +68,6 @@ an error. An integration whose name gateway.credentials defines too is listed as
 					}
 				}
 			}
-			recorded, err := recordedPlaces()
-			if err != nil {
-				return err
-			}
-			workspace = append(workspace, recorded...)
 			if err := conf.Forager.Expand(cmd.Context(), config.Expansion{Workspace: workspace}); err != nil {
 				return input(err)
 			}

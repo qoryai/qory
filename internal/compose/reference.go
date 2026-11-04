@@ -11,7 +11,6 @@ import (
 
 	"github.com/qoryai/qory/internal/checkout"
 	"github.com/qoryai/qory/internal/exports"
-	"github.com/qoryai/qory/internal/hostgit"
 	"github.com/qoryai/qory/internal/source"
 	"github.com/qoryai/qory/internal/stack"
 )
@@ -42,7 +41,7 @@ func LoadReference(ref stack.Source, opts Options) (*stack.Stack, source.Resolve
 		return nil, source.Resolved{}, fmt.Errorf("use a branch, tag or commit that %s has in -f %s: it has no branch or tag %s", exports.URL(gone.URL), sel, exports.Value(gone.Ref, false))
 	case errors.As(err, &fetch):
 		return nil, source.Resolved{}, fmt.Errorf("check the URL and the ref in -f %s: %w", sel, err)
-	case err != nil && (hostgit.Refused(err) || errors.As(err, &pathErr)):
+	case err != nil && errors.As(err, &pathErr):
 		return nil, source.Resolved{}, err
 	case err != nil:
 		return nil, source.Resolved{}, fmt.Errorf("check the folder in -f %s: %w", sel, exports.HideError(err))

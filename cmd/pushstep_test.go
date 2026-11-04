@@ -1165,8 +1165,9 @@ func TestAWalledRunPushes(t *testing.T) {
 	}
 }
 
-// TestAWalledRunWithAnAddedKeyFailsTheStep is the settings check of a place a walled run
-// used, which comes first: the line has its words.
+// TestAWalledRunWithAnAddedKeyFailsTheStep is a walled run whose agent adds a key to the
+// repository's configuration: the check after the agent exited stops the step, and the
+// line has the key.
 func TestAWalledRunWithAnAddedKeyFailsTheStep(t *testing.T) {
 	p := newPushRepo(t, "write")
 	docker, _ := fakeDocker(t)
@@ -1264,8 +1265,7 @@ func subcommand(args []string) string {
 
 // TestEveryGitOfThePushStepIsHardened records each git of the record after the setup and
 // of the push step: each reads no system or global configuration file, and each has
-// [proxygit.Hardened] apart from the two checks of a recorded place in a walled run,
-// which hostgit runs.
+// [proxygit.Hardened].
 func TestEveryGitOfThePushStepIsHardened(t *testing.T) {
 	for name, walled := range map[string]bool{"unwalled": false, "walled": true} {
 		t.Run(name, func(t *testing.T) {
@@ -1326,9 +1326,6 @@ func TestEveryGitOfThePushStepIsHardened(t *testing.T) {
 					t.Errorf("git %s reaches no remote and has the password of the proxy %q", all, proxy)
 				}
 				keyList := sub == "config" && strings.Contains(all, "--name-only")
-				if walled && (slices.Contains(args, "--path-format=absolute") || sub == "config" && !keyList) {
-					continue
-				}
 				if !strings.Contains(strings.Join(args, " "), strings.Join(proxygit.Hardened, " ")) {
 					t.Errorf("git %s has no options %v", all, proxygit.Hardened)
 				}

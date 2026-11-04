@@ -172,12 +172,9 @@ fetch, qory checks its `.git`. The run stops with exit 1 before git fetches anyt
 - a file under `.git`, outside `.git/objects`, or under `.qory` has a second name, a hard
   link, so that a write to it in place would reach the file of the other name. git writes
   each object to a new file, so the hard links of `git clone --local` in `.git/objects`
-  do not stop the run;
-- a walled run used the folder and its configuration changed since, or a walled run uses
-  it now.
+  do not stop the run.
 
-Start the run in a new empty git working tree. From the check until the fetch and the
-checkout end, a walled run that starts in the working folder waits.
+Start the run in a new empty git working tree.
 
 A source that breaks a rule stops the run with exit 2 before the agent starts. A stack
 given to `-f` from outside the checkout is not a file in the checkout: its paths resolve
@@ -348,19 +345,12 @@ Each run is recorded on your machine, outside the checkout, in qory's state dire
 that is set; qory refuses a relative `XDG_STATE_HOME`. `<checkout>` is the checkout's
 directory name, and `<hash>` the first 12 hex digits of the SHA-256 of its full path, with
 links resolved. Each checkout has a separate folder. The state directory, its `runs`
-directory and the checkout's folder are mode 0700: only you can open them. The state
-directory also keeps, in `places`, the record of the places each walled run used. qory
-checks it before it runs git or acts on a qory file there; a qory started with another
-`HOME` or `XDG_STATE_HOME` does not see those records, so it does not check those places.
+directory and the checkout's folder are mode 0700: only you can open them.
 
-A walled run records its checkout and each read-write mount, and the record stays after
-the run, so qory would afterwards check the git settings of every repository under them
-before it runs git there. A walled run whose checkout or read-write mount is your home
-folder or qory's state directory, or a folder that contains either, such as `/`, stops
-before anything starts, and `qory run` exits 2. For the checkout the line starts `start
-the walled run from a repository folder`: start the run in a repository's folder. For a
-mount it starts `mount a narrower folder`: mount one repository's folder in its place. A
-read-only mount is not recorded.
+A walled run whose read-write mount is your home folder or qory's state directory, or a
+folder that contains either, such as `/`, stops before anything starts, and `qory run`
+exits 2. The line starts `mount a narrower folder`: mount one repository's folder in its
+place. A read-only mount is not compared.
 
 qory names the run's folder when the run ends:
 
@@ -1536,9 +1526,8 @@ before the fetch, and picks one version of the artifact type `branch`:
 
 qory composes the harness at `target_version` and with the further repositories at their
 default branches, so a branch does not change the harness of its work item's runs. The
-fetch step also fetches each repository's commit by id, at depth 1. After the compose, and
-after the record of a walled run's places, qory checks out the branch with no request to a
-remote: at the commit in the version, or where the fetch left a repository with no entry
+fetch step also fetches each repository's commit by id, at depth 1. After the compose,
+qory checks out the branch with no request to a remote: at the commit in the version, or where the fetch left a repository with no entry
 in the version. The working folder then has the commit's files. qory leaves the ref
 `refs/qory/target-version` at the target version, so a file that the branch removed stays
 out when the run starts from an image's copy.
@@ -1998,8 +1987,7 @@ The step does this, in order:
    of this step does not use, on such a file that is not a regular file, on `alternates`, on
    `info/grafts`, on a `commondir` file, on a `.git` with no `HEAD`, `objects` or `refs`,
    on a link in `.git` or on the way to a further repository, and on a hard link in `.git`
-   outside `objects`. A walled run's target also gets the settings check of the place the
-   run used, which stops on a `remote.origin.url` other than the one it recorded.
+   outside `objects`.
 2. qory removes `.git/index.lock` of each repository, a file that an agent killed in a git
    command leaves behind, and prints `qory run: removed .git/index.lock of <path>, which the
    agent left when it stopped`. qory does this only for a walled run, whose container the
@@ -3448,7 +3436,7 @@ with `access: write`. A read run sees the checkout read-only:
   `Edit` or `Write` allow in the composed settings opens the rest of the container, and the
   deny rules and the read-only mount still stop a write to the checkout.
 - The setup and the host steps write the checkout, so the checkout stays among the places
-  the run may write, and the record lists it.
+  the run may write.
 - qory removes the setup container after the setup and before the agent starts, in the
   wall step `remove the setup container`, so every process in that container has ended
   when the agent starts. A read run's agent cannot reach a service that the setup started:

@@ -17,7 +17,6 @@ import (
 	"github.com/qoryai/forager/accesskey"
 	"gopkg.in/yaml.v3"
 
-	"github.com/qoryai/qory/internal/acting"
 	"github.com/qoryai/qory/internal/checkout"
 	"github.com/qoryai/qory/internal/exports"
 )
@@ -517,9 +516,6 @@ func Load(path string) (*Stack, error) {
 func loadFile(path string) (*Stack, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, err
-	}
-	if err := acting.Check(path, data); err != nil {
 		return nil, err
 	}
 	p := &Stack{}

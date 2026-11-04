@@ -176,25 +176,6 @@ func TestImageCheckPrintsNoSecret(t *testing.T) {
 	wants(t, out, nameShown+" ("+valueShown+")\n✓ the engine holds it", "\n"+valueShown+"\n✓ the engine holds it")
 }
 
-// TestAcceptCheckoutPrintsNoSecret changes acting keys whose names and values contain
-// an access key secret, in qory.yaml and in git's configuration, since a walled run
-// began: the accept lists each as Forager's phrase.
-func TestAcceptCheckoutPrintsNoSecret(t *testing.T) {
-	root := newCheckout(t)
-	file := filepath.Join(root, "qory.yaml")
-	writeFile(t, file, "apiVersion: qory.dev/v1alpha1\n")
-	recordCheckout(t, root)
-	appendTo(t, file, "env:\n  qak_TOKEN: a-value\nworktree:\n  run:\n    add: [./setup token-qak_y]\n")
-	runGit(t, root, "config", "branch.qak_x.description", "d")
-	defer cmd.SetTerminal(true)()
-	out, err := runIn(t, "n\n", "setup", "repo", "--accept-checkout")
-	if err != nil {
-		t.Fatalf("%v\n%s", err, out)
-	}
-	printsNoKey(t, out, err)
-	wants(t, out, "  qory.yaml: "+nameShown+"\n", "  qory.yaml: worktree.run.add "+valueShown+"\n", "  "+nameShown+"\n")
-}
-
 // TestAModuleThatSetsAModelVariablePrintsNoSecret is a module whose name contains an
 // access key secret and which exports a model variable, and a CLAUDE_CONFIG_DIR whose
 // value contains one: the refusal prints the module's name and the value as Forager's

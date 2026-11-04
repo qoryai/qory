@@ -17,7 +17,6 @@ import (
 	"github.com/qoryai/forager/session"
 	"github.com/spf13/cobra"
 
-	"github.com/qoryai/qory/internal/acting"
 	"github.com/qoryai/qory/internal/checkout"
 	"github.com/qoryai/qory/internal/compose"
 	"github.com/qoryai/qory/internal/config"
@@ -714,13 +713,7 @@ func composeHome(out, errOut io.Writer, o composeOptions) (*composed, error) {
 	if err := render.Build(res, at.home, all...); err != nil {
 		return nil, err
 	}
-	// What the compose wrote, the home and its report, is what the record of a place
-	// they lie in holds from here on, a compose that stopped on the way included.
-	err = write(out, o, at, res, rep, previous, targets, all, force, skippedConfig, u)
-	if recordErr := recordHarness(at); err == nil {
-		err = recordErr
-	}
-	if err != nil {
+	if err := write(out, o, at, res, rep, previous, targets, all, force, skippedConfig, u); err != nil {
 		return nil, err
 	}
 	var workflows map[string]stack.Workflow
@@ -935,11 +928,10 @@ func prepare(out, errOut io.Writer, o composeOptions) (pr *prepared, err error) 
 	// the pin only offline, and an edited ref resolves anew. The memo puts every
 	// source at one URL and ref, the base included, on one commit for this compose.
 	previous, _ := report.Read(at.report)
-	if checkHarness(at) != nil || o.inCheckout {
-		// A report in a recorded place that is not the one the last compose wrote
-		// pins, replaces and links nothing: the compose starts as if there were none.
-		// Neither does any report for a run given a run key: a branch of the
-		// repository can commit one into the checkout.
+	if o.inCheckout {
+		// A report for a run given a run key pins, replaces and links nothing: a branch
+		// of the repository can commit one into the checkout, so the compose starts as
+		// if there were none.
 		previous = report.Report{}
 	}
 	pins := map[string]string{}
@@ -1513,11 +1505,9 @@ func (e inputError) Error() string { return e.err.Error() }
 func (e inputError) Unwrap() error { return e.err }
 
 // input wraps err as an error in the input. A nil err stays nil, so a check that passed
-// can be wrapped as it is returned, and so do the settings check's refusal of a
-// repository and the refusal of a qory file whose acting keys changed since a walled run
-// began in its place, which are no mistake in the input.
+// can be wrapped as it is returned.
 func input(err error) error {
-	if err == nil || hostgit.Refused(err) || acting.Refused(err) {
+	if err == nil {
 		return err
 	}
 	return inputError{err}
@@ -1583,8 +1573,7 @@ func ExitCode(err error) int {
 	case errors.As(err, &stale):
 		return ExitStale
 	case errors.As(err, &git):
-		// The settings check's refusals exit with 1 too, also where a verb marks them as
-		// input.
+		// A git older than 2.36 exits with 1, also where a verb marks the error as input.
 		return 1
 	case errors.As(err, &in), strings.HasPrefix(err.Error(), "unknown command"):
 		return ExitInput
@@ -1798,13 +1787,9 @@ func newInspect(use string, aliases ...string) *cobra.Command {
 }
 
 // readReport reads the report of the last compose for the places, and refuses a report
-// of a version this qory does not read, and a home and report in a recorded place that
-// are not what the last compose wrote there. Nothing composed is a plain error naming
-// the compose verb.
+// of a version this qory does not read. Nothing composed is a plain error naming the
+// compose verb.
 func readReport(at places) (report.Report, error) {
-	if err := checkHarness(at); err != nil {
-		return report.Report{}, err
-	}
 	rep, err := report.Read(at.report)
 	if errors.Is(err, os.ErrNotExist) {
 		return rep, fmt.Errorf("no composed harness for %s; run qory harness compose", at.root)
@@ -1853,14 +1838,6 @@ More: https://github.com/qoryai/qory/blob/main/docs/harness.md#a-home-outside-th
 		RunE: func(cmd *cobra.Command, args []string) error {
 			at, conf, err := locate(h)
 			if err != nil {
-				return err
-			}
-			// The line starts the agent on this machine, without a wall.
-			cwd, err := os.Getwd()
-			if err != nil {
-				return err
-			}
-			if err := unwalledHere(at.root, cwd); err != nil {
 				return err
 			}
 			rep, err := readReport(at)
@@ -1995,20 +1972,11 @@ same when it removes the last composed runtime.
 A home outside the checkout, under --home or harness.home, is removed with its report.
 The checkout is not touched: nothing was written there.`,
 		Args: noArgs,
-		RunE: func(cmd *cobra.Command, args []string) (removeErr error) {
+		RunE: func(cmd *cobra.Command, args []string) error {
 			at, _, err := locate(h)
 			if err != nil {
 				return err
 			}
-			if err := checkHarness(at); err != nil {
-				return err
-			}
-			// What the remove leaves is what the place's record holds from here on.
-			defer func() {
-				if err := recordHarness(at); err != nil && removeErr == nil {
-					removeErr = err
-				}
-			}()
 			u := ui.New(cmd.OutOrStdout())
 			rep, _ := report.Read(at.report)
 			name := rep.Stack

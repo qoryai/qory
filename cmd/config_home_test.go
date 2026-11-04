@@ -42,7 +42,7 @@ func filesUnder(t *testing.T, dir string) []string {
 }
 
 // TestEveryCommandRefusesARelativeConfigHome sets XDG_CONFIG_HOME to cfg, a relative
-// path, in a checkout a walled run has used, whose cfg/qory holds a qory.yaml, a
+// path, in a checkout whose cfg/qory holds a qory.yaml, a
 // forager.yaml and a runtime descriptor no reader could take: every command that reads
 // the configuration directory refuses with the line that says why, and nothing under
 // cfg is written or removed.
@@ -53,9 +53,6 @@ func TestEveryCommandRefusesARelativeConfigHome(t *testing.T) {
 	writeFile(t, filepath.Join(cfg, "qory", config.ForagerFileName), "gateway: [\n")
 	writeFile(t, filepath.Join(cfg, "qory", cmd.DescriptorsDir, "claude.yaml"), "launch: [\n")
 	copyFixture(t, "two-modules", root)
-	if err := cmd.RecordCheckout(root); err != nil {
-		t.Fatal(err)
-	}
 	signer, err := accesskey.Generate()
 	if err != nil {
 		t.Fatal(err)
@@ -72,7 +69,6 @@ func TestEveryCommandRefusesARelativeConfigHome(t *testing.T) {
 		{"gateway"},
 		{"access-key", "enrol", "https://apiary.example.com", "qecn_F1XT0RE0000000000000000000." + signer.Fingerprint()},
 		{"worktree", "add", "feature"},
-		{"setup", "repo", "--accept-checkout"},
 	} {
 		out, err := run(t, args...)
 		if err == nil || err.Error() != relativeLine {
