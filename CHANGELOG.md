@@ -566,6 +566,10 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Fixed
 
+- A walled run whose read-write `--mount` or `wall.mounts` entry is your home folder or
+  qory's state directory, or a folder that contains either, stops with exit 2 before
+  anything starts, as `mount a narrower folder: the mount <path> is your home folder, and
+  a walled run may change any file in a read-write mount`.
 - A run from a run code mounts its inputs from a `qory-inputs-` folder, so the wall no
   longer stops the run as it mounts a folder that Forager reserves for its record
   sockets.
