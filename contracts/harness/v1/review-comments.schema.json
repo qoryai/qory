@@ -15,7 +15,7 @@
   },
   "$defs": {
     "review_comment": {
-      "description": "A member's review comment on one version of an artifact.",
+      "description": "A member's review comment on one version of an artifact. A closed review comment has at least one reply by a run.",
       "type": "object",
       "required": ["id", "on", "text", "by", "at", "state"],
       "additionalProperties": false,
@@ -40,7 +40,13 @@
           "type": "array",
           "items": {"$ref": "#/$defs/reply"}
         }
-      }
+      },
+      "allOf": [
+        {
+          "if": {"required": ["state"], "properties": {"state": {"const": "closed"}}},
+          "then": {"required": ["replies"], "properties": {"replies": {"contains": {"required": ["by"], "properties": {"by": {"required": ["run"]}}}}}}
+        }
+      ]
     },
     "reply": {
       "description": "A reply to a review comment, by a member or by a run. outcome is present exactly when a run wrote the reply, and question exactly when outcome is asked.",
@@ -86,10 +92,10 @@
       }
     },
     "time": {
-      "description": "RFC 3339 in UTC with whole seconds, ending Z: hours 00 to 23, minutes and seconds 00 to 59, so never a leap second.",
+      "description": "RFC 3339 in UTC with whole seconds, ending Z: months 01 to 12, days 01 to 31, hours 00 to 23, minutes and seconds 00 to 59, so never a leap second. The pattern does not check the day against the month, such as February 30: format date-time does, in a validator that asserts formats.",
       "type": "string",
       "format": "date-time",
-      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T(?:[01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]Z$"
+      "pattern": "^[0-9]{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12][0-9]|3[01])T(?:[01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]Z$"
     },
     "text": {
       "description": "Text that may span lines. Tab, line feed and carriage return are its only control characters: it has none of U+0000 to U+0008, U+000B, U+000C, U+000E to U+001F, U+007F and U+0080 to U+009F. It has none of the bidirectional controls, the marks U+061C, U+200E and U+200F, the embeddings and overrides U+202A to U+202E and the isolates U+2066 to U+2069; the separators U+2028 and U+2029; and the format characters U+00AD, U+180E, U+200B, U+2060 to U+2064, U+FEFF and U+FFF9 to U+FFFB.",
