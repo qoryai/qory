@@ -34,7 +34,7 @@
         "text": {"description": "The review comment, as Markdown.", "$ref": "#/$defs/short_text"},
         "by": {"description": "The member who wrote the review comment.", "$ref": "#/$defs/member"},
         "at": {"description": "When the member wrote the review comment.", "$ref": "#/$defs/time"},
-        "state": {"description": "open until a run adds a reply to the review comment, closed once a run added one.", "enum": ["open", "closed"]},
+        "state": {"description": "open until a run replies to the review comment and closes it, closed after that. When a member replies to a closed review comment, the control plane sets it to open again.", "enum": ["open", "closed"]},
         "replies": {
           "description": "The replies to the review comment, oldest first: absent or empty when it has none.",
           "type": "array",

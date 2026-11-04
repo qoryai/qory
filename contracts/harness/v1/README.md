@@ -469,9 +469,9 @@ types: a name alone passes for any name of the right form.
 
 With no `artifact_types`, a workspace made from the template shows every standard type. A
 list, also an empty one, hides each standard type it leaves out in a new workspace, except
-`proposal`, `questions` and `verdict`, which no workspace can hide. A person can switch a
-hidden type on in the workspace. Qory Apiary refuses a template whose stage has an input
-or output that is neither in the list nor one of those three.
+`proposal`, `questions`, `review-comments` and `verdict`, which no workspace can hide. A
+person can switch a hidden type on in the workspace. A template fails Qory Apiary's check
+when a stage has an input or output that is neither in the list nor one of those four.
 
 A `json_schema` is an object that compiles as a JSON Schema. It is draft 2020-12 unless its
 `$schema` sets draft-07, the only other draft. A reference to a file or URL outside the
