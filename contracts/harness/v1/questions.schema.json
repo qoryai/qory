@@ -24,10 +24,13 @@
         "question": {"description": "The question, plain text on one line: one sentence, 1 to 500 characters.", "$ref": "#/$defs/line", "minLength": 1, "maxLength": 500},
         "context": {"description": "What a person needs to know to answer, as Markdown: absent when the question needs none.", "$ref": "#/$defs/long_text"},
         "options": {
-          "description": "The answers a member can pick, 0 to 10: empty when the run lists no option and the member writes the answer.",
+          "description": "The answers a member can pick, at most 10, and at most one with recommended set to true. An open or answered question has at least 1, and 1 is enough. A withdrawn question may have none. A member can also write an answer instead of picking an option.",
           "type": "array",
           "maxItems": 10,
-          "items": {"$ref": "#/$defs/option"}
+          "items": {"$ref": "#/$defs/option"},
+          "contains": {"required": ["recommended"], "properties": {"recommended": {"const": true}}},
+          "minContains": 0,
+          "maxContains": 1
         },
         "state": {"description": "open until a member answers the question, answered once a member answered it, withdrawn once a run withdrew it.", "enum": ["open", "answered", "withdrawn"]},
         "asked": {"description": "The run that added the question, and when.", "$ref": "#/$defs/run_at"},
@@ -60,7 +63,13 @@
       },
       "if": {"required": ["state"], "properties": {"state": {"const": "answered"}}},
       "then": {"required": ["answer"]},
-      "else": {"not": {"required": ["answer"]}}
+      "else": {"not": {"required": ["answer"]}},
+      "allOf": [
+        {
+          "if": {"required": ["state"], "properties": {"state": {"enum": ["open", "answered"]}}},
+          "then": {"properties": {"options": {"minItems": 1}}}
+        }
+      ]
     },
     "option": {
       "description": "An answer a member can pick.",
@@ -69,7 +78,8 @@
       "additionalProperties": false,
       "properties": {
         "title": {"description": "The option's title.", "$ref": "#/$defs/option_title"},
-        "explanation": {"description": "A short explanation of the option, plain text.", "$ref": "#/$defs/short_text"}
+        "explanation": {"description": "A short explanation of the option, plain text.", "$ref": "#/$defs/short_text"},
+        "recommended": {"description": "true when the run recommends this option: absent or false otherwise.", "type": "boolean"}
       }
     },
     "answer": {
