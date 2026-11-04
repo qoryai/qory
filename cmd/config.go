@@ -68,6 +68,9 @@ an error. An integration whose name gateway.credentials defines too is listed as
 					}
 				}
 			}
+			if runs := runCopiesDir(); runs != "" {
+				workspace = append(workspace, runs)
+			}
 			if err := conf.Forager.Expand(cmd.Context(), config.Expansion{Workspace: workspace}); err != nil {
 				return input(err)
 			}

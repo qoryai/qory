@@ -167,6 +167,9 @@ More: ` + gatewayDocs,
 			// The server supplies every run's policy, so every integration is described.
 			shadowed := r.Shadowed()
 			e := config.Expansion{Only: func(key string) bool { return !slices.Contains(shadowed, key) }}
+			if runs := runCopiesDir(); runs != "" {
+				e.Workspace = []string{runs}
+			}
 			if gw.Credentials, err = machineCredentials(ctx, r, e, "gateway", stderr); err != nil {
 				return err
 			}

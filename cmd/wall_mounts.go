@@ -41,7 +41,8 @@ func stateDir() (string, error) {
 }
 
 // writtenPlaces are the places a walled run's container may write, for the session's
-// Written: the checkout root, then each read-write mount, each once. A place Forager
+// Written: the checkout root, then each read-write mount, then the folder of the copies of
+// walled runs, each once. A place Forager
 // cannot resolve, such as one below a directory this user cannot search, or below a
 // path that is now a file, is left out: passed, it would stop the run, and it guards
 // nothing, since Forager stops at a mount, a workspace and a file it cannot resolve, so
@@ -58,6 +59,9 @@ func writtenPlaces(root string, mounts []wall.Mount) []string {
 		if !m.ReadOnly {
 			add(m.Path)
 		}
+	}
+	if runs := runCopiesDir(); runs != "" {
+		add(runs)
 	}
 	return out
 }

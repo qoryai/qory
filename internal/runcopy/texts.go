@@ -14,17 +14,17 @@ const (
 	textNoCheckout   = "check that git can check out %s in a clone of %s: the run works on that commit, and the checkout failed: %w"
 	textNoSubmodule  = "check the submodule %s in %s: qory copies it for the run from %s, and the copy failed: %w"
 	textSubmodules   = "check .gitmodules at %s in %s: qory reads it to copy the submodules, and git config failed: %w"
-	textFolderOnly   = "start the run in a folder: %s is no folder"
+	textFolderOnly   = "start the run in a folder: %s is not a folder"
 	textFolderHolds  = "start the run in a folder that does not contain %s: a run's copy goes there, and qory would copy it into itself"
 	textNoFolderCopy = "check that you can read every file in %s: qory copies the folder for the run, and the copy failed: %w"
 
-	textBranch    = "give a branch name that git check-ref-format takes and that does not start with a dash: %s is no branch name for the run"
+	textBranch    = "give a branch name that git check-ref-format takes and that does not start with a dash: %s is not a branch name for the run"
 	textRef       = "give a full ref name under refs/ that git check-ref-format takes: %s is not one"
 	textGitFailed = "check git on this machine: git check-ref-format failed: %w"
-	textBase      = "give the base commit of %s in full: %s is no commit id"
+	textBase      = "give the base commit of %s in full: %s is not a commit id"
 	textLeftOut   = "give each path left out of the run's commit relative to the top of its repository: %s is not such a path"
 	textState     = "give each setup path's state as Dir.SetupStates reads it: %s is not such a state"
-	textRepoPath  = "give each repository of the run as Dir.Clone returned it: %s is no folder in the copy"
+	textRepoPath  = "give each repository of the run as Dir.Clone returned it: %s is not a folder in the copy"
 
 	textNoBundle        = "look at the git session's output: it wrote no bundle and no record of an empty change for %s, so the session failed or ran past its limit, and nothing came back from the run"
 	textBundleOpen      = "look at %s: qory reads the run's bundle there only as a regular file, and the open failed: %w"
@@ -44,5 +44,6 @@ const (
 	textCopyBackLimit   = "copy the rest from %s by hand: qory copies back at most %d files and %d bytes from a run, and the run left more; it copied %s"
 	textRecord          = "start the run again: qory reads the record of the files it copied in %s, and the read failed: %w"
 	textSetupPath       = "give each setup path relative to the top of the copy: %s is not such a path"
+	textSetupStatus     = "check that git can read the copy %s: qory lists what the setup changed there, and git failed: %w"
 	textTooDeep         = "remove %s by hand: it has folders more than %d deep, more than qory opens at once"
 )

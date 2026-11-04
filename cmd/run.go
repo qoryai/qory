@@ -393,6 +393,14 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				if err := reservedMounts(at.root, spec.Mounts); err != nil {
 					return err
 				}
+				// A run with no run code can only write, so it works in a copy, which a
+				// read-write mount would go around. A run code's access is known once the
+				// harness is composed, see prepareLaunch.
+				if code == nil {
+					if err := writableMount(at.root, spec.Mounts, ""); err != nil {
+						return err
+					}
+				}
 			}
 			if spec.Wall != nil && h.home == "" {
 				if err := userHome(at, conf, remote); err != nil {
@@ -455,7 +463,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					return err
 				}
 				if spec.Wall != nil {
-					if err := fromCode.reportExposed(at.root, cwd, at.home, at.report, spec.given); err != nil {
+					if err := fromCode.reportExposed(at.home, at.report, spec.given); err != nil {
 						return err
 					}
 				}
@@ -633,6 +641,11 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				return closed
 			}
 			name := ""
+			// copied is the copy a walled run that may write works in, nil before it is made
+			// and for any other run. composedAt is where the compose writes: at, or with a home
+			// inside the checkout, the copy.
+			var copied *runCopy
+			composedAt := at
 			// prepareLaunch composes the harness into the home the session starts on and
 			// makes the session's launch from it, writing the compose's lines to w;
 			// freshHome is true for a dispatched walled run of a runtime that is a
@@ -642,7 +655,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			// checkout, see [readsOnly].
 			var readOnly bool
 			prepareLaunch := func(w io.Writer) (freshHome bool, err error) {
-				harness, workflows, err := composeForRun(w, composing, at, runtime, dispatched, walled)
+				harness, workflows, err := composeForRun(w, composing, composedAt, runtime, dispatched, walled)
 				if err != nil && composing.git != nil && composing.git.Named != nil {
 					return false, namedComposeError(err, composing.git.Named)
 				}
@@ -652,12 +665,12 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				if err != nil {
 					return false, err
 				}
-				rep, err := readReport(at)
+				rep, err := readReport(composedAt)
 				if err != nil {
 					return false, err
 				}
 				var launch render.Launch
-				if name, launch, err = resolveLaunch(rep, conf, runtime, at.home); err != nil {
+				if name, launch, err = resolveLaunch(rep, conf, runtime, composedAt.home); err != nil {
 					return false, err
 				}
 				renderer, err := render.Lookup(name)
@@ -678,6 +691,13 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					if err := readOnlyCheckout(&spec, at.root, fromCode.workflow, run.Image()); err != nil {
 						return false, err
 					}
+					if err := fromCode.readExposed(at.root, cwd, at.report); err != nil {
+						return false, err
+					}
+				} else if fromCode != nil && walled {
+					if err := writableMount(at.root, spec.Mounts, codeUsed); err != nil {
+						return false, err
+					}
 				}
 				if dispatched {
 					launch.Args = dispatchedArgs(renderer, launch.Args)
@@ -690,7 +710,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					if readOnly {
 						readRoot = at.root
 					}
-					if launchArgs, err = inlineSettings(s.SettingsFlag(), launch.Args, extra, at.home, readRoot); err != nil {
+					if launchArgs, err = inlineSettings(s.SettingsFlag(), launch.Args, extra, composedAt.home, readRoot); err != nil {
 						return false, err
 					}
 				}
@@ -742,6 +762,28 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			}
 			// branch is the branch of the run's work item, set by hostWork, nil for none.
 			var branch *preparation.WorkBranch
+			// makeCopy makes the copy of a walled run that may write, see [startCopy], within the
+			// run's time limit: the working folder's state is that of its commit at HEAD.
+			makeCopy := func() error {
+				copyCtx, cancel := ctx, func() {}
+				if timeout > 0 {
+					copyCtx, cancel = context.WithDeadline(ctx, opened.Add(timeout))
+				}
+				defer cancel()
+				ref := ""
+				if branch != nil {
+					ref = branch.Ref
+				}
+				var err error
+				if copied, err = startCopy(copyCtx, at.root, spec.RunID, ref, state, spec.RunsDir); err != nil {
+					if code != nil {
+						err = fmt.Errorf("%w%s", err, codeUsed)
+					}
+					return &runLineError{err}
+				}
+				cleanups = append(cleanups, func() { copied.done(said) })
+				return nil
+			}
 			// hostWork is the run's work on this machine before its session joins, in two
 			// steps of the run's record: the fetch, when the run configuration lists
 			// repositories, and the compose. When the run configuration lists repositories,
@@ -791,6 +833,17 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					}
 				} else if err := preparation.Unlisted(runValues(run), fromCode.fetchTarget()); err != nil {
 					return &runLineError{err}
+				}
+				// A home inside the checkout goes into the copy, which a run with no run code
+				// always uses. No run code has such a home: see [locateRun].
+				if walled && at.dir != "" {
+					if err := makeCopy(); err != nil {
+						return err
+					}
+					var err error
+					if composedAt, err = copied.composedIn(at); err != nil {
+						return &runLineError{err}
+					}
 				}
 				var freshHome bool
 				err := inStep(run, streams.errOut, event.StepCompose, composeStepName(runtime), stopped, func(w io.Writer) error {
@@ -845,15 +898,28 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				if err := prepareSession(freshHome); err != nil {
 					return err
 				}
-				if branch == nil {
+				if branch != nil {
+					switchCtx, cancel := ctx, func() {}
+					if timeout > 0 {
+						switchCtx, cancel = context.WithDeadline(ctx, opened.Add(timeout))
+					}
+					defer cancel()
+					if err := preparation.Switch(switchCtx, cwd, os.Environ(), branch, stderr); err != nil {
+						return &runLineError{err}
+					}
+				}
+				if !walled || readOnly {
 					return nil
 				}
-				switchCtx, cancel := ctx, func() {}
-				if timeout > 0 {
-					switchCtx, cancel = context.WithDeadline(ctx, opened.Add(timeout))
+				if copied == nil {
+					if err := makeCopy(); err != nil {
+						return err
+					}
 				}
-				defer cancel()
-				if err := preparation.Switch(switchCtx, cwd, os.Environ(), branch, stderr); err != nil {
+				if err := copied.bind(&spec, at, cwd); err != nil {
+					return &runLineError{err}
+				}
+				if err := copied.recordLinks(); err != nil {
 					return &runLineError{err}
 				}
 				return nil
@@ -910,15 +976,15 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					return fetchImage(imageCtx, run, spec.EngineProxy, code != nil)
 				})
 			}
-			// recordSetupWork records what the setup left changed, within the run's time limit,
-			// so the push step leaves it out, see [preparation.RecordSetup].
+			// recordSetupWork records what the setup left changed in the copy, within the run's
+			// time limit, so the git session leaves it out, see [runCopy.recordSetup].
 			recordSetupWork := func() error {
 				recordCtx, cancel := ctx, func() {}
 				if timeout > 0 {
 					recordCtx, cancel = context.WithDeadline(ctx, opened.Add(timeout))
 				}
 				defer cancel()
-				if err := preparation.RecordSetup(recordCtx, cwd, os.Environ(), branch); err != nil {
+				if err := copied.recordSetup(recordCtx); err != nil {
 					return &runLineError{err}
 				}
 				return nil
@@ -936,7 +1002,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				if prepErr == nil && readOnly {
 					prepErr = removeSetupWork()
 				}
-				if prepErr == nil && walled && spec.setupWhere != config.SetupInside && canPush(fromCode, readOnly, branch) {
+				if prepErr == nil && copied != nil && !copied.plain && run.Repositories() != "" && spec.setupWhere != config.SetupInside {
 					prepErr = recordSetupWork()
 				}
 				if beforeJoin != nil {
@@ -1001,15 +1067,30 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			// of a walled agent is proven: the join removes its container, and when it could
 			// not, the step's [openedRun.HostProxy] fails, so the step runs no git. An unwalled
 			// agent's process leaves no proof that it stopped.
+			//
+			// Any other walled run with a copy runs its git session here and brings its work
+			// back after the close, under the same [pushContext].
 			ending := pushEnding{session: out, limit: timeout}
-			var pushErr error
-			if keepsWork(fromCode, readOnly, branch, res, err) {
-				var limit time.Time
-				if timeout > 0 {
-					limit = opened.Add(timeout)
-				}
+			var pushErr, sessionErr error
+			var limit time.Time
+			if timeout > 0 {
+				limit = opened.Add(timeout)
+			}
+			pushes := keepsWork(fromCode, readOnly, branch, res, err)
+			returns := copied != nil && !pushes && err == nil && res != nil
+			backCtx, cancelBack := pushContext(ctx, again, limit, pushTimes.limit, pushTimes.signal)
+			defer cancelBack()
+			switch {
+			case returns && copied.plain:
+			case returns && res.RunClosed:
+				copied.keep = true
+				sessionErr = fmt.Errorf(textCopyClosed, exports.Value(copied.dir.Work(), false))
+			case returns:
+				sessionErr = copied.gitSession(backCtx, run, &spec, "")
+			}
+			if pushes {
 				pushCtx, cancel := pushContext(ctx, again, limit, pushTimes.limit, pushTimes.signal)
-				ending.noStep, pushErr = removeThenPush(pushCtx, run, streams.errOut, branch, cwd, spec.RunID, fromCode.runNumber, out, walled)
+				ending.noStep, pushErr = removeThenPush(pushCtx, run, streams.errOut, branch, cwd, spec.RunID, fromCode.runNumber, out, walled, copied, &spec, said)
 				ending.stopped = ctx.Err() != nil
 				ending.again, ending.got = again.Err() != nil, got()
 				ending.cut = pushCtx.Err() != nil
@@ -1058,6 +1139,22 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			ended := runEnded(u, res, end)
 			if pushErr != nil {
 				return ending.ended(u, said, pushErr, branch, ended)
+			}
+			if !returns {
+				return ended
+			}
+			back := false
+			switch {
+			case sessionErr != nil:
+				said(sessionErr.Error())
+			case closed == nil:
+				// The close failed, so a container of the run may be left.
+				copied.kept(said)
+			default:
+				back = copied.comeBack(backCtx, spec.RunID, said)
+			}
+			if !back && ended == nil {
+				return reported(&exitError{code: 1})
 			}
 			return ended
 		},
@@ -1587,6 +1684,9 @@ func expansion(r *config.Forager, pol *gateway.Policy, fromServer bool, root, cw
 		if !m.ReadOnly {
 			e.Workspace = append(e.Workspace, m.Path)
 		}
+	}
+	if runs := runCopiesDir(); runs != "" {
+		e.Workspace = append(e.Workspace, runs)
 	}
 	shadowed := r.Shadowed()
 	selected := map[string]bool{}

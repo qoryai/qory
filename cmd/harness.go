@@ -89,6 +89,17 @@ type places struct {
 	home   string // the composed tree: .qory/harness, or its directory under the root harness.home names
 	report string // the report of the last compose, beside the home as <home>-report.json
 	links  bool   // whether the checkout gets links into the home and exclude lines for them
+	// linksIn is the folder that gets the links and the exclude lines, when a compose reads
+	// the files of root and writes in another, the copy of a walled run; "" for root.
+	linksIn string
+}
+
+// linkRoot is the folder that gets the links into the home and their exclude lines.
+func (p places) linkRoot() string {
+	if p.linksIn != "" {
+		return p.linksIn
+	}
+	return p.root
 }
 
 // homeOptions is what a verb was told about the home on its command line: --home, "" for
@@ -1302,7 +1313,7 @@ func write(out io.Writer, o composeOptions, at places, res *compose.Result, rep,
 	switch {
 	case at.links:
 		for _, rt := range all {
-			l, err := render.LinkInto(rt, res, at.root, at.home, force)
+			l, err := render.LinkInto(rt, res, at.linkRoot(), at.home, force)
 			linked[rt.Name()] = l
 			if err := record(l, err); err != nil {
 				return explainForeign(err, at.root, o.file, rep.Replaced, force)
@@ -1315,7 +1326,7 @@ func write(out io.Writer, o composeOptions, at places, res *compose.Result, rep,
 			}
 		}
 		var err error
-		moduleLinks, err = render.LinkModules(res, at.root, at.home, previousLinks, force)
+		moduleLinks, err = render.LinkModules(res, at.linkRoot(), at.home, previousLinks, force)
 		if err := record(moduleLinks, err); err != nil {
 			return composeError(explainForeign(err, at.root, o.file, rep.Replaced, force))
 		}
@@ -1323,11 +1334,11 @@ func write(out io.Writer, o composeOptions, at places, res *compose.Result, rep,
 		// The home is in the checkout and nothing links to it: the qory directory is
 		// qory's and kept out of git, and the links a previous compose wrote are removed
 		// the way a compose removes what it does not link.
-		if err := render.Exclude(at.root, "/"+checkout.Dir); err != nil {
+		if err := render.Exclude(at.linkRoot(), "/"+checkout.Dir); err != nil {
 			return err
 		}
 		var err error
-		if takenBack, err = unlinkAll(at.root); err != nil {
+		if takenBack, err = unlinkAll(at.linkRoot()); err != nil {
 			return err
 		}
 	}

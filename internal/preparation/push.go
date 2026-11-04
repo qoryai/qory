@@ -142,6 +142,13 @@ func Push(ctx context.Context, dir string, base []string, b *WorkBranch, message
 			return nil, err
 		}
 	}
+	return pushHeads(ctx, folders, heads, b, p, report)
+}
+
+// pushHeads pushes heads[i] of each repository of b from the folder folders[i], with "" in
+// heads for a repository with nothing to push, and returns the branch document of the new
+// version, nil when it pushed nothing.
+func pushHeads(ctx context.Context, folders, heads []string, b *WorkBranch, p proxygit.Proxy, report io.Writer) (*branchformat.Branch, error) {
 	version := slices.Clone(b.Version)
 	pushed := false
 	for i, r := range b.Repositories {
@@ -164,6 +171,41 @@ func Push(ctx context.Context, dir string, base []string, b *WorkBranch, message
 		return nil, nil
 	}
 	return &branchformat.Branch{Ref: b.Ref, Repositories: version}, nil
+}
+
+// Quarantined is the head of the run's commits in one repository of a [WorkBranch], in a
+// repository on this machine that no run could write.
+type Quarantined struct {
+	// Dir is the repository's [WorkRepository.Dir].
+	Dir string
+	// Path is the folder of the repository that has the commits.
+	Path string
+	// Head is the commit at the end of the run's commits.
+	Head string
+}
+
+// PushFrom pushes the commits of each repository of b that from lists, past its
+// [WorkRepository.Commit], to the branch b.Ref as a fast-forward, by the URL qory builds,
+// through the run's host proxy p, as [Push] does. Every git runs in a folder of from, and
+// none in the folder the agent wrote, so nothing the agent left there applies. It returns
+// the branch document of the new version, nil when no repository has new commits. It prints
+// a line on report for each repository pushed.
+func PushFrom(ctx context.Context, from []Quarantined, base []string, b *WorkBranch, p proxygit.Proxy, report io.Writer) (*branchformat.Branch, error) {
+	ctx = hostgit.WithBase(ctx, proxygit.Env(base, nil))
+	folders := make([]string, len(b.Repositories))
+	heads := make([]string, len(b.Repositories))
+	for i, r := range b.Repositories {
+		found := slices.IndexFunc(from, func(q Quarantined) bool { return q.Dir == r.Dir })
+		if found < 0 {
+			continue
+		}
+		folders[i] = from[found].Path
+		var err error
+		if heads[i], err = commitPast(ctx, stepGit(noRemote, ""), folders[i], from[found].Head, r); err != nil {
+			return nil, err
+		}
+	}
+	return pushHeads(ctx, folders, heads, b, p, report)
 }
 
 // clearIndexLocks removes .git/index.lock of each repository, in folders by the order of
@@ -493,11 +535,16 @@ func headPast(ctx context.Context, git gitRunner, dir string, r WorkRepository) 
 	if err != nil {
 		return "", fmt.Errorf(textNoCommitLeft, shownPath(r.Path), integration.Printable(exports.HideURLError(err).Error()))
 	}
-	head := strings.TrimSpace(out)
+	return commitPast(ctx, git, dir, strings.TrimSpace(out), r)
+}
+
+// commitPast is head of the repository r in the folder dir when it is past
+// [WorkRepository.Commit], as [headPast] checks it.
+func commitPast(ctx context.Context, git gitRunner, dir, head string, r WorkRepository) (string, error) {
 	if head == r.Commit {
 		return "", nil
 	}
-	_, err = git(ctx, dir, "merge-base", "--is-ancestor", r.Commit, head)
+	_, err := git(ctx, dir, "merge-base", "--is-ancestor", r.Commit, head)
 	if ge := (*gitError)(nil); errors.As(err, &ge) && ge.exit == 1 {
 		return "", fmt.Errorf(textNotFastForward, shownPath(r.Path), shortCommit(head), shortCommit(r.Commit))
 	}

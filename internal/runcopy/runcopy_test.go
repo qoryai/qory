@@ -212,7 +212,7 @@ func sessionGit(t *testing.T) {
 // runGit makes the git session for repos with out, and runs it.
 func runGit(t *testing.T, d Dir, repos []Repository, out map[string]LeftOut) {
 	t.Helper()
-	s, err := d.GitSession(context.Background(), branch, repos, out)
+	s, err := d.GitSession(context.Background(), branch, "", repos, out)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -666,7 +666,7 @@ func TestGitSessionWithNoChangeWritesNoBundle(t *testing.T) {
 	if errors.Is(err, ErrNoBundle) {
 		t.Error("a session that wrote nothing counts as one with no change")
 	}
-	_, err = d.GitSession(ctx, branch, repos, nil)
+	_, err = d.GitSession(ctx, branch, "", repos, nil)
 	hasPrefix(t, "second GitSession", err, "remove ")
 }
 
@@ -693,12 +693,12 @@ func TestGitSessionChecksItsArguments(t *testing.T) {
 		{"main", main, LeftOut{Setup: []SetupPath{{Path: "a", State: "file:xyz"}}}, "give each setup path's state"},
 		{"main", main, LeftOut{Setup: []SetupPath{{Path: "a", State: ""}}}, "give each setup path's state"},
 	} {
-		_, err := d.GitSession(ctx, c.branch, c.repos, map[string]LeftOut{c.repos[0].Path: c.out})
+		_, err := d.GitSession(ctx, c.branch, "", c.repos, map[string]LeftOut{c.repos[0].Path: c.out})
 		hasPrefix(t, c.branch+" "+c.prefix, err, c.prefix)
 	}
 	// A path named -- is a path like any other: the script takes counts, not a
 	// separator. A trailing / is dropped.
-	s, err := d.GitSession(ctx, "main", main, map[string]LeftOut{"": {Links: []string{"--", "x"}, Setup: []SetupPath{{Path: "dir/", State: "other"}}}})
+	s, err := d.GitSession(ctx, "main", "", main, map[string]LeftOut{"": {Links: []string{"--", "x"}, Setup: []SetupPath{{Path: "dir/", State: "other"}}}})
 	if err != nil {
 		t.Fatal(err)
 	}

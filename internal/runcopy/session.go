@@ -86,16 +86,20 @@ type GitSession struct {
 // copy's .git, and its configuration, as git dir: inside the wall that git has no more
 // access than the agent had. The script starts the index from that commit, adds every
 // change but [LeftOut]'s, and commits when anything changed. With no commit past the
-// base commit, it writes a file that records that, in place of the bundle.
+// base commit, it writes a file that records that, in place of the bundle. message is
+// the message of the commit it makes, "" for [commitMessage].
 //
 // The script runs no filter: a file a filter changed at the checkout, such as a Git LFS
 // file, stays out while the copy has what the checkout wrote, and one the agent changed
 // goes into the commit as its content in the copy.
-func (d Dir) GitSession(ctx context.Context, branch string, repos []Repository, out map[string]LeftOut) (GitSession, error) {
+func (d Dir) GitSession(ctx context.Context, branch, message string, repos []Repository, out map[string]LeftOut) (GitSession, error) {
 	if err := checkBranch(ctx, branch); err != nil {
 		return GitSession{}, err
 	}
-	args := []string{"-c", sessionScript, "qory-git-session", sessionPath, d.Work(), d.Bundle(), branch, strconv.Itoa(len(repos))}
+	if message == "" {
+		message = commitMessage
+	}
+	args := []string{"-c", sessionScript, "qory-git-session", sessionPath, d.Work(), d.Bundle(), branch, message, strconv.Itoa(len(repos))}
 	for _, r := range repos {
 		rel, err := repositoryRel(r)
 		if err != nil {
@@ -161,14 +165,15 @@ func (d Dir) SessionMounts() []wall.Mount {
 }
 
 // sessionScript is the git session's script, run with sh -c. Its arguments are the
-// PATH, the copy, the bundle folder, the branch and the number of repositories; then
+// PATH, the copy, the bundle folder, the branch, the commit's message and the number of
+// repositories; then
 // for each repository its folder relative to the copy, its base commit, the number of
 // links qory wrote and the links, and the number of paths the setup changed and each
 // such path followed by its state. For the repository number n it writes n.bundle, or
 // n.none when nothing is past the base commit.
 const sessionScript = `set -eu
-PATH=$1 W=$2 B=$3 branch=$4 count=$5
-shift 5
+PATH=$1 W=$2 B=$3 branch=$4 message=$5 count=$6
+shift 6
 export PATH
 unset XDG_CONFIG_HOME GIT_CONFIG GIT_CONFIG_PARAMETERS GIT_CONFIG_COUNT GIT_CONFIG_SYSTEM \
 	GIT_EXEC_PATH GIT_COMMON_DIR GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES \
@@ -275,7 +280,7 @@ while [ "$n" -lt "$count" ]; do
 	1)
 		GIT_AUTHOR_NAME=` + commitName + ` GIT_AUTHOR_EMAIL=` + commitEmail + ` \
 		GIT_COMMITTER_NAME=` + commitName + ` GIT_COMMITTER_EMAIL=` + commitEmail + ` \
-			g commit -q --no-verify --no-gpg-sign -m "` + commitMessage + `"
+			g commit -q --no-verify --no-gpg-sign -m "$message"
 		;;
 	*) exit "$changed" ;;
 	esac

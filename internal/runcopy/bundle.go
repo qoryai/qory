@@ -156,6 +156,9 @@ func (d Dir) quarantineOne(ctx context.Context, i int, r Repository, rel, branch
 	if err := writeNew(filepath.Join(q, "objects", "info", "alternates"), filepath.Join(source, "objects")+"\n"); err != nil {
 		return nil, fileErr(q, err)
 	}
+	if err := copyShallow(source, q); err != nil {
+		return nil, fileErr(q, err)
+	}
 	ref := "refs/heads/" + branch
 	if bundleFetchChecks(ctx) {
 		_, err = git(ctx, q, "-c", "transfer.fsckObjects=true", "-c", "fetch.fsckObjects=true", "-c", "fetch.fsck.hasDotgit=error",
@@ -176,6 +179,20 @@ func (d Dir) quarantineOne(ctx context.Context, i int, r Repository, rel, branch
 		return nil, err
 	}
 	return quarantine, nil
+}
+
+// copyShallow gives the quarantine q the shallow list of its bare source, when the source
+// has one: a repository fetched at depth one has a base commit whose parents no alternate
+// has, and git stops at the commits of the list when it walks the history.
+func copyShallow(source, q string) error {
+	data, err := os.ReadFile(filepath.Join(source, "shallow"))
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	return writeNew(filepath.Join(q, "shallow"), string(data))
 }
 
 // checkTop returns an error when the head's tree has an entry at the top whose name is
