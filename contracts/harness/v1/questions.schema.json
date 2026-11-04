@@ -24,9 +24,9 @@
         "question": {"description": "The question, plain text on one line: one sentence, 1 to 500 characters.", "$ref": "#/$defs/line", "minLength": 1, "maxLength": 500},
         "context": {"description": "What a person needs to know to answer, as Markdown: absent when the question needs none.", "$ref": "#/$defs/long_text"},
         "options": {
-          "description": "The answers a member can pick, 0 to 10, and at most one with recommended set to true: empty when the run lists no option and the member writes the answer.",
+          "description": "The answers a member can pick, 0 to 4, and at most one with recommended set to true: empty when the run lists no option and the member writes the answer.",
           "type": "array",
-          "maxItems": 10,
+          "maxItems": 4,
           "items": {"$ref": "#/$defs/option"},
           "contains": {"required": ["recommended"], "properties": {"recommended": {"const": true}}},
           "minContains": 0,

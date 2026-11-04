@@ -450,8 +450,8 @@ func TestQuestionsSchema(t *testing.T) {
 		{replace("The service reads `DATABASE_URL`.", `\u0007`), false},
 		{replace("The service reads `DATABASE_URL`.\\n\\n- one\\n- two", ""), false},
 		// options
-		{options(10), true},
-		{options(11), false},
+		{options(4), true},
+		{options(5), false},
 		{replace(`"options": [],`, ``), false},
 		{replace(option, ``), true},
 		// recommended is a boolean, and true on at most one option of a question.
