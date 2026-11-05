@@ -3449,10 +3449,12 @@ session. It runs no agent and gets no model key and no run code, and it binds on
 copy and a new folder for its bundles. It commits what the agent left, with no setting from
 the copy's `.git` and no filter, and writes the run's branch to a git bundle. With a branch
 checked out that descends from your commit, the bundle has that branch, and its commits keep
-their messages. With `HEAD` at your commit and the run's branch past it, or with `HEAD` on a branch
-with no commit or on a commit that does not descend from yours, the bundle has the run's branch as
-it is. The session then makes no commit, since a commit of that working tree would undo the
-branch's files. Your `.gitignore`, `.git/info/exclude` and global excludes file keep their files out of
+their messages. With `HEAD` at your commit and the run's branch past it, with `HEAD` on a branch with
+no commit, on a commit older than yours, or on a commit other than the run's branch's that does not
+descend from yours, the bundle has the run's branch as it is. The session then makes no commit, since
+a commit of that working tree would undo the branch's files. After an amended commit or
+`git pull --rebase`, with `HEAD` and the run's branch at one commit, the session commits as usual.
+Your `.gitignore`, `.git/info/exclude` and global excludes file keep their files out of
 the commit. The image needs git 2.25 or later, `cat`, `comm`, `cp`, `find`, `grep`, `mkdir`, `mv`,
 `readlink`, `sort` and `tr` in `/usr/local/bin`,
 `/usr/bin` or `/bin`: `qory image check` tests them. The run's record shows the session as a second session.
@@ -3509,6 +3511,9 @@ exits with another status than 0, nothing comes back, and qory keeps the copy:
 ```text
 qory run: read the run's files in <folder>, and run no git there: the git session ran past its limit of 5m0s, so nothing came back from the run
 ```
+
+A run with the push step keeps no copy: the copy goes, and the step prints
+`take the work item in again in Qory Apiary` with the cause.
 
 Once the run's containers are gone, qory checks the bundle, fetches it into a new repository
 with git's object checks on, and fetches the run's branch into your repository as
