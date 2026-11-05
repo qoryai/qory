@@ -1,28 +1,14 @@
-# 🐝 qory
+# 🐝 Qory
 
-`qory` gets your coding agent ready to work, and keeps it in check.
-
-It does three things:
-
-1. **It builds the harness.** A harness is what your agent reads: instructions, skills,
-   agents, commands, settings. You write it once, as modules. `qory` composes it for
-   every agent you use.
-2. **It prepares the workspace.** One worktree per branch. Set up and ready to work.
-3. **It runs the agent safely.** Every connection is recorded. You decide what the agent
-   may reach. Behind a wall, your tokens stay outside.
+Qory sets up agents, runs them in a sandbox, and records what they do. The `qory`
+command composes the harness your agents read from modules you write once, makes a
+worktree per branch, and starts the agent in the sandbox: a container whose one way out is a
+recording proxy. Each run reports its record to Qory Apiary, which also keeps the policy for what
+runs may reach.
 
 <p align="center">
   <img src="docs/assets/slogan.png" alt="Don't worry, use Qory" width="720">
 </p>
-
-## Why
-
-You have many repositories. You use more than one agent. Each agent reads a different folder:
-`.claude`, `.codex`, `.gemini`. So every repository keeps copies. The copies drift.
-Nobody knows which version a checkout runs.
-
-And an agent acts unsupervised. It calls hosts you don't see. It holds your tokens.
-Afterwards, you can't tell what it did.
 
 ## Install
 
@@ -43,6 +29,25 @@ qory needs git 2.36 or later.
 `qory update` installs the newest release, the same way this `qory` was installed. Every
 command tells you when a newer release is out. `QORY_NO_UPDATE_CHECK=1` turns that off.
 More: [qory update](docs/commands/qory_update.md).
+
+## The parts of Qory
+
+- [Qory Apiary](https://github.com/qoryai/apiary): the server that runs report to, with the record of each run and the policy for what runs may reach.
+- [Qory Forager](https://github.com/qoryai/forager): the programs that start the agent in the sandbox, record the session and keep your credentials outside the sandbox.
+- [Qory Hive](https://github.com/qoryai/hive): makes and deletes the machines of a Qory Apiary node pool, a group of machines that runs dispatched work.
+- [Qory Harness](https://github.com/qoryai/harness): a harness of instructions, skills and agents that your repository extends and `qory` composes.
+- [Qory Integrations](https://github.com/qoryai/integrations): the contract for integrations, the programs that connect Qory to an outside system, and a Go package that tests a program against that contract.
+- [Qory GitHub Integration](https://github.com/qoryai/qory-github): gives a run a GitHub token for the repositories the run works on, and keeps the token outside the sandbox.
+- [Qory Integration Template](https://github.com/qoryai/integration-template): a starting point for an integration written in Go, with a working example that is tested against the contract.
+
+## Why
+
+You have many repositories. You use more than one agent. Each agent reads a different folder:
+`.claude`, `.codex`, `.gemini`. So every repository keeps copies. The copies drift.
+Nobody knows which version a checkout runs.
+
+And an agent acts unsupervised. It calls hosts you don't see. It holds your tokens.
+Afterwards, you can't tell what it did.
 
 ## Try it
 

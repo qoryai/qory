@@ -51,7 +51,8 @@ release may change what an existing document does, and states it under Upgrading
 - Version 1 of the questions format, `contracts/harness/v1/questions.schema.json`: every
   question of a work item and its answer, the file of the artifact type `questions`. A run
   adds, withdraws or reopens questions with `qory artifact push`, and the control plane
-  writes the answers. See The questions format in `contracts/harness/v1/README.md`.
+  writes the answers. At most one option of a question has `recommended` set to `true`. See
+  The questions format in `contracts/harness/v1/README.md`.
 - Version 1 of the review comments format,
   `contracts/harness/v1/review-comments.schema.json`: the members' review comments on a
   work item's artifact versions and the replies to them, the file of the artifact type

@@ -400,6 +400,9 @@ func TestQuestionsSchema(t *testing.T) {
 		return strings.Replace(questionsDocument, from, to, 1)
 	}
 	option := `{"title": "PostgreSQL", "explanation": "The database of the other services."}`
+	recommended := func(value string) string {
+		return strings.Replace(option, `}`, `, "recommended": `+value+`}`, 1)
+	}
 	options := func(n int) string {
 		return replace(option, strings.TrimSuffix(strings.Repeat(option+", ", n), ", "))
 	}
@@ -447,9 +450,20 @@ func TestQuestionsSchema(t *testing.T) {
 		{replace("The service reads `DATABASE_URL`.", `\u0007`), false},
 		{replace("The service reads `DATABASE_URL`.\\n\\n- one\\n- two", ""), false},
 		// options
-		{options(10), true},
-		{options(11), false},
+		{options(4), true},
+		{options(5), false},
 		{replace(`"options": [],`, ``), false},
+		{replace(option, ``), true},
+		// recommended is a boolean, and true on at most one option of a question.
+		{replace(option, recommended(`true`)), true},
+		{replace(option, recommended(`false`)), true},
+		{replace(option, recommended(`true`)+`, `+recommended(`false`)), true},
+		{replace(option, recommended(`false`)+`, `+recommended(`false`)), true},
+		{replace(option, recommended(`true`)+`, `+option), true},
+		{replace(option, recommended(`true`)+`, `+recommended(`true`)), false},
+		{replace(option, recommended(`"true"`)), false},
+		{replace(option, recommended(`null`)), false},
+		{strings.Replace(replace(`"options": []`, `"options": [`+recommended(`true`)+`]`), option, recommended(`true`), 1), true},
 		{replace(`"title": "PostgreSQL"`, `"title": "`+strings.Repeat("a", 200)+`"`), true},
 		{replace(`"title": "PostgreSQL"`, `"title": "`+strings.Repeat("a", 201)+`"`), false},
 		{replace(`"title": "PostgreSQL"`, `"title": ""`), false},
