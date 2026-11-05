@@ -203,11 +203,13 @@ such folder:
 ```
 module core: add SKILL.md to skills/review, or put a skill in a folder below it: skills/review has no SKILL.md and no skill below it
 module core: rename skills/tools/codex, or read it through a variant: a folder named after a runtime is not a group
-module core: remove the link skills/tools/gone, or point it at a skill: it leads nowhere
+module core: remove the link skills/tools/gone, or point it at a path that exists: it leads nowhere
 ```
 
-Two skills of one module whose names are equal or differ only in case stop the compose with
-exit 2, because an exclude cannot separate them:
+Two skills of one module with one name stop the compose with exit 2, because an exclude
+cannot separate them. Two names that differ only in case are one folder on a file system
+that ignores case, so qory stops them with exit 2 on every file system, and a module composes
+alike everywhere:
 
 ```
 module core: rename skills/a/review or skills/b/review: each skill goes to skills/<name>, and both are the skill review

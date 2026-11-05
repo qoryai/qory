@@ -819,9 +819,11 @@ func variantSkillDirs(m *Manifest) map[string]bool {
 //   - Anything else, which is an error that starts with its fix and shows the folder's full
 //     path: for folders with no skill below them, the topmost one.
 //
-// Loose files are skipped, and a link that leads nowhere is an error. Two skills whose names
-// are equal or differ only in case are an error on every file system, because each skill
-// goes to skills/<name> and an exclude cannot separate two skills of one module.
+// Loose files are skipped, and a link that leads nowhere is an error. Two skills of one
+// name are an error, because each skill goes to skills/<name> and an exclude cannot separate
+// two skills of one module. Two names that differ only in case are one folder on a file
+// system that ignores case, and are an error on every file system, so a module composes
+// alike everywhere.
 func readSkills(rel, dir string, variants map[string]bool) ([]Entry, error) {
 	items, err := os.ReadDir(dir)
 	if errors.Is(err, os.ErrNotExist) {
@@ -855,7 +857,7 @@ func (r *skillReader) read(rel, dir string, items []os.DirEntry) error {
 		info, err := os.Stat(path)
 		if err != nil {
 			if leadsNowhere(path, err) {
-				return fmt.Errorf("remove the link %s, or point it at a skill: it leads nowhere", exports.HidePath(at))
+				return fmt.Errorf("remove the link %s, or point it at a path that exists: it leads nowhere", exports.HidePath(at))
 			}
 			return exports.HideError(err)
 		}

@@ -217,7 +217,7 @@ func TestALinkThatLeadsNowhereStops(t *testing.T) {
 			dir := tree(t, c.files)
 			linkIn(t, dir, c.link, target)
 			_, err := Read("core", dir, nil, "")
-			if want := "module core: remove the link " + c.link + ", or point it at a skill: it leads nowhere"; err == nil || err.Error() != want {
+			if want := "module core: remove the link " + c.link + ", or point it at a path that exists: it leads nowhere"; err == nil || err.Error() != want {
 				t.Errorf("%s to %s: %v\nwant %s", c.link, target, err, want)
 			}
 		}

@@ -682,8 +682,8 @@ compose with status 2, each with the full path below the module:
   is not a group`
 - a link to a folder with no `SKILL.md`: `remove the link skills/g/docs, or point it at a skill:
   it leads to a folder with no SKILL.md`
-- a link that leads nowhere: `remove the link skills/g/gone, or point it at a skill: it leads
-  nowhere`
+- a link that leads nowhere: `remove the link skills/g/gone, or point it at a path that exists:
+  it leads nowhere`
 - two skills of one module with one name: `rename skills/a/review or skills/b/review: each skill
   goes to skills/<name>, and both are the skill review`
 - two skills of one module whose names differ only in case: `rename skills/a/Review or

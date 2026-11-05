@@ -623,7 +623,7 @@ func TestReadRefusesADanglingSkillLink(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err := Read("core", dir, nil, "")
-	if want := "module core: remove the link skills/review, or point it at a skill: it leads nowhere"; err == nil || err.Error() != want {
+	if want := "module core: remove the link skills/review, or point it at a path that exists: it leads nowhere"; err == nil || err.Error() != want {
 		t.Fatalf("error %v, want %q", err, want)
 	}
 }
