@@ -171,7 +171,8 @@ git fetches anything if the working folder:
 
 - has any entry and no `.git`, such as a file or only `.qory`;
 - is a link to an empty folder;
-- is empty and inside a git repository, or is empty and below a `.git` that git cannot read;
+- is empty and, on the same file system, inside a git repository or below a `.git` on which
+  git fails, such as a `.git` file that leads nowhere or a bad config;
 - has a `.git` and anything else but `.qory`, with or without a commit;
 - has a `.git` that is a file or a link, or that has no `HEAD`, `objects` or `refs`;
 - is not the top of its git working tree;
@@ -184,6 +185,8 @@ if:
   `remote.origin.proxy` or `http.sslVerify`;
 - `.git` has a link anywhere under it, such as a linked `objects` folder, or
   `objects/info/alternates` or `objects/info/http-alternates`;
+- `.git` has a `commondir` file or `info/grafts`;
+- `.git/config` or `.git/config.worktree` is not a regular file;
 - a file under `.git`, outside `.git/objects`, or under `.qory` has a second name, a hard
   link, so that a write to it in place would reach the file of the other name. git writes
   each object to a new file, so the hard links of `git clone --local` in `.git/objects`

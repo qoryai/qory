@@ -116,6 +116,11 @@ var twoModuleEntries = map[string]string{
 	"skills/test":         "core",
 }
 
+// shellQuote is s as one word of a shell script.
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
 // emptyDir makes an empty directory the working directory, in an environment that reads
 // nothing of the machine's own: HOME, Claude Code's configuration directory, the cache, configuration, state and data directories, git's
 // global config and gh's config directory all point at temporary paths, git's system config is off, and colour

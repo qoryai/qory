@@ -201,8 +201,7 @@ release may change what an existing document does, and states it under Upgrading
   the descriptor close-on-exec. Linux and macOS only. See The run key from a run code in
   `docs/run.md`.
 - Print a run's diagnostics document from Qory Apiary with `qory apiary run diagnose
-  <run number or id>`: the run's number, such as `18342` from "Run 18342" on the run's
-  page in Qory Apiary, or its `rn_` id. qory signs the request with the diagnostics key
+  <run id>`, with the run's `rn_` id. qory signs the request with the diagnostics key
   in `~/.config/qory/apiary/<host>/` and prints the document to stdout only after its
   signature verifies under the server key pinned there. Pass `--server <url>` when keys
   for several servers are on this computer. See `docs/apiary.md`.
@@ -591,8 +590,6 @@ release may change what an existing document does, and states it under Upgrading
   such a folder, they stop with exit 2 and the line `set --home or harness.home to a
   folder outside <folder>, or run git init in <folder>: a home inside a folder needs a
   git working tree there, and <folder> is not one`.
-- `qory apiary run diagnose` takes only the run's `rn_` id, and stops at any other value
-  before it sends anything: a run number is per workspace, so it does not identify a run.
 
 ### Fixed
 

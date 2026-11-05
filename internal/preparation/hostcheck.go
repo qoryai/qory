@@ -28,12 +28,12 @@ import (
 // store outside it.
 //
 // It stops on the folder, in this order, when:
-//   - its .git has a link anywhere under it ([textGitLink]); it, outside objects, or
-//     .qory has a regular file with another name, a hard link ([textHardLink]); or it
-//     has a commondir file ([textCommonDir]), info/grafts ([textGrafts]),
-//     objects/info/alternates or objects/info/http-alternates ([textAlternates]), or a
-//     config or config.worktree
-//     that is not a regular file ([textConfigNotFile]);
+//   - its .git has a link anywhere under it ([textGitLink]); a regular file outside objects
+//     with another name, a hard link ([textHardLink]); a commondir file ([textCommonDir]),
+//     info/grafts ([textGrafts]), objects/info/alternates or objects/info/http-alternates
+//     ([textAlternates]); a config or config.worktree that is not a regular file
+//     ([textConfigNotFile]); or no HEAD, objects or refs ([textNoGitPart]);
+//   - its .qory has a regular file with another name ([textHardLink]);
 //   - its configuration has a remote's key ([textHasRemote]), such as
 //     remote.origin.proxy, or another key git init does not write ([textConfigKey]).
 func safeRepository(ctx context.Context, dir string) error {
@@ -117,10 +117,8 @@ func checkedRepository(ctx context.Context, dir string, fetched bool) error {
 	if _, err := gitFiles(gitDir); err != nil {
 		return err
 	}
-	if fetched {
-		if err := gitParts(gitDir); err != nil {
-			return err
-		}
+	if err := gitParts(gitDir); err != nil {
+		return err
 	}
 	if err := qoryFiles(dir); err != nil {
 		return err
@@ -151,7 +149,7 @@ func keysIn(ctx context.Context, dir string, files []string, fetched, afterRun b
 			if name == "config" && (fetched && fetchKey(key) || afterRun && hostgit.Identity(key)) {
 				continue
 			}
-			if name == "config" && !fetched && strings.HasPrefix(key, "remote.") {
+			if name == "config" && !fetched && strings.HasPrefix(key, "remote.") && strings.Count(key, ".") >= 2 {
 				return errors.New(textHasRemote)
 			}
 			if name == "config.worktree" || !initKey(key) {

@@ -21,7 +21,7 @@ import (
 const diagnosticsRunID = "rn_0123456789abcdef"
 
 // diagnosticsNotARunID is the first line of the error for a value that is not a run id.
-const diagnosticsNotARunID = "Use the run's rn_ id: a run number is per workspace, so it does not identify a run."
+const diagnosticsNotARunID = "Use the run's id, rn_ and 16 characters: this command takes only that id."
 
 // diagnosticsFixture is the path of a diagnostics document of the diagnostics
 // contract's fixtures, resolved before any test changes the working directory. It is
@@ -345,6 +345,57 @@ func TestApiaryDiagnoseStopsAtABadRun(t *testing.T) {
 	}
 	if s.received != 0 {
 		t.Errorf("a bad run reached the server %d times", s.received)
+	}
+}
+
+// TestApiaryDiagnoseSendsEveryLetterOfARunID is a run id of the letters after f in the
+// alphabet of run ids: the id reaches the server, which has no such run.
+func TestApiaryDiagnoseSendsEveryLetterOfARunID(t *testing.T) {
+	const run = "rn_ghjkmnpqrstvwxyz"
+	s, _ := diagnoseKeyed(t)
+	_, _, err := runApart(t, "apiary", "run", "diagnose", run)
+	if err == nil {
+		t.Fatalf("diagnose of a run the server does not have, %s, succeeded", run)
+	}
+	if want := "/v1/runs/" + run + "/diagnostics"; s.received != 1 || s.path != want {
+		t.Errorf("%d requests, path %q, want one to %q: %v", s.received, s.path, want, err)
+	}
+}
+
+// TestApiaryDiagnoseStopsAtARunNumberWithoutAKey is a run number on a computer with no
+// diagnostics key: the error is about the run id, so the check runs before the key is read.
+func TestApiaryDiagnoseStopsAtARunNumberWithoutAKey(t *testing.T) {
+	emptyDir(t)
+	_, _, err := runApart(t, "apiary", "run", "diagnose", "18342")
+	if err == nil {
+		t.Fatal("diagnose of a run number succeeded")
+	}
+	if got := firstLine(err.Error()); got != diagnosticsNotARunID {
+		t.Errorf("first line %q, want %q", got, diagnosticsNotARunID)
+	}
+	if cmd.ExitCode(err) != cmd.ExitInput {
+		t.Errorf("exit %d", cmd.ExitCode(err))
+	}
+}
+
+// TestApiaryDiagnoseHidesASecretInTheValue is an access key secret passed as the run: the
+// error has a phrase in place of the value, and no output contains the secret.
+func TestApiaryDiagnoseHidesASecretInTheValue(t *testing.T) {
+	const run = "qak_AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA"
+	s, _ := diagnoseKeyed(t)
+	out, errOut, err := runApart(t, "apiary", "run", "diagnose", run)
+	if err == nil {
+		t.Fatal("diagnose of a secret succeeded")
+	}
+	if got := firstLine(err.Error()); got != diagnosticsNotARunID {
+		t.Errorf("first line %q, want %q", got, diagnosticsNotARunID)
+	}
+	wantIn(t, err.Error(), "\nYou passed (a value that contains an access key secret).")
+	if all := strings.ToLower(out + errOut + err.Error()); strings.Contains(all, "qak_") {
+		t.Errorf("the output contains the secret: %s", all)
+	}
+	if s.received != 0 {
+		t.Errorf("the secret reached the server %d times", s.received)
 	}
 }
 

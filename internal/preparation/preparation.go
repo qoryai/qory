@@ -81,6 +81,7 @@ const (
 	textExcludeOutside = "qory run: start the run in a git working tree whose exclude file is inside the working folder: the exclude file, %s, is outside it, and qory writes it only inside"
 	textGitNotDir      = "qory run: start the run in a git working tree whose .git is a folder: the working folder's .git is a file or a link, which points at a repository elsewhere"
 	textHasRemote      = "qory run: start the run in a new empty folder or a new empty git working tree: the working folder's repository has a remote already, and qory fetches the run's repository only into a repository with no remote"
+	textAboveFailed    = "qory run: check that git on this machine can read the working folder and each .git above it, then run again. git failed: %s"
 	textGitFailed      = "qory run: check that git on this machine can read the working folder, then run again. git failed: %s"
 	textLocal          = "qory run: check that this machine can read and write the working folder, then run again. The step failed: %s"
 	textConfigKey      = "qory run: start the run in a new empty git working tree, or remove %s from %s, then run again. qory fetches only into a repository whose configuration has only the keys git init writes, since git on this machine would use any other key, such as a filter, a proxy or http.sslVerify"
@@ -89,14 +90,14 @@ const (
 	textGitLink        = "qory run: start the run in a new empty git working tree, or remove the link %s, then run again: git would read and write through that link"
 	textHardLink       = "qory run: start the run in a new empty git working tree, or remove the hard link %s, then run again: a write to it would change another file"
 	textGrafts         = "qory run: start the run in a new empty git working tree, then run again: the working folder's .git has info/grafts, which gives commits other parents"
-	textCommonDir      = "qory run: start the run in a new empty git working tree, then run again: the working folder's .git has a commondir file, which makes git read the configuration of another repository"
+	textCommonDir      = "qory run: start the run in a new empty git working tree, then run again: the working folder's .git has a commondir file, which can point git at another repository"
 	// The cause of each of these lines alone, for the line after the agent exited.
 	causeConfigKey     = "it has %s in %s, and the check stops on each key that neither git init nor the fetch writes, because a key such as a filter, a proxy or http.sslVerify changes what git on this machine does"
 	causeConfigNotFile = "its %s is not a regular file"
 	causeAlternates    = "its .git has %s, which makes git read objects from outside the working folder"
 	causeGitLink       = "it has the link %s, and git would read and write through that link"
 	causeHardLink      = "it has the hard link %s, and a write to it would change another file"
-	causeCommonDir     = "its .git has a commondir file, which makes git read the configuration of another repository"
+	causeCommonDir     = "its .git has a commondir file, which can point git at another repository"
 	causeGrafts        = "its .git has info/grafts, which gives commits other parents, so a push that overwrites a branch would pass as a fast-forward"
 	causeGitFailed     = "git failed: %s"
 	causeLocal         = "the read of its files failed: %s"
@@ -418,10 +419,11 @@ func repoURL(system, path string) string {
 // repository elsewhere, such as a worktree's or a separate git directory's, whose path is
 // the host's; on one with a .git and anything else but .qory; and on one with no .git and
 // any entry, which is not a working tree. A folder with no entries gets a repository from
-// [initFolder], and a .git with no HEAD, objects or refs stops as [gitParts] has it. Then
-// it stops on one whose repository [safeRepository] stops on; then on one that is not the
-// top of its working tree, whose repository has a commit, or has a remote. A git that fails
-// to read the folder is [textGitFailed], not a stop on what the folder has.
+// [initFolder]. Then it stops on one whose repository [safeRepository] stops on; then on
+// one that is not the top of its working tree, whose repository has a commit, or has a
+// remote. A git that finds no repository as it looks for the top of the working tree is
+// [textAboveFailed], since a .git git does not take for a repository sends it to the folders
+// above. Any other failure of git is [textGitFailed].
 func emptyTree(ctx context.Context, git gitRunner, dir string) error {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -450,14 +452,15 @@ func emptyTree(ctx context.Context, git gitRunner, dir string) error {
 		if err := initFolder(ctx, git, dir); err != nil {
 			return err
 		}
-	} else if err := gitParts(filepath.Join(dir, ".git")); err != nil {
-		return err
 	}
 	if err := safeRepository(ctx, dir); err != nil {
 		return err
 	}
 	top, err := git(ctx, dir, "rev-parse", "--show-toplevel")
 	if err != nil {
+		if ge := (*gitError)(nil); errors.As(err, &ge) && strings.Contains(ge.line, "not a git repository") {
+			return aboveFailed(err)
+		}
 		return gitFailed(err)
 	}
 	// Only the line end is git's: a folder's name can end in a space.
@@ -511,9 +514,9 @@ func BranchName(ctx context.Context, dir, branch string) (bool, error) {
 // dir that is a link, without following it, and with [textNotTree] on a dir git finds a
 // repository for, such as a folder inside a working tree, where git would use the second
 // repository in place of the first. Any other failure of git to look for a repository,
-// such as a .git above dir that git cannot read, is [textGitFailed]. The fetch replaces the unborn branch main with the remote's default branch,
-// so its name has no effect on the run; the option keeps it from depending on git's
-// version.
+// such as a .git above dir that leads nowhere, is [textAboveFailed]. The fetch replaces the
+// unborn branch main with the remote's default branch, so its name has no effect on the run; the
+// option keeps it from depending on git's version.
 func initFolder(ctx context.Context, git gitRunner, dir string) error {
 	info, err := os.Lstat(dir)
 	if err != nil {
@@ -528,12 +531,17 @@ func initFolder(ctx context.Context, git gitRunner, dir string) error {
 	}
 	var ge *gitError
 	if !errors.As(err, &ge) || !strings.Contains(ge.line, "not a git repository (or any") {
-		return gitFailed(err)
+		return aboveFailed(err)
 	}
 	if _, err := git(ctx, dir, "init", "--quiet", "--template=", "--initial-branch=main"); err != nil {
 		return local(err)
 	}
 	return nil
+}
+
+// aboveFailed is [textAboveFailed] with git's line made printable.
+func aboveFailed(err error) error {
+	return fmt.Errorf(textAboveFailed, integration.Printable(exports.HideURLError(err).Error()))
 }
 
 // fetchRun fetches the run's repository into dir with git: origin is its URL, and the

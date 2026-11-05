@@ -137,7 +137,7 @@ func TestAWalledRunActsOnNothingInTheWorkspaceAfterItsSession(t *testing.T) {
 		t.Fatal(err)
 	}
 	bin := tempDir(t)
-	writeFile(t, filepath.Join(bin, "git"), "#!/bin/sh\necho \"git in $PWD: $*\" >> "+log+"\nexec "+realGit+" \"$@\"\n")
+	writeFile(t, filepath.Join(bin, "git"), "#!/bin/sh\necho \"git in $PWD: $*\" >> "+log+"\nexec "+shellQuote(realGit)+" \"$@\"\n")
 	script := filepath.Join(root, "tools", "setup.sh")
 	agent := filepath.Join(tempDir(t), "docker")
 	writeFile(t, agent, `#!/bin/sh
