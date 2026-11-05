@@ -3576,7 +3576,7 @@ docker build -t qory-prebuild --build-arg BASE=qory-agent-docker images/prebuild
 | `prebuild` | `agent-docker`, the `devcontainer` command `@devcontainers/cli` 0.89.0, and Docker's `buildx` plugin: the image a prebuild runs in behind its wall |
 
 Every version and every download's sum is a build argument, with its default in the
-Dockerfile. A build checks each download against its sum, and installs Debian's packages
+Dockerfile. Debian's packages follow the snapshot date. A build checks each download against its sum, and installs Debian's packages
 from the snapshot the base image was built from.
 
 What each of them does:
@@ -3594,8 +3594,9 @@ What each of them does:
 - **Go.** `agent-go` has Go at the version the image pins, with `GOTOOLCHAIN=local`, so a
   `go.mod` that asks for a newer one fails instead of downloading it. `GOPATH` and the
   caches are under `HOME`. It has no C compiler, so cgo is off.
-- **Browser.** `agent-browser` has Chromium and the packages Chromium depends on, from
-  the Debian snapshot the base image was built from, with no recommended packages.
+- **Browser.** `agent-browser` has Chromium and the packages Chromium depends on, with no
+  recommended packages. It has no sandbox helper, so start Chromium with `--no-sandbox`.
+  On a read-only `HOME`, set `XDG_CONFIG_HOME` and `XDG_CACHE_HOME` to a writable folder.
 
 To add what your agents need, build yours FROM one of them, and check it:
 

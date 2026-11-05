@@ -47,10 +47,6 @@ concurrency:
 #   digest. Each platform builds on a runner of that platform, and qory image check checks
 #   each platform's image before one index joins the two, as for the agent image.
 #
-# ghcr.io/qoryai/qory-prerelease, ghcr.io/qoryai/qory-agent-prerelease,
-# ghcr.io/qoryai/qory-gateway-prerelease, ghcr.io/qoryai/qory-prebuild-prerelease and
-# ghcr.io/qoryai/qory-agent-browser-prerelease stay private: they are never made public.
-#
 # The build reads only the pushed sources: a go.mod that replaces a module with a local
 # path fails it, as that path is not in the checkout.
 #

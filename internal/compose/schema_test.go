@@ -625,6 +625,18 @@ func TestReviewCommentsSchema(t *testing.T) {
 		{replace(`"artifact": "reply-draft"`, `"artifact": "reply--draft"`), false},
 		{replace(`"artifact": "reply-draft"`, `"artifact": "`+strings.Repeat("a", 64)+`"`), true},
 		{replace(`"artifact": "reply-draft"`, `"artifact": "`+strings.Repeat("a", 65)+`"`), false},
+		// on.screen is optional: on a closed review comment with a run's reply, and on an
+		// open one. reviewCommentsDocument itself has no screen.
+		{replace(`"version": 2}`, `"version": 2, "screen": "cart"}`), true},
+		{replace(`"version": 1}`, `"version": 1, "screen": "cart"}`), true},
+		{replace(`"version": 2}`, `"version": 2, "screen": "`+strings.Repeat("a", 32)+`"}`), true},
+		{replace(`"version": 2}`, `"version": 2, "screen": "`+strings.Repeat("a", 33)+`"}`), false},
+		{replace(`"version": 2}`, `"version": 2, "screen": ""}`), false},
+		{replace(`"version": 2}`, `"version": 2, "screen": 1}`), false},
+		{replace(`"version": 2}`, `"version": 2, "screen": null}`), false},
+		{replace(`"version": 2}`, `"version": 2, "screen": ["cart"]}`), false},
+		{replace(`"version": 2}`, `"version": 2, "screen": "a\nb"}`), false},
+		{replace(`"version": 2}`, `"version": 2, "screen": "a\u202eb"}`), false},
 		// text
 		{replace(`"Why two steps?"`, `"`+strings.Repeat("a", 2000)+`"`), true},
 		{replace(`"Why two steps?"`, `"`+strings.Repeat("a", 2001)+`"`), false},
@@ -639,16 +651,6 @@ func TestReviewCommentsSchema(t *testing.T) {
 		{replace(`"2026-11-04T10:00:00Z"`, `"2026-13-04T10:00:00Z"`), false},
 		{replace(`"2026-11-04T10:00:00Z"`, `"2026-11-32T10:00:00Z"`), false},
 		{replace(`, "at": "2026-11-04T11:00:00Z"`, ``), false},
-		// on.screen is optional: on a closed review comment with a run's reply, and on an
-		// open one. reviewCommentsDocument itself has no screen.
-		{replace(`"version": 2}`, `"version": 2, "screen": "cart"}`), true},
-		{replace(`"version": 1}`, `"version": 1, "screen": "cart"}`), true},
-		{replace(`"version": 2}`, `"version": 2, "screen": "`+strings.Repeat("a", 32)+`"}`), true},
-		{replace(`"version": 2}`, `"version": 2, "screen": "`+strings.Repeat("a", 33)+`"}`), false},
-		{replace(`"version": 2}`, `"version": 2, "screen": ""}`), false},
-		{replace(`"version": 2}`, `"version": 2, "screen": 1}`), false},
-		{replace(`"version": 2}`, `"version": 2, "screen": null}`), false},
-		{replace(`"version": 2}`, `"version": 2, "screen": ["cart"]}`), false},
 		// a member this schema does not define, at each level
 		{replace(`{"review_comments": [`, `{"version": 1, "review_comments": [`), false},
 		{replace(`"id": "c-2"`, `"id": "c-2", "anchor": "line 4"`), false},

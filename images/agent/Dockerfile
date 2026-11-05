@@ -20,7 +20,9 @@ ARG NODE_IMAGE=public.ecr.aws/docker/library/node:24.21.0-trixie-slim@sha256:8ec
 # emulation.
 ARG FETCH_IMAGE=public.ecr.aws/docker/library/debian:trixie-20260918-slim@sha256:a99cfc517144bc59b1978475ec53b46ecabec7e43635402ee5b77cc54cd1b20a
 # The Debian snapshot the packages come from: the one the base's Debian was built from,
-# named in its /etc/apt/sources.list.d/debian.sources. Change it with the base.
+# named in its /etc/apt/sources.list.d/debian.sources. Change it with the base, and in
+# images/agent-docker/Dockerfile and images/agent-browser/Dockerfile, which have a copy of
+# it; a test in internal/image fails when the three differ.
 ARG DEBIAN_SNAPSHOT=20260918T000000Z
 # The GitHub command; the sums are those of gh_<version>_checksums.txt.
 ARG GH_VERSION=2.101.0

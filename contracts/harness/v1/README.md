@@ -553,10 +553,11 @@ least one reply by a run. A run's reply has an `outcome`:
 A member's reply has no `outcome` and no `question`.
 
 A review comment's `on` has the artifact type's name in `artifact` and the version's number
-in `version`. For a comment on one screen of a mockup, `on` also has `screen`: the id of a
-screen in the `screens.json` of that artifact version, 1 to 32 characters. A version that a
-run pushes keeps `on` unchanged. This is version 1 of the format
-([review-comments.schema.json](review-comments.schema.json)).
+in `version`. For a review comment on one screen of a mockup, `on` also has `screen`: the id
+of a screen in that artifact version, 1 to 32 characters on one line. A version that a run
+pushes keeps `on` unchanged.
+
+This is version 1 of the format ([review-comments.schema.json](review-comments.schema.json)).
 
 ## The proposal sources format
 

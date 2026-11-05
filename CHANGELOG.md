@@ -59,18 +59,17 @@ release may change what an existing document does, and states it under Upgrading
   `review-comments`. The control plane writes the members' review comments and replies.
   A version that a run pushes only adds the run's reply to any of the open review
   comments, at most one reply to each, and closes each review comment it adds a reply to.
-  See The review comments format in `contracts/harness/v1/README.md`.
-- A review comment's `on` in `contracts/harness/v1/review-comments.schema.json` takes an
-  optional `screen`: the id of a screen in the `screens.json` of that artifact version, for
-  a comment on one screen of a mockup.
-- `images/agent-browser`: the agent image with Chromium. `images.yml` builds and checks
-  it, and `prerelease.yml` publishes it by digest. See Qory's images in `docs/run.md`.
+  A review comment's `on` takes an optional `screen`: the id of a screen in that artifact
+  version, for a review comment on one screen of a mockup. See The review comments format
+  in `contracts/harness/v1/README.md`.
 - Version 1 of the proposal sources format,
   `contracts/harness/v1/proposal-sources.schema.json`: the file `sources.json` of a
   version of the artifact type `proposal`, with every source the run used to write the
   proposal and the reason for each. A source has an open `kind`, such as `page`, `record`
   or `file`, and a `ref` in the form that its kind needs. See The proposal sources format
   in `contracts/harness/v1/README.md`.
+- `images/agent-browser`: the agent image with Chromium. `images.yml` builds and checks
+  it, and `prerelease.yml` publishes it by digest. See Qory's images in `docs/run.md`.
 - `-f` on `qory harness compose`, `qory run` and `qory worktree add` takes a stack by
   reference, `<https URL>#<ref>:<folder>`: qory fetches the folder as it fetches a git
   module and composes its `qory-stack.yaml`. `examples/hello` has one, so a run takes it
