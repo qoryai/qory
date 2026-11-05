@@ -9,7 +9,6 @@ import (
 	"net/url"
 	"path/filepath"
 	"regexp"
-	"strconv"
 	"strings"
 	"time"
 
@@ -49,25 +48,8 @@ var diagnosticsClock = time.Now
 // runIDShape is a run id as the Qory Apiary API returns it.
 var runIDShape = regexp.MustCompile(`^rn_[0-9a-hjkmnp-tv-z]{16}$`)
 
-// runNumberShape is a run number as Qory Apiary reads it in an address: digits with no
-// leading zero. runRef also holds it to at most math.MaxInt64, the largest number Qory
-// Apiary stores.
-var runNumberShape = regexp.MustCompile(`^[1-9][0-9]{0,18}$`)
-
-// runRef reports whether v is a run number or a run id in the form Qory Apiary reads.
-func runRef(v string) bool {
-	if runIDShape.MatchString(v) {
-		return true
-	}
-	if !runNumberShape.MatchString(v) {
-		return false
-	}
-	_, err := strconv.ParseInt(v, 10, 64)
-	return err == nil
-}
-
 // codeNotFound is Qory Apiary's signed 404 to a request for the diagnostics of a run it
-// does not have, or of a value that is neither a run number nor a run id.
+// does not have.
 const codeNotFound = accesskey.CodeNotFound
 
 // codeUnsupportedContractVersion is the code of a refusal of the contract version the
@@ -100,7 +82,7 @@ func newApiaryRun() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "run",
 		Short: "Read what Qory Apiary recorded about a run",
-		Long: `Read what Qory Apiary recorded about a run, by the run's number or id.
+		Long: `Read what Qory Apiary recorded about a run, by the run's rn_ id.
 
   diagnose   print a run's diagnostics document
 
@@ -114,15 +96,15 @@ More: ` + apiaryDocs,
 func newApiaryRunDiagnose() *cobra.Command {
 	var serverURL string
 	c := &cobra.Command{
-		Use:   "diagnose <run number or id>",
+		Use:   "diagnose <run id>",
 		Short: "Print a run's diagnostics document from Qory Apiary",
 		Long: `Print a run's diagnostics document: the run, its queue entry, each dispatch, the
 preparation of its machine, its last events and the end of its log, as one JSON
 document.
 
-Pass the run's number or its id. The number is the one on the run's page in Qory
-Apiary, 18342 in "Run 18342", and the number after /runs/ in the page's address. The
-run id is the rn_ id that the Qory Apiary API returns.
+Copy Run id from Details on the run's page, and pass it. The id is rn_ and 16
+characters, and the Qory Apiary API also returns it. A run number is per workspace, so it
+does not identify a run.
 
 qory signs the request with the diagnostics key in ~/.config/qory/apiary/<host>, and
 prints the document only after its signature verifies under the server key pinned
@@ -135,13 +117,12 @@ diagnostics key for.
 --verbose adds nothing here.
 
 More: ` + apiaryDocs,
-		Example: `  qory apiary run diagnose 18342
-  qory apiary run diagnose rn_0123456789abcdef
-  qory apiary run diagnose 18342 --server https://apiary.example
+		Example: `  qory apiary run diagnose rn_0123456789abcdef
+  qory apiary run diagnose rn_0123456789abcdef --server https://apiary.example
   qory apiary run diagnose rn_0123456789abcdef > diagnostics.json`,
 		Args: func(cmd *cobra.Command, args []string) error {
 			if len(args) != 1 {
-				return input(errors.New("Pass one run number or run id, such as 18342 or rn_0123456789abcdef: qory apiary run diagnose takes one run."))
+				return input(errors.New("Pass one run id, such as rn_0123456789abcdef: qory apiary run diagnose takes one run."))
 			}
 			return nil
 		},
@@ -153,14 +134,14 @@ More: ` + apiaryDocs,
 	return c
 }
 
-// diagnose prints the diagnostics document of the run runID, a run number or a run id,
-// to out: it reads the diagnostics key of the server --server selects, or of the one
-// server with a key, sends the signed GET and writes the body of a verified 200 as it
-// came, with a line ending after it when it has none. Nothing else goes to out. A
-// response that does not verify under the pinned key prints nothing.
+// diagnose prints the diagnostics document of the run with the id runID to out: it reads
+// the diagnostics key of the server --server selects, or of the one server with a key,
+// sends the signed GET and writes the body of a verified 200 as it came, with a line
+// ending after it when it has none. Nothing else goes to out. A response that does not
+// verify under the pinned key prints nothing.
 func diagnose(ctx context.Context, out, report io.Writer, runID, serverURL string, serverGiven bool) error {
-	if !runRef(runID) {
-		return input(fmt.Errorf("Pass a run number, such as 18342, or a run id, such as rn_0123456789abcdef: %s is neither.", exports.Value(runID, true)))
+	if !runIDShape.MatchString(runID) {
+		return input(fmt.Errorf("Use the run's id, rn_ and 16 characters: a run number does not identify a run.\nYou passed %s.", exports.Value(runID, true)))
 	}
 	root, err := apiarydir.Root()
 	if err != nil {
@@ -297,7 +278,7 @@ func fetchDiagnostics(ctx context.Context, key *apiarydir.Key, instance, runID s
 	case ref == nil:
 		return nil, fmt.Errorf("Check the run with the instance admin of %s: the request was not accepted (%d).", key.Host, status)
 	case ref.Code == codeNotFound && status == http.StatusNotFound:
-		return nil, fmt.Errorf("Check the run number or id: %s has no run %s (%s).", key.Host, runID, codeNotFound)
+		return nil, fmt.Errorf("Check the run id: %s has no run %s (%s).", key.Host, runID, codeNotFound)
 	case ref.Code == codeUnsupportedContractVersion:
 		return nil, fmt.Errorf("Update qory to a release that works with %s: the request was not accepted: %s (%d).", key.Host, ref.Code, status)
 	case len(ref.Names) > 0:
