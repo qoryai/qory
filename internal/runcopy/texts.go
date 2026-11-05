@@ -28,6 +28,7 @@ const (
 	textGitFailed = "check git on this machine: git check-ref-format failed: %w"
 	textBase      = "give the base commit of %s in full: %s is not a commit id"
 	textLeftOut   = "give each path left out of the run's commit relative to the top of its repository: %s is not such a path"
+	textHiddenURL = "(a URL with a credential)"
 	textState     = "give each setup path's state as Dir.SetupStates reads it: %s is not such a state"
 	textRepoPath  = "give each repository of the run as Dir.Clone returned it: %s is not a folder in the copy"
 

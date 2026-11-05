@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"io/fs"
 	"os"
@@ -729,7 +730,7 @@ func TestGitSessionChecksItsArguments(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "rel='.' base=" + base + " links=2 setup=1\nset -- '--' 'x' 'dir' other\n"
+	want := "rel='.' base=" + base + " icase=false links=2 setup=1\nset -- '--' 'x' 'dir' other\n"
 	if got := read(t, d.Bundle(), "list-0"); got != want {
 		t.Errorf("the list is %q, want %q", got, want)
 	}
@@ -3807,5 +3808,115 @@ func TestARebaseOverACommitTakesUncommittedWork(t *testing.T) {
 		if !slices.Contains(got, want) {
 			t.Errorf("the commit has %v, want %s", got, want)
 		}
+	}
+}
+
+// TestAnHTTPURLInAGitLineHasNoCredential is each form of a credential in a URL that git prints.
+func TestAnHTTPURLInAGitLineHasNoCredential(t *testing.T) {
+	for raw, want := range map[string]string{
+		"fatal: unable to access 'https://SECRETTOK@host.example/x': failed": "fatal: unable to access 'https://host.example/x': failed",
+		"fatal: https://me:SEC/RET@host.example/x failed":                    "fatal: " + textHiddenURL + " failed",
+		"fatal: HTTP://host.example/x?token=SECRETQ failed":                  "fatal: HTTP://host.example/x failed",
+		"fatal: http://host.example/x#SECRETQ":                               "fatal: http://host.example/x",
+		"fatal: https://me:SECRETPW@host.example:8443/x":                     "fatal: https://host.example:8443/x",
+		"fatal: no URL at SECRET here":                                       "fatal: no URL at SECRET here",
+	} {
+		if got := hideHTTP(raw); got != want {
+			t.Errorf("hideHTTP(%q) = %q, want %q", raw, got, want)
+		}
+	}
+}
+
+// TestALineBreakInARepositoryPathLetsTheSessionCommit is a further repository whose folder has a
+// line break: its alternates line stays one line.
+func TestALineBreakInARepositoryPathLetsTheSessionCommit(t *testing.T) {
+	isolate(t)
+	sessionGit(t)
+	src, _ := person(t)
+	further := filepath.Join(src, ".qory", "repositories", "a\nb", "c\"d")
+	write(t, further, "f.txt", "first\n")
+	testGit(t, further, "init", "--quiet", "-b", "main")
+	commitAll(t, further, "first")
+	d, repos := cloneRun(t, src)
+	if len(repos) != 2 {
+		t.Fatalf("repositories: %+v", repos)
+	}
+	write(t, d.Work(), filepath.Join(filepath.FromSlash(repos[1].Path), "g.txt"), "g\n")
+	printed := sessionOutput(t, d, repos, nil)
+	qs, err := d.Quarantine(context.Background(), branch, repos)
+	if err != nil {
+		t.Fatalf("%v\n%s", err, printed)
+	}
+	if !slices.Contains(files(t, qs[1].Path, qs[1].Head), "g.txt") {
+		t.Errorf("the commit did not come back:\n%s", printed)
+	}
+}
+
+// caseInsensitiveDisk skips the test on a disk with both names as two files.
+func caseInsensitiveDisk(t *testing.T) {
+	t.Helper()
+	at := t.TempDir()
+	write(t, at, "Probe", "x\n")
+	if _, err := os.Stat(filepath.Join(at, "probe")); err != nil {
+		t.Skip("this disk tells Probe from probe")
+	}
+}
+
+// TestACaseRenameOnACaseInsensitiveDiskKeepsOneName is an uncommitted mv Foo.txt foo.txt: no commit
+// has both names.
+func TestACaseRenameOnACaseInsensitiveDiskKeepsOneName(t *testing.T) {
+	caseInsensitiveDisk(t)
+	isolate(t)
+	sessionGit(t)
+	src, _ := person(t)
+	write(t, src, "Foo.txt", "foo\n")
+	commitAll(t, src, "Foo")
+	d, repos := cloneRun(t, src)
+	if err := os.Rename(filepath.Join(d.Work(), "Foo.txt"), filepath.Join(d.Work(), "foo.txt")); err != nil {
+		t.Fatal(err)
+	}
+	write(t, d.Work(), "other.txt", "other\n")
+	qs := bringBack(t, d, src, repos, nil)
+	got := files(t, src, qs.Head)
+	if slices.Contains(got, "Foo.txt") && slices.Contains(got, "foo.txt") {
+		t.Errorf("the commit has both names: %v", got)
+	}
+}
+
+// TestTwoNamesOfOneFileOnACaseInsensitiveDiskGetNoCommit is a commit with README and readme, of
+// which the disk has one: a run with no change makes no commit.
+func TestTwoNamesOfOneFileOnACaseInsensitiveDiskGetNoCommit(t *testing.T) {
+	caseInsensitiveDisk(t)
+	isolate(t)
+	sessionGit(t)
+	src, _ := person(t)
+	id := strings.TrimSpace(gitIn(t, src, "other\n", "hash-object", "-w", "--stdin"))
+	testGit(t, src, "update-index", "--add", "--cacheinfo", "100644,"+id+",readme.md")
+	testGit(t, src, "commit", "--quiet", "-m", "two names")
+	d, repos := cloneRun(t, src)
+	noBundle(t, d, repos, false)
+}
+
+// TestManyRefsLeaveTheSessionItsTime is 20,000 tags off every branch, which the session compares
+// with what the clone had.
+func TestManyRefsLeaveTheSessionItsTime(t *testing.T) {
+	isolate(t)
+	sessionGit(t)
+	src, _ := person(t)
+	testGit(t, src, "checkout", "--quiet", "--detach")
+	write(t, src, "tagged.txt", "x\n")
+	commitAll(t, src, "tagged")
+	at := testGit(t, src, "rev-parse", "HEAD")
+	testGit(t, src, "checkout", "--quiet", "main")
+	var refs strings.Builder
+	for i := range 20000 {
+		fmt.Fprintf(&refs, "create refs/tags/t%d %s\n", i, at)
+	}
+	gitIn(t, src, refs.String(), "update-ref", "--stdin")
+	d, repos := cloneRun(t, src)
+	start := time.Now()
+	noBundle(t, d, repos, false)
+	if took := time.Since(start); took > time.Minute {
+		t.Errorf("the session took %s", took)
 	}
 }

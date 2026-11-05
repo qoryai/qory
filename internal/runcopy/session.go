@@ -185,7 +185,7 @@ func sessionList(r Repository, o LeftOut) (string, error) {
 	}
 	setup := slices.Concat(o.Setup, r.filtered)
 	var b strings.Builder
-	fmt.Fprintf(&b, "rel=%s base=%s links=%d setup=%d\nset --", shellQuote(rel), r.Base, len(o.Links), len(setup))
+	fmt.Fprintf(&b, "rel=%s base=%s icase=%t links=%d setup=%d\nset --", shellQuote(rel), r.Base, r.ignorecase, len(o.Links), len(setup))
 	for _, p := range o.Links {
 		if !cleanRel(p) {
 			return "", fmt.Errorf(textLeftOut, shown(p))
@@ -276,6 +276,20 @@ copygit() {
 past() {
 	[ -n "$1" ] && [ "$1" != "$base" ] && copygit merge-base --is-ancestor "$base" "$1" 2>/dev/null
 }
+# c_quoted prints $1 as a line of an alternates file that a line break in $1 does not split.
+c_quoted() {
+	rest=$1 line=
+	while [ -n "$rest" ]; do
+		c=${rest%"${rest#?}"}
+		rest=${rest#?}
+		case $c in
+		\\ | \") line=$line\\$c ;;
+		"$nl") line=$line\\n ;;
+		*) line=$line$c ;;
+		esac
+	done
+	printf '"%s"\n' "$line"
+}
 # lacking prints the lines of the file $1 that the file $2 does not have, and every line of $1 when
 # sort or comm fails, so a failure keeps the copy. LC_ALL=C is what both sort by.
 lacking() {
@@ -345,7 +359,10 @@ while [ "$n" -lt "$count" ]; do
 	if [ ${#base} -eq 64 ]; then
 		printf '[core]\n\trepositoryformatversion = 1\n[extensions]\n\tobjectformat = sha256\n' > "$G/config"
 	fi
-	printf '%s\n' "$T/.git/objects" > "$G/objects/info/alternates"
+	c_quoted "$T/.git/objects" > "$G/objects/info/alternates"
+	if [ "$icase" = true ]; then
+		printf '[core]\n\tignorecase = true\n' >> "$G/config"
+	fi
 	printf 'ref: refs/heads/%s\n' "$branch" > "$G/HEAD"
 
 	# head is what the bundle has: HEAD when it is past the base commit, so commits on another

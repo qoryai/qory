@@ -244,9 +244,25 @@ var gitSessionDirs = []string{"/usr/local/bin", "/usr/bin", "/bin"}
 // sessionTools are the programs the script of a walled run's git session runs besides git, with
 // what it runs each for.
 var sessionTools = []struct{ name, why string }{
+	{"cat", "to read its lists of commits and git's lines"},
+	{"comm", "to compare the run's refs and commits with what the bundle has"},
+	{"cp", "to copy the person's ignore rules to its git folder"},
 	{"find", "to list executable files and embedded repositories"},
-	{"grep", "to compare the run's refs and commits with what the bundle has"},
+	{"grep", "to find a sparse checkout and what the setup left in a submodule"},
+	{"mkdir", "to make its git folder"},
+	{"mv", "to put the finished bundle in place"},
+	{"readlink", "to read a link the setup left"},
+	{"sort", "to compare the run's refs and commits with what the bundle has"},
 	{"tr", "to print a folder's name with no control character"},
+}
+
+// SessionTools is the name of each of [sessionTools].
+func SessionTools() []string {
+	names := make([]string, 0, len(sessionTools))
+	for _, tool := range sessionTools {
+		names = append(names, tool.name)
+	}
+	return names
 }
 
 // git checks that git runs, and what the git session of a walled run that may write needs of

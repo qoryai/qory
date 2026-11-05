@@ -259,8 +259,8 @@ release may change what an existing document does, and states it under Upgrading
   works in a copy, read-only for the agent, and nothing comes back from it. A read-write
   mount stops a read run too, and so does a read run with no setup at your home folder.
   `make the mount … read-only` replaces `mount a narrower folder` in the line of a read-write
-  mount of your home folder. `qory image check` tests that git is 2.25 or later and that `find`,
-  `grep` and `tr` are there, in `/usr/local/bin`, `/usr/bin` or `/bin`. See A run that may write works in a copy in
+  mount of your home folder. `qory image check` tests that git is 2.25 or later and that `cat`,
+  `comm`, `cp`, `find`, `grep`, `mkdir`, `mv`, `readlink`, `sort` and `tr` are there, in `/usr/local/bin`, `/usr/bin` or `/bin`. See A run that may write works in a copy in
   `docs/run.md`.
 - A run that lists repositories starts in an empty folder as well: qory runs `git init`
   there, then fetches. A folder that is not empty and is not a git working tree still

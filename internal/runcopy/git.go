@@ -117,7 +117,7 @@ func run(cmd *exec.Cmd, stdin io.Reader, args []string) (string, error) {
 			line = err.Error()
 		}
 		// A filter or a credential helper can print a URL with its password here.
-		line = exports.HideURLError(errors.New(line)).Error()
+		line = exports.HideURLError(errors.New(hideHTTP(line))).Error()
 		exit := -1
 		var ee *exec.ExitError
 		if errors.As(err, &ee) {
@@ -253,4 +253,19 @@ func atLeast(out string, major, minor int) bool {
 	ma, err1 := strconv.Atoi(parts[0])
 	mi, err2 := strconv.Atoi(parts[1])
 	return err1 == nil && err2 == nil && (ma > major || ma == major && mi >= minor)
+}
+
+// httpURL is an http or https URL in a line that git prints, up to a space or a quote.
+var httpURL = regexp.MustCompile(`(?i)https?://[^\s'"]+`)
+
+// hideHTTP is line with each http or https URL as [withoutCredentials] writes it: no user name,
+// password or query. A URL in which a credential could still be stays out, in favour of
+// textHiddenURL.
+func hideHTTP(line string) string {
+	return httpURL.ReplaceAllStringFunc(line, func(raw string) string {
+		if clean := withoutCredentials(raw); clean != "" {
+			return clean
+		}
+		return textHiddenURL
+	})
 }

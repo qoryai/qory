@@ -54,6 +54,9 @@ type Repository struct {
 	// cloned is when the clone ended, less [submoduleClockMargin]: [Dir.SubmoduleSetup] reads each
 	// file in a submodule with a later time as the setup's.
 	cloned time.Time
+	// ignorecase is whether git, in the clone, set core.ignorecase for the disk of the copy. The
+	// git session's configuration has the same setting.
+	ignorecase bool
 }
 
 // Clone copies the person's repository at checkout, the top of its working tree, and
@@ -147,7 +150,7 @@ func (d Dir) cloneOne(ctx context.Context, i int, src, dest, branch string) (Rep
 	}
 	return Repository{
 		Base: base, index: i, filtered: slices.Concat(filtered, rewritten),
-		excludes: personalExcludes(ctx, src), refs: refs, cloned: cloned,
+		excludes: personalExcludes(ctx, src), refs: refs, cloned: cloned, ignorecase: ignoreCase(ctx, dest),
 	}, nil
 }
 
@@ -437,6 +440,12 @@ func (d Dir) filteredFiles(ctx context.Context, i int, dest string) ([]SetupPath
 		return nil, nil
 	}
 	return d.setupStatesAt(ctx, dest, i, paths)
+}
+
+// ignoreCase reports whether the clone at dest has core.ignorecase set to true.
+func ignoreCase(ctx context.Context, dest string) bool {
+	out, err := git(ctx, dest, "config", "--type=bool", "--get", "core.ignorecase")
+	return err == nil && strings.TrimSpace(out) == "true"
 }
 
 // lineEndFiles is each file of the copy at dest, the repository number i just checked out at
