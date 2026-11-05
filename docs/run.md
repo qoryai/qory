@@ -56,7 +56,8 @@ run, it happens once the fetched stack shows that the run reads. This applies
 when `harness_hidden` is `false` too: through `qory` in your cache directory, such a run
 would read the reports of the runs on this machine whose harness is hidden. The
 container gets each mount of `wall.mounts` and `--mount` and the home, read-only, and a
-read run also gets the checkout and the working folder. The run stops when a mount of
+read run also gets the checkout and the working folder. A read run with a setup gets them
+from a copy: see [Read workflows](#read-workflows). The run stops when a mount of
 `wall.mounts` or `--mount`, or the checkout or working folder of a read run:
 
 - is, contains or lies inside `qory` in your cache directory, where qory writes the home
@@ -351,8 +352,8 @@ directory and the checkout's folder are mode 0700: only you can open them.
 
 A walled run whose read-write mount is your home folder or qory's state directory, or a
 folder that contains either, such as `/`, stops before anything starts, and `qory run`
-exits 2. The line starts `mount a narrower folder`: mount one repository's folder in its
-place. A read-only mount is not compared. A run that may write takes no read-write mount
+exits 2. The line starts `make the mount <folder> read-only, with :ro on --mount or in
+wall.mounts`. A read-only mount is not compared. A walled run takes no read-write mount
 at all: see [A run that may write works in a copy](#a-run-that-may-write-works-in-a-copy).
 
 qory names the run's folder when the run ends:
@@ -1975,7 +1976,9 @@ one that succeeded. The commit keeps its subject and gets the body line `The run
 <state>: <reason>.`, and the version's note is the same line. `<reason>` is `exit <code>`
 for a session with no reason. A session that succeeded has neither.
 
-A run has no step in these cases, and what the agent left stays in the working folder only:
+A run has no step in these cases. Nothing reaches the branch: in a walled run that may write,
+what the agent left stays in the run's copy or lands on `qory/run-<run id>` in the checkout on
+that machine, and with no wall it stays in the working folder.
 
 - A read run.
 - A run whose session did not start, or stopped with an error of the session itself.
@@ -3311,7 +3314,7 @@ What to know:
 
   For a read-only mount of the state directory, it says `the agent could read them`
   instead. A read-write mount that is or contains the state directory stops first, with
-  `mount a narrower folder: …`, so for a read-write mount this line appears only when the
+  `make the mount <path> read-only, …`, so for a read-write mount this line appears only when the
   mount lies inside the state directory.
 
   For a link on the way to the state directory, to a file of the configuration
@@ -3325,7 +3328,7 @@ What to know:
 
   For a read-only mount, it leaves out `; the agent could point it elsewhere`. The second
   line appears only for a read-only mount: a read-write mount that contains a link on the
-  way to the state directory stops first, with `mount a narrower folder: …`.
+  way to the state directory stops first, with `make the mount <path> read-only, …`.
 
   When the path is the checkout or the working directory, it says `the workspace <path>`
   instead of `the mount <path>`.
@@ -3394,26 +3397,52 @@ A walled run that may write never binds your repository, so it has no write acce
 repository to `<user cache>/qory/runs/<run id>/work`, `~/Library/Caches` on macOS and
 `$XDG_CACHE_HOME` or `~/.cache` on Linux, and binds that clone in place of the checkout. Each
 repository under `.qory/repositories` is cloned too, and with a home inside the checkout,
-the harness is composed into the clone. A read run binds your checkout read-only instead.
+the harness is composed into the clone. A read run with no setup binds your checkout
+read-only instead, and a read run with a setup gets the clone read-only: see
+[Read workflows](#read-workflows).
 
 The run starts from your commit at `HEAD`. It does not see your uncommitted, untracked or
 ignored files, such as `.env`. A working folder that the commit at `HEAD` does not have
 stops the run: commit it, or run qory in a folder that commit has. A repository with no commit stops the run
 too, with one exception. A run from a run code or a run key that lists no repositories, in a folder where
 `git init` ran and that has no commit, works like a run in a folder that is not a repository, with `.git` left
-out of the copy. A filter you set up in your git configuration, such as Git LFS, and your submodules
-apply before the run starts.
+out of the copy. A filter you set up in your git configuration, such as Git LFS, and the submodules of
+each repository apply before the run starts. A filter that cannot run stops the run.
+
+The clone has your `origin` URL with any credentials removed, your `origin/*` refs, and the
+`user.name` and `user.email` of your repository's configuration. With no `origin` in your
+repository, it has none. A compose in the clone starts from your harness report, so a module
+keeps its pin and a path a compose replaced in your checkout is replaced in the clone too.
+
+Three repositories stop the run with their fix first:
+
+- A branch named as a parent of the run's branch, such as `qory`: git keeps no branch below a
+  branch, so rename yours with `git branch -m`.
+- A partial clone: the clone has only the objects your repository has. The line has the
+  commands that fetch the rest, such as `git fetch --refetch origin`.
+- A folder of a run's copy under `qory/runs` in your cache folder: a run could have written
+  it, so `qory run` and `qory harness compose` also stop there, and the line says to run qory
+  in your checkout.
 
 When the agent has ended, however it ended, a second session starts on the same run: the git
 session. It runs no agent and gets no model key and no run code, and it binds only the
 copy and a new folder for its bundles. It commits what the agent left, with no setting from
-the copy's `.git` and no filter, and writes the run's branch to a git bundle. The run's
-record shows it as a second session. A program the agent planted in the copy can run again
-in this session, under the run's egress policy, so the session ends after 5 minutes. Past
-that time nothing comes back, and qory keeps the copy:
+the copy's `.git` and no filter, and writes the run's branch to a git bundle. A commit on
+another branch that descends from your commit keeps its message. Your `.gitignore`,
+`.git/info/exclude` and global excludes file keep their files out of the commit. The image
+needs git 2.25 or later in `/usr/local/bin`, `/usr/bin` or `/bin`: `qory image check` tests it.
+The run's record shows the session as a second session.
+
+Git LFS: because the session runs no filter, an LFS file the agent changes goes into the
+commit as its full content, in place of a pointer.
+
+A program the agent planted in the copy can run again in this session, under the run's egress
+policy, so the session has at most 5 minutes. A first signal to `qory run` leaves it that time,
+and a second signal ends it. Past that time, or if the session exits with another status than
+0, nothing comes back, and qory keeps the copy:
 
 ```text
-qory run: look at the run's copy in <folder>: the git session ran past its limit of 5m0s, so nothing came back from the run
+qory run: read the run's files in <folder>, and run no git there: the git session ran past its limit of 5m0s, so nothing came back from the run
 ```
 
 Once the run's containers are gone, qory checks the bundle, fetches it into a new repository
@@ -3434,12 +3463,20 @@ qory run: the run's commits are on qory/run-0193 in /path/to/repo. They change t
 
 With no commit past `HEAD`, qory prints `qory run: no action needed: the run made no commit
 past its base commit`. Then it deletes the copy. When anything stops the return, qory
-prints the cause and `qory run: look at the run's copy in <folder>, then remove it: nothing
-more came back from the run`, and `qory run` exits 1 for a session that succeeded.
+prints the cause and `qory run: read the run's files in <folder>, run no git there, then
+remove the folder: nothing more came back from the run`, and `qory run` exits 1 for a session
+that succeeded.
+
+A copy that stays has no `.git`. qory renames each `.git` in it to `.git-from-run`, mode 0700,
+and the `HEAD` of a folder that git would take as a repository, so a git there finds no
+repository and runs nothing the run planted. Read the files, and remove the folder when you
+are done.
 
 A commit of the run that adds `.git` or `.qory` at the top of a repository brings nothing
 back. A write run of a work item pushes from the checked repository instead of fetching
-into your repository: see [The push step of a write run](#the-push-step-of-a-write-run).
+into your repository: see [The push step of a write run](#the-push-step-of-a-write-run). In
+such a run, a line that stops the return says to take the work item in again in Qory Apiary. It
+has no path, and qory deletes the copy.
 
 **Artifacts.** Outside a control plane, `qory artifact push` keeps versions in
 `.qory/artifacts`, which the commits leave out. Once the run's containers are gone, with or
@@ -3458,13 +3495,16 @@ versions first.
 gone, copies back the regular files that the run added or changed, and deletes those it
 deleted. It leaves out links, every `.git` and `.qory`, and a qory file whose settings
 the run changed, and it keeps your version of a file you both changed. It prints what it left
-out and what you both changed, and deletes the copy, with the run's version of each.
+out and what you both changed. When you both changed a file, or the run changed a qory
+setting, the copy stays with the run's version of each, and qory prints its folder. Otherwise
+it deletes the copy.
 
-**Mounts.** A read-write `--mount` or `wall.mounts` entry stops a run that may write, since it
-would give the run write access outside the copy. Read-only mounts stay:
+**Mounts.** A read-write `--mount` or `wall.mounts` entry stops a walled run, since it
+would give the run write access outside the copy or the read-only checkout. Read-only mounts
+stay:
 
 ```text
-make the mount /srv/data read-only, with :ro on --mount or in wall.mounts: a run that may write works in a copy of the checkout, and a read-write mount lets it write your files directly
+make the mount /srv/data read-only, with :ro on --mount or in wall.mounts: a walled run reads the checkout or works in a copy of it, and a read-write mount lets it write your files directly
 ```
 
 ### Read workflows
@@ -3516,8 +3556,10 @@ with `access: write`. A read run sees the checkout read-only:
   with no rule. That folder stays in the container and does not reach the checkout. An
   `Edit` or `Write` allow in the composed settings opens the rest of the container, and the
   deny rules and the read-only mount still stop a write to the checkout.
-- The setup and the host steps write the checkout, so the checkout stays among the places
-  the run may write.
+- A run with no setup binds your checkout read-only. A run with a setup gets a copy, as in
+  [A run that may write works in a copy](#a-run-that-may-write-works-in-a-copy): the setup
+  works in the copy, so it cannot write your `.git`, the agent has the copy read-only, and
+  nothing comes back from it. The fetch of a run's repository still writes the working folder.
 - qory removes the setup container after the setup and before the agent starts, in the
   wall step `remove the setup container`, so every process in that container has ended
   when the agent starts. A read run's agent cannot reach a service that the setup started:
@@ -3569,24 +3611,17 @@ A time limit or a signal that ends the removal closes the run as it closes a set
 it cuts short: `cancelled` with `timeout`, exit 124, or `cancelled` with `interrupted`,
 exit 1.
 
-A writable mount from `--mount` or `wall.mounts` that contains the checkout, lies inside
-it or links to it also stops a read run, later, and the agent does not start. The run
-stops after the image's fetch, exit 1, with a line that ends `(mount_mode_conflict)`:
+A read-write mount from `--mount` or `wall.mounts` stops a read run after the compose, exit 2,
+with a line that starts `make the mount <folder> read-only, with :ro on --mount or in
+wall.mounts`. A mount at the checkout's exact path stops nothing: qory makes it read-only.
 
-- When the run configuration lists no repositories, the run has no setup and stops at the
-  join. The session closes `failed` with `mount_mode_conflict`, and the run closes
-  `failed` with no reason.
-- When it lists repositories, the setup runs first, with the checkout writable and
-  without the mount, and the run stops at the join in the same way.
-- When it lists repositories and the run's policy selects the image by its reference,
-  the run stops before the setup and closes `failed` with `no_session`.
+A read run with no setup whose checkout or working folder is your home folder or qory's state
+directory, or contains one, stops after the compose, exit 2, since the agent could read every
+file there:
 
-A mount folder that exists in the checkout before the fetch, outside `.git` and `.qory`,
-stops a run whose run configuration lists repositories at the fetch instead, with
-`no_session`: the fetch needs an empty working folder. `--mount <checkout>/.qory/sub`, a
-mount in `.git`, and a `wall.mounts` folder that the fetch creates pass the fetch and stop
-as in the last two cases. A writable mount at the checkout's exact path stops nothing:
-qory makes it read-only.
+```text
+start the run from a repository folder: the folder <folder> is your home folder, and a read run binds it into the agent's container; the code is used
+```
 
 A run of a workflow from a run code where neither value is `read`, a run given a run key
 with no run code, and a run you start yourself see the checkout writable.

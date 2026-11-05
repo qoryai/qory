@@ -249,8 +249,16 @@ release may change what an existing document does, and states it under Upgrading
   stops such a run. A folder that is not a repository gets its regular files back, and so
   does a run from a run code or a run key that lists no repositories, in a folder where
   `git init` ran with no commit. Every such run starts with your `.qory/artifacts` and
-  `.qory/work-item.json`, and gets `.qory/artifacts` back. See A run that may write works
-  in a copy in `docs/run.md`.
+  `.qory/work-item.json`, and gets `.qory/artifacts` back. New stops, each with its fix first: a
+  local repository with no commit, a working folder absent from `HEAD`, a partial clone, a
+  branch named as a parent of the run's branch, and a run or compose in a folder of a run's
+  copy. A copy that stays has its `.git` renamed to `.git-from-run`. A read run with a setup
+  also works in a copy, read-only for the agent, and nothing comes back from it. A read-write
+  mount stops a read run too, and so does a read run with no setup at your home folder.
+  `make the mount … read-only` replaces `mount a narrower folder` in the line of a read-write
+  mount of your home folder. `qory image check` tests that git is 2.25 or later in
+  `/usr/local/bin`, `/usr/bin` or `/bin`. See A run that may write works in a copy in
+  `docs/run.md`.
 - The compose fails, exit 2, for each entry of a stack's `workflows` that no module of
   the stack composes as a skill or command.
 - A run from a run code whose composed harness has no skill or command of the
