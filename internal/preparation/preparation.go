@@ -83,8 +83,8 @@ const (
 	textExcludeOutside = "qory run: start the run in a git working tree whose exclude file is inside the working folder: the exclude file, %s, is outside it, and qory writes it only inside"
 	textGitNotDir      = "qory run: start the run in a git working tree whose .git is a folder: the working folder's .git is a file or a link, which points at a repository elsewhere"
 	textHasRemote      = "qory run: start the run in a new empty folder or a new empty git working tree: the working folder's repository has a remote already, and qory fetches the run's repository only into a repository with no remote"
-	textTreeFailed     = "qory run: check git on this machine, the working folder's .git and each .git above it, then run again. git failed: %s"
-	textAboveFailed    = "qory run: check git on this machine and each .git above the working folder, then run again. git failed: %s"
+	textTreeFailed     = "qory run: check git on this machine, the working folder's .git and each repository above it, then run again. git failed: %s"
+	textAboveFailed    = "qory run: check git on this machine, the working folder and each repository above it, then run again. git failed: %s"
 	textGitFailed      = "qory run: check that git on this machine can read the working folder, then run again. git failed: %s"
 	textLocal          = "qory run: check that this machine can read and write the working folder, then run again. The step failed: %s"
 	textAboveStop      = "qory run: start the run in an empty folder outside the repository above the working folder, then run again. The check of that repository failed: %s"
@@ -543,11 +543,11 @@ func initFolder(ctx context.Context, git gitRunner, dir string) error {
 // emptyStop is the line for a folder with no entries that hostgit's check stops on, with
 // hostgit's whole text, since its fix is at the end. A walled run in the folder is
 // [textEmptyInUse]. A container the check cannot reach is [textEngineStop]: the check of
-// another folder skips a run with no bind that overlaps it, but an entry whose bind cannot
-// be resolved reaches the engine check for every folder, so hostgit's fix stays. Records,
-// git or a walled run's entry that the check cannot read are hostgit's text alone, since
-// another folder does not help. Every other stop is of the repository above the folder, as
-// the folder has none: [textAboveStop].
+// another folder skips a run with no bind that overlaps it, but an entry whose writable
+// bind cannot be resolved reaches the engine check for every folder, so hostgit's fix
+// stays. Records, git or a walled run's entry that the check cannot read are hostgit's
+// text alone, since another folder does not help. Every other stop is of the repository
+// above the folder, as the folder has none: [textAboveStop].
 func emptyStop(stop *hostgit.RefusedError) error {
 	shown := module.Escape(exports.HideError(stop).Error())
 	switch stop.Reason {
