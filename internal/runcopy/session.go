@@ -320,9 +320,14 @@ submodule_at() (
 )
 # from_setup reports whether each change in $G/status of the submodule at the folder $1 is what the
 # setup left there, as sub-n has it. One git hashes the regular files, as for the setup's paths: git
-# strips a final carriage return from each path it reads, so such a path goes through state. A path
-# with a line break comes out in pieces that sub-n does not have, so it keeps the copy.
+# strips a final carriage return from each path it reads, so such a path goes through state. A
+# status entry with a line break returns 1, since the lines read below could each match sub-n, and
+# the copy stays. sub-n has no such path.
 from_setup() {
+	tr -cd '\n' < "$G/status" > "$G/breaks"
+	if [ -s "$G/breaks" ]; then
+		return 1
+	fi
 	: > "$G/hash"
 	: > "$G/now"
 	tr '\000' '\n' < "$G/status" > "$G/changes"

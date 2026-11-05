@@ -4087,3 +4087,22 @@ func TestALockedSetupFileInASubmoduleKeepsTheCopy(t *testing.T) {
 		})
 	}
 }
+
+// TestANameThatReadsAsTwoStatusLinesKeepsTheCopy is an agent's file in a submodule whose name has a
+// line break, and whose pieces read as two status lines of files the setup left: the file does not
+// come back, so the copy stays.
+func TestANameThatReadsAsTwoStatusLinesKeepsTheCopy(t *testing.T) {
+	isolate(t)
+	sessionGit(t)
+	src, sub := withSubmodule(t)
+	d, repos := cloneRun(t, src)
+	inner := filepath.Join(d.Work(), filepath.FromSlash(sub))
+	write(t, inner, "foo.o", "generated\n")
+	write(t, inner, "gen.o", "generated\n")
+	out := setupRecord(t, d, repos[0])
+	write(t, inner, "foo.o\n?? gen.o", "the agent's\n")
+	printed := sessionOutput(t, d, repos, map[string]LeftOut{"": out})
+	if !d.LeftBehind(repos) {
+		t.Errorf("the session did not keep the copy:\n%s", printed)
+	}
+}
