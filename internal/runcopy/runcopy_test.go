@@ -3415,3 +3415,23 @@ func TestACredentialInAFilterLineStaysHidden(t *testing.T) {
 		t.Errorf("the line lost the filter's cause: %v", err)
 	}
 }
+
+// TestDisarmWithNoFreeNameCountsTheNames is every name that the walk tries taken, by files: the
+// line has how many it tried, and the words for what they can be.
+func TestDisarmWithNoFreeNameCountsTheNames(t *testing.T) {
+	isolate(t)
+	src, _ := person(t)
+	d, _ := cloneRun(t, src)
+	write(t, d.Work(), ".git-from-run", "x\n")
+	for i := 1; i <= maxRenameTries; i++ {
+		write(t, d.Work(), ".git-from-run-"+strconv.Itoa(i), "x\n")
+	}
+	err := d.Disarm(context.Background())
+	if err == nil {
+		t.Fatal("Disarm passed")
+	}
+	want := "remove the files or folders next to " + filepath.Join(d.Work(), ".git") + " that have its name and -from-run: all 101 such names are taken"
+	if !strings.Contains(err.Error(), want) {
+		t.Errorf("the line is %q", err)
+	}
+}

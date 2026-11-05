@@ -30,8 +30,9 @@ const (
 	textCopyOutside    = "run qory inside the checkout %s: a run that may write works in a copy of the checkout, and the working folder %s is outside it"
 	textCopyNoFolder   = "commit %[1]s, or run qory in a folder that the commit at HEAD has: a run that may write works in a copy of that commit, which has no folder %[1]s"
 	textCopyReserved   = "start the run from a folder that does not contain your home folder or qory's state directory: the folder %s %s, and the run's copy of it would have every file there"
-	textCopyBehind     = "part of the run's work did not come back: commits on another branch of the copy, or files that git add could not read."
+	textCopyBehind     = "part of the run's work did not come back: the copy has changes not committed, commits on another branch or in a submodule, a stash, a tag, a nested repository, or files that git add could not read."
 	textCopyStepLimit  = "the check of the run's commits ran past its limit of %s, so those commits did not come back"
+	textCopyFetchLimit = "the fetch of the run's commits ran past its limit of %s, so those commits did not come back"
 	textCopyBackLimit  = "the copy back of the run's files ran past its limit of %s, so part of them did not come back"
 	textCopyWaiting    = "got %s: bringing the run's work back, for at most %s. Send a second signal to stop that."
 	textCopyOnBranch   = "the run's commits are on %s in %s."
@@ -74,8 +75,13 @@ const removeSetupLimit = 2 * time.Minute
 // stepErr is err of a step under limited, the context of ctx with [copyStepLimit]: the line of
 // that limit when the limit ended the step. A stop that ended ctx stays err, for [runCopy.checkFailed].
 func stepErr(ctx, limited context.Context, err error) error {
+	return limitErr(ctx, limited, textCopyStepLimit, err)
+}
+
+// limitErr is [stepErr] with text, the line of the limit.
+func limitErr(ctx, limited context.Context, text string, err error) error {
 	if err != nil && ctx.Err() == nil && limited.Err() != nil {
-		return fmt.Errorf(textCopyStepLimit, copyStepLimit)
+		return fmt.Errorf(text, copyStepLimit)
 	}
 	return err
 }
@@ -384,7 +390,7 @@ func (c *runCopy) recordSetup(ctx context.Context) error {
 func (c *runCopy) gitSession(ctx context.Context, run openedRun, spec *runSpec, message string) error {
 	gs, err := c.dir.GitSession(ctx, c.branch, message, c.repos, c.out)
 	if err != nil {
-		return c.stopped(fmt.Sprintf(textCopyNoSession, shownError(err)))
+		return c.noSession(ctx, err)
 	}
 	grace := spec.StopGrace
 	if c.fromCode {
@@ -417,12 +423,21 @@ func (c *runCopy) gitSession(ctx context.Context, run openedRun, spec *runSpec, 
 	case timedOut:
 		return c.stopped(fmt.Sprintf(textCopyLimit, runcopy.SessionLimit))
 	case err != nil:
-		return c.stopped(fmt.Sprintf(textCopyNoSession, shownError(err)))
+		return c.noSession(ctx, err)
 	case res.ExitCode != 0:
 		// A session that failed can leave a bundle of part of the work: no bundle is used.
 		return c.stopped(fmt.Sprintf(textCopyExited, res.ExitCode))
 	}
 	return nil
+}
+
+// noSession is the stop of a git session that did not start with err. When ctx ended, what ended
+// it is the cause, and err only follows from that.
+func (c *runCopy) noSession(ctx context.Context, err error) error {
+	if ctx.Err() != nil && c.cutBy != nil {
+		return c.stopped(fmt.Sprintf(textCopyCut, c.cutBy()))
+	}
+	return c.stopped(fmt.Sprintf(textCopyNoSession, shownError(err)))
 }
 
 // quarantine checks the bundles of the git session, with [copyStepLimit], once the session's
@@ -487,7 +502,7 @@ func (c *runCopy) fetchOne(ctx context.Context, q *runcopy.Quarantine, runID str
 	branch := runBranch(runID)
 	if err := q.FetchInto(limited, at, "refs/heads/"+branch); err != nil {
 		if limited.Err() != nil {
-			report(c.checkFailed(ctx, stepErr(ctx, limited, err)).Error())
+			report(c.checkFailed(ctx, limitErr(ctx, limited, textCopyFetchLimit, err)).Error())
 			return false
 		}
 		report(shownError(err) + c.used())

@@ -3426,7 +3426,7 @@ The clone has your `origin` URL with any credentials removed, your `origin/*` re
 repository, or an address that could still have a credential in it after that, it has none. A compose in the clone starts from your harness report, so a module
 keeps its pin and a path a compose replaced in your checkout is replaced in the clone too.
 
-Four cases stop the run with their fix first:
+Five cases stop the run with their fix first:
 
 - A branch named as a parent of the run's branch, such as `qory`: git keeps no branch below a
   branch, so rename yours with `git branch -m`.
@@ -3438,23 +3438,36 @@ Four cases stop the run with their fix first:
   has only the files of the commit at `HEAD`.
 - A folder of a run's copy under `qory/runs` in your cache folder: a run could have written
   it, so `qory run` and `qory harness compose` also stop there. Run qory in your checkout.
+- A commit at `HEAD` with a file or a link at `.qory`: a compose in the copy writes in a folder
+  `.qory`. Remove `.qory` from the commit, or make it a folder.
 
 When the agent has ended, however it ended, a second session starts on the same run: the git
 session. It runs no agent and gets no model key and no run code, and it binds only the
 copy and a new folder for its bundles. It commits what the agent left, with no setting from
 the copy's `.git` and no filter, and writes the run's branch to a git bundle. With a branch
 checked out that descends from your commit, the bundle has that branch, and its commits keep
-their messages. With `HEAD` at your commit and the run's branch past it, the bundle has the run's
-branch. Your `.gitignore`, `.git/info/exclude` and global excludes file keep their files out of
+their messages. With `HEAD` at your commit and the run's branch past it, or with `HEAD` on a branch
+with no commit or on a commit that does not descend from yours, the bundle has the run's branch as
+it is. The session then makes no commit, since a commit of that working tree would undo the
+branch's files. Your `.gitignore`, `.git/info/exclude` and global excludes file keep their files out of
 the commit. The image needs git 2.25 or later and `find` in `/usr/local/bin`, `/usr/bin` or
 `/bin`: `qory image check` tests them. The run's record shows the session as a second session.
 
-Part of the run's work can miss the bundle: commits on a branch that the bundle does not have, or
-a file that `git add` cannot read, such as one in a folder of mode 000. The session then prints
-git's line, and qory keeps the copy and exits 1:
+Part of the run's work can miss the bundle:
+
+- A change in the working tree when the session makes no commit.
+- A commit on a branch that the bundle does not have, a stash, a tag the run made, or a commit made
+  with `HEAD` detached. A commit that a remote-tracking ref has does not count.
+- With nothing past your commit, a commit that a reset took off the branch.
+- A commit or a change in a submodule, or a repository the run made. An ignore rule that covers a
+  repository's folder keeps it out of this list. The session prints a line with its path.
+- A file that `git add` cannot read, such as one in a folder of mode 000. The session prints git's
+  line.
+
+qory then keeps the copy and exits 1:
 
 ```text
-qory run: part of the run's work did not come back: commits on another branch of the copy, or files that git add could not read.
+qory run: part of the run's work did not come back: the copy has changes not committed, commits on another branch or in a submodule, a stash, a tag, a nested repository, or files that git add could not read.
 qory run: read the run's files in <folder>, run no git there, then remove the folder: nothing more came back from the run
 ```
 

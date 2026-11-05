@@ -151,6 +151,14 @@ func GitSessionOnHost(ctx context.Context, spec session.SessionSpec) (*session.R
 	return res, nil
 }
 
+// SetReturnAfterSignal sets how long the return of a local run has after a signal, and returns
+// what restores the default.
+func SetReturnAfterSignal(d time.Duration) func() {
+	before := returnAfterSignal
+	returnAfterSignal = d
+	return func() { returnAfterSignal = before }
+}
+
 // SetGitSession makes the join of a git session return what f returns, and returns what
 // restores the default.
 func SetGitSession(f func(context.Context, session.SessionSpec) (*session.Result, error)) func() {

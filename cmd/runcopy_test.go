@@ -631,7 +631,7 @@ func TestCommitsOnAnotherBranchKeepTheCopy(t *testing.T) {
 	}
 	lacks(t, out, "no action needed")
 	wants(t, out,
-		"part of the run's work did not come back: commits on another branch of the copy, or files that git add could not read.",
+		"part of the run's work did not come back: the copy has changes not committed, commits on another branch or in a submodule, a stash, a tag, a nested repository, or files that git add could not read.",
 		"read the run's files in "+work+", run no git there, then remove the folder")
 	if _, err := os.Lstat(work); err != nil {
 		t.Errorf("the copy is gone: %v", err)
@@ -1409,6 +1409,9 @@ func TestACommitWithAFileAtQoryStopsTheCompose(t *testing.T) {
 	if !strings.HasPrefix(err.Error(), "remove .qory from the commit at HEAD in ") || !strings.Contains(err.Error(), root) {
 		t.Errorf("the line is %q", err)
 	}
+	if code := cmd.ExitCode(err); code != 2 {
+		t.Errorf("exit %d, want 2", code)
+	}
 	lacksCopyPath(t, err.Error())
 }
 
@@ -1488,4 +1491,63 @@ func TestTheGitSessionOfACodeRunHasAShortGrace(t *testing.T) {
 	if grace <= 0 || 10*time.Second+15*time.Second+grace >= 30*time.Second {
 		t.Errorf("the session's grace is %s", grace)
 	}
+}
+
+// TestTwoSignalsBeforeTheSessionHaveThatCause is two signals before the git session starts: the
+// line has them as the cause, and no line asks for a second signal after both came. A line about
+// git, which the ended context stopped, would send the person to check git.
+func TestTwoSignalsBeforeTheSessionHaveThatCause(t *testing.T) {
+	copyCheckout(t)
+	agentInCopy(t, func(spec session.SessionSpec) {
+		writeFile(t, filepath.Join(spec.Dir, "left.txt"), "left\n")
+		term(t)
+		term(t)
+	})
+	cmd.RunGitSessionsOnHost()
+	out, err := run(t, "run", "claude", "--", "-p", "hi")
+	if err == nil {
+		t.Fatalf("the run passed:\n%s", out)
+	}
+	wants(t, out, "qory run got a second signal during the git session, so nothing came back from the run")
+	lacks(t, out, "the git session did not start", "check-ref-format", "Send a second signal")
+}
+
+// TestAClosedRunPrintsNoWait is a signal to a run the gateway closed during its session: nothing
+// comes back, so no line says that the work is coming back.
+func TestAClosedRunPrintsNoWait(t *testing.T) {
+	copyCheckout(t)
+	t.Cleanup(cmd.SetJoinResult(func(spec session.SessionSpec) (*session.Result, error) {
+		if spec.OnVariables != nil {
+			spec.OnVariables(session.Applied{})
+		}
+		term(t)
+		return &session.Result{RunClosed: true}, nil
+	}))
+	out, err := run(t, "run", "claude", "--", "-p", "hi")
+	if err == nil {
+		t.Fatalf("the run passed:\n%s", out)
+	}
+	wants(t, out, "the run ended before the git session started, so nothing came back from the run")
+	lacks(t, out, "bringing the run's work back")
+}
+
+// TestALocalReturnCutAfterASignalHasItsBudget is a signal during the git session of a local run,
+// which passes the time of the return: the line has that time, not the time of a push step.
+func TestALocalReturnCutAfterASignalHasItsBudget(t *testing.T) {
+	copyCheckout(t)
+	agentInCopy(t, func(spec session.SessionSpec) {
+		writeFile(t, filepath.Join(spec.Dir, "left.txt"), "left\n")
+	})
+	t.Cleanup(cmd.SetReturnAfterSignal(200 * time.Millisecond))
+	t.Cleanup(cmd.SetGitSession(func(ctx context.Context, _ session.SessionSpec) (*session.Result, error) {
+		term(t)
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}))
+	out, err := run(t, "run", "claude", "--", "-p", "hi")
+	if err == nil {
+		t.Fatalf("the run passed:\n%s", out)
+	}
+	wants(t, out, "qory run got SIGTERM, and the step reached its limit of 200ms during the git session")
+	lacks(t, out, "limit of 15s")
 }

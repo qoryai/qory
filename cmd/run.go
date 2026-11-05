@@ -1119,11 +1119,14 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				copied.cutBy = func() string {
 					e := ending
 					e.stopped, e.again, e.got = ctx.Err() != nil, again.Err() != nil, got()
+					if code == nil {
+						e.afterSignal = returnAfterSignal
+					}
 					return e.cutBy()
 				}
 			}
 			backCtx, cancelBack := returnContext(ctx, again, code != nil, func(wait time.Duration) {
-				if returns {
+				if returns && !res.RunClosed && again.Err() == nil {
 					said(fmt.Sprintf(textCopyWaiting, got(), wait))
 				}
 			})
@@ -1137,7 +1140,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				sessionErr = run.RemoveSetup(removeCtx)
 				cancelRemove()
 				if sessionErr != nil {
-					sessionErr = copied.stopped(fmt.Sprintf(textCopyNoSession, shownError(sessionErr)))
+					sessionErr = copied.noSession(backCtx, sessionErr)
 				} else {
 					sessionErr = copied.gitSession(backCtx, run, &spec, "")
 				}

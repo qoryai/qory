@@ -278,7 +278,7 @@ func renameOut(dir int, name, base, at string) (string, error) {
 			return "", fileErr(at, err)
 		}
 		if i > maxRenameTries {
-			return "", fmt.Errorf(textNoFreeName, shown(at), maxRenameTries)
+			return "", fmt.Errorf(textNoFreeName, shown(at), maxRenameTries+1)
 		}
 		to = base + "-" + strconv.Itoa(i)
 	}

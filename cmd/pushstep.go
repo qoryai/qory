@@ -166,8 +166,9 @@ func returnContext(ctx, again context.Context, fromCode bool, started func(time.
 }
 
 // returnAfterSignal is how long the return of a local run's work has after a first signal: the
-// removal of the setup container, the git session, and the checks of its bundles.
-const returnAfterSignal = 30 * time.Minute
+// removal of the setup container, the git session, and the checks of its bundles. A test sets a
+// shorter one.
+var returnAfterSignal = 30 * time.Minute
 
 // removeThenPush removes the setup container of a run that gets the push step, then runs
 // the git session of a run with a copy, then [pushWork], with ctx as the bound of all three.
@@ -413,6 +414,8 @@ type pushEnding struct {
 	// and noStep whether the removal of the setup container failed, so no step ran.
 	stopped, again, cut, noStep bool
 	got                         string
+	// afterSignal is the time a first signal leaves the step, 0 for [pushTimes].signal.
+	afterSignal time.Duration
 }
 
 // outcome is the outcome a run closes with after its push step failed with err. A session
@@ -437,6 +440,9 @@ func (e pushEnding) cutBy() string {
 	case e.again:
 		return textCutSecondSignal
 	case e.stopped:
+		if e.afterSignal > 0 {
+			return fmt.Sprintf(textCutSignal, e.got, e.afterSignal)
+		}
 		return fmt.Sprintf(textCutSignal, e.got, pushTimes.signal)
 	case e.session.Reason == event.ReasonTimeout:
 		return fmt.Sprintf(textCutPushLimit, pushTimes.limit)

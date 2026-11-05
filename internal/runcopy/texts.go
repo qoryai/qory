@@ -3,7 +3,7 @@ package runcopy
 // The texts of the errors this package returns. Each starts with its fix, but for the texts of
 // a bundle and of a run's commit: the caller has the place where the person can act, and adds the fix.
 const (
-	textNoFreeName = "remove the folders next to %s: %d names ending in -from-run are taken there"
+	textNoFreeName = "remove the files or folders next to %s that have its name and -from-run: all %d such names are taken"
 	textRunID      = "give a run id of letters, digits, dots, dashes and underscores that starts with a letter or a digit: the run's copy goes to a folder named after it, and %s is not such a name"
 	textNoCache    = "set HOME: the copy of a walled run's checkout goes under the user's cache folder, and the lookup of that folder failed: %w"
 	textOverlap    = "set XDG_STATE_HOME to a folder outside %s: a walled run writes its copy in %s, and that folder overlaps %s, which no walled run may write"
