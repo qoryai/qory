@@ -308,15 +308,30 @@ submodule_at() (
 	cd "$T/$1"
 	now=$(g --git-dir="$T/$1/.git" rev-parse --verify --quiet "HEAD^{commit}") || exit 1
 	[ "$now" = "$2" ] || exit 1
-	g --git-dir="$T/$1/.git" --work-tree=. status --porcelain --untracked-files=all --ignore-submodules=none > "$G/status"
+	g --git-dir="$T/$1/.git" --work-tree=. status --porcelain -z --untracked-files=all --ignore-submodules=none > "$G/status"
 )
 # from_setup reports whether each change in $G/status of the submodule at the folder $1 is what the
-# setup left there, as sub-n has it.
+# setup left there, as sub-n has it. One git hashes the regular files, as for the setup's paths: git
+# strips a final carriage return from each path it reads, so such a path goes through state. A path
+# with a line break comes out in pieces that sub-n does not have, so it keeps the copy.
 from_setup() {
+	: > "$G/hash"
+	: > "$G/now"
+	tr '\000' '\n' < "$G/status" > "$G/changes"
 	while IFS= read -r line; do
 		p=$1/${line#???}
-		grep -Fxq "$(state "$p") $p" "$B/sub-$n" 2>/dev/null || return 1
-	done < "$G/status"
+		if [ ! -h "$T/$p" ] && [ -f "$T/$p" ] && [ "$p" = "${p%"$cr"}" ]; then
+			printf '%s\n' "./$p" >> "$G/hash"
+		else
+			printf '%s %s\n' "$(state "$p")" "$p" >> "$G/now"
+		fi
+	done < "$G/changes"
+	g hash-object --no-filters --stdin-paths < "$G/hash" > "$G/ids" 2>/dev/null || return 1
+	while IFS= read -r p && read -r id <&4; do
+		p=${p#./}
+		printf '%s:%s %s\n' "$(kind "$p")" "$id" "$p" >> "$G/now"
+	done < "$G/hash" 4< "$G/ids"
+	[ -z "$(lacking "$G/now" "$B/sub-$n")" ]
 }
 # below_gitlink reports whether a folder above the folder $1 is a submodule of the tree $from.
 below_gitlink() {

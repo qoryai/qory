@@ -3920,3 +3920,49 @@ func TestManyRefsLeaveTheSessionItsTime(t *testing.T) {
 		t.Errorf("the session took %s", took)
 	}
 }
+
+// TestASetupFileWithAnyNameInASubmoduleLeavesNothingBehind is a setup's file in a submodule with a
+// name that git status quotes: the name reads as the setup wrote it.
+func TestASetupFileWithAnyNameInASubmoduleLeavesNothingBehind(t *testing.T) {
+	for _, name := range []string{"gen file.o", "gén.o", `ge"n.o`, "ge\tn.o", `ge\n.o`, "gen.o\r"} {
+		t.Run(strings.ToValidUTF8(strconv.Quote(name), ""), func(t *testing.T) {
+			isolate(t)
+			sessionGit(t)
+			src, sub := withSubmodule(t)
+			d, repos := cloneRun(t, src)
+			write(t, filepath.Join(d.Work(), filepath.FromSlash(sub)), name, "generated\n")
+			out := setupRecord(t, d, repos[0])
+			if printed := sessionOutput(t, d, repos, map[string]LeftOut{"": out}); d.LeftBehind(repos) {
+				t.Errorf("the session recorded work left behind:\n%s", printed)
+			}
+		})
+	}
+}
+
+// TestManySetupFilesInASubmoduleLeaveTheSessionItsTime is 2,000 files a setup left in a submodule.
+// A process per file takes about 18 s here, and past 26,000 files the session's whole limit.
+func TestManySetupFilesInASubmoduleLeaveTheSessionItsTime(t *testing.T) {
+	isolate(t)
+	sessionGit(t)
+	src, sub := withSubmodule(t)
+	d, repos := cloneRun(t, src)
+	inner := filepath.Join(d.Work(), filepath.FromSlash(sub))
+	for i := range 2000 {
+		write(t, inner, fmt.Sprintf("gen/f%d.o", i), "generated\n")
+	}
+	out := setupRecord(t, d, repos[0])
+	start := time.Now()
+	printed := sessionOutput(t, d, repos, map[string]LeftOut{"": out})
+	took := time.Since(start)
+	t.Logf("the session took %s", took)
+	if took > manyFilesLimit {
+		t.Errorf("the session took %s, past %s", took, manyFilesLimit)
+	}
+	if d.LeftBehind(repos) {
+		t.Errorf("the session recorded work left behind:\n%s", printed)
+	}
+}
+
+// manyFilesLimit is what a session with 2,000 setup files in a submodule gets. A process per file
+// passes it on a machine under test load too.
+const manyFilesLimit = 10 * time.Second
