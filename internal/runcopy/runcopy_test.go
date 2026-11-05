@@ -3087,6 +3087,39 @@ func TestAHeadBeforeTheBaseCommitCommitsNothing(t *testing.T) {
 	}
 }
 
+// TestAResetBelowTheBaseCommitCommitsNothing is an agent that runs reset --hard HEAD~1 on the run's
+// branch and leaves a new file: HEAD and the branch are one commit, older than the base commit, so
+// a commit of that working tree would delete the base commit's file. The session makes no commit,
+// so no bundle comes back and the branch stays at the base commit, and the new file keeps the copy.
+func TestAResetBelowTheBaseCommitCommitsNothing(t *testing.T) {
+	isolate(t)
+	sessionGit(t)
+	src, older := person(t)
+	write(t, src, "newer.txt", "newer\n")
+	commitAll(t, src, "newer")
+	d, repos := cloneRun(t, src)
+	testGit(t, d.Work(), "reset", "--quiet", "--hard", "HEAD~1")
+	write(t, d.Work(), "left.txt", "left\n")
+	for _, ref := range []string{"HEAD", branch} {
+		if got := testGit(t, d.Work(), "rev-parse", ref); got != older {
+			t.Fatalf("%s is at %s, want the older commit %s", ref, got, older)
+		}
+	}
+	printed := sessionOutput(t, d, repos, nil)
+	if !d.LeftBehind(repos) {
+		t.Errorf("the session did not record the new file:\n%s", printed)
+	}
+	qs, err := d.Quarantine(context.Background(), branch, repos)
+	if errors.Is(err, ErrNoBundle) {
+		return
+	}
+	if err != nil {
+		t.Fatalf("Quarantine: %v\n%s", err, printed)
+	}
+	got := files(t, qs[0].Path, qs[0].Head)
+	t.Errorf("the session made a commit, which has %v; newer.txt present = %t", got, slices.Contains(got, "newer.txt"))
+}
+
 // TestAnOrphanHeadCommitsNothing is an agent on a branch with no commit, past the run's branch:
 // the session commits no deletion of every tracked file, the branch comes back as it is, and the
 // new file stays behind.
