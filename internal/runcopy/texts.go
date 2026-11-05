@@ -44,6 +44,6 @@ const (
 	textCopyBackLimit   = "copy the rest from %s by hand: qory copies back at most %d files and %d bytes from a run, and the run left more; it copied %s"
 	textRecord          = "start the run again: qory reads the record of the files it copied in %s, and the read failed: %w"
 	textSetupPath       = "give each setup path relative to the top of the copy: %s is not such a path"
-	textSetupStatus     = "check that git can read the copy %s: qory lists what the setup changed there, and git failed: %w"
+	textSetupStatus     = "check that you can read the copy %s: qory lists what the setup changed there, and the read failed: %w"
 	textTooDeep         = "remove %s by hand: it has folders more than %d deep, more than qory opens at once"
 )

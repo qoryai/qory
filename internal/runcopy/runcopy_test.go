@@ -1232,6 +1232,116 @@ func TestSetupChangesListsWhatTheSetupChanged(t *testing.T) {
 	}
 }
 
+// TestSetupChangesFollowsGitsRules is each case of what git status lists: a file and a folder
+// that .gitignore ignores stay out, a pattern's negation counts, a changed execute bit and a
+// tracked file under an ignored folder count, an unchanged file does not, an empty folder
+// does not, and a new repository is one path.
+func TestSetupChangesFollowsGitsRules(t *testing.T) {
+	isolate(t)
+	src, _ := person(t)
+	write(t, src, ".gitignore", "*.log\nignored/\nbuild/\n!keep.log\n")
+	write(t, src, "ignored/tracked.txt", "first\n")
+	write(t, src, "run.sh", "first\n")
+	write(t, src, "same.txt", "first\n")
+	testGit(t, src, "add", "-f", "ignored/tracked.txt")
+	commitAll(t, src, "more")
+	d, repos := cloneRun(t, src)
+	write(t, d.Work(), "a.log", "x\n")
+	write(t, d.Work(), "keep.log", "x\n")
+	write(t, d.Work(), "build/out.txt", "x\n")
+	write(t, d.Work(), "ignored/new.txt", "x\n")
+	write(t, d.Work(), "ignored/tracked.txt", "the setup\n")
+	write(t, d.Work(), "sub/.gitignore", "*.tmp\n")
+	write(t, d.Work(), "sub/a.tmp", "x\n")
+	write(t, d.Work(), "sub/b.txt", "x\n")
+	write(t, d.Work(), "inner/.git/HEAD", "ref: refs/heads/main\n")
+	write(t, d.Work(), "inner/file.txt", "x\n")
+	if err := os.Mkdir(filepath.Join(d.Work(), "empty"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(filepath.Join(d.Work(), "run.sh"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	got, err := d.SetupChanges(context.Background(), repos[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"ignored/tracked.txt", "inner/", "keep.log", "run.sh", "sub/.gitignore", "sub/b.txt"}
+	if !slices.Equal(got, want) {
+		t.Errorf("the setup changed %v, want %v", got, want)
+	}
+}
+
+// TestSetupChangesFollowsNoLink is a new link to a folder outside, and a tracked file and a
+// tracked folder replaced by links there: each link is one path, and nothing of the folder it
+// points to is listed or read, not even a file named as a tracked one.
+func TestSetupChangesFollowsNoLink(t *testing.T) {
+	isolate(t)
+	src, _ := person(t)
+	write(t, src, "tracked.txt", "first\n")
+	write(t, src, "folder/file.txt", "first\n")
+	commitAll(t, src, "more")
+	d, repos := cloneRun(t, src)
+	outside := t.TempDir()
+	write(t, outside, "file.txt", "first\n")
+	write(t, outside, "secret.txt", "secret\n")
+	link(t, d.Work(), "out", outside)
+	for _, rel := range []string{"tracked.txt", "folder"} {
+		if err := os.RemoveAll(filepath.Join(d.Work(), rel)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	link(t, d.Work(), "tracked.txt", filepath.Join(outside, "file.txt"))
+	link(t, d.Work(), "folder", outside)
+	got, err := d.SetupChanges(context.Background(), repos[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"folder", "folder/file.txt", "out", "tracked.txt"}; !slices.Equal(got, want) {
+		t.Errorf("the setup changed %v, want %v", got, want)
+	}
+}
+
+// TestSetupChangesRunsNoGitInTheCopy records the folder and the work tree of each git it runs:
+// none is the copy or lies in it.
+func TestSetupChangesRunsNoGitInTheCopy(t *testing.T) {
+	isolate(t)
+	src, _ := person(t)
+	d, repos := cloneRun(t, src)
+	write(t, d.Work(), "README.md", "the setup\n")
+	real, err := exec.LookPath("git")
+	if err != nil {
+		t.Skip("git is not installed")
+	}
+	calls := filepath.Join(t.TempDir(), "calls")
+	bin := t.TempDir()
+	if err := os.WriteFile(filepath.Join(bin, "git"), []byte("#!/bin/sh\nprintf '%s|%s|%s\\n' \"$(pwd -P)\" \"$GIT_WORK_TREE\" \"$*\" >> "+calls+"\nexec "+real+" \"$@\"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	if _, err := d.SetupChanges(context.Background(), repos[0]); err != nil {
+		t.Fatal(err)
+	}
+	log, err := os.ReadFile(calls)
+	if err != nil {
+		t.Fatal(err)
+	}
+	work, err := filepath.EvalSymlinks(d.Work())
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := false
+	for line := range strings.Lines(string(log)) {
+		seen = seen || strings.Contains(line, "hash-object")
+		if strings.Contains(line, work) || strings.Contains(line, d.Work()) {
+			t.Errorf("a git ran in the copy: %s", line)
+		}
+	}
+	if !seen {
+		t.Errorf("no git hash-object ran:\n%s", log)
+	}
+}
+
 // TestAShallowRepositoryComesBack is a person's repository cloned with a depth of 1: the
 // quarantine reads the run's commits, though the parent of the first commit is not there.
 func TestAShallowRepositoryComesBack(t *testing.T) {

@@ -39,7 +39,7 @@ type LeftOut struct {
 	// Links are the links qory wrote, as render.OwnLink finds them. The commit also
 	// sets each back to what the base commit has, as the push step does.
 	Links []string
-	// Setup are the paths the setup changed, as RecordSetup lists them, each with what
+	// Setup are the paths the setup changed, as [Dir.SetupChanges] lists them, each with what
 	// the setup left there, as [Dir.SetupStates] reads it. As in the push step, a path
 	// stays out only while the copy still has what the setup left; a path the agent
 	// changed after the setup goes into the commit.
