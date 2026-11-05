@@ -567,6 +567,8 @@ release may change what an existing document does, and states it under Upgrading
   such a folder, they stop with exit 2 and the line `set --home or harness.home to a
   folder outside <folder>, or run git init in <folder>: a home inside a folder needs a
   git working tree there, and <folder> is not one`.
+- `qory apiary run diagnose` takes only the run's `rn_` id, and stops at any other value
+  before it sends anything: a run number is per workspace, so it does not identify a run.
 
 ### Fixed
 
