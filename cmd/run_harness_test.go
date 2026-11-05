@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -63,7 +64,10 @@ func TestRunTakesAModuleExportAsADefault(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wants(t, string(data), "env: CORE_SCRIPTS=/elsewhere\n", "env: LOG_DIR=from-server\n", "env: CODEX_HOME="+runKeyHome(t, root)+"/codex\n")
+	wants(t, string(data), "env: CORE_SCRIPTS=/elsewhere\n", "env: LOG_DIR=from-server\n")
+	if want := regexp.MustCompile(`env: CODEX_HOME=` + regexp.QuoteMeta(runKeyHome(t, root)) + `/[^/\n]+/codex\n`); !want.Match(data) {
+		t.Errorf("the environment file has no CODEX_HOME in the run's home:\n%s", data)
+	}
 	lacks(t, string(data), "DOCKER_HOST=", "/not-the-template", "LOG_DIR="+home)
 	_, evs := events(t, root)
 	got, _ := json.Marshal(sessionApplied(t, evs)["variables"])

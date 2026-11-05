@@ -1778,8 +1778,10 @@ func TestAWalledRunComposesUnderTheCache(t *testing.T) {
 	if !containerRun.Match(data) {
 		t.Fatalf("no container started:\n%s", data)
 	}
-	home := runKeyHome(t, root)
-	wants(t, string(data), "--mount type=bind,src="+home+",dst="+home+",readonly")
+	home := regexp.QuoteMeta(runKeyHome(t, root)) + `/[^/,]+`
+	if want := regexp.MustCompile(`--mount type=bind,src=` + home + `,dst=` + home + `,readonly`); !want.Match(data) {
+		t.Errorf("no read-only mount of the run's home:\n%s", data)
+	}
 	noQoryFolder(t, root)
 }
 
