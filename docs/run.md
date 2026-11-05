@@ -3548,7 +3548,7 @@ with no run code, and a run you start yourself see the checkout writable.
 
 ### Qory's images
 
-`qory`'s repository defines four images for the agent under `images/`, and one a prebuild
+`qory`'s repository defines five images for the agent under `images/`, and one a prebuild
 runs in, for `linux/amd64` and `linux/arm64`. They are not published for you to pull: you build them, by hand as
 below, and a workflow of the repository builds and checks them on a change. Build them
 from a checkout of `qory` at the commit `qory version` prints, since each commit pins the
@@ -3562,6 +3562,7 @@ docker build -t qory-agent-docker --build-arg BASE=qory-agent images/agent-docke
 docker build -t qory-agent-go --build-arg BASE=qory-agent images/agent-go
 docker build -t qory-agent-go-docker --build-arg BASE=qory-agent-docker \
   --build-arg TITLE=agent-go-docker images/agent-go
+docker build -t qory-agent-browser --build-arg BASE=qory-agent images/agent-browser
 docker build -t qory-prebuild --build-arg BASE=qory-agent-docker images/prebuild
 ```
 
@@ -3571,6 +3572,7 @@ docker build -t qory-prebuild --build-arg BASE=qory-agent-docker images/prebuild
 | `agent-docker` | `agent`, and Docker's daemon and command |
 | `agent-go` | `agent`, and Go |
 | `agent-go-docker` | `agent-docker`, and Go |
+| `agent-browser` | `agent`, and Chromium |
 | `prebuild` | `agent-docker`, the `devcontainer` command `@devcontainers/cli` 0.89.0, and Docker's `buildx` plugin: the image a prebuild runs in behind its wall |
 
 Every version and every download's sum is a build argument, with its default in the
@@ -3592,6 +3594,8 @@ What each of them does:
 - **Go.** `agent-go` has Go at the version the image pins, with `GOTOOLCHAIN=local`, so a
   `go.mod` that asks for a newer one fails instead of downloading it. `GOPATH` and the
   caches are under `HOME`. It has no C compiler, so cgo is off.
+- **Browser.** `agent-browser` has Chromium and the packages Chromium depends on, from
+  the Debian snapshot the base image was built from, with no recommended packages.
 
 To add what your agents need, build yours FROM one of them, and check it:
 
@@ -3647,6 +3651,8 @@ wall:
       ref: ghcr.io/acme/agent-go-docker@sha256:…
       runtime: sysbox-runc
       docker: true
+    browser:                # Chromium
+      ref: ghcr.io/acme/agent-browser@sha256:…
 ```
 
 ```yaml

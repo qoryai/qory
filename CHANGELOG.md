@@ -63,6 +63,8 @@ release may change what an existing document does, and states it under Upgrading
 - A review comment's `on` in `contracts/harness/v1/review-comments.schema.json` takes an
   optional `screen`: the id of a screen in the `screens.json` of that artifact version, for
   a comment on one screen of a mockup.
+- `images/agent-browser`: the agent image with Chromium. `images.yml` builds and checks
+  it, and `prerelease.yml` publishes it by digest. See Qory's images in `docs/run.md`.
 - Version 1 of the proposal sources format,
   `contracts/harness/v1/proposal-sources.schema.json`: the file `sources.json` of a
   version of the artifact type `proposal`, with every source the run used to write the
