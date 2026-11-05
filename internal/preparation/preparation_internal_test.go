@@ -19,6 +19,11 @@ import (
 	"github.com/qoryai/qory/internal/proxygit"
 )
 
+// shellQuote is s as one word of a shell script.
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
 // needGit skips a test that runs git when the machine has none, and keeps the user's
 // and the system's git configuration out of it.
 func needGit(t *testing.T) {
@@ -491,21 +496,43 @@ func TestABadHeadBelowABadGitFileStops(t *testing.T) {
 	}
 }
 
+// TestAGitThatFailsInTheWorkingFolderStops is a repository that git finds and cannot use:
+// the line sends the reader to the working folder and not to the folders above it.
+func TestAGitThatFailsInTheWorkingFolderStops(t *testing.T) {
+	needGit(t)
+	base := t.TempDir()
+	remote(t, base, "acme/shop", "main", nil)
+	want := "qory run: check that git on this machine can read the working folder, then run again. git failed: "
+	for _, c := range []struct{ key, value string }{
+		{"core.bare", "true"},
+		{"core.repositoryformatversion", "99"},
+	} {
+		dir := emptyFolder(t)
+		run(t, dir, "config", c.key, c.value)
+		_, err := prepare(context.Background(), dir, env("git.example.com", "acme/shop"))
+		if err == nil || !strings.HasPrefix(err.Error(), want) {
+			t.Errorf("%s: %v, want a line that starts %s", c.key, err, want)
+		}
+	}
+}
+
 // TestEmptyStopHasTheFixOfEachStop is the line for each stop of hostgit's check on a folder
-// with no entries: a new folder for a walled run, HOME or XDG_STATE_HOME for records out of
-// reach, and a folder outside the repository for any other stop, which is of that repository.
+// with no entries: a new folder for a walled run in it, hostgit's text alone for what the
+// check cannot reach, and a folder outside the repository for a stop of that repository.
 func TestEmptyStopHasTheFixOfEachStop(t *testing.T) {
-	inUse := "qory run: start the run in a new empty folder that no walled run uses, then run again. The check of the working folder failed: "
+	above := "qory run: start the run in an empty folder outside the repository above the working folder, then run again. The check of that repository failed: "
 	for _, c := range []struct {
 		name string
 		stop *hostgit.RefusedError
 		want string
 	}{
-		{"in use", &hostgit.RefusedError{Dir: "/work", Reason: hostgit.RefusedInUse}, inUse},
-		{"engine out of reach", &hostgit.RefusedError{Dir: "/work", Key: "rn_1", Reason: hostgit.RefusedEngineUnreachable}, inUse},
-		{"entry unreadable", &hostgit.RefusedError{Dir: "/work", Key: "rn_1", Target: "/state/rn_1", Reason: hostgit.RefusedEntryUnreadable}, inUse},
-		{"no records", &hostgit.RefusedError{Reason: hostgit.RefusedNoRecords, Err: errors.New("no home")}, "qory run: set HOME or XDG_STATE_HOME, then run again: qory reads the records of walled runs under that folder, and the read failed: no home"},
-		{"a key above", &hostgit.RefusedError{Dir: "/work", Key: "filter.x.smudge", Reason: hostgit.RefusedSetting}, "qory run: start the run in an empty folder outside the repository above the working folder, then run again. The check of that repository failed: "},
+		{"in use", &hostgit.RefusedError{Dir: "/work", Reason: hostgit.RefusedInUse}, "qory run: start the run in a new empty folder that no walled run uses, then run again. The check of the working folder failed: "},
+		{"engine out of reach", &hostgit.RefusedError{Dir: "/work", Key: "rn_1", Reason: hostgit.RefusedEngineUnreachable}, "qory run: The check for a container of the walled run rn_1 failed."},
+		{"entry unreadable", &hostgit.RefusedError{Dir: "/work", Key: "rn_1", Target: "/state/rn_1", Reason: hostgit.RefusedEntryUnreadable}, "qory run: qory cannot read /state/rn_1,"},
+		{"no records", &hostgit.RefusedError{Reason: hostgit.RefusedNoRecords, Err: errors.New("no home")}, "qory run: no home"},
+		{"no git", &hostgit.RefusedError{Dir: "/work", Reason: hostgit.RefusedNoGit}, "qory run: git is not on the PATH,"},
+		{"a key above", &hostgit.RefusedError{Dir: "/work", Key: "filter.x.smudge", Reason: hostgit.RefusedSetting}, above},
+		{"a link above", &hostgit.RefusedError{Dir: "/work", Key: "objects", Target: "/x", Reason: hostgit.RefusedObjectsLink}, above},
 	} {
 		if got := emptyStop(c.stop).Error(); !strings.HasPrefix(got, c.want) {
 			t.Errorf("%s: %s, want a line that starts %s", c.name, got, c.want)
@@ -514,7 +541,8 @@ func TestEmptyStopHasTheFixOfEachStop(t *testing.T) {
 }
 
 // TestAnEmptyFolderWithNoRecordsStops is a run with neither HOME nor XDG_STATE_HOME: the
-// line starts with setting them, and the folder has no .git.
+// line is the reason qory cannot find the records, with no other folder as a fix, and the
+// folder has no .git.
 func TestAnEmptyFolderWithNoRecordsStops(t *testing.T) {
 	needGit(t)
 	isolatedPlaces(t)
@@ -522,11 +550,14 @@ func TestAnEmptyFolderWithNoRecordsStops(t *testing.T) {
 	remote(t, base, "acme/shop", "main", nil)
 	t.Setenv("HOME", "")
 	t.Setenv("XDG_STATE_HOME", "")
+	_, dirErr := places.Dir()
+	if dirErr == nil {
+		t.Fatal("the records have a folder with neither HOME nor XDG_STATE_HOME")
+	}
 	dir := t.TempDir()
 	_, err := prepare(context.Background(), dir, env("git.example.com", "acme/shop"))
-	want := "qory run: set HOME or XDG_STATE_HOME, then run again: qory reads the records of walled runs under that folder, and the read failed: "
-	if err == nil || !strings.HasPrefix(err.Error(), want) {
-		t.Errorf("%v, want a line that starts %s", err, want)
+	if want := "qory run: " + dirErr.Error(); err == nil || err.Error() != want {
+		t.Errorf("%v, want %s", err, want)
 	}
 	if _, err := os.Lstat(filepath.Join(dir, ".git")); !os.IsNotExist(err) {
 		t.Errorf("the folder has a .git after the stop: %v", err)
@@ -882,7 +913,7 @@ func TestTellsARefusedBranchNameFromAFailedCheck(t *testing.T) {
 		{"stopped", "exec sleep 30", notReached + "git check-ref-format ran past 2s and was stopped"},
 	} {
 		bin := t.TempDir()
-		write(t, filepath.Join(bin, "git"), "#!/bin/sh\nfor a; do [ \"$a\" = check-ref-format ] && { "+c.check+"; }; done\nexec "+gitPath+" \"$@\"\n")
+		write(t, filepath.Join(bin, "git"), "#!/bin/sh\nfor a; do [ \"$a\" = check-ref-format ] && { "+c.check+"; }; done\nexec "+shellQuote(gitPath)+" \"$@\"\n")
 		if err := os.Chmod(filepath.Join(bin, "git"), 0o755); err != nil {
 			t.Fatal(err)
 		}

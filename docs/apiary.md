@@ -164,7 +164,7 @@ Each error's first line starts with the fix.
 | ``Run `qory apiary enrol <server> <code>` first: no diagnostics key in <dir>.`` | No server directory, or no key in it. |
 | ``Pass --server <url>: diagnostics keys for several servers are in <dir>: a, b.`` | Keys for more than one server are on this computer. |
 | ``Remove <dir>, then run `qory apiary enrol <server> <code>` again: <host> did not accept the diagnostics key <id> (401).`` | Qory Apiary has no such key, has revoked it, or this computer's clock is more than five minutes off. |
-| `Use the run's id, rn_ and 16 characters: only that id identifies a run.` | The value is not a run id, and the next line contains it. Nothing was sent. |
+| `Use the run's id, rn_ and 16 characters: this command takes only that id.` | The value is not a run id, and the next line contains it. Nothing was sent. |
 | `Check the run id: <host> has no run <run> (not_found).` | Qory Apiary has no run with that id. |
 | `Update qory to a release that works with <host>: the request was not accepted: unsupported_contract_version (400).` | Qory Apiary does not serve the contract version that this qory sends. |
 | `Check the run with the instance admin of <host>: the request was not accepted: <code> (<status>).` | Qory Apiary refused the request with another signed code. |

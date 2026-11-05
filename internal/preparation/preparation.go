@@ -86,7 +86,7 @@ const (
 	textGitFailed      = "qory run: check that git on this machine can read the working folder, then run again. git failed: %s"
 	textLocal          = "qory run: check that this machine can read and write the working folder, then run again. The step failed: %s"
 	textAboveStop      = "qory run: start the run in an empty folder outside the repository above the working folder, then run again. The check of that repository failed: %s"
-	textNoRecords      = "qory run: set HOME or XDG_STATE_HOME, then run again: qory reads the records of walled runs under that folder, and the read failed: %s"
+	textCheckStop      = "qory run: %s"
 	textEmptyInUse     = "qory run: start the run in a new empty folder that no walled run uses, then run again. The check of the working folder failed: %s"
 	textPlaceRefused   = "qory run: start the run in a new empty git working tree that no walled run used, then run again. The check of the working folder's git configuration failed: %s"
 	textConfigKey      = "qory run: start the run in a new empty git working tree, or remove %s from %s, then run again. qory fetches only into a repository whose configuration has only the keys git init writes, since git on this machine would use any other key, such as a filter, a proxy or http.sslVerify"
@@ -431,9 +431,9 @@ func repoURL(system, path string) string {
 // [initFolder]. Then it stops on one whose repository [safeRepository] stops on; then on
 // one that is not the top of its working tree, whose repository has a commit, or has a
 // remote. Otherwise it returns the hold [safeRepository] took on the folder, which its
-// caller releases once the fetch ends. A git that fails to find the top of the working
-// tree is [textAboveFailed], since a .git git does not take for a repository sends it to
-// the folders above, and a git that fails after that is [textGitFailed].
+// caller releases once the fetch ends. A git that finds no repository as it looks for the
+// top of the working tree is [textAboveFailed], since a .git git does not take for a
+// repository sends it to the folders above. Any other failure of git is [textGitFailed].
 func emptyTree(ctx context.Context, git gitRunner, dir string) (hold *places.Hold, err error) {
 	defer func() {
 		if err != nil {
@@ -474,7 +474,10 @@ func emptyTree(ctx context.Context, git gitRunner, dir string) (hold *places.Hol
 	}
 	top, err := git(ctx, dir, "rev-parse", "--show-toplevel")
 	if err != nil {
-		return hold, aboveFailed(err)
+		if ge := (*gitError)(nil); errors.As(err, &ge) && strings.Contains(ge.line, "not a git repository") {
+			return hold, aboveFailed(err)
+		}
+		return hold, gitFailed(err)
 	}
 	// Only the line end is git's: a folder's name can end in a space.
 	if !samePath(strings.TrimSuffix(top, "\n"), dir) {
@@ -503,10 +506,10 @@ func emptyTree(ctx context.Context, git gitRunner, dir string) (hold *places.Hol
 // repository for, such as a folder inside a working tree, where git would use the second
 // repository in place of the first. Any other failure of git to look for a repository,
 // such as a .git above dir that leads nowhere, is [textAboveFailed]. A stop of hostgit's
-// check is the line of [emptyStop]. A walled run that starts in dir waits for the git commands here: the hold ends before [safeRepository]
-// takes one. The fetch replaces the unborn branch main with the remote's default branch,
-// so its name has no effect on the run; the option keeps it from depending on git's
-// version.
+// check is the line of [emptyStop]. A walled run that starts in dir waits for the git
+// commands here: the hold ends before [safeRepository] takes one. The fetch replaces the
+// unborn branch main with the remote's default branch, so its name has no effect on the
+// run; the option keeps it from depending on git's version.
 func initFolder(ctx context.Context, git gitRunner, dir string) error {
 	info, err := os.Lstat(dir)
 	if err != nil {
@@ -542,17 +545,17 @@ func aboveFailed(err error) error {
 	return fmt.Errorf(textAboveFailed, integration.Printable(exports.HideURLError(err).Error()))
 }
 
-// emptyStop is the line for a folder with no entries that hostgit's check stops on. The
-// folder has no git configuration, so the stop is of one of three things: a walled run
-// that may use the folder, records of walled runs that qory cannot find, or the repository
-// above the folder.
+// emptyStop is the line for a folder with no entries that hostgit's check stops on. A
+// walled run in the folder is [textEmptyInUse]. Records, git or a container that the check
+// cannot reach are hostgit's text alone, since another folder does not help. Every other
+// stop is of the repository above the folder, as the folder has none: [textAboveStop].
 func emptyStop(stop *hostgit.RefusedError) error {
 	shown := integration.Printable(exports.HideError(stop).Error())
 	switch stop.Reason {
-	case hostgit.RefusedInUse, hostgit.RefusedEngineUnreachable, hostgit.RefusedEntryUnreadable:
+	case hostgit.RefusedInUse:
 		return fmt.Errorf(textEmptyInUse, shown)
-	case hostgit.RefusedNoRecords:
-		return fmt.Errorf(textNoRecords, shown)
+	case hostgit.RefusedNoRecords, hostgit.RefusedNoGit, hostgit.RefusedEntryUnreadable, hostgit.RefusedEngineUnreachable:
+		return fmt.Errorf(textCheckStop, shown)
 	}
 	return fmt.Errorf(textAboveStop, shown)
 }

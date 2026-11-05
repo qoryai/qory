@@ -442,7 +442,7 @@ func TestARunCodeDescriptorIsClosedBeforeTheRunStartsAProgram(t *testing.T) {
 			t.Fatal(err)
 		}
 		bin := tempDir(t)
-		writeFile(t, filepath.Join(bin, "git"), "#!/bin/sh\nif cat /dev/fd/"+strconv.Itoa(n)+" >/dev/null 2>&1; then echo open; else echo closed; fi >> "+marks+"\nexec "+git+" \"$@\"\n")
+		writeFile(t, filepath.Join(bin, "git"), "#!/bin/sh\nif cat /dev/fd/"+strconv.Itoa(n)+" >/dev/null 2>&1; then echo open; else echo closed; fi >> "+marks+"\nexec "+shellQuote(git)+" \"$@\"\n")
 		if err := os.Chmod(filepath.Join(bin, "git"), 0o755); err != nil {
 			t.Fatal(err)
 		}

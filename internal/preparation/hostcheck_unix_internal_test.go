@@ -14,11 +14,6 @@ import (
 	"github.com/qoryai/qory/internal/places"
 )
 
-// shellQuote is s as one word of a shell script.
-func shellQuote(s string) string {
-	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
-}
-
 // TestHoldsTheWorkingFolderUntilTheFetchEnds is a fetch that a stand-in git stops at
 // git fetch: a walled run that starts in the working folder meanwhile waits until the
 // fetch and the checkout end, so it cannot change the configuration qory checked.
