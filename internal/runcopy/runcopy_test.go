@@ -3438,3 +3438,29 @@ func TestAnOrphanHeadInASHA256Repository(t *testing.T) {
 		})
 	}
 }
+
+// TestAHeadBeforeTheBaseCommitWithNoBranchStops is HEAD at a commit older than the base commit
+// with the run's branch deleted: the session stops, and its line is true for a HEAD that is a
+// commit.
+func TestAHeadBeforeTheBaseCommitWithNoBranchStops(t *testing.T) {
+	isolate(t)
+	sessionGit(t)
+	src, older := person(t)
+	write(t, src, "newer.txt", "newer\n")
+	commitAll(t, src, "newer")
+	d, repos := cloneRun(t, src)
+	testGit(t, d.Work(), "checkout", "--quiet", "--detach", older)
+	testGit(t, d.Work(), "branch", "-q", "-D", branch)
+	s, err := d.GitSession(context.Background(), branch, "", repos, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	printed, err := boundedSession(t, s)
+	if err == nil {
+		t.Fatalf("the session passed:\n%s", printed)
+	}
+	want := "qory: neither HEAD nor " + branch + " in the copy is at or past the base commit, so the session commits nothing"
+	if !strings.Contains(printed, want) {
+		t.Errorf("the session printed:\n%s", printed)
+	}
+}

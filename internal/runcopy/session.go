@@ -325,7 +325,7 @@ while [ "$n" -lt "$count" ]; do
 	fi
 	case $head in
 	'' | *[!0-9a-f]*)
-		echo "qory: neither HEAD nor $branch in $shown is a commit, so the session commits nothing" >&2
+		echo "qory: neither HEAD nor $branch in $shown is at or past the base commit, so the session commits nothing" >&2
 		exit 1
 		;;
 	esac

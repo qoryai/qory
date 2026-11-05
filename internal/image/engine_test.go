@@ -159,6 +159,8 @@ func TestEngineFindsSetuidFilesAndCapabilities(t *testing.T) {
 		tarFile{name: "usr/bin/ping", mode: 0o755, capability: true},
 		tarFile{name: "usr/bin/git", mode: 0o755},
 		tarFile{name: "usr/bin/find", mode: 0o755},
+		tarFile{name: "usr/bin/grep", mode: 0o755},
+		tarFile{name: "usr/bin/tr", mode: 0o755},
 	)}
 	checks := image.Engine{Run: f.run}.Check(context.Background(), "linux/arm64", image.Target{Ref: "a:1", Helper: "/q"})
 	want := "setuid or setgid: /usr/bin/passwd, /usr/bin/chage; file capabilities: /usr/bin/ping; remove them in the image: find / -xdev -type f -perm /6000 -exec chmod ug-s {} +, and setcap -r on each"

@@ -3453,8 +3453,8 @@ their messages. With `HEAD` at your commit and the run's branch past it, or with
 with no commit or on a commit that does not descend from yours, the bundle has the run's branch as
 it is. The session then makes no commit, since a commit of that working tree would undo the
 branch's files. Your `.gitignore`, `.git/info/exclude` and global excludes file keep their files out of
-the commit. The image needs git 2.25 or later and `find` in `/usr/local/bin`, `/usr/bin` or
-`/bin`: `qory image check` tests them. The run's record shows the session as a second session.
+the commit. The image needs git 2.25 or later, `find`, `grep` and `tr` in `/usr/local/bin`,
+`/usr/bin` or `/bin`: `qory image check` tests them. The run's record shows the session as a second session.
 
 Part of the run's work can miss the bundle:
 

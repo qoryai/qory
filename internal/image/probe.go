@@ -241,8 +241,16 @@ func (p Probe) program(ctx context.Context, name string) Check {
 // gitSessionDirs are the folders of the PATH of a walled run's git session.
 var gitSessionDirs = []string{"/usr/local/bin", "/usr/bin", "/bin"}
 
+// sessionTools are the programs the script of a walled run's git session runs besides git, with
+// what it runs each for.
+var sessionTools = []struct{ name, why string }{
+	{"find", "to list executable files and embedded repositories"},
+	{"grep", "to compare the run's refs and commits with what the bundle has"},
+	{"tr", "to print a folder's name with no control character"},
+}
+
 // git checks that git runs, and what the git session of a walled run that may write needs of
-// it: git 2.25 or later, for --pathspec-from-file, in [gitSessionDirs].
+// it: git 2.25 or later, for --pathspec-from-file, and [sessionTools], in [gitSessionDirs].
 func (p Probe) git(ctx context.Context) Check {
 	line, at, err := p.run(ctx, "git", "--version")
 	if err != nil {
@@ -252,8 +260,11 @@ func (p Probe) git(ctx context.Context) Check {
 	if session == "" {
 		return Check{"git", Fail, "install git in " + strings.Join(gitSessionDirs, ", ") + ": the git session of a walled run runs git from there, and the image has none in them"}
 	}
-	if p.lookPath("find", gitSessionDirs) == "" {
-		return Check{"git", Fail, "install find in " + strings.Join(gitSessionDirs, ", ") + ": the git session of a walled run runs find from these folders, to list executable files and embedded repositories"}
+	for _, tool := range sessionTools {
+		if p.lookPath(tool.name, gitSessionDirs) != "" {
+			continue
+		}
+		return Check{"git", Fail, "install " + tool.name + " in " + strings.Join(gitSessionDirs, ", ") + ": the git session of a walled run runs " + tool.name + " from these folders, " + tool.why}
 	}
 	shown := line
 	if session != at {

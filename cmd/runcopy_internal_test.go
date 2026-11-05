@@ -26,3 +26,16 @@ func TestAFetchPastItsLimitHasItsLine(t *testing.T) {
 		t.Errorf("after a stop the error is %v", err)
 	}
 }
+
+// TestASignalInTheCheckOrFetchHasItsLine is a stop that ended the check of a run's commits or
+// their fetch, which share the line: the line is true for both.
+func TestASignalInTheCheckOrFetchHasItsLine(t *testing.T) {
+	stopped, cancel := context.WithCancel(context.Background())
+	cancel()
+	c := &runCopy{cutBy: func() string { return "qory run got a second signal" }}
+	err := c.checkFailed(stopped, errors.New("the fetch failed"))
+	want := "qory run got a second signal during the check or the fetch of the run's commits, so those commits did not come back"
+	if err == nil || !strings.Contains(err.Error(), want) {
+		t.Errorf("the line is %v", err)
+	}
+}
