@@ -93,7 +93,7 @@ func reservedMounts(root string, mounts []wall.Mount) error {
 func readBindsReserved(root, cwd string) error {
 	for _, p := range []string{root, cwd} {
 		if relation := reserved(p); relation != "" {
-			return input(fmt.Errorf("start the run from a repository folder: the folder %s %s, and a read run binds it into the agent's container%s", hostgit.Shown(p), relation, codeUsed))
+			return input(fmt.Errorf("start the run from a folder that does not contain your home folder or qory's state directory: the folder %s %s, and a read run binds it into the agent's container%s", hostgit.Shown(p), relation, codeUsed))
 		}
 	}
 	return nil

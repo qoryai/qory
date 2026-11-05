@@ -3,6 +3,7 @@
 package runcopy
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -148,95 +149,122 @@ func writable(dir int, path string, depth int) error {
 // disarmedSuffix goes after the name of what [Dir.Disarm] renames.
 const disarmedSuffix = "-from-run"
 
-// Disarm renames each .git in the copy and in the bundle folder to .git-from-run, mode 0700,
-// and each entry that makes a folder a git folder, as [gitDirLike] reads it, the same way, so
-// a git in a copy that stays finds no repository and runs nothing the run planted. It follows
-// no link: it opens each folder from the one above it with O_NOFOLLOW, and a link named .git
-// is renamed as a link. Call it once the run's containers are gone.
-func (d Dir) Disarm() error {
+// maxRenameTries is how many names [renameOut] tries in one folder.
+const maxRenameTries = 100
+
+// maxDisarmErrors is how many errors [Dir.Disarm] returns, so the line it goes in stays short.
+const maxDisarmErrors = 5
+
+// Disarm renames each .git in the copy and in the bundle folder to .git-from-run, and each
+// entry that makes a folder a git folder, as [gitDirLike] reads it, the same way. It sets every
+// folder it enters to mode 0700, and enters what it renamed. A git in such a folder finds no
+// repository and runs nothing the run planted, as long as no container of the run is left: a
+// live container can write a new .git. It follows no link: it opens each folder from the one
+// above it with O_NOFOLLOW, and a link named .git is renamed as a link. An error does not end
+// the walk, so a folder it cannot enter leaves the rest renamed. ctx ends the walk. Call it once
+// the run's containers are gone.
+func (d Dir) Disarm(ctx context.Context) error {
+	var errs []error
 	for _, top := range []string{d.Work(), d.Bundle()} {
 		fd, err := unix.Open(top, dirFlags, 0)
 		if errors.Is(err, unix.ENOENT) {
 			continue
 		}
 		if err != nil {
-			return fileErr(top, err)
+			errs = append(errs, fileErr(top, err))
+			continue
 		}
-		err = disarm(fd, top, 0)
+		disarm(ctx, fd, top, 0, false, &errs)
 		unix.Close(fd)
-		if err != nil {
-			return err
-		}
 	}
-	return nil
+	return errors.Join(errs[:min(len(errs), maxDisarmErrors)]...)
 }
 
-// disarm is [Dir.Disarm] of the folder dir at path.
-func disarm(dir int, path string, depth int) error {
+// disarm is the walk of [Dir.Disarm] in the folder dir, at path. gitDir is whether the folder is
+// a .git that the walk renamed, where HEAD and commondir go whatever else the folder has. It
+// adds each error to errs.
+func disarm(ctx context.Context, dir int, path string, depth int, gitDir bool, errs *[]error) {
+	if err := ctx.Err(); err != nil {
+		if !slices.ContainsFunc(*errs, func(e error) bool { return errors.Is(e, err) }) {
+			*errs = append(*errs, err)
+		}
+		return
+	}
 	if depth > maxOpenFolders {
-		return fmt.Errorf(textTooDeep, shown(path), maxOpenFolders)
+		*errs = append(*errs, fmt.Errorf(textTooDeep, shown(path), maxOpenFolders))
+		return
+	}
+	// A failed chmod leaves the folder as it was: the reads below show what that stops.
+	if err := unix.Fchmod(dir, 0o700); err != nil {
+		*errs = append(*errs, fileErr(path, err))
 	}
 	names, err := readNames(dir)
 	if err != nil {
-		return fileErr(path, err)
+		*errs = append(*errs, fileErr(path, err))
+		return
 	}
-	like := gitDirLike(names)
+	like := gitDir || gitDirLike(names)
 	for _, name := range names {
 		at := path + "/" + name
+		entry, isGit := name, false
 		switch f := folded(name); {
-		case f == folded(".git"):
-			if err := renameOut(dir, name, at); err != nil {
-				return err
-			}
-			continue
+		case f == ".git":
+			isGit = true
+			fallthrough
 		case like && (f == "head" || f == "commondir"):
-			if err := renameOut(dir, name, at); err != nil {
-				return err
+			if entry, err = renameOut(dir, name, f, at); err != nil {
+				*errs = append(*errs, err)
+				continue
 			}
-			continue
 		}
 		var st unix.Stat_t
-		if err := unix.Fstatat(dir, name, &st, unix.AT_SYMLINK_NOFOLLOW); err != nil || st.Mode&unix.S_IFMT != unix.S_IFDIR {
+		if err := unix.Fstatat(dir, entry, &st, unix.AT_SYMLINK_NOFOLLOW); err != nil {
+			*errs = append(*errs, fileErr(at, err))
 			continue
 		}
-		sub, err := unix.Openat(dir, name, dirFlags, 0)
+		if st.Mode&unix.S_IFMT != unix.S_IFDIR {
+			continue
+		}
+		sub, err := unix.Openat(dir, entry, dirFlags, 0)
 		if errors.Is(err, unix.EACCES) {
-			if err := chmodFolder(dir, name); err != nil {
-				return fileErr(at, err)
+			// A folder with no read bit: the open needs the bit, and the chmod follows no link.
+			if err := chmodFolder(dir, entry); err != nil {
+				*errs = append(*errs, fileErr(at, err))
+				continue
 			}
-			sub, err = unix.Openat(dir, name, dirFlags, 0)
+			sub, err = unix.Openat(dir, entry, dirFlags, 0)
 		}
 		if err != nil {
-			return fileErr(at, err)
+			*errs = append(*errs, fileErr(at, err))
+			continue
 		}
-		err = disarm(sub, at, depth+1)
+		disarm(ctx, sub, path+"/"+entry, depth+1, isGit, errs)
 		unix.Close(sub)
-		if err != nil {
-			return err
-		}
 	}
-	return nil
 }
 
-// renameOut renames the entry name in dir to a free name with [disarmedSuffix], and sets a
-// folder to mode 0700. It follows no link.
-func renameOut(dir int, name, at string) error {
-	to := strings.ToLower(name) + disarmedSuffix
+// renameOut renames the entry name of the folder dir, at at, to base with [disarmedSuffix], or
+// with a number after that when the name is taken, and returns the new name. base is the plain
+// form of name, as [folded] has it, so a long name that folds to .git fits.
+func renameOut(dir int, name, base, at string) (string, error) {
+	base += disarmedSuffix
+	to := base
 	for i := 1; ; i++ {
 		var st unix.Stat_t
-		if err := unix.Fstatat(dir, to, &st, unix.AT_SYMLINK_NOFOLLOW); errors.Is(err, unix.ENOENT) {
+		err := unix.Fstatat(dir, to, &st, unix.AT_SYMLINK_NOFOLLOW)
+		if errors.Is(err, unix.ENOENT) {
 			break
 		}
-		to = strings.ToLower(name) + disarmedSuffix + "-" + strconv.Itoa(i)
+		if err != nil {
+			return "", fileErr(at, err)
+		}
+		if i > maxRenameTries {
+			return "", fmt.Errorf(textNoFreeName, shown(at), maxRenameTries)
+		}
+		to = base + "-" + strconv.Itoa(i)
 	}
 	if err := unix.Renameat(dir, name, dir, to); err != nil {
-		return fileErr(at, err)
+		return "", fileErr(at, err)
 	}
-	var st unix.Stat_t
-	if err := unix.Fstatat(dir, to, &st, unix.AT_SYMLINK_NOFOLLOW); err == nil && st.Mode&unix.S_IFMT == unix.S_IFDIR {
-		if err := chmodFolder(dir, to); err != nil {
-			return fileErr(at, err)
-		}
-	}
-	return nil
+	return to, nil
 }

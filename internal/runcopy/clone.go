@@ -6,12 +6,13 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
-	"net/url"
 	"os"
 	"path"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
+	"syscall"
 
 	"github.com/qoryai/qory/internal/checkout"
 )
@@ -19,6 +20,10 @@ import (
 // repositories is the folder, relative to the checkout, that the further repositories
 // of a run are cloned under, as preparation.Repositories sets it.
 const repositories = checkout.Dir + "/repositories"
+
+// checkoutLF are the options of a checkout of a copy: the person's core.autocrlf would write
+// CRLF into the copy, and the git session would then commit it as a change on every line.
+var checkoutLF = []string{"-c", "core.autocrlf=false", "-c", "core.eol=lf"}
 
 // Repository is one repository of the copy and the commit it starts at.
 type Repository struct {
@@ -152,8 +157,7 @@ func (d Dir) cloneAt(ctx context.Context, i int, src, dest, branch string) (stri
 	if err := d.copySettings(ctx, src, bare, dest); err != nil {
 		return "", fmt.Errorf(textNoClone, shown(src), err)
 	}
-	args := slices.Concat(lfsFlags(ctx, src), []string{"checkout", "--quiet", "--force", "--no-recurse-submodules", "-B", branch, base})
-	if _, err := personGit(ctx, dest, args...); err != nil {
+	if _, err := personGit(ctx, dest, lfsConfig(ctx, src), slices.Concat(checkoutLF, []string{"checkout", "--quiet", "--force", "--no-recurse-submodules", "-B", branch, base})...); err != nil {
 		return "", fmt.Errorf(textNoCheckout, base, shown(src), err)
 	}
 	return base, nil
@@ -221,7 +225,11 @@ func (d Dir) copySettings(ctx context.Context, src, bare, dest string) error {
 	origin, err := git(ctx, src, "config", "--local", "--get", "remote.origin.url")
 	switch {
 	case err == nil:
-		if _, err := git(ctx, dest, "config", "remote.origin.url", withoutCredentials(strings.TrimSpace(origin))); err != nil {
+		if address := withoutCredentials(strings.TrimSpace(origin)); address != "" {
+			if _, err := git(ctx, dest, "config", "remote.origin.url", address); err != nil {
+				return err
+			}
+		} else if _, err := git(ctx, dest, "config", "--remove-section", "remote.origin"); err != nil {
 			return err
 		}
 	case exitOf(err) == 1:
@@ -243,37 +251,106 @@ func (d Dir) copySettings(ctx context.Context, src, bare, dest string) error {
 	return nil
 }
 
-// withoutCredentials is the remote address raw with no password, and with no user name for an
-// address over HTTP. An ssh user name, as in git@host:path, is part of the address.
+// withoutCredentials is the remote address raw with no password and no query, and with no
+// user name for an address other than ssh. An ssh user name, as in git@host:path, is part of the
+// address. It cuts the text by hand, as git reads an address: a password can have characters
+// that a URL parser stops on. It is "" when the address could still have a credential in it.
 func withoutCredentials(raw string) string {
-	u, err := url.Parse(raw)
-	if err != nil || u.User == nil || u.Host == "" {
-		return raw
+	if strings.ContainsFunc(raw, func(r rune) bool { return r < ' ' || r == 0x7f }) {
+		return ""
 	}
-	if u.Scheme == "http" || u.Scheme == "https" {
-		u.User = nil
-	} else {
-		u.User = url.User(u.User.Username())
+	scheme, rest, isURL := strings.Cut(raw, "://")
+	if !isURL {
+		return localOrSCP(raw)
 	}
-	return u.String()
+	end := strings.IndexAny(rest, "/?#")
+	if end < 0 {
+		end = len(rest)
+	}
+	authority, path := rest[:end], rest[end:]
+	// An @ after the end of the authority, or a ? or # before an @, can be a password with one of
+	// those characters in it.
+	if strings.Contains(path, "@") {
+		return ""
+	}
+	if cut := strings.IndexAny(path, "?#"); cut >= 0 {
+		path = path[:cut]
+	}
+	userinfo, host := "", authority
+	if at := strings.LastIndex(authority, "@"); at >= 0 {
+		userinfo, host = authority[:at], authority[at+1:]
+	}
+	if !plainHost(host) {
+		return ""
+	}
+	if user, _, _ := strings.Cut(userinfo, ":"); user != "" && sshScheme(scheme) {
+		host = user + "@" + host
+	}
+	return scheme + "://" + host + path
 }
 
-// lfsFlags are the options of a checkout of the repository at src, for Git LFS: lfs.storage at
-// its folder of LFS objects, so the checkout finds what the person has, and lfs.url at its
-// endpoint. nil for a repository with neither. Nothing here runs git-lfs.
-func lfsFlags(ctx context.Context, src string) []string {
-	var flags []string
+// localOrSCP is raw, an address with no ://, when it is a path, an alias, or user@host:path with
+// nothing before the @ but a user name; "" for anything else with an @ in it.
+func localOrSCP(raw string) string {
+	user, _, hasAt := strings.Cut(raw, "@")
+	if !hasAt || strings.HasPrefix(raw, "/") || strings.HasPrefix(raw, ".") || user != "" && !strings.ContainsAny(user, ":/ ") {
+		return raw
+	}
+	return ""
+}
+
+// sshScheme reports whether scheme, in any case, is a form of ssh that git takes.
+func sshScheme(scheme string) bool {
+	switch strings.ToLower(scheme) {
+	case "ssh", "git+ssh", "ssh+git":
+		return true
+	}
+	return false
+}
+
+// plainHost reports whether host is a host name or a bracketed address, with an optional port
+// of digits: anything else can be the end of a password.
+func plainHost(host string) bool {
+	name := host
+	if i := strings.LastIndex(host, ":"); i >= 0 && !strings.HasSuffix(host, "]") {
+		port := host[i+1:]
+		if port == "" || strings.Trim(port, "0123456789") != "" {
+			return false
+		}
+		name = host[:i]
+	}
+	if strings.HasPrefix(name, "[") && strings.HasSuffix(name, "]") {
+		name = strings.Trim(name, "[]")
+		return name != "" && strings.Trim(name, "0123456789abcdefABCDEF:.") == ""
+	}
+	return !strings.ContainsAny(name, " :[]\\")
+}
+
+// lfsConfig is the configuration of a checkout of the repository at src, for Git LFS, as
+// variables of git's environment: lfs.storage at its folder of LFS objects, so the checkout
+// finds what the person has, and lfs.url at its endpoint. The address can have a credential in
+// it, and git's command line is visible in a process list. nil for a repository with neither.
+// Nothing here runs git-lfs.
+func lfsConfig(ctx context.Context, src string) []string {
+	var keys, values []string
 	dir, err := git(ctx, src, "rev-parse", "--path-format=absolute", "--git-common-dir")
 	if err == nil {
 		storage := filepath.Join(strings.TrimSpace(dir), "lfs")
 		if info, err := os.Lstat(storage); err == nil && info.IsDir() {
-			flags = append(flags, "-c", "lfs.storage="+storage)
+			keys, values = append(keys, "lfs.storage"), append(values, storage)
 		}
 	}
-	if endpoint, err := personGit(ctx, src, "config", "--get", "lfs.url"); err == nil && strings.TrimSpace(endpoint) != "" {
-		flags = append(flags, "-c", "lfs.url="+strings.TrimSpace(endpoint))
+	if endpoint, err := personGit(ctx, src, nil, "config", "--get", "lfs.url"); err == nil && strings.TrimSpace(endpoint) != "" {
+		keys, values = append(keys, "lfs.url"), append(values, strings.TrimSpace(endpoint))
 	}
-	return flags
+	if len(keys) == 0 {
+		return nil
+	}
+	env := []string{"GIT_CONFIG_COUNT=" + strconv.Itoa(len(keys))}
+	for i := range keys {
+		env = append(env, fmt.Sprintf("GIT_CONFIG_KEY_%d=%s", i, keys[i]), fmt.Sprintf("GIT_CONFIG_VALUE_%d=%s", i, values[i]))
+	}
+	return env
 }
 
 // maxExcludeFile is the most bytes [personalExcludes] reads of one file.
@@ -287,7 +364,7 @@ func personalExcludes(ctx context.Context, src string) []byte {
 	if p, err := git(ctx, src, "rev-parse", "--path-format=absolute", "--git-path", "info/exclude"); err == nil {
 		files = append(files, strings.TrimSpace(p))
 	}
-	global, err := personGit(ctx, src, "config", "--path", "--get", "core.excludesFile")
+	global, err := personGit(ctx, src, nil, "config", "--path", "--get", "core.excludesFile")
 	switch {
 	case err == nil:
 		files = append(files, strings.TrimSpace(global))
@@ -300,7 +377,8 @@ func personalExcludes(ctx context.Context, src string) []byte {
 	}
 	var out []byte
 	for _, p := range files {
-		f, err := os.Open(p)
+		// O_NONBLOCK: the open of a named pipe with no writer does not wait.
+		f, err := os.OpenFile(p, os.O_RDONLY|syscall.O_NONBLOCK, 0)
 		if err != nil {
 			continue
 		}
@@ -392,8 +470,8 @@ func (d Dir) cloneSubmodules(ctx context.Context, src, dest, base string) error 
 		if _, err := git(ctx, to, "fetch", "--quiet", "--no-tags", "--no-recurse-submodules", "--no-write-fetch-head", "--", from, commit); err != nil {
 			return fmt.Errorf(textNoSubmodule, shown(sub), shown(src), shown(from), err)
 		}
-		args := slices.Concat(lfsFlags(ctx, from), []string{"checkout", "--quiet", "--force", "--detach", commit})
-		if _, err := personGit(ctx, to, args...); err != nil {
+		args := slices.Concat(checkoutLF, []string{"checkout", "--quiet", "--force", "--detach", commit})
+		if _, err := personGit(ctx, to, lfsConfig(ctx, from), args...); err != nil {
 			return fmt.Errorf(textNoSubmodule, shown(sub), shown(src), shown(from), err)
 		}
 	}

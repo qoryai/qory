@@ -1172,3 +1172,95 @@ func TestARunsArtifactsComeBackWithNoCommit(t *testing.T) {
 		})
 	}
 }
+
+// aHomeFolder makes the working folder a plain folder with .ssh/id_test at home, with the state
+// directory outside it unless state is set, and returns what the agent read, if it ran.
+func aHomeFolder(t *testing.T, root, home, state string) *string {
+	t.Helper()
+	copyFixture(t, "two-modules", root)
+	docker, _ := fakeDocker(t)
+	walledBy(t, docker)
+	t.Setenv("QORY_RUN_KEY", "")
+	t.Setenv("HOME", home)
+	if state == "" {
+		state = tempDir(t)
+	}
+	t.Setenv("XDG_STATE_HOME", state)
+	writeFile(t, filepath.Join(home, ".ssh", "id_test"), "dummy\n")
+	seen := new(string)
+	agentInCopy(t, func(spec session.SessionSpec) {
+		*seen = spec.Dir
+	})
+	return seen
+}
+
+// wantHomeStop is a run that stops before any copy, with the line that starts with its fix.
+func wantHomeStop(t *testing.T, seen *string, relation string) {
+	t.Helper()
+	out, err := run(t, "run", "claude", "--home", filepath.Join(tempDir(t), "home"), "--", "-p", "hi")
+	if err == nil || *seen != "" {
+		t.Fatalf("the run went on in %q: %v\n%s", *seen, err, out)
+	}
+	if code := cmd.ExitCode(err); code != 2 {
+		t.Errorf("exit %d, want 2: %v", code, err)
+	}
+	wants(t, err.Error(), "start the run from a folder that does not contain your home folder or qory's state directory: the folder ", relation)
+}
+
+// TestAPlainFolderAtTheHomeFolderStops is a run that may write in a plain folder at the home
+// folder, with the cache folder in it: no copy has .ssh.
+func TestAPlainFolderAtTheHomeFolderStops(t *testing.T) {
+	root := emptyDir(t)
+	seen := aHomeFolder(t, root, root, "")
+	wantHomeStop(t, seen, "is your home folder")
+}
+
+// TestAPlainFolderAtTheHomeFolderStopsWithTheCacheOutside is the same with the cache folder a link
+// out of the home folder, where the check of the copy's folder finds no overlap.
+func TestAPlainFolderAtTheHomeFolderStopsWithTheCacheOutside(t *testing.T) {
+	root := emptyDir(t)
+	if err := os.MkdirAll(filepath.Join(root, "Library"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(tempDir(t), filepath.Join(root, "Library", "Caches")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(tempDir(t), filepath.Join(root, ".cache")); err != nil {
+		t.Fatal(err)
+	}
+	seen := aHomeFolder(t, root, root, "")
+	wantHomeStop(t, seen, "is your home folder")
+}
+
+// TestAPlainFolderThatContainsTheHomeFolderStops is a plain folder above the home folder.
+func TestAPlainFolderThatContainsTheHomeFolderStops(t *testing.T) {
+	root := emptyDir(t)
+	seen := aHomeFolder(t, root, filepath.Join(root, "users", "me"), "")
+	wantHomeStop(t, seen, "contains your home folder")
+}
+
+// TestAPlainFolderThatContainsTheStateDirectoryStops is a plain folder with qory's state in it.
+func TestAPlainFolderThatContainsTheStateDirectoryStops(t *testing.T) {
+	root := emptyDir(t)
+	seen := aHomeFolder(t, root, tempDir(t), filepath.Join(root, "state"))
+	wantHomeStop(t, seen, "contains qory's state directory")
+}
+
+// TestAHomeFolderThatIsARepositoryRuns is a run that may write at a home folder with a commit:
+// the copy has the commit's files, so .ssh, which git does not track, is not in it.
+func TestAHomeFolderThatIsARepositoryRuns(t *testing.T) {
+	root := copyCheckout(t)
+	t.Setenv("HOME", root)
+	t.Setenv("XDG_STATE_HOME", tempDir(t))
+	writeFile(t, filepath.Join(root, ".ssh", "id_test"), "dummy\n")
+	var seen string
+	agentInCopy(t, func(spec session.SessionSpec) {
+		seen = spec.Dir
+		if _, err := os.Lstat(filepath.Join(spec.Dir, ".ssh")); err == nil {
+			t.Error("the copy has .ssh")
+		}
+	})
+	if out, err := run(t, "run", "claude", "--", "-p", "hi"); err != nil || seen == "" {
+		t.Fatalf("the agent ran in %q: %v\n%s", seen, err, out)
+	}
+}

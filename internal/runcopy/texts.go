@@ -3,12 +3,13 @@ package runcopy
 // The texts of the errors this package returns. Each starts with its fix, but for the texts of
 // a bundle and of a run's commit: the caller knows where the person can act, and adds the fix.
 const (
-	textRunID     = "give a run id of letters, digits, dots, dashes and underscores that starts with a letter or a digit: the run's copy goes to a folder named after it, and %s is not such a name"
-	textNoCache   = "set HOME: the copy of a walled run's checkout goes under the user's cache folder, and the lookup of that folder failed: %w"
-	textOverlap   = "set XDG_STATE_HOME to a folder outside %s: a walled run writes its copy in %s, and that folder overlaps %s, which no walled run may write"
-	textRunExists = "remove %s, or start the run again with another id: a run's copy goes into a new folder, and that folder exists"
-	textFile      = "check that you can read and write %s: %v"
-	textExists    = "remove %s: qory makes it new for each run, and it exists"
+	textNoFreeName = "remove the folders next to %s: %d names ending in -from-run are taken there"
+	textRunID      = "give a run id of letters, digits, dots, dashes and underscores that starts with a letter or a digit: the run's copy goes to a folder named after it, and %s is not such a name"
+	textNoCache    = "set HOME: the copy of a walled run's checkout goes under the user's cache folder, and the lookup of that folder failed: %w"
+	textOverlap    = "set XDG_STATE_HOME to a folder outside %s: a walled run writes its copy in %s, and that folder overlaps %s, which no walled run may write"
+	textRunExists  = "remove %s, or start the run again with another id: a run's copy goes into a new folder, and that folder exists"
+	textFile       = "check that you can read and write %s: %v"
+	textExists     = "remove %s: qory makes it new for each run, and it exists"
 
 	textInRunCopies  = "run qory in your checkout: %s is in %s, the folder of the runs' copies, which a run could have written"
 	textNoHead       = "commit in %s, or start the run in a repository with a commit at HEAD: the run works in a copy of the commit at HEAD, and the fetch of HEAD failed: %w"

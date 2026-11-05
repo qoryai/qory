@@ -3432,6 +3432,10 @@ Three cases stop the run with their fix first:
   branch, so rename yours with `git branch -m`.
 - A partial clone: the clone has only the objects your repository has. The line has the
   commands that fetch the rest, such as `git fetch --refetch origin`.
+- A folder that is not a repository, and that is your home folder or qory's state directory or
+  contains one, with exit 2: the copy would have every file there, such as `~/.ssh`. Start the run
+  from a folder that does not contain them. A home folder that is a repository runs: its copy
+  has only the files of the commit at `HEAD`.
 - A folder of a run's copy under `qory/runs` in your cache folder: a run could have written
   it, so `qory run` and `qory harness compose` also stop there, and the line says to run qory
   in your checkout.
@@ -3479,10 +3483,10 @@ prints the cause and `qory run: read the run's files in <folder>, run no git the
 remove the folder: nothing more came back from the run`, and `qory run` exits 1 for a session
 that succeeded.
 
-A copy that stays has no `.git`. qory renames each `.git` in it to `.git-from-run`, mode 0700,
-and the `HEAD` of a folder that git would take as a repository, so a git there finds no
-repository and runs nothing the run planted. Read the files, and remove the folder when you
-are done.
+In a copy that stays, qory renames each `.git` to `.git-from-run`, mode 0700, and the `HEAD` of
+a folder that git would take as a repository. Run no git there: after a close that failed, a
+container of the run can still write a new `.git` in the copy. Read the files, and remove the
+folder when you are done.
 
 A commit of the run that adds `.git` or `.qory` at the top of a repository brings nothing
 back. A write run of a work item pushes from the checked repository instead of fetching
@@ -3632,7 +3636,7 @@ directory, or contains one, stops after the compose, exit 2, since the agent cou
 file there:
 
 ```text
-start the run from a repository folder: the folder <folder> is your home folder, and a read run binds it into the agent's container; the code is used
+start the run from a folder that does not contain your home folder or qory's state directory: the folder <folder> is your home folder, and a read run binds it into the agent's container; the code is used
 ```
 
 A run of a workflow from a run code where neither value is `read`, a run given a run key

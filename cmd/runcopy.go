@@ -29,6 +29,7 @@ const (
 	textCopyMount      = "make the mount %s read-only, with :ro on --mount or in wall.mounts: a walled run reads the checkout or works in a copy of it, and a read-write mount lets it write your files directly"
 	textCopyOutside    = "run qory inside the checkout %s: a run that may write works in a copy of the checkout, and the working folder %s is outside it"
 	textCopyNoFolder   = "commit %[1]s, or run qory in a folder that the commit at HEAD has: a run that may write works in a copy of that commit, which has no folder %[1]s"
+	textCopyReserved   = "start the run from a folder that does not contain your home folder or qory's state directory: the folder %s %s, and the run's copy of it would have every file there"
 	textCopyOnBranch   = "the run's commits are on %s in %s."
 	textCopyActing     = " They change these qory settings: %s. Check them before you check out the branch."
 	textCopyPushActing = "qory run: the run's commits in %s change these qory settings: %s. Check them before you check out the branch."
@@ -53,6 +54,9 @@ const (
 // copyStepLimit is how long the check of a run's bundles, or a fetch from them, may take.
 // A bundle has at most 1 GiB, and git checks every object in it.
 const copyStepLimit = 10 * time.Minute
+
+// disarmLimit is how long the renames in a copy that stays may take.
+const disarmLimit = time.Minute
 
 // runBranch is the branch a run's commits land on in the person's repository. qory never checks
 // it out.
@@ -148,11 +152,14 @@ func startCopy(ctx context.Context, root, runID, branch string, noRepository boo
 	if err != nil {
 		return nil, err
 	}
+	empty := git && noRepository && runcopy.NoCommits(ctx, root)
+	if relation := reserved(root); relation != "" && (!git || empty) {
+		return nil, input(fmt.Errorf(textCopyReserved, exports.Value(root, false), relation))
+	}
 	dir, err := runcopy.New(runID, keepOut...)
 	if err != nil {
 		return nil, err
 	}
-	empty := git && noRepository && runcopy.NoCommits(ctx, root)
 	c := &runCopy{dir: dir, root: root, branch: branch, plain: !git || empty, out: map[string]runcopy.LeftOut{}}
 	switch {
 	case empty:
@@ -193,8 +200,10 @@ func (c *runCopy) done(report func(string)) {
 		return
 	}
 	if c.keep {
-		if err := c.dir.Disarm(); err != nil {
-			report(fmt.Sprintf(textCopyNoDisarm, exports.Value(c.dir.Root(), false), exports.HideError(err)))
+		ctx, cancel := context.WithTimeout(context.Background(), disarmLimit)
+		defer cancel()
+		if err := c.dir.Disarm(ctx); err != nil {
+			report(fmt.Sprintf(textCopyNoDisarm, exports.Value(c.dir.Root(), false), strings.ReplaceAll(exports.HideError(err).Error(), "\n", "; ")))
 		}
 		return
 	}

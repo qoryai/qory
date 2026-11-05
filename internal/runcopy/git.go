@@ -92,14 +92,14 @@ func gitWith(ctx context.Context, dir string, env []string, stdin io.Reader, arg
 // personGit runs git with args in dir with the person's git environment: the person's
 // HOME and global configuration, so a filter they set up, such as Git LFS, applies,
 // with the flags of [hostgit] and hooks off. Only the checkout of a copy that qory just
-// made, before the run starts, runs this way.
-func personGit(ctx context.Context, dir string, args ...string) (string, error) {
+// made, before the run starts, runs this way. env goes on git's environment.
+func personGit(ctx context.Context, dir string, env []string, args ...string) (string, error) {
 	full := slices.Concat(noMaintenance, args)
 	cmd, err := hostgit.Unchecked(ctx, dir, hostgit.Base(ctx), full...)
 	if err != nil {
 		return "", &gitError{subcommand: subcommand(args), line: err.Error(), exit: -1}
 	}
-	cmd.Env = append(cmd.Env, "GIT_CEILING_DIRECTORIES="+filepath.Dir(dir), "GIT_TERMINAL_PROMPT=0")
+	cmd.Env = append(append(cmd.Env, "GIT_CEILING_DIRECTORIES="+filepath.Dir(dir), "GIT_TERMINAL_PROMPT=0"), env...)
 	return run(cmd, nil, args)
 }
 

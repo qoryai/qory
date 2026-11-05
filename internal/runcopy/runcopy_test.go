@@ -1432,15 +1432,79 @@ func TestTheCopyShowsThePersonsOrigin(t *testing.T) {
 // TestWithoutCredentials is an address per kind.
 func TestWithoutCredentials(t *testing.T) {
 	for raw, want := range map[string]string{
-		"https://me:secret@host.example/a.git": "https://host.example/a.git",
-		"https://token@host.example/a.git":     "https://host.example/a.git",
-		"ssh://git:secret@host.example/a.git":  "ssh://git@host.example/a.git",
-		"git@host.example:a.git":               "git@host.example:a.git",
-		"/srv/a.git":                           "/srv/a.git",
+		"https://me:secret@host.example/a.git":       "https://host.example/a.git",
+		"https://token@host.example/a.git":           "https://host.example/a.git",
+		"HTTPS://me:secret@host.example/a.git":       "HTTPS://host.example/a.git",
+		"https://me:se%40cret@host.example/a.git":    "https://host.example/a.git",
+		"https://me:se^cret@host.example/a.git":      "https://host.example/a.git",
+		"https://me:se%ZZcret@host.example/a.git":    "https://host.example/a.git",
+		"https://me:se cret@host.example/a.git":      "https://host.example/a.git",
+		"https://me:a@b@host.example:8443/a.git":     "https://host.example:8443/a.git",
+		"https://host.example/a.git?private_token=x": "https://host.example/a.git",
+		"https://host.example/a.git#x":               "https://host.example/a.git",
+		"ftps://token@host.example/a.git":            "ftps://host.example/a.git",
+		"git://me@host.example/a.git":                "git://host.example/a.git",
+		"ssh://git:secret@host.example/a.git":        "ssh://git@host.example/a.git",
+		"ssh://git@host.example/a.git":               "ssh://git@host.example/a.git",
+		"git+ssh://git:secret@host.example/a.git":    "git+ssh://git@host.example/a.git",
+		"SSH://git:secret@[::1]:2222/a.git":          "SSH://git@[::1]:2222/a.git",
+		"file:///srv/a.git":                          "file:///srv/a.git",
+		"git@host.example:a.git":                     "git@host.example:a.git",
+		"gh:acme/a.git":                              "gh:acme/a.git",
+		"/srv/a.git":                                 "/srv/a.git",
+		"/srv/a b@c.git":                             "/srv/a b@c.git",
+		"../a.git":                                   "../a.git",
+		// Each of these can have a password in it, so the copy gets no address.
+		"https://me:se/cret@host.example/a.git": "",
+		"https://me:se#cret@host.example/a.git": "",
+		"https://me:se?cret@host.example/a.git": "",
+		"https://me:secret/a.git":               "",
+		"https://me:secret":                     "",
+		"https://me:se]cret@ho st/a.git":        "",
+		"https://host.example/a@b.git":          "",
+		"https://host.example/a.git?x=a@b":      "",
+		"me:secret@host.example:a.git":          "",
+		"https://host.example/a\n.git":          "",
 	} {
 		if got := withoutCredentials(raw); got != want {
-			t.Errorf("withoutCredentials(%s) = %s, want %s", raw, got, want)
+			t.Errorf("withoutCredentials(%q) = %q, want %q", raw, got, want)
 		}
+	}
+}
+
+// TestTheCopyHasNoCredentialOfTheRemote is a repository with a credential in each setting of a
+// remote: no file under the run's folder has one, and the copy's origin is the address without it,
+// or no address when a credential could be left in it.
+func TestTheCopyHasNoCredentialOfTheRemote(t *testing.T) {
+	for origin, want := range map[string]string{
+		"gh:acme/a.git":                         "gh:acme/a.git",
+		"https://me:se^LEAK@host.example/a.git": "https://host.example/a.git",
+		"https://me:se/LEAK@host.example/a.git": "",
+		"https://host.example/a.git?t=LEAK":     "https://host.example/a.git",
+	} {
+		// A test folder has the name of its subtest, so that name has no credential in it.
+		t.Run("", func(t *testing.T) {
+			isolate(t)
+			src, _ := person(t)
+			testGit(t, src, "remote", "add", "origin", origin)
+			testGit(t, src, "config", "url.https://me:LEAK@host.example/.insteadOf", "gh:")
+			testGit(t, src, "config", "remote.origin.pushurl", "https://me:LEAK@host.example/a.git")
+			testGit(t, src, "config", "http.extraHeader", "Authorization: LEAK")
+			testGit(t, src, "config", "lfs.url", "https://me:LEAK@host.example/a.git/info/lfs")
+			testGit(t, src, "config", "credential.helper", "LEAK")
+			d, _ := cloneRun(t, src)
+			if out, _ := exec.Command("grep", "-rl", "LEAK", d.Root()).CombinedOutput(); len(out) > 0 {
+				t.Errorf("files under the run's folder with a credential:\n%s", out)
+			}
+			got := ""
+			if c := gitCmd(d.Work(), "config", "--get", "remote.origin.url"); true {
+				out, _ := c.Output()
+				got = strings.TrimSpace(string(out))
+			}
+			if got != want {
+				t.Errorf("the copy's origin is %q, want %q", got, want)
+			}
+		})
 	}
 }
 
@@ -1456,7 +1520,7 @@ func TestTheCheckoutGetsThePersonsLFSSettings(t *testing.T) {
 	testGit(t, src, "config", "lfs.url", "https://lfs.example/acme/app")
 	seen := filepath.Join(t.TempDir(), "seen")
 	smudge := filepath.Join(t.TempDir(), "smudge.sh")
-	if err := os.WriteFile(smudge, []byte("#!/bin/sh\nprintf '%s\\n' \"$GIT_CONFIG_PARAMETERS\" >> '"+seen+"'\ncat\n"), 0o755); err != nil {
+	if err := os.WriteFile(smudge, []byte("#!/bin/sh\nprintf '%s %s %s %s\\n' \"$GIT_CONFIG_KEY_0\" \"$GIT_CONFIG_VALUE_0\" \"$GIT_CONFIG_KEY_1\" \"$GIT_CONFIG_VALUE_1\" >> '"+seen+"'\nprintf 'line: %s\\n' \"$GIT_CONFIG_PARAMETERS\" >> '"+seen+"'\ncat\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	config := t.TempDir()
@@ -1470,6 +1534,12 @@ func TestTheCheckoutGetsThePersonsLFSSettings(t *testing.T) {
 	for _, want := range []string{"lfs.storage", filepath.Join(".git", "lfs"), "lfs.url", "https://lfs.example/acme/app"} {
 		if !strings.Contains(string(data), want) {
 			t.Errorf("the filter's options have no %s:\n%s", want, data)
+		}
+	}
+	// git's -c options reach a filter here; a process list shows them on git's command line.
+	for line := range strings.Lines(string(data)) {
+		if strings.HasPrefix(line, "line: ") && strings.Contains(line, "lfs") {
+			t.Errorf("an LFS setting is on git's command line: %s", line)
 		}
 	}
 }
@@ -1595,7 +1665,7 @@ func TestAKeptCopyRunsNothingInAGitStatus(t *testing.T) {
 	write(t, d.Bundle(), "git-0/HEAD", "ref: refs/heads/main\n")
 	write(t, d.Bundle(), "git-0/objects/x", "x\n")
 	write(t, d.Bundle(), "git-0/config", "[core]\n\tfsmonitor = "+program+"\n")
-	if err := d.Disarm(); err != nil {
+	if err := d.Disarm(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	for _, rel := range []string{".git", "sub/.git", "bare/HEAD", "HEAD"} {
@@ -2395,5 +2465,195 @@ func TestCopyArtifactsBackOfAPlainFolderTakesTheRunsChange(t *testing.T) {
 	}
 	if read(t, src, ".qory/artifacts/note.md") != "the run\n" {
 		t.Errorf("the run's change did not come back: %+v", got)
+	}
+}
+
+// disarmWithin is d.Disarm under a bound: a walk that does not end fails the test.
+func disarmWithin(t *testing.T, d Dir, limit time.Duration) error {
+	t.Helper()
+	done := make(chan error, 1)
+	go func() { done <- d.Disarm(context.Background()) }()
+	select {
+	case err := <-done:
+		return err
+	case <-time.After(limit):
+		t.Fatalf("Disarm still runs after %s", limit)
+		return nil
+	}
+}
+
+// TestADisarmedCopyHasNoRepositoryGitFinds is a copy with a planted program at every place git
+// reads settings from. No git status in it, or below what Disarm renamed, runs the program.
+func TestADisarmedCopyHasNoRepositoryGitFinds(t *testing.T) {
+	isolate(t)
+	src, _ := person(t)
+	d, _ := cloneRun(t, src)
+	w := d.Work()
+	program, ran := marker(t)
+	testGit(t, w, "config", "core.fsmonitor", program)
+	testGit(t, w, "config", "core.worktree", w)
+	planted := func(rel string) {
+		write(t, w, rel+"/HEAD", "ref: refs/heads/main\n")
+		write(t, w, rel+"/objects/x", "x")
+		write(t, w, rel+"/refs/x", "x")
+		write(t, w, rel+"/config", "[core]\n\tfsmonitor = "+program+"\n\tworktree = "+w+"\n")
+	}
+	for _, rel := range []string{
+		".git/modules/sub", "caseupper/.GIT", "casemix/.gIt", "zw/.g\u200cit", "nfc/.git\u0301",
+		"bare.git", "other/deep/bare2", "common", "noexec/inner/.git",
+	} {
+		planted(rel)
+	}
+	write(t, w, "wtgit/HEAD", "ref: refs/heads/main\n")
+	write(t, w, "wtgit/commondir", "../common\n")
+	write(t, w, "wt/.git", "gitdir: "+filepath.Join(w, "wtgit")+"\n")
+	write(t, w, "wt2/.git", "gitdir: ../bare.git\n")
+	link(t, w, "lnk/.git", filepath.Join(w, "bare.git"))
+	if err := os.Chmod(filepath.Join(w, "noexec"), 0o400); err != nil {
+		t.Fatal(err)
+	}
+	if err := disarmWithin(t, d, time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(filepath.Join(w, "noexec", "inner", ".git")); err == nil {
+		t.Error("noexec/inner/.git stays")
+	}
+	for _, rel := range []string{
+		".", "bare.git", "other/deep/bare2", "wt", "wt2", "wtgit", "common", "lnk", "caseupper", "casemix", "zw", "nfc",
+		".git-from-run", ".git-from-run/objects", ".git-from-run/modules/sub", ".git-from-run/hooks", "noexec/inner",
+	} {
+		dir := filepath.Join(w, filepath.FromSlash(rel))
+		c := gitCmd(dir, "status")
+		c.Env = append(c.Env, "GIT_CEILING_DIRECTORIES="+filepath.Dir(d.Root()))
+		out, err := c.CombinedOutput()
+		if err == nil {
+			t.Errorf("git status passed in %s:\n%s", rel, out)
+		}
+		if data, err := os.ReadFile(ran); err == nil {
+			t.Errorf("git status in %s ran a program: %s", rel, data)
+			os.Remove(ran)
+		}
+	}
+}
+
+// TestDisarmRenamesAFolderInAFolderItCanOnlyRead is .git in a folder of mode 0400, where the lookup
+// of a free name fails until the folder has its search bit.
+func TestDisarmRenamesAFolderInAFolderItCanOnlyRead(t *testing.T) {
+	isolate(t)
+	src, _ := person(t)
+	d, _ := cloneRun(t, src)
+	write(t, d.Work(), "trap/.git/HEAD", "x")
+	if err := os.Chmod(filepath.Join(d.Work(), "trap"), 0o400); err != nil {
+		t.Fatal(err)
+	}
+	if err := disarmWithin(t, d, 30*time.Second); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(filepath.Join(d.Work(), "trap", ".git-from-run")); err != nil {
+		t.Error(err)
+	}
+}
+
+// TestDisarmRenamesALongName is a name of up to 748 bytes that folds to .git: the new name fits.
+func TestDisarmRenamesALongName(t *testing.T) {
+	for _, zeros := range []int{83, 248} {
+		isolate(t)
+		src, _ := person(t)
+		d, _ := cloneRun(t, src)
+		name := ".g" + strings.Repeat("\u200c", zeros) + "it"
+		if err := os.MkdirAll(filepath.Join(d.Work(), "long", name), 0o755); err != nil {
+			t.Logf("this file system has no such name: %v", err)
+			continue
+		}
+		if err := disarmWithin(t, d, 30*time.Second); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := os.Lstat(filepath.Join(d.Work(), "long", ".git-from-run")); err != nil {
+			t.Error(err)
+		}
+	}
+}
+
+// TestDisarmGoesOnPastAFolderTooDeep is a folder of 70 levels whose name sorts before .git: the
+// error is in the result, the top .git is renamed, and at most maxDisarmErrors lines return.
+func TestDisarmGoesOnPastAFolderTooDeep(t *testing.T) {
+	isolate(t)
+	src, _ := person(t)
+	d, _ := cloneRun(t, src)
+	for _, top := range []string{".a", ".b", ".c", ".d", ".e", ".f", ".0"} {
+		write(t, d.Work(), top+"/"+strings.Repeat("d/", 70)+"f", "x")
+	}
+	err := disarmWithin(t, d, time.Minute)
+	if err == nil {
+		t.Fatal("no error for a folder too deep")
+	}
+	if n := strings.Count(err.Error(), "\n") + 1; n != maxDisarmErrors {
+		t.Errorf("%d lines, want %d: %v", n, maxDisarmErrors, err)
+	}
+	if _, err := os.Lstat(filepath.Join(d.Work(), ".git")); err == nil {
+		t.Error("the top .git stays")
+	}
+}
+
+// TestDisarmEndsWithItsContext is a context that ended: the walk ends with its error.
+func TestDisarmEndsWithItsContext(t *testing.T) {
+	isolate(t)
+	src, _ := person(t)
+	d, _ := cloneRun(t, src)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := d.Disarm(ctx); !errors.Is(err, context.Canceled) {
+		t.Errorf("%v, want the context's error", err)
+	}
+}
+
+// TestRenameOutStopsWhenEveryNameIsTaken is a folder with every name renameOut tries.
+func TestRenameOutStopsWhenEveryNameIsTaken(t *testing.T) {
+	isolate(t)
+	src, _ := person(t)
+	d, _ := cloneRun(t, src)
+	write(t, d.Work(), "full/.git/x", "x")
+	write(t, d.Work(), "full/.git-from-run", "x")
+	for i := 1; i <= maxRenameTries; i++ {
+		write(t, d.Work(), "full/.git-from-run-"+strconv.Itoa(i), "x")
+	}
+	err := disarmWithin(t, d, 30*time.Second)
+	if err == nil || !strings.HasPrefix(err.Error(), "remove the folders next to ") {
+		t.Errorf("%v, want the line that starts with the fix", err)
+	}
+}
+
+// TestAPipeAtTheExcludeFileLeavesTheCloneToEnd is a named pipe at .git/info/exclude: the clone
+// reads no such file and ends.
+func TestAPipeAtTheExcludeFileLeavesTheCloneToEnd(t *testing.T) {
+	isolate(t)
+	src, _ := person(t)
+	exclude := filepath.Join(src, ".git", "info", "exclude")
+	if err := os.MkdirAll(filepath.Dir(exclude), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	os.Remove(exclude)
+	if err := exec.Command("mkfifo", exclude).Run(); err != nil {
+		t.Skipf("no named pipe here: %v", err)
+	}
+	done := make(chan error, 1)
+	go func() {
+		d, err := New("run-1")
+		if err == nil {
+			_, err = d.Clone(t.Context(), src, branch)
+		}
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Error(err)
+		}
+	case <-time.After(30 * time.Second):
+		// Open the pipe, so the goroutine ends.
+		if f, err := os.OpenFile(exclude, os.O_WRONLY, 0); err == nil {
+			f.Close()
+		}
+		t.Fatal("the clone still waits on the named pipe")
 	}
 }

@@ -585,7 +585,7 @@ func TestAReadRunAtTheHomeFolderStops(t *testing.T) {
 			if r.joined || cmd.ExitCode(r.err) != cmd.ExitInput {
 				t.Fatalf("%v (exit %d), want exit %d before the join\n%s", r.err, cmd.ExitCode(r.err), cmd.ExitInput, r.out)
 			}
-			wants(t, r.err.Error(), "start the run from a repository folder: the folder ", "your home folder", "; the code is used")
+			wants(t, r.err.Error(), "start the run from a folder that does not contain your home folder or qory's state directory: the folder ", "your home folder", "; the code is used")
 		})
 	}
 }

@@ -252,7 +252,8 @@ release may change what an existing document does, and states it under Upgrading
   `.qory/work-item.json`, and gets `.qory/artifacts` back. New stops, each with its fix first: a
   local repository with no commit, a working folder absent from `HEAD`, a partial clone, a
   branch named as a parent of the run's branch, and a run or compose in a folder of a run's
-  copy. A copy that stays has its `.git` renamed to `.git-from-run`. A read run with a setup
+  copy, and a run in a folder that is not a repository and is or contains your home folder or
+  qory's state directory. A copy that stays has its `.git` renamed to `.git-from-run`. A read run with a setup
   also works in a copy, read-only for the agent, and nothing comes back from it. A read-write
   mount stops a read run too, and so does a read run with no setup at your home folder.
   `make the mount … read-only` replaces `mount a narrower folder` in the line of a read-write
