@@ -3823,6 +3823,10 @@ func TestAnHTTPURLInAGitLineHasNoCredential(t *testing.T) {
 		"fatal: https://me:SECRETPW@host.example:8443/x":                     "fatal: (a URL, hidden) host.example:8443/x",
 		"fatal: https://host.example:8443/x failed":                          "fatal: https://host.example:8443/x failed",
 		"fatal: me@host.example has no https://host.example/x":               "fatal: me@host.example has no https://host.example/x",
+		"fatal: https://host/x?user=me@corp.example&token=SECRET failed":     "fatal: (a URL, hidden) failed",
+		"fatal: https://me:S@host/x?u=a@b&token=SECRET failed":               "fatal: (a URL, hidden) failed",
+		"fatal: https://host/x#a@SECRET failed":                              "fatal: (a URL, hidden) failed",
+		"fatal: https://host/x?token=SEC@RET failed":                         "fatal: (a URL, hidden) failed",
 		"fatal: no URL at SECRET here":                                       "fatal: no URL at SECRET here",
 	} {
 		if got := hideHTTP(raw); got != want {

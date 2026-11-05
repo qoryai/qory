@@ -266,8 +266,9 @@ var (
 // hideHTTP is line with each http or https URL as [withoutCredentials] writes it: no user name,
 // password or query. A password can have a space or a /, so textHiddenURL takes the place of the
 // line from the start of a URL that an @ follows on the line through the last @. After it comes the
-// rest of that word, up to a query, which has the host for the reader. textHiddenURL also takes the
-// place of a URL that [withoutCredentials] returns no address for.
+// rest of that word, up to a query, which has the host for the reader. With a ? or a # before that
+// @, the @ is in a query or a fragment, so nothing of that word comes after it. textHiddenURL also
+// takes the place of a URL that [withoutCredentials] returns no address for.
 func hideHTTP(line string) string {
 	if start := httpStart.FindStringIndex(line); start != nil {
 		if at := strings.LastIndex(line, "@"); at > start[0] {
@@ -276,6 +277,9 @@ func hideHTTP(line string) string {
 			rest = rest[len(word):]
 			if cut := strings.IndexAny(word, "?#"); cut >= 0 {
 				word = word[:cut]
+			}
+			if strings.ContainsAny(line[start[0]:at], "?#") {
+				word = ""
 			}
 			if word != "" {
 				word = " " + word
