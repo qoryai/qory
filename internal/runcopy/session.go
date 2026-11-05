@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strconv"
@@ -61,9 +62,9 @@ type SetupPath struct {
 var stateForm = regexp.MustCompile(`^(?:missing|other|(?:file|exec|link):(?:[0-9a-f]{40}|[0-9a-f]{64}))$`)
 
 // GitSession is the bare session that runs after the agent: the program, its arguments
-// and its environment, for a Forager SessionSpec with no Runtime. The arguments contain
-// every path and value the script reads, so the script does not depend on the
-// environment the session passes.
+// and its environment, for a Forager SessionSpec with no Runtime. The arguments and the
+// files in the bundle folder contain every path and value the script reads, so the script
+// does not depend on the environment the session passes.
 type GitSession struct {
 	Command string
 	Args    []string
@@ -87,7 +88,10 @@ type GitSession struct {
 // access than the agent had. The script starts the index from that commit, adds every
 // change but [LeftOut]'s, and commits when anything changed. With no commit past the
 // base commit, it writes a file that records that, in place of the bundle. message is
-// the message of the commit it makes, "" for [commitMessage].
+// the message of the commit it makes, "" for [commitMessage]. When HEAD of the copy descends
+// from the base commit, the bundle has HEAD, so an agent's commits on another branch keep
+// their messages; otherwise it has branch. The person's personal ignore rules stay in effect
+// through the info/exclude of that git folder.
 //
 // The script runs no filter: a file a filter changed at the checkout, such as a Git LFS
 // file, stays out while the copy has what the checkout wrote, and one the agent changed
@@ -100,40 +104,31 @@ func (d Dir) GitSession(ctx context.Context, branch, message string, repos []Rep
 		message = commitMessage
 	}
 	args := []string{"-c", sessionScript, "qory-git-session", sessionPath, d.Work(), d.Bundle(), branch, message, strconv.Itoa(len(repos))}
-	for _, r := range repos {
-		rel, err := repositoryRel(r)
+	lists := make([]string, len(repos))
+	for n, r := range repos {
+		list, err := sessionList(r, out[r.Path])
 		if err != nil {
 			return GitSession{}, err
 		}
-		if !objectID.MatchString(r.Base) {
-			return GitSession{}, fmt.Errorf(textBase, shown(rel), shown(r.Base))
-		}
-		o := out[r.Path]
-		setup := slices.Concat(o.Setup, r.filtered)
-		args = append(args, rel, r.Base, strconv.Itoa(len(o.Links)))
-		for _, p := range o.Links {
-			if !cleanRel(p) {
-				return GitSession{}, fmt.Errorf(textLeftOut, shown(p))
-			}
-			args = append(args, p)
-		}
-		args = append(args, strconv.Itoa(len(setup)))
-		for _, s := range setup {
-			p := strings.TrimSuffix(s.Path, "/")
-			if !cleanRel(p) {
-				return GitSession{}, fmt.Errorf(textLeftOut, shown(s.Path))
-			}
-			if !stateForm.MatchString(s.State) {
-				return GitSession{}, fmt.Errorf(textState, shown(s.State))
-			}
-			args = append(args, p, s.State)
-		}
+		lists[n] = list
 	}
 	if err := os.Mkdir(d.Bundle(), 0o700); err != nil {
 		if errors.Is(err, fs.ErrExist) {
 			return GitSession{}, fmt.Errorf(textExists, shown(d.Bundle()))
 		}
 		return GitSession{}, fileErr(d.Bundle(), err)
+	}
+	for n, list := range lists {
+		p := filepath.Join(d.Bundle(), "list-"+strconv.Itoa(n))
+		if err := writeNew(p, list); err != nil {
+			return GitSession{}, fileErr(p, err)
+		}
+		if len(repos[n].excludes) > 0 {
+			p := filepath.Join(d.Bundle(), "exclude-"+strconv.Itoa(n))
+			if err := writeNew(p, string(repos[n].excludes)); err != nil {
+				return GitSession{}, fileErr(p, err)
+			}
+		}
 	}
 	return GitSession{
 		Command: "/bin/sh",
@@ -144,6 +139,46 @@ func (d Dir) GitSession(ctx context.Context, branch, message string, repos []Rep
 		},
 		Dir: d.Work(),
 	}, nil
+}
+
+// sessionList is the file the script sources for the repository r: shell assignments of its
+// folder, its base commit and the counts, then set -- with the links and each setup path
+// followed by its state. A file keeps 10,000 paths out of the arguments of sh, which the
+// system limits, and a shell builtin takes any number. Each value is in single quotes.
+func sessionList(r Repository, o LeftOut) (string, error) {
+	rel, err := repositoryRel(r)
+	if err != nil {
+		return "", err
+	}
+	if !objectID.MatchString(r.Base) {
+		return "", fmt.Errorf(textBase, shown(rel), shown(r.Base))
+	}
+	setup := slices.Concat(o.Setup, r.filtered)
+	var b strings.Builder
+	fmt.Fprintf(&b, "rel=%s base=%s links=%d setup=%d\nset --", shellQuote(rel), r.Base, len(o.Links), len(setup))
+	for _, p := range o.Links {
+		if !cleanRel(p) {
+			return "", fmt.Errorf(textLeftOut, shown(p))
+		}
+		b.WriteString(" " + shellQuote(p))
+	}
+	for _, s := range setup {
+		p := strings.TrimSuffix(s.Path, "/")
+		if !cleanRel(p) {
+			return "", fmt.Errorf(textLeftOut, shown(s.Path))
+		}
+		if !stateForm.MatchString(s.State) {
+			return "", fmt.Errorf(textState, shown(s.State))
+		}
+		b.WriteString(" " + shellQuote(p) + " " + s.State)
+	}
+	b.WriteString("\n")
+	return b.String(), nil
+}
+
+// shellQuote is value in single quotes, for sh.
+func shellQuote(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", `'\''`) + "'"
 }
 
 // repositoryRel is the folder of r relative to the copy, as the script takes it: . for
@@ -166,14 +201,11 @@ func (d Dir) SessionMounts() []wall.Mount {
 
 // sessionScript is the git session's script, run with sh -c. Its arguments are the
 // PATH, the copy, the bundle folder, the branch, the commit's message and the number of
-// repositories; then
-// for each repository its folder relative to the copy, its base commit, the number of
-// links qory wrote and the links, and the number of paths the setup changed and each
-// such path followed by its state. For the repository number n it writes n.bundle, or
-// n.none when nothing is past the base commit.
+// repositories. For the repository number n it sources list-n, see [sessionList], and uses
+// exclude-n when there is one. It writes n.bundle, or n.none when nothing is past the base
+// commit. It needs git 2.25 or later, for --pathspec-from-file.
 const sessionScript = `set -eu
 PATH=$1 W=$2 B=$3 branch=$4 message=$5 count=$6
-shift 6
 export PATH
 unset XDG_CONFIG_HOME GIT_CONFIG GIT_CONFIG_PARAMETERS GIT_CONFIG_COUNT GIT_CONFIG_SYSTEM \
 	GIT_EXEC_PATH GIT_COMMON_DIR GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES \
@@ -193,6 +225,8 @@ g() {
 		-c core.untrackedCache=false -c gc.auto=0 -c maintenance.auto=false \
 		-c protocol.allow=never -c commit.gpgSign=false "$@"
 }
+nl='
+'
 # state prints what the repository at $T has at a path, in the form of SetupPath.State.
 state() {
 	f=$T/$1
@@ -201,7 +235,7 @@ state() {
 		printf 'link:%s' "$(printf '%s' "$t" | g hash-object --no-filters --stdin)"
 	elif [ -f "$f" ]; then
 		k=file
-		if [ -n "$(find "$f" -prune -perm -u+x 2>/dev/null)" ]; then
+		if [ -x "$f" ]; then
 			k=exec
 		fi
 		printf '%s:%s' "$k" "$(g hash-object --no-filters -- "$f")"
@@ -213,12 +247,14 @@ state() {
 }
 n=0
 while [ "$n" -lt "$count" ]; do
-	rel=$1 base=$2 links=$3
-	shift 3
+	. "$B/list-$n"
 	if [ "$rel" = . ]; then T=$W; else T=$W/$rel; fi
 	G=$B/git-$n
 	cd "$T"
-	mkdir "$G" "$G/objects" "$G/objects/info" "$G/refs" "$G/refs/heads"
+	mkdir "$G" "$G/objects" "$G/objects/info" "$G/refs" "$G/refs/heads" "$G/info"
+	if [ -f "$B/exclude-$n" ]; then
+		cp "$B/exclude-$n" "$G/info/exclude"
+	fi
 	: > "$G/config"
 	if [ ${#base} -eq 64 ]; then
 		printf '[core]\n\trepositoryformatversion = 1\n[extensions]\n\tobjectformat = sha256\n' > "$G/config"
@@ -226,17 +262,21 @@ while [ "$n" -lt "$count" ]; do
 	printf '%s\n' "$T/.git/objects" > "$G/objects/info/alternates"
 	printf 'ref: refs/heads/%s\n' "$branch" > "$G/HEAD"
 
-	# The branch's commit, read by git with the copy's .git, so packed refs and
+	# HEAD when it descends from the base commit, so commits on another branch come back with
+	# their messages; otherwise the branch. Read by git with the copy's .git, so packed refs and
 	# reftable both work. This git reads the copy's configuration, inside the wall.
-	head=$(g --git-dir="$T/.git" rev-parse --verify --quiet "refs/heads/$branch^{commit}") || head=
+	head=$(g --git-dir="$T/.git" rev-parse --verify --quiet "HEAD^{commit}") || head=
+	if [ -z "$head" ] || ! g --git-dir="$T/.git" merge-base --is-ancestor "$base" "$head" 2>/dev/null; then
+		head=$(g --git-dir="$T/.git" rev-parse --verify --quiet "refs/heads/$branch^{commit}") || head=
+	fi
 	case $head in
 	'' | *[!0-9a-f]*)
-		echo "qory: the copy of $rel has no commit on branch $branch" >&2
+		echo "qory: check out $branch or a branch from it in the copy of $rel: HEAD and $branch are not at a commit past the base commit" >&2
 		exit 1
 		;;
 	esac
 	if [ ${#head} -ne ${#base} ]; then
-		echo "qory: the branch $branch of the copy of $rel is set to no commit id" >&2
+		echo "qory: set the branch $branch of the copy of $rel to a commit id: git read something else there" >&2
 		exit 1
 	fi
 	export GIT_DIR="$G" GIT_WORK_TREE="$T" GIT_INDEX_FILE="$G/index"
@@ -261,16 +301,47 @@ while [ "$n" -lt "$count" ]; do
 		shift
 		i=$((i + 1))
 	done
-	setup=$1
-	shift
+	# One git hashes the setup's regular files, since a process per file takes minutes for
+	# 10000 paths. A path with a line break takes the slow way through state.
+	i=0
+	for a do
+		if [ $((i % 2)) -eq 0 ] && [ ! -h "$T/$a" ] && [ -f "$T/$a" ]; then
+			case $a in
+			*"$nl"*) ;;
+			*) printf '%s\n' "$T/$a" ;;
+			esac
+		fi
+		i=$((i + 1))
+	done > "$G/regular"
+	g hash-object --no-filters --stdin-paths < "$G/regular" > "$G/ids"
+	exec 3< "$G/ids"
 	i=0
 	while [ "$i" -lt "$setup" ]; do
-		if [ "$(state "$1")" = "$2" ]; then
+		f=$T/$1
+		have=
+		if [ ! -h "$f" ] && [ -f "$f" ]; then
+			case $1 in
+			*"$nl"*) ;;
+			*)
+				read -r id <&3
+				k=file
+				if [ -x "$f" ]; then
+					k=exec
+				fi
+				have=$k:$id
+				;;
+			esac
+		fi
+		if [ -z "$have" ]; then
+			have=$(state "$1")
+		fi
+		if [ "$have" = "$2" ]; then
 			printf ':(exclude,top,literal)%s\0' "$1" >> "$P"
 		fi
 		shift 2
 		i=$((i + 1))
 	done
+	exec 3<&-
 	g add -A --pathspec-from-file="$P" --pathspec-file-nul
 	g reset -q "$base" --pathspec-from-file="$R" --pathspec-file-nul
 

@@ -10,6 +10,8 @@ const (
 	textExists    = "remove %s: qory makes it new for each run, and it exists"
 
 	textNoHead       = "commit in %s, or start the run in a repository with a commit at HEAD: the run works in a copy of the commit at HEAD, and the fetch of HEAD failed: %w"
+	textPartialClone = "in %s, run git config --unset remote.origin.partialclonefilter, git fetch --refetch origin, git config --unset remote.origin.promisor, and git config --unset extensions.partialClone if it is set: a run's copy has only the objects the repository has, and a partial clone does not have all of them"
+	textBranchAbove  = "rename your branch %s in %s with git branch -m: the run's branch %s goes below that name, and git keeps no branch below a branch"
 	textNoClone      = "check that git can clone %s: qory copies it for the run with git clone, which failed: %w"
 	textNoCheckout   = "check that git can check out %s in a clone of %s: the run works on that commit, and the checkout failed: %w"
 	textNoSubmodule  = "check the submodule %s in %s: qory copies it for the run from %s, and the copy failed: %w"

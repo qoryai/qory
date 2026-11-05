@@ -4,10 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
+	"net/url"
 	"os"
 	"path"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/qoryai/qory/internal/checkout"
@@ -27,6 +30,10 @@ type Repository struct {
 	// index is the repository's number: 0 for the person's, and from 1 for the further
 	// ones, which is in the name of its bare source and of its quarantine.
 	index int
+	// excludes are the person's personal ignore rules for this repository: its
+	// .git/info/exclude and the global excludes file. The git session's git folder has them,
+	// so those files stay out of the commit, as they do in the person's repository.
+	excludes []byte
 	// filtered are the files a filter changed at the checkout, such as a Git LFS file,
 	// with what the checkout wrote: the git session runs no filter, so it leaves each
 	// out while the copy still has what the checkout wrote.
@@ -44,8 +51,10 @@ type Repository struct {
 // filter such as Git LFS applies; no run has written the copy yet. --no-local copies
 // the objects and links none of them, and no clone uses --shared or --reference. Each
 // submodule of the person's repository whose repository is under its .git/modules is
-// cloned the same way at the commit its gitlink records. The copy has commits alone:
-// no uncommitted, untracked or ignored file of the checkout.
+// cloned the same way at the commit its gitlink records. The copy shows the person's origin,
+// see [Dir.copySettings]. The copy has commits alone: no uncommitted, untracked or ignored
+// file of the checkout. A partial clone stops here, since its missing objects have no way into
+// the copy.
 func (d Dir) Clone(ctx context.Context, checkout, branch string) ([]Repository, error) {
 	if err := checkBranch(ctx, branch); err != nil {
 		return nil, err
@@ -64,9 +73,6 @@ func (d Dir) Clone(ctx context.Context, checkout, branch string) ([]Repository, 
 	}
 	first, err := d.cloneOne(ctx, 0, checkout, d.Work(), branch)
 	if err != nil {
-		return nil, err
-	}
-	if err := d.cloneSubmodules(ctx, checkout, d.Work(), first.Base); err != nil {
 		return nil, err
 	}
 	repos := []Repository{first}
@@ -104,15 +110,22 @@ func (d Dir) cloneOne(ctx context.Context, i int, src, dest, branch string) (Rep
 	if err != nil {
 		return Repository{}, err
 	}
+	if err := d.cloneSubmodules(ctx, src, dest, base); err != nil {
+		return Repository{}, err
+	}
 	filtered, err := d.filteredFiles(ctx, i, dest)
 	if err != nil {
 		return Repository{}, fmt.Errorf(textNoCheckout, base, shown(src), err)
 	}
-	return Repository{Base: base, index: i, filtered: filtered}, nil
+	return Repository{Base: base, index: i, filtered: filtered, excludes: personalExcludes(ctx, src)}, nil
 }
 
 // cloneAt is [Dir.cloneOne] without the filtered files.
 func (d Dir) cloneAt(ctx context.Context, i int, src, dest, branch string) (string, error) {
+	// A partial clone has no objects to copy for what it left out, and no run has its promisor.
+	if partialClone(ctx, src) {
+		return "", fmt.Errorf(textPartialClone, shown(src))
+	}
 	bare := d.source(i)
 	if _, err := git(ctx, d.root, "clone", "--quiet", "--bare", "--no-local", "--no-hardlinks", "--", src, bare); err != nil {
 		return "", fmt.Errorf(textNoClone, shown(src), err)
@@ -121,6 +134,9 @@ func (d Dir) cloneAt(ctx context.Context, i int, src, dest, branch string) (stri
 	// and a HEAD on no branch would not be among them.
 	ref := "refs/heads/" + branch
 	if _, err := git(ctx, bare, "fetch", "--quiet", "--no-tags", "--no-recurse-submodules", "--no-write-fetch-head", "--", src, "+HEAD:"+ref); err != nil {
+		if above := branchAbove(ctx, bare, branch); above != "" {
+			return "", fmt.Errorf(textBranchAbove, shown(above), shown(src), shown(branch))
+		}
 		return "", fmt.Errorf(textNoHead, shown(src), err)
 	}
 	base, err := commitOf(ctx, bare, ref)
@@ -130,10 +146,168 @@ func (d Dir) cloneAt(ctx context.Context, i int, src, dest, branch string) (stri
 	if _, err := git(ctx, d.root, "clone", "--quiet", "--no-local", "--no-hardlinks", "--no-checkout", "--no-recurse-submodules", "--branch", branch, "--", bare, dest); err != nil {
 		return "", fmt.Errorf(textNoClone, shown(src), err)
 	}
-	if _, err := personGit(ctx, dest, "checkout", "--quiet", "--force", "--no-recurse-submodules", "-B", branch, base); err != nil {
+	if err := d.copySettings(ctx, src, bare, dest); err != nil {
+		return "", fmt.Errorf(textNoClone, shown(src), err)
+	}
+	args := slices.Concat(lfsFlags(ctx, src), []string{"checkout", "--quiet", "--force", "--no-recurse-submodules", "-B", branch, base})
+	if _, err := personGit(ctx, dest, args...); err != nil {
 		return "", fmt.Errorf(textNoCheckout, base, shown(src), err)
 	}
 	return base, nil
+}
+
+// partialClone reports whether the repository at src is a partial clone: git writes
+// remote.<name>.promisor, and an older git extensions.partialClone.
+func partialClone(ctx context.Context, src string) bool {
+	if out, err := git(ctx, src, "config", "--get", "extensions.partialClone"); err == nil && strings.TrimSpace(out) != "" {
+		return true
+	}
+	out, err := git(ctx, src, "config", "--type=bool", "--get-regexp", `^remote\..*\.promisor$`)
+	if err != nil {
+		return false
+	}
+	for line := range strings.Lines(out) {
+		if strings.HasSuffix(strings.TrimSpace(line), " true") {
+			return true
+		}
+	}
+	return false
+}
+
+// branchAbove is the person's branch whose name is a parent folder of branch, which keeps git
+// from writing branch, "" for none, as the bare repository bare has the branches.
+func branchAbove(ctx context.Context, bare, branch string) string {
+	parts := strings.Split(branch, "/")
+	for i := 1; i < len(parts); i++ {
+		above := strings.Join(parts[:i], "/")
+		if _, err := git(ctx, bare, "show-ref", "--verify", "--quiet", "refs/heads/"+above); err == nil {
+			return above
+		}
+	}
+	return ""
+}
+
+// copySettings makes the copy at dest show what the person's repository at src shows:
+// remote.origin.url with no credentials, refs/remotes/origin/* of the person's origin in place
+// of the person's local branches, and user.name and user.email of the repository's
+// configuration. The objects come through the bare repository, so nothing in dest links to
+// src.
+func (d Dir) copySettings(ctx context.Context, src, bare, dest string) error {
+	if _, err := git(ctx, bare, "fetch", "--quiet", "--no-tags", "--no-recurse-submodules", "--no-write-fetch-head", "--", src, "+refs/remotes/origin/*:refs/remotes/origin/*"); err != nil {
+		return err
+	}
+	// git clone wrote the bare repository's branches as these refs.
+	refs, err := git(ctx, dest, "for-each-ref", "--format=%(refname)", "refs/remotes/origin/")
+	if err != nil {
+		return err
+	}
+	_, _ = git(ctx, dest, "symbolic-ref", "--delete", "refs/remotes/origin/HEAD")
+	for ref := range strings.Lines(refs) {
+		if _, err := git(ctx, dest, "update-ref", "--no-deref", "-d", strings.TrimSpace(ref)); err != nil {
+			return err
+		}
+	}
+	if _, err := git(ctx, dest, "fetch", "--quiet", "--no-tags", "--no-recurse-submodules", "--no-write-fetch-head", "--", bare, "+refs/remotes/origin/*:refs/remotes/origin/*"); err != nil {
+		return err
+	}
+	if head, err := git(ctx, src, "symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"); err == nil {
+		if _, err := git(ctx, dest, "symbolic-ref", "refs/remotes/origin/HEAD", strings.TrimSpace(head)); err != nil {
+			return err
+		}
+	}
+	origin, err := git(ctx, src, "config", "--local", "--get", "remote.origin.url")
+	switch {
+	case err == nil:
+		if _, err := git(ctx, dest, "config", "remote.origin.url", withoutCredentials(strings.TrimSpace(origin))); err != nil {
+			return err
+		}
+	case exitOf(err) == 1:
+		if _, err := git(ctx, dest, "config", "--remove-section", "remote.origin"); err != nil {
+			return err
+		}
+	default:
+		return err
+	}
+	for _, key := range []string{"user.name", "user.email"} {
+		value, err := git(ctx, src, "config", "--local", "--get", key)
+		if err != nil {
+			continue
+		}
+		if _, err := git(ctx, dest, "config", key, strings.TrimSpace(value)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// withoutCredentials is the remote address raw with no password, and with no user name for an
+// address over HTTP. An ssh user name, as in git@host:path, is part of the address.
+func withoutCredentials(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil || u.User == nil || u.Host == "" {
+		return raw
+	}
+	if u.Scheme == "http" || u.Scheme == "https" {
+		u.User = nil
+	} else {
+		u.User = url.User(u.User.Username())
+	}
+	return u.String()
+}
+
+// lfsFlags are the options of a checkout of the repository at src, for Git LFS: lfs.storage at
+// its folder of LFS objects, so the checkout finds what the person has, and lfs.url at its
+// endpoint. nil for a repository with neither. Nothing here runs git-lfs.
+func lfsFlags(ctx context.Context, src string) []string {
+	var flags []string
+	dir, err := git(ctx, src, "rev-parse", "--path-format=absolute", "--git-common-dir")
+	if err == nil {
+		storage := filepath.Join(strings.TrimSpace(dir), "lfs")
+		if info, err := os.Lstat(storage); err == nil && info.IsDir() {
+			flags = append(flags, "-c", "lfs.storage="+storage)
+		}
+	}
+	if endpoint, err := personGit(ctx, src, "config", "--get", "lfs.url"); err == nil && strings.TrimSpace(endpoint) != "" {
+		flags = append(flags, "-c", "lfs.url="+strings.TrimSpace(endpoint))
+	}
+	return flags
+}
+
+// maxExcludeFile is the most bytes [personalExcludes] reads of one file.
+const maxExcludeFile = 1 << 20
+
+// personalExcludes is what the person's .git/info/exclude of the repository at src and the
+// global excludes file have, nil when the lookup fails or both have nothing. A rule of the
+// person's stays in effect; a file that cannot be read has no rules.
+func personalExcludes(ctx context.Context, src string) []byte {
+	var files []string
+	if p, err := git(ctx, src, "rev-parse", "--path-format=absolute", "--git-path", "info/exclude"); err == nil {
+		files = append(files, strings.TrimSpace(p))
+	}
+	global, err := personGit(ctx, src, "config", "--path", "--get", "core.excludesFile")
+	switch {
+	case err == nil:
+		files = append(files, strings.TrimSpace(global))
+	default:
+		if home := os.Getenv("XDG_CONFIG_HOME"); home != "" {
+			files = append(files, filepath.Join(home, "git", "ignore"))
+		} else if home, err := os.UserHomeDir(); err == nil {
+			files = append(files, filepath.Join(home, ".config", "git", "ignore"))
+		}
+	}
+	var out []byte
+	for _, p := range files {
+		f, err := os.Open(p)
+		if err != nil {
+			continue
+		}
+		if info, err := f.Stat(); err == nil && info.Mode().IsRegular() {
+			data, _ := io.ReadAll(io.LimitReader(f, maxExcludeFile))
+			out = append(append(out, data...), '\n')
+		}
+		f.Close()
+	}
+	return out
 }
 
 // filteredFiles is each file of the copy at dest, the repository number i just checked
@@ -215,7 +389,8 @@ func (d Dir) cloneSubmodules(ctx context.Context, src, dest, base string) error 
 		if _, err := git(ctx, to, "fetch", "--quiet", "--no-tags", "--no-recurse-submodules", "--no-write-fetch-head", "--", from, commit); err != nil {
 			return fmt.Errorf(textNoSubmodule, shown(sub), shown(src), shown(from), err)
 		}
-		if _, err := personGit(ctx, to, "checkout", "--quiet", "--force", "--detach", commit); err != nil {
+		args := slices.Concat(lfsFlags(ctx, from), []string{"checkout", "--quiet", "--force", "--detach", commit})
+		if _, err := personGit(ctx, to, args...); err != nil {
 			return fmt.Errorf(textNoSubmodule, shown(sub), shown(src), shown(from), err)
 		}
 	}

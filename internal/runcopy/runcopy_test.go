@@ -357,9 +357,10 @@ func TestCloneSharesNoObjectFile(t *testing.T) {
 	if got := testGit(t, filepath.Join(work, ".qory", "repositories", "example", "further"), "rev-parse", "HEAD"); got != furtherBase {
 		t.Errorf("further copy at %s, want %s", got, furtherBase)
 	}
-	// The copy comes from the bare source, which no run binds, and borrows no object.
-	if got := testGit(t, work, "config", "remote.origin.url"); got != d.source(0) {
-		t.Errorf("the copy was cloned from %s, want %s", got, d.source(0))
+	// The copy comes from the bare source, which no run binds, and borrows no object. The
+	// person has no origin, so it has none either.
+	if out, err := gitCmd(work, "config", "--get", "remote.origin.url").CombinedOutput(); err == nil {
+		t.Errorf("the copy has the origin %s, and the person has none", out)
 	}
 	if got := testGit(t, d.source(0), "rev-parse", "refs/heads/"+branch); got != base {
 		t.Errorf("the bare source has the run's branch at %s, want %s", got, base)
@@ -703,13 +704,13 @@ func TestGitSessionChecksItsArguments(t *testing.T) {
 	}
 	// A path named -- is a path like any other: the script takes counts, not a
 	// separator. A trailing / is dropped.
-	s, err := d.GitSession(ctx, "main", "", main, map[string]LeftOut{"": {Links: []string{"--", "x"}, Setup: []SetupPath{{Path: "dir/", State: "other"}}}})
+	_, err := d.GitSession(ctx, "main", "", main, map[string]LeftOut{"": {Links: []string{"--", "x"}, Setup: []SetupPath{{Path: "dir/", State: "other"}}}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{".", base, "2", "--", "x", "1", "dir", "other"}
-	if got := s.Args[len(s.Args)-len(want):]; !slices.Equal(got, want) {
-		t.Errorf("arguments end in %q, want %q", got, want)
+	want := "rel='.' base=" + base + " links=2 setup=1\nset -- '--' 'x' 'dir' other\n"
+	if got := read(t, d.Bundle(), "list-0"); got != want {
+		t.Errorf("the list is %q, want %q", got, want)
 	}
 }
 
@@ -1297,6 +1298,258 @@ func TestTheGitSessionFetchesNoMissingObject(t *testing.T) {
 	}
 	if data, err := os.ReadFile(ran); err == nil {
 		t.Errorf("a program ran: %s", data)
+	}
+}
+
+// TestTheGitSessionTakesManySetupPaths is 10000 setup paths, over the limit of one argument of
+// sh on Linux, and paths with a quote and a line break: each stays out of the commit.
+func TestTheGitSessionTakesManySetupPaths(t *testing.T) {
+	isolate(t)
+	sessionGit(t)
+	src, _ := person(t)
+	d, repos := cloneRun(t, src)
+	const many = 10000
+	for i := range many {
+		write(t, d.Work(), "gen/f"+strconv.Itoa(i)+"-"+strings.Repeat("x", 40), "x\n")
+	}
+	odd := []string{"it's a file", "line\nbreak", "sp ace"}
+	paths := []string{"gen"}
+	for _, p := range odd {
+		write(t, d.Work(), p, "x\n")
+		paths = append(paths, p)
+	}
+	for i := range many {
+		paths = append(paths, "gen/f"+strconv.Itoa(i)+"-"+strings.Repeat("x", 40))
+	}
+	states, err := d.SetupStates(context.Background(), repos[0], paths)
+	if err != nil {
+		t.Fatal(err)
+	}
+	write(t, d.Work(), "agent.txt", "the agent\n")
+	q := bringBack(t, d, src, repos, map[string]LeftOut{"": {Setup: states}})
+	got := strings.Split(testGit(t, src, "ls-tree", "-r", "--name-only", q.Head), "\n")
+	if !slices.Contains(got, "agent.txt") {
+		t.Errorf("the commit has no agent.txt: %d files", len(got))
+	}
+	for _, f := range got {
+		if strings.HasPrefix(f, "gen/") || strings.Contains(f, "sp ace") || strings.Contains(f, "it") && strings.Contains(f, "file") {
+			t.Errorf("the commit has the setup's %s", f)
+			break
+		}
+	}
+}
+
+// TestCommitsOnAnotherBranchKeepTheirMessages is an agent that checks out another branch and
+// commits twice: the bundle has both commits, and what it left uncommitted after them.
+func TestCommitsOnAnotherBranchKeepTheirMessages(t *testing.T) {
+	isolate(t)
+	sessionGit(t)
+	src, _ := person(t)
+	d, repos := cloneRun(t, src)
+	testGit(t, d.Work(), "checkout", "--quiet", "-b", "feature")
+	write(t, d.Work(), "one.txt", "1\n")
+	commitAll(t, d.Work(), "first of the agent")
+	write(t, d.Work(), "two.txt", "2\n")
+	commitAll(t, d.Work(), "second of the agent")
+	write(t, d.Work(), "left.txt", "left\n")
+	q := bringBack(t, d, src, repos, nil)
+	log := testGit(t, src, "log", "--format=%s", "-n", "3", q.Head)
+	for _, want := range []string{"first of the agent", "second of the agent", commitMessage} {
+		if !strings.Contains(log, want) {
+			t.Errorf("the log has no %q:\n%s", want, log)
+		}
+	}
+}
+
+// TestAHeadFromElsewhereUsesTheBranch is an agent that checks out a commit that does not
+// descend from the base commit: the bundle has the run's branch.
+func TestAHeadFromElsewhereUsesTheBranch(t *testing.T) {
+	isolate(t)
+	sessionGit(t)
+	src, _ := person(t)
+	d, repos := cloneRun(t, src)
+	write(t, d.Work(), "kept.txt", "kept\n")
+	commitAll(t, d.Work(), "on the branch")
+	testGit(t, d.Work(), "checkout", "--quiet", "--orphan", "elsewhere")
+	commitAll(t, d.Work(), "unrelated")
+	q := bringBack(t, d, src, repos, nil)
+	if log := testGit(t, src, "log", "--format=%s", q.Head); !strings.Contains(log, "on the branch") {
+		t.Errorf("the log has no commit of the branch:\n%s", log)
+	}
+}
+
+// TestPersonalIgnoreRulesStayInEffect is a person's .git/info/exclude and global excludes file:
+// a file they cover stays out of the commit.
+func TestPersonalIgnoreRulesStayInEffect(t *testing.T) {
+	isolate(t)
+	sessionGit(t)
+	src, _ := person(t)
+	write(t, src, ".git/info/exclude", "*.mine\n")
+	config := t.TempDir()
+	write(t, config, "global-ignore", "*.global\n")
+	write(t, config, "gitconfig", "[core]\n\texcludesFile = "+filepath.Join(config, "global-ignore")+"\n")
+	t.Setenv("GIT_CONFIG_GLOBAL", filepath.Join(config, "gitconfig"))
+	d, repos := cloneRun(t, src)
+	write(t, d.Work(), "a.mine", "x\n")
+	write(t, d.Work(), "b.global", "x\n")
+	write(t, d.Work(), "c.txt", "x\n")
+	q := bringBack(t, d, src, repos, nil)
+	got := files(t, src, q.Head)
+	if slices.Contains(got, "a.mine") || slices.Contains(got, "b.global") || !slices.Contains(got, "c.txt") {
+		t.Errorf("the commit has %v", got)
+	}
+}
+
+// TestTheCopyShowsThePersonsOrigin is a person's repository with an origin with a password, a
+// remote branch and a local branch: the copy has the address with no password, the remote
+// branch, no ref of the local branch, and the repository's user.
+func TestTheCopyShowsThePersonsOrigin(t *testing.T) {
+	isolate(t)
+	src, base := person(t)
+	testGit(t, src, "config", "remote.origin.url", "https://me:secret@git.example.com/acme/app.git")
+	testGit(t, src, "config", "user.name", "The Person")
+	testGit(t, src, "config", "user.email", "person@example.com")
+	testGit(t, src, "update-ref", "refs/remotes/origin/main", base)
+	testGit(t, src, "update-ref", "refs/remotes/origin/release", base)
+	testGit(t, src, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+	testGit(t, src, "branch", "local-only", base)
+	d, _ := cloneRun(t, src)
+	if got := testGit(t, d.Work(), "config", "remote.origin.url"); got != "https://git.example.com/acme/app.git" {
+		t.Errorf("remote.origin.url = %s", got)
+	}
+	refs := testGit(t, d.Work(), "for-each-ref", "--format=%(refname)", "refs/remotes/")
+	if strings.Contains(refs, "local-only") || !strings.Contains(refs, "refs/remotes/origin/release") {
+		t.Errorf("the remote refs are:\n%s", refs)
+	}
+	if got := testGit(t, d.Work(), "symbolic-ref", "refs/remotes/origin/HEAD"); got != "refs/remotes/origin/main" {
+		t.Errorf("origin/HEAD = %s", got)
+	}
+	if got := testGit(t, d.Work(), "config", "user.name"); got != "The Person" {
+		t.Errorf("user.name = %s", got)
+	}
+}
+
+// TestWithoutCredentials is an address per kind.
+func TestWithoutCredentials(t *testing.T) {
+	for raw, want := range map[string]string{
+		"https://me:secret@host.example/a.git": "https://host.example/a.git",
+		"https://token@host.example/a.git":     "https://host.example/a.git",
+		"ssh://git:secret@host.example/a.git":  "ssh://git@host.example/a.git",
+		"git@host.example:a.git":               "git@host.example:a.git",
+		"/srv/a.git":                           "/srv/a.git",
+	} {
+		if got := withoutCredentials(raw); got != want {
+			t.Errorf("withoutCredentials(%s) = %s, want %s", raw, got, want)
+		}
+	}
+}
+
+// TestTheCheckoutGetsThePersonsLFSSettings is a repository with LFS objects and an endpoint: a
+// stand-in filter records the options git passed to the checkout. git-lfs itself does not run.
+func TestTheCheckoutGetsThePersonsLFSSettings(t *testing.T) {
+	isolate(t)
+	src, _ := person(t)
+	write(t, src, ".gitattributes", "*.bin filter=fake\n")
+	write(t, src, "big.bin", "pointer\n")
+	commitAll(t, src, "a filtered file")
+	write(t, src, ".git/lfs/objects/keep", "x\n")
+	testGit(t, src, "config", "lfs.url", "https://lfs.example/acme/app")
+	seen := filepath.Join(t.TempDir(), "seen")
+	smudge := filepath.Join(t.TempDir(), "smudge.sh")
+	if err := os.WriteFile(smudge, []byte("#!/bin/sh\nprintf '%s\\n' \"$GIT_CONFIG_PARAMETERS\" >> '"+seen+"'\ncat\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	config := t.TempDir()
+	write(t, config, "gitconfig", "[filter \"fake\"]\n\tsmudge = "+smudge+"\n\trequired = true\n")
+	t.Setenv("GIT_CONFIG_GLOBAL", filepath.Join(config, "gitconfig"))
+	cloneRun(t, src)
+	data, err := os.ReadFile(seen)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"lfs.storage", filepath.Join(".git", "lfs"), "lfs.url", "https://lfs.example/acme/app"} {
+		if !strings.Contains(string(data), want) {
+			t.Errorf("the filter's options have no %s:\n%s", want, data)
+		}
+	}
+}
+
+// TestAFilterThatCannotRunStopsTheClone is a filter set as required whose program fails: the
+// clone stops, so no run works on a checkout the filter did not write.
+func TestAFilterThatCannotRunStopsTheClone(t *testing.T) {
+	isolate(t)
+	src, _ := person(t)
+	write(t, src, ".gitattributes", "*.bin filter=fake\n")
+	write(t, src, "big.bin", "pointer\n")
+	commitAll(t, src, "a filtered file")
+	config := t.TempDir()
+	write(t, config, "gitconfig", "[filter \"fake\"]\n\tsmudge = /bin/false\n\trequired = true\n")
+	t.Setenv("GIT_CONFIG_GLOBAL", filepath.Join(config, "gitconfig"))
+	d := newDir(t)
+	_, err := d.Clone(context.Background(), src, branch)
+	if err == nil || !strings.HasPrefix(err.Error(), "check that git can check out ") {
+		t.Errorf("err = %v", err)
+	}
+}
+
+// TestAPartialCloneStops is a partial clone: the clone stops with the commands that fetch the
+// missing objects, and after those commands it passes.
+func TestAPartialCloneStops(t *testing.T) {
+	isolate(t)
+	origin, _ := person(t)
+	testGit(t, origin, "config", "uploadpack.allowFilter", "true")
+	src := filepath.Join(t.TempDir(), "partial")
+	testGit(t, t.TempDir(), "-c", "protocol.file.allow=always", "clone", "--quiet", "--filter=blob:none", "file://"+origin, src)
+	d := newDir(t)
+	_, err := d.Clone(context.Background(), src, branch)
+	if err == nil || !strings.Contains(err.Error(), "git fetch --refetch origin") {
+		t.Fatalf("err = %v", err)
+	}
+	testGit(t, src, "config", "--unset", "remote.origin.partialclonefilter")
+	testGit(t, src, "-c", "protocol.file.allow=always", "fetch", "--quiet", "--refetch", "origin")
+	testGit(t, src, "config", "--unset", "remote.origin.promisor")
+	again, err := New("run-3")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = again.Remove() })
+	if _, err := again.Clone(context.Background(), src, branch); err != nil {
+		t.Errorf("after the commands: %v", err)
+	}
+}
+
+// TestABranchAboveTheRunsBranchStops is a person's branch named qory: the run's branch cannot
+// go below it, and the line has the rename as its fix.
+func TestABranchAboveTheRunsBranchStops(t *testing.T) {
+	isolate(t)
+	src, base := person(t)
+	testGit(t, src, "branch", "qory", base)
+	d := newDir(t)
+	_, err := d.Clone(context.Background(), src, branch)
+	if err == nil || !strings.HasPrefix(err.Error(), "rename your branch qory in ") {
+		t.Errorf("err = %v", err)
+	}
+}
+
+// TestAFurtherRepositoryGetsItsSubmodules is a repository under .qory/repositories with a
+// submodule: the copy has the submodule's files.
+func TestAFurtherRepositoryGetsItsSubmodules(t *testing.T) {
+	isolate(t)
+	src, _ := person(t)
+	further, sub := withSubmodule(t)
+	at := filepath.Join(src, ".qory", "repositories")
+	if err := os.MkdirAll(at, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(further, filepath.Join(at, "other")); err != nil {
+		t.Fatal(err)
+	}
+	d, repos := cloneRun(t, src)
+	if len(repos) != 2 {
+		t.Fatalf("repos = %+v", repos)
+	}
+	if got := read(t, filepath.Join(d.Work(), ".qory", "repositories", "other"), sub+"/lib.txt"); got != "lib\n" {
+		t.Errorf("the submodule's file has %q", got)
 	}
 }
 
