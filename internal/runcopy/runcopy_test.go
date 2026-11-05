@@ -3435,3 +3435,26 @@ func TestDisarmWithNoFreeNameCountsTheNames(t *testing.T) {
 		t.Errorf("the line is %q", err)
 	}
 }
+
+// TestAnOrphanHeadInASHA256Repository is a branch with no commit in a repository of each object
+// format: the empty tree the session compares with has that format.
+func TestAnOrphanHeadInASHA256Repository(t *testing.T) {
+	for _, format := range []string{"sha1", "sha256"} {
+		t.Run(format, func(t *testing.T) {
+			isolate(t)
+			sessionGit(t)
+			src := filepath.Join(t.TempDir(), "person")
+			if err := os.Mkdir(src, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			testGit(t, src, "init", "--quiet", "-b", "main", "--object-format="+format)
+			write(t, src, "README.md", "hello\n")
+			commitAll(t, src, "first")
+			d, repos := cloneRun(t, src)
+			testGit(t, d.Work(), "checkout", "--quiet", "--orphan", "o")
+			testGit(t, d.Work(), "rm", "-rf", "--quiet", ".")
+			write(t, d.Work(), "new.txt", "new\n")
+			noBundle(t, d, repos, true)
+		})
+	}
+}

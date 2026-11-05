@@ -583,14 +583,21 @@ func TestARunFromACodeHasTheShortTimeAfterASignal(t *testing.T) {
 func TestTheRemovalOfTheSetupHasALimit(t *testing.T) {
 	copyCheckout(t)
 	agentInCopy(t, func(session.SessionSpec) {})
-	removesSetupWith(t, func(ctx context.Context) error {
+	removals := 0
+	_, _, restore := cmd.OpenNowhereWith(cmd.Nowhere{RemoveSetup: func(ctx context.Context) error {
+		removals++
 		if at, ok := ctx.Deadline(); !ok || time.Until(at) > 3*time.Minute {
 			t.Errorf("the removal has until %s, %v", at, ok)
 		}
 		return nil
-	})
+	}})
+	defer restore()
+	cmd.RunGitSessionsOnHost()
 	if out, err := run(t, "run", "claude", "--", "-p", "hi"); err != nil {
 		t.Fatalf("%v\n%s", err, out)
+	}
+	if removals == 0 {
+		t.Error("the run removed no setup")
 	}
 }
 
@@ -1550,4 +1557,135 @@ func TestALocalReturnCutAfterASignalHasItsBudget(t *testing.T) {
 	}
 	wants(t, out, "qory run got SIGTERM, and the step reached its limit of 200ms during the git session")
 	lacks(t, out, "limit of 15s")
+}
+
+// commitIn commits every change in dir with an identity for the commit.
+func commitIn(t *testing.T, dir, message string) {
+	t.Helper()
+	gitOutput(t, dir, "add", "-A")
+	gitOutput(t, dir, "-c", "user.name=agent", "-c", "user.email=agent@example.com", "commit", "--quiet", "--allow-empty", "-m", message)
+}
+
+// workLeftBehind is each way an agent leaves work that no bundle has, with nothing past the base
+// commit, in the copy at dir.
+var workLeftBehind = map[string]func(t *testing.T, dir string){
+	"stash": func(t *testing.T, dir string) {
+		writeFile(t, filepath.Join(dir, "README.md"), "stashed\n")
+		gitOutput(t, dir, "-c", "user.name=agent", "-c", "user.email=agent@example.com", "stash", "--quiet")
+	},
+	"tag then reset": func(t *testing.T, dir string) {
+		writeFile(t, filepath.Join(dir, "x.txt"), "x\n")
+		commitIn(t, dir, "x")
+		gitOutput(t, dir, "tag", "keep")
+		gitOutput(t, dir, "reset", "--quiet", "--hard", "HEAD~1")
+	},
+	"detached commit": func(t *testing.T, dir string) {
+		on := strings.TrimSpace(gitOutput(t, dir, "branch", "--show-current"))
+		gitOutput(t, dir, "checkout", "--quiet", "--detach")
+		writeFile(t, filepath.Join(dir, "x.txt"), "x\n")
+		commitIn(t, dir, "x")
+		gitOutput(t, dir, "checkout", "--quiet", on)
+	},
+	"new repository": func(t *testing.T, dir string) {
+		inner := filepath.Join(dir, "inner")
+		writeFile(t, filepath.Join(inner, "x.txt"), "x\n")
+		gitOutput(t, inner, "init", "--quiet")
+		commitIn(t, inner, "x")
+	},
+	"orphan": func(t *testing.T, dir string) {
+		gitOutput(t, dir, "checkout", "--quiet", "--orphan", "o")
+		gitOutput(t, dir, "rm", "-rf", "--quiet", ".")
+		writeFile(t, filepath.Join(dir, "new.txt"), "new\n")
+	},
+}
+
+// TestWorkLeftBehindKeepsTheCopyOfALocalRun is each way of [workLeftBehind] in a local run: the
+// line is not that the run made no commit, the run exits 1, and the copy stays.
+func TestWorkLeftBehindKeepsTheCopyOfALocalRun(t *testing.T) {
+	for name, agent := range workLeftBehind {
+		t.Run(strings.ReplaceAll(name, " ", "-"), func(t *testing.T) {
+			root := copyCheckout(t)
+			var work string
+			agentInCopy(t, func(spec session.SessionSpec) {
+				work = spec.Dir
+				agent(t, spec.Dir)
+			})
+			cmd.RunGitSessionsOnHost()
+			out, err := run(t, "run", "claude", "--", "-p", "hi")
+			if cmd.ExitCode(err) != 1 {
+				t.Errorf("exit %d, want 1:\n%s", cmd.ExitCode(err), out)
+			}
+			lacks(t, out, "no action needed")
+			wants(t, out, "part of the run's work did not come back", "read the run's files in "+work)
+			if _, err := os.Lstat(work); err != nil {
+				t.Errorf("the copy is gone: %v", err)
+			}
+			wantDisarmed(t, work)
+			if got := gitOutput(t, root, "for-each-ref", "refs/heads/qory/"); got != "" {
+				t.Errorf("a run's branch came back: %s", got)
+			}
+		})
+	}
+}
+
+// TestAHeadBeforeTheBaseCommitLosesNoFile is an agent that checked out a commit older than the
+// base commit and left no other work: no commit that deletes the base commit's files comes back.
+func TestAHeadBeforeTheBaseCommitLosesNoFile(t *testing.T) {
+	root := copyCheckout(t)
+	writeFile(t, filepath.Join(root, "second.txt"), "second\n")
+	runGit(t, root, "add", "second.txt")
+	runGit(t, root, "commit", "--quiet", "-m", "second")
+	agentInCopy(t, func(spec session.SessionSpec) {
+		gitOutput(t, spec.Dir, "checkout", "--quiet", "--detach", "HEAD~1")
+	})
+	cmd.RunGitSessionsOnHost()
+	out, err := run(t, "run", "claude", "--", "-p", "hi")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	lacks(t, out, "part of the run's work did not come back")
+	if got := gitOutput(t, root, "for-each-ref", "refs/heads/qory/"); got != "" {
+		t.Errorf("a run's branch came back: %s", got)
+	}
+}
+
+// TestAnOrphanHeadPushesNoDeletion is an agent with a commit on the work item's branch, then on a
+// branch with no commit: the branch reaches the forge as the agent left it, with no commit that
+// deletes its files, and the line says that part of the work stayed.
+func TestAnOrphanHeadPushesNoDeletion(t *testing.T) {
+	p := walledPush(t)
+	r := p.run(t, func(dir string) {
+		writeFile(t, filepath.Join(dir, "committed.txt"), "committed\n")
+		commitIn(t, dir, "Add a file")
+		gitOutput(t, dir, "checkout", "--quiet", "--orphan", "o")
+		gitOutput(t, dir, "rm", "-rf", "--quiet", ".")
+		writeFile(t, filepath.Join(dir, "new.txt"), "new\n")
+	}, nil)
+	wants(t, r.out, "qory run: part of the run's work did not come back")
+	head := p.branchHead(t)
+	if head == "" {
+		t.Fatalf("no branch reached the forge:\n%s", r.out)
+	}
+	tree := gitOutput(t, p.bare, "ls-tree", "-r", "--name-only", head)
+	wants(t, tree, "committed.txt", "README.md")
+	lacks(t, tree, "new.txt")
+	if got := gitOutput(t, p.bare, "log", "-1", "--format=%s", head); !strings.Contains(got, "Add a file") {
+		t.Errorf("the branch ends with %q", got)
+	}
+}
+
+// TestWorkLeftBehindHasItsLineOnThePushPath is each way of [workLeftBehind] in a run with the push
+// step: no branch reaches the forge, and the line shows that work stayed behind.
+func TestWorkLeftBehindHasItsLineOnThePushPath(t *testing.T) {
+	for name, agent := range workLeftBehind {
+		t.Run(strings.ReplaceAll(name, " ", "-"), func(t *testing.T) {
+			p := walledPush(t)
+			r := p.run(t, func(dir string) { agent(t, dir) }, nil)
+			wants(t, r.out, "qory run: part of the run's work did not come back")
+			lacks(t, r.out, "no action needed")
+			if head := p.branchHead(t); head != "" {
+				t.Errorf("a branch reached the forge at %s:\n%s", head, r.out)
+			}
+		})
+	}
 }
