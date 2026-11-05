@@ -1276,3 +1276,138 @@ func TestTheGitSessionUsesTheMessageItIsGiven(t *testing.T) {
 		t.Errorf("the commit's message is %q", got)
 	}
 }
+
+// TestCopyArtifactsBackBringsOnlyRegularFiles is a run's .qory/artifacts in a clone: a version
+// and the store's .gitignore come back; a link, a .git, a folder that git takes as a git
+// folder and a pipe do not; the person's other file stays; and no other file of .qory comes.
+func TestCopyArtifactsBackBringsOnlyRegularFiles(t *testing.T) {
+	isolate(t)
+	src, _ := person(t)
+	outside := filepath.Join(t.TempDir(), "outside")
+	write(t, outside, "secret.txt", "secret\n")
+	write(t, src, ".qory/artifacts/mine/kept.txt", "the person\n")
+	write(t, src, ".qory/artifacts/mine/both.txt", "the person\n")
+	d, _ := cloneRun(t, src)
+	store := ".qory/artifacts/"
+	write(t, d.Work(), store+".gitignore", "*\n")
+	write(t, d.Work(), store+"note/main/1/note.md", "the run\n")
+	write(t, d.Work(), store+"mine/both.txt", "the run\n")
+	write(t, d.Work(), store+"sub/.git/config", "[core]\n\tfsmonitor = x\n")
+	write(t, d.Work(), store+"bare/HEAD", "ref: refs/heads/main\n")
+	write(t, d.Work(), store+"bare/refs/x", "x\n")
+	write(t, d.Work(), store+"bare/objects/x", "x\n")
+	write(t, d.Work(), ".qory/harness/entry", "the compose\n")
+	link(t, d.Work(), store+"out", outside)
+	link(t, d.Work(), store+"note/main/1/secret.txt", filepath.Join(outside, "secret.txt"))
+	if err := syscall.Mkfifo(filepath.Join(d.Work(), ".qory", "artifacts", "pipe"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := d.CopyArtifactsBack(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if read(t, src, store+"note/main/1/note.md") != "the run\n" || read(t, src, store+".gitignore") != "*\n" {
+		t.Errorf("the version did not come back: %+v", got)
+	}
+	if read(t, src, store+"mine/kept.txt") != "the person\n" || read(t, src, store+"mine/both.txt") != "the person\n" {
+		t.Errorf("the person's files changed: %+v", got)
+	}
+	if !slices.Contains(got.Conflicts, store+"mine/both.txt") {
+		t.Errorf("the conflicts are %v", got.Conflicts)
+	}
+	for _, gone := range []string{store + "out", store + "note/main/1/secret.txt", store + "sub/.git", store + "bare", store + "pipe", ".qory/harness"} {
+		if _, err := os.Lstat(filepath.Join(src, gone)); err == nil {
+			t.Errorf("%s came back", gone)
+		}
+	}
+	for _, skipped := range []string{store + "out", store + "note/main/1/secret.txt", store + "bare", store + "pipe"} {
+		if !slices.Contains(got.Skipped, skipped) {
+			t.Errorf("%s is not among the left out %v", skipped, got.Skipped)
+		}
+	}
+}
+
+// TestCopyArtifactsBackFollowsNoLinkOfThePerson is a link of the person's at .qory and at
+// .qory/artifacts: nothing is written through it. A link in the copy's path brings nothing.
+func TestCopyArtifactsBackFollowsNoLinkOfThePerson(t *testing.T) {
+	isolate(t)
+	for _, at := range []string{".qory", ".qory/artifacts"} {
+		t.Run(at, func(t *testing.T) {
+			src, _ := person(t)
+			outside := t.TempDir()
+			link(t, src, at, outside)
+			d, _ := cloneRun(t, src)
+			if err := os.RemoveAll(filepath.Join(d.Work(), ".qory")); err != nil {
+				t.Fatal(err)
+			}
+			write(t, d.Work(), ".qory/artifacts/note.md", "the run\n")
+			got, err := d.CopyArtifactsBack(src)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !slices.Contains(got.Skipped, at) {
+				t.Errorf("the left out are %v, want %s", got.Skipped, at)
+			}
+			names, err := os.ReadDir(outside)
+			if err != nil || len(names) != 0 {
+				t.Errorf("the folder behind the link has %v (%v)", names, err)
+			}
+			if err := d.Remove(); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+	src, _ := person(t)
+	d, _ := cloneRun(t, src)
+	outside := t.TempDir()
+	write(t, outside, "note.md", "outside\n")
+	if err := os.RemoveAll(filepath.Join(d.Work(), ".qory")); err != nil {
+		t.Fatal(err)
+	}
+	link(t, d.Work(), ".qory", outside)
+	got, err := d.CopyArtifactsBack(src)
+	if err != nil || !slices.Contains(got.Skipped, ".qory") {
+		t.Errorf("a link at the copy's .qory: %+v, %v", got, err)
+	}
+	if _, err := os.Lstat(filepath.Join(src, ".qory")); err == nil {
+		t.Error(".qory is in the person's repository")
+	}
+}
+
+// TestCopyArtifactsBackStopsAtTheBudget is a run past the file budget and past the byte
+// budget: the error starts with its fix, and nothing past the budget is written.
+func TestCopyArtifactsBackStopsAtTheBudget(t *testing.T) {
+	isolate(t)
+	src, _ := person(t)
+	d, _ := cloneRun(t, src)
+	write(t, d.Work(), ".qory/artifacts/a.txt", "12345\n")
+	write(t, d.Work(), ".qory/artifacts/b.txt", "12345\n")
+	_, err := d.artifactsBackWith(src, 1, 1<<20)
+	hasPrefix(t, "the file budget", err, "copy the rest from ")
+	if _, serr := os.Stat(filepath.Join(src, ".qory", "artifacts", "b.txt")); serr == nil {
+		t.Error("the file past the budget came back")
+	}
+	_, err = d.artifactsBackWith(t.TempDir(), 100, 1)
+	hasPrefix(t, "the byte budget", err, "copy the rest from ")
+}
+
+// TestCopyArtifactsBackOfAPlainFolderTakesTheRunsChange is a version of the person's that the
+// copy of a plain folder started with and the run changed: the record shows it is the run's
+// change, so it comes back.
+func TestCopyArtifactsBackOfAPlainFolderTakesTheRunsChange(t *testing.T) {
+	isolate(t)
+	src := t.TempDir()
+	write(t, src, ".qory/artifacts/note.md", "first\n")
+	d := newDir(t)
+	if err := d.CopyFolder(src); err != nil {
+		t.Fatal(err)
+	}
+	write(t, d.Work(), ".qory/artifacts/note.md", "the run\n")
+	got, err := d.CopyArtifactsBack(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if read(t, src, ".qory/artifacts/note.md") != "the run\n" {
+		t.Errorf("the run's change did not come back: %+v", got)
+	}
+}

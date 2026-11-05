@@ -130,6 +130,27 @@ func (c *runCopy) done(report func(string)) {
 	}
 }
 
+// artifactsBack copies .qory/artifacts of the copy back to the person's, once the run's
+// containers are gone, with or without a commit: the git session leaves .qory out. It prints
+// what it left out. A file you both have keeps your version, so the copy stays with the
+// run's. It returns false when the copy back stopped.
+func (c *runCopy) artifactsBack(report func(string)) bool {
+	res, err := c.dir.CopyArtifactsBack(c.root)
+	if len(res.Skipped) > 0 {
+		report(fmt.Sprintf(textCopyLeftOut, shownPaths(res.Skipped)))
+	}
+	if len(res.Conflicts) > 0 {
+		report(fmt.Sprintf(textCopyConflicts, shownPaths(res.Conflicts)))
+		c.kept(report)
+	}
+	if err != nil {
+		report(shownError(err))
+		c.kept(report)
+		return false
+	}
+	return true
+}
+
 // kept marks the copy to stay and prints where it is, once.
 func (c *runCopy) kept(report func(string)) {
 	if c.keep {

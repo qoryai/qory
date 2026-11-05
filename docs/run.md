@@ -3439,6 +3439,14 @@ A commit of the run that adds `.git` or `.qory` at the top of a repository bring
 back. A write run of a work item pushes from the checked repository instead of fetching
 into your repository: see [The push step of a write run](#the-push-step-of-a-write-run).
 
+**Artifacts.** Outside a control plane, `qory artifact push` keeps versions in
+`.qory/artifacts`, which the commits leave out. Once the run's containers are gone, with or
+without a commit and also past the limit of the git session, qory copies the regular files
+of that folder from the copy to your `.qory/artifacts`, by the same rules as a folder that
+is not a repository. A file you already have with other content stays, qory lists it, and
+the copy stays too with the run's version. The clone starts with no `.qory/artifacts`, so a
+run in a repository numbers its versions from 1 and does not see yours.
+
 **A folder that is not a repository.** qory copies the folder and, once the containers are
 gone, copies back the regular files that the run added or changed, and deletes those it
 deleted. It leaves out links, every `.git` and `.qory`, and a qory file whose settings

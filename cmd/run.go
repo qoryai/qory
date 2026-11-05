@@ -1105,6 +1105,11 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				}
 			}
 			closed := closeRun(out)
+			// A failed close may leave a container of the run, which could still write the copy.
+			artifactsBack := true
+			if copied != nil && !pushes && closed != nil {
+				artifactsBack = copied.artifactsBack(said)
+			}
 			if err != nil {
 				return failed(err)
 			}
@@ -1158,7 +1163,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			default:
 				back = copied.comeBack(backCtx, spec.RunID, said)
 			}
-			if !back && ended == nil {
+			if (!back || !artifactsBack) && ended == nil {
 				return reported(&exitError{code: 1})
 			}
 			return ended

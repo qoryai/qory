@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path"
 	"slices"
@@ -16,6 +17,8 @@ import (
 	"strings"
 
 	"golang.org/x/sys/unix"
+
+	"github.com/qoryai/qory/internal/checkout"
 )
 
 // maxCopyBackFiles is the most files [Dir.CopyBack] writes from one run.
@@ -56,6 +59,10 @@ type copyBack struct {
 	skipped  map[string]bool
 	bytes    int64
 }
+
+// artifactsFolder is the folder under .qory where qory artifact push keeps versions outside
+// a control plane.
+const artifactsFolder = "artifacts"
 
 // errBudget is a copy-back past [maxCopyBackFiles] or [maxCopyBackBytes].
 var errBudget = errors.New("past the budget")
@@ -117,6 +124,80 @@ func (d Dir) copyBackWith(dest string, maxFiles int, maxBytes int64) (CopyBackRe
 		return result, err
 	}
 	return result, nil
+}
+
+// CopyArtifactsBack copies the regular files of .qory/artifacts in [Dir.Work], where qory
+// artifact push keeps versions outside a control plane, into .qory/artifacts of dest, the
+// person's checkout or folder. The git session leaves .qory out of its commits, so this
+// runs with or without a commit, once the run's containers are gone and before
+// [Dir.Remove]. The folder holds no qory setting, so no acting key applies.
+//
+// The rules of [Dir.CopyBack] apply: it follows no link on any part of a path, in the copy
+// or in dest, leaves out each link, each .git and .qory at any depth, each file that is not
+// regular and each folder that git would take as a git folder, and stops at the same budget.
+// A file that the person has with other content stays and is listed as a conflict. It
+// deletes nothing.
+func (d Dir) CopyArtifactsBack(dest string) (CopyBackResult, error) {
+	return d.artifactsBackWith(dest, maxCopyBackFiles, maxCopyBackBytes)
+}
+
+// artifactsBackWith is [Dir.CopyArtifactsBack] with a budget of maxFiles files and maxBytes
+// bytes.
+func (d Dir) artifactsBackWith(dest string, maxFiles int, maxBytes int64) (CopyBackResult, error) {
+	var result CopyBackResult
+	rec, err := d.readRecord()
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		// A clone has no record: only a plain folder's copy started with the person's files.
+		rec = folderRecord{}
+	case err != nil:
+		return result, err
+	}
+	src, err := openRoot(d.Work())
+	if err != nil {
+		return result, fileErr(d.Work(), err)
+	}
+	defer unix.Close(src)
+	dst, err := unix.Open(dest, dirFlags, 0)
+	if err != nil {
+		return result, fmt.Errorf(textCopyBackOpen, shown(dest), err)
+	}
+	defer unix.Close(dst)
+	c := &copyBack{maxFiles: maxFiles, maxBytes: maxBytes, rec: rec, result: &result, qory: map[string]bool{}, skipped: map[string]bool{}}
+	from, to := src, dst
+	rel := ""
+	for _, name := range []string{checkout.Dir, artifactsFolder} {
+		rel = path.Join(rel, name)
+		sub, err := unix.Openat(from, name, dirFlags, 0)
+		switch {
+		case errors.Is(err, unix.ENOENT):
+			return result, nil
+		case errors.Is(err, unix.ELOOP), errors.Is(err, unix.ENOTDIR):
+			c.skip(rel, true)
+			return result, nil
+		case err != nil:
+			return result, fileErr(rel, err)
+		}
+		defer unix.Close(sub)
+		if err := unix.Mkdirat(to, name, 0o777); err != nil && !errors.Is(err, unix.EEXIST) {
+			return result, fileErr(rel, err)
+		}
+		into, err := unix.Openat(to, name, dirFlags, 0)
+		switch {
+		case errors.Is(err, unix.ELOOP), errors.Is(err, unix.ENOTDIR):
+			c.skip(rel, true)
+			return result, nil
+		case err != nil:
+			return result, fileErr(rel, err)
+		}
+		defer unix.Close(into)
+		from, to = sub, into
+	}
+	err = c.dir(from, to, rel, 0)
+	if errors.Is(err, errBudget) {
+		return result, fmt.Errorf(textCopyBackLimit, shown(d.Work()), maxFiles, maxBytes, strings.Join(result.Copied, ", "))
+	}
+	return result, err
 }
 
 // compareQory lists the acting changes of the qory files between dst, the person's

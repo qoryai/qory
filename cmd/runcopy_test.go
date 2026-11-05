@@ -527,3 +527,114 @@ func TestAWriteRunHasTwoSessionsInItsRecord(t *testing.T) {
 		t.Errorf("the record has %d started sessions, want 2\n%s", started, out)
 	}
 }
+
+// TestAWorkingFolderInTheCheckoutStartsInTheCopy is a run from a folder of the commit at HEAD,
+// which starts in that folder of the copy, and from a folder the commit does not have, which
+// stops with the fix first.
+func TestAWorkingFolderInTheCheckoutStartsInTheCopy(t *testing.T) {
+	root := copyCheckout(t)
+	writeFile(t, filepath.Join(root, "sub", "file.txt"), "first\n")
+	runGit(t, root, "add", "sub")
+	runGit(t, root, "commit", "--quiet", "-m", "sub")
+	var dir string
+	agentInCopy(t, func(spec session.SessionSpec) { dir = spec.Dir })
+	t.Chdir(filepath.Join(root, "sub"))
+	if out, err := run(t, "run", "claude", "--", "-p", "hi"); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if filepath.Base(dir) != "sub" || filepath.Base(filepath.Dir(dir)) != "work" {
+		t.Errorf("the session starts in %s, want the folder sub of the copy", dir)
+	}
+	missing := filepath.Join(root, "missing")
+	if err := os.Mkdir(missing, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(missing)
+	_, err := run(t, "run", "claude", "--", "-p", "hi")
+	if err == nil || !strings.HasPrefix(err.Error(), "commit missing, or run qory in a folder that the commit at HEAD has") {
+		t.Errorf("a folder the commit lacks: %v", err)
+	}
+}
+
+// TestASessionThatFailedStillBringsItsCommitsBack is an agent that exits 3 after it wrote a
+// file: the file is on the run's branch, and the run exits 3.
+func TestASessionThatFailedStillBringsItsCommitsBack(t *testing.T) {
+	root := copyCheckout(t)
+	t.Cleanup(cmd.SetJoinResult(func(spec session.SessionSpec) (*session.Result, error) {
+		if spec.OnVariables != nil {
+			spec.OnVariables(session.Applied{})
+		}
+		writeFile(t, filepath.Join(spec.Dir, "left.txt"), "left\n")
+		return &session.Result{State: event.StateFailed, ExitCode: 3}, nil
+	}))
+	out, err := run(t, "run", "claude", "--", "-p", "hi")
+	if cmd.ExitCode(err) != 3 {
+		t.Fatalf("%v (exit %d), want exit 3\n%s", err, cmd.ExitCode(err), out)
+	}
+	gitOutput(t, root, "cat-file", "-e", runBranchOf(t, out)+":left.txt")
+}
+
+// TestARunClosedDuringItsSessionKeepsTheCopy is a run that the gateway closed while its agent
+// ran: no git session starts, the copy stays, and the line has its path.
+func TestARunClosedDuringItsSessionKeepsTheCopy(t *testing.T) {
+	copyCheckout(t)
+	var dir string
+	t.Cleanup(cmd.SetJoinResult(func(spec session.SessionSpec) (*session.Result, error) {
+		if spec.OnVariables != nil {
+			spec.OnVariables(session.Applied{})
+		}
+		dir = spec.Dir
+		return &session.Result{RunClosed: true}, nil
+	}))
+	t.Cleanup(cmd.SetGitSession(func(context.Context, session.SessionSpec) (*session.Result, error) {
+		t.Error("a git session started")
+		return &session.Result{}, nil
+	}))
+	out, _ := run(t, "run", "claude", "--", "-p", "hi")
+	wants(t, out, "look at the run's copy in "+dir+": the run ended before the git session started")
+	if _, err := os.Stat(dir); err != nil {
+		t.Errorf("the copy did not stay: %v", err)
+	}
+}
+
+// TestARunsArtifactsComeBackWithNoCommit is a run with no commit whose agent kept a version in
+// .qory/artifacts and left a link there: the version is in the person's .qory/artifacts, the
+// link is not, and the line lists it. A git session past its limit brings the version too.
+func TestARunsArtifactsComeBackWithNoCommit(t *testing.T) {
+	for name, limit := range map[string]bool{"no commit": false, "past the limit": true} {
+		t.Run(name, func(t *testing.T) {
+			root := copyCheckout(t)
+			secret := filepath.Join(tempDir(t), "secret.txt")
+			writeFile(t, secret, "secret\n")
+			agentInCopy(t, func(spec session.SessionSpec) {
+				store := filepath.Join(spec.Dir, ".qory", "artifacts")
+				writeFile(t, filepath.Join(store, ".gitignore"), "*\n")
+				writeFile(t, filepath.Join(store, "note", "main", "1", "note.md"), "the run\n")
+				if err := os.Symlink(secret, filepath.Join(store, "note", "main", "1", "secret.txt")); err != nil {
+					t.Fatal(err)
+				}
+			})
+			if limit {
+				t.Cleanup(cmd.SetGitSession(func(context.Context, session.SessionSpec) (*session.Result, error) {
+					return &session.Result{TimedOut: true}, nil
+				}))
+			}
+			out, err := run(t, "run", "claude", "--", "-p", "hi")
+			if limit && cmd.ExitCode(err) != 1 || !limit && err != nil {
+				t.Fatalf("%v (exit %d)\n%s", err, cmd.ExitCode(err), out)
+			}
+			version := filepath.Join(root, ".qory", "artifacts", "note", "main", "1")
+			data, err := os.ReadFile(filepath.Join(version, "note.md"))
+			if err != nil || string(data) != "the run\n" {
+				t.Errorf("the version has %q (%v)\n%s", data, err, out)
+			}
+			if _, err := os.Lstat(filepath.Join(version, "secret.txt")); err == nil {
+				t.Error("the run's link came back")
+			}
+			wants(t, out, "left out of the copy back to your folder: ", "secret.txt")
+			if got := gitOutput(t, root, "for-each-ref", "refs/heads/qory/"); got != "" {
+				t.Errorf("a run's branch came back: %s", got)
+			}
+		})
+	}
+}
