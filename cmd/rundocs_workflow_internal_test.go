@@ -29,12 +29,18 @@ var workflowForms = map[string]map[string]string{
 // no workflow, so the compose passes with no form too.
 func composedWith(t *testing.T, runtime string, forms ...string) report.Report {
 	t.Helper()
+	return composedWithStack(t, runtime, "", forms...)
+}
+
+// composedWithStack is [composedWith] with more of the stack, such as its bind.
+func composedWithStack(t *testing.T, runtime, more string, forms ...string) report.Report {
+	t.Helper()
 	for _, name := range []string{"HOME", "XDG_CONFIG_HOME", "XDG_STATE_HOME", "XDG_CACHE_HOME", "XDG_DATA_HOME"} {
 		t.Setenv(name, t.TempDir())
 	}
 	dir := t.TempDir()
 	files := map[string]string{
-		stack.FileName:                   "apiVersion: qory.dev/v1alpha1\nname: core\nmodules:\n  - name: core\n    source: {path: modules/core}\n",
+		stack.FileName:                   "apiVersion: qory.dev/v1alpha1\nname: core\nmodules:\n  - name: core\n    source: {path: modules/core}\n" + more,
 		"modules/core/qory-module.yaml":  "apiVersion: qory.dev/v1alpha1\nname: core\n",
 		"modules/core/skills/a/SKILL.md": "---\nname: a\ndescription: d\n---\n",
 	}
@@ -178,10 +184,11 @@ func TestAWorkflowStartsItsPrefixedEntryFirst(t *testing.T) {
 
 // TestAWorkflowInNoFormStopsWithItsReason is workflowArgs on each runtime with a harness
 // the real compose made with no form of the workflow: the stop with the reason, whose
-// fix adds the prefixed skill and whose cause has both names.
+// fix adds the prefixed form that the runtime can start, a skill or a command, and whose
+// cause has both names.
 func TestAWorkflowInNoFormStopsWithItsReason(t *testing.T) {
-	const want = "add a skill workflow-example to the checkout's harness, or set another workflow in Qory Apiary: the composed harness has no skill or command workflow-example or example (workflow_not_in_harness); the code is used"
-	for _, rt := range []string{"claude", "codex", "cursor", "gemini", "opencode"} {
+	for rt, add := range map[string]string{"claude": "skill", "codex": "skill", "cursor": "skill", "gemini": "command", "opencode": "command"} {
+		want := "add a " + add + " workflow-example to the checkout's harness, or set another workflow in Qory Apiary: the composed harness has no skill or command workflow-example or example (workflow_not_in_harness); the code is used"
 		r, err := codeRunOf(contracts.Documents{Workflow: "example", RunSettings: &contracts.RunSettings{Runtime: rt}})
 		if err != nil {
 			t.Fatal(err)
@@ -191,6 +198,25 @@ func TestAWorkflowInNoFormStopsWithItsReason(t *testing.T) {
 		if !errors.As(err, &ended) || ended.code != reasonWorkflowNotInHarness || err.Error() != want {
 			t.Errorf("%s: %v\nwant %s", rt, err, want)
 		}
+	}
+}
+
+// TestARoleBoundAtThePrefixedNameIsAWorkflowsSkill is a stack that binds the role
+// skills/workflow-example to the skill a: claude starts the skill, by its name, and gemini,
+// which runs no skill by its name, stops with the add a command line.
+func TestARoleBoundAtThePrefixedNameIsAWorkflowsSkill(t *testing.T) {
+	const bind = "bind:\n  skills:\n    workflow-example: a\n"
+	r, err := codeRunOf(contracts.Documents{Workflow: "example", RunSettings: &contracts.RunSettings{Runtime: "claude"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := r.workflowArgs("claude", composedWithStack(t, "claude", bind), "/in", "")
+	if want := headlessStart("claude", "a"); err != nil || !reflect.DeepEqual(got, want) {
+		t.Errorf("claude: got %q, %v\nwant %q", got, err, want)
+	}
+	const want = "add a command workflow-example to the checkout's harness, or set another runtime in Qory Apiary: gemini runs no skill by its name from a headless start, and the composed harness has no command workflow-example or example; the code is used"
+	if _, err := r.workflowArgs("gemini", composedWithStack(t, "gemini", bind), "/in", ""); err == nil || err.Error() != want {
+		t.Errorf("gemini: %v\nwant %s", err, want)
 	}
 }
 

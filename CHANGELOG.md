@@ -240,15 +240,16 @@ release may change what an existing document does, and states it under Upgrading
   there, then fetches. A folder that is not empty and is not a git working tree still
   stops the run.
 - A module may group its skills in folders, at any depth, and qory writes each skill flat
-  for every runtime, at `skills/<name>`. A skill's name is its last folder. Two skills of
-  one name in one module stop the compose. See `docs/harness.md`.
+  for every runtime, at `skills/<name>`. A skill's name is its last folder. Two skills in
+  one module whose names are equal or differ only in case stop the compose. See
+  `docs/harness.md`.
 - A skill or command of a workflow may be named `workflow-<name>`, while the stack and
   `process.yaml` keep `<name>`. A run from a run code starts the first of these that the
   runtime can start: the skill `workflow-<name>`, the command `workflow-<name>`, the skill
   `<name>`, the command `<name>`. A plain name works, and when a harness ships both names,
   the prefixed one runs.
-- A workflow's name in a stack has at most 55 characters, which leaves room for the prefix
-  within 64 characters. A longer name stops the stack's check.
+- A workflow's name in a stack has at most 55 characters, so `workflow-<name>` has at most
+  64 characters. A longer name stops the stack's check.
 - The compose fails, exit 2, for each entry of a stack's `workflows` that no module of
   the stack composes as a skill or command under either name.
 - A run from a run code whose composed harness has no skill or command of the

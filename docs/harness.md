@@ -162,18 +162,19 @@ starts the run. A plain name works: the hello example ships a plain `hello` comm
 a harness ships both names, the prefixed one runs.
 
 A workflow's name is a lower-case letter, then up to 54 lower-case letters, digits and
-hyphens. The limit of 55 characters leaves room for the prefix within 64 characters.
+hyphens. The limit is 55 characters, so `workflow-<name>` has at most 64 characters.
 
 So the stack ships a skill or command, under either name, for each workflow it lists.
 When none of the stack's modules composes one, after their `exclude` and `only`, the
 compose fails with exit 2:
 
 ```
-add a skill workflow-deploy to a module of the base stack core@4b8e2f1a9c7d, or remove deploy from the workflows of its qory-stack.yaml: the stack declares the workflow deploy, and none of its modules ships a skill or command workflow-deploy or deploy
+add a skill or command workflow-deploy to a module of the base stack core@4b8e2f1a9c7d, or remove deploy from the workflows of its qory-stack.yaml: the stack declares the workflow deploy, and none of its modules ships a skill or command workflow-deploy or deploy
 ```
 
 A module that a checkout adds to the stack does not count, because the stack lists the
-workflows.
+workflows. A checkout's exclude does not count either: the compose checks what the stack's
+modules ship before it applies that exclude.
 
 ### Group skills in folders
 
@@ -190,19 +191,27 @@ A skill's name is its last folder, so `exclude`, `only`, `requires`, `bind`, `pr
 `${qory:skills/deploy}` use `deploy`. A folder with `SKILL.md` is a skill, and everything
 below it is that skill's files. Loose files in a group are skipped.
 
+A skill links to another skill with `${qory:skills/<name>}`. A relative path out of a skill's
+folder resolves differently by how qory places the skill: as a link to the source folder, or
+as a copy.
+
 A folder named after a runtime, such as `skills/codex`, is not a group, and neither is a link
 or a folder that a variant reads skills from. Such a folder with no `SKILL.md` stops the
-compose with exit 2, as a folder with no skill below it does:
+compose with exit 2, and so does a folder with no skill below it. The line shows the topmost
+such folder:
 
 ```
-module core: skills/delivery/empty has no SKILL.md
+module core: add SKILL.md to skills/review, or put a skill in a folder below it: skills/review has no SKILL.md and no skill below it
+module core: rename skills/tools/codex, or read it through a variant: a folder named after a runtime is not a group
+module core: remove the link skills/tools/gone, or point it at a skill: it leads nowhere
 ```
 
-Two skills of one name in one module stop the compose with exit 2, because an exclude cannot
-separate them:
+Two skills of one module whose names are equal or differ only in case stop the compose with
+exit 2, because an exclude cannot separate them:
 
 ```
-module core: rename skills/a/review or skills/b/review: both are the skill review, and qory writes skills flat
+module core: rename skills/a/review or skills/b/review: each skill goes to skills/<name>, and both are the skill review
+module core: rename skills/a/Review or skills/b/review: each skill goes to skills/<name>, and these two names differ only in case
 ```
 
 ## See a collision

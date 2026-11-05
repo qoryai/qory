@@ -4,23 +4,13 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"testing"
 
 	"github.com/qoryai/qory/internal/compose"
-	"github.com/qoryai/qory/internal/module"
 	"github.com/qoryai/qory/internal/render"
 	"github.com/qoryai/qory/internal/stack"
 )
-
-// TestRuntimeFoldersAreTheRegisteredRuntimes keeps the module package's list of runtime
-// names equal to the runtimes this qory renders.
-func TestRuntimeFoldersAreTheRegisteredRuntimes(t *testing.T) {
-	if !slices.Equal(module.RuntimeFolders, render.Names()) {
-		t.Errorf("module.RuntimeFolders is %v, and the registered runtimes are %v", module.RuntimeFolders, render.Names())
-	}
-}
 
 // groupedSkillPaths are the folders of each runtime's home, besides the shared skills
 // folder, where a skill is written.
@@ -33,6 +23,7 @@ var groupedSkillPaths = map[string][]string{
 	"copilot":  {"copilot/workspace/.github/skills"},
 	"amp":      nil,
 	"goose":    nil,
+	"any":      nil,
 }
 
 // composeGrouped composes a module with skills in groups of one and two levels for the
@@ -88,7 +79,11 @@ func composeGrouped(t *testing.T, runtime string, opts compose.Options, block st
 // shared folder and the runtime's, with references resolved in a skill's documents, and no
 // group's name is in a skills folder. modules/core keeps the module's tree.
 func TestAGroupedSkillLandsFlatOnEveryRuntime(t *testing.T) {
-	for runtime, folders := range groupedSkillPaths {
+	for _, runtime := range render.Names() {
+		folders, ok := groupedSkillPaths[runtime]
+		if !ok {
+			t.Fatalf("runtime %s has no expectations here", runtime)
+		}
 		t.Run(runtime, func(t *testing.T) {
 			_, home := composeGrouped(t, runtime, compose.Options{}, "")
 			for _, folder := range append([]string{"skills"}, folders...) {
@@ -118,24 +113,39 @@ func TestAGroupedSkillLandsFlatOnEveryRuntime(t *testing.T) {
 }
 
 // TestAWalledCopyLeavesOutAGroupedSkillAnExcludeLeftOut is a module the home holds a copy
-// of, for a walled run, with an exclude of a skill in a group: neither the flat folder nor
-// the group in modules/core has the skill, and the other skill of the group stays.
+// of, for a walled run on each runtime, with an exclude of a skill in a group: neither the
+// flat folders nor the group in modules/core has the skill, and the other skill of the
+// group is a copy in each of them.
 func TestAWalledCopyLeavesOutAGroupedSkillAnExcludeLeftOut(t *testing.T) {
-	opts := compose.Options{Copies: func(string) bool { return true }, Walled: true}
-	_, home := composeGrouped(t, "claude", opts, "    exclude: {skills: [fix]}\n")
-	for _, gone := range []string{"skills/fix", "claude/skills/fix", "modules/core/skills/one/two/fix"} {
-		if _, err := os.Lstat(filepath.Join(home, gone)); !os.IsNotExist(err) {
-			t.Errorf("%s: %v, want it left out", gone, err)
+	for _, runtime := range render.Names() {
+		folders, ok := groupedSkillPaths[runtime]
+		if !ok {
+			t.Fatalf("runtime %s has no expectations here", runtime)
 		}
-	}
-	for _, kept := range []string{"skills/deploy/SKILL.md", "claude/skills/deploy/SKILL.md", "modules/core/skills/one/deploy/SKILL.md"} {
-		info, err := os.Lstat(filepath.Join(home, kept))
-		if err != nil {
-			t.Errorf("%s: %v", kept, err)
-			continue
-		}
-		if info.Mode()&fs.ModeSymlink != 0 {
-			t.Errorf("%s is a link, want a copy", kept)
-		}
+		t.Run(runtime, func(t *testing.T) {
+			opts := compose.Options{Copies: func(string) bool { return true }, Walled: true}
+			_, home := composeGrouped(t, runtime, opts, "    exclude: {skills: [fix]}\n")
+			gone := []string{"modules/core/skills/one/two/fix"}
+			kept := []string{"modules/core/skills/one/deploy/SKILL.md"}
+			for _, folder := range append([]string{"skills"}, folders...) {
+				gone = append(gone, folder+"/fix")
+				kept = append(kept, folder+"/deploy/SKILL.md")
+			}
+			for _, path := range gone {
+				if _, err := os.Lstat(filepath.Join(home, path)); !os.IsNotExist(err) {
+					t.Errorf("%s: %v, want it left out", path, err)
+				}
+			}
+			for _, path := range kept {
+				info, err := os.Lstat(filepath.Join(home, path))
+				if err != nil {
+					t.Errorf("%s: %v", path, err)
+					continue
+				}
+				if info.Mode()&fs.ModeSymlink != 0 {
+					t.Errorf("%s is a link, want a copy", path)
+				}
+			}
+		})
 	}
 }

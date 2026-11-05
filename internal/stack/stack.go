@@ -458,8 +458,9 @@ const (
 // most 64.
 var workflowName = regexp.MustCompile(`^[a-z][a-z0-9-]{0,54}$`)
 
-// WorkflowEntry is the name of the skill or command that a harness ships for the
-// workflow name: workflow-<name>. A stack, a process.yaml and a message use name itself.
+// WorkflowEntry is the prefixed name of a skill or command that a harness ships for the
+// workflow name: workflow-<name>. A harness may ship the plain name too, see
+// [WorkflowEntries]. A stack and a process.yaml use name itself.
 func WorkflowEntry(name string) string { return "workflow-" + name }
 
 // WorkflowEntries are the names a skill or command of the workflow name may have, in the

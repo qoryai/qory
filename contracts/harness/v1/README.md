@@ -195,7 +195,7 @@ schema is [config.schema.json](config.schema.json).
 | `modules[].link` | no | a name at the checkout root, one path segment, linked to the module's directory in the composed tree, so a permission rule or a script refers to the module's files by a checkout-relative path: `harness/scripts/check.sh`. A hard link (§Rendering), each name used once across the modules |
 | `bind` | no | the entry that fills each role a document references (§References), by kind and then by role, to the name of one entry of that kind: `bind: {agents: {coder: rails-coder}}`. The kind is `agents`, `skills` or `commands`. A role's value is one name; a list is refused. A flat key, `agents/coder: rails-coder`, is refused with `Write bind as bind.agents.coder: rails-coder in qory.yaml: bind keys are kinds, and agents/coder is a kind and a role.` A checkout's `bind` sets a role over the base's `bind` and over the modules' `provides` |
 | `extensions` | no | a map of keys the author chooses, each a value of any shape, a scalar, a list or a map of any depth; written into the report as it is and printed by `qory harness inspect`; qory reads nothing in it |
-| `workflows` | no | the settings of each workflow of the stack, by its name: a lower-case letter, then up to 54 lower-case letters, digits and hyphens, 55 characters at most, which leaves room for the prefix `workflow-` within 64 characters. A run that Qory Apiary dispatches from a run code starts the first of these that the runtime can start: the skill `workflow-<name>`, the command `workflow-<name>`, the skill `<name>`, the command `<name>` (docs/run.md, §The run key from a run code). A plain name works, and when a harness ships both names, the prefixed one runs. The compose fails with status 2 for each workflow that no module of the stack composes as a skill or command under either name, after the modules' `exclude` and `only`: `add a skill workflow-<name> to a module of the base stack <stack>, or remove <name> from the workflows of its qory-stack.yaml: the stack declares the workflow <name>, and none of its modules ships a skill or command workflow-<name> or <name>`, or, for a stack that extends none, `add a skill workflow-<name> to a module of the stack in <file>, or remove <name> from its workflows: …`, where `<file>` is the `qory-stack.yaml` or the `qory.yaml` that defines the stack. For a stack that the harness document of a run from a run code defines, the line has `the workspace's harness in Qory Apiary` in place of `the stack in <file>`. A module that a checkout adds to the stack it extends does not count. The harness section of a `qory.yaml` that defines a stack lists them with the same keys and checks; a section that extends a stack takes the base's and lists none |
+| `workflows` | no | the settings of each workflow of the stack, by its name: a lower-case letter, then up to 54 lower-case letters, digits and hyphens, 55 characters at most, so `workflow-<name>` has at most 64 characters. A run that Qory Apiary dispatches from a run code starts the first of these that the runtime can start: the skill `workflow-<name>`, the command `workflow-<name>`, the skill `<name>`, the command `<name>` (docs/run.md, §The run key from a run code). A plain name works, and when a harness ships both names, the prefixed one runs. The compose fails with status 2 for each workflow that no module of the stack composes as a skill or command under either name, after the modules' `exclude` and `only`: `add a skill or command workflow-<name> to a module of the base stack <stack>, or remove <name> from the workflows of its qory-stack.yaml: the stack declares the workflow <name>, and none of its modules ships a skill or command workflow-<name> or <name>`, or, for a stack that extends none, `add a skill or command workflow-<name> to a module of the stack in <file>, or remove <name> from its workflows: …`, where `<file>` is the `qory-stack.yaml` or the `qory.yaml` that defines the stack. For a stack that the harness document of a run from a run code defines, the line has `the workspace's harness in Qory Apiary` in place of `the stack in <file>`. A module that a checkout adds to the stack it extends does not count, and neither does a checkout's exclude: the compose checks what the stack's modules ship before it applies that exclude. The harness section of a `qory.yaml` that defines a stack lists them with the same keys and checks; a section that extends a stack takes the base's and lists none |
 | `workflows.<name>.time_limit` | no | how long a dispatched run of the workflow may run, counted from the run's open, as a Go duration above zero, such as `7h`, `45m` or `1h30m`; qory stops with an error on any other value: `set workflows.<name>.time_limit to a duration above zero, such as 7h or 45m: <value> is not one`. The run's `run_settings.time_limit_minutes`, when Qory Apiary sets it, applies instead, and a workflow without it runs for at most 3 hours |
 | `workflows.<name>.access` | no | the access level the workflow declares for what a dispatched run of it works on, `read` or `write`, and `read` when left out; qory stops with an error on any other value: `set workflows.<name>.access to read or write: <value> is neither`. A dispatched run from a run code sees the checkout read-only when this access is `read` or `access` in the run's documents is `read`, and on Claude Code its settings deny `Edit`, `Write` and `NotebookEdit`; such a run with no wall, with `wall.setup: inside`, or whose image chosen at the run's open has nested Docker, whichever way it was selected, stops before the agent starts (docs/run.md, §Read workflows). The run sees the checkout writable only when both are `write`, or when this access is `write` and the documents have no `access`, as documents with no target do |
 | `extending` | no | what a module of a checkout extending this stack may ship: `kinds`, `instructions`, `settings`, `files` (§Extending a stack). A base without the block cannot be extended |
@@ -662,15 +662,34 @@ Below `skills`, a folder with `SKILL.md` is a skill, and everything below it is 
 files, a nested `SKILL.md` included. A real folder with no `SKILL.md` and with a folder below
 it is a group of skills, at any depth, read by the same rules. qory writes each skill flat for
 every runtime, at `skills/<name>` in the home and at `<name>` in each runtime's skills folder,
-so a skill's name is its last folder. A group appears in no
-name: `modules[].exclude`, `only`, `requires`, `bind`, `provides` and a reference
-(§References) all use `<name>`. Loose files in a group are skipped. These folders stop the
-compose with status 2, `<path> has no SKILL.md`, with the full path below the module: a folder
-with neither `SKILL.md` nor a folder below it, a link to a folder with no `SKILL.md`, a folder
-named after a runtime, and a folder that a variant reads skills from. Two skills of one name in
-one module also stop it with status 2: `rename skills/a/review or skills/b/review: both are the
-skill review, and qory writes skills flat`. The same name in two modules is a collision, status
-3, whose `exclude` lists `<name>`.
+so a skill's name is its last folder. A group appears in no name: `modules[].exclude`, `only`,
+`requires`, `bind`, `provides` and a reference (§References) all use `<name>`. Loose files in a
+group are skipped. A skill links to another skill with `${qory:skills/<name>}`. A relative path
+out of a skill's folder resolves differently by how qory places the skill: as a link to the
+source folder, or as a copy.
+
+A folder that a variant reads skills from composes when that variant is selected. These stop the
+compose with status 2, each with the full path below the module:
+
+- a folder with neither `SKILL.md` nor, apart from dot folders, a folder below it: `add SKILL.md
+  to skills/review: skills/review has no SKILL.md and no skill below it`
+- a group with no skill anywhere below it, by its topmost folder: `add SKILL.md to skills/review,
+  or put a skill in a folder below it: skills/review has no SKILL.md and no skill below it`
+- a folder named after a runtime, with no `SKILL.md`: `rename skills/tools/codex, or read it
+  through a variant: a folder named after a runtime is not a group`
+- a folder that another variant reads skills from, with no `SKILL.md`: `select the variant that
+  reads skills/modern, or change that variant's skills: a folder that a variant reads skills from
+  is not a group`
+- a link to a folder with no `SKILL.md`: `remove the link skills/g/docs, or point it at a skill:
+  it leads to a folder with no SKILL.md`
+- a link that leads nowhere: `remove the link skills/g/gone, or point it at a skill: it leads
+  nowhere`
+- two skills of one module with one name: `rename skills/a/review or skills/b/review: each skill
+  goes to skills/<name>, and both are the skill review`
+- two skills of one module whose names differ only in case: `rename skills/a/Review or
+  skills/b/review: each skill goes to skills/<name>, and these two names differ only in case`
+
+The same name in two modules is a collision, status 3, whose `exclude` lists `<name>`.
 
 `AGENTS.md` and skills are read by every runtime. Agents and commands are written in each
 runtime's format from the one file above; a runtime without the concept skips the kind and

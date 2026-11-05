@@ -1,1 +1,1 @@
-module core: rename skills/a/review or skills/b/review: both are the skill review, and qory writes skills flat
+module core: rename skills/a/review or skills/b/review: each skill goes to skills/<name>, and both are the skill review

@@ -515,7 +515,11 @@ func (r *codeRun) workflowArgs(name string, rep report.Report, in, system string
 		}
 		return nil, fmt.Errorf("add a %s %s to %s, or set another runtime in Qory Apiary: %s runs no %s by its name from a headless start, and the composed harness has no %s %s or %s%s", add, prefixed, r.phrase(), accesskey.ShownName(name, false), runsNo, add, prefixed, plain, codeUsed)
 	}
-	text := fmt.Sprintf("add a skill %s to %s, or set another workflow in Qory Apiary: the composed harness has no skill or command %s or %s (%s)%s", prefixed, r.harnessAt(system), prefixed, plain, reasonWorkflowNotInHarness, codeUsed)
+	add := "skill"
+	if _, ok := h.HeadlessArgs("skills", prefixed, "", ""); !ok {
+		add = "command"
+	}
+	text := fmt.Sprintf("add a %s %s to %s, or set another workflow in Qory Apiary: the composed harness has no skill or command %s or %s (%s)%s", add, prefixed, r.harnessAt(system), prefixed, plain, reasonWorkflowNotInHarness, codeUsed)
 	return nil, &reasonError{code: reasonWorkflowNotInHarness, text: text}
 }
 
