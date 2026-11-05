@@ -1,6 +1,7 @@
 package stack
 
 import (
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -63,8 +64,8 @@ func TestLoadRefusesABrokenWorkflow(t *testing.T) {
 	for _, c := range []struct {
 		body, want string
 	}{
-		{"  Hello: {}\n", `name the workflow "Hello" with a lower-case letter, then up to 63 lower-case letters, digits and hyphens: workflows lists it`},
-		{"  hello_there: {}\n", `name the workflow "hello_there" with a lower-case letter, then up to 63 lower-case letters, digits and hyphens: workflows lists it`},
+		{"  Hello: {}\n", `name the workflow "Hello" with a lower-case letter, then up to 54 lower-case letters, digits and hyphens, 55 characters at most: workflows lists it`},
+		{"  hello_there: {}\n", `name the workflow "hello_there" with a lower-case letter, then up to 54 lower-case letters, digits and hyphens, 55 characters at most: workflows lists it`},
 		{"  hello:\n    time_limit: 7 hours\n", `set workflows.hello.time_limit to a duration above zero, such as 7h or 45m: "7 hours" is not one`},
 		{"  hello:\n    time_limit: 0s\n", `set workflows.hello.time_limit to a duration above zero, such as 7h or 45m: "0s" is not one`},
 		{"  hello:\n    time_limit: -1h\n", `set workflows.hello.time_limit to a duration above zero, such as 7h or 45m: "-1h" is not one`},
@@ -169,5 +170,32 @@ func TestNewComposeRefusesWorkflowsBesideExtends(t *testing.T) {
 	_, err := compose(t, &Stack{Extends: Source{Path: "../base"}, Modules: []Module{{Name: "app"}}, Workflows: map[string]Workflow{"fix": {Access: AccessWrite}}})
 	if err == nil || !strings.HasSuffix(err.Error(), ": "+want) {
 		t.Errorf("%v, want %q", err, want)
+	}
+}
+
+// TestAWorkflowNameHasAtMost55Characters is the stack check at the limit: a name of 55
+// characters loads and [WorkflowEntry] makes one of 64, and a name of 56 stops, with the
+// limit and the name in the line.
+func TestAWorkflowNameHasAtMost55Characters(t *testing.T) {
+	isolate(t)
+	limit := strings.Repeat("a", 55)
+	if _, err := Load(write(t, withWorkflows("  "+limit+": {}\n"))); err != nil {
+		t.Errorf("55 characters: %v", err)
+	}
+	if got := len(WorkflowEntry(limit)); got != 64 {
+		t.Errorf("the prefixed name has %d characters, want 64", got)
+	}
+	over := limit + "a"
+	want := `name the workflow "` + over + `" with a lower-case letter, then up to 54 lower-case letters, digits and hyphens, 55 characters at most: workflows lists it`
+	if _, err := Load(write(t, withWorkflows("  "+over+": {}\n"))); err == nil || !strings.Contains(err.Error(), want) {
+		t.Errorf("56 characters: %v\nwant %s", err, want)
+	}
+}
+
+// TestWorkflowEntriesListThePrefixedNameFirst is the one rule the run's lookup and the
+// compose's check read.
+func TestWorkflowEntriesListThePrefixedNameFirst(t *testing.T) {
+	if got := WorkflowEntries("deploy"); !slices.Equal(got, []string{"workflow-deploy", "deploy"}) {
+		t.Errorf("got %q", got)
 	}
 }

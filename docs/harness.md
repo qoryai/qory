@@ -155,13 +155,21 @@ The harness repository states the qory it needs once, in its `qory.yaml`:
 ### Declare a workflow
 
 A stack lists under `workflows` the workflows that a run from a run code may start. A
-workflow's name is its skill's name: the run starts the skill or command of that name.
-So the stack ships a skill or command for each workflow it lists. When none of the
-stack's modules composes one, after their `exclude` and `only`, the compose fails with
-exit 2:
+run of the workflow `deploy` starts the first of these that the runtime can start: the
+skill `workflow-deploy`, the command `workflow-deploy`, the skill `deploy`, the command
+`deploy`. The stack and `process.yaml` use `deploy`, and qory adds the prefix when it
+starts the run. A plain name works: the hello example ships a plain `hello` command. When
+a harness ships both names, the prefixed one runs.
+
+A workflow's name is a lower-case letter, then up to 54 lower-case letters, digits and
+hyphens. The limit of 55 characters leaves room for the prefix within 64 characters.
+
+So the stack ships a skill or command, under either name, for each workflow it lists.
+When none of the stack's modules composes one, after their `exclude` and `only`, the
+compose fails with exit 2:
 
 ```
-add a skill or command deploy to a module of the base stack core@4b8e2f1a9c7d, or remove deploy from the workflows of its qory-stack.yaml: the stack declares the workflow deploy, and none of its modules ships a skill or command deploy
+add a skill workflow-deploy to a module of the base stack core@4b8e2f1a9c7d, or remove deploy from the workflows of its qory-stack.yaml: the stack declares the workflow deploy, and none of its modules ships a skill or command workflow-deploy or deploy
 ```
 
 A module that a checkout adds to the stack does not count, because the stack lists the
@@ -226,13 +234,14 @@ harness:
   target: {runtime: claude}
   modules:
     - name: core               # a module of the stack you extend
-      exclude: {skills: [explore-a-ticket]}
-    - name: app                # ships skills/explore-a-ticket too
+      exclude: {skills: [workflow-explore-a-ticket]}
+    - name: app                # ships skills/workflow-explore-a-ticket too
       source: {path: ./harness}
 ```
 
-The compose leaves the delivered `explore-a-ticket` out of `core` and takes the one in
-`app`. `qory harness inspect` lists `core  skills/explore-a-ticket` under **Excludes**,
+The compose leaves the delivered `workflow-explore-a-ticket` out of `core` and takes the
+one in `app`. An exclude lists the skill by its full name, with the prefix.
+`qory harness inspect` lists `core  skills/workflow-explore-a-ticket` under **Excludes**,
 and the skill from `app` under **Entries**. The report, `.qory/harness-report.json`,
 records the same.
 

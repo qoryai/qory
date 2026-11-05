@@ -76,8 +76,8 @@ release may change what an existing document does, and states it under Upgrading
   the gateway for the run's run key and documents, and runs with that key, which stays in
   memory. The documents set the harness, the workflow, the runtime, the model settings
   and the inputs: qory composes the documents' harness, or the checkout's `qory.yaml` or
-  `harness.yaml` when they contain none, and starts the skill or command named like the
-  workflow, with the path of the inputs.
+  `harness.yaml` when they contain none, and starts the workflow's skill or command, with
+  the path of the inputs.
 - A run from a run code starts its workflow on each runtime with a headless start:
   `claude`, `codex`, `gemini`, `opencode` and `cursor`; `qory image check` checks each
   runtime of Forager's `runtimes.json`.
@@ -239,10 +239,17 @@ release may change what an existing document does, and states it under Upgrading
 - A run that lists repositories starts in an empty folder as well: qory runs `git init`
   there, then fetches. A folder that is not empty and is not a git working tree still
   stops the run.
+- A skill or command of a workflow may be named `workflow-<name>`, while the stack and
+  `process.yaml` keep `<name>`. A run from a run code starts the first of these that the
+  runtime can start: the skill `workflow-<name>`, the command `workflow-<name>`, the skill
+  `<name>`, the command `<name>`. A plain name works, and when a harness ships both names,
+  the prefixed one runs.
+- A workflow's name in a stack has at most 55 characters, which leaves room for the prefix
+  within 64 characters. A longer name stops the stack's check.
 - The compose fails, exit 2, for each entry of a stack's `workflows` that no module of
-  the stack composes as a skill or command.
+  the stack composes as a skill or command under either name.
 - A run from a run code whose composed harness has no skill or command of the
-  workflow's name closes `failed` with the reason `workflow_not_in_harness`, not
+  workflow under either name closes `failed` with the reason `workflow_not_in_harness`, not
   `no_session`, and its line shows the target's path after the checkout's harness.
 - `bind` nests roles by kind: `bind: {agents: {coder: rails-coder}}`. A flat key stops
   the compose with `Write bind as bind.agents.coder: rails-coder in qory.yaml: bind keys

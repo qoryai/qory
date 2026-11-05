@@ -41,8 +41,9 @@ func (e *runLineError) Unwrap() error { return e.err }
 // reasonError is an error that stops a run before its session joins and sets the
 // reason the run closes with, failed, in place of no_session: Forager's refusal of a
 // walled run's image at its fetch, image_missing or image_user_root, and a run code's
-// workflow that the composed harness has no skill or command for,
-// [reasonWorkflowNotInHarness]. Its text is the line qory run prints.
+// workflow that the composed harness has no skill or command for, under either name of
+// [stack.WorkflowEntries], [reasonWorkflowNotInHarness]. Its text is the line qory run
+// prints.
 type reasonError struct{ code, text string }
 
 func (e *reasonError) Error() string { return e.text }

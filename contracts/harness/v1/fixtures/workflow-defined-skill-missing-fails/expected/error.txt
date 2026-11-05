@@ -1,1 +1,1 @@
-add a skill or command review to a module of the stack in qory.yaml, or remove review from its workflows: the stack declares the workflow review, and none of its modules ships a skill or command review
+add a skill workflow-review to a module of the stack in qory.yaml, or remove review from its workflows: the stack declares the workflow review, and none of its modules ships a skill or command workflow-review or review
