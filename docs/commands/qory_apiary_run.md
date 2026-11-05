@@ -4,7 +4,7 @@ Read what Qory Apiary recorded about a run
 
 ### Synopsis
 
-Read what Qory Apiary recorded about a run, by the run's number or id.
+Read what Qory Apiary recorded about a run, by the run's rn_ id.
 
   diagnose   print a run's diagnostics document
 

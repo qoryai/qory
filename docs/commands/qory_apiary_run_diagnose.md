@@ -8,9 +8,8 @@ Print a run's diagnostics document: the run, its queue entry, each dispatch, the
 preparation of its machine, its last events and the end of its log, as one JSON
 document.
 
-Pass the run's number or its id. The number is the one on the run's page in Qory
-Apiary, 18342 in "Run 18342", and the number after /runs/ in the page's address. The
-run id is the rn_ id that the Qory Apiary API returns.
+Pass the run's id, the rn_ id that the Qory Apiary API returns. A run number is per
+workspace, so it does not identify a run.
 
 qory signs the request with the diagnostics key in ~/.config/qory/apiary/<host>, and
 prints the document only after its signature verifies under the server key pinned
@@ -25,15 +24,14 @@ diagnostics key for.
 More: https://github.com/qoryai/qory/blob/main/docs/apiary.md
 
 ```
-qory apiary run diagnose <run number or id> [flags]
+qory apiary run diagnose <run id> [flags]
 ```
 
 ### Examples
 
 ```
-  qory apiary run diagnose 18342
   qory apiary run diagnose rn_0123456789abcdef
-  qory apiary run diagnose 18342 --server https://apiary.example
+  qory apiary run diagnose rn_0123456789abcdef --server https://apiary.example
   qory apiary run diagnose rn_0123456789abcdef > diagnostics.json
 ```
 
