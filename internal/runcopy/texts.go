@@ -41,6 +41,7 @@ const (
 	textGitInRepo       = "check that %s is a git repository: qory reads it for the run, and git failed: %w"
 	textActingFailed    = "check that git can read the quarantine %s: qory compares the acting keys of the run's commits there, and git failed: %w"
 	textCopyBackOpen    = "give the folder the run started in by a path with no link at its end: qory copies the run's files back there, and the open of %s failed: %w"
+	textCopyInLimit     = "remove old versions from %s: qory copies at most %d files and %d bytes of them into a run's copy, and the folder has more"
 	textCopyBackLimit   = "copy the rest from %s by hand: qory copies back at most %d files and %d bytes from a run, and the run left more; it copied %s"
 	textRecord          = "start the run again: qory reads the record of the files it copied in %s, and the read failed: %w"
 	textSetupPath       = "give each setup path relative to the top of the copy: %s is not such a path"

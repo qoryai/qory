@@ -782,6 +782,12 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					return &runLineError{err}
 				}
 				cleanups = append(cleanups, func() { copied.done(said) })
+				if err := copied.artifactsIn(said); err != nil {
+					if code != nil {
+						err = fmt.Errorf("%w%s", err, codeUsed)
+					}
+					return &runLineError{err}
+				}
 				return nil
 			}
 			// hostWork is the run's work on this machine before its session joins, in two

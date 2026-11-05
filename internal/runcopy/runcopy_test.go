@@ -1232,6 +1232,137 @@ func TestSetupChangesListsWhatTheSetupChanged(t *testing.T) {
 	}
 }
 
+// TestCopyArtifactsInCopiesTheArtifactsAndTheWorkItem is a checkout with versions and a work
+// item: the copy has them with the same content, so a later copy back has no conflict.
+func TestCopyArtifactsInCopiesTheArtifactsAndTheWorkItem(t *testing.T) {
+	isolate(t)
+	src, _ := person(t)
+	d, _ := cloneRun(t, src)
+	write(t, src, ".qory/artifacts/note/main/v1/note.md", "first\n")
+	write(t, src, ".qory/artifacts/.gitignore", "*\n")
+	write(t, src, ".qory/work-item.json", "{}\n")
+	write(t, src, ".qory/secrets.env", "no\n")
+	res, err := d.CopyArtifactsIn(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Skipped)+len(res.Conflicts) != 0 || len(res.Copied) != 3 {
+		t.Errorf("result = %+v", res)
+	}
+	for _, rel := range []string{".qory/artifacts/note/main/v1/note.md", ".qory/work-item.json"} {
+		if got, want := read(t, d.Work(), rel), read(t, src, rel); got != want {
+			t.Errorf("%s = %q, want %q", rel, got, want)
+		}
+	}
+	if _, err := os.Lstat(filepath.Join(d.Work(), ".qory", "secrets.env")); err == nil {
+		t.Error("the copy has a file of .qory that is no artifact")
+	}
+	back, err := d.CopyArtifactsBack(src)
+	if err != nil || len(back.Conflicts)+len(back.Copied) != 0 {
+		t.Errorf("the copy back: %+v, %v", back, err)
+	}
+}
+
+// TestCopyArtifactsInFollowsNoLink is a link at each place of the path: nothing it points to
+// reaches the copy.
+func TestCopyArtifactsInFollowsNoLink(t *testing.T) {
+	outside := func(t *testing.T) string {
+		dir := t.TempDir()
+		write(t, dir, "secret.txt", "secret\n")
+		write(t, dir, "work-item.json", "secret\n")
+		write(t, dir, "artifacts/secret.txt", "secret\n")
+		return dir
+	}
+	for name, plant := range map[string]func(t *testing.T, src, out string) string{
+		".qory": func(t *testing.T, src, out string) string {
+			link(t, src, ".qory", out)
+			return ".qory"
+		},
+		"artifacts": func(t *testing.T, src, out string) string {
+			write(t, src, ".qory/keep.txt", "x\n")
+			link(t, src, ".qory/artifacts", filepath.Join(out, "artifacts"))
+			return ".qory/artifacts"
+		},
+		"work item": func(t *testing.T, src, out string) string {
+			write(t, src, ".qory/keep.txt", "x\n")
+			link(t, src, ".qory/work-item.json", filepath.Join(out, "work-item.json"))
+			return ".qory/work-item.json"
+		},
+		"a file": func(t *testing.T, src, out string) string {
+			write(t, src, ".qory/artifacts/keep.txt", "x\n")
+			link(t, src, ".qory/artifacts/secret.txt", filepath.Join(out, "secret.txt"))
+			return ".qory/artifacts/secret.txt"
+		},
+		"a folder": func(t *testing.T, src, out string) string {
+			write(t, src, ".qory/artifacts/keep.txt", "x\n")
+			link(t, src, ".qory/artifacts/note", out)
+			return ".qory/artifacts/note"
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			isolate(t)
+			src, _ := person(t)
+			d, _ := cloneRun(t, src)
+			want := plant(t, src, outside(t))
+			res, err := d.CopyArtifactsIn(src)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !slices.Contains(res.Skipped, want) {
+				t.Errorf("skipped = %v, want %s", res.Skipped, want)
+			}
+			if _, err := os.Lstat(filepath.Join(d.Work(), filepath.FromSlash(want))); err == nil {
+				t.Errorf("the copy has %s", want)
+			}
+			err = filepath.WalkDir(d.Work(), func(p string, e fs.DirEntry, err error) error {
+				if err == nil && strings.Contains(e.Name(), "secret") {
+					t.Errorf("the copy has %s", p)
+				}
+				return err
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+// TestCopyArtifactsInStopsAtItsBudget is a store past the budget: the run does not start with
+// part of the store, and the error starts with the fix.
+func TestCopyArtifactsInStopsAtItsBudget(t *testing.T) {
+	isolate(t)
+	src, _ := person(t)
+	d, _ := cloneRun(t, src)
+	write(t, src, ".qory/artifacts/a.txt", "x\n")
+	write(t, src, ".qory/artifacts/b.txt", "x\n")
+	_, err := d.artifactsInWith(src, 1, 1<<20)
+	if err == nil || !strings.HasPrefix(err.Error(), "remove old versions from ") {
+		t.Errorf("err = %v", err)
+	}
+}
+
+// TestCopyArtifactsInKeepsAFileOfTheCommit is a store file that the commit has with other
+// content: the commit's stays, and the file is a conflict.
+func TestCopyArtifactsInKeepsAFileOfTheCommit(t *testing.T) {
+	isolate(t)
+	src, _ := person(t)
+	write(t, src, ".qory/artifacts/a.txt", "the commit\n")
+	testGit(t, src, "add", "-f", ".qory/artifacts/a.txt")
+	commitAll(t, src, "more")
+	d, _ := cloneRun(t, src)
+	write(t, src, ".qory/artifacts/a.txt", "the person\n")
+	res, err := d.CopyArtifactsIn(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(res.Conflicts, []string{".qory/artifacts/a.txt"}) {
+		t.Errorf("conflicts = %v", res.Conflicts)
+	}
+	if got := read(t, d.Work(), ".qory/artifacts/a.txt"); got != "the commit\n" {
+		t.Errorf("the copy has %q", got)
+	}
+}
+
 // TestSetupChangesFollowsGitsRules is each case of what git status lists: a file and a folder
 // that .gitignore ignores stay out, a pattern's negation counts, a changed execute bit and a
 // tracked file under an ignored folder count, an unchanged file does not, an empty folder

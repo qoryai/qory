@@ -597,6 +597,75 @@ func TestARunClosedDuringItsSessionKeepsTheCopy(t *testing.T) {
 	}
 }
 
+// TestALocalRunSeesTheArtifactsAndTheWorkItem is a local run in a checkout with a version and
+// a work item. In the copy, qory artifact pull uses the local store with the earlier version,
+// qory artifact push makes version 2, and qory work-item show reads the file. Version 2 comes
+// back with no conflict.
+func TestALocalRunSeesTheArtifactsAndTheWorkItem(t *testing.T) {
+	root := copyCheckout(t)
+	t.Setenv("QORY_RUN_API", "")
+	first := filepath.Join(root, "note.md")
+	writeFile(t, first, "the person\n")
+	if out, err := run(t, "artifact", "push", "note", first); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if err := os.Remove(first); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(root, ".qory", "work-item.json"), "{\"title\":\"Local\"}\n")
+	store := filepath.Join(".qory", "artifacts", "note", "main")
+	agentInCopy(t, func(spec session.SessionSpec) {
+		back, err := os.Getwd()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chdir(spec.Dir); err != nil {
+			t.Fatal(err)
+		}
+		defer func() {
+			if err := os.Chdir(back); err != nil {
+				t.Fatal(err)
+			}
+		}()
+		out, err := run(t, "artifact", "pull")
+		if err != nil {
+			t.Fatalf("%v\n%s", err, out)
+		}
+		wants(t, out, "Nothing pulled")
+		data, err := os.ReadFile(filepath.Join(spec.Dir, store, "v1", "note.md"))
+		if err != nil || string(data) != "the person\n" {
+			t.Errorf("the run's version 1 has %q (%v)", data, err)
+		}
+		second := filepath.Join(tempDir(t), "note.md")
+		writeFile(t, second, "the run\n")
+		out, err = run(t, "artifact", "push", "note", second)
+		if err != nil {
+			t.Fatalf("%v\n%s", err, out)
+		}
+		data, err = os.ReadFile(filepath.Join(spec.Dir, store, "v2", "note.md"))
+		if err != nil || string(data) != "the run\n" {
+			t.Errorf("the run's version 2 has %q (%v)\n%s", data, err, out)
+		}
+		out, err = run(t, "work-item", "show")
+		if err != nil || out != "{\"title\":\"Local\"}\n" {
+			t.Errorf("qory work-item show printed %q (%v)", out, err)
+		}
+	})
+	out, err := run(t, "run", "claude", "--", "-p", "hi")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	for version, want := range map[string]string{"v1": "the person\n", "v2": "the run\n"} {
+		data, err := os.ReadFile(filepath.Join(root, store, version, "note.md"))
+		if err != nil || string(data) != want {
+			t.Errorf("%s has %q (%v), want %q\n%s", version, data, err, want, out)
+		}
+	}
+	if strings.Contains(out, "both changed") || strings.Contains(out, "left out of") {
+		t.Errorf("the run lists a conflict or a left-out file:\n%s", out)
+	}
+}
+
 // TestARunsArtifactsComeBackWithNoCommit is a run with no commit whose agent kept a version in
 // .qory/artifacts and left a link there: the version is in the person's .qory/artifacts, the
 // link is not, and the line lists it. A git session past its limit brings the version too.

@@ -12,6 +12,7 @@ import (
 	"io/fs"
 	"os"
 	"path"
+	"path/filepath"
 	"slices"
 	"sort"
 	"strings"
@@ -63,6 +64,10 @@ type copyBack struct {
 // artifactsFolder is the folder under .qory where qory artifact push keeps versions outside
 // a control plane.
 const artifactsFolder = "artifacts"
+
+// workItemFile is the file under .qory where qory work-item show reads the work item outside
+// a control plane.
+const workItemFile = "work-item.json"
 
 // errBudget is a copy-back past [maxCopyBackFiles] or [maxCopyBackBytes].
 var errBudget = errors.New("past the budget")
@@ -141,6 +146,99 @@ func (d Dir) CopyArtifactsBack(dest string) (CopyBackResult, error) {
 	return d.artifactsBackWith(dest, maxCopyBackFiles, maxCopyBackBytes)
 }
 
+// CopyArtifactsIn copies src's .qory/artifacts and .qory/work-item.json, which qory wrote and
+// no run did, into the copy that [Dir.Clone] made of src, before the run starts. A run then
+// reads the same artifacts and work item as the person, and numbers its versions after theirs.
+// The rules of [Dir.CopyArtifactsBack] apply: a file of the commit with other content stays
+// and is listed as a conflict. src itself may be a link, which the person gave.
+func (d Dir) CopyArtifactsIn(src string) (CopyBackResult, error) {
+	return d.artifactsInWith(src, maxCopyBackFiles, maxCopyBackBytes)
+}
+
+// artifactsInWith is [Dir.CopyArtifactsIn] with a budget of maxFiles files and maxBytes bytes.
+func (d Dir) artifactsInWith(src string, maxFiles int, maxBytes int64) (CopyBackResult, error) {
+	var result CopyBackResult
+	top, err := unix.Open(src, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_CLOEXEC, 0)
+	if err != nil {
+		return result, fileErr(src, err)
+	}
+	defer unix.Close(top)
+	work, err := openRoot(d.Work())
+	if err != nil {
+		return result, fileErr(d.Work(), err)
+	}
+	defer unix.Close(work)
+	c := &copyBack{maxFiles: maxFiles, maxBytes: maxBytes, rec: folderRecord{}, result: &result, qory: map[string]bool{}, skipped: map[string]bool{}}
+	err = c.artifactsIn(top, work)
+	if errors.Is(err, errBudget) {
+		return result, fmt.Errorf(textCopyInLimit, shown(filepath.Join(src, checkout.Dir, artifactsFolder)), maxFiles, maxBytes)
+	}
+	return result, err
+}
+
+// artifactsIn is the walk of [Dir.CopyArtifactsIn] from the folder top to the folder work.
+func (c *copyBack) artifactsIn(top, work int) error {
+	from, to, ok, err := c.enter(top, work, checkout.Dir, checkout.Dir)
+	if err != nil || !ok {
+		return err
+	}
+	defer unix.Close(from)
+	defer unix.Close(to)
+	rel := path.Join(checkout.Dir, workItemFile)
+	var st unix.Stat_t
+	err = unix.Fstatat(from, workItemFile, &st, unix.AT_SYMLINK_NOFOLLOW)
+	switch {
+	case errors.Is(err, unix.ENOENT):
+	case err != nil:
+		return fileErr(rel, err)
+	case st.Mode&unix.S_IFMT != unix.S_IFREG:
+		c.skip(rel, false)
+	default:
+		if err := c.file(from, to, workItemFile, rel, st.Mode&0o100 != 0); err != nil {
+			return err
+		}
+	}
+	rel = path.Join(checkout.Dir, artifactsFolder)
+	subFrom, subTo, ok, err := c.enter(from, to, artifactsFolder, rel)
+	if err != nil || !ok {
+		return err
+	}
+	defer unix.Close(subFrom)
+	defer unix.Close(subTo)
+	return c.dir(subFrom, subTo, rel, 0)
+}
+
+// enter opens the folder name in src and in dst, at rel, and makes it in dst when there is
+// none. ok is false when src has none, and when a link or a file stands there in either,
+// which it lists as skipped. It follows no link. The caller closes both folders.
+func (c *copyBack) enter(src, dst int, name, rel string) (from, to int, ok bool, err error) {
+	from, err = unix.Openat(src, name, dirFlags, 0)
+	switch {
+	case errors.Is(err, unix.ENOENT):
+		return -1, -1, false, nil
+	case errors.Is(err, unix.ELOOP), errors.Is(err, unix.ENOTDIR):
+		c.skip(rel, true)
+		return -1, -1, false, nil
+	case err != nil:
+		return -1, -1, false, fileErr(rel, err)
+	}
+	if err := unix.Mkdirat(dst, name, 0o777); err != nil && !errors.Is(err, unix.EEXIST) {
+		unix.Close(from)
+		return -1, -1, false, fileErr(rel, err)
+	}
+	to, err = unix.Openat(dst, name, dirFlags, 0)
+	switch {
+	case errors.Is(err, unix.ELOOP), errors.Is(err, unix.ENOTDIR):
+		unix.Close(from)
+		c.skip(rel, true)
+		return -1, -1, false, nil
+	case err != nil:
+		unix.Close(from)
+		return -1, -1, false, fileErr(rel, err)
+	}
+	return from, to, true, nil
+}
+
 // artifactsBackWith is [Dir.CopyArtifactsBack] with a budget of maxFiles files and maxBytes
 // bytes.
 func (d Dir) artifactsBackWith(dest string, maxFiles int, maxBytes int64) (CopyBackResult, error) {
@@ -164,35 +262,20 @@ func (d Dir) artifactsBackWith(dest string, maxFiles int, maxBytes int64) (CopyB
 	}
 	defer unix.Close(dst)
 	c := &copyBack{maxFiles: maxFiles, maxBytes: maxBytes, rec: rec, result: &result, qory: map[string]bool{}, skipped: map[string]bool{}}
-	from, to := src, dst
-	rel := ""
-	for _, name := range []string{checkout.Dir, artifactsFolder} {
-		rel = path.Join(rel, name)
-		sub, err := unix.Openat(from, name, dirFlags, 0)
-		switch {
-		case errors.Is(err, unix.ENOENT):
-			return result, nil
-		case errors.Is(err, unix.ELOOP), errors.Is(err, unix.ENOTDIR):
-			c.skip(rel, true)
-			return result, nil
-		case err != nil:
-			return result, fileErr(rel, err)
-		}
-		defer unix.Close(sub)
-		if err := unix.Mkdirat(to, name, 0o777); err != nil && !errors.Is(err, unix.EEXIST) {
-			return result, fileErr(rel, err)
-		}
-		into, err := unix.Openat(to, name, dirFlags, 0)
-		switch {
-		case errors.Is(err, unix.ELOOP), errors.Is(err, unix.ENOTDIR):
-			c.skip(rel, true)
-			return result, nil
-		case err != nil:
-			return result, fileErr(rel, err)
-		}
-		defer unix.Close(into)
-		from, to = sub, into
+	from, to, ok, err := c.enter(src, dst, checkout.Dir, checkout.Dir)
+	if err != nil || !ok {
+		return result, err
 	}
+	defer unix.Close(from)
+	defer unix.Close(to)
+	rel := path.Join(checkout.Dir, artifactsFolder)
+	subFrom, subTo, ok, err := c.enter(from, to, artifactsFolder, rel)
+	if err != nil || !ok {
+		return result, err
+	}
+	defer unix.Close(subFrom)
+	defer unix.Close(subTo)
+	from, to = subFrom, subTo
 	err = c.dir(from, to, rel, 0)
 	if errors.Is(err, errBudget) {
 		return result, fmt.Errorf(textCopyBackLimit, shown(d.Work()), maxFiles, maxBytes, strings.Join(result.Copied, ", "))

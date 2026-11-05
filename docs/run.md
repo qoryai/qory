@@ -3444,8 +3444,13 @@ into your repository: see [The push step of a write run](#the-push-step-of-a-wri
 without a commit and also past the limit of the git session, qory copies the regular files
 of that folder from the copy to your `.qory/artifacts`, by the same rules as a folder that
 is not a repository. A file you already have with other content stays, qory lists it, and
-the copy stays too with the run's version. The clone starts with no `.qory/artifacts`, so a
-run in a repository numbers its versions from 1 and does not see yours.
+the copy stays too with the run's version.
+
+Before the run starts, qory copies your `.qory/artifacts` and `.qory/work-item.json` into the
+clone by the same rules. A run in a repository reads your versions and your work item with
+`qory artifact pull` and `qory work-item show`, and numbers its versions after yours. If
+`.qory/artifacts` has more than 100000 files or 8589934592 bytes, the run stops: remove old
+versions first.
 
 **A folder that is not a repository.** qory copies the folder and, once the containers are
 gone, copies back the regular files that the run added or changed, and deletes those it

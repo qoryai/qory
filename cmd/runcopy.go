@@ -39,6 +39,7 @@ const (
 	textCopyLeftOut    = "left out of the copy back to your folder: %s."
 	textCopyConflicts  = "you and the run both changed these files, so yours stay: %s."
 	textCopyActingKept = "the run changed these qory settings, so those files stay as you have them: %s."
+	textCopyNotIn      = "left out of the run's copy: %s."
 	textCopyNoRemove   = "remove %s by hand: %s"
 )
 
@@ -117,6 +118,19 @@ func startCopy(ctx context.Context, root, runID, branch string, keepOut ...strin
 		return nil, err
 	}
 	return c, nil
+}
+
+// artifactsIn copies the checkout's artifacts and work item into the copy of a repository. A
+// plain folder's copy has them already. report prints a line of qory run.
+func (c *runCopy) artifactsIn(report func(string)) error {
+	if c.plain {
+		return nil
+	}
+	res, err := c.dir.CopyArtifactsIn(c.root)
+	if out := slices.Concat(res.Skipped, res.Conflicts); len(out) > 0 {
+		report(fmt.Sprintf(textCopyNotIn, shownPaths(out)))
+	}
+	return err
 }
 
 // done removes the copy, unless a line of the run told the person that it stays. report
