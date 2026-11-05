@@ -251,7 +251,7 @@ func pushCopy(ctx context.Context, copied *runCopy, branch *preparation.WorkBran
 		return nil, copied.checkFailed(ctx, err)
 	}
 	if copied.dir.LeftBehind(copied.repos) {
-		fmt.Fprintln(w, "qory run: "+textCopyBehind)
+		fmt.Fprintln(w, "qory run: "+fmt.Sprintf(textCopyAgain, textCopyBehind, ""))
 	}
 	from, lines, err := pushable(ctx, qs)
 	if err != nil {

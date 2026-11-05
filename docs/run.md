@@ -2047,8 +2047,8 @@ also after the session used up the limit. A run can pass its time limit by up to
 seconds. A first signal, before or during the step, cuts the step to at most 15 seconds. A
 second signal ends the step at once. A step that one of these ended has the state
 `cancelled`. The git session counts toward the same time, at most 5 minutes. A git session
-that ends past that time, or that fails, brings nothing back: qory keeps the run's copy
-and prints its path.
+that ends past that time, or that fails, brings nothing back: the step pushes nothing, the run's
+copy goes, and the step prints `take the work item in again in Qory Apiary` with the cause.
 
 The run closes as its session ended, whatever the step did: a session that timed out closes
 `cancelled` with the reason `timeout`, exit 124, and a session that failed closes `failed`.
@@ -3477,11 +3477,18 @@ Part of the run's work can miss the bundle:
 Other lines of `git add` print too, such as its warning about a link at `.gitignore`. They keep
 nothing behind.
 
-qory then keeps the copy and exits 1:
+A local run then keeps the copy and exits 1:
 
 ```text
-qory run: part of the run's work did not come back: the copy has changes not committed, commits on another branch or in a submodule, a stash, a tag, a nested repository, or files that git add could not read.
+qory run: part of the run's work did not come back: the copy has changes not committed, commits on another branch or in a submodule, a detached commit, a commit a reset took off the branch, a stash, a tag, a sparse checkout, a nested repository, or files that git add could not read.
 qory run: read the run's files in <folder>, run no git there, then remove the folder: nothing more came back from the run
+```
+
+A run with the push step keeps no copy: the copy goes, and the run continues to the push of what
+came back. Its line has the fix:
+
+```text
+qory run: take the work item in again in Qory Apiary: part of the run's work did not come back: the copy has changes not committed, ...
 ```
 
 Git LFS: because the session runs no filter, an LFS file the agent changes goes into the

@@ -24,13 +24,14 @@ import (
 
 // The lines of a walled write run, which works in a copy of the person's checkout. A line
 // with a path of the copy shows the person where the run's work stays. The texts of a cause go
-// after [textCopyRead] or [textCopyAgain], which have the fix.
+// after [textCopyRead] or [textCopyAgain], which have the fix. [textCopyBehind] also stands alone
+// beside the line of [runCopy.kept], which has the fix.
 const (
 	textCopyMount      = "make the mount %s read-only, with :ro on --mount or in wall.mounts: a walled run reads the checkout or works in a copy of it, and a read-write mount lets it write your files directly"
 	textCopyOutside    = "run qory inside the checkout %s: a run that may write works in a copy of the checkout, and the working folder %s is outside it"
 	textCopyNoFolder   = "commit %[1]s, or run qory in a folder that the commit at HEAD has: a run that may write works in a copy of that commit, which has no folder %[1]s"
 	textCopyReserved   = "start the run from a folder that does not contain your home folder or qory's state directory: the folder %s %s, and the run's copy of it would have every file there"
-	textCopyBehind     = "part of the run's work did not come back: the copy has changes not committed, commits on another branch or in a submodule, a stash, a tag, a nested repository, or files that git add could not read."
+	textCopyBehind     = "part of the run's work did not come back: the copy has changes not committed, commits on another branch or in a submodule, a detached commit, a commit a reset took off the branch, a stash, a tag, a sparse checkout, a nested repository, or files that git add could not read."
 	textCopyStepLimit  = "the check of the run's commits ran past its limit of %s, so those commits did not come back"
 	textCopyFetchLimit = "the fetch of the run's commits ran past its limit of %s, so those commits did not come back"
 	textCopyBackLimit  = "the copy back of the run's files ran past its limit of %s, so part of them did not come back"

@@ -181,8 +181,8 @@ func (d Dir) Disarm(ctx context.Context) error {
 	return errors.Join(errs[:min(len(errs), maxDisarmErrors)]...)
 }
 
-// openTop opens the folder at top, which the run could chmod. A folder with no read bit gets
-// the chmod that [disarm] gives a folder below it.
+// openTop opens the folder at top, which the run could chmod. A folder with no read bit is set to
+// the mode that [disarm] sets on a folder below it.
 func openTop(top string) (int, error) {
 	fd, err := unix.Open(top, dirFlags, 0)
 	if !errors.Is(err, unix.EACCES) {

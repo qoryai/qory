@@ -638,7 +638,7 @@ func TestCommitsOnAnotherBranchKeepTheCopy(t *testing.T) {
 	}
 	lacks(t, out, "no action needed")
 	wants(t, out,
-		"part of the run's work did not come back: the copy has changes not committed, commits on another branch or in a submodule, a stash, a tag, a nested repository, or files that git add could not read.",
+		"part of the run's work did not come back: the copy has changes not committed, commits on another branch or in a submodule, a detached commit, a commit a reset took off the branch, a stash, a tag, a sparse checkout, a nested repository, or files that git add could not read.",
 		"read the run's files in "+work+", run no git there, then remove the folder")
 	if _, err := os.Lstat(work); err != nil {
 		t.Errorf("the copy is gone: %v", err)
@@ -1661,7 +1661,7 @@ func TestAnOrphanHeadPushesNoDeletion(t *testing.T) {
 		gitOutput(t, dir, "rm", "-rf", "--quiet", ".")
 		writeFile(t, filepath.Join(dir, "new.txt"), "new\n")
 	}, nil)
-	wants(t, r.out, "qory run: part of the run's work did not come back")
+	wants(t, r.out, "qory run: take the work item in again in Qory Apiary: part of the run's work did not come back")
 	head := p.branchHead(t)
 	if head == "" {
 		t.Fatalf("no branch reached the forge:\n%s", r.out)
@@ -1681,7 +1681,7 @@ func TestWorkLeftBehindHasItsLineOnThePushPath(t *testing.T) {
 		t.Run(strings.ReplaceAll(name, " ", "-"), func(t *testing.T) {
 			p := walledPush(t)
 			r := p.run(t, func(dir string) { agent(t, dir) }, nil)
-			wants(t, r.out, "qory run: part of the run's work did not come back")
+			wants(t, r.out, "qory run: take the work item in again in Qory Apiary: part of the run's work did not come back")
 			lacks(t, r.out, "no action needed")
 			if head := p.branchHead(t); head != "" {
 				t.Errorf("a branch reached the forge at %s:\n%s", head, r.out)
