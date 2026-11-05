@@ -44,7 +44,7 @@ func TestComposeAndInspectPrintNoSecretInNames(t *testing.T) {
 	wants(t, out, "(a name that contains a run key) · claude "+valueShown, nameShown+"  "+nameShown, "link    "+nameShown+"  (module "+nameShown+")")
 	out, err = run(t, "hi")
 	printsNoKey(t, out, err)
-	wants(t, out, "about     "+valueShown, nameShown+"  "+valueShown+"  working-tree")
+	wants(t, out, "about        "+valueShown, nameShown+"  "+valueShown+"  working-tree")
 	out, err = run(t, "hr")
 	printsNoKey(t, out, err)
 	wants(t, out, "removed "+nameShown)

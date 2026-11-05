@@ -46,7 +46,7 @@ const (
 // A bundle has at most 1 GiB, and git checks every object in it.
 const copyStepLimit = 10 * time.Minute
 
-// runRef is the ref a run's commits land on in the person's repository. qory never checks
+// runBranch is the branch a run's commits land on in the person's repository. qory never checks
 // it out.
 func runBranch(runID string) string { return "qory/run-" + runID }
 

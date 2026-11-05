@@ -149,13 +149,20 @@ func emptyDir(t *testing.T) string {
 // command is the same in every run.
 func newCheckout(t *testing.T) string {
 	t.Helper()
+	root := checkoutWithNoCommit(t)
+	// A walled run that may write works in a copy of the commit at HEAD.
+	runGit(t, root, "commit", "--quiet", "--allow-empty", "-m", "first")
+	return root
+}
+
+// checkoutWithNoCommit is [newCheckout] before its first commit.
+func checkoutWithNoCommit(t *testing.T) string {
+	t.Helper()
 	root := emptyDir(t)
 	runGit(t, root, "init", "--quiet", "--initial-branch=main")
 	runGit(t, root, "config", "user.name", "Tester")
 	runGit(t, root, "config", "user.email", "tester@example.com")
 	runGit(t, root, "remote", "add", "origin", "https://git.example.com/acme/app.git")
-	// A walled run that may write works in a copy of the commit at HEAD.
-	runGit(t, root, "commit", "--quiet", "--allow-empty", "-m", "first")
 	return root
 }
 

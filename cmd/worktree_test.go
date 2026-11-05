@@ -132,7 +132,7 @@ func TestWorktreeAddPreparesAndComposes(t *testing.T) {
 // TestWorktreeAddNeedsACommit is a repository with no commit yet: add says so instead
 // of passing git's message on.
 func TestWorktreeAddNeedsACommit(t *testing.T) {
-	localOrigin(t, newCheckout(t))
+	localOrigin(t, checkoutWithNoCommit(t))
 	out, _, err := runSplit(t, "", "worktree", "add", "feature")
 	if err == nil {
 		t.Fatalf("add in a repository with no commit succeeded:\n%s", out)
