@@ -474,7 +474,7 @@ func TestPushEndingLines(t *testing.T) {
 		{"first signal", pushEnding{session: succeeded, cut: true, stopped: true, got: "SIGTERM"}, "qory run got SIGTERM, and the step reached its limit of 15s", 1},
 		{"run's limit", pushEnding{session: succeeded, cut: true, limit: time.Hour}, "the run reached its time limit of 1h0m0s", exitTimeout},
 		{"a failed session at the run's limit", pushEnding{session: failed, cut: true, limit: time.Hour}, "the run reached its time limit of 1h0m0s", 3},
-		{"after a timeout", pushEnding{session: timedOut, cut: true, limit: time.Hour}, "the step reached its limit of 2m0s", 3},
+		{"after a timeout", pushEnding{session: timedOut, cut: true, limit: time.Hour}, "the step reached its limit of 5m0s", 3},
 	} {
 		var out strings.Builder
 		err := c.ending.ended(ui.New(&out), func(string) {}, errors.New("cut"), &preparation.WorkBranch{}, sessionEnd)

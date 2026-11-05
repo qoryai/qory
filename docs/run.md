@@ -2143,7 +2143,7 @@ nothing, and the run ends as a failed step ends it, with this line:
 
 A step that the time limit or a signal stopped prints one of these, where `<cause>` is `qory
 run got a second signal`, `qory run got <signal>, and the step reached its limit of 15s`,
-`the step reached its limit of 2m0s`, or `the run reached its time limit of <limit>`:
+`the step reached its limit of 5m0s`, or `the run reached its time limit of <limit>`:
 
 - `take the work item in again in Qory Apiary: <cause> during the push step, and the run's
   commits may not have reached the branch; the code is used`
