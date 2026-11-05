@@ -544,8 +544,12 @@ func TestCopyFolderKeepsLinksAsLinks(t *testing.T) {
 func TestCopyFolderOfAFolderThatContainsTheRun(t *testing.T) {
 	isolate(t)
 	d := newDir(t)
-	err := d.CopyFolder(context.Background(), os.Getenv("HOME"))
-	hasPrefix(t, "CopyFolder of HOME", err, "start the run in a folder that does not contain ")
+	cache, err := os.UserCacheDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = d.CopyFolder(context.Background(), cache)
+	hasPrefix(t, "CopyFolder of the cache folder", err, "start the run in a folder that does not contain ")
 	if _, err := os.Lstat(d.Work()); !errors.Is(err, fs.ErrNotExist) {
 		t.Errorf("the copy was made: %v", err)
 	}
