@@ -1689,3 +1689,89 @@ func TestWorkLeftBehindHasItsLineOnThePushPath(t *testing.T) {
 		})
 	}
 }
+
+// nestedSubmoduleRepos makes a repository with a submodule, and returns the path of the outer one.
+func nestedSubmoduleRepos(t *testing.T) string {
+	t.Helper()
+	inner := tempDir(t)
+	runGit(t, inner, "init", "--quiet", "--initial-branch=main")
+	writeFile(t, filepath.Join(inner, "lib.txt"), "lib\n")
+	commitIn(t, inner, "inner")
+	middle := tempDir(t)
+	runGit(t, middle, "init", "--quiet", "--initial-branch=main")
+	writeFile(t, filepath.Join(middle, "m.txt"), "m\n")
+	runGit(t, middle, "-c", "protocol.file.allow=always", "submodule", "add", "--quiet", inner, "inner")
+	commitIn(t, middle, "middle")
+	return middle
+}
+
+// TestANestedSubmoduleComesBackThroughARun is an agent that updates a nested submodule, as a person
+// does, and commits: the session ends well, and the commit lands on the run's branch.
+func TestANestedSubmoduleComesBackThroughARun(t *testing.T) {
+	root := copyCheckout(t)
+	runGit(t, root, "-c", "protocol.file.allow=always", "submodule", "add", "--quiet", nestedSubmoduleRepos(t), "libs/m")
+	runGit(t, root, "commit", "--quiet", "-m", "a submodule")
+	agentInCopy(t, func(spec session.SessionSpec) {
+		gitOutput(t, spec.Dir, "-c", "protocol.file.allow=always", "submodule", "update", "--init", "--recursive", "--quiet")
+		writeFile(t, filepath.Join(spec.Dir, "x.txt"), "x\n")
+		commitIn(t, spec.Dir, "x")
+	})
+	cmd.RunGitSessionsOnHost()
+	out, err := run(t, "run", "claude", "--", "-p", "hi")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	lacks(t, out, "that the run made", "did not come back")
+	if got := gitOutput(t, root, "for-each-ref", "refs/heads/qory/"); got == "" {
+		t.Errorf("the run's branch did not come back:\n%s", out)
+	}
+}
+
+// TestASetupThatUpdatesASubmoduleComesBackThroughARun is a run with the push step whose setup runs
+// that update and writes a file in the submodule: the agent's commit reaches the forge, and the
+// setup's work keeps nothing behind.
+func TestASetupThatUpdatesASubmoduleComesBackThroughARun(t *testing.T) {
+	p := walledPush(t)
+	middle := nestedSubmoduleRepos(t)
+	clone := tempDir(t)
+	gitOutput(t, clone, "-c", "protocol.file.allow=always", "clone", "--quiet", p.bare, ".")
+	gitOutput(t, clone, "-c", "protocol.file.allow=always", "submodule", "add", "--quiet", middle, "libs/m")
+	commitIn(t, clone, "a submodule")
+	gitOutput(t, clone, "push", "--quiet", "origin", "HEAD:refs/heads/main")
+	p.first = strings.TrimSpace(gitOutput(t, clone, "rev-parse", "HEAD"))
+	p.setup = func(dir string) {
+		gitOutput(t, dir, "-c", "protocol.file.allow=always", "submodule", "update", "--init", "--recursive", "--quiet")
+		writeFile(t, filepath.Join(dir, "libs", "m", "gen.o"), "generated\n")
+	}
+	r := p.run(t, writesAndCommits(t), nil)
+	lacks(t, r.out, "that the run made", "did not come back", "the submodule ")
+	if p.branchHead(t) == "" {
+		t.Errorf("no branch reached the forge:\n%s", r.out)
+	}
+}
+
+// TestASparseCheckoutPushesNoDeletion is an agent that took files out of the working tree in a run
+// with the push step: no commit that deletes them reaches the forge.
+func TestASparseCheckoutPushesNoDeletion(t *testing.T) {
+	for name, agent := range map[string]func(t *testing.T, dir string){
+		"sparse-checkout": func(t *testing.T, dir string) {
+			gitOutput(t, dir, "sparse-checkout", "set", "nothing-here")
+		},
+		"skip-worktree": func(t *testing.T, dir string) {
+			gitOutput(t, dir, "update-index", "--skip-worktree", "README.md")
+			if err := os.Remove(filepath.Join(dir, "README.md")); err != nil {
+				t.Fatal(err)
+			}
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			p := walledPush(t)
+			p.setup = nil
+			r := p.run(t, func(dir string) { agent(t, dir) }, nil)
+			wants(t, r.out, "part of the run's work did not come back")
+			if head := p.branchHead(t); head != "" {
+				t.Errorf("a branch reached the forge at %s:\n%s", head, r.out)
+			}
+		})
+	}
+}

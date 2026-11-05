@@ -45,6 +45,9 @@ type LeftOut struct {
 	// stays out only while the copy still has what the setup left; a path the agent
 	// changed after the setup goes into the commit.
 	Setup []SetupPath
+	// Submodules are the files the setup left in a submodule, as [Dir.SubmoduleSetup] lists them.
+	// A change in a submodule that is one of these keeps nothing behind.
+	Submodules []SetupPath
 }
 
 // SetupPath is a path the setup changed, relative to the top of its repository with
@@ -92,13 +95,16 @@ type GitSession struct {
 // the base commit, the bundle has HEAD, so an agent's commits on another branch keep their
 // messages. When HEAD is at the base commit and branch is past it, or when HEAD has no commit or
 // does not descend from the base commit, the bundle has branch as it is and the script makes no
-// commit, since the working tree is at HEAD: a commit would undo branch's files. Work that the
-// bundle does not have writes n.left, which [Dir.LeftBehind] reads: a change in such a working
-// tree; a commit in a ref the clone did not write, such as a branch, a tag or refs/stash; HEAD, a
-// commit made with HEAD detached, or, with nothing past the base commit, any commit a reflog has,
-// unless a remote-tracking ref has it; a submodule off its gitlink or with a change; a repository
-// the run made; or a line of git add for what it could not add. The person's personal ignore
-// rules stay in effect through the info/exclude of that git folder.
+// commit, since the working tree is at HEAD: a commit would undo branch's files. The same goes
+// for a sparse checkout in the copy. HEAD and branch at one commit that the base commit does not
+// have, such as an amended base commit, get a commit as usual. Work that the bundle does not have
+// writes n.left, which [Dir.LeftBehind] reads: a change in a working tree with no commit; a commit
+// in a ref the clone did not write, such as a branch, a tag or refs/stash; HEAD, a commit made with
+// HEAD detached, or, with nothing past the base commit, any commit a reflog has, unless a
+// remote-tracking ref or a ref of the clone has it; a submodule off its gitlink or with a change
+// the setup did not leave; a repository the run made; a file that git ls-files still lists after
+// the add; or a folder the session cannot read. The person's personal ignore rules stay in effect
+// through the info/exclude of that git folder.
 //
 // The script runs no filter: a file a filter changed at the checkout, such as a Git LFS
 // file, stays out while the copy has what the checkout wrote, and one the agent changed
@@ -130,6 +136,10 @@ func (d Dir) GitSession(ctx context.Context, branch, message string, repos []Rep
 		if err := writeNew(p, list); err != nil {
 			return GitSession{}, fileErr(p, err)
 		}
+		subs := filepath.Join(d.Bundle(), "sub-"+strconv.Itoa(n))
+		if err := writeNew(subs, submoduleList(out[repos[n].Path].Submodules)); err != nil {
+			return GitSession{}, fileErr(subs, err)
+		}
 		refs := filepath.Join(d.Bundle(), "refs-"+strconv.Itoa(n))
 		if err := writeNew(refs, repos[n].refs); err != nil {
 			return GitSession{}, fileErr(refs, err)
@@ -150,6 +160,15 @@ func (d Dir) GitSession(ctx context.Context, branch, message string, repos []Rep
 		},
 		Dir: d.Work(),
 	}, nil
+}
+
+// submoduleList is the file sub-n of the script: a state and a path per line.
+func submoduleList(paths []SetupPath) string {
+	var b strings.Builder
+	for _, s := range paths {
+		b.WriteString(s.State + " " + s.Path + "\n")
+	}
+	return b.String()
 }
 
 // sessionList is the file the script sources for the repository r: shell assignments of its
@@ -213,7 +232,7 @@ func (d Dir) SessionMounts() []wall.Mount {
 // sessionScript is the git session's script, run with sh -c. Its arguments are the
 // PATH, the copy, the bundle folder, the branch, the commit's message and the number of
 // repositories. For the repository number n it sources list-n, see [sessionList], reads refs-n,
-// see [Repository], and uses exclude-n when there is one. It writes n.bundle, or n.none when nothing is past the base
+// see [Repository], and sub-n, see [submoduleList], and uses exclude-n when there is one. It writes n.bundle, or n.none when nothing is past the base
 // commit. It needs git 2.25 or later, for --pathspec-from-file.
 const sessionScript = `set -eu
 PATH=$1 W=$2 B=$3 branch=$4 message=$5 count=$6
@@ -257,29 +276,47 @@ copygit() {
 past() {
 	[ -n "$1" ] && [ "$1" != "$base" ] && copygit merge-base --is-ancestor "$base" "$1" 2>/dev/null
 }
-# lacking prints the lines of the file $1 that the file $2 does not have, and every line when grep
-# fails, so a failure keeps the copy.
+# lacking prints the lines of the file $1 that the file $2 does not have, and every line of $1 when
+# sort or comm fails, so a failure keeps the copy. LC_ALL=C is what both sort by.
 lacking() {
-	set +e
-	grep -Fxv -f "$2" "$1" 2>/dev/null
-	lacked=$?
-	set -e
-	if [ "$lacked" -gt 1 ]; then cat "$1"; fi
+	if ! { sort -u "$1" > "$G/one" && sort -u "$2" > "$G/two" && comm -23 "$G/one" "$G/two"; } 2>/dev/null; then
+		cat "$1"
+	fi
 }
 # printable is $1 with no control character, for a line of this script.
 printable() {
 	printf '%s' "$1" | tr -d '\000-\037\177' 2>/dev/null || printf 'a folder'
 }
-# submodule_at reports whether the submodule at the folder $1 of $T has the commit $2 at HEAD and
-# no change. Its git reads the submodule's configuration, inside the wall.
+# submodule_at reports whether the submodule at the folder $1 of $T has the commit $2 at HEAD, and
+# writes its changes to $G/status. Its git reads the submodule's configuration, inside the wall.
 submodule_at() (
 	unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE
 	cd "$T/$1"
 	now=$(g --git-dir="$T/$1/.git" rev-parse --verify --quiet "HEAD^{commit}") || exit 1
 	[ "$now" = "$2" ] || exit 1
-	changes=$(g --git-dir="$T/$1/.git" --work-tree=. status --porcelain --ignore-submodules=none) || exit 1
-	[ -z "$changes" ]
+	g --git-dir="$T/$1/.git" --work-tree=. status --porcelain --untracked-files=all --ignore-submodules=none > "$G/status"
 )
+# from_setup reports whether each change in $G/status of the submodule at the folder $1 is what the
+# setup left there, as sub-n has it.
+from_setup() {
+	while IFS= read -r line; do
+		p=$1/${line#???}
+		grep -Fxq "$(state "$p") $p" "$B/sub-$n" 2>/dev/null || return 1
+	done < "$G/status"
+}
+# below_gitlink reports whether a folder above the folder $1 is a submodule of the tree $from.
+below_gitlink() {
+	p=$1
+	while :; do
+		case $p in
+		*/*) p=${p%/*} ;;
+		*) return 1 ;;
+		esac
+		case $(g ls-tree "$from" -- "$p" 2>/dev/null) in
+		"160000 "*) return 0 ;;
+		esac
+	done
+}
 # state prints what the repository at $T has at a path, in the form of SetupPath.State.
 state() {
 	f=$T/$1
@@ -321,7 +358,16 @@ while [ "$n" -lt "$count" ]; do
 	moved=
 	if ! past "$at" && { [ "$at" != "$base" ] || past "$on"; }; then
 		head=$on
+		# HEAD and the branch at one commit that the base commit does not have, such as an amended
+		# base commit: the working tree is at the branch, so a commit undoes nothing.
+		if [ -z "$at" ] || [ "$at" != "$on" ] || copygit merge-base --is-ancestor "$at" "$base" 2>/dev/null; then
+			moved=1
+		fi
+	fi
+	# A sparse checkout took files out of the working tree, and a commit would delete them.
+	if copygit ls-files -t 2>/dev/null | grep -q '^S '; then
 		moved=1
+		: > "$B/$n.left"
 	fi
 	case $head in
 	'' | *[!0-9a-f]*)
@@ -358,7 +404,11 @@ while [ "$n" -lt "$count" ]; do
 		esac
 	done < "$G/reflog" > "$G/moves"
 	lacking "$G/moves" "$G/on-branch" >> "$G/tips"
-	behind=$(copygit rev-list -1 --ignore-missing --stdin --not "$head" "$base" --remotes < "$G/tips" 2>/dev/null) || behind=1
+	# A commit in a ref of the clone is the person's.
+	while read -r tip ref; do
+		printf '^%s\n' "$tip"
+	done < "$B/refs-$n" > "$G/theirs"
+	behind=$(cat "$G/tips" "$G/theirs" | copygit rev-list -1 --ignore-missing --stdin --not "$head" "$base" --remotes 2>/dev/null) || behind=1
 	if [ -n "$behind" ]; then
 		: > "$B/$n.left"
 	fi
@@ -383,23 +433,35 @@ while [ "$n" -lt "$count" ]; do
 	printf ':/\0:(exclude,top,literal,icase).qory\0' > "$P"
 	printf ':(top,literal,icase).qory\0' > "$R"
 	: > "$G/folders"
-	{ find . -path ./.git -prune -o -path ./.qory -prune -o -name .git -exec sh -c '
+	: > "$G/out-paths"
+	: > "$G/out-folders"
+	if ! command -v find > /dev/null 2>&1; then
+		: > "$B/$n.left"
+	fi
+	# A path with a line break is written whole here, and its pieces in the list match nothing.
+	find . -path ./.git -prune -o -path ./.qory -prune -o -name .git -exec sh -c '
 		list=$1
-		shift
+		add=$2
+		shift 2
 		for p do
 			d=${p%/.git}
-			printf ":(exclude,top,literal)%s\0" "${d#./}"
-			printf "%s\n" "${d#./}" >> "$list"
-		done' sh "$G/folders" {} + 2>/dev/null || :; } >> "$P"
+			d=${d#./}
+			printf "%s\n" "$d" >> "$list"
+			case $d in
+			*"
+"*) printf ":(exclude,top,literal)%s\0" "$d" >> "$add" ;;
+			esac
+		done' sh "$G/folders" "$P" {} + 2>/dev/null || :
 	i=0
 	while [ "$i" -lt "$links" ]; do
 		printf ':(exclude,top,literal)%s\0' "$1" >> "$P"
 		printf ':(top,literal)%s\0' "$1" >> "$R"
+		printf '%s\n' "$1" >> "$G/out-paths"
 		shift
 		i=$((i + 1))
 	done
 	execs=
-	if [ "$setup" -gt 0 ]; then
+	if [ "$setup" -gt 0 ] || [ -s "$B/sub-$n" ]; then
 		execs=$nl$(find . -path ./.git -prune -o -type f -perm -100 -print 2>/dev/null || :)$nl
 	fi
 	# One git hashes the setup's regular files, since a process per file takes minutes for
@@ -410,7 +472,7 @@ while [ "$n" -lt "$count" ]; do
 		if [ $((i % 2)) -eq 0 ] && [ ! -h "$T/$a" ] && [ -f "$T/$a" ]; then
 			case $a in
 			*"$nl"* | *"$cr") ;;
-			*) printf '%s\n' "$T/$a" ;;
+			*) printf '%s\n' "./$a" ;;
 			esac
 		fi
 		i=$((i + 1))
@@ -438,23 +500,36 @@ while [ "$n" -lt "$count" ]; do
 			printf ':(exclude,top,literal)%s\0' "$1" >> "$P"
 			if [ "$2" = other ]; then
 				known=$known$1$nl
+				printf '%s\n' "$1" >> "$G/out-folders"
+			else
+				printf '%s\n' "$1" >> "$G/out-paths"
 			fi
 		fi
 		shift 2
 		i=$((i + 1))
 	done
 	exec 3<&-
-	# Each folder with a .git stays out of the commit. A submodule stays behind when it is not at
-	# the commit of its gitlink or has a change. Any other such folder stays behind when the setup
-	# did not make it and no ignore rule covers it: the clone makes no other.
+	# The positional parameters are now what stays out besides .qory and $G/out-paths, for ls-files.
 	while IFS= read -r d; do
-		entry=$(g ls-files -s -- ":(top,literal)$d" 2>/dev/null) || entry=
+		set -- "$@" ":(exclude,top,literal)$d"
+	done < "$G/out-folders"
+	# Each folder with a .git stays out of the commit. A .git below a submodule belongs to that
+	# submodule. A submodule stays behind when it is not at the commit of its gitlink, or has a
+	# change that the setup did not leave. Any other such folder stays behind when the setup did
+	# not make it and no ignore rule covers it: the clone makes no other.
+	while IFS= read -r d; do
+		if below_gitlink "$d"; then
+			continue
+		fi
+		printf ':(exclude,top,literal)%s\0' "$d" >> "$P"
+		set -- "$@" ":(exclude,top,literal)$d"
+		entry=$(g ls-tree "$from" -- "$d" 2>/dev/null) || entry=
 		shows=$(printable "$d")
 		case $entry in
 		"160000 "*)
-			link=${entry#160000 }
-			link=${link%% *}
-			if ! submodule_at "$d" "$link"; then
+			link=${entry#160000 commit }
+			link=${link%%"$(printf '\t')"*}
+			if ! submodule_at "$d" "$link" || ! from_setup "$d"; then
 				printf 'qory: the submodule %s in %s has commits or changes that the commit leaves out\n' "$shows" "$shown" >&2
 				: > "$B/$n.left"
 			fi
@@ -471,10 +546,10 @@ while [ "$n" -lt "$count" ]; do
 			;;
 		esac
 	done < "$G/folders"
-	# git add exits 1 when a path left out here is also ignored, and it adds the rest all the
-	# same. Any other failure exits 128.
+	# git add exits 1 when it could not add a file, or when a path left out here is also ignored,
+	# and it adds the rest all the same. Any other failure exits 128.
 	set +e
-	g add -A --pathspec-from-file="$P" --pathspec-file-nul 2> "$G/add-errors"
+	g add -A --ignore-errors --pathspec-from-file="$P" --pathspec-file-nul 2> "$G/add-errors"
 	added=$?
 	set -e
 	case $added in
@@ -484,8 +559,7 @@ while [ "$n" -lt "$count" ]; do
 		exit "$added"
 		;;
 	esac
-	# Any other line is what git add could not add, such as a folder it cannot read, or an
-	# embedded repository that the list above does not have. That work stays behind.
+	# git's lines go to the person, except its list of ignored paths. They decide nothing.
 	block=
 	while IFS= read -r line || [ -n "$line" ]; do
 		case $block:$line in
@@ -495,11 +569,27 @@ while [ "$n" -lt "$count" ]; do
 		'hint:hint: '*) ;;
 		*)
 			block=
-			printf 'qory: git add left this out of the commit in %s: %s\n' "$shown" "$line" >&2
-			: > "$B/$n.left"
+			printf 'qory: git add printed in %s: %s\n' "$shown" "$line" >&2
 			;;
 		esac
 	done < "$G/add-errors"
+	# What stays behind is what the add left: a file that ls-files still lists, or a folder this
+	# process cannot read, which no git lists, unless an ignore rule covers it.
+	g ls-files -z -m -o --exclude-standard -- ':/' ':(exclude,top,literal,icase).qory' "$@" > "$G/unadded-z" 2>/dev/null || : > "$B/$n.left"
+	tr '\000' '\n' < "$G/unadded-z" > "$G/unadded"
+	lacking "$G/unadded" "$G/out-paths" > "$G/missed"
+	if [ -s "$G/missed" ]; then
+		: > "$B/$n.left"
+	fi
+	find . -path ./.git -prune -o -path ./.qory -prune -o -type d -exec sh -c '
+		for p do
+			test -r "$p" && test -x "$p" || printf "%s\n" "$p"
+		done' sh {} + > "$G/closed" 2>/dev/null || :
+	while IFS= read -r d; do
+		if ! g check-ignore -q -- "$d" 2>/dev/null; then
+			: > "$B/$n.left"
+		fi
+	done < "$G/closed"
 	g reset -q "$back" --pathspec-from-file="$R" --pathspec-file-nul
 
 	set +e
@@ -522,7 +612,7 @@ while [ "$n" -lt "$count" ]; do
 		: > "$B/$n.none"
 		# With nothing past the base commit, a commit that any reflog has stays behind too, such as
 		# one that a reset took off the branch.
-		gone=$(copygit rev-list -1 --reflog --not "$base" --remotes 2>/dev/null) || gone=1
+		gone=$(copygit rev-list -1 --ignore-missing --stdin --reflog --not "$base" --remotes < "$G/theirs" 2>/dev/null) || gone=1
 		if [ -n "$gone" ]; then
 			: > "$B/$n.left"
 		fi

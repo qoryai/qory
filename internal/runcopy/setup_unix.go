@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"golang.org/x/sys/unix"
 
@@ -33,6 +34,97 @@ func (d Dir) SetupStates(ctx context.Context, r Repository, paths []string) ([]S
 		return nil, err
 	}
 	return d.setupStatesAt(ctx, filepath.Join(d.Work(), filepath.FromSlash(rel)), r.index, paths)
+}
+
+// SubmoduleSetup lists each regular file and link in a submodule of the repository r, as
+// [Dir.Clone] returned it, whose time is past the clone's, with what it has there, for
+// [LeftOut.Submodules]. [Dir.SetupChanges] leaves submodules out, so a git session that finds a
+// change in one compares it with this. Call it after the setup and before the agent's session.
+// No git opens the copy, and the walk follows no link. A file the setup deleted, or wrote with an
+// older time, is not listed, so that change keeps the copy.
+func (d Dir) SubmoduleSetup(ctx context.Context, r Repository) ([]SetupPath, error) {
+	rel, err := repositoryRel(r)
+	if err != nil {
+		return nil, err
+	}
+	top := filepath.Join(d.Work(), filepath.FromSlash(rel))
+	out, err := git(ctx, d.source(r.index), "ls-tree", "-r", "-z", "--full-tree", r.Base)
+	if err != nil {
+		return nil, err
+	}
+	root, err := unix.Open(top, dirFlags, 0)
+	if err != nil {
+		return nil, fileErr(top, err)
+	}
+	defer unix.Close(root)
+	var paths []string
+	for entry := range strings.SplitSeq(out, "\x00") {
+		meta, file, ok := strings.Cut(entry, "\t")
+		if !ok || !strings.HasPrefix(meta, "160000 ") || !cleanRel(file) {
+			continue
+		}
+		dir, name, err := lookup(root, file)
+		if errors.Is(err, errNoEntry) {
+			continue
+		}
+		if err != nil {
+			return nil, fileErr(filepath.Join(top, filepath.FromSlash(file)), err)
+		}
+		sub, err := unix.Openat(dir, name, dirFlags, 0)
+		unix.Close(dir)
+		if err != nil {
+			continue
+		}
+		err = newerFiles(sub, file, r.cloned, 0, &paths)
+		unix.Close(sub)
+		if err != nil {
+			return nil, fileErr(filepath.Join(top, filepath.FromSlash(file)), err)
+		}
+	}
+	if len(paths) == 0 {
+		return nil, nil
+	}
+	return d.setupStatesAt(ctx, top, r.index, paths)
+}
+
+// newerFiles adds to paths each regular file and link below the folder dir, at rel, with a time
+// past since, and walks each folder but .git. A path with a line break stays out, since sub-n has
+// one path per line, and a folder it cannot open is skipped: either keeps the copy.
+func newerFiles(dir int, rel string, since time.Time, depth int, paths *[]string) error {
+	if depth >= maxOpenFolders {
+		return nil
+	}
+	names, err := readNames(dir)
+	if err != nil {
+		return err
+	}
+	for _, name := range names {
+		if folds(name, ".git") || strings.Contains(name, "\n") {
+			continue
+		}
+		var st unix.Stat_t
+		if err := unix.Fstatat(dir, name, &st, unix.AT_SYMLINK_NOFOLLOW); err != nil {
+			return err
+		}
+		at := path.Join(rel, name)
+		switch st.Mode & unix.S_IFMT {
+		case unix.S_IFDIR:
+			sub, err := unix.Openat(dir, name, dirFlags, 0)
+			if err != nil {
+				continue
+			}
+			err = newerFiles(sub, at, since, depth+1, paths)
+			unix.Close(sub)
+			if err != nil {
+				return err
+			}
+		case unix.S_IFREG, unix.S_IFLNK:
+			if time.Unix(int64(st.Mtim.Sec), int64(st.Mtim.Nsec)).After(since) {
+				*paths = append(*paths, at)
+			}
+		}
+	}
+	return nil
 }
 
 // SetupChanges lists what the setup changed in the copy of the repository r, as [Dir.Clone]

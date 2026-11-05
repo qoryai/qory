@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/qoryai/qory/internal/checkout"
 )
@@ -20,6 +21,10 @@ import (
 // repositories is the folder, relative to the checkout, that the further repositories
 // of a run are cloned under, as preparation.Repositories sets it.
 const repositories = checkout.Dir + "/repositories"
+
+// submoduleClockMargin is how far before the end of the clone [Dir.SubmoduleSetup] starts to read
+// a file as the setup's: a file system's times and a container's clock can lag by that.
+const submoduleClockMargin = 2 * time.Second
 
 // checkoutLF are the options of a checkout of a copy: the person's core.autocrlf would write
 // CRLF into the copy, and the git session would then commit it as a change on every line.
@@ -44,8 +49,11 @@ type Repository struct {
 	// out while the copy still has what the checkout wrote.
 	filtered []SetupPath
 	// refs is every ref of the copy when the clone ended, as for-each-ref prints the object and the
-	// name, so the git session can tell a ref the run made or moved.
+	// name. The git session compares the refs at its start with it, for what the run made or moved.
 	refs string
+	// cloned is when the clone ended, less [submoduleClockMargin]: [Dir.SubmoduleSetup] reads each
+	// file in a submodule with a later time as the setup's.
+	cloned time.Time
 }
 
 // Clone copies the person's repository at checkout, the top of its working tree, and
@@ -124,7 +132,12 @@ func (d Dir) cloneOne(ctx context.Context, i int, src, dest, branch string) (Rep
 	if err := d.cloneSubmodules(ctx, src, dest, base); err != nil {
 		return Repository{}, err
 	}
+	cloned := time.Now().Add(-submoduleClockMargin)
 	filtered, err := d.filteredFiles(ctx, i, dest)
+	if err != nil {
+		return Repository{}, fmt.Errorf(textNoCheckout, base, shown(src), err)
+	}
+	rewritten, err := d.lineEndFiles(ctx, i, dest, base)
 	if err != nil {
 		return Repository{}, fmt.Errorf(textNoCheckout, base, shown(src), err)
 	}
@@ -132,7 +145,10 @@ func (d Dir) cloneOne(ctx context.Context, i int, src, dest, branch string) (Rep
 	if err != nil {
 		return Repository{}, fmt.Errorf(textNoCheckout, base, shown(src), err)
 	}
-	return Repository{Base: base, index: i, filtered: filtered, excludes: personalExcludes(ctx, src), refs: refs}, nil
+	return Repository{
+		Base: base, index: i, filtered: slices.Concat(filtered, rewritten),
+		excludes: personalExcludes(ctx, src), refs: refs, cloned: cloned,
+	}, nil
 }
 
 // cloneAt is [Dir.cloneOne] without the filtered files.
@@ -419,6 +435,38 @@ func (d Dir) filteredFiles(ctx context.Context, i int, dest string) ([]SetupPath
 	}
 	if len(paths) == 0 {
 		return nil, nil
+	}
+	return d.setupStatesAt(ctx, dest, i, paths)
+}
+
+// lineEndFiles is each file of the copy at dest, the repository number i just checked out at
+// base, that a git add would change with no edit, with what the checkout wrote there: a CRLF blob
+// with a line-end rule in .gitattributes. The git session leaves each out while the copy has
+// that. git runs on a temporary index, read from the tree, before any run writes the copy.
+func (d Dir) lineEndFiles(ctx context.Context, i int, dest, base string) ([]SetupPath, error) {
+	temp, err := os.MkdirTemp(d.root, "index-")
+	if err != nil {
+		return nil, err
+	}
+	defer os.RemoveAll(temp)
+	env := []string{"GIT_INDEX_FILE=" + filepath.Join(temp, "index")}
+	if _, err := gitWith(ctx, dest, env, nil, "read-tree", base); err != nil {
+		return nil, err
+	}
+	options := []string{"-c", "core.autocrlf=false", "-c", "core.eol=lf", "-c", "core.safecrlf=false"}
+	// update-index exits 1 when a file differs, which the next command lists.
+	if _, err := gitWith(ctx, dest, env, nil, slices.Concat(options, []string{"update-index", "-q", "--refresh"})...); err != nil && exitOf(err) != 1 {
+		return nil, err
+	}
+	out, err := gitWith(ctx, dest, env, nil, slices.Concat(options, []string{"diff-files", "--name-only", "-z", "--ignore-submodules=all"})...)
+	if err != nil || out == "" {
+		return nil, err
+	}
+	var paths []string
+	for _, p := range strings.Split(strings.TrimSuffix(out, "\x00"), "\x00") {
+		if cleanRel(p) {
+			paths = append(paths, p)
+		}
 	}
 	return d.setupStatesAt(ctx, dest, i, paths)
 }

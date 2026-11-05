@@ -375,8 +375,12 @@ func (c *runCopy) recordSetup(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
+		submodules, err := c.dir.SubmoduleSetup(ctx, r)
+		if err != nil {
+			return err
+		}
 		o := c.out[r.Path]
-		o.Setup = states
+		o.Setup, o.Submodules = states, submodules
 		c.out[r.Path] = o
 	}
 	return nil

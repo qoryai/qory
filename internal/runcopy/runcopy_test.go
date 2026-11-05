@@ -2817,7 +2817,7 @@ func TestAFolderGitCannotReadIsLeftBehind(t *testing.T) {
 	}
 	t.Cleanup(func() { os.Chmod(locked, 0o755) })
 	out := sessionOutput(t, d, repos, nil)
-	if !strings.Contains(out, "qory: git add left this out of the commit in the copy: ") || !strings.Contains(out, "could not open directory") {
+	if !strings.Contains(out, "qory: git add printed in the copy: ") || !strings.Contains(out, "could not open directory") {
 		t.Errorf("the session printed:\n%s", out)
 	}
 	if !d.LeftBehind(repos) {
@@ -3014,7 +3014,7 @@ func TestAnEmbeddedRepositoryWithNoFindIsLeftBehind(t *testing.T) {
 	isolate(t)
 	sessionGit(t)
 	bin := t.TempDir()
-	for _, name := range []string{"git", "cat", "cp", "mkdir", "mv", "readlink", "rm"} {
+	for _, name := range []string{"git", "cat", "comm", "cp", "grep", "mkdir", "mv", "readlink", "rm", "sort", "tr"} {
 		real, err := exec.LookPath(name)
 		if err != nil {
 			t.Skipf("no %s here: %v", name, err)
@@ -3037,7 +3037,7 @@ func TestAnEmbeddedRepositoryWithNoFindIsLeftBehind(t *testing.T) {
 	write(t, inner, "x.txt", "x\n")
 	commitAll(t, inner, "inner")
 	out := sessionOutput(t, d, repos, nil)
-	if !strings.Contains(out, "qory: git add left this out of the commit in the copy: ") || !strings.Contains(out, "embedded") {
+	if !strings.Contains(out, "qory: git add printed in the copy: ") || !strings.Contains(out, "embedded") {
 		t.Errorf("the session printed:\n%s", out)
 	}
 	if !d.LeftBehind(repos) {
@@ -3462,5 +3462,350 @@ func TestAHeadBeforeTheBaseCommitWithNoBranchStops(t *testing.T) {
 	want := "qory: neither HEAD nor " + branch + " in the copy is at or past the base commit, so the session commits nothing"
 	if !strings.Contains(printed, want) {
 		t.Errorf("the session printed:\n%s", printed)
+	}
+}
+
+// nestedSubmodule is a person's repository with the submodule libs/m, which has the submodule
+// inner. The clone of the copy has libs/m, and git leaves inner empty until an update.
+func nestedSubmodule(t *testing.T) string {
+	t.Helper()
+	src, _ := person(t)
+	inner := filepath.Join(t.TempDir(), "inner")
+	write(t, inner, "lib.txt", "lib\n")
+	testGit(t, inner, "init", "--quiet", "-b", "main")
+	commitAll(t, inner, "inner")
+	middle := filepath.Join(t.TempDir(), "middle")
+	write(t, middle, "m.txt", "m\n")
+	testGit(t, middle, "init", "--quiet", "-b", "main")
+	testGit(t, middle, "-c", "protocol.file.allow=always", "submodule", "add", "--quiet", inner, "inner")
+	commitAll(t, middle, "middle")
+	testGit(t, src, "-c", "protocol.file.allow=always", "submodule", "add", "--quiet", middle, "libs/m")
+	commitAll(t, src, "submodule")
+	return src
+}
+
+// updateSubmodules runs what a person runs for a nested submodule, in the copy at work.
+func updateSubmodules(t *testing.T, work string) {
+	t.Helper()
+	testGit(t, work, "-c", "protocol.file.allow=always", "submodule", "update", "--init", "--recursive", "--quiet")
+}
+
+// TestANestedSubmoduleLetsTheSessionCommit is an agent that updates a nested submodule and commits:
+// the commit comes back, and no line says that the run made a repository.
+func TestANestedSubmoduleLetsTheSessionCommit(t *testing.T) {
+	isolate(t)
+	sessionGit(t)
+	src := nestedSubmodule(t)
+	d, repos := cloneRun(t, src)
+	updateSubmodules(t, d.Work())
+	if _, err := os.Stat(filepath.Join(d.Work(), "libs", "m", "inner", ".git")); err != nil {
+		t.Fatalf("the update made no nested repository: %v", err)
+	}
+	write(t, d.Work(), "x.txt", "x\n")
+	commitAll(t, d.Work(), "x")
+	printed := sessionOutput(t, d, repos, nil)
+	if strings.Contains(printed, "that the run made") || d.LeftBehind(repos) {
+		t.Errorf("left behind = %v:\n%s", d.LeftBehind(repos), printed)
+	}
+	qs, err := d.Quarantine(context.Background(), branch, repos)
+	if err != nil {
+		t.Fatalf("Quarantine: %v\n%s", err, printed)
+	}
+	if !slices.Contains(files(t, qs[0].Path, qs[0].Head), "x.txt") {
+		t.Errorf("the commit did not come back:\n%s", printed)
+	}
+}
+
+// TestASetupThatUpdatesANestedSubmoduleLeavesNothingBehind is the same update in the setup, and an
+// agent that commits after it.
+func TestASetupThatUpdatesANestedSubmoduleLeavesNothingBehind(t *testing.T) {
+	isolate(t)
+	sessionGit(t)
+	src := nestedSubmodule(t)
+	d, repos := cloneRun(t, src)
+	updateSubmodules(t, d.Work())
+	out := setupRecord(t, d, repos[0])
+	write(t, d.Work(), "x.txt", "x\n")
+	commitAll(t, d.Work(), "x")
+	printed := sessionOutput(t, d, repos, map[string]LeftOut{"": out})
+	if d.LeftBehind(repos) {
+		t.Errorf("the session recorded work left behind:\n%s", printed)
+	}
+}
+
+// setupRecord is what cmd records after the setup, for the repository r.
+func setupRecord(t *testing.T, d Dir, r Repository) LeftOut {
+	t.Helper()
+	paths, err := d.SetupChanges(t.Context(), r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	states, err := d.SetupStates(t.Context(), r, paths)
+	if err != nil {
+		t.Fatal(err)
+	}
+	submodules, err := d.SubmoduleSetup(t.Context(), r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return LeftOut{Setup: states, Submodules: submodules}
+}
+
+// TestAnUnreadableFileLeavesTheRestToComeBack is a file of mode 000 beside other work: the session
+// ends well, the rest comes back, and the file keeps the copy.
+func TestAnUnreadableFileLeavesTheRestToComeBack(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root reads a file of mode 000")
+	}
+	for name, c := range map[string]struct {
+		commit, change bool
+		bundle         bool
+	}{
+		"a commit":      {commit: true, bundle: true},
+		"a change":      {change: true, bundle: true},
+		"no other work": {},
+	} {
+		t.Run(strings.ReplaceAll(name, " ", "-"), func(t *testing.T) {
+			isolate(t)
+			sessionGit(t)
+			src, _ := person(t)
+			d, repos := cloneRun(t, src)
+			if c.commit {
+				write(t, d.Work(), "kept.txt", "kept\n")
+				commitAll(t, d.Work(), "kept")
+			}
+			if c.change {
+				write(t, d.Work(), "kept.txt", "kept\n")
+			}
+			locked := filepath.Join(d.Work(), "locked.txt")
+			write(t, d.Work(), "locked.txt", "x\n")
+			if err := os.Chmod(locked, 0); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = os.Chmod(locked, 0o644) })
+			printed := sessionOutput(t, d, repos, nil)
+			if !d.LeftBehind(repos) {
+				t.Errorf("the session did not record the file:\n%s", printed)
+			}
+			qs, err := d.Quarantine(context.Background(), branch, repos)
+			if !c.bundle {
+				if !errors.Is(err, ErrNoBundle) {
+					t.Errorf("Quarantine = %v, want no bundle", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := files(t, qs[0].Path, qs[0].Head)
+			if !slices.Contains(got, "kept.txt") || slices.Contains(got, "locked.txt") {
+				t.Errorf("the commit has %v", got)
+			}
+		})
+	}
+}
+
+// TestALineOfGitAddIsNoLostWork is each rule file that makes git add print a line on every run: the
+// session prints the line, the run has no change, and nothing stays behind.
+func TestALineOfGitAddIsNoLostWork(t *testing.T) {
+	for name, before := range map[string]func(t *testing.T, src string){
+		"linked gitignore": func(t *testing.T, src string) {
+			write(t, src, "ignore-rules", "*.o\n")
+			link(t, src, ".gitignore", "ignore-rules")
+		},
+		"linked gitattributes": func(t *testing.T, src string) {
+			write(t, src, "attribute-rules", "*.o binary\n")
+			link(t, src, ".gitattributes", "attribute-rules")
+		},
+		"negative attribute": func(t *testing.T, src string) {
+			write(t, src, ".gitattributes", "!foo text\n")
+		},
+		"macro in a folder": func(t *testing.T, src string) {
+			write(t, src, "sub/.gitattributes", "[attr]m text\n")
+		},
+	} {
+		t.Run(strings.ReplaceAll(name, " ", "-"), func(t *testing.T) {
+			isolate(t)
+			sessionGit(t)
+			src, _ := person(t)
+			before(t, src)
+			commitAll(t, src, "the rule")
+			d, repos := cloneRun(t, src)
+			noBundle(t, d, repos, false)
+		})
+	}
+}
+
+// TestALineEndRewriteStaysOut is a blob with CRLF that a line-end rule in .gitattributes would
+// rewrite on the next git add: a run with no change has no commit, and a change to the file goes in.
+func TestALineEndRewriteStaysOut(t *testing.T) {
+	for name, c := range map[string]struct{ attributes, file string }{
+		"text rule":              {"legacy.txt text\n", "legacy.txt"},
+		"eol rule":               {"*.bat text eol=crlf\n", "run.bat"},
+		"quote in the name":      {"*.txt text\n", "le\"gacy.txt"},
+		"line break in the name": {"*.txt text\n", "le\ngacy.txt"},
+	} {
+		t.Run(strings.ReplaceAll(name, " ", "-"), func(t *testing.T) {
+			isolate(t)
+			sessionGit(t)
+			src, _ := person(t)
+			write(t, src, c.file, "one\r\ntwo\r\n")
+			commitAll(t, src, "CRLF")
+			write(t, src, ".gitattributes", c.attributes)
+			commitAll(t, src, "the rule")
+			d, repos := cloneRun(t, src)
+			noBundle(t, d, repos, false)
+		})
+		t.Run(strings.ReplaceAll(name, " ", "-")+"-changed", func(t *testing.T) {
+			isolate(t)
+			sessionGit(t)
+			src, _ := person(t)
+			write(t, src, c.file, "one\r\ntwo\r\n")
+			commitAll(t, src, "CRLF")
+			write(t, src, ".gitattributes", c.attributes)
+			commitAll(t, src, "the rule")
+			d, repos := cloneRun(t, src)
+			write(t, d.Work(), c.file, "one\r\nthree\r\n")
+			q := bringBack(t, d, src, repos, nil)
+			if d.LeftBehind(repos) {
+				t.Error("the session recorded work left behind")
+			}
+			got := files(t, src, q.Head)
+			if !slices.ContainsFunc(got, func(f string) bool { return strings.HasSuffix(strings.Trim(f, `"`), filepath.Ext(c.file)) }) {
+				t.Errorf("the commit has %v", got)
+			}
+		})
+	}
+}
+
+// TestTextAutoHasNoCommit is * text=auto on files with each line end, which no add rewrites.
+func TestTextAutoHasNoCommit(t *testing.T) {
+	isolate(t)
+	sessionGit(t)
+	src, _ := person(t)
+	write(t, src, "crlf.txt", "one\r\ntwo\r\n")
+	write(t, src, "lf.txt", "one\ntwo\n")
+	commitAll(t, src, "both")
+	write(t, src, ".gitattributes", "* text=auto\n")
+	commitAll(t, src, "the rule")
+	d, repos := cloneRun(t, src)
+	noBundle(t, d, repos, false)
+}
+
+// TestASparseCheckoutCommitsNoDeletion is an agent that took files out of the working tree: no
+// commit deletes them, and the copy stays.
+func TestASparseCheckoutCommitsNoDeletion(t *testing.T) {
+	for name, agent := range map[string]func(t *testing.T, work string){
+		"sparse-checkout": func(t *testing.T, work string) {
+			testGit(t, work, "sparse-checkout", "set", "nothing-here")
+		},
+		"skip-worktree": func(t *testing.T, work string) {
+			testGit(t, work, "update-index", "--skip-worktree", "README.md")
+			if err := os.Remove(filepath.Join(work, "README.md")); err != nil {
+				t.Fatal(err)
+			}
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			isolate(t)
+			sessionGit(t)
+			src, _ := person(t)
+			write(t, src, "sub/a.txt", "a\n")
+			commitAll(t, src, "a folder")
+			d, repos := cloneRun(t, src)
+			agent(t, d.Work())
+			noBundle(t, d, repos, true)
+		})
+	}
+}
+
+// TestASetupFileInASubmoduleLeavesNothingBehind is a setup that wrote a file in a submodule: the
+// file is the setup's, and a change the agent makes after that keeps the copy.
+func TestASetupFileInASubmoduleLeavesNothingBehind(t *testing.T) {
+	for _, agentChanges := range []bool{false, true} {
+		t.Run("", func(t *testing.T) {
+			isolate(t)
+			sessionGit(t)
+			src, sub := withSubmodule(t)
+			d, repos := cloneRun(t, src)
+			inner := filepath.Join(d.Work(), filepath.FromSlash(sub))
+			write(t, inner, "gen.o", "generated\n")
+			out := setupRecord(t, d, repos[0])
+			if agentChanges {
+				write(t, inner, "gen.o", "the agent's\n")
+			}
+			printed := sessionOutput(t, d, repos, map[string]LeftOut{"": out})
+			if got := d.LeftBehind(repos); got != agentChanges {
+				t.Errorf("left behind = %v, want %v:\n%s", got, agentChanges, printed)
+			}
+		})
+	}
+}
+
+// TestATagOfThePersonIsNoWorkLeftBehind is a tag off every branch that the agent checks out, then
+// leaves: the commit is the person's.
+func TestATagOfThePersonIsNoWorkLeftBehind(t *testing.T) {
+	isolate(t)
+	sessionGit(t)
+	src, base := person(t)
+	testGit(t, src, "checkout", "--quiet", "--detach")
+	write(t, src, "tagged.txt", "x\n")
+	commitAll(t, src, "tagged")
+	testGit(t, src, "tag", "v1")
+	testGit(t, src, "checkout", "--quiet", "main")
+	if got := testGit(t, src, "rev-parse", "HEAD"); got != base {
+		t.Fatalf("HEAD is %s, want %s", got, base)
+	}
+	d, repos := cloneRun(t, src)
+	testGit(t, d.Work(), "checkout", "--quiet", "v1")
+	testGit(t, d.Work(), "checkout", "--quiet", branch)
+	noBundle(t, d, repos, false)
+}
+
+// TestAnAmendedBaseCommitTakesUncommittedWork is HEAD and the branch at one commit that the base
+// commit does not have: a commit undoes nothing, so what the agent left comes back.
+func TestAnAmendedBaseCommitTakesUncommittedWork(t *testing.T) {
+	isolate(t)
+	sessionGit(t)
+	src, _ := person(t)
+	d, repos := cloneRun(t, src)
+	write(t, d.Work(), "amended.txt", "x\n")
+	testGit(t, d.Work(), "add", "amended.txt")
+	testGit(t, d.Work(), "commit", "--quiet", "--amend", "-m", "amended")
+	write(t, d.Work(), "left.txt", "left\n")
+	q := bringBack(t, d, src, repos, nil)
+	if d.LeftBehind(repos) {
+		t.Error("the session recorded work left behind")
+	}
+	got := files(t, src, q.Head)
+	for _, want := range []string{"amended.txt", "left.txt", "README.md"} {
+		if !slices.Contains(got, want) {
+			t.Errorf("the commit has %v, want %s", got, want)
+		}
+	}
+}
+
+// TestARebaseOverACommitTakesUncommittedWork is a pull --rebase over a local commit, as a rebase on
+// a commit with another base: HEAD and the branch are one commit past another history.
+func TestARebaseOverACommitTakesUncommittedWork(t *testing.T) {
+	isolate(t)
+	sessionGit(t)
+	src, older := person(t)
+	write(t, src, "second.txt", "second\n")
+	commitAll(t, src, "second")
+	d, repos := cloneRun(t, src)
+	testGit(t, d.Work(), "checkout", "--quiet", "-B", "elsewhere", older)
+	write(t, d.Work(), "theirs.txt", "theirs\n")
+	commitAll(t, d.Work(), "theirs")
+	testGit(t, d.Work(), "checkout", "--quiet", branch)
+	testGit(t, d.Work(), "rebase", "--quiet", "elsewhere")
+	testGit(t, d.Work(), "branch", "-q", "-D", "elsewhere")
+	write(t, d.Work(), "left.txt", "left\n")
+	q := bringBack(t, d, src, repos, nil)
+	got := files(t, src, q.Head)
+	for _, want := range []string{"theirs.txt", "left.txt", "second.txt"} {
+		if !slices.Contains(got, want) {
+			t.Errorf("the commit has %v, want %s", got, want)
+		}
 	}
 }

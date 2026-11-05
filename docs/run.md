@@ -3460,12 +3460,21 @@ Part of the run's work can miss the bundle:
 
 - A change in the working tree when the session makes no commit.
 - A commit on a branch that the bundle does not have, a stash, a tag the run made, or a commit made
-  with `HEAD` detached. A commit that a remote-tracking ref has does not count.
+  with `HEAD` detached. A commit that a remote-tracking ref or a ref of your repository has does not
+  count. Some ordinary commands count too: `git fetch --tags` with a new tag off any branch, a
+  fetched pull request ref checked out as a local branch, `git notes add`, and a feature branch
+  squash-merged and deleted.
 - With nothing past your commit, a commit that a reset took off the branch.
-- A commit or a change in a submodule, or a repository the run made. An ignore rule that covers a
-  repository's folder keeps it out of this list. The session prints a line with its path.
-- A file that `git add` cannot read, such as one in a folder of mode 000. The session prints git's
-  line.
+- A sparse checkout in the copy: the session makes no commit, since a commit would delete the
+  files that the checkout took out.
+- A commit or a change in a submodule, other than a file the setup left there, or a repository the
+  run made. An ignore rule that covers a repository's folder keeps it out of this list. The session
+  prints a line with its path.
+- A file or a folder that `git add` cannot read, such as one of mode 000. The rest of the work comes
+  back.
+
+Other lines of `git add` print too, such as its warning about a link at `.gitignore`. They keep
+nothing behind.
 
 qory then keeps the copy and exits 1:
 
