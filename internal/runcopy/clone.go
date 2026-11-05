@@ -77,6 +77,12 @@ func (d Dir) Clone(ctx context.Context, checkout, branch string) ([]Repository, 
 	for i, rel := range further {
 		src := filepath.Join(checkout, filepath.FromSlash(rel))
 		dest := filepath.Join(d.Work(), filepath.FromSlash(rel))
+		// The commit can have a link at .qory or below it, which a clone would write through.
+		if through, err := linkOnPath(d.Work(), rel); err != nil {
+			return nil, fileErr(dest, err)
+		} else if through {
+			continue
+		}
 		if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
 			return nil, fileErr(filepath.Dir(dest), err)
 		}
@@ -196,6 +202,12 @@ func (d Dir) cloneSubmodules(ctx context.Context, src, dest, base string) error 
 		if info, err := os.Lstat(from); !ok || err != nil || !info.IsDir() {
 			continue
 		}
+		// The commit can have a link on the way, which a clone would write through.
+		if through, err := linkOnPath(dest, sub); err != nil {
+			return fmt.Errorf(textNoSubmodule, shown(sub), shown(src), shown(from), err)
+		} else if through {
+			continue
+		}
 		to := filepath.Join(dest, filepath.FromSlash(sub))
 		if _, err := git(ctx, d.root, "clone", "--quiet", "--no-local", "--no-hardlinks", "--no-checkout", "--no-recurse-submodules", "--", from, to); err != nil {
 			return fmt.Errorf(textNoSubmodule, shown(sub), shown(src), shown(from), err)
@@ -208,6 +220,25 @@ func (d Dir) cloneSubmodules(ctx context.Context, src, dest, base string) error 
 		}
 	}
 	return nil
+}
+
+// linkOnPath reports whether a part of rel, with forward slashes, below the folder top is a
+// link, part by part with lstat. It stops at the first part that does not exist.
+func linkOnPath(top, rel string) (bool, error) {
+	at := top
+	for part := range strings.SplitSeq(rel, "/") {
+		at = filepath.Join(at, part)
+		info, err := os.Lstat(at)
+		switch {
+		case errors.Is(err, fs.ErrNotExist):
+			return false, nil
+		case err != nil:
+			return false, err
+		case info.Mode()&fs.ModeSymlink != 0:
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // gitlinkAt is the commit the gitlink at rel in commit records, and whether there is

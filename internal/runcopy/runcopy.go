@@ -9,7 +9,9 @@
 // wall runs the script of [Dir.GitSession]: it commits what the agent left in each
 // repository of the copy and writes the run's branch to a git bundle per repository,
 // through a git folder that the script makes, so no setting in the copy's .git applies
-// to the add, the commit or the bundle. Once the run's containers are gone,
+// to the add, the commit or the bundle. One git of the script reads the branch's commit
+// through the copy's .git and its settings, inside the wall, with no transport and no lazy
+// fetch. Once the run's containers are gone,
 // [Dir.Quarantine] checks each bundle file and fetches it into a new bare repository
 // with git's object checks on; [Quarantine.FetchInto] fetches the run's branch from
 // there into the person's repository, and [Quarantine.ActingChanges] lists the acting

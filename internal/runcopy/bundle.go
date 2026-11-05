@@ -160,6 +160,10 @@ func (d Dir) quarantineOne(ctx context.Context, i int, r Repository, rel, branch
 		return nil, fileErr(q, err)
 	}
 	ref := "refs/heads/" + branch
+	// git fetch follows a file that has gitdir: <path>, so nothing but a bundle reaches it.
+	if err := checkBundleHeader(checked, ref); err != nil {
+		return nil, fmt.Errorf(textBundleChecks, shown(d.Work()), shown(rel), err)
+	}
 	if bundleFetchChecks(ctx) {
 		_, err = git(ctx, q, "-c", "transfer.fsckObjects=true", "-c", "fetch.fsckObjects=true", "-c", "fetch.fsck.hasDotgit=error",
 			"fetch", "--quiet", "--no-tags", "--no-recurse-submodules", "--no-write-fetch-head",
@@ -239,7 +243,7 @@ func indexBundle(ctx context.Context, q, path, ref string) error {
 	if _, err := f.Seek(offset, io.SeekStart); err != nil {
 		return err
 	}
-	if _, err := gitWith(ctx, q, nil, f, "index-pack", "--stdin", "--fix-thin", "--strict", "--fsck-objects"); err != nil {
+	if _, err := gitWith(ctx, q, nil, f, "index-pack", "--stdin", "--fix-thin", "--strict=hasDotgit=error", "--fsck-objects"); err != nil {
 		return err
 	}
 	if _, err := git(ctx, q, "update-ref", ref, head); err != nil {
@@ -250,6 +254,18 @@ func indexBundle(ctx context.Context, q, path, ref string) error {
 		args = append(append(args, "--not"), prereqs...)
 	}
 	_, err = git(ctx, q, args...)
+	return err
+}
+
+// checkBundleHeader returns an error unless the file at path starts with the header of a
+// version 2 or 3 git bundle that has ref.
+func checkBundleHeader(path, ref string) error {
+	f, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	_, _, _, err = bundleHeader(f, ref)
 	return err
 }
 

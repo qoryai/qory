@@ -179,6 +179,9 @@ func plant(t *testing.T, work, program string) {
 		{"commit.gpgSign", "true"},
 		{"gpg.program", program},
 		{"credential.helper", program},
+		{"extensions.partialClone", "origin"},
+		{"remote.origin.promisor", "true"},
+		{"protocol.ext.allow", "always"},
 	}
 	for _, kv := range set {
 		testGit(t, work, "config", kv[0], kv[1])
@@ -1229,6 +1232,214 @@ func TestSetupChangesListsWhatTheSetupChanged(t *testing.T) {
 	}
 	if _, err := os.Stat(ran); err == nil {
 		t.Error("a program the copy's .git names ran on this machine")
+	}
+}
+
+// TestAFileThatPointsToARepositoryIsNoBundle is a bundle file with gitdir: <path>: git fetch
+// would open that repository, so the header check stops it first and no program of that
+// repository runs.
+func TestAFileThatPointsToARepositoryIsNoBundle(t *testing.T) {
+	for _, target := range []string{"copy", "other"} {
+		t.Run(target, func(t *testing.T) {
+			isolate(t)
+			src, _ := person(t)
+			d, repos := cloneRun(t, src)
+			program, ran := marker(t)
+			at := filepath.Join(d.Work(), ".git")
+			if target == "other" {
+				other := t.TempDir()
+				testGit(t, other, "init", "--quiet")
+				at = filepath.Join(other, ".git")
+			}
+			testGit(t, filepath.Dir(at), "config", "uploadpack.packObjectsHook", program)
+			testGit(t, filepath.Dir(at), "config", "core.fsmonitor", program)
+			if err := os.Mkdir(d.Bundle(), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			write(t, d.Bundle(), "0.bundle", "gitdir: "+at+"\n")
+			_, err := d.Quarantine(context.Background(), branch, repos)
+			if err == nil || !strings.Contains(err.Error(), "header") {
+				t.Errorf("err = %v, want the header check", err)
+			}
+			if data, err := os.ReadFile(ran); err == nil {
+				t.Errorf("a program ran: %s", data)
+			}
+		})
+	}
+}
+
+// TestTheGitSessionFetchesNoMissingObject is a copy set up as a partial clone from an ext::
+// address with the branch at a missing object: the session fails, and the program does not run.
+func TestTheGitSessionFetchesNoMissingObject(t *testing.T) {
+	isolate(t)
+	src, _ := person(t)
+	d, repos := cloneRun(t, src)
+	program, ran := marker(t)
+	for _, kv := range [][2]string{
+		{"extensions.partialClone", "origin"},
+		{"remote.origin.promisor", "true"},
+		{"remote.origin.url", "ext::" + program},
+		{"protocol.ext.allow", "always"},
+	} {
+		testGit(t, d.Work(), "config", kv[0], kv[1])
+	}
+	write(t, d.Work(), ".git/refs/heads/"+branch, strings.Repeat("a", 40)+"\n")
+	s, err := d.GitSession(context.Background(), branch, "", repos, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := exec.Command(s.Command, s.Args...)
+	c.Dir, c.Env = s.Dir, s.Env
+	if out, err := c.CombinedOutput(); err == nil {
+		t.Errorf("the session passed:\n%s", out)
+	}
+	if data, err := os.ReadFile(ran); err == nil {
+		t.Errorf("a program ran: %s", data)
+	}
+}
+
+// TestNamesFoldAsMacOSFoldsThem is U+017F and the Kelvin sign, which lower-casing keeps and
+// APFS folds to s and k.
+func TestNamesFoldAsMacOSFoldsThem(t *testing.T) {
+	for name, want := range map[string]string{
+		"harne\u017fs.yaml":    "harness.yaml",
+		"qory-\u017ftack.yaml": "qory-stack.yaml",
+		"qory-stac\u212a.yaml": "qory-stack.yaml",
+		"QORY.yaml":            "qory.yaml",
+		"qory\u200d.yaml":      "qory.yaml",
+	} {
+		if got := qoryName(name); got != want {
+			t.Errorf("qoryName(%q) = %q, want %q", name, got, want)
+		}
+	}
+	for _, names := range [][]string{
+		{"HEAD", "object\u017f"},
+		{"HEAD", "ref\u017f"},
+		{"head", "REFS"},
+	} {
+		if !gitDirLike(names) {
+			t.Errorf("gitDirLike(%q) = false", names)
+		}
+	}
+	if folded("\u00d3") != folded("O\u0301") {
+		t.Errorf("folded does not normalize: %q, %q", folded("\u00d3"), folded("O\u0301"))
+	}
+}
+
+// TestActingChangesReadsAFoldedQoryFile is a run's commit that adds a stack file whose name
+// macOS folds to qory-stack.yaml: its keys are listed.
+func TestActingChangesReadsAFoldedQoryFile(t *testing.T) {
+	isolate(t)
+	src, _ := person(t)
+	d, repos := cloneRun(t, src)
+	write(t, d.Work(), "harne\u017fs.yaml", "env:\n  B: \"2\"\n")
+	write(t, d.Work(), "qory-stac\u212a.yaml", "modules:\n  - name: other\n    source:\n      git: https://git.example.com/other.git\n")
+	q := bringBack(t, d, src, repos, nil)
+	changes, err := q.ActingChanges(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(changes) < 2 {
+		t.Errorf("the changes for the two folded names are %+v", changes)
+	}
+}
+
+// TestActingChangesListsAnAddedGitFolder is a run's commit that adds a bare repository: the
+// result lists its folder, also when a name folds to objects.
+func TestActingChangesListsAnAddedGitFolder(t *testing.T) {
+	isolate(t)
+	src, _ := person(t)
+	d, repos := cloneRun(t, src)
+	for _, f := range []string{"bare/HEAD", "bare/objects/x", "bare/refs/x", "folded/HEAD", "folded/object\u017f/x"} {
+		write(t, d.Work(), f, "x\n")
+	}
+	q := bringBack(t, d, src, repos, nil)
+	changes, err := q.ActingChanges(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var files []string
+	for _, c := range changes {
+		files = append(files, c.File)
+	}
+	for _, want := range []string{"bare", "folded"} {
+		if !slices.Contains(files, want) {
+			t.Errorf("the changes %v do not list %s", files, want)
+		}
+	}
+}
+
+// withSubmodule makes the person's repository with a submodule, and returns its folder and the
+// submodule's path.
+func withSubmodule(t *testing.T) (string, string) {
+	t.Helper()
+	src, _ := person(t)
+	sub := filepath.Join(t.TempDir(), "sub")
+	write(t, sub, "lib.txt", "lib\n")
+	testGit(t, sub, "init", "--quiet", "-b", "main")
+	commitAll(t, sub, "lib")
+	testGit(t, src, "-c", "protocol.file.allow=always", "submodule", "add", "--quiet", sub, "libs/s")
+	commitAll(t, src, "submodule")
+	return src, "libs/s"
+}
+
+// TestASubmoduleBehindALinkIsSkipped is a copy whose submodule folder's parent is a link to a
+// folder outside, as a commit can make through a name the file system folds: no clone goes
+// through the link.
+func TestASubmoduleBehindALinkIsSkipped(t *testing.T) {
+	isolate(t)
+	src, sub := withSubmodule(t)
+	d, _ := cloneRun(t, src)
+	base := testGit(t, d.Work(), "rev-parse", "HEAD")
+	top := filepath.Join(d.Work(), strings.Split(sub, "/")[0])
+	if err := os.RemoveAll(top); err != nil {
+		t.Fatal(err)
+	}
+	outside := t.TempDir()
+	if err := os.Symlink(outside, top); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.cloneSubmodules(context.Background(), src, d.Work(), base); err != nil {
+		t.Fatal(err)
+	}
+	entries, err := os.ReadDir(outside)
+	if err != nil || len(entries) != 0 {
+		t.Errorf("the folder outside has %v (%v)", entries, err)
+	}
+}
+
+// TestAFurtherRepositoryBehindALinkIsSkipped is a commit with a link at .qory to a folder
+// outside, and a further repository in the person's .qory: no clone goes through the link.
+func TestAFurtherRepositoryBehindALinkIsSkipped(t *testing.T) {
+	isolate(t)
+	src, _ := person(t)
+	outside := t.TempDir()
+	if err := os.Symlink(outside, filepath.Join(src, ".qory")); err != nil {
+		t.Fatal(err)
+	}
+	testGit(t, src, "add", ".qory")
+	commitAll(t, src, "a link at .qory")
+	if err := os.Remove(filepath.Join(src, ".qory")); err != nil {
+		t.Fatal(err)
+	}
+	further := filepath.Join(src, ".qory", "repositories", "other")
+	if err := os.MkdirAll(further, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	testGit(t, further, "init", "--quiet", "-b", "main")
+	write(t, further, "file.txt", "x\n")
+	commitAll(t, further, "first")
+	d := newDir(t)
+	repos, err := d.Clone(context.Background(), src, branch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(repos) != 1 {
+		t.Errorf("repos = %+v, want the person's alone", repos)
+	}
+	entries, err := os.ReadDir(outside)
+	if err != nil || len(entries) != 0 {
+		t.Errorf("the folder outside has %v (%v)", entries, err)
 	}
 }
 

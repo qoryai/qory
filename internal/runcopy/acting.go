@@ -3,6 +3,8 @@ package runcopy
 import (
 	"context"
 	"fmt"
+	"path"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -11,7 +13,8 @@ import (
 // the qory files at the repository's base commit and at the run's head, both in the
 // quarantine: qory.yaml, harness.yaml and qory-stack.yaml at the top, by a name that
 // matches regardless of letter case, and each stack file in the repository that one of
-// them extends by a path. It also lists each link the run's commits add or change.
+// them extends by a path. It also lists each link the run's commits add or change, and each
+// folder they add that [gitDirLike] matches, which git takes as a repository at a checkout.
 //
 // Every file is read from the commit's tree with git ls-tree and git cat-file, which
 // run no filter, part by part of its path, so a link or a submodule on the way counts
@@ -36,6 +39,13 @@ func (q *Quarantine) ActingChanges(ctx context.Context) ([]ActingChange, error) 
 	}
 	for _, l := range links {
 		out = append(out, ActingChange{File: l})
+	}
+	folders, err := q.addedGitFolders(ctx)
+	if err != nil {
+		return nil, fmt.Errorf(textActingFailed, shown(q.Path), err)
+	}
+	for _, f := range folders {
+		out = append(out, ActingChange{File: f})
 	}
 	return sortChanges(out), nil
 }
@@ -149,4 +159,46 @@ func (q *Quarantine) changedLinks(ctx context.Context) ([]string, error) {
 		}
 	}
 	return links, nil
+}
+
+// addedGitFolders is each folder at the run's head that [gitDirLike] matches and that the base
+// commit does not have as such, "." for the top.
+func (q *Quarantine) addedGitFolders(ctx context.Context) ([]string, error) {
+	before, err := q.gitFolders(ctx, q.Repo.Base)
+	if err != nil {
+		return nil, err
+	}
+	after, err := q.gitFolders(ctx, q.Head)
+	if err != nil {
+		return nil, err
+	}
+	var added []string
+	for _, f := range after {
+		if !slices.Contains(before, f) {
+			added = append(added, f)
+		}
+	}
+	return added, nil
+}
+
+// gitFolders is each folder of commit's tree that [gitDirLike] matches, sorted.
+func (q *Quarantine) gitFolders(ctx context.Context, commit string) ([]string, error) {
+	out, err := git(ctx, q.Path, "ls-tree", "-r", "-z", "--name-only", "--full-tree", commit)
+	if err != nil {
+		return nil, err
+	}
+	names := map[string][]string{}
+	for file := range strings.SplitSeq(out, "\x00") {
+		for p := file; p != "" && p != "."; p = path.Dir(p) {
+			names[path.Dir(p)] = append(names[path.Dir(p)], path.Base(p))
+		}
+	}
+	var folders []string
+	for f, in := range names {
+		if gitDirLike(in) {
+			folders = append(folders, f)
+		}
+	}
+	slices.Sort(folders)
+	return folders, nil
 }

@@ -3,18 +3,24 @@ package runcopy
 import (
 	"strings"
 
+	"golang.org/x/text/cases"
+	"golang.org/x/text/unicode/norm"
+
 	"github.com/qoryai/qory/internal/checkout"
 )
 
-// folded is name as a file system that ignores letter case, and the code points macOS
-// ignores in a name, compares it: lower case, without those code points.
+// folded is name as a file system that ignores letter case and normalization, and the code
+// points macOS ignores in a name, compares it: without those code points, case-folded by
+// Unicode, so U+017F is s and the Kelvin sign is k, and in NFD. A [cases.Caser] may keep
+// state, so each call makes one.
 func folded(name string) string {
-	return strings.ToLower(strings.Map(func(r rune) rune {
+	stripped := strings.Map(func(r rune) rune {
 		if ignorable(r) {
 			return -1
 		}
 		return r
-	}, name))
+	}, name)
+	return norm.NFD.String(cases.Fold().String(stripped))
 }
 
 // folds reports whether name and want are one name as [folded] compares them.
