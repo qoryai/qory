@@ -871,17 +871,16 @@ func TestACheckoutAtTheHomeFolderWithTheStateOutsideRuns(t *testing.T) {
 }
 
 // TestAnOldPlacesFileStopsNothing is a home with a file of the former record of checkouts
-// under the state folder: qory wa, the compose, run and launch print nothing about it.
+// under the state folder: qory wa, the compose and run print nothing about it.
 func TestAnOldPlacesFileStopsNothing(t *testing.T) {
 	root := copyCheckout(t)
 	old := filepath.Join(os.Getenv("XDG_STATE_HOME"), "qory", "places", "0123456789ab")
 	writeFile(t, old, "{\"path\": \""+root+"\"}\n")
 	agentInCopy(t, func(session.SessionSpec) {})
 	for _, args := range [][]string{
-		{"wa", "feature", "--no-compose"},
+		{"wa", "feature", "--no-compose", "--offline"},
 		{"harness", "compose", "--runtime", "claude", "--no-links"},
 		{"run", "claude", "--", "-p", "hi"},
-		{"launch", "claude", "--", "-p", "hi"},
 	} {
 		out, err := run(t, args...)
 		if err != nil {

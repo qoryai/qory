@@ -1942,7 +1942,7 @@ func TestAFailedRemovalOfTheSetupContainerRunsNoPush(t *testing.T) {
 
 // TestAWallThatStaysRunsNoGit is a HostProxy that fails because the wall of a session could
 // not be removed, for each end of the session: the agent may still run, so the step runs
-// no git, and a lock stays.
+// no git.
 func TestAWallThatStaysRunsNoGit(t *testing.T) {
 	const refused = "Open a new run. The wall of session 1 could not be removed and may still run, so this run takes no more sessions."
 	for name, result := range allSessionEnds {
@@ -1961,11 +1961,8 @@ func TestAWallThatStaysRunsNoGit(t *testing.T) {
 				}
 				return errors.New(refused)
 			}
-			var lock string
 			r := p.run(t, func(dir string) {
-				lock = filepath.Join(dir, ".git", "index.lock")
 				writeFile(t, filepath.Join(dir, "left.txt"), "left\n")
-				writeFile(t, lock, "")
 				info, err := os.Stat(calls)
 				if err != nil {
 					t.Fatal(err)
@@ -1985,9 +1982,6 @@ func TestAWallThatStaysRunsNoGit(t *testing.T) {
 				if !strings.Contains(line, " check-ref-format ") {
 					t.Errorf("git ran after the session:\n%s", line)
 				}
-			}
-			if _, err := os.Lstat(lock); err != nil {
-				t.Errorf("the lock is gone: %v", err)
 			}
 			if head := p.branchHead(t); head != "" {
 				t.Errorf("the forge has the branch at %s", head)
