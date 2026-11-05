@@ -23,6 +23,18 @@ const MaxBundle = 1 << 30
 // qory reads when it checks the pack itself.
 const maxBundleHeader = 1 << 20
 
+// LeftBehind reports whether the git session of repos recorded work of the run that the bundles
+// do not have. The file's content is not read: a program in the session can write it, and all
+// it can do is keep the copy.
+func (d Dir) LeftBehind(repos []Repository) bool {
+	for i := range repos {
+		if info, err := os.Lstat(filepath.Join(d.Bundle(), strconv.Itoa(i)+".left")); err == nil && info.Mode().IsRegular() {
+			return true
+		}
+	}
+	return false
+}
+
 // ErrNoBundle is a git session that recorded, for every repository, that the run made
 // no commit past its base, so nothing comes back.
 var ErrNoBundle = errors.New("no action needed: the run made no commit past its base commit")

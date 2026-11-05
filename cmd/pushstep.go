@@ -138,16 +138,27 @@ func canPush(fromCode *codeRun, readOnly bool, branch *preparation.WorkBranch) b
 }
 
 // returnContext is the context of the return of a local run's work: a stop has ended ctx, so
-// it is not ended by ctx, and only again, a second signal, ends it. The git session has
-// [runcopy.SessionLimit] and each check [copyStepLimit], and a first signal leaves that time.
-func returnContext(ctx, again context.Context) (context.Context, func()) {
-	back, cancel := context.WithCancel(context.WithoutCancel(ctx))
-	stop := context.AfterFunc(again, cancel)
+// it is not ended by ctx. It ends at a second signal, again, and afterSignal after ctx ends, so a
+// first signal leaves the return that time, and the git session and each check have their
+// limits within it. fromCode is a run from a run code, which is how a pool starts a run: such
+// a run has [pushTimes].signal after a signal, as the push step has, since [child.DefaultGrace]
+// kills it. started, for any other run, is what prints the line of the wait, when the first
+// signal comes; it does not print for a return that ended first.
+func returnContext(ctx, again context.Context, fromCode bool, started func(time.Duration)) (context.Context, func()) {
+	if fromCode {
+		return pushContext(ctx, again, time.Time{}, pushTimes.limit, pushTimes.signal)
+	}
+	back, stop := pushContext(ctx, again, time.Time{}, returnAfterSignal, returnAfterSignal)
+	stopLine := context.AfterFunc(ctx, func() { started(returnAfterSignal) })
 	return back, func() {
+		stopLine()
 		stop()
-		cancel()
 	}
 }
+
+// returnAfterSignal is how long the return of a local run's work has after a first signal: the
+// removal of the setup container, the git session, and the checks of its bundles.
+const returnAfterSignal = 30 * time.Minute
 
 // removeThenPush removes the setup container of a run that gets the push step, then runs
 // the git session of a run with a copy, then [pushWork], with ctx as the bound of all three.
@@ -228,6 +239,9 @@ func pushCopy(ctx context.Context, copied *runCopy, branch *preparation.WorkBran
 	qs, err := copied.quarantine(ctx, nil)
 	if err != nil {
 		return nil, copied.checkFailed(ctx, err)
+	}
+	if copied.dir.LeftBehind(copied.repos) {
+		fmt.Fprintln(w, "qory run: "+textCopyBehind)
 	}
 	from, lines, err := pushable(ctx, qs)
 	if err != nil {

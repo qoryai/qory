@@ -30,6 +30,10 @@ const (
 	textCopyOutside    = "run qory inside the checkout %s: a run that may write works in a copy of the checkout, and the working folder %s is outside it"
 	textCopyNoFolder   = "commit %[1]s, or run qory in a folder that the commit at HEAD has: a run that may write works in a copy of that commit, which has no folder %[1]s"
 	textCopyReserved   = "start the run from a folder that does not contain your home folder or qory's state directory: the folder %s %s, and the run's copy of it would have every file there"
+	textCopyBehind     = "part of the run's work did not come back: commits on another branch of the copy, or files that git add could not read."
+	textCopyStepLimit  = "the check of the run's commits ran past its limit of %s, so those commits did not come back"
+	textCopyBackLimit  = "the copy back of the run's files ran past its limit of %s, so part of them did not come back"
+	textCopyWaiting    = "got %s: bringing the run's work back, for at most %s. Send a second signal to stop that."
 	textCopyOnBranch   = "the run's commits are on %s in %s."
 	textCopyActing     = " They change these qory settings: %s. Check them before you check out the branch."
 	textCopyPushActing = "qory run: the run's commits in %s change these qory settings: %s. Check them before you check out the branch."
@@ -39,7 +43,7 @@ const (
 	textCopyNoSession  = "the git session did not start, so nothing came back from the run: %s"
 	textCopyExited     = "the git session exited with %d, so nothing came back from the run"
 	textCopyCut        = "%s during the git session, so nothing came back from the run"
-	textCopyCheckCut   = "%s during the check of the run's commits, so nothing came back from the run"
+	textCopyCheckCut   = "%s during the check of the run's commits, so those commits did not come back"
 	textCopyClosed     = "the run ended before the git session started, so nothing came back from the run"
 	textCopyStays      = "read the run's files in %s, run no git there, then remove the folder: nothing more came back from the run"
 	textCopyBack       = "copied %s back to %s from the run, and deleted %s there."
@@ -51,9 +55,23 @@ const (
 	textCopyNoDisarm   = "remove %s, and run no git there: qory renames each .git in a copy it keeps, and that failed: %s"
 )
 
-// copyStepLimit is how long the check of a run's bundles, or a fetch from them, may take.
-// A bundle has at most 1 GiB, and git checks every object in it.
-const copyStepLimit = 10 * time.Minute
+// copyStepLimit is how long the check of a run's bundles, a fetch from them, or a copy of a run's
+// files back may take. A bundle has at most 1 GiB, and git checks every object in it. A test
+// sets a shorter one.
+var copyStepLimit = 10 * time.Minute
+
+// removeSetupLimit is how long the removal of a run's setup container may take before its work
+// comes back.
+const removeSetupLimit = 2 * time.Minute
+
+// stepErr is err of a step under limited, the context of ctx with [copyStepLimit]: the line of
+// that limit when the limit ended the step. A stop that ended ctx stays err, for [runCopy.checkFailed].
+func stepErr(ctx, limited context.Context, err error) error {
+	if err != nil && ctx.Err() == nil && limited.Err() != nil {
+		return fmt.Errorf(textCopyStepLimit, copyStepLimit)
+	}
+	return err
+}
 
 // disarmLimit is how long the renames in a copy that stays may take.
 const disarmLimit = time.Minute
@@ -217,7 +235,9 @@ func (c *runCopy) done(report func(string)) {
 // what it left out. A file you both have keeps your version, so the copy stays with the
 // run's. It returns false when the copy back stopped.
 func (c *runCopy) artifactsBack(ctx context.Context, report func(string)) bool {
-	res, err := c.dir.CopyArtifactsBack(ctx, c.root)
+	limited, cancel := context.WithTimeout(ctx, copyStepLimit)
+	defer cancel()
+	res, err := c.dir.CopyArtifactsBack(limited, c.root)
 	if len(res.Skipped) > 0 {
 		report(fmt.Sprintf(textCopyLeftOut, shownPaths(res.Skipped)))
 	}
@@ -403,12 +423,12 @@ func (c *runCopy) quarantine(ctx context.Context, report func(string)) ([]*runco
 	defer cancel()
 	qs, err := c.dir.Quarantine(limited, c.branch, c.repos)
 	if errors.Is(err, runcopy.ErrNoBundle) {
-		if report != nil {
+		if report != nil && !c.dir.LeftBehind(c.repos) {
 			report(err.Error())
 		}
 		return nil, nil
 	}
-	return qs, err
+	return qs, stepErr(ctx, limited, err)
 }
 
 // comeBack brings the run's work to the person: for a plain folder the files, and for a
@@ -433,6 +453,10 @@ func (c *runCopy) comeBack(ctx context.Context, runID string, report func(string
 			ok = false
 		}
 	}
+	if c.dir.LeftBehind(c.repos) {
+		report(textCopyBehind)
+		ok = false
+	}
 	if !ok {
 		c.kept(report)
 	}
@@ -446,14 +470,14 @@ func (c *runCopy) fetchOne(ctx context.Context, q *runcopy.Quarantine, runID str
 	defer cancel()
 	changes, err := q.ActingChanges(limited)
 	if err != nil {
-		report(c.checkFailed(ctx, err).Error())
+		report(c.checkFailed(ctx, stepErr(ctx, limited, err)).Error())
 		return false
 	}
 	at := filepath.Join(c.root, filepath.FromSlash(q.Repo.Path))
 	branch := runBranch(runID)
 	if err := q.FetchInto(limited, at, "refs/heads/"+branch); err != nil {
-		if ctx.Err() != nil {
-			report(c.checkFailed(ctx, err).Error())
+		if limited.Err() != nil {
+			report(c.checkFailed(ctx, stepErr(ctx, limited, err)).Error())
 			return false
 		}
 		report(shownError(err) + c.used())
@@ -469,9 +493,15 @@ func (c *runCopy) fetchOne(ctx context.Context, q *runcopy.Quarantine, runID str
 
 // copyBack brings the run's files back to the person's plain folder.
 func (c *runCopy) copyBack(ctx context.Context, report func(string)) bool {
-	res, err := c.dir.CopyBack(ctx, c.root)
+	limited, cancel := context.WithTimeout(ctx, copyStepLimit)
+	defer cancel()
+	res, err := c.dir.CopyBack(limited, c.root)
 	if err != nil {
-		report(shownError(err) + c.used())
+		if ctx.Err() == nil && limited.Err() != nil {
+			report(fmt.Sprintf(textCopyBackLimit, copyStepLimit) + c.used())
+		} else {
+			report(shownError(err) + c.used())
+		}
 		c.kept(report)
 		return false
 	}
@@ -511,6 +541,7 @@ func pushable(ctx context.Context, qs []*runcopy.Quarantine) ([]preparation.Quar
 		from = append(from, preparation.Quarantined{Dir: dir, Path: q.Path, Head: q.Head})
 		limited, cancel := context.WithTimeout(ctx, copyStepLimit)
 		changes, err := q.ActingChanges(limited)
+		err = stepErr(ctx, limited, err)
 		cancel()
 		if err != nil {
 			return nil, nil, err

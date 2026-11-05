@@ -513,11 +513,14 @@ func TestASecondSignalCutsTheGitSession(t *testing.T) {
 // run: the session keeps its limit of five minutes, and the run's work comes back.
 func TestAFirstSignalLeavesTheGitSessionItsTime(t *testing.T) {
 	root := copyCheckout(t)
+	// The time of a run from a run code: the session outlives it here.
+	t.Cleanup(cmd.SetPushTimes(time.Second, time.Second))
 	agentInCopy(t, func(spec session.SessionSpec) {
 		writeFile(t, filepath.Join(spec.Dir, "left.txt"), "left\n")
 	})
 	t.Cleanup(cmd.SetGitSession(func(ctx context.Context, spec session.SessionSpec) (*session.Result, error) {
 		term(t)
+		time.Sleep(2500 * time.Millisecond)
 		if err := ctx.Err(); err != nil {
 			t.Errorf("one signal ended the git session: %v", err)
 		}
@@ -527,8 +530,112 @@ func TestAFirstSignalLeavesTheGitSessionItsTime(t *testing.T) {
 		return cmd.GitSessionOnHost(ctx, spec)
 	}))
 	out, _ := run(t, "run", "claude", "--", "-p", "hi")
+	wants(t, out, "qory run: got SIGTERM: bringing the run's work back, for at most 30m0s. Send a second signal to stop that.")
 	branch := runBranchOf(t, out)
 	gitOutput(t, root, "cat-file", "-e", branch+":left.txt")
+}
+
+// TestAReturnWithNoSignalPrintsNoWait is a run with no signal: nothing waits on a signal.
+func TestAReturnWithNoSignalPrintsNoWait(t *testing.T) {
+	copyCheckout(t)
+	agentInCopy(t, func(spec session.SessionSpec) {
+		writeFile(t, filepath.Join(spec.Dir, "left.txt"), "left\n")
+	})
+	cmd.RunGitSessionsOnHost()
+	out, err := run(t, "run", "claude", "--", "-p", "hi")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	lacks(t, out, "Send a second signal")
+}
+
+// TestARunFromACodeHasTheShortTimeAfterASignal is a write run from a run code with no branch, the
+// way a pool starts a run: after a signal the return ends within the push step's time, so the
+// close runs before the pool's kill.
+func TestARunFromACodeHasTheShortTimeAfterASignal(t *testing.T) {
+	p := walledPush(t)
+	p.change = func(d map[string]any) {
+		// A target on another system: the run has no branch of its work item.
+		target := map[string]any{"system": "other.example", "path": "acme/site"}
+		d["target"], d["inputs"].(map[string]any)["target"] = target, target
+	}
+	t.Cleanup(cmd.SetPushTimes(time.Second, time.Second))
+	ended := false
+	t.Cleanup(cmd.SetGitSession(func(ctx context.Context, spec session.SessionSpec) (*session.Result, error) {
+		term(t)
+		select {
+		case <-ctx.Done():
+			ended = true
+		case <-time.After(30 * time.Second):
+		}
+		return nil, ctx.Err()
+	}))
+	r := p.run(t, writesAndCommits(t), nil)
+	if !ended {
+		t.Errorf("the return did not end within the short time: %v\n%s\n%s", r.err, r.out, r.log())
+	}
+	lacks(t, r.out, "Send a second signal")
+}
+
+// TestTheRemovalOfTheSetupHasALimit is a removal of the setup container that does not end: its
+// context has a deadline, so the local return goes on to its line.
+func TestTheRemovalOfTheSetupHasALimit(t *testing.T) {
+	copyCheckout(t)
+	agentInCopy(t, func(session.SessionSpec) {})
+	removesSetupWith(t, func(ctx context.Context) error {
+		if at, ok := ctx.Deadline(); !ok || time.Until(at) > 3*time.Minute {
+			t.Errorf("the removal has until %s, %v", at, ok)
+		}
+		return nil
+	})
+	if out, err := run(t, "run", "claude", "--", "-p", "hi"); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+}
+
+// TestACheckPastItsLimitHasItsLine is a check of the run's bundle cut by its limit: the line has the
+// limit, and it is no failed check.
+func TestACheckPastItsLimitHasItsLine(t *testing.T) {
+	copyCheckout(t)
+	agentInCopy(t, func(spec session.SessionSpec) {
+		writeFile(t, filepath.Join(spec.Dir, "left.txt"), "left\n")
+	})
+	cmd.RunGitSessionsOnHost()
+	t.Cleanup(cmd.SetCopyStepLimit(time.Nanosecond))
+	out, err := run(t, "run", "claude", "--", "-p", "hi")
+	if err == nil {
+		t.Fatalf("the run passed:\n%s", out)
+	}
+	wants(t, out, "and run no git there: the check of the run's commits ran past its limit of 1ns, so those commits did not come back")
+}
+
+// TestCommitsOnAnotherBranchKeepTheCopy is an agent that committed on a branch and checked out the
+// run's branch: the line is not that the run made no commit, and the copy stays, with its path.
+func TestCommitsOnAnotherBranchKeepTheCopy(t *testing.T) {
+	copyCheckout(t)
+	var work string
+	agentInCopy(t, func(spec session.SessionSpec) {
+		work = spec.Dir
+		branch := strings.TrimSpace(gitOutput(t, spec.Dir, "branch", "--show-current"))
+		gitOutput(t, spec.Dir, "checkout", "--quiet", "-b", "feature")
+		writeFile(t, filepath.Join(spec.Dir, "feature.txt"), "x\n")
+		gitOutput(t, spec.Dir, "add", "feature.txt")
+		gitOutput(t, spec.Dir, "-c", "user.name=agent", "-c", "user.email=agent@example.com", "commit", "--quiet", "-m", "on feature")
+		gitOutput(t, spec.Dir, "checkout", "--quiet", branch)
+	})
+	cmd.RunGitSessionsOnHost()
+	out, err := run(t, "run", "claude", "--", "-p", "hi")
+	if cmd.ExitCode(err) != 1 {
+		t.Errorf("exit %d, want 1:\n%s", cmd.ExitCode(err), out)
+	}
+	lacks(t, out, "no action needed")
+	wants(t, out,
+		"part of the run's work did not come back: commits on another branch of the copy, or files that git add could not read.",
+		"read the run's files in "+work+", run no git there, then remove the folder")
+	if _, err := os.Lstat(work); err != nil {
+		t.Errorf("the copy is gone: %v", err)
+	}
+	wantDisarmed(t, work)
 }
 
 // TestThePushPathLineAsksForTheWorkItemAgain is a run with the push step whose git session

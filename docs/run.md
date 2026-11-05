@@ -3443,19 +3443,36 @@ Three cases stop the run with their fix first:
 When the agent has ended, however it ended, a second session starts on the same run: the git
 session. It runs no agent and gets no model key and no run code, and it binds only the
 copy and a new folder for its bundles. It commits what the agent left, with no setting from
-the copy's `.git` and no filter, and writes the run's branch to a git bundle. A commit on
-another branch that descends from your commit keeps its message. Your `.gitignore`,
-`.git/info/exclude` and global excludes file keep their files out of the commit. The image
-needs git 2.25 or later in `/usr/local/bin`, `/usr/bin` or `/bin`: `qory image check` tests it.
-The run's record shows the session as a second session.
+the copy's `.git` and no filter, and writes the run's branch to a git bundle. With a branch
+checked out that descends from your commit, the bundle has that branch, and its commits keep
+their messages. With `HEAD` at your commit and the run's branch past it, the bundle has the run's
+branch. Your `.gitignore`, `.git/info/exclude` and global excludes file keep their files out of
+the commit. The image needs git 2.25 or later and `find` in `/usr/local/bin`, `/usr/bin` or
+`/bin`: `qory image check` tests them. The run's record shows the session as a second session.
+
+Part of the run's work can miss the bundle: commits on a branch that the bundle does not have, or
+a file that `git add` cannot read, such as one in a folder of mode 000. The session then prints
+git's line, and qory keeps the copy and exits 1:
+
+```text
+qory run: part of the run's work did not come back: commits on another branch of the copy, or files that git add could not read.
+qory run: read the run's files in <folder>, run no git there, then remove the folder: nothing more came back from the run
+```
 
 Git LFS: because the session runs no filter, an LFS file the agent changes goes into the
 commit as its full content, in place of a pointer.
 
 A program the agent planted in the copy can run again in this session, under the run's egress
 policy, so the session has at most 5 minutes. A first signal to `qory run` leaves it that time,
-and a second signal ends it. Past that time, or if the session exits with another status than
-0, nothing comes back, and qory keeps the copy:
+and a second signal ends it. qory prints how long the return of the work may take:
+
+```text
+qory run: got SIGTERM: bringing the run's work back, for at most 30m0s. Send a second signal to stop that.
+```
+
+A run from a run code, as a pool starts it, prints no such line. It has 15 seconds after a signal,
+since a pool kills it 30 seconds after its SIGTERM. Past the session's time, or if the session
+exits with another status than 0, nothing comes back, and qory keeps the copy:
 
 ```text
 qory run: read the run's files in <folder>, and run no git there: the git session ran past its limit of 5m0s, so nothing came back from the run

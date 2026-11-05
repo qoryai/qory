@@ -47,6 +47,7 @@ func agentFiles() map[string]string {
 		"bin/sh":                            "#!/bin/sh\n",
 		"usr/local/bin/claude":              "",
 		"usr/bin/git":                       "",
+		"usr/bin/find":                      "",
 		"usr/local/bin/gh":                  "",
 		"usr/share/doc/git/copyright":       "",
 	}
@@ -152,7 +153,7 @@ func TestProbePassesAnImageWithWhatTheWallNeeds(t *testing.T) {
 // TestProbeNamesWhatAnImageLacks probes a root with none of it: every line fails and
 // says what to add.
 func TestProbeNamesWhatAnImageLacks(t *testing.T) {
-	root := imageRoot(t, map[string]string{"usr/bin/git": "", "etc/ssl/cert.pem": "no certificate here\n"})
+	root := imageRoot(t, map[string]string{"usr/bin/git": "", "usr/bin/find": "", "etc/ssl/cert.pem": "no certificate here\n"})
 	p := image.Probe{Root: root, Env: env(map[string]string{"PATH": "/usr/bin"}), Exec: (&versions{}).exec, Runtimes: claudeAt("2.1.316"), User: "65532:65532"}
 	checks := byName(p.Report(context.Background()))
 	want(t, checks, "home", image.Fail, "HOME is not set", "ENV HOME=")
@@ -257,7 +258,7 @@ func TestProbeReportsEveryCheck(t *testing.T) {
 func TestTheGitLineChecksWhatTheGitSessionNeeds(t *testing.T) {
 	old := goodVersions()
 	old.lines["git"] = "git version 2.24.4"
-	root := imageRoot(t, map[string]string{"usr/bin/git": ""})
+	root := imageRoot(t, map[string]string{"usr/bin/git": "", "usr/bin/find": ""})
 	p := image.Probe{Root: root, Env: env(map[string]string{"PATH": "/usr/bin"}), Exec: old.exec}
 	checks := byName(p.Report(context.Background()))
 	want(t, checks, "git", image.Fail, "install git 2.25 or later in /usr/local/bin, /usr/bin, /bin: ", "git version 2.24.4")
@@ -267,8 +268,16 @@ func TestTheGitLineChecksWhatTheGitSessionNeeds(t *testing.T) {
 	checks = byName(p.Report(context.Background()))
 	want(t, checks, "git", image.Fail, "install git in /usr/local/bin, /usr/bin, /bin: ")
 
-	root = imageRoot(t, map[string]string{"usr/bin/git": ""})
+	root = imageRoot(t, map[string]string{"usr/bin/git": "", "usr/bin/find": ""})
 	p = image.Probe{Root: root, Env: env(map[string]string{"PATH": "/usr/bin"}), Exec: goodVersions().exec}
 	checks = byName(p.Report(context.Background()))
 	want(t, checks, "git", image.Pass, "git version 2.47.3")
+}
+
+// TestTheGitCheckNeedsFind is an image with git and no find in the folders of the git session.
+func TestTheGitCheckNeedsFind(t *testing.T) {
+	root := imageRoot(t, map[string]string{"usr/bin/git": ""})
+	p := image.Probe{Root: root, Env: env(map[string]string{"PATH": "/usr/bin"}), Exec: goodVersions().exec}
+	checks := byName(p.Report(context.Background()))
+	want(t, checks, "git", image.Fail, "install find in /usr/local/bin, /usr/bin, /bin: the git session of a walled run runs find from these folders, to list executable files and embedded repositories")
 }

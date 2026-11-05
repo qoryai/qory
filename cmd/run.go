@@ -1121,14 +1121,21 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					return e.cutBy()
 				}
 			}
-			backCtx, cancelBack := returnContext(ctx, again)
+			backCtx, cancelBack := returnContext(ctx, again, code != nil, func(wait time.Duration) {
+				if returns {
+					said(fmt.Sprintf(textCopyWaiting, got(), wait))
+				}
+			})
 			defer cancelBack()
 			switch {
 			case returns && copied.plain:
 			case returns && res.RunClosed:
 				sessionErr = copied.stopped(textCopyClosed)
 			case returns:
-				if sessionErr = run.RemoveSetup(backCtx); sessionErr != nil {
+				removeCtx, cancelRemove := context.WithTimeout(backCtx, removeSetupLimit)
+				sessionErr = run.RemoveSetup(removeCtx)
+				cancelRemove()
+				if sessionErr != nil {
 					sessionErr = copied.stopped(fmt.Sprintf(textCopyNoSession, shownError(sessionErr)))
 				} else {
 					sessionErr = copied.gitSession(backCtx, run, &spec, "")

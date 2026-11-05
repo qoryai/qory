@@ -88,10 +88,13 @@ type GitSession struct {
 // access than the agent had. The script starts the index from that commit, adds every
 // change but [LeftOut]'s, and commits when anything changed. With no commit past the
 // base commit, it writes a file that records that, in place of the bundle. message is
-// the message of the commit it makes, "" for [commitMessage]. When HEAD of the copy descends
-// from the base commit, the bundle has HEAD, so an agent's commits on another branch keep
-// their messages; otherwise it has branch. The person's personal ignore rules stay in effect
-// through the info/exclude of that git folder.
+// the message of the commit it makes, "" for [commitMessage]. When HEAD of the copy is past
+// the base commit, the bundle has HEAD, so an agent's commits on another branch keep their
+// messages. When it is not and branch is, the bundle has branch as it is, since the working
+// tree is at HEAD. A commit on another branch that the bundle does not have, a change in such a
+// working tree, or a line of git add for what it could not add writes n.left, which
+// [Dir.LeftBehind] reads. The person's personal ignore rules stay in effect through the
+// info/exclude of that git folder.
 //
 // The script runs no filter: a file a filter changed at the checkout, such as a Git LFS
 // file, stays out while the copy has what the checkout wrote, and one the agent changed
@@ -217,7 +220,7 @@ unset XDG_CONFIG_HOME GIT_CONFIG GIT_CONFIG_PARAMETERS GIT_CONFIG_COUNT GIT_CONF
 # protocol.allow=never. GIT_NO_LAZY_FETCH keeps git from fetching a missing object.
 export HOME="$B/home" GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null \
 	GIT_NO_REPLACE_OBJECTS=1 GIT_TERMINAL_PROMPT=0 GIT_OPTIONAL_LOCKS=0 \
-	GIT_NO_LAZY_FETCH=1 GIT_ALLOW_PROTOCOL=none
+	GIT_NO_LAZY_FETCH=1 GIT_ALLOW_PROTOCOL=none LC_ALL=C
 mkdir "$HOME"
 g() {
 	git -c core.hooksPath=/dev/null -c core.fsmonitor=false -c core.useReplaceRefs=false \
@@ -227,6 +230,20 @@ g() {
 }
 nl='
 '
+cr=$(printf '\r')
+# kind is exec for a file with the owner's execute bit, as git and SetupPath.State read it, and
+# file for any other. [ -x ] tests what the process may do, which differs for root or for another
+# user. $execs is what one find listed, since a process per file takes minutes for 10000 paths.
+kind() {
+	case $execs in
+	*"$nl./$1$nl"*) printf exec ;;
+	*) printf file ;;
+	esac
+}
+# past reports whether a commit descends from the base commit and is not that commit.
+past() {
+	[ -n "$1" ] && [ "$1" != "$base" ] && g --git-dir="$T/.git" merge-base --is-ancestor "$base" "$1" 2>/dev/null
+}
 # state prints what the repository at $T has at a path, in the form of SetupPath.State.
 state() {
 	f=$T/$1
@@ -234,11 +251,7 @@ state() {
 		t=$(readlink "$f")
 		printf 'link:%s' "$(printf '%s' "$t" | g hash-object --no-filters --stdin)"
 	elif [ -f "$f" ]; then
-		k=file
-		if [ -x "$f" ]; then
-			k=exec
-		fi
-		printf '%s:%s' "$k" "$(g hash-object --no-filters -- "$f")"
+		printf '%s:%s' "$(kind "$1")" "$(g hash-object --no-filters -- "$f")"
 	elif [ -e "$f" ]; then
 		printf other
 	else
@@ -248,7 +261,7 @@ state() {
 n=0
 while [ "$n" -lt "$count" ]; do
 	. "$B/list-$n"
-	if [ "$rel" = . ]; then T=$W; else T=$W/$rel; fi
+	if [ "$rel" = . ]; then T=$W shown="the copy"; else T=$W/$rel shown="the copy of $rel"; fi
 	G=$B/git-$n
 	cd "$T"
 	mkdir "$G" "$G/objects" "$G/objects/info" "$G/refs" "$G/refs/heads" "$G/info"
@@ -262,27 +275,45 @@ while [ "$n" -lt "$count" ]; do
 	printf '%s\n' "$T/.git/objects" > "$G/objects/info/alternates"
 	printf 'ref: refs/heads/%s\n' "$branch" > "$G/HEAD"
 
-	# HEAD when it descends from the base commit, so commits on another branch come back with
-	# their messages; otherwise the branch. Read by git with the copy's .git, so packed refs and
-	# reftable both work. This git reads the copy's configuration, inside the wall.
+	# HEAD when it is past the base commit, so commits on another branch come back with their
+	# messages. The branch when HEAD is not past it and the branch is: the working tree is then at
+	# HEAD, so it is compared with HEAD, and a change there stays behind. The branch also when HEAD
+	# has no commit, or has no base commit in its history. Read by git with the copy's .git, so
+	# packed refs and reftable both work. This git reads the copy's configuration, inside the wall.
 	head=$(g --git-dir="$T/.git" rev-parse --verify --quiet "HEAD^{commit}") || head=
-	if [ -z "$head" ] || ! g --git-dir="$T/.git" merge-base --is-ancestor "$base" "$head" 2>/dev/null; then
-		head=$(g --git-dir="$T/.git" rev-parse --verify --quiet "refs/heads/$branch^{commit}") || head=
+	on=$(g --git-dir="$T/.git" rev-parse --verify --quiet "refs/heads/$branch^{commit}") || on=
+	from=
+	if ! past "$head"; then
+		if past "$on"; then
+			from=$head
+			head=$on
+		elif [ -z "$head" ] || ! g --git-dir="$T/.git" merge-base --is-ancestor "$base" "$head" 2>/dev/null; then
+			head=$on
+		fi
 	fi
+	moved=$from
+	if [ -z "$from" ]; then from=$head; fi
 	case $head in
 	'' | *[!0-9a-f]*)
-		echo "qory: check out $branch or a branch from it in the copy of $rel: HEAD and $branch are not at a commit past the base commit" >&2
+		echo "qory: read the run's files in $shown, and run no git there: neither HEAD nor $branch there is a commit, so the session commits nothing" >&2
 		exit 1
 		;;
 	esac
 	if [ ${#head} -ne ${#base} ]; then
-		echo "qory: set the branch $branch of the copy of $rel to a commit id: git read something else there" >&2
+		echo "qory: read the run's files in $shown, and run no git there: git read a commit id of ${#head} characters there, and the base commit has ${#base}" >&2
 		exit 1
 	fi
+	# A branch of the copy with a commit that the bundle does not have: the work stays behind.
+	g --git-dir="$T/.git" for-each-ref --no-merged "$head" --format='%(objectname)' refs/heads/ > "$G/others" 2>/dev/null || :
+	while IFS= read -r tip; do
+		if ! g --git-dir="$T/.git" merge-base --is-ancestor "$tip" "$base" 2>/dev/null; then
+			: > "$B/$n.left"
+		fi
+	done < "$G/others"
 	export GIT_DIR="$G" GIT_WORK_TREE="$T" GIT_INDEX_FILE="$G/index"
 	g cat-file -e "$head^{commit}"
 	g update-ref "refs/heads/$branch" "$head"
-	g read-tree "refs/heads/$branch"
+	g read-tree "$from"
 
 	# Add every change but .qory, each folder with a .git, and the paths left out.
 	P=$G/add
@@ -301,13 +332,18 @@ while [ "$n" -lt "$count" ]; do
 		shift
 		i=$((i + 1))
 	done
+	execs=
+	if [ "$setup" -gt 0 ]; then
+		execs=$nl$(find . -path ./.git -prune -o -type f -perm -100 -print 2>/dev/null || :)$nl
+	fi
 	# One git hashes the setup's regular files, since a process per file takes minutes for
-	# 10000 paths. A path with a line break takes the slow way through state.
+	# 10000 paths. git strips a line end from each path it reads, so a path with a line break
+	# or a final carriage return takes the slow way through state.
 	i=0
 	for a do
 		if [ $((i % 2)) -eq 0 ] && [ ! -h "$T/$a" ] && [ -f "$T/$a" ]; then
 			case $a in
-			*"$nl"*) ;;
+			*"$nl"* | *"$cr") ;;
 			*) printf '%s\n' "$T/$a" ;;
 			esac
 		fi
@@ -321,14 +357,10 @@ while [ "$n" -lt "$count" ]; do
 		have=
 		if [ ! -h "$f" ] && [ -f "$f" ]; then
 			case $1 in
-			*"$nl"*) ;;
+			*"$nl"* | *"$cr") ;;
 			*)
 				read -r id <&3
-				k=file
-				if [ -x "$f" ]; then
-					k=exec
-				fi
-				have=$k:$id
+				have=$(kind "$1"):$id
 				;;
 			esac
 		fi
@@ -355,15 +387,32 @@ while [ "$n" -lt "$count" ]; do
 		exit "$added"
 		;;
 	esac
+	# Any other line is what git add could not add, such as a folder it cannot read, or an
+	# embedded repository that the list above does not have. That work stays behind.
+	block=
+	while IFS= read -r line || [ -n "$line" ]; do
+		case $block:$line in
+		':The following paths are ignored by one of your .gitignore files:') block=paths ;;
+		'paths:hint: '* | 'paths:Use -f'*) block=hint ;;
+		paths:*) ;;
+		'hint:hint: '*) ;;
+		*)
+			block=
+			printf 'qory: git add left this out of the commit in %s: %s\n' "$shown" "$line" >&2
+			: > "$B/$n.left"
+			;;
+		esac
+	done < "$G/add-errors"
 	g reset -q "$base" --pathspec-from-file="$R" --pathspec-file-nul
 
 	set +e
-	g diff --cached --quiet --no-ext-diff --ignore-submodules=none "refs/heads/$branch" --
+	g diff --cached --quiet --no-ext-diff --ignore-submodules=none "$from" --
 	changed=$?
 	set -e
-	case $changed in
-	0) ;;
-	1)
+	case $changed:$moved in
+	0:*) ;;
+	1:?*) : > "$B/$n.left" ;;
+	1:)
 		GIT_AUTHOR_NAME=` + commitName + ` GIT_AUTHOR_EMAIL=` + commitEmail + ` \
 		GIT_COMMITTER_NAME=` + commitName + ` GIT_COMMITTER_EMAIL=` + commitEmail + ` \
 			g commit -q --no-verify --no-gpg-sign -m "$message"

@@ -1,6 +1,7 @@
 package runcopy
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io/fs"
@@ -194,12 +195,31 @@ func plant(t *testing.T, work, program string) {
 // runSession runs the git session on this machine with sh, in place of the wall.
 func runSession(t *testing.T, s GitSession) {
 	t.Helper()
-	c := exec.Command(s.Command, s.Args...)
-	c.Dir = s.Dir
-	c.Env = s.Env
-	if out, err := c.CombinedOutput(); err != nil {
+	if out, err := boundedSession(t, s); err != nil {
 		t.Fatalf("git session: %v\n%s", err, out)
 	}
+}
+
+// boundedSession runs s in a process group of its own, with a time limit, and kills that group at
+// the end, so a regression that hangs fails the test and leaves no process behind.
+func boundedSession(t *testing.T, s GitSession) (string, error) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	c := exec.CommandContext(ctx, s.Command, s.Args...)
+	c.Dir, c.Env = s.Dir, s.Env
+	c.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	c.Cancel = func() error { return syscall.Kill(-c.Process.Pid, syscall.SIGKILL) }
+	c.WaitDelay = 5 * time.Second
+	var out bytes.Buffer
+	c.Stdout, c.Stderr = &out, &out
+	err := c.Start()
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = syscall.Kill(-c.Process.Pid, syscall.SIGKILL) }()
+	err = c.Wait()
+	return out.String(), err
 }
 
 // sessionGit sets the git session's PATH to the folder of this machine's git.
@@ -1291,9 +1311,7 @@ func TestTheGitSessionFetchesNoMissingObject(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	c := exec.Command(s.Command, s.Args...)
-	c.Dir, c.Env = s.Dir, s.Env
-	if out, err := c.CombinedOutput(); err == nil {
+	if out, err := boundedSession(t, s); err == nil {
 		t.Errorf("the session passed:\n%s", out)
 	}
 	if data, err := os.ReadFile(ran); err == nil {
@@ -2655,5 +2673,268 @@ func TestAPipeAtTheExcludeFileLeavesTheCloneToEnd(t *testing.T) {
 			f.Close()
 		}
 		t.Fatal("the clone still waits on the named pipe")
+	}
+}
+
+// sessionOutput makes the git session for repos with out, runs it, and returns what it printed.
+func sessionOutput(t *testing.T, d Dir, repos []Repository, out map[string]LeftOut) string {
+	t.Helper()
+	s, err := d.GitSession(context.Background(), branch, "", repos, out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	printed, err := boundedSession(t, s)
+	if err != nil {
+		t.Fatalf("git session: %v\n%s", err, printed)
+	}
+	return printed
+}
+
+// TestTheBranchComesBackWithHeadAtTheBaseCommit is an agent that committed on the run's branch and
+// then checked out a new branch at the base commit: the commits come back as they are, and the
+// working tree, which has no such file, makes no commit that removes it.
+func TestTheBranchComesBackWithHeadAtTheBaseCommit(t *testing.T) {
+	isolate(t)
+	sessionGit(t)
+	src, base := person(t)
+	d, repos := cloneRun(t, src)
+	write(t, d.Work(), "kept.txt", "kept\n")
+	commitAll(t, d.Work(), "on the branch")
+	testGit(t, d.Work(), "checkout", "--quiet", "-b", "scratch", base)
+	q := bringBack(t, d, src, repos, nil)
+	if got := testGit(t, src, "log", "-1", "--format=%s", q.Head); !strings.Contains(got, "on the branch") {
+		t.Errorf("the head commit is %q", got)
+	}
+	if !slices.Contains(files(t, src, "refs/heads/"+branch), "kept.txt") {
+		t.Error("kept.txt did not come back")
+	}
+	if d.LeftBehind(repos) {
+		t.Error("the session recorded work left behind, with nothing left behind")
+	}
+}
+
+// TestAChangeOnAScratchBranchIsLeftBehind is the same with a file left in the working tree, which
+// the branch does not start from: the commit stays out, and the session records that.
+func TestAChangeOnAScratchBranchIsLeftBehind(t *testing.T) {
+	isolate(t)
+	sessionGit(t)
+	src, base := person(t)
+	d, repos := cloneRun(t, src)
+	write(t, d.Work(), "kept.txt", "kept\n")
+	commitAll(t, d.Work(), "on the branch")
+	testGit(t, d.Work(), "checkout", "--quiet", "-b", "scratch", base)
+	write(t, d.Work(), "scratch.txt", "x\n")
+	q := bringBack(t, d, src, repos, nil)
+	got := files(t, src, "refs/heads/"+branch)
+	if !slices.Contains(got, "kept.txt") || slices.Contains(got, "scratch.txt") {
+		t.Errorf("the branch at %s has %v", q.Head, got)
+	}
+	if !d.LeftBehind(repos) {
+		t.Error("the session did not record the file left behind")
+	}
+}
+
+// TestACommitOnAnotherBranchIsLeftBehind is an agent that committed on a branch and then checked
+// out the run's branch: no bundle comes back, and the session records the commit.
+func TestACommitOnAnotherBranchIsLeftBehind(t *testing.T) {
+	isolate(t)
+	sessionGit(t)
+	src, _ := person(t)
+	d, repos := cloneRun(t, src)
+	testGit(t, d.Work(), "checkout", "--quiet", "-b", "feature")
+	write(t, d.Work(), "feature.txt", "x\n")
+	commitAll(t, d.Work(), "on feature")
+	testGit(t, d.Work(), "checkout", "--quiet", branch)
+	runGit(t, d, repos, nil)
+	if _, err := d.Quarantine(t.Context(), branch, repos); !errors.Is(err, ErrNoBundle) {
+		t.Errorf("%v, want no bundle", err)
+	}
+	if !d.LeftBehind(repos) {
+		t.Error("the session did not record the commit on feature")
+	}
+}
+
+// TestABranchPastHeadIsLeftBehind is commits on two branches from the base commit: HEAD's come
+// back, and the session records the others.
+func TestABranchPastHeadIsLeftBehind(t *testing.T) {
+	isolate(t)
+	sessionGit(t)
+	src, base := person(t)
+	d, repos := cloneRun(t, src)
+	write(t, d.Work(), "one.txt", "x\n")
+	commitAll(t, d.Work(), "on the branch")
+	testGit(t, d.Work(), "checkout", "--quiet", "-b", "side", base)
+	write(t, d.Work(), "two.txt", "x\n")
+	commitAll(t, d.Work(), "on side")
+	bringBack(t, d, src, repos, nil)
+	if got := files(t, src, "refs/heads/"+branch); !slices.Contains(got, "two.txt") {
+		t.Errorf("the branch has %v", got)
+	}
+	if !d.LeftBehind(repos) {
+		t.Error("the session did not record the commit on the run's branch")
+	}
+}
+
+// TestABranchInHeadLeavesNothingBehind is a person with a branch past HEAD and an agent's branch
+// that the bundle has: the session records nothing.
+func TestABranchInHeadLeavesNothingBehind(t *testing.T) {
+	isolate(t)
+	sessionGit(t)
+	src, base := person(t)
+	testGit(t, src, "branch", "elsewhere", base)
+	testGit(t, src, "checkout", "--quiet", "elsewhere")
+	write(t, src, "person.txt", "x\n")
+	commitAll(t, src, "the person's")
+	testGit(t, src, "checkout", "--quiet", "-")
+	d, repos := cloneRun(t, src)
+	write(t, d.Work(), "one.txt", "x\n")
+	commitAll(t, d.Work(), "on the branch")
+	testGit(t, d.Work(), "checkout", "--quiet", "-b", "more")
+	write(t, d.Work(), "two.txt", "x\n")
+	commitAll(t, d.Work(), "on more")
+	bringBack(t, d, src, repos, nil)
+	if d.LeftBehind(repos) {
+		t.Error("the session recorded work left behind, with nothing left behind")
+	}
+}
+
+// TestAFolderGitCannotReadIsLeftBehind is new work in a folder of mode 000: git add exits 0, the
+// session prints git's line, and it records the work left behind.
+func TestAFolderGitCannotReadIsLeftBehind(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root reads a folder of mode 000")
+	}
+	isolate(t)
+	sessionGit(t)
+	src, _ := person(t)
+	d, repos := cloneRun(t, src)
+	write(t, d.Work(), "ok.txt", "ok\n")
+	write(t, d.Work(), "locked/new.txt", "x\n")
+	locked := filepath.Join(d.Work(), "locked")
+	if err := os.Chmod(locked, 0); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(locked, 0o755) })
+	out := sessionOutput(t, d, repos, nil)
+	if !strings.Contains(out, "qory: git add left this out of the commit in the copy: ") || !strings.Contains(out, "could not open directory") {
+		t.Errorf("the session printed:\n%s", out)
+	}
+	if !d.LeftBehind(repos) {
+		t.Error("the session did not record the folder left behind")
+	}
+	qs, err := d.Quarantine(t.Context(), branch, repos)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(files(t, qs[0].Path, qs[0].Head), "ok.txt") {
+		t.Error("ok.txt did not come back")
+	}
+}
+
+// TestAnIgnoredPathLeftOutPrintsNothing is a setup path that .gitignore lists too: git add exits 1
+// and prints its block, which is no work left behind.
+func TestAnIgnoredPathLeftOutPrintsNothing(t *testing.T) {
+	isolate(t)
+	sessionGit(t)
+	src, _ := person(t)
+	write(t, src, ".gitignore", "*.log\n")
+	commitAll(t, src, "an ignore file")
+	d, repos := cloneRun(t, src)
+	write(t, d.Work(), "setup.log", "x\n")
+	write(t, d.Work(), "ok.txt", "ok\n")
+	states, err := d.SetupStates(t.Context(), repos[0], []string{"setup.log"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := sessionOutput(t, d, repos, map[string]LeftOut{"": {Setup: states}})
+	if strings.Contains(out, "qory:") || strings.Contains(out, "ignored") {
+		t.Errorf("the session printed:\n%s", out)
+	}
+	if d.LeftBehind(repos) {
+		t.Error("the session recorded an ignored path as work left behind")
+	}
+}
+
+// TestCoreAutocrlfLeavesTheCopyAsCommitted is a person with core.autocrlf=true: the copy has LF,
+// and a file the agent edits goes into the commit with LF on the lines it did not change.
+func TestCoreAutocrlfLeavesTheCopyAsCommitted(t *testing.T) {
+	isolate(t)
+	sessionGit(t)
+	src, _ := person(t)
+	first := read(t, src, "README.md")
+	config := filepath.Join(t.TempDir(), "gitconfig")
+	if err := os.WriteFile(config, []byte("[core]\n\tautocrlf = true\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GIT_CONFIG_GLOBAL", config)
+	d, repos := cloneRun(t, src)
+	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
+	if got := read(t, d.Work(), "README.md"); got != first {
+		t.Fatalf("the copy's README.md is %q, want %q", got, first)
+	}
+	write(t, d.Work(), "README.md", first+"agent line\n")
+	runGit(t, d, repos, nil)
+	qs, err := d.Quarantine(t.Context(), branch, repos)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := testGit(t, qs[0].Path, "cat-file", "blob", qs[0].Head+":README.md"); strings.Contains(got, "\r") {
+		t.Errorf("the commit's README.md has CR: %q", got)
+	}
+}
+
+// TestASetupPathEndingInACarriageReturnStaysOut is a setup path that ends in CR, which git strips
+// from a line it reads: the session ends with exit 0, and the unchanged file stays out.
+func TestASetupPathEndingInACarriageReturnStaysOut(t *testing.T) {
+	isolate(t)
+	sessionGit(t)
+	src, _ := person(t)
+	d, repos := cloneRun(t, src)
+	write(t, d.Work(), "setup\r", "x\n")
+	write(t, d.Work(), "ok.txt", "ok\n")
+	states, err := d.SetupStates(t.Context(), repos[0], []string{"setup\r"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sessionOutput(t, d, repos, map[string]LeftOut{"": {Setup: states}})
+	qs, err := d.Quarantine(t.Context(), branch, repos)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := files(t, qs[0].Path, qs[0].Head)
+	if !slices.Contains(got, "ok.txt") || slices.ContainsFunc(got, func(f string) bool { return strings.Contains(f, "setup") }) {
+		t.Errorf("the commit has %v", got)
+	}
+}
+
+// TestASetupFileWithAnExecuteBitButTheOwnersStaysOut is a setup file of mode 0654, whose state has
+// the owner's bit. A session as root, or as a user other than the owner, must read that bit.
+func TestASetupFileWithAnExecuteBitButTheOwnersStaysOut(t *testing.T) {
+	if strings.Contains(sessionScript, `[ -x "`) {
+		t.Error("the session's script tests what the process may do, not the owner's bit")
+	}
+	isolate(t)
+	sessionGit(t)
+	src, _ := person(t)
+	d, repos := cloneRun(t, src)
+	for name, mode := range map[string]os.FileMode{"group.sh": 0o654, "owner.sh": 0o744} {
+		write(t, d.Work(), name, "x\n")
+		if err := os.Chmod(filepath.Join(d.Work(), name), mode); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(t, d.Work(), "ok.txt", "ok\n")
+	states, err := d.SetupStates(t.Context(), repos[0], []string{"group.sh", "owner.sh"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sessionOutput(t, d, repos, map[string]LeftOut{"": {Setup: states}})
+	qs, err := d.Quarantine(t.Context(), branch, repos)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := files(t, qs[0].Path, qs[0].Head)
+	if !slices.Contains(got, "ok.txt") || slices.Contains(got, "group.sh") || slices.Contains(got, "owner.sh") {
+		t.Errorf("the commit has %v", got)
 	}
 }

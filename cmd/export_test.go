@@ -182,7 +182,15 @@ func GitSessionThroughJoin() func() {
 	return func() { joinSession = before }
 }
 
-// SetPushTimes sets the time the push step has past a time limit and after a signal, and
+// SetCopyStepLimit sets how long a check of a run's bundles or a copy back may take, and returns
+// what restores the default.
+func SetCopyStepLimit(limit time.Duration) func() {
+	before := copyStepLimit
+	copyStepLimit = limit
+	return func() { copyStepLimit = before }
+}
+
+// SetPushTimes sets the time the push step has past a run's limit and after a signal, and
 // returns what restores the defaults.
 func SetPushTimes(limit, signal time.Duration) func() {
 	before := pushTimes

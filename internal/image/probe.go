@@ -252,6 +252,9 @@ func (p Probe) git(ctx context.Context) Check {
 	if session == "" {
 		return Check{"git", Fail, "install git in " + strings.Join(gitSessionDirs, ", ") + ": the git session of a walled run runs git from there, and the image has none in them"}
 	}
+	if p.lookPath("find", gitSessionDirs) == "" {
+		return Check{"git", Fail, "install find in " + strings.Join(gitSessionDirs, ", ") + ": the git session of a walled run runs find from these folders, to list executable files and embedded repositories"}
+	}
 	shown := line
 	if session != at {
 		run := p.Exec
@@ -260,7 +263,7 @@ func (p Probe) git(ctx context.Context) Check {
 		}
 		out, err := run(ctx, p.host(session), "--version")
 		if err != nil {
-			return Check{"git", Fail, fmt.Sprintf("%s --version failed: %v", exports.Value(session, false), exports.HideValueError(err, session))}
+			return Check{"git", Fail, fmt.Sprintf("install git 2.25 or later in "+strings.Join(gitSessionDirs, ", ")+": %s --version failed: %v", exports.Value(session, false), exports.HideValueError(err, session))}
 		}
 		shown, _, _ = strings.Cut(strings.TrimSpace(string(out)), "\n")
 		shown = exports.HideValues(shown)
