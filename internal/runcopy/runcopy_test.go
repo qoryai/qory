@@ -3649,22 +3649,14 @@ func TestALineEndRewriteStaysOut(t *testing.T) {
 		t.Run(strings.ReplaceAll(name, " ", "-"), func(t *testing.T) {
 			isolate(t)
 			sessionGit(t)
-			src, _ := person(t)
-			write(t, src, c.file, "one\r\ntwo\r\n")
-			commitAll(t, src, "CRLF")
-			write(t, src, ".gitattributes", c.attributes)
-			commitAll(t, src, "the rule")
+			src, _ := crlfBlob(t, c.file, "one\r\ntwo\r\n", c.attributes)
 			d, repos := cloneRun(t, src)
 			noBundle(t, d, repos, false)
 		})
 		t.Run(strings.ReplaceAll(name, " ", "-")+"-changed", func(t *testing.T) {
 			isolate(t)
 			sessionGit(t)
-			src, _ := person(t)
-			write(t, src, c.file, "one\r\ntwo\r\n")
-			commitAll(t, src, "CRLF")
-			write(t, src, ".gitattributes", c.attributes)
-			commitAll(t, src, "the rule")
+			src, _ := crlfBlob(t, c.file, "one\r\ntwo\r\n", c.attributes)
 			d, repos := cloneRun(t, src)
 			write(t, d.Work(), c.file, "one\r\nthree\r\n")
 			q := bringBack(t, d, src, repos, nil)
@@ -3688,7 +3680,11 @@ func TestTextAutoHasNoCommit(t *testing.T) {
 	write(t, src, "lf.txt", "one\ntwo\n")
 	commitAll(t, src, "both")
 	write(t, src, ".gitattributes", "* text=auto\n")
-	commitAll(t, src, "the rule")
+	testGit(t, src, "add", ".gitattributes")
+	testGit(t, src, "commit", "--quiet", "-m", "the rule")
+	if blob := gitIn(t, src, "", "cat-file", "blob", "HEAD:crlf.txt"); !strings.Contains(blob, "\r") {
+		t.Fatalf("the blob is %q, want a CR", blob)
+	}
 	d, repos := cloneRun(t, src)
 	noBundle(t, d, repos, false)
 }
@@ -3966,3 +3962,81 @@ func TestManySetupFilesInASubmoduleLeaveTheSessionItsTime(t *testing.T) {
 // manyFilesLimit is what a session with 2,000 setup files in a submodule gets. A process per file
 // passes it on a machine under test load too.
 const manyFilesLimit = 10 * time.Second
+
+// crlfUnderARule is a person's repository whose legacy.txt is a blob with CR under a line-end rule,
+// checked that the blob and the checkout have the CR, with the base commit.
+func crlfUnderARule(t *testing.T) (src, base string) {
+	t.Helper()
+	src, _ = person(t)
+	return crlfBlob(t, "legacy.txt", checkoutBytes, "legacy.txt text\n")
+}
+
+// crlfBlob is a person's repository with file as a blob with content, which has a CR, and the line-end
+// rule attributes committed after it, with the base commit. Only .gitattributes goes into the second
+// commit: a git add -A can read the file again under the rule, and write the blob with no CR.
+func crlfBlob(t *testing.T, file, content, attributes string) (src, base string) {
+	t.Helper()
+	src, _ = person(t)
+	write(t, src, file, content)
+	commitAll(t, src, "CRLF")
+	write(t, src, ".gitattributes", attributes)
+	testGit(t, src, "add", ".gitattributes")
+	testGit(t, src, "commit", "--quiet", "-m", "the rule")
+	base = testGit(t, src, "rev-parse", "HEAD")
+	if blob := gitIn(t, src, "", "cat-file", "blob", base+":"+file); !strings.Contains(blob, "\r") {
+		t.Fatalf("the blob is %q, want a CR", blob)
+	}
+	return src, base
+}
+
+// checkoutBytes is what the checkout of the fixture of [crlfUnderARule] writes.
+const checkoutBytes = "one\r\ntwo\r\n"
+
+// TestAnUndoOfACommitOnAFileKeptOutIsLeftBehind is an agent that edits and commits a file the
+// session keeps out, then writes the bytes it found back with no commit: the state matches, so no
+// commit has the undo, and the copy stays. Once for a file on the clone's list, and once for a
+// setup's file.
+func TestAnUndoOfACommitOnAFileKeptOutIsLeftBehind(t *testing.T) {
+	for _, setup := range []bool{false, true} {
+		t.Run(fmt.Sprintf("setup=%t", setup), func(t *testing.T) {
+			isolate(t)
+			sessionGit(t)
+			src, _ := crlfUnderARule(t)
+			d, repos := cloneRun(t, src)
+			found := checkoutBytes
+			out := LeftOut{}
+			if setup {
+				found = "setup\r\n"
+				write(t, d.Work(), "legacy.txt", found)
+				out = setupRecord(t, d, repos[0])
+			}
+			if got := read(t, d.Work(), "legacy.txt"); got != found {
+				t.Fatalf("the copy has %q, want the CR", got)
+			}
+			write(t, d.Work(), "legacy.txt", "edited\n")
+			commitAll(t, d.Work(), "edit")
+			write(t, d.Work(), "legacy.txt", found)
+			printed := sessionOutput(t, d, repos, map[string]LeftOut{"": out})
+			if !d.LeftBehind(repos) {
+				t.Errorf("the session did not record the undo:\n%s", printed)
+			}
+		})
+	}
+}
+
+// TestACommitOfASetupFileAsItIsLeavesNothingBehind is an agent that runs git add -A and commits a
+// file the setup left: the commit has the bytes the copy has, so nothing is lost.
+func TestACommitOfASetupFileAsItIsLeavesNothingBehind(t *testing.T) {
+	isolate(t)
+	sessionGit(t)
+	src, _ := person(t)
+	d, repos := cloneRun(t, src)
+	write(t, d.Work(), "gen.txt", "generated\n")
+	out := setupRecord(t, d, repos[0])
+	write(t, d.Work(), "agent.txt", "agent\n")
+	commitAll(t, d.Work(), "everything")
+	printed := sessionOutput(t, d, repos, map[string]LeftOut{"": out})
+	if d.LeftBehind(repos) {
+		t.Errorf("the session recorded work left behind:\n%s", printed)
+	}
+}

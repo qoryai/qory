@@ -103,7 +103,8 @@ type GitSession struct {
 // HEAD detached, or, with nothing past the base commit, any commit a reflog has, unless a
 // remote-tracking ref or a ref of the clone has it; a submodule off its gitlink or with a change
 // the setup did not leave; a repository the run made; a file that git ls-files still lists after
-// the add; or a folder the session cannot read. The person's personal ignore rules stay in effect
+// the add, which includes a path left out here that a commit of the run changed, when the copy
+// has other bytes than that commit; or a folder the session cannot read. The person's personal ignore rules stay in effect
 // through the info/exclude of that git folder.
 //
 // The script runs no filter: a file a filter changed at the checkout, such as a Git LFS
@@ -294,6 +295,13 @@ c_quoted() {
 # sort or comm fails, so a failure keeps the copy. LC_ALL=C is what both sort by.
 lacking() {
 	if ! { sort -u "$1" > "$G/one" && sort -u "$2" > "$G/two" && comm -23 "$G/one" "$G/two"; } 2>/dev/null; then
+		cat "$1"
+	fi
+}
+# both prints the lines that the files $1 and $2 share, and every line of $1 when sort or comm fails,
+# so a failure keeps the copy.
+both() {
+	if ! { sort -u "$1" > "$G/one" && sort -u "$2" > "$G/two" && comm -12 "$G/one" "$G/two"; } 2>/dev/null; then
 		cat "$1"
 	fi
 }
@@ -612,6 +620,17 @@ while [ "$n" -lt "$count" ]; do
 	lacking "$G/unadded" "$G/out-paths" > "$G/missed"
 	if [ -s "$G/missed" ]; then
 		: > "$B/$n.left"
+	fi
+	# A path that stays out, that a commit of the run changed, and that here has other bytes than
+	# that commit: the undo of the commit's change is in no commit.
+	if [ -n "$at" ] && [ "$at" != "$base" ]; then
+		g diff-tree -r --no-renames --name-only -z "$base" "$at" > "$G/changed-z" 2>/dev/null || : > "$B/$n.left"
+		tr '\000' '\n' < "$G/changed-z" > "$G/changed"
+		both "$G/unadded" "$G/out-paths" > "$G/kept"
+		both "$G/kept" "$G/changed" > "$G/undone"
+		if [ -s "$G/undone" ]; then
+			: > "$B/$n.left"
+		fi
 	fi
 	find . -path ./.git -prune -o -path ./.qory -prune -o -type d -exec sh -c '
 		for p do
