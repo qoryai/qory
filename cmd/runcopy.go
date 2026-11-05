@@ -112,9 +112,9 @@ func startCopy(ctx context.Context, root, runID, branch string, noRepository boo
 	c := &runCopy{dir: dir, root: root, branch: branch, plain: !git || empty, out: map[string]runcopy.LeftOut{}}
 	switch {
 	case empty:
-		err = dir.CopyFolderWithoutGit(root)
+		err = dir.CopyFolderWithoutGit(ctx, root)
 	case c.plain:
-		err = dir.CopyFolder(root)
+		err = dir.CopyFolder(ctx, root)
 	default:
 		c.repos, err = dir.Clone(ctx, root, branch)
 	}
@@ -129,11 +129,11 @@ func startCopy(ctx context.Context, root, runID, branch string, noRepository boo
 
 // artifactsIn copies the checkout's artifacts and work item into the copy of a repository. A
 // plain folder's copy has them already. report prints a line of qory run.
-func (c *runCopy) artifactsIn(report func(string)) error {
+func (c *runCopy) artifactsIn(ctx context.Context, report func(string)) error {
 	if c.plain {
 		return nil
 	}
-	res, err := c.dir.CopyArtifactsIn(c.root)
+	res, err := c.dir.CopyArtifactsIn(ctx, c.root)
 	if out := slices.Concat(res.Skipped, res.Conflicts); len(out) > 0 {
 		report(fmt.Sprintf(textCopyNotIn, shownPaths(out)))
 	}
@@ -155,8 +155,8 @@ func (c *runCopy) done(report func(string)) {
 // containers are gone, with or without a commit: the git session leaves .qory out. It prints
 // what it left out. A file you both have keeps your version, so the copy stays with the
 // run's. It returns false when the copy back stopped.
-func (c *runCopy) artifactsBack(report func(string)) bool {
-	res, err := c.dir.CopyArtifactsBack(c.root)
+func (c *runCopy) artifactsBack(ctx context.Context, report func(string)) bool {
+	res, err := c.dir.CopyArtifactsBack(ctx, c.root)
 	if len(res.Skipped) > 0 {
 		report(fmt.Sprintf(textCopyLeftOut, shownPaths(res.Skipped)))
 	}
@@ -357,7 +357,7 @@ func (c *runCopy) quarantine(ctx context.Context, report func(string)) ([]*runco
 // report prints a line of qory run. It reports whether everything came back.
 func (c *runCopy) comeBack(ctx context.Context, runID string, report func(string)) bool {
 	if c.plain {
-		return c.copyBack(report)
+		return c.copyBack(ctx, report)
 	}
 	qs, err := c.quarantine(ctx, report)
 	if err != nil {
@@ -405,8 +405,8 @@ func (c *runCopy) fetchOne(ctx context.Context, q *runcopy.Quarantine, runID str
 }
 
 // copyBack brings the run's files back to the person's plain folder.
-func (c *runCopy) copyBack(report func(string)) bool {
-	res, err := c.dir.CopyBack(c.root)
+func (c *runCopy) copyBack(ctx context.Context, report func(string)) bool {
+	res, err := c.dir.CopyBack(ctx, c.root)
 	if err != nil {
 		report(shownError(err))
 		c.kept(report)

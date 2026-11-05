@@ -3,6 +3,7 @@
 package runcopy
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -11,6 +12,7 @@ import (
 	"path"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -24,8 +26,7 @@ import (
 // [LeftOut.Setup]. Call it after the setup and before the agent's session. A trailing
 // / of a path is dropped. It opens each folder on the way from the one above it with
 // O_NOFOLLOW, so it follows no link, and hashes a file's content, or a link's target,
-// with git hash-object --stdin --no-filters in the bare source of r, which sets the
-// object format. No git opens the copy.
+// in the object format of the bare source of r. No git opens the copy.
 func (d Dir) SetupStates(ctx context.Context, r Repository, paths []string) ([]SetupPath, error) {
 	rel, err := repositoryRel(r)
 	if err != nil {
@@ -42,7 +43,8 @@ func (d Dir) SetupStates(ctx context.Context, r Repository, paths []string) ([]S
 //
 // No git opens the copy, since the setup could write it. The tree of the commit comes from
 // the bare source of r. A walk opens each folder from the one above it with O_NOFOLLOW, so it
-// follows no link, and pipes a tracked file's content to git hash-object in the bare source.
+// follows no link, and hashes a tracked file's content in this process, when its size is that
+// of the blob, in the object format of the bare source.
 // git check-ignore reads the regular .gitignore files from a mirror in the run's folder, which
 // no run binds, with an empty configuration: a program named in the copy has no way to run.
 func (d Dir) SetupChanges(ctx context.Context, r Repository) ([]string, error) {
@@ -75,8 +77,12 @@ func (d Dir) setupChanges(ctx context.Context, top string, r Repository) ([]stri
 	if err := copyFormat(ctx, source, private, r.Base); err != nil {
 		return nil, err
 	}
+	format, err := objectFormat(ctx, source)
+	if err != nil {
+		return nil, err
+	}
 	w := &setupWalk{
-		source: source, mirror: mirror, gitDir: private,
+		source: source, format: format, mirror: mirror, gitDir: private,
 		tracked: map[string]treeFile{}, above: map[string]bool{}, gitlink: map[string]bool{}, seen: map[string]bool{},
 		hashes: make(chan struct{}, maxHashes),
 	}
@@ -105,21 +111,22 @@ func (d Dir) setupChanges(ctx context.Context, top string, r Repository) ([]stri
 	return w.changed, nil
 }
 
-// maxHashes is the most files [setupWalk] pipes to git hash-object at one time.
+// maxHashes is the most files [setupWalk] hashes at one time.
 const maxHashes = 8
 
 // maxIgnoreFile is the most bytes [setupWalk] reads of one .gitignore. Patterns past it do not
 // count, so a file they ignore is listed, and [Dir.SetupStates] records it as it is.
 const maxIgnoreFile = 1 << 25
 
-// treeFile is a file of the commit's tree: its mode and object id.
+// treeFile is a file of the commit's tree: its mode, object id and size.
 type treeFile struct {
 	mode, id string
+	size     int64
 }
 
 // setupWalk is the state of one [Dir.SetupChanges].
 type setupWalk struct {
-	source, mirror, gitDir string
+	source, format, mirror, gitDir string
 	// tracked are the regular files and links of the commit's tree, by path, and above each
 	// folder that has one or a submodule. gitlink are the paths of the submodules.
 	tracked map[string]treeFile
@@ -137,7 +144,7 @@ type setupWalk struct {
 
 // readTree reads the tree of commit from the bare source, leaving out .qory.
 func (w *setupWalk) readTree(ctx context.Context, commit string) error {
-	out, err := git(ctx, w.source, "ls-tree", "-r", "-z", "--full-tree", commit)
+	out, err := git(ctx, w.source, "ls-tree", "-r", "-l", "-z", "--full-tree", commit)
 	if err != nil {
 		return err
 	}
@@ -147,8 +154,8 @@ func (w *setupWalk) readTree(ctx context.Context, commit string) error {
 			continue
 		}
 		fields := strings.Fields(meta)
-		if len(fields) != 3 {
-			return &gitError{subcommand: "ls-tree", line: "printed " + shown(meta) + ", which is no tree entry", exit: -1}
+		if len(fields) != 4 {
+			return &gitError{subcommand: "ls-tree", line: "printed " + shown(meta) + ", which is not a tree entry", exit: -1}
 		}
 		for up := path.Dir(file); up != "."; up = path.Dir(up) {
 			w.above[up] = true
@@ -157,7 +164,11 @@ func (w *setupWalk) readTree(ctx context.Context, commit string) error {
 			w.gitlink[file] = true
 			continue
 		}
-		w.tracked[file] = treeFile{mode: fields[0], id: fields[2]}
+		size, err := strconv.ParseInt(fields[3], 10, 64)
+		if err != nil {
+			return &gitError{subcommand: "ls-tree", line: "printed " + shown(meta) + ", which is not a tree entry", exit: -1}
+		}
+		w.tracked[file] = treeFile{mode: fields[0], id: fields[2], size: size}
 	}
 	return nil
 }
@@ -199,7 +210,7 @@ func (w *setupWalk) folder(ctx context.Context, dir int, rel string, depth int) 
 		switch {
 		case isTracked && kind == unix.S_IFREG && file.mode != "120000":
 			w.seen[at] = true
-			if err := w.compareFile(ctx, dir, name, at, file, st.Mode&0o100 != 0); err != nil {
+			if err := w.compareFile(ctx, dir, name, at, file, st.Mode&0o100 != 0, st.Size); err != nil {
 				return err
 			}
 			continue
@@ -282,11 +293,11 @@ func (w *setupWalk) subfolder(ctx context.Context, sub int, rel string, depth in
 	return w.folder(ctx, sub, rel, depth+1)
 }
 
-// compareFile adds at to the changed paths when the regular file name in dir has another
-// kind, another owner's execute bit or another content than file, by git hash-object in
-// the bare source. A hash runs beside the walk, at most [maxHashes] at one time.
-func (w *setupWalk) compareFile(ctx context.Context, dir int, name, at string, file treeFile, exec bool) error {
-	if exec != (file.mode == "100755") {
+// compareFile adds at to the changed paths when the regular file name in dir, of size bytes,
+// has another owner's execute bit, size or content than file. A hash runs beside the walk, at
+// most [maxHashes] at one time.
+func (w *setupWalk) compareFile(ctx context.Context, dir int, name, at string, file treeFile, exec bool, size int64) error {
+	if exec != (file.mode == "100755") || size != file.size || size > maxHashBytes {
 		w.note(at)
 		return nil
 	}
@@ -294,7 +305,7 @@ func (w *setupWalk) compareFile(ctx context.Context, dir int, name, at string, f
 	if err != nil {
 		return err
 	}
-	if info, err := f.Stat(); err != nil || !info.Mode().IsRegular() {
+	if info, err := f.Stat(); err != nil || !info.Mode().IsRegular() || info.Size() != size {
 		f.Close()
 		w.note(at)
 		return err
@@ -303,7 +314,7 @@ func (w *setupWalk) compareFile(ctx context.Context, dir int, name, at string, f
 	w.waiting.Add(1)
 	go func() {
 		defer func() { <-w.hashes; w.waiting.Done(); f.Close() }()
-		id, err := blobID(ctx, w.source, f)
+		id, err := hashBlob(ctx, w.format, f, size)
 		w.mu.Lock()
 		defer w.mu.Unlock()
 		switch {
@@ -326,7 +337,7 @@ func (w *setupWalk) compareLink(ctx context.Context, dir int, name, at string, f
 	if err != nil {
 		return err
 	}
-	id, err := blobID(ctx, w.source, strings.NewReader(string(buf[:n])))
+	id, err := hashBlob(ctx, w.format, bytes.NewReader(buf[:n]), int64(n))
 	if err != nil {
 		return err
 	}
@@ -410,6 +421,10 @@ func copyFormat(ctx context.Context, source, private, base string) error {
 
 // setupStatesAt is [Dir.SetupStates] for the repository number index at top.
 func (d Dir) setupStatesAt(ctx context.Context, top string, index int, paths []string) ([]SetupPath, error) {
+	format, err := objectFormat(ctx, d.source(index))
+	if err != nil {
+		return nil, err
+	}
 	root, err := unix.Open(top, dirFlags, 0)
 	if err != nil {
 		return nil, fileErr(top, err)
@@ -421,7 +436,7 @@ func (d Dir) setupStatesAt(ctx context.Context, top string, index int, paths []s
 		if !cleanRel(p) {
 			return nil, fmt.Errorf(textSetupPath, shown(p))
 		}
-		state, err := d.setupState(ctx, root, index, p)
+		state, err := setupState(ctx, root, format, p)
 		if err != nil {
 			return nil, fileErr(filepath.Join(top, filepath.FromSlash(p)), err)
 		}
@@ -430,8 +445,9 @@ func (d Dir) setupStatesAt(ctx context.Context, top string, index int, paths []s
 	return out, nil
 }
 
-// setupState is what the folder root has at rel, in the form of [SetupPath.State].
-func (d Dir) setupState(ctx context.Context, root, index int, rel string) (string, error) {
+// setupState is what the folder root has at rel, in the form of [SetupPath.State]: other for a
+// file past [maxHashBytes].
+func setupState(ctx context.Context, root int, format, rel string) (string, error) {
 	dir, name, err := lookup(root, rel)
 	if errors.Is(err, errNoEntry) {
 		return "missing", nil
@@ -455,7 +471,7 @@ func (d Dir) setupState(ctx context.Context, root, index int, rel string) (strin
 		if err != nil {
 			return "", err
 		}
-		id, err := blobID(ctx, d.source(index), strings.NewReader(string(buf[:n])))
+		id, err := hashBlob(ctx, format, bytes.NewReader(buf[:n]), int64(n))
 		return "link:" + id, err
 	case unix.S_IFREG:
 		f, err := openFileAt(dir, name, rel)
@@ -463,14 +479,15 @@ func (d Dir) setupState(ctx context.Context, root, index int, rel string) (strin
 			return "", err
 		}
 		defer f.Close()
-		if info, err := f.Stat(); err != nil || !info.Mode().IsRegular() {
+		info, err := f.Stat()
+		if err != nil || !info.Mode().IsRegular() || info.Size() > maxHashBytes {
 			return "other", err
 		}
 		kind := "file:"
 		if st.Mode&0o100 != 0 {
 			kind = "exec:"
 		}
-		id, err := blobID(ctx, d.source(index), f)
+		id, err := hashBlob(ctx, format, f, info.Size())
 		return kind + id, err
 	}
 	return "other", nil

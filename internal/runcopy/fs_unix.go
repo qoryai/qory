@@ -126,9 +126,8 @@ func writable(dir int, path string, depth int) error {
 		}
 		sub, err := unix.Openat(dir, name, dirFlags, 0)
 		if errors.Is(err, unix.EACCES) {
-			// A folder with no read bit: the entry is a folder, as fstatat read it, and
-			// no process of the run is left to swap it.
-			if err := unix.Fchmodat(dir, name, 0o700, 0); err != nil {
+			// A folder with no read bit: the open needs the bit, and the chmod follows no link.
+			if err := chmodFolder(dir, name); err != nil {
 				return fileErr(path+"/"+name, err)
 			}
 			sub, err = unix.Openat(dir, name, dirFlags, 0)

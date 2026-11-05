@@ -57,8 +57,8 @@ type SetupPath struct {
 	State string
 }
 
-// setupState is the form of [SetupPath.State].
-var setupState = regexp.MustCompile(`^(?:missing|other|(?:file|exec|link):(?:[0-9a-f]{40}|[0-9a-f]{64}))$`)
+// stateForm is the form of [SetupPath.State].
+var stateForm = regexp.MustCompile(`^(?:missing|other|(?:file|exec|link):(?:[0-9a-f]{40}|[0-9a-f]{64}))$`)
 
 // GitSession is the bare session that runs after the agent: the program, its arguments
 // and its environment, for a Forager SessionSpec with no Runtime. The arguments contain
@@ -123,7 +123,7 @@ func (d Dir) GitSession(ctx context.Context, branch, message string, repos []Rep
 			if !cleanRel(p) {
 				return GitSession{}, fmt.Errorf(textLeftOut, shown(s.Path))
 			}
-			if !setupState.MatchString(s.State) {
+			if !stateForm.MatchString(s.State) {
 				return GitSession{}, fmt.Errorf(textState, shown(s.State))
 			}
 			args = append(args, p, s.State)

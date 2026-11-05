@@ -782,7 +782,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					return &runLineError{err}
 				}
 				cleanups = append(cleanups, func() { copied.done(said) })
-				if err := copied.artifactsIn(said); err != nil {
+				if err := copied.artifactsIn(copyCtx, said); err != nil {
 					if code != nil {
 						err = fmt.Errorf("%w%s", err, codeUsed)
 					}
@@ -1114,7 +1114,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			// A failed close may leave a container of the run, which could still write the copy.
 			artifactsBack := true
 			if copied != nil && !pushes && closed != nil {
-				artifactsBack = copied.artifactsBack(said)
+				artifactsBack = copied.artifactsBack(backCtx, said)
 			}
 			if err != nil {
 				return failed(err)

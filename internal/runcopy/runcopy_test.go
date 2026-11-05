@@ -8,9 +8,11 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"syscall"
 	"testing"
+	"time"
 )
 
 // branch is the run's branch in every test.
@@ -492,7 +494,7 @@ func TestCopyFolderKeepsLinksAsLinks(t *testing.T) {
 		t.Fatal(err)
 	}
 	d := newDir(t)
-	if err := d.CopyFolder(src); err != nil {
+	if err := d.CopyFolder(context.Background(), src); err != nil {
 		t.Fatal(err)
 	}
 	work := d.Work()
@@ -510,14 +512,14 @@ func TestCopyFolderKeepsLinksAsLinks(t *testing.T) {
 	if _, err := os.Lstat(filepath.Join(work, "pipe")); !errors.Is(err, fs.ErrNotExist) {
 		t.Errorf("the copy has the pipe: %v", err)
 	}
-	err := d.CopyFolder(src)
+	err := d.CopyFolder(context.Background(), src)
 	hasPrefix(t, "second CopyFolder", err, "remove ")
 }
 
 func TestCopyFolderOfAFolderThatContainsTheRun(t *testing.T) {
 	isolate(t)
 	d := newDir(t)
-	err := d.CopyFolder(os.Getenv("HOME"))
+	err := d.CopyFolder(context.Background(), os.Getenv("HOME"))
 	hasPrefix(t, "CopyFolder of HOME", err, "start the run in a folder that does not contain ")
 	if _, err := os.Lstat(d.Work()); !errors.Is(err, fs.ErrNotExist) {
 		t.Errorf("the copy was made: %v", err)
@@ -1042,7 +1044,7 @@ func copyBackFixture(t *testing.T) (string, Dir) {
 	}
 	link(t, dest, "out", t.TempDir())
 	d := newDir(t)
-	if err := d.CopyFolder(dest); err != nil {
+	if err := d.CopyFolder(context.Background(), dest); err != nil {
 		t.Fatal(err)
 	}
 	return dest, d
@@ -1089,7 +1091,7 @@ func TestCopyBackLeavesOutLinksGitAndQory(t *testing.T) {
 	}
 	link(t, dest, "linked", moved)
 
-	r, err := d.CopyBack(dest)
+	r, err := d.CopyBack(context.Background(), dest)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1145,7 +1147,7 @@ func TestCopyBackStopsPastItsBudget(t *testing.T) {
 		dest, d := copyBackFixture(t)
 		write(t, d.Work(), "b.txt", "new\n")
 		write(t, d.Work(), "c.txt", "new\n")
-		r, err := d.copyBackWith(dest, c.files, c.bytes)
+		r, err := d.copyBackWith(context.Background(), dest, c.files, c.bytes)
 		hasPrefix(t, "past the budget", err, "copy the rest from ")
 		if len(r.Copied) >= 2 {
 			t.Errorf("copied %v past a budget of %d files and %d bytes", r.Copied, c.files, c.bytes)
@@ -1295,6 +1297,145 @@ func TestTheGitSessionFetchesNoMissingObject(t *testing.T) {
 	}
 	if data, err := os.ReadFile(ran); err == nil {
 		t.Errorf("a program ran: %s", data)
+	}
+}
+
+// TestHashBlobIsWhatGitComputes compares [hashBlob] with git hash-object in both object formats.
+func TestHashBlobIsWhatGitComputes(t *testing.T) {
+	isolate(t)
+	for _, format := range []string{"sha1", "sha256"} {
+		dir := t.TempDir()
+		testGit(t, dir, "init", "--quiet", "--object-format="+format)
+		content := "line\n\x00binary\r\n"
+		want := gitIn(t, dir, content, "hash-object", "--no-filters", "--stdin")
+		got, err := hashBlob(context.Background(), format, strings.NewReader(content), int64(len(content)))
+		if err != nil || got != want {
+			t.Errorf("%s: %s (%v), want %s", format, got, err, want)
+		}
+	}
+	if _, err := hashBlob(context.Background(), "sha1", strings.NewReader("x"), 2); err == nil {
+		t.Error("a short file has a hash")
+	}
+}
+
+// TestCopyBackChecksTheSizeBeforeTheHash is a file of the run past the budget, sparse so that a
+// hash would take long: the copy back stops with no read.
+func TestCopyBackChecksTheSizeBeforeTheHash(t *testing.T) {
+	isolate(t)
+	src := t.TempDir()
+	write(t, src, "file.txt", "first\n")
+	d := newDir(t)
+	if err := d.CopyFolder(context.Background(), src); err != nil {
+		t.Fatal(err)
+	}
+	f, err := os.Create(filepath.Join(d.Work(), "sparse"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Truncate(1 << 40); err != nil {
+		t.Skipf("this file system has no sparse file: %v", err)
+	}
+	f.Close()
+	start := time.Now()
+	_, err = d.copyBackWith(context.Background(), src, 10, 1<<20)
+	if err == nil || !strings.HasPrefix(err.Error(), "copy the rest from ") {
+		t.Errorf("err = %v", err)
+	}
+	if time.Since(start) > 30*time.Second {
+		t.Errorf("the copy back took %v", time.Since(start))
+	}
+	if _, err := os.Lstat(filepath.Join(src, "sparse")); err == nil {
+		t.Error("the file came back")
+	}
+}
+
+// TestCopyBackCountsFolders is a run that adds many empty folders: they pass the budget.
+func TestCopyBackCountsFolders(t *testing.T) {
+	isolate(t)
+	src := t.TempDir()
+	d := newDir(t)
+	if err := d.CopyFolder(context.Background(), src); err != nil {
+		t.Fatal(err)
+	}
+	for i := range 5 {
+		if err := os.Mkdir(filepath.Join(d.Work(), "d"+strconv.Itoa(i)), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := d.copyBackWith(context.Background(), src, 3, 1<<20); err == nil {
+		t.Error("five folders passed a budget of three")
+	}
+}
+
+// TestCopyBackStopsWithItsContext is a context that ended: the copy back stops, with what it
+// copied in the line.
+func TestCopyBackStopsWithItsContext(t *testing.T) {
+	isolate(t)
+	src := t.TempDir()
+	d := newDir(t)
+	if err := d.CopyFolder(context.Background(), src); err != nil {
+		t.Fatal(err)
+	}
+	write(t, d.Work(), "new.txt", "the run\n")
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := d.CopyBack(ctx, src)
+	if err == nil || !strings.Contains(err.Error(), "cut short") {
+		t.Errorf("err = %v", err)
+	}
+}
+
+// TestCopyFolderStopsAtItsBudget is a folder past each budget, and a context that ended.
+func TestCopyFolderStopsAtItsBudget(t *testing.T) {
+	isolate(t)
+	src := t.TempDir()
+	write(t, src, "a.txt", "12345\n")
+	write(t, src, "b.txt", "12345\n")
+	for name, c := range map[string]struct {
+		entries int
+		bytes   int64
+	}{"entries": {1, 1 << 20}, "bytes": {10, 3}} {
+		d, err := New("run-" + name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = d.Remove() })
+		err = d.copyFolderOf(context.Background(), src, "", c.entries, c.bytes)
+		if err == nil || !strings.HasPrefix(err.Error(), "start the run in a smaller folder") {
+			t.Errorf("%s: err = %v", name, err)
+		}
+	}
+	d := newDir(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := d.CopyFolder(ctx, src); err == nil {
+		t.Error("a copy with an ended context passed")
+	}
+}
+
+// TestALinkOfTheFolderIsNotListedAgain is a plain folder with a link at the copy: the copy back
+// lists only a new link, or one the run changed.
+func TestALinkOfTheFolderIsNotListedAgain(t *testing.T) {
+	isolate(t)
+	src := t.TempDir()
+	write(t, src, "target.txt", "x\n")
+	link(t, src, "same", "target.txt")
+	link(t, src, "changed", "target.txt")
+	d := newDir(t)
+	if err := d.CopyFolder(context.Background(), src); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(d.Work(), "changed")); err != nil {
+		t.Fatal(err)
+	}
+	link(t, d.Work(), "changed", "/etc/passwd")
+	link(t, d.Work(), "new", "target.txt")
+	res, err := d.CopyBack(context.Background(), src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"changed", "new"}; !slices.Equal(res.Skipped, want) {
+		t.Errorf("skipped = %v, want %v", res.Skipped, want)
 	}
 }
 
@@ -1454,7 +1595,7 @@ func TestCopyFolderWithoutGitLeavesOutTheTopGit(t *testing.T) {
 		t.Error("NoCommits = false after git init")
 	}
 	d := newDir(t)
-	if err := d.CopyFolderWithoutGit(src); err != nil {
+	if err := d.CopyFolderWithoutGit(context.Background(), src); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Lstat(filepath.Join(d.Work(), ".git")); err == nil {
@@ -1462,7 +1603,7 @@ func TestCopyFolderWithoutGitLeavesOutTheTopGit(t *testing.T) {
 	}
 	write(t, d.Work(), "file.txt", "the run\n")
 	head := read(t, src, ".git/HEAD")
-	if _, err := d.CopyBack(src); err != nil {
+	if _, err := d.CopyBack(context.Background(), src); err != nil {
 		t.Fatal(err)
 	}
 	if read(t, src, "file.txt") != "the run\n" || read(t, src, ".git/HEAD") != head {
@@ -1497,7 +1638,7 @@ func TestCopyArtifactsInCopiesTheArtifactsAndTheWorkItem(t *testing.T) {
 	write(t, src, ".qory/artifacts/.gitignore", "*\n")
 	write(t, src, ".qory/work-item.json", "{}\n")
 	write(t, src, ".qory/secrets.env", "no\n")
-	res, err := d.CopyArtifactsIn(src)
+	res, err := d.CopyArtifactsIn(context.Background(), src)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1512,7 +1653,7 @@ func TestCopyArtifactsInCopiesTheArtifactsAndTheWorkItem(t *testing.T) {
 	if _, err := os.Lstat(filepath.Join(d.Work(), ".qory", "secrets.env")); err == nil {
 		t.Error("the copy has a file of .qory that is no artifact")
 	}
-	back, err := d.CopyArtifactsBack(src)
+	back, err := d.CopyArtifactsBack(context.Background(), src)
 	if err != nil || len(back.Conflicts)+len(back.Copied) != 0 {
 		t.Errorf("the copy back: %+v, %v", back, err)
 	}
@@ -1559,7 +1700,7 @@ func TestCopyArtifactsInFollowsNoLink(t *testing.T) {
 			src, _ := person(t)
 			d, _ := cloneRun(t, src)
 			want := plant(t, src, outside(t))
-			res, err := d.CopyArtifactsIn(src)
+			res, err := d.CopyArtifactsIn(context.Background(), src)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1590,7 +1731,7 @@ func TestCopyArtifactsInStopsAtItsBudget(t *testing.T) {
 	d, _ := cloneRun(t, src)
 	write(t, src, ".qory/artifacts/a.txt", "x\n")
 	write(t, src, ".qory/artifacts/b.txt", "x\n")
-	_, err := d.artifactsInWith(src, 1, 1<<20)
+	_, err := d.artifactsInWith(context.Background(), src, 1, 1<<20)
 	if err == nil || !strings.HasPrefix(err.Error(), "remove old versions from ") {
 		t.Errorf("err = %v", err)
 	}
@@ -1606,7 +1747,7 @@ func TestCopyArtifactsInKeepsAFileOfTheCommit(t *testing.T) {
 	commitAll(t, src, "more")
 	d, _ := cloneRun(t, src)
 	write(t, src, ".qory/artifacts/a.txt", "the person\n")
-	res, err := d.CopyArtifactsIn(src)
+	res, err := d.CopyArtifactsIn(context.Background(), src)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1718,13 +1859,13 @@ func TestSetupChangesRunsNoGitInTheCopy(t *testing.T) {
 	}
 	seen := false
 	for line := range strings.Lines(string(log)) {
-		seen = seen || strings.Contains(line, "hash-object")
+		seen = seen || strings.Contains(line, "ls-tree")
 		if strings.Contains(line, work) || strings.Contains(line, d.Work()) {
 			t.Errorf("a git ran in the copy: %s", line)
 		}
 	}
 	if !seen {
-		t.Errorf("no git hash-object ran:\n%s", log)
+		t.Errorf("no git ls-tree ran:\n%s", log)
 	}
 }
 
@@ -1798,7 +1939,7 @@ func TestCopyArtifactsBackBringsOnlyRegularFiles(t *testing.T) {
 	if err := syscall.Mkfifo(filepath.Join(d.Work(), ".qory", "artifacts", "pipe"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	got, err := d.CopyArtifactsBack(src)
+	got, err := d.CopyArtifactsBack(context.Background(), src)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1837,7 +1978,7 @@ func TestCopyArtifactsBackFollowsNoLinkOfThePerson(t *testing.T) {
 				t.Fatal(err)
 			}
 			write(t, d.Work(), ".qory/artifacts/note.md", "the run\n")
-			got, err := d.CopyArtifactsBack(src)
+			got, err := d.CopyArtifactsBack(context.Background(), src)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1861,7 +2002,7 @@ func TestCopyArtifactsBackFollowsNoLinkOfThePerson(t *testing.T) {
 		t.Fatal(err)
 	}
 	link(t, d.Work(), ".qory", outside)
-	got, err := d.CopyArtifactsBack(src)
+	got, err := d.CopyArtifactsBack(context.Background(), src)
 	if err != nil || !slices.Contains(got.Skipped, ".qory") {
 		t.Errorf("a link at the copy's .qory: %+v, %v", got, err)
 	}
@@ -1878,12 +2019,12 @@ func TestCopyArtifactsBackStopsAtTheBudget(t *testing.T) {
 	d, _ := cloneRun(t, src)
 	write(t, d.Work(), ".qory/artifacts/a.txt", "12345\n")
 	write(t, d.Work(), ".qory/artifacts/b.txt", "12345\n")
-	_, err := d.artifactsBackWith(src, 1, 1<<20)
+	_, err := d.artifactsBackWith(context.Background(), src, 1, 1<<20)
 	hasPrefix(t, "the file budget", err, "copy the rest from ")
 	if _, serr := os.Stat(filepath.Join(src, ".qory", "artifacts", "b.txt")); serr == nil {
 		t.Error("the file past the budget came back")
 	}
-	_, err = d.artifactsBackWith(t.TempDir(), 100, 1)
+	_, err = d.artifactsBackWith(context.Background(), t.TempDir(), 100, 1)
 	hasPrefix(t, "the byte budget", err, "copy the rest from ")
 }
 
@@ -1895,11 +2036,11 @@ func TestCopyArtifactsBackOfAPlainFolderTakesTheRunsChange(t *testing.T) {
 	src := t.TempDir()
 	write(t, src, ".qory/artifacts/note.md", "first\n")
 	d := newDir(t)
-	if err := d.CopyFolder(src); err != nil {
+	if err := d.CopyFolder(context.Background(), src); err != nil {
 		t.Fatal(err)
 	}
 	write(t, d.Work(), ".qory/artifacts/note.md", "the run\n")
-	got, err := d.CopyArtifactsBack(src)
+	got, err := d.CopyArtifactsBack(context.Background(), src)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -3,8 +3,12 @@ package runcopy
 import (
 	"bytes"
 	"context"
+	"crypto/sha1"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"hash"
 	"io"
 	"os/exec"
 	"path/filepath"
@@ -142,7 +146,7 @@ func commitOf(ctx context.Context, dir, rev string) (string, error) {
 	}
 	id := strings.TrimSpace(out)
 	if !objectID.MatchString(id) {
-		return "", &gitError{subcommand: "rev-parse", line: "printed " + shown(id) + ", which is no commit id", exit: -1}
+		return "", &gitError{subcommand: "rev-parse", line: "printed " + shown(id) + ", which is not a commit id", exit: -1}
 	}
 	return id, nil
 }
@@ -177,18 +181,38 @@ func checkRef(ctx context.Context, ref string) error {
 	return nil
 }
 
-// blobID is the git blob id of what r has, by git hash-object --stdin --no-filters in
-// the repository at dir, which sets the object format.
-func blobID(ctx context.Context, dir string, r io.Reader) (string, error) {
-	out, err := gitWith(ctx, dir, nil, r, "hash-object", "--no-filters", "--stdin")
+// objectFormat is the object format of the repository at dir: sha1 or sha256.
+func objectFormat(ctx context.Context, dir string) (string, error) {
+	out, err := git(ctx, dir, "rev-parse", "--show-object-format")
+	return strings.TrimSpace(out), err
+}
+
+// maxHashBytes is the most bytes [hashBlob] reads of one file. A setup can leave a sparse file
+// of any size.
+const maxHashBytes = maxCopyBackBytes
+
+// hashBlob is the git blob id of what r has, size bytes, in format: the hash of blob <size>,
+// a zero byte and the content, as git hash-object --no-filters computes it. It reads no more
+// than size bytes, and fails when r has fewer. No git runs, so a file costs no process.
+func hashBlob(ctx context.Context, format string, r io.Reader, size int64) (string, error) {
+	var h hash.Hash
+	switch format {
+	case "sha1":
+		h = sha1.New()
+	case "sha256":
+		h = sha256.New()
+	default:
+		return "", &gitError{subcommand: "rev-parse", line: "printed " + shown(format) + ", which is not an object format", exit: -1}
+	}
+	fmt.Fprintf(h, "blob %d\x00", size)
+	n, err := io.Copy(h, io.LimitReader(ctxReader{ctx, r}, size))
 	if err != nil {
 		return "", err
 	}
-	id := strings.TrimSpace(out)
-	if !objectID.MatchString(id) {
-		return "", &gitError{subcommand: "hash-object", line: "printed " + shown(id) + ", which is no object id", exit: -1}
+	if n != size {
+		return "", io.ErrUnexpectedEOF
 	}
-	return id, nil
+	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
 // bundleFetchChecks reports whether a fetch from a bundle checks the objects it

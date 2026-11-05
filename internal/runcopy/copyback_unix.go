@@ -3,6 +3,7 @@
 package runcopy
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
@@ -51,6 +52,7 @@ type CopyBackResult struct {
 
 // copyBack is the state of one [Dir.CopyBack].
 type copyBack struct {
+	ctx context.Context
 	// maxFiles and maxBytes are the budget: [maxCopyBackFiles] and [maxCopyBackBytes].
 	maxFiles int
 	maxBytes int64
@@ -59,6 +61,26 @@ type copyBack struct {
 	qory     map[string]bool
 	skipped  map[string]bool
 	bytes    int64
+	// folders are the folders it made in the destination.
+	folders int
+}
+
+// overBudget reports whether one more entry of size bytes passes the budget.
+func (c *copyBack) overBudget(size int64) bool {
+	return len(c.result.Copied)+c.folders+1 > c.maxFiles || c.bytes+size > c.maxBytes
+}
+
+// ctxReader stops a read of r once ctx ends.
+type ctxReader struct {
+	ctx context.Context
+	r   io.Reader
+}
+
+func (c ctxReader) Read(p []byte) (int, error) {
+	if err := c.ctx.Err(); err != nil {
+		return 0, err
+	}
+	return c.r.Read(p)
 }
 
 // artifactsFolder is the folder under .qory where qory artifact push keeps versions outside
@@ -93,12 +115,12 @@ var errBudget = errors.New("past the budget")
 // an error that lists what it copied. A changed file keeps the permission bits it has
 // in dest, with the run's change to the owner's execute bit, and a new one gets the
 // process's umask, with the execute bits when the copy has the owner's.
-func (d Dir) CopyBack(dest string) (CopyBackResult, error) {
-	return d.copyBackWith(dest, maxCopyBackFiles, maxCopyBackBytes)
+func (d Dir) CopyBack(ctx context.Context, dest string) (CopyBackResult, error) {
+	return d.copyBackWith(ctx, dest, maxCopyBackFiles, maxCopyBackBytes)
 }
 
 // copyBackWith is [Dir.CopyBack] with a budget of maxFiles files and maxBytes bytes.
-func (d Dir) copyBackWith(dest string, maxFiles int, maxBytes int64) (CopyBackResult, error) {
+func (d Dir) copyBackWith(ctx context.Context, dest string, maxFiles int, maxBytes int64) (CopyBackResult, error) {
 	var result CopyBackResult
 	rec, err := d.readRecord()
 	if err != nil {
@@ -114,13 +136,16 @@ func (d Dir) copyBackWith(dest string, maxFiles int, maxBytes int64) (CopyBackRe
 		return result, fmt.Errorf(textCopyBackOpen, shown(dest), err)
 	}
 	defer unix.Close(dst)
-	c := &copyBack{maxFiles: maxFiles, maxBytes: maxBytes, rec: rec, result: &result, qory: map[string]bool{}, skipped: map[string]bool{}}
+	c := &copyBack{ctx: ctx, maxFiles: maxFiles, maxBytes: maxBytes, rec: rec, result: &result, qory: map[string]bool{}, skipped: map[string]bool{}}
 	if err := c.compareQory(src, dst); err != nil {
 		return result, err
 	}
 	err = c.dir(src, dst, "", 0)
 	if errors.Is(err, errBudget) {
 		return result, fmt.Errorf(textCopyBackLimit, shown(d.Work()), maxFiles, maxBytes, strings.Join(result.Copied, ", "))
+	}
+	if ctx.Err() != nil && err != nil {
+		return result, fmt.Errorf(textCopyBackCut, shown(d.Work()), strings.Join(result.Copied, ", "))
 	}
 	if err != nil {
 		return result, err
@@ -142,8 +167,8 @@ func (d Dir) copyBackWith(dest string, maxFiles int, maxBytes int64) (CopyBackRe
 // regular and each folder that git would take as a git folder, and stops at the same budget.
 // A file that the person has with other content stays and is listed as a conflict. It
 // deletes nothing.
-func (d Dir) CopyArtifactsBack(dest string) (CopyBackResult, error) {
-	return d.artifactsBackWith(dest, maxCopyBackFiles, maxCopyBackBytes)
+func (d Dir) CopyArtifactsBack(ctx context.Context, dest string) (CopyBackResult, error) {
+	return d.artifactsBackWith(ctx, dest, maxCopyBackFiles, maxCopyBackBytes)
 }
 
 // CopyArtifactsIn copies src's .qory/artifacts and .qory/work-item.json, which qory wrote and
@@ -151,12 +176,12 @@ func (d Dir) CopyArtifactsBack(dest string) (CopyBackResult, error) {
 // reads the same artifacts and work item as the person, and numbers its versions after theirs.
 // The rules of [Dir.CopyArtifactsBack] apply: a file of the commit with other content stays
 // and is listed as a conflict. src itself may be a link, which the person gave.
-func (d Dir) CopyArtifactsIn(src string) (CopyBackResult, error) {
-	return d.artifactsInWith(src, maxCopyBackFiles, maxCopyBackBytes)
+func (d Dir) CopyArtifactsIn(ctx context.Context, src string) (CopyBackResult, error) {
+	return d.artifactsInWith(ctx, src, maxCopyBackFiles, maxCopyBackBytes)
 }
 
 // artifactsInWith is [Dir.CopyArtifactsIn] with a budget of maxFiles files and maxBytes bytes.
-func (d Dir) artifactsInWith(src string, maxFiles int, maxBytes int64) (CopyBackResult, error) {
+func (d Dir) artifactsInWith(ctx context.Context, src string, maxFiles int, maxBytes int64) (CopyBackResult, error) {
 	var result CopyBackResult
 	top, err := unix.Open(src, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_CLOEXEC, 0)
 	if err != nil {
@@ -168,7 +193,7 @@ func (d Dir) artifactsInWith(src string, maxFiles int, maxBytes int64) (CopyBack
 		return result, fileErr(d.Work(), err)
 	}
 	defer unix.Close(work)
-	c := &copyBack{maxFiles: maxFiles, maxBytes: maxBytes, rec: folderRecord{}, result: &result, qory: map[string]bool{}, skipped: map[string]bool{}}
+	c := &copyBack{ctx: ctx, maxFiles: maxFiles, maxBytes: maxBytes, rec: folderRecord{}, result: &result, qory: map[string]bool{}, skipped: map[string]bool{}}
 	err = c.artifactsIn(top, work)
 	if errors.Is(err, errBudget) {
 		return result, fmt.Errorf(textCopyInLimit, shown(filepath.Join(src, checkout.Dir, artifactsFolder)), maxFiles, maxBytes)
@@ -241,7 +266,7 @@ func (c *copyBack) enter(src, dst int, name, rel string) (from, to int, ok bool,
 
 // artifactsBackWith is [Dir.CopyArtifactsBack] with a budget of maxFiles files and maxBytes
 // bytes.
-func (d Dir) artifactsBackWith(dest string, maxFiles int, maxBytes int64) (CopyBackResult, error) {
+func (d Dir) artifactsBackWith(ctx context.Context, dest string, maxFiles int, maxBytes int64) (CopyBackResult, error) {
 	var result CopyBackResult
 	rec, err := d.readRecord()
 	switch {
@@ -261,7 +286,7 @@ func (d Dir) artifactsBackWith(dest string, maxFiles int, maxBytes int64) (CopyB
 		return result, fmt.Errorf(textCopyBackOpen, shown(dest), err)
 	}
 	defer unix.Close(dst)
-	c := &copyBack{maxFiles: maxFiles, maxBytes: maxBytes, rec: rec, result: &result, qory: map[string]bool{}, skipped: map[string]bool{}}
+	c := &copyBack{ctx: ctx, maxFiles: maxFiles, maxBytes: maxBytes, rec: rec, result: &result, qory: map[string]bool{}, skipped: map[string]bool{}}
 	from, to, ok, err := c.enter(src, dst, checkout.Dir, checkout.Dir)
 	if err != nil || !ok {
 		return result, err
@@ -279,6 +304,9 @@ func (d Dir) artifactsBackWith(dest string, maxFiles int, maxBytes int64) (CopyB
 	err = c.dir(from, to, rel, 0)
 	if errors.Is(err, errBudget) {
 		return result, fmt.Errorf(textCopyBackLimit, shown(d.Work()), maxFiles, maxBytes, strings.Join(result.Copied, ", "))
+	}
+	if ctx.Err() != nil && err != nil {
+		return result, fmt.Errorf(textCopyBackCut, shown(d.Work()), strings.Join(result.Copied, ", "))
 	}
 	return result, err
 }
@@ -376,6 +404,9 @@ func (c *copyBack) dir(src, dst int, rel string, depth int) error {
 		return nil
 	}
 	for _, name := range names {
+		if err := c.ctx.Err(); err != nil {
+			return err
+		}
 		at := path.Join(rel, name)
 		if leftOutName(name) {
 			c.skip(at, true)
@@ -397,11 +428,28 @@ func (c *copyBack) dir(src, dst int, rel string, depth int) error {
 			if err := c.file(src, dst, name, at, st.Mode&0o100 != 0); err != nil {
 				return err
 			}
+		case unix.S_IFLNK:
+			// A link the folder had at the copy, with the same target, is no change of the run.
+			if !c.sameLink(src, name, at) {
+				c.skip(at, false)
+			}
 		default:
 			c.skip(at, false)
 		}
 	}
 	return nil
+}
+
+// sameLink reports whether the link name in src, at rel, has the target the record has for
+// rel.
+func (c *copyBack) sameLink(src int, name, rel string) bool {
+	was, recorded := c.rec.Links[rel]
+	if !recorded {
+		return false
+	}
+	buf := make([]byte, unix.PathMax)
+	n, err := unix.Readlinkat(src, name, buf)
+	return err == nil && string(buf[:n]) == was
 }
 
 // skip lists rel among the skipped entries. When folder is true, nothing below rel is
@@ -430,7 +478,13 @@ func (c *copyBack) sub(src, dst int, name, rel string, depth int) error {
 		c.skip(rel, true)
 		return nil
 	}
-	if err := unix.Mkdirat(dst, name, 0o777); err != nil && !errors.Is(err, unix.EEXIST) {
+	switch err := unix.Mkdirat(dst, name, 0o777); {
+	case err == nil:
+		c.folders++
+		if c.overBudget(0) {
+			return errBudget
+		}
+	case !errors.Is(err, unix.EEXIST):
 		return fileErr(rel, err)
 	}
 	to, err := unix.Openat(dst, name, dirFlags, 0)
@@ -454,15 +508,20 @@ func (c *copyBack) file(src, dst int, name, rel string, exec bool) error {
 		return fileErr(rel, err)
 	}
 	defer in.Close()
-	if info, err := in.Stat(); err != nil || !info.Mode().IsRegular() {
+	info, err := in.Stat()
+	if err != nil || !info.Mode().IsRegular() {
 		c.skip(rel, false)
 		return nil
 	}
-	now, err := hashState(in, exec)
+	was, recorded := c.rec.Files[rel]
+	// A size past the budget stops the copy before any hash reads the file.
+	if !(recorded && info.Size() == was.Size) && c.overBudget(info.Size()) {
+		return errBudget
+	}
+	now, err := hashState(ctxReader{c.ctx, io.LimitReader(in, info.Size())}, exec)
 	if err != nil {
 		return fileErr(rel, err)
 	}
-	was, recorded := c.rec.Files[rel]
 	if recorded && now == was {
 		return nil
 	}
@@ -479,7 +538,7 @@ func (c *copyBack) file(src, dst int, name, rel string, exec bool) error {
 		c.result.Conflicts = append(c.result.Conflicts, rel)
 		return nil
 	}
-	if len(c.result.Copied)+1 > c.maxFiles || c.bytes+now.Size > c.maxBytes {
+	if c.overBudget(now.Size) {
 		return errBudget
 	}
 	if _, err := in.Seek(0, io.SeekStart); err != nil {
@@ -498,7 +557,8 @@ func (c *copyBack) file(src, dst int, name, rel string, exec bool) error {
 			mode &^= 0o111
 		}
 	}
-	if err := writeAt(dst, name, rel, in, mode, replaces); err != nil {
+	// At most what the hash read, which the budget counted.
+	if err := writeAt(dst, name, rel, ctxReader{c.ctx, io.LimitReader(in, now.Size)}, mode, replaces); err != nil {
 		return err
 	}
 	c.bytes += now.Size

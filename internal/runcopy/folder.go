@@ -31,21 +31,47 @@ type fileState struct {
 // relative to the folder with forward slashes.
 type folderRecord struct {
 	Files map[string]fileState `json:"files"`
+	// Links is the target of each link the copy has.
+	Links map[string]string `json:"links"`
 }
+
+// The most [Dir.CopyFolder] copies of a folder: a person's folder can be larger than what a
+// run brings back, and the copy has to fit on this machine's disk.
+const (
+	maxCopyFolderEntries = 1_000_000
+	maxCopyFolderBytes   = 64 << 30
+)
+
+// folderCopy is the state of one [Dir.CopyFolder].
+type folderCopy struct {
+	ctx      context.Context
+	from, to *os.Root
+	rec      folderRecord
+	// leave is the path left out, "" for none.
+	leave string
+	// maxEntries and maxBytes are the budget, entries and bytes what it used.
+	maxEntries int
+	maxBytes   int64
+	entries    int
+	bytes      int64
+}
+
+// errFolderBudget is a folder past the budget of [Dir.CopyFolder].
+var errFolderBudget = errors.New("past the budget")
 
 // CopyFolder copies the folder src, which is not a repository, into [Dir.Work]: its
 // folders, its regular files with their permission bits and times, and its links as
 // links, never followed. Any other kind of file, such as a pipe or a socket, stays out.
 // It records the size, the owner's execute bit and a hash of each regular file in the
 // run's folder, for [Dir.CopyBack]. src must not contain the run's folder.
-func (d Dir) CopyFolder(src string) error {
-	return d.copyFolderOf(src, "")
+func (d Dir) CopyFolder(ctx context.Context, src string) error {
+	return d.copyFolderOf(ctx, src, "", maxCopyFolderEntries, maxCopyFolderBytes)
 }
 
 // CopyFolderWithoutGit is [Dir.CopyFolder] of a folder that git init set up and that has no
 // commit, for a run that has no repository: the .git at its top stays out of the copy.
-func (d Dir) CopyFolderWithoutGit(src string) error {
-	return d.copyFolderOf(src, gitDirName)
+func (d Dir) CopyFolderWithoutGit(ctx context.Context, src string) error {
+	return d.copyFolderOf(ctx, src, gitDirName, maxCopyFolderEntries, maxCopyFolderBytes)
 }
 
 // gitDirName is the git folder of a working tree.
@@ -58,8 +84,9 @@ func NoCommits(ctx context.Context, dir string) bool {
 	return err == nil && strings.TrimSpace(out) == ""
 }
 
-// copyFolderOf is [Dir.CopyFolder] with the path leave, "" for none, left out.
-func (d Dir) copyFolderOf(src, leave string) error {
+// copyFolderOf is [Dir.CopyFolder] with the path leave, "" for none, left out, and a budget of
+// maxEntries entries and maxBytes bytes.
+func (d Dir) copyFolderOf(ctx context.Context, src, leave string, maxEntries int, maxBytes int64) error {
 	src, err := filepath.Abs(src)
 	if err != nil {
 		return fileErr(src, err)
@@ -91,8 +118,12 @@ func (d Dir) copyFolderOf(src, leave string) error {
 		return fileErr(work, err)
 	}
 	defer to.Close()
-	rec := folderRecord{Files: map[string]fileState{}}
-	if err := copyFolder(from, to, ".", rec, leave); err != nil {
+	rec := folderRecord{Files: map[string]fileState{}, Links: map[string]string{}}
+	c := &folderCopy{ctx: ctx, from: from, to: to, rec: rec, leave: leave, maxEntries: maxEntries, maxBytes: maxBytes}
+	if err := c.folder("."); err != nil {
+		if errors.Is(err, errFolderBudget) {
+			return fmt.Errorf(textFolderLimit, maxEntries, maxBytes, shown(src))
+		}
 		return fmt.Errorf(textNoFolderCopy, shown(src), err)
 	}
 	data, err := json.Marshal(rec)
@@ -106,10 +137,10 @@ func (d Dir) copyFolderOf(src, leave string) error {
 	return nil
 }
 
-// copyFolder copies the entries of the folder rel of from into to, but the path leave, and
-// records each regular file in rec.
-func copyFolder(from, to *os.Root, rel string, rec folderRecord, leave string) error {
-	f, err := from.Open(rel)
+// folder copies the entries of the folder rel into the copy, and records each regular file and
+// each link.
+func (c *folderCopy) folder(rel string) error {
+	f, err := c.from.Open(rel)
 	if err != nil {
 		return err
 	}
@@ -120,45 +151,54 @@ func copyFolder(from, to *os.Root, rel string, rec folderRecord, leave string) e
 	}
 	for _, e := range entries {
 		p := path.Join(rel, e.Name())
-		if p == leave {
+		if p == c.leave {
 			continue
 		}
-		fi, err := from.Lstat(p)
+		if err := c.ctx.Err(); err != nil {
+			return err
+		}
+		fi, err := c.from.Lstat(p)
 		if err != nil {
 			return err
 		}
+		c.entries++
+		if c.entries > c.maxEntries || c.bytes+fi.Size() > c.maxBytes {
+			return errFolderBudget
+		}
 		switch mode := fi.Mode(); {
 		case mode&fs.ModeSymlink != 0:
-			target, err := from.Readlink(p)
+			target, err := c.from.Readlink(p)
 			if err != nil {
 				return err
 			}
-			if err := to.Symlink(target, p); err != nil {
+			if err := c.to.Symlink(target, p); err != nil {
 				return err
 			}
+			c.rec.Links[p] = target
 		case mode.IsDir():
-			if err := to.Mkdir(p, 0o700); err != nil {
+			if err := c.to.Mkdir(p, 0o700); err != nil {
 				return err
 			}
-			if err := copyFolder(from, to, p, rec, leave); err != nil {
+			if err := c.folder(p); err != nil {
 				return err
 			}
 			// The owner keeps write access, so the run can write in every folder.
-			if err := to.Chmod(p, mode.Perm()|0o700); err != nil {
+			if err := c.to.Chmod(p, mode.Perm()|0o700); err != nil {
 				return err
 			}
 		case mode.IsRegular():
-			if err := preparation.CopyFile(from, to, p); err != nil {
+			c.bytes += fi.Size()
+			if err := preparation.CopyFile(c.from, c.to, p); err != nil {
 				return err
 			}
-			if err := preparation.KeepMode(to, p, fi); err != nil {
+			if err := preparation.KeepMode(c.to, p, fi); err != nil {
 				return err
 			}
-			state, err := stateOf(to, p, mode)
+			state, err := stateOf(c.to, p, mode)
 			if err != nil {
 				return err
 			}
-			rec.Files[p] = state
+			c.rec.Files[p] = state
 		}
 	}
 	return nil
