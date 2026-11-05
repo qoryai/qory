@@ -165,6 +165,36 @@ func TestAnEmptyFolderBehindALinkStops(t *testing.T) {
 	}
 }
 
+// TestAnEmptyFolderFetchesInAnotherLanguage is an empty folder with a stand-in git that
+// prints German for the look for a repository unless LC_ALL is C: the fetch goes on, so
+// the check of the folder runs git with LC_ALL=C. A stand-in shows it on every machine,
+// since a real git prints German only where the locale and git's messages are installed.
+func TestAnEmptyFolderFetchesInAnotherLanguage(t *testing.T) {
+	needGit(t)
+	isolatedPlaces(t)
+	gitPath, err := exec.LookPath("git")
+	if err != nil {
+		t.Fatal(err)
+	}
+	base := t.TempDir()
+	remote(t, base, "acme/shop", "main", nil)
+	bin := t.TempDir()
+	write(t, filepath.Join(bin, "git"), "#!/bin/sh\nif [ \"$LC_ALL\" != C ]; then for a; do if [ \"$a\" = --git-dir ]; then echo 'Schwerwiegend: Kein Git-Repository (oder irgendeines der Elternverzeichnisse): .git' >&2; exit 128; fi; done; fi\nexec "+gitPath+" \"$@\"\n")
+	if err := os.Chmod(filepath.Join(bin, "git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("LANGUAGE", "de")
+	t.Setenv("LC_ALL", "de_DE.UTF-8")
+	dir := t.TempDir()
+	if _, err := prepare(context.Background(), dir, env("git.example.com", "acme/shop")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "README.md")); err != nil {
+		t.Errorf("acme/shop was not fetched: %v", err)
+	}
+}
+
 // TestAnEmptyFolderInUseStopsBeforeGitInit is a folder with no entries in which a walled run
 // is starting: the run stops with the line of a place in use, and the folder has no .git.
 func TestAnEmptyFolderInUseStopsBeforeGitInit(t *testing.T) {
@@ -182,7 +212,7 @@ func TestAnEmptyFolderInUseStopsBeforeGitInit(t *testing.T) {
 	}
 	defer h.Release()
 	_, err = prepare(context.Background(), dir, env("git.example.com", "acme/shop"))
-	want := "qory run: start the run in a new empty git working tree that no walled run used, then run again. The check of the working folder's git configuration failed: "
+	want := "qory run: start the run in a new empty folder that no walled run uses, then run again. The check of the working folder failed: "
 	if err == nil || !strings.HasPrefix(err.Error(), want) {
 		t.Errorf("%v, want a line that starts %s", err, want)
 	}

@@ -38,7 +38,8 @@ import (
 //     has a commondir file ([textCommonDir]), info/grafts ([textGrafts]),
 //     objects/info/alternates or objects/info/http-alternates ([textAlternates]), or a
 //     config or config.worktree
-//     that is not a regular file ([textConfigNotFile]);
+//     that is not a regular file ([textConfigNotFile]); or it has no HEAD, objects or refs
+//     ([textNoGitPart]);
 //   - hostgit's settings check stops on it ([textPlaceRefused]): the folder is in a place
 //     a walled run used, and its configuration has a key qory and git do not write, or
 //     changed since the place was recorded, or a walled run uses it now;
@@ -212,10 +213,8 @@ func checkedRepository(ctx context.Context, dir string, fetched bool) (*places.H
 	if _, err := gitFiles(gitDir); err != nil {
 		return nil, err
 	}
-	if fetched {
-		if err := gitParts(gitDir); err != nil {
-			return nil, err
-		}
+	if err := gitParts(gitDir); err != nil {
+		return nil, err
 	}
 	if err := qoryFiles(dir); err != nil {
 		return nil, err
@@ -270,7 +269,7 @@ func keysIn(ctx context.Context, dir string, files []string, fetched, afterRun b
 			if name == "config" && (fetched && fetchKey(key) || afterRun && hostgit.Identity(key)) {
 				continue
 			}
-			if name == "config" && !fetched && strings.HasPrefix(key, "remote.") {
+			if name == "config" && !fetched && strings.HasPrefix(key, "remote.") && strings.Count(key, ".") >= 2 {
 				return errors.New(textHasRemote)
 			}
 			if name == "config.worktree" || !initKey(key) {

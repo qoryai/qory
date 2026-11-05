@@ -46,10 +46,10 @@ The toolchain is pinned in `mise.toml`; `mise install` provides it. Go 1.27 and,
 release, goreleaser.
 
 ```sh
-go build -o qory .      # the binary
-go test ./...           # every fixture under contracts/harness/v1/fixtures, and the unit tests
-go test ./... -cover    # per-package statement coverage
-gofmt -l .              # must print nothing
+go build -o qory .                 # the binary
+go test -timeout 30m ./...         # every fixture under contracts/harness/v1/fixtures, and the unit tests
+go test -timeout 30m ./... -cover  # per-package statement coverage
+gofmt -l .                         # must print nothing
 go vet ./...
 go run github.com/mgechev/revive@v1.16.0 -config revive.toml ./...
 ```

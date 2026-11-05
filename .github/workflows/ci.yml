@@ -85,7 +85,8 @@ jobs:
 
       - name: Test
         # Every test runs on every push: many run git, and go's test cache does not see it.
-        # The cmd package takes up to 686 s, past go's default limit of 600 s per package.
+        # The cmd package took 686 s on a developer machine, past go's default limit of 600 s
+        # per package.
         run: go test -count=1 -timeout 30m ./...
 
       - name: Build

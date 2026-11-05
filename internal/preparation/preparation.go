@@ -82,8 +82,10 @@ const (
 	textExcludeOutside = "qory run: start the run in a git working tree whose exclude file is inside the working folder: the exclude file, %s, is outside it, and qory writes it only inside"
 	textGitNotDir      = "qory run: start the run in a git working tree whose .git is a folder: the working folder's .git is a file or a link, which points at a repository elsewhere"
 	textHasRemote      = "qory run: start the run in a new empty folder or a new empty git working tree: the working folder's repository has a remote already, and qory fetches the run's repository only into a repository with no remote"
+	textAboveFailed    = "qory run: check that git on this machine can read the working folder and each .git above it, then run again. git failed: %s"
 	textGitFailed      = "qory run: check that git on this machine can read the working folder, then run again. git failed: %s"
 	textLocal          = "qory run: check that this machine can read and write the working folder, then run again. The step failed: %s"
+	textEmptyInUse     = "qory run: start the run in a new empty folder that no walled run uses, then run again. The check of the working folder failed: %s"
 	textPlaceRefused   = "qory run: start the run in a new empty git working tree that no walled run used, then run again. The check of the working folder's git configuration failed: %s"
 	textConfigKey      = "qory run: start the run in a new empty git working tree, or remove %s from %s, then run again. qory fetches only into a repository whose configuration has only the keys git init writes, since git on this machine would use any other key, such as a filter, a proxy or http.sslVerify"
 	textConfigNotFile  = "qory run: start the run in a new empty git working tree, then run again: the working folder's %s is not a regular file, and qory fetches only into a repository whose configuration it can read"
@@ -424,9 +426,9 @@ func repoURL(system, path string) string {
 // repository elsewhere, such as a worktree's or a separate git directory's, whose path is
 // the host's; on one with a .git and anything else but .qory; and on one with no .git and
 // any entry, which is not a working tree. A folder with no entries gets a repository from
-// [initFolder], and a .git with no HEAD, objects or refs stops as [gitParts] has it. Then
-// it stops on one whose repository [safeRepository] stops on; then on one that is not the
-// top of its working tree, whose repository has a commit, or has a remote. Otherwise it
+// [initFolder]. Then it stops on one whose repository [safeRepository] stops on; then on
+// one that is not the top of its working tree, whose repository has a commit, or has a
+// remote. Otherwise it
 // returns the hold [safeRepository] took on the folder, which its caller releases once the
 // fetch ends. A git that fails to read the folder is [textGitFailed], not a stop on what
 // the folder has.
@@ -464,8 +466,6 @@ func emptyTree(ctx context.Context, git gitRunner, dir string) (hold *places.Hol
 		if err := initFolder(ctx, git, dir); err != nil {
 			return hold, err
 		}
-	} else if err := gitParts(filepath.Join(dir, ".git")); err != nil {
-		return hold, err
 	}
 	if hold, err = safeRepository(ctx, dir); err != nil {
 		return nil, err
@@ -500,7 +500,7 @@ func emptyTree(ctx context.Context, git gitRunner, dir string) (hold *places.Hol
 // dir that is a link, without following it, and with [textNotTree] on a dir git finds a
 // repository for, such as a folder inside a working tree, where git would use the second
 // repository in place of the first. Any other failure of git to look for a repository,
-// such as a .git above dir that git cannot read, is [textGitFailed]. A walled run that
+// such as a .git above dir that git cannot read, is [textAboveFailed]. A walled run that
 // starts in dir waits for the git commands here: the hold ends before [safeRepository]
 // takes one. The fetch replaces the unborn branch main with the remote's default branch,
 // so its name has no effect on the run; the option keeps it from depending on git's
@@ -515,7 +515,7 @@ func initFolder(ctx context.Context, git gitRunner, dir string) error {
 	}
 	hold, err := hostgit.Hold(ctx, dir)
 	if hostgit.Refused(err) {
-		return fmt.Errorf(textPlaceRefused, integration.Printable(exports.HideError(err).Error()))
+		return fmt.Errorf(textEmptyInUse, integration.Printable(exports.HideError(err).Error()))
 	}
 	if err != nil {
 		return gitFailed(err)
@@ -527,7 +527,7 @@ func initFolder(ctx context.Context, git gitRunner, dir string) error {
 	}
 	var ge *gitError
 	if !errors.As(err, &ge) || !strings.Contains(ge.line, "not a git repository (or any") {
-		return gitFailed(err)
+		return fmt.Errorf(textAboveFailed, integration.Printable(exports.HideURLError(err).Error()))
 	}
 	if _, err := git(ctx, dir, "init", "--quiet", "--template=", "--initial-branch=main"); err != nil {
 		return local(err)

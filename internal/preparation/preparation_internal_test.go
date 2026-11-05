@@ -438,7 +438,7 @@ func TestAGitThatFailsAboveAnEmptyFolderStops(t *testing.T) {
 	needGit(t)
 	base := t.TempDir()
 	remote(t, base, "acme/shop", "main", nil)
-	want := "qory run: check that git on this machine can read the working folder, then run again. git failed: "
+	want := "qory run: check that git on this machine can read the working folder and each .git above it, then run again. git failed: "
 	for _, content := range []string{"gitdir: /nowhere\n", "not a git file\n"} {
 		parent := t.TempDir()
 		write(t, filepath.Join(parent, ".git"), content)
@@ -453,28 +453,6 @@ func TestAGitThatFailsAboveAnEmptyFolderStops(t *testing.T) {
 		if _, err := os.Lstat(filepath.Join(dir, ".git")); !os.IsNotExist(err) {
 			t.Errorf("%q: the folder has a .git after the stop: %v", content, err)
 		}
-	}
-}
-
-// TestAnEmptyFolderFetchesInAnotherLanguage is an empty folder with git set to print German:
-// the check of the folder reads git's line in English all the same, and the fetch goes on.
-func TestAnEmptyFolderFetchesInAnotherLanguage(t *testing.T) {
-	needGit(t)
-	base := t.TempDir()
-	remote(t, base, "acme/shop", "main", nil)
-	t.Setenv("LANGUAGE", "de")
-	t.Setenv("LC_ALL", "de_DE.UTF-8")
-	c := exec.Command("git", "rev-parse", "--git-dir")
-	c.Dir = t.TempDir()
-	if out, _ := c.CombinedOutput(); strings.Contains(string(out), "not a git repository") {
-		t.Skip("git prints English under LC_ALL=de_DE.UTF-8: this machine has no such locale, or this git has no German messages")
-	}
-	dir := t.TempDir()
-	if _, err := prepare(context.Background(), dir, env("git.example.com", "acme/shop")); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.Stat(filepath.Join(dir, "README.md")); err != nil {
-		t.Errorf("acme/shop was not fetched: %v", err)
 	}
 }
 
@@ -519,7 +497,8 @@ func TestAFolderNameMayEndInASpace(t *testing.T) {
 
 // TestAGitFolderThatIsNoRepositoryStops is a working folder whose .git is empty, or has no
 // refs: the line starts with its fix and has what is missing, with no repository above
-// the folder and with one.
+// the folder and with one. A .git with a commondir file and no objects or refs gets the
+// line of the commondir file, since git follows that file.
 func TestAGitFolderThatIsNoRepositoryStops(t *testing.T) {
 	needGit(t)
 	base := t.TempDir()
@@ -531,19 +510,23 @@ func TestAGitFolderThatIsNoRepositoryStops(t *testing.T) {
 		t.Fatal(err)
 	}
 	nested := filepath.Join(emptyFolder(t), "inner")
-	for _, dir := range []string{filepath.Join(empty, ".git"), filepath.Join(nested, ".git")} {
+	common := t.TempDir()
+	for _, dir := range []string{filepath.Join(empty, ".git"), filepath.Join(nested, ".git"), filepath.Join(common, ".git")} {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			t.Fatal(err)
 		}
 	}
-	for _, c := range []struct{ name, dir, part string }{
-		{"an empty .git", empty, "HEAD"},
-		{"no refs", noRefs, "refs"},
-		{"an empty .git inside a working tree", nested, "HEAD"},
+	write(t, filepath.Join(common, ".git", "HEAD"), "ref: refs/heads/main\n")
+	write(t, filepath.Join(common, ".git", "commondir"), t.TempDir()+"\n")
+	for _, c := range []struct{ name, dir, want string }{
+		{"an empty .git", empty, fmt.Sprintf(line, "HEAD")},
+		{"no refs", noRefs, fmt.Sprintf(line, "refs")},
+		{"an empty .git inside a working tree", nested, fmt.Sprintf(line, "HEAD")},
+		{"HEAD and a commondir file", common, "qory run: start the run in a new empty git working tree, then run again: the working folder's .git has a commondir file, which makes git read the configuration of another repository"},
 	} {
 		_, err := prepare(context.Background(), c.dir, env("git.example.com", "acme/shop"))
-		if want := fmt.Sprintf(line, c.part); err == nil || err.Error() != want {
-			t.Errorf("%s: %v, want %s", c.name, err, want)
+		if err == nil || err.Error() != c.want {
+			t.Errorf("%s: %v, want %s", c.name, err, c.want)
 		}
 	}
 }

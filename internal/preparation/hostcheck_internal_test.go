@@ -92,6 +92,7 @@ func TestStopsOnAWorkingFolderGitWouldActOn(t *testing.T) {
 	}{
 		{"a filter", func(dir, marker string) { smudging(t, dir, marker) }, strings.Replace(strings.Replace(configKey, "%s", "filter.x.smudge", 1), "%s", "config", 1)},
 		{"a proxy for origin", func(dir, _ string) { run(t, dir, "config", "remote.origin.proxy", "http://127.0.0.1:9") }, textHasRemote},
+		{"a remote key of no remote", func(dir, _ string) { run(t, dir, "config", "remote.pushDefault", "origin") }, strings.Replace(strings.Replace(configKey, "%s", "remote.pushdefault", 1), "%s", "config", 1)},
 		{"no certificate check", func(dir, _ string) { run(t, dir, "config", "http.sslVerify", "false") }, strings.Replace(strings.Replace(configKey, "%s", "http.sslverify", 1), "%s", "config", 1)},
 		{"an include", func(dir, _ string) { run(t, dir, "config", "include.path", "/dev/null") }, strings.Replace(strings.Replace(configKey, "%s", "include.path", 1), "%s", "config", 1)},
 		{"a config.worktree", func(dir, _ string) {
