@@ -367,36 +367,106 @@ func TestKeepsQoryRepositories(t *testing.T) {
 	}
 }
 
-// TestRefusesAFolderThatIsNotEmpty refuses a working folder with a file, one that is no
-// git working tree and one whose repository has a commit, and fetches nothing.
-func TestRefusesAFolderThatIsNotEmpty(t *testing.T) {
+// TestStopsOnAFolderThatIsNotEmpty stops on a working folder with a file, one that is no
+// git working tree and not empty, one whose repository has a commit and one inside a
+// working tree, and fetches nothing. A folder with no entries gets past the check, and
+// the repository is fetched.
+func TestStopsOnAFolderThatIsNotEmpty(t *testing.T) {
 	needGit(t)
 	base := t.TempDir()
 	remote(t, base, "acme/shop", "main", nil)
 	notEmpty := "qory run: start the run in an empty git working tree: the working folder contains files already, and the run's repository is fetched only into an empty one"
-	notTree := "qory run: start the run in a git working tree without commits: the working folder is not one, and the run's repository is fetched only into an empty git working tree"
+	notTree := "qory run: start the run in an empty folder outside any git working tree, or at the top of a git working tree without commits: the working folder is neither, and qory fetches the run's repository only into one of these"
 
 	withFile := emptyFolder(t)
 	write(t, filepath.Join(withFile, "notes.txt"), "notes\n")
 	plain := t.TempDir()
+	write(t, filepath.Join(plain, "notes.txt"), "notes\n")
+	qoryOnly := t.TempDir()
+	if err := os.Mkdir(filepath.Join(qoryOnly, ".qory"), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	committed := emptyFolder(t)
 	run(t, committed, "commit", "--quiet", "--allow-empty", "-m", "first")
 	nested := filepath.Join(emptyFolder(t), "inner")
 	if err := os.Mkdir(nested, 0o755); err != nil {
 		t.Fatal(err)
 	}
+	bare := t.TempDir()
+	run(t, bare, "init", "--quiet", "--bare")
+	inBare := filepath.Join(bare, "inner")
+	if err := os.Mkdir(inBare, 0o755); err != nil {
+		t.Fatal(err)
+	}
 	for _, c := range []struct{ name, dir, want string }{
 		{"a file", withFile, notEmpty},
 		{"no git", plain, notTree},
+		{"only .qory", qoryOnly, notTree},
 		{"a commit", committed, notTree},
 		{"a folder inside a working tree", nested, notTree},
+		{"a folder inside a bare repository", inBare, notTree},
+		{"an empty folder", t.TempDir(), ""},
 	} {
 		_, err := prepare(context.Background(), c.dir, env("git.example.com", "acme/shop"))
+		if c.want == "" {
+			if err != nil {
+				t.Errorf("%s: %v", c.name, err)
+			}
+			if _, err := os.Stat(filepath.Join(c.dir, "README.md")); err != nil {
+				t.Errorf("%s: acme/shop was not fetched: %v", c.name, err)
+			}
+			continue
+		}
 		if err == nil || err.Error() != c.want {
 			t.Errorf("%s: %v, want %s", c.name, err, c.want)
 		}
 		if out, _ := exec.Command("git", "-C", c.dir, "remote").Output(); strings.TrimSpace(string(out)) != "" {
 			t.Errorf("%s: a remote was added: %s", c.name, out)
+		}
+	}
+	for _, dir := range []string{plain, qoryOnly, nested, inBare} {
+		if _, err := os.Lstat(filepath.Join(dir, ".git")); !os.IsNotExist(err) {
+			t.Errorf("%s has a .git after the stop: %v", dir, err)
+		}
+	}
+}
+
+// TestAnEmptyFolderGetsARepository runs git init in a folder with no entries, with no
+// template, and fetches the run's repository on its default branch, whichever that is,
+// and a further one, whose line in the exclude file qory writes.
+func TestAnEmptyFolderGetsARepository(t *testing.T) {
+	needGit(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, "config"))
+	t.Setenv("XDG_STATE_HOME", filepath.Join(home, "state"))
+	base := t.TempDir()
+	remote(t, base, "acme/shop", "main", nil)
+	remote(t, base, "acme/old", "master", nil)
+	remote(t, base, "acme/docs", "main", nil)
+	for _, c := range []struct{ list, branch string }{
+		{"acme/shop", "main"},
+		{"acme/old", "master"},
+		{"acme/shop,acme/docs", "main"},
+	} {
+		dir := t.TempDir()
+		if _, err := prepare(context.Background(), dir, env("git.example.com", c.list)); err != nil {
+			t.Errorf("%s: %v", c.list, err)
+			continue
+		}
+		if got := run(t, dir, "rev-parse", "--abbrev-ref", "HEAD"); got != c.branch {
+			t.Errorf("%s: HEAD is on %s, want %s", c.list, got, c.branch)
+		}
+		if got := run(t, dir, "rev-parse", "--abbrev-ref", "@{upstream}"); got != "origin/"+c.branch {
+			t.Errorf("%s: the upstream is %s, want origin/%s", c.list, got, c.branch)
+		}
+		if got := run(t, dir, "status", "--porcelain", "--untracked-files=all"); got != "" {
+			t.Errorf("%s: git status: %s", c.list, got)
+		}
+		for _, name := range []string{"hooks", "description"} {
+			if _, err := os.Lstat(filepath.Join(dir, ".git", name)); !os.IsNotExist(err) {
+				t.Errorf("%s: .git/%s comes from a template: %v", c.list, name, err)
+			}
 		}
 	}
 }

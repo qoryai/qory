@@ -128,9 +128,9 @@ compose:
 
 When the run configuration lists repositories, `qory run` fetches them on this machine
 once the run is open, before the compose: the run's repository into the working folder,
-which is an empty git working tree, and each further one under `.qory/repositories`. Each
-fetch is at depth one, over https only, through the run's host proxy on the run's
-gateway, which adds the credential the run configuration has for the host, with git's
+which is an empty folder or an empty git working tree, and each further one under
+`.qory/repositories`. Each fetch is at depth one, over https only, through the run's host
+proxy on the run's gateway, which adds the credential the run configuration has for the host, with git's
 hooks off and no credential helper, so no token is on this machine. qory closes the host
 proxy once the repositories are fetched. The compose then fetches the harness's git
 sources through the run's stack proxy, which gets none of those credentials. `qory run`
@@ -162,8 +162,13 @@ and for a git source that is not https, and 1 for any other failed fetch:
 - `run again: the run's stack proxy, through which qory fetches the run's harness, did
   not open: <error>`, exit 1
 
-The working folder must be an empty git working tree that git init made: before the
-fetch, qory checks its `.git`. The run stops with exit 1 before git fetches anything if:
+A starter gives the run an empty folder or an empty git working tree that git init made.
+In an empty folder, qory runs `git init` with no template. The run stops with exit 1 in a
+folder that has files and is not a git working tree, in an empty folder inside another
+repository, and in a repository that has a commit.
+
+Before the fetch, qory checks the working folder's `.git`. The run stops with exit 1 before
+git fetches anything if:
 
 - its configuration has a key git init does not write, such as a filter,
   `remote.origin.proxy` or `http.sslVerify`;
@@ -176,8 +181,8 @@ fetch, qory checks its `.git`. The run stops with exit 1 before git fetches anyt
 - a walled run used the folder and its configuration changed since, or a walled run uses
   it now.
 
-Start the run in a new empty git working tree. From the check until the fetch and the
-checkout end, a walled run that starts in the working folder waits.
+Start the run in a new empty folder or a new empty git working tree. From the check until
+the fetch and the checkout end, a walled run that starts in the working folder waits.
 
 A source that breaks a rule stops the run with exit 2 before the agent starts. A stack
 given to `-f` from outside the checkout is not a file in the checkout: its paths resolve
