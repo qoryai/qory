@@ -324,8 +324,8 @@ So a tracked `harness/` directory is no collision. A pull is an ordinary pull.
 
 `--home <dir>` defines the directory. So does `harness.home` in your `qory.yaml`.
 Every checkout and worktree gets a separate home under it.
-A run with a run key composes into such a home when neither sets one, under
-`qory/homes` in your cache directory, and stops on a home inside the folder it runs in:
+A walled `qory run`, and a run with a run key, composes into such a home when neither sets
+one, under `qory/homes` in your cache directory, and stops on a home inside the folder it runs in:
 see [Running a session](run.md#what-qory-run-does).
 
 A folder that is not a git working tree composes only with such a home, named after the

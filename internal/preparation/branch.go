@@ -24,9 +24,9 @@ const (
 	textNoCheckout      = "qory run: add a new version of the artifact branch in Qory Apiary with a commit that git can check out, then take the work item in again. The checkout of %[1]s at %[2]s in %[3]s failed: %[4]s; the code is used"
 )
 
-// targetRef is the ref that [Switch] leaves at the target version: [fromSeed] reads which
+// TargetRef is the ref that [Switch] leaves at the target version: [fromSeed] reads which
 // files a branch removed from it.
-const targetRef = "refs/qory/target-version"
+const TargetRef = "refs/qory/target-version"
 
 // WorkBranch is the branch of a run's work item. [RunAt] fetches it with [Target.Branch]
 // set, and [Switch] checks it out. A repository with no entry in Version
@@ -120,7 +120,7 @@ func Switch(ctx context.Context, dir string, base []string, b *WorkBranch, repor
 		return local(err)
 	}
 	git := hostRunner(nil)
-	if _, err := git(ctx, dir, "update-ref", targetRef, "HEAD"); err != nil {
+	if _, err := git(ctx, dir, "update-ref", TargetRef, "HEAD"); err != nil {
 		return noCheckout(b, b.Repositories[0], err)
 	}
 	for i := range b.Repositories {
@@ -179,14 +179,14 @@ func sameQory(ctx context.Context, git gitRunner, dir, ref, commit, version stri
 // not have and the target version has: nil outside a branch. The image's copy, made at
 // or before the target version, may still have those files.
 func removedByBranch(ctx context.Context, dir string) (map[string]bool, error) {
-	if _, err := git(ctx, dir, "rev-parse", "--verify", "--quiet", targetRef); err != nil {
+	if _, err := git(ctx, dir, "rev-parse", "--verify", "--quiet", TargetRef); err != nil {
 		var ge *gitError
 		if errors.As(err, &ge) && ge.exit == 1 {
 			return nil, nil
 		}
 		return nil, gitFailedIn(err)
 	}
-	out, err := git(ctx, dir, "diff", "--name-only", "-z", "--no-renames", "--diff-filter=D", targetRef, "HEAD", "--")
+	out, err := git(ctx, dir, "diff", "--name-only", "-z", "--no-renames", "--diff-filter=D", TargetRef, "HEAD", "--")
 	if err != nil {
 		return nil, gitFailedIn(err)
 	}

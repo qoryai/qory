@@ -277,7 +277,7 @@ func TestARunCodeWaitsForTheChecksOfTheRun(t *testing.T) {
 	}
 	home := filepath.Join(root, ".qory", "harness")
 	out, err := run(t, "run", "--run-code-file", file, "--gateway", g.URL, "--home", home)
-	want := "set --home to a folder outside " + root + ": " + home + " is inside " + root + ", and a run with a run key writes no harness into the folder it runs in"
+	want := "set --home to a folder outside " + root + ": " + home + " is inside " + root + ", and a walled run or a run with a run key writes no harness into the folder it runs in"
 	if err == nil || err.Error() != want || cmd.ExitCode(err) != cmd.ExitInput {
 		t.Errorf("--home %s: %v (exit %d), want %q\n%s", home, err, cmd.ExitCode(err), want, out)
 	}

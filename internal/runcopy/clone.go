@@ -1,6 +1,7 @@
 package runcopy
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -16,6 +17,7 @@ import (
 	"time"
 
 	"github.com/qoryai/qory/internal/checkout"
+	"github.com/qoryai/qory/internal/preparation"
 )
 
 // repositories is the folder, relative to the checkout, that the further repositories
@@ -73,7 +75,7 @@ type Repository struct {
 // cloned the same way at the commit its gitlink records. The copy shows the person's origin,
 // see [Dir.copySettings]. The copy has commits alone: no uncommitted, untracked or ignored
 // file of the checkout. A partial clone stops here, since its missing objects have no way into
-// the copy.
+// the copy. A repository with [preparation.TargetRef] has it in the copy too, at the same commit.
 func (d Dir) Clone(ctx context.Context, checkout, branch string) ([]Repository, error) {
 	if err := checkBranch(ctx, branch); err != nil {
 		return nil, err
@@ -102,6 +104,11 @@ func (d Dir) Clone(ctx context.Context, checkout, branch string) ([]Repository, 
 	if err != nil {
 		return nil, err
 	}
+	if len(further) > 0 {
+		if err := d.Exclude(preparation.ExcludeLine); err != nil {
+			return nil, err
+		}
+	}
 	for i, rel := range further {
 		src := filepath.Join(checkout, filepath.FromSlash(rel))
 		dest := filepath.Join(d.Work(), filepath.FromSlash(rel))
@@ -122,6 +129,26 @@ func (d Dir) Clone(ctx context.Context, checkout, branch string) ([]Repository, 
 		repos = append(repos, r)
 	}
 	return repos, nil
+}
+
+// Exclude adds line to .git/info/exclude of the copy of a repository, so that an agent's git add
+// -A in the copy leaves those paths out. Call it before any run writes the copy.
+func (d Dir) Exclude(line string) error {
+	file := filepath.Join(d.Work(), ".git", "info", "exclude")
+	data, err := os.ReadFile(file)
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return fileErr(file, err)
+	}
+	if len(data) > 0 && !bytes.HasSuffix(data, []byte("\n")) {
+		data = append(data, '\n')
+	}
+	if err := os.MkdirAll(filepath.Dir(file), 0o755); err != nil {
+		return fileErr(file, err)
+	}
+	if err := os.WriteFile(file, append(data, line+"\n"...), 0o644); err != nil {
+		return fileErr(file, err)
+	}
+	return nil
 }
 
 // cloneOne copies the repository at src, as [Dir.Clone] describes, through the bare
@@ -180,6 +207,9 @@ func (d Dir) cloneAt(ctx context.Context, i int, src, dest, branch string) (stri
 	if _, err := git(ctx, d.root, "clone", "--quiet", "--no-local", "--no-hardlinks", "--no-checkout", "--no-recurse-submodules", "--branch", branch, "--", bare, dest); err != nil {
 		return "", fmt.Errorf(textNoClone, shown(src), err)
 	}
+	if err := copyTargetVersion(ctx, src, bare, dest); err != nil {
+		return "", fmt.Errorf(textNoClone, shown(src), err)
+	}
 	if err := d.copySettings(ctx, src, bare, dest); err != nil {
 		return "", fmt.Errorf(textNoClone, shown(src), err)
 	}
@@ -187,6 +217,37 @@ func (d Dir) cloneAt(ctx context.Context, i int, src, dest, branch string) (stri
 		return "", fmt.Errorf(textNoCheckout, base, shown(src), err)
 	}
 	return base, nil
+}
+
+// copyTargetVersion writes [preparation.TargetRef] in dest at the commit src has there, through
+// the bare repository: no branch or tag may reach that commit, so the clone leaves it out. A
+// src without the ref writes nothing. --update-shallow takes the commit when a run's fetch left
+// it at depth 1.
+func copyTargetVersion(ctx context.Context, src, bare, dest string) error {
+	want, err := git(ctx, src, "rev-parse", "--verify", "--quiet", preparation.TargetRef)
+	if err != nil {
+		var ge *gitError
+		if errors.As(err, &ge) && ge.exit == 1 {
+			return nil
+		}
+		return err
+	}
+	ref := "+" + preparation.TargetRef + ":" + preparation.TargetRef
+	fetch := []string{"fetch", "--quiet", "--no-tags", "--no-recurse-submodules", "--no-write-fetch-head", "--update-shallow", "--"}
+	if _, err := git(ctx, bare, slices.Concat(fetch, []string{src, ref})...); err != nil {
+		return err
+	}
+	if _, err := git(ctx, dest, slices.Concat(fetch, []string{bare, ref})...); err != nil {
+		return err
+	}
+	got, err := commitOf(ctx, dest, preparation.TargetRef)
+	if err != nil {
+		return err
+	}
+	if got != strings.TrimSpace(want) {
+		return fmt.Errorf(textTargetVersion, preparation.TargetRef, got, strings.TrimSpace(want))
+	}
+	return nil
 }
 
 // partialClone reports whether the repository at src is a partial clone: git writes

@@ -24,6 +24,7 @@ import (
 	"github.com/qoryai/qory/internal/pool/prebuild"
 	"github.com/qoryai/qory/internal/preparation"
 	"github.com/qoryai/qory/internal/proxygit"
+	"github.com/qoryai/qory/internal/runcopy"
 )
 
 // SetWriteLabels makes qory run keep a checkout's labels with f, and returns what
@@ -92,12 +93,12 @@ func SetJoinResult(f func(session.SessionSpec) (*session.Result, error)) func() 
 
 // isGitSession is whether spec is a run's git session, see [runcopy.Dir.GitSession].
 func isGitSession(spec session.SessionSpec) bool {
-	return len(spec.Args) > 2 && spec.Args[2] == "qory-git-session"
+	return len(spec.Args) > 1 && filepath.Base(spec.Args[0]) == runcopy.SessionScriptName
 }
 
 // hostGitFolder is the folder of this machine's git, for the PATH of a git session in a
-// test: the run's image has its git in other folders. The third of the session's
-// arguments after -c and the script is that PATH.
+// test: the run's image has its git in other folders. The session's first argument after
+// the script file is that PATH.
 func hostGitFolder(spec session.SessionSpec) (session.SessionSpec, error) {
 	path, err := exec.LookPath("git")
 	if err != nil {
@@ -105,7 +106,7 @@ func hostGitFolder(spec session.SessionSpec) (session.SessionSpec, error) {
 	}
 	folders := filepath.Dir(path) + ":/usr/bin:/bin"
 	spec.Args = slices.Clone(spec.Args)
-	spec.Args[3] = folders
+	spec.Args[1] = folders
 	spec.Env = slices.Clone(spec.Env)
 	for i, e := range spec.Env {
 		if strings.HasPrefix(e, "PATH=") {

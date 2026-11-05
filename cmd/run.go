@@ -94,10 +94,9 @@ and 1 otherwise.
 
 qory run opens the run, then composes the harness, as qory harness compose does, into
 the same home, and prints the result on stderr. -f, --model, --effort, --tier and
---tier-effort mean what they mean there. With a run key, the home is outside the folder
-the run runs in, under qory/homes in the cache directory, unless --home or harness.home
-sets another, and a home inside the folder stops the run. Behind a wall, a run with no
-run key that has a home inside the checkout composes into the copy it works in.
+--tier-effort mean what they mean there. With a run key or behind a wall, the home is
+outside the folder the run runs in, under qory/homes in the cache directory, unless --home
+or harness.home sets another, and a home inside the folder stops the run.
 
 The agent is the runtime of the stack's target. Name another first, and the run composes
 for it instead; name one when the target has several. Arguments after -- go to the
@@ -187,7 +186,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					return err
 				}
 			}
-			at, conf, err := locateRun(h, remote, true)
+			at, conf, err := locateRun(h, remote, true, func(c config.Config) bool { return wallNamed(c.Forager, o) })
 			if err != nil {
 				return err
 			}
@@ -408,7 +407,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				}
 			}
 			if spec.Wall != nil && h.home == "" {
-				if err := userHome(at, conf, remote); err != nil {
+				if err := userHome(at, conf); err != nil {
 					return err
 				}
 			}
@@ -647,10 +646,8 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			}
 			name := ""
 			// copied is the copy a walled run that may write works in, nil before it is made
-			// and for any other run. composedAt is where the compose writes: at, or with a home
-			// inside the checkout, the copy.
+			// and for any other run.
 			var copied *runCopy
-			composedAt := at
 			// prepareLaunch composes the harness into the home the session starts on and
 			// makes the session's launch from it, writing the compose's lines to w;
 			// freshHome is true for a dispatched walled run of a runtime that is a
@@ -660,7 +657,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			// checkout, see [readsOnly].
 			var readOnly bool
 			prepareLaunch := func(w io.Writer) (freshHome bool, err error) {
-				harness, workflows, err := composeForRun(w, composing, composedAt, runtime, dispatched, walled)
+				harness, workflows, err := composeForRun(w, composing, at, runtime, dispatched, walled)
 				if err != nil && composing.git != nil && composing.git.Named != nil {
 					return false, namedComposeError(err, composing.git.Named)
 				}
@@ -670,12 +667,12 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				if err != nil {
 					return false, err
 				}
-				rep, err := readReport(composedAt)
+				rep, err := readReport(at)
 				if err != nil {
 					return false, err
 				}
 				var launch render.Launch
-				if name, launch, err = resolveLaunch(rep, conf, runtime, composedAt.home); err != nil {
+				if name, launch, err = resolveLaunch(rep, conf, runtime, at.home); err != nil {
 					return false, err
 				}
 				renderer, err := render.Lookup(name)
@@ -725,7 +722,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					if readOnly {
 						readRoot = at.root
 					}
-					if launchArgs, err = inlineSettings(s.SettingsFlag(), launch.Args, extra, composedAt.home, readRoot); err != nil {
+					if launchArgs, err = inlineSettings(s.SettingsFlag(), launch.Args, extra, at.home, readRoot); err != nil {
 						return false, err
 					}
 				}
@@ -861,17 +858,6 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				} else if err := preparation.Unlisted(runValues(run), fromCode.fetchTarget()); err != nil {
 					return &runLineError{err}
 				}
-				// A home inside the checkout goes into the copy, which a run with no run code
-				// always uses. No run code has such a home: see [locateRun].
-				if walled && at.dir != "" {
-					if err := makeCopy(); err != nil {
-						return err
-					}
-					var err error
-					if composedAt, err = copied.composedIn(at); err != nil {
-						return &runLineError{codeLine(err)}
-					}
-				}
 				var freshHome bool
 				err := inStep(run, streams.errOut, event.StepCompose, composeStepName(runtime), stopped, func(w io.Writer) error {
 					var n *source.Named
@@ -940,10 +926,8 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				if !walled || readOnly && run.Repositories() == "" {
 					return nil
 				}
-				if copied == nil {
-					if err := makeCopy(); err != nil {
-						return err
-					}
+				if err := makeCopy(); err != nil {
+					return err
 				}
 				copied.readOnly = readOnly
 				if err := copied.bind(&spec, at, cwd); err != nil {
@@ -1093,6 +1077,16 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			// Forager's session masks the runtime's output with the run's masker, on a
 			// terminal and on pipes.
 			spec.Stdout, spec.Stderr = streams.session()
+			// joined is whether the join passed its checks. Past them the agent may have run,
+			// and a join that returned an error has no result to show it.
+			joined := false
+			onVariables := spec.OnVariables
+			spec.OnVariables = func(a session.Applied) {
+				joined = true
+				if onVariables != nil {
+					onVariables(a)
+				}
+			}
 			res, err := joinSession(run, ctx, spec.SessionSpec)
 			out := sessionOutcome(res, err)
 			// pushWork is the push step of a run with an agent session that may write, see
@@ -1166,8 +1160,13 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				artifactsBack = copied.artifactsBack(backCtx, said)
 			}
 			if err != nil {
-				if copied != nil && !copied.readOnly && closed != nil && closed.WallKept {
+				switch {
+				case copied == nil || copied.readOnly:
+				case closed != nil && closed.WallKept:
 					said(copied.stopped(textCopyWallKept).Error())
+				case joined:
+					copied.pushes = canPush(fromCode, readOnly, branch)
+					said(copied.stopped(shownError(err)).Error())
 				}
 				return failed(err)
 			}
@@ -1794,6 +1793,20 @@ func (o wallOptions) walled() bool {
 	return o.image != "" || len(o.mounts) > 0 || o.limits != (wall.Limits{})
 }
 
+// wallName is the wall that the flags, else wall.adapter of r, name: "" or [wallOff] for none.
+func wallName(r *config.Forager, o wallOptions) string {
+	if o.name != "" || r == nil || r.Wall == nil {
+		return o.name
+	}
+	return r.Wall.Adapter
+}
+
+// wallNamed reports whether the flags and r start a wall.
+func wallNamed(r *config.Forager, o wallOptions) bool {
+	name := wallName(r, o)
+	return name != "" && name != wallOff
+}
+
 // exitTimeout is the exit status of a run stopped at its --timeout, timeout(1)'s.
 const exitTimeout = 124
 
@@ -1891,10 +1904,7 @@ func enclose(spec *runSpec, r *config.Forager, o wallOptions, selected string, f
 	if r != nil {
 		spec.Machine = r.Machine
 	}
-	name := o.name
-	if name == "" {
-		name = section.Adapter
-	}
+	name := wallName(r, o)
 	run, err := passedVariables(o.env)
 	if err != nil {
 		return err
@@ -2726,7 +2736,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md#resending-a-runs-reco
 			if key != nil {
 				secretmask.Default().Add(key.value)
 			}
-			at, conf, err := locateRun(homeOptions{}, key != nil, false)
+			at, conf, err := locateRun(homeOptions{}, key != nil, false, nil)
 			if err != nil {
 				return err
 			}
@@ -3339,9 +3349,8 @@ func samePath(a, b string) bool {
 // value in another file that leaves the home where the configuration directory's file
 // alone puts it is harmless and passes. With no configuration directory, any other file
 // that sets harness.home is refused, as the run records are with no state directory.
-// keyed is a run given a run key or a run code, whose home with no harness.home in the
-// configuration directory's file is [runKeyHomes].
-func userHome(at places, conf config.Config, keyed bool) error {
+// With no harness.home in the configuration directory's file, the home is [cacheHomes].
+func userHome(at places, conf config.Config) error {
 	origin := conf.Origin("harness.home")
 	yours := ""
 	dir, err := config.UserDir()
@@ -3370,10 +3379,8 @@ func userHome(at places, conf config.Config, keyed bool) error {
 	}
 	mine := conf
 	mine.Home = own.Home
-	if keyed {
-		if mine, err = withRunKeyHome(at.root, mine); err != nil {
-			return err
-		}
+	if mine, err = withCacheHome(at.root, mine); err != nil {
+		return err
 	}
 	if want, err := placesFor(at.root, mine, homeOptions{}); err == nil && samePath(want.home, at.home) {
 		return nil

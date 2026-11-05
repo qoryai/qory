@@ -90,79 +90,6 @@ type places struct {
 	home   string // the composed tree: .qory/harness, or its directory under the root harness.home names
 	report string // the report of the last compose, beside the home as <home>-report.json
 	links  bool   // whether the checkout gets links into the home and exclude lines for them
-	// linksIn is the folder that gets the links and the exclude lines, when a compose reads
-	// the files of root and writes in another, the copy of a walled run; "" for root.
-	linksIn string
-	// previous is the report of the last compose when it is not report: the person's, for a
-	// compose in the copy of a walled run, whose fresh checkout has none.
-	previous string
-}
-
-// previousReport is the path of the report of the last compose.
-func (p places) previousReport() string {
-	if p.previous != "" {
-		return p.previous
-	}
-	return p.report
-}
-
-// inCopy is err of a compose in the copy of a walled run, with the checkout's path in place of
-// the copy's: the person acts in the checkout.
-func (p places) inCopy(err error) error {
-	if err == nil || p.linksIn == "" {
-		return err
-	}
-	return &copyPathError{err: err, copy: p.linksIn, root: p.root}
-}
-
-// copyPathError is an error whose text has the checkout's path in place of the copy's.
-type copyPathError struct {
-	err        error
-	copy, root string
-}
-
-func (e *copyPathError) Error() string {
-	return strings.ReplaceAll(e.err.Error(), e.copy, e.root)
-}
-
-func (e *copyPathError) Unwrap() error { return e.err }
-
-// removeReplaced removes from the fresh copy at root each path that a compose replaced in the
-// person's checkout, so a link takes its place there too. A path that goes through a link, or
-// out of root, stays.
-func removeReplaced(root string, replaced []string) error {
-	for _, rel := range replaced {
-		path := filepath.FromSlash(rel)
-		if !filepath.IsLocal(path) {
-			continue
-		}
-		at, plain := root, true
-		for part := range strings.SplitSeq(filepath.Dir(path), string(filepath.Separator)) {
-			at = filepath.Join(at, part)
-			if info, err := os.Lstat(at); part != "." && (err != nil || !info.IsDir()) {
-				plain = false
-				break
-			}
-		}
-		if !plain {
-			continue
-		}
-		at = filepath.Join(root, path)
-		if info, err := os.Lstat(at); err == nil && info.Mode()&os.ModeSymlink == 0 {
-			if err := os.RemoveAll(at); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
-}
-
-// linkRoot is the folder that gets the links into the home and their exclude lines.
-func (p places) linkRoot() string {
-	if p.linksIn != "" {
-		return p.linksIn
-	}
-	return p.root
 }
 
 // homeOptions is what a verb was told about the home on its command line: --home, "" for
@@ -1004,7 +931,7 @@ func prepare(out, errOut io.Writer, o composeOptions) (pr *prepared, err error) 
 	// composed from: a tag stays there, a branch takes the remote's commit and keeps
 	// the pin only offline, and an edited ref resolves anew. The memo puts every
 	// source at one URL and ref, the base included, on one commit for this compose.
-	previous, _ := report.Read(at.previousReport())
+	previous, _ := report.Read(at.report)
 	if o.inCheckout {
 		// A report for a run given a run key pins, replaces and links nothing: a branch
 		// of the repository can commit one into the checkout, so the compose starts as
@@ -1143,7 +1070,7 @@ func prepare(out, errOut io.Writer, o composeOptions) (pr *prepared, err error) 
 	if err := checkTierEfforts(res, all, at.root); err != nil {
 		return nil, input(err)
 	}
-	envRows, err := checkModelVariables(res, conf, all, at)
+	envRows, err := checkModelVariables(res, conf, all, at, at.dir != "" || o.run && o.walled && !o.inCheckout)
 	if err != nil {
 		return nil, input(err)
 	}
@@ -1378,16 +1305,11 @@ func write(out io.Writer, o composeOptions, at places, res *compose.Result, rep,
 	}
 	switch {
 	case at.links:
-		if at.linksIn != "" {
-			if err := removeReplaced(at.linksIn, previous.Replaced); err != nil {
-				return at.inCopy(err)
-			}
-		}
 		for _, rt := range all {
-			l, err := render.LinkInto(rt, res, at.linkRoot(), at.home, force)
+			l, err := render.LinkInto(rt, res, at.root, at.home, force)
 			linked[rt.Name()] = l
 			if err := record(l, err); err != nil {
-				return at.inCopy(explainForeign(err, at.linkRoot(), o.file, rep.Replaced, force))
+				return explainForeign(err, at.root, o.file, rep.Replaced, force)
 			}
 		}
 		var previousLinks []string
@@ -1397,19 +1319,19 @@ func write(out io.Writer, o composeOptions, at places, res *compose.Result, rep,
 			}
 		}
 		var err error
-		moduleLinks, err = render.LinkModules(res, at.linkRoot(), at.home, previousLinks, force)
+		moduleLinks, err = render.LinkModules(res, at.root, at.home, previousLinks, force)
 		if err := record(moduleLinks, err); err != nil {
-			return at.inCopy(composeError(explainForeign(err, at.linkRoot(), o.file, rep.Replaced, force)))
+			return composeError(explainForeign(err, at.root, o.file, rep.Replaced, force))
 		}
 	case at.dir != "":
 		// The home is in the checkout and nothing links to it: the qory directory is
 		// qory's and kept out of git, and the links a previous compose wrote are removed
 		// the way a compose removes what it does not link.
-		if err := render.Exclude(at.linkRoot(), "/"+checkout.Dir); err != nil {
+		if err := render.Exclude(at.root, "/"+checkout.Dir); err != nil {
 			return err
 		}
 		var err error
-		if takenBack, err = unlinkAll(at.linkRoot()); err != nil {
+		if takenBack, err = unlinkAll(at.root); err != nil {
 			return err
 		}
 	}

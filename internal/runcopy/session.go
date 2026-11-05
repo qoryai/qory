@@ -37,7 +37,7 @@ const (
 // besides .qory and every folder with a .git in it. Each path is relative to the top of
 // that repository, with forward slashes.
 type LeftOut struct {
-	// Links are the links qory wrote, as render.OwnLink finds them. The commit also
+	// Links are the links into the copy's .qory folder, as render.OwnLink finds them. The commit also
 	// sets each back to what the base commit has, as the push step does.
 	Links []string
 	// Setup are the paths the setup changed, as [Dir.SetupChanges] lists them, each with what
@@ -117,7 +117,8 @@ func (d Dir) GitSession(ctx context.Context, branch, message string, repos []Rep
 	if message == "" {
 		message = commitMessage
 	}
-	args := []string{"-c", sessionScript, "qory-git-session", sessionPath, d.Work(), d.Bundle(), branch, message, strconv.Itoa(len(repos))}
+	script := filepath.Join(d.Bundle(), SessionScriptName)
+	args := []string{script, sessionPath, d.Work(), d.Bundle(), branch, message, strconv.Itoa(len(repos))}
 	lists := make([]string, len(repos))
 	for n, r := range repos {
 		list, err := sessionList(r, out[r.Path])
@@ -131,6 +132,9 @@ func (d Dir) GitSession(ctx context.Context, branch, message string, repos []Rep
 			return GitSession{}, fmt.Errorf(textExists, shown(d.Bundle()))
 		}
 		return GitSession{}, fileErr(d.Bundle(), err)
+	}
+	if err := writeNew(script, sessionScript); err != nil {
+		return GitSession{}, fileErr(script, err)
 	}
 	for n, list := range lists {
 		p := filepath.Join(d.Bundle(), "list-"+strconv.Itoa(n))
@@ -230,7 +234,12 @@ func (d Dir) SessionMounts() []wall.Mount {
 	return []wall.Mount{{Path: d.Work()}, {Path: d.Bundle()}}
 }
 
-// sessionScript is the git session's script, run with sh -c. Its arguments are the
+// SessionScriptName is the file in the bundle folder that has [sessionScript]. The host writes
+// it for the session and never reads it back.
+const SessionScriptName = "qory-git-session.sh"
+
+// sessionScript is the git session's script, run with sh from a file, so that the session's
+// line and its record have the file's path and no script text. Its arguments are the
 // PATH, the copy, the bundle folder, the branch, the commit's message and the number of
 // repositories. For the repository number n it sources list-n, see [sessionList], reads refs-n,
 // see [Repository], and sub-n, see [submoduleList], and uses exclude-n when there is one. It writes n.bundle, or n.none when nothing is past the base

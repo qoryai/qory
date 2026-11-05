@@ -200,7 +200,7 @@ func TestARunKeyWithAHomeInsideTheFolderStops(t *testing.T) {
 				}
 				before := folderTree(t, root)
 				out, err, n := inCheckoutRun(t, append([]string{"claude"}, h.args...)...)
-				want := "set --home to a folder outside " + root + ": " + h.home + " is inside " + root + ", and a run with a run key writes no harness into the folder it runs in"
+				want := "set --home to a folder outside " + root + ": " + h.home + " is inside " + root + ", and a walled run or a run with a run key writes no harness into the folder it runs in"
 				if err == nil || err.Error() != want || cmd.ExitCode(err) != cmd.ExitInput {
 					t.Errorf("%s: %v (exit %d), want %q\n%s", h.what, err, cmd.ExitCode(err), want, out)
 				}
@@ -267,7 +267,7 @@ func TestARunKeyWithAHomeOfAnotherCheckoutInsideTheFolderStops(t *testing.T) {
 	home := filepath.Join(root, "homes", checkout.Key(other))
 	before := folderTree(t, root)
 	out, err, n := inCheckoutRun(t, "claude", "--home", home)
-	want := "set --home to a folder outside " + root + ": " + home + " is inside " + root + ", and a run with a run key writes no harness into the folder it runs in"
+	want := "set --home to a folder outside " + root + ": " + home + " is inside " + root + ", and a walled run or a run with a run key writes no harness into the folder it runs in"
 	if err == nil || err.Error() != want || cmd.ExitCode(err) != cmd.ExitInput {
 		t.Errorf("%v (exit %d), want %q\n%s", err, cmd.ExitCode(err), want, out)
 	}
@@ -293,7 +293,7 @@ func TestARunKeyNeedsACacheDirectoryForItsHome(t *testing.T) {
 		t.Skip("the cache directory is found without HOME and XDG_CACHE_HOME")
 	}
 	out, err, n := inCheckoutRun(t, "claude")
-	want := "set HOME, or give --home a folder outside " + root + ": a run with a run key composes its harness under the cache directory, and the lookup of that directory failed: " + lookup.Error()
+	want := "set HOME, or give --home a folder outside " + root + ": a walled run or a run with a run key composes its harness under the cache directory, and the lookup of that directory failed: " + lookup.Error()
 	if err == nil || err.Error() != want || cmd.ExitCode(err) != cmd.ExitInput {
 		t.Errorf("%v (exit %d), want %q\n%s", err, cmd.ExitCode(err), want, out)
 	}

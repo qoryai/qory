@@ -32,7 +32,8 @@ const (
 	textState     = "give each setup path's state as Dir.SetupStates reads it: %s is not such a state"
 	textRepoPath  = "give each repository of the run as Dir.Clone returned it: %s is not a folder in the copy"
 
-	textNoBundle        = "the git session exited 0 and wrote no bundle and no record of an empty change for %s, so nothing came back from the run"
+	textTargetVersion   = "the ref %s of the copy is at %s, and the checkout has it at %s"
+	textNoBundle        = "the git session exited 0 and wrote no bundle and no record of an empty change for %s, so the run's commits did not come back"
 	textBundleOpen      = "the run's bundle %s did not open: %w"
 	textBundleKind      = "the run's bundle %s is a %s, and qory reads only a regular file"
 	textBundleMoved     = "the run's bundle %s changed while qory opened it, so qory read nothing from it"

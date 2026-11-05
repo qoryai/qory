@@ -500,3 +500,26 @@ func TestFailedEnd(t *testing.T) {
 		}
 	}
 }
+
+// TestThePushHasFiveMinutesPastTheLimit is the time past a run's time limit that the git session
+// and the push share, and a first signal during that time: it leaves at most 15 seconds.
+func TestThePushHasFiveMinutesPastTheLimit(t *testing.T) {
+	if pushTimes.limit != 5*time.Minute {
+		t.Errorf("the time past the limit is %s, want 5m0s", pushTimes.limit)
+	}
+	signalled, signal := context.WithCancel(context.Background())
+	defer signal()
+	push, done := pushContext(signalled, context.Background(), time.Now().Add(-time.Hour), pushTimes.limit, pushTimes.signal)
+	defer done()
+	if endsWithin(push, time.Second) {
+		t.Fatal("the step past the limit ended at once")
+	}
+	started := time.Now()
+	signal()
+	if !endsWithin(push, 16*time.Second) {
+		t.Fatal("the step did not end within 15 seconds of the signal")
+	}
+	if took := time.Since(started); took < 14*time.Second {
+		t.Errorf("the step ended %s after the signal, want 15s", took)
+	}
+}

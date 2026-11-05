@@ -15,7 +15,6 @@ import (
 	"github.com/qoryai/forager/wall"
 
 	"github.com/qoryai/qory/internal/checkout"
-	"github.com/qoryai/qory/internal/config"
 	"github.com/qoryai/qory/internal/exports"
 	"github.com/qoryai/qory/internal/preparation"
 	"github.com/qoryai/qory/internal/render"
@@ -39,17 +38,16 @@ const (
 	textCopyOnBranch   = "the run's commits are on %s in %s."
 	textCopyActing     = " They change these qory settings, links or repository folders: %s. Check them before you check out the branch."
 	textCopyPushActing = "qory run: the run's commits in %s change these qory settings, links or repository folders: %s. Check them before you check out the branch."
-	textCopyQoryFile   = "remove .qory from the commit at HEAD in %s, or make it a folder: a compose in a run's copy writes in a folder .qory, and that commit has a file or a link there"
 	textCopyRead       = "read the run's files in %s, and run no git there: %s%s"
 	textCopyAgain      = "take the work item in again in Qory Apiary: %s%s"
-	textCopyLimit      = "the git session ran past its limit of %s, so nothing came back from the run"
-	textCopyNoSession  = "the git session did not start, so nothing came back from the run: %s"
-	textCopyExited     = "the git session exited with %d, so nothing came back from the run"
-	textCopyCut        = "%s during the git session, so nothing came back from the run"
+	textCopyLimit      = "the git session ran past its limit of %s, so the run's commits did not come back"
+	textCopyNoSession  = "the git session did not start, so the run's commits did not come back: %s"
+	textCopyExited     = "the git session exited with %d, so the run's commits did not come back"
+	textCopyCut        = "%s during the git session, so the run's commits did not come back"
 	textCopyCheckCut   = "%s during the check or the fetch of the run's commits, so those commits did not come back"
 	textCopyWallKept   = "removing a part of the run's wall failed during the run, so a process may have written the copy after its session ended, and nothing came back from the run"
-	textCopyClosed     = "the run ended before the git session started, so nothing came back from the run"
-	textCopyStays      = "read the run's files in %s, run no git there, then remove the folder: nothing more came back from the run"
+	textCopyClosed     = "the run ended before the git session started, so the run's commits did not come back"
+	textCopyStays      = "read the run's files in %s, run no git there, then remove the folder: it has the work that did not come back"
 	textCopyBack       = "copied %s back to %s from the run, and deleted %s there."
 	textCopyLeftOut    = "left out of the copy back to your folder: %s."
 	textCopyConflicts  = "you and the run both changed these files, so yours stay: %s."
@@ -65,8 +63,8 @@ const (
 var copyStepLimit = 10 * time.Minute
 
 // sessionGraceFromCode is how long the git session of a run from a run code has after its stop
-// signal, see [pushAfterSignal]. git needs no time to save anything: a cut session brings nothing
-// back.
+// signal, see [pushAfterSignal]. git needs no time to save anything: a cut session brings no
+// commit back.
 const sessionGraceFromCode = 3 * time.Second
 
 // removeSetupLimit is how long the removal of a run's setup container may take before its work
@@ -210,11 +208,15 @@ func startCopy(ctx context.Context, root, runID, branch string, noRepository boo
 	return c, nil
 }
 
-// artifactsIn copies the checkout's artifacts and work item into the copy of a repository. A
-// plain folder's copy has them already. report prints a line of qory run.
+// artifactsIn copies the checkout's artifacts and work item into the copy of a repository, and
+// keeps .qory out of an agent's git add -A there. A plain folder's copy has them already. report
+// prints a line of qory run.
 func (c *runCopy) artifactsIn(ctx context.Context, report func(string)) error {
 	if c.plain {
 		return nil
+	}
+	if err := c.dir.Exclude("/" + checkout.Dir); err != nil {
+		return err
 	}
 	res, err := c.dir.CopyArtifactsIn(ctx, c.root)
 	if out := slices.Concat(res.Skipped, res.Conflicts); len(out) > 0 {
@@ -277,26 +279,8 @@ func (c *runCopy) kept(report func(string)) {
 	report(fmt.Sprintf(textCopyStays, exports.Value(c.dir.Work(), false)) + c.used())
 }
 
-// composedIn is at with the home in the copy, for a compose in a checkout whose home is
-// inside it: the compose reads the person's files, writes only in the copy, and links the
-// copy's files to the home there, so the person's checkout stays as it is.
-func (c *runCopy) composedIn(at places) (places, error) {
-	work := c.dir.Work()
-	dir := checkout.QoryDir(work)
-	if info, err := os.Lstat(dir); err == nil && (info.Mode()&fs.ModeSymlink != 0 || !info.IsDir()) {
-		return places{}, input(fmt.Errorf(textCopyQoryFile, exports.Value(c.root, false)))
-	}
-	at.dir = dir
-	at.home = filepath.Join(work, config.DefaultHome)
-	at.previous = at.report
-	at.report = reportFor(at.home)
-	at.linksIn = work
-	return at, nil
-}
-
 // bind makes spec work in the copy: the workspace is the copy with the working folder's
-// path in the checkout at at.root, and the checkout's read-write mount is the copy's. A home
-// outside the checkout that the checkout's mount held gets its read-only mount.
+// path in the checkout at at.root, and the checkout's read-write mount is the copy's.
 func (c *runCopy) bind(spec *runSpec, at places, cwd string) error {
 	work := c.dir.Work()
 	rel, err := filepath.Rel(realPath(at.root), realPath(cwd))
@@ -318,15 +302,12 @@ func (c *runCopy) bind(spec *runSpec, at places, cwd string) error {
 			spec.Mounts[i].Path = work
 		}
 	}
-	if at.dir == "" && reallyWithin(at.root, at.home) {
-		spec.Mounts = append(spec.Mounts, wall.Mount{Path: at.home, ReadOnly: true})
-	}
 	spec.Written = writtenPlaces(work, spec.Mounts)
 	return nil
 }
 
-// recordLinks lists the links the compose wrote into the copy, for the git session to leave
-// out: the links into its .qory folder. Call it before any run writes the copy.
+// recordLinks lists the links into the copy's .qory folder that its commit has, for the git
+// session to leave out. Call it before any run writes the copy.
 func (c *runCopy) recordLinks() error {
 	if c.plain {
 		return nil

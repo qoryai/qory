@@ -270,6 +270,22 @@ func (c *copyBack) enter(src, dst int, name, rel string) (from, to int, ok bool,
 	return from, to, true, nil
 }
 
+// hasArtifacts reports whether the folder src has .qory/artifacts, of any kind: with none,
+// the copy back writes no .qory in the person's folder. It is true when the check fails, so
+// [copyBack.enter] reports the failure.
+func hasArtifacts(src int) bool {
+	qory, err := unix.Openat(src, checkout.Dir, dirFlags, 0)
+	if errors.Is(err, unix.ENOENT) {
+		return false
+	}
+	if err != nil {
+		return true
+	}
+	defer unix.Close(qory)
+	var st unix.Stat_t
+	return !errors.Is(unix.Fstatat(qory, artifactsFolder, &st, unix.AT_SYMLINK_NOFOLLOW), unix.ENOENT)
+}
+
 // artifactsBackWith is [Dir.CopyArtifactsBack] with a budget of maxFiles files and maxBytes
 // bytes.
 func (d Dir) artifactsBackWith(ctx context.Context, dest string, maxFiles int, maxBytes int64) (CopyBackResult, error) {
@@ -293,6 +309,9 @@ func (d Dir) artifactsBackWith(ctx context.Context, dest string, maxFiles int, m
 	}
 	defer unix.Close(dst)
 	c := &copyBack{ctx: ctx, maxFiles: maxFiles, maxBytes: maxBytes, rec: rec, result: &result, qory: map[string]bool{}, skipped: map[string]bool{}}
+	if !hasArtifacts(src) {
+		return result, nil
+	}
 	from, to, ok, err := c.enter(src, dst, checkout.Dir, checkout.Dir)
 	if err != nil || !ok {
 		return result, err

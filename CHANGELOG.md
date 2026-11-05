@@ -250,8 +250,8 @@ release may change what an existing document does, and states it under Upgrading
   `git init` ran with no commit. Every such run starts with your `.qory/artifacts` and
   `.qory/work-item.json`, and gets `.qory/artifacts` back. New stops, each with its fix first: a
   local repository with no commit, a working folder absent from `HEAD`, a partial clone, a
-  branch named as a parent of the run's branch, a run or compose in a folder of a run's copy, a
-  commit at `HEAD` with a file or a link at `.qory`, and a run in a folder that is not a repository
+  branch named as a parent of the run's branch, a run or compose in a folder of a run's copy,
+  and a run in a folder that is not a repository
   and is or contains your home folder or qory's state directory. A copy that stays has its `.git` renamed to `.git-from-run`. Part of the run's work
   that misses the bundle, such as commits on another branch or a stash, keeps the copy, and so does a part of
   the run's wall that could not be removed, which brings nothing back. A run with the push step keeps no
@@ -435,7 +435,18 @@ release may change what an existing document does, and states it under Upgrading
   well. A home inside the folder stops the run with exit 2 before anything is written,
   behind a wall or not: `set --home to a folder outside <dir>: …`. This stop replaces
   the one of a walled run of Claude Code with a run key on a home inside the folder,
-  which came after the compose. A run without a run key composes as before.
+  which came after the compose. A run without a run key and without a wall composes as before.
+- Past a run's time limit, the git session and the push step of a write run share 5 minutes, up
+  from 120 seconds, so a run can pass its limit by up to 5 minutes. A git session that uses all of
+  that time leaves the push nothing, and on an image that runs nested Docker, starting the engine
+  can use up to 120 seconds of it. A signal still cuts the step to at most 15 seconds.
+- A walled run with no run key composes its harness as a run with a run key does: into a home
+  under `qory/homes` in your cache directory, unless `--home` or `harness.home` in your `qory.yaml`
+  sets another, and the container has that home read-only. Before, it composed into the copy, and
+  a walled run of Claude Code stopped with `Move the plugin <folder> to a directory no walled run
+  writes`. A home inside the folder, such as `.qory/harness`, stops the run with exit 2 and `set
+  --home to a folder outside <dir>: …`. A walled run in a folder that is not a repository now
+  starts with no `--home`. A run leaves no empty `.qory` in your folder.
 - A walled run from a run code stops with exit 2, before the harness is fetched and
   before the run writes its inputs, home or report, when a mount of `wall.mounts` in
   `forager.yaml` or of `--mount`, the checkout or the working folder, both mounted

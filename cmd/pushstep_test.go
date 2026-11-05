@@ -2013,7 +2013,7 @@ func TestAWallThatStaysRunsNoGit(t *testing.T) {
 			"Unwrap or the close": {wall: cmd.Nowhere{WallKept: true}, wants: line},
 			"RemoveSetup": {
 				wall:  cmd.Nowhere{WallKept: true, RemoveSetup: func(context.Context) error { return errors.New(refused) }},
-				wants: ", and run no git there: the git session did not start, so nothing came back from the run: ",
+				wants: ", and run no git there: the git session did not start, so the run's commits did not come back: ",
 			},
 		} {
 			t.Run(name, func(t *testing.T) {

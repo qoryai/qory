@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/qoryai/qory/internal/exports"
+	"github.com/qoryai/qory/internal/preparation"
 )
 
 // branch is the run's branch in every test.
@@ -4189,5 +4190,148 @@ func TestANameThatReadsAsTwoStatusLinesKeepsTheCopy(t *testing.T) {
 	printed := sessionOutput(t, d, repos, map[string]LeftOut{"": out})
 	if !d.LeftBehind(repos) {
 		t.Errorf("the session did not keep the copy:\n%s", printed)
+	}
+}
+
+// TestASeedInTheCopyLeavesOutWhatTheBranchRemoved is a work item's branch that deleted src/old.py,
+// and a next run that starts from a prebuilt image's copy of the repository: the run's fetch leaves
+// both commits at depth 1, so no branch or tag reaches the target version, and the file stays out
+// of the run's copy. The ref leaves the git session nothing to report.
+func TestASeedInTheCopyLeavesOutWhatTheBranchRemoved(t *testing.T) {
+	isolate(t)
+	sessionGit(t)
+	up := t.TempDir()
+	testGit(t, up, "init", "--quiet", "-b", "main")
+	write(t, up, "src/old.py", "old\n")
+	write(t, up, "keep.py", "keep\n")
+	target := commitAll(t, up, "first")
+	testGit(t, up, "checkout", "--quiet", "-b", "item")
+	testGit(t, up, "rm", "--quiet", "src/old.py")
+	commitAll(t, up, "remove")
+
+	work := t.TempDir()
+	testGit(t, work, "init", "--quiet", "-b", "unused")
+	testGit(t, work, "fetch", "--quiet", "--depth", "1", "file://"+up, "main")
+	testGit(t, work, "checkout", "--quiet", "--detach", "FETCH_HEAD")
+	testGit(t, work, "update-ref", preparation.TargetRef, "HEAD")
+	testGit(t, work, "fetch", "--quiet", "--depth", "1", "file://"+up, "item")
+	testGit(t, work, "checkout", "--quiet", "-b", branch, "FETCH_HEAD")
+
+	d, repos := cloneRun(t, work)
+	if got := testGit(t, d.Work(), "rev-parse", "--verify", preparation.TargetRef+"^{commit}"); got != target {
+		t.Errorf("the copy has the target version at %q, want %q", got, target)
+	}
+	runGit(t, d, repos, nil)
+	if d.LeftBehind(repos) {
+		t.Error("the git session reports work left behind")
+	}
+
+	seed := t.TempDir()
+	testGit(t, seed, "clone", "--quiet", "--branch", "main", "file://"+up, ".")
+	testGit(t, seed, "remote", "set-url", "origin", "https://github.com/acme/shop")
+	write(t, seed, "lib/dependency.py", "installed\n")
+	env := map[string]string{preparation.EnvRepositories: "acme/shop", preparation.EnvSystem: "github.com"}
+	if _, err := preparation.Prepare(context.Background(), d.Work(), seed, func(k string) string { return env[k] }, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(filepath.Join(d.Work(), "src", "old.py")); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("the seed brought back src/old.py: %v", err)
+	}
+	if got := read(t, d.Work(), "lib/dependency.py"); got != "installed\n" {
+		t.Errorf("lib/dependency.py is %q", got)
+	}
+}
+
+// TestACloneWithNoTargetVersionHasNoRef is a local run's repository.
+func TestACloneWithNoTargetVersionHasNoRef(t *testing.T) {
+	isolate(t)
+	src, _ := person(t)
+	d, _ := cloneRun(t, src)
+	if out, err := gitCmd(d.Work(), "rev-parse", "--verify", "--quiet", preparation.TargetRef).Output(); err == nil {
+		t.Errorf("the copy has the ref at %s", out)
+	}
+}
+
+// TestAnAddAllInTheCopyStagesNoFurtherRepository is an agent's git add -A in a run with a further
+// repository: no gitlink goes into the index.
+func TestAnAddAllInTheCopyStagesNoFurtherRepository(t *testing.T) {
+	isolate(t)
+	src, _ := person(t)
+	further := filepath.Join(src, ".qory", "repositories", "example", "further")
+	write(t, further, "f.txt", "further\n")
+	testGit(t, further, "init", "--quiet", "-b", "main")
+	commitAll(t, further, "further")
+	d, _ := cloneRun(t, src)
+	testGit(t, d.Work(), "add", "-A")
+	if staged := testGit(t, d.Work(), "ls-files", "--stage"); strings.Contains(staged, "160000") || strings.Contains(staged, ".qory") {
+		t.Errorf("the index has:\n%s", staged)
+	}
+}
+
+// TestArtifactsBackWritesNoQoryWithNoArtifacts is a copy with a .qory that has no artifacts: the
+// person's folder gets no .qory.
+func TestArtifactsBackWritesNoQoryWithNoArtifacts(t *testing.T) {
+	isolate(t)
+	src, _ := person(t)
+	d, _ := cloneRun(t, src)
+	write(t, d.Work(), ".qory/other.txt", "the run\n")
+	if _, err := d.CopyArtifactsBack(context.Background(), src); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(filepath.Join(src, ".qory")); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("the person's folder has .qory: %v", err)
+	}
+	write(t, d.Work(), ".qory/artifacts/note/main/1/a.txt", "note\n")
+	if _, err := d.CopyArtifactsBack(context.Background(), src); err != nil {
+		t.Fatal(err)
+	}
+	if got := read(t, src, ".qory/artifacts/note/main/1/a.txt"); got != "note\n" {
+		t.Errorf("the artifact came back as %q", got)
+	}
+}
+
+// TestTheGitSessionRunsItsScriptFromAFile is the session on each shell: its arguments have the
+// file's path and no script text, its work comes back, and a file planted over the script after
+// the session changes nothing the host reads.
+func TestTheGitSessionRunsItsScriptFromAFile(t *testing.T) {
+	for _, shell := range []string{"/bin/sh", "/bin/dash"} {
+		t.Run(filepath.Base(shell), func(t *testing.T) {
+			if _, err := os.Stat(shell); err != nil {
+				t.Skipf("no %s here", shell)
+			}
+			isolate(t)
+			sessionGit(t)
+			src, _ := person(t)
+			d, repos := cloneRun(t, src)
+			write(t, d.Work(), "left.txt", "left\n")
+			s, err := d.GitSession(context.Background(), branch, "", repos, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			script := filepath.Join(d.Bundle(), SessionScriptName)
+			if s.Args[0] != script {
+				t.Errorf("the session's first argument is %q, want %q", s.Args[0], script)
+			}
+			if joined := strings.Join(s.Args, " "); strings.Contains(joined, "set -eu") || len(joined) > 2000 {
+				t.Errorf("the session's arguments have the script, %d characters", len(joined))
+			}
+			if got := read(t, d.Bundle(), SessionScriptName); got != sessionScript {
+				t.Error("the file does not have the script's text")
+			}
+			s.Command = shell
+			runSession(t, s)
+			write(t, d.Bundle(), SessionScriptName, "exit 9\n")
+			if d.LeftBehind(repos) {
+				t.Error("the host reports work left behind")
+			}
+			qs, err := d.Quarantine(context.Background(), branch, repos)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := qs[0].FetchInto(context.Background(), src, "refs/heads/"+branch); err != nil {
+				t.Fatal(err)
+			}
+			testGit(t, src, "cat-file", "-e", branch+":left.txt")
+		})
 	}
 }

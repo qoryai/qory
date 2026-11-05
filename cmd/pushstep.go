@@ -77,11 +77,12 @@ var branchWait = func(ctx context.Context, d time.Duration) error {
 // The time the push step has after a stop. A signal leaves pushAfterSignal: it fits inside
 // the 30 seconds that [child.DefaultGrace] leaves a pool's run after SIGTERM, with the 10 seconds
 // of a runtime's default stop before it, the [sessionGraceFromCode] of a git session it cuts, and
-// the close. Past a run's time limit no process stops
-// qory run, so the step has pushAfterLimit, and the run can pass its limit by that time.
+// the close. Past a run's time limit no process stops qory run, so the git session and the push
+// share pushAfterLimit, and the run can pass its limit by that time. The session's limit,
+// [runcopy.SessionLimit], is the same time, so a session that uses it all leaves the push nothing.
 const (
 	pushAfterSignal = 15 * time.Second
-	pushAfterLimit  = 120 * time.Second
+	pushAfterLimit  = 5 * time.Minute
 )
 
 // pushTimes is [pushAfterLimit] and [pushAfterSignal]; a test sets shorter ones.

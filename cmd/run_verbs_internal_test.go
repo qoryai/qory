@@ -741,11 +741,11 @@ func TestUserHomeNeedsAConfigurationDirectory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = userHome(places{root: root}, conf, false)
+	err = userHome(places{root: root}, conf)
 	if want := "no configuration directory: set HOME or XDG_CONFIG_HOME"; err == nil || err.Error() != want || ExitCode(err) != ExitCode(errors.New("")) {
 		t.Errorf("no configuration directory: %v (exit %d), want %q", err, ExitCode(err), want)
 	}
-	if err := userHome(places{root: root}, config.Defaults(), false); err != nil {
+	if err := userHome(places{root: root}, config.Defaults()); err != nil {
 		t.Errorf("a home no file sets: %v", err)
 	}
 }

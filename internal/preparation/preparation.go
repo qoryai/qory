@@ -144,8 +144,8 @@ var errLimit = errors.New("the limit of one git call")
 // repositories are cloned under, each at its path.
 const Repositories = ".qory/repositories"
 
-// excludeLine keeps [Repositories] out of the run repository's git status.
-const excludeLine = "/" + Repositories + "/"
+// ExcludeLine keeps [Repositories] out of the run repository's git status.
+const ExcludeLine = "/" + Repositories + "/"
 
 var (
 	hostName = regexp.MustCompile(`^[a-z0-9.-]{1,253}$`)
@@ -623,7 +623,7 @@ func keepRepositories(dir, path string) error {
 	return nil
 }
 
-// exclude adds [excludeLine] to the exclude file of the working tree at dir, the one
+// exclude adds [ExcludeLine] to the exclude file of the working tree at dir, the one
 // git rev-parse --git-path info/exclude names, as [checkout.ExcludeFile] finds it but
 // with the environment of every git here, unless the file has that line already. The
 // file is read and written through an [os.Root] of dir, and refused when it is outside
@@ -667,14 +667,14 @@ func exclude(ctx context.Context, git gitRunner, dir string) error {
 		return local(err)
 	}
 	for _, line := range strings.Split(string(data), "\n") {
-		if strings.TrimSpace(line) == excludeLine {
+		if strings.TrimSpace(line) == ExcludeLine {
 			return nil
 		}
 	}
 	if len(data) > 0 && !bytes.HasSuffix(data, []byte("\n")) {
 		data = append(data, '\n')
 	}
-	data = append(data, excludeLine+"\n"...)
+	data = append(data, ExcludeLine+"\n"...)
 	if err := root.MkdirAll(filepath.Dir(file), 0o755); err != nil {
 		return local(err)
 	}

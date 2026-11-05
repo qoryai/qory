@@ -37,7 +37,7 @@ func withAgentHome(fixed []string, name string) []string {
 	return out
 }
 
-// homeInFolder stops a run given a run key whose harness home is inside the folder at
+// homeInFolder stops a walled run or a run given a run key whose harness home is inside the folder at
 // root, the folder the run runs in, by their paths or with their links resolved: such
 // a run writes nothing into that folder, no home, no link and no exclude line, since
 // the repository's files and commands can change what is there.
@@ -45,30 +45,30 @@ func homeInFolder(root, home string) error {
 	if !within(root, home) && !within(realPath(root), realPath(home)) {
 		return nil
 	}
-	return input(fmt.Errorf("set --home to a folder outside %[1]s: %[2]s is inside %[1]s, and a run with a run key writes no harness into the folder it runs in", exports.Value(root, false), exports.Value(home, false)))
+	return input(fmt.Errorf("set --home to a folder outside %[1]s: %[2]s is inside %[1]s, and a walled run or a run with a run key writes no harness into the folder it runs in", exports.Value(root, false), exports.Value(home, false)))
 }
 
-// runKeyHomes is the root of the homes of runs given a run key when neither --home nor
-// harness.home sets one: qory/homes under the user's cache directory, ~/Library/Caches
+// cacheHomes is the root of the homes of walled runs and runs given a run key when neither
+// --home nor harness.home sets one: qory/homes under the user's cache directory, ~/Library/Caches
 // on macOS and $XDG_CACHE_HOME or ~/.cache on Linux, one home per checkout under it. It
 // is not under qory's state directory: a walled run mounts its home, and Forager stops
 // a run with a mount inside that directory, which contains the run records. root is the
 // checkout the run runs in, which the error of a failed lookup prints.
-func runKeyHomes(root string) (string, error) {
+func cacheHomes(root string) (string, error) {
 	base, err := os.UserCacheDir()
 	if err != nil {
-		return "", input(fmt.Errorf("set HOME, or give --home a folder outside %s: a run with a run key composes its harness under the cache directory, and the lookup of that directory failed: %w", exports.Value(root, false), err))
+		return "", input(fmt.Errorf("set HOME, or give --home a folder outside %s: a walled run or a run with a run key composes its harness under the cache directory, and the lookup of that directory failed: %w", exports.Value(root, false), err))
 	}
 	return filepath.Join(base, "qory", "homes"), nil
 }
 
-// withRunKeyHome is conf with the home of a run given a run key in the checkout at root:
-// harness.home, else [runKeyHomes].
-func withRunKeyHome(root string, conf config.Config) (config.Config, error) {
+// withCacheHome is conf with the home of a walled run or a run given a run key in the checkout
+// at root: harness.home, else [cacheHomes].
+func withCacheHome(root string, conf config.Config) (config.Config, error) {
 	if conf.Home != "" {
 		return conf, nil
 	}
-	homes, err := runKeyHomes(root)
+	homes, err := cacheHomes(root)
 	if err != nil {
 		return conf, err
 	}
@@ -81,12 +81,28 @@ func withRunKeyHome(root string, conf config.Config) (config.Config, error) {
 // them, as under extends, so the repository a dispatched run works on does not configure
 // how it starts. composes is set for qory run, which composes the harness: the home is
 // outside the checkout unless --home or harness.home puts it inside, see
-// [withRunKeyHome], and a home inside the checkout or inside the working directory stops
+// [withCacheHome], and a home inside the checkout or inside the working directory stops
 // the run with [homeInFolder] before any other check of the home, and before anything
-// is written.
-func locateRun(o homeOptions, keyed, composes bool) (places, config.Config, error) {
+// is written. Without keyed, walled reports whether the configuration starts a wall: a run
+// with no wall takes the home as [locate] does, and a walled run takes it as a keyed one.
+func locateRun(o homeOptions, keyed, composes bool, walled func(config.Config) bool) (places, config.Config, error) {
 	if !keyed {
-		return locate(o)
+		if !composes {
+			return locate(o)
+		}
+		return locateWith(o, func(root string) (config.Config, error) {
+			conf, err := configFor(root)
+			if err != nil || o.home != "" || !walled(conf) {
+				return conf, err
+			}
+			return withCacheHome(root, conf)
+		}, func(root, home string) error {
+			// A configuration that does not load stops the run where locateWith loads it.
+			if conf, err := configFor(root); err != nil || !walled(conf) {
+				return nil
+			}
+			return homeInFolders(root, home)
+		})
 	}
 	var check func(root, home string) error
 	if composes {
@@ -103,7 +119,7 @@ func locateRun(o homeOptions, keyed, composes bool) (places, config.Config, erro
 		if !composes || o.home != "" {
 			return conf, nil
 		}
-		return withRunKeyHome(root, conf)
+		return withCacheHome(root, conf)
 	}, check)
 }
 
