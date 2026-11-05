@@ -3812,7 +3812,7 @@ func TestARebaseOverACommitTakesUncommittedWork(t *testing.T) {
 // has its text before the URL, and none of the secret. A line with no @, ? or # stays whole.
 func TestAnHTTPURLInAGitLineHasNoCredential(t *testing.T) {
 	const hidden = "(a URL and the rest of the line, hidden)"
-	secrets := []string{"SEC", "RET", "123", "SECRET", "ZZS1", "ZZS2", "corp.example"}
+	secrets := []string{"SEC", "RET", "123", "SECRET", "ZZS1", "ZZS2", "corp.example", "ZZSECRETZZ"}
 	for raw, want := range map[string]string{
 		"fatal: https://me:SEC RET@host/x failed":                           "fatal: " + hidden,
 		"fatal: https://me:123 RET@host/x failed":                           "fatal: " + hidden,
@@ -3833,11 +3833,14 @@ func TestAnHTTPURLInAGitLineHasNoCredential(t *testing.T) {
 		"fatal: https://host/x and https://me:ZZS1@host/y failed":           "fatal: " + hidden,
 		"fatal: https://me:ZZS1@host/x and https://host/y?t=ZZS2 failed":    "fatal: " + hidden,
 		"fatal: unable to access 'https://me:ZZS1@host/x/': failed":         "fatal: unable to access '" + hidden,
+		"\x1b[31mhttps://host.example/x?t=ZZSECRETZZ":                       "\x1b[31m" + hidden,
+		"url_https://ZZSECRETZZ@host.example/x":                             "url_" + hidden,
+		"1https://host.example/x#ZZSECRETZZ":                                "1" + hidden,
+		"fatal: me@host.example has no https://host.example/x":              "fatal: me@host.example has no https://host.example/x",
 		"https://host.example: failed":                                      "https://host.example: failed",
 		"fatal: unable to access 'https://host/x/': Could not resolve host": "fatal: unable to access 'https://host/x/': Could not resolve host",
 		"fatal: https://host/x and ftp://host/y failed":                     "fatal: https://host/x and ftp://host/y failed",
 		"ssh://git@host/x: Permission denied":                               "ssh://git@host/x: Permission denied",
-		"sftp://me@host/x: Permission denied":                               "sftp://me@host/x: Permission denied",
 		"me@host.example has no URL?":                                       "me@host.example has no URL?",
 	} {
 		got := exports.HideURLError(errors.New(hideHTTP(raw))).Error()
@@ -3850,6 +3853,32 @@ func TestAnHTTPURLInAGitLineHasNoCredential(t *testing.T) {
 					t.Errorf("the line %q prints %q, with %s", raw, got, secret)
 				}
 			}
+		}
+	}
+	long := strings.Repeat("ZZSECRETZZ", 30)
+	for raw, want := range map[string]string{
+		"fatal: https://me:" + long + "@host.example/x":           "fatal: " + hidden,
+		"fatal: ssh://me:" + long + "@host.example/x":             "fatal: ssh://me:(hidden)@host.example/x",
+		"fatal: https://host.example/x\nZZSECRETZZ@corp\n":        "fatal: " + hidden,
+		"fatal: https://host.example/x\n?t=ZZSECRETZZ\n":          "fatal: " + hidden,
+		"\n\nfatal: https://me:ZZSECRETZZ@host.example/x\n":       "fatal: " + hidden,
+		"\x1b[31mhttps://host.example/x?t=ZZSECRETZZ":             "?[31m" + hidden,
+		"url_https://ZZSECRETZZ@host.example/x":                   "url_" + hidden,
+		"1https://host.example/x#ZZSECRETZZ":                      "1" + hidden,
+		"fatal: https://host.example/x and ftp://a@b/ZZSECRETZZ":  "fatal: " + hidden,
+		"fatal: no repository\nsee https://host/x?t=ZZSECRETZZ\n": "fatal: no repository",
+	} {
+		cmd := exec.CommandContext(t.Context(), "/bin/sh", "-c", `printf '%s' "$1" >&2; exit 1`, "sh", raw)
+		_, err := run(cmd, nil, []string{"status"})
+		var ge *gitError
+		if !errors.As(err, &ge) {
+			t.Fatalf("the error of %q is %v", raw, err)
+		}
+		if ge.line != want {
+			t.Errorf("run printed %q for %q, want %q", ge.line, raw, want)
+		}
+		if strings.Contains(ge.line, "ZZSECRETZZ") {
+			t.Errorf("run printed %q for %q, with the secret", ge.line, raw)
 		}
 	}
 }

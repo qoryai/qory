@@ -83,7 +83,7 @@ func gitWith(ctx context.Context, dir string, env []string, stdin io.Reader, arg
 	full := slices.Concat(proxygit.Hardened, localOnly, noMaintenance, args)
 	cmd, err := hostgit.Unchecked(ctx, dir, hostgit.Base(ctx), full...)
 	if err != nil {
-		return "", &gitError{subcommand: subcommand(args), line: err.Error(), exit: -1}
+		return "", &gitError{subcommand: subcommand(args), line: hidden(err.Error()), exit: -1}
 	}
 	cmd.Env = append(proxygit.Env(cmd.Env, &proxygit.Proxy{}), "GIT_CEILING_DIRECTORIES="+filepath.Dir(dir))
 	cmd.Env = append(cmd.Env, env...)
@@ -98,7 +98,7 @@ func personGit(ctx context.Context, dir string, env []string, args ...string) (s
 	full := slices.Concat(noMaintenance, args)
 	cmd, err := hostgit.Unchecked(ctx, dir, hostgit.Base(ctx), full...)
 	if err != nil {
-		return "", &gitError{subcommand: subcommand(args), line: err.Error(), exit: -1}
+		return "", &gitError{subcommand: subcommand(args), line: hidden(err.Error()), exit: -1}
 	}
 	cmd.Env = append(append(cmd.Env, "GIT_CEILING_DIRECTORIES="+filepath.Dir(dir), "GIT_TERMINAL_PROMPT=0"), env...)
 	return run(cmd, nil, args)
@@ -112,12 +112,12 @@ func run(cmd *exec.Cmd, stdin io.Reader, args []string) (string, error) {
 	// A helper left holding the output is not waited for past this.
 	cmd.WaitDelay = time.Second
 	if err := cmd.Run(); err != nil {
-		line := firstLine(stderr.String())
+		// A filter or a credential helper can print a URL with its password here. The hide reads
+		// all of it, since [firstLine] drops the later lines and can cut a password before its @.
+		line := firstLine(hidden(stderr.String()))
 		if line == "" {
-			line = err.Error()
+			line = hidden(err.Error())
 		}
-		// A filter or a credential helper can print a URL with its password here.
-		line = exports.HideURLError(errors.New(hideHTTP(line))).Error()
 		exit := -1
 		var ee *exec.ExitError
 		if errors.As(err, &ee) {
@@ -126,6 +126,11 @@ func run(cmd *exec.Cmd, stdin io.Reader, args []string) (string, error) {
 		return "", &gitError{subcommand: subcommand(args), line: line, exit: exit}
 	}
 	return stdout.String(), nil
+}
+
+// hidden is text as [hideHTTP] and then [exports.HideURLError] print it.
+func hidden(text string) string {
+	return exports.HideURLError(errors.New(hideHTTP(text))).Error()
 }
 
 // firstLine is the first line of text that is not empty, as a line prints it.
@@ -255,17 +260,18 @@ func atLeast(out string, major, minor int) bool {
 	return err1 == nil && err2 == nil && (ma > major || ma == major && mi >= minor)
 }
 
-// httpURL is the start of a URL with the scheme http, https, ftp or ftps, in any case.
-var httpURL = regexp.MustCompile(`(?i)\b(?:https?|ftps?)://`)
+// httpURL is the start of a URL with the scheme http, https, ftp or ftps, in any case, after any
+// text: a colour code or a word can come right before it.
+var httpURL = regexp.MustCompile(`(?i)(?:https?|ftps?)://`)
 
-// hideHTTP is line with the first such URL and all that follows it replaced by textHiddenURL, when
-// an @, a ? or a # follows the URL's start on the line. A credential can have a space, a quote or a
-// /, so no rule can tell where it ends, and nothing after the URL's start stays. With no such
-// character, line stays as it is.
-func hideHTTP(line string) string {
-	start := httpURL.FindStringIndex(line)
-	if start == nil || !strings.ContainsAny(line[start[0]:], "@?#") {
-		return line
+// hideHTTP is text with the first such URL and all that follows it, later lines too, replaced by
+// textHiddenURL, when an @, a ? or a # follows the URL's start in text. A credential can have a
+// space, a quote, a / or a line break, so no rule can tell where it ends, and nothing after the URL's
+// start stays. With no such character, text stays as it is.
+func hideHTTP(text string) string {
+	start := httpURL.FindStringIndex(text)
+	if start == nil || !strings.ContainsAny(text[start[0]:], "@?#") {
+		return text
 	}
-	return line[:start[0]] + textHiddenURL
+	return text[:start[0]] + textHiddenURL
 }
