@@ -3044,3 +3044,326 @@ func TestAnEmbeddedRepositoryWithNoFindIsLeftBehind(t *testing.T) {
 		t.Error("the session did not record the embedded repository")
 	}
 }
+
+// noBundle runs the git session and wants no commit past the base commit in the person's
+// repository, and wants left as what the session recorded as left behind.
+func noBundle(t *testing.T, d Dir, repos []Repository, left bool) string {
+	t.Helper()
+	printed := sessionOutput(t, d, repos, nil)
+	if _, err := d.Quarantine(context.Background(), branch, repos); !errors.Is(err, ErrNoBundle) {
+		t.Errorf("Quarantine = %v, want no bundle\n%s", err, printed)
+	}
+	if got := d.LeftBehind(repos); got != left {
+		t.Errorf("left behind = %v, want %v\n%s", got, left, printed)
+	}
+	return printed
+}
+
+// TestAHeadBeforeTheBaseCommitCommitsNothing is an agent that checked out a commit older than the
+// base commit: the working tree lacks the base commit's files, and the session commits no deletion
+// of them. With nothing else in the copy no work stays behind, and a change there does.
+func TestAHeadBeforeTheBaseCommitCommitsNothing(t *testing.T) {
+	for _, changed := range []bool{false, true} {
+		t.Run("", func(t *testing.T) {
+			isolate(t)
+			sessionGit(t)
+			src, older := person(t)
+			write(t, src, "newer.txt", "newer\n")
+			commitAll(t, src, "newer")
+			d, repos := cloneRun(t, src)
+			testGit(t, d.Work(), "checkout", "--quiet", "--detach", older)
+			if changed {
+				write(t, d.Work(), "README.md", "changed\n")
+			}
+			noBundle(t, d, repos, changed)
+		})
+	}
+}
+
+// TestAnOrphanHeadCommitsNothing is an agent on a branch with no commit, past the run's branch:
+// the session commits no deletion of every tracked file, the branch comes back as it is, and the
+// new file stays behind.
+func TestAnOrphanHeadCommitsNothing(t *testing.T) {
+	isolate(t)
+	sessionGit(t)
+	src, _ := person(t)
+	d, repos := cloneRun(t, src)
+	write(t, d.Work(), "kept.txt", "kept\n")
+	commitAll(t, d.Work(), "on the branch")
+	tip := testGit(t, d.Work(), "rev-parse", "HEAD")
+	testGit(t, d.Work(), "checkout", "--quiet", "--orphan", "o")
+	testGit(t, d.Work(), "rm", "-rf", "--quiet", ".")
+	write(t, d.Work(), "new.txt", "new\n")
+	q := bringBack(t, d, src, repos, nil)
+	if q.Head != tip {
+		t.Errorf("the bundle has %s, want the agent's commit %s", q.Head, tip)
+	}
+	if !d.LeftBehind(repos) {
+		t.Error("the session did not record the new file")
+	}
+}
+
+// TestAnEmptyOrphanHeadLeavesNothingBehind is an agent that emptied the working tree on a branch
+// with no commit: the commit it would make is a deletion, and the copy has nothing else.
+func TestAnEmptyOrphanHeadLeavesNothingBehind(t *testing.T) {
+	isolate(t)
+	sessionGit(t)
+	src, _ := person(t)
+	d, repos := cloneRun(t, src)
+	testGit(t, d.Work(), "checkout", "--quiet", "--orphan", "o")
+	testGit(t, d.Work(), "rm", "-rf", "--quiet", ".")
+	noBundle(t, d, repos, false)
+}
+
+// TestWorkOutsideTheBundleIsLeftBehind is each way an agent can leave work that the bundle does
+// not have, with nothing past the base commit: the session records it, so the copy stays.
+func TestWorkOutsideTheBundleIsLeftBehind(t *testing.T) {
+	for name, agent := range map[string]func(t *testing.T, work, base string){
+		"stash": func(t *testing.T, work, _ string) {
+			write(t, work, "README.md", "stashed\n")
+			testGit(t, work, "stash", "--quiet")
+		},
+		"tag then reset": func(t *testing.T, work, base string) {
+			write(t, work, "x.txt", "x\n")
+			commitAll(t, work, "x")
+			testGit(t, work, "tag", "keep")
+			testGit(t, work, "reset", "--quiet", "--hard", base)
+		},
+		"annotated tag then reset": func(t *testing.T, work, base string) {
+			write(t, work, "x.txt", "x\n")
+			commitAll(t, work, "x")
+			testGit(t, work, "tag", "-a", "-m", "keep", "keep")
+			testGit(t, work, "reset", "--quiet", "--hard", base)
+		},
+		"reset": func(t *testing.T, work, base string) {
+			write(t, work, "x.txt", "x\n")
+			commitAll(t, work, "x")
+			testGit(t, work, "reset", "--quiet", "--hard", base)
+		},
+		"detached commit": func(t *testing.T, work, _ string) {
+			testGit(t, work, "checkout", "--quiet", "--detach")
+			write(t, work, "x.txt", "x\n")
+			commitAll(t, work, "x")
+			testGit(t, work, "checkout", "--quiet", branch)
+		},
+	} {
+		t.Run(strings.ReplaceAll(name, " ", "-"), func(t *testing.T) {
+			isolate(t)
+			sessionGit(t)
+			src, base := person(t)
+			d, repos := cloneRun(t, src)
+			agent(t, d.Work(), base)
+			noBundle(t, d, repos, true)
+		})
+	}
+}
+
+// TestADetachedCommitBesideTheBranchIsLeftBehind is an agent with a commit on the branch and one
+// made with HEAD detached: the branch comes back, and the other commit keeps the copy.
+func TestADetachedCommitBesideTheBranchIsLeftBehind(t *testing.T) {
+	isolate(t)
+	sessionGit(t)
+	src, _ := person(t)
+	d, repos := cloneRun(t, src)
+	write(t, d.Work(), "kept.txt", "kept\n")
+	commitAll(t, d.Work(), "on the branch")
+	testGit(t, d.Work(), "checkout", "--quiet", "--detach")
+	write(t, d.Work(), "x.txt", "x\n")
+	commitAll(t, d.Work(), "x")
+	testGit(t, d.Work(), "checkout", "--quiet", branch)
+	bringBack(t, d, src, repos, nil)
+	if !d.LeftBehind(repos) {
+		t.Error("the session did not record the detached commit")
+	}
+}
+
+// TestAnUnrelatedHeadIsLeftBehind is a detached commit that does not descend from the base commit,
+// with the branch past that commit: the branch comes back, and the commit keeps the copy. The
+// working tree is at that commit, so the session finds no change there.
+func TestAnUnrelatedHeadIsLeftBehind(t *testing.T) {
+	isolate(t)
+	sessionGit(t)
+	src, _ := person(t)
+	d, repos := cloneRun(t, src)
+	write(t, d.Work(), "kept.txt", "kept\n")
+	commitAll(t, d.Work(), "on the branch")
+	tip := testGit(t, d.Work(), "rev-parse", "HEAD")
+	testGit(t, d.Work(), "checkout", "--quiet", "--orphan", "y")
+	write(t, d.Work(), "y.txt", "y\n")
+	commitAll(t, d.Work(), "y")
+	testGit(t, d.Work(), "checkout", "--quiet", "--detach")
+	testGit(t, d.Work(), "branch", "-q", "-D", "y")
+	q := bringBack(t, d, src, repos, nil)
+	if q.Head != tip {
+		t.Errorf("the bundle has %s, want %s", q.Head, tip)
+	}
+	if !d.LeftBehind(repos) {
+		t.Error("the session did not record the commit at HEAD")
+	}
+}
+
+// TestASubmodulePastItsGitlinkIsLeftBehind is a commit or a change in a submodule: the session
+// prints a line, and the copy stays.
+func TestASubmodulePastItsGitlinkIsLeftBehind(t *testing.T) {
+	for name, commit := range map[string]bool{"commit": true, "change": false} {
+		t.Run(name, func(t *testing.T) {
+			isolate(t)
+			sessionGit(t)
+			src, sub := withSubmodule(t)
+			d, repos := cloneRun(t, src)
+			inner := filepath.Join(d.Work(), filepath.FromSlash(sub))
+			write(t, inner, "lib.txt", "changed\n")
+			if commit {
+				commitAll(t, inner, "in the submodule")
+			}
+			printed := noBundle(t, d, repos, true)
+			if want := "qory: the submodule libs/s in the copy has commits or changes that the commit leaves out"; !strings.Contains(printed, want) {
+				t.Errorf("the session printed:\n%s", printed)
+			}
+		})
+	}
+}
+
+// TestASubmoduleAtItsGitlinkLeavesNothingBehind is a submodule the agent did not change.
+func TestASubmoduleAtItsGitlinkLeavesNothingBehind(t *testing.T) {
+	isolate(t)
+	sessionGit(t)
+	src, _ := withSubmodule(t)
+	d, repos := cloneRun(t, src)
+	if printed := noBundle(t, d, repos, false); printed != "" {
+		t.Errorf("the session printed:\n%s", printed)
+	}
+}
+
+// TestARepositoryTheRunMadeIsLeftBehind is a new repository with a commit, and git init in a
+// folder of the commit with a change there: the session prints a line, and the copy stays.
+func TestARepositoryTheRunMadeIsLeftBehind(t *testing.T) {
+	for name, agent := range map[string]func(t *testing.T, work string){
+		"new": func(t *testing.T, work string) {
+			write(t, filepath.Join(work, "inner"), "x.txt", "x\n")
+			testGit(t, filepath.Join(work, "inner"), "init", "--quiet")
+			commitAll(t, filepath.Join(work, "inner"), "inside")
+		},
+		"init": func(t *testing.T, work string) {
+			testGit(t, filepath.Join(work, "inner"), "init", "--quiet")
+			write(t, filepath.Join(work, "inner"), "tracked.txt", "changed\n")
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			isolate(t)
+			sessionGit(t)
+			src, _ := person(t)
+			if name == "init" {
+				write(t, filepath.Join(src, "inner"), "tracked.txt", "tracked\n")
+				commitAll(t, src, "a folder")
+			}
+			d, repos := cloneRun(t, src)
+			agent(t, d.Work())
+			printed := noBundle(t, d, repos, true)
+			if want := "qory: the copy has a git repository at inner that the run made, and the commit leaves it out"; !strings.Contains(printed, want) {
+				t.Errorf("the session printed:\n%s", printed)
+			}
+		})
+	}
+}
+
+// TestAnIgnoredRepositoryLeavesNothingBehind is a repository in a folder an ignore rule covers,
+// such as a tool's cache: git add leaves such a folder out with or without a .git.
+func TestAnIgnoredRepositoryLeavesNothingBehind(t *testing.T) {
+	isolate(t)
+	sessionGit(t)
+	src, _ := person(t)
+	write(t, src, ".gitignore", "cache/\n")
+	commitAll(t, src, "ignore")
+	d, repos := cloneRun(t, src)
+	inner := filepath.Join(d.Work(), "cache", "dep")
+	write(t, inner, "x.txt", "x\n")
+	testGit(t, inner, "init", "--quiet")
+	commitAll(t, inner, "inside")
+	if printed := noBundle(t, d, repos, false); printed != "" {
+		t.Errorf("the session printed:\n%s", printed)
+	}
+}
+
+// TestAGoodRunLeavesNothingBehind is what a run does with no work to lose: the session records
+// nothing, so the copy goes and the run exits 0.
+func TestAGoodRunLeavesNothingBehind(t *testing.T) {
+	for name, agent := range map[string]func(t *testing.T, work, base string){
+		"amend": func(t *testing.T, work, _ string) {
+			write(t, work, "x.txt", "x\n")
+			commitAll(t, work, "x")
+			write(t, work, "x.txt", "y\n")
+			testGit(t, work, "add", "x.txt")
+			testGit(t, work, "commit", "--quiet", "--amend", "-m", "y")
+		},
+		"squash": func(t *testing.T, work, base string) {
+			write(t, work, "x.txt", "x\n")
+			commitAll(t, work, "x")
+			write(t, work, "y.txt", "y\n")
+			commitAll(t, work, "y")
+			testGit(t, work, "reset", "--quiet", "--soft", base)
+			testGit(t, work, "commit", "--quiet", "-m", "both")
+		},
+		"detach and back": func(t *testing.T, work, _ string) {
+			write(t, work, "x.txt", "x\n")
+			commitAll(t, work, "x")
+			testGit(t, work, "checkout", "--quiet", "--detach")
+			testGit(t, work, "checkout", "--quiet", branch)
+		},
+		"other branch of the person and back": func(t *testing.T, work, _ string) {
+			testGit(t, work, "checkout", "--quiet", "other")
+			testGit(t, work, "checkout", "--quiet", branch)
+			write(t, work, "x.txt", "x\n")
+		},
+	} {
+		t.Run(strings.ReplaceAll(name, " ", "-"), func(t *testing.T) {
+			isolate(t)
+			sessionGit(t)
+			src, base := person(t)
+			testGit(t, src, "checkout", "--quiet", "-b", "other")
+			write(t, src, "other.txt", "other\n")
+			commitAll(t, src, "other")
+			testGit(t, src, "tag", "from-the-person")
+			testGit(t, src, "remote", "add", "origin", "https://example.com/site.git")
+			testGit(t, src, "update-ref", "refs/remotes/origin/other", "HEAD")
+			testGit(t, src, "checkout", "--quiet", "-")
+			testGit(t, src, "branch", "-q", "-D", "other")
+			d, repos := cloneRun(t, src)
+			agent(t, d.Work(), base)
+			bringBack(t, d, src, repos, nil)
+			if d.LeftBehind(repos) {
+				t.Error("the session recorded work left behind")
+			}
+		})
+	}
+}
+
+// TestAGoodRunOnALineEndRuleLeavesNothingBehind is a line-end rule that makes git add print a
+// warning: the warning is no failure of the add, so it prints no line and the copy goes.
+func TestAGoodRunOnALineEndRuleLeavesNothingBehind(t *testing.T) {
+	for attributes, content := range map[string]string{
+		"* text=auto\n":         "one\r\ntwo\r\n",
+		"*.txt text eol=crlf\n": "one\ntwo\n",
+	} {
+		t.Run("", func(t *testing.T) {
+			isolate(t)
+			sessionGit(t)
+			src, _ := person(t)
+			write(t, src, ".gitattributes", attributes)
+			commitAll(t, src, "line ends")
+			d, repos := cloneRun(t, src)
+			testGit(t, d.Work(), "config", "core.safecrlf", "true")
+			write(t, d.Work(), "x.txt", content)
+			printed := sessionOutput(t, d, repos, nil)
+			if strings.Contains(printed, "left this out") {
+				t.Errorf("the session printed:\n%s", printed)
+			}
+			if d.LeftBehind(repos) {
+				t.Errorf("the session recorded work left behind:\n%s", printed)
+			}
+			if _, err := d.Quarantine(context.Background(), branch, repos); err != nil {
+				t.Errorf("Quarantine: %v\n%s", err, printed)
+			}
+		})
+	}
+}

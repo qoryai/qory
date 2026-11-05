@@ -43,6 +43,9 @@ type Repository struct {
 	// with what the checkout wrote: the git session runs no filter, so it leaves each
 	// out while the copy still has what the checkout wrote.
 	filtered []SetupPath
+	// refs is every ref of the copy when the clone ended, as for-each-ref prints the object and the
+	// name, so the git session can tell a ref the run made or moved.
+	refs string
 }
 
 // Clone copies the person's repository at checkout, the top of its working tree, and
@@ -125,7 +128,11 @@ func (d Dir) cloneOne(ctx context.Context, i int, src, dest, branch string) (Rep
 	if err != nil {
 		return Repository{}, fmt.Errorf(textNoCheckout, base, shown(src), err)
 	}
-	return Repository{Base: base, index: i, filtered: filtered, excludes: personalExcludes(ctx, src)}, nil
+	refs, err := git(ctx, dest, "for-each-ref", "--format=%(objectname) %(refname)")
+	if err != nil {
+		return Repository{}, fmt.Errorf(textNoCheckout, base, shown(src), err)
+	}
+	return Repository{Base: base, index: i, filtered: filtered, excludes: personalExcludes(ctx, src), refs: refs}, nil
 }
 
 // cloneAt is [Dir.cloneOne] without the filtered files.

@@ -90,11 +90,15 @@ type GitSession struct {
 // base commit, it writes a file that records that, in place of the bundle. message is
 // the message of the commit it makes, "" for [commitMessage]. When HEAD of the copy is past
 // the base commit, the bundle has HEAD, so an agent's commits on another branch keep their
-// messages. When it is not and branch is, the bundle has branch as it is, since the working
-// tree is at HEAD. A commit on another branch that the bundle does not have, a change in such a
-// working tree, or a line of git add for what it could not add writes n.left, which
-// [Dir.LeftBehind] reads. The person's personal ignore rules stay in effect through the
-// info/exclude of that git folder.
+// messages. When HEAD is at the base commit and branch is past it, or when HEAD has no commit or
+// does not descend from the base commit, the bundle has branch as it is and the script makes no
+// commit, since the working tree is at HEAD: a commit would undo branch's files. Work that the
+// bundle does not have writes n.left, which [Dir.LeftBehind] reads: a change in such a working
+// tree; a commit in a ref the clone did not write, such as a branch, a tag or refs/stash; HEAD, a
+// commit made with HEAD detached, or, with nothing past the base commit, any commit a reflog has,
+// unless a remote-tracking ref has it; a submodule off its gitlink or with a change; a repository
+// the run made; or a line of git add for what it could not add. The person's personal ignore
+// rules stay in effect through the info/exclude of that git folder.
 //
 // The script runs no filter: a file a filter changed at the checkout, such as a Git LFS
 // file, stays out while the copy has what the checkout wrote, and one the agent changed
@@ -125,6 +129,10 @@ func (d Dir) GitSession(ctx context.Context, branch, message string, repos []Rep
 		p := filepath.Join(d.Bundle(), "list-"+strconv.Itoa(n))
 		if err := writeNew(p, list); err != nil {
 			return GitSession{}, fileErr(p, err)
+		}
+		refs := filepath.Join(d.Bundle(), "refs-"+strconv.Itoa(n))
+		if err := writeNew(refs, repos[n].refs); err != nil {
+			return GitSession{}, fileErr(refs, err)
 		}
 		if len(repos[n].excludes) > 0 {
 			p := filepath.Join(d.Bundle(), "exclude-"+strconv.Itoa(n))
@@ -204,8 +212,8 @@ func (d Dir) SessionMounts() []wall.Mount {
 
 // sessionScript is the git session's script, run with sh -c. Its arguments are the
 // PATH, the copy, the bundle folder, the branch, the commit's message and the number of
-// repositories. For the repository number n it sources list-n, see [sessionList], and uses
-// exclude-n when there is one. It writes n.bundle, or n.none when nothing is past the base
+// repositories. For the repository number n it sources list-n, see [sessionList], reads refs-n,
+// see [Repository], and uses exclude-n when there is one. It writes n.bundle, or n.none when nothing is past the base
 // commit. It needs git 2.25 or later, for --pathspec-from-file.
 const sessionScript = `set -eu
 PATH=$1 W=$2 B=$3 branch=$4 message=$5 count=$6
@@ -226,7 +234,7 @@ g() {
 	git -c core.hooksPath=/dev/null -c core.fsmonitor=false -c core.useReplaceRefs=false \
 		-c core.commitGraph=false -c core.attributesFile=/dev/null -c core.excludesFile=/dev/null \
 		-c core.untrackedCache=false -c gc.auto=0 -c maintenance.auto=false \
-		-c protocol.allow=never -c commit.gpgSign=false "$@"
+		-c protocol.allow=never -c commit.gpgSign=false -c core.safecrlf=false "$@"
 }
 nl='
 '
@@ -240,10 +248,38 @@ kind() {
 	*) printf file ;;
 	esac
 }
+# copygit is git with the copy's .git as git dir, so packed refs and reftable both work. It reads
+# the copy's configuration, inside the wall.
+copygit() {
+	g --git-dir="$T/.git" "$@"
+}
 # past reports whether a commit descends from the base commit and is not that commit.
 past() {
-	[ -n "$1" ] && [ "$1" != "$base" ] && g --git-dir="$T/.git" merge-base --is-ancestor "$base" "$1" 2>/dev/null
+	[ -n "$1" ] && [ "$1" != "$base" ] && copygit merge-base --is-ancestor "$base" "$1" 2>/dev/null
 }
+# lacking prints the lines of the file $1 that the file $2 does not have, and every line when grep
+# fails, so a failure keeps the copy.
+lacking() {
+	set +e
+	grep -Fxv -f "$2" "$1" 2>/dev/null
+	lacked=$?
+	set -e
+	if [ "$lacked" -gt 1 ]; then cat "$1"; fi
+}
+# printable is $1 with no control character, for a line of this script.
+printable() {
+	printf '%s' "$1" | tr -d '\000-\037\177' 2>/dev/null || printf 'a folder'
+}
+# submodule_at reports whether the submodule at the folder $1 of $T has the commit $2 at HEAD and
+# no change. Its git reads the submodule's configuration, inside the wall.
+submodule_at() (
+	unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE
+	cd "$T/$1"
+	now=$(g --git-dir="$T/$1/.git" rev-parse --verify --quiet "HEAD^{commit}") || exit 1
+	[ "$now" = "$2" ] || exit 1
+	changes=$(g --git-dir="$T/$1/.git" --work-tree=. status --porcelain --ignore-submodules=none) || exit 1
+	[ -z "$changes" ]
+)
 # state prints what the repository at $T has at a path, in the form of SetupPath.State.
 state() {
 	f=$T/$1
@@ -275,24 +311,18 @@ while [ "$n" -lt "$count" ]; do
 	printf '%s\n' "$T/.git/objects" > "$G/objects/info/alternates"
 	printf 'ref: refs/heads/%s\n' "$branch" > "$G/HEAD"
 
-	# HEAD when it is past the base commit, so commits on another branch come back with their
-	# messages. The branch when HEAD is not past it and the branch is: the working tree is then at
-	# HEAD, so it is compared with HEAD, and a change there stays behind. The branch also when HEAD
-	# has no commit, or has no base commit in its history. Read by git with the copy's .git, so
-	# packed refs and reftable both work. This git reads the copy's configuration, inside the wall.
-	head=$(g --git-dir="$T/.git" rev-parse --verify --quiet "HEAD^{commit}") || head=
-	on=$(g --git-dir="$T/.git" rev-parse --verify --quiet "refs/heads/$branch^{commit}") || on=
-	from=
-	if ! past "$head"; then
-		if past "$on"; then
-			from=$head
-			head=$on
-		elif [ -z "$head" ] || ! g --git-dir="$T/.git" merge-base --is-ancestor "$base" "$head" 2>/dev/null; then
-			head=$on
-		fi
+	# head is what the bundle has: HEAD when it is past the base commit, so commits on another
+	# branch come back with their messages, or HEAD at the base commit with the branch not past it.
+	# In any other case it is the branch, and moved is set: the working tree is at HEAD, a commit
+	# from there would undo the branch's files, so the session makes none, and a change stays behind.
+	at=$(copygit rev-parse --verify --quiet "HEAD^{commit}") || at=
+	on=$(copygit rev-parse --verify --quiet "refs/heads/$branch^{commit}") || on=
+	head=$at
+	moved=
+	if ! past "$at" && { [ "$at" != "$base" ] || past "$on"; }; then
+		head=$on
+		moved=1
 	fi
-	moved=$from
-	if [ -z "$from" ]; then from=$head; fi
 	case $head in
 	'' | *[!0-9a-f]*)
 		echo "qory: neither HEAD nor $branch in $shown is a commit, so the session commits nothing" >&2
@@ -303,28 +333,64 @@ while [ "$n" -lt "$count" ]; do
 		echo "qory: git read a commit id of ${#head} characters in $shown, and the base commit has ${#base}, so the session commits nothing" >&2
 		exit 1
 	fi
-	# A branch of the copy with a commit that the bundle does not have: the work stays behind.
-	g --git-dir="$T/.git" for-each-ref --no-merged "$head" --format='%(objectname)' refs/heads/ > "$G/others" 2>/dev/null || :
-	while IFS= read -r tip; do
-		if ! g --git-dir="$T/.git" merge-base --is-ancestor "$tip" "$base" 2>/dev/null; then
-			: > "$B/$n.left"
-		fi
-	done < "$G/others"
+	# A commit that the bundle does not have stays behind: one in a ref the clone did not write,
+	# such as a branch, a tag or refs/stash; HEAD; or one that HEAD's reflog has and no branch's
+	# reflog has, which is a commit made with HEAD detached. A rebase's steps do not count, since
+	# the rebase's result replaces them. A commit in a remote-tracking ref is at its remote.
+	copygit for-each-ref --no-merged "$head" --format='%(objectname) %(refname)' > "$G/tips-now" 2>/dev/null || : > "$B/$n.left"
+	lacking "$G/tips-now" "$B/refs-$n" > "$G/new"
+	while read -r tip ref; do
+		printf '%s\n' "$tip"
+	done < "$G/new" > "$G/tips"
+	if [ -n "$moved" ] && [ -n "$at" ]; then
+		printf '%s\n' "$at" >> "$G/tips"
+	fi
+	copygit for-each-ref --format='%(refname)' refs/heads/ > "$G/names" 2>/dev/null || :
+	: > "$G/on-branch"
+	while IFS= read -r ref; do
+		copygit rev-list -g "$ref" >> "$G/on-branch" 2>/dev/null || :
+	done < "$G/names"
+	{ copygit log -g --format='%H %gs' HEAD 2>/dev/null || :; } > "$G/reflog"
+	while read -r tip what; do
+		case $what in
+		rebase*) ;;
+		*) printf '%s\n' "$tip" ;;
+		esac
+	done < "$G/reflog" > "$G/moves"
+	lacking "$G/moves" "$G/on-branch" >> "$G/tips"
+	behind=$(copygit rev-list -1 --ignore-missing --stdin --not "$head" "$base" --remotes < "$G/tips" 2>/dev/null) || behind=1
+	if [ -n "$behind" ]; then
+		: > "$B/$n.left"
+	fi
 	export GIT_DIR="$G" GIT_WORK_TREE="$T" GIT_INDEX_FILE="$G/index"
 	g cat-file -e "$head^{commit}"
 	g update-ref "refs/heads/$branch" "$head"
+	# The tree the working tree is compared with: HEAD, or an empty tree when HEAD has no commit.
+	from=$at
+	if [ -z "$from" ]; then
+		from=$(g hash-object -t tree /dev/null)
+	fi
 	g read-tree "$from"
+	# With moved set, the paths the commit sets back stay as HEAD has them, so they differ in nothing.
+	back=$base
+	if [ -n "$moved" ]; then
+		back=$from
+	fi
 
 	# Add every change but .qory, each folder with a .git, and the paths left out.
 	P=$G/add
 	R=$G/restore
 	printf ':/\0:(exclude,top,literal,icase).qory\0' > "$P"
 	printf ':(top,literal,icase).qory\0' > "$R"
+	: > "$G/folders"
 	{ find . -path ./.git -prune -o -path ./.qory -prune -o -name .git -exec sh -c '
+		list=$1
+		shift
 		for p do
 			d=${p%/.git}
 			printf ":(exclude,top,literal)%s\0" "${d#./}"
-		done' sh {} + 2>/dev/null || :; } >> "$P"
+			printf "%s\n" "${d#./}" >> "$list"
+		done' sh "$G/folders" {} + 2>/dev/null || :; } >> "$P"
 	i=0
 	while [ "$i" -lt "$links" ]; do
 		printf ':(exclude,top,literal)%s\0' "$1" >> "$P"
@@ -352,6 +418,7 @@ while [ "$n" -lt "$count" ]; do
 	g hash-object --no-filters --stdin-paths < "$G/regular" > "$G/ids"
 	exec 3< "$G/ids"
 	i=0
+	known=$nl
 	while [ "$i" -lt "$setup" ]; do
 		f=$T/$1
 		have=
@@ -369,11 +436,41 @@ while [ "$n" -lt "$count" ]; do
 		fi
 		if [ "$have" = "$2" ]; then
 			printf ':(exclude,top,literal)%s\0' "$1" >> "$P"
+			if [ "$2" = other ]; then
+				known=$known$1$nl
+			fi
 		fi
 		shift 2
 		i=$((i + 1))
 	done
 	exec 3<&-
+	# Each folder with a .git stays out of the commit. A submodule stays behind when it is not at
+	# the commit of its gitlink or has a change. Any other such folder stays behind when the setup
+	# did not make it and no ignore rule covers it: the clone makes no other.
+	while IFS= read -r d; do
+		entry=$(g ls-files -s -- ":(top,literal)$d" 2>/dev/null) || entry=
+		shows=$(printable "$d")
+		case $entry in
+		"160000 "*)
+			link=${entry#160000 }
+			link=${link%% *}
+			if ! submodule_at "$d" "$link"; then
+				printf 'qory: the submodule %s in %s has commits or changes that the commit leaves out\n' "$shows" "$shown" >&2
+				: > "$B/$n.left"
+			fi
+			;;
+		*)
+			case $known in
+			*"$nl$d$nl"*) continue ;;
+			esac
+			if g check-ignore -q -- "./$d" 2>/dev/null; then
+				continue
+			fi
+			printf 'qory: %s has a git repository at %s that the run made, and the commit leaves it out\n' "$shown" "$shows" >&2
+			: > "$B/$n.left"
+			;;
+		esac
+	done < "$G/folders"
 	# git add exits 1 when a path left out here is also ignored, and it adds the rest all the
 	# same. Any other failure exits 128.
 	set +e
@@ -403,7 +500,7 @@ while [ "$n" -lt "$count" ]; do
 			;;
 		esac
 	done < "$G/add-errors"
-	g reset -q "$base" --pathspec-from-file="$R" --pathspec-file-nul
+	g reset -q "$back" --pathspec-from-file="$R" --pathspec-file-nul
 
 	set +e
 	g diff --cached --quiet --no-ext-diff --ignore-submodules=none "$from" --
@@ -423,6 +520,12 @@ while [ "$n" -lt "$count" ]; do
 	# The bundle: the branch without base and the commits before it.
 	if [ "$(g rev-list --count "refs/heads/$branch" "^$base")" = 0 ]; then
 		: > "$B/$n.none"
+		# With nothing past the base commit, a commit that any reflog has stays behind too, such as
+		# one that a reset took off the branch.
+		gone=$(copygit rev-list -1 --reflog --not "$base" --remotes 2>/dev/null) || gone=1
+		if [ -n "$gone" ]; then
+			: > "$B/$n.left"
+		fi
 	else
 		g bundle create -q "$B/$n.bundle.part" "refs/heads/$branch" "^$base"
 		mv "$B/$n.bundle.part" "$B/$n.bundle"
