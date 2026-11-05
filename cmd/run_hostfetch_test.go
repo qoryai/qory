@@ -51,7 +51,7 @@ func newHostFetch(t *testing.T, src, ref string) *hostFetch {
 		t.Skip("git is not installed")
 	}
 	bin := tempDir(t)
-	writeFile(t, filepath.Join(bin, "git"), "#!/bin/sh\nprintf '%s\\n' \"$*\" >> "+h.argv+"\nexec "+real+" \"$@\"\n")
+	writeFile(t, filepath.Join(bin, "git"), "#!/bin/sh\nprintf '%s\\n' \"$*\" >> "+h.argv+"\nexec "+shellQuote(real)+" \"$@\"\n")
 	if err := os.Chmod(filepath.Join(bin, "git"), 0o755); err != nil {
 		t.Fatal(err)
 	}
