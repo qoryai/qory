@@ -437,24 +437,39 @@ func TestStopsOnAFolderThatIsNotEmpty(t *testing.T) {
 }
 
 // TestAGitThatFailsAboveAnEmptyFolderStops is an empty folder under a .git file git cannot
-// use, or a repository with a bad config: the check of the folder fails with git's line,
+// use, or a repository git cannot use: the check of the folder fails with git's line,
 // and git init does not run, since a repository in the folder would hide what is above it.
 func TestAGitThatFailsAboveAnEmptyFolderStops(t *testing.T) {
 	needGit(t)
 	base := t.TempDir()
 	remote(t, base, "acme/shop", "main", nil)
-	want := "qory run: check that git on this machine can read the working folder and each .git above it, then run again. git failed: "
-	for _, c := range []struct {
+	want := "qory run: check git on this machine, the working folder, and each repository and .git above it, then run again. git failed: "
+	type row struct {
 		name  string
 		plant func(parent string)
-	}{
+	}
+	rows := []row{
 		{"a .git file that leads nowhere", func(parent string) { write(t, filepath.Join(parent, ".git"), "gitdir: /nowhere\n") }},
 		{"a .git file that is no git file", func(parent string) { write(t, filepath.Join(parent, ".git"), "not a git file\n") }},
 		{"a bad config", func(parent string) {
 			run(t, parent, "init", "--quiet")
 			write(t, filepath.Join(parent, ".git", "config"), "not a config\n[")
 		}},
-	} {
+		{"a format git does not take", func(parent string) {
+			run(t, parent, "init", "--quiet")
+			run(t, parent, "config", "core.repositoryformatversion", "99")
+		}},
+	}
+	// Root reads a file with no read permission.
+	if os.Geteuid() != 0 {
+		rows = append(rows, row{"a .git file with no read permission", func(parent string) {
+			write(t, filepath.Join(parent, ".git"), "gitdir: /nowhere\n")
+			if err := os.Chmod(filepath.Join(parent, ".git"), 0); err != nil {
+				t.Fatal(err)
+			}
+		}})
+	}
+	for _, c := range rows {
 		parent := t.TempDir()
 		c.plant(parent)
 		dir := filepath.Join(parent, "inner")
@@ -473,7 +488,7 @@ func TestAGitThatFailsAboveAnEmptyFolderStops(t *testing.T) {
 
 // TestABadHeadBelowABadGitFileStops is a working folder whose .git has a HEAD git does not
 // take, below a .git file that leads nowhere: git goes on to the folder above, and the
-// line sends the reader to each .git above the working folder.
+// line lists the working folder's .git, and each repository and .git above it.
 func TestABadHeadBelowABadGitFileStops(t *testing.T) {
 	needGit(t)
 	base := t.TempDir()
@@ -487,19 +502,20 @@ func TestABadHeadBelowABadGitFileStops(t *testing.T) {
 	run(t, dir, "init", "--quiet", "-b", "main")
 	write(t, filepath.Join(dir, ".git", "HEAD"), "not a head\n")
 	_, err := prepare(context.Background(), dir, env("git.example.com", "acme/shop"))
-	want := "qory run: check that git on this machine can read the working folder and each .git above it, then run again. git failed: "
+	want := "qory run: check git on this machine, the working folder's .git, and each repository and .git above it, then run again. git failed: "
 	if err == nil || !strings.HasPrefix(err.Error(), want) {
 		t.Errorf("%v, want a line that starts %s", err, want)
 	}
 }
 
 // TestAGitThatFailsInTheWorkingFolderStops is a repository that git finds and cannot use:
-// the line sends the reader to the working folder and not to the folders above it.
+// the line for a failed look for the top of the working tree, as for a .git above it, since
+// git can print the same line for both.
 func TestAGitThatFailsInTheWorkingFolderStops(t *testing.T) {
 	needGit(t)
 	base := t.TempDir()
 	remote(t, base, "acme/shop", "main", nil)
-	want := "qory run: check that git on this machine can read the working folder, then run again. git failed: "
+	want := "qory run: check git on this machine, the working folder's .git, and each repository and .git above it, then run again. git failed: "
 	for _, c := range []struct{ key, value string }{
 		{"core.bare", "true"},
 		{"core.repositoryformatversion", "99"},
@@ -737,16 +753,48 @@ func TestRefusesAQoryThatIsNoFolder(t *testing.T) {
 	}
 }
 
-// TestSaysWhenGitCannotReadTheFolder is a git that does not run, or fails on the
-// folder, worded as git's failure and not as a refusal of the folder.
-func TestSaysWhenGitCannotReadTheFolder(t *testing.T) {
+// TestSaysWhenGitDoesNotStart is a git that is not on the PATH, or an empty folder that git
+// cannot start in: each stop is the line for a failed git.
+func TestSaysWhenGitDoesNotStart(t *testing.T) {
 	needGit(t)
-	dir := emptyFolder(t)
-	t.Setenv("PATH", t.TempDir())
-	_, err := prepare(context.Background(), dir, env("git.example.com", "acme/shop"))
-	want := `qory run: check that git on this machine can read the working folder, then run again. git failed: exec: "git": executable file not found in $PATH`
-	if err == nil || err.Error() != want {
-		t.Errorf("git missing: %v, want %s", err, want)
+	const (
+		missing = `git failed: exec: "git": executable file not found in $PATH`
+		above   = "qory run: check git on this machine, the working folder, and each repository and .git above it, then run again. "
+	)
+	type row struct {
+		name, dir, want string
+		noGit           bool
+	}
+	rows := []row{
+		{"a working tree, no git", emptyFolder(t), "qory run: check that git on this machine can read the working folder, then run again. " + missing, true},
+		{"an empty folder, no git", t.TempDir(), above + missing, true},
+	}
+	// Root starts git in a folder with no search permission.
+	if os.Geteuid() != 0 {
+		closed := t.TempDir()
+		if err := os.Chmod(closed, 0o400); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = os.Chmod(closed, 0o700) })
+		path, err := exec.LookPath("git")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if path, err = filepath.EvalSymlinks(path); err != nil {
+			t.Fatal(err)
+		}
+		rows = append(rows, row{"an empty folder at mode 0400", closed, above + "git failed: fork/exec " + path + ": permission denied", false})
+	}
+	for _, c := range rows {
+		t.Run(c.name, func(t *testing.T) {
+			if c.noGit {
+				t.Setenv("PATH", t.TempDir())
+			}
+			_, err := prepare(context.Background(), c.dir, env("git.example.com", "acme/shop"))
+			if err == nil || err.Error() != c.want {
+				t.Errorf("%v, want %s", err, c.want)
+			}
+		})
 	}
 }
 

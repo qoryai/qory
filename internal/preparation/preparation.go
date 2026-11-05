@@ -81,7 +81,8 @@ const (
 	textExcludeOutside = "qory run: start the run in a git working tree whose exclude file is inside the working folder: the exclude file, %s, is outside it, and qory writes it only inside"
 	textGitNotDir      = "qory run: start the run in a git working tree whose .git is a folder: the working folder's .git is a file or a link, which points at a repository elsewhere"
 	textHasRemote      = "qory run: start the run in a new empty folder or a new empty git working tree: the working folder's repository has a remote already, and qory fetches the run's repository only into a repository with no remote"
-	textAboveFailed    = "qory run: check that git on this machine can read the working folder and each .git above it, then run again. git failed: %s"
+	textTreeFailed     = "qory run: check git on this machine, the working folder's .git, and each repository and .git above it, then run again. git failed: %s"
+	textAboveFailed    = "qory run: check git on this machine, the working folder, and each repository and .git above it, then run again. git failed: %s"
 	textGitFailed      = "qory run: check that git on this machine can read the working folder, then run again. git failed: %s"
 	textLocal          = "qory run: check that this machine can read and write the working folder, then run again. The step failed: %s"
 	textConfigKey      = "qory run: start the run in a new empty git working tree, or remove %s from %s, then run again. qory fetches only into a repository whose configuration has only the keys git init writes, since git on this machine would use any other key, such as a filter, a proxy or http.sslVerify"
@@ -421,9 +422,9 @@ func repoURL(system, path string) string {
 // any entry, which is not a working tree. A folder with no entries gets a repository from
 // [initFolder]. Then it stops on one whose repository [safeRepository] stops on; then on
 // one that is not the top of its working tree, whose repository has a commit, or has a
-// remote. A git that finds no repository as it looks for the top of the working tree is
-// [textAboveFailed], since a .git git does not take for a repository sends it to the folders
-// above. Any other failure of git is [textGitFailed].
+// remote. A git that fails to find the top of the working tree is [textTreeFailed]: the cause
+// can be in the folder's .git or in one above it, and git can print the same line for both. Any
+// later failure of git is [textGitFailed].
 func emptyTree(ctx context.Context, git gitRunner, dir string) error {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -458,10 +459,7 @@ func emptyTree(ctx context.Context, git gitRunner, dir string) error {
 	}
 	top, err := git(ctx, dir, "rev-parse", "--show-toplevel")
 	if err != nil {
-		if ge := (*gitError)(nil); errors.As(err, &ge) && strings.Contains(ge.line, "not a git repository") {
-			return aboveFailed(err)
-		}
-		return gitFailed(err)
+		return fmt.Errorf(textTreeFailed, integration.Printable(exports.HideURLError(err).Error()))
 	}
 	// Only the line end is git's: a folder's name can end in a space.
 	if !samePath(strings.TrimSuffix(top, "\n"), dir) {
@@ -513,10 +511,10 @@ func BranchName(ctx context.Context, dir, branch string) (bool, error) {
 // repository has only what git init writes without one. It stops with [textDirLink] on a
 // dir that is a link, without following it, and with [textNotTree] on a dir git finds a
 // repository for, such as a folder inside a working tree, where git would use the second
-// repository in place of the first. Any other failure of git to look for a repository,
-// such as a .git above dir that leads nowhere, is [textAboveFailed]. The fetch replaces the
-// unborn branch main with the remote's default branch, so its name has no effect on the run; the
-// option keeps it from depending on git's version.
+// repository in place of the first. Any other failure of git as it looks for a repository
+// is [textAboveFailed]. The fetch replaces the unborn branch main with the remote's default
+// branch, so its name has no effect on the run; the option keeps it from depending on git's
+// version.
 func initFolder(ctx context.Context, git gitRunner, dir string) error {
 	info, err := os.Lstat(dir)
 	if err != nil {
@@ -531,17 +529,12 @@ func initFolder(ctx context.Context, git gitRunner, dir string) error {
 	}
 	var ge *gitError
 	if !errors.As(err, &ge) || !strings.Contains(ge.line, "not a git repository (or any") {
-		return aboveFailed(err)
+		return fmt.Errorf(textAboveFailed, integration.Printable(exports.HideURLError(err).Error()))
 	}
 	if _, err := git(ctx, dir, "init", "--quiet", "--template=", "--initial-branch=main"); err != nil {
 		return local(err)
 	}
 	return nil
-}
-
-// aboveFailed is [textAboveFailed] with git's line made printable.
-func aboveFailed(err error) error {
-	return fmt.Errorf(textAboveFailed, integration.Printable(exports.HideURLError(err).Error()))
 }
 
 // fetchRun fetches the run's repository into dir with git: origin is its URL, and the

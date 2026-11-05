@@ -1228,7 +1228,7 @@ func recordGit(t *testing.T, config string) string {
 	script := "#!/bin/sh\nprintf '%s|%s|%s|%s|%s\\n' \"$GIT_CONFIG_NOSYSTEM\" \"$GIT_CONFIG_GLOBAL\" \"$GIT_CONFIG_VALUE_0\" \"$GIT_CEILING_DIRECTORIES\" \"$*\" >> " + calls + "\n" +
 		"if [ \"$GIT_CONFIG_NOSYSTEM\" != 1 ]; then GIT_CONFIG_SYSTEM=" + config + "; export GIT_CONFIG_SYSTEM; fi\n" +
 		"GIT_CONFIG_GLOBAL=${GIT_CONFIG_GLOBAL:-" + config + "}; export GIT_CONFIG_GLOBAL\n" +
-		"exec " + real + " \"$@\"\n"
+		"exec " + shellQuote(real) + " \"$@\"\n"
 	writeFile(t, filepath.Join(bin, "git"), script)
 	if err := os.Chmod(filepath.Join(bin, "git"), 0o755); err != nil {
 		t.Fatal(err)
