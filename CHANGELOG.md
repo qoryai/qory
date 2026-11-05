@@ -60,6 +60,9 @@ release may change what an existing document does, and states it under Upgrading
   A version that a run pushes only adds the run's reply to any of the open review
   comments, at most one reply to each, and closes each review comment it adds a reply to.
   See The review comments format in `contracts/harness/v1/README.md`.
+- A review comment's `on` in `contracts/harness/v1/review-comments.schema.json` takes an
+  optional `screen`: the id of a screen in the `screens.json` of that artifact version, for
+  a comment on one screen of a mockup.
 - Version 1 of the proposal sources format,
   `contracts/harness/v1/proposal-sources.schema.json`: the file `sources.json` of a
   version of the artifact type `proposal`, with every source the run used to write the

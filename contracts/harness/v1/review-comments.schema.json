@@ -28,7 +28,8 @@
           "additionalProperties": false,
           "properties": {
             "artifact": {"description": "The artifact type's name, such as proposal: lowercase letters and digits in groups joined by single hyphens, 1 to 64 bytes.", "type": "string", "maxLength": 64, "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"},
-            "version": {"description": "The version's number, from 1.", "type": "integer", "minimum": 1}
+            "version": {"description": "The version's number, from 1.", "type": "integer", "minimum": 1},
+            "screen": {"description": "The id of the screen the review comment is on, for a comment on one screen of a mockup: 1 to 32 characters. The id is one of the ids in the screens.json of that artifact version, which a JSON Schema cannot check. A version that a run pushes keeps it unchanged.", "type": "string", "minLength": 1, "maxLength": 32}
           }
         },
         "text": {"description": "The review comment, as Markdown.", "$ref": "#/$defs/short_text"},
