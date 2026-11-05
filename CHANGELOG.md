@@ -255,7 +255,7 @@ release may change what an existing document does, and states it under Upgrading
   and is or contains your home folder or qory's state directory. A copy that stays has its `.git` renamed to `.git-from-run`. Part of the run's work
   that misses the bundle, such as commits on another branch or a stash, keeps the copy, and so does a part of
   the run's wall that could not be removed, which brings nothing back. A run with the push step keeps no
-  copy, and prints `take the work item in again in Qory Apiary`. A first signal leaves the
+  copy, and a stop before its push prints `take the work item in again in Qory Apiary`. A first signal leaves the
   return of a local run at most 30 minutes, and `qory run` prints that time. A read run with a setup also
   works in a copy, read-only for the agent, and nothing comes back from it. A read-write
   mount stops a read run too, and so does a read run with no setup at your home folder.

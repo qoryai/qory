@@ -3475,6 +3475,9 @@ Part of the run's work can miss the bundle:
   prints a line with its path.
 - A file or a folder that `git add` cannot read, such as one of mode 000. The rest of the work comes
   back.
+- A setup's file that the agent commits as it is, under a filter set only in the copy's git settings,
+  `core.autocrlf=true` with a CRLF file, or `core.fileMode=false` with an executable file: the session
+  has none of the copy's git settings, so the copy stays with no work lost.
 
 Other lines of `git add` print too, such as its warning about a link at `.gitignore`. They keep
 nothing behind.
