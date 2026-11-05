@@ -239,6 +239,9 @@ release may change what an existing document does, and states it under Upgrading
 - A run that lists repositories starts in an empty folder as well: qory runs `git init`
   there, then fetches. A folder that is not empty and is not a git working tree still
   stops the run.
+- A module may group its skills in folders, at any depth, and qory writes each skill flat
+  for every runtime, at `skills/<name>`. A skill's name is its last folder. Two skills of
+  one name in one module stop the compose. See `docs/harness.md`.
 - A skill or command of a workflow may be named `workflow-<name>`, while the stack and
   `process.yaml` keep `<name>`. A run from a run code starts the first of these that the
   runtime can start: the skill `workflow-<name>`, the command `workflow-<name>`, the skill

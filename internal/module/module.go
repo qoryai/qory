@@ -446,8 +446,9 @@ func names(v map[string]Variant) string {
 // leaving the module are all refused. A variant that sets a kind outside the seven known
 // kinds is refused too.
 //
-// A kind directory that is not there leaves the module without entries of that kind. A
-// skills subdirectory without SKILL.md is an error. In the Markdown kinds only .md files
+// A kind directory that is not there leaves the module without entries of that kind.
+// Skills may be grouped in folders, see [readSkills]; a folder that is neither a skill
+// nor a group is an error. In the Markdown kinds only .md files
 // count. Under hooks every file is a hook and a directory is an error, because a hook is
 // identified by its file name and a script's helpers belong elsewhere in the module,
 // reached as $QORY_HARNESS_HOME/modules/<name>/<path>. Under mcp every .json file is one
@@ -485,7 +486,7 @@ func ReadWith(name, dir string, m *Manifest, variant string, readFile func(path 
 			dirs[kind] = clean
 		}
 	}
-	skills, err := readSkills(dirs["skills"], filepath.Join(abs, dirs["skills"]))
+	skills, err := readSkills(dirs["skills"], filepath.Join(abs, dirs["skills"]), variantSkillDirs(m))
 	if err != nil {
 		return nil, fmt.Errorf("module %s: %w", shown, err)
 	}
@@ -514,18 +515,26 @@ func ReadWith(name, dir string, m *Manifest, variant string, readFile func(path 
 	}
 	l.Entries = append(l.Entries, files...)
 	for i, e := range l.Entries {
+		// at is the entry as an error prints it. A skill's name does not show its folder,
+		// which may be in a group or a variant's directory.
+		at := e.Kind + "/" + e.Name
+		if e.Kind == "skills" {
+			if rel, err := filepath.Rel(abs, e.Path); err == nil {
+				at = filepath.ToSlash(rel)
+			}
+		}
 		if err := inside(abs, e.Path); err != nil {
-			if out := linkOut(shown, exports.HidePath(e.Kind+"/"+e.Name), err); out != nil {
+			if out := linkOut(shown, exports.HidePath(at), err); out != nil {
 				return nil, out
 			}
-			return nil, fmt.Errorf("module %s: %s %w", shown, exports.HidePath(e.Kind+"/"+e.Name), err)
+			return nil, fmt.Errorf("module %s: %s %w", shown, exports.HidePath(at), err)
 		}
 		if e.Kind == "skills" {
 			if err := insideAll(abs, e.Path); err != nil {
-				if out := linkOut(shown, exports.HidePath("skills/"+e.Name), err); out != nil {
+				if out := linkOut(shown, exports.HidePath(at), err); out != nil {
 					return nil, out
 				}
-				return nil, fmt.Errorf("module %s: %s/%w", shown, exports.HidePath("skills/"+e.Name), err)
+				return nil, fmt.Errorf("module %s: %s/%w", shown, exports.HidePath(at), err)
 			}
 		}
 		refs, tier, err := references(abs, e)
@@ -775,18 +784,64 @@ func insideAll(root, dir string) error {
 	})
 }
 
-// readSkills lists the skill directories of dir. A skill is a directory holding SKILL.md,
-// so a directory without one is a mistake worth an error rather than a silent skip; the
-// message names the directory as the variant reads it, rel, relative to the module root.
-func readSkills(rel, dir string) ([]Entry, error) {
-	items, err := os.ReadDir(dir)
-	if errors.Is(err, os.ErrNotExist) {
+// RuntimeFolders are the names of the runtimes qory renders. A folder with one of these
+// names under skills is not a group, see [readSkills], so a skill meant for one runtime
+// stops the compose for the others. A test in the render package checks this list against
+// the registered runtimes, because that package imports this one.
+var RuntimeFolders = []string{"amp", "any", "claude", "codex", "copilot", "cursor", "gemini", "goose", "opencode"}
+
+// variantSkillDirs lists the directories that the variants of m read skills from.
+func variantSkillDirs(m *Manifest) map[string]bool {
+	dirs := map[string]bool{}
+	if m == nil {
+		return dirs
+	}
+	for _, v := range m.Variants {
+		if sub, ok := v["skills"]; ok {
+			dirs[filepath.ToSlash(filepath.Clean(sub))] = true
+		}
+	}
+	return dirs
+}
+
+// readSkills lists the skills below dir, which errors print as rel, relative to the module
+// root. Below dir, each folder whose name starts with no dot is one of these:
+//
+//   - A skill: it has SKILL.md. Everything below it is that skill's files, a nested
+//     SKILL.md included. Its name is the folder's name.
+//   - A group: a real folder with no SKILL.md and with a folder below it. A group is read
+//     by these same rules, at any depth, and its name appears in no entry's name. A link is
+//     never a group, so no cycle can occur. A folder named after a runtime, or that a
+//     variant in variants reads skills from, is never a group, because its skills are for
+//     that runtime or variant.
+//   - Anything else, which is an error that shows the folder's full path.
+//
+// Loose files are skipped. Two skills of one name are an error, because the skills are
+// written flat and an exclude cannot separate two skills of one module.
+func readSkills(rel, dir string, variants map[string]bool) ([]Entry, error) {
+	if _, err := os.Stat(dir); errors.Is(err, os.ErrNotExist) {
 		return nil, nil
 	}
-	if err != nil {
-		return nil, exports.HideError(err)
+	r := skillReader{variants: variants, seen: map[string]string{}}
+	if err := r.read(filepath.ToSlash(rel), dir); err != nil {
+		return nil, err
 	}
-	var es []Entry
+	return r.entries, nil
+}
+
+// skillReader is one read of a module's skills folder, see [readSkills].
+type skillReader struct {
+	variants map[string]bool   // the folders that are for a variant, see [readSkills]
+	seen     map[string]string // the folder of each skill read so far, by the skill's name
+	entries  []Entry
+}
+
+// read adds the skills of dir, which errors print as rel.
+func (r *skillReader) read(rel, dir string) error {
+	items, err := os.ReadDir(dir)
+	if err != nil {
+		return exports.HideError(err)
+	}
 	for _, it := range items {
 		if strings.HasPrefix(it.Name(), ".") {
 			continue
@@ -794,17 +849,53 @@ func readSkills(rel, dir string) ([]Entry, error) {
 		path := filepath.Join(dir, it.Name())
 		info, err := os.Stat(path)
 		if err != nil {
-			return nil, exports.HideError(err)
+			return exports.HideError(err)
 		}
 		if !info.IsDir() {
 			continue
 		}
-		if _, err := os.Stat(filepath.Join(path, "SKILL.md")); err != nil {
-			return nil, fmt.Errorf("%s has no SKILL.md", exports.HidePath(filepath.ToSlash(rel)+"/"+it.Name()))
+		at := rel + "/" + it.Name()
+		if _, err := os.Stat(filepath.Join(path, "SKILL.md")); err == nil {
+			if first, ok := r.seen[it.Name()]; ok {
+				return fmt.Errorf("rename %s or %s: both are the skill %s, and qory writes skills flat", exports.HidePath(first), exports.HidePath(at), accesskey.ShownName(it.Name(), false))
+			}
+			r.seen[it.Name()] = at
+			r.entries = append(r.entries, Entry{Kind: "skills", Name: it.Name(), Path: path})
+			continue
 		}
-		es = append(es, Entry{Kind: "skills", Name: it.Name(), Path: path})
+		if !r.isGroup(at, path) {
+			return fmt.Errorf("%s has no SKILL.md", exports.HidePath(at))
+		}
+		if err := r.read(at, path); err != nil {
+			return err
+		}
 	}
-	return es, nil
+	return nil
+}
+
+// isGroup reports whether the folder at path, with no SKILL.md, printed as at, is a group
+// of skills, see [readSkills].
+func (r *skillReader) isGroup(at, path string) bool {
+	if slices.Contains(RuntimeFolders, filepath.Base(path)) || r.variants[at] {
+		return false
+	}
+	self, err := os.Lstat(path)
+	if err != nil || !self.IsDir() {
+		return false
+	}
+	items, err := os.ReadDir(path)
+	if err != nil {
+		return false
+	}
+	for _, it := range items {
+		if strings.HasPrefix(it.Name(), ".") {
+			continue
+		}
+		if info, err := os.Stat(filepath.Join(path, it.Name())); err == nil && info.IsDir() {
+			return true
+		}
+	}
+	return false
 }
 
 // readMarkdown lists the .md files of dir as entries of kind, named without the

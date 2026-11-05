@@ -644,7 +644,7 @@ A module's tree contains these entry kinds:
 
 ```
 AGENTS.md                        merged; the instruction section, read by every runtime
-skills/<name>/SKILL.md           atomic; the Agent Skills layout, read by every runtime
+skills/<name>/SKILL.md           atomic; the Agent Skills layout, read by every runtime; may sit in folders that group skills, skills/<group>/<name>/SKILL.md
 agents/<name>.md                 atomic; frontmatter name, description, and the keys some runtimes read (model, tools, mode); body = system prompt
 commands/<name>.md               atomic; frontmatter description; body = prompt, $ARGUMENTS for the arguments
 output-styles/<name>.md          atomic; Claude Code only
@@ -657,6 +657,20 @@ process.yaml                     a factory's process template, checked when expo
 ```
 
 `model` may be a tier, `${qory:light}`, `${qory:fast}` or `${qory:thinking}`, which the compose replaces with the model id the tier maps to (§ The configuration). A tier with no map leaves the agent without a model, so it runs on the main model, and the compose prints a row.
+
+Below `skills`, a folder with `SKILL.md` is a skill, and everything below it is that skill's
+files, a nested `SKILL.md` included. A real folder with no `SKILL.md` and with a folder below
+it is a group of skills, at any depth, read by the same rules. qory writes each skill flat for
+every runtime, at `skills/<name>` in the home and at `<name>` in each runtime's skills folder,
+so a skill's name is its last folder. A group appears in no
+name: `modules[].exclude`, `only`, `requires`, `bind`, `provides` and a reference
+(§References) all use `<name>`. Loose files in a group are skipped. These folders stop the
+compose with status 2, `<path> has no SKILL.md`, with the full path below the module: a folder
+with neither `SKILL.md` nor a folder below it, a link to a folder with no `SKILL.md`, a folder
+named after a runtime, and a folder that a variant reads skills from. Two skills of one name in
+one module also stop it with status 2: `rename skills/a/review or skills/b/review: both are the
+skill review, and qory writes skills flat`. The same name in two modules is a collision, status
+3, whose `exclude` lists `<name>`.
 
 `AGENTS.md` and skills are read by every runtime. Agents and commands are written in each
 runtime's format from the one file above; a runtime without the concept skips the kind and
@@ -704,7 +718,8 @@ the kind `agents`, `skills` or `commands`, the name one path segment:
 ```
 
 The compose reads a reference in an agent, a command, an output style, `AGENTS.md`, and
-every `.md` file under a skill's directory at any depth. Anything else between `${qory:`
+every `.md` file under a skill's directory at any depth. A reference to a skill in a group
+is `${qory:skills/<name>}`, with its last folder alone. Anything else between `${qory:`
 and `}` fails the compose, with the file and the reference in the message. Prose that
 mentions an entry in passing stays prose; the marker identifies the strings that are
 dispatched. The reference

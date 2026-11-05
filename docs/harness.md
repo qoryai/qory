@@ -175,6 +175,36 @@ add a skill workflow-deploy to a module of the base stack core@4b8e2f1a9c7d, or 
 A module that a checkout adds to the stack does not count, because the stack lists the
 workflows.
 
+### Group skills in folders
+
+A module may group its skills in folders. qory writes each skill flat for every runtime:
+at `skills/<name>` in the composed tree, and at `<name>` in each runtime's skills folder.
+
+```
+harness/skills/review/SKILL.md            the skill review
+harness/skills/delivery/deploy/SKILL.md   the skill deploy
+harness/skills/delivery/ci/fix/SKILL.md   the skill fix
+```
+
+A skill's name is its last folder, so `exclude`, `only`, `requires`, `bind`, `provides` and
+`${qory:skills/deploy}` use `deploy`. A folder with `SKILL.md` is a skill, and everything
+below it is that skill's files. Loose files in a group are skipped.
+
+A folder named after a runtime, such as `skills/codex`, is not a group, and neither is a link
+or a folder that a variant reads skills from. Such a folder with no `SKILL.md` stops the
+compose with exit 2, as a folder with no skill below it does:
+
+```
+module core: skills/delivery/empty has no SKILL.md
+```
+
+Two skills of one name in one module stop the compose with exit 2, because an exclude cannot
+separate them:
+
+```
+module core: rename skills/a/review or skills/b/review: both are the skill review, and qory writes skills flat
+```
+
 ## See a collision
 
 `qory setup example` writes a stack and two modules. Both modules ship a greet skill. The
