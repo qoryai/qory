@@ -16,6 +16,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/qoryai/qory/internal/exports"
 )
 
 // branch is the run's branch in every test.
@@ -3403,17 +3405,16 @@ func TestACredentialInAFilterLineStaysHidden(t *testing.T) {
 	write(t, src, "x.dat", "x\n")
 	commitAll(t, src, "a filtered file")
 	config := t.TempDir()
-	write(t, config, "gitconfig", "[filter \"fails\"]\n\tsmudge = sh -c 'echo fatal: https://me:SECRETTOK@host.example/x >&2; exit 1'\n\trequired = true\n")
+	write(t, config, "gitconfig", "[filter \"fails\"]\n\tsmudge = sh -c 'echo fatal: https://me:SECRETTOK@host.example/x?t=SECRETONE SECRETTWO >&2; exit 1'\n\trequired = true\n")
 	t.Setenv("GIT_CONFIG_GLOBAL", filepath.Join(config, "gitconfig"))
 	_, err := newDir(t).Clone(context.Background(), src, branch)
 	if err == nil {
 		t.Fatal("the clone passed")
 	}
-	if strings.Contains(err.Error(), "SECRETTOK") {
-		t.Errorf("the line has the password: %v", err)
-	}
-	if !strings.Contains(err.Error(), "host.example") {
-		t.Errorf("the line lost the filter's cause: %v", err)
+	for _, secret := range []string{"SECRETTOK", "SECRETONE", "SECRETTWO"} {
+		if strings.Contains(err.Error(), secret) {
+			t.Errorf("the line has %s: %v", secret, err)
+		}
 	}
 }
 
@@ -3807,30 +3808,48 @@ func TestARebaseOverACommitTakesUncommittedWork(t *testing.T) {
 	}
 }
 
-// TestAnHTTPURLInAGitLineHasNoCredential is each form of a credential in a URL that git prints.
+// TestAnHTTPURLInAGitLineHasNoCredential is each form of a secret in a URL that git prints: the line
+// has its text before the URL, and none of the secret. A line with no @, ? or # stays whole.
 func TestAnHTTPURLInAGitLineHasNoCredential(t *testing.T) {
+	const hidden = "(a URL and the rest of the line, hidden)"
+	secrets := []string{"SEC", "RET", "123", "SECRET", "ZZS1", "ZZS2", "corp.example"}
 	for raw, want := range map[string]string{
-		"fatal: unable to access 'https://SECRETTOK@host.example/x': failed": "fatal: unable to access '(a URL, hidden) host.example/x': failed",
-		"fatal: https://me:SEC/RET@host.example/x failed":                    "fatal: (a URL, hidden) host.example/x failed",
-		"fatal: https://me:SEC RET@host.example/x failed":                    "fatal: (a URL, hidden) host.example/x failed",
-		"fatal: https://me:123 RET@host.example/x failed":                    "fatal: (a URL, hidden) host.example/x failed",
-		"fatal: https://me:A B C@host.example/x and D@E failed":              "fatal: (a URL, hidden) E failed",
-		"fatal: https://host.example/@scope/pkg failed":                      "fatal: (a URL, hidden) scope/pkg failed",
-		"fatal: https://me@host.example/x?token=SECRETQ failed":              "fatal: (a URL, hidden) host.example/x failed",
-		"fatal: https://host.example: failed":                                "fatal: (a URL, hidden) failed",
-		"fatal: HTTP://host.example/x?token=SECRETQ failed":                  "fatal: HTTP://host.example/x failed",
-		"fatal: http://host.example/x#SECRETQ":                               "fatal: http://host.example/x",
-		"fatal: https://me:SECRETPW@host.example:8443/x":                     "fatal: (a URL, hidden) host.example:8443/x",
-		"fatal: https://host.example:8443/x failed":                          "fatal: https://host.example:8443/x failed",
-		"fatal: me@host.example has no https://host.example/x":               "fatal: me@host.example has no https://host.example/x",
-		"fatal: https://host/x?user=me@corp.example&token=SECRET failed":     "fatal: (a URL, hidden) failed",
-		"fatal: https://me:S@host/x?u=a@b&token=SECRET failed":               "fatal: (a URL, hidden) failed",
-		"fatal: https://host/x#a@SECRET failed":                              "fatal: (a URL, hidden) failed",
-		"fatal: https://host/x?token=SEC@RET failed":                         "fatal: (a URL, hidden) failed",
-		"fatal: no URL at SECRET here":                                       "fatal: no URL at SECRET here",
+		"fatal: https://me:SEC RET@host/x failed":                           "fatal: " + hidden,
+		"fatal: https://me:123 RET@host/x failed":                           "fatal: " + hidden,
+		"fatal: https://SECRET@host/x failed":                               "fatal: " + hidden,
+		"fatal: https://me:SEC/RET@host/x failed":                           "fatal: " + hidden,
+		"fatal: https://host/x?token=SECRET failed":                         "fatal: " + hidden,
+		"fatal: https://host/x?t=ZZS1 ZZS2 failed":                          "fatal: " + hidden,
+		"fatal: https://host/x?t=ZZS1'ZZS2 failed":                          "fatal: " + hidden,
+		`fatal: https://host/x#ZZS1"ZZS2 failed`:                            "fatal: " + hidden,
+		"fatal: HTTPS://host/x?t=ZZS1 ZZS2 failed":                          "fatal: " + hidden,
+		"fatal: http://host/x?t=ZZS1 failed":                                "fatal: " + hidden,
+		"fatal: ftp://me:ZZS1@host/x failed":                                "fatal: " + hidden,
+		"fatal: ftps://host/x?t=ZZS1 failed":                                "fatal: " + hidden,
+		"fatal: https://host/x?user=me@corp.example&token=SECRET failed":    "fatal: " + hidden,
+		"fatal: https://me:S@host/x?u=a@b&token=SECRET failed":              "fatal: " + hidden,
+		"fatal: https://host/x#a@SECRET failed":                             "fatal: " + hidden,
+		"fatal: https://host/x?token=SEC@RET failed":                        "fatal: " + hidden,
+		"fatal: https://host/x and https://me:ZZS1@host/y failed":           "fatal: " + hidden,
+		"fatal: https://me:ZZS1@host/x and https://host/y?t=ZZS2 failed":    "fatal: " + hidden,
+		"fatal: unable to access 'https://me:ZZS1@host/x/': failed":         "fatal: unable to access '" + hidden,
+		"https://host.example: failed":                                      "https://host.example: failed",
+		"fatal: unable to access 'https://host/x/': Could not resolve host": "fatal: unable to access 'https://host/x/': Could not resolve host",
+		"fatal: https://host/x and ftp://host/y failed":                     "fatal: https://host/x and ftp://host/y failed",
+		"ssh://git@host/x: Permission denied":                               "ssh://git@host/x: Permission denied",
+		"sftp://me@host/x: Permission denied":                               "sftp://me@host/x: Permission denied",
+		"me@host.example has no URL?":                                       "me@host.example has no URL?",
 	} {
-		if got := hideHTTP(raw); got != want {
-			t.Errorf("hideHTTP(%q) = %q, want %q", raw, got, want)
+		got := exports.HideURLError(errors.New(hideHTTP(raw))).Error()
+		if got != want {
+			t.Errorf("the line %q prints %q, want %q", raw, got, want)
+		}
+		if strings.Contains(want, hidden) {
+			for _, secret := range secrets {
+				if strings.Contains(got, secret) {
+					t.Errorf("the line %q prints %q, with %s", raw, got, secret)
+				}
+			}
 		}
 	}
 }

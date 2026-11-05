@@ -255,42 +255,17 @@ func atLeast(out string, major, minor int) bool {
 	return err1 == nil && err2 == nil && (ma > major || ma == major && mi >= minor)
 }
 
-// httpStart is where an http or https URL starts, httpURL is such a URL in a line that git prints,
-// up to a space or a quote, and urlTail is what comes before the next space or quote.
-var (
-	httpStart = regexp.MustCompile(`(?i)https?://`)
-	httpURL   = regexp.MustCompile(`(?i)https?://[^\s'"]+`)
-	urlTail   = regexp.MustCompile(`^[^\s'"]*`)
-)
+// httpURL is the start of a URL with the scheme http, https, ftp or ftps, in any case.
+var httpURL = regexp.MustCompile(`(?i)\b(?:https?|ftps?)://`)
 
-// hideHTTP is line with each http or https URL as [withoutCredentials] writes it: no user name,
-// password or query. A password can have a space or a /, so textHiddenURL takes the place of the
-// line from the start of a URL that an @ follows on the line through the last @. After it comes the
-// rest of that word, up to a query, which has the host for the reader. With a ? or a # before that
-// @, the @ is in a query or a fragment, so nothing of that word comes after it. textHiddenURL also
-// takes the place of a URL that [withoutCredentials] returns no address for.
+// hideHTTP is line with the first such URL and all that follows it replaced by textHiddenURL, when
+// an @, a ? or a # follows the URL's start on the line. A credential can have a space, a quote or a
+// /, so no rule can tell where it ends, and nothing after the URL's start stays. With no such
+// character, line stays as it is.
 func hideHTTP(line string) string {
-	if start := httpStart.FindStringIndex(line); start != nil {
-		if at := strings.LastIndex(line, "@"); at > start[0] {
-			rest := line[at+1:]
-			word := urlTail.FindString(rest)
-			rest = rest[len(word):]
-			if cut := strings.IndexAny(word, "?#"); cut >= 0 {
-				word = word[:cut]
-			}
-			if strings.ContainsAny(line[start[0]:at], "?#") {
-				word = ""
-			}
-			if word != "" {
-				word = " " + word
-			}
-			line = line[:start[0]] + textHiddenURL + word + rest
-		}
+	start := httpURL.FindStringIndex(line)
+	if start == nil || !strings.ContainsAny(line[start[0]:], "@?#") {
+		return line
 	}
-	return httpURL.ReplaceAllStringFunc(line, func(raw string) string {
-		if clean := withoutCredentials(raw); clean != "" {
-			return clean
-		}
-		return textHiddenURL
-	})
+	return line[:start[0]] + textHiddenURL
 }
