@@ -1,6 +1,7 @@
 package runcopy
 
-// The texts of the errors this package returns. Each starts with its fix.
+// The texts of the errors this package returns. Each starts with its fix, but for the texts of
+// a bundle and of a run's commit: the caller knows where the person can act, and adds the fix.
 const (
 	textRunID     = "give a run id of letters, digits, dots, dashes and underscores that starts with a letter or a digit: the run's copy goes to a folder named after it, and %s is not such a name"
 	textNoCache   = "set HOME: the copy of a walled run's checkout goes under the user's cache folder, and the lookup of that folder failed: %w"
@@ -9,6 +10,7 @@ const (
 	textFile      = "check that you can read and write %s: %v"
 	textExists    = "remove %s: qory makes it new for each run, and it exists"
 
+	textInRunCopies  = "run qory in your checkout: %s is in %s, the folder of the runs' copies, which a run could have written"
 	textNoHead       = "commit in %s, or start the run in a repository with a commit at HEAD: the run works in a copy of the commit at HEAD, and the fetch of HEAD failed: %w"
 	textPartialClone = "in %s, run git config --unset remote.origin.partialclonefilter, git fetch --refetch origin, git config --unset remote.origin.promisor, and git config --unset extensions.partialClone if it is set: a run's copy has only the objects the repository has, and a partial clone does not have all of them"
 	textBranchAbove  = "rename your branch %s in %s with git branch -m: the run's branch %s goes below that name, and git keeps no branch below a branch"
@@ -28,14 +30,14 @@ const (
 	textState     = "give each setup path's state as Dir.SetupStates reads it: %s is not such a state"
 	textRepoPath  = "give each repository of the run as Dir.Clone returned it: %s is not a folder in the copy"
 
-	textNoBundle        = "look at the git session's output: it wrote no bundle and no record of an empty change for %s, so the session failed or ran past its limit, and nothing came back from the run"
-	textBundleOpen      = "look at %s: qory reads the run's bundle there only as a regular file, and the open failed: %w"
-	textBundleKind      = "look at %s: qory reads the run's bundle only from a regular file, and it is a %s"
-	textBundleMoved     = "look at %s: it changed while qory opened it, so qory read nothing from it"
-	textBundleSize      = "look at %s: qory reads a bundle of at most %d bytes from a run, and it has %d"
-	textBundleGrew      = "look at %s: qory reads a bundle of at most %d bytes from a run, and it grew past that while qory read it"
-	textBundleChecks    = "look at the run's copy in %s: the run's bundle for %s failed git's checks, so no commit of the run reached your repository: %w"
-	textTopEntry        = "look at the run's copy in %s: the run's commit %s in %s adds %s at the top of the repository, where git or qory would act on it, so no commit of the run reached your repository"
+	textNoBundle        = "the git session wrote no bundle and no record of an empty change for %s, so the session failed or ran past its limit, and nothing came back from the run"
+	textBundleOpen      = "the run's bundle %s did not open: %w"
+	textBundleKind      = "the run's bundle %s is a %s, and qory reads only a regular file"
+	textBundleMoved     = "the run's bundle %s changed while qory opened it, so qory read nothing from it"
+	textBundleSize      = "the run's bundle %s has more than qory reads from a run, at most %d bytes: it has %d"
+	textBundleGrew      = "the run's bundle %s grew past what qory reads from a run, at most %d bytes, while qory read it"
+	textBundleChecks    = "the run's bundle for %s failed git's checks, so no commit of the run reached your repository: %w"
+	textTopEntry        = "the run's commit %s in %s adds %s at the top of the repository, where git or qory would act on it, so no commit of the run reached your repository"
 	textQuarantine      = "check that you can write %s: qory fetches the run's commits there first, and git failed: %w"
 	textFetchExists     = "delete %[2]s in %[3]s with git update-ref -d %[2]s, then fetch %[4]s from %[1]s: %[2]s exists, and git fetch moves it only forward: %[5]w"
 	textFetchCheckedOut = "give the run's commits a ref other than %[1]s, which is checked out in %[2]s, then fetch %[3]s from %[4]s: git fetch writes no branch that is checked out: %[5]w"

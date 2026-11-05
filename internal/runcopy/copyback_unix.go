@@ -160,7 +160,7 @@ func (d Dir) copyBackWith(ctx context.Context, dest string, maxFiles int, maxByt
 // artifact push keeps versions outside a control plane, into .qory/artifacts of dest, the
 // person's checkout or folder. The git session leaves .qory out of its commits, so this
 // runs with or without a commit, once the run's containers are gone and before
-// [Dir.Remove]. The folder holds no qory setting, so no acting key applies.
+// [Dir.Remove]. The folder has no qory setting, so no acting key applies.
 //
 // The rules of [Dir.CopyBack] apply: it follows no link on any part of a path, in the copy
 // or in dest, leaves out each link, each .git and .qory at any depth, each file that is not

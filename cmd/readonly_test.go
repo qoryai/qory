@@ -489,6 +489,107 @@ func TestAReadRunRemovesTheSetupContainerBeforeTheJoin(t *testing.T) {
 	}
 }
 
+// TestAReadRunsSetupWorksInACopy is a read run with a setup that writes a key and a file: both
+// stay in the copy, the agent has the copy read-only, the person's repository stays as it was,
+// and nothing comes back.
+func TestAReadRunsSetupWorksInACopy(t *testing.T) {
+	listsRepositories(t)
+	canary := filepath.Join(tempDir(t), "canary")
+	var setupDir, root string
+	codeSetup = func(spec session.SetupSpec) error {
+		setupDir = spec.Dir
+		root, _ = os.Getwd()
+		config := filepath.Join(spec.Dir, ".git", "config")
+		data, err := os.ReadFile(config)
+		if err != nil {
+			return err
+		}
+		writeFile(t, config, string(data)+"[core]\n\tfsmonitor = touch "+canary+"\n")
+		writeFile(t, filepath.Join(spec.Dir, "setup.txt"), "the setup\n")
+		return nil
+	}
+	t.Cleanup(func() { codeSetup = nil })
+	r, _ := readRun(t, nil, readImage, "")
+	if !r.joined {
+		t.Fatalf("%v (exit %d), want the join\n%s", r.err, cmd.ExitCode(r.err), r.out)
+	}
+	if setupDir == "" || setupDir == root {
+		t.Fatalf("the setup ran in %q, the checkout is %q", setupDir, root)
+	}
+	if r.spec.Dir != setupDir || !r.spec.WorkspaceReadOnly {
+		t.Errorf("the session starts in %s, read-only %v; the setup ran in %s", r.spec.Dir, r.spec.WorkspaceReadOnly, setupDir)
+	}
+	for _, m := range checkoutMounts(r.spec) {
+		if !m.ReadOnly {
+			t.Errorf("the session has the read-write mount %s", m.Path)
+		}
+		if m.Path == root {
+			t.Errorf("the session has the checkout %s", root)
+		}
+	}
+	data, err := os.ReadFile(filepath.Join(root, ".git", "config"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	lacks(t, string(data), canary)
+	if _, err := os.Lstat(filepath.Join(root, "setup.txt")); err == nil {
+		t.Error("the setup's file reached the checkout")
+	}
+	if got := gitOutput(t, root, "for-each-ref", "refs/heads/qory/"); got != "" {
+		t.Errorf("a branch came back: %s", got)
+	}
+	if _, err := os.Lstat(setupDir); err == nil {
+		t.Errorf("the copy %s stays", setupDir)
+	}
+}
+
+// TestAReadRunWithAReadWriteMountStops is a read run with a read-write mount from --mount: the
+// run stops with exit 2, before the join, with the fix first. A read-only mount passes.
+func TestAReadRunWithAReadWriteMountStops(t *testing.T) {
+	mount := tempDir(t)
+	t.Run("read-write", func(t *testing.T) {
+		r, _ := readRunArgs(t, []string{"--mount", mount}, nil, readImage, "")
+		if r.joined || cmd.ExitCode(r.err) != cmd.ExitInput {
+			t.Fatalf("%v (exit %d), want exit %d before the join\n%s", r.err, cmd.ExitCode(r.err), cmd.ExitInput, r.out)
+		}
+		wants(t, r.err.Error(), "make the mount "+mount+" read-only, with :ro on --mount or in wall.mounts: ", "; the code is used")
+	})
+	t.Run("read-only", func(t *testing.T) {
+		r, _ := readRunArgs(t, []string{"--mount", mount + ":ro"}, nil, readImage, "")
+		if !r.joined {
+			t.Fatalf("%v (exit %d), want the join\n%s", r.err, cmd.ExitCode(r.err), r.out)
+		}
+	})
+}
+
+// TestAReadRunAtTheHomeFolderStops is a read run with no setup in a checkout that is the home
+// folder or contains it, which it would bind: the run stops before the join, with the fix
+// first. With a setup, the run binds a copy and passes.
+func TestAReadRunAtTheHomeFolderStops(t *testing.T) {
+	for name, below := range map[string]string{"at the home folder": "", "above the home folder": "below"} {
+		t.Run(name, func(t *testing.T) {
+			var docker string
+			r := runFromCodeWith(t, func(string) []string {
+				root, err := os.Getwd()
+				if err != nil {
+					t.Fatal(err)
+				}
+				t.Setenv("HOME", filepath.Join(root, below))
+				t.Setenv("XDG_STATE_HOME", tempDir(t))
+				t.Setenv("XDG_CACHE_HOME", tempDir(t))
+				docker, _ = fakeDocker(t)
+				writeFile(t, filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "forager.yaml"),
+					"wall:\n  adapter: docker\n  command: "+docker+"\n  helper: "+staticELF(t)+"\n  user: \"1000:1000\"\n  image: "+readImage+"\n")
+				return nil
+			}, []string{"--home", filepath.Join(tempDir(t), "home")}, nil, nil)
+			if r.joined || cmd.ExitCode(r.err) != cmd.ExitInput {
+				t.Fatalf("%v (exit %d), want exit %d before the join\n%s", r.err, cmd.ExitCode(r.err), cmd.ExitInput, r.out)
+			}
+			wants(t, r.err.Error(), "start the run from a repository folder: the folder ", "your home folder", "; the code is used")
+		})
+	}
+}
+
 // TestAWriteRunKeepsTheSetupContainer is a walled write run with a setup: it never calls
 // RemoveSetup, so the setup container stays up.
 func TestAWriteRunKeepsTheSetupContainer(t *testing.T) {

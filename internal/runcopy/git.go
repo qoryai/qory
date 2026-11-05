@@ -43,7 +43,7 @@ type gitError struct {
 
 func (e *gitError) Error() string { return "git " + e.subcommand + ": " + e.line }
 
-// exitOf is git's exit status in err, -1 when err is no [*gitError] or git did not
+// exitOf is git's exit status in err, -1 when err is not a [*gitError] or git did not
 // exit.
 func exitOf(err error) int {
 	var ge *gitError

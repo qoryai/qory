@@ -116,3 +116,19 @@ func shown(s string) string { return preparation.ShownPath(s) }
 func fileErr(path string, err error) error {
 	return fmt.Errorf(textFile, shown(path), exports.HideError(err))
 }
+
+// InRunCopies returns an error when the folder at path is a run's copy or lies inside one: the
+// folder of the copies, under the user's cache folder. A run could have written such a folder,
+// so no run and no compose starts there. It returns nil when the lookup of the cache folder
+// fails, since qory then makes no copy.
+func InRunCopies(path string) error {
+	base, err := os.UserCacheDir()
+	if err != nil {
+		return nil
+	}
+	runs := filepath.Join(base, "qory", "runs")
+	if how := session.Overlap(path, runs); how == "is" || how == "lies inside" {
+		return fmt.Errorf(textInRunCopies, shown(path), shown(runs))
+	}
+	return nil
+}

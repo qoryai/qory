@@ -130,9 +130,7 @@ func (p Probe) Report(ctx context.Context) Report {
 	for _, rt := range p.Runtimes {
 		checks = append(checks, p.runtime(ctx, rt))
 	}
-	for _, name := range []string{"git", "gh"} {
-		checks = append(checks, p.program(ctx, name))
-	}
+	checks = append(checks, p.git(ctx), p.program(ctx, "gh"))
 	checks = append(checks, p.docker())
 	return Report{Version: ReportVersion, Checks: checks}
 }
@@ -238,6 +236,48 @@ func (p Probe) program(ctx context.Context, name string) Check {
 		return Check{name, Fail, err.Error()}
 	}
 	return Check{name, Pass, out}
+}
+
+// gitSessionDirs are the folders of the PATH of a walled run's git session.
+var gitSessionDirs = []string{"/usr/local/bin", "/usr/bin", "/bin"}
+
+// git checks that git runs, and what the git session of a walled run that may write needs of
+// it: git 2.25 or later, for --pathspec-from-file, in [gitSessionDirs].
+func (p Probe) git(ctx context.Context) Check {
+	line, at, err := p.run(ctx, "git", "--version")
+	if err != nil {
+		return Check{"git", Fail, err.Error()}
+	}
+	session := p.lookPath("git", gitSessionDirs)
+	if session == "" {
+		return Check{"git", Fail, "install git in " + strings.Join(gitSessionDirs, ", ") + ": the git session of a walled run runs git from there, and the image has none in them"}
+	}
+	shown := line
+	if session != at {
+		run := p.Exec
+		if run == nil {
+			run = execute
+		}
+		out, err := run(ctx, p.host(session), "--version")
+		if err != nil {
+			return Check{"git", Fail, fmt.Sprintf("%s --version failed: %v", exports.Value(session, false), exports.HideValueError(err, session))}
+		}
+		shown, _, _ = strings.Cut(strings.TrimSpace(string(out)), "\n")
+		shown = exports.HideValues(shown)
+	}
+	if !gitAtLeast225(shown) {
+		return Check{"git", Fail, "install git 2.25 or later in " + strings.Join(gitSessionDirs, ", ") + ": the git session of a walled run needs it, and " + exports.Value(session, false) + " prints " + shown}
+	}
+	return Check{"git", Pass, line}
+}
+
+// gitAtLeast225 reports whether line, as git --version prints it, has git 2.25 or later.
+func gitAtLeast225(line string) bool {
+	var major, minor int
+	if _, err := fmt.Sscanf(line, "git version %d.%d", &major, &minor); err != nil {
+		return false
+	}
+	return major > 2 || major == 2 && minor >= 25
 }
 
 // run finds a program on the image's PATH and runs it, returning the first line it

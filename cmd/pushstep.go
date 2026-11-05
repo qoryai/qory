@@ -75,7 +75,7 @@ var branchWait = func(ctx context.Context, d time.Duration) error {
 }
 
 // The time the push step has after a stop. A signal leaves pushAfterSignal: it fits inside
-// the 30 seconds [child.DefaultGrace] gives a pool's run after SIGTERM, with the 10 seconds
+// the 30 seconds that [child.DefaultGrace] leaves a pool's run after SIGTERM, with the 10 seconds
 // of a runtime's default stop and the close. Past a run's time limit no process stops
 // qory run, so the step has pushAfterLimit, and the run can pass its limit by that time.
 const (
@@ -137,18 +137,25 @@ func canPush(fromCode *codeRun, readOnly bool, branch *preparation.WorkBranch) b
 	return fromCode.writes() && !readOnly && branch != nil
 }
 
+// returnContext is the context of the return of a local run's work: a stop has ended ctx, so
+// it is not ended by ctx, and only again, a second signal, ends it. The git session has
+// [runcopy.SessionLimit] and each check [copyStepLimit], and a first signal leaves that time.
+func returnContext(ctx, again context.Context) (context.Context, func()) {
+	back, cancel := context.WithCancel(context.WithoutCancel(ctx))
+	stop := context.AfterFunc(again, cancel)
+	return back, func() {
+		stop()
+		cancel()
+	}
+}
+
 // removeThenPush removes the setup container of a run that gets the push step, then runs
 // the git session of a run with a copy, then [pushWork], with ctx as the bound of all three.
-// A process in that container can write the working folder, so the check of the step holds
-// only once the container is gone. After a failed removal [openedRun.HostProxy] and
+// A process in that container can write the working folder, so the check of the step is
+// valid only once the container is gone. After a failed removal [openedRun.HostProxy] and
 // [openedRun.StartStep] still work, so this check alone stops the push, and the run has no
 // step. A git session that fails stops the push the same way.
-func removeThenPush(ctx context.Context, run openedRun, stderr io.Writer, branch *preparation.WorkBranch, dir, runID string, runNumber int, out session.Outcome, copied *runCopy, spec *runSpec, said func(string)) (noStep bool, err error) {
-	defer func() {
-		if err != nil && copied != nil {
-			copied.kept(said)
-		}
-	}()
+func removeThenPush(ctx context.Context, run openedRun, stderr io.Writer, branch *preparation.WorkBranch, dir, runID string, runNumber int, out session.Outcome, copied *runCopy, spec *runSpec) (noStep bool, err error) {
 	if err := run.RemoveSetup(ctx); err != nil {
 		return true, fmt.Errorf(textSetupStays, shownError(err))
 	}
@@ -220,20 +227,17 @@ func pushWork(ctx context.Context, run openedRun, stderr io.Writer, branch *prep
 func pushCopy(ctx context.Context, copied *runCopy, branch *preparation.WorkBranch, p proxygit.Proxy, w io.Writer) (*branchformat.Branch, error) {
 	qs, err := copied.quarantine(ctx, nil)
 	if err != nil {
-		return nil, err
+		return nil, copied.checkFailed(ctx, err)
 	}
 	from, lines, err := pushable(ctx, qs)
 	if err != nil {
-		return nil, err
+		return nil, copied.checkFailed(ctx, err)
 	}
-	document, err := preparation.PushFrom(ctx, from, os.Environ(), branch, p, w)
-	if err != nil {
-		return nil, err
-	}
+	// Before the push, so a push that fails hides no change of a setting.
 	for _, line := range lines {
 		fmt.Fprintln(w, line)
 	}
-	return document, nil
+	return preparation.PushFrom(ctx, from, os.Environ(), branch, p, w)
 }
 
 // shownError is err as a line shows it: printable, with every URL's password and every

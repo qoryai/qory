@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"slices"
+	"strconv"
 	"strings"
 
 	"golang.org/x/sys/unix"
@@ -139,6 +140,102 @@ func writable(dir int, path string, depth int) error {
 		unix.Close(sub)
 		if err != nil {
 			return err
+		}
+	}
+	return nil
+}
+
+// disarmedSuffix goes after the name of what [Dir.Disarm] renames.
+const disarmedSuffix = "-from-run"
+
+// Disarm renames each .git in the copy and in the bundle folder to .git-from-run, mode 0700,
+// and each entry that makes a folder a git folder, as [gitDirLike] reads it, the same way, so
+// a git in a copy that stays finds no repository and runs nothing the run planted. It follows
+// no link: it opens each folder from the one above it with O_NOFOLLOW, and a link named .git
+// is renamed as a link. Call it once the run's containers are gone.
+func (d Dir) Disarm() error {
+	for _, top := range []string{d.Work(), d.Bundle()} {
+		fd, err := unix.Open(top, dirFlags, 0)
+		if errors.Is(err, unix.ENOENT) {
+			continue
+		}
+		if err != nil {
+			return fileErr(top, err)
+		}
+		err = disarm(fd, top, 0)
+		unix.Close(fd)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// disarm is [Dir.Disarm] of the folder dir at path.
+func disarm(dir int, path string, depth int) error {
+	if depth > maxOpenFolders {
+		return fmt.Errorf(textTooDeep, shown(path), maxOpenFolders)
+	}
+	names, err := readNames(dir)
+	if err != nil {
+		return fileErr(path, err)
+	}
+	like := gitDirLike(names)
+	for _, name := range names {
+		at := path + "/" + name
+		switch f := folded(name); {
+		case f == folded(".git"):
+			if err := renameOut(dir, name, at); err != nil {
+				return err
+			}
+			continue
+		case like && (f == "head" || f == "commondir"):
+			if err := renameOut(dir, name, at); err != nil {
+				return err
+			}
+			continue
+		}
+		var st unix.Stat_t
+		if err := unix.Fstatat(dir, name, &st, unix.AT_SYMLINK_NOFOLLOW); err != nil || st.Mode&unix.S_IFMT != unix.S_IFDIR {
+			continue
+		}
+		sub, err := unix.Openat(dir, name, dirFlags, 0)
+		if errors.Is(err, unix.EACCES) {
+			if err := chmodFolder(dir, name); err != nil {
+				return fileErr(at, err)
+			}
+			sub, err = unix.Openat(dir, name, dirFlags, 0)
+		}
+		if err != nil {
+			return fileErr(at, err)
+		}
+		err = disarm(sub, at, depth+1)
+		unix.Close(sub)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// renameOut renames the entry name in dir to a free name with [disarmedSuffix], and sets a
+// folder to mode 0700. It follows no link.
+func renameOut(dir int, name, at string) error {
+	to := strings.ToLower(name) + disarmedSuffix
+	for i := 1; ; i++ {
+		var st unix.Stat_t
+		if err := unix.Fstatat(dir, to, &st, unix.AT_SYMLINK_NOFOLLOW); errors.Is(err, unix.ENOENT) {
+			break
+		}
+		to = strings.ToLower(name) + disarmedSuffix + "-" + strconv.Itoa(i)
+	}
+	if err := unix.Renameat(dir, name, dir, to); err != nil {
+		return fileErr(at, err)
+	}
+	var st unix.Stat_t
+	if err := unix.Fstatat(dir, to, &st, unix.AT_SYMLINK_NOFOLLOW); err == nil && st.Mode&unix.S_IFMT == unix.S_IFDIR {
+		if err := chmodFolder(dir, to); err != nil {
+			return fileErr(at, err)
 		}
 	}
 	return nil

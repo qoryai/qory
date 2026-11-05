@@ -342,7 +342,19 @@ while [ "$n" -lt "$count" ]; do
 		i=$((i + 1))
 	done
 	exec 3<&-
-	g add -A --pathspec-from-file="$P" --pathspec-file-nul
+	# git add exits 1 when a path left out here is also ignored, and it adds the rest all the
+	# same. Any other failure exits 128.
+	set +e
+	g add -A --pathspec-from-file="$P" --pathspec-file-nul 2> "$G/add-errors"
+	added=$?
+	set -e
+	case $added in
+	0 | 1) ;;
+	*)
+		cat "$G/add-errors" >&2
+		exit "$added"
+		;;
+	esac
 	g reset -q "$base" --pathspec-from-file="$R" --pathspec-file-nul
 
 	set +e

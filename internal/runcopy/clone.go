@@ -63,6 +63,9 @@ func (d Dir) Clone(ctx context.Context, checkout, branch string) ([]Repository, 
 	if err != nil {
 		return nil, fileErr(checkout, err)
 	}
+	if err := InRunCopies(checkout); err != nil {
+		return nil, err
+	}
 	for _, p := range []string{d.Work(), filepath.Join(d.root, sourcesName)} {
 		if _, err := os.Lstat(p); err == nil {
 			return nil, fmt.Errorf(textExists, shown(p))

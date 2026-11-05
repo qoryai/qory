@@ -1935,7 +1935,7 @@ func TestAFailedRemovalOfTheSetupContainerRunsNoPush(t *testing.T) {
 			if posts, _, _ := p.api.counts(); posts != 0 {
 				t.Errorf("%d POST, want 0", posts)
 			}
-			wants(t, r.out, "look at the run's copy in ")
+			lacksCopyPath(t, r.out)
 		})
 	}
 }

@@ -1247,9 +1247,9 @@ func TestRunRefusesAMountOfALinkOnTheWayToTheRecords(t *testing.T) {
 		state, mount, want string
 		exit               int
 	}{
-		{home, links, "mount a narrower folder: the mount " + links + " contains qory's state directory " + filepath.Join(home, "qory") + ", and a walled run may change any file in a read-write mount", cmd.ExitInput},
+		{home, links, "make the mount " + links + " read-only, with :ro on --mount or in wall.mounts: it contains qory's state directory " + filepath.Join(home, "qory") + ", and a walled run may change any file in a read-write mount", cmd.ExitInput},
 		{home, links + ":ro", "the mount " + links + " contains " + home + ", which leads to qory's run records, so the run does not start. Mount a narrower path (mount_contains_forager_files)", 1},
-		{filepath.Join(user, ".local", "state"), above, "mount a narrower folder: the mount " + above + " contains qory's state directory " + filepath.Join(user, ".local", "state", "qory") + ", and a walled run may change any file in a read-write mount", cmd.ExitInput},
+		{filepath.Join(user, ".local", "state"), above, "make the mount " + above + " read-only, with :ro on --mount or in wall.mounts: it contains qory's state directory " + filepath.Join(user, ".local", "state", "qory") + ", and a walled run may change any file in a read-write mount", cmd.ExitInput},
 	} {
 		t.Setenv("XDG_STATE_HOME", c.state)
 		out, err := run(t, "run", "claude", "--mount", c.mount)

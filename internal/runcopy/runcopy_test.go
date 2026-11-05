@@ -668,7 +668,7 @@ func TestGitSessionWithNoChangeWritesNoBundle(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err := d.Quarantine(ctx, branch, repos)
-	hasPrefix(t, "no record", err, "look at the git session's output")
+	hasPrefix(t, "no record", err, "the git session wrote no bundle")
 	if errors.Is(err, ErrNoBundle) {
 		t.Error("a session that wrote nothing counts as one with no change")
 	}
@@ -835,7 +835,7 @@ func TestOpenBundleTakesARegularFileAlone(t *testing.T) {
 		if f != nil {
 			f.Close()
 		}
-		hasPrefix(t, filepath.Base(p), err, "look at ")
+		hasPrefix(t, filepath.Base(p), err, "the run's bundle ")
 	}
 	f, err = OpenBundle(regular)
 	if err != nil {
@@ -877,7 +877,7 @@ func TestCorruptObjectFailsTheQuarantineFetch(t *testing.T) {
 		bad := gitIn(t, d.Work(), "tree "+tree+"\nparent "+base+"\n\nno author\n", "hash-object", "-t", "commit", "-w", "--literally", "--stdin")
 		handBundle(t, d, bad, base)
 		_, err := d.Quarantine(ctx, branch, repos)
-		hasPrefix(t, "corrupt commit", err, "look at the run's copy")
+		hasPrefix(t, "corrupt commit", err, "the run's bundle for ")
 		noRunCommit(t, src, bad)
 	})
 }
@@ -897,7 +897,7 @@ func TestTopEntryFailsTheQuarantine(t *testing.T) {
 				commit := testGit(t, work, "commit-tree", tree, "-p", base, "-m", "adds "+name)
 				handBundle(t, d, commit, base)
 				_, err := d.Quarantine(ctx, branch, repos)
-				hasPrefix(t, name, err, "look at the run's copy")
+				hasPrefix(t, name, err, "the run's ")
 				noRunCommit(t, src, commit)
 			})
 		})
@@ -1492,6 +1492,26 @@ func TestAFilterThatCannotRunStopsTheClone(t *testing.T) {
 	}
 }
 
+// TestAnIgnoredLeftOutPathStopsNothing is a .gitignore that lists .qory and a link of the
+// compose: git add exits 1 for such a path, and the session goes on with the rest.
+func TestAnIgnoredLeftOutPathStopsNothing(t *testing.T) {
+	isolate(t)
+	sessionGit(t)
+	src, _ := person(t)
+	write(t, src, ".gitignore", ".qory\nlinked\n")
+	testGit(t, src, "add", ".gitignore")
+	commitAll(t, src, "ignore")
+	d, repos := cloneRun(t, src)
+	write(t, d.Work(), ".qory/home/x", "x\n")
+	link(t, d.Work(), "linked", ".qory/home/x")
+	write(t, d.Work(), "work.txt", "the run\n")
+	q := bringBack(t, d, src, repos, map[string]LeftOut{"": {Links: []string{"linked"}}})
+	all := files(t, src, q.Head)
+	if !slices.Contains(all, "work.txt") || slices.Contains(all, "linked") || slices.Contains(all, ".qory/home/x") {
+		t.Errorf("the commit has: %v", all)
+	}
+}
+
 // TestAPartialCloneStops is a partial clone: the clone stops with the commands that fetch the
 // missing objects, and after those commands it passes.
 func TestAPartialCloneStops(t *testing.T) {
@@ -1550,6 +1570,82 @@ func TestAFurtherRepositoryGetsItsSubmodules(t *testing.T) {
 	}
 	if got := read(t, filepath.Join(d.Work(), ".qory", "repositories", "other"), sub+"/lib.txt"); got != "lib\n" {
 		t.Errorf("the submodule's file has %q", got)
+	}
+}
+
+// TestAKeptCopyRunsNothingInAGitStatus is a copy with every setting and hook that would run a
+// program, a planted bare repository at the top and below it, a link named .git in a folder,
+// and a bundle folder with a git folder. After [Dir.Disarm], git status in each runs nothing.
+func TestAKeptCopyRunsNothingInAGitStatus(t *testing.T) {
+	isolate(t)
+	src, _ := person(t)
+	d, _ := cloneRun(t, src)
+	program, ran := marker(t)
+	plant(t, d.Work(), program)
+	outside := t.TempDir()
+	testGit(t, outside, "init", "--quiet")
+	testGit(t, outside, "config", "core.fsmonitor", program)
+	link(t, d.Work(), "sub/.git", filepath.Join(outside, ".git"))
+	for _, f := range []string{"bare/HEAD", "bare/objects/x", "bare/refs/x"} {
+		write(t, d.Work(), f, "ref: refs/heads/main\n")
+	}
+	write(t, d.Work(), "bare/config", "[core]\n\tfsmonitor = "+program+"\n")
+	write(t, d.Work(), "HEAD", "ref: refs/heads/main\n")
+	write(t, d.Work(), "objects/x", "x\n")
+	write(t, d.Bundle(), "git-0/HEAD", "ref: refs/heads/main\n")
+	write(t, d.Bundle(), "git-0/objects/x", "x\n")
+	write(t, d.Bundle(), "git-0/config", "[core]\n\tfsmonitor = "+program+"\n")
+	if err := d.Disarm(); err != nil {
+		t.Fatal(err)
+	}
+	for _, rel := range []string{".git", "sub/.git", "bare/HEAD", "HEAD"} {
+		if _, err := os.Lstat(filepath.Join(d.Work(), filepath.FromSlash(rel))); err == nil {
+			t.Errorf("%s stays", rel)
+		}
+	}
+	info, err := os.Lstat(filepath.Join(d.Work(), ".git-from-run"))
+	if err != nil || info.Mode().Perm() != 0o700 {
+		t.Errorf(".git-from-run: %v, %v", info, err)
+	}
+	if target, err := os.Readlink(filepath.Join(d.Work(), "sub", ".git-from-run")); err != nil || target != filepath.Join(outside, ".git") {
+		t.Errorf("the link is %q (%v)", target, err)
+	}
+	for _, dir := range []string{d.Work(), filepath.Join(d.Work(), "sub"), filepath.Join(d.Work(), "bare"), filepath.Join(d.Bundle(), "git-0")} {
+		c := gitCmd(dir, "status")
+		c.Env = append(c.Env, "GIT_CEILING_DIRECTORIES="+filepath.Dir(d.Root()))
+		if out, err := c.CombinedOutput(); err == nil {
+			t.Errorf("git status passed in %s:\n%s", dir, out)
+		}
+	}
+	if data, err := os.ReadFile(ran); err == nil {
+		t.Errorf("a program ran: %s", data)
+	}
+}
+
+// TestACheckoutInARunsCopyStops is a repository and a plain folder under the folder of the
+// copies: neither gets a copy, and the line starts with the fix.
+func TestACheckoutInARunsCopyStops(t *testing.T) {
+	isolate(t)
+	src, _ := person(t)
+	d, _ := cloneRun(t, src)
+	other, err := New("run-other")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = other.Remove() })
+	_, err = other.Clone(context.Background(), d.Work(), branch)
+	if err == nil || !strings.HasPrefix(err.Error(), "run qory in your checkout: ") {
+		t.Errorf("Clone: %v", err)
+	}
+	if _, err := os.Lstat(other.Work()); err == nil {
+		t.Error("Clone made a copy")
+	}
+	err = other.CopyFolder(context.Background(), d.Work())
+	if err == nil || !strings.HasPrefix(err.Error(), "run qory in your checkout: ") {
+		t.Errorf("CopyFolder: %v", err)
+	}
+	if err := InRunCopies(src); err != nil {
+		t.Errorf("the person's repository: %v", err)
 	}
 }
 

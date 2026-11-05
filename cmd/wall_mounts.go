@@ -81,7 +81,19 @@ func reservedMounts(root string, mounts []wall.Mount) error {
 			continue
 		}
 		if relation := reserved(m.Path); relation != "" {
-			return input(fmt.Errorf("mount a narrower folder: the mount %s %s, and a walled run may change any file in a read-write mount", hostgit.Shown(m.Path), relation))
+			return input(fmt.Errorf("make the mount %s read-only, with :ro on --mount or in wall.mounts: it %s, and a walled run may change any file in a read-write mount", hostgit.Shown(m.Path), relation))
+		}
+	}
+	return nil
+}
+
+// readBindsReserved stops a read run with no setup, which binds the checkout at root and the
+// working folder cwd themselves, when one of them is or contains the home folder or qory's
+// state directory: the agent could read every file of the person there.
+func readBindsReserved(root, cwd string) error {
+	for _, p := range []string{root, cwd} {
+		if relation := reserved(p); relation != "" {
+			return input(fmt.Errorf("start the run from a repository folder: the folder %s %s, and a read run binds it into the agent's container%s", hostgit.Shown(p), relation, codeUsed))
 		}
 	}
 	return nil

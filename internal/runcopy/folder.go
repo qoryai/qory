@@ -98,6 +98,9 @@ func (d Dir) copyFolderOf(ctx context.Context, src, leave string, maxEntries int
 	if !info.IsDir() {
 		return fmt.Errorf(textFolderOnly, shown(src))
 	}
+	if err := InRunCopies(src); err != nil {
+		return err
+	}
 	if session.Overlap(src, d.root) != "" {
 		return fmt.Errorf(textFolderHolds, shown(d.root))
 	}

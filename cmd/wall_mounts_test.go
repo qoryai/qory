@@ -32,7 +32,7 @@ func walledSection(t *testing.T) string {
 // home folder or qory's state directory by relation: "is your home folder", or
 // "contains your home folder" and its path, and the same for "qory's state directory".
 func mountLine(path, relation string) string {
-	return "mount a narrower folder: the mount " + path + " " + relation + ", and a walled run may change any file in a read-write mount"
+	return "make the mount " + path + " read-only, with :ro on --mount or in wall.mounts: it " + relation + ", and a walled run may change any file in a read-write mount"
 }
 
 // TestAWalledRunWithAMountOfTheHomeFolderStopsFirst runs behind the fake wall with a

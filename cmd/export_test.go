@@ -124,26 +124,31 @@ func RunGitSessionsOnHost() {
 		if !isGitSession(spec) {
 			return before(r, ctx, spec)
 		}
-		spec, err := hostGitFolder(spec)
-		if err != nil {
+		return GitSessionOnHost(ctx, spec)
+	}
+}
+
+// GitSessionOnHost runs the git session spec as a process on this machine.
+func GitSessionOnHost(ctx context.Context, spec session.SessionSpec) (*session.Result, error) {
+	spec, err := hostGitFolder(spec)
+	if err != nil {
+		return nil, err
+	}
+	c := exec.CommandContext(ctx, spec.Command, spec.Args...)
+	c.Dir, c.Env, c.Stdout, c.Stderr = spec.Dir, spec.Env, spec.Stdout, spec.Stderr
+	res := &session.Result{}
+	if err := c.Run(); err != nil {
+		if ctx.Err() != nil {
+			res.TimedOut = true
+			return res, nil
+		}
+		var exit *exec.ExitError
+		if !errors.As(err, &exit) {
 			return nil, err
 		}
-		c := exec.CommandContext(ctx, spec.Command, spec.Args...)
-		c.Dir, c.Env, c.Stdout, c.Stderr = spec.Dir, spec.Env, spec.Stdout, spec.Stderr
-		res := &session.Result{}
-		if err := c.Run(); err != nil {
-			if ctx.Err() != nil {
-				res.TimedOut = true
-				return res, nil
-			}
-			var exit *exec.ExitError
-			if !errors.As(err, &exit) {
-				return nil, err
-			}
-			res.ExitCode = exit.ExitCode()
-		}
-		return res, nil
+		res.ExitCode = exit.ExitCode()
 	}
+	return res, nil
 }
 
 // SetGitSession makes the join of a git session return what f returns, and returns what
@@ -254,6 +259,8 @@ type Nowhere struct {
 	Real         bool
 	PolicyImage  string
 	OnImage      func(session.Image)
+	// CloseErr, when not nil, is the error of the run's Close, which then returns no result.
+	CloseErr error
 	// RunAPI is the base URL of the run's run API, "" for a server that returns 404 with
 	// no error code to every request, as Qory Apiary does with its feature workflow_model
 	// off.
@@ -496,6 +503,9 @@ func (n *nowhere) Close(ctx context.Context, out session.Outcome) (*session.Clos
 	}
 	n.ended = true
 	n.closed(out)
+	if n.values.CloseErr != nil {
+		return nil, n.values.CloseErr
+	}
 	if n.at != nil {
 		closed, err := n.at.run.Close(ctx, out)
 		_, endErr := n.at.g.Close(ctx)

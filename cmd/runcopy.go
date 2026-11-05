@@ -23,24 +23,31 @@ import (
 )
 
 // The lines of a walled write run, which works in a copy of the person's checkout. A line
-// with a path of the copy tells the person where the run's work stays.
+// with a path of the copy shows the person where the run's work stays. The texts of a cause go
+// after [textCopyRead] or [textCopyAgain], which have the fix.
 const (
-	textCopyMount      = "make the mount %s read-only, with :ro on --mount or in wall.mounts: a run that may write works in a copy of the checkout, and a read-write mount lets it write your files directly"
+	textCopyMount      = "make the mount %s read-only, with :ro on --mount or in wall.mounts: a walled run reads the checkout or works in a copy of it, and a read-write mount lets it write your files directly"
 	textCopyOutside    = "run qory inside the checkout %s: a run that may write works in a copy of the checkout, and the working folder %s is outside it"
 	textCopyNoFolder   = "commit %[1]s, or run qory in a folder that the commit at HEAD has: a run that may write works in a copy of that commit, which has no folder %[1]s"
 	textCopyOnBranch   = "the run's commits are on %s in %s."
 	textCopyActing     = " They change these qory settings: %s. Check them before you check out the branch."
 	textCopyPushActing = "qory run: the run's commits in %s change these qory settings: %s. Check them before you check out the branch."
-	textCopyLimit      = "look at the run's copy in %s: the git session ran past its limit of %s, so nothing came back from the run"
-	textCopyNoSession  = "look at the run's copy in %s: the git session did not start, so nothing came back from the run: %s"
-	textCopyClosed     = "look at the run's copy in %s: the run ended before the git session started, so nothing came back from the run"
-	textCopyStays      = "look at the run's copy in %s, then remove it: nothing more came back from the run"
+	textCopyRead       = "read the run's files in %s, and run no git there: %s%s"
+	textCopyAgain      = "take the work item in again in Qory Apiary: %s%s"
+	textCopyLimit      = "the git session ran past its limit of %s, so nothing came back from the run"
+	textCopyNoSession  = "the git session did not start, so nothing came back from the run: %s"
+	textCopyExited     = "the git session exited with %d, so nothing came back from the run"
+	textCopyCut        = "%s during the git session, so nothing came back from the run"
+	textCopyCheckCut   = "%s during the check of the run's commits, so nothing came back from the run"
+	textCopyClosed     = "the run ended before the git session started, so nothing came back from the run"
+	textCopyStays      = "read the run's files in %s, run no git there, then remove the folder: nothing more came back from the run"
 	textCopyBack       = "copied %s back to %s from the run, and deleted %s there."
 	textCopyLeftOut    = "left out of the copy back to your folder: %s."
 	textCopyConflicts  = "you and the run both changed these files, so yours stay: %s."
 	textCopyActingKept = "the run changed these qory settings, so those files stay as you have them: %s."
 	textCopyNotIn      = "left out of the run's copy: %s."
 	textCopyNoRemove   = "remove %s by hand: %s"
+	textCopyNoDisarm   = "remove %s, and run no git there: qory renames each .git in a copy it keeps, and that failed: %s"
 )
 
 // copyStepLimit is how long the check of a run's bundles, or a fetch from them, may take.
@@ -80,20 +87,57 @@ type runCopy struct {
 	root string
 	// branch is the branch of the copy that the run works on.
 	branch string
-	// plain says the checkout is no git working tree: [runcopy.Dir.CopyBack] brings the
+	// plain is whether the checkout is not a git working tree: [runcopy.Dir.CopyBack] brings the
 	// files back.
 	plain bool
 	// repos are the repositories of the copy, the person's first, nil for a plain folder.
 	repos []runcopy.Repository
 	// out is what the git session leaves out of its commit, by [runcopy.Repository.Path].
 	out map[string]runcopy.LeftOut
-	// keep says the copy stays when the run ends: nothing, or not everything, came back.
+	// keep is whether the copy stays when the run ends: nothing, or not everything, came back.
 	keep bool
+	// readOnly is whether the run only reads: its setup works in the copy, the agent has the copy
+	// read-only, and nothing comes back.
+	readOnly bool
+	// pushes is whether the run gets the push step. The person may have no access to this machine,
+	// so no line has a path of the copy, and the copy does not stay.
+	pushes bool
+	// fromCode is whether the run comes from a run code: a line that ends it ends with [codeUsed].
+	fromCode bool
+	// cutBy is what ended a step whose context ended, as a line has it.
+	cutBy func() string
+}
+
+// stopped is the line of a return of the run's work that stopped with cause. Past it, the copy
+// stays, unless the run gets the push step.
+func (c *runCopy) stopped(cause string) error {
+	if c.pushes {
+		return fmt.Errorf(textCopyAgain, strings.ReplaceAll(cause, c.dir.Root(), "the run's folder"), c.used())
+	}
+	c.keep = true
+	return fmt.Errorf(textCopyRead, exports.Value(c.dir.Work(), false), cause, c.used())
+}
+
+// used is what ends a line that ends the run: [codeUsed] for a run from a run code.
+func (c *runCopy) used() string {
+	if c.fromCode {
+		return codeUsed
+	}
+	return ""
+}
+
+// checkFailed is the line of a check of the run's commits that failed with err, under ctx: the
+// cut, when ctx ended, and never a failed check for it.
+func (c *runCopy) checkFailed(ctx context.Context, err error) error {
+	if ctx.Err() != nil && c.cutBy != nil {
+		return c.stopped(fmt.Sprintf(textCopyCheckCut, c.cutBy()))
+	}
+	return c.stopped(shownError(err))
 }
 
 // startCopy makes the copy of the checkout at root for the run runID. branch is the branch
 // the run works on, "" for [runBranch]. keepOut are the folders the copy must not overlap.
-// noRepository says the run comes from a run code or a run key and lists no repositories: in
+// noRepository is whether the run comes from a run code or a run key and lists no repositories: in
 // a folder where git init ran and that has no commit, it gets the copy of a plain folder with
 // .git left out. A local run in such a folder stops, since a repository needs a commit.
 func startCopy(ctx context.Context, root, runID, branch string, noRepository bool, keepOut ...string) (*runCopy, error) {
@@ -140,10 +184,18 @@ func (c *runCopy) artifactsIn(ctx context.Context, report func(string)) error {
 	return err
 }
 
-// done removes the copy, unless a line of the run told the person that it stays. report
-// prints a line of qory run.
+// done removes the copy, unless a line of the run told the person that it stays. A copy that
+// stays gets no .git, so a git there runs nothing the run planted. After a failed close a
+// container of the run may be left, and it could write the copy again. report prints a line of
+// qory run.
 func (c *runCopy) done(report func(string)) {
-	if c == nil || c.keep {
+	if c == nil {
+		return
+	}
+	if c.keep {
+		if err := c.dir.Disarm(); err != nil {
+			report(fmt.Sprintf(textCopyNoDisarm, exports.Value(c.dir.Root(), false), exports.HideError(err)))
+		}
 		return
 	}
 	if err := c.dir.Remove(); err != nil {
@@ -172,13 +224,14 @@ func (c *runCopy) artifactsBack(ctx context.Context, report func(string)) bool {
 	return true
 }
 
-// kept marks the copy to stay and prints where it is, once.
+// kept marks the copy to stay and prints where it is, once. A run with the push step has no
+// such line, see [runCopy.pushes].
 func (c *runCopy) kept(report func(string)) {
-	if c.keep {
+	if c.keep || c.pushes {
 		return
 	}
 	c.keep = true
-	report(fmt.Sprintf(textCopyStays, exports.Value(c.dir.Work(), false)))
+	report(fmt.Sprintf(textCopyStays, exports.Value(c.dir.Work(), false)) + c.used())
 }
 
 // composedIn is at with the home in the copy, for a compose in a checkout whose home is
@@ -193,6 +246,7 @@ func (c *runCopy) composedIn(at places) (places, error) {
 	}
 	at.dir = dir
 	at.home = filepath.Join(work, config.DefaultHome)
+	at.previous = at.report
 	at.report = reportFor(at.home)
 	at.linksIn = work
 	return at, nil
@@ -218,7 +272,7 @@ func (c *runCopy) bind(spec *runSpec, at places, cwd string) error {
 	}
 	spec.Dir = dir
 	for i, m := range spec.Mounts {
-		if m.Path == at.root && !m.ReadOnly {
+		if m.Path == at.root && (!m.ReadOnly || c.readOnly) {
 			spec.Mounts[i].Path = work
 		}
 	}
@@ -295,7 +349,7 @@ func (c *runCopy) recordSetup(ctx context.Context) error {
 func (c *runCopy) gitSession(ctx context.Context, run openedRun, spec *runSpec, message string) error {
 	gs, err := c.dir.GitSession(ctx, c.branch, message, c.repos, c.out)
 	if err != nil {
-		return fmt.Errorf(textCopyNoSession, exports.Value(c.dir.Work(), false), shownError(err))
+		return c.stopped(fmt.Sprintf(textCopyNoSession, shownError(err)))
 	}
 	limited, cancel := context.WithTimeout(ctx, runcopy.SessionLimit)
 	defer cancel()
@@ -317,16 +371,17 @@ func (c *runCopy) gitSession(ctx context.Context, run openedRun, spec *runSpec, 
 		SocketGrace:  spec.SocketGrace,
 		Timeout:      runcopy.SessionLimit,
 	})
+	timedOut := err == nil && res.TimedOut || limited.Err() != nil
 	switch {
-	case err == nil && (res.TimedOut || limited.Err() != nil):
-		c.keep = true
-		return fmt.Errorf(textCopyLimit, exports.Value(c.dir.Work(), false), runcopy.SessionLimit)
-	case err != nil && limited.Err() != nil:
-		c.keep = true
-		return fmt.Errorf(textCopyLimit, exports.Value(c.dir.Work(), false), runcopy.SessionLimit)
+	case ctx.Err() != nil && (err != nil || timedOut) && c.cutBy != nil:
+		return c.stopped(fmt.Sprintf(textCopyCut, c.cutBy()))
+	case timedOut:
+		return c.stopped(fmt.Sprintf(textCopyLimit, runcopy.SessionLimit))
 	case err != nil:
-		c.keep = true
-		return fmt.Errorf(textCopyNoSession, exports.Value(c.dir.Work(), false), shownError(err))
+		return c.stopped(fmt.Sprintf(textCopyNoSession, shownError(err)))
+	case res.ExitCode != 0:
+		// A session that failed can leave a bundle of part of the work: no bundle is used.
+		return c.stopped(fmt.Sprintf(textCopyExited, res.ExitCode))
 	}
 	return nil
 }
@@ -344,11 +399,7 @@ func (c *runCopy) quarantine(ctx context.Context, report func(string)) ([]*runco
 		}
 		return nil, nil
 	}
-	if err != nil {
-		c.keep = true
-		return nil, err
-	}
-	return qs, nil
+	return qs, err
 }
 
 // comeBack brings the run's work to the person: for a plain folder the files, and for a
@@ -361,8 +412,7 @@ func (c *runCopy) comeBack(ctx context.Context, runID string, report func(string
 	}
 	qs, err := c.quarantine(ctx, report)
 	if err != nil {
-		report(shownError(err))
-		c.kept(report)
+		report(c.checkFailed(ctx, err).Error())
 		return false
 	}
 	ok := true
@@ -387,13 +437,17 @@ func (c *runCopy) fetchOne(ctx context.Context, q *runcopy.Quarantine, runID str
 	defer cancel()
 	changes, err := q.ActingChanges(limited)
 	if err != nil {
-		report(shownError(err))
+		report(c.checkFailed(ctx, err).Error())
 		return false
 	}
 	at := filepath.Join(c.root, filepath.FromSlash(q.Repo.Path))
 	branch := runBranch(runID)
 	if err := q.FetchInto(limited, at, "refs/heads/"+branch); err != nil {
-		report(shownError(err))
+		if ctx.Err() != nil {
+			report(c.checkFailed(ctx, err).Error())
+			return false
+		}
+		report(shownError(err) + c.used())
 		return false
 	}
 	line := fmt.Sprintf(textCopyOnBranch, exports.Value(branch, false), exports.Value(at, false))
@@ -408,7 +462,7 @@ func (c *runCopy) fetchOne(ctx context.Context, q *runcopy.Quarantine, runID str
 func (c *runCopy) copyBack(ctx context.Context, report func(string)) bool {
 	res, err := c.dir.CopyBack(ctx, c.root)
 	if err != nil {
-		report(shownError(err))
+		report(shownError(err) + c.used())
 		c.kept(report)
 		return false
 	}
@@ -423,6 +477,10 @@ func (c *runCopy) copyBack(ctx context.Context, report func(string)) bool {
 	}
 	if keys := actingKeys(res.Acting); keys != "" {
 		report(fmt.Sprintf(textCopyActingKept, keys))
+	}
+	// The person's version of each such file stays, so the run's is only in the copy.
+	if len(res.Conflicts)+len(res.Acting) > 0 {
+		c.kept(report)
 	}
 	return true
 }

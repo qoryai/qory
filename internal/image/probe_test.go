@@ -251,3 +251,24 @@ func TestProbeReportsEveryCheck(t *testing.T) {
 		t.Errorf("lines %v, want %s", names, want)
 	}
 }
+
+// TestTheGitLineChecksWhatTheGitSessionNeeds is an image whose git is too old, or is in no
+// folder of the git session's PATH: the line fails with the fix first.
+func TestTheGitLineChecksWhatTheGitSessionNeeds(t *testing.T) {
+	old := goodVersions()
+	old.lines["git"] = "git version 2.24.4"
+	root := imageRoot(t, map[string]string{"usr/bin/git": ""})
+	p := image.Probe{Root: root, Env: env(map[string]string{"PATH": "/usr/bin"}), Exec: old.exec}
+	checks := byName(p.Report(context.Background()))
+	want(t, checks, "git", image.Fail, "install git 2.25 or later in /usr/local/bin, /usr/bin, /bin: ", "git version 2.24.4")
+
+	root = imageRoot(t, map[string]string{"opt/git/bin/git": ""})
+	p = image.Probe{Root: root, Env: env(map[string]string{"PATH": "/opt/git/bin"}), Exec: goodVersions().exec}
+	checks = byName(p.Report(context.Background()))
+	want(t, checks, "git", image.Fail, "install git in /usr/local/bin, /usr/bin, /bin: ")
+
+	root = imageRoot(t, map[string]string{"usr/bin/git": ""})
+	p = image.Probe{Root: root, Env: env(map[string]string{"PATH": "/usr/bin"}), Exec: goodVersions().exec}
+	checks = byName(p.Report(context.Background()))
+	want(t, checks, "git", image.Pass, "git version 2.47.3")
+}

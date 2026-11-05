@@ -47,6 +47,7 @@ import (
 	"github.com/qoryai/qory/internal/proxygit"
 	"github.com/qoryai/qory/internal/render"
 	"github.com/qoryai/qory/internal/report"
+	"github.com/qoryai/qory/internal/runcopy"
 	"github.com/qoryai/qory/internal/secretmask"
 	"github.com/qoryai/qory/internal/source"
 	"github.com/qoryai/qory/internal/stack"
@@ -95,7 +96,8 @@ qory run opens the run, then composes the harness, as qory harness compose does,
 the same home, and prints the result on stderr. -f, --model, --effort, --tier and
 --tier-effort mean what they mean there. With a run key, the home is outside the folder
 the run runs in, under qory/homes in the cache directory, unless --home or harness.home
-sets another, and a home inside the folder stops the run.
+sets another, and a home inside the folder stops the run. Behind a wall, a run with no
+run key that has a home inside the checkout composes into the copy it works in.
 
 The agent is the runtime of the stack's target. Name another first, and the run composes
 for it instead; name one when the target has several. Arguments after -- go to the
@@ -188,6 +190,9 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			at, conf, err := locateRun(h, remote, true)
 			if err != nil {
 				return err
+			}
+			if err := runcopy.InRunCopies(at.root); err != nil {
+				return input(err)
 			}
 			if err := enrolmentCodeFileFor(conf.Forager, "qory run"); err != nil {
 				return err
@@ -691,6 +696,16 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					if err := readOnlyCheckout(&spec, at.root, fromCode.workflow, run.Image()); err != nil {
 						return false, err
 					}
+					// The checkout's mount is read-only by now, so any other mount that writes stops.
+					if err := writableMount(at.root, spec.Mounts, codeUsed); err != nil {
+						return false, err
+					}
+					// A run with no setup binds the checkout itself, see hostWork.
+					if run.Repositories() == "" {
+						if err := readBindsReserved(at.root, cwd); err != nil {
+							return false, err
+						}
+					}
 					if err := fromCode.readExposed(at.root, cwd, at.report); err != nil {
 						return false, err
 					}
@@ -762,6 +777,14 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			}
 			// branch is the branch of the run's work item, set by hostWork, nil for none.
 			var branch *preparation.WorkBranch
+			// codeLine ends a line that stops a run from a run code with [codeUsed].
+			codeLine := func(err error) error {
+				if code != nil {
+					return fmt.Errorf("%w%s", err, codeUsed)
+				}
+				return err
+			}
+			controlPlane := remote || server != nil && !local
 			// makeCopy makes the copy of a walled run that may write, see [startCopy], within the
 			// run's time limit: the working folder's state is that of its commit at HEAD.
 			makeCopy := func() error {
@@ -776,17 +799,15 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				}
 				var err error
 				if copied, err = startCopy(copyCtx, at.root, spec.RunID, ref, remote && run.Repositories() == "", state, spec.RunsDir); err != nil {
-					if code != nil {
-						err = fmt.Errorf("%w%s", err, codeUsed)
-					}
-					return &runLineError{err}
+					return &runLineError{codeLine(err)}
 				}
 				cleanups = append(cleanups, func() { copied.done(said) })
-				if err := copied.artifactsIn(copyCtx, said); err != nil {
-					if code != nil {
-						err = fmt.Errorf("%w%s", err, codeUsed)
+				copied.fromCode = code != nil
+				// .qory/artifacts is the store only outside a control plane.
+				if !controlPlane {
+					if err := copied.artifactsIn(copyCtx, said); err != nil {
+						return &runLineError{codeLine(err)}
 					}
-					return &runLineError{err}
 				}
 				return nil
 			}
@@ -848,7 +869,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					}
 					var err error
 					if composedAt, err = copied.composedIn(at); err != nil {
-						return &runLineError{err}
+						return &runLineError{codeLine(err)}
 					}
 				}
 				var freshHome bool
@@ -914,7 +935,9 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 						return &runLineError{err}
 					}
 				}
-				if !walled || readOnly {
+				// A read run with no setup binds the person's checkout read-only. A setup can write
+				// what it binds, the .git too, so a read run with one gets a copy.
+				if !walled || readOnly && run.Repositories() == "" {
 					return nil
 				}
 				if copied == nil {
@@ -922,11 +945,12 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 						return err
 					}
 				}
+				copied.readOnly = readOnly
 				if err := copied.bind(&spec, at, cwd); err != nil {
-					return &runLineError{err}
+					return &runLineError{codeLine(err)}
 				}
 				if err := copied.recordLinks(); err != nil {
-					return &runLineError{err}
+					return &runLineError{codeLine(err)}
 				}
 				return nil
 			}
@@ -949,7 +973,12 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				case errors.As(err, &exited):
 					return &runLineError{err}
 				}
-				if m := mountRefused(err, passed{foragerDir: foragerDir, stateDir: state, spec: &spec, root: at.root, own: own}); m != nil {
+				// The checkout's mount is the copy's by now.
+				bound := at.root
+				if copied != nil {
+					bound = copied.dir.Work()
+				}
+				if m := mountRefused(err, passed{foragerDir: foragerDir, stateDir: state, spec: &spec, root: bound, own: own}); m != nil {
 					return m
 				}
 				return err
@@ -991,7 +1020,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				}
 				defer cancel()
 				if err := copied.recordSetup(recordCtx); err != nil {
-					return &runLineError{err}
+					return &runLineError{codeLine(err)}
 				}
 				return nil
 			}
@@ -1008,7 +1037,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				if prepErr == nil && readOnly {
 					prepErr = removeSetupWork()
 				}
-				if prepErr == nil && copied != nil && !copied.plain && run.Repositories() != "" && spec.setupWhere != config.SetupInside {
+				if prepErr == nil && copied != nil && !copied.plain && !copied.readOnly && run.Repositories() != "" && spec.setupWhere != config.SetupInside {
 					prepErr = recordSetupWork()
 				}
 				if beforeJoin != nil {
@@ -1083,25 +1112,31 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				limit = opened.Add(timeout)
 			}
 			pushes := keepsWork(fromCode, readOnly, branch, res, err)
-			returns := copied != nil && !pushes && err == nil && res != nil
-			backCtx, cancelBack := pushContext(ctx, again, limit, pushTimes.limit, pushTimes.signal)
+			returns := copied != nil && !copied.readOnly && !pushes && err == nil && res != nil
+			if copied != nil {
+				copied.pushes = pushes
+				copied.cutBy = func() string {
+					e := ending
+					e.stopped, e.again, e.got = ctx.Err() != nil, again.Err() != nil, got()
+					return e.cutBy()
+				}
+			}
+			backCtx, cancelBack := returnContext(ctx, again)
 			defer cancelBack()
 			switch {
 			case returns && copied.plain:
 			case returns && res.RunClosed:
-				copied.keep = true
-				sessionErr = fmt.Errorf(textCopyClosed, exports.Value(copied.dir.Work(), false))
+				sessionErr = copied.stopped(textCopyClosed)
 			case returns:
 				if sessionErr = run.RemoveSetup(backCtx); sessionErr != nil {
-					copied.keep = true
-					sessionErr = fmt.Errorf(textCopyNoSession, exports.Value(copied.dir.Work(), false), shownError(sessionErr))
+					sessionErr = copied.stopped(fmt.Sprintf(textCopyNoSession, shownError(sessionErr)))
 				} else {
 					sessionErr = copied.gitSession(backCtx, run, &spec, "")
 				}
 			}
 			if pushes {
 				pushCtx, cancel := pushContext(ctx, again, limit, pushTimes.limit, pushTimes.signal)
-				ending.noStep, pushErr = removeThenPush(pushCtx, run, streams.errOut, branch, cwd, spec.RunID, fromCode.runNumber, out, copied, &spec, said)
+				ending.noStep, pushErr = removeThenPush(pushCtx, run, streams.errOut, branch, cwd, spec.RunID, fromCode.runNumber, out, copied, &spec)
 				ending.stopped = ctx.Err() != nil
 				ending.again, ending.got = again.Err() != nil, got()
 				ending.cut = pushCtx.Err() != nil
@@ -1113,7 +1148,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			closed := closeRun(out)
 			// A failed close may leave a container of the run, which could still write the copy.
 			artifactsBack := true
-			if copied != nil && !pushes && closed != nil {
+			if copied != nil && !copied.readOnly && !pushes && closed != nil && !controlPlane {
 				artifactsBack = copied.artifactsBack(backCtx, said)
 			}
 			if err != nil {

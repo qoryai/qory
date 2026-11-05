@@ -162,7 +162,7 @@ func (d Dir) quarantineOne(ctx context.Context, i int, r Repository, rel, branch
 	ref := "refs/heads/" + branch
 	// git fetch follows a file that has gitdir: <path>, so nothing but a bundle reaches it.
 	if err := checkBundleHeader(checked, ref); err != nil {
-		return nil, fmt.Errorf(textBundleChecks, shown(d.Work()), shown(rel), err)
+		return nil, fmt.Errorf(textBundleChecks, shown(rel), err)
 	}
 	if bundleFetchChecks(ctx) {
 		_, err = git(ctx, q, "-c", "transfer.fsckObjects=true", "-c", "fetch.fsckObjects=true", "-c", "fetch.fsck.hasDotgit=error",
@@ -172,14 +172,14 @@ func (d Dir) quarantineOne(ctx context.Context, i int, r Repository, rel, branch
 		err = indexBundle(ctx, q, checked, ref)
 	}
 	if err != nil {
-		return nil, fmt.Errorf(textBundleChecks, shown(d.Work()), shown(rel), err)
+		return nil, fmt.Errorf(textBundleChecks, shown(rel), err)
 	}
 	head, err := commitOf(ctx, q, ref)
 	if err != nil {
-		return nil, fmt.Errorf(textBundleChecks, shown(d.Work()), shown(rel), err)
+		return nil, fmt.Errorf(textBundleChecks, shown(rel), err)
 	}
 	quarantine := &Quarantine{Path: q, Repo: r, Branch: branch, Head: head}
-	if err := quarantine.checkTop(ctx, d.Work(), rel); err != nil {
+	if err := quarantine.checkTop(ctx, rel); err != nil {
 		return nil, err
 	}
 	return quarantine, nil
@@ -201,14 +201,14 @@ func copyShallow(source, q string) error {
 
 // checkTop returns an error when the head's tree has an entry at the top whose name is
 // .git or .qory in any letter case, other than the same entry at the base commit.
-func (q *Quarantine) checkTop(ctx context.Context, work, rel string) error {
+func (q *Quarantine) checkTop(ctx context.Context, rel string) error {
 	head, err := q.treeEntries(ctx, q.Head+"^{tree}", "")
 	if err != nil {
-		return fmt.Errorf(textBundleChecks, shown(work), shown(rel), err)
+		return fmt.Errorf(textBundleChecks, shown(rel), err)
 	}
 	base, err := q.treeEntries(ctx, q.Repo.Base+"^{tree}", "")
 	if err != nil {
-		return fmt.Errorf(textBundleChecks, shown(work), shown(rel), err)
+		return fmt.Errorf(textBundleChecks, shown(rel), err)
 	}
 	for _, e := range head {
 		if !folds(e.name, ".git") && !folds(e.name, checkout.Dir) {
@@ -219,7 +219,7 @@ func (q *Quarantine) checkTop(ctx context.Context, work, rel string) error {
 			kept = kept || b == e
 		}
 		if !kept {
-			return fmt.Errorf(textTopEntry, shown(work), q.Head, shown(rel), shown(e.name))
+			return fmt.Errorf(textTopEntry, q.Head, shown(rel), shown(e.name))
 		}
 	}
 	return nil
