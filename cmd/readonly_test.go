@@ -147,7 +147,6 @@ func TestAReadRunOpensTheStoreToAComposedBlock(t *testing.T) {
 // no rules from qory.
 func TestAWriteWorkflowSeesTheCheckoutWritable(t *testing.T) {
 	r := runFromCodeWith(t, func(string) []string {
-		firstCommit(t, ".")
 		docker, _ := fakeDocker(t)
 		writeFile(t, filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "forager.yaml"),
 			"wall:\n  adapter: docker\n  command: "+docker+"\n  helper: "+staticELF(t)+"\n  user: \"1000:1000\"\n  image: "+readImage+"\n")
@@ -179,7 +178,6 @@ func settingsOf(t *testing.T, args []string) string {
 // code, which starts no workflow: the workspace and the checkout's mount stay writable.
 func TestARunKeyRunSeesTheCheckoutWritable(t *testing.T) {
 	h := newHostFetch(t, "", "main")
-	firstCommit(t, h.dir)
 	r := runSetUp(t, h, "", "", nil)
 	if len(r.joins) != 1 {
 		t.Fatalf("%d joins, %v (exit %d)\n%s", len(r.joins), r.err, cmd.ExitCode(r.err), r.out)

@@ -93,7 +93,10 @@ type runCopy struct {
 
 // startCopy makes the copy of the checkout at root for the run runID. branch is the branch
 // the run works on, "" for [runBranch]. keepOut are the folders the copy must not overlap.
-func startCopy(ctx context.Context, root, runID, branch string, keepOut ...string) (*runCopy, error) {
+// noRepository says the run comes from a run code or a run key and lists no repositories: in
+// a folder where git init ran and that has no commit, it gets the copy of a plain folder with
+// .git left out. A local run in such a folder stops, since a repository needs a commit.
+func startCopy(ctx context.Context, root, runID, branch string, noRepository bool, keepOut ...string) (*runCopy, error) {
 	if branch == "" {
 		branch = runBranch(runID)
 	}
@@ -105,10 +108,14 @@ func startCopy(ctx context.Context, root, runID, branch string, keepOut ...strin
 	if err != nil {
 		return nil, err
 	}
-	c := &runCopy{dir: dir, root: root, branch: branch, plain: !git, out: map[string]runcopy.LeftOut{}}
-	if c.plain {
+	empty := git && noRepository && runcopy.NoCommits(ctx, root)
+	c := &runCopy{dir: dir, root: root, branch: branch, plain: !git || empty, out: map[string]runcopy.LeftOut{}}
+	switch {
+	case empty:
+		err = dir.CopyFolderWithoutGit(root)
+	case c.plain:
 		err = dir.CopyFolder(root)
-	} else {
+	default:
 		c.repos, err = dir.Clone(ctx, root, branch)
 	}
 	if err != nil {

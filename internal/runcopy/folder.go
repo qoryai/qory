@@ -1,6 +1,7 @@
 package runcopy
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -11,6 +12,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"strings"
 
 	"github.com/qoryai/forager/session"
 
@@ -37,6 +39,27 @@ type folderRecord struct {
 // It records the size, the owner's execute bit and a hash of each regular file in the
 // run's folder, for [Dir.CopyBack]. src must not contain the run's folder.
 func (d Dir) CopyFolder(src string) error {
+	return d.copyFolderOf(src, "")
+}
+
+// CopyFolderWithoutGit is [Dir.CopyFolder] of a folder that git init set up and that has no
+// commit, for a run that has no repository: the .git at its top stays out of the copy.
+func (d Dir) CopyFolderWithoutGit(src string) error {
+	return d.copyFolderOf(src, gitDirName)
+}
+
+// gitDirName is the git folder of a working tree.
+const gitDirName = ".git"
+
+// NoCommits reports whether the repository at dir has no commit on any ref, as after git
+// init. A failure of git is no such repository: [Dir.Clone] then prints what is wrong.
+func NoCommits(ctx context.Context, dir string) bool {
+	out, err := git(ctx, dir, "rev-list", "-n", "1", "--all")
+	return err == nil && strings.TrimSpace(out) == ""
+}
+
+// copyFolderOf is [Dir.CopyFolder] with the path leave, "" for none, left out.
+func (d Dir) copyFolderOf(src, leave string) error {
 	src, err := filepath.Abs(src)
 	if err != nil {
 		return fileErr(src, err)
@@ -69,7 +92,7 @@ func (d Dir) CopyFolder(src string) error {
 	}
 	defer to.Close()
 	rec := folderRecord{Files: map[string]fileState{}}
-	if err := copyFolder(from, to, ".", rec); err != nil {
+	if err := copyFolder(from, to, ".", rec, leave); err != nil {
 		return fmt.Errorf(textNoFolderCopy, shown(src), err)
 	}
 	data, err := json.Marshal(rec)
@@ -83,9 +106,9 @@ func (d Dir) CopyFolder(src string) error {
 	return nil
 }
 
-// copyFolder copies the entries of the folder rel of from into to, and records each
-// regular file in rec.
-func copyFolder(from, to *os.Root, rel string, rec folderRecord) error {
+// copyFolder copies the entries of the folder rel of from into to, but the path leave, and
+// records each regular file in rec.
+func copyFolder(from, to *os.Root, rel string, rec folderRecord, leave string) error {
 	f, err := from.Open(rel)
 	if err != nil {
 		return err
@@ -97,6 +120,9 @@ func copyFolder(from, to *os.Root, rel string, rec folderRecord) error {
 	}
 	for _, e := range entries {
 		p := path.Join(rel, e.Name())
+		if p == leave {
+			continue
+		}
 		fi, err := from.Lstat(p)
 		if err != nil {
 			return err
@@ -114,7 +140,7 @@ func copyFolder(from, to *os.Root, rel string, rec folderRecord) error {
 			if err := to.Mkdir(p, 0o700); err != nil {
 				return err
 			}
-			if err := copyFolder(from, to, p, rec); err != nil {
+			if err := copyFolder(from, to, p, rec, leave); err != nil {
 				return err
 			}
 			// The owner keeps write access, so the run can write in every folder.

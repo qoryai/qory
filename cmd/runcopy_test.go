@@ -58,13 +58,6 @@ func copyWork(t *testing.T, lines string) string {
 	return all[len(all)-1][1]
 }
 
-// firstCommit makes an empty commit in the repository at dir: a walled run that may write and
-// fetches no repository works in a copy of the commit at HEAD.
-func firstCommit(t *testing.T, dir string) {
-	t.Helper()
-	gitOutput(t, dir, "-c", "user.name=Tester", "-c", "user.email=tester@example.com", "commit", "--quiet", "--allow-empty", "-m", "first")
-}
-
 // gitOutput is the output of git with args in dir.
 func gitOutput(t *testing.T, dir string, args ...string) string {
 	t.Helper()
@@ -595,6 +588,73 @@ func TestARunClosedDuringItsSessionKeepsTheCopy(t *testing.T) {
 	if _, err := os.Stat(dir); err != nil {
 		t.Errorf("the copy did not stay: %v", err)
 	}
+}
+
+// TestARunCodeWithNoRepositoriesWorksInAFolderCopy is a run code whose run lists no
+// repositories, in a folder where git init ran and in a plain folder. The run works in a copy
+// with no .git, and its file comes back. The person's .git stays as it is, with no commit.
+func TestARunCodeWithNoRepositoriesWorksInAFolderCopy(t *testing.T) {
+	for name, keepGit := range map[string]bool{"git init": true, "plain": false} {
+		t.Run(name, func(t *testing.T) {
+			var root string
+			joined := false
+			r := runFromCodeWith(t, func(string) []string {
+				var err error
+				if root, err = os.Getwd(); err != nil {
+					t.Fatal(err)
+				}
+				if !keepGit {
+					if err := os.RemoveAll(filepath.Join(root, ".git")); err != nil {
+						t.Fatal(err)
+					}
+				}
+				docker, _ := fakeDocker(t)
+				writeFile(t, filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "forager.yaml"),
+					"wall:\n  adapter: docker\n  command: "+docker+"\n  helper: "+staticELF(t)+"\n  user: \"1000:1000\"\n  image: "+readImage+"\n")
+				t.Cleanup(cmd.SetJoinResult(func(spec session.SessionSpec) (*session.Result, error) {
+					joined = true
+					if spec.Dir == root {
+						t.Errorf("the session starts in the folder %s, want a copy", root)
+					}
+					if _, err := os.Lstat(filepath.Join(spec.Dir, ".git")); err == nil {
+						t.Error("the copy has a .git")
+					}
+					writeFile(t, filepath.Join(spec.Dir, "added.txt"), "the run\n")
+					return &session.Result{}, nil
+				}))
+				return nil
+			}, []string{"--home", filepath.Join(tempDir(t), "home")}, declares("write"), nil)
+			if !joined {
+				t.Fatalf("no session joined: %v (exit %d)\n%s", r.err, cmd.ExitCode(r.err), r.out)
+			}
+			data, err := os.ReadFile(filepath.Join(root, "added.txt"))
+			if err != nil || string(data) != "the run\n" {
+				t.Errorf("the run's file has %q (%v)\n%s", data, err, r.out)
+			}
+			if keepGit {
+				if got := gitOutput(t, root, "rev-list", "-n", "1", "--all"); got != "" {
+					t.Errorf("the person's .git has the commit %s", got)
+				}
+			}
+		})
+	}
+}
+
+// TestALocalRunInARepositoryWithNoCommitStops is a local run where git init ran and no commit
+// exists: it stops with the fix first, before any session joins.
+func TestALocalRunInARepositoryWithNoCommitStops(t *testing.T) {
+	root := checkoutWithNoCommit(t)
+	copyFixture(t, "two-modules", root)
+	composedForFake(t, root, fakeRuntime(t))
+	docker, _ := fakeDocker(t)
+	walledBy(t, docker)
+	t.Setenv("QORY_RUN_KEY", "")
+	agentInCopy(t, func(session.SessionSpec) { t.Error("a session joined") })
+	out, err := run(t, "run", "claude", "--", "-p", "hi")
+	if cmd.ExitCode(err) != 1 {
+		t.Fatalf("%v (exit %d)\n%s", err, cmd.ExitCode(err), out)
+	}
+	wants(t, out, "qory run: commit in ", "or start the run in a repository with a commit at HEAD")
 }
 
 // TestALocalRunSeesTheArtifactsAndTheWorkItem is a local run in a checkout with a version and

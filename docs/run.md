@@ -3399,7 +3399,9 @@ the harness is composed into the clone. A read run binds your checkout read-only
 The run starts from your commit at `HEAD`. It does not see your uncommitted, untracked or
 ignored files, such as `.env`. A working folder that the commit at `HEAD` does not have
 stops the run: commit it, or run qory in a folder that commit has. A repository with no commit stops the run
-too. A filter you set up in your git configuration, such as Git LFS, and your submodules
+too, with one exception. A run from a run code or a run key that lists no repositories, in a folder where
+`git init` ran and that has no commit, works like a run in a folder that is not a repository, with `.git` left
+out of the copy. A filter you set up in your git configuration, such as Git LFS, and your submodules
 apply before the run starts.
 
 When the agent has ended, however it ended, a second session starts on the same run: the git

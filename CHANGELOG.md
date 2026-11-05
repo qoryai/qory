@@ -245,9 +245,11 @@ release may change what an existing document does, and states it under Upgrading
   `.git`. Its commits land on the branch `qory/run-<run id>`, which qory never checks out,
   and one line prints that branch and any qory settings they change. A write run of a work
   item pushes from a checked repository. A read-write `--mount` or `wall.mounts` entry
-  stops such a run. A folder that is not a repository gets its regular files back. Every
-  such run starts with your `.qory/artifacts` and `.qory/work-item.json`, and gets
-  `.qory/artifacts` back. See A run that may write works in a copy in `docs/run.md`.
+  stops such a run. A folder that is not a repository gets its regular files back, and so
+  does a run from a run code or a run key that lists no repositories, in a folder where
+  `git init` ran with no commit. Every such run starts with your `.qory/artifacts` and
+  `.qory/work-item.json`, and gets `.qory/artifacts` back. See A run that may write works
+  in a copy in `docs/run.md`.
 - The compose fails, exit 2, for each entry of a stack's `workflows` that no module of
   the stack composes as a skill or command.
 - A run from a run code whose composed harness has no skill or command of the

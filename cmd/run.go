@@ -775,7 +775,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					ref = branch.Ref
 				}
 				var err error
-				if copied, err = startCopy(copyCtx, at.root, spec.RunID, ref, state, spec.RunsDir); err != nil {
+				if copied, err = startCopy(copyCtx, at.root, spec.RunID, ref, remote && run.Repositories() == "", state, spec.RunsDir); err != nil {
 					if code != nil {
 						err = fmt.Errorf("%w%s", err, codeUsed)
 					}

@@ -1232,6 +1232,50 @@ func TestSetupChangesListsWhatTheSetupChanged(t *testing.T) {
 	}
 }
 
+// TestCopyFolderWithoutGitLeavesOutTheTopGit is a folder where git init ran: its .git stays out
+// of the copy, and a copy back leaves it as it is.
+func TestCopyFolderWithoutGitLeavesOutTheTopGit(t *testing.T) {
+	isolate(t)
+	src := t.TempDir()
+	testGit(t, src, "init", "--quiet")
+	write(t, src, "file.txt", "first\n")
+	if !NoCommits(context.Background(), src) {
+		t.Error("NoCommits = false after git init")
+	}
+	d := newDir(t)
+	if err := d.CopyFolderWithoutGit(src); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(filepath.Join(d.Work(), ".git")); err == nil {
+		t.Error("the copy has a .git")
+	}
+	write(t, d.Work(), "file.txt", "the run\n")
+	head := read(t, src, ".git/HEAD")
+	if _, err := d.CopyBack(src); err != nil {
+		t.Fatal(err)
+	}
+	if read(t, src, "file.txt") != "the run\n" || read(t, src, ".git/HEAD") != head {
+		t.Error("the copy back did not bring the file, or changed .git")
+	}
+}
+
+// TestNoCommitsIsFalseWithACommit is a repository with a commit, also on a branch HEAD is not
+// on, and a folder git has nothing to read in.
+func TestNoCommitsIsFalseWithACommit(t *testing.T) {
+	isolate(t)
+	src, _ := person(t)
+	if NoCommits(context.Background(), src) {
+		t.Error("NoCommits = true with a commit")
+	}
+	testGit(t, src, "checkout", "--quiet", "--orphan", "other")
+	if NoCommits(context.Background(), src) {
+		t.Error("NoCommits = true on an unborn branch beside a commit")
+	}
+	if NoCommits(context.Background(), t.TempDir()) {
+		t.Error("NoCommits = true in a folder with no repository")
+	}
+}
+
 // TestCopyArtifactsInCopiesTheArtifactsAndTheWorkItem is a checkout with versions and a work
 // item: the copy has them with the same content, so a later copy back has no conflict.
 func TestCopyArtifactsInCopiesTheArtifactsAndTheWorkItem(t *testing.T) {
