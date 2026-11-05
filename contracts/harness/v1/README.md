@@ -664,9 +664,9 @@ it is a group of skills, at any depth, read by the same rules. qory writes each 
 every runtime, at `skills/<name>` in the home and at `<name>` in each runtime's skills folder,
 so a skill's name is its last folder. A group appears in no name: `modules[].exclude`, `only`,
 `requires`, `bind`, `provides` and a reference (§References) all use `<name>`. Loose files in a
-group are skipped. A skill links to another skill with `${qory:skills/<name>}`. A relative path
-out of a skill's folder resolves differently by how qory places the skill: as a link to the
-source folder, or as a copy.
+group are skipped. A skill refers to another skill by name with `${qory:skills/<name>}`, which
+resolves to the name and gives no path. A relative path out of a skill's folder resolves
+differently by how qory places the skill: as a link to the source folder, or as a copy.
 
 A folder that a variant reads skills from composes when that variant is selected. These stop the
 compose with status 2, each with the full path below the module:
