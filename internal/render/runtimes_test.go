@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -206,5 +207,42 @@ func TestClaudePluginCopiesItsAgents(t *testing.T) {
 	}
 	if len(l.Fixed)+len(l.Defaults) != 0 || l.HarnessHome != home || len(l.Args) < 2 || l.Args[0] != "--plugin-dir" || l.Args[1] != plugin {
 		t.Errorf("launch %q env %q, want --plugin-dir %s and QORY_HARNESS_HOME alone", l.Args, l.Env(), plugin)
+	}
+}
+
+// TestCheckoutOnlyListsWhatTheComposeWrote is what a runtime reads from the checkout alone, of a
+// harness that has only part of it. Each list is the one in the runtime's package comment.
+func TestCheckoutOnlyListsWhatTheComposeWrote(t *testing.T) {
+	every := &compose.Result{Instructions: "be brief", Entries: []compose.Entry{
+		{Kind: "skills"}, {Kind: "agents"}, {Kind: "commands"}, {Kind: "hooks"}, {Kind: "mcp"},
+	}}
+	noSkills := &compose.Result{Instructions: "be brief", Entries: []compose.Entry{{Kind: "agents"}}}
+	skillsOnly := &compose.Result{Entries: []compose.Entry{{Kind: "skills"}}}
+	for _, c := range []struct {
+		runtime string
+		res     *compose.Result
+		want    []string
+	}{
+		{"gemini", every, []string{"skills", "agents", "commands", "instructions"}},
+		{"gemini", noSkills, []string{"agents", "instructions"}},
+		{"gemini", skillsOnly, []string{"skills"}},
+		{"amp", every, []string{"skills", "instructions"}},
+		{"amp", noSkills, []string{"instructions"}},
+		{"opencode", every, []string{"instructions"}},
+		{"opencode", skillsOnly, nil},
+		{"cursor", every, []string{"instructions"}},
+		{"copilot", every, []string{"hooks", "instructions"}},
+		{"copilot", skillsOnly, nil},
+		{"claude", every, nil},
+		{"codex", every, nil},
+		{"goose", every, nil},
+	} {
+		rt, err := render.Lookup(c.runtime)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := render.CheckoutOnly(rt, c.res); !slices.Equal(got, c.want) {
+			t.Errorf("%s: %v, want %v", c.runtime, got, c.want)
+		}
 	}
 }

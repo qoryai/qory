@@ -1913,3 +1913,66 @@ func TestTheGitSessionsLineHasNoScript(t *testing.T) {
 		t.Errorf("the session's arguments have %d characters", len(joined))
 	}
 }
+
+// TestAPlainFolderWithQoryPrintsNoLeftOut is a plain folder with artifacts in .qory: the artifact
+// the run wrote comes back, so no line has .qory, and a file the copy back does leave out has its
+// line.
+func TestAPlainFolderWithQoryPrintsNoLeftOut(t *testing.T) {
+	root := emptyDir(t)
+	copyFixture(t, "two-modules", root)
+	writeFile(t, filepath.Join(root, ".qory", "artifacts", "note", "main", "1", "a.txt"), "note\n")
+	docker, _ := fakeDocker(t)
+	walledBy(t, docker)
+	t.Setenv("QORY_RUN_KEY", "")
+	agentInCopy(t, func(spec session.SessionSpec) {
+		writeFile(t, filepath.Join(spec.Dir, ".qory", "artifacts", "note", "main", "2", "a.txt"), "run\n")
+		if err := os.Symlink("README.md", filepath.Join(spec.Dir, "link")); err != nil {
+			t.Fatal(err)
+		}
+	})
+	out, err := run(t, "run", "claude", "--", "-p", "hi")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if data, err := os.ReadFile(filepath.Join(root, ".qory", "artifacts", "note", "main", "2", "a.txt")); err != nil || string(data) != "run\n" {
+		t.Errorf("the artifact: %q, %v", data, err)
+	}
+	wants(t, out, "qory run: left out of the copy back to your folder: link.\n")
+	if strings.Contains(out, ".qory.") {
+		t.Errorf("a line has .qory:\n%s", out)
+	}
+}
+
+// TestACommitWithAFileNamedQoryPrintsNoLeftOut is a commit with a file at .qory: nothing can be left
+// out there, on any run, so no line has it.
+func TestACommitWithAFileNamedQoryPrintsNoLeftOut(t *testing.T) {
+	root, _ := committedFixture(t)
+	writeFile(t, filepath.Join(root, ".qory"), "a file\n")
+	runGit(t, root, "add", ".qory")
+	runGit(t, root, "commit", "--quiet", "-m", "a file")
+	agentInCopy(t, func(session.SessionSpec) {})
+	out, err := run(t, "run", "claude", "--home", tempDir(t), "--", "-p", "hi")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if strings.Contains(out, "left out of") {
+		t.Errorf("a line of what was left out:\n%s", out)
+	}
+}
+
+// TestAFolderOfArtifactsBehindAFileIsReported is a run that wrote .qory/artifacts while the person
+// has a file at .qory: the artifact stays out of the person's folder, and the line has .qory.
+func TestAFolderOfArtifactsBehindAFileIsReported(t *testing.T) {
+	root, _ := committedFixture(t)
+	writeFile(t, filepath.Join(root, ".qory"), "a file\n")
+	runGit(t, root, "add", ".qory")
+	runGit(t, root, "commit", "--quiet", "-m", "a file")
+	agentInCopy(t, func(spec session.SessionSpec) {
+		if err := os.Remove(filepath.Join(spec.Dir, ".qory")); err != nil {
+			t.Fatal(err)
+		}
+		writeFile(t, filepath.Join(spec.Dir, ".qory", "artifacts", "note", "main", "1", "a.txt"), "run\n")
+	})
+	out, _ := run(t, "run", "claude", "--home", tempDir(t), "--", "-p", "hi")
+	wants(t, out, "left out of the copy back to your folder: .qory.")
+}

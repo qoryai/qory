@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/qoryai/qory/internal/exports"
 )
@@ -252,6 +253,7 @@ var sessionTools = []struct{ name, why string }{
 	{"mkdir", "to make its git folder"},
 	{"mv", "to put the finished bundle in place"},
 	{"readlink", "to read a link the setup left"},
+	{"sh", "to run its script"},
 	{"sort", "to compare the run's refs and commits with what the bundle has"},
 	{"tr", "to print a folder's name with no control character"},
 }
@@ -265,6 +267,129 @@ func SessionTools() []string {
 	return names
 }
 
+// noSessionGit is the fix for an image with no git in [gitSessionDirs].
+func noSessionGit() string {
+	return "install git in " + strings.Join(gitSessionDirs, ", ") + ": the git session of a walled run runs git from there, and the image has none in them"
+}
+
+// noSessionTool is the fix for an image with no program name in [gitSessionDirs], which the git
+// session runs for why.
+func noSessionTool(name, why string) string {
+	return "install " + name + " in " + strings.Join(gitSessionDirs, ", ") + ": the git session of a walled run runs " + name + " from these folders, " + why
+}
+
+// sessionGitFailed is the fix for an image whose git at the path at fails with cause.
+func sessionGitFailed(at, cause string) string {
+	return "install git 2.25 or later in " + strings.Join(gitSessionDirs, ", ") + ": " + at + " --version failed: " + cause
+}
+
+// sessionGitOld is the fix for an image whose git at the path at prints line, older than 2.25.
+func sessionGitOld(at, line string) string {
+	return "install git 2.25 or later in " + strings.Join(gitSessionDirs, ", ") + ": the git session of a walled run needs it, and " + at + " prints " + line
+}
+
+// SessionShellFix is the line for a setup step that could not start /bin/sh.
+func SessionShellFix() string {
+	for _, tool := range sessionTools {
+		if tool.name == "sh" {
+			return noSessionTool(tool.name, tool.why)
+		}
+	}
+	return ""
+}
+
+// SessionCheckScript is the sh script of a walled write run's setup step that checks, before the
+// agent, what [Probe.git] checks of the image: each of [sessionTools] and git 2.25 or later, on
+// the PATH of the git session. It prints nothing and exits 0 when all of it is there. Otherwise it
+// prints the line of [Probe.git] for each failure on stderr, the fix first, and exits 1. It runs
+// only the shell's builtins and git, under dash and busybox ash as well.
+func SessionCheckScript() string {
+	return sessionCheckScript(strings.Join(gitSessionDirs, ":"))
+}
+
+// sessionCheckScript is [SessionCheckScript] with path as the session's PATH.
+func sessionCheckScript(path string) string {
+	var b strings.Builder
+	b.WriteString("PATH=" + shellQuoted(path) + "\nexport PATH\nfailed=0\n")
+	b.WriteString(sessionCheckFunctions)
+	for _, tool := range sessionTools {
+		b.WriteString("need " + tool.name + " " + shellQuoted(noSessionTool(tool.name, tool.why)) + "\n")
+	}
+	b.WriteString("if found git; then\n")
+	b.WriteString("\tline=$(\"$at\" --version 2>/dev/null)\n\tstatus=$?\n\tline=${line%%\n*}\n")
+	b.WriteString("\tif test \"$status\" -ne 0; then\n")
+	b.WriteString("\t\tfail " + shellQuoted(sessionGitFailed("@AT@", "exit status @STATUS@")) + "\n")
+	b.WriteString("\telif ! at_least_225 \"$line\"; then\n")
+	b.WriteString("\t\tfail " + shellQuoted(sessionGitOld("@AT@", "@LINE@")) + "\n")
+	b.WriteString("\tfi\nelse\n")
+	b.WriteString("\tfail " + shellQuoted(noSessionGit()) + "\n")
+	b.WriteString("fi\nexit \"$failed\"\n")
+	return b.String()
+}
+
+// sessionCheckFunctions are the functions of [SessionCheckScript]. found sets at to where the
+// shell finds a program: a builtin of /bin/sh counts, since the session's script runs under the
+// same shell, and a file that is not executable does not, which dash's command -v lists. fail
+// prints a line with what git's run gave in place of @AT@, @STATUS@ and @LINE@. at_least_225 is
+// [gitAtLeast225].
+const sessionCheckFunctions = `found() {
+	at=$(command -v "$1" 2>/dev/null) || at=
+	case $at in
+	'') return 1 ;;
+	/*) test -f "$at" && test -x "$at" ;;
+	esac
+}
+fail() {
+	text=$1
+	case $text in *@AT@*) text=${text%%@AT@*}$at${text#*@AT@} ;; esac
+	case $text in *@STATUS@*) text=${text%%@STATUS@*}$status${text#*@STATUS@} ;; esac
+	case $text in *@LINE@*) text=${text%%@LINE@*}$line${text#*@LINE@} ;; esac
+	printf '%s\n' "$text" >&2
+	failed=1
+}
+need() {
+	found "$1" || fail "$2"
+}
+at_least_225() {
+	case $1 in
+	'git version '[0-9]*.[0-9]*) ;;
+	*) return 1 ;;
+	esac
+	rest=${1#git version }
+	major=${rest%%.*}
+	case $major in *[!0-9]*) return 1 ;; esac
+	minor=${rest#*.}
+	minor=${minor%%[!0-9]*}
+	case $minor in '') return 1 ;; esac
+	test "$major" -gt 2 || { test "$major" -eq 2 && test "$minor" -ge 25; }
+}
+`
+
+// shellQuoted is s as one word of sh, in single quotes.
+func shellQuoted(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
+// SessionCheckLine is line, one line of what [SessionCheckScript] printed, as qory prints it, and
+// whether it starts as a line of the script does and has no control character. The image runs the
+// script, so the line can contain anything.
+func SessionCheckLine(line string) (string, bool) {
+	if strings.IndexFunc(line, unicode.IsControl) >= 0 {
+		return "", false
+	}
+	dirs := " in " + strings.Join(gitSessionDirs, ", ") + ": "
+	starts := []string{"install git" + dirs, "install git 2.25 or later" + dirs}
+	for _, tool := range sessionTools {
+		starts = append(starts, "install "+tool.name+dirs)
+	}
+	for _, start := range starts {
+		if strings.HasPrefix(line, start) {
+			return exports.HideValues(line), true
+		}
+	}
+	return "", false
+}
+
 // git checks that git runs, and what the git session of a walled run that may write needs of
 // it: git 2.25 or later, for --pathspec-from-file, and [sessionTools], in [gitSessionDirs].
 func (p Probe) git(ctx context.Context) Check {
@@ -274,13 +399,13 @@ func (p Probe) git(ctx context.Context) Check {
 	}
 	session := p.lookPath("git", gitSessionDirs)
 	if session == "" {
-		return Check{"git", Fail, "install git in " + strings.Join(gitSessionDirs, ", ") + ": the git session of a walled run runs git from there, and the image has none in them"}
+		return Check{"git", Fail, noSessionGit()}
 	}
 	for _, tool := range sessionTools {
 		if p.lookPath(tool.name, gitSessionDirs) != "" {
 			continue
 		}
-		return Check{"git", Fail, "install " + tool.name + " in " + strings.Join(gitSessionDirs, ", ") + ": the git session of a walled run runs " + tool.name + " from these folders, " + tool.why}
+		return Check{"git", Fail, noSessionTool(tool.name, tool.why)}
 	}
 	shown := line
 	if session != at {
@@ -290,13 +415,13 @@ func (p Probe) git(ctx context.Context) Check {
 		}
 		out, err := run(ctx, p.host(session), "--version")
 		if err != nil {
-			return Check{"git", Fail, fmt.Sprintf("install git 2.25 or later in "+strings.Join(gitSessionDirs, ", ")+": %s --version failed: %v", exports.Value(session, false), exports.HideValueError(err, session))}
+			return Check{"git", Fail, sessionGitFailed(exports.Value(session, false), exports.HideValueError(err, session).Error())}
 		}
 		shown, _, _ = strings.Cut(strings.TrimSpace(string(out)), "\n")
 		shown = exports.HideValues(shown)
 	}
 	if !gitAtLeast225(shown) {
-		return Check{"git", Fail, "install git 2.25 or later in " + strings.Join(gitSessionDirs, ", ") + ": the git session of a walled run needs it, and " + exports.Value(session, false) + " prints " + shown}
+		return Check{"git", Fail, sessionGitOld(exports.Value(session, false), shown)}
 	}
 	return Check{"git", Pass, line}
 }

@@ -326,7 +326,9 @@ So a tracked `harness/` directory is no collision. A pull is an ordinary pull.
 Every checkout and worktree gets a separate home under it.
 A walled `qory run`, and a run with a run key, composes into such a home when neither sets
 one, under `qory/homes` in your cache directory, and stops on a home inside the folder it runs in:
-see [Running a session](run.md#what-qory-run-does).
+see [Running a session](run.md#what-qory-run-does). A walled run writes no link into the folder,
+whatever `harness.links` sets. On any other compose with a home outside the checkout,
+`harness.links: checkout` stops with `harness.links: checkout needs the home inside the checkout`.
 
 A folder that is not a git working tree composes only with such a home, named after the
 folder. If the home is inside such a folder, `qory harness compose` stops with exit 2. Run

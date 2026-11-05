@@ -50,7 +50,10 @@ func homeInFolder(root, home string) error {
 
 // cacheHomes is the root of the homes of walled runs and runs given a run key when neither
 // --home nor harness.home sets one: qory/homes under the user's cache directory, ~/Library/Caches
-// on macOS and $XDG_CACHE_HOME or ~/.cache on Linux, one home per checkout under it. It
+// on macOS and $XDG_CACHE_HOME or ~/.cache on Linux, one folder per checkout under it. A run
+// given a run key composes into that folder, and a person's walled run into a folder of the
+// run's id inside it, which [removeRunHome] removes. The report of both is beside the
+// checkout's folder, as <name>-<hash>-report.json. It
 // is not under qory's state directory: a walled run mounts its home, and Forager stops
 // a run with a mount inside that directory, which contains the run records. root is the
 // checkout the run runs in, which the error of a failed lookup prints.
@@ -76,6 +79,16 @@ func withCacheHome(root string, conf config.Config) (config.Config, error) {
 	return conf, nil
 }
 
+// removeRunHome removes the home of a person's walled run, and what a compose cut short left
+// beside it, when the run ends. report prints a line of qory run.
+func removeRunHome(home string, report func(string)) {
+	for _, path := range []string{home, home + ".tmp"} {
+		if err := os.RemoveAll(path); err != nil {
+			report(fmt.Sprintf(textCopyNoRemove, exports.Value(path, false), shownError(err)))
+		}
+	}
+}
+
 // locateRun is [locate] for qory run and qory run resend: given a run key or a run code,
 // keyed, the checkout's qory.yaml sets no machine key, harness.launch and env among
 // them, as under extends, so the repository a dispatched run works on does not configure
@@ -84,7 +97,9 @@ func withCacheHome(root string, conf config.Config) (config.Config, error) {
 // [withCacheHome], and a home inside the checkout or inside the working directory stops
 // the run with [homeInFolder] before any other check of the home, and before anything
 // is written. Without keyed, walled reports whether the configuration starts a wall: a run
-// with no wall takes the home as [locate] does, and a walled run takes it as a keyed one.
+// with no wall takes the home as [locate] does, and a walled run takes it as a keyed one. A
+// walled run is a run with no links, whatever harness.links sets: it writes nothing into the
+// folder it runs in.
 func locateRun(o homeOptions, keyed, composes bool, walled func(config.Config) bool) (places, config.Config, error) {
 	if !keyed {
 		if !composes {
@@ -92,8 +107,12 @@ func locateRun(o homeOptions, keyed, composes bool, walled func(config.Config) b
 		}
 		return locateWith(o, func(root string) (config.Config, error) {
 			conf, err := configFor(root)
-			if err != nil || o.home != "" || !walled(conf) {
+			if err != nil || !walled(conf) {
 				return conf, err
+			}
+			conf.Links = config.LinksNone
+			if o.home != "" {
+				return conf, nil
 			}
 			return withCacheHome(root, conf)
 		}, func(root, home string) error {
@@ -115,6 +134,9 @@ func locateRun(o homeOptions, keyed, composes bool, walled func(config.Config) b
 		conf, err := config.Load(root, false)
 		if err != nil {
 			return conf, input(err)
+		}
+		if composes && walled != nil && walled(conf) {
+			conf.Links = config.LinksNone
 		}
 		if !composes || o.home != "" {
 			return conf, nil

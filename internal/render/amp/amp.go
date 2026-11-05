@@ -43,6 +43,9 @@ func (amp) Links(res *compose.Result) []render.Link {
 	return links
 }
 
+// CheckoutParts are what the package comment lists as read from the checkout alone.
+func (amp) CheckoutParts() []string { return []string{"skills", render.Instructions} }
+
 // Skips are agents, commands and output styles, which Amp defines through plugins rather
 // than project files.
 func (amp) Skips() []string { return []string{"agents", "commands", "output-styles"} }

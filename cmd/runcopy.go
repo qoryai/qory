@@ -219,7 +219,7 @@ func (c *runCopy) artifactsIn(ctx context.Context, report func(string)) error {
 		return err
 	}
 	res, err := c.dir.CopyArtifactsIn(ctx, c.root)
-	if out := slices.Concat(res.Skipped, res.Conflicts); len(out) > 0 {
+	if out := slices.Concat(reportedSkips(res.Skipped, c.root), res.Conflicts); len(out) > 0 {
 		report(fmt.Sprintf(textCopyNotIn, shownPaths(out)))
 	}
 	return err
@@ -246,6 +246,21 @@ func (c *runCopy) done(report func(string)) {
 	}
 }
 
+// reportedSkips is what a copy of artifacts from the folder from left out, as a person reads it:
+// .qory at the top is listed only when from has a folder there. A commit with a file named .qory
+// has no artifacts to leave out, on any run.
+func reportedSkips(skipped []string, from string) []string {
+	if info, err := os.Lstat(filepath.Join(from, checkout.Dir)); err == nil && info.IsDir() {
+		return skipped
+	}
+	return withoutQoryDir(skipped)
+}
+
+// withoutQoryDir is skipped without .qory at the top.
+func withoutQoryDir(skipped []string) []string {
+	return slices.DeleteFunc(slices.Clone(skipped), func(p string) bool { return p == checkout.Dir })
+}
+
 // artifactsBack copies .qory/artifacts of the copy back to the person's, once the run's
 // containers are gone, with or without a commit: the git session leaves .qory out. It prints
 // what it left out. A file you both have keeps your version, so the copy stays with the
@@ -254,8 +269,8 @@ func (c *runCopy) artifactsBack(ctx context.Context, report func(string)) bool {
 	limited, cancel := context.WithTimeout(ctx, copyStepLimit)
 	defer cancel()
 	res, err := c.dir.CopyArtifactsBack(limited, c.root)
-	if len(res.Skipped) > 0 {
-		report(fmt.Sprintf(textCopyLeftOut, shownPaths(res.Skipped)))
+	if skipped := reportedSkips(res.Skipped, c.dir.Work()); len(skipped) > 0 {
+		report(fmt.Sprintf(textCopyLeftOut, shownPaths(skipped)))
 	}
 	if len(res.Conflicts) > 0 {
 		report(fmt.Sprintf(textCopyConflicts, shownPaths(res.Conflicts)))
@@ -519,8 +534,9 @@ func (c *runCopy) copyBack(ctx context.Context, report func(string)) bool {
 	if len(res.Copied)+len(res.Deleted) > 0 {
 		report(fmt.Sprintf(textCopyBack, count(len(res.Copied), "file", "files"), exports.Value(c.root, false), count(len(res.Deleted), "file", "files")))
 	}
-	if len(res.Skipped) > 0 {
-		report(fmt.Sprintf(textCopyLeftOut, shownPaths(res.Skipped)))
+	// [runCopy.artifactsBack] copies .qory/artifacts back after this, and reports what it leaves out.
+	if skipped := withoutQoryDir(res.Skipped); len(skipped) > 0 {
+		report(fmt.Sprintf(textCopyLeftOut, shownPaths(skipped)))
 	}
 	if len(res.Conflicts) > 0 {
 		report(fmt.Sprintf(textCopyConflicts, shownPaths(res.Conflicts)))

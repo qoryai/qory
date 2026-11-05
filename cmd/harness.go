@@ -296,8 +296,9 @@ func configFor(root string) (config.Config, error) {
 // repository committed, because everything qory writes and removes there goes through
 // that path. A home outside the checkout is a root containing one home per checkout, with
 // the name [checkout.Key] returns, so one directory serves every checkout and every worktree, and the
-// checkout gets no links: harness.links: checkout is refused there. Inside, the links are
-// written unless harness.links: none or --no-links.
+// checkout gets no links: harness.links: checkout stops the compose there, except on a walled run,
+// which [locateRun] makes a run with no links. Inside, the links are written unless harness.links: none
+// or --no-links.
 func placesFor(root string, conf config.Config, o homeOptions) (places, error) {
 	home, err := configuredHome(root, conf, o)
 	if err != nil {
@@ -673,6 +674,8 @@ type composed struct {
 	harness []session.HarnessSource
 	// workflows are the composed stack's workflows, nil for none.
 	workflows map[string]stack.Workflow
+	// checkoutOnly is, per runtime composed for, what [render.CheckoutOnly] lists.
+	checkoutOnly map[string][]string
 }
 
 // composeHome is [runCompose] returning what it composed; nil after a check or a dry
@@ -721,7 +724,11 @@ func composeHome(out, errOut io.Writer, o composeOptions) (*composed, error) {
 	if res.Stack != nil {
 		workflows = res.Stack.Workflows
 	}
-	return &composed{rep: rep, targets: targets, warnings: pr.warnings, harness: harnessSources(res, o.named()), workflows: workflows}, nil
+	checkoutOnly := map[string][]string{}
+	for _, rt := range targets {
+		checkoutOnly[rt.Name()] = render.CheckoutOnly(rt, res)
+	}
+	return &composed{rep: rep, targets: targets, warnings: pr.warnings, harness: harnessSources(res, o.named()), workflows: workflows, checkoutOnly: checkoutOnly}, nil
 }
 
 // launchEnv is, per runtime with a launch template, the variables the harness sets when

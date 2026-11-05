@@ -38,8 +38,14 @@ compose` composes only then.
 A walled run, and any run with a run key, writes no harness into the folder it runs in. The harness goes into
 a home under `qory/homes` in your cache directory: `~/.cache/qory/homes/<name>-<hash>` on
 Linux, or `$XDG_CACHE_HOME/qory/homes/<name>-<hash>` when that is set, and
-`~/Library/Caches/qory/homes/<name>-<hash>` on macOS. `--home`, or `harness.home` in your
-`qory.yaml`, sets another folder outside. The compose writes nothing into the folder: no
+`~/Library/Caches/qory/homes/<name>-<hash>` on macOS. A run with a run key composes into that
+folder. A walled run with no run key, `--home` or `harness.home` composes into
+`<name>-<hash>/<run id>` inside it, a home for that run alone, so a second run of the checkout
+leaves the first run's home as it is. `qory` removes that home when the run ends, also after a
+stop and when the run's copy stays. Its harness report stays per checkout, at
+`<name>-<hash>-report.json`, so a module keeps its pin between runs: the first run takes each
+module's commit, and later runs read the report. `--home`, or `harness.home` in your
+`qory.yaml`, sets another folder outside, and that home stays after the run. The compose writes nothing into the folder: no
 `.qory/harness`, no link and no line in `.git/info/exclude`, in a folder that is not a
 git working tree as well. A home inside the folder stops the run with exit 2, behind a
 wall or not, before the run opens and before anything is written:
@@ -47,6 +53,26 @@ wall or not, before the run opens and before anything is written:
 ```text
 set --home to a folder outside /work/app: /work/app/.qory/harness is inside /work/app, and a walled run or a run with a run key writes no harness into the folder it runs in
 ```
+
+A walled run gets no link in the folder, whatever `harness.links` sets, so
+`harness.links: checkout` does not stop it. A run with no wall keeps its links. Without the
+links, some programs lose part of the harness, since they read that part from the checkout alone:
+
+| Runtime              | What does not reach a walled session                 |
+| -------------------- | ---------------------------------------------------- |
+| `gemini`             | the skills, the agents, the commands, the instructions |
+| `amp`                | the skills, the instructions                         |
+| `opencode`, `cursor` | the instructions                                     |
+| `copilot`            | the hooks, the instructions                          |
+
+A walled run with no run key on one of these runtimes prints one line on stderr before the agent
+starts, with what the compose wrote of that list, and nothing when it wrote none of it:
+
+```text
+qory run: run with --wall none for gemini's skills, agents, commands and instructions: a walled run has the harness in a home outside the checkout, and gemini reads those from the checkout.
+```
+
+A run with a run key prints no such line. Other runtimes, such as `claude` and `codex`, get all of it from the home.
 
 A walled run from a run code stops with exit 2, before the agent starts, when the agent's
 container would get a harness report, `<home>-report.json`, which contains the harness's
@@ -520,9 +546,9 @@ The agent greets you as before. What changed:
 - The record lists those requests with the credential's name, `model`, as `credential`
   in `dev.qory.run.egress`. It never lists the token's value.
 - Everything else the agent tries to reach is denied and recorded.
-- The harness is in `~/.cache/qory/homes/<name>-<hash>` on Linux, or
-  `~/Library/Caches/qory/homes/<name>-<hash>` on macOS, and the container has that folder
-  read-only. Your checkout gets no `.qory/harness`.
+- The harness is in `~/.cache/qory/homes/<name>-<hash>/<run id>` on Linux, or
+  `~/Library/Caches/qory/homes/<name>-<hash>/<run id>` on macOS, and the container has that folder
+  read-only. `qory` removes that folder when the run ends. Your checkout gets no `.qory/harness`.
 
 If you run it without a wall, the agent can read the token too. qory and the agent run as
 the same user. On macOS, the agent can read the environment qory started with, where
@@ -3417,8 +3443,11 @@ A walled run that may write never binds your repository, so it has no write acce
 repository to `<user cache>/qory/runs/<run id>/work`, `~/Library/Caches` on macOS and
 `$XDG_CACHE_HOME` or `~/.cache` on Linux, and binds that clone in place of the checkout. Each
 repository under `.qory/repositories` is cloned too. The harness goes into
-`<user cache>/qory/homes/<name>-<hash>`, outside the clone, and the container has that folder
-read-only. A read run with no setup binds your checkout
+`<user cache>/qory/homes/<name>-<hash>/<run id>`, outside the clone, and the container has that
+folder read-only. `qory` removes that folder when the run ends. A run with a run key has
+`<name>-<hash>` as its home, and a home from `--home` or `harness.home` stays. The clone gets no
+link to the harness, so a program that reads part of it from the checkout does not get that part:
+see [What `qory run` does](#what-qory-run-does). A read run with no setup binds your checkout
 read-only instead, and a read run with a setup gets the clone read-only: see
 [Read workflows](#read-workflows).
 
@@ -3453,9 +3482,10 @@ When the agent has ended, however it ended, a second session starts on the same 
 session. It runs no agent and gets no model key and no run code. It never binds your
 checkout, and of what you have, only the copy is writable. Its other binds are a new folder
 for its bundles and the folder of the hook forwarder's socket, both writable, and `qory`'s
-Linux build and the session's folder in the run's record, both read-only. A run whose proxy
-ends TLS, as [TLS on credential hosts](#tls-on-credential-hosts) describes, also binds its bundle
-of authorities read-only, at `/qory/ca-bundle.pem`. It commits what
+Linux build and the session's folder in the run's record, both read-only. A run whose gateway
+answered the open with an authority also binds its bundle of authorities read-only, at
+`/qory/ca-bundle.pem`. A run with no authority in that answer has no such bind, whatever its proxy
+does with TLS. It commits what
 the agent left, with no setting from the copy's `.git` and no filter, and writes the run's
 branch to a git bundle. With a branch
 checked out that descends from your commit, the bundle has that branch, and its commits keep
@@ -3466,8 +3496,18 @@ a commit of that working tree would undo the branch's files. After an amended co
 `git pull --rebase`, with `HEAD` and the run's branch at one commit, the session commits as usual.
 Your `.gitignore`, `.git/info/exclude` and global excludes file keep their files out of
 the commit. The image needs git 2.25 or later, `cat`, `comm`, `cp`, `find`, `grep`, `mkdir`, `mv`,
-`readlink`, `sort` and `tr` in `/usr/local/bin`,
-`/usr/bin` or `/bin`: `qory image check` tests them. The run's record shows the session as a second session.
+`readlink`, `sh`, `sort` and `tr` in `/usr/local/bin`,
+`/usr/bin` or `/bin`: `qory image check` tests them. A write run that lists repositories tests them
+too, in a first setup step named `Check tools`, in the setup container or, with `wall.setup: inside`,
+in the agent's container. The step prints nothing when they are there. When one is missing, the run
+closes as a failed setup before the agent starts, with one line per missing program, such as:
+
+```text
+qory run: install comm in /usr/local/bin, /usr/bin, /bin: the git session of a walled run runs comm from these folders, to compare the run's refs and commits with what the bundle has
+```
+
+A run that lists no repositories has no setup, so it has no such step, and a read run has no git
+session. The run's record shows the session as a second session.
 
 Part of the run's work can miss the bundle:
 

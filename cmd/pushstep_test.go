@@ -220,6 +220,7 @@ type pushRepo struct {
 	flags        []string
 	waits        []time.Duration
 	setup        func(dir string)
+	onSetup      func(session.SetupSpec)
 	mask         string
 	// pushStarted, when set, runs as the push step starts. removeSetup, when set, is the
 	// run's RemoveSetup, and proxyErr the error of the run's HostProxy.
@@ -323,6 +324,9 @@ func (p *pushRepo) run(t *testing.T, agent func(dir string), result func() (*ses
 		Setup: func(spec session.SetupSpec) error {
 			if p.setup != nil {
 				p.setup(spec.Dir)
+			}
+			if p.onSetup != nil {
+				p.onSetup(spec)
 			}
 			return nil
 		},

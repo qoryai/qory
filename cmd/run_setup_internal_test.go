@@ -67,7 +67,7 @@ func setupSpecOf(t *testing.T, where string, wallEnv, flagEnv []string, harness 
 		got = &s
 		return nil
 	}}}
-	err = runSetup(t.Context(), run, &spec)
+	err = runSetup(t.Context(), run, &spec, false)
 	return got, spec, err
 }
 

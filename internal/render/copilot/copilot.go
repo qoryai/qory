@@ -70,6 +70,9 @@ func (copilot) Links(res *compose.Result) []render.Link {
 	return links
 }
 
+// CheckoutParts are what the package comment lists as read from the checkout alone.
+func (copilot) CheckoutParts() []string { return []string{"hooks", render.Instructions} }
+
 // Skips are commands, output styles and MCP servers: Copilot CLI reads no project prompt
 // files, has no output styles, and reads its MCP configuration from the user's home.
 func (copilot) Skips() []string { return []string{"commands", "output-styles"} }

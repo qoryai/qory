@@ -51,6 +51,11 @@ func (gemini) Links(res *compose.Result) []render.Link {
 	return links
 }
 
+// CheckoutParts are what the package comment lists as read from the checkout alone.
+func (gemini) CheckoutParts() []string {
+	return []string{"skills", "agents", "commands", render.Instructions}
+}
+
 // Skips are output styles, the one kind Gemini CLI has no place for.
 func (gemini) Skips() []string { return []string{"output-styles"} }
 

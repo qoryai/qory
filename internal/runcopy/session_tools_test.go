@@ -72,7 +72,8 @@ func TestSessionToolsListsEveryProgramOfTheScript(t *testing.T) {
 		}
 	}
 	for _, tool := range tools {
-		if !slices.Contains(scriptPrograms(sessionScript), tool) {
+		// The session's command runs the script under sh, which the script does not call.
+		if tool != "sh" && !slices.Contains(scriptPrograms(sessionScript), tool) {
 			t.Errorf("image.SessionTools lists %s, which the script does not run", tool)
 		}
 	}

@@ -63,6 +63,9 @@ func (cursor) Links(res *compose.Result) []render.Link {
 	return links
 }
 
+// CheckoutParts are what the package comment lists as read from the checkout alone.
+func (cursor) CheckoutParts() []string { return []string{render.Instructions} }
+
 // Skips are commands and output styles, since Cursor folded commands into skills and has
 // no output styles.
 func (cursor) Skips() []string { return []string{"commands", "output-styles"} }

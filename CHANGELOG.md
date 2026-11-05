@@ -251,8 +251,10 @@ release may change what an existing document does, and states it under Upgrading
   `.qory/work-item.json`, and gets `.qory/artifacts` back. New stops, each with its fix first: a
   local repository with no commit, a working folder absent from `HEAD`, a partial clone, a
   branch named as a parent of the run's branch, a run or compose in a folder of a run's copy,
-  and a run in a folder that is not a repository
-  and is or contains your home folder or qory's state directory. A copy that stays has its `.git` renamed to `.git-from-run`. Part of the run's work
+  a run in a folder that is not a repository
+  and is or contains your home folder or qory's state directory, and a write run that lists
+  repositories on an image without a program of the git session, which stops in the setup step
+  `Check tools`, before the agent, with `install <program> in /usr/local/bin, /usr/bin, /bin: …`. A copy that stays has its `.git` renamed to `.git-from-run`. Part of the run's work
   that misses the bundle, such as commits on another branch or a stash, keeps the copy, and so does a part of
   the run's wall that could not be removed, which brings nothing back. A run with the push step keeps no
   copy, and a stop before its push prints `take the work item in again in Qory Apiary`. A first signal leaves the
@@ -261,8 +263,20 @@ release may change what an existing document does, and states it under Upgrading
   mount stops a read run too, and so does a read run with no setup at your home folder.
   `make the mount … read-only` replaces `mount a narrower folder` in the line of a read-write
   mount of your home folder. `qory image check` tests that git is 2.25 or later and that `cat`,
-  `comm`, `cp`, `find`, `grep`, `mkdir`, `mv`, `readlink`, `sort` and `tr` are there, in `/usr/local/bin`, `/usr/bin` or `/bin`. See A run that may write works in a copy in
+  `comm`, `cp`, `find`, `grep`, `mkdir`, `mv`, `readlink`, `sh`, `sort` and `tr` are there, in `/usr/local/bin`, `/usr/bin` or `/bin`. See A run that may write works in a copy in
   `docs/run.md`.
+- A walled run with no run key, `--home` or `harness.home` composes into
+  `qory/homes/<name>-<hash>/<run id>` in your cache directory, a home for that run alone, and
+  `qory` removes that home when the run ends. A second run of a checkout no longer empties the
+  first run's home. The harness report stays per checkout, at `qory/homes/<name>-<hash>-report.json`,
+  so a module keeps its pin between runs.
+- `harness.links: checkout` no longer stops a walled run, which gets no link. A walled run with no
+  run key on gemini, amp, opencode, cursor or copilot prints one line before the agent starts, with
+  `run with --wall none` first and what of the harness those programs read from the checkout alone:
+  gemini the skills, agents, commands and instructions, amp the skills and instructions, opencode
+  and cursor the instructions, and copilot the hooks and instructions.
+- A plain folder with `.qory`, and a commit with a file named `.qory`, no longer print
+  `left out of the copy back to your folder: .qory.` or `left out of the run's copy: .qory.`.
 - A run that lists repositories starts in an empty folder as well: qory runs `git init`
   there, then fetches. A folder that is not empty and is not a git working tree still
   stops the run.
