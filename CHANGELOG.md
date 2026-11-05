@@ -259,6 +259,9 @@ release may change what an existing document does, and states it under Upgrading
   mount of your home folder. `qory image check` tests that git is 2.25 or later in
   `/usr/local/bin`, `/usr/bin` or `/bin`. See A run that may write works in a copy in
   `docs/run.md`.
+- A run that lists repositories starts in an empty folder as well: qory runs `git init`
+  there, then fetches. A folder that is not empty and is not a git working tree still
+  stops the run.
 - The compose fails, exit 2, for each entry of a stack's `workflows` that no module of
   the stack composes as a skill or command.
 - A run from a run code whose composed harness has no skill or command of the

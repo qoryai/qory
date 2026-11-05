@@ -4,12 +4,12 @@
 // repository first.
 //
 // [Run] fetches on this machine, as qory run does once the run is open: the run's
-// repository into the working folder, an empty git working tree, at the head of its
-// default branch, or at a commit with [RunAt], and each further one under
-// .qory/repositories, every request through the run's host proxy, which adds what a
-// host needs, so no token is on the machine or in git's configuration. Every fetch is at
-// depth one, over https alone, with no credential helper and no prompt, as package
-// [proxygit] sets git up.
+// repository into the working folder, an empty folder, in which it runs git init, or an
+// empty git working tree, at the head of its default branch, or at a commit with [RunAt],
+// and each further one under .qory/repositories, every request through the run's host
+// proxy, which adds what a host needs, so no token is on the machine or in git's
+// configuration. Every fetch is at depth one, over https alone, with no credential helper
+// and no prompt, as package [proxygit] sets git up.
 //
 // In a container of the run's image, the setup container or the agent's, qory run prepare
 // calls [Prepare], which adds to the working folder the files of the image's copy at
@@ -74,11 +74,13 @@ const (
 	textQoryNotDir     = "qory run: remove .qory from the working folder of %s: it is a file or a link, where qory clones the further repositories into a folder, and nothing is cloned over it"
 	textOtherOwner     = "qory run: list in %[1]s only repositories of owner %[4]s: entry %[2]d is of owner %[3]s, and on github.com the repositories of a run are of one owner"
 	textNotGitHub      = "qory run: write entry %[2]d of %[1]s as owner/name, the form of a repository on github.com"
-	textNotTree        = "qory run: start the run in a git working tree without commits: the working folder is not one, and the run's repository is fetched only into an empty git working tree"
+	textNotTree        = "qory run: start the run in an empty folder outside any git repository, or at the top of a git working tree without commits: the working folder is neither, and qory fetches the run's repository only into one of these"
+	textDirLink        = "qory run: start the run in the folder that the link leads to: the working folder is a link, and qory runs git init only in a folder"
+	textNoGitPart      = "qory run: start the run in a new empty folder or a new empty git working tree: the working folder's .git has no %s, so git does not take that folder for a repository"
 	textExcludeLink    = "qory run: remove the link %s from the working folder: qory writes the exclude file of the repository only where no link leads"
 	textExcludeOutside = "qory run: start the run in a git working tree whose exclude file is inside the working folder: the exclude file, %s, is outside it, and qory writes it only inside"
 	textGitNotDir      = "qory run: start the run in a git working tree whose .git is a folder: the working folder's .git is a file or a link, which points at a repository elsewhere"
-	textHasRemote      = "qory run: start the run in a git working tree with no remote: the working folder's repository has a remote already, and the run's repository is fetched only into an empty git working tree"
+	textHasRemote      = "qory run: start the run in a new empty folder or a new empty git working tree: the working folder's repository has a remote already, and qory fetches the run's repository only into a repository with no remote"
 	textGitFailed      = "qory run: check that git on this machine can read the working folder, then run again. git failed: %s"
 	textLocal          = "qory run: check that this machine can read and write the working folder, then run again. The step failed: %s"
 	textConfigKey      = "qory run: start the run in a new empty git working tree, or remove %s from %s, then run again. qory fetches only into a repository whose configuration has only the keys git init writes, since git on this machine would use any other key, such as a filter, a proxy or http.sslVerify"
@@ -221,7 +223,8 @@ func RunAt(ctx context.Context, dir string, base []string, getenv func(string) s
 		return false, local(err)
 	}
 	g := hostRunner(&p)
-	if err := emptyTree(ctx, g, dir); err != nil {
+	// LC_ALL=C keeps the line [initFolder] reads from git in English.
+	if err := emptyTree(ctx, hostRunnerWith(&p, "", "LC_ALL=C"), dir); err != nil {
 		return false, err
 	}
 	start := time.Now()
@@ -411,19 +414,20 @@ func repoURL(system, path string) string {
 	return base + "/" + path + ".git"
 }
 
-// emptyTree stops on a working folder that holds anything but .git and .qory; then on
-// one whose .git is not a folder, a file or a link to a repository elsewhere, such as a
-// worktree's or a separate git directory's, whose path is the host's; then on one with
-// no .git, which is outside a working tree or nested in one; then on one whose
-// repository [safeRepository] stops on; then on one that is not the top of its working
-// tree, whose repository has a commit, or has a remote. A git that fails to read the
-// folder is [textGitFailed], not a refusal of the folder.
+// emptyTree stops on a working folder whose .git is not a folder, a file or a link to a
+// repository elsewhere, such as a worktree's or a separate git directory's, whose path is
+// the host's; on one with a .git and anything else but .qory; and on one with no .git and
+// any entry, which is not a working tree. A folder with no entries gets a repository from
+// [initFolder], and a .git with no HEAD, objects or refs stops as [gitParts] has it. Then
+// it stops on one whose repository [safeRepository] stops on; then on one that is not the
+// top of its working tree, whose repository has a commit, or has a remote. A git that fails
+// to read the folder is [textGitFailed], not a stop on what the folder has.
 func emptyTree(ctx context.Context, git gitRunner, dir string) error {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return local(err)
 	}
-	hasGit := false
+	hasGit, other := false, false
 	for _, e := range entries {
 		switch e.Name() {
 		case ".git":
@@ -433,11 +437,21 @@ func emptyTree(ctx context.Context, git gitRunner, dir string) error {
 			hasGit = true
 		case checkout.Dir:
 		default:
-			return errors.New(textNotEmpty)
+			other = true
 		}
 	}
+	if other && hasGit {
+		return errors.New(textNotEmpty)
+	}
 	if !hasGit {
-		return errors.New(textNotTree)
+		if len(entries) > 0 {
+			return errors.New(textNotTree)
+		}
+		if err := initFolder(ctx, git, dir); err != nil {
+			return err
+		}
+	} else if err := gitParts(filepath.Join(dir, ".git")); err != nil {
+		return err
 	}
 	if err := safeRepository(ctx, dir); err != nil {
 		return err
@@ -446,7 +460,8 @@ func emptyTree(ctx context.Context, git gitRunner, dir string) error {
 	if err != nil {
 		return gitFailed(err)
 	}
-	if !samePath(strings.TrimSpace(top), dir) {
+	// Only the line end is git's: a folder's name can end in a space.
+	if !samePath(strings.TrimSuffix(top, "\n"), dir) {
 		return errors.New(textNotTree)
 	}
 	commits, err := git(ctx, dir, "rev-list", "-n", "1", "--all")
@@ -489,6 +504,36 @@ func branchName(ctx context.Context, git gitRunner, dir, branch string) (bool, e
 // push step, which reaches no remote.
 func BranchName(ctx context.Context, dir, branch string) (bool, error) {
 	return branchName(ctx, stepGit(noRemote, ""), dir, branch)
+}
+
+// initFolder runs git init in dir, a folder with no entries, with no template, so the
+// repository has only what git init writes without one. It stops with [textDirLink] on a
+// dir that is a link, without following it, and with [textNotTree] on a dir git finds a
+// repository for, such as a folder inside a working tree, where git would use the second
+// repository in place of the first. Any other failure of git to look for a repository,
+// such as a .git above dir that git cannot read, is [textGitFailed]. The fetch replaces the unborn branch main with the remote's default branch,
+// so its name has no effect on the run; the option keeps it from depending on git's
+// version.
+func initFolder(ctx context.Context, git gitRunner, dir string) error {
+	info, err := os.Lstat(dir)
+	if err != nil {
+		return local(err)
+	}
+	if info.Mode()&fs.ModeSymlink != 0 {
+		return errors.New(textDirLink)
+	}
+	_, err = git(ctx, dir, "rev-parse", "--git-dir")
+	if err == nil {
+		return errors.New(textNotTree)
+	}
+	var ge *gitError
+	if !errors.As(err, &ge) || !strings.Contains(ge.line, "not a git repository (or any") {
+		return gitFailed(err)
+	}
+	if _, err := git(ctx, dir, "init", "--quiet", "--template=", "--initial-branch=main"); err != nil {
+		return local(err)
+	}
+	return nil
 }
 
 // fetchRun fetches the run's repository into dir with git: origin is its URL, and the

@@ -51,6 +51,70 @@ func TestEnvDropsTheTransportsOfTheEnvironment(t *testing.T) {
 	}
 }
 
+// TestEnvDropsTheFormatsAndTheCeiling is an environment that chooses the formats git init
+// writes and ends git's search for a repository early: Env drops each, with and without a
+// proxy. A git init with GIT_DEFAULT_HASH=sha256 in that environment writes the format
+// of a git init with none, and a git with the ceiling at the repository still finds it.
+func TestEnvDropsTheFormatsAndTheCeiling(t *testing.T) {
+	names := []string{"GIT_DEFAULT_HASH", "GIT_DEFAULT_REF_FORMAT", "GIT_CEILING_DIRECTORIES"}
+	env := []string{"PATH=" + os.Getenv("PATH")}
+	for _, name := range names {
+		env = append(env, name+"=x")
+	}
+	for _, p := range []*proxygit.Proxy{nil, {URL: "http://qory:password@127.0.0.1:9"}} {
+		for _, kv := range proxygit.Env(env, p) {
+			if name, _, _ := strings.Cut(kv, "="); slices.Contains(names, name) {
+				t.Errorf("proxy %v: Env keeps %s", p != nil, kv)
+			}
+		}
+	}
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git is not installed")
+	}
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, "config"))
+	git := func(dir string, env []string, args ...string) (string, error) {
+		c := exec.Command("git", args...)
+		c.Dir, c.Env = dir, env
+		out, err := c.CombinedOutput()
+		return strings.TrimSpace(string(out)), err
+	}
+	format := func(env []string) string {
+		dir := t.TempDir()
+		if out, err := git(dir, env, "init", "--quiet"); err != nil {
+			t.Fatalf("git init: %v\n%s", err, out)
+		}
+		out, err := git(dir, env, "rev-parse", "--show-object-format")
+		if err != nil {
+			t.Fatalf("git rev-parse: %v\n%s", err, out)
+		}
+		return out
+	}
+	plain := proxygit.Env(os.Environ(), nil)
+	if got, want := format(proxygit.Env(append(os.Environ(), "GIT_DEFAULT_HASH=sha256"), nil)), format(plain); got != want {
+		t.Errorf("the object format with GIT_DEFAULT_HASH=sha256 is %s, want %s", got, want)
+	}
+	if got := format(append(slices.Clone(plain), "GIT_DEFAULT_HASH=sha256")); got != "sha256" {
+		t.Errorf("with GIT_DEFAULT_HASH kept, the format is %s, so the test shows nothing", got)
+	}
+	top := t.TempDir()
+	if out, err := git(top, plain, "init", "--quiet"); err != nil {
+		t.Fatalf("git init: %v\n%s", err, out)
+	}
+	inner := filepath.Join(top, "inner")
+	if err := os.Mkdir(inner, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	ceiling := "GIT_CEILING_DIRECTORIES=" + top
+	if out, err := git(inner, proxygit.Env(append(os.Environ(), ceiling), nil), "rev-parse", "--git-dir"); err != nil {
+		t.Errorf("git did not find the repository above the folder: %v\n%s", err, out)
+	}
+	if _, err := git(inner, append(slices.Clone(plain), ceiling), "rev-parse", "--git-dir"); err == nil {
+		t.Errorf("with GIT_CEILING_DIRECTORIES kept, git found the repository, so the test shows nothing")
+	}
+}
+
 // TestEnvWithAProxyDropsNoProxy is an environment with NO_PROXY and no_proxy set to the
 // loopback names, as the Env of Forager's forwarder sets them: with a proxy, Env drops
 // both, since git reaches a host that NO_PROXY lists directly, past the run's proxy;

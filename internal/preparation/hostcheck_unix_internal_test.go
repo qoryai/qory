@@ -6,6 +6,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -71,5 +72,47 @@ func TestALocalCloneIsNoHardLinkStop(t *testing.T) {
 	}
 	if err := qoryFiles(dir); err != nil {
 		t.Errorf("the clone's .qory: %v", err)
+	}
+}
+
+// TestAnEmptyFolderBehindALinkStops is a working folder that is a link to a folder with no
+// entries: the run stops, and git init does not run through the link.
+func TestAnEmptyFolderBehindALinkStops(t *testing.T) {
+	needGit(t)
+	base := t.TempDir()
+	remote(t, base, "acme/shop", "main", nil)
+	target := t.TempDir()
+	link := filepath.Join(t.TempDir(), "link")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+	_, err := prepare(context.Background(), link, env("git.example.com", "acme/shop"))
+	want := "qory run: start the run in the folder that the link leads to: the working folder is a link, and qory runs git init only in a folder"
+	if err == nil || err.Error() != want {
+		t.Errorf("%v, want %s", err, want)
+	}
+	if _, err := os.Lstat(filepath.Join(target, ".git")); !os.IsNotExist(err) {
+		t.Errorf("the link's target has a .git: %v", err)
+	}
+}
+
+// TestAnEmptyFolderGitCannotWriteStops is a folder with no entries and no write
+// permission: the line starts with the fix and contains git's line.
+func TestAnEmptyFolderGitCannotWriteStops(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root writes to a read-only folder")
+	}
+	needGit(t)
+	base := t.TempDir()
+	remote(t, base, "acme/shop", "main", nil)
+	dir := t.TempDir()
+	if err := os.Chmod(dir, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(dir, 0o700) })
+	_, err := prepare(context.Background(), dir, env("git.example.com", "acme/shop"))
+	want := "qory run: check that this machine can read and write the working folder, then run again. The step failed: "
+	if err == nil || !strings.HasPrefix(err.Error(), want) || len(err.Error()) == len(want) {
+		t.Errorf("%v, want a line that starts %s", err, want)
 	}
 }

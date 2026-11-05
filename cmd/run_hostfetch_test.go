@@ -237,7 +237,7 @@ func TestARunStopsOnAFailedHostFetch(t *testing.T) {
 			return "qory run: use an https URL for git@github.com:example-org/harness.git in qory.yaml, such as https://github.com/example-org/harness. A run from a control plane fetches git sources only over https, through the run's gateway; ssh would use this machine's keys.\n"
 		}, 2, nil, true},
 		{"proxy in the working folder", "acme/shop", "", "main", func(*hostFetch) string {
-			return "qory run: start the run in a git working tree with no remote: the working folder's repository has a remote already, and the run's repository is fetched only into an empty git working tree\n"
+			return "qory run: start the run in a new empty folder or a new empty git working tree: the working folder's repository has a remote already, and qory fetches the run's repository only into a repository with no remote\n"
 		}, 1, func(dir string) { runGit(t, dir, "config", "remote.origin.proxy", "http://127.0.0.1:9") }, false},
 	} {
 		t.Run(c.name, func(t *testing.T) {

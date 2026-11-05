@@ -131,11 +131,11 @@ compose:
 
 When the run configuration lists repositories, `qory run` fetches them on this machine
 once the run is open, before the compose: the run's repository into the working folder,
-which is an empty git working tree, and each further one under `.qory/repositories`. Each
-fetch is at depth one, over https only, through the run's host proxy on the run's
-gateway, which adds the credential the run configuration has for the host, with git's
-hooks off and no credential helper, so no token is on this machine. qory closes the host
-proxy once the repositories are fetched. The compose then fetches the harness's git
+which is an empty folder or an empty git working tree, and each further one under
+`.qory/repositories`. Each fetch is at depth one, over https only, through the run's host
+proxy on the run's gateway, which adds the credential the run configuration has for the
+host, with git's hooks off and no credential helper, so no token is on this machine. qory
+closes the host proxy once the repositories are fetched. The compose then fetches the harness's git
 sources through the run's stack proxy, which gets none of those credentials. `qory run`
 prints one line for the repositories, with `and 1 further repository` when there are
 two, and then one line for each git source of the compose:
@@ -165,8 +165,20 @@ and for a git source that is not https, and 1 for any other failed fetch:
 - `run again: the run's stack proxy, through which qory fetches the run's harness, did
   not open: <error>`, exit 1
 
-The working folder must be an empty git working tree that git init made: before the
-fetch, qory checks its `.git`. The run stops with exit 1 before git fetches anything if:
+A starter gives the run an empty folder or an empty git working tree that git init made.
+In an empty folder, qory runs `git init` with no template. The run stops with exit 1 before
+git fetches anything if the working folder:
+
+- has any entry and no `.git`, such as a file or only `.qory`;
+- is a link to an empty folder;
+- is empty and inside a git repository, or is empty and below a `.git` that git cannot read;
+- has a `.git` and anything else but `.qory`, with or without a commit;
+- has a `.git` that is a file or a link, or that has no `HEAD`, `objects` or `refs`;
+- is not the top of its git working tree;
+- has a repository with a commit or a remote.
+
+Before the fetch, qory also checks the working folder's `.git`. The run stops in the same way
+if:
 
 - its configuration has a key git init does not write, such as a filter,
   `remote.origin.proxy` or `http.sslVerify`;
@@ -177,7 +189,7 @@ fetch, qory checks its `.git`. The run stops with exit 1 before git fetches anyt
   each object to a new file, so the hard links of `git clone --local` in `.git/objects`
   do not stop the run.
 
-Start the run in a new empty git working tree.
+Start the run in a new empty folder or a new empty git working tree.
 
 A source that breaks a rule stops the run with exit 2 before the agent starts. A stack
 given to `-f` from outside the checkout is not a file in the checkout: its paths resolve
