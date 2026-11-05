@@ -3007,3 +3007,40 @@ func TestAFilePastTheHashLimitIsNotHashed(t *testing.T) {
 		t.Errorf("the state past the limit is %s, want other", states[0].State)
 	}
 }
+
+// TestAnEmbeddedRepositoryWithNoFindIsLeftBehind is a session whose PATH has no find: git add adds
+// the repository as a link to a commit, prints its warning, and the session records that.
+func TestAnEmbeddedRepositoryWithNoFindIsLeftBehind(t *testing.T) {
+	isolate(t)
+	sessionGit(t)
+	bin := t.TempDir()
+	for _, name := range []string{"git", "cat", "cp", "mkdir", "mv", "readlink", "rm"} {
+		real, err := exec.LookPath(name)
+		if err != nil {
+			t.Skipf("no %s here: %v", name, err)
+		}
+		write(t, bin, name, "#!/bin/sh\nexec '"+real+"' \"$@\"\n")
+		if err := os.Chmod(filepath.Join(bin, name), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	old := sessionPath
+	sessionPath = bin
+	t.Cleanup(func() { sessionPath = old })
+	src, _ := person(t)
+	d, repos := cloneRun(t, src)
+	inner := filepath.Join(d.Work(), "inner")
+	if err := os.Mkdir(inner, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	testGit(t, inner, "init", "--quiet")
+	write(t, inner, "x.txt", "x\n")
+	commitAll(t, inner, "inner")
+	out := sessionOutput(t, d, repos, nil)
+	if !strings.Contains(out, "qory: git add left this out of the commit in the copy: ") || !strings.Contains(out, "embedded") {
+		t.Errorf("the session printed:\n%s", out)
+	}
+	if !d.LeftBehind(repos) {
+		t.Error("the session did not record the embedded repository")
+	}
+}

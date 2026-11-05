@@ -295,12 +295,12 @@ while [ "$n" -lt "$count" ]; do
 	if [ -z "$from" ]; then from=$head; fi
 	case $head in
 	'' | *[!0-9a-f]*)
-		echo "qory: read the run's files in $shown, and run no git there: neither HEAD nor $branch there is a commit, so the session commits nothing" >&2
+		echo "qory: neither HEAD nor $branch in $shown is a commit, so the session commits nothing" >&2
 		exit 1
 		;;
 	esac
 	if [ ${#head} -ne ${#base} ]; then
-		echo "qory: read the run's files in $shown, and run no git there: git read a commit id of ${#head} characters there, and the base commit has ${#base}" >&2
+		echo "qory: git read a commit id of ${#head} characters in $shown, and the base commit has ${#base}, so the session commits nothing" >&2
 		exit 1
 	fi
 	# A branch of the copy with a commit that the bundle does not have: the work stays behind.
