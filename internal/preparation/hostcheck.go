@@ -24,8 +24,8 @@ import (
 )
 
 // safeRepository stops on a working folder whose repository git on this machine must not
-// fetch into, before any git runs there with the run's host proxy: the fetch runs on
-// this machine, and a walled run of an earlier run could have written the working
+// fetch into, before any git reaches a remote from there through the run's host proxy: the
+// fetch runs on this machine, and a walled run of an earlier run could have written the working
 // folder's .git. A key of the repository's configuration can make git run a program, as
 // a filter does on checkout, or take the fetch past the gateway or past its check of
 // the host's certificate, as remote.<name>.proxy and http.sslVerify do. A link under
@@ -185,15 +185,14 @@ func noLinkTo(root, dir string) error {
 	return nil
 }
 
-// gitParts stops on a git directory without HEAD, objects or refs: git does not take such
-// a directory for a repository, and goes on to the folders above it.
+// gitParts stops on a git directory without HEAD, objects or refs ([textNoGitPart]): git
+// does not take such a directory for a repository, and goes on to the folders above it.
 func gitParts(gitDir string) error {
 	for _, name := range []string{"HEAD", "objects", "refs"} {
 		_, err := os.Lstat(filepath.Join(gitDir, name))
 		switch {
 		case errors.Is(err, fs.ErrNotExist):
-			cause := fmt.Sprintf(causeNoGitPart, name)
-			return &unsafeError{cause, cause}
+			return &unsafeError{fmt.Sprintf(textNoGitPart, name), fmt.Sprintf(causeNoGitPart, name)}
 		case err != nil:
 			return local(err)
 		}

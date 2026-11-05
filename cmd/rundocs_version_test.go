@@ -136,7 +136,7 @@ func TestARunCodeInAFolderWithAFileStops(t *testing.T) {
 	if cmd.ExitCode(err) != 1 || n.joined {
 		t.Fatalf("%v (exit %d), want exit 1 before the join\n%s", err, cmd.ExitCode(err), out)
 	}
-	wants(t, out+err.Error(), "qory run: start the run in an empty folder outside any git working tree, or at the top of a git working tree without commits: the working folder is neither, and qory fetches the run's repository only into one of these")
+	wants(t, out+err.Error(), "qory run: start the run in an empty folder outside any git repository, or at the top of a git working tree without commits: the working folder is neither, and qory fetches the run's repository only into one of these")
 	if _, err := os.Lstat(filepath.Join(h.dir, ".git")); !os.IsNotExist(err) {
 		t.Errorf("the folder has a .git after the stop: %v", err)
 	}

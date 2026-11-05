@@ -130,9 +130,9 @@ When the run configuration lists repositories, `qory run` fetches them on this m
 once the run is open, before the compose: the run's repository into the working folder,
 which is an empty folder or an empty git working tree, and each further one under
 `.qory/repositories`. Each fetch is at depth one, over https only, through the run's host
-proxy on the run's gateway, which adds the credential the run configuration has for the host, with git's
-hooks off and no credential helper, so no token is on this machine. qory closes the host
-proxy once the repositories are fetched. The compose then fetches the harness's git
+proxy on the run's gateway, which adds the credential the run configuration has for the
+host, with git's hooks off and no credential helper, so no token is on this machine. qory
+closes the host proxy once the repositories are fetched. The compose then fetches the harness's git
 sources through the run's stack proxy, which gets none of those credentials. `qory run`
 prints one line for the repositories, with `and 1 further repository` when there are
 two, and then one line for each git source of the compose:
@@ -163,12 +163,19 @@ and for a git source that is not https, and 1 for any other failed fetch:
   not open: <error>`, exit 1
 
 A starter gives the run an empty folder or an empty git working tree that git init made.
-In an empty folder, qory runs `git init` with no template. The run stops with exit 1 in a
-folder that has files and is not a git working tree, in an empty folder inside another
-repository, and in a repository that has a commit.
+In an empty folder, qory runs `git init` with no template. The run stops with exit 1 before
+git fetches anything if the working folder:
 
-Before the fetch, qory checks the working folder's `.git`. The run stops with exit 1 before
-git fetches anything if:
+- has any entry and no `.git`, such as a file or only `.qory`;
+- is a link to an empty folder;
+- is empty and inside a git repository, or is empty and below a `.git` that git cannot read;
+- has a `.git` and anything else but `.qory`, with or without a commit;
+- has a `.git` that is a file or a link, or that has no `HEAD`, `objects` or `refs`;
+- is not the top of its git working tree;
+- has a repository with a commit or a remote.
+
+Before the fetch, qory also checks the working folder's `.git`. The run stops in the same way
+if:
 
 - its configuration has a key git init does not write, such as a filter,
   `remote.origin.proxy` or `http.sslVerify`;
@@ -3519,9 +3526,11 @@ stops after the image's fetch, exit 1, with a line that ends `(mount_mode_confli
 
 A mount folder that exists in the checkout before the fetch, outside `.git` and `.qory`,
 stops a run whose run configuration lists repositories at the fetch instead, with
-`no_session`: the fetch needs an empty working folder. `--mount <checkout>/.qory/sub`, a
-mount in `.git`, and a `wall.mounts` folder that the fetch creates pass the fetch and stop
-as in the last two cases. A writable mount at the checkout's exact path stops nothing:
+`no_session`: the fetch needs a working folder with nothing but `.git` and `.qory`. In a git
+working tree, `--mount <checkout>/.qory/sub`, a mount in `.git`, and a `wall.mounts` folder
+that the fetch creates pass the fetch and stop as in the last two cases. In a folder with no
+`.git`, any entry stops the run at the fetch, `.qory` among them, so only a `wall.mounts`
+folder that the fetch creates passes. A writable mount at the checkout's exact path stops nothing:
 qory makes it read-only.
 
 A run of a workflow from a run code where neither value is `read`, a run given a run key
