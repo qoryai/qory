@@ -189,7 +189,7 @@ func objectFormat(ctx context.Context, dir string) (string, error) {
 
 // maxHashBytes is the most bytes [hashBlob] reads of one file. A setup can leave a sparse file
 // of any size.
-const maxHashBytes = maxCopyBackBytes
+var maxHashBytes int64 = maxCopyBackBytes
 
 // hashBlob is the git blob id of what r has, size bytes, in format: the hash of blob <size>,
 // a zero byte and the content, as git hash-object --no-filters computes it. It reads no more

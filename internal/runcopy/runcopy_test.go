@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
 	"io/fs"
 	"os"
 	"os/exec"
@@ -688,7 +689,7 @@ func TestGitSessionWithNoChangeWritesNoBundle(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err := d.Quarantine(ctx, branch, repos)
-	hasPrefix(t, "no record", err, "the git session wrote no bundle")
+	hasPrefix(t, "no record", err, "the git session exited 0 and wrote no bundle")
 	if errors.Is(err, ErrNoBundle) {
 		t.Error("a session that wrote nothing counts as one with no change")
 	}
@@ -2936,5 +2937,73 @@ func TestASetupFileWithAnExecuteBitButTheOwnersStaysOut(t *testing.T) {
 	got := files(t, qs[0].Path, qs[0].Head)
 	if !slices.Contains(got, "ok.txt") || slices.Contains(got, "group.sh") || slices.Contains(got, "owner.sh") {
 		t.Errorf("the commit has %v", got)
+	}
+}
+
+// TestACtxReaderStopsWhenItsContextEnds is a read after the context ended.
+func TestACtxReaderStopsWhenItsContextEnds(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	r := ctxReader{ctx, strings.NewReader("abc")}
+	if _, err := r.Read(make([]byte, 1)); err != nil {
+		t.Fatal(err)
+	}
+	cancel()
+	if _, err := r.Read(make([]byte, 1)); !errors.Is(err, context.Canceled) {
+		t.Errorf("%v, want the context's error", err)
+	}
+}
+
+// TestACopyReadsOnlyTheHashedSize is a file that grew after its hash: the copy has what was
+// hashed, and a context that ends stops the copy.
+func TestACopyReadsOnlyTheHashedSize(t *testing.T) {
+	got, err := io.ReadAll(boundedRead(context.Background(), strings.NewReader("hashed and more"), 6))
+	if err != nil || string(got) != "hashed" {
+		t.Errorf("%q, %v, want the first 6 bytes", got, err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := io.ReadAll(boundedRead(ctx, strings.NewReader("x"), 1)); !errors.Is(err, context.Canceled) {
+		t.Errorf("%v, want the context's error", err)
+	}
+}
+
+// TestAFilePastTheHashLimitIsNotHashed is a tracked file over the limit, unchanged: the setup's
+// list has it with no hash of the file, and its state is other.
+func TestAFilePastTheHashLimitIsNotHashed(t *testing.T) {
+	isolate(t)
+	src, _ := person(t)
+	write(t, src, "big.txt", "more than four bytes\n")
+	commitAll(t, src, "a file")
+	d, repos := cloneRun(t, src)
+	before, err := d.SetupChanges(t.Context(), repos[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if slices.Contains(before, "big.txt") {
+		t.Fatalf("an unchanged file under the limit is listed: %v", before)
+	}
+	states, err := d.SetupStates(t.Context(), repos[0], []string{"big.txt"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if states[0].State == "other" {
+		t.Fatalf("the state under the limit is %s", states[0].State)
+	}
+	old := maxHashBytes
+	maxHashBytes = 4
+	t.Cleanup(func() { maxHashBytes = old })
+	after, err := d.SetupChanges(t.Context(), repos[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(after, "big.txt") {
+		t.Errorf("a file past the limit is not listed: %v", after)
+	}
+	states, err = d.SetupStates(t.Context(), repos[0], []string{"big.txt"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if states[0].State != "other" {
+		t.Errorf("the state past the limit is %s, want other", states[0].State)
 	}
 }

@@ -2016,7 +2016,7 @@ The step does this, in order:
 2. Host git fetches each bundle into a new quarantine repository, with git's object checks
    on. A commit of the run that adds `.git` or `.qory` at the top of a repository stops
    the step here, and no commit is pushed. qory prints `qory run: the run's commits in
-   <folder> change these qory settings: <keys>. Check them before you check out the
+   <folder> change these qory settings, links or repository folders: <keys>. Check them before you check out the
    branch.` for a repository whose commits change a setting that qory acts on.
 3. An agent with no wall has no copy, and qory works in the working folder. It checks each
    repository, since the agent could write each `.git`, and commits what the agent left, as
@@ -3418,15 +3418,15 @@ ignored files, such as `.env`. A working folder that the commit at `HEAD` does n
 stops the run: commit it, or run qory in a folder that commit has. A repository with no commit stops the run
 too, with one exception. A run from a run code or a run key that lists no repositories, in a folder where
 `git init` ran and that has no commit, works like a run in a folder that is not a repository, with `.git` left
-out of the copy. A filter you set up in your git configuration, such as Git LFS, and the submodules of
-each repository apply before the run starts. A filter that cannot run stops the run.
+out of the copy. A filter in your global git configuration, such as Git LFS, and the submodules of each
+repository apply before the run starts. A required filter that cannot run stops the run.
 
 The clone has your `origin` URL with any credentials removed, your `origin/*` refs, and the
 `user.name` and `user.email` of your repository's configuration. With no `origin` in your
-repository, it has none. A compose in the clone starts from your harness report, so a module
+repository, or an address that could still have a credential in it after that, it has none. A compose in the clone starts from your harness report, so a module
 keeps its pin and a path a compose replaced in your checkout is replaced in the clone too.
 
-Three cases stop the run with their fix first:
+Four cases stop the run with their fix first:
 
 - A branch named as a parent of the run's branch, such as `qory`: git keeps no branch below a
   branch, so rename yours with `git branch -m`.
@@ -3437,8 +3437,7 @@ Three cases stop the run with their fix first:
   from a folder that does not contain them. A home folder that is a repository runs: its copy
   has only the files of the commit at `HEAD`.
 - A folder of a run's copy under `qory/runs` in your cache folder: a run could have written
-  it, so `qory run` and `qory harness compose` also stop there, and the line says to run qory
-  in your checkout.
+  it, so `qory run` and `qory harness compose` also stop there. Run qory in your checkout.
 
 When the agent has ended, however it ended, a second session starts on the same run: the git
 session. It runs no agent and gets no model key and no run code, and it binds only the
@@ -3491,7 +3490,7 @@ When the commits change a setting that qory acts on, such as `harness.launch` or
 `qory.yaml`, or add a link, the line continues with what they change:
 
 ```text
-qory run: the run's commits are on qory/run-0193 in /path/to/repo. They change these qory settings: harness.launch.claude.command. Check them before you check out the branch.
+qory run: the run's commits are on qory/run-0193 in /path/to/repo. They change these qory settings, links or repository folders: harness.launch.claude.command. Check them before you check out the branch.
 ```
 
 With no commit past `HEAD`, qory prints `qory run: no action needed: the run made no commit
@@ -3516,7 +3515,7 @@ folder when you are done.
 A commit of the run that adds `.git` or `.qory` at the top of a repository brings nothing
 back. A write run of a work item pushes from the checked repository instead of fetching
 into your repository: see [The push step of a write run](#the-push-step-of-a-write-run). In
-such a run, a line that stops the return says to take the work item in again in Qory Apiary. It
+such a run, a line that stops the return starts `take the work item in again in Qory Apiary`. It
 has no path, and qory deletes the copy.
 
 **Artifacts.** Outside a control plane, `qory artifact push` keeps versions in

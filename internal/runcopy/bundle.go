@@ -136,6 +136,9 @@ func (d Dir) Quarantine(ctx context.Context, branch string, repos []Repository) 
 		}
 		bundle := filepath.Join(d.Bundle(), strconv.Itoa(i)+".bundle")
 		if _, err := os.Lstat(bundle); errors.Is(err, fs.ErrNotExist) {
+			if rel == "." {
+				return nil, fmt.Errorf(textNoBundle, "the run's repository")
+			}
 			return nil, fmt.Errorf(textNoBundle, shown(rel))
 		}
 		q, err := d.quarantineOne(ctx, i, r, rel, branch, bundle)

@@ -83,6 +83,12 @@ func (c ctxReader) Read(p []byte) (int, error) {
 	return c.r.Read(p)
 }
 
+// boundedRead is what a copy reads of in: at most size bytes, the file's size when the walk
+// hashed it, so a file that grows after that adds nothing, until ctx ends.
+func boundedRead(ctx context.Context, in io.Reader, size int64) io.Reader {
+	return ctxReader{ctx, io.LimitReader(in, size)}
+}
+
 // artifactsFolder is the folder under .qory where qory artifact push keeps versions outside
 // a control plane.
 const artifactsFolder = "artifacts"
@@ -518,7 +524,7 @@ func (c *copyBack) file(src, dst int, name, rel string, exec bool) error {
 	if !(recorded && info.Size() == was.Size) && c.overBudget(info.Size()) {
 		return errBudget
 	}
-	now, err := hashState(ctxReader{c.ctx, io.LimitReader(in, info.Size())}, exec)
+	now, err := hashState(boundedRead(c.ctx, in, info.Size()), exec)
 	if err != nil {
 		return fileErr(rel, err)
 	}
@@ -558,7 +564,7 @@ func (c *copyBack) file(src, dst int, name, rel string, exec bool) error {
 		}
 	}
 	// At most what the hash read, which the budget counted.
-	if err := writeAt(dst, name, rel, ctxReader{c.ctx, io.LimitReader(in, now.Size)}, mode, replaces); err != nil {
+	if err := writeAt(dst, name, rel, boundedRead(c.ctx, in, now.Size), mode, replaces); err != nil {
 		return err
 	}
 	c.bytes += now.Size

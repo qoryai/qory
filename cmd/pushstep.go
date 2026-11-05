@@ -149,9 +149,16 @@ func returnContext(ctx, again context.Context, fromCode bool, started func(time.
 		return pushContext(ctx, again, time.Time{}, pushTimes.limit, pushTimes.signal)
 	}
 	back, stop := pushContext(ctx, again, time.Time{}, returnAfterSignal, returnAfterSignal)
-	stopLine := context.AfterFunc(ctx, func() { started(returnAfterSignal) })
+	printed := make(chan struct{})
+	stopLine := context.AfterFunc(ctx, func() {
+		defer close(printed)
+		started(returnAfterSignal)
+	})
 	return back, func() {
-		stopLine()
+		// A line that started is written before the run's last lines.
+		if !stopLine() {
+			<-printed
+		}
 		stop()
 	}
 }

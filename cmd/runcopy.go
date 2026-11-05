@@ -35,8 +35,9 @@ const (
 	textCopyBackLimit  = "the copy back of the run's files ran past its limit of %s, so part of them did not come back"
 	textCopyWaiting    = "got %s: bringing the run's work back, for at most %s. Send a second signal to stop that."
 	textCopyOnBranch   = "the run's commits are on %s in %s."
-	textCopyActing     = " They change these qory settings: %s. Check them before you check out the branch."
-	textCopyPushActing = "qory run: the run's commits in %s change these qory settings: %s. Check them before you check out the branch."
+	textCopyActing     = " They change these qory settings, links or repository folders: %s. Check them before you check out the branch."
+	textCopyPushActing = "qory run: the run's commits in %s change these qory settings, links or repository folders: %s. Check them before you check out the branch."
+	textCopyQoryFile   = "remove .qory from the commit at HEAD in %s, or make it a folder: a compose in a run's copy writes in a folder .qory, and that commit has a file or a link there"
 	textCopyRead       = "read the run's files in %s, and run no git there: %s%s"
 	textCopyAgain      = "take the work item in again in Qory Apiary: %s%s"
 	textCopyLimit      = "the git session ran past its limit of %s, so nothing came back from the run"
@@ -271,8 +272,7 @@ func (c *runCopy) composedIn(at places) (places, error) {
 	work := c.dir.Work()
 	dir := checkout.QoryDir(work)
 	if info, err := os.Lstat(dir); err == nil && (info.Mode()&fs.ModeSymlink != 0 || !info.IsDir()) {
-		target, _ := os.Readlink(dir)
-		return places{}, &render.ForeignPathError{Path: dir, Target: target}
+		return places{}, input(fmt.Errorf(textCopyQoryFile, exports.Value(c.root, false)))
 	}
 	at.dir = dir
 	at.home = filepath.Join(work, config.DefaultHome)
@@ -548,7 +548,11 @@ func pushable(ctx context.Context, qs []*runcopy.Quarantine) ([]preparation.Quar
 			return nil, nil, err
 		}
 		if keys := actingKeys(changes); keys != "" {
-			lines = append(lines, fmt.Sprintf(textCopyPushActing, exports.Value(dir, false), keys))
+			shown := exports.Value(dir, false)
+			if dir == "." {
+				shown = "the run's repository"
+			}
+			lines = append(lines, fmt.Sprintf(textCopyPushActing, shown, keys))
 		}
 	}
 	return from, lines, nil
@@ -563,7 +567,9 @@ func actingKeys(changes []runcopy.ActingChange) string {
 		if k == "" {
 			k = c.File
 		}
-		k = preparation.ShownPath(k)
+		if k = preparation.ShownPath(k); k == "." {
+			k = "the repository's top folder"
+		}
 		if !slices.Contains(keys, k) {
 			keys = append(keys, k)
 		}

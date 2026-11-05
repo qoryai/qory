@@ -164,7 +164,7 @@ func TestTheRunsCommitsLandOnARunBranch(t *testing.T) {
 			t.Errorf("%s is in the person's checkout", name)
 		}
 	}
-	lacks(t, out, "They change these qory settings")
+	lacks(t, out, "They change these")
 }
 
 // TestARunWithNoCommitSaysSo is an agent that leaves nothing: no branch, and a line that
@@ -202,7 +202,7 @@ func TestTheResultLineListsAChangedSetting(t *testing.T) {
 		t.Fatalf("%v\n%s", err, out)
 	}
 	branch := runBranchOf(t, out)
-	wants(t, out, "the run's commits are on "+branch+" in ", " They change these qory settings: harness.launch.claude.command. Check them before you check out the branch.")
+	wants(t, out, "the run's commits are on "+branch+" in ", " They change these qory settings, links or repository folders: harness.launch.claude.command. Check them before you check out the branch.")
 	gitOutput(t, root, "cat-file", "-e", branch+":qory.yaml")
 }
 
@@ -682,7 +682,7 @@ func TestAChangedSettingShowsWhenThePushFails(t *testing.T) {
 	if p.branchHead(t) != "" {
 		t.Errorf("the forge has the branch\n%s", r.out)
 	}
-	wants(t, r.out, "change these qory settings: harness.launch.claude.command")
+	wants(t, r.out, "in the run's repository change these qory settings, links or repository folders: harness.launch.claude.command")
 }
 
 // TestAFailedCloseKeepsTheCopy is a run whose close fails: a container of the run may be left,
@@ -1377,4 +1377,50 @@ func TestAHomeFolderThatIsARepositoryRuns(t *testing.T) {
 	if out, err := run(t, "run", "claude", "--", "-p", "hi"); err != nil || seen == "" {
 		t.Fatalf("the agent ran in %q: %v\n%s", seen, err, out)
 	}
+}
+
+// TestACommitWithAFileAtQoryStopsTheCompose is a commit at HEAD with a file at .qory, in a checkout
+// with a folder there: the compose in the copy cannot write, and the line has the fix and the
+// checkout, where the person can act, and no path of the copy.
+func TestACommitWithAFileAtQoryStopsTheCompose(t *testing.T) {
+	root := newCheckout(t)
+	copyFixture(t, "two-modules", root)
+	runGit(t, root, "add", "qory.yaml", "modules")
+	if err := os.RemoveAll(filepath.Join(root, ".qory")); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(root, ".qory"), "a file\n")
+	runGit(t, root, "add", ".qory")
+	runGit(t, root, "commit", "--quiet", "-m", "first")
+	if err := os.Remove(filepath.Join(root, ".qory")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(root, ".qory"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	docker, _ := fakeDocker(t)
+	walledBy(t, docker)
+	t.Setenv("QORY_RUN_KEY", "")
+	out, err := run(t, "run", "claude", "--", "-p", "hi")
+	if err == nil {
+		t.Fatalf("the run passed:\n%s", out)
+	}
+	if !strings.HasPrefix(err.Error(), "remove .qory from the commit at HEAD in ") || !strings.Contains(err.Error(), root) {
+		t.Errorf("the line is %q", err)
+	}
+	lacksCopyPath(t, err.Error())
+}
+
+// TestCommitsThatMakeTheTopARepositorySayWhere is a commit that adds what makes the top folder a
+// git folder: the line has words for that place.
+func TestCommitsThatMakeTheTopARepositorySayWhere(t *testing.T) {
+	copyCheckout(t)
+	agentInCopy(t, func(spec session.SessionSpec) {
+		writeFile(t, filepath.Join(spec.Dir, "HEAD"), "ref: refs/heads/main\n")
+		writeFile(t, filepath.Join(spec.Dir, "objects", "x"), "x\n")
+		writeFile(t, filepath.Join(spec.Dir, "refs", "x"), "x\n")
+	})
+	cmd.RunGitSessionsOnHost()
+	out, _ := run(t, "run", "claude", "--", "-p", "hi")
+	wants(t, out, "They change these qory settings, links or repository folders: the repository's top folder.")
 }
