@@ -113,16 +113,17 @@ such as ``Run `chmod 600 <path>` ``.
 
 ## Run it
 
-1. Copy the run's id, `rn_` and 16 characters, which the Qory Apiary API returns.
+1. Copy **Run id** from Details on the run's page. The id is `rn_` and 16 characters, and
+   the Qory Apiary API also returns it.
 2. Run `qory apiary run diagnose <run id>`. With keys for several servers on
    this computer, add `--server <url>` to select one.
 
 A run number is per workspace, so it does not identify a run. qory stops with an error,
 before it sends anything, for a run number and for any other value that is not a run id.
 It sends the run id as you typed it, `GET <server>/v1/runs/<run id>/diagnostics`, signed
-with the key, and waits at most 10 seconds. The document goes to stdout exactly as Qory Apiary sent
-it, followed by a line ending when it has none. Nothing else goes to stdout, so a pipe
-or a file receives JSON alone. Errors go to stderr.
+with the key, and waits at most 10 seconds. The document goes to stdout exactly as Qory
+Apiary sent it, followed by a line ending when it has none. Nothing else goes to stdout,
+so a pipe or a file receives JSON alone. Errors go to stderr.
 
 The document follows the diagnostics contract, `contracts/diagnostics/v1` in
 [qoryai/integrations](https://github.com/qoryai/integrations). It contains the run, its
@@ -134,8 +135,7 @@ and not its number.
 
 Both commands exit 2 in these cases, and 1 for every other failure:
 
-- a mistake in the command line: the arguments, the server URL, the code, or the run
-  number or id
+- a mistake in the command line: the arguments, the server URL, the code, or the run id
 - neither `HOME` nor `XDG_CONFIG_HOME` is set
 - no diagnostics key for the server, or keys for several servers and no `--server`
 - an error when qory reads the stored diagnostics key, such as a secret file that
@@ -164,7 +164,7 @@ Each error's first line starts with the fix.
 | ``Run `qory apiary enrol <server> <code>` first: no diagnostics key in <dir>.`` | No server directory, or no key in it. |
 | ``Pass --server <url>: diagnostics keys for several servers are in <dir>: a, b.`` | Keys for more than one server are on this computer. |
 | ``Remove <dir>, then run `qory apiary enrol <server> <code>` again: <host> did not accept the diagnostics key <id> (401).`` | Qory Apiary has no such key, has revoked it, or this computer's clock is more than five minutes off. |
-| `Use the run's rn_ id: a run number is per workspace, so it does not identify a run.` | The value is not a run id, and the next line contains it. Nothing was sent. |
+| `Use the run's id, rn_ and 16 characters: a run number does not identify a run.` | The value is not a run id, and the next line contains it. Nothing was sent. |
 | `Check the run id: <host> has no run <run> (not_found).` | Qory Apiary has no run with that id. |
 | `Update qory to a release that works with <host>: the request was not accepted: unsupported_contract_version (400).` | Qory Apiary does not serve the contract version that this qory sends. |
 | `Check the run with the instance admin of <host>: the request was not accepted: <code> (<status>).` | Qory Apiary refused the request with another signed code. |
