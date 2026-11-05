@@ -3414,7 +3414,7 @@ The clone has your `origin` URL with any credentials removed, your `origin/*` re
 repository, it has none. A compose in the clone starts from your harness report, so a module
 keeps its pin and a path a compose replaced in your checkout is replaced in the clone too.
 
-Three repositories stop the run with their fix first:
+Three cases stop the run with their fix first:
 
 - A branch named as a parent of the run's branch, such as `qory`: git keeps no branch below a
   branch, so rename yours with `git branch -m`.

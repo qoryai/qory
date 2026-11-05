@@ -794,8 +794,8 @@ func TestAControlPlaneRunHasNoArtifactsCopy(t *testing.T) {
 }
 
 // TestACheckoutThatContainsTheStateFolderRuns is a walled run whose checkout contains qory's
-// state folder: no mount of the session is or contains the checkout, so qory passes Forager no
-// such place. The test join runs no check of Forager's: this test shows the mounts only.
+// state folder: the copy leaves that folder out, and the run's work comes back. The test join
+// runs no check of Forager's, so this test does not show that Forager accepts the run.
 func TestACheckoutThatContainsTheStateFolderRuns(t *testing.T) {
 	root := copyCheckout(t)
 	t.Setenv("XDG_STATE_HOME", filepath.Join(root, ".state"))
