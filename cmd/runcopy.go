@@ -44,6 +44,7 @@ const (
 	textCopyExited     = "the git session exited with %d, so nothing came back from the run"
 	textCopyCut        = "%s during the git session, so nothing came back from the run"
 	textCopyCheckCut   = "%s during the check of the run's commits, so those commits did not come back"
+	textCopyWallKept   = "removing a part of the run's wall failed during the run, so a process may have written the copy after its session ended, and nothing came back from the run"
 	textCopyClosed     = "the run ended before the git session started, so nothing came back from the run"
 	textCopyStays      = "read the run's files in %s, run no git there, then remove the folder: nothing more came back from the run"
 	textCopyBack       = "copied %s back to %s from the run, and deleted %s there."

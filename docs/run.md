@@ -3500,6 +3500,14 @@ prints the cause and `qory run: read the run's files in <folder>, run no git the
 remove the folder: nothing more came back from the run`, and `qory run` exits 1 for a session
 that succeeded.
 
+When removing a part of the run's wall failed at any point of the run, even if a later removal
+succeeded, a process may have written the copy after its session ended. Nothing comes back,
+qory keeps the copy, and `qory run` exits 1:
+
+```text
+qory run: read the run's files in <folder>, and run no git there: removing a part of the run's wall failed during the run, so a process may have written the copy after its session ended, and nothing came back from the run
+```
+
 In a copy that stays, qory renames each `.git` to `.git-from-run`, mode 0700, and the `HEAD` of
 a folder that git would take as a repository. Run no git there: after a close that failed, a
 container of the run can still write a new `.git` in the copy. Read the files, and remove the

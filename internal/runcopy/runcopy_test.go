@@ -200,8 +200,8 @@ func runSession(t *testing.T, s GitSession) {
 	}
 }
 
-// boundedSession runs s in a process group of its own, with a time limit, and kills that group at
-// the end, so a regression that hangs fails the test and leaves no process behind.
+// boundedSession runs s in a new process group, with a time limit, and kills that group at the
+// end, so a regression that hangs fails the test and leaves no process behind.
 func boundedSession(t *testing.T, s GitSession) (string, error) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)

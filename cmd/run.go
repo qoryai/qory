@@ -1100,11 +1100,12 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			// The step runs under [pushContext], since a stop has ended ctx or spent the time
 			// limit. A failed step changes the close only of a session that succeeded. The stop
 			// of a walled agent is proven: the join removes its container, and when it could
-			// not, the step's [openedRun.HostProxy] fails, so the step runs no git. An unwalled
-			// agent's process leaves no proof that it stopped.
+			// not, [openedRun.RemoveSetup] and the step's [openedRun.HostProxy] fail, so the step
+			// runs no git. An unwalled agent's process leaves no proof that it stopped.
 			//
 			// Any other walled run with a copy runs its git session here and brings its work
-			// back after the close, under the same [pushContext].
+			// back after the close, under [returnContext], unless the close shows
+			// [session.Closed.WallKept].
 			ending := pushEnding{session: out, limit: timeout}
 			var pushErr, sessionErr error
 			var limit time.Time
@@ -1153,12 +1154,18 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				}
 			}
 			closed := closeRun(out)
-			// A failed close may leave a container of the run, which could still write the copy.
+			// Nothing of the copy comes back when a process of the run could have written it past
+			// its session's end: a close that failed may leave a container, and with WallKept
+			// a part of the run's wall was not removed at some point of the run.
+			trusted := closed != nil && !closed.WallKept
 			artifactsBack := true
-			if copied != nil && !copied.readOnly && !pushes && closed != nil && !controlPlane {
+			if copied != nil && !copied.readOnly && !pushes && trusted && !controlPlane {
 				artifactsBack = copied.artifactsBack(backCtx, said)
 			}
 			if err != nil {
+				if copied != nil && !copied.readOnly && closed != nil && closed.WallKept {
+					said(copied.stopped(textCopyWallKept).Error())
+				}
 				return failed(err)
 			}
 			defer fmt.Fprintln(stderr, "qory run: the record is in", record)
@@ -1208,6 +1215,8 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			case closed == nil:
 				// The close failed, so a container of the run may be left.
 				copied.kept(said)
+			case closed.WallKept:
+				said(copied.stopped(textCopyWallKept).Error())
 			default:
 				back = copied.comeBack(backCtx, spec.RunID, said)
 			}

@@ -269,6 +269,8 @@ type Nowhere struct {
 	OnImage      func(session.Image)
 	// CloseErr, when not nil, is the error of the run's Close, which then returns no result.
 	CloseErr error
+	// WallKept is [session.Closed.WallKept] of the run's Close.
+	WallKept bool
 	// RunAPI is the base URL of the run's run API, "" for a server that returns 404 with
 	// no error code to every request, as Qory Apiary does with its feature workflow_model
 	// off.
@@ -519,7 +521,7 @@ func (n *nowhere) Close(ctx context.Context, out session.Outcome) (*session.Clos
 		_, endErr := n.at.g.Close(ctx)
 		return closed, errors.Join(err, endErr)
 	}
-	return &session.Closed{RunID: n.id, State: out.State, Reason: out.Reason, ExitCode: out.ExitCode}, nil
+	return &session.Closed{RunID: n.id, State: out.State, Reason: out.Reason, ExitCode: out.ExitCode, WallKept: n.values.WallKept}, nil
 }
 
 func (n *nowhere) HostProxy() (hostProxy, error) {

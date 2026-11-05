@@ -1022,14 +1022,21 @@ func TestAWriteRunHasTwoSessionsInItsRecord(t *testing.T) {
 		t.Fatalf("%v\n%s", err, out)
 	}
 	gitOutput(t, root, "cat-file", "-e", runBranchOf(t, out)+":left.txt")
-	started := 0
-	for _, kind := range typesOf(sessionRecord(t, root)) {
-		if kind == "session.started" {
-			started++
+	var started []map[string]any
+	for _, ev := range sessionRecord(t, root) {
+		if ev.Type == "dev.qory.session.started" {
+			started = append(started, ev.Data)
 		}
 	}
-	if started != 2 {
-		t.Errorf("the record has %d started sessions, want 2\n%s", started, out)
+	if len(started) != 2 {
+		t.Fatalf("the record has %d started sessions, want 2\n%s", len(started), out)
+	}
+	// The git session passes no Runtime, so Forager records it as bare.
+	if _, bare := started[0]["bare"]; bare {
+		t.Errorf("the agent's session.started has bare: %v", started[0])
+	}
+	if started[1]["bare"] != true {
+		t.Errorf("the git session's session.started has no bare: %v", started[1])
 	}
 }
 

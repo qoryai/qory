@@ -1988,4 +1988,101 @@ func TestAWallThatStaysRunsNoGit(t *testing.T) {
 			}
 		})
 	}
+
+	// A setup container that stays: Forager's RemoveSetup fails, also after a failed Unwrap.
+	t.Run("the removal of the setup fails", func(t *testing.T) {
+		p := walledPush(t)
+		t.Cleanup(cmd.SetGitSession(func(context.Context, session.SessionSpec) (*session.Result, error) {
+			t.Error("a git session started")
+			return &session.Result{}, nil
+		}))
+		p.removeSetup = func(context.Context) error { return errors.New(refused) }
+		r := p.run(t, func(dir string) { writeFile(t, filepath.Join(dir, "left.txt"), "left\n") }, nil)
+		wants(t, r.out, "take the work item in again in Qory Apiary: ", refused)
+		if head := p.branchHead(t); head != "" {
+			t.Errorf("the forge has the branch at %s", head)
+		}
+	})
+	t.Run("a local run", func(t *testing.T) {
+		const line = ", and run no git there: removing a part of the run's wall failed during the run, so a process may have written the copy after its session ended, and nothing came back from the run"
+		for name, c := range map[string]struct {
+			wall  cmd.Nowhere
+			wants string
+		}{
+			// The agent's Unwrap or the close failed, and the join of the git session went on.
+			"Unwrap or the close": {wall: cmd.Nowhere{WallKept: true}, wants: line},
+			"RemoveSetup": {
+				wall:  cmd.Nowhere{WallKept: true, RemoveSetup: func(context.Context) error { return errors.New(refused) }},
+				wants: ", and run no git there: the git session did not start, so nothing came back from the run: ",
+			},
+		} {
+			t.Run(name, func(t *testing.T) {
+				root := copyCheckout(t)
+				artifact := filepath.Join(root, ".qory", "artifacts", "run.txt")
+				t.Cleanup(cmd.SetGitSession(func(context.Context, session.SessionSpec) (*session.Result, error) {
+					return &session.Result{}, nil
+				}))
+				empty := filepath.Join(tempDir(t), "gitconfig")
+				writeFile(t, empty, "")
+				calls := recordGit(t, empty)
+				var after int64
+				var work string
+				agentInCopy(t, func(spec session.SessionSpec) {
+					work = spec.Dir
+					writeFile(t, filepath.Join(spec.Dir, "left.txt"), "left\n")
+					writeFile(t, filepath.Join(spec.Dir, ".qory", "artifacts", "run.txt"), "the run\n")
+					info, err := os.Stat(calls)
+					if err != nil {
+						t.Fatal(err)
+					}
+					after = info.Size()
+				})
+				_, _, restore := cmd.OpenNowhereWith(c.wall)
+				defer restore()
+				out, err := run(t, "run", "claude", "--", "-p", "hi")
+				if cmd.ExitCode(err) != 1 {
+					t.Errorf("exit %d (%v), want 1\n%s", cmd.ExitCode(err), err, out)
+				}
+				wants(t, out, "read the run's files in "+work+c.wants)
+				log, err := os.ReadFile(calls)
+				if err != nil {
+					t.Fatal(err)
+				}
+				for line := range strings.Lines(string(log[after:])) {
+					if !strings.Contains(line, " check-ref-format ") {
+						t.Errorf("git ran after the session:\n%s", line)
+					}
+				}
+				if got := gitOutput(t, root, "for-each-ref", "refs/heads/qory/"); got != "" {
+					t.Errorf("the run's branch came back: %s", got)
+				}
+				if _, err := os.Lstat(artifact); err == nil {
+					t.Error("the run's artifact came back")
+				}
+				wantDisarmed(t, work)
+			})
+		}
+	})
+	t.Run("a local run in a plain folder", func(t *testing.T) {
+		root := emptyDir(t)
+		copyFixture(t, "two-modules", root)
+		docker, _ := fakeDocker(t)
+		walledBy(t, docker)
+		t.Setenv("QORY_RUN_KEY", "")
+		var work string
+		agentInCopy(t, func(spec session.SessionSpec) {
+			work = spec.Dir
+			writeFile(t, filepath.Join(spec.Dir, "left.txt"), "left\n")
+		})
+		_, _, restore := cmd.OpenNowhereWith(cmd.Nowhere{WallKept: true})
+		defer restore()
+		out, err := run(t, "run", "claude", "--home", filepath.Join(tempDir(t), "home"), "--", "-p", "hi")
+		if cmd.ExitCode(err) != 1 {
+			t.Errorf("exit %d (%v), want 1\n%s", cmd.ExitCode(err), err, out)
+		}
+		wants(t, out, "read the run's files in "+work+", and run no git there: removing a part of the run's wall failed")
+		if _, err := os.Lstat(filepath.Join(root, "left.txt")); err == nil {
+			t.Error("the run's file came back")
+		}
+	})
 }
