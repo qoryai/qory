@@ -192,8 +192,8 @@ A skill's name is its last folder, so `exclude`, `only`, `requires`, `bind`, `pr
 below it is that skill's files. Loose files in a group are skipped.
 
 A skill refers to another skill by name with `${qory:skills/<name>}`, which resolves to the
-name and gives no path. A relative path out of a skill's folder resolves differently by how
-qory places the skill: as a link to the source folder, or as a copy.
+registered name and gives no path. A relative path out of a skill's folder resolves differently
+by how qory places the skill: as a link to the source folder, or as a copy.
 
 A folder named after a runtime, such as `skills/codex`, is not a group, and neither is a link
 or a folder that a variant reads skills from. Such a folder with no `SKILL.md` stops the
