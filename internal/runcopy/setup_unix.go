@@ -64,22 +64,16 @@ func (d Dir) SubmoduleSetup(ctx context.Context, r Repository) ([]SetupPath, err
 			continue
 		}
 		dir, name, err := lookup(root, file)
-		if errors.Is(err, errNoEntry) {
-			continue
-		}
 		if err != nil {
-			return nil, fileErr(filepath.Join(top, filepath.FromSlash(file)), err)
+			continue
 		}
 		sub, err := unix.Openat(dir, name, dirFlags, 0)
 		unix.Close(dir)
 		if err != nil {
 			continue
 		}
-		err = newerFiles(sub, file, r.cloned, 0, &paths)
+		newerFiles(sub, file, r.cloned, 0, &paths)
 		unix.Close(sub)
-		if err != nil {
-			return nil, fileErr(filepath.Join(top, filepath.FromSlash(file)), err)
-		}
 	}
 	if len(paths) == 0 {
 		return nil, nil
@@ -89,14 +83,16 @@ func (d Dir) SubmoduleSetup(ctx context.Context, r Repository) ([]SetupPath, err
 
 // newerFiles adds to paths each regular file and link below the folder dir, at rel, with a time
 // past since, and walks each folder but .git. A path with a line break stays out, since sub-n has
-// one path per line, and a folder it cannot open is skipped: either keeps the copy.
-func newerFiles(dir int, rel string, since time.Time, depth int, paths *[]string) error {
+// one path per line. A folder or a file this process cannot read stays out too, such as a file of
+// mode 000 or a folder of mode 0444. The git session finds each as a change that sub-n does not
+// have, or as a folder it cannot read, and keeps the copy.
+func newerFiles(dir int, rel string, since time.Time, depth int, paths *[]string) {
 	if depth >= maxOpenFolders {
-		return nil
+		return
 	}
 	names, err := readNames(dir)
 	if err != nil {
-		return err
+		return
 	}
 	for _, name := range names {
 		if folds(name, ".git") || strings.Contains(name, "\n") {
@@ -104,7 +100,7 @@ func newerFiles(dir int, rel string, since time.Time, depth int, paths *[]string
 		}
 		var st unix.Stat_t
 		if err := unix.Fstatat(dir, name, &st, unix.AT_SYMLINK_NOFOLLOW); err != nil {
-			return err
+			continue
 		}
 		at := path.Join(rel, name)
 		switch st.Mode & unix.S_IFMT {
@@ -113,18 +109,23 @@ func newerFiles(dir int, rel string, since time.Time, depth int, paths *[]string
 			if err != nil {
 				continue
 			}
-			err = newerFiles(sub, at, since, depth+1, paths)
+			newerFiles(sub, at, since, depth+1, paths)
 			unix.Close(sub)
+		case unix.S_IFREG:
+			file, err := unix.Openat(dir, name, unix.O_RDONLY|unix.O_NOFOLLOW|unix.O_NONBLOCK|unix.O_CLOEXEC, 0)
 			if err != nil {
-				return err
+				continue
 			}
-		case unix.S_IFREG, unix.S_IFLNK:
+			unix.Close(file)
+			if time.Unix(int64(st.Mtim.Sec), int64(st.Mtim.Nsec)).After(since) {
+				*paths = append(*paths, at)
+			}
+		case unix.S_IFLNK:
 			if time.Unix(int64(st.Mtim.Sec), int64(st.Mtim.Nsec)).After(since) {
 				*paths = append(*paths, at)
 			}
 		}
 	}
-	return nil
 }
 
 // SetupChanges lists what the setup changed in the copy of the repository r, as [Dir.Clone]

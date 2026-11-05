@@ -255,13 +255,34 @@ func atLeast(out string, major, minor int) bool {
 	return err1 == nil && err2 == nil && (ma > major || ma == major && mi >= minor)
 }
 
-// httpURL is an http or https URL in a line that git prints, up to a space or a quote.
-var httpURL = regexp.MustCompile(`(?i)https?://[^\s'"]+`)
+// httpStart is where an http or https URL starts, httpURL is such a URL in a line that git prints,
+// up to a space or a quote, and urlTail is what comes before the next space or quote.
+var (
+	httpStart = regexp.MustCompile(`(?i)https?://`)
+	httpURL   = regexp.MustCompile(`(?i)https?://[^\s'"]+`)
+	urlTail   = regexp.MustCompile(`^[^\s'"]*`)
+)
 
 // hideHTTP is line with each http or https URL as [withoutCredentials] writes it: no user name,
-// password or query. A URL in which a credential could still be stays out, in favour of
-// textHiddenURL.
+// password or query. A password can have a space or a /, so textHiddenURL takes the place of the
+// line from the start of a URL that an @ follows on the line through the last @. After it comes the
+// rest of that word, up to a query, which has the host for the reader. textHiddenURL also takes the
+// place of a URL that [withoutCredentials] returns no address for.
 func hideHTTP(line string) string {
+	if start := httpStart.FindStringIndex(line); start != nil {
+		if at := strings.LastIndex(line, "@"); at > start[0] {
+			rest := line[at+1:]
+			word := urlTail.FindString(rest)
+			rest = rest[len(word):]
+			if cut := strings.IndexAny(word, "?#"); cut >= 0 {
+				word = word[:cut]
+			}
+			if word != "" {
+				word = " " + word
+			}
+			line = line[:start[0]] + textHiddenURL + word + rest
+		}
+	}
 	return httpURL.ReplaceAllStringFunc(line, func(raw string) string {
 		if clean := withoutCredentials(raw); clean != "" {
 			return clean

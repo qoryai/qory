@@ -3810,11 +3810,19 @@ func TestARebaseOverACommitTakesUncommittedWork(t *testing.T) {
 // TestAnHTTPURLInAGitLineHasNoCredential is each form of a credential in a URL that git prints.
 func TestAnHTTPURLInAGitLineHasNoCredential(t *testing.T) {
 	for raw, want := range map[string]string{
-		"fatal: unable to access 'https://SECRETTOK@host.example/x': failed": "fatal: unable to access 'https://host.example/x': failed",
-		"fatal: https://me:SEC/RET@host.example/x failed":                    "fatal: " + textHiddenURL + " failed",
+		"fatal: unable to access 'https://SECRETTOK@host.example/x': failed": "fatal: unable to access '(a URL, hidden) host.example/x': failed",
+		"fatal: https://me:SEC/RET@host.example/x failed":                    "fatal: (a URL, hidden) host.example/x failed",
+		"fatal: https://me:SEC RET@host.example/x failed":                    "fatal: (a URL, hidden) host.example/x failed",
+		"fatal: https://me:123 RET@host.example/x failed":                    "fatal: (a URL, hidden) host.example/x failed",
+		"fatal: https://me:A B C@host.example/x and D@E failed":              "fatal: (a URL, hidden) E failed",
+		"fatal: https://host.example/@scope/pkg failed":                      "fatal: (a URL, hidden) scope/pkg failed",
+		"fatal: https://me@host.example/x?token=SECRETQ failed":              "fatal: (a URL, hidden) host.example/x failed",
+		"fatal: https://host.example: failed":                                "fatal: (a URL, hidden) failed",
 		"fatal: HTTP://host.example/x?token=SECRETQ failed":                  "fatal: HTTP://host.example/x failed",
 		"fatal: http://host.example/x#SECRETQ":                               "fatal: http://host.example/x",
-		"fatal: https://me:SECRETPW@host.example:8443/x":                     "fatal: https://host.example:8443/x",
+		"fatal: https://me:SECRETPW@host.example:8443/x":                     "fatal: (a URL, hidden) host.example:8443/x",
+		"fatal: https://host.example:8443/x failed":                          "fatal: https://host.example:8443/x failed",
+		"fatal: me@host.example has no https://host.example/x":               "fatal: me@host.example has no https://host.example/x",
 		"fatal: no URL at SECRET here":                                       "fatal: no URL at SECRET here",
 	} {
 		if got := hideHTTP(raw); got != want {
@@ -4038,5 +4046,40 @@ func TestACommitOfASetupFileAsItIsLeavesNothingBehind(t *testing.T) {
 	printed := sessionOutput(t, d, repos, map[string]LeftOut{"": out})
 	if d.LeftBehind(repos) {
 		t.Errorf("the session recorded work left behind:\n%s", printed)
+	}
+}
+
+// TestALockedSetupFileInASubmoduleKeepsTheCopy is a setup that leaves a file of mode 000 or a folder
+// of mode 0444 in a submodule: the run goes on, and the session keeps the copy.
+func TestALockedSetupFileInASubmoduleKeepsTheCopy(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root reads any mode")
+	}
+	for name, c := range map[string]struct {
+		path string
+		mode os.FileMode
+	}{
+		"a file of mode 000":    {"gen.o", 0},
+		"a folder of mode 0444": {"gen", 0o444},
+	} {
+		t.Run(strings.ReplaceAll(name, " ", "-"), func(t *testing.T) {
+			isolate(t)
+			sessionGit(t)
+			src, sub := withSubmodule(t)
+			d, repos := cloneRun(t, src)
+			inner := filepath.Join(d.Work(), filepath.FromSlash(sub))
+			write(t, inner, "gen/f.o", "generated\n")
+			write(t, inner, "gen.o", "generated\n")
+			locked := filepath.Join(inner, c.path)
+			if err := os.Chmod(locked, c.mode); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = os.Chmod(locked, 0o755) })
+			out := setupRecord(t, d, repos[0])
+			printed := sessionOutput(t, d, repos, map[string]LeftOut{"": out})
+			if !d.LeftBehind(repos) {
+				t.Errorf("the session did not keep the copy:\n%s", printed)
+			}
+		})
 	}
 }
