@@ -62,6 +62,11 @@ const (
 // sets a shorter one.
 var copyStepLimit = 10 * time.Minute
 
+// sessionGraceFromCode is how long the git session of a run from a run code has after its stop
+// signal, see [pushAfterSignal]. git needs no time to save anything: a cut session brings nothing
+// back.
+const sessionGraceFromCode = 3 * time.Second
+
 // removeSetupLimit is how long the removal of a run's setup container may take before its work
 // comes back.
 const removeSetupLimit = 2 * time.Minute
@@ -381,6 +386,10 @@ func (c *runCopy) gitSession(ctx context.Context, run openedRun, spec *runSpec, 
 	if err != nil {
 		return c.stopped(fmt.Sprintf(textCopyNoSession, shownError(err)))
 	}
+	grace := spec.StopGrace
+	if c.fromCode {
+		grace = sessionGraceFromCode
+	}
 	limited, cancel := context.WithTimeout(ctx, runcopy.SessionLimit)
 	defer cancel()
 	res, err := joinSession(run, limited, session.SessionSpec{
@@ -397,7 +406,7 @@ func (c *runCopy) gitSession(ctx context.Context, run openedRun, spec *runSpec, 
 		Stdout:       spec.Stderr,
 		Stderr:       spec.Stderr,
 		StopSignal:   spec.StopSignal,
-		StopGrace:    spec.StopGrace,
+		StopGrace:    grace,
 		SocketGrace:  spec.SocketGrace,
 		Timeout:      runcopy.SessionLimit,
 	})

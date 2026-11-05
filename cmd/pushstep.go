@@ -76,7 +76,8 @@ var branchWait = func(ctx context.Context, d time.Duration) error {
 
 // The time the push step has after a stop. A signal leaves pushAfterSignal: it fits inside
 // the 30 seconds that [child.DefaultGrace] leaves a pool's run after SIGTERM, with the 10 seconds
-// of a runtime's default stop and the close. Past a run's time limit no process stops
+// of a runtime's default stop before it, the [sessionGraceFromCode] of a git session it cuts, and
+// the close. Past a run's time limit no process stops
 // qory run, so the step has pushAfterLimit, and the run can pass its limit by that time.
 const (
 	pushAfterSignal = 15 * time.Second
@@ -99,8 +100,9 @@ func keepsWork(fromCode *codeRun, readOnly bool, branch *preparation.WorkBranch,
 
 // pushContext is the context of the push step: not ended by ctx, which a stop ended
 // already. It ends at limit, or afterLimit from now when that is later; with a zero limit
-// there is no such end. It ends afterSignal after ctx ends, unless it ends sooner, and at
-// once when again ends. Run passes [pushAfterLimit] and [pushAfterSignal].
+// there is no such end. It ends afterSignal after ctx ends or after this call, whichever is
+// later, unless it ends sooner, and at once when again ends. A signal comes before this call when
+// it stopped the agent, so the agent's stop adds to afterSignal. Run passes [pushAfterLimit] and [pushAfterSignal].
 func pushContext(ctx, again context.Context, limit time.Time, afterLimit, afterSignal time.Duration) (context.Context, func()) {
 	push, cancel := context.WithCancel(context.WithoutCancel(ctx))
 	wait := time.Duration(math.MaxInt64)

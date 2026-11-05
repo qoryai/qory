@@ -3367,3 +3367,51 @@ func TestAGoodRunOnALineEndRuleLeavesNothingBehind(t *testing.T) {
 		})
 	}
 }
+
+// TestDisarmOpensATopFolderWithNoReadBit is a run that took the read bit off the copy: the walk
+// still renames its .git.
+func TestDisarmOpensATopFolderWithNoReadBit(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root opens a folder with no read bit")
+	}
+	for _, mode := range []os.FileMode{0o300, 0o100, 0o000} {
+		t.Run("", func(t *testing.T) {
+			isolate(t)
+			src, _ := person(t)
+			d, _ := cloneRun(t, src)
+			if err := os.Chmod(d.Work(), mode); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = os.Chmod(d.Work(), 0o700) })
+			if err := d.Disarm(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := os.Lstat(filepath.Join(d.Work(), ".git")); !errors.Is(err, fs.ErrNotExist) {
+				t.Errorf("Lstat of .git: %v", err)
+			}
+		})
+	}
+}
+
+// TestACredentialInAFilterLineStaysHidden is a required filter that prints a URL with a password
+// and fails at the checkout of the copy: the stop has no password.
+func TestACredentialInAFilterLineStaysHidden(t *testing.T) {
+	isolate(t)
+	src, _ := person(t)
+	write(t, src, ".gitattributes", "*.dat filter=fails\n")
+	write(t, src, "x.dat", "x\n")
+	commitAll(t, src, "a filtered file")
+	config := t.TempDir()
+	write(t, config, "gitconfig", "[filter \"fails\"]\n\tsmudge = sh -c 'echo fatal: https://me:SECRETTOK@host.example/x >&2; exit 1'\n\trequired = true\n")
+	t.Setenv("GIT_CONFIG_GLOBAL", filepath.Join(config, "gitconfig"))
+	_, err := newDir(t).Clone(context.Background(), src, branch)
+	if err == nil {
+		t.Fatal("the clone passed")
+	}
+	if strings.Contains(err.Error(), "SECRETTOK") {
+		t.Errorf("the line has the password: %v", err)
+	}
+	if !strings.Contains(err.Error(), "host.example") {
+		t.Errorf("the line lost the filter's cause: %v", err)
+	}
+}

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -166,7 +167,7 @@ const maxDisarmErrors = 5
 func (d Dir) Disarm(ctx context.Context) error {
 	var errs []error
 	for _, top := range []string{d.Work(), d.Bundle()} {
-		fd, err := unix.Open(top, dirFlags, 0)
+		fd, err := openTop(top)
 		if errors.Is(err, unix.ENOENT) {
 			continue
 		}
@@ -178,6 +179,24 @@ func (d Dir) Disarm(ctx context.Context) error {
 		unix.Close(fd)
 	}
 	return errors.Join(errs[:min(len(errs), maxDisarmErrors)]...)
+}
+
+// openTop opens the folder at top, which the run could chmod. A folder with no read bit gets
+// the chmod that [disarm] gives a folder below it.
+func openTop(top string) (int, error) {
+	fd, err := unix.Open(top, dirFlags, 0)
+	if !errors.Is(err, unix.EACCES) {
+		return fd, err
+	}
+	parent, err := unix.Open(filepath.Dir(top), dirFlags, 0)
+	if err != nil {
+		return -1, err
+	}
+	defer unix.Close(parent)
+	if err := chmodFolder(parent, filepath.Base(top)); err != nil {
+		return -1, err
+	}
+	return unix.Openat(parent, filepath.Base(top), dirFlags, 0)
 }
 
 // disarm is the walk of [Dir.Disarm] in the folder dir, at path. gitDir is whether the folder is

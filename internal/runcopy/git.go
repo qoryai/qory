@@ -19,6 +19,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/qoryai/qory/internal/exports"
 	"github.com/qoryai/qory/internal/hostgit"
 	"github.com/qoryai/qory/internal/preparation"
 	"github.com/qoryai/qory/internal/proxygit"
@@ -115,6 +116,8 @@ func run(cmd *exec.Cmd, stdin io.Reader, args []string) (string, error) {
 		if line == "" {
 			line = err.Error()
 		}
+		// A filter or a credential helper can print a URL with its password here.
+		line = exports.HideURLError(errors.New(line)).Error()
 		exit := -1
 		var ee *exec.ExitError
 		if errors.As(err, &ee) {

@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -1423,4 +1424,68 @@ func TestCommitsThatMakeTheTopARepositorySayWhere(t *testing.T) {
 	cmd.RunGitSessionsOnHost()
 	out, _ := run(t, "run", "claude", "--", "-p", "hi")
 	wants(t, out, "They change these qory settings, links or repository folders: the repository's top folder.")
+}
+
+// homeWithALinkedCache is a home folder at dir, with Library/Caches a link out of it as a person's
+// folder can have, so no copy lies inside the home folder. The working folder is what the test
+// passes, and the checks that follow start in it.
+func homeWithALinkedCache(t *testing.T, home string) *string {
+	t.Helper()
+	seen := aHomeFolder(t, home, home, "")
+	if err := os.MkdirAll(filepath.Join(home, "Library"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	_ = os.RemoveAll(filepath.Join(home, "Library", "Caches"))
+	if err := os.Symlink(tempDir(t), filepath.Join(home, "Library", "Caches")); err != nil {
+		t.Fatal(err)
+	}
+	return seen
+}
+
+// TestAHomeFolderWrittenAnotherWayStops is a working folder that is the home folder in another
+// Unicode form or through the firmlink of the data volume: the file system has one folder, so the
+// run stops as it does at the home folder written as HOME has it.
+func TestAHomeFolderWrittenAnotherWayStops(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("the two Unicode forms and the firmlink are one folder only on macOS")
+	}
+	const nfc, nfd = "Café", "Café"
+	top, err := filepath.EvalSymlinks(tempDir(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, paths := range map[string][2]string{
+		"NFC home": {filepath.Join(top, nfc), filepath.Join(top, nfd)},
+		"NFD home": {filepath.Join(top, nfd), filepath.Join(top, nfc)},
+		"firmlink": {filepath.Join(top, "person"), "/System/Volumes/Data" + filepath.Join(top, "person")},
+	} {
+		t.Run(strings.ReplaceAll(name, " ", "-"), func(t *testing.T) {
+			home, working := paths[0], paths[1]
+			defer func() { _ = os.RemoveAll(home) }()
+			if err := os.MkdirAll(home, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			seen := homeWithALinkedCache(t, home)
+			if _, err := os.Stat(working); err != nil {
+				t.Skipf("no such path here: %v", err)
+			}
+			t.Chdir(working)
+			wantHomeStop(t, seen, "your home folder")
+		})
+	}
+}
+
+// TestTheGitSessionOfACodeRunHasAShortGrace is a run from a run code: with the agent's stop and
+// the time after a signal, the session's stop stays inside the pool's 30 seconds.
+func TestTheGitSessionOfACodeRunHasAShortGrace(t *testing.T) {
+	p := walledPush(t)
+	var grace time.Duration
+	t.Cleanup(cmd.SetGitSession(func(_ context.Context, spec session.SessionSpec) (*session.Result, error) {
+		grace = spec.StopGrace
+		return &session.Result{TimedOut: true}, nil
+	}))
+	p.run(t, writesAndCommits(t), nil)
+	if grace <= 0 || 10*time.Second+15*time.Second+grace >= 30*time.Second {
+		t.Errorf("the session's grace is %s", grace)
+	}
 }
