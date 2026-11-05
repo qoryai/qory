@@ -478,21 +478,23 @@ func ComposeWith(p *stack.Stack, opts Options) (_ *Result, err error) {
 }
 
 // workflowsShipped checks that each workflow of p is a skill or command that composed
-// contains, the entries of the modules of the stack that lists the workflows, after
-// their exclude or only blocks: base's modules for a stack that extends base, and
-// p's modules for one that extends none. A module that a checkout adds to a base does not
-// count, since the base lists the workflows. Each workflow without one is a line of the
-// error, in sorted order, which shows a stack that extends none as as, when set, and
-// otherwise by its file.
+// contains, under either name of [stack.WorkflowEntries], the entries of the modules of
+// the stack that lists the workflows, after their exclude or only blocks: base's modules
+// for a stack that extends base, and p's modules for one that extends none. A module that
+// a checkout adds to a base does not count, since the base lists the workflows. Each
+// workflow without one is a line of the error, in sorted order, which shows a stack that
+// extends none as as, when set, and otherwise by its file.
 func workflowsShipped(p *stack.Stack, composed map[string]bool, base *Base, as string) error {
 	var lines []string
 	for _, name := range slices.Sorted(maps.Keys(p.Workflows)) {
-		if composed["skills/"+name] || composed["commands/"+name] {
+		if slices.ContainsFunc(stack.WorkflowEntries(name), func(entry string) bool {
+			return composed["skills/"+entry] || composed["commands/"+entry]
+		}) {
 			continue
 		}
-		w := shown(name)
+		w, prefixed := shown(name), shown(stack.WorkflowEntry(name))
 		if base != nil {
-			lines = append(lines, fmt.Sprintf("add a skill or command %s to a module of the base stack %s, or remove %s from the workflows of its %s: the stack declares the workflow %s, and none of its modules ships a skill or command %s", w, base.String(), w, stack.FileName, w, w))
+			lines = append(lines, fmt.Sprintf("add a skill or command %s to a module of the base stack %s, or remove %s from the workflows of its %s: the stack declares the workflow %s, and none of its modules ships a skill or command %s or %s", prefixed, base.String(), w, stack.FileName, w, prefixed, w))
 			continue
 		}
 		in := "the stack"
@@ -502,7 +504,7 @@ func workflowsShipped(p *stack.Stack, composed map[string]bool, base *Base, as s
 		case p.File != "":
 			in += " in " + filepath.Base(p.File)
 		}
-		lines = append(lines, fmt.Sprintf("add a skill or command %s to a module of %s, or remove %s from its workflows: the stack declares the workflow %s, and none of its modules ships a skill or command %s", w, in, w, w, w))
+		lines = append(lines, fmt.Sprintf("add a skill or command %s to a module of %s, or remove %s from its workflows: the stack declares the workflow %s, and none of its modules ships a skill or command %s or %s", prefixed, in, w, w, prefixed, w))
 	}
 	if len(lines) == 0 {
 		return nil

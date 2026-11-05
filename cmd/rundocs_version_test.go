@@ -2,6 +2,7 @@ package cmd_test
 
 import (
 	"errors"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -93,6 +94,54 @@ func TestARunCodeWorksAtItsTargetVersion(t *testing.T) {
 	h.noPassword(t, out)
 }
 
+// TestARunCodeFetchesIntoAnEmptyFolder is a run from a run code in a folder with no
+// entries, as a pool and a machine start script give it: qory run runs git init there,
+// with no template, before it adds the remote, fetches the target's repository at its
+// version, and the session joins.
+func TestARunCodeFetchesIntoAnEmptyFolder(t *testing.T) {
+	h, first, _, _ := versionRepository(t)
+	if err := os.RemoveAll(filepath.Join(h.dir, ".git")); err != nil {
+		t.Fatal(err)
+	}
+	out, err, n, _ := runAtVersion(t, h, "acme/site", first)
+	if !n.joined {
+		t.Fatalf("%v (exit %d), want the join\n%s", err, cmd.ExitCode(err), out)
+	}
+	wants(t, out, "qory run: fetched acme/site at "+first[:12]+" in ", "qory run: composed ")
+	if got := gitOut(t, h.dir, "rev-parse", "HEAD"); got != first {
+		t.Errorf("the working folder is at %s, want %s", got, first)
+	}
+	data, readErr := os.ReadFile(h.argv)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	argv := string(data)
+	init, remote := strings.Index(argv, "init --quiet --template= --initial-branch=main\n"), strings.Index(argv, "remote add -- origin ")
+	if init < 0 || remote < init {
+		t.Errorf("git init at %d, git remote add at %d, want init first:\n%s", init, remote, argv)
+	}
+	h.noPassword(t, out)
+}
+
+// TestARunCodeInAFolderWithAFileStops is a run from a run code in a folder that has a file
+// and is not a git working tree: the run stops before the join with exit 1, and git init
+// does not run.
+func TestARunCodeInAFolderWithAFileStops(t *testing.T) {
+	h, first, _, _ := versionRepository(t)
+	if err := os.RemoveAll(filepath.Join(h.dir, ".git")); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(h.dir, "notes.txt"), "notes\n")
+	out, err, n, _ := runAtVersion(t, h, "acme/site", first)
+	if cmd.ExitCode(err) != 1 || n.joined {
+		t.Fatalf("%v (exit %d), want exit 1 before the join\n%s", err, cmd.ExitCode(err), out)
+	}
+	wants(t, out+err.Error(), "qory run: start the run in an empty folder outside any git repository, or at the top of a git working tree without commits: the working folder is neither, and qory fetches the run's repository only into one of these")
+	if _, err := os.Lstat(filepath.Join(h.dir, ".git")); !os.IsNotExist(err) {
+		t.Errorf("the folder has a .git after the stop: %v", err)
+	}
+}
+
 // TestARunCodeAtItsBranchHeadComposesTheHead is the run of
 // [TestARunCodeWorksAtItsTargetVersion] at the head commit: qory run composes the head's
 // qory.yaml, which has no command hello, so the run stops before the join, exit 1, and
@@ -108,7 +157,7 @@ func TestARunCodeAtItsBranchHeadComposesTheHead(t *testing.T) {
 		t.Errorf("the run closed with %v, want %v", n.closes, want)
 	}
 	wants(t, out, "qory run: fetched acme/site at "+head[:12]+" in ")
-	wants(t, out+err.Error(), "add a skill or command hello to the checkout's harness in the repository acme/site, or set another workflow in Qory Apiary: the composed harness has no skill or command hello (workflow_not_in_harness); the code is used")
+	wants(t, out+err.Error(), "add a skill workflow-hello to the checkout's harness in the repository acme/site, or set another workflow in Qory Apiary: the composed harness has no skill or command workflow-hello or hello (workflow_not_in_harness); the code is used")
 }
 
 // TestARunCodeAtACommitTheServerLacksStops is a run from a run code whose documents set

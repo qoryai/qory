@@ -2,6 +2,7 @@ package preparation
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -13,8 +14,15 @@ import (
 	"testing"
 	"time"
 
+	"github.com/qoryai/qory/internal/hostgit"
+	"github.com/qoryai/qory/internal/places"
 	"github.com/qoryai/qory/internal/proxygit"
 )
+
+// shellQuote is s as one word of a shell script.
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
 
 // needGit skips a test that runs git when the machine has none, and keeps the user's
 // and the system's git configuration out of it.
@@ -367,36 +375,361 @@ func TestKeepsQoryRepositories(t *testing.T) {
 	}
 }
 
-// TestRefusesAFolderThatIsNotEmpty refuses a working folder with a file, one that is no
-// git working tree and one whose repository has a commit, and fetches nothing.
-func TestRefusesAFolderThatIsNotEmpty(t *testing.T) {
+// TestStopsOnAFolderThatIsNotEmpty stops on a working folder with a file, one that is no
+// git working tree and not empty, one whose repository has a commit and one inside a
+// working tree, and fetches nothing. A folder with no entries gets past the check, and
+// the repository is fetched.
+func TestStopsOnAFolderThatIsNotEmpty(t *testing.T) {
 	needGit(t)
 	base := t.TempDir()
 	remote(t, base, "acme/shop", "main", nil)
 	notEmpty := "qory run: start the run in an empty git working tree: the working folder contains files already, and the run's repository is fetched only into an empty one"
-	notTree := "qory run: start the run in a git working tree without commits: the working folder is not one, and the run's repository is fetched only into an empty git working tree"
+	notTree := "qory run: start the run in an empty folder outside any git repository, or at the top of a git working tree without commits: the working folder is neither, and qory fetches the run's repository only into one of these"
 
 	withFile := emptyFolder(t)
 	write(t, filepath.Join(withFile, "notes.txt"), "notes\n")
 	plain := t.TempDir()
+	write(t, filepath.Join(plain, "notes.txt"), "notes\n")
+	qoryOnly := t.TempDir()
+	if err := os.Mkdir(filepath.Join(qoryOnly, ".qory"), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	committed := emptyFolder(t)
 	run(t, committed, "commit", "--quiet", "--allow-empty", "-m", "first")
 	nested := filepath.Join(emptyFolder(t), "inner")
 	if err := os.Mkdir(nested, 0o755); err != nil {
 		t.Fatal(err)
 	}
+	bare := t.TempDir()
+	run(t, bare, "init", "--quiet", "--bare")
+	inBare := filepath.Join(bare, "inner")
+	if err := os.Mkdir(inBare, 0o755); err != nil {
+		t.Fatal(err)
+	}
 	for _, c := range []struct{ name, dir, want string }{
 		{"a file", withFile, notEmpty},
 		{"no git", plain, notTree},
+		{"only .qory", qoryOnly, notTree},
 		{"a commit", committed, notTree},
 		{"a folder inside a working tree", nested, notTree},
+		{"a folder inside a bare repository", inBare, notTree},
+		{"an empty folder", t.TempDir(), ""},
 	} {
 		_, err := prepare(context.Background(), c.dir, env("git.example.com", "acme/shop"))
+		if c.want == "" {
+			if err != nil {
+				t.Errorf("%s: %v", c.name, err)
+			}
+			if _, err := os.Stat(filepath.Join(c.dir, "README.md")); err != nil {
+				t.Errorf("%s: acme/shop was not fetched: %v", c.name, err)
+			}
+			continue
+		}
 		if err == nil || err.Error() != c.want {
 			t.Errorf("%s: %v, want %s", c.name, err, c.want)
 		}
 		if out, _ := exec.Command("git", "-C", c.dir, "remote").Output(); strings.TrimSpace(string(out)) != "" {
 			t.Errorf("%s: a remote was added: %s", c.name, out)
+		}
+	}
+	for _, dir := range []string{plain, qoryOnly, nested, inBare} {
+		if _, err := os.Lstat(filepath.Join(dir, ".git")); !os.IsNotExist(err) {
+			t.Errorf("%s has a .git after the stop: %v", dir, err)
+		}
+	}
+}
+
+// TestAGitThatFailsAboveAnEmptyFolderStops is an empty folder under a .git file git cannot
+// use, or a repository git cannot use: the check of the folder fails with git's line,
+// and git init does not run, since a repository in the folder would hide what is above it.
+func TestAGitThatFailsAboveAnEmptyFolderStops(t *testing.T) {
+	needGit(t)
+	base := t.TempDir()
+	remote(t, base, "acme/shop", "main", nil)
+	want := "qory run: check git on this machine, the working folder, and each repository and .git above it, then run again. git failed: "
+	type row struct {
+		name  string
+		plant func(parent string)
+	}
+	rows := []row{
+		{"a .git file that leads nowhere", func(parent string) { write(t, filepath.Join(parent, ".git"), "gitdir: /nowhere\n") }},
+		{"a .git file that is no git file", func(parent string) { write(t, filepath.Join(parent, ".git"), "not a git file\n") }},
+		{"a bad config", func(parent string) {
+			run(t, parent, "init", "--quiet")
+			write(t, filepath.Join(parent, ".git", "config"), "not a config\n[")
+		}},
+		{"a format git does not take", func(parent string) {
+			run(t, parent, "init", "--quiet")
+			run(t, parent, "config", "core.repositoryformatversion", "99")
+		}},
+	}
+	// Root reads a file with no read permission.
+	if os.Geteuid() != 0 {
+		rows = append(rows, row{"a .git file with no read permission", func(parent string) {
+			write(t, filepath.Join(parent, ".git"), "gitdir: /nowhere\n")
+			if err := os.Chmod(filepath.Join(parent, ".git"), 0); err != nil {
+				t.Fatal(err)
+			}
+		}})
+	}
+	for _, c := range rows {
+		parent := t.TempDir()
+		c.plant(parent)
+		dir := filepath.Join(parent, "inner")
+		if err := os.Mkdir(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		_, err := prepare(context.Background(), dir, env("git.example.com", "acme/shop"))
+		if err == nil || !strings.HasPrefix(err.Error(), want) {
+			t.Errorf("%s: %v, want a line that starts %s", c.name, err, want)
+		}
+		if _, err := os.Lstat(filepath.Join(dir, ".git")); !os.IsNotExist(err) {
+			t.Errorf("%s: the folder has a .git after the stop: %v", c.name, err)
+		}
+	}
+}
+
+// TestABadHeadBelowABadGitFileStops is a working folder whose .git has a HEAD git does not
+// take, below a .git file that leads nowhere: git goes on to the folder above, and the
+// line lists the working folder's .git, and each repository and .git above it.
+func TestABadHeadBelowABadGitFileStops(t *testing.T) {
+	needGit(t)
+	base := t.TempDir()
+	remote(t, base, "acme/shop", "main", nil)
+	parent := t.TempDir()
+	write(t, filepath.Join(parent, ".git"), "gitdir: /nowhere\n")
+	dir := filepath.Join(parent, "inner")
+	if err := os.Mkdir(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	run(t, dir, "init", "--quiet", "-b", "main")
+	write(t, filepath.Join(dir, ".git", "HEAD"), "not a head\n")
+	_, err := prepare(context.Background(), dir, env("git.example.com", "acme/shop"))
+	want := "qory run: check git on this machine, the working folder's .git, and each repository and .git above it, then run again. git failed: "
+	if err == nil || !strings.HasPrefix(err.Error(), want) {
+		t.Errorf("%v, want a line that starts %s", err, want)
+	}
+}
+
+// TestAGitThatFailsInTheWorkingFolderStops is a repository that git finds and cannot use:
+// the line for a failed look for the top of the working tree, as for a .git above it, since
+// git can print the same line for both.
+func TestAGitThatFailsInTheWorkingFolderStops(t *testing.T) {
+	needGit(t)
+	base := t.TempDir()
+	remote(t, base, "acme/shop", "main", nil)
+	want := "qory run: check git on this machine, the working folder's .git, and each repository and .git above it, then run again. git failed: "
+	for _, c := range []struct{ key, value string }{
+		{"core.bare", "true"},
+		{"core.repositoryformatversion", "99"},
+	} {
+		dir := emptyFolder(t)
+		run(t, dir, "config", c.key, c.value)
+		_, err := prepare(context.Background(), dir, env("git.example.com", "acme/shop"))
+		if err == nil || !strings.HasPrefix(err.Error(), want) {
+			t.Errorf("%s: %v, want a line that starts %s", c.key, err, want)
+		}
+	}
+}
+
+// TestEmptyStopHasTheFixOfEachStop is the whole line for each stop of hostgit's check on a
+// folder with no entries, with paths long enough that a cut would lose hostgit's fix: a new
+// folder for a walled run that may use it, hostgit's text alone for what the check cannot
+// read, and a folder outside the repository for a stop of that repository.
+func TestEmptyStopHasTheFixOfEachStop(t *testing.T) {
+	long := "/state/" + strings.Repeat("x", 300)
+	inUse := "qory run: start the run in a new empty folder that no walled run uses, then run again. The check of the working folder failed: "
+	above := "qory run: start the run in an empty folder outside the repository above the working folder, then run again. The check of that repository failed: "
+	for _, c := range []struct {
+		name string
+		stop *hostgit.RefusedError
+		want string
+	}{
+		{"in use", &hostgit.RefusedError{Dir: "/work", Reason: hostgit.RefusedInUse},
+			inUse + "/work is in use by a walled run; qory runs no git there until the run ends, since the run could change git's configuration between qory's check and git's read"},
+		{"engine out of reach", &hostgit.RefusedError{Dir: "/work", Key: "rn_1", Target: long, Reason: hostgit.RefusedEngineUnreachable},
+			"qory run: start the run in a new empty folder that no walled run uses, then run again. If it stops there too: The check for a container of the walled run rn_1 failed. That run used /work, so qory runs no git there. If docker ps --all --filter label=dev.qory.run=rn_1 lists no container, or the Docker engine of that run no longer exists, delete " + long},
+		{"entry unreadable", &hostgit.RefusedError{Dir: "/work", Key: "rn_1", Target: long, Reason: hostgit.RefusedEntryUnreadable},
+			"qory run: qory cannot read " + long + ", the record of the walled run rn_1, so it cannot tell whether that run used /work or is still going, and runs no git there. If docker ps --all --filter label=dev.qory.run=rn_1 lists no container, delete " + long},
+		{"no records", &hostgit.RefusedError{Reason: hostgit.RefusedNoRecords, Err: errors.New("no\nhome")}, `qory run: no\nhome`},
+		{"no git", &hostgit.RefusedError{Dir: "/work", Reason: hostgit.RefusedNoGit},
+			"qory run: git is not on the PATH, so qory cannot check the git configuration of /work; qory runs no git there, since a run could have set it to make git on this machine run a program"},
+		{"a key above", &hostgit.RefusedError{Dir: "/work", Key: "filter.x.smudge", Reason: hostgit.RefusedSetting},
+			above + "the git configuration of /work sets filter.x.smudge, which qory does not write; qory runs no git there, since a run could have set it to make git on this machine run a program"},
+		{"a link above", &hostgit.RefusedError{Dir: "/work", Key: "objects", Target: long, Reason: hostgit.RefusedObjectsLink},
+			above + "the git directory of /work holds objects, a link to " + long + "; qory runs no git there, since a run could have pointed it at another repository's objects. Remove the link to go on"},
+	} {
+		if got := emptyStop(c.stop).Error(); got != c.want {
+			t.Errorf("%s:\n%s\nwant\n%s", c.name, got, c.want)
+		}
+	}
+}
+
+// TestAnEmptyFolderWithNoRecordsStops is a run with neither HOME nor XDG_STATE_HOME: the
+// line is the reason qory cannot find the records, with no other folder as a fix, and the
+// folder has no .git.
+func TestAnEmptyFolderWithNoRecordsStops(t *testing.T) {
+	needGit(t)
+	isolatedPlaces(t)
+	base := t.TempDir()
+	remote(t, base, "acme/shop", "main", nil)
+	t.Setenv("HOME", "")
+	t.Setenv("XDG_STATE_HOME", "")
+	_, dirErr := places.Dir()
+	if dirErr == nil {
+		t.Fatal("the records have a folder with neither HOME nor XDG_STATE_HOME")
+	}
+	dir := t.TempDir()
+	_, err := prepare(context.Background(), dir, env("git.example.com", "acme/shop"))
+	if want := "qory run: " + dirErr.Error(); err == nil || err.Error() != want {
+		t.Errorf("%v, want %s", err, want)
+	}
+	if _, err := os.Lstat(filepath.Join(dir, ".git")); !os.IsNotExist(err) {
+		t.Errorf("the folder has a .git after the stop: %v", err)
+	}
+}
+
+// TestAnEmptyFolderBelowARecordedRepositoryStops is an empty folder inside a repository that
+// a walled run used, whose configuration has a filter the run wrote: the line sends the
+// reader outside that repository, and the folder has no .git.
+func TestAnEmptyFolderBelowARecordedRepositoryStops(t *testing.T) {
+	needGit(t)
+	isolatedPlaces(t)
+	base := t.TempDir()
+	remote(t, base, "acme/shop", "main", nil)
+	parent, err := filepath.EvalSymlinks(emptyFolder(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := hostgit.Record(context.Background(), parent, places.KindCheckout, "run-1"); err != nil {
+		t.Fatal(err)
+	}
+	smudging(t, parent, filepath.Join(t.TempDir(), "ran"))
+	dir := filepath.Join(parent, "inner")
+	if err := os.Mkdir(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	_, err = prepare(context.Background(), dir, env("git.example.com", "acme/shop"))
+	want := "qory run: start the run in an empty folder outside the repository above the working folder, then run again. The check of that repository failed: "
+	if err == nil || !strings.HasPrefix(err.Error(), want) {
+		t.Errorf("%v, want a line that starts %s", err, want)
+	}
+	if _, err := os.Lstat(filepath.Join(dir, ".git")); !os.IsNotExist(err) {
+		t.Errorf("the folder has a .git after the stop: %v", err)
+	}
+}
+
+// TestAnEmptyFolderStartsOnMain is a fetch that fails after git init: HEAD is the unborn
+// branch main, whichever branch git would start on by default.
+func TestAnEmptyFolderStartsOnMain(t *testing.T) {
+	needGit(t)
+	base := t.TempDir()
+	remote(t, base, "acme/shop", "main", nil)
+	dir := t.TempDir()
+	if _, err := prepare(context.Background(), dir, env("git.example.com", "acme/missing")); err == nil {
+		t.Fatal("acme/missing was fetched")
+	}
+	if got := run(t, dir, "symbolic-ref", "HEAD"); got != "refs/heads/main" {
+		t.Errorf("HEAD is %s, want refs/heads/main", got)
+	}
+}
+
+// TestAFolderNameMayEndInASpace is an empty folder and a git working tree whose names end in
+// a space: each gets the fetch.
+func TestAFolderNameMayEndInASpace(t *testing.T) {
+	needGit(t)
+	base := t.TempDir()
+	remote(t, base, "acme/shop", "main", nil)
+	empty, tree := filepath.Join(t.TempDir(), "name "), filepath.Join(t.TempDir(), "name ")
+	for _, dir := range []string{empty, tree} {
+		if err := os.Mkdir(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	run(t, tree, "init", "--quiet", "-b", "master")
+	for _, dir := range []string{empty, tree} {
+		if _, err := prepare(context.Background(), dir, env("git.example.com", "acme/shop")); err != nil {
+			t.Errorf("%q: %v", dir, err)
+			continue
+		}
+		if _, err := os.Stat(filepath.Join(dir, "README.md")); err != nil {
+			t.Errorf("%q: acme/shop was not fetched: %v", dir, err)
+		}
+	}
+}
+
+// TestAGitFolderThatIsNoRepositoryStops is a working folder whose .git is empty, or has no
+// refs: the line starts with its fix and has what is missing, with no repository above
+// the folder and with one. A .git with a commondir file and no objects or refs gets the
+// line of the commondir file, since git follows that file.
+func TestAGitFolderThatIsNoRepositoryStops(t *testing.T) {
+	needGit(t)
+	base := t.TempDir()
+	remote(t, base, "acme/shop", "main", nil)
+	line := "qory run: start the run in a new empty folder or a new empty git working tree: the working folder's .git has no %s, so git does not take that folder for a repository"
+	empty := t.TempDir()
+	noRefs := emptyFolder(t)
+	if err := os.RemoveAll(filepath.Join(noRefs, ".git", "refs")); err != nil {
+		t.Fatal(err)
+	}
+	nested := filepath.Join(emptyFolder(t), "inner")
+	common := t.TempDir()
+	for _, dir := range []string{filepath.Join(empty, ".git"), filepath.Join(nested, ".git"), filepath.Join(common, ".git")} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(t, filepath.Join(common, ".git", "HEAD"), "ref: refs/heads/main\n")
+	write(t, filepath.Join(common, ".git", "commondir"), t.TempDir()+"\n")
+	for _, c := range []struct{ name, dir, want string }{
+		{"an empty .git", empty, fmt.Sprintf(line, "HEAD")},
+		{"no refs", noRefs, fmt.Sprintf(line, "refs")},
+		{"an empty .git inside a working tree", nested, fmt.Sprintf(line, "HEAD")},
+		{"HEAD and a commondir file", common, "qory run: start the run in a new empty git working tree, then run again: the working folder's .git has a commondir file, which can point git at another repository"},
+	} {
+		_, err := prepare(context.Background(), c.dir, env("git.example.com", "acme/shop"))
+		if err == nil || err.Error() != c.want {
+			t.Errorf("%s: %v, want %s", c.name, err, c.want)
+		}
+	}
+}
+
+// TestAnEmptyFolderGetsARepository runs git init in a folder with no entries, with no
+// template, and fetches the run's repository on its default branch, whichever that is,
+// and a further one, whose line in the exclude file qory writes.
+func TestAnEmptyFolderGetsARepository(t *testing.T) {
+	needGit(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, "config"))
+	t.Setenv("XDG_STATE_HOME", filepath.Join(home, "state"))
+	base := t.TempDir()
+	remote(t, base, "acme/shop", "main", nil)
+	remote(t, base, "acme/old", "master", nil)
+	remote(t, base, "acme/docs", "main", nil)
+	for _, c := range []struct{ list, branch string }{
+		{"acme/shop", "main"},
+		{"acme/old", "master"},
+		{"acme/shop,acme/docs", "main"},
+	} {
+		dir := t.TempDir()
+		if _, err := prepare(context.Background(), dir, env("git.example.com", c.list)); err != nil {
+			t.Errorf("%s: %v", c.list, err)
+			continue
+		}
+		if got := run(t, dir, "rev-parse", "--abbrev-ref", "HEAD"); got != c.branch {
+			t.Errorf("%s: HEAD is on %s, want %s", c.list, got, c.branch)
+		}
+		if got := run(t, dir, "rev-parse", "--abbrev-ref", "@{upstream}"); got != "origin/"+c.branch {
+			t.Errorf("%s: the upstream is %s, want origin/%s", c.list, got, c.branch)
+		}
+		if got := run(t, dir, "status", "--porcelain", "--untracked-files=all"); got != "" {
+			t.Errorf("%s: git status: %s", c.list, got)
+		}
+		for _, name := range []string{"hooks", "description"} {
+			if _, err := os.Lstat(filepath.Join(dir, ".git", name)); !os.IsNotExist(err) {
+				t.Errorf("%s: .git/%s comes from a template: %v", c.list, name, err)
+			}
 		}
 	}
 }
@@ -510,16 +843,48 @@ func TestRefusesAQoryThatIsNoFolder(t *testing.T) {
 	}
 }
 
-// TestSaysWhenGitCannotReadTheFolder is a git that does not run, or fails on the
-// folder, worded as git's failure and not as a refusal of the folder.
-func TestSaysWhenGitCannotReadTheFolder(t *testing.T) {
+// TestSaysWhenGitDoesNotStart is a git that is not on the PATH, or an empty folder that git
+// cannot start in: each stop is the line for a failed git.
+func TestSaysWhenGitDoesNotStart(t *testing.T) {
 	needGit(t)
-	dir := emptyFolder(t)
-	t.Setenv("PATH", t.TempDir())
-	_, err := prepare(context.Background(), dir, env("git.example.com", "acme/shop"))
-	want := `qory run: check that git on this machine can read the working folder, then run again. git failed: exec: "git": executable file not found in $PATH`
-	if err == nil || err.Error() != want {
-		t.Errorf("git missing: %v, want %s", err, want)
+	const (
+		missing = `git failed: exec: "git": executable file not found in $PATH`
+		above   = "qory run: check git on this machine, the working folder, and each repository and .git above it, then run again. "
+	)
+	type row struct {
+		name, dir, want string
+		noGit           bool
+	}
+	rows := []row{
+		{"a working tree, no git", emptyFolder(t), "qory run: check that git on this machine can read the working folder, then run again. " + missing, true},
+		{"an empty folder, no git", t.TempDir(), above + missing, true},
+	}
+	// Root starts git in a folder with no search permission.
+	if os.Geteuid() != 0 {
+		closed := t.TempDir()
+		if err := os.Chmod(closed, 0o400); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = os.Chmod(closed, 0o700) })
+		path, err := exec.LookPath("git")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if path, err = filepath.EvalSymlinks(path); err != nil {
+			t.Fatal(err)
+		}
+		rows = append(rows, row{"an empty folder at mode 0400", closed, above + "git failed: fork/exec " + path + ": permission denied", false})
+	}
+	for _, c := range rows {
+		t.Run(c.name, func(t *testing.T) {
+			if c.noGit {
+				t.Setenv("PATH", t.TempDir())
+			}
+			_, err := prepare(context.Background(), c.dir, env("git.example.com", "acme/shop"))
+			if err == nil || err.Error() != c.want {
+				t.Errorf("%v, want %s", err, c.want)
+			}
+		})
 	}
 }
 
@@ -532,7 +897,7 @@ func TestRefusesARemoteAlready(t *testing.T) {
 	dir := emptyFolder(t)
 	run(t, dir, "remote", "add", "origin", "https://git.example.com/acme/other.git")
 	_, err := prepare(context.Background(), dir, env("git.example.com", "acme/shop"))
-	want := "qory run: start the run in a git working tree with no remote: the working folder's repository has a remote already, and the run's repository is fetched only into an empty git working tree"
+	want := "qory run: start the run in a new empty folder or a new empty git working tree: the working folder's repository has a remote already, and qory fetches the run's repository only into a repository with no remote"
 	if err == nil || err.Error() != want {
 		t.Errorf("%v, want %s", err, want)
 	}
@@ -605,7 +970,7 @@ func TestTellsARefusedBranchNameFromAFailedCheck(t *testing.T) {
 		{"stopped", "exec sleep 30", notReached + "git check-ref-format ran past 2s and was stopped"},
 	} {
 		bin := t.TempDir()
-		write(t, filepath.Join(bin, "git"), "#!/bin/sh\nfor a; do [ \"$a\" = check-ref-format ] && { "+c.check+"; }; done\nexec "+gitPath+" \"$@\"\n")
+		write(t, filepath.Join(bin, "git"), "#!/bin/sh\nfor a; do [ \"$a\" = check-ref-format ] && { "+c.check+"; }; done\nexec "+shellQuote(gitPath)+" \"$@\"\n")
 		if err := os.Chmod(filepath.Join(bin, "git"), 0o755); err != nil {
 			t.Fatal(err)
 		}

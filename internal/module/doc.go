@@ -4,9 +4,10 @@
 // A module's tree contains one directory per entry kind, skills, agents, commands,
 // output-styles, hooks and mcp, the settings/<runtime>/<file> fragments, and AGENTS.md.
 // An entry is one atomic thing the module ships, identified by kind and name: a skill is
-// a directory that contains SKILL.md, an agent, a command and an output style are
-// Markdown files named after the entry, a hook is a regular file under hooks, an MCP
-// server is one JSON file under mcp. Every path an entry, a fragment or AGENTS.md
+// a directory that contains SKILL.md, at any depth of folders that group skills and named
+// by its last folder alone, an agent, a command and an output style are Markdown files
+// named after the entry, a hook is a regular file under hooks, an MCP server is one JSON
+// file under mcp. Every path an entry, a fragment or AGENTS.md
 // resolves to, symlinks followed, lies inside the module; one that leaves it is refused,
 // so the harness reads nothing the report does not show. The manifest, qory-module.yaml,
 // declares the module's name and its variants, the per-runtime alternatives, each one

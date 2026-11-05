@@ -410,9 +410,10 @@ type Stack struct {
 	// settings beside the stack.
 	Extensions map[string]any `yaml:"extensions,omitempty"`
 	// Workflows are the settings of the workflows the stack starts, by name: a
-	// dispatched run starts the skill or command of a workflow's name. A stack file sets
-	// them, and so does the harness section of a checkout's qory.yaml that defines a
-	// stack; a section that extends a stack sets none, and [Extend] takes the base's.
+	// dispatched run starts the skill or command of a workflow's name, as
+	// [WorkflowEntries] lists the names it looks up. A stack file sets them, and so does
+	// the harness section of a checkout's qory.yaml that defines a stack; a section that
+	// extends a stack sets none, and [Extend] takes the base's.
 	Workflows map[string]Workflow `yaml:"workflows,omitempty"`
 
 	// RetiredAPIVersion is the apiVersion the file declared when it is a retired
@@ -453,8 +454,18 @@ const (
 	AccessWrite = "write"
 )
 
-// workflowName is a workflow's name, as the provisioner contract's workflow is.
-var workflowName = regexp.MustCompile(`^[a-z][a-z0-9-]{0,63}$`)
+// workflowName is a workflow's name: at most 55 characters, so that [WorkflowEntry] is at
+// most 64.
+var workflowName = regexp.MustCompile(`^[a-z][a-z0-9-]{0,54}$`)
+
+// WorkflowEntry is the prefixed name of a skill or command that a harness ships for the
+// workflow name: workflow-<name>. A harness may ship the plain name too, see
+// [WorkflowEntries]. A stack and a process.yaml use name itself.
+func WorkflowEntry(name string) string { return "workflow-" + name }
+
+// WorkflowEntries are the names a skill or command of the workflow name may have, in the
+// order a run looks them up: [WorkflowEntry], then name itself.
+func WorkflowEntries(name string) []string { return []string{WorkflowEntry(name), name} }
 
 // TimeLimitOf is the time_limit of the workflow name, 0 when the stack has no such
 // workflow or the workflow sets none.
@@ -682,7 +693,7 @@ func (p *Stack) validate(compose bool) error {
 	}
 	for _, name := range slices.Sorted(maps.Keys(p.Workflows)) {
 		if !workflowName.MatchString(name) {
-			return fmt.Errorf("name the workflow %s with a lower-case letter, then up to 63 lower-case letters, digits and hyphens: workflows lists it", accesskey.ShownName(name, true))
+			return fmt.Errorf("name the workflow %s with a lower-case letter, then up to 54 lower-case letters, digits and hyphens, 55 characters at most: workflows lists it", accesskey.ShownName(name, true))
 		}
 		w := p.Workflows[name]
 		if w.Access != "" && w.Access != AccessRead && w.Access != AccessWrite {

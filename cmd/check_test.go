@@ -9,9 +9,9 @@ import (
 )
 
 // TestCheckSeesAStaleHome is the CI gate: a compose, then an edit to the app module's
-// instructions, which the composed AGENTS.md and CLAUDE.md are generated copies of. The
-// check exits 6 naming both copies and writes nothing; a compose brings the home up to
-// date and the check exits 0.
+// instructions, which the composed AGENTS.md and claude/launch/AGENTS.md are generated
+// copies of. The check exits 6 naming both copies and writes nothing; a compose brings
+// the home up to date and the check exits 0.
 func TestCheckSeesAStaleHome(t *testing.T) {
 	root := newCheckout(t)
 	writeAppCheckout(t, root, ">=0.1.0")
@@ -37,7 +37,7 @@ func TestCheckSeesAStaleHome(t *testing.T) {
 	}
 	wants(t, err.Error(), "stale: run qory harness compose")
 	wantsRow(t, out, "AGENTS.md", "changed")
-	wantsRow(t, out, "claude/CLAUDE.md", "changed")
+	wantsRow(t, out, "claude/launch/AGENTS.md", "changed")
 	lacks(t, out, "up to date", "composed")
 	if !maps.Equal(snapshot(t, root), before) {
 		t.Error("the check changed the checkout")

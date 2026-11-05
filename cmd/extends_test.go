@@ -114,7 +114,7 @@ func TestExtendsComposesTheBaseFirstAndClosed(t *testing.T) {
 		t.Fatal(err)
 	}
 	wants(t, string(settings), `"Bash(git push:*)"`, `"Bash(npm test)"`, "guard.sh", `"model": "opus"`)
-	instructions, _ := os.ReadFile(filepath.Join(root, ".claude", "CLAUDE.md"))
+	instructions, _ := os.ReadFile(filepath.Join(root, ".claude", "rules", "qory-harness.md"))
 	if !strings.HasPrefix(string(instructions), "# Core rules\n") || !strings.Contains(string(instructions), "# App rules") {
 		t.Errorf("instructions:\n%s", instructions)
 	}
@@ -405,7 +405,7 @@ func TestExtendsFollowsTheBasesBranch(t *testing.T) {
 	}
 	wantsRow(t, out, "extends", "nextjs-15  main "+first+" → "+rep.Base.Pin)
 	wantsNoRow(t, out, "module")
-	instructions, _ := os.ReadFile(filepath.Join(root, ".claude", "CLAUDE.md"))
+	instructions, _ := os.ReadFile(filepath.Join(root, ".claude", "rules", "qory-harness.md"))
 	if !strings.HasPrefix(string(instructions), "# Core rules, second\n") {
 		t.Errorf("instructions after the push:\n%s", instructions)
 	}

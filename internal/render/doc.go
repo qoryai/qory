@@ -93,8 +93,9 @@
 // A files entry is a file a module ships as it is, named <runtime>/<path> after its place
 // in the module, files/<runtime>/<path>. Build links it at <path> under the runtime's
 // directory in the home once Render has written the runtime's own files, so a runtime
-// whose directory is linked whole reaches it through that link: .claude/rules becomes a
-// directory link like .claude/skills, and .claude/rules/nextjs-15.md resolves through it.
+// whose directory is linked whole reaches it through that link. claude links .claude/rules
+// apart: it is a real directory with one link per rule, beside the repository's rules, and
+// .claude/rules/nextjs-15.md is one of those links.
 // Copilot, whose .github is the repository's, adds one soft link per file to its Links.
 // A runtime with no directory in the checkout, goose and any, lists the files kind in
 // its Skips, and [Skipped] lists a files entry only for the runtime in its path.

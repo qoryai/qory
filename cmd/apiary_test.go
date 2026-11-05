@@ -17,12 +17,11 @@ import (
 	"github.com/qoryai/qory/internal/apiarydir"
 )
 
-// diagnosticsRunID is the run of the diagnostics fixture, and diagnosticsRunNumber the
-// same run's number.
-const (
-	diagnosticsRunID     = "rn_0123456789abcdef"
-	diagnosticsRunNumber = "18342"
-)
+// diagnosticsRunID is the run of the diagnostics fixture.
+const diagnosticsRunID = "rn_0123456789abcdef"
+
+// diagnosticsNotARunID is the first line of the error for a value that is not a run id.
+const diagnosticsNotARunID = "Use the run's id, rn_ and 16 characters: this command takes only that id."
 
 // diagnosticsFixture is the path of a diagnostics document of the diagnostics
 // contract's fixtures, resolved before any test changes the working directory. It is
@@ -79,7 +78,7 @@ func newDiagnosticsServer(t *testing.T, client *accesskey.Key) *diagnosticsServe
 			w.WriteHeader(http.StatusUnauthorized)
 			return
 		}
-		if p := r.URL.Path; p != "/v1/runs/"+diagnosticsRunID+"/diagnostics" && p != "/v1/runs/"+diagnosticsRunNumber+"/diagnostics" {
+		if r.URL.Path != "/v1/runs/"+diagnosticsRunID+"/diagnostics" {
 			s.respond(w, sig, http.StatusNotFound, []byte(`{"error":"not_found"}`))
 			return
 		}
@@ -176,39 +175,40 @@ func TestApiaryDiagnoseEndsTheDocumentWithALineEnding(t *testing.T) {
 	}
 }
 
-// TestApiaryDiagnoseTakesARunNumber is a run named by its number: qory sends the number
-// as typed on the path, and prints the document.
-func TestApiaryDiagnoseTakesARunNumber(t *testing.T) {
+// TestApiaryDiagnoseSendsTheRunIDAlone is a run id after a run number on the same server:
+// only the run id reaches the server, as typed on the path, and qory prints the document.
+func TestApiaryDiagnoseSendsTheRunIDAlone(t *testing.T) {
 	s, _ := diagnoseKeyed(t)
-	out, errOut, err := runApart(t, "apiary", "run", "diagnose", diagnosticsRunNumber)
+	if _, _, err := runApart(t, "apiary", "run", "diagnose", "18342"); err == nil {
+		t.Fatal("diagnose of a run number succeeded")
+	}
+	out, errOut, err := runApart(t, "apiary", "run", "diagnose", diagnosticsRunID)
 	if err != nil {
 		t.Fatalf("diagnose: %v\n%s", err, errOut)
 	}
-	if want := "/v1/runs/" + diagnosticsRunNumber + "/diagnostics"; s.path != want {
+	if want := "/v1/runs/" + diagnosticsRunID + "/diagnostics"; s.path != want {
 		t.Errorf("path %q, want %q", s.path, want)
 	}
-	if out != string(s.body) || s.requests != 1 {
-		t.Errorf("%d verified requests, stdout:\n%s", s.requests, out)
+	if out != string(s.body) || s.requests != 1 || s.received != 1 {
+		t.Errorf("%d requests, %d verified, stdout:\n%s", s.received, s.requests, out)
 	}
 }
 
 func TestApiaryDiagnoseNotFound(t *testing.T) {
-	// The largest number Qory Apiary stores is sent, and is no run of the server.
-	for _, run := range []string{"rn_1123456789abcdef", "18343", "9223372036854775807"} {
-		s, _ := diagnoseKeyed(t)
-		out, _, err := runApart(t, "apiary", "run", "diagnose", run)
-		if err == nil {
-			t.Fatalf("diagnose of a run the server does not have, %s, succeeded", run)
-		}
-		if want := "Check the run number or id: " + hostOf(t) + " has no run " + run + " (not_found)."; firstLine(err.Error()) != want {
-			t.Errorf("first line %q, want %q", firstLine(err.Error()), want)
-		}
-		if out != "" || cmd.ExitCode(err) != 1 {
-			t.Errorf("%s: stdout %q, exit %d", run, out, cmd.ExitCode(err))
-		}
-		if want := "/v1/runs/" + run + "/diagnostics"; s.received != 1 || s.path != want {
-			t.Errorf("%s: %d requests, path %q, want one to %q", run, s.received, s.path, want)
-		}
+	const run = "rn_1123456789abcdef"
+	s, _ := diagnoseKeyed(t)
+	out, _, err := runApart(t, "apiary", "run", "diagnose", run)
+	if err == nil {
+		t.Fatalf("diagnose of a run the server does not have, %s, succeeded", run)
+	}
+	if want := "Check the run id: " + hostOf(t) + " has no run " + run + " (not_found)."; firstLine(err.Error()) != want {
+		t.Errorf("first line %q, want %q", firstLine(err.Error()), want)
+	}
+	if out != "" || cmd.ExitCode(err) != 1 {
+		t.Errorf("%s: stdout %q, exit %d", run, out, cmd.ExitCode(err))
+	}
+	if want := "/v1/runs/" + run + "/diagnostics"; s.received != 1 || s.path != want {
+		t.Errorf("%s: %d requests, path %q, want one to %q", run, s.received, s.path, want)
 	}
 }
 
@@ -298,12 +298,36 @@ func TestApiaryDiagnoseStopsAtADocumentOverTheLimit(t *testing.T) {
 	wantIn(t, firstLine(err.Error()), "is not signed with the pinned server key")
 }
 
-// TestApiaryDiagnoseStopsAtABadRun is a value that is neither a run id nor a run number
-// in the form Qory Apiary reads: qory stops before any request.
+// TestApiaryDiagnoseStopsAtARunNumber is a run number, the smallest and the largest that
+// Qory Apiary stores among them: qory stops before any request, with the fix and the cause
+// on a first line under 100 characters and the value after it.
+func TestApiaryDiagnoseStopsAtARunNumber(t *testing.T) {
+	s, _ := diagnoseKeyed(t)
+	for _, run := range []string{"1", "18342", "9223372036854775807"} {
+		out, _, err := runApart(t, "apiary", "run", "diagnose", run)
+		if err == nil {
+			t.Fatalf("diagnose %q succeeded", run)
+		}
+		if cmd.ExitCode(err) != cmd.ExitInput || out != "" {
+			t.Errorf("diagnose %q: exit %d, stdout %q", run, cmd.ExitCode(err), out)
+		}
+		if got := firstLine(err.Error()); got != diagnosticsNotARunID || len(got) >= 100 {
+			t.Errorf("first line %q, want %q, under 100 characters", got, diagnosticsNotARunID)
+		}
+		wantIn(t, err.Error(), "\nYou passed \""+run+"\".")
+	}
+	if s.received != 0 {
+		t.Errorf("a run number reached the server %d times", s.received)
+	}
+}
+
+// TestApiaryDiagnoseStopsAtABadRun is a value that is neither a run id nor a run number:
+// qory stops before any request. A value of any length leaves the first line as it is.
 func TestApiaryDiagnoseStopsAtABadRun(t *testing.T) {
 	s, _ := diagnoseKeyed(t)
 	for _, run := range []string{
 		"rn_0123456789abcdeF", "rn_0123456789abcdei", "rn_0123", "wi_0123456789abcdef", "rn_0123456789abcdef0",
+		"RN_0123456789abcdef", " rn_0123456789abcdef", "rn_0123456789abcdef\n", strings.Repeat("x", 200),
 		"018342", "0", "9223372036854775808", "99999999999999999999", "#5", "Run 5", "-5", "+5", "5 ", "",
 		"１８３４２", "5\n",
 	} {
@@ -315,18 +339,71 @@ func TestApiaryDiagnoseStopsAtABadRun(t *testing.T) {
 		if cmd.ExitCode(err) != cmd.ExitInput || out != "" {
 			t.Errorf("diagnose %q: exit %d, stdout %q", run, cmd.ExitCode(err), out)
 		}
-		wantIn(t, firstLine(err.Error()), "Pass a run number, such as 18342, or a run id, such as rn_0123456789abcdef: ")
+		if got := firstLine(err.Error()); got != diagnosticsNotARunID {
+			t.Errorf("diagnose %q: first line %q, want %q", run, got, diagnosticsNotARunID)
+		}
 	}
 	if s.received != 0 {
 		t.Errorf("a bad run reached the server %d times", s.received)
 	}
 }
 
+// TestApiaryDiagnoseSendsEveryLetterOfARunID is a run id of the letters after f in the
+// alphabet of run ids: the id reaches the server, which has no such run.
+func TestApiaryDiagnoseSendsEveryLetterOfARunID(t *testing.T) {
+	const run = "rn_ghjkmnpqrstvwxyz"
+	s, _ := diagnoseKeyed(t)
+	_, _, err := runApart(t, "apiary", "run", "diagnose", run)
+	if err == nil {
+		t.Fatalf("diagnose of a run the server does not have, %s, succeeded", run)
+	}
+	if want := "/v1/runs/" + run + "/diagnostics"; s.received != 1 || s.path != want {
+		t.Errorf("%d requests, path %q, want one to %q: %v", s.received, s.path, want, err)
+	}
+}
+
+// TestApiaryDiagnoseStopsAtARunNumberWithoutAKey is a run number on a computer with no
+// diagnostics key: the error is about the run id, so the check runs before the key is read.
+func TestApiaryDiagnoseStopsAtARunNumberWithoutAKey(t *testing.T) {
+	emptyDir(t)
+	_, _, err := runApart(t, "apiary", "run", "diagnose", "18342")
+	if err == nil {
+		t.Fatal("diagnose of a run number succeeded")
+	}
+	if got := firstLine(err.Error()); got != diagnosticsNotARunID {
+		t.Errorf("first line %q, want %q", got, diagnosticsNotARunID)
+	}
+	if cmd.ExitCode(err) != cmd.ExitInput {
+		t.Errorf("exit %d", cmd.ExitCode(err))
+	}
+}
+
+// TestApiaryDiagnoseHidesASecretInTheValue is an access key secret passed as the run: the
+// error has a phrase in place of the value, and no output contains the secret.
+func TestApiaryDiagnoseHidesASecretInTheValue(t *testing.T) {
+	const run = "qak_AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA"
+	s, _ := diagnoseKeyed(t)
+	out, errOut, err := runApart(t, "apiary", "run", "diagnose", run)
+	if err == nil {
+		t.Fatal("diagnose of a secret succeeded")
+	}
+	if got := firstLine(err.Error()); got != diagnosticsNotARunID {
+		t.Errorf("first line %q, want %q", got, diagnosticsNotARunID)
+	}
+	wantIn(t, err.Error(), "\nYou passed (a value that contains an access key secret).")
+	if all := strings.ToLower(out + errOut + err.Error()); strings.Contains(all, "qak_") {
+		t.Errorf("the output contains the secret: %s", all)
+	}
+	if s.received != 0 {
+		t.Errorf("the secret reached the server %d times", s.received)
+	}
+}
+
 func TestApiaryDiagnoseTakesOneRun(t *testing.T) {
 	s, _ := diagnoseKeyed(t)
-	for _, args := range [][]string{{}, {diagnosticsRunNumber, diagnosticsRunID}} {
+	for _, args := range [][]string{{}, {diagnosticsRunID, diagnosticsRunID}} {
 		_, _, err := runApart(t, append([]string{"apiary", "run", "diagnose"}, args...)...)
-		if want := "Pass one run number or run id, such as 18342 or rn_0123456789abcdef: qory apiary run diagnose takes one run."; err == nil || firstLine(err.Error()) != want {
+		if want := "Pass one run id, such as rn_0123456789abcdef: qory apiary run diagnose takes one run."; err == nil || firstLine(err.Error()) != want {
 			t.Errorf("diagnose %q: %v, want %q", args, err, want)
 		}
 		if cmd.ExitCode(err) != cmd.ExitInput {

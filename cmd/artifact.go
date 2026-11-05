@@ -141,8 +141,7 @@ func newWorkItemShow() *cobra.Command {
 		Use:   "show",
 		Short: "Print the work item as JSON",
 		Long: `Print the work item as JSON: the ticket, the stage's name, the round, the stage's inputs and
-outputs with each output's check, the newest verdict and gaps, answers, and notes from
-people.
+outputs with each output's check, the newest verdict and gaps, and notes from people.
 
 In a run, qory reads the work item from Qory Apiary through the gateway. Outside a run,
 qory prints .qory/work-item.json, and exits ` + strconv.Itoa(ExitNoWorkItem) + ` when that file does not exist.
@@ -260,7 +259,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md#commands-of-a-work-it
 			}
 
 			if client == nil {
-				_, err := fmt.Fprintln(c.OutOrStdout(), "Not signed in to Qory Apiary; .qory/artifacts/ has the local versions only.")
+				_, err := fmt.Fprintln(c.OutOrStdout(), "Nothing pulled: outside a Qory Apiary run, qory uses only the local folder .qory/artifacts.")
 
 				return err
 			}
@@ -411,8 +410,9 @@ func newArtifactPush() *cobra.Command {
 		Short: "Upload files as one new version of an artifact",
 		Long: `Upload the files as one new version of the artifact <type>/<name>, keep a copy in the store
 under <type>/<name>/v<N>/, and print the version. - reads one file from standard input.
---name separates several artifacts of one type, such as mockups of two screens. The store
-is .qory/artifacts, or /tmp/qory-artifacts when the run's checkout is read-only.
+--name separates several artifacts of one type, such as mockups of two screens. In a run,
+the types questions and review-comments take only the name main. The store is
+.qory/artifacts, or /tmp/qory-artifacts when the run's checkout is read-only.
 
 qory exits ` + strconv.Itoa(ExitArtifactRefused) + ` with the type and the limit for a type that the workspace does not have,
 for too many files, and for files over the type's size limit. One version is at most about
@@ -459,7 +459,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md#commands-of-a-work-it
 			return sendPush(c, client, runapi.Push{Type: artifactType, Name: name, Note: note}, sources)
 		},
 	}
-	c.Flags().StringVar(&name, "name", "", "the artifact's name, for several artifacts of one type (default main)")
+	c.Flags().StringVar(&name, "name", "", "the artifact's name, for several artifacts of one type (default main; in a run, only main for questions and review-comments)")
 	c.Flags().StringVar(&note, "note", "", "a note on this version, for a person to read")
 
 	return c
@@ -656,7 +656,7 @@ func keepPush(c *cobra.Command, artifactType, name string, sources []pushSource)
 		return err
 	}
 
-	_, err = fmt.Fprintf(c.OutOrStdout(), "Kept in %s%c; not sent, because you are not signed in to Qory Apiary.\n",
+	_, err = fmt.Fprintf(c.OutOrStdout(), "Kept in %s%c; not sent: outside a Qory Apiary run, qory keeps versions only in .qory/artifacts.\n",
 		store.shown(dir), filepath.Separator)
 
 	return err

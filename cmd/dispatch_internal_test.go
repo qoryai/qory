@@ -29,7 +29,7 @@ func claudeLaunch(t *testing.T, withMCP bool) (render.Launch, string) {
 	t.Helper()
 	home := t.TempDir()
 	dir := filepath.Join(home, claude.Runtime)
-	files := []string{"settings.json", "launch/CLAUDE.md", "plugin/.claude-plugin/plugin.json"}
+	files := []string{"settings.json", "launch/AGENTS.md", "plugin/.claude-plugin/plugin.json"}
 	if withMCP {
 		files = append(files, "mcp.json")
 	}
@@ -65,7 +65,7 @@ func TestADispatchedLaunchLoadsTheHarnessAlone(t *testing.T) {
 		"--plugin-dir", dir + "/plugin",
 		"--settings", dir + "/settings.json",
 		"--mcp-config", dir + "/mcp.json",
-		"--append-system-prompt-file", dir + "/launch/CLAUDE.md",
+		"--append-system-prompt-file", dir + "/launch/AGENTS.md",
 		"--strict-mcp-config", "--setting-sources", "user",
 	}
 	if !slices.Equal(got, want) {
@@ -80,7 +80,7 @@ func TestADispatchedLaunchLoadsTheHarnessAlone(t *testing.T) {
 	want = []string{
 		"--plugin-dir", dir + "/plugin",
 		"--settings", dir + "/settings.json",
-		"--append-system-prompt-file", dir + "/launch/CLAUDE.md",
+		"--append-system-prompt-file", dir + "/launch/AGENTS.md",
 		"--mcp-config", `{"mcpServers":{}}`,
 		"--strict-mcp-config", "--setting-sources", "user",
 	}

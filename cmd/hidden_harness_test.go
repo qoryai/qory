@@ -74,7 +74,11 @@ func TestARunCodeWithAHiddenHarnessComposesNoLink(t *testing.T) {
 		t.Errorf("the home of a hidden harness has the links %v", links)
 	}
 	regularFiles(t, home, "modules/hello/GUIDE.md", "modules/world/docs/greet/SKILL.md", "modules/hello/commands/hello.md",
-		"modules/hello/skills/greet/SKILL.md", "skills/greet/SKILL.md", "claude/plugin/skills/greet/SKILL.md")
+		"modules/hello/skills/greet/SKILL.md", "skills/greet/SKILL.md", "claude/plugin/skills/greet/SKILL.md", "claude/rules/qory-harness.md")
+	rule, _ := os.ReadFile(filepath.Join(home, "claude", "rules", "qory-harness.md"))
+	if shared, _ := os.ReadFile(filepath.Join(home, "AGENTS.md")); len(rule) == 0 || string(rule) != string(shared) {
+		t.Errorf("claude/rules/qory-harness.md differs from the home's AGENTS.md:\n%s", rule)
+	}
 	guide, err := os.ReadFile(filepath.Join(home, "modules", "hello", "GUIDE.md"))
 	if err != nil {
 		t.Fatal(err)

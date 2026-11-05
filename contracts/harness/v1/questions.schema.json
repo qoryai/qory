@@ -1,0 +1,152 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://qory.dev/contracts/harness/v1/questions.schema.json",
+  "title": "The questions format, version 1",
+  "description": "A work item's questions and their answers: the file of a version of the artifact type questions, one document per work item. A run adds, withdraws or reopens questions; the control plane writes the answers. Each question's id is unique in the document, which a JSON Schema cannot check. The file is at most 1 MiB (1,048,576 bytes), the type's size limit, which a JSON Schema cannot check either. No object has a member this schema does not define.",
+  "type": "object",
+  "required": ["questions"],
+  "additionalProperties": false,
+  "properties": {
+    "questions": {
+      "description": "Every question of the work item, in the order they were asked.",
+      "type": "array",
+      "items": {"$ref": "#/$defs/question"}
+    }
+  },
+  "$defs": {
+    "question": {
+      "description": "One question. answer is present exactly when state is answered.",
+      "type": "object",
+      "required": ["id", "question", "options", "state", "asked"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {"description": "The question's id, unique in the document: 1 to 32 lower-case letters, digits and hyphens, such as q1.", "$ref": "#/$defs/id"},
+        "question": {"description": "The question, plain text on one line: one sentence, 1 to 500 characters.", "$ref": "#/$defs/line", "minLength": 1, "maxLength": 500},
+        "context": {"description": "What a person needs to know to answer, as Markdown: absent when the question needs none.", "$ref": "#/$defs/long_text"},
+        "options": {
+          "description": "The answers a member can pick, 0 to 4, and at most one with recommended set to true: empty when the run lists no option and the member writes the answer.",
+          "type": "array",
+          "maxItems": 4,
+          "items": {"$ref": "#/$defs/option"},
+          "contains": {"required": ["recommended"], "properties": {"recommended": {"const": true}}},
+          "minContains": 0,
+          "maxContains": 1
+        },
+        "state": {"description": "open until a member answers the question, answered once a member answered it, withdrawn once a run withdrew it.", "enum": ["open", "answered", "withdrawn"]},
+        "asked": {"description": "The run that added the question, and when.", "$ref": "#/$defs/run_at"},
+        "answer": {"description": "The member's answer, which the control plane writes.", "$ref": "#/$defs/answer"},
+        "follows": {
+          "description": "The ids of earlier questions in the document that this question follows from: absent or empty when it follows from none.",
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/id"}
+        },
+        "history": {
+          "description": "The earlier answers of the question, oldest first: each one ended when a run reopened the question.",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "description": "An earlier answer: the members of an answer, and reopened.",
+            "required": ["option", "by", "at", "reopened"],
+            "additionalProperties": false,
+            "properties": {
+              "option": {"$ref": "#/$defs/answer/properties/option"},
+              "note": {"$ref": "#/$defs/answer/properties/note"},
+              "by": {"$ref": "#/$defs/answer/properties/by"},
+              "at": {"$ref": "#/$defs/answer/properties/at"},
+              "reopened": {"description": "The run that reopened the question, and when.", "$ref": "#/$defs/run_at"}
+            },
+            "if": {"required": ["option"], "properties": {"option": {"type": "null"}}},
+            "then": {"required": ["note"]}
+          }
+        }
+      },
+      "if": {"required": ["state"], "properties": {"state": {"const": "answered"}}},
+      "then": {"required": ["answer"]},
+      "else": {"not": {"required": ["answer"]}}
+    },
+    "option": {
+      "description": "An answer a member can pick.",
+      "type": "object",
+      "required": ["title", "explanation"],
+      "additionalProperties": false,
+      "properties": {
+        "title": {"description": "The option's title.", "$ref": "#/$defs/option_title"},
+        "explanation": {"description": "A short explanation of the option, plain text.", "$ref": "#/$defs/short_text"},
+        "recommended": {"description": "true when the run recommends this option: absent or false otherwise.", "type": "boolean"}
+      }
+    },
+    "answer": {
+      "description": "A member's answer to a question: an option the member chose, or null and a note. note is required when option is null.",
+      "type": "object",
+      "required": ["option", "by", "at"],
+      "additionalProperties": false,
+      "properties": {
+        "option": {"description": "The title of the option the member chose, or null when the member wrote the answer in note. The title is one of the question's option titles, which a JSON Schema cannot check.", "anyOf": [{"$ref": "#/$defs/option_title"}, {"type": "null"}]},
+        "note": {"description": "Added detail on the chosen option, or the member's answer when option is null, as Markdown.", "$ref": "#/$defs/short_text"},
+        "by": {"description": "The member who answered.", "$ref": "#/$defs/member"},
+        "at": {"description": "When the member answered.", "$ref": "#/$defs/time"}
+      },
+      "if": {"required": ["option"], "properties": {"option": {"type": "null"}}},
+      "then": {"required": ["note"]}
+    },
+    "option_title": {
+      "description": "An option's title, plain text on one line, 1 to 200 characters.",
+      "$ref": "#/$defs/line",
+      "minLength": 1,
+      "maxLength": 200
+    },
+    "run_at": {
+      "description": "A run and a time.",
+      "type": "object",
+      "required": ["run", "at"],
+      "additionalProperties": false,
+      "properties": {
+        "run": {"description": "The run's number, from 1.", "type": "integer", "minimum": 1},
+        "at": {"description": "When the run did it.", "$ref": "#/$defs/time"}
+      }
+    },
+    "member": {
+      "description": "A member of the control plane.",
+      "type": "object",
+      "required": ["name"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {"description": "The name the control plane shows for the member, 1 to 160 characters on one line.", "$ref": "#/$defs/line", "minLength": 1, "maxLength": 160}
+      }
+    },
+    "id": {
+      "description": "A question's id: 1 to 32 lower-case letters, digits and hyphens.",
+      "type": "string",
+      "pattern": "^[a-z0-9-]{1,32}$"
+    },
+    "time": {
+      "description": "RFC 3339 in UTC with whole seconds, ending Z: months 01 to 12, days 01 to 31, hours 00 to 23, minutes and seconds 00 to 59, so never a leap second. The pattern does not check the day against the month, such as February 30: format date-time does, in a validator that asserts formats.",
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^[0-9]{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12][0-9]|3[01])T(?:[01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]Z$"
+    },
+    "text": {
+      "description": "Text that may span lines. Tab, line feed and carriage return are its only control characters: it has none of U+0000 to U+0008, U+000B, U+000C, U+000E to U+001F, U+007F and U+0080 to U+009F. It has none of the bidirectional controls, the marks U+061C, U+200E and U+200F, the embeddings and overrides U+202A to U+202E and the isolates U+2066 to U+2069; the separators U+2028 and U+2029; and the format characters U+00AD, U+180E, U+200B, U+2060 to U+2064, U+FEFF and U+FFF9 to U+FFFB.",
+      "type": "string",
+      "pattern": "^[^\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f\u0080-\u009f\u00ad\u061c\u180e\u200b\u200e\u200f\u2028\u2029\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff\ufff9-\ufffb]*$"
+    },
+    "line": {
+      "description": "Text on one line: text as $defs text defines it, with no control character at all, so no tab, line feed or carriage return.",
+      "type": "string",
+      "pattern": "^[^\u0000-\u001f\u007f\u0080-\u009f\u00ad\u061c\u180e\u200b\u200e\u200f\u2028\u2029\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff\ufff9-\ufffb]*$"
+    },
+    "short_text": {
+      "description": "A short text, such as an option's explanation or a note: 1 to 2000 characters.",
+      "$ref": "#/$defs/text",
+      "minLength": 1,
+      "maxLength": 2000
+    },
+    "long_text": {
+      "description": "A long text, 1 to 20000 characters.",
+      "$ref": "#/$defs/text",
+      "minLength": 1,
+      "maxLength": 20000
+    }
+  }
+}

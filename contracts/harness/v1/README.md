@@ -2,7 +2,7 @@
 
 What `qory harness compose` reads and what it writes.
 
-## Five files
+## Eight files
 
 | File | Lives in | Defines |
 |---|---|---|
@@ -11,6 +11,9 @@ What `qory harness compose` reads and what it writes.
 | `process.yaml` | optional; the folder root of a module that `exports.modules` lists, which makes the module a factory | a process template: its name, summary and description, the workspace type, the exported stack its workflows run on, its `qory.process/v1` process, and optionally the artifact types its workspaces use. Every command that reads the configuration checks it; the compose does not read it (§Exports) |
 | `qory.yaml`, or `harness.yaml` | the repository root, committed; the user's configuration directory and the checkout's ancestor directories, for the machine | the repository's document and the machine's: under `harness`, this repository's stack, its target and modules, or the stack it extends, the target it composes it for and the modules it appends, and the runtime and model this machine composes for; under `worktree`, what a worktree of the repository needs and where the machine puts one; under `exports`, the stacks and modules this repository publishes for others, by name (§Exports); `git` and `env` (§The configuration) |
 | a branch document | the file of a version of a structured artifact type `branch` | a work item's branch and the commit in each repository (§The branch format). No compose reads it |
+| a questions document | the file of a version of the artifact type `questions` | a work item's questions and their answers (§The questions format). No compose reads it |
+| a review comments document | the file of a version of the artifact type `review-comments` | a work item's review comments on its artifact versions and the replies to them (§The review comments format). No compose reads it |
+| a proposal sources document | the file `sources.json` of a version of the artifact type `proposal` | every source a run used to write the proposal, with the reason for each (§The proposal sources format). No compose reads it |
 
 Every module has a `qory-module.yaml`; it defines the module's name, and a directory
 without one is not a module. `qory.yaml` is optional: every setting has a default. It has
@@ -192,7 +195,7 @@ schema is [config.schema.json](config.schema.json).
 | `modules[].link` | no | a name at the checkout root, one path segment, linked to the module's directory in the composed tree, so a permission rule or a script refers to the module's files by a checkout-relative path: `harness/scripts/check.sh`. A hard link (§Rendering), each name used once across the modules |
 | `bind` | no | the entry that fills each role a document references (§References), by kind and then by role, to the name of one entry of that kind: `bind: {agents: {coder: rails-coder}}`. The kind is `agents`, `skills` or `commands`. A role's value is one name; a list is refused. A flat key, `agents/coder: rails-coder`, is refused with `Write bind as bind.agents.coder: rails-coder in qory.yaml: bind keys are kinds, and agents/coder is a kind and a role.` A checkout's `bind` sets a role over the base's `bind` and over the modules' `provides` |
 | `extensions` | no | a map of keys the author chooses, each a value of any shape, a scalar, a list or a map of any depth; written into the report as it is and printed by `qory harness inspect`; qory reads nothing in it |
-| `workflows` | no | the settings of each workflow of the stack, by its name: a lower-case letter, then up to 63 lower-case letters, digits and hyphens. A run that Qory Apiary dispatches from a run code starts the skill or command named like its workflow (docs/run.md, §The run key from a run code). The compose fails with status 2 for each workflow that no module of the stack composes as a skill or command, after the modules' `exclude` and `only`: `add a skill or command <name> to a module of the base stack <stack>, or remove <name> from the workflows of its qory-stack.yaml: the stack declares the workflow <name>, and none of its modules ships a skill or command <name>`, or, for a stack that extends none, `add a skill or command <name> to a module of the stack in <file>, or remove <name> from its workflows: …`, where `<file>` is the `qory-stack.yaml` or the `qory.yaml` that defines the stack. For a stack that the harness document of a run from a run code defines, the line has `the workspace's harness in Qory Apiary` in place of `the stack in <file>`. A module that a checkout adds to the stack it extends does not count. The harness section of a `qory.yaml` that defines a stack lists them with the same keys and checks; a section that extends a stack takes the base's and lists none |
+| `workflows` | no | the settings of each workflow of the stack, by its name: a lower-case letter, then up to 54 lower-case letters, digits and hyphens, 55 characters at most, so `workflow-<name>` has at most 64 characters. A run that Qory Apiary dispatches from a run code starts the first of these that the runtime can start: the skill `workflow-<name>`, the command `workflow-<name>`, the skill `<name>`, the command `<name>` (docs/run.md, §The run key from a run code). A plain name works, and when a harness ships both names, the prefixed one runs. The compose fails with status 2 for each workflow that no module of the stack composes as a skill or command under either name, after the modules' `exclude` and `only`: `add a skill or command workflow-<name> to a module of the base stack <stack>, or remove <name> from the workflows of its qory-stack.yaml: the stack declares the workflow <name>, and none of its modules ships a skill or command workflow-<name> or <name>`, or, for a stack that extends none, `add a skill or command workflow-<name> to a module of the stack in <file>, or remove <name> from its workflows: …`, where `<file>` is the `qory-stack.yaml` or the `qory.yaml` that defines the stack. For a stack that the harness document of a run from a run code defines, the line has `the workspace's harness in Qory Apiary` in place of `the stack in <file>`. A module that a checkout adds to the stack it extends does not count, and neither does a checkout's exclude: the compose checks what the stack's modules ship before it applies that exclude. The harness section of a `qory.yaml` that defines a stack lists them with the same keys and checks; a section that extends a stack takes the base's and lists none |
 | `workflows.<name>.time_limit` | no | how long a dispatched run of the workflow may run, counted from the run's open, as a Go duration above zero, such as `7h`, `45m` or `1h30m`; qory stops with an error on any other value: `set workflows.<name>.time_limit to a duration above zero, such as 7h or 45m: <value> is not one`. The run's `run_settings.time_limit_minutes`, when Qory Apiary sets it, applies instead, and a workflow without it runs for at most 3 hours |
 | `workflows.<name>.access` | no | the access level the workflow declares for what a dispatched run of it works on, `read` or `write`, and `read` when left out; qory stops with an error on any other value: `set workflows.<name>.access to read or write: <value> is neither`. A dispatched run from a run code sees the checkout read-only when this access is `read` or `access` in the run's documents is `read`, and on Claude Code its settings deny `Edit`, `Write` and `NotebookEdit`; such a run with no wall, with `wall.setup: inside`, or whose image chosen at the run's open has nested Docker, whichever way it was selected, stops before the agent starts (docs/run.md, §Read workflows). The run sees the checkout writable only when both are `write`, or when this access is `write` and the documents have no `access`, as documents with no target do |
 | `extending` | no | what a module of a checkout extending this stack may ship: `kinds`, `instructions`, `settings`, `files` (§Extending a stack). A base without the block cannot be extended |
@@ -215,7 +218,7 @@ checkout appends:
 - The checkout may leave entries out of a base module: its `modules` lists the base
   module by the name the base lists it under, its `name` or the `module` its source
   selects, with `exclude` and no other key, `{name: core, exclude: {skills:
-  [explore-a-ticket]}}`. The entry is no module of the composed stack: its exclude
+  [workflow-explore-a-ticket]}}`. The entry is no module of the composed stack: its exclude
   applies to the base module after the base's exclude or only block, and the report
   lists each entry it leaves out under `excludes`, by the base module's name. The
   exclude lists entries of the kinds in the base's `extending.kinds` and files under its
@@ -466,9 +469,9 @@ types: a name alone passes for any name of the right form.
 
 With no `artifact_types`, a workspace made from the template shows every standard type. A
 list, also an empty one, hides each standard type it leaves out in a new workspace, except
-`proposal`, `questions` and `verdict`, which no workspace can hide. A person can switch a
-hidden type on in the workspace. Qory Apiary refuses a template whose stage has an input
-or output that is neither in the list nor one of those three.
+`proposal`, `questions`, `review-comments` and `verdict`, which no workspace can hide. A
+person can switch a hidden type on in the workspace. A template fails Qory Apiary's check
+when a stage has an input or output that is neither in the list nor one of those four.
 
 A `json_schema` is an object that compiles as a JSON Schema. It is draft 2020-12 unless its
 `$schema` sets draft-07, the only other draft. A reference to a file or URL outside the
@@ -517,6 +520,49 @@ artifact_types:
     max_files: 1
     json_schema: {…}             # the content of branch.schema.json
 ```
+
+## The questions format
+
+A questions document records every question of a work item and its answer, one document
+per work item and at most 1 MiB. A run adds, withdraws or reopens questions with `qory
+artifact push questions`, and the control plane writes the answers. A question has 0 to
+4 options. The run sets `recommended` to `true` on the option it recommends, on at most
+one option of a question. An answer has
+`option`, the title of the option the member chose, or `null`, and `note`, added detail on
+the chosen option, or the member's answer when `option` is `null`. `note` is optional when
+the member chose an option and required when `option` is `null`. This is version 1 of
+the format ([questions.schema.json](questions.schema.json)).
+
+## The review comments format
+
+A review comments document records the members' review comments on a work item's artifact
+versions, such as a proposal, and the replies to them, one document per work item and at
+most 1 MiB. The control plane writes the members' review comments and replies. A version
+that a run pushes only adds the run's reply to any of the open review comments, at most
+one reply to each, and closes each review comment it adds a reply to: it changes no
+member's text, drops no id and adds no review comment. A closed review comment has at
+least one reply by a run. A run's reply has an `outcome`:
+
+| `outcome` | Meaning |
+|---|---|
+| `changed` | the run changed the artifact for the review comment |
+| `answered` | the review comment is a question, and the reply contains the answer |
+| `declined` | the review comment is a request for a change that the run did not make, and the reply contains the reason |
+| `asked` | the run could not settle the review comment and added a question for a person to the `questions` artifact; the reply's `question` is the id of that question in the newest `questions` version, so the run pushes the questions before the review comments |
+
+A member's reply has no `outcome` and no `question`. This is version 1 of the format
+([review-comments.schema.json](review-comments.schema.json)).
+
+## The proposal sources format
+
+A proposal sources document is the file `sources.json` of a version of the artifact type
+`proposal`, beside `proposal.md`, and at most 1 MiB. It records every source the run used
+to write the proposal, with the reason for each, for the agent of the next stage. A source
+is anything the run read: a web page, a ticket, a record in another system, a document or
+a file in a repository. Each source has a `kind` from an open list, such as `page` or
+`record`, a `ref` in the form that its kind needs, and a `why`; `system`, `container` and
+`locator` are optional. This is version 1 of the format
+([proposal-sources.schema.json](proposal-sources.schema.json)).
 
 ## The module manifest
 
@@ -598,7 +644,7 @@ A module's tree contains these entry kinds:
 
 ```
 AGENTS.md                        merged; the instruction section, read by every runtime
-skills/<name>/SKILL.md           atomic; the Agent Skills layout, read by every runtime
+skills/<name>/SKILL.md           atomic; the Agent Skills layout, read by every runtime; may sit in folders that group skills, skills/<group>/<name>/SKILL.md
 agents/<name>.md                 atomic; frontmatter name, description, and the keys some runtimes read (model, tools, mode); body = system prompt
 commands/<name>.md               atomic; frontmatter description; body = prompt, $ARGUMENTS for the arguments
 output-styles/<name>.md          atomic; Claude Code only
@@ -611,6 +657,39 @@ process.yaml                     a factory's process template, checked when expo
 ```
 
 `model` may be a tier, `${qory:light}`, `${qory:fast}` or `${qory:thinking}`, which the compose replaces with the model id the tier maps to (§ The configuration). A tier with no map leaves the agent without a model, so it runs on the main model, and the compose prints a row.
+
+Below `skills`, a folder with `SKILL.md` is a skill, and everything below it is that skill's
+files, a nested `SKILL.md` included. A real folder with no `SKILL.md` and with a folder below
+it is a group of skills, at any depth, read by the same rules. qory writes each skill flat for
+every runtime, at `skills/<name>` in the home and at `<name>` in each runtime's skills folder,
+so a skill's name is its last folder. A group appears in no name: `modules[].exclude`, `only`,
+`requires`, `bind`, `provides` and a reference (§References) all use `<name>`. Loose files in a
+group are skipped. A skill refers to another skill by name with `${qory:skills/<name>}`, which
+resolves to the registered name and gives no path. A relative path out of a skill's folder
+resolves differently by how qory places the skill: as a link to the source folder, or as a copy.
+
+A folder that a variant reads skills from composes when that variant is selected. These stop the
+compose with status 2, each with the full path below the module:
+
+- a folder with neither `SKILL.md` nor, apart from dot folders, a folder below it: `add SKILL.md
+  to skills/review: skills/review has no SKILL.md and no skill below it`
+- a group with no skill anywhere below it, by its topmost folder: `add SKILL.md to skills/review,
+  or put a skill in a folder below it: skills/review has no SKILL.md and no skill below it`
+- a folder named after a runtime, with no `SKILL.md`: `rename skills/tools/codex, or read it
+  through a variant: a folder named after a runtime is not a group`
+- a folder that another variant reads skills from, with no `SKILL.md`: `select the variant that
+  reads skills/modern, or change that variant's skills: a folder that a variant reads skills from
+  is not a group`
+- a link to a folder with no `SKILL.md`: `remove the link skills/g/docs, or point it at a skill:
+  it leads to a folder with no SKILL.md`
+- a link that leads nowhere: `remove the link skills/g/gone, or point it at a path that exists:
+  it leads nowhere`
+- two skills of one module with one name: `rename skills/a/review or skills/b/review: each skill
+  goes to skills/<name>, and both are the skill review`
+- two skills of one module whose names differ only in case: `rename skills/a/Review or
+  skills/b/review: each skill goes to skills/<name>, and these two names differ only in case`
+
+The same name in two modules is a collision, status 3, whose `exclude` lists `<name>`.
 
 `AGENTS.md` and skills are read by every runtime. Agents and commands are written in each
 runtime's format from the one file above; a runtime without the concept skips the kind and
@@ -658,7 +737,8 @@ the kind `agents`, `skills` or `commands`, the name one path segment:
 ```
 
 The compose reads a reference in an agent, a command, an output style, `AGENTS.md`, and
-every `.md` file under a skill's directory at any depth. Anything else between `${qory:`
+every `.md` file under a skill's directory at any depth. A reference to a skill in a group
+is `${qory:skills/<name>}`, with its last folder alone. Anything else between `${qory:`
 and `}` fails the compose, with the file and the reference in the message. Prose that
 mentions an entry in passing stays prose; the marker identifies the strings that are
 dispatched. The reference
@@ -847,10 +927,12 @@ symlink. A link to a directory, such as `.claude`, is a real directory in the ch
 containing one symlink per entry of the tree's directory, `.claude/skills` and
 `.claude/settings.json` alike, so the checkout's files there stay: Claude Code's
 `.claude/settings.local.json` survives every compose, and a repository may keep its
-agents under `.github/agents` beside the linked ones. A directory a module's files make in
-the tree, such as `.claude/rules`, is one such symlink, like `.claude/skills`: a repository
-that keeps its rules there moves them into a module, under `extends` into a module it
-appends, with `claude/rules/` in the base's `files` list. A compose also removes what a
+agents under `.github/agents` beside the linked ones. `.claude/rules` is a second
+directory link of this kind, so the rules a repository keeps there stay beside
+`qory-harness.md` and the rules the modules ship. Any other directory a module's files make
+in the tree is one such symlink, like `.claude/skills`: a repository that keeps files there
+moves them into a module, under `extends` into a module it appends, with that directory in
+the base's `files` list. A compose also removes what a
 previous one linked and this one does not. `qory harness remove --runtime <name>` takes one
 runtime's links and leaves a link another composed runtime shares, such as `.agents/skills`.
 A link is written, pruned or removed only where the checkout is: a directory on the way
@@ -874,6 +956,7 @@ without a report, so a `.qory` deleted by hand leaves no link behind.
 
 The links listed below are the full set; a link to a file the compose did not produce is
 left out, `AGENTS.md`, `AGENTS.override.md` and `GEMINI.md` without instructions,
+`.claude/rules` without instructions and without a module's `files/claude/rules/` entry,
 `.mcp.json` without a server or a `settings/claude/mcp.json` fragment, `opencode.json`
 without a model, a server or a fragment.
 
@@ -891,7 +974,7 @@ so the hint is not lost.
 
 | `target.runtime` | Program | Links in the checkout | Model written to | MCP servers written to | A fragment's variables, set in the launch | Files land in | Kinds with no place |
 |---|---|---|---|---|---|---|---|
-| `claude` | Claude Code | `.claude`, `.mcp.json` | `.claude/settings.json` `model` | `.mcp.json` `mcpServers` | `settings/claude/settings.json` `env` | `.claude/<path>` | none |
+| `claude` | Claude Code | `.claude`, `.claude/rules`, `.mcp.json` | `.claude/settings.json` `model` | `.mcp.json` `mcpServers` | `settings/claude/settings.json` `env` | `.claude/<path>` | none |
 | `codex` | Codex CLI | `.codex`, `.agents/skills`, `AGENTS.override.md` | `.codex/config.toml` `model` | `.codex/config.toml` `mcp_servers` | `settings/codex/config.toml` `shell_environment_policy.set` | `.codex/<path>` | commands, output-styles |
 | `gemini` | Gemini CLI | `.gemini`, `GEMINI.md` | `.gemini/settings.json` `model.name` | `.gemini/settings.json` `mcpServers` | none | `.gemini/<path>` | output-styles |
 | `opencode` | OpenCode | `.opencode`, `.agents/skills`, `opencode.json`, `AGENTS.md` | `opencode.json` `model` | `opencode.json` `mcp`, in OpenCode's shape | none | `.opencode/<path>` | output-styles |
@@ -915,7 +998,7 @@ segment. The refusal lists the module, the entry and the reason, with status 2:
 
 | `target.runtime` | qory writes | The program reads as settings | A kind is linked at | Runs without the agent |
 |---|---|---|---|---|
-| `claude` | `CLAUDE.md`, `settings.json`, `mcp.json`, `plugin`, `launch` | `settings.local.json` | `skills`, `agents`, `commands`, `hooks`, `output-styles` | |
+| `claude` | `rules/qory-harness.md`, `settings.json`, `mcp.json`, `plugin`, `launch`; `rules` as a file, since qory links that directory one file at a time | `settings.local.json` | `skills`, `agents`, `commands`, `hooks`, `output-styles` | |
 | `codex` | `config.toml`, `AGENTS.md` | | `agents`, `skills` | |
 | `gemini` | `settings.json` | | `skills`, `hooks`, `agents`, `commands` | |
 | `opencode` | `opencode.json` | | `commands`, `hooks`, `agents`, `skills` | |
@@ -925,17 +1008,23 @@ segment. The refusal lists the module, the entry and the reason, with status 2:
 | `goose` | | | `agents` | |
 | `any` | | | | |
 
+`claude` also reserves `CLAUDE.md` and `AGENTS.md`. qory does not write them under
+`.claude`, and a module ships its instructions as `AGENTS.md` at the module root.
+
 Per runtime, the files written into its directory:
 
 - **claude**: links for every kind, `settings.json` with the model and without `env`,
-  whose variables are the launch's, `mcp.json` with the servers, linked as `.mcp.json` at the checkout root, and the
-  instructions written in full as `CLAUDE.md`. They are not imported from `AGENTS.md`,
-  because Claude Code resolves a link to its real path and prompts about an import found
-  through one on every start. `plugin/` is the launch spec, a plugin in Claude Code's
-  layout, and `launch/CLAUDE.md` the instructions a launch reads, with the plugin's names
-  and the names the session registers after the modules' text (§Launching); neither is
-  linked into the checkout, whose `.claude/CLAUDE.md` and `.claude/agents` register the
-  bare names.
+  whose variables are the launch's, `mcp.json` with the servers, linked as `.mcp.json` at the checkout root, and
+  `rules/qory-harness.md`, a relative symlink to the tree's `AGENTS.md`, or a copy of it in
+  the tree of a hidden harness, linked as `.claude/rules/qory-harness.md`. qory writes no `CLAUDE.md`. Claude Code loads a rule
+  without `paths` frontmatter at launch, beside a repository's `CLAUDE.md`, and a rule
+  does not hide a repository's `AGENTS.md`, as a `.claude/CLAUDE.md` does. The rule is a
+  link with no `@AGENTS.md` import, because Claude Code resolves a link to its real path
+  and prompts about an import found through one on every start. `plugin/` is the launch
+  spec, a plugin in Claude Code's layout, and `launch/AGENTS.md` the instructions a launch
+  reads, with the plugin's names and the names the session registers after the modules'
+  text (§Launching); neither is linked into the checkout, whose
+  `.claude/rules/qory-harness.md` and `.claude/agents` register the bare names.
 - **codex**: `config.toml` with the model, the servers as `[mcp_servers.<name>]` tables,
   and any other `settings/codex/` file, without `shell_environment_policy.set`, whose
   variables are the launch's, one `agents/<name>.toml` per agent with the body as
@@ -1043,7 +1132,7 @@ reports it with status 2: `goose` and `any`.
 
 | `target.runtime` | Template | Rendered for it under the runtime's directory | Reaches the session from outside | Read from the checkout alone |
 |---|---|---|---|---|
-| `claude` | `claude --plugin-dir ${dir}/plugin --settings ${dir}/settings.json --mcp-config ${dir}/mcp.json --append-system-prompt-file ${dir}/launch/CLAUDE.md --setting-sources user` | `plugin/`, a plugin in Claude Code's layout: the skills and commands linked, or written where a document contains a reference, the agents copied, since Claude Code passes over a link in a plugin's `agents/` where it follows one everywhere else, the output styles under `output-styles/` with the manifest's `outputStyles` pointing there, `.claude-plugin/plugin.json` setting its name to `harness`, so a skill is `/harness:<name>` and an agent `harness:<name>`, and every reference in the plugin resolves to that name; `launch/CLAUDE.md`, the instructions with their references resolved the same way and, after them, the names the session registers, per kind, with each role | everything: the plugin, the permissions, hooks and model in `settings.json`, the environment the line sets, the servers, the instructions appended to the system prompt; `--setting-sources user` keeps every `.claude` of the checkout and of the directories above it out | nothing |
+| `claude` | `claude --plugin-dir ${dir}/plugin --settings ${dir}/settings.json --mcp-config ${dir}/mcp.json --append-system-prompt-file ${dir}/launch/AGENTS.md --setting-sources user` | `plugin/`, a plugin in Claude Code's layout: the skills and commands linked, or written where a document contains a reference, the agents copied, since Claude Code passes over a link in a plugin's `agents/` where it follows one everywhere else, the output styles under `output-styles/` with the manifest's `outputStyles` pointing there, `.claude-plugin/plugin.json` setting its name to `harness`, so a skill is `/harness:<name>` and an agent `harness:<name>`, and every reference in the plugin resolves to that name; `launch/AGENTS.md`, the instructions with their references resolved the same way and, after them, the names the session registers, per kind, with each role | everything: the plugin, the permissions, hooks and model in `settings.json`, the environment the line sets, the servers, the instructions appended to the system prompt; `--setting-sources user` keeps every `.claude` of the checkout and of the directories above it out | nothing |
 | `cursor` | `cursor-agent --plugin-dir ${dir}/plugin` | `plugin/`, the same layout under `.cursor-plugin/plugin.json`, with the agents in Cursor's shape, a copy of `hooks.json` as `hooks/hooks.json` and of `mcp.json` as `.mcp.json`, since the CLI takes no settings file | the skills, agents, hooks and servers | the instructions, `AGENTS.md` |
 | `copilot` | `copilot --add-dir ${dir}/workspace --additional-mcp-config @${dir}/mcp.json` | `workspace/.github/skills` linked and `workspace/.github/agents` written, which `--add-dir` loads as trusted configuration, and `mcp.json` with the servers under `mcpServers`, so the MCP kind has a place in copilot | the skills, agents and servers | the hooks and the instructions |
 | `codex` | `env CODEX_HOME=${dir} codex` | `skills/` linked and the instructions as `AGENTS.md`, ending with the names the session registers, which a Codex home registers as the modules wrote them, beside `config.toml` and the agents, so the directory is a Codex home | everything | nothing; Codex keeps its login in the same home, `auth.json`, so a launcher authenticates through `OPENAI_API_KEY` or puts `auth.json` there |

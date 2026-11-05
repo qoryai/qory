@@ -48,6 +48,24 @@ release may change what an existing document does, and states it under Upgrading
 - Version 1 of the branch format, `contracts/harness/v1/branch.schema.json`: a work
   item's branch, `qory/<work item id>`, and the commit in each repository. A software
   factory can use it as the `json_schema` of a custom artifact type `branch`.
+- Version 1 of the questions format, `contracts/harness/v1/questions.schema.json`: every
+  question of a work item and its answer, the file of the artifact type `questions`. A run
+  adds, withdraws or reopens questions with `qory artifact push`, and the control plane
+  writes the answers. At most one option of a question has `recommended` set to `true`. See
+  The questions format in `contracts/harness/v1/README.md`.
+- Version 1 of the review comments format,
+  `contracts/harness/v1/review-comments.schema.json`: the members' review comments on a
+  work item's artifact versions and the replies to them, the file of the artifact type
+  `review-comments`. The control plane writes the members' review comments and replies.
+  A version that a run pushes only adds the run's reply to any of the open review
+  comments, at most one reply to each, and closes each review comment it adds a reply to.
+  See The review comments format in `contracts/harness/v1/README.md`.
+- Version 1 of the proposal sources format,
+  `contracts/harness/v1/proposal-sources.schema.json`: the file `sources.json` of a
+  version of the artifact type `proposal`, with every source the run used to write the
+  proposal and the reason for each. A source has an open `kind`, such as `page`, `record`
+  or `file`, and a `ref` in the form that its kind needs. See The proposal sources format
+  in `contracts/harness/v1/README.md`.
 - `-f` on `qory harness compose`, `qory run` and `qory worktree add` takes a stack by
   reference, `<https URL>#<ref>:<folder>`: qory fetches the folder as it fetches a git
   module and composes its `qory-stack.yaml`. `examples/hello` has one, so a run takes it
@@ -58,8 +76,8 @@ release may change what an existing document does, and states it under Upgrading
   the gateway for the run's run key and documents, and runs with that key, which stays in
   memory. The documents set the harness, the workflow, the runtime, the model settings
   and the inputs: qory composes the documents' harness, or the checkout's `qory.yaml` or
-  `harness.yaml` when they contain none, and starts the skill or command named like the
-  workflow, with the path of the inputs.
+  `harness.yaml` when they contain none, and starts the workflow's skill or command, with
+  the path of the inputs.
 - A run from a run code starts its workflow on each runtime with a headless start:
   `claude`, `codex`, `gemini`, `opencode` and `cursor`; `qory image check` checks each
   runtime of Forager's `runtimes.json`.
@@ -183,8 +201,7 @@ release may change what an existing document does, and states it under Upgrading
   the descriptor close-on-exec. Linux and macOS only. See The run key from a run code in
   `docs/run.md`.
 - Print a run's diagnostics document from Qory Apiary with `qory apiary run diagnose
-  <run number or id>`: the run's number, such as `18342` from "Run 18342" on the run's
-  page in Qory Apiary, or its `rn_` id. qory signs the request with the diagnostics key
+  <run id>`, with the run's `rn_` id. qory signs the request with the diagnostics key
   in `~/.config/qory/apiary/<host>/` and prints the document to stdout only after its
   signature verifies under the server key pinned there. Pass `--server <url>` when keys
   for several servers are on this computer. See `docs/apiary.md`.
@@ -219,10 +236,24 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Changed
 
+- A run that lists repositories starts in an empty folder as well: qory runs `git init`
+  there, then fetches. A folder that is not empty and is not a git working tree still
+  stops the run.
+- A module may group its skills in folders, at any depth, and qory writes each skill flat
+  for every runtime, at `skills/<name>`. A skill's name is its last folder. Two skills in
+  one module whose names are equal or differ only in case stop the compose. See
+  `docs/harness.md`.
+- A skill or command of a workflow may be named `workflow-<name>`, while the stack and
+  `process.yaml` keep `<name>`. A run from a run code starts the first of these that the
+  runtime can start: the skill `workflow-<name>`, the command `workflow-<name>`, the skill
+  `<name>`, the command `<name>`. A plain name works, and when a harness ships both names,
+  the prefixed one runs.
+- A workflow's name in a stack has at most 55 characters, so `workflow-<name>` has at most
+  64 characters. A longer name stops the stack's check.
 - The compose fails, exit 2, for each entry of a stack's `workflows` that no module of
-  the stack composes as a skill or command.
+  the stack composes as a skill or command under either name.
 - A run from a run code whose composed harness has no skill or command of the
-  workflow's name closes `failed` with the reason `workflow_not_in_harness`, not
+  workflow under either name closes `failed` with the reason `workflow_not_in_harness`, not
   `no_session`, and its line shows the target's path after the checkout's harness.
 - `bind` nests roles by kind: `bind: {agents: {coder: rails-coder}}`. A flat key stops
   the compose with `Write bind as bind.agents.coder: rails-coder in qory.yaml: bind keys
@@ -232,6 +263,15 @@ release may change what an existing document does, and states it under Upgrading
   and the stack does not bind`. When a module provides the role with an entry that an
   `exclude` or an `only` left out, it ends with `which module web provides as agent
   core-developer, which module core leaves out`, one line per such module.
+- For Claude Code, the checkout gets `.claude/rules/qory-harness.md`, a link to the
+  home's `AGENTS.md`, in place of `.claude/CLAUDE.md`. qory writes no file named
+  `CLAUDE.md`. A repository's `AGENTS.md` now loads in a session of Claude Code
+  2.1.277 or later when the repository has no `CLAUDE.md`. Rules the repository keeps
+  in `.claude/rules` stay beside qory's. The claude launch line appends
+  `${dir}/launch/AGENTS.md` in place of `${dir}/launch/CLAUDE.md`. A module's
+  `files/claude/CLAUDE.md`, `files/claude/AGENTS.md` or
+  `files/claude/rules/qory-harness.md`, or a file at `files/claude/rules`, fails the
+  compose.
 - The `agent` image contains Claude Code 2.1.316, up from 2.1.273.
 - Claude Code runs with `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` and
   `CLAUDE_CODE_DISABLE_OFFICIAL_MARKETPLACE_AUTOINSTALL=1` in every run,

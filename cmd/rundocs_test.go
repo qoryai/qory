@@ -365,7 +365,7 @@ func TestARunCodeWhoseHarnessHasNoWorkflowStops(t *testing.T) {
 	if want := []session.Outcome{{State: "failed", Reason: "workflow_not_in_harness", ExitCode: -1}}; !slices.Equal(r.closes, want) {
 		t.Errorf("the run closed with %v, want %v", r.closes, want)
 	}
-	wants(t, r.out+r.err.Error(), "add a skill or command deploy to the workspace's harness, or set another workflow in Qory Apiary: the composed harness has no skill or command deploy (workflow_not_in_harness); the code is used")
+	wants(t, r.out+r.err.Error(), "add a skill workflow-deploy to the workspace's harness, or set another workflow in Qory Apiary: the composed harness has no skill or command workflow-deploy or deploy (workflow_not_in_harness); the code is used")
 }
 
 // TestAGatewayTakesTheCloseOfARunCodeWhoseHarnessHasNoWorkflow is the run of
@@ -442,7 +442,7 @@ func TestARunCodeDescriptorIsClosedBeforeTheRunStartsAProgram(t *testing.T) {
 			t.Fatal(err)
 		}
 		bin := tempDir(t)
-		writeFile(t, filepath.Join(bin, "git"), "#!/bin/sh\nif cat /dev/fd/"+strconv.Itoa(n)+" >/dev/null 2>&1; then echo open; else echo closed; fi >> "+marks+"\nexec "+git+" \"$@\"\n")
+		writeFile(t, filepath.Join(bin, "git"), "#!/bin/sh\nif cat /dev/fd/"+strconv.Itoa(n)+" >/dev/null 2>&1; then echo open; else echo closed; fi >> "+marks+"\nexec "+shellQuote(git)+" \"$@\"\n")
 		if err := os.Chmod(filepath.Join(bin, "git"), 0o755); err != nil {
 			t.Fatal(err)
 		}
@@ -460,4 +460,23 @@ func TestARunCodeDescriptorIsClosedBeforeTheRunStartsAProgram(t *testing.T) {
 		syscall.Close(fd)
 		t.Errorf("git found the run code's descriptor %d open: %q", fd, got)
 	}
+}
+
+// TestARunCodeStartsTheWorkflowsPrefixedSkill is a whole run from a run code whose harness
+// ships the skill workflow-deploy for the workflow deploy: the run starts that skill, and
+// the start line has the workflow's name without the prefix. The stack's settings of
+// the workflow are under deploy, and access write there lets the run start with no wall.
+func TestARunCodeStartsTheWorkflowsPrefixedSkill(t *testing.T) {
+	declares := func(s string) string { return s + "workflows:\n  deploy:\n    access: write\n" }
+	r := runFromCodeLinks(t, nil, nil, declares, func(d map[string]any) { d["workflow"] = "deploy" }, map[string]string{
+		"examples/hello/modules/hello/skills/workflow-deploy/SKILL.md": "---\nname: workflow-deploy\ndescription: Deploys.\n---\nDeploy.\n",
+	}, nil)
+	if !r.joined {
+		t.Fatalf("%v, want a join\n%s", r.err, r.out)
+	}
+	if prompt := strings.Join(r.spec.Args, " "); !strings.Contains(prompt, "/harness:workflow-deploy ") {
+		t.Errorf("the start has %q, want the prefixed skill", prompt)
+	}
+	wants(t, r.out, "starts the workflow deploy of ")
+	lacks(t, r.out, "the workflow workflow-deploy")
 }

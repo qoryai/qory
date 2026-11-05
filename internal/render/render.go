@@ -83,7 +83,7 @@ func (e *ForeignPathError) Error() string {
 // Reserved is one path under a runtime's directory that a files entry may not take,
 // because the runtime writes or links something there or the program reads it as its
 // own configuration. [CheckFiles] refuses a files entry at the path or, when the path is
-// a directory, anywhere under it.
+// a directory and not Exact, anywhere under it.
 type Reserved struct {
 	// Path is the path under the runtime's directory with forward slashes, a file such as
 	// "settings.json" or a directory such as "skills". A directory reserves its whole
@@ -93,6 +93,10 @@ type Reserved struct {
 	// Why is the clause the refusal ends with, after "and": what stands at the path and
 	// where the module ships the file instead, such as "qory writes it".
 	Why string
+	// Exact reserves the path alone and not its subtree: a directory the runtime links
+	// one entry at a time, such as claude's "rules", where a module ships files below the
+	// path and not a file at it.
+	Exact bool
 }
 
 // FilesKind is the entry kind of a file a module ships as it is, at
@@ -927,7 +931,7 @@ func CheckFiles(res *compose.Result) error {
 			return fmt.Errorf("module %s ships files/%s, and %s is not a runtime qory renders; runtimes: %s", accesskey.ShownName(e.Module, false), accesskey.ShownName(e.Name, false), accesskey.ShownName(rt, false), strings.Join(Names(), ", "))
 		}
 		for _, r := range p.Reserved() {
-			if path == r.Path || strings.HasPrefix(path, r.Path+"/") {
+			if path == r.Path || !r.Exact && strings.HasPrefix(path, r.Path+"/") {
 				return fmt.Errorf("module %s ships files/%s, and %s", accesskey.ShownName(e.Module, false), accesskey.ShownName(e.Name, false), r.Why)
 			}
 		}

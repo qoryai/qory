@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -32,7 +33,7 @@ func TestHoldsTheWorkingFolderUntilTheFetchEnds(t *testing.T) {
 	flags := t.TempDir()
 	started, proceed := filepath.Join(flags, "started"), filepath.Join(flags, "proceed")
 	bin := t.TempDir()
-	write(t, filepath.Join(bin, "git"), "#!/bin/sh\nfor a; do [ \"$a\" = fetch ] && { touch '"+started+"'; i=0; while [ ! -e '"+proceed+"' ] && [ $i -lt 300 ]; do sleep 0.1; i=$((i+1)); done; break; }; done\nexec "+gitPath+" \"$@\"\n")
+	write(t, filepath.Join(bin, "git"), "#!/bin/sh\nfor a; do [ \"$a\" = fetch ] && { touch '"+started+"'; i=0; while [ ! -e '"+proceed+"' ] && [ $i -lt 300 ]; do sleep 0.1; i=$((i+1)); done; break; }; done\nexec "+shellQuote(gitPath)+" \"$@\"\n")
 	if err := os.Chmod(filepath.Join(bin, "git"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -140,5 +141,163 @@ func TestALocalCloneIsNoHardLinkStop(t *testing.T) {
 	}
 	if err := qoryFiles(dir); err != nil {
 		t.Errorf("the clone's .qory: %v", err)
+	}
+}
+
+// TestAnEmptyFolderBehindALinkStops is a working folder that is a link to a folder with no
+// entries: the run stops, and git init does not run through the link.
+func TestAnEmptyFolderBehindALinkStops(t *testing.T) {
+	needGit(t)
+	base := t.TempDir()
+	remote(t, base, "acme/shop", "main", nil)
+	target := t.TempDir()
+	link := filepath.Join(t.TempDir(), "link")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+	_, err := prepare(context.Background(), link, env("git.example.com", "acme/shop"))
+	want := "qory run: start the run in the folder that the link leads to: the working folder is a link, and qory runs git init only in a folder"
+	if err == nil || err.Error() != want {
+		t.Errorf("%v, want %s", err, want)
+	}
+	if _, err := os.Lstat(filepath.Join(target, ".git")); !os.IsNotExist(err) {
+		t.Errorf("the link's target has a .git: %v", err)
+	}
+}
+
+// TestAnEmptyFolderFetchesInAnotherLanguage is an empty folder with a stand-in git that
+// prints German for the look for a repository unless LC_ALL is C: the fetch goes on, so
+// the check of the folder runs git with LC_ALL=C. A stand-in shows it on every machine,
+// since a real git prints German only where the locale and git's messages are installed.
+func TestAnEmptyFolderFetchesInAnotherLanguage(t *testing.T) {
+	needGit(t)
+	isolatedPlaces(t)
+	gitPath, err := exec.LookPath("git")
+	if err != nil {
+		t.Fatal(err)
+	}
+	base := t.TempDir()
+	remote(t, base, "acme/shop", "main", nil)
+	bin := t.TempDir()
+	write(t, filepath.Join(bin, "git"), "#!/bin/sh\nif [ \"$LC_ALL\" != C ]; then for a; do if [ \"$a\" = --git-dir ]; then echo 'Schwerwiegend: Kein Git-Repository (oder irgendeines der Elternverzeichnisse): .git' >&2; exit 128; fi; done; fi\nexec "+shellQuote(gitPath)+" \"$@\"\n")
+	if err := os.Chmod(filepath.Join(bin, "git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("LANGUAGE", "de")
+	t.Setenv("LC_ALL", "de_DE.UTF-8")
+	dir := t.TempDir()
+	if _, err := prepare(context.Background(), dir, env("git.example.com", "acme/shop")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "README.md")); err != nil {
+		t.Errorf("acme/shop was not fetched: %v", err)
+	}
+}
+
+// TestAnEmptyFolderInUseStopsBeforeGitInit is a folder with no entries in which a walled run
+// is starting: the run stops with the line of a place in use, and the folder has no .git.
+func TestAnEmptyFolderInUseStopsBeforeGitInit(t *testing.T) {
+	needGit(t)
+	isolatedPlaces(t)
+	base := t.TempDir()
+	remote(t, base, "acme/shop", "main", nil)
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	h, err := places.Starting([]string{dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer h.Release()
+	_, err = prepare(context.Background(), dir, env("git.example.com", "acme/shop"))
+	want := "qory run: start the run in a new empty folder that no walled run uses, then run again. The check of the working folder failed: "
+	if err == nil || !strings.HasPrefix(err.Error(), want) {
+		t.Errorf("%v, want a line that starts %s", err, want)
+	}
+	if _, err := os.Lstat(filepath.Join(dir, ".git")); !os.IsNotExist(err) {
+		t.Errorf("the folder has a .git after the stop: %v", err)
+	}
+}
+
+// TestAWalledRunWaitsForGitInit is a git init that a stand-in git stops at: a walled run that
+// starts in the folder meanwhile waits until git init ends.
+func TestAWalledRunWaitsForGitInit(t *testing.T) {
+	needGit(t)
+	isolatedPlaces(t)
+	gitPath, err := exec.LookPath("git")
+	if err != nil {
+		t.Fatal(err)
+	}
+	base := t.TempDir()
+	remote(t, base, "acme/shop", "main", nil)
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	flags := t.TempDir()
+	started, proceed := filepath.Join(flags, "started"), filepath.Join(flags, "proceed")
+	bin := t.TempDir()
+	write(t, filepath.Join(bin, "git"), "#!/bin/sh\nfor a; do [ \"$a\" = init ] && { touch '"+started+"'; i=0; while [ ! -e '"+proceed+"' ] && [ $i -lt 300 ]; do sleep 0.1; i=$((i+1)); done; break; }; done\nexec "+shellQuote(gitPath)+" \"$@\"\n")
+	if err := os.Chmod(filepath.Join(bin, "git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	fetched := make(chan error, 1)
+	go func() {
+		_, err := prepare(context.Background(), dir, env("git.example.com", "acme/shop"))
+		fetched <- err
+	}()
+	for deadline := time.Now().Add(20 * time.Second); ; time.Sleep(50 * time.Millisecond) {
+		if _, err := os.Stat(started); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("git init did not start")
+		}
+	}
+	walled := make(chan *places.Hold, 1)
+	go func() {
+		h, err := places.Starting([]string{dir})
+		if err != nil {
+			t.Error(err)
+		}
+		walled <- h
+	}()
+	select {
+	case h := <-walled:
+		h.Release()
+		t.Fatal("a walled run started in the folder during git init")
+	case <-time.After(500 * time.Millisecond):
+	}
+	write(t, proceed, "")
+	select {
+	case h := <-walled:
+		h.Release()
+	case <-time.After(10 * time.Second):
+		t.Fatal("a walled run still waits after git init ended")
+	}
+	<-fetched
+}
+
+// TestAnEmptyFolderGitCannotWriteStops is a folder with no entries and no write
+// permission: the line starts with the fix and contains git's line.
+func TestAnEmptyFolderGitCannotWriteStops(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root writes to a read-only folder")
+	}
+	needGit(t)
+	base := t.TempDir()
+	remote(t, base, "acme/shop", "main", nil)
+	dir := t.TempDir()
+	if err := os.Chmod(dir, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(dir, 0o700) })
+	_, err := prepare(context.Background(), dir, env("git.example.com", "acme/shop"))
+	want := "qory run: check that this machine can read and write the working folder, then run again. The step failed: "
+	if err == nil || !strings.HasPrefix(err.Error(), want) || len(err.Error()) == len(want) {
+		t.Errorf("%v, want a line that starts %s", err, want)
 	}
 }

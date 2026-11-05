@@ -128,11 +128,11 @@ compose:
 
 When the run configuration lists repositories, `qory run` fetches them on this machine
 once the run is open, before the compose: the run's repository into the working folder,
-which is an empty git working tree, and each further one under `.qory/repositories`. Each
-fetch is at depth one, over https only, through the run's host proxy on the run's
-gateway, which adds the credential the run configuration has for the host, with git's
-hooks off and no credential helper, so no token is on this machine. qory closes the host
-proxy once the repositories are fetched. The compose then fetches the harness's git
+which is an empty folder or an empty git working tree, and each further one under
+`.qory/repositories`. Each fetch is at depth one, over https only, through the run's host
+proxy on the run's gateway, which adds the credential the run configuration has for the
+host, with git's hooks off and no credential helper, so no token is on this machine. qory
+closes the host proxy once the repositories are fetched. The compose then fetches the harness's git
 sources through the run's stack proxy, which gets none of those credentials. `qory run`
 prints one line for the repositories, with `and 1 further repository` when there are
 two, and then one line for each git source of the compose:
@@ -162,13 +162,28 @@ and for a git source that is not https, and 1 for any other failed fetch:
 - `run again: the run's stack proxy, through which qory fetches the run's harness, did
   not open: <error>`, exit 1
 
-The working folder must be an empty git working tree that git init made: before the
-fetch, qory checks its `.git`. The run stops with exit 1 before git fetches anything if:
+A starter gives the run an empty folder or an empty git working tree that git init made.
+In an empty folder, qory runs `git init` with no template. The run stops with exit 1 before
+git fetches anything if the working folder:
+
+- has any entry and no `.git`, such as a file or only `.qory`;
+- is a link to an empty folder;
+- is empty and, on the same file system, inside a git repository or below a `.git` on which
+  git fails, such as a `.git` file that leads nowhere or a bad config;
+- has a `.git` and anything else but `.qory`, with or without a commit;
+- has a `.git` that is a file or a link, or that has no `HEAD`, `objects` or `refs`;
+- is not the top of its git working tree;
+- has a repository with a commit or a remote.
+
+Before the fetch, qory also checks the working folder's `.git`. The run stops in the same way
+if:
 
 - its configuration has a key git init does not write, such as a filter,
   `remote.origin.proxy` or `http.sslVerify`;
 - `.git` has a link anywhere under it, such as a linked `objects` folder, or
   `objects/info/alternates` or `objects/info/http-alternates`;
+- `.git` has a `commondir` file or `info/grafts`;
+- `.git/config` or `.git/config.worktree` is not a regular file;
 - a file under `.git`, outside `.git/objects`, or under `.qory` has a second name, a hard
   link, so that a write to it in place would reach the file of the other name. git writes
   each object to a new file, so the hard links of `git clone --local` in `.git/objects`
@@ -176,8 +191,8 @@ fetch, qory checks its `.git`. The run stops with exit 1 before git fetches anyt
 - a walled run used the folder and its configuration changed since, or a walled run uses
   it now.
 
-Start the run in a new empty git working tree. From the check until the fetch and the
-checkout end, a walled run that starts in the working folder waits.
+Start the run in a new empty folder or a new empty git working tree. From the check until
+the fetch and the checkout end, a walled run that starts in the working folder waits.
 
 A source that breaks a rule stops the run with exit 2 before the agent starts. A stack
 given to `-f` from outside the checkout is not a file in the checkout: its paths resolve
@@ -1463,9 +1478,12 @@ the work item. Then a run of the step explore:
   0700, of a new temporary folder, which qory removes when the run ends. Behind a wall,
   `in/` is mounted read-only at the same path;
 - starts the runtime with its headless start: the arguments that run one prompt with no
-  terminal, write the session's output to stdout and exit. The prompt invokes the skill
-  or command of the workflow's name by the name the runtime registers it under, with
-  `<in>/inputs.json` after it. Each runtime's start, after its launch's arguments:
+  terminal, write the session's output to stdout and exit. The prompt invokes the
+  first of these that the runtime can start: the skill `workflow-<workflow>`, the command
+  `workflow-<workflow>`, the skill `<workflow>`, the command `<workflow>`. A plain name
+  works, and when a harness ships both names, the prefixed one runs. The prompt uses the
+  name the runtime registers the entry under, with `<in>/inputs.json` after it. Each
+  runtime's start, after its launch's arguments:
 
   | Runtime | Headless start | Invokes |
   |---|---|---|
@@ -1484,16 +1502,17 @@ run <run id> starts the workflow <workflow> of the workspace's harness on claude
 run whose documents contain a harness, or `… of the checkout's harness on claude` for one
 whose documents contain none.
 
-When the composed harness has no skill or command of the workflow's name, the run stops
+When the composed harness has no skill or command under either name, the run stops
 before the agent starts, exit 1, and qory closes the run `failed` with the reason
 `workflow_not_in_harness`, in place of `no_session`:
 
 ```
-add a skill or command <workflow> to <harness>, or set another workflow in Qory Apiary: the composed harness has no skill or command <workflow> (workflow_not_in_harness); the code is used
+add a <kind> workflow-<workflow> to <harness>, or set another workflow in Qory Apiary: the composed harness has no skill or command workflow-<workflow> or <workflow> (workflow_not_in_harness); the code is used
 ```
 
-`<harness>` is `the workspace's harness` for a run whose documents contain a harness. For
-one whose documents contain none, it is `the checkout's harness`, with the target's
+`<kind>` is `command` on `gemini` and `opencode`, and `skill` on `claude`, `codex` and
+`cursor`. `<harness>` is `the workspace's harness` for a run whose documents contain a
+harness. For one whose documents contain none, it is `the checkout's harness`, with the target's
 `path` after it when the documents have a target: `the checkout's harness in the
 repository <path>` when the target's `system` is `QORY_RUN_SYSTEM`, and `the checkout's
 harness for the target <path>` on any other system. A workflow whose skill or command
@@ -1696,11 +1715,12 @@ These stop it after the redemption, exit 1. The code is used, so each needs a ne
 - `set another runtime for the workspace in Qory Apiary, then take the work item in
   again: qory starts a run code's workflow with a runtime's headless start, and has none
   for <runtime>; the code is used`, before anything is fetched
-- `add a skill or command <workflow> to <harness>, or set another workflow in Qory
-  Apiary: the composed harness has no skill or command <workflow>
+- `add a <kind> workflow-<workflow> to <harness>, or set another workflow in Qory
+  Apiary: the composed harness has no skill or command workflow-<workflow> or <workflow>
   (workflow_not_in_harness); the code is used`, after the compose, which closes the run
   with the reason `workflow_not_in_harness`; [What the run takes from the
-  response](#what-the-run-takes-from-the-response) lists the values of `<harness>`
+  response](#what-the-run-takes-from-the-response) lists the values of `<kind>` and
+  `<harness>`
 - `run this workflow with a wall: this run of workflow <workflow> only reads the checkout,
   and a run with no wall mounts nothing read-only (read_needs_wall); the code is used`,
   after the compose, for a read run with no wall, which closes the run with the reason
@@ -1720,12 +1740,14 @@ These stop it after the redemption, exit 1. The code is used, so each needs a ne
   (read_needs_setup_removed); the code is used`, after the setup, for a read run whose
   setup container was not removed, which closes the run with the reason
   `read_needs_setup_removed`; see [Read workflows](#read-workflows)
-- `add a command <workflow> to <harness>, or set another runtime in Qory Apiary:
-  <runtime> runs no skill by its name from a headless start; the code is used`, after the
-  compose, for a workflow that is only a skill on `gemini` or `opencode`
-- `add a skill <workflow> to <harness>, or set another runtime in Qory Apiary: <runtime>
-  runs no command by its name from a headless start; the code is used`, after the
-  compose, for a workflow that is only a command on `codex` or `cursor`
+- `add a command workflow-<workflow> to <harness>, or set another runtime in Qory Apiary:
+  <runtime> runs no skill by its name from a headless start, and the composed harness has
+  no command workflow-<workflow> or <workflow>; the code is used`, after the compose, for
+  a workflow that is only a skill on `gemini` or `opencode`
+- `add a skill workflow-<workflow> to <harness>, or set another runtime in Qory Apiary:
+  <runtime> runs no command by its name from a headless start, and the composed harness
+  has no skill workflow-<workflow> or <workflow>; the code is used`, after the compose,
+  for a workflow that is only a command on `codex` or `cursor`
 - `take the work item in again in Qory Apiary: the run's host proxy, through which qory
   fetches the run's repositories, did not open: <error>; the code is used`, where a run
   without a run code prints `run again: the run's host proxy, through which qory fetches
@@ -2601,6 +2623,8 @@ works in a run and on a laptop. A wall mounts `qory` at `/qory/qory` and does no
 | `qory artifact pull [<type>] [--version <N>]` | Fetches artifacts into the store, under `<type>/<name>/v<N>/`, writes `index.json` there, and prints the store's directory. | Fetches nothing, and says so. |
 | `qory artifact push <type> <file>... [--name <name>] [--note <text>]` | Stores the files as one new version, keeps a copy in the store, and prints the version. | Keeps the files in `.qory/artifacts`, and sends nothing. |
 | `qory run verdict passed\|changes-requested\|escalate [--gaps <file>]` | Stores the verdict. Qory Apiary acts on it when the run ends. | Prints the verdict and keeps it in `.qory/artifacts/verdict/`. Nothing acts on it. |
+
+In a run, the types `questions` and `review-comments` take only the name `main`.
 
 A run with a control plane sets `QORY_RUN_API` to
 `http://run-api.qory.invalid/v1/runs/<run id>`. The commands send their requests there
@@ -3512,9 +3536,11 @@ stops after the image's fetch, exit 1, with a line that ends `(mount_mode_confli
 
 A mount folder that exists in the checkout before the fetch, outside `.git` and `.qory`,
 stops a run whose run configuration lists repositories at the fetch instead, with
-`no_session`: the fetch needs an empty working folder. `--mount <checkout>/.qory/sub`, a
-mount in `.git`, and a `wall.mounts` folder that the fetch creates pass the fetch and stop
-as in the last two cases. A writable mount at the checkout's exact path stops nothing:
+`no_session`: the fetch needs a working folder with nothing but `.git` and `.qory`. In a git
+working tree, `--mount <checkout>/.qory/sub`, a mount in `.git`, and a `wall.mounts` folder
+that the fetch creates pass the fetch and stop as in the last two cases. In a folder with no
+`.git`, any entry stops the run at the fetch, `.qory` among them, so only a `wall.mounts`
+folder that the fetch creates passes. A writable mount at the checkout's exact path stops nothing:
 qory makes it read-only.
 
 A run of a workflow from a run code where neither value is `read`, a run given a run key

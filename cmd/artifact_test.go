@@ -234,7 +234,7 @@ func TestArtifactPullOutsideARunFetchesNothing(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if out != "Not signed in to Qory Apiary; .qory/artifacts/ has the local versions only.\n" {
+	if out != "Nothing pulled: outside a Qory Apiary run, qory uses only the local folder .qory/artifacts.\n" {
 		t.Errorf("out = %q", out)
 	}
 
@@ -781,7 +781,7 @@ func TestArtifactPushOutsideARunKeepsNewVersions(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		want := fmt.Sprintf("Kept in .qory/artifacts/demo-video/main/v%d/; not sent, because you are not signed in to Qory Apiary.\n", number)
+		want := fmt.Sprintf("Kept in .qory/artifacts/demo-video/main/v%d/; not sent: outside a Qory Apiary run, qory keeps versions only in .qory/artifacts.\n", number)
 		if out != want {
 			t.Errorf("out = %q", out)
 		}

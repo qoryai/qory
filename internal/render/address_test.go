@@ -69,9 +69,10 @@ func lacks(t *testing.T, what, text string, unwanted ...string) {
 // in it say so: a skill with a reference is a written copy carrying the plugin's names,
 // a role resolved to the entry the stack binds, while a skill without one stays a link.
 // The checkout's .claude and the shared root register the bare names, and their copies
-// of the same skill carry those. The instructions follow the same split: CLAUDE.md,
-// linked into the checkout, resolves bare and ends with nothing more; launch/CLAUDE.md,
-// read at launch alone, resolves to the plugin's names and ends with the names the
+// of the same skill carry those. The instructions follow the same split: the root
+// AGENTS.md, linked into the checkout as the rule .claude/rules/qory-harness.md, resolves
+// bare and ends with nothing more, and no CLAUDE.md is written; launch/AGENTS.md, read at
+// launch alone, resolves to the plugin's names and ends with the names the
 // session registers, under the prefix the plugin's own manifest declares. A Codex home
 // registers bare names and its AGENTS.md says that.
 func TestReferencesResolveToThePathsNames(t *testing.T) {
@@ -111,22 +112,25 @@ func TestReferencesResolveToThePathsNames(t *testing.T) {
 	linked(t, filepath.Join(home, "skills", "test"))
 
 	// The instructions, twice.
-	checkout := read(t, filepath.Join(home, "claude", "CLAUDE.md"))
-	if want := "Product code goes to rails-coder; a change is checked by test.\n"; checkout != want {
-		t.Errorf("CLAUDE.md:\n%s\nwant:\n%s", checkout, want)
+	rule := filepath.Join(home, "claude", "rules", "qory-harness.md")
+	if target, err := os.Readlink(rule); err != nil || target != filepath.Join("..", "..", "AGENTS.md") {
+		t.Errorf("claude/rules/qory-harness.md links to %q (%v), want ../../AGENTS.md", target, err)
 	}
-	launch := read(t, filepath.Join(home, "claude", "launch", "CLAUDE.md"))
-	has(t, "launch/CLAUDE.md", launch,
+	checkout := read(t, rule)
+	if want := "Product code goes to rails-coder; a change is checked by test.\n"; checkout != want {
+		t.Errorf("rules/qory-harness.md:\n%s\nwant:\n%s", checkout, want)
+	}
+	if _, err := os.Lstat(filepath.Join(home, "claude", "CLAUDE.md")); err == nil {
+		t.Error("claude/CLAUDE.md is written")
+	}
+	launch := read(t, filepath.Join(home, "claude", "launch", "AGENTS.md"))
+	has(t, "launch/AGENTS.md", launch,
 		"Product code goes to "+prefix+"rails-coder; a change is checked by "+prefix+"test.\n\n# Names in this session\n",
 		"- agents: "+prefix+"rails-coder, "+prefix+"reviewer\n",
 		"- commands: "+prefix+"ship\n",
 		"- skills: "+prefix+"deploy, "+prefix+"test\n",
 		"- roles: agents/coder is "+prefix+"rails-coder\n")
-	lacks(t, "launch/CLAUDE.md", launch, "${qory:")
-	shared := read(t, filepath.Join(home, "AGENTS.md"))
-	if shared != checkout {
-		t.Errorf("the root AGENTS.md differs from the checkout's CLAUDE.md:\n%s", shared)
-	}
+	lacks(t, "launch/AGENTS.md", launch, "${qory:")
 
 	// Codex: bare names, commands skipped, and the file says the names are the modules'.
 	codex := read(t, filepath.Join(home, "codex", "AGENTS.md"))
@@ -147,7 +151,10 @@ func TestReferencesResolveToThePathsNames(t *testing.T) {
 			t.Errorf(".claude/%s is linked into the checkout", name)
 		}
 	}
-	linked(t, filepath.Join(root, ".claude", "CLAUDE.md"))
+	linked(t, filepath.Join(root, ".claude", "rules", "qory-harness.md"))
+	if _, err := os.Lstat(filepath.Join(root, ".claude", "CLAUDE.md")); err == nil {
+		t.Error(".claude/CLAUDE.md is linked into the checkout")
+	}
 }
 
 // TestAddressingSaysNothingWithoutARoster is a harness of instructions alone: no agent,
@@ -182,7 +189,7 @@ func TestAddressingSaysNothingWithoutARoster(t *testing.T) {
 	if err := render.Build(res, home, lookup(t, "claude"), lookup(t, "codex")); err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"claude/launch/CLAUDE.md", "codex/AGENTS.md", "claude/CLAUDE.md"} {
+	for _, name := range []string{"claude/launch/AGENTS.md", "codex/AGENTS.md", "claude/rules/qory-harness.md"} {
 		if got := read(t, filepath.Join(home, name)); got != "Rules.\n" {
 			t.Errorf("%s:\n%s\nwant the instructions alone", name, got)
 		}

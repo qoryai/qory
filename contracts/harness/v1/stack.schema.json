@@ -31,9 +31,9 @@
       "type": "object"
     },
     "workflows": {
-      "description": "The settings of each workflow the stack starts, by the workflow's name: a run that Qory Apiary dispatches starts the skill or command of that name.",
+      "description": "The settings of each workflow the stack starts, by the workflow's name: a run that Qory Apiary dispatches starts the skill or command workflow-<name>, or else the one named <name>.",
       "type": "object",
-      "propertyNames": {"pattern": "^[a-z][a-z0-9-]{0,63}$"},
+      "propertyNames": {"pattern": "^[a-z][a-z0-9-]{0,54}$"},
       "additionalProperties": {
         "type": "object",
         "additionalProperties": false,

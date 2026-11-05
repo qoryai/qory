@@ -439,7 +439,7 @@ func TestARunCodesLinesShowTheHarnessByItsPhrase(t *testing.T) {
 			_, missing := r.workflowArgs("claude", report.Report{}, "", "")
 			for _, c := range []struct{ got, want string }{
 				{r.startLine("run_1"), "qory run: the run run_1 starts the workflow example of " + phrase + " on claude"},
-				{fmt.Sprint(missing), "add a skill or command example to " + phrase + ", or set another workflow in Qory Apiary: the composed harness has no skill or command example (workflow_not_in_harness); the code is used"},
+				{fmt.Sprint(missing), "add a skill workflow-example to " + phrase + ", or set another workflow in Qory Apiary: the composed harness has no skill or command workflow-example or example (workflow_not_in_harness); the code is used"},
 			} {
 				if c.got != c.want {
 					t.Errorf("hidden %v: got  %q\nwant %q", hidden, c.got, c.want)
@@ -455,8 +455,8 @@ func TestARunCodesLinesShowTheHarnessByItsPhrase(t *testing.T) {
 // the system of the run's repositories and as the target on any other, and the
 // workspace's harness without it.
 func TestAMissingWorkflowEndsTheRunWithItsReason(t *testing.T) {
-	const fix = "add a skill or command example to "
-	const cause = ", or set another workflow in Qory Apiary: the composed harness has no skill or command example (workflow_not_in_harness); the code is used"
+	const fix = "add a skill workflow-example to "
+	const cause = ", or set another workflow in Qory Apiary: the composed harness has no skill or command workflow-example or example (workflow_not_in_harness); the code is used"
 	doc := &contracts.HarnessDocument{Harness: contracts.HarnessSection{Extends: &contracts.HarnessBase{Git: "https://code.example.com/team/stacks", Ref: "release-7"}}}
 	target := &contracts.Target{System: "code.example.com", Path: "acme/site"}
 	for _, c := range []struct {
@@ -627,10 +627,10 @@ func TestARunCodesWorkflowStartsOnEachRuntimesHeadlessStart(t *testing.T) {
 		rep     report.Report
 		want    string
 	}{
-		{"gemini", skill, "add a command example to the checkout's harness, or set another runtime in Qory Apiary: gemini runs no skill by its name from a headless start; the code is used"},
-		{"opencode", skill, "add a command example to the checkout's harness, or set another runtime in Qory Apiary: opencode runs no skill by its name from a headless start; the code is used"},
-		{"codex", command, "add a skill example to the checkout's harness, or set another runtime in Qory Apiary: codex runs no command by its name from a headless start; the code is used"},
-		{"cursor", command, "add a skill example to the checkout's harness, or set another runtime in Qory Apiary: cursor runs no command by its name from a headless start; the code is used"},
+		{"gemini", skill, "add a command workflow-example to the checkout's harness, or set another runtime in Qory Apiary: gemini runs no skill by its name from a headless start, and the composed harness has no command workflow-example or example; the code is used"},
+		{"opencode", skill, "add a command workflow-example to the checkout's harness, or set another runtime in Qory Apiary: opencode runs no skill by its name from a headless start, and the composed harness has no command workflow-example or example; the code is used"},
+		{"codex", command, "add a skill workflow-example to the checkout's harness, or set another runtime in Qory Apiary: codex runs no command by its name from a headless start, and the composed harness has no skill workflow-example or example; the code is used"},
+		{"cursor", command, "add a skill workflow-example to the checkout's harness, or set another runtime in Qory Apiary: cursor runs no command by its name from a headless start, and the composed harness has no skill workflow-example or example; the code is used"},
 		{"amp", skill, "set another runtime for the workspace in Qory Apiary, then take the work item in again: qory starts a run code's workflow with a runtime's headless start, and has none for amp; the code is used"},
 		{"copilot", skill, "set another runtime for the workspace in Qory Apiary, then take the work item in again: qory starts a run code's workflow with a runtime's headless start, and has none for copilot; the code is used"},
 	} {

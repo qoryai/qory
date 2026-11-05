@@ -187,7 +187,7 @@ func TestPathReadsOfACopiedModuleGoThroughItsRoot(t *testing.T) {
 	for _, f := range holding[outside] {
 		t.Errorf("%s holds the outside directory's marker", f)
 	}
-	for _, want := range []string{"AGENTS.md", "claude/CLAUDE.md", "claude/launch/CLAUDE.md", "claude/mcp.json", "claude/settings.json"} {
+	for _, want := range []string{"AGENTS.md", "claude/launch/AGENTS.md", "claude/mcp.json", "claude/settings.json"} {
 		if !slices.Contains(holding[inside], want) {
 			t.Errorf("%s does not hold the module's value; files with it: %v", want, holding[inside])
 		}

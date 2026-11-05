@@ -46,14 +46,17 @@ var repositoryVariables = []string{"GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE",
 
 // droppedVariables are git's variables that add configuration, name a program git
 // runs or a folder it takes programs or templates from, turn off the check of a
-// host's certificate, choose the transports git may use, trace what git does, or name
-// replace refs. [Env] drops each, and the ones that set what it sets. GIT_ALLOW_PROTOCOL
-// wins over protocol.allow, so with it set, [HTTPSOnly] would not hold.
+// host's certificate, choose the transports git may use, trace what git does, name
+// replace refs, choose the formats git init writes, or end git's search for a repository
+// early. [Env] drops each, and the ones that set what it sets. GIT_ALLOW_PROTOCOL wins
+// over protocol.allow, so with it set, [HTTPSOnly] would not hold. A caller that needs
+// GIT_CEILING_DIRECTORIES adds it after Env.
 var droppedVariables = []string{
 	"GIT_CONFIG", "GIT_CONFIG_PARAMETERS", "GIT_CONFIG_COUNT", "GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM", "GIT_CONFIG_NOSYSTEM",
 	"GIT_EXEC_PATH", "GIT_TEMPLATE_DIR", "GIT_SSH", "GIT_SSH_COMMAND", "GIT_PROXY_COMMAND", "GIT_SSL_NO_VERIFY",
 	"GIT_ALLOW_PROTOCOL", "GIT_PROTOCOL_FROM_USER",
 	"GIT_REPLACE_REF_BASE", "GIT_NO_REPLACE_OBJECTS",
+	"GIT_DEFAULT_HASH", "GIT_DEFAULT_REF_FORMAT", "GIT_CEILING_DIRECTORIES",
 	"GIT_TERMINAL_PROMPT", "GIT_ASKPASS", "SSH_ASKPASS",
 }
 

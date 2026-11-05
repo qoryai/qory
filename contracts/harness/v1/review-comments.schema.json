@@ -1,0 +1,117 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://qory.dev/contracts/harness/v1/review-comments.schema.json",
+  "title": "The review comments format, version 1",
+  "description": "A work item's review comments on its artifact versions, such as a proposal, and the replies to them: the file of a version of the artifact type review-comments, one document per work item. The control plane writes the members' review comments and replies. A version that a run pushes only adds the run's reply to any of the open review comments, at most one reply to each, and closes each review comment it adds a reply to: it changes no member's text, drops no id and adds no review comment. Each review comment's id is unique in the document, which a JSON Schema cannot check. The file is at most 1 MiB (1,048,576 bytes), the type's size limit, which a JSON Schema cannot check either. No object has a member this schema does not define.",
+  "type": "object",
+  "required": ["review_comments"],
+  "additionalProperties": false,
+  "properties": {
+    "review_comments": {
+      "description": "Every review comment of the work item, in the order they were written.",
+      "type": "array",
+      "items": {"$ref": "#/$defs/review_comment"}
+    }
+  },
+  "$defs": {
+    "review_comment": {
+      "description": "A member's review comment on one version of an artifact. A closed review comment has at least one reply by a run.",
+      "type": "object",
+      "required": ["id", "on", "text", "by", "at", "state"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {"description": "The review comment's id, unique in the document: 1 to 32 lower-case letters, digits and hyphens, such as c1.", "type": "string", "pattern": "^[a-z0-9-]{1,32}$"},
+        "on": {
+          "description": "The artifact version the review comment is on.",
+          "type": "object",
+          "required": ["artifact", "version"],
+          "additionalProperties": false,
+          "properties": {
+            "artifact": {"description": "The artifact type's name, such as proposal: lowercase letters and digits in groups joined by single hyphens, 1 to 64 bytes.", "type": "string", "maxLength": 64, "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"},
+            "version": {"description": "The version's number, from 1.", "type": "integer", "minimum": 1}
+          }
+        },
+        "text": {"description": "The review comment, as Markdown.", "$ref": "#/$defs/short_text"},
+        "by": {"description": "The member who wrote the review comment.", "$ref": "#/$defs/member"},
+        "at": {"description": "When the member wrote the review comment.", "$ref": "#/$defs/time"},
+        "state": {"description": "open until a run replies to the review comment and closes it, closed after that. When a member replies to a closed review comment, the control plane sets it to open again.", "enum": ["open", "closed"]},
+        "replies": {
+          "description": "The replies to the review comment, oldest first: absent or empty when it has none.",
+          "type": "array",
+          "items": {"$ref": "#/$defs/reply"}
+        }
+      },
+      "allOf": [
+        {
+          "if": {"required": ["state"], "properties": {"state": {"const": "closed"}}},
+          "then": {"required": ["replies"], "properties": {"replies": {"contains": {"required": ["by"], "properties": {"by": {"required": ["run"]}}}}}}
+        }
+      ]
+    },
+    "reply": {
+      "description": "A reply to a review comment, by a member or by a run. outcome is present exactly when a run wrote the reply, and question exactly when outcome is asked.",
+      "type": "object",
+      "required": ["text", "by", "at"],
+      "additionalProperties": false,
+      "properties": {
+        "text": {"description": "The reply, as Markdown.", "$ref": "#/$defs/short_text"},
+        "by": {"description": "Who wrote the reply: a member, or a run.", "oneOf": [{"$ref": "#/$defs/member"}, {"$ref": "#/$defs/run"}]},
+        "at": {"description": "When the reply was written.", "$ref": "#/$defs/time"},
+        "outcome": {"description": "What the run did about the review comment: changed when the run changed the artifact for the review comment; answered when the review comment is a question and the reply contains the answer; declined when the review comment is a request for a change that the run did not make, and the reply contains the reason; asked when the run could not settle the review comment and added a question for a person to the questions artifact.", "enum": ["changed", "answered", "declined", "asked"]},
+        "question": {"description": "The id of the question that the run added to the questions artifact, when outcome is asked: 1 to 32 lower-case letters, digits and hyphens. The run pushes the questions before the review comments: the id is one of the ids in the newest version of the questions artifact, which a JSON Schema cannot check.", "type": "string", "pattern": "^[a-z0-9-]{1,32}$"}
+      },
+      "allOf": [
+        {
+          "if": {"required": ["by"], "properties": {"by": {"required": ["run"]}}},
+          "then": {"required": ["outcome"]},
+          "else": {"not": {"required": ["outcome"]}}
+        },
+        {
+          "if": {"required": ["outcome"], "properties": {"outcome": {"const": "asked"}}},
+          "then": {"required": ["question"]},
+          "else": {"not": {"required": ["question"]}}
+        }
+      ]
+    },
+    "run": {
+      "description": "A run.",
+      "type": "object",
+      "required": ["run"],
+      "additionalProperties": false,
+      "properties": {
+        "run": {"description": "The run's number, from 1.", "type": "integer", "minimum": 1}
+      }
+    },
+    "member": {
+      "description": "A member of the control plane.",
+      "type": "object",
+      "required": ["name"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {"description": "The name the control plane shows for the member, 1 to 160 characters on one line.", "$ref": "#/$defs/line", "minLength": 1, "maxLength": 160}
+      }
+    },
+    "time": {
+      "description": "RFC 3339 in UTC with whole seconds, ending Z: months 01 to 12, days 01 to 31, hours 00 to 23, minutes and seconds 00 to 59, so never a leap second. The pattern does not check the day against the month, such as February 30: format date-time does, in a validator that asserts formats.",
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^[0-9]{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12][0-9]|3[01])T(?:[01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]Z$"
+    },
+    "text": {
+      "description": "Text that may span lines. Tab, line feed and carriage return are its only control characters: it has none of U+0000 to U+0008, U+000B, U+000C, U+000E to U+001F, U+007F and U+0080 to U+009F. It has none of the bidirectional controls, the marks U+061C, U+200E and U+200F, the embeddings and overrides U+202A to U+202E and the isolates U+2066 to U+2069; the separators U+2028 and U+2029; and the format characters U+00AD, U+180E, U+200B, U+2060 to U+2064, U+FEFF and U+FFF9 to U+FFFB.",
+      "type": "string",
+      "pattern": "^[^\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f\u0080-\u009f\u00ad\u061c\u180e\u200b\u200e\u200f\u2028\u2029\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff\ufff9-\ufffb]*$"
+    },
+    "line": {
+      "description": "Text on one line: text as $defs text defines it, with no control character at all, so no tab, line feed or carriage return.",
+      "type": "string",
+      "pattern": "^[^\u0000-\u001f\u007f\u0080-\u009f\u00ad\u061c\u180e\u200b\u200e\u200f\u2028\u2029\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff\ufff9-\ufffb]*$"
+    },
+    "short_text": {
+      "description": "A short text, 1 to 2000 characters.",
+      "$ref": "#/$defs/text",
+      "minLength": 1,
+      "maxLength": 2000
+    }
+  }
+}

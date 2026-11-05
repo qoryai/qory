@@ -166,7 +166,7 @@ func TestAModuleNameWithASecretIsLeftOutOfItsRefusals(t *testing.T) {
 		}
 	}
 	bare := tree(t, map[string]string{"skills/greet/x.md": "x\n"})
-	if _, err := Read("qak_m", bare, nil, ""); err == nil || !strings.HasPrefix(err.Error(), "module "+accessKeyPhrase+": skills/") {
+	if _, err := Read("qak_m", bare, nil, ""); err == nil || !strings.HasPrefix(err.Error(), "module "+accessKeyPhrase+": add SKILL.md to skills/") {
 		t.Errorf("a skill without SKILL.md: %v", err)
 	}
 	for _, c := range []struct{ body, want string }{

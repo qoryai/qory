@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -62,10 +63,13 @@ func TestDirectoryLinkKeepsTheCheckoutsOwnFiles(t *testing.T) {
 	if info, err := os.Lstat(filepath.Join(root, ".claude")); err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
 		t.Fatalf(".claude is not a real directory: %v %v", info, err)
 	}
-	for _, name := range []string{"skills", "agents", "settings.json", "CLAUDE.md"} {
+	for _, name := range []string{"skills", "agents", "settings.json", "rules/qory-harness.md"} {
 		if !isLink(t, filepath.Join(root, ".claude", name)) {
 			t.Errorf(".claude/%s is not a link", name)
 		}
+	}
+	if _, err := os.Lstat(filepath.Join(root, ".claude", "CLAUDE.md")); err == nil {
+		t.Error(".claude/CLAUDE.md is linked")
 	}
 	if data, _ := os.ReadFile(local); string(data) != "{}\n" {
 		t.Errorf("settings.local.json = %q", data)
@@ -78,7 +82,7 @@ func TestDirectoryLinkKeepsTheCheckoutsOwnFiles(t *testing.T) {
 		t.Errorf("settings.local.json after the second compose = %q", data)
 	}
 	removed, err := render.Unlink(claude, root)
-	if err != nil || len(removed) != 2 || removed[0] != ".claude" || removed[1] != ".mcp.json" {
+	if err != nil || strings.Join(removed, " ") != ".claude .claude/rules .mcp.json" {
 		t.Fatalf("unlink: removed=%v err=%v", removed, err)
 	}
 	if data, _ := os.ReadFile(local); string(data) != "{}\n" {
@@ -86,6 +90,130 @@ func TestDirectoryLinkKeepsTheCheckoutsOwnFiles(t *testing.T) {
 	}
 	if isLink(t, filepath.Join(root, ".claude", "settings.json")) {
 		t.Error(".claude/settings.json is still linked")
+	}
+}
+
+// TestRulesLinkKeepsTheRepositorysTrackedRules is a repository that tracks
+// .claude/rules/style.md: the compose adds the link qory-harness.md beside it, the
+// tracked file keeps its bytes, git status lists nothing, and a remove takes the link and
+// leaves the file and its directory.
+func TestRulesLinkKeepsTheRepositorysTrackedRules(t *testing.T) {
+	res, root, home := composeFixture(t, "claude")
+	claude := lookup(t, "claude")
+	style := filepath.Join(root, ".claude", "rules", "style.md")
+	write(t, style, "Use tabs.\n")
+	gitIn(t, root, "add", "-A")
+	gitIn(t, root, "-c", "user.name=T", "-c", "user.email=t@example.com", "commit", "-q", "-m", "rules")
+	if err := render.Build(res, home, claude); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		linked, err := render.LinkInto(claude, res, root, home, false)
+		if err != nil || len(linked.Skipped) != 0 || len(linked.Replaced) != 0 {
+			t.Fatalf("linked=%+v err=%v", linked, err)
+		}
+	}
+	checkLink(t, root, home, ".claude/rules/qory-harness.md", "AGENTS.md", readExclude(t, root))
+	if data, _ := os.ReadFile(style); string(data) != "Use tabs.\n" {
+		t.Errorf(".claude/rules/style.md = %q", data)
+	}
+	c := exec.Command("git", "status", "--porcelain", "--untracked-files=all")
+	c.Dir = root
+	out, err := c.CombinedOutput()
+	if err != nil || len(out) != 0 {
+		t.Errorf("git status: %v\n%s", err, out)
+	}
+	if _, err := render.Unlink(claude, root); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(filepath.Join(root, ".claude", "rules", "qory-harness.md")); err == nil {
+		t.Error(".claude/rules/qory-harness.md is still there after the remove")
+	}
+	if data, _ := os.ReadFile(style); string(data) != "Use tabs.\n" {
+		t.Errorf(".claude/rules/style.md after the remove = %q", data)
+	}
+}
+
+// TestRulesLinkReplacesTheWholeDirectoryLinkOfAnEarlierCompose is a checkout composed by
+// a qory that linked .claude/rules whole: the link and its exclude line go, and a real
+// directory with one link per rule takes its place. Without the line gone, git would
+// ignore every untracked rule a person adds there.
+func TestRulesLinkReplacesTheWholeDirectoryLinkOfAnEarlierCompose(t *testing.T) {
+	res, root, home := composeFixture(t, "claude")
+	claude := lookup(t, "claude")
+	if err := render.Build(res, home, claude); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, ".claude"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join("..", ".qory", "harness", "claude", "rules"), filepath.Join(root, ".claude", "rules")); err != nil {
+		t.Fatal(err)
+	}
+	if err := render.Exclude(root, "/.claude/rules"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := render.LinkInto(claude, res, root, home, false); err != nil {
+		t.Fatal(err)
+	}
+	if info, err := os.Lstat(filepath.Join(root, ".claude", "rules")); err != nil || !info.IsDir() {
+		t.Fatalf(".claude/rules is not a real directory: %v", err)
+	}
+	exclude := readExclude(t, root)
+	if slices.Contains(strings.Split(exclude, "\n"), "/.claude/rules") {
+		t.Errorf("the exclude file still contains /.claude/rules:\n%s", exclude)
+	}
+	checkLink(t, root, home, ".claude/rules/qory-harness.md", "AGENTS.md", exclude)
+}
+
+// TestTrackedHarnessRuleIsForeign is a repository that tracks a file at
+// .claude/rules/qory-harness.md: without force the compose fails on it, and under force
+// the file is replaced by the link and listed, as for any other link.
+func TestTrackedHarnessRuleIsForeign(t *testing.T) {
+	res, root, home := composeFixture(t, "claude")
+	claude := lookup(t, "claude")
+	theirs := filepath.Join(root, ".claude", "rules", "qory-harness.md")
+	write(t, theirs, "theirs\n")
+	gitIn(t, root, "add", "-A")
+	gitIn(t, root, "-c", "user.name=T", "-c", "user.email=t@example.com", "commit", "-q", "-m", "rules")
+	if err := render.Build(res, home, claude); err != nil {
+		t.Fatal(err)
+	}
+	_, err := render.LinkInto(claude, res, root, home, false)
+	var foreign *render.ForeignPathError
+	if !errorsAs(err, &foreign) || foreign.Path != theirs {
+		t.Fatalf("err = %v, want a ForeignPathError for %s", err, theirs)
+	}
+	if data, _ := os.ReadFile(theirs); string(data) != "theirs\n" {
+		t.Errorf("the tracked file changed without force: %q", data)
+	}
+	linked, err := render.LinkInto(claude, res, root, home, true)
+	if err != nil || len(linked.Replaced) != 1 || linked.Replaced[0] != ".claude/rules/qory-harness.md" {
+		t.Fatalf("force: linked=%+v err=%v", linked, err)
+	}
+	checkLink(t, root, home, ".claude/rules/qory-harness.md", "AGENTS.md", readExclude(t, root))
+}
+
+// TestNoRuleWithoutInstructions is a compose whose modules have no AGENTS.md: the home
+// has no AGENTS.md and no claude/rules, and the checkout gets no .claude/rules, so no
+// link points at a file that is not there.
+func TestNoRuleWithoutInstructions(t *testing.T) {
+	res, root, home := composeFixture(t, "claude")
+	claude := lookup(t, "claude")
+	res.Instructions = ""
+	if err := render.Build(res, home, claude); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := render.LinkInto(claude, res, root, home, false); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{filepath.Join(home, "AGENTS.md"), filepath.Join(home, "claude", "rules"), filepath.Join(root, ".claude", "rules")} {
+		if _, err := os.Lstat(path); err == nil {
+			t.Errorf("%s is there", path)
+		}
+	}
+	if !isLink(t, filepath.Join(root, ".claude", "settings.json")) {
+		t.Error(".claude/settings.json is not linked")
 	}
 }
 
@@ -112,9 +240,10 @@ func TestDirectoryLinkReplacesTheWholeDirectoryLinkOfAnEarlierRelease(t *testing
 }
 
 // TestLinkIntoPrunesWhatTheComposeNoLongerAsksFor composes twice, the second time with no
-// instructions: the AGENTS.override.md link and the .claude/CLAUDE.md link both go, and
-// nothing else does. A kind directory left empty stays linked, so a runtime keeps every
-// place it reads.
+// instructions. Three paths go: the AGENTS.override.md link, the
+// .claude/rules/qory-harness.md link, and .claude/rules, which is then empty. Every other
+// link stays. A kind directory left empty stays linked, so a runtime keeps every place it
+// reads.
 func TestLinkIntoPrunesWhatTheComposeNoLongerAsksFor(t *testing.T) {
 	res, root, home := composeFixture(t, "claude", "codex")
 	claude, codex := lookup(t, "claude"), lookup(t, "codex")
@@ -126,7 +255,7 @@ func TestLinkIntoPrunesWhatTheComposeNoLongerAsksFor(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	for _, name := range []string{"AGENTS.override.md", ".claude/CLAUDE.md"} {
+	for _, name := range []string{"AGENTS.override.md", ".claude/rules/qory-harness.md"} {
 		if !isLink(t, filepath.Join(root, name)) {
 			t.Fatalf("%s was not linked", name)
 		}
@@ -147,7 +276,7 @@ func TestLinkIntoPrunesWhatTheComposeNoLongerAsksFor(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	for _, name := range []string{"AGENTS.override.md", ".claude/CLAUDE.md"} {
+	for _, name := range []string{"AGENTS.override.md", ".claude/rules/qory-harness.md", ".claude/rules"} {
 		if _, err := os.Lstat(filepath.Join(root, name)); err == nil {
 			t.Errorf("%s is still there", name)
 		}
@@ -335,10 +464,10 @@ func TestUnlinkTakesTheLinksAfterTheQoryDirectoryIsGone(t *testing.T) {
 		t.Fatal(err)
 	}
 	removed, err := render.Unlink(claude, root)
-	if err != nil || len(removed) != 2 || removed[0] != ".claude" || removed[1] != ".mcp.json" {
+	if err != nil || strings.Join(removed, " ") != ".claude .claude/rules .mcp.json" {
 		t.Fatalf("unlink: removed=%v err=%v", removed, err)
 	}
-	for _, name := range []string{".claude/settings.json", ".claude", ".mcp.json"} {
+	for _, name := range []string{".claude/settings.json", ".claude/rules", ".claude", ".mcp.json"} {
 		if _, err := os.Lstat(filepath.Join(root, name)); err == nil {
 			t.Errorf("%s is still there", name)
 		}
