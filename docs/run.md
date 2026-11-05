@@ -3535,7 +3535,10 @@ With no commit past `HEAD`, qory prints `qory run: no action needed: the run mad
 past its base commit`. Then it deletes the copy. When anything stops the return, qory
 prints the cause and `qory run: read the run's files in <folder>, run no git there, then
 remove the folder: nothing more came back from the run`, and `qory run` exits 1 for a session
-that succeeded.
+that succeeded. On the push path, qory instead pushes nothing, prints
+`take the work item in again in Qory Apiary` with the cause, and deletes the copy. For the exit
+status, see
+[The push step of a write run](#the-push-step-of-a-write-run).
 
 When removing a part of the run's wall failed at any point of the run, even if a later removal
 succeeded, a process may have written the copy after its session ended. Nothing comes back,
@@ -3544,6 +3547,15 @@ qory keeps the copy, and `qory run` exits 1:
 ```text
 qory run: read the run's files in <folder>, and run no git there: removing a part of the run's wall failed during the run, so a process may have written the copy after its session ended, and nothing came back from the run
 ```
+
+On the push path, the result depends on when the removal failed:
+
+- Before the push step, for the agent's container or the setup container: the run has no push
+  step. qory pushes nothing, prints `take the work item in again in Qory Apiary` with the cause,
+  and deletes the copy.
+- At the close, which comes after the push step: what the step pushed stays on the branch, and the
+  run's exit status does not change. qory prints `removing the wall:` with the cause, and deletes
+  the copy.
 
 In a copy that stays, qory renames each `.git` to `.git-from-run`, mode 0700, and the `HEAD` of
 a folder that git would take as a repository. Run no git there: after a close that failed, a
