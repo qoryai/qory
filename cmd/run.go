@@ -53,7 +53,6 @@ import (
 	"github.com/qoryai/qory/internal/runcopy"
 	"github.com/qoryai/qory/internal/secretmask"
 	"github.com/qoryai/qory/internal/source"
-	"github.com/qoryai/qory/internal/stack"
 	"github.com/qoryai/qory/internal/statusfd"
 	"github.com/qoryai/qory/internal/ui"
 )
@@ -101,8 +100,8 @@ the same home, and prints the result on stderr. -f, --model, --effort, --tier an
 outside the folder the run runs in, under qory/homes in the cache directory, unless --home
 or harness.home sets another, and a home inside the folder stops the run. A walled run with
 no run key, --home or harness.home gets a home for that run alone, which qory removes when
-the run ends. The harness report stays per checkout, as <name>-<hash>-report.json under
-qory/homes.
+the run ends: runs/<name>-<hash>/<run id> under qory/homes. The harness report stays per
+checkout, as runs/<name>-<hash>-report.json there.
 
 The agent is the runtime of the stack's target. Name another first, and the run composes
 for it instead; name one when the target has several. Arguments after -- go to the
@@ -192,7 +191,13 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					return err
 				}
 			}
-			at, conf, err := locateRun(h, remote, true, func(c config.Config) bool { return wallNamed(c.Forager, o) })
+			// linksNone is harness.links: none as the configuration sets it: [locateRun] sets it for
+			// every walled run.
+			linksNone := false
+			at, conf, err := locateRun(h, remote, true, func(c config.Config) bool {
+				linksNone = c.Links == config.LinksNone
+				return wallNamed(c.Forager, o)
+			})
 			if err != nil {
 				return err
 			}
@@ -386,8 +391,9 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			// this run alone, so a second run of the checkout leaves the first run's home as it
 			// is. The report stays per checkout, so a module keeps its pin between runs.
 			runHome := ""
-			if !remote && h.home == "" && conf.Origin("harness.home") == config.Default && wallNamed(conf.Forager, o) {
-				at.home = filepath.Join(at.home, spec.RunID)
+			homeGiven := h.home != "" || conf.Origin("harness.home") != config.Default
+			if !remote && !homeGiven && wallNamed(conf.Forager, o) {
+				at = runHomeAt(at, spec.RunID)
 				runHome = at.home
 			}
 			if err := enclose(&spec, conf.Forager, o, selected, remote || server != nil && !local, exe, at.root, at.home); err != nil {
@@ -676,7 +682,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			// checkout, see [readsOnly].
 			var readOnly bool
 			prepareLaunch := func(w io.Writer) (freshHome bool, err error) {
-				harness, workflows, checkoutOnly, err := composeForRun(w, composing, at, runtime, dispatched, walled)
+				c, err := composeForRun(w, composing, at, runtime, dispatched, walled)
 				if err != nil && composing.git != nil && composing.git.Named != nil {
 					return false, namedComposeError(err, composing.git.Named)
 				}
@@ -686,10 +692,8 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				if err != nil {
 					return false, err
 				}
-				rep, err := readReport(at)
-				if err != nil {
-					return false, err
-				}
+				// The report on disk can be another run's by now, so the run reads what it composed.
+				rep, harness, workflows := c.rep, c.harness, c.workflows
 				var launch render.Launch
 				if name, launch, err = resolveLaunch(rep, conf, runtime, at.home); err != nil {
 					return false, err
@@ -699,8 +703,8 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					return false, input(err)
 				}
 				// A dispatched run has no person who could start it with --wall none.
-				if parts := checkoutOnly[name]; walled && !dispatched && len(parts) > 0 {
-					fmt.Fprintln(w, "qory run:", checkoutOnlyLine(name, parts))
+				if parts := c.checkoutOnly[name]; walled && !dispatched && len(parts) > 0 {
+					fmt.Fprintln(w, "qory run:", checkoutOnlyLine(name, parts, homeGiven || linksNone))
 				}
 				if fromCode != nil {
 					if extra, err = fromCode.workflowArgs(name, rep, in, run.System()); err != nil {
@@ -3218,6 +3222,10 @@ func newSetupCommand() *cobra.Command {
 // setupStep is the name of the setup step of qory run prepare.
 const setupStep = "prepare"
 
+// textCheckoutOnlyNoLinks starts the line of [checkoutOnlyLine] for a run that has no links with
+// --wall none as well.
+const textCheckoutOnlyNoLinks = "remove --home, harness.home and harness.links: none, and "
+
 // textCheckoutOnly is the line of [checkoutOnlyLine].
 const textCheckoutOnly = "run with --wall none for %s's %s: a walled run has the harness in a home outside the checkout, and %s reads those from the checkout."
 
@@ -3240,8 +3248,12 @@ func setupCommands(gitSession bool) []session.SetupCommand {
 
 // toolFixes is what a person reads of err, a step [checkToolsStep] of the run with the record
 // dir that failed in the setup container: the step's install lines from session.jsonl, which
-// has the step's output, since [session.SetupError] has only its exit status. A docker exec that could not start /bin/sh exits 126 or 127 with no such line. It is
-// nil for another error, and for a step with no line, which [session.SetupError] then reports.
+// has the step's output, since [session.SetupError] has only its exit status. The run's image
+// writes that output, so [image.SessionCheckFixes] keeps only the lines of the check. A docker
+// exec with no /bin/sh exits 127 and the step prints nothing, so that is the line for sh. It is
+// nil for another error, and for a step with no line, also for exit 126, where docker could not
+// run the command for another cause, such as the image's architecture. [session.SetupError] then
+// reports the step.
 func toolFixes(dir string, err error) []string {
 	var exited *session.SetupError
 	if !errors.As(err, &exited) || exited.Name != checkToolsStep {
@@ -3267,13 +3279,9 @@ func toolFixes(dir string, err error) []string {
 				text = append(text, chunk...)
 			}
 		}
-		for line := range strings.Lines(string(text)) {
-			if fix, ok := image.SessionCheckLine(strings.TrimRight(line, "\n")); ok {
-				fixes = append(fixes, fix)
-			}
-		}
+		fixes = image.SessionCheckFixes(string(text))
 	}
-	if fixes == nil && (exited.ExitCode == 126 || exited.ExitCode == 127) {
+	if fixes == nil && exited.ExitCode == 127 {
 		fixes = []string{image.SessionShellFix()}
 	}
 	return fixes
@@ -3577,18 +3585,17 @@ func exitStatusOf(err error) bool {
 
 // composeForRun composes the harness of a qory run before its session starts: the
 // compose of qory harness compose, with the flags o contains and the run's runtime as its
-// --runtime, into the home at that the run starts on. It returns the git sources the
-// compose resolved and the composed stack's workflows. inCheckout is set for a run given a
+// --runtime, into the home at that the run starts on. It returns what it composed. inCheckout is set for a run given a
 // run key, see [extendsInCheckout], and walled for a run behind a wall, whose home
 // contains copies of the modules' files, see [copies], as the home of a run whose
 // harness is hidden, o.hidden, does. stdout is the agent's, so the compose prints there
 // nothing; on stderr it prints a collision as compose does, a line per git source whose
 // remote could not be reached, and its result line last.
-func composeForRun(stderr io.Writer, o composeOptions, at places, runtime string, inCheckout, walled bool) ([]session.HarnessSource, map[string]stack.Workflow, map[string][]string, error) {
+func composeForRun(stderr io.Writer, o composeOptions, at places, runtime string, inCheckout, walled bool) (*composed, error) {
 	o.runtime, o.at, o.run, o.inCheckout, o.walled = runtime, &at, true, inCheckout, walled
 	c, err := composeHome(io.Discard, stderr, o)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, err
 	}
 	for _, w := range c.warnings {
 		fmt.Fprintln(stderr, "qory run:", w)
@@ -3598,17 +3605,22 @@ func composeForRun(stderr io.Writer, o composeOptions, at places, runtime string
 		names = append(names, rt.Name())
 	}
 	fmt.Fprintf(stderr, "qory run: composed %s from %s for %s\n", count(len(c.rep.Entries), "entry", "entries"), count(len(c.rep.Modules), "module", "modules"), strings.Join(names, ", "))
-	return c.harness, c.workflows, c.checkoutOnly, nil
+	return c, nil
 }
 
 // checkoutOnlyLine is the line of a walled run of the runtime name, whose program reads parts of
-// the composed harness from the checkout alone, see [render.CheckoutOnly].
-func checkoutOnlyLine(name string, parts []string) string {
+// the composed harness from the checkout alone, see [render.CheckoutOnly]. noLinks is a run that
+// has no links with --wall none as well: --home, harness.home or harness.links: none.
+func checkoutOnlyLine(name string, parts []string, noLinks bool) string {
 	listed := parts[len(parts)-1]
 	if len(parts) > 1 {
 		listed = strings.Join(parts[:len(parts)-1], ", ") + " and " + listed
 	}
-	return fmt.Sprintf(textCheckoutOnly, name, listed, name)
+	line := fmt.Sprintf(textCheckoutOnly, name, listed, name)
+	if noLinks {
+		return textCheckoutOnlyNoLinks + line
+	}
+	return line
 }
 
 // harnessSources is the harness's git sources a compose resolved, each with the full

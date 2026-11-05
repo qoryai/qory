@@ -124,6 +124,8 @@ type runCopy struct {
 	// plain is whether the checkout is not a git working tree: [runcopy.Dir.CopyBack] brings the
 	// files back.
 	plain bool
+	// qoryLeftOut is whether [runCopy.leftOut] printed .qory.
+	qoryLeftOut bool
 	// repos are the repositories of the copy, the person's first, nil for a plain folder.
 	repos []runcopy.Repository
 	// out is what the git session leaves out of its commit, by [runcopy.Repository.Path].
@@ -247,11 +249,32 @@ func (c *runCopy) done(report func(string)) {
 }
 
 // reportedSkips is what a copy of artifacts from the folder from left out, as a person reads it:
-// .qory at the top is listed only when from has a folder there. A commit with a file named .qory
-// has no artifacts to leave out, on any run.
+// .qory at the top is not listed when from has a regular file there. A commit with a file named
+// .qory has no artifacts to leave out, on any run.
 func reportedSkips(skipped []string, from string) []string {
-	if info, err := os.Lstat(filepath.Join(from, checkout.Dir)); err == nil && info.IsDir() {
+	if info, err := os.Lstat(filepath.Join(from, checkout.Dir)); err == nil && info.Mode().IsRegular() {
+		return withoutQoryDir(skipped)
+	}
+	return skipped
+}
+
+// copyBackSkips is what the copy back from the copy at work left out, as a person reads it: .qory
+// at the top is not listed when it is a folder with nothing but the artifacts, which
+// [runCopy.artifactsBack] copies back and reports, and the work item, which qory wrote. Anything
+// else there stays in the copy, which qory removes, so the line is the last trace of it.
+func copyBackSkips(skipped []string, work string) []string {
+	at := filepath.Join(work, checkout.Dir)
+	if info, err := os.Lstat(at); err != nil || !info.IsDir() {
 		return skipped
+	}
+	entries, err := os.ReadDir(at)
+	if err != nil {
+		return skipped
+	}
+	for _, e := range entries {
+		if e.Name() != artifactsDir && e.Name() != workItemFile {
+			return skipped
+		}
 	}
 	return withoutQoryDir(skipped)
 }
@@ -269,9 +292,7 @@ func (c *runCopy) artifactsBack(ctx context.Context, report func(string)) bool {
 	limited, cancel := context.WithTimeout(ctx, copyStepLimit)
 	defer cancel()
 	res, err := c.dir.CopyArtifactsBack(limited, c.root)
-	if skipped := reportedSkips(res.Skipped, c.dir.Work()); len(skipped) > 0 {
-		report(fmt.Sprintf(textCopyLeftOut, shownPaths(skipped)))
-	}
+	c.leftOut(reportedSkips(res.Skipped, c.dir.Work()), report)
 	if len(res.Conflicts) > 0 {
 		report(fmt.Sprintf(textCopyConflicts, shownPaths(res.Conflicts)))
 		c.kept(report)
@@ -282,6 +303,18 @@ func (c *runCopy) artifactsBack(ctx context.Context, report func(string)) bool {
 		return false
 	}
 	return true
+}
+
+// leftOut prints what a copy back left out, with .qory at the top once: both copies back of a plain
+// folder can leave it out.
+func (c *runCopy) leftOut(skipped []string, report func(string)) {
+	if c.qoryLeftOut {
+		skipped = withoutQoryDir(skipped)
+	}
+	if len(skipped) > 0 {
+		report(fmt.Sprintf(textCopyLeftOut, shownPaths(skipped)))
+		c.qoryLeftOut = slices.Contains(skipped, checkout.Dir)
+	}
 }
 
 // kept marks the copy to stay and prints where it is, once. A run with the push step has no
@@ -534,10 +567,7 @@ func (c *runCopy) copyBack(ctx context.Context, report func(string)) bool {
 	if len(res.Copied)+len(res.Deleted) > 0 {
 		report(fmt.Sprintf(textCopyBack, count(len(res.Copied), "file", "files"), exports.Value(c.root, false), count(len(res.Deleted), "file", "files")))
 	}
-	// [runCopy.artifactsBack] copies .qory/artifacts back after this, and reports what it leaves out.
-	if skipped := withoutQoryDir(res.Skipped); len(skipped) > 0 {
-		report(fmt.Sprintf(textCopyLeftOut, shownPaths(skipped)))
-	}
+	c.leftOut(copyBackSkips(res.Skipped, c.dir.Work()), report)
 	if len(res.Conflicts) > 0 {
 		report(fmt.Sprintf(textCopyConflicts, shownPaths(res.Conflicts)))
 	}

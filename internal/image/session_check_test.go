@@ -155,19 +155,91 @@ func TestTheSessionCheckReportsAGitThatFails(t *testing.T) {
 	}
 }
 
-// TestSessionCheckLine is what qory prints of the output of the step.
+// TestSessionCheckLine is what qory prints of the output of the step: the lines the script prints
+// on an image, with git in a folder of the session's PATH.
 func TestSessionCheckLine(t *testing.T) {
+	old := sessionGitOld("/usr/bin/git", "git version 2.24.0")
 	for line, want := range map[string]bool{
-		noSessionGit():              true,
-		noSessionTool("tr", "x"):    true,
-		sessionGitOld("/a", "b"):    true,
-		"install git in /elsewhere": false,
-		"something else":            false,
-		noSessionGit() + "\x1b[2J":  false,
-		"":                          false,
+		noSessionGit():                          true,
+		noSessionTool("tr", toolWhy(t, "tr")):   true,
+		old:                                     true,
+		sessionGitOld("/usr/local/bin/git", ""): true,
+		sessionGitFailed("/bin/git", "exit status 3"):           true,
+		noSessionTool("tr", "x"):                                false,
+		noSessionTool("curl", "x"):                              false,
+		sessionGitOld("/a/git", "git version 2.24.0"):           false,
+		sessionGitFailed("/bin/git", "run this"):                false,
+		sessionGitFailed("/bin/git", "exit status 1234"):        false,
+		sessionGitFailed("/bin/git", "exit status "):            false,
+		"install git in /elsewhere":                             false,
+		"install git in /usr/local/bin, /usr/bin, /bin: run it": false,
+		"something else":                                        false,
+		noSessionGit() + "\x1b[2J":                              false,
+		old + "\x1b[2J":                                         false,
+		old + "\xc2\x9b[2J":                                     false,
+		old + "\x9b[2J":                                         false,
+		old + "\u202e":                                          false,
+		old + strings.Repeat("x", 201-len(old)):                 false,
+		old + strings.Repeat("x", 200-len(old)):                 true,
+		"":                                                      false,
 	} {
 		if _, ok := SessionCheckLine(line); ok != want {
 			t.Errorf("%q: %v, want %v", line, ok, want)
+		}
+	}
+}
+
+// toolWhy is what the git session runs the tool for.
+func toolWhy(t *testing.T, name string) string {
+	t.Helper()
+	for _, tool := range sessionTools {
+		if tool.name == name {
+			return tool.why
+		}
+	}
+	t.Fatalf("no tool %s", name)
+	return ""
+}
+
+// TestSessionCheckFixesKeepsAtMostOnePerCheck is more lines than the script can print.
+func TestSessionCheckFixesKeepsAtMostOnePerCheck(t *testing.T) {
+	got := SessionCheckFixes(strings.Repeat(noSessionGit()+"\nanother line\n", 1000))
+	if want := len(sessionTools) + 1; len(got) != want {
+		t.Errorf("%d lines, want %d", len(got), want)
+	}
+}
+
+// TestTheSessionCheckTakesNoFolder is a folder with the name of a program, and no such program.
+func TestTheSessionCheckTakesNoFolder(t *testing.T) {
+	for _, shell := range shells(t) {
+		dir := standIns(t, "git version 2.47.3")
+		if err := os.Remove(filepath.Join(dir, "comm")); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Mkdir(filepath.Join(dir, "comm"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if _, errOut, code := checkOn(t, shell, dir); !strings.HasPrefix(errOut, "install comm in ") || code != 1 {
+			t.Errorf("%s: %q, exit %d", shell, errOut, code)
+		}
+	}
+}
+
+// TestTheSessionCheckGoesPastAFileThatDoesNotRun is a folder of the session's PATH with a tr that is
+// not executable, and one with a folder named tr, ahead of a folder with a real tr. Dash's command -v
+// returns the first file.
+func TestTheSessionCheckGoesPastAFileThatDoesNotRun(t *testing.T) {
+	for _, shell := range shells(t) {
+		first, second := t.TempDir(), t.TempDir()
+		if err := os.WriteFile(filepath.Join(first, "tr"), []byte("#!/bin/sh\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Mkdir(filepath.Join(second, "tr"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		dirs := first + ":" + second + ":" + standIns(t, "git version 2.47.3")
+		if _, errOut, code := checkOn(t, shell, dirs); errOut != "" || code != 0 {
+			t.Errorf("%s: %q, exit %d", shell, errOut, code)
 		}
 	}
 }

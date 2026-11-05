@@ -266,16 +266,20 @@ release may change what an existing document does, and states it under Upgrading
   `comm`, `cp`, `find`, `grep`, `mkdir`, `mv`, `readlink`, `sh`, `sort` and `tr` are there, in `/usr/local/bin`, `/usr/bin` or `/bin`. See A run that may write works in a copy in
   `docs/run.md`.
 - A walled run with no run key, `--home` or `harness.home` composes into
-  `qory/homes/<name>-<hash>/<run id>` in your cache directory, a home for that run alone, and
+  `qory/homes/runs/<name>-<hash>/<run id>` in your cache directory, a home for that run alone, and
   `qory` removes that home when the run ends. A second run of a checkout no longer empties the
-  first run's home. The harness report stays per checkout, at `qory/homes/<name>-<hash>-report.json`,
-  so a module keeps its pin between runs.
+  first run's home, and neither does `qory harness compose`, `qory run` or `qory harness remove`
+  with `--home` set to `qory/homes`. The harness report stays per checkout, at
+  `qory/homes/runs/<name>-<hash>-report.json`, so a module keeps its pin between runs.
 - `harness.links: checkout` no longer stops a walled run, which gets no link. A walled run with no
   run key on gemini, amp, opencode, cursor or copilot prints one line before the agent starts, with
   `run with --wall none` first and what of the harness those programs read from the checkout alone:
-  gemini the skills, agents, commands and instructions, amp the skills and instructions, opencode
-  and cursor the instructions, and copilot the hooks and instructions.
-- A plain folder with `.qory`, and a commit with a file named `.qory`, no longer print
+  gemini the skills, agents, commands, instructions and `files` entries, amp the skills, instructions
+  and `files` entries, opencode the instructions, cursor the instructions and `files` entries, and
+  copilot the hooks, instructions and `files` entries. With `--home`, `harness.home` or
+  `harness.links: none`, the line starts with `remove --home, harness.home and harness.links: none`.
+- A plain folder whose `.qory` has only `artifacts` and `work-item.json`, and a commit with a file
+  named `.qory`, no longer print
   `left out of the copy back to your folder: .qory.` or `left out of the run's copy: .qory.`.
 - A run that lists repositories starts in an empty folder as well: qory runs `git init`
   there, then fetches. A folder that is not empty and is not a git working tree still

@@ -16,6 +16,13 @@ import (
 	"github.com/qoryai/qory/internal/report"
 )
 
+// runHomesFolder is the folder of the homes of a person's walled runs of the checkout at root.
+func runHomesFolder(t *testing.T, root string) string {
+	t.Helper()
+	key := runKeyHome(t, root)
+	return filepath.Join(filepath.Dir(key), "runs", filepath.Base(key))
+}
+
 // runHomes are the folders of the runs' homes in the folder at, sorted.
 func runHomes(t *testing.T, at string) []string {
 	t.Helper()
@@ -49,7 +56,7 @@ func oneRunHome(t *testing.T, at string) string {
 // its run, and the report stays per checkout, valid, beside them.
 func TestTwoRunsOfOneCheckoutKeepTheirHomes(t *testing.T) {
 	root, _ := committedFixture(t)
-	homes := runKeyHome(t, root)
+	homes := runHomesFolder(t, root)
 	var first, second string
 	var whole map[string]string
 	joins := 0
@@ -112,7 +119,7 @@ func TestTwoRunsOfOneCheckoutKeepTheirHomes(t *testing.T) {
 func TestALaterWalledRunReadsTheReport(t *testing.T) {
 	root, _ := committedFixture(t)
 	agentInCopy(t, func(session.SessionSpec) {})
-	path := runKeyHome(t, root) + "-report.json"
+	path := runHomesFolder(t, root) + "-report.json"
 	if out, err := run(t, "run", "claude", "--", "-p", "hi"); err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
@@ -136,7 +143,7 @@ func TestALaterWalledRunReadsTheReport(t *testing.T) {
 // that is running: its open fails, and the home at that id stays the first run's.
 func TestARunWithAnIDInUseLeavesTheHomeOfTheRunWithThatID(t *testing.T) {
 	root, _ := committedFixture(t)
-	homes := runKeyHome(t, root)
+	homes := runHomesFolder(t, root)
 	agentInCopy(t, func(session.SessionSpec) {
 		home := oneRunHome(t, homes)
 		whole := snapshot(t, home)
@@ -162,7 +169,7 @@ func TestARunWithAUsedIDLeavesAHomeAtThatID(t *testing.T) {
 	if out, err := run(t, "run", "claude", "--run-id", id, "--", "-p", "first"); err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
-	other := filepath.Join(runKeyHome(t, root), id, "other")
+	other := filepath.Join(runHomesFolder(t, root), id, "other")
 	writeFile(t, other, "another run's\n")
 	out, err := run(t, "run", "claude", "--run-id", id, "--", "-p", "second")
 	if err == nil {
@@ -177,7 +184,7 @@ func TestARunWithAUsedIDLeavesAHomeAtThatID(t *testing.T) {
 // copy stays with its line, which does not depend on the home, and the home is gone.
 func TestARunsHomeIsGoneAfterAKeptCopy(t *testing.T) {
 	root, _ := committedFixture(t)
-	homes := runKeyHome(t, root)
+	homes := runHomesFolder(t, root)
 	var copyDir string
 	t.Cleanup(cmd.SetJoinResult(func(spec session.SessionSpec) (*session.Result, error) {
 		spec.OnVariables(session.Applied{})
@@ -202,7 +209,7 @@ func TestARunsHomeIsGoneAfterAKeptCopy(t *testing.T) {
 // TestARunsHomeIsGoneAfterAStop is a signal during the agent's session of a walled run.
 func TestARunsHomeIsGoneAfterAStop(t *testing.T) {
 	root := copyCheckout(t)
-	homes := runKeyHome(t, root)
+	homes := runHomesFolder(t, root)
 	agentInCopy(t, func(session.SessionSpec) {
 		oneRunHome(t, homes)
 		term(t)
@@ -374,5 +381,236 @@ func TestADispatchedWalledRunWithLinksCheckoutStarts(t *testing.T) {
 	out, err, n := inCheckoutRun(t, "claude")
 	if !n.joined {
 		t.Fatalf("the run did not go on to the join: %v\n%s", err, out)
+	}
+}
+
+// TestACommandOnTheHomesFolderLeavesARunningHome is each command that writes or removes a home,
+// with --home set to qory/homes, while a walled run's agent runs: each uses the checkout's folder
+// there, so the run's home keeps every file.
+func TestACommandOnTheHomesFolderLeavesARunningHome(t *testing.T) {
+	for name, command := range map[string][][]string{
+		"compose": {{"harness", "compose"}},
+		"run":     {{"run", "claude"}},
+		"remove":  {{"harness", "compose"}, {"harness", "remove"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			root, _ := committedFixture(t)
+			homes := filepath.Dir(runKeyHome(t, root))
+			joins := 0
+			t.Cleanup(cmd.SetJoinResult(func(spec session.SessionSpec) (*session.Result, error) {
+				spec.OnVariables(session.Applied{})
+				joins++
+				if joins > 1 {
+					return &session.Result{}, nil
+				}
+				home := oneRunHome(t, runHomesFolder(t, root))
+				whole := snapshot(t, home)
+				for _, args := range command {
+					if out, err := run(t, append(args, "--home", homes)...); err != nil {
+						t.Errorf("%v: %v\n%s", args, err, out)
+					}
+					if !maps.Equal(snapshot(t, home), whole) {
+						t.Errorf("%v changed the running home", args)
+					}
+				}
+				return &session.Result{}, nil
+			}))
+			if out, err := run(t, "run", "claude", "--", "-p", "hi"); err != nil || joins == 0 {
+				t.Fatalf("%d joins, %v\n%s", joins, err, out)
+			}
+		})
+	}
+}
+
+// TestAComposeAndALaunchOnTheHomesFolderFollowAWalledRun is the person's commands of a home after a
+// walled run: the run's report is not the one they read, so a launch has no report of a removed home.
+func TestAComposeAndALaunchOnTheHomesFolderFollowAWalledRun(t *testing.T) {
+	root, _ := committedFixture(t)
+	agentInCopy(t, func(session.SessionSpec) {})
+	if out, err := run(t, "run", "claude", "--", "-p", "hi"); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	homes := filepath.Dir(runKeyHome(t, root))
+	if out, err := run(t, "harness", "launch", "--runtime", "claude", "--home", homes); err != nil && strings.Contains(err.Error(), "names the home") {
+		t.Errorf("a launch reads the run's report: %v\n%s", err, out)
+	}
+	if out, err := run(t, "harness", "compose", "--home", homes); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	out, err := run(t, "harness", "launch", "--runtime", "claude", "--home", homes)
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	wants(t, out, runKeyHome(t, root))
+}
+
+// TestALaterWalledRunReadsThePins is a module whose tag moves between two walled runs: the second
+// run composes the commit of the first, from the report in the runs folder.
+func TestALaterWalledRunReadsThePins(t *testing.T) {
+	root, _ := committedFixture(t)
+	remote := tempDir(t)
+	runGit(t, remote, "init", "--quiet", "--initial-branch=main")
+	runGit(t, remote, "config", "user.name", "Tester")
+	runGit(t, remote, "config", "user.email", "tester@example.com")
+	writeManifest(t, filepath.Join(remote, "modules", "core"), "core")
+	writeFile(t, filepath.Join(remote, "modules", "core", "AGENTS.md"), "# First\n")
+	runGit(t, remote, "add", "-A")
+	runGit(t, remote, "commit", "-q", "-m", "first")
+	runGit(t, remote, "tag", "v1")
+	writeOwnStack(t, root, "apiVersion: qory.dev/v1alpha1\ntarget:\n  runtime: claude\nmodules:\n  - name: core\n    source: {git: file://"+remote+", ref: v1, path: modules/core}\n")
+	runGit(t, root, "add", "qory.yaml")
+	runGit(t, root, "commit", "--quiet", "-m", "the stack")
+	var instructions string
+	agentInCopy(t, func(session.SessionSpec) {
+		data, err := os.ReadFile(filepath.Join(oneRunHome(t, runHomesFolder(t, root)), "AGENTS.md"))
+		if err != nil {
+			t.Error(err)
+		}
+		instructions = string(data)
+	})
+	pin := func() string {
+		t.Helper()
+		if out, err := run(t, "run", "claude", "--", "-p", "hi"); err != nil {
+			t.Fatalf("%v\n%s", err, out)
+		}
+		rep, err := report.Read(runHomesFolder(t, root) + "-report.json")
+		if err != nil || len(rep.Modules) != 1 {
+			t.Fatalf("the report: %+v, %v", rep.Modules, err)
+		}
+		return rep.Modules[0].Pin
+	}
+	first := pin()
+	writeFile(t, filepath.Join(remote, "modules", "core", "AGENTS.md"), "# Second\n")
+	runGit(t, remote, "commit", "-q", "-am", "second")
+	runGit(t, remote, "tag", "-f", "v1")
+	if second := pin(); second != first {
+		t.Errorf("the pin %s, want %s", second, first)
+	}
+	wants(t, instructions, "# First")
+	lacks(t, instructions, "# Second")
+}
+
+// TestAWalledRunWithNoLinksPrintsWhatToRemove is the line of a run for which --wall none alone gives
+// no links, and the default, for which it does.
+func TestAWalledRunWithNoLinksPrintsWhatToRemove(t *testing.T) {
+	const rest = "run with --wall none for gemini's skills, agents, commands and instructions: a walled run has the harness in a home outside the checkout, and gemini reads those from the checkout.\n"
+	const removes = "remove --home, harness.home and harness.links: none, and "
+	for name, c := range map[string]struct {
+		machine string
+		home    bool
+		want    string
+	}{
+		"--home":              {home: true, want: removes},
+		"harness.home":        {machine: "harness:\n  home: @HOMES@\n", want: removes},
+		"harness.links: none": {machine: "harness:\n  links: none\n", want: removes},
+		"the default":         {},
+	} {
+		t.Run(name, func(t *testing.T) {
+			committedFixture(t)
+			homes := tempDir(t)
+			args := []string{"run", "gemini"}
+			if c.home {
+				args = append(args, "--home", homes)
+			}
+			if c.machine != "" {
+				machineConfig(t, strings.ReplaceAll(c.machine, "@HOMES@", homes))
+			}
+			agentInCopy(t, func(session.SessionSpec) {})
+			out, err := run(t, append(args, "--", "-p", "hi")...)
+			if err != nil {
+				t.Fatalf("%v\n%s", err, out)
+			}
+			wants(t, out, "qory run: "+c.want+rest)
+		})
+	}
+}
+
+// oneFilesEntry is a stack of one module with one files entry for the runtime, and nothing else.
+func oneFilesEntry(t *testing.T, root, runtime string) {
+	t.Helper()
+	module := filepath.Join(root, "modules", "only")
+	writeManifest(t, module, "only")
+	writeFile(t, filepath.Join(module, "files", runtime, "notes.md"), "notes\n")
+	writeOwnStack(t, root, "apiVersion: qory.dev/v1alpha1\ntarget:\n  runtime: "+runtime+"\nmodules:\n  - name: only\n    source: {path: modules/only}\n")
+	runGit(t, root, "add", "qory.yaml", "modules")
+	runGit(t, root, "commit", "--quiet", "-m", "one files entry")
+}
+
+// TestAWalledRunPrintsAFilesEntry is a harness with one files entry: the line on each runtime that
+// reads those from the checkout alone, and none on opencode, which reads them from the home.
+func TestAWalledRunPrintsAFilesEntry(t *testing.T) {
+	const reason = ": a walled run has the harness in a home outside the checkout, and "
+	for _, runtime := range []string{"gemini", "amp", "cursor", "copilot", "opencode"} {
+		t.Run(runtime, func(t *testing.T) {
+			root, _ := committedFixture(t)
+			oneFilesEntry(t, root, runtime)
+			agentInCopy(t, func(session.SessionSpec) {})
+			out, err := run(t, "run", runtime, "--", "-p", "hi")
+			if err != nil {
+				t.Fatalf("%v\n%s", err, out)
+			}
+			if runtime == "opencode" {
+				lacks(t, out, reason)
+				return
+			}
+			wants(t, out, "qory run: run with --wall none for "+runtime+"'s files"+reason+runtime+" reads those from the checkout.\n")
+		})
+	}
+}
+
+// TestTheLineListsFilesAfterTheRest is a stack with every part of gemini's list.
+func TestTheLineListsFilesAfterTheRest(t *testing.T) {
+	root, _ := committedFixture(t)
+	writeFile(t, filepath.Join(root, "modules", "core", "files", "gemini", "notes.md"), "notes\n")
+	runGit(t, root, "add", "modules")
+	runGit(t, root, "commit", "--quiet", "-m", "a files entry")
+	agentInCopy(t, func(session.SessionSpec) {})
+	out, err := run(t, "run", "gemini", "--", "-p", "hi")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	wants(t, out, "run with --wall none for gemini's skills, agents, commands, instructions and files: ")
+}
+
+// replacesReport is the output of a run that, at the line of its compose, replaces the shared report
+// with another run's, as a second run of the checkout on another runtime does.
+type replacesReport struct {
+	output
+	at       string
+	replaced bool
+}
+
+// Write appends p to the output, and replaces the report at the line of the compose.
+func (r *replacesReport) Write(p []byte) (int, error) {
+	if !r.replaced && strings.Contains(string(p), "qory run: composed ") {
+		r.replaced = true
+		rep, err := report.Read(r.at)
+		if err == nil {
+			rep.Target.Runtimes = []string{"codex"}
+			err = report.Write(r.at, rep)
+		}
+		if err != nil {
+			return 0, err
+		}
+	}
+	return r.output.Write(p)
+}
+
+// TestARunStartsFromItsCompose is another run's report in the shared place, between a run's compose
+// and its start: the run starts on what it composed.
+func TestARunStartsFromItsCompose(t *testing.T) {
+	root, _ := committedFixture(t)
+	var started string
+	agentInCopy(t, func(spec session.SessionSpec) { started = spec.Command })
+	out := &replacesReport{at: runHomesFolder(t, root) + "-report.json"}
+	c := cmd.Root()
+	c.SetArgs([]string{"run", "claude", "--", "-p", "hi"})
+	c.SetOut(out)
+	c.SetErr(out)
+	if err := c.Execute(); err != nil {
+		t.Fatalf("%v\n%s", err, out.String())
+	}
+	if !out.replaced || started != "claude" {
+		t.Errorf("replaced %v, started %q\n%s", out.replaced, started, out.String())
 	}
 }

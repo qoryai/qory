@@ -20,9 +20,9 @@
 // The Cursor CLI also takes a plugin from outside the checkout, --plugin-dir, in the
 // layout Claude Code's plugins have, and the runtime's directory contains one at plugin/:
 // the skills and the agents linked, and copies of hooks.json as hooks/hooks.json and of
-// mcp.json as .mcp.json, since the CLI has no flag for settings. The instructions are
-// read from the checkout alone. [Template] passes the plugin, and the checkout's .cursor
-// never links it.
+// mcp.json as .mcp.json, since the CLI has no flag for settings. The instructions and the
+// files entries are read from the checkout alone. [Template] passes the plugin, and the
+// checkout's .cursor never links it.
 package cursor
 
 import (
@@ -64,7 +64,7 @@ func (cursor) Links(res *compose.Result) []render.Link {
 }
 
 // CheckoutParts are what the package comment lists as read from the checkout alone.
-func (cursor) CheckoutParts() []string { return []string{render.Instructions} }
+func (cursor) CheckoutParts() []string { return []string{render.Instructions, render.FilesKind} }
 
 // Skips are commands and output styles, since Cursor folded commands into skills and has
 // no output styles.

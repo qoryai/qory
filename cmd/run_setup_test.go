@@ -294,10 +294,10 @@ exec `+fake+` "$@"
 // record it writes: qory run prints the install line, the fix first, in place of the exit status
 // of the step, and the line reaches no agent. Nothing else the image printed reaches the terminal.
 func TestAMissingToolReachesThePerson(t *testing.T) {
-	const line = "install comm in /usr/local/bin, /usr/bin, /bin: the git session of a walled run runs comm from these folders, to compare the refs"
+	const line = "install comm in /usr/local/bin, /usr/bin, /bin: the git session of a walled run runs comm from these folders, to compare the run's refs and commits with what the bundle has"
 	p := newPushRepo(t, "write")
 	p.real = true
-	walledBy(t, missingToolDocker(t, line))
+	walledBy(t, missingToolDocker(t, strings.ReplaceAll(line, "'", `'\''`)))
 	p.flags = []string{"--home", filepath.Join(tempDir(t), "home")}
 	r := p.run(t, func(string) { t.Error("the agent started") }, nil)
 	wants(t, r.out, "qory run: "+line+"\n")
@@ -325,6 +325,15 @@ func TestAMissingShellReachesThePerson(t *testing.T) {
 	if strings.Contains(r.out, "Fix Check tools") {
 		t.Errorf("the output has the step's exit status:\n%s", r.out)
 	}
+}
+
+// TestAnExecThatCouldNotRunTheCommandReportsItsStep is exit 126, where docker could not run the
+// command for a cause other than a missing shell, such as the image's architecture.
+func TestAnExecThatCouldNotRunTheCommandReportsItsStep(t *testing.T) {
+	h := newHostFetch(t, "", "main")
+	r := runSetUp(t, h, "", "acme/shop", &session.SetupError{Name: "Check tools", Step: 3, ExitCode: 126})
+	wants(t, r.out, "qory run: Fix Check tools: setup step 3 exited with 126.\n")
+	lacks(t, r.out, "install sh")
 }
 
 // TestACheckThatPrintedNoLineReportsItsStep is a step that exited 1 with no line in its record.

@@ -852,6 +852,8 @@ func TestAControlPlaneRunHasNoArtifactsCopy(t *testing.T) {
 			t.Fatal(err)
 		}
 		writeFile(t, filepath.Join(root, "file.txt"), "first\n")
+		runGit(t, root, "config", "user.name", "Tester")
+		runGit(t, root, "config", "user.email", "tester@example.com")
 		runGit(t, root, "add", "file.txt")
 		runGit(t, root, "commit", "--quiet", "-m", "first")
 		writeFile(t, filepath.Join(root, ".qory", "artifacts", "person.txt"), "the person\n")
@@ -1778,7 +1780,7 @@ func TestAWalledRunComposesUnderTheCache(t *testing.T) {
 	if !containerRun.Match(data) {
 		t.Fatalf("no container started:\n%s", data)
 	}
-	home := regexp.QuoteMeta(runKeyHome(t, root)) + `/[^/,]+`
+	home := regexp.QuoteMeta(runHomesFolder(t, root)) + `/[^/,]+`
 	if want := regexp.MustCompile(`--mount type=bind,src=` + home + `,dst=` + home + `,readonly`); !want.Match(data) {
 		t.Errorf("no read-only mount of the run's home:\n%s", data)
 	}
@@ -1943,6 +1945,64 @@ func TestAPlainFolderWithQoryPrintsNoLeftOut(t *testing.T) {
 	if strings.Contains(out, ".qory.") {
 		t.Errorf("a line has .qory:\n%s", out)
 	}
+}
+
+// TestAPlainFolderRunThatWritesInQoryPrintsTheLine is an agent that writes what the copy back does
+// not bring to the person's folder, at .qory: the line prints once, since the copy goes with it.
+func TestAPlainFolderRunThatWritesInQoryPrintsTheLine(t *testing.T) {
+	for name, agent := range map[string]func(t *testing.T, work string){
+		"a file": func(t *testing.T, work string) {
+			writeFile(t, filepath.Join(work, ".qory"), "a file\n")
+		},
+		"a file in the folder": func(t *testing.T, work string) {
+			writeFile(t, filepath.Join(work, ".qory", "notes.md"), "notes\n")
+		},
+		"a link": func(t *testing.T, work string) {
+			if err := os.Symlink("README.md", filepath.Join(work, ".qory")); err != nil {
+				t.Fatal(err)
+			}
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			root := emptyDir(t)
+			copyFixture(t, "two-modules", root)
+			docker, _ := fakeDocker(t)
+			walledBy(t, docker)
+			t.Setenv("QORY_RUN_KEY", "")
+			agentInCopy(t, func(spec session.SessionSpec) { agent(t, spec.Dir) })
+			out, err := run(t, "run", "claude", "--", "-p", "hi")
+			if err != nil {
+				t.Fatalf("%v\n%s", err, out)
+			}
+			if line := "qory run: left out of the copy back to your folder: .qory.\n"; strings.Count(out, line) != 1 {
+				t.Errorf("want %q once:\n%s", line, out)
+			}
+			if _, err := os.Lstat(filepath.Join(root, ".qory")); err == nil {
+				t.Error("the person's folder got a .qory")
+			}
+		})
+	}
+}
+
+// TestAQoryLinkPrintsTheLine is a person's .qory that links to a folder with artifacts: the run's copy
+// has no artifact, and the line prints.
+func TestAQoryLinkPrintsTheLine(t *testing.T) {
+	root, _ := committedFixture(t)
+	elsewhere := tempDir(t)
+	writeFile(t, filepath.Join(elsewhere, "artifacts", "note", "main", "1", "a.txt"), "note\n")
+	if err := os.Symlink(elsewhere, filepath.Join(root, ".qory")); err != nil {
+		t.Fatal(err)
+	}
+	agentInCopy(t, func(spec session.SessionSpec) {
+		if _, err := os.Lstat(filepath.Join(spec.Dir, ".qory", "artifacts")); err == nil {
+			t.Error("the run's copy has the artifacts")
+		}
+	})
+	out, err := run(t, "run", "claude", "--", "-p", "hi")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	wants(t, out, "qory run: left out of the run's copy: .qory.\n")
 }
 
 // TestACommitWithAFileNamedQoryPrintsNoLeftOut is a commit with a file at .qory: nothing can be left

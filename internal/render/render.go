@@ -137,7 +137,7 @@ type Launcher interface {
 // so that part does not reach a session on a home with no links into the checkout.
 type CheckoutReader interface {
 	// CheckoutParts are the parts it reads from the checkout alone, in the order a line lists
-	// them: an entry kind, or [Instructions].
+	// them: an entry kind, [Instructions], or [FilesKind] for the runtime's files entries.
 	CheckoutParts() []string
 }
 
@@ -156,7 +156,13 @@ func CheckoutOnly(rt Runtime, res *compose.Result) []string {
 	var parts []string
 	for _, part := range reader.CheckoutParts() {
 		wrote := part == Instructions && res.Instructions != "" ||
-			slices.ContainsFunc(res.Entries, func(e compose.Entry) bool { return e.Kind == part })
+			slices.ContainsFunc(res.Entries, func(e compose.Entry) bool {
+				if part == FilesKind {
+					_, ok := FileFor(e, rt.Name())
+					return ok
+				}
+				return e.Kind == part
+			})
 		if wrote {
 			parts = append(parts, part)
 		}

@@ -218,6 +218,9 @@ func TestCheckoutOnlyListsWhatTheComposeWrote(t *testing.T) {
 	}}
 	noSkills := &compose.Result{Instructions: "be brief", Entries: []compose.Entry{{Kind: "agents"}}}
 	skillsOnly := &compose.Result{Entries: []compose.Entry{{Kind: "skills"}}}
+	filesFor := func(runtime string) *compose.Result {
+		return &compose.Result{Entries: []compose.Entry{{Kind: "files", Name: runtime + "/notes.md"}}}
+	}
 	for _, c := range []struct {
 		runtime string
 		res     *compose.Result
@@ -236,6 +239,13 @@ func TestCheckoutOnlyListsWhatTheComposeWrote(t *testing.T) {
 		{"claude", every, nil},
 		{"codex", every, nil},
 		{"goose", every, nil},
+		{"gemini", filesFor("gemini"), []string{"files"}},
+		{"amp", filesFor("amp"), []string{"files"}},
+		{"cursor", filesFor("cursor"), []string{"files"}},
+		{"copilot", filesFor("copilot"), []string{"files"}},
+		{"opencode", filesFor("opencode"), nil},
+		{"gemini", filesFor("claude"), nil},
+		{"claude", filesFor("claude"), nil},
 	} {
 		rt, err := render.Lookup(c.runtime)
 		if err != nil {

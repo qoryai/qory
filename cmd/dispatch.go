@@ -51,10 +51,9 @@ func homeInFolder(root, home string) error {
 // cacheHomes is the root of the homes of walled runs and runs given a run key when neither
 // --home nor harness.home sets one: qory/homes under the user's cache directory, ~/Library/Caches
 // on macOS and $XDG_CACHE_HOME or ~/.cache on Linux, one folder per checkout under it. A run
-// given a run key composes into that folder, and a person's walled run into a folder of the
-// run's id inside it, which [removeRunHome] removes. The report of both is beside the
-// checkout's folder, as <name>-<hash>-report.json. It
-// is not under qory's state directory: a walled run mounts its home, and Forager stops
+// given a run key composes into that folder, with its report beside it, as
+// <name>-<hash>-report.json. A person's walled run takes [runHomeAt]. The root is
+// not under qory's state directory: a walled run mounts its home, and Forager stops
 // a run with a mount inside that directory, which contains the run records. root is the
 // checkout the run runs in, which the error of a failed lookup prints.
 func cacheHomes(root string) (string, error) {
@@ -63,6 +62,21 @@ func cacheHomes(root string) (string, error) {
 		return "", input(fmt.Errorf("set HOME, or give --home a folder outside %s: a walled run or a run with a run key composes its harness under the cache directory, and the lookup of that directory failed: %w", exports.Value(root, false), err))
 	}
 	return filepath.Join(base, "qory", "homes"), nil
+}
+
+// runHomesDir is the folder under [cacheHomes] of the homes of a person's walled runs. A checkout's
+// folder there ends in a hash, see [checkout.Key], so it is never this one.
+const runHomesDir = "runs"
+
+// runHomeAt is at, a checkout's folder under [cacheHomes], for a person's walled run with the id:
+// the home is runs/<name>-<hash>/<id> there, which [removeRunHome] removes, so a second run leaves
+// the first run's home as it is. The report is runs/<name>-<hash>-report.json, so a module keeps its
+// pin between runs. A --home of the root writes and removes only <name>-<hash> and its report, and
+// neither is in runs.
+func runHomeAt(at places, id string) places {
+	runs := filepath.Join(filepath.Dir(at.home), runHomesDir, filepath.Base(at.home))
+	at.home, at.report = filepath.Join(runs, id), reportFor(runs)
+	return at
 }
 
 // withCacheHome is conf with the home of a walled run or a run given a run key in the checkout

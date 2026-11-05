@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/qoryai/qory/internal/exports"
 )
@@ -327,16 +328,24 @@ func sessionCheckScript(path string) string {
 	return b.String()
 }
 
-// sessionCheckFunctions are the functions of [SessionCheckScript]. found sets at to where the
-// shell finds a program: a builtin of /bin/sh counts, since the session's script runs under the
-// same shell, and a file that is not executable does not, which dash's command -v lists. fail
+// sessionCheckFunctions are the functions of [SessionCheckScript]. found sets at to the first
+// executable file with that name in a folder of the PATH, where dash's command -v returns the
+// first file, executable or not. A builtin of /bin/sh counts as well, since the session's script
+// runs under the same shell. fail
 // prints a line with what git's run gave in place of @AT@, @STATUS@ and @LINE@. at_least_225 is
 // [gitAtLeast225].
 const sessionCheckFunctions = `found() {
+	dirs=$PATH:
+	while test -n "$dirs"; do
+		at=${dirs%%:*}/$1
+		dirs=${dirs#*:}
+		if test -x "$at" && test ! -d "$at"; then
+			return 0
+		fi
+	done
 	at=$(command -v "$1" 2>/dev/null) || at=
 	case $at in
-	'') return 1 ;;
-	/*) test -f "$at" && test -x "$at" ;;
+	'' | /*) return 1 ;;
 	esac
 }
 fail() {
@@ -370,24 +379,63 @@ func shellQuoted(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
+// maxSessionGitLine is the longest line about git that [SessionCheckLine] takes, in bytes. The
+// line for git version 2.24.0 in /usr/local/bin has 151 bytes.
+const maxSessionGitLine = 200
+
 // SessionCheckLine is line, one line of what [SessionCheckScript] printed, as qory prints it, and
-// whether it starts as a line of the script does and has no control character. The image runs the
-// script, so the line can contain anything.
+// whether the script can print it. The image runs the script, so the line can contain anything: a
+// line about a program is one of the fixed lines, and a line about git's version has one of the
+// script's forms, at most [maxSessionGitLine] bytes of valid UTF-8 with no control or format
+// character.
 func SessionCheckLine(line string) (string, bool) {
-	if strings.IndexFunc(line, unicode.IsControl) >= 0 {
+	if line == noSessionGit() {
+		return line, true
+	}
+	for _, tool := range sessionTools {
+		if line == noSessionTool(tool.name, tool.why) {
+			return line, true
+		}
+	}
+	if len(line) > maxSessionGitLine || !utf8.ValidString(line) || strings.IndexFunc(line, unprintable) >= 0 {
 		return "", false
 	}
-	dirs := " in " + strings.Join(gitSessionDirs, ", ") + ": "
-	starts := []string{"install git" + dirs, "install git 2.25 or later" + dirs}
-	for _, tool := range sessionTools {
-		starts = append(starts, "install "+tool.name+dirs)
-	}
-	for _, start := range starts {
-		if strings.HasPrefix(line, start) {
+	for _, dir := range gitSessionDirs {
+		at := dir + "/git"
+		if strings.HasPrefix(line, sessionGitOld(at, "")) {
 			return exports.HideValues(line), true
+		}
+		if status, ok := strings.CutPrefix(line, sessionGitFailed(at, "exit status ")); ok && isStatus(status) {
+			return line, true
 		}
 	}
 	return "", false
+}
+
+// SessionCheckFixes is what qory prints of text, the output of [SessionCheckScript]: each line
+// [SessionCheckLine] takes, and at most as many as the script can print.
+func SessionCheckFixes(text string) []string {
+	var fixes []string
+	for line := range strings.Lines(text) {
+		if fix, ok := SessionCheckLine(strings.TrimRight(line, "\n")); ok {
+			fixes = append(fixes, fix)
+			if len(fixes) == len(sessionTools)+1 {
+				break
+			}
+		}
+	}
+	return fixes
+}
+
+// unprintable reports whether r is a control or format character, which a terminal can act on.
+func unprintable(r rune) bool { return unicode.IsControl(r) || unicode.Is(unicode.Cf, r) }
+
+// isStatus reports whether s is an exit status: one to three digits.
+func isStatus(s string) bool {
+	if s == "" || len(s) > 3 {
+		return false
+	}
+	return strings.Trim(s, "0123456789") == ""
 }
 
 // git checks that git runs, and what the git session of a walled run that may write needs of
