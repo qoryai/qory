@@ -3445,9 +3445,12 @@ Five cases stop the run with their fix first:
   `.qory`. Remove `.qory` from the commit, or make it a folder.
 
 When the agent has ended, however it ended, a second session starts on the same run: the git
-session. It runs no agent and gets no model key and no run code, and it binds only the
-copy and a new folder for its bundles. It commits what the agent left, with no setting from
-the copy's `.git` and no filter, and writes the run's branch to a git bundle. With a branch
+session. It runs no agent and gets no model key and no run code. It never binds your
+checkout, and of what you have, only the copy is writable. Its other binds are a new folder
+for its bundles and the folder of the hook forwarder's socket, both writable, and `qory`'s
+Linux build and the session's folder in the run's record, both read-only. It commits what
+the agent left, with no setting from the copy's `.git` and no filter, and writes the run's
+branch to a git bundle. With a branch
 checked out that descends from your commit, the bundle has that branch, and its commits keep
 their messages. With `HEAD` at your commit and the run's branch past it, with `HEAD` on a branch with
 no commit, on a commit older than yours, or on a commit other than the run's branch's that does not
