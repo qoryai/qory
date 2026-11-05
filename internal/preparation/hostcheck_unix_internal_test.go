@@ -14,6 +14,11 @@ import (
 	"github.com/qoryai/qory/internal/places"
 )
 
+// shellQuote is s as one word of a shell script.
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
 // TestHoldsTheWorkingFolderUntilTheFetchEnds is a fetch that a stand-in git stops at
 // git fetch: a walled run that starts in the working folder meanwhile waits until the
 // fetch and the checkout end, so it cannot change the configuration qory checked.
@@ -33,7 +38,7 @@ func TestHoldsTheWorkingFolderUntilTheFetchEnds(t *testing.T) {
 	flags := t.TempDir()
 	started, proceed := filepath.Join(flags, "started"), filepath.Join(flags, "proceed")
 	bin := t.TempDir()
-	write(t, filepath.Join(bin, "git"), "#!/bin/sh\nfor a; do [ \"$a\" = fetch ] && { touch '"+started+"'; i=0; while [ ! -e '"+proceed+"' ] && [ $i -lt 300 ]; do sleep 0.1; i=$((i+1)); done; break; }; done\nexec "+gitPath+" \"$@\"\n")
+	write(t, filepath.Join(bin, "git"), "#!/bin/sh\nfor a; do [ \"$a\" = fetch ] && { touch '"+started+"'; i=0; while [ ! -e '"+proceed+"' ] && [ $i -lt 300 ]; do sleep 0.1; i=$((i+1)); done; break; }; done\nexec "+shellQuote(gitPath)+" \"$@\"\n")
 	if err := os.Chmod(filepath.Join(bin, "git"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -179,7 +184,7 @@ func TestAnEmptyFolderFetchesInAnotherLanguage(t *testing.T) {
 	base := t.TempDir()
 	remote(t, base, "acme/shop", "main", nil)
 	bin := t.TempDir()
-	write(t, filepath.Join(bin, "git"), "#!/bin/sh\nif [ \"$LC_ALL\" != C ]; then for a; do if [ \"$a\" = --git-dir ]; then echo 'Schwerwiegend: Kein Git-Repository (oder irgendeines der Elternverzeichnisse): .git' >&2; exit 128; fi; done; fi\nexec "+gitPath+" \"$@\"\n")
+	write(t, filepath.Join(bin, "git"), "#!/bin/sh\nif [ \"$LC_ALL\" != C ]; then for a; do if [ \"$a\" = --git-dir ]; then echo 'Schwerwiegend: Kein Git-Repository (oder irgendeines der Elternverzeichnisse): .git' >&2; exit 128; fi; done; fi\nexec "+shellQuote(gitPath)+" \"$@\"\n")
 	if err := os.Chmod(filepath.Join(bin, "git"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -239,7 +244,7 @@ func TestAWalledRunWaitsForGitInit(t *testing.T) {
 	flags := t.TempDir()
 	started, proceed := filepath.Join(flags, "started"), filepath.Join(flags, "proceed")
 	bin := t.TempDir()
-	write(t, filepath.Join(bin, "git"), "#!/bin/sh\nfor a; do [ \"$a\" = init ] && { touch '"+started+"'; i=0; while [ ! -e '"+proceed+"' ] && [ $i -lt 300 ]; do sleep 0.1; i=$((i+1)); done; break; }; done\nexec "+gitPath+" \"$@\"\n")
+	write(t, filepath.Join(bin, "git"), "#!/bin/sh\nfor a; do [ \"$a\" = init ] && { touch '"+started+"'; i=0; while [ ! -e '"+proceed+"' ] && [ $i -lt 300 ]; do sleep 0.1; i=$((i+1)); done; break; }; done\nexec "+shellQuote(gitPath)+" \"$@\"\n")
 	if err := os.Chmod(filepath.Join(bin, "git"), 0o755); err != nil {
 		t.Fatal(err)
 	}

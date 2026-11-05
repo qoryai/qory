@@ -25,21 +25,20 @@ import (
 
 // safeRepository stops on a working folder whose repository git on this machine must not
 // fetch into, before any git reaches a remote from there through the run's host proxy: the
-// fetch runs on this machine, and a walled run of an earlier run could have written the working
-// folder's .git. A key of the repository's configuration can make git run a program, as
+// fetch runs on this machine, and a walled run of an earlier run could have written the
+// working folder's .git. A key of the repository's configuration can make git run a program, as
 // a filter does on checkout, or take the fetch past the gateway or past its check of
 // the host's certificate, as remote.<name>.proxy and http.sslVerify do. A link under
 // .git can send git's reads and writes outside the working folder, and alternates make
 // git read objects from a store outside it.
 //
 // It stops on the folder, in this order, when:
-//   - its .git has a link anywhere under it ([textGitLink]); it, outside objects, or
-//     .qory has a regular file with another name, a hard link ([textHardLink]); or it
-//     has a commondir file ([textCommonDir]), info/grafts ([textGrafts]),
-//     objects/info/alternates or objects/info/http-alternates ([textAlternates]), or a
-//     config or config.worktree
-//     that is not a regular file ([textConfigNotFile]); or it has no HEAD, objects or refs
-//     ([textNoGitPart]);
+//   - its .git has a link anywhere under it ([textGitLink]); a regular file outside objects
+//     with another name, a hard link ([textHardLink]); a commondir file ([textCommonDir]),
+//     info/grafts ([textGrafts]), objects/info/alternates or objects/info/http-alternates
+//     ([textAlternates]); a config or config.worktree that is not a regular file
+//     ([textConfigNotFile]); or no HEAD, objects or refs ([textNoGitPart]);
+//   - its .qory has a regular file with another name ([textHardLink]);
 //   - hostgit's settings check stops on it ([textPlaceRefused]): the folder is in a place
 //     a walled run used, and its configuration has a key qory and git do not write, or
 //     changed since the place was recorded, or a walled run uses it now;

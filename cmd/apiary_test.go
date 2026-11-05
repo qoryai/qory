@@ -21,7 +21,7 @@ import (
 const diagnosticsRunID = "rn_0123456789abcdef"
 
 // diagnosticsNotARunID is the first line of the error for a value that is not a run id.
-const diagnosticsNotARunID = "Use the run's id, rn_ and 16 characters: a run number does not identify a run."
+const diagnosticsNotARunID = "Use the run's id, rn_ and 16 characters: only that id identifies a run."
 
 // diagnosticsFixture is the path of a diagnostics document of the diagnostics
 // contract's fixtures, resolved before any test changes the working directory. It is

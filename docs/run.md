@@ -168,8 +168,8 @@ git fetches anything if the working folder:
 
 - has any entry and no `.git`, such as a file or only `.qory`;
 - is a link to an empty folder;
-- is empty and, on the same file system, inside a git repository or below a `.git` that git
-  cannot read;
+- is empty and, on the same file system, inside a git repository or below a `.git` on which
+  git fails, such as a `.git` file that leads nowhere or a bad config;
 - has a `.git` and anything else but `.qory`, with or without a commit;
 - has a `.git` that is a file or a link, or that has no `HEAD`, `objects` or `refs`;
 - is not the top of its git working tree;

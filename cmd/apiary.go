@@ -141,7 +141,7 @@ More: ` + apiaryDocs,
 // verify under the pinned key prints nothing.
 func diagnose(ctx context.Context, out, report io.Writer, runID, serverURL string, serverGiven bool) error {
 	if !runIDShape.MatchString(runID) {
-		return input(fmt.Errorf("Use the run's id, rn_ and 16 characters: a run number does not identify a run.\nYou passed %s.", exports.Value(runID, true)))
+		return input(fmt.Errorf("Use the run's id, rn_ and 16 characters: only that id identifies a run.\nYou passed %s.", exports.Value(runID, true)))
 	}
 	root, err := apiarydir.Root()
 	if err != nil {
