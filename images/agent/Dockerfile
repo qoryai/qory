@@ -1,7 +1,8 @@
 # agent: the image the wall runs the agent in, the base every other agent image of
 # Qory's is built FROM. It holds what qory's harness launches and what an agent needs to
 # deliver its work: Claude Code at the version Forager's descriptor for it sets, git,
-# the GitHub command, and the system's authorities where the wall reads them. It runs as any user the machine gives it, with HOME a directory every user may
+# the GitHub command, poppler's PDF tools, which Claude Code reads a PDF's pages with,
+# and the system's authorities where the wall reads them. It runs as any user the machine gives it, with HOME a directory every user may
 # write, and holds no setuid or setgid program. It sets no entry point: the wall starts
 # the launch command, or qory's helper, itself.
 #
@@ -86,7 +87,7 @@ RUN apt="-o Dir::Etc::SourceList=/tmp/snapshot.sources -o Dir::Etc::SourceParts=
         /etc/apt/sources.list.d/debian.sources > /tmp/snapshot.sources \
  && ! grep -q deb.debian.org /tmp/snapshot.sources \
  && apt-get $apt update \
- && apt-get $apt install -y --no-install-recommends ca-certificates git \
+ && apt-get $apt install -y --no-install-recommends ca-certificates git poppler-utils \
  && rm -rf /var/lib/apt/lists/* /tmp/snapshot.sources
 
 # From the checked archives alone, with no registry: the package's install script, the
@@ -106,6 +107,7 @@ COPY --from=gh /out/bin/gh /usr/local/bin/gh
 # the agent as the machine's user id, which has no entry in this image.
 RUN gh --version \
  && git --version \
+ && pdftoppm -v \
  && mkdir -p /home/agent \
  && chmod 1777 /home/agent \
  && find / -xdev -type f \( -perm -4000 -o -perm -2000 \) -exec chmod ug-s {} +
