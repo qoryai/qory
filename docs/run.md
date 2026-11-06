@@ -391,21 +391,10 @@ It holds:
 The record has `qory run`'s work before the agent starts as steps, each with its lines and
 how it ended:
 
-1. For a run from a run code given `--machine-steps-file <file>`, the machine step, `start
-   machine`, of kind `machine`, right after the run opens. A machine's start script
-   gives the flag, which `qory run --help` does not show, and writes the file: one JSON
-   object per line, in the order the steps ran, such as
-   `{"name":"start Docker","started":"2026-11-06T00:31:58.904Z","ended":"2026-11-06T00:32:02.104Z"}`,
-   each time in RFC 3339. The step has one line per entry, the name and the seconds from
-   `started` to `ended`, such as `start Docker  3.2 s`, and ends `succeeded` with -1. It
-   shows the first 64 entries, each name without control characters and cut to 100
-   characters. A file that is missing, cannot be read, is larger than 64 KiB, or has a
-   line that is not such an object, with a time that does not parse or that ended before
-   it started, leaves the step out, and so does a step that Forager fails to start. qory
-   then prints one line, such as `qory run: the run's record has no machine step: line 3
-   of /var/lib/qory-machine/steps.jsonl is not a JSON object with the strings name,
-   started and ended`, and the run goes on. `--machine-steps-file` without
-   `--run-code-file` exits 2.
+1. For a run from a run code given `--machine-steps-file <file>`, which a machine's start
+   script passes, the step `start machine`, of kind `machine`, right after the run opens:
+   one line per entry of the file, such as `start Docker  3.2 s`, and it ends `succeeded`.
+   With a bad file the run has no such step, qory prints one line, and the run goes on.
 2. When the run configuration lists repositories, the fetch, named after the run's
    repository, such as `fetch github.com/example-org/shop`, with `and 1 further
    repository` when there are two.

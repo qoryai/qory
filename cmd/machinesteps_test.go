@@ -89,8 +89,9 @@ func TestMachineStepsFileIsHidden(t *testing.T) {
 
 // TestARunCodeWritesTheMachineStepBeforeTheFetch is a run from a run code with
 // --machine-steps-file: step 1 is the machine step, start machine, with one line per
-// entry, the escape sequence removed and the second name cut to 100 characters, and it
-// exits succeeded with -1; the fetch is step 2. qory run prints no line of it.
+// entry, the second name without its escape sequence, \x1b[2K, and cut to 100
+// characters, and it exits succeeded with -1; the fetch is step 2. qory run prints no
+// line of it.
 func TestARunCodeWritesTheMachineStepBeforeTheFetch(t *testing.T) {
 	file := filepath.Join(t.TempDir(), "steps.jsonl")
 	writeFile(t, file, machineSteps)
@@ -102,7 +103,7 @@ func TestARunCodeWritesTheMachineStepBeforeTheFetch(t *testing.T) {
 	want := []string{
 		"1 started machine: start machine",
 		"1 log: boot  14.8 s\n",
-		"1 log: start Docker[2K" + strings.Repeat("x", 85) + "  3.2 s\n",
+		"1 log: start Docker" + strings.Repeat("x", 88) + "  3.2 s\n",
 		"1 exited succeeded -1",
 		"2 started fetch: fetch " + proxygittest.Host + "/acme/site",
 	}
@@ -134,14 +135,14 @@ func TestARunCodeWithABadMachineStepsFileGoesOn(t *testing.T) {
 }
 
 // TestARunCodeWhoseMachineStepForagerDoesNotStartGoesOn is a run from a run code whose
-// machine step Forager does not start: qory run prints one line with Forager's error,
-// the fetch is step 1, and the run joins.
+// machine step Forager does not start: qory run prints one line with the error, the
+// fetch is step 1, and the run joins.
 func TestARunCodeWhoseMachineStepForagerDoesNotStartGoesOn(t *testing.T) {
 	file := filepath.Join(t.TempDir(), "steps.jsonl")
 	writeFile(t, file, machineSteps)
 	out, err, n, steps := machineRun(t, file, func(kind string) error {
 		if kind == event.StepMachine {
-			return errors.New("start a host step of kind fetch, compose, build or push, not \"machine\"")
+			return errors.New("the run is closed")
 		}
 		return nil
 	})
@@ -151,7 +152,7 @@ func TestARunCodeWhoseMachineStepForagerDoesNotStartGoesOn(t *testing.T) {
 	if len(steps) == 0 || steps[0].Kind != event.StepFetch || steps[0].Step != 1 {
 		t.Errorf("the steps:\n%s\nwant the fetch first", strings.Join(shownSteps(steps), "\n"))
 	}
-	line := "qory run: the run's record has no machine step: writing the step failed: start a host step of kind fetch, compose, build or push, not \"machine\"\n"
+	line := "qory run: the run's record has no machine step: writing the step failed: the run is closed\n"
 	if c := strings.Count(out, "machine step"); c != 1 || !strings.Contains(out, line) {
 		t.Errorf("want one line %q, got %d lines of the machine step:\n%s", line, c, out)
 	}

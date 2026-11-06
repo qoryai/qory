@@ -235,8 +235,8 @@ release may change what an existing document does, and states it under Upgrading
   `from`.
 - A run from a run code given `--machine-steps-file <file>` records the start of its
   machine as its first step, `start machine`, of kind `machine`, with one line per entry
-  of the file, such as `start Docker  3.2 s`. A machine's start script gives the flag, and
-  `qory run --help` does not show it. With a file that is missing or not in the format,
+  of the file, such as `start Docker  3.2 s`. A machine's start script passes the flag,
+  and `qory run --help` does not show it. With a bad file, such as one that is missing,
   the run has no such step, qory prints one line, and the run goes on. See The record in
   `docs/run.md`.
 

@@ -78,8 +78,9 @@ func (k *heldRunKey) Format(f fmt.State, _ rune) { _, _ = io.WriteString(f, "[hi
 // from exe, wall.ca_env and the wall's limits. pool.registry of r, when r sets one, is
 // where the images must go. qory's line on the run's gateway goes to stderr, and each
 // line of the prebuild, which contains the output of the programs the build runs, to
-// log, after "qory run: ". Each error is exit 1.
-func runCodePrebuild(ctx context.Context, stderr, log io.Writer, r *config.Forager, state, user, exe string, key *runKey, doc contracts.Documents, runID string) error {
+// log, after "qory run: ". machineSteps, "" for none, is the file of the machine's
+// start, from which the prebuild writes the run's machine step. Each error is exit 1.
+func runCodePrebuild(ctx context.Context, stderr, log io.Writer, r *config.Forager, state, user, exe string, key *runKey, doc contracts.Documents, runID, machineSteps string) error {
 	var w *config.ForagerWall
 	if r != nil {
 		w = r.Wall
@@ -107,7 +108,7 @@ func runCodePrebuild(ctx context.Context, stderr, log io.Writer, r *config.Forag
 		Wall:  &wall.Docker{Command: w.Command, Helper: helper, RelayArgs: relayArgs, NestArgs: nestArgs, HoldArgs: holdArgs, User: w.User, CAEnv: w.CAEnv},
 		Image: w.PrebuildImage, Images: images, CAEnv: w.CAEnv, Exec: append([]string{wall.HelperPath}, execArgs...),
 		Limits:   wall.Limits{CPUs: w.CPUs, Memory: w.Memory, PIDs: w.PIDs, ShmSize: w.ShmSize},
-		Registry: registry, Machine: r.Machine, Masker: secretmask.Default().Masker(), Log: func(line string) { fmt.Fprintln(log, "qory run:", line) },
+		Registry: registry, Machine: r.Machine, MachineSteps: machineSteps, Masker: secretmask.Default().Masker(), Log: func(line string) { fmt.Fprintln(log, "qory run:", line) },
 	}, prebuild.Run{
 		RunID: runID, Key: &heldRunKey{b: []byte(key.value)}, Inputs: doc.Inputs,
 		ImageDestination: doc.ImageDestination, EnvironmentDestination: doc.EnvironmentDestination, EnvironmentImage: doc.EnvironmentImage,

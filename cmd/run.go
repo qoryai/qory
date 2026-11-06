@@ -457,7 +457,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 						return err
 					}
 					defer runLock.Release()
-					return runCodePrebuild(ctx, stderr, streams.errOut, conf.Forager, state, user, exe, key, doc, spec.RunID)
+					return runCodePrebuild(ctx, stderr, streams.errOut, conf.Forager, state, user, exe, key, doc, spec.RunID, machineSteps)
 				}
 				if fromCode, err = codeRunOf(doc); err != nil {
 					return err
@@ -636,7 +636,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				defer openingRun(spec.RunID)()
 			}
 			// The start of the machine comes first in the run's record, before the fetch.
-			if cmd.Flags().Changed(machineStepsFileFlag) {
+			if machineSteps != "" {
 				writeMachineStep(run, machineSteps, said)
 			}
 			// The run's time limit counts from its open: the compose and the session.
@@ -1132,7 +1132,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 	c.Flags().StringVar(&codeFile, runCodeFileFlag, "", runCodeFileUsage)
 	c.Flags().StringVar(&gatewayURL, gatewayFlag, "", gatewayUsage)
 	c.Flags().StringVar(&machineSteps, machineStepsFileFlag, "", machineStepsFileUsage)
-	// A machine's start script gives the flag; a person has no use for it.
+	// A machine's start script passes the flag; a person has no use for it.
 	c.Flags().Lookup(machineStepsFileFlag).Hidden = true
 	c.Flags().StringVar(&o.limits.ShmSize, "shm-size", "", "the size of /dev/shm in the container, such as 2g ("+config.ForagerFileName+": wall.shm_size)")
 	homeFlags(c, &h)
