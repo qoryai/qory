@@ -6,7 +6,7 @@ require (
 	github.com/BurntSushi/toml v1.6.0
 	github.com/charmbracelet/lipgloss v1.1.0
 	github.com/charmbracelet/x/term v0.2.1
-	github.com/qoryai/forager v0.7.1-0.20261102234628-65c7d850716d
+	github.com/qoryai/forager v0.7.1-0.20261106235152-1c963b571d1b
 	github.com/qoryai/integrations v0.3.1-0.20261104212229-ec0857068317
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3
 	github.com/spf13/cobra v1.10.2
@@ -36,5 +36,3 @@ require (
 	golang.org/x/term v0.46.0 // indirect
 	golang.org/x/text v0.14.0 // indirect
 )
-
-replace github.com/qoryai/forager => ../../forager/wt-machine-step-352
