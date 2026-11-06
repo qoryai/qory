@@ -30,8 +30,6 @@ github.com/mattn/go-runewidth v0.0.16 h1:E5ScNMtiwvlvB5paMFdw9p4kSQzbXFikJ5SQO6T
 github.com/mattn/go-runewidth v0.0.16/go.mod h1:Jdepj2loyihRzMpdS35Xk/zdY8IAYHsh153qUoGf23w=
 github.com/muesli/termenv v0.16.0 h1:S5AlUN9dENB57rsbnkPyfdGuWIlkmzJjbFf0Tf5FWUc=
 github.com/muesli/termenv v0.16.0/go.mod h1:ZRfOIKPFDYQoDFF4Olj7/QJbW60Ol/kL1pU3VfY/Cnk=
-github.com/qoryai/forager v0.7.1-0.20261102234628-65c7d850716d h1:3xXJdAunU2OzXu8qj66vHEBIG2M63S9iOBqqTsWB9yw=
-github.com/qoryai/forager v0.7.1-0.20261102234628-65c7d850716d/go.mod h1:bawutvQpl4xH1hYlLMsTOkOq5IkIEiFHWJ9jhahf6Ac=
 github.com/qoryai/integrations v0.3.1-0.20261104212229-ec0857068317 h1:MCl7nRGOTGsT3f4l+eb93Df6CzMqJ7FzohVft9sZ8Xk=
 github.com/qoryai/integrations v0.3.1-0.20261104212229-ec0857068317/go.mod h1:8wZP+FYKJRy8P+XaN/CSL74R2V+I2QqTwZ4JRsxz0TE=
 github.com/rivo/uniseg v0.2.0/go.mod h1:J6wj4VEh+S6ZtnVlnTBMWIodfgj8LQOQFoIToxlJtxc=
