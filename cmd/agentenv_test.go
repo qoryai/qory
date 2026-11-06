@@ -125,7 +125,9 @@ exec `+docker+` "$@"
 
 // TestAWalledRunWithARunAPIKeepsItForTheAgent is a walled run with a run API, started
 // through the agent-env verb: the file of kept names lists QORY_RUN_API, so the value
-// Forager sets for it reaches the agent, whose qory reads the run API from it.
+// Forager sets for it reaches the agent, whose qory reads the run API from it. The
+// fake run has a run API whatever its RunAPI field is set to; the field and the value
+// passed to the verb stand in for the gateway's response and for Forager's value.
 func TestAWalledRunWithARunAPIKeepsItForTheAgent(t *testing.T) {
 	defer cmd.StartThroughAgentEnv()()
 	root := newCheckout(t)
@@ -158,8 +160,9 @@ func TestAWalledRunWithARunAPIKeepsItForTheAgent(t *testing.T) {
 	wants(t, agentEnvSees(t, kept, "QORY_RUN_API="+base), "\nQORY_RUN_API="+base+"\n")
 }
 
-// agentEnvSees is the environment of a launch that qory run agent-env starts in a
-// separate process with the file of kept names kept and env.
+// agentEnvSees is the environment that qory run agent-env, started in a separate
+// process, gives its launch, with kept as the file of kept names and env as the
+// environment the verb starts with.
 func agentEnvSees(t *testing.T, kept []byte, env ...string) string {
 	t.Helper()
 	file := filepath.Join(t.TempDir(), "kept")

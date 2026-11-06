@@ -38,15 +38,14 @@ var wrapsAgentEnv = func(freshHome, walled bool) bool { return freshHome && wall
 // the other names with one of [agentenv.Prefixes] or among [agentenv.Names], the proxy
 // variables or the variables that point at authorities, which is why the verb drops
 // them. Forager's environment file wins over the image's value for every name it sets,
-// so the names it sets are the ones kept: the wall's, the session's, QORY_RUN_API when
-// runAPI is true, for a run with a run API, the runtime's declared and reserved
-// variables and the ones it reads a model key and its model endpoint from, the fixed
-// variables of the runtime's descriptor, the harness's fixed values, and the run's
-// variables as resolved, which are known once the gateway answered. They go, names
-// alone, into a file in a folder qory makes for it, outside
-// the checkout and the run directory, which the container sees read-only at the same
-// path; the run's resolved names are added when Forager resolves them, before the wall
-// starts. A gateway's placeholder whose name qory does not know is kept by its value
+// so the names it sets are the ones kept: the wall's, the session's, QORY_RUN_API for a
+// run with a run API (runAPI true), the runtime's declared and reserved variables and
+// the ones it reads a model key and its model endpoint from, the fixed variables of the
+// runtime's descriptor, the harness's fixed values, and the run's variables as
+// resolved, which are known once the gateway answered. They go, names alone, into a
+// file in a folder qory makes for it, outside the checkout and the run directory, which
+// the container sees read-only at the same path; the run's resolved names are added
+// when Forager resolves them, before the wall starts. A gateway's placeholder whose name qory does not know is kept by its value
 // when its name has one of [agentenv.Prefixes], see [preparation.AgentEnv]. This guards
 // against the values the image's environment leaves in place, not against the image's
 // programs or the repository's commands, which run as the agent's user in the agent's
@@ -105,14 +104,14 @@ func wrapAgentEnv(spec *runSpec, runAPI bool, report func(string)) (func(), erro
 
 // keptNames are the names Forager sets for a walled run before the run's variables are
 // resolved: always, the wall's proxy and socket names, QORY_RUN_ID, QORY_HARNESS_HOME
-// with a harness home, QORY_RUN_API when runAPI is true, for a run with a run API, the
+// with a harness home, QORY_RUN_API for a run with a run API (runAPI true), the
 // runtime's declared and reserved variables and the variables it reads a model key
 // from, which Forager sets behind a wall to a placeholder or to a value passed for them,
 // or unsets them, the variable it reads its model endpoint from, which Forager sets to
 // the start key's endpoint or to a passed value its endpoint rule keeps, or unsets, the
-// fixed variables of the runtime's descriptor, which Forager sets
-// in every launch, read from runtimes.json, and the harness's fixed values; and ca, the
-// names the wall sets only when the run has an authority.
+// fixed variables of the runtime's descriptor, which Forager sets in every launch, read
+// from runtimes.json, and the harness's fixed values; and ca, the names the wall sets
+// only when the run has an authority.
 func keptNames(spec *runSpec, d *wall.Docker, runAPI bool) (always, ca []string, err error) {
 	ca = d.CAEnv
 	if ca == nil {
@@ -152,7 +151,8 @@ func keptNames(spec *runSpec, d *wall.Docker, runAPI bool) (always, ca []string,
 
 // hasRunAPI reports whether run has a run API: Forager sets QORY_RUN_API in each
 // session of the run to the base URL [openedRun.RunAPI] returns, which comes from the
-// gateway's answer to the run's open, and sets no QORY_RUN_API for a run with none.
+// gateway's response to the run's open, and sets no QORY_RUN_API for a run with none.
+// It is false too once the run is closing; no session joins the run then.
 func hasRunAPI(run openedRun) bool {
 	_, base, err := run.RunAPI()
 	return err == nil && base != ""
