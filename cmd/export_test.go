@@ -198,6 +198,9 @@ type Nowhere struct {
 	// no error code to every request, as Qory Apiary does with its feature workflow_model
 	// off.
 	RunAPI string
+	// StepErr, when not nil, is called by each StartStep with the step's kind, and a
+	// StartStep whose call returns an error writes no step and returns it.
+	StepErr func(kind string) error
 }
 
 // StepEvent is one event of a host step of a run [OpenNowhereWith] opened: Type is
@@ -483,6 +486,11 @@ func (n *nowhere) StackProxy() (hostProxy, error) {
 func (n *nowhere) StartStep(kind, name string) (hostStep, error) {
 	if n.open != nil {
 		return nil, fmt.Errorf("exit step %d before the next host step starts", n.open.n)
+	}
+	if n.values.StepErr != nil {
+		if err := n.values.StepErr(kind); err != nil {
+			return nil, err
+		}
 	}
 	n.steps++
 	n.open = &nowhereStep{r: n, n: n.steps}

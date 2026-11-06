@@ -391,13 +391,28 @@ It holds:
 The record has `qory run`'s work before the agent starts as steps, each with its lines and
 how it ended:
 
-1. When the run configuration lists repositories, the fetch, named after the run's
+1. For a run from a run code given `--machine-steps-file <file>`, the machine step, `start
+   machine`, of kind `machine`, right after the run opens. A machine's start script
+   gives the flag, which `qory run --help` does not show, and writes the file: one JSON
+   object per line, in the order the steps ran, such as
+   `{"name":"start Docker","started":"2026-11-06T00:31:58.904Z","ended":"2026-11-06T00:32:02.104Z"}`,
+   each time in RFC 3339. The step has one line per entry, the name and the seconds from
+   `started` to `ended`, such as `start Docker  3.2 s`, and ends `succeeded` with -1. It
+   shows the first 64 entries, each name without control characters and cut to 100
+   characters. A file that is missing, cannot be read, is larger than 64 KiB, or has a
+   line that is not such an object, with a time that does not parse or that ended before
+   it started, leaves the step out, and so does a step that Forager fails to start. qory
+   then prints one line, such as `qory run: the run's record has no machine step: line 3
+   of /var/lib/qory-machine/steps.jsonl is not a JSON object with the strings name,
+   started and ended`, and the run goes on. `--machine-steps-file` without
+   `--run-code-file` exits 2.
+2. When the run configuration lists repositories, the fetch, named after the run's
    repository, such as `fetch github.com/example-org/shop`, with `and 1 further
    repository` when there are two.
-2. The compose, `compose the harness for claude`, or `compose the harness` when you name
+3. The compose, `compose the harness for claude`, or `compose the harness` when you name
    no runtime. The step ends once `qory run` has read the agent's launch from the
    composed home.
-3. For a walled run whose policy names its image by a reference pinned by digest, the
+4. For a walled run whose policy names its image by a reference pinned by digest, the
    image step, named after the reference. Forager first requests the image's manifest
    from its registry through the run's proxy, with the run's credentials: a `HEAD` of
    `/v2/<repository>/manifests/<digest>`, over https, or over http for a registry on

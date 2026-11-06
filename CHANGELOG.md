@@ -233,6 +233,12 @@ release may change what an existing document does, and states it under Upgrading
   `qory harness launch --json` and `--address` print them. The Bind table that
   `qory harness inspect` and `qory harness compose --dry-run` print has a third column,
   `from`.
+- A run from a run code given `--machine-steps-file <file>` records the start of its
+  machine as its first step, `start machine`, of kind `machine`, with one line per entry
+  of the file, such as `start Docker  3.2 s`. A machine's start script gives the flag, and
+  `qory run --help` does not show it. With a file that is missing or not in the format,
+  the run has no such step, qory prints one line, and the run goes on. See The record in
+  `docs/run.md`.
 
 ### Changed
 
