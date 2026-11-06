@@ -580,6 +580,11 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Fixed
 
+- In a dispatched walled run of Claude Code from a control plane, the agent's `qory
+  work-item show`, `qory artifact pull`, `qory artifact push` and `qory run verdict`
+  reach the run API at `QORY_RUN_API`. Until now, `qory run agent-env` removed the
+  variable before the agent started, so `pull` printed `Nothing pulled: outside a Qory
+  Apiary run, …`, `qory work-item show` exited 3, and a verdict stayed in the container.
 - A walled run whose checkout or read-write mount is your home folder or qory's state
   directory, or a folder that contains either, stops with exit 2 before anything starts,
   as `start the walled run from a repository folder: its checkout <path> is your home

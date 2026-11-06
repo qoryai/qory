@@ -2,12 +2,14 @@ package cmd_test
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/qoryai/forager/session"
 	"github.com/qoryai/forager/wall"
 
 	"github.com/qoryai/qory/cmd"
@@ -55,6 +57,8 @@ func TestAgentEnvStartsTheLaunchAsGiven(t *testing.T) {
 // file of kept names and the launch, and Forager still puts its settings, with the
 // hooks, in place of the launch's --settings; the file's folder is mounted read-only
 // and holds the names Forager sets and the run's --env, and goes once the run is over.
+// The run has no control plane, so the file does not keep QORY_RUN_API, and the image's
+// value of it does not reach the agent.
 func TestAWalledRunThroughAgentEnv(t *testing.T) {
 	defer cmd.StartThroughAgentEnv()()
 	root := newCheckout(t)
@@ -64,10 +68,11 @@ func TestAWalledRunThroughAgentEnv(t *testing.T) {
 	// The docker that stands in also logs the kept names' file the agent-env verb is
 	// given, as the container would read it.
 	logging := filepath.Join(t.TempDir(), "docker")
+	copied := filepath.Join(t.TempDir(), "kept")
 	writeFile(t, logging, `#!/bin/sh
 prev=
 for a in "$@"; do
-	if [ "$prev" = agent-env ]; then sed 's/^/kept: /' "$a" >> `+log+`; fi
+	if [ "$prev" = agent-env ]; then sed 's/^/kept: /' "$a" >> `+log+`; cp "$a" `+copied+`; fi
 	prev=$a
 done
 exec `+docker+` "$@"
@@ -110,4 +115,66 @@ exec `+docker+` "$@"
 	if _, err := os.Stat(dir); !os.IsNotExist(err) {
 		t.Errorf("the kept names' folder stays after the run: %v", err)
 	}
+	lacks(t, lines, "QORY_RUN_API")
+	kept, err := os.ReadFile(copied)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lacks(t, agentEnvSees(t, kept, "QORY_RUN_API=http://image.example/v1/runs/1"), "QORY_RUN_API")
+}
+
+// TestAWalledRunWithARunAPIKeepsItForTheAgent is a walled run with a run API, started
+// through the agent-env verb: the file of kept names lists QORY_RUN_API, so the value
+// Forager sets for it reaches the agent, whose qory reads the run API from it. The
+// fake run has a run API whatever its RunAPI field is set to; the field and the value
+// passed to the verb stand in for the gateway's response and for Forager's value.
+func TestAWalledRunWithARunAPIKeepsItForTheAgent(t *testing.T) {
+	defer cmd.StartThroughAgentEnv()()
+	root := newCheckout(t)
+	copyFixture(t, "two-modules", root)
+	composedForFake(t, root, "claude")
+	walledSection(t)
+	const base = "http://run-api.qory.invalid/v1/runs/run-1"
+	_, _, restore := cmd.OpenNowhereWith(cmd.Nowhere{RunAPI: base})
+	defer restore()
+	// The file goes once the run is over, so it is read at the join.
+	var kept []byte
+	defer cmd.SetJoinSession(func(s session.SessionSpec) {
+		for i, a := range s.Args {
+			if a == "agent-env" && i+1 < len(s.Args) {
+				data, err := os.ReadFile(s.Args[i+1])
+				if err != nil {
+					t.Error(err)
+				}
+				kept = data
+			}
+		}
+	})()
+	if out, err := run(t, "run", "claude"); !errors.Is(err, cmd.ErrJoinedNowhere) {
+		t.Fatalf("%v (exit %d)\n%s", err, cmd.ExitCode(err), out)
+	}
+	if kept == nil {
+		t.Fatal("the session's launch does not start through the agent-env verb")
+	}
+	wants(t, "\n"+string(kept), "\nQORY_RUN_API\n")
+	wants(t, agentEnvSees(t, kept, "QORY_RUN_API="+base), "\nQORY_RUN_API="+base+"\n")
+}
+
+// agentEnvSees is the environment that qory run agent-env, started in a separate
+// process, gives its launch, with kept as the file of kept names and env as the
+// environment the verb starts with.
+func agentEnvSees(t *testing.T, kept []byte, env ...string) string {
+	t.Helper()
+	file := filepath.Join(t.TempDir(), "kept")
+	if err := os.WriteFile(file, kept, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	c := exec.Command(os.Args[0], "-test.run=^$", "--", file, "--", "env")
+	c.Stdout, c.Stderr = &stdout, &stderr
+	c.Env = append([]string{"QORY_TEST_AGENT_ENV=1", "PATH=" + os.Getenv("PATH")}, env...)
+	if err := c.Run(); err != nil {
+		t.Fatalf("%v\n%s%s", err, stdout.String(), stderr.String())
+	}
+	return "\n" + stdout.String()
 }

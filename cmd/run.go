@@ -735,7 +735,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			// for a walled run the record of each place the container may write.
 			prepareSession := func(freshHome bool) error {
 				if wrapsAgentEnv(freshHome, walled) {
-					done, err := wrapAgentEnv(&spec, said)
+					done, err := wrapAgentEnv(&spec, hasRunAPI(run), said)
 					if err != nil {
 						return err
 					}
