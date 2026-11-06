@@ -1,10 +1,11 @@
 # agent: the image the wall runs the agent in, the base every other agent image of
-# Qory's is built FROM. It holds what qory's harness launches and what an agent needs to
-# deliver its work: Claude Code at the version Forager's descriptor for it sets, git,
-# the GitHub command, poppler's PDF tools, which Claude Code reads a PDF's pages with,
-# and the system's authorities where the wall reads them. It runs as any user the machine gives it, with HOME a directory every user may
-# write, and holds no setuid or setgid program. It sets no entry point: the wall starts
-# the launch command, or qory's helper, itself.
+# Qory's is built FROM. It contains what qory's harness launches and what an agent needs
+# to deliver its work: Claude Code at the version Forager's descriptor for it sets, git,
+# the GitHub command, poppler's pdftoppm (Claude Code renders a PDF's pages with it), and
+# the system's authorities where the wall reads them. It runs as any user the machine
+# gives it, with HOME a directory every user may write, and contains no setuid or setgid
+# program. It sets no entry point: the wall starts the launch command, or qory's helper,
+# itself.
 #
 # Every version and every sum is a build argument, with its default below. Build it from
 # a checkout of qory at the commit qory version prints, for linux/amd64 or linux/arm64:

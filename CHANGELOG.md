@@ -279,7 +279,6 @@ release may change what an existing document does, and states it under Upgrading
   `files/claude/rules/qory-harness.md`, or a file at `files/claude/rules`, fails the
   compose.
 - The `agent` image contains Claude Code 2.1.316, up from 2.1.273.
-- The `agent` image contains poppler's `pdftoppm`, so Claude Code reads a PDF's pages.
 - Claude Code runs with `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` and
   `CLAUDE_CODE_DISABLE_OFFICIAL_MARKETPLACE_AUTOINSTALL=1` in every run,
   walled or not, and the `env` of its `--settings` copy sets both.
@@ -587,6 +586,8 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Fixed
 
+- In the `agent` image, Claude Code's Read of chosen pages of a PDF works: the image
+  contains poppler's `pdftoppm`. Until now, it failed with `pdftoppm is not installed`.
 - In a dispatched walled run of Claude Code from a control plane, the agent's `qory
   work-item show`, `qory artifact pull`, `qory artifact push` and `qory run verdict`
   reach the run API at `QORY_RUN_API`. Until now, `qory run agent-env` removed the
