@@ -136,7 +136,7 @@ func TestAWalledRunCodeWithAHiddenHarnessComposesNoLink(t *testing.T) {
 // TestARunCodeWithAHiddenHarnessStopsOnALinkOutOfAModule is a run from a run code whose
 // documents set harness_hidden to true, of a stack whose hello module contains a link
 // to the stack's README.md, outside the module: the compose stops before the join, exit
-// 1, with the front of a stop of any status but 2, before the line of the copy of a walled
+// 1, with the start of a stop of any status but 2, before the line of the copy of a walled
 // run's module.
 func TestARunCodeWithAHiddenHarnessStopsOnALinkOutOfAModule(t *testing.T) {
 	r := runFromCodeLinks(t, nil, nil, nil, nil, nil, map[string]string{"examples/hello/modules/hello/README.md": "../../README.md"})

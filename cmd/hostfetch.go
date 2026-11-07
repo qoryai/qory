@@ -201,7 +201,7 @@ func namedComposeError(err error, n *source.Named) error {
 }
 
 // hiddenComposeError is err, a compose's error in a run from a run code whose harness
-// addresses no text shows, n, with one front and the end of a used code, whatever the
+// addresses no text shows, n, with one of two starts and the end of a used code, whatever the
 // text is: the harness to correct for exit 2, and the cause to fix for any other status.
 // A line that has the end already and a collision that [printCollision] printed stay as
 // they are. The exit status does not change.

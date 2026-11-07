@@ -405,7 +405,7 @@ func TestAWalledRunPullsItsImageThroughTheEngineProxy(t *testing.T) {
 		kind, _ := s["kind"].(string)
 		kinds = append(kinds, kind)
 	}
-	if want := []string{"compose", "image", "join", "wall"}; !slices.Equal(kinds, want) {
+	if want := []string{"compose", "image", "join", "wall", "copy"}; !slices.Equal(kinds, want) {
 		t.Errorf("the steps are of the kinds %q, want %q", kinds, want)
 	}
 	reached := false
