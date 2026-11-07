@@ -11,8 +11,6 @@ import (
 	"time"
 
 	"github.com/qoryai/qory/internal/exports"
-	"github.com/qoryai/qory/internal/fixline"
-	"github.com/qoryai/qory/internal/hostgit"
 	"github.com/qoryai/qory/internal/integration"
 	"github.com/qoryai/qory/internal/preparation"
 	"github.com/qoryai/qory/internal/proxygit"
@@ -91,7 +89,7 @@ func noStackProxy(harness string, err error, fromCode bool) error {
 	return fmt.Errorf(text, harness, integration.Printable(exports.HideURLError(err).Error()))
 }
 
-// runValues is getenv for [preparation.Run]: the server's values of the run's system and
+// runValues is getenv for [preparation.RunAt]: the server's values of the run's system and
 // repositories, as the run answer gave them, and "" for any other name.
 func runValues(run openedRun) func(string) string {
 	return func(name string) string {
@@ -158,7 +156,7 @@ func usedLine(text string, n *source.Named, err error) error {
 
 // namedComposeError is err, a compose's error in a run whose harness addresses no text
 // shows, n, as the line qory run prints. Only a run from a run code has such a harness, so
-// the code is used and each line sends the person to a new take-in: a git source that is
+// the code is used and the fix of each line is a new take-in: a git source that is
 // not https and a ref a repository does not have, each an input error; a git source that
 // could not be fetched, a failure of the fetch, with its cause and no output of git; an
 // export whose folder its repository does not have and a source.path that is not inside
@@ -203,23 +201,20 @@ func namedComposeError(err error, n *source.Named) error {
 }
 
 // hiddenComposeError is err, a compose's error in a run from a run code whose harness
-// addresses no text shows, n, with the fix and the end of a used code. A line that starts
-// with its fix gets the end alone. A line with only a cause gets the fix in the harness,
-// for an input error, or on this machine. A line that has the end already and a collision
-// that [printCollision] printed stay as they are.
+// addresses no text shows, n, with one front and the end of a used code, whatever the
+// text is: the harness to correct for exit 2, and the cause to fix for any other status.
+// A line that has the end already and a collision that [printCollision] printed stay as
+// they are. The exit status does not change.
 func hiddenComposeError(err error, n *source.Named) error {
 	hidden := n.HideError(err)
 	text := hidden.Error()
-	var git *hostgit.GitVersionError
 	switch {
 	case errors.Is(err, ErrReported), strings.HasSuffix(text, codeUsed):
 		return hidden
-	case fixline.First(err), errors.As(err, &git):
-		return usedLine(text, n, err)
 	case ExitCode(err) == ExitInput:
 		return usedLine(fmt.Sprintf("correct %s, then take the work item in again in Qory Apiary: %s", n.Phrase(), text), n, err)
 	}
-	return usedLine("fix the cause on this machine, then take the work item in again in Qory Apiary: "+text, n, err)
+	return usedLine("fix the cause, then take the work item in again in Qory Apiary: "+text, n, err)
 }
 
 // connectStatus and httpStatus match the status curl writes, in git's output, for a

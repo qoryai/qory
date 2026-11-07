@@ -182,8 +182,8 @@ func TestARunCodeAtACommitTheServerLacksStops(t *testing.T) {
 
 // TestARunCodeWhoseFetchFailsSendsThePersonToANewTakeIn is a run from a run code whose
 // further repository is not on the server, at a commit of the target and with no
-// target_version: the run stops before the compose, exit 1, and the whole line sends the
-// person to a new take-in, since the code is used.
+// target_version: the run stops before the compose, exit 1, and the fix of the whole line is
+// a new take-in, since the code is used.
 func TestARunCodeWhoseFetchFailsSendsThePersonToANewTakeIn(t *testing.T) {
 	const head = "\nqory run: add a credential for git.test that reads acme/missing to the run configuration, then take the work item in again in Qory Apiary: the fetch of acme/missing through the run's gateway failed: "
 	for name, version := range map[string]func(first string) string{

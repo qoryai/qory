@@ -17,7 +17,6 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/qoryai/qory/internal/exports"
-	"github.com/qoryai/qory/internal/fixline"
 	"github.com/qoryai/qory/internal/runapi"
 	"github.com/qoryai/qory/internal/stack"
 )
@@ -722,7 +721,7 @@ func ReadThrough(root *os.Root, dir, realDir string) func(path string) ([]byte, 
 		}
 		rel, err := filepath.Rel(abs, path)
 		if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
-			return nil, fixline.Mark(fmt.Errorf("Move %s inside the module. It lies outside the module, and qory reads only the module's files.", exports.HidePath(path)))
+			return nil, fmt.Errorf("Move %s inside the module. It lies outside the module, and qory reads only the module's files.", exports.HidePath(path))
 		}
 		inner, err := ResolveIn(root, realDir, rel)
 		if err != nil {
@@ -843,7 +842,7 @@ func linkOut(shown, name string, err error) error {
 	if out.under != "" {
 		name += "/" + out.under
 	}
-	return fixline.Mark(fmt.Errorf("module %s: Remove the link %s or point it inside the module. It links to %s, outside the module, and qory reads only the module's files.", shown, name, out.real))
+	return fmt.Errorf("module %s: Remove the link %s or point it inside the module. It links to %s, outside the module, and qory reads only the module's files.", shown, name, out.real)
 }
 
 // insideAll walks the skill directory at dir and checks every file and directory in it

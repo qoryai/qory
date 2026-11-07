@@ -10,7 +10,6 @@ import (
 	"strings"
 
 	"github.com/qoryai/qory/internal/exports"
-	"github.com/qoryai/qory/internal/fixline"
 	"github.com/qoryai/qory/internal/module"
 	"github.com/qoryai/qory/internal/source"
 	"github.com/qoryai/qory/internal/stack"
@@ -119,7 +118,7 @@ func twoProviders(p *stack.Stack, key string, list []Role) error {
 	if len(list) > 2 {
 		both = fmt.Sprintf("all %d modules", len(list))
 	}
-	return fixline.Mark(fmt.Errorf("Bind %s.%s in %s, or compose one of %s: %s provide %s (%s).", shown(kind), shown(role), file, andList(modules), both, shown(key), strings.Join(names, ", ")))
+	return fmt.Errorf("Bind %s.%s in %s, or compose one of %s: %s provide %s (%s).", shown(kind), shown(role), file, andList(modules), both, shown(key), strings.Join(names, ", "))
 }
 
 // andList joins names as a sentence lists them: "a and b", "a, b and c".
@@ -177,7 +176,7 @@ func checkProvides(m *module.Manifest, base *Base) error {
 	sort.Strings(kinds)
 	for _, kind := range kinds {
 		if !slices.Contains(base.Extending.Kinds, kind) {
-			return fixline.Mark(fmt.Errorf("Remove provides.%s from module %s, or use a base that allows %s: the base's extending.kinds is [%s].", shown(kind), shown(m.Name), shown(kind), strings.Join(shownAll(base.Extending.Kinds), ", ")))
+			return fmt.Errorf("Remove provides.%s from module %s, or use a base that allows %s: the base's extending.kinds is [%s].", shown(kind), shown(m.Name), shown(kind), strings.Join(shownAll(base.Extending.Kinds), ", "))
 		}
 	}
 	return nil

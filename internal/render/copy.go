@@ -14,7 +14,6 @@ import (
 	"github.com/qoryai/qory/internal/checkout"
 	"github.com/qoryai/qory/internal/compose"
 	"github.com/qoryai/qory/internal/exports"
-	"github.com/qoryai/qory/internal/fixline"
 	"github.com/qoryai/qory/internal/module"
 )
 
@@ -51,7 +50,7 @@ type copier struct {
 // directory, since a link inside the module is followed by that path.
 func openCopier(m compose.Module) (*copier, error) {
 	name := accesskey.ShownName(m.Name, false)
-	moved := fixline.Mark(fmt.Errorf("module %s: Compose again. %s leads to another directory than when qory read the module, so qory did not copy it into the home.", name, exports.HidePath(m.Source)))
+	moved := fmt.Errorf("module %s: Compose again. %s leads to another directory than when qory read the module, so qory did not copy it into the home.", name, exports.HidePath(m.Source))
 	if m.Root == nil || m.DirInfo == nil {
 		return nil, moved
 	}
@@ -84,9 +83,9 @@ func (n *counter) add() error {
 // tooMany is the refusal of a module whose copy passes [maxEntries].
 func (c *copier) tooMany() error {
 	if c.anywhere {
-		return fixline.Mark(fmt.Errorf("module %s: Ship fewer files. It contains more than 10,000 files, directories and links, the most qory copies into the home.", c.name))
+		return fmt.Errorf("module %s: Ship fewer files. It contains more than 10,000 files, directories and links, the most qory copies into the home.", c.name)
 	}
-	return fixline.Mark(fmt.Errorf("module %s: Move the module out of the checkout, or ship fewer files. It contains more than 10,000 files, directories and links, the most qory copies into the home.", c.name))
+	return fmt.Errorf("module %s: Move the module out of the checkout, or ship fewer files. It contains more than 10,000 files, directories and links, the most qory copies into the home.", c.name)
 }
 
 // copyRules are what one copy leaves out and changes.
@@ -161,9 +160,9 @@ type budget struct {
 // budget is a full budget for one copy of the module.
 func (c *copier) budget() *budget {
 	if c.anywhere {
-		return &budget{left: maxModuleBytes, refuse: fixline.Mark(fmt.Errorf("module %s: Ship fewer files. Its files add up to more than 1 GiB, the most qory copies into the home.", c.name))}
+		return &budget{left: maxModuleBytes, refuse: fmt.Errorf("module %s: Ship fewer files. Its files add up to more than 1 GiB, the most qory copies into the home.", c.name)}
 	}
-	return &budget{left: maxModuleBytes, refuse: fixline.Mark(fmt.Errorf("module %s: Move the module out of the checkout, or ship fewer files. Its files add up to more than 1 GiB, the most qory copies into the home.", c.name))}
+	return &budget{left: maxModuleBytes, refuse: fmt.Errorf("module %s: Move the module out of the checkout, or ship fewer files. Its files add up to more than 1 GiB, the most qory copies into the home.", c.name)}
 }
 
 // budgetWriter writes to w and counts each write against b. A write that would pass
@@ -285,9 +284,9 @@ func (c *copier) readAll(rel string, f *os.File, info fs.FileInfo) ([]byte, erro
 // tooLarge is the refusal of a file at rel larger than [maxFileBytes].
 func (c *copier) tooLarge(rel string) error {
 	if c.anywhere {
-		return fixline.Mark(fmt.Errorf("module %s: Ship %s under %d MiB. It is larger than %d MiB, the most qory copies into the home.", c.name, exports.HidePath(filepath.ToSlash(rel)), maxFileBytes>>20, maxFileBytes>>20))
+		return fmt.Errorf("module %s: Ship %s under %d MiB. It is larger than %d MiB, the most qory copies into the home.", c.name, exports.HidePath(filepath.ToSlash(rel)), maxFileBytes>>20, maxFileBytes>>20)
 	}
-	return fixline.Mark(fmt.Errorf("module %s: Move the module out of the checkout, or ship %s under %d MiB. It is larger than %d MiB, the most qory copies into the home.", c.name, exports.HidePath(filepath.ToSlash(rel)), maxFileBytes>>20, maxFileBytes>>20))
+	return fmt.Errorf("module %s: Move the module out of the checkout, or ship %s under %d MiB. It is larger than %d MiB, the most qory copies into the home.", c.name, exports.HidePath(filepath.ToSlash(rel)), maxFileBytes>>20, maxFileBytes>>20)
 }
 
 // rel is path, inside the module's directory as the compose read it, relative to that
@@ -295,7 +294,7 @@ func (c *copier) tooLarge(rel string) error {
 func (c *copier) rel(path string) (string, error) {
 	rel, err := filepath.Rel(c.written, path)
 	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
-		return "", fixline.Mark(fmt.Errorf("module %s: Move %s inside the module. It lies outside the module, and qory copies only the module's files into the home.", c.name, exports.HidePath(path)))
+		return "", fmt.Errorf("module %s: Move %s inside the module. It lies outside the module, and qory copies only the module's files into the home.", c.name, exports.HidePath(path))
 	}
 	return rel, nil
 }
@@ -355,7 +354,7 @@ func (c *copier) copyAt(rel string, out *os.Root, to string, above []fs.FileInfo
 	for _, a := range above {
 		if os.SameFile(a, opened) {
 			f.Close()
-			return fixline.Mark(fmt.Errorf("module %s: Remove %s, or point it at a directory that is not above it. It leads to a directory above it, which qory cannot copy into the home.", c.name, exports.HidePath(filepath.ToSlash(rel))))
+			return fmt.Errorf("module %s: Remove %s, or point it at a directory that is not above it. It leads to a directory above it, which qory cannot copy into the home.", c.name, exports.HidePath(filepath.ToSlash(rel)))
 		}
 	}
 	entries, err := readCounted(f, func(e fs.DirEntry) bool {
@@ -536,7 +535,7 @@ func (c *copier) copyFile(rel string, f *os.File, info fs.FileInfo, out *os.Root
 // notCopyable is the refusal of an entry that is not a file, a directory or a link to one
 // of them, such as a named pipe.
 func (c *copier) notCopyable(rel string) error {
-	return fixline.Mark(fmt.Errorf("module %s: Remove %s from the module. It is not a file, a directory or a link, so qory cannot copy it into the home.", c.name, exports.HidePath(filepath.ToSlash(rel))))
+	return fmt.Errorf("module %s: Remove %s from the module. It is not a file, a directory or a link, so qory cannot copy it into the home.", c.name, exports.HidePath(filepath.ToSlash(rel)))
 }
 
 // failed is the error of a read of rel that failed: the refusal of a link out of the
@@ -544,13 +543,13 @@ func (c *copier) notCopyable(rel string) error {
 func (c *copier) failed(rel string, err error) error {
 	shown := exports.HidePath(filepath.ToSlash(rel))
 	if real, rerr := filepath.EvalSymlinks(filepath.Join(c.dir, rel)); rerr == nil && real != c.dir && !below(real, c.dir) {
-		return fixline.Mark(fmt.Errorf("module %s: Remove the link %s or point it inside the module. It links to %s, outside the module, and qory copies only the module's files into the home.", c.name, shown, exports.HidePath(real)))
+		return fmt.Errorf("module %s: Remove the link %s or point it inside the module. It links to %s, outside the module, and qory copies only the module's files into the home.", c.name, shown, exports.HidePath(real))
 	}
 	if c.escapes(err) {
 		// The root fails the same way for an absolute link to a missing file inside
 		// the module, which it does not follow; ResolveIn tells that one apart.
 		if _, rerr := module.ResolveIn(c.root, c.real, rel); rerr != nil && !errors.Is(rerr, fs.ErrNotExist) {
-			return fixline.Mark(fmt.Errorf("module %s: Remove the link %s or point it inside the module. It points out of the module, and qory copies only the module's files into the home.", c.name, shown))
+			return fmt.Errorf("module %s: Remove the link %s or point it inside the module. It points out of the module, and qory copies only the module's files into the home.", c.name, shown)
 		}
 	}
 	var pe *fs.PathError
@@ -627,9 +626,9 @@ func (s *pluginScan) dir(dir string) error {
 	entries, err := readCounted(f, nil, func() error {
 		if s.n++; s.n > maxEntries {
 			if s.anywhere {
-				return fixline.Mark(errors.New("Ship fewer files in the modules. claude/plugin contains more than 10,000 files, directories and links, the most a Claude Code run behind a wall or with a hidden harness takes."))
+				return errors.New("Ship fewer files in the modules. claude/plugin contains more than 10,000 files, directories and links, the most a Claude Code run behind a wall or with a hidden harness takes.")
 			}
-			return fixline.Mark(errors.New("Move a module out of the checkout, or ship fewer files. claude/plugin contains more than 10,000 files, directories and links, the most a walled Claude Code run takes."))
+			return errors.New("Move a module out of the checkout, or ship fewer files. claude/plugin contains more than 10,000 files, directories and links, the most a walled Claude Code run takes.")
 		}
 		return nil
 	})

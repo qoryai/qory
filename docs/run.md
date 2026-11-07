@@ -238,9 +238,11 @@ if:
   do not stop the run.
 
 Start the run in a new empty folder or a new empty git working tree. In a run from a run
-code, the lines for the git configuration and for the files under `.git` start with `take
-the work item in again in Qory Apiary, and start its run in a new empty git working tree`,
-and end with `; the code is used`.
+code, the lines for the git configuration, for the files under `.git`, and for a hard link
+under `.qory` start with `take the work item in again in Qory Apiary, and start its run in
+a new empty git working tree`, and end with `; the code is used`. In a prebuild from a run
+code, they start with `start the run again with a new run code, in a new empty git working
+tree`.
 
 A source that breaks a rule stops the run with exit 2 before the agent starts. A stack
 given to `-f` from outside the checkout is not a file in the checkout: its paths resolve
@@ -2008,18 +2010,18 @@ phrase:
   file or of the checkout's file. A module with no name shows as `modules[<i>]`. For the
   `extends` of the checkout's file, the line starts with `set the path of the base of
   <harness>`.
-- `correct <harness>, then take the work item in again in Qory Apiary: <cause>; the code
-  is used`, exit 2, for any other error in the harness, where `<harness>` is the
-  workspace's harness or the checkout's harness. One such `<cause>` is `module <module>:
-  qory.yaml in <source>: exports.dir <stacks or modules> is not a directory inside the
-  repository`, for an `exports.dir` that is absolute or leads out of its repository.
-- `fix the cause on this machine, then take the work item in again in Qory Apiary:
-  <cause>; the code is used`, exit 1, for an error of the machine
+- `correct <harness>, then take the work item in again in Qory Apiary: <text>; the code
+  is used`, for any other error of exit 2, where `<harness>` is the workspace's harness or
+  the checkout's harness. One such `<text>` is `module <module>: qory.yaml in <source>:
+  exports.dir <stacks or modules> is not a directory inside the repository`, for an
+  `exports.dir` that is absolute or leads out of its repository.
+- `fix the cause, then take the work item in again in Qory Apiary: <text>; the code is
+  used`, for any other error of any other exit status, which stays as it is
 
-A line of the compose that starts with its fix, such as `check <source>: <cause>` or
-`module <name>: Ship fewer files. <cause>`, only gets the end `; the code is used`, in
-place of a full stop. A collision prints its table and the stack lines that
-resolve it, with no such line.
+Every other line of the compose gets one of these two fronts, also when `<text>` starts
+with a fix, such as `check <source>: <cause>`. A final full stop of `<text>`
+is left out before the end. A line that already ends with `; the code is used` stays as it
+is. A collision prints its table and the stack lines that resolve it, with no such line.
 
 When `harness_hidden` is `false`, the lines and errors show the addresses, as for any
 harness.
@@ -2035,13 +2037,14 @@ The copy follows these rules:
 
 - A link inside a module is copied as the file or directory it leads to.
 - A link that leads out of the module stops the run, exit 1, before the session starts,
-  with one of these errors:
+  with one of these errors, each after `fix the cause, then take the work item in again
+  in Qory Apiary: ` and with `; the code is used` as its end:
   - `module <name>: Remove the link <path> or point it inside the module. It links to
     <target>, outside the module, and qory copies only the module's files into the
-    home; the code is used`, for a link to a file or directory outside the module;
+    home`, for a link to a file or directory outside the module;
   - `module <name>: Remove the link <path> or point it inside the module. It points out
-    of the module, and qory copies only the module's files into the home; the code is
-    used`, for a link out of the module that leads to nothing.
+    of the module, and qory copies only the module's files into the home`, for a link
+    out of the module that leads to nothing.
 - Without a wall, the copy contains the files that the stack's `only` or `exclude`
   leave out, as a link to the module shows them. Behind a wall, the copy leaves them
   out.

@@ -23,7 +23,7 @@ func TestFetchesThroughTheHostProxy(t *testing.T) {
 	s.Repository(t, "acme/lib", "main", map[string]string{"README.md": "lib\n"})
 	dir := emptyFolder(t)
 	var report strings.Builder
-	fetched, err := Run(context.Background(), dir, os.Environ(), env(proxygittest.Host, "acme/shop,acme/lib"), s.Proxy, &report)
+	fetched, err := RunAt(context.Background(), dir, os.Environ(), env(proxygittest.Host, "acme/shop,acme/lib"), Target{}, s.Proxy, &report)
 	if err != nil || !fetched {
 		t.Fatalf("%v, %v", fetched, err)
 	}
@@ -46,7 +46,7 @@ func TestFetchesThroughTheHostProxy(t *testing.T) {
 
 	wrong := s.Proxy
 	wrong.URL = strings.Replace(wrong.URL, proxygittest.Password, "another-password", 1)
-	_, err = Run(context.Background(), emptyFolder(t), os.Environ(), env(proxygittest.Host, "acme/shop"), wrong, &report)
+	_, err = RunAt(context.Background(), emptyFolder(t), os.Environ(), env(proxygittest.Host, "acme/shop"), Target{}, wrong, &report)
 	prefix := "qory run: check that the run's policy allows git.test and that git.test is reachable, then run again. The fetch of acme/shop through the run's gateway failed: "
 	if err == nil || !strings.HasPrefix(err.Error(), prefix) || strings.Contains(err.Error(), "another-password") || strings.Contains(err.Error(), "\n") {
 		t.Errorf("a denied fetch: %v, want one line starting %q", err, prefix)

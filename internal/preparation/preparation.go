@@ -3,7 +3,7 @@
 // the code is: [EnvSystem], the host, and [EnvRepositories], the repositories, the run's
 // repository first.
 //
-// [Run] fetches on this machine, as qory run does once the run is open: the run's
+// [RunAt] fetches on this machine, as qory run does once the run is open: the run's
 // repository into the working folder, an empty folder, in which it runs git init, or an
 // empty git working tree, at the head of its default branch, or at a commit with [RunAt],
 // and each further one under .qory/repositories, every request through the run's host
@@ -58,7 +58,7 @@ const (
 // ForgeGitHub is the one forge whose repository form qory knows: github.com.
 const ForgeGitHub = "github.com"
 
-// The lines of a run from a run code for the fetch's stops that say "run again". The code
+// The lines of a run from a run code for the fetch's lines that contain "run again". The code
 // is redeemed before the fetch, so the next run needs a new take-in. The steps on this
 // machine are for the person with a shell on it.
 const (
@@ -196,19 +196,6 @@ var (
 // always https.
 var baseURL = ""
 
-// Run fetches the repositories getenv names into dir, the working folder, on this
-// machine through the run's host proxy p, and reports whether it fetched them, the run's
-// repository at the head of its default branch, as [RunAt] does with no commit. With
-// [EnvRepositories] unset or empty it does nothing and returns false. The list is
-// checked whole before any fetch. Once every repository is fetched, it prints on report
-// the line that says what it fetched, the run's repository's commit, and in how long.
-// Every error's text is one line, ready for stderr, with no password of p's URL in it.
-// Every git it runs starts from base, as [hostgit.WithBase] has it: qory run gives this
-// process's environment, and a pool the environment of its commands.
-func Run(ctx context.Context, dir string, base []string, getenv func(string) string, p proxygit.Proxy, report io.Writer) (bool, error) {
-	return RunAt(ctx, dir, base, getenv, Target{}, p, report)
-}
-
 // Target is the target of a run's documents, the place a change would go, and the
 // version of it that the documents set: a run code's target.system, target.path and
 // target_version.
@@ -226,7 +213,7 @@ type Target struct {
 }
 
 // runLine is a stop whose line is text with args, for a run from no run code. [Target.stop]
-// gives the same args to the line of a run from a run code.
+// formats the line of a run from a run code with the same args.
 type runLine struct {
 	text string
 	args []any
@@ -264,8 +251,18 @@ func prebuildLine(text string) string {
 	).Replace(text)
 }
 
-// RunAt is [Run] with the target's repository fetched at at.Version, when at sets a
-// version and at.System is [EnvSystem]. The version is the commit at which Qory Apiary
+// RunAt fetches the repositories getenv names into dir, the working folder, on this
+// machine through the run's host proxy p, and reports whether it fetched them, the run's
+// repository at the head of its default branch. With [EnvRepositories] unset or empty it
+// does nothing and returns false. The list is checked whole before any fetch. Once every
+// repository is fetched, it prints on report the line with what it fetched, the run's
+// repository's commit, and how long the fetch took. Every error's text is one line, ready
+// for stderr, with no password of p's URL in it. Every git it runs starts from base, as
+// [hostgit.WithBase] has it: qory run gives this process's environment, and a pool the
+// environment of its commands.
+//
+// The target's repository is fetched at at.Version, when at sets a version and at.System
+// is [EnvSystem]. The version is the commit at which Qory Apiary
 // checked the target for a harness file. A control plane lists the target's path first,
 // so the target is the run's repository: an at.Path that is a later entry of the list,
 // as [targetIn] finds it, stops RunAt with [textTargetLater], one the list does not
@@ -286,7 +283,8 @@ func RunAt(ctx context.Context, dir string, base []string, getenv func(string) s
 	return fetched, at.stop(err)
 }
 
-// RunPrebuild is [Run] for the prebuild from a run code: a stop has the line of
+// RunPrebuild is [RunAt] for the prebuild from a run code, at the head of each default
+// branch: a stop has the line of
 // [Target.stop] for a prebuild.
 func RunPrebuild(ctx context.Context, dir string, base []string, getenv func(string) string, p proxygit.Proxy, report io.Writer) (bool, error) {
 	return RunAt(ctx, dir, base, getenv, Target{FromCode: true, Prebuild: true}, p, report)

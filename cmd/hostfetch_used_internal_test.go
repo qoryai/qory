@@ -7,16 +7,16 @@ import (
 	"testing"
 
 	"github.com/qoryai/qory/internal/compose"
-	"github.com/qoryai/qory/internal/fixline"
 	"github.com/qoryai/qory/internal/hostgit"
 	"github.com/qoryai/qory/internal/source"
 	"github.com/qoryai/qory/internal/stack"
 )
 
 // TestAComposeLineOfAHiddenHarnessEndsWithTheUsedCode is each kind of a compose's error
-// in a run from a run code whose harness is hidden, with the status it exits with: the
-// whole line has one fix, which sends the person to a new take-in or stays as it is, and
-// one end. A line that has the end and a collision that was printed stay as they are.
+// in a run from a run code whose harness is hidden, with the status it exits with. Each
+// named case has its line. Any other line gets one front by its status, whatever its text
+// starts with, and one end, in place of a full stop. A line that has the end and a
+// collision that was printed stay as they are.
 func TestAComposeLineOfAHiddenHarnessEndsWithTheUsedCode(t *testing.T) {
 	const (
 		takeIn = ", then take the work item in again in Qory Apiary: "
@@ -48,19 +48,18 @@ func TestAComposeLineOfAHiddenHarnessEndsWithTheUsedCode(t *testing.T) {
 			"set the path of the module modules[1] to a folder inside its repository" + takeIn + "the path is absolute, the repository's root, or leads out of the repository" + used, ExitInput},
 		{"the path of extends", input(fmt.Errorf("extends: %w", &stack.SourcePathError{Path: "../x"})),
 			"set the path of the base of the workspace's harness to a folder inside its repository" + takeIn + "the path is absolute, the repository's root, or leads out of the repository" + used, ExitInput},
-		{"a line that starts with its fix", input(fix), fixLine + used, ExitInput},
-		{"a line of the copy that starts with its fix", fixline.Mark(errors.New("module tools: Ship fewer files. It contains more than 10,000 files, the most qory copies into the home.")),
-			"module tools: Ship fewer files. It contains more than 10,000 files, the most qory copies into the home" + used, 1},
-		{"a git that is too old", fmt.Errorf("module tools: %w", &hostgit.GitVersionError{Version: "2.34.1"}),
-			"module tools: Install git 2.36 or later. qory reads git's worktree list in a form that git 2.34.1 does not print" + used, 1},
-		{"a fix under a prefix has a cause in front", input(fmt.Errorf("module tools: %w", fix)),
-			"correct the workspace's harness" + takeIn + "module tools: " + fixLine + used, ExitInput},
-		{"a line with only a cause", input(errors.New("module world: qory-module.yaml in the module world: yaml: bad")),
+		{"exit 2, a line that starts with a fix", input(fix),
+			"correct the workspace's harness" + takeIn + fixLine + used, ExitInput},
+		{"exit 2, a line with only a cause", input(errors.New("module world: qory-module.yaml in the module world: yaml: bad")),
 			"correct the workspace's harness" + takeIn + "module world: qory-module.yaml in the module world: yaml: bad" + used, ExitInput},
-		{"a cause with a full stop", input(errors.New("the file is bad.")),
+		{"exit 2, a cause with a full stop", input(errors.New("the file is bad.")),
 			"correct the workspace's harness" + takeIn + "the file is bad" + used, ExitInput},
-		{"an error of the machine", denied,
-			"fix the cause on this machine" + takeIn + denied.Error() + used, 1},
+		{"exit 1, an error of the machine", denied,
+			"fix the cause" + takeIn + denied.Error() + used, 1},
+		{"exit 1, a line that starts with a fix", errors.New("module tools: Ship fewer files. It contains more than 10,000 files, the most qory copies into the home."),
+			"fix the cause" + takeIn + "module tools: Ship fewer files. It contains more than 10,000 files, the most qory copies into the home" + used, 1},
+		{"exit 1, a git that is too old", fmt.Errorf("module tools: %w", &hostgit.GitVersionError{Version: "2.34.1"}),
+			"fix the cause" + takeIn + "module tools: Install git 2.36 or later. qory reads git's worktree list in a form that git 2.34.1 does not print" + used, 1},
 		{"a line that has the end", input(errors.New("Set harness.home to a folder outside the checkout" + used)),
 			"Set harness.home to a folder outside the checkout" + used, ExitInput},
 		{"a collision that was printed", printed, printed.Error(), ExitCollision},

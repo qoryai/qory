@@ -9,10 +9,10 @@ import (
 	"github.com/qoryai/qory/internal/branchformat"
 )
 
-// TestAStopHasALineForEachKindOfRun is each stop of the fetch that says "run again", with
-// a value for each of its verbs: a run with no code has the line as it is, a run from a
-// run code sends the person to a new take-in, and a prebuild from a run code to a new run
-// code. Each line ends with the code being used.
+// TestAStopHasALineForEachKindOfRun is each stop of the fetch whose line contains "run
+// again", with a value for each of its verbs: a run with no code has the line as it is, the
+// fix of a run from a run code is a new take-in, and the fix of a prebuild from a run code
+// is a new run code. Each of those two lines ends with the code being used.
 func TestAStopHasALineForEachKindOfRun(t *testing.T) {
 	const (
 		takeIn = "take the work item in again in Qory Apiary"
@@ -114,7 +114,7 @@ func TestAStopHasALineForEachKindOfRun(t *testing.T) {
 // TestAFetchFromARunCodeStopsWithTheLineOfAUsedCode is [RunAt] for a run from a run code,
 // with no version and with one: a repository the host does not have, git that fails to
 // read the folder's repository through the stop of [safeRepository], and a failure on
-// the machine. Each line sends the person to a new take-in; the same stop of a run from
+// the machine. The fix of each line is a new take-in; the same stop of a run from
 // no run code keeps its line.
 func TestAFetchFromARunCodeStopsWithTheLineOfAUsedCode(t *testing.T) {
 	needGit(t)
