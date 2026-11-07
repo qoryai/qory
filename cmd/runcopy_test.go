@@ -982,19 +982,7 @@ func TestAnOldPlacesFileStopsNothing(t *testing.T) {
 // wall that runs its containers on this machine: the agent's commit reaches the run's branch,
 // and the run's record has the agent's session and the git session.
 func TestAWriteRunHasTwoSessionsInItsRecord(t *testing.T) {
-	root := newCheckout(t)
-	copyFixture(t, "two-modules", root)
-	script := filepath.Join(t.TempDir(), "agent")
-	writeFile(t, script, "#!/bin/sh\necho left > left.txt\n")
-	if err := os.Chmod(script, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	composedForFake(t, root, script)
-	runGit(t, root, "add", "qory.yaml", "modules")
-	runGit(t, root, "commit", "--quiet", "-m", "first")
-	writeFile(t, filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "forager.yaml"), "apiVersion: qory.dev/v1alpha1\n"+passingWall(t))
-	t.Setenv("QORY_RUN_KEY", "")
-	t.Cleanup(cmd.GitSessionThroughJoin())
+	root := walledThroughJoin(t, "#!/bin/sh\necho left > left.txt\n")
 	out, err := run(t, "run", "claude", "--", "-p", "hi")
 	if err != nil {
 		t.Fatalf("%v\n%s", err, out)
@@ -1015,6 +1003,385 @@ func TestAWriteRunHasTwoSessionsInItsRecord(t *testing.T) {
 	}
 	if started[1]["bare"] != true {
 		t.Errorf("the git session's session.started has no bare: %v", started[1])
+	}
+}
+
+// stepsAndSessions is the steps of the record rec and the starts and ends of its sessions, in
+// order: "copy started: copy work out", "join started", "copy exited failed 128", "session 2
+// started bare", "session 2 exited".
+func stepsAndSessions(rec []runEvent) []string {
+	kinds := map[float64]string{}
+	var lines []string
+	for _, ev := range rec {
+		switch ev.Type {
+		case event.StepStarted:
+			kind, _ := ev.Data["kind"].(string)
+			kinds[ev.Data["step"].(float64)] = kind
+			if kind == event.StepCopy {
+				lines = append(lines, fmt.Sprintf("copy started: %v", ev.Data["name"]))
+			} else {
+				lines = append(lines, kind+" started")
+			}
+		case event.StepExited:
+			kind := kinds[ev.Data["step"].(float64)]
+			if kind == event.StepCopy {
+				lines = append(lines, fmt.Sprintf("copy exited %v %v", ev.Data["state"], ev.Data["exit_code"]))
+			} else {
+				lines = append(lines, kind+" exited")
+			}
+		case "dev.qory.session.started":
+			bare := ""
+			if ev.Data["bare"] == true {
+				bare = " bare"
+			}
+			lines = append(lines, fmt.Sprintf("session %v started%s", ev.Data["session"], bare))
+		case "dev.qory.session.exited":
+			lines = append(lines, fmt.Sprintf("session %v exited", ev.Data["session"]))
+		}
+	}
+	return lines
+}
+
+// fromCopyStep is the part of lines from the copy step's start.
+func fromCopyStep(t *testing.T, lines []string) []string {
+	t.Helper()
+	i := slices.Index(lines, "copy started: copy work out")
+	if i < 0 {
+		t.Fatalf("the record has no copy step:\n%s", strings.Join(lines, "\n"))
+	}
+	return lines[i:]
+}
+
+// TestTheRecordHasTheGitSessionInACopyStep is a walled write run through Forager's join, with a
+// wall that runs its containers on this machine: the steps of the git session start and end
+// inside the copy step, which exits 0 once the session ended, and the agent's session is
+// outside it.
+func TestTheRecordHasTheGitSessionInACopyStep(t *testing.T) {
+	root := walledThroughJoin(t, "#!/bin/sh\necho left > left.txt\n")
+	out, err := run(t, "run", "claude", "--", "-p", "hi")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	gitOutput(t, root, "cat-file", "-e", runBranchOf(t, out)+":left.txt")
+	all := stepsAndSessions(sessionRecord(t, root))
+	equalLines(t, fromCopyStep(t, all), []string{
+		"copy started: copy work out",
+		"join started",
+		"join exited",
+		"session 2 started bare",
+		"wall started",
+		"wall exited",
+		"session 2 exited",
+		"copy exited succeeded 0",
+	})
+	if i, j := slices.Index(all, "session 1 exited"), slices.Index(all, "copy started: copy work out"); i < 0 || i > j {
+		t.Errorf("the agent's session is not before the copy step:\n%s", strings.Join(all, "\n"))
+	}
+}
+
+// TestAFailedGitSessionExitsItsCopyStepFailed is the git session through Forager's join on a
+// copy where the agent deleted the tree of its commit: git read-tree in the session exits 128,
+// and the copy step exits failed with that code.
+func TestAFailedGitSessionExitsItsCopyStepFailed(t *testing.T) {
+	root := walledThroughJoin(t, `#!/bin/sh
+echo left > left.txt
+git add left.txt
+git -c user.name=agent -c user.email=agent@example.invalid commit -q -m agent
+tree=$(git rev-parse 'HEAD^{tree}')
+rm -f ".git/objects/$(echo "$tree" | cut -c1-2)/$(echo "$tree" | cut -c3-)"
+`)
+	out, err := run(t, "run", "claude", "--", "-p", "hi")
+	if cmd.ExitCode(err) != 1 {
+		t.Errorf("exit %d (%v), want 1\n%s", cmd.ExitCode(err), err, out)
+	}
+	wants(t, out, "the git session exited with 128, so the run's commits did not come back")
+	lines := fromCopyStep(t, stepsAndSessions(sessionRecord(t, root)))
+	if got := lines[len(lines)-1]; got != "copy exited failed 128" {
+		t.Errorf("the copy step ends with %q:\n%s", got, strings.Join(lines, "\n"))
+	}
+	if got := gitOutput(t, root, "for-each-ref", "refs/heads/qory/"); got != "" {
+		t.Errorf("the run's branch came back: %s", got)
+	}
+}
+
+// walledThroughJoin is a checkout whose walled write run goes through Forager's join, with the
+// agent script and a wall that runs its containers on this machine.
+func walledThroughJoin(t *testing.T, agent string) string {
+	t.Helper()
+	root := newCheckout(t)
+	copyFixture(t, "two-modules", root)
+	script := filepath.Join(t.TempDir(), "agent")
+	writeFile(t, script, agent)
+	if err := os.Chmod(script, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	composedForFake(t, root, script)
+	runGit(t, root, "add", "qory.yaml", "modules")
+	runGit(t, root, "commit", "--quiet", "-m", "first")
+	writeFile(t, filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "forager.yaml"), "apiVersion: qory.dev/v1alpha1\n"+passingWall(t))
+	t.Setenv("QORY_RUN_KEY", "")
+	t.Cleanup(cmd.GitSessionThroughJoin())
+	return root
+}
+
+// copyStepRun is a walled write run with a fake run: agent, nil for one that leaves a file,
+// stands in for the agent, and git for the git session. It returns the run's output and error,
+// the checkout, and the copy step's events and the session's join and end, in order. Those
+// two show as "joined" and "ended".
+func copyStepRun(t *testing.T, values cmd.Nowhere, agent func(spec session.SessionSpec), git func(context.Context, session.SessionSpec) (*session.Result, error)) (string, error, string, []string) {
+	t.Helper()
+	root := copyCheckout(t)
+	if agent == nil {
+		agent = func(spec session.SessionSpec) {
+			writeFile(t, filepath.Join(spec.Dir, "left.txt"), "left\n")
+		}
+	}
+	agentInCopy(t, agent)
+	var trace []string
+	copyStep := 0
+	values.OnStep = func(e cmd.StepEvent) {
+		if e.Type == "step_started" && e.Kind == event.StepCopy {
+			copyStep = e.Step
+		}
+		if e.Step == copyStep && copyStep != 0 {
+			trace = append(trace, shownSteps([]cmd.StepEvent{e})...)
+		}
+	}
+	_, _, restore := cmd.OpenNowhereWith(values)
+	defer restore()
+	t.Cleanup(cmd.SetGitSession(func(ctx context.Context, spec session.SessionSpec) (*session.Result, error) {
+		trace = append(trace, "joined")
+		defer func() { trace = append(trace, "ended") }()
+		return git(ctx, spec)
+	}))
+	out, err := run(t, "run", "claude", "--", "-p", "hi")
+	return out, err, root, trace
+}
+
+// withoutNumbers is lines without the step's number at the start of each.
+func withoutNumbers(lines []string) []string {
+	shown := make([]string, len(lines))
+	for i, line := range lines {
+		_, rest, _ := strings.Cut(line, " ")
+		if rest == "" {
+			rest = line
+		}
+		shown[i] = rest
+	}
+	return shown
+}
+
+// TestTheCopyStepEndsWithTheGitSession is each failure of the git session: the step starts before
+// the join and exits failed once after the session ended, with the session's exit code, or -1
+// when it has none, and its last line is the stop.
+func TestTheCopyStepEndsWithTheGitSession(t *testing.T) {
+	cases := []struct {
+		name string
+		res  *session.Result
+		err  error
+		exit string
+		line string
+	}{
+		{"git fails", &session.Result{ExitCode: 128}, nil, "exited failed 128", "the git session exited with 128, so the run's commits did not come back"},
+		{"the time limit", &session.Result{TimedOut: true}, nil, "exited failed -1", "the git session ran past its limit of 5m0s, so the run's commits did not come back"},
+		{"the time limit with an exit code", &session.Result{TimedOut: true, ExitCode: 143}, nil, "exited failed 143", "the git session ran past its limit of 5m0s, so the run's commits did not come back"},
+		{"no start", nil, errors.New("the engine is gone"), "exited failed -1", "the git session did not start, so the run's commits did not come back: the engine is gone"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			out, err, root, trace := copyStepRun(t, cmd.Nowhere{}, nil, func(context.Context, session.SessionSpec) (*session.Result, error) {
+				return c.res, c.err
+			})
+			if cmd.ExitCode(err) != 1 {
+				t.Errorf("exit %d (%v), want 1\n%s", cmd.ExitCode(err), err, out)
+			}
+			wants(t, out, c.line)
+			got := withoutNumbers(trace)
+			if len(got) != 5 {
+				t.Fatalf("the copy step's events:\n%s", strings.Join(trace, "\n"))
+			}
+			equalLines(t, []string{got[0], got[1], got[2], got[4]}, []string{"started copy: copy work out", "joined", "ended", c.exit})
+			if !strings.HasPrefix(got[3], "log: qory run: read the run's files in ") || !strings.HasSuffix(got[3], ": "+c.line+"\n") {
+				t.Errorf("the step's last line is %q, want the stop %q", got[3], c.line)
+			}
+			if got := gitOutput(t, root, "for-each-ref", "refs/heads/qory/"); got != "" {
+				t.Errorf("the run's branch came back: %s", got)
+			}
+		})
+	}
+}
+
+// TestTheCopyStepOfASessionThatSucceeds is a git session that exits 0: the step starts before
+// the join, exits succeeded with 0 after the session ended, once, with no line, and the run's
+// commits come back.
+func TestTheCopyStepOfASessionThatSucceeds(t *testing.T) {
+	out, err, root, trace := copyStepRun(t, cmd.Nowhere{}, nil, cmd.GitSessionOnHost)
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	equalLines(t, withoutNumbers(trace), []string{"started copy: copy work out", "joined", "ended", "exited succeeded 0"})
+	gitOutput(t, root, "cat-file", "-e", runBranchOf(t, out)+":left.txt")
+}
+
+// TestACutGitSessionExitsItsCopyStepCancelled is a second signal during the git session: the step
+// exits cancelled with -1, and its last line has the cut.
+func TestACutGitSessionExitsItsCopyStepCancelled(t *testing.T) {
+	out, _, _, trace := copyStepRun(t, cmd.Nowhere{}, nil, func(ctx context.Context, _ session.SessionSpec) (*session.Result, error) {
+		term(t)
+		term(t)
+		<-ctx.Done()
+		return nil, ctx.Err()
+	})
+	line := "qory run got a second signal during the git session, so the run's commits did not come back"
+	wants(t, out, line)
+	got := withoutNumbers(trace)
+	if len(got) != 5 || got[4] != "exited cancelled -1" || !strings.HasSuffix(got[3], ": "+line+"\n") {
+		t.Errorf("the copy step's events:\n%s", strings.Join(trace, "\n"))
+	}
+}
+
+// TestACutGitSessionWithAnExitCodeExitsCancelled is a second signal during the git session, whose
+// join returns a result with the exit code after the stop: the step exits cancelled with -1, not
+// with that code, whether it is 143 or 0.
+func TestACutGitSessionWithAnExitCodeExitsCancelled(t *testing.T) {
+	for _, code := range []int{143, 0} {
+		t.Run(fmt.Sprint(code), func(t *testing.T) {
+			out, _, _, trace := copyStepRun(t, cmd.Nowhere{}, nil, func(ctx context.Context, _ session.SessionSpec) (*session.Result, error) {
+				term(t)
+				term(t)
+				<-ctx.Done()
+				return &session.Result{Cancelled: true, ExitCode: code}, nil
+			})
+			line := "qory run got a second signal during the git session, so the run's commits did not come back"
+			wants(t, out, line)
+			got := withoutNumbers(trace)
+			if len(got) != 5 || got[4] != "exited cancelled -1" || !strings.HasSuffix(got[3], ": "+line+"\n") {
+				t.Errorf("the copy step's events:\n%s", strings.Join(trace, "\n"))
+			}
+		})
+	}
+}
+
+// TestACopyStepWithNoScriptExitsFailed is a git session whose script qory cannot write, since
+// the agent made the folder of its bundle: no session joins, and the step exits failed with -1.
+func TestACopyStepWithNoScriptExitsFailed(t *testing.T) {
+	out, err, _, trace := copyStepRun(t, cmd.Nowhere{}, func(spec session.SessionSpec) {
+		if err := os.Mkdir(filepath.Join(filepath.Dir(spec.Dir), "bundle"), 0o700); err != nil {
+			t.Error(err)
+		}
+	}, func(context.Context, session.SessionSpec) (*session.Result, error) {
+		t.Error("a session joined")
+		return &session.Result{}, nil
+	})
+	if cmd.ExitCode(err) != 1 {
+		t.Errorf("exit %d (%v), want 1\n%s", cmd.ExitCode(err), err, out)
+	}
+	wants(t, out, "the git session did not start, so the run's commits did not come back: ")
+	got := withoutNumbers(trace)
+	if len(got) != 3 || got[0] != "started copy: copy work out" || !strings.Contains(got[1], "the git session did not start") || got[2] != "exited failed -1" {
+		t.Errorf("the copy step's events:\n%s", strings.Join(trace, "\n"))
+	}
+}
+
+// TestACopyStepThatDoesNotStartStopsTheReturn is a StartStep of kind copy that returns an error:
+// no session joins, and the run's commits do not come back.
+func TestACopyStepThatDoesNotStartStopsTheReturn(t *testing.T) {
+	out, err, root, trace := copyStepRun(t, cmd.Nowhere{StepErr: func(kind string) error {
+		if kind == event.StepCopy {
+			return errors.New("the step did not start")
+		}
+		return nil
+	}}, nil, func(context.Context, session.SessionSpec) (*session.Result, error) {
+		t.Error("a session joined")
+		return &session.Result{}, nil
+	})
+	if cmd.ExitCode(err) != 1 {
+		t.Errorf("exit %d (%v), want 1\n%s", cmd.ExitCode(err), err, out)
+	}
+	wants(t, out, "the git session did not start, so the run's commits did not come back: the step did not start")
+	if len(trace) != 0 {
+		t.Errorf("the copy step's events:\n%s", strings.Join(trace, "\n"))
+	}
+	if got := gitOutput(t, root, "for-each-ref", "refs/heads/qory/"); got != "" {
+		t.Errorf("the run's branch came back: %s", got)
+	}
+}
+
+// TestACopyStepThatDoesNotEndStopsTheReturn is a Step.Exit of the copy step that returns an error
+// after a session that succeeded: the line has the error, and the run's commits do not come
+// back, as for any step that does not end.
+func TestACopyStepThatDoesNotEndStopsTheReturn(t *testing.T) {
+	out, err, root, _ := copyStepRun(t, cmd.Nowhere{StepExitErr: func(kind string) error {
+		if kind == event.StepCopy {
+			return errors.New("the step did not end")
+		}
+		return nil
+	}}, nil, cmd.GitSessionOnHost)
+	if cmd.ExitCode(err) != 1 {
+		t.Errorf("exit %d (%v), want 1\n%s", cmd.ExitCode(err), err, out)
+	}
+	wants(t, out, "and run no git there: the step did not end")
+	if got := gitOutput(t, root, "for-each-ref", "refs/heads/qory/"); got != "" {
+		t.Errorf("the run's branch came back: %s", got)
+	}
+}
+
+// TestAFailedExitKeepsTheStopOfTheGitSession is a git session that exits 128 and a Step.Exit of the
+// copy step that returns an error: the line is the session's stop, and the error of the exit
+// does not replace it.
+func TestAFailedExitKeepsTheStopOfTheGitSession(t *testing.T) {
+	out, err, _, _ := copyStepRun(t, cmd.Nowhere{StepExitErr: func(kind string) error {
+		if kind == event.StepCopy {
+			return errors.New("the step did not end")
+		}
+		return nil
+	}}, nil, func(context.Context, session.SessionSpec) (*session.Result, error) {
+		return &session.Result{ExitCode: 128}, nil
+	})
+	if cmd.ExitCode(err) != 1 {
+		t.Errorf("exit %d (%v), want 1\n%s", cmd.ExitCode(err), err, out)
+	}
+	wants(t, out, "and run no git there: the git session exited with 128, so the run's commits did not come back")
+	lacks(t, out, "the step did not end")
+}
+
+// TestTheCopyStepsLogHasNoPathOfTheCopy is a failed git session on a run with no push: the line in
+// the step's log has the run's folder, and the line on the terminal has the path of the copy.
+// It covers a path in the line's fix and a path in its cause.
+func TestTheCopyStepsLogHasNoPathOfTheCopy(t *testing.T) {
+	var work string
+	cases := []struct {
+		name  string
+		agent func(session.SessionSpec)
+		log   string
+	}{
+		{"in the fix", func(spec session.SessionSpec) { work = spec.Dir }, "the run's folder, and run no git there: the git session exited with 128, so the run's commits did not come back\n"},
+		{"in the cause", func(spec session.SessionSpec) {
+			work = spec.Dir
+			if err := os.Mkdir(filepath.Join(filepath.Dir(spec.Dir), "bundle"), 0o700); err != nil {
+				t.Error(err)
+			}
+		}, "the run's folder/bundle"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			out, _, _, trace := copyStepRun(t, cmd.Nowhere{}, c.agent, func(context.Context, session.SessionSpec) (*session.Result, error) {
+				return &session.Result{ExitCode: 128}, nil
+			})
+			wants(t, out, "qory run: read the run's files in "+work+", and run no git there: ")
+			line := ""
+			for _, e := range trace {
+				if _, rest, ok := strings.Cut(e, " log: "); ok {
+					line = rest
+				}
+			}
+			if !strings.HasPrefix(line, "qory run: read the run's files in the run's folder, and run no git there: ") || !strings.Contains(line, c.log) {
+				t.Errorf("the step's log line is %q", line)
+			}
+			if strings.Contains(line, filepath.Join("qory", "runs")) || strings.Contains(line, filepath.Dir(work)) {
+				t.Errorf("the step's log line has a path of the copy: %q", line)
+			}
+		})
 	}
 }
 

@@ -1466,8 +1466,8 @@ type openedRun interface {
 	// before the first join; see [fetchImage].
 	FetchImage(ctx context.Context) error
 	Close(ctx context.Context, out session.Outcome) (*session.Closed, error)
-	// StartStep starts a step of the run's host work, of kind fetch, compose, push or
-	// machine.
+	// StartStep starts a step of the run's host work, of kind fetch, compose, push, machine
+	// or copy.
 	StartStep(kind, name string) (hostStep, error)
 	// HostProxy starts the run's host proxy, for the fetch and the push of the run's
 	// repositories on this machine.

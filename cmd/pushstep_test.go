@@ -1953,6 +1953,50 @@ func TestAFailedRemovalOfTheSetupContainerRunsNoPush(t *testing.T) {
 	}
 }
 
+// TestTheCopyStepComesBeforeThePushStep is a walled write run with the push step: the copy step
+// exits before the push step starts. A git session that fails exits the copy step failed with
+// its code, and the run has no push step.
+func TestTheCopyStepComesBeforeThePushStep(t *testing.T) {
+	kept := func(steps []cmd.StepEvent) []string {
+		numbers := map[int]bool{}
+		var lines []string
+		for _, e := range steps {
+			if e.Type == "step_started" && (e.Kind == event.StepCopy || e.Kind == event.StepPush) {
+				numbers[e.Step] = true
+			}
+			if numbers[e.Step] && e.Type != "log" {
+				lines = append(lines, shownSteps([]cmd.StepEvent{e})...)
+			}
+		}
+		return lines
+	}
+	left := func(dir string) { writeFile(t, filepath.Join(dir, "left.txt"), "left\n") }
+	t.Run("the session succeeds", func(t *testing.T) {
+		p := walledPush(t)
+		t.Cleanup(cmd.SetGitSession(cmd.GitSessionOnHost))
+		r := p.run(t, left, nil)
+		if r.err != nil {
+			t.Fatalf("%v\n%s", r.err, r.out)
+		}
+		got := withoutNumbers(kept(r.steps))
+		if len(got) != 4 || got[0] != "started copy: copy work out" || got[1] != "exited succeeded 0" || !strings.HasPrefix(got[2], "started push: ") || got[3] != "exited succeeded 0" {
+			t.Errorf("the steps:\n%s", strings.Join(got, "\n"))
+		}
+	})
+	t.Run("the session fails", func(t *testing.T) {
+		p := walledPush(t)
+		t.Cleanup(cmd.SetGitSession(func(context.Context, session.SessionSpec) (*session.Result, error) {
+			return &session.Result{ExitCode: 128}, nil
+		}))
+		r := p.run(t, left, nil)
+		wants(t, r.out, "the git session exited with 128")
+		equalLines(t, withoutNumbers(kept(r.steps)), []string{"started copy: copy work out", "exited failed 128"})
+		if head := p.branchHead(t); head != "" {
+			t.Errorf("the forge has the branch at %s", head)
+		}
+	})
+}
+
 // TestAWallThatStaysRunsNoGit is a HostProxy that fails because the wall of a session could
 // not be removed, for each end of the session: the agent may still run, so the step runs
 // no git.
