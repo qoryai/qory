@@ -500,6 +500,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				// A run whose harness is hidden composes a home with no link, which Forager
 				// reads to mask the harness's text in the session's log and events.
 				composing.hidden, spec.HarnessHidden = fromCode.hidden, fromCode.hidden
+				composing.fromCode = true
 				timeout = provisioner.TimeLimit(fromCode.minutes, 0)
 				var remove func()
 				in, remove, err = fromCode.writeInputs()

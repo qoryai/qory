@@ -504,8 +504,8 @@ func TestARunAPIThatFailsStopsARunWithPushChecks(t *testing.T) {
 // TestAWritableMountInTheHomeStopsARunCodeWithPushChecks is a walled run from a run code
 // with push checks and --home outside the cache directory, given a read-write --mount at
 // or inside its home: the run stops at the compose, before the home is written, with
-// exit 2 and the fix line, and the agent does not start. A read-only mount inside the
-// home starts the agent.
+// exit 2 and the fix line, which ends with "; the code is used", and the agent does not
+// start. A read-only mount inside the home starts the agent.
 func TestAWritableMountInTheHomeStopsARunCodeWithPushChecks(t *testing.T) {
 	docker, log := checkDocker(t, 0, "")
 	p, homes := newCheckedRepo(t, docker)
@@ -527,7 +527,7 @@ func TestAWritableMountInTheHomeStopsARunCodeWithPushChecks(t *testing.T) {
 		if joined || slices.Contains(r.calls, "setup") {
 			t.Errorf("--mount %s: the run went on: %v, joined %v", mount, r.calls, joined)
 		}
-		want := "Mount " + mount + " read-only, or move it out of the harness home, for a walled run with push checks. The agent could change the push checks through it."
+		want := "Mount " + mount + " read-only, or move it out of the harness home, for a walled run with push checks. The agent could change the push checks through it; the code is used"
 		if r.err == nil || r.err.Error() != want {
 			t.Errorf("--mount %s: %v, want %q\n%s", mount, r.err, want, r.out)
 		}

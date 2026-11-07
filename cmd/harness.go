@@ -518,6 +518,9 @@ type composeOptions struct {
 	// code, whose file is the copy in the run directory: the compose's errors show a
 	// stack that the document defines as checkedAs in Qory Apiary.
 	fromDocuments bool
+	// fromCode is set for the compose of a run from a run code: a line of
+	// [pushChecksWritable] ends with [codeUsed].
+	fromCode bool
 }
 
 // named is the harness o composes with no address shown, see [source.Named]; nil for any
@@ -743,17 +746,21 @@ func composeHome(out, errOut io.Writer, o composeOptions) (*composed, error) {
 // see [homeInFolders]; this check is a backstop. A read-write mount at or inside the home
 // stops only a run from a run code here; any other walled run stops on any read-write
 // mount before the run opens, see [writableMount]. A home without push checks starts as
-// before.
+// before. Each line of a run from a run code ends with [codeUsed].
 func pushChecksWritable(o composeOptions, pr *prepared) error {
 	if !o.run || !o.walled || len(pr.res.PushChecks) == 0 {
 		return nil
 	}
+	ending := "."
+	if o.fromCode {
+		ending = codeUsed
+	}
 	if reallyWithin(pr.at.root, pr.at.home) {
-		return input(fmt.Errorf("Set harness.home to a folder outside the checkout for a walled run. %s is inside the checkout, where the agent can change the push checks.", exports.Value(pr.at.home, false)))
+		return input(fmt.Errorf("Set harness.home to a folder outside the checkout for a walled run. %s is inside the checkout, where the agent can change the push checks%s", exports.Value(pr.at.home, false), ending))
 	}
 	for _, path := range o.writable {
 		if liesIn(path, pr.at.home) {
-			return input(fmt.Errorf("Mount %s read-only, or move it out of the harness home, for a walled run with push checks. The agent could change the push checks through it.", exports.Value(path, false)))
+			return input(fmt.Errorf("Mount %s read-only, or move it out of the harness home, for a walled run with push checks. The agent could change the push checks through it%s", exports.Value(path, false), ending))
 		}
 	}
 	return nil
