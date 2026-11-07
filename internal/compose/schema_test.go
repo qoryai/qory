@@ -327,6 +327,67 @@ func TestModuleSchemaTakesTheHostForagerTakes(t *testing.T) {
 	}
 }
 
+// TestModuleSchemaMatchesTheReaderOnPushChecks keeps the schema and module.ReadManifest in
+// step on push_checks: each item passes both or fails both. The one rule the schema
+// cannot state, one type twice in one module, is the reader's alone.
+func TestModuleSchemaMatchesTheReaderOnPushChecks(t *testing.T) {
+	schema, err := jsonschema.NewCompiler().Compile("../../contracts/harness/v1/module.schema.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		items string
+		valid bool
+	}{
+		{`[]`, true},
+		{`[{"type": "spec", "command": ["skills/run/checks.js", "push", "spec"]}]`, true},
+		{`[{"type": "spec", "command": ["checks.js"]}, {"type": "review-comments", "command": ["./checks.js", ""]}]`, true},
+		{`[{"type": "spec", "command": ["c.js", "--dir", "../x"]}]`, true},
+		{`[{"type": "decision-record", "command": ["c.js"], "reads": ["acceptance-criteria", "questions"]}]`, true},
+		{`[{"type": "spec", "command": ["c.js"], "reads": []}]`, true},
+		{`[{"type": "spec", "command": ["c.js"], "reads": ["Questions"]}]`, false},
+		{`[{"type": "spec", "command": ["c.js"], "reads": ["questions", "questions"]}]`, false},
+		{`[{"type": "spec", "command": ["c.js"], "reads": [3]}]`, false},
+		{`[{"type": "spec", "command": ["c.js"], "reads": "questions"}]`, false},
+		{`[{"type": "Spec", "command": ["c.js"]}]`, false},
+		{`[{"type": "spec-", "command": ["c.js"]}]`, false},
+		{`[{"type": "", "command": ["c.js"]}]`, false},
+		{`[{"type": "` + strings.Repeat("a", 65) + `", "command": ["c.js"]}]`, false},
+		{`[{"command": ["c.js"]}]`, false},
+		{`[{"type": "spec"}]`, false},
+		{`[{"type": "spec", "command": []}]`, false},
+		{`[{"type": "spec", "command": [""]}]`, false},
+		{`[{"type": "spec", "command": ["/usr/bin/node"]}]`, false},
+		{`[{"type": "spec", "command": ["../c.js"]}]`, false},
+		{`[{"type": "spec", "command": ["a/../c.js"]}]`, false},
+		{`[{"type": "spec", "command": ["a/.."]}]`, false},
+		{`[{"type": "spec", "command": ["c.js", 3]}]`, false},
+		{`[{"type": "spec", "command": "c.js"}]`, false},
+		{`[{"type": "spec", "command": ["c.js"], "timeout": 5}]`, false},
+		{`{"spec": ["c.js"]}`, false},
+	} {
+		var items any
+		if err := json.Unmarshal([]byte(c.items), &items); err != nil {
+			t.Fatal(err)
+		}
+		doc := map[string]any{"apiVersion": "qory.dev/v1alpha1", "name": "core", "push_checks": items}
+		if err := schema.Validate(doc); (err == nil) != c.valid {
+			t.Errorf("schema: %s valid=%v err=%v", c.items, c.valid, err)
+		}
+		dir := t.TempDir()
+		body, err := yaml.Marshal(doc)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, module.ManifestName), body, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := module.ReadManifest(dir); (err == nil) != c.valid {
+			t.Errorf("reader: %s valid=%v err=%v", c.items, c.valid, err)
+		}
+	}
+}
+
 // TestConfigSchemaKnowsTiers takes harness.tiers in both entry forms, with or beside a
 // document, and refuses a name that is not a tier, an empty model, an entry without a
 // model and a key the entry does not have. A stack has no tiers.

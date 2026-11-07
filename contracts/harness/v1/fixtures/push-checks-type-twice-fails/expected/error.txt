@@ -1,0 +1,1 @@
+Remove the push check for spec from module core or module web: a type has one push check, and both modules declare one

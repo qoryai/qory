@@ -683,6 +683,9 @@ func composeHome(out, errOut io.Writer, o composeOptions) (*composed, error) {
 		return nil, err
 	}
 	defer pr.res.Close()
+	if err := pushChecksWritable(o, pr); err != nil {
+		return nil, err
+	}
 	if o.check {
 		return nil, runCheck(out, pr)
 	}
@@ -728,6 +731,17 @@ func composeHome(out, errOut io.Writer, o composeOptions) (*composed, error) {
 		workflows = res.Stack.Workflows
 	}
 	return &composed{rep: rep, targets: targets, warnings: pr.warnings, harness: harnessSources(res, o.named()), workflows: workflows}, nil
+}
+
+// pushChecksWritable stops a walled run before the home is written when the home is
+// inside the checkout and a module declares a push check: the container mounts such a
+// home with the checkout, read-write, so the agent could change the checks. A home
+// without push checks starts as before.
+func pushChecksWritable(o composeOptions, pr *prepared) error {
+	if !o.run || !o.walled || len(pr.res.PushChecks) == 0 || !reallyWithin(pr.at.root, pr.at.home) {
+		return nil
+	}
+	return input(fmt.Errorf("Set harness.home to a folder outside the checkout for a walled run. %s is inside the checkout, where the agent can change the push checks.", exports.Value(pr.at.home, false)))
 }
 
 // launchEnv is, per runtime with a launch template, the variables the harness sets when

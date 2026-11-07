@@ -607,6 +607,10 @@ roles:                           # the roles the module's documents reference
 provides:                        # the roles the module fills
   agents:
     developer: nextjs-developer  # ${qory:agents/developer} is the agent nextjs-developer
+push_checks:                     # optional: a check for the files of one artifact type
+  - type: spec
+    command: [scripts/checks.js, push, spec]  # a program in the module, then its arguments
+    reads: [questions]           # optional: the other artifact types the check reads
 ```
 
 `description`, optional, describes what the module is for; the report contains it and `qory harness
@@ -655,6 +659,22 @@ name of one entry of that kind, as `bind` does: a technology module `typescript`
 checkout. The name is a composed entry of any module. A list as a value, a flat
 `agents/developer` key and a kind other than the three are refused, each with the
 manifest's path.
+`push_checks`, optional, declares checks for the files of an artifact type, one item per
+type: `type`, the artifact type, `command`, the program and its arguments, and `reads`,
+optional. `reads` lists the other artifact types the check reads. The program is a file in
+the module, a relative path with no `..` part, such as an executable script with a
+`#!/usr/bin/env node` line. The checks are set per module, and a module without
+`push_checks` adds none: its pushes work as before. A type that does not match
+`^[a-z0-9]+(-[a-z0-9]+)*$` or is longer than 64 bytes, one type twice in one module, an
+empty command, a word of the command that is not a string, and a value of `reads` that is
+not a type or is listed twice fail the compose, each with the manifest's path. The compose
+also fails when two modules declare a check for one type, `Remove the push check for spec
+from module core or module web: a type has one push check, and both modules declare one`;
+when the program is not a file in the module, `Add checks/check.js to module core, or
+change its push check for spec: the module has no file at that path`; and when the program
+is in an entry an `exclude` or an `only` of its module leaves out. The home contains
+`push-checks.json` with each check, sorted by type, with its `reads` and its program's
+absolute path in the home; a harness whose modules declare no check has no such file.
 
 A module's tree contains these entry kinds:
 

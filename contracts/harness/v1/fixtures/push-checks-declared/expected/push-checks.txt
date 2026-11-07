@@ -1,0 +1,3 @@
+mockup web $QORY_HARNESS_HOME/modules/web/bin/check --strict
+review-comments web $QORY_HARNESS_HOME/modules/web/bin/check
+spec core $QORY_HARNESS_HOME/modules/core/checks/check.js push spec reads acceptance-criteria questions

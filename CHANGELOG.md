@@ -45,6 +45,15 @@ release may change what an existing document does, and states it under Upgrading
   `size_limit`, `max_files` and, for `base_view: structured`, `json_schema`. Every command
   that reads the configuration checks each entry and compiles each `json_schema`. See
   Artifact types in `contracts/harness/v1/README.md`.
+- A module can declare checks for the files of an artifact type with `push_checks` in
+  `qory-module.yaml`: each item has `type`, `command`, a program in the module and its
+  arguments, and optional `reads`, the other artifact types the check reads. The checks
+  are optional and set per module; a module without them pushes as before. The compose
+  fails when two modules declare a check for one type, or when a program is not a file
+  in the module, and writes the checks to `push-checks.json` in the home. A walled run
+  whose home is inside the checkout, and whose modules declare push checks, stops before
+  the agent starts with exit 2. See The module manifest in
+  `contracts/harness/v1/README.md`.
 - Version 1 of the branch format, `contracts/harness/v1/branch.schema.json`: a work
   item's branch, `qory/<work item id>`, and the commit in each repository. A software
   factory can use it as the `json_schema` of a custom artifact type `branch`.

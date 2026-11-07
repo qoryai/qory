@@ -221,6 +221,11 @@ go to the runtime, after the launch template's arguments.
 The report fixes no variable and adds no mount. Behind a wall, `harness.home` comes from
 the `qory.yaml` in qory's configuration directory alone: another `qory.yaml` that moves
 the home refuses a walled run.
+A walled run whose home is inside the checkout, and whose modules declare `push_checks`,
+stops before the agent starts, with exit 2: `Set harness.home to a folder outside the
+checkout for a walled run. <path> is inside the checkout, where the agent can change the
+push checks.` The container mounts such a home with the checkout, read-write. A home
+without push checks starts as before.
 
 When the run ends, qory says how, and its exit status goes with it:
 

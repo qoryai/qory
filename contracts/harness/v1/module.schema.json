@@ -78,6 +78,33 @@
         }
       }
     },
+    "push_checks": {
+      "description": "Checks for the files of an artifact type, one per type across the composed modules. Optional: a module without the key adds none.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["type", "command"],
+        "additionalProperties": false,
+        "properties": {
+          "type": {"description": "An artifact type: lowercase letters and digits in groups joined by single hyphens, 1 to 64 bytes.", "type": "string", "maxLength": 64, "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"},
+          "command": {
+            "description": "The program, a relative path inside the module with no .. part, then its arguments.",
+            "type": "array",
+            "minItems": 1,
+            "prefixItems": [
+              {"type": "string", "minLength": 1, "pattern": "^[^/]", "not": {"pattern": "(^|/)\\.\\.(/|$)"}}
+            ],
+            "items": {"type": "string"}
+          },
+          "reads": {
+            "description": "The other artifact types the check reads, each once.",
+            "type": "array",
+            "uniqueItems": true,
+            "items": {"type": "string", "maxLength": 64, "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"}
+          }
+        }
+      }
+    },
     "variants": {
       "type": "object",
       "properties": {"default": {"type": "string", "minLength": 1}},
