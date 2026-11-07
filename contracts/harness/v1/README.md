@@ -738,10 +738,11 @@ In a run whose home has push checks, a push that the check cannot read gets 422
 When qory cannot run the check, the push stops with 503 `push_check_unavailable`, and qory
 run writes the cause as a line on its stderr: the fetch of the artifacts fails, two files
 of a fetched version are one file on this machine, the engine is not reachable or does
-not create the container, the engine has no run's image, or a temporary folder cannot be
-made. Node is needed only by a check whose program uses it: Qory's agent image, and every
-image built FROM it, has it. A run without a wall runs no check, and outside a run `qory
-artifact push` keeps the files in `.qory/artifacts` and runs no check.
+not create the container, the engine does not have the run's image, or a temporary
+folder cannot be made. Node is needed only by a check whose program uses it: Qory's agent
+image, and every image built FROM it, has it. A run without a wall, or without a control
+plane, runs no check, and outside a run `qory artifact push` keeps the files in
+`.qory/artifacts` and runs no check.
 
 A module's tree contains these entry kinds:
 

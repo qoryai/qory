@@ -217,6 +217,9 @@ type Nowhere struct {
 	// no error code to every request, as Qory Apiary does with its feature workflow_model
 	// off.
 	RunAPI string
+	// RunAPIErr, when not nil, is called by each RunAPI, which returns its error when it
+	// returns one, as Forager's RunAPI of a closed run.
+	RunAPIErr func() error
 	// StepErr, when not nil, is called by each StartStep with the step's kind, and a
 	// StartStep whose call returns an error writes no step and returns it.
 	StepErr func(kind string) error
@@ -370,6 +373,11 @@ func openAtGateway(ctx context.Context, spec session.OpenSpec, image string) (*g
 func (n *nowhere) RunAPI() (*http.Client, string, error) {
 	if n.ended {
 		return nil, "", errNowhereClosed
+	}
+	if n.values.RunAPIErr != nil {
+		if err := n.values.RunAPIErr(); err != nil {
+			return nil, "", err
+		}
 	}
 	if n.values.RunAPI != "" {
 		return http.DefaultClient, n.values.RunAPI, nil

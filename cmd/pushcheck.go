@@ -31,7 +31,9 @@ const textNotChecked = "the version did not pass the check for %s"
 // textCheckNotFinished is the status line of a push whose check returned an error.
 const (
 	textChecksNoWall     = "Set wall.adapter to docker, and run again. The push checks of %s run in containers of the docker wall alone."
-	textChecksNoRunAPI   = "Run again. The run API, through which the push checks read the artifacts, failed: %s."
+	textChecksNoRunAPI   = "Open the run through a gateway that sends the run API address, and run again. The push checks read the artifacts through the run API, which failed: %s."
+	textChecksBadRunAPI  = "Update the run's gateway, and run again. The run API address that the gateway sent is not one the push checks can use: %s."
+	textChecksEngine     = "Switch the engine back to the one the run started on, and run again. The push checks would run on the engine %s, and the run's containers are on the engine %s."
 	textChecksNoFolder   = "Check %s, and run again. Making the folder of the push checks' files failed: %s."
 	textChecksNotSet     = "Run again. Turning on the push checks for the POSTs from behind the wall failed, so the run stopped before the setup: %s."
 	textCheckNotFinished = "the check before a push did not finish, and the push was not stored (503 " + runapi.CodePushCheckUnavailable + "): %s"
@@ -58,7 +60,7 @@ var loadPushChecks = pushcheck.Load
 type runPushChecks struct {
 	mu      sync.Mutex
 	checker *pushcheck.Checker
-	// report writes one status line of qory run; nil writes none.
+	// report writes one status line of qory run, masked; nil writes none.
 	report func(string)
 }
 
@@ -84,15 +86,16 @@ func (p *runPushChecks) set(run openedRun) error {
 
 // runAPICheck is [pushcheck.Checker.RunAPICheck] of the run's checker, for
 // [session.Run.SetRunAPICheck]. Forager writes no line for its error, so qory run
-// writes it as a status line, masked.
+// writes it as a status line.
 func (p *runPushChecks) runAPICheck(ctx context.Context, req session.RunAPIRequest) (*session.RunAPIRefusal, error) {
 	c := p.current()
 	if c == nil {
 		return nil, nil
 	}
 	refusal, err := c.RunAPICheck(ctx, req)
+	// report is qory run's status line, which masks the run's secrets.
 	if err != nil && p.report != nil {
-		p.report(secretmask.Default().Replace(fmt.Sprintf(textCheckNotFinished, shownError(err))))
+		p.report(fmt.Sprintf(textCheckNotFinished, shownError(err)))
 	}
 	return refusal, err
 }
@@ -111,10 +114,10 @@ func (p *runPushChecks) check(ctx context.Context, artifactType string, files []
 // from the run's image on the engine of the wall, as the run's user, with the wall's
 // limits and the run's label, and read the artifacts through the run's run API on this
 // machine. Their temporary folders are in a folder of the run directory, which done
-// removes. A home with no push check, and a run with no control plane, load nothing. An
-// error starts with its fix.
-func (p *runPushChecks) load(ctx context.Context, run openedRun, home, runID string, spec *runSpec) (done func(), err error) {
-	checker, err := pushChecker(ctx, run, home, runID, spec)
+// removes. A home with no push check, and a run with no control plane, controlPlane
+// false, load nothing. An error starts with its fix.
+func (p *runPushChecks) load(ctx context.Context, run openedRun, home, runID string, spec *runSpec, controlPlane bool) (done func(), err error) {
+	checker, err := pushChecker(ctx, run, home, runID, spec, controlPlane)
 	if err != nil || checker == nil {
 		return func() {}, err
 	}
@@ -125,25 +128,27 @@ func (p *runPushChecks) load(ctx context.Context, run openedRun, home, runID str
 }
 
 // pushChecker is the checker of [runPushChecks.load], nil for a home with no push check
-// and for a run with no control plane.
-func pushChecker(ctx context.Context, run openedRun, home, runID string, spec *runSpec) (*pushcheck.Checker, error) {
+// and for a run with no control plane, which has no run API and takes no push.
+func pushChecker(ctx context.Context, run openedRun, home, runID string, spec *runSpec, controlPlane bool) (*pushcheck.Checker, error) {
 	checks, err := loadPushChecks(home)
-	if err != nil || len(checks) == 0 {
+	if err != nil || len(checks) == 0 || !controlPlane {
 		return nil, err
 	}
 	d, ok := spec.Wall.(*wall.Docker)
 	if !ok {
 		return nil, fmt.Errorf(textChecksNoWall, exports.Value(home, false))
 	}
-	// Forager's run is open here, so the run API fails only for a run with no control
-	// plane, which takes no push: such a run checks nothing.
 	httpClient, base, err := run.RunAPI()
 	if err != nil {
-		return nil, nil
+		return nil, fmt.Errorf(textChecksNoRunAPI, strings.TrimSuffix(shownError(err), "."))
 	}
 	client, err := runapi.New(base, httpClient)
 	if err != nil {
-		return nil, fmt.Errorf(textChecksNoRunAPI, strings.TrimSuffix(shownError(err), "."))
+		return nil, fmt.Errorf(textChecksBadRunAPI, strings.TrimSuffix(shownError(err), "."))
+	}
+	engine, err := checkEngine(ctx, d)
+	if err != nil {
+		return nil, err
 	}
 	user := d.User
 	if user == "" {
@@ -152,7 +157,7 @@ func pushChecker(ctx context.Context, run openedRun, home, runID string, spec *r
 	}
 	checker := &pushcheck.Checker{
 		Home: home, Checks: checks, Image: run.Image().Ref, User: user,
-		Engine: checkEngine(ctx, d),
+		Engine: engine,
 		Fetch:  artifactsForCheck(client),
 		Dir:    filepath.Join(run.Dir(), pushChecksDir),
 		Limits: wall.Limits{CPUs: spec.Limits.CPUs, Memory: spec.Limits.Memory, PIDs: spec.Limits.PIDs},
@@ -177,22 +182,31 @@ func pushChecker(ctx context.Context, run openedRun, home, runID string, spec *r
 
 // checkEngine is the engine of the push checks of a run behind d: d's command, with the
 // selection of the engine that the wall recorded at the run's open, as a new
-// [wall.Docker.Engine] reads it, when the engine it reaches has the id of the engine of
-// that selection. Otherwise, such as for an engine with no id, it is d's command with
-// this process's environment.
-func checkEngine(ctx context.Context, d *wall.Docker) pushcheck.Engine {
+// [wall.Docker.Engine] reads it. A new selection that reaches an engine with another id
+// than the recorded one is an error, which starts with its fix: the checks would run
+// on another engine than the run's containers. With no recorded selection, or an engine
+// that gives no id, it is d's command with this process's environment.
+func checkEngine(ctx context.Context, d *wall.Docker) (pushcheck.Engine, error) {
 	ctx, cancel := context.WithTimeout(ctx, engineSelectWait)
 	defer cancel()
 	e := pushcheck.Engine{Command: d.Command}
 	id, err := d.EngineID(ctx)
 	if err != nil || id == "" {
-		return e
+		return e, nil
 	}
 	selected := (&wall.Docker{Command: d.Command}).Engine(ctx)
 	if selected.ID != id {
-		return e
+		return pushcheck.Engine{}, fmt.Errorf(textChecksEngine, engineShown(selected.ID), engineShown(id))
 	}
-	return pushcheck.Engine{Command: selected.Command, Env: append([]string{}, selected.Env...)}
+	return pushcheck.Engine{Command: selected.Command, Env: append([]string{}, selected.Env...)}, nil
+}
+
+// engineShown is an engine's id as a text shows it, "with no id" for none.
+func engineShown(id string) string {
+	if id == "" {
+		return "with no id"
+	}
+	return exports.Value(id, true)
 }
 
 // artifactsForCheck is the fetch of a push check through client: the artifact index,

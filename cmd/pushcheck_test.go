@@ -444,29 +444,58 @@ func TestACheckThatDidNotFinishIsAStatusLine(t *testing.T) {
 	}
 }
 
-// TestTheFetchOfTwoFilesThatAreOneFileHereFails is a version whose files A.md and a.md
-// are one file on this machine's file system, which ignores case: the fetch of a push
-// check fails with both names. On a file system that keeps them apart, both are there.
+// TestTheFetchOfTwoFilesThatAreOneFileHereFails is a version whose files A.md and a.md,
+// or café.md with its é as one character and as e and an accent, are one file on this
+// machine's file system, which is insensitive to case or to the form of an accent: the
+// fetch of a push check fails with both names. On a file system that keeps them apart,
+// both are there.
 func TestTheFetchOfTwoFilesThatAreOneFileHereFails(t *testing.T) {
 	inCheckout(t)
-	server := startRunAPI(t)
-	server.index = indexOf(artifactEntry("spec", "main", "", 1, versionEntry("av_1", 1, fileEntry("A.md", "one\n"), fileEntry("a.md", "two\n"))))
-	server.files = map[string]string{"/artifacts/av_1/files/A.md": "one\n", "/artifacts/av_1/files/a.md": "two\n"}
-	fetch, err := cmd.ArtifactsForCheck(server.URL + "/v1/runs/run-1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	probe := t.TempDir()
-	writeFile(t, filepath.Join(probe, "A.md"), "")
-	_, statErr := os.Stat(filepath.Join(probe, "a.md"))
-	err = fetch(context.Background(), t.TempDir(), []string{"spec"})
-	if statErr != nil {
+	for _, pair := range [][2]string{{"A.md", "a.md"}, {"caf\u00e9.md", "cafe\u0301.md"}} {
+		server := startRunAPI(t)
+		server.index = indexOf(artifactEntry("spec", "main", "", 1, versionEntry("av_1", 1, fileEntry(pair[0], "one\n"), fileEntry(pair[1], "two\n"))))
+		server.files = map[string]string{"/artifacts/av_1/files/" + pair[0]: "one\n", "/artifacts/av_1/files/" + pair[1]: "two\n"}
+		fetch, err := cmd.ArtifactsForCheck(server.URL + "/v1/runs/run-1")
 		if err != nil {
-			t.Errorf("a file system that keeps A.md and a.md apart: %v", err)
+			t.Fatal(err)
 		}
-		return
+		probe := t.TempDir()
+		writeFile(t, filepath.Join(probe, pair[0]), "")
+		_, statErr := os.Stat(filepath.Join(probe, pair[1]))
+		dir := t.TempDir()
+		err = fetch(context.Background(), dir, []string{"spec"})
+		if statErr != nil {
+			if err != nil {
+				t.Errorf("%q on a file system that keeps them apart: %v", pair, err)
+			}
+			continue
+		}
+		want := fmt.Sprintf("the files %q and %q of the version av_1 are one file on this machine, whose file system is insensitive to case or to the form of an accent", pair[0], pair[1])
+		if err == nil || err.Error() != want {
+			t.Errorf("%q: the fetch = %v, want %q", pair, err, want)
+		}
 	}
-	if want := `the files "A.md" and "a.md" of the version av_1 are one file on this machine, whose file system is insensitive to case or to the form of an accent`; err == nil || err.Error() != want {
-		t.Errorf("the fetch = %v, want %q", err, want)
+}
+
+// TestARunAPIThatFailsStopsARunWithPushChecks is a walled run from a run code, which has
+// a control plane, whose push checks cannot reach the run API: the run stops before the
+// setup and the agent, with exit 2 and the fix line, and sets no check.
+func TestARunAPIThatFailsStopsARunWithPushChecks(t *testing.T) {
+	docker, _ := checkDocker(t, 0, "")
+	p, home := newCheckedRepo(t, docker)
+	// The run API works for the run's reads before the compose, and fails once the
+	// compose wrote the home's push checks.
+	p.runAPIErr = func() error {
+		if composed, _ := filepath.Glob(filepath.Join(home, "*", "push-checks.json")); len(composed) > 0 {
+			return errors.New("Open another run to reach the run API: this run is closed.")
+		}
+		return nil
 	}
+	joined := false
+	r := p.run(t, func(string) { joined = true }, nil)
+	r.wantsClose(t, event.StateFailed, cmd.ExitInput)
+	if joined || slices.Contains(r.calls, "setup") || slices.Contains(r.calls, "set run API check") {
+		t.Errorf("the run went on: %v, joined %v", r.calls, joined)
+	}
+	wants(t, r.out, "qory run: Open the run through a gateway that sends the run API address, and run again. The push checks read the artifacts through the run API, which failed: Open another run to reach the run API: this run is closed.\n")
 }

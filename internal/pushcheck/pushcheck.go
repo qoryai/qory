@@ -419,8 +419,8 @@ type state struct {
 }
 
 // run runs program with args in a new container and returns how it ended. The engine's
-// failures, such as an engine that is not reachable, are errors; an image the engine
-// does not hold, and a program that does not start, are an end with startErr set.
+// failures, such as an engine that is not reachable or that does not have the image,
+// are errors; a program that does not start is an end with startErr set.
 func (c *Checker) run(ctx context.Context, program string, args []string, pulled, pushed string) (ended, error) {
 	name, err := containerName()
 	if err != nil {
@@ -449,7 +449,7 @@ func (c *Checker) run(ctx context.Context, program string, args []string, pulled
 	var errOut bytes.Buffer
 	if err := c.engine(ctx, engineWait, nil, &errOut, create...); err != nil {
 		if noSuchImage(errOut.String()) {
-			return ended{}, fmt.Errorf("the engine has no image %s for the check's container: %s", exports.Value(c.Image, false), engineError(errOut.Bytes(), err))
+			return ended{}, fmt.Errorf("the engine does not have the image %s for the check's container: %s", exports.Value(c.Image, false), engineError(errOut.Bytes(), err))
 		}
 		return ended{}, fmt.Errorf("the engine did not create the check's container: %s", engineError(errOut.Bytes(), err))
 	}

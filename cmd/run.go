@@ -890,7 +890,12 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				// setup and the agent. The run's forwarder checks the POSTs from behind the
 				// wall from here on: nothing behind the wall has run yet.
 				if walled {
-					done, err := checks.load(ctx, run, at.home, spec.RunID, &spec)
+					loadCtx, cancel := ctx, func() {}
+					if timeout > 0 {
+						loadCtx, cancel = context.WithDeadline(ctx, opened.Add(timeout))
+					}
+					done, err := checks.load(loadCtx, run, at.home, spec.RunID, &spec, remote || server != nil && !local)
+					cancel()
 					if err != nil {
 						return &runLineError{input(err)}
 					}

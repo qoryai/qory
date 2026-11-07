@@ -229,6 +229,7 @@ type pushRepo struct {
 	// onOpen, when set, gets the spec of each open. onSetCheck, when set, gets the check
 	// of each SetRunAPICheck, and its error is the call's.
 	onOpen     func(session.OpenSpec)
+	runAPIErr  func() error
 	onSetCheck func(func(context.Context, session.RunAPIRequest) (*session.RunAPIRefusal, error)) error
 	// real has the run's setup, removal and join use a real wall at a gateway in this
 	// process. runID and runsDir are those of the last open.
@@ -319,7 +320,7 @@ func (p *pushRepo) run(t *testing.T, agent func(dir string), result func() (*ses
 		System: proxygittest.Host, Repositories: p.repositories, RunAPI: p.api.base(),
 		Proxy: p.h.server.Proxy.URL, CABundle: p.h.server.Proxy.CABundle, Dir: p.h.runDir,
 		RemoveSetup: p.removeSetup, HostProxyErr: p.proxyErr, AtGateway: p.real, Real: p.real,
-		SetRunAPICheck: p.onSetCheck,
+		SetRunAPICheck: p.onSetCheck, RunAPIErr: p.runAPIErr,
 		Setup: func(session.SetupSpec) error {
 			if p.setup != nil {
 				p.setup(p.h.dir)
