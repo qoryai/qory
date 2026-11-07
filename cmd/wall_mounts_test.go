@@ -47,6 +47,7 @@ func TestAWalledRunWithAMountOfTheHomeFolderStopsFirst(t *testing.T) {
 	log := walledSection(t)
 	home := tempDir(t)
 	t.Setenv("HOME", home)
+	t.Setenv("DOCKER_CONFIG", "")
 	repo := filepath.Join(home, "app")
 	if err := os.Mkdir(repo, 0o700); err != nil {
 		t.Fatal(err)
