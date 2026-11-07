@@ -261,8 +261,8 @@ go to the runtime, after the launch template's arguments.
 The report fixes no variable and adds no mount. Behind a wall, `harness.home` comes from
 the `qory.yaml` in qory's configuration directory alone: another `qory.yaml` that moves
 the home refuses a walled run.
-A walled run from a run code with push checks, whose home `--home` or `harness.home` sets,
-stops at the compose, before the home is written, with exit 2, when its `wall.mounts` or
+A walled run from a run code with push checks, whose home `--home` or `harness.home` sets
+outside `qory` in your cache directory, stops at the compose, before the home is written, with exit 2, when its `wall.mounts` or
 `--mount` has a read-write mount at or inside the home: `Mount <path> read-only, or move it
 out of the harness home, for a walled run with push checks. The agent could change the push
 checks through it.` Any other walled run stops on such a mount before the run opens: a run

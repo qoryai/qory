@@ -53,8 +53,9 @@ release may change what an existing document does, and states it under Upgrading
   type, or when a program is not a file in the module, and writes the checks to
   `push-checks.json` in the home. A walled run with push checks stops before the agent
   starts with exit 2 when its `push-checks.json` cannot be read, and a walled run from a
-  run code with push checks stops at the compose with exit 2 when a read-write mount is
-  at or inside the home. In a walled run, the
+  run code with push checks, and a home that `--home` or `harness.home` sets outside
+  `qory` in your cache directory, stops at the compose with exit 2 when a read-write
+  mount is at or inside the home. In a walled run, the
   check of a type runs before each push of that type reaches Qory Apiary, from inside the
   wall or from the push step: in a new container from the run's image, with no network,
   the wall's limits and the run's label, the home and the newest versions of the type and
