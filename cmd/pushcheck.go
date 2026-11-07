@@ -33,6 +33,7 @@ const (
 	textChecksNoWall     = "Set wall.adapter to docker, and run again. The push checks of %s run in containers of the docker wall alone."
 	textChecksNoRunAPI   = "Run again. The run API, through which the push checks read the artifacts, failed: %s."
 	textChecksNoFolder   = "Check %s, and run again. Making the folder of the push checks' files failed: %s."
+	textChecksNotSet     = "Run again. Turning on the push checks for the POSTs from behind the wall failed, so the run stopped before the setup: %s."
 	textCheckNotFinished = "the check before a push did not finish, and the push was not stored (503 " + runapi.CodePushCheckUnavailable + "): %s"
 )
 
@@ -52,8 +53,8 @@ var loadPushChecks = pushcheck.Load
 
 // runPushChecks is the push checks of a walled run, from the home qory run composed for
 // it: [runPushChecks.runAPICheck] checks each POST of the run API from behind the wall,
-// and [runPushChecks.check] the push step's version. Until [runPushChecks.load] reads
-// the home, and in a run whose home has no push check, nothing is checked.
+// once [runPushChecks.set] turned it on, and [runPushChecks.check] the push step's
+// version. In a run whose home has no push check, nothing is checked.
 type runPushChecks struct {
 	mu      sync.Mutex
 	checker *pushcheck.Checker
@@ -68,8 +69,21 @@ func (p *runPushChecks) current() *pushcheck.Checker {
 	return p.checker
 }
 
+// set turns on the check of each POST of the run API from behind the wall of run, with
+// [runPushChecks.runAPICheck], when the load found push checks; with none, it sets no
+// check. Call it after the load and before the run's setup and join.
+func (p *runPushChecks) set(run openedRun) error {
+	if p.current() == nil {
+		return nil
+	}
+	if err := run.SetRunAPICheck(p.runAPICheck); err != nil {
+		return fmt.Errorf(textChecksNotSet, strings.TrimSuffix(shownError(err), "."))
+	}
+	return nil
+}
+
 // runAPICheck is [pushcheck.Checker.RunAPICheck] of the run's checker, for
-// [session.OpenSpec.RunAPICheck]. Forager writes no line for its error, so qory run
+// [session.Run.SetRunAPICheck]. Forager writes no line for its error, so qory run
 // writes it as a status line, masked.
 func (p *runPushChecks) runAPICheck(ctx context.Context, req session.RunAPIRequest) (*session.RunAPIRefusal, error) {
 	c := p.current()

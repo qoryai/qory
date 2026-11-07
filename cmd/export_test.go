@@ -220,6 +220,9 @@ type Nowhere struct {
 	// StepErr, when not nil, is called by each StartStep with the step's kind, and a
 	// StartStep whose call returns an error writes no step and returns it.
 	StepErr func(kind string) error
+	// SetRunAPICheck, when not nil, gets the check of each SetRunAPICheck, and its error
+	// is the call's; nil takes the check. A run at a gateway sets it on the run too.
+	SetRunAPICheck func(check func(context.Context, session.RunAPIRequest) (*session.RunAPIRefusal, error)) error
 }
 
 // StepEvent is one event of a host step of a run [OpenNowhereWith] opened: Type is
@@ -235,7 +238,8 @@ type StepEvent struct {
 // is n.Dir, or a new temporary folder, which restore removes. Besides the outcomes, it
 // returns the calls the runs got, in order: "host proxy" for each HostProxy, "host
 // proxy closed" for each close of one, "stack proxy" and "stack proxy closed" for each
-// StackProxy and close of one, "fetch image", "setup", "remove setup" and "join".
+// StackProxy and close of one, "set run API check", "fetch image", "setup", "remove setup"
+// and "join".
 func OpenNowhereWith(n Nowhere) (outcomes func() []session.Outcome, calls func() []string, restore func()) {
 	before := openRun
 	var mu sync.Mutex
@@ -393,6 +397,20 @@ func (n *nowhere) Join(ctx context.Context, spec session.SessionSpec) (*session.
 		return n.at.run.Join(ctx, spec)
 	}
 	return nil, ErrJoinedNowhere
+}
+
+// SetRunAPICheck is [Nowhere.SetRunAPICheck], and Forager's of a run at a gateway.
+func (n *nowhere) SetRunAPICheck(check func(context.Context, session.RunAPIRequest) (*session.RunAPIRefusal, error)) error {
+	n.note("set run API check")
+	if n.values.SetRunAPICheck != nil {
+		if err := n.values.SetRunAPICheck(check); err != nil {
+			return err
+		}
+	}
+	if n.values.Real {
+		return n.at.run.SetRunAPICheck(check)
+	}
+	return nil
 }
 
 func (n *nowhere) Setup(ctx context.Context, spec session.SetupSpec) error {

@@ -622,14 +622,9 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				}
 				return withRecord(streams.errOut, err, record)
 			}
-			// A walled run checks each POST of its run API from behind the wall with the push
-			// checks of the home it composes, see [runPushChecks]. Forager builds the wall's
-			// forwarder as the run opens, before the compose, so the check is set for every
-			// walled run, and passes every POST of a run whose home has no push check.
+			// A walled run whose composed home has push checks checks each POST of its run
+			// API from behind the wall, see [runPushChecks].
 			checks := &runPushChecks{report: said}
-			if walled {
-				spec.RunAPICheck = checks.runAPICheck
-			}
 			run, err := openRun(ctx, spec.OpenSpec)
 			if err != nil {
 				closeGateway()
@@ -892,13 +887,17 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					return err
 				}
 				// A home whose push checks qory cannot run stops the run here, before the
-				// setup and the agent.
+				// setup and the agent. The run's forwarder checks the POSTs from behind the
+				// wall from here on: nothing behind the wall has run yet.
 				if walled {
 					done, err := checks.load(ctx, run, at.home, spec.RunID, &spec)
 					if err != nil {
 						return &runLineError{input(err)}
 					}
 					cleanups = append(cleanups, done)
+					if err := checks.set(run); err != nil {
+						return &runLineError{err}
+					}
 				}
 				// Only the push step's commit uses the run number. readOnly is set by the
 				// compose, so the check comes here, before the session.
@@ -1323,6 +1322,9 @@ type openedRun interface {
 	Image() session.Image
 	// Dir is the run directory.
 	Dir() string
+	// SetRunAPICheck sets the check of each POST to the run API from behind the wall,
+	// before the setup and the first join; see [session.Run.SetRunAPICheck].
+	SetRunAPICheck(check func(ctx context.Context, req session.RunAPIRequest) (*session.RunAPIRefusal, error)) error
 }
 
 // hostProxy is the run's host proxy or stack proxy as qory run uses it: the proxy git

@@ -3,11 +3,13 @@ package cmd_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -184,7 +186,10 @@ func TestTheAgentsPushIsCheckedBeforeItLeaves(t *testing.T) {
 	docker, log := checkDocker(t, 1, "spec.md: the section Goal is missing\n")
 	p, home := newCheckedRepo(t, docker)
 	var check func(context.Context, session.RunAPIRequest) (*session.RunAPIRefusal, error)
-	p.onOpen = func(spec session.OpenSpec) { check = spec.RunAPICheck }
+	p.onSetCheck = func(c func(context.Context, session.RunAPIRequest) (*session.RunAPIRefusal, error)) error {
+		check = c
+		return nil
+	}
 	var refusal, verdict *session.RunAPIRefusal
 	var checkErr, verdictErr error
 	var parentMode fs.FileMode
@@ -248,22 +253,16 @@ func TestTheAgentsPushIsCheckedBeforeItLeaves(t *testing.T) {
 }
 
 // TestAWalledRunWithoutPushChecksChecksNothing is a walled run whose harness declares
-// no push check: its POSTs all pass, and no container of a check starts.
+// no push check: it sets no run API check, and no container of a check starts.
 func TestAWalledRunWithoutPushChecksChecksNothing(t *testing.T) {
 	docker, log := checkDocker(t, 1, "a finding\n")
 	p := newPushRepo(t, "write")
 	walledBy(t, docker)
 	p.flags = []string{"--home", filepath.Join(tempDir(t), "home")}
-	var check func(context.Context, session.RunAPIRequest) (*session.RunAPIRefusal, error)
-	p.onOpen = func(spec session.OpenSpec) { check = spec.RunAPICheck }
-	var refusal *session.RunAPIRefusal
-	var err error
-	r := p.run(t, func(string) {
-		refusal, err = check(context.Background(), session.RunAPIRequest{Path: "/artifacts", Body: specPush(t)})
-	}, nil)
+	r := p.run(t, func(dir string) { writeFile(t, filepath.Join(dir, "left.txt"), "left\n") }, nil)
 	r.wantsClose(t, event.StateSucceeded, 0)
-	if refusal != nil || err != nil {
-		t.Errorf("the push got %+v, %v, want nil, nil", refusal, err)
+	if slices.Contains(r.calls, "set run API check") {
+		t.Errorf("the run set a run API check: %v", r.calls)
 	}
 	if got := checkLog(t, log); got != "" {
 		t.Errorf("a check's container ran:\n%s", got)
@@ -271,24 +270,82 @@ func TestAWalledRunWithoutPushChecksChecksNothing(t *testing.T) {
 }
 
 // TestAnUnwalledRunSetsNoCheck is an unwalled run whose harness declares push checks:
-// its open gets no check, and its push step stores the version unchecked.
+// it sets no run API check, and its push step stores the version unchecked.
 func TestAnUnwalledRunSetsNoCheck(t *testing.T) {
 	p, _ := newCheckedRepo(t, "")
-	opened := false
-	p.onOpen = func(spec session.OpenSpec) {
-		opened = true
-		if spec.RunAPICheck != nil {
-			t.Error("an unwalled run's open has a RunAPICheck")
-		}
-	}
 	r := p.run(t, func(dir string) { writeFile(t, filepath.Join(dir, "left.txt"), "left\n") }, nil)
 	r.wantsClose(t, event.StateSucceeded, 0)
-	if !opened {
-		t.Error("the unwalled run did not open")
+	if slices.Contains(r.calls, "set run API check") {
+		t.Errorf("the unwalled run set a run API check: %v", r.calls)
 	}
 	if posts, _, stored := p.api.counts(); posts != 1 || stored != 1 {
 		t.Errorf("%d POST and %d versions, want 1 and 1\n%s", posts, stored, r.out)
 	}
+}
+
+// TestTheCheckIsSetBeforeTheSetupAndTheJoin is a walled run whose harness declares a
+// check for spec: the run sets its run API check once, before the image, the setup and
+// the join, and a push of spec from the setup container, which the check gets as the
+// run's forwarder gives it, gets 422 with the check's finding.
+func TestTheCheckIsSetBeforeTheSetupAndTheJoin(t *testing.T) {
+	docker, _ := checkDocker(t, 1, "spec.md: a finding\n")
+	p, _ := newCheckedRepo(t, docker)
+	var check func(context.Context, session.RunAPIRequest) (*session.RunAPIRefusal, error)
+	p.onSetCheck = func(c func(context.Context, session.RunAPIRequest) (*session.RunAPIRefusal, error)) error {
+		check = c
+		return nil
+	}
+	var fromSetup *session.RunAPIRefusal
+	var setupErr error
+	p.setup = func(string) {
+		if check == nil {
+			t.Error("the setup ran with no run API check set")
+			return
+		}
+		fromSetup, setupErr = check(context.Background(), session.RunAPIRequest{Path: "/artifacts", Body: specPush(t)})
+	}
+	joined := false
+	r := p.run(t, func(string) {
+		joined = true
+		if check == nil {
+			t.Error("the session joined with no run API check set")
+		}
+	}, func() (*session.Result, error) { return &session.Result{State: event.StateFailed, ExitCode: 3}, nil })
+	if !joined {
+		t.Error("the session did not join")
+	}
+	if setupErr != nil || fromSetup == nil || fromSetup.Status != 422 || !slices.Equal(fromSetup.Findings, []string{"spec.md: a finding"}) {
+		t.Errorf("the setup container's push got %+v, %v, want 422 with the finding", fromSetup, setupErr)
+	}
+	set := slices.Index(r.calls, "set run API check")
+	if set < 0 || slices.Index(r.calls[set+1:], "set run API check") >= 0 {
+		t.Fatalf("the run API check was set %v, want once", r.calls)
+	}
+	// The join of this test is a stand-in, which the calls do not list; the agent's
+	// check covers it.
+	for _, later := range []string{"fetch image", "setup"} {
+		if i := slices.Index(r.calls, later); i < 0 || i < set {
+			t.Errorf("%s at %d, the check's set at %d, want the set first: %v", later, i, set, r.calls)
+		}
+	}
+}
+
+// TestACheckThatCannotBeSetStopsTheRun is a walled run with push checks whose
+// SetRunAPICheck fails: the run stops before the setup and the join, with exit 1 and
+// the fix line.
+func TestACheckThatCannotBeSetStopsTheRun(t *testing.T) {
+	docker, _ := checkDocker(t, 0, "")
+	p, _ := newCheckedRepo(t, docker)
+	p.onSetCheck = func(func(context.Context, session.RunAPIRequest) (*session.RunAPIRefusal, error)) error {
+		return errors.New("Call SetRunAPICheck before Setup: the setup started.")
+	}
+	joined := false
+	r := p.run(t, func(string) { joined = true }, nil)
+	r.wantsClose(t, event.StateFailed, 1)
+	if slices.Contains(r.calls, "setup") || joined {
+		t.Errorf("the run went on after the failed set: %v, joined %v", r.calls, joined)
+	}
+	wants(t, r.out, "qory run: Run again. Turning on the push checks for the POSTs from behind the wall failed, so the run stopped before the setup: Call SetRunAPICheck before Setup: the setup started.\n")
 }
 
 // TestThePushStepChecksItsVersion is a walled run whose harness declares a check for
@@ -370,7 +427,10 @@ func TestACheckThatDidNotFinishIsAStatusLine(t *testing.T) {
 	}
 	p, _ := newCheckedRepo(t, script)
 	var check func(context.Context, session.RunAPIRequest) (*session.RunAPIRefusal, error)
-	p.onOpen = func(spec session.OpenSpec) { check = spec.RunAPICheck }
+	p.onSetCheck = func(c func(context.Context, session.RunAPIRequest) (*session.RunAPIRefusal, error)) error {
+		check = c
+		return nil
+	}
 	var checkErr error
 	r := p.run(t, func(string) {
 		_, checkErr = check(context.Background(), session.RunAPIRequest{Path: "/artifacts", Body: specPush(t)})

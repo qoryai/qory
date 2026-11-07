@@ -244,7 +244,7 @@ func (c *Checker) For(artifactType string) *compose.PushCheck {
 	return nil
 }
 
-// RunAPICheck is the check of a POST to the run API, for [session.OpenSpec.RunAPICheck].
+// RunAPICheck is the check of a POST to the run API, for [session.Run.SetRunAPICheck].
 // Only a POST of /artifacts of a checker with checks is checked. A body that is not a
 // push in the run API's form, or whose members [readPush] cannot read one way only, such
 // as one with a member twice, is a refusal: nothing is stored that was not checked. Of a

@@ -230,7 +230,10 @@ inside the home: `Mount <path> read-only, or move it out of the harness home, fo
 run with push checks. The agent could change the push checks through it.` A walled run
 whose home has a `push-checks.json` that qory cannot read stops before the setup and the
 agent, with exit 2: `Compose the harness again, and run again. The push checks in <path>
-could not be read: <cause>.` A home without push checks starts as before.
+could not be read: <cause>.` When Forager cannot turn on the check of the POSTs from
+behind the wall, the run stops there too, with exit 1: `Run again. Turning on the push
+checks for the POSTs from behind the wall failed, so the run stopped before the setup:
+<cause>.` A home without push checks starts as before, with no check turned on.
 
 When the run ends, qory says how, and its exit status goes with it:
 
