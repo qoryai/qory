@@ -1346,7 +1346,7 @@ func TestAFailedExitKeepsTheStopOfTheGitSession(t *testing.T) {
 }
 
 // TestTheCopyStepsLogHasNoPathOfTheCopy is a failed git session on a run with no push: the line in
-// the step's log has the run's folder, and the line on the terminal has the path of the copy.
+// the step's log has the run's copy, and the line on the terminal has the path of the copy.
 // It covers a path in the line's fix and a path in its cause.
 func TestTheCopyStepsLogHasNoPathOfTheCopy(t *testing.T) {
 	var work string
@@ -1355,13 +1355,13 @@ func TestTheCopyStepsLogHasNoPathOfTheCopy(t *testing.T) {
 		agent func(session.SessionSpec)
 		log   string
 	}{
-		{"in the fix", func(spec session.SessionSpec) { work = spec.Dir }, "the run's folder, and run no git there: the git session exited with 128, so the run's commits did not come back\n"},
+		{"in the fix", func(spec session.SessionSpec) { work = spec.Dir }, "the run's copy, and run no git there: the git session exited with 128, so the run's commits did not come back\n"},
 		{"in the cause", func(spec session.SessionSpec) {
 			work = spec.Dir
 			if err := os.Mkdir(filepath.Join(filepath.Dir(spec.Dir), "bundle"), 0o700); err != nil {
 				t.Error(err)
 			}
-		}, "the run's folder/bundle"},
+		}, "the run's copy/bundle"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -1375,7 +1375,7 @@ func TestTheCopyStepsLogHasNoPathOfTheCopy(t *testing.T) {
 					line = rest
 				}
 			}
-			if !strings.HasPrefix(line, "qory run: read the run's files in the run's folder, and run no git there: ") || !strings.Contains(line, c.log) {
+			if !strings.HasPrefix(line, "qory run: read the run's files in the run's copy, and run no git there: ") || !strings.Contains(line, c.log) {
 				t.Errorf("the step's log line is %q", line)
 			}
 			if strings.Contains(line, filepath.Join("qory", "runs")) || strings.Contains(line, filepath.Dir(work)) {

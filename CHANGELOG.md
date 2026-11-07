@@ -414,11 +414,12 @@ release may change what an existing document does, and states it under Upgrading
   and the checkout has no qory.yaml or harness.yaml; the code is used`. A failed fetch of
   the run's repositories has `then take the work item in again in Qory Apiary`, or in a
   prebuild `then start the run again with a new run code`, and ends with `; the code is
-  used`. Any other stop of a hidden harness's compose, beside the lines for a source's
-  URL, ref, export and path, has `correct <harness>, then take the work item in again in Qory
-  Apiary: <text>; the code is used` for exit 2, and `fix the cause, then take the work
-  item in again in Qory Apiary: <text>; the code is used` for any other status; a line
-  with that end and a collision that was printed stay as they are.
+  used`. The lines for a source's URL, ref, export and path each have their fix. Any
+  other stop of a hidden harness's compose with exit 2 has `correct <harness>, then take the
+  work item in again in Qory Apiary: <text>; the code is used`. Such a stop with any other
+  status has `fix the cause, then take the work item in again in Qory Apiary: <text>; the code
+  is used`. A line that already ends with `; the code is used` and a collision that was printed
+  stay as they are.
 - When the documents of a run from a run code set `harness_hidden` to true, a line, an
   event of the run's record and an error show every harness source by a phrase and each
   module by its name, in place of a URL, a ref and a folder, for the documents' harness

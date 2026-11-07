@@ -505,11 +505,11 @@ After the agent, a walled run that may write in a repository has the step `copy 
 of kind `copy`, around the git session: see [A run that may write works in a
 copy](#a-run-that-may-write-works-in-a-copy). Forager's steps of the git session, such as
 `join session 2`, start and end inside it. It ends `succeeded` with 0 when the git session
-exits 0 within its limit. It ends `cancelled` with -1 when the run is stopped or out of time
-during the session. Otherwise it ends `failed`, also when the session reaches its limit of 5
+exits 0 within its limit. It ends `cancelled` with -1 when a stop or the run's time limit cuts
+the session. Otherwise it ends `failed`, also when the session reaches its limit of 5
 minutes, with the git session's exit status, or with -1 when the session has none to show,
 such as one that did not start or one that exits 0 at that limit. Unless it ends `succeeded`,
-its last line is the error line, with `the run's folder` in place of any path on the machine.
+its last line is the error line, with `the run's copy` in place of each path of the copy.
 
 After an agent session that succeeded, this step sets how the run closes, with a push step or
 without one. A step that ends `failed` closes the run `failed` with the step's exit code, and
@@ -2034,7 +2034,7 @@ phrase:
 - `fix the cause, then take the work item in again in Qory Apiary: <text>; the code is
   used`, for any other error of any other exit status, which stays as it is
 
-Every other line of the compose gets one of these two fronts, also when `<text>` starts
+Every other line of the compose starts with one of these two texts, also when `<text>` starts
 with a fix, such as `check <source>: <cause>`. A final full stop of `<text>`
 is left out before the end. A line that already ends with `; the code is used` stays as it
 is. A collision prints its table and the stack lines that resolve it, with no such line.
@@ -3703,7 +3703,7 @@ since a pool kills it 30 seconds after its SIGTERM. Past the session's time, or 
 exits with another status than 0, the run's commits do not come back, and qory keeps the copy:
 
 ```text
-qory run: read the run's files in <folder>, and run no git there: the git session ran past its limit of 5m0s, so the run's commits did not come back
+qory run: read the run's files in <folder>, and run no git there: the git session ran past its limit of 5m0s, so the run's commits did not come back; the code is used
 ```
 
 A run with the push step keeps no copy: the copy goes, and the step prints

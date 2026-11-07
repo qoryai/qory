@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -43,6 +44,52 @@ func TestASignalInTheCheckOrFetchHasItsLine(t *testing.T) {
 	want := "qory run got a second signal during the check or the fetch of the run's commits, so those commits did not come back"
 	if err == nil || !strings.Contains(err.Error(), want) {
 		t.Errorf("the line is %v", err)
+	}
+}
+
+// TestALongCauseKeepsNoPartOfAPathOfTheCopy is a cause past the cut of [integration.Printable],
+// in a long cache folder, with a path of the copy twice: the step's log and the line of a run with
+// a push have no part of a path of the copy, and the line of a run with no push keeps the path.
+func TestALongCauseKeepsNoPartOfAPathOfTheCopy(t *testing.T) {
+	long := filepath.Join(t.TempDir(), strings.Repeat("a-long-cache-folder/", 12))
+	t.Setenv("HOME", long)
+	t.Setenv("XDG_CACHE_HOME", long)
+	dir, err := runcopy.New("01a1b738-63b1-76fa-9757-6552cfc987b5")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := dir.Remove(); err != nil {
+			t.Error(err)
+		}
+	})
+	cause := errors.New("mkdir " + dir.Bundle() + ": no space left on device, and " + dir.Bundle() + " stays")
+	const logged = "mkdir the run's copy/bundle: no space left on device, and the run's copy/bundle stays"
+	for _, c := range []struct {
+		name   string
+		pushes bool
+		stop   func(*runCopy) *copyStop
+	}{
+		{"no session", false, func(c *runCopy) *copyStop { return c.noSession(context.Background(), cause) }},
+		{"no session, push", true, func(c *runCopy) *copyStop { return c.noSession(context.Background(), cause) }},
+		{"another cause", false, func(c *runCopy) *copyStop { return c.stoppedBy("%s", cause) }},
+		{"another cause, push", true, func(c *runCopy) *copyStop { return c.stoppedBy("%s", cause) }},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			stop := c.stop(&runCopy{dir: dir, pushes: c.pushes})
+			if !strings.Contains(stop.log, logged) {
+				t.Errorf("the log's line is %q, want %q in it", stop.log, logged)
+			}
+			if strings.Contains(stop.log, "a-long-cache-folder") || strings.Contains(stop.log, "qory/runs") {
+				t.Errorf("the log's line has a part of a path: %q", stop.log)
+			}
+			if c.pushes && stop.Error() != stop.log {
+				t.Errorf("the line of a run with a push is %q, want the log's line %q", stop.Error(), stop.log)
+			}
+			if !c.pushes && (!strings.Contains(stop.Error(), dir.Work()) || !strings.Contains(stop.Error(), "...")) {
+				t.Errorf("the line of a run with no push is %q, want the path of the copy and the cut", stop.Error())
+			}
+		})
 	}
 }
 

@@ -1249,7 +1249,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					said(copied.stopped(textCopyWallKept).Error())
 				case joined:
 					copied.pushes = canPush(fromCode, readOnly, branch)
-					said(copied.stopped(shownError(err)).Error())
+					said(copied.stoppedBy("%s", err).Error())
 				}
 				return failed(err)
 			}
