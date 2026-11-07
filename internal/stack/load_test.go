@@ -357,3 +357,30 @@ func TestLoadReadsARetiredAPIVersion(t *testing.T) {
 		t.Fatalf("a document: apiVersion %q, retired %q, %v", p.APIVersion, p.RetiredAPIVersion, err)
 	}
 }
+
+// TestASourcePathErrorHasItsModule is a source.path that leads out of its repository, in a
+// module with a name, in one without, and in extends: the error has the module by its name,
+// as modules[i] with no name, and none for extends. Its text does not change.
+func TestASourcePathErrorHasItsModule(t *testing.T) {
+	const source = "{git: https://git.example/h.git, ref: main, path: ../other}"
+	head := "apiVersion: qory.dev/v1alpha1\n"
+	for _, c := range []struct{ name, text, module string }{
+		{"a name", head + "modules:\n  - name: core\n    source: " + source + "\n", "core"},
+		{"no name", head + "modules:\n  - name: one\n  - source: " + source + "\n", "modules[1]"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "qory-stack.yaml")
+			if err := os.WriteFile(path, []byte(c.text), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			_, err := Load(path)
+			var sp *SourcePathError
+			if !errors.As(err, &sp) || sp.Module != c.module {
+				t.Fatalf("%v, want the module %q", err, c.module)
+			}
+			if !strings.Contains(err.Error(), `source.path "../other" is not a directory inside the repository`) {
+				t.Errorf("the text is %q", err)
+			}
+		})
+	}
+}

@@ -19,6 +19,7 @@ import (
 	"github.com/qoryai/forager/accesskey"
 
 	"github.com/qoryai/qory/internal/exports"
+	"github.com/qoryai/qory/internal/fixline"
 	"github.com/qoryai/qory/internal/module"
 	"github.com/qoryai/qory/internal/source"
 	"github.com/qoryai/qory/internal/stack"
@@ -524,20 +525,20 @@ func addPushChecks(res *Result, checkers map[string]string, dir string, root *os
 	}
 	for _, c := range checks {
 		if c.Type == verdictType {
-			return fmt.Errorf("Remove the push check for %s from module %s: a verdict is sent by qory run verdict, which push checks do not cover", verdictType, shown(name))
+			return fixline.Mark(fmt.Errorf("Remove the push check for %s from module %s: a verdict is sent by qory run verdict, which push checks do not cover", verdictType, shown(name)))
 		}
 		if other, ok := checkers[c.Type]; ok {
-			return fmt.Errorf("Remove the push check for %s from module %s or module %s: a type has one push check, and both modules declare one", c.Type, shown(other), shown(name))
+			return fixline.Mark(fmt.Errorf("Remove the push check for %s from module %s or module %s: a type has one push check, and both modules declare one", c.Type, shown(other), shown(name)))
 		}
 		checkers[c.Type] = name
 		program := c.Command[0]
 		shownProgram := exports.Value(filepath.ToSlash(program), false)
 		info, err := root.Stat(program)
 		if err != nil {
-			return fmt.Errorf("Add %s to module %s, or change its push check for %s: the module has no file at that path", shownProgram, shown(name), c.Type)
+			return fixline.Mark(fmt.Errorf("Add %s to module %s, or change its push check for %s: the module has no file at that path", shownProgram, shown(name), c.Type))
 		}
 		if !info.Mode().IsRegular() {
-			return fmt.Errorf("Set the push check for %s of module %s to a program file: %s is not a file", c.Type, shown(name), shownProgram)
+			return fixline.Mark(fmt.Errorf("Set the push check for %s of module %s to a program file: %s is not a file", c.Type, shown(name), shownProgram))
 		}
 		for _, e := range res.Excludes {
 			if e.Module != name || e.Path == "" {
@@ -547,8 +548,8 @@ func addPushChecks(res *Result, checkers map[string]string, dir string, root *os
 			if err != nil || entry != program && !strings.HasPrefix(program, entry+string(filepath.Separator)) {
 				continue
 			}
-			return fmt.Errorf("Keep %s/%s in module %s, or move %s out of it: the program of the push check for %s is in %s/%s, which an exclude or only of module %s leaves out",
-				e.Kind, shown(e.Name), shown(name), shownProgram, c.Type, e.Kind, shown(e.Name), shown(name))
+			return fixline.Mark(fmt.Errorf("Keep %s/%s in module %s, or move %s out of it: the program of the push check for %s is in %s/%s, which an exclude or only of module %s leaves out",
+				e.Kind, shown(e.Name), shown(name), shownProgram, c.Type, e.Kind, shown(e.Name), shown(name)))
 		}
 		command := append([]string{"$QORY_HARNESS_HOME/modules/" + name + "/" + filepath.ToSlash(program)}, c.Command[1:]...)
 		res.PushChecks = append(res.PushChecks, PushCheck{Type: c.Type, Module: name, Command: command, Reads: c.Reads})

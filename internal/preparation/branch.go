@@ -112,8 +112,14 @@ func branchNoCommit(path, system, commit, line string) error {
 // reaches the harness. No git here reaches a remote. A commit with another .qory stops
 // with [textQoryInBranch], and a commit that git does not check out with
 // [textNoCheckout]. On success it prints the branch and the target's commit on report,
-// and sets each [WorkRepository.Commit].
+// and sets each [WorkRepository.Commit]. A work branch comes only from a run code, so a stop
+// has the line of [Target.stop] for a run from a run code.
 func Switch(ctx context.Context, dir string, base []string, b *WorkBranch, report io.Writer) error {
+	return Target{FromCode: true}.stop(checkOutBranch(ctx, dir, base, b, report))
+}
+
+// checkOutBranch is [Switch] with the lines of a run from no run code.
+func checkOutBranch(ctx context.Context, dir string, base []string, b *WorkBranch, report io.Writer) error {
 	ctx = hostgit.WithBase(ctx, base)
 	dir, err := filepath.Abs(dir)
 	if err != nil {

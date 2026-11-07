@@ -8,6 +8,7 @@ import (
 
 	"github.com/qoryai/forager/accesskey"
 
+	"github.com/qoryai/qory/internal/fixline"
 	"github.com/qoryai/qory/internal/source"
 	"github.com/qoryai/qory/internal/stack"
 )
@@ -32,11 +33,11 @@ func CheckBase(p *stack.Stack, harness string) error {
 	base := "the base of " + harness
 	switch addressFault(p.Extends.Git) {
 	case faultUser:
-		return fmt.Errorf("remove the user name and password from the URL of %s: the run's stack proxy sets the harness credentials of the run configuration, so a source's URL needs none", base)
+		return fixline.Mark(fmt.Errorf("remove the user name and password from the URL of %s: the run's stack proxy sets the harness credentials of the run configuration, so a source's URL needs none", base))
 	case faultParse:
-		return fmt.Errorf("correct the URL of %s: qory could not read it as a URL", base)
+		return fixline.Mark(fmt.Errorf("correct the URL of %s: qory could not read it as a URL", base))
 	case faultHost:
-		return fmt.Errorf("write the host in the URL of %s in ASCII, with the xn-- form for an international name: the host has a character outside ASCII, which git may map to another, such as a fullwidth @ to @", base)
+		return fixline.Mark(fmt.Errorf("write the host in the URL of %s in ASCII, with the xn-- form for an international name: the host has a character outside ASCII, which git may map to another, such as a fullwidth @ to @", base))
 	}
 	return nil
 }
@@ -106,11 +107,11 @@ func CheckAddresses(p *stack.Stack, harness string) error {
 		u, err := url.Parse(l.Source.Git)
 		switch {
 		case stack.AtBeforePath(l.Source.Git) || err == nil && u.User != nil:
-			return fmt.Errorf("remove the user name and password from the source of %s in %s: the run's stack proxy sets the harness credentials of the run configuration, so a source's URL needs none", module, in)
+			return fixline.Mark(fmt.Errorf("remove the user name and password from the source of %s in %s: the run's stack proxy sets the harness credentials of the run configuration, so a source's URL needs none", module, in))
 		case err != nil:
-			return fmt.Errorf("correct the URL in the source of %s in %s: qory could not read it as a URL", module, in)
+			return fixline.Mark(fmt.Errorf("correct the URL in the source of %s in %s: qory could not read it as a URL", module, in))
 		case stack.NonASCIIHost(l.Source.Git):
-			return fmt.Errorf("write the host in the source of %s in %s in ASCII, with the xn-- form for an international name: the host has a character outside ASCII, which git may map to another, such as a fullwidth @ to @", module, in)
+			return fixline.Mark(fmt.Errorf("write the host in the source of %s in %s in ASCII, with the xn-- form for an international name: the host has a character outside ASCII, which git may map to another, such as a fullwidth @ to @", module, in))
 		}
 	}
 	return nil

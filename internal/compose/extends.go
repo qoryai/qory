@@ -13,6 +13,7 @@ import (
 	"github.com/qoryai/forager/accesskey"
 
 	"github.com/qoryai/qory/internal/exports"
+	"github.com/qoryai/qory/internal/fixline"
 	"github.com/qoryai/qory/internal/module"
 	"github.com/qoryai/qory/internal/source"
 	"github.com/qoryai/qory/internal/stack"
@@ -85,7 +86,7 @@ func LoadBase(p *stack.Stack, pin string, opts Options) (*stack.Stack, *Base, er
 	case errors.As(err, &fetch):
 		return nil, nil, fmt.Errorf("the stack %s is not reachable from here: %w", p.Extends.Shown(), err)
 	case err != nil && named != nil:
-		return nil, nil, fmt.Errorf("check %s: %w", named.Base(), exports.HideError(err))
+		return nil, nil, fixline.Mark(fmt.Errorf("check %s: %w", named.Base(), exports.HideError(err)))
 	case err != nil:
 		return nil, nil, fmt.Errorf("extends %s: %w", p.Extends.Shown(), exports.HideError(err))
 	}
@@ -96,7 +97,7 @@ func LoadBase(p *stack.Stack, pin string, opts Options) (*stack.Stack, *Base, er
 	base, err := stack.Load(file)
 	switch {
 	case errors.Is(err, os.ErrNotExist) && named != nil:
-		return nil, nil, fmt.Errorf("check the folder of %s: its repository has no %s there", named.Base(), stack.FileName)
+		return nil, nil, fixline.Mark(fmt.Errorf("check the folder of %s: its repository has no %s there", named.Base(), stack.FileName))
 	case errors.Is(err, os.ErrNotExist):
 		return nil, nil, fmt.Errorf("extends %s: %s contains no %s", p.Extends.Shown(), exports.Value(src.Dir, false), stack.FileName)
 	case err != nil:
@@ -127,7 +128,7 @@ func baseInClone(p *stack.Stack, src source.Resolved, file string, named *source
 	case err != nil:
 		return err
 	case out && named != nil:
-		return fmt.Errorf("check the folder of %s: its %s links outside its repository", named.Base(), stack.FileName)
+		return fixline.Mark(fmt.Errorf("check the folder of %s: its %s links outside its repository", named.Base(), stack.FileName))
 	case out:
 		return fmt.Errorf("extends %s: %s links outside the repository", p.Extends.Shown(), stack.FileName)
 	}
@@ -141,7 +142,7 @@ func baseInClone(p *stack.Stack, src source.Resolved, file string, named *source
 	case err != nil:
 		return err
 	case out && named != nil:
-		return fmt.Errorf("check %s: the qory.yaml of its repository links outside its repository", named.Base())
+		return fixline.Mark(fmt.Errorf("check %s: the qory.yaml of its repository links outside its repository", named.Base()))
 	case out:
 		return fmt.Errorf("extends %s: %s at the root of its repository links outside the repository", p.Extends.Shown(), filepath.Base(config))
 	}

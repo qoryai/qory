@@ -205,6 +205,11 @@ and for a git source that is not https, and 1 for any other failed fetch:
 - `run again: the run's stack proxy, through which qory fetches the run's harness, did
   not open: <error>`, exit 1
 
+A run from a run code has used its one-use code by the time it fetches. In such a run, each
+line of a failed fetch of the run's repositories has `then take the work item in again in
+Qory Apiary` in place of `then run again`, and ends with `; the code is used`. In a prebuild
+from a run code, it has `then start the run again with a new run code`.
+
 A starter gives the run an empty folder or an empty git working tree that git init made.
 In an empty folder, qory runs `git init` with no template. The run stops with exit 1 before
 git fetches anything if the working folder:
@@ -232,7 +237,10 @@ if:
   each object to a new file, so the hard links of `git clone --local` in `.git/objects`
   do not stop the run.
 
-Start the run in a new empty folder or a new empty git working tree.
+Start the run in a new empty folder or a new empty git working tree. In a run from a run
+code, the lines for the git configuration and for the files under `.git` start with `take
+the work item in again in Qory Apiary, and start its run in a new empty git working tree`,
+and end with `; the code is used`.
 
 A source that breaks a rule stops the run with exit 2 before the agent starts. A stack
 given to `-f` from outside the checkout is not a file in the checkout: its paths resolve
@@ -1986,17 +1994,32 @@ phrase:
 - `take the work item in again in Qory Apiary: the run's stack proxy returned 407 Proxy
   Authentication Required to the password Forager set for the run, so the fetch of
   <source> failed; the code is used`, exit 1
-- `set the ref of <source> to a branch, tag or commit its repository has: the repository
-  of <source> has no branch or tag by the ref it is set to`, exit 2
-- `use an https URL for <source>: a run from a control plane fetches git sources only
-  over https`, exit 2
-- `<source> exports <export> at a folder that is not there`, exit 2
-- `module <module>: source.path is not a directory inside the repository`, exit 2, for a
-  module of the stack's file or of the checkout's file whose path is absolute, the
-  repository's root, or leads out of it
-- `qory.yaml in <source>: exports.dir <stacks or modules> is not a directory inside the
-  repository`, exit 2, for an `exports.dir` that is absolute or leads out of its
-  repository
+- `set the ref of <source> to a branch, tag or commit its repository has, then take the
+  work item in again in Qory Apiary: the repository of <source> has no branch or tag by
+  the ref it is set to; the code is used`, exit 2
+- `use an https URL for <source>, then take the work item in again in Qory Apiary: a run
+  from a control plane fetches git sources only over https; the code is used`, exit 2
+- `correct exports.dir in the qory.yaml of <source>, or set <source> to a ref whose
+  repository has the folder of <export>, then take the work item in again in Qory Apiary:
+  <source> exports <export> at a folder that is not there; the code is used`, exit 2
+- `set the path of the module <module> to a folder inside its repository, then take the
+  work item in again in Qory Apiary: the path is absolute, the repository's root, or
+  leads out of the repository; the code is used`, exit 2, for a module of the stack's
+  file or of the checkout's file. A module with no name shows as `modules[<i>]`. For the
+  `extends` of the checkout's file, the line starts with `set the path of the base of
+  <harness>`.
+- `correct <harness>, then take the work item in again in Qory Apiary: <cause>; the code
+  is used`, exit 2, for any other error in the harness, where `<harness>` is the
+  workspace's harness or the checkout's harness. One such `<cause>` is `module <module>:
+  qory.yaml in <source>: exports.dir <stacks or modules> is not a directory inside the
+  repository`, for an `exports.dir` that is absolute or leads out of its repository.
+- `fix the cause on this machine, then take the work item in again in Qory Apiary:
+  <cause>; the code is used`, exit 1, for an error of the machine
+
+A line of the compose that starts with its fix, such as `check <source>: <cause>` or
+`module <name>: Ship fewer files. <cause>`, only gets the end `; the code is used`, in
+place of a full stop. A collision prints its table and the stack lines that
+resolve it, with no such line.
 
 When `harness_hidden` is `false`, the lines and errors show the addresses, as for any
 harness.
@@ -2015,10 +2038,10 @@ The copy follows these rules:
   with one of these errors:
   - `module <name>: Remove the link <path> or point it inside the module. It links to
     <target>, outside the module, and qory copies only the module's files into the
-    home.`, for a link to a file or directory outside the module;
+    home; the code is used`, for a link to a file or directory outside the module;
   - `module <name>: Remove the link <path> or point it inside the module. It points out
-    of the module, and qory copies only the module's files into the home.`, for a link
-    out of the module that leads to nothing.
+    of the module, and qory copies only the module's files into the home; the code is
+    used`, for a link out of the module that leads to nothing.
 - Without a wall, the copy contains the files that the stack's `only` or `exclude`
   leave out, as a link to the module shows them. Behind a wall, the copy leaves them
   out.

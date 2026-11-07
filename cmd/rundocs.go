@@ -171,9 +171,9 @@ func codeRunOf(doc contracts.Documents) (*codeRun, error) {
 		}
 		harness = append(harness, '\n')
 	}
-	var target preparation.Target
+	target := preparation.Target{FromCode: true}
 	if doc.Target != nil {
-		target = preparation.Target{System: doc.Target.System, Path: doc.Target.Path, Version: doc.TargetVersion}
+		target.System, target.Path, target.Version = doc.Target.System, doc.Target.Path, doc.TargetVersion
 	}
 	r := &codeRun{runtime: runtime, settings: settings, harness: harness, defines: defines, workflow: doc.Workflow, inputs: doc.Inputs, minutes: minutes, hidden: hidden, target: target, access: doc.Access}
 	if doc.WorkItem != nil {

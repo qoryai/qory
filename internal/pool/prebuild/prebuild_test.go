@@ -1015,7 +1015,7 @@ func TestHostProgramsByNameAreFoundOnTheCleanedPATH(t *testing.T) {
 	}
 }
 
-// TestTheFetchRunsNoGitFromTheRunsFolder runs the fetch of [preparation.Run] with a
+// TestTheFetchRunsNoGitFromTheRunsFolder runs the fetch of [preparation.RunPrebuild] with a
 // git in an entry of the runs folder first on the pool's PATH, where a walled run could
 // write it: that git does not run, because the fetch's git starts from the environment
 // of the pool's commands, and the fetch through the closed proxy port fails after
@@ -1047,6 +1047,10 @@ func TestTheFetchRunsNoGitFromTheRunsFolder(t *testing.T) {
 	}
 	if err == nil || !slices.Equal(e.closed(), []session.Outcome{closedFailed}) || len(e.built) != 0 {
 		t.Errorf("%v, closed %+v: want the fetch through the closed proxy port to fail", err, e.closed())
+	}
+	// The run code of a prebuild is used, and a prebuild has no work item to take in again.
+	if err != nil && (!strings.Contains(err.Error(), ", then start the run again with a new run code: the fetch of ") || !strings.HasSuffix(err.Error(), "; the code is used")) {
+		t.Errorf("the line is %q", err)
 	}
 	if !strings.Contains(err.Error(), "acme/shop") {
 		t.Errorf("%v, want the fetch's line for acme/shop", err)

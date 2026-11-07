@@ -408,7 +408,10 @@ release may change what an existing document does, and states it under Upgrading
   stops it, exit 2, when qory comes to fetch it. When the documents contain no harness
   and the checkout has no `qory.yaml` or `harness.yaml`, the run stops with exit 1:
   `take the work item in again in Qory Apiary: the run's documents contain no harness
-  and the checkout has no qory.yaml or harness.yaml; the code is used`.
+  and the checkout has no qory.yaml or harness.yaml; the code is used`. A failed fetch of
+  the run's repositories and a failed compose of a hidden harness have a line that ends
+  with `; the code is used` and sends the person to a new take-in in Qory Apiary, or in a
+  prebuild to a new run code.
 - When the documents of a run from a run code set `harness_hidden` to true, a line, an
   event of the run's record and an error show every harness source by a phrase and each
   module by its name, in place of a URL, a ref and a folder, for the documents' harness

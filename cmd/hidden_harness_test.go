@@ -142,7 +142,7 @@ func TestARunCodeWithAHiddenHarnessStopsOnALinkOutOfAModule(t *testing.T) {
 	if r.joined || cmd.ExitCode(r.err) != 1 {
 		t.Fatalf("%v (exit %d), want exit 1 before the join\n%s", r.err, cmd.ExitCode(r.err), r.out)
 	}
-	wants(t, r.err.Error(), "module hello: Remove the link README.md or point it inside the module. It links to README.md in the base of the workspace's harness, outside the module, and qory copies only the module's files into the home.")
+	wants(t, r.err.Error(), "module hello: Remove the link README.md or point it inside the module. It links to README.md in the base of the workspace's harness, outside the module, and qory copies only the module's files into the home; the code is used")
 }
 
 // TestARunCodeWithAHiddenHarnessStopsAtAPluginOf10000 is a run from a run code whose
@@ -161,6 +161,6 @@ func TestARunCodeWithAHiddenHarnessStopsAtAPluginOf10000(t *testing.T) {
 	if r.joined || cmd.ExitCode(r.err) != 1 {
 		t.Fatalf("%v (exit %d), want exit 1 before the join\n%s", r.err, cmd.ExitCode(r.err), r.out)
 	}
-	wants(t, r.err.Error(), "Ship fewer files in the modules. claude/plugin contains more than 10,000 files, directories and links, the most a Claude Code run behind a wall or with a hidden harness takes.")
+	wants(t, r.err.Error(), "Ship fewer files in the modules. claude/plugin contains more than 10,000 files, directories and links, the most a Claude Code run behind a wall or with a hidden harness takes; the code is used")
 	lacks(t, r.err.Error(), "Move a module out of the checkout")
 }
