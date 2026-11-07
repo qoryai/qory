@@ -1,0 +1,7 @@
+apiVersion: qory.dev/v1alpha1
+name: web
+push_checks:
+  - type: review-comments
+    command: [./bin/check]
+  - type: mockup
+    command: [bin/check, --strict]

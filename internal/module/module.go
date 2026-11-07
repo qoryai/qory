@@ -17,6 +17,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/qoryai/qory/internal/exports"
+	"github.com/qoryai/qory/internal/runapi"
 	"github.com/qoryai/qory/internal/stack"
 )
 
@@ -75,6 +76,32 @@ type Manifest struct {
 	// of the entry that fills it. The compose sets a role from the modules' provides
 	// after the base's bind and before the checkout's. Nil when the manifest has none.
 	Provides stack.Roles
+	// PushChecks are the checks the module declares for the files of an artifact type,
+	// one per type, in the order of the file; nil when the manifest has none.
+	PushChecks []PushCheck
+}
+
+// PushCheck is one check a module declares for the files of one artifact type.
+type PushCheck struct {
+	// Type is the artifact type: lowercase letters and digits in groups joined by single
+	// hyphens, at most 64 bytes.
+	Type string
+	// Command is the program and its arguments. The program is a path inside the module,
+	// relative to its root, cleaned.
+	Command []string
+	// Reads are the other artifact types the check reads, each once, in the order of the
+	// file; nil for none.
+	Reads []string
+}
+
+// InsideModule reports whether path is a relative path that stays inside the module:
+// not empty, not absolute, and with no .. part. It returns the path cleaned.
+func InsideModule(path string) (string, bool) {
+	clean := filepath.Clean(path)
+	if path == "" || filepath.IsAbs(clean) || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+		return "", false
+	}
+	return clean, true
 }
 
 // EgressHost is the grammar of a declared host, copied from the Forager contract's
@@ -94,6 +121,16 @@ type rawManifest struct {
 	Egress      *[]string              `yaml:"egress,omitempty"`
 	Roles       yaml.Node              `yaml:"roles,omitempty"`
 	Provides    yaml.Node              `yaml:"provides,omitempty"`
+	PushChecks  []rawPushCheck         `yaml:"push_checks,omitempty"`
+}
+
+// rawPushCheck is one push_checks item as it is written. The command's items stay nodes,
+// so a number or a boolean among them fails the read as it fails the schema, where a
+// decode into strings would take it.
+type rawPushCheck struct {
+	Type    string      `yaml:"type"`
+	Command []yaml.Node `yaml:"command"`
+	Reads   []yaml.Node `yaml:"reads"`
 }
 
 // singular maps the key a requires item names its entry by to the entry's kind. mcp is
@@ -237,10 +274,13 @@ var envName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 // These are errors: an unknown field, an apiVersion other than [stack.APIVersion] or a
 // retired spelling of it, a missing name, a default that selects something other than
 // a declared variant or "fail", an env key that is not an environment variable name or
-// is QORY_HARNESS_HOME, an env value that is not a relative path inside the module, and
+// is QORY_HARNESS_HOME, an env value that is not a relative path inside the module,
 // roles or provides for which [stack.ReadRoles] returns an error, roles with every
-// value one. Every error contains the manifest path; an error about roles or provides
-// contains it inside the text, after the fix. A name the file writes that contains an access
+// value one, and a push_checks item whose type is not an artifact type or repeats one,
+// or whose command is empty or does not start with a relative path inside the module
+// with no .. part, or whose reads lists a value that is not an artifact type, or one
+// type twice. Every error contains the manifest path; an error about roles or
+// provides contains it inside the text, after the fix. A name the file writes that contains an access
 // key secret or a run key, a key of env, of variants or of a requires item, an entry a
 // requires item lists, and the variant default selects, is printed as
 // [accesskey.ShownName] prints it, and a value it writes as [exports.Value] prints it.
@@ -308,8 +348,8 @@ func parseManifest(dir string, data []byte, err error) (*Manifest, error) {
 		if !envName.MatchString(key) {
 			return nil, fmt.Errorf("%s: env: %s is not an environment variable name", path, accesskey.ShownName(key, false))
 		}
-		clean := filepath.Clean(value)
-		if value == "" || filepath.IsAbs(clean) || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+		clean, ok := InsideModule(value)
+		if !ok {
 			return nil, fmt.Errorf("%s: env.%s: %s is not a path inside the module", path, accesskey.ShownName(key, false), exports.Value(value, false))
 		}
 		if m.Env == nil {
@@ -342,6 +382,9 @@ func parseManifest(dir string, data []byte, err error) (*Manifest, error) {
 			}
 		}
 		sort.Strings(m.Egress)
+	}
+	if m.PushChecks, err = readPushChecks(path, raw.PushChecks); err != nil {
+		return nil, err
 	}
 	for _, part := range []struct {
 		key    string
@@ -385,6 +428,52 @@ func parseManifest(dir string, data []byte, err error) (*Manifest, error) {
 		}
 	}
 	return m, nil
+}
+
+// readPushChecks checks the push_checks items of the manifest at path: a type in the
+// form [runapi.ArtifactName] checks, at most once, and a command whose first item is a path inside
+// the module with no .. part, and reads, artifact types, each once. It returns the
+// items with each program's path cleaned, nil for none.
+func readPushChecks(path string, items []rawPushCheck) ([]PushCheck, error) {
+	var out []PushCheck
+	seen := map[string]bool{}
+	for i, item := range items {
+		if !runapi.ArtifactName(item.Type) {
+			return nil, fmt.Errorf("%s: push_checks[%d].type: set it to an artifact type, lowercase letters and digits in groups joined by single hyphens, at most 64 bytes. The value is %s", path, i, exports.Value(item.Type, true))
+		}
+		if seen[item.Type] {
+			return nil, fmt.Errorf("%s: push_checks: remove one of the two checks for %s. A module has one check per type", path, item.Type)
+		}
+		seen[item.Type] = true
+		if len(item.Command) == 0 {
+			return nil, fmt.Errorf("%s: push_checks[%d].command: set it to the program's path inside the module, then its arguments. The list is empty", path, i)
+		}
+		words := make([]string, len(item.Command))
+		for j, node := range item.Command {
+			if node.Kind != yaml.ScalarNode || node.Tag != "!!str" {
+				return nil, fmt.Errorf("%s: push_checks[%d].command[%d]: set it to a string, quoted when it reads as a number or a boolean", path, i, j)
+			}
+			words[j] = node.Value
+		}
+		// No .. part at all, as the schema has it, though a/../b would stay inside.
+		program, ok := InsideModule(words[0])
+		if !ok || slices.Contains(strings.Split(filepath.ToSlash(words[0]), "/"), "..") {
+			return nil, fmt.Errorf("%s: push_checks[%d].command: set the first item to a path inside the module. %s is not one", path, i, exports.Value(words[0], true))
+		}
+		command := append([]string{program}, words[1:]...)
+		var reads []string
+		for j, node := range item.Reads {
+			if node.Kind != yaml.ScalarNode || node.Tag != "!!str" || !runapi.ArtifactName(node.Value) {
+				return nil, fmt.Errorf("%s: push_checks[%d].reads[%d]: set it to an artifact type, lowercase letters and digits in groups joined by single hyphens, at most 64 bytes. The value is %s", path, i, j, exports.Value(node.Value, true))
+			}
+			if slices.Contains(reads, node.Value) {
+				return nil, fmt.Errorf("%s: push_checks[%d].reads: remove one of the two items %s. A type is listed once", path, i, node.Value)
+			}
+			reads = append(reads, node.Value)
+		}
+		out = append(out, PushCheck{Type: item.Type, Command: command, Reads: reads})
+	}
+	return out, nil
 }
 
 // SelectVariant picks the variant for a runtime: the forced one from the stack, else the

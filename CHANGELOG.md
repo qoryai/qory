@@ -45,14 +45,36 @@ release may change what an existing document does, and states it under Upgrading
   `size_limit`, `max_files` and, for `base_view: structured`, `json_schema`. Every command
   that reads the configuration checks each entry and compiles each `json_schema`. See
   Artifact types in `contracts/harness/v1/README.md`.
+- A module can declare checks for the files of an artifact type with `push_checks` in
+  `qory-module.yaml`: each item has `type`, `command`, a program in the module and its
+  arguments, and optional `reads`, the other artifact types the check reads. The checks
+  are optional and set per module; a module without them pushes as before. The compose
+  fails for a check of the type `verdict`, when two modules declare a check for one
+  type, or when a program is not a file in the module, and writes the checks to
+  `push-checks.json` in the home. A walled run with push checks stops before the agent
+  starts with exit 2 when its home is inside the checkout, when a read-write mount is at
+  or inside the home, or when its `push-checks.json` cannot be read. In a walled run, the
+  check of a type runs before each push of that type reaches Qory Apiary, from inside the
+  wall or from the push step: in a new container from the run's image, with no network,
+  the wall's limits and the run's label, the home and the newest versions of the type and
+  its `reads` read-only. A check that does not pass stops the push with 422
+  `push_check_failed`, its fix line and its findings, and `qory artifact push` exits 4;
+  so does a push that the check cannot read, such as a body that is not a push or two
+  files that are one file on the machine. A check that did not finish stops the push with
+  503 `push_check_unavailable`, qory run writes the cause on its stderr, and the push
+  exits 1. Outside a run, `qory artifact push` runs no check. See The module manifest in
+  `contracts/harness/v1/README.md`.
 - Version 1 of the branch format, `contracts/harness/v1/branch.schema.json`: a work
   item's branch, `qory/<work item id>`, and the commit in each repository. A software
   factory can use it as the `json_schema` of a custom artifact type `branch`.
 - Version 1 of the questions format, `contracts/harness/v1/questions.schema.json`: every
-  question of a work item and its answer, the file of the artifact type `questions`. A run
-  adds, withdraws or reopens questions with `qory artifact push`, and the control plane
-  writes the answers. At most one option of a question has `recommended` set to `true`. See
-  The questions format in `contracts/harness/v1/README.md`.
+  question of a work item and its answer or a run's decision, the file of the artifact
+  type `questions`. A run adds, decides, withdraws or reopens questions with `qory artifact
+  push`, and the control plane writes the answers. At most one option of a question has
+  `recommended` set to `true`. A decided question has `state: decided` and `decision`
+  (`option`, `reason`, `run`, `at`), and at least one option and none with `recommended`;
+  `decision` stays when the state changes. See The questions format in
+  `contracts/harness/v1/README.md`.
 - Version 1 of the review comments format,
   `contracts/harness/v1/review-comments.schema.json`: the members' review comments on a
   work item's artifact versions and the replies to them, the file of the artifact type

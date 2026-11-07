@@ -11,7 +11,7 @@ What `qory harness compose` reads and what it writes.
 | `process.yaml` | optional; the folder root of a module that `exports.modules` lists, which makes the module a factory | a process template: its name, summary and description, the workspace type, the exported stack its workflows run on, its `qory.process/v1` process, and optionally the artifact types its workspaces use. Every command that reads the configuration checks it; the compose does not read it (§Exports) |
 | `qory.yaml`, or `harness.yaml` | the repository root, committed; the user's configuration directory and the checkout's ancestor directories, for the machine | the repository's document and the machine's: under `harness`, this repository's stack, its target and modules, or the stack it extends, the target it composes it for and the modules it appends, and the runtime and model this machine composes for; under `worktree`, what a worktree of the repository needs and where the machine puts one; under `exports`, the stacks and modules this repository publishes for others, by name (§Exports); `git` and `env` (§The configuration) |
 | a branch document | the file of a version of a structured artifact type `branch` | a work item's branch and the commit in each repository (§The branch format). No compose reads it |
-| a questions document | the file of a version of the artifact type `questions` | a work item's questions and their answers (§The questions format). No compose reads it |
+| a questions document | the file of a version of the artifact type `questions` | a work item's questions, their answers and the decisions of its runs (§The questions format). No compose reads it |
 | a review comments document | the file of a version of the artifact type `review-comments` | a work item's review comments on its artifact versions and the replies to them (§The review comments format). No compose reads it |
 | a proposal sources document | the file `sources.json` of a version of the artifact type `proposal` | every source a run used to write the proposal, with the reason for each (§The proposal sources format). No compose reads it |
 
@@ -523,15 +523,31 @@ artifact_types:
 
 ## The questions format
 
-A questions document records every question of a work item and its answer, one document
-per work item and at most 1 MiB. A run adds, withdraws or reopens questions with `qory
-artifact push questions`, and the control plane writes the answers. A question has 0 to
+A questions document records every question of a work item and its answer or a run's
+decision, one document per work item and at most 1 MiB. A run adds, decides, withdraws or
+reopens questions with `qory artifact push questions`, and the control plane writes the
+answers. A question has 0 to
 4 options. The run sets `recommended` to `true` on the option it recommends, on at most
 one option of a question. An answer has
 `option`, the title of the option the member chose, or `null`, and `note`, added detail on
 the chosen option, or the member's answer when `option` is `null`. `note` is optional when
-the member chose an option and required when `option` is `null`. This is version 1 of
-the format ([questions.schema.json](questions.schema.json)).
+the member chose an option and required when `option` is `null`.
+
+A run that chooses an option without asking a member records a decided question: its
+`state` is `decided`, so it is not open, and it has `decision`. A decided question has at
+least one option, and none has `recommended`. `decision` has four members, all required:
+
+| Member | Meaning |
+|---|---|
+| `option` | the title of the option the run chose, one of the question's option titles |
+| `reason` | why the run chose the option, plain text in 1 or 2 sentences, at most 2000 characters |
+| `run` | the run's number, as in `asked` |
+| `at` | when the run chose the option, as in `asked` |
+
+`decision` stays on the question when its state changes. A run that withdraws a decided
+question keeps `decision`. A member changes a decision by answering the question: its
+`state` becomes `answered`, and `decision` stays beside `answer`. A run that reopens that
+answer keeps `decision` too. This is version 1 of the format ([questions.schema.json](questions.schema.json)).
 
 ## The review comments format
 
@@ -591,6 +607,10 @@ roles:                           # the roles the module's documents reference
 provides:                        # the roles the module fills
   agents:
     developer: nextjs-developer  # ${qory:agents/developer} is the agent nextjs-developer
+push_checks:                     # optional: a check for the files of one artifact type
+  - type: spec
+    command: [scripts/checks.js, push, spec]  # a program in the module, then its arguments
+    reads: [questions]           # optional: the other artifact types the check reads
 ```
 
 `description`, optional, describes what the module is for; the report contains it and `qory harness
@@ -639,6 +659,90 @@ name of one entry of that kind, as `bind` does: a technology module `typescript`
 checkout. The name is a composed entry of any module. A list as a value, a flat
 `agents/developer` key and a kind other than the three are refused, each with the
 manifest's path.
+`push_checks`, optional, declares checks for the files of an artifact type, one item per
+type: `type`, the artifact type, `command`, the program and its arguments, and `reads`,
+optional. `reads` lists the other artifact types the check reads. The program is a file in
+the module, a relative path with no `..` part, such as an executable script with a
+`#!/usr/bin/env node` line. The checks are set per module, and a module without
+`push_checks` adds none: its pushes work as before. A type that does not match
+`^[a-z0-9]+(-[a-z0-9]+)*$` or is longer than 64 bytes, one type twice in one module, an
+empty command, a word of the command that is not a string, and a value of `reads` that is
+not a type or is listed twice fail the compose, each with the manifest's path. The compose
+also fails for a check of the type `verdict`, `Remove the push check for verdict from
+module core: a verdict is sent by qory run verdict, which push checks do not cover`; when
+two modules declare a check for one type, `Remove the push check for spec from module core
+or module web: a type has one push check, and both modules declare one`;
+when the program is not a file in the module, `Add checks/check.js to module core, or
+change its push check for spec: the module has no file at that path`; and when the program
+is in an entry an `exclude` or an `only` of its module leaves out. The home contains
+`push-checks.json` with each check, sorted by type, with its `reads` and its program's
+absolute path in the home; a harness whose modules declare no check has no such file.
+
+**Push checks.** A push check runs in a run behind a wall, before a push of its type
+reaches Qory Apiary: for every push to the run API from inside the wall, through `qory
+artifact push` or any other request, and for the version that the push step stores after
+the agent. qory runs the program on the engine of the run's wall, in a new container from
+the run's image, as the run's user, with no network and no capability. The container has
+no variable but the image's and those Docker sets: `HOME`, `HOSTNAME` and `PATH`. It has
+the wall's CPU and memory limits of the run's containers, the wall's process limit or 512
+processes, and the label of the run's containers, so the clean-up of the run removes a
+container that a stopped qory left. The container gets three read-only folders:
+
+- the home, at its path, so the program's absolute path in `push-checks.json` is valid;
+- the working folder: the work item's artifact index, `index.json`, and the newest version
+  of each artifact of the type and of each `reads` type, in the layout of `qory artifact
+  pull`, `<type>/<name>/v<N>/<files>`; a type with no version has no folder;
+- the pushed files, under their names, whose paths follow the command's arguments.
+
+qory makes the last two in the run directory, in a folder that only its user can list,
+and removes them after each check.
+
+A check that exits 0 lets the push go on with the bytes it checked. Any other exit stops
+the push with 422 `push_check_failed` and `Fix each finding below and push again. The check
+for <type> failed:`, with the findings: the lines of the program's standard output. When
+standard output has none, the first finding is `The check exited with <N> and printed
+nothing on stdout. Its stderr:`, and the lines of standard error follow it. When neither
+has a line, the one finding is `The check exited with <N> and printed nothing.` Each
+finding is without control characters, with the run's secrets masked, and at most 1,000
+characters; a check has at most 200 findings. qory reads at most 64 KiB of each stream.
+
+A program that does not start stops the push with 422 too: `Install node, or run in an
+image built FROM qory-agent, and push again. The check for <type> could not start:
+<error>.` when its `#!` line is for `node`, else `Install the program <path>, and push
+again. The check for <type> could not start: <error>.` A program does not start when it
+exits with 126 or 127 and the last line of its standard error is the container's init's
+line for the program, or ends with `not found`, `No such file or directory` or
+`Permission denied` for the program or a word of its `#!` line, such as
+`/usr/bin/env: 'node': No such file or directory`. Any other exit with 126 or 127, such as
+one for a program that the check runs, is a check that failed. A program still running
+after 30 seconds is stopped, with `Make the check for <type> finish within 30 s, and push
+again. It ran longer and was stopped.`
+
+In a run whose home has push checks, a push that the check cannot read gets 422
+`push_check_failed` too, before any check runs, whatever its type:
+
+- a body that is not a push in the run API's form: `Send the push as qory artifact push
+  sends it, and push again. The body is not a push: <cause>.`;
+- a member twice in one object, or one whose name differs from a member of the push only
+  in case: `Send each member of the push once, in lower case, and push again.`;
+- of a type with a check, a file's name that is empty, `.` or `..`, longer than 255 bytes,
+  or contains a slash, a backslash or a control character, or one that is there twice:
+  `Give each file a different name of at most 255 bytes, other than . and .., with no
+  slash, backslash or control character, and push again. <name> is not one.`, or `<name>
+  is the name of two files.`;
+- of a type with a check, two files whose names differ only in case or in the form of an
+  accent, on a machine whose file system keeps them as one file, such as macOS: `Give each
+  file a different name, also when you ignore case and accents, and push again. <a> and <b>
+  are one file on this machine.`
+
+When qory cannot run the check, the push stops with 503 `push_check_unavailable`, and qory
+run writes the cause as a line on its stderr: the fetch of the artifacts fails, two files
+of a fetched version are one file on this machine, the engine is not reachable or does
+not create the container, the engine does not have the run's image, or a temporary
+folder cannot be made. Node is needed only by a check whose program uses it: Qory's agent
+image, and every image built FROM it, has it. A run without a wall, or without a control
+plane, runs no check, and outside a run `qory artifact push` keeps the files in
+`.qory/artifacts` and runs no check.
 
 A module's tree contains these entry kinds:
 

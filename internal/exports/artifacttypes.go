@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"regexp"
 	"regexp/syntax"
 	"slices"
 	"strings"
@@ -15,12 +14,14 @@ import (
 	"github.com/santhosh-tekuri/jsonschema/v6"
 	"github.com/santhosh-tekuri/jsonschema/v6/kind"
 	"gopkg.in/yaml.v3"
+
+	"github.com/qoryai/qory/internal/runapi"
 )
 
-// The limits of an artifact type in a process.yaml: its name in bytes, the files of one
-// version, and each base view's most bytes of all files of one version.
+// The limits of an artifact type in a process.yaml: the files of one version, and each
+// base view's most bytes of all files of one version. Its name is at most
+// [runapi.MaxArtifactName] bytes.
 const (
-	maxTypeName  = 64
 	maxTypeFiles = 20
 	mebibyte     = 1 << 20
 )
@@ -71,9 +72,6 @@ const maxSchemaError = 300
 
 // typeKeys is every key an entry of artifact_types may have.
 var typeKeys = []string{"name", "base_view", "size_limit", "max_files", "json_schema"}
-
-// typeName is the form of an artifact type's name.
-var typeName = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
 
 // typeSchemaDrafts is what $schema may be set to in a custom type's JSON Schema, each
 // with and without a # at its end.
@@ -150,8 +148,8 @@ func checkArtifactType(entry *yaml.Node, i int, patterns *patternBudget) (name, 
 	if n.Kind != yaml.ScalarNode || n.Tag != "!!str" {
 		return "", fmt.Sprintf("set the name of %s to a string of lowercase letters and digits in groups joined by single hyphens: the name is %s", label, nodeKind(n))
 	}
-	if len(n.Value) > maxTypeName || !typeName.MatchString(n.Value) {
-		return "", fmt.Sprintf("set the name of %s to lowercase letters and digits in groups joined by single hyphens, at most %d bytes: the name is %s", label, maxTypeName, scalarText(n))
+	if !runapi.ArtifactName(n.Value) {
+		return "", fmt.Sprintf("set the name of %s to lowercase letters and digits in groups joined by single hyphens, at most %d bytes: the name is %s", label, runapi.MaxArtifactName, scalarText(n))
 	}
 	name = n.Value
 	if len(entry.Content) == 2 {

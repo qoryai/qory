@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://qory.dev/contracts/harness/v1/questions.schema.json",
   "title": "The questions format, version 1",
-  "description": "A work item's questions and their answers: the file of a version of the artifact type questions, one document per work item. A run adds, withdraws or reopens questions; the control plane writes the answers. Each question's id is unique in the document, which a JSON Schema cannot check. The file is at most 1 MiB (1,048,576 bytes), the type's size limit, which a JSON Schema cannot check either. No object has a member this schema does not define.",
+  "description": "A work item's questions, their answers and the decisions of its runs: the file of a version of the artifact type questions, one document per work item. A run adds, decides, withdraws or reopens questions; the control plane writes the answers. Each question's id is unique in the document, which a JSON Schema cannot check. The file is at most 1 MiB (1,048,576 bytes), the type's size limit, which a JSON Schema cannot check either. No object has a member this schema does not define.",
   "type": "object",
   "required": ["questions"],
   "additionalProperties": false,
@@ -15,7 +15,7 @@
   },
   "$defs": {
     "question": {
-      "description": "One question. answer is present exactly when state is answered.",
+      "description": "One question. answer is present exactly when state is answered. decision is present when state is decided, and stays when the state changes after that.",
       "type": "object",
       "required": ["id", "question", "options", "state", "asked"],
       "additionalProperties": false,
@@ -24,7 +24,7 @@
         "question": {"description": "The question, plain text on one line: one sentence, 1 to 500 characters.", "$ref": "#/$defs/line", "minLength": 1, "maxLength": 500},
         "context": {"description": "What a person needs to know to answer, as Markdown: absent when the question needs none.", "$ref": "#/$defs/long_text"},
         "options": {
-          "description": "The answers a member can pick, 0 to 4, and at most one with recommended set to true: empty when the run lists no option and the member writes the answer.",
+          "description": "The answers a member can pick, 0 to 4, and at most one with recommended set to true: empty when the run lists no option and the member writes the answer. A decided question has at least one option, and none has recommended.",
           "type": "array",
           "maxItems": 4,
           "items": {"$ref": "#/$defs/option"},
@@ -32,9 +32,10 @@
           "minContains": 0,
           "maxContains": 1
         },
-        "state": {"description": "open until a member answers the question, answered once a member answered it, withdrawn once a run withdrew it.", "enum": ["open", "answered", "withdrawn"]},
+        "state": {"description": "open until a member answers the question, answered once a member answered it, decided once a run chose an option and recorded it in decision, withdrawn once a run withdrew it. A decided question is not open.", "enum": ["open", "answered", "decided", "withdrawn"]},
         "asked": {"description": "The run that added the question, and when.", "$ref": "#/$defs/run_at"},
         "answer": {"description": "The member's answer, which the control plane writes.", "$ref": "#/$defs/answer"},
+        "decision": {"description": "The option a run chose without asking a member, and why: required when state is decided, and kept when a run withdraws or reopens the question or a member answers it.", "$ref": "#/$defs/decision"},
         "follows": {
           "description": "The ids of earlier questions in the document that this question follows from: absent or empty when it follows from none.",
           "type": "array",
@@ -61,9 +62,20 @@
           }
         }
       },
-      "if": {"required": ["state"], "properties": {"state": {"const": "answered"}}},
-      "then": {"required": ["answer"]},
-      "else": {"not": {"required": ["answer"]}}
+      "allOf": [
+        {
+          "if": {"required": ["state"], "properties": {"state": {"const": "answered"}}},
+          "then": {"required": ["answer"]},
+          "else": {"not": {"required": ["answer"]}}
+        },
+        {
+          "if": {"required": ["state"], "properties": {"state": {"const": "decided"}}},
+          "then": {
+            "required": ["decision"],
+            "properties": {"options": {"minItems": 1, "items": {"not": {"required": ["recommended"]}}}}
+          }
+        }
+      ]
     },
     "option": {
       "description": "An answer a member can pick.",
@@ -89,6 +101,18 @@
       },
       "if": {"required": ["option"], "properties": {"option": {"type": "null"}}},
       "then": {"required": ["note"]}
+    },
+    "decision": {
+      "description": "A run's decision on a question: the option the run chose, why, the run and when.",
+      "type": "object",
+      "required": ["option", "reason", "run", "at"],
+      "additionalProperties": false,
+      "properties": {
+        "option": {"description": "The title of the option the run chose. The title is one of the question's option titles, which a JSON Schema cannot check.", "$ref": "#/$defs/option_title"},
+        "reason": {"description": "Why the run chose the option, plain text in 1 or 2 sentences.", "$ref": "#/$defs/short_text"},
+        "run": {"$ref": "#/$defs/run_at/properties/run"},
+        "at": {"$ref": "#/$defs/run_at/properties/at"}
+      }
     },
     "option_title": {
       "description": "An option's title, plain text on one line, 1 to 200 characters.",

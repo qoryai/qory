@@ -181,6 +181,10 @@ type Result struct {
 	// Tiers is, for each tier an agent sets that [Options.Tiers] maps, the entry it maps
 	// to; nil when there is none. An agent whose tier is absent here has no map.
 	Tiers map[string]stack.Tier
+	// PushChecks are the checks the modules declare for the files of an artifact type,
+	// sorted by type, one per type; nil when no module declares one. [Result.PushChecksFor]
+	// renders them for a home.
+	PushChecks []PushCheck
 	// roots are the module roots the compose opened, which [Result.Close] closes.
 	roots []*os.Root
 	// setBy is the module that set each settings leaf, keyed
@@ -331,6 +335,8 @@ func ComposeWith(p *stack.Stack, opts Options) (_ *Result, err error) {
 	tiers := map[string]string{}
 	servers := map[string]map[string]any{}
 	exporters := map[string]string{}
+	// checkers is the module that declares the push check of each type.
+	checkers := map[string]string{}
 	var instructions []string
 	requires := map[string]map[string][]Need{}
 	read := map[string]*module.Module{}
@@ -381,6 +387,9 @@ func ComposeWith(p *stack.Stack, opts Options) (_ *Result, err error) {
 			}
 		}
 		if err := exportEnv(res, exporters, name, env, opts.Env); err != nil {
+			return nil, err
+		}
+		if err := addPushChecks(res, checkers, l.Dir, root, name, m.PushChecks); err != nil {
 			return nil, err
 		}
 		res.Modules = append(res.Modules, rl)
@@ -474,7 +483,95 @@ func ComposeWith(p *stack.Stack, opts Options) (_ *Result, err error) {
 	for name, value := range opts.Env {
 		res.Env[name] = value
 	}
+	sort.Slice(res.PushChecks, func(i, j int) bool { return res.PushChecks[i].Type < res.PushChecks[j].Type })
 	return res, nil
+}
+
+// PushCheck is one check the composed harness declares for the files of an artifact
+// type.
+type PushCheck struct {
+	// Type is the artifact type the check is for.
+	Type string `json:"type"`
+	// Module is the module that declares the check.
+	Module string `json:"module"`
+	// Command is the program and its arguments. The program is
+	// $QORY_HARNESS_HOME/modules/<module>/<path>, before substitution.
+	Command []string `json:"command"`
+	// Reads are the other artifact types the check reads; nil for none.
+	Reads []string `json:"reads,omitempty"`
+}
+
+// verdictType is the artifact type of a run's verdict, which qory run verdict sends to
+// a path of the run API that push checks do not check.
+const verdictType = "verdict"
+
+// addPushChecks adds the push checks of the module name at dir to the result. A check
+// for [verdictType] fails the compose, and so does a type that another module already
+// declares a check for, a program that is not a file in the module, read through root
+// when it is not nil, and one in an entry the module's exclude or only leaves out, since
+// the home can leave out such an entry.
+func addPushChecks(res *Result, checkers map[string]string, dir string, root *os.Root, name string, checks []module.PushCheck) error {
+	if len(checks) == 0 {
+		return nil
+	}
+	if root == nil {
+		opened, err := os.OpenRoot(dir)
+		if err != nil {
+			return exports.HideError(err)
+		}
+		defer opened.Close()
+		root = opened
+	}
+	for _, c := range checks {
+		if c.Type == verdictType {
+			return fmt.Errorf("Remove the push check for %s from module %s: a verdict is sent by qory run verdict, which push checks do not cover", verdictType, shown(name))
+		}
+		if other, ok := checkers[c.Type]; ok {
+			return fmt.Errorf("Remove the push check for %s from module %s or module %s: a type has one push check, and both modules declare one", c.Type, shown(other), shown(name))
+		}
+		checkers[c.Type] = name
+		program := c.Command[0]
+		shownProgram := exports.Value(filepath.ToSlash(program), false)
+		info, err := root.Stat(program)
+		if err != nil {
+			return fmt.Errorf("Add %s to module %s, or change its push check for %s: the module has no file at that path", shownProgram, shown(name), c.Type)
+		}
+		if !info.Mode().IsRegular() {
+			return fmt.Errorf("Set the push check for %s of module %s to a program file: %s is not a file", c.Type, shown(name), shownProgram)
+		}
+		for _, e := range res.Excludes {
+			if e.Module != name || e.Path == "" {
+				continue
+			}
+			entry, err := filepath.Rel(dir, e.Path)
+			if err != nil || entry != program && !strings.HasPrefix(program, entry+string(filepath.Separator)) {
+				continue
+			}
+			return fmt.Errorf("Keep %s/%s in module %s, or move %s out of it: the program of the push check for %s is in %s/%s, which an exclude or only of module %s leaves out",
+				e.Kind, shown(e.Name), shown(name), shownProgram, c.Type, e.Kind, shown(e.Name), shown(name))
+		}
+		command := append([]string{"$QORY_HARNESS_HOME/modules/" + name + "/" + filepath.ToSlash(program)}, c.Command[1:]...)
+		res.PushChecks = append(res.PushChecks, PushCheck{Type: c.Type, Module: name, Command: command, Reads: c.Reads})
+	}
+	return nil
+}
+
+// PushChecksFor is a copy of the push checks rendered for a home, with every
+// $QORY_HARNESS_HOME in a command replaced the way [Result.SettingsFor] replaces it; nil
+// when there is none.
+func (r *Result) PushChecksFor(home string) []PushCheck {
+	if len(r.PushChecks) == 0 {
+		return nil
+	}
+	out := make([]PushCheck, len(r.PushChecks))
+	for i, c := range r.PushChecks {
+		command := make([]string, len(c.Command))
+		for j, word := range c.Command {
+			command[j] = ForHome(word, home).(string)
+		}
+		out[i] = PushCheck{Type: c.Type, Module: c.Module, Command: command, Reads: slices.Clone(c.Reads)}
+	}
+	return out
 }
 
 // workflowsShipped checks that each workflow of p is a skill or command that composed

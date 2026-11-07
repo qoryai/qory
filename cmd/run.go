@@ -622,6 +622,9 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				}
 				return withRecord(streams.errOut, err, record)
 			}
+			// A walled run whose composed home has push checks checks each POST of its run
+			// API from behind the wall, see [runPushChecks].
+			checks := &runPushChecks{report: said}
 			run, err := openRun(ctx, spec.OpenSpec)
 			if err != nil {
 				closeGateway()
@@ -664,6 +667,12 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			// checkout, see [readsOnly].
 			var readOnly bool
 			prepareLaunch := func(w io.Writer) (freshHome bool, err error) {
+				composing.writable = nil
+				for _, m := range spec.Mounts {
+					if !m.ReadOnly {
+						composing.writable = append(composing.writable, m.Path)
+					}
+				}
 				harness, workflows, err := composeForRun(w, composing, at, runtime, dispatched, walled)
 				if err != nil && composing.git != nil && composing.git.Named != nil {
 					return false, namedComposeError(err, composing.git.Named)
@@ -877,6 +886,24 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				if err != nil {
 					return err
 				}
+				// A home whose push checks qory cannot run stops the run here, before the
+				// setup and the agent. The run's forwarder checks the POSTs from behind the
+				// wall from here on: nothing behind the wall has run yet.
+				if walled {
+					loadCtx, cancel := ctx, func() {}
+					if timeout > 0 {
+						loadCtx, cancel = context.WithDeadline(ctx, opened.Add(timeout))
+					}
+					done, err := checks.load(loadCtx, run, at.home, spec.RunID, &spec, remote || server != nil && !local)
+					cancel()
+					if err != nil {
+						return &runLineError{input(err)}
+					}
+					cleanups = append(cleanups, done)
+					if err := checks.set(run); err != nil {
+						return &runLineError{err}
+					}
+				}
 				// Only the push step's commit uses the run number. readOnly is set by the
 				// compose, so the check comes here, before the session.
 				if canPush(fromCode, readOnly, branch) && fromCode.runNumber < 1 {
@@ -1054,7 +1081,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					limit = opened.Add(timeout)
 				}
 				pushCtx, cancel := pushContext(ctx, again, limit, pushTimes.limit, pushTimes.signal)
-				ending.noStep, pushErr = removeThenPush(pushCtx, run, streams.errOut, branch, cwd, spec.RunID, fromCode.runNumber, out, walled)
+				ending.noStep, pushErr = removeThenPush(pushCtx, run, streams.errOut, branch, cwd, spec.RunID, fromCode.runNumber, out, walled, checks)
 				ending.stopped = ctx.Err() != nil
 				ending.again, ending.got = again.Err() != nil, got()
 				ending.cut = pushCtx.Err() != nil
@@ -1300,6 +1327,9 @@ type openedRun interface {
 	Image() session.Image
 	// Dir is the run directory.
 	Dir() string
+	// SetRunAPICheck sets the check of each POST to the run API from behind the wall,
+	// before the setup and the first join; see [session.Run.SetRunAPICheck].
+	SetRunAPICheck(check func(ctx context.Context, req session.RunAPIRequest) (*session.RunAPIRefusal, error)) error
 }
 
 // hostProxy is the run's host proxy or stack proxy as qory run uses it: the proxy git

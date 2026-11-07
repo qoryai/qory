@@ -1,0 +1,1 @@
+Remove the push check for verdict from module core: a verdict is sent by qory run verdict, which push checks do not cover
