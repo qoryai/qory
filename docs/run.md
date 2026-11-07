@@ -2195,7 +2195,8 @@ the step sets the close:
 - A git session that fails before the step closes the run `failed` with the exit code of the
   step `copy work out`, or -1 when it has none, such as a session that did not start. On a run
   with a copy, a setup container that was not removed closes it the same way, with -1.
-  `qory run` exits 1.
+  `qory run` exits 1. A removal of the setup container that the time limit or a signal cut
+  closes the run as a cut step does.
 - A step or a git session stopped at the time limit closes the run `cancelled` with the
   reason `timeout`, exit 124.
 - A step or a git session stopped after a signal closes the run `cancelled` with the reason
@@ -2271,7 +2272,8 @@ Each of these lines fails the step. `<commit>` is the commit's first 12 characte
 
 A removal of the setup container that failed runs no step: qory commits nothing and pushes
 nothing. After a session that succeeded, the run closes `failed` with -1 on a run with a copy
-and with 1 on any other run, and `qory run` exits 1. The line is:
+and with 1 on any other run, and `qory run` exits 1. A removal that the time limit or a signal
+cut closes the run as a cut step does. The line is:
 
 - `take the work item in again in Qory Apiary: the setup container of this run was not
   removed, so a process in it could write the working folder, and qory pushed nothing:

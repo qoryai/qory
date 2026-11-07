@@ -3912,12 +3912,37 @@ func TestAnHTTPURLInAGitLineHasNoCredential(t *testing.T) {
 		if !errors.As(err, &ge) {
 			t.Fatalf("the error of %q is %v", raw, err)
 		}
-		if ge.line != want {
-			t.Errorf("run printed %q for %q, want %q", ge.line, raw, want)
+		if got := strings.TrimPrefix(ShownError(err).Error(), "git status: "); got != want {
+			t.Errorf("run printed %q for %q, want %q", got, raw, want)
 		}
 		if strings.Contains(ge.line, "ZZSECRETZZ") {
 			t.Errorf("run printed %q for %q, with the secret", ge.line, raw)
 		}
+	}
+}
+
+// TestALineOfGitInitKeepsItsPath is a real error of git init in a long folder of the copy, as the
+// quarantine runs it: the line has the whole path, for a caller to take it out before the cut, and
+// [ShownError] cuts the line as before.
+func TestALineOfGitInitKeepsItsPath(t *testing.T) {
+	isolate(t)
+	long := filepath.Join(t.TempDir(), strings.Repeat("a-long-cache-folder/", 12))
+	t.Setenv("HOME", long)
+	t.Setenv("XDG_CACHE_HOME", long)
+	d := newDir(t)
+	file := filepath.Join(d.Root(), "a-file")
+	if err := os.WriteFile(file, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	q := filepath.Join(file, "0.git")
+	_, err := git(t.Context(), d.Root(), "init", "--quiet", "--bare", "--template=", "--", q)
+	var ge *gitError
+	if !errors.As(err, &ge) || !ge.uncut || !strings.Contains(ge.line, q) {
+		t.Fatalf("the error of git init is %v, want git's line with %s", err, q)
+	}
+	shownErr := ShownError(fmt.Errorf(textQuarantine, shown(q), err)).Error()
+	if want := fmt.Errorf(textQuarantine, shown(q), errors.New("git init: "+shown(ge.line))).Error(); shownErr != want || !strings.HasSuffix(shownErr, "...") {
+		t.Errorf("the line is %q, want %q", shownErr, want)
 	}
 }
 

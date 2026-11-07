@@ -423,7 +423,7 @@ type pushEnding struct {
 	limit   time.Duration
 	// stopped is whether qory run got a signal, again whether it got a second, and got the
 	// first signal: as [pushEnding.settle] sets them. cut is whether the step's context ended
-	// as the step exited, or [runCopy.cut] on a run with no step. noStep is whether no step
+	// as the step exited, or [runCopy.cut] on a run with no step. noStep is whether no push step
 	// ran: the removal of the setup container or the copy step failed.
 	stopped, again, cut, noStep bool
 	got                         string
@@ -440,9 +440,9 @@ type stopRead struct {
 	got            string
 }
 
-// cutLine is [pushEnding.cutBy] for a line printed before the close, with now as what stopped
-// the run and afterSignal as the time a first signal leaves the step. [pushEnding.settle] uses
-// now for the close, so a signal after this line does not change the close.
+// cutLine is [pushEnding.cutBy] for a line, with now as what stopped the run and afterSignal as
+// the time a first signal leaves the step. [pushEnding.settle] uses now for the close, so a
+// signal after this line does not change the close.
 func (e *pushEnding) cutLine(now stopRead, afterSignal time.Duration) string {
 	e.lineRead = &now
 	line := *e

@@ -35,14 +35,63 @@ var noMaintenance = []string{"-c", "gc.auto=0", "-c", "maintenance.auto=false"}
 
 // gitError is a git command that failed: the subcommand, the first line git printed on
 // stderr, or the error that kept git from running, and git's exit status, -1 when git
-// did not exit.
+// did not exit. uncut is whether line is git's line as [firstLine] keeps it.
 type gitError struct {
 	subcommand string
 	line       string
 	exit       int
+	uncut      bool
 }
 
 func (e *gitError) Error() string { return "git " + e.subcommand + ": " + e.line }
+
+// ShownError is err as a line prints it when [integration.Printable] does not run on all
+// of its text: each line of git in it that [firstLine] keeps uncut is cut and has each
+// character that does not print as ?, as [preparation.ShownPath] prints it. The result
+// unwraps to err.
+func ShownError(err error) error {
+	if err == nil {
+		return nil
+	}
+	text := err.Error()
+	cut := text
+	for _, ge := range gitErrors(err) {
+		if ge.uncut {
+			cut = strings.ReplaceAll(cut, ge.Error(), "git "+ge.subcommand+": "+shown(ge.line))
+		}
+	}
+	if cut == text {
+		return err
+	}
+	return &cutError{cut, err}
+}
+
+// gitErrors is each [*gitError] in the tree of err.
+func gitErrors(err error) []*gitError {
+	switch e := err.(type) {
+	case *gitError:
+		return []*gitError{e}
+	case interface{ Unwrap() []error }:
+		var out []*gitError
+		for _, inner := range e.Unwrap() {
+			out = append(out, gitErrors(inner)...)
+		}
+		return out
+	case interface{ Unwrap() error }:
+		return gitErrors(e.Unwrap())
+	}
+	return nil
+}
+
+// cutError is the error of [ShownError]: text, with err under it.
+type cutError struct {
+	text string
+	err  error
+}
+
+func (e *cutError) Error() string { return e.text }
+
+func (e *cutError) Unwrap() error { return e.err }
 
 // exitOf is git's exit status in err, -1 when err is not a [*gitError] or git did not
 // exit.
@@ -113,9 +162,10 @@ func run(cmd *exec.Cmd, stdin io.Reader, args []string) (string, error) {
 	cmd.WaitDelay = time.Second
 	if err := cmd.Run(); err != nil {
 		// A filter or a credential helper can print a URL with its password here. The hide reads
-		// all of it, since [firstLine] drops the later lines and can cut a password before its @.
+		// all of it, since [firstLine] drops the later lines.
 		line := firstLine(hidden(stderr.String()))
-		if line == "" {
+		uncut := line != ""
+		if !uncut {
 			line = hidden(err.Error())
 		}
 		exit := -1
@@ -123,7 +173,7 @@ func run(cmd *exec.Cmd, stdin io.Reader, args []string) (string, error) {
 		if errors.As(err, &ee) {
 			exit = ee.ExitCode()
 		}
-		return "", &gitError{subcommand: subcommand(args), line: line, exit: exit}
+		return "", &gitError{subcommand: subcommand(args), line: line, exit: exit, uncut: uncut}
 	}
 	return stdout.String(), nil
 }
@@ -133,11 +183,14 @@ func hidden(text string) string {
 	return exports.HideURLError(errors.New(hideHTTP(text))).Error()
 }
 
-// firstLine is the first line of text that is not empty, as a line prints it.
+// firstLine is the first line of text that is not empty, with a secret in it masked as
+// [exports.Value] masks it. It is not cut and can have characters that do not print: a
+// caller takes a path of the copy out of it before [integration.Printable] cuts it, or
+// prints it through [ShownError].
 func firstLine(text string) string {
 	for line := range strings.SplitSeq(text, "\n") {
 		if line = strings.TrimSpace(line); line != "" {
-			return shown(line)
+			return exports.Value(line, false)
 		}
 	}
 	return ""

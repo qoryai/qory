@@ -139,8 +139,9 @@ type runCopy struct {
 	// read-only, and nothing comes back.
 	readOnly bool
 	// pushes is whether the run gets the push step. The person may have no access to this machine,
-	// so the copy does not stay, and only [textCopyNoRemove], for a removal of the copy that
-	// failed, has a path of the copy.
+	// so the copy does not stay, and a line that stops the return of the work is [copyStop.log],
+	// with no path of the copy. Of the lines of a method of runCopy after the agent's session, only
+	// [textCopyNoRemove], for a removal of the copy that failed, has a path of the copy.
 	pushes bool
 	// fromCode is whether the run comes from a run code: a line that ends it ends with [codeUsed].
 	fromCode bool
@@ -248,6 +249,8 @@ func startCopy(ctx context.Context, root, runID, branch string, noRepository boo
 		c.repos, err = dir.Clone(ctx, root, branch)
 	}
 	if err != nil {
+		// No [integration.Printable] runs on the whole line, so a line of git in err is cut here.
+		err = runcopy.ShownError(err)
 		if rerr := dir.Remove(); rerr != nil {
 			return nil, errors.Join(err, rerr)
 		}
@@ -440,20 +443,21 @@ func (c *runCopy) recordLinks() error {
 }
 
 // recordSetup records what the setup left changed in each repository of the copy, so the
-// git session leaves it out while it stays as the setup left it.
+// git session leaves it out while it stays as the setup left it. No [integration.Printable]
+// runs on the whole line of its error, so a line of git in it is cut, see [runcopy.ShownError].
 func (c *runCopy) recordSetup(ctx context.Context) error {
 	for _, r := range c.repos {
 		paths, err := c.dir.SetupChanges(ctx, r)
 		if err != nil {
-			return err
+			return runcopy.ShownError(err)
 		}
 		states, err := c.dir.SetupStates(ctx, r, paths)
 		if err != nil {
-			return err
+			return runcopy.ShownError(err)
 		}
 		submodules, err := c.dir.SubmoduleSetup(ctx, r)
 		if err != nil {
-			return err
+			return runcopy.ShownError(err)
 		}
 		o := c.out[r.Path]
 		o.Setup, o.Submodules = states, submodules

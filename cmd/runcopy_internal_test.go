@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -13,6 +14,7 @@ import (
 	"github.com/qoryai/forager/session"
 	"github.com/qoryai/forager/session/runtimes"
 
+	"github.com/qoryai/qory/internal/integration"
 	"github.com/qoryai/qory/internal/runcopy"
 )
 
@@ -130,6 +132,72 @@ func TestAnErrorOfTheCopyKeepsNoPartOfItsPath(t *testing.T) {
 				t.Errorf("the log's line is %q, from the error %q", stop.log, err)
 			}
 		})
+	}
+}
+
+// TestALineOfGitKeepsNoPartOfAPathOfTheCopy is a real line of git with a path of the copy that
+// reaches past the cut of [integration.Printable], in a long cache folder: git clone into a
+// folder of the copy that is not empty. The step's log has no part of the path, and the line
+// that no cut follows has git's line cut as before.
+func TestALineOfGitKeepsNoPartOfAPathOfTheCopy(t *testing.T) {
+	long := filepath.Join(t.TempDir(), strings.Repeat("a-long-cache-folder/", 12))
+	t.Setenv("HOME", long)
+	t.Setenv("XDG_CACHE_HOME", long)
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
+	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
+	git := func(dir string, args ...string) {
+		t.Helper()
+		c := exec.Command("git", args...)
+		c.Dir = dir
+		c.Env = append(os.Environ(), "GIT_AUTHOR_NAME=Example", "GIT_AUTHOR_EMAIL=example@example.com",
+			"GIT_COMMITTER_NAME=Example", "GIT_COMMITTER_EMAIL=example@example.com")
+		if out, err := c.CombinedOutput(); err != nil {
+			t.Fatalf("git %v in %s: %v\n%s", args, dir, err, out)
+		}
+	}
+	// The commit has a file in the folder of a further repository, so the clone of that
+	// repository finds its folder in the copy not empty.
+	checkout := t.TempDir()
+	further := filepath.Join(checkout, ".qory", "repositories", "x")
+	if err := os.MkdirAll(further, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(further, "a.txt"), []byte("a\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git(checkout, "init", "--quiet", "-b", "main")
+	git(checkout, "add", ".")
+	git(checkout, "commit", "--quiet", "-m", "first")
+	if err := os.WriteFile(filepath.Join(further, "b.txt"), []byte("b\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git(further, "init", "--quiet", "-b", "main")
+	git(further, "add", "b.txt")
+	git(further, "commit", "--quiet", "-m", "first")
+	dir, err := runcopy.New("01a1b738-63b1-76fa-9757-6552cfc987b5")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := dir.Remove(); err != nil {
+			t.Error(err)
+		}
+	})
+	_, err = dir.Clone(context.Background(), checkout, "qory/run-1")
+	line := errors.Unwrap(err)
+	if line == nil || !strings.HasPrefix(line.Error(), "git clone: fatal: destination path ") {
+		t.Fatalf("the clone's error is %v, want git's line", err)
+	}
+	stop := (&runCopy{dir: dir, pushes: true}).stoppedBy("%s", line)
+	if want := "destination path 'the run's copy/.qory/repositories/x' already exists"; !strings.Contains(stop.log, want) {
+		t.Errorf("the log's line is %q, want %q in it", stop.log, want)
+	}
+	if strings.Contains(stop.log, "a-long-cache-folder") || strings.Contains(stop.log, "qory/runs") || stop.Error() != stop.log {
+		t.Errorf("the line is %q and the log's line %q, from the error %q", stop.Error(), stop.log, line)
+	}
+	shown := runcopy.ShownError(line).Error()
+	if want := "git clone: " + integration.Printable(strings.TrimPrefix(line.Error(), "git clone: ")); shown != want || !strings.HasSuffix(shown, "...") {
+		t.Errorf("the line that no cut follows is %q, want %q", shown, want)
 	}
 }
 
