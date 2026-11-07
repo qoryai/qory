@@ -421,13 +421,42 @@ type pushEnding struct {
 	// session is the outcome of the session, and limit the run's time limit.
 	session session.Outcome
 	limit   time.Duration
-	// stopped is whether qory run got a signal, again whether it got a second, and cut
-	// whether the step's context ended, each as the step exited. got is the first signal,
-	// and noStep whether the removal of the setup container failed, so no step ran.
+	// stopped is whether qory run got a signal, again whether it got a second, and got the
+	// first signal: as [pushEnding.settle] sets them. cut is whether the step's context ended
+	// as the step exited, or [runCopy.cut] on a run with no step. noStep is whether no step
+	// ran: the removal of the setup container or the copy step failed.
 	stopped, again, cut, noStep bool
 	got                         string
 	// afterSignal is the time a first signal leaves the step, 0 for [pushTimes].signal.
 	afterSignal time.Duration
+	// lineRead is what the last [pushEnding.cutLine] read, nil when none ran.
+	lineRead *stopRead
+}
+
+// stopRead is one read of what stopped a run: whether qory run got a signal, whether it got a
+// second, and the first signal.
+type stopRead struct {
+	stopped, again bool
+	got            string
+}
+
+// cutLine is [pushEnding.cutBy] for a line printed before the close, with now as what stopped
+// the run and afterSignal as the time a first signal leaves the step. [pushEnding.settle] uses
+// now for the close, so a signal after this line does not change the close.
+func (e *pushEnding) cutLine(now stopRead, afterSignal time.Duration) string {
+	e.lineRead = &now
+	line := *e
+	line.stopped, line.again, line.got, line.afterSignal = now.stopped, now.again, now.got, afterSignal
+	return line.cutBy()
+}
+
+// settle sets what stopped the run, for the close: what the last [pushEnding.cutLine] read, or
+// now when none ran.
+func (e *pushEnding) settle(now stopRead) {
+	if e.lineRead != nil {
+		now = *e.lineRead
+	}
+	e.stopped, e.again, e.got = now.stopped, now.again, now.got
 }
 
 // outcome is the outcome a run closes with after its push step failed with err. A session
@@ -451,17 +480,6 @@ func (e pushEnding) outcome(err error) session.Outcome {
 // run that closes failed.
 func (e pushEnding) copyOutcome(code int) session.Outcome {
 	return e.outcome(&exitError{code: code})
-}
-
-// returnFailedStatus is qory run's exit status when the session succeeded, the run closed with
-// out, and its work did not come back: [exitTimeout] for a copy step cut at the run's time limit,
-// as [pushEnding.ended] has it, and 1 otherwise. [returnContext] has no such limit today, so a run
-// with no push reaches only the 1.
-func returnFailedStatus(out session.Outcome) int {
-	if out.Reason == event.ReasonTimeout {
-		return exitTimeout
-	}
-	return 1
 }
 
 // cutBy is what ended a step whose context ended, as a line has it.

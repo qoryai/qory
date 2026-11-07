@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"errors"
+	"io"
 	"os"
 	"strings"
 	"syscall"
@@ -457,10 +458,11 @@ func TestPushEndingOutcome(t *testing.T) {
 	}
 }
 
-// TestCopyEndingOutcome is the close of a run and qory run's exit status for each end of its
-// session and its copy step. The time limit's row is the one a run with no push does not reach,
-// see [returnFailedStatus]. A run the gateway closed takes no such close: see
-// TestARunsEndWithAFailedCopyStep.
+// TestCopyEndingOutcome is the close of a run for each end of its session and its copy step, and
+// qory run's exit status on a run with a push when the session succeeded: a run whose session did
+// not succeed exits as the session ended. A run with no push has no time limit past its session,
+// so it does not reach the time limit's row, and it exits 1 when its work does not come back. A
+// run the gateway closed takes no such close: see TestARunsEndWithAFailedCopyStep.
 func TestCopyEndingOutcome(t *testing.T) {
 	succeeded := session.Outcome{State: event.StateSucceeded}
 	failed := session.Outcome{State: event.StateFailed, ExitCode: 3}
@@ -478,17 +480,46 @@ func TestCopyEndingOutcome(t *testing.T) {
 		{"the step has no exit code", pushEnding{session: succeeded}, -1, session.Outcome{State: event.StateFailed, ExitCode: -1}, 1},
 		{"a signal cuts the step", pushEnding{session: succeeded, cut: true, stopped: true}, -1, interrupted, 1},
 		{"the run's time limit cuts the step", pushEnding{session: succeeded, cut: true}, -1, timedOut, exitTimeout},
-		{"the agent failed", pushEnding{session: failed}, 128, failed, 1},
-		{"the agent timed out", pushEnding{session: timedOut, cut: true, stopped: true}, -1, timedOut, exitTimeout},
-		{"the agent was cancelled", pushEnding{session: cancelled, cut: true, stopped: true}, -1, cancelled, 1},
+		{"the agent failed", pushEnding{session: failed}, 128, failed, 0},
+		{"the agent timed out", pushEnding{session: timedOut, cut: true, stopped: true}, -1, timedOut, 0},
+		{"the agent was cancelled", pushEnding{session: cancelled, cut: true, stopped: true}, -1, cancelled, 0},
 	} {
 		got := c.ending.copyOutcome(c.code)
 		if got != c.want {
 			t.Errorf("%s: %+v, want %+v", c.name, got, c.want)
 		}
-		if status := returnFailedStatus(got); status != c.status {
+		if c.status == 0 {
+			continue
+		}
+		e := c.ending
+		e.noStep = true
+		status := ExitCode(e.ended(ui.New(io.Discard), func(string) {}, errors.New("the copy step failed"), &preparation.WorkBranch{}, nil))
+		if status != c.status {
 			t.Errorf("%s: exit %d, want %d", c.name, status, c.status)
 		}
+	}
+}
+
+// TestACutLineAndTheCloseReadOneStop is a time limit that cuts a copy step and a signal that comes
+// after the step's line: the close has the reason of the line, and a run with no line reads the
+// stop as it closes.
+func TestACutLineAndTheCloseReadOneStop(t *testing.T) {
+	succeeded := session.Outcome{State: event.StateSucceeded}
+	signal := stopRead{stopped: true, got: "SIGTERM"}
+	e := pushEnding{session: succeeded, limit: time.Hour, cut: true}
+	line := e.cutLine(stopRead{}, 0)
+	e.settle(signal)
+	if want := "the run reached its time limit of 1h0m0s"; line != want || e.cutBy() != want {
+		t.Errorf("the line is %q and then %q, want %q", line, e.cutBy(), want)
+	}
+	if got := e.copyOutcome(-1); got.Reason != event.ReasonTimeout || got.ExitCode != exitTimeout {
+		t.Errorf("the close is %+v, want the time limit", got)
+	}
+
+	e = pushEnding{session: succeeded, limit: time.Hour, cut: true}
+	e.settle(signal)
+	if got := e.copyOutcome(-1); got.Reason != event.ReasonInterrupted || got.ExitCode != -1 {
+		t.Errorf("with no line the close is %+v, want the signal", got)
 	}
 }
 

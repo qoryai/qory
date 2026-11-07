@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -65,20 +66,23 @@ func TestALongCauseKeepsNoPartOfAPathOfTheCopy(t *testing.T) {
 	})
 	cause := errors.New("mkdir " + dir.Bundle() + ": no space left on device, and " + dir.Bundle() + " stays")
 	const logged = "mkdir the run's copy/bundle: no space left on device, and the run's copy/bundle stays"
+	under := errors.New("stat " + filepath.Join(dir.Work(), "sub") + ": no such file")
 	for _, c := range []struct {
 		name   string
 		pushes bool
+		logged string
 		stop   func(*runCopy) *copyStop
 	}{
-		{"no session", false, func(c *runCopy) *copyStop { return c.noSession(context.Background(), cause) }},
-		{"no session, push", true, func(c *runCopy) *copyStop { return c.noSession(context.Background(), cause) }},
-		{"another cause", false, func(c *runCopy) *copyStop { return c.stoppedBy("%s", cause) }},
-		{"another cause, push", true, func(c *runCopy) *copyStop { return c.stoppedBy("%s", cause) }},
+		{"no session", false, logged, func(c *runCopy) *copyStop { return c.noSession(context.Background(), cause) }},
+		{"no session, push", true, logged, func(c *runCopy) *copyStop { return c.noSession(context.Background(), cause) }},
+		{"another cause", false, logged, func(c *runCopy) *copyStop { return c.stoppedBy("%s", cause) }},
+		{"another cause, push", true, logged, func(c *runCopy) *copyStop { return c.stoppedBy("%s", cause) }},
+		{"a path under the working folder", false, "stat the run's copy/sub: no such file", func(c *runCopy) *copyStop { return c.stoppedBy("%s", under) }},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			stop := c.stop(&runCopy{dir: dir, pushes: c.pushes})
-			if !strings.Contains(stop.log, logged) {
-				t.Errorf("the log's line is %q, want %q in it", stop.log, logged)
+			if !strings.Contains(stop.log, c.logged) {
+				t.Errorf("the log's line is %q, want %q in it", stop.log, c.logged)
 			}
 			if strings.Contains(stop.log, "a-long-cache-folder") || strings.Contains(stop.log, "qory/runs") {
 				t.Errorf("the log's line has a part of a path: %q", stop.log)
@@ -88,6 +92,42 @@ func TestALongCauseKeepsNoPartOfAPathOfTheCopy(t *testing.T) {
 			}
 			if !c.pushes && (!strings.Contains(stop.Error(), dir.Work()) || !strings.Contains(stop.Error(), "...")) {
 				t.Errorf("the line of a run with no push is %q, want the path of the copy and the cut", stop.Error())
+			}
+		})
+	}
+}
+
+// TestAnErrorOfTheCopyKeepsNoPartOfItsPath is a real error of [runcopy.Dir.GitSession], whose path
+// is already cut or has its characters replaced: a bundle folder that is there, in a cache folder
+// past the cut and in one with a tab in its name. The step's log has no part of the path.
+func TestAnErrorOfTheCopyKeepsNoPartOfItsPath(t *testing.T) {
+	for _, c := range []struct{ name, cache, part string }{
+		{"a long cache folder", strings.Repeat("a-long-cache-folder/", 12), "a-long-cache-folder"},
+		{"a tab in the cache folder", "a-cache\tfolder", "a-cache"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			cache := filepath.Join(t.TempDir(), c.cache)
+			t.Setenv("HOME", cache)
+			t.Setenv("XDG_CACHE_HOME", cache)
+			dir, err := runcopy.New("01a1b738-63b1-76fa-9757-6552cfc987b5")
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				if err := dir.Remove(); err != nil {
+					t.Error(err)
+				}
+			})
+			if err := os.Mkdir(dir.Bundle(), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			_, err = dir.GitSession(context.Background(), "main", "message", nil, nil)
+			if err == nil {
+				t.Fatal("the session has a bundle folder that is there, and no error")
+			}
+			stop := (&runCopy{dir: dir}).noSession(context.Background(), err)
+			if !strings.Contains(stop.log, textCopyFolder) || strings.Contains(stop.log, c.part) || strings.Contains(stop.log, "qory/runs") {
+				t.Errorf("the log's line is %q, from the error %q", stop.log, err)
 			}
 		})
 	}

@@ -1182,15 +1182,15 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			}
 			pushes := keepsWork(fromCode, readOnly, branch, res, err)
 			returns := copied != nil && !copied.readOnly && !pushes && err == nil && res != nil
+			stopNow := func() stopRead { return stopRead{ctx.Err() != nil, again.Err() != nil, got()} }
 			if copied != nil {
 				copied.pushes = pushes
 				copied.cutBy = func() string {
-					e := ending
-					e.stopped, e.again, e.got = ctx.Err() != nil, again.Err() != nil, got()
+					afterSignal := time.Duration(0)
 					if code == nil {
-						e.afterSignal = returnAfterSignal
+						afterSignal = returnAfterSignal
 					}
-					return e.cutBy()
+					return ending.cutLine(stopNow(), afterSignal)
 				}
 			}
 			backCtx, cancelBack := returnContext(ctx, again, code != nil, func(wait time.Duration) {
@@ -1213,7 +1213,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					sessionErr = copied.gitSession(backCtx, run, &spec, "")
 				}
 				if sessionErr != nil {
-					ending.stopped, ending.again, ending.got = ctx.Err() != nil, again.Err() != nil, got()
+					ending.settle(stopNow())
 					ending.cut = copied.cut
 					out = ending.copyOutcome(copied.stepCode)
 				}
@@ -1221,8 +1221,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			if pushes {
 				pushCtx, cancel := pushContext(ctx, again, limit, pushTimes.limit, pushTimes.signal)
 				ending.noStep, pushErr = removeThenPush(pushCtx, run, streams.errOut, branch, cwd, spec.RunID, fromCode.runNumber, out, copied, &spec, checks)
-				ending.stopped = ctx.Err() != nil
-				ending.again, ending.got = again.Err() != nil, got()
+				ending.settle(stopNow())
 				ending.cut = pushCtx.Err() != nil
 				cancel()
 				switch {
@@ -1306,7 +1305,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				back = copied.comeBack(backCtx, spec.RunID, said)
 			}
 			if (!back || !artifactsBack) && ended == nil {
-				return reported(&exitError{code: returnFailedStatus(out)})
+				return reported(&exitError{code: 1})
 			}
 			return ended
 		},

@@ -14,9 +14,9 @@ import (
 
 // TestAComposeLineOfAHiddenHarnessEndsWithTheUsedCode is each kind of a compose's error
 // in a run from a run code whose harness is hidden, with the status it exits with. Each
-// named case has its line. Any other line gets one of two starts by its status, whatever its text
-// starts with, and one end, in place of a full stop. A line that has the end and a
-// collision that was printed stay as they are.
+// named case has its line. Any other line gets one of two starts by its status, whatever
+// its text starts with, and one end, in place of a full stop. A line that has the end and
+// a collision that was printed stay as they are.
 func TestAComposeLineOfAHiddenHarnessEndsWithTheUsedCode(t *testing.T) {
 	const (
 		takeIn = ", then take the work item in again in Qory Apiary: "

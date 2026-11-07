@@ -505,10 +505,10 @@ After the agent, a walled run that may write in a repository has the step `copy 
 of kind `copy`, around the git session: see [A run that may write works in a
 copy](#a-run-that-may-write-works-in-a-copy). Forager's steps of the git session, such as
 `join session 2`, start and end inside it. It ends `succeeded` with 0 when the git session
-exits 0 within its limit. It ends `cancelled` with -1 when a stop or the run's time limit cuts
-the session. Otherwise it ends `failed`, also when the session reaches its limit of 5
-minutes, with the git session's exit status, or with -1 when the session has none to show,
-such as one that did not start or one that exits 0 at that limit. Unless it ends `succeeded`,
+exits 0 within its limit. It ends `cancelled` with -1 when a stop or the run's time limit on a
+run with a push step cuts the session. Otherwise it ends `failed`, also when the session
+reaches its limit of 5 minutes, with the git session's exit status, or with -1 when the
+session has none to show, such as one that did not start or one that exits 0 at that limit. Unless it ends `succeeded`,
 its last line is the error line, with `the run's copy` in place of each path of the copy.
 
 After an agent session that succeeded, this step sets how the run closes, with a push step or
@@ -772,6 +772,8 @@ run's open, so it covers the compose and the session. When the limit is reached:
 
 A compose that is running when the limit is reached runs to its end; the runtime does
 not start after it.
+
+A walled run with no push step can run past the limit: its setup removal has up to 2 minutes, and its git session up to 5.
 
 `--timeout 0` lifts the limit `forager.yaml` sets.
 
@@ -2034,7 +2036,7 @@ phrase:
 - `fix the cause, then take the work item in again in Qory Apiary: <text>; the code is
   used`, for any other error of any other exit status, which stays as it is
 
-Every other line of the compose starts with one of these two texts, also when `<text>` starts
+Every other line of the compose starts with one of the last two texts, also when `<text>` starts
 with a fix, such as `check <source>: <cause>`. A final full stop of `<text>`
 is left out before the end. A line that already ends with `; the code is used` stays as it
 is. A collision prints its table and the stack lines that resolve it, with no such line.
@@ -2268,7 +2270,8 @@ Each of these lines fails the step. `<commit>` is the commit's first 12 characte
   because the push of the next repository failed: <line of that failure>`
 
 A removal of the setup container that failed runs no step: qory commits nothing and pushes
-nothing, and the run ends as a failed step ends it, with this line:
+nothing. After a session that succeeded, the run closes `failed` with -1 on a run with a copy
+and with 1 on any other run, and `qory run` exits 1. The line is:
 
 - `take the work item in again in Qory Apiary: the setup container of this run was not
   removed, so a process in it could write the working folder, and qory pushed nothing:
@@ -3703,8 +3706,11 @@ since a pool kills it 30 seconds after its SIGTERM. Past the session's time, or 
 exits with another status than 0, the run's commits do not come back, and qory keeps the copy:
 
 ```text
-qory run: read the run's files in <folder>, and run no git there: the git session ran past its limit of 5m0s, so the run's commits did not come back; the code is used
+qory run: read the run's files in <folder>, and run no git there: the git session ran past its limit of 5m0s, so the run's commits did not come back
 ```
+
+On a run from a run code, each line that starts with `read the run's files in <folder>` ends
+with `; the code is used`.
 
 A run with the push step keeps no copy: the copy goes, and the step prints
 `take the work item in again in Qory Apiary` with the cause.

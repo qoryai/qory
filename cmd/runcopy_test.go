@@ -1529,6 +1529,7 @@ func TestACopyStepSetsTheCloseOfARunWithAPush(t *testing.T) {
 		git    func(context.Context, session.SessionSpec) (*session.Result, error)
 		want   session.Outcome
 		status int
+		line   string
 	}{
 		{name: "the step exits 128", git: func(context.Context, session.SessionSpec) (*session.Result, error) {
 			return &session.Result{ExitCode: 128}, nil
@@ -1544,10 +1545,10 @@ func TestACopyStepSetsTheCloseOfARunWithAPush(t *testing.T) {
 			<-ctx.Done()
 			return nil, ctx.Err()
 		}, want: interrupted, status: 1},
-		{name: "the run's time limit cuts the step", limit: "\n    time_limit: 1s", git: func(ctx context.Context, _ session.SessionSpec) (*session.Result, error) {
+		{name: "the run's time limit cuts the step", limit: "\n    time_limit: 10s", git: func(ctx context.Context, _ session.SessionSpec) (*session.Result, error) {
 			<-ctx.Done()
 			return nil, ctx.Err()
-		}, want: session.Outcome{State: event.StateCancelled, Reason: event.ReasonTimeout, ExitCode: 124}, status: 124},
+		}, want: session.Outcome{State: event.StateCancelled, Reason: event.ReasonTimeout, ExitCode: 124}, status: 124, line: "during the git session"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			p := newPushRepo(t, "write"+c.limit)
@@ -1563,6 +1564,7 @@ func TestACopyStepSetsTheCloseOfARunWithAPush(t *testing.T) {
 			if got := cmd.ExitCode(r.err); got != c.status {
 				t.Errorf("exit %d (%v), want %d\n%s", got, r.err, c.status, r.out)
 			}
+			wants(t, r.out, c.line)
 			if head := p.branchHead(t); head != "" {
 				t.Errorf("the forge has the branch at %s", head)
 			}

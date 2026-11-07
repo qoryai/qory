@@ -139,7 +139,8 @@ type runCopy struct {
 	// read-only, and nothing comes back.
 	readOnly bool
 	// pushes is whether the run gets the push step. The person may have no access to this machine,
-	// so no line has a path of the copy, and the copy does not stay.
+	// so the copy does not stay, and only [textCopyNoRemove], for a removal of the copy that
+	// failed, has a path of the copy.
 	pushes bool
 	// fromCode is whether the run comes from a run code: a line that ends it ends with [codeUsed].
 	fromCode bool
@@ -188,9 +189,12 @@ func (c *runCopy) stop(cause, logged string) *copyStop {
 	}
 }
 
-// withoutPaths is text with [textCopyFolder] in place of each path of the copy.
+// withoutPaths is text with [textCopyFolder] in place of each path of the copy, as it is and as
+// [preparation.ShownPath] shows it: an error of [runcopy] has the second. The folder inside the
+// copy goes first, so a path under it does not keep the folder's name.
 func (c *runCopy) withoutPaths(text string) string {
-	for _, path := range []string{c.dir.Work(), c.dir.Root()} {
+	work, root := c.dir.Work(), c.dir.Root()
+	for _, path := range []string{work, preparation.ShownPath(work), root, preparation.ShownPath(root)} {
 		text = strings.ReplaceAll(text, path, textCopyFolder)
 	}
 	return text
@@ -470,7 +474,7 @@ func (c *runCopy) recordSetup(ctx context.Context) error {
 //
 // A copy step that does not start stops the return of the work, as a push step that does not
 // start stops its push. A copy step that does not end stops the return too. Both go through
-// [runCopy.stopped], which keeps the copy unless the run gets the push step.
+// [runCopy.stop], which keeps the copy unless the run gets the push step.
 func (c *runCopy) gitSession(ctx context.Context, run openedRun, spec *runSpec, message string) error {
 	step, err := run.StartStep(event.StepCopy, textCopyStep)
 	if err != nil {
