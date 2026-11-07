@@ -494,9 +494,11 @@ After the agent, a walled run that may write in a repository has the step `copy 
 of kind `copy`, around the git session: see [A run that may write works in a
 copy](#a-run-that-may-write-works-in-a-copy). Forager's steps of the git session, such as
 `join session 2`, start and end inside it. It ends `succeeded` with 0 when the git session
-exits 0. Otherwise it ends `failed`, also when the run is stopped or the session reaches its
-limit of 5 minutes, with the git session's exit status, or with -1 when the session has none,
-such as one that did not start. Its last line is then the error line.
+exits 0 within its limit. It ends `cancelled` with -1 when the run is stopped or out of time
+during the session. Otherwise it ends `failed`, also when the session reaches its limit of 5
+minutes, with the git session's exit status, or with -1 when the session has none to show,
+such as one that did not start or one that exits 0 at that limit. Unless it ends `succeeded`,
+its last line is the error line, with `the run's folder` in place of the path on the machine.
 
 An image step that fails ends the run before the agent starts, and `qory run` exits 1
 with one line, the fix first. An image its registry does not have closes the run
@@ -2103,11 +2105,11 @@ The step does this, in order:
 1. A walled run works in a copy: see [A run that may write works in a
    copy](#a-run-that-may-write-works-in-a-copy). qory starts a second session on the run,
    the git session, in the step `copy work out`, before the push step. The git session
-   commits what the agent left in each repository of the copy, and
-   writes the run's branch to a bundle per repository. The commit has the message `Changes
-   left by run <run number>` and the author and committer `qory <qory@localhost>`. A new
-   file is in the commit unless git ignores it through `.gitignore`. `.qory` and the links
-   into it stay out, also when the agent staged them. When a commit of the agent has them,
+   commits what the agent left in each repository of the copy, and writes the run's branch
+   to a bundle per repository. The commit has the message `Changes left by run <run number>`
+   and the author and committer `qory <qory@localhost>`. A new file is in the commit unless
+   git ignores it through `.gitignore`. `.qory` and the links into it stay out, also when
+   the agent staged them. When a commit of the agent has them,
    the git session's commit puts them back as they were at the start of the run. A
    repository inside a repository stays out, as its files and as a gitlink. A path that
    the setup changed stays out while it is as the setup left it: after a setup outside the

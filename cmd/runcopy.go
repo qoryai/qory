@@ -56,6 +56,7 @@ const (
 	textCopyNotIn      = "left out of the run's copy: %s."
 	textCopyNoRemove   = "remove %s by hand: %s"
 	textCopyNoDisarm   = "remove %s, and run no git there: qory renames each .git in a copy it keeps, and that failed: %s"
+	textCopyFolder     = "the run's folder"
 )
 
 // copyStepLimit is how long the check of a run's bundles, a fetch from them, or a copy of a run's
@@ -149,10 +150,19 @@ type runCopy struct {
 // stays, unless the run gets the push step.
 func (c *runCopy) stopped(cause string) error {
 	if c.pushes {
-		return fmt.Errorf(textCopyAgain, strings.ReplaceAll(cause, c.dir.Root(), "the run's folder"), c.used())
+		return fmt.Errorf(textCopyAgain, strings.ReplaceAll(cause, c.dir.Root(), textCopyFolder), c.used())
 	}
 	c.keep = true
 	return fmt.Errorf(textCopyRead, exports.Value(c.dir.Work(), false), cause, c.used())
+}
+
+// withoutPaths is line as a step's log has it, with [textCopyFolder] in place of each path of the
+// copy. The record reaches Qory Apiary, and its reader may have no access to this machine.
+func (c *runCopy) withoutPaths(line string) string {
+	for _, path := range []string{exports.Value(c.dir.Work(), false), c.dir.Work(), exports.Value(c.dir.Root(), false), c.dir.Root()} {
+		line = strings.ReplaceAll(line, path, textCopyFolder)
+	}
+	return line
 }
 
 // used is what ends a line that ends the run: [codeUsed] for a run from a run code.
@@ -424,10 +434,14 @@ func (c *runCopy) recordSetup(ctx context.Context) error {
 // container: a process in it could write the copy during the session, and that removal
 // returns an error while the step is open.
 //
-// The step ends before this returns, so the run's close finds it ended. Its exit code is the
-// session's, -1 for a session with no exit code to show, and its last line is the line of the
-// stop. A step that does not start or end stops the return of the work, as the push step's
-// does: the copy has the work.
+// The step ends before this returns, so the run's close finds it ended. It ends failed with the
+// session's exit code, -1 for a session with no exit code to show. A cut, which is a stop or the
+// run's time limit that ended ctx, ends it cancelled with -1, as [inStep] does. Unless it
+// succeeds, its last line is the line of the stop, see [runCopy.withoutPaths].
+//
+// A copy step that does not start stops the return of the work, as a push step that does not
+// start stops its push. A copy step that does not end stops the return too. Both go through
+// [runCopy.stopped], which keeps the copy unless the run gets the push step.
 func (c *runCopy) gitSession(ctx context.Context, run openedRun, spec *runSpec, message string) error {
 	step, err := run.StartStep(event.StepCopy, textCopyStep)
 	if err != nil {
@@ -437,8 +451,11 @@ func (c *runCopy) gitSession(ctx context.Context, run openedRun, spec *runSpec, 
 	state := event.StateSucceeded
 	if stop != nil {
 		state = event.StateFailed
+		if ctx.Err() != nil {
+			state, code = event.StateCancelled, -1
+		}
 		lines := &stepLines{stderr: spec.Stderr, step: step}
-		lines.log(stepFailure(stop))
+		lines.log([]byte(c.withoutPaths(string(stepFailure(stop)))))
 	}
 	if err := step.Exit(state, code); err != nil && stop == nil {
 		return c.stopped(shownError(err))
@@ -478,7 +495,7 @@ func (c *runCopy) joinGitSession(ctx context.Context, run openedRun, spec *runSp
 		Timeout:      runcopy.SessionLimit,
 	})
 	timedOut := err == nil && res.TimedOut || limited.Err() != nil
-	// A session stopped at the limit or by a cut can exit 0, and the step still fails.
+	// A session can exit 0 at its limit or at a cut, and that is no success.
 	code := -1
 	if err == nil && res.ExitCode != 0 {
 		code = res.ExitCode

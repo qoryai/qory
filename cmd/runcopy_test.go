@@ -1223,9 +1223,9 @@ func TestTheCopyStepOfASessionThatSucceeds(t *testing.T) {
 	gitOutput(t, root, "cat-file", "-e", runBranchOf(t, out)+":left.txt")
 }
 
-// TestACutGitSessionExitsItsCopyStepFailed is a second signal during the git session: the step
-// exits failed with -1, and its last line has the cut.
-func TestACutGitSessionExitsItsCopyStepFailed(t *testing.T) {
+// TestACutGitSessionExitsItsCopyStepCancelled is a second signal during the git session: the step
+// exits cancelled with -1, and its last line has the cut.
+func TestACutGitSessionExitsItsCopyStepCancelled(t *testing.T) {
 	out, _, _, trace := copyStepRun(t, cmd.Nowhere{}, nil, func(ctx context.Context, _ session.SessionSpec) (*session.Result, error) {
 		term(t)
 		term(t)
@@ -1235,8 +1235,30 @@ func TestACutGitSessionExitsItsCopyStepFailed(t *testing.T) {
 	line := "qory run got a second signal during the git session, so the run's commits did not come back"
 	wants(t, out, line)
 	got := withoutNumbers(trace)
-	if len(got) != 5 || got[4] != "exited failed -1" || !strings.HasSuffix(got[3], ": "+line+"\n") {
+	if len(got) != 5 || got[4] != "exited cancelled -1" || !strings.HasSuffix(got[3], ": "+line+"\n") {
 		t.Errorf("the copy step's events:\n%s", strings.Join(trace, "\n"))
+	}
+}
+
+// TestACutGitSessionWithAnExitCodeExitsCancelled is a second signal during the git session, whose
+// join returns a result with the exit code after the stop: the step exits cancelled with -1, not
+// with that code, whether it is 143 or 0.
+func TestACutGitSessionWithAnExitCodeExitsCancelled(t *testing.T) {
+	for _, code := range []int{143, 0} {
+		t.Run(fmt.Sprint(code), func(t *testing.T) {
+			out, _, _, trace := copyStepRun(t, cmd.Nowhere{}, nil, func(ctx context.Context, _ session.SessionSpec) (*session.Result, error) {
+				term(t)
+				term(t)
+				<-ctx.Done()
+				return &session.Result{Cancelled: true, ExitCode: code}, nil
+			})
+			line := "qory run got a second signal during the git session, so the run's commits did not come back"
+			wants(t, out, line)
+			got := withoutNumbers(trace)
+			if len(got) != 5 || got[4] != "exited cancelled -1" || !strings.HasSuffix(got[3], ": "+line+"\n") {
+				t.Errorf("the copy step's events:\n%s", strings.Join(trace, "\n"))
+			}
+		})
 	}
 }
 
@@ -1301,6 +1323,65 @@ func TestACopyStepThatDoesNotEndStopsTheReturn(t *testing.T) {
 	wants(t, out, "and run no git there: the step did not end")
 	if got := gitOutput(t, root, "for-each-ref", "refs/heads/qory/"); got != "" {
 		t.Errorf("the run's branch came back: %s", got)
+	}
+}
+
+// TestAFailedExitKeepsTheStopOfTheGitSession is a git session that exits 128 and a Step.Exit of the
+// copy step that returns an error: the line is the session's stop, and the error of the exit
+// does not replace it.
+func TestAFailedExitKeepsTheStopOfTheGitSession(t *testing.T) {
+	out, err, _, _ := copyStepRun(t, cmd.Nowhere{StepExitErr: func(kind string) error {
+		if kind == event.StepCopy {
+			return errors.New("the step did not end")
+		}
+		return nil
+	}}, nil, func(context.Context, session.SessionSpec) (*session.Result, error) {
+		return &session.Result{ExitCode: 128}, nil
+	})
+	if cmd.ExitCode(err) != 1 {
+		t.Errorf("exit %d (%v), want 1\n%s", cmd.ExitCode(err), err, out)
+	}
+	wants(t, out, "and run no git there: the git session exited with 128, so the run's commits did not come back")
+	lacks(t, out, "the step did not end")
+}
+
+// TestTheCopyStepsLogHasNoPathOfTheCopy is a failed git session on a run with no push: the line in
+// the step's log has the run's folder, and the line on the terminal has the path of the copy.
+// It covers a path in the line's fix and a path in its cause.
+func TestTheCopyStepsLogHasNoPathOfTheCopy(t *testing.T) {
+	var work string
+	cases := []struct {
+		name  string
+		agent func(session.SessionSpec)
+		log   string
+	}{
+		{"in the fix", func(spec session.SessionSpec) { work = spec.Dir }, "the run's folder, and run no git there: the git session exited with 128, so the run's commits did not come back\n"},
+		{"in the cause", func(spec session.SessionSpec) {
+			work = spec.Dir
+			if err := os.Mkdir(filepath.Join(filepath.Dir(spec.Dir), "bundle"), 0o700); err != nil {
+				t.Error(err)
+			}
+		}, "the run's folder/bundle"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			out, _, _, trace := copyStepRun(t, cmd.Nowhere{}, c.agent, func(context.Context, session.SessionSpec) (*session.Result, error) {
+				return &session.Result{ExitCode: 128}, nil
+			})
+			wants(t, out, "qory run: read the run's files in "+work+", and run no git there: ")
+			line := ""
+			for _, e := range trace {
+				if _, rest, ok := strings.Cut(e, " log: "); ok {
+					line = rest
+				}
+			}
+			if !strings.HasPrefix(line, "qory run: read the run's files in the run's folder, and run no git there: ") || !strings.Contains(line, c.log) {
+				t.Errorf("the step's log line is %q", line)
+			}
+			if strings.Contains(line, filepath.Join("qory", "runs")) || strings.Contains(line, filepath.Dir(work)) {
+				t.Errorf("the step's log line has a path of the copy: %q", line)
+			}
+		})
 	}
 }
 
