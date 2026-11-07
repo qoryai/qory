@@ -286,13 +286,14 @@ Turning on the push checks for the POSTs from behind the wall failed, so the run
 before the setup: <cause>.` A home without push checks, and a run with no control plane,
 start as before, with no check turned on.
 
-A run from a run code stops at the same points with the same exit status. The code is used
-by then, so the fix in each line is to take the work item in again:
+A run from a run code stops at the same points of the push-check load with the same exit
+status. The code is used by then, so the fix in each line is to take the work item in
+again:
 
 ```text
 Take the work item in again in Qory Apiary, so that the new run composes the harness again: the push checks in <path> could not be read: <cause>; the code is used
-Take the work item in again in Qory Apiary, and do not switch the engine while that run starts: the engine changed after this run opened, so the push checks would run on the engine <id>, and the run's containers are on the engine <id>; the code is used
-Update the run's gateway so that it sends the run API address, then take the work item in again in Qory Apiary: the push checks read the artifacts through the run API, which failed: <cause>; the code is used
+Take the work item in again in Qory Apiary, and do not switch the engine while that run starts: the push checks would run on the engine <id>, and the run's containers are on the engine <id>; the code is used
+Take the work item in again in Qory Apiary, through a gateway that sends the run API address: the push checks read the artifacts through the run API, which failed: <cause>; the code is used
 Update the run's gateway, then take the work item in again in Qory Apiary: the run API address that the gateway sent is not one the push checks can use: <cause>; the code is used
 Take the work item in again in Qory Apiary: turning on the push checks for the POSTs from behind the wall failed, so the run stopped before the setup: <cause>; the code is used
 ```

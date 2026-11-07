@@ -530,7 +530,7 @@ func TestARunAPIThatFailsStopsARunWithPushChecks(t *testing.T) {
 	if joined || slices.Contains(r.calls, "setup") || slices.Contains(r.calls, "set run API check") {
 		t.Errorf("the run went on: %v, joined %v", r.calls, joined)
 	}
-	wants(t, r.out, "qory run: Update the run's gateway so that it sends the run API address, then take the work item in again in Qory Apiary: the push checks read the artifacts through the run API, which failed: Open another run to reach the run API: this run is closed; the code is used\n")
+	wants(t, r.out, "qory run: Take the work item in again in Qory Apiary, through a gateway that sends the run API address: the push checks read the artifacts through the run API, which failed: Open another run to reach the run API: this run is closed; the code is used\n")
 }
 
 // TestAWritableMountInTheHomeStopsARunCodeWithPushChecks is a walled run from a run code

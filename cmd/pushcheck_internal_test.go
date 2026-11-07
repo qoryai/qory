@@ -17,7 +17,7 @@ import (
 
 // engineScript is a docker command whose context show prints the contexts in order,
 // one a call, the last one again once they run out, and whose info prints the id of
-// the engine the context selects, id-<DOCKER_CONTEXT>.
+// the engine the context selects, id-<DOCKER_CONTEXT>, and exits 1 for the context none.
 func engineScript(t *testing.T, contexts ...string) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -30,7 +30,7 @@ func engineScript(t *testing.T, contexts ...string) string {
 		t.Fatal(err)
 	}
 	script := filepath.Join(dir, "docker")
-	body := "#!/bin/sh\ncase \"$1\" in\ncontext)\n\thead -n 1 " + list + "\n\tif [ \"$(wc -l < " + list + ")\" -gt 1 ]; then sed -i.bak 1d " + list + "; fi ;;\ninfo) echo \"id-$DOCKER_CONTEXT\" ;;\nesac\n"
+	body := "#!/bin/sh\ncase \"$1\" in\ncontext)\n\thead -n 1 " + list + "\n\tif [ \"$(wc -l < " + list + ")\" -gt 1 ]; then sed -i.bak 1d " + list + "; fi ;;\ninfo) [ \"$DOCKER_CONTEXT\" != none ] || exit 1; echo \"id-$DOCKER_CONTEXT\" ;;\nesac\n"
 	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -71,7 +71,7 @@ func TestTheChecksEngineIsTheWalls(t *testing.T) {
 	// The context changed after the open: the new selection reaches another engine.
 	for fromCode, want := range map[bool]string{
 		false: `Switch the engine back to the one the run started on, and run again. The push checks would run on the engine "id-b", and the run's containers are on the engine "id-a".`,
-		true:  `Take the work item in again in Qory Apiary, and do not switch the engine while that run starts: the engine changed after this run opened, so the push checks would run on the engine "id-b", and the run's containers are on the engine "id-a"; the code is used`,
+		true:  `Take the work item in again in Qory Apiary, and do not switch the engine while that run starts: the push checks would run on the engine "id-b", and the run's containers are on the engine "id-a"; the code is used`,
 	} {
 		other := engineScript(t, "a", "b")
 		d = &wall.Docker{Command: other}
@@ -110,11 +110,20 @@ func TestTheLoadOfPushChecksStopsWithItsLine(t *testing.T) {
 	gone := filepath.Join(t.TempDir(), "gone")
 	folder := filepath.Join(gone, pushChecksDir)
 	folderCause := "mkdir " + folder + ": no such file or directory"
+	unsetenv(t, "DOCKER_HOST")
+	unsetenv(t, "DOCKER_CONTEXT")
+	// The wall recorded the context a at the open, and the next selection reads the context b.
+	otherEngine := &wall.Docker{Command: engineScript(t, "a", "b")}
+	otherEngine.Engine(context.Background())
+	// The same, with the next selection on an engine whose id cannot be read.
+	noIDEngine := &wall.Docker{Command: engineScript(t, "a", "none")}
+	noIDEngine.Engine(context.Background())
 	for _, c := range []struct {
 		name         string
 		run          runAPIOnly
 		unread       bool
 		noWall       bool
+		docker       *wall.Docker
 		controlPlane bool
 		want         string
 		fromCode     string
@@ -125,7 +134,7 @@ func TestTheLoadOfPushChecksStopsWithItsLine(t *testing.T) {
 			run:          runAPIOnly{err: closed},
 			controlPlane: true,
 			want:         "Open the run through a gateway that sends the run API address, and run again. The push checks read the artifacts through the run API, which failed: Open another run to reach the run API: this run is closed.",
-			fromCode:     "Update the run's gateway so that it sends the run API address, then take the work item in again in Qory Apiary: the push checks read the artifacts through the run API, which failed: Open another run to reach the run API: this run is closed; the code is used",
+			fromCode:     "Take the work item in again in Qory Apiary, through a gateway that sends the run API address: the push checks read the artifacts through the run API, which failed: Open another run to reach the run API: this run is closed; the code is used",
 		},
 		{
 			name:         "a bad address",
@@ -149,6 +158,22 @@ func TestTheLoadOfPushChecksStopsWithItsLine(t *testing.T) {
 			fromCode:     "Check " + folder + ", then take the work item in again in Qory Apiary: making the folder of the push checks' files failed: " + folderCause + "; the code is used",
 		},
 		{
+			name:         "another engine",
+			run:          runAPIOnly{base: goodAPI},
+			docker:       otherEngine,
+			controlPlane: true,
+			want:         `Switch the engine back to the one the run started on, and run again. The push checks would run on the engine "id-b", and the run's containers are on the engine "id-a".`,
+			fromCode:     `Take the work item in again in Qory Apiary, and do not switch the engine while that run starts: the push checks would run on the engine "id-b", and the run's containers are on the engine "id-a"; the code is used`,
+		},
+		{
+			name:         "an engine whose id cannot be read",
+			run:          runAPIOnly{base: goodAPI},
+			docker:       noIDEngine,
+			controlPlane: true,
+			want:         `Switch the engine back to the one the run started on, and run again. The push checks would run on the engine with no id, and the run's containers are on the engine "id-a".`,
+			fromCode:     `Take the work item in again in Qory Apiary, and do not switch the engine while that run starts: the push checks would run on the engine with no id, and the run's containers are on the engine "id-a"; the code is used`,
+		},
+		{
 			name:     "push checks that do not read",
 			unread:   true,
 			want:     "Compose the harness again, and run again. The push checks in /h/push-checks.json could not be read: a cause.",
@@ -163,7 +188,9 @@ func TestTheLoadOfPushChecksStopsWithItsLine(t *testing.T) {
 				return []compose.PushCheck{{Type: "proposal"}}, nil
 			}
 			spec := &runSpec{}
-			if !c.noWall {
+			if c.docker != nil {
+				spec.Wall = c.docker
+			} else if !c.noWall {
 				spec.Wall = &wall.Docker{}
 			}
 			for fromCode, want := range map[bool]string{false: c.want, true: c.fromCode} {
