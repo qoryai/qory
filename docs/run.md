@@ -2661,6 +2661,24 @@ any other artifact it fetches the approved version, or the newest when none is a
 `qory artifact push` exits 4, with the type and the limit, for a type that the workspace
 does not have, for too many files, and for files over a limit. One version has at most 100
 files through the run API, whatever the type's maximum.
+
+In a walled run whose modules declare a push check for the type, the check runs before the
+push reaches Qory Apiary (see Push checks in `contracts/harness/v1/README.md`). A check
+that does not pass stops the push with 422 `push_check_failed`, and `qory artifact push`
+exits 4. It prints the fix line, such as `Fix each finding below and push again. The check
+for spec failed:`, then each finding of the check on a separate line:
+
+```text
+✗ Fix each finding below and push again. The check for spec failed:
+  spec.md: the section Goal is missing
+```
+
+Fix the files and push again. A check that did not finish stops the push with 503
+`push_check_unavailable`, and `qory artifact push` exits 1 with `Run the push again: the
+check before the push did not finish.` Neither push stores a version or keeps a copy in
+the store. The push step of a write run runs the check of the type `branch` before it
+stores its version: a check that does not pass prints its fix line and findings in the
+step's lines, and the step fails as when the version is not stored.
 `qory run verdict` exits 4 for a request over its limit too. `qory work-item show` exits 3
 with no work item. These numbers mean a collision and a foreign path on `qory harness`.
 

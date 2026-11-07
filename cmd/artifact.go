@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -95,12 +96,12 @@ type noWorkItemError struct{}
 // Error returns the line for the person.
 func (noWorkItemError) Error() string { return noWorkItemText }
 
-// artifactRefused reports whether err is a run API error for a type or a limit.
-// [ExitCode] gives it [ExitArtifactRefused].
+// artifactRefused reports whether err is a run API error for a type or a limit, or for
+// a push check that did not pass. [ExitCode] maps it to [ExitArtifactRefused].
 func artifactRefused(err error) bool {
 	for _, code := range []string{
 		runapi.CodeUnknownType, runapi.CodeTooManyFiles, runapi.CodeTooLarge,
-		runapi.CodePayloadTooLarge,
+		runapi.CodePayloadTooLarge, runapi.CodePushCheckFailed,
 	} {
 		if runapi.HasCode(err, code) {
 			return true
@@ -314,7 +315,7 @@ func pullArtifacts(c *cobra.Command, client *runapi.Client, artifactType string,
 
 		found = true
 
-		if err := store.fetch(c, client, artifact, *chosen); err != nil {
+		if err := store.fetch(c.Context(), client, artifact, *chosen); err != nil {
 			return err
 		}
 	}
@@ -416,7 +417,9 @@ the types questions and review-comments take only the name main. The store is
 
 qory exits ` + strconv.Itoa(ExitArtifactRefused) + ` with the type and the limit for a type that the workspace does not have,
 for too many files, and for files over the type's size limit. One version is at most about
-24 MiB and 100 files through the run API, whatever the type's limit.
+24 MiB and 100 files through the run API, whatever the type's limit. In a walled run, qory
+also exits ` + strconv.Itoa(ExitArtifactRefused) + ` with the fix line and the findings when the harness's push check for <type>
+does not pass.
 
 Outside a run, qory keeps the files in .qory/artifacts and sends nothing.
 
@@ -1012,7 +1015,7 @@ func (s *artifactStore) keep(artifactType, name string, number int, sources []pu
 
 // fetch downloads the files of version into its directory. A file that is there with the
 // index's digest stays.
-func (s *artifactStore) fetch(c *cobra.Command, client *runapi.Client, artifact runapi.Artifact, version runapi.Version) error {
+func (s *artifactStore) fetch(ctx context.Context, client *runapi.Client, artifact runapi.Artifact, version runapi.Version) error {
 	for what, value := range map[string]string{"type": artifact.Type, "name": artifact.Name} {
 		if err := artifactNameError(what, value); err != nil {
 			return fmt.Errorf("Check the artifact index of this run. %w", err)
@@ -1035,7 +1038,7 @@ func (s *artifactStore) fetch(c *cobra.Command, client *runapi.Client, artifact 
 		}
 
 		if err := s.write(dir, file.Filename, func(w io.Writer) error {
-			return client.Download(c.Context(), version.ID, file, w)
+			return client.Download(ctx, version.ID, file, w)
 		}); err != nil {
 			return err
 		}

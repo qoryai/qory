@@ -28,6 +28,11 @@ const (
 	// CodeAnswerUnverified is the gateway's error for a response of Qory Apiary whose
 	// signature failed its check.
 	CodeAnswerUnverified = "answer_unverified"
+	// CodePushCheckFailed is a walled run's error for a push whose push check did not
+	// pass, with the check's findings, and CodePushCheckUnavailable for a push whose
+	// check did not finish. Neither push reached Qory Apiary.
+	CodePushCheckFailed      = "push_check_failed"
+	CodePushCheckUnavailable = "push_check_unavailable"
 )
 
 // Error is an error status of the run API or of the gateway's route to it, or, with
@@ -44,6 +49,9 @@ type Error struct {
 	Limit int64
 	// Names has the members or files that failed, such as `files[0].filename`.
 	Names []string
+	// Findings are the lines of a push check that did not pass, [CodePushCheckFailed];
+	// nil for none.
+	Findings []string
 	// Message is the response's `message`, written for a person. Where a fix exists, the
 	// message starts with it. A `run_ended` response has a message too, with no fix, since
 	// the run has ended.
@@ -57,7 +65,7 @@ type Error struct {
 // Error returns one line for a person or a log: Message when the response has one, else
 // a line made from the code, with the fix first. A POST with the code [CodeUnavailable]
 // always gets the line below, in place of the gateway's retry line: the POST may have
-// stored the version.
+// stored the version. Each of the error's Findings follows Message on a separate line.
 func (e *Error) Error() string {
 	if e.Code == CodeUnavailable && strings.HasPrefix(e.Request, http.MethodPost) {
 		return fmt.Sprintf("Read the artifact index, and try again if the version is not there. "+
@@ -65,6 +73,10 @@ func (e *Error) Error() string {
 	}
 
 	if e.Message != "" {
+		if len(e.Findings) > 0 {
+			return e.Message + "\n" + strings.Join(e.Findings, "\n")
+		}
+
 		return e.Message
 	}
 
@@ -134,11 +146,12 @@ func readError(response *http.Response, request string) *Error {
 	apiError := &Error{Status: response.StatusCode, Request: request}
 
 	var body struct {
-		Error   string   `json:"error"`
-		Type    string   `json:"type"`
-		Limit   int64    `json:"limit"`
-		Names   []string `json:"names"`
-		Message string   `json:"message"`
+		Error    string   `json:"error"`
+		Type     string   `json:"type"`
+		Limit    int64    `json:"limit"`
+		Names    []string `json:"names"`
+		Message  string   `json:"message"`
+		Findings []string `json:"findings"`
 	}
 
 	raw, err := io.ReadAll(io.LimitReader(response.Body, maxErrorResponse))
@@ -148,6 +161,7 @@ func readError(response *http.Response, request string) *Error {
 		apiError.Limit = body.Limit
 		apiError.Names = body.Names
 		apiError.Message = body.Message
+		apiError.Findings = body.Findings
 	}
 
 	if seconds, err := strconv.Atoi(response.Header.Get("Retry-After")); err == nil && seconds > 0 {

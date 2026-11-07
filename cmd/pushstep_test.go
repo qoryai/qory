@@ -226,6 +226,8 @@ type pushRepo struct {
 	pushStarted func()
 	removeSetup func(context.Context) error
 	proxyErr    func() error
+	// onOpen, when set, gets the spec of each open.
+	onOpen func(session.OpenSpec)
 	// real has the run's setup, removal and join use a real wall at a gateway in this
 	// process. runID and runsDir are those of the last open.
 	real           bool
@@ -328,6 +330,9 @@ func (p *pushRepo) run(t *testing.T, agent func(dir string), result func() (*ses
 			}
 		},
 		OnOpen: func(spec session.OpenSpec) {
+			if p.onOpen != nil {
+				p.onOpen(spec)
+			}
 			if p.mask != "" {
 				secretmask.Default().Add(p.mask)
 			}

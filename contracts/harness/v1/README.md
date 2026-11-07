@@ -676,6 +676,35 @@ is in an entry an `exclude` or an `only` of its module leaves out. The home cont
 `push-checks.json` with each check, sorted by type, with its `reads` and its program's
 absolute path in the home; a harness whose modules declare no check has no such file.
 
+**Push checks.** A push check runs in a run behind a wall, before a push of its type
+reaches Qory Apiary: for every push to the run API from inside the wall, through `qory
+artifact push` or any other request, and for the version that the push step stores after
+the agent. qory runs the program on the host's engine, in a new container from the run's
+image, as the run's user, with no network, no capability and no variable but the image's
+and `HOME`. The container gets three read-only folders:
+
+- the home, at its path, so the program's absolute path in `push-checks.json` is valid;
+- the working folder: the work item's artifact index, `index.json`, and the newest version
+  of each artifact of the type and of each `reads` type, in the layout of `qory artifact
+  pull`, `<type>/<name>/v<N>/<files>`; a type with no version has no folder;
+- the pushed files, under their names, whose paths follow the command's arguments.
+
+A check that exits 0 lets the push go on with the bytes it checked. Any other exit stops
+the push with 422 `push_check_failed` and `Fix each finding below and push again. The check
+for <type> failed:`, with the findings: the lines of the program's standard output, or of
+its standard error when standard output has none, without control characters, at most
+200 lines of at most 1,000 characters. qory reads at most 64 KiB of each stream. A program
+that does not start stops the push with 422 too: `Install node, or run in an image built
+FROM qory-agent, and push again. The check for <type> could not start: <error>.` when its
+`#!` line is for `node`, else `Install the program <path>, and push again. The check for
+<type> could not start: <error>.` A program still running after 30 seconds is stopped, with
+`Make the check for <type> finish within 30 s, and push again. It ran longer and was
+stopped.` When qory cannot run the check, such as when the fetch of the artifacts fails or
+the engine is not reachable, the push stops with 503 `push_check_unavailable`. Node is needed
+only by a check whose program uses it: Qory's agent image, and every image built FROM it,
+has it. A run without a wall runs no check, and outside a run `qory artifact push` keeps
+the files in `.qory/artifacts` and runs no check.
+
 A module's tree contains these entry kinds:
 
 ```

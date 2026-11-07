@@ -24,6 +24,7 @@ import (
 	"github.com/qoryai/qory/internal/pool/prebuild"
 	"github.com/qoryai/qory/internal/preparation"
 	"github.com/qoryai/qory/internal/proxygit"
+	"github.com/qoryai/qory/internal/runapi"
 )
 
 // SetWriteLabels makes qory run keep a checkout's labels with f, and returns what
@@ -123,6 +124,15 @@ func SetPushTimes(limit, signal time.Duration) func() {
 	before := pushTimes
 	pushTimes.limit, pushTimes.signal = limit, signal
 	return func() { pushTimes = before }
+}
+
+// ArtifactsForCheck is the fetch of a push check through the run API at base.
+func ArtifactsForCheck(base string) (func(ctx context.Context, dir string, types []string) error, error) {
+	client, err := runapi.New(base, http.DefaultClient)
+	if err != nil {
+		return nil, err
+	}
+	return artifactsForCheck(client), nil
 }
 
 // SetBranchWait makes the push step pass each wait to f in place of waiting, and returns

@@ -622,6 +622,14 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				}
 				return withRecord(streams.errOut, err, record)
 			}
+			// A walled run checks each POST of its run API from behind the wall with the push
+			// checks of the home it composes, see [runPushChecks]. Forager builds the wall's
+			// forwarder as the run opens, before the compose, so the check is set for every
+			// walled run, and passes every POST of a run whose home has no push check.
+			checks := &runPushChecks{}
+			if walled {
+				spec.RunAPICheck = checks.runAPICheck
+			}
 			run, err := openRun(ctx, spec.OpenSpec)
 			if err != nil {
 				closeGateway()
@@ -877,6 +885,9 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				if err != nil {
 					return err
 				}
+				if walled {
+					checks.load(run, at.home, spec.Wall)
+				}
 				// Only the push step's commit uses the run number. readOnly is set by the
 				// compose, so the check comes here, before the session.
 				if canPush(fromCode, readOnly, branch) && fromCode.runNumber < 1 {
@@ -1054,7 +1065,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					limit = opened.Add(timeout)
 				}
 				pushCtx, cancel := pushContext(ctx, again, limit, pushTimes.limit, pushTimes.signal)
-				ending.noStep, pushErr = removeThenPush(pushCtx, run, streams.errOut, branch, cwd, spec.RunID, fromCode.runNumber, out, walled)
+				ending.noStep, pushErr = removeThenPush(pushCtx, run, streams.errOut, branch, cwd, spec.RunID, fromCode.runNumber, out, walled, checks)
 				ending.stopped = ctx.Err() != nil
 				ending.again, ending.got = again.Err() != nil, got()
 				ending.cut = pushCtx.Err() != nil
