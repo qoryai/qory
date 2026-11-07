@@ -49,15 +49,12 @@ release may change what an existing document does, and states it under Upgrading
   item's branch, `qory/<work item id>`, and the commit in each repository. A software
   factory can use it as the `json_schema` of a custom artifact type `branch`.
 - Version 1 of the questions format, `contracts/harness/v1/questions.schema.json`: every
-  question of a work item and its answer, the file of the artifact type `questions`. A run
-  adds, withdraws or reopens questions with `qory artifact push`, and the control plane
-  writes the answers. At most one option of a question has `recommended` set to `true`. See
-  The questions format in `contracts/harness/v1/README.md`.
-- A run records an option it chose without asking a member as a decided question in the
-  questions format: `state: decided` and `decision` with `option`, `reason`, `run` and
-  `at`, and no option with `recommended`. `decision` stays when a run withdraws or reopens
-  the question or a member answers it. See The questions format in
-  `contracts/harness/v1/README.md`.
+  question of a work item and its answer or a run's decision, the file of the artifact
+  type `questions`. A run adds, decides, withdraws or reopens questions with `qory artifact
+  push`, and the control plane writes the answers. At most one option of a question has
+  `recommended` set to `true`. A decided question has `state: decided` and `decision`
+  (`option`, `reason`, `run`, `at`), and no option with `recommended`; `decision` stays
+  when the state changes. See The questions format in `contracts/harness/v1/README.md`.
 - Version 1 of the review comments format,
   `contracts/harness/v1/review-comments.schema.json`: the members' review comments on a
   work item's artifact versions and the replies to them, the file of the artifact type

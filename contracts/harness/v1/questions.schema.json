@@ -35,7 +35,7 @@
         "state": {"description": "open until a member answers the question, answered once a member answered it, decided once a run chose an option and recorded it in decision, withdrawn once a run withdrew it. A decided question is not open.", "enum": ["open", "answered", "decided", "withdrawn"]},
         "asked": {"description": "The run that added the question, and when.", "$ref": "#/$defs/run_at"},
         "answer": {"description": "The member's answer, which the control plane writes.", "$ref": "#/$defs/answer"},
-        "decision": {"description": "The option a run chose without a member, and why: required when state is decided, and kept when a run withdraws or reopens the question or a member answers it.", "$ref": "#/$defs/decision"},
+        "decision": {"description": "The option a run chose without asking a member, and why: required when state is decided, and kept when a run withdraws or reopens the question or a member answers it.", "$ref": "#/$defs/decision"},
         "follows": {
           "description": "The ids of earlier questions in the document that this question follows from: absent or empty when it follows from none.",
           "type": "array",

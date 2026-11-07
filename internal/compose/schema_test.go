@@ -457,7 +457,12 @@ func TestQuestionsSchema(t *testing.T) {
 		{replace(",\n  "+decisionStart+`, `+reason+decisionRun+`}`, ``), false},
 		{replace(`"state": "open"`, decided), false},
 		{replace(decided+`, `, decided+`, `+answer), false},
-		// each member of decision is required, and its values
+		// decision is an object; each member is required and has the limits of its
+		// definition. An option title the question does not have passes: the schema
+		// cannot compare the two.
+		{replace(`"decision": {"option": "Redis", "reason": "The other services use Redis.", "run": 2, "at": "2026-11-04T10:51:00Z"}`, `"decision": "Redis"`), false},
+		{replace(`"decision": {"option": "Redis", "reason": "The other services use Redis.", "run": 2, "at": "2026-11-04T10:51:00Z"}`, `"decision": null`), false},
+		{replace(decisionStart, `"decision": {"option": "MySQL"`), true},
 		{replace(decisionStart+`, `, `"decision": {`), false},
 		{replace(reason, ``), false},
 		{replace(`, `+decisionRun, `, "at": "2026-11-04T10:51:00Z"`), false},

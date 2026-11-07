@@ -524,8 +524,9 @@ artifact_types:
 ## The questions format
 
 A questions document records every question of a work item and its answer or a run's
-decision, one document per work item and at most 1 MiB. A run adds, decides, withdraws or reopens questions with
-`qory artifact push questions`, and the control plane writes the answers. A question has 0 to
+decision, one document per work item and at most 1 MiB. A run adds, decides, withdraws or
+reopens questions with `qory artifact push questions`, and the control plane writes the
+answers. A question has 0 to
 4 options. The run sets `recommended` to `true` on the option it recommends, on at most
 one option of a question. An answer has
 `option`, the title of the option the member chose, or `null`, and `note`, added detail on
@@ -544,10 +545,9 @@ question has `recommended`. `decision` has four members, all required:
 | `at` | when the run chose the option, as in `asked` |
 
 `decision` stays on the question when its state changes. A run that withdraws a decided
-question keeps `decision`, and so does a run that reopens it. A member changes a decision
-by answering the question: its `state` becomes `answered`, and `decision` stays beside
-`answer`. So `decision` is required when `state` is `decided` and allowed in every other
-state. This is version 1 of the format ([questions.schema.json](questions.schema.json)).
+question keeps `decision`. A member changes a decision by answering the question: its
+`state` becomes `answered`, and `decision` stays beside `answer`. A run that reopens that
+answer keeps `decision` too. This is version 1 of the format ([questions.schema.json](questions.schema.json)).
 
 ## The review comments format
 
