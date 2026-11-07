@@ -155,17 +155,66 @@ The harness repository states the qory it needs once, in its `qory.yaml`:
 ### Declare a workflow
 
 A stack lists under `workflows` the workflows that a run from a run code may start. A
-workflow's name is its skill's name: the run starts the skill or command of that name.
-So the stack ships a skill or command for each workflow it lists. When none of the
-stack's modules composes one, after their `exclude` and `only`, the compose fails with
-exit 2:
+run of the workflow `deploy` starts the first of these that the runtime can start: the
+skill `workflow-deploy`, the command `workflow-deploy`, the skill `deploy`, the command
+`deploy`. The stack and `process.yaml` use `deploy`, and qory adds the prefix when it
+starts the run. A plain name works: the hello example ships a plain `hello` command. When
+a harness ships both names, the prefixed one runs.
+
+A workflow's name is a lower-case letter, then up to 54 lower-case letters, digits and
+hyphens. The limit is 55 characters, so `workflow-<name>` has at most 64 characters.
+
+So the stack ships a skill or command, under either name, for each workflow it lists.
+When none of the stack's modules composes one, after their `exclude` and `only`, the
+compose fails with exit 2:
 
 ```
-add a skill or command deploy to a module of the base stack core@4b8e2f1a9c7d, or remove deploy from the workflows of its qory-stack.yaml: the stack declares the workflow deploy, and none of its modules ships a skill or command deploy
+add a skill or command workflow-deploy to a module of the base stack core@4b8e2f1a9c7d, or remove deploy from the workflows of its qory-stack.yaml: the stack declares the workflow deploy, and none of its modules ships a skill or command workflow-deploy or deploy
 ```
 
 A module that a checkout adds to the stack does not count, because the stack lists the
-workflows.
+workflows. A checkout's exclude does not count either: the compose checks what the stack's
+modules ship before it applies that exclude.
+
+### Group skills in folders
+
+A module may group its skills in folders. qory writes each skill flat for every runtime:
+at `skills/<name>` in the composed tree, and at `<name>` in each runtime's skills folder.
+
+```
+harness/skills/review/SKILL.md            the skill review
+harness/skills/delivery/deploy/SKILL.md   the skill deploy
+harness/skills/delivery/ci/fix/SKILL.md   the skill fix
+```
+
+A skill's name is its last folder, so `exclude`, `only`, `requires`, `bind`, `provides` and
+`${qory:skills/deploy}` use `deploy`. A folder with `SKILL.md` is a skill, and everything
+below it is that skill's files. Loose files in a group are skipped.
+
+A skill refers to another skill by name with `${qory:skills/<name>}`, which resolves to the
+registered name and gives no path. A relative path out of a skill's folder resolves differently
+by how qory places the skill: as a link to the source folder, or as a copy.
+
+A folder named after a runtime, such as `skills/codex`, is not a group, and neither is a link
+or a folder that a variant reads skills from. Such a folder with no `SKILL.md` stops the
+compose with exit 2, and so does a folder with no skill below it. The line shows the topmost
+such folder:
+
+```
+module core: add SKILL.md to skills/review, or put a skill in a folder below it: skills/review has no SKILL.md and no skill below it
+module core: rename skills/tools/codex, or read it through a variant: a folder named after a runtime is not a group
+module core: remove the link skills/tools/gone, or point it at a path that exists: it leads nowhere
+```
+
+Two skills of one module with one name stop the compose with exit 2, because an exclude
+cannot separate them. Two names that differ only in case are one folder on a file system
+that ignores case, so qory stops them with exit 2 on every file system, and a module composes
+alike everywhere:
+
+```
+module core: rename skills/a/review or skills/b/review: each skill goes to skills/<name>, and both are the skill review
+module core: rename skills/a/Review or skills/b/review: each skill goes to skills/<name>, and these two names differ only in case
+```
 
 ## See a collision
 
@@ -226,13 +275,14 @@ harness:
   target: {runtime: claude}
   modules:
     - name: core               # a module of the stack you extend
-      exclude: {skills: [explore-a-ticket]}
-    - name: app                # ships skills/explore-a-ticket too
+      exclude: {skills: [workflow-explore-a-ticket]}
+    - name: app                # ships skills/workflow-explore-a-ticket too
       source: {path: ./harness}
 ```
 
-The compose leaves the delivered `explore-a-ticket` out of `core` and takes the one in
-`app`. `qory harness inspect` lists `core  skills/explore-a-ticket` under **Excludes**,
+The compose leaves the delivered `workflow-explore-a-ticket` out of `core` and takes the
+one in `app`. An exclude lists the skill by its full name, with the prefix.
+`qory harness inspect` lists `core  skills/workflow-explore-a-ticket` under **Excludes**,
 and the skill from `app` under **Entries**. The report, `.qory/harness-report.json`,
 records the same.
 

@@ -127,7 +127,7 @@ func TestReadNamesTheVariantDirectoryInItsMessages(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = Read("core", dir, m, "codex")
-	if err == nil || err.Error() != "module core: codex/skills/x has no SKILL.md" {
+	if err == nil || err.Error() != "module core: add SKILL.md to codex/skills/x: codex/skills/x has no SKILL.md and no skill below it" {
 		t.Errorf("skills: %v", err)
 	}
 	dir = tree(t, map[string]string{"codex/mcp/db.json": "[]\n", "qory-module.yaml": manifest})

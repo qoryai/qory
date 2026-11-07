@@ -1,0 +1,3 @@
+skills/review is provided by 2 modules: core@working-tree, team@working-tree
+  keep one and exclude the others, for example
+    core: exclude: {skills: [review]}

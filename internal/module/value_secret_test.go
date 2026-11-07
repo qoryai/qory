@@ -152,8 +152,8 @@ func TestAnEntryPathWithASecretIsLeftOutOfItsRefusal(t *testing.T) {
 		want  string
 	}{
 		{map[string]string{"AGENTS.md": "x\n"}, Variant{"skills": "../qak_x"}, "variant v reads skills from " + accessKeyValuePhrase + ", which is not a directory inside the module"},
-		{map[string]string{"skills/qak_s/x.md": "x\n"}, nil, "skills/" + accessKeyPhrase + " has no SKILL.md"},
-		{map[string]string{"qrk_d/s/x.md": "x\n"}, Variant{"skills": "qrk_d"}, runKeyPhrase + "/s has no SKILL.md"},
+		{map[string]string{"skills/qak_s/x.md": "x\n"}, nil, "add SKILL.md to skills/" + accessKeyPhrase + ": skills/" + accessKeyPhrase + " has no SKILL.md and no skill below it"},
+		{map[string]string{"qrk_d/s/x.md": "x\n"}, Variant{"skills": "qrk_d"}, "add SKILL.md to " + runKeyPhrase + "/s: " + runKeyPhrase + "/s has no SKILL.md and no skill below it"},
 		{map[string]string{"hooks/qak_d/x.sh": "x\n"}, nil, "hooks/" + accessKeyPhrase + " is a directory; a hook is one file. Keep its helpers elsewhere in the module, reached as $QORY_HARNESS_HOME/modules/core/<path>"},
 		{map[string]string{"files/qak_f.txt": "x\n"}, nil, "files/" + accessKeyPhrase + " is not under a runtime directory; a file ships as files/<runtime>/<path>"},
 		{map[string]string{"qrk_d/f.txt": "x\n"}, Variant{"files": "qrk_d"}, runKeyPhrase + "/f.txt is not under a runtime directory; a file ships as " + runKeyPhrase + "/<runtime>/<path>"},

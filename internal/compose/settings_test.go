@@ -525,7 +525,7 @@ func TestComposeRefuses(t *testing.T) {
 				"modules/a/skills/greet/x.md": "x\n",
 				"modules/b/":                  "",
 			},
-			want: "module a: skills/greet has no SKILL.md",
+			want: "module a: add SKILL.md to skills/greet: skills/greet has no SKILL.md and no skill below it",
 		},
 	}
 	for _, c := range cases {

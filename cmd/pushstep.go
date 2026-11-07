@@ -177,7 +177,7 @@ var returnAfterSignal = 30 * time.Minute
 // valid only once the container is gone. After a failed removal [openedRun.HostProxy] and
 // [openedRun.StartStep] still work, so this check alone stops the push, and the run has no
 // step. A git session that fails stops the push the same way.
-func removeThenPush(ctx context.Context, run openedRun, stderr io.Writer, branch *preparation.WorkBranch, dir, runID string, runNumber int, out session.Outcome, copied *runCopy, spec *runSpec) (noStep bool, err error) {
+func removeThenPush(ctx context.Context, run openedRun, stderr io.Writer, branch *preparation.WorkBranch, dir, runID string, runNumber int, out session.Outcome, copied *runCopy, spec *runSpec, checks *runPushChecks) (noStep bool, err error) {
 	if err := run.RemoveSetup(ctx); err != nil {
 		return true, fmt.Errorf(textSetupStays, shownError(err))
 	}
@@ -186,7 +186,7 @@ func removeThenPush(ctx context.Context, run openedRun, stderr io.Writer, branch
 			return true, err
 		}
 	}
-	return false, pushWork(ctx, run, stderr, branch, dir, runID, runNumber, out, copied)
+	return false, pushWork(ctx, run, stderr, branch, dir, runID, runNumber, out, copied, checks)
 }
 
 // commitMessage is the message of the commit of what the agent left, as the run's number and
@@ -206,8 +206,9 @@ func commitMessage(runNumber int, out session.Outcome) string {
 // number in the commit's message, and runID the run that the version's check reads. A walled run
 // has copied, its copy: the step pushes from the quarantines of the bundles its git session
 // wrote, and no git runs in the folder the agent wrote. An unwalled agent had the machine
-// and has no copy, so the step commits and pushes in dir, the working folder.
-func pushWork(ctx context.Context, run openedRun, stderr io.Writer, branch *preparation.WorkBranch, dir, runID string, runNumber int, out session.Outcome, copied *runCopy) error {
+// and has no copy, so the step commits and pushes in dir, the working folder. checks checks
+// the version before it is stored, see [checkBranchVersion].
+func pushWork(ctx context.Context, run openedRun, stderr io.Writer, branch *preparation.WorkBranch, dir, runID string, runNumber int, out session.Outcome, copied *runCopy, checks *runPushChecks) error {
 	cut := func() bool { return ctx.Err() != nil }
 	return inStep(run, stderr, event.StepPush, pushStepName(branch, run.System()), cut, func(w io.Writer) error {
 		httpClient, base, err := run.RunAPI()
@@ -237,7 +238,10 @@ func pushWork(ctx context.Context, run openedRun, stderr io.Writer, branch *prep
 		if document == nil {
 			return nil
 		}
-		if err := storeBranch(ctx, client, runID, end, branch, document); err != nil {
+		check := func(content []byte) error {
+			return checkBranchVersion(ctx, checks, branch, document.Ref, content)
+		}
+		if err := storeBranch(ctx, client, runID, end, branch, document, check); err != nil {
 			return &runLineError{err}
 		}
 		return nil
@@ -291,14 +295,18 @@ func pushStepName(branch *preparation.WorkBranch, system string) string {
 // a POST with no response sends it again only when [branchStored] reads that no
 // version of this run has the document. At most [maxBranchTries] POST go out, and
 // unknown_type is [textNoBranchType]. Every failure has the fix of
-// [preparation.WorkBranch.VersionWays], as the push landed.
-func storeBranch(ctx context.Context, client *runapi.Client, runID, note string, branch *preparation.WorkBranch, document *branchformat.Branch) error {
+// [preparation.WorkBranch.VersionWays], as the push landed. check gets the version's
+// file before the first POST, and its error sends none.
+func storeBranch(ctx context.Context, client *runapi.Client, runID, note string, branch *preparation.WorkBranch, document *branchformat.Branch, check func(content []byte) error) error {
 	content, err := json.Marshal(document)
 	if err != nil {
 		return fmt.Errorf(textNotStored, branch.VersionWays(), document.Ref, shownError(err))
 	}
 	if err := branchformat.Check(content); err != nil {
 		return fmt.Errorf(textNotStored, branch.VersionWays(), document.Ref, shownError(err))
+	}
+	if err := check(content); err != nil {
+		return err
 	}
 	sum := sha256.Sum256(content)
 	push := runapi.Push{Type: branchType, Name: defaultName, Note: note, Files: []runapi.PushFile{

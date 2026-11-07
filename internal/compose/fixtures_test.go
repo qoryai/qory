@@ -21,8 +21,8 @@ import (
 const fixtures = "../../contracts/harness/v1/fixtures"
 
 // TestFixtures runs every fixture: the document in its qory.yaml, on the stack it
-// extends when it extends one, composes to the expected entries, settings, instructions
-// and workflow access levels, or fails with the expected error text.
+// extends when it extends one, composes to the expected entries, settings, instructions,
+// push checks and workflow access levels, or fails with the expected error text.
 func TestFixtures(t *testing.T) {
 	dirs, err := filepath.Glob(filepath.Join(fixtures, "*"))
 	if err != nil || len(dirs) == 0 {
@@ -137,6 +137,19 @@ func TestFixtures(t *testing.T) {
 			}
 			if _, err := os.Stat("expected/egress.txt"); err == nil || declared {
 				expectText(t, "expected/egress.txt", b.String())
+			}
+			// expected/push-checks.txt is each push check, sorted by type, with its module,
+			// its command and the types it reads, when any module declares one.
+			b.Reset()
+			for _, c := range res.PushChecks {
+				fmt.Fprintf(&b, "%s %s %s", c.Type, c.Module, strings.Join(c.Command, " "))
+				if len(c.Reads) > 0 {
+					fmt.Fprintf(&b, " reads %s", strings.Join(c.Reads, " "))
+				}
+				b.WriteString("\n")
+			}
+			if _, err := os.Stat("expected/push-checks.txt"); err == nil || b.Len() > 0 {
+				expectText(t, "expected/push-checks.txt", b.String())
 			}
 			// expected/access.txt is the access level of each workflow of the stack, as
 			// a dispatched run reads it, when the stack has any workflows.

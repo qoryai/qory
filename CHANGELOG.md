@@ -45,14 +45,39 @@ release may change what an existing document does, and states it under Upgrading
   `size_limit`, `max_files` and, for `base_view: structured`, `json_schema`. Every command
   that reads the configuration checks each entry and compiles each `json_schema`. See
   Artifact types in `contracts/harness/v1/README.md`.
+- A module can declare checks for the files of an artifact type with `push_checks` in
+  `qory-module.yaml`: each item has `type`, `command`, a program in the module and its
+  arguments, and optional `reads`, the other artifact types the check reads. The checks
+  are optional and set per module; a module without them pushes as before. The compose
+  fails for a check of the type `verdict`, when two modules declare a check for one
+  type, or when a program is not a file in the module, and writes the checks to
+  `push-checks.json` in the home. A walled run whose home is inside the checkout stops
+  before the compose with exit 2, as `set --home to a folder outside <dir>: <path> is
+  inside <dir>, and a walled run or a run with a run key writes no harness into the folder
+  it runs in`. A walled run with push checks stops before the agent starts with exit 2
+  when a read-write mount is at or inside the home, or when its `push-checks.json` cannot
+  be read. In a walled run, the
+  check of a type runs before each push of that type reaches Qory Apiary, from inside the
+  wall or from the push step: in a new container from the run's image, with no network,
+  the wall's limits and the run's label, the home and the newest versions of the type and
+  its `reads` read-only. A check that does not pass stops the push with 422
+  `push_check_failed`, its fix line and its findings, and `qory artifact push` exits 4;
+  so does a push that the check cannot read, such as a body that is not a push or two
+  files that are one file on the machine. A check that did not finish stops the push with
+  503 `push_check_unavailable`, qory run writes the cause on its stderr, and the push
+  exits 1. Outside a run, `qory artifact push` runs no check. See The module manifest in
+  `contracts/harness/v1/README.md`.
 - Version 1 of the branch format, `contracts/harness/v1/branch.schema.json`: a work
   item's branch, `qory/<work item id>`, and the commit in each repository. A software
   factory can use it as the `json_schema` of a custom artifact type `branch`.
 - Version 1 of the questions format, `contracts/harness/v1/questions.schema.json`: every
-  question of a work item and its answer, the file of the artifact type `questions`. A run
-  adds, withdraws or reopens questions with `qory artifact push`, and the control plane
-  writes the answers. At most one option of a question has `recommended` set to `true`. See
-  The questions format in `contracts/harness/v1/README.md`.
+  question of a work item and its answer or a run's decision, the file of the artifact
+  type `questions`. A run adds, decides, withdraws or reopens questions with `qory artifact
+  push`, and the control plane writes the answers. At most one option of a question has
+  `recommended` set to `true`. A decided question has `state: decided` and `decision`
+  (`option`, `reason`, `run`, `at`), and at least one option and none with `recommended`;
+  `decision` stays when the state changes. See The questions format in
+  `contracts/harness/v1/README.md`.
 - Version 1 of the review comments format,
   `contracts/harness/v1/review-comments.schema.json`: the members' review comments on a
   work item's artifact versions and the replies to them, the file of the artifact type
@@ -76,8 +101,8 @@ release may change what an existing document does, and states it under Upgrading
   the gateway for the run's run key and documents, and runs with that key, which stays in
   memory. The documents set the harness, the workflow, the runtime, the model settings
   and the inputs: qory composes the documents' harness, or the checkout's `qory.yaml` or
-  `harness.yaml` when they contain none, and starts the skill or command named like the
-  workflow, with the path of the inputs.
+  `harness.yaml` when they contain none, and starts the workflow's skill or command, with
+  the path of the inputs.
 - A run from a run code starts its workflow on each runtime with a headless start:
   `claude`, `codex`, `gemini`, `opencode` and `cursor`; `qory image check` checks each
   runtime of Forager's `runtimes.json`.
@@ -237,6 +262,12 @@ release may change what an existing document does, and states it under Upgrading
   qory's state directory, or a folder that contains either, stops with exit 2 before
   anything starts, as `mount a narrower folder: the mount <path> is your home folder, and
   a walled run may change any file in a read-write mount`.
+- A run from a run code given `--machine-steps-file <file>` records the start of its
+  machine as its first step, `start machine`, of kind `machine`, with one line per entry
+  of the file, such as `start Docker  3.2 s`. A machine's start script passes the flag,
+  and `qory run --help` does not show it. With a bad file, such as one that is missing,
+  the run has no such step, qory prints one line, and the run goes on. See The record in
+  `docs/run.md`.
 
 ### Changed
 
@@ -284,10 +315,21 @@ release may change what an existing document does, and states it under Upgrading
 - A run that lists repositories starts in an empty folder as well: qory runs `git init`
   there, then fetches. A folder that is not empty and is not a git working tree still
   stops the run.
+- A module may group its skills in folders, at any depth, and qory writes each skill flat
+  for every runtime, at `skills/<name>`. A skill's name is its last folder. Two skills in
+  one module whose names are equal or differ only in case stop the compose. See
+  `docs/harness.md`.
+- A skill or command of a workflow may be named `workflow-<name>`, while the stack and
+  `process.yaml` keep `<name>`. A run from a run code starts the first of these that the
+  runtime can start: the skill `workflow-<name>`, the command `workflow-<name>`, the skill
+  `<name>`, the command `<name>`. A plain name works, and when a harness ships both names,
+  the prefixed one runs.
+- A workflow's name in a stack has at most 55 characters, so `workflow-<name>` has at most
+  64 characters. A longer name stops the stack's check.
 - The compose fails, exit 2, for each entry of a stack's `workflows` that no module of
-  the stack composes as a skill or command.
+  the stack composes as a skill or command under either name.
 - A run from a run code whose composed harness has no skill or command of the
-  workflow's name closes `failed` with the reason `workflow_not_in_harness`, not
+  workflow under either name closes `failed` with the reason `workflow_not_in_harness`, not
   `no_session`, and its line shows the target's path after the checkout's harness.
 - `bind` nests roles by kind: `bind: {agents: {coder: rails-coder}}`. A flat key stops
   the compose with `Write bind as bind.agents.coder: rails-coder in qory.yaml: bind keys
@@ -623,6 +665,13 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Fixed
 
+- In the `agent` image, Claude Code's Read of chosen pages of a PDF works: the image
+  contains poppler's `pdftoppm`. Until now, it failed with `pdftoppm is not installed`.
+- In a dispatched walled run of Claude Code from a control plane, the agent's `qory
+  work-item show`, `qory artifact pull`, `qory artifact push` and `qory run verdict`
+  reach the run API at `QORY_RUN_API`. Until now, `qory run agent-env` removed the
+  variable before the agent started, so `pull` printed `Nothing pulled: outside a Qory
+  Apiary run, …`, `qory work-item show` exited 3, and a verdict stayed in the container.
 - A run from a run code mounts its inputs from a `qory-inputs-` folder, so the wall no
   longer stops the run as it mounts a folder that Forager reserves for its record
   sockets.

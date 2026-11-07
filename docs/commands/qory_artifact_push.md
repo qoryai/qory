@@ -12,7 +12,9 @@ the types questions and review-comments take only the name main. The store is
 
 qory exits 4 with the type and the limit for a type that the workspace does not have,
 for too many files, and for files over the type's size limit. One version is at most about
-24 MiB and 100 files through the run API, whatever the type's limit.
+24 MiB and 100 files through the run API, whatever the type's limit. In a walled run, qory
+also exits 4 with the fix line and the findings when the harness's push check for <type>
+does not pass.
 
 Outside a run, qory keeps the files in .qory/artifacts and sends nothing.
 

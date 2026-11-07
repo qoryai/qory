@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -12,12 +13,10 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"regexp"
 	"slices"
 	"strconv"
 	"strings"
 	"time"
-	"unicode"
 
 	"github.com/qoryai/forager/wall"
 	"github.com/spf13/cobra"
@@ -95,12 +94,12 @@ type noWorkItemError struct{}
 // Error returns the line for the person.
 func (noWorkItemError) Error() string { return noWorkItemText }
 
-// artifactRefused reports whether err is a run API error for a type or a limit.
-// [ExitCode] gives it [ExitArtifactRefused].
+// artifactRefused reports whether err is a run API error for a type or a limit, or for
+// a push check that did not pass. [ExitCode] maps it to [ExitArtifactRefused].
 func artifactRefused(err error) bool {
 	for _, code := range []string{
 		runapi.CodeUnknownType, runapi.CodeTooManyFiles, runapi.CodeTooLarge,
-		runapi.CodePayloadTooLarge,
+		runapi.CodePayloadTooLarge, runapi.CodePushCheckFailed,
 	} {
 		if runapi.HasCode(err, code) {
 			return true
@@ -314,7 +313,7 @@ func pullArtifacts(c *cobra.Command, client *runapi.Client, artifactType string,
 
 		found = true
 
-		if err := store.fetch(c, client, artifact, *chosen); err != nil {
+		if err := store.fetch(c.Context(), client, artifact, *chosen); err != nil {
 			return err
 		}
 	}
@@ -416,7 +415,9 @@ the types questions and review-comments take only the name main. The store is
 
 qory exits ` + strconv.Itoa(ExitArtifactRefused) + ` with the type and the limit for a type that the workspace does not have,
 for too many files, and for files over the type's size limit. One version is at most about
-24 MiB and 100 files through the run API, whatever the type's limit.
+24 MiB and 100 files through the run API, whatever the type's limit. In a walled run, qory
+also exits ` + strconv.Itoa(ExitArtifactRefused) + ` with the fix line and the findings when the harness's push check for <type>
+does not pass.
 
 Outside a run, qory keeps the files in .qory/artifacts and sends nothing.
 
@@ -776,13 +777,10 @@ func keepVerdict(c *cobra.Command, verdict, gaps string) error {
 	return err
 }
 
-// artifactNamePattern is the form of an artifact type and name in the run API.
-var artifactNamePattern = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
-
 // artifactNameError returns the error of value, an artifact's type or name, nil when it
 // has the run API's form. The form also makes value safe as a directory name.
 func artifactNameError(what, value string) error {
-	if len(value) > 64 || !artifactNamePattern.MatchString(value) {
+	if !runapi.ArtifactName(value) {
 		return fmt.Errorf("Set the %s to lowercase letters and digits in groups joined by single hyphens, at most 64 bytes. The value is %q.", what, value)
 	}
 
@@ -796,6 +794,9 @@ func artifactNameError(what, value string) error {
 type artifactStore struct {
 	root string
 	dir  string
+	// fresh marks the store of a push check, a new folder: [artifactStore.fetch] creates
+	// each file new, and a file that is there already is an error.
+	fresh bool
 }
 
 // checkoutRoot returns the root of the checkout that the working directory is in.
@@ -1011,8 +1012,10 @@ func (s *artifactStore) keep(artifactType, name string, number int, sources []pu
 }
 
 // fetch downloads the files of version into its directory. A file that is there with the
-// index's digest stays.
-func (s *artifactStore) fetch(c *cobra.Command, client *runapi.Client, artifact runapi.Artifact, version runapi.Version) error {
+// index's digest stays. In a fresh store, a file that is there is an error: on a file
+// system that ignores case or the form of an accent, two files of the version whose
+// names differ in those alone are one file.
+func (s *artifactStore) fetch(ctx context.Context, client *runapi.Client, artifact runapi.Artifact, version runapi.Version) error {
 	for what, value := range map[string]string{"type": artifact.Type, "name": artifact.Name} {
 		if err := artifactNameError(what, value); err != nil {
 			return fmt.Errorf("Check the artifact index of this run. %w", err)
@@ -1024,24 +1027,74 @@ func (s *artifactStore) fetch(c *cobra.Command, client *runapi.Client, artifact 
 		return err
 	}
 
-	for _, file := range version.Files {
-		if !localFilename(file.Filename) {
+	for i, file := range version.Files {
+		if !runapi.LocalFilename(file.Filename) {
 			return fmt.Errorf("Check the artifact index of this run. %q cannot be a file's name in a directory.", file.Filename)
 		}
 
 		path := filepath.Join(dir, file.Filename)
+		if s.fresh {
+			err := writeFresh(path, func(w io.Writer) error {
+				return client.Download(ctx, version.ID, file, w)
+			})
+			if errors.Is(err, fs.ErrExist) {
+				return oneFileError(dir, version, i)
+			}
+
+			if err != nil {
+				return err
+			}
+
+			continue
+		}
+
 		if sameFile(path, file) {
 			continue
 		}
 
 		if err := s.write(dir, file.Filename, func(w io.Writer) error {
-			return client.Download(c.Context(), version.ID, file, w)
+			return client.Download(ctx, version.ID, file, w)
 		}); err != nil {
 			return err
 		}
 	}
 
 	return nil
+}
+
+// writeFresh writes the new file at path with fill. A file that is there is an error
+// that is [fs.ErrExist], and so is one whose name differs from the file's only in case
+// or in the form of an accent, on a file system that ignores those. An error of fill
+// comes back as it is.
+func writeFresh(path string, fill func(io.Writer) error) error {
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+	if err != nil {
+		return fmt.Errorf("Check %s. Making the file failed: %w", path, err)
+	}
+
+	err = fill(file)
+	if closed := file.Close(); err == nil && closed != nil {
+		err = fmt.Errorf("Check %s. Writing it failed: %w", path, closed)
+	}
+
+	return err
+}
+
+// oneFileError is the error of the file i of version, which is one file in dir with a
+// file of the version before it.
+func oneFileError(dir string, version runapi.Version, i int) error {
+	name := version.Files[i].Filename
+	other := "a file before it"
+
+	if at, err := os.Stat(filepath.Join(dir, name)); err == nil {
+		for _, before := range version.Files[:i] {
+			if info, err := os.Stat(filepath.Join(dir, before.Filename)); err == nil && os.SameFile(at, info) {
+				other = fmt.Sprintf("%q", before.Filename)
+			}
+		}
+	}
+
+	return fmt.Errorf("the files %s and %q of the version %s are one file on this machine, whose file system is insensitive to case or to the form of an accent", other, name, version.ID)
 }
 
 // sameFile reports whether the file at path has the size and the digest of file.
@@ -1057,12 +1110,6 @@ func sameFile(path string, file runapi.File) bool {
 	size, err := io.Copy(digest, content)
 
 	return err == nil && size == file.Size && strings.EqualFold(hex.EncodeToString(digest.Sum(nil)), file.SHA256)
-}
-
-// localFilename reports whether name is safe as one file name in a directory.
-func localFilename(name string) bool {
-	return name != "" && name != "." && name != ".." && !strings.ContainsAny(name, `/\`) &&
-		strings.IndexFunc(name, unicode.IsControl) < 0
 }
 
 // writeIndex writes the run API's index, as it returned it.

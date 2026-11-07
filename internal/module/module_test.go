@@ -235,7 +235,7 @@ func TestReadRefusesASkillWithoutItsSkillFile(t *testing.T) {
 	if err == nil {
 		t.Fatal("read a skill directory without a SKILL.md")
 	}
-	if want := "module core: skills/review has no SKILL.md"; err.Error() != want {
+	if want := "module core: add SKILL.md to skills/review: skills/review has no SKILL.md and no skill below it"; err.Error() != want {
 		t.Fatalf("error %q, want %q", err, want)
 	}
 }
@@ -622,8 +622,9 @@ func TestReadRefusesADanglingSkillLink(t *testing.T) {
 	if err := os.Symlink(filepath.Join(dir, "gone"), filepath.Join(dir, "skills", "review")); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Read("core", dir, nil, ""); err == nil {
-		t.Fatal("read a skill link that leads nowhere")
+	_, err := Read("core", dir, nil, "")
+	if want := "module core: remove the link skills/review, or point it at a path that exists: it leads nowhere"; err == nil || err.Error() != want {
+		t.Fatalf("error %v, want %q", err, want)
 	}
 }
 

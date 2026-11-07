@@ -482,16 +482,19 @@ func (r *codeRun) writeInputs() (string, func(), error) {
 }
 
 // reasonWorkflowNotInHarness is the reason a run from a run code closes with, failed,
-// when the composed harness has no skill or command with the workflow's name.
+// when the composed harness has no skill or command of the workflow, under either name
+// of [stack.WorkflowEntries].
 const reasonWorkflowNotInHarness = "workflow_not_in_harness"
 
 // workflowArgs are the arguments after -- that start r's workflow on the runtime name,
 // as the harness rep was composed for it, with the inputs in the folder in: the
 // runtime's headless start, see [render.Headless], with the prompt that invokes the
-// skill or command named like the workflow, by the name the runtime registers it
-// under, with the path of inputs.json. A runtime with no headless start, a workflow that
-// is only of a kind the runtime renders or invokes by no name, and a harness with no
-// such skill or command, stop the run. The last is a [*reasonError] of
+// workflow's skill or command, by the name the runtime registers it under, with the path
+// of inputs.json. It tries skill workflow-<name>, command workflow-<name>, skill <name>,
+// then command <name>, as [stack.WorkflowEntries] lists the names, and takes the first
+// that the runtime can start. A runtime with no headless start, a workflow that is only
+// of a kind the runtime renders or invokes by no name, and a harness with no such skill
+// or command, stop the run. The last is a [*reasonError] of
 // [reasonWorkflowNotInHarness], whose line shows the harness as [codeRun.harnessAt]
 // does for system, the system the run's repositories are on.
 func (r *codeRun) workflowArgs(name string, rep report.Report, in, system string) ([]string, error) {
@@ -507,26 +510,34 @@ func (r *codeRun) workflowArgs(name string, rep report.Report, in, system string
 	// render gets the line with the kind it does invoke.
 	addresses := render.Addresses(entryKeys(rep), rep.Bind, render.AddressOf(rt), nil)
 	var found []string
-	for _, kind := range []string{"skills", "commands"} {
-		registered, ok := addresses[kind][r.workflow]
-		if !ok {
-			continue
-		}
-		if !slices.Contains(rt.Skips(), kind) {
-			if args, ok := h.HeadlessArgs(kind, registered, filepath.Join(in, inputsFile), in); ok {
-				return args, nil
+	entries := stack.WorkflowEntries(r.workflow)
+	for _, entry := range entries {
+		for _, kind := range []string{"skills", "commands"} {
+			registered, ok := addresses[kind][entry]
+			if !ok {
+				continue
 			}
+			if !slices.Contains(rt.Skips(), kind) {
+				if args, ok := h.HeadlessArgs(kind, registered, filepath.Join(in, inputsFile), in); ok {
+					return args, nil
+				}
+			}
+			found = append(found, kind)
 		}
-		found = append(found, kind)
 	}
+	prefixed, plain := entries[0], entries[1]
 	if len(found) > 0 {
 		add, runsNo := "command", "skill"
 		if found[0] == "commands" {
 			add, runsNo = "skill", "command"
 		}
-		return nil, fmt.Errorf("add a %s %s to %s, or set another runtime in Qory Apiary: %s runs no %s by its name from a headless start%s", add, r.workflow, r.phrase(), accesskey.ShownName(name, false), runsNo, codeUsed)
+		return nil, fmt.Errorf("add a %s %s to %s, or set another runtime in Qory Apiary: %s runs no %s by its name from a headless start, and the composed harness has no %s %s or %s%s", add, prefixed, r.phrase(), accesskey.ShownName(name, false), runsNo, add, prefixed, plain, codeUsed)
 	}
-	text := fmt.Sprintf("add a skill or command %s to %s, or set another workflow in Qory Apiary: the composed harness has no skill or command %s (%s)%s", r.workflow, r.harnessAt(system), r.workflow, reasonWorkflowNotInHarness, codeUsed)
+	add := "skill"
+	if _, ok := h.HeadlessArgs("skills", prefixed, "", ""); !ok {
+		add = "command"
+	}
+	text := fmt.Sprintf("add a %s %s to %s, or set another workflow in Qory Apiary: the composed harness has no skill or command %s or %s (%s)%s", add, prefixed, r.harnessAt(system), prefixed, plain, reasonWorkflowNotInHarness, codeUsed)
 	return nil, &reasonError{code: reasonWorkflowNotInHarness, text: text}
 }
 

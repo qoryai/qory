@@ -157,7 +157,7 @@ func TestARunCodeAtItsBranchHeadComposesTheHead(t *testing.T) {
 		t.Errorf("the run closed with %v, want %v", n.closes, want)
 	}
 	wants(t, out, "qory run: fetched acme/site at "+head[:12]+" in ")
-	wants(t, out+err.Error(), "add a skill or command hello to the checkout's harness in the repository acme/site, or set another workflow in Qory Apiary: the composed harness has no skill or command hello (workflow_not_in_harness); the code is used")
+	wants(t, out+err.Error(), "add a skill workflow-hello to the checkout's harness in the repository acme/site, or set another workflow in Qory Apiary: the composed harness has no skill or command workflow-hello or hello (workflow_not_in_harness); the code is used")
 }
 
 // TestARunCodeAtACommitTheServerLacksStops is a run from a run code whose documents set

@@ -1,0 +1,5 @@
+apiVersion: qory.dev/v1alpha1
+name: core
+push_checks:
+  - type: spec
+    command: [checks/check.js, push, spec]

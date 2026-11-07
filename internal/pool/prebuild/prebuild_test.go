@@ -355,6 +355,11 @@ func (e *env) join(ctx context.Context, spec session.SessionSpec) (*session.Resu
 	return &session.Result{ExitCode: code}, nil
 }
 
+// StartStep returns an error: the fake run writes no step.
+func (r *fakeRun) StartStep(string, string) (*session.Step, error) {
+	return nil, errors.New("the run is closed")
+}
+
 func (r *fakeRun) System() string       { return "github.com" }
 func (r *fakeRun) Repositories() string { return "acme/shop" }
 

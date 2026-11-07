@@ -53,6 +53,12 @@ type launched struct {
 // before qory run.
 func prebuildFromCode(t *testing.T, documents json.RawMessage, wall string, err error, setup ...func(*codeRelay)) (*launched, string, error, string) {
 	t.Helper()
+	return prebuildFromCodeWith(t, documents, wall, err, nil, setup...)
+}
+
+// prebuildFromCodeWith is [prebuildFromCode] with flags after the run code's.
+func prebuildFromCodeWith(t *testing.T, documents json.RawMessage, wall string, err error, flags []string, setup ...func(*codeRelay)) (*launched, string, error, string) {
+	t.Helper()
 	runKeyCheckout(t)
 	if wall != "" {
 		writeFile(t, filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "forager.yaml"), wall)
@@ -70,7 +76,7 @@ func prebuildFromCode(t *testing.T, documents json.RawMessage, wall string, err 
 		got.calls++
 		return prebuild.Result{}, err
 	}))
-	out, runErr := run(t, "run", "--run-code-file", codeFile(t, g.code()), "--gateway", g.URL)
+	out, runErr := run(t, append([]string{"run", "--run-code-file", codeFile(t, g.code()), "--gateway", g.URL}, flags...)...)
 	return got, out, runErr, g.runKey()
 }
 
@@ -134,6 +140,30 @@ func TestARunCodeForAPrebuildRunsTheBuild(t *testing.T) {
 			t.Errorf("%v (exit %d), want %q, exit 1\n%s", err, cmd.ExitCode(err), line, out)
 		}
 	})
+}
+
+// TestARunCodeForAPrebuildTakesTheMachineStepsFile is a prebuild from a run code with
+// --machine-steps-file, and one without: the prebuild's settings have the file's path,
+// from which the prebuild writes the run's machine step, or none.
+func TestARunCodeForAPrebuildTakesTheMachineStepsFile(t *testing.T) {
+	docker, _ := fakeDocker(t)
+	wall := "wall:\n  adapter: docker\n  image: " + prebuildAgent + "\n  images_allow: [registry.example.com/agents/]\n  command: " + docker + "\n  helper: " + staticELF(t) + "\n  user: \"1000:1000\"\n" + prebuildImages
+	file := filepath.Join(t.TempDir(), "steps.jsonl")
+	for _, c := range []struct {
+		flags []string
+		want  string
+	}{
+		{[]string{"--machine-steps-file", file}, file},
+		{nil, ""},
+	} {
+		got, out, err, _ := prebuildFromCodeWith(t, prebuildDocuments(t, "prebuild.json"), wall, nil, c.flags)
+		if err != nil || got.calls != 1 {
+			t.Fatalf("%q: %v, %d prebuilds\n%s", c.flags, err, got.calls, out)
+		}
+		if got.settings.MachineSteps != c.want {
+			t.Errorf("%q: the prebuild's MachineSteps is %q, want %q", c.flags, got.settings.MachineSteps, c.want)
+		}
+	}
 }
 
 // TestARunCodeForAPrebuildNeedsTheWallSettings is a prebuild from a run code on a

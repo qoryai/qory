@@ -1,0 +1,3 @@
+skills/deploy core
+skills/fix core
+skills/review core

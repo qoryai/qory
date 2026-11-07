@@ -17,6 +17,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/qoryai/qory/internal/exports"
+	"github.com/qoryai/qory/internal/runapi"
 	"github.com/qoryai/qory/internal/stack"
 )
 
@@ -75,6 +76,32 @@ type Manifest struct {
 	// of the entry that fills it. The compose sets a role from the modules' provides
 	// after the base's bind and before the checkout's. Nil when the manifest has none.
 	Provides stack.Roles
+	// PushChecks are the checks the module declares for the files of an artifact type,
+	// one per type, in the order of the file; nil when the manifest has none.
+	PushChecks []PushCheck
+}
+
+// PushCheck is one check a module declares for the files of one artifact type.
+type PushCheck struct {
+	// Type is the artifact type: lowercase letters and digits in groups joined by single
+	// hyphens, at most 64 bytes.
+	Type string
+	// Command is the program and its arguments. The program is a path inside the module,
+	// relative to its root, cleaned.
+	Command []string
+	// Reads are the other artifact types the check reads, each once, in the order of the
+	// file; nil for none.
+	Reads []string
+}
+
+// InsideModule reports whether path is a relative path that stays inside the module:
+// not empty, not absolute, and with no .. part. It returns the path cleaned.
+func InsideModule(path string) (string, bool) {
+	clean := filepath.Clean(path)
+	if path == "" || filepath.IsAbs(clean) || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+		return "", false
+	}
+	return clean, true
 }
 
 // EgressHost is the grammar of a declared host, copied from the Forager contract's
@@ -94,6 +121,16 @@ type rawManifest struct {
 	Egress      *[]string              `yaml:"egress,omitempty"`
 	Roles       yaml.Node              `yaml:"roles,omitempty"`
 	Provides    yaml.Node              `yaml:"provides,omitempty"`
+	PushChecks  []rawPushCheck         `yaml:"push_checks,omitempty"`
+}
+
+// rawPushCheck is one push_checks item as it is written. The command's items stay nodes,
+// so a number or a boolean among them fails the read as it fails the schema, where a
+// decode into strings would take it.
+type rawPushCheck struct {
+	Type    string      `yaml:"type"`
+	Command []yaml.Node `yaml:"command"`
+	Reads   []yaml.Node `yaml:"reads"`
 }
 
 // singular maps the key a requires item names its entry by to the entry's kind. mcp is
@@ -237,10 +274,13 @@ var envName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 // These are errors: an unknown field, an apiVersion other than [stack.APIVersion] or a
 // retired spelling of it, a missing name, a default that selects something other than
 // a declared variant or "fail", an env key that is not an environment variable name or
-// is QORY_HARNESS_HOME, an env value that is not a relative path inside the module, and
+// is QORY_HARNESS_HOME, an env value that is not a relative path inside the module,
 // roles or provides for which [stack.ReadRoles] returns an error, roles with every
-// value one. Every error contains the manifest path; an error about roles or provides
-// contains it inside the text, after the fix. A name the file writes that contains an access
+// value one, and a push_checks item whose type is not an artifact type or repeats one,
+// or whose command is empty or does not start with a relative path inside the module
+// with no .. part, or whose reads lists a value that is not an artifact type, or one
+// type twice. Every error contains the manifest path; an error about roles or
+// provides contains it inside the text, after the fix. A name the file writes that contains an access
 // key secret or a run key, a key of env, of variants or of a requires item, an entry a
 // requires item lists, and the variant default selects, is printed as
 // [accesskey.ShownName] prints it, and a value it writes as [exports.Value] prints it.
@@ -308,8 +348,8 @@ func parseManifest(dir string, data []byte, err error) (*Manifest, error) {
 		if !envName.MatchString(key) {
 			return nil, fmt.Errorf("%s: env: %s is not an environment variable name", path, accesskey.ShownName(key, false))
 		}
-		clean := filepath.Clean(value)
-		if value == "" || filepath.IsAbs(clean) || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+		clean, ok := InsideModule(value)
+		if !ok {
 			return nil, fmt.Errorf("%s: env.%s: %s is not a path inside the module", path, accesskey.ShownName(key, false), exports.Value(value, false))
 		}
 		if m.Env == nil {
@@ -342,6 +382,9 @@ func parseManifest(dir string, data []byte, err error) (*Manifest, error) {
 			}
 		}
 		sort.Strings(m.Egress)
+	}
+	if m.PushChecks, err = readPushChecks(path, raw.PushChecks); err != nil {
+		return nil, err
 	}
 	for _, part := range []struct {
 		key    string
@@ -385,6 +428,52 @@ func parseManifest(dir string, data []byte, err error) (*Manifest, error) {
 		}
 	}
 	return m, nil
+}
+
+// readPushChecks checks the push_checks items of the manifest at path: a type in the
+// form [runapi.ArtifactName] checks, at most once, and a command whose first item is a path inside
+// the module with no .. part, and reads, artifact types, each once. It returns the
+// items with each program's path cleaned, nil for none.
+func readPushChecks(path string, items []rawPushCheck) ([]PushCheck, error) {
+	var out []PushCheck
+	seen := map[string]bool{}
+	for i, item := range items {
+		if !runapi.ArtifactName(item.Type) {
+			return nil, fmt.Errorf("%s: push_checks[%d].type: set it to an artifact type, lowercase letters and digits in groups joined by single hyphens, at most 64 bytes. The value is %s", path, i, exports.Value(item.Type, true))
+		}
+		if seen[item.Type] {
+			return nil, fmt.Errorf("%s: push_checks: remove one of the two checks for %s. A module has one check per type", path, item.Type)
+		}
+		seen[item.Type] = true
+		if len(item.Command) == 0 {
+			return nil, fmt.Errorf("%s: push_checks[%d].command: set it to the program's path inside the module, then its arguments. The list is empty", path, i)
+		}
+		words := make([]string, len(item.Command))
+		for j, node := range item.Command {
+			if node.Kind != yaml.ScalarNode || node.Tag != "!!str" {
+				return nil, fmt.Errorf("%s: push_checks[%d].command[%d]: set it to a string, quoted when it reads as a number or a boolean", path, i, j)
+			}
+			words[j] = node.Value
+		}
+		// No .. part at all, as the schema has it, though a/../b would stay inside.
+		program, ok := InsideModule(words[0])
+		if !ok || slices.Contains(strings.Split(filepath.ToSlash(words[0]), "/"), "..") {
+			return nil, fmt.Errorf("%s: push_checks[%d].command: set the first item to a path inside the module. %s is not one", path, i, exports.Value(words[0], true))
+		}
+		command := append([]string{program}, words[1:]...)
+		var reads []string
+		for j, node := range item.Reads {
+			if node.Kind != yaml.ScalarNode || node.Tag != "!!str" || !runapi.ArtifactName(node.Value) {
+				return nil, fmt.Errorf("%s: push_checks[%d].reads[%d]: set it to an artifact type, lowercase letters and digits in groups joined by single hyphens, at most 64 bytes. The value is %s", path, i, j, exports.Value(node.Value, true))
+			}
+			if slices.Contains(reads, node.Value) {
+				return nil, fmt.Errorf("%s: push_checks[%d].reads: remove one of the two items %s. A type is listed once", path, i, node.Value)
+			}
+			reads = append(reads, node.Value)
+		}
+		out = append(out, PushCheck{Type: item.Type, Command: command, Reads: reads})
+	}
+	return out, nil
 }
 
 // SelectVariant picks the variant for a runtime: the forced one from the stack, else the
@@ -446,12 +535,13 @@ func names(v map[string]Variant) string {
 // leaving the module are all refused. A variant that sets a kind outside the seven known
 // kinds is refused too.
 //
-// A kind directory that is not there leaves the module without entries of that kind. A
-// skills subdirectory without SKILL.md is an error. In the Markdown kinds only .md files
-// count. Under hooks every file is a hook and a directory is an error, because a hook is
-// identified by its file name and a script's helpers belong elsewhere in the module,
-// reached as $QORY_HARNESS_HOME/modules/<name>/<path>. Under mcp every .json file is one
-// server and must contain a JSON object. Under files every file below a runtime directory
+// A kind directory that is not there leaves the module without entries of that kind.
+// Skills may be grouped in folders, see [readSkills]; a folder that is neither a skill
+// nor a group is an error. In the Markdown kinds only .md files count. Under hooks every
+// file is a hook and a directory is an error, because a hook is identified by its file
+// name and a script's helpers belong elsewhere in the module, reached as
+// $QORY_HARNESS_HOME/modules/<name>/<path>. Under mcp every .json file is one server and
+// must contain a JSON object. Under files every file below a runtime directory
 // is one entry named <runtime>/<path>, at any depth, and a file directly under files is
 // an error. A name starting with a dot is skipped everywhere. Settings are read from
 // settings/ at the module root, which no variant redirects, and AGENTS.md from the root
@@ -485,7 +575,7 @@ func ReadWith(name, dir string, m *Manifest, variant string, readFile func(path 
 			dirs[kind] = clean
 		}
 	}
-	skills, err := readSkills(dirs["skills"], filepath.Join(abs, dirs["skills"]))
+	skills, err := readSkills(dirs["skills"], filepath.Join(abs, dirs["skills"]), variantSkillDirs(m))
 	if err != nil {
 		return nil, fmt.Errorf("module %s: %w", shown, err)
 	}
@@ -514,18 +604,26 @@ func ReadWith(name, dir string, m *Manifest, variant string, readFile func(path 
 	}
 	l.Entries = append(l.Entries, files...)
 	for i, e := range l.Entries {
+		// at is the entry as an error prints it. A skill's name does not show its folder,
+		// which may be in a group or a variant's directory.
+		at := e.Kind + "/" + e.Name
+		if e.Kind == "skills" {
+			if rel, err := filepath.Rel(abs, e.Path); err == nil {
+				at = filepath.ToSlash(rel)
+			}
+		}
 		if err := inside(abs, e.Path); err != nil {
-			if out := linkOut(shown, exports.HidePath(e.Kind+"/"+e.Name), err); out != nil {
+			if out := linkOut(shown, exports.HidePath(at), err); out != nil {
 				return nil, out
 			}
-			return nil, fmt.Errorf("module %s: %s %w", shown, exports.HidePath(e.Kind+"/"+e.Name), err)
+			return nil, fmt.Errorf("module %s: %s %w", shown, exports.HidePath(at), err)
 		}
 		if e.Kind == "skills" {
 			if err := insideAll(abs, e.Path); err != nil {
-				if out := linkOut(shown, exports.HidePath("skills/"+e.Name), err); out != nil {
+				if out := linkOut(shown, exports.HidePath(at), err); out != nil {
 					return nil, out
 				}
-				return nil, fmt.Errorf("module %s: %s/%w", shown, exports.HidePath("skills/"+e.Name), err)
+				return nil, fmt.Errorf("module %s: %s/%w", shown, exports.HidePath(at), err)
 			}
 		}
 		refs, tier, err := references(abs, e)
@@ -775,10 +873,47 @@ func insideAll(root, dir string) error {
 	})
 }
 
-// readSkills lists the skill directories of dir. A skill is a directory holding SKILL.md,
-// so a directory without one is a mistake worth an error rather than a silent skip; the
-// message names the directory as the variant reads it, rel, relative to the module root.
-func readSkills(rel, dir string) ([]Entry, error) {
+// RuntimeFolders lists the names of the runtimes qory renders. A folder with one of these
+// names under skills is not a group, see [readSkills], so a skill meant for one runtime
+// stops the compose for the others. A test in the cmd package checks this list against
+// the registered runtimes: this package cannot import render, which imports it.
+func RuntimeFolders() []string {
+	return []string{"amp", "any", "claude", "codex", "copilot", "cursor", "gemini", "goose", "opencode"}
+}
+
+// variantSkillDirs lists the directories that the variants of m read skills from.
+func variantSkillDirs(m *Manifest) map[string]bool {
+	dirs := map[string]bool{}
+	if m == nil {
+		return dirs
+	}
+	for _, v := range m.Variants {
+		if sub, ok := v["skills"]; ok {
+			dirs[filepath.ToSlash(filepath.Clean(sub))] = true
+		}
+	}
+	return dirs
+}
+
+// readSkills lists the skills below dir, which errors print as rel, relative to the module
+// root. Below dir, each folder whose name starts with no dot is one of these:
+//
+//   - A skill: it has SKILL.md. Everything below it is that skill's files, a nested
+//     SKILL.md included. Its name is the folder's name.
+//   - A group: a real folder with no SKILL.md and with a folder below it. A group is read
+//     by these same rules, at any depth, and its name appears in no entry's name. A link is
+//     never a group, so no cycle can occur. A folder named after a runtime, or that a
+//     variant in variants reads skills from, is never a group, because its skills are for
+//     that runtime or variant.
+//   - Anything else, which is an error that starts with its fix and shows the folder's full
+//     path: for folders with no skill below them, the topmost one.
+//
+// Loose files are skipped, and a link that leads nowhere is an error. Two skills of one
+// name are an error, because each skill goes to skills/<name> and an exclude cannot separate
+// two skills of one module. Two names that differ only in case are one folder on a file
+// system that ignores case, and are an error on every file system, so a module composes
+// alike everywhere.
+func readSkills(rel, dir string, variants map[string]bool) ([]Entry, error) {
 	items, err := os.ReadDir(dir)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, nil
@@ -786,25 +921,153 @@ func readSkills(rel, dir string) ([]Entry, error) {
 	if err != nil {
 		return nil, exports.HideError(err)
 	}
-	var es []Entry
+	r := skillReader{variants: variants, seen: map[string]string{}}
+	if err := r.read(filepath.ToSlash(rel), dir, items); err != nil {
+		return nil, err
+	}
+	return r.entries, nil
+}
+
+// skillReader is one read of a module's skills folder, see [readSkills].
+type skillReader struct {
+	variants map[string]bool   // the folders that are for a variant, see [readSkills]
+	seen     map[string]string // the folder of each skill read so far, by its lower-case name
+	entries  []Entry
+}
+
+// read adds the skills of items, the contents of dir, which errors print as rel.
+func (r *skillReader) read(rel, dir string, items []os.DirEntry) error {
 	for _, it := range items {
 		if strings.HasPrefix(it.Name(), ".") {
 			continue
 		}
 		path := filepath.Join(dir, it.Name())
+		at := rel + "/" + it.Name()
 		info, err := os.Stat(path)
 		if err != nil {
-			return nil, exports.HideError(err)
+			if leadsNowhere(path, err) {
+				return fmt.Errorf("remove the link %s, or point it at a path that exists: it leads nowhere", exports.HidePath(at))
+			}
+			return exports.HideError(err)
 		}
 		if !info.IsDir() {
 			continue
 		}
-		if _, err := os.Stat(filepath.Join(path, "SKILL.md")); err != nil {
-			return nil, fmt.Errorf("%s has no SKILL.md", exports.HidePath(filepath.ToSlash(rel)+"/"+it.Name()))
+		if isSkill(path) {
+			if err := r.add(at, it.Name(), path); err != nil {
+				return err
+			}
+			continue
 		}
-		es = append(es, Entry{Kind: "skills", Name: it.Name(), Path: path})
+		if err := r.checkGroup(at, path); err != nil {
+			return err
+		}
+		below, err := os.ReadDir(path)
+		if err != nil {
+			return exports.HideError(err)
+		}
+		if err := r.read(at, path, below); err != nil {
+			return err
+		}
 	}
-	return es, nil
+	return nil
+}
+
+// add adds the skill name in the folder at path, printed as at, unless the module already
+// has a skill with that name, in any case.
+func (r *skillReader) add(at, name, path string) error {
+	key := strings.ToLower(name)
+	if first, ok := r.seen[key]; ok {
+		same := "both are the skill " + accesskey.ShownName(name, false)
+		if filepath.Base(first) != name {
+			same = "these two names differ only in case"
+		}
+		return fmt.Errorf("rename %s or %s: each skill goes to skills/<name>, and %s", exports.HidePath(first), exports.HidePath(at), same)
+	}
+	r.seen[key] = at
+	r.entries = append(r.entries, Entry{Kind: "skills", Name: name, Path: path})
+	return nil
+}
+
+// checkGroup returns the stop for the folder at path, with no SKILL.md, printed as at, when
+// it cannot be read as a group of skills, see [readSkills].
+func (r *skillReader) checkGroup(at, path string) error {
+	if err := r.notAGroup(at, path); err != nil {
+		return err
+	}
+	none, folders := r.noSkillBelow(at, path)
+	switch {
+	case !none:
+		return nil
+	case folders:
+		return fmt.Errorf("add SKILL.md to %[1]s, or put a skill in a folder below it: %[1]s has no SKILL.md and no skill below it", exports.HidePath(at))
+	}
+	return fmt.Errorf("add SKILL.md to %[1]s: %[1]s has no SKILL.md and no skill below it", exports.HidePath(at))
+}
+
+// notAGroup is the stop for a folder that is never a group whatever is below it, nil for
+// any other: one that a variant reads skills from, one named after a runtime, and a link.
+func (r *skillReader) notAGroup(at, path string) error {
+	shown := exports.HidePath(at)
+	if r.variants[at] {
+		return fmt.Errorf("select the variant that reads %s, or change that variant's skills: a folder that a variant reads skills from is not a group", shown)
+	}
+	if slices.Contains(RuntimeFolders(), filepath.Base(path)) {
+		return fmt.Errorf("rename %s, or read it through a variant: a folder named after a runtime is not a group", shown)
+	}
+	self, err := os.Lstat(path)
+	if err != nil {
+		return exports.HideError(err)
+	}
+	if !self.IsDir() {
+		return fmt.Errorf("remove the link %s, or point it at a skill: it leads to a folder with no SKILL.md", shown)
+	}
+	return nil
+}
+
+// noSkillBelow reports whether the real folder at path, printed as at, has no skill below
+// it, and whether it has a folder below it. A dot name does not count. It returns false
+// when anything below it has a stop of a more exact kind, which [skillReader.read] reaches.
+func (r *skillReader) noSkillBelow(at, path string) (none, folders bool) {
+	items, err := os.ReadDir(path)
+	if err != nil {
+		return false, false
+	}
+	for _, it := range items {
+		if strings.HasPrefix(it.Name(), ".") {
+			continue
+		}
+		below := filepath.Join(path, it.Name())
+		info, err := os.Stat(below)
+		if err != nil {
+			return false, false
+		}
+		if !info.IsDir() {
+			continue
+		}
+		folders = true
+		belowAt := at + "/" + it.Name()
+		if isSkill(below) || r.notAGroup(belowAt, below) != nil {
+			return false, true
+		}
+		if empty, _ := r.noSkillBelow(belowAt, below); !empty {
+			return false, true
+		}
+	}
+	return true, folders
+}
+
+// isSkill reports whether the folder at path has SKILL.md.
+func isSkill(path string) bool {
+	_, err := os.Stat(filepath.Join(path, "SKILL.md"))
+	return err == nil
+}
+
+// leadsNowhere reports whether path, whose stat failed with err, is a link to nothing: its
+// target does not exist, or it links to itself in a loop.
+func leadsNowhere(path string, err error) bool {
+	self, lerr := os.Lstat(path)
+	return lerr == nil && self.Mode()&os.ModeSymlink != 0 && !errors.Is(err, os.ErrPermission)
 }
 
 // readMarkdown lists the .md files of dir as entries of kind, named without the
