@@ -78,6 +78,7 @@ func newRun() *cobra.Command {
 	var stopSignal string
 	var secretFD, keyFD int
 	var codeFile, gatewayURL string
+	var machineSteps string
 	c := &cobra.Command{
 		Use:   "run [runtime] [-- argument...]",
 		Short: "Run the agent on its harness, observed and recorded",
@@ -151,6 +152,10 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				}
 				fdKey = k
 				secretmask.Default().Add(k.Secret())
+			}
+			// The machine's steps go into the record of a run from a run code alone.
+			if cmd.Flags().Changed(machineStepsFileFlag) && !cmd.Flags().Changed(runCodeFileFlag) {
+				return input(errors.New(textMachineOnlyWithCode))
 			}
 			// A run code is read here and redeemed for the run key last before the run
 			// starts, once every check that can stop the run has passed, so that a run they
@@ -452,7 +457,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 						return err
 					}
 					defer runLock.Release()
-					return runCodePrebuild(ctx, stderr, streams.errOut, conf.Forager, state, user, exe, key, doc, spec.RunID)
+					return runCodePrebuild(ctx, stderr, streams.errOut, conf.Forager, state, user, exe, key, doc, spec.RunID, machineSteps)
 				}
 				if fromCode, err = codeRunOf(doc); err != nil {
 					return err
@@ -629,6 +634,10 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			// no other run can be listed under: the entry of that id is this run's.
 			if walled {
 				defer openingRun(spec.RunID)()
+			}
+			// The start of the machine comes first in the run's record, before the fetch.
+			if machineSteps != "" {
+				writeMachineStep(run, machineSteps, said)
 			}
 			// The run's time limit counts from its open: the compose and the session.
 			opened := time.Now()
@@ -1122,6 +1131,9 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 	c.Flags().IntVar(&keyFD, runKeyFDFlag, 0, runKeyFDUsage)
 	c.Flags().StringVar(&codeFile, runCodeFileFlag, "", runCodeFileUsage)
 	c.Flags().StringVar(&gatewayURL, gatewayFlag, "", gatewayUsage)
+	c.Flags().StringVar(&machineSteps, machineStepsFileFlag, "", machineStepsFileUsage)
+	// A machine's start script passes the flag; a person has no use for it.
+	c.Flags().Lookup(machineStepsFileFlag).Hidden = true
 	c.Flags().StringVar(&o.limits.ShmSize, "shm-size", "", "the size of /dev/shm in the container, such as 2g ("+config.ForagerFileName+": wall.shm_size)")
 	homeFlags(c, &h)
 	composeFlags(c, &composing)
@@ -1263,7 +1275,8 @@ type openedRun interface {
 	// before the first join; see [fetchImage].
 	FetchImage(ctx context.Context) error
 	Close(ctx context.Context, out session.Outcome) (*session.Closed, error)
-	// StartStep starts a step of the run's host work, of kind fetch, compose or push.
+	// StartStep starts a step of the run's host work, of kind fetch, compose, push or
+	// machine.
 	StartStep(kind, name string) (hostStep, error)
 	// HostProxy starts the run's host proxy, for the fetch and the push of the run's
 	// repositories on this machine.

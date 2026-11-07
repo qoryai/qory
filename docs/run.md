@@ -391,13 +391,17 @@ It holds:
 The record has `qory run`'s work before the agent starts as steps, each with its lines and
 how it ended:
 
-1. When the run configuration lists repositories, the fetch, named after the run's
+1. For a run from a run code given `--machine-steps-file <file>`, which a machine's start
+   script passes, the step `start machine`, of kind `machine`, right after the run opens:
+   one line per entry of the file, such as `start Docker  3.2 s`, and it ends `succeeded`.
+   With a bad file the run has no such step, qory prints one line, and the run goes on.
+2. When the run configuration lists repositories, the fetch, named after the run's
    repository, such as `fetch github.com/example-org/shop`, with `and 1 further
    repository` when there are two.
-2. The compose, `compose the harness for claude`, or `compose the harness` when you name
+3. The compose, `compose the harness for claude`, or `compose the harness` when you name
    no runtime. The step ends once `qory run` has read the agent's launch from the
    composed home.
-3. For a walled run whose policy names its image by a reference pinned by digest, the
+4. For a walled run whose policy names its image by a reference pinned by digest, the
    image step, named after the reference. Forager first requests the image's manifest
    from its registry through the run's proxy, with the run's credentials: a `HEAD` of
    `/v2/<repository>/manifests/<digest>`, over https, or over http for a registry on
@@ -3567,7 +3571,7 @@ docker build -t qory-prebuild --build-arg BASE=qory-agent-docker images/prebuild
 
 | Image | What it holds |
 |---|---|
-| `agent` | Claude Code at the version Forager's descriptor sets, `git`, `gh`, Node, the system's authorities |
+| `agent` | Claude Code at the version Forager's descriptor sets, `git`, `gh`, poppler's `pdftoppm`, Node, the system's authorities |
 | `agent-docker` | `agent`, and Docker's daemon and command |
 | `agent-go` | `agent`, and Go |
 | `agent-go-docker` | `agent-docker`, and Go |
