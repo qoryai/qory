@@ -1385,6 +1385,204 @@ func TestTheCopyStepsLogHasNoPathOfTheCopy(t *testing.T) {
 	}
 }
 
+// TestARunsEndWithAFailedCopyStep is each end of a walled write run with no push, through qory
+// run's close on a fake run: a copy step that does not succeed sets the end of a run whose agent
+// succeeded, and of no other.
+func TestARunsEndWithAFailedCopyStep(t *testing.T) {
+	exits := func(code int) func(context.Context, session.SessionSpec) (*session.Result, error) {
+		return func(context.Context, session.SessionSpec) (*session.Result, error) {
+			return &session.Result{ExitCode: code}, nil
+		}
+	}
+	agentOK := &session.Result{State: event.StateSucceeded}
+	interrupted := session.Outcome{State: event.StateCancelled, Reason: event.ReasonInterrupted, ExitCode: -1}
+	cases := []struct {
+		name   string
+		agent  *session.Result
+		values cmd.Nowhere
+		git    func(context.Context, session.SessionSpec) (*session.Result, error)
+		want   session.Outcome
+		status int
+	}{
+		{name: "no failure", agent: agentOK, git: cmd.GitSessionOnHost, want: session.Outcome{State: event.StateSucceeded}},
+		{name: "the step exits 128", agent: agentOK, git: exits(128), want: session.Outcome{State: event.StateFailed, ExitCode: 128}, status: 1},
+		{name: "the session exits 0 at its limit", agent: agentOK, git: func(context.Context, session.SessionSpec) (*session.Result, error) {
+			return &session.Result{TimedOut: true}, nil
+		}, want: session.Outcome{State: event.StateFailed, ExitCode: -1}, status: 1},
+		{name: "the session does not start", agent: agentOK, git: func(context.Context, session.SessionSpec) (*session.Result, error) {
+			return nil, errors.New("the engine is gone")
+		}, want: session.Outcome{State: event.StateFailed, ExitCode: -1}, status: 1},
+		{name: "the step does not start", agent: agentOK, values: cmd.Nowhere{StepErr: func(kind string) error {
+			if kind == event.StepCopy {
+				return errors.New("the step did not start")
+			}
+			return nil
+		}}, git: exits(0), want: session.Outcome{State: event.StateFailed, ExitCode: -1}, status: 1},
+		{name: "the step does not end", agent: agentOK, values: cmd.Nowhere{StepExitErr: func(kind string) error {
+			if kind == event.StepCopy {
+				return errors.New("the step did not end")
+			}
+			return nil
+		}}, git: cmd.GitSessionOnHost, want: session.Outcome{State: event.StateFailed, ExitCode: -1}, status: 1},
+		{name: "the removal of the setup container fails", agent: agentOK, values: cmd.Nowhere{RemoveSetup: func(context.Context) error {
+			return errors.New("the engine failed")
+		}}, git: exits(0), want: session.Outcome{State: event.StateFailed, ExitCode: -1}, status: 1},
+		{name: "a signal cuts the step", agent: agentOK, git: func(ctx context.Context, _ session.SessionSpec) (*session.Result, error) {
+			term(t)
+			term(t)
+			<-ctx.Done()
+			return nil, ctx.Err()
+		}, want: interrupted, status: 1},
+		{name: "a signal cuts the removal of the setup container", agent: agentOK, values: cmd.Nowhere{RemoveSetup: func(ctx context.Context) error {
+			term(t)
+			term(t)
+			<-ctx.Done()
+			return ctx.Err()
+		}}, git: exits(0), want: interrupted, status: 1},
+		{name: "a signal, and the step exits 128 within its time", agent: agentOK, git: func(context.Context, session.SessionSpec) (*session.Result, error) {
+			term(t)
+			return &session.Result{ExitCode: 128}, nil
+		}, want: session.Outcome{State: event.StateFailed, ExitCode: 128}, status: 1},
+		{name: "the agent failed", agent: &session.Result{State: event.StateFailed, ExitCode: 3}, git: exits(128), want: session.Outcome{State: event.StateFailed, ExitCode: 3}, status: 3},
+		{name: "the agent timed out", agent: &session.Result{State: event.StateCancelled, TimedOut: true, ExitCode: 124}, git: exits(128), want: session.Outcome{State: event.StateCancelled, Reason: event.ReasonTimeout, ExitCode: 124}, status: 124},
+		{name: "the agent was cancelled", agent: &session.Result{State: event.StateCancelled, Cancelled: true, ExitCode: 130}, git: exits(128), want: session.Outcome{State: event.StateCancelled, Reason: event.ReasonInterrupted, ExitCode: 130}, status: 1},
+		{name: "the gateway closed the run", agent: &session.Result{RunClosed: true, State: event.StateSucceeded}, git: func(context.Context, session.SessionSpec) (*session.Result, error) {
+			t.Error("a git session started")
+			return &session.Result{}, nil
+		}, want: session.Outcome{State: event.StateFailed, ExitCode: -1}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			copyCheckout(t)
+			t.Cleanup(cmd.SetJoinResult(func(spec session.SessionSpec) (*session.Result, error) {
+				if spec.OnVariables != nil {
+					spec.OnVariables(session.Applied{})
+				}
+				writeFile(t, filepath.Join(spec.Dir, "left.txt"), "left\n")
+				return c.agent, nil
+			}))
+			closes, _, restore := cmd.OpenNowhereWith(c.values)
+			defer restore()
+			t.Cleanup(cmd.SetGitSession(c.git))
+			out, err := run(t, "run", "claude", "--", "-p", "hi")
+			if got := closes(); len(got) != 1 || got[0] != c.want {
+				t.Errorf("the run closed with %+v, want %+v\n%s", got, c.want, out)
+			}
+			if got := cmd.ExitCode(err); got != c.status {
+				t.Errorf("exit %d (%v), want %d\n%s", got, err, c.status, out)
+			}
+		})
+	}
+}
+
+// TestTheRecordOfARunEndsAsItsCopyStep is a walled write run through Forager's join, whose record
+// is the real one: dev.qory.run.exited for a copy step that exits 128, one that a signal cuts,
+// and one that succeeds, and qory run's exit status.
+func TestTheRecordOfARunEndsAsItsCopyStep(t *testing.T) {
+	broken := `#!/bin/sh
+echo left > left.txt
+git add left.txt
+git -c user.name=agent -c user.email=agent@example.invalid commit -q -m agent
+tree=$(git rev-parse 'HEAD^{tree}')
+rm -f ".git/objects/$(echo "$tree" | cut -c1-2)/$(echo "$tree" | cut -c3-)"
+`
+	cases := []struct {
+		name, agent string
+		git         func(context.Context, session.SessionSpec) (*session.Result, error)
+		want        string
+		status      int
+	}{
+		{name: "the step exits 128", agent: broken, want: "failed//128", status: 1},
+		{name: "a signal cuts the step", agent: "#!/bin/sh\necho left > left.txt\n", git: func(ctx context.Context, _ session.SessionSpec) (*session.Result, error) {
+			term(t)
+			term(t)
+			<-ctx.Done()
+			return nil, ctx.Err()
+		}, want: "cancelled/interrupted/-1", status: 1},
+		{name: "no failure", agent: "#!/bin/sh\necho left > left.txt\n", want: "succeeded//0"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			root := walledThroughJoin(t, c.agent)
+			if c.git != nil {
+				t.Cleanup(cmd.SetGitSession(c.git))
+			}
+			out, err := run(t, "run", "claude", "--", "-p", "hi")
+			if got := cmd.ExitCode(err); got != c.status {
+				t.Errorf("exit %d (%v), want %d\n%s", got, err, c.status, out)
+			}
+			if got := endsOf(t, root); len(got) != 1 || got[0] != c.want {
+				t.Errorf("the run ended %v, want %s\n%s", got, c.want, out)
+			}
+		})
+	}
+}
+
+// TestACopyStepSetsTheCloseOfARunWithAPush is a run with the push step whose agent succeeded: a
+// copy step that does not succeed sets the close, a push step that fails keeps its status, and a
+// cut closes the run as a cut of the push step does.
+func TestACopyStepSetsTheCloseOfARunWithAPush(t *testing.T) {
+	interrupted := session.Outcome{State: event.StateCancelled, Reason: event.ReasonInterrupted, ExitCode: -1}
+	for _, c := range []struct {
+		name   string
+		limit  string
+		git    func(context.Context, session.SessionSpec) (*session.Result, error)
+		want   session.Outcome
+		status int
+	}{
+		{name: "the step exits 128", git: func(context.Context, session.SessionSpec) (*session.Result, error) {
+			return &session.Result{ExitCode: 128}, nil
+		}, want: session.Outcome{State: event.StateFailed, ExitCode: 128}, status: 1},
+		{name: "the session exits 0 at its limit", git: func(context.Context, session.SessionSpec) (*session.Result, error) {
+			return &session.Result{TimedOut: true}, nil
+		}, want: session.Outcome{State: event.StateFailed, ExitCode: -1}, status: 1},
+		{name: "the session does not start", git: func(context.Context, session.SessionSpec) (*session.Result, error) {
+			return nil, errors.New("the engine is gone")
+		}, want: session.Outcome{State: event.StateFailed, ExitCode: -1}, status: 1},
+		{name: "a signal cuts the step", git: func(ctx context.Context, _ session.SessionSpec) (*session.Result, error) {
+			term(t)
+			<-ctx.Done()
+			return nil, ctx.Err()
+		}, want: interrupted, status: 1},
+		{name: "the run's time limit cuts the step", limit: "\n    time_limit: 1s", git: func(ctx context.Context, _ session.SessionSpec) (*session.Result, error) {
+			<-ctx.Done()
+			return nil, ctx.Err()
+		}, want: session.Outcome{State: event.StateCancelled, Reason: event.ReasonTimeout, ExitCode: 124}, status: 124},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			p := newPushRepo(t, "write"+c.limit)
+			docker, _ := fakeDocker(t)
+			walledBy(t, docker)
+			p.flags = []string{"--home", filepath.Join(tempDir(t), "home")}
+			defer cmd.SetPushTimes(200*time.Millisecond, 200*time.Millisecond)()
+			t.Cleanup(cmd.SetGitSession(c.git))
+			r := p.run(t, writesAndCommits(t), nil)
+			if len(r.closes) != 1 || r.closes[0] != c.want {
+				t.Errorf("the run closed with %+v, want %+v\n%s", r.closes, c.want, r.out)
+			}
+			if got := cmd.ExitCode(r.err); got != c.status {
+				t.Errorf("exit %d (%v), want %d\n%s", got, r.err, c.status, r.out)
+			}
+			if head := p.branchHead(t); head != "" {
+				t.Errorf("the forge has the branch at %s", head)
+			}
+		})
+	}
+	t.Run("the push step fails", func(t *testing.T) {
+		p := walledPush(t)
+		t.Cleanup(cmd.SetGitSession(cmd.GitSessionOnHost))
+		writeFile(t, filepath.Join(p.bare, "hooks", "pre-receive"), "#!/bin/sh\nexit 1\n")
+		if err := os.Chmod(filepath.Join(p.bare, "hooks", "pre-receive"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		r := p.run(t, writesAndCommits(t), nil)
+		want := session.Outcome{State: event.StateFailed, ExitCode: 1}
+		if len(r.closes) != 1 || r.closes[0] != want {
+			t.Errorf("the run closed with %+v, want %+v\n%s", r.closes, want, r.out)
+		}
+	})
+}
+
 // TestAWorkingFolderInTheCheckoutStartsInTheCopy is a run from a folder of the commit at HEAD,
 // which starts in that folder of the copy, and from a folder the commit does not have, which
 // stops with the fix first.

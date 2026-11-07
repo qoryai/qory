@@ -457,6 +457,41 @@ func TestPushEndingOutcome(t *testing.T) {
 	}
 }
 
+// TestCopyEndingOutcome is the close of a run and qory run's exit status for each end of its
+// session and its copy step. The time limit's row is the one a run with no push does not reach,
+// see [returnFailedStatus]. A run the gateway closed takes no such close: see
+// TestARunsEndWithAFailedCopyStep.
+func TestCopyEndingOutcome(t *testing.T) {
+	succeeded := session.Outcome{State: event.StateSucceeded}
+	failed := session.Outcome{State: event.StateFailed, ExitCode: 3}
+	timedOut := session.Outcome{State: event.StateCancelled, Reason: event.ReasonTimeout, ExitCode: exitTimeout}
+	cancelled := session.Outcome{State: event.StateCancelled, Reason: event.ReasonInterrupted, ExitCode: 130}
+	interrupted := session.Outcome{State: event.StateCancelled, Reason: event.ReasonInterrupted, ExitCode: -1}
+	for _, c := range []struct {
+		name   string
+		ending pushEnding
+		code   int
+		want   session.Outcome
+		status int
+	}{
+		{"the step exits 128", pushEnding{session: succeeded}, 128, session.Outcome{State: event.StateFailed, ExitCode: 128}, 1},
+		{"the step has no exit code", pushEnding{session: succeeded}, -1, session.Outcome{State: event.StateFailed, ExitCode: -1}, 1},
+		{"a signal cuts the step", pushEnding{session: succeeded, cut: true, stopped: true}, -1, interrupted, 1},
+		{"the run's time limit cuts the step", pushEnding{session: succeeded, cut: true}, -1, timedOut, exitTimeout},
+		{"the agent failed", pushEnding{session: failed}, 128, failed, 1},
+		{"the agent timed out", pushEnding{session: timedOut, cut: true, stopped: true}, -1, timedOut, exitTimeout},
+		{"the agent was cancelled", pushEnding{session: cancelled, cut: true, stopped: true}, -1, cancelled, 1},
+	} {
+		got := c.ending.copyOutcome(c.code)
+		if got != c.want {
+			t.Errorf("%s: %+v, want %+v", c.name, got, c.want)
+		}
+		if status := returnFailedStatus(got); status != c.status {
+			t.Errorf("%s: exit %d, want %d", c.name, status, c.status)
+		}
+	}
+}
+
 // TestPushEndingLines is the line of a cut step, with and without a push that landed, and
 // the exit status of each end.
 func TestPushEndingLines(t *testing.T) {

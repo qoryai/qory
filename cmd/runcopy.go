@@ -144,6 +144,11 @@ type runCopy struct {
 	fromCode bool
 	// cutBy is what ended a step whose context ended, as a line has it.
 	cutBy func() string
+	// stepCode is the exit code of a copy step that ended failed, -1 when it did not end or
+	// has none. cut is whether a stop or the run's time limit ended the step, or the removal of
+	// the setup container before it. The run's close reads both, see [pushEnding.copyOutcome].
+	stepCode int
+	cut      bool
 }
 
 // stopped is the line of a return of the run's work that stopped with cause. Past it, the copy
@@ -203,7 +208,7 @@ func startCopy(ctx context.Context, root, runID, branch string, noRepository boo
 	if err != nil {
 		return nil, err
 	}
-	c := &runCopy{dir: dir, root: root, branch: branch, plain: !git || empty, out: map[string]runcopy.LeftOut{}}
+	c := &runCopy{dir: dir, root: root, branch: branch, plain: !git || empty, out: map[string]runcopy.LeftOut{}, stepCode: -1}
 	switch {
 	case empty:
 		err = dir.CopyFolderWithoutGit(ctx, root)
@@ -453,7 +458,9 @@ func (c *runCopy) gitSession(ctx context.Context, run openedRun, spec *runSpec, 
 		state = event.StateFailed
 		if ctx.Err() != nil {
 			state, code = event.StateCancelled, -1
+			c.cut = true
 		}
+		c.stepCode = code
 		lines := &stepLines{stderr: spec.Stderr, step: step}
 		lines.log([]byte(c.withoutPaths(string(stepFailure(stop)))))
 	}
@@ -518,6 +525,7 @@ func (c *runCopy) joinGitSession(ctx context.Context, run openedRun, spec *runSp
 // it is the cause, and err only follows from that.
 func (c *runCopy) noSession(ctx context.Context, err error) error {
 	if ctx.Err() != nil && c.cutBy != nil {
+		c.cut = true
 		return c.stopped(fmt.Sprintf(textCopyCut, c.cutBy()))
 	}
 	return c.stopped(fmt.Sprintf(textCopyNoSession, shownError(err)))

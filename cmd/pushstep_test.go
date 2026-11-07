@@ -1905,7 +1905,7 @@ func TestAProcessOfTheSetupCannotWriteAfterTheCheck(t *testing.T) {
 
 // TestAFailedRemovalOfTheSetupContainerRunsNoPush is a removal that failed, also cut by a
 // second signal: the run has no step, commits nothing and pushes nothing, though the host
-// proxy and the steps still work. The close follows the rules of a failed step.
+// proxy and the steps still work. The close follows the rules of a copy step with no exit code.
 func TestAFailedRemovalOfTheSetupContainerRunsNoPush(t *testing.T) {
 	const line = "take the work item in again in Qory Apiary: the setup container of this run was not removed, so a process in it could write the working folder, and qory pushed nothing: "
 	timedOut := allSessionEnds["timed out"]
@@ -1938,6 +1938,9 @@ func TestAFailedRemovalOfTheSetupContainerRunsNoPush(t *testing.T) {
 			p.removeSetup = c.remove
 			r := p.run(t, writesAndCommits(t), c.result)
 			r.wantsClose(t, c.state, c.code)
+			if name == "after a session that succeeded" && r.closes[0].ExitCode != -1 {
+				t.Errorf("the run closed with exit code %d, want -1", r.closes[0].ExitCode)
+			}
 			wants(t, r.out, c.want)
 			if name, _ := r.step(); name != "" {
 				t.Errorf("a push step %q", name)

@@ -179,6 +179,9 @@ var returnAfterSignal = 30 * time.Minute
 // step. A git session that fails stops the push the same way.
 func removeThenPush(ctx context.Context, run openedRun, stderr io.Writer, branch *preparation.WorkBranch, dir, runID string, runNumber int, out session.Outcome, copied *runCopy, spec *runSpec, checks *runPushChecks) (noStep bool, err error) {
 	if err := run.RemoveSetup(ctx); err != nil {
+		if copied != nil {
+			copied.cut = ctx.Err() != nil
+		}
 		return true, fmt.Errorf(textSetupStays, shownError(err))
 	}
 	if copied != nil {
@@ -441,6 +444,24 @@ func (e pushEnding) outcome(err error) session.Outcome {
 		return session.Outcome{State: event.StateCancelled, Reason: event.ReasonTimeout, ExitCode: exitTimeout}
 	}
 	return session.Outcome{State: event.StateFailed, ExitCode: ExitCode(err)}
+}
+
+// copyOutcome is the outcome a run closes with when its copy step did not succeed or did not
+// open, code being [runCopy.stepCode]: as [pushEnding.outcome], with code as the exit code of a
+// run that closes failed.
+func (e pushEnding) copyOutcome(code int) session.Outcome {
+	return e.outcome(&exitError{code: code})
+}
+
+// returnFailedStatus is qory run's exit status when the session succeeded, the run closed with
+// out, and its work did not come back: [exitTimeout] for a copy step cut at the run's time limit,
+// as [pushEnding.ended] has it, and 1 otherwise. [returnContext] has no such limit today, so a run
+// with no push reaches only the 1.
+func returnFailedStatus(out session.Outcome) int {
+	if out.Reason == event.ReasonTimeout {
+		return exitTimeout
+	}
+	return 1
 }
 
 // cutBy is what ended a step whose context ended, as a line has it.

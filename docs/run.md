@@ -511,6 +511,11 @@ minutes, with the git session's exit status, or with -1 when the session has non
 such as one that did not start or one that exits 0 at that limit. Unless it ends `succeeded`,
 its last line is the error line, with `the run's folder` in place of any path on the machine.
 
+After an agent session that succeeded, this step sets how the run closes, with a push step or
+without one. A step that ends `failed` closes the run `failed` with the step's exit code, and
+`qory run` exits 1. A step that ends `cancelled` closes the run `cancelled`, as [The push step of a
+write run](#the-push-step-of-a-write-run) lists.
+
 An image step that fails ends the run before the agent starts, and `qory run` exits 1
 with one line, the fix first. An image its registry does not have closes the run
 `failed` with the reason `image_missing`, and an image whose user is root, or a user
@@ -2185,10 +2190,14 @@ The line of a failed step is printed after the run's end. After a session that s
 the step sets the close:
 
 - A failed step closes the run `failed`, exit 1.
-- A step stopped at the time limit closes the run `cancelled` with the reason `timeout`,
-  exit 124.
-- A step stopped after a signal closes the run `cancelled` with the reason `interrupted`,
-  exit 1.
+- A git session that fails before the step closes the run `failed` with the exit code of the
+  step `copy work out`, or -1 when it has none, such as a session that did not start. On a run
+  with a copy, a setup container that was not removed closes it the same way, with -1.
+  `qory run` exits 1.
+- A step or a git session stopped at the time limit closes the run `cancelled` with the
+  reason `timeout`, exit 124.
+- A step or a git session stopped after a signal closes the run `cancelled` with the reason
+  `interrupted`, exit 1.
 
 `qory run pool` stops a run with SIGTERM, and with SIGKILL 30 seconds later. The step gets
 its 15 seconds when the agent's runtime stops within the 10 seconds of the default
@@ -3724,6 +3733,13 @@ that succeeded. On the push path, qory instead pushes nothing, prints
 `take the work item in again in Qory Apiary` with the cause, and deletes the copy. For the exit
 status, see
 [The push step of a write run](#the-push-step-of-a-write-run).
+
+After a session that succeeded, a git session that stops the return also sets how the run
+closes: `failed` with the exit code of the step `copy work out`, or -1 when it has none. A signal
+that cuts the session closes the run `cancelled` with the reason `interrupted`, exit 1. A run with
+no push step has no time limit during the git session: the session has its limit of 5 minutes.
+A return that stops after the run closed, in the check, the fetch or the copy back, leaves the run
+`succeeded`, and `qory run` exits 1: only the close proves that no container of the run is left.
 
 When removing a part of the run's wall failed at any point of the run, even if a later removal
 succeeded, a process may have written the copy after its session ended. Nothing comes back,

@@ -1170,6 +1170,10 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			// Any other walled run with a copy runs its git session here and brings its work
 			// back after the close, under [returnContext], unless the close shows
 			// [session.Closed.WallKept].
+			//
+			// A git session that fails changes the close of a session that succeeded on both
+			// paths, see [pushEnding.copyOutcome]. A return that fails after the close changes
+			// only qory run's exit status: only the close proves that no container is left.
 			ending := pushEnding{session: out, limit: timeout}
 			var pushErr, sessionErr error
 			var limit time.Time
@@ -1208,6 +1212,11 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				} else {
 					sessionErr = copied.gitSession(backCtx, run, &spec, "")
 				}
+				if sessionErr != nil {
+					ending.stopped, ending.again, ending.got = ctx.Err() != nil, again.Err() != nil, got()
+					ending.cut = copied.cut
+					out = ending.copyOutcome(copied.stepCode)
+				}
 			}
 			if pushes {
 				pushCtx, cancel := pushContext(ctx, again, limit, pushTimes.limit, pushTimes.signal)
@@ -1216,7 +1225,11 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				ending.again, ending.got = again.Err() != nil, got()
 				ending.cut = pushCtx.Err() != nil
 				cancel()
-				if pushErr != nil {
+				switch {
+				case pushErr != nil && ending.noStep && copied != nil:
+					ending.cut = copied.cut
+					out = ending.copyOutcome(copied.stepCode)
+				case pushErr != nil:
 					out = ending.outcome(pushErr)
 				}
 			}
@@ -1293,7 +1306,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				back = copied.comeBack(backCtx, spec.RunID, said)
 			}
 			if (!back || !artifactsBack) && ended == nil {
-				return reported(&exitError{code: 1})
+				return reported(&exitError{code: returnFailedStatus(out)})
 			}
 			return ended
 		},
