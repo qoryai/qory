@@ -233,6 +233,12 @@ release may change what an existing document does, and states it under Upgrading
   `qory harness launch --json` and `--address` print them. The Bind table that
   `qory harness inspect` and `qory harness compose --dry-run` print has a third column,
   `from`.
+- A run from a run code given `--machine-steps-file <file>` records the start of its
+  machine as its first step, `start machine`, of kind `machine`, with one line per entry
+  of the file, such as `start Docker  3.2 s`. A machine's start script passes the flag,
+  and `qory run --help` does not show it. With a bad file, such as one that is missing,
+  the run has no such step, qory prints one line, and the run goes on. See The record in
+  `docs/run.md`.
 
 ### Changed
 
@@ -580,6 +586,8 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Fixed
 
+- In the `agent` image, Claude Code's Read of chosen pages of a PDF works: the image
+  contains poppler's `pdftoppm`. Until now, it failed with `pdftoppm is not installed`.
 - In a dispatched walled run of Claude Code from a control plane, the agent's `qory
   work-item show`, `qory artifact pull`, `qory artifact push` and `qory run verdict`
   reach the run API at `QORY_RUN_API`. Until now, `qory run agent-env` removed the

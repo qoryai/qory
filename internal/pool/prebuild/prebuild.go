@@ -15,7 +15,8 @@
 //     that [explore.RecordDir] returns for work. A run whose policy is not the one of the
 //     server's run configuration, as the record's dev.qory.run.policy_applied has it,
 //     stops here. The run stays open until Launch returns. Whether the run started is
-//     whether the open made its record.
+//     whether the open made its record. With [Settings.MachineSteps], the run's machine
+//     step comes right after the open, before the check of the policy.
 //  2. The fetch, in qory run's process: through the run's host proxy, [preparation.Run]
 //     fetches the run's repositories into work, as qory run does once a run is open. The
 //     fetch has [fetchTimeout], counted from the open. Every git of the fetch starts from
@@ -70,6 +71,7 @@ import (
 
 	"github.com/qoryai/qory/internal/exports"
 	"github.com/qoryai/qory/internal/integration"
+	"github.com/qoryai/qory/internal/machinestep"
 	"github.com/qoryai/qory/internal/pool/child"
 	"github.com/qoryai/qory/internal/pool/explore"
 	"github.com/qoryai/qory/internal/preparation"
@@ -182,6 +184,10 @@ type Settings struct {
 	// Machine is machine of forager.yaml, the adapter that made the machine, which
 	// run.started reports; empty leaves it out.
 	Machine string
+	// MachineSteps is the path of the file of the steps of the machine's start, from
+	// which the run's machine step is written right after the open, as
+	// [machinestep.Write] writes it; empty writes none.
+	MachineSteps string
 	// Open opens the run at its gateway; nil is [session.Open]. A test replaces it.
 	Open func(ctx context.Context, spec session.OpenSpec) (Opened, error)
 	// Fetch fetches the run's repositories, as [preparation.Run]; nil is
@@ -226,6 +232,9 @@ type Run struct {
 // Opened is a run open at its gateway, as the prebuild uses it: a [*session.Run].
 type Opened interface {
 	HostProxy() (session.HostProxy, error)
+	// StartStep starts a step of the run's host work, as [session.Run.StartStep]: the
+	// machine step.
+	StartStep(kind, name string) (*session.Step, error)
 	// Join runs the step's session behind the wall, as [session.Run.Join].
 	Join(ctx context.Context, spec session.SessionSpec) (*session.Result, error)
 	// System and Repositories are the server's values of [preparation.EnvSystem] and
@@ -491,6 +500,16 @@ func (s Settings) fetch(ctx context.Context, r Run, work, state, record string) 
 	})
 	if err != nil {
 		return nil, out, fmt.Errorf(textNotOpened, integration.Printable(exports.HideURLError(err).Error()))
+	}
+	// The start of the machine comes first in the run's record, before the fetch.
+	if s.MachineSteps != "" {
+		machinestep.Write(func(kind, name string) (machinestep.Step, error) {
+			step, err := run.StartStep(kind, name)
+			if err != nil {
+				return nil, err
+			}
+			return step, nil
+		}, s.MachineSteps, func(line string) { s.log(r.RunID, line) })
 	}
 	// The run's policy is the server's run configuration's, or nothing is fetched: the
 	// machine's policy has none of its rules for the registry.
