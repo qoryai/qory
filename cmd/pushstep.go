@@ -185,7 +185,7 @@ func pushWork(ctx context.Context, run openedRun, stderr io.Writer, branch *prep
 			return nil
 		}
 		check := func(content []byte) error {
-			return checkBranchVersion(ctx, checks, w, branch, document.Ref, content)
+			return checkBranchVersion(ctx, checks, branch, document.Ref, content)
 		}
 		if err := storeBranch(ctx, client, runID, end, branch, document, check); err != nil {
 			return &runLineError{err}

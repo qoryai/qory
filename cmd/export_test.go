@@ -19,6 +19,7 @@ import (
 	"github.com/qoryai/forager/session"
 	"github.com/qoryai/forager/wall"
 
+	"github.com/qoryai/qory/internal/compose"
 	"github.com/qoryai/qory/internal/foragerdir"
 	walled "github.com/qoryai/qory/internal/places"
 	"github.com/qoryai/qory/internal/pool/prebuild"
@@ -133,6 +134,14 @@ func ArtifactsForCheck(base string) (func(ctx context.Context, dir string, types
 		return nil, err
 	}
 	return artifactsForCheck(client), nil
+}
+
+// SetLoadPushChecks makes qory run read the push checks of a home with f, and returns
+// what restores the reader.
+func SetLoadPushChecks(f func(home string) ([]compose.PushCheck, error)) func() {
+	before := loadPushChecks
+	loadPushChecks = f
+	return func() { loadPushChecks = before }
 }
 
 // SetBranchWait makes the push step pass each wait to f in place of waiting, and returns

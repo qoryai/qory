@@ -14,10 +14,12 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
 	"github.com/qoryai/forager/session"
+	"github.com/qoryai/forager/wall"
 
 	"github.com/qoryai/qory/internal/compose"
 	"github.com/qoryai/qory/internal/pushcheck"
@@ -215,8 +217,9 @@ func TestLoadReadsTheHomesPushChecks(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(home, render.PushChecksFile), []byte("{"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := pushcheck.Load(home); err == nil || !strings.HasPrefix(err.Error(), "Compose the harness again.") {
-		t.Errorf("Load of a broken file = %v, want the fix first", err)
+	want := "Compose the harness again, and run again. The push checks in " + filepath.Join(home, render.PushChecksFile) + " could not be read: it is not JSON in the form the compose writes: unexpected end of JSON input."
+	if _, err := pushcheck.Load(home); err == nil || err.Error() != want {
+		t.Errorf("Load of a broken file = %v, want %q", err, want)
 	}
 }
 
@@ -247,36 +250,66 @@ func TestOnlyAPushOfArtifactsIsChecked(t *testing.T) {
 	}
 }
 
-// TestABodyThatIsNoPushPasses is a body the run API returns an error for: it passes
-// unchecked, so the run API returns that error.
-func TestABodyThatIsNoPushPasses(t *testing.T) {
-	f := newFixture(t, "#!/usr/bin/env node")
-	for _, body := range []string{
-		``, `not json`, `[]`, `{"type":"spec"}`, `{"type":"spec","files":{}}`,
-		`{"type":"spec","files":[{"filename":"a.md","content_base64":"not base64!"}]}`,
-		`{"type":"spec","files":[]} trailing`,
-	} {
-		if r, err := f.post(t, "/artifacts", []byte(body)); r != nil || err != nil {
-			t.Errorf("%q: got %+v, %v, want nil, nil", body, r, err)
-		}
+// wantRefusal fails the test unless r is a 422 push_check_failed with message and no
+// finding, with no error.
+func wantRefusal(t *testing.T, what string, r *session.RunAPIRefusal, err error, message string) {
+	t.Helper()
+	if err != nil || r == nil {
+		t.Errorf("%s: got %+v, %v, want a refusal", what, r, err)
+		return
 	}
-	if len(f.e.commands) != 0 {
-		t.Errorf("ran %v, want nothing", f.e.commands)
+	if r.Status != 422 || r.Code != "push_check_failed" || r.Message != message || len(r.Findings) != 0 {
+		t.Errorf("%s: the refusal is %d %s %q %q, want 422 push_check_failed %q", what, r.Status, r.Code, r.Message, r.Findings, message)
 	}
 }
 
-// TestABodyReadInTwoWaysFails is a body with a member twice or a member whose name
-// differs from the push's only in case: an error, so the forwarder returns 503.
-func TestABodyReadInTwoWaysFails(t *testing.T) {
+// TestABodyThatIsNoPushGets422 is a body that is not a push in the run API's form:
+// in a run whose home has push checks it gets 422 with the fix and the cause, whatever
+// its type, and runs no check; in a run whose home has none it passes.
+func TestABodyThatIsNoPushGets422(t *testing.T) {
+	f := newFixture(t, "#!/usr/bin/env node")
+	fix := "Send the push as qory artifact push sends it, and push again. The body is not a push: "
+	for body, cause := range map[string]string{
+		``:                            "it is not a JSON object.",
+		`not json`:                    "it is not a JSON object.",
+		`[]`:                          "it is not a JSON object.",
+		`{"type":"spec"`:              "it is not JSON: unexpected end of JSON input.",
+		`{"type":"spec"}`:             "files is missing or not a list.",
+		`{"type":3,"files":[]}`:       "type is missing or not a string.",
+		`{"type":"spec","files":{}}`:  "files is missing or not a list.",
+		`{"type":"spec","files":[1]}`: "files[0]: it is not a JSON object.",
+		`{"type":"spec","files":[{"content_base64":""}]}`:                              "files[0].filename is missing or not a string.",
+		`{"type":"spec","files":[{"filename":"a.md","content_base64":"not base64!"}]}`: "files[0].content_base64 is missing or not base64.",
+		`{"type":"spec","files":[]} trailing`:                                          "it has more after the JSON object.",
+		`{"type":"questions","files":{}}`:                                              "files is missing or not a list.",
+	} {
+		r, err := f.post(t, "/artifacts", []byte(body))
+		wantRefusal(t, fmt.Sprintf("%q", body), r, err, fix+cause)
+	}
+	if len(f.e.commands) != 0 || len(f.fetched) != 0 {
+		t.Errorf("fetched %v and ran %v, want nothing", f.fetched, f.e.commands)
+	}
+	f.c.Checks = nil
+	if r, err := f.post(t, "/artifacts", []byte(`not json`)); r != nil || err != nil {
+		t.Errorf("a home with no push check: got %+v, %v, want nil, nil", r, err)
+	}
+}
+
+// TestABodyReadInTwoWaysGets422 is a body with a member twice or a member whose name
+// differs from the push's only in case: 422 with the fix.
+func TestABodyReadInTwoWaysGets422(t *testing.T) {
 	f := newFixture(t, "#!/usr/bin/env node")
 	for _, body := range []string{
 		`{"type":"spec","type":"other","files":[]}`,
 		`{"type":"other","Type":"spec","files":[]}`,
 		`{"type":"spec","files":[{"filename":"a.md","FileName":"b.md","content_base64":""}]}`,
+		`{"type":"spec","files":[{"filename":"a.md","filename":"b.md","content_base64":""}]}`,
 	} {
-		if r, err := f.post(t, "/artifacts", []byte(body)); r != nil || err == nil {
-			t.Errorf("%q: got %+v, %v, want an error", body, r, err)
-		}
+		r, err := f.post(t, "/artifacts", []byte(body))
+		wantRefusal(t, body, r, err, "Send each member of the push once, in lower case, and push again.")
+	}
+	if len(f.e.commands) != 0 {
+		t.Errorf("ran %v, want nothing", f.e.commands)
 	}
 }
 
@@ -325,6 +358,7 @@ func TestAPassingCheckLetsThePushGoOn(t *testing.T) {
 // arguments and the files' paths.
 func TestTheContainerIsClosedOff(t *testing.T) {
 	f := newFixture(t, "#!/usr/bin/env node")
+	f.c.Label = "dev.qory.run=run-1"
 	if _, err := f.post(t, "/artifacts", pushBody(t, "spec", [2]string{"spec.md", "x"}, [2]string{"b.md", "y"})); err != nil {
 		t.Fatal(err)
 	}
@@ -333,7 +367,11 @@ func TestTheContainerIsClosedOff(t *testing.T) {
 	if c[0] != "/usr/local/bin/docker" {
 		t.Errorf("the engine's command is %s, want the wall's", c[0])
 	}
+	if slices.Contains(c, "--cpus") || slices.Contains(c, "--memory") {
+		t.Errorf("a wall with no limits gives the check limits:\n%s", line)
+	}
 	for _, want := range []string{
+		"--label dev.qory.run=run-1", "--pids-limit 512",
 		"--network none", "--user " + f.c.User, "--cap-drop ALL", "--security-opt no-new-privileges", "--pull never",
 		"--workdir " + pushcheck.WorkDir, "--entrypoint " + f.program + " " + f.c.Image + " push spec " + pushcheck.FilesDir + "/spec.md " + pushcheck.FilesDir + "/b.md",
 	} {
@@ -369,18 +407,85 @@ func TestTheContainerIsClosedOff(t *testing.T) {
 	}
 }
 
-// TestAnotherUserGetsFoldersItCanRead is a run whose user is not this process's: the
-// two folders open to it.
-func TestAnotherUserGetsFoldersItCanRead(t *testing.T) {
+// TestTheWallsLimitsAreTheChecks is a wall with limits: the check's container gets its
+// CPUs, its memory and its PIDs.
+func TestTheWallsLimitsAreTheChecks(t *testing.T) {
 	f := newFixture(t, "#!/usr/bin/env node")
-	f.c.User = fmt.Sprintf("%d:%d", os.Getuid()+1, os.Getgid())
+	f.c.Limits = wall.Limits{CPUs: "1.5", Memory: "2g", PIDs: 64, ShmSize: "1g"}
+	if _, err := f.post(t, "/artifacts", pushBody(t, "spec", [2]string{"spec.md", "x"})); err != nil {
+		t.Fatal(err)
+	}
+	line := strings.Join(f.e.created(t), " ")
+	for _, want := range []string{"--cpus 1.5", "--memory 2g", "--pids-limit 64"} {
+		if !strings.Contains(line, want) {
+			t.Errorf("the create lacks %q:\n%s", want, line)
+		}
+	}
+	if strings.Contains(line, "--shm-size") {
+		t.Errorf("the create has --shm-size:\n%s", line)
+	}
+}
+
+// TestTheTemporaryFoldersAreInTheCheckersDir is a checker with a Dir: both folders are
+// made in it, and are gone after the check.
+func TestTheTemporaryFoldersAreInTheCheckersDir(t *testing.T) {
+	f := newFixture(t, "#!/usr/bin/env node")
+	f.c.Dir = t.TempDir()
 	if _, err := f.post(t, "/artifacts", pushBody(t, "spec", [2]string{"spec.md", "x"})); err != nil {
 		t.Fatal(err)
 	}
 	for _, m := range f.e.mounts[1:] {
 		src := strings.TrimPrefix(strings.Split(m, ",")[1], "src=")
-		if mode := f.e.modes[src]; mode != 0o755 {
-			t.Errorf("%s has mode %o, want 755", src, mode)
+		if filepath.Dir(src) != f.c.Dir {
+			t.Errorf("%s is not in %s", src, f.c.Dir)
+		}
+	}
+	if left, _ := os.ReadDir(f.c.Dir); len(left) != 0 {
+		t.Errorf("%s has %v after the check", f.c.Dir, left)
+	}
+}
+
+// TestAnotherUserGetsFoldersItCanRead is a run whose user is not this process's, under
+// the umask 077: the two folders, the folders in them and their files open to it.
+func TestAnotherUserGetsFoldersItCanRead(t *testing.T) {
+	defer syscall.Umask(syscall.Umask(0o077))
+	f := newFixture(t, "#!/usr/bin/env node")
+	f.c.User = fmt.Sprintf("%d:%d", os.Getuid()+1, os.Getgid())
+	f.c.Fetch = func(_ context.Context, dir string, _ []string) error {
+		if err := os.MkdirAll(filepath.Join(dir, "spec", "main", "v1"), 0o755); err != nil {
+			return err
+		}
+		return os.WriteFile(filepath.Join(dir, "spec", "main", "v1", "spec.md"), []byte("old"), 0o644)
+	}
+	var modes map[string]fs.FileMode
+	f.e.start = func(context.Context, io.Writer, io.Writer) error {
+		modes = map[string]fs.FileMode{}
+		for _, m := range f.e.mounts[1:] {
+			src := strings.TrimPrefix(strings.Split(m, ",")[1], "src=")
+			filepath.WalkDir(src, func(path string, d fs.DirEntry, err error) error {
+				if err == nil {
+					info, _ := d.Info()
+					rel, _ := filepath.Rel(src, path)
+					modes[filepath.Base(src)+"/"+filepath.ToSlash(rel)] = info.Mode().Perm()
+				}
+				return err
+			})
+		}
+		return nil
+	}
+	if _, err := f.post(t, "/artifacts", pushBody(t, "spec", [2]string{"spec.md", "x"})); err != nil {
+		t.Fatal(err)
+	}
+	if len(modes) != 7 {
+		t.Errorf("the folders have %v, want 7 entries", modes)
+	}
+	for path, mode := range modes {
+		want := fs.FileMode(0o755)
+		if strings.HasSuffix(path, ".md") {
+			want = 0o644
+		}
+		if mode != want {
+			t.Errorf("%s has mode %o, want %o", path, mode, want)
 		}
 	}
 }
@@ -410,18 +515,66 @@ func TestAFindingStopsThePush(t *testing.T) {
 }
 
 // TestStderrIsReadWhenStdoutIsEmpty is a check that prints its findings on stderr
-// alone, and one that prints more than 200 lines.
+// alone: the first finding says so, and the lines of stderr follow it, masked and
+// without control characters, at most 200 findings with that line. A check that prints
+// more than 200 lines on stdout has 200 findings.
 func TestStderrIsReadWhenStdoutIsEmpty(t *testing.T) {
 	f := newFixture(t, "#!/usr/bin/env node")
-	f.e.exit(2, "\n", "first\nsecond\n")
+	f.c.Mask = func(s string) string { return strings.ReplaceAll(s, "s3cr3t-value", "***") }
+	f.e.exit(2, "\n  \n", "first\x1b[0m\nkey s3cr3t-value\n")
 	r, err := f.post(t, "/artifacts", pushBody(t, "spec", [2]string{"spec.md", "x"}))
-	if err != nil || r == nil || !slices.Equal(r.Findings, []string{"first", "second"}) {
-		t.Fatalf("got %+v, %v, want the two lines of stderr", r, err)
+	want := []string{"The check exited with 2 and printed nothing on stdout. Its stderr:", "first[0m", "key ***"}
+	if err != nil || r == nil || !slices.Equal(r.Findings, want) {
+		t.Fatalf("got %+v, %v, want %q", r, err, want)
+	}
+	f.e.exit(1, "", strings.Repeat("line\n", 250))
+	r, err = f.post(t, "/artifacts", pushBody(t, "spec", [2]string{"spec.md", "x"}))
+	if err != nil || r == nil || len(r.Findings) != 200 || r.Findings[0] != "The check exited with 1 and printed nothing on stdout. Its stderr:" || r.Findings[199] != "line" {
+		t.Fatalf("got %d findings %q, %v, want the line and 199 of stderr", len(r.Findings), r.Findings, err)
 	}
 	f.e.exit(1, strings.Repeat("line\n", 250), "")
 	r, err = f.post(t, "/artifacts", pushBody(t, "spec", [2]string{"spec.md", "x"}))
 	if err != nil || r == nil || len(r.Findings) != 200 {
 		t.Fatalf("got %d findings, %v, want 200", len(r.Findings), err)
+	}
+}
+
+// TestACheckThatPrintsNothingHasOneFinding is a check that exits 3 and prints nothing,
+// or blank lines alone: one finding with its exit.
+func TestACheckThatPrintsNothingHasOneFinding(t *testing.T) {
+	f := newFixture(t, "#!/usr/bin/env node")
+	for _, out := range [][2]string{{"", ""}, {"\n \n", "\x1b\n"}} {
+		f.e.exit(3, out[0], out[1])
+		r, err := f.post(t, "/artifacts", pushBody(t, "spec", [2]string{"spec.md", "x"}))
+		if want := []string{"The check exited with 3 and printed nothing."}; err != nil || r == nil || !slices.Equal(r.Findings, want) {
+			t.Errorf("%q: got %+v, %v, want %q", out, r, err, want)
+		}
+	}
+}
+
+// TestThePushStepGetsItsLines is the line of each failure for the push step: the fix
+// without "push again", then the cause; for a failed check, the cause alone.
+func TestThePushStepGetsItsLines(t *testing.T) {
+	f := newFixture(t, "#!/usr/bin/env node")
+	files := []pushcheck.File{{Name: "spec.md", Content: []byte("x")}}
+	f.e.exit(1, "a finding\n", "")
+	failed, err := f.c.Check(context.Background(), "spec", files)
+	if err != nil || failed == nil || failed.Step != "The check for spec failed:" || !slices.Equal(failed.Findings, []string{"a finding"}) {
+		t.Errorf("a failed check: %+v, %v", failed, err)
+	}
+	f.e.exit(127, "", "/usr/bin/env: 'node': No such file or directory\n")
+	failed, err = f.c.Check(context.Background(), "spec", files)
+	if want := "Install node, or run in an image built FROM qory-agent. The check for spec could not start: /usr/bin/env: 'node': No such file or directory."; err != nil || failed == nil || failed.Step != want {
+		t.Errorf("a check that did not start: %+v, %v, want %q", failed, err, want)
+	}
+	f.c.Limit = 50 * time.Millisecond
+	f.e.start = func(ctx context.Context, _, _ io.Writer) error {
+		<-ctx.Done()
+		return ctx.Err()
+	}
+	failed, err = f.c.Check(context.Background(), "spec", files)
+	if want := "Make the check for spec finish within 30 s. It ran longer and was stopped."; err != nil || failed == nil || failed.Step != want {
+		t.Errorf("a check past its limit: %+v, %v, want %q", failed, err, want)
 	}
 }
 
@@ -452,14 +605,14 @@ func TestAProgramThatCannotStartStopsThePush(t *testing.T) {
 			e.exit(127, "", "[FATAL tini (7)] exec /home/c failed: No such file or directory\n")
 		}, "Install the program PROGRAM, and push again. The check for spec could not start: exec /home/c failed: No such file or directory."},
 		{"not executable", "#!/bin/sh", func(e *engine) {
-			e.exit(126, "", "")
-		}, "Install the program PROGRAM, and push again. The check for spec could not start: it exited with 126."},
-		{"no image", "#!/usr/bin/env node", func(e *engine) {
-			e.create = func(stderr io.Writer) error {
-				io.WriteString(stderr, "Error response from daemon: No such image: registry.example/agent\n")
-				return errors.New("exit status 1")
-			}
-		}, "Install node, or run in an image built FROM qory-agent, and push again. The check for spec could not start: Error response from daemon: No such image: registry.example/agent."},
+			e.exit(126, "", "[FATAL tini (7)] exec /home/c failed: Permission denied\n")
+		}, "Install the program PROGRAM, and push again. The check for spec could not start: exec /home/c failed: Permission denied."},
+		{"busybox env", "#!/usr/bin/env node", func(e *engine) {
+			e.exit(127, "", "env: can't execute 'node': No such file or directory\n")
+		}, "Install node, or run in an image built FROM qory-agent, and push again. The check for spec could not start: env: can't execute 'node': No such file or directory."},
+		{"interpreter", "#!/usr/local/bin/deno run", func(e *engine) {
+			e.exit(127, "", "sh: /usr/local/bin/deno: not found\n")
+		}, "Install the program PROGRAM, and push again. The check for spec could not start: sh: /usr/local/bin/deno: not found."},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -477,6 +630,28 @@ func TestAProgramThatCannotStartStopsThePush(t *testing.T) {
 				t.Errorf("the engine ran %v, want rm last", verbs)
 			}
 		})
+	}
+}
+
+// TestAnExit126Or127OfTheCheckIsAFinding is a check that exits 126 or 127 for another
+// reason than the start of its program, such as a program it runs that is not there:
+// a failed check with its stderr as findings.
+func TestAnExit126Or127OfTheCheckIsAFinding(t *testing.T) {
+	for _, tc := range []struct {
+		code   int
+		stderr string
+	}{
+		{127, "/home/modules/core/checks.sh: 3: markdownlint: not found\n"},
+		{127, "node:internal/modules/cjs/loader:1228\n  throw err;\nError: Cannot find module '/home/x.js'\n"},
+		{126, "/home/modules/core/checks.sh: line 2: ./lint: Permission denied\n"},
+		{126, ""},
+	} {
+		f := newFixture(t, "#!/bin/sh")
+		f.e.exit(tc.code, "", tc.stderr)
+		r, err := f.post(t, "/artifacts", pushBody(t, "spec", [2]string{"spec.md", "x"}))
+		if err != nil || r == nil || r.Message != "Fix each finding below and push again. The check for spec failed:" || len(r.Findings) == 0 || !strings.HasPrefix(r.Findings[0], fmt.Sprintf("The check exited with %d and printed nothing", tc.code)) {
+			t.Errorf("%d %q: got %+v, %v, want a failed check", tc.code, tc.stderr, r, err)
+		}
 	}
 }
 
@@ -528,6 +703,12 @@ func TestAFailureOfQorysWorkIsAnError(t *testing.T) {
 		"init": func(f *fixture) {
 			f.e.state = `{"Status":"created","ExitCode":127,"Error":"failed to create task for container: OCI runtime create failed: error mounting: unknown"}`
 		},
+		"no image": func(f *fixture) {
+			f.e.create = func(stderr io.Writer) error {
+				io.WriteString(stderr, "Error response from daemon: No such image: registry.example/agent\n")
+				return errors.New("exit status 1")
+			}
+		},
 	}
 	for name, set := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -555,17 +736,67 @@ func TestAFailureOfQorysWorkIsAnError(t *testing.T) {
 	}
 }
 
-// TestAFileNameTheCheckCannotWriteIsAnError is a push of a type with a check whose
-// file name is no name in a folder, or repeats one.
-func TestAFileNameTheCheckCannotWriteIsAnError(t *testing.T) {
+// TestAFileNameTheCheckCannotWriteGets422 is a push of a type with a check whose
+// file name is no name in a folder, is longer than 255 bytes, or repeats one: 422 with
+// the fix and the name.
+func TestAFileNameTheCheckCannotWriteGets422(t *testing.T) {
 	f := newFixture(t, "#!/usr/bin/env node")
-	for _, files := range [][][2]string{{{"../x.md", "x"}}, {{"a.md", "x"}, {"a.md", "y"}}} {
-		if r, err := f.post(t, "/artifacts", pushBody(t, "spec", files...)); err == nil || r != nil {
-			t.Errorf("%v: got %+v, %v, want an error", files, r, err)
-		}
+	fix := "Give each file a different name of at most 255 bytes, other than . and .., with no slash, backslash or control character, and push again. "
+	long := strings.Repeat("a", 253) + ".md"
+	for _, tc := range []struct {
+		files [][2]string
+		cause string
+	}{
+		{[][2]string{{"../x.md", "x"}}, `"../x.md" is not one.`},
+		{[][2]string{{"a\\b.md", "x"}}, `"a\\b.md" is not one.`},
+		{[][2]string{{"..", "x"}}, `".." is not one.`},
+		{[][2]string{{"", "x"}}, `"" is not one.`},
+		{[][2]string{{"a\nb.md", "x"}}, `"a\nb.md" is not one.`},
+		{[][2]string{{long, "x"}}, `"` + long + `" is not one.`},
+		{[][2]string{{"a.md", "x"}, {"a.md", "y"}}, `"a.md" is the name of two files.`},
+	} {
+		r, err := f.post(t, "/artifacts", pushBody(t, "spec", tc.files...))
+		wantRefusal(t, fmt.Sprint(tc.files), r, err, fix+tc.cause)
 	}
 	if len(f.e.commands) != 0 {
 		t.Errorf("ran %v, want nothing", f.e.commands)
+	}
+	if r, err := f.post(t, "/artifacts", pushBody(t, "spec", [2]string{strings.Repeat("a", 252) + ".md", "x"})); r != nil || err != nil {
+		t.Errorf("a name of 255 bytes: got %+v, %v, want nil, nil", r, err)
+	}
+}
+
+// oneFileHere reports whether a and b are one file in a folder of this machine's
+// temporary folder, whose file system may ignore case or the form of an accent.
+func oneFileHere(t *testing.T, a, b string) bool {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, a), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := os.Stat(filepath.Join(dir, b))
+	return err == nil
+}
+
+// TestNamesThatAreOneFileHereGet422 is a push of A.md and a.md, and of café.md
+// with its é as one character and as e and an accent: on a file system that ignores
+// case, or the form of an accent, 422 with the fix and both names, and no check; on
+// one that does not, the check gets both files.
+func TestNamesThatAreOneFileHereGet422(t *testing.T) {
+	nfc, nfd := "caf\u00e9.md", "cafe\u0301.md"
+	for _, pair := range [][2]string{{"A.md", "a.md"}, {nfc, nfd}} {
+		f := newFixture(t, "#!/usr/bin/env node")
+		r, err := f.post(t, "/artifacts", pushBody(t, "spec", [2]string{pair[0], "one"}, [2]string{pair[1], "two"}))
+		if !oneFileHere(t, pair[0], pair[1]) {
+			if r != nil || err != nil || len(f.e.pushed) != 2 {
+				t.Errorf("%q on a file system that keeps them apart: got %+v, %v, pushed %v", pair, r, err, f.e.pushed)
+			}
+			continue
+		}
+		wantRefusal(t, fmt.Sprintf("%q", pair), r, err, fmt.Sprintf("Give each file a different name, also when you ignore case and accents, and push again. %q and %q are one file on this machine.", pair[0], pair[1]))
+		if len(f.e.commands) != 0 || len(f.fetched) != 0 {
+			t.Errorf("%q: fetched %v and ran %v, want nothing", pair, f.fetched, f.e.commands)
+		}
 	}
 }
 
@@ -599,6 +830,29 @@ func TestTheEngineRunsWithoutTheAccessKey(t *testing.T) {
 	}
 	if !strings.Contains(string(data), "DOCKER_HOST=unix:///test.sock") {
 		t.Errorf("the engine's command lacks the engine's selection:\n%s", data)
+	}
+
+	// With the wall's selection, the command gets it in place of this process's.
+	if err := os.Remove(log); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("DOCKER_CONTEXT", "other")
+	f.c.Engine.Env = []string{"DOCKER_HOST=unix:///wall.sock", "DOCKER_CONFIG=/wall/config"}
+	if r, err := f.post(t, "/artifacts", pushBody(t, "spec", [2]string{"spec.md", "x"})); r != nil || err != nil {
+		t.Fatalf("got %+v, %v, want nil, nil", r, err)
+	}
+	if data, err = os.ReadFile(log); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"DOCKER_HOST=unix:///wall.sock\n", "DOCKER_CONFIG=/wall/config\n"} {
+		if !strings.Contains(string(data), want) {
+			t.Errorf("the engine's command lacks %q:\n%s", want, data)
+		}
+	}
+	for _, unwanted := range []string{"test.sock", "DOCKER_CONTEXT", "qrk_test", "qak_test"} {
+		if strings.Contains(string(data), unwanted) {
+			t.Errorf("the engine's command has %q:\n%s", unwanted, data)
+		}
 	}
 }
 
@@ -641,6 +895,8 @@ func TestARealCheckRunsInTheEngine(t *testing.T) {
 			Checks: []compose.PushCheck{{Type: "spec", Module: "core", Command: []string{program, "push"}}},
 			Image:  realImage,
 			User:   fmt.Sprintf("%d:%d", os.Getuid(), os.Getgid()),
+			Label:  "dev.qory.run=run-push-check-test",
+			Limits: wall.Limits{CPUs: "1", Memory: "256m"},
 			Fetch: func(_ context.Context, dir string, _ []string) error {
 				if err := os.MkdirAll(filepath.Join(dir, "spec", "main", "v1"), 0o755); err != nil {
 					return err
@@ -672,6 +928,10 @@ func TestARealCheckRunsInTheEngine(t *testing.T) {
 	node := write("node", "#!/usr/bin/env node\n")
 	if r := check(checker(node)); r == nil || !strings.HasPrefix(r.Message, "Install node, or run in an image built FROM qory-agent, and push again. The check for spec could not start: ") {
 		t.Errorf("the check without node got %+v", r)
+	}
+	lint := write("lint", "#!/bin/sh\nnosuchlinter \"$2\"\n")
+	if r := check(checker(lint)); r == nil || r.Message != "Fix each finding below and push again. The check for spec failed:" || len(r.Findings) != 2 || r.Findings[0] != "The check exited with 127 and printed nothing on stdout. Its stderr:" || !strings.Contains(r.Findings[1], "nosuchlinter") {
+		t.Errorf("the check whose linter is not there got %+v", r)
 	}
 	missing := filepath.Join(home, "modules", "core", "missing")
 	if r := check(checker(missing)); r == nil || !strings.HasPrefix(r.Message, "Install the program "+missing+", and push again. The check for spec could not start: exec "+missing+" failed: No such file or directory.") {

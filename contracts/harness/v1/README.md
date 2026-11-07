@@ -668,8 +668,10 @@ the module, a relative path with no `..` part, such as an executable script with
 `^[a-z0-9]+(-[a-z0-9]+)*$` or is longer than 64 bytes, one type twice in one module, an
 empty command, a word of the command that is not a string, and a value of `reads` that is
 not a type or is listed twice fail the compose, each with the manifest's path. The compose
-also fails when two modules declare a check for one type, `Remove the push check for spec
-from module core or module web: a type has one push check, and both modules declare one`;
+also fails for a check of the type `verdict`, `Remove the push check for verdict from
+module core: a verdict is sent by qory run verdict, which push checks do not cover`; when
+two modules declare a check for one type, `Remove the push check for spec from module core
+or module web: a type has one push check, and both modules declare one`;
 when the program is not a file in the module, `Add checks/check.js to module core, or
 change its push check for spec: the module has no file at that path`; and when the program
 is in an entry an `exclude` or an `only` of its module leaves out. The home contains
@@ -679,9 +681,12 @@ absolute path in the home; a harness whose modules declare no check has no such 
 **Push checks.** A push check runs in a run behind a wall, before a push of its type
 reaches Qory Apiary: for every push to the run API from inside the wall, through `qory
 artifact push` or any other request, and for the version that the push step stores after
-the agent. qory runs the program on the host's engine, in a new container from the run's
-image, as the run's user, with no network, no capability and no variable but the image's
-and `HOME`. The container gets three read-only folders:
+the agent. qory runs the program on the engine of the run's wall, in a new container from
+the run's image, as the run's user, with no network and no capability. The container has
+no variable but the image's and those Docker sets: `HOME`, `HOSTNAME` and `PATH`. It has
+the wall's CPU and memory limits of the run's containers, the wall's process limit or 512
+processes, and the label of the run's containers, so the clean-up of the run removes a
+container that a stopped qory left. The container gets three read-only folders:
 
 - the home, at its path, so the program's absolute path in `push-checks.json` is valid;
 - the working folder: the work item's artifact index, `index.json`, and the newest version
@@ -689,21 +694,54 @@ and `HOME`. The container gets three read-only folders:
   pull`, `<type>/<name>/v<N>/<files>`; a type with no version has no folder;
 - the pushed files, under their names, whose paths follow the command's arguments.
 
+qory makes the last two in the run directory, in a folder that only its user can list,
+and removes them after each check.
+
 A check that exits 0 lets the push go on with the bytes it checked. Any other exit stops
 the push with 422 `push_check_failed` and `Fix each finding below and push again. The check
-for <type> failed:`, with the findings: the lines of the program's standard output, or of
-its standard error when standard output has none, without control characters, at most
-200 lines of at most 1,000 characters. qory reads at most 64 KiB of each stream. A program
-that does not start stops the push with 422 too: `Install node, or run in an image built
-FROM qory-agent, and push again. The check for <type> could not start: <error>.` when its
-`#!` line is for `node`, else `Install the program <path>, and push again. The check for
-<type> could not start: <error>.` A program still running after 30 seconds is stopped, with
-`Make the check for <type> finish within 30 s, and push again. It ran longer and was
-stopped.` When qory cannot run the check, such as when the fetch of the artifacts fails or
-the engine is not reachable, the push stops with 503 `push_check_unavailable`. Node is needed
-only by a check whose program uses it: Qory's agent image, and every image built FROM it,
-has it. A run without a wall runs no check, and outside a run `qory artifact push` keeps
-the files in `.qory/artifacts` and runs no check.
+for <type> failed:`, with the findings: the lines of the program's standard output. When
+standard output has none, the first finding is `The check exited with <N> and printed
+nothing on stdout. Its stderr:`, and the lines of standard error follow it. When neither
+has a line, the one finding is `The check exited with <N> and printed nothing.` Each
+finding is without control characters, with the run's secrets masked, and at most 1,000
+characters; a check has at most 200 findings. qory reads at most 64 KiB of each stream.
+
+A program that does not start stops the push with 422 too: `Install node, or run in an
+image built FROM qory-agent, and push again. The check for <type> could not start:
+<error>.` when its `#!` line is for `node`, else `Install the program <path>, and push
+again. The check for <type> could not start: <error>.` A program does not start when it
+exits with 126 or 127 and the last line of its standard error is the container's init's
+line for the program, or ends with `not found`, `No such file or directory` or
+`Permission denied` for the program or a word of its `#!` line, such as
+`/usr/bin/env: 'node': No such file or directory`. Any other exit with 126 or 127, such as
+one for a program that the check runs, is a check that failed. A program still running
+after 30 seconds is stopped, with `Make the check for <type> finish within 30 s, and push
+again. It ran longer and was stopped.`
+
+In a run whose home has push checks, a push that the check cannot read gets 422
+`push_check_failed` too, before any check runs, whatever its type:
+
+- a body that is not a push in the run API's form: `Send the push as qory artifact push
+  sends it, and push again. The body is not a push: <cause>.`;
+- a member twice in one object, or one whose name differs from a member of the push only
+  in case: `Send each member of the push once, in lower case, and push again.`;
+- of a type with a check, a file's name that is empty, `.` or `..`, longer than 255 bytes,
+  or contains a slash, a backslash or a control character, or one that is there twice:
+  `Give each file a different name of at most 255 bytes, other than . and .., with no
+  slash, backslash or control character, and push again. <name> is not one.`, or `<name>
+  is the name of two files.`;
+- of a type with a check, two files whose names differ only in case or in the form of an
+  accent, on a machine whose file system keeps them as one file, such as macOS: `Give each
+  file a different name, also when you ignore case and accents, and push again. <a> and <b>
+  are one file on this machine.`
+
+When qory cannot run the check, the push stops with 503 `push_check_unavailable`, and qory
+run writes the cause as a line on its stderr: the fetch of the artifacts fails, two files
+of a fetched version are one file on this machine, the engine is not reachable or does
+not create the container, the engine has no run's image, or a temporary folder cannot be
+made. Node is needed only by a check whose program uses it: Qory's agent image, and every
+image built FROM it, has it. A run without a wall runs no check, and outside a run `qory
+artifact push` keeps the files in `.qory/artifacts` and runs no check.
 
 A module's tree contains these entry kinds:
 

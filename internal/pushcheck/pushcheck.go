@@ -3,8 +3,8 @@
 // run's image, with no network, as the run's user, with the home read-only at its path,
 // the newest versions of the work item's artifacts as the working folder and the pushed
 // files beside them. A check that exits 0 lets the version go on; any other end is a
-// [session.RunAPIRefusal] with the fix first, which a walled run's forwarder sends to the
-// program that pushed, and which the host's push step prints.
+// [Failure] with the fix first, which a walled run's forwarder sends to the program that
+// pushed as a [session.RunAPIRefusal], and which the host's push step prints.
 package pushcheck
 
 import (
@@ -32,6 +32,7 @@ import (
 
 	"github.com/qoryai/forager/accesskey"
 	"github.com/qoryai/forager/session"
+	"github.com/qoryai/forager/wall"
 
 	"github.com/qoryai/qory/internal/compose"
 	"github.com/qoryai/qory/internal/exports"
@@ -41,6 +42,9 @@ import (
 
 // The limits of one check.
 const (
+	// PIDs is the most processes and threads of a check's container when the wall sets
+	// no limit for the run's containers.
+	PIDs = 512
 	// Limit is how long the check's program may run, from the start of its container.
 	Limit = 30 * time.Second
 	// Budget is how long one check has for the fetch and the engine's commands. With
@@ -67,12 +71,33 @@ const (
 	FilesDir = "/qory-push-check/files"
 )
 
-// The texts of a refusal. Each starts with its fix.
+// The texts of a check that did not pass. The program that pushed gets the fix, ", and
+// push again.", then the cause; the push step's line has the fix, then the cause.
 const (
-	textFailed    = "Fix each finding below and push again. The check for %s failed:"
-	textNoNode    = "Install node, or run in an image built FROM qory-agent, and push again. The check for %s could not start: %s."
-	textNoProgram = "Install the program %s, and push again. The check for %s could not start: %s."
-	textTimeLimit = "Make the check for %s finish within 30 s, and push again. It ran longer and was stopped."
+	textFailed      = "The check for %s failed:"
+	textFailedFix   = "Fix each finding below and push again. "
+	textNoNode      = "Install node, or run in an image built FROM qory-agent"
+	textNoProgram   = "Install the program %s"
+	textNotStarted  = "The check for %s could not start: %s."
+	textTimeLimit   = "Make the check for %s finish within 30 s"
+	textTimeCause   = "It ran longer and was stopped."
+	textNoOutput    = "The check exited with %d and printed nothing."
+	textStderrLabel = "The check exited with %d and printed nothing on stdout. Its stderr:"
+)
+
+// textUnread is the error of a home's push checks that cannot be read.
+const textUnread = "Compose the harness again, and run again. The push checks in %s could not be read: %s."
+
+// The texts of a push that the check cannot read, each with its fix.
+const (
+	textNoPush        = "Send the push as qory artifact push sends it"
+	textNoPushCause   = "The body is not a push: %s."
+	textMembers       = "Send each member of the push once, in lower case"
+	textFilename      = "Give each file a different name of at most 255 bytes, other than . and .., with no slash, backslash or control character"
+	textFilenameBad   = "%s is not one."
+	textFilenameTwice = "%s is the name of two files."
+	textOneFile       = "Give each file a different name, also when you ignore case and accents"
+	textOneFileCause  = "%s and %s are one file on this machine."
 )
 
 const (
@@ -106,11 +131,23 @@ type Fetch func(ctx context.Context, dir string, types []string) error
 type Engine struct {
 	// Command is the program, docker or the value of wall.command; empty means docker.
 	Command string
+	// Env, when not nil, is the selection of the engine, NAME=value, as the wall
+	// recorded it at the run's open: the command runs with it in place of the variables
+	// of [EngineVariables] that this process has.
+	Env []string
 	// Run runs argv with its standard output and standard error going to the writers,
 	// and returns its error, an *exec.ExitError for an exit otherwise than 0. Nil runs it
 	// on this machine with this process's environment without the access key's
 	// variables and the run key, as the wall runs the engine's command.
 	Run func(ctx context.Context, argv []string, stdout, stderr io.Writer) error
+}
+
+// EngineVariables are the variables that select the engine that the docker command,
+// podman or nerdctl reaches, as Forager's wall has them.
+var EngineVariables = []string{
+	"DOCKER_HOST", "DOCKER_CONTEXT", "DOCKER_CONFIG", "DOCKER_CERT_PATH",
+	"DOCKER_TLS_VERIFY", "CONTAINER_HOST", "CONTAINER_CONNECTION", "CONTAINERD_ADDRESS",
+	"CONTAINERD_NAMESPACE",
 }
 
 // Checker runs the push checks of one run.
@@ -125,32 +162,76 @@ type Checker struct {
 	Image, User string
 	Engine      Engine
 	Fetch       Fetch
+	// Dir is the folder the check's temporary folders are made in; "" for the system's
+	// temporary folder.
+	Dir string
+	// Limits are the wall's limits of the run's containers. A check's container gets
+	// their CPUs and Memory, and their PIDs, or [PIDs] when it is 0.
+	Limits wall.Limits
+	// Label is the label, NAME=value, that the wall removes the run's containers by; ""
+	// for none.
+	Label string
 	// Mask replaces each secret value of the run in a text; nil leaves the text as it is.
 	Mask func(string) string
 	// Limit, when set, replaces [Limit]. Tests set it.
 	Limit time.Duration
 }
 
+// Failure is a check that did not pass, or a push that the check cannot read.
+type Failure struct {
+	// Message is the line for the program that pushed: the fix, then "push again", then
+	// the cause.
+	Message string
+	// Step is the line for the push step: the fix without "push again", then the cause;
+	// for a check that failed, the cause alone.
+	Step string
+	// Findings are the lines of the check; nil for none.
+	Findings []string
+}
+
+// Refusal is the run API's 422 [runapi.CodePushCheckFailed] for f, nil for a nil f.
+func (f *Failure) Refusal() *session.RunAPIRefusal {
+	if f == nil {
+		return nil
+	}
+	return &session.RunAPIRefusal{Status: http.StatusUnprocessableEntity, Code: runapi.CodePushCheckFailed, Message: f.Message, Findings: f.Findings}
+}
+
+// failure is the failure with fix and cause, which may be "".
+func failure(fix, cause string) *Failure {
+	f := &Failure{Message: fix + ", and push again.", Step: fix + "."}
+	if cause != "" {
+		f.Message += " " + cause
+		f.Step += " " + cause
+	}
+	return f
+}
+
 // Load reads the push checks of the home at home, from [render.PushChecksFile]; nil when
-// the home has no such file, as a harness whose modules declare no check.
+// the home has no such file, as a harness whose modules declare no check. An error
+// starts with its fix.
 func Load(home string) ([]compose.PushCheck, error) {
-	data, err := os.ReadFile(filepath.Join(home, render.PushChecksFile))
+	file := filepath.Join(home, render.PushChecksFile)
+	unread := func(cause string) error {
+		return fmt.Errorf(textUnread, exports.Value(file, false), strings.TrimSuffix(cause, "."))
+	}
+	data, err := os.ReadFile(file)
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil, nil
 	}
 	if err != nil {
-		return nil, fmt.Errorf("Compose the harness again. Reading its push checks failed: %w", exports.HideError(err))
+		return nil, unread(exports.HideError(err).Error())
 	}
-	var file render.PushChecks
-	if err := json.Unmarshal(data, &file); err != nil {
-		return nil, fmt.Errorf("Compose the harness again. Its %s does not read: %w", render.PushChecksFile, err)
+	var checks render.PushChecks
+	if err := json.Unmarshal(data, &checks); err != nil {
+		return nil, unread("it is not JSON in the form the compose writes: " + err.Error())
 	}
-	for _, c := range file.PushChecks {
+	for _, c := range checks.PushChecks {
 		if len(c.Command) == 0 || !filepath.IsAbs(c.Command[0]) {
-			return nil, fmt.Errorf("Compose the harness again. Its %s has a push check for %s with no program's path", render.PushChecksFile, exports.Value(c.Type, true))
+			return nil, unread(fmt.Sprintf("the check for %s has no absolute path of a program", exports.Value(c.Type, true)))
 		}
 	}
-	return file.PushChecks, nil
+	return checks.PushChecks, nil
 }
 
 // For is the check of artifactType, nil for none.
@@ -164,56 +245,68 @@ func (c *Checker) For(artifactType string) *compose.PushCheck {
 }
 
 // RunAPICheck is the check of a POST to the run API, for [session.OpenSpec.RunAPICheck].
-// Only a POST of /artifacts is checked, and of it only a push of a type with a check.
-// A body that is not a push in the run API's form passes as it is: the run API returns
-// its error. A body whose members [readPush] cannot read one way only, such as one with a
-// member twice, is an error, so the forwarder returns 503 and nothing is stored that
-// was not checked. The check never changes the body.
+// Only a POST of /artifacts of a checker with checks is checked. A body that is not a
+// push in the run API's form, or whose members [readPush] cannot read one way only, such
+// as one with a member twice, is a refusal: nothing is stored that was not checked. Of a
+// push, only one of a type with a check runs the check, and a file's name that is not
+// [runapi.LocalFilename] or is there twice is a refusal. The check never changes the
+// body.
 func (c *Checker) RunAPICheck(ctx context.Context, req session.RunAPIRequest) (*session.RunAPIRefusal, error) {
-	if req.Path != artifactsPath {
+	if req.Path != artifactsPath || len(c.Checks) == 0 {
 		return nil, nil
 	}
 	artifactType, files, err := readPush(req.Body)
-	if errors.Is(err, errAmbiguous) {
-		return nil, err
-	}
-	if err != nil || c.For(artifactType) == nil {
+	switch {
+	case errors.Is(err, errAmbiguous):
+		return failure(textMembers, "").Refusal(), nil
+	case err != nil:
+		return failure(textNoPush, fmt.Sprintf(textNoPushCause, cut(cleanLine(strings.TrimSuffix(err.Error(), "."))))).Refusal(), nil
+	case c.For(artifactType) == nil:
 		return nil, nil
 	}
 	for i, f := range files {
-		if !localFilename(f.Name) || slices.ContainsFunc(files[:i], func(o File) bool { return o.Name == f.Name }) {
-			return nil, fmt.Errorf("the push of %s has a file name the check cannot write: %s", artifactType, exports.Value(f.Name, true))
+		switch {
+		case !runapi.LocalFilename(f.Name):
+			return failure(textFilename, fmt.Sprintf(textFilenameBad, exports.Value(f.Name, true))).Refusal(), nil
+		case slices.ContainsFunc(files[:i], func(o File) bool { return o.Name == f.Name }):
+			return failure(textFilename, fmt.Sprintf(textFilenameTwice, exports.Value(f.Name, true))).Refusal(), nil
 		}
 	}
-	return c.Check(ctx, artifactType, files)
+	f, err := c.Check(ctx, artifactType, files)
+	return f.Refusal(), err
 }
 
-// Check runs the check of artifactType on files, the files of one version, within
-// [Budget]: nil, nil when artifactType has no check or the check exits 0. A check that
-// exits otherwise, cannot start or runs past [Limit] is a refusal with status 422 and
-// [runapi.CodePushCheckFailed]. A failure of the fetch, of a temporary folder or of the
-// engine is an error. Both temporary folders and the container are removed in every
-// case.
-func (c *Checker) Check(ctx context.Context, artifactType string, files []File) (*session.RunAPIRefusal, error) {
+// Check runs the check of artifactType on files, the files of one version, each with a
+// name that is [runapi.LocalFilename], within [Budget]: nil, nil when artifactType has no
+// check or the check exits 0. A check that exits otherwise, cannot start or runs past
+// [Limit] is a [Failure], and so are two files that are one file on this machine's file
+// system, which ignores case or the form of an accent. A failure of the fetch, of a
+// temporary folder or of the engine is an error. Both temporary folders and the
+// container are removed in every case.
+func (c *Checker) Check(ctx context.Context, artifactType string, files []File) (*Failure, error) {
 	check := c.For(artifactType)
 	if check == nil {
 		return nil, nil
 	}
 	ctx, cancel := context.WithTimeout(ctx, Budget)
 	defer cancel()
-	pulled, err := tempFolder()
+	pulled, err := c.tempFolder()
 	if err != nil {
 		return nil, err
 	}
 	defer os.RemoveAll(pulled)
-	pushed, err := tempFolder()
+	pushed, err := c.tempFolder()
 	if err != nil {
 		return nil, err
 	}
 	defer os.RemoveAll(pushed)
 	args := slices.Clone(check.Command[1:])
-	for _, f := range files {
-		if err := os.WriteFile(filepath.Join(pushed, f.Name), f.Content, 0o644); err != nil {
+	for i, f := range files {
+		err := writeNew(filepath.Join(pushed, f.Name), f.Content)
+		if errors.Is(err, fs.ErrExist) {
+			return oneFile(pushed, files[:i], f.Name), nil
+		}
+		if err != nil {
 			return nil, fmt.Errorf("writing the pushed file %s for the check failed: %w", exports.Value(f.Name, true), exports.HideError(err))
 		}
 		args = append(args, path.Join(FilesDir, f.Name))
@@ -231,27 +324,76 @@ func (c *Checker) Check(ctx context.Context, artifactType string, files []File) 
 	if err != nil {
 		return nil, err
 	}
-	return c.refusal(artifactType, check.Command[0], end), nil
+	return c.failure(artifactType, check.Command[0], end), nil
 }
 
-// tempFolder makes a new temporary folder that only this user can open.
-func tempFolder() (string, error) {
-	dir, err := os.MkdirTemp("", containerPrefix+"*")
+// writeNew writes content to a new file at path, and fails with an error that is
+// [fs.ErrExist] when a file is there: on a file system that ignores case or the form of
+// an accent, also one whose name differs in those alone.
+func writeNew(path string, content []byte) error {
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+	if err != nil {
+		return err
+	}
+	_, err = f.Write(content)
+	if closed := f.Close(); err == nil {
+		err = closed
+	}
+	return err
+}
+
+// oneFile is the failure of name, a file that could not be written into dir because a
+// file is there, after the files written: with the written file that is the same file
+// on this machine, when one is.
+func oneFile(dir string, written []File, name string) *Failure {
+	at, err := os.Stat(filepath.Join(dir, name))
+	if err == nil {
+		for _, w := range written {
+			if other, err := os.Stat(filepath.Join(dir, w.Name)); err == nil && os.SameFile(at, other) {
+				return failure(textOneFile, fmt.Sprintf(textOneFileCause, exports.Value(w.Name, true), exports.Value(name, true)))
+			}
+		}
+	}
+	return failure(textOneFile, "")
+}
+
+// tempFolder makes a new temporary folder in [Checker.Dir] that only this user can
+// open.
+func (c *Checker) tempFolder() (string, error) {
+	dir, err := os.MkdirTemp(c.Dir, containerPrefix+"*")
 	if err != nil {
 		return "", fmt.Errorf("making a temporary folder for the check failed: %w", exports.HideError(err))
 	}
 	return dir, nil
 }
 
-// openTo lets the run's user read both folders when that user is not this one: the
-// engine shows them to the container with their owner and mode.
-func (c *Checker) openTo(dirs ...string) error {
+// otherUser reports whether the run's user is not this process's user.
+func (c *Checker) otherUser() bool {
 	uid, _, _ := strings.Cut(c.User, ":")
-	if c.User == "" || uid == strconv.Itoa(os.Getuid()) {
+	return c.User != "" && uid != strconv.Itoa(os.Getuid())
+}
+
+// openTo lets the run's user read both folders and everything in them when that user
+// is not this one: the engine shows them to the container with their owner and mode,
+// and a umask such as 077 leaves a new file or folder to its owner alone. Each folder
+// gets mode 755 and each file 644.
+func (c *Checker) openTo(dirs ...string) error {
+	if !c.otherUser() {
 		return nil
 	}
 	for _, dir := range dirs {
-		if err := os.Chmod(dir, 0o755); err != nil {
+		err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+			switch {
+			case err != nil:
+				return err
+			case d.IsDir():
+				return os.Chmod(path, 0o755)
+			case d.Type().IsRegular():
+				return os.Chmod(path, 0o644)
+			}
+			return nil
+		})
+		if err != nil {
 			return fmt.Errorf("opening the check's folder to the run's user failed: %w", exports.HideError(err))
 		}
 	}
@@ -295,6 +437,10 @@ func (c *Checker) run(ctx context.Context, program string, args []string, pulled
 	create := []string{"create", "--name", name, "--network", "none", "--user", c.User,
 		"--cap-drop", "ALL", "--security-opt", "no-new-privileges", "--init", "--pull", "never",
 		"--no-healthcheck", "--workdir", WorkDir}
+	if c.Label != "" {
+		create = append(create, "--label", c.Label)
+	}
+	create = append(create, c.limits()...)
 	create = append(create, mounts...)
 	create = append(create, "--entrypoint", program, c.Image)
 	create = append(create, args...)
@@ -303,7 +449,7 @@ func (c *Checker) run(ctx context.Context, program string, args []string, pulled
 	var errOut bytes.Buffer
 	if err := c.engine(ctx, engineWait, nil, &errOut, create...); err != nil {
 		if noSuchImage(errOut.String()) {
-			return ended{startErr: lastLine(errOut.Bytes())}, nil
+			return ended{}, fmt.Errorf("the engine has no image %s for the check's container: %s", exports.Value(c.Image, false), engineError(errOut.Bytes(), err))
 		}
 		return ended{}, fmt.Errorf("the engine did not create the check's container: %s", engineError(errOut.Bytes(), err))
 	}
@@ -338,14 +484,68 @@ func (c *Checker) run(ctx context.Context, program string, args []string, pulled
 	case s.Status != "exited":
 		return ended{}, fmt.Errorf("the check's container is %s after its start, not exited (the start: %v)", exports.Value(s.Status, true), startErr)
 	case s.ExitCode == exitCannotInvoke || s.ExitCode == exitNotFound:
-		// --init's tini starts the program, and writes its failure as well.
-		line := tiniFatal.ReplaceAllString(lastLine(stderr.Bytes()), "")
-		if line == "" {
-			line = fmt.Sprintf("it exited with %d", s.ExitCode)
+		if line, ok := notStarted(program, lastLine(stderr.Bytes())); ok {
+			return ended{startErr: line}, nil
 		}
-		return ended{startErr: line}, nil
 	}
 	return ended{exitCode: s.ExitCode, stdout: stdout.Bytes(), stderr: stderr.Bytes()}, nil
+}
+
+// limits are the flags of the check container's limits.
+func (c *Checker) limits() []string {
+	var out []string
+	if c.Limits.CPUs != "" {
+		out = append(out, "--cpus", c.Limits.CPUs)
+	}
+	if c.Limits.Memory != "" {
+		out = append(out, "--memory", c.Limits.Memory)
+	}
+	pids := c.Limits.PIDs
+	if pids <= 0 {
+		pids = PIDs
+	}
+	return append(out, "--pids-limit", strconv.Itoa(pids))
+}
+
+// notStarted is the cause of a program that exited with 126 or 127 and whose standard
+// error ends with line, and true when line is about the start of the program itself:
+// the line of the container's init, which starts the program, without its prefix, or a
+// line that ends with "not found", "No such file or directory" or "Permission denied"
+// for the program or a word of its #! line, such as the line of /usr/bin/env for a
+// node it does not find. Any other line, such as one about a program that the check
+// runs, is false: an exit of the check.
+func notStarted(program, line string) (string, bool) {
+	if tiniFatal.MatchString(line) {
+		return tiniFatal.ReplaceAllString(line, ""), true
+	}
+	var rest string
+	found := false
+	for _, end := range []string{": not found", ": No such file or directory", ": Permission denied"} {
+		if rest, found = strings.CutSuffix(line, end); found {
+			break
+		}
+	}
+	if !found {
+		return "", false
+	}
+	// The name is the field before the cause, such as 'node' in
+	// "/usr/bin/env: 'node': No such file or directory", or in
+	// "env: can't execute 'node': No such file or directory".
+	name := rest
+	if i := strings.LastIndex(rest, ": "); i >= 0 {
+		name = rest[i+2:]
+	}
+	name = strings.TrimPrefix(strings.TrimSpace(name), "can't execute ")
+	name = strings.Trim(name, "'\"`‘’")
+	if name == "" {
+		return "", false
+	}
+	for _, word := range append([]string{program}, shebang(program)...) {
+		if name == word || path.Base(name) == path.Base(word) && !strings.Contains(name, "/") {
+			return line, true
+		}
+	}
+	return "", false
 }
 
 // engine runs one command of the engine with args, within wait when it is not 0.
@@ -373,32 +573,35 @@ func (c *Checker) engine(ctx context.Context, wait time.Duration, stdout, stderr
 	// The access key's variables and the run key are Forager's alone: the engine's
 	// command never receives them, as the wall's commands do not.
 	cmd.Env = accesskey.WithoutVariables(os.Environ())
+	if c.Engine.Env != nil {
+		cmd.Env = slices.DeleteFunc(cmd.Env, func(kv string) bool {
+			name, _, _ := strings.Cut(kv, "=")
+			return slices.Contains(EngineVariables, name)
+		})
+		cmd.Env = append(cmd.Env, c.Engine.Env...)
+	}
 	cmd.Stdout, cmd.Stderr = stdout, stderr
 	cmd.WaitDelay = time.Second
 	return cmd.Run()
 }
 
-// refusal is the refusal of a check of artifactType with program that ended as end, nil
+// failure is the failure of a check of artifactType with program that ended as end, nil
 // for an exit 0.
-func (c *Checker) refusal(artifactType, program string, end ended) *session.RunAPIRefusal {
-	r := &session.RunAPIRefusal{Status: http.StatusUnprocessableEntity, Code: runapi.CodePushCheckFailed}
+func (c *Checker) failure(artifactType, program string, end ended) *Failure {
 	switch {
 	case end.timedOut:
-		r.Message = fmt.Sprintf(textTimeLimit, artifactType)
+		return failure(fmt.Sprintf(textTimeLimit, artifactType), textTimeCause)
 	case end.startErr != "":
-		cause := strings.TrimSuffix(c.mask(cleanLine(end.startErr)), ".")
+		cause := fmt.Sprintf(textNotStarted, artifactType, strings.TrimSuffix(c.mask(cleanLine(end.startErr)), "."))
 		if namesNode(program) {
-			r.Message = fmt.Sprintf(textNoNode, artifactType, cause)
-		} else {
-			r.Message = fmt.Sprintf(textNoProgram, exports.Value(program, false), artifactType, cause)
+			return failure(textNoNode, cause)
 		}
+		return failure(fmt.Sprintf(textNoProgram, exports.Value(program, false)), cause)
 	case end.exitCode == 0:
 		return nil
-	default:
-		r.Message = fmt.Sprintf(textFailed, artifactType)
-		r.Findings = findings(end.stdout, end.stderr, c.mask)
 	}
-	return r
+	cause := fmt.Sprintf(textFailed, artifactType)
+	return &Failure{Message: textFailedFix + cause, Step: cause, Findings: findings(end.exitCode, end.stdout, end.stderr, c.mask)}
 }
 
 // mask is [Checker.Mask] applied to text.
@@ -409,16 +612,23 @@ func (c *Checker) mask(text string) string {
 	return c.Mask(text)
 }
 
-// findings are the lines of stdout, or of stderr when stdout has none, each without
-// control characters and masked, cut to [maxFinding] characters, at most [maxFindings]
-// of them. An empty line is no finding.
-func findings(stdout, stderr []byte, mask func(string) string) []string {
+// findings are the findings of a check that exited with code: the lines of stdout; when
+// stdout has none, [textStderrLabel] and then the lines of stderr; when neither has one,
+// [textNoOutput] alone. Each line is without control characters and masked, cut to
+// [maxFinding] characters, at most [maxFindings] of them, the label included. An empty
+// line is no finding.
+func findings(code int, stdout, stderr []byte, mask func(string) string) []string {
+	var label []string
 	lines := cleanLines(stdout)
 	if len(lines) == 0 {
 		lines = cleanLines(stderr)
+		if len(lines) == 0 {
+			return []string{fmt.Sprintf(textNoOutput, code)}
+		}
+		label = []string{fmt.Sprintf(textStderrLabel, code)}
 	}
-	if len(lines) > maxFindings {
-		lines = lines[:maxFindings]
+	if len(lines) > maxFindings-len(label) {
+		lines = lines[:maxFindings-len(label)]
 	}
 	for i, line := range lines {
 		if mask != nil {
@@ -426,7 +636,7 @@ func findings(stdout, stderr []byte, mask func(string) string) []string {
 		}
 		lines[i] = cut(line)
 	}
-	return lines
+	return append(label, lines...)
 }
 
 // cleanLines are the lines of b without control characters, and without the lines that
@@ -463,9 +673,15 @@ func cut(line string) string {
 // interpreter or one of its words, such as #!/usr/bin/env node; false for a program that
 // cannot be read.
 func namesNode(program string) bool {
+	return slices.ContainsFunc(shebang(program), func(word string) bool { return path.Base(word) == "node" })
+}
+
+// shebang is the words of the #! line of program, nil for a program with none or that
+// cannot be read.
+func shebang(program string) []string {
 	f, err := os.Open(program)
 	if err != nil {
-		return false
+		return nil
 	}
 	defer f.Close()
 	head := make([]byte, 256)
@@ -473,14 +689,9 @@ func namesNode(program string) bool {
 	line, _, _ := bytes.Cut(head[:n], []byte("\n"))
 	rest, ok := bytes.CutPrefix(line, []byte("#!"))
 	if !ok {
-		return false
+		return nil
 	}
-	for _, word := range strings.Fields(string(rest)) {
-		if path.Base(word) == "node" {
-			return true
-		}
-	}
-	return false
+	return strings.Fields(string(rest))
 }
 
 // tiniFatal is the start of the line that the container's init writes for a program it
@@ -528,12 +739,6 @@ func bindMount(src, dst string) (string, error) {
 		}
 	}
 	return "type=bind,src=" + src + ",dst=" + dst + ",readonly", nil
-}
-
-// localFilename reports whether name is safe as one file name in a folder.
-func localFilename(name string) bool {
-	return name != "" && name != "." && name != ".." && !strings.ContainsAny(name, `/\`) &&
-		strings.IndexFunc(name, unicode.IsControl) < 0
 }
 
 // capped keeps what is written to it up to limit bytes, and takes the rest without

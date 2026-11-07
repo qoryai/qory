@@ -17,6 +17,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/qoryai/qory/internal/exports"
+	"github.com/qoryai/qory/internal/runapi"
 	"github.com/qoryai/qory/internal/stack"
 )
 
@@ -92,10 +93,6 @@ type PushCheck struct {
 	// file; nil for none.
 	Reads []string
 }
-
-// ArtifactType is the form of an artifact type, as the run API and process.schema.json
-// have it.
-var ArtifactType = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
 
 // InsideModule reports whether path is a relative path that stays inside the module:
 // not empty, not absolute, and with no .. part. It returns the path cleaned.
@@ -434,14 +431,14 @@ func parseManifest(dir string, data []byte, err error) (*Manifest, error) {
 }
 
 // readPushChecks checks the push_checks items of the manifest at path: a type in the
-// form [ArtifactType] has, at most once, and a command whose first item is a path inside
+// form [runapi.ArtifactName] checks, at most once, and a command whose first item is a path inside
 // the module with no .. part, and reads, artifact types, each once. It returns the
 // items with each program's path cleaned, nil for none.
 func readPushChecks(path string, items []rawPushCheck) ([]PushCheck, error) {
 	var out []PushCheck
 	seen := map[string]bool{}
 	for i, item := range items {
-		if len(item.Type) > 64 || !ArtifactType.MatchString(item.Type) {
+		if !runapi.ArtifactName(item.Type) {
 			return nil, fmt.Errorf("%s: push_checks[%d].type: set it to an artifact type, lowercase letters and digits in groups joined by single hyphens, at most 64 bytes. The value is %s", path, i, exports.Value(item.Type, true))
 		}
 		if seen[item.Type] {
@@ -466,7 +463,7 @@ func readPushChecks(path string, items []rawPushCheck) ([]PushCheck, error) {
 		command := append([]string{program}, words[1:]...)
 		var reads []string
 		for j, node := range item.Reads {
-			if node.Kind != yaml.ScalarNode || node.Tag != "!!str" || len(node.Value) > 64 || !ArtifactType.MatchString(node.Value) {
+			if node.Kind != yaml.ScalarNode || node.Tag != "!!str" || !runapi.ArtifactName(node.Value) {
 				return nil, fmt.Errorf("%s: push_checks[%d].reads[%d]: set it to an artifact type, lowercase letters and digits in groups joined by single hyphens, at most 64 bytes. The value is %s", path, i, j, exports.Value(node.Value, true))
 			}
 			if slices.Contains(reads, node.Value) {

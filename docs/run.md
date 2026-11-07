@@ -224,8 +224,13 @@ the home refuses a walled run.
 A walled run whose home is inside the checkout, and whose modules declare `push_checks`,
 stops before the agent starts, with exit 2: `Set harness.home to a folder outside the
 checkout for a walled run. <path> is inside the checkout, where the agent can change the
-push checks.` The container mounts such a home with the checkout, read-write. A home
-without push checks starts as before.
+push checks.` The container mounts such a home with the checkout, read-write. So does a
+walled run with push checks whose `wall.mounts` or `--mount` has a read-write mount at or
+inside the home: `Mount <path> read-only, or move it out of the harness home, for a walled
+run with push checks. The agent could change the push checks through it.` A walled run
+whose home has a `push-checks.json` that qory cannot read stops before the setup and the
+agent, with exit 2: `Compose the harness again, and run again. The push checks in <path>
+could not be read: <cause>.` A home without push checks starts as before.
 
 When the run ends, qory says how, and its exit status goes with it:
 
@@ -2665,8 +2670,8 @@ files through the run API, whatever the type's maximum.
 In a walled run whose modules declare a push check for the type, the check runs before the
 push reaches Qory Apiary (see Push checks in `contracts/harness/v1/README.md`). A check
 that does not pass stops the push with 422 `push_check_failed`, and `qory artifact push`
-exits 4. It prints the fix line, such as `Fix each finding below and push again. The check
-for spec failed:`, then each finding of the check on a separate line:
+exits 4. `qory artifact push` prints the fix line, such as `Fix each finding below and push
+again. The check for spec failed:`, then each finding of the check on a separate line:
 
 ```text
 ✗ Fix each finding below and push again. The check for spec failed:
@@ -2675,10 +2680,14 @@ for spec failed:`, then each finding of the check on a separate line:
 
 Fix the files and push again. A check that did not finish stops the push with 503
 `push_check_unavailable`, and `qory artifact push` exits 1 with `Run the push again: the
-check before the push did not finish.` Neither push stores a version or keeps a copy in
-the store. The push step of a write run runs the check of the type `branch` before it
-stores its version: a check that does not pass prints its fix line and findings in the
-step's lines, and the step fails as when the version is not stored.
+check before the push did not finish.` qory run writes the cause on its stderr, as `qory
+run: the check before a push did not finish, and the push was not stored (503
+push_check_unavailable): <cause>`. Neither push stores a version or keeps a copy in the
+store. The push step of a write run runs the check of the type `branch` before it stores
+its version. A check that does not pass fails the step as when the version is not stored:
+the step's line, which ends `the version did not pass the check for branch; the code is
+used`, comes first, then `The check for branch failed:` and the findings, each a line of
+qory run.
 `qory run verdict` exits 4 for a request over its limit too. `qory work-item show` exits 3
 with no work item. These numbers mean a collision and a foreign path on `qory harness`.
 

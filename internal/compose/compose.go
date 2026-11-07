@@ -501,11 +501,15 @@ type PushCheck struct {
 	Reads []string `json:"reads,omitempty"`
 }
 
-// addPushChecks adds the push checks of the module name at dir to the result. A type
-// that another module already declares a check for fails the compose, and so does a
-// program that is not a file in the module, read through root when it is not nil, or
-// one in an entry the module's exclude or only leaves out, since the home can leave out
-// such an entry.
+// verdictType is the artifact type of a run's verdict, which qory run verdict sends to
+// a path of the run API that push checks do not check.
+const verdictType = "verdict"
+
+// addPushChecks adds the push checks of the module name at dir to the result. A check
+// for [verdictType] fails the compose, and so does a type that another module already
+// declares a check for, a program that is not a file in the module, read through root
+// when it is not nil, and one in an entry the module's exclude or only leaves out, since
+// the home can leave out such an entry.
 func addPushChecks(res *Result, checkers map[string]string, dir string, root *os.Root, name string, checks []module.PushCheck) error {
 	if len(checks) == 0 {
 		return nil
@@ -519,6 +523,9 @@ func addPushChecks(res *Result, checkers map[string]string, dir string, root *os
 		root = opened
 	}
 	for _, c := range checks {
+		if c.Type == verdictType {
+			return fmt.Errorf("Remove the push check for %s from module %s: a verdict is sent by qory run verdict, which push checks do not cover", verdictType, shown(name))
+		}
 		if other, ok := checkers[c.Type]; ok {
 			return fmt.Errorf("Remove the push check for %s from module %s or module %s: a type has one push check, and both modules declare one", c.Type, shown(other), shown(name))
 		}

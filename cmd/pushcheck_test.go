@@ -16,6 +16,8 @@ import (
 	"github.com/qoryai/forager/session"
 
 	"github.com/qoryai/qory/cmd"
+	"github.com/qoryai/qory/internal/compose"
+	"github.com/qoryai/qory/internal/pushcheck"
 )
 
 // TestAPushCheckReadsTheNewestVersionsInThePullLayout is the working folder of a push
@@ -185,6 +187,7 @@ func TestTheAgentsPushIsCheckedBeforeItLeaves(t *testing.T) {
 	p.onOpen = func(spec session.OpenSpec) { check = spec.RunAPICheck }
 	var refusal, verdict *session.RunAPIRefusal
 	var checkErr, verdictErr error
+	var parentMode fs.FileMode
 	p.run(t, func(string) {
 		if check == nil {
 			t.Error("the walled run's open has no RunAPICheck")
@@ -192,6 +195,9 @@ func TestTheAgentsPushIsCheckedBeforeItLeaves(t *testing.T) {
 		}
 		refusal, checkErr = check(context.Background(), session.RunAPIRequest{Path: "/artifacts", Body: specPush(t)})
 		verdict, verdictErr = check(context.Background(), session.RunAPIRequest{Path: "/verdict", Body: []byte(`{"verdict":"passed"}`)})
+		if info, err := os.Stat(filepath.Join(p.h.runDir, "push-checks")); err == nil {
+			parentMode = info.Mode().Perm()
+		}
 	}, func() (*session.Result, error) { return &session.Result{State: event.StateFailed, ExitCode: 3}, nil })
 	if checkErr != nil || refusal == nil {
 		t.Fatalf("the push of spec got %+v, %v, want a refusal\n%s", refusal, checkErr, checkLog(t, log))
@@ -215,7 +221,23 @@ func TestTheAgentsPushIsCheckedBeforeItLeaves(t *testing.T) {
 		t.Fatalf("the check's container does not mount the run's home under %s read-only at its path:\n%s", home, created)
 	}
 	program := filepath.Join(composed[1], "modules", "checks", "bin", "check")
+	// The check's folders are in the run directory's push-checks, which the run's user,
+	// another user, passes through and cannot list, and which is gone after the run.
+	parent := filepath.Join(p.h.runDir, "push-checks")
+	for _, dst := range []string{"/qory-push-check/artifacts", "/qory-push-check/files"} {
+		folder := regexp.MustCompile(`src=(\S+),dst=` + dst + `,readonly`).FindStringSubmatch(created)
+		if folder == nil || filepath.Dir(folder[1]) != parent {
+			t.Errorf("the folder at %s is not in %s:\n%s", dst, parent, created)
+		}
+	}
+	if parentMode != 0o711 {
+		t.Errorf("%s had mode %o during the check, want 711", parent, parentMode)
+	}
+	if _, err := os.Stat(parent); !os.IsNotExist(err) {
+		t.Errorf("%s is left after the run: %v", parent, err)
+	}
 	for _, want := range []string{
+		"--label dev.qory.run=" + p.runID, "--pids-limit 512",
 		"--network none", "--user 1000:1000",
 		"--entrypoint " + program + " example.com/agent:1 push spec /qory-push-check/files/spec.md",
 	} {
@@ -284,8 +306,11 @@ func TestThePushStepChecksItsVersion(t *testing.T) {
 		t.Errorf("the push step ended %s, want failed\n%s", state, r.out)
 	}
 	wants(t, r.log(),
-		"qory run: Fix each finding below and push again. The check for branch failed:\nqory run: branch.json: the ref is not the work item's\n",
-		"qory run: "+versionWays+", then take the work item in again: qory pushed qory/"+workItem+", and the version of the artifact branch was not stored: the version did not pass the check for branch; the code is used")
+		"qory run: "+versionWays+", then take the work item in again: qory pushed qory/"+workItem+", and the version of the artifact branch was not stored: the version did not pass the check for branch; the code is used\n"+
+			"qory run: The check for branch failed:\nqory run: branch.json: the ref is not the work item's\n")
+	if strings.Contains(r.log(), "push again") || strings.Count(r.out, "The check for branch failed:") != 1 {
+		t.Errorf("the step's lines have \"push again\", or the check's line not once:\n%s", r.out)
+	}
 	if !strings.Contains(checkLog(t, log), "/qory-push-check/files/branch.json") {
 		t.Errorf("the check did not get branch.json:\n%s", checkLog(t, log))
 	}
@@ -303,5 +328,85 @@ func TestThePushStepStoresAVersionThatPasses(t *testing.T) {
 	}
 	if !strings.Contains(checkLog(t, log), "/qory-push-check/files/branch.json") {
 		t.Errorf("the check did not run:\n%s", checkLog(t, log))
+	}
+}
+
+// TestAHomeWhosePushChecksDoNotReadStopsTheRun is a walled run whose composed home has a
+// push-checks.json that does not read: the run stops before the setup and the agent,
+// with exit 2 and the fix line.
+func TestAHomeWhosePushChecksDoNotReadStopsTheRun(t *testing.T) {
+	docker, log := checkDocker(t, 0, "")
+	p, _ := newCheckedRepo(t, docker)
+	var file string
+	t.Cleanup(cmd.SetLoadPushChecks(func(home string) ([]compose.PushCheck, error) {
+		file = filepath.Join(home, "push-checks.json")
+		if err := os.WriteFile(file, []byte("{"), 0o644); err != nil {
+			return nil, err
+		}
+		return pushcheck.Load(home)
+	}))
+	setUp, joined := false, false
+	p.setup = func(string) { setUp = true }
+	r := p.run(t, func(string) { joined = true }, nil)
+	r.wantsClose(t, event.StateFailed, cmd.ExitInput)
+	if setUp || joined {
+		t.Errorf("the setup ran %v, the agent ran %v, want neither", setUp, joined)
+	}
+	wants(t, r.out, "qory run: Compose the harness again, and run again. The push checks in "+file+" could not be read: it is not JSON in the form the compose writes: unexpected end of JSON input.\n")
+	if got := checkLog(t, log); got != "" {
+		t.Errorf("a check's container ran:\n%s", got)
+	}
+}
+
+// TestACheckThatDidNotFinishIsAStatusLine is a push whose check's container the engine
+// did not create: the check returns an error, for which Forager returns 503, and qory
+// run writes it as one status line.
+func TestACheckThatDidNotFinishIsAStatusLine(t *testing.T) {
+	docker, _ := fakeDocker(t)
+	script := filepath.Join(tempDir(t), "docker")
+	writeFile(t, script, "#!/bin/sh\ncase \"$*\" in\n*qory-push-check-*)\n\techo 'Cannot connect to the Docker daemon at unix:///var/run/docker.sock' >&2\n\texit 1 ;;\nesac\nexec "+docker+" \"$@\"\n")
+	if err := os.Chmod(script, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	p, _ := newCheckedRepo(t, script)
+	var check func(context.Context, session.RunAPIRequest) (*session.RunAPIRefusal, error)
+	p.onOpen = func(spec session.OpenSpec) { check = spec.RunAPICheck }
+	var checkErr error
+	r := p.run(t, func(string) {
+		_, checkErr = check(context.Background(), session.RunAPIRequest{Path: "/artifacts", Body: specPush(t)})
+	}, func() (*session.Result, error) { return &session.Result{State: event.StateFailed, ExitCode: 3}, nil })
+	if checkErr == nil {
+		t.Fatal("the check returned no error")
+	}
+	line := "qory run: the check before a push did not finish, and the push was not stored (503 push_check_unavailable): the engine did not create the check's container: Cannot connect to the Docker daemon at unix:///var/run/docker.sock\n"
+	if strings.Count(r.out, line) != 1 {
+		t.Errorf("the output does not have the line %q once:\n%s", line, r.out)
+	}
+}
+
+// TestTheFetchOfTwoFilesThatAreOneFileHereFails is a version whose files A.md and a.md
+// are one file on this machine's file system, which ignores case: the fetch of a push
+// check fails with both names. On a file system that keeps them apart, both are there.
+func TestTheFetchOfTwoFilesThatAreOneFileHereFails(t *testing.T) {
+	inCheckout(t)
+	server := startRunAPI(t)
+	server.index = indexOf(artifactEntry("spec", "main", "", 1, versionEntry("av_1", 1, fileEntry("A.md", "one\n"), fileEntry("a.md", "two\n"))))
+	server.files = map[string]string{"/artifacts/av_1/files/A.md": "one\n", "/artifacts/av_1/files/a.md": "two\n"}
+	fetch, err := cmd.ArtifactsForCheck(server.URL + "/v1/runs/run-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	probe := t.TempDir()
+	writeFile(t, filepath.Join(probe, "A.md"), "")
+	_, statErr := os.Stat(filepath.Join(probe, "a.md"))
+	err = fetch(context.Background(), t.TempDir(), []string{"spec"})
+	if statErr != nil {
+		if err != nil {
+			t.Errorf("a file system that keeps A.md and a.md apart: %v", err)
+		}
+		return
+	}
+	if want := `the files "A.md" and "a.md" of the version av_1 are one file on this machine, whose file system is insensitive to case or to the form of an accent`; err == nil || err.Error() != want {
+		t.Errorf("the fetch = %v, want %q", err, want)
 	}
 }

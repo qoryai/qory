@@ -626,7 +626,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			// checks of the home it composes, see [runPushChecks]. Forager builds the wall's
 			// forwarder as the run opens, before the compose, so the check is set for every
 			// walled run, and passes every POST of a run whose home has no push check.
-			checks := &runPushChecks{}
+			checks := &runPushChecks{report: said}
 			if walled {
 				spec.RunAPICheck = checks.runAPICheck
 			}
@@ -672,6 +672,12 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			// checkout, see [readsOnly].
 			var readOnly bool
 			prepareLaunch := func(w io.Writer) (freshHome bool, err error) {
+				composing.writable = nil
+				for _, m := range spec.Mounts {
+					if !m.ReadOnly {
+						composing.writable = append(composing.writable, m.Path)
+					}
+				}
 				harness, workflows, err := composeForRun(w, composing, at, runtime, dispatched, walled)
 				if err != nil && composing.git != nil && composing.git.Named != nil {
 					return false, namedComposeError(err, composing.git.Named)
@@ -885,8 +891,14 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				if err != nil {
 					return err
 				}
+				// A home whose push checks qory cannot run stops the run here, before the
+				// setup and the agent.
 				if walled {
-					checks.load(run, at.home, spec.Wall)
+					done, err := checks.load(ctx, run, at.home, spec.RunID, &spec)
+					if err != nil {
+						return &runLineError{input(err)}
+					}
+					cleanups = append(cleanups, done)
 				}
 				// Only the push step's commit uses the run number. readOnly is set by the
 				// compose, so the check comes here, before the session.

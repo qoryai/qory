@@ -22,7 +22,8 @@ var (
 
 // readPush reads body, a POST of /artifacts as the run API reads it: its type, and its
 // files with their names and decoded contents. A body that is not a push in that form is
-// an error; a body whose members can be read in more than one way is [errAmbiguous].
+// an error, whose text says which part is not; a body whose members can be read in more
+// than one way is [errAmbiguous].
 func readPush(body []byte) (string, []File, error) {
 	top, err := members(body, pushMembers)
 	if err != nil {
@@ -30,24 +31,27 @@ func readPush(body []byte) (string, []File, error) {
 	}
 	var artifactType string
 	if err := json.Unmarshal(top["type"], &artifactType); err != nil {
-		return "", nil, fmt.Errorf("the push has no type: %w", err)
+		return "", nil, errors.New("type is missing or not a string")
 	}
 	var items []json.RawMessage
 	if err := json.Unmarshal(top["files"], &items); err != nil {
-		return "", nil, fmt.Errorf("the push has no list of files: %w", err)
+		return "", nil, errors.New("files is missing or not a list")
 	}
 	files := make([]File, 0, len(items))
 	for i, item := range items {
 		m, err := members(item, fileMembers)
-		if err != nil {
+		if errors.Is(err, errAmbiguous) {
 			return "", nil, err
+		}
+		if err != nil {
+			return "", nil, fmt.Errorf("files[%d]: %w", i, err)
 		}
 		var f File
 		if err := json.Unmarshal(m["filename"], &f.Name); err != nil {
-			return "", nil, fmt.Errorf("files[%d] has no filename: %w", i, err)
+			return "", nil, fmt.Errorf("files[%d].filename is missing or not a string", i)
 		}
 		if err := json.Unmarshal(m["content_base64"], &f.Content); err != nil {
-			return "", nil, fmt.Errorf("files[%d] has no content: %w", i, err)
+			return "", nil, fmt.Errorf("files[%d].content_base64 is missing or not base64", i)
 		}
 		files = append(files, f)
 	}
@@ -60,13 +64,13 @@ func readPush(body []byte) (string, []File, error) {
 func members(raw []byte, known []string) (map[string]json.RawMessage, error) {
 	d := json.NewDecoder(bytes.NewReader(raw))
 	if t, err := d.Token(); err != nil || t != json.Delim('{') {
-		return nil, errors.New("the value is not an object")
+		return nil, errors.New("it is not a JSON object")
 	}
 	out := map[string]json.RawMessage{}
 	for d.More() {
 		t, err := d.Token()
 		if err != nil {
-			return nil, err
+			return nil, notJSON(err)
 		}
 		name, ok := t.(string)
 		if !ok {
@@ -74,7 +78,7 @@ func members(raw []byte, known []string) (map[string]json.RawMessage, error) {
 		}
 		var value json.RawMessage
 		if err := d.Decode(&value); err != nil {
-			return nil, err
+			return nil, notJSON(err)
 		}
 		if _, twice := out[name]; twice {
 			return nil, errAmbiguous
@@ -87,10 +91,15 @@ func members(raw []byte, known []string) (map[string]json.RawMessage, error) {
 		out[name] = value
 	}
 	if _, err := d.Token(); err != nil {
-		return nil, err
+		return nil, notJSON(err)
 	}
 	if _, err := d.Token(); !errors.Is(err, io.EOF) {
-		return nil, errors.New("the body has more after the object")
+		return nil, errors.New("it has more after the JSON object")
 	}
 	return out, nil
+}
+
+// notJSON is the error of a decoder's err: a value that is not JSON.
+func notJSON(err error) error {
+	return fmt.Errorf("it is not JSON: %w", err)
 }

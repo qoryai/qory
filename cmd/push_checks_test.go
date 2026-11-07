@@ -92,3 +92,39 @@ func TestWalledRunWithoutPushChecksStartsAsBefore(t *testing.T) {
 		t.Errorf("a harness without push checks has push-checks.json: %v", err)
 	}
 }
+
+// TestAWritableMountInTheHomeStopsARunWithPushChecks is a walled run whose home is
+// outside the checkout and declares a push check, given a read-write --mount of the
+// home: the run stops before the agent starts, with exit 2 and the fix line. A
+// read-only mount of the home starts as before.
+func TestAWritableMountInTheHomeStopsARunWithPushChecks(t *testing.T) {
+	_, user, launch := pushChecksCheckout(t, true)
+	homes := tempDir(t)
+	writeFile(t, user, strings.Replace(launch, "harness:\n", "harness:\n  home: "+homes+"\n", 1))
+	log := walledForager(t)
+	if out, err := run(t, "run", "codex"); cmd.ExitCode(err) != 4 {
+		t.Fatalf("the first run: %v (exit %d)\n%s", err, cmd.ExitCode(err), out)
+	}
+	checks, err := filepath.Glob(filepath.Join(homes, "*", "push-checks.json"))
+	if err != nil || len(checks) != 1 {
+		t.Fatalf("the home has push-checks.json %v (%v), want one", checks, err)
+	}
+	home := filepath.Dir(checks[0])
+	inside := filepath.Join(home, "modules")
+	if err := os.Remove(log); err != nil {
+		t.Fatal(err)
+	}
+	for _, mount := range []string{home, inside} {
+		out, err := run(t, "run", "--mount", mount, "codex")
+		want := "Mount " + mount + " read-only, or move it out of the harness home, for a walled run with push checks. The agent could change the push checks through it."
+		if cmd.ExitCode(err) != cmd.ExitInput || err == nil || err.Error() != want {
+			t.Errorf("--mount %s: %v (exit %d), want %q\n%s", mount, err, cmd.ExitCode(err), want, out)
+		}
+	}
+	if data, err := os.ReadFile(log); err == nil && strings.Contains(string(data), "src="+inside) {
+		t.Errorf("the wall started the agent's container:\n%s", data)
+	}
+	if out, err := run(t, "run", "--mount", inside+":ro", "codex"); cmd.ExitCode(err) != 4 {
+		t.Errorf("a read-only mount in the home: %v (exit %d)\n%s", err, cmd.ExitCode(err), out)
+	}
+}
