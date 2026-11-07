@@ -3,10 +3,12 @@ package cmd_test
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
 	"github.com/qoryai/qory/cmd"
+	"github.com/qoryai/qory/internal/checkout"
 )
 
 // pushChecksCheckout is a checkout whose stack composes module core for codex, with the
@@ -84,16 +86,74 @@ func TestAWalledRunWithPushChecksAndTheHomeInTheCheckoutStops(t *testing.T) {
 	}
 }
 
-// TestWalledRunWithoutPushChecksStartsAsBefore is a walled run whose home is the
-// checkout's .qory/harness and whose modules declare no push check: it starts, and the
-// home has no push-checks.json.
+// TestWalledRunWithoutPushChecksStartsAsBefore is a walled run whose modules declare no
+// push check, with no --home and no harness.home: it composes into
+// qory/homes/runs/<name>-<hash>/<run id> in the cache directory, that home has no
+// push-checks.json while the agent's container starts, and the agent starts. A stand-in
+// docker in front of the wall's reads the home from the agent's environment file.
 func TestWalledRunWithoutPushChecksStartsAsBefore(t *testing.T) {
 	root, _, _ := pushChecksCheckout(t, false)
 	walledForager(t)
+	file := filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "forager.yaml")
+	data, err := os.ReadFile(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	docker := regexp.MustCompile(`(?m)^  command: (.+)$`).FindStringSubmatch(string(data))
+	if docker == nil {
+		t.Fatalf("forager.yaml has no wall command:\n%s", data)
+	}
+	seen := filepath.Join(tempDir(t), "seen")
+	front := filepath.Join(tempDir(t), "docker")
+	writeFile(t, front, `#!/bin/sh
+if [ "$1" = run ]; then
+	env=
+	for a; do [ "$prev" = --env-file ] && env=$a; prev=$a; done
+	home=$(sed -n 's/^QORY_HARNESS_HOME=//p' "$env" 2>/dev/null)
+	if [ -n "$home" ]; then
+		echo "home=$home" >> `+seen+`
+		sed -n 's/^QORY_RUN_ID=/id=/p' "$env" >> `+seen+`
+		test -d "$home" && echo composed >> `+seen+`
+		test -e "$home/push-checks.json" && echo checks >> `+seen+`
+	fi
+fi
+exec `+docker[1]+` "$@"
+`)
+	if err := os.Chmod(front, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, file, strings.Replace(string(data), "command: "+docker[1], "command: "+front, 1))
 	if out, err := run(t, "run", "codex"); cmd.ExitCode(err) != 4 {
 		t.Fatalf("a walled run without push checks: %v (exit %d)\n%s", err, cmd.ExitCode(err), out)
 	}
-	if _, err := os.Stat(filepath.Join(root, ".qory", "harness", "push-checks.json")); !os.IsNotExist(err) {
-		t.Errorf("a harness without push checks has push-checks.json: %v", err)
+	got, err := os.ReadFile(seen)
+	if err != nil {
+		t.Fatalf("the agent's container did not start: %v", err)
+	}
+	fields := map[string]string{}
+	for _, line := range strings.Split(strings.TrimSpace(string(got)), "\n") {
+		key, value, _ := strings.Cut(line, "=")
+		fields[key] = value
+	}
+	cache, err := os.UserCacheDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The home's folder is as the cache directory gives it, or with its links resolved
+	// when qory/homes existed before the run.
+	homes := filepath.Join(cache, "qory", "homes")
+	want := filepath.Join(homes, "runs", checkout.Key(root), fields["id"])
+	resolvedWant := want
+	if resolved, err := filepath.EvalSymlinks(homes); err == nil {
+		resolvedWant = filepath.Join(resolved, "runs", checkout.Key(root), fields["id"])
+	}
+	if fields["id"] == "" || fields["home"] != want && fields["home"] != resolvedWant {
+		t.Errorf("the agent's home is %q, want %q\n%s", fields["home"], want, got)
+	}
+	if _, ok := fields["composed"]; !ok {
+		t.Errorf("the home was not there when the agent's container started:\n%s", got)
+	}
+	if _, ok := fields["checks"]; ok {
+		t.Errorf("a harness without push checks has push-checks.json in %s", fields["home"])
 	}
 }
