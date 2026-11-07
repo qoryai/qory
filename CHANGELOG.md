@@ -53,8 +53,8 @@ release may change what an existing document does, and states it under Upgrading
   type `questions`. A run adds, decides, withdraws or reopens questions with `qory artifact
   push`, and the control plane writes the answers. At most one option of a question has
   `recommended` set to `true`. A decided question has `state: decided` and `decision`
-  (`option`, `reason`, `run`, `at`), and at least one option and none with
-  `recommended`; `decision` stays when the state changes. See The questions format in
+  (`option`, `reason`, `run`, `at`), and at least one option and none with `recommended`;
+  `decision` stays when the state changes. See The questions format in
   `contracts/harness/v1/README.md`.
 - Version 1 of the review comments format,
   `contracts/harness/v1/review-comments.schema.json`: the members' review comments on a
