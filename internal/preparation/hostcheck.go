@@ -84,7 +84,7 @@ func noLinkTo(root, dir string) error {
 		case info.Mode()&fs.ModeSymlink != 0:
 			shown, _ := filepath.Rel(root, at)
 			shown = integration.Printable(filepath.ToSlash(shown))
-			return &unsafeError{fmt.Sprintf(textGitLink, shown), fmt.Sprintf(causeGitLink, shown)}
+			return &unsafeError{lineOf(textGitLink, shown), fmt.Sprintf(causeGitLink, shown)}
 		}
 	}
 	return nil
@@ -97,7 +97,7 @@ func gitParts(gitDir string) error {
 		_, err := os.Lstat(filepath.Join(gitDir, name))
 		switch {
 		case errors.Is(err, fs.ErrNotExist):
-			return &unsafeError{fmt.Sprintf(textNoGitPart, name), fmt.Sprintf(causeNoGitPart, name)}
+			return &unsafeError{lineOf(textNoGitPart, name), fmt.Sprintf(causeNoGitPart, name)}
 		case err != nil:
 			return local(err)
 		}
@@ -107,9 +107,15 @@ func gitParts(gitDir string) error {
 
 // unsafeError is a stop of [safeRepository]. Its text is the line for a run that has not
 // started, and cause is what the folder has, for a line after the agent exited.
-type unsafeError struct{ line, cause string }
+type unsafeError struct {
+	line  *runLine
+	cause string
+}
 
-func (e *unsafeError) Error() string { return e.line }
+func (e *unsafeError) Error() string { return e.line.Error() }
+
+// Unwrap is the line, so [Target.stop] finds it.
+func (e *unsafeError) Unwrap() error { return e.line }
 
 // checkedRepository is [safeRepository], and [safeAfterRun] with fetched set.
 func checkedRepository(ctx context.Context, dir string, fetched bool) error {
@@ -156,7 +162,7 @@ func keysIn(ctx context.Context, dir string, files []string, fetched, afterRun b
 				// A key's subsection can be a URL with a password, as in
 				// http.<url>.sslVerify: it is shown without its userinfo, as hostgit shows it.
 				shown := hostgit.ShownKey(accesskey.ShownName(key, false))
-				return &unsafeError{fmt.Sprintf(textConfigKey, shown, ".git/"+name), fmt.Sprintf(causeConfigKey, shown, ".git/"+name)}
+				return &unsafeError{lineOf(textConfigKey, shown, ".git/"+name), fmt.Sprintf(causeConfigKey, shown, ".git/"+name)}
 			}
 		}
 	}
@@ -178,7 +184,7 @@ func hardLinked(rel string, d fs.DirEntry) error {
 	}
 	if linkCount(info) > 1 {
 		shown := integration.Printable(filepath.ToSlash(rel))
-		return &unsafeError{fmt.Sprintf(textHardLink, shown), fmt.Sprintf(causeHardLink, shown)}
+		return &unsafeError{lineOf(textHardLink, shown), fmt.Sprintf(causeHardLink, shown)}
 	}
 	return nil
 }
@@ -220,7 +226,7 @@ func gitFiles(gitDir string) ([]string, error) {
 		rel, _ := filepath.Rel(filepath.Dir(gitDir), path)
 		if d.Type()&fs.ModeSymlink != 0 {
 			shown := integration.Printable(filepath.ToSlash(rel))
-			link = &unsafeError{fmt.Sprintf(textGitLink, shown), fmt.Sprintf(causeGitLink, shown)}
+			link = &unsafeError{lineOf(textGitLink, shown), fmt.Sprintf(causeGitLink, shown)}
 			return filepath.SkipAll
 		}
 		// Git writes each object to a temporary file and renames it, so a hard link under
@@ -243,11 +249,11 @@ func gitFiles(gitDir string) ([]string, error) {
 		_, err := os.Lstat(filepath.Join(gitDir, filepath.FromSlash(name)))
 		switch {
 		case err == nil && name == "commondir":
-			return nil, &unsafeError{textCommonDir, causeCommonDir}
+			return nil, &unsafeError{lineOf(textCommonDir), causeCommonDir}
 		case err == nil && name == "info/grafts":
-			return nil, &unsafeError{textGrafts, causeGrafts}
+			return nil, &unsafeError{lineOf(textGrafts), causeGrafts}
 		case err == nil:
-			return nil, &unsafeError{fmt.Sprintf(textAlternates, ".git/"+name), fmt.Sprintf(causeAlternates, ".git/"+name)}
+			return nil, &unsafeError{lineOf(textAlternates, ".git/"+name), fmt.Sprintf(causeAlternates, ".git/"+name)}
 		case !errors.Is(err, fs.ErrNotExist):
 			return nil, local(err)
 		}
@@ -261,7 +267,7 @@ func gitFiles(gitDir string) ([]string, error) {
 		case err != nil:
 			return nil, local(err)
 		case !info.Mode().IsRegular():
-			return nil, &unsafeError{fmt.Sprintf(textConfigNotFile, ".git/"+name), fmt.Sprintf(causeConfigNotFile, ".git/"+name)}
+			return nil, &unsafeError{lineOf(textConfigNotFile, ".git/"+name), fmt.Sprintf(causeConfigNotFile, ".git/"+name)}
 		}
 		files = append(files, name)
 	}

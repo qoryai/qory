@@ -124,7 +124,7 @@ var (
 	commits = regexp.MustCompile(` at [0-9a-f]{12}( |$)`)
 )
 
-// prepare is [Run] through [testProxy], which returns what Run printed, its lines
+// prepare is [RunAt] through [testProxy], which returns what RunAt printed, its lines
 // trimmed and joined by newlines, each time in them as Xs and each commit as C, and ""
 // when it fetched nothing.
 func prepare(ctx context.Context, dir string, getenv func(string) string) (string, error) {
@@ -135,9 +135,9 @@ func prepare(ctx context.Context, dir string, getenv func(string) string) (strin
 // as qory run prepare runs it once qory run fetched; the lines are Run's, then Prepare's.
 func prepareFrom(ctx context.Context, dir, seed string, getenv func(string) string) (string, error) {
 	var report strings.Builder
-	fetched, err := Run(ctx, dir, os.Environ(), getenv, testProxy, &report)
+	fetched, err := RunAt(ctx, dir, os.Environ(), getenv, Target{}, testProxy, &report)
 	if err == nil && fetched != (report.Len() > 0) {
-		return "", fmt.Errorf("Run reports fetched %v and printed %q", fetched, report.String())
+		return "", fmt.Errorf("RunAt reports fetched %v and printed %q", fetched, report.String())
 	}
 	if err == nil && seed != "" {
 		_, err = Prepare(ctx, dir, seed, getenv, &report)

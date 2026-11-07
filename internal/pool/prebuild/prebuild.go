@@ -17,7 +17,7 @@
 //     stops here. The run stays open until Launch returns. Whether the run started is
 //     whether the open made its record. With [Settings.MachineSteps], the run's machine
 //     step comes right after the open, before the check of the policy.
-//  2. The fetch, in qory run's process: through the run's host proxy, [preparation.Run]
+//  2. The fetch, in qory run's process: through the run's host proxy, [preparation.RunPrebuild]
 //     fetches the run's repositories into work, as qory run does once a run is open. The
 //     fetch has [fetchTimeout], counted from the open. Every git of the fetch starts from
 //     the environment of [child.Env], so git is found on its PATH.
@@ -86,7 +86,7 @@ const exitTimeout = 124
 // test shortens it.
 var fetchTimeout = 15 * time.Minute
 
-// fetchPrefix starts each line and error of [preparation.Run].
+// fetchPrefix starts each line and error of [preparation.RunPrebuild].
 const fetchPrefix = "qory run: "
 
 // errFetchLimit is the cause of a fetch stopped at [fetchTimeout].
@@ -190,8 +190,8 @@ type Settings struct {
 	MachineSteps string
 	// Open opens the run at its gateway; nil is [session.Open]. A test replaces it.
 	Open func(ctx context.Context, spec session.OpenSpec) (Opened, error)
-	// Fetch fetches the run's repositories, as [preparation.Run]; nil is
-	// preparation.Run. A test replaces it.
+	// Fetch fetches the run's repositories, as [preparation.RunPrebuild]; nil is
+	// preparation.RunPrebuild. A test replaces it.
 	Fetch func(ctx context.Context, dir string, base []string, getenv func(string) string, p proxygit.Proxy, report io.Writer) (bool, error)
 	// Git is the git binary that makes work an empty working tree; empty is git. A name
 	// with no path separator is found on the PATH every command gets, as
@@ -558,7 +558,7 @@ func (s Settings) fetchThrough(ctx context.Context, run Opened, runID, work, sta
 	defer h.Close()
 	fetch := s.Fetch
 	if fetch == nil {
-		fetch = preparation.Run
+		fetch = preparation.RunPrebuild
 	}
 	values := func(name string) string {
 		switch name {

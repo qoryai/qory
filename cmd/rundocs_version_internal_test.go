@@ -16,13 +16,13 @@ func TestARunCodesTargetIsWhatItsFetchTakes(t *testing.T) {
 	settings := &contracts.RunSettings{Runtime: "claude"}
 	for _, v := range []string{"0123456789abcdef0123456789abcdef01234567", "2026-10-24.3", ""} {
 		r, err := codeRunOf(contracts.Documents{Workflow: "example", Target: &contracts.Target{System: "code.example.com", Path: "acme/shop"}, TargetVersion: v, RunSettings: settings})
-		want := preparation.Target{System: "code.example.com", Path: "acme/shop", Version: v}
+		want := preparation.Target{System: "code.example.com", Path: "acme/shop", Version: v, FromCode: true}
 		if err != nil || r.fetchTarget() != want {
 			t.Errorf("%q: %v, the target %+v, want %+v", v, err, r.fetchTarget(), want)
 		}
 	}
 	r, err := codeRunOf(contracts.Documents{Workflow: "example", RunSettings: settings})
-	if err != nil || r.fetchTarget() != (preparation.Target{}) {
+	if err != nil || r.fetchTarget() != (preparation.Target{FromCode: true}) {
 		t.Errorf("no target: %v, the target %+v", err, r.fetchTarget())
 	}
 	var none *codeRun

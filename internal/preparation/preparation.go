@@ -3,7 +3,7 @@
 // the code is: [EnvSystem], the host, and [EnvRepositories], the repositories, the run's
 // repository first.
 //
-// [Run] fetches on this machine, as qory run does once the run is open: the run's
+// [RunAt] fetches on this machine, as qory run does once the run is open: the run's
 // repository into the working folder, an empty folder, in which it runs git init, or an
 // empty git working tree, at the head of its default branch, or at a commit with [RunAt],
 // and each further one under .qory/repositories, every request through the run's host
@@ -57,6 +57,44 @@ const (
 
 // ForgeGitHub is the one forge whose repository form qory knows: github.com.
 const ForgeGitHub = "github.com"
+
+// The lines of a run from a run code for the fetch's lines that contain "run again". The code
+// is redeemed before the fetch, so the next run needs a new take-in. The steps on this
+// machine are for the person with a shell on it.
+const (
+	textNotFetchedFromCode    = "qory run: add a credential for %s that reads %s to the run configuration, then take the work item in again in Qory Apiary: the fetch of %s through the run's gateway failed: %s; the code is used"
+	textNotReachedFromCode    = "qory run: check that the run's policy allows %[1]s and that %[1]s is reachable, then take the work item in again in Qory Apiary: the fetch of %[2]s through the run's gateway failed: %[3]s; the code is used"
+	textNoBranchFromCode      = "qory run: give %s on %s a default branch with a commit, then take the work item in again in Qory Apiary: the fetch through the run's gateway failed: %s; the code is used"
+	textTreeFailedFromCode    = "qory run: check git on this machine, the working folder's .git, and each repository and .git above it, then take the work item in again in Qory Apiary: git failed: %s; the code is used"
+	textAboveFailedFromCode   = "qory run: check git on this machine, the working folder, and each repository and .git above it, then take the work item in again in Qory Apiary: git failed: %s; the code is used"
+	textGitFailedFromCode     = "qory run: check that git on this machine can read the working folder, then take the work item in again in Qory Apiary: git failed: %s; the code is used"
+	textLocalFromCode         = "qory run: check that this machine can read and write the working folder, then take the work item in again in Qory Apiary: the step failed: %s; the code is used"
+	textConfigKeyFromCode     = "qory run: take the work item in again in Qory Apiary, and start its run in a new empty git working tree, or remove %s from %s first: qory fetches only into a repository whose configuration has only the keys git init writes, since git on this machine would use any other key, such as a filter, a proxy or http.sslVerify; the code is used"
+	textConfigNotFileFromCode = "qory run: take the work item in again in Qory Apiary, and start its run in a new empty git working tree: the working folder's %s is not a regular file, and qory fetches only into a repository whose configuration it can read; the code is used"
+	textAlternatesFromCode    = "qory run: take the work item in again in Qory Apiary, and start its run in a new empty git working tree: the working folder's .git has %s, which makes git read objects from outside the working folder; the code is used"
+	textGitLinkFromCode       = "qory run: take the work item in again in Qory Apiary, and start its run in a new empty git working tree, or remove the link %s first: git would read and write through that link; the code is used"
+	textHardLinkFromCode      = "qory run: take the work item in again in Qory Apiary, and start its run in a new empty git working tree, or remove the hard link %s first: a write to it would change another file; the code is used"
+	textGraftsFromCode        = "qory run: take the work item in again in Qory Apiary, and start its run in a new empty git working tree: the working folder's .git has info/grafts, which gives commits other parents; the code is used"
+	textCommonDirFromCode     = "qory run: take the work item in again in Qory Apiary, and start its run in a new empty git working tree: the working folder's .git has a commondir file, which can point git at another repository; the code is used"
+)
+
+// fromCodeLines is the line of a run from a run code for each line of a run from none.
+var fromCodeLines = map[string]string{
+	textNotFetched:    textNotFetchedFromCode,
+	textNotReached:    textNotReachedFromCode,
+	textNoBranch:      textNoBranchFromCode,
+	textTreeFailed:    textTreeFailedFromCode,
+	textAboveFailed:   textAboveFailedFromCode,
+	textGitFailed:     textGitFailedFromCode,
+	textLocal:         textLocalFromCode,
+	textConfigKey:     textConfigKeyFromCode,
+	textConfigNotFile: textConfigNotFileFromCode,
+	textAlternates:    textAlternatesFromCode,
+	textGitLink:       textGitLinkFromCode,
+	textHardLink:      textHardLinkFromCode,
+	textGrafts:        textGraftsFromCode,
+	textCommonDir:     textCommonDirFromCode,
+}
 
 // The words of the fetch qory run does. Each is one format string.
 const (
@@ -158,19 +196,6 @@ var (
 // always https.
 var baseURL = ""
 
-// Run fetches the repositories getenv names into dir, the working folder, on this
-// machine through the run's host proxy p, and reports whether it fetched them, the run's
-// repository at the head of its default branch, as [RunAt] does with no commit. With
-// [EnvRepositories] unset or empty it does nothing and returns false. The list is
-// checked whole before any fetch. Once every repository is fetched, it prints on report
-// the line that says what it fetched, the run's repository's commit, and in how long.
-// Every error's text is one line, ready for stderr, with no password of p's URL in it.
-// Every git it runs starts from base, as [hostgit.WithBase] has it: qory run gives this
-// process's environment, and a pool the environment of its commands.
-func Run(ctx context.Context, dir string, base []string, getenv func(string) string, p proxygit.Proxy, report io.Writer) (bool, error) {
-	return RunAt(ctx, dir, base, getenv, Target{}, p, report)
-}
-
 // Target is the target of a run's documents, the place a change would go, and the
 // version of it that the documents set: a run code's target.system, target.path and
 // target_version.
@@ -179,10 +204,65 @@ type Target struct {
 	// Branch is the branch of the run's work item, nil for none. It is used only when
 	// the fetch uses Version.
 	Branch *WorkBranch
+	// FromCode is a run from a run code, with or without a target: its one-use code is
+	// redeemed before the fetch, so a stop of the fetch has the line of [fromCodeLines].
+	FromCode bool
+	// Prebuild is a prebuild from a run code: with FromCode, a stop has the line that
+	// [prebuildLine] makes, since a prebuild has no work item to take in again.
+	Prebuild bool
 }
 
-// RunAt is [Run] with the target's repository fetched at at.Version, when at sets a
-// version and at.System is [EnvSystem]. The version is the commit at which Qory Apiary
+// runLine is a stop whose line is text with args, for a run from no run code. [Target.stop]
+// formats the line of a run from a run code with the same args.
+type runLine struct {
+	text string
+	args []any
+}
+
+func (l *runLine) Error() string { return fmt.Sprintf(l.text, l.args...) }
+
+// lineOf is the [runLine] of text with args.
+func lineOf(text string, args ...any) *runLine { return &runLine{text, args} }
+
+// stop is err as the run t fetches for prints it: a [runLine] with a line in
+// [fromCodeLines] has that line for a run from a run code, and [prebuildLine]'s for a
+// prebuild. Any other error, and any error of another run, stays as it is.
+func (t Target) stop(err error) error {
+	var line *runLine
+	if !t.FromCode || !errors.As(err, &line) {
+		return err
+	}
+	text, ok := fromCodeLines[line.text]
+	if !ok {
+		return err
+	}
+	if t.Prebuild {
+		text = prebuildLine(text)
+	}
+	return fmt.Errorf(text, line.args...)
+}
+
+// prebuildLine is text, a line of [fromCodeLines], for a prebuild from a run code: its fix
+// is to start the run again with a new run code.
+func prebuildLine(text string) string {
+	return strings.NewReplacer(
+		"take the work item in again in Qory Apiary, and start its run in", "start the run again with a new run code, in",
+		"then take the work item in again in Qory Apiary", "then start the run again with a new run code",
+	).Replace(text)
+}
+
+// RunAt fetches the repositories getenv names into dir, the working folder, on this
+// machine through the run's host proxy p, and reports whether it fetched them, the run's
+// repository at the head of its default branch. With [EnvRepositories] unset or empty it
+// does nothing and returns false. The list is checked whole before any fetch. Once every
+// repository is fetched, it prints on report the line with what it fetched, the run's
+// repository's commit, and how long the fetch took. Every error's text is one line, ready
+// for stderr, with no password of p's URL in it. Every git it runs starts from base, as
+// [hostgit.WithBase] has it: qory run gives this process's environment, and a pool the
+// environment of its commands.
+//
+// The target's repository is fetched at at.Version, when at sets a version and at.System
+// is [EnvSystem]. The version is the commit at which Qory Apiary
 // checked the target for a harness file. A control plane lists the target's path first,
 // so the target is the run's repository: an at.Path that is a later entry of the list,
 // as [targetIn] finds it, stops RunAt with [textTargetLater], one the list does not
@@ -196,7 +276,22 @@ type Target struct {
 // of their default branches. A version of a target on another system, which is not one
 // of the run's repositories, is not used. With at.Branch set, the commit of the branch in
 // each repository is fetched too, and [Switch] checks it out after the compose.
+//
+// A stop of a run with at.FromCode set has the line of [Target.stop]: its run code is used.
 func RunAt(ctx context.Context, dir string, base []string, getenv func(string) string, at Target, p proxygit.Proxy, report io.Writer) (bool, error) {
+	fetched, err := fetchRepositories(ctx, dir, base, getenv, at, p, report)
+	return fetched, at.stop(err)
+}
+
+// RunPrebuild is [RunAt] for the prebuild from a run code, at the head of each default
+// branch: a stop has the line of
+// [Target.stop] for a prebuild.
+func RunPrebuild(ctx context.Context, dir string, base []string, getenv func(string) string, p proxygit.Proxy, report io.Writer) (bool, error) {
+	return RunAt(ctx, dir, base, getenv, Target{FromCode: true, Prebuild: true}, p, report)
+}
+
+// fetchRepositories is [RunAt] with the lines of a run from no run code.
+func fetchRepositories(ctx context.Context, dir string, base []string, getenv func(string) string, at Target, p proxygit.Proxy, report io.Writer) (bool, error) {
 	ctx = hostgit.WithBase(ctx, base)
 	list := getenv(EnvRepositories)
 	if list == "" {
@@ -459,7 +554,7 @@ func emptyTree(ctx context.Context, git gitRunner, dir string) error {
 	}
 	top, err := git(ctx, dir, "rev-parse", "--show-toplevel")
 	if err != nil {
-		return fmt.Errorf(textTreeFailed, integration.Printable(exports.HideURLError(err).Error()))
+		return lineOf(textTreeFailed, integration.Printable(exports.HideURLError(err).Error()))
 	}
 	// Only the line end is git's: a folder's name can end in a space.
 	if !samePath(strings.TrimSuffix(top, "\n"), dir) {
@@ -529,7 +624,7 @@ func initFolder(ctx context.Context, git gitRunner, dir string) error {
 	}
 	var ge *gitError
 	if !errors.As(err, &ge) || !strings.Contains(ge.line, "not a git repository (or any") {
-		return fmt.Errorf(textAboveFailed, integration.Printable(exports.HideURLError(err).Error()))
+		return lineOf(textAboveFailed, integration.Printable(exports.HideURLError(err).Error()))
 	}
 	if _, err := git(ctx, dir, "init", "--quiet", "--template=", "--initial-branch=main"); err != nil {
 		return local(err)
@@ -831,11 +926,11 @@ func notFetched(path, system string, err error) error {
 	var ge *gitError
 	switch {
 	case !errors.As(err, &ge):
-		return fmt.Errorf(textNoBranch, shown, host, cause)
+		return lineOf(textNoBranch, shown, host, cause)
 	case answered.MatchString(ge.line):
-		return fmt.Errorf(textNotFetched, host, shown, shown, cause)
+		return lineOf(textNotFetched, host, shown, shown, cause)
 	}
-	return fmt.Errorf(textNotReached, host, shown, cause)
+	return lineOf(textNotReached, host, shown, cause)
 }
 
 // notAtCommit is the line for a fetch of commit of path on system that failed with err:
@@ -889,13 +984,13 @@ var answered = regexp.MustCompile(`(?i)authentication failed|could not read (use
 // printable.
 func gitFailed(err error) error {
 	shown := integration.Printable(exports.HideURLError(err).Error())
-	return &unsafeError{fmt.Sprintf(textGitFailed, shown), fmt.Sprintf(causeGitFailed, shown)}
+	return &unsafeError{lineOf(textGitFailed, shown), fmt.Sprintf(causeGitFailed, shown)}
 }
 
 // local is [textLocal]: a failure on the machine, not of a fetch.
 func local(err error) error {
 	shown := integration.Printable(exports.HideError(err).Error())
-	return &unsafeError{fmt.Sprintf(textLocal, shown), fmt.Sprintf(causeLocal, shown)}
+	return &unsafeError{lineOf(textLocal, shown), fmt.Sprintf(causeLocal, shown)}
 }
 
 // The words of a failure of qory run prepare inside the wall that is not of a fetch:

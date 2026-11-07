@@ -16,6 +16,7 @@ import (
 	"github.com/qoryai/qory/internal/proxygit"
 	"github.com/qoryai/qory/internal/secretmask"
 	"github.com/qoryai/qory/internal/source"
+	"github.com/qoryai/qory/internal/stack"
 )
 
 // runSources is the folder of the run directory that the compose of a run from a
@@ -88,7 +89,7 @@ func noStackProxy(harness string, err error, fromCode bool) error {
 	return fmt.Errorf(text, harness, integration.Printable(exports.HideURLError(err).Error()))
 }
 
-// runValues is getenv for [preparation.Run]: the server's values of the run's system and
+// runValues is getenv for [preparation.RunAt]: the server's values of the run's system and
 // repositories, as the run answer gave them, and "" for any other name.
 func runValues(run openedRun) func(string) string {
 	return func(name string) string {
@@ -138,17 +139,36 @@ func namedGit(h hostProxy, stderr io.Writer, n *source.Named) *source.Git {
 	}}
 }
 
+// usedLineError is the line of a stop of a compose in a run from a run code: text, with
+// the end [codeUsed]. It unwraps to the compose's error, so [ExitCode] reads its status.
+type usedLineError struct {
+	text string
+	err  error
+}
+
+func (e *usedLineError) Error() string { return e.text }
+func (e *usedLineError) Unwrap() error { return e.err }
+
+// usedLine is the [usedLineError] of err with text as [source.Named.Hide] prints it.
+func usedLine(text string, n *source.Named, err error) error {
+	return &usedLineError{strings.TrimSuffix(n.Hide(text), ".") + codeUsed, err}
+}
+
 // namedComposeError is err, a compose's error in a run whose harness addresses no text
-// shows, n, as the line qory run prints: a git source that is not https and a ref a
-// repository does not have, each an input error; a git source that could not be
-// fetched, a failure of the fetch, with its cause and no output of git; anything else
-// with every address and every path of a source's folder replaced by the source's
-// name, as [source.Named.Hide] replaces them. The compose fetched through the run's
-// stack proxy.
+// shows, n, as the line qory run prints. Only a run from a run code has such a harness, so
+// the code is used and the fix of each line is a new take-in: a git source that is
+// not https and a ref a repository does not have, each an input error; a git source that
+// could not be fetched, a failure of the fetch, with its cause and no output of git; an
+// export whose folder its repository does not have and a source.path that is not inside
+// its repository; anything else as [hiddenComposeError] prints it. Every address and
+// every path of a source's folder is replaced by the source's name, as [source.Named.Hide]
+// replaces them. The compose fetched through the run's stack proxy.
 func namedComposeError(err error, n *source.Named) error {
 	var scheme *source.SchemeError
 	var gone *source.GoneError
 	var fetch *source.FetchError
+	var export *source.ExportGoneError
+	var path *stack.SourcePathError
 	switch {
 	case errors.As(err, &scheme):
 		if scheme.Name == "" {
@@ -160,16 +180,41 @@ func namedComposeError(err error, n *source.Named) error {
 			}
 			scheme = &source.SchemeError{URL: scheme.URL, Name: name}
 		}
-		return &runLineError{input(n.HideError(scheme))}
+		return &runLineError{input(errors.New(n.Hide(fmt.Sprintf("use an https URL for %s, then take the work item in again in Qory Apiary: a run from a control plane fetches git sources only over https", scheme.Name)) + codeUsed))}
 	case errors.As(err, &gone):
-		return &runLineError{input(fmt.Errorf("set the ref of %s to a branch, tag or commit its repository has: %w", gone.Name, n.HideError(gone)))}
+		return &runLineError{input(fmt.Errorf("set the ref of %s to a branch, tag or commit its repository has, then take the work item in again in Qory Apiary: %w%s", gone.Name, n.HideError(gone), codeUsed))}
 	case errors.As(err, &fetch):
 		if m := connectStatus.FindStringSubmatch(fetch.Output); m != nil && m[1] == "407" {
 			return &runLineError{fmt.Errorf("take the work item in again in Qory Apiary: the run's stack proxy returned 407 Proxy Authentication Required to the password Forager set for the run, so the fetch of %s failed%s", fetch.Name, codeUsed)}
 		}
 		return &runLineError{fmt.Errorf("add the host of %s to gateway.stack_hosts in the gateway's forager.yaml or to the stack_hosts of the run configuration that Qory Apiary sends, and, for a private repository, a harness credential for %s to that run configuration, then take the work item in again: the fetch of %s through the run's stack proxy failed: %s%s", fetch.Name, fetch.Name, fetch.Name, namedFetchCause(fetch), codeUsed)}
+	case errors.As(err, &export):
+		return usedLine(fmt.Sprintf("correct exports.dir in the qory.yaml of %[1]s, or set %[1]s to a ref whose repository has the folder of %[2]s, then take the work item in again in Qory Apiary: %[3]s", export.Where, export.Export, export), n, err)
+	case errors.As(err, &path):
+		what := "the base of " + n.Phrase()
+		if path.Module != "" {
+			what = "the module " + path.Module
+		}
+		return usedLine(fmt.Sprintf("set the path of %s to a folder inside its repository, then take the work item in again in Qory Apiary: the path is absolute, the repository's root, or leads out of the repository", what), n, err)
 	}
-	return n.HideError(err)
+	return hiddenComposeError(err, n)
+}
+
+// hiddenComposeError is err, a compose's error in a run from a run code whose harness
+// addresses no text shows, n, with one front and the end of a used code, whatever the
+// text is: the harness to correct for exit 2, and the cause to fix for any other status.
+// A line that has the end already and a collision that [printCollision] printed stay as
+// they are. The exit status does not change.
+func hiddenComposeError(err error, n *source.Named) error {
+	hidden := n.HideError(err)
+	text := hidden.Error()
+	switch {
+	case errors.Is(err, ErrReported), strings.HasSuffix(text, codeUsed):
+		return hidden
+	case ExitCode(err) == ExitInput:
+		return usedLine(fmt.Sprintf("correct %s, then take the work item in again in Qory Apiary: %s", n.Phrase(), text), n, err)
+	}
+	return usedLine("fix the cause, then take the work item in again in Qory Apiary: "+text, n, err)
 }
 
 // connectStatus and httpStatus match the status curl writes, in git's output, for a

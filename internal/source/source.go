@@ -141,6 +141,20 @@ func (e *GoneError) Error() string {
 	return secretmask.Default().Replace(fmt.Sprintf("%s has no branch or tag %s; to keep the old harness, set ref to a commit id", exports.URL(e.URL), exports.Value(e.Ref, false)))
 }
 
+// ExportGoneError is a source of a [Named] compose that selects an export whose folder its
+// repository does not have.
+type ExportGoneError struct {
+	// Where is the source as a text of the compose shows it.
+	Where string
+	// Export is the export the source selects, such as module tools.
+	Export string
+}
+
+// Error has the source and the export, and no address or folder.
+func (e *ExportGoneError) Error() string {
+	return fmt.Sprintf("%s exports %s at a folder that is not there", e.Where, e.Export)
+}
+
 // SchemeError is a git source that is not an https URL, in a compose that fetches
 // through a run's stack proxy, see [Git]: git does not run for it.
 type SchemeError struct {
@@ -528,7 +542,7 @@ func resolveGit(s stack.Source, opts Options) (Resolved, error) {
 	}
 	info, err := os.Stat(module)
 	if errors.Is(err, os.ErrNotExist) && s.Path == "" && sub != "" && n != nil {
-		return Resolved{}, fmt.Errorf("%s exports %s at a folder that is not there", where, exportName(s))
+		return Resolved{}, &ExportGoneError{Where: where, Export: exportName(s)}
 	}
 	if errors.Is(err, os.ErrNotExist) && s.Path == "" && sub != "" {
 		return Resolved{}, fmt.Errorf("%s exports %s at %s, which is not there", where, exportName(s), exports.Value(sub, false))
