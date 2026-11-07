@@ -490,6 +490,14 @@ the error line. An image step that fails ends `failed` with -1, and its last lin
 Forager's error. A step that fails once the run is stopped, or out of time, ends
 `cancelled`.
 
+After the agent, a walled run that may write in a repository has the step `copy work out`,
+of kind `copy`, around the git session: see [A run that may write works in a
+copy](#a-run-that-may-write-works-in-a-copy). Forager's steps of the git session, such as
+`join session 2`, start and end inside it. It ends `succeeded` with 0 when the git session
+exits 0. Otherwise it ends `failed`, also when the run is stopped or the session reaches its
+limit of 5 minutes, with the git session's exit status, or with -1 when the session has none,
+such as one that did not start. Its last line is then the error line.
+
 An image step that fails ends the run before the agent starts, and `qory run` exits 1
 with one line, the fix first. An image its registry does not have closes the run
 `failed` with the reason `image_missing`, and an image whose user is root, or a user
@@ -2094,7 +2102,8 @@ The step does this, in order:
 
 1. A walled run works in a copy: see [A run that may write works in a
    copy](#a-run-that-may-write-works-in-a-copy). qory starts a second session on the run,
-   the git session, which commits what the agent left in each repository of the copy, and
+   the git session, in the step `copy work out`, before the push step. The git session
+   commits what the agent left in each repository of the copy, and
    writes the run's branch to a bundle per repository. The commit has the message `Changes
    left by run <run number>` and the author and committer `qory <qory@localhost>`. A new
    file is in the commit unless git ignores it through `.gitignore`. `.qory` and the links

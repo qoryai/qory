@@ -273,7 +273,8 @@ release may change what an existing document does, and states it under Upgrading
 - A walled run that may write works in a copy of the checkout, under `qory/runs` in your cache
   folder, and starts from your commit at `HEAD`, so it never gets write access to your
   `.git`. Its commits land on the branch `qory/run-<run id>`, which qory never checks out,
-  and one line prints that branch and any qory settings they change. A write run of a work
+  and one line prints that branch and any qory settings they change. The copy after the agent
+  is the step `copy work out`, of kind `copy`, in the run's record. A write run of a work
   item pushes from a checked repository. A read-write `--mount` or `wall.mounts` entry
   stops such a run. A folder that is not a repository gets its regular files back, and so
   does a run from a run code or a run key that lists no repositories, in a folder where

@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/qoryai/forager/accesskey"
+	"github.com/qoryai/forager/event"
 	"github.com/qoryai/forager/gateway"
 	"github.com/qoryai/forager/server"
 	"github.com/qoryai/forager/session"
@@ -127,8 +128,22 @@ func RunGitSessionsOnHost() {
 		if !isGitSession(spec) {
 			return before(r, ctx, spec)
 		}
-		return GitSessionOnHost(ctx, spec)
+		return inFakeJoin(r, spec, func() (*session.Result, error) { return GitSessionOnHost(ctx, spec) })
 	}
+}
+
+// inFakeJoin runs f as a join of a git session that never reaches r.Join: on a run
+// [OpenNowhere] opened, the join keeps Forager's rules of a join, see [nowhere.startJoin].
+func inFakeJoin(r openedRun, spec session.SessionSpec, f func() (*session.Result, error)) (*session.Result, error) {
+	n, ok := r.(*nowhere)
+	if !ok {
+		return f()
+	}
+	if err := n.startJoin(spec); err != nil {
+		return nil, err
+	}
+	defer n.endJoin()
+	return f()
 }
 
 // GitSessionOnHost runs the git session spec as a process on this machine.
@@ -168,7 +183,7 @@ func SetGitSession(f func(context.Context, session.SessionSpec) (*session.Result
 	before := joinSession
 	joinSession = func(r openedRun, ctx context.Context, spec session.SessionSpec) (*session.Result, error) {
 		if isGitSession(spec) {
-			return f(ctx, spec)
+			return inFakeJoin(r, spec, func() (*session.Result, error) { return f(ctx, spec) })
 		}
 		return before(r, ctx, spec)
 	}
@@ -309,6 +324,9 @@ type Nowhere struct {
 	// StepErr, when not nil, is called by each StartStep with the step's kind, and a
 	// StartStep whose call returns an error writes no step and returns it.
 	StepErr func(kind string) error
+	// StepExitErr, when not nil, is called by each Step.Exit with the step's kind, and an
+	// Exit whose call returns an error writes nothing and returns it.
+	StepExitErr func(kind string) error
 	// SetRunAPICheck, when not nil, gets the check of each SetRunAPICheck, and its error
 	// is the call's; nil takes the check. A run at a gateway sets it on the run too.
 	SetRunAPICheck func(check func(context.Context, session.RunAPIRequest) (*session.RunAPIRefusal, error)) error
@@ -388,19 +406,41 @@ func OpenNowhereWith(n Nowhere) (outcomes func() []session.Outcome, calls func()
 }
 
 // nowhere is a run [OpenNowhere] opened. Its steps are numbered as Forager numbers
-// them, one open at a time, and Close ends an open one cancelled with -1.
+// them, one open at a time, and Close ends an open one cancelled with -1. It keeps
+// Forager's rules of a copy step: only a session with no runtime joins during one, and
+// the step's Log and Exit, and HostProxy, return an error during that join. HostProxy
+// also returns an error all through the step.
 type nowhere struct {
-	id     string
-	dir    string
-	values Nowhere
-	image  session.Image
-	note   func(string)
-	closed func(session.Outcome)
-	at     *gatewayRun
-	steps  int
-	open   *nowhereStep
-	ended  bool
+	id      string
+	dir     string
+	values  Nowhere
+	image   session.Image
+	note    func(string)
+	closed  func(session.Outcome)
+	at      *gatewayRun
+	steps   int
+	open    *nowhereStep
+	ended   bool
+	joining bool
 }
+
+// startJoin checks a join of spec against Forager's rules of an open host step, and marks
+// the run as joining until [nowhere.endJoin].
+func (n *nowhere) startJoin(spec session.SessionSpec) error {
+	if n.open != nil {
+		if n.open.kind != event.StepCopy {
+			return fmt.Errorf("exit step %d before the join", n.open.n)
+		}
+		if spec.Runtime != nil {
+			return fmt.Errorf("exit step %d before the join: only a session with no runtime joins during a copy step", n.open.n)
+		}
+	}
+	n.joining = true
+	return nil
+}
+
+// endJoin marks the run's join as ended.
+func (n *nowhere) endJoin() { n.joining = false }
 
 // errNowhereClosed is what [Run.HostProxy] and [Run.RunAPI] of Forager return after Close.
 var errNowhereClosed = errors.New("the run is closed")
@@ -483,9 +523,10 @@ func (noRunAPI) RoundTrip(r *http.Request) (*http.Response, error) {
 }
 
 func (n *nowhere) Join(ctx context.Context, spec session.SessionSpec) (*session.Result, error) {
-	if n.open != nil {
-		return nil, fmt.Errorf("exit step %d before the join", n.open.n)
+	if err := n.startJoin(spec); err != nil {
+		return nil, err
 	}
+	defer n.endJoin()
 	n.note("join")
 	if n.values.Real {
 		return n.at.run.Join(ctx, spec)
@@ -586,6 +627,12 @@ func (n *nowhere) HostProxy() (hostProxy, error) {
 	if n.ended {
 		return hostProxy{}, errNowhereClosed
 	}
+	if n.joining {
+		return hostProxy{}, errors.New("start the host proxy after Join returns")
+	}
+	if n.open != nil && n.open.kind == event.StepCopy {
+		return hostProxy{}, fmt.Errorf("exit step %d before you start the host proxy", n.open.n)
+	}
 	if n.values.ProxyErr != nil {
 		return hostProxy{}, n.values.ProxyErr
 	}
@@ -618,6 +665,9 @@ func (n *nowhere) StackProxy() (hostProxy, error) {
 }
 
 func (n *nowhere) StartStep(kind, name string) (hostStep, error) {
+	if n.joining {
+		return nil, errors.New("start the host step after Join returns")
+	}
 	if n.open != nil {
 		return nil, fmt.Errorf("exit step %d before the next host step starts", n.open.n)
 	}
@@ -627,7 +677,7 @@ func (n *nowhere) StartStep(kind, name string) (hostStep, error) {
 		}
 	}
 	n.steps++
-	n.open = &nowhereStep{r: n, n: n.steps}
+	n.open = &nowhereStep{r: n, n: n.steps, kind: kind}
 	n.event(StepEvent{Type: "step_started", Step: n.steps, Name: name, Kind: kind})
 	return n.open, nil
 }
@@ -643,10 +693,14 @@ func (n *nowhere) event(e StepEvent) {
 type nowhereStep struct {
 	r      *nowhere
 	n      int
+	kind   string
 	exited bool
 }
 
 func (s *nowhereStep) Log(b []byte) error {
+	if s.r.joining {
+		return fmt.Errorf("write step %d's lines after Join returns", s.n)
+	}
 	if s.exited {
 		return fmt.Errorf("step %d exited", s.n)
 	}
@@ -655,8 +709,16 @@ func (s *nowhereStep) Log(b []byte) error {
 }
 
 func (s *nowhereStep) Exit(state string, exitCode int) error {
+	if s.r.joining {
+		return fmt.Errorf("exit step %d after Join returns", s.n)
+	}
 	if s.exited {
 		return fmt.Errorf("step %d exited already", s.n)
+	}
+	if s.r.values.StepExitErr != nil {
+		if err := s.r.values.StepExitErr(s.kind); err != nil {
+			return err
+		}
 	}
 	s.exited = true
 	s.r.open = nil

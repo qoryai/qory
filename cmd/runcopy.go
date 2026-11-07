@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/qoryai/forager/event"
 	"github.com/qoryai/forager/session"
 	"github.com/qoryai/forager/wall"
 
@@ -416,15 +417,41 @@ func (c *runCopy) recordSetup(ctx context.Context) error {
 	return nil
 }
 
-// gitSession is the bare session after the agent: it commits what the agent left in the copy
-// and writes the run's bundles, with no agent, no model key and no bind but the copy and the
-// bundle folder. It ends at [runcopy.SessionLimit] at the latest. message is the message of
-// its commit, "" for the default. The caller has removed the setup container: a process in
-// it could write the copy during the session.
+// gitSession is the bare session after the agent, as the run's step of kind copy: it commits
+// what the agent left in the copy and writes the run's bundles, with no agent, no model key and
+// no bind but the copy and the bundle folder. It ends at [runcopy.SessionLimit] at the latest.
+// message is the message of its commit, "" for the default. The caller has removed the setup
+// container: a process in it could write the copy during the session, and that removal
+// returns an error while the step is open.
+//
+// The step ends before this returns, so the run's close finds it ended. Its exit code is the
+// session's, -1 for a session with no exit code to show, and its last line is the line of the
+// stop. A step that does not start or end stops the return of the work, as the push step's
+// does: the copy has the work.
 func (c *runCopy) gitSession(ctx context.Context, run openedRun, spec *runSpec, message string) error {
-	gs, err := c.dir.GitSession(ctx, c.branch, message, c.repos, c.out)
+	step, err := run.StartStep(event.StepCopy, textCopyStep)
 	if err != nil {
 		return c.noSession(ctx, err)
+	}
+	code, stop := c.joinGitSession(ctx, run, spec, message)
+	state := event.StateSucceeded
+	if stop != nil {
+		state = event.StateFailed
+		lines := &stepLines{stderr: spec.Stderr, step: step}
+		lines.log(stepFailure(stop))
+	}
+	if err := step.Exit(state, code); err != nil && stop == nil {
+		return c.stopped(shownError(err))
+	}
+	return stop
+}
+
+// joinGitSession runs the git session in the open copy step. It returns the step's exit code
+// and the stop of the return of the run's work, nil with 0 for a session that succeeded.
+func (c *runCopy) joinGitSession(ctx context.Context, run openedRun, spec *runSpec, message string) (int, error) {
+	gs, err := c.dir.GitSession(ctx, c.branch, message, c.repos, c.out)
+	if err != nil {
+		return -1, c.noSession(ctx, err)
 	}
 	grace := spec.StopGrace
 	if c.fromCode {
@@ -451,18 +478,23 @@ func (c *runCopy) gitSession(ctx context.Context, run openedRun, spec *runSpec, 
 		Timeout:      runcopy.SessionLimit,
 	})
 	timedOut := err == nil && res.TimedOut || limited.Err() != nil
+	// A session stopped at the limit or by a cut can exit 0, and the step still fails.
+	code := -1
+	if err == nil && res.ExitCode != 0 {
+		code = res.ExitCode
+	}
 	switch {
 	case ctx.Err() != nil && (err != nil || timedOut) && c.cutBy != nil:
-		return c.stopped(fmt.Sprintf(textCopyCut, c.cutBy()))
+		return code, c.stopped(fmt.Sprintf(textCopyCut, c.cutBy()))
 	case timedOut:
-		return c.stopped(fmt.Sprintf(textCopyLimit, runcopy.SessionLimit))
+		return code, c.stopped(fmt.Sprintf(textCopyLimit, runcopy.SessionLimit))
 	case err != nil:
-		return c.noSession(ctx, err)
+		return code, c.noSession(ctx, err)
 	case res.ExitCode != 0:
 		// A session that failed can leave a bundle of part of the work: no bundle is used.
-		return c.stopped(fmt.Sprintf(textCopyExited, res.ExitCode))
+		return code, c.stopped(fmt.Sprintf(textCopyExited, res.ExitCode))
 	}
-	return nil
+	return 0, nil
 }
 
 // noSession is the stop of a git session that did not start with err. When ctx ended, what ended
