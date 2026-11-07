@@ -1355,7 +1355,9 @@ func TestAHomeFolderThatIsARepositoryRuns(t *testing.T) {
 	if out, err := run(t, "run", "claude", "--home", filepath.Join(tempDir(t), "home"), "--", "-p", "hi"); err != nil || seen == "" {
 		t.Fatalf("the agent ran in %q: %v\n%s", seen, err, out)
 	}
-	// With no --home, the home is under the cache folder, which is inside the home folder.
+	// With no --home, the home is under the cache folder. On macOS that folder is below HOME
+	// whatever XDG_CACHE_HOME is; on Linux this variable puts it inside the home folder.
+	t.Setenv("XDG_CACHE_HOME", filepath.Join(root, ".cache"))
 	out, err := run(t, "run", "claude", "--", "-p", "hi")
 	if cmd.ExitCode(err) != 2 {
 		t.Errorf("exit %d (%v), want 2\n%s", cmd.ExitCode(err), err, out)
