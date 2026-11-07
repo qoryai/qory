@@ -348,13 +348,13 @@ func checkName(branch string) error {
 }
 
 // Main returns the main checkout of the repository containing dir: the first worktree git
-// lists, the one whose git directory is the repository's. An error of the settings
-// check, a refusal or one that kept it from reading a record of the places, is returned
-// as it is: no git ran, so it says nothing of whether dir is in a working tree.
+// lists, the one whose git directory is the repository's. An error before git ran, a
+// git older than 2.36, is returned as it is: no git ran, so it says nothing of whether
+// dir is in a working tree.
 func Main(dir string) (string, error) {
 	// -z ends each line with a NUL byte, so a path with a line end in it stays whole.
 	out, err := runner{}.git(dir, "worktree", "list", "--porcelain", "-z")
-	if stoppedByCheck(err) {
+	if stoppedBeforeGit(err) {
 		return "", err
 	}
 	if err != nil {
@@ -500,7 +500,7 @@ func Add(main, branch string, o Options) (Added, error) {
 			return a, fmt.Errorf("%s is a file, at the path of the worktree of %s", value(a.Path), value(branch))
 		}
 		on, err := r.git(a.Path, "branch", "--show-current")
-		if stoppedByCheck(err) {
+		if stoppedBeforeGit(err) {
 			return a, err
 		}
 		if err != nil {
@@ -720,16 +720,8 @@ func Remove(main, path string, o Options) (Removed, error) {
 	if path == main {
 		return rm, fmt.Errorf("%s is the main checkout, not a worktree", value(path))
 	}
-	// The worktree stays held from its check through git worktree remove and the branch
-	// steps: a walled run that starts there while the person answers waits until remove
-	// returns.
-	hold, err := hostgit.Hold(context.Background(), path)
-	if err != nil {
-		return rm, &checkError{err: err}
-	}
-	defer hold.Release()
 	branch, err := r.git(path, "branch", "--show-current")
-	if stoppedByCheck(err) {
+	if stoppedBeforeGit(err) {
 		return rm, err
 	}
 	if err != nil {
@@ -814,7 +806,7 @@ func Remove(main, path string, o Options) (Removed, error) {
 		// -D, since the check above is stricter than git's own, which wants the branch
 		// merged into its upstream or HEAD and knows nothing of the base or other remotes.
 		if _, err := r.git(main, "branch", "-D", "--", branch); err != nil {
-			if shown := hostgit.Shown(value(branch)); shown != branch && !stoppedByCheck(err) {
+			if shown := hostgit.Shown(value(branch)); shown != branch && !stoppedBeforeGit(err) {
 				// git's message names the branch as it is: it is printed as it can be.
 				err = errors.New(strings.ReplaceAll(err.Error(), branch, shown))
 			}
@@ -1323,9 +1315,8 @@ func (r runner) run(dir string, timeout time.Duration, args ...string) (string, 
 	return strings.TrimSpace(string(out)), nil
 }
 
-// checkError is an error of the settings check before git ran, a
-// [*hostgit.RefusedError] or one that kept it from reading a record of the places: no
-// git ran, so it says nothing of whether the directory is a working tree.
+// checkError is an error before git ran, a [*hostgit.GitVersionError]: no git ran, so it
+// says nothing of whether the directory is a working tree.
 type checkError struct {
 	err error
 }
@@ -1334,9 +1325,9 @@ func (e *checkError) Error() string { return e.err.Error() }
 
 func (e *checkError) Unwrap() error { return e.err }
 
-// stoppedByCheck reports whether err is the settings check's, a [*checkError]: git did
-// not run, and the error goes on as it is, rather than as git's.
-func stoppedByCheck(err error) bool {
+// stoppedBeforeGit reports whether err is a [*checkError]: git did not run, and the error
+// goes on as it is, rather than as git's.
+func stoppedBeforeGit(err error) bool {
 	var stopped *checkError
 	return errors.As(err, &stopped)
 }

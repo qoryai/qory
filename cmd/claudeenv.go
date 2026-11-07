@@ -32,11 +32,12 @@ func (e *modelVariablesError) Error() string {
 // Claude Code session on this home, when the home holds claude after the compose: a
 // module's settings fragment and its manifest's export, the configuration's env and
 // harness.launch.claude.env, the settings.json of the CLAUDE_CONFIG_DIR the claude launch
-// sets, and, for a home inside the checkout, the checkout's .claude/settings.json and
-// .claude/settings.local.json and the user's Claude Code settings file. A settings file
+// sets, and, with readsSettings, the checkout's .claude/settings.json and
+// .claude/settings.local.json and the user's Claude Code settings file: a home inside the
+// checkout, or a walled run with no run key, whose agent reads those. A settings file
 // that is not JSON is not checked, and its row comes back; one qory cannot read stops
 // the compose with the read error.
-func checkModelVariables(res *compose.Result, conf config.Config, runtimes []render.Runtime, at places) ([][2]string, error) {
+func checkModelVariables(res *compose.Result, conf config.Config, runtimes []render.Runtime, at places, readsSettings bool) ([][2]string, error) {
 	if !slices.ContainsFunc(runtimes, func(rt render.Runtime) bool { return rt.Name() == claude.Runtime }) {
 		return nil, nil
 	}
@@ -69,7 +70,7 @@ func checkModelVariables(res *compose.Result, conf config.Config, runtimes []ren
 	// what follows it.
 	type file struct{ path, shown, place string }
 	var files []file
-	if at.dir != "" {
+	if readsSettings {
 		for _, name := range []string{"settings.json", "settings.local.json"} {
 			rel := ".claude/" + name
 			files = append(files, file{filepath.Join(at.root, ".claude", name), rel, rel + " in the checkout"})

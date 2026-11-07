@@ -474,7 +474,7 @@ func TestPushEndingLines(t *testing.T) {
 		{"first signal", pushEnding{session: succeeded, cut: true, stopped: true, got: "SIGTERM"}, "qory run got SIGTERM, and the step reached its limit of 15s", 1},
 		{"run's limit", pushEnding{session: succeeded, cut: true, limit: time.Hour}, "the run reached its time limit of 1h0m0s", exitTimeout},
 		{"a failed session at the run's limit", pushEnding{session: failed, cut: true, limit: time.Hour}, "the run reached its time limit of 1h0m0s", 3},
-		{"after a timeout", pushEnding{session: timedOut, cut: true, limit: time.Hour}, "the step reached its limit of 2m0s", 3},
+		{"after a timeout", pushEnding{session: timedOut, cut: true, limit: time.Hour}, "the step reached its limit of 5m0s", 3},
 	} {
 		var out strings.Builder
 		err := c.ending.ended(ui.New(&out), func(string) {}, errors.New("cut"), &preparation.WorkBranch{}, sessionEnd)
@@ -498,5 +498,28 @@ func TestFailedEnd(t *testing.T) {
 		if got := failedEnd(out); got != want {
 			t.Errorf("%+v: %q, want %q", out, got, want)
 		}
+	}
+}
+
+// TestThePushHasFiveMinutesPastTheLimit is the time past a run's time limit that the git session
+// and the push share, and a first signal during that time: it leaves at most 15 seconds.
+func TestThePushHasFiveMinutesPastTheLimit(t *testing.T) {
+	if pushTimes.limit != 5*time.Minute {
+		t.Errorf("the time past the limit is %s, want 5m0s", pushTimes.limit)
+	}
+	signalled, signal := context.WithCancel(context.Background())
+	defer signal()
+	push, done := pushContext(signalled, context.Background(), time.Now().Add(-time.Hour), pushTimes.limit, pushTimes.signal)
+	defer done()
+	if endsWithin(push, time.Second) {
+		t.Fatal("the step past the limit ended at once")
+	}
+	started := time.Now()
+	signal()
+	if !endsWithin(push, 16*time.Second) {
+		t.Fatal("the step did not end within 15 seconds of the signal")
+	}
+	if took := time.Since(started); took < 14*time.Second {
+		t.Errorf("the step ended %s after the signal, want 15s", took)
 	}
 }

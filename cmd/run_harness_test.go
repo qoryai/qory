@@ -4,10 +4,12 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
 	"github.com/qoryai/qory/cmd"
+	"github.com/qoryai/qory/internal/checkout"
 	"github.com/qoryai/qory/internal/report"
 )
 
@@ -62,7 +64,10 @@ func TestRunTakesAModuleExportAsADefault(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wants(t, string(data), "env: CORE_SCRIPTS=/elsewhere\n", "env: LOG_DIR=from-server\n", "env: CODEX_HOME="+home+"/codex\n")
+	wants(t, string(data), "env: CORE_SCRIPTS=/elsewhere\n", "env: LOG_DIR=from-server\n")
+	if want := regexp.MustCompile(`env: CODEX_HOME=` + regexp.QuoteMeta(runHomesFolder(t, root)) + `/[^/\n]+/codex\n`); !want.Match(data) {
+		t.Errorf("the environment file has no CODEX_HOME in the run's home:\n%s", data)
+	}
 	lacks(t, string(data), "DOCKER_HOST=", "/not-the-template", "LOG_DIR="+home)
 	_, evs := events(t, root)
 	got, _ := json.Marshal(sessionApplied(t, evs)["variables"])
@@ -141,7 +146,7 @@ func startedNothing(t *testing.T, root, log string) {
 
 // TestRunComposesOverAReportNamingAnotherHome is a report in the checkout that contains
 // another home, as a repository could commit or a walled agent write: the run composes
-// before it starts, which writes the report again, and mounts the home it computes.
+// under the cache folder, and mounts the home it computes.
 // --home set to the composed home, with a report for another checkout, is refused
 // before the wall runs anything, since the run would mount that checkout.
 func TestRunComposesOverAReportNamingAnotherHome(t *testing.T) {
@@ -163,9 +168,6 @@ func TestRunComposesOverAReportNamingAnotherHome(t *testing.T) {
 	if out, err := run(t, "run", "claude"); cmd.ExitCode(err) != 4 {
 		t.Fatalf("a report naming another home: %v (exit %d)\n%s", err, cmd.ExitCode(err), out)
 	}
-	if rep, err := report.Read(path); err != nil || rep.Home != home {
-		t.Errorf("the run left the report naming the home %q (%v), want %s", rep.Home, err, home)
-	}
 	data, err := os.ReadFile(log)
 	if err != nil {
 		t.Fatal(err)
@@ -180,6 +182,12 @@ func TestRunComposesOverAReportNamingAnotherHome(t *testing.T) {
 		}
 	}
 
+	outside := filepath.Join(tempDir(t), "homes")
+	if out, err := run(t, "hc", "--runtime", "claude", "--home", outside); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	home = filepath.Join(outside, checkout.Key(root))
+	path = home + "-report.json"
 	if rep, err = report.Read(path); err != nil {
 		t.Fatal(err)
 	}
@@ -194,20 +202,25 @@ func TestRunComposesOverAReportNamingAnotherHome(t *testing.T) {
 	}
 	startedNothing(t, root, log)
 
-	composedForFake(t, root, "claude")
-	out, err := run(t, "run", "claude")
+	if out, err := run(t, "hc", "--runtime", "claude", "--home", outside); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := run(t, "hc", "--runtime", "claude", "--home", outside); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	out, err := run(t, "run", "claude", "--home", home)
 	if cmd.ExitCode(err) != 4 {
-		t.Fatalf("run after a compose: %v (exit %d)\n%s", err, cmd.ExitCode(err), out)
+		t.Fatalf("--home naming the composed home: %v (exit %d)\n%s", err, cmd.ExitCode(err), out)
 	}
 	data, err = os.ReadFile(log)
 	if err != nil {
 		t.Fatal(err)
 	}
-	wants(t, string(data), "--mount type=bind,src="+root+",dst="+root+" ")
+	wants(t, string(data), "--mount type=bind,src="+copyWork(t, string(data))+",dst="+copyWork(t, string(data))+" ")
 	lacks(t, string(data), forged)
-	if out, err := run(t, "run", "claude", "--home", home); cmd.ExitCode(err) != 4 {
-		t.Fatalf("--home naming the composed home: %v (exit %d)\n%s", err, cmd.ExitCode(err), out)
-	}
 }
 
 // TestWalledRunTakesTheHomeFromYourOwnFile is a checkout whose own qory.yaml sets

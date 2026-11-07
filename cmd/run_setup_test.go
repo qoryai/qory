@@ -8,10 +8,12 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/qoryai/forager/event"
 	"github.com/qoryai/forager/session"
 	"github.com/qoryai/forager/wall"
 
 	"github.com/qoryai/qory/cmd"
+	"github.com/qoryai/qory/internal/image"
 	"github.com/qoryai/qory/internal/proxygit/proxygittest"
 )
 
@@ -79,8 +81,12 @@ func runSetUpWith(t *testing.T, h *hostFetch, where, repositories string, setupE
 	return r
 }
 
-// prepareCommand is the one setup command of a run that lists repositories.
-var prepareCommand = []session.SetupCommand{{Name: "prepare", Args: []string{wall.HelperPath, "run", "prepare"}}}
+// prepareCommand is the setup command of a run that lists repositories, after the check of a run
+// that may write.
+var prepareCommand = []session.SetupCommand{
+	{Name: "Check tools", Args: []string{"/bin/sh", "-c", image.SessionCheckScript()}},
+	{Name: "prepare", Args: []string{wall.HelperPath, "run", "prepare"}},
+}
 
 // TestAWalledRunSetsUpOutsideWithTheJoinsPlaces is a walled run from a control plane
 // that lists acme/shop, with wall.setup absent and set to outside: once qory run fetched
@@ -234,4 +240,105 @@ func TestASetupVariableRefusalFailsTheRun(t *testing.T) {
 // sameCommand reports whether a and b are the same setup command.
 func sameCommand(a, b session.SetupCommand) bool {
 	return a.Name == b.Name && slices.Equal(a.Args, b.Args)
+}
+
+// TestAReadRunGetsNoCheckOfTheGitSessionsTools is a read run that has a setup: no git session
+// follows its agent.
+func TestAReadRunGetsNoCheckOfTheGitSessionsTools(t *testing.T) {
+	p := walledPush(t)
+	p.change = lowered
+	var got []session.SetupCommand
+	p.onSetup = func(spec session.SetupSpec) { got = spec.Commands }
+	p.run(t, nil, nil)
+	if len(got) != 1 || got[0].Name != "prepare" {
+		t.Errorf("the setup commands of a read run: %v", got)
+	}
+}
+
+// TestAWriteRunChecksTheGitSessionsToolsFirst is a write run from a run code that has a setup: the
+// step comes before prepare.
+func TestAWriteRunChecksTheGitSessionsToolsFirst(t *testing.T) {
+	p := walledPush(t)
+	var got []session.SetupCommand
+	p.onSetup = func(spec session.SetupSpec) { got = spec.Commands }
+	p.run(t, nil, nil)
+	if !slices.EqualFunc(got, prepareCommand, sameCommand) {
+		t.Errorf("the setup commands: %v, want %v", got, prepareCommand)
+	}
+}
+
+// missingToolDocker is a docker that stands in for the setup container of a real wall: its exec of
+// sh prints line and what must not reach the terminal on stderr, and exits 1.
+func missingToolDocker(t *testing.T, line string) string {
+	t.Helper()
+	fake, _ := fakeDocker(t)
+	script := filepath.Join(t.TempDir(), "docker")
+	writeFile(t, script, `#!/bin/sh
+case "$*" in
+"run --detach "*) echo the-setup-container; exit 0 ;;
+"inspect --format {{.State.Running}} "*) echo true; exit 0 ;;
+"exec "*"/bin/sh -c "*)
+	printf '%s\n' `+"'"+line+"'"+` >&2
+	printf 'not a line of the check\n\033[31minstall red\033[0m in the terminal\n' >&2
+	exit 1 ;;
+esac
+exec `+fake+` "$@"
+`)
+	if err := os.Chmod(script, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return script
+}
+
+// TestAMissingToolReachesThePerson is an image with no comm, through Forager's setup and the
+// record it writes: qory run prints the install line, the fix first, in place of the exit status
+// of the step, and the line reaches no agent. Nothing else the image printed reaches the terminal.
+func TestAMissingToolReachesThePerson(t *testing.T) {
+	const line = "install comm in /usr/local/bin, /usr/bin, /bin: the git session of a walled run runs comm from these folders, to compare the run's refs and commits with what the bundle has"
+	p := newPushRepo(t, "write")
+	p.real = true
+	walledBy(t, missingToolDocker(t, strings.ReplaceAll(line, "'", `'\''`)))
+	p.flags = []string{"--home", filepath.Join(tempDir(t), "home")}
+	r := p.run(t, func(string) { t.Error("the agent started") }, nil)
+	wants(t, r.out, "qory run: "+line+"\n")
+	for _, text := range []string{"Fix Check tools", "not a line of the check", "install red", "\x1b["} {
+		if strings.Contains(r.out, text) {
+			t.Errorf("the output has %q:\n%s", text, r.out)
+		}
+	}
+	if len(r.closes) != 1 || r.closes[0].State != event.StateFailed {
+		t.Errorf("the run closed with %+v", r.closes)
+	}
+	record, err := os.ReadFile(p.record())
+	if err != nil {
+		t.Fatal(err)
+	}
+	wants(t, string(record), `"name":"Check tools"`)
+}
+
+// TestAMissingShellReachesThePerson is an exec of /bin/sh that failed in the setup container, so
+// the step wrote no line.
+func TestAMissingShellReachesThePerson(t *testing.T) {
+	h := newHostFetch(t, "", "main")
+	r := runSetUp(t, h, "", "acme/shop", &session.SetupError{Name: "Check tools", Step: 3, ExitCode: 127})
+	wants(t, r.out, "qory run: install sh in /usr/local/bin, /usr/bin, /bin: the git session of a walled run runs sh from these folders, to run its script\n")
+	if strings.Contains(r.out, "Fix Check tools") {
+		t.Errorf("the output has the step's exit status:\n%s", r.out)
+	}
+}
+
+// TestAnExecThatCouldNotRunTheCommandReportsItsStep is exit 126, where docker could not run the
+// command for a cause other than a missing shell, such as the image's architecture.
+func TestAnExecThatCouldNotRunTheCommandReportsItsStep(t *testing.T) {
+	h := newHostFetch(t, "", "main")
+	r := runSetUp(t, h, "", "acme/shop", &session.SetupError{Name: "Check tools", Step: 3, ExitCode: 126})
+	wants(t, r.out, "qory run: Fix Check tools: setup step 3 exited with 126.\n")
+	lacks(t, r.out, "install sh")
+}
+
+// TestACheckThatPrintedNoLineReportsItsStep is a step that exited 1 with no line in its record.
+func TestACheckThatPrintedNoLineReportsItsStep(t *testing.T) {
+	h := newHostFetch(t, "", "main")
+	r := runSetUp(t, h, "", "acme/shop", &session.SetupError{Name: "Check tools", Step: 3, ExitCode: 1})
+	wants(t, r.out, "qory run: Fix Check tools: setup step 3 exited with 1.\n")
 }

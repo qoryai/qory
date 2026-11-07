@@ -25,9 +25,8 @@ import (
 //
 // The result is a first name only when git's user.name begins with one, and a gh login is
 // returned whole. Name reports no error. A missing git, a git older than 2.36, an unset
-// user.name, a repository whose git settings the settings check of
-// [github.com/qoryai/qory/internal/hostgit] refuses, and an unreadable hosts file each
-// fall through to the next source, and the last of them returns "".
+// user.name and an unreadable hosts file each fall through to the next source, and the
+// last of them returns "".
 func Name() string {
 	if c, err := hostgit.Command(context.Background(), ".", "config", "user.name"); err == nil {
 		if out, err := c.Output(); err == nil {

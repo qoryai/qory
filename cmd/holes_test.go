@@ -11,7 +11,6 @@ import (
 	"testing"
 
 	"github.com/qoryai/qory/cmd"
-	walled "github.com/qoryai/qory/internal/places"
 )
 
 // TestRemoveRuntimeDeletesNothingThroughALinkedHome composes for Claude Code, then puts
@@ -232,29 +231,15 @@ func TestWorktreeAddBringsNothingThroughALinkOfTheCheckout(t *testing.T) {
 	}
 }
 
-// recordMount records dir as a read-write mount a walled run had.
-func recordMount(t *testing.T, dir string) {
-	t.Helper()
-	if err := walled.Update(dir, walled.KindMount, func(r *walled.Record) error {
-		r.Run = "run-1"
-		r.Qory = &walled.Qory{}
-		return nil
-	}); err != nil {
-		t.Fatal(err)
-	}
-}
-
-// TestNoProgramFromAPlaceAWalledRunUsed records a folder as a read-write mount of an
-// earlier walled run and puts an integration's program, a credential's adapter and a
-// tool's program in it: qory config and qory run refuse each, as they refuse one in the
-// checkout, before anything starts. An integration's relative <name>_file setting is
-// refused, since it would move with the working folder.
-func TestNoProgramFromAPlaceAWalledRunUsed(t *testing.T) {
+// TestNoProgramFromTheCheckout puts an integration's program, a credential's adapter and
+// a tool's program in the checkout: qory config and qory run stop at each before anything
+// starts. An integration's relative <name>_file setting, with its program outside the
+// checkout, is an error too, since it would move with the working folder.
+func TestNoProgramFromTheCheckout(t *testing.T) {
 	root := newCheckout(t)
 	copyFixture(t, "two-modules", root)
 	composedForFake(t, root, fakeRuntime(t))
-	place := tempDir(t)
-	recordMount(t, place)
+	place := root
 	program := filepath.Join(place, "bin", "acme-tracker")
 	writeFile(t, program, "#!/bin/sh\ntest \"$1\" = describe || exit 64\necho '{\"version\": 1, \"name\": \"tracker\", \"title\": \"Tracker\", \"program_version\": \"0.3.0\", \"settings\": {\"type\": \"object\"}, \"roles\": {\"credential\": {\"argument\": \"[A-Z]+\", \"hosts\": [\"tracker.acme.example\"]}}}'\n")
 	if err := os.Chmod(program, 0o755); err != nil {
@@ -266,7 +251,7 @@ func TestNoProgramFromAPlaceAWalledRunUsed(t *testing.T) {
 		t.Fatal(err)
 	}
 	shown := filepath.Join(real, "bin", "acme-tracker")
-	tail := ", inside " + real + ", which a run may write; qory runs %s from outside the checkout, the container's read-write mounts and the places a walled run has used"
+	tail := ", inside " + real + ", which a run may write; qory runs %s from outside the checkout and the container's read-write mounts"
 	writeFile(t, file, "apiVersion: qory.dev/v1alpha1\ngateway:\n  integrations:\n    tracker: {program: "+program+"}\n")
 	out, err := run(t, "config")
 	if want := "gateway.integrations.tracker: " + shown + fmt.Sprintf(tail, "an integration"); err == nil || !strings.HasSuffix(err.Error(), want) {
@@ -286,8 +271,16 @@ func TestNoProgramFromAPlaceAWalledRunUsed(t *testing.T) {
 		t.Errorf("a refused run left records %v", ids)
 	}
 
-	forgetPlaces(t)
-	writeFile(t, file, "apiVersion: qory.dev/v1alpha1\ngateway:\n  integrations:\n    tracker: {program: "+program+", settings: {project: SHOP, token_file: keys/token}}\n")
+	outside := filepath.Join(tempDir(t), "acme-tracker")
+	data, err := os.ReadFile(program)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, outside, string(data))
+	if err := os.Chmod(outside, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, file, "apiVersion: qory.dev/v1alpha1\ngateway:\n  integrations:\n    tracker: {program: "+outside+", settings: {project: SHOP, token_file: keys/token}}\n")
 	out, err = run(t, "config")
 	if want := "gateway.integrations.tracker: settings.token_file is a relative path; qory takes the file by its absolute path, since a relative one moves with the working folder"; err == nil || !strings.HasSuffix(err.Error(), want) {
 		t.Errorf("a relative token_file: %v, want %q\n%s", err, want, out)

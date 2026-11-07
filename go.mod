@@ -6,13 +6,14 @@ require (
 	github.com/BurntSushi/toml v1.6.0
 	github.com/charmbracelet/lipgloss v1.1.0
 	github.com/charmbracelet/x/term v0.2.1
-	github.com/qoryai/forager v0.7.1-0.20261107122707-1e2716002823
+	github.com/qoryai/forager v0.7.1-0.20261107135322-ea3054c020ac
 	github.com/qoryai/integrations v0.3.1-0.20261104212229-ec0857068317
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/pflag v1.0.9
 	golang.org/x/mod v0.41.0
 	golang.org/x/sys v0.48.0
+	golang.org/x/text v0.14.0
 	gopkg.in/yaml.v3 v3.0.1
 )
 
@@ -34,5 +35,4 @@ require (
 	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect
 	go.yaml.in/yaml/v3 v3.0.4 // indirect
 	golang.org/x/term v0.46.0 // indirect
-	golang.org/x/text v0.14.0 // indirect
 )

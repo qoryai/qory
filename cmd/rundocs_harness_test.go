@@ -750,14 +750,15 @@ func TestAWalledRunOfAHiddenHarnessThatMountsTheFolderOfItsHomeStops(t *testing.
 // TestAWalledRunOfAHiddenHarnessFromTheCacheDirectoryStops is a walled run from a run
 // code whose harness is hidden, started in the cache directory with --home set to a
 // composed home whose report lists a checkout elsewhere: the checkout is the report's,
-// and the working folder, which the agent's container gets writable, contains qory's
-// cache folder, so the run stops, exit 2, with the line of the working folder, before
-// it opens the run's stack proxy, fetches anything or runs a command of the wall.
+// and the working folder of the read run, which the agent's container gets read-only,
+// contains qory's cache folder, so the run stops, exit 2, with the line of the working
+// folder, before it runs a command of the wall. Only the fetched stack shows that the run
+// reads, so the harness is fetched by then.
 func TestAWalledRunOfAHiddenHarnessFromTheCacheDirectoryStops(t *testing.T) {
 	docker, log := fakeDocker(t)
 	helper := staticELF(t)
 	var cache, cwd string
-	r := codeHarness{before: func() []string {
+	r := codeHarness{stack: declares("read"), before: func() []string {
 		root, err := os.Getwd()
 		if err != nil {
 			t.Fatal(err)
@@ -786,7 +787,6 @@ func TestAWalledRunOfAHiddenHarnessFromTheCacheDirectoryStops(t *testing.T) {
 	if r.err == nil || r.err.Error() != want || cmd.ExitCode(r.err) != cmd.ExitInput {
 		t.Fatalf("%v (exit %d), want %q, exit %d\n%s", r.err, cmd.ExitCode(r.err), want, cmd.ExitInput, r.out)
 	}
-	r.fetchedNothing(t)
 	if data, err := os.ReadFile(log); err == nil {
 		t.Errorf("the wall ran a command:\n%s", data)
 	}

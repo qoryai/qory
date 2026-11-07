@@ -42,8 +42,6 @@ import (
 	"github.com/qoryai/qory/internal/exports"
 	"github.com/qoryai/qory/internal/hostgit"
 	"github.com/qoryai/qory/internal/integration"
-	"github.com/qoryai/qory/internal/module"
-	"github.com/qoryai/qory/internal/places"
 	"github.com/qoryai/qory/internal/proxygit"
 )
 
@@ -87,11 +85,6 @@ const (
 	textAboveFailed    = "qory run: check git on this machine, the working folder, and each repository and .git above it, then run again. git failed: %s"
 	textGitFailed      = "qory run: check that git on this machine can read the working folder, then run again. git failed: %s"
 	textLocal          = "qory run: check that this machine can read and write the working folder, then run again. The step failed: %s"
-	textAboveStop      = "qory run: start the run in an empty folder outside the repository above the working folder, then run again. The check of that repository failed: %s"
-	textCheckStop      = "qory run: %s"
-	textEngineStop     = "qory run: start the run in a new empty folder that no walled run uses, then run again. If it stops there too: %s"
-	textEmptyInUse     = "qory run: start the run in a new empty folder that no walled run uses, then run again. The check of the working folder failed: %s"
-	textPlaceRefused   = "qory run: start the run in a new empty git working tree that no walled run used, then run again. The check of the working folder's git configuration failed: %s"
 	textConfigKey      = "qory run: start the run in a new empty git working tree, or remove %s from %s, then run again. qory fetches only into a repository whose configuration has only the keys git init writes, since git on this machine would use any other key, such as a filter, a proxy or http.sslVerify"
 	textConfigNotFile  = "qory run: start the run in a new empty git working tree, then run again: the working folder's %s is not a regular file, and qory fetches only into a repository whose configuration it can read"
 	textAlternates     = "qory run: start the run in a new empty git working tree, then run again: the working folder's .git has %s, which makes git read objects from outside the working folder"
@@ -151,8 +144,8 @@ var errLimit = errors.New("the limit of one git call")
 // repositories are cloned under, each at its path.
 const Repositories = ".qory/repositories"
 
-// excludeLine keeps [Repositories] out of the run repository's git status.
-const excludeLine = "/" + Repositories + "/"
+// ExcludeLine keeps [Repositories] out of the run repository's git status.
+const ExcludeLine = "/" + Repositories + "/"
 
 var (
 	hostName = regexp.MustCompile(`^[a-z0-9.-]{1,253}$`)
@@ -233,13 +226,9 @@ func RunAt(ctx context.Context, dir string, base []string, getenv func(string) s
 	}
 	g := hostRunner(&p)
 	// LC_ALL=C keeps the line [initFolder] reads from git in English.
-	hold, err := emptyTree(ctx, hostRunnerWith(&p, "", "LC_ALL=C"), dir)
-	if err != nil {
+	if err := emptyTree(ctx, hostRunnerWith(&p, "", "LC_ALL=C"), dir); err != nil {
 		return false, err
 	}
-	// The working folder stays held until the fetches and the checkout end: a walled run
-	// that starts there waits, so it cannot change what [safeRepository] checked.
-	defer hold.Release()
 	start := time.Now()
 	first := integration.Printable(exports.Value(paths[0], false))
 	if err := fetchRun(ctx, g, dir, system, paths[0], commit); err != nil {
@@ -433,27 +422,20 @@ func repoURL(system, path string) string {
 // any entry, which is not a working tree. A folder with no entries gets a repository from
 // [initFolder]. Then it stops on one whose repository [safeRepository] stops on; then on
 // one that is not the top of its working tree, whose repository has a commit, or has a
-// remote. Otherwise it returns the hold [safeRepository] took on the folder, which its
-// caller releases once the fetch ends. A git that fails to find the top of the working
-// tree is [textTreeFailed]: the cause can be in the folder's .git or in one above it, and
-// git can print the same line for both. Any later failure of git is [textGitFailed].
-func emptyTree(ctx context.Context, git gitRunner, dir string) (hold *places.Hold, err error) {
-	defer func() {
-		if err != nil {
-			hold.Release()
-			hold = nil
-		}
-	}()
+// remote. A git that fails to find the top of the working tree is [textTreeFailed]: the cause
+// can be in the folder's .git or in one above it, and git can print the same line for both. Any
+// later failure of git is [textGitFailed].
+func emptyTree(ctx context.Context, git gitRunner, dir string) error {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		return hold, local(err)
+		return local(err)
 	}
 	hasGit, other := false, false
 	for _, e := range entries {
 		switch e.Name() {
 		case ".git":
 			if !e.IsDir() {
-				return hold, errors.New(textGitNotDir)
+				return errors.New(textGitNotDir)
 			}
 			hasGit = true
 		case checkout.Dir:
@@ -462,42 +444,67 @@ func emptyTree(ctx context.Context, git gitRunner, dir string) (hold *places.Hol
 		}
 	}
 	if other && hasGit {
-		return hold, errors.New(textNotEmpty)
+		return errors.New(textNotEmpty)
 	}
 	if !hasGit {
 		if len(entries) > 0 {
-			return hold, errors.New(textNotTree)
+			return errors.New(textNotTree)
 		}
 		if err := initFolder(ctx, git, dir); err != nil {
-			return hold, err
+			return err
 		}
 	}
-	if hold, err = safeRepository(ctx, dir); err != nil {
-		return nil, err
+	if err := safeRepository(ctx, dir); err != nil {
+		return err
 	}
 	top, err := git(ctx, dir, "rev-parse", "--show-toplevel")
 	if err != nil {
-		return hold, fmt.Errorf(textTreeFailed, integration.Printable(exports.HideURLError(err).Error()))
+		return fmt.Errorf(textTreeFailed, integration.Printable(exports.HideURLError(err).Error()))
 	}
 	// Only the line end is git's: a folder's name can end in a space.
 	if !samePath(strings.TrimSuffix(top, "\n"), dir) {
-		return hold, errors.New(textNotTree)
+		return errors.New(textNotTree)
 	}
 	commits, err := git(ctx, dir, "rev-list", "-n", "1", "--all")
 	if err != nil {
-		return hold, gitFailed(err)
+		return gitFailed(err)
 	}
 	if strings.TrimSpace(commits) != "" {
-		return hold, errors.New(textNotTree)
+		return errors.New(textNotTree)
 	}
 	remotes, err := git(ctx, dir, "remote")
 	if err != nil {
-		return hold, gitFailed(err)
+		return gitFailed(err)
 	}
 	if strings.TrimSpace(remotes) != "" {
-		return hold, errors.New(textHasRemote)
+		return errors.New(textHasRemote)
 	}
-	return hold, nil
+	return nil
+}
+
+// branchName reports whether branch is a branch name: one that does not start with a
+// dash and that git check-ref-format takes after refs/heads/, by git in dir. The error is
+// git's when check-ref-format fails in another way than its exit 1, a stop among them.
+func branchName(ctx context.Context, git gitRunner, dir, branch string) (bool, error) {
+	if strings.HasPrefix(branch, "-") {
+		return false, nil
+	}
+	if _, err := git(ctx, dir, "check-ref-format", "refs/heads/"+branch); err != nil {
+		// check-ref-format exits 1 for a name that is no valid ref name; any other
+		// failure, a stop among them, is git's.
+		var ge *gitError
+		if errors.As(err, &ge) && ge.exit == 1 {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
+}
+
+// BranchName is [branchName] for a caller outside the preparation, with the git of the
+// push step, which reaches no remote.
+func BranchName(ctx context.Context, dir, branch string) (bool, error) {
+	return branchName(ctx, stepGit(noRemote, ""), dir, branch)
 }
 
 // initFolder runs git init in dir, a folder with no entries, with no template, so the
@@ -505,11 +512,9 @@ func emptyTree(ctx context.Context, git gitRunner, dir string) (hold *places.Hol
 // dir that is a link, without following it, and with [textNotTree] on a dir git finds a
 // repository for, such as a folder inside a working tree, where git would use the second
 // repository in place of the first. Any other failure of git as it looks for a repository
-// is [textAboveFailed]. A stop of hostgit's
-// check is the line of [emptyStop]. A walled run that starts in dir waits for the git
-// commands here: the hold ends before [safeRepository] takes one. The fetch replaces the
-// unborn branch main with the remote's default branch, so its name has no effect on the
-// run; the option keeps it from depending on git's version.
+// is [textAboveFailed]. The fetch replaces the unborn branch main with the remote's default
+// branch, so its name has no effect on the run; the option keeps it from depending on git's
+// version.
 func initFolder(ctx context.Context, git gitRunner, dir string) error {
 	info, err := os.Lstat(dir)
 	if err != nil {
@@ -518,14 +523,6 @@ func initFolder(ctx context.Context, git gitRunner, dir string) error {
 	if info.Mode()&fs.ModeSymlink != 0 {
 		return errors.New(textDirLink)
 	}
-	hold, err := hostgit.Hold(ctx, dir)
-	if stop := (*hostgit.RefusedError)(nil); errors.As(err, &stop) {
-		return emptyStop(stop)
-	}
-	if err != nil {
-		return gitFailed(err)
-	}
-	defer hold.Release()
 	_, err = git(ctx, dir, "rev-parse", "--git-dir")
 	if err == nil {
 		return errors.New(textNotTree)
@@ -538,27 +535,6 @@ func initFolder(ctx context.Context, git gitRunner, dir string) error {
 		return local(err)
 	}
 	return nil
-}
-
-// emptyStop is the line for a folder with no entries that hostgit's check stops on, with
-// hostgit's whole text, since its fix is at the end. A walled run in the folder is
-// [textEmptyInUse]. A container the check cannot reach is [textEngineStop]: the check of
-// another folder skips a run with no bind that overlaps it, but an entry whose writable
-// bind cannot be resolved reaches the engine check for every folder, so hostgit's fix
-// stays. Records, git or a walled run's entry that the check cannot read are hostgit's
-// text alone, since another folder does not help. Every other stop is of the repository
-// above the folder, as the folder has none: [textAboveStop].
-func emptyStop(stop *hostgit.RefusedError) error {
-	shown := module.Escape(exports.HideError(stop).Error())
-	switch stop.Reason {
-	case hostgit.RefusedInUse:
-		return fmt.Errorf(textEmptyInUse, shown)
-	case hostgit.RefusedEngineUnreachable:
-		return fmt.Errorf(textEngineStop, shown)
-	case hostgit.RefusedNoRecords, hostgit.RefusedNoGit, hostgit.RefusedEntryUnreadable:
-		return fmt.Errorf(textCheckStop, shown)
-	}
-	return fmt.Errorf(textAboveStop, shown)
 }
 
 // fetchRun fetches the run's repository into dir with git: origin is its URL, and the
@@ -591,17 +567,10 @@ func fetchRun(ctx context.Context, git gitRunner, dir, system, path, commit stri
 	// The branch is the remote's word, so it is checked as a branch name, which never
 	// starts with a dash, and it follows "--" where git takes it as a refspec.
 	notBranch := fmt.Errorf(textNotBranch, integration.Printable(exports.Value(branch, false)))
-	if strings.HasPrefix(branch, "-") {
-		return notFetched(path, system, notBranch)
-	}
-	if _, err := git(ctx, dir, "check-ref-format", "refs/heads/"+branch); err != nil {
-		// check-ref-format exits 1 for a name it refuses; any other failure, a stop
-		// among them, is git's.
-		var ge *gitError
-		if errors.As(err, &ge) && ge.exit == 1 {
-			return notFetched(path, system, notBranch)
-		}
+	if ok, err := branchName(ctx, git, dir, branch); err != nil {
 		return notFetched(path, system, err)
+	} else if !ok {
+		return notFetched(path, system, notBranch)
 	}
 	if commit != "" {
 		if _, err := git(ctx, dir, "fetch", "--quiet", "--depth", "1", "origin", "--", commit); err != nil {
@@ -654,7 +623,7 @@ func keepRepositories(dir, path string) error {
 	return nil
 }
 
-// exclude adds [excludeLine] to the exclude file of the working tree at dir, the one
+// exclude adds [ExcludeLine] to the exclude file of the working tree at dir, the one
 // git rev-parse --git-path info/exclude names, as [checkout.ExcludeFile] finds it but
 // with the environment of every git here, unless the file has that line already. The
 // file is read and written through an [os.Root] of dir, and refused when it is outside
@@ -698,14 +667,14 @@ func exclude(ctx context.Context, git gitRunner, dir string) error {
 		return local(err)
 	}
 	for _, line := range strings.Split(string(data), "\n") {
-		if strings.TrimSpace(line) == excludeLine {
+		if strings.TrimSpace(line) == ExcludeLine {
 			return nil
 		}
 	}
 	if len(data) > 0 && !bytes.HasSuffix(data, []byte("\n")) {
 		data = append(data, '\n')
 	}
-	data = append(data, excludeLine+"\n"...)
+	data = append(data, ExcludeLine+"\n"...)
 	if err := root.MkdirAll(filepath.Dir(file), 0o755); err != nil {
 		return local(err)
 	}

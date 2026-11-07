@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/qoryai/qory/internal/config"
 	"github.com/qoryai/qory/internal/preparation"
 	"github.com/qoryai/qory/internal/render"
 	"github.com/qoryai/qory/internal/render/claude"
@@ -173,7 +174,7 @@ func TestARunKeyReadsNoMachineKeyOfTheCheckout(t *testing.T) {
 	}
 	t.Chdir(root)
 
-	_, person, err := locateRun(homeOptions{}, false, true)
+	_, person, err := locateRun(homeOptions{}, false, true, func(config.Config) bool { return false })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -181,7 +182,7 @@ func TestARunKeyReadsNoMachineKeyOfTheCheckout(t *testing.T) {
 		t.Errorf("without a run key the checkout's keys are not read: %+v, env %v", person.Launch, person.Env)
 	}
 
-	_, keyed, err := locateRun(homeOptions{}, true, true)
+	_, keyed, err := locateRun(homeOptions{}, true, true, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

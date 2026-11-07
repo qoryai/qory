@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/qoryai/qory/internal/hostgit"
-	"github.com/qoryai/qory/internal/places"
 )
 
 // fakeGit puts a git first on the PATH that prints printed for git version and runs the
@@ -116,26 +115,13 @@ func TestAGitOlderThan236Stops(t *testing.T) {
 func TestEveryEntryStopsOnAGitOlderThan236(t *testing.T) {
 	hermetic(t)
 	dir := newRepo(t)
-	record(t, dir)
-	other := newRepo(t)
-	repo, ok := hostgit.Resolve(context.Background(), dir)
-	if !ok {
-		t.Fatal("no repository")
-	}
-	recs, err := places.Load()
-	if err != nil {
-		t.Fatal(err)
-	}
 	ctx := context.Background()
 	for name, call := range map[string]func() error{
 		"Command": func() error { _, err := hostgit.Command(ctx, dir, "status"); return err },
-		"Hold":    func() error { _, err := hostgit.Hold(ctx, dir); return err },
-		"Record":  func() error { return hostgit.Record(ctx, other, places.KindCheckout, "run-2") },
-		"Fingerprint": func() error {
-			_, err := hostgit.Fingerprint(ctx, repo)
+		"Unchecked": func() error {
+			_, err := hostgit.Unchecked(ctx, dir, os.Environ(), "config", "--list")
 			return err
 		},
-		"Changes": func() error { _, err := hostgit.Changes(ctx, recs, repo); return err },
 	} {
 		t.Run(name, func(t *testing.T) {
 			log := fakeGit(t, "git version 2.34.1", false, true)
@@ -146,24 +132,6 @@ func TestEveryEntryStopsOnAGitOlderThan236(t *testing.T) {
 				t.Errorf("git ran %q, want only git version", got)
 			}
 		})
-	}
-}
-
-// TestResolveRunsNoGitReadyFoundTooOld finds git 2.34.1 with Ready, then resolves a
-// repository: git is not started again, and Resolve finds none.
-func TestResolveRunsNoGitReadyFoundTooOld(t *testing.T) {
-	hermetic(t)
-	dir := newRepo(t)
-	log := fakeGit(t, "git version 2.34.1", false, true)
-	ctx := context.Background()
-	if err := hostgit.Ready(ctx); err == nil || err.Error() != tooOldLine {
-		t.Fatalf("got %v, want %q", err, tooOldLine)
-	}
-	if _, ok := hostgit.Resolve(ctx, dir); ok {
-		t.Error("Resolve found a repository")
-	}
-	if got := runs(t, log); !slices.Equal(got, []string{"version"}) {
-		t.Errorf("git ran %q, want only git version", got)
 	}
 }
 

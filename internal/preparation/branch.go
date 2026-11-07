@@ -22,15 +22,14 @@ const (
 	textBranchNotCommit = "qory run: add a new version of the artifact branch in Qory Apiary with a commit of %[2]s, then take the work item in again: the version has %[1]s, which is not a commit; the code is used"
 	textQoryInBranch    = "qory run: add a new version of the artifact branch in Qory Apiary whose commit has .qory as the target version %[3]s has it, then take the work item in again: commit %[2]s of %[1]s has another .qory, where qory keeps the files of the run; the code is used"
 	textNoCheckout      = "qory run: add a new version of the artifact branch in Qory Apiary with a commit that git can check out, then take the work item in again. The checkout of %[1]s at %[2]s in %[3]s failed: %[4]s; the code is used"
-	textNoHoldOnBranch  = "qory run: take the work item in again in Qory Apiary: the check of the working folder before the checkout of the branch failed: %s; the code is used"
 )
 
-// targetRef is the ref that [Switch] leaves at the target version: [fromSeed] reads which
+// TargetRef is the ref that [Switch] leaves at the target version: [fromSeed] reads which
 // files a branch removed from it.
-const targetRef = "refs/qory/target-version"
+const TargetRef = "refs/qory/target-version"
 
 // WorkBranch is the branch of a run's work item. [RunAt] fetches it with [Target.Branch]
-// set, and [Switch] or [SwitchHeld] checks it out. A repository with no entry in Version
+// set, and [Switch] checks it out. A repository with no entry in Version
 // gets the branch at the commit the fetch took.
 type WorkBranch struct {
 	// Ref is the branch's name, the same in each repository: qory/<work item id>.
@@ -39,15 +38,11 @@ type WorkBranch struct {
 	// have repositories that the run does not list, and those are not fetched.
 	Version []branchformat.Repository
 	// Repositories is every repository of the run, the target first, set by [RunAt] and
-	// [SwitchHeld].
+	// [Switch].
 	Repositories []WorkRepository
 
 	// system is the host of the run's repositories.
 	system string
-	// setupChanges is, by [WorkRepository.Dir], each path that the setup left changed, as
-	// git status lists it, with the digest of its entry. [RecordSetup] sets it, and it is
-	// nil with no setup outside the agent's container.
-	setupChanges map[string]map[string]string
 	// pushed is each repository [Push] pushed, as a line shows it.
 	pushed []string
 }
@@ -111,33 +106,21 @@ func branchNoCommit(path, system, commit, line string) error {
 	return fmt.Errorf(textBranchNoCommit, shortCommit(commit), shown, host, integration.Printable(exports.HideURLError(errors.New(line)).Error()))
 }
 
-// Switch is [SwitchHeld] under a hold on dir, the working folder of a run that no hold of
-// a walled run's start covers.
+// Switch checks out b in dir, the working folder, and in each further repository: at the
+// commit of the version that [RunAt] fetched, or where the repository is when the version
+// has no entry for it. A caller runs it after the compose, so no file of the branch
+// reaches the harness. No git here reaches a remote. A commit with another .qory stops
+// with [textQoryInBranch], and a commit that git does not check out with
+// [textNoCheckout]. On success it prints the branch and the target's commit on report,
+// and sets each [WorkRepository.Commit].
 func Switch(ctx context.Context, dir string, base []string, b *WorkBranch, report io.Writer) error {
-	hold, err := hostgit.Hold(hostgit.WithBase(ctx, base), dir)
-	if err != nil {
-		return fmt.Errorf(textNoHoldOnBranch, integration.Printable(exports.HideError(err).Error()))
-	}
-	defer hold.Release()
-	return SwitchHeld(ctx, dir, base, b, report)
-}
-
-// SwitchHeld checks out b in dir, the working folder, and in each further repository: at
-// the commit of the version that [RunAt] fetched, or where the repository is when the
-// version has no entry for it. A caller runs it after the compose and after the record
-// of a walled run's places, so no file of the branch reaches the harness or a record of
-// what a person wrote. No git here reaches a remote. A commit with another .qory stops
-// with [textQoryInBranch], and a commit that git does not check out with [textNoCheckout].
-// On success it prints the branch and the target's commit on report, and sets each
-// [WorkRepository.Commit].
-func SwitchHeld(ctx context.Context, dir string, base []string, b *WorkBranch, report io.Writer) error {
 	ctx = hostgit.WithBase(ctx, base)
 	dir, err := filepath.Abs(dir)
 	if err != nil {
 		return local(err)
 	}
 	git := hostRunner(nil)
-	if _, err := git(ctx, dir, "update-ref", targetRef, "HEAD"); err != nil {
+	if _, err := git(ctx, dir, "update-ref", TargetRef, "HEAD"); err != nil {
 		return noCheckout(b, b.Repositories[0], err)
 	}
 	for i := range b.Repositories {
@@ -196,14 +179,14 @@ func sameQory(ctx context.Context, git gitRunner, dir, ref, commit, version stri
 // not have and the target version has: nil outside a branch. The image's copy, made at
 // or before the target version, may still have those files.
 func removedByBranch(ctx context.Context, dir string) (map[string]bool, error) {
-	if _, err := git(ctx, dir, "rev-parse", "--verify", "--quiet", targetRef); err != nil {
+	if _, err := git(ctx, dir, "rev-parse", "--verify", "--quiet", TargetRef); err != nil {
 		var ge *gitError
 		if errors.As(err, &ge) && ge.exit == 1 {
 			return nil, nil
 		}
 		return nil, gitFailedIn(err)
 	}
-	out, err := git(ctx, dir, "diff", "--name-only", "-z", "--no-renames", "--diff-filter=D", targetRef, "HEAD", "--")
+	out, err := git(ctx, dir, "diff", "--name-only", "-z", "--no-renames", "--diff-filter=D", TargetRef, "HEAD", "--")
 	if err != nil {
 		return nil, gitFailedIn(err)
 	}

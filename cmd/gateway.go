@@ -166,12 +166,10 @@ More: ` + gatewayDocs,
 			gw.Discovered = discovered(machine, id, verbGateway, stderr)
 			// The server supplies every run's policy, so every integration is described.
 			shadowed := r.Shadowed()
-			// A program in a place a walled run has used is refused, as a run refuses it.
-			recorded, err := recordedPlaces()
-			if err != nil {
-				return err
+			e := config.Expansion{Only: func(key string) bool { return !slices.Contains(shadowed, key) }}
+			if runs := runCopiesDir(); runs != "" {
+				e.Workspace = []string{runs}
 			}
-			e := config.Expansion{Workspace: recorded, Only: func(key string) bool { return !slices.Contains(shadowed, key) }}
 			if gw.Credentials, err = machineCredentials(ctx, r, e, "gateway", stderr); err != nil {
 				return err
 			}

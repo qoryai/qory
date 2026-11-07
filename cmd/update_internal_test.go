@@ -60,7 +60,7 @@ func TestNoUpdateCheckInsideTheWall(t *testing.T) {
 	if err := enclose(&spec, r, wallOptions{}, "", false, "/usr/local/bin/qory", t.TempDir(), t.TempDir()); err != nil {
 		t.Fatal(err)
 	}
-	if err := runSetup(t.Context(), nil, &spec); err != nil {
+	if err := runSetup(t.Context(), nil, &spec, false); err != nil {
 		t.Fatal(err)
 	}
 	d, ok := spec.Wall.(*wall.Docker)

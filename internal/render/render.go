@@ -10,6 +10,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
@@ -130,6 +131,43 @@ type Runtime interface {
 type Launcher interface {
 	// Template is how the program is started on a home, see [Template].
 	Template() Template
+}
+
+// CheckoutReader is a [Launcher] whose program reads part of a harness from the checkout alone,
+// so that part does not reach a session on a home with no links into the checkout.
+type CheckoutReader interface {
+	// CheckoutParts are the parts it reads from the checkout alone, in the order a line lists
+	// them: an entry kind, [Instructions], or [FilesKind] for the runtime's files entries.
+	CheckoutParts() []string
+}
+
+// Instructions is the part of a harness that the root AGENTS.md of its home contains, in a
+// [CheckoutReader]'s list.
+const Instructions = "instructions"
+
+// CheckoutOnly lists the parts of the composed harness res that rt reads from the checkout alone:
+// each of [CheckoutReader.CheckoutParts] that the compose wrote. It is nil for a runtime that gets
+// everything from the home.
+func CheckoutOnly(rt Runtime, res *compose.Result) []string {
+	reader, ok := rt.(CheckoutReader)
+	if !ok {
+		return nil
+	}
+	var parts []string
+	for _, part := range reader.CheckoutParts() {
+		wrote := part == Instructions && res.Instructions != "" ||
+			slices.ContainsFunc(res.Entries, func(e compose.Entry) bool {
+				if part == FilesKind {
+					_, ok := FileFor(e, rt.Name())
+					return ok
+				}
+				return e.Kind == part
+			})
+		if wrote {
+			parts = append(parts, part)
+		}
+	}
+	return parts
 }
 
 // AgentModel is a [Runtime] that writes the model id an agent's tier maps to into the
@@ -1840,7 +1878,7 @@ func unexclude(root, line string) error {
 // heldElsewhere reports whether a worktree of the repository other than root has
 // something, a dangling link included, at the path an exclude line names. Git lists
 // worktrees by their real paths, so root is told apart by its real path. The error is
-// the settings check's refusal of the repository.
+// that of [checkout.Worktrees]: a git older than 2.36.
 func heldElsewhere(root, line string) (bool, error) {
 	self := root
 	if resolved, err := filepath.EvalSymlinks(root); err == nil {

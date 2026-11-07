@@ -546,9 +546,7 @@ func TestAKeyedMachineRunsNoAgentWithoutAWall(t *testing.T) {
 	}
 	t.Setenv("QORY_ACCESS_KEY_SECRET", "")
 
-	// Without a server, each file that holds a secret keeps an unwalled run out. The
-	// walled runs before recorded the checkout, which keeps every unwalled run out.
-	forgetPlaces(t)
+	// Without a server, each file that holds a secret keeps an unwalled run out.
 	writeFile(t, filepath.Join(string(dir), "forager.yaml"), "apiVersion: qory.dev/v1alpha1\n")
 	secret := dir.Path(foragerdir.SecretFile)
 	for _, name := range []string{foragerdir.NewSecretFile, foragerdir.ReplacedFile, foragerdir.OldPrefix + "1700000000"} {

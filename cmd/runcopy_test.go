@@ -1,0 +1,2040 @@
+package cmd_test
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"regexp"
+	"runtime"
+	"slices"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/qoryai/forager/event"
+	"github.com/qoryai/forager/session"
+	"github.com/qoryai/forager/wall"
+
+	"github.com/qoryai/qory/cmd"
+	"github.com/qoryai/qory/internal/runcopy"
+)
+
+// copyCheckout is a checkout with the two-modules fixture in its first commit, composed for
+// the fake runtime, with a wall whose docker stands in for the engine.
+func copyCheckout(t *testing.T) string {
+	t.Helper()
+	root := newCheckout(t)
+	copyFixture(t, "two-modules", root)
+	writeFile(t, filepath.Join(root, "README.md"), "first\n")
+	writeFile(t, filepath.Join(root, "gone.txt"), "first\n")
+	composedForFake(t, root, fakeRuntime(t))
+	runGit(t, root, "add", "README.md", "gone.txt", "qory.yaml", "modules")
+	runGit(t, root, "commit", "--quiet", "-m", "first")
+	docker, _ := fakeDocker(t)
+	walledBy(t, docker)
+	t.Setenv("QORY_RUN_KEY", "")
+	return root
+}
+
+// agentInCopy makes the join of the agent's session run agent in the session's folder, with
+// the session's spec, and end as a session that succeeded does.
+func agentInCopy(t *testing.T, agent func(spec session.SessionSpec)) {
+	t.Helper()
+	t.Cleanup(cmd.SetJoinResult(func(spec session.SessionSpec) (*session.Result, error) {
+		if spec.OnVariables != nil {
+			spec.OnVariables(session.Applied{})
+		}
+		agent(spec)
+		return &session.Result{}, nil
+	}))
+}
+
+// copyWork is the folder of the last run's copy in lines, the fake docker's log.
+func copyWork(t *testing.T, lines string) string {
+	t.Helper()
+	all := regexp.MustCompile(`src=([^,]*/qory/runs/[^/,]+/work),`).FindAllStringSubmatch(lines, -1)
+	if all == nil {
+		t.Fatalf("no bind of a copy in:\n%s", lines)
+	}
+	return all[len(all)-1][1]
+}
+
+// gitOutput is the output of git with args in dir.
+func gitOutput(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	c := exec.Command("git", args...)
+	c.Dir = dir
+	c.Env = append(os.Environ(), "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL="+os.DevNull)
+	out, err := c.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v in %s: %v\n%s", args, dir, err, out)
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// runBranchOf is the branch that the result line of out contains.
+func runBranchOf(t *testing.T, out string) string {
+	t.Helper()
+	m := regexp.MustCompile(`the run's commits are on (qory/run-\S+) in `).FindStringSubmatch(out)
+	if m == nil {
+		t.Fatalf("the output has no line with the run's branch:\n%s", out)
+	}
+	return m[1]
+}
+
+// TestAWalledWriteRunBindsACopy is a walled write run: its session starts in a copy under
+// qory's cache folder, no mount is the person's checkout or lies in it, and the copy is gone
+// once its commits came back.
+func TestAWalledWriteRunBindsACopy(t *testing.T) {
+	root := copyCheckout(t)
+	real, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var agentDir string
+	var specs []session.SessionSpec
+	agentInCopy(t, func(spec session.SessionSpec) {
+		agentDir = spec.Dir
+		specs = append(specs, spec)
+		if _, err := os.Stat(filepath.Join(spec.Dir, ".git")); err != nil {
+			t.Errorf("the copy has no .git: %v", err)
+		}
+	})
+	out, err := run(t, "run", "claude", "--", "-p", "hi")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if len(specs) != 1 {
+		t.Fatalf("%d agent sessions, want 1", len(specs))
+	}
+	cache, err := os.UserCacheDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(agentDir, filepath.Join(cache, "qory", "runs")+string(filepath.Separator)) {
+		t.Errorf("the session starts in %s, want a folder under qory/runs in %s", agentDir, cache)
+	}
+	for _, m := range specs[0].Mounts {
+		resolved := m.Path
+		if r, err := filepath.EvalSymlinks(m.Path); err == nil {
+			resolved = r
+		}
+		if resolved == real || strings.HasPrefix(resolved, real+string(filepath.Separator)) {
+			t.Errorf("the session has the mount %+v of the person's checkout %s", m, real)
+		}
+	}
+	if !slices.ContainsFunc(specs[0].Mounts, func(m wall.Mount) bool { return m.Path == agentDir && !m.ReadOnly }) {
+		t.Errorf("the session's mounts %+v have no read-write mount of the copy", specs[0].Mounts)
+	}
+	if !slices.Contains(specs[0].Written, filepath.Join(cache, "qory", "runs")) {
+		t.Errorf("Written is %v, want qory/runs in %s", specs[0].Written, cache)
+	}
+	if _, err := os.Stat(agentDir); err == nil {
+		t.Errorf("the copy %s stays after the run", agentDir)
+	}
+}
+
+// TestTheRunsCommitsLandOnARunBranch is an agent that commits one change and leaves another:
+// both are on qory/run-<run id>, and the person's checked-out branch and files stay.
+func TestTheRunsCommitsLandOnARunBranch(t *testing.T) {
+	root := copyCheckout(t)
+	head := gitOutput(t, root, "rev-parse", "HEAD")
+	agentInCopy(t, func(spec session.SessionSpec) {
+		writeFile(t, filepath.Join(spec.Dir, "committed.txt"), "committed\n")
+		gitOutput(t, spec.Dir, "add", "committed.txt")
+		gitOutput(t, spec.Dir, "-c", "user.name=agent", "-c", "user.email=agent@example.com", "commit", "--quiet", "-m", "the agent's commit")
+		writeFile(t, filepath.Join(spec.Dir, "left.txt"), "left\n")
+	})
+	out, err := run(t, "run", "claude", "--", "-p", "hi")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	branch := runBranchOf(t, out)
+	if got := gitOutput(t, root, "rev-parse", "HEAD"); got != head {
+		t.Errorf("HEAD moved to %s, want %s", got, head)
+	}
+	if got := gitOutput(t, root, "symbolic-ref", "--short", "HEAD"); got != "main" {
+		t.Errorf("the checked-out branch is %s, want main", got)
+	}
+	for _, name := range []string{"committed.txt", "left.txt"} {
+		gitOutput(t, root, "cat-file", "-e", branch+":"+name)
+		if _, err := os.Stat(filepath.Join(root, name)); err == nil {
+			t.Errorf("%s is in the person's checkout", name)
+		}
+	}
+	lacks(t, out, "They change these")
+}
+
+// TestARunWithNoCommitSaysSo is an agent that leaves nothing: no branch, and a line that
+// needs no action.
+func TestARunWithNoCommitSaysSo(t *testing.T) {
+	root := copyCheckout(t)
+	agentInCopy(t, func(session.SessionSpec) {})
+	out, err := run(t, "run", "claude", "--", "-p", "hi")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	wants(t, out, "qory run: "+runcopy.ErrNoBundle.Error())
+	if got := gitOutput(t, root, "for-each-ref", "refs/heads/qory/"); got != "" {
+		t.Errorf("the run's branch came back: %s", got)
+	}
+}
+
+// TestTheResultLineListsAChangedSetting is an agent that changes a qory setting that qory
+// acts on: the result line has its key.
+func TestTheResultLineListsAChangedSetting(t *testing.T) {
+	root := copyCheckout(t)
+	agentInCopy(t, func(spec session.SessionSpec) {
+		file := filepath.Join(spec.Dir, "qory.yaml")
+		data, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(data), "harness:\n") {
+			t.Fatalf("qory.yaml has no harness section:\n%s", data)
+		}
+		writeFile(t, file, strings.Replace(string(data), "harness:\n", "harness:\n  launch:\n    claude:\n      command: /opt/planted\n", 1))
+	})
+	out, err := run(t, "run", "claude", "--", "-p", "hi")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	branch := runBranchOf(t, out)
+	wants(t, out, "the run's commits are on "+branch+" in ", " They change these qory settings, links or repository folders: harness.launch.claude.command. Check them before you check out the branch.")
+	gitOutput(t, root, "cat-file", "-e", branch+":qory.yaml")
+}
+
+// TestAReadWriteMountStopsAWriteRun is a read-write mount, from --mount and from wall.mounts,
+// in a run that may write: the run stops with exit 2 and the line starts with the fix. A
+// read-only mount passes.
+func TestAReadWriteMountStopsAWriteRun(t *testing.T) {
+	copyCheckout(t)
+	mount := tempDir(t)
+	want := "make the mount " + mount + " read-only, with :ro on --mount or in wall.mounts: "
+	joins := 0
+	agentInCopy(t, func(session.SessionSpec) { joins++ })
+	_, err := run(t, "run", "claude", "--mount", mount, "--", "-p", "hi")
+	if err == nil || cmd.ExitCode(err) != cmd.ExitInput || !strings.HasPrefix(err.Error(), want) {
+		t.Errorf("--mount: %v (exit %d), want the line %q", err, cmd.ExitCode(err), want)
+	}
+	if joins != 0 {
+		t.Errorf("%d sessions joined the run, want none", joins)
+	}
+	if out, err := run(t, "run", "claude", "--mount", mount+":ro", "--", "-p", "hi"); err != nil {
+		t.Errorf("a read-only mount: %v\n%s", err, out)
+	}
+	file := filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "forager.yaml")
+	data, err := os.ReadFile(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, file, string(data)+"  mounts: ["+mount+"]\n")
+	_, err = run(t, "run", "claude", "--", "-p", "hi")
+	if err == nil || cmd.ExitCode(err) != cmd.ExitInput || !strings.HasPrefix(err.Error(), want) {
+		t.Errorf("wall.mounts: %v (exit %d), want the line %q", err, cmd.ExitCode(err), want)
+	}
+}
+
+// TestARunCodeWithAReadWriteMountStops is a write run from a run code with a read-write
+// mount: the line ends as each line after the code was read does.
+func TestARunCodeWithAReadWriteMountStops(t *testing.T) {
+	p := walledPush(t)
+	mount := tempDir(t)
+	p.flags = append(p.flags, "--mount", mount)
+	r := p.run(t, writesAndCommits(t), nil)
+	if r.err == nil || cmd.ExitCode(r.err) != cmd.ExitInput {
+		t.Fatalf("got %v (exit %d)\n%s", r.err, cmd.ExitCode(r.err), r.out)
+	}
+	wants(t, r.err.Error(), "make the mount "+mount+" read-only", "; the code is used")
+}
+
+// TestAPlainFolderGetsItsFilesBack is a walled run in a folder that is not a repository: the
+// files the run changed, added and deleted come back, a link stays out, and the line lists it.
+func TestAPlainFolderGetsItsFilesBack(t *testing.T) {
+	root := emptyDir(t)
+	copyFixture(t, "two-modules", root)
+	writeFile(t, filepath.Join(root, "changed.txt"), "first\n")
+	writeFile(t, filepath.Join(root, "gone.txt"), "first\n")
+	docker, _ := fakeDocker(t)
+	walledBy(t, docker)
+	t.Setenv("QORY_RUN_KEY", "")
+	agentInCopy(t, func(spec session.SessionSpec) {
+		if spec.Dir == root {
+			t.Errorf("the session starts in the folder %s, want a copy", root)
+		}
+		writeFile(t, filepath.Join(spec.Dir, "changed.txt"), "the run\n")
+		writeFile(t, filepath.Join(spec.Dir, "added.txt"), "the run\n")
+		if err := os.Remove(filepath.Join(spec.Dir, "gone.txt")); err != nil {
+			t.Error(err)
+		}
+		if err := os.Symlink("/etc/passwd", filepath.Join(spec.Dir, "link")); err != nil {
+			t.Error(err)
+		}
+	})
+	out, err := run(t, "run", "claude", "--home", filepath.Join(tempDir(t), "home"), "--", "-p", "hi")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	for name, want := range map[string]string{"changed.txt": "the run\n", "added.txt": "the run\n"} {
+		data, err := os.ReadFile(filepath.Join(root, name))
+		if err != nil || string(data) != want {
+			t.Errorf("%s has %q (%v), want %q", name, data, err, want)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(root, "gone.txt")); err == nil {
+		t.Error("gone.txt stays in the folder")
+	}
+	if _, err := os.Lstat(filepath.Join(root, "link")); err == nil {
+		t.Error("the run's link is in the folder")
+	}
+	wants(t, out, "left out of the copy back to your folder: ", "link")
+}
+
+// TestThePushStepPushesFromTheQuarantine is a walled run whose agent plants a hook and a
+// configuration key in the copy's .git: both stay unused, its work reaches the branch, and
+// no git of qory runs in the copy.
+func TestThePushStepPushesFromTheQuarantine(t *testing.T) {
+	p := walledPush(t)
+	canary := filepath.Join(tempDir(t), "canary")
+	var copyDir string
+	var before int
+	calls := recordGitDirs(t)
+	r := p.run(t, func(dir string) {
+		real, err := filepath.EvalSymlinks(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		copyDir = real
+		log, err := os.ReadFile(calls)
+		if err != nil {
+			t.Fatal(err)
+		}
+		before = len(log)
+		writeFile(t, filepath.Join(dir, "left.txt"), "left\n")
+		hook := filepath.Join(dir, ".git", "hooks", "pre-push")
+		writeFile(t, hook, "#!/bin/sh\ntouch "+canary+"\n")
+		if err := os.Chmod(hook, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		config := filepath.Join(dir, ".git", "config")
+		data, err := os.ReadFile(config)
+		if err != nil {
+			t.Fatal(err)
+		}
+		writeFile(t, config, string(data)+"[core]\n\tfsmonitor = touch "+canary+"\n")
+	}, nil)
+	r.wantsClose(t, event.StateSucceeded, 0)
+	wants(t, r.out, "pushed qory/wi_")
+	if _, err := os.Stat(canary); err == nil {
+		t.Error("a program of the copy's .git ran on this machine")
+	}
+	if p.api.document(t, 1).Repositories == nil {
+		t.Errorf("no repository in the version\n%s", r.out)
+	}
+	log, err := os.ReadFile(calls)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seenPush := false
+	for line := range strings.Lines(string(log[before:])) {
+		parts := strings.SplitN(strings.TrimSuffix(line, "\n"), "|", 3)
+		dir, home, args := parts[0], parts[1], parts[2]
+		// The test's stand-in git session runs as a process on this machine, with its HOME in
+		// the run's folder. On a wall it runs in the run's container.
+		if strings.Contains(home, filepath.Join("qory", "runs")) {
+			continue
+		}
+		if dir == copyDir || strings.HasPrefix(dir, copyDir+string(filepath.Separator)) {
+			t.Errorf("git %s ran in the copy %s", args, dir)
+		}
+		seenPush = seenPush || strings.Contains(" "+args+" ", " push ")
+	}
+	if !seenPush {
+		t.Errorf("no git push ran:\n%s", log)
+	}
+}
+
+// recordGitDirs puts a git in front of PATH that records the folder, $HOME and arguments of
+// each git that qory runs, and returns the file of the records.
+func recordGitDirs(t *testing.T) string {
+	t.Helper()
+	real, err := exec.LookPath("git")
+	if err != nil {
+		t.Skip("git is not installed")
+	}
+	calls := filepath.Join(tempDir(t), "calls")
+	writeFile(t, calls, "")
+	bin := tempDir(t)
+	writeFile(t, filepath.Join(bin, "git"), "#!/bin/sh\nprintf '%s|%s|%s\\n' \"$(pwd -P)\" \"$HOME\" \"$*\" >> "+calls+"\nexec "+real+" \"$@\"\n")
+	if err := os.Chmod(filepath.Join(bin, "git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	return calls
+}
+
+// TestTheTimeLimitOfTheGitSessionKeepsTheCopy is a git session that passes its limit: the
+// session has that deadline, nothing comes back, the copy stays and the line has its path.
+func TestTheTimeLimitOfTheGitSessionKeepsTheCopy(t *testing.T) {
+	root := copyCheckout(t)
+	var copyDir string
+	agentInCopy(t, func(spec session.SessionSpec) {
+		copyDir = spec.Dir
+		writeFile(t, filepath.Join(spec.Dir, "left.txt"), "left\n")
+	})
+	t.Cleanup(cmd.SetGitSession(func(ctx context.Context, spec session.SessionSpec) (*session.Result, error) {
+		if _, ok := ctx.Deadline(); !ok {
+			t.Error("the git session has no deadline")
+		}
+		if spec.Timeout != runcopy.SessionLimit {
+			t.Errorf("the git session's timeout is %s, want %s", spec.Timeout, runcopy.SessionLimit)
+		}
+		return &session.Result{TimedOut: true}, nil
+	}))
+	out, err := run(t, "run", "claude", "--", "-p", "hi")
+	if cmd.ExitCode(err) != 1 {
+		t.Errorf("exit %d (%v), want 1", cmd.ExitCode(err), err)
+	}
+	wants(t, out, "read the run's files in "+filepath.Dir(copyDir)+"/work, and run no git there: the git session ran past its limit of 5m0s, so the run's commits did not come back")
+	if _, err := os.Stat(filepath.Join(copyDir, "left.txt")); err != nil {
+		t.Errorf("the copy did not stay: %v", err)
+	}
+	wantDisarmed(t, copyDir)
+	if got := gitOutput(t, root, "for-each-ref", "refs/heads/qory/"); got != "" {
+		t.Errorf("the run's branch came back: %s", got)
+	}
+	t.Cleanup(func() { os.RemoveAll(filepath.Dir(copyDir)) })
+}
+
+// wantDisarmed checks that the copy at work has no .git, and that git status finds no
+// repository there.
+func wantDisarmed(t *testing.T, work string) {
+	t.Helper()
+	if _, err := os.Lstat(filepath.Join(work, ".git")); err == nil {
+		t.Errorf("the copy %s that stays has a .git", work)
+	}
+	info, err := os.Lstat(filepath.Join(work, ".git-from-run"))
+	if err != nil || info.Mode().Perm() != 0o700 {
+		t.Errorf("the copy's .git-from-run: %v, %v", info, err)
+	}
+	c := exec.Command("git", "status")
+	c.Dir = work
+	c.Env = append(os.Environ(), "GIT_CEILING_DIRECTORIES="+filepath.Dir(work), "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=/dev/null")
+	if out, err := c.CombinedOutput(); err == nil {
+		t.Errorf("git status passed in the copy:\n%s", out)
+	}
+}
+
+// lacksCopyPath checks that out has no path in the folder of the runs' copies.
+func lacksCopyPath(t *testing.T, out string) {
+	t.Helper()
+	base, err := os.UserCacheDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	lacks(t, out, filepath.Join(base, "qory", "runs"))
+}
+
+// TestAGitSessionThatFailsBringsNothingBack is a git session that writes its bundle and exits
+// with 7: qory uses no bundle of it, and the copy stays.
+func TestAGitSessionThatFailsBringsNothingBack(t *testing.T) {
+	root := copyCheckout(t)
+	var copyDir string
+	agentInCopy(t, func(spec session.SessionSpec) {
+		copyDir = spec.Dir
+		writeFile(t, filepath.Join(spec.Dir, "left.txt"), "left\n")
+	})
+	t.Cleanup(cmd.SetGitSession(func(ctx context.Context, spec session.SessionSpec) (*session.Result, error) {
+		res, err := cmd.GitSessionOnHost(ctx, spec)
+		if err != nil || res.ExitCode != 0 {
+			t.Errorf("the git session: %+v, %v", res, err)
+		}
+		return &session.Result{ExitCode: 7}, nil
+	}))
+	out, err := run(t, "run", "claude", "--", "-p", "hi")
+	if cmd.ExitCode(err) != 1 {
+		t.Errorf("exit %d (%v), want 1", cmd.ExitCode(err), err)
+	}
+	wants(t, out, "read the run's files in "+copyDir+", and run no git there: the git session exited with 7, so the run's commits did not come back")
+	if got := gitOutput(t, root, "for-each-ref", "refs/heads/qory/"); got != "" {
+		t.Errorf("the run's branch came back: %s", got)
+	}
+	wantDisarmed(t, copyDir)
+}
+
+// TestAnAgentThatDeletesTheRunsBranchKeepsTheCopy is an agent that deletes the branch the run
+// works on: nothing comes back, and the line has the copy's path.
+func TestAnAgentThatDeletesTheRunsBranchKeepsTheCopy(t *testing.T) {
+	root := copyCheckout(t)
+	var copyDir string
+	agentInCopy(t, func(spec session.SessionSpec) {
+		copyDir = spec.Dir
+		writeFile(t, filepath.Join(spec.Dir, "left.txt"), "left\n")
+		branch := gitOutput(t, spec.Dir, "symbolic-ref", "--short", "HEAD")
+		gitOutput(t, spec.Dir, "update-ref", "-d", "refs/heads/"+branch)
+	})
+	out, err := run(t, "run", "claude", "--", "-p", "hi")
+	if cmd.ExitCode(err) != 1 {
+		t.Errorf("exit %d (%v), want 1\n%s", cmd.ExitCode(err), err, out)
+	}
+	wants(t, out, "read the run's files in "+copyDir+", and run no git there: ")
+	if got := gitOutput(t, root, "for-each-ref", "refs/heads/qory/"); got != "" {
+		t.Errorf("the run's branch came back: %s", got)
+	}
+	wantDisarmed(t, copyDir)
+}
+
+// TestASecondSignalCutsTheGitSession is a second signal during the git session: the session
+// ends, the line has that cause, and the copy stays.
+func TestASecondSignalCutsTheGitSession(t *testing.T) {
+	root := copyCheckout(t)
+	var copyDir string
+	agentInCopy(t, func(spec session.SessionSpec) {
+		copyDir = spec.Dir
+		writeFile(t, filepath.Join(spec.Dir, "left.txt"), "left\n")
+	})
+	t.Cleanup(cmd.SetGitSession(func(ctx context.Context, _ session.SessionSpec) (*session.Result, error) {
+		term(t)
+		term(t)
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}))
+	out, _ := run(t, "run", "claude", "--", "-p", "hi")
+	wants(t, out, "read the run's files in "+copyDir+", and run no git there: qory run got a second signal during the git session, so the run's commits did not come back")
+	lacks(t, out, "ran past its limit", "failed git's checks")
+	if got := gitOutput(t, root, "for-each-ref", "refs/heads/qory/"); got != "" {
+		t.Errorf("the run's branch came back: %s", got)
+	}
+}
+
+// TestAFirstSignalLeavesTheGitSessionItsTime is one signal during the git session of a local
+// run: the session keeps its limit of five minutes, and the run's work comes back.
+func TestAFirstSignalLeavesTheGitSessionItsTime(t *testing.T) {
+	root := copyCheckout(t)
+	// The time of a run from a run code: the session outlives it here.
+	t.Cleanup(cmd.SetPushTimes(time.Second, time.Second))
+	agentInCopy(t, func(spec session.SessionSpec) {
+		writeFile(t, filepath.Join(spec.Dir, "left.txt"), "left\n")
+	})
+	t.Cleanup(cmd.SetGitSession(func(ctx context.Context, spec session.SessionSpec) (*session.Result, error) {
+		term(t)
+		time.Sleep(2500 * time.Millisecond)
+		if err := ctx.Err(); err != nil {
+			t.Errorf("one signal ended the git session: %v", err)
+		}
+		if at, ok := ctx.Deadline(); !ok || time.Until(at) < 4*time.Minute {
+			t.Errorf("the git session has until %s", at)
+		}
+		return cmd.GitSessionOnHost(ctx, spec)
+	}))
+	out, _ := run(t, "run", "claude", "--", "-p", "hi")
+	wants(t, out, "qory run: got SIGTERM: bringing the run's work back, for at most 30m0s. Send a second signal to stop that.")
+	branch := runBranchOf(t, out)
+	gitOutput(t, root, "cat-file", "-e", branch+":left.txt")
+}
+
+// TestAReturnWithNoSignalPrintsNoWait is a run with no signal: nothing waits on a signal.
+func TestAReturnWithNoSignalPrintsNoWait(t *testing.T) {
+	copyCheckout(t)
+	agentInCopy(t, func(spec session.SessionSpec) {
+		writeFile(t, filepath.Join(spec.Dir, "left.txt"), "left\n")
+	})
+	cmd.RunGitSessionsOnHost()
+	out, err := run(t, "run", "claude", "--", "-p", "hi")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	lacks(t, out, "Send a second signal")
+}
+
+// TestARunFromACodeHasTheShortTimeAfterASignal is a write run from a run code with no branch, the
+// way a pool starts a run: after a signal the return ends within the push step's time, so the
+// close runs before the pool's kill.
+func TestARunFromACodeHasTheShortTimeAfterASignal(t *testing.T) {
+	p := walledPush(t)
+	p.change = func(d map[string]any) {
+		// A target on another system: the run has no branch of its work item.
+		target := map[string]any{"system": "other.example", "path": "acme/site"}
+		d["target"], d["inputs"].(map[string]any)["target"] = target, target
+	}
+	t.Cleanup(cmd.SetPushTimes(time.Second, time.Second))
+	ended := false
+	t.Cleanup(cmd.SetGitSession(func(ctx context.Context, spec session.SessionSpec) (*session.Result, error) {
+		term(t)
+		select {
+		case <-ctx.Done():
+			ended = true
+		case <-time.After(30 * time.Second):
+		}
+		return nil, ctx.Err()
+	}))
+	r := p.run(t, writesAndCommits(t), nil)
+	if !ended {
+		t.Errorf("the return did not end within the short time: %v\n%s\n%s", r.err, r.out, r.log())
+	}
+	lacks(t, r.out, "Send a second signal")
+}
+
+// TestTheRemovalOfTheSetupHasALimit is a removal of the setup container that does not end: its
+// context has a deadline, so the local return goes on to its line.
+func TestTheRemovalOfTheSetupHasALimit(t *testing.T) {
+	copyCheckout(t)
+	agentInCopy(t, func(session.SessionSpec) {})
+	removals := 0
+	_, _, restore := cmd.OpenNowhereWith(cmd.Nowhere{RemoveSetup: func(ctx context.Context) error {
+		removals++
+		if at, ok := ctx.Deadline(); !ok || time.Until(at) > 3*time.Minute {
+			t.Errorf("the removal has until %s, %v", at, ok)
+		}
+		return nil
+	}})
+	defer restore()
+	cmd.RunGitSessionsOnHost()
+	if out, err := run(t, "run", "claude", "--", "-p", "hi"); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if removals == 0 {
+		t.Error("the run removed no setup")
+	}
+}
+
+// TestACheckPastItsLimitHasItsLine is a check of the run's bundle cut by its limit: the line has the
+// limit, and it is no failed check.
+func TestACheckPastItsLimitHasItsLine(t *testing.T) {
+	copyCheckout(t)
+	agentInCopy(t, func(spec session.SessionSpec) {
+		writeFile(t, filepath.Join(spec.Dir, "left.txt"), "left\n")
+	})
+	cmd.RunGitSessionsOnHost()
+	t.Cleanup(cmd.SetCopyStepLimit(time.Nanosecond))
+	out, err := run(t, "run", "claude", "--", "-p", "hi")
+	if err == nil {
+		t.Fatalf("the run passed:\n%s", out)
+	}
+	wants(t, out, "and run no git there: the check of the run's commits ran past its limit of 1ns, so those commits did not come back")
+}
+
+// TestCommitsOnAnotherBranchKeepTheCopy is an agent that committed on a branch and checked out the
+// run's branch: the line is not that the run made no commit, and the copy stays, with its path.
+func TestCommitsOnAnotherBranchKeepTheCopy(t *testing.T) {
+	copyCheckout(t)
+	var work string
+	agentInCopy(t, func(spec session.SessionSpec) {
+		work = spec.Dir
+		branch := strings.TrimSpace(gitOutput(t, spec.Dir, "branch", "--show-current"))
+		gitOutput(t, spec.Dir, "checkout", "--quiet", "-b", "feature")
+		writeFile(t, filepath.Join(spec.Dir, "feature.txt"), "x\n")
+		gitOutput(t, spec.Dir, "add", "feature.txt")
+		gitOutput(t, spec.Dir, "-c", "user.name=agent", "-c", "user.email=agent@example.com", "commit", "--quiet", "-m", "on feature")
+		gitOutput(t, spec.Dir, "checkout", "--quiet", branch)
+	})
+	cmd.RunGitSessionsOnHost()
+	out, err := run(t, "run", "claude", "--", "-p", "hi")
+	if cmd.ExitCode(err) != 1 {
+		t.Errorf("exit %d, want 1:\n%s", cmd.ExitCode(err), out)
+	}
+	lacks(t, out, "no action needed")
+	wants(t, out,
+		"part of the run's work did not come back: the copy has changes not committed, commits on another branch or in a submodule, a detached commit, a commit a reset took off the branch, a stash, a tag, a sparse checkout, a nested repository, or files that git add could not read.",
+		"read the run's files in "+work+", run no git there, then remove the folder")
+	if _, err := os.Lstat(work); err != nil {
+		t.Errorf("the copy is gone: %v", err)
+	}
+	wantDisarmed(t, work)
+}
+
+// TestThePushPathLineAsksForTheWorkItemAgain is a run with the push step whose git session
+// passes its limit: the person may have no access to this machine, so the line has no path of
+// the copy, and the run code is used.
+func TestThePushPathLineAsksForTheWorkItemAgain(t *testing.T) {
+	p := walledPush(t)
+	t.Cleanup(cmd.SetGitSession(func(context.Context, session.SessionSpec) (*session.Result, error) {
+		return &session.Result{TimedOut: true}, nil
+	}))
+	r := p.run(t, writesAndCommits(t), nil)
+	wants(t, r.out, "take the work item in again in Qory Apiary: the git session ran past its limit of 5m0s, so the run's commits did not come back; the code is used")
+	lacksCopyPath(t, r.out)
+	lacks(t, r.out, "run no git")
+}
+
+// TestASignalCutsTheGitSessionOfThePushStep is a signal during the git session of the push
+// step, which has less than the session's five minutes: the line has that cause.
+func TestASignalCutsTheGitSessionOfThePushStep(t *testing.T) {
+	p := walledPush(t)
+	defer cmd.SetPushTimes(200*time.Millisecond, 200*time.Millisecond)()
+	t.Cleanup(cmd.SetGitSession(func(ctx context.Context, _ session.SessionSpec) (*session.Result, error) {
+		term(t)
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}))
+	r := p.run(t, writesAndCommits(t), nil)
+	wants(t, r.out, "take the work item in again in Qory Apiary: qory run got SIGTERM, and the step reached its limit of 200ms during the git session, so the run's commits did not come back; the code is used")
+	lacksCopyPath(t, r.out)
+	lacks(t, r.out, "ran past its limit")
+}
+
+// TestAChangedSettingShowsWhenThePushFails is a run whose commits change a qory setting and
+// whose push fails: the line with the setting prints before the push.
+func TestAChangedSettingShowsWhenThePushFails(t *testing.T) {
+	p := walledPush(t)
+	writeFile(t, filepath.Join(p.bare, "hooks", "pre-receive"), "#!/bin/sh\nexit 1\n")
+	if err := os.Chmod(filepath.Join(p.bare, "hooks", "pre-receive"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	r := p.run(t, func(dir string) {
+		writeFile(t, filepath.Join(dir, "qory.yaml"), "apiVersion: qory.dev/v1alpha1\nharness:\n  launch:\n    claude:\n      command: /opt/planted\n")
+	}, nil)
+	if p.branchHead(t) != "" {
+		t.Errorf("the forge has the branch\n%s", r.out)
+	}
+	wants(t, r.out, "in the run's repository change these qory settings, links or repository folders: harness.launch.claude.command")
+}
+
+// TestAFailedCloseKeepsTheCopy is a run whose close fails: a container of the run may be left,
+// so qory reads nothing of the copy, and the copy stays.
+func TestAFailedCloseKeepsTheCopy(t *testing.T) {
+	root := copyCheckout(t)
+	var copyDir string
+	agentInCopy(t, func(spec session.SessionSpec) {
+		copyDir = spec.Dir
+		writeFile(t, filepath.Join(spec.Dir, "left.txt"), "left\n")
+	})
+	_, _, restore := cmd.OpenNowhereWith(cmd.Nowhere{CloseErr: errors.New("the close failed")})
+	defer restore()
+	out, err := run(t, "run", "claude", "--", "-p", "hi")
+	if cmd.ExitCode(err) != 1 {
+		t.Errorf("exit %d (%v), want 1\n%s", cmd.ExitCode(err), err, out)
+	}
+	wants(t, out, "the close failed", "read the run's files in "+copyDir+", run no git there, then remove the folder")
+	if got := gitOutput(t, root, "for-each-ref", "refs/heads/qory/"); got != "" {
+		t.Errorf("the run's branch came back: %s", got)
+	}
+	wantDisarmed(t, copyDir)
+}
+
+// TestSeveralRepositoriesLandOnTheRunsBranch is a checkout with a further repository under
+// .qory/repositories: the agent changes both, and each gets the run's branch.
+func TestSeveralRepositoriesLandOnTheRunsBranch(t *testing.T) {
+	root := copyCheckout(t)
+	further := filepath.Join(root, ".qory", "repositories", "other")
+	if err := os.MkdirAll(further, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, further, "init", "--quiet", "--initial-branch=main")
+	runGit(t, further, "config", "user.name", "Tester")
+	runGit(t, further, "config", "user.email", "tester@example.com")
+	writeFile(t, filepath.Join(further, "README.md"), "first\n")
+	runGit(t, further, "add", "README.md")
+	runGit(t, further, "commit", "--quiet", "-m", "first")
+	agentInCopy(t, func(spec session.SessionSpec) {
+		writeFile(t, filepath.Join(spec.Dir, "left.txt"), "left\n")
+		writeFile(t, filepath.Join(spec.Dir, ".qory", "repositories", "other", "there.txt"), "there\n")
+	})
+	out, err := run(t, "run", "claude", "--", "-p", "hi")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	branch := runBranchOf(t, out)
+	gitOutput(t, root, "cat-file", "-e", branch+":left.txt")
+	gitOutput(t, further, "cat-file", "-e", branch+":there.txt")
+	if strings.Count(out, "the run's commits are on "+branch) != 2 {
+		t.Errorf("want a line for each repository:\n%s", out)
+	}
+}
+
+// TestAPlainFolderConflictKeepsTheCopy is a plain folder whose file the person changes during
+// the run, and the run too: the person's stays, and the copy stays with the run's, disarmed.
+func TestAPlainFolderConflictKeepsTheCopy(t *testing.T) {
+	root := emptyDir(t)
+	copyFixture(t, "two-modules", root)
+	writeFile(t, filepath.Join(root, "both.txt"), "first\n")
+	docker, _ := fakeDocker(t)
+	walledBy(t, docker)
+	t.Setenv("QORY_RUN_KEY", "")
+	var copyDir string
+	agentInCopy(t, func(spec session.SessionSpec) {
+		copyDir = spec.Dir
+		writeFile(t, filepath.Join(spec.Dir, ".git", "config"), "[core]\n\tbare = false\n")
+		writeFile(t, filepath.Join(spec.Dir, "both.txt"), "the run\n")
+		writeFile(t, filepath.Join(root, "both.txt"), "the person\n")
+	})
+	out, err := run(t, "run", "claude", "--home", filepath.Join(tempDir(t), "home"), "--", "-p", "hi")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	wants(t, out, "you and the run both changed these files, so yours stay: both.txt", "read the run's files in "+copyDir+", run no git there, then remove the folder")
+	if data, err := os.ReadFile(filepath.Join(root, "both.txt")); err != nil || string(data) != "the person\n" {
+		t.Errorf("both.txt has %q (%v)", data, err)
+	}
+	if data, err := os.ReadFile(filepath.Join(copyDir, "both.txt")); err != nil || string(data) != "the run\n" {
+		t.Errorf("the copy's both.txt has %q (%v)", data, err)
+	}
+	wantDisarmed(t, copyDir)
+}
+
+// TestARunInARunsCopyStops is qory run and a compose in a folder of a run's copy, which a run
+// could have written: each stops with the fix first.
+func TestARunInARunsCopyStops(t *testing.T) {
+	copyCheckout(t)
+	base, err := os.UserCacheDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Join(base, "qory", "runs", "run-1", "work")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, dir, "init", "--quiet", "--initial-branch=main")
+	t.Chdir(dir)
+	for _, args := range [][]string{{"run", "claude", "--", "-p", "hi"}, {"harness", "compose", "--runtime", "claude"}} {
+		out, err := run(t, args...)
+		if cmd.ExitCode(err) != cmd.ExitInput {
+			t.Errorf("%v: exit %d (%v)\n%s", args, cmd.ExitCode(err), err, out)
+		}
+		wants(t, out+fmt.Sprint(err), "run qory in your checkout: ")
+	}
+}
+
+// TestABranchPinnedModuleKeepsItsPinInTheCopy is a module at main, composed once, whose remote
+// is gone: the compose in the copy starts from the person's report, so it keeps the commit.
+func TestABranchPinnedModuleKeepsItsPinInTheCopy(t *testing.T) {
+	root := copyCheckout(t)
+	remote, url := branchRemote(t)
+	writeOwnStack(t, root, onMain(url))
+	runGit(t, root, "add", "qory.yaml")
+	runGit(t, root, "commit", "--quiet", "-m", "a module at main")
+	if out, err := run(t, "hc"); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	pin := readReport(t, root).Modules[0].Pin
+	if err := os.RemoveAll(remote); err != nil {
+		t.Fatal(err)
+	}
+	agentInCopy(t, func(spec session.SessionSpec) {
+		writeFile(t, filepath.Join(spec.Dir, "left.txt"), "left\n")
+	})
+	out, err := run(t, "run", "claude", "--", "-p", "hi")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	wants(t, out, "could not reach the remote; kept "+pin)
+}
+
+// TestARefusalOfTheCopyCallsItTheWorkspace is a read run with a setup, whose setup Forager
+// stops for the copy's folder: the line calls that folder the workspace, never a mount.
+func TestARefusalOfTheCopyCallsItTheWorkspace(t *testing.T) {
+	listsRepositories(t)
+	var work string
+	codeSetup = func(spec session.SetupSpec) error {
+		work = spec.Dir
+		return &session.Refusal{Code: "mount_contains_forager_files", Names: []string{work, filepath.Join(work, "records")}}
+	}
+	t.Cleanup(func() { codeSetup = nil })
+	r, _ := readRun(t, nil, readImage, "")
+	if work == "" {
+		t.Fatalf("no setup ran: %v\n%s", r.err, r.out)
+	}
+	wants(t, r.out+fmt.Sprint(r.err), "the workspace "+work)
+	lacks(t, r.out+fmt.Sprint(r.err), "the mount "+work)
+}
+
+// TestAControlPlaneRunHasNoArtifactsCopy is a run from a run code in a repository with a
+// .qory/artifacts folder: the copy gets none, and the run's stays out of the checkout.
+func TestAControlPlaneRunHasNoArtifactsCopy(t *testing.T) {
+	var root string
+	joined := false
+	r := runFromCodeWith(t, func(string) []string {
+		var err error
+		if root, err = os.Getwd(); err != nil {
+			t.Fatal(err)
+		}
+		writeFile(t, filepath.Join(root, "file.txt"), "first\n")
+		runGit(t, root, "config", "user.name", "Tester")
+		runGit(t, root, "config", "user.email", "tester@example.com")
+		runGit(t, root, "add", "file.txt")
+		runGit(t, root, "commit", "--quiet", "-m", "first")
+		writeFile(t, filepath.Join(root, ".qory", "artifacts", "person.txt"), "the person\n")
+		docker, _ := fakeDocker(t)
+		writeFile(t, filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "forager.yaml"),
+			"wall:\n  adapter: docker\n  command: "+docker+"\n  helper: "+staticELF(t)+"\n  user: \"1000:1000\"\n  image: "+readImage+"\n")
+		t.Cleanup(cmd.SetJoinResult(func(spec session.SessionSpec) (*session.Result, error) {
+			joined = true
+			if _, err := os.Lstat(filepath.Join(spec.Dir, ".qory", "artifacts", "person.txt")); err == nil {
+				t.Error("the copy has the person's artifacts")
+			}
+			writeFile(t, filepath.Join(spec.Dir, ".qory", "artifacts", "run.txt"), "the run\n")
+			return &session.Result{}, nil
+		}))
+		return nil
+	}, []string{"--home", filepath.Join(tempDir(t), "home")}, declares("write"), nil)
+	if !joined {
+		t.Fatalf("no session joined: %v (exit %d)\n%s", r.err, cmd.ExitCode(r.err), r.out)
+	}
+	if _, err := os.Lstat(filepath.Join(root, ".qory", "artifacts", "run.txt")); err == nil {
+		t.Errorf("the run's artifact came back\n%s", r.out)
+	}
+}
+
+// TestACheckoutThatContainsTheStateFolderRuns is a walled run whose checkout contains qory's
+// state folder: the copy leaves that folder out, and the run's work comes back. The test join
+// runs no check of Forager's, so this test does not show that Forager accepts the run.
+func TestACheckoutThatContainsTheStateFolderRuns(t *testing.T) {
+	root := copyCheckout(t)
+	t.Setenv("XDG_STATE_HOME", filepath.Join(root, ".state"))
+	gitInfoExclude(t, root, ".state")
+	agentInCopy(t, func(spec session.SessionSpec) {
+		if _, err := os.Stat(filepath.Join(spec.Dir, ".state")); err == nil {
+			t.Error("the copy has the state folder")
+		}
+		writeFile(t, filepath.Join(spec.Dir, "left.txt"), "left\n")
+	})
+	out, err := run(t, "run", "claude", "--", "-p", "hi")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	gitOutput(t, root, "cat-file", "-e", runBranchOf(t, out)+":left.txt")
+}
+
+// gitInfoExclude keeps name out of git status in the checkout at root.
+func gitInfoExclude(t *testing.T, root, name string) {
+	t.Helper()
+	writeFile(t, filepath.Join(root, ".git", "info", "exclude"), name+"\n")
+}
+
+// TestARunCodeWithACheckoutInTheHomeFolderRuns is a run from a run code whose checkout is the
+// home folder, which holds the run key's home and report on macOS: the run's agent gets the
+// copy, so the code is not used up by a stop.
+func TestARunCodeWithACheckoutInTheHomeFolderRuns(t *testing.T) {
+	p := walledPush(t)
+	t.Setenv("HOME", p.h.dir)
+	var mounts []wall.Mount
+	var dir string
+	p.mountsOf = func(spec session.SessionSpec) { mounts, dir = spec.Mounts, spec.Dir }
+	r := p.run(t, func(d string) { writeFile(t, filepath.Join(d, "left.txt"), "left\n") }, nil)
+	r.wantsClose(t, event.StateSucceeded, 0)
+	if dir == p.h.dir {
+		t.Errorf("the session starts in the home folder %s", dir)
+	}
+	real, err := filepath.EvalSymlinks(p.h.dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range mounts {
+		if m.Path == real || m.Path == p.h.dir {
+			t.Errorf("the session has the mount %+v of the home folder", m)
+		}
+	}
+}
+
+// TestACheckoutAtTheHomeFolderWithTheStateOutsideRuns is a walled run with XDG_STATE_HOME
+// outside HOME and the checkout at HOME: HOME is not bound.
+func TestACheckoutAtTheHomeFolderWithTheStateOutsideRuns(t *testing.T) {
+	root := copyCheckout(t)
+	t.Setenv("HOME", root)
+	t.Setenv("XDG_STATE_HOME", tempDir(t))
+	t.Setenv("XDG_CACHE_HOME", tempDir(t))
+	real, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	agentInCopy(t, func(spec session.SessionSpec) {
+		for _, m := range spec.Mounts {
+			if !m.ReadOnly && (m.Path == root || m.Path == real) {
+				t.Errorf("the session has the read-write mount %s of the home folder", m.Path)
+			}
+		}
+		if spec.Dir == root || spec.Dir == real {
+			t.Errorf("the session starts in the home folder %s", spec.Dir)
+		}
+	})
+	if out, err := run(t, "run", "claude", "--home", filepath.Join(tempDir(t), "home"), "--", "-p", "hi"); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+}
+
+// TestAnOldPlacesFileStopsNothing is a home with a file of the former record of checkouts
+// under the state folder: qory wa, the compose and run print nothing about it.
+func TestAnOldPlacesFileStopsNothing(t *testing.T) {
+	root := copyCheckout(t)
+	old := filepath.Join(os.Getenv("XDG_STATE_HOME"), "qory", "places", "0123456789ab")
+	writeFile(t, old, "{\"path\": \""+root+"\"}\n")
+	agentInCopy(t, func(session.SessionSpec) {})
+	for _, args := range [][]string{
+		{"wa", "feature", "--no-compose", "--offline"},
+		{"harness", "compose", "--runtime", "claude", "--no-links"},
+		{"run", "claude", "--", "-p", "hi"},
+	} {
+		out, err := run(t, args...)
+		if err != nil {
+			t.Errorf("%v: %v\n%s", args, err, out)
+		}
+		lacks(t, out, "places", old)
+	}
+	if _, err := os.Stat(old); err != nil {
+		t.Errorf("the file is gone: %v", err)
+	}
+}
+
+// TestAWriteRunHasTwoSessionsInItsRecord is a walled write run through Forager's join, with a
+// wall that runs its containers on this machine: the agent's commit reaches the run's branch,
+// and the run's record has the agent's session and the git session.
+func TestAWriteRunHasTwoSessionsInItsRecord(t *testing.T) {
+	root := newCheckout(t)
+	copyFixture(t, "two-modules", root)
+	script := filepath.Join(t.TempDir(), "agent")
+	writeFile(t, script, "#!/bin/sh\necho left > left.txt\n")
+	if err := os.Chmod(script, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	composedForFake(t, root, script)
+	runGit(t, root, "add", "qory.yaml", "modules")
+	runGit(t, root, "commit", "--quiet", "-m", "first")
+	writeFile(t, filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "forager.yaml"), "apiVersion: qory.dev/v1alpha1\n"+passingWall(t))
+	t.Setenv("QORY_RUN_KEY", "")
+	t.Cleanup(cmd.GitSessionThroughJoin())
+	out, err := run(t, "run", "claude", "--", "-p", "hi")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	gitOutput(t, root, "cat-file", "-e", runBranchOf(t, out)+":left.txt")
+	var started []map[string]any
+	for _, ev := range sessionRecord(t, root) {
+		if ev.Type == "dev.qory.session.started" {
+			started = append(started, ev.Data)
+		}
+	}
+	if len(started) != 2 {
+		t.Fatalf("the record has %d started sessions, want 2\n%s", len(started), out)
+	}
+	// The git session passes no Runtime, so Forager records it as bare.
+	if _, bare := started[0]["bare"]; bare {
+		t.Errorf("the agent's session.started has bare: %v", started[0])
+	}
+	if started[1]["bare"] != true {
+		t.Errorf("the git session's session.started has no bare: %v", started[1])
+	}
+}
+
+// TestAWorkingFolderInTheCheckoutStartsInTheCopy is a run from a folder of the commit at HEAD,
+// which starts in that folder of the copy, and from a folder the commit does not have, which
+// stops with the fix first.
+func TestAWorkingFolderInTheCheckoutStartsInTheCopy(t *testing.T) {
+	root := copyCheckout(t)
+	writeFile(t, filepath.Join(root, "sub", "file.txt"), "first\n")
+	runGit(t, root, "add", "sub")
+	runGit(t, root, "commit", "--quiet", "-m", "sub")
+	var dir string
+	agentInCopy(t, func(spec session.SessionSpec) { dir = spec.Dir })
+	t.Chdir(filepath.Join(root, "sub"))
+	if out, err := run(t, "run", "claude", "--", "-p", "hi"); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if filepath.Base(dir) != "sub" || filepath.Base(filepath.Dir(dir)) != "work" {
+		t.Errorf("the session starts in %s, want the folder sub of the copy", dir)
+	}
+	missing := filepath.Join(root, "missing")
+	if err := os.Mkdir(missing, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(missing)
+	_, err := run(t, "run", "claude", "--", "-p", "hi")
+	if err == nil || !strings.HasPrefix(err.Error(), "commit missing, or run qory in a folder that the commit at HEAD has") {
+		t.Errorf("a folder the commit lacks: %v", err)
+	}
+}
+
+// TestASessionThatFailedStillBringsItsCommitsBack is an agent that exits 3 after it wrote a
+// file: the file is on the run's branch, and the run exits 3.
+func TestASessionThatFailedStillBringsItsCommitsBack(t *testing.T) {
+	root := copyCheckout(t)
+	t.Cleanup(cmd.SetJoinResult(func(spec session.SessionSpec) (*session.Result, error) {
+		if spec.OnVariables != nil {
+			spec.OnVariables(session.Applied{})
+		}
+		writeFile(t, filepath.Join(spec.Dir, "left.txt"), "left\n")
+		return &session.Result{State: event.StateFailed, ExitCode: 3}, nil
+	}))
+	out, err := run(t, "run", "claude", "--", "-p", "hi")
+	if cmd.ExitCode(err) != 3 {
+		t.Fatalf("%v (exit %d), want exit 3\n%s", err, cmd.ExitCode(err), out)
+	}
+	gitOutput(t, root, "cat-file", "-e", runBranchOf(t, out)+":left.txt")
+}
+
+// TestARunClosedDuringItsSessionKeepsTheCopy is a run that the gateway closed while its agent
+// ran: no git session starts, the copy stays, and the line has its path.
+func TestARunClosedDuringItsSessionKeepsTheCopy(t *testing.T) {
+	copyCheckout(t)
+	var dir string
+	t.Cleanup(cmd.SetJoinResult(func(spec session.SessionSpec) (*session.Result, error) {
+		if spec.OnVariables != nil {
+			spec.OnVariables(session.Applied{})
+		}
+		dir = spec.Dir
+		return &session.Result{RunClosed: true}, nil
+	}))
+	t.Cleanup(cmd.SetGitSession(func(context.Context, session.SessionSpec) (*session.Result, error) {
+		t.Error("a git session started")
+		return &session.Result{}, nil
+	}))
+	out, _ := run(t, "run", "claude", "--", "-p", "hi")
+	wants(t, out, "read the run's files in "+dir+", and run no git there: the run ended before the git session started")
+	if _, err := os.Stat(dir); err != nil {
+		t.Errorf("the copy did not stay: %v", err)
+	}
+}
+
+// TestARunCodeWithNoRepositoriesWorksInAFolderCopy is a run code whose run lists no
+// repositories, in a folder where git init ran and in a plain folder. The run works in a copy
+// with no .git, and its file comes back. The person's .git stays as it is, with no commit.
+func TestARunCodeWithNoRepositoriesWorksInAFolderCopy(t *testing.T) {
+	for name, keepGit := range map[string]bool{"git init": true, "plain": false} {
+		t.Run(name, func(t *testing.T) {
+			var root string
+			joined := false
+			r := runFromCodeWith(t, func(string) []string {
+				var err error
+				if root, err = os.Getwd(); err != nil {
+					t.Fatal(err)
+				}
+				if !keepGit {
+					if err := os.RemoveAll(filepath.Join(root, ".git")); err != nil {
+						t.Fatal(err)
+					}
+				}
+				docker, _ := fakeDocker(t)
+				writeFile(t, filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "forager.yaml"),
+					"wall:\n  adapter: docker\n  command: "+docker+"\n  helper: "+staticELF(t)+"\n  user: \"1000:1000\"\n  image: "+readImage+"\n")
+				t.Cleanup(cmd.SetJoinResult(func(spec session.SessionSpec) (*session.Result, error) {
+					joined = true
+					if spec.Dir == root {
+						t.Errorf("the session starts in the folder %s, want a copy", root)
+					}
+					if _, err := os.Lstat(filepath.Join(spec.Dir, ".git")); err == nil {
+						t.Error("the copy has a .git")
+					}
+					writeFile(t, filepath.Join(spec.Dir, "added.txt"), "the run\n")
+					return &session.Result{}, nil
+				}))
+				return nil
+			}, []string{"--home", filepath.Join(tempDir(t), "home")}, declares("write"), nil)
+			if !joined {
+				t.Fatalf("no session joined: %v (exit %d)\n%s", r.err, cmd.ExitCode(r.err), r.out)
+			}
+			data, err := os.ReadFile(filepath.Join(root, "added.txt"))
+			if err != nil || string(data) != "the run\n" {
+				t.Errorf("the run's file has %q (%v)\n%s", data, err, r.out)
+			}
+			if keepGit {
+				if got := gitOutput(t, root, "rev-list", "-n", "1", "--all"); got != "" {
+					t.Errorf("the person's .git has the commit %s", got)
+				}
+			}
+		})
+	}
+}
+
+// TestALocalRunInARepositoryWithNoCommitStops is a local run where git init ran and no commit
+// exists: it stops with the fix first, before any session joins.
+func TestALocalRunInARepositoryWithNoCommitStops(t *testing.T) {
+	root := checkoutWithNoCommit(t)
+	copyFixture(t, "two-modules", root)
+	composedForFake(t, root, fakeRuntime(t))
+	docker, _ := fakeDocker(t)
+	walledBy(t, docker)
+	t.Setenv("QORY_RUN_KEY", "")
+	agentInCopy(t, func(session.SessionSpec) { t.Error("a session joined") })
+	out, err := run(t, "run", "claude", "--", "-p", "hi")
+	if cmd.ExitCode(err) != 1 {
+		t.Fatalf("%v (exit %d)\n%s", err, cmd.ExitCode(err), out)
+	}
+	wants(t, out, "qory run: commit in ", "or start the run in a repository with a commit at HEAD")
+}
+
+// TestALocalRunSeesTheArtifactsAndTheWorkItem is a local run in a checkout with a version and
+// a work item. In the copy, qory artifact pull uses the local store with the earlier version,
+// qory artifact push makes version 2, and qory work-item show reads the file. Version 2 comes
+// back with no conflict.
+func TestALocalRunSeesTheArtifactsAndTheWorkItem(t *testing.T) {
+	root := copyCheckout(t)
+	t.Setenv("QORY_RUN_API", "")
+	first := filepath.Join(root, "note.md")
+	writeFile(t, first, "the person\n")
+	if out, err := run(t, "artifact", "push", "note", first); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if err := os.Remove(first); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(root, ".qory", "work-item.json"), "{\"title\":\"Local\"}\n")
+	store := filepath.Join(".qory", "artifacts", "note", "main")
+	agentInCopy(t, func(spec session.SessionSpec) {
+		back, err := os.Getwd()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chdir(spec.Dir); err != nil {
+			t.Fatal(err)
+		}
+		defer func() {
+			if err := os.Chdir(back); err != nil {
+				t.Fatal(err)
+			}
+		}()
+		out, err := run(t, "artifact", "pull")
+		if err != nil {
+			t.Fatalf("%v\n%s", err, out)
+		}
+		wants(t, out, "Nothing pulled")
+		data, err := os.ReadFile(filepath.Join(spec.Dir, store, "v1", "note.md"))
+		if err != nil || string(data) != "the person\n" {
+			t.Errorf("the run's version 1 has %q (%v)", data, err)
+		}
+		second := filepath.Join(tempDir(t), "note.md")
+		writeFile(t, second, "the run\n")
+		out, err = run(t, "artifact", "push", "note", second)
+		if err != nil {
+			t.Fatalf("%v\n%s", err, out)
+		}
+		data, err = os.ReadFile(filepath.Join(spec.Dir, store, "v2", "note.md"))
+		if err != nil || string(data) != "the run\n" {
+			t.Errorf("the run's version 2 has %q (%v)\n%s", data, err, out)
+		}
+		out, err = run(t, "work-item", "show")
+		if err != nil || out != "{\"title\":\"Local\"}\n" {
+			t.Errorf("qory work-item show printed %q (%v)", out, err)
+		}
+	})
+	out, err := run(t, "run", "claude", "--", "-p", "hi")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	for version, want := range map[string]string{"v1": "the person\n", "v2": "the run\n"} {
+		data, err := os.ReadFile(filepath.Join(root, store, version, "note.md"))
+		if err != nil || string(data) != want {
+			t.Errorf("%s has %q (%v), want %q\n%s", version, data, err, want, out)
+		}
+	}
+	if strings.Contains(out, "both changed") || strings.Contains(out, "left out of") {
+		t.Errorf("the run lists a conflict or a left-out file:\n%s", out)
+	}
+}
+
+// TestARunsArtifactsComeBackWithNoCommit is a run with no commit whose agent kept a version in
+// .qory/artifacts and left a link there: the version is in the person's .qory/artifacts, the
+// link is not, and the line lists it. A git session past its limit brings the version too.
+func TestARunsArtifactsComeBackWithNoCommit(t *testing.T) {
+	for name, limit := range map[string]bool{"no commit": false, "past the limit": true} {
+		t.Run(name, func(t *testing.T) {
+			root := copyCheckout(t)
+			secret := filepath.Join(tempDir(t), "secret.txt")
+			writeFile(t, secret, "secret\n")
+			agentInCopy(t, func(spec session.SessionSpec) {
+				store := filepath.Join(spec.Dir, ".qory", "artifacts")
+				writeFile(t, filepath.Join(store, ".gitignore"), "*\n")
+				writeFile(t, filepath.Join(store, "note", "main", "1", "note.md"), "the run\n")
+				if err := os.Symlink(secret, filepath.Join(store, "note", "main", "1", "secret.txt")); err != nil {
+					t.Fatal(err)
+				}
+			})
+			if limit {
+				t.Cleanup(cmd.SetGitSession(func(context.Context, session.SessionSpec) (*session.Result, error) {
+					return &session.Result{TimedOut: true}, nil
+				}))
+			}
+			out, err := run(t, "run", "claude", "--", "-p", "hi")
+			if limit && cmd.ExitCode(err) != 1 || !limit && err != nil {
+				t.Fatalf("%v (exit %d)\n%s", err, cmd.ExitCode(err), out)
+			}
+			version := filepath.Join(root, ".qory", "artifacts", "note", "main", "1")
+			data, err := os.ReadFile(filepath.Join(version, "note.md"))
+			if err != nil || string(data) != "the run\n" {
+				t.Errorf("the version has %q (%v)\n%s", data, err, out)
+			}
+			if _, err := os.Lstat(filepath.Join(version, "secret.txt")); err == nil {
+				t.Error("the run's link came back")
+			}
+			wants(t, out, "left out of the copy back to your folder: ", "secret.txt")
+			if got := gitOutput(t, root, "for-each-ref", "refs/heads/qory/"); got != "" {
+				t.Errorf("a run's branch came back: %s", got)
+			}
+		})
+	}
+}
+
+// aHomeFolder makes the working folder a plain folder with .ssh/id_test at home, with the state
+// directory outside it unless state is set, and returns what the agent read, if it ran.
+func aHomeFolder(t *testing.T, root, home, state string) *string {
+	t.Helper()
+	copyFixture(t, "two-modules", root)
+	docker, _ := fakeDocker(t)
+	walledBy(t, docker)
+	t.Setenv("QORY_RUN_KEY", "")
+	t.Setenv("HOME", home)
+	if state == "" {
+		state = tempDir(t)
+	}
+	t.Setenv("XDG_STATE_HOME", state)
+	writeFile(t, filepath.Join(home, ".ssh", "id_test"), "dummy\n")
+	seen := new(string)
+	agentInCopy(t, func(spec session.SessionSpec) {
+		*seen = spec.Dir
+	})
+	return seen
+}
+
+// wantHomeStop is a run that stops before any copy, with the line that starts with its fix.
+func wantHomeStop(t *testing.T, seen *string, relation string) {
+	t.Helper()
+	out, err := run(t, "run", "claude", "--home", filepath.Join(tempDir(t), "home"), "--", "-p", "hi")
+	if err == nil || *seen != "" {
+		t.Fatalf("the run went on in %q: %v\n%s", *seen, err, out)
+	}
+	if code := cmd.ExitCode(err); code != 2 {
+		t.Errorf("exit %d, want 2: %v", code, err)
+	}
+	wants(t, err.Error(), "start the run from a folder that does not contain your home folder or qory's state directory: the folder ", relation)
+}
+
+// TestAPlainFolderAtTheHomeFolderStops is a run that may write in a plain folder at the home
+// folder, with the cache folder in it: no copy has .ssh.
+func TestAPlainFolderAtTheHomeFolderStops(t *testing.T) {
+	root := emptyDir(t)
+	seen := aHomeFolder(t, root, root, "")
+	wantHomeStop(t, seen, "is your home folder")
+}
+
+// TestAPlainFolderAtTheHomeFolderStopsWithTheCacheOutside is the same with the cache folder a link
+// out of the home folder, where the check of the copy's folder finds no overlap.
+func TestAPlainFolderAtTheHomeFolderStopsWithTheCacheOutside(t *testing.T) {
+	root := emptyDir(t)
+	if err := os.MkdirAll(filepath.Join(root, "Library"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(tempDir(t), filepath.Join(root, "Library", "Caches")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(tempDir(t), filepath.Join(root, ".cache")); err != nil {
+		t.Fatal(err)
+	}
+	seen := aHomeFolder(t, root, root, "")
+	wantHomeStop(t, seen, "is your home folder")
+}
+
+// TestAPlainFolderThatContainsTheHomeFolderStops is a plain folder above the home folder.
+func TestAPlainFolderThatContainsTheHomeFolderStops(t *testing.T) {
+	root := emptyDir(t)
+	seen := aHomeFolder(t, root, filepath.Join(root, "users", "me"), "")
+	wantHomeStop(t, seen, "contains your home folder")
+}
+
+// TestAPlainFolderThatContainsTheStateDirectoryStops is a plain folder with qory's state in it.
+func TestAPlainFolderThatContainsTheStateDirectoryStops(t *testing.T) {
+	root := emptyDir(t)
+	seen := aHomeFolder(t, root, tempDir(t), filepath.Join(root, "state"))
+	wantHomeStop(t, seen, "contains qory's state directory")
+}
+
+// TestAHomeFolderThatIsARepositoryRuns is a run that may write at a home folder with a commit:
+// the copy has the commit's files, so .ssh, which git does not track, is not in it.
+func TestAHomeFolderThatIsARepositoryRuns(t *testing.T) {
+	root := copyCheckout(t)
+	t.Setenv("HOME", root)
+	t.Setenv("XDG_STATE_HOME", tempDir(t))
+	writeFile(t, filepath.Join(root, ".ssh", "id_test"), "dummy\n")
+	var seen string
+	agentInCopy(t, func(spec session.SessionSpec) {
+		seen = spec.Dir
+		if _, err := os.Lstat(filepath.Join(spec.Dir, ".ssh")); err == nil {
+			t.Error("the copy has .ssh")
+		}
+	})
+	if out, err := run(t, "run", "claude", "--home", filepath.Join(tempDir(t), "home"), "--", "-p", "hi"); err != nil || seen == "" {
+		t.Fatalf("the agent ran in %q: %v\n%s", seen, err, out)
+	}
+	// With no --home, the home is under the cache folder, which is inside the home folder.
+	out, err := run(t, "run", "claude", "--", "-p", "hi")
+	if cmd.ExitCode(err) != 2 {
+		t.Errorf("exit %d (%v), want 2\n%s", cmd.ExitCode(err), err, out)
+	}
+	wants(t, fmt.Sprint(err), "set --home to a folder outside ")
+}
+
+// TestACommitWithAFileAtQoryRuns is a commit at HEAD with a file at .qory: the home is outside the
+// copy, so the file is in the agent's way no more than any other file of the commit.
+func TestACommitWithAFileAtQoryRuns(t *testing.T) {
+	root := newCheckout(t)
+	copyFixture(t, "two-modules", root)
+	runGit(t, root, "add", "qory.yaml", "modules")
+	writeFile(t, filepath.Join(root, ".qory"), "a file\n")
+	runGit(t, root, "add", ".qory")
+	runGit(t, root, "commit", "--quiet", "-m", "first")
+	docker, _ := fakeDocker(t)
+	walledBy(t, docker)
+	t.Setenv("QORY_RUN_KEY", "")
+	ran := false
+	agentInCopy(t, func(spec session.SessionSpec) {
+		ran = true
+		if got, err := os.ReadFile(filepath.Join(spec.Dir, ".qory")); err != nil || string(got) != "a file\n" {
+			t.Errorf("the copy's .qory: %q, %v", got, err)
+		}
+	})
+	if out, err := run(t, "run", "claude", "--", "-p", "hi"); err != nil || !ran {
+		t.Fatalf("the agent ran: %v: %v\n%s", ran, err, out)
+	}
+}
+
+// TestCommitsThatMakeTheTopARepositorySayWhere is a commit that adds what makes the top folder a
+// git folder: the line has words for that place.
+func TestCommitsThatMakeTheTopARepositorySayWhere(t *testing.T) {
+	copyCheckout(t)
+	agentInCopy(t, func(spec session.SessionSpec) {
+		writeFile(t, filepath.Join(spec.Dir, "HEAD"), "ref: refs/heads/main\n")
+		writeFile(t, filepath.Join(spec.Dir, "objects", "x"), "x\n")
+		writeFile(t, filepath.Join(spec.Dir, "refs", "x"), "x\n")
+	})
+	cmd.RunGitSessionsOnHost()
+	out, _ := run(t, "run", "claude", "--", "-p", "hi")
+	wants(t, out, "They change these qory settings, links or repository folders: the repository's top folder.")
+}
+
+// homeWithALinkedCache is a home folder at dir, with Library/Caches a link out of it as a person's
+// folder can have, so no copy lies inside the home folder. The working folder is what the test
+// passes, and the checks that follow start in it.
+func homeWithALinkedCache(t *testing.T, home string) *string {
+	t.Helper()
+	seen := aHomeFolder(t, home, home, "")
+	if err := os.MkdirAll(filepath.Join(home, "Library"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	_ = os.RemoveAll(filepath.Join(home, "Library", "Caches"))
+	if err := os.Symlink(tempDir(t), filepath.Join(home, "Library", "Caches")); err != nil {
+		t.Fatal(err)
+	}
+	return seen
+}
+
+// TestAHomeFolderWrittenAnotherWayStops is a working folder that is the home folder in another
+// Unicode form or through the firmlink of the data volume: the file system has one folder, so the
+// run stops as it does at the home folder written as HOME has it.
+func TestAHomeFolderWrittenAnotherWayStops(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("the two Unicode forms and the firmlink are one folder only on macOS")
+	}
+	const nfc, nfd = "Café", "Café"
+	top, err := filepath.EvalSymlinks(tempDir(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, paths := range map[string][2]string{
+		"NFC home": {filepath.Join(top, nfc), filepath.Join(top, nfd)},
+		"NFD home": {filepath.Join(top, nfd), filepath.Join(top, nfc)},
+		"firmlink": {filepath.Join(top, "person"), "/System/Volumes/Data" + filepath.Join(top, "person")},
+	} {
+		t.Run(strings.ReplaceAll(name, " ", "-"), func(t *testing.T) {
+			home, working := paths[0], paths[1]
+			defer func() { _ = os.RemoveAll(home) }()
+			if err := os.MkdirAll(home, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			seen := homeWithALinkedCache(t, home)
+			if _, err := os.Stat(working); err != nil {
+				t.Skipf("no such path here: %v", err)
+			}
+			t.Chdir(working)
+			wantHomeStop(t, seen, "your home folder")
+		})
+	}
+}
+
+// TestTheGitSessionOfACodeRunHasAShortGrace is a run from a run code: with the agent's stop and
+// the time after a signal, the session's stop stays inside the pool's 30 seconds.
+func TestTheGitSessionOfACodeRunHasAShortGrace(t *testing.T) {
+	p := walledPush(t)
+	var grace time.Duration
+	t.Cleanup(cmd.SetGitSession(func(_ context.Context, spec session.SessionSpec) (*session.Result, error) {
+		grace = spec.StopGrace
+		return &session.Result{TimedOut: true}, nil
+	}))
+	p.run(t, writesAndCommits(t), nil)
+	if grace <= 0 || 10*time.Second+15*time.Second+grace >= 30*time.Second {
+		t.Errorf("the session's grace is %s", grace)
+	}
+}
+
+// TestTwoSignalsBeforeTheSessionHaveThatCause is two signals before the git session starts: the
+// line has them as the cause, and no line asks for a second signal after both came. A line about
+// git, which the ended context stopped, would send the person to check git.
+func TestTwoSignalsBeforeTheSessionHaveThatCause(t *testing.T) {
+	copyCheckout(t)
+	agentInCopy(t, func(spec session.SessionSpec) {
+		writeFile(t, filepath.Join(spec.Dir, "left.txt"), "left\n")
+		term(t)
+		term(t)
+	})
+	cmd.RunGitSessionsOnHost()
+	out, err := run(t, "run", "claude", "--", "-p", "hi")
+	if err == nil {
+		t.Fatalf("the run passed:\n%s", out)
+	}
+	wants(t, out, "qory run got a second signal during the git session, so the run's commits did not come back")
+	lacks(t, out, "the git session did not start", "check-ref-format", "Send a second signal")
+}
+
+// TestAClosedRunPrintsNoWait is a signal to a run the gateway closed during its session: nothing
+// comes back, so no line says that the work is coming back.
+func TestAClosedRunPrintsNoWait(t *testing.T) {
+	copyCheckout(t)
+	t.Cleanup(cmd.SetJoinResult(func(spec session.SessionSpec) (*session.Result, error) {
+		if spec.OnVariables != nil {
+			spec.OnVariables(session.Applied{})
+		}
+		term(t)
+		return &session.Result{RunClosed: true}, nil
+	}))
+	out, err := run(t, "run", "claude", "--", "-p", "hi")
+	if err == nil {
+		t.Fatalf("the run passed:\n%s", out)
+	}
+	wants(t, out, "the run ended before the git session started, so the run's commits did not come back")
+	lacks(t, out, "bringing the run's work back")
+}
+
+// TestALocalReturnCutAfterASignalHasItsBudget is a signal during the git session of a local run,
+// which passes the time of the return: the line has that time, not the time of a push step.
+func TestALocalReturnCutAfterASignalHasItsBudget(t *testing.T) {
+	copyCheckout(t)
+	agentInCopy(t, func(spec session.SessionSpec) {
+		writeFile(t, filepath.Join(spec.Dir, "left.txt"), "left\n")
+	})
+	t.Cleanup(cmd.SetReturnAfterSignal(200 * time.Millisecond))
+	t.Cleanup(cmd.SetGitSession(func(ctx context.Context, _ session.SessionSpec) (*session.Result, error) {
+		term(t)
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}))
+	out, err := run(t, "run", "claude", "--", "-p", "hi")
+	if err == nil {
+		t.Fatalf("the run passed:\n%s", out)
+	}
+	wants(t, out, "qory run got SIGTERM, and the step reached its limit of 200ms during the git session")
+	lacks(t, out, "limit of 15s")
+}
+
+// commitIn commits every change in dir with an identity for the commit.
+func commitIn(t *testing.T, dir, message string) {
+	t.Helper()
+	gitOutput(t, dir, "add", "-A")
+	gitOutput(t, dir, "-c", "user.name=agent", "-c", "user.email=agent@example.com", "commit", "--quiet", "--allow-empty", "-m", message)
+}
+
+// workLeftBehind is each way an agent leaves work that no bundle has, with nothing past the base
+// commit, in the copy at dir.
+var workLeftBehind = map[string]func(t *testing.T, dir string){
+	"stash": func(t *testing.T, dir string) {
+		writeFile(t, filepath.Join(dir, "README.md"), "stashed\n")
+		gitOutput(t, dir, "-c", "user.name=agent", "-c", "user.email=agent@example.com", "stash", "--quiet")
+	},
+	"tag then reset": func(t *testing.T, dir string) {
+		writeFile(t, filepath.Join(dir, "x.txt"), "x\n")
+		commitIn(t, dir, "x")
+		gitOutput(t, dir, "tag", "keep")
+		gitOutput(t, dir, "reset", "--quiet", "--hard", "HEAD~1")
+	},
+	"detached commit": func(t *testing.T, dir string) {
+		on := strings.TrimSpace(gitOutput(t, dir, "branch", "--show-current"))
+		gitOutput(t, dir, "checkout", "--quiet", "--detach")
+		writeFile(t, filepath.Join(dir, "x.txt"), "x\n")
+		commitIn(t, dir, "x")
+		gitOutput(t, dir, "checkout", "--quiet", on)
+	},
+	"new repository": func(t *testing.T, dir string) {
+		inner := filepath.Join(dir, "inner")
+		writeFile(t, filepath.Join(inner, "x.txt"), "x\n")
+		gitOutput(t, inner, "init", "--quiet")
+		commitIn(t, inner, "x")
+	},
+	"orphan": func(t *testing.T, dir string) {
+		gitOutput(t, dir, "checkout", "--quiet", "--orphan", "o")
+		gitOutput(t, dir, "rm", "-rf", "--quiet", ".")
+		writeFile(t, filepath.Join(dir, "new.txt"), "new\n")
+	},
+}
+
+// TestWorkLeftBehindKeepsTheCopyOfALocalRun is each way of [workLeftBehind] in a local run: the
+// line is not that the run made no commit, the run exits 1, and the copy stays.
+func TestWorkLeftBehindKeepsTheCopyOfALocalRun(t *testing.T) {
+	for name, agent := range workLeftBehind {
+		t.Run(strings.ReplaceAll(name, " ", "-"), func(t *testing.T) {
+			root := copyCheckout(t)
+			var work string
+			agentInCopy(t, func(spec session.SessionSpec) {
+				work = spec.Dir
+				agent(t, spec.Dir)
+			})
+			cmd.RunGitSessionsOnHost()
+			out, err := run(t, "run", "claude", "--", "-p", "hi")
+			if cmd.ExitCode(err) != 1 {
+				t.Errorf("exit %d, want 1:\n%s", cmd.ExitCode(err), out)
+			}
+			lacks(t, out, "no action needed")
+			wants(t, out, "part of the run's work did not come back", "read the run's files in "+work)
+			if _, err := os.Lstat(work); err != nil {
+				t.Errorf("the copy is gone: %v", err)
+			}
+			wantDisarmed(t, work)
+			if got := gitOutput(t, root, "for-each-ref", "refs/heads/qory/"); got != "" {
+				t.Errorf("a run's branch came back: %s", got)
+			}
+		})
+	}
+}
+
+// TestAHeadBeforeTheBaseCommitLosesNoFile is an agent that checked out a commit older than the
+// base commit and left no other work: no commit that deletes the base commit's files comes back.
+func TestAHeadBeforeTheBaseCommitLosesNoFile(t *testing.T) {
+	root := copyCheckout(t)
+	writeFile(t, filepath.Join(root, "second.txt"), "second\n")
+	runGit(t, root, "add", "second.txt")
+	runGit(t, root, "commit", "--quiet", "-m", "second")
+	agentInCopy(t, func(spec session.SessionSpec) {
+		gitOutput(t, spec.Dir, "checkout", "--quiet", "--detach", "HEAD~1")
+	})
+	cmd.RunGitSessionsOnHost()
+	out, err := run(t, "run", "claude", "--", "-p", "hi")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	lacks(t, out, "part of the run's work did not come back")
+	if got := gitOutput(t, root, "for-each-ref", "refs/heads/qory/"); got != "" {
+		t.Errorf("a run's branch came back: %s", got)
+	}
+}
+
+// TestAnOrphanHeadPushesNoDeletion is an agent with a commit on the work item's branch, then on a
+// branch with no commit: the branch reaches the forge as the agent left it, with no commit that
+// deletes its files, and the line says that part of the work stayed.
+func TestAnOrphanHeadPushesNoDeletion(t *testing.T) {
+	p := walledPush(t)
+	r := p.run(t, func(dir string) {
+		writeFile(t, filepath.Join(dir, "committed.txt"), "committed\n")
+		commitIn(t, dir, "Add a file")
+		gitOutput(t, dir, "checkout", "--quiet", "--orphan", "o")
+		gitOutput(t, dir, "rm", "-rf", "--quiet", ".")
+		writeFile(t, filepath.Join(dir, "new.txt"), "new\n")
+	}, nil)
+	wants(t, r.out, "qory run: take the work item in again in Qory Apiary: part of the run's work did not come back")
+	head := p.branchHead(t)
+	if head == "" {
+		t.Fatalf("no branch reached the forge:\n%s", r.out)
+	}
+	tree := gitOutput(t, p.bare, "ls-tree", "-r", "--name-only", head)
+	wants(t, tree, "committed.txt", "README.md")
+	lacks(t, tree, "new.txt")
+	if got := gitOutput(t, p.bare, "log", "-1", "--format=%s", head); !strings.Contains(got, "Add a file") {
+		t.Errorf("the branch ends with %q", got)
+	}
+}
+
+// TestWorkLeftBehindHasItsLineOnThePushPath is each way of [workLeftBehind] in a run with the push
+// step: no branch reaches the forge, and the line shows that work stayed behind.
+func TestWorkLeftBehindHasItsLineOnThePushPath(t *testing.T) {
+	for name, agent := range workLeftBehind {
+		t.Run(strings.ReplaceAll(name, " ", "-"), func(t *testing.T) {
+			p := walledPush(t)
+			r := p.run(t, func(dir string) { agent(t, dir) }, nil)
+			wants(t, r.out, "qory run: take the work item in again in Qory Apiary: part of the run's work did not come back")
+			lacks(t, r.out, "no action needed")
+			if head := p.branchHead(t); head != "" {
+				t.Errorf("a branch reached the forge at %s:\n%s", head, r.out)
+			}
+		})
+	}
+}
+
+// nestedSubmoduleRepos makes a repository with a submodule, and returns the path of the outer one.
+func nestedSubmoduleRepos(t *testing.T) string {
+	t.Helper()
+	inner := tempDir(t)
+	runGit(t, inner, "init", "--quiet", "--initial-branch=main")
+	writeFile(t, filepath.Join(inner, "lib.txt"), "lib\n")
+	commitIn(t, inner, "inner")
+	middle := tempDir(t)
+	runGit(t, middle, "init", "--quiet", "--initial-branch=main")
+	writeFile(t, filepath.Join(middle, "m.txt"), "m\n")
+	runGit(t, middle, "-c", "protocol.file.allow=always", "submodule", "add", "--quiet", inner, "inner")
+	commitIn(t, middle, "middle")
+	return middle
+}
+
+// TestANestedSubmoduleComesBackThroughARun is an agent that updates a nested submodule, as a person
+// does, and commits: the session ends well, and the commit lands on the run's branch.
+func TestANestedSubmoduleComesBackThroughARun(t *testing.T) {
+	root := copyCheckout(t)
+	runGit(t, root, "-c", "protocol.file.allow=always", "submodule", "add", "--quiet", nestedSubmoduleRepos(t), "libs/m")
+	runGit(t, root, "commit", "--quiet", "-m", "a submodule")
+	agentInCopy(t, func(spec session.SessionSpec) {
+		gitOutput(t, spec.Dir, "-c", "protocol.file.allow=always", "submodule", "update", "--init", "--recursive", "--quiet")
+		writeFile(t, filepath.Join(spec.Dir, "x.txt"), "x\n")
+		commitIn(t, spec.Dir, "x")
+	})
+	cmd.RunGitSessionsOnHost()
+	out, err := run(t, "run", "claude", "--", "-p", "hi")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	lacks(t, out, "that the run made", "did not come back")
+	if got := gitOutput(t, root, "for-each-ref", "refs/heads/qory/"); got == "" {
+		t.Errorf("the run's branch did not come back:\n%s", out)
+	}
+}
+
+// TestASetupThatUpdatesASubmoduleComesBackThroughARun is a run with the push step whose setup runs
+// that update and writes a file in the submodule: the agent's commit reaches the forge, and the
+// setup's work keeps nothing behind.
+func TestASetupThatUpdatesASubmoduleComesBackThroughARun(t *testing.T) {
+	p := walledPush(t)
+	middle := nestedSubmoduleRepos(t)
+	clone := tempDir(t)
+	gitOutput(t, clone, "-c", "protocol.file.allow=always", "clone", "--quiet", p.bare, ".")
+	gitOutput(t, clone, "-c", "protocol.file.allow=always", "submodule", "add", "--quiet", middle, "libs/m")
+	commitIn(t, clone, "a submodule")
+	gitOutput(t, clone, "push", "--quiet", "origin", "HEAD:refs/heads/main")
+	p.first = strings.TrimSpace(gitOutput(t, clone, "rev-parse", "HEAD"))
+	p.setup = func(dir string) {
+		gitOutput(t, dir, "-c", "protocol.file.allow=always", "submodule", "update", "--init", "--recursive", "--quiet")
+		writeFile(t, filepath.Join(dir, "libs", "m", "gen.o"), "generated\n")
+	}
+	r := p.run(t, writesAndCommits(t), nil)
+	lacks(t, r.out, "that the run made", "did not come back", "the submodule ")
+	if p.branchHead(t) == "" {
+		t.Errorf("no branch reached the forge:\n%s", r.out)
+	}
+}
+
+// TestASparseCheckoutPushesNoDeletion is an agent that took files out of the working tree in a run
+// with the push step: no commit that deletes them reaches the forge.
+func TestASparseCheckoutPushesNoDeletion(t *testing.T) {
+	for name, agent := range map[string]func(t *testing.T, dir string){
+		"sparse-checkout": func(t *testing.T, dir string) {
+			gitOutput(t, dir, "sparse-checkout", "set", "nothing-here")
+		},
+		"skip-worktree": func(t *testing.T, dir string) {
+			gitOutput(t, dir, "update-index", "--skip-worktree", "README.md")
+			if err := os.Remove(filepath.Join(dir, "README.md")); err != nil {
+				t.Fatal(err)
+			}
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			p := walledPush(t)
+			p.setup = nil
+			r := p.run(t, func(dir string) { agent(t, dir) }, nil)
+			wants(t, r.out, "part of the run's work did not come back")
+			if head := p.branchHead(t); head != "" {
+				t.Errorf("a branch reached the forge at %s:\n%s", head, r.out)
+			}
+		})
+	}
+}
+
+// noQoryFolder checks that the person's folder at root has no .qory.
+func noQoryFolder(t *testing.T, root string) {
+	t.Helper()
+	if info, err := os.Lstat(filepath.Join(root, ".qory")); err == nil {
+		t.Errorf("the run left %s, a folder: %v", filepath.Join(root, ".qory"), info.IsDir())
+	}
+}
+
+// committedFixture is a checkout with the two-modules fixture committed and nothing composed,
+// with a wall whose docker stands in for the engine, and the log of that docker.
+func committedFixture(t *testing.T) (string, string) {
+	t.Helper()
+	root := newCheckout(t)
+	copyFixture(t, "two-modules", root)
+	runGit(t, root, "add", "qory.yaml", "modules")
+	runGit(t, root, "commit", "--quiet", "-m", "first")
+	docker, log := fakeDocker(t)
+	walledBy(t, docker)
+	t.Setenv("QORY_RUN_KEY", "")
+	return root, log
+}
+
+// TestAWalledRunComposesUnderTheCache is a walled run of Claude Code with no --home and no run key,
+// through Forager's join and the fake engine: the agent's container starts, with the home under
+// qory/homes read-only, and the person's folder gets no .qory.
+func TestAWalledRunComposesUnderTheCache(t *testing.T) {
+	root, log := committedFixture(t)
+	out, err := run(t, "run", "claude", "--", "-p", "hi")
+	if cmd.ExitCode(err) != 4 {
+		t.Fatalf("exit %d (%v), want the agent's 4\n%s", cmd.ExitCode(err), err, out)
+	}
+	lacks(t, out, "Move the plugin")
+	data, err := os.ReadFile(log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !containerRun.Match(data) {
+		t.Fatalf("no container started:\n%s", data)
+	}
+	home := regexp.QuoteMeta(runHomesFolder(t, root)) + `/[^/,]+`
+	if want := regexp.MustCompile(`--mount type=bind,src=` + home + `,dst=` + home + `,readonly`); !want.Match(data) {
+		t.Errorf("no read-only mount of the run's home:\n%s", data)
+	}
+	noQoryFolder(t, root)
+}
+
+// TestAWalledRunWithAHomeInsideTheFolderStops is the stop of a run with a run key, on a walled run
+// with no run key, before the run opens: nothing comes into the person's folder.
+func TestAWalledRunWithAHomeInsideTheFolderStops(t *testing.T) {
+	root, log := committedFixture(t)
+	home := filepath.Join(root, ".qory", "harness")
+	out, err := run(t, "run", "claude", "--home", home)
+	want := "set --home to a folder outside " + root + ": " + home + " is inside " + root + ", and a walled run or a run with a run key writes no harness into the folder it runs in"
+	if err == nil || err.Error() != want || cmd.ExitCode(err) != cmd.ExitInput {
+		t.Errorf("%v (exit %d), want %q\n%s", err, cmd.ExitCode(err), want, out)
+	}
+	startedNothing(t, root, log)
+	noQoryFolder(t, root)
+}
+
+// TestAWalledRunInAPlainFolderStartsWithNoHome is a folder that is not a repository: the default
+// home is outside it, so the run starts, and its folder gets no .qory.
+func TestAWalledRunInAPlainFolderStartsWithNoHome(t *testing.T) {
+	root := emptyDir(t)
+	copyFixture(t, "two-modules", root)
+	docker, _ := fakeDocker(t)
+	walledBy(t, docker)
+	t.Setenv("QORY_RUN_KEY", "")
+	ran := false
+	agentInCopy(t, func(session.SessionSpec) { ran = true })
+	if out, err := run(t, "run", "claude", "--", "-p", "hi"); err != nil || !ran {
+		t.Fatalf("the agent ran: %v: %v\n%s", ran, err, out)
+	}
+	noQoryFolder(t, root)
+}
+
+// TestAJoinErrorKeepsTheCopy is a join that passed its checks and returned an error, as a wait
+// that failed does: the agent may have run, so the copy stays, and the line has its path and the
+// cause. The person's folder gets no .qory.
+func TestAJoinErrorKeepsTheCopy(t *testing.T) {
+	root, _ := committedFixture(t)
+	var copyDir string
+	t.Cleanup(cmd.SetJoinResult(func(spec session.SessionSpec) (*session.Result, error) {
+		spec.OnVariables(session.Applied{})
+		copyDir = spec.Dir
+		writeFile(t, filepath.Join(spec.Dir, "left.txt"), "left\n")
+		return nil, errors.New("the wait for the agent failed")
+	}))
+	out, err := run(t, "run", "claude", "--", "-p", "hi")
+	if err == nil {
+		t.Fatalf("the run passed:\n%s", out)
+	}
+	wants(t, out, "read the run's files in "+copyDir+", and run no git there: the wait for the agent failed")
+	if _, err := os.Stat(filepath.Join(copyDir, "left.txt")); err != nil {
+		t.Errorf("the copy did not stay: %v", err)
+	}
+	wantDisarmed(t, copyDir)
+	noQoryFolder(t, root)
+}
+
+// TestAJoinStoppedAtItsChecksKeepsNoCopy is a join that its checks stopped: no agent ran, so no line tells the
+// person to read a copy, and the copy goes.
+func TestAJoinStoppedAtItsChecksKeepsNoCopy(t *testing.T) {
+	root, _ := committedFixture(t)
+	var copyDir string
+	t.Cleanup(cmd.SetJoinResult(func(spec session.SessionSpec) (*session.Result, error) {
+		copyDir = spec.Dir
+		return nil, errors.New("the join stopped at its checks")
+	}))
+	out, err := run(t, "run", "claude", "--", "-p", "hi")
+	if err == nil {
+		t.Fatalf("the run passed:\n%s", out)
+	}
+	lacks(t, out, "read the run's files in ")
+	if _, err := os.Stat(copyDir); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("the copy stayed: %v", err)
+	}
+	noQoryFolder(t, root)
+}
+
+// TestAJoinErrorOnThePushPathDeletesTheCopy is the same join error on a run with the push step:
+// the person may have no access to this machine, so the line has no path, and the copy goes.
+func TestAJoinErrorOnThePushPathDeletesTheCopy(t *testing.T) {
+	p := walledPush(t)
+	var copyDir string
+	r := p.run(t, func(d string) { copyDir = d }, func() (*session.Result, error) {
+		return nil, errors.New("the wait for the agent failed")
+	})
+	wants(t, r.out, "take the work item in again in Qory Apiary: the wait for the agent failed")
+	lacksCopyPath(t, r.out)
+	if _, err := os.Stat(copyDir); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("the copy stayed: %v", err)
+	}
+}
+
+// TestAnAgentsAddAllLeavesTheQoryFolderOut is an agent's git add -A in the copy of a local run: the
+// artifacts and the work item that came in stay out of its commit.
+func TestAnAgentsAddAllLeavesTheQoryFolderOut(t *testing.T) {
+	root, _ := committedFixture(t)
+	writeFile(t, filepath.Join(root, ".qory", "work-item.json"), "{\"title\":\"Local\"}\n")
+	writeFile(t, filepath.Join(root, ".qory", "artifacts", "note", "main", "1", "a.txt"), "note\n")
+	agentInCopy(t, func(spec session.SessionSpec) {
+		if _, err := os.Stat(filepath.Join(spec.Dir, ".qory", "work-item.json")); err != nil {
+			t.Errorf("the work item did not come in: %v", err)
+		}
+		if _, err := os.Stat(filepath.Join(spec.Dir, ".qory", "artifacts", "note", "main", "1", "a.txt")); err != nil {
+			t.Errorf("the artifact did not come in: %v", err)
+		}
+		gitOutput(t, spec.Dir, "add", "-A")
+		lacks(t, gitOutput(t, spec.Dir, "ls-files"), ".qory")
+	})
+	if out, err := run(t, "run", "claude", "--", "-p", "hi"); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+}
+
+// TestTheGitSessionsLineHasNoScript is the session's arguments, which Forager prints on one line and
+// writes in dev.qory.session.started: the script stays in its file.
+func TestTheGitSessionsLineHasNoScript(t *testing.T) {
+	copyCheckout(t)
+	agentInCopy(t, func(session.SessionSpec) {})
+	var args []string
+	t.Cleanup(cmd.SetGitSession(func(_ context.Context, spec session.SessionSpec) (*session.Result, error) {
+		args = spec.Args
+		return &session.Result{}, nil
+	}))
+	_, _ = run(t, "run", "claude", "--", "-p", "hi")
+	if len(args) == 0 || filepath.Base(args[0]) != runcopy.SessionScriptName {
+		t.Fatalf("the session's arguments are %q", args)
+	}
+	joined := strings.Join(args, " ")
+	lacks(t, joined, "set -eu", "copygit")
+	if len(joined) > 2000 {
+		t.Errorf("the session's arguments have %d characters", len(joined))
+	}
+}
+
+// TestAPlainFolderWithQoryPrintsNoLeftOut is a plain folder with artifacts in .qory: the artifact
+// the run wrote comes back, so no line has .qory, and a file the copy back does leave out has its
+// line.
+func TestAPlainFolderWithQoryPrintsNoLeftOut(t *testing.T) {
+	root := emptyDir(t)
+	copyFixture(t, "two-modules", root)
+	writeFile(t, filepath.Join(root, ".qory", "artifacts", "note", "main", "1", "a.txt"), "note\n")
+	docker, _ := fakeDocker(t)
+	walledBy(t, docker)
+	t.Setenv("QORY_RUN_KEY", "")
+	agentInCopy(t, func(spec session.SessionSpec) {
+		writeFile(t, filepath.Join(spec.Dir, ".qory", "artifacts", "note", "main", "2", "a.txt"), "run\n")
+		if err := os.Symlink("README.md", filepath.Join(spec.Dir, "link")); err != nil {
+			t.Fatal(err)
+		}
+	})
+	out, err := run(t, "run", "claude", "--", "-p", "hi")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if data, err := os.ReadFile(filepath.Join(root, ".qory", "artifacts", "note", "main", "2", "a.txt")); err != nil || string(data) != "run\n" {
+		t.Errorf("the artifact: %q, %v", data, err)
+	}
+	wants(t, out, "qory run: left out of the copy back to your folder: link.\n")
+	if strings.Contains(out, ".qory.") {
+		t.Errorf("a line has .qory:\n%s", out)
+	}
+}
+
+// TestAPlainFolderRunThatWritesInQoryPrintsTheLine is an agent that writes what the copy back does
+// not bring to the person's folder, at .qory: the line prints once, since the copy goes with it.
+func TestAPlainFolderRunThatWritesInQoryPrintsTheLine(t *testing.T) {
+	for name, agent := range map[string]func(t *testing.T, work string){
+		"a file": func(t *testing.T, work string) {
+			writeFile(t, filepath.Join(work, ".qory"), "a file\n")
+		},
+		"a file in the folder": func(t *testing.T, work string) {
+			writeFile(t, filepath.Join(work, ".qory", "notes.md"), "notes\n")
+		},
+		"a link": func(t *testing.T, work string) {
+			if err := os.Symlink("README.md", filepath.Join(work, ".qory")); err != nil {
+				t.Fatal(err)
+			}
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			root := emptyDir(t)
+			copyFixture(t, "two-modules", root)
+			docker, _ := fakeDocker(t)
+			walledBy(t, docker)
+			t.Setenv("QORY_RUN_KEY", "")
+			agentInCopy(t, func(spec session.SessionSpec) { agent(t, spec.Dir) })
+			out, err := run(t, "run", "claude", "--", "-p", "hi")
+			if err != nil {
+				t.Fatalf("%v\n%s", err, out)
+			}
+			if line := "qory run: left out of the copy back to your folder: .qory.\n"; strings.Count(out, line) != 1 {
+				t.Errorf("want %q once:\n%s", line, out)
+			}
+			if _, err := os.Lstat(filepath.Join(root, ".qory")); err == nil {
+				t.Error("the person's folder got a .qory")
+			}
+		})
+	}
+}
+
+// TestAQoryLinkPrintsTheLine is a person's .qory that links to a folder with artifacts: the run's copy
+// has no artifact, and the line prints.
+func TestAQoryLinkPrintsTheLine(t *testing.T) {
+	root, _ := committedFixture(t)
+	elsewhere := tempDir(t)
+	writeFile(t, filepath.Join(elsewhere, "artifacts", "note", "main", "1", "a.txt"), "note\n")
+	if err := os.Symlink(elsewhere, filepath.Join(root, ".qory")); err != nil {
+		t.Fatal(err)
+	}
+	agentInCopy(t, func(spec session.SessionSpec) {
+		if _, err := os.Lstat(filepath.Join(spec.Dir, ".qory", "artifacts")); err == nil {
+			t.Error("the run's copy has the artifacts")
+		}
+	})
+	out, err := run(t, "run", "claude", "--", "-p", "hi")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	wants(t, out, "qory run: left out of the run's copy: .qory.\n")
+}
+
+// TestACommitWithAFileNamedQoryPrintsNoLeftOut is a commit with a file at .qory: nothing can be left
+// out there, on any run, so no line has it.
+func TestACommitWithAFileNamedQoryPrintsNoLeftOut(t *testing.T) {
+	root, _ := committedFixture(t)
+	writeFile(t, filepath.Join(root, ".qory"), "a file\n")
+	runGit(t, root, "add", ".qory")
+	runGit(t, root, "commit", "--quiet", "-m", "a file")
+	agentInCopy(t, func(session.SessionSpec) {})
+	out, err := run(t, "run", "claude", "--home", tempDir(t), "--", "-p", "hi")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if strings.Contains(out, "left out of") {
+		t.Errorf("a line of what was left out:\n%s", out)
+	}
+}
+
+// TestAFolderOfArtifactsBehindAFileIsReported is a run that wrote .qory/artifacts while the person
+// has a file at .qory: the artifact stays out of the person's folder, and the line has .qory.
+func TestAFolderOfArtifactsBehindAFileIsReported(t *testing.T) {
+	root, _ := committedFixture(t)
+	writeFile(t, filepath.Join(root, ".qory"), "a file\n")
+	runGit(t, root, "add", ".qory")
+	runGit(t, root, "commit", "--quiet", "-m", "a file")
+	agentInCopy(t, func(spec session.SessionSpec) {
+		if err := os.Remove(filepath.Join(spec.Dir, ".qory")); err != nil {
+			t.Fatal(err)
+		}
+		writeFile(t, filepath.Join(spec.Dir, ".qory", "artifacts", "note", "main", "1", "a.txt"), "run\n")
+	})
+	out, _ := run(t, "run", "claude", "--home", tempDir(t), "--", "-p", "hi")
+	wants(t, out, "left out of the copy back to your folder: .qory.")
+}

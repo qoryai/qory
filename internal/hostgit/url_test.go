@@ -128,14 +128,3 @@ func TestShownKeyMasksTheURLOfAKey(t *testing.T) {
 		}
 	}
 }
-
-// TestARefusedKeyShowsItsURLMasked sets an includeIf key whose condition matches a URL
-// that names a user and a password in a recorded repository: the refusal names the key
-// with them masked. Only the configuration is read.
-func TestARefusedKeyShowsItsURLMasked(t *testing.T) {
-	hermetic(t)
-	dir := newRepo(t)
-	record(t, dir)
-	git(t, dir, "config", "includeIf.hasconfig:remote.*.url:https://a-user:a-password@git.example.com/**.path", "/etc/acme.gitconfig")
-	refusedKey(t, run(t, dir), dir, "includeif.hasconfig:remote.*.url:https://***@git.example.com/**.path")
-}

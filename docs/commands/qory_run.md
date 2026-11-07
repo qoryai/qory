@@ -16,9 +16,12 @@ and 1 otherwise.
 
 qory run opens the run, then composes the harness, as qory harness compose does, into
 the same home, and prints the result on stderr. -f, --model, --effort, --tier and
---tier-effort mean what they mean there. With a run key, the home is outside the folder
-the run runs in, under qory/homes in the cache directory, unless --home or harness.home
-sets another, and a home inside the folder stops the run.
+--tier-effort mean what they mean there. With a run key or behind a wall, the home is
+outside the folder the run runs in, under qory/homes in the cache directory, unless --home
+or harness.home sets another, and a home inside the folder stops the run. A walled run with
+no run key, --home or harness.home gets a home for that run alone, which qory removes when
+the run ends: runs/<name>-<hash>/<run id> under qory/homes. The harness report stays per
+checkout, as runs/<name>-<hash>-report.json there.
 
 The agent is the runtime of the stack's target. Name another first, and the run composes
 for it instead; name one when the target has several. Arguments after -- go to the

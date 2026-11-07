@@ -7,8 +7,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/qoryai/qory/internal/hostgit"
 )
 
 // secret is a value that contains an access key secret; it is not a real key.
@@ -54,8 +52,6 @@ func hermetic(t *testing.T) {
 	t.Setenv("GIT_CEILING_DIRECTORIES", filepath.Dir(home))
 	t.Setenv("GIT_CONFIG_GLOBAL", filepath.Join(home, ".gitconfig"))
 	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
-	hostgit.Forget()
-	t.Cleanup(hostgit.Forget)
 }
 
 // repository is a new repository with one commit on main, and the branches given cut at

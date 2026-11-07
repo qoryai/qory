@@ -3,9 +3,7 @@ package preparation
 import (
 	"context"
 	"errors"
-	"fmt"
 	"io/fs"
-	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -15,7 +13,6 @@ import (
 	"time"
 
 	"github.com/qoryai/qory/internal/branchformat"
-	"github.com/qoryai/qory/internal/hostgit"
 	"github.com/qoryai/qory/internal/proxygit"
 )
 
@@ -45,13 +42,8 @@ func onBranch(t *testing.T, list string) (string, *WorkBranch) {
 // pushOf is [Push] of b in dir, with the message "Changes left", which returns the lines
 // it printed too.
 func pushOf(dir string, b *WorkBranch) (*branchformat.Branch, string, error) {
-	return pushWith(dir, b, true)
-}
-
-// pushWith is [pushOf] with agentStopped set.
-func pushWith(dir string, b *WorkBranch, agentStopped bool) (*branchformat.Branch, string, error) {
 	var report strings.Builder
-	doc, err := Push(context.Background(), dir, os.Environ(), b, "Changes left", testProxy, agentStopped, &report)
+	doc, err := Push(context.Background(), dir, os.Environ(), b, "Changes left", testProxy, &report)
 	return doc, report.String(), err
 }
 
@@ -60,15 +52,12 @@ func pushWith(dir string, b *WorkBranch, agentStopped bool) (*branchformat.Branc
 func TestAfterTheRunTheCheckTakesWhatTheFetchWrote(t *testing.T) {
 	dir, _ := onBranch(t, "acme/shop,acme/lib")
 	ctx := context.Background()
-	if hold, err := safeRepository(ctx, dir); err == nil || err.Error() != textHasRemote {
-		hold.Release()
+	if err := safeRepository(ctx, dir); err == nil || err.Error() != textHasRemote {
 		t.Errorf("the check of a fetch: %v", err)
 	}
-	hold, err := safeAfterRun(ctx, dir)
-	if err != nil {
+	if err := safeAfterRun(ctx, dir); err != nil {
 		t.Fatal(err)
 	}
-	hold.Release()
 	if err := safeFurther(ctx, dir, filepath.Join(dir, filepath.FromSlash(Repositories), "acme", "lib"), true); err != nil {
 		t.Errorf("the check of a further repository: %v", err)
 	}
@@ -219,14 +208,6 @@ func TestPushFailed(t *testing.T) {
 	}
 }
 
-// recordSetup is [RecordSetup] of b in dir.
-func recordSetup(t *testing.T, dir string, b *WorkBranch) {
-	t.Helper()
-	if err := RecordSetup(context.Background(), dir, os.Environ(), b); err != nil {
-		t.Fatal(err)
-	}
-}
-
 // commitPaths is each path of the commit at HEAD.
 func commitPaths(t *testing.T, dir string) []string {
 	t.Helper()
@@ -235,308 +216,14 @@ func commitPaths(t *testing.T, dir string) []string {
 	return got
 }
 
-// setupLeaves is a setup that changes README.md, adds lock.txt, removes first.txt and
-// adds the link latest.
-func setupLeaves(t *testing.T, dir string) {
-	t.Helper()
-	write(t, filepath.Join(dir, "README.md"), "the setup\n")
-	write(t, filepath.Join(dir, "lock.txt"), "the setup\n")
-	if err := os.Remove(filepath.Join(dir, "first.txt")); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Symlink("README.md", filepath.Join(dir, "latest")); err != nil {
-		t.Fatal(err)
-	}
-}
-
-// TestWhatTheSetupLeftIsNotCommitted is a setup that changed a file, added one, removed
-// one and added a link, and an agent that changed nothing: no commit, no push, no version.
-func TestWhatTheSetupLeftIsNotCommitted(t *testing.T) {
-	dir, b := onBranch(t, "acme/shop")
-	head := run(t, dir, "rev-parse", "HEAD")
-	setupLeaves(t, dir)
-	recordSetup(t, dir, b)
-	doc, lines, err := pushOf(dir, b)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if doc != nil || run(t, dir, "rev-parse", "HEAD") != head {
-		t.Errorf("the document is %+v, and HEAD is %s", doc, run(t, dir, "rev-parse", "HEAD"))
-	}
-	if strings.TrimSpace(lines) != textNoNewCommits {
-		t.Errorf("the lines are %q", lines)
-	}
-}
-
-// TestAPathTheAgentChangedAgainIsCommitted is each kind of path the setup left, which the
-// agent changed again, beside the ones it did not touch.
-func TestAPathTheAgentChangedAgainIsCommitted(t *testing.T) {
-	cases := map[string]struct {
-		agent func(t *testing.T, dir string)
-		want  []string
-	}{
-		"a file": {func(t *testing.T, dir string) {
-			write(t, filepath.Join(dir, "README.md"), "the agent\n")
-		}, []string{"README.md"}},
-		"a file with the bit that lets it run": {func(t *testing.T, dir string) {
-			if err := os.Chmod(filepath.Join(dir, "README.md"), 0o755); err != nil {
-				t.Fatal(err)
-			}
-		}, []string{"README.md"}},
-		"a removed file": {func(t *testing.T, dir string) {
-			write(t, filepath.Join(dir, "first.txt"), "the agent\n")
-		}, []string{"first.txt"}},
-		"a file the setup added, removed": {func(t *testing.T, dir string) {
-			if err := os.Remove(filepath.Join(dir, "README.md")); err != nil {
-				t.Fatal(err)
-			}
-		}, []string{"README.md"}},
-		"a link": {func(t *testing.T, dir string) {
-			if err := os.Remove(filepath.Join(dir, "latest")); err != nil {
-				t.Fatal(err)
-			}
-			if err := os.Symlink("lock.txt", filepath.Join(dir, "latest")); err != nil {
-				t.Fatal(err)
-			}
-		}, []string{"latest"}},
-		"a new file": {func(t *testing.T, dir string) {
-			write(t, filepath.Join(dir, "new.txt"), "the agent\n")
-		}, []string{"new.txt"}},
-	}
-	for name, c := range cases {
-		t.Run(name, func(t *testing.T) {
-			dir, b := onBranch(t, "acme/shop")
-			setupLeaves(t, dir)
-			recordSetup(t, dir, b)
-			c.agent(t, dir)
-			doc, _, err := pushOf(dir, b)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if doc == nil {
-				t.Fatal("the run pushed nothing")
-			}
-			if got := commitPaths(t, dir); !slices.Equal(got, c.want) {
-				t.Errorf("the commit has %q, want %q", got, c.want)
-			}
-		})
-	}
-}
-
-// TestAFileTheSetupRestoredIsNoChange is a path the setup left changed that the agent
-// put back as HEAD has it: git status no longer lists it, so no commit.
-func TestAFileTheSetupRestoredIsNoChange(t *testing.T) {
-	dir, b := onBranch(t, "acme/shop")
-	content := contentOf(t, filepath.Join(dir, "README.md"))
-	write(t, filepath.Join(dir, "README.md"), "the setup\n")
-	recordSetup(t, dir, b)
-	write(t, filepath.Join(dir, "README.md"), content)
-	if doc, _, err := pushOf(dir, b); err != nil || doc != nil {
-		t.Errorf("the document is %+v, the error %v", doc, err)
-	}
-}
-
-// TestASetupThatAddsAFilterStopsBeforeGitStatus is a setup that added a clean filter,
-// which git status would run on this machine: the check comes first and the filter does
-// not run.
-func TestASetupThatAddsAFilterStopsBeforeGitStatus(t *testing.T) {
-	dir, b := onBranch(t, "acme/shop")
-	marker := filepath.Join(t.TempDir(), "filter-ran")
-	run(t, dir, "config", "filter.probe.clean", "touch "+marker+"; cat")
-	write(t, filepath.Join(dir, ".git", "info", "attributes"), "* filter=probe\n")
-	write(t, filepath.Join(dir, "README.md"), "the setup\n")
-	err := RecordSetup(context.Background(), dir, os.Environ(), b)
-	if err == nil || !strings.Contains(err.Error(), "after the setup, the check of repository acme/shop failed, so the agent did not start: ") {
-		t.Fatalf("the error is %v", err)
-	}
-	if _, err := os.Stat(marker); err == nil {
-		t.Error("the filter ran")
-	}
-}
-
-// laterFilter writes into the repository at dir what a process in the setup container can
-// write after the check: a clean filter, a fake program in a temporary folder that creates
-// the file marker, and attributes that apply it. It also moves the time of a tracked file
-// with its size unchanged, so git status reads that file.
-func laterFilter(t *testing.T, dir, marker string) {
-	t.Helper()
-	program := filepath.Join(t.TempDir(), "filter")
-	write(t, program, "#!/bin/sh\n: > '"+marker+"'\ncat\n")
-	if err := os.Chmod(program, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	config, err := os.OpenFile(filepath.Join(dir, ".git", "config"), os.O_APPEND|os.O_WRONLY, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer config.Close()
-	if _, err := fmt.Fprintf(config, "[filter \"probe\"]\n\tclean = %s\n", program); err != nil {
-		t.Fatal(err)
-	}
-	write(t, filepath.Join(dir, ".git", "info", "attributes"), "* filter=probe\n")
-	later := time.Now().Add(time.Hour)
-	if err := os.Chtimes(filepath.Join(dir, "README.md"), later, later); err != nil {
-		t.Fatal(err)
-	}
-}
-
-// TestAFilterWrittenAfterTheCheckRunsNoProgram is a process that adds a filter between the
-// check and git status, so each run of the test has the order that a concurrent write
-// reaches only at times. git status reads the copy, so the filter does not run, and the
-// record is as it is with no filter.
-func TestAFilterWrittenAfterTheCheckRunsNoProgram(t *testing.T) {
-	dir, b := onBranch(t, "acme/shop")
-	marker := filepath.Join(t.TempDir(), "filter-ran")
-	write(t, filepath.Join(dir, "lock.txt"), "the setup\n")
-	ran := false
-	status := func(env ...string) gitRunner {
-		return func(ctx context.Context, at string, args ...string) (string, error) {
-			laterFilter(t, dir, marker)
-			ran = true
-			return stepGit(noRemote, "", env...)(ctx, at, args...)
-		}
-	}
-	if err := recordWith(context.Background(), dir, os.Environ(), b, status); err != nil {
-		t.Fatal(err)
-	}
-	if !ran {
-		t.Fatal("git status did not run")
-	}
-	if _, err := os.Stat(marker); err == nil {
-		t.Error("the filter ran")
-	}
-	if got := slices.Sorted(maps.Keys(b.setupChanges["."])); !slices.Equal(got, []string{"lock.txt"}) {
-		t.Errorf("the record has %q, want lock.txt", got)
-	}
-}
-
-// TestThePrivateGitDirHasNoKeyOfALaterWrite is the folder git status reads: a later write
-// to .git changes nothing in it, and git status with it has no filter to run.
-func TestThePrivateGitDirHasNoKeyOfALaterWrite(t *testing.T) {
-	dir, b := onBranch(t, "acme/shop")
-	r := b.Repositories[0]
-	write(t, filepath.Join(dir, ".git", "info", "exclude"), "ignored.txt\n")
-	index, err := os.ReadFile(filepath.Join(dir, ".git", "index"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	private := t.TempDir()
-	if err := privateGitDir(hostgit.WithBase(context.Background(), proxygit.Env(os.Environ(), nil)), dir, dir, private, r.Commit); err != nil {
-		t.Fatal(err)
-	}
-	marker := filepath.Join(t.TempDir(), "filter-ran")
-	laterFilter(t, dir, marker)
-	config, err := os.ReadFile(filepath.Join(private, "config"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(string(config), "filter") {
-		t.Errorf("the private config has a key of the later write:\n%s", config)
-	}
-	if _, err := os.Lstat(filepath.Join(private, "info", "attributes")); !errors.Is(err, fs.ErrNotExist) {
-		t.Errorf("the private folder has attributes: %v", err)
-	}
-	for name, want := range map[string]string{"HEAD": r.Commit + "\n", "index": string(index), "info/exclude": "ignored.txt\n"} {
-		if got, err := os.ReadFile(filepath.Join(private, filepath.FromSlash(name))); err != nil || string(got) != want {
-			t.Errorf("%s of the private folder differs from what was read: %v", name, err)
-		}
-	}
-	env := []string{"GIT_DIR=" + private, "GIT_WORK_TREE=" + dir, "GIT_OBJECT_DIRECTORY=" + filepath.Join(dir, ".git", "objects")}
-	if _, err := changedPaths(hostgit.WithBase(context.Background(), proxygit.Env(os.Environ(), nil)), stepGit(noRemote, "", env...), dir); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.Stat(marker); err == nil {
-		t.Error("the filter ran")
-	}
-}
-
-// TestThePrivateIndexHasTheTimeOfTheIndex is an index with a known past time: the copy has
-// that time, so git status of the copy reads a file of the same size as the index entry as
-// git status of the repository does.
-func TestThePrivateIndexHasTheTimeOfTheIndex(t *testing.T) {
-	dir, b := onBranch(t, "acme/shop")
-	past := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
-	if err := os.Chtimes(filepath.Join(dir, ".git", "index"), past, past); err != nil {
-		t.Fatal(err)
-	}
-	private := t.TempDir()
-	ctx := hostgit.WithBase(context.Background(), proxygit.Env(os.Environ(), nil))
-	if err := privateGitDir(ctx, dir, dir, private, b.Repositories[0].Commit); err != nil {
-		t.Fatal(err)
-	}
-	info, err := os.Stat(filepath.Join(private, "index"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !info.ModTime().Equal(past) {
-		t.Errorf("the copy of the index has the time %s, want %s", info.ModTime(), past)
-	}
-}
-
-// TestTheCheckReadsThePrivateCopy is the git the check runs, seen through a program first on
-// the PATH that writes its arguments to a file and runs git: git config --file reads the
-// copy that git status reads, and never the live .git/config, which a process can change
-// between the two reads.
-func TestTheCheckReadsThePrivateCopy(t *testing.T) {
-	dir, b := onBranch(t, "acme/shop")
-	git, err := exec.LookPath("git")
-	if err != nil {
-		t.Fatal(err)
-	}
-	bin, private := t.TempDir(), t.TempDir()
-	calls := filepath.Join(bin, "calls")
-	write(t, filepath.Join(bin, "git"), "#!/bin/sh\necho \"$*\" >> '"+calls+"'\nexec '"+git+"' \"$@\"\n")
-	if err := os.Chmod(filepath.Join(bin, "git"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("PATH", bin+string(filepath.ListSeparator)+os.Getenv("PATH"))
-	ctx := hostgit.WithBase(context.Background(), proxygit.Env(os.Environ(), nil))
-	if err := privateGitDir(ctx, dir, dir, private, b.Repositories[0].Commit); err != nil {
-		t.Fatal(err)
-	}
-	got, err := os.ReadFile(calls)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(got), "--file "+filepath.Join(private, "config")) {
-		t.Errorf("no check of the private copy in:\n%s", got)
-	}
-	if strings.Contains(string(got), filepath.Join(dir, ".git", "config")) {
-		t.Errorf("a check of the live file in:\n%s", got)
-	}
-}
-
-// TestTheRecordListsWhatGitStatusListsInTheRepository is a plain setup that changes, adds,
-// removes, stages and ignores: the private folder gives the same paths as git status in
-// the repository itself.
-func TestTheRecordListsWhatGitStatusListsInTheRepository(t *testing.T) {
-	dir, b := onBranch(t, "acme/shop")
-	setupLeaves(t, dir)
-	write(t, filepath.Join(dir, ".git", "info", "exclude"), "ignored.txt\n")
-	write(t, filepath.Join(dir, "ignored.txt"), "the setup\n")
-	write(t, filepath.Join(dir, "staged.txt"), "the setup\n")
-	run(t, dir, "add", "staged.txt")
-	want, err := changedPaths(hostgit.WithBase(context.Background(), proxygit.Env(os.Environ(), nil)), stepGit(noRemote, ""), dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	slices.Sort(want)
-	recordSetup(t, dir, b)
-	got := slices.Sorted(maps.Keys(b.setupChanges["."]))
-	if len(got) == 0 || !slices.Equal(got, want) {
-		t.Errorf("the record has %q, git status lists %q", got, want)
-	}
-}
-
-// TestARepositoryInARepositoryStaysOut is a repository the setup or the agent left in the
-// working folder, with and without a commit: it stays out of the commit. A line shows it
-// unless it is as the setup left it, and a change beside it is pushed.
+// TestARepositoryInARepositoryStaysOut is a repository the agent left in the working
+// folder, with and without a commit: it stays out of the commit, a line shows it, and a
+// change beside it is pushed.
 func TestARepositoryInARepositoryStaysOut(t *testing.T) {
-	for name, c := range map[string]struct{ commits, setup, changed, line bool }{
-		"the agent's, with a commit":  {commits: true, line: true},
-		"the agent's, with no commit": {line: true},
-		"the setup's, as it left it":  {commits: true, setup: true},
-		"the setup's, changed":        {commits: true, setup: true, changed: true, line: true},
+	for name, c := range map[string]struct{ commits, changed, line bool }{
+		"with a commit":  {commits: true, line: true},
+		"with no commit": {line: true},
+		"changed":        {commits: true, changed: true, line: true},
 	} {
 		t.Run(name, func(t *testing.T) {
 			dir, b := onBranch(t, "acme/shop")
@@ -549,9 +236,6 @@ func TestARepositoryInARepositoryStaysOut(t *testing.T) {
 			if c.commits {
 				run(t, inner, "add", "-A")
 				run(t, inner, "commit", "--quiet", "-m", "inner")
-			}
-			if c.setup {
-				recordSetup(t, dir, b)
 			}
 			if c.changed {
 				write(t, filepath.Join(inner, "file.txt"), "the agent\n")
@@ -707,34 +391,12 @@ func committedLeft(t *testing.T, folder string) bool {
 	return run(t, folder, "log", "-1", "--format=%s") == "Changes left"
 }
 
-// TestAStaleIndexLockDoesNotLoseTheWork is an agent that was killed in a git command, whose
-// stop is proven: qory removes the lock, and the commit and the push go on.
-func TestAStaleIndexLockDoesNotLoseTheWork(t *testing.T) {
-	inEachRepository(t, func(t *testing.T, dir, folder string, b *WorkBranch, path string) {
-		write(t, indexLock(folder), "")
-		_, lines, err := pushWith(dir, b, true)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if _, err := os.Lstat(indexLock(folder)); !errors.Is(err, fs.ErrNotExist) {
-			t.Errorf("the lock is still there: %v", err)
-		}
-		if !committedLeft(t, folder) {
-			t.Error("the commit is missing")
-		}
-		want := "qory run: removed .git/index.lock of " + path + ", which the agent left when it stopped"
-		if !strings.Contains(lines, want) {
-			t.Errorf("the lines are %q, want %q", lines, want)
-		}
-	})
-}
-
 // TestAnIndexLockFailsTheStepWhileTheStopIsNotProven is a lock with an agent that may run:
 // it stays, and nothing is committed in any repository.
 func TestAnIndexLockFailsTheStepWhileTheStopIsNotProven(t *testing.T) {
 	inEachRepository(t, func(t *testing.T, dir, folder string, b *WorkBranch, path string) {
 		write(t, indexLock(folder), "")
-		_, _, err := pushWith(dir, b, false)
+		_, _, err := pushOf(dir, b)
 		want := "repository " + path + " has .git/index.lock and the stop of the agent is not proven"
 		if err == nil || !strings.Contains(err.Error(), want) {
 			t.Fatalf("the error is %v, want %q", err, want)
@@ -754,7 +416,7 @@ func TestAnIndexLockFailsTheStepWhileTheStopIsNotProven(t *testing.T) {
 // TestNoLockIsNeededWhileTheStopIsNotProven is a run with no lock: the step goes on.
 func TestNoLockIsNeededWhileTheStopIsNotProven(t *testing.T) {
 	inEachRepository(t, func(t *testing.T, dir, folder string, b *WorkBranch, _ string) {
-		if _, _, err := pushWith(dir, b, false); err != nil {
+		if _, _, err := pushOf(dir, b); err != nil {
 			t.Fatal(err)
 		}
 		if !committedLeft(t, folder) {
@@ -769,7 +431,7 @@ func TestAnIndexLockThatIsNoFileStaysAndFailsTheStep(t *testing.T) {
 		if err := os.Mkdir(indexLock(folder), 0o755); err != nil {
 			t.Fatal(err)
 		}
-		_, _, err := pushWith(dir, b, true)
+		_, _, err := pushOf(dir, b)
 		want := ".git/index.lock of repository " + path + " is not a regular file"
 		if err == nil || !strings.Contains(err.Error(), want) {
 			t.Fatalf("the error is %v, want %q", err, want)
@@ -789,7 +451,7 @@ func TestAnIndexLockThatIsALinkStaysAndFailsTheCheck(t *testing.T) {
 		if err := os.Symlink(target, indexLock(folder)); err != nil {
 			t.Fatal(err)
 		}
-		_, _, err := pushWith(dir, b, true)
+		_, _, err := pushOf(dir, b)
 		if err == nil || !strings.Contains(err.Error(), "the check of repository") {
 			t.Fatalf("the error is %v, want the safety check's", err)
 		}
@@ -809,7 +471,7 @@ func TestAFailedCheckLeavesTheLock(t *testing.T) {
 	write(t, indexLock(dir), "")
 	further := filepath.Join(dir, filepath.FromSlash(Repositories), "acme", "lib")
 	run(t, further, "config", "filter.x.clean", "false")
-	if _, _, err := pushWith(dir, b, true); err == nil || !strings.Contains(err.Error(), "the check of repository") {
+	if _, _, err := pushOf(dir, b); err == nil || !strings.Contains(err.Error(), "the check of repository") {
 		t.Fatalf("the error is %v, want the safety check's", err)
 	}
 	if _, err := os.Lstat(indexLock(dir)); err != nil {
@@ -826,7 +488,7 @@ func TestALaterLockThatFailsLeavesTheEarlierLock(t *testing.T) {
 	if err := os.Mkdir(indexLock(further), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := pushWith(dir, b, true); err == nil {
+	if _, _, err := pushOf(dir, b); err == nil {
 		t.Fatal("no error")
 	}
 	if _, err := os.Lstat(indexLock(dir)); err != nil {
@@ -840,7 +502,7 @@ func TestNoOtherLockIsRemoved(t *testing.T) {
 	inEachRepository(t, func(t *testing.T, dir, folder string, b *WorkBranch, _ string) {
 		other := filepath.Join(folder, ".git", "HEAD.lock")
 		write(t, other, "")
-		_, _, err := pushWith(dir, b, true)
+		_, _, err := pushOf(dir, b)
 		if err == nil || !strings.Contains(err.Error(), "the commit of what the agent left") {
 			t.Fatalf("the error is %v, want a failed commit", err)
 		}
@@ -1014,17 +676,6 @@ func TestOtherKeysOfTheUserSectionStop(t *testing.T) {
 	}
 }
 
-// TestASetupThatSetsTheIdentityStops is the record after the setup, which is not a check
-// after the run: a key of the identity stops it.
-func TestASetupThatSetsTheIdentityStops(t *testing.T) {
-	dir, b := onBranch(t, "acme/shop")
-	run(t, dir, "config", "user.name", "The setup")
-	err := RecordSetup(context.Background(), dir, os.Environ(), b)
-	if err == nil || !strings.Contains(err.Error(), "the check stops on each key") {
-		t.Fatalf("the error is %v", err)
-	}
-}
-
 // TestACheckThatFailedHasAFixAPersonCanCarryOut is a failed check after the run whose cause
 // comes from a text for a run that has not started: the line has only the fix of a used code.
 func TestACheckThatFailedHasAFixAPersonCanCarryOut(t *testing.T) {
@@ -1032,12 +683,9 @@ func TestACheckThatFailedHasAFixAPersonCanCarryOut(t *testing.T) {
 	for name, err := range map[string]error{
 		"git":     gitFailed(errors.New("fatal: a line of git")),
 		"machine": local(errors.New("a read failed")),
-		"a remote file": &unsafeError{"the line", (&hostgit.RefusedError{
-			Dir: "/w", Key: "remotes/x", Reason: hostgit.RefusedRemoteFile}).Cause()},
-		"a pointer": &unsafeError{"the line", (&hostgit.RefusedError{Reason: hostgit.RefusedPointer}).Cause()},
 	} {
 		got := notSafe(r, err).Error()
-		for _, fix := range []string{"run again", "Remove it", "--accept-checkout", "docker ps"} {
+		for _, fix := range []string{"run again", "Remove it"} {
 			if strings.Contains(got, fix) {
 				t.Errorf("%s: %q has %q", name, got, fix)
 			}

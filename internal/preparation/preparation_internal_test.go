@@ -2,7 +2,6 @@ package preparation
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -14,8 +13,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/qoryai/qory/internal/hostgit"
-	"github.com/qoryai/qory/internal/places"
 	"github.com/qoryai/qory/internal/proxygit"
 )
 
@@ -529,93 +526,6 @@ func TestAGitThatFailsInTheWorkingFolderStops(t *testing.T) {
 		if err == nil || !strings.HasPrefix(err.Error(), want) {
 			t.Errorf("%s: %v, want a line that starts %s", c.key, err, want)
 		}
-	}
-}
-
-// TestEmptyStopHasTheFixOfEachStop is the whole line for each stop of hostgit's check on a
-// folder with no entries, with paths long enough that a cut would lose hostgit's fix: a new
-// folder for a walled run that may use it, hostgit's text alone for what the check cannot
-// read, and a folder outside the repository for a stop of that repository.
-func TestEmptyStopHasTheFixOfEachStop(t *testing.T) {
-	long := "/state/" + strings.Repeat("x", 300)
-	inUse := "qory run: start the run in a new empty folder that no walled run uses, then run again. The check of the working folder failed: "
-	above := "qory run: start the run in an empty folder outside the repository above the working folder, then run again. The check of that repository failed: "
-	for _, c := range []struct {
-		name string
-		stop *hostgit.RefusedError
-		want string
-	}{
-		{"in use", &hostgit.RefusedError{Dir: "/work", Reason: hostgit.RefusedInUse},
-			inUse + "/work is in use by a walled run; qory runs no git there until the run ends, since the run could change git's configuration between qory's check and git's read"},
-		{"engine out of reach", &hostgit.RefusedError{Dir: "/work", Key: "rn_1", Target: long, Reason: hostgit.RefusedEngineUnreachable},
-			"qory run: start the run in a new empty folder that no walled run uses, then run again. If it stops there too: The check for a container of the walled run rn_1 failed. That run used /work, so qory runs no git there. If docker ps --all --filter label=dev.qory.run=rn_1 lists no container, or the Docker engine of that run no longer exists, delete " + long},
-		{"entry unreadable", &hostgit.RefusedError{Dir: "/work", Key: "rn_1", Target: long, Reason: hostgit.RefusedEntryUnreadable},
-			"qory run: qory cannot read " + long + ", the record of the walled run rn_1, so it cannot tell whether that run used /work or is still going, and runs no git there. If docker ps --all --filter label=dev.qory.run=rn_1 lists no container, delete " + long},
-		{"no records", &hostgit.RefusedError{Reason: hostgit.RefusedNoRecords, Err: errors.New("no\nhome")}, `qory run: no\nhome`},
-		{"no git", &hostgit.RefusedError{Dir: "/work", Reason: hostgit.RefusedNoGit},
-			"qory run: git is not on the PATH, so qory cannot check the git configuration of /work; qory runs no git there, since a run could have set it to make git on this machine run a program"},
-		{"a key above", &hostgit.RefusedError{Dir: "/work", Key: "filter.x.smudge", Reason: hostgit.RefusedSetting},
-			above + "the git configuration of /work sets filter.x.smudge, which qory does not write; qory runs no git there, since a run could have set it to make git on this machine run a program"},
-		{"a link above", &hostgit.RefusedError{Dir: "/work", Key: "objects", Target: long, Reason: hostgit.RefusedObjectsLink},
-			above + "the git directory of /work holds objects, a link to " + long + "; qory runs no git there, since a run could have pointed it at another repository's objects. Remove the link to go on"},
-	} {
-		if got := emptyStop(c.stop).Error(); got != c.want {
-			t.Errorf("%s:\n%s\nwant\n%s", c.name, got, c.want)
-		}
-	}
-}
-
-// TestAnEmptyFolderWithNoRecordsStops is a run with neither HOME nor XDG_STATE_HOME: the
-// line is the reason qory cannot find the records, with no other folder as a fix, and the
-// folder has no .git.
-func TestAnEmptyFolderWithNoRecordsStops(t *testing.T) {
-	needGit(t)
-	isolatedPlaces(t)
-	base := t.TempDir()
-	remote(t, base, "acme/shop", "main", nil)
-	t.Setenv("HOME", "")
-	t.Setenv("XDG_STATE_HOME", "")
-	_, dirErr := places.Dir()
-	if dirErr == nil {
-		t.Fatal("the records have a folder with neither HOME nor XDG_STATE_HOME")
-	}
-	dir := t.TempDir()
-	_, err := prepare(context.Background(), dir, env("git.example.com", "acme/shop"))
-	if want := "qory run: " + dirErr.Error(); err == nil || err.Error() != want {
-		t.Errorf("%v, want %s", err, want)
-	}
-	if _, err := os.Lstat(filepath.Join(dir, ".git")); !os.IsNotExist(err) {
-		t.Errorf("the folder has a .git after the stop: %v", err)
-	}
-}
-
-// TestAnEmptyFolderBelowARecordedRepositoryStops is an empty folder inside a repository that
-// a walled run used, whose configuration has a filter the run wrote: the line sends the
-// reader outside that repository, and the folder has no .git.
-func TestAnEmptyFolderBelowARecordedRepositoryStops(t *testing.T) {
-	needGit(t)
-	isolatedPlaces(t)
-	base := t.TempDir()
-	remote(t, base, "acme/shop", "main", nil)
-	parent, err := filepath.EvalSymlinks(emptyFolder(t))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := hostgit.Record(context.Background(), parent, places.KindCheckout, "run-1"); err != nil {
-		t.Fatal(err)
-	}
-	smudging(t, parent, filepath.Join(t.TempDir(), "ran"))
-	dir := filepath.Join(parent, "inner")
-	if err := os.Mkdir(dir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	_, err = prepare(context.Background(), dir, env("git.example.com", "acme/shop"))
-	want := "qory run: start the run in an empty folder outside the repository above the working folder, then run again. The check of that repository failed: "
-	if err == nil || !strings.HasPrefix(err.Error(), want) {
-		t.Errorf("%v, want a line that starts %s", err, want)
-	}
-	if _, err := os.Lstat(filepath.Join(dir, ".git")); !os.IsNotExist(err) {
-		t.Errorf("the folder has a .git after the stop: %v", err)
 	}
 }
 

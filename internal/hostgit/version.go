@@ -29,12 +29,8 @@ var versions struct {
 
 // Ready returns a [*GitVersionError] when the git that [Command] runs is older than
 // 2.36. It returns nil when there is no git, which [Command] then reports, and when git
-// version fails or prints a line qory cannot read. [Command], [Hold], [Record],
-// [Fingerprint] and [Changes] call Ready first, and [Unchecked] runs the same check on
-// the git that its environment finds. [Resolve] does not: after Ready found git older
-// than 2.36, Resolve starts no git and returns false. A caller that reads that false as
-// a folder outside a working tree calls Ready first, so a git failure is never read
-// that way.
+// version fails or prints a line qory cannot read. [Command] calls Ready first, and
+// [Unchecked] runs the same check on the git that its environment finds.
 func Ready(ctx context.Context) error { return ready(ctx, envOf(ctx)) }
 
 // ready is [Ready] for the git that the PATH of env finds.

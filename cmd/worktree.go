@@ -16,7 +16,6 @@ import (
 	"github.com/qoryai/qory/internal/config"
 	"github.com/qoryai/qory/internal/exports"
 	"github.com/qoryai/qory/internal/hostgit"
-	walled "github.com/qoryai/qory/internal/places"
 	"github.com/qoryai/qory/internal/ui"
 	"github.com/qoryai/qory/internal/worktree"
 )
@@ -422,15 +421,9 @@ More: https://github.com/qoryai/qory/blob/main/docs/worktrees.md`,
 			if at, err := placesAt(target.Path); err == nil && at.dir == "" {
 				outside = &at
 			}
-			// The record of the worktree's folder, if a walled run used it, goes with the
-			// folder; its name is taken while the folder is there to resolve.
-			recorded := walled.Real(target.Path)
 			r, err := worktree.Remove(main, target.Path, o)
 			if err != nil {
 				return input(err)
-			}
-			if err := walled.Remove(recorded); err != nil {
-				return err
 			}
 			fields := [][2]string{}
 			for _, c := range r.Ran {

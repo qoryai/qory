@@ -64,15 +64,11 @@ func TestAGitOlderThan236StopsEveryCommandThatReadsGit(t *testing.T) {
 	for _, args := range [][]string{
 		{"worktree", "list"},
 		{"harness", "compose"},
-		{"setup", "repo", "--accept-checkout"},
 	} {
 		t.Run(strings.Join(args, " "), func(t *testing.T) {
 			root := newCheckout(t)
 			t.Setenv("GIT_CEILING_DIRECTORIES", filepath.Dir(root))
 			t.Setenv("XDG_DATA_HOME", filepath.Join(os.Getenv("HOME"), ".local", "share"))
-			if err := cmd.RecordCheckout(root); err != nil {
-				t.Fatal(err)
-			}
 			log := fakeGit(t, "git version 2.34.1", false, true)
 			out, err := run(t, args...)
 			if err == nil || err.Error() != want {

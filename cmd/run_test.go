@@ -964,7 +964,7 @@ func TestRunRefusesAProgramUnderAReadWriteMount(t *testing.T) {
 	policy := filepath.Join(t.TempDir(), "policy.yaml")
 	writeFile(t, policy, "version: 1\negress:\n  mode: observe\ncredentials:\n  - {name: tracker, argument: SHOP}\n")
 	refused := "inside " + tools + ", which a run may write"
-	if _, err := run(t, "run", "claude", "--policy", policy, "--mount", tools); cmd.ExitCode(err) != cmd.ExitInput || !strings.Contains(err.Error(), refused) {
+	if _, err := run(t, "run", "claude", "--policy", policy, "--mount", tools); cmd.ExitCode(err) != cmd.ExitInput || !strings.HasPrefix(err.Error(), "make the mount "+tools+" read-only") {
 		t.Errorf("a program under a read-write --mount: %v", err)
 	}
 	out, err := run(t, "run", "claude", "--policy", policy, "--mount", tools+":ro")
@@ -1019,7 +1019,7 @@ func TestRunBehindAWall(t *testing.T) {
 		"--cpus 2 --memory 8g --shm-size 2g --pids-limit 4096",
 		"--entrypoint /qory/qory example.com/agent:2 run relay 3128=",
 		"src="+helper+",dst=/qory/qory,readonly",
-		"--mount type=bind,src="+root+",dst="+root+" ",
+		"--mount type=bind,src="+copyWork(t, lines)+",dst="+copyWork(t, lines)+" ",
 		"--entrypoint /qory/qory example.com/agent:2 run exec --unset ",
 		" -- claude --settings "+runsDir(t, root),
 		" -p hi",
@@ -1029,9 +1029,10 @@ func TestRunBehindAWall(t *testing.T) {
 	lacks(t, lines, "HOST_ONLY", "NOT_SET_HERE", "env: PATH=", "env: HOME=", ".qory/runs")
 	// The record is bound read-only from the state directory, outside the checkout.
 	wants(t, lines, "--mount type=bind,src="+runsDir(t, root)+string(filepath.Separator))
-	if strings.Count(lines, " --mount type=bind,src="+root+",") != 1 {
-		t.Error("the checkout is mounted more than once")
+	if strings.Count(lines, " --mount type=bind,src="+copyWork(t, lines)+",") != 1 {
+		t.Error("the copy is mounted more than once")
 	}
+	lacks(t, lines, " --mount type=bind,src="+root+",")
 	if strings.Contains(strings.ReplaceAll(lines, "env: MODEL_KEY=not-a-real-key", ""), "not-a-real-key") {
 		t.Error("a value of the environment is on a command line")
 	}
@@ -1050,21 +1051,11 @@ func TestRunBehindAWall(t *testing.T) {
 	}
 	wants(t, string(settings), "/qory/qory run forward")
 
-	// --wall none in the checkout a walled run used is refused, and starts nothing.
 	if err := os.RemoveAll(runsDir(t, root)); err != nil {
 		t.Fatal(err)
 	}
 	composedForFake(t, root, fakeRuntime(t))
-	want := "a walled run has used " + root + ", so qory runs no agent there without a wall, since the run could have left settings, hooks or scripts the agent would run; run it behind a wall, or in another clone or worktree"
-	if out, err := run(t, "run", "claude", "--wall", "none"); err == nil || err.Error() != want || cmd.ExitCode(err) != 1 {
-		t.Fatalf("--wall none after a walled run: %v (exit %d)\n%s", err, cmd.ExitCode(err), out)
-	}
-	if _, err := os.Stat(runsDir(t, root)); err == nil {
-		t.Error("the refused run left records")
-	}
-	// --wall none runs without the section's wall, as this machine's process, in a
-	// checkout no walled run used.
-	forgetPlaces(t)
+	// --wall none runs without the section's wall, as this machine's process.
 	if out, err := run(t, "run", "claude", "--wall", "none"); cmd.ExitCode(err) != 3 {
 		t.Fatalf("--wall none: %v (exit %d)\n%s", err, cmd.ExitCode(err), out)
 	}
@@ -1153,10 +1144,9 @@ func TestRunRefusesAMountOfAnIntegrationsSettingFile(t *testing.T) {
 	policy := filepath.Join(tempDir(t), "policy.yaml")
 	writeFile(t, policy, "version: 1\negress:\n  mode: observe\ncredentials:\n  - {name: tracker, argument: SHOP}\n")
 	for _, c := range []struct{ setting, mount, want string }{
-		{token, keys, "the mount " + keys + " contains " + token + ", which holds one of Forager's files; the agent could change it, so the run does not start. Mount a narrower path (mount_contains_forager_files)"},
 		{token, keys + ":ro", "the mount " + keys + " contains " + token + ", which holds one of Forager's files; the agent could read it, so the run does not start. Mount a narrower path (mount_contains_forager_files)"},
 		{token, token + ":ro", "the mount " + token + " is " + token + ", which holds one of Forager's files; the agent could read it, so the run does not start. Mount a narrower path (mount_contains_forager_files)"},
-		{link, links, "the mount " + links + " contains " + link + ", which leads to one of Forager's files; the agent could point it elsewhere, so the run does not start. Mount a narrower path (mount_contains_forager_files)"},
+		{link, links + ":ro", "the mount " + links + " contains " + link + ", which leads to one of Forager's files, so the run does not start. Mount a narrower path (mount_contains_forager_files)"},
 		{link, keys + ":ro", "the mount " + keys + " contains " + token + ", which holds one of Forager's files; the agent could read it, so the run does not start. Mount a narrower path (mount_contains_forager_files)"},
 	} {
 		writeFile(t, file, "apiVersion: qory.dev/v1alpha1\n"+wallSection+"gateway:\n  integrations:\n    tracker: {program: "+program+", settings: {project: SHOP, token_file: "+c.setting+"}}\n")
@@ -1166,7 +1156,7 @@ func TestRunRefusesAMountOfAnIntegrationsSettingFile(t *testing.T) {
 		}
 		wants(t, out, "the record is in")
 	}
-	if ends := endsOf(t, root); !slices.Equal(ends, repeated("failed//-1", 5)) {
+	if ends := endsOf(t, root); !slices.Equal(ends, repeated("failed//-1", 4)) {
 		t.Errorf("the refused runs ended %v", ends)
 	}
 	if _, err := os.Stat(log); err == nil {
@@ -1185,9 +1175,8 @@ func TestRunRefusesAMountOfAnIntegrationsSettingFile(t *testing.T) {
 // Forager's files, or read it through a read-only mount. A mount of a directory Forager keeps its own files in, the tools'
 // sockets, says so, in either mode, and one of qory's state directory says the agent could change the
 // run records, or read them through a read-only mount. A run refused so has a record
-// that shows it failed, and its last line contains the record's path. A checkout that
-// contains the state directory stops the run with exit 2 before the run opens, so the
-// run has no record.
+// that shows it failed, and its last line contains the record's path. Forager stops a
+// run whose checkout contains the state directory too.
 func TestRunRefusesAMountOfForagersFiles(t *testing.T) {
 	root := newCheckout(t)
 	copyFixture(t, "two-modules", root)
@@ -1195,10 +1184,7 @@ func TestRunRefusesAMountOfForagersFiles(t *testing.T) {
 	docker, log := fakeDocker(t)
 	configDir := filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory")
 	writeFile(t, filepath.Join(configDir, "forager.yaml"), "wall:\n  adapter: docker\n  image: example.com/agent:1\n  command: "+docker+"\n  helper: "+staticELF(t)+"\n  user: \"1000:1000\"\n")
-	// A read-write mount of the home folder or the state home stops the run before
-	// Forager reads the mounts, so the read-write mounts here lie inside them.
 	home := os.Getenv("HOME")
-	configHome := os.Getenv("XDG_CONFIG_HOME")
 	// The tools' sockets are made in the system's temporary directory: one apart from
 	// the home, so a mount of it holds Forager's files and not the access key.
 	tmp := tempDir(t)
@@ -1209,13 +1195,9 @@ func TestRunRefusesAMountOfForagersFiles(t *testing.T) {
 		secret              bool
 		mount, want, ending string
 	}{
-		{false, configHome, "the mount " + configHome + " contains " + configDir + ", which holds one of Forager's files; the agent could change it, so the run does not start. Mount a narrower path (mount_contains_forager_files)", ""},
 		{false, home + ":ro", "the mount " + home + " contains " + configDir + ", which holds one of Forager's files; the agent could read it, so the run does not start. Mount a narrower path (mount_contains_forager_files)", ""},
-		{true, configHome, "the mount " + configHome + " contains " + configDir + ", which holds this machine's access key; the agent could read the key, so the run does not start. Mount a narrower path (mount_contains_forager_files)", ""},
 		{true, configDir + ":ro", "the mount " + configDir + " is " + configDir + ", which holds this machine's access key; the agent could read the key, so the run does not start. Mount a narrower path (mount_contains_forager_files)", ""},
-		{true, tmp, "the mount " + tmp + " contains " + filepath.Join(tmp, "qory-tool-"), ", which holds one of Forager's files; the agent could change it, so the run does not start. Mount a narrower path (mount_contains_forager_files)"},
 		{true, tmp + ":ro", "the mount " + tmp + " contains " + filepath.Join(tmp, "qory-tool-"), ", which holds one of Forager's files; the agent could read it, so the run does not start. Mount a narrower path (mount_contains_forager_files)"},
-		{true, filepath.Join(stateHome, "qory", "runs"), "the mount " + filepath.Join(stateHome, "qory", "runs") + " lies inside " + filepath.Join(stateHome, "qory") + ", which holds qory's run records; the agent could change them, so the run does not start. Mount a narrower path (mount_contains_forager_files)", ""},
 		{true, filepath.Join(stateHome, "qory", "runs") + ":ro", "the mount " + filepath.Join(stateHome, "qory", "runs") + " lies inside " + filepath.Join(stateHome, "qory") + ", which holds qory's run records; the agent could read them, so the run does not start. Mount a narrower path (mount_contains_forager_files)", ""},
 	} {
 		if c.secret {
@@ -1228,16 +1210,8 @@ func TestRunRefusesAMountOfForagersFiles(t *testing.T) {
 		lacks(t, out, "inside the container")
 		wants(t, out, "the record is in")
 	}
-	if ends := endsOf(t, root); !slices.Equal(ends, repeated("failed//-1", 8)) {
+	if ends := endsOf(t, root); !slices.Equal(ends, repeated("failed//-1", 4)) {
 		t.Errorf("the refused runs ended %v", ends)
-	}
-	t.Setenv("XDG_STATE_HOME", filepath.Join(root, "state"))
-	want := "start the walled run from a repository folder: its checkout " + root + " contains qory's state directory " + filepath.Join(root, "state", "qory") + ", and a walled run may change any file in its checkout, the record of the places walled runs used among them"
-	if out, err := run(t, "run", "claude"); err == nil || err.Error() != want || cmd.ExitCode(err) != cmd.ExitInput {
-		t.Errorf("the state directory in the checkout: %v (exit %d), want %q\n%s", err, cmd.ExitCode(err), want, out)
-	}
-	if ids := recorded(t, root); len(ids) != 0 {
-		t.Errorf("the stopped run left records %v", ids)
 	}
 	if _, err := os.Stat(log); err == nil {
 		data, _ := os.ReadFile(log)
@@ -1273,9 +1247,9 @@ func TestRunRefusesAMountOfALinkOnTheWayToTheRecords(t *testing.T) {
 		state, mount, want string
 		exit               int
 	}{
-		{home, links, "mount a narrower folder: the mount " + links + " contains qory's state directory " + filepath.Join(home, "qory") + ", and a walled run may change any file in a read-write mount, the record of the places walled runs used among them", cmd.ExitInput},
+		{home, links, "make the mount " + links + " read-only, with :ro on --mount or in wall.mounts: it contains qory's state directory " + filepath.Join(home, "qory") + ", and a walled run may change any file in a read-write mount", cmd.ExitInput},
 		{home, links + ":ro", "the mount " + links + " contains " + home + ", which leads to qory's run records, so the run does not start. Mount a narrower path (mount_contains_forager_files)", 1},
-		{filepath.Join(user, ".local", "state"), above, "mount a narrower folder: the mount " + above + " contains qory's state directory " + filepath.Join(user, ".local", "state", "qory") + ", and a walled run may change any file in a read-write mount, the record of the places walled runs used among them", cmd.ExitInput},
+		{filepath.Join(user, ".local", "state"), above, "make the mount " + above + " read-only, with :ro on --mount or in wall.mounts: it contains qory's state directory " + filepath.Join(user, ".local", "state", "qory") + ", and a walled run may change any file in a read-write mount", cmd.ExitInput},
 	} {
 		t.Setenv("XDG_STATE_HOME", c.state)
 		out, err := run(t, "run", "claude", "--mount", c.mount)
@@ -1291,17 +1265,15 @@ func TestRunRefusesAMountOfALinkOnTheWayToTheRecords(t *testing.T) {
 	}
 }
 
-// TestRunRefusesAMountOfAnotherModeInside is a walled run with a read-only mount inside
-// the checkout, which the container sees writable, and one with a read-only mount
-// reached through a link inside the checkout that leads out of it, which the agent could
-// repoint: Forager refuses each before anything starts, and qory gives both modes, or
-// names the link. A mount reached through a link that leads back into the checkout is
-// reached through the checkout, and that run starts.
-func TestRunRefusesAMountOfAnotherModeInside(t *testing.T) {
+// TestARunMountsAPartOfTheCheckoutReadOnly is a walled run with read-only mounts of a folder
+// in the checkout, directly and through a link in it: the agent's copy of the checkout is
+// another folder, so the mounts have no mode to conflict with, and no link the agent can
+// change is on their way.
+func TestARunMountsAPartOfTheCheckoutReadOnly(t *testing.T) {
 	root := newCheckout(t)
 	copyFixture(t, "two-modules", root)
 	composedForFake(t, root, "claude")
-	docker, log := fakeDocker(t)
+	docker, _ := fakeDocker(t)
 	writeFile(t, filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "forager.yaml"), "wall:\n  adapter: docker\n  image: example.com/agent:1\n  command: "+docker+"\n  helper: "+staticELF(t)+"\n  user: \"1000:1000\"\n")
 	vendor := filepath.Join(root, "vendor")
 	if err := os.MkdirAll(vendor, 0o755); err != nil {
@@ -1315,32 +1287,11 @@ func TestRunRefusesAMountOfAnotherModeInside(t *testing.T) {
 	if err := os.Symlink(elsewhere, link); err != nil {
 		t.Fatal(err)
 	}
-	lib := filepath.Join(link, "lib")
-	for _, c := range []struct{ mount, want string }{
-		{vendor, "the mount " + vendor + " (read-only) lies inside " + root + ", which is writable: a part of a mount can't have another mode, so the run does not start. Give both the same mode, or leave " + vendor + " out (mount_mode_conflict)"},
-		{lib, "the mount " + lib + " is reached through the link " + link + " inside the workspace " + root + ", which a walled agent can change, so the run does not start. List the link's target itself (mount_through_link)"},
-	} {
-		out, err := run(t, "run", "claude", "--mount", c.mount+":ro")
-		if err == nil || cmd.ExitCode(err) != 1 || err.Error() != c.want {
-			t.Errorf("--mount %s:ro: %v (exit %d), want %q\n%s", c.mount, err, cmd.ExitCode(err), c.want, out)
+	for _, mount := range []string{vendor, filepath.Join(link, "lib")} {
+		out, err := run(t, "run", "claude", "--mount", mount+":ro")
+		if cmd.ExitCode(err) != 4 || !strings.Contains(out, "inside the container") {
+			t.Errorf("--mount %s:ro: %v (exit %d)\n%s", mount, err, cmd.ExitCode(err), out)
 		}
-	}
-	if _, err := os.Stat(log); err == nil {
-		data, _ := os.ReadFile(log)
-		if containerRun.Match(data) {
-			t.Errorf("a container was started:\n%s", data)
-		}
-	}
-	if err := os.MkdirAll(filepath.Join(root, "real", "x"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Symlink(filepath.Join(root, "real"), filepath.Join(root, "inlink")); err != nil {
-		t.Fatal(err)
-	}
-	inside := filepath.Join(root, "inlink", "x")
-	out, err := run(t, "run", "claude", "--mount", inside)
-	if cmd.ExitCode(err) != 4 || !strings.Contains(out, "inside the container") {
-		t.Errorf("--mount %s, through a link that leads into the checkout: %v (exit %d)\n%s", inside, err, cmd.ExitCode(err), out)
 	}
 }
 
@@ -1369,8 +1320,8 @@ func TestRunRefusesAMountOfWhereAConfigLinkLeads(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, c := range []struct{ mount, want string }{
-		{dotfiles, "the mount " + dotfiles + " contains " + target + ", which holds one of Forager's files; the agent could change it, so the run does not start. Mount a narrower path (mount_contains_forager_files)"},
-		{later, "the mount " + later + " contains " + filepath.Join(configDir, "runtimes", "goose.yaml") + ", which holds one of Forager's files; the agent could change it, so the run does not start. Mount a narrower path (mount_contains_forager_files)"},
+		{dotfiles + ":ro", "the mount " + dotfiles + " contains " + target + ", which holds one of Forager's files; the agent could read it, so the run does not start. Mount a narrower path (mount_contains_forager_files)"},
+		{later + ":ro", "the mount " + later + " contains " + filepath.Join(configDir, "runtimes", "goose.yaml") + ", which holds one of Forager's files; the agent could read it, so the run does not start. Mount a narrower path (mount_contains_forager_files)"},
 	} {
 		out, err := run(t, "run", "claude", "--mount", c.mount)
 		if err == nil || cmd.ExitCode(err) != 1 || err.Error() != c.want {
@@ -1417,11 +1368,10 @@ func TestRunRefusesAMountOfALinkOnTheWayToAConfigFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, c := range []struct{ mount, path, what string }{
-		{hop, filepath.Join(hop, "goose.yaml"), "leads to one of Forager's files; the agent could point it elsewhere"},
 		{hop + ":ro", filepath.Join(hop, "goose.yaml"), "leads to one of Forager's files"},
-		{last, filepath.Join(last, "goose.yaml"), "holds one of Forager's files; the agent could change it"},
-		{linked, filepath.Join(linked, "dotfiles"), "leads to one of Forager's files; the agent could point it elsewhere"},
-		{real, filepath.Join(real, "forager.yaml"), "holds one of Forager's files; the agent could change it"},
+		{last + ":ro", filepath.Join(last, "goose.yaml"), "holds one of Forager's files; the agent could read it"},
+		{linked + ":ro", filepath.Join(linked, "dotfiles"), "leads to one of Forager's files"},
+		{real + ":ro", filepath.Join(real, "forager.yaml"), "holds one of Forager's files; the agent could read it"},
 	} {
 		mount, _, _ := strings.Cut(c.mount, ":")
 		want := "the mount " + mount + " contains " + c.path + ", which " + c.what + ", so the run does not start. Mount a narrower path (mount_contains_forager_files)"
@@ -1470,9 +1420,8 @@ func TestRunRefusesAMountOfALinkToTheConfigDir(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, c := range []struct{ mount, want string }{
-		{configHome, "the mount " + configHome + " contains " + filepath.Join(physical, "qory") + ", which leads to one of Forager's files; the agent could point it elsewhere, so the run does not start. Mount a narrower path (mount_contains_forager_files)"},
 		{configHome + ":ro", "the mount " + configHome + " contains " + filepath.Join(physical, "qory") + ", which leads to one of Forager's files, so the run does not start. Mount a narrower path (mount_contains_forager_files)"},
-		{elsewhere, "the mount " + elsewhere + " contains " + configDir + ", which holds this machine's access key; the agent could read the key, so the run does not start. Mount a narrower path (mount_contains_forager_files)"},
+		{elsewhere + ":ro", "the mount " + elsewhere + " contains " + configDir + ", which holds this machine's access key; the agent could read the key, so the run does not start. Mount a narrower path (mount_contains_forager_files)"},
 	} {
 		out, err := run(t, "run", "claude", "--mount", c.mount)
 		if err == nil || cmd.ExitCode(err) != 1 || err.Error() != c.want {
@@ -2152,13 +2101,13 @@ rules:
 	}
 }
 
-// TestRunInACheckoutOfARunWhoseContainerCannotBeCheckedStopsAtGit runs a walled run
-// whose wall the script in place of docker cannot remove, so Forager keeps its entry.
-// While docker ps lists none of that run's containers, the next walled run of the same
-// checkout starts. Once docker ps exits 1, the git qory runs in the checkout before the
-// wall returns the refusal that lists the earlier run's id, the docker ps command and
-// the registry entry to delete, and the wall runs nothing.
-func TestRunInACheckoutOfARunWhoseContainerCannotBeCheckedStopsAtGit(t *testing.T) {
+// TestRunInACheckoutOfARunWhoseContainerCannotBeCheckedStops runs a walled run whose
+// wall the script in place of docker cannot remove, so Forager keeps its entry. While
+// docker ps lists none of that run's containers, the next walled run of the same
+// checkout starts. Once docker ps exits 1, Forager stops the next run before the wall
+// with the line that lists the docker ps command and the registry entry to delete, and
+// the wall runs nothing.
+func TestRunInACheckoutOfARunWhoseContainerCannotBeCheckedStops(t *testing.T) {
 	root := newCheckout(t)
 	copyFixture(t, "two-modules", root)
 	composedForFake(t, root, "claude")
@@ -2213,7 +2162,7 @@ esac
 	if _, statErr := os.Stat(entry); statErr != nil {
 		t.Fatalf("no registry entry for the second run: %v", statErr)
 	}
-	want := "The check for a container of the walled run " + ids[len(ids)-1] + " failed. That run used " + root + ", so qory runs no git there. If docker ps --all --filter label=dev.qory.run=" + ids[len(ids)-1] + " lists no container, or the Docker engine of that run no longer exists, delete " + entry
+	want := "The check for a container of an earlier walled run failed, so the run does not start. If docker ps --all --filter label=dev.qory.run=" + ids[len(ids)-1] + " lists no container, or the Docker engine of that run no longer exists, delete " + entry + " (engine_unreachable)"
 	if err == nil || err.Error() != want {
 		t.Fatalf("a run beside an earlier one the engine cannot be asked about: %v, want %q", err, want)
 	}

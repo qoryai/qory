@@ -220,12 +220,15 @@ type pushRepo struct {
 	flags        []string
 	waits        []time.Duration
 	setup        func(dir string)
+	onSetup      func(session.SetupSpec)
 	mask         string
 	// pushStarted, when set, runs as the push step starts. removeSetup, when set, is the
 	// run's RemoveSetup, and proxyErr the error of the run's HostProxy.
 	pushStarted func()
 	removeSetup func(context.Context) error
 	proxyErr    func() error
+	// mountsOf, when set, gets the spec of the agent's session.
+	mountsOf func(session.SessionSpec)
 	// onOpen, when set, gets the spec of each open. onSetCheck, when set, gets the check
 	// of each SetRunAPICheck, and its error is the call's.
 	onOpen     func(session.OpenSpec)
@@ -308,8 +311,11 @@ func (p *pushRepo) run(t *testing.T, agent func(dir string), result func() (*ses
 			if spec.OnVariables != nil {
 				spec.OnVariables(session.Applied{})
 			}
+			if p.mountsOf != nil {
+				p.mountsOf(spec)
+			}
 			if agent != nil {
-				agent(p.h.dir)
+				agent(spec.Dir)
 			}
 			return result()
 		}))
@@ -321,9 +327,12 @@ func (p *pushRepo) run(t *testing.T, agent func(dir string), result func() (*ses
 		Proxy: p.h.server.Proxy.URL, CABundle: p.h.server.Proxy.CABundle, Dir: p.h.runDir,
 		RemoveSetup: p.removeSetup, HostProxyErr: p.proxyErr, AtGateway: p.real, Real: p.real,
 		SetRunAPICheck: p.onSetCheck, RunAPIErr: p.runAPIErr,
-		Setup: func(session.SetupSpec) error {
+		Setup: func(spec session.SetupSpec) error {
 			if p.setup != nil {
-				p.setup(p.h.dir)
+				p.setup(spec.Dir)
+			}
+			if p.onSetup != nil {
+				p.onSetup(spec)
 			}
 			return nil
 		},
@@ -1174,24 +1183,6 @@ func TestAWalledRunPushes(t *testing.T) {
 	}
 }
 
-// TestAWalledRunWithAnAddedKeyFailsTheStep is the settings check of a place a walled run
-// used, which comes first: the line has its words.
-func TestAWalledRunWithAnAddedKeyFailsTheStep(t *testing.T) {
-	p := newPushRepo(t, "write")
-	docker, _ := fakeDocker(t)
-	walledBy(t, docker)
-	p.flags = []string{"--home", filepath.Join(tempDir(t), "home")}
-	r := p.run(t, func(dir string) {
-		writeFile(t, filepath.Join(dir, "left.txt"), "left\n")
-		proxygittest.Git(t, dir, "config", "core.fsmonitor", "/bin/false")
-	}, nil)
-	r.wantsClose(t, event.StateFailed, 1)
-	wants(t, r.out, "after the agent exited, the check of repository acme/site failed, so qory committed and pushed nothing: ", "core.fsmonitor")
-	if got := p.branchHead(t); got != "" {
-		t.Errorf("the forge has the branch at %s", got)
-	}
-}
-
 // TestAHistoryThatLeavesTheStartFailsTheStep is an agent that replaced the commit the run
 // started at: on a branch the forge does not have yet any push would pass, so the step
 // stops before the push.
@@ -1273,8 +1264,7 @@ func subcommand(args []string) string {
 
 // TestEveryGitOfThePushStepIsHardened records each git of the record after the setup and
 // of the push step: each reads no system or global configuration file, and each has
-// [proxygit.Hardened] apart from the two checks of a recorded place in a walled run,
-// which hostgit runs.
+// [proxygit.Hardened].
 func TestEveryGitOfThePushStepIsHardened(t *testing.T) {
 	for name, walled := range map[string]bool{"unwalled": false, "walled": true} {
 		t.Run(name, func(t *testing.T) {
@@ -1334,10 +1324,12 @@ func TestEveryGitOfThePushStepIsHardened(t *testing.T) {
 				if strings.Contains(proxy, "@") && sub != "push" {
 					t.Errorf("git %s reaches no remote and has the password of the proxy %q", all, proxy)
 				}
-				keyList := sub == "config" && strings.Contains(all, "--name-only")
-				if walled && (slices.Contains(args, "--path-format=absolute") || sub == "config" && !keyList) {
+				// The checks of a bundle reach no remote: they have their hardening, with
+				// protocol.allow=never, in the quarantine they name.
+				if walled && strings.Contains(all, "-c core.hooksPath=/dev/null -c core.fsmonitor=false") && strings.Contains(all, "-c protocol.allow=never") {
 					continue
 				}
+				keyList := sub == "config" && strings.Contains(all, "--name-only")
 				if !strings.Contains(strings.Join(args, " "), strings.Join(proxygit.Hardened, " ")) {
 					t.Errorf("git %s has no options %v", all, proxygit.Hardened)
 				}
@@ -1351,7 +1343,11 @@ func TestEveryGitOfThePushStepIsHardened(t *testing.T) {
 					t.Errorf("git %s has no maintenance options", all)
 				}
 			}
-			for _, want := range []string{"config", "status", "reset", "add", "diff", "commit", "rev-parse", "merge-base", "push"} {
+			wanted := []string{"config", "status", "reset", "add", "diff", "commit", "rev-parse", "merge-base", "push"}
+			if walled {
+				wanted = []string{"cat-file", "update-ref", "read-tree", "rev-parse", "push"}
+			}
+			for _, want := range wanted {
 				if !seen[want] {
 					t.Errorf("the step ran no git %s:\n%s", want, step)
 				}
@@ -1481,9 +1477,10 @@ func TestAnAgentsCommitOfQoryAndALinkKeepsTheNextRun(t *testing.T) {
 	}
 }
 
-// TestAWalledRunRemovesAStaleIndexLock is a killed walled agent that left .git/index.lock,
-// in the target and in a further repository: the join proved its stop, so the push goes on.
-func TestAWalledRunRemovesAStaleIndexLock(t *testing.T) {
+// TestAStaleIndexLockOfAWalledRunStopsNothing is a killed walled agent that left
+// .git/index.lock, in the target and in a further repository of its copy: the git session
+// uses another git directory, so the push goes on.
+func TestAStaleIndexLockOfAWalledRunStopsNothing(t *testing.T) {
 	for name, folder := range map[string]string{"target": "", "further": filepath.Join(".qory", "repositories", "acme", "lib")} {
 		t.Run(name, func(t *testing.T) {
 			p := walledPush(t)
@@ -1500,7 +1497,6 @@ func TestAWalledRunRemovesAStaleIndexLock(t *testing.T) {
 			if _, state := r.step(); state != event.StateSucceeded {
 				t.Errorf("the step ended %q, want succeeded\n%s", state, r.out)
 			}
-			wants(t, r.log(), "which the agent left when it stopped")
 			if posts, _, _ := p.api.counts(); posts != 1 {
 				t.Errorf("%d POST, want 1", posts)
 			}
@@ -1561,25 +1557,26 @@ func TestTheAgentsChangeBesideTheSetupsIsPushed(t *testing.T) {
 	if p.branchHead(t) == "" {
 		t.Fatalf("the run pushed nothing:\n%s", r.out)
 	}
-	got := proxygittest.Git(t, p.h.dir, "diff-tree", "-r", "--name-only", "--no-commit-id", "HEAD")
+	got := proxygittest.Git(t, p.bare, "diff-tree", "-r", "--name-only", "--no-commit-id", p.branchHead(t))
 	if got != "README.md" {
 		t.Errorf("the commit has %q, want README.md", got)
 	}
 }
 
-// TestASetupThatAddsAKeyStopsTheRunBeforeTheAgent is a setup that wrote a key git would
-// use to run a program: the run fails before the agent starts, with the line after the setup.
-func TestASetupThatAddsAKeyStopsTheRunBeforeTheAgent(t *testing.T) {
+// TestASetupThatAddsAKeyRunsNoProgram is a setup that wrote a key git would use to run a
+// program in the copy's .git: the record of what the setup changed does not read it, so the
+// agent starts and the program does not run on this machine.
+func TestASetupThatAddsAKeyRunsNoProgram(t *testing.T) {
 	p := walledPush(t)
-	p.setup = func(dir string) { proxygittest.Git(t, dir, "config", "core.fsmonitor", "/bin/false") }
+	canary := filepath.Join(tempDir(t), "canary")
+	p.setup = func(dir string) { proxygittest.Git(t, dir, "config", "core.fsmonitor", "touch "+canary) }
 	started := false
 	r := p.run(t, func(string) { started = true }, nil)
-	if started {
-		t.Error("the agent started")
+	if !started {
+		t.Errorf("the agent did not start:\n%s", r.out)
 	}
-	wants(t, r.out, "after the setup, the check of repository acme/site failed, so the agent did not start: ", "core.fsmonitor")
-	if strings.Contains(r.out, "qory run: qory run:") {
-		t.Errorf("the line has qory run: twice:\n%s", r.out)
+	if _, err := os.Stat(canary); err == nil {
+		t.Error("the program of the setup's key ran on this machine")
 	}
 }
 
@@ -1951,21 +1948,22 @@ func TestAFailedRemovalOfTheSetupContainerRunsNoPush(t *testing.T) {
 			if posts, _, _ := p.api.counts(); posts != 0 {
 				t.Errorf("%d POST, want 0", posts)
 			}
-			if got := gitOut(t, p.h.dir, "status", "--porcelain"); !strings.Contains(got, "left.txt") {
-				t.Errorf("the agent's file was committed: %q", got)
-			}
+			lacksCopyPath(t, r.out)
 		})
 	}
 }
 
 // TestAWallThatStaysRunsNoGit is a HostProxy that fails because the wall of a session could
 // not be removed, for each end of the session: the agent may still run, so the step runs
-// no git, and a lock stays.
+// no git.
 func TestAWallThatStaysRunsNoGit(t *testing.T) {
 	const refused = "Open a new run. The wall of session 1 could not be removed and may still run, so this run takes no more sessions."
 	for name, result := range allSessionEnds {
 		t.Run(name, func(t *testing.T) {
 			p := walledPush(t)
+			t.Cleanup(cmd.SetGitSession(func(context.Context, session.SessionSpec) (*session.Result, error) {
+				return &session.Result{}, nil
+			}))
 			empty := filepath.Join(tempDir(t), "gitconfig")
 			writeFile(t, empty, "")
 			calls := recordGit(t, empty)
@@ -1976,11 +1974,8 @@ func TestAWallThatStaysRunsNoGit(t *testing.T) {
 				}
 				return errors.New(refused)
 			}
-			var lock string
 			r := p.run(t, func(dir string) {
-				lock = filepath.Join(dir, ".git", "index.lock")
 				writeFile(t, filepath.Join(dir, "left.txt"), "left\n")
-				writeFile(t, lock, "")
 				info, err := os.Stat(calls)
 				if err != nil {
 					t.Fatal(err)
@@ -1995,15 +1990,112 @@ func TestAWallThatStaysRunsNoGit(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if got := string(log[after:]); got != "" {
-				t.Errorf("git ran after the session:\n%s", got)
-			}
-			if _, err := os.Lstat(lock); err != nil {
-				t.Errorf("the lock is gone: %v", err)
+			// The check of the run's branch name opens no repository.
+			for line := range strings.Lines(string(log[after:])) {
+				if !strings.Contains(line, " check-ref-format ") {
+					t.Errorf("git ran after the session:\n%s", line)
+				}
 			}
 			if head := p.branchHead(t); head != "" {
 				t.Errorf("the forge has the branch at %s", head)
 			}
 		})
 	}
+
+	// A setup container that stays: Forager's RemoveSetup fails, also after a failed Unwrap.
+	t.Run("the removal of the setup fails", func(t *testing.T) {
+		p := walledPush(t)
+		t.Cleanup(cmd.SetGitSession(func(context.Context, session.SessionSpec) (*session.Result, error) {
+			t.Error("a git session started")
+			return &session.Result{}, nil
+		}))
+		p.removeSetup = func(context.Context) error { return errors.New(refused) }
+		r := p.run(t, func(dir string) { writeFile(t, filepath.Join(dir, "left.txt"), "left\n") }, nil)
+		wants(t, r.out, "take the work item in again in Qory Apiary: ", refused)
+		if head := p.branchHead(t); head != "" {
+			t.Errorf("the forge has the branch at %s", head)
+		}
+	})
+	t.Run("a local run", func(t *testing.T) {
+		const line = ", and run no git there: removing a part of the run's wall failed during the run, so a process may have written the copy after its session ended, and nothing came back from the run"
+		for name, c := range map[string]struct {
+			wall  cmd.Nowhere
+			wants string
+		}{
+			// The agent's Unwrap or the close failed, and the join of the git session went on.
+			"Unwrap or the close": {wall: cmd.Nowhere{WallKept: true}, wants: line},
+			"RemoveSetup": {
+				wall:  cmd.Nowhere{WallKept: true, RemoveSetup: func(context.Context) error { return errors.New(refused) }},
+				wants: ", and run no git there: the git session did not start, so the run's commits did not come back: ",
+			},
+		} {
+			t.Run(name, func(t *testing.T) {
+				root := copyCheckout(t)
+				artifact := filepath.Join(root, ".qory", "artifacts", "run.txt")
+				t.Cleanup(cmd.SetGitSession(func(context.Context, session.SessionSpec) (*session.Result, error) {
+					return &session.Result{}, nil
+				}))
+				empty := filepath.Join(tempDir(t), "gitconfig")
+				writeFile(t, empty, "")
+				calls := recordGit(t, empty)
+				var after int64
+				var work string
+				agentInCopy(t, func(spec session.SessionSpec) {
+					work = spec.Dir
+					writeFile(t, filepath.Join(spec.Dir, "left.txt"), "left\n")
+					writeFile(t, filepath.Join(spec.Dir, ".qory", "artifacts", "run.txt"), "the run\n")
+					info, err := os.Stat(calls)
+					if err != nil {
+						t.Fatal(err)
+					}
+					after = info.Size()
+				})
+				_, _, restore := cmd.OpenNowhereWith(c.wall)
+				defer restore()
+				out, err := run(t, "run", "claude", "--", "-p", "hi")
+				if cmd.ExitCode(err) != 1 {
+					t.Errorf("exit %d (%v), want 1\n%s", cmd.ExitCode(err), err, out)
+				}
+				wants(t, out, "read the run's files in "+work+c.wants)
+				log, err := os.ReadFile(calls)
+				if err != nil {
+					t.Fatal(err)
+				}
+				for line := range strings.Lines(string(log[after:])) {
+					if !strings.Contains(line, " check-ref-format ") {
+						t.Errorf("git ran after the session:\n%s", line)
+					}
+				}
+				if got := gitOutput(t, root, "for-each-ref", "refs/heads/qory/"); got != "" {
+					t.Errorf("the run's branch came back: %s", got)
+				}
+				if _, err := os.Lstat(artifact); err == nil {
+					t.Error("the run's artifact came back")
+				}
+				wantDisarmed(t, work)
+			})
+		}
+	})
+	t.Run("a local run in a plain folder", func(t *testing.T) {
+		root := emptyDir(t)
+		copyFixture(t, "two-modules", root)
+		docker, _ := fakeDocker(t)
+		walledBy(t, docker)
+		t.Setenv("QORY_RUN_KEY", "")
+		var work string
+		agentInCopy(t, func(spec session.SessionSpec) {
+			work = spec.Dir
+			writeFile(t, filepath.Join(spec.Dir, "left.txt"), "left\n")
+		})
+		_, _, restore := cmd.OpenNowhereWith(cmd.Nowhere{WallKept: true})
+		defer restore()
+		out, err := run(t, "run", "claude", "--home", filepath.Join(tempDir(t), "home"), "--", "-p", "hi")
+		if cmd.ExitCode(err) != 1 {
+			t.Errorf("exit %d (%v), want 1\n%s", cmd.ExitCode(err), err, out)
+		}
+		wants(t, out, "read the run's files in "+work+", and run no git there: removing a part of the run's wall failed")
+		if _, err := os.Lstat(filepath.Join(root, "left.txt")); err == nil {
+			t.Error("the run's file came back")
+		}
+	})
 }

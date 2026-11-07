@@ -16,8 +16,8 @@
 // Gemini CLI also reads its system settings from the file at
 // GEMINI_CLI_SYSTEM_SETTINGS_PATH, over the user's and the workspace's, so the model, the
 // servers and the hooks in settings.json reach a session from outside the checkout; the
-// skills, agents, commands and instructions are read from the checkout alone. [Template]
-// sets the variable.
+// skills, agents, commands, instructions and files entries are read from the checkout
+// alone. [Template] sets the variable.
 package gemini
 
 import (
@@ -49,6 +49,11 @@ func (gemini) Links(res *compose.Result) []render.Link {
 		links = append(links, render.Link{Checkout: "GEMINI.md", Home: "AGENTS.md", Soft: true})
 	}
 	return links
+}
+
+// CheckoutParts are what the package comment lists as read from the checkout alone.
+func (gemini) CheckoutParts() []string {
+	return []string{"skills", "agents", "commands", render.Instructions, render.FilesKind}
 }
 
 // Skips are output styles, the one kind Gemini CLI has no place for.

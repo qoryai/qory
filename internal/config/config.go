@@ -88,7 +88,6 @@ import (
 	"github.com/qoryai/forager/accesskey"
 	"gopkg.in/yaml.v3"
 
-	"github.com/qoryai/qory/internal/acting"
 	"github.com/qoryai/qory/internal/exports"
 	"github.com/qoryai/qory/internal/module"
 	"github.com/qoryai/qory/internal/source"
@@ -1118,17 +1117,6 @@ func read(path string) (file, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return f, err
-	}
-	// The user's qory.yaml is never in a place a walled run may write: Forager refuses a
-	// mount of the directory that holds it.
-	dir, err := UserDir()
-	if err != nil {
-		return f, err
-	}
-	if dir == "" || filepath.Dir(path) != filepath.Clean(dir) {
-		if err := acting.Check(path, data); err != nil {
-			return f, err
-		}
 	}
 	if err := exports.RefuseAliases(path, data); err != nil {
 		return f, err

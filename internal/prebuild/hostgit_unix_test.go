@@ -11,8 +11,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/qoryai/qory/internal/hostgit"
-	"github.com/qoryai/qory/internal/places"
 	"github.com/qoryai/qory/internal/prebuild"
 )
 
@@ -33,34 +31,6 @@ func ran(t *testing.T, dir string) bool {
 		t.Fatal(err)
 	}
 	return err == nil
-}
-
-// TestBuildRunsNoGitFromARecordedPlace puts a git first on the PATH of the options'
-// environment, in a folder a walled run used: the check of the git configuration runs
-// another git, and the build goes on.
-func TestBuildRunsNoGitFromARecordedPlace(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	t.Setenv("XDG_STATE_HOME", filepath.Join(home, "state"))
-	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, "config"))
-	places.Forget()
-	t.Cleanup(places.Forget)
-	newFakes(t)
-	place := t.TempDir()
-	if err := hostgit.Record(t.Context(), place, places.KindMount, "run-1"); err != nil {
-		t.Fatal(err)
-	}
-	writeFake(t, filepath.Join(place, "git"), "touch "+place+"/ran\n")
-	repo := repository(t, shopConfig)
-	withGitConfig(t, repo, "[core]\n\tbare = false\n")
-	o := options(t, repo, io.Discard, io.Discard)
-	gitFirst(&o, place)
-	if _, err := prebuild.Build(t.Context(), o); err != nil {
-		t.Fatalf("Build: %v", err)
-	}
-	if ran(t, place) {
-		t.Error("the git in a place a walled run used ran")
-	}
 }
 
 // TestBuildStopsOnAGitOlderThan236 is a git that prints 2.34.1 first on the PATH of the
