@@ -11,7 +11,7 @@ What `qory harness compose` reads and what it writes.
 | `process.yaml` | optional; the folder root of a module that `exports.modules` lists, which makes the module a factory | a process template: its name, summary and description, the workspace type, the exported stack its workflows run on, its `qory.process/v1` process, and optionally the artifact types its workspaces use. Every command that reads the configuration checks it; the compose does not read it (§Exports) |
 | `qory.yaml`, or `harness.yaml` | the repository root, committed; the user's configuration directory and the checkout's ancestor directories, for the machine | the repository's document and the machine's: under `harness`, this repository's stack, its target and modules, or the stack it extends, the target it composes it for and the modules it appends, and the runtime and model this machine composes for; under `worktree`, what a worktree of the repository needs and where the machine puts one; under `exports`, the stacks and modules this repository publishes for others, by name (§Exports); `git` and `env` (§The configuration) |
 | a branch document | the file of a version of a structured artifact type `branch` | a work item's branch and the commit in each repository (§The branch format). No compose reads it |
-| a questions document | the file of a version of the artifact type `questions` | a work item's questions and their answers (§The questions format). No compose reads it |
+| a questions document | the file of a version of the artifact type `questions` | a work item's questions, their answers and the decisions of its runs (§The questions format). No compose reads it |
 | a review comments document | the file of a version of the artifact type `review-comments` | a work item's review comments on its artifact versions and the replies to them (§The review comments format). No compose reads it |
 | a proposal sources document | the file `sources.json` of a version of the artifact type `proposal` | every source a run used to write the proposal, with the reason for each (§The proposal sources format). No compose reads it |
 
@@ -523,15 +523,31 @@ artifact_types:
 
 ## The questions format
 
-A questions document records every question of a work item and its answer, one document
-per work item and at most 1 MiB. A run adds, withdraws or reopens questions with `qory
-artifact push questions`, and the control plane writes the answers. A question has 0 to
+A questions document records every question of a work item and its answer or a run's
+decision, one document per work item and at most 1 MiB. A run adds, decides, withdraws or reopens questions with
+`qory artifact push questions`, and the control plane writes the answers. A question has 0 to
 4 options. The run sets `recommended` to `true` on the option it recommends, on at most
 one option of a question. An answer has
 `option`, the title of the option the member chose, or `null`, and `note`, added detail on
 the chosen option, or the member's answer when `option` is `null`. `note` is optional when
-the member chose an option and required when `option` is `null`. This is version 1 of
-the format ([questions.schema.json](questions.schema.json)).
+the member chose an option and required when `option` is `null`.
+
+A run that chooses an option without asking a member records a decided question: its
+`state` is `decided`, so it is not open, and it has `decision`. No option of a decided
+question has `recommended`. `decision` has four members, all required:
+
+| Member | Meaning |
+|---|---|
+| `option` | the title of the option the run chose, one of the question's option titles |
+| `reason` | why the run chose the option, plain text in 1 or 2 sentences, at most 2000 characters |
+| `run` | the run's number, as in `asked` |
+| `at` | when the run chose the option, as in `asked` |
+
+`decision` stays on the question when its state changes. A run that withdraws a decided
+question keeps `decision`, and so does a run that reopens it. A member changes a decision
+by answering the question: its `state` becomes `answered`, and `decision` stays beside
+`answer`. So `decision` is required when `state` is `decided` and allowed in every other
+state. This is version 1 of the format ([questions.schema.json](questions.schema.json)).
 
 ## The review comments format
 

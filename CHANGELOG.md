@@ -53,6 +53,11 @@ release may change what an existing document does, and states it under Upgrading
   adds, withdraws or reopens questions with `qory artifact push`, and the control plane
   writes the answers. At most one option of a question has `recommended` set to `true`. See
   The questions format in `contracts/harness/v1/README.md`.
+- A run records an option it chose without asking a member as a decided question in the
+  questions format: `state: decided` and `decision` with `option`, `reason`, `run` and
+  `at`, and no option with `recommended`. `decision` stays when a run withdraws or reopens
+  the question or a member answers it. See The questions format in
+  `contracts/harness/v1/README.md`.
 - Version 1 of the review comments format,
   `contracts/harness/v1/review-comments.schema.json`: the members' review comments on a
   work item's artifact versions and the replies to them, the file of the artifact type

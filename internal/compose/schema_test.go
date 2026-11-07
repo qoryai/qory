@@ -375,7 +375,7 @@ func TestConfigSchemaKnowsTiers(t *testing.T) {
 
 // questionsDocument is a document of questions.schema.json that passes: a question
 // answered with an option, with an earlier answer of a note alone that a run reopened,
-// and an open question that follows from it.
+// an open question that follows from it, and a question that a run decided.
 const questionsDocument = `{"questions": [
  {"id": "q1", "question": "Which database does the service use?",
   "context": "The service reads ` + "`DATABASE_URL`" + `.\n\n- one\n- two",
@@ -384,7 +384,11 @@ const questionsDocument = `{"questions": [
   "answer": {"option": "PostgreSQL", "by": {"name": "Sam Example"}, "at": "2026-11-04T11:00:00Z"},
   "history": [{"option": null, "note": "Not\nsure", "by": {"name": "Sam Example"}, "at": "2026-11-04T10:30:00Z", "reopened": {"run": 2, "at": "2026-11-04T10:45:00Z"}}]},
  {"id": "q-2", "question": "Which port does it listen on?", "options": [],
-  "state": "open", "asked": {"run": 2, "at": "2026-11-04T10:45:00Z"}, "follows": ["q1"]}
+  "state": "open", "asked": {"run": 2, "at": "2026-11-04T10:45:00Z"}, "follows": ["q1"]},
+ {"id": "q3", "question": "Which cache does the service use?",
+  "options": [{"title": "Redis", "explanation": "The cache of the other services."}, {"title": "None", "explanation": "Every read goes to the database."}],
+  "state": "decided", "asked": {"run": 2, "at": "2026-11-04T10:50:00Z"},
+  "decision": {"option": "Redis", "reason": "The other services use Redis.", "run": 2, "at": "2026-11-04T10:51:00Z"}}
 ]}`
 
 // TestQuestionsSchema is each document that questions.schema.json passes or fails.
@@ -412,6 +416,20 @@ func TestQuestionsSchema(t *testing.T) {
 		answerStart  = `"answer": {"option": "PostgreSQL"`
 		historyStart = `"history": [{"option": null, "note": "Not\nsure"`
 	)
+	// decided is the state of the decided question, decisionStart starts its decision, and
+	// redis is its first option.
+	const (
+		decided       = `"state": "decided"`
+		decisionStart = `"decision": {"option": "Redis"`
+		redis         = `{"title": "Redis", "explanation": "The cache of the other services."`
+	)
+	// reason and decisionRun are members of the decision, and answer is a member's answer
+	// to the decided question.
+	const (
+		reason      = `"reason": "The other services use Redis.", `
+		decisionRun = `"run": 2, "at": "2026-11-04T10:51:00Z"`
+		answer      = `"answer": {"option": "None", "by": {"name": "Kim Example"}, "at": "2026-11-04T12:00:00Z"}, `
+	)
 	for _, c := range []struct {
 		doc   string
 		valid bool
@@ -428,6 +446,35 @@ func TestQuestionsSchema(t *testing.T) {
 		{replace(`"state": "open"`, `"state": "withdrawn"`), true},
 		{replace(`"state": "open"`, `"state": "closed"`), false},
 		{replace(`"state": "open", `, ``), false},
+		// decision is present when state is decided, stays when the state changes after
+		// that, and no option of a decided question has recommended.
+		{replace(decided, `"state": "withdrawn"`), true},
+		{replace(decided+`, `, `"state": "answered", `+answer), true},
+		{replace(decided, `"state": "open"`), true},
+		{strings.Replace(replace(decided+`, `, `"state": "answered", `+answer), redis, redis+`, "recommended": true`, 1), true},
+		{replace(redis, redis+`, "recommended": true`), false},
+		{replace(redis, redis+`, "recommended": false`), false},
+		{replace(",\n  "+decisionStart+`, `+reason+decisionRun+`}`, ``), false},
+		{replace(`"state": "open"`, decided), false},
+		{replace(decided+`, `, decided+`, `+answer), false},
+		// each member of decision is required, and its values
+		{replace(decisionStart+`, `, `"decision": {`), false},
+		{replace(reason, ``), false},
+		{replace(`, `+decisionRun, `, "at": "2026-11-04T10:51:00Z"`), false},
+		{replace(decisionRun, `"run": 2`), false},
+		{replace(decisionStart, `"decision": {"option": ""`), false},
+		{replace(decisionStart, `"decision": {"option": null`), false},
+		{replace(decisionStart, `"decision": {"option": "`+strings.Repeat("a", 200)+`"`), true},
+		{replace(decisionStart, `"decision": {"option": "`+strings.Repeat("a", 201)+`"`), false},
+		{replace(decisionStart, `"decision": {"option": "Re\ndis"`), false},
+		{replace(reason, `"reason": "", `), false},
+		{replace(reason, `"reason": "`+strings.Repeat("a", 2000)+`", `), true},
+		{replace(reason, `"reason": "`+strings.Repeat("a", 2001)+`", `), false},
+		{replace(reason, `"reason": "One.\nTwo.", `), true},
+		{replace(reason, `"reason": "\u0007", `), false},
+		{replace(decisionRun, `"run": 0, "at": "2026-11-04T10:51:00Z"`), false},
+		{replace(decisionRun, `"run": 2.5, "at": "2026-11-04T10:51:00Z"`), false},
+		{replace(decisionRun, `"run": 2, "at": "2026-11-04T10:51:00+01:00"`), false},
 		// id
 		{replace(`"id": "q-2"`, `"id": "`+strings.Repeat("a", 32)+`"`), true},
 		{replace(`"id": "q-2"`, `"id": "`+strings.Repeat("a", 33)+`"`), false},
@@ -534,6 +581,7 @@ func TestQuestionsSchema(t *testing.T) {
 		{replace(`"asked": {"run": 1, `, `"asked": {"step": "explore", "run": 1, `), false},
 		{replace(`"reopened": {"run": 2, `, `"reopened": {"note": "a", "run": 2, `), false},
 		{replace(historyStart, historyStart+`, "rank": 1`), false},
+		{replace(decisionStart, decisionStart+`, "rank": 1`), false},
 	} {
 		var doc any
 		if err := json.Unmarshal([]byte(c.doc), &doc); err != nil {
