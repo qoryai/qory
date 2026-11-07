@@ -18,6 +18,7 @@ import (
 	"github.com/qoryai/forager/session"
 
 	"github.com/qoryai/qory/cmd"
+	"github.com/qoryai/qory/internal/checkout"
 	"github.com/qoryai/qory/internal/compose"
 	"github.com/qoryai/qory/internal/pushcheck"
 )
@@ -498,4 +499,42 @@ func TestARunAPIThatFailsStopsARunWithPushChecks(t *testing.T) {
 		t.Errorf("the run went on: %v, joined %v", r.calls, joined)
 	}
 	wants(t, r.out, "qory run: Open the run through a gateway that sends the run API address, and run again. The push checks read the artifacts through the run API, which failed: Open another run to reach the run API: this run is closed.\n")
+}
+
+// TestAWritableMountInTheHomeStopsARunCodeWithPushChecks is a walled run from a run code
+// with push checks and --home outside the cache directory, given a read-write --mount at
+// or inside its home: the run stops at the compose, before the home is written, with
+// exit 2 and the fix line, and the agent does not start.
+func TestAWritableMountInTheHomeStopsARunCodeWithPushChecks(t *testing.T) {
+	docker, log := checkDocker(t, 0, "")
+	p, homes := newCheckedRepo(t, docker)
+	flags := p.flags
+	for _, inside := range []bool{false, true} {
+		p.again(t)
+		home := filepath.Join(homes, checkout.Key(p.h.dir))
+		mount := home
+		if inside {
+			mount = filepath.Join(home, "modules")
+		}
+		if err := os.MkdirAll(mount, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		p.flags = append(slices.Clone(flags), "--mount", mount)
+		joined := false
+		r := p.run(t, func(string) { joined = true }, nil)
+		r.wantsClose(t, event.StateFailed, cmd.ExitInput)
+		if joined || slices.Contains(r.calls, "setup") {
+			t.Errorf("--mount %s: the run went on: %v, joined %v", mount, r.calls, joined)
+		}
+		want := "Mount " + mount + " read-only, or move it out of the harness home, for a walled run with push checks. The agent could change the push checks through it."
+		if r.err == nil || r.err.Error() != want {
+			t.Errorf("--mount %s: %v, want %q\n%s", mount, r.err, want, r.out)
+		}
+		if _, err := os.Stat(filepath.Join(home, "push-checks.json")); !os.IsNotExist(err) {
+			t.Errorf("--mount %s: the home has push-checks.json: %v", mount, err)
+		}
+	}
+	if got := checkLog(t, log); got != "" {
+		t.Errorf("a check's container ran:\n%s", got)
+	}
 }

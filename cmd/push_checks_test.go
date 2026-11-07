@@ -10,9 +10,8 @@ import (
 )
 
 // pushChecksCheckout is a checkout whose stack composes module core for codex, with the
-// fake runtime as codex's program through the user's file, launch. codex passes no
-// plugin directory, which stops a walled run with a home inside the checkout. core
-// declares a push check for spec when checks is set. It returns the checkout, the user's
+// fake runtime as codex's program through the user's file, launch. core declares a push
+// check for spec when checks is set. It returns the checkout, the user's
 // file and the file's content.
 func pushChecksCheckout(t *testing.T, checks bool) (root, user, launch string) {
 	t.Helper()
@@ -30,13 +29,14 @@ func pushChecksCheckout(t *testing.T, checks bool) (root, user, launch string) {
 	return root, user, launch
 }
 
-// TestWalledRunNeedsTheHomeOutsideForPushChecks is a walled run whose harness.home is the
-// checkout's .qory/harness and whose module declares a push check: the run stops before
-// the compose, with exit 2 and the line of a home inside the folder, and the home has no
-// push-checks.json, which the agent could change. A run without a wall starts as
-// before, and so does a walled run with harness.home outside the checkout, whose home is
-// mounted read-only, and which works in a copy of the checkout.
-func TestWalledRunNeedsTheHomeOutsideForPushChecks(t *testing.T) {
+// TestAWalledRunWithPushChecksAndTheHomeInTheCheckoutStops is a walled run whose
+// harness.home is the checkout's .qory/harness and whose module declares a push check:
+// the run stops before the compose, with exit 2 and the line of a home inside the
+// folder the run runs in, as homeInFolders prints it, and the home has no
+// push-checks.json. A run without a wall composes the push checks into that home. A
+// walled run with harness.home outside the checkout starts, mounts its home read-only
+// and works in a copy of the checkout.
+func TestAWalledRunWithPushChecksAndTheHomeInTheCheckoutStops(t *testing.T) {
 	root, user, launch := pushChecksCheckout(t, true)
 	home := filepath.Join(root, ".qory", "harness")
 	if out, err := run(t, "run", "codex"); cmd.ExitCode(err) != 3 {
@@ -95,42 +95,5 @@ func TestWalledRunWithoutPushChecksStartsAsBefore(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(root, ".qory", "harness", "push-checks.json")); !os.IsNotExist(err) {
 		t.Errorf("a harness without push checks has push-checks.json: %v", err)
-	}
-}
-
-// TestAWritableMountInTheHomeStopsARunWithPushChecks is a walled run whose home is
-// outside the checkout and declares a push check, given a read-write --mount of the
-// home: the run stops before the agent starts, with exit 2 and the fix line. A walled run
-// with no run code works in a copy, so any read-write mount stops it with the copy's line
-// before the compose. A read-only mount of the home starts as before.
-func TestAWritableMountInTheHomeStopsARunWithPushChecks(t *testing.T) {
-	_, user, launch := pushChecksCheckout(t, true)
-	homes := tempDir(t)
-	writeFile(t, user, strings.Replace(launch, "harness:\n", "harness:\n  home: "+homes+"\n", 1))
-	log := walledForager(t)
-	if out, err := run(t, "run", "codex"); cmd.ExitCode(err) != 4 {
-		t.Fatalf("the first run: %v (exit %d)\n%s", err, cmd.ExitCode(err), out)
-	}
-	checks, err := filepath.Glob(filepath.Join(homes, "*", "push-checks.json"))
-	if err != nil || len(checks) != 1 {
-		t.Fatalf("the home has push-checks.json %v (%v), want one", checks, err)
-	}
-	home := filepath.Dir(checks[0])
-	inside := filepath.Join(home, "modules")
-	if err := os.Remove(log); err != nil {
-		t.Fatal(err)
-	}
-	for _, mount := range []string{home, inside} {
-		out, err := run(t, "run", "--mount", mount, "codex")
-		want := "make the mount " + mount + " read-only, with :ro on --mount or in wall.mounts: a walled run reads the checkout or works in a copy of it, and a read-write mount lets it write your files directly"
-		if cmd.ExitCode(err) != cmd.ExitInput || err == nil || err.Error() != want {
-			t.Errorf("--mount %s: %v (exit %d), want %q\n%s", mount, err, cmd.ExitCode(err), want, out)
-		}
-	}
-	if data, err := os.ReadFile(log); err == nil && strings.Contains(string(data), "src="+inside) {
-		t.Errorf("the wall started the agent's container:\n%s", data)
-	}
-	if out, err := run(t, "run", "--mount", inside+":ro", "codex"); cmd.ExitCode(err) != 4 {
-		t.Errorf("a read-only mount in the home: %v (exit %d)\n%s", err, cmd.ExitCode(err), out)
 	}
 }

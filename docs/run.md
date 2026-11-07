@@ -261,13 +261,15 @@ go to the runtime, after the launch template's arguments.
 The report fixes no variable and adds no mount. Behind a wall, `harness.home` comes from
 the `qory.yaml` in qory's configuration directory alone: another `qory.yaml` that moves
 the home refuses a walled run.
-A walled run whose home is inside the checkout stops before the compose, with exit 2,
-whether or not its modules declare `push_checks`: `set --home to a folder outside <dir>:
-<path> is inside <dir>, and a walled run or a run with a run key writes no harness into the
-folder it runs in`. A walled run with push checks whose `wall.mounts` or `--mount` has a
-read-write mount at or inside the home stops before the agent starts, with exit 2: `Mount
-<path> read-only, or move it out of the harness home, for a walled run with push checks.
-The agent could change the push checks through it.` A walled run
+A walled run from a run code with push checks, whose home `--home` or `harness.home` sets,
+stops at the compose, before the home is written, with exit 2, when its `wall.mounts` or
+`--mount` has a read-write mount at or inside the home: `Mount <path> read-only, or move it
+out of the harness home, for a walled run with push checks. The agent could change the push
+checks through it.` Any other walled run stops on such a mount before the run opens: a run
+from a run code whose home is under `qory` in your cache directory with `remove <path> from
+--mount: …`, see [What `qory run` does](#what-qory-run-does), and a run with no run code
+with `make the mount <path> read-only, …`, see [A run that may write works in a
+copy](#a-run-that-may-write-works-in-a-copy). A walled run
 whose home has a `push-checks.json` that qory cannot read stops before the setup and the
 agent, with exit 2: `Compose the harness again, and run again. The push checks in <path>
 could not be read: <cause>.` It stops there with exit 2 too when the push checks would

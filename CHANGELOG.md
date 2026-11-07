@@ -51,12 +51,10 @@ release may change what an existing document does, and states it under Upgrading
   are optional and set per module; a module without them pushes as before. The compose
   fails for a check of the type `verdict`, when two modules declare a check for one
   type, or when a program is not a file in the module, and writes the checks to
-  `push-checks.json` in the home. A walled run whose home is inside the checkout stops
-  before the compose with exit 2, as `set --home to a folder outside <dir>: <path> is
-  inside <dir>, and a walled run or a run with a run key writes no harness into the folder
-  it runs in`. A walled run with push checks stops before the agent starts with exit 2
-  when a read-write mount is at or inside the home, or when its `push-checks.json` cannot
-  be read. In a walled run, the
+  `push-checks.json` in the home. A walled run with push checks stops before the agent
+  starts with exit 2 when its `push-checks.json` cannot be read, and a walled run from a
+  run code with push checks stops at the compose with exit 2 when a read-write mount is
+  at or inside the home. In a walled run, the
   check of a type runs before each push of that type reaches Qory Apiary, from inside the
   wall or from the push step: in a new container from the run's image, with no network,
   the wall's limits and the run's label, the home and the newest versions of the type and
