@@ -649,7 +649,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			}
 			// A walled run whose composed home has push checks checks each POST of its run
 			// API from behind the wall, see [runPushChecks].
-			checks := &runPushChecks{report: said}
+			checks := &runPushChecks{report: said, fromCode: code != nil}
 			run, err := openRun(ctx, spec.OpenSpec)
 			if err != nil {
 				closeGateway()

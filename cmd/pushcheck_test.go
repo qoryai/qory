@@ -227,8 +227,9 @@ func TestTheAgentsPushIsCheckedBeforeItLeaves(t *testing.T) {
 		t.Fatalf("the check's container does not mount the run's home under %s read-only at its path:\n%s", home, created)
 	}
 	program := filepath.Join(composed[1], "modules", "checks", "bin", "check")
-	// The check's folders are in the run directory's push-checks, which the run's user,
-	// another user, passes through and cannot list, and which is gone after the run.
+	// The check's folders are in the run directory's push-checks, which is gone after the
+	// run. The run's user, 1000 by walledBy, passes through it and cannot list it, unless
+	// that user is this process's, whose folder it is.
 	parent := filepath.Join(p.h.runDir, "push-checks")
 	for _, dst := range []string{"/qory-push-check/artifacts", "/qory-push-check/files"} {
 		folder := regexp.MustCompile(`src=(\S+),dst=` + dst + `,readonly`).FindStringSubmatch(created)
@@ -236,8 +237,12 @@ func TestTheAgentsPushIsCheckedBeforeItLeaves(t *testing.T) {
 			t.Errorf("the folder at %s is not in %s:\n%s", dst, parent, created)
 		}
 	}
-	if parentMode != 0o711 {
-		t.Errorf("%s had mode %o during the check, want 711", parent, parentMode)
+	wantMode := fs.FileMode(0o700)
+	if os.Getuid() != 1000 {
+		wantMode = 0o711
+	}
+	if parentMode != wantMode {
+		t.Errorf("%s had mode %o during the check, want %o", parent, parentMode, wantMode)
 	}
 	if _, err := os.Stat(parent); !os.IsNotExist(err) {
 		t.Errorf("%s is left after the run: %v", parent, err)
@@ -346,7 +351,7 @@ func TestACheckThatCannotBeSetStopsTheRun(t *testing.T) {
 	if slices.Contains(r.calls, "setup") || joined {
 		t.Errorf("the run went on after the failed set: %v, joined %v", r.calls, joined)
 	}
-	wants(t, r.out, "qory run: Run again. Turning on the push checks for the POSTs from behind the wall failed, so the run stopped before the setup: Call SetRunAPICheck before Setup: the setup started.\n")
+	wants(t, r.out, "qory run: Take the work item in again in Qory Apiary: turning on the push checks for the POSTs from behind the wall failed, so the run stopped before the setup: Call SetRunAPICheck before Setup: the setup started; the code is used\n")
 }
 
 // TestThePushStepChecksItsVersion is a walled run whose harness declares a check for
@@ -410,10 +415,37 @@ func TestAHomeWhosePushChecksDoNotReadStopsTheRun(t *testing.T) {
 	if setUp || joined {
 		t.Errorf("the setup ran %v, the agent ran %v, want neither", setUp, joined)
 	}
-	wants(t, r.out, "qory run: Compose the harness again, and run again. The push checks in "+file+" could not be read: it is not JSON in the form the compose writes: unexpected end of JSON input.\n")
+	wants(t, r.out, "qory run: Take the work item in again in Qory Apiary, so that the new run composes the harness again: the push checks in "+file+" could not be read: it is not JSON in the form the compose writes: unexpected end of JSON input; the code is used\n")
 	if got := checkLog(t, log); got != "" {
 		t.Errorf("a check's container ran:\n%s", got)
 	}
+}
+
+// TestAHomeWhosePushChecksDoNotReadStopsARunWithNoCode is that stop in a person's walled
+// run, given no run code and no run key: its fix is to run again, with exit 2.
+func TestAHomeWhosePushChecksDoNotReadStopsARunWithNoCode(t *testing.T) {
+	root := newCheckout(t)
+	copyFixture(t, "two-modules", root)
+	runGit(t, root, "add", "qory.yaml", "modules")
+	runGit(t, root, "commit", "--quiet", "-m", "first")
+	docker, _ := fakeDocker(t)
+	walledBy(t, docker)
+	t.Setenv("QORY_RUN_KEY", "")
+	var file string
+	t.Cleanup(cmd.SetLoadPushChecks(func(home string) ([]compose.PushCheck, error) {
+		file = filepath.Join(home, "push-checks.json")
+		if err := os.WriteFile(file, []byte("{"), 0o644); err != nil {
+			return nil, err
+		}
+		return pushcheck.Load(home)
+	}))
+	joined := false
+	agentInCopy(t, func(session.SessionSpec) { joined = true })
+	out, err := run(t, "run", "claude", "--home", filepath.Join(tempDir(t), "home"), "--", "-p", "hi")
+	if cmd.ExitCode(err) != cmd.ExitInput || joined {
+		t.Errorf("exit %d (%v), the agent ran %v, want exit %d and no agent\n%s", cmd.ExitCode(err), err, joined, cmd.ExitInput, out)
+	}
+	wants(t, out, "qory run: Compose the harness again, and run again. The push checks in "+file+" could not be read: it is not JSON in the form the compose writes: unexpected end of JSON input.\n")
 }
 
 // TestACheckThatDidNotFinishIsAStatusLine is a push whose check's container the engine
@@ -498,7 +530,7 @@ func TestARunAPIThatFailsStopsARunWithPushChecks(t *testing.T) {
 	if joined || slices.Contains(r.calls, "setup") || slices.Contains(r.calls, "set run API check") {
 		t.Errorf("the run went on: %v, joined %v", r.calls, joined)
 	}
-	wants(t, r.out, "qory run: Open the run through a gateway that sends the run API address, and run again. The push checks read the artifacts through the run API, which failed: Open another run to reach the run API: this run is closed.\n")
+	wants(t, r.out, "qory run: Update the run's gateway so that it sends the run API address, then take the work item in again in Qory Apiary: the push checks read the artifacts through the run API, which failed: Open another run to reach the run API: this run is closed; the code is used\n")
 }
 
 // TestAWritableMountInTheHomeStopsARunCodeWithPushChecks is a walled run from a run code

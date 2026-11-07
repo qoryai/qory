@@ -1300,9 +1300,11 @@ func wantHomeStop(t *testing.T, seen *string, relation string) {
 }
 
 // TestAPlainFolderAtTheHomeFolderStops is a run that may write in a plain folder at the home
-// folder, with the cache folder in it: no copy has .ssh.
+// folder, with the cache folder in it on macOS and, by XDG_CACHE_HOME, on Linux: no copy has
+// .ssh.
 func TestAPlainFolderAtTheHomeFolderStops(t *testing.T) {
 	root := emptyDir(t)
+	t.Setenv("XDG_CACHE_HOME", filepath.Join(root, ".cache"))
 	seen := aHomeFolder(t, root, root, "")
 	wantHomeStop(t, seen, "is your home folder")
 }
@@ -1344,6 +1346,9 @@ func TestAHomeFolderThatIsARepositoryRuns(t *testing.T) {
 	root := copyCheckout(t)
 	t.Setenv("HOME", root)
 	t.Setenv("XDG_STATE_HOME", tempDir(t))
+	// With no --home, the home is under the cache folder, which is in the home folder on macOS
+	// and, by this variable, on Linux.
+	t.Setenv("XDG_CACHE_HOME", filepath.Join(root, ".cache"))
 	writeFile(t, filepath.Join(root, ".ssh", "id_test"), "dummy\n")
 	var seen string
 	agentInCopy(t, func(spec session.SessionSpec) {
@@ -1355,9 +1360,6 @@ func TestAHomeFolderThatIsARepositoryRuns(t *testing.T) {
 	if out, err := run(t, "run", "claude", "--home", filepath.Join(tempDir(t), "home"), "--", "-p", "hi"); err != nil || seen == "" {
 		t.Fatalf("the agent ran in %q: %v\n%s", seen, err, out)
 	}
-	// With no --home, the home is under the cache folder. On macOS that folder is below HOME
-	// whatever XDG_CACHE_HOME is; on Linux this variable puts it inside the home folder.
-	t.Setenv("XDG_CACHE_HOME", filepath.Join(root, ".cache"))
 	out, err := run(t, "run", "claude", "--", "-p", "hi")
 	if cmd.ExitCode(err) != 2 {
 		t.Errorf("exit %d (%v), want 2\n%s", cmd.ExitCode(err), err, out)

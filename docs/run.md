@@ -266,24 +266,36 @@ outside `qory` in your cache directory, stops at the compose, before the home is
 with exit 2, when its `wall.mounts` or `--mount` has a read-write mount at or inside the
 home: `Mount <path> read-only, or move it out of the harness home, for a walled run with
 push checks. The agent could change the push checks through it; the code is used`. Any
-other walled run stops on such a mount before the run opens: a run from a run code whose home is under `qory` in your cache directory with `remove <path> from
---mount: …`, see [What `qory run` does](#what-qory-run-does), and a run with no run code
-with `make the mount <path> read-only, …`, see [A run that may write works in a
-copy](#a-run-that-may-write-works-in-a-copy). A walled run
-whose home has a `push-checks.json` that qory cannot read stops before the setup and the
-agent, with exit 2: `Compose the harness again, and run again. The push checks in <path>
-could not be read: <cause>.` It stops there with exit 2 too when the push checks would
-run on another engine than the run's containers, `Switch the engine back to the one the
-run started on, and run again. The push checks would run on the engine <id>, and the
-run's containers are on the engine <id>.`, and when the run API of a run from a control
-plane fails, `Open the run through a gateway that sends the run API address, and run
-again. The push checks read the artifacts through the run API, which failed: <cause>.`,
-or when the run API address is not an http or https URL: `Update the run's gateway, and
-run again. The run API address that the gateway sent is not one the push checks can use:
-<cause>.` When Forager cannot turn on the check of the POSTs from behind the wall, the run stops
-there with exit 1: `Run again. Turning on the push checks for the POSTs from behind the
-wall failed, so the run stopped before the setup: <cause>.` A home without push checks,
-and a run with no control plane, start as before, with no check turned on.
+other walled run stops on such a mount before the run opens: a run from a run code whose
+home is under `qory` in your cache directory with `remove <path> from --mount: …`, see
+[What `qory run` does](#what-qory-run-does), and a run with no run code, unless the mount
+is the checkout's, with `make the mount <path> read-only, …`, see [A run that may write
+works in a copy](#a-run-that-may-write-works-in-a-copy). A walled run whose home has a
+`push-checks.json` that qory cannot read stops before the setup and the agent, with exit
+2: `Compose the harness again, and run again. The push checks in <path> could not be read:
+<cause>.` It stops there with exit 2 too when the push checks would run on another engine
+than the run's containers, `Switch the engine back to the one the run started on, and run
+again. The push checks would run on the engine <id>, and the run's containers are on the
+engine <id>.`, and when the run API of a run from a control plane fails, `Open the run
+through a gateway that sends the run API address, and run again. The push checks read the
+artifacts through the run API, which failed: <cause>.`, or when the run API address is not
+an http or https URL: `Update the run's gateway, and run again. The run API address that
+the gateway sent is not one the push checks can use: <cause>.` When Forager cannot turn on
+the check of the POSTs from behind the wall, the run stops there with exit 1: `Run again.
+Turning on the push checks for the POSTs from behind the wall failed, so the run stopped
+before the setup: <cause>.` A home without push checks, and a run with no control plane,
+start as before, with no check turned on.
+
+A run from a run code stops at the same points with the same exit status. The code is used
+by then, so the fix in each line is to take the work item in again:
+
+```text
+Take the work item in again in Qory Apiary, so that the new run composes the harness again: the push checks in <path> could not be read: <cause>; the code is used
+Take the work item in again in Qory Apiary, and do not switch the engine while that run starts: the engine changed after this run opened, so the push checks would run on the engine <id>, and the run's containers are on the engine <id>; the code is used
+Update the run's gateway so that it sends the run API address, then take the work item in again in Qory Apiary: the push checks read the artifacts through the run API, which failed: <cause>; the code is used
+Update the run's gateway, then take the work item in again in Qory Apiary: the run API address that the gateway sent is not one the push checks can use: <cause>; the code is used
+Take the work item in again in Qory Apiary: turning on the push checks for the POSTs from behind the wall failed, so the run stopped before the setup: <cause>; the code is used
+```
 
 When the run ends, qory says how, and its exit status goes with it:
 

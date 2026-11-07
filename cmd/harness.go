@@ -744,9 +744,9 @@ func composeHome(out, errOut io.Writer, o composeOptions) (*composed, error) {
 // the checkout, and when a mount the container may write is at or inside the home. A
 // walled run whose home is inside the checkout or the working directory stops earlier,
 // see [homeInFolders]; this check is a backstop. A read-write mount at or inside the home
-// stops only a run from a run code here; any other walled run stops on any read-write
-// mount before the run opens, see [writableMount]. A home without push checks starts as
-// before. Each line of a run from a run code ends with [codeUsed].
+// stops only a run from a run code here; any other walled run stops on a read-write mount
+// other than the checkout's before the run opens, see [writableMount]. A home without push
+// checks starts as before. Each line of a run from a run code ends with [codeUsed].
 func pushChecksWritable(o composeOptions, pr *prepared) error {
 	if !o.run || !o.walled || len(pr.res.PushChecks) == 0 {
 		return nil

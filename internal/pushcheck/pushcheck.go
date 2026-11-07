@@ -88,6 +88,17 @@ const (
 // textUnread is the error of a home's push checks that cannot be read.
 const textUnread = "Compose the harness again, and run again. The push checks in %s could not be read: %s."
 
+// UnreadError is the error of [Load] for a home's push checks that cannot be read: File is
+// the file as a text shows it, and Cause the cause with no final period.
+type UnreadError struct {
+	File, Cause string
+}
+
+// Error is the line for a run that the person can start again.
+func (e *UnreadError) Error() string {
+	return fmt.Sprintf(textUnread, e.File, e.Cause)
+}
+
 // The texts of a push that the check cannot read, each with its fix.
 const (
 	textNoPush        = "Send the push as qory artifact push sends it"
@@ -213,7 +224,7 @@ func failure(fix, cause string) *Failure {
 func Load(home string) ([]compose.PushCheck, error) {
 	file := filepath.Join(home, render.PushChecksFile)
 	unread := func(cause string) error {
-		return fmt.Errorf(textUnread, exports.Value(file, false), strings.TrimSuffix(cause, "."))
+		return &UnreadError{File: exports.Value(file, false), Cause: strings.TrimSuffix(cause, ".")}
 	}
 	data, err := os.ReadFile(file)
 	if errors.Is(err, fs.ErrNotExist) {
