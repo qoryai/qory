@@ -509,7 +509,7 @@ exits 0 within its limit. It ends `cancelled` with -1 when the run is stopped or
 during the session. Otherwise it ends `failed`, also when the session reaches its limit of 5
 minutes, with the git session's exit status, or with -1 when the session has none to show,
 such as one that did not start or one that exits 0 at that limit. Unless it ends `succeeded`,
-its last line is the error line, with `the run's folder` in place of the path on the machine.
+its last line is the error line, with `the run's folder` in place of any path on the machine.
 
 An image step that fails ends the run before the agent starts, and `qory run` exits 1
 with one line, the fix first. An image its registry does not have closes the run
