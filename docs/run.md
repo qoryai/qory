@@ -286,8 +286,8 @@ Turning on the push checks for the POSTs from behind the wall failed, so the run
 before the setup: <cause>.` A home without push checks, and a run with no control plane,
 start as before, with no check turned on.
 
-A run from a run code stops at the same points of the push-check load with the same exit
-status. The code is used by then, so the fix in each line is to take the work item in
+A run from a run code stops at the same points of the push-check load and set with the same
+exit status. The code is used by then, so the fix in each line is to take the work item in
 again:
 
 ```text
