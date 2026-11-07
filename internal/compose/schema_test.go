@@ -447,7 +447,9 @@ func TestQuestionsSchema(t *testing.T) {
 		{replace(`"state": "open"`, `"state": "closed"`), false},
 		{replace(`"state": "open", `, ``), false},
 		// decision is present when state is decided, stays when the state changes after
-		// that, and no option of a decided question has recommended.
+		// that, and a decided question has at least one option and none with recommended.
+		{replace(`"options": [{"title": "Redis", "explanation": "The cache of the other services."}, {"title": "None", "explanation": "Every read goes to the database."}]`, `"options": []`), false},
+		{replace(`, {"title": "None", "explanation": "Every read goes to the database."}`, ``), true},
 		{replace(decided, `"state": "withdrawn"`), true},
 		{replace(decided+`, `, `"state": "answered", `+answer), true},
 		{replace(decided, `"state": "open"`), true},

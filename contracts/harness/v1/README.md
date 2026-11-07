@@ -534,8 +534,8 @@ the chosen option, or the member's answer when `option` is `null`. `note` is opt
 the member chose an option and required when `option` is `null`.
 
 A run that chooses an option without asking a member records a decided question: its
-`state` is `decided`, so it is not open, and it has `decision`. No option of a decided
-question has `recommended`. `decision` has four members, all required:
+`state` is `decided`, so it is not open, and it has `decision`. A decided question has at
+least one option, and none has `recommended`. `decision` has four members, all required:
 
 | Member | Meaning |
 |---|---|

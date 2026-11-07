@@ -24,7 +24,7 @@
         "question": {"description": "The question, plain text on one line: one sentence, 1 to 500 characters.", "$ref": "#/$defs/line", "minLength": 1, "maxLength": 500},
         "context": {"description": "What a person needs to know to answer, as Markdown: absent when the question needs none.", "$ref": "#/$defs/long_text"},
         "options": {
-          "description": "The answers a member can pick, 0 to 4, and at most one with recommended set to true: empty when the run lists no option and the member writes the answer. No option of a decided question has recommended.",
+          "description": "The answers a member can pick, 0 to 4, and at most one with recommended set to true: empty when the run lists no option and the member writes the answer. A decided question has at least one option, and none has recommended.",
           "type": "array",
           "maxItems": 4,
           "items": {"$ref": "#/$defs/option"},
@@ -72,7 +72,7 @@
           "if": {"required": ["state"], "properties": {"state": {"const": "decided"}}},
           "then": {
             "required": ["decision"],
-            "properties": {"options": {"items": {"not": {"required": ["recommended"]}}}}
+            "properties": {"options": {"minItems": 1, "items": {"not": {"required": ["recommended"]}}}}
           }
         }
       ]
