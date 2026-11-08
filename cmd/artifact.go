@@ -767,6 +767,8 @@ func readPoints(verdict, path string, given bool) ([]runapi.Point, error) {
 		return nil, input(fmt.Errorf("Save %s without a byte order mark.", path))
 	case errors.Is(err, verdictformat.ErrNotUTF8):
 		return nil, input(fmt.Errorf("Save %s as UTF-8.", path))
+	case errors.Is(err, verdictformat.ErrLoneSurrogate):
+		return nil, input(fmt.Errorf("Remove the escape of a lone surrogate, such as \\ud800, from %s.", path))
 	case err != nil:
 		return nil, input(err)
 	}

@@ -974,7 +974,7 @@ func TestRunVerdictChecksItsArguments(t *testing.T) {
 		{[]string{"run", "verdict", "escalate", "--points", points(`[]`)}, "Write at least one point. The array is empty."},
 		{[]string{"run", "verdict", "escalate", "--points", withMark}, "Save " + withMark + " without a byte order mark."},
 		{[]string{"run", "verdict", "escalate", "--points", notUTF8}, "Save " + notUTF8 + " as UTF-8."},
-		{[]string{"run", "verdict", "escalate", "--points", lone}, "Save " + lone + " as UTF-8."},
+		{[]string{"run", "verdict", "escalate", "--points", lone}, `Remove the escape of a lone surrogate, such as \ud800, from ` + lone + "."},
 		{[]string{"run", "verdict", "escalate", "--points", points(`[{"text": "The spec does not say who sees the price.", "action": "answer"}]`)},
 			"Add question, the id of an open question, to point 1: a point with the action answer has one."},
 		{[]string{"run", "verdict", "escalate", "--points", points(`{"verdict": "escalate", "gaps": "Add the empty cart."}`)},

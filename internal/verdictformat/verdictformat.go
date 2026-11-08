@@ -60,14 +60,17 @@ var contract = sync.OnceValues(func() (*jsonschema.Schema, error) {
 // byteOrderMark starts a file that an editor saved with a UTF-8 byte order mark.
 const byteOrderMark = "\xef\xbb\xbf"
 
-// The errors of [Points] for data that is not plain UTF-8. A caller that knows the
-// file's path can name it in the line.
+// The errors of [Points] for data that is not plain UTF-8. A caller with the file's path
+// writes a line that contains it.
 var (
 	// ErrByteOrderMark is the error of data that starts with a UTF-8 byte order mark.
 	ErrByteOrderMark = errors.New("Save the file without a byte order mark.")
-	// ErrNotUTF8 is the error of data that is not UTF-8, or that has an escape of a
-	// UTF-16 surrogate that is not half of a pair, such as \ud800, in a string.
+	// ErrNotUTF8 is the error of data that is not UTF-8.
 	ErrNotUTF8 = errors.New("Save the file as UTF-8.")
+	// ErrLoneSurrogate is the error of data with an escape of a UTF-16 surrogate that is
+	// not half of a pair, such as \ud800, in a string. The escape is ASCII, so saving the
+	// file as UTF-8 keeps it.
+	ErrLoneSurrogate = errors.New("Remove the escape of a lone surrogate, such as \\ud800, from the file.")
 )
 
 // questionID is the id form of a question in contracts/harness/v1/questions.schema.json.
@@ -96,8 +99,8 @@ func Check(document []byte) error {
 
 // Points reads data, a JSON array of the points of an escalation, and checks it against
 // the schema. The error starts with the fix. An error about one point contains the
-// point's number from 1 after the fix, such as "Write each point as {text, action}:
-// point 2 has no action." Points does not check that a question is open.
+// point's number, from 1, such as "Write each point as {text, action}: point 2 has no
+// action." Points does not check that a question is open.
 func Points(data []byte) ([]runapi.Point, error) {
 	items, err := pointsArray(data)
 	if err != nil {
@@ -139,7 +142,7 @@ func pointsArray(data []byte) ([]any, error) {
 		return nil, notJSON(err.Error())
 	}
 	if loneSurrogate(data[:decoder.InputOffset()]) {
-		return nil, ErrNotUTF8
+		return nil, ErrLoneSurrogate
 	}
 	array, ok := doc.([]any)
 	if !ok {

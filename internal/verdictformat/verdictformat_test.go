@@ -66,9 +66,9 @@ func TestPointsReadsTheFile(t *testing.T) {
 }
 
 // TestPointsStopsAtTheFirstBrokenRule is each file that [verdictformat.Points] stops
-// at, with the error, which starts with the fix and contains the point's number from 1.
-// The schema fails the verdict of each such file too, and passes the verdict of each
-// file that Points reads.
+// at, with the error, which starts with the fix; an error about one point contains its
+// number. The schema fails the verdict of each such file too, and passes the verdict of
+// each file that Points reads.
 func TestPointsStopsAtTheFirstBrokenRule(t *testing.T) {
 	schema := compiled(t)
 	two := func(second string) string { return "[" + runAgainPoint + ", " + second + "]" }
@@ -142,10 +142,10 @@ func TestPointsNeedsPlainUTF8(t *testing.T) {
 	}{
 		{"\xef\xbb\xbf" + text("One sentence."), verdictformat.ErrByteOrderMark},
 		{text("One \xff sentence."), verdictformat.ErrNotUTF8},
-		{text(`One \ud800 sentence.`), verdictformat.ErrNotUTF8},
-		{text(`One \udc00 sentence.`), verdictformat.ErrNotUTF8},
-		{text(`One \ud800\u0041 sentence.`), verdictformat.ErrNotUTF8},
-		{text(`One \ud800`), verdictformat.ErrNotUTF8},
+		{text(`One \ud800 sentence.`), verdictformat.ErrLoneSurrogate},
+		{text(`One \udc00 sentence.`), verdictformat.ErrLoneSurrogate},
+		{text(`One \ud800\u0041 sentence.`), verdictformat.ErrLoneSurrogate},
+		{text(`One \ud800`), verdictformat.ErrLoneSurrogate},
 		{text(`One \ud83d\ude00 sentence.`), nil},
 		{text(`One \\ud800 sentence.`), nil},
 		{text(`One \u00e9 sentence.`), nil},
@@ -160,6 +160,9 @@ func TestPointsNeedsPlainUTF8(t *testing.T) {
 	}
 	if got := verdictformat.ErrNotUTF8.Error(); got != "Save the file as UTF-8." {
 		t.Errorf("ErrNotUTF8 = %q", got)
+	}
+	if got := verdictformat.ErrLoneSurrogate.Error(); got != `Remove the escape of a lone surrogate, such as \ud800, from the file.` {
+		t.Errorf("ErrLoneSurrogate = %q", got)
 	}
 }
 
@@ -197,8 +200,8 @@ func TestCheck(t *testing.T) {
 }
 
 // TestExcludedIsTheSchemasCharacters keeps [verdictformat.Excluded] and the pattern of
-// the schema's $defs line in step, tab, line feed and carriage return included, character by character, through U+FFFF and for a
-// character past it.
+// the schema's $defs line in step, tab, line feed and carriage return included,
+// character by character, through U+FFFF and for a character past it.
 func TestExcludedIsTheSchemasCharacters(t *testing.T) {
 	schema := compiled(t)
 	for r := rune(0); r <= 0x10000; r++ {

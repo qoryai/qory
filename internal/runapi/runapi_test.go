@@ -225,11 +225,16 @@ func TestWorkItemReadsTheSnapshot(t *testing.T) {
 // TestWorkItemReadsAnyShapeOfPoints reads a work item whose points and verdict points
 // have another shape than the verdict format: the client has no member for them.
 func TestWorkItemReadsAnyShapeOfPoints(t *testing.T) {
-	other := strings.Replace(snapshotExample, `"points": [{"text": "The ticket`, `"points": "one text", "other": [{"text": "The ticket`, 1)
-	other = strings.Replace(other, `"points": [{"text": "The checks`, `"points": {"text": "The checks`, 1)
-	other = strings.Replace(other, `"action": "run_again"}], "version"`, `"action": "run_again"}, "version"`, 1)
-	if other == snapshotExample {
-		t.Fatal("the example has no points")
+	other := snapshotExample
+	for _, r := range [][2]string{
+		{`"points": [{"text": "The ticket`, `"points": "one text", "other": [{"text": "The ticket`},
+		{`"points": [{"text": "The checks`, `"points": {"text": "The checks`},
+		{`"action": "run_again"}], "version"`, `"action": "run_again"}, "version"`},
+	} {
+		if strings.Count(other, r[0]) != 1 {
+			t.Fatalf("the example has %d of %s, want 1", strings.Count(other, r[0]), r[0])
+		}
+		other = strings.Replace(other, r[0], r[1], 1)
 	}
 
 	snapshot, err := serve(t, respond(http.StatusOK, other)).WorkItem(context.Background())
