@@ -125,13 +125,15 @@ func TestAClaimOfAnotherRevisionIsRefused(t *testing.T) {
 		"a target": func(d map[string]any) {
 			d["target"] = map[string]any{"system": "code.example.com", "path": "acme/shop"}
 		},
-		"a run key":              func(d map[string]any) { d["run_key"] = "qrk_abc.def" },
-		"a lifetime of 14":       func(d map[string]any) { d["max_lifetime_minutes"] = 14 },
-		"a lifetime of 1471":     func(d map[string]any) { d["max_lifetime_minutes"] = 1471 },
-		"a gateway over http":    func(d map[string]any) { d["gateway_url"] = "http://gateway.example" },
-		"a machine in capitals":  func(d map[string]any) { d["machine"] = "Small" },
-		"no gateway":             func(d map[string]any) { delete(d, "gateway_url") },
-		"a lease that is a date": func(d map[string]any) { d["lease_until"] = "2026-10-15" },
+		"a run key":                  func(d map[string]any) { d["run_key"] = "qrk_abc.def" },
+		"a lifetime of 14":           func(d map[string]any) { d["max_lifetime_minutes"] = 14 },
+		"a lifetime of 1471":         func(d map[string]any) { d["max_lifetime_minutes"] = 1471 },
+		"a gateway over http":        func(d map[string]any) { d["gateway_url"] = "http://gateway.example" },
+		"a machine in capitals":      func(d map[string]any) { d["machine"] = "Small" },
+		"a machine without its spec": func(d map[string]any) { delete(d, "machine_spec") },
+		"a spec without a machine":   func(d map[string]any) { delete(d, "machine") },
+		"no gateway":                 func(d map[string]any) { delete(d, "gateway_url") },
+		"a lease that is a date":     func(d map[string]any) { d["lease_until"] = "2026-10-15" },
 	} {
 		d := claimFixture(t, "machine.json")
 		edit(d)
