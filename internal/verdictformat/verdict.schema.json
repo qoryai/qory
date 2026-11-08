@@ -26,7 +26,7 @@
       "required": ["text", "action"],
       "additionalProperties": false,
       "properties": {
-        "text": {"description": "What is wrong or missing, and what the person can do: one plain sentence on one line, 1 to 500 characters.", "$ref": "#/$defs/line", "minLength": 1, "maxLength": 500},
+        "text": {"description": "What is wrong or missing, in one plain sentence on one line, 1 to 500 characters, with no action and no question id: Qory Apiary adds the action from action.", "$ref": "#/$defs/line", "minLength": 1, "maxLength": 500},
         "action": {"description": "answer: the person answers the question in question. run_again: the person runs another round.", "enum": ["answer", "run_again"]},
         "question": {"description": "The id of an open question in the work item's newest questions version, in the id form of questions.schema.json: 1 to 32 lower-case letters, digits and hyphens, such as q1.", "type": "string", "pattern": "^[a-z0-9-]{1,32}$"}
       },

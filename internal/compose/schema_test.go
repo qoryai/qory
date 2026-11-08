@@ -664,8 +664,8 @@ func TestQuestionsSchema(t *testing.T) {
 // verdictDocument is a document of verdict.schema.json that passes: an escalation
 // with a point to answer and a point to run again.
 const verdictDocument = `{"verdict": "escalate", "points": [
- {"text": "The ticket does not say which customers see the new price. Answer question q4.", "action": "answer", "question": "q4"},
- {"text": "The checks script failed on the spec's links. Run another round.", "action": "run_again"}
+ {"text": "The ticket does not say which customers see the new price.", "action": "answer", "question": "q4"},
+ {"text": "The checks script failed on the spec's links.", "action": "run_again"}
 ]}`
 
 // TestVerdictSchema is each document that verdict.schema.json passes or fails.
@@ -680,12 +680,12 @@ func TestVerdictSchema(t *testing.T) {
 		}
 		return strings.Replace(verdictDocument, from, to, 1)
 	}
-	point := `{"text": "The checks script failed. Run another round.", "action": "run_again"}`
+	point := `{"text": "The checks script failed.", "action": "run_again"}`
 	points := func(n int) string {
 		return `{"verdict": "escalate", "points": [` + strings.TrimSuffix(strings.Repeat(point+", ", n), ", ") + `]}`
 	}
 	text := func(s string) string {
-		return replace(`"text": "The checks script failed on the spec's links. Run another round."`, `"text": "`+s+`"`)
+		return replace(`"text": "The checks script failed on the spec's links."`, `"text": "`+s+`"`)
 	}
 	rlo := string(rune(0x202e)) // a right-to-left override, invisible
 	for _, c := range []struct {
@@ -709,10 +709,10 @@ func TestVerdictSchema(t *testing.T) {
 		{points(0), false},
 		{points(21), false},
 		{`{"verdict": "escalate", "points": {}}`, false},
-		{`{"verdict": "escalate", "points": ["Run another round."]}`, false},
+		{`{"verdict": "escalate", "points": ["The spec's links are broken."]}`, false},
 		// text and action are required.
 		{replace(`, "action": "run_again"`, ``), false},
-		{replace(`"text": "The checks script failed on the spec's links. Run another round.", `, ``), false},
+		{replace(`"text": "The checks script failed on the spec's links.", `, ``), false},
 		{replace(`"action": "run_again"`, `"action": "ask"`), false},
 		// question is required with answer and absent with run_again.
 		{replace(`, "question": "q4"`, ``), false},
@@ -733,7 +733,7 @@ func TestVerdictSchema(t *testing.T) {
 		{text(`One\rsentence.`), false},
 		{text(`One\u0007sentence.`), false},
 		{text(`One ` + rlo + `sentence.`), false},
-		{replace(`"text": "The checks script failed on the spec's links. Run another round."`, `"text": 1`), false},
+		{replace(`"text": "The checks script failed on the spec's links."`, `"text": 1`), false},
 		// a member this schema does not define, at each level, and the old text gaps
 		{replace(`"verdict": "escalate", `, `"verdict": "escalate", "gaps": "Add the empty cart.", `), false},
 		{`{"verdict": "passed", "gaps": "Add the empty cart."}`, false},

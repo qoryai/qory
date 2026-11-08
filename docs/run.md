@@ -2656,8 +2656,8 @@ In a run, the types `questions` and `review-comments` take only the name `main`.
 format](../contracts/harness/v1/README.md#the-verdict-format):
 
 ```json
-[{"text": "The spec does not say which customers see the new price. Answer question q4.", "action": "answer", "question": "q4"},
- {"text": "The checks script failed on the spec's links. Run another round.", "action": "run_again"}]
+[{"text": "The spec does not say which customers see the new price.", "action": "answer", "question": "q4"},
+ {"text": "The checks script failed on the spec's links.", "action": "run_again"}]
 ```
 
 qory checks the file before it sends or keeps the verdict. A file that breaks a rule

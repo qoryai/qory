@@ -19,8 +19,8 @@ const contract = "../../contracts/harness/v1/verdict.schema.json"
 
 // The points of a file that passes: one to answer and one to run again.
 const (
-	answerPoint   = `{"text": "The spec does not say which customers see the new price. Answer question q4.", "action": "answer", "question": "q4"}`
-	runAgainPoint = `{"text": "The checks script failed on the spec's links. Run another round.", "action": "run_again"}`
+	answerPoint   = `{"text": "The spec does not say which customers see the new price.", "action": "answer", "question": "q4"}`
+	runAgainPoint = `{"text": "The checks script failed on the spec's links.", "action": "run_again"}`
 )
 
 // compiled is the contract's file, compiled.
@@ -57,8 +57,8 @@ func TestPointsReadsTheFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []runapi.Point{
-		{Text: "The spec does not say which customers see the new price. Answer question q4.", Action: runapi.ActionAnswer, Question: "q4"},
-		{Text: "The checks script failed on the spec's links. Run another round.", Action: runapi.ActionRunAgain},
+		{Text: "The spec does not say which customers see the new price.", Action: runapi.ActionAnswer, Question: "q4"},
+		{Text: "The checks script failed on the spec's links.", Action: runapi.ActionRunAgain},
 	}
 	if !slices.Equal(points, want) {
 		t.Errorf("points = %+v", points)
@@ -95,7 +95,7 @@ func TestPointsStopsAtTheFirstBrokenRule(t *testing.T) {
 		{" \n", `Write the points as a JSON array, such as [{"text": "…", "action": "run_again"}]. The file is empty.`},
 		{`[]`, "Write at least one point. The array is empty."},
 		{many(21), "Write at most 20 points. The array has 21."},
-		{two(`"Run another round."`), "Write each point as {text, action}: point 2 is a JSON string."},
+		{two(`"The spec's links are broken."`), "Write each point as {text, action}: point 2 is a JSON string."},
 		{two(`{"text": "The checks script failed."}`), "Write each point as {text, action}: point 2 has no action."},
 		{two(`{"action": "run_again"}`), "Write each point as {text, action}: point 2 has no text."},
 		{two(`{"text": "a", "action": "run_again", "gaps": "Add the empty cart."}`), `Remove "gaps" from point 2: a point has only text, action and question.`},

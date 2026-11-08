@@ -864,13 +864,13 @@ func TestArtifactPushChecksItsArguments(t *testing.T) {
 // unescaped, as encoding/json's Marshal would not write them.
 const (
 	verdictPoints = `[
-  {"text": "The spec does not say which customers see the new price. Answer question q4.", "action": "answer", "question": "q4"},
-  {"text": "The checks script failed on the spec's rule a < b & c. Run another round.", "action": "run_again"}
+  {"text": "The spec does not say which customers see the new price.", "action": "answer", "question": "q4"},
+  {"text": "The checks script failed on the spec's rule a < b & c.", "action": "run_again"}
 ]
 `
 	verdictPointsBody = `{"verdict":"escalate","points":[` +
-		`{"text":"The spec does not say which customers see the new price. Answer question q4.","action":"answer","question":"q4"},` +
-		`{"text":"The checks script failed on the spec's rule a < b & c. Run another round.","action":"run_again"}]}`
+		`{"text":"The spec does not say which customers see the new price.","action":"answer","question":"q4"},` +
+		`{"text":"The checks script failed on the spec's rule a < b & c.","action":"run_again"}]}`
 )
 
 // writePoints writes content to points.json in dir and returns its path.
@@ -955,8 +955,8 @@ func TestRunVerdictChecksItsArguments(t *testing.T) {
 	}
 
 	withMark := points("\xef\xbb\xbf" + verdictPoints)
-	notUTF8 := points("[{\"text\": \"The checks failed \xff. Run another round.\", \"action\": \"run_again\"}]")
-	lone := points(`[{"text": "The checks failed \ud800. Run another round.", "action": "run_again"}]`)
+	notUTF8 := points("[{\"text\": \"The checks failed \xff.\", \"action\": \"run_again\"}]")
+	lone := points(`[{"text": "The checks failed \ud800.", "action": "run_again"}]`)
 
 	for _, c := range []struct {
 		args []string
@@ -969,7 +969,7 @@ func TestRunVerdictChecksItsArguments(t *testing.T) {
 		{[]string{"run", "verdict", "changes-requested", "--points", points(verdictPoints)}, "Leave out --points with changes-requested: only escalate has points."},
 		{[]string{"run", "verdict", "escalate", "--points", absent}, "Pass a file that exists to --points. open " + absent + ": no such file or directory"},
 		{[]string{"run", "verdict", "escalate", "--points", long}, "Shorten " + long + " to at most 65536 bytes. The file is larger."},
-		{[]string{"run", "verdict", "escalate", "--points", points(`[{"text": "The checks failed. Run another round.", "action": "run_again"}, {"text": "The checks failed."}]`)},
+		{[]string{"run", "verdict", "escalate", "--points", points(`[{"text": "The checks failed.", "action": "run_again"}, {"text": "The checks failed."}]`)},
 			"Write each point as {text, action}: point 2 has no action."},
 		{[]string{"run", "verdict", "escalate", "--points", points(`[]`)}, "Write at least one point. The array is empty."},
 		{[]string{"run", "verdict", "escalate", "--points", withMark}, "Save " + withMark + " without a byte order mark."},

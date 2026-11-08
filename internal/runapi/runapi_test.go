@@ -32,8 +32,8 @@ const (
   "outputs": [
     {"type": "demo-video", "required": true, "version": null, "check": "missing"}
   ],
-  "verdict": {"verdict": "escalate", "points": [{"text": "The checks failed on the cart page. Run another round.", "action": "run_again"}], "version": {"id": "av_2", "number": 1}},
-  "points": [{"text": "The ticket does not say which cart is empty. Answer question q1.", "action": "answer", "question": "q1"}],
+  "verdict": {"verdict": "escalate", "points": [{"text": "The checks failed on the cart page.", "action": "run_again"}], "version": {"id": "av_2", "number": 1}},
+  "points": [{"text": "The ticket does not say which cart is empty.", "action": "answer", "question": "q1"}],
   "ticket": {"external_ref": "T-1", "url": "https://example.test/T-1", "title": "A title", "body": "A body",
              "filed_by": {"name": "Dana", "kind": "person"}, "filed_at": "2026-10-31T09:00:00Z", "collection": "c"},
   "instruction": {"text": "Go", "by": {"name": "dana"}, "at": "2026-10-31T09:00:00Z"},
@@ -550,10 +550,10 @@ func TestPushVerdictSendsTheBodyTheRunAPIReads(t *testing.T) {
 	}{
 		{runapi.VerdictChangesRequested, nil, `{"verdict":"changes-requested"}`},
 		{runapi.VerdictEscalate, []runapi.Point{
-			{Text: "The spec does not say which customers see the price. Answer question q4.", Action: runapi.ActionAnswer, Question: "q4"},
-			{Text: "The checks script failed. Run another round.", Action: runapi.ActionRunAgain},
-		}, `{"verdict":"escalate","points":[{"text":"The spec does not say which customers see the price. Answer question q4.","action":"answer","question":"q4"},` +
-			`{"text":"The checks script failed. Run another round.","action":"run_again"}]}`},
+			{Text: "The spec does not say which customers see the price.", Action: runapi.ActionAnswer, Question: "q4"},
+			{Text: "The checks script failed.", Action: runapi.ActionRunAgain},
+		}, `{"verdict":"escalate","points":[{"text":"The spec does not say which customers see the price.","action":"answer","question":"q4"},` +
+			`{"text":"The checks script failed.","action":"run_again"}]}`},
 		// Escaped, 20 points of 500 of these would pass the limit of the body.
 		{runapi.VerdictEscalate, []runapi.Point{{Text: "a < b & c", Action: runapi.ActionRunAgain}},
 			`{"verdict":"escalate","points":[{"text":"a < b & c","action":"run_again"}]}`},
