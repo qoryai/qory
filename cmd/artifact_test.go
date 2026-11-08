@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -13,6 +14,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -857,27 +859,51 @@ func TestArtifactPushChecksItsArguments(t *testing.T) {
 	}
 }
 
+// verdictPoints is a file of --points with a point to answer and a point to run again,
+// and verdictPointsBody is the same points as qory sends and keeps them.
+const (
+	verdictPoints = `[
+  {"text": "The spec does not say which customers see the new price. Answer question q4.", "action": "answer", "question": "q4"},
+  {"text": "The checks script failed on the spec's links. Run another round.", "action": "run_again"}
+]
+`
+	verdictPointsBody = `{"verdict":"escalate","points":[` +
+		`{"text":"The spec does not say which customers see the new price. Answer question q4.","action":"answer","question":"q4"},` +
+		`{"text":"The checks script failed on the spec's links. Run another round.","action":"run_again"}]}`
+)
+
+// writePoints writes content to points.json in dir and returns its path.
+func writePoints(t *testing.T, dir, content string) string {
+	t.Helper()
+
+	path := filepath.Join(dir, "points.json")
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	return path
+}
+
 func TestRunVerdictStoresTheVerdictInARun(t *testing.T) {
 	root := inCheckout(t)
 	server := startRunAPI(t)
 	server.response = `{"version":1,"artifact":{"type":"verdict","name":"main","version":{"id":"av_4","number":4}}}`
 
-	gaps := filepath.Join(root, "gaps.md")
-	if err := os.WriteFile(gaps, []byte("Add the empty cart."), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	out, err := run(t, "run", "verdict", "changes-requested", "--gaps", gaps)
+	out, err := run(t, "run", "verdict", "escalate", "--points", writePoints(t, root, verdictPoints))
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if out != "Stored the verdict changes-requested as version 4.\n" {
+	if out != "Stored the verdict escalate as version 4.\n" {
 		t.Errorf("out = %q", out)
 	}
 
-	if want := `{"verdict":"changes-requested","gaps":"Add the empty cart."}`; server.verdicts[0] != want {
-		t.Errorf("body = %s", server.verdicts[0])
+	if out, err = run(t, "run", "verdict", "changes-requested"); err != nil || out != "Stored the verdict changes-requested as version 4.\n" {
+		t.Fatalf("changes-requested: %q, %v", out, err)
+	}
+
+	if want := []string{verdictPointsBody, `{"verdict":"changes-requested"}`}; !slices.Equal(server.verdicts, want) {
+		t.Errorf("bodies = %q, want %q", server.verdicts, want)
 	}
 }
 
@@ -895,27 +921,80 @@ func TestRunVerdictOutsideARunKeepsTheVerdict(t *testing.T) {
 	}
 
 	wantFile(t, filepath.Join(root, ".qory", "artifacts", "verdict", "main", "v1", "verdict.json"), `{"verdict":"passed"}`)
+
+	out, err = run(t, "run", "verdict", "escalate", "--points", writePoints(t, root, verdictPoints))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if out != "Verdict escalate, kept in .qory/artifacts/verdict/main/v2/; nothing acts on it outside a run.\n" {
+		t.Errorf("out = %q", out)
+	}
+
+	// The same document as the run API receives in a run.
+	wantFile(t, filepath.Join(root, ".qory", "artifacts", "verdict", "main", "v2", "verdict.json"), verdictPointsBody)
 }
 
+// TestRunVerdictChecksItsArguments stops each wrong command line or file of --points with
+// exit 2 and the error, whose line starts with the fix, before anything is sent: in a
+// run, no verdict reaches the run API, and outside a run, the store keeps none.
 func TestRunVerdictChecksItsArguments(t *testing.T) {
 	root := inCheckout(t)
-	t.Setenv("QORY_RUN_API", "")
 
-	long := filepath.Join(root, "long.md")
+	long := filepath.Join(root, "long.json")
 	if err := os.WriteFile(long, make([]byte, 64<<10+1), 0o644); err != nil {
 		t.Fatal(err)
+	}
+
+	absent := filepath.Join(root, "absent")
+	points := func(content string) string {
+		dir := t.TempDir()
+
+		return writePoints(t, dir, content)
 	}
 
 	for _, c := range []struct {
 		args []string
 		want string
 	}{
-		{[]string{"run", "verdict", "maybe"}, "Pass passed, changes-requested or escalate."},
-		{[]string{"run", "verdict"}, "accepts 1 arg"},
-		{[]string{"run", "verdict", "passed", "--gaps", filepath.Join(root, "absent")}, "Pass a file that exists to --gaps."},
-		{[]string{"run", "verdict", "passed", "--gaps", long}, "Shorten "},
+		{[]string{"run", "verdict", "maybe"}, `Pass passed, changes-requested or escalate. The verdict is "maybe".`},
+		{[]string{"run", "verdict"}, "accepts 1 arg(s), received 0"},
+		{[]string{"run", "verdict", "escalate"}, "Pass --points <file> with escalate: a JSON array of the points a person acts on."},
+		{[]string{"run", "verdict", "passed", "--points", points(verdictPoints)}, "Leave out --points with passed: only escalate has points."},
+		{[]string{"run", "verdict", "changes-requested", "--points", points(verdictPoints)}, "Leave out --points with changes-requested: only escalate has points."},
+		{[]string{"run", "verdict", "escalate", "--points", absent}, "Pass a file that exists to --points. open " + absent + ": no such file or directory"},
+		{[]string{"run", "verdict", "escalate", "--points", long}, "Shorten " + long + " to at most 65536 bytes. The file is larger."},
+		{[]string{"run", "verdict", "escalate", "--points", points(`[{"text": "The checks failed. Run another round.", "action": "run_again"}, {"text": "The checks failed."}]`)},
+			"Write each point as {text, action}: point 2 has no action."},
+		{[]string{"run", "verdict", "escalate", "--points", points(`[]`)}, "Write at least one point. The array is empty."},
+		{[]string{"run", "verdict", "escalate", "--points", points(`[{"text": "The spec does not say who sees the price.", "action": "answer"}]`)},
+			"Add question, the id of an open question, to point 1: a point with the action answer has one."},
+		{[]string{"run", "verdict", "escalate", "--points", points(`{"verdict": "escalate", "gaps": "Add the empty cart."}`)},
+			`Write the points as a JSON array, such as [{"text": "…", "action": "run_again"}]. The file is a JSON object.`},
+		{[]string{"run", "verdict", "passed", "--gaps", points(verdictPoints)}, "unknown flag: --gaps"},
 	} {
-		_, err := run(t, c.args...)
-		wantExit(t, err, cmd.ExitInput, c.want)
+		for _, inRun := range []bool{true, false} {
+			var server *runAPIServer
+			if inRun {
+				server = startRunAPI(t)
+			} else {
+				t.Setenv("QORY_RUN_API", "")
+			}
+
+			_, err := run(t, c.args...)
+			wantExit(t, err, cmd.ExitInput, c.want)
+
+			if err != nil && strings.SplitN(err.Error(), "\n", 2)[0] != c.want {
+				t.Errorf("%v: the first line is %q, want %q", c.args, err, c.want)
+			}
+
+			if server != nil && len(server.verdicts) != 0 {
+				t.Errorf("%v: sent %q", c.args, server.verdicts)
+			}
+		}
+	}
+
+	if _, err := os.Stat(filepath.Join(root, ".qory", "artifacts", "verdict")); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("the store has a verdict: %v", err)
 	}
 }

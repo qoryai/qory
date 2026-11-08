@@ -12,13 +12,15 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/qoryai/qory/internal/runapi"
 )
 
-// The examples of Core's docs/contract/run-api.md.
+// The examples of Core's docs/contract/run-api.md, with the points of
+// contracts/harness/v1/verdict.schema.json in place of the text gaps.
 const (
 	snapshotExample = `{
   "version": 1,
@@ -31,8 +33,8 @@ const (
   "outputs": [
     {"type": "demo-video", "required": true, "version": null, "check": "missing"}
   ],
-  "verdict": {"verdict": "changes-requested", "gaps": "Add the empty cart.", "version": {"id": "av_2", "number": 1}},
-  "gaps": "Add the empty cart.",
+  "verdict": {"verdict": "escalate", "points": [{"text": "The checks failed on the cart page. Run another round.", "action": "run_again"}], "version": {"id": "av_2", "number": 1}},
+  "points": [{"text": "The ticket does not say which cart is empty. Answer question q1.", "action": "answer", "question": "q1"}],
   "ticket": {"external_ref": "T-1", "url": "https://example.test/T-1", "title": "A title", "body": "A body",
              "filed_by": {"name": "Dana", "kind": "person"}, "filed_at": "2026-10-31T09:00:00Z", "collection": "c"},
   "instruction": {"text": "Go", "by": {"name": "dana"}, "at": "2026-10-31T09:00:00Z"},
@@ -53,7 +55,7 @@ const (
   "inputs": [],
   "outputs": [],
   "verdict": null,
-  "gaps": null,
+  "points": null,
   "comments": [],
   "comments_omitted": 0,
   "answers": [],
@@ -211,8 +213,11 @@ func TestWorkItemReadsTheSnapshot(t *testing.T) {
 		t.Errorf("inputs = %+v, outputs = %+v", snapshot.Inputs, snapshot.Outputs)
 	}
 
-	if snapshot.Verdict.Verdict != runapi.VerdictChangesRequested || *snapshot.Gaps != "Add the empty cart." {
-		t.Errorf("verdict = %+v", snapshot.Verdict)
+	wantVerdict := []runapi.Point{{Text: "The checks failed on the cart page. Run another round.", Action: runapi.ActionRunAgain}}
+	wantPoints := []runapi.Point{{Text: "The ticket does not say which cart is empty. Answer question q1.", Action: runapi.ActionAnswer, Question: "q1"}}
+	if snapshot.Verdict.Verdict != runapi.VerdictEscalate || !slices.Equal(snapshot.Verdict.Points, wantVerdict) ||
+		!slices.Equal(snapshot.Points, wantPoints) {
+		t.Errorf("verdict = %+v, points = %+v", snapshot.Verdict, snapshot.Points)
 	}
 
 	// A caller prints the whole work item, ticket and notes included, from Raw.
@@ -228,7 +233,7 @@ func TestWorkItemReadsAWorkItemInNoStage(t *testing.T) {
 	}
 
 	if snapshot.Stage.ID != nil || snapshot.Stage.Name != nil || snapshot.Run.Workflow != nil ||
-		snapshot.Verdict != nil || snapshot.Gaps != nil {
+		snapshot.Verdict != nil || snapshot.Points != nil {
 		t.Errorf("snapshot = %+v", snapshot)
 	}
 }
@@ -505,7 +510,7 @@ func TestAnUnavailablePushSaysToReadTheIndexFirst(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			client := serve(t, respond(http.StatusServiceUnavailable, body))
 
-			_, err := client.PushVerdict(context.Background(), runapi.VerdictPassed, "")
+			_, err := client.PushVerdict(context.Background(), runapi.VerdictPassed, nil)
 
 			want := "Read the artifact index, and try again if the version is not there. " +
 				"POST /verdict may have stored it (503 unavailable)."
@@ -517,11 +522,20 @@ func TestAnUnavailablePushSaysToReadTheIndexFirst(t *testing.T) {
 }
 
 func TestPushVerdictSendsTheBodyTheRunAPIReads(t *testing.T) {
-	for _, c := range []struct{ gaps, want string }{
-		{"Add the empty cart.", `{"verdict":"changes-requested","gaps":"Add the empty cart."}`},
-		{"", `{"verdict":"changes-requested"}`},
-		// Escaped, 20000 of these would pass the limit of the body.
-		{"a < b & c", `{"verdict":"changes-requested","gaps":"a < b & c"}`},
+	for _, c := range []struct {
+		verdict string
+		points  []runapi.Point
+		want    string
+	}{
+		{runapi.VerdictChangesRequested, nil, `{"verdict":"changes-requested"}`},
+		{runapi.VerdictEscalate, []runapi.Point{
+			{Text: "The spec does not say which customers see the price. Answer question q4.", Action: runapi.ActionAnswer, Question: "q4"},
+			{Text: "The checks script failed. Run another round.", Action: runapi.ActionRunAgain},
+		}, `{"verdict":"escalate","points":[{"text":"The spec does not say which customers see the price. Answer question q4.","action":"answer","question":"q4"},` +
+			`{"text":"The checks script failed. Run another round.","action":"run_again"}]}`},
+		// Escaped, 20 points of 500 of these would pass the limit of the body.
+		{runapi.VerdictEscalate, []runapi.Point{{Text: "a < b & c", Action: runapi.ActionRunAgain}},
+			`{"verdict":"escalate","points":[{"text":"a < b & c","action":"run_again"}]}`},
 	} {
 		client := serve(t, func(w http.ResponseWriter, r *http.Request) {
 			if r.Method != http.MethodPost || r.URL.Path != "/v1/runs/run-1/verdict" {
@@ -536,7 +550,7 @@ func TestPushVerdictSendsTheBodyTheRunAPIReads(t *testing.T) {
 				`{"version": 1, "artifact": {"type": "verdict", "name": "main", "version": {"id": "av_4", "number": 4}}}`)(w, r)
 		})
 
-		pushed, err := client.PushVerdict(context.Background(), runapi.VerdictChangesRequested, c.gaps)
+		pushed, err := client.PushVerdict(context.Background(), c.verdict, c.points)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -661,7 +675,7 @@ func TestErrorsStartWithTheFix(t *testing.T) {
 func TestATooLargeVerdictHasTheVerdictLimit(t *testing.T) {
 	client := serve(t, respond(http.StatusRequestEntityTooLarge, `{"error":"payload_too_large"}`))
 
-	_, err := client.PushVerdict(context.Background(), runapi.VerdictPassed, "")
+	_, err := client.PushVerdict(context.Background(), runapi.VerdictPassed, nil)
 
 	want := "Shrink the request to at most 65536 bytes encoded. POST /verdict returned 413 payload_too_large."
 	if err == nil || err.Error() != want {

@@ -2,7 +2,7 @@
 
 What `qory harness compose` reads and what it writes.
 
-## Eight files
+## Nine files
 
 | File | Lives in | Defines |
 |---|---|---|
@@ -14,6 +14,7 @@ What `qory harness compose` reads and what it writes.
 | a questions document | the file of a version of the artifact type `questions` | a work item's questions, their answers and the decisions of its runs (§The questions format). No compose reads it |
 | a review comments document | the file of a version of the artifact type `review-comments` | a work item's review comments on its artifact versions and the replies to them (§The review comments format). No compose reads it |
 | a proposal sources document | the file `sources.json` of a version of the artifact type `proposal` | every source a run used to write the proposal, with the reason for each (§The proposal sources format). No compose reads it |
+| a verdict document | the file of a version of the artifact type `verdict`, which `qory run verdict` stores | a run's verdict, and for `escalate` the points a person acts on (§The verdict format). No compose reads it |
 
 Every module has a `qory-module.yaml`; it defines the module's name, and a directory
 without one is not a module. `qory.yaml` is optional: every setting has a default. It has
@@ -579,6 +580,40 @@ a file in a repository. Each source has a `kind` from an open list, such as `pag
 `record`, a `ref` in the form that its kind needs, and a `why`; `system`, `container` and
 `locator` are optional. This is version 1 of the format
 ([proposal-sources.schema.json](proposal-sources.schema.json)).
+
+## The verdict format
+
+A verdict document records a run's verdict on the work of its round. `qory run verdict`
+stores it as a version of the artifact type `verdict`. This is version 1 of the format
+([verdict.schema.json](verdict.schema.json)):
+
+```json
+{"verdict": "escalate",
+ "points": [{"text": "The spec does not say which customers see the new price. Answer question q4.", "action": "answer", "question": "q4"},
+            {"text": "The checks script failed on the spec's links. Run another round.", "action": "run_again"}]}
+```
+
+| Member | Meaning |
+|---|---|
+| `verdict` | `passed`: the work meets the bar; `changes-requested`: the work needs another round; `escalate`: a person must act |
+| `points` | what is wrong or missing and what a person can do, 1 to 20 points: required with `escalate`, and absent with the other verdicts |
+| `text` | one plain sentence for a person, 1 to 500 characters: tab, line feed and carriage return are its only control characters, and the schema's `$defs` `text` lists the format characters it cannot have |
+| `action` | `answer`: the person answers the question in `question`; `run_again`: the person runs another round |
+| `question` | the id of an open question in the work item's newest `questions` version, in the id form of the questions format: required with `answer`, and absent with `run_again` |
+
+A document and a point have no other member. A JSON Schema cannot check that the
+question is open, so the run pushes its questions before its verdict. Each of these
+documents fails the schema:
+
+```json
+{"verdict": "escalate"}
+{"verdict": "passed", "points": [{"text": "The checks script failed. Run another round.", "action": "run_again"}]}
+{"verdict": "escalate", "points": []}
+{"verdict": "escalate", "points": [{"text": "The spec does not say who sees the price."}]}
+{"verdict": "escalate", "points": [{"text": "The spec does not say who sees the price.", "action": "answer"}]}
+{"verdict": "escalate", "points": [{"text": "The checks script failed.", "action": "run_again", "question": "q4"}]}
+{"verdict": "changes-requested", "gaps": "Add the empty cart."}
+```
 
 ## The module manifest
 

@@ -24,6 +24,7 @@ import (
 	"github.com/qoryai/qory/internal/checkout"
 	"github.com/qoryai/qory/internal/preparation"
 	"github.com/qoryai/qory/internal/runapi"
+	"github.com/qoryai/qory/internal/verdictformat"
 )
 
 // The commands of a work item: qory work-item show, qory artifact pull and push, and qory
@@ -77,8 +78,9 @@ var runStartFolder = func() string {
 	return start
 }
 
-// maxGapsFile is the most read of the file of --gaps: the 64 KiB of the request's body.
-const maxGapsFile = 64 << 10
+// maxPointsFile is the most read of the file of --points: the 64 KiB of the request's
+// body. Twenty points of 500 characters fit in it.
+const maxPointsFile = 64 << 10
 
 // noWorkItemText is what qory work-item show prints outside a run with no work item file.
 const noWorkItemText = "No work item. Write .qory/work-item.json, or pass the task to the skill."
@@ -140,7 +142,7 @@ func newWorkItemShow() *cobra.Command {
 		Use:   "show",
 		Short: "Print the work item as JSON",
 		Long: `Print the work item as JSON: the ticket, the stage's name, the round, the stage's inputs and
-outputs with each output's check, the newest verdict and gaps, and notes from people.
+outputs with each output's check, the newest verdict and points, and notes from people.
 
 In a run, qory reads the work item from Qory Apiary through the gateway. Outside a run,
 qory prints .qory/work-item.json, and exits ` + strconv.Itoa(ExitNoWorkItem) + ` when that file does not exist.
@@ -664,13 +666,19 @@ func keepPush(c *cobra.Command, artifactType, name string, sources []pushSource)
 }
 
 func newRunVerdict() *cobra.Command {
-	var gapsFile string
+	var pointsFile string
 
 	c := &cobra.Command{
 		Use:   "verdict passed|changes-requested|escalate",
 		Short: "Store the run's verdict",
 		Long: `Store the run's verdict as a version of the artifact verdict. Qory Apiary acts on it when the
-run ends. --gaps reads the text of what is missing from a file.
+run ends.
+
+escalate needs --points, a file with a JSON array of 1 to 20 points for a person. Each
+point is {text, action}: text is one sentence of 1 to 500 characters on what is wrong or
+missing, and action is answer or run_again. A point with the action answer also has
+question, the id of an open question. qory checks the file against
+contracts/harness/v1/verdict.schema.json before it sends or keeps anything.
 
 Outside a run, qory prints the verdict and keeps it in .qory/artifacts/verdict/; nothing
 acts on it.
@@ -679,7 +687,7 @@ acts on it.
 
 More: https://github.com/qoryai/qory/blob/main/docs/run.md#commands-of-a-work-item`,
 		Example: `  qory run verdict passed
-  qory run verdict changes-requested --gaps gaps.md`,
+  qory run verdict escalate --points points.json`,
 		Args: func(c *cobra.Command, args []string) error {
 			if err := cobra.ExactArgs(1)(c, args); err != nil {
 				return input(err)
@@ -693,7 +701,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md#commands-of-a-work-it
 		},
 		Annotations: map[string]string{inWall: "true"},
 		RunE: func(c *cobra.Command, args []string) error {
-			gaps, err := readGaps(gapsFile)
+			points, err := readPoints(args[0], pointsFile, c.Flags().Changed("points"))
 			if err != nil {
 				return err
 			}
@@ -704,10 +712,10 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md#commands-of-a-work-it
 			}
 
 			if client == nil {
-				return keepVerdict(c, args[0], gaps)
+				return keepVerdict(c, args[0], points)
 			}
 
-			pushed, err := client.PushVerdict(c.Context(), args[0], gaps)
+			pushed, err := client.PushVerdict(c.Context(), args[0], points)
 			if err != nil {
 				return err
 			}
@@ -717,37 +725,52 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md#commands-of-a-work-it
 			return err
 		},
 	}
-	c.Flags().StringVar(&gapsFile, "gaps", "", "read the text of what is missing from this file")
+	c.Flags().StringVar(&pointsFile, "points", "", "read the points of escalate, a JSON array, from this file")
 
 	return c
 }
 
-// readGaps returns the text of the file of --gaps, empty for no file.
-func readGaps(path string) (string, error) {
-	if path == "" {
-		return "", nil
+// readPoints returns the points of verdict from path, the file of --points; given is true
+// when the command line has --points. escalate needs the file, and the other verdicts
+// take none.
+func readPoints(verdict, path string, given bool) ([]runapi.Point, error) {
+	if verdict != runapi.VerdictEscalate {
+		if given {
+			return nil, input(fmt.Errorf("Leave out --points with %s: only escalate has points.", verdict))
+		}
+
+		return nil, nil
+	}
+
+	if !given {
+		return nil, input(errors.New("Pass --points <file> with escalate: a JSON array of the points a person acts on."))
 	}
 
 	file, err := os.Open(path)
 	if err != nil {
-		return "", input(fmt.Errorf("Pass a file that exists to --gaps. %w", err))
+		return nil, input(fmt.Errorf("Pass a file that exists to --points. %w", err))
 	}
 	defer file.Close()
 
-	gaps, err := io.ReadAll(io.LimitReader(file, maxGapsFile+1))
+	data, err := io.ReadAll(io.LimitReader(file, maxPointsFile+1))
 	if err != nil {
-		return "", input(fmt.Errorf("Check the file of --gaps. Reading it failed: %w", err))
+		return nil, input(fmt.Errorf("Check the file of --points. Reading it failed: %w", err))
 	}
 
-	if len(gaps) > maxGapsFile {
-		return "", input(fmt.Errorf("Shorten %s to at most 20000 characters. The file is over %d bytes.", path, maxGapsFile))
+	if len(data) > maxPointsFile {
+		return nil, input(fmt.Errorf("Shorten %s to at most %d bytes. The file is larger.", path, maxPointsFile))
 	}
 
-	return string(gaps), nil
+	points, err := verdictformat.Points(data)
+	if err != nil {
+		return nil, input(err)
+	}
+
+	return points, nil
 }
 
 // keepVerdict keeps the verdict in the store as the run API stores it, outside a run.
-func keepVerdict(c *cobra.Command, verdict, gaps string) error {
+func keepVerdict(c *cobra.Command, verdict string, points []runapi.Point) error {
 	store, err := openArtifactStore()
 	if err != nil {
 		return err
@@ -758,10 +781,7 @@ func keepVerdict(c *cobra.Command, verdict, gaps string) error {
 		return err
 	}
 
-	content, err := json.Marshal(struct {
-		Verdict string `json:"verdict"`
-		Gaps    string `json:"gaps,omitempty"`
-	}{verdict, gaps})
+	content, err := runapi.VerdictBody(verdict, points)
 	if err != nil {
 		return err
 	}
