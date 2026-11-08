@@ -65,11 +65,13 @@ func newApiary() *cobra.Command {
 		Long: `Work with a Qory Apiary server as a person who debugs its runs.
 
   enrol          make a diagnostics key and enrol it with a code from Qory Apiary
+  run list       list the runs, the last created first
   run diagnose   print a run's diagnostics document
 
 The commands sign their requests with a diagnostics key: an access key of kind
 diagnostics, made on this computer. Its secret stays in ~/.config/qory/apiary/<host>,
-Qory Apiary keeps its public half, and it reads only the diagnostics of runs.
+Qory Apiary keeps its public half, and it lists runs and reads their diagnostics, and
+nothing else.
 
 More: ` + apiaryDocs,
 	}
@@ -81,14 +83,16 @@ More: ` + apiaryDocs,
 func newApiaryRun() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "run",
-		Short: "Read what Qory Apiary recorded about a run",
-		Long: `Read what Qory Apiary recorded about a run, by the run's rn_ id.
+		Short: "List runs and read what Qory Apiary recorded about one",
+		Long: `List the runs on Qory Apiary, and read what it recorded about a run, by the run's rn_
+id.
 
+  list       list the runs, the last created first
   diagnose   print a run's diagnostics document
 
 More: ` + apiaryDocs,
 	}
-	c.AddCommand(newApiaryRunDiagnose())
+	c.AddCommand(newApiaryRunList(), newApiaryRunDiagnose())
 	return c
 }
 
@@ -143,38 +147,54 @@ func diagnose(ctx context.Context, out, report io.Writer, runID, serverURL strin
 	if !runIDShape.MatchString(runID) {
 		return input(fmt.Errorf("Use the run's id, rn_ and 16 characters: this command takes only that id.\nYou passed %s.", exports.Value(runID, true)))
 	}
-	root, err := apiarydir.Root()
-	if err != nil {
-		return input(err)
-	}
-	host, err := diagnosticsHost(root, serverURL, serverGiven)
+	key, instance, err := diagnosticsKey(report, "qory apiary run diagnose", serverURL, serverGiven)
 	if err != nil {
 		return err
-	}
-	key, err := apiarydir.Read(root, host)
-	if errors.Is(err, apiarydir.ErrNoKey) {
-		return input(noDiagnosticsKey(serverURL, filepath.Join(root, host)))
-	}
-	if err != nil {
-		return input(err)
-	}
-	instance, kept, err := key.Dir.InstanceID(foragerdir.MachineID())
-	if err != nil {
-		return fmt.Errorf("Check that %s can be written: the instance id: %w", key.Dir, err)
-	}
-	if !kept {
-		fmt.Fprintf(report, "qory apiary run diagnose: instance %s, this process's alone: %s cannot be written\n", instance, key.Dir.Path(foragerdir.InstanceFile))
 	}
 	resp, err := fetchDiagnostics(ctx, key, instance, runID)
 	if err != nil {
 		return err
 	}
-	body := resp.body
+	return writeLine(out, resp.body)
+}
+
+// writeLine writes body to out, with a line ending after it when it has none.
+func writeLine(out io.Writer, body []byte) error {
 	if len(body) == 0 || body[len(body)-1] != '\n' {
-		body = append(body, '\n')
+		body = append(body[:len(body):len(body)], '\n')
 	}
-	_, err = out.Write(body)
+	_, err := out.Write(body)
 	return err
+}
+
+// diagnosticsKey reads the diagnostics key of the server serverURL selects when
+// serverGiven, else of the one server with a key, and this computer's instance id in the
+// key's directory. When the instance id cannot be written, the instance id is one for
+// this process alone, and a line on report that starts with command states that.
+func diagnosticsKey(report io.Writer, command, serverURL string, serverGiven bool) (*apiarydir.Key, string, error) {
+	root, err := apiarydir.Root()
+	if err != nil {
+		return nil, "", input(err)
+	}
+	host, err := diagnosticsHost(root, serverURL, serverGiven)
+	if err != nil {
+		return nil, "", err
+	}
+	key, err := apiarydir.Read(root, host)
+	if errors.Is(err, apiarydir.ErrNoKey) {
+		return nil, "", input(noDiagnosticsKey(serverURL, filepath.Join(root, host)))
+	}
+	if err != nil {
+		return nil, "", input(err)
+	}
+	instance, kept, err := key.Dir.InstanceID(foragerdir.MachineID())
+	if err != nil {
+		return nil, "", fmt.Errorf("Check that %s can be written: the instance id: %w", key.Dir, err)
+	}
+	if !kept {
+		fmt.Fprintf(report, "%s: instance %s, this process's alone: %s cannot be written\n", command, instance, key.Dir.Path(foragerdir.InstanceFile))
+	}
+	return key, instance, nil
 }
 
 // diagnosticsHost returns the name of the server directory under root to read the key
@@ -217,21 +237,58 @@ type diagnosticsResponse struct {
 }
 
 // fetchDiagnostics sends the GET for the diagnostics of runID as typed, signed with key
-// as the instance instance, as Forager's server client signs a GET: the timestamp in
-// place of a body. It follows no redirect and keeps no cookie, since Go copies a
-// request's headers to wherever a redirect points. It returns the body of a 200 whose signature
-// verifies under the pinned key, bound to this request's signature; every other result
-// is an error whose first line is the fix. No error contains the secret, the signature
-// or a header of the request.
+// as the instance instance, see [signedGet]. It returns the body of a verified 200; every
+// other result is an error whose first line is the fix.
 func fetchDiagnostics(ctx context.Context, key *apiarydir.Key, instance, runID string) (*diagnosticsResponse, error) {
+	status, b, err := signedGet(ctx, key, instance, "/v1/runs/"+runID+"/diagnostics")
+	if err != nil {
+		return nil, err
+	}
+	if status == http.StatusOK {
+		if len(b) > maxDiagnostics {
+			return nil, fmt.Errorf("Ask the instance admin of %s to check the run %s: its diagnostics document is larger than 8 MiB, the most qory prints.", key.Host, runID)
+		}
+		return &diagnosticsResponse{body: b}, nil
+	}
+	ref := accesskey.ReadRefusal(status, b)
+	if ref != nil && ref.Code == codeNotFound && status == http.StatusNotFound {
+		return nil, fmt.Errorf("Check the run id: %s has no run %s (%s).", key.Host, runID, codeNotFound)
+	}
+	return nil, notAccepted(key.Host, "the run", ref, status)
+}
+
+// notAccepted is the error of a verified refusal ref, nil for a body with no refusal code,
+// with the status status, from the server host, of a request about what, such as "the
+// run".
+func notAccepted(host, what string, ref *accesskey.Refusal, status int) error {
+	switch {
+	case ref == nil:
+		return fmt.Errorf("Check %s with the instance admin of %s: the request was not accepted (%d).", what, host, status)
+	case ref.Code == codeUnsupportedContractVersion:
+		return fmt.Errorf("Update qory to a release that works with %s: the request was not accepted: %s (%d).", host, ref.Code, status)
+	case len(ref.Names) > 0:
+		return fmt.Errorf("Check %s with the instance admin of %s: the request was not accepted: %s (%d): %s.", what, host, ref.Code, status, strings.Join(accesskey.ShownNames(ref.Names), ", "))
+	}
+	return fmt.Errorf("Check %s with the instance admin of %s: the request was not accepted: %s (%d).", what, host, ref.Code, status)
+}
+
+// signedGet sends GET target, a path and query of the server's API as typed, signed with
+// key as the instance instance, as Forager's server client signs a GET: the timestamp in
+// place of a body. It follows no redirect and keeps no cookie, since Go copies a
+// request's headers to wherever a redirect points. It returns the status and the body of
+// a response whose signature verifies under the pinned key, bound to this request's
+// signature. A 401, a response that does not verify and a request that fails are errors
+// whose first line is the fix. No error contains the secret, the signature or a header of
+// the request.
+func signedGet(ctx context.Context, key *apiarydir.Key, instance, target string) (int, []byte, error) {
 	serverURL := strings.TrimSuffix(key.Server, "/")
 	hc := &http.Client{
 		Timeout:       diagnosticsTimeout,
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, serverURL+"/v1/runs/"+runID+"/diagnostics", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, serverURL+target, nil)
 	if err != nil {
-		return nil, accesskey.ShownError(err)
+		return 0, nil, accesskey.ShownError(err)
 	}
 	signed := accesskey.Request{
 		AccessKeyID: key.AccessKeyID,
@@ -242,7 +299,7 @@ func fetchDiagnostics(ctx context.Context, key *apiarydir.Key, instance, runID s
 	}
 	sig, err := key.Secret.SignRequest(signed)
 	if err != nil {
-		return nil, err
+		return 0, nil, err
 	}
 	req.Header.Set("User-Agent", userAgent())
 	req.Header.Set(server.HeaderAccessKeyID, key.AccessKeyID)
@@ -253,38 +310,21 @@ func fetchDiagnostics(ctx context.Context, key *apiarydir.Key, instance, runID s
 	req.Header.Set(server.HeaderSignature, sig)
 	resp, err := hc.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("Check that %s is reachable: %w.", serverURL, accesskey.ShownError(unwrapURLError(err)))
+		return 0, nil, fmt.Errorf("Check that %s is reachable: %w.", serverURL, accesskey.ShownError(unwrapURLError(err)))
 	}
 	defer resp.Body.Close()
 	b, err := io.ReadAll(io.LimitReader(resp.Body, maxDiagnosticsRead+1))
 	if err != nil {
-		return nil, fmt.Errorf("Check that %s is reachable: reading the response: %w.", serverURL, accesskey.ShownError(unwrapURLError(err)))
+		return 0, nil, fmt.Errorf("Check that %s is reachable: reading the response: %w.", serverURL, accesskey.ShownError(unwrapURLError(err)))
 	}
 	status := resp.StatusCode
 	if status == http.StatusUnauthorized {
-		return nil, fmt.Errorf("%s: %s did not accept the diagnostics key %s (401).", apiarydir.EnrolAgain(key.Dir, key.Server), key.Host, key.AccessKeyID)
+		return 0, nil, fmt.Errorf("%s: %s did not accept the diagnostics key %s (401).", apiarydir.EnrolAgain(key.Dir, key.Server), key.Host, key.AccessKeyID)
 	}
 	if len(b) > maxDiagnosticsRead || (status != http.StatusOK && len(b) > server.MaxRefusal) || !verified(key.Pin, resp.Header, status, sig, b) {
-		return nil, fmt.Errorf("Check that %s is the server the diagnostics key in %s was enrolled with: its response (%d) is not signed with the pinned server key, so qory printed nothing.", serverURL, key.Dir, status)
+		return 0, nil, fmt.Errorf("Check that %s is the server the diagnostics key in %s was enrolled with: its response (%d) is not signed with the pinned server key, so qory printed nothing.", serverURL, key.Dir, status)
 	}
-	if status == http.StatusOK {
-		if len(b) > maxDiagnostics {
-			return nil, fmt.Errorf("Ask the instance admin of %s to check the run %s: its diagnostics document is larger than 8 MiB, the most qory prints.", key.Host, runID)
-		}
-		return &diagnosticsResponse{body: b}, nil
-	}
-	ref := accesskey.ReadRefusal(status, b)
-	switch {
-	case ref == nil:
-		return nil, fmt.Errorf("Check the run with the instance admin of %s: the request was not accepted (%d).", key.Host, status)
-	case ref.Code == codeNotFound && status == http.StatusNotFound:
-		return nil, fmt.Errorf("Check the run id: %s has no run %s (%s).", key.Host, runID, codeNotFound)
-	case ref.Code == codeUnsupportedContractVersion:
-		return nil, fmt.Errorf("Update qory to a release that works with %s: the request was not accepted: %s (%d).", key.Host, ref.Code, status)
-	case len(ref.Names) > 0:
-		return nil, fmt.Errorf("Check the run with the instance admin of %s: the request was not accepted: %s (%d): %s.", key.Host, ref.Code, status, strings.Join(accesskey.ShownNames(ref.Names), ", "))
-	}
-	return nil, fmt.Errorf("Check the run with the instance admin of %s: the request was not accepted: %s (%d).", key.Host, ref.Code, status)
+	return status, b, nil
 }
 
 // verified reports whether a response verifies under pin, bound to the request's

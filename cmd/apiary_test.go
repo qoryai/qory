@@ -32,10 +32,11 @@ var diagnosticsFixture, _ = filepath.Abs(filepath.Join("testdata", "diagnostics.
 // diagnosticsKeyID is the id of the diagnostics key the tests store.
 const diagnosticsKeyID = "ak_0123456789abcdef"
 
-// diagnosticsServer stands in for Qory Apiary's diagnostics route: it verifies each
-// request's signature under the diagnostics key with its timestamp, and responds with
-// the status and body it is set to, signed under its signing key unless unsigned is
-// set. A request that does not verify gets an unsigned 401, as Qory Apiary does.
+// diagnosticsServer stands in for Qory Apiary's diagnostics route and its run list: it
+// verifies each request's signature under the diagnostics key with its timestamp, and
+// responds with the status and body it is set to, signed under its signing key unless
+// unsigned is set. A request that does not verify gets an unsigned 401, as Qory Apiary
+// does.
 type diagnosticsServer struct {
 	*httptest.Server
 	signer   *accesskey.Key
@@ -47,10 +48,11 @@ type diagnosticsServer struct {
 	// requests counts the requests that verified, and headers keeps the last one's.
 	requests int
 	headers  http.Header
-	// received counts every request that reached the server, and path keeps the last
-	// one's path as sent.
+	// received counts every request that reached the server, path keeps the last
+	// one's path as sent, and query its query.
 	received int
 	path     string
+	query    string
 }
 
 func newDiagnosticsServer(t *testing.T, client *accesskey.Key) *diagnosticsServer {
@@ -65,6 +67,7 @@ func newDiagnosticsServer(t *testing.T, client *accesskey.Key) *diagnosticsServe
 		defer s.mu.Unlock()
 		s.received++
 		s.path = r.URL.EscapedPath()
+		s.query = r.URL.RawQuery
 		sig := r.Header.Get(accesskey.HeaderSignature)
 		req := accesskey.Request{
 			AccessKeyID: r.Header.Get(accesskey.HeaderAccessKeyID),
@@ -78,7 +81,7 @@ func newDiagnosticsServer(t *testing.T, client *accesskey.Key) *diagnosticsServe
 			w.WriteHeader(http.StatusUnauthorized)
 			return
 		}
-		if r.URL.Path != "/v1/runs/"+diagnosticsRunID+"/diagnostics" {
+		if r.URL.Path != "/v1/runs/"+diagnosticsRunID+"/diagnostics" && r.URL.Path != "/v1/runs" {
 			s.respond(w, sig, http.StatusNotFound, []byte(`{"error":"not_found"}`))
 			return
 		}

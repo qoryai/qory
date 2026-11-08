@@ -1,12 +1,14 @@
 # Debug runs on Qory Apiary
 
-`qory apiary run diagnose <run id>` prints what Qory Apiary recorded about one
+`qory apiary run list` lists the runs on Qory Apiary, so that you can find the run that
+failed. `qory apiary run diagnose <run id>` prints what Qory Apiary recorded about one
 run, as one JSON document, so that a person or an agent can find why the run failed.
-qory signs the request with a diagnostics key stored on this computer, which
+qory signs each request with a diagnostics key stored on this computer, which
 `qory apiary enrol <server> <code>` makes and enrols once per server.
 
 ```sh
 qory apiary enrol https://apiary.example qecd_F1XT-0RE0-0000-0000-0000-0000-00.uoES-kuj1vk0sq0qoGlmAg
+qory apiary run list --state failed --since 24h
 qory apiary run diagnose rn_0123456789abcdef
 qory apiary run diagnose rn_0123456789abcdef --server https://apiary.example
 qory apiary run diagnose rn_0123456789abcdef > diagnostics.json
@@ -16,7 +18,7 @@ qory apiary run diagnose rn_0123456789abcdef > diagnostics.json
 
 A diagnostics key is an access key of kind `diagnostics`, an Ed25519 key made on this
 computer. Its secret stays on this computer, and Qory Apiary keeps only its public half.
-The key reads the diagnostics of runs and nothing else.
+The key lists runs and reads their diagnostics, and nothing else.
 
 A diagnostics key is kept apart from this machine's node access key: qory never reads it
 from `forager.yaml` or from the files beside `forager.yaml`, and `qory apiary enrol`
@@ -72,7 +74,7 @@ If Qory Apiary refuses the code or the key, qory moves the new secret aside to
 
 `qory apiary enrol` writes the key to one directory per server, under the user's
 configuration directory, `$XDG_CONFIG_HOME/qory` or `~/.config/qory`, and
-`qory apiary run diagnose` reads it from there:
+`qory apiary run list` and `qory apiary run diagnose` read it from there:
 
 ```text
 ~/.config/qory/apiary/                  mode 0700
@@ -103,18 +105,65 @@ starts with `http_`: `http://localhost:4000` is `http_localhost_4000`, and
 }
 ```
 
-`apiary_public_key` is the server's public key, the pin. qory prints a document only
-after its signature verifies under one of the keys listed there.
+`apiary_public_key` is the server's public key, the pin. qory prints a run list or a
+document only after its signature verifies under one of the keys listed there.
 
 qory stops with an error on a secret that it cannot keep private: an `access-key-secret` that is a
 symbolic link or not a regular file, a file mode that grants anything to the group or
 to others, and a server directory that does. The first line of each error is the fix,
 such as ``Run `chmod 600 <path>` ``.
 
+## List the runs
+
+`qory apiary run list` prints one line per run, the last created first, 25 runs by
+default:
+
+```text
+🐝 apiary.example · runs
+  rn_0123456789abcdeh  42  acme/web  hello  7  completed  2026-11-01T10:02:10Z  13m32s
+  rn_0123456789abcdeg  41  acme/web  hello  6  failed     2026-11-01T09:01:00Z  1m35s
+  rn_0123456789abcdef  40  acme/web  -      -  pending    -                     -
+Next page: qory apiary run list --workspace acme/web --limit 3 --before rn_0123456789abcdef
+```
+
+The columns are the run's id, its number in the workspace, the workspace as
+`<organisation>/<workspace>`, the workflow, the work item's number, the state, when the
+run started, in UTC, and how long it ran, such as `45s`, `4m12s` or `1h02m`. A `-`
+stands for a value the run does not have. A state other than the six that `--state`
+takes is printed as Qory Apiary sent it.
+
+Each flag selects runs, and a run is listed when it matches every flag given:
+
+| Flag | Selects |
+|---|---|
+| `--workspace <org>/<workspace>` | the runs of one workspace, such as `acme/web`: two slugs of 1 to 40 characters, `a-z`, `0-9` and `-`, with no `-` at either end |
+| `--work-item <number>` | the runs of one work item, by its number in the workspace; only with `--workspace` |
+| `--workflow <name>` | the runs that start one workflow, such as `hello`: `a-z` first, then `a-z`, `0-9` and `-`, 55 characters at most |
+| `--state <state>` | the runs in one state: `pending`, `running`, `completed`, `failed`, `cancelled` or `lost` |
+| `--since <time>` | the runs created at or after a time: a duration counted back from now, such as `30m`, `1h` or `24h`, or an RFC 3339 time, such as `2026-11-01T09:00:00Z` |
+| `--limit <number>` | at most this many runs, from 1 to 100; 25 without the flag |
+| `--before <run id>` | the runs after this run in the list: the next page |
+
+qory checks each value before it sends anything, and sends `--since` as a time in UTC.
+It sends `GET <server>/v1/runs` with the flags as its query, signed with the key, and
+waits at most 10 seconds. It reads the key of the one server it has a key for.
+
+When more runs match, the last line is the command that lists the next page: every
+flag you gave, `--since` as the time qory sent, and `--before` with the last run of the
+page. The runs go to stdout, and the line for the next page to stderr, so a pipe
+receives the runs alone. When no run matches, qory prints one line on stderr and exits
+0.
+
+With `--json`, qory prints the run list as Qory Apiary sent it, after its signature and
+the contract's `runs.schema.json` check, and nothing else on stdout. The list follows
+`contracts/diagnostics/v1/runs.schema.json` in
+[qoryai/integrations](https://github.com/qoryai/integrations); its `next` is the value
+of `--before` for the next page, and `null` on the last page.
+
 ## Run it
 
-1. Copy **Run id** from Details on the run's page. The id is `rn_` and 16 characters, and
-   the Qory Apiary API also returns it.
+1. Copy **Run id** from Details on the run's page, or from `qory apiary run list`. The
+   id is `rn_` and 16 characters, and the Qory Apiary API also returns it.
 2. Run `qory apiary run diagnose <run id>`. With keys for several servers on
    this computer, add `--server <url>` to select one.
 
@@ -133,9 +182,10 @@ and not its number.
 
 ## Errors
 
-Both commands exit 2 in these cases, and 1 for every other failure:
+Each command exits 2 in these cases, and 1 for every other failure:
 
-- a mistake in the command line: the arguments, the server URL, the code, or the run id
+- a mistake in the command line: the arguments, the server URL, the code, the run id, or
+  a flag of `qory apiary run list` with a value outside its rule
 - neither `HOME` nor `XDG_CONFIG_HOME` is set
 - no diagnostics key for the server, or keys for several servers and no `--server`
 - an error when qory reads the stored diagnostics key, such as a secret file that
@@ -170,6 +220,21 @@ Each error's first line starts with the fix.
 | `Check the run with the instance admin of <host>: the request was not accepted: <code> (<status>).` | Qory Apiary refused the request with another signed code. |
 | `Check that <server> is the server the diagnostics key in <dir> was enrolled with: ...` | The response does not verify under the pinned key, and qory printed nothing. |
 | `Check that <server> is reachable: <error>.` | The request did not reach Qory Apiary, or timed out. |
+
+`qory apiary run list` stops with the lines of `qory apiary run diagnose` for a missing
+key, a key that Qory Apiary did not accept, a response that does not verify and a
+server that is not reachable, and with these:
+
+| First line | What happened |
+|---|---|
+| `Pass --<flag> as ...` | The value of the flag is outside its rule, and the next line contains it. Nothing was sent. |
+| `Add --workspace <org>/<workspace>: a work item's number counts in one workspace.` | `--work-item` without `--workspace`. Nothing was sent. |
+| `Change or remove a flag to list more runs: no run on <host> matches <flags>.` | No run matches the flags. qory exits 0. |
+| `No action needed: <host> has no runs.` | Qory Apiary has no runs. qory exits 0. |
+| `Check --<flag> <value>: <host> did not accept the value (invalid_request, 400).` | Qory Apiary did not accept the value, such as a workspace it does not have, or a `--before` that is the id of no run. |
+| `Update qory to a release that works with <host>: the request was not accepted: unsupported_contract_version (400).` | Qory Apiary does not serve the contract version that this qory sends. |
+| `Check the run list with the instance admin of <host>: the request was not accepted: <code> (<status>).` | Qory Apiary returned another signed code. |
+| `Check the run list with the instance admin of <host>: the response does not follow runs.schema.json, so qory printed nothing.` | The signed response is not a run list of the contract. |
 
 qory never prints the key's secret, the enrolment code, the proof, a signature or the
 request's headers.

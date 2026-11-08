@@ -227,6 +227,12 @@ release may change what an existing document does, and states it under Upgrading
   in `~/.config/qory/apiary/<host>/` and prints the document to stdout only after its
   signature verifies under the server key pinned there. Pass `--server <url>` when keys
   for several servers are on this computer. See `docs/apiary.md`.
+- List the runs on Qory Apiary with `qory apiary run list`, the last created first, one
+  line per run with its `rn_` id, to pass to `qory apiary run diagnose`. `--workspace`,
+  `--work-item`, `--workflow`, `--state` and `--since` select runs, `--limit` and
+  `--before` page through them, and `--json` prints the list as Qory Apiary sent it. The
+  request is signed with the diagnostics key, and qory prints the list only after its
+  signature verifies. See List the runs in `docs/apiary.md`.
 - Make and enrol that diagnostics key with `qory apiary enrol <server> <code>`, using a
   `qecd_` code an instance admin issues under Instance settings > Diagnostics keys in
   Qory Apiary. qory writes the key to `~/.config/qory/apiary/<host>/` and never to
