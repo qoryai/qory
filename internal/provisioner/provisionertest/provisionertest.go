@@ -83,6 +83,10 @@ const (
 	MaxLifetimeMinutes = 1470
 )
 
+// MachineSpec is the machine_spec a claim's answer has beside the machine of a [Run]
+// that sets one, as claim-answer.schema.json requires.
+var MachineSpec = contracts.MachineSpec{VCPUs: 2, MemoryMiB: 4096, DiskGiB: 50, Arch: "amd64"}
+
 // Window is how far a request's time may be from [Server.Now], either way.
 const Window = 300 * time.Second
 
@@ -114,7 +118,7 @@ const (
 // Run is a run waiting in the queue, as [Server.Offer] puts it there. Each member left
 // empty is filled in: a new run id, the step explore, the contract's documents fixture
 // of the step, a new run code, [GatewayURL], [MaxLifetimeMinutes] and [Lease]. Machine
-// empty sends no machine.
+// empty sends no machine; a Machine is sent with [MachineSpec].
 type Run struct {
 	// RunID is the run the redemption of the code makes, which an outcome is posted for.
 	RunID string
@@ -830,9 +834,13 @@ func (s *Server) claim(ctx context.Context, body []byte) answer {
 			d := &Dispatch{ID: newDispatchID(), Run: run, ClaimedAt: now, LeaseUntil: now.Add(run.Lease), State: StateClaimed}
 			s.dispatches[d.ID] = d
 			s.order = append(s.order, d.ID)
+			var spec *contracts.MachineSpec
+			if run.Machine != "" {
+				spec = &MachineSpec
+			}
 			b, _ := json.Marshal(contracts.ClaimAnswer{
 				Version: 1, Revision: contracts.ProvisionerRevision, DispatchID: d.ID, PoolID: PoolID,
-				LeaseUntil: contracts.FormatTime(d.LeaseUntil), Machine: run.Machine, RunCode: run.RunCode,
+				LeaseUntil: contracts.FormatTime(d.LeaseUntil), Machine: run.Machine, MachineSpec: spec, RunCode: run.RunCode,
 				GatewayURL: run.GatewayURL, MaxLifetimeMinutes: run.MaxLifetimeMinutes,
 			})
 			return answer{status: http.StatusOK, body: b, header: http.Header{"Cache-Control": {"no-store"}}}
