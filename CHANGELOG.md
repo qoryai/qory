@@ -93,9 +93,9 @@ release may change what an existing document does, and states it under Upgrading
   in `contracts/harness/v1/README.md`.
 - Version 1 of the verdict format, `contracts/harness/v1/verdict.schema.json`: a run's
   verdict, the file of the artifact type `verdict`. With `escalate`, `points` lists 1 to
-  20 points for a person, each with `text`, one sentence of 1 to 500 characters, and
-  `action`: `answer`, with `question`, the id of an open question, or `run_again`. The
-  text member `gaps` is gone. See The verdict format in `contracts/harness/v1/README.md`.
+  20 points for a person, each with `text`, one sentence on one line, 1 to 500
+  characters, and `action`: `answer`, with `question`, the id of an open question, or
+  `run_again`. The text member `gaps` is gone. See The verdict format in `contracts/harness/v1/README.md`.
 - `-f` on `qory harness compose`, `qory run` and `qory worktree add` takes a stack by
   reference, `<https URL>#<ref>:<folder>`: qory fetches the folder as it fetches a git
   module and composes its `qory-stack.yaml`. `examples/hello` has one, so a run takes it

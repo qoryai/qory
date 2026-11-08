@@ -597,7 +597,7 @@ stores it as a version of the artifact type `verdict`. This is version 1 of the 
 |---|---|
 | `verdict` | `passed`: the work meets the bar; `changes-requested`: the work needs another round; `escalate`: a person must act |
 | `points` | what is wrong or missing and what a person can do, 1 to 20 points: required with `escalate`, and absent with the other verdicts |
-| `text` | one plain sentence for a person, 1 to 500 characters: tab, line feed and carriage return are its only control characters, and the schema's `$defs` `text` lists the format characters it cannot have |
+| `text` | one plain sentence for a person on one line, 1 to 500 characters: it has no control character, so no tab, line feed or carriage return, and the schema's `$defs` `line`, the `line` of the questions format, lists the format characters it cannot have |
 | `action` | `answer`: the person answers the question in `question`; `run_again`: the person runs another round |
 | `question` | the id of an open question in the work item's newest `questions` version, in the id form of the questions format: required with `answer`, and absent with `run_again` |
 
@@ -612,6 +612,7 @@ documents fails the schema:
 {"verdict": "escalate", "points": [{"text": "The spec does not say who sees the price."}]}
 {"verdict": "escalate", "points": [{"text": "The spec does not say who sees the price.", "action": "answer"}]}
 {"verdict": "escalate", "points": [{"text": "The checks script failed.", "action": "run_again", "question": "q4"}]}
+{"verdict": "escalate", "points": [{"text": "The checks script failed.\nRun another round.", "action": "run_again"}]}
 {"verdict": "changes-requested", "gaps": "Add the empty cart."}
 ```
 

@@ -722,12 +722,15 @@ func TestVerdictSchema(t *testing.T) {
 		{replace(`"question": "q4"`, `"question": ""`), false},
 		{replace(`"question": "q4"`, `"question": "Q4"`), false},
 		{replace(`"question": "q4"`, `"question": 4`), false},
-		// text: 1 to 500 characters, with the character rules of $defs text
+		// text: 1 to 500 characters on one line, with the character rules of $defs line
 		{text(strings.Repeat("a", 500)), true},
 		{text(strings.Repeat("é", 500)), true},
 		{text(strings.Repeat("a", 501)), false},
 		{text(""), false},
-		{text(`One\tsentence.`), true},
+		{text(`One sentence, with ' and \" and \\.`), true},
+		{text(`One\tsentence.`), false},
+		{text(`One\nsentence.`), false},
+		{text(`One\rsentence.`), false},
 		{text(`One\u0007sentence.`), false},
 		{text(`One ` + rlo + `sentence.`), false},
 		{replace(`"text": "The checks script failed on the spec's links. Run another round."`, `"text": 1`), false},

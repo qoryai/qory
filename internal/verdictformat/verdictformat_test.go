@@ -82,11 +82,16 @@ func TestPointsStopsAtTheFirstBrokenRule(t *testing.T) {
 		{many(1), ""},
 		{many(20), ""},
 		{text(strings.Repeat("é", 500)), ""},
-		{text(`One\tsentence.`), ""},
+		{text(`One sentence, with ' and \" and \\.`), ""},
+		{text(`One\tsentence.`), "Write the text of point 2 on one line. It has a tab (U+0009)."},
+		{text(`One\nsentence.`), "Write the text of point 2 on one line. It has a line break (U+000A)."},
+		{text(`One\r\nsentence.`), "Write the text of point 2 on one line. It has a line break (U+000D)."},
 		{two(`{"text": "a", "action": "answer", "question": "` + strings.Repeat("a", 32) + `"}`), ""},
 		{`{"text": "a", "action": "run_again"}`, `Write the points as a JSON array, such as [{"text": "…", "action": "run_again"}]. The file is a JSON object.`},
 		{`[` + runAgainPoint, `Write the points as one JSON array, such as [{"text": "…", "action": "run_again"}]. Reading the JSON failed: unexpected EOF`},
-		{many(1) + many(1), `Write the points as one JSON array, such as [{"text": "…", "action": "run_again"}]. Reading the JSON failed: the file has more than one JSON value`},
+		{many(1) + many(1), `Write the points as one JSON array, such as [{"text": "…", "action": "run_again"}]. Reading the JSON failed: the file continues after the JSON array`},
+		{many(1) + "\n\\ud800", `Write the points as one JSON array, such as [{"text": "…", "action": "run_again"}]. Reading the JSON failed: the file continues after the JSON array`},
+		{`{"text": "a"} []`, `Write the points as a JSON array, such as [{"text": "…", "action": "run_again"}]. The file is a JSON object.`},
 		{" \n", `Write the points as a JSON array, such as [{"text": "…", "action": "run_again"}]. The file is empty.`},
 		{`[]`, "Write at least one point. The array is empty."},
 		{many(21), "Write at most 20 points. The array has 21."},
@@ -95,7 +100,7 @@ func TestPointsStopsAtTheFirstBrokenRule(t *testing.T) {
 		{two(`{"action": "run_again"}`), "Write each point as {text, action}: point 2 has no text."},
 		{two(`{"text": "a", "action": "run_again", "gaps": "Add the empty cart."}`), `Remove "gaps" from point 2: a point has only text, action and question.`},
 		{two(`{"text": 1, "action": "run_again"}`), "Write the text of point 2 as a JSON string. The text is a JSON number."},
-		{text(""), "Write the text of point 2: one sentence of 1 to 500 characters. The text is empty."},
+		{text(""), "Write the text of point 2: one sentence on one line, 1 to 500 characters. The text is empty."},
 		{text(strings.Repeat("a", 501)), "Shorten the text of point 2 to at most 500 characters. The text has 501."},
 		{text(`One\u0007sentence.`), "Remove the character U+0007 from the text of point 2. contracts/harness/v1/verdict.schema.json lists the characters a text cannot have."},
 		{text("One \u202esentence."), "Remove the character U+202E from the text of point 2. contracts/harness/v1/verdict.schema.json lists the characters a text cannot have."},
@@ -123,6 +128,38 @@ func TestPointsStopsAtTheFirstBrokenRule(t *testing.T) {
 		if err := schema.Validate(doc); (err == nil) != (c.want == "") {
 			t.Errorf("%s: the schema's result is %v, Points' is %q", c.file, err, c.want)
 		}
+	}
+}
+
+// TestPointsNeedsPlainUTF8 stops at a file with a byte order mark, a file that is not
+// UTF-8, and a string with an escape of a lone UTF-16 surrogate, which encoding/json
+// reads as U+FFFD. An escaped pair and an escaped backslash before a u read.
+func TestPointsNeedsPlainUTF8(t *testing.T) {
+	text := func(s string) string { return `[{"text": "` + s + `", "action": "run_again"}]` }
+	for _, c := range []struct {
+		file string
+		want error
+	}{
+		{"\xef\xbb\xbf" + text("One sentence."), verdictformat.ErrByteOrderMark},
+		{text("One \xff sentence."), verdictformat.ErrNotUTF8},
+		{text(`One \ud800 sentence.`), verdictformat.ErrNotUTF8},
+		{text(`One \udc00 sentence.`), verdictformat.ErrNotUTF8},
+		{text(`One \ud800\u0041 sentence.`), verdictformat.ErrNotUTF8},
+		{text(`One \ud800`), verdictformat.ErrNotUTF8},
+		{text(`One \ud83d\ude00 sentence.`), nil},
+		{text(`One \\ud800 sentence.`), nil},
+		{text(`One \u00e9 sentence.`), nil},
+	} {
+		_, err := verdictformat.Points([]byte(c.file))
+		if err != c.want {
+			t.Errorf("%q: err = %v, want %v", c.file, err, c.want)
+		}
+	}
+	if got := verdictformat.ErrByteOrderMark.Error(); got != "Save the file without a byte order mark." {
+		t.Errorf("ErrByteOrderMark = %q", got)
+	}
+	if got := verdictformat.ErrNotUTF8.Error(); got != "Save the file as UTF-8." {
+		t.Errorf("ErrNotUTF8 = %q", got)
 	}
 }
 
@@ -160,7 +197,7 @@ func TestCheck(t *testing.T) {
 }
 
 // TestExcludedIsTheSchemasCharacters keeps [verdictformat.Excluded] and the pattern of
-// the schema's $defs text in step, character by character, through U+FFFF and for a
+// the schema's $defs line in step, tab, line feed and carriage return included, character by character, through U+FFFF and for a
 // character past it.
 func TestExcludedIsTheSchemasCharacters(t *testing.T) {
 	schema := compiled(t)

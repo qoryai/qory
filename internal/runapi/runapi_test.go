@@ -12,7 +12,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"slices"
 	"strings"
 	"testing"
 
@@ -213,16 +212,33 @@ func TestWorkItemReadsTheSnapshot(t *testing.T) {
 		t.Errorf("inputs = %+v, outputs = %+v", snapshot.Inputs, snapshot.Outputs)
 	}
 
-	wantVerdict := []runapi.Point{{Text: "The checks failed on the cart page. Run another round.", Action: runapi.ActionRunAgain}}
-	wantPoints := []runapi.Point{{Text: "The ticket does not say which cart is empty. Answer question q1.", Action: runapi.ActionAnswer, Question: "q1"}}
-	if snapshot.Verdict.Verdict != runapi.VerdictEscalate || !slices.Equal(snapshot.Verdict.Points, wantVerdict) ||
-		!slices.Equal(snapshot.Points, wantPoints) {
-		t.Errorf("verdict = %+v, points = %+v", snapshot.Verdict, snapshot.Points)
+	if snapshot.Verdict.Verdict != runapi.VerdictEscalate || snapshot.Verdict.Version.ID != "av_2" {
+		t.Errorf("verdict = %+v", snapshot.Verdict)
 	}
 
 	// A caller prints the whole work item, ticket and notes included, from Raw.
 	if string(snapshot.Raw) != snapshotExample {
 		t.Errorf("Raw = %s", snapshot.Raw)
+	}
+}
+
+// TestWorkItemReadsAnyShapeOfPoints reads a work item whose points and verdict points
+// have another shape than the verdict format: the client has no member for them.
+func TestWorkItemReadsAnyShapeOfPoints(t *testing.T) {
+	other := strings.Replace(snapshotExample, `"points": [{"text": "The ticket`, `"points": "one text", "other": [{"text": "The ticket`, 1)
+	other = strings.Replace(other, `"points": [{"text": "The checks`, `"points": {"text": "The checks`, 1)
+	other = strings.Replace(other, `"action": "run_again"}], "version"`, `"action": "run_again"}, "version"`, 1)
+	if other == snapshotExample {
+		t.Fatal("the example has no points")
+	}
+
+	snapshot, err := serve(t, respond(http.StatusOK, other)).WorkItem(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if snapshot.Verdict.Verdict != runapi.VerdictEscalate {
+		t.Errorf("verdict = %+v", snapshot.Verdict)
 	}
 }
 
@@ -233,7 +249,7 @@ func TestWorkItemReadsAWorkItemInNoStage(t *testing.T) {
 	}
 
 	if snapshot.Stage.ID != nil || snapshot.Stage.Name != nil || snapshot.Run.Workflow != nil ||
-		snapshot.Verdict != nil || snapshot.Points != nil {
+		snapshot.Verdict != nil {
 		t.Errorf("snapshot = %+v", snapshot)
 	}
 }

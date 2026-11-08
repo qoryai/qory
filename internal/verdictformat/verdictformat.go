@@ -13,6 +13,7 @@ import (
 	"regexp"
 	"slices"
 	"sort"
+	"strconv"
 	"sync"
 	"unicode/utf8"
 
@@ -56,6 +57,19 @@ var contract = sync.OnceValues(func() (*jsonschema.Schema, error) {
 	return c.Compile(schemaURL)
 })
 
+// byteOrderMark starts a file that an editor saved with a UTF-8 byte order mark.
+const byteOrderMark = "\xef\xbb\xbf"
+
+// The errors of [Points] for data that is not plain UTF-8. A caller that knows the
+// file's path can name it in the line.
+var (
+	// ErrByteOrderMark is the error of data that starts with a UTF-8 byte order mark.
+	ErrByteOrderMark = errors.New("Save the file without a byte order mark.")
+	// ErrNotUTF8 is the error of data that is not UTF-8, or that has an escape of a
+	// UTF-16 surrogate that is not half of a pair, such as \ud800, in a string.
+	ErrNotUTF8 = errors.New("Save the file as UTF-8.")
+)
+
 // questionID is the id form of a question in contracts/harness/v1/questions.schema.json.
 var questionID = regexp.MustCompile(`^[a-z0-9-]{1,32}$`)
 
@@ -81,9 +95,9 @@ func Check(document []byte) error {
 }
 
 // Points reads data, a JSON array of the points of an escalation, and checks it against
-// the schema. The error starts with the fix and contains the number, from 1, of the
-// first point that breaks a rule, such as "Write each point as {text, action}: point 2
-// has no action." Points does not check that a question is open.
+// the schema. The error starts with the fix. An error about one point contains the
+// point's number from 1 after the fix, such as "Write each point as {text, action}:
+// point 2 has no action." Points does not check that a question is open.
 func Points(data []byte) ([]runapi.Point, error) {
 	items, err := pointsArray(data)
 	if err != nil {
@@ -107,27 +121,32 @@ func Points(data []byte) ([]runapi.Point, error) {
 	return points, nil
 }
 
-// pointsArray reads data, a JSON array of 1 to [MaxPoints] values.
+// pointsArray reads data, a JSON array of 1 to [MaxPoints] values in UTF-8.
 func pointsArray(data []byte) ([]any, error) {
+	if bytes.HasPrefix(data, []byte(byteOrderMark)) {
+		return nil, ErrByteOrderMark
+	}
+	if !utf8.Valid(data) {
+		return nil, ErrNotUTF8
+	}
 	if len(bytes.TrimSpace(data)) == 0 {
 		return nil, errors.New(`Write the points as a JSON array, such as [{"text": "…", "action": "run_again"}]. The file is empty.`)
 	}
 	var doc any
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.UseNumber()
-	err := decoder.Decode(&doc)
-	if err == nil {
-		if _, next := decoder.Token(); !errors.Is(next, io.EOF) {
-			err = errors.New("the file has more than one JSON value")
-		}
+	if err := decoder.Decode(&doc); err != nil {
+		return nil, notJSON(err.Error())
 	}
-	if err != nil {
-		return nil, fmt.Errorf(`Write the points as one JSON array, such as [{"text": "…", "action": "run_again"}]. Reading the JSON failed: %s`,
-			exports.HideValues(err.Error()))
+	if loneSurrogate(data[:decoder.InputOffset()]) {
+		return nil, ErrNotUTF8
 	}
 	array, ok := doc.([]any)
 	if !ok {
 		return nil, fmt.Errorf(`Write the points as a JSON array, such as [{"text": "…", "action": "run_again"}]. The file is a JSON %s.`, kind(doc))
+	}
+	if _, next := decoder.Token(); !errors.Is(next, io.EOF) {
+		return nil, notJSON("the file continues after the JSON array")
 	}
 	if len(array) == 0 {
 		return nil, errors.New("Write at least one point. The array is empty.")
@@ -136,6 +155,51 @@ func pointsArray(data []byte) ([]any, error) {
 		return nil, fmt.Errorf("Write at most %d points. The array has %d.", MaxPoints, len(array))
 	}
 	return array, nil
+}
+
+// notJSON is the error of a file that does not read as one JSON value, with cause.
+func notJSON(cause string) error {
+	return fmt.Errorf(`Write the points as one JSON array, such as [{"text": "…", "action": "run_again"}]. Reading the JSON failed: %s`,
+		exports.HideValues(cause))
+}
+
+// loneSurrogate reports whether data, one JSON value, has an escape of a UTF-16
+// surrogate that is not half of a pair, such as \ud800, in a string. encoding/json reads
+// such an escape as U+FFFD, so the text would change on its way to the run API.
+func loneSurrogate(data []byte) bool {
+	for i := 0; i < len(data); i++ {
+		if data[i] != '\\' || i+1 >= len(data) {
+			continue
+		}
+		if data[i+1] != 'u' {
+			i++
+			continue
+		}
+		r := escaped(data, i)
+		i += 5
+		switch {
+		case r >= 0xdc00 && r <= 0xdfff:
+			return true
+		case r >= 0xd800 && r <= 0xdbff:
+			if next := escaped(data, i+1); next < 0xdc00 || next > 0xdfff {
+				return true
+			}
+			i += 6
+		}
+	}
+	return false
+}
+
+// escaped is the code unit of the escape \uXXXX at data[i:], or -1 when there is none.
+func escaped(data []byte, i int) int {
+	if i+6 > len(data) || data[i] != '\\' || data[i+1] != 'u' {
+		return -1
+	}
+	unit, err := strconv.ParseUint(string(data[i+2:i+6]), 16, 16)
+	if err != nil {
+		return -1
+	}
+	return int(unit)
 }
 
 // readPoint checks item, point number n, and returns it.
@@ -189,17 +253,23 @@ func readPoint(n int, item any) (runapi.Point, error) {
 	return runapi.Point{Text: text, Action: action, Question: question}, nil
 }
 
-// checkText checks text, the text of point number n: 1 to [MaxText] characters, and none
-// that the schema's $defs text excludes.
+// checkText checks text, the text of point number n: 1 to [MaxText] characters on one
+// line, and none that the schema's $defs line excludes.
 func checkText(n int, text string) error {
 	length := utf8.RuneCountInString(text)
 	if length == 0 {
-		return fmt.Errorf("Write the text of point %d: one sentence of 1 to %d characters. The text is empty.", n, MaxText)
+		return fmt.Errorf("Write the text of point %d: one sentence on one line, 1 to %d characters. The text is empty.", n, MaxText)
 	}
 	if length > MaxText {
 		return fmt.Errorf("Shorten the text of point %d to at most %d characters. The text has %d.", n, MaxText, length)
 	}
 	for _, r := range text {
+		switch r {
+		case '\t':
+			return fmt.Errorf("Write the text of point %d on one line. It has a tab (%U).", n, r)
+		case '\n', '\r':
+			return fmt.Errorf("Write the text of point %d on one line. It has a line break (%U).", n, r)
+		}
 		if Excluded(r) {
 			return fmt.Errorf("Remove the character %U from the text of point %d. %s lists the characters a text cannot have.", r, n, contractPath)
 		}
@@ -207,12 +277,12 @@ func checkText(n int, text string) error {
 	return nil
 }
 
-// Excluded reports whether the schema's $defs text excludes r: a control character other
-// than tab, line feed and carriage return, a bidirectional control, a separator U+2028 or
-// U+2029, or one of the format characters it lists.
+// Excluded reports whether the schema's $defs line excludes r: any control character,
+// tab, line feed and carriage return included, a bidirectional control, a separator
+// U+2028 or U+2029, or one of the format characters it lists.
 func Excluded(r rune) bool {
 	switch {
-	case r <= 0x08, r == 0x0b, r == 0x0c, r >= 0x0e && r <= 0x1f, r >= 0x7f && r <= 0x9f:
+	case r <= 0x1f, r >= 0x7f && r <= 0x9f:
 		return true
 	case r == 0xad, r == 0x61c, r == 0x180e, r == 0x200b, r == 0x200e, r == 0x200f:
 		return true

@@ -128,8 +128,6 @@ type Snapshot struct {
 	Outputs []Output `json:"outputs"`
 	// Verdict is the work item's newest verdict, nil for none.
 	Verdict *GivenVerdict `json:"verdict"`
-	// Points is the stage's points, nil for none.
-	Points []Point `json:"points"`
 
 	Raw json.RawMessage `json:"-"`
 }
@@ -151,17 +149,16 @@ type Output struct {
 	Check    string      `json:"check"`
 }
 
-// GivenVerdict is a verdict that the work item has. Points is nil for a verdict other
-// than escalate.
+// GivenVerdict is a verdict that the work item has.
 type GivenVerdict struct {
 	Verdict string      `json:"verdict"`
-	Points  []Point     `json:"points"`
 	Version *VersionRef `json:"version"`
 }
 
-// Point is one point of an escalation: what is wrong or missing, and what a person can
-// do. Question is the id of a question for the action answer, and empty for run_again.
-// The contract is contracts/harness/v1/verdict.schema.json.
+// Point is one point of an escalation that [Client.PushVerdict] sends: what is wrong or
+// missing, and what a person can do. Question is the id of a question for the action
+// answer, and empty for run_again. The contract is
+// contracts/harness/v1/verdict.schema.json.
 type Point struct {
 	Text     string `json:"text"`
 	Action   string `json:"action"`

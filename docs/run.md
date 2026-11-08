@@ -2661,8 +2661,8 @@ format](../contracts/harness/v1/README.md#the-verdict-format):
 ```
 
 qory checks the file before it sends or keeps the verdict. A file that breaks a rule
-stops the command with exit 2, and the error's first line gives the fix, such as `Write
-each point as {text, action}: point 2 has no action.` qory does not check that the
+stops the command with exit 2, and the first line of the error is the fix, such as
+`Write each point as {text, action}: point 2 has no action.` qory does not check that the
 question of an `answer` point is open; push the `questions` artifact with that question
 before the verdict.
 

@@ -79,7 +79,7 @@ var runStartFolder = func() string {
 }
 
 // maxPointsFile is the most read of the file of --points: the 64 KiB of the request's
-// body. Twenty points of 500 characters fit in it.
+// body.
 const maxPointsFile = 64 << 10
 
 // noWorkItemText is what qory work-item show prints outside a run with no work item file.
@@ -675,9 +675,9 @@ func newRunVerdict() *cobra.Command {
 run ends.
 
 escalate needs --points, a file with a JSON array of 1 to 20 points for a person. Each
-point is {text, action}: text is one sentence of 1 to 500 characters on what is wrong or
-missing, and action is answer or run_again. A point with the action answer also has
-question, the id of an open question. qory checks the file against
+point is {text, action}: text is one sentence on one line, 1 to 500 characters, on what
+is wrong or missing, and action is answer or run_again. A point with the action answer
+also has question, the id of an open question. qory checks the file against
 contracts/harness/v1/verdict.schema.json before it sends or keeps anything.
 
 Outside a run, qory prints the verdict and keeps it in .qory/artifacts/verdict/; nothing
@@ -762,7 +762,12 @@ func readPoints(verdict, path string, given bool) ([]runapi.Point, error) {
 	}
 
 	points, err := verdictformat.Points(data)
-	if err != nil {
+	switch {
+	case errors.Is(err, verdictformat.ErrByteOrderMark):
+		return nil, input(fmt.Errorf("Save %s without a byte order mark.", path))
+	case errors.Is(err, verdictformat.ErrNotUTF8):
+		return nil, input(fmt.Errorf("Save %s as UTF-8.", path))
+	case err != nil:
 		return nil, input(err)
 	}
 

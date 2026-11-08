@@ -860,16 +860,17 @@ func TestArtifactPushChecksItsArguments(t *testing.T) {
 }
 
 // verdictPoints is a file of --points with a point to answer and a point to run again,
-// and verdictPointsBody is the same points as qory sends and keeps them.
+// and verdictPointsBody is the same points as qory sends and keeps them, with < and &
+// unescaped, as encoding/json's Marshal would not write them.
 const (
 	verdictPoints = `[
   {"text": "The spec does not say which customers see the new price. Answer question q4.", "action": "answer", "question": "q4"},
-  {"text": "The checks script failed on the spec's links. Run another round.", "action": "run_again"}
+  {"text": "The checks script failed on the spec's rule a < b & c. Run another round.", "action": "run_again"}
 ]
 `
 	verdictPointsBody = `{"verdict":"escalate","points":[` +
 		`{"text":"The spec does not say which customers see the new price. Answer question q4.","action":"answer","question":"q4"},` +
-		`{"text":"The checks script failed on the spec's links. Run another round.","action":"run_again"}]}`
+		`{"text":"The checks script failed on the spec's rule a < b & c. Run another round.","action":"run_again"}]}`
 )
 
 // writePoints writes content to points.json in dir and returns its path.
@@ -953,6 +954,10 @@ func TestRunVerdictChecksItsArguments(t *testing.T) {
 		return writePoints(t, dir, content)
 	}
 
+	withMark := points("\xef\xbb\xbf" + verdictPoints)
+	notUTF8 := points("[{\"text\": \"The checks failed \xff. Run another round.\", \"action\": \"run_again\"}]")
+	lone := points(`[{"text": "The checks failed \ud800. Run another round.", "action": "run_again"}]`)
+
 	for _, c := range []struct {
 		args []string
 		want string
@@ -967,6 +972,9 @@ func TestRunVerdictChecksItsArguments(t *testing.T) {
 		{[]string{"run", "verdict", "escalate", "--points", points(`[{"text": "The checks failed. Run another round.", "action": "run_again"}, {"text": "The checks failed."}]`)},
 			"Write each point as {text, action}: point 2 has no action."},
 		{[]string{"run", "verdict", "escalate", "--points", points(`[]`)}, "Write at least one point. The array is empty."},
+		{[]string{"run", "verdict", "escalate", "--points", withMark}, "Save " + withMark + " without a byte order mark."},
+		{[]string{"run", "verdict", "escalate", "--points", notUTF8}, "Save " + notUTF8 + " as UTF-8."},
+		{[]string{"run", "verdict", "escalate", "--points", lone}, "Save " + lone + " as UTF-8."},
 		{[]string{"run", "verdict", "escalate", "--points", points(`[{"text": "The spec does not say who sees the price.", "action": "answer"}]`)},
 			"Add question, the id of an open question, to point 1: a point with the action answer has one."},
 		{[]string{"run", "verdict", "escalate", "--points", points(`{"verdict": "escalate", "gaps": "Add the empty cart."}`)},
