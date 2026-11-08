@@ -497,6 +497,8 @@ type composeOptions struct {
 	// walled is set for a run behind a wall: the home contains copies of every module's
 	// files, see [copies].
 	walled bool
+	// writable are the paths of a walled run's mounts that the container may write.
+	writable []string
 	// hidden is set for a run whose documents set harness_hidden: the home contains
 	// copies of every module's files, as for a walled run, so it contains no link.
 	hidden bool
@@ -683,6 +685,9 @@ func composeHome(out, errOut io.Writer, o composeOptions) (*composed, error) {
 		return nil, err
 	}
 	defer pr.res.Close()
+	if err := pushChecksWritable(o, pr); err != nil {
+		return nil, err
+	}
 	if o.check {
 		return nil, runCheck(out, pr)
 	}
@@ -728,6 +733,26 @@ func composeHome(out, errOut io.Writer, o composeOptions) (*composed, error) {
 		workflows = res.Stack.Workflows
 	}
 	return &composed{rep: rep, targets: targets, warnings: pr.warnings, harness: harnessSources(res, o.named()), workflows: workflows}, nil
+}
+
+// pushChecksWritable stops a walled run before the home is written when a module
+// declares a push check and the agent could change the checks: when the home is inside
+// the checkout, which the container mounts read-write with the home, and when a mount
+// the container may write is at or inside the home. A home without push checks starts as
+// before.
+func pushChecksWritable(o composeOptions, pr *prepared) error {
+	if !o.run || !o.walled || len(pr.res.PushChecks) == 0 {
+		return nil
+	}
+	if reallyWithin(pr.at.root, pr.at.home) {
+		return input(fmt.Errorf("Set harness.home to a folder outside the checkout for a walled run. %s is inside the checkout, where the agent can change the push checks.", exports.Value(pr.at.home, false)))
+	}
+	for _, path := range o.writable {
+		if within(resolvedUp(pr.at.home), resolvedUp(path)) {
+			return input(fmt.Errorf("Mount %s read-only, or move it out of the harness home, for a walled run with push checks. The agent could change the push checks through it.", exports.Value(path, false)))
+		}
+	}
+	return nil
 }
 
 // launchEnv is, per runtime with a launch template, the variables the harness sets when

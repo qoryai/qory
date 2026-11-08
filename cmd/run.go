@@ -78,6 +78,7 @@ func newRun() *cobra.Command {
 	var stopSignal string
 	var secretFD, keyFD int
 	var codeFile, gatewayURL string
+	var machineSteps string
 	c := &cobra.Command{
 		Use:   "run [runtime] [-- argument...]",
 		Short: "Run the agent on its harness, observed and recorded",
@@ -151,6 +152,10 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				}
 				fdKey = k
 				secretmask.Default().Add(k.Secret())
+			}
+			// The machine's steps go into the record of a run from a run code alone.
+			if cmd.Flags().Changed(machineStepsFileFlag) && !cmd.Flags().Changed(runCodeFileFlag) {
+				return input(errors.New(textMachineOnlyWithCode))
 			}
 			// A run code is read here and redeemed for the run key last before the run
 			// starts, once every check that can stop the run has passed, so that a run they
@@ -452,7 +457,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 						return err
 					}
 					defer runLock.Release()
-					return runCodePrebuild(ctx, stderr, streams.errOut, conf.Forager, state, user, exe, key, doc, spec.RunID)
+					return runCodePrebuild(ctx, stderr, streams.errOut, conf.Forager, state, user, exe, key, doc, spec.RunID, machineSteps)
 				}
 				if fromCode, err = codeRunOf(doc); err != nil {
 					return err
@@ -617,6 +622,9 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				}
 				return withRecord(streams.errOut, err, record)
 			}
+			// A walled run whose composed home has push checks checks each POST of its run
+			// API from behind the wall, see [runPushChecks].
+			checks := &runPushChecks{report: said}
 			run, err := openRun(ctx, spec.OpenSpec)
 			if err != nil {
 				closeGateway()
@@ -629,6 +637,10 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			// no other run can be listed under: the entry of that id is this run's.
 			if walled {
 				defer openingRun(spec.RunID)()
+			}
+			// The start of the machine comes first in the run's record, before the fetch.
+			if machineSteps != "" {
+				writeMachineStep(run, machineSteps, said)
 			}
 			// The run's time limit counts from its open: the compose and the session.
 			opened := time.Now()
@@ -655,6 +667,12 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			// checkout, see [readsOnly].
 			var readOnly bool
 			prepareLaunch := func(w io.Writer) (freshHome bool, err error) {
+				composing.writable = nil
+				for _, m := range spec.Mounts {
+					if !m.ReadOnly {
+						composing.writable = append(composing.writable, m.Path)
+					}
+				}
 				harness, workflows, err := composeForRun(w, composing, at, runtime, dispatched, walled)
 				if err != nil && composing.git != nil && composing.git.Named != nil {
 					return false, namedComposeError(err, composing.git.Named)
@@ -735,7 +753,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			// for a walled run the record of each place the container may write.
 			prepareSession := func(freshHome bool) error {
 				if wrapsAgentEnv(freshHome, walled) {
-					done, err := wrapAgentEnv(&spec, said)
+					done, err := wrapAgentEnv(&spec, hasRunAPI(run), said)
 					if err != nil {
 						return err
 					}
@@ -867,6 +885,24 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				})
 				if err != nil {
 					return err
+				}
+				// A home whose push checks qory cannot run stops the run here, before the
+				// setup and the agent. The run's forwarder checks the POSTs from behind the
+				// wall from here on: nothing behind the wall has run yet.
+				if walled {
+					loadCtx, cancel := ctx, func() {}
+					if timeout > 0 {
+						loadCtx, cancel = context.WithDeadline(ctx, opened.Add(timeout))
+					}
+					done, err := checks.load(loadCtx, run, at.home, spec.RunID, &spec, remote || server != nil && !local)
+					cancel()
+					if err != nil {
+						return &runLineError{input(err)}
+					}
+					cleanups = append(cleanups, done)
+					if err := checks.set(run); err != nil {
+						return &runLineError{err}
+					}
 				}
 				// Only the push step's commit uses the run number. readOnly is set by the
 				// compose, so the check comes here, before the session.
@@ -1045,7 +1081,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					limit = opened.Add(timeout)
 				}
 				pushCtx, cancel := pushContext(ctx, again, limit, pushTimes.limit, pushTimes.signal)
-				ending.noStep, pushErr = removeThenPush(pushCtx, run, streams.errOut, branch, cwd, spec.RunID, fromCode.runNumber, out, walled)
+				ending.noStep, pushErr = removeThenPush(pushCtx, run, streams.errOut, branch, cwd, spec.RunID, fromCode.runNumber, out, walled, checks)
 				ending.stopped = ctx.Err() != nil
 				ending.again, ending.got = again.Err() != nil, got()
 				ending.cut = pushCtx.Err() != nil
@@ -1122,6 +1158,9 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 	c.Flags().IntVar(&keyFD, runKeyFDFlag, 0, runKeyFDUsage)
 	c.Flags().StringVar(&codeFile, runCodeFileFlag, "", runCodeFileUsage)
 	c.Flags().StringVar(&gatewayURL, gatewayFlag, "", gatewayUsage)
+	c.Flags().StringVar(&machineSteps, machineStepsFileFlag, "", machineStepsFileUsage)
+	// A machine's start script passes the flag; a person has no use for it.
+	c.Flags().Lookup(machineStepsFileFlag).Hidden = true
 	c.Flags().StringVar(&o.limits.ShmSize, "shm-size", "", "the size of /dev/shm in the container, such as 2g ("+config.ForagerFileName+": wall.shm_size)")
 	homeFlags(c, &h)
 	composeFlags(c, &composing)
@@ -1263,7 +1302,8 @@ type openedRun interface {
 	// before the first join; see [fetchImage].
 	FetchImage(ctx context.Context) error
 	Close(ctx context.Context, out session.Outcome) (*session.Closed, error)
-	// StartStep starts a step of the run's host work, of kind fetch, compose or push.
+	// StartStep starts a step of the run's host work, of kind fetch, compose, push or
+	// machine.
 	StartStep(kind, name string) (hostStep, error)
 	// HostProxy starts the run's host proxy, for the fetch and the push of the run's
 	// repositories on this machine.
@@ -1287,6 +1327,9 @@ type openedRun interface {
 	Image() session.Image
 	// Dir is the run directory.
 	Dir() string
+	// SetRunAPICheck sets the check of each POST to the run API from behind the wall,
+	// before the setup and the first join; see [session.Run.SetRunAPICheck].
+	SetRunAPICheck(check func(ctx context.Context, req session.RunAPIRequest) (*session.RunAPIRefusal, error)) error
 }
 
 // hostProxy is the run's host proxy or stack proxy as qory run uses it: the proxy git

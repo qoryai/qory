@@ -327,6 +327,67 @@ func TestModuleSchemaTakesTheHostForagerTakes(t *testing.T) {
 	}
 }
 
+// TestModuleSchemaMatchesTheReaderOnPushChecks keeps the schema and module.ReadManifest in
+// step on push_checks: each item passes both or fails both. The one rule the schema
+// cannot state, one type twice in one module, is the reader's alone.
+func TestModuleSchemaMatchesTheReaderOnPushChecks(t *testing.T) {
+	schema, err := jsonschema.NewCompiler().Compile("../../contracts/harness/v1/module.schema.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		items string
+		valid bool
+	}{
+		{`[]`, true},
+		{`[{"type": "spec", "command": ["skills/run/checks.js", "push", "spec"]}]`, true},
+		{`[{"type": "spec", "command": ["checks.js"]}, {"type": "review-comments", "command": ["./checks.js", ""]}]`, true},
+		{`[{"type": "spec", "command": ["c.js", "--dir", "../x"]}]`, true},
+		{`[{"type": "decision-record", "command": ["c.js"], "reads": ["acceptance-criteria", "questions"]}]`, true},
+		{`[{"type": "spec", "command": ["c.js"], "reads": []}]`, true},
+		{`[{"type": "spec", "command": ["c.js"], "reads": ["Questions"]}]`, false},
+		{`[{"type": "spec", "command": ["c.js"], "reads": ["questions", "questions"]}]`, false},
+		{`[{"type": "spec", "command": ["c.js"], "reads": [3]}]`, false},
+		{`[{"type": "spec", "command": ["c.js"], "reads": "questions"}]`, false},
+		{`[{"type": "Spec", "command": ["c.js"]}]`, false},
+		{`[{"type": "spec-", "command": ["c.js"]}]`, false},
+		{`[{"type": "", "command": ["c.js"]}]`, false},
+		{`[{"type": "` + strings.Repeat("a", 65) + `", "command": ["c.js"]}]`, false},
+		{`[{"command": ["c.js"]}]`, false},
+		{`[{"type": "spec"}]`, false},
+		{`[{"type": "spec", "command": []}]`, false},
+		{`[{"type": "spec", "command": [""]}]`, false},
+		{`[{"type": "spec", "command": ["/usr/bin/node"]}]`, false},
+		{`[{"type": "spec", "command": ["../c.js"]}]`, false},
+		{`[{"type": "spec", "command": ["a/../c.js"]}]`, false},
+		{`[{"type": "spec", "command": ["a/.."]}]`, false},
+		{`[{"type": "spec", "command": ["c.js", 3]}]`, false},
+		{`[{"type": "spec", "command": "c.js"}]`, false},
+		{`[{"type": "spec", "command": ["c.js"], "timeout": 5}]`, false},
+		{`{"spec": ["c.js"]}`, false},
+	} {
+		var items any
+		if err := json.Unmarshal([]byte(c.items), &items); err != nil {
+			t.Fatal(err)
+		}
+		doc := map[string]any{"apiVersion": "qory.dev/v1alpha1", "name": "core", "push_checks": items}
+		if err := schema.Validate(doc); (err == nil) != c.valid {
+			t.Errorf("schema: %s valid=%v err=%v", c.items, c.valid, err)
+		}
+		dir := t.TempDir()
+		body, err := yaml.Marshal(doc)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, module.ManifestName), body, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := module.ReadManifest(dir); (err == nil) != c.valid {
+			t.Errorf("reader: %s valid=%v err=%v", c.items, c.valid, err)
+		}
+	}
+}
+
 // TestConfigSchemaKnowsTiers takes harness.tiers in both entry forms, with or beside a
 // document, and refuses a name that is not a tier, an empty model, an entry without a
 // model and a key the entry does not have. A stack has no tiers.
@@ -375,7 +436,7 @@ func TestConfigSchemaKnowsTiers(t *testing.T) {
 
 // questionsDocument is a document of questions.schema.json that passes: a question
 // answered with an option, with an earlier answer of a note alone that a run reopened,
-// and an open question that follows from it.
+// an open question that follows from it, and a question that a run decided.
 const questionsDocument = `{"questions": [
  {"id": "q1", "question": "Which database does the service use?",
   "context": "The service reads ` + "`DATABASE_URL`" + `.\n\n- one\n- two",
@@ -384,7 +445,11 @@ const questionsDocument = `{"questions": [
   "answer": {"option": "PostgreSQL", "by": {"name": "Sam Example"}, "at": "2026-11-04T11:00:00Z"},
   "history": [{"option": null, "note": "Not\nsure", "by": {"name": "Sam Example"}, "at": "2026-11-04T10:30:00Z", "reopened": {"run": 2, "at": "2026-11-04T10:45:00Z"}}]},
  {"id": "q-2", "question": "Which port does it listen on?", "options": [],
-  "state": "open", "asked": {"run": 2, "at": "2026-11-04T10:45:00Z"}, "follows": ["q1"]}
+  "state": "open", "asked": {"run": 2, "at": "2026-11-04T10:45:00Z"}, "follows": ["q1"]},
+ {"id": "q3", "question": "Which cache does the service use?",
+  "options": [{"title": "Redis", "explanation": "The cache of the other services."}, {"title": "None", "explanation": "Every read goes to the database."}],
+  "state": "decided", "asked": {"run": 2, "at": "2026-11-04T10:50:00Z"},
+  "decision": {"option": "Redis", "reason": "The other services use Redis.", "run": 2, "at": "2026-11-04T10:51:00Z"}}
 ]}`
 
 // TestQuestionsSchema is each document that questions.schema.json passes or fails.
@@ -412,6 +477,20 @@ func TestQuestionsSchema(t *testing.T) {
 		answerStart  = `"answer": {"option": "PostgreSQL"`
 		historyStart = `"history": [{"option": null, "note": "Not\nsure"`
 	)
+	// decided is the state of the decided question, decisionStart starts its decision, and
+	// redis is its first option.
+	const (
+		decided       = `"state": "decided"`
+		decisionStart = `"decision": {"option": "Redis"`
+		redis         = `{"title": "Redis", "explanation": "The cache of the other services."`
+	)
+	// reason and decisionRun are members of the decision, and answer is a member's answer
+	// to the decided question.
+	const (
+		reason      = `"reason": "The other services use Redis.", `
+		decisionRun = `"run": 2, "at": "2026-11-04T10:51:00Z"`
+		answer      = `"answer": {"option": "None", "by": {"name": "Kim Example"}, "at": "2026-11-04T12:00:00Z"}, `
+	)
 	for _, c := range []struct {
 		doc   string
 		valid bool
@@ -428,6 +507,42 @@ func TestQuestionsSchema(t *testing.T) {
 		{replace(`"state": "open"`, `"state": "withdrawn"`), true},
 		{replace(`"state": "open"`, `"state": "closed"`), false},
 		{replace(`"state": "open", `, ``), false},
+		// decision is present when state is decided, stays when the state changes after
+		// that, and a decided question has at least one option and none with recommended.
+		{replace(`"options": [{"title": "Redis", "explanation": "The cache of the other services."}, {"title": "None", "explanation": "Every read goes to the database."}]`, `"options": []`), false},
+		{replace(`, {"title": "None", "explanation": "Every read goes to the database."}`, ``), true},
+		{replace(decided, `"state": "withdrawn"`), true},
+		{replace(decided+`, `, `"state": "answered", `+answer), true},
+		{replace(decided, `"state": "open"`), true},
+		{strings.Replace(replace(decided+`, `, `"state": "answered", `+answer), redis, redis+`, "recommended": true`, 1), true},
+		{replace(redis, redis+`, "recommended": true`), false},
+		{replace(redis, redis+`, "recommended": false`), false},
+		{replace(",\n  "+decisionStart+`, `+reason+decisionRun+`}`, ``), false},
+		{replace(`"state": "open"`, decided), false},
+		{replace(decided+`, `, decided+`, `+answer), false},
+		// decision is an object; each member is required and has the limits of its
+		// definition. An option title the question does not have passes: the schema
+		// cannot compare the two.
+		{replace(`"decision": {"option": "Redis", "reason": "The other services use Redis.", "run": 2, "at": "2026-11-04T10:51:00Z"}`, `"decision": "Redis"`), false},
+		{replace(`"decision": {"option": "Redis", "reason": "The other services use Redis.", "run": 2, "at": "2026-11-04T10:51:00Z"}`, `"decision": null`), false},
+		{replace(decisionStart, `"decision": {"option": "MySQL"`), true},
+		{replace(decisionStart+`, `, `"decision": {`), false},
+		{replace(reason, ``), false},
+		{replace(`, `+decisionRun, `, "at": "2026-11-04T10:51:00Z"`), false},
+		{replace(decisionRun, `"run": 2`), false},
+		{replace(decisionStart, `"decision": {"option": ""`), false},
+		{replace(decisionStart, `"decision": {"option": null`), false},
+		{replace(decisionStart, `"decision": {"option": "`+strings.Repeat("a", 200)+`"`), true},
+		{replace(decisionStart, `"decision": {"option": "`+strings.Repeat("a", 201)+`"`), false},
+		{replace(decisionStart, `"decision": {"option": "Re\ndis"`), false},
+		{replace(reason, `"reason": "", `), false},
+		{replace(reason, `"reason": "`+strings.Repeat("a", 2000)+`", `), true},
+		{replace(reason, `"reason": "`+strings.Repeat("a", 2001)+`", `), false},
+		{replace(reason, `"reason": "One.\nTwo.", `), true},
+		{replace(reason, `"reason": "\u0007", `), false},
+		{replace(decisionRun, `"run": 0, "at": "2026-11-04T10:51:00Z"`), false},
+		{replace(decisionRun, `"run": 2.5, "at": "2026-11-04T10:51:00Z"`), false},
+		{replace(decisionRun, `"run": 2, "at": "2026-11-04T10:51:00+01:00"`), false},
 		// id
 		{replace(`"id": "q-2"`, `"id": "`+strings.Repeat("a", 32)+`"`), true},
 		{replace(`"id": "q-2"`, `"id": "`+strings.Repeat("a", 33)+`"`), false},
@@ -534,6 +649,7 @@ func TestQuestionsSchema(t *testing.T) {
 		{replace(`"asked": {"run": 1, `, `"asked": {"step": "explore", "run": 1, `), false},
 		{replace(`"reopened": {"run": 2, `, `"reopened": {"note": "a", "run": 2, `), false},
 		{replace(historyStart, historyStart+`, "rank": 1`), false},
+		{replace(decisionStart, decisionStart+`, "rank": 1`), false},
 	} {
 		var doc any
 		if err := json.Unmarshal([]byte(c.doc), &doc); err != nil {

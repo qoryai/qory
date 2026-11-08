@@ -579,7 +579,8 @@ func Build(res *compose.Result, home string, runtimes ...Runtime) (err error) {
 // and renames; a check stages elsewhere and compares. BuildAt links every module's
 // directory as modules/<name>, links the shared skills and hooks for the bare address and
 // writes AGENTS.md at the staging root with its references resolved the same way, since
-// every checkout link reads them, then calls each runtime's Render for the subdirectory
+// every checkout link reads them, and push-checks.json beside it when a module declares a
+// push check, [PushChecksFile], then calls each runtime's Render for the subdirectory
 // named after it and links the runtime's files entries into that subdirectory. The links
 // point at the modules by absolute path, so a tree staged anywhere contains the same
 // links. A module the home holds a copy of, see [compose.Module.Copy], is copied in place
@@ -608,6 +609,9 @@ func BuildAt(res *compose.Result, stage, home string, runtimes ...Runtime) error
 			return err
 		}
 	}
+	if err := writePushChecks(res, stage, home); err != nil {
+		return err
+	}
 	for _, p := range runtimes {
 		dir := filepath.Join(stage, p.Name())
 		if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -621,6 +625,30 @@ func BuildAt(res *compose.Result, stage, home string, runtimes ...Runtime) error
 		}
 	}
 	return nil
+}
+
+// PushChecksFile is the file at the root of a home with the push checks the modules
+// declare, written only when a module declares one.
+const PushChecksFile = "push-checks.json"
+
+// PushChecks is the content of [PushChecksFile]: each check with its program's absolute
+// path in the home.
+type PushChecks struct {
+	PushChecks []compose.PushCheck `json:"push_checks"`
+}
+
+// writePushChecks writes [PushChecksFile] into stage, with each program's path in home;
+// nothing when no module declares a push check.
+func writePushChecks(res *compose.Result, stage, home string) error {
+	checks := res.PushChecksFor(home)
+	if len(checks) == 0 {
+		return nil
+	}
+	data, err := json.MarshalIndent(PushChecks{PushChecks: checks}, "", "  ")
+	if err != nil {
+		return err
+	}
+	return WriteFile(stage, PushChecksFile, append(data, '\n'))
 }
 
 // Difference is one path at which two trees differ, as [Diff] reports it.

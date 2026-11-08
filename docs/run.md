@@ -221,6 +221,27 @@ go to the runtime, after the launch template's arguments.
 The report fixes no variable and adds no mount. Behind a wall, `harness.home` comes from
 the `qory.yaml` in qory's configuration directory alone: another `qory.yaml` that moves
 the home refuses a walled run.
+A walled run whose home is inside the checkout, and whose modules declare `push_checks`,
+stops before the agent starts, with exit 2: `Set harness.home to a folder outside the
+checkout for a walled run. <path> is inside the checkout, where the agent can change the
+push checks.` The container mounts such a home with the checkout, read-write. So does a
+walled run with push checks whose `wall.mounts` or `--mount` has a read-write mount at or
+inside the home: `Mount <path> read-only, or move it out of the harness home, for a walled
+run with push checks. The agent could change the push checks through it.` A walled run
+whose home has a `push-checks.json` that qory cannot read stops before the setup and the
+agent, with exit 2: `Compose the harness again, and run again. The push checks in <path>
+could not be read: <cause>.` It stops there with exit 2 too when the push checks would
+run on another engine than the run's containers, `Switch the engine back to the one the
+run started on, and run again. The push checks would run on the engine <id>, and the
+run's containers are on the engine <id>.`, and when the run API of a run from a control
+plane fails, `Open the run through a gateway that sends the run API address, and run
+again. The push checks read the artifacts through the run API, which failed: <cause>.`,
+or when the run API address is not an http or https URL: `Update the run's gateway, and
+run again. The run API address that the gateway sent is not one the push checks can use:
+<cause>.` When Forager cannot turn on the check of the POSTs from behind the wall, the run stops
+there with exit 1: `Run again. Turning on the push checks for the POSTs from behind the
+wall failed, so the run stopped before the setup: <cause>.` A home without push checks,
+and a run with no control plane, start as before, with no check turned on.
 
 When the run ends, qory says how, and its exit status goes with it:
 
@@ -391,13 +412,17 @@ It holds:
 The record has `qory run`'s work before the agent starts as steps, each with its lines and
 how it ended:
 
-1. When the run configuration lists repositories, the fetch, named after the run's
+1. For a run from a run code given `--machine-steps-file <file>`, which a machine's start
+   script passes, the step `start machine`, of kind `machine`, right after the run opens:
+   one line per entry of the file, such as `start Docker  3.2 s`, and it ends `succeeded`.
+   With a bad file the run has no such step, qory prints one line, and the run goes on.
+2. When the run configuration lists repositories, the fetch, named after the run's
    repository, such as `fetch github.com/example-org/shop`, with `and 1 further
    repository` when there are two.
-2. The compose, `compose the harness for claude`, or `compose the harness` when you name
+3. The compose, `compose the harness for claude`, or `compose the harness` when you name
    no runtime. The step ends once `qory run` has read the agent's launch from the
    composed home.
-3. For a walled run whose policy names its image by a reference pinned by digest, the
+4. For a walled run whose policy names its image by a reference pinned by digest, the
    image step, named after the reference. Forager first requests the image's manifest
    from its registry through the run's proxy, with the run's credentials: a `HEAD` of
    `/v2/<repository>/manifests/<digest>`, over https, or over http for a registry on
@@ -2652,6 +2677,28 @@ any other artifact it fetches the approved version, or the newest when none is a
 `qory artifact push` exits 4, with the type and the limit, for a type that the workspace
 does not have, for too many files, and for files over a limit. One version has at most 100
 files through the run API, whatever the type's maximum.
+
+In a walled run whose modules declare a push check for the type, the check runs before the
+push reaches Qory Apiary (see Push checks in `contracts/harness/v1/README.md`). A check
+that does not pass stops the push with 422 `push_check_failed`, and `qory artifact push`
+exits 4. `qory artifact push` prints the fix line, such as `Fix each finding below and push
+again. The check for spec failed:`, then each finding of the check on a separate line:
+
+```text
+✗ Fix each finding below and push again. The check for spec failed:
+  spec.md: the section Goal is missing
+```
+
+Fix the files and push again. A check that did not finish stops the push with 503
+`push_check_unavailable`, and `qory artifact push` exits 1 with `Run the push again: the
+check before the push did not finish.` qory run writes the cause on its stderr, as `qory
+run: the check before a push did not finish, and the push was not stored (503
+push_check_unavailable): <cause>`. Neither push stores a version or keeps a copy in the
+store. The push step of a write run runs the check of the type `branch` before it stores
+its version. A check that does not pass fails the step as when the version is not stored:
+the step's line, which ends `the version did not pass the check for branch; the code is
+used`, comes first, then `The check for branch failed:` and the findings, each a line of
+qory run.
 `qory run verdict` exits 4 for a request over its limit too. `qory work-item show` exits 3
 with no work item. These numbers mean a collision and a foreign path on `qory harness`.
 
@@ -3568,7 +3615,7 @@ docker build -t qory-prebuild --build-arg BASE=qory-agent-docker images/prebuild
 
 | Image | What it holds |
 |---|---|
-| `agent` | Claude Code at the version Forager's descriptor sets, `git`, `gh`, Node, the system's authorities |
+| `agent` | Claude Code at the version Forager's descriptor sets, `git`, `gh`, poppler's `pdftoppm`, Node, the system's authorities |
 | `agent-docker` | `agent`, and Docker's daemon and command |
 | `agent-go` | `agent`, and Go |
 | `agent-go-docker` | `agent-docker`, and Go |

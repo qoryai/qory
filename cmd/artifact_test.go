@@ -681,6 +681,36 @@ func TestArtifactPushExitStatuses(t *testing.T) {
 	}
 }
 
+// TestArtifactPushOfAFailedPushCheck is a push that a walled run's push check stops:
+// 422 push_check_failed exits 4 with the message, then each finding on a separate line,
+// and keeps no copy; 503 push_check_unavailable exits 1 with the message.
+func TestArtifactPushOfAFailedPushCheck(t *testing.T) {
+	root := inCheckout(t)
+	server := startRunAPI(t)
+	server.status = http.StatusUnprocessableEntity
+	server.response = `{"error":"push_check_failed","message":"Fix each finding below and push again. The check for spec failed:",` +
+		`"findings":["spec.md: the section Goal is missing","spec.md: 2 links point nowhere"]}`
+
+	_, err := runIn(t, "# Spec\n", "artifact", "push", "spec", "-")
+	want := "Fix each finding below and push again. The check for spec failed:\n" +
+		"spec.md: the section Goal is missing\nspec.md: 2 links point nowhere"
+	wantExit(t, err, cmd.ExitArtifactRefused, want)
+
+	if err != nil && err.Error() != want {
+		t.Errorf("err = %q, want %q", err, want)
+	}
+
+	if _, err := os.Stat(filepath.Join(root, ".qory", "artifacts", "spec")); !os.IsNotExist(err) {
+		t.Errorf("the store has a copy of the version: %v", err)
+	}
+
+	server.status = http.StatusServiceUnavailable
+	server.response = `{"error":"push_check_unavailable","message":"Run the push again: the check before the push did not finish."}`
+
+	_, err = runIn(t, "# Spec\n", "artifact", "push", "spec", "-")
+	wantExit(t, err, 1, "Run the push again: the check before the push did not finish.")
+}
+
 func TestArtifactPushOverTheRunAPILimitReadsNoFile(t *testing.T) {
 	root := inCheckout(t)
 	server := startRunAPI(t)
