@@ -41,9 +41,9 @@ func (h *harness) machineLogs(id string) (logs []contracts.MachineLog, bodies []
 // qory run ended, the pool uploads its output as the dispatch's machine log, once,
 // after its end's line. Each line is as the pool's log has it, without the dispatch id,
 // so each line with what starts a secret is the pool's fixed line. The log is not
-// truncated, and the fake recorded it. The fake got claim, dispatched and the machine
-// log, in that order, and after them only the pool's next claims, which may come at any
-// time before it stops.
+// truncated, and the fake recorded it. The fake got claim, dispatched, the machine log
+// and the machine end gone, in that order, and after them only the pool's next claims,
+// which may come at any time before it stops.
 func TestTheOutputIsTheMachineLog(t *testing.T) {
 	h := newHarness(t, 1)
 	h.script(script{Say: []string{"key QAK~abc", "run key qRk~abc.def", "code QECR~ABC", "bye"}})
@@ -64,8 +64,8 @@ func TestTheOutputIsTheMachineLog(t *testing.T) {
 		t.Errorf("the fake recorded %v", got.MachineLog)
 	}
 	routes := h.srv.Routes()
-	i := slices.Index(routes, provisionertest.RouteMachineLog)
-	order := []provisionertest.Route{provisionertest.RouteClaim, provisionertest.RouteDispatched, provisionertest.RouteMachineLog}
+	i := slices.Index(routes, provisionertest.RouteMachineEnd)
+	order := []provisionertest.Route{provisionertest.RouteClaim, provisionertest.RouteDispatched, provisionertest.RouteMachineLog, provisionertest.RouteMachineEnd}
 	if i < 0 || !slices.Equal(routes[:i+1], order) || slices.ContainsFunc(routes[i+1:], func(r provisionertest.Route) bool { return r != provisionertest.RouteClaim }) {
 		t.Errorf("the fake was sent %v, want %v, then claims alone", routes, order)
 	}

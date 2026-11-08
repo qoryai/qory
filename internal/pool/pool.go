@@ -21,20 +21,41 @@
 // dispatch is never released: Qory Apiary returns 409 machine_exists to a release after
 // dispatched.
 //
+// After the machine log, the pool reports the dispatch's machine gone: the provisioner
+// contract's machine end with the state gone, with which Qory Apiary frees the slot it
+// keeps for the dispatch once the dispatch ended. The pool has no machine command: qory
+// run is the dispatch's machine, and the end of qory run is the end of the machine. A
+// gone that fails, with no answer, an unsigned answer, a signed 429 or 503 unavailable,
+// or another server error, is sent again, built anew, after a wait: a signed 429's
+// Retry-After, else one that doubles from [firstBackoff] up to [maxBackoff]. It is sent
+// until Qory Apiary returns the signed 204, or a signed 400, 403 or 404, after which
+// the same call cannot succeed. The pool also sends gone, with no qory run started, for
+// a dispatch whose release returned 409 machine_exists, and for one whose first
+// dispatched returned 410 gone or 409 lease_expired, since an earlier try of dispatched
+// may have been taken with its answer lost. A gone takes none of the pool's Runs: the
+// next claim may go out while it is sent.
+//
 // A journal, <pool's folder>/dispatches, contains each live dispatch's id and phase,
-// claimed or dispatched, never a run code. The claimed entry is written and synced
-// before the request dispatched, and the dispatched entry after that request succeeds. A
+// claimed, dispatched or ended, never a run code. The claimed entry is written and
+// synced before the request dispatched, and the dispatched entry after that request
+// succeeds. The ended entry is written before the first gone: once qory run ended or
+// could not be started, or after the release or the dispatched that the gone follows. A
 // release of an entry left at claimed after a dispatched that succeeded returns 409
-// machine_exists, and the pool drops the entry. The entry is removed once it ends. When
-// the program starts, before its first claim, it runs the check of [Probe]: when a
-// container on the engine's default bridge network connects to the cloud metadata
-// service, or the check cannot run, Run returns its error and claims nothing. Then each
-// claimed entry it finds is released and each dispatched entry is dropped, with the
-// folders of both.
+// machine_exists, and the pool sends gone for it. The entry is removed, with the
+// dispatch's folder, once the dispatch ends; an ended entry once its gone got the 204
+// or a signed 400, 403 or 404. When the program starts, before its first claim, it runs
+// the check of [Probe]: when a container on the engine's default bridge network
+// connects to the cloud metadata service, or the check cannot run, Run returns its
+// error and claims nothing. Then each claimed entry it finds is released and each
+// dispatched entry is dropped, with the folders of both. Each ended entry, and each
+// claimed one whose release returns 409 machine_exists, gets gone, sent as above in a
+// separate goroutine beside the claim loop, so the first claim does not wait for it.
 //
 // When ctx ends, the pool stops: it claims no more, a claim being sent is given up, a
 // dispatch not yet dispatched is released, and each qory run is stopped as [child.Run]
-// stops a command. Run returns once every dispatch ended.
+// stops a command. A gone not yet answered is sent once more, for at most
+// [lastGoneTimeout]; when that fails, the ended entry and the dispatch's folder stay, for
+// the next start. Run returns once every dispatch ended.
 package pool
 
 import (
@@ -47,6 +68,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/qoryai/integrations/contracts"
 
 	"github.com/qoryai/qory/internal/exports"
 	"github.com/qoryai/qory/internal/pool/child"
@@ -65,6 +88,9 @@ const (
 	// heartbeatEvery is how often dispatched is sent again while a dispatch's qory run
 	// runs.
 	heartbeatEvery = 60 * time.Second
+	// lastGoneTimeout is how long the last gone of a dispatch may take once the pool
+	// stops, so a stop is not held up by Qory Apiary.
+	lastGoneTimeout = 10 * time.Second
 )
 
 // The pool's folder's entries besides the journal: the folder of the dispatches'
@@ -188,20 +214,31 @@ func removeCodeFiles(state string) error {
 }
 
 // replay acts on each dispatch the journal contains, as the program that held it is
-// gone: a claimed one is released, and a dispatched one, which Qory Apiary does not
-// release, is dropped. A dispatch released, over already or dropped leaves the journal,
-// and its folder is removed; one Qory Apiary could not be reached for stays, for the
-// next start. Once ctx ends, the rest stay.
+// gone: a claimed one is released, a dispatched one, which Qory Apiary does not
+// release, is dropped, and an ended one gets gone. A dispatch released, over already or
+// dropped leaves the journal, and its folder is removed; one Qory Apiary could not be
+// reached for stays, for the next start. A claimed one whose release returned 409
+// machine_exists is written at ended, and gets gone too. Each gone is sent by
+// [Pool.endBeside], beside the claim loop. Once ctx ends, the rest stay.
 func (p *Pool) replay(ctx context.Context) {
 	work := context.WithoutCancel(ctx)
 	for _, e := range p.journal.list() {
 		if ctx.Err() != nil {
 			return
 		}
-		if e.Phase == PhaseClaimed && !p.release(work, e.DispatchID, ReasonRestarted) {
-			continue
+		switch e.Phase {
+		case PhaseEnded:
+			p.endBeside(ctx, e.DispatchID)
+		case PhaseClaimed:
+			end := p.release(work, e.DispatchID, ReasonRestarted)
+			if p.machineAfter(e.DispatchID, end) {
+				p.endBeside(ctx, e.DispatchID)
+			} else if end == releaseOver {
+				p.forget(e.DispatchID)
+			}
+		default:
+			p.forget(e.DispatchID)
 		}
-		p.forget(e.DispatchID)
 	}
 }
 
@@ -252,21 +289,31 @@ func (p *Pool) claimLoop(ctx context.Context) {
 		p.wg.Add(1)
 		go func() {
 			defer p.wg.Done()
-			defer func() { <-p.slots }()
-			p.dispatch(ctx, c)
+			gone := p.dispatch(ctx, c)
+			if !gone {
+				p.forget(c.DispatchID)
+			}
+			// The slot is free once qory run ended: gone runs nothing on this machine.
+			<-p.slots
+			if gone {
+				p.end(ctx, c.DispatchID)
+			}
 		}()
 	}
 }
 
 // admit journals the claim c and checks it before its dispatch starts, and reports
 // whether it starts. A claim whose machine member is set, whose lease passed, or that
-// could not be journaled is released, and its run code cleared.
+// could not be journaled is released, and its run code cleared. One whose release
+// returned 409 machine_exists gets gone, beside the claim loop.
 func (p *Pool) admit(ctx context.Context, c provisioner.Claimed) bool {
 	work := context.WithoutCancel(ctx)
 	if err := p.journal.set(Entry{c.DispatchID, PhaseClaimed}); err != nil {
 		c.RunCode.Clear()
 		p.log.Error(lineNotJournaled, slog.String("dispatch_id", c.DispatchID), errAttr(err))
-		p.release(work, c.DispatchID, ReasonNotStarted)
+		if p.machineAfter(c.DispatchID, p.release(work, c.DispatchID, ReasonNotStarted)) {
+			p.endBeside(ctx, c.DispatchID)
+		}
 		return false
 	}
 	reason := ""
@@ -280,33 +327,37 @@ func (p *Pool) admit(ctx context.Context, c provisioner.Claimed) bool {
 		return true
 	}
 	c.RunCode.Clear()
-	p.release(work, c.DispatchID, reason)
-	p.forget(c.DispatchID)
+	if p.machineAfter(c.DispatchID, p.release(work, c.DispatchID, reason)) {
+		p.endBeside(ctx, c.DispatchID)
+	} else {
+		p.forget(c.DispatchID)
+	}
 	return false
 }
 
 // dispatch takes the claim c from its folder and run code's file through dispatched to
-// its qory run's end, and then out of the journal. stop is the pool's context: once it
-// ends, no request is sent again after a wait, and qory run is stopped; the requests
-// already decided go out on a context that does not end with it.
-func (p *Pool) dispatch(stop context.Context, c provisioner.Claimed) {
+// its qory run's end, and reports whether the dispatch gets gone, with its journal
+// entry at ended: after qory run, after a release that returned 409 machine_exists, or
+// after a dispatched that returned 410 gone or 409 lease_expired. The caller sends gone, or takes
+// the dispatch out of the journal. stop is the pool's context: once it ends, no request
+// is sent again after a wait, and qory run is stopped; the requests already decided go
+// out on a context that does not end with it.
+func (p *Pool) dispatch(stop context.Context, c provisioner.Claimed) bool {
 	work := context.WithoutCancel(stop)
-	defer p.forget(c.DispatchID)
 	dir, code, err := p.prepare(c)
 	if err != nil {
 		p.log.Warn(lineNotStarted, slog.String("dispatch_id", c.DispatchID), errAttr(err))
-		p.release(work, c.DispatchID, ReasonNotStarted)
-		return
+		return p.machineAfter(c.DispatchID, p.release(work, c.DispatchID, ReasonNotStarted))
 	}
 	defer code.Close()
 	if stop.Err() != nil {
-		p.release(work, c.DispatchID, ReasonStoppedBeforeStart)
-		return
+		return p.machineAfter(c.DispatchID, p.release(work, c.DispatchID, ReasonStoppedBeforeStart))
 	}
-	if !p.dispatched(stop, work, c) {
-		return
+	if started, gone := p.dispatched(stop, work, c); !started {
+		return gone
 	}
 	p.run(stop, c, dir, code)
+	return true
 }
 
 // dispatchDir is the folder of the dispatch id: <pool's folder>/runs/<id>.
@@ -358,54 +409,51 @@ func (p *Pool) prepare(c provisioner.Claimed) (string, *os.File, error) {
 }
 
 // dispatched sends dispatched for c, and reports whether it was accepted, with the
-// dispatch journaled at its new phase. A signed 429 is waited out up to
+// dispatch journaled at its new phase, and, when it was not, whether the dispatch gets
+// gone, with its journal entry at ended. A signed 429 is waited out up to
 // [maxRateLimited] times while the lease lasts. On 409 lease_expired or 410 gone the
-// dispatch is dropped, with no release. Any other end releases the dispatch: for the
-// pool's stop during a wait, the lease, or a failure.
-func (p *Pool) dispatched(stop, work context.Context, c provisioner.Claimed) bool {
+// dispatch is not released, and gets gone: an earlier try of dispatched may have been
+// taken with its answer lost. Any other end releases the dispatch: for the pool's stop
+// during a wait, the lease, or a failure; a release that returned 409 machine_exists
+// gets gone.
+func (p *Pool) dispatched(stop, work context.Context, c provisioner.Claimed) (started, gone bool) {
+	id := c.DispatchID
 	for limited := 0; ; limited++ {
-		err := p.Client.Dispatched(work, c.DispatchID)
+		err := p.Client.Dispatched(work, id)
 		var r *provisioner.Refusal
 		switch {
 		case err == nil:
-			if err := p.journal.set(Entry{c.DispatchID, PhaseDispatched}); err != nil {
-				p.log.Error(lineNotJournaled, slog.String("dispatch_id", c.DispatchID), errAttr(err))
-			}
-			return true
+			p.setPhase(id, PhaseDispatched)
+			return true, false
 		case errors.Is(err, provisioner.ErrRateLimited) && errors.As(err, &r) && limited < maxRateLimited:
 			if !p.now().Add(r.RetryAfter).Before(c.LeaseUntil) {
-				p.release(work, c.DispatchID, ReasonLeasePassed)
-				return false
+				return false, p.machineAfter(id, p.release(work, id, ReasonLeasePassed))
 			}
 			if p.sleep(stop, r.RetryAfter) != nil {
-				p.release(work, c.DispatchID, ReasonStoppedBeforeStart)
-				return false
+				return false, p.machineAfter(id, p.release(work, id, ReasonStoppedBeforeStart))
 			}
 			continue
 		}
-		p.log.Warn(lineNotRecorded, slog.String("dispatch_id", c.DispatchID), errAttr(err))
-		if !errors.Is(err, provisioner.ErrLeaseExpired) && !errors.Is(err, provisioner.ErrGone) {
-			p.release(work, c.DispatchID, ReasonNotStarted)
+		p.log.Warn(lineNotRecorded, slog.String("dispatch_id", id), errAttr(err))
+		if errors.Is(err, provisioner.ErrLeaseExpired) || errors.Is(err, provisioner.ErrGone) {
+			p.setPhase(id, PhaseEnded)
+			return false, true
 		}
-		return false
+		return false, p.machineAfter(id, p.release(work, id, ReasonNotStarted))
 	}
 }
 
 // run runs qory run for the dispatched claim c, in dir, with code as its descriptor 3,
 // until it ends, and logs how it ended. qory run is stopped at stop's end, once the
 // claim's max_lifetime_minutes passed, or once the heartbeat finds the dispatch ended.
-// Each line of its output goes to the pool's log, after the dispatch id, and is kept;
-// once qory run ended, or could not be started, the lines kept are uploaded as the
-// dispatch's machine log, on a context that does not end with stop. The output is masked
-// first with the process's mask list, [secretmask.Default], which replaces the value of a
-// URL's signature or token.
+// Each line of its output goes to the pool's log, after the dispatch id, and is kept.
+// Once qory run ended, or could not be started, the dispatch's journal entry is written
+// at ended, and the lines kept are uploaded as the dispatch's machine log, on a context
+// that does not end with stop. The output is masked first with the process's mask list,
+// [secretmask.Default], which replaces the value of a URL's signature or token.
 func (p *Pool) run(stop context.Context, c provisioner.Claimed, dir string, code *os.File) {
 	id := slog.String("dispatch_id", c.DispatchID)
 	var out outputTail
-	defer func() {
-		log, cut := out.text()
-		p.uploadLog(context.WithoutCancel(stop), c.DispatchID, log, cut)
-	}()
 	ctx, cancel := context.WithCancel(stop)
 	defer cancel()
 	watch, unwatch := context.WithCancel(ctx)
@@ -439,15 +487,18 @@ func (p *Pool) run(stop context.Context, c provisioner.Claimed, dir string, code
 	})
 	unwatch()
 	wg.Wait()
+	p.setPhase(c.DispatchID, PhaseEnded)
 	if err != nil {
 		p.log.Warn(lineNotStarted, id, errAttr(err))
-		return
+	} else {
+		attrs := []any{id, slog.Int("exit_code", res.ExitCode)}
+		if res.Signal != 0 {
+			attrs = append(attrs, slog.String("signal", res.Signal.String()))
+		}
+		p.log.Info(lineEnded, attrs...)
 	}
-	attrs := []any{id, slog.Int("exit_code", res.ExitCode)}
-	if res.Signal != 0 {
-		attrs = append(attrs, slog.String("signal", res.Signal.String()))
-	}
-	p.log.Info(lineEnded, attrs...)
+	log, cut := out.text()
+	p.uploadLog(context.WithoutCancel(stop), c.DispatchID, log, cut)
 }
 
 // heartbeat sends dispatched for the dispatch id every [heartbeatEvery] until ctx ends.
@@ -473,12 +524,27 @@ func (p *Pool) heartbeat(ctx context.Context, id string, end func()) {
 	}
 }
 
-// release gives the dispatch id back, for reason, and reports whether the dispatch is
-// over: released, or over already. A signed 429 is waited out up to [maxRateLimited]
-// times. A 409 lease_expired or a 410 gone is the dispatch over already; a signed 403,
-// 404 or 409 machine_exists is one Qory Apiary does not release, which is not sent
-// again either.
-func (p *Pool) release(work context.Context, id, reason string) bool {
+// releaseEnd is how a release ended.
+type releaseEnd int
+
+const (
+	// releaseKept is a release that failed and may succeed later: the journal entry
+	// stays, for the next start.
+	releaseKept releaseEnd = iota
+	// releaseOver is a dispatch released, over already, or one Qory Apiary does not
+	// release for a signed 403 or 404: the entry goes.
+	releaseOver
+	// releaseMachine is a release that returned 409 machine_exists: Qory Apiary took
+	// dispatched for the dispatch, or the machine redeemed its run code, so the
+	// dispatch gets gone.
+	releaseMachine
+)
+
+// release gives the dispatch id back, for reason, and reports how that ended. A signed
+// 429 is waited out up to [maxRateLimited] times. A 409 lease_expired or a 410 gone is
+// the dispatch over already; a signed 403 or 404 is one Qory Apiary does not release,
+// and a 409 machine_exists one that gets gone; neither is sent again.
+func (p *Pool) release(work context.Context, id, reason string) releaseEnd {
 	ids := slog.String("dispatch_id", id)
 	for limited := 0; ; limited++ {
 		err := p.Client.Release(work, id, reason)
@@ -486,18 +552,100 @@ func (p *Pool) release(work context.Context, id, reason string) bool {
 		switch {
 		case err == nil:
 			p.log.Info(lineReleased, ids, slog.String("reason", reason))
-			return true
+			return releaseOver
 		case errors.Is(err, provisioner.ErrLeaseExpired), errors.Is(err, provisioner.ErrGone):
 			p.log.Info(lineOverAlready, ids, errAttr(err))
-			return true
+			return releaseOver
 		case errors.Is(err, provisioner.ErrRateLimited) && errors.As(err, &r) && limited < maxRateLimited:
 			if p.sleep(work, r.RetryAfter) != nil {
-				return false
+				return releaseKept
 			}
 			continue
 		}
 		p.log.Warn(lineNotReleased, ids, slog.String("reason", reason), errAttr(err))
-		return errors.Is(err, provisioner.ErrForbidden) || errors.Is(err, provisioner.ErrNotFound) || errors.Is(err, provisioner.ErrMachineExists)
+		switch {
+		case errors.Is(err, provisioner.ErrMachineExists):
+			return releaseMachine
+		case errors.Is(err, provisioner.ErrForbidden), errors.Is(err, provisioner.ErrNotFound):
+			return releaseOver
+		}
+		return releaseKept
+	}
+}
+
+// machineAfter reports whether the dispatch id, whose release ended with end, gets
+// gone: after 409 machine_exists, with its journal entry written at ended first.
+func (p *Pool) machineAfter(id string, end releaseEnd) bool {
+	if end != releaseMachine {
+		return false
+	}
+	p.setPhase(id, PhaseEnded)
+	return true
+}
+
+// endBeside runs [Pool.end] for the dispatch id in a goroutine, beside the claim loop,
+// which Run waits for.
+func (p *Pool) endBeside(stop context.Context, id string) {
+	p.wg.Go(func() { p.end(stop, id) })
+}
+
+// end sends gone for the dispatch id, whose journal entry is at ended, and takes the
+// dispatch out of the journal once gone is settled; otherwise the entry and the
+// dispatch's folder stay, for the next start.
+func (p *Pool) end(stop context.Context, id string) {
+	if p.gone(stop, id) {
+		p.forget(id)
+	}
+}
+
+// gone sends the machine end gone for the dispatch id, one call at a time, and reports
+// whether it is settled: answered with the signed 204, or with a signed 400, 403 or 404,
+// after which the same call cannot succeed. Any other failure is sent again, built anew,
+// after a wait: a signed 429's Retry-After, else one that doubles from [firstBackoff] up
+// to [maxBackoff]. Once stop ends, gone is sent once more, for at most
+// [lastGoneTimeout], and a failure then leaves it unsettled.
+func (p *Pool) gone(stop context.Context, id string) bool {
+	ids := slog.String("dispatch_id", id)
+	wait := firstBackoff
+	for {
+		last := stop.Err() != nil
+		ctx, cancel := context.WithCancel(stop)
+		if last {
+			ctx, cancel = context.WithTimeout(context.WithoutCancel(stop), lastGoneTimeout)
+		}
+		err := p.Client.MachineEnd(ctx, id, contracts.MachineEndGone)
+		cancel()
+		switch {
+		case err == nil:
+			p.log.Info(lineGone, ids)
+			return true
+		case provisioner.EndsAttempts(err):
+			p.log.Warn(lineGoneEnded, ids, errAttr(err))
+			return true
+		case last:
+			p.log.Warn(lineGoneKept, ids, errAttr(err))
+			return false
+		case stop.Err() != nil:
+			// The stop cut this send short; the last one follows.
+			continue
+		}
+		pause := wait
+		var r *provisioner.Refusal
+		if errors.Is(err, provisioner.ErrRateLimited) && errors.As(err, &r) {
+			pause = r.RetryAfter
+		} else {
+			wait = min(wait*2, maxBackoff)
+		}
+		p.log.Warn(lineGoneFailed, ids, slog.Duration("wait", pause), errAttr(err))
+		_ = p.sleep(stop, pause)
+	}
+}
+
+// setPhase writes the dispatch id's journal entry at phase, and logs a write that
+// failed.
+func (p *Pool) setPhase(id, phase string) {
+	if err := p.journal.set(Entry{id, phase}); err != nil {
+		p.log.Error(lineNotJournaled, slog.String("dispatch_id", id), errAttr(err))
 	}
 }
 

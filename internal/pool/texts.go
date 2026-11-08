@@ -30,6 +30,15 @@ const (
 	// lineLogNotUploaded is a machine log whose upload failed or returned a refusal;
 	// the dispatch's end does not change.
 	lineLogNotUploaded = "qory run's output could not be uploaded as the dispatch's machine log"
+	// lineGone is a machine end gone answered with the signed 204.
+	lineGone = "reported the dispatch's machine as gone"
+	// lineGoneFailed is a machine end gone that failed with no answer, an unsigned
+	// answer, a signed 429, a signed 503 unavailable or another server error.
+	lineGoneFailed = "the report of the machine as gone failed, so it is sent again after a wait"
+	// lineGoneEnded is a machine end gone answered with a signed 400, 403 or 404.
+	lineGoneEnded = "the machine could not be reported as gone, and the same report cannot succeed, so it is not sent again"
+	// lineGoneKept is a machine end gone that failed once the pool was stopping.
+	lineGoneKept = "the machine could not be reported as gone before the pool stopped, so the pool sends the report again at its next start"
 )
 
 // The reasons a release gives, display text in Qory Apiary. Each is 1 to 200

@@ -564,11 +564,13 @@ func (h *harness) waitFor(what string, cond func() bool) {
 }
 
 // overLines are the lines after which the pool does nothing more for a dispatch but
-// take it out of the journal.
+// take it out of the journal: a release's end, a dispatched that did not start a run,
+// and gone's end. After qory run's end, the machine log and gone follow; after a
+// release that returned 409 machine_exists, or some dispatched that did not start a
+// run, gone follows, which [harness.settled] waits for through the journal.
 var overLines = []string{
-	"qory run for the dispatch ended", "the run could not be started", "released the run",
-	"the dispatch was over already, so nothing was released", "the run could not be released",
-	"Qory Apiary did not record the run's start",
+	"released the run", "the dispatch was over already, so nothing was released", "the run could not be released",
+	"Qory Apiary did not record the run's start", lineGone, lineGoneEnded,
 }
 
 // settled waits until the fake made n dispatches, the pool logged one of [overLines]

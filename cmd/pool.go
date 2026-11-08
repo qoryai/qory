@@ -82,7 +82,10 @@ While a run runs, the pool sends dispatched every 60 s. It stops the run when Qo
 Apiary ends the dispatch or the claim's max_lifetime_minutes pass. Once the run ends,
 the pool uploads the run's output as the dispatch's machine log: at most the last
 768 KiB, with each line that contains qak_, qrk_, qecr_, qecn_, qecp_, qecg_ or qeci_
-replaced. It releases a claim that sets a machine type, and a claim it could not start.
+replaced. Then it reports the dispatch's machine as gone, and sends that report again
+after each failure until Qory Apiary returns 204, 400, 403 or 404 to it; a report
+still not answered when the pool stops is sent at its next start. It releases a claim
+that sets a machine type, and a claim it could not start.
 The pool section of forager.yaml sets it: runs, registry, run_config. SIGINT or SIGTERM
 stops it: it claims no new run, stops the runs it started, and exits 0.`,
 		Hidden: true,
