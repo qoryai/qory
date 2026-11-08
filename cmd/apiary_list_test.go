@@ -4,6 +4,7 @@ import (
 	"io/fs"
 	"net/http"
 	"net/url"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -431,5 +432,33 @@ func TestApiaryRunListSaysAnInstanceIDForThisProcess(t *testing.T) {
 	}
 	if !strings.HasPrefix(errOut, "qory apiary run list: instance ") || !strings.Contains(out, "rn_0123456789abcdef") {
 		t.Errorf("stderr %q, stdout %q", errOut, out)
+	}
+}
+
+// TestApiaryRunListWithSeveralKeys is keys for two servers on this computer: without
+// --server, qory stops before any request; --server selects the test server's key, and
+// the command for the next page keeps --server as given.
+func TestApiaryRunListWithSeveralKeys(t *testing.T) {
+	s, dir := diagnoseKeyed(t)
+	s.set(http.StatusOK, runsFixture(t, "fixtures/runs/page-with-next.json"), false)
+	storeDiagnosticsKey(t, "https://apiary.example", s.pin(), newKey(t))
+	root := filepath.Dir(dir)
+	out, _, err := runList(t, "--state", "failed")
+	want := "Pass --server <url>: diagnostics keys for several servers are in " + root + ": apiary.example, " + filepath.Base(dir) + "."
+	if err == nil || firstLine(err.Error()) != want {
+		t.Errorf("list with keys for two servers: %v, want %q", err, want)
+	}
+	if cmd.ExitCode(err) != cmd.ExitInput || out != "" || s.received != 0 {
+		t.Errorf("exit %d, stdout %q, %d requests", cmd.ExitCode(err), out, s.received)
+	}
+	out, errOut, err := runList(t, "--state", "failed", "--server", s.URL+"/")
+	if err != nil {
+		t.Fatalf("list --server: %v\n%s", err, errOut)
+	}
+	if !strings.Contains(out, "rn_0123456789abcdeh") || s.requests != 1 {
+		t.Errorf("%d requests, stdout:\n%s", s.requests, out)
+	}
+	if want := "Next page: qory apiary run list --server " + s.URL + "/ --state failed --before rn_0123456789abcdeg\n"; errOut != want {
+		t.Errorf("stderr %q, want %q", errOut, want)
 	}
 }

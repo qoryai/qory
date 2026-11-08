@@ -52,6 +52,9 @@ type runListFlag struct {
 type runListFlags struct {
 	workspace, workItem, workflow, state, since, limit, before string
 	json                                                       bool
+	// server is --server as given, and serverGiven whether it was given.
+	server      string
+	serverGiven bool
 }
 
 // newApiaryRunList builds qory apiary run list.
@@ -75,15 +78,20 @@ qory signs the request with the diagnostics key in ~/.config/qory/apiary/<host>,
 prints the list only after its signature verifies under the server key pinned there.
 --json prints the list as Qory Apiary sent it, so a pipe or a file receives JSON alone.
 
+--server selects the server by its URL. Without it, qory takes the one server it has a
+diagnostics key for.
+
 --verbose adds nothing here.
 
 More: ` + apiaryDocs,
 		Example: `  qory apiary run list
   qory apiary run list --state failed --since 24h
   qory apiary run list --workspace acme/web --work-item 7
+  qory apiary run list --server https://apiary.example
   qory apiary run list --json > runs.json`,
 		Args: noArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			f.serverGiven = cmd.Flags().Changed("server")
 			return listRuns(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), cmd, f)
 		},
 	}
@@ -95,6 +103,7 @@ More: ` + apiaryDocs,
 	c.Flags().StringVar(&f.limit, "limit", "", "list at most `<number>` runs, from 1 to 100 (default 25)")
 	c.Flags().StringVar(&f.before, "before", "", "list the runs after the run `<run id>`, for the next page")
 	c.Flags().BoolVar(&f.json, "json", false, "print the list as Qory Apiary sent it, one JSON object")
+	c.Flags().StringVar(&f.server, "server", "", serverUsage)
 	return c
 }
 
@@ -106,7 +115,7 @@ func listRuns(ctx context.Context, out, report io.Writer, cmd *cobra.Command, f 
 	if err != nil {
 		return err
 	}
-	key, instance, err := diagnosticsKey(report, runListCommand, "", false)
+	key, instance, err := diagnosticsKey(report, runListCommand, f.server, f.serverGiven)
 	if err != nil {
 		return err
 	}
@@ -143,7 +152,7 @@ func listRuns(ctx context.Context, out, report io.Writer, cmd *cobra.Command, f 
 	}
 	u.Table(rows)
 	if list.Next != nil {
-		fmt.Fprintln(report, "Next page: "+nextPageCommand(given, *list.Next))
+		fmt.Fprintln(report, "Next page: "+nextPageCommand(f, given, *list.Next))
 	}
 	return nil
 }
@@ -322,9 +331,12 @@ func shortDuration(s int64) string {
 }
 
 // nextPageCommand is the command that lists the page after the run next: every flag in
-// given, --since as the time qory sent, then --before next.
-func nextPageCommand(given []runListFlag, next string) string {
+// given, --since as the time qory sent, --server as given in f, then --before next.
+func nextPageCommand(f runListFlags, given []runListFlag, next string) string {
 	parts := []string{runListCommand}
+	if f.serverGiven {
+		parts = append(parts, "--server", f.server)
+	}
 	for _, g := range given {
 		if g.name != "before" {
 			parts = append(parts, "--"+g.name, g.value)

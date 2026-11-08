@@ -232,7 +232,8 @@ release may change what an existing document does, and states it under Upgrading
   `--work-item`, `--workflow`, `--state` and `--since` select runs, `--limit` and
   `--before` page through them, and `--json` prints the list as Qory Apiary sent it. The
   request is signed with the diagnostics key, and qory prints the list only after its
-  signature verifies. See List the runs in `docs/apiary.md`.
+  signature verifies. Pass `--server <url>` when keys for several servers are on this
+  computer. See List the runs in `docs/apiary.md`.
 - Make and enrol that diagnostics key with `qory apiary enrol <server> <code>`, using a
   `qecd_` code an instance admin issues under Instance settings > Diagnostics keys in
   Qory Apiary. qory writes the key to `~/.config/qory/apiary/<host>/` and never to

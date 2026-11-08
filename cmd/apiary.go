@@ -37,6 +37,9 @@ const (
 	maxDiagnosticsRead = maxDiagnostics + accesskey.MaxAnswer
 )
 
+// serverUsage is the help of --server of the commands that read a diagnostics key.
+const serverUsage = "the Qory Apiary server, by its URL; needed when diagnostics keys for several servers are on this computer"
+
 // diagnosticsTimeout is how long the request for a run's diagnostics may take, from its
 // start to the last byte of the body.
 const diagnosticsTimeout = 10 * time.Second
@@ -134,7 +137,7 @@ More: ` + apiaryDocs,
 			return diagnose(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), args[0], serverURL, cmd.Flags().Changed("server"))
 		},
 	}
-	c.Flags().StringVar(&serverURL, "server", "", "the Qory Apiary server, by its URL; needed when diagnostics keys for several servers are on this computer")
+	c.Flags().StringVar(&serverURL, "server", "", serverUsage)
 	return c
 }
 

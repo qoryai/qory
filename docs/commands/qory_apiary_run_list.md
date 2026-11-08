@@ -19,6 +19,9 @@ qory signs the request with the diagnostics key in ~/.config/qory/apiary/<host>,
 prints the list only after its signature verifies under the server key pinned there.
 --json prints the list as Qory Apiary sent it, so a pipe or a file receives JSON alone.
 
+--server selects the server by its URL. Without it, qory takes the one server it has a
+diagnostics key for.
+
 --verbose adds nothing here.
 
 More: https://github.com/qoryai/qory/blob/main/docs/apiary.md
@@ -33,6 +36,7 @@ qory apiary run list [flags]
   qory apiary run list
   qory apiary run list --state failed --since 24h
   qory apiary run list --workspace acme/web --work-item 7
+  qory apiary run list --server https://apiary.example
   qory apiary run list --json > runs.json
 ```
 
@@ -43,6 +47,7 @@ qory apiary run list [flags]
   -h, --help                          help for list
       --json                          print the list as Qory Apiary sent it, one JSON object
       --limit <number>                list at most <number> runs, from 1 to 100 (default 25)
+      --server string                 the Qory Apiary server, by its URL; needed when diagnostics keys for several servers are on this computer
       --since <time>                  list the runs created at or after <time>: a duration back from now, such as 1h, or an RFC 3339 time
       --state <state>                 list the runs in <state>: pending, running, completed, failed, cancelled or lost
       --work-item <number>            list the runs of the work item <number> in the workspace; needs --workspace

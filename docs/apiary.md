@@ -143,14 +143,16 @@ Each flag selects runs, and a run is listed when it matches every flag given:
 | `--since <time>` | the runs created at or after a time: a duration counted back from now, such as `30m`, `1h` or `24h`, or an RFC 3339 time, such as `2026-11-01T09:00:00Z` |
 | `--limit <number>` | at most this many runs, from 1 to 100; 25 without the flag |
 | `--before <run id>` | the runs after this run in the list: the next page |
+| `--server <url>` | the runs on the server at that URL; needed when diagnostics keys for several servers are on this computer |
 
 qory checks each value before it sends anything, and sends `--since` as a time in UTC.
 It sends `GET <server>/v1/runs` with the flags as its query, signed with the key, and
-waits at most 10 seconds. It reads the key of the one server it has a key for.
+waits at most 10 seconds. It reads the key of the server that `--server` selects, or
+without `--server`, of the one server it has a key for.
 
 When more runs match, the last line is the command that lists the next page: every
-flag you gave, `--since` as the time qory sent, and `--before` with the last run of the
-page. The title line and the runs go to stdout, and the line for the next page to
+flag you gave, `--server` as you wrote it, `--since` as the time qory sent, and
+`--before` with the last run of the page. The title line and the runs go to stdout, and the line for the next page to
 stderr, so a pipe receives the title line and the runs, and no next-page line. When no
 run matches, qory prints one line on stderr and exits
 0.
@@ -223,8 +225,8 @@ Each error's first line starts with the fix.
 | `Check that <server> is reachable: <error>.` | The request did not reach Qory Apiary, or timed out. |
 
 `qory apiary run list` stops with the lines of `qory apiary run diagnose` for a missing
-key, a request that failed with 401 for the key, a response that does not verify and a
-server that is not reachable, and with these:
+key, keys for several servers and no `--server`, a request that failed with 401 for the
+key, a response that does not verify and a server that is not reachable, and with these:
 
 | First line | What happened |
 |---|---|
