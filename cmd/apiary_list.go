@@ -191,7 +191,7 @@ func checkRunListFlags(cmd *cobra.Command, f runListFlags, now time.Time) ([]run
 		}
 	}
 	if cmd.Flags().Changed("work-item") && !cmd.Flags().Changed("workspace") {
-		return nil, input(errors.New("Add --workspace <org>/<workspace>: a work item's number counts in one workspace."))
+		return nil, input(errors.New("Add --workspace <org>/<workspace>: a work item's number is unique only in its workspace."))
 	}
 	return given, nil
 }
@@ -261,7 +261,7 @@ func runListNotAccepted(host string, given []runListFlag, status int, b []byte) 
 		if json.Unmarshal(b, &body) == nil && body.Parameter != nil {
 			for _, g := range runListSent(given) {
 				if g.parameter == *body.Parameter {
-					return fmt.Errorf("Check --%s %s: %s did not accept the value (%s, %d).", g.name, g.value, host, ref.Code, status)
+					return fmt.Errorf("Check --%s %s: the request to %s failed with %s (%d) for that value.", g.name, g.value, host, ref.Code, status)
 				}
 			}
 			return fmt.Errorf("Check the run list with the instance admin of %s: the request was not accepted: %s (%d): %s.", host, ref.Code, status, accesskey.ShownName(*body.Parameter, true))

@@ -70,8 +70,8 @@ func newApiary() *cobra.Command {
 
 The commands sign their requests with a diagnostics key: an access key of kind
 diagnostics, made on this computer. Its secret stays in ~/.config/qory/apiary/<host>,
-Qory Apiary keeps its public half, and it lists runs and reads their diagnostics, and
-nothing else.
+Qory Apiary keeps its public half. With the key, qory lists runs and reads their
+diagnostics, and nothing else.
 
 More: ` + apiaryDocs,
 	}

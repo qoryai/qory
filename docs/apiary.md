@@ -18,7 +18,7 @@ qory apiary run diagnose rn_0123456789abcdef > diagnostics.json
 
 A diagnostics key is an access key of kind `diagnostics`, an Ed25519 key made on this
 computer. Its secret stays on this computer, and Qory Apiary keeps only its public half.
-The key lists runs and reads their diagnostics, and nothing else.
+With the key, qory lists runs and reads their diagnostics, and nothing else.
 
 A diagnostics key is kept apart from this machine's node access key: qory never reads it
 from `forager.yaml` or from the files beside `forager.yaml`, and `qory apiary enrol`
@@ -150,8 +150,9 @@ waits at most 10 seconds. It reads the key of the one server it has a key for.
 
 When more runs match, the last line is the command that lists the next page: every
 flag you gave, `--since` as the time qory sent, and `--before` with the last run of the
-page. The runs go to stdout, and the line for the next page to stderr, so a pipe
-receives the runs alone. When no run matches, qory prints one line on stderr and exits
+page. The title line and the runs go to stdout, and the line for the next page to
+stderr, so a pipe receives the title line and the runs, and no next-page line. When no
+run matches, qory prints one line on stderr and exits
 0.
 
 With `--json`, qory prints the run list as Qory Apiary sent it, after its signature and
@@ -222,16 +223,16 @@ Each error's first line starts with the fix.
 | `Check that <server> is reachable: <error>.` | The request did not reach Qory Apiary, or timed out. |
 
 `qory apiary run list` stops with the lines of `qory apiary run diagnose` for a missing
-key, a key that Qory Apiary did not accept, a response that does not verify and a
+key, a request that failed with 401 for the key, a response that does not verify and a
 server that is not reachable, and with these:
 
 | First line | What happened |
 |---|---|
 | `Pass --<flag> as ...` | The value of the flag is outside its rule, and the next line contains it. Nothing was sent. |
-| `Add --workspace <org>/<workspace>: a work item's number counts in one workspace.` | `--work-item` without `--workspace`. Nothing was sent. |
+| `Add --workspace <org>/<workspace>: a work item's number is unique only in its workspace.` | `--work-item` without `--workspace`. Nothing was sent. |
 | `Change or remove a flag to list more runs: no run on <host> matches <flags>.` | No run matches the flags. qory exits 0. |
 | `No action needed: <host> has no runs.` | Qory Apiary has no runs. qory exits 0. |
-| `Check --<flag> <value>: <host> did not accept the value (invalid_request, 400).` | Qory Apiary did not accept the value, such as a workspace it does not have, or a `--before` that is the id of no run. |
+| `Check --<flag> <value>: the request to <host> failed with invalid_request (400) for that value.` | The request failed for the value of that flag, such as a workspace that does not exist on `<host>`, or a `--before` that is the id of no run. |
 | `Update qory to a release that works with <host>: the request was not accepted: unsupported_contract_version (400).` | Qory Apiary does not serve the contract version that this qory sends. |
 | `Check the run list with the instance admin of <host>: the request was not accepted: <code> (<status>).` | Qory Apiary returned another signed code. |
 | `Check the run list with the instance admin of <host>: the response does not follow runs.schema.json, so qory printed nothing.` | The signed response is not a run list of the contract. |

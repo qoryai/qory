@@ -15,6 +15,7 @@ import (
 
 	"github.com/qoryai/qory/cmd"
 	"github.com/qoryai/qory/internal/apiarydir"
+	"github.com/qoryai/qory/internal/foragerdir"
 )
 
 // diagnosticsRunID is the run of the diagnostics fixture.
@@ -570,5 +571,36 @@ func wantIn(t *testing.T, s, want string) {
 	t.Helper()
 	if !strings.Contains(s, want) {
 		t.Errorf("%q lacks %q", s, want)
+	}
+}
+
+// unwritableInstanceID makes the server directory dir unwritable, with no instance-id
+// in it, so the command uses an instance id for its process alone. It skips under root,
+// which writes the directory anyway.
+func unwritableInstanceID(t *testing.T, dir string) {
+	t.Helper()
+	if os.Geteuid() == 0 {
+		t.Skip("root writes a directory of mode 0500")
+	}
+	if err := os.Remove(filepath.Join(dir, foragerdir.InstanceFile)); err != nil && !os.IsNotExist(err) {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(dir, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(dir, 0o700) })
+}
+
+// TestApiaryDiagnoseSaysAnInstanceIDForThisProcess is a server directory where the
+// instance id cannot be written: the line about it starts with the command's name.
+func TestApiaryDiagnoseSaysAnInstanceIDForThisProcess(t *testing.T) {
+	s, dir := diagnoseKeyed(t)
+	unwritableInstanceID(t, dir)
+	out, errOut, err := runApart(t, "apiary", "run", "diagnose", diagnosticsRunID)
+	if err != nil {
+		t.Fatalf("diagnose: %v\n%s", err, errOut)
+	}
+	if !strings.HasPrefix(errOut, "qory apiary run diagnose: instance ") || out != string(s.body) {
+		t.Errorf("stderr %q, stdout %d bytes", errOut, len(out))
 	}
 }

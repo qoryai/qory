@@ -213,6 +213,7 @@ func TestApiaryRunListStopsAtAWrongValue(t *testing.T) {
 		{"--workflow", "Hello"}, {"--workflow", "1hello"}, {"--workflow", "h" + strings.Repeat("e", 55)},
 		{"--state", "Failed"}, {"--state", "waiting"}, {"--state", ""},
 		{"--since", "yesterday"}, {"--since", "-1h"}, {"--since", "0s"}, {"--since", "2026-11-01"}, {"--since", "1d"},
+		{"--since", "9999-12-31T23:00:00-05:00"},
 		{"--limit", "0"}, {"--limit", "101"}, {"--limit", "01"}, {"--limit", "ten"}, {"--limit", ""},
 		{"--before", "rn_0123"}, {"--before", "42"},
 	} {
@@ -240,7 +241,7 @@ func TestApiaryRunListStopsAtAWrongValue(t *testing.T) {
 func TestApiaryRunListStopsAtAWorkItemWithoutAWorkspace(t *testing.T) {
 	s := listKeyed(t, "fixtures/runs/last-page.json")
 	_, _, err := runList(t, "--work-item", "7")
-	if want := "Add --workspace <org>/<workspace>: a work item's number counts in one workspace."; err == nil || firstLine(err.Error()) != want {
+	if want := "Add --workspace <org>/<workspace>: a work item's number is unique only in its workspace."; err == nil || firstLine(err.Error()) != want {
 		t.Errorf("--work-item alone: %v, want %q", err, want)
 	}
 	if cmd.ExitCode(err) != cmd.ExitInput || s.received != 0 {
@@ -322,13 +323,13 @@ func TestApiaryRunListRefusals(t *testing.T) {
 		want string
 	}{
 		{`{"error":"invalid_request","parameter":"workspace"}`, []string{"--workspace", "acme/web"},
-			"Check --workspace acme/web: " + host + " did not accept the value (invalid_request, 400)."},
+			"Check --workspace acme/web: the request to " + host + " failed with invalid_request (400) for that value."},
 		{`{"error":"invalid_request","parameter":"before"}`, []string{"--before", "rn_0123456789abcdef"},
-			"Check --before rn_0123456789abcdef: " + host + " did not accept the value (invalid_request, 400)."},
+			"Check --before rn_0123456789abcdef: the request to " + host + " failed with invalid_request (400) for that value."},
 		{`{"error":"invalid_request","parameter":"since"}`, []string{"--since", "2026-11-01T09:00:00+01:00"},
-			"Check --since 2026-11-01T08:00:00Z: " + host + " did not accept the value (invalid_request, 400)."},
+			"Check --since 2026-11-01T08:00:00Z: the request to " + host + " failed with invalid_request (400) for that value."},
 		{string(runsFixture(t, "fixtures/runs-refusal/invalid-request.json")), nil,
-			"Check --limit 25: " + host + " did not accept the value (invalid_request, 400)."},
+			"Check --limit 25: the request to " + host + " failed with invalid_request (400) for that value."},
 		{`{"error":"invalid_request","parameter":"page"}`, nil,
 			"Check the run list with the instance admin of " + host + ": the request was not accepted: invalid_request (400): \"page\"."},
 		{`{"error":"bad_request"}`, nil,
@@ -415,4 +416,20 @@ func TestApiaryRunListUnsignedPrintsNothing(t *testing.T) {
 		t.Fatalf("list signed under another key: err %v, stdout %q", err, out)
 	}
 	wantIn(t, firstLine(err.Error()), "is not signed with the pinned server key")
+}
+
+// TestApiaryRunListSaysAnInstanceIDForThisProcess is a server directory where the
+// instance id cannot be written: the line about it starts with the command's name, and
+// the runs follow on stdout.
+func TestApiaryRunListSaysAnInstanceIDForThisProcess(t *testing.T) {
+	s, dir := diagnoseKeyed(t)
+	s.set(http.StatusOK, runsFixture(t, "fixtures/runs/last-page.json"), false)
+	unwritableInstanceID(t, dir)
+	out, errOut, err := runList(t)
+	if err != nil {
+		t.Fatalf("list: %v\n%s", err, errOut)
+	}
+	if !strings.HasPrefix(errOut, "qory apiary run list: instance ") || !strings.Contains(out, "rn_0123456789abcdef") {
+		t.Errorf("stderr %q, stdout %q", errOut, out)
+	}
 }
