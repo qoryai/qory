@@ -34,6 +34,8 @@ github.com/qoryai/forager v0.7.1-0.20261107122707-1e2716002823 h1:hhmlMUjpd7sxJ7
 github.com/qoryai/forager v0.7.1-0.20261107122707-1e2716002823/go.mod h1:bawutvQpl4xH1hYlLMsTOkOq5IkIEiFHWJ9jhahf6Ac=
 github.com/qoryai/integrations v0.3.1-0.20261104212229-ec0857068317 h1:MCl7nRGOTGsT3f4l+eb93Df6CzMqJ7FzohVft9sZ8Xk=
 github.com/qoryai/integrations v0.3.1-0.20261104212229-ec0857068317/go.mod h1:8wZP+FYKJRy8P+XaN/CSL74R2V+I2QqTwZ4JRsxz0TE=
+github.com/qoryai/integrations v0.3.1-0.20261108215229-9612effb84a9 h1:tA+lMcQf7sqJjeBVFdTRSIcrV/OZIzi9fZyxijXDSoE=
+github.com/qoryai/integrations v0.3.1-0.20261108215229-9612effb84a9/go.mod h1:8wZP+FYKJRy8P+XaN/CSL74R2V+I2QqTwZ4JRsxz0TE=
 github.com/rivo/uniseg v0.2.0/go.mod h1:J6wj4VEh+S6ZtnVlnTBMWIodfgj8LQOQFoIToxlJtxc=
 github.com/rivo/uniseg v0.4.7 h1:WUdvkW8uEhrYfLC4ZzdpI2ztxP1I582+49Oc5Mq64VQ=
 github.com/rivo/uniseg v0.4.7/go.mod h1:FN3SvrM+Zdj16jyLfmOkMNblXMcoc8DfTHruCPUcx88=
