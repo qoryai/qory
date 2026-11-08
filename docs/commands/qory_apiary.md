@@ -12,7 +12,7 @@ Work with a Qory Apiary server as a person who debugs its runs.
 
 The commands sign their requests with a diagnostics key: an access key of kind
 diagnostics, made on this computer. Its secret stays in ~/.config/qory/apiary/<host>,
-Qory Apiary keeps its public half. With the key, qory lists runs and reads their
+and Qory Apiary keeps its public half. With the key, qory lists runs and reads their
 diagnostics, and nothing else.
 
 More: https://github.com/qoryai/qory/blob/main/docs/apiary.md

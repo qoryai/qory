@@ -330,8 +330,9 @@ func shortDuration(s int64) string {
 	return fmt.Sprintf("%dh%02dm", s/3600, s%3600/60)
 }
 
-// nextPageCommand is the command that lists the page after the run next: every flag in
-// given, --since as the time qory sent, --server as given in f, then --before next.
+// nextPageCommand is the command that lists the page after the run next: --server as
+// given in f, then every flag in given, --since as the time qory sent, then --before
+// next.
 func nextPageCommand(f runListFlags, given []runListFlag, next string) string {
 	parts := []string{runListCommand}
 	if f.serverGiven {

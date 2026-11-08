@@ -458,6 +458,9 @@ func TestApiaryRunListWithSeveralKeys(t *testing.T) {
 	if !strings.Contains(out, "rn_0123456789abcdeh") || s.requests != 1 {
 		t.Errorf("%d requests, stdout:\n%s", s.requests, out)
 	}
+	if s.query != "limit=25&state=failed" {
+		t.Errorf("query %q, want limit=25&state=failed alone", s.query)
+	}
 	if want := "Next page: qory apiary run list --server " + s.URL + "/ --state failed --before rn_0123456789abcdeg\n"; errOut != want {
 		t.Errorf("stderr %q, want %q", errOut, want)
 	}

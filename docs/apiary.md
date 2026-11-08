@@ -152,10 +152,9 @@ without `--server`, of the one server it has a key for.
 
 When more runs match, the last line is the command that lists the next page: every
 flag you gave, `--server` as you wrote it, `--since` as the time qory sent, and
-`--before` with the last run of the page. The title line and the runs go to stdout, and the line for the next page to
-stderr, so a pipe receives the title line and the runs, and no next-page line. When no
-run matches, qory prints one line on stderr and exits
-0.
+`--before` with the last run of the page. The title line and the runs go to stdout, and
+the line for the next page to stderr, so a pipe receives the title line and the runs,
+and no next-page line. When no run matches, qory prints one line on stderr and exits 0.
 
 With `--json`, qory prints the run list as Qory Apiary sent it, after its signature and
 the contract's `runs.schema.json` check, and nothing else on stdout. The list follows
