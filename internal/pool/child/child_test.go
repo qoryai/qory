@@ -845,10 +845,10 @@ func TestOutputIsMaskedWithMask(t *testing.T) {
 	}
 }
 
-// TestLeaderSince passes a process that leads its group and started before the time
-// given, and fails one that started after it, one that leads no group of its id, and
-// one that has ended.
-func TestLeaderSince(t *testing.T) {
+// TestCheckLeader passes a process that leads its group and has the start stamp that
+// StartStamp read, and fails one with another stamp, one that leads no group of its id,
+// and one that has ended, which is ErrNoProcess.
+func TestCheckLeader(t *testing.T) {
 	start := func(newGroup bool) *exec.Cmd {
 		cmd := exec.Command("sleep", "60")
 		if newGroup {
@@ -864,21 +864,35 @@ func TestLeaderSince(t *testing.T) {
 		return cmd
 	}
 	leader := start(true)
-	if err := child.LeaderSince(leader.Process.Pid, time.Now().Add(time.Second)); err != nil {
+	stamp, err := child.StartStamp(leader.Process.Pid)
+	if err != nil || stamp == "" {
+		t.Fatalf("the leader's start stamp is %q, %v", stamp, err)
+	}
+	if again, err := child.StartStamp(leader.Process.Pid); err != nil || again != stamp {
+		t.Errorf("the leader's start stamp read again is %q, %v, want %q", again, err, stamp)
+	}
+	if err := child.CheckLeader(leader.Process.Pid, stamp); err != nil {
 		t.Errorf("the leader failed: %v", err)
 	}
-	if err := child.LeaderSince(leader.Process.Pid, time.Now().Add(-time.Hour)); err == nil || !strings.Contains(err.Error(), "started at") {
-		t.Errorf("a leader that started after the time passed: %v", err)
+	if err := child.CheckLeader(leader.Process.Pid, stamp+"1"); err == nil || !strings.Contains(err.Error(), "passed to another process") {
+		t.Errorf("a leader with another start passed: %v", err)
 	}
 	member := start(false)
-	if err := child.LeaderSince(member.Process.Pid, time.Now().Add(time.Second)); err == nil || !strings.Contains(err.Error(), "leads no group") {
+	memberStamp, err := child.StartStamp(member.Process.Pid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := child.CheckLeader(member.Process.Pid, memberStamp); err == nil || !strings.Contains(err.Error(), "leads no group") {
 		t.Errorf("a process that leads no group passed: %v", err)
 	}
 	ended := exec.Command("true")
 	if err := ended.Run(); err != nil {
 		t.Fatal(err)
 	}
-	if err := child.LeaderSince(ended.Process.Pid, time.Now()); err == nil || !strings.Contains(err.Error(), "does not run") {
-		t.Errorf("a process that ended passed: %v", err)
+	if err := child.CheckLeader(ended.Process.Pid, stamp); !errors.Is(err, child.ErrNoProcess) {
+		t.Errorf("a process that ended is %v, want ErrNoProcess", err)
+	}
+	if _, err := child.StartStamp(ended.Process.Pid); !errors.Is(err, child.ErrNoProcess) {
+		t.Errorf("the start stamp of a process that ended is %v, want ErrNoProcess", err)
 	}
 }

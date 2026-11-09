@@ -50,7 +50,7 @@ func RecordDir(state, work, runID string) (string, error) {
 
 // RecordedRuns is the run ids of the records that qory run made with XDG_STATE_HOME set
 // to state: the names of the folders <state>/qory/runs/<checkout>-<hash>/<run id>, as
-// [RecordDir] has them, that are a run id. A folder that cannot be read lists nothing.
+// [RecordDir] has them, that are a run id. A folder that cannot be read adds no id.
 func RecordedRuns(state string) []string {
 	runs := filepath.Join(state, "qory", "runs")
 	checkouts, _ := os.ReadDir(runs)

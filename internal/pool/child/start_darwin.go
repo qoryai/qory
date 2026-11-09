@@ -1,18 +1,25 @@
 package child
 
 import (
-	"time"
+	"errors"
+	"fmt"
 
 	"golang.org/x/sys/unix"
 )
 
-// startTime is when the process id started, p_starttime of the kinfo_proc that the
-// sysctl kern.proc.pid returns.
-func startTime(id int) (time.Time, error) {
+// startStamp is when the process id started, as the kernel keeps it: p_starttime of
+// the kinfo_proc that the sysctl kern.proc.pid returns, as seconds and microseconds,
+// sec.usec. It is the same for as long as the process runs. The sysctl returns no
+// kinfo_proc for an id that no process has, which x/sys returns as EIO: that is
+// [ErrNoProcess].
+func startStamp(id int) (string, error) {
 	kp, err := unix.SysctlKinfoProc("kern.proc.pid", id)
+	if errors.Is(err, unix.EIO) {
+		return "", fmt.Errorf("process %d does not run: %w", id, ErrNoProcess)
+	}
 	if err != nil {
-		return time.Time{}, err
+		return "", err
 	}
 	t := kp.Proc.P_starttime
-	return time.Unix(int64(t.Sec), int64(t.Usec)*1000), nil
+	return fmt.Sprintf("%d.%06d", t.Sec, t.Usec), nil
 }

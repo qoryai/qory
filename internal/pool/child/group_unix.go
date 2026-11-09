@@ -3,10 +3,10 @@
 package child
 
 import (
+	"errors"
 	"fmt"
 	"os/exec"
 	"syscall"
-	"time"
 )
 
 // group starts cmd in a new process group: a signal sent to the program from its
@@ -34,24 +34,33 @@ func SignalGroup(id int, kill bool) error {
 // ProcessGroup is the id of this process's process group.
 func ProcessGroup() int { return syscall.Getpgrp() }
 
-// LeaderSince checks that the process id leads the process group id and started no
-// later than since: a process that started later, or that leads no group of that id,
-// took the id over from a group that is gone. Its error is for each failed check, and
-// for a start time that cannot be read.
-func LeaderSince(id int, since time.Time) error {
+// StartStamp is when the process id started, as the kernel keeps it: on Linux, field 22
+// of /proc/<id>/stat in clock ticks, and on macOS p_starttime as sec.usec. It is the
+// same for as long as the process runs, and another process that gets the id later
+// has another one. A process that does not run is [ErrNoProcess].
+func StartStamp(id int) (string, error) { return startStamp(id) }
+
+// CheckLeader checks that the process id leads the process group id and has the start
+// stamp start, as [StartStamp] read it when the process started: a process with
+// another stamp, or one that leads no group of that id, got the id after the group
+// that start recorded ended. A process that does not run is [ErrNoProcess].
+func CheckLeader(id int, start string) error {
 	g, err := syscall.Getpgid(id)
+	if errors.Is(err, syscall.ESRCH) {
+		return fmt.Errorf("process %d does not run: %w", id, ErrNoProcess)
+	}
 	if err != nil {
-		return fmt.Errorf("process %d does not run: %w", id, err)
+		return fmt.Errorf("the process group of process %d could not be read: %w", id, err)
 	}
 	if g != id {
 		return fmt.Errorf("process %d is in process group %d, so it leads no group %d", id, g, id)
 	}
-	started, err := startTime(id)
+	stamp, err := startStamp(id)
 	if err != nil {
-		return fmt.Errorf("the start time of process %d could not be read: %w", id, err)
+		return err
 	}
-	if started.After(since) {
-		return fmt.Errorf("process %d started at %s, after %s, so it is not the one recorded", id, started.UTC().Format(time.RFC3339Nano), since.UTC().Format(time.RFC3339Nano))
+	if stamp != start {
+		return fmt.Errorf("process %d started at %s, not at %s as recorded, so its id passed to another process", id, stamp, start)
 	}
 	return nil
 }

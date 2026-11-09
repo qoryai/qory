@@ -56,6 +56,9 @@ func ContainsSecret(v string) bool {
 	return accesskey.ContainsSecret(v) || strings.Contains(strings.ToLower(v), accesskey.CodePrefixRun)
 }
 
+// ErrNoProcess is a process id that no process has.
+var ErrNoProcess = errors.New("no process has the id")
+
 // DefaultGrace is how long a command has after SIGTERM before it is killed.
 const DefaultGrace = 30 * time.Second
 

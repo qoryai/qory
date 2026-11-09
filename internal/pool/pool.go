@@ -67,9 +67,11 @@
 // entry whose run.lock is held is a qory run left from before: beside the claim loop,
 // and in one of the pool's Runs while one is free, the pool sends SIGTERM to that
 // process group, SIGKILL once the grace passed, and waits up to the grace again for the
-// lock. It signals the group only while the group's leader runs and started no later
-// than run.pgid was written; otherwise it sends nothing and waits the grace for the
-// lock. When the lock is still held then, or cannot be tried, the entry stays, with its
+// lock. run.pgid records the group's id and its leader's start stamp, which the pool
+// reads once qory run started. The pool signals the group only while the process of
+// that id leads the group and has that stamp, so only a group whose leader is the run it
+// started; otherwise it sends nothing and waits the grace for the lock. SIGKILL goes
+// also when no process has the leader's id by then. When the lock is still held then, or cannot be tried, the entry stays, with its
 // folder, for the next start, and no gone is sent; so does it when ctx ends during the
 // waits. Once the lock is free, the pool removes the wall of
 // each run whose record is in the dispatch's folder, with [Pool.Reap], as qory run
@@ -87,6 +89,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -270,9 +273,10 @@ func removeCodeFiles(state string) error {
 // it stops, it takes one of the pool's Runs when one is free. A dispatch whose folder
 // contains a run's record then has that run's wall removed, as [Pool.Reap] has it,
 // beside the claim loop too, before the dispatch is acted on as above. A dispatch whose
-// lock is still held after the stop, or whose lock cannot be tried, stays in the journal
-// at its phase, with its folder, for the next start, and keeps its Run. Once ctx ends,
-// the rest stay.
+// lock is still held after the stop stays in the journal at its phase, with its folder,
+// for the next start, and keeps its Run; so does one whose lock cannot be tried, which
+// takes no Run at the first try and keeps the one it took when a later try fails. Once
+// ctx ends, the rest stay.
 func (p *Pool) replay(ctx context.Context) {
 	for _, e := range p.journal.list() {
 		if ctx.Err() != nil {
@@ -361,19 +365,21 @@ func (p *Pool) runLock(id string) (*foragerdir.Lock, error) {
 
 // stopLeftover stops the qory run of the dispatch id that is left from before the pool
 // started, and reports whether its lock is free. While the process group that run.pgid
-// of its folder contains passes [Pool.leftGroup], the pool sends SIGTERM to that group,
+// of its folder records passes [Pool.leftGroup], the pool sends SIGTERM to that group,
 // then, while the lock is still held once the grace of [Settings] has passed, SIGKILL,
-// and waits up to the grace again for the lock. A group that does not pass gets no
-// signal, and the pool waits up to the grace for the lock. A lock still held after the
-// waits is logged, as is a lock that cannot be tried. Once stop ends, the waits end, and
-// nothing more is sent or logged; the waits are the pool's Sleep.
+// and waits up to the grace again for the lock. SIGKILL goes also when no process has
+// the leader's id by then: while group N has members, no process gets the id N. It does
+// not go when a process with another start has the id. A group that does not pass gets
+// no signal, and the pool waits up to the grace for the lock. A lock still held after
+// the waits is logged, as is a lock that cannot be tried. Once stop ends, the waits end,
+// and nothing more is sent or logged; the waits are the pool's Sleep.
 func (p *Pool) stopLeftover(stop context.Context, id string) bool {
 	ids := slog.String("dispatch_id", id)
 	grace := p.Settings.Grace
 	if grace <= 0 {
 		grace = child.DefaultGrace
 	}
-	group, why := p.leftGroup(id)
+	group, start, why := p.leftGroup(id)
 	if why == nil {
 		p.log.Warn(lineLeftoverStopped, ids, slog.Int("process_group", group))
 		_ = child.SignalGroup(group, false)
@@ -382,9 +388,9 @@ func (p *Pool) stopLeftover(stop context.Context, id string) bool {
 			return true
 		}
 		if stop.Err() == nil && errors.Is(err, foragerdir.ErrLocked) {
-			// The leader is checked again: it may have ended after SIGTERM, and its id
-			// may lead another group by now.
-			if _, why = p.leftGroup(id); why == nil {
+			// The leader may have ended at SIGTERM while other members of its group
+			// hold the lock.
+			if err := child.CheckLeader(group, start); err == nil || errors.Is(err, child.ErrNoProcess) {
 				_ = child.SignalGroup(group, true)
 			}
 		}
@@ -413,24 +419,19 @@ func (p *Pool) lockNotTried(id string, err error) {
 	p.log.Error(line, slog.String("dispatch_id", id))
 }
 
-// leftGroup is the process group id that run.pgid of the dispatch id's folder contains,
-// as [readGroup] reads it, with no error only when the group's leader runs and started
-// no later than the file was last written, as [child.LeaderSince] checks: otherwise the
-// id may have passed to another group after the run's group ended.
-func (p *Pool) leftGroup(id string) (int, error) {
-	dir := p.dispatchDir(id)
-	group, err := readGroup(dir)
+// leftGroup is the process group id and the leader's start stamp that run.pgid of the
+// dispatch id's folder records, as [readGroup] reads them, with no error only when the
+// process of that id leads the group and has that stamp, as [child.CheckLeader] checks:
+// otherwise the id may have passed to another process after the run's group ended.
+func (p *Pool) leftGroup(id string) (int, string, error) {
+	group, start, err := readGroup(p.dispatchDir(id))
 	if err != nil {
-		return 0, err
+		return 0, "", err
 	}
-	info, err := os.Stat(filepath.Join(dir, runGroupFile))
-	if err != nil {
-		return 0, err
+	if err := child.CheckLeader(group, start); err != nil {
+		return 0, "", err
 	}
-	if err := child.LeaderSince(group, info.ModTime()); err != nil {
-		return 0, err
-	}
-	return group, nil
+	return group, start, nil
 }
 
 // waitLock tries the lock of the dispatch id's folder every [leftoverPoll], for up to
@@ -452,29 +453,49 @@ func (p *Pool) waitLock(ctx context.Context, id string, d time.Duration) (bool, 
 	}
 }
 
-// readGroup is the process group id that run.pgid of the dispatch's folder dir
-// contains. An id of 1 or less, which would signal more than one run, the process id of
-// the pool program, or the id of its process group, is an error.
-func readGroup(dir string) (int, error) {
-	b, err := os.ReadFile(filepath.Join(dir, runGroupFile))
+// maxGroupFile is the most of run.pgid that is read: far more than its one line.
+const maxGroupFile = 128
+
+// readGroup is what run.pgid of the dispatch's folder dir records, read from one open
+// of the file: the process group id and the leader's start stamp, as [writeGroup]
+// writes them. A file of another shape, one number among them, is an error, as is an id
+// of 1 or less, which would signal more than one run, the process id of the pool
+// program, or the id of its process group.
+func readGroup(dir string) (int, string, error) {
+	f, err := os.Open(filepath.Join(dir, runGroupFile))
 	if err != nil {
-		return 0, err
+		return 0, "", err
 	}
-	n, err := strconv.Atoi(strings.TrimSpace(string(b)))
+	defer f.Close()
+	b, err := io.ReadAll(io.LimitReader(f, maxGroupFile))
+	if err != nil {
+		return 0, "", err
+	}
+	bad := fmt.Errorf("%s does not contain the id of a qory run's process group and its leader's start", runGroupFile)
+	fields := strings.Fields(string(b))
+	if len(fields) != 2 || strings.Trim(fields[1], "0123456789.") != "" {
+		return 0, "", bad
+	}
+	n, err := strconv.Atoi(fields[0])
 	if err != nil || n <= 1 || n == os.Getpid() || n == child.ProcessGroup() {
-		return 0, fmt.Errorf("%s does not contain the id of a qory run's process group", runGroupFile)
+		return 0, "", bad
 	}
-	return n, nil
+	return n, fields[1], nil
 }
 
-// writeGroup writes the process group id to run.pgid of the dispatch's folder dir, mode
-// 0600, synced.
+// writeGroup writes the process group id and its leader's start stamp, as
+// [child.StartStamp] reads it, to run.pgid of the dispatch's folder dir, mode 0600,
+// synced, as one line: "<id> <stamp>". It writes no file when the stamp cannot be read.
 func writeGroup(dir string, id int) error {
+	stamp, err := child.StartStamp(id)
+	if err != nil {
+		return err
+	}
 	f, err := os.OpenFile(filepath.Join(dir, runGroupFile), os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
 	if err != nil {
 		return err
 	}
-	_, err = f.WriteString(strconv.Itoa(id) + "\n")
+	_, err = f.WriteString(strconv.Itoa(id) + " " + stamp + "\n")
 	if err == nil {
 		err = f.Sync()
 	}
@@ -865,18 +886,14 @@ func (p *Pool) release(work context.Context, id, reason string) (releaseEnd, err
 			continue
 		}
 		machine := errors.Is(err, provisioner.ErrMachineExists)
-		if !machine && !provisioner.EndsAttempts(err) {
-			return releaseKept, err
-		}
 		if machine {
 			p.log.Warn(lineNotReleased, ids, slog.String("reason", reason), errAttr(err))
 			return releaseMachine, nil
 		}
-		line := lineNotReleased
-		if errors.As(err, &r) && releaseEndedLine[r.Status] != "" {
-			line = releaseEndedLine[r.Status]
+		if !provisioner.EndsAttempts(err) || !errors.As(err, &r) {
+			return releaseKept, err
 		}
-		p.log.Warn(line, ids, slog.String("reason", reason), errAttr(err))
+		p.log.Warn(releaseEndedLine[r.Status], ids, slog.String("reason", reason), errAttr(err))
 		return releaseOver, nil
 	}
 }

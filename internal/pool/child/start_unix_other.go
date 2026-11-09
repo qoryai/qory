@@ -2,12 +2,9 @@
 
 package child
 
-import (
-	"errors"
-	"time"
-)
+import "errors"
 
-// startTime reads no start time on a system that qory is not built for.
-func startTime(int) (time.Time, error) {
-	return time.Time{}, errors.New("this system has no start time of a process that qory reads")
+// startStamp reads no start of a process on a system that qory is not built for.
+func startStamp(int) (string, error) {
+	return "", errors.New("this system has no start of a process that qory reads")
 }

@@ -6,7 +6,6 @@ import (
 	"errors"
 	"os"
 	"os/exec"
-	"time"
 )
 
 // group leaves cmd as it is on a system without process groups.
@@ -31,7 +30,12 @@ func SignalGroup(id int, kill bool) error {
 // ProcessGroup is -1 on a system without process groups: no id is a group's.
 func ProcessGroup() int { return -1 }
 
-// LeaderSince fails on a system without process groups, so no group is signalled.
-func LeaderSince(int, time.Time) error {
+// StartStamp reads no start on a system without process groups.
+func StartStamp(int) (string, error) {
+	return "", errors.New("this system has no process groups")
+}
+
+// CheckLeader fails on a system without process groups, so no group is signalled.
+func CheckLeader(int, string) error {
 	return errors.New("this system has no process groups")
 }

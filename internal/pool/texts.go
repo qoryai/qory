@@ -1,7 +1,9 @@
 package pool
 
-// The lines the pool program logs. Each is a fixed text; what varies goes in its
-// attributes, and every line passes [SafeHandler] before it is written.
+// The lines the pool program logs. Each is a fixed text, and what varies goes in its
+// attributes, except the formats for fmt.Sprintf below; [lineLockNotTried] is the one
+// format that has the path of a file in its text. Every line passes [SafeHandler]
+// before it is written.
 const (
 	lineClaimed     = "claimed a run"
 	lineClaimFailed = "the claim failed, so it is sent again after a wait"
@@ -29,8 +31,10 @@ const (
 	// lineNotStarted is a qory run that could not be started.
 	lineNotStarted = "the run could not be started"
 	// lineLeftoverStopped is a qory run left from before the pool started whose lock
-	// is held: the pool sends SIGTERM to its process group, the attribute
-	// process_group, when run.pgid contains it, and SIGKILL after the grace.
+	// is held, logged once the leader of its process group, the attribute
+	// process_group, passed the check of the leader's start that run.pgid records.
+	// The pool then sends SIGTERM to the group, and SIGKILL after the grace only while
+	// the lock is still held.
 	lineLeftoverStopped = "a qory run of the dispatch is left from before the pool started, so the pool stops it"
 	// lineLeftoverHeld is a qory run left from before the pool started whose lock is
 	// still held after the waits: the entry stays in the journal, and no gone is sent.
@@ -71,7 +75,7 @@ const (
 const lineGoneFailed = "the gone report failed; the pool sends it again in %s"
 
 // lineLockNotTried is a lock of a dispatch's folder that the pool could not try, such
-// as a run.lock it may not open, or a link: the entry stays in the journal, and no gone
+// as a run.lock it has no permission to open, or a link: the entry stays in the journal, and no gone
 // is sent. It is a format for fmt.Sprintf of the path of run.lock, as
 // [exports.HidePath] prints it, and of the error.
 const lineLockNotTried = "check `%s`: the pool could not lock it (%s), so it keeps the dispatch for its next start and reports no gone"
