@@ -575,9 +575,8 @@ A review comment's `on` has one of two forms:
   on one screen of a mockup, `on` also has `screen`: the id of a screen in that artifact
   version, 1 to 32 characters on one line.
 - On a round, `on` has only `run`, the number of a run, from 1: the review comment is
-  about everything that run produced and the round as a whole. A round is one run of a
-  stage and the versions it pushed. When a member asks for another round with a review
-  comment, the control plane writes it with the newest run of the stage in `run`.
+  about everything that run produced and the round as a whole. `run` is the number of the
+  run whose round the member commented on.
 
 A version that a run pushes keeps `on` unchanged.
 
