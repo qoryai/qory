@@ -141,10 +141,10 @@ func wantSameTree(t *testing.T, root string, before map[string]string) {
 // artifact, and records the bodies of the pushes and verdicts that reach it, signed by
 // the gateway.
 type signedRunAPI struct {
-	mu      sync.Mutex
-	pushes  []map[string]any
-	gaps    []string
-	content []byte
+	mu       sync.Mutex
+	pushes   []map[string]any
+	verdicts []string
+	content  []byte
 }
 
 // The run API's fixture: the artifact brief, version 1, with one file.
@@ -187,7 +187,7 @@ func (a *signedRunAPI) serve(signer *accesskey.Key, w http.ResponseWriter, r *ht
 			len(a.pushes)+1, len(a.pushes)+1))
 	case path == "verdict":
 		raw, _ := io.ReadAll(r.Body)
-		a.gaps = append(a.gaps, string(raw))
+		a.verdicts = append(a.verdicts, string(raw))
 
 		return answer(http.StatusCreated, `{"version":1,"artifact":{"type":"verdict","name":"main","version":{"id":"av_9","number":1}}}`)
 	case path == "artifacts/av_1/files/"+gatewayArtifactFile:
@@ -352,12 +352,9 @@ func TestAReadRunStoresThroughARealGateway(t *testing.T) {
 		t.Fatalf("push of standard input: %q, %v", out, err)
 	}
 
-	gaps := filepath.Join(dir, "gaps.md")
-	if err := os.WriteFile(gaps, []byte("Add the empty cart."), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	points := writePoints(t, dir, verdictPoints)
 
-	if out, err = run(t, "run", "verdict", "changes-requested", "--gaps", gaps); err != nil {
+	if out, err = run(t, "run", "verdict", "escalate", "--points", points); err != nil {
 		t.Fatalf("verdict: %q, %v", out, err)
 	}
 
@@ -382,8 +379,8 @@ func TestAReadRunStoresThroughARealGateway(t *testing.T) {
 		t.Errorf("the first push's file: %v", file)
 	}
 
-	if want := `{"verdict":"changes-requested","gaps":"Add the empty cart."}`; len(api.gaps) != 1 || api.gaps[0] != want {
-		t.Errorf("the verdicts: %q, want %q", api.gaps, want)
+	if len(api.verdicts) != 1 || api.verdicts[0] != verdictPointsBody {
+		t.Errorf("the verdicts: %q, want %q", api.verdicts, verdictPointsBody)
 	}
 }
 

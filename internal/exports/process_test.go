@@ -920,10 +920,11 @@ func TestArtifactTypesSchemaMatchesTheReader(t *testing.T) {
 }
 
 // TestContractSchemasPassAsCustomTypes is each structured format of the contract,
-// branch.schema.json, questions.schema.json, review-comments.schema.json and
-// proposal-sources.schema.json, as the json_schema of a custom type: it passes the
-// check and process.schema.json, with a size limit that a structured type can have. The
-// same type with a schema that does not compile fails, so the check reads the entry.
+// branch.schema.json, questions.schema.json, review-comments.schema.json,
+// proposal-sources.schema.json and verdict.schema.json, as the json_schema of a custom
+// type: it passes the check and process.schema.json, with a size limit that a structured
+// type can have. The same type with a schema that does not compile fails, so the check
+// reads the entry.
 func TestContractSchemasPassAsCustomTypes(t *testing.T) {
 	processSchema, err := jsonschema.NewCompiler().Compile("../../contracts/harness/v1/process.schema.json")
 	if err != nil {
@@ -934,6 +935,7 @@ func TestContractSchemasPassAsCustomTypes(t *testing.T) {
 		{"questions", "1048576"},
 		{"review-comments", "1048576"},
 		{"proposal-sources", "1048576"},
+		{"verdict", "65536"},
 	} {
 		file := c.name + ".schema.json"
 		raw, err := os.ReadFile("../../contracts/harness/v1/" + file)

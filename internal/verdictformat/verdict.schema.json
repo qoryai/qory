@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://qory.dev/contracts/harness/v1/verdict.schema.json",
+  "title": "The verdict format, version 1",
+  "description": "A run's verdict on the work of its round: the file of a version of the artifact type verdict, which qory run verdict stores. passed: the work meets the bar. changes-requested: the work needs another round. escalate: a person must act, and points lists what is wrong or missing and what the person can do. The question of an answer point is open in the work item's newest questions version, which a JSON Schema cannot check. No object has a member this schema does not define.",
+  "type": "object",
+  "required": ["verdict"],
+  "additionalProperties": false,
+  "properties": {
+    "verdict": {"description": "passed, changes-requested or escalate.", "enum": ["passed", "changes-requested", "escalate"]},
+    "points": {
+      "description": "What is wrong or missing and what a person can do, 1 to 20 points: required when verdict is escalate, and absent otherwise.",
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 20,
+      "items": {"$ref": "#/$defs/point"}
+    }
+  },
+  "if": {"required": ["verdict"], "properties": {"verdict": {"const": "escalate"}}},
+  "then": {"required": ["points"]},
+  "else": {"not": {"required": ["points"]}},
+  "$defs": {
+    "point": {
+      "description": "One point for a person. question is required when action is answer, and absent when action is run_again.",
+      "type": "object",
+      "required": ["text", "action"],
+      "additionalProperties": false,
+      "properties": {
+        "text": {"description": "What is wrong or missing, in one plain sentence on one line, 1 to 500 characters, with no action and no question id: Qory Apiary adds the action from action.", "$ref": "#/$defs/line", "minLength": 1, "maxLength": 500},
+        "action": {"description": "answer: the person answers the question in question. run_again: the person runs another round.", "enum": ["answer", "run_again"]},
+        "question": {"description": "The id of an open question in the work item's newest questions version, in the id form of questions.schema.json: 1 to 32 lower-case letters, digits and hyphens, such as q1.", "type": "string", "pattern": "^[a-z0-9-]{1,32}$"}
+      },
+      "if": {"required": ["action"], "properties": {"action": {"const": "answer"}}},
+      "then": {"required": ["question"]},
+      "else": {"not": {"required": ["question"]}}
+    },
+    "line": {
+      "description": "Text on one line: it has no control character, so none of U+0000 to U+001F, U+007F and U+0080 to U+009F, and no tab, line feed or carriage return. It has none of the bidirectional controls, the marks U+061C, U+200E and U+200F, the embeddings and overrides U+202A to U+202E and the isolates U+2066 to U+2069; the separators U+2028 and U+2029; and the format characters U+00AD, U+180E, U+200B, U+2060 to U+2064, U+FEFF and U+FFF9 to U+FFFB. This is the line of questions.schema.json.",
+      "type": "string",
+      "pattern": "^[^\u0000-\u001f\u007f\u0080-\u009f\u00ad\u061c\u180e\u200b\u200e\u200f\u2028\u2029\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff\ufff9-\ufffb]*$"
+    }
+  }
+}

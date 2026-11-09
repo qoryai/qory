@@ -661,6 +661,95 @@ func TestQuestionsSchema(t *testing.T) {
 	}
 }
 
+// verdictDocument is a document of verdict.schema.json that passes: an escalation
+// with a point to answer and a point to run again.
+const verdictDocument = `{"verdict": "escalate", "points": [
+ {"text": "The ticket does not say which customers see the new price.", "action": "answer", "question": "q4"},
+ {"text": "The checks script failed on the spec's links.", "action": "run_again"}
+]}`
+
+// TestVerdictSchema is each document that verdict.schema.json passes or fails.
+func TestVerdictSchema(t *testing.T) {
+	schema, err := jsonschema.NewCompiler().Compile("../../contracts/harness/v1/verdict.schema.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	replace := func(from, to string) string {
+		if !strings.Contains(verdictDocument, from) {
+			t.Fatalf("the document has no %s", from)
+		}
+		return strings.Replace(verdictDocument, from, to, 1)
+	}
+	point := `{"text": "The checks script failed.", "action": "run_again"}`
+	points := func(n int) string {
+		return `{"verdict": "escalate", "points": [` + strings.TrimSuffix(strings.Repeat(point+", ", n), ", ") + `]}`
+	}
+	text := func(s string) string {
+		return replace(`"text": "The checks script failed on the spec's links."`, `"text": "`+s+`"`)
+	}
+	rlo := string(rune(0x202e)) // a right-to-left override, invisible
+	for _, c := range []struct {
+		doc   string
+		valid bool
+	}{
+		{verdictDocument, true},
+		{`{"verdict": "passed"}`, true},
+		{`{"verdict": "changes-requested"}`, true},
+		{`{}`, false},
+		{`[]`, false},
+		{`{"verdict": "failed"}`, false},
+		// points is required with escalate and absent otherwise.
+		{`{"verdict": "escalate"}`, false},
+		{replace(`"verdict": "escalate"`, `"verdict": "passed"`), false},
+		{replace(`"verdict": "escalate"`, `"verdict": "changes-requested"`), false},
+		{`{"verdict": "passed", "points": []}`, false},
+		// 1 to 20 points
+		{points(1), true},
+		{points(20), true},
+		{points(0), false},
+		{points(21), false},
+		{`{"verdict": "escalate", "points": {}}`, false},
+		{`{"verdict": "escalate", "points": ["The spec's links are broken."]}`, false},
+		// text and action are required.
+		{replace(`, "action": "run_again"`, ``), false},
+		{replace(`"text": "The checks script failed on the spec's links.", `, ``), false},
+		{replace(`"action": "run_again"`, `"action": "ask"`), false},
+		// question is required with answer and absent with run_again.
+		{replace(`, "question": "q4"`, ``), false},
+		{replace(`"action": "run_again"`, `"action": "run_again", "question": "q4"`), false},
+		{replace(`"question": "q4"`, `"question": "`+strings.Repeat("a", 32)+`"`), true},
+		{replace(`"question": "q4"`, `"question": "`+strings.Repeat("a", 33)+`"`), false},
+		{replace(`"question": "q4"`, `"question": ""`), false},
+		{replace(`"question": "q4"`, `"question": "Q4"`), false},
+		{replace(`"question": "q4"`, `"question": 4`), false},
+		// text: 1 to 500 characters on one line, with the character rules of $defs line
+		{text(strings.Repeat("a", 500)), true},
+		{text(strings.Repeat("é", 500)), true},
+		{text(strings.Repeat("a", 501)), false},
+		{text(""), false},
+		{text(`One sentence, with ' and \" and \\.`), true},
+		{text(`One\tsentence.`), false},
+		{text(`One\nsentence.`), false},
+		{text(`One\rsentence.`), false},
+		{text(`One\u0007sentence.`), false},
+		{text(`One ` + rlo + `sentence.`), false},
+		{replace(`"text": "The checks script failed on the spec's links."`, `"text": 1`), false},
+		// a member this schema does not define, at each level, and the old text gaps
+		{replace(`"verdict": "escalate", `, `"verdict": "escalate", "gaps": "Add the empty cart.", `), false},
+		{`{"verdict": "passed", "gaps": "Add the empty cart."}`, false},
+		{replace(`"action": "run_again"`, `"action": "run_again", "gaps": "Add the empty cart."`), false},
+		{replace(`"action": "run_again"`, `"action": "run_again", "priority": 1`), false},
+	} {
+		var doc any
+		if err := json.Unmarshal([]byte(c.doc), &doc); err != nil {
+			t.Fatalf("%s: %v", c.doc, err)
+		}
+		if err := schema.Validate(doc); (err == nil) != c.valid {
+			t.Errorf("%s: valid=%v err=%v", c.doc, c.valid, err)
+		}
+	}
+}
+
 // reviewCommentsDocument is a document of review-comments.schema.json that passes: a
 // closed review comment with a member's reply and a run's reply, and an open review
 // comment with no reply.

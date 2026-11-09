@@ -30,12 +30,15 @@ release may change what an existing document does, and states it under Upgrading
   artifact pull`, `qory artifact push` and `qory run verdict`. In a run they use Qory
   Apiary through the gateway, at `QORY_RUN_API`. Outside a run they use the checkout's
   `.qory` directory. `qory work-item show` exits 3 with no work item, and `qory artifact
-  push` exits 4 for a type or a limit. In a run that cannot write its checkout, such as a
-  read run, `qory artifact pull` and `qory artifact push` keep their files in
-  `/tmp/qory-artifacts`, and `pull` prints that directory. In a run, `pull` prints a whole
-  path. A folder at `/tmp/qory-artifacts` that another user owns, or whose mode has a group
-  or other bit, stops both commands with exit 1. See Commands of a work item in
-  `docs/run.md`.
+  push` exits 4 for a type or a limit. `qory run verdict escalate` needs `--points
+  <file>`, a JSON array of 1 to 20 points in the verdict format, and the other verdicts
+  take no `--points`; qory checks the file before it sends or keeps the verdict, and a
+  file that breaks a rule stops the command with exit 2. In a run that cannot write its
+  checkout, such as a read run, `qory artifact pull` and `qory artifact push` keep their
+  files in `/tmp/qory-artifacts`, and `pull` prints that directory. In a run, `pull`
+  prints a whole path. A folder at `/tmp/qory-artifacts` that another user owns, or whose
+  mode has a group or other bit, stops both commands with exit 1. See Commands of a work
+  item in `docs/run.md`.
 - Every command that reads the configuration checks the `process.yaml` at the folder
   root of each module that `exports.modules` lists: its fields and their limits, that
   `stack` is one of `exports.stacks`, and that the stack declares each workflow the
@@ -91,6 +94,12 @@ release may change what an existing document does, and states it under Upgrading
   proposal and the reason for each. A source has an open `kind`, such as `page`, `record`
   or `file`, and a `ref` in the form that its kind needs. See The proposal sources format
   in `contracts/harness/v1/README.md`.
+- Version 1 of the verdict format, `contracts/harness/v1/verdict.schema.json`: a run's
+  verdict, the file of the artifact type `verdict`. With `escalate`, `points` lists 1 to
+  20 points for a person, each with `text`, one sentence on one line, 1 to 500
+  characters, and `action`: `answer`, with `question`, the id of an open question, or
+  `run_again`. The text member `gaps` is gone. See The verdict format in
+  `contracts/harness/v1/README.md`.
 - `images/agent-browser`: the agent image with Chromium. `images.yml` builds and checks
   it, and `prerelease.yml` publishes it by digest. See Qory's images in `docs/run.md`.
 - `-f` on `qory harness compose`, `qory run` and `qory worktree add` takes a stack by
