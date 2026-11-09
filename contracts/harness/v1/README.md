@@ -571,10 +571,14 @@ A member's reply has no `outcome` and no `question`.
 A review comment's `on` has one of two forms:
 
 - On an output, `on` has the artifact type's name in `artifact` and the version's number
-  in `version`: the review comment is about that artifact version.
+  in `version`: the review comment is about that artifact version. For a review comment
+  on one screen of a mockup, `on` also has `screen`: the id of a screen in that artifact
+  version, 1 to 32 characters on one line.
 - On a round, `on` has only `run`, the number of a run, from 1: the review comment is
   about everything that run produced and the round as a whole. `run` is the number of the
   run whose round the member commented on.
+
+A version that a run pushes keeps `on` unchanged.
 
 This is version 1 of the format ([review-comments.schema.json](review-comments.schema.json)).
 
