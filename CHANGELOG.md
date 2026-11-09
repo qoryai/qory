@@ -381,8 +381,19 @@ release may change what an existing document does, and states it under Upgrading
   `max_lifetime_minutes` pass. Once the run ends, the pool uploads the run's output as
   the dispatch's machine log, once: at most the last 768 KiB, with each line that
   contains `qak_`, `qrk_`, `qecr_`, `qecn_`, `qecp_`, `qecg_` or `qeci_` replaced. If the
-  upload fails, the pool logs a line, and the run's end does not change. The pool section
-  of `forager.yaml` takes `runs`, `registry` and `run_config`. With `prebuilds`,
+  upload fails, the pool logs a line, and the run's end does not change. After the
+  machine log, the pool reports the dispatch's machine as gone, the machine end `gone`,
+  so Qory Apiary frees the dispatch's slot of the node pool once the dispatch ended, not
+  `max_lifetime_minutes` and 60 minutes later. It also sends `gone`, with no run
+  started, for a dispatch whose first dispatched gets 410 `gone` or 409
+  `lease_expired`, and for one whose release gets 409 `machine_exists`. A `gone` that
+  fails is sent again after a wait that doubles from 1 s to 60 s, or after a 429's
+  `Retry-After`, until Qory Apiary returns a signed 204, 400, 403 or 404, after which
+  the same report cannot succeed. Until then, the journal `dispatches` in the pool's
+  folder contains the dispatch at the phase `ended`. When the pool stops, it sends
+  `gone` once more, for at most 10 s; a `gone` that has not got a signed 204, 400, 403
+  or 404 when the pool stops is sent again at its next start, beside the claims. The pool section of
+  `forager.yaml` takes `runs`, `registry` and `run_config`. With `prebuilds`,
   `harness_ref` or `harness_path` in it, qory stops with `<file>: line <n>: key "<key>"
   is not one forager.yaml reads`.
 - qory treats an enrolment code, `qecn_`, `qecp_`, `qecg_` or `qeci_` in any letter case,
