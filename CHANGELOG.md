@@ -81,7 +81,9 @@ release may change what an existing document does, and states it under Upgrading
   `review-comments`. The control plane writes the members' review comments and replies.
   A version that a run pushes only adds the run's reply to any of the open review
   comments, at most one reply to each, and closes each review comment it adds a reply to.
-  See The review comments format in `contracts/harness/v1/README.md`.
+  A review comment's `on` is an artifact version (`artifact` and `version`) or the whole
+  round of a run (`run`, the run's number). See The review comments format in
+  `contracts/harness/v1/README.md`.
 - Version 1 of the proposal sources format,
   `contracts/harness/v1/proposal-sources.schema.json`: the file `sources.json` of a
   version of the artifact type `proposal`, with every source the run used to write the

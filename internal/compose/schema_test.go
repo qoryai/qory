@@ -741,6 +741,15 @@ func TestReviewCommentsSchema(t *testing.T) {
 		{replace(`"artifact": "reply-draft"`, `"artifact": "reply--draft"`), false},
 		{replace(`"artifact": "reply-draft"`, `"artifact": "`+strings.Repeat("a", 64)+`"`), true},
 		{replace(`"artifact": "reply-draft"`, `"artifact": "`+strings.Repeat("a", 65)+`"`), false},
+		// on a round: on has only run, the run's number from 1.
+		{replace(`{"artifact": "reply-draft", "version": 1}`, `{"run": 3}`), true},
+		{replace(`{"artifact": "proposal", "version": 2}`, `{"run": 1}`), true},
+		{replace(`{"artifact": "reply-draft", "version": 1}`, `{"run": 0}`), false},
+		{replace(`{"artifact": "reply-draft", "version": 1}`, `{"run": 1, "artifact": "proposal"}`), false},
+		{replace(`{"artifact": "reply-draft", "version": 1}`, `{"run": 1, "version": 1}`), false},
+		{replace(`{"artifact": "reply-draft", "version": 1}`, `{"run": "3"}`), false},
+		{replace(`{"artifact": "reply-draft", "version": 1}`, `{"run": 1.5}`), false},
+		{replace(`{"artifact": "reply-draft", "version": 1}`, `{}`), false},
 		// text
 		{replace(`"Why two steps?"`, `"`+strings.Repeat("a", 2000)+`"`), true},
 		{replace(`"Why two steps?"`, `"`+strings.Repeat("a", 2001)+`"`), false},
