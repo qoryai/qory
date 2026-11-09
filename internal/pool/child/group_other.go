@@ -40,10 +40,10 @@ func StartStamp(int) (string, error) { return "", errNoSessions }
 func CheckLeader(int, string) error { return errNoSessions }
 
 // HasOpen lists no process on a system without sessions.
-func HasOpen([]int, os.FileInfo) []int { return nil }
+func HasOpen([]Member, int, os.FileInfo) []int { return nil }
 
 // OpenFilesRead is false on a system without sessions.
 const OpenFilesRead = false
 
 // SessionMembers fails on a system without sessions.
-func SessionMembers(int) ([]int, error) { return nil, errNoSessions }
+func SessionMembers(int) ([]Member, error) { return nil, errNoSessions }

@@ -57,6 +57,13 @@ func ContainsSecret(v string) bool {
 	return accesskey.ContainsSecret(v) || strings.Contains(strings.ToLower(v), accesskey.CodePrefixRun)
 }
 
+// Member is a process of a session, as [SessionMembers] lists it: its process id and
+// its start stamp, as [StartStamp] reads it.
+type Member struct {
+	ID    int
+	Stamp string
+}
+
 // ErrNoProcess is a process id that no process has.
 var ErrNoProcess = errors.New("no process has the id")
 

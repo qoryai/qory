@@ -878,8 +878,8 @@ func TestCheckLeader(t *testing.T) {
 	}
 }
 
-// TestSessionMembers lists the leader of a new session and a process it started, and
-// not a process of the test's session.
+// TestSessionMembers lists the leader of a new session and a process it started, each
+// with its start stamp, and not a process of the test's session.
 func TestSessionMembers(t *testing.T) {
 	leader := exec.Command("/bin/sh", "-c", `/bin/sh -c 'exec sleep 60' & echo $!; wait`)
 	leader.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
@@ -905,13 +905,20 @@ func TestSessionMembers(t *testing.T) {
 		_ = leader.Wait()
 	})
 	other := startSleep(t, nil)
-	var ids []int
+	var members []child.Member
 	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
-		if ids, err = child.SessionMembers(leader.Process.Pid); err != nil {
+		if members, err = child.SessionMembers(leader.Process.Pid); err != nil {
 			t.Fatal(err)
 		}
-		if len(ids) == 2 {
+		if len(members) == 2 {
 			break
+		}
+	}
+	var ids []int
+	for _, m := range members {
+		ids = append(ids, m.ID)
+		if stamp, err := child.StartStamp(m.ID); err != nil || stamp != m.Stamp {
+			t.Errorf("process %d is listed with the start %q, and has %q: %v", m.ID, m.Stamp, stamp, err)
 		}
 	}
 	slices.Sort(ids)
@@ -968,7 +975,15 @@ func TestHasOpen(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := child.HasOpen([]int{with.Process.Pid, without.Process.Pid}, info); !slices.Equal(got, []int{with.Process.Pid}) {
+	members := make([]child.Member, 0, 2)
+	for _, id := range []int{with.Process.Pid, without.Process.Pid} {
+		stamp, err := child.StartStamp(id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		members = append(members, child.Member{ID: id, Stamp: stamp})
+	}
+	if got := child.HasOpen(members, child.Session(), info); !slices.Equal(got, []int{with.Process.Pid}) {
 		t.Errorf("the processes with the file open are %v, want %d", got, with.Process.Pid)
 	}
 }

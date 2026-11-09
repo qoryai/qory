@@ -16,9 +16,9 @@ func signalMember(id, session int, sig unix.Signal) {
 	}
 }
 
-// HasOpen lists no process on a system whose open files of a process qory does not
-// read: [OpenFilesRead] is false.
-func HasOpen([]int, os.FileInfo) []int { return nil }
+// HasOpen lists no process: on this system, qory does not read which files a process
+// has open, and [OpenFilesRead] is false.
+func HasOpen([]Member, int, os.FileInfo) []int { return nil }
 
 // OpenFilesRead reports whether [HasOpen] reads the open files of processes on this
 // system.

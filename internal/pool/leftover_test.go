@@ -460,7 +460,7 @@ func TestALeftoverSessionIsStopped(t *testing.T) {
 // A program in another session holds run.lock. Once the grace passed, the session's
 // one process is one that no earlier list had, its leader does not run, and none of
 // its processes has run.lock open, so the session is not shown to be the run's: the
-// new process gets no SIGKILL, and the line of the held lock gives that cause.
+// new process gets no SIGKILL, and the line of the held lock contains that cause.
 func TestASessionWithOnlyNewProcessesGetsNoSIGKILL(t *testing.T) {
 	h := newHarness(t, 1)
 	h.srv.Offer(provisionertest.Run{})
@@ -469,9 +469,23 @@ func TestASessionWithOnlyNewProcessesGetsNoSIGKILL(t *testing.T) {
 	other := holdLock(t, lock, false)
 	leader := holdLockInSession(t, lock, "respawn", false)
 	writeSessionFile(t, lock, leader.pid(), leader.stamp)
+	fresh := leader.ready + ".fresh"
+	started := &holder{}
+	readStarted := func() {
+		if b, err := os.ReadFile(fresh); err == nil && started.member == 0 {
+			if started.member, err = strconv.Atoi(strings.TrimSpace(string(b))); err == nil {
+				started.memberStamp, _ = child.StartStamp(started.member)
+			}
+		}
+	}
+	t.Cleanup(func() {
+		readStarted()
+		if started.member != 0 && started.memberRuns() {
+			_ = syscall.Kill(started.member, syscall.SIGKILL)
+		}
+	})
 	// The first wait for the lock, after SIGTERM, lasts until the leader exited and
 	// the new process started, so the second list has the new process alone.
-	fresh := leader.ready + ".fresh"
 	var once sync.Once
 	keepsLeftover(t, h, e, "no process of the session was in an earlier list of it", 1, func() {
 		once.Do(func() {
@@ -488,24 +502,50 @@ func TestASessionWithOnlyNewProcessesGetsNoSIGKILL(t *testing.T) {
 			t.Error("the new process did not start")
 		})
 	})
-	started := &holder{}
-	if b, err := os.ReadFile(fresh); err == nil {
-		if started.member, err = strconv.Atoi(strings.TrimSpace(string(b))); err == nil {
-			started.memberStamp, _ = child.StartStamp(started.member)
-		}
-	}
-	if started.member != 0 {
-		t.Cleanup(func() {
-			if started.memberRuns() {
-				_ = syscall.Kill(started.member, syscall.SIGKILL)
-			}
-		})
-	}
+	readStarted()
 	if started.member == 0 || !started.memberRuns() || !other.running() {
 		t.Errorf("the new process %d got SIGKILL, or it did not start", started.member)
 	}
 	if got := leader.endedBy(); got != 0 {
 		t.Errorf("the leader ended by %v, want an exit", got)
+	}
+}
+
+// TestAContinuedSessionGetsSIGKILL starts a pool whose dispatched entry's run.session
+// contains a session whose leader ends at SIGTERM, and whose member ignores SIGTERM and
+// has no descriptor of run.lock, while a program in another session holds run.lock.
+// Once the grace passed, the leader does not run, and no process of the session has
+// run.lock open, but the member was in the list of SIGTERM with the same start: the
+// session is still the run's, and the member gets SIGKILL. The lock stays held, so the
+// line of the held lock follows and the entry stays.
+func TestAContinuedSessionGetsSIGKILL(t *testing.T) {
+	h := newHarness(t, 1)
+	h.srv.Offer(provisionertest.Run{})
+	e := claimTo(t, h.srv, pool.PhaseDispatched)
+	lock := leftFolder(t, h, e.DispatchID)
+	other := holdLock(t, lock, false)
+	leader := holdLockInSession(t, lock, "trap", false)
+	writeSessionFile(t, lock, leader.pid(), leader.stamp)
+	// The first wait for the lock, after SIGTERM, lasts until the leader ended, so the
+	// second list has the member alone.
+	var once sync.Once
+	keepsLeftover(t, h, e, "", 1, func() {
+		once.Do(func() {
+			select {
+			case <-leader.done:
+			case <-time.After(20 * time.Second):
+				t.Error("the leader did not end at SIGTERM")
+			}
+		})
+	})
+	if got := leader.endedBy(); got != syscall.SIGTERM {
+		t.Errorf("the leader ended by %v, want SIGTERM", got)
+	}
+	if !leader.memberEnds() {
+		t.Error("the member did not get SIGKILL")
+	}
+	if !other.running() {
+		t.Error("the program in another session got a signal")
 	}
 }
 
@@ -535,7 +575,7 @@ func TestALeaderlessSessionWithTheLockIsStopped(t *testing.T) {
 // entry's run.session contains a session whose leader ended, while a program in
 // another session holds run.lock. On Linux, no process of the session has run.lock
 // open, so the session is not shown to be the run's: no signal goes out, the line of
-// the held lock gives that cause, and the entry stays.
+// the held lock contains that cause, and the entry stays.
 func TestALeaderlessSessionWithoutTheLockGetsNoSignal(t *testing.T) {
 	if !child.OpenFilesRead {
 		t.Skip("the open files of a process are read on Linux alone; elsewhere TestALeaderlessSessionKeepsItsEntry covers a session without its leader")
@@ -558,7 +598,7 @@ func TestALeaderlessSessionWithoutTheLockGetsNoSignal(t *testing.T) {
 // whose dispatched entry's qory run is left as a session whose leader ended, and whose
 // member holds run.lock. The open files of the member are not read there, so the
 // session is not shown to be the run's: no signal goes out, the line of the held lock
-// gives that cause, and the entry stays.
+// contains that cause, and the entry stays.
 func TestALeaderlessSessionKeepsItsEntry(t *testing.T) {
 	if child.OpenFilesRead {
 		t.Skip("on Linux, TestALeaderlessSessionWithTheLockIsStopped covers a session without its leader")
@@ -570,7 +610,7 @@ func TestALeaderlessSessionKeepsItsEntry(t *testing.T) {
 	holder := holdLockInSession(t, lock, "alone", true)
 	writeSessionFile(t, lock, holder.pid(), holder.stamp)
 	<-holder.done
-	keepsLeftover(t, h, e, "cannot be read on this system", 0, nil)
+	keepsLeftover(t, h, e, "qory does not read which files a process has open on this system", 0, nil)
 	if !holder.memberRuns() || lockFree(lock) {
 		t.Error("the member got a signal")
 	}

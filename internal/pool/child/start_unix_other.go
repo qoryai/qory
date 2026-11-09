@@ -12,4 +12,4 @@ var errNotRead = errors.New("qory reads no start of a process and no session's m
 func startStamp(int) (string, error) { return "", errNotRead }
 
 // SessionMembers lists no process on a system that qory is not built for.
-func SessionMembers(int) ([]int, error) { return nil, errNotRead }
+func SessionMembers(int) ([]Member, error) { return nil, errNotRead }
