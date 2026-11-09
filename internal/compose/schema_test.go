@@ -750,6 +750,11 @@ func TestReviewCommentsSchema(t *testing.T) {
 		{replace(`{"artifact": "reply-draft", "version": 1}`, `{"run": "3"}`), false},
 		{replace(`{"artifact": "reply-draft", "version": 1}`, `{"run": 1.5}`), false},
 		{replace(`{"artifact": "reply-draft", "version": 1}`, `{}`), false},
+		{replace(`{"artifact": "reply-draft", "version": 1}`, `{"artifact": "reply-draft", "version": 1, "run": 1}`), false},
+		// on and a reply's by are objects.
+		{replace(`{"artifact": "reply-draft", "version": 1}`, `3`), false},
+		{replace(`{"artifact": "reply-draft", "version": 1}`, `null`), false},
+		{replace(`"by": {"run": 3}`, `"by": 3`), false},
 		// text
 		{replace(`"Why two steps?"`, `"`+strings.Repeat("a", 2000)+`"`), true},
 		{replace(`"Why two steps?"`, `"`+strings.Repeat("a", 2001)+`"`), false},

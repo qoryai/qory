@@ -573,9 +573,8 @@ A review comment's `on` has one of two forms:
 - On an output, `on` has the artifact type's name in `artifact` and the version's number
   in `version`: the review comment is about that artifact version.
 - On a round, `on` has only `run`, the number of a run, from 1: the review comment is
-  about everything that run produced and the round as a whole. A round is one run of a
-  stage and the versions it pushed. When a member asks for another round with a review
-  comment, the control plane writes it with the newest run of the stage in `run`.
+  about everything that run produced and the round as a whole. `run` is the number of the
+  run whose round the member commented on.
 
 This is version 1 of the format ([review-comments.schema.json](review-comments.schema.json)).
 
