@@ -19,8 +19,13 @@ const (
 	lineReleased = "released the run"
 	// lineOverAlready is a release that returned 410 gone or 409 lease_expired.
 	lineOverAlready = "the dispatch was over already, so nothing was released"
-	// lineNotReleased is a release Qory Apiary did not take.
+	// lineNotReleased is a release that returned 409 machine_exists or a signed 400, 403
+	// or 404, or that failed for a claim that could not be written to the journal: the
+	// pool does not send it again.
 	lineNotReleased = "the run could not be released"
+	// lineReleaseKept is a release that failed and was not sent again before the pool
+	// stopped; the claimed entry stays in the journal.
+	lineReleaseKept = "the release of the run failed before the pool stopped; the pool sends it again at its next start"
 	// lineNotStarted is a qory run that could not be started.
 	lineNotStarted = "the run could not be started"
 	// lineNotJournaled is a write of the journal that failed.
@@ -47,6 +52,11 @@ const (
 // for fmt.Sprintf of the wait before it is sent again, as Go prints a time.Duration. The
 // wait is also the attribute wait of the line.
 const lineGoneFailed = "the gone report failed; the pool sends it again in %s"
+
+// lineReleaseFailed is a release that failed with no response, an unsigned response, a
+// fourth signed 429, a server error or another refusal, while the pool runs: a format
+// for fmt.Sprintf of the wait before it is sent again, as lineGoneFailed is.
+const lineReleaseFailed = "the release of the run failed; the pool sends it again in %s"
 
 // The reasons a release gives, display text in Qory Apiary. Each is 1 to 200
 // characters, as release.schema.json requires.

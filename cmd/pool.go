@@ -86,7 +86,8 @@ replaced. Then it reports the dispatch's machine as gone, and sends that report 
 after each failure until Qory Apiary returns a signed 204, 400, 403 or 404 to it; a
 report that has not got a signed 204, 400, 403 or 404 when the pool stops is sent
 again at its next start. It releases a claim that sets a machine type, and a claim it
-could not start.
+could not start. A release that fails is sent again after each failure while the pool
+runs, and at the pool's next start; no run starts for that claim.
 The pool section of forager.yaml sets it: runs, how many runs run at once, 1 when not
 set, registry and run_config. With runs above 1, the pool exits 2 before its first claim
 unless the runs' forager.yaml sets wall.pids_limit and wall.memory. SIGINT or SIGTERM
