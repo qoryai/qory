@@ -20,6 +20,7 @@ import (
 
 	"github.com/qoryai/qory/internal/pool/child"
 	"github.com/qoryai/qory/internal/secretmask"
+	"golang.org/x/sys/unix"
 )
 
 // fakeArg is the first argument that makes the test binary the fake command.
@@ -384,9 +385,9 @@ func TestRunCodeThroughAnUnlinkedFile(t *testing.T) {
 }
 
 // TestAHeldFileIsDescriptor4 passes a run code's file and a held file: the run code is
-// descriptor 3 and the held file descriptor 4. Group is called with the command's
-// process id, which is its process group's, before Started, and Run leaves the held
-// file open.
+// descriptor 3 and the held file descriptor 4. Session is called with the command's
+// process id, which is its session's and its process group's, before Started, and Run
+// leaves the held file open.
 func TestAHeldFileIsDescriptor4(t *testing.T) {
 	dir := t.TempDir()
 	name := filepath.Join(dir, "code")
@@ -406,15 +407,18 @@ func TestAHeldFileIsDescriptor4(t *testing.T) {
 	}
 	defer hold.Close()
 	var calls []string
-	group := 0
+	session := 0
 	res, err, rep, _ := start(t, context.Background(), dir, script{Code: testCode}, nil, 0, func(c *child.Command) {
 		c.File, c.Hold = f, hold
-		c.Group = func(id int) {
-			group = id
+		c.Session = func(id int) {
+			session = id
 			if g, err := syscall.Getpgid(id); err != nil || g != id {
 				t.Errorf("the process group of %d is %d: %v", id, g, err)
 			}
-			calls = append(calls, "group")
+			if s, err := unix.Getsid(id); err != nil || s != id {
+				t.Errorf("the session of %d is %d: %v", id, s, err)
+			}
+			calls = append(calls, "session")
 		}
 		c.Started = func() { calls = append(calls, "started") }
 		c.Args = append(c.Args, "--run-code-file", "/dev/fd/3")
@@ -429,8 +433,8 @@ func TestAHeldFileIsDescriptor4(t *testing.T) {
 	if !rep.CodeOK || rep.FD4Ino != uint64(st.Ino) || len(rep.Problems) > 0 {
 		t.Errorf("report %+v, want descriptor 4 of inode %d", rep, st.Ino)
 	}
-	if !slices.Equal(calls, []string{"group", "started"}) || group <= 1 {
-		t.Errorf("the calls were %q, with the group %d", calls, group)
+	if !slices.Equal(calls, []string{"session", "started"}) || session <= 1 {
+		t.Errorf("the calls were %q, with the session %d", calls, session)
 	}
 }
 
@@ -845,25 +849,11 @@ func TestOutputIsMaskedWithMask(t *testing.T) {
 	}
 }
 
-// TestCheckLeader passes a process that leads its group and has the start stamp that
-// StartStamp read, and fails one with another stamp, one that leads no group of its id,
-// and one that has ended, which is ErrNoProcess.
+// TestCheckLeader passes a process that leads its session and has the start stamp
+// that StartStamp read, and fails one with another stamp, one that leads no session of
+// its id, and one that has ended, which is ErrNoProcess.
 func TestCheckLeader(t *testing.T) {
-	start := func(newGroup bool) *exec.Cmd {
-		cmd := exec.Command("sleep", "60")
-		if newGroup {
-			cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-		}
-		if err := cmd.Start(); err != nil {
-			t.Fatal(err)
-		}
-		t.Cleanup(func() {
-			_ = cmd.Process.Kill()
-			_ = cmd.Wait()
-		})
-		return cmd
-	}
-	leader := start(true)
+	leader := startSleep(t, &syscall.SysProcAttr{Setsid: true})
 	stamp, err := child.StartStamp(leader.Process.Pid)
 	if err != nil || stamp == "" {
 		t.Fatalf("the leader's start stamp is %q, %v", stamp, err)
@@ -877,13 +867,13 @@ func TestCheckLeader(t *testing.T) {
 	if err := child.CheckLeader(leader.Process.Pid, stamp+"1"); err == nil || !strings.Contains(err.Error(), "passed to another process") {
 		t.Errorf("a leader with another start passed: %v", err)
 	}
-	member := start(false)
+	member := startSleep(t, &syscall.SysProcAttr{Setpgid: true})
 	memberStamp, err := child.StartStamp(member.Process.Pid)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := child.CheckLeader(member.Process.Pid, memberStamp); err == nil || !strings.Contains(err.Error(), "leads no group") {
-		t.Errorf("a process that leads no group passed: %v", err)
+	if err := child.CheckLeader(member.Process.Pid, memberStamp); err == nil || !strings.Contains(err.Error(), "leads no session") {
+		t.Errorf("a process that leads no session passed: %v", err)
 	}
 	ended := exec.Command("true")
 	if err := ended.Run(); err != nil {
@@ -895,4 +885,59 @@ func TestCheckLeader(t *testing.T) {
 	if _, err := child.StartStamp(ended.Process.Pid); !errors.Is(err, child.ErrNoProcess) {
 		t.Errorf("the start stamp of a process that ended is %v, want ErrNoProcess", err)
 	}
+}
+
+// TestSessionMembers lists the leader of a new session and a process it started, and
+// not a process of the test's session.
+func TestSessionMembers(t *testing.T) {
+	leader := exec.Command("/bin/sh", "-c", `/bin/sh -c 'exec sleep 60' & echo $!; wait`)
+	leader.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	out, err := leader.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := leader.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if ids, err := child.SessionMembers(leader.Process.Pid); err == nil {
+			child.SignalEach(ids, true)
+		}
+		_ = leader.Wait()
+	})
+	var memberID int
+	if _, err := fmt.Fscan(out, &memberID); err != nil {
+		t.Fatal(err)
+	}
+	other := startSleep(t, nil)
+	var ids []int
+	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
+		if ids, err = child.SessionMembers(leader.Process.Pid); err != nil {
+			t.Fatal(err)
+		}
+		if len(ids) == 2 {
+			break
+		}
+	}
+	slices.Sort(ids)
+	want := []int{leader.Process.Pid, memberID}
+	slices.Sort(want)
+	if !slices.Equal(ids, want) || slices.Contains(ids, other.Process.Pid) {
+		t.Errorf("the session's members are %v, want %v", ids, want)
+	}
+}
+
+// startSleep starts sleep 60 with attr, and kills it at the test's end.
+func startSleep(t *testing.T, attr *syscall.SysProcAttr) *exec.Cmd {
+	t.Helper()
+	cmd := exec.Command("sleep", "60")
+	cmd.SysProcAttr = attr
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+	})
+	return cmd
 }

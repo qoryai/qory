@@ -82,6 +82,9 @@ type report struct {
 }
 
 func TestMain(m *testing.M) {
+	if len(os.Args) == 4 && os.Args[1] == leaderArg {
+		os.Exit(fakeLeader(os.Args[2], os.Args[3]))
+	}
 	if len(os.Args) > 2 && os.Args[1] == "run" && os.Args[2] == "--rm" {
 		os.Exit(fakeProbe())
 	}

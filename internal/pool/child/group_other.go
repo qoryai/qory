@@ -8,34 +8,36 @@ import (
 	"os/exec"
 )
 
-// group leaves cmd as it is on a system without process groups.
+// group leaves cmd as it is on a system without sessions.
 func group(*exec.Cmd) {}
 
 // kill kills cmd on a system without process groups.
 func kill(cmd *exec.Cmd) { _ = cmd.Process.Kill() }
 
-// SignalGroup kills the process id on a system without process groups, when kill is
+// SignalEach kills each process id of ids on a system without sessions, when kill is
 // set; without kill it sends nothing, since such a system has no SIGTERM to send.
-func SignalGroup(id int, kill bool) error {
+func SignalEach(ids []int, kill bool) {
 	if !kill {
-		return nil
+		return
 	}
-	p, err := os.FindProcess(id)
-	if err != nil {
-		return err
+	for _, id := range ids {
+		if p, err := os.FindProcess(id); err == nil {
+			_ = p.Kill()
+		}
 	}
-	return p.Kill()
 }
 
-// ProcessGroup is -1 on a system without process groups: no id is a group's.
-func ProcessGroup() int { return -1 }
+// Session is -1 on a system without sessions: no id is a session's.
+func Session() int { return -1 }
 
-// StartStamp reads no start on a system without process groups.
-func StartStamp(int) (string, error) {
-	return "", errors.New("this system has no process groups")
-}
+// errNoSessions is the error of each call that reads sessions or starts.
+var errNoSessions = errors.New("this system has no sessions")
 
-// CheckLeader fails on a system without process groups, so no group is signalled.
-func CheckLeader(int, string) error {
-	return errors.New("this system has no process groups")
-}
+// StartStamp reads no start on a system without sessions.
+func StartStamp(int) (string, error) { return "", errNoSessions }
+
+// CheckLeader fails on a system without sessions, so no session is signalled.
+func CheckLeader(int, string) error { return errNoSessions }
+
+// SessionMembers fails on a system without sessions.
+func SessionMembers(int) ([]int, error) { return nil, errNoSessions }

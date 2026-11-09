@@ -71,10 +71,10 @@ type holder struct {
 	done chan struct{}
 }
 
-// holdLock starts a program in a new process group that holds the lock of the file
-// lock, which it inherits as a descriptor, as a qory run does once the pool that started
-// it crashed: the test's copy is closed. With ignoreTerm, the program and the sleep it
-// starts ignore SIGTERM. The program is killed at the test's end.
+// holdLock starts a program in a new session that holds the lock of the file lock,
+// which it inherits as a descriptor, as a qory run does once the pool that started it
+// crashed: the test's copy is closed. With ignoreTerm, the program and the sleep it
+// starts ignore SIGTERM. The session is killed at the test's end.
 func holdLock(t *testing.T, lock string, ignoreTerm bool) *holder {
 	t.Helper()
 	f, err := os.OpenFile(lock, os.O_RDWR, 0)
@@ -89,9 +89,15 @@ func holdLock(t *testing.T, lock string, ignoreTerm bool) *holder {
 	if ignoreTerm {
 		script = `trap "" TERM; sleep 60`
 	}
-	cmd := exec.Command("/bin/sh", "-c", script)
+	return startHolder(t, f, exec.Command("/bin/sh", "-c", script))
+}
+
+// startHolder starts cmd in a new session with the open file f as its descriptor 3,
+// and kills each process of the session at the test's end.
+func startHolder(t *testing.T, f *os.File, cmd *exec.Cmd) *holder {
+	t.Helper()
 	cmd.ExtraFiles = []*os.File{f}
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
@@ -101,13 +107,15 @@ func holdLock(t *testing.T, lock string, ignoreTerm bool) *holder {
 		close(h.done)
 	}()
 	t.Cleanup(func() {
-		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+		if ids, err := child.SessionMembers(cmd.Process.Pid); err == nil {
+			child.SignalEach(ids, true)
+		}
 		<-h.done
 	})
 	return h
 }
 
-// pid is the holder's process id, which is its process group's.
+// pid is the holder's process id, which is its session's.
 func (h *holder) pid() int { return h.cmd.Process.Pid }
 
 // running reports whether the holder has not ended.
@@ -134,10 +142,10 @@ func (h *holder) endedBy() syscall.Signal {
 	return 0
 }
 
-// writeGroupFile writes the process group id and the start stamp to run.pgid beside
+// writeSessionFile writes the session id and the start stamp to run.session beside
 // lock, as the pool writes it; an empty stamp is the one that child.StartStamp reads
 // for the process id.
-func writeGroupFile(t *testing.T, lock string, id int, stamp string) {
+func writeSessionFile(t *testing.T, lock string, id int, stamp string) {
 	t.Helper()
 	if stamp == "" {
 		var err error
@@ -145,13 +153,13 @@ func writeGroupFile(t *testing.T, lock string, id int, stamp string) {
 			t.Fatal(err)
 		}
 	}
-	writeGroupText(t, lock, strconv.Itoa(id)+" "+stamp+"\n")
+	writeSessionText(t, lock, strconv.Itoa(id)+" "+stamp+"\n")
 }
 
-// writeGroupText writes text to run.pgid beside lock.
-func writeGroupText(t *testing.T, lock, text string) {
+// writeSessionText writes text to run.session beside lock.
+func writeSessionText(t *testing.T, lock, text string) {
 	t.Helper()
-	if err := os.WriteFile(filepath.Join(filepath.Dir(lock), "run.pgid"), []byte(text), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(filepath.Dir(lock), "run.session"), []byte(text), 0o600); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -214,11 +222,44 @@ func realPolls(h *harness, before int, claimed *bool, mu *sync.Mutex) {
 	})
 }
 
-// holdLockInGroup starts a program in a new process group, the leader, that holds the
-// lock of the file lock as holdLock does, and starts a member of its group that
-// inherits the lock and ignores SIGTERM. The leader ends at SIGTERM and is waited for,
-// so no process has its id after that. It returns once the member ignores SIGTERM.
-func holdLockInGroup(t *testing.T, lock string) *holder {
+// leaderArg is the argument that makes the test program [fakeLeader].
+const leaderArg = "leftover-leader"
+
+// fakeLeader is the leader of a left run's session: it starts a member in a new process
+// group of its session, which inherits descriptor 3 and ignores SIGTERM when member is
+// "trap". Once the member wrote the file ready, the leader exits 0 when member is
+// "alone", and otherwise sleeps until a signal ends it.
+func fakeLeader(ready, member string) int {
+	script := `: > "$1"; exec sleep 60`
+	if member == "trap" {
+		script = `trap "" TERM; ` + script
+	}
+	cmd := exec.Command("/bin/sh", "-c", script, "member", ready)
+	cmd.ExtraFiles = []*os.File{os.NewFile(3, "lock")}
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	if err := cmd.Start(); err != nil {
+		return 90
+	}
+	for deadline := time.Now().Add(20 * time.Second); ; time.Sleep(10 * time.Millisecond) {
+		if _, err := os.Stat(ready); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			return 91
+		}
+	}
+	if member == "alone" {
+		return 0
+	}
+	time.Sleep(time.Hour)
+	return 0
+}
+
+// holdLockInSession starts [fakeLeader] in a new session, with the lock of the file
+// lock as its descriptor 3, as holdLock does, and returns once the leader's member
+// started. The member is in another process group than the leader, and holds the lock
+// with it.
+func holdLockInSession(t *testing.T, lock, member string) *holder {
 	t.Helper()
 	f, err := os.OpenFile(lock, os.O_RDWR, 0)
 	if err != nil {
@@ -229,71 +270,74 @@ func holdLockInGroup(t *testing.T, lock string) *holder {
 		t.Fatal(err)
 	}
 	ready := filepath.Join(t.TempDir(), "ready")
-	cmd := exec.Command("/bin/sh", "-c", `/bin/sh -c 'trap "" TERM; : > "$1"; exec sleep 60' member "$1" & wait`, "leader", ready)
-	cmd.ExtraFiles = []*os.File{f}
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	if err := cmd.Start(); err != nil {
-		t.Fatal(err)
-	}
-	h := &holder{cmd: cmd, done: make(chan struct{})}
-	go func() {
-		_ = cmd.Wait()
-		close(h.done)
-	}()
-	t.Cleanup(func() {
-		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
-		<-h.done
-	})
+	h := startHolder(t, f, exec.Command(os.Args[0], leaderArg, ready, member))
 	for deadline := time.Now().Add(20 * time.Second); ; time.Sleep(10 * time.Millisecond) {
 		if _, err := os.Stat(ready); err == nil {
 			return h
 		}
 		if time.Now().After(deadline) {
-			t.Fatal("the member of the holder's group did not start")
+			t.Fatal("the member of the holder's session did not start")
 		}
 	}
 }
 
-// TestALeftoverGroupWithoutItsLeaderIsKilled starts a pool whose dispatched entry's
-// qory run is left as a group whose leader ends at SIGTERM, while a member of the group
-// that ignores SIGTERM holds run.lock. Once the grace passed, no process has the
-// leader's id, and the pool sends SIGKILL to the group all the same: the lock is free,
-// then Reap is called and gone is sent.
-func TestALeftoverGroupWithoutItsLeaderIsKilled(t *testing.T) {
-	h := newHarness(t, 1)
-	h.srv.Offer(provisionertest.Run{})
-	e := claimTo(t, h.srv, pool.PhaseDispatched)
-	lock := leftFolder(t, h, e.DispatchID)
-	holder := holdLockInGroup(t, lock)
-	writeGroupFile(t, lock, holder.pid(), "")
-	writeJournal(t, h, e)
-	var r reaps
-	h.pool.Reap = r.seam(h, lock, e.DispatchID, nil)
-	var mu sync.Mutex
-	var claimed bool
-	realPolls(h, h.count(provisionertest.RouteClaim), &claimed, &mu)
-	h.start()
-	h.waitFor("the gone's line", func() bool { return len(h.log.with(lineGone)) == 1 })
-	h.stop()
-	if got := holder.endedBy(); got != syscall.SIGTERM {
-		t.Errorf("the leader ended by %v, want SIGTERM", got)
-	}
-	if ids, order := r.calls(); !slices.Equal(ids, []string{leftRunID}) || !order[0] {
-		t.Errorf("Reap was called with %q, with the lock free and no gone sent: %v", ids, order)
-	}
-	if states, _ := h.machineEnds(e.DispatchID); !slices.Equal(states, []string{"gone"}) {
-		t.Errorf("the machine ends are %q, want one gone", states)
-	}
-	if len(h.log.with(lineLeftoverStopped)) != 1 || len(h.log.with(lineLeftoverHeld)) != 0 {
-		t.Errorf("the log:\n%s", h.log.text())
+// TestALeftoverSessionIsStopped starts a pool whose dispatched entry's qory run is
+// left as a session: its leader ends at SIGTERM, and a member of the session in
+// another process group ignores SIGTERM and holds run.lock. The pool sends SIGTERM to
+// both, and, once the grace passed, SIGKILL to the member: the lock is free, then Reap
+// is called and gone is sent. A session whose leader ended before the pool started
+// has its member signalled the same way.
+func TestALeftoverSessionIsStopped(t *testing.T) {
+	for _, c := range []struct {
+		name, member string
+		leaderEnd    syscall.Signal
+	}{
+		{name: "with its leader", member: "trap", leaderEnd: syscall.SIGTERM},
+		{name: "without its leader", member: "alone"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			h := newHarness(t, 1)
+			h.srv.Offer(provisionertest.Run{})
+			e := claimTo(t, h.srv, pool.PhaseDispatched)
+			lock := leftFolder(t, h, e.DispatchID)
+			holder := holdLockInSession(t, lock, c.member)
+			writeSessionFile(t, lock, holder.pid(), "")
+			if c.leaderEnd == 0 {
+				<-holder.done
+			}
+			writeJournal(t, h, e)
+			var r reaps
+			h.pool.Reap = r.seam(h, lock, e.DispatchID, nil)
+			var mu sync.Mutex
+			var claimed bool
+			realPolls(h, h.count(provisionertest.RouteClaim), &claimed, &mu)
+			h.start()
+			h.waitFor("the gone's line", func() bool { return len(h.log.with(lineGone)) == 1 })
+			h.stop()
+			if got := holder.endedBy(); got != c.leaderEnd {
+				t.Errorf("the leader ended by %v, want %v", got, c.leaderEnd)
+			}
+			if ids, order := r.calls(); !slices.Equal(ids, []string{leftRunID}) || !order[0] {
+				t.Errorf("Reap was called with %q, with the lock free and no gone sent: %v", ids, order)
+			}
+			if states, _ := h.machineEnds(e.DispatchID); !slices.Equal(states, []string{"gone"}) {
+				t.Errorf("the machine ends are %q, want one gone", states)
+			}
+			if m := h.log.with(lineLeftoverStopped); len(m) != 1 || m[0]["session"] != float64(holder.pid()) {
+				t.Errorf("the stop's lines are %v", m)
+			}
+			if len(h.log.with(lineLeftoverHeld)) != 0 {
+				t.Errorf("the log:\n%s", h.log.text())
+			}
+		})
 	}
 }
 
 // TestALeftoverRunIsStopped starts a pool of one run whose journal contains a
 // dispatched entry whose qory run is left from a crash of the pool: a program in a new
-// process group, apart from the test's, holds run.lock, and run.pgid contains that
-// group. The pool logs that it stops the run, and sends SIGTERM to the group; a program
-// that ignores SIGTERM gets SIGKILL once the grace passed. Once the lock is free, Reap
+// session, apart from the test's, holds run.lock, and run.session contains that
+// session. The pool logs that it stops the run, and sends SIGTERM to each process of
+// the session; a program that ignores SIGTERM gets SIGKILL once the grace passed. Once the lock is free, Reap
 // is called with the run id of the record in the dispatch's folder, then gone is sent,
 // and the entry and the folder go. While the run stops, it takes the pool's one Run, so
 // no claim is sent.
@@ -305,7 +349,7 @@ func TestALeftoverRunIsStopped(t *testing.T) {
 			e := claimTo(t, h.srv, pool.PhaseDispatched)
 			lock := leftFolder(t, h, e.DispatchID)
 			holder := holdLock(t, lock, ignoreTerm)
-			writeGroupFile(t, lock, holder.pid(), "")
+			writeSessionFile(t, lock, holder.pid(), "")
 			writeJournal(t, h, e)
 			var r reaps
 			h.pool.Reap = r.seam(h, lock, e.DispatchID, nil)
@@ -315,7 +359,7 @@ func TestALeftoverRunIsStopped(t *testing.T) {
 			h.start()
 			h.waitFor("the gone's line", func() bool { return len(h.log.with(lineGone)) == 1 })
 			h.stop()
-			if m := h.log.with(lineLeftoverStopped); len(m) != 1 || m[0]["dispatch_id"] != e.DispatchID || m[0]["process_group"] != float64(holder.pid()) {
+			if m := h.log.with(lineLeftoverStopped); len(m) != 1 || m[0]["dispatch_id"] != e.DispatchID || m[0]["session"] != float64(holder.pid()) || m[0]["processes"] == float64(0) {
 				t.Errorf("the stop's lines are %v", m)
 			}
 			if ids, order := r.calls(); !slices.Equal(ids, []string{leftRunID}) || !order[0] {
@@ -398,48 +442,49 @@ func TestAFreeLockSendsGoneAtOnce(t *testing.T) {
 }
 
 // TestALockStillHeldKeepsTheEntry starts a pool whose dispatched entry's run.lock a
-// program holds, while run.pgid does not lead to it: another group, which gets SIGTERM;
-// no run.pgid; a run.pgid with the group id alone, as it was written before it had the
-// leader's start; a run.pgid with a start that is not the holder's, as when its id
-// passed to a new group; and the id of a process that has ended. Only the first gets a signal and
-// the line of the stop. After the waits, the pool logs the line that starts with its
+// program holds, while run.session does not lead to it: another session, which gets
+// SIGTERM, as when a program outside the run's session holds the lock; no run.session;
+// a run.session with the id alone; a run.session with a start that is not the
+// holder's, as when the id passed to another process; and the id of a process that has
+// ended, whose session has no process. Only the first gets a signal and the line of
+// the stop. After the waits, the pool logs the line that starts with its
 // fix, with the lock's path and the cause, sends no gone, calls no Reap, and keeps the
 // entry at dispatched with its folder; the holder still runs, and the left run keeps
 // the pool's one Run, so no claim is sent.
 func TestALockStillHeldKeepsTheEntry(t *testing.T) {
 	for _, c := range []struct {
 		name    string
-		group   func(t *testing.T, lock string, holder *holder)
+		session func(t *testing.T, lock string, holder *holder)
 		stopped int
 		cause   string
 	}{
-		// The other group's leader ends at SIGTERM: the check before SIGKILL then fails
-		// on macOS, and passes for its zombie on Linux, so the cause is either.
-		{name: "another group", stopped: 1, cause: "", group: func(t *testing.T, lock string, _ *holder) {
+		// The other session's leader ends at SIGTERM; the cause of the held line is that
+		// of the last try of the lock.
+		{name: "another session", stopped: 1, cause: "", session: func(t *testing.T, lock string, _ *holder) {
 			other := exec.Command("sleep", "60")
-			other.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+			other.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 			if err := other.Start(); err != nil {
 				t.Fatal(err)
 			}
 			t.Cleanup(func() {
-				_ = syscall.Kill(-other.Process.Pid, syscall.SIGKILL)
+				_ = other.Process.Kill()
 				_ = other.Wait()
 			})
-			writeGroupFile(t, lock, other.Process.Pid, "")
+			writeSessionFile(t, lock, other.Process.Pid, "")
 		}},
-		{name: "no run.pgid", cause: "run.pgid", group: func(*testing.T, string, *holder) {}},
-		{name: "a run.pgid with the id alone", cause: "does not contain", group: func(t *testing.T, lock string, holder *holder) {
-			writeGroupText(t, lock, strconv.Itoa(holder.pid())+"\n")
+		{name: "no run.session", cause: "run.session", session: func(*testing.T, string, *holder) {}},
+		{name: "a run.session with the id alone", cause: "does not contain", session: func(t *testing.T, lock string, holder *holder) {
+			writeSessionText(t, lock, strconv.Itoa(holder.pid())+"\n")
 		}},
-		{name: "a run.pgid with another start", cause: "passed to another process", group: func(t *testing.T, lock string, holder *holder) {
-			writeGroupFile(t, lock, holder.pid(), "1.000000")
+		{name: "a run.session with another start", cause: "passed to another process", session: func(t *testing.T, lock string, holder *holder) {
+			writeSessionFile(t, lock, holder.pid(), "1.000000")
 		}},
-		{name: "a process that ended", cause: "does not run", group: func(t *testing.T, lock string, _ *holder) {
+		{name: "a process that ended", cause: "no process is in session", session: func(t *testing.T, lock string, _ *holder) {
 			ended := exec.Command("true")
 			if err := ended.Run(); err != nil {
 				t.Fatal(err)
 			}
-			writeGroupFile(t, lock, ended.Process.Pid, "1.000000")
+			writeSessionFile(t, lock, ended.Process.Pid, "1.000000")
 		}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
@@ -448,7 +493,7 @@ func TestALockStillHeldKeepsTheEntry(t *testing.T) {
 			e := claimTo(t, h.srv, pool.PhaseDispatched)
 			lock := leftFolder(t, h, e.DispatchID)
 			holder := holdLock(t, lock, false)
-			c.group(t, lock, holder)
+			c.session(t, lock, holder)
 			writeJournal(t, h, e)
 			var r reaps
 			h.pool.Reap = r.seam(h, lock, e.DispatchID, nil)
@@ -513,7 +558,7 @@ func TestALockThatCannotBeTried(t *testing.T) {
 	h.pool.Reap = r.seam(h, lock, e.DispatchID, nil)
 	before := h.count(provisionertest.RouteClaim)
 	h.start()
-	start := "check `" + lock + "`: the pool could not lock it ("
+	start := "make `" + lock + "` a regular file the pool's user can open, then restart the pool: the pool could not lock it ("
 	h.waitFor("the line of a lock not tried", func() bool { return len(h.log.withPrefix(start)) == 1 })
 	h.waitFor("a claim", func() bool { return h.count(provisionertest.RouteClaim) > before })
 	h.stop()
@@ -547,7 +592,7 @@ func TestAStopDuringALeftoversStop(t *testing.T) {
 	e := claimTo(t, h.srv, pool.PhaseDispatched)
 	lock := leftFolder(t, h, e.DispatchID)
 	holder := holdLock(t, lock, true)
-	writeGroupFile(t, lock, holder.pid(), "")
+	writeSessionFile(t, lock, holder.pid(), "")
 	writeJournal(t, h, e)
 	var r reaps
 	h.pool.Reap = r.seam(h, lock, e.DispatchID, nil)
@@ -569,7 +614,7 @@ func TestAStopDuringALeftoversStop(t *testing.T) {
 		t.Fatal("the pool did not wait for the left run's lock")
 	}
 	h.stop()
-	if len(h.log.with(lineLeftoverStopped)) != 1 || len(h.log.with(lineLeftoverHeld)) != 0 || len(h.log.withPrefix("check `")) != 0 {
+	if len(h.log.with(lineLeftoverStopped)) != 1 || len(h.log.with(lineLeftoverHeld)) != 0 || len(h.log.withPrefix("make `")) != 0 {
 		t.Errorf("the log:\n%s", h.log.text())
 	}
 	select {
@@ -623,8 +668,8 @@ func TestADispatchedNotJournaledStartsNoRun(t *testing.T) {
 }
 
 // TestARunHoldsItsLock runs one dispatch whose fake qory blocks: its descriptor 4 is
-// run.lock of its folder, run.pgid contains its process group, which is its process
-// id, and its start stamp, and the lock is held. Once it ended, the lock is free while
+// run.lock of its folder, run.session contains its session, which is its process id,
+// and its start stamp, and the lock is held. Once it ended, the lock is free while
 // the machine log's upload is held, before the folder goes.
 func TestARunHoldsItsLock(t *testing.T) {
 	h := newHarness(t, 1)
@@ -639,23 +684,20 @@ func TestARunHoldsItsLock(t *testing.T) {
 	if lockFree(lock) {
 		t.Error("the lock is free while qory run runs")
 	}
-	b, err := os.ReadFile(filepath.Join(dir, "run.pgid"))
+	b, err := os.ReadFile(filepath.Join(dir, "run.session"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	fields := strings.Fields(string(b))
 	if len(fields) != 2 {
-		t.Fatalf("run.pgid is %q", b)
+		t.Fatalf("run.session is %q", b)
 	}
-	group, err := strconv.Atoi(fields[0])
+	session, err := strconv.Atoi(fields[0])
 	if err != nil {
 		t.Fatal(err)
 	}
-	if g, err := syscall.Getpgid(group); err != nil || g != group {
-		t.Errorf("run.pgid contains %d, whose process group is %d: %v", group, g, err)
-	}
-	if stamp, err := child.StartStamp(group); err != nil || stamp != fields[1] {
-		t.Errorf("run.pgid contains the start %q, and the leader's is %q: %v", fields[1], stamp, err)
+	if err := child.CheckLeader(session, fields[1]); err != nil {
+		t.Errorf("run.session contains %d and %q: %v", session, fields[1], err)
 	}
 	if info, err := os.Stat(lock); err != nil || info.Mode().Perm() != 0o600 {
 		t.Errorf("run.lock: %v, %v", info, err)

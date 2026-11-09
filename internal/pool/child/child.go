@@ -18,8 +18,9 @@
 // ([HoldFD]): the command and every program it starts that inherits the descriptor hold
 // the lock, so the lock is free only once the last of them ended.
 //
-// The command is stopped when the context ends: SIGTERM, then, once the grace has
-// passed, SIGKILL to the command's process group.
+// The command starts in a new session, whose id is the command's process id, and which
+// is also the id of its process group. It is stopped when the context ends: SIGTERM,
+// then, once the grace has passed, SIGKILL to the command's process group.
 package child
 
 import (
@@ -217,9 +218,9 @@ type Command struct {
 	// caller took, which the command keeps until it ends. Run does not close it: the
 	// caller closes its copy once Run returned.
 	Hold *os.File
-	// Group, when set, is called once the command started, before Started, with the id of
-	// the command's process group, which is the command's process id.
-	Group func(id int)
+	// Session, when set, is called once the command started, before Started, with the
+	// id of the command's session, which is the command's process id.
+	Session func(id int)
 	// Started, when set, is called once the command started.
 	Started func()
 }
@@ -334,8 +335,8 @@ func Run(ctx context.Context, c Command) (Result, error) {
 		// The command has its copy of the descriptor.
 		c.File.Close()
 	}
-	if c.Group != nil {
-		c.Group(cmd.Process.Pid)
+	if c.Session != nil {
+		c.Session(cmd.Process.Pid)
 	}
 	if c.Started != nil {
 		c.Started()

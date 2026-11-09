@@ -62,20 +62,21 @@
 //
 // qory run, and each program it starts that inherits descriptor 4, hold the lock of
 // run.lock until they end, so the lock outlasts a crash of the pool, and the pool
-// closes its copy once qory run ended. Once qory run started, the pool writes the id of
-// its process group to run.pgid of the dispatch's folder. When the program starts, an
-// entry whose run.lock is held is a qory run left from before: beside the claim loop,
-// and in one of the pool's Runs while one is free, the pool sends SIGTERM to that
-// process group, SIGKILL once the grace passed, and waits up to the grace again for the
-// lock. run.pgid records the group's id and its leader's start stamp, which the pool
-// reads once qory run started. The pool signals the group only while the process of
-// that id leads the group and has that stamp, so only a group whose leader is the run it
-// started; otherwise it sends nothing and waits the grace for the lock. SIGKILL goes
-// also when no process has the leader's id by then. When the lock is still held then, or cannot be tried, the entry stays, with its
-// folder, for the next start, and no gone is sent; so does it when ctx ends during the
-// waits. Once the lock is free, the pool removes the wall of
-// each run whose record is in the dispatch's folder, with [Pool.Reap], as qory run
-// resend does, and acts on the entry as above.
+// closes its copy once qory run ended. qory run starts in a new session, whose id is
+// its process id. Once qory run started, the pool writes that id and qory run's start
+// stamp to run.session of the dispatch's folder. When the program starts, an entry
+// whose run.lock is held is a qory run left from before: beside the claim loop, and in
+// one of the pool's Runs while one is free, the pool sends SIGTERM to each process of
+// that session, then, once the grace passed, SIGKILL to each process of it then, and
+// waits up to the grace again for the lock. The session is that of the run the pool
+// started only while the process of its id has the stamp in run.session, or while no
+// process has that id: no process gets the id of a session that has members. When a
+// process with another stamp has the id, or no process is in the session, the pool
+// sends nothing and waits the grace for the lock. When the lock is still held then, or
+// cannot be tried, the entry stays, with its folder, for the next start, and no gone is
+// sent; so does it when ctx ends during the waits. Once the lock is free, the pool
+// removes the wall of each run whose record is in the dispatch's folder, with
+// [Pool.Reap], as qory run resend does, and acts on the entry as above.
 //
 // When ctx ends, the pool stops: it claims no more, a claim being sent is given up, a
 // dispatch not yet dispatched is released, and each qory run is stopped as [child.Run]
@@ -133,10 +134,10 @@ const (
 )
 
 // The files of a dispatch's folder that outlast the pool program: the lock that the
-// dispatch's qory run holds, and the id of its process group.
+// dispatch's qory run holds, and the id of its session with qory run's start stamp.
 const (
-	runLockFile  = "run.lock"
-	runGroupFile = "run.pgid"
+	runLockFile    = "run.lock"
+	runSessionFile = "run.session"
 )
 
 // leftoverPoll is how often the pool tries the lock of a qory run left from before it
@@ -364,34 +365,36 @@ func (p *Pool) runLock(id string) (*foragerdir.Lock, error) {
 }
 
 // stopLeftover stops the qory run of the dispatch id that is left from before the pool
-// started, and reports whether its lock is free. While the process group that run.pgid
-// of its folder records passes [Pool.leftGroup], the pool sends SIGTERM to that group,
-// then, while the lock is still held once the grace of [Settings] has passed, SIGKILL,
-// and waits up to the grace again for the lock. SIGKILL goes also when no process has
-// the leader's id by then: while group N has members, no process gets the id N. It does
-// not go when a process with another start has the id. A group that does not pass gets
-// no signal, and the pool waits up to the grace for the lock. A lock still held after
-// the waits is logged, as is a lock that cannot be tried. Once stop ends, the waits end,
-// and nothing more is sent or logged; the waits are the pool's Sleep.
+// started, and reports whether its lock is free. When the session that run.session of
+// its folder records has members, as [sessionMembers] lists them, the pool sends
+// SIGTERM to each, then, while the lock is still held once the grace of [Settings] has
+// passed, SIGKILL to each member it lists again, and waits up to the grace again for
+// the lock. When the session has no member to signal, the pool sends no signal and
+// waits up to the grace for the lock. A lock still held after the waits is logged, as is
+// a lock that cannot be tried. Once stop ends, the waits end, and nothing more is sent
+// or logged; the waits are the pool's Sleep.
 func (p *Pool) stopLeftover(stop context.Context, id string) bool {
 	ids := slog.String("dispatch_id", id)
 	grace := p.Settings.Grace
 	if grace <= 0 {
 		grace = child.DefaultGrace
 	}
-	group, start, why := p.leftGroup(id)
+	session, start, why := readSession(p.dispatchDir(id))
+	var members []int
 	if why == nil {
-		p.log.Warn(lineLeftoverStopped, ids, slog.Int("process_group", group))
-		_ = child.SignalGroup(group, false)
+		members, why = sessionMembers(session, start)
+	}
+	if why == nil {
+		p.log.Warn(lineLeftoverStopped, ids, slog.Int("session", session), slog.Int("processes", len(members)))
+		child.SignalEach(members, false)
 		free, err := p.waitLock(stop, id, grace)
 		if free {
 			return true
 		}
 		if stop.Err() == nil && errors.Is(err, foragerdir.ErrLocked) {
-			// The leader may have ended at SIGTERM while other members of its group
-			// hold the lock.
-			if err := child.CheckLeader(group, start); err == nil || errors.Is(err, child.ErrNoProcess) {
-				_ = child.SignalGroup(group, true)
+			// Members may have started more processes since SIGTERM.
+			if members, err := sessionMembers(session, start); err == nil {
+				child.SignalEach(members, true)
 			}
 		}
 	}
@@ -412,26 +415,32 @@ func (p *Pool) stopLeftover(stop context.Context, id string) bool {
 	return false
 }
 
+// sessionMembers is the id of each process of the session id, which qory run started
+// with the start stamp start, as [child.SessionMembers] lists them. It is an error when
+// a process with another stamp has the id, as [child.CheckLeader] checks: that process
+// got the id after the session ended. While no process has the id, the members are
+// those of the run's session, since no process gets the id of a session that has
+// members. A session with no member is an error too: a program outside the session
+// holds the lock.
+func sessionMembers(id int, start string) ([]int, error) {
+	if err := child.CheckLeader(id, start); err != nil && !errors.Is(err, child.ErrNoProcess) {
+		return nil, err
+	}
+	members, err := child.SessionMembers(id)
+	if err != nil {
+		return nil, fmt.Errorf("the processes of session %d could not be listed: %w", id, err)
+	}
+	if len(members) == 0 {
+		return nil, fmt.Errorf("no process is in session %d, so a program outside it holds the lock", id)
+	}
+	return members, nil
+}
+
 // lockNotTried logs that the lock of the dispatch id's folder could not be tried, for
 // err, with the lock's path and the error in the line's text.
 func (p *Pool) lockNotTried(id string, err error) {
 	line := fmt.Sprintf(lineLockNotTried, exports.HidePath(p.lockPath(id)), exports.HideError(err).Error())
 	p.log.Error(line, slog.String("dispatch_id", id))
-}
-
-// leftGroup is the process group id and the leader's start stamp that run.pgid of the
-// dispatch id's folder records, as [readGroup] reads them, with no error only when the
-// process of that id leads the group and has that stamp, as [child.CheckLeader] checks:
-// otherwise the id may have passed to another process after the run's group ended.
-func (p *Pool) leftGroup(id string) (int, string, error) {
-	group, start, err := readGroup(p.dispatchDir(id))
-	if err != nil {
-		return 0, "", err
-	}
-	if err := child.CheckLeader(group, start); err != nil {
-		return 0, "", err
-	}
-	return group, start, nil
 }
 
 // waitLock tries the lock of the dispatch id's folder every [leftoverPoll], for up to
@@ -453,45 +462,44 @@ func (p *Pool) waitLock(ctx context.Context, id string, d time.Duration) (bool, 
 	}
 }
 
-// maxGroupFile is the most of run.pgid that is read: far more than its one line.
-const maxGroupFile = 128
+// maxSessionFile is the most of run.session that is read: far more than its one line.
+const maxSessionFile = 128
 
-// readGroup is what run.pgid of the dispatch's folder dir records, read from one open
-// of the file: the process group id and the leader's start stamp, as [writeGroup]
-// writes them. A file of another shape, one number among them, is an error, as is an id
-// of 1 or less, which would signal more than one run, the process id of the pool
-// program, or the id of its process group.
-func readGroup(dir string) (int, string, error) {
-	f, err := os.Open(filepath.Join(dir, runGroupFile))
+// readSession is what run.session of the dispatch's folder dir records, read from one
+// open of the file: the session id and qory run's start stamp, as [writeSession] writes
+// them. A file of another shape is an error, as is an id of 1 or less, the process id
+// of the pool program, or the id of its session.
+func readSession(dir string) (int, string, error) {
+	f, err := os.Open(filepath.Join(dir, runSessionFile))
 	if err != nil {
 		return 0, "", err
 	}
 	defer f.Close()
-	b, err := io.ReadAll(io.LimitReader(f, maxGroupFile))
+	b, err := io.ReadAll(io.LimitReader(f, maxSessionFile))
 	if err != nil {
 		return 0, "", err
 	}
-	bad := fmt.Errorf("%s does not contain the id of a qory run's process group and its leader's start", runGroupFile)
+	bad := fmt.Errorf("%s does not contain the id of a qory run's session and the run's start", runSessionFile)
 	fields := strings.Fields(string(b))
 	if len(fields) != 2 || strings.Trim(fields[1], "0123456789.") != "" {
 		return 0, "", bad
 	}
 	n, err := strconv.Atoi(fields[0])
-	if err != nil || n <= 1 || n == os.Getpid() || n == child.ProcessGroup() {
+	if err != nil || n <= 1 || n == os.Getpid() || n == child.Session() {
 		return 0, "", bad
 	}
 	return n, fields[1], nil
 }
 
-// writeGroup writes the process group id and its leader's start stamp, as
-// [child.StartStamp] reads it, to run.pgid of the dispatch's folder dir, mode 0600,
+// writeSession writes the session id and the start stamp of its leader, qory run, as
+// [child.StartStamp] reads it, to run.session of the dispatch's folder dir, mode 0600,
 // synced, as one line: "<id> <stamp>". It writes no file when the stamp cannot be read.
-func writeGroup(dir string, id int) error {
+func writeSession(dir string, id int) error {
 	stamp, err := child.StartStamp(id)
 	if err != nil {
 		return err
 	}
-	f, err := os.OpenFile(filepath.Join(dir, runGroupFile), os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+	f, err := os.OpenFile(filepath.Join(dir, runSessionFile), os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
 	if err != nil {
 		return err
 	}
@@ -754,8 +762,8 @@ func (p *Pool) dispatched(stop context.Context, c provisioner.Claimed) (started,
 
 // run runs qory run for the dispatched claim c, in dir, with code as its descriptor 3
 // and lock's file as its descriptor 4, until it ends, and logs how it ended. Once qory
-// run started, the id of its process group is written to run.pgid in dir; once it
-// ended, lock is closed. qory run is stopped at stop's end, once the
+// run started, the id of its session and its start stamp are written to run.session
+// in dir; once it ended, lock is closed. qory run is stopped at stop's end, once the
 // claim's max_lifetime_minutes passed, or once the heartbeat finds the dispatch ended.
 // Each line of its output goes to the pool's log, after the dispatch id, and is kept.
 // Once qory run ended, or could not be started, the dispatch's journal entry is written
@@ -783,9 +791,9 @@ func (p *Pool) run(stop context.Context, c provisioner.Claimed, dir string, code
 		p.log.Info(c.DispatchID + ": " + line)
 		out.add(line)
 	})
-	// A run.pgid that could not be written matters only after a crash of the pool: the
-	// next start then sends no signal, and logs lineLeftoverHeld after the grace.
-	recordGroup := func(group int) { _ = writeGroup(dir, group) }
+	// A run.session that could not be written matters only after a crash of the pool:
+	// the next start then sends no signal, and logs lineLeftoverHeld after the grace.
+	recordSession := func(session int) { _ = writeSession(dir, session) }
 	res, err := child.Run(ctx, child.Command{
 		Path:       p.Settings.Qory,
 		Args:       []string{"run", "--run-code-file", fmt.Sprintf("/dev/fd/%d", child.KeyFD), "--gateway", c.GatewayURL, "--home", filepath.Join(dir, homeFolder)},
@@ -796,7 +804,7 @@ func (p *Pool) run(stop context.Context, c provisioner.Claimed, dir string, code
 		Runs:       filepath.Join(p.Settings.State, runsFolder),
 		File:       code,
 		Hold:       lock.File(),
-		Group:      recordGroup,
+		Session:    recordSession,
 		Output:     output,
 		Mask:       secretmask.Default(),
 		Grace:      p.Settings.Grace,

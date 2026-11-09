@@ -2201,30 +2201,34 @@ machine reads that harness.
 A run can outlast the pool: after a crash of the pool, or after a second SIGINT or
 SIGTERM, which ends the pool at once. The pool locks `run.lock` in the run's folder
 before the run starts, and passes the lock's file to `qory run` as descriptor 4. The
-lock stays held while `qory run`, or a program it started, still runs. Once `qory run`
-started, the pool writes the id of the run's process group and the start of the
-group's leader, `qory run`, to `run.pgid` beside the lock: on Linux, field 22 of
-`/proc/<pid>/stat` in clock ticks, and on macOS the process's start as seconds and
-microseconds. When the pool starts,
-before it acts on a run of the journal, it checks that run's lock:
+lock stays held while `qory run`, or a program it started, still runs. `qory run`
+starts in a new session, whose id is its process id. Once `qory run` started, the pool
+writes that id and the start of `qory run` to `run.session` beside the lock: on Linux,
+field 22 of `/proc/<pid>/stat` in clock ticks, and on macOS the process's start as
+seconds and microseconds. When the pool starts, before it acts on a run of the
+journal, it checks that run's lock:
 
 1. If the lock is held, the pool stops the run: it logs `a qory run of the dispatch is
-   left from before the pool started, so the pool stops it`, and sends SIGTERM to the
-   run's process group. If the run still holds the lock 30 seconds later, the pool
-   sends SIGKILL to the group. While the run stops, it counts against `pool.runs`. The
-   pool signals only a group whose leader is the run it started: the process whose id
-   is in `run.pgid` must lead that group and have the start in `run.pgid`. Otherwise
-   the id may belong to another program by then, and the pool sends no signal and
-   waits 30 seconds for the lock. If no process has the leader's id when SIGKILL is
-   due, the pool sends SIGKILL to the group all the same: no process gets the id of a
-   group that still has members.
+   left from before the pool started, so the pool stops it`, and sends SIGTERM to each
+   process of the run's session, in any process group. If the run still holds the
+   lock 30 seconds later, the pool lists the session's processes again and sends
+   SIGKILL to each. While the run stops, it counts against `pool.runs`. The pool
+   signals only a session whose leader is the run it started: the process whose id is
+   in `run.session` must have the start in `run.session`. If a process with another
+   start has the id, the id belongs to another program by then, and the pool sends no
+   signal and waits 30 seconds for the lock. If no process has the id, the pool
+   signals the processes of the session all the same: no process gets the id of a
+   session that still has members. If the session has no process, a program outside
+   it holds the lock, and the pool sends no signal and waits 30 seconds for the lock.
+   A program that the run starts in a new session, as `setsid` does, is outside it.
 2. If the lock is still held after these waits, the pool logs `stop the programs that
    hold run.lock in the dispatch's folder, then restart the pool: a qory run left from
    before the pool started still holds that lock, so the pool keeps the dispatch for its
    next start and reports no gone`. The run keeps its place in `pool.runs`. If the pool
-   cannot try the lock, for example because `run.lock` is a link, it logs ``check
-   `<the run's folder>/run.lock`: the pool could not lock it (<error>), so it keeps the
-   dispatch for its next start and reports no gone``. If the pool is stopped
+   cannot try the lock, for example because `run.lock` is a link, it logs ``make
+   `<the run's folder>/run.lock` a regular file the pool's user can open, then restart
+   the pool: the pool could not lock it (<error>), so it keeps the dispatch for its
+   next start and reports no gone``. If the pool is stopped
    during the waits, the waits end, and the pool keeps the dispatch for its next start.
 3. Once the lock is free, the pool removes the containers and networks the run's wall
    left, as `qory run resend` does. If the removal fails, the pool logs `remove the

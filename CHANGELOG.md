@@ -403,11 +403,12 @@ release may change what an existing document does, and states it under Upgrading
   `machine_exists`, which `gone` follows, or a signed 400, 403 or 404. A release left
   when the pool stops is sent at its next start. A restart of the pool stops a run left
   from a crash of the pool, removes the containers and networks of its wall, and
-  reports its machine as gone; it signals only a process group whose leader is the run
-  it started. The pool section of `forager.yaml` takes `runs` (how
-  many runs this host runs at once; 1 when not set), `registry` and `run_config`. With
-  `prebuilds`, `harness_ref` or `harness_path` in it, qory stops with `<file>: line <n>:
-  key "<key>" is not one forager.yaml reads`.
+  reports its machine as gone. It sends SIGTERM to each process of the run's session,
+  and SIGKILL 30 s later to each one still there while the run holds its lock, and it
+  signals only a session whose leader is the run it started. The pool section of
+  `forager.yaml` takes `runs` (how many runs this host runs at once; 1 when not set),
+  `registry` and `run_config`. With `prebuilds`, `harness_ref` or `harness_path` in it,
+  qory stops with `<file>: line <n>: key "<key>" is not one forager.yaml reads`.
 - qory treats an enrolment code, `qecn_`, `qecp_`, `qecg_` or `qeci_` in any letter case,
   as a secret, as it treats `qak_`, `qrk_` and `qecr_`. Where qory prints a phrase in
   place of a value or a name that contains one of those, it prints "(a value that
