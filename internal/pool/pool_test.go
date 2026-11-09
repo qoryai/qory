@@ -270,30 +270,51 @@ func TestTheRunsCap(t *testing.T) {
 }
 
 // TestDispatchedFailures: a signed 429 is waited out up to three times; 409
-// lease_expired and 410 drop the dispatch with no release; anything else releases it.
-// qory run starts after dispatched alone.
+// lease_expired and 410 drop the dispatch with no release, and get gone, also after a
+// try whose response was lost and which the fake took; anything else releases it, and
+// a release that gets 204 from the fake gets no gone. While such a gone is held, the
+// journal entry is at ended and the dispatch's folder is gone. qory run starts after
+// dispatched alone, and a qory run that ran gets gone.
 func TestDispatchedFailures(t *testing.T) {
 	limited := provisionertest.Reply{Status: 429, Code: "rate_limited", RetryAfter: "2"}
+	lost := provisionertest.Reply{Drop: true}
 	for _, c := range []struct {
 		name    string
 		replies []provisionertest.Reply
 		reason  string
 		ran     bool
 		waits   int
+		gone    bool
 	}{
 		{name: "429 three times", replies: []provisionertest.Reply{limited, limited, limited}, ran: true, waits: 3},
 		{name: "429 four times", replies: []provisionertest.Reply{limited, limited, limited, limited}, reason: reasonNotStart, waits: 3},
-		{name: "lease_expired", replies: []provisionertest.Reply{{Status: 409, Code: "lease_expired"}}},
-		{name: "gone", replies: []provisionertest.Reply{{Status: 410, Code: "gone"}}},
+		{name: "lease_expired", replies: []provisionertest.Reply{{Status: 409, Code: "lease_expired"}}, gone: true},
+		{name: "gone", replies: []provisionertest.Reply{{Status: 410, Code: "gone"}}, gone: true},
 		{name: "forbidden", replies: []provisionertest.Reply{{Status: 403, Code: "forbidden"}}, reason: reasonNotStart},
 		{name: "unsigned", replies: slices.Repeat([]provisionertest.Reply{{Status: 503, Unsigned: true}}, 5), reason: reasonNotStart},
 		{name: "429 past the lease", replies: []provisionertest.Reply{{Status: 429, Code: "rate_limited", RetryAfter: "3600"}}, reason: reasonLease},
+		{name: "gone after a lost answer", replies: []provisionertest.Reply{lost, {Status: 410, Code: "gone"}}, gone: true},
+		{name: "lease_expired after a lost answer", replies: []provisionertest.Reply{lost, {Status: 409, Code: "lease_expired"}}, gone: true},
+		{name: "gone after a lost answer and a 429", replies: []provisionertest.Reply{lost, limited, {Status: 410, Code: "gone"}}, waits: 1, gone: true},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			h := newHarness(t, 1)
 			h.srv.Script(provisionertest.RouteDispatched, c.replies...)
+			var let func()
+			if c.gone {
+				let = h.gate.holdNext("/machine-end")
+			}
 			h.srv.Offer(provisionertest.Run{})
 			h.start()
+			if c.gone {
+				<-h.gate.reached
+				d := h.only()
+				if lines, want := journalOf(t, h.state), d.ID+" "+pool.PhaseEnded; len(lines) != 1 || lines[0] != want {
+					t.Errorf("the journal while gone is held is %q, want %q", lines, want)
+				}
+				h.noFolder(d.ID)
+				let()
+			}
 			h.settled(1)
 			h.stop()
 			d := h.only()
@@ -314,13 +335,21 @@ func TestDispatchedFailures(t *testing.T) {
 			if n != c.waits {
 				t.Errorf("the pool waited %v, want %d waits of 2s", h.waitsOf(), c.waits)
 			}
+			var want []string
+			if c.gone || c.ran {
+				want = []string{"gone"}
+			}
+			if states, statuses := h.machineEnds(d.ID); !slices.Equal(states, want) || len(statuses) > 0 && statuses[0] != 204 {
+				t.Errorf("the machine ends are %q, answered %v, want %q", states, statuses, want)
+			}
 		})
 	}
 }
 
 // TestTheRelease waits out a signed 429 to a release up to three times, takes 410 and
 // lease_expired as the dispatch over already, and logs a release that failed, 409
-// machine_exists among them.
+// machine_exists among them. After 409 machine_exists alone the pool sends gone, with
+// the journal entry at ended and no folder of the dispatch while that gone is held.
 func TestTheRelease(t *testing.T) {
 	limited := provisionertest.Reply{Status: 429, Code: "rate_limited", RetryAfter: "3"}
 	for _, c := range []struct {
@@ -339,9 +368,22 @@ func TestTheRelease(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			h := newHarness(t, 1)
 			h.srv.Script(provisionertest.RouteRelease, c.replies...)
+			machine := c.name == "machine_exists"
+			var let func()
+			if machine {
+				let = h.gate.holdNext("/machine-end")
+			}
 			h.srv.Offer(provisionertest.Run{Machine: "large"})
 			h.start()
 			h.waitFor("the release's line", func() bool { return len(h.log.with(c.line)) == 1 })
+			if machine {
+				<-h.gate.reached
+				if lines, want := journalOf(t, h.state), h.only().ID+" "+pool.PhaseEnded; len(lines) != 1 || lines[0] != want {
+					t.Errorf("the journal while gone is held is %q, want %q", lines, want)
+				}
+				h.noFolder(h.only().ID)
+				let()
+			}
 			h.settled(1)
 			h.stop()
 			n := 0
@@ -352,6 +394,13 @@ func TestTheRelease(t *testing.T) {
 			}
 			if n != c.waits {
 				t.Errorf("the pool waited %v, want %d waits of 3s", h.waitsOf(), c.waits)
+			}
+			var want []string
+			if machine {
+				want = []string{"gone"}
+			}
+			if states, _ := h.machineEnds(h.only().ID); !slices.Equal(states, want) {
+				t.Errorf("the machine ends are %q, want %q", states, want)
 			}
 		})
 	}
@@ -478,6 +527,9 @@ func TestAStopAtEachPhase(t *testing.T) {
 		if logs, _, statuses := h.machineLogs(d.ID); len(logs) != 1 || statuses[0] != 204 || !strings.HasPrefix(logs[0].Log, "hello\n") {
 			t.Errorf("the machine logs after the stop are %+v, answered %v", logs, statuses)
 		}
+		if states, statuses := h.machineEnds(d.ID); !slices.Equal(states, []string{"gone"}) || statuses[0] != 204 {
+			t.Errorf("the machine ends after the stop are %q, answered %v", states, statuses)
+		}
 		h.notReleased()
 		if lines := journalOf(t, h.state); len(lines) != 0 {
 			t.Errorf("the journal is %q", lines)
@@ -488,19 +540,23 @@ func TestAStopAtEachPhase(t *testing.T) {
 // TestTheJournalAfterAKill kills the pool at each phase, by taking the journal as it is
 // on disk then, and starts a second pool with it: before its first claim, the second
 // releases a claimed dispatch, for the pool program restarted, and drops a dispatched
-// one with no release. The journal is 0600 in a 0700 folder and contains the dispatch
-// id and the phase alone.
+// one with no release. For an ended one, killed while its gone is held, the second
+// sends gone beside its claims, and takes the entry out of the journal on the 204. The
+// journal is 0600 in a 0700 folder and contains the dispatch id and the phase alone.
 func TestTheJournalAfterAKill(t *testing.T) {
-	for _, phase := range []string{pool.PhaseClaimed, pool.PhaseDispatched} {
+	for _, phase := range []string{pool.PhaseClaimed, pool.PhaseDispatched, pool.PhaseEnded} {
 		t.Run(phase, func(t *testing.T) {
 			first := newHarness(t, 1)
-			first.script(script{Block: true})
-			if phase == pool.PhaseClaimed {
+			first.script(script{Block: phase != pool.PhaseEnded})
+			switch phase {
+			case pool.PhaseClaimed:
 				defer first.gate.holdNext("/dispatched")()
+			case pool.PhaseEnded:
+				defer first.gate.holdNext("/machine-end")()
 			}
 			first.srv.Offer(provisionertest.Run{})
 			first.start()
-			if phase == pool.PhaseClaimed {
+			if phase != pool.PhaseDispatched {
 				<-first.gate.reached
 			} else {
 				first.waitFor("the dispatch", func() bool { return len(first.srv.Dispatches()) == 1 })
@@ -535,16 +591,27 @@ func TestTheJournalAfterAKill(t *testing.T) {
 			second.waitFor("a claim", func() bool {
 				return slices.ContainsFunc(first.srv.Calls()[before:], func(c provisionertest.Call) bool { return c.Route == provisionertest.RouteClaim })
 			})
+			if phase == pool.PhaseEnded {
+				second.waitFor("the gone's line", func() bool { return len(second.log.with(lineGone)) == 1 })
+			}
 			second.stop()
 			first.stop()
 			calls := first.srv.Calls()[before:]
-			if phase == pool.PhaseClaimed {
+			switch phase {
+			case pool.PhaseClaimed:
 				second.released(d, reasonRestarted)
 				if calls[0].Route != provisionertest.RouteRelease || calls[0].DispatchID != d.ID {
 					t.Errorf("the second pool's first request was %s %s", calls[0].Route, calls[0].DispatchID)
 				}
-			} else if calls[0].Route != provisionertest.RouteClaim {
-				t.Errorf("the second pool's first request was %s %s, want its claim", calls[0].Route, calls[0].DispatchID)
+			case pool.PhaseDispatched:
+				if calls[0].Route != provisionertest.RouteClaim {
+					t.Errorf("the second pool's first request was %s %s, want its claim", calls[0].Route, calls[0].DispatchID)
+				}
+			case pool.PhaseEnded:
+				second.notReleased()
+				if got, _ := first.srv.Dispatch(d.ID); !slices.Equal(got.MachineEnds, []string{"gone"}) {
+					t.Errorf("the fake took the machine ends %q, want one gone", got.MachineEnds)
+				}
 			}
 			if lines := journalOf(t, second.state); len(lines) != 0 {
 				t.Errorf("the second pool's journal is %q", lines)

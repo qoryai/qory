@@ -35,6 +35,20 @@ func (c *Client) MachineLog(ctx context.Context, dispatchID, log string, truncat
 	})
 }
 
+// MachineEnd sends POST /v1/dispatches/<dispatchID>/machine-end,
+// machine-end.schema.json: the state of the machine the pool started for the dispatch,
+// contracts.MachineEndGone once its run ended. Qory Apiary takes a machine end before or
+// after the dispatch ends, and a gone again changes nothing. A signed 204 is the answer.
+// A refusal is a [*Refusal]: [ErrForbidden], a dispatch that is unknown or of another
+// node pool; [ErrUnavailable], a machine end Qory Apiary cannot store at that moment;
+// [ErrNotFound], [ErrUnsupportedRevision] or [ErrRateLimited]. [EndsAttempts] reports
+// whether the error ends the attempts to send it.
+func (c *Client) MachineEnd(ctx context.Context, dispatchID, state string) error {
+	return c.toDispatch(ctx, "the machine end of "+dispatchID, kindMachineEnd, dispatchID, "machine-end", "machine-end.schema.json", func(t string) any {
+		return contracts.MachineEnd{Version: 1, Time: t, State: state}
+	})
+}
+
 // fitMachineLog is log as a machine log sends it: each U+0000 replaced by U+FFFD, each
 // run of bytes that is not UTF-8 replaced by one U+FFFD, and each line that contains
 // what looks like a secret, qak_, qrk_, qecr_, qecn_, qecp_, qecg_ or qeci_ in any

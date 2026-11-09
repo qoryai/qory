@@ -393,9 +393,10 @@ func TestTheSameBytesAreNeverSentTwice(t *testing.T) {
 
 // TestRefusalsMatchTheirRequest answers each request with each signed refusal code:
 // errors.Is matches the code's error only for a request whose schema gives it, and
-// never an unsigned answer of the same status and body.
+// never an unsigned answer of the same status and body. A signed 503, a server error,
+// answers every try.
 func TestRefusalsMatchTheirRequest(t *testing.T) {
-	all := []provisionertest.Route{"claim", "dispatched", "release", "machine-log"}
+	all := []provisionertest.Route{"claim", "dispatched", "release", "machine-log", "machine-end"}
 	codes := []struct {
 		err    error
 		status int
@@ -411,13 +412,18 @@ func TestRefusalsMatchTheirRequest(t *testing.T) {
 		{provisioner.ErrMachineLogExists, 409, "machine_log_exists", []provisionertest.Route{"machine-log"}},
 		{provisioner.ErrNoGateway, 409, "no_gateway", []provisionertest.Route{"claim"}},
 		{provisioner.ErrRateLimited, 429, "rate_limited", all},
+		{provisioner.ErrUnavailable, 503, "unavailable", []provisionertest.Route{"machine-end"}},
 		{errors.New("409 handed_over"), 409, "handed_over", nil},
 	}
 	for _, code := range codes {
 		for _, route := range all {
 			srv, c, _, _ := setup(t)
 			cl := claimed(t, srv, c, provisionertest.Run{})
-			srv.Script(route, provisionertest.Reply{Status: code.status, Code: code.code})
+			tries := 1
+			if code.status >= 500 {
+				tries = 5
+			}
+			srv.Script(route, slices.Repeat([]provisionertest.Reply{{Status: code.status, Code: code.code}}, tries)...)
 			err := send(c, route, cl)
 			if want := slices.Contains(code.on, route); errors.Is(err, code.err) != want {
 				t.Errorf("%s to %s: %v, matches %v, want %v", code.code, route, err, !want, want)
@@ -450,6 +456,8 @@ func send(c *provisioner.Client, route provisionertest.Route, cl provisioner.Cla
 		return c.Dispatched(ctx, cl.DispatchID)
 	case "machine-log":
 		return c.MachineLog(ctx, cl.DispatchID, "a line\n", false)
+	case "machine-end":
+		return c.MachineEnd(ctx, cl.DispatchID, contracts.MachineEndGone)
 	}
 	return c.Release(ctx, cl.DispatchID, "a reason")
 }
@@ -458,14 +466,14 @@ func send(c *provisioner.Client, route provisionertest.Route, cl provisioner.Cla
 // unsupported_contract_version: the error starts with its fix, and contains the
 // revision qory sends, the request and the code.
 func TestAnotherRevisionHasItsLine(t *testing.T) {
-	for _, route := range []provisionertest.Route{"claim", "dispatched", "release", "machine-log"} {
+	for _, route := range []provisionertest.Route{"claim", "dispatched", "release", "machine-log", "machine-end"} {
 		srv, c, _, _ := setup(t)
 		cl := claimed(t, srv, c, provisionertest.Run{})
 		srv.Script(route, provisionertest.Reply{Status: 400, Code: "unsupported_contract_version"})
 		err := send(c, route, cl)
 		what := map[provisionertest.Route]string{
 			"claim": "the claim", "dispatched": "dispatched for " + cl.DispatchID, "release": "the release of " + cl.DispatchID,
-			"machine-log": "the machine log of " + cl.DispatchID,
+			"machine-log": "the machine log of " + cl.DispatchID, "machine-end": "the machine end of " + cl.DispatchID,
 		}[route]
 		want := "update qory: Qory Apiary takes another provisioner revision, and this qory sends revision 1 (" + what + ": 400 unsupported_contract_version)"
 		if err == nil || err.Error() != want {

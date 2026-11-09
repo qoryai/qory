@@ -14,8 +14,8 @@ import (
 // The refusals of Qory Apiary the pool acts on, each matched with errors.Is against the
 // [*Refusal] a request returns. A signed refusal matches only for a request whose schema
 // gives it, with its status and its code: claim.schema.json, dispatched.schema.json,
-// release.schema.json and machine-log.schema.json of provisioner/v1, with
-// refusal.schema.json.
+// release.schema.json, machine-log.schema.json and machine-end.schema.json of
+// provisioner/v1, with refusal.schema.json.
 var (
 	// ErrForbidden is the signed 403 forbidden: a request outside the key's rights, or a
 	// dispatch that is unknown or of another node pool.
@@ -33,6 +33,9 @@ var (
 	// ErrMachineLogExists is a machine log's signed 409 machine_log_exists: the dispatch
 	// has a machine log already.
 	ErrMachineLogExists = errors.New("409 machine_log_exists")
+	// ErrUnavailable is a machine end's signed 503 unavailable: Qory Apiary cannot store
+	// the machine end at that moment, and it is sent again later, built anew.
+	ErrUnavailable = errors.New("503 unavailable")
 	// ErrNoGateway is a claim's signed 409 no_gateway: the node pool has no gateway a
 	// run code could be bound to.
 	ErrNoGateway = errors.New("409 no_gateway")
@@ -73,6 +76,7 @@ var codeOf = map[error]struct {
 	ErrMachineExists:       {http.StatusConflict, "machine_exists"},
 	ErrMachineLogExists:    {http.StatusConflict, "machine_log_exists"},
 	ErrNoGateway:           {http.StatusConflict, "no_gateway"},
+	ErrUnavailable:         {http.StatusServiceUnavailable, "unavailable"},
 	ErrUnsupportedRevision: {http.StatusBadRequest, "unsupported_contract_version"},
 	ErrRateLimited:         {http.StatusTooManyRequests, "rate_limited"},
 }
@@ -85,6 +89,7 @@ const (
 	kindDispatched
 	kindRelease
 	kindMachineLog
+	kindMachineEnd
 )
 
 // refusalsOf are the signed refusals each request's schema gives, in the order Qory
@@ -96,6 +101,7 @@ var refusalsOf = map[kind][]error{
 	kindDispatched: {ErrUnsupportedRevision, ErrNotFound, ErrForbidden, ErrGone, ErrLeaseExpired, ErrRateLimited},
 	kindRelease:    {ErrUnsupportedRevision, ErrNotFound, ErrForbidden, ErrGone, ErrMachineExists, ErrLeaseExpired, ErrRateLimited},
 	kindMachineLog: {ErrUnsupportedRevision, ErrNotFound, ErrForbidden, ErrMachineLogExists, ErrRateLimited},
+	kindMachineEnd: {ErrUnsupportedRevision, ErrNotFound, ErrForbidden, ErrUnavailable, ErrRateLimited},
 }
 
 // Refusal is an answer that is not the one a request wants: its status, whether it was
@@ -161,6 +167,23 @@ func (r *Refusal) Is(target error) bool {
 	}
 	c, ok := codeOf[target]
 	return ok && r.Signed && r.Status == c.status && r.Code == c.code && slices.Contains(refusalsOf[r.kind], target)
+}
+
+// EndsAttempts reports whether err, the error of a machine end, ends the attempts to
+// send that machine end for the dispatch: a signed 400, 403 or 404, since the same call
+// sent again cannot succeed. After any other error, no answer, an unsigned answer, a 401
+// among them, a signed 429 or a signed 503 unavailable, the machine end gone is sent
+// again, built anew.
+func EndsAttempts(err error) bool {
+	r, ok := errors.AsType[*Refusal](err)
+	if !ok || !r.Signed || r.TooLarge {
+		return false
+	}
+	switch r.Status {
+	case http.StatusBadRequest, http.StatusForbidden, http.StatusNotFound:
+		return true
+	}
+	return false
 }
 
 // refused is the [*Refusal] of a signed answer that is not the one wanted, or
