@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://qory.dev/contracts/harness/v1/review-comments.schema.json",
   "title": "The review comments format, version 1",
-  "description": "A work item's review comments on its artifact versions, such as a proposal, and the replies to them: the file of a version of the artifact type review-comments, one document per work item. The control plane writes the members' review comments and replies. A version that a run pushes only adds the run's reply to any of the open review comments, at most one reply to each, and closes each review comment it adds a reply to: it changes no member's text, drops no id and adds no review comment. Each review comment's id is unique in the document, which a JSON Schema cannot check. The file is at most 1 MiB (1,048,576 bytes), the type's size limit, which a JSON Schema cannot check either. No object has a member this schema does not define.",
+  "description": "A work item's review comments, each on an artifact version, such as a proposal, or on the whole round of a run, and the replies to them: the file of a version of the artifact type review-comments, one document per work item. The control plane writes the members' review comments and replies. A version that a run pushes only adds the run's reply to any of the open review comments, at most one reply to each, and closes each review comment it adds a reply to: it changes no member's text, drops no id and adds no review comment. Each review comment's id is unique in the document, which a JSON Schema cannot check. The file is at most 1 MiB (1,048,576 bytes), the type's size limit, which a JSON Schema cannot check either. No object has a member this schema does not define.",
   "type": "object",
   "required": ["review_comments"],
   "additionalProperties": false,
@@ -15,22 +15,15 @@
   },
   "$defs": {
     "review_comment": {
-      "description": "A member's review comment on one version of an artifact. A closed review comment has at least one reply by a run.",
+      "description": "A member's review comment on one version of an artifact, or on the whole round of a run. A review comment on a run (`on.run`) is about everything that run produced and the round as a whole. A closed review comment has at least one reply by a run.",
       "type": "object",
       "required": ["id", "on", "text", "by", "at", "state"],
       "additionalProperties": false,
       "properties": {
         "id": {"description": "The review comment's id, unique in the document: 1 to 32 lower-case letters, digits and hyphens, such as c1.", "type": "string", "pattern": "^[a-z0-9-]{1,32}$"},
         "on": {
-          "description": "The artifact version the review comment is on. A version that a run pushes keeps `on` unchanged.",
-          "type": "object",
-          "required": ["artifact", "version"],
-          "additionalProperties": false,
-          "properties": {
-            "artifact": {"description": "The artifact type's name, such as proposal: lowercase letters and digits in groups joined by single hyphens, 1 to 64 bytes.", "type": "string", "maxLength": 64, "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"},
-            "version": {"description": "The version's number, from 1.", "type": "integer", "minimum": 1},
-            "screen": {"description": "The id of a screen in that artifact version, for a review comment on one screen of a mockup: 1 to 32 characters on one line. A JSON Schema cannot check that the version has that screen.", "$ref": "#/$defs/line", "minLength": 1, "maxLength": 32}
-          }
+          "description": "What the review comment is on: one artifact version, or the whole round of a run. A version that a run pushes keeps `on` unchanged.",
+          "oneOf": [{"$ref": "#/$defs/output"}, {"$ref": "#/$defs/run"}]
         },
         "text": {"description": "The review comment, as Markdown.", "$ref": "#/$defs/short_text"},
         "by": {"description": "The member who wrote the review comment.", "$ref": "#/$defs/member"},
@@ -74,8 +67,19 @@
         }
       ]
     },
+    "output": {
+      "description": "One artifact version: the review comment is about that output.",
+      "type": "object",
+      "required": ["artifact", "version"],
+      "additionalProperties": false,
+      "properties": {
+        "artifact": {"description": "The artifact type's name, such as proposal: lowercase letters and digits in groups joined by single hyphens, 1 to 64 bytes.", "type": "string", "maxLength": 64, "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"},
+        "version": {"description": "The version's number, from 1.", "type": "integer", "minimum": 1},
+        "screen": {"description": "The id of a screen in that artifact version, for a review comment on one screen of a mockup: 1 to 32 characters on one line. A JSON Schema cannot check that the version has that screen.", "$ref": "#/$defs/line", "minLength": 1, "maxLength": 32}
+      }
+    },
     "run": {
-      "description": "A run.",
+      "description": "A run: the run that wrote a reply, or the run whose round a review comment is on.",
       "type": "object",
       "required": ["run"],
       "additionalProperties": false,
