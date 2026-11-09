@@ -51,5 +51,5 @@ qory apiary run diagnose <run id> [flags]
 
 ### SEE ALSO
 
-* [qory apiary run](qory_apiary_run.md)	 - Read what Qory Apiary recorded about a run
+* [qory apiary run](qory_apiary_run.md)	 - List runs and read what Qory Apiary recorded about one
 
