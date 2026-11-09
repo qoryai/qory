@@ -322,6 +322,9 @@ func (p *Pool) admit(ctx context.Context, c provisioner.Claimed) bool {
 	reason := ""
 	switch {
 	case c.Machine != "":
+		// The contract rules out machine and machine_spec in the answer to a claim without
+		// offers, and the pool sends none; this check is all that stops a run on such an
+		// answer.
 		reason = ReasonMachine
 	case !p.now().Before(c.LeaseUntil):
 		reason = ReasonLeasePassed

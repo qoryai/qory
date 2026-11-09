@@ -225,8 +225,9 @@ func TestTheLifetime(t *testing.T) {
 	h.notReleased()
 }
 
-// TestAClaimWithAMachineIsReleased releases a claim whose machine member is set, before
-// dispatched, writes no run code's file and starts no qory run.
+// TestAClaimWithAMachineIsReleased releases a claim whose machine member is set, an
+// answer the contract rules out for a claim without offers, before dispatched, and
+// starts no qory run.
 func TestAClaimWithAMachineIsReleased(t *testing.T) {
 	h := newHarness(t, 1)
 	h.srv.Offer(provisionertest.Run{Machine: "large"})
