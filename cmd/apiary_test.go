@@ -15,6 +15,7 @@ import (
 
 	"github.com/qoryai/qory/cmd"
 	"github.com/qoryai/qory/internal/apiarydir"
+	"github.com/qoryai/qory/internal/foragerdir"
 )
 
 // diagnosticsRunID is the run of the diagnostics fixture.
@@ -32,10 +33,11 @@ var diagnosticsFixture, _ = filepath.Abs(filepath.Join("testdata", "diagnostics.
 // diagnosticsKeyID is the id of the diagnostics key the tests store.
 const diagnosticsKeyID = "ak_0123456789abcdef"
 
-// diagnosticsServer stands in for Qory Apiary's diagnostics route: it verifies each
-// request's signature under the diagnostics key with its timestamp, and responds with
-// the status and body it is set to, signed under its signing key unless unsigned is
-// set. A request that does not verify gets an unsigned 401, as Qory Apiary does.
+// diagnosticsServer stands in for Qory Apiary's diagnostics route and its run list: it
+// verifies each request's signature under the diagnostics key with its timestamp, and
+// responds with the status and body it is set to, signed under its signing key unless
+// unsigned is set. A request that does not verify gets an unsigned 401, as Qory Apiary
+// does.
 type diagnosticsServer struct {
 	*httptest.Server
 	signer   *accesskey.Key
@@ -47,10 +49,11 @@ type diagnosticsServer struct {
 	// requests counts the requests that verified, and headers keeps the last one's.
 	requests int
 	headers  http.Header
-	// received counts every request that reached the server, and path keeps the last
-	// one's path as sent.
+	// received counts every request that reached the server, path keeps the last
+	// one's path as sent, and query its query.
 	received int
 	path     string
+	query    string
 }
 
 func newDiagnosticsServer(t *testing.T, client *accesskey.Key) *diagnosticsServer {
@@ -65,6 +68,7 @@ func newDiagnosticsServer(t *testing.T, client *accesskey.Key) *diagnosticsServe
 		defer s.mu.Unlock()
 		s.received++
 		s.path = r.URL.EscapedPath()
+		s.query = r.URL.RawQuery
 		sig := r.Header.Get(accesskey.HeaderSignature)
 		req := accesskey.Request{
 			AccessKeyID: r.Header.Get(accesskey.HeaderAccessKeyID),
@@ -78,7 +82,7 @@ func newDiagnosticsServer(t *testing.T, client *accesskey.Key) *diagnosticsServe
 			w.WriteHeader(http.StatusUnauthorized)
 			return
 		}
-		if r.URL.Path != "/v1/runs/"+diagnosticsRunID+"/diagnostics" {
+		if r.URL.Path != "/v1/runs/"+diagnosticsRunID+"/diagnostics" && r.URL.Path != "/v1/runs" {
 			s.respond(w, sig, http.StatusNotFound, []byte(`{"error":"not_found"}`))
 			return
 		}
@@ -567,5 +571,36 @@ func wantIn(t *testing.T, s, want string) {
 	t.Helper()
 	if !strings.Contains(s, want) {
 		t.Errorf("%q lacks %q", s, want)
+	}
+}
+
+// unwritableInstanceID makes the server directory dir unwritable, with no instance-id
+// in it, so the command uses an instance id for its process alone. It skips under root,
+// which writes the directory anyway.
+func unwritableInstanceID(t *testing.T, dir string) {
+	t.Helper()
+	if os.Geteuid() == 0 {
+		t.Skip("root writes a directory of mode 0500")
+	}
+	if err := os.Remove(filepath.Join(dir, foragerdir.InstanceFile)); err != nil && !os.IsNotExist(err) {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(dir, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(dir, 0o700) })
+}
+
+// TestApiaryDiagnoseSaysAnInstanceIDForThisProcess is a server directory where the
+// instance id cannot be written: the line about it starts with the command's name.
+func TestApiaryDiagnoseSaysAnInstanceIDForThisProcess(t *testing.T) {
+	s, dir := diagnoseKeyed(t)
+	unwritableInstanceID(t, dir)
+	out, errOut, err := runApart(t, "apiary", "run", "diagnose", diagnosticsRunID)
+	if err != nil {
+		t.Fatalf("diagnose: %v\n%s", err, errOut)
+	}
+	if !strings.HasPrefix(errOut, "qory apiary run diagnose: instance ") || out != string(s.body) {
+		t.Errorf("stderr %q, stdout %d bytes", errOut, len(out))
 	}
 }
