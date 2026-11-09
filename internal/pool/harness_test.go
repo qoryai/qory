@@ -579,6 +579,7 @@ func (h *harness) waitFor(what string, cond func() bool) {
 var overLines = []string{
 	"released the run", "the dispatch was over already, so nothing was released", "the run could not be released",
 	"Qory Apiary did not record the run's start", lineGone, lineGone400, lineGone403, lineGone404,
+	lineRelease400, lineRelease403, lineRelease404,
 }
 
 // settled waits until the fake made n dispatches, the pool logged one of [overLines]

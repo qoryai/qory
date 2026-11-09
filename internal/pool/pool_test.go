@@ -24,6 +24,9 @@ const (
 	lineBeatFailed  = "dispatched failed, so it is sent again after a wait"
 	lineReleased    = "released the run"
 	lineNotReleased = "the run could not be released"
+	lineRelease400  = "update qory to the version of this Qory Apiary: Qory Apiary returned 400 for the release, so the pool does not send it again"
+	lineRelease403  = "check this pool's key in Qory Apiary: Qory Apiary returned 403 for the release, so the pool does not send it again"
+	lineRelease404  = "check the server address and update Qory Apiary: Qory Apiary returned 404 for the release, so the pool does not send it again"
 	lineOverAlready = "the dispatch was over already, so nothing was released"
 	lineNotStarted  = "the run could not be started"
 	reasonMachine   = "this pool creates no machine of the type in the claim"
@@ -374,7 +377,9 @@ func TestTheRelease(t *testing.T) {
 		{name: "gone", replies: []provisionertest.Reply{{Status: 410, Code: "gone"}}, line: lineOverAlready, releases: 1},
 		{name: "lease_expired", replies: []provisionertest.Reply{{Status: 409, Code: "lease_expired"}}, line: lineOverAlready, releases: 1},
 		{name: "machine_exists", replies: []provisionertest.Reply{{Status: 409, Code: "machine_exists"}}, line: lineNotReleased, releases: 1},
-		{name: "invalid_request", replies: []provisionertest.Reply{{Status: 400, Code: "invalid_request"}}, line: lineNotReleased, releases: 1},
+		{name: "invalid_request", replies: []provisionertest.Reply{{Status: 400, Code: "invalid_request"}}, line: lineRelease400, releases: 1},
+		{name: "forbidden", replies: []provisionertest.Reply{{Status: 403, Code: "forbidden"}}, line: lineRelease403, releases: 1},
+		{name: "not_found", replies: []provisionertest.Reply{{Status: 404, Code: "not_found"}}, line: lineRelease404, releases: 1},
 		{name: "unsigned", replies: slices.Repeat([]provisionertest.Reply{{Status: 500, Unsigned: true}}, 5), line: releaseFailed(time.Second), releases: 6},
 	} {
 		t.Run(c.name, func(t *testing.T) {
@@ -707,8 +712,8 @@ func TestAStopAtEachPhase(t *testing.T) {
 
 // TestTheJournalAfterAKill kills the pool at each phase, by taking the journal as it is
 // on disk then, and starts a second pool with it: before its first claim, the second
-// releases a claimed dispatch, for the pool program restarted, and drops a dispatched
-// one with no release. For an ended one, killed while its gone is held, the second
+// releases a claimed dispatch, for the pool program restarted. For a dispatched one,
+// with no release, and for an ended one, killed while its gone is held, the second
 // sends gone beside its claims, and takes the entry out of the journal on the 204. The
 // journal is 0600 in a 0700 folder and contains the dispatch id and the phase alone.
 func TestTheJournalAfterAKill(t *testing.T) {

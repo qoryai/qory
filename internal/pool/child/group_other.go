@@ -3,8 +3,10 @@
 package child
 
 import (
+	"errors"
 	"os"
 	"os/exec"
+	"time"
 )
 
 // group leaves cmd as it is on a system without process groups.
@@ -24,4 +26,12 @@ func SignalGroup(id int, kill bool) error {
 		return err
 	}
 	return p.Kill()
+}
+
+// ProcessGroup is -1 on a system without process groups: no id is a group's.
+func ProcessGroup() int { return -1 }
+
+// LeaderSince fails on a system without process groups, so no group is signalled.
+func LeaderSince(int, time.Time) error {
+	return errors.New("this system has no process groups")
 }

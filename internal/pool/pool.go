@@ -67,8 +67,11 @@
 // entry whose run.lock is held is a qory run left from before: beside the claim loop,
 // and in one of the pool's Runs while one is free, the pool sends SIGTERM to that
 // process group, SIGKILL once the grace passed, and waits up to the grace again for the
-// lock. When the lock is still held then, the entry stays, with its folder, for the
-// next start, and no gone is sent. Once the lock is free, the pool removes the wall of
+// lock. It signals the group only while the group's leader runs and started no later
+// than run.pgid was written; otherwise it sends nothing and waits the grace for the
+// lock. When the lock is still held then, or cannot be tried, the entry stays, with its
+// folder, for the next start, and no gone is sent; so does it when ctx ends during the
+// waits. Once the lock is free, the pool removes the wall of
 // each run whose record is in the dispatch's folder, with [Pool.Reap], as qory run
 // resend does, and acts on the entry as above.
 //
@@ -88,7 +91,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -99,6 +101,7 @@ import (
 	"github.com/qoryai/qory/internal/exports"
 	"github.com/qoryai/qory/internal/foragerdir"
 	"github.com/qoryai/qory/internal/pool/child"
+	"github.com/qoryai/qory/internal/pool/explore"
 	"github.com/qoryai/qory/internal/provisioner"
 	"github.com/qoryai/qory/internal/secretmask"
 )
@@ -294,7 +297,7 @@ func (p *Pool) replay(ctx context.Context) {
 			})
 			continue
 		case err != nil:
-			p.log.Error(lineLeftoverHeld, slog.String("dispatch_id", id), errAttr(err))
+			p.lockNotTried(id, err)
 			continue
 		}
 		_ = lock.Release()
@@ -340,11 +343,16 @@ func (p *Pool) takeSlot() bool {
 	}
 }
 
+// lockPath is the lock file of the dispatch id's folder, run.lock.
+func (p *Pool) lockPath(id string) string {
+	return filepath.Join(p.dispatchDir(id), runLockFile)
+}
+
 // runLock takes the lock of the dispatch id's folder, without waiting: the lock that
 // the dispatch's qory run holds while it runs. A lock another process holds is
 // [foragerdir.ErrLocked]. A folder with no lock file returns no lock and no error.
 func (p *Pool) runLock(id string) (*foragerdir.Lock, error) {
-	path := filepath.Join(p.dispatchDir(id), runLockFile)
+	path := p.lockPath(id)
 	if _, err := os.Lstat(path); errors.Is(err, os.ErrNotExist) {
 		return nil, nil
 	}
@@ -352,44 +360,82 @@ func (p *Pool) runLock(id string) (*foragerdir.Lock, error) {
 }
 
 // stopLeftover stops the qory run of the dispatch id that is left from before the pool
-// started, and reports whether its lock is free: SIGTERM to the process group that its
-// folder's run.pgid contains, then, while the lock is still held once the grace of
-// [Settings] has passed, SIGKILL to that group, and up to the grace again for the
-// lock. A lock still held then, and a folder whose run.pgid cannot be read, after the
-// grace for the lock, is logged. The run is stopped also once stop ended, and the waits
-// are the pool's Sleep.
+// started, and reports whether its lock is free. While the process group that run.pgid
+// of its folder contains passes [Pool.leftGroup], the pool sends SIGTERM to that group,
+// then, while the lock is still held once the grace of [Settings] has passed, SIGKILL,
+// and waits up to the grace again for the lock. A group that does not pass gets no
+// signal, and the pool waits up to the grace for the lock. A lock still held after the
+// waits is logged, as is a lock that cannot be tried. Once stop ends, the waits end, and
+// nothing more is sent or logged; the waits are the pool's Sleep.
 func (p *Pool) stopLeftover(stop context.Context, id string) bool {
-	work := context.WithoutCancel(stop)
 	ids := slog.String("dispatch_id", id)
 	grace := p.Settings.Grace
 	if grace <= 0 {
 		grace = child.DefaultGrace
 	}
-	group, gerr := readGroup(p.dispatchDir(id))
-	if gerr != nil {
-		p.log.Warn(lineLeftoverStopped, ids)
-	} else {
+	group, why := p.leftGroup(id)
+	if why == nil {
 		p.log.Warn(lineLeftoverStopped, ids, slog.Int("process_group", group))
 		_ = child.SignalGroup(group, false)
-		if free, _ := p.waitLock(work, id, grace); free {
+		free, err := p.waitLock(stop, id, grace)
+		if free {
 			return true
 		}
-		_ = child.SignalGroup(group, true)
+		if stop.Err() == nil && errors.Is(err, foragerdir.ErrLocked) {
+			// The leader is checked again: it may have ended after SIGTERM, and its id
+			// may lead another group by now.
+			if _, why = p.leftGroup(id); why == nil {
+				_ = child.SignalGroup(group, true)
+			}
+		}
 	}
-	free, err := p.waitLock(work, id, grace)
-	if free {
+	free, err := p.waitLock(stop, id, grace)
+	switch {
+	case free:
 		return true
+	case stop.Err() != nil:
+		return false
+	case !errors.Is(err, foragerdir.ErrLocked):
+		p.lockNotTried(id, err)
+		return false
 	}
-	if gerr != nil {
-		err = gerr
+	if why != nil {
+		err = why
 	}
-	p.log.Error(lineLeftoverHeld, ids, errAttr(err))
+	p.log.Error(lineLeftoverHeld, ids, slog.String("path", exports.HidePath(p.lockPath(id))), errAttr(err))
 	return false
 }
 
+// lockNotTried logs that the lock of the dispatch id's folder could not be tried, for
+// err.
+func (p *Pool) lockNotTried(id string, err error) {
+	p.log.Error(lineLockNotTried, slog.String("dispatch_id", id), slog.String("path", exports.HidePath(p.lockPath(id))), errAttr(err))
+}
+
+// leftGroup is the process group id that run.pgid of the dispatch id's folder contains,
+// as [readGroup] reads it, with no error only when the group's leader runs and started
+// no later than the file was last written, as [child.LeaderSince] checks: otherwise the
+// id may have passed to another group after the run's group ended.
+func (p *Pool) leftGroup(id string) (int, error) {
+	dir := p.dispatchDir(id)
+	group, err := readGroup(dir)
+	if err != nil {
+		return 0, err
+	}
+	info, err := os.Stat(filepath.Join(dir, runGroupFile))
+	if err != nil {
+		return 0, err
+	}
+	if err := child.LeaderSince(group, info.ModTime()); err != nil {
+		return 0, err
+	}
+	return group, nil
+}
+
 // waitLock tries the lock of the dispatch id's folder every [leftoverPoll], for up to
-// d by the pool's clock, and reports whether it was free; when it was not, the error is
-// that of the last try.
+// d by the pool's clock, and reports whether it was free. It returns at once when a try
+// fails with another error than [foragerdir.ErrLocked], and once ctx ends; when the
+// lock was not free, the error is that of the last try.
 func (p *Pool) waitLock(ctx context.Context, id string, d time.Duration) (bool, error) {
 	until := p.now().Add(d)
 	for {
@@ -398,7 +444,7 @@ func (p *Pool) waitLock(ctx context.Context, id string, d time.Duration) (bool, 
 			_ = lock.Release()
 			return true, nil
 		}
-		if !p.now().Before(until) {
+		if !errors.Is(err, foragerdir.ErrLocked) || ctx.Err() != nil || !p.now().Before(until) {
 			return false, err
 		}
 		_ = p.sleep(ctx, leftoverPoll)
@@ -406,15 +452,15 @@ func (p *Pool) waitLock(ctx context.Context, id string, d time.Duration) (bool, 
 }
 
 // readGroup is the process group id that run.pgid of the dispatch's folder dir
-// contains. An id of 1 or less, which would signal more than one run, or the process
-// id of the pool program, is an error.
+// contains. An id of 1 or less, which would signal more than one run, the process id of
+// the pool program, or the id of its process group, is an error.
 func readGroup(dir string) (int, error) {
 	b, err := os.ReadFile(filepath.Join(dir, runGroupFile))
 	if err != nil {
 		return 0, err
 	}
 	n, err := strconv.Atoi(strings.TrimSpace(string(b)))
-	if err != nil || n <= 1 || n == os.Getpid() {
+	if err != nil || n <= 1 || n == os.Getpid() || n == child.ProcessGroup() {
 		return 0, fmt.Errorf("%s does not contain the id of a qory run's process group", runGroupFile)
 	}
 	return n, nil
@@ -437,29 +483,11 @@ func writeGroup(dir string, id int) error {
 	return err
 }
 
-// leftRuns is the run ids of the records under the dispatch id's folder: the folders
-// <dispatch's folder>/state/qory/runs/<checkout>-<hash>/<run id> that qory run made, as
-// explore.RecordDir has the path.
+// leftRuns is the run ids of the records under the dispatch id's folder, which qory
+// run made with XDG_STATE_HOME set to its state/, as [explore.RecordedRuns] lists them.
 func (p *Pool) leftRuns(id string) []string {
-	runs := filepath.Join(p.dispatchDir(id), "state", "qory", "runs")
-	checkouts, _ := os.ReadDir(runs)
-	var ids []string
-	for _, c := range checkouts {
-		if !c.IsDir() {
-			continue
-		}
-		records, _ := os.ReadDir(filepath.Join(runs, c.Name()))
-		for _, r := range records {
-			if r.IsDir() && runIDShape.MatchString(r.Name()) {
-				ids = append(ids, r.Name())
-			}
-		}
-	}
-	return ids
+	return explore.RecordedRuns(filepath.Join(p.dispatchDir(id), "state"))
 }
-
-// runIDShape is a run id: a UUID in the canonical lower-case form.
-var runIDShape = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
 
 // reap removes the wall of each run whose record is under the dispatch id's folder, as
 // [Pool.Reap] has it, on a context that does not end with stop, and logs each failure;
@@ -662,7 +690,7 @@ func writeCode(name string, c provisioner.Claimed) (*os.File, error) {
 // gone, with its journal entry at ended. A signed 429 is waited out up to
 // [maxRateLimited] times while the lease lasts. On 409 lease_expired or 410 gone the
 // dispatch is not released, and gets gone: an earlier try of dispatched may have been
-// taken with its answer lost. Any other end releases the dispatch, as [Pool.giveBack]
+// taken with its response lost. Any other end releases the dispatch, as [Pool.giveBack]
 // has it: for the pool's stop during a wait, the lease, or a failure. A dispatched that
 // succeeded but could not be journaled starts no qory run: Qory Apiary does not release
 // the dispatch then, so it gets gone, as one whose qory run could not start does.
@@ -839,10 +867,15 @@ func (p *Pool) release(work context.Context, id, reason string) (releaseEnd, err
 		if !machine && !provisioner.EndsAttempts(err) {
 			return releaseKept, err
 		}
-		p.log.Warn(lineNotReleased, ids, slog.String("reason", reason), errAttr(err))
 		if machine {
+			p.log.Warn(lineNotReleased, ids, slog.String("reason", reason), errAttr(err))
 			return releaseMachine, nil
 		}
+		line := lineNotReleased
+		if errors.As(err, &r) && releaseEndedLine[r.Status] != "" {
+			line = releaseEndedLine[r.Status]
+		}
+		p.log.Warn(line, ids, slog.String("reason", reason), errAttr(err))
 		return releaseOver, nil
 	}
 }
@@ -976,6 +1009,14 @@ var goneEndedLine = map[int]string{
 	http.StatusBadRequest: lineGone400,
 	http.StatusForbidden:  lineGone403,
 	http.StatusNotFound:   lineGone404,
+}
+
+// releaseEndedLine is the line of a release that got each signed status after which
+// [provisioner.EndsAttempts] ends its attempts.
+var releaseEndedLine = map[int]string{
+	http.StatusBadRequest: lineRelease400,
+	http.StatusForbidden:  lineRelease403,
+	http.StatusNotFound:   lineRelease404,
 }
 
 // setPhase writes the dispatch id's journal entry at phase, and logs a write that

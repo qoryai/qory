@@ -19,9 +19,9 @@ const (
 	lineReleased = "released the run"
 	// lineOverAlready is a release that returned 410 gone or 409 lease_expired.
 	lineOverAlready = "the dispatch was over already, so nothing was released"
-	// lineNotReleased is a release that returned 409 machine_exists or a signed 400, 403
-	// or 404, or that failed for a claim that could not be written to the journal: the
-	// pool does not send it again.
+	// lineNotReleased is a release that returned 409 machine_exists, or that failed for
+	// a claim that could not be written to the journal: the pool does not send it
+	// again.
 	lineNotReleased = "the run could not be released"
 	// lineReleaseKept is a release that failed and was not sent again before the pool
 	// stopped; the claimed entry stays in the journal.
@@ -33,9 +33,13 @@ const (
 	// process_group, when run.pgid contains it, and SIGKILL after the grace.
 	lineLeftoverStopped = "a qory run of the dispatch is left from before the pool started, so the pool stops it"
 	// lineLeftoverHeld is a qory run left from before the pool started whose lock is
-	// still held after SIGKILL and the grace, or could not be tried: the entry stays
-	// in the journal, and no gone is sent.
+	// still held after the waits: the entry stays in the journal, and no gone is sent.
+	// The attribute path is the lock file's.
 	lineLeftoverHeld = "stop the programs that hold run.lock in the dispatch's folder, then restart the pool: a qory run left from before the pool started still holds that lock, so the pool keeps the dispatch for its next start and reports no gone"
+	// lineLockNotTried is a lock of a dispatch's folder that the pool could not try,
+	// such as a run.lock it may not open, or a link: the entry stays in the journal, and
+	// no gone is sent. The attribute path is the lock file's.
+	lineLockNotTried = "check the file run.lock in the dispatch's folder: the pool could not try its lock, so the pool keeps the dispatch for its next start and reports no gone"
 	// lineReapFailed is a removal of a left qory run's wall that failed; gone is sent
 	// all the same.
 	lineReapFailed = "remove the containers and networks with the label dev.qory.run=<run_id> from the container engine: the removal of the wall of a qory run left from before the pool started failed; the pool reports the machine as gone all the same"
@@ -56,6 +60,12 @@ const (
 	lineGone400 = "update qory to the version of this Qory Apiary: Qory Apiary returned 400 for the gone report, so the pool does not send it again"
 	lineGone403 = "check this pool's key in Qory Apiary: Qory Apiary returned 403 for the gone report, so the pool does not send it again"
 	lineGone404 = "check the server address and update Qory Apiary: Qory Apiary returned 404 for the gone report, so the pool does not send it again"
+	// lineRelease400, lineRelease403 and lineRelease404 are a release that got a signed
+	// 400, 403 or 404, after which the pool does not send it again. The status's code is
+	// in the attribute error.
+	lineRelease400 = "update qory to the version of this Qory Apiary: Qory Apiary returned 400 for the release, so the pool does not send it again"
+	lineRelease403 = "check this pool's key in Qory Apiary: Qory Apiary returned 403 for the release, so the pool does not send it again"
+	lineRelease404 = "check the server address and update Qory Apiary: Qory Apiary returned 404 for the release, so the pool does not send it again"
 )
 
 // lineGoneFailed is a machine end gone that failed with no response, an unsigned

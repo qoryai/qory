@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"testing"
@@ -21,6 +22,7 @@ import (
 const (
 	lineLeftoverStopped = "a qory run of the dispatch is left from before the pool started, so the pool stops it"
 	lineLeftoverHeld    = "stop the programs that hold run.lock in the dispatch's folder, then restart the pool: a qory run left from before the pool started still holds that lock, so the pool keeps the dispatch for its next start and reports no gone"
+	lineLockNotTried    = "check the file run.lock in the dispatch's folder: the pool could not try its lock, so the pool keeps the dispatch for its next start and reports no gone"
 	lineReapFailed      = "remove the containers and networks with the label dev.qory.run=<run_id> from the container engine: the removal of the wall of a qory run left from before the pool started failed; the pool reports the machine as gone all the same"
 )
 
@@ -60,11 +62,17 @@ func writeJournal(t *testing.T, h *harness, entries ...pool.Entry) {
 	}
 }
 
+// holder is a program that holds a left run's lock.
+type holder struct {
+	cmd  *exec.Cmd
+	done chan struct{}
+}
+
 // holdLock starts a program in a new process group that holds the lock of the file
 // lock, which it inherits as a descriptor, as a qory run does once the pool that started
 // it crashed: the test's copy is closed. With ignoreTerm, the program and the sleep it
 // starts ignore SIGTERM. The program is killed at the test's end.
-func holdLock(t *testing.T, lock string, ignoreTerm bool) *exec.Cmd {
+func holdLock(t *testing.T, lock string, ignoreTerm bool) *holder {
 	t.Helper()
 	f, err := os.OpenFile(lock, os.O_RDWR, 0)
 	if err != nil {
@@ -84,13 +92,43 @@ func holdLock(t *testing.T, lock string, ignoreTerm bool) *exec.Cmd {
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
-	var once sync.Once
+	h := &holder{cmd: cmd, done: make(chan struct{})}
+	go func() {
+		_ = cmd.Wait()
+		close(h.done)
+	}()
 	t.Cleanup(func() {
 		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
-		once.Do(func() { _ = cmd.Wait() })
+		<-h.done
 	})
-	go once.Do(func() { _ = cmd.Wait() })
-	return cmd
+	return h
+}
+
+// pid is the holder's process id, which is its process group's.
+func (h *holder) pid() int { return h.cmd.Process.Pid }
+
+// running reports whether the holder has not ended.
+func (h *holder) running() bool {
+	select {
+	case <-h.done:
+		return false
+	default:
+		return true
+	}
+}
+
+// endedBy waits up to 20 s for the holder to end, and is the signal that ended it, 0
+// when it exited or did not end.
+func (h *holder) endedBy() syscall.Signal {
+	select {
+	case <-h.done:
+	case <-time.After(20 * time.Second):
+		return 0
+	}
+	if ws, ok := h.cmd.ProcessState.Sys().(syscall.WaitStatus); ok && ws.Signaled() {
+		return ws.Signal()
+	}
+	return 0
 }
 
 // writeGroupFile writes the process group id to run.pgid beside lock.
@@ -175,7 +213,7 @@ func TestALeftoverRunIsStopped(t *testing.T) {
 			e := claimTo(t, h.srv, pool.PhaseDispatched)
 			lock := leftFolder(t, h, e.DispatchID)
 			holder := holdLock(t, lock, ignoreTerm)
-			writeGroupFile(t, lock, holder.Process.Pid)
+			writeGroupFile(t, lock, holder.pid())
 			writeJournal(t, h, e)
 			var r reaps
 			h.pool.Reap = r.seam(h, lock, e.DispatchID, nil)
@@ -185,7 +223,7 @@ func TestALeftoverRunIsStopped(t *testing.T) {
 			h.start()
 			h.waitFor("the gone's line", func() bool { return len(h.log.with(lineGone)) == 1 })
 			h.stop()
-			if m := h.log.with(lineLeftoverStopped); len(m) != 1 || m[0]["dispatch_id"] != e.DispatchID || m[0]["process_group"] != float64(holder.Process.Pid) {
+			if m := h.log.with(lineLeftoverStopped); len(m) != 1 || m[0]["dispatch_id"] != e.DispatchID || m[0]["process_group"] != float64(holder.pid()) {
 				t.Errorf("the stop's lines are %v", m)
 			}
 			if ids, order := r.calls(); !slices.Equal(ids, []string{leftRunID}) || !order[0] {
@@ -208,15 +246,12 @@ func TestALeftoverRunIsStopped(t *testing.T) {
 				t.Errorf("the journal is %q", lines)
 			}
 			h.noFolder(e.DispatchID)
-			// The harness's grace is 2 s: 20 waits of the pool's clock before SIGKILL.
-			polls := 0
-			for _, d := range h.waitsOf() {
-				if d == leftoverPoll {
-					polls++
-				}
+			want := syscall.SIGTERM
+			if ignoreTerm {
+				want = syscall.SIGKILL
 			}
-			if ignoreTerm && polls < 20 || !ignoreTerm && polls >= 20 {
-				t.Errorf("the pool waited %d times for the lock", polls)
+			if got := holder.endedBy(); got != want {
+				t.Errorf("the holder ended by %v, want %v", got, want)
 			}
 			if len(h.log.with(lineLeftoverHeld)) != 0 || len(h.log.with(lineReapFailed)) != 0 {
 				t.Errorf("the log:\n%s", h.log.text())
@@ -271,48 +306,131 @@ func TestAFreeLockSendsGoneAtOnce(t *testing.T) {
 }
 
 // TestALockStillHeldKeepsTheEntry starts a pool whose dispatched entry's run.lock a
-// program holds outside the process group of run.pgid, so neither SIGTERM nor SIGKILL
-// to that group frees it. After the grace twice, the pool logs the line that starts
-// with its fix, sends no gone, calls no Reap, and keeps the entry at dispatched with its
-// folder; the left run keeps the pool's one Run, so no claim is sent.
+// program holds, while run.pgid does not lead to it: another group, which gets SIGTERM;
+// no run.pgid; a run.pgid written before the holder started, as when its id passed to a
+// new group; and the id of a process that has ended. Only the first gets a signal and
+// the line of the stop. After the waits, the pool logs the line that starts with its
+// fix, with the lock's path and the cause, sends no gone, calls no Reap, and keeps the
+// entry at dispatched with its folder; the holder still runs, and the left run keeps
+// the pool's one Run, so no claim is sent.
 func TestALockStillHeldKeepsTheEntry(t *testing.T) {
+	for _, c := range []struct {
+		name    string
+		group   func(t *testing.T, lock string, holder *holder)
+		stopped int
+		cause   string
+	}{
+		// The other group's leader ends at SIGTERM: the check before SIGKILL then fails
+		// on macOS, and passes for its zombie on Linux, so the cause is either.
+		{name: "another group", stopped: 1, cause: "", group: func(t *testing.T, lock string, _ *holder) {
+			other := exec.Command("sleep", "60")
+			other.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+			if err := other.Start(); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				_ = syscall.Kill(-other.Process.Pid, syscall.SIGKILL)
+				_ = other.Wait()
+			})
+			writeGroupFile(t, lock, other.Process.Pid)
+		}},
+		{name: "no run.pgid", cause: "run.pgid", group: func(*testing.T, string, *holder) {}},
+		{name: "a run.pgid older than its process", cause: "started at", group: func(t *testing.T, lock string, holder *holder) {
+			writeGroupFile(t, lock, holder.pid())
+			old := time.Now().Add(-time.Hour)
+			if err := os.Chtimes(filepath.Join(filepath.Dir(lock), "run.pgid"), old, old); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{name: "a process that ended", cause: "does not run", group: func(t *testing.T, lock string, _ *holder) {
+			ended := exec.Command("true")
+			if err := ended.Run(); err != nil {
+				t.Fatal(err)
+			}
+			writeGroupFile(t, lock, ended.Process.Pid)
+		}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			h := newHarness(t, 1)
+			h.srv.Offer(provisionertest.Run{}, provisionertest.Run{})
+			e := claimTo(t, h.srv, pool.PhaseDispatched)
+			lock := leftFolder(t, h, e.DispatchID)
+			holder := holdLock(t, lock, false)
+			c.group(t, lock, holder)
+			writeJournal(t, h, e)
+			var r reaps
+			h.pool.Reap = r.seam(h, lock, e.DispatchID, nil)
+			var mu sync.Mutex
+			var claimed bool
+			before := h.count(provisionertest.RouteClaim)
+			realPolls(h, before, &claimed, &mu)
+			h.start()
+			h.waitFor("the held lock's line", func() bool { return len(h.log.with(lineLeftoverHeld)) == 1 })
+			time.Sleep(200 * time.Millisecond)
+			h.stop()
+			if m := h.log.with(lineLeftoverHeld); m[0]["dispatch_id"] != e.DispatchID || m[0]["path"] != lock || !strings.Contains(m[0]["error"].(string), c.cause) {
+				t.Errorf("the held lock's line is %v, want the cause %q", m[0], c.cause)
+			}
+			if n := len(h.log.with(lineLeftoverStopped)); n != c.stopped {
+				t.Errorf("%d lines of a stop, want %d", n, c.stopped)
+			}
+			if !holder.running() || lockFree(lock) {
+				t.Error("the program that held the lock was stopped")
+			}
+			if n := h.count(provisionertest.RouteMachineEnd); n != 0 {
+				t.Errorf("%d machine ends were sent", n)
+			}
+			if n := h.count(provisionertest.RouteClaim) - before; n != 0 || claimed {
+				t.Errorf("%d claims were sent while the left run kept the pool's one run", n)
+			}
+			if ids, _ := r.calls(); len(ids) != 0 {
+				t.Errorf("Reap was called with %q", ids)
+			}
+			if lines, want := journalOf(t, h.state), e.DispatchID+" "+pool.PhaseDispatched; len(lines) != 1 || lines[0] != want {
+				t.Errorf("the journal is %q, want %q", lines, want)
+			}
+			if _, err := os.Stat(lock); err != nil {
+				t.Errorf("the dispatch's folder: %v", err)
+			}
+		})
+	}
+}
+
+// TestALockThatCannotBeTried starts a pool whose dispatched entry's run.lock is a link,
+// which the lock's open does not follow: the pool logs the line that starts with its
+// fix, with the lock's path and the error, and not the line of a held lock. It stops
+// nothing, sends no gone, calls no Reap, and keeps the entry at dispatched.
+func TestALockThatCannotBeTried(t *testing.T) {
 	h := newHarness(t, 1)
-	h.srv.Offer(provisionertest.Run{}, provisionertest.Run{})
+	h.srv.Offer(provisionertest.Run{})
 	e := claimTo(t, h.srv, pool.PhaseDispatched)
 	lock := leftFolder(t, h, e.DispatchID)
-	holdLock(t, lock, false)
-	other := exec.Command("sleep", "60")
-	other.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	if err := other.Start(); err != nil {
+	target := filepath.Join(h.root, "elsewhere.lock")
+	if err := os.WriteFile(target, nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() {
-		_ = syscall.Kill(-other.Process.Pid, syscall.SIGKILL)
-		_ = other.Wait()
-	})
-	writeGroupFile(t, lock, other.Process.Pid)
+	if err := os.Remove(lock); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, lock); err != nil {
+		t.Fatal(err)
+	}
 	writeJournal(t, h, e)
 	var r reaps
 	h.pool.Reap = r.seam(h, lock, e.DispatchID, nil)
-	var mu sync.Mutex
-	var claimed bool
 	before := h.count(provisionertest.RouteClaim)
-	realPolls(h, before, &claimed, &mu)
 	h.start()
-	h.waitFor("the held lock's line", func() bool { return len(h.log.with(lineLeftoverHeld)) == 1 })
-	time.Sleep(200 * time.Millisecond)
+	h.waitFor("the line of a lock not tried", func() bool { return len(h.log.with(lineLockNotTried)) == 1 })
+	h.waitFor("a claim", func() bool { return h.count(provisionertest.RouteClaim) > before })
 	h.stop()
-	if m := h.log.with(lineLeftoverHeld); m[0]["dispatch_id"] != e.DispatchID {
-		t.Errorf("the held lock's line is %v", m[0])
+	if m := h.log.with(lineLockNotTried); m[0]["dispatch_id"] != e.DispatchID || m[0]["path"] != lock || m[0]["error"] == nil {
+		t.Errorf("the line is %v", m[0])
 	}
-	if lockFree(lock) {
-		t.Error("the lock is free: the program that held it was stopped")
+	if len(h.log.with(lineLeftoverHeld)) != 0 || len(h.log.with(lineLeftoverStopped)) != 0 {
+		t.Errorf("the log:\n%s", h.log.text())
 	}
-	if n := h.count(provisionertest.RouteMachineEnd); n != 0 {
-		t.Errorf("%d machine ends were sent", n)
-	}
-	if n := h.count(provisionertest.RouteClaim) - before; n != 0 || claimed {
-		t.Errorf("%d claims were sent while the left run kept the pool's one run", n)
+	if states, _ := h.machineEnds(e.DispatchID); len(states) != 0 {
+		t.Errorf("the machine ends are %q", states)
 	}
 	if ids, _ := r.calls(); len(ids) != 0 {
 		t.Errorf("Reap was called with %q", ids)
@@ -320,8 +438,54 @@ func TestALockStillHeldKeepsTheEntry(t *testing.T) {
 	if lines, want := journalOf(t, h.state), e.DispatchID+" "+pool.PhaseDispatched; len(lines) != 1 || lines[0] != want {
 		t.Errorf("the journal is %q, want %q", lines, want)
 	}
-	if _, err := os.Stat(lock); err != nil {
-		t.Errorf("the dispatch's folder: %v", err)
+}
+
+// TestAStopDuringALeftoversStop stops the pool while it waits for a left run that
+// ignores SIGTERM to free its lock: the wait ends at the stop, no SIGKILL is sent, no
+// line of a held lock is logged, no gone is sent, and the entry stays at dispatched for
+// the next start.
+func TestAStopDuringALeftoversStop(t *testing.T) {
+	h := newHarness(t, 1)
+	h.srv.Offer(provisionertest.Run{})
+	e := claimTo(t, h.srv, pool.PhaseDispatched)
+	lock := leftFolder(t, h, e.DispatchID)
+	holder := holdLock(t, lock, true)
+	writeGroupFile(t, lock, holder.pid())
+	writeJournal(t, h, e)
+	var r reaps
+	h.pool.Reap = r.seam(h, lock, e.DispatchID, nil)
+	waiting := make(chan struct{}, 1)
+	h.setSleep(func(ctx context.Context, d time.Duration) error {
+		if d == leftoverPoll {
+			select {
+			case waiting <- struct{}{}:
+			default:
+			}
+			<-ctx.Done()
+		}
+		return ctx.Err()
+	})
+	h.start()
+	select {
+	case <-waiting:
+	case <-time.After(20 * time.Second):
+		t.Fatal("the pool did not wait for the left run's lock")
+	}
+	h.stop()
+	if len(h.log.with(lineLeftoverStopped)) != 1 || len(h.log.with(lineLeftoverHeld)) != 0 || len(h.log.with(lineLockNotTried)) != 0 {
+		t.Errorf("the log:\n%s", h.log.text())
+	}
+	if !holder.running() {
+		t.Error("the left run got SIGKILL after the stop")
+	}
+	if states, _ := h.machineEnds(e.DispatchID); len(states) != 0 {
+		t.Errorf("the machine ends are %q", states)
+	}
+	if ids, _ := r.calls(); len(ids) != 0 {
+		t.Errorf("Reap was called with %q", ids)
+	}
+	if lines, want := journalOf(t, h.state), e.DispatchID+" "+pool.PhaseDispatched; len(lines) != 1 || lines[0] != want {
+		t.Errorf("the journal is %q, want %q", lines, want)
 	}
 }
 

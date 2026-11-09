@@ -90,8 +90,8 @@ again at its next start. It releases a claim that sets a machine type, and a cla
 could not start. A release that fails is sent again after each failure while the pool
 runs, and at the pool's next start; no run starts for that claim. At its start, the
 pool stops each run left from a crash of the pool, with SIGTERM to the run's process
-group and SIGKILL 30 s later, removes the containers and networks of the run's wall,
-and reports the run's machine as gone.
+group, and SIGKILL to it when the run still holds its lock 30 s later. Then it removes
+the containers and networks of the run's wall, and reports the run's machine as gone.
 The pool section of forager.yaml sets it: runs (how many runs this host runs at once; 1
 when not set), registry and run_config. If runs is above 1, set wall.pids_limit and
 wall.memory in the runs' forager.yaml; otherwise the pool exits 2 before its first

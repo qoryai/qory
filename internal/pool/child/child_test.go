@@ -844,3 +844,41 @@ func TestOutputIsMaskedWithMask(t *testing.T) {
 		t.Errorf("the lines are %q, want %q", got, want)
 	}
 }
+
+// TestLeaderSince passes a process that leads its group and started before the time
+// given, and fails one that started after it, one that leads no group of its id, and
+// one that has ended.
+func TestLeaderSince(t *testing.T) {
+	start := func(newGroup bool) *exec.Cmd {
+		cmd := exec.Command("sleep", "60")
+		if newGroup {
+			cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+		}
+		if err := cmd.Start(); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() {
+			_ = cmd.Process.Kill()
+			_ = cmd.Wait()
+		})
+		return cmd
+	}
+	leader := start(true)
+	if err := child.LeaderSince(leader.Process.Pid, time.Now().Add(time.Second)); err != nil {
+		t.Errorf("the leader failed: %v", err)
+	}
+	if err := child.LeaderSince(leader.Process.Pid, time.Now().Add(-time.Hour)); err == nil || !strings.Contains(err.Error(), "started at") {
+		t.Errorf("a leader that started after the time passed: %v", err)
+	}
+	member := start(false)
+	if err := child.LeaderSince(member.Process.Pid, time.Now().Add(time.Second)); err == nil || !strings.Contains(err.Error(), "leads no group") {
+		t.Errorf("a process that leads no group passed: %v", err)
+	}
+	ended := exec.Command("true")
+	if err := ended.Run(); err != nil {
+		t.Fatal(err)
+	}
+	if err := child.LeaderSince(ended.Process.Pid, time.Now()); err == nil || !strings.Contains(err.Error(), "does not run") {
+		t.Errorf("a process that ended passed: %v", err)
+	}
+}

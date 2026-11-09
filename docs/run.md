@@ -2206,13 +2206,21 @@ the id of the run's process group to `run.pgid` beside the lock. When the pool s
 before it acts on a run of the journal, it checks that run's lock:
 
 1. If the lock is held, the pool stops the run: it logs `a qory run of the dispatch is
-   left from before the pool started, so the pool stops it`, sends SIGTERM to the run's
-   process group, and sends SIGKILL 30 seconds later. While the run stops, it counts
-   against `pool.runs`.
-2. If the lock is still held 30 seconds after SIGKILL, the pool logs `stop the programs
-   that hold run.lock in the dispatch's folder, then restart the pool: a qory run left
-   from before the pool started still holds that lock, so the pool keeps the dispatch
-   for its next start and reports no gone`. The run keeps its place in `pool.runs`.
+   left from before the pool started, so the pool stops it`, and sends SIGTERM to the
+   run's process group. If the run still holds the lock 30 seconds later, the pool
+   sends SIGKILL to the group. While the run stops, it counts against `pool.runs`. The
+   pool signals the group only while the process whose id is in `run.pgid` runs, leads
+   that group and started before `run.pgid` was written. Otherwise the id may belong
+   to another program by then, and the pool sends no signal and waits 30 seconds for
+   the lock.
+2. If the lock is still held after these waits, the pool logs `stop the programs that
+   hold run.lock in the dispatch's folder, then restart the pool: a qory run left from
+   before the pool started still holds that lock, so the pool keeps the dispatch for its
+   next start and reports no gone`. The run keeps its place in `pool.runs`. If the pool
+   cannot try the lock, for example because `run.lock` is a link, it logs `check the
+   file run.lock in the dispatch's folder: the pool could not try its lock, so the pool
+   keeps the dispatch for its next start and reports no gone`. If the pool is stopped
+   during the waits, the waits end, and the pool keeps the dispatch for its next start.
 3. Once the lock is free, the pool removes the containers and networks the run's wall
    left, as `qory run resend` does. If the removal fails, the pool logs `remove the
    containers and networks with the label dev.qory.run=<run_id> from the container

@@ -388,8 +388,9 @@ release may change what an existing document does, and states it under Upgrading
   folder contains the dispatch at the phase `ended`. When the pool stops, it sends
   `gone` once more, for at most 10 s; a `gone` that has not got a signed 204, 400, 403
   or 404 when the pool stops is sent again at its next start, beside the claims. A
-  release that fails, with no answer, an unsigned answer, a fourth 429 or a server error,
-  leaves the dispatch in the journal at the phase `claimed`, and no run starts for it.
+  release that fails, with no response, an unsigned response, a fourth signed 429, a
+  server error or another refusal, leaves the dispatch in the journal at the phase
+  `claimed`, and no run starts for it.
   While the pool runs, the release is sent again after the same waits as `gone`, until
   Qory Apiary releases the dispatch or returns 410 `gone`, 409 `lease_expired`, 409
   `machine_exists`, which `gone` follows, or a signed 400, 403 or 404. A release left
