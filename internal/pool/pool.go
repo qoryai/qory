@@ -69,10 +69,12 @@
 // one of the pool's Runs while one is free, the pool sends SIGTERM to each process of
 // that session, then, once the grace passed, SIGKILL to each process of it then, and
 // waits up to the grace again for the lock. The pool signals the session only while it
-// is shown to be the run's, which it checks before each signal: the process of its id
-// has the stamp in run.session, or, on Linux, no process has that id and a process of
-// the session has run.lock open. Otherwise the pool sends nothing and waits the grace
-// for the lock, and the line of the held lock gives the cause. When the lock is still
+// is shown to be the run's, which it checks before each signal: a process it lists was
+// in an earlier list shown to be the run's, with the same start stamp, so the session
+// has had processes since then; the process of its id has the stamp in run.session; or,
+// on Linux, no process has that id and a process of the session has run.lock open.
+// Otherwise the pool sends nothing and waits the grace for the lock, and the line of
+// the held lock gives the cause. When the lock is still
 // held then, or
 // cannot be tried, the entry stays, with its folder, for the next start, and no gone is
 // sent; so does it when ctx ends during the waits. Once the lock is free, the pool
@@ -367,10 +369,10 @@ func (p *Pool) runLock(id string) (*foragerdir.Lock, error) {
 
 // stopLeftover stops the qory run of the dispatch id that is left from before the pool
 // started, and reports whether its lock is free. When the session that run.session of
-// its folder contains is the run's, as [sessionMembers] checks, the pool sends SIGTERM
-// to each of its processes. While the lock is still held once the grace of [Settings]
-// has passed, it checks the session again and sends SIGKILL to each process, in up to
-// [killRounds] rounds, and waits up to the grace again for the lock. When the session
+// its folder contains is the run's, as [leftSession.members] checks, the pool sends
+// SIGTERM to each of its processes. While the lock is still held once the grace of
+// [Settings] has passed, it checks the session again and sends SIGKILL to each process,
+// in up to [killRounds] rounds, and waits up to the grace again for the lock. When the session
 // is not shown to be the run's, the pool sends no signal and waits up to the grace for
 // the lock. A lock still held after the waits is logged with the cause, as is a lock
 // that cannot be tried. Once stop ends, the waits end, and nothing more is sent or
@@ -383,9 +385,10 @@ func (p *Pool) stopLeftover(stop context.Context, id string) bool {
 	}
 	lock := p.lockPath(id)
 	session, start, why := readSession(p.dispatchDir(id))
+	left := &leftSession{id: session, start: start, lock: lock, signalled: map[int]string{}}
 	var members []int
 	if why == nil {
-		members, why = sessionMembers(session, start, lock)
+		members, why = left.members()
 	}
 	if why == nil {
 		p.log.Warn(lineLeftoverStopped, ids, slog.Int("session", session), slog.Int("processes", len(members)))
@@ -395,7 +398,7 @@ func (p *Pool) stopLeftover(stop context.Context, id string) bool {
 			return true
 		}
 		if stop.Err() == nil && errors.Is(err, foragerdir.ErrLocked) {
-			why = killSession(session, start, lock)
+			why = left.kill()
 		}
 	}
 	free, err := p.waitLock(stop, id, grace)
@@ -420,14 +423,25 @@ func (p *Pool) stopLeftover(stop context.Context, id string) bool {
 // another one before SIGKILL reaches it.
 const killRounds = 3
 
-// killSession sends SIGKILL to each process of the session id that [sessionMembers]
-// lists, and lists the session again, until a list has no process that an earlier one
-// did not have, for at most [killRounds] lists. The error is that of the first list,
-// when it lists no process to signal; a later list that fails ends the rounds.
-func killSession(id int, start, lock string) error {
+// leftSession is the session id of a qory run left from before the pool started, as
+// run.session contains it with qory run's start stamp start, and the path of the run's
+// lock. signalled has the start stamp of each process that a list shown to be the
+// run's had, by process id.
+type leftSession struct {
+	id        int
+	start     string
+	lock      string
+	signalled map[int]string
+}
+
+// kill sends SIGKILL to each process of the session that [leftSession.members] lists,
+// and lists the session again, until a list has no process that an earlier one did not
+// have, for at most [killRounds] lists. The error is that of the first list, when it
+// lists no process to signal; a later list that fails ends the rounds.
+func (s *leftSession) kill() error {
 	seen := map[int]bool{}
 	for range killRounds {
-		members, err := sessionMembers(id, start, lock)
+		members, err := s.members()
 		if err != nil {
 			if len(seen) == 0 {
 				return err
@@ -444,47 +458,79 @@ func killSession(id int, start, lock string) error {
 		if len(added) == 0 {
 			return nil
 		}
-		child.SignalEach(added, id, true)
+		child.SignalEach(added, s.id, true)
 	}
 	return nil
 }
 
-// sessionMembers is the id of each process of the session id, as
-// [child.SessionMembers] lists them, when the session is shown to be the one that qory
-// run started with the start stamp start, and whose lock is the file lock. The session
-// is the run's when the process of the id has that stamp, as [child.CheckLeader]
-// checks. When no process has the id, the session is the run's only when one of its
-// processes has lock open, matched by device and inode, as [child.HasOpen] reads it on
-// Linux; on another system, such a session is not shown to be the run's. Any other
-// case is an error that gives the cause, as is a session with no process: a program
-// outside the session holds the lock.
-func sessionMembers(id int, start, lock string) ([]int, error) {
-	err := child.CheckLeader(id, start)
-	leaderless := errors.Is(err, child.ErrNoProcess)
-	if err != nil && !leaderless {
-		return nil, err
+// members is the id of each process of the session, as [child.SessionMembers] lists
+// them, when the session is shown to be the run's, and adds the start stamp of each to
+// signalled. The session is the run's in three cases, checked in this order:
+//   - A process it lists has an id and a start stamp that an earlier list shown to be
+//     the run's had: the session has had processes since that list without a break,
+//     and no process gets the id of a session that has processes.
+//   - The process of the session's id has the start stamp start, as
+//     [child.CheckLeader] checks.
+//   - No process has the session's id, and one of its processes has the lock open,
+//     matched by device and inode, as [child.HasOpen] reads it on Linux; on another
+//     system, this case is not shown.
+//
+// Any other case is an error that gives the cause, as is a session with no process: a
+// program outside the session holds the lock.
+func (s *leftSession) members() ([]int, error) {
+	leader := child.CheckLeader(s.id, s.start)
+	members, err := child.SessionMembers(s.id)
+	if err == nil && s.continued(members) {
+		return s.record(members), nil
 	}
-	members, err := child.SessionMembers(id)
+	leaderless := errors.Is(leader, child.ErrNoProcess)
+	if leader != nil && !leaderless {
+		return nil, leader
+	}
 	if err != nil {
-		return nil, fmt.Errorf("the processes of session %d could not be listed: %w", id, err)
+		return nil, fmt.Errorf("the processes of session %d could not be listed: %w", s.id, err)
 	}
 	if len(members) == 0 {
-		return nil, fmt.Errorf("no process is in session %d, so a program outside it holds the lock", id)
+		return nil, fmt.Errorf("no process is in session %d, so a program outside it holds the lock", s.id)
 	}
 	if !leaderless {
-		return members, nil
+		return s.record(members), nil
 	}
 	if !child.OpenFilesRead {
-		return nil, fmt.Errorf("process %d, the leader of session %d, does not run, and the files that the session's processes have open cannot be read on this system", id, id)
+		return nil, fmt.Errorf("process %d, the leader of session %d, does not run, no process of the session was in an earlier list of it, and the files that the session's processes have open cannot be read on this system", s.id, s.id)
 	}
-	info, err := os.Lstat(lock)
+	info, err := os.Lstat(s.lock)
 	if err != nil {
 		return nil, err
 	}
 	if len(child.HasOpen(members, info)) == 0 {
-		return nil, fmt.Errorf("process %d, the leader of session %d, does not run, and no process of the session has run.lock open", id, id)
+		return nil, fmt.Errorf("process %d, the leader of session %d, does not run, no process of the session was in an earlier list of it, and none has run.lock open", s.id, s.id)
 	}
-	return members, nil
+	return s.record(members), nil
+}
+
+// continued reports whether one of the process ids of members is in signalled with the
+// start stamp that the process has now.
+func (s *leftSession) continued(members []int) bool {
+	for _, m := range members {
+		if want, ok := s.signalled[m]; ok {
+			if stamp, err := child.StartStamp(m); err == nil && stamp == want {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// record adds the start stamp of each process id of members to signalled, and returns
+// members. A process whose stamp cannot be read, as one that ended, is not added.
+func (s *leftSession) record(members []int) []int {
+	for _, m := range members {
+		if stamp, err := child.StartStamp(m); err == nil {
+			s.signalled[m] = stamp
+		}
+	}
+	return members
 }
 
 // lockNotTried logs that the lock of the dispatch id's folder could not be tried, for

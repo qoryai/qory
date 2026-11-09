@@ -405,12 +405,13 @@ release may change what an existing document does, and states it under Upgrading
   from a crash of the pool, removes the containers and networks of its wall, and
   reports its machine as gone. It sends SIGTERM to each process of the run's session,
   and SIGKILL 30 s later to each one still there while the run holds its lock. It
-  signals only a session that is the run's: its leader runs with the start the pool
-  recorded, or, on Linux, its leader has ended and one of its processes has the run's
-  lock open. The pool section of `forager.yaml` takes `runs` (how many runs this host
-  runs at once; 1 when not set), `registry` and `run_config`. With `prebuilds`,
-  `harness_ref` or `harness_path` in it, qory stops with `<file>: line <n>: key
-  "<key>" is not one forager.yaml reads`.
+  signals only a session that is the run's: a process of it got the pool's SIGTERM and
+  still runs, its leader runs with the start the pool recorded, or, on Linux, its
+  leader has ended and one of its processes has the run's lock open. The pool section
+  of `forager.yaml` takes `runs` (how many runs this host runs at once; 1 when not
+  set), `registry` and `run_config`. With `prebuilds`, `harness_ref` or `harness_path`
+  in it, qory stops with `<file>: line <n>: key "<key>" is not one forager.yaml
+  reads`.
 - qory treats an enrolment code, `qecn_`, `qecp_`, `qecg_` or `qeci_` in any letter case,
   as a secret, as it treats `qak_`, `qrk_` and `qecr_`. Where qory prints a phrase in
   place of a value or a name that contains one of those, it prints "(a value that

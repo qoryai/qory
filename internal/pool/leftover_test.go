@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -68,13 +69,14 @@ func writeJournal(t *testing.T, h *harness, entries ...pool.Entry) {
 
 // holder is a program that holds a left run's lock, with the start stamp stamp.
 // member, when not 0, is the process id of a process that the program started, which
-// has the start stamp memberStamp.
+// has the start stamp memberStamp. ready is the file where the member wrote its id.
 type holder struct {
 	cmd         *exec.Cmd
 	done        chan struct{}
 	stamp       string
 	member      int
 	memberStamp string
+	ready       string
 }
 
 // holdLock starts a program in a new session that holds the lock of the file lock,
@@ -262,31 +264,68 @@ const leaderArg = "leftover-leader"
 // fakeLeader is the leader of a left run's session: it starts a member in a new process
 // group of its session, which inherits descriptor 3 and ignores SIGTERM when member is
 // "trap". The member writes its process id to the file ready. Once it did, the leader
-// exits 0 when member is "alone", and otherwise sleeps until a signal ends it.
+// exits 0 when member is "alone", and otherwise sleeps until a signal ends it. When
+// member is "respawn", the leader waits for SIGTERM instead, and then starts another
+// process in another process group of its session, without descriptor 3, that ignores
+// SIGTERM and writes its process id to ready.fresh; then the leader exits 0.
 func fakeLeader(ready, member string) int {
+	if member == "respawn" {
+		terms := make(chan os.Signal, 1)
+		signal.Notify(terms, syscall.SIGTERM)
+		defer signal.Stop(terms)
+		member, wait := startMember(ready, `echo $$ > "$1.new" && mv "$1.new" "$1" && exec sleep 60`, true)
+		if member == nil {
+			return 90
+		}
+		go func() { _ = member.Wait() }()
+		if !wait() {
+			return 91
+		}
+		<-terms
+		fresh, wait := startMember(ready+".fresh", `trap "" TERM; echo $$ > "$1.new" && mv "$1.new" "$1" && exec sleep 60`, false)
+		if fresh == nil || !wait() {
+			return 92
+		}
+		return 0
+	}
 	script := `echo $$ > "$1.new" && mv "$1.new" "$1" && exec sleep 60`
 	if member == "trap" {
 		script = `trap "" TERM; ` + script
 	}
-	cmd := exec.Command("/bin/sh", "-c", script, "member", ready)
-	cmd.ExtraFiles = []*os.File{os.NewFile(3, "lock")}
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	if err := cmd.Start(); err != nil {
+	cmd, wait := startMember(ready, script, true)
+	if cmd == nil {
 		return 90
 	}
-	for deadline := time.Now().Add(20 * time.Second); ; time.Sleep(10 * time.Millisecond) {
-		if _, err := os.Stat(ready); err == nil {
-			break
-		}
-		if time.Now().After(deadline) {
-			return 91
-		}
+	if !wait() {
+		return 91
 	}
 	if member == "alone" {
 		return 0
 	}
 	time.Sleep(time.Hour)
 	return 0
+}
+
+// startMember starts the shell script with the file ready as its $1, in a new process
+// group, with descriptor 3 when withFD3, and returns it with a function that waits up
+// to 20 s for ready to exist. The command is nil when it could not be started.
+func startMember(ready, script string, withFD3 bool) (*exec.Cmd, func() bool) {
+	cmd := exec.Command("/bin/sh", "-c", script, "member", ready)
+	if withFD3 {
+		cmd.ExtraFiles = []*os.File{os.NewFile(3, "lock")}
+	}
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	if err := cmd.Start(); err != nil {
+		return nil, nil
+	}
+	return cmd, func() bool {
+		for deadline := time.Now().Add(20 * time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
+			if _, err := os.Stat(ready); err == nil {
+				return true
+			}
+		}
+		return false
+	}
 }
 
 // holdLockInSession starts [fakeLeader] in a new session and returns once the leader's
@@ -313,6 +352,7 @@ func holdLockInSession(t *testing.T, lock, member string, withLock bool) *holder
 	}
 	ready := filepath.Join(t.TempDir(), "ready")
 	h := startHolder(t, f, exec.Command(os.Args[0], leaderArg, ready, member))
+	h.ready = ready
 	for deadline := time.Now().Add(20 * time.Second); ; time.Sleep(10 * time.Millisecond) {
 		if b, err := os.ReadFile(ready); err == nil {
 			if h.member, err = strconv.Atoi(strings.TrimSpace(string(b))); err != nil {
@@ -361,11 +401,20 @@ func stopsLeftover(t *testing.T, h *harness, e pool.Entry, lock string, session 
 // keepsLeftover starts the pool of h, whose journal contains e alone, and waits for the
 // line of a held lock; then it checks that the line has the cause, that stopped lines
 // of a stop were logged, that no gone was sent, and that the entry stays at
-// dispatched.
-func keepsLeftover(t *testing.T, h *harness, e pool.Entry, cause string, stopped int) {
+// dispatched. Each of the pool's waits between two tries of the lock takes 10 ms, after
+// poll returns when poll is set.
+func keepsLeftover(t *testing.T, h *harness, e pool.Entry, cause string, stopped int, poll func()) {
 	t.Helper()
 	writeJournal(t, h, e)
-	realPolls(h, h.count(provisionertest.RouteClaim), new(bool), new(sync.Mutex))
+	h.setSleep(func(ctx context.Context, d time.Duration) error {
+		if d == leftoverPoll {
+			if poll != nil {
+				poll()
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		return ctx.Err()
+	})
 	h.start()
 	h.waitFor("the held lock's line", func() bool { return len(h.log.with(lineLeftoverHeld)) == 1 })
 	h.stop()
@@ -386,10 +435,9 @@ func keepsLeftover(t *testing.T, h *harness, e pool.Entry, cause string, stopped
 // TestALeftoverSessionIsStopped starts a pool whose dispatched entry's qory run is
 // left as a session: its leader ends at SIGTERM, and a member of the session in
 // another process group ignores SIGTERM and holds run.lock. The pool sends SIGTERM to
-// both. Once the grace passed, the leader does not run, so the session is the run's
-// only while the member has run.lock open. On Linux, the member gets SIGKILL, the lock
-// is free, then Reap is called and gone is sent. Elsewhere, the open files are not
-// read, so the member gets no SIGKILL and the entry stays.
+// both. Once the grace passed, the leader does not run, but the member still runs with
+// the start it had at SIGTERM, so the session is still the run's: the member gets
+// SIGKILL, the lock is free, then Reap is called and gone is sent.
 func TestALeftoverSessionIsStopped(t *testing.T) {
 	h := newHarness(t, 1)
 	h.srv.Offer(provisionertest.Run{})
@@ -397,19 +445,67 @@ func TestALeftoverSessionIsStopped(t *testing.T) {
 	lock := leftFolder(t, h, e.DispatchID)
 	holder := holdLockInSession(t, lock, "trap", true)
 	writeSessionFile(t, lock, holder.pid(), holder.stamp)
-	if child.OpenFilesRead {
-		stopsLeftover(t, h, e, lock, holder.pid())
-	} else {
-		keepsLeftover(t, h, e, "cannot be read on this system", 1)
-	}
+	stopsLeftover(t, h, e, lock, holder.pid())
 	if got := holder.endedBy(); got != syscall.SIGTERM {
 		t.Errorf("the leader ended by %v, want SIGTERM", got)
 	}
-	if child.OpenFilesRead && !holder.memberEnds() {
+	if !holder.memberEnds() {
 		t.Error("the member still runs")
 	}
-	if !child.OpenFilesRead && !holder.memberRuns() {
-		t.Error("the member got SIGKILL")
+}
+
+// TestASessionWithOnlyNewProcessesGetsNoSIGKILL starts a pool whose dispatched entry's
+// run.session contains a session whose leader, at SIGTERM, starts another process of
+// the session that ignores SIGTERM, and exits, while its first member ends at SIGTERM.
+// A program in another session holds run.lock. Once the grace passed, the session's
+// one process is one that no earlier list had, its leader does not run, and none of
+// its processes has run.lock open, so the session is not shown to be the run's: the
+// new process gets no SIGKILL, and the line of the held lock gives that cause.
+func TestASessionWithOnlyNewProcessesGetsNoSIGKILL(t *testing.T) {
+	h := newHarness(t, 1)
+	h.srv.Offer(provisionertest.Run{})
+	e := claimTo(t, h.srv, pool.PhaseDispatched)
+	lock := leftFolder(t, h, e.DispatchID)
+	other := holdLock(t, lock, false)
+	leader := holdLockInSession(t, lock, "respawn", false)
+	writeSessionFile(t, lock, leader.pid(), leader.stamp)
+	// The first wait for the lock, after SIGTERM, lasts until the leader exited and
+	// the new process started, so the second list has the new process alone.
+	fresh := leader.ready + ".fresh"
+	var once sync.Once
+	keepsLeftover(t, h, e, "no process of the session was in an earlier list of it", 1, func() {
+		once.Do(func() {
+			select {
+			case <-leader.done:
+			case <-time.After(20 * time.Second):
+				t.Error("the leader did not exit at SIGTERM")
+			}
+			for deadline := time.Now().Add(20 * time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
+				if _, err := os.Stat(fresh); err == nil {
+					return
+				}
+			}
+			t.Error("the new process did not start")
+		})
+	})
+	started := &holder{}
+	if b, err := os.ReadFile(fresh); err == nil {
+		if started.member, err = strconv.Atoi(strings.TrimSpace(string(b))); err == nil {
+			started.memberStamp, _ = child.StartStamp(started.member)
+		}
+	}
+	if started.member != 0 {
+		t.Cleanup(func() {
+			if started.memberRuns() {
+				_ = syscall.Kill(started.member, syscall.SIGKILL)
+			}
+		})
+	}
+	if started.member == 0 || !started.memberRuns() || !other.running() {
+		t.Errorf("the new process %d got SIGKILL, or it did not start", started.member)
+	}
+	if got := leader.endedBy(); got != 0 {
+		t.Errorf("the leader ended by %v, want an exit", got)
 	}
 }
 
@@ -452,7 +548,7 @@ func TestALeaderlessSessionWithoutTheLockGetsNoSignal(t *testing.T) {
 	leaderless := holdLockInSession(t, lock, "alone", false)
 	writeSessionFile(t, lock, leaderless.pid(), leaderless.stamp)
 	<-leaderless.done
-	keepsLeftover(t, h, e, "no process of the session has run.lock open", 0)
+	keepsLeftover(t, h, e, "none has run.lock open", 0, nil)
 	if !leaderless.memberRuns() || !other.running() {
 		t.Error("a process got a signal")
 	}
@@ -474,7 +570,7 @@ func TestALeaderlessSessionKeepsItsEntry(t *testing.T) {
 	holder := holdLockInSession(t, lock, "alone", true)
 	writeSessionFile(t, lock, holder.pid(), holder.stamp)
 	<-holder.done
-	keepsLeftover(t, h, e, "cannot be read on this system", 0)
+	keepsLeftover(t, h, e, "cannot be read on this system", 0, nil)
 	if !holder.memberRuns() || lockFree(lock) {
 		t.Error("the member got a signal")
 	}
@@ -486,8 +582,8 @@ func TestALeaderlessSessionKeepsItsEntry(t *testing.T) {
 // session. The pool logs that it stops the run, and sends SIGTERM to each process of
 // the session; a program that ignores SIGTERM gets SIGKILL once the grace passed. Once
 // the lock is free, Reap is called with the run id of the record in the dispatch's
-// folder, then gone is sent, and the entry and the folder go. While the run stops, it takes the pool's one Run, so
-// no claim is sent.
+// folder, then gone is sent, and the entry and the folder go. While the run stops, it
+// takes the pool's one Run, so no claim is sent.
 func TestALeftoverRunIsStopped(t *testing.T) {
 	for _, ignoreTerm := range []bool{false, true} {
 		t.Run("ignoreTerm="+strconv.FormatBool(ignoreTerm), func(t *testing.T) {

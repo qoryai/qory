@@ -2215,16 +2215,19 @@ journal, it checks that run's lock:
    SIGKILL to each, up to 3 times while new processes appear. While the run stops, it
    counts against `pool.runs`. Before each signal, the pool checks that the session is
    the run's:
+   - A process of the session got a signal from the pool before, and has the same
+     start as then. The session has had processes since then, and no process gets the
+     id of a session that has processes.
    - The process whose id is in `run.session` has the start in `run.session`: it is
      `qory run`.
    - On Linux, no process has that id, and a process of the session has `run.lock`
      open, matched by device and inode in `/proc/<pid>/fd`. On macOS, the pool does
-     not read which files a process has open, so a session whose `qory run` has ended
-     gets no signal.
+     not read which files a process has open, so a session whose `qory run` ended
+     before the pool started gets no signal.
 
    Otherwise the pool sends no signal and waits 30 seconds for the lock: a process with
-   another start has the id, the session has no process, or none of its processes has
-   `run.lock` open. A program that the run starts in a new session, as `setsid` does,
+   another start has the id, the session has no process, or none of its processes got
+   a signal before or has `run.lock` open. A program that the run starts in a new session, as `setsid` does,
    is outside the run's session and gets no signal.
 2. If the lock is still held after these waits, the pool logs `stop the programs that
    hold run.lock in the dispatch's folder, then restart the pool: a qory run left from
