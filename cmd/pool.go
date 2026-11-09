@@ -87,7 +87,9 @@ after each failure until Qory Apiary returns a signed 204, 400, 403 or 404 to it
 report that has not got a signed 204, 400, 403 or 404 when the pool stops is sent
 again at its next start. It releases a claim that sets a machine type, and a claim it
 could not start.
-The pool section of forager.yaml sets it: runs, registry, run_config. SIGINT or SIGTERM
+The pool section of forager.yaml sets it: runs, how many runs run at once, 1 when not
+set, registry and run_config. With runs above 1, the pool exits 2 before its first claim
+unless the runs' forager.yaml sets wall.pids_limit and wall.memory. SIGINT or SIGTERM
 stops it: it claims no new run, stops the runs it started, and exits 0.`,
 		Hidden: true,
 		Args:   noArgs,

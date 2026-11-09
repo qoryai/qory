@@ -388,7 +388,7 @@ release may change what an existing document does, and states it under Upgrading
   folder contains the dispatch at the phase `ended`. When the pool stops, it sends
   `gone` once more, for at most 10 s; a `gone` that has not got a signed 204, 400, 403
   or 404 when the pool stops is sent again at its next start, beside the claims. The pool section of
-  `forager.yaml` takes `runs`, `registry` and `run_config`. With `prebuilds`,
+  `forager.yaml` takes `runs`, 1 when not set, `registry` and `run_config`. With `prebuilds`,
   `harness_ref` or `harness_path` in it, qory stops with `<file>: line <n>: key "<key>"
   is not one forager.yaml reads`.
 - qory treats an enrolment code, `qecn_`, `qecp_`, `qecg_` or `qeci_` in any letter case,
