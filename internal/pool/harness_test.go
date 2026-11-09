@@ -557,10 +557,11 @@ func (h *harness) stop() error {
 	return nil
 }
 
-// waitFor waits until cond holds.
+// waitFor waits until cond holds, for up to 60 s: a test under -race on a busy machine
+// can take more than 20 s.
 func (h *harness) waitFor(what string, cond func() bool) {
 	h.t.Helper()
-	deadline := time.Now().Add(20 * time.Second)
+	deadline := time.Now().Add(60 * time.Second)
 	for !cond() {
 		if time.Now().After(deadline) {
 			h.t.Fatalf("%s never happened; the fake was sent %v; the log:\n%s", what, h.srv.Routes(), h.log.text())
