@@ -552,12 +552,12 @@ answer keeps `decision` too. This is version 1 of the format ([questions.schema.
 ## The review comments format
 
 A review comments document records the members' review comments on a work item's artifact
-versions, such as a proposal, and the replies to them, one document per work item and at
-most 1 MiB. The control plane writes the members' review comments and replies. A version
-that a run pushes only adds the run's reply to any of the open review comments, at most
-one reply to each, and closes each review comment it adds a reply to: it changes no
-member's text, drops no id and adds no review comment. A closed review comment has at
-least one reply by a run. A run's reply has an `outcome`:
+versions, such as a proposal, or on the whole round of a run, and the replies to them, one
+document per work item and at most 1 MiB. The control plane writes the members' review
+comments and replies. A version that a run pushes only adds the run's reply to any of the
+open review comments, at most one reply to each, and closes each review comment it adds a
+reply to: it changes no member's text, drops no id and adds no review comment. A closed
+review comment has at least one reply by a run. A run's reply has an `outcome`:
 
 | `outcome` | Meaning |
 |---|---|
@@ -566,8 +566,17 @@ least one reply by a run. A run's reply has an `outcome`:
 | `declined` | the review comment is a request for a change that the run did not make, and the reply contains the reason |
 | `asked` | the run could not settle the review comment and added a question for a person to the `questions` artifact; the reply's `question` is the id of that question in the newest `questions` version, so the run pushes the questions before the review comments |
 
-A member's reply has no `outcome` and no `question`. This is version 1 of the format
-([review-comments.schema.json](review-comments.schema.json)).
+A member's reply has no `outcome` and no `question`.
+
+A review comment's `on` has one of two forms:
+
+- On an output, `on` has the artifact type's name in `artifact` and the version's number
+  in `version`: the review comment is about that artifact version.
+- On a round, `on` has only `run`, the number of a run, from 1: the review comment is
+  about everything that run produced and the round as a whole. `run` is the number of the
+  run whose round the member commented on.
+
+This is version 1 of the format ([review-comments.schema.json](review-comments.schema.json)).
 
 ## The proposal sources format
 
