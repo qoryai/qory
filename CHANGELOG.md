@@ -395,10 +395,10 @@ release may change what an existing document does, and states it under Upgrading
   `machine_exists`, which `gone` follows, or a signed 400, 403 or 404. A release left
   when the pool stops is sent at its next start. A restart of the pool stops a run left
   from a crash of the pool, removes the containers and networks of its wall, and
-  reports its machine as gone. The pool section of
-  `forager.yaml` takes `runs`, 1 when not set, `registry` and `run_config`. With `prebuilds`,
-  `harness_ref` or `harness_path` in it, qory stops with `<file>: line <n>: key "<key>"
-  is not one forager.yaml reads`.
+  reports its machine as gone. The pool section of `forager.yaml` takes `runs` (how
+  many runs this host runs at once; 1 when not set), `registry` and `run_config`. With
+  `prebuilds`, `harness_ref` or `harness_path` in it, qory stops with `<file>: line <n>:
+  key "<key>" is not one forager.yaml reads`.
 - qory treats an enrolment code, `qecn_`, `qecp_`, `qecg_` or `qeci_` in any letter case,
   as a secret, as it treats `qak_`, `qrk_` and `qecr_`. Where qory prints a phrase in
   place of a value or a name that contains one of those, it prints "(a value that
@@ -732,8 +732,8 @@ release may change what an existing document does, and states it under Upgrading
   it removes with the folder, so no run reads the registry logins, Docker settings or git
   configuration under the pool user's `HOME`. It stops with exit 2 when the runs'
   `forager.yaml` sets `wall.mounts`, which every run would see.
-- With `pool.runs` above 1, `qory run pool` stops with exit 2 unless the runs'
-  `forager.yaml` sets both `wall.pids_limit` and `wall.memory`.
+- If `pool.runs` is above 1, set `wall.pids_limit` and `wall.memory` in the runs'
+  `forager.yaml`; otherwise `qory run pool` exits 2 before its first claim.
 - `qory run pool` stops with exit 2 when the runs' `forager.yaml` sets no
   `wall.engine_proxy_file`, so the engine pulls each run's image through the run's
   gateway.

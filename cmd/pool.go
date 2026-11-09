@@ -92,10 +92,10 @@ runs, and at the pool's next start; no run starts for that claim. At its start, 
 pool stops each run left from a crash of the pool, with SIGTERM to the run's process
 group and SIGKILL 30 s later, removes the containers and networks of the run's wall,
 and reports the run's machine as gone.
-The pool section of forager.yaml sets it: runs, how many runs run at once, 1 when not
-set, registry and run_config. With runs above 1, the pool exits 2 before its first claim
-unless the runs' forager.yaml sets wall.pids_limit and wall.memory. SIGINT or SIGTERM
-stops it: it claims no new run, stops the runs it started, and exits 0.`,
+The pool section of forager.yaml sets it: runs (how many runs this host runs at once; 1
+when not set), registry and run_config. If runs is above 1, set wall.pids_limit and
+wall.memory in the runs' forager.yaml; otherwise the pool exits 2 before its first
+claim. SIGINT or SIGTERM stops it: it claims no new run, stops the runs it started, and exits 0.`,
 		Hidden: true,
 		Args:   noArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {

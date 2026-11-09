@@ -2224,7 +2224,7 @@ The `pool` section of the pool's `forager.yaml` sets what the pool runs by:
 
 ```yaml
 pool:
-  runs: 1                             # how many runs run at once on this machine; 1 when not set
+  runs: 1                             # how many runs this host runs at once; 1 when not set
   registry: localhost:5001/qory-env   # the image name the builds are pushed under
   run_config: /etc/qory/pool-runs     # each run's XDG_CONFIG_HOME, an absolute path
 ```
@@ -2240,7 +2240,8 @@ wall:
   memory: 14g                         # at most 14 GB of memory in each container
 ```
 
-When either limit is missing, the pool stops before its first claim, with exit 2:
+If `pool.runs` is above 1, set `wall.pids_limit` and `wall.memory` in the runs'
+`forager.yaml`; otherwise the pool exits 2 before its first claim, with this error:
 
 ```text
 set wall.pids_limit and wall.memory in <pool.run_config>/qory/forager.yaml: with pool.runs above 1, runs share this machine, and a run without both limits can take the processes and memory the others need
