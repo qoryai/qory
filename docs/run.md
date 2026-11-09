@@ -2212,15 +2212,20 @@ journal, it checks that run's lock:
    left from before the pool started, so the pool stops it`, and sends SIGTERM to each
    process of the run's session, in any process group. If the run still holds the
    lock 30 seconds later, the pool lists the session's processes again and sends
-   SIGKILL to each. While the run stops, it counts against `pool.runs`. The pool
-   signals only a session whose leader is the run it started: the process whose id is
-   in `run.session` must have the start in `run.session`. If a process with another
-   start has the id, the id belongs to another program by then, and the pool sends no
-   signal and waits 30 seconds for the lock. If no process has the id, the pool
-   signals the processes of the session all the same: no process gets the id of a
-   session that still has members. If the session has no process, a program outside
-   it holds the lock, and the pool sends no signal and waits 30 seconds for the lock.
-   A program that the run starts in a new session, as `setsid` does, is outside it.
+   SIGKILL to each, up to 3 times while new processes appear. While the run stops, it
+   counts against `pool.runs`. Before each signal, the pool checks that the session is
+   the run's:
+   - The process whose id is in `run.session` has the start in `run.session`: it is
+     `qory run`.
+   - On Linux, no process has that id, and a process of the session has `run.lock`
+     open, matched by device and inode in `/proc/<pid>/fd`. On macOS, the pool does
+     not read which files a process has open, so a session whose `qory run` has ended
+     gets no signal.
+
+   Otherwise the pool sends no signal and waits 30 seconds for the lock: a process with
+   another start has the id, the session has no process, or none of its processes has
+   `run.lock` open. A program that the run starts in a new session, as `setsid` does,
+   is outside the run's session and gets no signal.
 2. If the lock is still held after these waits, the pool logs `stop the programs that
    hold run.lock in the dispatch's folder, then restart the pool: a qory run left from
    before the pool started still holds that lock, so the pool keeps the dispatch for its

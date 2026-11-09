@@ -3,8 +3,8 @@
 package child
 
 import (
-	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"syscall"
 
@@ -26,14 +26,24 @@ func kill(cmd *exec.Cmd) {
 }
 
 // SignalEach sends SIGTERM, or SIGKILL with kill, to each process id of ids, as
-// [SessionMembers] lists them. A process that ended since then gets nothing.
-func SignalEach(ids []int, kill bool) {
-	sig := syscall.SIGTERM
+// [SessionMembers] listed them for the session session. Just before each signal, the
+// process's session is read again, so a process that ended since the list, and one
+// that got its id since then in another session, gets nothing. It sends nothing for a
+// session of 1 or less or the session of this process, and nothing to an id of 1 or
+// less or this process's id.
+func SignalEach(ids []int, session int, kill bool) {
+	if session <= 1 || session == Session() {
+		return
+	}
+	sig := unix.SIGTERM
 	if kill {
-		sig = syscall.SIGKILL
+		sig = unix.SIGKILL
 	}
 	for _, id := range ids {
-		_ = syscall.Kill(id, sig)
+		if id <= 1 || id == os.Getpid() {
+			continue
+		}
+		signalMember(id, session, sig)
 	}
 }
 
@@ -52,10 +62,11 @@ func Session() int {
 // has another one. A process that does not run is [ErrNoProcess].
 func StartStamp(id int) (string, error) { return startStamp(id) }
 
-// CheckLeader checks that the process id leads the session id and has the start stamp
-// start, as [StartStamp] read it when the process started: a process with another
-// stamp, or one that leads no session of that id, got the id after the session that
-// start recorded ended. A process that does not run is [ErrNoProcess].
+// CheckLeader checks that the process id has the start stamp start, as [StartStamp]
+// read it when the process started as the leader of the session id: a process with
+// another stamp got the id after that session ended. A session's leader cannot leave
+// the session, so a process with that stamp still leads it. A process that does not run
+// is [ErrNoProcess].
 func CheckLeader(id int, start string) error {
 	stamp, err := startStamp(id)
 	if err != nil {
@@ -63,16 +74,6 @@ func CheckLeader(id int, start string) error {
 	}
 	if stamp != start {
 		return fmt.Errorf("process %d started at %s, not at %s as recorded, so its id passed to another process", id, stamp, start)
-	}
-	sid, err := unix.Getsid(id)
-	if errors.Is(err, unix.ESRCH) {
-		return fmt.Errorf("process %d does not run: %w", id, ErrNoProcess)
-	}
-	if err != nil {
-		return fmt.Errorf("the session of process %d could not be read: %w", id, err)
-	}
-	if sid != id {
-		return fmt.Errorf("process %d is in session %d, so it leads no session %d", id, sid, id)
 	}
 	return nil
 }

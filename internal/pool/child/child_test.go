@@ -849,9 +849,8 @@ func TestOutputIsMaskedWithMask(t *testing.T) {
 	}
 }
 
-// TestCheckLeader passes a process that leads its session and has the start stamp
-// that StartStamp read, and fails one with another stamp, one that leads no session of
-// its id, and one that has ended, which is ErrNoProcess.
+// TestCheckLeader passes a process that has the start stamp that StartStamp read, and
+// fails one with another stamp, and one that has ended, which is ErrNoProcess.
 func TestCheckLeader(t *testing.T) {
 	leader := startSleep(t, &syscall.SysProcAttr{Setsid: true})
 	stamp, err := child.StartStamp(leader.Process.Pid)
@@ -866,14 +865,6 @@ func TestCheckLeader(t *testing.T) {
 	}
 	if err := child.CheckLeader(leader.Process.Pid, stamp+"1"); err == nil || !strings.Contains(err.Error(), "passed to another process") {
 		t.Errorf("a leader with another start passed: %v", err)
-	}
-	member := startSleep(t, &syscall.SysProcAttr{Setpgid: true})
-	memberStamp, err := child.StartStamp(member.Process.Pid)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := child.CheckLeader(member.Process.Pid, memberStamp); err == nil || !strings.Contains(err.Error(), "leads no session") {
-		t.Errorf("a process that leads no session passed: %v", err)
 	}
 	ended := exec.Command("true")
 	if err := ended.Run(); err != nil {
@@ -899,16 +890,20 @@ func TestSessionMembers(t *testing.T) {
 	if err := leader.Start(); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() {
-		if ids, err := child.SessionMembers(leader.Process.Pid); err == nil {
-			child.SignalEach(ids, true)
-		}
-		_ = leader.Wait()
-	})
 	var memberID int
 	if _, err := fmt.Fscan(out, &memberID); err != nil {
+		_ = leader.Process.Kill()
+		_ = leader.Wait()
 		t.Fatal(err)
 	}
+	memberStamp, _ := child.StartStamp(memberID)
+	t.Cleanup(func() {
+		if stamp, err := child.StartStamp(memberID); err == nil && stamp == memberStamp {
+			_ = syscall.Kill(memberID, syscall.SIGKILL)
+		}
+		_ = leader.Process.Kill()
+		_ = leader.Wait()
+	})
 	other := startSleep(t, nil)
 	var ids []int
 	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
@@ -924,6 +919,57 @@ func TestSessionMembers(t *testing.T) {
 	slices.Sort(want)
 	if !slices.Equal(ids, want) || slices.Contains(ids, other.Process.Pid) {
 		t.Errorf("the session's members are %v, want %v", ids, want)
+	}
+}
+
+// TestSignalEach sends SIGTERM to a process of the session given, and nothing to a
+// process of another session, to this process, or for this process's session.
+func TestSignalEach(t *testing.T) {
+	inSession := startSleep(t, &syscall.SysProcAttr{Setsid: true})
+	outside := startSleep(t, &syscall.SysProcAttr{Setsid: true})
+	mine := startSleep(t, nil)
+	child.SignalEach([]int{outside.Process.Pid, os.Getpid(), 1, 0}, inSession.Process.Pid, false)
+	child.SignalEach([]int{mine.Process.Pid}, child.Session(), false)
+	child.SignalEach([]int{inSession.Process.Pid}, inSession.Process.Pid, false)
+	if err := inSession.Wait(); err == nil || !strings.Contains(err.Error(), "terminated") {
+		t.Errorf("the process of the session ended with %v, want SIGTERM", err)
+	}
+	for _, cmd := range []*exec.Cmd{outside, mine} {
+		if cmd.ProcessState != nil || cmd.Process.Signal(syscall.Signal(0)) != nil {
+			t.Errorf("process %d got a signal", cmd.Process.Pid)
+		}
+	}
+}
+
+// TestHasOpen lists, on Linux, the process that has a file open, matched by device and
+// inode, and not one that has another file open.
+func TestHasOpen(t *testing.T) {
+	if !child.OpenFilesRead {
+		t.Skip("the open files of a process are read on Linux alone")
+	}
+	dir := t.TempDir()
+	name := filepath.Join(dir, "run.lock")
+	f, err := os.Create(name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	with := exec.Command("sleep", "60")
+	with.ExtraFiles = []*os.File{f}
+	if err := with.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = with.Process.Kill()
+		_ = with.Wait()
+	})
+	without := startSleep(t, nil)
+	info, err := os.Lstat(name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := child.HasOpen([]int{with.Process.Pid, without.Process.Pid}, info); !slices.Equal(got, []int{with.Process.Pid}) {
+		t.Errorf("the processes with the file open are %v, want %d", got, with.Process.Pid)
 	}
 }
 

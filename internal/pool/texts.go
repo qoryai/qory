@@ -31,10 +31,12 @@ const (
 	// lineNotStarted is a qory run that could not be started.
 	lineNotStarted = "the run could not be started"
 	// lineLeftoverStopped is a qory run left from before the pool started whose lock
-	// is held, logged once its session, the attribute session, passed the check of
-	// the leader's start that run.session records and has members, as many as the
-	// attribute processes. The pool then sends SIGTERM to each member, and SIGKILL to
-	// each member after the grace only while the lock is still held.
+	// is held, logged once its session, the attribute session, is shown to be the
+	// run's and has members, as many as the attribute processes: its leader has the
+	// start that run.session contains, or, on Linux, its leader does not run and a
+	// member has run.lock open. The pool then sends SIGTERM to each member, and
+	// SIGKILL to each member after the grace only while the lock is still held and
+	// the session is still shown to be the run's.
 	lineLeftoverStopped = "a qory run of the dispatch is left from before the pool started, so the pool stops it"
 	// lineLeftoverHeld is a qory run left from before the pool started whose lock is
 	// still held after the waits: the entry stays in the journal, and no gone is sent.

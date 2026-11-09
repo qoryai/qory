@@ -68,11 +68,12 @@
 // whose run.lock is held is a qory run left from before: beside the claim loop, and in
 // one of the pool's Runs while one is free, the pool sends SIGTERM to each process of
 // that session, then, once the grace passed, SIGKILL to each process of it then, and
-// waits up to the grace again for the lock. The session is that of the run the pool
-// started only while the process of its id has the stamp in run.session, or while no
-// process has that id: no process gets the id of a session that has members. When a
-// process with another stamp has the id, or no process is in the session, the pool
-// sends nothing and waits the grace for the lock. When the lock is still held then, or
+// waits up to the grace again for the lock. The pool signals the session only while it
+// is shown to be the run's, which it checks before each signal: the process of its id
+// has the stamp in run.session, or, on Linux, no process has that id and a process of
+// the session has run.lock open. Otherwise the pool sends nothing and waits the grace
+// for the lock, and the line of the held lock gives the cause. When the lock is still
+// held then, or
 // cannot be tried, the entry stays, with its folder, for the next start, and no gone is
 // sent; so does it when ctx ends during the waits. Once the lock is free, the pool
 // removes the wall of each run whose record is in the dispatch's folder, with
@@ -366,36 +367,35 @@ func (p *Pool) runLock(id string) (*foragerdir.Lock, error) {
 
 // stopLeftover stops the qory run of the dispatch id that is left from before the pool
 // started, and reports whether its lock is free. When the session that run.session of
-// its folder records has members, as [sessionMembers] lists them, the pool sends
-// SIGTERM to each, then, while the lock is still held once the grace of [Settings] has
-// passed, SIGKILL to each member it lists again, and waits up to the grace again for
-// the lock. When the session has no member to signal, the pool sends no signal and
-// waits up to the grace for the lock. A lock still held after the waits is logged, as is
-// a lock that cannot be tried. Once stop ends, the waits end, and nothing more is sent
-// or logged; the waits are the pool's Sleep.
+// its folder contains is the run's, as [sessionMembers] checks, the pool sends SIGTERM
+// to each of its processes. While the lock is still held once the grace of [Settings]
+// has passed, it checks the session again and sends SIGKILL to each process, in up to
+// [killRounds] rounds, and waits up to the grace again for the lock. When the session
+// is not shown to be the run's, the pool sends no signal and waits up to the grace for
+// the lock. A lock still held after the waits is logged with the cause, as is a lock
+// that cannot be tried. Once stop ends, the waits end, and nothing more is sent or
+// logged; the waits are the pool's Sleep.
 func (p *Pool) stopLeftover(stop context.Context, id string) bool {
 	ids := slog.String("dispatch_id", id)
 	grace := p.Settings.Grace
 	if grace <= 0 {
 		grace = child.DefaultGrace
 	}
+	lock := p.lockPath(id)
 	session, start, why := readSession(p.dispatchDir(id))
 	var members []int
 	if why == nil {
-		members, why = sessionMembers(session, start)
+		members, why = sessionMembers(session, start, lock)
 	}
 	if why == nil {
 		p.log.Warn(lineLeftoverStopped, ids, slog.Int("session", session), slog.Int("processes", len(members)))
-		child.SignalEach(members, false)
+		child.SignalEach(members, session, false)
 		free, err := p.waitLock(stop, id, grace)
 		if free {
 			return true
 		}
 		if stop.Err() == nil && errors.Is(err, foragerdir.ErrLocked) {
-			// Members may have started more processes since SIGTERM.
-			if members, err := sessionMembers(session, start); err == nil {
-				child.SignalEach(members, true)
-			}
+			why = killSession(session, start, lock)
 		}
 	}
 	free, err := p.waitLock(stop, id, grace)
@@ -411,19 +411,57 @@ func (p *Pool) stopLeftover(stop context.Context, id string) bool {
 	if why != nil {
 		err = why
 	}
-	p.log.Error(lineLeftoverHeld, ids, slog.String("path", exports.HidePath(p.lockPath(id))), errAttr(err))
+	p.log.Error(lineLeftoverHeld, ids, slog.String("path", exports.HidePath(lock)), errAttr(err))
 	return false
 }
 
-// sessionMembers is the id of each process of the session id, which qory run started
-// with the start stamp start, as [child.SessionMembers] lists them. It is an error when
-// a process with another stamp has the id, as [child.CheckLeader] checks: that process
-// got the id after the session ended. While no process has the id, the members are
-// those of the run's session, since no process gets the id of a session that has
-// members. A session with no member is an error too: a program outside the session
-// holds the lock.
-func sessionMembers(id int, start string) ([]int, error) {
-	if err := child.CheckLeader(id, start); err != nil && !errors.Is(err, child.ErrNoProcess) {
+// killRounds is how many times, at most, the pool lists a left run's session and sends
+// SIGKILL to the processes that were not in an earlier list: a process may start
+// another one before SIGKILL reaches it.
+const killRounds = 3
+
+// killSession sends SIGKILL to each process of the session id that [sessionMembers]
+// lists, and lists the session again, until a list has no process that an earlier one
+// did not have, for at most [killRounds] lists. The error is that of the first list,
+// when it lists no process to signal; a later list that fails ends the rounds.
+func killSession(id int, start, lock string) error {
+	seen := map[int]bool{}
+	for range killRounds {
+		members, err := sessionMembers(id, start, lock)
+		if err != nil {
+			if len(seen) == 0 {
+				return err
+			}
+			return nil
+		}
+		var added []int
+		for _, m := range members {
+			if !seen[m] {
+				seen[m] = true
+				added = append(added, m)
+			}
+		}
+		if len(added) == 0 {
+			return nil
+		}
+		child.SignalEach(added, id, true)
+	}
+	return nil
+}
+
+// sessionMembers is the id of each process of the session id, as
+// [child.SessionMembers] lists them, when the session is shown to be the one that qory
+// run started with the start stamp start, and whose lock is the file lock. The session
+// is the run's when the process of the id has that stamp, as [child.CheckLeader]
+// checks. When no process has the id, the session is the run's only when one of its
+// processes has lock open, matched by device and inode, as [child.HasOpen] reads it on
+// Linux; on another system, such a session is not shown to be the run's. Any other
+// case is an error that gives the cause, as is a session with no process: a program
+// outside the session holds the lock.
+func sessionMembers(id int, start, lock string) ([]int, error) {
+	err := child.CheckLeader(id, start)
+	leaderless := errors.Is(err, child.ErrNoProcess)
+	if err != nil && !leaderless {
 		return nil, err
 	}
 	members, err := child.SessionMembers(id)
@@ -432,6 +470,19 @@ func sessionMembers(id int, start string) ([]int, error) {
 	}
 	if len(members) == 0 {
 		return nil, fmt.Errorf("no process is in session %d, so a program outside it holds the lock", id)
+	}
+	if !leaderless {
+		return members, nil
+	}
+	if !child.OpenFilesRead {
+		return nil, fmt.Errorf("process %d, the leader of session %d, does not run, and the files that the session's processes have open cannot be read on this system", id, id)
+	}
+	info, err := os.Lstat(lock)
+	if err != nil {
+		return nil, err
+	}
+	if len(child.HasOpen(members, info)) == 0 {
+		return nil, fmt.Errorf("process %d, the leader of session %d, does not run, and no process of the session has run.lock open", id, id)
 	}
 	return members, nil
 }
@@ -465,7 +516,7 @@ func (p *Pool) waitLock(ctx context.Context, id string, d time.Duration) (bool, 
 // maxSessionFile is the most of run.session that is read: far more than its one line.
 const maxSessionFile = 128
 
-// readSession is what run.session of the dispatch's folder dir records, read from one
+// readSession is what run.session of the dispatch's folder dir contains, read from one
 // open of the file: the session id and qory run's start stamp, as [writeSession] writes
 // them. A file of another shape is an error, as is an id of 1 or less, the process id
 // of the pool program, or the id of its session.
@@ -493,13 +544,15 @@ func readSession(dir string) (int, string, error) {
 
 // writeSession writes the session id and the start stamp of its leader, qory run, as
 // [child.StartStamp] reads it, to run.session of the dispatch's folder dir, mode 0600,
-// synced, as one line: "<id> <stamp>". It writes no file when the stamp cannot be read.
+// as one line: "<id> <stamp>". It writes a file beside run.session, syncs it, and
+// renames it to run.session, so run.session is either whole or missing. It writes no
+// file when the stamp cannot be read.
 func writeSession(dir string, id int) error {
 	stamp, err := child.StartStamp(id)
 	if err != nil {
 		return err
 	}
-	f, err := os.OpenFile(filepath.Join(dir, runSessionFile), os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+	f, err := os.CreateTemp(dir, runSessionFile+".*")
 	if err != nil {
 		return err
 	}
@@ -509,6 +562,12 @@ func writeSession(dir string, id int) error {
 	}
 	if cerr := f.Close(); err == nil {
 		err = cerr
+	}
+	if err == nil {
+		err = os.Rename(f.Name(), filepath.Join(dir, runSessionFile))
+	}
+	if err != nil {
+		_ = os.Remove(f.Name())
 	}
 	return err
 }
@@ -898,10 +957,14 @@ func (p *Pool) release(work context.Context, id, reason string) (releaseEnd, err
 			p.log.Warn(lineNotReleased, ids, slog.String("reason", reason), errAttr(err))
 			return releaseMachine, nil
 		}
-		if !provisioner.EndsAttempts(err) || !errors.As(err, &r) {
+		if !errors.As(err, &r) {
 			return releaseKept, err
 		}
-		p.log.Warn(releaseEndedLine[r.Status], ids, slog.String("reason", reason), errAttr(err))
+		line, ok := releaseEndedLine[r.Status]
+		if !ok || !provisioner.EndsAttempts(err) {
+			return releaseKept, err
+		}
+		p.log.Warn(line, ids, slog.String("reason", reason), errAttr(err))
 		return releaseOver, nil
 	}
 }

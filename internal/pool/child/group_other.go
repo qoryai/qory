@@ -16,7 +16,7 @@ func kill(cmd *exec.Cmd) { _ = cmd.Process.Kill() }
 
 // SignalEach kills each process id of ids on a system without sessions, when kill is
 // set; without kill it sends nothing, since such a system has no SIGTERM to send.
-func SignalEach(ids []int, kill bool) {
+func SignalEach(ids []int, _ int, kill bool) {
 	if !kill {
 		return
 	}
@@ -38,6 +38,12 @@ func StartStamp(int) (string, error) { return "", errNoSessions }
 
 // CheckLeader fails on a system without sessions, so no session is signalled.
 func CheckLeader(int, string) error { return errNoSessions }
+
+// HasOpen lists no process on a system without sessions.
+func HasOpen([]int, os.FileInfo) []int { return nil }
+
+// OpenFilesRead is false on a system without sessions.
+const OpenFilesRead = false
 
 // SessionMembers fails on a system without sessions.
 func SessionMembers(int) ([]int, error) { return nil, errNoSessions }
