@@ -14,7 +14,9 @@
 // the command started, closes the write end and clears its copy. A run code goes to it
 // as a file the caller opened and unlinked, passed as descriptor 3, which qory run
 // reads with --run-code-file /dev/fd/3. Neither is ever in the command's arguments or
-// environment.
+// environment. A lock's file, when the caller passes one, is the command's descriptor 4
+// ([HoldFD]): the command and every program it starts that inherits the descriptor hold
+// the lock, so the lock is free only once the last of them ended.
 //
 // The command is stopped when the context ends: SIGTERM, then, once the grace has
 // passed, SIGKILL to the command's process group.
@@ -42,6 +44,10 @@ import (
 // KeyFD is the descriptor the command reads the run key or the run code from: the
 // first of ExtraFiles, the one after standard error.
 const KeyFD = 3
+
+// HoldFD is the descriptor of the lock's file a command holds: the second of
+// ExtraFiles, the one after [KeyFD].
+const HoldFD = KeyFD + 1
 
 // ContainsSecret reports whether v contains what starts an access key secret, a run
 // key, a run code or an enrolment code: qak_, qrk_, qecr_, qecn_, qecp_, qecg_ or
@@ -204,6 +210,13 @@ type Command struct {
 	// Grace is how long the command has after SIGTERM before it is killed; zero is
 	// [DefaultGrace].
 	Grace time.Duration
+	// Hold, when set, is the command's descriptor [HoldFD]: the open file of a lock the
+	// caller took, which the command keeps until it ends. Run does not close it: the
+	// caller closes its copy once Run returned.
+	Hold *os.File
+	// Group, when set, is called once the command started, before Started, with the id of
+	// the command's process group, which is the command's process id.
+	Group func(id int)
 	// Started, when set, is called once the command started.
 	Started func()
 }
@@ -298,6 +311,14 @@ func Run(ctx context.Context, c Command) (Result, error) {
 	} else if c.File != nil {
 		cmd.ExtraFiles = []*os.File{c.File}
 	}
+	if c.Hold != nil {
+		// A nil first entry leaves descriptor 3 closed in the command.
+		var first *os.File
+		if len(cmd.ExtraFiles) == 1 {
+			first = cmd.ExtraFiles[0]
+		}
+		cmd.ExtraFiles = []*os.File{first, c.Hold}
+	}
 	if err := ctx.Err(); err != nil {
 		closeAll(r, w)
 		return Result{}, err
@@ -309,6 +330,9 @@ func Run(ctx context.Context, c Command) (Result, error) {
 	if c.File != nil {
 		// The command has its copy of the descriptor.
 		c.File.Close()
+	}
+	if c.Group != nil {
+		c.Group(cmd.Process.Pid)
 	}
 	if c.Started != nil {
 		c.Started()

@@ -393,7 +393,9 @@ release may change what an existing document does, and states it under Upgrading
   While the pool runs, the release is sent again after the same waits as `gone`, until
   Qory Apiary releases the dispatch or returns 410 `gone`, 409 `lease_expired`, 409
   `machine_exists`, which `gone` follows, or a signed 400, 403 or 404. A release left
-  when the pool stops is sent at its next start. The pool section of
+  when the pool stops is sent at its next start. A restart of the pool stops a run left
+  from a crash of the pool, removes the containers and networks of its wall, and
+  reports its machine as gone. The pool section of
   `forager.yaml` takes `runs`, 1 when not set, `registry` and `run_config`. With `prebuilds`,
   `harness_ref` or `harness_path` in it, qory stops with `<file>: line <n>: key "<key>"
   is not one forager.yaml reads`.

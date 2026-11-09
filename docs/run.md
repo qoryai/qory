@@ -2198,6 +2198,28 @@ composes its harness under `home/` of that folder, outside `work/`. Once the run
 the pool removes the run's folder and the harness home in it, so no later run on the
 machine reads that harness.
 
+A run can outlast the pool: after a crash of the pool, or after a second SIGINT or
+SIGTERM, which ends the pool at once. The pool locks `run.lock` in the run's folder
+before the run starts, and passes the lock's file to `qory run` as descriptor 4. The
+lock stays held while `qory run`, or a program it started, still runs. The pool writes
+the id of the run's process group to `run.pgid` beside the lock. When the pool starts,
+before it acts on a run of the journal, it checks that run's lock:
+
+1. If the lock is held, the pool stops the run: it logs `a qory run of the dispatch is
+   left from before the pool started, so the pool stops it`, sends SIGTERM to the run's
+   process group, and sends SIGKILL 30 seconds later. While the run stops, it counts
+   against `pool.runs`.
+2. If the lock is still held 30 seconds after SIGKILL, the pool logs `stop the programs
+   that hold run.lock in the dispatch's folder, then restart the pool: a qory run left
+   from before the pool started still holds that lock, so the pool keeps the dispatch
+   for its next start and reports no gone`. The run keeps its place in `pool.runs`.
+3. Once the lock is free, the pool removes the containers and networks the run's wall
+   left, as `qory run resend` does. If the removal fails, the pool logs `remove the
+   containers and networks with the label dev.qory.run=<run_id> from the container
+   engine: the removal of the wall of a qory run left from before the pool started
+   failed; the pool reports the machine as gone all the same`.
+4. The pool reports the run's machine as gone.
+
 The `pool` section of the pool's `forager.yaml` sets what the pool runs by:
 
 ```yaml

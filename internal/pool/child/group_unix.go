@@ -17,3 +17,14 @@ func group(cmd *exec.Cmd) {
 func kill(cmd *exec.Cmd) {
 	_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 }
+
+// SignalGroup sends sig to the process group id, as [Command.Group] reported it: to the
+// command and every program it started in its group. kill sends SIGKILL, and SIGTERM
+// otherwise.
+func SignalGroup(id int, kill bool) error {
+	sig := syscall.SIGTERM
+	if kill {
+		sig = syscall.SIGKILL
+	}
+	return syscall.Kill(-id, sig)
+}

@@ -75,6 +75,9 @@ type report struct {
 	// FD3File reports whether descriptor 3 was a regular file, mode 0600, that no name
 	// links to, open for reading alone.
 	FD3File bool
+	// FD4Lock reports whether descriptor 4 was the file run.lock of its dispatch's
+	// folder.
+	FD4Lock bool
 	CodeSum string
 }
 
@@ -150,6 +153,9 @@ func fakeQory() int {
 	if info, err := os.Stat(os.Getenv("HOME")); err == nil && info.IsDir() {
 		rep.HomeMode = info.Mode().Perm()
 	}
+	var fd4, lock syscall.Stat_t
+	rep.FD4Lock = syscall.Fstat(child.HoldFD, &fd4) == nil && syscall.Stat(filepath.Join(filepath.Dir(cwd), "run.lock"), &lock) == nil &&
+		fd4.Dev == lock.Dev && fd4.Ino == lock.Ino
 	var code []byte
 	if fd3 {
 		f := os.NewFile(uintptr(child.KeyFD), "code")

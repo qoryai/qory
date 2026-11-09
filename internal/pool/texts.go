@@ -28,6 +28,17 @@ const (
 	lineReleaseKept = "the release of the run failed before the pool stopped; the pool sends it again at its next start"
 	// lineNotStarted is a qory run that could not be started.
 	lineNotStarted = "the run could not be started"
+	// lineLeftoverStopped is a qory run left from before the pool started whose lock
+	// is held: the pool sends SIGTERM to its process group, the attribute
+	// process_group, when run.pgid contains it, and SIGKILL after the grace.
+	lineLeftoverStopped = "a qory run of the dispatch is left from before the pool started, so the pool stops it"
+	// lineLeftoverHeld is a qory run left from before the pool started whose lock is
+	// still held after SIGKILL and the grace, or could not be tried: the entry stays
+	// in the journal, and no gone is sent.
+	lineLeftoverHeld = "stop the programs that hold run.lock in the dispatch's folder, then restart the pool: a qory run left from before the pool started still holds that lock, so the pool keeps the dispatch for its next start and reports no gone"
+	// lineReapFailed is a removal of a left qory run's wall that failed; gone is sent
+	// all the same.
+	lineReapFailed = "remove the containers and networks with the label dev.qory.run=<run_id> from the container engine: the removal of the wall of a qory run left from before the pool started failed; the pool reports the machine as gone all the same"
 	// lineNotJournaled is a write of the journal that failed.
 	lineNotJournaled = "the journal of the pool's dispatches could not be written"
 	// lineLogUploaded is qory run's output, uploaded as the dispatch's machine log.

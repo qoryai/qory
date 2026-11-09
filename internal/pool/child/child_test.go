@@ -53,7 +53,9 @@ type report struct {
 	StdinNull bool
 	// CodeOK reports whether descriptor 3 is a regular file that no name links to, and
 	// contains the script's Code.
-	CodeOK   bool
+	CodeOK bool
+	// FD4Ino is the inode of the file of descriptor 4, 0 when it is not open.
+	FD4Ino   uint64
 	Problems []string
 }
 
@@ -91,6 +93,10 @@ func fake(file string, fd3 bool) int {
 		}
 	}
 	rep.FD3Pipe = fd3
+	var st4 syscall.Stat_t
+	if syscall.Fstat(child.HoldFD, &st4) == nil {
+		rep.FD4Ino = uint64(st4.Ino)
+	}
 	if s.Code != "" {
 		var st syscall.Stat_t
 		if syscall.Fstat(child.KeyFD, &st) == nil && st.Mode&syscall.S_IFMT == syscall.S_IFREG && st.Nlink == 0 {
@@ -374,6 +380,57 @@ func TestRunCodeThroughAnUnlinkedFile(t *testing.T) {
 	}
 	if err := f.Close(); !errors.Is(err, os.ErrClosed) {
 		t.Errorf("the file was not closed: %v", err)
+	}
+}
+
+// TestAHeldFileIsDescriptor4 passes a run code's file and a held file: the run code is
+// descriptor 3 and the held file descriptor 4. Group is called with the command's
+// process id, which is its process group's, before Started, and Run leaves the held
+// file open.
+func TestAHeldFileIsDescriptor4(t *testing.T) {
+	dir := t.TempDir()
+	name := filepath.Join(dir, "code")
+	if err := os.WriteFile(name, []byte(testCode), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f, err := os.Open(name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(name); err != nil {
+		t.Fatal(err)
+	}
+	hold, err := os.OpenFile(filepath.Join(dir, "run.lock"), os.O_RDWR|os.O_CREATE, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer hold.Close()
+	var calls []string
+	group := 0
+	res, err, rep, _ := start(t, context.Background(), dir, script{Code: testCode}, nil, 0, func(c *child.Command) {
+		c.File, c.Hold = f, hold
+		c.Group = func(id int) {
+			group = id
+			if g, err := syscall.Getpgid(id); err != nil || g != id {
+				t.Errorf("the process group of %d is %d: %v", id, g, err)
+			}
+			calls = append(calls, "group")
+		}
+		c.Started = func() { calls = append(calls, "started") }
+		c.Args = append(c.Args, "--run-code-file", "/dev/fd/3")
+	})
+	if err != nil || res != (child.Result{}) {
+		t.Fatal(res, err)
+	}
+	var st syscall.Stat_t
+	if err := syscall.Fstat(int(hold.Fd()), &st); err != nil {
+		t.Fatalf("the held file was closed: %v", err)
+	}
+	if !rep.CodeOK || rep.FD4Ino != uint64(st.Ino) || len(rep.Problems) > 0 {
+		t.Errorf("report %+v, want descriptor 4 of inode %d", rep, st.Ino)
+	}
+	if !slices.Equal(calls, []string{"group", "started"}) || group <= 1 {
+		t.Errorf("the calls were %q, with the group %d", calls, group)
 	}
 }
 

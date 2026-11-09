@@ -759,7 +759,7 @@ func TestTheJournalAfterAKill(t *testing.T) {
 			second.waitFor("a claim", func() bool {
 				return slices.ContainsFunc(first.srv.Calls()[before:], func(c provisionertest.Call) bool { return c.Route == provisionertest.RouteClaim })
 			})
-			if phase == pool.PhaseEnded {
+			if phase != pool.PhaseClaimed {
 				second.waitFor("the gone's line", func() bool { return len(second.log.with(lineGone)) == 1 })
 			}
 			second.stop()
@@ -771,11 +771,7 @@ func TestTheJournalAfterAKill(t *testing.T) {
 				if calls[0].Route != provisionertest.RouteRelease || calls[0].DispatchID != d.ID {
 					t.Errorf("the second pool's first request was %s %s", calls[0].Route, calls[0].DispatchID)
 				}
-			case pool.PhaseDispatched:
-				if calls[0].Route != provisionertest.RouteClaim {
-					t.Errorf("the second pool's first request was %s %s, want its claim", calls[0].Route, calls[0].DispatchID)
-				}
-			case pool.PhaseEnded:
+			case pool.PhaseDispatched, pool.PhaseEnded:
 				second.notReleased()
 				if got, _ := first.srv.Dispatch(d.ID); !slices.Equal(got.MachineEnds, []string{"gone"}) {
 					t.Errorf("the fake took the machine ends %q, want one gone", got.MachineEnds)
@@ -808,8 +804,8 @@ func claimTo(t *testing.T, srv *provisionertest.Server, phase string) pool.Entry
 }
 
 // TestTheJournalIsReplayedBeforeTheFirstClaim releases each claimed entry of the
-// journal it starts with, for the pool program restarted, and drops each dispatched one
-// with no release. One over already, 410, leaves the journal as one released does, and
+// journal it starts with, for the pool program restarted, and sends gone for each
+// dispatched one, with no release. One over already, 410, leaves the journal as one released does, and
 // so does its folder, and one answered 403 too. One whose release gets no signed answer
 // stays at claimed, with its folder, while its release is sent again beside the claim
 // loop after a second; once the fake released it, it leaves too. A run code's file left
@@ -867,17 +863,21 @@ func TestTheJournalIsReplayedBeforeTheFirstClaim(t *testing.T) {
 	}
 	close(again)
 	h.waitFor("the second release's line", func() bool { return len(h.log.with(lineReleased)) == 2 })
+	h.waitFor("the dispatched entry's gone", func() bool { return len(h.log.with(lineGone)) == 1 })
 	h.stop()
 	d, _ := h.srv.Dispatch(entries[0].DispatchID)
 	h.released(d, reasonRestarted)
-	calls := h.srv.Calls()[before:]
+	calls := slices.DeleteFunc(h.srv.Calls()[before:], func(c provisionertest.Call) bool { return c.Route == provisionertest.RouteMachineEnd })
 	for i, e := range []pool.Entry{entries[0], entries[2], entries[3], entries[4]} {
 		if c := calls[i]; c.Route != provisionertest.RouteRelease || c.DispatchID != e.DispatchID {
 			t.Errorf("request %d was %s %s, want the release of %s", i, c.Route, c.DispatchID, e.DispatchID)
 		}
 	}
 	if slices.ContainsFunc(calls, func(c provisionertest.Call) bool { return c.DispatchID == entries[1].DispatchID }) {
-		t.Error("a request was sent for the dispatched entry")
+		t.Error("a request other than gone was sent for the dispatched entry")
+	}
+	if states, _ := h.machineEnds(entries[1].DispatchID); !slices.Equal(states, []string{"gone"}) {
+		t.Errorf("the dispatched entry's machine ends are %q, want one gone", states)
 	}
 	if len(h.log.with(lineOverAlready)) != 1 {
 		t.Errorf("the ended dispatch's release was not logged as over already:\n%s", h.log.text())

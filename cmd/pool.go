@@ -15,6 +15,7 @@ import (
 	"github.com/qoryai/forager/accesskey"
 	"github.com/qoryai/forager/policy"
 	"github.com/qoryai/forager/server"
+	"github.com/qoryai/forager/wall"
 	"github.com/spf13/cobra"
 
 	"github.com/qoryai/qory/internal/config"
@@ -87,7 +88,10 @@ after each failure until Qory Apiary returns a signed 204, 400, 403 or 404 to it
 report that has not got a signed 204, 400, 403 or 404 when the pool stops is sent
 again at its next start. It releases a claim that sets a machine type, and a claim it
 could not start. A release that fails is sent again after each failure while the pool
-runs, and at the pool's next start; no run starts for that claim.
+runs, and at the pool's next start; no run starts for that claim. At its start, the
+pool stops each run left from a crash of the pool, with SIGTERM to the run's process
+group and SIGKILL 30 s later, removes the containers and networks of the run's wall,
+and reports the run's machine as gone.
 The pool section of forager.yaml sets it: runs, how many runs run at once, 1 when not
 set, registry and run_config. With runs above 1, the pool exits 2 before its first claim
 unless the runs' forager.yaml sets wall.pids_limit and wall.memory. SIGINT or SIGTERM
@@ -284,7 +288,8 @@ func runPool(ctx context.Context, s *poolSettings, key *accesskey.Key, pin acces
 
 // poolLoop is the loop [runPool] runs with s, key and pin, logging to log: it reaches the
 // server directly for every call, and checks the cloud metadata service with the runs'
-// wall first, [poolProbe]. Each qory run it starts is this binary.
+// wall first, [poolProbe]. Each qory run it starts is this binary. A qory run left from
+// before the pool started has its wall removed as [poolReap] has it.
 func poolLoop(s *poolSettings, key *accesskey.Key, pin accesskey.Pin, log *slog.Logger) *pool.Pool {
 	return &pool.Pool{
 		Settings: pool.Settings{Runs: s.Pool.Runs, State: s.State, RunConfig: s.Pool.RunConfig, Probe: poolProbe(s.Runs)},
@@ -292,7 +297,21 @@ func poolLoop(s *poolSettings, key *accesskey.Key, pin accesskey.Pin, log *slog.
 			URL: strings.TrimSuffix(s.Forager.Server.URL, "/"), KeyID: s.Forager.Server.AccessKeyID, Key: key, Pin: pin,
 			InstanceID: s.InstanceID, UserAgent: userAgent(), Log: log,
 		},
-		Log: log,
+		Log:  log,
+		Reap: poolReap(s.Runs),
+	}
+}
+
+// poolReap removes the containers and networks of a run's wall with the wall command of
+// the runs' forager.yaml r, as qory run resend does, see [reapWall]; nil when r has no
+// wall.
+func poolReap(r *config.Forager) func(ctx context.Context, runID string) error {
+	if r == nil || r.Wall == nil {
+		return nil
+	}
+	return func(ctx context.Context, runID string) error {
+		_, err := (&wall.Docker{Command: r.Wall.Command}).Reap(ctx, runID)
+		return err
 	}
 }
 

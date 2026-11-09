@@ -6,8 +6,9 @@
 // whose lease passed, is released. It writes the run code to a file, mode 0600, in the
 // pool's folder, opens the file for reading and unlinks it, so no file name leads to the
 // code. It sends dispatched, then starts qory run --run-code-file /dev/fd/3 --gateway
-// <gateway_url> --home <dispatch's folder>/home, with the open file as descriptor 3, in
-// an empty folder work/ of the dispatch's folder <pool's folder>/runs/<dispatch_id>,
+// <gateway_url> --home <dispatch's folder>/home, with the open file as descriptor 3, and
+// the file run.lock of the dispatch's folder, whose lock the pool took, as descriptor 4,
+// in an empty folder work/ of the dispatch's folder <pool's folder>/runs/<dispatch_id>,
 // with the environment of [child.Env] and HOME set to home-user/ of the dispatch's
 // folder: the pool's access key never reaches it, and neither do the files under the
 // pool's HOME. The run's harness home is under home/, outside work/, so no later run
@@ -38,24 +39,38 @@
 // A journal, <pool's folder>/dispatches, contains each live dispatch's id and phase,
 // claimed, dispatched or ended, never a run code. The claimed entry is written and
 // synced before the request dispatched, and the dispatched entry after that request
-// succeeds. The ended entry is written before the first gone: once qory run ended or
-// could not be started, or after the release or the dispatched that the gone follows. A
-// release of an entry left at claimed after a dispatched that succeeded returns 409
-// machine_exists, and the pool sends gone for it. A release that fails with no response,
-// an unsigned response, a fourth signed 429, a server error or another refusal than a
-// signed 400, 403 or 404 leaves the entry at claimed, and is sent again beside the claim
-// loop after a wait, as gone is, until it is settled; no qory run starts for that
-// dispatch, and it takes none of the pool's Runs. The dispatch's folder is removed
-// before its first gone: once qory run ended, after the upload of its machine log, or
-// at once when no qory run started. The entry is removed once the dispatch ends; an
-// ended entry once its gone got a signed 204, 400, 403 or 404. When the program starts,
-// before its first claim, it runs the check of [Probe]: when a container on the
-// engine's default bridge network connects to the cloud metadata service, or the check
-// cannot run, Run returns its error and claims nothing. Then each claimed entry it
-// finds is released and each dispatched entry is dropped, with the folders of both.
-// Each ended entry, and each claimed one whose release returns 409 machine_exists, gets
-// gone, sent as above in a separate goroutine beside the claim loop, so the first claim
-// does not wait for it; a release that fails is sent again there too.
+// succeeds; when the dispatched entry cannot be written, no qory run starts, and the
+// dispatch gets gone. The ended entry is written before the first gone: once qory run
+// ended or could not be started, or after the release or the dispatched that the gone
+// follows. A release of an entry left at claimed after a dispatched that succeeded
+// returns 409 machine_exists, and the pool sends gone for it. A release that fails with
+// no response, an unsigned response, a fourth signed 429, a server error or another
+// refusal than a signed 400, 403 or 404 leaves the entry at claimed, and is sent again
+// beside the claim loop after a wait, as gone is, until it is settled; no qory run
+// starts for that dispatch, and it takes none of the pool's Runs. The dispatch's folder
+// is removed before its first gone: once qory run ended, after the upload of its
+// machine log, or at once when no qory run started. The entry is removed once the
+// dispatch ends; an ended entry once its gone got a signed 204, 400, 403 or 404. When
+// the program starts, before its first claim, it runs the check of [Probe]: when a
+// container on the engine's default bridge network connects to the cloud metadata
+// service, or the check cannot run, Run returns its error and claims nothing. Then each
+// claimed entry it finds is released, with its folder, and each dispatched entry is
+// written at ended. Each ended entry, each dispatched one, and each claimed one whose
+// release returns 409 machine_exists, gets gone, sent as above in a separate goroutine
+// beside the claim loop, so the first claim does not wait for it; a release that fails
+// is sent again there too.
+//
+// qory run, and each program it starts that inherits descriptor 4, hold the lock of
+// run.lock until they end, so the lock outlasts a crash of the pool, and the pool
+// closes its copy once qory run ended. Once qory run started, the pool writes the id of
+// its process group to run.pgid of the dispatch's folder. When the program starts, an
+// entry whose run.lock is held is a qory run left from before: beside the claim loop,
+// and in one of the pool's Runs while one is free, the pool sends SIGTERM to that
+// process group, SIGKILL once the grace passed, and waits up to the grace again for the
+// lock. When the lock is still held then, the entry stays, with its folder, for the
+// next start, and no gone is sent. Once the lock is free, the pool removes the wall of
+// each run whose record is in the dispatch's folder, with [Pool.Reap], as qory run
+// resend does, and acts on the entry as above.
 //
 // When ctx ends, the pool stops: it claims no more, a claim being sent is given up, a
 // dispatch not yet dispatched is released, and each qory run is stopped as [child.Run]
@@ -73,6 +88,8 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -80,6 +97,7 @@ import (
 	"github.com/qoryai/integrations/contracts"
 
 	"github.com/qoryai/qory/internal/exports"
+	"github.com/qoryai/qory/internal/foragerdir"
 	"github.com/qoryai/qory/internal/pool/child"
 	"github.com/qoryai/qory/internal/provisioner"
 	"github.com/qoryai/qory/internal/secretmask"
@@ -107,6 +125,17 @@ const (
 	runsFolder     = "runs"
 	codeFilePrefix = "runcode-"
 )
+
+// The files of a dispatch's folder that outlast the pool program: the lock that the
+// dispatch's qory run holds, and the id of its process group.
+const (
+	runLockFile  = "run.lock"
+	runGroupFile = "run.pgid"
+)
+
+// leftoverPoll is how often the pool tries the lock of a qory run left from before it
+// started, while it waits for that run to stop.
+const leftoverPoll = 100 * time.Millisecond
 
 // homeFolder is the folder of a dispatch's folder that its qory run composes the harness
 // under, as --home: one home per checkout under it, as qory run puts it.
@@ -148,6 +177,10 @@ type Pool struct {
 	Now func() time.Time
 	// Sleep waits d or until ctx is done; nil waits on a timer.
 	Sleep func(ctx context.Context, d time.Duration) error
+	// Reap removes the containers and networks of the wall of the run id, as qory run
+	// resend does; nil removes nothing. The pool calls it for a qory run left from
+	// before it started, once that run stopped.
+	Reap func(ctx context.Context, runID string) error
 
 	log     *slog.Logger
 	journal *journal
@@ -195,8 +228,8 @@ func (p *Pool) Run(ctx context.Context) error {
 	if err != nil || stopped {
 		return err
 	}
-	p.replay(ctx)
 	p.slots = make(chan struct{}, s.Runs)
+	p.replay(ctx)
 	p.claimLoop(ctx)
 	p.wg.Wait()
 	return nil
@@ -222,25 +255,222 @@ func removeCodeFiles(state string) error {
 }
 
 // replay acts on each dispatch the journal contains, as the program that held it is
-// gone: a claimed one is released, a dispatched one, which Qory Apiary does not
-// release, is dropped, and an ended one gets gone. A dispatch released, over already or
-// dropped leaves the journal, and its folder is removed. A claimed one whose release
-// returned 409 machine_exists is written at ended, and gets gone too; one whose release
-// failed stays at claimed, and its release is sent again. Each gone and each release sent
-// again goes out beside the claim loop, as [Pool.giveBack] has it. Once ctx ends, the
-// rest stay.
+// gone: a claimed one is released, and a dispatched one, which Qory Apiary does not
+// release, is written at ended; an ended one, and a dispatched one, get gone. A dispatch
+// released or over already leaves the journal, and its folder is removed. A claimed one
+// whose release returned 409 machine_exists is written at ended, and gets gone too; one
+// whose release failed stays at claimed, and its release is sent again. Each gone and
+// each release sent again goes out beside the claim loop, as [Pool.giveBack] has it.
+//
+// A dispatch whose qory run, or a program it started, still holds the lock of its
+// folder is stopped first, as [Pool.stopLeftover] has it, beside the claim loop: while
+// it stops, it takes one of the pool's Runs when one is free. A dispatch whose folder
+// contains a run's record then has that run's wall removed, as [Pool.Reap] has it,
+// beside the claim loop too, before the dispatch is acted on as above. A dispatch whose
+// lock is still held after the stop, or whose lock cannot be tried, stays in the journal
+// at its phase, with its folder, for the next start, and keeps its Run. Once ctx ends,
+// the rest stay.
 func (p *Pool) replay(ctx context.Context) {
 	for _, e := range p.journal.list() {
 		if ctx.Err() != nil {
 			return
 		}
-		switch e.Phase {
-		case PhaseEnded:
-			p.endBeside(ctx, e.DispatchID)
-		case PhaseClaimed:
-			p.giveBack(ctx, e.DispatchID, ReasonRestarted)
-		default:
-			p.forget(e.DispatchID)
+		id := e.DispatchID
+		lock, err := p.runLock(id)
+		switch {
+		case errors.Is(err, foragerdir.ErrLocked):
+			slot := p.takeSlot()
+			p.wg.Go(func() {
+				if !p.stopLeftover(ctx, id) {
+					return
+				}
+				if slot {
+					<-p.slots
+				}
+				if ctx.Err() == nil {
+					p.reap(ctx, id)
+					p.resume(ctx, e, false)
+				}
+			})
+			continue
+		case err != nil:
+			p.log.Error(lineLeftoverHeld, slog.String("dispatch_id", id), errAttr(err))
+			continue
+		}
+		_ = lock.Release()
+		if len(p.leftRuns(id)) > 0 {
+			p.wg.Go(func() {
+				p.reap(ctx, id)
+				p.resume(ctx, e, false)
+			})
+			continue
+		}
+		p.resume(ctx, e, true)
+	}
+}
+
+// resume acts on the journal entry e at the replay, once no qory run of its dispatch
+// is going, as [Pool.replay] has it. beside sends its gone in a goroutine beside the
+// claim loop; otherwise it is sent before resume returns.
+func (p *Pool) resume(ctx context.Context, e Entry, beside bool) {
+	id := e.DispatchID
+	switch e.Phase {
+	case PhaseClaimed:
+		p.giveBack(ctx, id, ReasonRestarted)
+		return
+	case PhaseDispatched:
+		p.setPhase(id, PhaseEnded)
+	}
+	if beside {
+		p.endBeside(ctx, id)
+	} else {
+		p.end(ctx, id)
+	}
+}
+
+// takeSlot takes one of the pool's Runs when one is free, and reports whether it took
+// one: a qory run left from before the pool started takes one while it stops, and
+// never waits for one.
+func (p *Pool) takeSlot() bool {
+	select {
+	case p.slots <- struct{}{}:
+		return true
+	default:
+		return false
+	}
+}
+
+// runLock takes the lock of the dispatch id's folder, without waiting: the lock that
+// the dispatch's qory run holds while it runs. A lock another process holds is
+// [foragerdir.ErrLocked]. A folder with no lock file returns no lock and no error.
+func (p *Pool) runLock(id string) (*foragerdir.Lock, error) {
+	path := filepath.Join(p.dispatchDir(id), runLockFile)
+	if _, err := os.Lstat(path); errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	return foragerdir.LockFile(path)
+}
+
+// stopLeftover stops the qory run of the dispatch id that is left from before the pool
+// started, and reports whether its lock is free: SIGTERM to the process group that its
+// folder's run.pgid contains, then, while the lock is still held once the grace of
+// [Settings] has passed, SIGKILL to that group, and up to the grace again for the
+// lock. A lock still held then, and a folder whose run.pgid cannot be read, after the
+// grace for the lock, is logged. The run is stopped also once stop ended, and the waits
+// are the pool's Sleep.
+func (p *Pool) stopLeftover(stop context.Context, id string) bool {
+	work := context.WithoutCancel(stop)
+	ids := slog.String("dispatch_id", id)
+	grace := p.Settings.Grace
+	if grace <= 0 {
+		grace = child.DefaultGrace
+	}
+	group, gerr := readGroup(p.dispatchDir(id))
+	if gerr != nil {
+		p.log.Warn(lineLeftoverStopped, ids)
+	} else {
+		p.log.Warn(lineLeftoverStopped, ids, slog.Int("process_group", group))
+		_ = child.SignalGroup(group, false)
+		if free, _ := p.waitLock(work, id, grace); free {
+			return true
+		}
+		_ = child.SignalGroup(group, true)
+	}
+	free, err := p.waitLock(work, id, grace)
+	if free {
+		return true
+	}
+	if gerr != nil {
+		err = gerr
+	}
+	p.log.Error(lineLeftoverHeld, ids, errAttr(err))
+	return false
+}
+
+// waitLock tries the lock of the dispatch id's folder every [leftoverPoll], for up to
+// d by the pool's clock, and reports whether it was free; when it was not, the error is
+// that of the last try.
+func (p *Pool) waitLock(ctx context.Context, id string, d time.Duration) (bool, error) {
+	until := p.now().Add(d)
+	for {
+		lock, err := p.runLock(id)
+		if err == nil {
+			_ = lock.Release()
+			return true, nil
+		}
+		if !p.now().Before(until) {
+			return false, err
+		}
+		_ = p.sleep(ctx, leftoverPoll)
+	}
+}
+
+// readGroup is the process group id that run.pgid of the dispatch's folder dir
+// contains. An id of 1 or less, which would signal more than one run, or the process
+// id of the pool program, is an error.
+func readGroup(dir string) (int, error) {
+	b, err := os.ReadFile(filepath.Join(dir, runGroupFile))
+	if err != nil {
+		return 0, err
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(string(b)))
+	if err != nil || n <= 1 || n == os.Getpid() {
+		return 0, fmt.Errorf("%s does not contain the id of a qory run's process group", runGroupFile)
+	}
+	return n, nil
+}
+
+// writeGroup writes the process group id to run.pgid of the dispatch's folder dir, mode
+// 0600, synced.
+func writeGroup(dir string, id int) error {
+	f, err := os.OpenFile(filepath.Join(dir, runGroupFile), os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+	if err != nil {
+		return err
+	}
+	_, err = f.WriteString(strconv.Itoa(id) + "\n")
+	if err == nil {
+		err = f.Sync()
+	}
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	return err
+}
+
+// leftRuns is the run ids of the records under the dispatch id's folder: the folders
+// <dispatch's folder>/state/qory/runs/<checkout>-<hash>/<run id> that qory run made, as
+// explore.RecordDir has the path.
+func (p *Pool) leftRuns(id string) []string {
+	runs := filepath.Join(p.dispatchDir(id), "state", "qory", "runs")
+	checkouts, _ := os.ReadDir(runs)
+	var ids []string
+	for _, c := range checkouts {
+		if !c.IsDir() {
+			continue
+		}
+		records, _ := os.ReadDir(filepath.Join(runs, c.Name()))
+		for _, r := range records {
+			if r.IsDir() && runIDShape.MatchString(r.Name()) {
+				ids = append(ids, r.Name())
+			}
+		}
+	}
+	return ids
+}
+
+// runIDShape is a run id: a UUID in the canonical lower-case form.
+var runIDShape = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
+
+// reap removes the wall of each run whose record is under the dispatch id's folder, as
+// [Pool.Reap] has it, on a context that does not end with stop, and logs each failure;
+// a failure changes nothing else.
+func (p *Pool) reap(stop context.Context, id string) {
+	if p.Reap == nil {
+		return
+	}
+	for _, run := range p.leftRuns(id) {
+		if err := p.Reap(context.WithoutCancel(stop), run); err != nil {
+			p.log.Warn(lineReapFailed, slog.String("dispatch_id", id), slog.String("run_id", run), errAttr(err))
 		}
 	}
 }
@@ -343,13 +573,15 @@ func (p *Pool) admit(ctx context.Context, c provisioner.Claimed) bool {
 // run is stopped; the requests already decided go out on a context that does not end
 // with it.
 func (p *Pool) dispatch(stop context.Context, c provisioner.Claimed) bool {
-	dir, code, err := p.prepare(c)
+	dir, code, lock, err := p.prepare(c)
 	if err != nil {
 		p.log.Warn(lineNotStarted, slog.String("dispatch_id", c.DispatchID), errAttr(err))
 		p.giveBack(stop, c.DispatchID, ReasonNotStarted)
 		return false
 	}
 	defer code.Close()
+	// [Pool.run] closes the lock once qory run ended; this closes it on the other paths.
+	defer lock.Close()
 	if stop.Err() != nil {
 		p.giveBack(stop, c.DispatchID, ReasonStoppedBeforeStart)
 		return false
@@ -357,7 +589,7 @@ func (p *Pool) dispatch(stop context.Context, c provisioner.Claimed) bool {
 	if started, gone := p.dispatched(stop, c); !started {
 		return gone
 	}
-	p.run(stop, c, dir, code)
+	p.run(stop, c, dir, code, lock)
 	return true
 }
 
@@ -368,45 +600,61 @@ func (p *Pool) dispatchDir(id string) string {
 
 // prepare makes the dispatch's folder of c, mode 0700, with work/, empty, state/, qory
 // run's XDG_STATE_HOME, home/, its --home, and home-user/, its HOME, each mode 0700, and
-// returns it with c's run code open for reading. The code is written to a new file, mode
+// the lock file run.lock, mode 0600, whose lock it takes. It returns the folder with c's
+// run code open for reading, and the lock. The code is written to a new file, mode
 // 0600, in the pool's folder, which is opened for reading and unlinked before prepare
 // returns, on every path; c's run code is cleared.
-func (p *Pool) prepare(c provisioner.Claimed) (string, *os.File, error) {
+func (p *Pool) prepare(c provisioner.Claimed) (string, *os.File, *foragerdir.Lock, error) {
 	defer c.RunCode.Clear()
 	dir := p.dispatchDir(c.DispatchID)
 	if err := os.MkdirAll(filepath.Dir(dir), 0o700); err != nil {
-		return "", nil, err
+		return "", nil, nil, err
 	}
 	if err := os.RemoveAll(dir); err != nil {
-		return "", nil, err
+		return "", nil, nil, err
 	}
 	for _, d := range []string{dir, filepath.Join(dir, "work"), filepath.Join(dir, "state"), filepath.Join(dir, homeFolder), filepath.Join(dir, userHomeFolder)} {
 		if err := os.Mkdir(d, 0o700); err != nil {
-			return "", nil, err
+			return "", nil, nil, err
 		}
+	}
+	lock, err := foragerdir.LockFile(filepath.Join(dir, runLockFile))
+	if err != nil {
+		return "", nil, nil, err
 	}
 	name := filepath.Join(p.Settings.State, codeFilePrefix+c.DispatchID)
 	defer os.Remove(name)
+	code, err := writeCode(name, c)
+	if err != nil {
+		lock.Release()
+		return "", nil, nil, err
+	}
+	return dir, code, lock, nil
+}
+
+// writeCode writes c's run code to a new file, mode 0600, at name, and returns the file
+// open for reading, with name unlinked.
+func writeCode(name string, c provisioner.Claimed) (*os.File, error) {
 	f, err := os.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
-		return "", nil, err
+		return nil, err
 	}
 	_, err = c.RunCode.WriteTo(f)
 	if cerr := f.Close(); err == nil {
 		err = cerr
 	}
 	if err != nil {
-		return "", nil, err
+		return nil, err
 	}
 	code, err := os.Open(name)
 	if err != nil {
-		return "", nil, err
+		return nil, err
 	}
 	if err := os.Remove(name); err != nil {
 		code.Close()
-		return "", nil, err
+		return nil, err
 	}
-	return dir, code, nil
+	return code, nil
 }
 
 // dispatched sends dispatched for c, and reports whether it was accepted, with the
@@ -415,7 +663,9 @@ func (p *Pool) prepare(c provisioner.Claimed) (string, *os.File, error) {
 // [maxRateLimited] times while the lease lasts. On 409 lease_expired or 410 gone the
 // dispatch is not released, and gets gone: an earlier try of dispatched may have been
 // taken with its answer lost. Any other end releases the dispatch, as [Pool.giveBack]
-// has it: for the pool's stop during a wait, the lease, or a failure.
+// has it: for the pool's stop during a wait, the lease, or a failure. A dispatched that
+// succeeded but could not be journaled starts no qory run: Qory Apiary does not release
+// the dispatch then, so it gets gone, as one whose qory run could not start does.
 func (p *Pool) dispatched(stop context.Context, c provisioner.Claimed) (started, gone bool) {
 	id := c.DispatchID
 	work := context.WithoutCancel(stop)
@@ -424,7 +674,12 @@ func (p *Pool) dispatched(stop context.Context, c provisioner.Claimed) (started,
 		var r *provisioner.Refusal
 		switch {
 		case err == nil:
-			p.setPhase(id, PhaseDispatched)
+			if jerr := p.journal.set(Entry{id, PhaseDispatched}); jerr != nil {
+				p.log.Error(lineNotJournaled, slog.String("dispatch_id", id), errAttr(jerr))
+				p.log.Warn(lineNotStarted, slog.String("dispatch_id", id), errAttr(jerr))
+				p.setPhase(id, PhaseEnded)
+				return false, true
+			}
 			return true, false
 		case errors.Is(err, provisioner.ErrRateLimited) && errors.As(err, &r) && limited < maxRateLimited:
 			if !p.now().Add(r.RetryAfter).Before(c.LeaseUntil) {
@@ -447,8 +702,10 @@ func (p *Pool) dispatched(stop context.Context, c provisioner.Claimed) (started,
 	}
 }
 
-// run runs qory run for the dispatched claim c, in dir, with code as its descriptor 3,
-// until it ends, and logs how it ended. qory run is stopped at stop's end, once the
+// run runs qory run for the dispatched claim c, in dir, with code as its descriptor 3
+// and lock's file as its descriptor 4, until it ends, and logs how it ended. Once qory
+// run started, the id of its process group is written to run.pgid in dir; once it
+// ended, lock is closed. qory run is stopped at stop's end, once the
 // claim's max_lifetime_minutes passed, or once the heartbeat finds the dispatch ended.
 // Each line of its output goes to the pool's log, after the dispatch id, and is kept.
 // Once qory run ended, or could not be started, the dispatch's journal entry is written
@@ -456,7 +713,7 @@ func (p *Pool) dispatched(stop context.Context, c provisioner.Claimed) (started,
 // that does not end with stop; [Pool.end] removes dir next. The output is masked first
 // with the process's mask list, [secretmask.Default], which replaces the value of a
 // URL's signature or token.
-func (p *Pool) run(stop context.Context, c provisioner.Claimed, dir string, code *os.File) {
+func (p *Pool) run(stop context.Context, c provisioner.Claimed, dir string, code *os.File, lock *foragerdir.Lock) {
 	id := slog.String("dispatch_id", c.DispatchID)
 	var out outputTail
 	ctx, cancel := context.WithCancel(stop)
@@ -476,6 +733,9 @@ func (p *Pool) run(stop context.Context, c provisioner.Claimed, dir string, code
 		p.log.Info(c.DispatchID + ": " + line)
 		out.add(line)
 	})
+	// A run.pgid that could not be written matters only after a crash of the pool: the
+	// next start then sends no signal, and logs lineLeftoverHeld after the grace.
+	recordGroup := func(group int) { _ = writeGroup(dir, group) }
 	res, err := child.Run(ctx, child.Command{
 		Path:       p.Settings.Qory,
 		Args:       []string{"run", "--run-code-file", fmt.Sprintf("/dev/fd/%d", child.KeyFD), "--gateway", c.GatewayURL, "--home", filepath.Join(dir, homeFolder)},
@@ -485,11 +745,16 @@ func (p *Pool) run(stop context.Context, c provisioner.Claimed, dir string, code
 		Home:       filepath.Join(dir, userHomeFolder),
 		Runs:       filepath.Join(p.Settings.State, runsFolder),
 		File:       code,
+		Hold:       lock.File(),
+		Group:      recordGroup,
 		Output:     output,
 		Mask:       secretmask.Default(),
 		Grace:      p.Settings.Grace,
 		Started:    func() { p.log.Info(lineStarted, id) },
 	})
+	// Close, not Release: a program that qory run started and that outlived it keeps the
+	// lock held, so a restart finds it.
+	_ = lock.Close()
 	unwatch()
 	wg.Wait()
 	p.setPhase(c.DispatchID, PhaseEnded)
