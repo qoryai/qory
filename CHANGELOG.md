@@ -608,6 +608,11 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Fixed
 
+- A Copilot CLI session gets the harness's hooks in a repository that commits
+  `.github/hooks/hooks.json`. qory links `settings/copilot/hooks.json` as
+  `.github/hooks/qory-hooks.json`, and Copilot CLI runs the hooks of both files. Until
+  now, qory wrote no link at `.github/hooks/hooks.json` when the repository had a file
+  there, and the session ran with no harness hooks.
 - In the `agent` image, Claude Code's Read of chosen pages of a PDF works: the image
   contains poppler's `pdftoppm`. Until now, it failed with `pdftoppm is not installed`.
 - In a dispatched walled run of Claude Code from a control plane, the agent's `qory

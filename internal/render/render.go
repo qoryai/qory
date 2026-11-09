@@ -1942,6 +1942,13 @@ func Skipped(p Runtime, res *compose.Result) []string {
 // Names in ensure are written even when no module contributed to them, so a model reaches
 // a file that otherwise does not exist.
 func WriteSettings(res *compose.Result, runtime, dir, home string, ensure []string, patch func(file string, m map[string]any)) error {
+	return WriteSettingsAs(res, runtime, dir, home, ensure, patch, nil)
+}
+
+// WriteSettingsAs is [WriteSettings] with each file written under name(file) in dir. ensure
+// and patch see the target file names, and a nil name writes each file under its target
+// file name.
+func WriteSettingsAs(res *compose.Result, runtime, dir, home string, ensure []string, patch func(file string, m map[string]any), name func(file string) string) error {
 	files := res.SettingsFiles(runtime)
 	for _, e := range ensure {
 		found := false
@@ -1959,17 +1966,21 @@ func WriteSettings(res *compose.Result, runtime, dir, home string, ensure []stri
 		if patch != nil {
 			patch(file, m)
 		}
+		out := file
+		if name != nil {
+			out = name(file)
+		}
 		if filepath.Ext(file) == ".toml" {
 			data, err := EncodeTOML(m)
 			if err != nil {
 				return err
 			}
-			if err := WriteFile(dir, file, data); err != nil {
+			if err := WriteFile(dir, out, data); err != nil {
 				return err
 			}
 			continue
 		}
-		if err := WriteJSON(dir, file, m); err != nil {
+		if err := WriteJSON(dir, out, m); err != nil {
 			return err
 		}
 	}
