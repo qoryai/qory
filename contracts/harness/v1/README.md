@@ -1165,9 +1165,13 @@ Per runtime, the files written into its directory:
   with the servers under `mcpServers`, and `plugin/`, the launch spec, never linked into
   the checkout (§Launching).
 - **copilot**: `agents/<name>.agent.md` with `name`, `description`, `tools` and `model`,
-  the `settings/copilot/` files written under `hooks/`, so `settings/copilot/hooks.json`
-  reaches `.github/hooks/hooks.json`, and for a launch `workspace/.github` with the
-  skills and agents, and `mcp.json` with the servers (§Launching).
+  each `settings/copilot/<name>` file written under `hooks/` as `qory-<name>`, so
+  `settings/copilot/hooks.json` reaches `.github/hooks/qory-hooks.json`, and for a launch
+  `workspace/.github` with the skills and agents, and `mcp.json` with the servers
+  (§Launching). Copilot CLI loads every `*.json` file in `.github/hooks`, so a
+  repository's `.github/hooks/hooks.json` runs beside the harness's hooks and stays as
+  the repository has it. qory passes over a file at a `qory-` name that it did not write,
+  and lists it under `kept`.
 - **amp**: the `settings/amp/` files such as `settings.json`, with the servers under
   `amp.mcpServers`.
 - **goose**: `agents/<name>.md` with `name`, `description` and `model`.
