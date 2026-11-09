@@ -1,6 +1,6 @@
 // Package provisionertest is a fake Qory Apiary for the pool program's tests: an
-// httptest server that serves provisioner/v1, claim, dispatched, release and
-// machine-log, and Forager's configuration document and a run's outcome.
+// httptest server that serves provisioner/v1, claim, dispatched, release, machine-log
+// and machine-end, and Forager's configuration document and a run's outcome.
 //
 // It checks every request as Qory Apiary does, in the contract's order: a body over a
 // mebibyte is an unsigned 413, a POST of another content type an unsigned 415, a signing
@@ -26,7 +26,10 @@
 // unknown dispatch, 410 for one that ended, then 409 lease_expired for a stale one; a
 // release gets 403, 410, then 409 machine_exists after dispatched or the redemption,
 // then 409 lease_expired; a machine log gets 403, then 409 machine_log_exists for a
-// dispatch that has one, and is taken before or after the dispatch ends. A release
+// dispatch that has one, and is taken before or after the dispatch ends; a machine end
+// gets 403 for an unknown dispatch, and is otherwise taken, before or after the dispatch
+// ends, any number of times, each state recorded in order, [Dispatch.MachineEnds]. A
+// signed 503 unavailable to a machine end is scripted with [Server.Script]. A release
 // ends the dispatch. A run whose dispatch was dispatched or redeemed may be given its
 // outcome once; the same one again is answered as before, and another is 409
 // outcome_given. Every request is recorded in order, [Server.Calls].
@@ -83,9 +86,8 @@ const (
 	MaxLifetimeMinutes = 1470
 )
 
-// MachineSpec is the machine_spec the claim's answer contains with a [Run]'s Machine, as
-// claim-answer.schema.json requires: the spec of the contract's fixture
-// claim-answer/machine.json.
+// MachineSpec is the machine_spec a claim's answer has beside the machine of a [Run]
+// that sets one, as claim-answer.schema.json requires.
 var MachineSpec = contracts.MachineSpec{VCPUs: 2, MemoryMiB: 4096, DiskGiB: 50, Arch: "amd64"}
 
 // Window is how far a request's time may be from [Server.Now], either way.
@@ -103,6 +105,7 @@ const (
 	RouteDispatched    Route = "dispatched"
 	RouteRelease       Route = "release"
 	RouteMachineLog    Route = "machine-log"
+	RouteMachineEnd    Route = "machine-end"
 	RouteConfiguration Route = "configuration"
 	RouteOutcome       Route = "outcome"
 	// RouteUnknown is any other path, answered a signed 404 not_found once verified.
@@ -213,6 +216,8 @@ type Dispatch struct {
 	// Release is the release that ended it, if one did, and MachineLog its machine log.
 	Release    *contracts.Release
 	MachineLog *contracts.MachineLog
+	// MachineEnds are the states of the machine ends the fake took for it, in order.
+	MachineEnds []string
 }
 
 // Outcome is a run's outcome as the fake recorded it.
@@ -386,7 +391,7 @@ func (s *Server) Dispatches() []Dispatch {
 	defer s.mu.Unlock()
 	var out []Dispatch
 	for _, id := range s.order {
-		out = append(out, *s.dispatches[id])
+		out = append(out, s.dispatches[id].copy())
 	}
 	return out
 }
@@ -399,7 +404,15 @@ func (s *Server) Dispatch(id string) (Dispatch, bool) {
 	if d == nil {
 		return Dispatch{}, false
 	}
-	return *d, true
+	return d.copy(), true
+}
+
+// copy is d with MachineEnds copied, so no later machine end changes the copy. The
+// caller holds the server's mu.
+func (d *Dispatch) copy() Dispatch {
+	c := *d
+	c.MachineEnds = slices.Clone(d.MachineEnds)
+	return c
 }
 
 // Outcomes are the outcomes the fake recorded, by run id.
@@ -421,7 +434,7 @@ func (s *Server) now() time.Time {
 }
 
 var (
-	dispatchPathShape = regexp.MustCompile(`^/v1/dispatches/([^/]+)/(dispatched|release|machine-log)$`)
+	dispatchPathShape = regexp.MustCompile(`^/v1/dispatches/([^/]+)/(dispatched|release|machine-log|machine-end)$`)
 	outcomePathShape  = regexp.MustCompile(`^` + RunPath + `/([^/]+)/outcome$`)
 )
 
@@ -710,6 +723,7 @@ var schemaOf = map[Route]func() (*jsonschema.Schema, error){
 	RouteDispatched: sync.OnceValues(func() (*jsonschema.Schema, error) { return contracts.CompileProvisioner("dispatched.schema.json") }),
 	RouteRelease:    sync.OnceValues(func() (*jsonschema.Schema, error) { return contracts.CompileProvisioner("release.schema.json") }),
 	RouteMachineLog: sync.OnceValues(func() (*jsonschema.Schema, error) { return contracts.CompileProvisioner("machine-log.schema.json") }),
+	RouteMachineEnd: sync.OnceValues(func() (*jsonschema.Schema, error) { return contracts.CompileProvisioner("machine-end.schema.json") }),
 	RouteOutcome:    sync.OnceValues(func() (*jsonschema.Schema, error) { return foragercontracts.Compile("run-outcome.schema.json") }),
 }
 
@@ -778,6 +792,12 @@ func (s *Server) model(ctx context.Context, route Route, id string, body []byte)
 		d.MachineLog = &ml
 		return answer{status: http.StatusNoContent}
 	}
+	if route == RouteMachineEnd {
+		var me contracts.MachineEnd
+		_ = json.Unmarshal(body, &me)
+		d.MachineEnds = append(d.MachineEnds, me.State)
+		return answer{status: http.StatusNoContent}
+	}
 	s.refresh(d)
 	if d.State == StateEnded {
 		return refusal(http.StatusGone, "gone")
@@ -835,16 +855,15 @@ func (s *Server) claim(ctx context.Context, body []byte) answer {
 			d := &Dispatch{ID: newDispatchID(), Run: run, ClaimedAt: now, LeaseUntil: now.Add(run.Lease), State: StateClaimed}
 			s.dispatches[d.ID] = d
 			s.order = append(s.order, d.ID)
-			ca := contracts.ClaimAnswer{
-				Version: 1, Revision: contracts.ProvisionerRevision, DispatchID: d.ID, PoolID: PoolID,
-				LeaseUntil: contracts.FormatTime(d.LeaseUntil), Machine: run.Machine, RunCode: run.RunCode,
-				GatewayURL: run.GatewayURL, MaxLifetimeMinutes: run.MaxLifetimeMinutes,
-			}
+			var spec *contracts.MachineSpec
 			if run.Machine != "" {
-				spec := MachineSpec
-				ca.MachineSpec = &spec
+				spec = &MachineSpec
 			}
-			b, _ := json.Marshal(ca)
+			b, _ := json.Marshal(contracts.ClaimAnswer{
+				Version: 1, Revision: contracts.ProvisionerRevision, DispatchID: d.ID, PoolID: PoolID,
+				LeaseUntil: contracts.FormatTime(d.LeaseUntil), Machine: run.Machine, MachineSpec: spec, RunCode: run.RunCode,
+				GatewayURL: run.GatewayURL, MaxLifetimeMinutes: run.MaxLifetimeMinutes,
+			})
 			return answer{status: http.StatusOK, body: b, header: http.Header{"Cache-Control": {"no-store"}}}
 		}
 		wake := s.wake
