@@ -2217,9 +2217,9 @@ before it acts on a run of the journal, it checks that run's lock:
    hold run.lock in the dispatch's folder, then restart the pool: a qory run left from
    before the pool started still holds that lock, so the pool keeps the dispatch for its
    next start and reports no gone`. The run keeps its place in `pool.runs`. If the pool
-   cannot try the lock, for example because `run.lock` is a link, it logs `check the
-   file run.lock in the dispatch's folder: the pool could not try its lock, so the pool
-   keeps the dispatch for its next start and reports no gone`. If the pool is stopped
+   cannot try the lock, for example because `run.lock` is a link, it logs ``check
+   `<the run's folder>/run.lock`: the pool could not lock it (<error>), so it keeps the
+   dispatch for its next start and reports no gone``. If the pool is stopped
    during the waits, the waits end, and the pool keeps the dispatch for its next start.
 3. Once the lock is free, the pool removes the containers and networks the run's wall
    left, as `qory run resend` does. If the removal fails, the pool logs `remove the

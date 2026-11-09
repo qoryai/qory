@@ -36,10 +36,6 @@ const (
 	// still held after the waits: the entry stays in the journal, and no gone is sent.
 	// The attribute path is the lock file's.
 	lineLeftoverHeld = "stop the programs that hold run.lock in the dispatch's folder, then restart the pool: a qory run left from before the pool started still holds that lock, so the pool keeps the dispatch for its next start and reports no gone"
-	// lineLockNotTried is a lock of a dispatch's folder that the pool could not try,
-	// such as a run.lock it may not open, or a link: the entry stays in the journal, and
-	// no gone is sent. The attribute path is the lock file's.
-	lineLockNotTried = "check the file run.lock in the dispatch's folder: the pool could not try its lock, so the pool keeps the dispatch for its next start and reports no gone"
 	// lineReapFailed is a removal of a left qory run's wall that failed; gone is sent
 	// all the same.
 	lineReapFailed = "remove the containers and networks with the label dev.qory.run=<run_id> from the container engine: the removal of the wall of a qory run left from before the pool started failed; the pool reports the machine as gone all the same"
@@ -73,6 +69,12 @@ const (
 // for fmt.Sprintf of the wait before it is sent again, as Go prints a time.Duration. The
 // wait is also the attribute wait of the line.
 const lineGoneFailed = "the gone report failed; the pool sends it again in %s"
+
+// lineLockNotTried is a lock of a dispatch's folder that the pool could not try, such
+// as a run.lock it may not open, or a link: the entry stays in the journal, and no gone
+// is sent. It is a format for fmt.Sprintf of the path of run.lock, as
+// [exports.HidePath] prints it, and of the error.
+const lineLockNotTried = "check `%s`: the pool could not lock it (%s), so it keeps the dispatch for its next start and reports no gone"
 
 // lineReleaseFailed is a release that failed with no response, an unsigned response, a
 // fourth signed 429, a server error or another refusal, while the pool runs: a format

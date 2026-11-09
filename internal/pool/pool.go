@@ -407,9 +407,10 @@ func (p *Pool) stopLeftover(stop context.Context, id string) bool {
 }
 
 // lockNotTried logs that the lock of the dispatch id's folder could not be tried, for
-// err.
+// err, with the lock's path and the error in the line's text.
 func (p *Pool) lockNotTried(id string, err error) {
-	p.log.Error(lineLockNotTried, slog.String("dispatch_id", id), slog.String("path", exports.HidePath(p.lockPath(id))), errAttr(err))
+	line := fmt.Sprintf(lineLockNotTried, exports.HidePath(p.lockPath(id)), exports.HideError(err).Error())
+	p.log.Error(line, slog.String("dispatch_id", id))
 }
 
 // leftGroup is the process group id that run.pgid of the dispatch id's folder contains,

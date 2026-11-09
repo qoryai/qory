@@ -22,8 +22,10 @@ import (
 const (
 	lineLeftoverStopped = "a qory run of the dispatch is left from before the pool started, so the pool stops it"
 	lineLeftoverHeld    = "stop the programs that hold run.lock in the dispatch's folder, then restart the pool: a qory run left from before the pool started still holds that lock, so the pool keeps the dispatch for its next start and reports no gone"
-	lineLockNotTried    = "check the file run.lock in the dispatch's folder: the pool could not try its lock, so the pool keeps the dispatch for its next start and reports no gone"
-	lineReapFailed      = "remove the containers and networks with the label dev.qory.run=<run_id> from the container engine: the removal of the wall of a qory run left from before the pool started failed; the pool reports the machine as gone all the same"
+	// lockNotTriedEnd is the end of the line of a lock that could not be tried, after
+	// the error.
+	lockNotTriedEnd = "), so it keeps the dispatch for its next start and reports no gone"
+	lineReapFailed  = "remove the containers and networks with the label dev.qory.run=<run_id> from the container engine: the removal of the wall of a qory run left from before the pool started failed; the pool reports the machine as gone all the same"
 )
 
 // leftoverPoll is the pool's wait between two tries of a left run's lock.
@@ -398,7 +400,8 @@ func TestALockStillHeldKeepsTheEntry(t *testing.T) {
 
 // TestALockThatCannotBeTried starts a pool whose dispatched entry's run.lock is a link,
 // which the lock's open does not follow: the pool logs the line that starts with its
-// fix, with the lock's path and the error, and not the line of a held lock. It stops
+// fix, with the lock's path and the error in its text and the dispatch id as its one
+// attribute besides the level, and not the line of a held lock. It stops
 // nothing, sends no gone, calls no Reap, and keeps the entry at dispatched.
 func TestALockThatCannotBeTried(t *testing.T) {
 	h := newHarness(t, 1)
@@ -420,11 +423,15 @@ func TestALockThatCannotBeTried(t *testing.T) {
 	h.pool.Reap = r.seam(h, lock, e.DispatchID, nil)
 	before := h.count(provisionertest.RouteClaim)
 	h.start()
-	h.waitFor("the line of a lock not tried", func() bool { return len(h.log.with(lineLockNotTried)) == 1 })
+	start := "check `" + lock + "`: the pool could not lock it ("
+	h.waitFor("the line of a lock not tried", func() bool { return len(h.log.withPrefix(start)) == 1 })
 	h.waitFor("a claim", func() bool { return h.count(provisionertest.RouteClaim) > before })
 	h.stop()
-	if m := h.log.with(lineLockNotTried); m[0]["dispatch_id"] != e.DispatchID || m[0]["path"] != lock || m[0]["error"] == nil {
-		t.Errorf("the line is %v", m[0])
+	m := h.log.withPrefix(start)[0]
+	msg := m["msg"].(string)
+	cause := strings.TrimSuffix(strings.TrimPrefix(msg, start), lockNotTriedEnd)
+	if !strings.HasSuffix(msg, lockNotTriedEnd) || cause == "" || m["dispatch_id"] != e.DispatchID || m["path"] != nil || m["error"] != nil {
+		t.Errorf("the line is %v", m)
 	}
 	if len(h.log.with(lineLeftoverHeld)) != 0 || len(h.log.with(lineLeftoverStopped)) != 0 {
 		t.Errorf("the log:\n%s", h.log.text())
@@ -472,7 +479,7 @@ func TestAStopDuringALeftoversStop(t *testing.T) {
 		t.Fatal("the pool did not wait for the left run's lock")
 	}
 	h.stop()
-	if len(h.log.with(lineLeftoverStopped)) != 1 || len(h.log.with(lineLeftoverHeld)) != 0 || len(h.log.with(lineLockNotTried)) != 0 {
+	if len(h.log.with(lineLeftoverStopped)) != 1 || len(h.log.with(lineLeftoverHeld)) != 0 || len(h.log.withPrefix("check `")) != 0 {
 		t.Errorf("the log:\n%s", h.log.text())
 	}
 	if !holder.running() {
