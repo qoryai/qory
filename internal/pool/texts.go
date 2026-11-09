@@ -30,15 +30,22 @@ const (
 	// lineLogNotUploaded is a machine log whose upload failed or returned a refusal;
 	// the dispatch's end does not change.
 	lineLogNotUploaded = "qory run's output could not be uploaded as the dispatch's machine log"
-	// lineGone is a machine end gone answered with the signed 204.
-	lineGone = "reported the dispatch's machine as gone"
-	// lineGoneFailed is a machine end gone that failed with no answer, an unsigned
-	// answer, a signed 429, a signed 503 unavailable or another server error.
-	lineGoneFailed = "the report of the machine as gone failed, so it is sent again after a wait"
-	// lineGoneEnded is a machine end gone answered with a signed 400, 403 or 404.
-	lineGoneEnded = "the machine could not be reported as gone, and the same report cannot succeed, so it is not sent again"
+	// lineGone is a machine end gone that got the signed 204.
+	lineGone = "reported the machine as gone"
 	// lineGoneKept is a machine end gone that failed once the pool was stopping.
-	lineGoneKept = "the machine could not be reported as gone before the pool stopped, so the pool sends the report again at its next start"
+	lineGoneKept = "the gone report failed before the pool stopped; the pool sends it again at its next start"
+)
+
+// The lines of the machine end gone that contain a value, each a format for
+// fmt.Sprintf. The value is in an attribute of the line too.
+const (
+	// lineGoneFailed is a machine end gone that failed with no answer, an unsigned
+	// answer, a signed 429, a signed 503 unavailable or another server error, with the
+	// wait before it is sent again, as Go prints a time.Duration.
+	lineGoneFailed = "the gone report failed; the pool sends it again in %s"
+	// lineGoneEnded is a machine end gone that got a signed 400, 403 or 404, with that
+	// status and its code.
+	lineGoneEnded = "check this pool's key in Qory Apiary: Qory Apiary returned %s for the gone report, so the pool does not send it again"
 )
 
 // The reasons a release gives, display text in Qory Apiary. Each is 1 to 200

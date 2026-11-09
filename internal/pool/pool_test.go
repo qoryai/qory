@@ -272,8 +272,9 @@ func TestTheRunsCap(t *testing.T) {
 // TestDispatchedFailures: a signed 429 is waited out up to three times; 409
 // lease_expired and 410 drop the dispatch with no release, and get gone, also after a
 // try whose answer was lost and which the fake took; anything else releases it, and a
-// release the fake answers 204 gets no gone. qory run starts after dispatched alone, and
-// a qory run that ran gets gone.
+// release the fake answers 204 gets no gone. The journal entry is at ended while such a
+// gone is held. qory run starts after dispatched alone, and a qory run that ran gets
+// gone.
 func TestDispatchedFailures(t *testing.T) {
 	limited := provisionertest.Reply{Status: 429, Code: "rate_limited", RetryAfter: "2"}
 	lost := provisionertest.Reply{Drop: true}
@@ -299,8 +300,20 @@ func TestDispatchedFailures(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			h := newHarness(t, 1)
 			h.srv.Script(provisionertest.RouteDispatched, c.replies...)
+			var let func()
+			if c.gone {
+				let = h.gate.holdNext("/machine-end")
+			}
 			h.srv.Offer(provisionertest.Run{})
 			h.start()
+			if c.gone {
+				<-h.gate.reached
+				d := h.only()
+				if lines, want := journalOf(t, h.state), d.ID+" "+pool.PhaseEnded; len(lines) != 1 || lines[0] != want {
+					t.Errorf("the journal while gone is held is %q, want %q", lines, want)
+				}
+				let()
+			}
 			h.settled(1)
 			h.stop()
 			d := h.only()
@@ -334,7 +347,8 @@ func TestDispatchedFailures(t *testing.T) {
 
 // TestTheRelease waits out a signed 429 to a release up to three times, takes 410 and
 // lease_expired as the dispatch over already, and logs a release that failed, 409
-// machine_exists among them. After 409 machine_exists alone the pool sends gone.
+// machine_exists among them. After 409 machine_exists alone the pool sends gone, with
+// the journal entry at ended while that gone is held.
 func TestTheRelease(t *testing.T) {
 	limited := provisionertest.Reply{Status: 429, Code: "rate_limited", RetryAfter: "3"}
 	for _, c := range []struct {
@@ -353,9 +367,21 @@ func TestTheRelease(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			h := newHarness(t, 1)
 			h.srv.Script(provisionertest.RouteRelease, c.replies...)
+			machine := c.name == "machine_exists"
+			var let func()
+			if machine {
+				let = h.gate.holdNext("/machine-end")
+			}
 			h.srv.Offer(provisionertest.Run{Machine: "large"})
 			h.start()
 			h.waitFor("the release's line", func() bool { return len(h.log.with(c.line)) == 1 })
+			if machine {
+				<-h.gate.reached
+				if lines, want := journalOf(t, h.state), h.only().ID+" "+pool.PhaseEnded; len(lines) != 1 || lines[0] != want {
+					t.Errorf("the journal while gone is held is %q, want %q", lines, want)
+				}
+				let()
+			}
 			h.settled(1)
 			h.stop()
 			n := 0
@@ -368,7 +394,7 @@ func TestTheRelease(t *testing.T) {
 				t.Errorf("the pool waited %v, want %d waits of 3s", h.waitsOf(), c.waits)
 			}
 			var want []string
-			if c.name == "machine_exists" {
+			if machine {
 				want = []string{"gone"}
 			}
 			if states, _ := h.machineEnds(h.only().ID); !slices.Equal(states, want) {

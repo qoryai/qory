@@ -385,9 +385,9 @@ release may change what an existing document does, and states it under Upgrading
   fails is sent again after a wait that doubles from 1 s to 60 s, or after a 429's
   `Retry-After`, until Qory Apiary returns 204, or a 400, 403 or 404, after which the
   same report cannot succeed. Until then, the journal `dispatches` in the pool's folder
-  contains the dispatch at the phase `ended`, and the pool keeps the dispatch's folder.
-  When the pool stops, it sends `gone` once more, for at most 10 s; a `gone` still not
-  answered is sent at the next start, beside the claims. The pool section of
+  contains the dispatch at the phase `ended`. When the pool stops, it sends `gone` once
+  more, for at most 10 s; a `gone` that has not got the signed 204, 400, 403 or 404 when
+  the pool stops is sent again at its next start, beside the claims. The pool section of
   `forager.yaml` takes `runs`, `registry` and `run_config`. With `prebuilds`,
   `harness_ref` or `harness_path` in it, qory stops with `<file>: line <n>: key "<key>"
   is not one forager.yaml reads`.

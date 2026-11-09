@@ -41,9 +41,11 @@
 // succeeds. The ended entry is written before the first gone: once qory run ended or
 // could not be started, or after the release or the dispatched that the gone follows. A
 // release of an entry left at claimed after a dispatched that succeeded returns 409
-// machine_exists, and the pool sends gone for it. The entry is removed, with the
-// dispatch's folder, once the dispatch ends; an ended entry once its gone got the 204
-// or a signed 400, 403 or 404. When the program starts, before its first claim, it runs
+// machine_exists, and the pool sends gone for it. The dispatch's folder is removed once
+// qory run ended and its machine log was uploaded, or before the first gone of a
+// dispatch whose qory run did not start. The entry is removed once the dispatch ends;
+// an ended entry once its gone got the signed 204, 400, 403 or 404. When the program
+// starts, before its first claim, it runs
 // the check of [Probe]: when a container on the engine's default bridge network
 // connects to the cloud metadata service, or the check cannot run, Run returns its
 // error and claims nothing. Then each claimed entry it finds is released and each
@@ -53,9 +55,9 @@
 //
 // When ctx ends, the pool stops: it claims no more, a claim being sent is given up, a
 // dispatch not yet dispatched is released, and each qory run is stopped as [child.Run]
-// stops a command. A gone not yet answered is sent once more, for at most
-// [lastGoneTimeout]; when that fails, the ended entry and the dispatch's folder stay, for
-// the next start. Run returns once every dispatch ended.
+// stops a command. A gone that has not got the signed 204, 400, 403 or 404 is sent once
+// more, for at most [lastGoneTimeout]; when that fails, the ended entry stays, for the
+// next start. Run returns once every dispatch ended.
 package pool
 
 import (
@@ -448,8 +450,8 @@ func (p *Pool) dispatched(stop, work context.Context, c provisioner.Claimed) (st
 // claim's max_lifetime_minutes passed, or once the heartbeat finds the dispatch ended.
 // Each line of its output goes to the pool's log, after the dispatch id, and is kept.
 // Once qory run ended, or could not be started, the dispatch's journal entry is written
-// at ended, and the lines kept are uploaded as the dispatch's machine log, on a context
-// that does not end with stop. The output is masked first with the process's mask list,
+// at ended, the lines kept are uploaded as the dispatch's machine log, on a context that
+// does not end with stop, and dir is removed. The output is masked first with the process's mask list,
 // [secretmask.Default], which replaces the value of a URL's signature or token.
 func (p *Pool) run(stop context.Context, c provisioner.Claimed, dir string, code *os.File) {
 	id := slog.String("dispatch_id", c.DispatchID)
@@ -499,6 +501,7 @@ func (p *Pool) run(stop context.Context, c provisioner.Claimed, dir string, code
 	}
 	log, cut := out.text()
 	p.uploadLog(context.WithoutCancel(stop), c.DispatchID, log, cut)
+	_ = os.RemoveAll(dir)
 }
 
 // heartbeat sends dispatched for the dispatch id every [heartbeatEvery] until ctx ends.
@@ -589,18 +592,19 @@ func (p *Pool) endBeside(stop context.Context, id string) {
 	p.wg.Go(func() { p.end(stop, id) })
 }
 
-// end sends gone for the dispatch id, whose journal entry is at ended, and takes the
-// dispatch out of the journal once gone is settled; otherwise the entry and the
-// dispatch's folder stay, for the next start.
+// end removes the folder of the dispatch id, whose journal entry is at ended, if it has
+// one, sends gone for it, and takes the dispatch out of the journal once gone is
+// settled; otherwise the entry stays, for the next start.
 func (p *Pool) end(stop context.Context, id string) {
+	_ = os.RemoveAll(p.dispatchDir(id))
 	if p.gone(stop, id) {
 		p.forget(id)
 	}
 }
 
 // gone sends the machine end gone for the dispatch id, one call at a time, and reports
-// whether it is settled: answered with the signed 204, or with a signed 400, 403 or 404,
-// after which the same call cannot succeed. Any other failure is sent again, built anew,
+// whether it is settled: it got the signed 204, or a signed 400, 403 or 404, after which
+// the same call cannot succeed. Any other failure is sent again, built anew,
 // after a wait: a signed 429's Retry-After, else one that doubles from [firstBackoff] up
 // to [maxBackoff]. Once stop ends, gone is sent once more, for at most
 // [lastGoneTimeout], and a failure then leaves it unsettled.
@@ -609,9 +613,12 @@ func (p *Pool) gone(stop context.Context, id string) bool {
 	wait := firstBackoff
 	for {
 		last := stop.Err() != nil
-		ctx, cancel := context.WithCancel(stop)
+		var ctx context.Context
+		var cancel context.CancelFunc
 		if last {
 			ctx, cancel = context.WithTimeout(context.WithoutCancel(stop), lastGoneTimeout)
+		} else {
+			ctx, cancel = context.WithCancel(stop)
 		}
 		err := p.Client.MachineEnd(ctx, id, contracts.MachineEndGone)
 		cancel()
@@ -620,7 +627,7 @@ func (p *Pool) gone(stop context.Context, id string) bool {
 			p.log.Info(lineGone, ids)
 			return true
 		case provisioner.EndsAttempts(err):
-			p.log.Warn(lineGoneEnded, ids, errAttr(err))
+			p.log.Warn(fmt.Sprintf(lineGoneEnded, refusalStatus(err)), ids, errAttr(err))
 			return true
 		case last:
 			p.log.Warn(lineGoneKept, ids, errAttr(err))
@@ -636,9 +643,22 @@ func (p *Pool) gone(stop context.Context, id string) bool {
 		} else {
 			wait = min(wait*2, maxBackoff)
 		}
-		p.log.Warn(lineGoneFailed, ids, slog.Duration("wait", pause), errAttr(err))
+		p.log.Warn(fmt.Sprintf(lineGoneFailed, pause), ids, slog.Duration("wait", pause), errAttr(err))
 		_ = p.sleep(stop, pause)
 	}
+}
+
+// refusalStatus is the status of err, a signed refusal, and its code when it has one:
+// "403 forbidden", say.
+func refusalStatus(err error) string {
+	r, ok := errors.AsType[*provisioner.Refusal](err)
+	switch {
+	case !ok:
+		return "a refusal"
+	case r.Code == "":
+		return fmt.Sprint(r.Status)
+	}
+	return fmt.Sprintf("%d %s", r.Status, r.Code)
 }
 
 // setPhase writes the dispatch id's journal entry at phase, and logs a write that
