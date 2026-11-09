@@ -22,12 +22,14 @@ const JournalFile = "dispatches"
 // runs at once.
 const maxJournal = 1 << 20
 
-// The phases of a dispatch, as the journal contains them: claimed, and dispatched, its
-// start recorded at Qory Apiary. A claimed dispatch may be released; a dispatched one
-// may not, so a replay drops it.
+// The phases of a dispatch, as the journal contains them: claimed; dispatched, its
+// start recorded at Qory Apiary; and ended, its qory run over, while the machine end
+// gone is not yet settled. A claimed dispatch may be released; a dispatched one may
+// not, so a replay drops it; an ended one gets gone again at the replay.
 const (
 	PhaseClaimed    = "claimed"
 	PhaseDispatched = "dispatched"
+	PhaseEnded      = "ended"
 )
 
 var dispatchIDShape = regexp.MustCompile(`^dp_[0-9a-hjkmnp-tv-z]{16}$`)
@@ -45,7 +47,7 @@ func (e Entry) line() string {
 
 // valid reports whether each member of e has its shape.
 func (e Entry) valid() bool {
-	return dispatchIDShape.MatchString(e.DispatchID) && (e.Phase == PhaseClaimed || e.Phase == PhaseDispatched)
+	return dispatchIDShape.MatchString(e.DispatchID) && (e.Phase == PhaseClaimed || e.Phase == PhaseDispatched || e.Phase == PhaseEnded)
 }
 
 // journal is the file <pool's folder>/dispatches, mode 0600: one line per live
