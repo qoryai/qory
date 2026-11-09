@@ -29,6 +29,22 @@ func (l *Lock) Release() error {
 	return err
 }
 
+// File is the lock's open file. A command that inherits it as a descriptor holds the
+// lock through it: the lock is free once every copy of the descriptor is closed.
+func (l *Lock) File() *os.File { return l.f }
+
+// Close closes the lock's file and leaves the lock held while a command that inherited
+// the file's descriptor keeps it open; Release drops the lock for every copy. A nil Lock
+// closes nothing.
+func (l *Lock) Close() error {
+	if l == nil || l.f == nil {
+		return nil
+	}
+	err := l.f.Close()
+	l.f = nil
+	return err
+}
+
 // locks creates the locks directory, mode 0700.
 func (d Dir) locks() (string, error) {
 	path := d.Path(LocksDir)

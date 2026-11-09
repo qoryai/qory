@@ -2198,6 +2198,81 @@ composes its harness under `home/` of that folder, outside `work/`. Once the run
 the pool removes the run's folder and the harness home in it, so no later run on the
 machine reads that harness.
 
+A run can outlast the pool: after a crash of the pool, or after a second SIGINT or
+SIGTERM, which ends the pool at once. The pool locks `run.lock` in the run's folder
+before the run starts, and passes the lock's file to `qory run` as descriptor 4. The
+lock stays held while `qory run`, or a program it started, still runs. `qory run`
+starts in a new session, whose id is its process id. Once `qory run` started, the pool
+writes that id and the start of `qory run` to `run.session` beside the lock: on Linux,
+field 22 of `/proc/<pid>/stat` in clock ticks, and on macOS the process's start as
+seconds and microseconds. When the pool starts, before it acts on a run of the
+journal, it checks that run's lock:
+
+1. If the lock is held, the pool stops the run: it logs `a qory run of the dispatch is
+   left from before the pool started, so the pool stops it`, and sends SIGTERM to each
+   process of the run's session, in any process group. If the run still holds the
+   lock 30 seconds later, the pool lists the session's processes again and sends
+   SIGKILL to each, up to 3 times while new processes appear. While the run stops, it
+   counts against `pool.runs`. Before each signal, the pool checks that the session is
+   the run's:
+   - A process of the session was in an earlier list of it that the pool proved to be
+     the run's, and has the same start as then. The session has had processes since
+     then, and no process gets the id of a session that has processes.
+   - The process whose id is in `run.session` has the start in `run.session`: it is
+     `qory run`.
+   - On Linux, no process has that id, and a process of the session has `run.lock`
+     open, matched by device and inode in `/proc/<pid>/fd`. On macOS, the pool does
+     not read which files a process has open, so a session whose `qory run` ended
+     before the pool started gets no signal.
+
+   Otherwise the pool sends no signal, or no further signal once SIGTERM went out, and
+   waits 30 seconds for the lock: a process with another start has the id, the session
+   has no process, or none of its processes was in an earlier proven list or has
+   `run.lock` open. A program that the run starts in a new session, as `setsid` does,
+   is outside the run's session and gets no signal.
+2. If the lock is still held after these waits, the pool logs `stop the programs that
+   hold run.lock in the dispatch's folder, then restart the pool: a qory run left from
+   before the pool started still holds that lock, so the pool keeps the dispatch for its
+   next start and reports no gone`. The run keeps its place in `pool.runs`. If the pool
+   cannot try the lock, for example because `run.lock` is a link, it logs ``make
+   `<the run's folder>/run.lock` a regular file the pool's user can open, then restart
+   the pool: the pool could not lock it (<error>), so it keeps the dispatch for its
+   next start and reports no gone``. If the pool is stopped
+   during the waits, the waits end, and the pool keeps the dispatch for its next start.
+3. Once the lock is free, the pool removes the containers and networks the run's wall
+   left, as `qory run resend` does. If the removal fails, the pool logs `remove the
+   containers and networks with the label dev.qory.run=<run_id> from the container
+   engine: the removal of the wall of a qory run left from before the pool started
+   failed; the pool reports the machine as gone all the same`.
+4. The pool reports the run's machine as gone.
+
+The `pool` section of the pool's `forager.yaml` sets what the pool runs by:
+
+```yaml
+pool:
+  runs: 1                             # how many runs this host runs at once; 1 when not set
+  registry: localhost:5001/qory-env   # the image name the builds are pushed under
+  run_config: /etc/qory/pool-runs     # each run's XDG_CONFIG_HOME, an absolute path
+```
+
+Without `pool.runs`, the pool runs one run at a time on this machine. With `pool.runs`
+above 1, runs share the machine's processors, memory, disk and network at once, so the
+runs' `forager.yaml`, `<pool.run_config>/qory/forager.yaml`, must limit the processes and
+the memory of each run's containers (see Limits in [The wall](#the-wall)):
+
+```yaml
+wall:
+  pids_limit: 4096                    # at most 4096 processes in each container
+  memory: 14g                         # at most 14 GB of memory in each container
+```
+
+If `pool.runs` is above 1, set `wall.pids_limit` and `wall.memory` in the runs'
+`forager.yaml`; otherwise the pool exits 2 before its first claim, with this error:
+
+```text
+set wall.pids_limit and wall.memory in <pool.run_config>/qory/forager.yaml: with pool.runs above 1, runs share this machine, and a run without both limits can take the processes and memory the others need
+```
+
 Each run's `HOME` is `home-user/` of the run's folder, mode `0700`, which the pool makes
 empty and removes with the folder. `XDG_CONFIG_HOME` stays `pool.run_config`. So a run
 reads none of these files under the `HOME` of the user the pool runs as:
@@ -2215,15 +2290,6 @@ since every run would see the paths it lists, with exit 2:
 
 ```text
 remove wall.mounts from <pool.run_config>/qory/forager.yaml: every run of the pool would see the paths it lists, so the runs would share them
-```
-
-With `pool.runs` above 1, runs share the machine's processors, memory, disk and network
-at once. The pool stops before its first claim, with exit 2, unless the runs'
-`forager.yaml` sets both `wall.pids_limit` and `wall.memory` (see Limits in [The
-wall](#the-wall)):
-
-```text
-set wall.pids_limit and wall.memory in <pool.run_config>/qory/forager.yaml: with pool.runs above 1, runs share this machine, and a run without both limits can take the processes and memory the others need
 ```
 
 The pool also stops before its first claim, with exit 2, when the runs' `forager.yaml`
