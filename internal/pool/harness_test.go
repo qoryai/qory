@@ -563,7 +563,7 @@ func (h *harness) waitFor(what string, cond func() bool) {
 	}
 }
 
-// overLines are the starts of the lines after which the pool does nothing more for a
+// overLines are the lines after which the pool does nothing more for a
 // dispatch but take it out of the journal: a release's end, a dispatched that did not
 // start a run, and gone's end. After qory run's end, the machine log and gone follow;
 // after a release that returned 409 machine_exists, or a dispatched that returned 410
@@ -571,7 +571,7 @@ func (h *harness) waitFor(what string, cond func() bool) {
 // the journal.
 var overLines = []string{
 	"released the run", "the dispatch was over already, so nothing was released", "the run could not be released",
-	"Qory Apiary did not record the run's start", lineGone, goneEndedPrefix,
+	"Qory Apiary did not record the run's start", lineGone, lineGone400, lineGone403, lineGone404,
 }
 
 // settled waits until the fake made n dispatches, the pool logged one of [overLines]
@@ -593,12 +593,10 @@ func (h *harness) settled(n int) {
 	})
 }
 
-// over reports whether the pool logged a line for the dispatch id that starts with one of
-// [overLines].
+// over reports whether the pool logged one of [overLines] for the dispatch id.
 func (h *harness) over(id string) bool {
 	return slices.ContainsFunc(h.log.all(), func(m map[string]any) bool {
-		msg, _ := m["msg"].(string)
-		return m["dispatch_id"] == id && slices.ContainsFunc(overLines, func(l string) bool { return strings.HasPrefix(msg, l) })
+		return m["dispatch_id"] == id && slices.Contains(overLines, m["msg"].(string))
 	})
 }
 

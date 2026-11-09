@@ -18,20 +18,25 @@ import (
 	"github.com/qoryai/qory/internal/provisioner/provisionertest"
 )
 
-// The lines of the machine end gone, and the start of each line that contains a value.
+// The lines of the machine end gone, and the start of the line of a gone sent again.
 const (
 	lineGone         = "reported the machine as gone"
 	lineGoneKept     = "the gone report failed before the pool stopped; the pool sends it again at its next start"
+	lineGone400      = "update qory to the version of this Qory Apiary: Qory Apiary returned 400 for the gone report, so the pool does not send it again"
+	lineGone403      = "check this pool's key in Qory Apiary: Qory Apiary returned 403 for the gone report, so the pool does not send it again"
+	lineGone404      = "check the server address and update Qory Apiary: Qory Apiary returned 404 for the gone report, so the pool does not send it again"
 	goneFailedPrefix = "the gone report failed; the pool sends it again in "
-	goneEndedPrefix  = "check this pool's key in Qory Apiary: Qory Apiary returned "
 )
 
 // goneFailed is the line of a gone sent again after wait.
 func goneFailed(wait time.Duration) string { return goneFailedPrefix + wait.String() }
 
-// goneEnded is the line of a gone that got the signed status, "403 forbidden", say.
-func goneEnded(status string) string {
-	return goneEndedPrefix + status + " for the gone report, so the pool does not send it again"
+// noFolder fails the test when the dispatch id has a folder under the pool's folder.
+func (h *harness) noFolder(id string) {
+	h.t.Helper()
+	if _, err := os.Stat(filepath.Join(h.state, "runs", id)); !errors.Is(err, os.ErrNotExist) {
+		h.t.Errorf("the folder of %s is there: %v", id, err)
+	}
 }
 
 // withPrefix is the lines logged whose message starts with prefix.
@@ -177,12 +182,20 @@ func TestGoneIsSentAgain(t *testing.T) {
 	}
 }
 
-// TestGoneEndsAtASignedRefusal answers gone with a signed 403 forbidden and a signed
-// 404 not_found: the pool sends it once, logs the line that starts with its fix, with the
-// status and the code in its text and the error, and takes the dispatch out of the
+// TestGoneEndsAtASignedRefusal answers gone with a signed 400 invalid_request, 403
+// forbidden and 404 not_found: the pool sends it once, logs the status's line, which
+// starts with its fix, with the code in the error, and takes the dispatch out of the
 // journal and its folder away.
 func TestGoneEndsAtASignedRefusal(t *testing.T) {
-	for _, rep := range []provisionertest.Reply{{Status: 403, Code: "forbidden"}, {Status: 404, Code: "not_found"}} {
+	for _, c := range []struct {
+		rep  provisionertest.Reply
+		line string
+	}{
+		{provisionertest.Reply{Status: 400, Code: "invalid_request"}, lineGone400},
+		{provisionertest.Reply{Status: 403, Code: "forbidden"}, lineGone403},
+		{provisionertest.Reply{Status: 404, Code: "not_found"}, lineGone404},
+	} {
+		rep := c.rep
 		t.Run(rep.Code, func(t *testing.T) {
 			h := newHarness(t, 1)
 			h.srv.Script(provisionertest.RouteMachineEnd, rep)
@@ -194,8 +207,8 @@ func TestGoneEndsAtASignedRefusal(t *testing.T) {
 			if states, statuses := h.machineEnds(d.ID); len(states) != 1 || statuses[0] != rep.Status {
 				t.Errorf("the machine ends are %q, answered %v", states, statuses)
 			}
-			if m := h.log.with(goneEnded(fmt.Sprintf("%d %s", rep.Status, rep.Code))); len(m) != 1 || m[0]["dispatch_id"] != d.ID || !strings.Contains(m[0]["error"].(string), rep.Code) {
-				t.Errorf("the gone's lines are %v", h.log.withPrefix(goneEndedPrefix))
+			if m := h.log.with(c.line); len(m) != 1 || m[0]["dispatch_id"] != d.ID || !strings.Contains(m[0]["error"].(string), fmt.Sprintf("%d %s", rep.Status, rep.Code)) {
+				t.Errorf("the gone's lines are %v; the log:\n%s", m, h.log.text())
 			}
 			if len(h.log.with(lineGone)) != 0 || len(h.log.withPrefix(goneFailedPrefix)) != 0 {
 				t.Errorf("the log:\n%s", h.log.text())
@@ -259,9 +272,10 @@ func TestGoneIsKeptAtAStopAndSentAtTheNextStart(t *testing.T) {
 }
 
 // TestAReplayedMachineExistsGetsGone starts a pool with a journal of a claimed entry
-// whose dispatch the fake took dispatched for, with its folder, and an ended entry with
-// no folder: the release of the first returns 409 machine_exists, and both get gone,
-// which gets the 204, so both leave the journal, and the first's folder is removed.
+// whose dispatch the fake took dispatched for, and an ended entry, each with its folder:
+// the release of the first returns 409 machine_exists, and both get gone, which gets the
+// 204, so both leave the journal. The ended entry's folder is gone while its gone is
+// held, and the first's folder is gone at the end.
 func TestAReplayedMachineExistsGetsGone(t *testing.T) {
 	h := newHarness(t, 1)
 	h.srv.Offer(provisionertest.Run{}, provisionertest.Run{})
@@ -272,14 +286,18 @@ func TestAReplayedMachineExistsGetsGone(t *testing.T) {
 	var journal string
 	for _, e := range []pool.Entry{claimed, ended} {
 		journal += e.DispatchID + " " + e.Phase + "\n"
-	}
-	if err := os.MkdirAll(filepath.Join(h.state, "runs", claimed.DispatchID, "work"), 0o700); err != nil {
-		t.Fatal(err)
+		if err := os.MkdirAll(filepath.Join(h.state, "runs", e.DispatchID, "work"), 0o700); err != nil {
+			t.Fatal(err)
+		}
 	}
 	if err := os.WriteFile(filepath.Join(h.state, pool.JournalFile), []byte(journal), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	let := h.gate.holdNext(ended.DispatchID + "/machine-end")
 	h.start()
+	<-h.gate.reached
+	h.noFolder(ended.DispatchID)
+	let()
 	h.waitFor("both gones' lines", func() bool { return len(h.log.with(lineGone)) == 2 })
 	h.stop()
 	if m := h.log.with(lineNotReleased); len(m) != 1 || m[0]["dispatch_id"] != claimed.DispatchID || !strings.Contains(m[0]["error"].(string), "409 machine_exists") {
@@ -318,6 +336,7 @@ func TestASecondDispatchRunsWhileGoneIsHeld(t *testing.T) {
 	if states, _ := h.machineEnds(first.ID); len(states) != 0 {
 		t.Errorf("the first gone reached the fake while held: %q", states)
 	}
+	h.noFolder(first.ID)
 	let()
 	h.settled(2)
 	h.stop()

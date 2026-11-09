@@ -383,11 +383,11 @@ release may change what an existing document does, and states it under Upgrading
   started, for a dispatch whose first dispatched gets 410 `gone` or 409
   `lease_expired`, and for one whose release gets 409 `machine_exists`. A `gone` that
   fails is sent again after a wait that doubles from 1 s to 60 s, or after a 429's
-  `Retry-After`, until Qory Apiary returns 204, or a 400, 403 or 404, after which the
-  same report cannot succeed. Until then, the journal `dispatches` in the pool's folder
-  contains the dispatch at the phase `ended`. When the pool stops, it sends `gone` once
-  more, for at most 10 s; a `gone` that has not got the signed 204, 400, 403 or 404 when
-  the pool stops is sent again at its next start, beside the claims. The pool section of
+  `Retry-After`, until Qory Apiary returns a signed 204, 400, 403 or 404, after which
+  the same report cannot succeed. Until then, the journal `dispatches` in the pool's
+  folder contains the dispatch at the phase `ended`. When the pool stops, it sends
+  `gone` once more, for at most 10 s; a `gone` that has not got a signed 204, 400, 403
+  or 404 when the pool stops is sent again at its next start, beside the claims. The pool section of
   `forager.yaml` takes `runs`, `registry` and `run_config`. With `prebuilds`,
   `harness_ref` or `harness_path` in it, qory stops with `<file>: line <n>: key "<key>"
   is not one forager.yaml reads`.

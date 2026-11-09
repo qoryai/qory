@@ -34,19 +34,19 @@ const (
 	lineGone = "reported the machine as gone"
 	// lineGoneKept is a machine end gone that failed once the pool was stopping.
 	lineGoneKept = "the gone report failed before the pool stopped; the pool sends it again at its next start"
+	// lineGone400, lineGone403 and lineGone404 are a machine end gone that got a signed
+	// 400, 403 or 404, after which the pool does not send it again. The status's code
+	// is in the attribute error.
+	lineGone400 = "update qory to the version of this Qory Apiary: Qory Apiary returned 400 for the gone report, so the pool does not send it again"
+	lineGone403 = "check this pool's key in Qory Apiary: Qory Apiary returned 403 for the gone report, so the pool does not send it again"
+	lineGone404 = "check the server address and update Qory Apiary: Qory Apiary returned 404 for the gone report, so the pool does not send it again"
 )
 
-// The lines of the machine end gone that contain a value, each a format for
-// fmt.Sprintf. The value is in an attribute of the line too.
-const (
-	// lineGoneFailed is a machine end gone that failed with no answer, an unsigned
-	// answer, a signed 429, a signed 503 unavailable or another server error, with the
-	// wait before it is sent again, as Go prints a time.Duration.
-	lineGoneFailed = "the gone report failed; the pool sends it again in %s"
-	// lineGoneEnded is a machine end gone that got a signed 400, 403 or 404, with that
-	// status and its code.
-	lineGoneEnded = "check this pool's key in Qory Apiary: Qory Apiary returned %s for the gone report, so the pool does not send it again"
-)
+// lineGoneFailed is a machine end gone that failed with no response, an unsigned
+// response, a signed 429, a signed 503 unavailable or another server error: a format
+// for fmt.Sprintf of the wait before it is sent again, as Go prints a time.Duration. The
+// wait is also the attribute wait of the line.
+const lineGoneFailed = "the gone report failed; the pool sends it again in %s"
 
 // The reasons a release gives, display text in Qory Apiary. Each is 1 to 200
 // characters, as release.schema.json requires.

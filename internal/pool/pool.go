@@ -25,15 +25,15 @@
 // contract's machine end with the state gone, with which Qory Apiary frees the slot it
 // keeps for the dispatch once the dispatch ended. The pool has no machine command: qory
 // run is the dispatch's machine, and the end of qory run is the end of the machine. A
-// gone that fails, with no answer, an unsigned answer, a signed 429 or 503 unavailable,
-// or another server error, is sent again, built anew, after a wait: a signed 429's
-// Retry-After, else one that doubles from [firstBackoff] up to [maxBackoff]. It is sent
-// until Qory Apiary returns the signed 204, or a signed 400, 403 or 404, after which
-// the same call cannot succeed. The pool also sends gone, with no qory run started, for
-// a dispatch whose release returned 409 machine_exists, and for one whose first
-// dispatched returned 410 gone or 409 lease_expired, since an earlier try of dispatched
-// may have been taken with its answer lost. A gone takes none of the pool's Runs: the
-// next claim may go out while it is sent.
+// gone that fails, with no response, an unsigned response, a signed 429 or 503
+// unavailable, or another server error, is sent again, built anew, after a wait: a
+// signed 429's Retry-After, else one that doubles from [firstBackoff] up to
+// [maxBackoff]. It is sent until Qory Apiary returns a signed 204, 400, 403 or 404,
+// after which the same call cannot succeed. The pool also sends gone, with no qory run
+// started, for a dispatch whose release returned 409 machine_exists, and for one whose
+// first dispatched returned 410 gone or 409 lease_expired, since an earlier try of
+// dispatched may have been taken with its response lost. A gone takes none of the
+// pool's Runs: the next claim may go out while it is sent.
 //
 // A journal, <pool's folder>/dispatches, contains each live dispatch's id and phase,
 // claimed, dispatched or ended, never a run code. The claimed entry is written and
@@ -41,21 +41,21 @@
 // succeeds. The ended entry is written before the first gone: once qory run ended or
 // could not be started, or after the release or the dispatched that the gone follows. A
 // release of an entry left at claimed after a dispatched that succeeded returns 409
-// machine_exists, and the pool sends gone for it. The dispatch's folder is removed once
-// qory run ended and its machine log was uploaded, or before the first gone of a
-// dispatch whose qory run did not start. The entry is removed once the dispatch ends;
-// an ended entry once its gone got the signed 204, 400, 403 or 404. When the program
-// starts, before its first claim, it runs
-// the check of [Probe]: when a container on the engine's default bridge network
-// connects to the cloud metadata service, or the check cannot run, Run returns its
-// error and claims nothing. Then each claimed entry it finds is released and each
-// dispatched entry is dropped, with the folders of both. Each ended entry, and each
-// claimed one whose release returns 409 machine_exists, gets gone, sent as above in a
-// separate goroutine beside the claim loop, so the first claim does not wait for it.
+// machine_exists, and the pool sends gone for it. The dispatch's folder is removed
+// before its first gone: once qory run ended, after the upload of its machine log, or
+// at once when no qory run started. The entry is removed once the dispatch ends; an
+// ended entry once its gone got a signed 204, 400, 403 or 404. When the program starts,
+// before its first claim, it runs the check of [Probe]: when a container on the
+// engine's default bridge network connects to the cloud metadata service, or the check
+// cannot run, Run returns its error and claims nothing. Then each claimed entry it
+// finds is released and each dispatched entry is dropped, with the folders of both.
+// Each ended entry, and each claimed one whose release returns 409 machine_exists, gets
+// gone, sent as above in a separate goroutine beside the claim loop, so the first claim
+// does not wait for it.
 //
 // When ctx ends, the pool stops: it claims no more, a claim being sent is given up, a
 // dispatch not yet dispatched is released, and each qory run is stopped as [child.Run]
-// stops a command. A gone that has not got the signed 204, 400, 403 or 404 is sent once
+// stops a command. A gone that has not got a signed 204, 400, 403 or 404 is sent once
 // more, for at most [lastGoneTimeout]; when that fails, the ended entry stays, for the
 // next start. Run returns once every dispatch ended.
 package pool
@@ -65,6 +65,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -450,9 +451,10 @@ func (p *Pool) dispatched(stop, work context.Context, c provisioner.Claimed) (st
 // claim's max_lifetime_minutes passed, or once the heartbeat finds the dispatch ended.
 // Each line of its output goes to the pool's log, after the dispatch id, and is kept.
 // Once qory run ended, or could not be started, the dispatch's journal entry is written
-// at ended, the lines kept are uploaded as the dispatch's machine log, on a context that
-// does not end with stop, and dir is removed. The output is masked first with the process's mask list,
-// [secretmask.Default], which replaces the value of a URL's signature or token.
+// at ended, and the lines kept are uploaded as the dispatch's machine log, on a context
+// that does not end with stop; [Pool.end] removes dir next. The output is masked first
+// with the process's mask list, [secretmask.Default], which replaces the value of a
+// URL's signature or token.
 func (p *Pool) run(stop context.Context, c provisioner.Claimed, dir string, code *os.File) {
 	id := slog.String("dispatch_id", c.DispatchID)
 	var out outputTail
@@ -501,7 +503,6 @@ func (p *Pool) run(stop context.Context, c provisioner.Claimed, dir string, code
 	}
 	log, cut := out.text()
 	p.uploadLog(context.WithoutCancel(stop), c.DispatchID, log, cut)
-	_ = os.RemoveAll(dir)
 }
 
 // heartbeat sends dispatched for the dispatch id every [heartbeatEvery] until ctx ends.
@@ -603,8 +604,8 @@ func (p *Pool) end(stop context.Context, id string) {
 }
 
 // gone sends the machine end gone for the dispatch id, one call at a time, and reports
-// whether it is settled: it got the signed 204, or a signed 400, 403 or 404, after which
-// the same call cannot succeed. Any other failure is sent again, built anew,
+// whether it is settled: it got a signed 204, 400, 403 or 404, after which the same call
+// cannot succeed. Any other failure is sent again, built anew,
 // after a wait: a signed 429's Retry-After, else one that doubles from [firstBackoff] up
 // to [maxBackoff]. Once stop ends, gone is sent once more, for at most
 // [lastGoneTimeout], and a failure then leaves it unsettled.
@@ -622,12 +623,13 @@ func (p *Pool) gone(stop context.Context, id string) bool {
 		}
 		err := p.Client.MachineEnd(ctx, id, contracts.MachineEndGone)
 		cancel()
+		var r *provisioner.Refusal
 		switch {
 		case err == nil:
 			p.log.Info(lineGone, ids)
 			return true
-		case provisioner.EndsAttempts(err):
-			p.log.Warn(fmt.Sprintf(lineGoneEnded, refusalStatus(err)), ids, errAttr(err))
+		case provisioner.EndsAttempts(err) && errors.As(err, &r):
+			p.log.Warn(goneEndedLine[r.Status], ids, errAttr(err))
 			return true
 		case last:
 			p.log.Warn(lineGoneKept, ids, errAttr(err))
@@ -637,7 +639,6 @@ func (p *Pool) gone(stop context.Context, id string) bool {
 			continue
 		}
 		pause := wait
-		var r *provisioner.Refusal
 		if errors.Is(err, provisioner.ErrRateLimited) && errors.As(err, &r) {
 			pause = r.RetryAfter
 		} else {
@@ -648,17 +649,12 @@ func (p *Pool) gone(stop context.Context, id string) bool {
 	}
 }
 
-// refusalStatus is the status of err, a signed refusal, and its code when it has one:
-// "403 forbidden", say.
-func refusalStatus(err error) string {
-	r, ok := errors.AsType[*provisioner.Refusal](err)
-	switch {
-	case !ok:
-		return "a refusal"
-	case r.Code == "":
-		return fmt.Sprint(r.Status)
-	}
-	return fmt.Sprintf("%d %s", r.Status, r.Code)
+// goneEndedLine is the line of a gone that got each signed status after which
+// [provisioner.EndsAttempts] ends its attempts.
+var goneEndedLine = map[int]string{
+	http.StatusBadRequest: lineGone400,
+	http.StatusForbidden:  lineGone403,
+	http.StatusNotFound:   lineGone404,
 }
 
 // setPhase writes the dispatch id's journal entry at phase, and logs a write that

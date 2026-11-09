@@ -271,10 +271,10 @@ func TestTheRunsCap(t *testing.T) {
 
 // TestDispatchedFailures: a signed 429 is waited out up to three times; 409
 // lease_expired and 410 drop the dispatch with no release, and get gone, also after a
-// try whose answer was lost and which the fake took; anything else releases it, and a
-// release the fake answers 204 gets no gone. The journal entry is at ended while such a
-// gone is held. qory run starts after dispatched alone, and a qory run that ran gets
-// gone.
+// try whose response was lost and which the fake took; anything else releases it, and
+// a release that gets 204 from the fake gets no gone. While such a gone is held, the
+// journal entry is at ended and the dispatch's folder is gone. qory run starts after
+// dispatched alone, and a qory run that ran gets gone.
 func TestDispatchedFailures(t *testing.T) {
 	limited := provisionertest.Reply{Status: 429, Code: "rate_limited", RetryAfter: "2"}
 	lost := provisionertest.Reply{Drop: true}
@@ -312,6 +312,7 @@ func TestDispatchedFailures(t *testing.T) {
 				if lines, want := journalOf(t, h.state), d.ID+" "+pool.PhaseEnded; len(lines) != 1 || lines[0] != want {
 					t.Errorf("the journal while gone is held is %q, want %q", lines, want)
 				}
+				h.noFolder(d.ID)
 				let()
 			}
 			h.settled(1)
@@ -348,7 +349,7 @@ func TestDispatchedFailures(t *testing.T) {
 // TestTheRelease waits out a signed 429 to a release up to three times, takes 410 and
 // lease_expired as the dispatch over already, and logs a release that failed, 409
 // machine_exists among them. After 409 machine_exists alone the pool sends gone, with
-// the journal entry at ended while that gone is held.
+// the journal entry at ended and no folder of the dispatch while that gone is held.
 func TestTheRelease(t *testing.T) {
 	limited := provisionertest.Reply{Status: 429, Code: "rate_limited", RetryAfter: "3"}
 	for _, c := range []struct {
@@ -380,6 +381,7 @@ func TestTheRelease(t *testing.T) {
 				if lines, want := journalOf(t, h.state), h.only().ID+" "+pool.PhaseEnded; len(lines) != 1 || lines[0] != want {
 					t.Errorf("the journal while gone is held is %q, want %q", lines, want)
 				}
+				h.noFolder(h.only().ID)
 				let()
 			}
 			h.settled(1)
