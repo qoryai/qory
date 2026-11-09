@@ -1,8 +1,8 @@
 // Package provisioner is the pool program's client of Qory Apiary's provisioner
 // contract, provisioner/v1, at contracts.ProvisionerRevision: it claims a dispatch for
-// the node pool, reports that the dispatch's job started, gives a dispatch back, and
-// uploads a dispatch's machine log. It also reads the documents of a run code's
-// redemption, run/v1 documents.schema.json.
+// the node pool, reports that the dispatch's job started, gives a dispatch back,
+// uploads a dispatch's machine log, and reports the dispatch's machine gone. It also
+// reads the documents of a run code's redemption, run/v1 documents.schema.json.
 //
 // Every request is signed with the pool's access key as Forager's accesskey signs one,
 // with X-Qory-Access-Key-Id, X-Qory-Instance-Id, X-Qory-Signature-Ed25519 and
