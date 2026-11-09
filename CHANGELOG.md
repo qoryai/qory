@@ -84,7 +84,10 @@ release may change what an existing document does, and states it under Upgrading
   `review-comments`. The control plane writes the members' review comments and replies.
   A version that a run pushes only adds the run's reply to any of the open review
   comments, at most one reply to each, and closes each review comment it adds a reply to.
-  See The review comments format in `contracts/harness/v1/README.md`.
+  A review comment's `on` is an artifact version (`artifact` and `version`) or the whole
+  round of a run (`run`, the run's number). The artifact version form takes an optional
+  `screen`: the id of a screen in that artifact version, for a review comment on one
+  screen of a mockup. See The review comments format in `contracts/harness/v1/README.md`.
 - Version 1 of the proposal sources format,
   `contracts/harness/v1/proposal-sources.schema.json`: the file `sources.json` of a
   version of the artifact type `proposal`, with every source the run used to write the
@@ -97,6 +100,8 @@ release may change what an existing document does, and states it under Upgrading
   characters, and `action`: `answer`, with `question`, the id of an open question, or
   `run_again`. The text member `gaps` is gone. See The verdict format in
   `contracts/harness/v1/README.md`.
+- `images/agent-browser`: the agent image with Chromium. `images.yml` builds and checks
+  it, and `prerelease.yml` publishes it by digest. See Qory's images in `docs/run.md`.
 - `-f` on `qory harness compose`, `qory run` and `qory worktree add` takes a stack by
   reference, `<https URL>#<ref>:<folder>`: qory fetches the folder as it fetches a git
   module and composes its `qory-stack.yaml`. `examples/hello` has one, so a run takes it
@@ -403,10 +408,22 @@ release may change what an existing document does, and states it under Upgrading
   the same report cannot succeed. Until then, the journal `dispatches` in the pool's
   folder contains the dispatch at the phase `ended`. When the pool stops, it sends
   `gone` once more, for at most 10 s; a `gone` that has not got a signed 204, 400, 403
-  or 404 when the pool stops is sent again at its next start, beside the claims. The pool section of
-  `forager.yaml` takes `runs`, `registry` and `run_config`. With `prebuilds`,
-  `harness_ref` or `harness_path` in it, qory stops with `<file>: line <n>: key "<key>"
-  is not one forager.yaml reads`.
+  or 404 when the pool stops is sent again at its next start, beside the claims. A
+  release that fails, with no response, an unsigned response, a fourth signed 429, a
+  server error or another refusal, leaves the dispatch in the journal at the phase
+  `claimed`, and no run starts for it.
+  While the pool runs, the release is sent again after the same waits as `gone`, until
+  Qory Apiary releases the dispatch or returns 410 `gone`, 409 `lease_expired`, 409
+  `machine_exists`, which `gone` follows, or a signed 400, 403 or 404. A release left
+  when the pool stops is sent at its next start. A restart of the pool stops a run left
+  from a crash of the pool, removes the containers and networks of its wall, and
+  reports its machine as gone. It sends SIGTERM to each process of the run's session,
+  then SIGKILL to each one still there 30 s later while the run still holds its lock.
+  It signals a session only when it can prove that the session belongs to the run;
+  otherwise it keeps the run and prints why. The pool section of `forager.yaml` takes
+  `runs` (how many runs this host runs at once; 1 when not set), `registry` and
+  `run_config`. With `prebuilds`, `harness_ref` or `harness_path` in it, qory stops
+  with `<file>: line <n>: key "<key>" is not one forager.yaml reads`.
 - qory treats an enrolment code, `qecn_`, `qecp_`, `qecg_` or `qeci_` in any letter case,
   as a secret, as it treats `qak_`, `qrk_` and `qecr_`. Where qory prints a phrase in
   place of a value or a name that contains one of those, it prints "(a value that
@@ -635,6 +652,11 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Fixed
 
+- A Copilot CLI session gets the harness's hooks in a repository that commits
+  `.github/hooks/hooks.json`. qory links `settings/copilot/hooks.json` as
+  `.github/hooks/qory-hooks.json`, and Copilot CLI runs the hooks of both files. Until
+  now, qory wrote no link at `.github/hooks/hooks.json` when the repository had a file
+  there, and the session ran with no harness hooks.
 - In the `agent` image, Claude Code's Read of chosen pages of a PDF works: the image
   contains poppler's `pdftoppm`. Until now, it failed with `pdftoppm is not installed`.
 - In a dispatched walled run of Claude Code from a control plane, the agent's `qory
@@ -740,8 +762,8 @@ release may change what an existing document does, and states it under Upgrading
   it removes with the folder, so no run reads the registry logins, Docker settings or git
   configuration under the pool user's `HOME`. It stops with exit 2 when the runs'
   `forager.yaml` sets `wall.mounts`, which every run would see.
-- With `pool.runs` above 1, `qory run pool` stops with exit 2 unless the runs'
-  `forager.yaml` sets both `wall.pids_limit` and `wall.memory`.
+- If `pool.runs` is above 1, set `wall.pids_limit` and `wall.memory` in the runs'
+  `forager.yaml`; otherwise `qory run pool` exits 2 before its first claim.
 - `qory run pool` stops with exit 2 when the runs' `forager.yaml` sets no
   `wall.engine_proxy_file`, so the engine pulls each run's image through the run's
   gateway.

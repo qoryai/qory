@@ -24,6 +24,9 @@ const (
 	lineBeatFailed  = "dispatched failed, so it is sent again after a wait"
 	lineReleased    = "released the run"
 	lineNotReleased = "the run could not be released"
+	lineRelease400  = "update qory to the version of this Qory Apiary: Qory Apiary returned 400 for the release, so the pool does not send it again"
+	lineRelease403  = "check this pool's key in Qory Apiary: Qory Apiary returned 403 for the release, so the pool does not send it again"
+	lineRelease404  = "check the server address and update Qory Apiary: Qory Apiary returned 404 for the release, so the pool does not send it again"
 	lineOverAlready = "the dispatch was over already, so nothing was released"
 	lineNotStarted  = "the run could not be started"
 	reasonMachine   = "this pool creates no machine of the type in the claim"
@@ -32,7 +35,13 @@ const (
 	reasonStopped   = "the pool program stopped before the run started"
 	reasonLease     = "the lease ended before the run could be started"
 	withheld        = "(a line that contains a secret, left out)"
+	lineReleaseKept = "the release of the run failed before the pool stopped; the pool sends it again at its next start"
+	// releaseFailedPrefix is the start of the line of a release sent again.
+	releaseFailedPrefix = "the release of the run failed; the pool sends it again in "
 )
+
+// releaseFailed is the line of a release sent again after wait.
+func releaseFailed(wait time.Duration) string { return releaseFailedPrefix + wait.String() }
 
 // allowed are the variables a qory run may get, as child.Env gives them.
 var allowed = []string{"PATH", "HOME", "TMPDIR", "LANG", "DOCKER_HOST", "DOCKER_CONTEXT", "XDG_CONFIG_HOME", "XDG_STATE_HOME"}
@@ -225,8 +234,9 @@ func TestTheLifetime(t *testing.T) {
 	h.notReleased()
 }
 
-// TestAClaimWithAMachineIsReleased releases a claim whose machine member is set, before
-// dispatched, writes no run code's file and starts no qory run.
+// TestAClaimWithAMachineIsReleased releases a claim whose machine member is set, an
+// answer the contract rules out for a claim without offers, before dispatched, and
+// starts no qory run.
 func TestAClaimWithAMachineIsReleased(t *testing.T) {
 	h := newHarness(t, 1)
 	h.srv.Offer(provisionertest.Run{Machine: "large"})
@@ -347,23 +357,30 @@ func TestDispatchedFailures(t *testing.T) {
 }
 
 // TestTheRelease waits out a signed 429 to a release up to three times, takes 410 and
-// lease_expired as the dispatch over already, and logs a release that failed, 409
-// machine_exists among them. After 409 machine_exists alone the pool sends gone, with
-// the journal entry at ended and no folder of the dispatch while that gone is held.
+// lease_expired as the dispatch over already, and logs a release that ended without
+// it, 409 machine_exists and a signed 400 among them, which it does not send again.
+// After 409 machine_exists alone the pool sends gone, with the journal entry at ended
+// and no folder of the dispatch while that gone is held. A fourth 429 and an unsigned
+// answer are sent again, after the 429's Retry-After or a second, with a line that has
+// the wait, and the fake then releases the dispatch.
 func TestTheRelease(t *testing.T) {
 	limited := provisionertest.Reply{Status: 429, Code: "rate_limited", RetryAfter: "3"}
 	for _, c := range []struct {
-		name    string
-		replies []provisionertest.Reply
-		line    string
-		waits   int
+		name     string
+		replies  []provisionertest.Reply
+		line     string
+		waits    int
+		releases int
 	}{
-		{name: "429 twice", replies: []provisionertest.Reply{limited, limited}, line: lineReleased, waits: 2},
-		{name: "429 four times", replies: []provisionertest.Reply{limited, limited, limited, limited}, line: lineNotReleased, waits: 3},
-		{name: "gone", replies: []provisionertest.Reply{{Status: 410, Code: "gone"}}, line: lineOverAlready},
-		{name: "lease_expired", replies: []provisionertest.Reply{{Status: 409, Code: "lease_expired"}}, line: lineOverAlready},
-		{name: "machine_exists", replies: []provisionertest.Reply{{Status: 409, Code: "machine_exists"}}, line: lineNotReleased},
-		{name: "unsigned", replies: slices.Repeat([]provisionertest.Reply{{Status: 500, Unsigned: true}}, 5), line: lineNotReleased},
+		{name: "429 twice", replies: []provisionertest.Reply{limited, limited}, line: lineReleased, waits: 2, releases: 3},
+		{name: "429 four times", replies: []provisionertest.Reply{limited, limited, limited, limited}, line: releaseFailed(3 * time.Second), waits: 4, releases: 5},
+		{name: "gone", replies: []provisionertest.Reply{{Status: 410, Code: "gone"}}, line: lineOverAlready, releases: 1},
+		{name: "lease_expired", replies: []provisionertest.Reply{{Status: 409, Code: "lease_expired"}}, line: lineOverAlready, releases: 1},
+		{name: "machine_exists", replies: []provisionertest.Reply{{Status: 409, Code: "machine_exists"}}, line: lineNotReleased, releases: 1},
+		{name: "invalid_request", replies: []provisionertest.Reply{{Status: 400, Code: "invalid_request"}}, line: lineRelease400, releases: 1},
+		{name: "forbidden", replies: []provisionertest.Reply{{Status: 403, Code: "forbidden"}}, line: lineRelease403, releases: 1},
+		{name: "not_found", replies: []provisionertest.Reply{{Status: 404, Code: "not_found"}}, line: lineRelease404, releases: 1},
+		{name: "unsigned", replies: slices.Repeat([]provisionertest.Reply{{Status: 500, Unsigned: true}}, 5), line: releaseFailed(time.Second), releases: 6},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			h := newHarness(t, 1)
@@ -402,8 +419,164 @@ func TestTheRelease(t *testing.T) {
 			if states, _ := h.machineEnds(h.only().ID); !slices.Equal(states, want) {
 				t.Errorf("the machine ends are %q, want %q", states, want)
 			}
+			if n := h.count(provisionertest.RouteRelease); n != c.releases {
+				t.Errorf("%d releases were sent, want %d", n, c.releases)
+			}
+			if strings.HasPrefix(c.line, releaseFailedPrefix) {
+				if m := h.log.with(c.line); m[0]["reason"] != reasonMachine || m[0]["error"] == nil || m[0]["wait"] == nil {
+					t.Errorf("the failed release's line is %v", m[0])
+				}
+				if len(h.log.with(lineReleased)) != 1 || len(h.log.with(lineNotReleased)) != 0 {
+					t.Errorf("the log:\n%s", h.log.text())
+				}
+			}
 		})
 	}
+}
+
+// holdReleaseAgain makes the pool's wait of a second, the first wait before a release is
+// sent again, wait until the test closes let or the pool stops; paused gets a value
+// when that wait starts.
+func (h *harness) holdReleaseAgain() (let chan struct{}, paused chan struct{}) {
+	let, paused = make(chan struct{}), make(chan struct{}, 4)
+	h.setSleep(func(ctx context.Context, d time.Duration) error {
+		if d != time.Second {
+			return ctx.Err()
+		}
+		select {
+		case paused <- struct{}{}:
+		default:
+		}
+		select {
+		case <-let:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	})
+	return let, paused
+}
+
+// waitOn waits for a value on ch.
+func (h *harness) waitOn(ch chan struct{}, what string) {
+	h.t.Helper()
+	select {
+	case <-ch:
+	case <-time.After(20 * time.Second):
+		h.t.Fatalf("%s never happened; the fake was sent %v; the log:\n%s", what, h.srv.Routes(), h.log.text())
+	}
+}
+
+// lostTwice scripts the fake so that every try of dispatched and of the release that
+// follows it gets no answer. With taken, the fake takes the first dispatched before its
+// answer is lost, so a release then gets 409 machine_exists; otherwise it takes none.
+func lostTwice(srv *provisionertest.Server, taken bool) {
+	lost := provisionertest.Reply{Status: 503, Drop: true}
+	if taken {
+		lost.Status = 0
+	}
+	srv.Script(provisionertest.RouteDispatched, slices.Repeat([]provisionertest.Reply{lost}, 5)...)
+	srv.Script(provisionertest.RouteRelease, slices.Repeat([]provisionertest.Reply{lost}, 5)...)
+}
+
+// TestALostDispatchedAndALostReleaseKeepTheClaim loses every answer to dispatched and
+// to the release after it. The journal keeps the entry at claimed, no qory run starts,
+// and the slot of pool.runs is free: a second run offered is dispatched while the
+// release waits to be sent again. After a second the pool sends the release again: when
+// the fake took no dispatched, it releases the dispatch, for the run could not be
+// started, and the entry leaves the journal; when it took the lost dispatched, the
+// release gets 409 machine_exists, and the dispatch gets gone, answered 204.
+func TestALostDispatchedAndALostReleaseKeepTheClaim(t *testing.T) {
+	for _, taken := range []bool{false, true} {
+		t.Run(fmt.Sprintf("taken %v", taken), func(t *testing.T) {
+			h := newHarness(t, 1)
+			lostTwice(h.srv, taken)
+			let, paused := h.holdReleaseAgain()
+			h.srv.Offer(provisionertest.Run{}, provisionertest.Run{})
+			h.start()
+			h.waitOn(paused, "the wait before the release is sent again")
+			first := h.srv.Dispatches()[0]
+			if lines := journalOf(t, h.state); len(lines) == 0 || lines[0] != first.ID+" "+pool.PhaseClaimed {
+				t.Errorf("the journal while the release waits is %q, want %q first", lines, first.ID+" "+pool.PhaseClaimed)
+			}
+			if m := h.log.with(releaseFailed(time.Second)); len(m) != 1 || m[0]["dispatch_id"] != first.ID || m[0]["reason"] != reasonNotStart || m[0]["wait"] != float64(time.Second) || m[0]["error"] == nil {
+				t.Errorf("the failed release's lines are %v", m)
+			}
+			h.waitFor("the second run's end", func() bool {
+				ds := h.srv.Dispatches()
+				return len(ds) == 2 && h.over(ds[1].ID)
+			})
+			close(let)
+			h.settled(2)
+			h.stop()
+			if _, ran := h.reportOf(first.ID); ran {
+				t.Error("qory run ran for the first dispatch")
+			}
+			if n := h.count(provisionertest.RouteRelease); n != 6 {
+				t.Errorf("%d releases were sent, want the client's 5 tries and 1 more", n)
+			}
+			var want []string
+			if taken {
+				want = []string{"gone"}
+				if m := h.log.with(lineNotReleased); len(m) != 1 || !strings.Contains(m[0]["error"].(string), "409 machine_exists") {
+					t.Errorf("the release's lines are %v", m)
+				}
+			} else {
+				h.released(first, reasonNotStart)
+			}
+			if states, _ := h.machineEnds(first.ID); !slices.Equal(states, want) {
+				t.Errorf("the machine ends of the first dispatch are %q, want %q", states, want)
+			}
+			h.noFolder(first.ID)
+		})
+	}
+}
+
+// TestAReleaseLeftAtAStopIsSentAtTheNextStart loses every answer to dispatched, which
+// the fake takes, and to the release after it, and stops the pool while the release
+// waits to be sent again: the pool logs that it sends the release at its next start, and
+// Run returns with the entry at claimed. The pool started again releases the entry
+// before its first claim, gets 409 machine_exists, and sends gone, answered 204; the
+// entry then leaves the journal. No qory run starts.
+func TestAReleaseLeftAtAStopIsSentAtTheNextStart(t *testing.T) {
+	h := newHarness(t, 1)
+	lostTwice(h.srv, true)
+	_, paused := h.holdReleaseAgain()
+	h.srv.Offer(provisionertest.Run{})
+	h.start()
+	h.waitOn(paused, "the wait before the release is sent again")
+	d := h.only()
+	if err := h.stop(); err != nil {
+		t.Fatal(err)
+	}
+	if m := h.log.with(lineReleaseKept); len(m) != 1 || m[0]["dispatch_id"] != d.ID || m[0]["reason"] != reasonNotStart || m[0]["error"] == nil {
+		t.Errorf("the kept release's lines are %v", m)
+	}
+	if lines, want := journalOf(t, h.state), d.ID+" "+pool.PhaseClaimed; len(lines) != 1 || lines[0] != want {
+		t.Fatalf("the journal after the stop is %q, want %q", lines, want)
+	}
+	if n := h.count(provisionertest.RouteRelease); n != 5 {
+		t.Errorf("%d releases were sent before the stop, want the client's 5 tries", n)
+	}
+
+	h.setSleep(nil)
+	before := len(h.srv.Calls())
+	h.start()
+	h.waitFor("the gone's line", func() bool { return len(h.log.with(lineGone)) == 1 })
+	h.stop()
+	if c := h.srv.Calls()[before]; c.Route != provisionertest.RouteRelease || c.DispatchID != d.ID || c.Status != 409 {
+		t.Errorf("the first request after the start was %s %s, answered %d", c.Route, c.DispatchID, c.Status)
+	}
+	if states, statuses := h.machineEnds(d.ID); !slices.Equal(states, []string{"gone"}) || statuses[0] != 204 {
+		t.Errorf("the machine ends are %q, answered %v", states, statuses)
+	}
+	if lines := journalOf(t, h.state); len(lines) != 0 {
+		t.Errorf("the journal is %q", lines)
+	}
+	if _, ran := h.reportOf(d.ID); ran {
+		t.Error("qory run ran")
+	}
+	h.noFolder(d.ID)
 }
 
 // TestTheClaimBacksOff sends a claim that failed again after a wait that doubles from
@@ -539,8 +712,8 @@ func TestAStopAtEachPhase(t *testing.T) {
 
 // TestTheJournalAfterAKill kills the pool at each phase, by taking the journal as it is
 // on disk then, and starts a second pool with it: before its first claim, the second
-// releases a claimed dispatch, for the pool program restarted, and drops a dispatched
-// one with no release. For an ended one, killed while its gone is held, the second
+// releases a claimed dispatch, for the pool program restarted. For a dispatched one,
+// with no release, and for an ended one, killed while its gone is held, the second
 // sends gone beside its claims, and takes the entry out of the journal on the 204. The
 // journal is 0600 in a 0700 folder and contains the dispatch id and the phase alone.
 func TestTheJournalAfterAKill(t *testing.T) {
@@ -591,7 +764,7 @@ func TestTheJournalAfterAKill(t *testing.T) {
 			second.waitFor("a claim", func() bool {
 				return slices.ContainsFunc(first.srv.Calls()[before:], func(c provisionertest.Call) bool { return c.Route == provisionertest.RouteClaim })
 			})
-			if phase == pool.PhaseEnded {
+			if phase != pool.PhaseClaimed {
 				second.waitFor("the gone's line", func() bool { return len(second.log.with(lineGone)) == 1 })
 			}
 			second.stop()
@@ -603,11 +776,7 @@ func TestTheJournalAfterAKill(t *testing.T) {
 				if calls[0].Route != provisionertest.RouteRelease || calls[0].DispatchID != d.ID {
 					t.Errorf("the second pool's first request was %s %s", calls[0].Route, calls[0].DispatchID)
 				}
-			case pool.PhaseDispatched:
-				if calls[0].Route != provisionertest.RouteClaim {
-					t.Errorf("the second pool's first request was %s %s, want its claim", calls[0].Route, calls[0].DispatchID)
-				}
-			case pool.PhaseEnded:
+			case pool.PhaseDispatched, pool.PhaseEnded:
 				second.notReleased()
 				if got, _ := first.srv.Dispatch(d.ID); !slices.Equal(got.MachineEnds, []string{"gone"}) {
 					t.Errorf("the fake took the machine ends %q, want one gone", got.MachineEnds)
@@ -640,10 +809,12 @@ func claimTo(t *testing.T, srv *provisionertest.Server, phase string) pool.Entry
 }
 
 // TestTheJournalIsReplayedBeforeTheFirstClaim releases each claimed entry of the
-// journal it starts with, for the pool program restarted, and drops each dispatched one
-// with no release. One over already, 410, leaves the journal as one released does, and
-// so does its folder, and one refused 403 too; one whose release gets no response stays
-// for the next start. A run code's file left in the pool's folder is removed.
+// journal it starts with, for the pool program restarted, and sends gone for each
+// dispatched one, with no release. One over already, 410, leaves the journal as one released does, and
+// so does its folder, and one answered 403 too. One whose release gets no signed answer
+// stays at claimed, with its folder, while its release is sent again beside the claim
+// loop after a second; once the fake released it, it leaves too. A run code's file left
+// in the pool's folder is removed.
 func TestTheJournalIsReplayedBeforeTheFirstClaim(t *testing.T) {
 	h := newHarness(t, 1)
 	h.srv.Offer(provisionertest.Run{}, provisionertest.Run{}, provisionertest.Run{}, provisionertest.Run{})
@@ -671,32 +842,59 @@ func TestTheJournalIsReplayedBeforeTheFirstClaim(t *testing.T) {
 	if err := os.WriteFile(left, []byte("left"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	again := make(chan struct{})
+	h.setSleep(func(ctx context.Context, d time.Duration) error {
+		if d != time.Second {
+			return ctx.Err()
+		}
+		select {
+		case <-again:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	})
 	before := len(h.srv.Calls())
 	h.start()
 	h.waitFor("a claim", func() bool {
 		return slices.ContainsFunc(h.srv.Calls()[before:], func(c provisionertest.Call) bool { return c.Route == provisionertest.RouteClaim })
 	})
+	h.waitFor("the failed release's line", func() bool { return len(h.log.with(releaseFailed(time.Second))) == 1 })
+	if lines, want := journalOf(t, h.state), entries[4].DispatchID+" claimed"; len(lines) != 1 || lines[0] != want {
+		t.Errorf("the journal while the release waits is %q, want %q", lines, want)
+	}
+	if _, err := os.Stat(filepath.Join(h.state, "runs", entries[4].DispatchID)); err != nil {
+		t.Errorf("the folder of the entry whose release waits: %v", err)
+	}
+	close(again)
+	h.waitFor("the second release's line", func() bool { return len(h.log.with(lineReleased)) == 2 })
+	h.waitFor("the dispatched entry's gone", func() bool { return len(h.log.with(lineGone)) == 1 })
 	h.stop()
 	d, _ := h.srv.Dispatch(entries[0].DispatchID)
 	h.released(d, reasonRestarted)
-	calls := h.srv.Calls()[before:]
+	calls := slices.DeleteFunc(h.srv.Calls()[before:], func(c provisionertest.Call) bool { return c.Route == provisionertest.RouteMachineEnd })
 	for i, e := range []pool.Entry{entries[0], entries[2], entries[3], entries[4]} {
 		if c := calls[i]; c.Route != provisionertest.RouteRelease || c.DispatchID != e.DispatchID {
 			t.Errorf("request %d was %s %s, want the release of %s", i, c.Route, c.DispatchID, e.DispatchID)
 		}
 	}
 	if slices.ContainsFunc(calls, func(c provisionertest.Call) bool { return c.DispatchID == entries[1].DispatchID }) {
-		t.Error("a request was sent for the dispatched entry")
+		t.Error("a request other than gone was sent for the dispatched entry")
+	}
+	if states, _ := h.machineEnds(entries[1].DispatchID); !slices.Equal(states, []string{"gone"}) {
+		t.Errorf("the dispatched entry's machine ends are %q, want one gone", states)
 	}
 	if len(h.log.with(lineOverAlready)) != 1 {
 		t.Errorf("the ended dispatch's release was not logged as over already:\n%s", h.log.text())
 	}
-	if lines, want := journalOf(t, h.state), entries[4].DispatchID+" claimed"; len(lines) != 1 || lines[0] != want {
-		t.Errorf("the journal is %q, want %q", lines, want)
+	if lines := journalOf(t, h.state); len(lines) != 0 {
+		t.Errorf("the journal is %q", lines)
+	}
+	if d, _ := h.srv.Dispatch(entries[4].DispatchID); d.Release == nil {
+		t.Errorf("the fake did not release %s", d.ID)
 	}
 	for i, e := range entries {
-		_, err := os.Stat(filepath.Join(h.state, "runs", e.DispatchID))
-		if gone := errors.Is(err, os.ErrNotExist); gone != (i < 4) {
+		if _, err := os.Stat(filepath.Join(h.state, "runs", e.DispatchID)); !errors.Is(err, os.ErrNotExist) {
 			t.Errorf("the folder of entry %d: %v", i, err)
 		}
 	}

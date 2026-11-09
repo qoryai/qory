@@ -830,6 +830,33 @@ func TestReviewCommentsSchema(t *testing.T) {
 		{replace(`"artifact": "reply-draft"`, `"artifact": "reply--draft"`), false},
 		{replace(`"artifact": "reply-draft"`, `"artifact": "`+strings.Repeat("a", 64)+`"`), true},
 		{replace(`"artifact": "reply-draft"`, `"artifact": "`+strings.Repeat("a", 65)+`"`), false},
+		// on.screen is optional: on a closed review comment with a run's reply, and on an
+		// open one. reviewCommentsDocument itself has no screen.
+		{replace(`"version": 2}`, `"version": 2, "screen": "cart"}`), true},
+		{replace(`"version": 1}`, `"version": 1, "screen": "cart"}`), true},
+		{replace(`"version": 2}`, `"version": 2, "screen": "`+strings.Repeat("a", 32)+`"}`), true},
+		{replace(`"version": 2}`, `"version": 2, "screen": "`+strings.Repeat("a", 33)+`"}`), false},
+		{replace(`"version": 2}`, `"version": 2, "screen": ""}`), false},
+		{replace(`"version": 2}`, `"version": 2, "screen": 1}`), false},
+		{replace(`"version": 2}`, `"version": 2, "screen": null}`), false},
+		{replace(`"version": 2}`, `"version": 2, "screen": ["cart"]}`), false},
+		{replace(`"version": 2}`, `"version": 2, "screen": "a\nb"}`), false},
+		{replace(`"version": 2}`, `"version": 2, "screen": "a\u202eb"}`), false},
+		// on a round: on has only run, the run's number from 1, and no screen.
+		{replace(`{"artifact": "reply-draft", "version": 1}`, `{"run": 3}`), true},
+		{replace(`{"artifact": "proposal", "version": 2}`, `{"run": 1}`), true},
+		{replace(`{"artifact": "reply-draft", "version": 1}`, `{"run": 0}`), false},
+		{replace(`{"artifact": "reply-draft", "version": 1}`, `{"run": 1, "artifact": "proposal"}`), false},
+		{replace(`{"artifact": "reply-draft", "version": 1}`, `{"run": 1, "version": 1}`), false},
+		{replace(`{"artifact": "reply-draft", "version": 1}`, `{"run": 3, "screen": "cart"}`), false},
+		{replace(`{"artifact": "reply-draft", "version": 1}`, `{"run": "3"}`), false},
+		{replace(`{"artifact": "reply-draft", "version": 1}`, `{"run": 1.5}`), false},
+		{replace(`{"artifact": "reply-draft", "version": 1}`, `{}`), false},
+		{replace(`{"artifact": "reply-draft", "version": 1}`, `{"artifact": "reply-draft", "version": 1, "run": 1}`), false},
+		// on and a reply's by are objects.
+		{replace(`{"artifact": "reply-draft", "version": 1}`, `3`), false},
+		{replace(`{"artifact": "reply-draft", "version": 1}`, `null`), false},
+		{replace(`"by": {"run": 3}`, `"by": 3`), false},
 		// text
 		{replace(`"Why two steps?"`, `"`+strings.Repeat("a", 2000)+`"`), true},
 		{replace(`"Why two steps?"`, `"`+strings.Repeat("a", 2001)+`"`), false},

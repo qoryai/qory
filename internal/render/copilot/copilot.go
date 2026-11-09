@@ -1,12 +1,13 @@
 // Package copilot renders for GitHub Copilot CLI, which reads agents from .github/agents,
-// hook files from .github/hooks, AGENTS.md at the checkout root, and skills from
+// every *.json hook file in .github/hooks, AGENTS.md at the checkout root, and skills from
 // .agents/skills. All four are linked into the checkout, the two under .github softly, so
-// a repository's own agents and hooks keep their place. The model is a user setting in
-// Copilot and is not written, and Copilot CLI reads no project prompt files and has no
-// output styles, and reads MCP servers from the user's home, so commands, output styles
-// and MCP servers are skipped. .github is the repository's, so a files entry named
-// copilot/<path> is not reached through a directory link: each gets a soft link of its
-// own at .github/<path>, which is how a module ships .github/copilot-instructions.md or
+// a repository's agents and hooks keep their place. The harness's hook files are linked as
+// .github/hooks/qory-<name>, see [hookFile]. The model is a user setting in Copilot and is
+// not written, and Copilot CLI reads no project prompt files and has no output styles, and
+// reads MCP servers from the user's home, so commands, output styles and MCP servers are
+// skipped. .github is the repository's, so a files entry named copilot/<path> is not
+// reached through a directory link: each gets a soft link at .github/<path>, which is how
+// a module ships .github/copilot-instructions.md or
 // .github/instructions/web.instructions.md.
 //
 // The paths under .github a files entry may not take, see [render.Reserved]:
@@ -35,6 +36,11 @@ import (
 // Runtime is the target.runtime value for GitHub Copilot CLI, and the name of its
 // directory in the home.
 const Runtime = "copilot"
+
+// hookFile is the name in hooks/ and .github/hooks of settings/copilot/<file>: qory-<file>.
+// Copilot CLI loads every *.json in .github/hooks, so a repository's hooks.json stays and
+// runs too. A file qory did not write at a qory- name is passed over, like any soft link.
+func hookFile(file string) string { return "qory-" + file }
 
 // copilot implements [render.Runtime] for GitHub Copilot CLI.
 type copilot struct{}
@@ -85,10 +91,10 @@ func (copilot) Reserved() []render.Reserved {
 }
 
 // Render writes agents/<name>.agent.md per agent with the agent's name, description,
-// tools and model, and the settings/copilot/ files into hooks/, where Copilot reads its
-// hook files, so settings/copilot/hooks.json reaches .github/hooks/hooks.json. Both
-// directories are created even when nothing goes in them. The target model reaches no
-// file, because Copilot keeps the model in a user setting.
+// tools and model, and each settings/copilot/<name> file into hooks/ under the name
+// [hookFile] returns, so settings/copilot/hooks.json reaches .github/hooks/qory-hooks.json.
+// Both directories are created even when nothing goes in them. The target model reaches
+// no file, because Copilot keeps the model in a user setting.
 func (copilot) Render(res *compose.Result, dir, home string) error {
 	for _, sub := range []string{"agents", "hooks"} {
 		if err := os.MkdirAll(filepath.Join(dir, sub), 0o755); err != nil {
@@ -98,7 +104,7 @@ func (copilot) Render(res *compose.Result, dir, home string) error {
 	if err := render.WriteAgents(res, render.Bare, dir, "agents", ".agent.md", "name", "description", "tools", "model"); err != nil {
 		return err
 	}
-	if err := render.WriteSettings(res, Runtime, filepath.Join(dir, "hooks"), home, nil, nil); err != nil {
+	if err := render.WriteSettingsAs(res, Runtime, filepath.Join(dir, "hooks"), home, nil, nil, hookFile); err != nil {
 		return err
 	}
 	if servers := res.MCPFor(home); servers != nil {

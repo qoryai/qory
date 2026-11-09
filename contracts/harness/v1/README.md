@@ -553,12 +553,12 @@ answer keeps `decision` too. This is version 1 of the format ([questions.schema.
 ## The review comments format
 
 A review comments document records the members' review comments on a work item's artifact
-versions, such as a proposal, and the replies to them, one document per work item and at
-most 1 MiB. The control plane writes the members' review comments and replies. A version
-that a run pushes only adds the run's reply to any of the open review comments, at most
-one reply to each, and closes each review comment it adds a reply to: it changes no
-member's text, drops no id and adds no review comment. A closed review comment has at
-least one reply by a run. A run's reply has an `outcome`:
+versions, such as a proposal, or on the whole round of a run, and the replies to them, one
+document per work item and at most 1 MiB. The control plane writes the members' review
+comments and replies. A version that a run pushes only adds the run's reply to any of the
+open review comments, at most one reply to each, and closes each review comment it adds a
+reply to: it changes no member's text, drops no id and adds no review comment. A closed
+review comment has at least one reply by a run. A run's reply has an `outcome`:
 
 | `outcome` | Meaning |
 |---|---|
@@ -567,8 +567,21 @@ least one reply by a run. A run's reply has an `outcome`:
 | `declined` | the review comment is a request for a change that the run did not make, and the reply contains the reason |
 | `asked` | the run could not settle the review comment and added a question for a person to the `questions` artifact; the reply's `question` is the id of that question in the newest `questions` version, so the run pushes the questions before the review comments |
 
-A member's reply has no `outcome` and no `question`. This is version 1 of the format
-([review-comments.schema.json](review-comments.schema.json)).
+A member's reply has no `outcome` and no `question`.
+
+A review comment's `on` has one of two forms:
+
+- On an output, `on` has the artifact type's name in `artifact` and the version's number
+  in `version`: the review comment is about that artifact version. For a review comment
+  on one screen of a mockup, `on` also has `screen`: the id of a screen in that artifact
+  version, 1 to 32 characters on one line.
+- On a round, `on` has only `run`, the number of a run, from 1: the review comment is
+  about everything that run produced and the round as a whole. `run` is the number of the
+  run whose round the member commented on.
+
+A version that a run pushes keeps `on` unchanged.
+
+This is version 1 of the format ([review-comments.schema.json](review-comments.schema.json)).
 
 ## The proposal sources format
 
@@ -1188,9 +1201,13 @@ Per runtime, the files written into its directory:
   with the servers under `mcpServers`, and `plugin/`, the launch spec, never linked into
   the checkout (§Launching).
 - **copilot**: `agents/<name>.agent.md` with `name`, `description`, `tools` and `model`,
-  the `settings/copilot/` files written under `hooks/`, so `settings/copilot/hooks.json`
-  reaches `.github/hooks/hooks.json`, and for a launch `workspace/.github` with the
-  skills and agents, and `mcp.json` with the servers (§Launching).
+  each `settings/copilot/<name>` file written under `hooks/` as `qory-<name>`, so
+  `settings/copilot/hooks.json` reaches `.github/hooks/qory-hooks.json`, and for a launch
+  `workspace/.github` with the skills and agents, and `mcp.json` with the servers
+  (§Launching). Copilot CLI loads every `*.json` file in `.github/hooks`, so a
+  repository's `.github/hooks/hooks.json` runs beside the harness's hooks and stays as
+  the repository has it. qory passes over a file at a `qory-` name that it did not write,
+  and lists it under `kept`.
 - **amp**: the `settings/amp/` files such as `settings.json`, with the servers under
   `amp.mcpServers`.
 - **goose**: `agents/<name>.md` with `name`, `description` and `model`.
