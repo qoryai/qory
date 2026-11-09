@@ -75,10 +75,16 @@ type report struct {
 	// FD3File reports whether descriptor 3 was a regular file, mode 0600, that no name
 	// links to, open for reading alone.
 	FD3File bool
+	// FD4Lock reports whether descriptor 4 was the file run.lock of its dispatch's
+	// folder.
+	FD4Lock bool
 	CodeSum string
 }
 
 func TestMain(m *testing.M) {
+	if len(os.Args) == 4 && os.Args[1] == leaderArg {
+		os.Exit(fakeLeader(os.Args[2], os.Args[3]))
+	}
 	if len(os.Args) > 2 && os.Args[1] == "run" && os.Args[2] == "--rm" {
 		os.Exit(fakeProbe())
 	}
@@ -150,6 +156,9 @@ func fakeQory() int {
 	if info, err := os.Stat(os.Getenv("HOME")); err == nil && info.IsDir() {
 		rep.HomeMode = info.Mode().Perm()
 	}
+	var fd4, lock syscall.Stat_t
+	rep.FD4Lock = syscall.Fstat(child.HoldFD, &fd4) == nil && syscall.Stat(filepath.Join(filepath.Dir(cwd), "run.lock"), &lock) == nil &&
+		fd4.Dev == lock.Dev && fd4.Ino == lock.Ino
 	var code []byte
 	if fd3 {
 		f := os.NewFile(uintptr(child.KeyFD), "code")
@@ -551,10 +560,11 @@ func (h *harness) stop() error {
 	return nil
 }
 
-// waitFor waits until cond holds.
+// waitFor waits until cond holds, for up to 60 s: a test under -race on a busy machine
+// can take more than 20 s.
 func (h *harness) waitFor(what string, cond func() bool) {
 	h.t.Helper()
-	deadline := time.Now().Add(20 * time.Second)
+	deadline := time.Now().Add(60 * time.Second)
 	for !cond() {
 		if time.Now().After(deadline) {
 			h.t.Fatalf("%s never happened; the fake was sent %v; the log:\n%s", what, h.srv.Routes(), h.log.text())
@@ -572,6 +582,7 @@ func (h *harness) waitFor(what string, cond func() bool) {
 var overLines = []string{
 	"released the run", "the dispatch was over already, so nothing was released", "the run could not be released",
 	"Qory Apiary did not record the run's start", lineGone, lineGone400, lineGone403, lineGone404,
+	lineRelease400, lineRelease403, lineRelease404,
 }
 
 // settled waits until the fake made n dispatches, the pool logged one of [overLines]

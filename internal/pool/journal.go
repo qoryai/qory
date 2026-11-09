@@ -25,7 +25,7 @@ const maxJournal = 1 << 20
 // The phases of a dispatch, as the journal contains them: claimed; dispatched, its
 // start recorded at Qory Apiary; and ended, its qory run over, while the machine end
 // gone is not yet settled. A claimed dispatch may be released; a dispatched one may
-// not, so a replay drops it; an ended one gets gone again at the replay.
+// not, so a replay writes it at ended; an ended one gets gone again at the replay.
 const (
 	PhaseClaimed    = "claimed"
 	PhaseDispatched = "dispatched"

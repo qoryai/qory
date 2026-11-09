@@ -20,6 +20,7 @@ import (
 
 	"github.com/qoryai/qory/internal/pool/child"
 	"github.com/qoryai/qory/internal/secretmask"
+	"golang.org/x/sys/unix"
 )
 
 // fakeArg is the first argument that makes the test binary the fake command.
@@ -53,7 +54,9 @@ type report struct {
 	StdinNull bool
 	// CodeOK reports whether descriptor 3 is a regular file that no name links to, and
 	// contains the script's Code.
-	CodeOK   bool
+	CodeOK bool
+	// FD4Ino is the inode of the file of descriptor 4, 0 when it is not open.
+	FD4Ino   uint64
 	Problems []string
 }
 
@@ -91,6 +94,10 @@ func fake(file string, fd3 bool) int {
 		}
 	}
 	rep.FD3Pipe = fd3
+	var st4 syscall.Stat_t
+	if syscall.Fstat(child.HoldFD, &st4) == nil {
+		rep.FD4Ino = uint64(st4.Ino)
+	}
 	if s.Code != "" {
 		var st syscall.Stat_t
 		if syscall.Fstat(child.KeyFD, &st) == nil && st.Mode&syscall.S_IFMT == syscall.S_IFREG && st.Nlink == 0 {
@@ -374,6 +381,60 @@ func TestRunCodeThroughAnUnlinkedFile(t *testing.T) {
 	}
 	if err := f.Close(); !errors.Is(err, os.ErrClosed) {
 		t.Errorf("the file was not closed: %v", err)
+	}
+}
+
+// TestAHeldFileIsDescriptor4 passes a run code's file and a held file: the run code is
+// descriptor 3 and the held file descriptor 4. Session is called with the command's
+// process id, which is its session's and its process group's, before Started, and Run
+// leaves the held file open.
+func TestAHeldFileIsDescriptor4(t *testing.T) {
+	dir := t.TempDir()
+	name := filepath.Join(dir, "code")
+	if err := os.WriteFile(name, []byte(testCode), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f, err := os.Open(name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(name); err != nil {
+		t.Fatal(err)
+	}
+	hold, err := os.OpenFile(filepath.Join(dir, "run.lock"), os.O_RDWR|os.O_CREATE, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer hold.Close()
+	var calls []string
+	session := 0
+	res, err, rep, _ := start(t, context.Background(), dir, script{Code: testCode}, nil, 0, func(c *child.Command) {
+		c.File, c.Hold = f, hold
+		c.Session = func(id int) {
+			session = id
+			if g, err := syscall.Getpgid(id); err != nil || g != id {
+				t.Errorf("the process group of %d is %d: %v", id, g, err)
+			}
+			if s, err := unix.Getsid(id); err != nil || s != id {
+				t.Errorf("the session of %d is %d: %v", id, s, err)
+			}
+			calls = append(calls, "session")
+		}
+		c.Started = func() { calls = append(calls, "started") }
+		c.Args = append(c.Args, "--run-code-file", "/dev/fd/3")
+	})
+	if err != nil || res != (child.Result{}) {
+		t.Fatal(res, err)
+	}
+	var st syscall.Stat_t
+	if err := syscall.Fstat(int(hold.Fd()), &st); err != nil {
+		t.Fatalf("the held file was closed: %v", err)
+	}
+	if !rep.CodeOK || rep.FD4Ino != uint64(st.Ino) || len(rep.Problems) > 0 {
+		t.Errorf("report %+v, want descriptor 4 of inode %d", rep, st.Ino)
+	}
+	if !slices.Equal(calls, []string{"session", "started"}) || session <= 1 {
+		t.Errorf("the calls were %q, with the session %d", calls, session)
 	}
 }
 
@@ -786,4 +847,158 @@ func TestOutputIsMaskedWithMask(t *testing.T) {
 	if !slices.Equal(got, want) {
 		t.Errorf("the lines are %q, want %q", got, want)
 	}
+}
+
+// TestCheckLeader passes a process that has the start stamp that StartStamp read, and
+// fails one with another stamp, and one that has ended, which is ErrNoProcess.
+func TestCheckLeader(t *testing.T) {
+	leader := startSleep(t, &syscall.SysProcAttr{Setsid: true})
+	stamp, err := child.StartStamp(leader.Process.Pid)
+	if err != nil || stamp == "" {
+		t.Fatalf("the leader's start stamp is %q, %v", stamp, err)
+	}
+	if again, err := child.StartStamp(leader.Process.Pid); err != nil || again != stamp {
+		t.Errorf("the leader's start stamp read again is %q, %v, want %q", again, err, stamp)
+	}
+	if err := child.CheckLeader(leader.Process.Pid, stamp); err != nil {
+		t.Errorf("the leader failed: %v", err)
+	}
+	if err := child.CheckLeader(leader.Process.Pid, stamp+"1"); err == nil || !strings.Contains(err.Error(), "passed to another process") {
+		t.Errorf("a leader with another start passed: %v", err)
+	}
+	ended := exec.Command("true")
+	if err := ended.Run(); err != nil {
+		t.Fatal(err)
+	}
+	if err := child.CheckLeader(ended.Process.Pid, stamp); !errors.Is(err, child.ErrNoProcess) {
+		t.Errorf("a process that ended is %v, want ErrNoProcess", err)
+	}
+	if _, err := child.StartStamp(ended.Process.Pid); !errors.Is(err, child.ErrNoProcess) {
+		t.Errorf("the start stamp of a process that ended is %v, want ErrNoProcess", err)
+	}
+}
+
+// TestSessionMembers lists the leader of a new session and a process it started, each
+// with its start stamp, and not a process of the test's session.
+func TestSessionMembers(t *testing.T) {
+	leader := exec.Command("/bin/sh", "-c", `/bin/sh -c 'exec sleep 60' & echo $!; wait`)
+	leader.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	out, err := leader.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := leader.Start(); err != nil {
+		t.Fatal(err)
+	}
+	var memberID int
+	if _, err := fmt.Fscan(out, &memberID); err != nil {
+		_ = leader.Process.Kill()
+		_ = leader.Wait()
+		t.Fatal(err)
+	}
+	memberStamp, _ := child.StartStamp(memberID)
+	t.Cleanup(func() {
+		if stamp, err := child.StartStamp(memberID); err == nil && stamp == memberStamp {
+			_ = syscall.Kill(memberID, syscall.SIGKILL)
+		}
+		_ = leader.Process.Kill()
+		_ = leader.Wait()
+	})
+	other := startSleep(t, nil)
+	var members []child.Member
+	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
+		if members, err = child.SessionMembers(leader.Process.Pid); err != nil {
+			t.Fatal(err)
+		}
+		if len(members) == 2 {
+			break
+		}
+	}
+	var ids []int
+	for _, m := range members {
+		ids = append(ids, m.ID)
+		if stamp, err := child.StartStamp(m.ID); err != nil || stamp != m.Stamp {
+			t.Errorf("process %d is listed with the start %q, and has %q: %v", m.ID, m.Stamp, stamp, err)
+		}
+	}
+	slices.Sort(ids)
+	want := []int{leader.Process.Pid, memberID}
+	slices.Sort(want)
+	if !slices.Equal(ids, want) || slices.Contains(ids, other.Process.Pid) {
+		t.Errorf("the session's members are %v, want %v", ids, want)
+	}
+}
+
+// TestSignalEach sends SIGTERM to a process of the session given, and nothing to a
+// process of another session, to this process, or for this process's session.
+func TestSignalEach(t *testing.T) {
+	inSession := startSleep(t, &syscall.SysProcAttr{Setsid: true})
+	outside := startSleep(t, &syscall.SysProcAttr{Setsid: true})
+	mine := startSleep(t, nil)
+	child.SignalEach([]int{outside.Process.Pid, os.Getpid(), 1, 0}, inSession.Process.Pid, false)
+	child.SignalEach([]int{mine.Process.Pid}, child.Session(), false)
+	child.SignalEach([]int{inSession.Process.Pid}, inSession.Process.Pid, false)
+	if err := inSession.Wait(); err == nil || !strings.Contains(err.Error(), "terminated") {
+		t.Errorf("the process of the session ended with %v, want SIGTERM", err)
+	}
+	for _, cmd := range []*exec.Cmd{outside, mine} {
+		if cmd.ProcessState != nil || cmd.Process.Signal(syscall.Signal(0)) != nil {
+			t.Errorf("process %d got a signal", cmd.Process.Pid)
+		}
+	}
+}
+
+// TestHasOpen lists, on Linux, the process that has a file open, matched by device and
+// inode, and not one that has another file open.
+func TestHasOpen(t *testing.T) {
+	if !child.OpenFilesRead {
+		t.Skip("the open files of a process are read on Linux alone")
+	}
+	dir := t.TempDir()
+	name := filepath.Join(dir, "run.lock")
+	f, err := os.Create(name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	with := exec.Command("sleep", "60")
+	with.ExtraFiles = []*os.File{f}
+	if err := with.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = with.Process.Kill()
+		_ = with.Wait()
+	})
+	without := startSleep(t, nil)
+	info, err := os.Lstat(name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	members := make([]child.Member, 0, 2)
+	for _, id := range []int{with.Process.Pid, without.Process.Pid} {
+		stamp, err := child.StartStamp(id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		members = append(members, child.Member{ID: id, Stamp: stamp})
+	}
+	if got := child.HasOpen(members, child.Session(), info); !slices.Equal(got, []int{with.Process.Pid}) {
+		t.Errorf("the processes with the file open are %v, want %d", got, with.Process.Pid)
+	}
+}
+
+// startSleep starts sleep 60 with attr, and kills it at the test's end.
+func startSleep(t *testing.T, attr *syscall.SysProcAttr) *exec.Cmd {
+	t.Helper()
+	cmd := exec.Command("sleep", "60")
+	cmd.SysProcAttr = attr
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+	})
+	return cmd
 }
