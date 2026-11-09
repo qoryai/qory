@@ -269,3 +269,56 @@ func TestCopilotHooksComposedTwice(t *testing.T) {
 		t.Errorf("the repository's audit.json: %v", err)
 	}
 }
+
+// TestCopilotHooksPassOverASymlinkedHooksDirectory is a repository that commits
+// .github/hooks as a symlink: the soft link passes over the directory, and nothing is
+// written where the symlink points.
+func TestCopilotHooksPassOverASymlinkedHooksDirectory(t *testing.T) {
+	res, root, home := composeFixture(t, "copilot")
+	outside := t.TempDir()
+	write(t, filepath.Join(outside, "hooks.json"), "{\"version\": 1}\n")
+	write(t, filepath.Join(root, ".github", "keep.md"), "theirs\n")
+	if err := os.Symlink(outside, filepath.Join(root, ".github", "hooks")); err != nil {
+		t.Fatal(err)
+	}
+	gitIn(t, root, "add", ".github")
+	gitIn(t, root, "-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "-m", "hooks")
+	linked := copilotHooks(t, res, root, home)
+	if len(linked.Skipped) != 1 || linked.Skipped[0] != ".github/hooks" {
+		t.Errorf("skipped %v, want [.github/hooks]", linked.Skipped)
+	}
+	items, err := os.ReadDir(outside)
+	if err != nil || len(items) != 1 || items[0].Name() != "hooks.json" {
+		t.Errorf("behind the symlink: %v, %v; want hooks.json alone", items, err)
+	}
+	if !isLink(t, filepath.Join(root, ".github", "hooks")) {
+		t.Error("the repository's .github/hooks symlink was replaced")
+	}
+}
+
+// TestCopilotUnlinkLeavesTheRepositorysHooks is a remove in a checkout whose repository
+// has .github/hooks/hooks.json: the qory-hooks.json link and its exclude line go, and
+// hooks.json and the .github/hooks folder stay.
+func TestCopilotUnlinkLeavesTheRepositorysHooks(t *testing.T) {
+	res, root, home := composeFixture(t, "copilot")
+	theirs := filepath.Join(root, ".github", "hooks", "hooks.json")
+	const body = "{\"version\": 1}\n"
+	write(t, theirs, body)
+	copilotHooks(t, res, root, home)
+	harnessHooksLinked(t, root)
+	if _, err := render.Unlink(lookup(t, "copilot"), root); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(filepath.Join(root, ".github", "hooks", "qory-hooks.json")); err == nil {
+		t.Error(".github/hooks/qory-hooks.json is still there")
+	}
+	if strings.Contains(readExclude(t, root), "/.github/hooks/qory-hooks.json\n") {
+		t.Errorf("the exclude file still lists .github/hooks/qory-hooks.json:\n%s", readExclude(t, root))
+	}
+	if data, err := os.ReadFile(theirs); err != nil || string(data) != body {
+		t.Errorf("the repository's hooks.json changed: %q, %v", data, err)
+	}
+	if info, err := os.Lstat(filepath.Join(root, ".github", "hooks")); err != nil || !info.IsDir() {
+		t.Errorf(".github/hooks is not a folder after the remove: %v", err)
+	}
+}

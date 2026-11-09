@@ -1945,9 +1945,8 @@ func WriteSettings(res *compose.Result, runtime, dir, home string, ensure []stri
 	return WriteSettingsAs(res, runtime, dir, home, ensure, patch, nil)
 }
 
-// WriteSettingsAs is [WriteSettings] with each file written under name(file) in dir. ensure
-// and patch see the target file names, and a nil name writes each file under its target
-// file name.
+// WriteSettingsAs is [WriteSettings] with each file written to dir as name(file). ensure
+// and patch take the target file names. A nil name keeps the target file name.
 func WriteSettingsAs(res *compose.Result, runtime, dir, home string, ensure []string, patch func(file string, m map[string]any), name func(file string) string) error {
 	files := res.SettingsFiles(runtime)
 	for _, e := range ensure {

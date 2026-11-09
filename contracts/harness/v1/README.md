@@ -1157,8 +1157,8 @@ Per runtime, the files written into its directory:
   `workspace/.github` with the skills and agents, and `mcp.json` with the servers
   (§Launching). Copilot CLI loads every `*.json` file in `.github/hooks`, so a
   repository's `.github/hooks/hooks.json` runs beside the harness's hooks and stays as
-  the repository has it. A file the repository has at a `qory-` name is passed over, as
-  every soft link passes over a path qory did not write.
+  the repository has it. qory passes over a file at a `qory-` name that it did not write,
+  and lists it under `kept`.
 - **amp**: the `settings/amp/` files such as `settings.json`, with the servers under
   `amp.mcpServers`.
 - **goose**: `agents/<name>.md` with `name`, `description` and `model`.
