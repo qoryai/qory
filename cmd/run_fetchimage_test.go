@@ -122,9 +122,9 @@ func TestAWalledRunFetchesItsImageBeforeTheSetup(t *testing.T) {
 // line, closes the run failed with the refusal's code and -1, and exits 1. For
 // image_missing and image_user_root, the line is qory's fix and Forager's detail after
 // it; for image_access_denied, image_rate_limited and image_registry_unreachable, the
-// line is Forager's detail alone, which starts with the fix, with its first letter in
-// lower case and not cut at 200 runes. The line has the engine proxy's password hidden.
-// Neither the setup nor a session runs.
+// line is Forager's detail alone with its first letter in lower case, not cut at 200
+// runes; the detail starts with the fix. The line has the engine proxy's password
+// hidden. Neither the setup nor a session runs.
 func TestAnImageRefusalClosesTheRunWithItsCode(t *testing.T) {
 	const image = "registry.example/agents/go@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 	const short = "registry.example/go@sha256:0123abcd"
@@ -540,8 +540,8 @@ func noFileContains(t *testing.T, dir, secret string) {
 // that has the engine proxy's password hidden. A fetch that fails otherwise takes the
 // work item in again and ends with "; the code is used". The line of image_missing ends
 // with "; the code is used". The line of image_access_denied, image_rate_limited and
-// image_registry_unreachable is Forager's detail, with its first letter in lower case,
-// and ends with "; the code is used, so start the stage again from the work item in Qory
+// image_registry_unreachable is Forager's detail with its first letter in lower case,
+// followed by "; the code is used, so start the stage again from the work item in Qory
 // Apiary". A refusal closes the run failed with its code and -1. No session joins.
 func TestAnImageFetchFromARunCodeSaysTheCodeIsUsed(t *testing.T) {
 	missing := refusals.New(refusals.ImageMissing, []string{pinnedImage}, "the image %s is not in its registry", pinnedImage)

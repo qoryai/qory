@@ -32,8 +32,8 @@ const textNoImage = "run again: the fetch of the run's image failed: %s"
 // again makes.
 const textNoImageFromCode = "take the work item in again in Qory Apiary: the fetch of the run's image failed: %s" + codeUsed
 
-// maxImageRefusalDetail is the most runes of Forager's detail that the line of
-// image_access_denied, image_rate_limited or image_registry_unreachable prints. The
+// maxImageRefusalDetail is the most runes of Forager's detail that qory run prints in
+// the line of image_access_denied, image_rate_limited or image_registry_unreachable. The
 // detail contains the image's reference, the host of the registry or token realm, and
 // for image_rate_limited a Retry-After value, so it passes the 200 runes of
 // [integration.Printable]. For registry.example.com/team/app@sha256:<64 hex>, it is
@@ -63,9 +63,9 @@ func lowerFirst(s string) string {
 //     qory's fix before the detail. For a run from a run code, fromCode, the line ends
 //     with [codeUsed].
 //   - image_access_denied, image_rate_limited and image_registry_unreachable: the line is
-//     the detail alone, since Forager's detail starts with the fix, with its first letter
-//     in lower case, as qory's lines start, and cut at [maxImageRefusalDetail] runes in
-//     place of 200. For a run from a run code, the line ends with [codeUsedStartStage].
+//     Forager's detail with its first letter in lower case, as qory's lines start, cut
+//     at [maxImageRefusalDetail] runes in place of 200; the detail starts with the fix.
+//     For a run from a run code, the line ends with [codeUsedStartStage].
 //
 // Any other error is a [*runLineError] of [textNoImage], or [textNoImageFromCode] for a
 // run from a run code. Each text has proxy's password, and every secret, hidden, and

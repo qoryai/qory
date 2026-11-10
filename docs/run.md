@@ -457,8 +457,8 @@ or the run's proxy closes the run `failed` with `image_access_denied`. A check t
 429 from one of them closes it with `image_rate_limited`. A check that does not reach the
 registry or its token realm closes it with `image_registry_unreachable`: a host name that
 does not resolve, a connection refused or reset, a TLS handshake or certificate that
-fails, or a timeout. The line is Forager's reason, with its first letter in lower case,
-which starts with the fix and contains the image's reference:
+fails, or a timeout. The line is Forager's reason, which starts with the fix and contains
+the image's reference, with its first letter in lower case:
 
 ```
 qory run: <Forager's reason> (image_access_denied)

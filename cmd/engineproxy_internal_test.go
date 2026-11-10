@@ -257,13 +257,14 @@ func (r *fetchingRun) FetchImage(context.Context) error { return r.err }
 // succeeded; a refusal of the image, image_missing or image_user_root, as a line with the
 // fix first and Forager's detail, and the code to close the run with; a refusal of the
 // image, image_access_denied, image_rate_limited or image_registry_unreachable, as
-// Forager's detail alone, which starts with the fix, with its first letter in lower case
-// and cut only past 1000 runes, and the code to close the run with; any other error,
-// another refusal code too, as a line with the fix first and Forager's text. Each line has the engine proxy's password hidden and unwraps to no error of
-// Forager's. For a run from a run code, the lines of image_missing and image_user_root
-// end with "; the code is used", those of the other three refusals with "; the code is
-// used, so start the stage again from the work item in Qory Apiary", and the other
-// error's fix is to take the work item in again.
+// Forager's detail alone with its first letter in lower case, cut only past 1000 runes,
+// and the code to close the run with; the detail starts with the fix. Any other error,
+// another refusal code too, is a line with the fix first and Forager's text. Each line
+// has the engine proxy's password and every run key hidden, before any cut, and unwraps
+// to no error of Forager's. For a run from a run code, the lines of image_missing and
+// image_user_root end with "; the code is used", those of the other three refusals with
+// "; the code is used, so start the stage again from the work item in Qory Apiary", and
+// the other error's fix is to take the work item in again.
 func TestFetchImageSaysHowTheFetchEnded(t *testing.T) {
 	proxy := &session.EngineProxy{Addr: "127.0.0.1:3129", Password: testEnginePassword}
 	for _, fromCode := range []bool{false, true} {
@@ -277,6 +278,10 @@ func TestFetchImageSaysHowTheFetchEnded(t *testing.T) {
 	const full = "registry.example.com/team/app@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 	unreached := "check that the run's proxy reaches registry.example.com: the check of the image " + full + " at its registry failed (the run's proxy did not reach registry.example.com:443: "
 	cut := unreached + strings.Repeat("x", 1000-len(unreached))
+	// atCut is a detail whose proxy password starts at rune 990: the line hides it before
+	// the cut at rune 1000, so <hidden> prints whole and two runes follow it.
+	atCut := unreached + strings.Repeat("x", 990-len(unreached))
+	const runKey = "qrk_run-key-value-for-the-test"
 	for _, c := range []struct {
 		err            error
 		code           string
@@ -306,6 +311,13 @@ func TestFetchImageSaysHowTheFetchEnded(t *testing.T) {
 		{refusal.New(refusal.ImageRegistryUnreachable, []string{full}, "Check that the run's proxy reaches registry.example.com: the check of the image %s at its registry failed (the run's proxy did not reach registry.example.com:443: %s)", full, strings.Repeat("x", 1000)), refusal.ImageRegistryUnreachable,
 			cut + "... (image_registry_unreachable)",
 			cut + "... (image_registry_unreachable)" + startStage},
+		{refusal.New(refusal.ImageRegistryUnreachable, []string{full}, "%s", "C"+atCut[1:]+testEnginePassword+" and the rest of the line)"), refusal.ImageRegistryUnreachable,
+			atCut + "<hidden> a... (image_registry_unreachable)",
+			atCut + "<hidden> a... (image_registry_unreachable)" + startStage},
+		// A run key in the detail prints as its phrase.
+		{refusal.New(refusal.ImageAccessDenied, []string{short}, "Give the run a credential for %s that may pull %s: the token realm returned 401 to the check of the image", "https://qory:"+runKey+"@auth.example/token", short), refusal.ImageAccessDenied,
+			"give the run a credential for (a value that contains a run key) that may pull " + short + ": the token realm returned 401 to the check of the image (image_access_denied)",
+			"give the run a credential for (a value that contains a run key) that may pull " + short + ": the token realm returned 401 to the check of the image (image_access_denied)" + startStage},
 		{refusal.New(refusal.ImageNotAllowed, []string{short}, "the image %s is not in wall.images_allow", short), "",
 			"run again: the fetch of the run's image failed: the image " + short + " is not in wall.images_allow: image_not_allowed: " + short,
 			"take the work item in again in Qory Apiary: the fetch of the run's image failed: the image " + short + " is not in wall.images_allow: image_not_allowed: " + short + "; the code is used"},
@@ -327,8 +339,8 @@ func TestFetchImageSaysHowTheFetchEnded(t *testing.T) {
 			if got := errors.As(err, &refused); got != (c.code != "") || got && refused.code != c.code {
 				t.Errorf("%v: the image refusal %+v, want %q", c.err, refused, c.code)
 			}
-			if errors.Is(err, c.err) || strings.Contains(fmt.Sprintf("%+v", err), testEnginePassword) {
-				t.Errorf("%v: the line unwraps to Forager's error or contains the password", c.err)
+			if errors.Is(err, c.err) || strings.Contains(fmt.Sprintf("%+v", err), testEnginePassword) || strings.Contains(fmt.Sprintf("%+v", err), runKey) {
+				t.Errorf("%v: the line unwraps to Forager's error or contains the password or the run key", c.err)
 			}
 		}
 	}

@@ -541,9 +541,9 @@ func TestTheContractsReaderFixturesAreRefused(t *testing.T) {
 	}
 }
 
-// TestPrintableWithinCutsAtItsLimit holds PrintableWithin to its limit and Printable to
-// 200 runes: text up to the limit prints whole, longer text is cut at the limit with ...
-// after it, and a character that does not print is ? in both.
+// TestPrintableWithinCutsAtItsLimit checks that PrintableWithin cuts text at its limit
+// and Printable at 200 runes: text up to the limit prints whole, longer text is cut at
+// the limit with ... after it, and a character that does not print is ? in both.
 func TestPrintableWithinCutsAtItsLimit(t *testing.T) {
 	long := "é\n" + strings.Repeat("x", 248)
 	shown := "é?" + strings.Repeat("x", 248)
