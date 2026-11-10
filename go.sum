@@ -32,6 +32,8 @@ github.com/muesli/termenv v0.16.0 h1:S5AlUN9dENB57rsbnkPyfdGuWIlkmzJjbFf0Tf5FWUc
 github.com/muesli/termenv v0.16.0/go.mod h1:ZRfOIKPFDYQoDFF4Olj7/QJbW60Ol/kL1pU3VfY/Cnk=
 github.com/qoryai/forager v0.7.1-0.20261109214859-a4e7f43c9a58 h1:qybZTq4VebHLWZuph+jkJJjKismUjHs6c8RnMVGB4sU=
 github.com/qoryai/forager v0.7.1-0.20261109214859-a4e7f43c9a58/go.mod h1:bawutvQpl4xH1hYlLMsTOkOq5IkIEiFHWJ9jhahf6Ac=
+github.com/qoryai/forager v0.7.1-0.20261110145748-5d87f8eb857b h1:HFNDY4AWceOnoSjVLViwHRQ855RMmC/kbqx9Absbsuw=
+github.com/qoryai/forager v0.7.1-0.20261110145748-5d87f8eb857b/go.mod h1:bawutvQpl4xH1hYlLMsTOkOq5IkIEiFHWJ9jhahf6Ac=
 github.com/qoryai/integrations v0.3.1-0.20261108233040-2fbb74357cec h1:iLi5kqixW/w0h8a1Ra0Jm5FaXBL47CAHiDqlgu5fptE=
 github.com/qoryai/integrations v0.3.1-0.20261108233040-2fbb74357cec/go.mod h1:8wZP+FYKJRy8P+XaN/CSL74R2V+I2QqTwZ4JRsxz0TE=
 github.com/rivo/uniseg v0.2.0/go.mod h1:J6wj4VEh+S6ZtnVlnTBMWIodfgj8LQOQFoIToxlJtxc=
