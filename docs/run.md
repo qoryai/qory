@@ -452,14 +452,30 @@ qory run: push the image to its registry, or select another image in the run's p
 qory run: set USER in the image to a user other than root that its /etc/passwd lists, or select another image in the run's policy: <Forager's reason> (image_user_root)
 ```
 
+A check of the image's manifest that gets 401 or 403 from the registry, its token realm
+or the run's proxy closes the run `failed` with `image_access_denied`. A check that gets
+429 from one of them closes it with `image_rate_limited`. A check that does not reach the
+registry or its token realm closes it with `image_registry_unreachable`: a host name that
+does not resolve, a connection refused or reset, a TLS handshake or certificate that
+fails, or a timeout. The line is Forager's reason, with its first letter in lower case,
+which starts with the fix and contains the image's reference:
+
+```
+qory run: <Forager's reason> (image_access_denied)
+qory run: <Forager's reason> (image_rate_limited)
+qory run: <Forager's reason> (image_registry_unreachable)
+```
+
 Any other failure closes the run `failed` with `no_session`:
 
 ```
 qory run: run again: the fetch of the run's image failed: <Forager's error>
 ```
 
-For a run from a run code, the code is used by then. Each refusal line ends with `; the
-code is used`, and any other failure says:
+For a run from a run code, the code is used by then. The lines of `image_missing` and
+`image_user_root` end with `; the code is used`. The lines of `image_access_denied`,
+`image_rate_limited` and `image_registry_unreachable` end with `; the code is used, so
+start the stage again from the work item in Qory Apiary`. Any other failure says:
 
 ```
 qory run: take the work item in again in Qory Apiary: the fetch of the run's image failed: <Forager's error>; the code is used

@@ -118,11 +118,17 @@ func TestAWalledRunFetchesItsImageBeforeTheSetup(t *testing.T) {
 }
 
 // TestAnImageRefusalClosesTheRunWithItsCode is Forager's refusal of the run's image at
-// its fetch, image_missing and image_user_root: qory run prints one line, the fix first
-// and Forager's detail after it, closes the run failed with the refusal's code and -1,
-// and exits 1. Neither the setup nor a session runs.
+// its fetch, through the engine proxy of wall.engine_proxy_file: qory run prints one
+// line, closes the run failed with the refusal's code and -1, and exits 1. For
+// image_missing and image_user_root, the line is qory's fix and Forager's detail after
+// it; for image_access_denied, image_rate_limited and image_registry_unreachable, the
+// line is Forager's detail alone, which starts with the fix, with its first letter in
+// lower case and not cut at 200 runes. The line has the engine proxy's password hidden.
+// Neither the setup nor a session runs.
 func TestAnImageRefusalClosesTheRunWithItsCode(t *testing.T) {
 	const image = "registry.example/agents/go@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	const short = "registry.example/go@sha256:0123abcd"
+	registry := "qory:" + fetchPassword + "@registry.example"
 	for _, c := range []struct {
 		err  error
 		code string
@@ -132,9 +138,16 @@ func TestAnImageRefusalClosesTheRunWithItsCode(t *testing.T) {
 			"\nqory run: push the image to its registry, or select another image in the run's policy: the image " + image + " is not in its registry (image_missing)\n"},
 		{refusals.New(refusals.ImageUserRoot, []string{image}, "the image %s runs as root; a run's image runs as the wall's user", image), refusals.ImageUserRoot,
 			"\nqory run: set USER in the image to a user other than root that its /etc/passwd lists, or select another image in the run's policy: the image " + image + " runs as root; a run's image runs as the wall's user (image_user_root)\n"},
+		{refusals.New(refusals.ImageAccessDenied, []string{short}, "Give the run a credential for %s: its registry returned 401 to the check of the image %s with no Bearer challenge", registry, short), refusals.ImageAccessDenied,
+			"\nqory run: give the run a credential for qory:<hidden>@registry.example: its registry returned 401 to the check of the image " + short + " with no Bearer challenge (image_access_denied)\n"},
+		{refusals.New(refusals.ImageRateLimited, []string{image}, "Run again once the rate limit of the registry at %s resets, give the run a credential with a higher limit, or raise gateway.run_limits of the gateway: the check of the image %s got 429 from its registry or from the run's proxy%s", registry, image, " (Retry-After: 30)"), refusals.ImageRateLimited,
+			"\nqory run: run again once the rate limit of the registry at qory:<hidden>@registry.example resets, give the run a credential with a higher limit, or raise gateway.run_limits of the gateway: the check of the image " + image + " got 429 from its registry or from the run's proxy (Retry-After: 30) (image_rate_limited)\n"},
+		{refusals.New(refusals.ImageRegistryUnreachable, []string{short}, "Check that the run's proxy reaches %s within 30s: the check of the image %s at its registry timed out", registry, short), refusals.ImageRegistryUnreachable,
+			"\nqory run: check that the run's proxy reaches qory:<hidden>@registry.example within 30s: the check of the image " + short + " at its registry timed out (image_registry_unreachable)\n"},
 	} {
 		t.Run(c.code, func(t *testing.T) {
-			r := runFetching(t, "", func(context.Context) error { return c.err })
+			file := writeEngineProxy(t, "127.0.0.1:3129")
+			r := runFetching(t, "  engine_proxy_file: "+file+"\n", func(context.Context) error { return c.err })
 			if r.err == nil || cmd.ExitCode(r.err) != 1 {
 				t.Fatalf("%v (exit %d)\n%s", r.err, cmd.ExitCode(r.err), r.out)
 			}
@@ -148,6 +161,7 @@ func TestAnImageRefusalClosesTheRunWithItsCode(t *testing.T) {
 			if strings.Count(r.out, c.code) != 1 {
 				t.Errorf("the line is printed more than once:\n%s", r.out)
 			}
+			lacks(t, r.out, fetchPassword)
 		})
 	}
 }
@@ -520,33 +534,61 @@ func noFileContains(t *testing.T, dir, secret string) {
 	}
 }
 
-// TestAnImageFetchFromARunCodeSaysTheCodeIsUsed is a walled run from a run code whose
-// image's fetch fails, and whose image Forager refuses, image_missing: the code is used
-// by then, so qory run's line takes the work item in again, or ends with "; the code is
-// used", and exits 1. No session joins.
+// TestAnImageFetchFromARunCodeSaysTheCodeIsUsed is a walled run from a run code, through
+// the engine proxy of wall.engine_proxy_file, whose image's fetch fails, or ends with a
+// refusal code of Forager's: the code is used by then, and qory run exits 1 with one line
+// that has the engine proxy's password hidden. A fetch that fails otherwise takes the
+// work item in again and ends with "; the code is used". The line of image_missing ends
+// with "; the code is used". The line of image_access_denied, image_rate_limited and
+// image_registry_unreachable is Forager's detail, with its first letter in lower case,
+// and ends with "; the code is used, so start the stage again from the work item in Qory
+// Apiary". A refusal closes the run failed with its code and -1. No session joins.
 func TestAnImageFetchFromARunCodeSaysTheCodeIsUsed(t *testing.T) {
 	missing := refusals.New(refusals.ImageMissing, []string{pinnedImage}, "the image %s is not in its registry", pinnedImage)
+	const short = "registry.example/go@sha256:0123abcd"
+	const startStage = "; the code is used, so start the stage again from the work item in Qory Apiary"
+	registry := "qory:" + fetchPassword + "@registry.example"
 	for _, c := range []struct {
 		err  error
+		code string
 		line string
 	}{
-		{errors.New("wall docker: pull: connection refused"),
-			"\nqory run: take the work item in again in Qory Apiary: the fetch of the run's image failed: wall docker: pull: connection refused; the code is used\n"},
-		{missing,
+		{errors.New("wall docker: pull: proxyconnect tcp: http://qory:" + fetchPassword + "@127.0.0.1:3129: connection refused"), "",
+			"\nqory run: take the work item in again in Qory Apiary: the fetch of the run's image failed: wall docker: pull: proxyconnect tcp: http://qory:<hidden>@127.0.0.1:3129: connection refused; the code is used\n"},
+		{missing, refusals.ImageMissing,
 			"\nqory run: push the image to its registry, or select another image in the run's policy: the image " + pinnedImage + " is not in its registry (image_missing); the code is used\n"},
+		{refusals.New(refusals.ImageAccessDenied, []string{short}, "Give the run a credential for %s: its registry returned 401 to the check of the image %s with no Bearer challenge", registry, short), refusals.ImageAccessDenied,
+			"\nqory run: give the run a credential for qory:<hidden>@registry.example: its registry returned 401 to the check of the image " + short + " with no Bearer challenge (image_access_denied)" + startStage + "\n"},
+		{refusals.New(refusals.ImageRateLimited, []string{pinnedImage}, "Run again once the rate limit of the registry at %s resets, give the run a credential with a higher limit, or raise gateway.run_limits of the gateway: the check of the image %s got 429 from its registry or from the run's proxy%s", registry, pinnedImage, " (Retry-After: 30)"), refusals.ImageRateLimited,
+			"\nqory run: run again once the rate limit of the registry at qory:<hidden>@registry.example resets, give the run a credential with a higher limit, or raise gateway.run_limits of the gateway: the check of the image " + pinnedImage + " got 429 from its registry or from the run's proxy (Retry-After: 30) (image_rate_limited)" + startStage + "\n"},
+		{refusals.New(refusals.ImageRegistryUnreachable, []string{short}, "Check that the run's proxy reaches %s within 30s: the check of the image %s at its registry timed out", registry, short), refusals.ImageRegistryUnreachable,
+			"\nqory run: check that the run's proxy reaches qory:<hidden>@registry.example within 30s: the check of the image " + short + " at its registry timed out (image_registry_unreachable)" + startStage + "\n"},
 	} {
-		t.Run(c.err.Error(), func(t *testing.T) {
+		name := c.code
+		if name == "" {
+			name = "fetch failed"
+		}
+		t.Run(name, func(t *testing.T) {
 			codeFetchImage = func(context.Context) error { return c.err }
 			t.Cleanup(func() { codeFetchImage = nil })
 			r := runFromCodeWith(t, func(string) []string {
 				docker, _ := fakeDocker(t)
-				walledBy(t, docker)
+				file := writeEngineProxy(t, "127.0.0.1:3129")
+				writeFile(t, filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "forager.yaml"),
+					"wall:\n  adapter: docker\n  command: "+docker+"\n  helper: "+staticELF(t)+"\n  user: \"1000:1000\"\n  image: example.com/agent:1\n  engine_proxy_file: "+file+"\n")
 				return nil
 			}, nil, nil, nil)
 			if r.err == nil || cmd.ExitCode(r.err) != 1 || r.joined || !slices.Contains(r.calls, "fetch image") {
 				t.Fatalf("%v (exit %d), joined %v, the calls %v\n%s", r.err, cmd.ExitCode(r.err), r.joined, r.calls, r.out)
 			}
 			wants(t, r.out, c.line)
+			lacks(t, r.out, fetchPassword)
+			if c.code == "" {
+				return
+			}
+			if want := []session.Outcome{{State: "failed", Reason: c.code, ExitCode: -1}}; !slices.Equal(r.closes, want) {
+				t.Errorf("the closes: %v, want %v", r.closes, want)
+			}
 		})
 	}
 }

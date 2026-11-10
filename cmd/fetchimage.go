@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/qoryai/forager/refusal"
 	"github.com/qoryai/forager/session"
@@ -30,42 +32,82 @@ const textNoImage = "run again: the fetch of the run's image failed: %s"
 // again makes.
 const textNoImageFromCode = "take the work item in again in Qory Apiary: the fetch of the run's image failed: %s" + codeUsed
 
+// maxImageRefusalDetail is the most runes of Forager's detail that the line of
+// image_access_denied, image_rate_limited or image_registry_unreachable prints. The
+// detail contains the image's reference, the host of the registry or token realm, and
+// for image_rate_limited a Retry-After value, so it passes the 200 runes of
+// [integration.Printable]. For registry.example.com/team/app@sha256:<64 hex>, it is
+// 390 runes for a token realm's 429 and 418 for a certificate error. A 502 from the
+// run's proxy adds the first line of its body, at most 512 bytes, for 906 runes.
+const maxImageRefusalDetail = 1000
+
+// lowerFirst is s with its first rune in lower case.
+func lowerFirst(s string) string {
+	r, n := utf8.DecodeRuneInString(s)
+	if n == 0 {
+		return s
+	}
+	return string(unicode.ToLower(r)) + s[n:]
+}
+
 // fetchImage fetches the image of a walled run before its first join, as the run's image
 // step: [session.Run.FetchImage], which writes no step for an image the machine
 // defines, checks the image's manifest at its registry through the run's proxy, and
 // pulls the image, also one the engine holds by its digest. With proxy, the pull goes
-// through the run's proxy. A refusal of the image, image_missing or image_user_root, is
-// a [*reasonError] with Forager's code as a [*runLineError]; any other error is a [*runLineError] of
-// [textNoImage], or [textNoImageFromCode] for a run from a run code, fromCode, whose
-// refusal lines end with [codeUsed] too. Each text has proxy's password, and every
-// secret, hidden, and contains Forager's text alone as its cause, so it unwraps to no
-// error of Forager's.
+// through the run's proxy.
+//
+// A refusal of the image is a [*reasonError] with Forager's code as a [*runLineError],
+// and the line ends with Forager's detail and the code in parentheses:
+//
+//   - image_missing and image_user_root: [textImageMissing] or [textImageUserRoot] puts
+//     qory's fix before the detail. For a run from a run code, fromCode, the line ends
+//     with [codeUsed].
+//   - image_access_denied, image_rate_limited and image_registry_unreachable: the line is
+//     the detail alone, since Forager's detail starts with the fix, with its first letter
+//     in lower case, as qory's lines start, and cut at [maxImageRefusalDetail] runes in
+//     place of 200. For a run from a run code, the line ends with [codeUsedStartStage].
+//
+// Any other error is a [*runLineError] of [textNoImage], or [textNoImageFromCode] for a
+// run from a run code. Each text has proxy's password, and every secret, hidden, and
+// contains Forager's text alone as its cause, so it unwraps to no error of Forager's.
 func fetchImage(ctx context.Context, run openedRun, proxy *session.EngineProxy, fromCode bool) error {
 	err := run.FetchImage(ctx)
 	if err == nil {
 		return nil
 	}
-	shown := func(text string) string {
+	hidden := func(text string) string {
 		if proxy != nil && proxy.Password != "" {
 			text = strings.ReplaceAll(text, proxy.Password, "<hidden>")
 		}
-		return integration.Printable(exports.HideValues(text))
+		return exports.HideValues(text)
 	}
+	shown := func(text string) string { return integration.Printable(hidden(text)) }
 	var ref *session.Refusal
-	if errors.As(err, &ref) && (ref.Code == refusal.ImageMissing || ref.Code == refusal.ImageUserRoot) {
-		text := textImageMissing
-		if ref.Code == refusal.ImageUserRoot {
-			text = textImageUserRoot
-		}
+	if errors.As(err, &ref) {
 		detail := ref.Detail
 		if detail == "" {
 			detail = ref.Error()
 		}
-		line := fmt.Sprintf(text, shown(detail)+" ("+ref.Code+")")
-		if fromCode {
-			line += codeUsed
+		line := ""
+		switch ref.Code {
+		case refusal.ImageMissing, refusal.ImageUserRoot:
+			text := textImageMissing
+			if ref.Code == refusal.ImageUserRoot {
+				text = textImageUserRoot
+			}
+			line = fmt.Sprintf(text, shown(detail)+" ("+ref.Code+")")
+			if fromCode {
+				line += codeUsed
+			}
+		case refusal.ImageAccessDenied, refusal.ImageRateLimited, refusal.ImageRegistryUnreachable:
+			line = lowerFirst(integration.PrintableWithin(hidden(detail), maxImageRefusalDetail)) + " (" + ref.Code + ")"
+			if fromCode {
+				line += codeUsedStartStage
+			}
 		}
-		return &runLineError{&reasonError{code: ref.Code, text: line}}
+		if line != "" {
+			return &runLineError{&reasonError{code: ref.Code, text: line}}
+		}
 	}
 	if fromCode {
 		return &runLineError{fmt.Errorf(textNoImageFromCode, shown(err.Error()))}

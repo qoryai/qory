@@ -39,6 +39,11 @@ import (
 // one-use code cannot be redeemed again.
 const codeUsed = "; the code is used"
 
+// codeUsedStartStage is [codeUsed] for a line of a run from a run code whose fix is
+// Forager's detail at the start of the line: the one-use code cannot be redeemed again,
+// so the stage starts again only from the work item in Qory Apiary.
+const codeUsedStartStage = codeUsed + ", so start the stage again from the work item in Qory Apiary"
+
 // inputsFile is the file of a run code's inputs, in the run's inputs folder.
 const inputsFile = "inputs.json"
 
