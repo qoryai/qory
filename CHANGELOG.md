@@ -180,6 +180,12 @@ release may change what an existing document does, and states it under Upgrading
   the run's policy must allow the registry's host. An image its registry does not have
   closes the run `failed` with `image_missing`, and an image whose user is root with
   `image_user_root`; `qory run` exits 1 with a line that starts with the fix.
+- A walled run whose check of the image's manifest gets 401 or 403 closes the run
+  `failed` with `image_access_denied`, a check that gets 429 with `image_rate_limited`,
+  and a check that does not reach the registry or its token realm with
+  `image_registry_unreachable`. `qory run` exits 1 with Forager's reason, which starts
+  with the fix, and the code after it. For a run from a run code, the line ends with
+  `; the code is used, so start the stage again from the work item in Qory Apiary`.
 - `wall.setup` in forager.yaml: where the setup of a walled run from a control plane
   runs, `outside`, the default, in a separate container of the run's image on the wall's
   network, or `inside`, in the agent's container before the agent.
