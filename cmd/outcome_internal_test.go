@@ -3,7 +3,6 @@ package cmd
 import (
 	"context"
 	"errors"
-	"io"
 	"os"
 	"strings"
 	"syscall"
@@ -458,11 +457,9 @@ func TestPushEndingOutcome(t *testing.T) {
 	}
 }
 
-// TestCopyEndingOutcome is the close of a run for each end of its session and its copy step, and
-// qory run's exit status on a run with a push when the session succeeded: a run whose session did
-// not succeed exits as the session ended. A run with no push has no time limit past its session,
-// so it does not reach the time limit's row, and it exits 1 when its work does not come back. A
-// run the gateway closed takes no such close: see TestARunsEndWithAFailedCopyStep.
+// TestCopyEndingOutcome is the close of a run for each end of its session and its copy step. A
+// run in a copy has no time limit past its session, and it exits 1 when its work does not come
+// back. A run the gateway closed takes no such close: see TestARunsEndWithAFailedCopyStep.
 func TestCopyEndingOutcome(t *testing.T) {
 	succeeded := session.Outcome{State: event.StateSucceeded}
 	failed := session.Outcome{State: event.StateFailed, ExitCode: 3}
@@ -474,28 +471,16 @@ func TestCopyEndingOutcome(t *testing.T) {
 		ending pushEnding
 		code   int
 		want   session.Outcome
-		status int
 	}{
-		{"the step exits 128", pushEnding{session: succeeded}, 128, session.Outcome{State: event.StateFailed, ExitCode: 128}, 1},
-		{"the step has no exit code", pushEnding{session: succeeded}, -1, session.Outcome{State: event.StateFailed, ExitCode: -1}, 1},
-		{"a signal cuts the step", pushEnding{session: succeeded, cut: true, stopped: true}, -1, interrupted, 1},
-		{"the run's time limit cuts the step", pushEnding{session: succeeded, cut: true}, -1, timedOut, exitTimeout},
-		{"the agent failed", pushEnding{session: failed}, 128, failed, 0},
-		{"the agent timed out", pushEnding{session: timedOut, cut: true, stopped: true}, -1, timedOut, 0},
-		{"the agent was cancelled", pushEnding{session: cancelled, cut: true, stopped: true}, -1, cancelled, 0},
+		{"the step exits 128", pushEnding{session: succeeded}, 128, session.Outcome{State: event.StateFailed, ExitCode: 128}},
+		{"the step has no exit code", pushEnding{session: succeeded}, -1, session.Outcome{State: event.StateFailed, ExitCode: -1}},
+		{"a signal cuts the step", pushEnding{session: succeeded, cut: true, stopped: true}, -1, interrupted},
+		{"the agent failed", pushEnding{session: failed}, 128, failed},
+		{"the agent timed out", pushEnding{session: timedOut, cut: true, stopped: true}, -1, timedOut},
+		{"the agent was cancelled", pushEnding{session: cancelled, cut: true, stopped: true}, -1, cancelled},
 	} {
-		got := c.ending.copyOutcome(c.code)
-		if got != c.want {
+		if got := c.ending.copyOutcome(c.code); got != c.want {
 			t.Errorf("%s: %+v, want %+v", c.name, got, c.want)
-		}
-		if c.status == 0 {
-			continue
-		}
-		e := c.ending
-		e.noStep = true
-		status := ExitCode(e.ended(ui.New(io.Discard), func(string) {}, errors.New("the copy step failed"), &preparation.WorkBranch{}, nil))
-		if status != c.status {
-			t.Errorf("%s: exit %d, want %d", c.name, status, c.status)
 		}
 	}
 }
@@ -540,7 +525,7 @@ func TestPushEndingLines(t *testing.T) {
 		{"first signal", pushEnding{session: succeeded, cut: true, stopped: true, got: "SIGTERM"}, "qory run got SIGTERM, and the step reached its limit of 15s", 1},
 		{"run's limit", pushEnding{session: succeeded, cut: true, limit: time.Hour}, "the run reached its time limit of 1h0m0s", exitTimeout},
 		{"a failed session at the run's limit", pushEnding{session: failed, cut: true, limit: time.Hour}, "the run reached its time limit of 1h0m0s", 3},
-		{"after a timeout", pushEnding{session: timedOut, cut: true, limit: time.Hour}, "the step reached its limit of 5m0s", 3},
+		{"after a timeout", pushEnding{session: timedOut, cut: true, limit: time.Hour}, "the step reached its limit of 2m0s", 3},
 	} {
 		var out strings.Builder
 		err := c.ending.ended(ui.New(&out), func(string) {}, errors.New("cut"), &preparation.WorkBranch{}, sessionEnd)
@@ -567,11 +552,11 @@ func TestFailedEnd(t *testing.T) {
 	}
 }
 
-// TestThePushHasFiveMinutesPastTheLimit is the time past a run's time limit that the git session
-// and the push share, and a first signal during that time: it leaves at most 15 seconds.
-func TestThePushHasFiveMinutesPastTheLimit(t *testing.T) {
-	if pushTimes.limit != 5*time.Minute {
-		t.Errorf("the time past the limit is %s, want 5m0s", pushTimes.limit)
+// TestThePushHasTwoMinutesPastTheLimit is the time past a run's time limit that the push step
+// has, and a first signal during that time: it leaves at most 15 seconds.
+func TestThePushHasTwoMinutesPastTheLimit(t *testing.T) {
+	if pushTimes.limit != 2*time.Minute {
+		t.Errorf("the time past the limit is %s, want 2m0s", pushTimes.limit)
 	}
 	signalled, signal := context.WithCancel(context.Background())
 	defer signal()

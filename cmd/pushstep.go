@@ -21,7 +21,6 @@ import (
 	"github.com/qoryai/qory/internal/exports"
 	"github.com/qoryai/qory/internal/integration"
 	"github.com/qoryai/qory/internal/preparation"
-	"github.com/qoryai/qory/internal/proxygit"
 	"github.com/qoryai/qory/internal/runapi"
 	"github.com/qoryai/qory/internal/secretmask"
 	"github.com/qoryai/qory/internal/ui"
@@ -75,14 +74,12 @@ var branchWait = func(ctx context.Context, d time.Duration) error {
 }
 
 // The time the push step has after a stop. A signal leaves pushAfterSignal: it fits inside
-// the 30 seconds that [child.DefaultGrace] leaves a pool's run after SIGTERM, with the 10 seconds
-// of a runtime's default stop before it, the [sessionGraceFromCode] of a git session it cuts, and
-// the close. Past a run's time limit no process stops qory run, so the git session and the push
-// share pushAfterLimit, and the run can pass its limit by that time. The session's limit,
-// [runcopy.SessionLimit], is the same time, so a session that uses it all leaves the push nothing.
+// the 30 seconds [child.DefaultGrace] gives a pool's run after SIGTERM, with the 10 seconds
+// of a runtime's default stop and the close. Past a run's time limit no process stops
+// qory run, so the step has pushAfterLimit, and the run can pass its limit by that time.
 const (
 	pushAfterSignal = 15 * time.Second
-	pushAfterLimit  = 5 * time.Minute
+	pushAfterLimit  = 120 * time.Second
 )
 
 // pushTimes is [pushAfterLimit] and [pushAfterSignal]; a test sets shorter ones.
@@ -141,16 +138,11 @@ func canPush(fromCode *codeRun, readOnly bool, branch *preparation.WorkBranch) b
 }
 
 // returnContext is the context of the return of a local run's work: a stop has ended ctx, so
-// it is not ended by ctx. It ends at a second signal, again, and afterSignal after ctx ends, so a
-// first signal leaves the return that time, and the git session and each check have their
-// limits within it. fromCode is a run from a run code, which is how a pool starts a run: such
-// a run has [pushTimes].signal after a signal, as the push step has, since [child.DefaultGrace]
-// kills it. started, for any other run, is what prints the line of the wait, when the first
-// signal comes; it does not print for a return that ended first.
-func returnContext(ctx, again context.Context, fromCode bool, started func(time.Duration)) (context.Context, func()) {
-	if fromCode {
-		return pushContext(ctx, again, time.Time{}, pushTimes.limit, pushTimes.signal)
-	}
+// it is not ended by ctx. It ends at a second signal, again, and [returnAfterSignal] after ctx
+// ends, so a first signal leaves the return that time, and the git session and each check have
+// their limits within it. started is what prints the line of the wait, when the first signal
+// comes; it does not print for a return that ended first.
+func returnContext(ctx, again context.Context, started func(time.Duration)) (context.Context, func()) {
 	back, stop := pushContext(ctx, again, time.Time{}, returnAfterSignal, returnAfterSignal)
 	printed := make(chan struct{})
 	stopLine := context.AfterFunc(ctx, func() {
@@ -172,46 +164,25 @@ func returnContext(ctx, again context.Context, fromCode bool, started func(time.
 var returnAfterSignal = 30 * time.Minute
 
 // removeThenPush removes the setup container of a run that gets the push step, then runs
-// the git session of a run with a copy, then [pushWork], with ctx as the bound of all three.
-// A process in that container can write the working folder, so the check of the step is
-// valid only once the container is gone. After a failed removal [openedRun.HostProxy] and
-// [openedRun.StartStep] still work, so this check alone stops the push, and the run has no
-// step. A git session that fails stops the push the same way.
-func removeThenPush(ctx context.Context, run openedRun, stderr io.Writer, branch *preparation.WorkBranch, dir, runID string, runNumber int, out session.Outcome, copied *runCopy, spec *runSpec, checks *runPushChecks) (noStep bool, err error) {
+// [pushWork], with ctx as the bound of both. A process in that container can write the
+// working folder, so the check of the step holds only once the container is gone. After a
+// failed removal [openedRun.HostProxy] and [openedRun.StartStep] still work, so this
+// check alone stops the push, and the run has no step.
+func removeThenPush(ctx context.Context, run openedRun, stderr io.Writer, branch *preparation.WorkBranch, dir, runID string, runNumber int, out session.Outcome, agentStopped bool, checks *runPushChecks) (noStep bool, err error) {
 	if err := run.RemoveSetup(ctx); err != nil {
-		if copied != nil {
-			copied.cut = ctx.Err() != nil
-		}
 		return true, fmt.Errorf(textSetupStays, shownError(err))
 	}
-	if copied != nil {
-		if err := copied.gitSession(ctx, run, spec, commitMessage(runNumber, out)); err != nil {
-			return true, err
-		}
-	}
-	return false, pushWork(ctx, run, stderr, branch, dir, runID, runNumber, out, copied, checks)
-}
-
-// commitMessage is the message of the commit of what the agent left, as the run's number and
-// how the run ended have it.
-func commitMessage(runNumber int, out session.Outcome) string {
-	message := fmt.Sprintf(textChangesLeft, runNumber)
-	if end := failedEnd(out); end != "" {
-		message += "\n\n" + end
-	}
-	return message
+	return false, pushWork(ctx, run, stderr, branch, dir, runID, runNumber, out, agentStopped, checks)
 }
 
 // pushWork is the run's step of kind push: it pushes what the agent left, through the
 // run's host proxy, and stores the new version of the artifact type branch. The step
 // ends as [inStep] ends it, cancelled when ctx ended. out is how the session ended, which
-// the commit and the version show when it did not succeed, see [failedEnd]. runNumber is the
-// number in the commit's message, and runID the run that the version's check reads. A walled run
-// has copied, its copy: the step pushes from the quarantines of the bundles its git session
-// wrote, and no git runs in the folder the agent wrote. An unwalled agent had the machine
-// and has no copy, so the step commits and pushes in dir, the working folder. checks checks
-// the version before it is stored, see [checkBranchVersion].
-func pushWork(ctx context.Context, run openedRun, stderr io.Writer, branch *preparation.WorkBranch, dir, runID string, runNumber int, out session.Outcome, copied *runCopy, checks *runPushChecks) error {
+// the commit and the version show when it did not succeed, see [failedEnd]. agentStopped
+// is whether the agent's stop is proven, see [preparation.Push]. runNumber is the number
+// in the commit's message, and runID the run that the version's check reads. checks
+// checks the version before it is stored, see [checkBranchVersion].
+func pushWork(ctx context.Context, run openedRun, stderr io.Writer, branch *preparation.WorkBranch, dir, runID string, runNumber int, out session.Outcome, agentStopped bool, checks *runPushChecks) error {
 	cut := func() bool { return ctx.Err() != nil }
 	return inStep(run, stderr, event.StepPush, pushStepName(branch, run.System()), cut, func(w io.Writer) error {
 		httpClient, base, err := run.RunAPI()
@@ -229,12 +200,11 @@ func pushWork(ctx context.Context, run openedRun, stderr io.Writer, branch *prep
 		secretmask.Default().AddURLPassword(h.proxy.URL)
 		defer h.close()
 		end := failedEnd(out)
-		var document *branchformat.Branch
-		if copied != nil {
-			document, err = pushCopy(ctx, copied, branch, h.proxy, w)
-		} else {
-			document, err = preparation.Push(ctx, dir, os.Environ(), branch, commitMessage(runNumber, out), h.proxy, w)
+		message := fmt.Sprintf(textChangesLeft, runNumber)
+		if end != "" {
+			message += "\n\n" + end
 		}
+		document, err := preparation.Push(ctx, dir, os.Environ(), branch, message, h.proxy, agentStopped, w)
 		if err != nil {
 			return &runLineError{err}
 		}
@@ -249,27 +219,6 @@ func pushWork(ctx context.Context, run openedRun, stderr io.Writer, branch *prep
 		}
 		return nil
 	})
-}
-
-// pushCopy checks the bundles of the git session of copied into quarantines, pushes from them
-// and prints a line for each repository whose commits change a qory setting.
-func pushCopy(ctx context.Context, copied *runCopy, branch *preparation.WorkBranch, p proxygit.Proxy, w io.Writer) (*branchformat.Branch, error) {
-	qs, err := copied.quarantine(ctx, nil)
-	if err != nil {
-		return nil, copied.checkFailed(ctx, err)
-	}
-	if copied.dir.LeftBehind(copied.repos) {
-		fmt.Fprintln(w, "qory run: "+fmt.Sprintf(textCopyAgain, textCopyBehind, ""))
-	}
-	from, lines, err := pushable(ctx, qs)
-	if err != nil {
-		return nil, copied.checkFailed(ctx, err)
-	}
-	// Before the push, so a push that fails hides no change of a setting.
-	for _, line := range lines {
-		fmt.Fprintln(w, line)
-	}
-	return preparation.PushFrom(ctx, from, os.Environ(), branch, p, w)
 }
 
 // shownError is err as a line shows it: printable, with every URL's password and every
@@ -423,8 +372,8 @@ type pushEnding struct {
 	limit   time.Duration
 	// stopped is whether qory run got a signal, again whether it got a second, and got the
 	// first signal: as [pushEnding.settle] sets them. cut is whether the step's context ended
-	// as the step exited, or [runCopy.cut] on a run with no step. noStep is whether no push step
-	// ran: the removal of the setup container or the copy step failed.
+	// as the step exited, or [runCopy.cut] on a run with a copy. noStep is whether the removal
+	// of the setup container failed, so no push step ran.
 	stopped, again, cut, noStep bool
 	got                         string
 	// afterSignal is the time a first signal leaves the step, 0 for [pushTimes].signal.
