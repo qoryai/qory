@@ -481,35 +481,36 @@ func (c *runCopy) recordSetup(ctx context.Context) error {
 // the step's last line is [copyStop.log]. stderr is qory run's stderr, masked with the run's
 // mask list, which the container's lines go to as well.
 //
-// A copy step that does not start stops the return of the work, as a push step that does not
-// start stops its push. A copy step that does not end stops the return too. Both go through
-// [runCopy.stop], which keeps the copy.
-func (c *runCopy) gitSession(ctx context.Context, run openedRun, spec *runSpec, stderr io.Writer) error {
+// The first error is that of a copy step that did not start, for example when the link to the
+// gateway dropped after the join: no session ran, and the caller runs it after the close, see
+// [runCopy.gitSessionAfterClose]. The second is the stop of the return, which goes through
+// [runCopy.stop] and keeps the copy: a session that failed, or a copy step that did not end.
+func (c *runCopy) gitSession(ctx context.Context, run openedRun, spec *runSpec, stderr io.Writer) (error, error) {
 	step, err := run.StartStep(event.StepCopy, textCopyStep)
 	if err != nil {
-		return c.noSession(ctx, err)
+		return err, nil
 	}
 	lines := &stepLines{stderr: stderr, step: step}
 	code, stop := c.inContainer(ctx, run, spec, lines)
 	lines.flush()
 	if stop == nil {
 		if err := step.Exit(event.StateSucceeded, 0); err != nil {
-			return c.stoppedBy("%s", err)
+			return nil, c.stoppedBy("%s", err)
 		}
-		return nil
+		return nil, nil
 	}
 	state, code := c.stepEnd(code)
 	c.stepCode = code
 	lines.log(stepFailure(errors.New(stop.log)))
 	// The line of the stop stays when the exit fails too.
 	_ = step.Exit(state, code)
-	return stop
+	return nil, stop
 }
 
 // gitSessionAfterClose is the git session of [runCopy.gitSession] after the run's close, with no
-// step: the gateway closed the run, the agent's join returned an error, or a container of the
-// run may have been left before the close. The caller runs it only once the close showed that no
-// container of the run is left. Its lines go to stderr alone, as for [runCopy.gitSession].
+// step: the gateway closed the run, the agent's join returned an error, or the copy step did not
+// start. The caller runs it only once the close showed that no container of the run is left.
+// Its lines go to stderr alone, as for [runCopy.gitSession].
 func (c *runCopy) gitSessionAfterClose(ctx context.Context, run openedRun, spec *runSpec, stderr io.Writer) error {
 	if _, stop := c.inContainer(ctx, run, spec, stderr); stop != nil {
 		return stop

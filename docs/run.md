@@ -511,8 +511,8 @@ with the git session's exit status, or with -1 when the session has none to show
 that did not start or one that reached its time limit. Unless it ends `succeeded`,
 its last line is the error line, with `the run's copy` in place of each path of the copy.
 A run that the gateway closed during the agent's session, a run whose agent's join returned an
-error, and a run in which a container could not be removed after the agent's session have no
-such step: their git session runs after the close.
+error, a run whose step `copy work out` could not start, and a run whose wall removes the agent's
+container only at the close have no such step: their git session runs after the close.
 
 After an agent session that succeeded, this step sets how the run closes. A step that ends
 `failed` closes the run `failed` with the step's exit code, and `qory run` exits 1. A step that
@@ -3749,14 +3749,26 @@ A run that lists no repositories has no setup, so it has no such step, and a rea
 session. The run's record has no session for the git session.
 
 While the run is open, the git session runs in the step `copy work out`, once qory has removed
-the setup container and no container of the run is left. In three cases qory closes the run
-first: the gateway closed the run during the agent's session, the agent's join returned an error
-after the agent may have run, as when the link to the gateway is lost, or a container of the run
-could not be removed after the agent's session. Then the git session runs after the close, when
-the close shows that no container of the run is left, and its work comes back as usual. Its
-lines reach only your terminal, and a failure changes only `qory run`'s exit status. After an
-agent that succeeded, a setup container that could not be removed closes the run `failed` with
--1, or `cancelled` with the reason `interrupted` when a signal cut the removal.
+the setup container and no container of the run is left. In four cases qory closes the run
+first:
+
+- The gateway closed the run during the agent's session.
+- The agent's join returned an error after the agent may have run, as when the link to the
+  gateway is lost.
+- The step `copy work out` could not start, as when the link to the gateway is lost after the
+  join. After an agent that succeeded, the run closes `failed` with -1, and `qory run` prints the
+  step's error and exits 1, even when the work comes back.
+- The run's wall removes the agent's container only at the close.
+
+Then the git session runs after the close, when the close shows that no container of the run is
+left, and its work comes back as usual. Its lines reach only your terminal, and a failure changes
+only `qory run`'s exit status.
+
+A setup container that could not be removed after the agent's session is a container of the run
+that could not be removed: nothing comes back, as the end of this section describes. After an
+agent that succeeded, the run closes `failed` with -1, or `cancelled` with the reason
+`interrupted` when a signal cut the removal, and `qory run` prints the removal's error and exits
+1.
 
 Part of the run's work can stay in the copy:
 

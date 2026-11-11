@@ -1314,30 +1314,6 @@ func TestACopyStepWithNoScriptExitsFailed(t *testing.T) {
 	}
 }
 
-// TestACopyStepThatDoesNotStartStopsTheReturn is a StartStep of kind copy that returns an error:
-// no session joins, and the run's commits do not come back.
-func TestACopyStepThatDoesNotStartStopsTheReturn(t *testing.T) {
-	out, err, root, trace := copyStepRun(t, cmd.Nowhere{StepErr: func(kind string) error {
-		if kind == event.StepCopy {
-			return errors.New("the step did not start")
-		}
-		return nil
-	}}, nil, func(context.Context, session.SessionSpec) (*session.Result, error) {
-		t.Error("a session joined")
-		return &session.Result{}, nil
-	})
-	if cmd.ExitCode(err) != 1 {
-		t.Errorf("exit %d (%v), want 1\n%s", cmd.ExitCode(err), err, out)
-	}
-	wants(t, out, "the git session did not start, so the run's commits did not come back: the step did not start")
-	if len(trace) != 0 {
-		t.Errorf("the copy step's events:\n%s", strings.Join(trace, "\n"))
-	}
-	if got := gitOutput(t, root, "for-each-ref", "refs/heads/qory/"); got != "" {
-		t.Errorf("the run's branch came back: %s", got)
-	}
-}
-
 // TestACopyStepThatDoesNotEndStopsTheReturn is a Step.Exit of the copy step that returns an error
 // after a session that succeeded: the line has the error, and the run's commits do not come
 // back, as for any step that does not end.
@@ -2497,11 +2473,11 @@ func TestAKeptContainerMovesTheGitSessionPastTheClose(t *testing.T) {
 	}
 }
 
-// TestAFailedRemovalOfTheSetupMovesTheGitSessionPastTheClose is a removal of the setup container
-// that fails after the agent's session: the run closes failed with -1, as after a copy step that
-// did not start, and the git session runs after the close, which shows no container left here,
-// so the work comes back.
-func TestAFailedRemovalOfTheSetupMovesTheGitSessionPastTheClose(t *testing.T) {
+// TestAFailedRemovalOfTheSetupBringsNothingBack is a removal of the setup container that fails
+// after the agent's session: Forager marks the wall kept, so the run closes failed with -1, as after
+// a copy step that did not start, no git session runs, the removal's error and the line of a kept
+// container show, and qory run exits with 1.
+func TestAFailedRemovalOfTheSetupBringsNothingBack(t *testing.T) {
 	root := copyCheckout(t)
 	agentSucceedsInCopy(t, func(spec session.SessionSpec) {
 		writeFile(t, filepath.Join(spec.Dir, "left.txt"), "left\n")
@@ -2510,19 +2486,61 @@ func TestAFailedRemovalOfTheSetupMovesTheGitSessionPastTheClose(t *testing.T) {
 		return errors.New("the engine failed")
 	}})
 	defer restore()
+	t.Cleanup(cmd.SetGitSession(func(context.Context, session.SessionSpec) (*session.Result, error) {
+		t.Error("a git session ran")
+		return &session.Result{}, nil
+	}))
+	out, err := run(t, "run", "claude", "--", "-p", "hi")
+	if got := cmd.ExitCode(err); got != 1 {
+		t.Fatalf("exit %d (%v), want 1\n%s", got, err, out)
+	}
+	if got, want := closes(), (session.Outcome{State: event.StateFailed, ExitCode: -1}); len(got) != 1 || got[0] != want {
+		t.Errorf("the run closed with %+v, want %+v", got, want)
+	}
+	wants(t, out, "qory run: the engine failed\n")
+	wants(t, out, "a container of the run could not be removed and may still run and write the copy, so nothing came back from the run")
+	lacks(t, out, "qory/run-")
+	if refs := gitOutput(t, root, "for-each-ref", "refs/heads/qory", "refs/qory"); refs != "" {
+		t.Errorf("refs came back: %s", refs)
+	}
+}
+
+// TestACopyStepThatDoesNotStartMovesTheGitSessionPastTheClose is a copy step whose start fails
+// after the agent's session, as when the link to the gateway drops after the join: the run closes
+// failed with -1, the git session runs after the close, the work comes back, and qory run exits
+// with 1.
+func TestACopyStepThatDoesNotStartMovesTheGitSessionPastTheClose(t *testing.T) {
+	root := copyCheckout(t)
+	agentSucceedsInCopy(t, func(spec session.SessionSpec) {
+		writeFile(t, filepath.Join(spec.Dir, "left.txt"), "left\n")
+	})
+	closes, _, restore := cmd.OpenNowhereWith(cmd.Nowhere{StepErr: func(kind string) error {
+		if kind == event.StepCopy {
+			return errors.New("the link to the gateway dropped")
+		}
+		return nil
+	}})
+	defer restore()
+	sessions := 0
 	t.Cleanup(cmd.SetGitSession(func(ctx context.Context, spec session.SessionSpec) (*session.Result, error) {
+		sessions++
 		if len(closes()) != 1 {
 			t.Error("the git session ran before the close")
 		}
 		return cmd.GitSessionOnHost(ctx, spec)
 	}))
 	out, err := run(t, "run", "claude", "--", "-p", "hi")
-	if err != nil {
-		t.Fatalf("%v\n%s", err, out)
+	if got := cmd.ExitCode(err); got != 1 {
+		t.Fatalf("exit %d (%v), want 1\n%s", got, err, out)
+	}
+	if sessions != 1 {
+		t.Errorf("%d git sessions ran, want 1", sessions)
 	}
 	if got, want := closes(), (session.Outcome{State: event.StateFailed, ExitCode: -1}); len(got) != 1 || got[0] != want {
 		t.Errorf("the run closed with %+v, want %+v", got, want)
 	}
+	wants(t, out, "qory run: the link to the gateway dropped\n")
+	lacks(t, out, "read the run's files in ")
 	gitOutput(t, root, "cat-file", "-e", runBranchOf(t, out)+":left.txt")
 }
 

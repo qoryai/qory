@@ -379,11 +379,14 @@ release may change what an existing document does, and states it under Upgrading
   agent's limits. Its time limit is 5 minutes, plus a minute for each 20,000 files, folders and
   links in the copy and a minute for each 2 GiB in its files, at most 60 minutes, so a walled
   write run in a copy can run that long past its time limit. When the gateway closed the run during the agent's session, when the agent's
-  join returned an error after the agent may have run, or when a container of the run could not
-  be removed after the agent's session, the work comes back too: qory runs the git session after
-  the close, with no step `copy work out`, and a failure changes only `qory run`'s exit status.
-  After an agent that succeeded, a setup container that could not be removed closes the run
-  `failed` with -1, or `cancelled` when a stop cut the removal.
+  join returned an error after the agent may have run, when the step `copy work out` could not
+  start, or when the wall removes the agent's container only at the close, the work comes back
+  too: qory runs the git session after the close, with no step `copy work out`, and a failure
+  changes only `qory run`'s exit status. A step `copy work out` that could not start after an
+  agent that succeeded closes the run `failed` with -1, and `qory run` exits 1. A setup
+  container that could not be removed after an agent that succeeded closes the run `failed` with
+  -1, or `cancelled` when a stop cut the removal, brings nothing back, and `qory run` prints the
+  removal's error and exits 1.
   When a container of the run could not be removed, qory prints `a container of the run could
   not be removed and may still run and write the copy, so nothing came back from the run`; a
   network or a private folder of the wall that stays brings the work back.
