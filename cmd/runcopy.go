@@ -662,7 +662,10 @@ func (c *runCopy) fetchOne(ctx context.Context, q *runcopy.Quarantine, runID str
 			report(c.checkFailed(ctx, limitErr(ctx, limited, textCopyFetchLimit, c.limit, err)).Error())
 			return false
 		}
-		report(shownError(err))
+		// A fetch that failed in a submodule joins an error per repository, each a line.
+		for _, e := range joinedErrors(err) {
+			report(shownError(e))
+		}
 		return false
 	}
 	var line string
@@ -679,6 +682,14 @@ func (c *runCopy) fetchOne(ctx context.Context, q *runcopy.Quarantine, runID str
 	}
 	report(line)
 	return true
+}
+
+// joinedErrors is the errors that err joins, as [errors.Join] makes it, or err alone.
+func joinedErrors(err error) []error {
+	if j, ok := err.(interface{ Unwrap() []error }); ok {
+		return j.Unwrap()
+	}
+	return []error{err}
 }
 
 // copyBack brings the run's files back to the person's plain folder.

@@ -825,9 +825,12 @@ const branchTriesAfterFetch = 3
 // It returns the branch it made and deletes <prefix>/branch, or returns "" and keeps the commits
 // there. It returns prefix, "" when no ref is left under it.
 //
+// The submodules' fetches come first, so a failed one leaves the person's repository as it was.
 // When another git process holds a lock that a fetch or the branch needs, git runs again after
-// each wait of [lockWaits]. When the fetch fails, the quarantine stays, and the error contains its
-// path. ctx sets how long it may take.
+// each wait of [lockWaits]. When a fetch fails, the quarantine stays, and the error contains its
+// path: the error joins one error per failed fetch, one for the fetch into the person's repository
+// that a failed submodule's fetch kept from running, and one for the submodules' refs that came
+// back, each with its fix first. ctx sets how long it may take.
 func (q *Quarantine) FetchInto(ctx context.Context, checkout, branch, runID string) (string, string, error) {
 	if q.Head != "" {
 		if err := checkRef(ctx, "refs/heads/"+branch); err != nil {
@@ -852,21 +855,40 @@ func (q *Quarantine) FetchInto(ctx context.Context, checkout, branch, runID stri
 	if q.Head != "" {
 		specs = append(specs, "refs/heads/"+q.Branch+":"+prefix+"/"+branchRef)
 	}
-	if q.Path != "" && len(q.Refs)+len(specs) > 0 {
-		if err := fetchRefs(ctx, checkout, q.Path, slices.Concat(specs, q.moved(prefix))); err != nil {
-			refs := q.prefix + "/*"
-			switch {
-			case q.Head != "" && len(q.Refs) > 0:
-				refs = "refs/heads/" + q.Branch + " and " + refs
-			case q.Head != "":
-				refs = "refs/heads/" + q.Branch
-			}
-			return "", "", fmt.Errorf(textFetchFailed, shown(q.Path), prefix, shown(checkout), refs, err)
-		}
+	top := q.Path != "" && len(q.Refs)+len(specs) > 0
+	refs := q.prefix + "/*"
+	switch {
+	case q.Head != "" && len(q.Refs) > 0:
+		refs = "refs/heads/" + q.Branch + " and " + refs
+	case q.Head != "":
+		refs = "refs/heads/" + q.Branch
 	}
+	// The submodules come first: a failed fetch there leaves the person's repository as it was.
+	var failed []error
+	fetched := false
 	for _, s := range q.Submodules {
 		if err := fetchRefs(ctx, s.gitDir, s.Path, s.moved(prefix)); err != nil {
-			return "", "", fmt.Errorf(textFetchFailed, shown(s.Path), prefix, shown(s.gitDir), q.prefix+"/*", err)
+			failed = append(failed, fmt.Errorf(textFetchFailed, shown(s.Path), prefix, shown(s.gitDir), q.prefix+"/*", err))
+			continue
+		}
+		fetched = true
+	}
+	if len(failed) > 0 {
+		if top {
+			failed = append(failed, fmt.Errorf(textFetchAfterSubmodules, refs, shown(q.Path), shown(checkout)))
+		}
+		if fetched {
+			failed = append(failed, fmt.Errorf(textFetchedSubmodules, prefix))
+		}
+		return "", "", errors.Join(failed...)
+	}
+	if top {
+		if err := fetchRefs(ctx, checkout, q.Path, slices.Concat(specs, q.moved(prefix))); err != nil {
+			err = fmt.Errorf(textFetchFailed, shown(q.Path), prefix, shown(checkout), refs, err)
+			if fetched {
+				err = errors.Join(err, fmt.Errorf(textFetchedSubmodules, prefix))
+			}
+			return "", "", err
 		}
 	}
 	if q.Head == "" {

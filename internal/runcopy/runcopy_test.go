@@ -1328,6 +1328,63 @@ func TestFetchIntoStopsAfterTheLockWaits(t *testing.T) {
 	}
 }
 
+// joined is the errors that err joins, or err alone.
+func joined(err error) []error {
+	if j, ok := err.(interface{ Unwrap() []error }); ok {
+		return j.Unwrap()
+	}
+	return []error{err}
+}
+
+// TestAFailedFetchIntoASubmoduleLeavesYourRepositoryAsItWas is a run with a commit in the
+// repository and a change in a submodule, and a lock that stays on the ref the submodule's change
+// comes back to: the fetch into the submodule fails first, the fetch into the repository does not
+// run, and the error has a fix for each. With the lock on the repository's ref instead, the
+// submodule's refs come back, and the error lists them.
+func TestAFailedFetchIntoASubmoduleLeavesYourRepositoryAsItWas(t *testing.T) {
+	old := lockWaits
+	lockWaits = []time.Duration{10 * time.Millisecond}
+	t.Cleanup(func() { lockWaits = old })
+	for _, inSubmodule := range []bool{true, false} {
+		t.Run(fmt.Sprintf("in the submodule %t", inSubmodule), func(t *testing.T) {
+			isolate(t)
+			sessionGit(t)
+			ctx := context.Background()
+			src, sub := withSubmodule(t)
+			gitDir := testGit(t, filepath.Join(src, sub), "rev-parse", "--path-format=absolute", "--git-dir")
+			d, repos := cloneRun(t, src)
+			write(t, d.Work(), filepath.Join(sub, "lib.txt"), "changed\n")
+			write(t, d.Work(), "new.txt", "new\n")
+			runGit(t, d, repos, nil)
+			qs, err := d.Quarantine(ctx, branch, repos)
+			if err != nil {
+				t.Fatal(err)
+			}
+			lock := filepath.Join(src, ".git", filepath.FromSlash(prefix), "branch.lock")
+			if inSubmodule {
+				lock = filepath.Join(gitDir, filepath.FromSlash(prefix), "uncommitted.lock")
+			}
+			write(t, filepath.Dir(lock), filepath.Base(lock), "")
+			_, _, err = qs[0].FetchInto(ctx, src, branch, "run-1")
+			errs := joined(err)
+			if len(errs) != 2 {
+				t.Fatalf("the error joins %d errors, want 2: %v", len(errs), err)
+			}
+			if inSubmodule {
+				hasPrefix(t, "the submodule's fetch", errs[0], "fetch "+prefix+"/* from "+shown(qs[0].Submodules[0].Path)+" by hand:")
+				hasPrefix(t, "the repository's fetch", errs[1], "fetch refs/heads/"+branch+" from "+shown(qs[0].Path)+" into "+shown(src)+" by hand:")
+				if got := testGit(t, src, "for-each-ref", "refs/qory/", "refs/heads/qory/"); got != "" {
+					t.Errorf("your repository has refs of the run:\n%s", got)
+				}
+				return
+			}
+			hasPrefix(t, "the repository's fetch", errs[0], "fetch refs/heads/"+branch+" from "+shown(qs[0].Path)+" by hand:")
+			hasPrefix(t, "the submodule's refs", errs[1], "list the run's refs in your git folder of each submodule with git for-each-ref "+prefix+":")
+			wantRefs(t, refsUnder(t, gitDir, prefix), "uncommitted")
+		})
+	}
+}
+
 // TestFetchIntoStopsWaitingAtTheEndOfItsContext is a lock that stays and a context that ends
 // during a wait: the commits stay under the run's prefix, and no wait follows.
 func TestFetchIntoStopsWaitingAtTheEndOfItsContext(t *testing.T) {

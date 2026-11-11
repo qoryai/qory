@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"errors"
+	"fmt"
 	"maps"
 	"os"
 	"os/exec"
@@ -349,5 +350,18 @@ func TestALongListShowsItsFirstFiftyEntries(t *testing.T) {
 	}
 	if got := largeFiles(files[:50]); got != strings.Join(files[:50], ", ") {
 		t.Errorf("50 large files are listed as %q", got)
+	}
+}
+
+// TestJoinedErrorsAreLinesOfTheirOwn is the error of a fetch that failed in a submodule, which
+// joins an error per repository: each is a line. Any other error is one line.
+func TestJoinedErrorsAreLinesOfTheirOwn(t *testing.T) {
+	one, two := errors.New("fetch a by hand: it failed"), errors.New("fetch b by hand: it did not run")
+	if got := joinedErrors(errors.Join(one, two)); len(got) != 2 || got[0] != one || got[1] != two {
+		t.Errorf("the joined errors are %v", got)
+	}
+	wrapped := fmt.Errorf("check git: %w", errors.Join(one, two))
+	if got := joinedErrors(wrapped); len(got) != 1 || got[0] != wrapped {
+		t.Errorf("the errors of a wrapped error are %v", got)
 	}
 }
