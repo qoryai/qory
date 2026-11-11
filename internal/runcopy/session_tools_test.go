@@ -13,7 +13,7 @@ import (
 var shellWords = []string{
 	"case", "cd", "command", "do", "done", "elif", "else", "esac", "exit", "export", "fi", "for", "if", "in",
 	"printf", "read", "return", "set", "shift", "test", "then", "trap", "umask", "unset", "while", "echo",
-	"continue", "exec",
+	"continue", "exec", "break",
 }
 
 var (
@@ -24,10 +24,12 @@ var (
 	commandStart = regexp.MustCompile(`[;|&({!]|\$\(|\b(?:then|do|else|if|elif|while)\s`)
 	aProgram     = regexp.MustCompile(`^[a-z][a-z0-9_-]*$`)
 	functionName = regexp.MustCompile(`(?m)^\s*([a-z_][a-z0-9_]*)\(\)`)
+	findExec     = regexp.MustCompile(`-exec\s+([a-z][a-z0-9_-]*)`)
 )
 
-// scriptPrograms is each word at the start of a command of the sh script, with no keyword, builtin
-// or function of the script. It reads line by line, so it also reads the lines of a sh -c '...'.
+// scriptPrograms is each word at the start of a command of the sh script, and each program that a
+// find runs with -exec, with no keyword, builtin or function of the script. It reads line by line,
+// so it also reads the lines of a sh -c '...'.
 func scriptPrograms(script string) []string {
 	functions := functionName.FindAllStringSubmatch(script, -1)
 	var words []string
@@ -42,7 +44,11 @@ func scriptPrograms(script string) []string {
 			}
 			return "X"
 		})
-		for _, command := range commandStart.Split(line, -1) {
+		commands := commandStart.Split(line, -1)
+		for _, m := range findExec.FindAllStringSubmatch(line, -1) {
+			commands = append(commands, m[1])
+		}
+		for _, command := range commands {
 			fields := strings.Fields(command)
 			for len(fields) > 0 && strings.Contains(fields[0], "=") {
 				fields = fields[1:]
@@ -90,11 +96,11 @@ z=$(four | five)
 x="$(seven "$y")"
 find . -exec sh -c '
 	eight $1
-	test -r "$p" && nine' sh {} +
+	test -r "$p" && nine' sh {} + -o -exec thirteen {} \;
 i=$((i + 1))
 printf 'ten; eleven (twelve)\n'
 `)
-	want := []string{"eight", "find", "five", "four", "nine", "one", "seven", "six", "three", "two"}
+	want := []string{"eight", "find", "five", "four", "nine", "one", "seven", "sh", "six", "thirteen", "three", "two"}
 	slices.Sort(want)
 	if !slices.Equal(got, want) {
 		t.Errorf("got %v, want %v", got, want)

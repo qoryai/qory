@@ -59,6 +59,21 @@ type Repository struct {
 	// ignorecase is whether git, in the clone, set core.ignorecase for the disk of the copy. The
 	// git session's configuration has the same setting.
 	ignorecase bool
+	// submodules are the submodules the clone copied, in the order of .gitmodules.
+	submodules []submodule
+}
+
+// submodule is a submodule that [Dir.Clone] copied from the person's checkout.
+type submodule struct {
+	// path is the submodule's folder relative to the top of its repository, with forward slashes.
+	path string
+	// link is the commit its gitlink records at the base commit, which the copy checks out.
+	link string
+	// gitDir is the person's git folder of the submodule, which the copy is cloned from and the
+	// run's refs of the submodule come back to.
+	gitDir string
+	// refs is every ref of the submodule's copy when the clone ended, as [Repository] has them.
+	refs string
 }
 
 // Clone copies the person's repository at checkout, the top of its working tree, and
@@ -159,7 +174,8 @@ func (d Dir) cloneOne(ctx context.Context, i int, src, dest, branch string) (Rep
 	if err != nil {
 		return Repository{}, err
 	}
-	if err := d.cloneSubmodules(ctx, src, dest, base); err != nil {
+	subs, err := d.cloneSubmodules(ctx, src, dest, base)
+	if err != nil {
 		return Repository{}, err
 	}
 	cloned := time.Now().Add(-submoduleClockMargin)
@@ -178,6 +194,7 @@ func (d Dir) cloneOne(ctx context.Context, i int, src, dest, branch string) (Rep
 	return Repository{
 		Base: base, index: i, filtered: slices.Concat(filtered, rewritten),
 		excludes: personalExcludes(ctx, src), refs: refs, cloned: cloned, ignorecase: ignoreCase(ctx, dest),
+		submodules: subs,
 	}, nil
 }
 
@@ -527,40 +544,41 @@ func (d Dir) lineEndFiles(ctx context.Context, i int, dest, base string) ([]Setu
 
 // cloneSubmodules clones, into the copy at dest, each submodule that .gitmodules at
 // commit base lists, whose repository the person's checkout at src has under its git
-// folder's modules, at the commit its gitlink in base records. A submodule with no
-// such repository stays an empty folder, as git leaves one that is not set up.
-func (d Dir) cloneSubmodules(ctx context.Context, src, dest, base string) error {
+// folder's modules, at the commit its gitlink in base records, and returns them. A submodule
+// with no such repository stays an empty folder, as git leaves one that is not set up.
+func (d Dir) cloneSubmodules(ctx context.Context, src, dest, base string) ([]submodule, error) {
 	listed, err := git(ctx, dest, "ls-tree", "-z", "--full-tree", base, "--", ".gitmodules")
 	if err != nil {
-		return fmt.Errorf(textSubmodules, base, shown(src), err)
+		return nil, fmt.Errorf(textSubmodules, base, shown(src), err)
 	}
 	if listed == "" {
-		return nil
+		return nil, nil
 	}
 	out, err := git(ctx, dest, "config", "--blob", base+":.gitmodules", "-z", "--get-regexp", `^submodule\..*\.path$`)
 	if err != nil {
 		if exitOf(err) == 1 {
-			return nil
+			return nil, nil
 		}
-		return fmt.Errorf(textSubmodules, base, shown(src), err)
+		return nil, fmt.Errorf(textSubmodules, base, shown(src), err)
 	}
 	gitDir, err := git(ctx, src, "rev-parse", "--path-format=absolute", "--git-dir")
 	if err != nil {
-		return fmt.Errorf(textGitInRepo, shown(src), err)
+		return nil, fmt.Errorf(textGitInRepo, shown(src), err)
 	}
 	modules := filepath.Join(strings.TrimSpace(gitDir), "modules")
+	var subs []submodule
 	for entry := range strings.SplitSeq(out, "\x00") {
 		key, sub, ok := strings.Cut(entry, "\n")
 		if !ok {
 			continue
 		}
 		name := strings.TrimSuffix(strings.TrimPrefix(key, "submodule."), ".path")
-		if !cleanRel(name) || !cleanRel(sub) {
+		if !cleanRel(name) || !cleanRel(sub) || slices.ContainsFunc(subs, func(s submodule) bool { return s.path == sub }) {
 			continue
 		}
 		commit, ok, err := gitlinkAt(ctx, dest, base, sub)
 		if err != nil {
-			return fmt.Errorf(textSubmodules, base, shown(src), err)
+			return nil, fmt.Errorf(textSubmodules, base, shown(src), err)
 		}
 		from := filepath.Join(modules, filepath.FromSlash(name))
 		if info, err := os.Lstat(from); !ok || err != nil || !info.IsDir() {
@@ -568,23 +586,28 @@ func (d Dir) cloneSubmodules(ctx context.Context, src, dest, base string) error 
 		}
 		// The commit can have a link on the way, which a clone would write through.
 		if through, err := linkOnPath(dest, sub); err != nil {
-			return fmt.Errorf(textNoSubmodule, shown(sub), shown(src), shown(from), err)
+			return nil, fmt.Errorf(textNoSubmodule, shown(sub), shown(src), shown(from), err)
 		} else if through {
 			continue
 		}
 		to := filepath.Join(dest, filepath.FromSlash(sub))
 		if _, err := git(ctx, d.root, "clone", "--quiet", "--no-local", "--no-hardlinks", "--no-checkout", "--no-recurse-submodules", "--", from, to); err != nil {
-			return fmt.Errorf(textNoSubmodule, shown(sub), shown(src), shown(from), err)
+			return nil, fmt.Errorf(textNoSubmodule, shown(sub), shown(src), shown(from), err)
 		}
 		if _, err := git(ctx, to, "fetch", "--quiet", "--no-tags", "--no-recurse-submodules", "--no-write-fetch-head", "--", from, commit); err != nil {
-			return fmt.Errorf(textNoSubmodule, shown(sub), shown(src), shown(from), err)
+			return nil, fmt.Errorf(textNoSubmodule, shown(sub), shown(src), shown(from), err)
 		}
 		args := slices.Concat(checkoutLF, []string{"checkout", "--quiet", "--force", "--detach", commit})
 		if _, err := personGit(ctx, to, lfsConfig(ctx, from), args...); err != nil {
-			return fmt.Errorf(textNoSubmodule, shown(sub), shown(src), shown(from), err)
+			return nil, fmt.Errorf(textNoSubmodule, shown(sub), shown(src), shown(from), err)
 		}
+		refs, err := git(ctx, to, "for-each-ref", "--format=%(objectname) %(refname)")
+		if err != nil {
+			return nil, fmt.Errorf(textNoSubmodule, shown(sub), shown(src), shown(from), err)
+		}
+		subs = append(subs, submodule{path: sub, link: commit, gitDir: from, refs: refs})
 	}
-	return nil
+	return subs, nil
 }
 
 // linkOnPath reports whether a part of rel, with forward slashes, below the folder top is a

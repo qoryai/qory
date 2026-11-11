@@ -99,6 +99,13 @@ func (d Dir) Work() string { return filepath.Join(d.root, workName) }
 // writes.
 func (d Dir) Bundle() string { return filepath.Join(d.root, bundleName) }
 
+// RefPrefix is where the run's refs other than its branch come back, in each repository and
+// each of its submodules: refs/qory/run-<run id>. Below it are heads/<name> and tags/<name> for
+// each branch and tag the run made or moved, stash, HEAD for a detached HEAD, lost/<n> for
+// commits that only a reflog reaches, and uncommitted for the changes the git session commits
+// on HEAD in place of the run's branch.
+func (d Dir) RefPrefix() string { return "refs/qory/run-" + filepath.Base(d.root) }
+
 // source is the bare clone of the person's repository number i, which no run binds.
 func (d Dir) source(i int) string {
 	return filepath.Join(d.root, sourcesName, strconv.Itoa(i)+".git")

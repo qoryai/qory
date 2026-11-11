@@ -247,6 +247,7 @@ var gitSessionDirs = []string{"/usr/local/bin", "/usr/bin", "/bin"}
 // what it runs each for.
 var sessionTools = []struct{ name, why string }{
 	{"cat", "to read its lists of commits and git's lines"},
+	{"chmod", "to give itself read access to the files and folders the run made"},
 	{"comm", "to compare the run's refs and commits with what the bundle has"},
 	{"cp", "to copy the person's ignore rules to its git folder"},
 	{"find", "to list executable files and embedded repositories"},

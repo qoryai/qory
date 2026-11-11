@@ -3710,15 +3710,17 @@ answered the open with an authority also binds its bundle of authorities read-on
 `/qory/ca-bundle.pem`. A run with no authority in that answer has no such bind, whatever its proxy
 does with TLS. It commits what
 the agent left, with no setting from the copy's `.git` and no filter, and writes the run's
-branch to a git bundle. With a branch
+branch to a git bundle. First it gives itself read access to each file and folder that it owns
+and cannot read, such as one of mode 000 that the agent made. With a branch
 checked out that descends from your commit, the bundle has that branch, and its commits keep
 their messages. With `HEAD` at your commit and the run's branch past it, with `HEAD` on a branch with
 no commit, on a commit older than yours, or on a commit other than the run's branch's that does not
-descend from yours, the bundle has the run's branch as it is. The session then makes no commit, since
-a commit of that working tree would undo the branch's files. After an amended commit or
+descend from yours, the bundle has the run's branch as it is. A commit of that working tree on the
+branch would undo the branch's files, so the session commits it on `HEAD` instead, as
+`refs/qory/run-<run id>/uncommitted`. After an amended commit or
 `git pull --rebase`, with `HEAD` and the run's branch at one commit, the session commits as usual.
 Your `.gitignore`, `.git/info/exclude` and global excludes file keep their files out of
-the commit. The image needs git 2.25 or later, `cat`, `comm`, `cp`, `find`, `grep`, `mkdir`, `mv`,
+the commit. The image needs git 2.25 or later, `cat`, `chmod`, `comm`, `cp`, `find`, `grep`, `mkdir`, `mv`,
 `readlink`, `sh`, `sort` and `tr` in `/usr/local/bin`,
 `/usr/bin` or `/bin`: `qory image check` tests them. A write run in a copy that lists repositories
 tests them too, in a first setup step named `Check tools`, in the setup container or, with `wall.setup: inside`,
@@ -3742,22 +3744,14 @@ session then runs on the same image, qory keeps the copy, and you see a second l
 A run that lists no repositories has no setup, so it has no such step, and a read run has no git
 session. The run's record shows the session as a second session.
 
-Part of the run's work can miss the bundle:
+Part of the run's work can stay in the copy:
 
-- A change in the working tree when the session makes no commit.
-- A commit on a branch that the bundle does not have, a stash, a tag the run made, or a commit made
-  with `HEAD` detached. A commit that a remote-tracking ref or a ref of your repository has does not
-  count. Some ordinary commands count too: `git fetch --tags` with a new tag off any branch, a
-  fetched pull request ref checked out as a local branch, `git notes add`, and a feature branch
-  squash-merged and deleted.
-- With nothing past your commit, a commit that a reset took off the branch.
-- A sparse checkout in the copy: the session makes no commit, since a commit would delete the
-  files that the checkout took out.
-- A commit or a change in a submodule, other than a file the setup left there, or a repository the
-  run made. An ignore rule that covers a repository's folder keeps it out of this list. The session
+- A repository the run made, with a commit or a change, or a change in a repository inside a
+  submodule. An ignore rule that covers a repository's folder keeps it out of this list. The session
   prints a line with its path.
-- A file or a folder that `git add` cannot read, such as one of mode 000. The rest of the work comes
-  back.
+- A commit or a change in a submodule that the clone did not copy, such as one that the agent set up.
+- A file or a folder that the session cannot read after it gives itself read access, such as one
+  that another user owns. The rest of the work comes back.
 - A setup's file that the agent commits as it is, under a filter set only in the copy's git settings,
   `core.autocrlf=true` with a CRLF file, or `core.fileMode=false` with an executable file: the git that
   compares and commits has none of the copy's git settings, so a local run keeps the copy with no work
@@ -3769,7 +3763,7 @@ nothing behind.
 A local run then keeps the copy and exits 1:
 
 ```text
-qory run: part of the run's work did not come back: the copy has changes not committed, commits on another branch or in a submodule, a detached commit, a commit a reset took off the branch, a stash, a tag, a sparse checkout, a nested repository, or files that git add could not read.
+qory run: part of the run's work did not come back: the copy has a nested repository the run made.
 qory run: read the run's files in <folder>, run no git there, then remove the folder: it has the work that did not come back
 ```
 
@@ -3810,8 +3804,45 @@ When the commits change a setting that qory acts on, such as `harness.launch` or
 qory run: the run's commits are on qory/run-0193 in /path/to/repo. They change these qory settings, links or repository folders: harness.launch.claude.command. Check them before you check out the branch.
 ```
 
-With no commit past `HEAD`, qory prints `qory run: no action needed: the run made no commit
-past its base commit`. Then it deletes the copy. When anything stops the return, qory
+**What comes back besides the branch.** Work that the run's branch does not have comes back under the run's prefix,
+`refs/qory/run-<run id>`, in your repository:
+
+| Ref under the prefix | What it has |
+|---|---|
+| `heads/<name>` | A branch that the run made or moved, such as one it committed on and left. |
+| `tags/<name>` | A tag that the run made or moved. |
+| `stash` | The run's latest stash; older stashes come back as `lost/<n>`. |
+| `HEAD` | A detached `HEAD` at a commit that the branch does not have. |
+| `lost/<n>` | The newest commit of each line of commits that only a reflog reaches: a commit made with `HEAD` detached, an older stash, or, with nothing past your commit on the branch, any such commit, such as one that a reset took off the branch. The commits of another new ref, such as one of `git notes add`, come back here too. |
+| `uncommitted` | The changes in the working tree when the session makes no commit on the branch, as a commit on `HEAD`. In a sparse checkout, each path the checkout took out stays as `HEAD` has it. |
+
+A ref comes back only when it has a commit that your commit, a ref of the clone and a
+remote-tracking ref do not have: a tag of your commit stays out. Each submodule that the clone
+copied gets the same refs, under the same prefix, in your git folder of that submodule, such as
+`.git/modules/<name>`. A change in a submodule comes back as its `uncommitted`, and a commit as its
+`HEAD`. A file that the setup left in the submodule stays out.
+
+When a ref of yours has that prefix or lies under it, as after an earlier run with the same id,
+the refs come back under `refs/qory/run-<run id>-2`, `-3` and so on. qory fetches them with git's
+object checks, all or none, and moves no ref outside the prefix and no `HEAD`. The line of the
+branch says where they are:
+
+```text
+qory run: the run's commits are on qory/run-0193 in /path/to/repo. The run's other refs are under refs/qory/run-0193: list them with git for-each-ref refs/qory/run-0193.
+```
+
+With no commit on the run's branch, the line has the refs alone:
+
+```text
+qory run: the run's refs are under refs/qory/run-0193 in /path/to/repo: list them with git for-each-ref refs/qory/run-0193.
+```
+
+To take a ref's work, check it out or cherry-pick it, such as
+`git cherry-pick refs/qory/run-0193/uncommitted`. Delete the refs when you are done:
+`git for-each-ref --format='delete %(refname)' refs/qory/run-0193 | git update-ref --stdin`.
+
+With no commit past `HEAD`, on the branch or under the prefix, qory prints `qory run: no action
+needed: the run made no commit past its base commit`. Then it deletes the copy. When anything stops the return, qory
 prints the cause and `qory run: read the run's files in <folder>, run no git there, then
 remove the folder: it has the work that did not come back`, and `qory run` exits 1 for a session
 that succeeded.
@@ -3836,8 +3867,9 @@ a folder that git would take as a repository. Run no git there: after a close th
 container of the run can still write a new `.git` in the copy. Read the files, and remove the
 folder when you are done.
 
-A commit of the run that adds `.git` or `.qory` at the top of a repository brings nothing
-back.
+A commit of the run, on the branch or under the prefix, that adds `.git` or `.qory` at the top of a
+repository brings nothing back, and so does a bundle with a ref other than the run's branch and the
+refs under the prefix that the table lists.
 
 **Artifacts.** Outside a control plane, `qory artifact push` keeps versions in
 `.qory/artifacts`, which the commits leave out. Once the run's containers are gone, with or

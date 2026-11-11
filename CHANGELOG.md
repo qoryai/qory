@@ -315,15 +315,23 @@ release may change what an existing document does, and states it under Upgrading
   a run in a folder that is not a repository
   and is or contains your home folder or qory's state directory, and a write run in a copy that
   lists repositories on an image without a program of the git session, which stops in the setup step
-  `Check tools`, before the agent, with `install <program> in /usr/local/bin, /usr/bin, /bin: …`. A copy that stays has its `.git` renamed to `.git-from-run`. Part of the run's work
-  that misses the bundle, such as commits on another branch or a stash, keeps the copy, and so does a part of
+  `Check tools`, before the agent, with `install <program> in /usr/local/bin, /usr/bin, /bin: …`. A copy that stays has its `.git` renamed to `.git-from-run`. Work that the run's branch
+  does not have comes back under `refs/qory/run-<run id>` in your repository, or the first free
+  `refs/qory/run-<run id>-<n>`: each branch and tag the run made or moved, its stash, a detached
+  `HEAD`, commits that only a reflog reaches, and the working tree as a commit on `HEAD` when the
+  session makes no commit on the branch, as in a sparse checkout. Each submodule's commits and
+  changes come back under the same prefix in your git folder of that submodule. The line of the
+  branch adds `The run's other refs are under <prefix>: list them with git for-each-ref <prefix>.`
+  The git session gives itself read access to the files and folders it owns, so a file of mode 000
+  that the agent made comes back. A repository the run made keeps the copy, with `part of the run's
+  work did not come back: the copy has a nested repository the run made.`, and so does a part of
   the run's wall that could not be removed, which brings nothing back. A first signal leaves the
   return of a local run at most 30 minutes, and `qory run` prints that time. A read run with a setup also
   works in a copy, read-only for the agent, and nothing comes back from it. A read-write
   mount stops a read run too, and so does a read run with no setup at your home folder.
   `make the mount … read-only` replaces `mount a narrower folder` in the line of a read-write
   mount of your home folder. `qory image check` tests that git is 2.25 or later and that `cat`,
-  `comm`, `cp`, `find`, `grep`, `mkdir`, `mv`, `readlink`, `sh`, `sort` and `tr` are there, in `/usr/local/bin`, `/usr/bin` or `/bin`. See A run that may write works in a copy in
+  `chmod`, `comm`, `cp`, `find`, `grep`, `mkdir`, `mv`, `readlink`, `sh`, `sort` and `tr` are there, in `/usr/local/bin`, `/usr/bin` or `/bin`. See A run that may write works in a copy in
   `docs/run.md`.
 - A walled run with no run key, `--home` or `harness.home` composes into
   `qory/homes/runs/<name>-<hash>/<run id>` in your cache directory, a home for that run alone, and
