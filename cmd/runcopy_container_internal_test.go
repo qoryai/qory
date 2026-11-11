@@ -146,6 +146,32 @@ func TestTheGitContainerRemovesAContainerOfItsNameFirst(t *testing.T) {
 	}
 }
 
+// TestAContainerThatCannotBeRemovedStartsNoGitContainer is a docker rm that fails before docker
+// run: no container starts, and the error starts with its fix.
+func TestAContainerThatCannotBeRemovedStartsNoGitContainer(t *testing.T) {
+	dir := t.TempDir()
+	log := filepath.Join(dir, "log")
+	script := "#!/bin/sh\necho \"$*\" >> " + log + "\n" +
+		"if [ \"$1\" = rm ]; then echo 'Error response from daemon: cannot remove container' >&2; exit 1; fi\n"
+	docker := filepath.Join(dir, "docker")
+	if err := os.WriteFile(docker, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	c := gitContainer{Docker: docker, Name: "qory-copy-run-01", Label: "dev.qory.run=run-01", User: "1001:1001", Image: "agent", Output: io.Discard, Session: runcopy.GitSession{Command: "/bin/sh", Dir: "/w"}}
+	code, err := dockerGitContainer(context.Background(), c)
+	want := "remove the container qory-copy-run-01 with docker rm --force qory-copy-run-01: the git session runs in a container of that name, and docker rm failed: exit status 1: Error response from daemon: cannot remove container"
+	if code != -1 || err == nil || err.Error() != want {
+		t.Errorf("%d, %v, want -1 and %q", code, err, want)
+	}
+	b, err := os.ReadFile(log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if lines := strings.TrimSpace(string(b)); lines != "rm --force --volumes qory-copy-run-01" {
+		t.Errorf("the engine's calls:\n%s", b)
+	}
+}
+
 // TestAGitContainerThatDoesNotStartHasDockersLine is a docker run that fails before the container
 // runs: the error is docker's last line, and no exit code.
 func TestAGitContainerThatDoesNotStartHasDockersLine(t *testing.T) {

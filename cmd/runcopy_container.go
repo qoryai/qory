@@ -53,6 +53,10 @@ const gitContainerPIDs = 4096
 // stopped may take.
 const containerRemoveWait = time.Minute
 
+// textCopyContainerRemove is the error of a git container that docker rm could not remove, before
+// or after its docker run.
+const textCopyContainerRemove = "remove the container %[1]s with docker rm --force %[1]s: the git session runs in a container of that name, and docker rm failed: %[2]w: %[3]s"
+
 // exitNotStarted is the exit status of docker run when docker itself failed, so the container
 // did not run.
 const exitNotStarted = 125
@@ -133,7 +137,7 @@ func (c gitContainer) remove(ctx context.Context) error {
 	cmd.Env = c.Env
 	out, err := cmd.CombinedOutput()
 	if err != nil && !bytes.Contains(bytes.ToLower(out), []byte("no such container")) {
-		return fmt.Errorf("docker rm --force %s: %w: %s", c.Name, err, bytes.TrimSpace(out))
+		return fmt.Errorf(textCopyContainerRemove, c.Name, err, bytes.TrimSpace(out))
 	}
 	return nil
 }
