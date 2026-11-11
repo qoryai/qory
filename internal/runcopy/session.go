@@ -792,7 +792,8 @@ gitfolder() {
 # on its HEAD, and writes each new or moved ref of the submodule, with that commit, to the bundle
 # n-$2.bundle, without the commit $3 that the clone checked out there and the commits before it. A
 # file the setup left, as $G/now and sub-n both have it, and each folder with a .git below the
-# submodule stay out of the commit. A change in such a folder stays behind.
+# submodule stay out of the commit. A change in such a folder stays behind, and so does a
+# repository the run made in a folder that the submodule's HEAD has, as n.nested.
 submodule_bundle() (
 	d=$1 k=$2 base=$3
 	shows=$(printable "$d")
@@ -814,11 +815,28 @@ submodule_bundle() (
 	# A folder with a .git below another one stays out with it: git stops at a pathspec inside a
 	# submodule of the submodule.
 	all=$nl
+	: > "$G/all"
 	while IFS= read -r p; do
 		case $p in
-		"$d"/*) all=$all${p#"$d"/}$nl ;;
+		"$d"/*)
+			all=$all${p#"$d"/}$nl
+			printf '%s\n' "${p#"$d"/}" >> "$G/all"
+			;;
 		esac
 	done < "$PG/folders"
+	# A folder with a .git that $from has as a folder is a repository the run made there, as git
+	# init makes. The status lists each change in it by its file, never the folder, and the add
+	# leaves the changes out, so it stays behind as such a repository does in the top repository.
+	# No ignore rule covers such a folder: git ignores no folder that has a file of the index.
+	while IFS= read -r p; do
+		entry=$(g ls-tree "$from" -- "$p" 2>/dev/null) || entry=
+		case $entry in
+		"040000 "*) ;;
+		*) continue ;;
+		esac
+		printf 'qory: %s has a git repository at %s that the run made, and the commit leaves it out\n' "$shows" "$(printable "$p")" >&2
+		: > "$B/$n.nested"
+	done < "$G/all"
 	: > "$G/nested"
 	while IFS= read -r p; do
 		case $p in
@@ -854,7 +872,9 @@ submodule_bundle() (
 		p=${line#???}
 		printf '%s\n' "${p%/}"
 	done < "$G/changes" > "$G/changed"
-	if [ -s "$G/nested" ] && [ -n "$(both "$G/nested" "$G/changed")" ]; then
+	# Each folder with a .git, not only the first of a chain, since the status lists a repository
+	# inside the folder of another by its path, such as a/b/ in the folder a.
+	if [ -s "$G/all" ] && [ -n "$(both "$G/all" "$G/changed")" ]; then
 		printf 'qory: %s has a git repository with commits or changes that the commit leaves out\n' "$shows" >&2
 		: > "$B/$n.left"
 	fi
