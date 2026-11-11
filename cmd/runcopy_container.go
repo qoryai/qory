@@ -60,13 +60,17 @@ const exitNotStarted = 125
 // runGitContainer runs the git container c, [dockerGitContainer]; a test replaces it.
 var runGitContainer = dockerGitContainer
 
-// dockerGitContainer runs c with docker run and returns the container's exit status. It returns
-// an error when the container did not start, with docker's last line as its text, and when ctx
-// ended first: then it removes the container, under ctx without its end, so no process of it
-// writes the copy after the return.
+// dockerGitContainer runs c with docker run and returns the container's exit status. First it
+// removes a container with c's name, which an earlier run with the same id can leave, since
+// docker run starts no second container with one name. It returns an error when the container
+// did not start, with docker's last line as its text, and when ctx ended first: then it removes
+// the container, under ctx without its end, so no process of it writes the copy after the return.
 func dockerGitContainer(ctx context.Context, c gitContainer) (int, error) {
 	args, err := c.args()
 	if err != nil {
+		return -1, err
+	}
+	if err := c.remove(ctx); err != nil {
 		return -1, err
 	}
 	last := &lastLine{}

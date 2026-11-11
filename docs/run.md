@@ -3713,7 +3713,8 @@ container runtime when one is set, at most 4096 processes, the agent's limits of
 processors when the wall sets them, no network and no capability. The container joins no gateway and runs no agent, and gets no model key and no run
 code. It binds two folders,
 both writable, and nothing else: the copy, and a new folder for its bundles. It never binds your
-checkout. Its name is `qory-copy-<run id>`, with the run's label. It commits what
+checkout. Its name is `qory-copy-<run id>`, with the run's label. qory first removes a
+container of that name, which an earlier run with the same id can leave. It commits what
 the agent left, with no setting from the copy's `.git` and no filter, and writes the run's
 branch to a git bundle. First it gives itself read access to each file and folder that it owns
 and cannot read, such as one of mode 000 that the agent made. With a branch

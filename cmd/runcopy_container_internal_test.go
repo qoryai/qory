@@ -115,7 +115,33 @@ func TestACutRemovesTheGitContainer(t *testing.T) {
 		t.Fatal(err)
 	}
 	lines := strings.Split(strings.TrimSpace(string(b)), "\n")
-	if len(lines) != 2 || !strings.HasPrefix(lines[0], "run --rm ") || lines[1] != "rm --force --volumes qory-copy-run-01" {
+	if len(lines) != 3 || lines[0] != "rm --force --volumes qory-copy-run-01" || !strings.HasPrefix(lines[1], "run --rm ") || lines[2] != "rm --force --volumes qory-copy-run-01" {
+		t.Errorf("the engine's calls:\n%s", b)
+	}
+}
+
+// TestTheGitContainerRemovesAContainerOfItsNameFirst is a container named qory-copy-<run id> that
+// an earlier run with the same id left: docker rm removes it before docker run, and a missing one
+// is no error.
+func TestTheGitContainerRemovesAContainerOfItsNameFirst(t *testing.T) {
+	dir := t.TempDir()
+	log := filepath.Join(dir, "log")
+	script := "#!/bin/sh\necho \"$*\" >> " + log + "\n" +
+		"if [ \"$1\" = rm ]; then echo 'Error response from daemon: No such container: qory-copy-run-01' >&2; exit 1; fi\n"
+	docker := filepath.Join(dir, "docker")
+	if err := os.WriteFile(docker, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	c := gitContainer{Docker: docker, Name: "qory-copy-run-01", Label: "dev.qory.run=run-01", User: "1001:1001", Image: "agent", Output: io.Discard, Session: runcopy.GitSession{Command: "/bin/sh", Dir: "/w"}}
+	if code, err := dockerGitContainer(context.Background(), c); code != 0 || err != nil {
+		t.Fatalf("%d, %v, want 0", code, err)
+	}
+	b, err := os.ReadFile(log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(b)), "\n")
+	if len(lines) != 2 || lines[0] != "rm --force --volumes qory-copy-run-01" || !strings.HasPrefix(lines[1], "run --rm ") {
 		t.Errorf("the engine's calls:\n%s", b)
 	}
 }
