@@ -295,7 +295,7 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Changed
 
-- qory builds with Forager main ddda67a7. A run may have several model keys of one
+- qory builds with Forager main 14b898dc. A run may have several model keys of one
   provider: when the provider returns `429` for a request at a key's limit, the
   gateway's proxy sends the request again with the next key. When every key is at its limit, the
   session stops the runtime and ends `paused` with the reason `model_key_limit`. A
