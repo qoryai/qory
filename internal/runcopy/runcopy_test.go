@@ -4894,6 +4894,70 @@ func TestNestedSubmodulesInASubmoduleComeBack(t *testing.T) {
 	}
 }
 
+// TestARepositoryInARepositoryTheRunMadeInASubmoduleIsLeftBehind is an agent that commits a/f.txt
+// in a submodule the clone copied, runs git init in a and in a/b, and writes a/b/new.txt: the
+// session prints the line of a change in a nested repository, and the copy stays.
+func TestARepositoryInARepositoryTheRunMadeInASubmoduleIsLeftBehind(t *testing.T) {
+	isolate(t)
+	sessionGit(t)
+	src, sub := withSubmodule(t)
+	d, repos := cloneRun(t, src)
+	s := filepath.Join(d.Work(), filepath.FromSlash(sub))
+	write(t, s, "a/f.txt", "f\n")
+	commitAll(t, s, "a")
+	testGit(t, filepath.Join(s, "a"), "init", "--quiet")
+	write(t, s, "a/b/new.txt", "new\n")
+	testGit(t, filepath.Join(s, "a", "b"), "init", "--quiet")
+	printed := sessionOutput(t, d, repos, nil)
+	if want := "qory: the submodule libs/s in the copy has a git repository with commits or changes that the commit leaves out"; !strings.Contains(printed, want) {
+		t.Errorf("the session printed:\n%s", printed)
+	}
+	if !d.Left(repos).Behind {
+		t.Errorf("the session recorded no change left behind:\n%s", printed)
+	}
+}
+
+// TestARepositoryTheRunMadeInASubmoduleFolderIsLeftBehind is an agent that commits a/f.txt in a
+// submodule the clone copied, runs git init in a, and writes a/new.txt, or changes a/f.txt under an
+// ignore rule that covers a: the session prints a line for the repository, and the copy stays.
+// Without the git init the file comes back, and nothing stays.
+func TestARepositoryTheRunMadeInASubmoduleFolderIsLeftBehind(t *testing.T) {
+	for _, c := range []struct {
+		name          string
+		init, ignored bool
+	}{{"init", true, false}, {"ignored", true, true}, {"no-init", false, false}} {
+		t.Run(c.name, func(t *testing.T) {
+			isolate(t)
+			sessionGit(t)
+			src, sub := withSubmodule(t)
+			d, repos := cloneRun(t, src)
+			s := filepath.Join(d.Work(), filepath.FromSlash(sub))
+			write(t, s, "a/f.txt", "f\n")
+			commitAll(t, s, "a")
+			if c.ignored {
+				write(t, s, ".gitignore", "a/\n")
+				commitAll(t, s, "ignore")
+			}
+			if c.init {
+				testGit(t, filepath.Join(s, "a"), "init", "--quiet")
+			}
+			if c.ignored {
+				write(t, s, "a/f.txt", "changed\n")
+			} else {
+				write(t, s, "a/new.txt", "new\n")
+			}
+			printed := sessionOutput(t, d, repos, nil)
+			line := "qory: the submodule libs/s in the copy has a git repository at a that the run made, and the commit leaves it out"
+			if strings.Contains(printed, line) != c.init {
+				t.Errorf("the session printed:\n%s", printed)
+			}
+			if left := d.Left(repos); left.Nested != c.init || left.Behind {
+				t.Errorf("Left = %+v:\n%s", left, printed)
+			}
+		})
+	}
+}
+
 // TestAnUnreadableFileComesBack is a file of mode 000 that the agent left, which the session's user
 // owns, beside a commit, a change or nothing else: the session gives itself read access, and the
 // file comes back with the rest.
