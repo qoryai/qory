@@ -811,15 +811,32 @@ submodule_bundle() (
 	fi
 	g read-tree "$from"
 	printf ':/\0' > "$G/add"
+	# A folder with a .git below another one stays out with it: git stops at a pathspec inside a
+	# submodule of the submodule.
+	all=$nl
+	while IFS= read -r p; do
+		case $p in
+		"$d"/*) all=$all${p#"$d"/}$nl ;;
+		esac
+	done < "$PG/folders"
 	: > "$G/nested"
 	while IFS= read -r p; do
 		case $p in
-		"$d"/*)
-			p=${p#"$d"/}
-			printf '%s\n' "$p" >> "$G/nested"
-			printf ':(exclude,top,literal)%s\0' "$p" >> "$G/add"
-			;;
+		"$d"/*) ;;
+		*) continue ;;
 		esac
+		p=${p#"$d"/} up=$p
+		while :; do
+			case $up in
+			*/*) up=${up%/*} ;;
+			*) break ;;
+			esac
+			case $all in
+			*"$nl$up$nl"*) continue 2 ;;
+			esac
+		done
+		printf '%s\n' "$p" >> "$G/nested"
+		printf ':(exclude,top,literal)%s\0' "$p" >> "$G/add"
 	done < "$PG/folders"
 	# A failure here leaves the setup's files in the commit, which then has more, not less.
 	if ! { sort -u "$PG/now" > "$G/one" && sort -u "$B/sub-$n" > "$G/two" && comm -12 "$G/one" "$G/two" > "$G/setup"; } 2>/dev/null; then
