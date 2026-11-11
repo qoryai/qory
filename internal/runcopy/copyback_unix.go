@@ -58,9 +58,14 @@ type CopyBackResult struct {
 	Failed []string
 	// Deleted are the files the run deleted that it deleted in the folder too.
 	Deleted []string
-	// Conflicts are the files that the run and the person both changed, or that one
-	// changed and the other deleted, since the copy. The person's file stays.
+	// Conflicts are the files that the run changed and the person changed or deleted since
+	// the copy, or that both added with other content. The person's file stays, and the
+	// run's version is beside it, at the name with [disarmedSuffix], or with a number after
+	// that when the name is taken. [Dir.CopyArtifactsIn] writes no such file.
 	Conflicts []string
+	// NotDeleted are the files that the run deleted and the person changed since the copy.
+	// The person's file stays.
+	NotDeleted []string
 	// Skipped are the entries of the copy it left out: a link, a .git, a .qory, a file
 	// that is not regular, a folder that git would take as a git folder, a folder too
 	// deep, and a path whose folder in the destination is a link or no folder.
@@ -80,7 +85,8 @@ type copyBack struct {
 	result   *CopyBackResult
 	qory     map[string]bool
 	skipped  map[string]bool
-	// in is true for [Dir.CopyArtifactsIn]: a failed read or write stops the walk.
+	// in is true for [Dir.CopyArtifactsIn]: a failed read or write stops the walk, and a
+	// conflict writes no file beside the other.
 	in bool
 	// bytes, files and folders are what it wrote and made in the destination outside
 	// [generatedFolders], which the budget counts.
@@ -141,9 +147,11 @@ var errBudget = errors.New("past the budget")
 //
 //   - It copies a regular file that the run added or changed since [Dir.CopyFolder]
 //     recorded it, when the person did not change it since then. When the person did,
-//     the person's file stays, and the file is listed as a conflict.
+//     the person's file stays, the run's version goes beside it, at the name with
+//     [disarmedSuffix] or a free name after that, and the file is listed as a conflict.
 //   - It deletes a regular file that was in the folder at the copy, that the person did
-//     not change since, and that is gone from the copy.
+//     not change since, and that is gone from the copy. A file that the person changed
+//     stays, and is listed as not deleted.
 //   - It leaves out every link, every .git and .qory at any depth, every file that is
 //     not regular, and every folder that git would take as a git folder, in the copy or
 //     once copied.
@@ -209,8 +217,8 @@ func (d Dir) copyBackWith(ctx context.Context, dest string, maxFiles int, maxByt
 // The rules of [Dir.CopyBack] apply: it follows no link on any part of a path, in the copy
 // or in dest, leaves out each link, each .git and .qory at any depth, each file that is not
 // regular and each folder that git would take as a git folder, and stops at the same budget.
-// A file that the person has with other content stays and is listed as a conflict. It
-// deletes nothing.
+// A file that the person has with other content stays, the run's version goes beside it, and
+// the file is listed as a conflict. It deletes nothing.
 func (d Dir) CopyArtifactsBack(ctx context.Context, dest string) (CopyBackResult, error) {
 	return d.artifactsBackWith(ctx, dest, maxCopyBackFiles, maxCopyBackBytes)
 }
@@ -605,7 +613,9 @@ func (c *copyBack) file(src, dst int, name, rel string, exec bool) error {
 		return c.fail(rel, fileErr(rel, err))
 	case have != nil && *have == now:
 		return nil
-	case recorded && (have == nil || *have != was), !recorded && have != nil:
+	}
+	conflict := recorded && (have == nil || *have != was) || !recorded && have != nil
+	if conflict && c.in {
 		c.result.Conflicts = append(c.result.Conflicts, rel)
 		return nil
 	}
@@ -615,9 +625,15 @@ func (c *copyBack) file(src, dst int, name, rel string, exec bool) error {
 	if _, err := in.Seek(0, io.SeekStart); err != nil {
 		return c.fail(rel, fileErr(rel, err))
 	}
-	mode, replaces := uint32(0o666), have != nil
+	to, mode, replaces := name, uint32(0o666), have != nil && !conflict
 	if exec {
 		mode = 0o777
+	}
+	if conflict {
+		// The run's version goes beside the person's, at a name that neither folder has.
+		if to, err = fromRunName(name, rel, dst, src); err != nil {
+			return c.fail(rel, err)
+		}
 	}
 	if replaces {
 		mode = perm
@@ -629,14 +645,18 @@ func (c *copyBack) file(src, dst int, name, rel string, exec bool) error {
 		}
 	}
 	// At most what the hash read, which the budget counted.
-	if err := writeAt(dst, name, rel, boundedRead(c.ctx, in, now.Size), mode, replaces); err != nil {
+	if err := writeAt(dst, to, rel, boundedRead(c.ctx, in, now.Size), mode, replaces); err != nil {
 		return c.fail(rel, err)
 	}
 	if counted {
 		c.bytes += now.Size
 		c.files++
 	}
-	c.result.Copied = append(c.result.Copied, rel)
+	if conflict {
+		c.result.Conflicts = append(c.result.Conflicts, rel)
+	} else {
+		c.result.Copied = append(c.result.Copied, rel)
+	}
 	return nil
 }
 
@@ -697,7 +717,7 @@ func (c *copyBack) deletions(src, dst int) error {
 		have, _, err := destState(dir, name, rel)
 		switch {
 		case errors.Is(err, errNotRegular) || err == nil && have != nil && *have != c.rec.Files[rel]:
-			c.result.Conflicts = append(c.result.Conflicts, rel)
+			c.result.NotDeleted = append(c.result.NotDeleted, rel)
 		case err != nil:
 			unix.Close(dir)
 			return fileErr(rel, err)

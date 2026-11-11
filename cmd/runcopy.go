@@ -51,7 +51,8 @@ const (
 	textCopyBack       = "copied %s back to %s from the run, and deleted %s there."
 	textCopyLeftOut    = "left out of the copy back to your folder: %s."
 	textCopyFailed     = "left out of the copy back, as qory could not read or write them: %s."
-	textCopyConflicts  = "you and the run both changed these files, so yours stay: %s."
+	textCopyConflicts  = "you and the run both changed these files: yours stay, and the run's version of each is beside it with -from-run: %s."
+	textCopyNotDeleted = "you and the run both changed these files, so yours stay: %s."
 	textCopyActingKept = "the run changed these qory settings, so those files stay as you have them: %s."
 	textCopyNotIn      = "left out of the run's copy: %s."
 	textCopyNoRemove   = "remove %s by hand: %s"
@@ -313,8 +314,8 @@ func withoutQoryDir(skipped []string) []string {
 
 // artifactsBack copies .qory/artifacts of the copy back to the person's, once the run's
 // containers are gone, with or without a commit: the git session leaves .qory out. It prints
-// what it left out. A file you both have keeps your version, so the copy stays with the
-// run's, and so does a file that qory could not read or write. It returns false when the copy
+// what it left out. A file you both have keeps your version, with the run's beside it. The
+// copy stays with a file that qory could not read or write. It returns false when the copy
 // back stopped.
 func (c *runCopy) artifactsBack(ctx context.Context, report func(string)) bool {
 	limited, cancel := context.WithTimeout(ctx, copyStepLimit)
@@ -324,7 +325,6 @@ func (c *runCopy) artifactsBack(ctx context.Context, report func(string)) bool {
 	c.failed(res.Failed, report)
 	if len(res.Conflicts) > 0 {
 		report(fmt.Sprintf(textCopyConflicts, shownPaths(res.Conflicts)))
-		c.kept(report)
 	}
 	if err != nil {
 		report(shownError(err))
@@ -665,11 +665,14 @@ func (c *runCopy) copyBack(ctx context.Context, report func(string)) bool {
 	if len(res.Conflicts) > 0 {
 		report(fmt.Sprintf(textCopyConflicts, shownPaths(res.Conflicts)))
 	}
+	if len(res.NotDeleted) > 0 {
+		report(fmt.Sprintf(textCopyNotDeleted, shownPaths(res.NotDeleted)))
+	}
 	if keys := actingKeys(res.Acting); keys != "" {
 		report(fmt.Sprintf(textCopyActingKept, keys))
 	}
 	// The person's version of each such file stays, so the run's is only in the copy.
-	if len(res.Conflicts)+len(res.Acting) > 0 {
+	if len(res.Acting) > 0 {
 		c.kept(report)
 	}
 	return true

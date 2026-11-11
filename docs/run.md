@@ -3844,7 +3844,7 @@ back.
 without a commit and also past the limit of the git session, qory copies the regular files
 of that folder from the copy to your `.qory/artifacts`, by the same rules as a folder that
 is not a repository. A file you already have with other content stays, qory lists it, and
-the copy stays too with the run's version.
+the run's version goes beside it as `<name>-from-run`.
 
 Before the run starts, qory copies your `.qory/artifacts` and `.qory/work-item.json` into the
 clone by the same rules. A run in a repository reads your versions and your work item with
@@ -3855,10 +3855,18 @@ versions first.
 **A folder that is not a repository.** qory copies the folder and, once the containers are
 gone, copies back the regular files that the run added or changed, and deletes those it
 deleted. It leaves out links, every `.git` and `.qory`, and a qory file whose settings
-the run changed, and it keeps your version of a file you both changed. It prints what it left
-out and what you both changed. When you both changed a file, or the run changed a qory
-setting, the copy stays with the run's version of each, and qory prints its folder. Otherwise
-it deletes the copy.
+the run changed. When you both changed a file, or you deleted a file that the run changed, your
+version stays, and qory writes the run's version beside it as `<name>-from-run`, or as
+`<name>-from-run-1` and so on when that name is taken. A file that the run deleted and you
+changed stays. qory prints what it left out and what you both changed:
+
+```text
+qory run: you and the run both changed these files: yours stay, and the run's version of each is beside it with -from-run: notes.txt.
+qory run: you and the run both changed these files, so yours stay: old.txt.
+```
+
+When the run changed a qory setting, the copy stays with the run's version of each such file,
+and qory prints its folder. Otherwise it deletes the copy.
 
 The copy back writes at most 100000 files and folders and 8589934592 bytes. What the run
 writes in a folder named `node_modules`, `.venv`, `venv`, `__pycache__`, `target`, `build`,
@@ -3868,7 +3876,7 @@ leaves that entry out, copies back the rest, and deletes nothing in a folder it 
 lists those entries, and the copy stays with them:
 
 ```text
-left out of the copy back, as qory could not read or write them: closed/new.txt.
+qory run: left out of the copy back, as qory could not read or write them: closed/new.txt.
 ```
 
 **Mounts.** A read-write `--mount` or `wall.mounts` entry stops a walled run that works in a

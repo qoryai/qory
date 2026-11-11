@@ -345,6 +345,12 @@ release may change what an existing document does, and states it under Upgrading
   stays. What the run writes in `node_modules`, `.venv`, `venv`, `__pycache__`, `target`,
   `build`, `dist`, `.gradle` or `.next` comes back and counts nothing toward the limits of
   100000 files and 8589934592 bytes.
+- When you and a run in a folder that is not a repository both changed a file, qory writes the
+  run's version beside yours as `<name>-from-run`, or with a number after that when the name is
+  taken, and prints `you and the run both changed these files: yours stay, and the run's version
+  of each is beside it with -from-run: …`. The same goes for `.qory/artifacts` after any run. A
+  file that the run deleted and you changed stays and is listed. Neither keeps the copy any
+  more.
 - A run that lists repositories starts in an empty folder as well: qory runs `git init`
   there, then fetches. A folder that is not empty and is not a git working tree still
   stops the run.
