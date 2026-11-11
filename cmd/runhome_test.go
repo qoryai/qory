@@ -180,8 +180,9 @@ func TestARunWithAUsedIDLeavesAHomeAtThatID(t *testing.T) {
 	}
 }
 
-// TestARunsHomeIsGoneAfterAKeptCopy is a run whose agent left work that does not come back: the
-// copy stays with its line, which does not depend on the home, and the home is gone.
+// TestARunsHomeIsGoneAfterAKeptCopy is a run whose agent left work that does not come back, as its
+// join returned an error and the git session after the close failed: the copy stays with its
+// line, which does not depend on the home, and the home is gone.
 func TestARunsHomeIsGoneAfterAKeptCopy(t *testing.T) {
 	root, _ := committedFixture(t)
 	homes := runHomesFolder(t, root)
@@ -192,6 +193,9 @@ func TestARunsHomeIsGoneAfterAKeptCopy(t *testing.T) {
 		oneRunHome(t, homes)
 		writeFile(t, filepath.Join(spec.Dir, "left.txt"), "left\n")
 		return nil, errors.New("the wait for the agent failed")
+	}))
+	t.Cleanup(cmd.SetGitSession(func(context.Context, session.SessionSpec) (*session.Result, error) {
+		return &session.Result{ExitCode: 7}, nil
 	}))
 	out, err := run(t, "run", "claude", "--", "-p", "hi")
 	if err == nil {

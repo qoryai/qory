@@ -197,8 +197,7 @@ func TestALineOfGitKeepsNoPartOfAPathOfTheCopy(t *testing.T) {
 
 // TestNowhereKeepsTheRulesOfACopyStep is the fake run against Forager's rules, which the tests of
 // the copy step depend on: an agent's session joins in no host step, a bare one only in a copy
-// step, and during a copy step HostProxy, Setup and RemoveSetup return an error, as do the
-// step's Log and Exit during the join.
+// step, and during a copy step HostProxy, Setup and RemoveSetup return an error.
 func TestNowhereKeepsTheRulesOfACopyStep(t *testing.T) {
 	ctx := context.Background()
 	_, _, restore := OpenNowhereWith(Nowhere{})
@@ -238,27 +237,11 @@ func TestNowhereKeepsTheRulesOfACopyStep(t *testing.T) {
 	if err := r.RemoveSetup(ctx); err == nil {
 		t.Error("RemoveSetup during a copy step returned no error")
 	}
-	defer SetGitSession(func(context.Context, session.SessionSpec) (*session.Result, error) {
-		if err := step.Log([]byte("line\n")); err == nil {
-			t.Error("Log during the join returned no error")
-		}
-		if err := step.Exit(event.StateSucceeded, 0); err == nil {
-			t.Error("Exit during the join returned no error")
-		}
-		if _, err := r.HostProxy(); err == nil {
-			t.Error("HostProxy during the join returned no error")
-		}
-		return &session.Result{}, nil
-	})()
-	git := session.SessionSpec{Args: []string{runcopy.SessionScriptName, "/bin"}}
-	if _, err := joinSession(r, ctx, git); err != nil {
-		t.Errorf("the git session's join: %v", err)
-	}
 	if err := step.Log([]byte("line\n")); err != nil {
-		t.Errorf("Log after the join: %v", err)
+		t.Errorf("Log during the copy step: %v", err)
 	}
 	if err := step.Exit(event.StateFailed, 128); err != nil {
-		t.Errorf("Exit after the join: %v", err)
+		t.Errorf("Exit of the copy step: %v", err)
 	}
 	if _, err := r.HostProxy(); err != nil {
 		t.Errorf("HostProxy after the copy step: %v", err)

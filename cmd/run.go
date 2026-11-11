@@ -1179,38 +1179,42 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			// not, [openedRun.RemoveSetup] and the step's [openedRun.HostProxy] fail, so the step
 			// runs no git. An unwalled agent's process leaves no proof that it stopped.
 			//
-			// A walled write run with no run code works in a copy: it runs its git session here
-			// and brings its work back after the close, under [returnContext], unless the close
-			// shows [session.Closed.WallKept]. A git session that fails changes the close of a
-			// session that succeeded, see [pushEnding.copyOutcome]. A return that fails after the
-			// close changes only qory run's exit status: only the close proves that no container
-			// is left.
+			// A walled write run with no run code works in a copy, and the git session commits
+			// and bundles the agent's work there, in a container qory starts, see
+			// [runCopy.inContainer]. While the run is open, the session runs here, in the copy
+			// step, once [openedRun.RemoveSetup] removed the setup container and
+			// [openedRun.ContainerKept] shows no container of the run left: a git session that
+			// fails then changes the close of a session that succeeded, see
+			// [pushEnding.copyOutcome]. After a join that returned an error once the agent may
+			// have run, a run the gateway closed, a removal of the setup container that failed or
+			// a container of the run kept, it runs after the close instead, with no step, see
+			// [runCopy.gitSessionAfterClose]. The work comes back after the close, under
+			// [returnContext], unless the close shows [session.Closed.WallKept]: then no git
+			// session runs after it either. A return that fails after the close changes only
+			// qory run's exit status: only the close proves that no container is left.
 			ending := pushEnding{session: out, limit: timeout}
 			var pushErr, sessionErr error
 			pushes := keepsWork(fromCode, readOnly, branch, res, err)
-			returns := copied != nil && !copied.readOnly && err == nil && res != nil
+			returns := copied != nil && !copied.readOnly && (err == nil && res != nil || joined)
 			stopNow := func() stopRead { return stopRead{ctx.Err() != nil, again.Err() != nil, got()} }
 			if copied != nil {
 				copied.cutBy = func() string { return ending.cutLine(stopNow(), returnAfterSignal) }
 			}
 			backCtx, cancelBack := returnContext(ctx, again, func(wait time.Duration) {
-				if returns && !res.RunClosed && again.Err() == nil {
+				if returns && again.Err() == nil {
 					said(fmt.Sprintf(textCopyWaiting, got(), wait))
 				}
 			})
 			defer cancelBack()
-			switch {
-			case returns && copied.plain:
-			case returns && res.RunClosed:
-				sessionErr = copied.stopped(textCopyClosed)
-			case returns:
+			// afterClose is whether the git session runs after the close.
+			afterClose := returns && !copied.plain && (err != nil || res == nil || res.RunClosed)
+			if returns && !copied.plain && !afterClose {
 				removeCtx, cancelRemove := context.WithTimeout(backCtx, removeSetupLimit)
-				sessionErr = run.RemoveSetup(removeCtx)
+				removeErr := run.RemoveSetup(removeCtx)
 				cancelRemove()
-				if sessionErr != nil {
-					sessionErr = copied.noSession(backCtx, sessionErr)
-				} else {
-					sessionErr = copied.gitSession(backCtx, run, &spec)
+				afterClose = removeErr != nil || run.ContainerKept()
+				if !afterClose {
+					sessionErr = copied.gitSession(backCtx, run, &spec, streams.errOut)
 				}
 				if sessionErr != nil {
 					ending.settle(stopNow())
@@ -1235,19 +1239,27 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			closed := closeRun(out)
 			// Nothing of the copy comes back when a process of the run could have written it past
 			// its session's end: a close that failed may leave a container, and with WallKept
-			// a part of the run's wall was not removed at some point of the run.
+			// a container of the run could not be removed at some point of the run.
 			trusted := closed != nil && !closed.WallKept
 			artifactsBack := true
 			if copied != nil && !copied.readOnly && trusted && !controlPlane {
 				artifactsBack = copied.artifactsBack(backCtx, said)
+			}
+			if afterClose && trusted {
+				sessionErr = copied.gitSessionAfterClose(backCtx, run, &spec, streams.errOut)
 			}
 			if err != nil {
 				switch {
 				case copied == nil || copied.readOnly:
 				case closed != nil && closed.WallKept:
 					said(copied.stopped(textCopyWallKept).Error())
-				case joined:
+				case !joined:
+				case closed == nil:
 					said(copied.stoppedBy("%s", err).Error())
+				case sessionErr != nil:
+					said(sessionErr.Error())
+				default:
+					copied.comeBack(backCtx, spec.RunID, said)
 				}
 				return failed(err)
 			}
@@ -1303,7 +1315,8 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			default:
 				back = copied.comeBack(backCtx, spec.RunID, said)
 			}
-			if (!back || !artifactsBack) && ended == nil {
+			// A run the gateway closed as completed ends with an exit status of 0 that is not nil.
+			if (!back || !artifactsBack) && ExitCode(ended) == 0 {
 				return reported(&exitError{code: 1})
 			}
 			return ended
@@ -1471,8 +1484,12 @@ type openedRun interface {
 	// Setup runs the run's setup commands in the setup container, before the join.
 	Setup(ctx context.Context, spec session.SetupSpec) error
 	// RemoveSetup removes the run's setup container, if it has one: before the first join
-	// of a read run, and after the session of a run that gets the push step.
+	// of a read run, and after the session of a run that gets the push step or the copy step.
 	RemoveSetup(ctx context.Context) error
+	// ContainerKept is whether a container of the run that can write its binds may still run:
+	// a removal of the agent's container or of the setup container failed. See
+	// [session.Run.ContainerKept].
+	ContainerKept() bool
 	// FetchImage fetches a walled run's image by reference as the run's image step,
 	// before the first join; see [fetchImage].
 	FetchImage(ctx context.Context) error

@@ -503,13 +503,16 @@ Forager's error. A step that fails once the run is stopped, or out of time, ends
 `cancelled`.
 
 After the agent, a walled run that may write in a repository has the step `copy work out`,
-of kind `copy`, around the git session: see [A run that may write works in a
-copy](#a-run-that-may-write-works-in-a-copy). Forager's steps of the git session, such as
-`join session 2`, start and end inside it. It ends `succeeded` with 0 when the git session
-exits 0 within its limit. It ends `cancelled` with -1 when a stop cuts the session. Otherwise it ends `failed`, also when the session
-reaches its limit of 5 minutes, with the git session's exit status, or with -1 when the
-session has none to show, such as one that did not start or one that exits 0 at that limit. Unless it ends `succeeded`,
+of kind `copy`, around the git session, while the run is open: see [A run that may write
+works in a copy](#a-run-that-may-write-works-in-a-copy). The step's log has the lines of the git
+session's container, and no other step starts inside it. It ends `succeeded` with 0 when the git session
+exits 0 within its limit. It ends `cancelled` with -1 when a stop cuts the session. Otherwise it ends `failed`
+with the git session's exit status, or with -1 when the session has none to show, such as one
+that did not start or one that reached its limit of 5 minutes. Unless it ends `succeeded`,
 its last line is the error line, with `the run's copy` in place of each path of the copy.
+A run that the gateway closed during the agent's session, a run whose agent's join returned an
+error, and a run in which a container could not be removed after the agent's session have no
+such step: their git session runs after the close.
 
 After an agent session that succeeded, this step sets how the run closes. A step that ends
 `failed` closes the run `failed` with the step's exit code, and `qory run` exits 1. A step that
@@ -3701,14 +3704,12 @@ Three cases stop the run with their fix first:
 - A folder of a run's copy under `qory/runs` in your cache folder: a run could have written
   it, so `qory run` and `qory harness compose` also stop there. Run qory in your checkout.
 
-When the agent has ended, however it ended, a second session starts on the same run: the git
-session. It runs no agent and gets no model key and no run code. It never binds your
-checkout, and of what you have, only the copy is writable. Its other binds are a new folder
-for its bundles and the folder of the hook forwarder's socket, both writable, and `qory`'s
-Linux build and the session's folder in the run's record, both read-only. A run whose gateway
-answered the open with an authority also binds its bundle of authorities read-only, at
-`/qory/ca-bundle.pem`. A run with no authority in that answer has no such bind, whatever its proxy
-does with TLS. It commits what
+When the agent has ended, however it ended, qory runs the git session in a container that it
+starts on the run's engine itself: `docker run` with the run's image, the wall's user, the wall's
+container runtime when one is set, the agent's limits, no network and no capability. The container
+joins no gateway and runs no agent, and gets no model key and no run code. It binds two folders,
+both writable, and nothing else: the copy, and a new folder for its bundles. It never binds your
+checkout. Its name is `qory-copy-<run id>`, with the run's label. It commits what
 the agent left, with no setting from the copy's `.git` and no filter, and writes the run's
 branch to a git bundle. With a branch
 checked out that descends from your commit, the bundle has that branch, and its commits keep
@@ -3740,7 +3741,15 @@ With `wall.setup: inside`, you see each line once as the image's shell printed i
 session then runs on the same image, qory keeps the copy, and you see a second line.
 
 A run that lists no repositories has no setup, so it has no such step, and a read run has no git
-session. The run's record shows the session as a second session.
+session. The run's record has no session for the git session.
+
+While the run is open, the git session runs in the step `copy work out`, once qory has removed
+the setup container and no container of the run is left. In three cases qory closes the run
+first: the gateway closed the run during the agent's session, the agent's join returned an error
+after the agent may have run, as when the link to the gateway is lost, or a container of the run
+could not be removed after the agent's session. Then the git session runs after the close, when
+the close shows that no container of the run is left, and its work comes back as usual. Its
+lines reach only your terminal, and a failure changes only `qory run`'s exit status.
 
 Part of the run's work can miss the bundle:
 
@@ -3816,19 +3825,20 @@ prints the cause and `qory run: read the run's files in <folder>, run no git the
 remove the folder: it has the work that did not come back`, and `qory run` exits 1 for a session
 that succeeded.
 
-After a session that succeeded, a git session that stops the return also sets how the run
-closes: `failed` with the exit code of the step `copy work out`, or -1 when it has none. A signal
+After a session that succeeded, a git session in the step `copy work out` that stops the return
+also sets how the run closes: `failed` with the exit code of the step `copy work out`, or -1 when it has none. A signal
 that cuts the session closes the run `cancelled` with the reason `interrupted`, exit 1. The run has
 no time limit during the git session: the session has its limit of 5 minutes.
 A return that stops after the run closed, in the check, the fetch or the copy back, leaves the run
 `succeeded`, and `qory run` exits 1: only the close proves that no container of the run is left.
 
-When removing a part of the run's wall failed at any point of the run, even if a later removal
-succeeded, a process may have written the copy after its session ended. Nothing comes back,
-qory keeps the copy, and `qory run` exits 1:
+When removing a container of the run failed at any point of the run, even if a later removal
+succeeded, that container may still run and write the copy. A network or a private folder of
+the wall that stays does not count. Nothing comes back, qory runs no git session, qory keeps
+the copy, and `qory run` exits 1:
 
 ```text
-qory run: read the run's files in <folder>, and run no git there: removing a part of the run's wall failed during the run, so a process may have written the copy after its session ended, and nothing came back from the run
+qory run: read the run's files in <folder>, and run no git there: a container of the run could not be removed and may still run and write the copy, so nothing came back from the run
 ```
 
 In a copy that stays, qory renames each `.git` to `.git-from-run`, mode 0700, and the `HEAD` of

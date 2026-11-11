@@ -316,8 +316,8 @@ release may change what an existing document does, and states it under Upgrading
   and is or contains your home folder or qory's state directory, and a write run in a copy that
   lists repositories on an image without a program of the git session, which stops in the setup step
   `Check tools`, before the agent, with `install <program> in /usr/local/bin, /usr/bin, /bin: …`. A copy that stays has its `.git` renamed to `.git-from-run`. Part of the run's work
-  that misses the bundle, such as commits on another branch or a stash, keeps the copy, and so does a part of
-  the run's wall that could not be removed, which brings nothing back. A first signal leaves the
+  that misses the bundle, such as commits on another branch or a stash, keeps the copy, and so does a
+  container of the run that could not be removed, which brings nothing back. A first signal leaves the
   return of a local run at most 30 minutes, and `qory run` prints that time. A read run with a setup also
   works in a copy, read-only for the agent, and nothing comes back from it. A read-write
   mount stops a read run too, and so does a read run with no setup at your home folder.
@@ -353,6 +353,16 @@ release may change what an existing document does, and states it under Upgrading
   of each is beside it with -from-run: …`. The same goes for `.qory/artifacts` after any run. A
   file that the run deleted and you changed stays and is listed. Neither keeps the copy any
   more.
+- The git session of a walled write run in a copy runs in a container that qory starts with
+  `docker run`, from the run's image, as the wall's user, with the wall's container runtime when
+  one is set, no network, no capability, and binds of the copy and its bundle folder alone. It
+  joins no gateway. When the gateway closed the run during the agent's session, when the agent's
+  join returned an error after the agent may have run, or when a container of the run could not
+  be removed after the agent's session, the work comes back too: qory runs the git session after
+  the close, with no step `copy work out`, and a failure changes only `qory run`'s exit status.
+  When a container of the run could not be removed, qory prints `a container of the run could
+  not be removed and may still run and write the copy, so nothing came back from the run`; a
+  network or a private folder of the wall that stays brings the work back.
 - A run that lists repositories starts in an empty folder as well: qory runs `git init`
   there, then fetches. A folder that is not empty and is not a git working tree still
   stops the run.
