@@ -1,8 +1,10 @@
 package preparation
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -263,6 +265,156 @@ func TestFreshHomeRefusesAFolderPutThereAfterMkdir(t *testing.T) {
 		t.Errorf("the folder put there changed: %v %v", fi, err)
 	}
 	if _, err := os.Stat(filepath.Join(path, "settings.json")); err != nil {
+		t.Error(err)
+	}
+}
+
+// mountsAt has [readMountinfo] list a mount at each of paths, as the kernel writes
+// /proc/self/mountinfo, for the rest of the test.
+func mountsAt(t *testing.T, paths ...string) {
+	t.Helper()
+	text := "22 1 0:21 / / rw,relatime - overlay overlay rw\n"
+	for i, p := range paths {
+		p = strings.NewReplacer(`\`, `\134`, " ", `\040`).Replace(p)
+		text += fmt.Sprintf("%d 22 0:%d / %s rw,relatime - ext4 /dev/vda1 rw\n", 30+i, 30+i, p)
+	}
+	before := readMountinfo
+	readMountinfo = func() ([]byte, error) { return []byte(text), nil }
+	t.Cleanup(func() { readMountinfo = before })
+}
+
+// TestTheTranscriptsLinkToTheBind is the agent's home made fresh with a mount at
+// .claude/projects below HOME, where Forager binds the run's transcript folder: projects
+// of the home becomes a link to it, and a file written through the link lands in the
+// mounted folder.
+func TestTheTranscriptsLinkToTheBind(t *testing.T) {
+	dir := realTemp(t)
+	agentHome, home := filepath.Join(dir, "qory-agent-home"), filepath.Join(dir, "home agent")
+	bind := filepath.Join(home, ".claude", "projects")
+	if err := os.MkdirAll(bind, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	mountsAt(t, bind)
+	if err := freshHome(agentHome); err != nil {
+		t.Fatal(err)
+	}
+	if err := linkTranscripts(agentHome, home, "projects", ".claude/projects"); err != nil {
+		t.Fatal(err)
+	}
+	if target, err := os.Readlink(filepath.Join(agentHome, "projects")); err != nil || target != bind {
+		t.Fatalf("the link leads to %q (%v), want %s", target, err, bind)
+	}
+	if err := os.MkdirAll(filepath.Join(agentHome, "projects", "-work"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(agentHome, "projects", "-work", "s.jsonl"), []byte("{}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(bind, "-work", "s.jsonl")); err != nil {
+		t.Errorf("the transcript is not in the bound folder: %v", err)
+	}
+}
+
+// TestTheTranscriptsStayInTheHomeWithoutABind is a run whose transcript folder Forager
+// does not bind, or a launch with no HOME or no folder to link: the agent's home stays
+// empty. Each case but "no mount" lists a mount at the place it would link to, so the
+// check under test is what stops the link: with no mount at the place, even where the
+// image has a folder there and a mount is above it; with no HOME; with a relative HOME;
+// and with no folder to link.
+func TestTheTranscriptsStayInTheHomeWithoutABind(t *testing.T) {
+	for name, c := range map[string]struct{ home, folder string }{
+		"no mount":   {"home", "projects"},
+		"no HOME":    {"", "projects"},
+		"no folder":  {"home", ""},
+		"a relative": {"relative-home", "projects"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			dir := realTemp(t)
+			agentHome := filepath.Join(dir, "qory-agent-home")
+			home := c.home
+			if home == "home" {
+				home = filepath.Join(dir, "home")
+				if err := os.MkdirAll(filepath.Join(home, ".claude", "projects"), 0o700); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if name == "no mount" {
+				mountsAt(t, home)
+			} else {
+				mountsAt(t, filepath.Join(home, ".claude", "projects"))
+			}
+			if err := freshHome(agentHome); err != nil {
+				t.Fatal(err)
+			}
+			if err := linkTranscripts(agentHome, home, c.folder, ".claude/projects"); err != nil {
+				t.Fatal(err)
+			}
+			wantFreshHome(t, agentHome)
+		})
+	}
+}
+
+// TestTheTranscriptsLinkStopsAtSomethingInTheHome is a program that wrote into the
+// agent's home after qory made it fresh: a file at the link's path, or at a folder above
+// it. The link is not made, and the error's fix is to leave no such program running.
+func TestTheTranscriptsLinkStopsAtSomethingInTheHome(t *testing.T) {
+	for name, c := range map[string]struct{ file, folder string }{
+		"at the link":    {"projects", "projects"},
+		"above the link": {"a", "a/projects"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			dir := realTemp(t)
+			agentHome, home := filepath.Join(dir, "qory-agent-home"), filepath.Join(dir, "home")
+			bind := filepath.Join(home, ".claude", "projects")
+			if err := os.MkdirAll(bind, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			mountsAt(t, bind)
+			if err := freshHome(agentHome); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(agentHome, c.file), nil, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			err := linkTranscripts(agentHome, home, c.folder, ".claude/projects")
+			want := fmt.Sprintf(textLinkExists, agentHome, filepath.Join(agentHome, c.folder))
+			if err == nil || err.Error() != want {
+				t.Errorf("%v, want %s", err, want)
+			}
+			if fi, err := os.Lstat(filepath.Join(agentHome, c.file)); err != nil || !fi.Mode().IsRegular() {
+				t.Errorf("the file at %s is gone or replaced: %v", c.file, err)
+			}
+		})
+	}
+}
+
+// TestTheTranscriptsLinkStopsAtAPathOutside is a folder or a place with a .. name, or an
+// absolute one, which qory run does not pass: one error, and no link.
+func TestTheTranscriptsLinkStopsAtAPathOutside(t *testing.T) {
+	dir := realTemp(t)
+	agentHome := filepath.Join(dir, "qory-agent-home")
+	if err := freshHome(agentHome); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range [][2]string{{"../projects", ".claude/projects"}, {"projects", "../.claude"}, {"projects", "/etc"}, {"projects", ""}, {"a/./b", ".claude"}} {
+		err := linkTranscripts(agentHome, dir, c[0], c[1])
+		if err == nil || !strings.HasPrefix(err.Error(), "point wall.helper at the Linux build of the qory that starts the run: ") {
+			t.Errorf("%q: %v", c, err)
+		}
+	}
+	wantFreshHome(t, agentHome)
+}
+
+// TestLinkTranscriptsNeedsTheAgentHome is a launch whose CLAUDE_CONFIG_DIR is not the
+// agent's home, as on a run that is not dispatched or not walled: no link is made.
+func TestLinkTranscriptsNeedsTheAgentHome(t *testing.T) {
+	getenv := func(name string) string {
+		if name == "HOME" {
+			return "/nonexistent-home"
+		}
+		return ""
+	}
+	if err := LinkTranscripts(getenv, "../x", "/y"); err != nil {
 		t.Error(err)
 	}
 }

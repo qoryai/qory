@@ -286,8 +286,31 @@ release may change what an existing document does, and states it under Upgrading
   and `qory run --help` does not show it. With a bad file, such as one that is missing,
   the run has no such step, qory prints one line, and the run goes on. See The record in
   `docs/run.md`.
+- A run whose model keys all reached their limit ends with `✗ the run was paused: every
+  model key reached its limit` after the runtime's line, exit 1, as a cancelled run
+  does. qory closes the run `paused` with the reason `model_key_limit` and the runtime's
+  exit status, and a control plane can continue the run. `qory run resend` says the end
+  of such a run as `paused: every model key reached its limit`. `qory apiary run list
+  --state paused` lists the paused runs. See `docs/run.md`.
 
 ### Changed
+
+- qory builds with Forager main 14b898dc. A run may have several model keys of one
+  provider: when the provider returns `429` for a request at a key's limit, the
+  gateway's proxy sends the request again with the next key. When every key is at its limit, the
+  session stops the runtime and ends `paused` with the reason `model_key_limit`. A
+  walled run of Claude Code binds a folder of the run's directory at
+  `~/.claude/projects` in the agent's home, and the session sends the runtime's
+  transcript as `dev.qory.session.transcript`. `qory run end --reason model_key_limit`
+  stops with exit 2, as each of Forager's reasons does.
+- On a dispatched walled run of Claude Code, qory makes `/tmp/qory-agent-home/projects`
+  a symbolic link to `~/.claude/projects` in the container when Forager binds the run's
+  transcript folder there, after the check that the agent's home is empty. Claude Code
+  writes its transcripts through the link into the run directory, so the session sends
+  them and a continuation of a paused run starts Claude Code with `--resume`. Before,
+  Claude Code wrote them in the agent's home alone, the session sent none, and a
+  continuation started without a resume. Without the bind, qory makes no link. See
+  `docs/run.md`.
 
 - A run that lists repositories starts in an empty folder as well: qory runs `git init`
   there, then fetches. A folder that is not empty and is not a git working tree still

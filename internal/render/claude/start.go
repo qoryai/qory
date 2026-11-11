@@ -48,5 +48,10 @@ func (claude) SettingsFlag() string { return "--settings" }
 // plugins, memory, .claude.json and transcripts from that folder.
 func (claude) AgentHomeVariable() string { return "CLAUDE_CONFIG_DIR" }
 
+// TranscriptFolder is projects: Claude Code writes each session's transcript at
+// projects/<slug of the working folder>/<session id>.jsonl in its configuration
+// directory.
+func (claude) TranscriptFolder() string { return "projects" }
+
 // Install is Claude Code's npm package at version.
 func (claude) Install(version string) string { return "@anthropic-ai/claude-code@" + version }

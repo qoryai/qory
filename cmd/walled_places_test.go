@@ -35,7 +35,7 @@ func walledSection(t *testing.T) string {
 	docker, log := fakeDocker(t)
 	placesDir := filepath.Join(os.Getenv("XDG_STATE_HOME"), "qory", "places")
 	wrapper := filepath.Join(t.TempDir(), "docker")
-	writeFile(t, wrapper, "#!/bin/sh\ncase \"$1\" in run) echo \"places: $(ls "+placesDir+" 2>/dev/null | tr '\\n' ' ')\" >> "+log+" ;; esac\nexec "+docker+" \"$@\"\n")
+	writeFile(t, wrapper, "#!/bin/sh\ncase \"$1 $2\" in \"run \"*|\"start --attach\") echo \"places: $(ls "+placesDir+" 2>/dev/null | tr '\\n' ' ')\" >> "+log+" ;; esac\nexec "+docker+" \"$@\"\n")
 	if err := os.Chmod(wrapper, 0o755); err != nil {
 		t.Fatal(err)
 	}

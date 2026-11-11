@@ -185,7 +185,7 @@ func TestAWalledRunActsOnNothingInTheWorkspaceAfterItsSession(t *testing.T) {
 	script := filepath.Join(root, "tools", "setup.sh")
 	agent := filepath.Join(tempDir(t), "docker")
 	writeFile(t, agent, `#!/bin/sh
-case "$1" in run)
+case "$1 $2" in "run "*|"start --attach")
 	echo "the session starts" >> `+log+`
 	git -C `+root+` config alias.x log
 	mkdir -p `+filepath.Dir(script)+`

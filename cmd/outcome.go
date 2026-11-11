@@ -32,6 +32,9 @@ type outcome struct {
 	// lost is the outcome of a run whose session went silent or whose end was never
 	// recorded, failed with session_lost or gateway_lost, as Qory Apiary shows it.
 	completed, failed, cancelled, lost bool
+	// paused is the outcome of a run in the state paused: every model key of the run
+	// reached its limit, the reason model_key_limit, the one reason of that state.
+	paused bool
 	// noOutcome is a run whose starter ended it and gave no outcome, stopped.
 	noOutcome bool
 	// known is false when neither the state nor the reason says how the run ended.
@@ -42,10 +45,15 @@ type outcome struct {
 // outcomeOf is how the run ended, by state and reason. Forager's own reasons have the
 // outcome they always end a run with, and are said in qory's words; the time limit's is
 // said with its limit by the caller, so here it has no words, nor has a run stopped from
-// where it was started, interrupted, or a quiet one. Any other reason is the
-// run's starter's, said as it gave it with spaces for underscores, under the state.
+// where it was started, interrupted, or a quiet one. A run in the state paused stopped
+// at the model key limit. Any other reason is the run's starter's, said as it gave it
+// with spaces for underscores, under the state.
 func outcomeOf(state, reason string) outcome {
 	o := outcome{known: true}
+	if state == event.StatePaused {
+		o.paused, o.reason = true, "every model key reached its limit"
+		return o
+	}
 	switch reason {
 	case event.ReasonSessionLost:
 		o.lost, o.reason = true, fmt.Sprintf("it lost contact with the gateway for %s", runQuiet)
@@ -79,12 +87,14 @@ func outcomeOf(state, reason string) outcome {
 	return o
 }
 
-// word is the outcome as qory says it in a resend's line: completed, failed, cancelled
-// or lost.
+// word is the outcome as qory says it in a resend's line: completed, failed, cancelled,
+// paused or lost.
 func (o outcome) word() string {
 	switch {
 	case o.completed:
 		return "completed"
+	case o.paused:
+		return "paused"
 	case o.cancelled:
 		return "cancelled"
 	case o.lost:
@@ -93,11 +103,14 @@ func (o outcome) word() string {
 	return "failed"
 }
 
-// phrase is the outcome after "the run": completed, failed, was cancelled, was lost.
+// phrase is the outcome after "the run": completed, failed, was cancelled, was paused,
+// was lost.
 func (o outcome) phrase() string {
 	switch {
 	case o.completed:
 		return "completed"
+	case o.paused:
+		return "was paused"
 	case o.cancelled:
 		return "was cancelled"
 	case o.lost:
