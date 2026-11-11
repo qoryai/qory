@@ -300,7 +300,10 @@ export HOME="$B/home" GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null \
 	GIT_NO_LAZY_FETCH=1 GIT_ALLOW_PROTOCOL=none LC_ALL=C
 mkdir "$HOME"
 # g is git with settings that beat the copy's configuration and a submodule's, which the agent
-# wrote: no pager, hook, fsmonitor, replace ref, signature check or signing program runs.
+# wrote: no pager, fsmonitor, replace ref, signature check, signing program or hook in a hooks
+# folder runs. git 2.55 still runs a hook that such a configuration sets with
+# hook.<name>.command, and has a key that turns hooks off for one event only, not for all. So
+# each command run with such a configuration is a read that fires no hook event.
 g() {
 	git --no-pager -c core.hooksPath=/dev/null -c core.fsmonitor=false -c core.useReplaceRefs=false \
 		-c core.commitGraph=false -c core.attributesFile=/dev/null -c core.excludesFile=/dev/null \
@@ -325,7 +328,8 @@ kind() {
 }
 # copygit is git with the copy's git folder $C as git dir, so packed refs and reftable both work.
 # It reads the copy's configuration, inside the wall, and the settings of g beat each key there
-# that would run a program for the commands below.
+# that would run a program for the commands below, but hook.<name>.command: each command below
+# reads refs, logs or the index and fires no hook event.
 copygit() {
 	g --git-dir="$C" "$@"
 }
@@ -376,19 +380,52 @@ readable() {
 # the git folder $G/status-$st, $st being a number the caller raises for each call: see tree_status.
 submodule_status() (
 	unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE
-	tree_status "$T/$1" "$G/status" "$G/status-$st"
+	tree_status "$T/$1" "$G/status" "$G/status-$st" 1
 )
-# tree_status writes to the file $2 the changes of the repository at the folder $1: what its working
-# tree changed since its HEAD. As for the top repository, git runs through a new git folder $3 that
-# gitfolder makes, with an empty configuration, the repository's objects as alternates, HEAD at the
-# repository's commit and an index of its tree, so no program, hook, fsmonitor or filter that the
-# agent wrote in the repository's configuration runs. A submodule inside it at another commit is a
-# change. One at its commit with a .git gets the same status, in the git folder status-<k> of $3, k
-# being its number: when that status has a change or fails, the submodule is a change in $2, and
-# n.left is written. A gitlink whose path ls-files quotes cannot be checked: n.left is written.
-# A call in a condition ignores set -e, so each step that can fail exits 1 on its failure.
+# through_link reports whether the path $2 below the folder $1, or a folder on the way to it, is a
+# link.
+through_link() {
+	l_at=$1 l_rest=$2
+	while :; do
+		l_at=$l_at/${l_rest%%/*}
+		if [ -h "$l_at" ]; then
+			return 0
+		fi
+		case $l_rest in
+		*/*) l_rest=${l_rest#*/} ;;
+		*) return 1 ;;
+		esac
+	done
+}
+# filled reports whether $1 is anything but an empty folder that the session can list: a folder
+# with an entry or one it cannot list, or any other file. The shell lists the folder, as the
+# image may have no ls.
+filled() {
+	if [ ! -d "$1" ] || [ ! -r "$1" ] || [ ! -x "$1" ]; then
+		return 0
+	fi
+	for f_e in "$1"/* "$1"/.[!.]* "$1"/..?*; do
+		if [ -e "$f_e" ] || [ -h "$f_e" ]; then
+			return 0
+		fi
+	done
+	return 1
+}
+# tree_status writes to the file $2 the changes of the repository at the folder $1, which is $4
+# submodules deep: what its working tree changed since its HEAD. As for the top repository, git
+# runs through a new git folder $3 that gitfolder makes, with an empty configuration, the
+# repository's objects as alternates, HEAD at the repository's commit and an index of its tree, so
+# no program, hook, fsmonitor or filter that the agent wrote in the repository's configuration runs.
+# A submodule inside it at another commit is a change. One at its commit with a .git gets the same
+# status, in the git folder status-<k> of $3, k being its number: when that status has a change or
+# fails, the submodule is a change in $2, and n.left is written. These gitlinks cannot be checked,
+# so each is a change, and n.left is written: one whose path ls-files quotes; one whose path is a
+# link or goes through one, since a link to . would repeat the status without end; one with no
+# .git and a folder that is not empty or that the session cannot list, such as a nested
+# submodule that no update populated; and one more than 8 submodules deep. A call in a condition ignores set -e, so
+# each step that can fail exits 1 on its failure.
 tree_status() (
-	t_at=$1 t_out=$2 G=$3
+	t_at=$1 t_out=$2 G=$3 t_depth=$4
 	cd "$t_at" || exit 1
 	objects=$(g --git-dir=.git rev-parse --git-path objects) || exit 1
 	case $objects in
@@ -421,11 +458,25 @@ tree_status() (
 			continue
 			;;
 		esac
+		if through_link "$t_at" "$t_p"; then
+			printf ' M %s\0' "$t_p" >> "$t_out" || exit 1
+			: > "$B/$n.left"
+			continue
+		fi
 		if [ ! -e "$t_at/$t_p/.git" ] && [ ! -h "$t_at/$t_p/.git" ]; then
+			if [ -e "$t_at/$t_p" ] && filled "$t_at/$t_p"; then
+				printf ' M %s\0' "$t_p" >> "$t_out" || exit 1
+				: > "$B/$n.left"
+			fi
+			continue
+		fi
+		if [ "$t_depth" -ge 8 ]; then
+			printf ' M %s\0' "$t_p" >> "$t_out" || exit 1
+			: > "$B/$n.left"
 			continue
 		fi
 		t_k=$((t_k + 1))
-		if ! tree_status "$t_at/$t_p" "$G/status-$t_k.out" "$G/status-$t_k" || [ -s "$G/status-$t_k.out" ]; then
+		if ! tree_status "$t_at/$t_p" "$G/status-$t_k.out" "$G/status-$t_k" $((t_depth + 1)) || [ -s "$G/status-$t_k.out" ]; then
 			printf ' M %s\0' "$t_p" >> "$t_out" || exit 1
 			: > "$B/$n.left"
 		fi

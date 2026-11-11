@@ -662,9 +662,8 @@ func (c *runCopy) fetchOne(ctx context.Context, q *runcopy.Quarantine, runID str
 			report(c.checkFailed(ctx, limitErr(ctx, limited, textCopyFetchLimit, c.limit, err)).Error())
 			return false
 		}
-		// A fetch that failed in a submodule joins an error per repository, each a line.
-		for _, e := range joinedErrors(err) {
-			report(shownError(e))
+		for _, line := range fetchFailedLines(err) {
+			report(line)
 		}
 		return false
 	}
@@ -682,6 +681,22 @@ func (c *runCopy) fetchOne(ctx context.Context, q *runcopy.Quarantine, runID str
 	}
 	report(line)
 	return true
+}
+
+// maxFetchLine is the most runes of a line for a fetch of the run's commits that failed. Such a
+// line has up to three paths before git's cause, which the 200 runes of [integration.Printable]
+// would cut off.
+const maxFetchLine = 2000
+
+// fetchFailedLines is the lines for err, an error of [runcopy.Quarantine.FetchInto]: a fetch that
+// failed in a submodule joins an error per repository, each a line. Each line is printable, has
+// at most [maxFetchLine] runes, and has every URL's password and every secret hidden.
+func fetchFailedLines(err error) []string {
+	var lines []string
+	for _, e := range joinedErrors(err) {
+		lines = append(lines, integration.PrintableWithin(exports.HideURLError(e).Error(), maxFetchLine))
+	}
+	return lines
 }
 
 // joinedErrors is the errors that err joins, as [errors.Join] makes it, or err alone.

@@ -822,6 +822,7 @@ const branchTriesAfterFetch = 3
 // exists and no working tree has it checked out, so no branch of the person's moves and the
 // person's files never change to what the run wrote. When that fails, it tries the next free name
 // for the run runID, as [FreeBranchAgain] picks it, at most [branchTriesAfterFetch] names in all.
+// When git worktree list fails, it makes no branch.
 // It returns the branch it made and deletes <prefix>/branch, or returns "" and keeps the commits
 // there. It returns prefix, "" when no ref is left under it.
 //
@@ -915,7 +916,11 @@ func (q *Quarantine) makeBranch(ctx context.Context, checkout, branch, runID str
 		if checkRef(ctx, ref) != nil {
 			return ""
 		}
-		if checkedOut(ctx, checkout, ref) == "" {
+		tree, err := checkedOut(ctx, checkout, ref)
+		if err != nil {
+			return ""
+		}
+		if tree == "" {
 			err := withLockWaits(ctx, func() error {
 				_, err := git(ctx, checkout, "update-ref", ref, q.Head, zero)
 				return err
@@ -1050,12 +1055,19 @@ func lockHeld(err error) bool {
 	return false
 }
 
+// worktreeList runs git worktree list in the repository at checkout and returns its output. A
+// test replaces it with a list that fails.
+var worktreeList = func(ctx context.Context, checkout string) (string, error) {
+	return git(ctx, checkout, "worktree", "list", "--porcelain", "-z")
+}
+
 // checkedOut is the working tree of the repository at checkout that has ref checked
-// out, by git worktree list; "" for none or when the list fails.
-func checkedOut(ctx context.Context, checkout, ref string) string {
-	out, err := git(ctx, checkout, "worktree", "list", "--porcelain", "-z")
+// out, by git worktree list, or "" for none. It returns an error when the list fails, as a
+// working tree that the list leaves out may have ref checked out.
+func checkedOut(ctx context.Context, checkout, ref string) (string, error) {
+	out, err := worktreeList(ctx, checkout)
 	if err != nil {
-		return ""
+		return "", err
 	}
 	tree := ""
 	for field := range strings.SplitSeq(out, "\x00") {
@@ -1063,8 +1075,8 @@ func checkedOut(ctx context.Context, checkout, ref string) string {
 			tree = p
 		}
 		if field == "branch "+ref {
-			return tree
+			return tree, nil
 		}
 	}
-	return ""
+	return "", nil
 }

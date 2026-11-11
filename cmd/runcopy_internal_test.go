@@ -364,6 +364,26 @@ func TestALongListShowsItsFirstFiftyEntries(t *testing.T) {
 	}
 }
 
+// TestAFailedFetchPrintsEachLineWhole is a fetch that failed in a submodule with paths of 300
+// runes: each joined error is a line, git's cause at its end, and only a line of more than
+// [maxFetchLine] runes is cut.
+func TestAFailedFetchPrintsEachLineWhole(t *testing.T) {
+	long := "/" + strings.Repeat("folder/", 43) + "repo"
+	one := fmt.Errorf("fetch refs/qory/run-1/* from %s/quarantine/0-0.git by hand: qory fetched the run's commits there, and the fetch into %s/sub in %s/.git/modules/sub failed: %w", long, long, long, errors.New("git fetch: fatal: the cause"))
+	two := fmt.Errorf("fetch refs/heads/qory/run-1 from %s/quarantine/0.git into %s by hand: qory fetches the run's commits into your repository only after the fetch into each submodule, and a fetch into a submodule failed", long, long)
+	lines := fetchFailedLines(errors.Join(one, two))
+	if len(lines) != 2 || lines[0] != one.Error() || lines[1] != two.Error() {
+		t.Fatalf("the lines are %q", lines)
+	}
+	if !strings.HasSuffix(lines[0], "git fetch: fatal: the cause") || len(lines[0]) <= 200 {
+		t.Errorf("the line of the submodule's fetch is %q", lines[0])
+	}
+	cut := fetchFailedLines(errors.New(strings.Repeat("x", maxFetchLine+1)))
+	if want := strings.Repeat("x", maxFetchLine) + "..."; len(cut) != 1 || cut[0] != want {
+		t.Errorf("a line of %d runes is %q", maxFetchLine+1, cut)
+	}
+}
+
 // TestJoinedErrorsAreLinesOfTheirOwn is the error of a fetch that failed in a submodule, which
 // joins an error per repository: each is a line. Any other error is one line.
 func TestJoinedErrorsAreLinesOfTheirOwn(t *testing.T) {

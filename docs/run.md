@@ -3780,6 +3780,9 @@ Part of the run's work can stay in the copy:
   submodule. An ignore rule that covers a repository's folder keeps it out of this list. The session
   prints a line with its path.
 - A commit or a change in a submodule that the clone did not copy, such as one that the agent set up.
+- A repository inside a submodule that the session cannot check: one whose path is a link or goes
+  through one, one more than 8 submodules deep, or one with no `.git` whose folder is not empty,
+  such as a nested submodule that no update populated, with a file the agent wrote there.
 - A file or a folder that the session cannot read after it gives itself read access, such as one
   that another user owns. The rest of the work comes back.
 - A setup's file that the agent commits as it is, under a filter set only in the copy's git settings,
@@ -3819,7 +3822,11 @@ commit as its full content, in place of a pointer.
 
 The session reads the refs and reflogs of the copy, and of each submodule the clone copied, with
 git on the copy's git settings, and overrides each setting that runs a program in these reads: no
-pager, hook, fsmonitor, signature check or signing program that the run set runs.
+pager, fsmonitor, signature check, signing program or hook in a hooks folder that the run set
+runs. git 2.55 runs a hook that the git settings set with `hook.<name>.command` even with the
+hooks folder off, and has no setting that turns such hooks off for every event. Each git command
+that the session runs on the copy's git settings reads refs, logs or the index, which fires no
+hook event.
 
 A program the agent planted in the copy can run again in this session, in a container with no
 network, so the session has a time limit: 5 minutes, plus a minute for each 20,000 files, folders
@@ -3848,7 +3855,8 @@ branch named `qory` the names start at `qory-run-<run id>`. qory fetches the com
 run's prefix first, then makes the branch only when no branch has that name and no working tree
 has it checked out, so no branch of yours moves, even one you made during the fetch: then qory
 tries the next free name, at most 3 names in all. When another git process holds a lock on the
-branch, qory tries again, at most 5 times in 30 seconds. When qory makes no branch, the commits
+branch, qory tries again, at most 5 times in 30 seconds. When `git worktree list` fails, qory
+makes no branch, since a working tree may have it checked out. When qory makes no branch, the commits
 stay at `refs/qory/run-<run id>/branch`, and the line lists the run's refs. qory never checks the
 branch out, so the files in your checkout stay as they are:
 
@@ -3893,8 +3901,12 @@ When a ref of yours has that prefix or lies under it, as after an earlier run wi
 the refs come back under `refs/qory/run-<run id>-2`, `-3` and so on. qory fetches them with git's
 object checks, all or none, and moves no ref outside the prefix and no `HEAD`. It fetches into
 each submodule first: when one of those fetches fails, your repository gets no ref of the run,
-and qory prints a line with the fix for each fetch that failed or did not run, such as
-`fetch refs/heads/qory/run-0193 from <quarantine> into /path/to/repo by hand: …`. The line of the
+and qory prints a line of at most 2000 characters with the fix for each fetch that failed or did
+not run, such as
+`fetch refs/heads/qory/run-0193 from <quarantine> into /path/to/repo by hand: …`. When the fetch
+into a submodule worked, one more line follows:
+`list the run's refs with git for-each-ref refs/qory/run-0193 in the git folder of each submodule
+whose fetch worked: qory fetched them there under refs/qory/run-0193`. The line of the
 branch says where they are:
 
 ```text
