@@ -4853,7 +4853,47 @@ func TestAFailedStatusInANestedSubmoduleIsLeftBehind(t *testing.T) {
 	}
 }
 
-// TestAnUnreadableFileLeavesTheRestToComeBack is a file of mode 000 beside other work: the session
+// TestNestedSubmodulesInASubmoduleComeBack is a submodule that the clone copied, with a chain of
+// repositories in it, as levels submodules in all, and a new file at its top: the file comes back
+// in the submodule's uncommitted, without the files of the chain. A change at the end of the chain
+// keeps the copy, and so does a chain more than 8 submodules deep.
+func TestNestedSubmodulesInASubmoduleComeBack(t *testing.T) {
+	for _, c := range []struct {
+		levels int
+		change bool
+	}{{3, false}, {4, false}, {8, false}, {3, true}, {4, true}, {9, false}} {
+		t.Run(fmt.Sprintf("%d levels, a change %t", c.levels, c.change), func(t *testing.T) {
+			isolate(t)
+			sessionGit(t)
+			src, sub := withSubmodule(t)
+			d, repos := cloneRun(t, src)
+			s := filepath.Join(d.Work(), filepath.FromSlash(sub))
+			nest(t, s, c.levels-1)
+			write(t, s, "new.txt", "new\n")
+			if c.change {
+				write(t, s, strings.Repeat("d/", c.levels-1)+"f.txt", "changed\n")
+			}
+			printed := sessionOutput(t, d, repos, nil)
+			if got, want := leftBehind(d, repos), c.change || c.levels > 8; got != want {
+				t.Errorf("left behind = %v:\n%s", got, printed)
+			}
+			qs, err := d.Quarantine(context.Background(), branch, repos)
+			if err != nil {
+				t.Fatalf("Quarantine: %v\n%s", err, printed)
+			}
+			q := qs[0].Submodules[0]
+			ref := prefix + "/uncommitted"
+			if !slices.Contains(q.Refs, ref) {
+				t.Fatalf("the submodule's refs are %v:\n%s", q.Refs, printed)
+			}
+			got := files(t, q.Path, ref)
+			if !slices.Contains(got, "new.txt") || !slices.Contains(got, "d") || slices.Contains(got, "d/f.txt") {
+				t.Errorf("the submodule's uncommitted has %v", got)
+			}
+		})
+	}
+}
+
 // TestAnUnreadableFileComesBack is a file of mode 000 that the agent left, which the session's user
 // owns, beside a commit, a change or nothing else: the session gives itself read access, and the
 // file comes back with the rest.
