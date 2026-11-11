@@ -4461,6 +4461,31 @@ func TestANestedSubmoduleLetsTheSessionCommit(t *testing.T) {
 	}
 }
 
+// TestAChangeInANestedSubmoduleIsLeftBehind is an agent that updates a nested submodule and changes
+// a file there without a commit: the session prints a line for the submodule around it, and the copy
+// stays. A planted fsmonitor in the nested submodule's configuration never runs.
+func TestAChangeInANestedSubmoduleIsLeftBehind(t *testing.T) {
+	isolate(t)
+	sessionGit(t)
+	src := nestedSubmodule(t)
+	d, repos := cloneRun(t, src)
+	updateSubmodules(t, d.Work())
+	inner := filepath.Join(d.Work(), "libs", "m", "inner")
+	program, ran := marker(t)
+	testGit(t, inner, "config", "core.fsmonitor", program)
+	write(t, inner, "lib.txt", "changed\n")
+	printed := sessionOutput(t, d, repos, nil)
+	if want := "qory: the submodule libs/m in the copy has a git repository with commits or changes that the commit leaves out"; !strings.Contains(printed, want) {
+		t.Errorf("the session printed no line for libs/m:\n%s", printed)
+	}
+	if !leftBehind(d, repos) {
+		t.Errorf("the session recorded no work left behind:\n%s", printed)
+	}
+	if b, err := os.ReadFile(ran); err == nil {
+		t.Errorf("the planted fsmonitor ran:\n%s", b)
+	}
+}
+
 // TestASetupThatUpdatesANestedSubmoduleLeavesNothingBehind is the same update in the setup, and an
 // agent that commits after it.
 func TestASetupThatUpdatesANestedSubmoduleLeavesNothingBehind(t *testing.T) {
