@@ -812,11 +812,11 @@ const branchRef = "branch"
 const branchTriesAfterFetch = 3
 
 // FetchInto fetches the run's commits from the quarantine into the person's repository at
-// checkout, in one fetch: the run's branch as <prefix>/branch, and the run's other refs, in the
-// repository and in each submodule's git folder, under prefix, the first of the run's
+// checkout, in one fetch per repository: the run's branch as <prefix>/branch, and the run's other
+// refs, in the repository and in each submodule's git folder, under prefix, the first of the run's
 // [Dir.RefPrefix], then the same with -2, -3 and so on, that no ref there has, lies under or lies
 // above, with letter case ignored. Each fetch checks every object, writes no tag and no submodule,
-// and writes only the refs it names, all or none of them, all of them new.
+// and writes only the refs that its refspecs list, all or none of them, all of them new.
 //
 // It then makes the branch refs/heads/<branch> at the run's commit, only when no such branch
 // exists and no working tree has it checked out, so no branch of the person's moves and the
