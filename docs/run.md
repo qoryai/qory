@@ -502,7 +502,7 @@ the error line. An image step that fails ends `failed` with -1, and its last lin
 Forager's error. A step that fails once the run is stopped, or out of time, ends
 `cancelled`.
 
-After the agent, a walled run that may write in a repository has the step `copy work out`,
+After the agent, a walled run that may write in a repository and has no run code has the step `copy work out`,
 of kind `copy`, around the git session, while the run is open: see [A run that may write
 works in a copy](#a-run-that-may-write-works-in-a-copy). The step's log has the lines of the git
 session's container, and no other step starts inside it. It ends `succeeded` with 0 when the git session
@@ -511,8 +511,8 @@ with the git session's exit status, or with -1 when the session has none to show
 that did not start or one that reached its time limit. Unless it ends `succeeded`,
 its last line is the error line, with `the run's copy` in place of each path of the copy.
 A run that the gateway closed during the agent's session, a run whose agent's join returned an
-error, and a run in which a container could not be removed after the agent's session have no
-such step: their git session runs after the close.
+error, a run whose step `copy work out` could not start, and a run whose wall removes the agent's
+container only at the close have no such step: their git session runs after the close.
 
 After an agent session that succeeded, this step sets how the run closes. A step that ends
 `failed` closes the run `failed` with the step's exit code, and `qory run` exits 1. A step that
@@ -793,7 +793,7 @@ not start after it.
 
 A walled write run in a copy can run past the limit: its setup removal has up to 2 minutes, and its git session
 up to 5 minutes, plus a minute for each 20,000 files, folders and links in the copy and a minute for each 2 GiB
-in its files, at most 60 minutes.
+its files take on disk, at most 60 minutes.
 
 `--timeout 0` lifts the limit `forager.yaml` sets.
 
@@ -3698,21 +3698,23 @@ Three cases stop the run with their fix first:
 - A partial clone: the clone has only the objects your repository has. The line has the
   commands that fetch the rest, such as `git fetch --refetch origin`.
 - A folder that is not a repository, and that is your home folder or qory's state directory or
-  contains one, with exit 2: the copy would have every file there, such as `~/.ssh`. Start the run
-  from a folder that does not contain them. A home folder that is a repository runs when
+  contains one, or contains the folder of the runs' copies, `qory/runs` in your cache folder, with
+  exit 2: the copy would have every file there, such as `~/.ssh`. Start the run from a folder
+  that does not contain them. A home folder that is a repository runs when
   `--home` or `harness.home` sets a harness home outside it: its copy has only the files of the
   commit at `HEAD`. The default home is under your cache directory, which on macOS, and on Linux
   with no `XDG_CACHE_HOME` outside it, is inside your home folder.
 - A folder of a run's copy under `qory/runs` in your cache folder: a run could have written
   it, so `qory run` and `qory harness compose` also stop there. Run qory in your checkout.
 
-When the agent has ended, however it ended, qory runs the git session in a container that it
-starts on the run's engine itself: `docker run` with the run's image, the wall's user, the wall's
-container runtime when one is set, at most 4096 processes, no memory or CPU limit, no network and no
-capability. The container joins no gateway and runs no agent, and gets no model key and no run
+When the agent has ended, however it ended, qory runs the git session, unless a container of the
+run may still run. The session runs in a container that qory starts on the run's engine itself: `docker run` with the run's image, the wall's user, the wall's
+container runtime when one is set, at most 4096 processes, the agent's limits of memory and
+processors when the wall sets them, no network and no capability. The container joins no gateway and runs no agent, and gets no model key and no run
 code. It binds two folders,
 both writable, and nothing else: the copy, and a new folder for its bundles. It never binds your
-checkout. Its name is `qory-copy-<run id>`, with the run's label. It commits what
+checkout. Its name is `qory-copy-<run id>`, with the run's label. qory first removes a
+container of that name, which an earlier run with the same id can leave. It commits what
 the agent left, with no setting from the copy's `.git` and no filter, and writes the run's
 branch to a git bundle. First it gives itself read access to each file and folder that it owns
 and cannot read, such as one of mode 000 that the agent made. With a branch
@@ -3749,14 +3751,26 @@ A run that lists no repositories has no setup, so it has no such step, and a rea
 session. The run's record has no session for the git session.
 
 While the run is open, the git session runs in the step `copy work out`, once qory has removed
-the setup container and no container of the run is left. In three cases qory closes the run
-first: the gateway closed the run during the agent's session, the agent's join returned an error
-after the agent may have run, as when the link to the gateway is lost, or a container of the run
-could not be removed after the agent's session. Then the git session runs after the close, when
-the close shows that no container of the run is left, and its work comes back as usual. Its
-lines reach only your terminal, and a failure changes only `qory run`'s exit status. After an
-agent that succeeded, a setup container that could not be removed closes the run `failed` with
--1, or `cancelled` with the reason `interrupted` when a signal cut the removal.
+the setup container and no container of the run is left. In four cases qory closes the run
+first:
+
+- The gateway closed the run during the agent's session.
+- The agent's join returned an error after the agent may have run, as when the link to the
+  gateway is lost.
+- The step `copy work out` could not start, as when the link to the gateway is lost after the
+  join. After an agent that succeeded, the run closes `failed` with -1, and `qory run` prints the
+  step's error and exits 1, even when the work comes back.
+- The run's wall removes the agent's container only at the close.
+
+Then the git session runs after the close, when the close shows that no container of the run is
+left, and its work comes back as usual. Its lines reach only your terminal, and a failure changes
+only `qory run`'s exit status.
+
+A setup container that could not be removed after the agent's session is a container of the run
+that could not be removed: nothing comes back, as the end of this section describes. After an
+agent that succeeded, the run closes `failed` with -1, or `cancelled` with the reason
+`interrupted` when a signal cut the removal, and `qory run` prints the removal's error and exits
+1.
 
 Part of the run's work can stay in the copy:
 
@@ -3777,7 +3791,8 @@ nothing behind.
 The session leaves out of its commit each file of more than 100 MiB (104857600 bytes) that the
 agent added or changed, in the repository and in each submodule the clone copied, and lists it. A
 commit that the agent made keeps its files as they are. Such a file stays in the copy, and the
-rest of the work comes back:
+rest of the work comes back. The line lists the first 50 files, then the count of the rest, such
+as `and 10 more`:
 
 ```text
 qory run: left out of the run's commit, as each has more than 100 MiB: data/model.bin. They stay in the run's copy.
@@ -3800,10 +3815,11 @@ qory run: part of the run's work did not come back: the copy has changes that gi
 Git LFS: because the session runs no filter, an LFS file the agent changes goes into the
 commit as its full content, in place of a pointer.
 
-A program the agent planted in the copy can run again in this session, under the run's egress
-policy, so the session has a time limit: 5 minutes, plus a minute for each 20,000 files, folders
-and links in the copy and a minute for each 2 GiB in its files, at most 60 minutes. qory counts
-them in the copy once the agent has ended, with `lstat`, and follows no link. A first signal to
+A program the agent planted in the copy can run again in this session, in a container with no
+network, so the session has a time limit: 5 minutes, plus a minute for each 20,000 files, folders
+and links in the copy and a minute for each 2 GiB its files take on disk, at most 60 minutes. qory
+counts them in the copy once the agent has ended, with `lstat`, follows no link, and stops
+counting at 60 minutes. A sparse file counts only the blocks it takes on disk. A first signal to
 `qory run` leaves the session that limit, within the time that the return of the work has after
 the signal, and a second signal ends it. qory prints how long the return of the work may take:
 
@@ -3822,8 +3838,12 @@ Once the run's containers are gone, qory checks the bundle, fetches it into a ne
 with git's object checks on, and fetches the run's branch into your repository as
 `qory/run-<run id>`. When a branch has that name or blocks it, the name gets a suffix:
 `qory/run-<run id>-2`, `-3` and so on. git keeps no branch below another branch, so with a
-branch named `qory` the names start at `qory-run-<run id>`. When another git process holds a
-lock on the branch, qory fetches again, at most 5 times in 30 seconds. qory never checks the
+branch named `qory` the names start at `qory-run-<run id>`. qory fetches the commits under the
+run's prefix first, then makes the branch only when no branch has that name and no working tree
+has it checked out, so no branch of yours moves, even one you made during the fetch: then qory
+tries the next free name, at most 3 names in all. When another git process holds a lock on the
+branch, qory tries again, at most 5 times in 30 seconds. When qory makes no branch, the commits
+stay at `refs/qory/run-<run id>/branch`, and the line lists the run's refs. qory never checks the
 branch out, so the files in your checkout stay as they are:
 
 ```text
@@ -3852,9 +3872,11 @@ qory run: the run's commits are on qory/run-0193 in /path/to/repo. They change t
 | `HEAD` | A detached `HEAD` at a commit that the branch does not have. |
 | `lost/<n>` | The newest commit of each line of commits that only a reflog reaches: a commit made with `HEAD` detached, an older stash, or, with nothing past your commit on the branch, any such commit, such as one that a reset took off the branch. The commits of another new ref, such as one of `git notes add`, come back here too. |
 | `uncommitted` | The changes in the working tree when the session makes no commit on the branch, as a commit on `HEAD`. In a sparse checkout, each path the checkout took out stays as `HEAD` has it. |
+| `branch` | The commits of the run's branch, only when qory could make no branch for them. |
 
-A ref other than a branch or a tag comes back only when it has a commit that your commit, a ref of
-the clone and a remote-tracking ref do not have. A branch or a tag that the run made or moved at a
+A ref other than a branch or a tag comes back only when it has a commit that your commit and the
+refs at the end of the clone do not have. A remote-tracking ref that the run moved does not come
+back. A branch or a tag that the run made or moved at a
 commit you have, such as a tag of your commit, comes back too: qory checks that your repository has
 that commit, and makes the ref in the same fetch. Each submodule that the clone
 copied gets the same refs, under the same prefix, in your git folder of that submodule, such as
@@ -3934,7 +3956,7 @@ changed stays. qory prints what it left out and what you both changed:
 
 ```text
 qory run: you and the run both changed these files: yours stay, and the run's version of each is beside it with -from-run: notes.txt.
-qory run: you and the run both changed these files, so yours stay: old.txt.
+qory run: the run deleted these files, which you changed, so yours stay: old.txt.
 ```
 
 When the run changed a qory setting, the copy stays with the run's version of each such file,
@@ -3942,10 +3964,18 @@ and qory prints its folder. Otherwise it deletes the copy.
 
 The copy back writes at most 100000 files and folders and 8589934592 bytes. What the run
 writes in a folder named `node_modules`, `.venv`, `venv`, `__pycache__`, `target`, `build`,
-`dist`, `.gradle` or `.next`, at any depth, comes back and counts nothing toward those limits.
-When qory cannot read a file or folder of the copy, or cannot write it in your folder, it
+`dist`, `.gradle` or `.next`, at any depth, comes back and counts nothing toward those limits. A
+regular file with such a name counts. Those folders have a separate limit of 1000000 files and
+32 GiB in all. When the run writes more, qory leaves out every such folder, lists them, and keeps
+the copy, and `qory run` exits 1:
+
+```text
+qory run: left out of the copy back, as the folders that builds and package managers write have more than 1000000 files or 32 GiB in all: node_modules. They stay in the run's copy.
+```
+
+When qory cannot read a file or folder of the copy, or cannot write or delete it in your folder, it
 leaves that entry out, copies back the rest, and deletes nothing in a folder it left out. It
-lists those entries, and the copy stays with them:
+lists the first 50 of those entries, then the count of the rest, and the copy stays with them:
 
 ```text
 qory run: left out of the copy back, as qory could not read or write them: closed/new.txt.
@@ -4081,10 +4111,12 @@ with no run code, and a run you start yourself see the checkout writable.
 
 A walled write run from a run code gets no copy and binds the checkout itself. It stops after
 the compose, exit 2, when its checkout or working folder is your home folder or qory's state
-directory, or contains one, since the agent could change every file there:
+directory, or contains one, since the agent could change every file there, and when it contains
+the folder of the runs' copies, `qory/runs` in your cache folder, since the agent could change
+the copies of other runs:
 
 ```text
-Start the run from a folder that does not contain your home folder or qory's state directory: the folder <folder> is your home folder, and a write run from a run code binds it into the agent's container; the code is used
+start the run from a folder that does not contain your home folder, qory's state directory or the folder of the runs' copies: the folder <folder> is your home folder, and a write run from a run code binds it into the agent's container; the code is used
 ```
 
 ### Qory's images

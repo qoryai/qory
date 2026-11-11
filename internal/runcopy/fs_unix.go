@@ -7,11 +7,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
+	"syscall"
 
 	"golang.org/x/sys/unix"
 )
@@ -304,4 +306,13 @@ func fromRunName(base, at string, dirs ...int) (string, error) {
 		}
 		to = base + "-" + strconv.Itoa(i)
 	}
+}
+
+// allocated is the bytes that the file of info takes on disk, from its count of 512-byte blocks,
+// and its size when the file system gives no count.
+func allocated(info fs.FileInfo) int64 {
+	if st, ok := info.Sys().(*syscall.Stat_t); ok {
+		return int64(st.Blocks) * 512
+	}
+	return info.Size()
 }

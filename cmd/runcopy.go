@@ -31,7 +31,7 @@ const (
 	textCopyMount      = "make the mount %s read-only, with :ro on --mount or in wall.mounts: a walled run reads the checkout or works in a copy of it, and a read-write mount lets it write your files directly"
 	textCopyOutside    = "run qory inside the checkout %s: a run that may write works in a copy of the checkout, and the working folder %s is outside it"
 	textCopyNoFolder   = "commit %[1]s, or run qory in a folder that the commit at HEAD has: a run that may write works in a copy of that commit, which has no folder %[1]s"
-	textCopyReserved   = "start the run from a folder that does not contain your home folder or qory's state directory: the folder %s %s, and the run's copy of it would have every file there"
+	textCopyReserved   = "start the run from a folder that does not contain your home folder, qory's state directory or the folder of the runs' copies: the folder %s %s, and the run's copy of it would have every file there"
 	textCopyBehind     = "part of the run's work did not come back: the copy has a nested repository the run made."
 	textCopyNotAdded   = "part of the run's work did not come back: the copy has changes that git could not add to the run's commit, such as a file another user owns or a change in a submodule."
 	textCopyLarge      = "left out of the run's commit, as each has more than %s: %s. They stay in the run's copy."
@@ -54,8 +54,9 @@ const (
 	textCopyBack       = "copied %s back to %s from the run, and deleted %s there."
 	textCopyLeftOut    = "left out of the copy back to your folder: %s."
 	textCopyFailed     = "left out of the copy back, as qory could not read or write them: %s."
+	textCopyGenerated  = "left out of the copy back, as the folders that builds and package managers write have more than %d files or %s in all: %s. They stay in the run's copy."
 	textCopyConflicts  = "you and the run both changed these files: yours stay, and the run's version of each is beside it with -from-run: %s."
-	textCopyNotDeleted = "you and the run both changed these files, so yours stay: %s."
+	textCopyNotDeleted = "the run deleted these files, which you changed, so yours stay: %s."
 	textCopyActingKept = "the run changed these qory settings, so those files stay as you have them: %s."
 	textCopyNotIn      = "left out of the run's copy: %s."
 	textCopyNoRemove   = "remove %s by hand: %s"
@@ -367,7 +368,7 @@ func (c *runCopy) leftOut(skipped []string, report func(string)) {
 // and keeps the copy, which still has them.
 func (c *runCopy) failed(paths []string, report func(string)) {
 	if len(paths) > 0 {
-		report(fmt.Sprintf(textCopyFailed, shownPaths(paths)))
+		report(fmt.Sprintf(textCopyFailed, listed(shownList(paths))))
 		c.kept(report)
 	}
 }
@@ -481,35 +482,36 @@ func (c *runCopy) recordSetup(ctx context.Context) error {
 // the step's last line is [copyStop.log]. stderr is qory run's stderr, masked with the run's
 // mask list, which the container's lines go to as well.
 //
-// A copy step that does not start stops the return of the work, as a push step that does not
-// start stops its push. A copy step that does not end stops the return too. Both go through
-// [runCopy.stop], which keeps the copy.
-func (c *runCopy) gitSession(ctx context.Context, run openedRun, spec *runSpec, stderr io.Writer) error {
+// The first error is that of a copy step that did not start, for example when the link to the
+// gateway dropped after the join: no session ran, and the caller runs it after the close, see
+// [runCopy.gitSessionAfterClose]. The second is the stop of the return, which goes through
+// [runCopy.stop] and keeps the copy: a session that failed, or a copy step that did not end.
+func (c *runCopy) gitSession(ctx context.Context, run openedRun, spec *runSpec, stderr io.Writer) (error, error) {
 	step, err := run.StartStep(event.StepCopy, textCopyStep)
 	if err != nil {
-		return c.noSession(ctx, err)
+		return err, nil
 	}
 	lines := &stepLines{stderr: stderr, step: step}
 	code, stop := c.inContainer(ctx, run, spec, lines)
 	lines.flush()
 	if stop == nil {
 		if err := step.Exit(event.StateSucceeded, 0); err != nil {
-			return c.stoppedBy("%s", err)
+			return nil, c.stoppedBy("%s", err)
 		}
-		return nil
+		return nil, nil
 	}
 	state, code := c.stepEnd(code)
 	c.stepCode = code
 	lines.log(stepFailure(errors.New(stop.log)))
 	// The line of the stop stays when the exit fails too.
 	_ = step.Exit(state, code)
-	return stop
+	return nil, stop
 }
 
 // gitSessionAfterClose is the git session of [runCopy.gitSession] after the run's close, with no
-// step: the gateway closed the run, the agent's join returned an error, or a container of the
-// run may have been left before the close. The caller runs it only once the close showed that no
-// container of the run is left. Its lines go to stderr alone, as for [runCopy.gitSession].
+// step: the gateway closed the run, the agent's join returned an error, or the copy step did not
+// start. The caller runs it only once the close showed that no container of the run is left.
+// Its lines go to stderr alone, as for [runCopy.gitSession].
 func (c *runCopy) gitSessionAfterClose(ctx context.Context, run openedRun, spec *runSpec, stderr io.Writer) error {
 	if _, stop := c.inContainer(ctx, run, spec, stderr); stop != nil {
 		return stop
@@ -636,7 +638,8 @@ func (c *runCopy) comeBack(ctx context.Context, runID string, report func(string
 // fetchOne fetches the run's commits from the quarantine q into the person's repository, and
 // prints the line that lists the branch, the prefix of the run's other refs and any changed
 // acting key. The branch is [runCopy.back], or the next free name when a branch there has or
-// blocks it by now.
+// blocks it by now, or when one appears before qory makes it. When qory could make no branch, the
+// run's commits stay under the prefix, and the line lists the prefix alone.
 func (c *runCopy) fetchOne(ctx context.Context, q *runcopy.Quarantine, runID string, report func(string)) bool {
 	limited, cancel := context.WithTimeout(ctx, c.limit)
 	defer cancel()
@@ -653,7 +656,7 @@ func (c *runCopy) fetchOne(ctx context.Context, q *runcopy.Quarantine, runID str
 			return false
 		}
 	}
-	prefix, err := q.FetchInto(limited, at, "refs/heads/"+branch)
+	branch, prefix, err := q.FetchInto(limited, at, branch, runID)
 	if err != nil {
 		if limited.Err() != nil {
 			report(c.checkFailed(ctx, limitErr(ctx, limited, textCopyFetchLimit, c.limit, err)).Error())
@@ -690,6 +693,7 @@ func (c *runCopy) copyBack(ctx context.Context, report func(string)) bool {
 			report(shownError(err))
 		}
 		c.failed(res.Failed, report)
+		c.generated(res.Generated, report)
 		c.kept(report)
 		return false
 	}
@@ -698,6 +702,7 @@ func (c *runCopy) copyBack(ctx context.Context, report func(string)) bool {
 	}
 	c.leftOut(copyBackSkips(res.Skipped, c.dir.Work()), report)
 	c.failed(res.Failed, report)
+	back := !c.generated(res.Generated, report)
 	if len(res.Conflicts) > 0 {
 		report(fmt.Sprintf(textCopyConflicts, shownPaths(res.Conflicts)))
 	}
@@ -711,7 +716,30 @@ func (c *runCopy) copyBack(ctx context.Context, report func(string)) bool {
 	if len(res.Acting) > 0 {
 		c.kept(report)
 	}
+	return back
+}
+
+// generated prints the folders of builds and package managers that a copy back left out past
+// [runcopy.MaxGeneratedFiles] or [runcopy.MaxGeneratedBytes], and keeps the copy, which still
+// has them. It reports whether it printed any.
+func (c *runCopy) generated(folders []string, report func(string)) bool {
+	if len(folders) == 0 {
+		return false
+	}
+	report(fmt.Sprintf(textCopyGenerated, runcopy.MaxGeneratedFiles, shownBytes(runcopy.MaxGeneratedBytes), shownPaths(folders)))
+	c.kept(report)
 	return true
+}
+
+// shownBytes is n bytes as a line shows it: in GiB or MiB when n is a whole number of them.
+func shownBytes(n int64) string {
+	switch {
+	case n > 0 && n%(1<<30) == 0:
+		return fmt.Sprintf("%d GiB", n>>30)
+	case n > 0 && n%(1<<20) == 0:
+		return fmt.Sprintf("%d MiB", n>>20)
+	}
+	return fmt.Sprintf("%d bytes", n)
 }
 
 // actingKeys is the keys of changes as a line lists them, each once in order: a key, or the
@@ -736,21 +764,38 @@ func actingKeys(changes []runcopy.ActingChange) string {
 // maxFileShown is [runcopy.MaxFile] as a line shows it.
 var maxFileShown = fmt.Sprintf("%d MiB", runcopy.MaxFile>>20)
 
-// largeFiles is the files of [runcopy.Left.Large] as a line lists them: text that a program in the
-// git session can write, each with no control character.
+// largeFiles is the files of [runcopy.Left.Large] as a line lists them, by [listed]: text that a
+// program in the git session can write, each with no control character.
 func largeFiles(files []string) string {
 	shown := make([]string, len(files))
 	for i, f := range files {
 		shown[i] = integration.Printable(f)
 	}
-	return strings.Join(shown, ", ")
+	return listed(shown)
 }
 
 // shownPaths is paths of a run's copy as a line lists them.
 func shownPaths(paths []string) string {
+	return strings.Join(shownList(paths), ", ")
+}
+
+// shownList is each of paths of a run's copy as a line shows it.
+func shownList(paths []string) []string {
 	shown := make([]string, len(paths))
 	for i, p := range paths {
 		shown[i] = preparation.ShownPath(p)
 	}
-	return strings.Join(shown, ", ")
+	return shown
+}
+
+// maxListed is the most entries a line of a run's copy lists from a list that a run can make as
+// long as it likes; the line counts the rest.
+const maxListed = 50
+
+// listed is items as a line lists them: the first [maxListed], then "and <n> more" for the rest.
+func listed(items []string) string {
+	if len(items) > maxListed {
+		items = append(slices.Clip(items[:maxListed]), fmt.Sprintf("and %d more", len(items)-maxListed))
+	}
+	return strings.Join(items, ", ")
 }

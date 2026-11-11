@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -325,5 +326,28 @@ func TestEachLeftoverHasItsLine(t *testing.T) {
 				t.Errorf("keep %v, lines:\n%s", cp.keep, out)
 			}
 		})
+	}
+}
+
+// TestALongListShowsItsFirstFiftyEntries is a run that leaves 60 large files out of its commit
+// and 60 files out of the copy back: each line lists the first 50 and counts the other 10.
+func TestALongListShowsItsFirstFiftyEntries(t *testing.T) {
+	var files []string
+	for i := range 60 {
+		files = append(files, "f"+strconv.Itoa(i))
+	}
+	want := strings.Join(files[:50], ", ") + ", and 10 more"
+	if got := largeFiles(files); got != want {
+		t.Errorf("the large files are listed as %q, want %q", got, want)
+	}
+	var lines []string
+	c := &runCopy{dir: runcopy.Dir{}}
+	c.keep = true
+	c.failed(files, func(line string) { lines = append(lines, line) })
+	if wantLine := "left out of the copy back, as qory could not read or write them: " + want + "."; len(lines) != 1 || lines[0] != wantLine {
+		t.Errorf("the lines are %q, want %q", lines, wantLine)
+	}
+	if got := largeFiles(files[:50]); got != strings.Join(files[:50], ", ") {
+		t.Errorf("50 large files are listed as %q", got)
 	}
 }

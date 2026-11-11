@@ -35,12 +35,6 @@ const maxLarge = 1 << 20
 // qory reads when it checks the pack itself.
 const maxBundleHeader = 1 << 20
 
-// LeftBehind reports whether the git session of repos recorded work of the run that the bundles
-// do not have, besides the files of [Left.Large]: n.nested or n.left.
-func (d Dir) LeftBehind(repos []Repository) bool {
-	return d.recorded(repos, ".nested") || d.recorded(repos, ".left")
-}
-
 // recorded reports whether the git session of repos wrote a regular file n plus suffix for a
 // repository n. The file's content is not read: a program in the session can write it, and all
 // it can do is keep the copy.
@@ -404,7 +398,7 @@ func (q *Quarantine) fetchBundle(ctx context.Context, root, source, bundle, chec
 // addKnown checks q.known beside refs, the refs of the bundle's header, as [bundleHeader] checks
 // a header's refs, checks that source has each of their objects as a commit, makes them in q.Path
 // all or none, then reads the refs and checks the top of each commit, as [Quarantine.fetchBundle]
-// says.
+// describes.
 func (q *Quarantine) addKnown(ctx context.Context, source string, refs []bundleRef, ref, rel string) error {
 	all := slices.Concat(refs, q.known)
 	if err := checkRefSet(all); err != nil {
@@ -810,60 +804,111 @@ func writeNew(path, text string) error {
 	return f.Close()
 }
 
-// FetchInto fetches the run's branch from the quarantine into the person's repository
-// at checkout, as ref, a full ref name such as refs/heads/qory/run-<run id>, and the run's
-// other refs, in the repository and in each submodule's git folder, under the first of the
-// run's [Dir.RefPrefix], then the same with -2, -3 and so on, that no ref there has, lies
-// under or lies above, with letter case ignored. ctx sets how long it may take. It returns that
-// prefix, "" when no other ref came back. Each fetch checks every object, writes no tag and no
-// submodule, writes only the refs it names, all or none of them, and moves ref only forward. git
-// stops the fetch when ref is a branch checked out in a working tree of the repository: the
-// person's files never change to what the run wrote. When another git process holds a lock that
-// a fetch needs, the fetch runs again after each wait of [lockWaits]. When a fetch fails, the
-// quarantine stays, and the error contains its path.
-func (q *Quarantine) FetchInto(ctx context.Context, checkout, ref string) (string, error) {
-	from := "refs/heads/" + q.Branch
-	var specs []string
+// branchRef is the ref under the run's prefix that the run's branch is fetched into, before
+// [Quarantine.FetchInto] makes the branch from it. No ref of a bundle has this name.
+const branchRef = "branch"
+
+// branchTriesAfterFetch is how many names [Quarantine.FetchInto] tries for the run's branch.
+const branchTriesAfterFetch = 3
+
+// FetchInto fetches the run's commits from the quarantine into the person's repository at
+// checkout, in one fetch: the run's branch as <prefix>/branch, and the run's other refs, in the
+// repository and in each submodule's git folder, under prefix, the first of the run's
+// [Dir.RefPrefix], then the same with -2, -3 and so on, that no ref there has, lies under or lies
+// above, with letter case ignored. Each fetch checks every object, writes no tag and no submodule,
+// and writes only the refs it names, all or none of them, all of them new.
+//
+// It then makes the branch refs/heads/<branch> at the run's commit, only when no such branch
+// exists and no working tree has it checked out, so no branch of the person's moves and the
+// person's files never change to what the run wrote. When that fails, it tries the next free name
+// for the run runID, as [FreeBranchAgain] picks it, at most [branchTriesAfterFetch] names in all.
+// It returns the branch it made and deletes <prefix>/branch, or returns "" and keeps the commits
+// there. It returns prefix, "" when no ref is left under it.
+//
+// When another git process holds a lock that a fetch or the branch needs, git runs again after
+// each wait of [lockWaits]. When the fetch fails, the quarantine stays, and the error contains its
+// path. ctx sets how long it may take.
+func (q *Quarantine) FetchInto(ctx context.Context, checkout, branch, runID string) (string, string, error) {
 	if q.Head != "" {
-		if err := checkRef(ctx, ref); err != nil {
-			return "", err
+		if err := checkRef(ctx, "refs/heads/"+branch); err != nil {
+			return "", "", err
 		}
-		specs = append(specs, from+":"+ref)
 	}
 	if err := q.knownThere(ctx, checkout); err != nil {
-		return "", err
+		return "", "", err
 	}
-	prefix := ""
-	if q.hasRefs() {
-		dirs := []string{checkout}
-		for _, s := range q.Submodules {
-			dirs = append(dirs, s.gitDir)
-		}
-		var err error
-		if prefix, err = freePrefix(ctx, q.prefix, dirs); err != nil {
-			return "", err
-		}
+	if q.Head == "" && !q.hasRefs() {
+		return "", "", nil
+	}
+	dirs := []string{checkout}
+	for _, s := range q.Submodules {
+		dirs = append(dirs, s.gitDir)
+	}
+	prefix, err := freePrefix(ctx, q.prefix, dirs)
+	if err != nil {
+		return "", "", err
+	}
+	var specs []string
+	if q.Head != "" {
+		specs = append(specs, "refs/heads/"+q.Branch+":"+prefix+"/"+branchRef)
 	}
 	if q.Path != "" && len(q.Refs)+len(specs) > 0 {
 		if err := fetchRefs(ctx, checkout, q.Path, slices.Concat(specs, q.moved(prefix))); err != nil {
-			if q.Head == "" {
-				return "", fmt.Errorf(textFetchFailed, shown(q.Path), prefix, shown(checkout), q.prefix+"/*", err)
+			refs := q.prefix + "/*"
+			switch {
+			case q.Head != "" && len(q.Refs) > 0:
+				refs = "refs/heads/" + q.Branch + " and " + refs
+			case q.Head != "":
+				refs = "refs/heads/" + q.Branch
 			}
-			if at := checkedOut(ctx, checkout, ref); at != "" {
-				return "", fmt.Errorf(textFetchCheckedOut, shown(ref), shown(at), from, shown(q.Path), err)
-			}
-			if _, verr := git(ctx, checkout, "rev-parse", "--verify", "--quiet", "--end-of-options", ref); verr == nil {
-				return "", fmt.Errorf(textFetchExists, shown(q.Path), shown(ref), shown(checkout), from, err)
-			}
-			return "", fmt.Errorf(textFetchFailed, shown(q.Path), shown(ref), shown(checkout), from, err)
+			return "", "", fmt.Errorf(textFetchFailed, shown(q.Path), prefix, shown(checkout), refs, err)
 		}
 	}
 	for _, s := range q.Submodules {
 		if err := fetchRefs(ctx, s.gitDir, s.Path, s.moved(prefix)); err != nil {
-			return "", fmt.Errorf(textFetchFailed, shown(s.Path), prefix, shown(s.gitDir), q.prefix+"/*", err)
+			return "", "", fmt.Errorf(textFetchFailed, shown(s.Path), prefix, shown(s.gitDir), q.prefix+"/*", err)
 		}
 	}
-	return prefix, nil
+	if q.Head == "" {
+		return "", prefix, nil
+	}
+	made := q.makeBranch(ctx, checkout, branch, runID)
+	if made == "" {
+		return "", prefix, nil
+	}
+	// The branch has the commits now. A failed delete leaves the ref under prefix, which the
+	// line then lists.
+	if _, err := git(ctx, checkout, "update-ref", "-d", prefix+"/"+branchRef, q.Head); err == nil && !q.hasRefs() {
+		return made, "", nil
+	}
+	return made, prefix, nil
+}
+
+// makeBranch makes a branch at Head in the repository at checkout, by the rules of
+// [Quarantine.FetchInto], first branch, and returns its name, "" when it made none.
+func (q *Quarantine) makeBranch(ctx context.Context, checkout, branch, runID string) string {
+	zero := strings.Repeat("0", len(q.Head))
+	for range branchTriesAfterFetch {
+		ref := "refs/heads/" + branch
+		if checkRef(ctx, ref) != nil {
+			return ""
+		}
+		if checkedOut(ctx, checkout, ref) == "" {
+			err := withLockWaits(ctx, func() error {
+				_, err := git(ctx, checkout, "update-ref", ref, q.Head, zero)
+				return err
+			})
+			if err == nil {
+				return branch
+			}
+		}
+		next, err := FreeBranchAgain(ctx, checkout, branch, runID)
+		if err != nil || next == branch {
+			return ""
+		}
+		branch = next
+	}
+	return ""
 }
 
 // knownThere checks that the person's repository at checkout, and each submodule's git folder,
@@ -901,21 +946,26 @@ func (q *Quarantine) moved(prefix string) []string {
 
 // fetchRefs fetches specs from the bare repository from into the git repository at dir, a
 // working tree or a git folder, with its objects checked, and waits for another git process's
-// lock as [Quarantine.FetchInto] says.
+// lock as [Quarantine.FetchInto] describes.
 func fetchRefs(ctx context.Context, dir, from string, specs []string) error {
 	input := strings.Join(specs, "\n") + "\n"
-	fetch := func() error {
+	return withLockWaits(ctx, func() error {
 		_, err := gitWith(ctx, dir, nil, strings.NewReader(input), "-c", "transfer.fsckObjects=true", "-c", "fetch.fsckObjects=true",
 			"fetch", "--quiet", "--no-tags", "--no-recurse-submodules", "--no-write-fetch-head", "--atomic", "--stdin",
 			"--", from)
 		return err
-	}
-	err := fetch()
+	})
+}
+
+// withLockWaits runs run, and runs it again after each wait of [lockWaits] while it fails because
+// another git process holds a lock, until ctx ends.
+func withLockWaits(ctx context.Context, run func() error) error {
+	err := run()
 	for _, wait := range lockWaits {
 		if err == nil || !lockHeld(err) || !sleep(ctx, wait) {
 			break
 		}
-		err = fetch()
+		err = run()
 	}
 	return err
 }
@@ -951,8 +1001,8 @@ func freePrefix(ctx context.Context, base string, dirs []string) (string, error)
 	return "", fmt.Errorf(textNoFreePrefix, base, base, shown(dirs[0]), prefixTries)
 }
 
-// lockWaits are the waits of [Quarantine.FetchInto] before it fetches again while another git
-// process holds a lock: 5 more fetches within 30 s. A test sets shorter ones.
+// lockWaits are the waits of [Quarantine.FetchInto] before it runs git again while another git
+// process holds a lock: 5 more runs within 30 s. A test sets shorter ones.
 var lockWaits = []time.Duration{time.Second, 2 * time.Second, 4 * time.Second, 8 * time.Second, 15 * time.Second}
 
 // sleep waits for d, and reports whether d passed before ctx ended.

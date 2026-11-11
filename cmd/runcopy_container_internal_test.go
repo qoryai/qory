@@ -18,8 +18,9 @@ import (
 )
 
 // TestTheGitContainerHasNoNetwork is the docker run of the git session: no network, no
-// capability, the wall's user and runtime, the run's image, a limit of 4096 processes and none of
-// the agent's limits, and a bind of the copy and of the bundle folder alone, each at its path.
+// capability, the wall's user and runtime, the run's image, a limit of 4096 processes, the agent's
+// limits of memory and processors, when the wall sets them, and no other, and a bind of the copy
+// and of the bundle folder alone, each at its path.
 func TestTheGitContainerHasNoNetwork(t *testing.T) {
 	run := &nowhere{image: session.Image{Ref: "registry.example/agent@sha256:" + strings.Repeat("a", 64), Runtime: "runsc"}}
 	spec := &runSpec{}
@@ -37,7 +38,7 @@ func TestTheGitContainerHasNoNetwork(t *testing.T) {
 	}
 	got := strings.Join(args, " ")
 	want := "run --rm --pull never --network none --cap-drop ALL --security-opt no-new-privileges --init --no-healthcheck" +
-		" --user 1001:1001 --label dev.qory.run=run-01 --name qory-copy-run-01 --runtime runsc --pids-limit 4096" +
+		" --user 1001:1001 --label dev.qory.run=run-01 --name qory-copy-run-01 --runtime runsc --pids-limit 4096 --memory 2g --cpus 1.5" +
 		" --mount type=bind,src=/cache/qory/runs/run-01/work,dst=/cache/qory/runs/run-01/work" +
 		" --mount type=bind,src=/cache/qory/runs/run-01/bundle,dst=/cache/qory/runs/run-01/bundle" +
 		" --env PATH=/usr/bin:/bin --workdir /cache/qory/runs/run-01/work --entrypoint /bin/sh " + run.image.Ref +
@@ -51,6 +52,7 @@ func TestTheGitContainerHasNoNetwork(t *testing.T) {
 		}
 	}
 	spec.Wall = &wall.Docker{}
+	spec.Limits = wall.Limits{PIDs: 512}
 	run.image.Runtime = ""
 	args, err = gitContainerFor(run, spec, "run-01", gs, mounts, io.Discard).args()
 	if err != nil {
@@ -58,6 +60,9 @@ func TestTheGitContainerHasNoNetwork(t *testing.T) {
 	}
 	if slices.Contains(args, "--runtime") {
 		t.Errorf("a run with no runtime has --runtime: %v", args)
+	}
+	if slices.Contains(args, "--memory") || slices.Contains(args, "--cpus") {
+		t.Errorf("a wall with no limit of memory or processors sets one: %v", args)
 	}
 	if i := slices.Index(args, "--user"); i < 0 || args[i+1] == "" {
 		t.Errorf("the container has no user: %v", args)
@@ -110,7 +115,33 @@ func TestACutRemovesTheGitContainer(t *testing.T) {
 		t.Fatal(err)
 	}
 	lines := strings.Split(strings.TrimSpace(string(b)), "\n")
-	if len(lines) != 2 || !strings.HasPrefix(lines[0], "run --rm ") || lines[1] != "rm --force --volumes qory-copy-run-01" {
+	if len(lines) != 3 || lines[0] != "rm --force --volumes qory-copy-run-01" || !strings.HasPrefix(lines[1], "run --rm ") || lines[2] != "rm --force --volumes qory-copy-run-01" {
+		t.Errorf("the engine's calls:\n%s", b)
+	}
+}
+
+// TestTheGitContainerRemovesAContainerOfItsNameFirst is a container named qory-copy-<run id> that
+// an earlier run with the same id left: docker rm removes it before docker run, and a missing one
+// is no error.
+func TestTheGitContainerRemovesAContainerOfItsNameFirst(t *testing.T) {
+	dir := t.TempDir()
+	log := filepath.Join(dir, "log")
+	script := "#!/bin/sh\necho \"$*\" >> " + log + "\n" +
+		"if [ \"$1\" = rm ]; then echo 'Error response from daemon: No such container: qory-copy-run-01' >&2; exit 1; fi\n"
+	docker := filepath.Join(dir, "docker")
+	if err := os.WriteFile(docker, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	c := gitContainer{Docker: docker, Name: "qory-copy-run-01", Label: "dev.qory.run=run-01", User: "1001:1001", Image: "agent", Output: io.Discard, Session: runcopy.GitSession{Command: "/bin/sh", Dir: "/w"}}
+	if code, err := dockerGitContainer(context.Background(), c); code != 0 || err != nil {
+		t.Fatalf("%d, %v, want 0", code, err)
+	}
+	b, err := os.ReadFile(log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(b)), "\n")
+	if len(lines) != 2 || lines[0] != "rm --force --volumes qory-copy-run-01" || !strings.HasPrefix(lines[1], "run --rm ") {
 		t.Errorf("the engine's calls:\n%s", b)
 	}
 }

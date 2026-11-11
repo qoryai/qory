@@ -2,6 +2,7 @@ package runcopy
 
 import (
 	"context"
+	"errors"
 	"io/fs"
 	"path/filepath"
 	"time"
@@ -9,7 +10,7 @@ import (
 
 // SessionBase is the time limit of the git session on a small copy, which [SessionLimitFor]
 // raises for a large one; the caller that starts the session stops it then. A program the
-// agent planted in the copy can run again in that session, under the run's egress policy, so
+// agent planted in the copy can run again in that session, in a container with no network, so
 // the session has a time limit.
 const SessionBase time.Duration = 5 * time.Minute
 
@@ -17,11 +18,10 @@ const SessionBase time.Duration = 5 * time.Minute
 const SessionMax time.Duration = 60 * time.Minute
 
 // The git session gets a minute more per sessionEntriesPerMinute entries in the copy, and per
-// sessionBytesPerMinute bytes in its regular files.
-const (
-	sessionEntriesPerMinute = 20_000
-	sessionBytesPerMinute   = 2 << 30
-)
+// sessionBytesPerMinute bytes in its regular files. A test sets fewer entries.
+var sessionEntriesPerMinute int64 = 20_000
+
+const sessionBytesPerMinute = 2 << 30
 
 // SessionLimitFor is the time limit of the git session on a copy with entries files, folders
 // and links and bytes in its regular files: [SessionBase], plus a minute per whole 20,000
@@ -36,9 +36,14 @@ func SessionLimitFor(entries, bytes int64) time.Duration {
 	return SessionBase + time.Duration(extra)*time.Minute
 }
 
-// WorkSize counts the entries below the copy, [Dir.Work], and the bytes of its regular files,
-// with lstat: it follows no link. A folder it cannot read counts as one entry, with nothing
-// below it. When ctx ends, it returns the counts so far and ctx's error.
+// errAtSessionMax stops [Dir.WorkSize] once its counts give [SessionMax].
+var errAtSessionMax = errors.New("the counts give the longest time limit")
+
+// WorkSize counts the entries below the copy, [Dir.Work], and the bytes its regular files take
+// on disk, in allocated blocks, with lstat: it follows no link, and a sparse file counts only the
+// blocks it has. A folder it cannot read counts as one entry, with nothing below it. It stops once
+// [SessionLimitFor] of the counts is [SessionMax]. When ctx ends, it returns the counts so far and
+// ctx's error.
 func (d Dir) WorkSize(ctx context.Context) (entries, bytes int64, err error) {
 	root := d.Work()
 	err = filepath.WalkDir(root, func(path string, e fs.DirEntry, err error) error {
@@ -55,10 +60,16 @@ func (d Dir) WorkSize(ctx context.Context) (entries, bytes int64, err error) {
 		entries++
 		if e.Type().IsRegular() {
 			if info, infoErr := e.Info(); infoErr == nil {
-				bytes += info.Size()
+				bytes += allocated(info)
 			}
+		}
+		if SessionLimitFor(entries, bytes) == SessionMax {
+			return errAtSessionMax
 		}
 		return nil
 	})
+	if errors.Is(err, errAtSessionMax) {
+		err = nil
+	}
 	return entries, bytes, err
 }

@@ -27,6 +27,7 @@ import (
 	"github.com/qoryai/qory/internal/preparation"
 	"github.com/qoryai/qory/internal/proxygit"
 	"github.com/qoryai/qory/internal/runapi"
+	"github.com/qoryai/qory/internal/runcopy"
 )
 
 // SetWriteLabels makes qory run keep a checkout's labels with f, and returns what
@@ -224,6 +225,14 @@ func LoseLinkAfterJoin(lost error) func() {
 	return func() { joinSession = before }
 }
 
+// SetGeneratedLimits sets the most files and bytes in the folders of builds and package
+// managers that a copy back writes, and returns the function that restores both.
+func SetGeneratedLimits(files int, bytes int64) func() {
+	oldFiles, oldBytes := runcopy.MaxGeneratedFiles, runcopy.MaxGeneratedBytes
+	runcopy.MaxGeneratedFiles, runcopy.MaxGeneratedBytes = files, bytes
+	return func() { runcopy.MaxGeneratedFiles, runcopy.MaxGeneratedBytes = oldFiles, oldBytes }
+}
+
 // SetCopyStepLimit sets how long a check of a run's bundles or a copy back may take, and returns
 // what restores the default.
 func SetCopyStepLimit(limit time.Duration) func() {
@@ -328,9 +337,11 @@ type Nowhere struct {
 	OnImage      func(session.Image)
 	// CloseErr, when not nil, is the error of the run's Close, which then returns no result.
 	CloseErr error
-	// WallKept is [session.Closed.WallKept] of the run's Close.
+	// WallKept is [session.Closed.WallKept] of the run's Close. A RemoveSetup that returns
+	// an error sets it, as Forager's does.
 	WallKept bool
-	// ContainerKept is the run's ContainerKept before the close; after it, WallKept is.
+	// ContainerKept is the run's ContainerKept before the close; after it, WallKept is. A
+	// RemoveSetup that returns an error sets it too.
 	ContainerKept bool
 	// RunAPI is the base URL of the run's run API, "" for a server that returns 404 with
 	// no error code to every request, as Qory Apiary does with its feature workflow_model
@@ -589,7 +600,12 @@ func (n *nowhere) RemoveSetup(ctx context.Context) error {
 		return n.at.run.RemoveSetup(ctx)
 	}
 	if n.values.RemoveSetup != nil {
-		return n.values.RemoveSetup(ctx)
+		if err := n.values.RemoveSetup(ctx); err != nil {
+			// Forager marks the wall kept on a failed removal of the setup container: it
+			// may still run.
+			n.values.WallKept, n.values.ContainerKept = true, true
+			return err
+		}
 	}
 	return nil
 }

@@ -307,6 +307,7 @@ g() {
 nl='
 '
 cr=$(printf '\r')
+st=0
 # kind is exec for a file with the owner's execute bit, as git and SetupPath.State read it, and
 # file for any other. [ -x ] tests what the process may do, which differs for root or for another
 # user. $execs is what one find listed, since a process per file takes minutes for 10000 paths.
@@ -364,12 +365,35 @@ readable() {
 	find . -path ./.git -prune -o -path ./.qory -prune -o -type d ! -perm -500 -exec chmod u+rx {} \; \
 		-o ! -type d ! -type l ! -perm -400 -exec chmod u+r {} + 2>/dev/null || :
 }
-# submodule_status writes the changes of the submodule at the folder $1 of $T to $G/status. Its git
-# reads the submodule's configuration, inside the wall.
+# submodule_status writes the changes of the submodule at the folder $1 of $T to $G/status: what its
+# working tree changed since its HEAD. As for the top repository, git runs through the git folder
+# $G/status-$st that gitfolder makes, $st being a number the caller raises for each call, with an empty configuration, the submodule's objects as
+# alternates, HEAD at the submodule's commit and an index of its tree, so no program, hook,
+# fsmonitor or filter that the agent wrote in the submodule's configuration runs. A submodule
+# inside it counts as changed only at another commit: a status of its working tree would run git
+# with its configuration.
 submodule_status() (
 	unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE
 	cd "$T/$1"
-	g --git-dir="$T/$1/.git" --work-tree=. status --porcelain -z --untracked-files=all --ignore-submodules=none > "$G/status"
+	S=$G
+	objects=$(g --git-dir=.git rev-parse --git-path objects)
+	case $objects in
+	/*) ;;
+	*) objects=$T/$1/$objects ;;
+	esac
+	C=${objects%/objects}
+	now=$(g --git-dir="$C" rev-parse --verify --quiet "HEAD^{commit}") || now=
+	if [ -n "$now" ]; then
+		base=$now
+	fi
+	G=$S/status-$st
+	gitfolder /dev/null
+	export GIT_DIR="$G" GIT_WORK_TREE="$T/$1" GIT_INDEX_FILE="$G/index"
+	if [ -n "$now" ]; then
+		printf '%s\n' "$now" > "$G/HEAD"
+		g read-tree "$now"
+	fi
+	g status --porcelain -z --untracked-files=all --ignore-submodules=dirty > "$S/status"
 )
 # submodule_at reports whether the submodule at the folder $1 of $T has the commit $2 at HEAD, and
 # writes its changes to $G/status.
@@ -483,7 +507,7 @@ large() {
 	done < "$G/large"
 }
 # add_lines prints the lines of git add in $G/add-errors, for $1, but its list of ignored paths.
-# They decide nothing.
+# The lines are for the person to read: no check of the script reads them.
 add_lines() {
 	block=
 	while IFS= read -r line || [ -n "$line" ]; do
@@ -530,9 +554,9 @@ uncommitted() {
 		g commit-tree "$tree" "$@" -m "$message")
 	g update-ref "$prefix/uncommitted" "$made"
 }
-# fresh prints a commit when the commit $1 has one that $G/old does not reach: the base commit, a
-# ref of the clone, or a remote-tracking ref, and $1 itself when that check fails. A commit in a
-# remote-tracking ref is at its remote.
+# fresh prints a commit when the commit $1 has one that $G/old does not reach: the base commit or a
+# ref at the end of the clone, and $1 itself when that check fails. A ref that the agent wrote, such
+# as a remote-tracking ref it moved, does not count, since the person may not have its commits.
 fresh() {
 	printf '%s\n' "$1" | cat - "$G/old" | g rev-list -1 --stdin --ignore-missing || printf '%s\n' "$1"
 }
@@ -568,7 +592,6 @@ extra_refs() {
 		while read -r e_id e_ref; do
 			printf '^%s\n' "$e_id"
 		done < "$clonerefs"
-		copygit for-each-ref --format='^%(objectname)' refs/remotes/
 	} > "$G/old"
 	copygit for-each-ref --format='%(objectname) %(refname)' > "$G/refs-now"
 	lacking "$G/refs-now" "$clonerefs" > "$G/moved-refs"
@@ -947,6 +970,7 @@ while [ "$n" -lt "$count" ]; do
 					break
 				fi
 			done < "$B/subs-$n"
+			st=$((st + 1))
 			if [ -n "$k" ]; then
 				submodule_status "$d"
 				from_setup "$d" || :

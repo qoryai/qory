@@ -745,7 +745,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					}
 					// A run with no setup binds the checkout itself, see hostWork.
 					if run.Repositories() == "" {
-						if err := bindsReserved(textReadBindsReserved, at.root, cwd); err != nil {
+						if err := bindsReserved(textReadBindsReserved, at.root, cwd, homeOrState); err != nil {
 							return false, err
 						}
 					}
@@ -754,7 +754,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					}
 				} else if fromCode != nil && walled {
 					// A write run from a run code gets no copy: it binds the checkout itself.
-					if err := bindsReserved(textCodeWriteBindsReserved, at.root, cwd); err != nil {
+					if err := bindsReserved(textCodeWriteBindsReserved, at.root, cwd, reserved); err != nil {
 						return false, err
 					}
 				}
@@ -1186,13 +1186,15 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			// [openedRun.ContainerKept] shows no container of the run left: a git session that
 			// fails then changes the close of a session that succeeded, see
 			// [pushEnding.copyOutcome]. After a join that returned an error once the agent may
-			// have run, a run the gateway closed, a removal of the setup container that failed or
-			// a container of the run kept, it runs after the close instead, with no step, see
-			// [runCopy.gitSessionAfterClose]. A removal that failed after a session that succeeded
-			// closes the run as a copy step that did not start. The work comes back after the close, under
-			// [returnContext], unless the close shows [session.Closed.WallKept]: then no git
-			// session runs after it either. A return that fails after the close changes only
-			// qory run's exit status: only the close proves that no container is left.
+			// have run, a run the gateway closed, or a copy step that did not start, it runs
+			// after the close instead, with no step, see [runCopy.gitSessionAfterClose]. A
+			// removal of the setup container that failed, or a container of the run kept, sets
+			// [session.Closed.WallKept] in Forager: then no git session runs after the close,
+			// and nothing comes back. A removal or a copy step that failed after a session that
+			// succeeded closes the run as a copy step that did not start, and qory run exits
+			// with 1. The work comes back after the close, under [returnContext]. A return that
+			// fails after the close changes only qory run's exit status: only the close proves
+			// that no container is left.
 			ending := pushEnding{session: out, limit: timeout}
 			var pushErr, sessionErr error
 			pushes := keepsWork(fromCode, readOnly, branch, res, err)
@@ -1209,21 +1211,28 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			defer cancelBack()
 			// afterClose is whether the git session runs after the close.
 			afterClose := returns && !copied.plain && (err != nil || res == nil || res.RunClosed)
+			// returnFailed is whether a part of the return failed before the close: qory run then
+			// exits with 1 even when the work comes back.
+			returnFailed := false
 			if returns && !copied.plain && !afterClose {
 				removeCtx, cancelRemove := context.WithTimeout(backCtx, removeSetupLimit)
 				removeErr := run.RemoveSetup(removeCtx)
 				cancelRemove()
 				afterClose = removeErr != nil || run.ContainerKept()
+				var stepErr error
 				if !afterClose {
-					sessionErr = copied.gitSession(backCtx, run, &spec, streams.errOut)
+					stepErr, sessionErr = copied.gitSession(backCtx, run, &spec, streams.errOut)
+					afterClose = stepErr != nil
 				}
 				switch {
-				case removeErr != nil:
+				case removeErr != nil || stepErr != nil:
 					// The run closes as after a copy step that did not start: failed, or
-					// cancelled when a stop or the run's time limit ended the removal.
+					// cancelled when a stop or the run's time limit ended the removal or the step.
+					said(shownError(errors.Join(removeErr, stepErr)))
+					returnFailed = true
 					ending.settle(stopNow())
 					ending.cut = backCtx.Err() != nil
-					out = ending.copyOutcome(copied.stepCode)
+					out = ending.copyOutcome(-1)
 				case sessionErr != nil:
 					ending.settle(stopNow())
 					ending.cut = copied.cut
@@ -1324,7 +1333,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				back = copied.comeBack(backCtx, spec.RunID, said)
 			}
 			// A run the gateway closed as completed ends with an exit status of 0 that is not nil.
-			if (!back || !artifactsBack) && ExitCode(ended) == 0 {
+			if (!back || !artifactsBack || returnFailed) && ExitCode(ended) == 0 {
 				return reported(&exitError{code: 1})
 			}
 			return ended

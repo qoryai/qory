@@ -74,7 +74,7 @@ var branchWait = func(ctx context.Context, d time.Duration) error {
 }
 
 // The time the push step has after a stop. A signal leaves pushAfterSignal: it fits inside
-// the 30 seconds [child.DefaultGrace] gives a pool's run after SIGTERM, with the 10 seconds
+// the 30 seconds that [child.DefaultGrace] sets for a pool's run after SIGTERM, with the 10 seconds
 // of a runtime's default stop and the close. Past a run's time limit no process stops
 // qory run, so the step has pushAfterLimit, and the run can pass its limit by that time.
 const (
@@ -165,7 +165,7 @@ var returnAfterSignal = 30 * time.Minute
 
 // removeThenPush removes the setup container of a run that gets the push step, then runs
 // [pushWork], with ctx as the bound of both. A process in that container can write the
-// working folder, so the check of the step holds only once the container is gone. After a
+// working folder, so the check of the step is valid only once the container is gone. After a
 // failed removal [openedRun.HostProxy] and [openedRun.StartStep] still work, so this
 // check alone stops the push, and the run has no step.
 func removeThenPush(ctx context.Context, run openedRun, stderr io.Writer, branch *preparation.WorkBranch, dir, runID string, runNumber int, out session.Outcome, agentStopped bool, checks *runPushChecks) (noStep bool, err error) {
