@@ -5071,3 +5071,128 @@ func TestTheGitSessionRunsItsScriptFromAFile(t *testing.T) {
 		})
 	}
 }
+
+// sparseFile makes the file rel in dir with size bytes and no data written, so a test of the size
+// cap writes nothing to the disk.
+func sparseFile(t *testing.T, dir, rel string, size int64) {
+	t.Helper()
+	write(t, dir, rel, "")
+	if err := os.Truncate(filepath.Join(dir, filepath.FromSlash(rel)), size); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestAFileOverTheSizeCapStaysInTheCopy is an agent that commits two files of more than MaxFile
+// bytes, changes one of them, and leaves a new one, an ignored one, one of MaxFile bytes and a
+// small change: the run's commit leaves out the changed file and the new one, and n.large lists
+// both. The commit of the agent keeps its files, and nothing else stays behind.
+func TestAFileOverTheSizeCapStaysInTheCopy(t *testing.T) {
+	isolate(t)
+	sessionGit(t)
+	src, _ := person(t)
+	write(t, src, ".gitignore", "ignored.bin\n")
+	commitAll(t, src, "ignore")
+	d, repos := cloneRun(t, src)
+	sparseFile(t, d.Work(), "committed.bin", MaxFile+1)
+	sparseFile(t, d.Work(), "changed.bin", MaxFile+1)
+	agentCommit := commitAll(t, d.Work(), "two large files")
+	sparseFile(t, d.Work(), "changed.bin", MaxFile+2)
+	sparseFile(t, d.Work(), "big/new.bin", MaxFile+1)
+	sparseFile(t, d.Work(), "ignored.bin", MaxFile+1)
+	sparseFile(t, d.Work(), "exact.bin", MaxFile)
+	write(t, d.Work(), "small.txt", "small\n")
+	q := bringBack(t, d, src, repos, nil)
+	got := files(t, src, q.Head)
+	for _, want := range []string{"committed.bin", "changed.bin", "exact.bin", "small.txt"} {
+		if !slices.Contains(got, want) {
+			t.Errorf("the run's commit lacks %s: %v", want, got)
+		}
+	}
+	for _, out := range []string{"big/new.bin", "ignored.bin"} {
+		if slices.Contains(got, out) {
+			t.Errorf("the run's commit has %s", out)
+		}
+	}
+	if size := testGit(t, src, "cat-file", "-s", q.Head+":changed.bin"); size != strconv.Itoa(MaxFile+1) {
+		t.Errorf("changed.bin in the run's commit has %s bytes, want the agent's commit", size)
+	}
+	if parent := testGit(t, src, "rev-parse", q.Head+"^"); parent != agentCommit {
+		t.Errorf("the run's commit follows %s, want the agent's commit %s", parent, agentCommit)
+	}
+	left := d.Left(repos)
+	if want := []string{"big/new.bin", "changed.bin"}; !slices.Equal(left.Large, want) || left.Behind {
+		t.Errorf("Left = %+v, want large %v and nothing behind", left, want)
+	}
+}
+
+// TestALargeFileAloneBringsNoCommit is a run whose only change is a file over the cap: no bundle,
+// and the file is listed.
+func TestALargeFileAloneBringsNoCommit(t *testing.T) {
+	isolate(t)
+	sessionGit(t)
+	src, _ := person(t)
+	d, repos := cloneRun(t, src)
+	sparseFile(t, d.Work(), "data.bin", MaxFile+1)
+	printed := sessionOutput(t, d, repos, nil)
+	if _, err := d.Quarantine(context.Background(), branch, repos); !errors.Is(err, ErrNoBundle) {
+		t.Errorf("Quarantine = %v, want no bundle\n%s", err, printed)
+	}
+	if left := d.Left(repos); !slices.Equal(left.Large, []string{"data.bin"}) || left.Behind || !left.Any() {
+		t.Errorf("Left = %+v\n%s", left, printed)
+	}
+}
+
+// TestALargeFileInASubmoduleStaysInTheCopy is a file over the cap in a submodule the clone copied:
+// it stays out of the submodule's uncommitted, and n.large lists it by its path in the copy.
+func TestALargeFileInASubmoduleStaysInTheCopy(t *testing.T) {
+	isolate(t)
+	sessionGit(t)
+	src, sub := withSubmodule(t)
+	d, repos := cloneRun(t, src)
+	inner := filepath.Join(d.Work(), filepath.FromSlash(sub))
+	sparseFile(t, inner, "data.bin", MaxFile+1)
+	write(t, inner, "small.txt", "small\n")
+	q, _ := runRefs(t, d, src, repos, nil)
+	if len(q.Submodules) != 1 {
+		t.Fatalf("%d submodules came back", len(q.Submodules))
+	}
+	gitDir := testGit(t, filepath.Join(src, sub), "rev-parse", "--path-format=absolute", "--git-dir")
+	got := files(t, gitDir, prefix+"/uncommitted")
+	if !slices.Contains(got, "small.txt") || slices.Contains(got, "data.bin") {
+		t.Errorf("the submodule's uncommitted has %v", got)
+	}
+	if left := d.Left(repos); !slices.Equal(left.Large, []string{sub + "/data.bin"}) || left.Behind {
+		t.Errorf("Left = %+v", left)
+	}
+}
+
+// TestLeftReadsTheListsAsText is a list that is no regular file, which counts as work left behind,
+// and lists past 1 MiB, which end with "..." and keep no line the cut ended.
+func TestLeftReadsTheListsAsText(t *testing.T) {
+	d := newDir(t)
+	repos := []Repository{{}, {}}
+	if err := os.Mkdir(d.Bundle(), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(d.Bundle(), "0.large"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if left := d.Left(repos); !left.Behind || len(left.Large) > 0 {
+		t.Errorf("a folder at 0.large: Left = %+v", left)
+	}
+	if err := os.Remove(filepath.Join(d.Bundle(), "0.large")); err != nil {
+		t.Fatal(err)
+	}
+	line := strings.Repeat("a", 1000) + "\n"
+	write(t, d.Bundle(), "0.large", strings.Repeat(line, 1000))
+	write(t, d.Bundle(), "1.large", strings.Repeat(line, 100))
+	left := d.Left(repos)
+	if left.Behind || len(left.Large) != 1047+1 || left.Large[len(left.Large)-1] != "..." {
+		t.Errorf("past 1 MiB: %d files, behind %v, last %.10q", len(left.Large), left.Behind, left.Large[len(left.Large)-1])
+	}
+	for _, f := range left.Large[:len(left.Large)-1] {
+		if len(f) != 1000 {
+			t.Fatalf("a listed file has %d bytes", len(f))
+		}
+	}
+}

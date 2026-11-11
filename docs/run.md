@@ -3760,6 +3760,16 @@ Part of the run's work can stay in the copy:
 Other lines of `git add` print too, such as its warning about a link at `.gitignore`. They keep
 nothing behind.
 
+The session leaves out of its commit each file of more than 100 MiB (104857600 bytes) that the
+agent added or changed, in the repository and in each submodule the clone copied, and lists it. A
+commit that the agent made keeps its files as they are. Such a file stays in the copy, and the
+rest of the work comes back:
+
+```text
+qory run: left out of the run's commit, as each has more than 100 MiB: data/model.bin. They stay in the run's copy.
+qory run: read the run's files in <folder>, run no git there, then remove the folder: it has the work that did not come back
+```
+
 A local run then keeps the copy and exits 1:
 
 ```text
@@ -3796,6 +3806,10 @@ branch out, so the files in your checkout stay as they are:
 ```text
 qory run: the run's commits are on qory/run-0193 in /path/to/repo.
 ```
+
+The check and the fetch have 10 minutes, and a minute more for each full GiB of the bundles, at
+most 60 minutes. A bundle of more than 8 GiB (8589934592 bytes), which only the agent's commits can
+reach, brings nothing back.
 
 When the commits change a setting that qory acts on, such as `harness.launch` or `env` in
 `qory.yaml`, or add a link, the line continues with what they change:

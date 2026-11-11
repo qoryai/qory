@@ -18,17 +18,26 @@ import (
 	"github.com/qoryai/qory/internal/checkout"
 )
 
-// MaxBundle is the largest bundle qory reads back from a run.
-// 1 GiB is far above an agent's change, and keeps a planted file from filling the disk.
-const MaxBundle = 1 << 30
+// MaxBundle is the largest bundle qory reads back from a run. The git session leaves each file
+// of more than [MaxFile] bytes out of its commit, so only a commit of the agent's, or a session
+// that a program the agent planted changed, comes near it; it keeps a planted file from filling
+// the disk.
+const MaxBundle = 8 << 30
+
+// MaxFile is the largest file the git session adds to the run's commit. A larger one stays in the
+// copy, and n.large lists it.
+const MaxFile = 100 << 20
+
+// maxLarge is the most bytes qory reads of the lists of large files, all together.
+const maxLarge = 1 << 20
 
 // maxBundleHeader is the largest header of a bundle, its refs and prerequisites, that
 // qory reads when it checks the pack itself.
 const maxBundleHeader = 1 << 20
 
 // LeftBehind reports whether the git session of repos recorded work of the run that the bundles
-// do not have. The file's content is not read: a program in the session can write it, and all
-// it can do is keep the copy.
+// do not have, besides the files of [Left.Large]. The file's content is not read: a program in the
+// session can write it, and all it can do is keep the copy.
 func (d Dir) LeftBehind(repos []Repository) bool {
 	for i := range repos {
 		if info, err := os.Lstat(filepath.Join(d.Bundle(), strconv.Itoa(i)+".left")); err == nil && info.Mode().IsRegular() {
@@ -36,6 +45,101 @@ func (d Dir) LeftBehind(repos []Repository) bool {
 		}
 	}
 	return false
+}
+
+// Left is what the git session of a run's repositories recorded as staying in the copy.
+type Left struct {
+	// Behind is whether [Dir.LeftBehind] is true, or a list of large files is no regular file.
+	Behind bool
+	// Large are the files the session left out of the run's commit, each of more than [MaxFile]
+	// bytes, relative to the copy, as the session listed them: text to show, which a program in
+	// the session can write, and never a path to open. The last is "..." when the lists have more
+	// than qory reads.
+	Large []string
+}
+
+// Any reports whether anything stays.
+func (l Left) Any() bool { return l.Behind || len(l.Large) > 0 }
+
+// Left reads what the git session of repos recorded as staying in the copy: each n.large, a
+// regular file read with no link followed, at most 1 MiB of them in all.
+func (d Dir) Left(repos []Repository) Left {
+	left := Left{Behind: d.LeftBehind(repos)}
+	budget := int64(maxLarge)
+	for i := range repos {
+		data, cut, err := readRunFile(filepath.Join(d.Bundle(), strconv.Itoa(i)+".large"), budget)
+		switch {
+		case errors.Is(err, fs.ErrNotExist):
+			continue
+		case err != nil:
+			left.Behind = true
+			continue
+		}
+		budget -= int64(len(data))
+		lines := strings.Split(string(data), "\n")
+		// The last piece follows the last line break: "" or a line that the cut ended.
+		for _, line := range lines[:len(lines)-1] {
+			if line != "" {
+				left.Large = append(left.Large, line)
+			}
+		}
+		if cut {
+			left.Large = append(left.Large, "...")
+			break
+		}
+	}
+	return left
+}
+
+// readRunFile reads at most limit bytes of the file at path, which the git session wrote: only a
+// regular file, as lstat reads it, that opens with no link followed as that same file. It reports
+// whether the file has more than limit bytes.
+func readRunFile(path string, limit int64) ([]byte, bool, error) {
+	before, err := os.Lstat(path)
+	if err != nil {
+		return nil, false, err
+	}
+	if !before.Mode().IsRegular() {
+		return nil, false, errRunFile
+	}
+	f, err := openNoFollow(path)
+	if err != nil {
+		return nil, false, err
+	}
+	defer f.Close()
+	if info, err := f.Stat(); err != nil || !os.SameFile(before, info) {
+		return nil, false, errRunFile
+	}
+	data, err := io.ReadAll(io.LimitReader(f, limit+1))
+	if err != nil {
+		return nil, false, err
+	}
+	if int64(len(data)) > limit {
+		return data[:limit], true, nil
+	}
+	return data, false, nil
+}
+
+// errRunFile is a file of the git session that is not a regular file, or that changed while qory
+// opened it.
+var errRunFile = errors.New("the file is not a regular file, or it changed while qory opened it")
+
+// BundleBytes is the size of the bundles the git session of repos wrote, as lstat reads each
+// regular file, for the time their check may take.
+func (d Dir) BundleBytes(repos []Repository) int64 {
+	var total int64
+	for i, r := range repos {
+		names := []string{strconv.Itoa(i) + ".bundle"}
+		for k := range r.submodules {
+			names = append(names, strconv.Itoa(i)+"-"+strconv.Itoa(k)+".bundle")
+		}
+		for _, name := range names {
+			if info, err := os.Lstat(filepath.Join(d.Bundle(), name)); err == nil && info.Mode().IsRegular() {
+				total += info.Size()
+			}
+		}
+	}
+	return total
 }
 
 // ErrNoBundle is a git session that recorded, for every repository, that the run made

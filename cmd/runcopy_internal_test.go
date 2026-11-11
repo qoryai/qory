@@ -24,7 +24,7 @@ func TestAFetchPastItsLimitHasItsLine(t *testing.T) {
 	limited, cancel := context.WithCancel(context.Background())
 	cancel()
 	failed := errors.New("the fetch failed")
-	err := limitErr(context.Background(), limited, textCopyFetchLimit, failed)
+	err := limitErr(context.Background(), limited, textCopyFetchLimit, copyStepLimit, failed)
 	want := "the fetch of the run's commits ran past its limit of " + copyStepLimit.String()
 	if err == nil || !strings.HasPrefix(err.Error(), want) {
 		t.Errorf("the line is %v", err)
@@ -32,8 +32,27 @@ func TestAFetchPastItsLimitHasItsLine(t *testing.T) {
 	stop, cancelStop := context.WithTimeout(context.Background(), time.Nanosecond)
 	defer cancelStop()
 	<-stop.Done()
-	if err := limitErr(stop, limited, textCopyFetchLimit, failed); !errors.Is(err, failed) {
+	if err := limitErr(stop, limited, textCopyFetchLimit, copyStepLimit, failed); !errors.Is(err, failed) {
 		t.Errorf("after a stop the error is %v", err)
+	}
+}
+
+// TestTheCheckLimitGrowsWithTheBundles is the limit of the check and the fetch: the base under
+// 1 GiB, a minute more for each full GiB, and at most an hour.
+func TestTheCheckLimitGrowsWithTheBundles(t *testing.T) {
+	for _, c := range []struct {
+		size int64
+		want time.Duration
+	}{
+		{0, copyStepLimit},
+		{1<<30 - 1, copyStepLimit},
+		{1 << 30, copyStepLimit + time.Minute},
+		{runcopy.MaxBundle, copyStepLimit + 8*time.Minute},
+		{100 << 30, maxStepLimit},
+	} {
+		if got := stepLimitFor(c.size); got != c.want {
+			t.Errorf("the limit for %d bytes is %s, want %s", c.size, got, c.want)
+		}
 	}
 }
 

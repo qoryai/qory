@@ -323,7 +323,11 @@ release may change what an existing document does, and states it under Upgrading
   changes come back under the same prefix in your git folder of that submodule. The line of the
   branch adds `The run's other refs are under <prefix>: list them with git for-each-ref <prefix>.`
   The git session gives itself read access to the files and folders it owns, so a file of mode 000
-  that the agent made comes back. A repository the run made keeps the copy, with `part of the run's
+  that the agent made comes back. The git session leaves each file of more than 100 MiB out of its
+  commit, and the copy stays with `left out of the run's commit, as each has more than 100 MiB: ….
+  They stay in the run's copy.`; a commit of the agent keeps its files. A bundle may have up to
+  8 GiB, and its check and fetch have 10 minutes and a minute more per GiB, at most 60 minutes. A
+  repository the run made keeps the copy, with `part of the run's
   work did not come back: the copy has a nested repository the run made.`, and so does a part of
   the run's wall that could not be removed, which brings nothing back. A first signal leaves the
   return of a local run at most 30 minutes, and `qory run` prints that time. A read run with a setup also
