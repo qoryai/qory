@@ -1,6 +1,7 @@
 package cmd_test
 
 import (
+	"archive/tar"
 	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
@@ -803,13 +804,30 @@ func staticELF(t *testing.T) string {
 // Engine 28, the engine's version a run with nested Docker asks for, adds an IPv6
 // subnet to the inside network created with --ipv6, answers that it holds no image by
 // reference, as an engine that has not pulled it, and for run logs the environment
-// file, prints a line and exits 4, as a container's runtime would.
+// file, prints a line and exits 4, as a container's runtime would. An agent's container
+// with a transcript bind starts with create, which logs the environment file, and then
+// start --attach, which prints the line and exits 4. The image is the agent image: its
+// Config sets no user and HOME=/home/agent; a docker cp out of it writes the tar of a
+// directory owned by root, mode 0755, for /, /home and /home/agent, and exits 1 with
+// "Could not find the file" for a path below /home/agent.
 func fakeDocker(t *testing.T) (string, string) {
 	t.Helper()
 	dir := t.TempDir()
 	log := filepath.Join(dir, "docker.log")
 	ipv6 := filepath.Join(dir, "ipv6")
 	script := filepath.Join(dir, "docker")
+	var b bytes.Buffer
+	w := tar.NewWriter(&b)
+	if err := w.WriteHeader(&tar.Header{Name: "agent/", Typeflag: tar.TypeDir, Mode: 0o755, ModTime: time.Unix(0, 0)}); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	dirTar := filepath.Join(dir, "dir.tar")
+	if err := os.WriteFile(dirTar, b.Bytes(), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	writeFile(t, script, `#!/bin/sh
 echo "$*" >> `+log+`
 case "$*" in
@@ -817,6 +835,9 @@ case "$*" in
 "network create "*" --internal "*) rm -f `+ipv6+` ;;
 "network inspect "*.Subnet*) test -e `+ipv6+` && { echo "172.30.0.0/16 fd00:db8::/64 "; exit 0; } ;;
 "image inspect --format {{json .RepoDigests}} "*) echo "Error response from daemon: No such image: $5" >&2; exit 1 ;;
+"image inspect --format {{json .Config}} "*) echo '{"User":"","Env":["PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin","HOME=/home/agent"]}' ;;
+"cp "*":/ -"|"cp "*":/home -"|"cp "*":/home/agent -") cat `+dirTar+` ;;
+"cp "*":/home/agent/"*" -") echo "Error response from daemon: Could not find the file ${2#*:} in container ${2%%:*}" >&2; exit 1 ;;
 esac
 case "$1 $2" in
 "version --format") echo "28.0.0" ;;
@@ -826,13 +847,14 @@ case "$1 $2" in
 	*) echo "172.30.0.1 " ;;
 	esac ;;
 "logs "*) echo "relay: listening" ;;
-"run "*)
+"run "*|"create --rm")
+	c=$1
 	while [ $# -gt 0 ]; do
 		if [ "$1" = --env-file ]; then sed 's/^/env: /' "$2" >> `+log+`; fi
 		shift
 	done
-	echo "inside the container"
-	exit 4 ;;
+	if [ "$c" = run ]; then echo "inside the container"; exit 4; fi ;;
+"start --attach") echo "inside the container"; exit 4 ;;
 esac
 `)
 	if err := os.Chmod(script, 0o755); err != nil {
