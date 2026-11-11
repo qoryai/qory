@@ -328,9 +328,13 @@ release may change what an existing document does, and states it under Upgrading
   have, such as a tag of your commit, its stash, a detached
   `HEAD`, commits that only a reflog reaches, and the working tree as a commit on `HEAD` when the
   session makes no commit on the branch, as in a sparse checkout. Each submodule's commits and
-  changes come back under the same prefix in your git folder of that submodule. The git session
+  changes come back under the same prefix in your git folder of that submodule, fetched before
+  your repository's, so a failed fetch into a submodule leaves your repository without a ref of
+  the run, and each fetch that failed or did not run prints a line with its fix. The git session
   reads a submodule's changes through a git folder that it makes, with an empty configuration,
-  so no filter, hook or fsmonitor that the run wrote in the submodule's configuration runs. The line of the
+  so no filter, hook or fsmonitor that the run wrote in the submodule's configuration runs. It
+  reads the refs and reflogs of the copy with settings that run no pager, hook, fsmonitor,
+  signature check or signing program that the run set in the copy's configuration. The line of the
   branch adds `The run's other refs are under <prefix>: list them with git for-each-ref <prefix>.`
   The git session gives itself read access to the files and folders it owns, so a file of mode 000
   that the agent made comes back. The git session leaves each file of more than 100 MiB out of its
@@ -373,9 +377,11 @@ release may change what an existing document does, and states it under Upgrading
   50 entries and the count of the rest, and the copy stays. What the run writes in a folder named `node_modules`, `.venv`, `venv`,
   `__pycache__`, `target`, `build`, `dist`, `.gradle` or `.next` comes back and counts nothing
   toward the limits of 100000 files and 8589934592 bytes. Those folders have a separate limit of
-  1000000 files and 32 GiB in all. Past it, qory leaves them out, prints `left out of the copy
-  back, as the folders that builds and package managers write have more than 1000000 files or
-  32 GiB in all: …`, keeps the copy, and `qory run` exits 1.
+  1000000 files and folders, each such folder included, and 32 GiB in all. Past it, qory leaves
+  them out, prints `left out of the copy back, as the folders that builds and package managers
+  write have more than 1000000 files and folders or 32 GiB in all: …`, with the first 50 folders
+  and the count of the rest, keeps the copy, and `qory run` exits 1. The line of what the copy
+  back left out, such as links, lists the first 50 entries and the count of the rest too.
 - When you and a run in a folder that is not a repository both changed a file, qory writes the
   run's version beside yours as `<name>-from-run`, or with a number after that when the name is
   taken, and prints `you and the run both changed these files: yours stay, and the run's version

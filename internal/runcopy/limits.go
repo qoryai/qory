@@ -36,8 +36,8 @@ func SessionLimitFor(entries, bytes int64) time.Duration {
 	return SessionBase + time.Duration(extra)*time.Minute
 }
 
-// errAtSessionMax stops [Dir.WorkSize] once its counts give [SessionMax].
-var errAtSessionMax = errors.New("the counts give the longest time limit")
+// errAtSessionMax stops [Dir.WorkSize] once [SessionLimitFor] of its counts is [SessionMax].
+var errAtSessionMax = errors.New("the time limit of the counts is the longest")
 
 // WorkSize counts the entries below the copy, [Dir.Work], and the bytes its regular files take
 // on disk, in allocated blocks, with lstat: it follows no link, and a sparse file counts only the

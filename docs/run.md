@@ -3714,8 +3714,10 @@ processors when the wall sets them, no network and no capability. The container 
 code. It binds two folders,
 both writable, and nothing else: the copy, and a new folder for its bundles. It never binds your
 checkout. Its name is `qory-copy-<run id>`, with the run's label. qory first removes a
-container of that name, which an earlier run with the same id can leave. It commits what
-the agent left, with no setting from the copy's `.git` and no filter, and writes the run's
+container of that name, which an earlier run with the same id can leave. When that removal fails,
+no session runs, the copy stays, and the line of the git session that did not start ends with
+`remove the container qory-copy-<run id> with docker rm --force qory-copy-<run id>: …`. It commits
+what the agent left, with no setting from the copy's `.git` and no filter, and writes the run's
 branch to a git bundle. First it gives itself read access to each file and folder that it owns
 and cannot read, such as one of mode 000 that the agent made. With a branch
 checked out that descends from your commit, the bundle has that branch, and its commits keep
@@ -3815,6 +3817,10 @@ qory run: part of the run's work did not come back: the copy has changes that gi
 Git LFS: because the session runs no filter, an LFS file the agent changes goes into the
 commit as its full content, in place of a pointer.
 
+The session reads the refs and reflogs of the copy, and of each submodule the clone copied, with
+git on the copy's git settings, and overrides each setting that runs a program in these reads: no
+pager, hook, fsmonitor, signature check or signing program that the run set runs.
+
 A program the agent planted in the copy can run again in this session, in a container with no
 network, so the session has a time limit: 5 minutes, plus a minute for each 20,000 files, folders
 and links in the copy and a minute for each 2 GiB its files take on disk, at most 60 minutes. qory
@@ -3885,7 +3891,10 @@ copied gets the same refs, under the same prefix, in your git folder of that sub
 
 When a ref of yours has that prefix or lies under it, as after an earlier run with the same id,
 the refs come back under `refs/qory/run-<run id>-2`, `-3` and so on. qory fetches them with git's
-object checks, all or none, and moves no ref outside the prefix and no `HEAD`. The line of the
+object checks, all or none, and moves no ref outside the prefix and no `HEAD`. It fetches into
+each submodule first: when one of those fetches fails, your repository gets no ref of the run,
+and qory prints a line with the fix for each fetch that failed or did not run, such as
+`fetch refs/heads/qory/run-0193 from <quarantine> into /path/to/repo by hand: …`. The line of the
 branch says where they are:
 
 ```text
@@ -3952,7 +3961,8 @@ deleted. It leaves out links, every `.git` and `.qory`, and a qory file whose se
 the run changed. When you both changed a file, or you deleted a file that the run changed, your
 version stays, and qory writes the run's version beside it as `<name>-from-run`, or as
 `<name>-from-run-1` and so on when that name is taken. A file that the run deleted and you
-changed stays. qory prints what it left out and what you both changed:
+changed stays. qory prints what it left out, the first 50 entries and then the count of the rest,
+and what you both changed:
 
 ```text
 qory run: you and the run both changed these files: yours stay, and the run's version of each is beside it with -from-run: notes.txt.
@@ -3966,11 +3976,12 @@ The copy back writes at most 100000 files and folders and 8589934592 bytes. What
 writes in a folder named `node_modules`, `.venv`, `venv`, `__pycache__`, `target`, `build`,
 `dist`, `.gradle` or `.next`, at any depth, comes back and counts nothing toward those limits. A
 regular file with such a name counts. Those folders have a separate limit of 1000000 files and
-32 GiB in all. When the run writes more, qory leaves out every such folder, lists them, and keeps
-the copy, and `qory run` exits 1:
+folders, each such folder included, and 32 GiB in all. When the run writes more, qory leaves out
+every such folder, lists the first 50 and the count of the rest, and keeps the copy, and `qory
+run` exits 1:
 
 ```text
-qory run: left out of the copy back, as the folders that builds and package managers write have more than 1000000 files or 32 GiB in all: node_modules. They stay in the run's copy.
+qory run: left out of the copy back, as the folders that builds and package managers write have more than 1000000 files and folders or 32 GiB in all: node_modules. They stay in the run's copy.
 ```
 
 When qory cannot read a file or folder of the copy, or cannot write or delete it in your folder, it

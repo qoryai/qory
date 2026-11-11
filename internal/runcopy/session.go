@@ -104,10 +104,11 @@ type GitSession struct {
 // submodule that the clone copied gets the same refs, with its changes as
 // uncommitted, in the bundle n-k, where k is the line of the submodule in subs-n. A repository
 // the run made stays behind and writes n.nested. Any other work that stays behind writes n.left;
-// [Dir.Left] reads both: a change in a submodule that the clone did not copy, or in a repository inside a submodule; a file that git ls-files still lists
-// after the add, such as one the session's user cannot read, which includes a path left out
-// here that a commit of the run changed, when the copy has other bytes than that commit; or a
-// folder the session cannot read. The person's personal ignore rules stay in effect through
+// [Dir.Left] reads both: a change in a submodule that the clone did not copy, or in a repository
+// inside a submodule, such as a submodule of a submodule with a change in its working tree; a file
+// that git ls-files still lists after the add, such as one the session's user cannot read, which
+// includes a path left out here that a commit of the run changed, when the copy has other bytes
+// than that commit; or a folder the session cannot read. The person's personal ignore rules stay in effect through
 // the info/exclude of that git folder.
 //
 // The add leaves out each regular file of more than [MaxFile] bytes that it would add, in the
@@ -298,15 +299,20 @@ export HOME="$B/home" GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null \
 	GIT_NO_REPLACE_OBJECTS=1 GIT_TERMINAL_PROMPT=0 GIT_OPTIONAL_LOCKS=0 \
 	GIT_NO_LAZY_FETCH=1 GIT_ALLOW_PROTOCOL=none LC_ALL=C
 mkdir "$HOME"
+# g is git with settings that beat the copy's configuration and a submodule's, which the agent
+# wrote: no pager, hook, fsmonitor, replace ref, signature check or signing program runs.
 g() {
-	git -c core.hooksPath=/dev/null -c core.fsmonitor=false -c core.useReplaceRefs=false \
+	git --no-pager -c core.hooksPath=/dev/null -c core.fsmonitor=false -c core.useReplaceRefs=false \
 		-c core.commitGraph=false -c core.attributesFile=/dev/null -c core.excludesFile=/dev/null \
 		-c core.untrackedCache=false -c gc.auto=0 -c maintenance.auto=false \
-		-c protocol.allow=never -c commit.gpgSign=false -c core.safecrlf=false "$@"
+		-c protocol.allow=never -c commit.gpgSign=false -c core.safecrlf=false \
+		-c log.showSignature=false -c gpg.program=false -c gpg.openpgp.program=false \
+		-c gpg.x509.program=false -c gpg.ssh.program=false "$@"
 }
 nl='
 '
 cr=$(printf '\r')
+tab=$(printf '\t')
 st=0
 # kind is exec for a file with the owner's execute bit, as git and SetupPath.State read it, and
 # file for any other. [ -x ] tests what the process may do, which differs for root or for another
@@ -318,7 +324,8 @@ kind() {
 	esac
 }
 # copygit is git with the copy's git folder $C as git dir, so packed refs and reftable both work.
-# It reads the copy's configuration, inside the wall.
+# It reads the copy's configuration, inside the wall, and the settings of g beat each key there
+# that would run a program for the commands below.
 copygit() {
 	g --git-dir="$C" "$@"
 }
@@ -365,35 +372,64 @@ readable() {
 	find . -path ./.git -prune -o -path ./.qory -prune -o -type d ! -perm -500 -exec chmod u+rx {} \; \
 		-o ! -type d ! -type l ! -perm -400 -exec chmod u+r {} + 2>/dev/null || :
 }
-# submodule_status writes the changes of the submodule at the folder $1 of $T to $G/status: what its
-# working tree changed since its HEAD. As for the top repository, git runs through the git folder
-# $G/status-$st that gitfolder makes, $st being a number the caller raises for each call, with an empty configuration, the submodule's objects as
-# alternates, HEAD at the submodule's commit and an index of its tree, so no program, hook,
-# fsmonitor or filter that the agent wrote in the submodule's configuration runs. A submodule
-# inside it counts as changed only at another commit: a status of its working tree would run git
-# with its configuration.
+# submodule_status writes the changes of the submodule at the folder $1 of $T to $G/status, through
+# the git folder $G/status-$st, $st being a number the caller raises for each call: see tree_status.
 submodule_status() (
 	unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE
-	cd "$T/$1"
-	S=$G
-	objects=$(g --git-dir=.git rev-parse --git-path objects)
+	tree_status "$T/$1" "$G/status" "$G/status-$st"
+)
+# tree_status writes to the file $2 the changes of the repository at the folder $1: what its working
+# tree changed since its HEAD. As for the top repository, git runs through a new git folder $3 that
+# gitfolder makes, with an empty configuration, the repository's objects as alternates, HEAD at the
+# repository's commit and an index of its tree, so no program, hook, fsmonitor or filter that the
+# agent wrote in the repository's configuration runs. A submodule inside it at another commit is a
+# change. One at its commit with a .git gets the same status, in the git folder status-<k> of $3, k
+# being its number: when that status has a change or fails, the submodule is a change in $2, and
+# n.left is written. A gitlink whose path ls-files quotes cannot be checked: n.left is written.
+# A call in a condition ignores set -e, so each step that can fail exits 1 on its failure.
+tree_status() (
+	t_at=$1 t_out=$2 G=$3
+	cd "$t_at" || exit 1
+	objects=$(g --git-dir=.git rev-parse --git-path objects) || exit 1
 	case $objects in
 	/*) ;;
-	*) objects=$T/$1/$objects ;;
+	*) objects=$t_at/$objects ;;
 	esac
 	C=${objects%/objects}
 	now=$(g --git-dir="$C" rev-parse --verify --quiet "HEAD^{commit}") || now=
 	if [ -n "$now" ]; then
 		base=$now
 	fi
-	G=$S/status-$st
-	gitfolder /dev/null
-	export GIT_DIR="$G" GIT_WORK_TREE="$T/$1" GIT_INDEX_FILE="$G/index"
+	gitfolder /dev/null || exit 1
+	export GIT_DIR="$G" GIT_WORK_TREE="$t_at" GIT_INDEX_FILE="$G/index"
 	if [ -n "$now" ]; then
-		printf '%s\n' "$now" > "$G/HEAD"
-		g read-tree "$now"
+		printf '%s\n' "$now" > "$G/HEAD" || exit 1
+		g read-tree "$now" || exit 1
 	fi
-	g status --porcelain -z --untracked-files=all --ignore-submodules=dirty > "$S/status"
+	g status --porcelain -z --untracked-files=all --ignore-submodules=dirty > "$t_out" || exit 1
+	g -c core.quotePath=false ls-files -s > "$G/entries" || exit 1
+	t_k=0
+	while IFS= read -r t_line; do
+		case $t_line in
+		"160000 "*) ;;
+		*) continue ;;
+		esac
+		t_p=${t_line#*"$tab"}
+		case $t_p in
+		\"*)
+			: > "$B/$n.left"
+			continue
+			;;
+		esac
+		if [ ! -e "$t_at/$t_p/.git" ] && [ ! -h "$t_at/$t_p/.git" ]; then
+			continue
+		fi
+		t_k=$((t_k + 1))
+		if ! tree_status "$t_at/$t_p" "$G/status-$t_k.out" "$G/status-$t_k" || [ -s "$G/status-$t_k.out" ]; then
+			printf ' M %s\0' "$t_p" >> "$t_out" || exit 1
+			: > "$B/$n.left"
+		fi
+	done < "$G/entries"
 )
 # submodule_at reports whether the submodule at the folder $1 of $T has the commit $2 at HEAD, and
 # writes its changes to $G/status.

@@ -702,6 +702,48 @@ func TestGitSessionBringsTheWorkBackAndRunsNothingPlanted(t *testing.T) {
 	})
 }
 
+// forgedSignature makes a commit on HEAD of the repository at work with a gpgsig header that no key
+// made, moves HEAD's branch to it, and sets log.showSignature and gpg.program to program there: a
+// git log of HEAD's reflog with that configuration runs program to check the signature.
+func forgedSignature(t *testing.T, work, program string) {
+	t.Helper()
+	head := testGit(t, work, "rev-parse", "HEAD")
+	tree := testGit(t, work, "rev-parse", "HEAD^{tree}")
+	commit := "tree " + tree + "\nparent " + head + "\n" +
+		"author Example <example@example.com> 1700000000 +0000\n" +
+		"committer Example <example@example.com> 1700000000 +0000\n" +
+		"gpgsig -----BEGIN PGP SIGNATURE-----\n \n iQEzBAABCAAdFiEEforged\n -----END PGP SIGNATURE-----\n" +
+		"\nforged\n"
+	id := gitIn(t, work, commit, "hash-object", "-t", "commit", "-w", "--stdin")
+	testGit(t, work, "update-ref", "-m", "forged", "HEAD", id)
+	testGit(t, work, "config", "log.showSignature", "true")
+	testGit(t, work, "config", "gpg.program", program)
+}
+
+// TestASignatureCheckPlantedInTheCopyRunsNothing is an agent that sets log.showSignature and
+// gpg.program in the copy's configuration, and puts a commit with a forged signature in HEAD's
+// reflog, in the repository and in a submodule: the session reads the reflogs, and the program
+// never runs.
+func TestASignatureCheckPlantedInTheCopyRunsNothing(t *testing.T) {
+	isolate(t)
+	sessionGit(t)
+	src, sub := withSubmodule(t)
+	d, repos := cloneRun(t, src)
+	program, ran := marker(t)
+	forgedSignature(t, filepath.Join(d.Work(), filepath.FromSlash(sub)), program)
+	forgedSignature(t, d.Work(), program)
+	printed := sessionOutput(t, d, repos, nil)
+	if b, err := os.ReadFile(ran); err == nil {
+		t.Fatalf("the planted program ran:\n%s\n%s", b, printed)
+	}
+	// The control: git log of HEAD's reflog in the copy runs the planted program, so the check
+	// above has teeth.
+	_ = gitCmd(d.Work(), "log", "-g", "--format=%H %gs", "HEAD").Run()
+	if _, err := os.Stat(ran); err != nil {
+		t.Errorf("git log -g in the copy did not run the planted program, so the test shows nothing: %v", err)
+	}
+}
+
 func TestGitSessionBringsAFurtherRepositoryBack(t *testing.T) {
 	bothChecks(t, func(t *testing.T) {
 		sessionGit(t)
@@ -1205,6 +1247,34 @@ func TestFetchIntoMakesNoBranchThatAppearedAfterTheFetch(t *testing.T) {
 	testGit(t, src, "cat-file", "-e", landed+":new.txt")
 }
 
+// TestFetchIntoMakesNoBranchAWorkingTreeHasUnborn is a working tree of the person's repository on
+// the run's branch with no commit yet, which no ref lists: qory makes no branch of that name, since
+// the working tree would then be at the run's commit, and the commits stay under the prefix.
+func TestFetchIntoMakesNoBranchAWorkingTreeHasUnborn(t *testing.T) {
+	isolate(t)
+	sessionGit(t)
+	src, _ := person(t)
+	q := fetchQuarantine(t, src)
+	tree := filepath.Join(t.TempDir(), "tree")
+	testGit(t, src, "worktree", "add", "--quiet", "--detach", tree)
+	testGit(t, tree, "checkout", "--quiet", "--orphan", branch)
+	before := testGit(t, tree, "status", "--porcelain")
+	landed, got, err := q.FetchInto(context.Background(), src, branch, "run-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if landed != "" || got != prefix {
+		t.Errorf("the commits landed on %q with the prefix %q, want none and %q", landed, got, prefix)
+	}
+	if err := gitCmd(src, "rev-parse", "--verify", "--quiet", "refs/heads/"+branch).Run(); err == nil {
+		t.Errorf("your repository has the branch %s", branch)
+	}
+	testGit(t, src, "cat-file", "-e", prefix+"/branch:new.txt")
+	if after := testGit(t, tree, "status", "--porcelain"); after != before {
+		t.Errorf("the working tree's status was\n%s\nand is\n%s", before, after)
+	}
+}
+
 // fetchQuarantine is the quarantine of a run that added one file to the person's repository at
 // src.
 func fetchQuarantine(t *testing.T, src string) *Quarantine {
@@ -1283,6 +1353,63 @@ func TestFetchIntoStopsAfterTheLockWaits(t *testing.T) {
 	testGit(t, src, "cat-file", "-e", prefix+"/branch:new.txt")
 	if took := time.Since(start); took < 50*time.Millisecond {
 		t.Errorf("the fetch took %s, less than its waits", took)
+	}
+}
+
+// joined is the errors that err joins, or err alone.
+func joined(err error) []error {
+	if j, ok := err.(interface{ Unwrap() []error }); ok {
+		return j.Unwrap()
+	}
+	return []error{err}
+}
+
+// TestAFailedFetchIntoASubmoduleLeavesYourRepositoryAsItWas is a run with a commit in the
+// repository and a change in a submodule, and a lock that stays on the ref the submodule's change
+// comes back to: the fetch into the submodule fails first, the fetch into the repository does not
+// run, and the error has a fix for each. With the lock on the repository's ref instead, the
+// submodule's refs come back, and the error lists them.
+func TestAFailedFetchIntoASubmoduleLeavesYourRepositoryAsItWas(t *testing.T) {
+	old := lockWaits
+	lockWaits = []time.Duration{10 * time.Millisecond}
+	t.Cleanup(func() { lockWaits = old })
+	for _, inSubmodule := range []bool{true, false} {
+		t.Run(fmt.Sprintf("in the submodule %t", inSubmodule), func(t *testing.T) {
+			isolate(t)
+			sessionGit(t)
+			ctx := context.Background()
+			src, sub := withSubmodule(t)
+			gitDir := testGit(t, filepath.Join(src, sub), "rev-parse", "--path-format=absolute", "--git-dir")
+			d, repos := cloneRun(t, src)
+			write(t, d.Work(), filepath.Join(sub, "lib.txt"), "changed\n")
+			write(t, d.Work(), "new.txt", "new\n")
+			runGit(t, d, repos, nil)
+			qs, err := d.Quarantine(ctx, branch, repos)
+			if err != nil {
+				t.Fatal(err)
+			}
+			lock := filepath.Join(src, ".git", filepath.FromSlash(prefix), "branch.lock")
+			if inSubmodule {
+				lock = filepath.Join(gitDir, filepath.FromSlash(prefix), "uncommitted.lock")
+			}
+			write(t, filepath.Dir(lock), filepath.Base(lock), "")
+			_, _, err = qs[0].FetchInto(ctx, src, branch, "run-1")
+			errs := joined(err)
+			if len(errs) != 2 {
+				t.Fatalf("the error joins %d errors, want 2: %v", len(errs), err)
+			}
+			if inSubmodule {
+				hasPrefix(t, "the submodule's fetch", errs[0], "fetch "+prefix+"/* from "+shown(qs[0].Submodules[0].Path)+" by hand:")
+				hasPrefix(t, "the repository's fetch", errs[1], "fetch refs/heads/"+branch+" from "+shown(qs[0].Path)+" into "+shown(src)+" by hand:")
+				if got := testGit(t, src, "for-each-ref", "refs/qory/", "refs/heads/qory/"); got != "" {
+					t.Errorf("your repository has refs of the run:\n%s", got)
+				}
+				return
+			}
+			hasPrefix(t, "the repository's fetch", errs[0], "fetch refs/heads/"+branch+" from "+shown(qs[0].Path)+" by hand:")
+			hasPrefix(t, "the submodule's refs", errs[1], "list the run's refs in your git folder of each submodule with git for-each-ref "+prefix+":")
+			wantRefs(t, refsUnder(t, gitDir, prefix), "uncommitted")
+		})
 	}
 }
 
@@ -2406,6 +2533,51 @@ func TestCopyBackLeavesOutGeneratedFoldersPastTheirLimit(t *testing.T) {
 			}
 			if _, err := os.Lstat(filepath.Join(src, "pkg", "dist")); !errors.Is(err, os.ErrNotExist) {
 				t.Errorf("pkg/dist came back: %v", err)
+			}
+		})
+	}
+}
+
+// TestCopyBackCountsGeneratedFolders is a run that makes empty folders in node_modules: each folder
+// counts toward the limit of files in the folders of a build, so past it node_modules stays out and
+// no folder comes back. At the limit, they come back.
+func TestCopyBackCountsGeneratedFolders(t *testing.T) {
+	isolate(t)
+	files := MaxGeneratedFiles
+	t.Cleanup(func() { MaxGeneratedFiles = files })
+	for _, c := range []struct {
+		limit int
+		out   bool
+	}{{5, true}, {6, false}} {
+		t.Run(strconv.Itoa(c.limit), func(t *testing.T) {
+			MaxGeneratedFiles = c.limit
+			src := t.TempDir()
+			d := newDir(t)
+			if err := d.CopyFolder(context.Background(), src); err != nil {
+				t.Fatal(err)
+			}
+			// node_modules and five folders in it: six entries.
+			for i := range 5 {
+				if err := os.MkdirAll(filepath.Join(d.Work(), "node_modules", "d"+strconv.Itoa(i)), 0o755); err != nil {
+					t.Fatal(err)
+				}
+			}
+			r, err := d.CopyBack(context.Background(), src)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, statErr := os.Lstat(filepath.Join(src, "node_modules", "d4"))
+			if c.out {
+				if want := []string{"node_modules"}; !slices.Equal(r.Generated, want) {
+					t.Errorf("left out %q, want %q", r.Generated, want)
+				}
+				if !errors.Is(statErr, os.ErrNotExist) {
+					t.Errorf("a folder in node_modules came back: %v", statErr)
+				}
+				return
+			}
+			if len(r.Generated) != 0 || statErr != nil {
+				t.Errorf("left out %q, and node_modules/d4: %v", r.Generated, statErr)
 			}
 		})
 	}
@@ -4416,6 +4588,31 @@ func TestANestedSubmoduleLetsTheSessionCommit(t *testing.T) {
 	}
 	if !slices.Contains(files(t, qs[0].Path, qs[0].Head), "x.txt") {
 		t.Errorf("the commit did not come back:\n%s", printed)
+	}
+}
+
+// TestAChangeInANestedSubmoduleIsLeftBehind is an agent that updates a nested submodule and changes
+// a file there without a commit: the session prints a line for the submodule around it, and the copy
+// stays. A planted fsmonitor in the nested submodule's configuration never runs.
+func TestAChangeInANestedSubmoduleIsLeftBehind(t *testing.T) {
+	isolate(t)
+	sessionGit(t)
+	src := nestedSubmodule(t)
+	d, repos := cloneRun(t, src)
+	updateSubmodules(t, d.Work())
+	inner := filepath.Join(d.Work(), "libs", "m", "inner")
+	program, ran := marker(t)
+	testGit(t, inner, "config", "core.fsmonitor", program)
+	write(t, inner, "lib.txt", "changed\n")
+	printed := sessionOutput(t, d, repos, nil)
+	if want := "qory: the submodule libs/m in the copy has a git repository with commits or changes that the commit leaves out"; !strings.Contains(printed, want) {
+		t.Errorf("the session printed no line for libs/m:\n%s", printed)
+	}
+	if !leftBehind(d, repos) {
+		t.Errorf("the session recorded no work left behind:\n%s", printed)
+	}
+	if b, err := os.ReadFile(ran); err == nil {
+		t.Errorf("the planted fsmonitor ran:\n%s", b)
 	}
 }
 

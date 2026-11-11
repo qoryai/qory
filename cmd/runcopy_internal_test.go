@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"errors"
+	"fmt"
 	"maps"
 	"os"
 	"os/exec"
@@ -329,8 +330,9 @@ func TestEachLeftoverHasItsLine(t *testing.T) {
 	}
 }
 
-// TestALongListShowsItsFirstFiftyEntries is a run that leaves 60 large files out of its commit
-// and 60 files out of the copy back: each line lists the first 50 and counts the other 10.
+// TestALongListShowsItsFirstFiftyEntries is a run that leaves 60 large files out of its commit,
+// and 60 entries out of the copy back that it could not read or write, that it skipped, or that
+// are folders of builds past their limit: each line lists the first 50 and counts the other 10.
 func TestALongListShowsItsFirstFiftyEntries(t *testing.T) {
 	var files []string
 	for i := range 60 {
@@ -347,7 +349,30 @@ func TestALongListShowsItsFirstFiftyEntries(t *testing.T) {
 	if wantLine := "left out of the copy back, as qory could not read or write them: " + want + "."; len(lines) != 1 || lines[0] != wantLine {
 		t.Errorf("the lines are %q, want %q", lines, wantLine)
 	}
+	lines = nil
+	c.leftOut(files, func(line string) { lines = append(lines, line) })
+	if wantLine := "left out of the copy back to your folder: " + want + "."; len(lines) != 1 || lines[0] != wantLine {
+		t.Errorf("the left-out lines are %q, want %q", lines, wantLine)
+	}
+	lines = nil
+	c.generated(files, func(line string) { lines = append(lines, line) })
+	if wantLine := fmt.Sprintf(textCopyGenerated, runcopy.MaxGeneratedFiles, shownBytes(runcopy.MaxGeneratedBytes), want); len(lines) != 1 || lines[0] != wantLine {
+		t.Errorf("the generated-folder lines are %q, want %q", lines, wantLine)
+	}
 	if got := largeFiles(files[:50]); got != strings.Join(files[:50], ", ") {
 		t.Errorf("50 large files are listed as %q", got)
+	}
+}
+
+// TestJoinedErrorsAreLinesOfTheirOwn is the error of a fetch that failed in a submodule, which
+// joins an error per repository: each is a line. Any other error is one line.
+func TestJoinedErrorsAreLinesOfTheirOwn(t *testing.T) {
+	one, two := errors.New("fetch a by hand: it failed"), errors.New("fetch b by hand: it did not run")
+	if got := joinedErrors(errors.Join(one, two)); len(got) != 2 || got[0] != one || got[1] != two {
+		t.Errorf("the joined errors are %v", got)
+	}
+	wrapped := fmt.Errorf("check git: %w", errors.Join(one, two))
+	if got := joinedErrors(wrapped); len(got) != 1 || got[0] != wrapped {
+		t.Errorf("the errors of a wrapped error are %v", got)
 	}
 }

@@ -40,9 +40,10 @@ var generatedFolders = map[string]bool{
 	"build": true, "dist": true, ".gradle": true, ".next": true,
 }
 
-// MaxGeneratedFiles and MaxGeneratedBytes are the most regular files and bytes, in all folders of
-// [generatedFolders] at any depth, that [Dir.CopyBack] writes from one run. Past either, it
-// leaves out every such folder, in [CopyBackResult.Generated]. A test sets smaller ones.
+// MaxGeneratedFiles and MaxGeneratedBytes are the most entries and bytes in all folders of
+// [generatedFolders] at any depth that [Dir.CopyBack] writes from one run. An entry is such a
+// folder, a folder in one or a regular file in one. Past either, it leaves out every such folder,
+// in [CopyBackResult.Generated]. A test sets smaller ones.
 var (
 	MaxGeneratedFiles       = 1_000_000
 	MaxGeneratedBytes int64 = 32 << 30
@@ -62,10 +63,11 @@ func generated(rel string) bool {
 // errGeneratedOver stops the count of [generatedOver] past a limit.
 var errGeneratedOver = errors.New("past the limit of generated folders")
 
-// generatedOver reports whether the regular files in folders of [generatedFolders] of the folder
-// work, at any depth, are more than [MaxGeneratedFiles] or have more than [MaxGeneratedBytes]. It
-// reads each entry with lstat and follows no link. It leaves out .git and .qory, as the copy back
-// does, and each entry it cannot read, which the copy back lists as failed.
+// generatedOver reports whether the folders of [generatedFolders] of the folder work, at any depth,
+// have more entries than [MaxGeneratedFiles], as it defines them, or more bytes in their regular
+// files than [MaxGeneratedBytes]. It reads each entry with lstat and follows no link.
+// It leaves out .git and .qory, as the copy back does, and each entry it cannot read, which the copy
+// back lists as failed.
 func generatedOver(ctx context.Context, work string) (bool, error) {
 	files, bytes := 0, int64(0)
 	err := filepath.WalkDir(work, func(p string, e fs.DirEntry, err error) error {
@@ -78,8 +80,16 @@ func generatedOver(ctx context.Context, work string) (bool, error) {
 		case err != nil:
 			return nil
 		case e.IsDir():
-			if p != work && leftOutName(e.Name()) {
+			if p == work {
+				return nil
+			}
+			if leftOutName(e.Name()) {
 				return fs.SkipDir
+			}
+			if rel, err := filepath.Rel(work, p); err == nil && generated(filepath.ToSlash(rel)) {
+				if files++; files > MaxGeneratedFiles {
+					return errGeneratedOver
+				}
 			}
 			return nil
 		case !e.Type().IsRegular():
@@ -122,7 +132,7 @@ type CopyBackResult struct {
 	// that when the name is taken. [Dir.CopyArtifactsIn] writes no such file.
 	Conflicts []string
 	// Generated are the folders of [generatedFolders] it left out, each with all below it,
-	// because their files pass [MaxGeneratedFiles] or [MaxGeneratedBytes]. Nothing below such a
+	// because their entries pass [MaxGeneratedFiles] or [MaxGeneratedBytes]. Nothing below such a
 	// folder is deleted.
 	Generated []string
 	// NotDeleted are the files that the run deleted and the person changed since the copy.
@@ -228,7 +238,7 @@ var errBudget = errors.New("past the budget")
 // folder from the one above it with O_NOFOLLOW, and keeps at most [maxOpenFolders]
 // levels open. It stops past [maxCopyBackFiles] files or [maxCopyBackBytes] bytes, with
 // an error that lists what it copied; what it writes in a folder of [generatedFolders] counts
-// nothing toward them. When the files in those folders pass [MaxGeneratedFiles] or
+// nothing toward them. When the entries in those folders pass [MaxGeneratedFiles] or
 // [MaxGeneratedBytes], it leaves each such folder out, in [CopyBackResult.Generated]. A read or a write of an entry that fails lists the entry as failed,
 // and the walk goes on. A changed file keeps the permission bits it has
 // in dest, with the run's change to the owner's execute bit, and a new one gets the
@@ -605,8 +615,9 @@ func (c *copyBack) skip(rel string, folder bool) {
 }
 
 // sub copies back the folder name in src, at rel, into the folder of that name in dst,
-// which it makes when there is none. A folder of [generatedFolders] counts nothing toward the
-// budget, and stays out with [copyBack.noGenerated].
+// which it makes when there is none. A folder of [generatedFolders], and each folder in one, counts
+// nothing toward the budget: [generatedOver] counts it toward [MaxGeneratedFiles] before the walk.
+// A folder of [generatedFolders] stays out with [copyBack.noGenerated].
 func (c *copyBack) sub(src, dst int, name, rel string, depth int) error {
 	if c.noGenerated && generatedFolders[name] {
 		c.result.Generated = append(c.result.Generated, rel)

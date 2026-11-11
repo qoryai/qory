@@ -54,7 +54,7 @@ const (
 	textCopyBack       = "copied %s back to %s from the run, and deleted %s there."
 	textCopyLeftOut    = "left out of the copy back to your folder: %s."
 	textCopyFailed     = "left out of the copy back, as qory could not read or write them: %s."
-	textCopyGenerated  = "left out of the copy back, as the folders that builds and package managers write have more than %d files or %s in all: %s. They stay in the run's copy."
+	textCopyGenerated  = "left out of the copy back, as the folders that builds and package managers write have more than %d files and folders or %s in all: %s. They stay in the run's copy."
 	textCopyConflicts  = "you and the run both changed these files: yours stay, and the run's version of each is beside it with -from-run: %s."
 	textCopyNotDeleted = "the run deleted these files, which you changed, so yours stay: %s."
 	textCopyActingKept = "the run changed these qory settings, so those files stay as you have them: %s."
@@ -359,7 +359,7 @@ func (c *runCopy) leftOut(skipped []string, report func(string)) {
 		skipped = withoutQoryDir(skipped)
 	}
 	if len(skipped) > 0 {
-		report(fmt.Sprintf(textCopyLeftOut, shownPaths(skipped)))
+		report(fmt.Sprintf(textCopyLeftOut, listed(shownList(skipped))))
 		c.qoryLeftOut = slices.Contains(skipped, checkout.Dir)
 	}
 }
@@ -662,7 +662,10 @@ func (c *runCopy) fetchOne(ctx context.Context, q *runcopy.Quarantine, runID str
 			report(c.checkFailed(ctx, limitErr(ctx, limited, textCopyFetchLimit, c.limit, err)).Error())
 			return false
 		}
-		report(shownError(err))
+		// A fetch that failed in a submodule joins an error per repository, each a line.
+		for _, e := range joinedErrors(err) {
+			report(shownError(e))
+		}
 		return false
 	}
 	var line string
@@ -679,6 +682,14 @@ func (c *runCopy) fetchOne(ctx context.Context, q *runcopy.Quarantine, runID str
 	}
 	report(line)
 	return true
+}
+
+// joinedErrors is the errors that err joins, as [errors.Join] makes it, or err alone.
+func joinedErrors(err error) []error {
+	if j, ok := err.(interface{ Unwrap() []error }); ok {
+		return j.Unwrap()
+	}
+	return []error{err}
 }
 
 // copyBack brings the run's files back to the person's plain folder.
@@ -726,7 +737,7 @@ func (c *runCopy) generated(folders []string, report func(string)) bool {
 	if len(folders) == 0 {
 		return false
 	}
-	report(fmt.Sprintf(textCopyGenerated, runcopy.MaxGeneratedFiles, shownBytes(runcopy.MaxGeneratedBytes), shownPaths(folders)))
+	report(fmt.Sprintf(textCopyGenerated, runcopy.MaxGeneratedFiles, shownBytes(runcopy.MaxGeneratedBytes), listed(shownList(folders))))
 	c.kept(report)
 	return true
 }
