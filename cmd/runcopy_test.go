@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -464,15 +465,22 @@ func TestTheTimeLimitOfTheGitSessionKeepsTheCopy(t *testing.T) {
 	t.Cleanup(func() { os.RemoveAll(filepath.Dir(copyDir)) })
 }
 
-// TestTheTimeLimitOfTheGitSessionGrowsWithTheCopy is a copy with 2 GiB in a sparse file: the git
-// session has a minute more, and the line of its limit has that limit.
+// TestTheTimeLimitOfTheGitSessionGrowsWithTheCopy is a copy with 20,000 more files: the git
+// session has a minute more, and the line of its limit shows that limit.
 func TestTheTimeLimitOfTheGitSessionGrowsWithTheCopy(t *testing.T) {
 	copyCheckout(t)
 	var copyDir string
 	agentInCopy(t, func(spec session.SessionSpec) {
 		copyDir = spec.Dir
-		if err := os.Truncate(filepath.Join(spec.Dir, "README.md"), 2<<30); err != nil {
+		// 20,000 entries add a minute; a sparse file adds only the blocks it takes.
+		dir := filepath.Join(spec.Dir, "many")
+		if err := os.Mkdir(dir, 0o755); err != nil {
 			t.Fatal(err)
+		}
+		for i := range 20_000 {
+			if err := os.WriteFile(filepath.Join(dir, strconv.Itoa(i)), nil, 0o644); err != nil {
+				t.Fatal(err)
+			}
 		}
 	})
 	t.Cleanup(cmd.SetGitSession(func(ctx context.Context, spec session.SessionSpec) (*session.Result, error) {
