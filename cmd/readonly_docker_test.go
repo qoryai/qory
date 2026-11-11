@@ -294,3 +294,60 @@ func TestARealWriteRunInACopyBringsTheWorkBack(t *testing.T) {
 		})
 	}
 }
+
+// plantingAgent is the program of the agent's container in
+// [TestARealWriteRunRunsNoFilterPlantedInASubmodule]: it plants a clean filter in the
+// configuration of the submodule libs/s that appends to planted-ran at the top of the copy, applies
+// it to every file there, and changes lib.txt to other bytes of the same size.
+const plantingAgent = `#!/bin/sh
+top=$PWD
+git -C libs/s config filter.planted.clean "sh -c 'echo ran >> $top/planted-ran; cat'"
+echo '* filter=planted' > libs/s/.gitattributes
+echo LIB > libs/s/lib.txt
+echo left > left.txt
+`
+
+// TestARealWriteRunRunsNoFilterPlantedInASubmodule is a local walled write run behind a real wall
+// whose agent plants a clean filter in a submodule's configuration: the git session in its
+// container reads the submodule's changes with a configuration it makes, so the filter never
+// runs, and the submodule's change comes back under the run's prefix in the person's git folder
+// of the submodule. It runs only with QORY_TEST_DOCKER=1 and docker on the PATH.
+func TestARealWriteRunRunsNoFilterPlantedInASubmodule(t *testing.T) {
+	if os.Getenv("QORY_TEST_DOCKER") != "1" {
+		t.Skip("QORY_TEST_DOCKER=1 runs it")
+	}
+	if _, err := exec.LookPath("docker"); err != nil {
+		t.Skip("no docker command")
+	}
+	helper, image := realWallImage(t, "planting-agent", plantingAgent)
+	sub := filepath.Join(tempDir(t), "sub")
+	writeFile(t, filepath.Join(sub, "lib.txt"), "lib\n")
+	runGit(t, sub, "init", "--quiet", "-b", "main")
+	runGit(t, sub, "add", "lib.txt")
+	runGit(t, sub, "-c", "user.name=person", "-c", "user.email=person@example.invalid", "commit", "--quiet", "-m", "lib")
+	root := newCheckout(t)
+	copyFixture(t, "two-modules", root)
+	composedForFake(t, root, "/usr/local/bin/planting-agent")
+	runGit(t, root, "-c", "protocol.file.allow=always", "submodule", "add", "--quiet", sub, "libs/s")
+	runGit(t, root, "add", "qory.yaml", "modules")
+	runGit(t, root, "commit", "--quiet", "-m", "first")
+	writeFile(t, filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "forager.yaml"),
+		"wall:\n  adapter: docker\n  helper: "+helper+"\n  user: \"1000:1000\"\n  image: "+image+"\n")
+	t.Setenv("QORY_RUN_KEY", "")
+	t.Cleanup(cmd.GitSessionsInDocker(func([]string) {}))
+	out, err := run(t, "run", "claude", "--", "-p", "hi")
+	t.Logf("qory run:\n%s", out)
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	branch := runBranchOf(t, out)
+	gitOutput(t, root, "cat-file", "-e", branch+":left.txt")
+	if files := gitOutput(t, root, "ls-tree", "-r", "--name-only", branch); strings.Contains(files, "planted-ran") {
+		t.Errorf("the planted filter ran: the run's branch has planted-ran:\n%s", files)
+	}
+	prefix := runRefsOf(t, out)
+	gitDir := gitOutput(t, filepath.Join(root, "libs", "s"), "rev-parse", "--path-format=absolute", "--git-dir")
+	if got := gitOutput(t, gitDir, "show", prefix+"/uncommitted:lib.txt"); got != "LIB" {
+		t.Errorf("lib.txt of the submodule's uncommitted is %q", got)
+	}
+}
