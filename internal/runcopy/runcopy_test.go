@@ -1356,6 +1356,30 @@ func TestFetchIntoStopsAfterTheLockWaits(t *testing.T) {
 	}
 }
 
+// TestAFailedWorktreeListMakesNoBranch is a git worktree list that fails after the fetch: a
+// working tree may have the branch checked out, so qory makes no branch, and the commits stay under
+// the run's prefix.
+func TestAFailedWorktreeListMakesNoBranch(t *testing.T) {
+	isolate(t)
+	sessionGit(t)
+	src, _ := person(t)
+	q := fetchQuarantine(t, src)
+	old := worktreeList
+	worktreeList = func(context.Context, string) (string, error) { return "", errors.New("git worktree: it failed") }
+	t.Cleanup(func() { worktreeList = old })
+	landed, prefix, err := q.FetchInto(context.Background(), src, branch, "run-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if landed != "" || prefix != "refs/qory/run-run-1" {
+		t.Errorf("the commits landed on %q with the prefix %q", landed, prefix)
+	}
+	testGit(t, src, "cat-file", "-e", prefix+"/branch:new.txt")
+	if got := testGit(t, src, "for-each-ref", "refs/heads/qory/"); got != "" {
+		t.Errorf("qory made a branch:\n%s", got)
+	}
+}
+
 // joined is the errors that err joins, or err alone.
 func joined(err error) []error {
 	if j, ok := err.(interface{ Unwrap() []error }); ok {

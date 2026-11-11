@@ -3851,7 +3851,8 @@ branch named `qory` the names start at `qory-run-<run id>`. qory fetches the com
 run's prefix first, then makes the branch only when no branch has that name and no working tree
 has it checked out, so no branch of yours moves, even one you made during the fetch: then qory
 tries the next free name, at most 3 names in all. When another git process holds a lock on the
-branch, qory tries again, at most 5 times in 30 seconds. When qory makes no branch, the commits
+branch, qory tries again, at most 5 times in 30 seconds. When `git worktree list` fails, qory
+makes no branch, since a working tree may have it checked out. When qory makes no branch, the commits
 stay at `refs/qory/run-<run id>/branch`, and the line lists the run's refs. qory never checks the
 branch out, so the files in your checkout stay as they are:
 
