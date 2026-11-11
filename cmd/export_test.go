@@ -194,6 +194,23 @@ func GitSessionsInDocker(seen func(argv []string)) func() {
 	return func() { runGitContainer = before }
 }
 
+// SeeGitContainer makes the git session run as a process on this machine, as
+// [RunGitSessionsOnHost] does, with the arguments of its docker run passed to seen first, and
+// returns what restores the default.
+func SeeGitContainer(seen func(args []string)) func() {
+	before := runGitContainer
+	onHost := containerOf(GitSessionOnHost)
+	runGitContainer = func(ctx context.Context, c gitContainer) (int, error) {
+		args, err := c.args()
+		if err != nil {
+			return -1, err
+		}
+		seen(args)
+		return onHost(ctx, c)
+	}
+	return func() { runGitContainer = before }
+}
+
 // LoseLinkAfterJoin makes each join run as it does and then return lost, as a join whose link
 // to the gateway was lost during the session does, and returns what restores the default.
 func LoseLinkAfterJoin(lost error) func() {

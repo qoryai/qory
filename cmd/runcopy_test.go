@@ -489,6 +489,41 @@ func TestTheTimeLimitOfTheGitSessionGrowsWithTheCopy(t *testing.T) {
 	t.Cleanup(func() { os.RemoveAll(filepath.Dir(copyDir)) })
 }
 
+// TestNoHostVariableReachesTheGitContainer is a run with a token and a model key in qory's
+// environment: the docker run of the git container passes only the variables of the git
+// session's script, each with its value, and neither of the two.
+func TestNoHostVariableReachesTheGitContainer(t *testing.T) {
+	root := copyCheckout(t)
+	t.Setenv("GH_TOKEN", "fake-gh-token")
+	t.Setenv("ANTHROPIC_API_KEY", "fake-model-key")
+	agentInCopy(t, func(spec session.SessionSpec) {
+		writeFile(t, filepath.Join(spec.Dir, "left.txt"), "left\n")
+	})
+	var args []string
+	t.Cleanup(cmd.SeeGitContainer(func(a []string) { args = a }))
+	out, err := run(t, "run", "claude", "--", "-p", "hi")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	gitOutput(t, root, "cat-file", "-e", runBranchOf(t, out)+":left.txt")
+	var names []string
+	for i, a := range args {
+		if strings.Contains(a, "fake-") {
+			t.Errorf("a host variable reaches the git container: %s", a)
+		}
+		if a == "--env" {
+			name, _, ok := strings.Cut(args[i+1], "=")
+			if !ok {
+				t.Errorf("--env %s takes its value from the docker command's environment", args[i+1])
+			}
+			names = append(names, name)
+		}
+	}
+	if got, want := strings.Join(names, " "), "PATH HOME GIT_CONFIG_NOSYSTEM GIT_CONFIG_GLOBAL"; got != want {
+		t.Errorf("the git container gets %s, want %s", got, want)
+	}
+}
+
 // wantDisarmed checks that the copy at work has no .git, and that git status finds no
 // repository there.
 func wantDisarmed(t *testing.T, work string) {
