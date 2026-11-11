@@ -3874,8 +3874,9 @@ qory run: the run's commits are on qory/run-0193 in /path/to/repo. They change t
 | `uncommitted` | The changes in the working tree when the session makes no commit on the branch, as a commit on `HEAD`. In a sparse checkout, each path the checkout took out stays as `HEAD` has it. |
 | `branch` | The commits of the run's branch, only when qory could make no branch for them. |
 
-A ref other than a branch or a tag comes back only when it has a commit that your commit, a ref of
-the clone and a remote-tracking ref do not have. A branch or a tag that the run made or moved at a
+A ref other than a branch or a tag comes back only when it has a commit that your commit and the
+refs at the end of the clone do not have. A remote-tracking ref that the run moved does not come
+back. A branch or a tag that the run made or moved at a
 commit you have, such as a tag of your commit, comes back too: qory checks that your repository has
 that commit, and makes the ref in the same fetch. Each submodule that the clone
 copied gets the same refs, under the same prefix, in your git folder of that submodule, such as
