@@ -125,6 +125,12 @@ func person(t *testing.T) (string, string) {
 	return dir, commitAll(t, dir, "first")
 }
 
+// leftBehind reports whether the git session of repos recorded work of the run that the bundles
+// do not have, besides the files of [Left.Large]: n.nested or n.left.
+func leftBehind(d Dir, repos []Repository) bool {
+	return d.recorded(repos, ".nested") || d.recorded(repos, ".left")
+}
+
 // newDir makes the run's folder for run-1.
 func newDir(t *testing.T) Dir {
 	t.Helper()
@@ -277,7 +283,7 @@ const prefix = "refs/qory/run-run-1"
 func runRefs(t *testing.T, d Dir, src string, repos []Repository, out map[string]LeftOut) (*Quarantine, map[string]string) {
 	t.Helper()
 	printed := sessionOutput(t, d, repos, out)
-	if d.LeftBehind(repos) {
+	if leftBehind(d, repos) {
 		t.Errorf("the session recorded work left behind:\n%s", printed)
 	}
 	qs, err := d.Quarantine(context.Background(), branch, repos)
@@ -3375,7 +3381,7 @@ func TestTheBranchComesBackWithHeadAtTheBaseCommit(t *testing.T) {
 	if !slices.Contains(files(t, src, "refs/heads/"+branch), "kept.txt") {
 		t.Error("kept.txt did not come back")
 	}
-	if d.LeftBehind(repos) {
+	if leftBehind(d, repos) {
 		t.Error("the session recorded work left behind, with nothing left behind")
 	}
 }
@@ -3475,7 +3481,7 @@ func TestABranchInHeadLeavesNothingBehind(t *testing.T) {
 	write(t, d.Work(), "two.txt", "x\n")
 	commitAll(t, d.Work(), "on more")
 	bringBack(t, d, src, repos, nil)
-	if d.LeftBehind(repos) {
+	if leftBehind(d, repos) {
 		t.Error("the session recorded work left behind, with nothing left behind")
 	}
 }
@@ -3525,7 +3531,7 @@ func TestAnIgnoredPathLeftOutPrintsNothing(t *testing.T) {
 	if strings.Contains(out, "qory:") || strings.Contains(out, "ignored") {
 		t.Errorf("the session printed:\n%s", out)
 	}
-	if d.LeftBehind(repos) {
+	if leftBehind(d, repos) {
 		t.Error("the session recorded an ignored path as work left behind")
 	}
 }
@@ -3714,7 +3720,7 @@ func TestAnEmbeddedRepositoryWithNoFindIsLeftBehind(t *testing.T) {
 	if !strings.Contains(out, "qory: git add printed in the copy: ") || !strings.Contains(out, "embedded") {
 		t.Errorf("the session printed:\n%s", out)
 	}
-	if !d.LeftBehind(repos) {
+	if !leftBehind(d, repos) {
 		t.Error("the session did not record the embedded repository")
 	}
 	if left := d.Left(repos); left.Nested || !left.Behind {
@@ -3730,7 +3736,7 @@ func noBundleWith(t *testing.T, d Dir, repos []Repository, out map[string]LeftOu
 	if _, err := d.Quarantine(context.Background(), branch, repos); !errors.Is(err, ErrNoBundle) {
 		t.Errorf("Quarantine = %v, want no bundle\n%s", err, printed)
 	}
-	if d.LeftBehind(repos) {
+	if leftBehind(d, repos) {
 		t.Errorf("the session recorded work left behind\n%s", printed)
 	}
 }
@@ -3743,7 +3749,7 @@ func noBundle(t *testing.T, d Dir, repos []Repository, left bool) string {
 	if _, err := d.Quarantine(context.Background(), branch, repos); !errors.Is(err, ErrNoBundle) {
 		t.Errorf("Quarantine = %v, want no bundle\n%s", err, printed)
 	}
-	if got := d.LeftBehind(repos); got != left {
+	if got := leftBehind(d, repos); got != left {
 		t.Errorf("left behind = %v, want %v\n%s", got, left, printed)
 	}
 	return printed
@@ -4189,7 +4195,7 @@ func TestAGoodRunLeavesNothingBehind(t *testing.T) {
 			d, repos := cloneRun(t, src)
 			agent(t, d.Work(), base)
 			bringBack(t, d, src, repos, nil)
-			if d.LeftBehind(repos) {
+			if leftBehind(d, repos) {
 				t.Error("the session recorded work left behind")
 			}
 		})
@@ -4216,7 +4222,7 @@ func TestAGoodRunOnALineEndRuleLeavesNothingBehind(t *testing.T) {
 			if strings.Contains(printed, "left this out") {
 				t.Errorf("the session printed:\n%s", printed)
 			}
-			if d.LeftBehind(repos) {
+			if leftBehind(d, repos) {
 				t.Errorf("the session recorded work left behind:\n%s", printed)
 			}
 			if _, err := d.Quarantine(context.Background(), branch, repos); err != nil {
@@ -4362,8 +4368,8 @@ func TestANestedSubmoduleLetsTheSessionCommit(t *testing.T) {
 	write(t, d.Work(), "x.txt", "x\n")
 	commitAll(t, d.Work(), "x")
 	printed := sessionOutput(t, d, repos, nil)
-	if strings.Contains(printed, "that the run made") || d.LeftBehind(repos) {
-		t.Errorf("left behind = %v:\n%s", d.LeftBehind(repos), printed)
+	if strings.Contains(printed, "that the run made") || leftBehind(d, repos) {
+		t.Errorf("left behind = %v:\n%s", leftBehind(d, repos), printed)
 	}
 	qs, err := d.Quarantine(context.Background(), branch, repos)
 	if err != nil {
@@ -4386,7 +4392,7 @@ func TestASetupThatUpdatesANestedSubmoduleLeavesNothingBehind(t *testing.T) {
 	write(t, d.Work(), "x.txt", "x\n")
 	commitAll(t, d.Work(), "x")
 	printed := sessionOutput(t, d, repos, map[string]LeftOut{"": out})
-	if d.LeftBehind(repos) {
+	if leftBehind(d, repos) {
 		t.Errorf("the session recorded work left behind:\n%s", printed)
 	}
 }
@@ -4505,7 +4511,7 @@ func TestALineEndRewriteStaysOut(t *testing.T) {
 			d, repos := cloneRun(t, src)
 			write(t, d.Work(), c.file, "one\r\nthree\r\n")
 			q := bringBack(t, d, src, repos, nil)
-			if d.LeftBehind(repos) {
+			if leftBehind(d, repos) {
 				t.Error("the session recorded work left behind")
 			}
 			got := files(t, src, q.Head)
@@ -4641,7 +4647,7 @@ func TestAnAmendedBaseCommitTakesUncommittedWork(t *testing.T) {
 	testGit(t, d.Work(), "commit", "--quiet", "--amend", "-m", "amended")
 	write(t, d.Work(), "left.txt", "left\n")
 	q := bringBack(t, d, src, repos, nil)
-	if d.LeftBehind(repos) {
+	if leftBehind(d, repos) {
 		t.Error("the session recorded work left behind")
 	}
 	got := files(t, src, q.Head)
@@ -4882,7 +4888,7 @@ func TestASetupFileWithAnyNameInASubmoduleLeavesNothingBehind(t *testing.T) {
 			d, repos := cloneRun(t, src)
 			write(t, filepath.Join(d.Work(), filepath.FromSlash(sub)), name, "generated\n")
 			out := setupRecord(t, d, repos[0])
-			if printed := sessionOutput(t, d, repos, map[string]LeftOut{"": out}); d.LeftBehind(repos) {
+			if printed := sessionOutput(t, d, repos, map[string]LeftOut{"": out}); leftBehind(d, repos) {
 				t.Errorf("the session recorded work left behind:\n%s", printed)
 			}
 		})
@@ -4908,7 +4914,7 @@ func TestManySetupFilesInASubmoduleLeaveTheSessionItsTime(t *testing.T) {
 	if took > manyFilesLimit {
 		t.Errorf("the session took %s, past %s", took, manyFilesLimit)
 	}
-	if d.LeftBehind(repos) {
+	if leftBehind(d, repos) {
 		t.Errorf("the session recorded work left behind:\n%s", printed)
 	}
 }
@@ -4990,7 +4996,7 @@ func TestACommitOfASetupFileAsItIsLeavesNothingBehind(t *testing.T) {
 	write(t, d.Work(), "agent.txt", "agent\n")
 	commitAll(t, d.Work(), "everything")
 	printed := sessionOutput(t, d, repos, map[string]LeftOut{"": out})
-	if d.LeftBehind(repos) {
+	if leftBehind(d, repos) {
 		t.Errorf("the session recorded work left behind:\n%s", printed)
 	}
 }
@@ -5087,7 +5093,7 @@ func TestASeedInTheCopyLeavesOutWhatTheBranchRemoved(t *testing.T) {
 		t.Errorf("the copy has the target version at %q, want %q", got, target)
 	}
 	runGit(t, d, repos, nil)
-	if d.LeftBehind(repos) {
+	if leftBehind(d, repos) {
 		t.Error("the git session reports work left behind")
 	}
 
@@ -5186,7 +5192,7 @@ func TestTheGitSessionRunsItsScriptFromAFile(t *testing.T) {
 			s.Command = shell
 			runSession(t, s)
 			write(t, d.Bundle(), SessionScriptName, "exit 9\n")
-			if d.LeftBehind(repos) {
+			if leftBehind(d, repos) {
 				t.Error("the host reports work left behind")
 			}
 			qs, err := d.Quarantine(context.Background(), branch, repos)

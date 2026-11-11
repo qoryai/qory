@@ -35,12 +35,6 @@ const maxLarge = 1 << 20
 // qory reads when it checks the pack itself.
 const maxBundleHeader = 1 << 20
 
-// LeftBehind reports whether the git session of repos recorded work of the run that the bundles
-// do not have, besides the files of [Left.Large]: n.nested or n.left.
-func (d Dir) LeftBehind(repos []Repository) bool {
-	return d.recorded(repos, ".nested") || d.recorded(repos, ".left")
-}
-
 // recorded reports whether the git session of repos wrote a regular file n plus suffix for a
 // repository n. The file's content is not read: a program in the session can write it, and all
 // it can do is keep the copy.
