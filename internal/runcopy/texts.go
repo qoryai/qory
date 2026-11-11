@@ -50,7 +50,7 @@ const (
 	textQuarantine           = "check that you can write %s: qory fetches the run's commits there first, and git failed: %w"
 	textFetchFailed          = "fetch %[4]s from %[1]s by hand: qory fetched the run's commits there, and the fetch into %[2]s in %[3]s failed: %[5]w"
 	textFetchAfterSubmodules = "fetch %s from %s into %s by hand: qory fetches the run's commits into your repository only after the fetch into each submodule, and a fetch into a submodule failed"
-	textFetchedSubmodules    = "list the run's refs in your git folder of each submodule with git for-each-ref %[1]s: qory fetched them there under %[1]s"
+	textFetchedSubmodules    = "list the run's refs with git for-each-ref %[1]s in the git folder of each submodule whose fetch worked: qory fetched them there under %[1]s"
 	textNoFreeBranch         = "delete the branches %s and %s-<number> in %s that you no longer need: a run's commits come back on the first of these names that is free, and the first %d are taken"
 	textGitInRepo            = "check that %s is a git repository: qory reads it for the run, and git failed: %w"
 	textActingFailed         = "check that git can read the quarantine %s: qory compares the acting keys of the run's commits there, and git failed: %w"

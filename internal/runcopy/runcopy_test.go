@@ -1407,7 +1407,7 @@ func TestAFailedFetchIntoASubmoduleLeavesYourRepositoryAsItWas(t *testing.T) {
 				return
 			}
 			hasPrefix(t, "the repository's fetch", errs[0], "fetch refs/heads/"+branch+" from "+shown(qs[0].Path)+" by hand:")
-			hasPrefix(t, "the submodule's refs", errs[1], "list the run's refs in your git folder of each submodule with git for-each-ref "+prefix+":")
+			hasPrefix(t, "the submodule's refs", errs[1], "list the run's refs with git for-each-ref "+prefix+" in the git folder of each submodule whose fetch worked:")
 			wantRefs(t, refsUnder(t, gitDir, prefix), "uncommitted")
 		})
 	}

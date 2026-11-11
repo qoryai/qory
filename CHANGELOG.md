@@ -330,9 +330,9 @@ release may change what an existing document does, and states it under Upgrading
   session makes no commit on the branch, as in a sparse checkout. Each submodule's commits and
   changes come back under the same prefix in your git folder of that submodule, fetched before
   your repository's, so a failed fetch into a submodule leaves your repository without a ref of
-  the run, and each fetch that failed or did not run prints a line with its fix. A repository
-  inside a submodule that is a link or goes through one, is more than 8 submodules deep, or has
-  no `.git` and a folder that is not empty keeps the copy. The git session
+  the run, and each fetch that failed or did not run prints a line of at most 2000 characters
+  with its fix. A repository inside a submodule that is a link or goes through one, is more than
+  8 submodules deep, or has no `.git` and a folder that is not empty keeps the copy. The git session
   reads a submodule's changes through a git folder that it makes, with an empty configuration,
   so no filter, hook or fsmonitor that the run wrote in the submodule's configuration runs. It
   reads the refs and reflogs of the copy with settings that run no pager, hook, fsmonitor,

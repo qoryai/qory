@@ -3896,8 +3896,12 @@ When a ref of yours has that prefix or lies under it, as after an earlier run wi
 the refs come back under `refs/qory/run-<run id>-2`, `-3` and so on. qory fetches them with git's
 object checks, all or none, and moves no ref outside the prefix and no `HEAD`. It fetches into
 each submodule first: when one of those fetches fails, your repository gets no ref of the run,
-and qory prints a line with the fix for each fetch that failed or did not run, such as
-`fetch refs/heads/qory/run-0193 from <quarantine> into /path/to/repo by hand: …`. The line of the
+and qory prints a line of at most 2000 characters with the fix for each fetch that failed or did
+not run, such as
+`fetch refs/heads/qory/run-0193 from <quarantine> into /path/to/repo by hand: …`. When the fetch
+into a submodule worked, one more line follows:
+`list the run's refs with git for-each-ref refs/qory/run-0193 in the git folder of each submodule
+whose fetch worked: qory fetched them there under refs/qory/run-0193`. The line of the
 branch says where they are:
 
 ```text
