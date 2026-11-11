@@ -289,6 +289,15 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Changed
 
+- qory builds with Forager main ddda67a7. A run may have several model keys of one
+  provider: when the provider returns `429` for a request at a key's limit, the
+  gateway's proxy sends the request again with the next key. When every key is at its limit, the
+  session stops the runtime and ends `cancelled` with the reason `model_key_limit`. A
+  walled run of Claude Code binds a folder of the run's directory at
+  `~/.claude/projects` in the agent's home, and the session sends the runtime's
+  transcript as `dev.qory.session.transcript`. `qory run end --reason model_key_limit`
+  stops with exit 2, as each of Forager's reasons does.
+
 - A run that lists repositories starts in an empty folder as well: qory runs `git init`
   there, then fetches. A folder that is not empty and is not a git working tree still
   stops the run.
