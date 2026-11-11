@@ -3630,6 +3630,9 @@ func TestAnEmbeddedRepositoryWithNoFindIsLeftBehind(t *testing.T) {
 	if !d.LeftBehind(repos) {
 		t.Error("the session did not record the embedded repository")
 	}
+	if left := d.Left(repos); left.Nested || !left.Behind {
+		t.Errorf("Left = %+v, want work git could not add", left)
+	}
 }
 
 // noBundleWith runs the git session for repos with out, and wants nothing to come back and
@@ -3995,6 +3998,9 @@ func TestARepositoryTheRunMadeIsLeftBehind(t *testing.T) {
 			printed := noBundle(t, d, repos, true)
 			if want := "qory: the copy has a git repository at inner that the run made, and the commit leaves it out"; !strings.Contains(printed, want) {
 				t.Errorf("the session printed:\n%s", printed)
+			}
+			if left := d.Left(repos); !left.Nested || left.Behind {
+				t.Errorf("Left = %+v, want a nested repository alone", left)
 			}
 		})
 	}
@@ -4846,8 +4852,8 @@ func TestAnUndoOfACommitOnAFileKeptOutIsLeftBehind(t *testing.T) {
 			commitAll(t, d.Work(), "edit")
 			write(t, d.Work(), "legacy.txt", found)
 			printed := sessionOutput(t, d, repos, map[string]LeftOut{"": out})
-			if !d.LeftBehind(repos) {
-				t.Errorf("the session did not record the undo:\n%s", printed)
+			if left := d.Left(repos); !left.Behind || left.Nested {
+				t.Errorf("the session did not record the undo as work git could not add: %+v\n%s", left, printed)
 			}
 		})
 	}

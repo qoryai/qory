@@ -3770,11 +3770,17 @@ qory run: left out of the run's commit, as each has more than 100 MiB: data/mode
 qory run: read the run's files in <folder>, run no git there, then remove the folder: it has the work that did not come back
 ```
 
-A local run then keeps the copy and exits 1:
+A local run then keeps the copy and exits 1. A repository the run made has this line:
 
 ```text
 qory run: part of the run's work did not come back: the copy has a nested repository the run made.
 qory run: read the run's files in <folder>, run no git there, then remove the folder: it has the work that did not come back
+```
+
+Each of the other cases, a repository inside a submodule too, has this line in place of the first:
+
+```text
+qory run: part of the run's work did not come back: the copy has changes that git could not add to the run's commit, such as a file another user owns or a change in a submodule.
 ```
 
 Git LFS: because the session runs no filter, an LFS file the agent changes goes into the

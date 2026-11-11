@@ -108,9 +108,9 @@ type GitSession struct {
 // commit, is a line in n.known, its commit id and its name under the prefix, as a bundle leaves out
 // a ref whose commits it excludes; an annotated one is in the bundle, with its tag object. Each
 // submodule that the clone copied gets the same refs, with its changes as
-// uncommitted, in the bundle n-k, where k is the line of the submodule in subs-n. What still
-// stays behind writes n.left, which [Dir.LeftBehind] reads: a repository the run made; a change in a submodule that the clone
-// did not copy, or in a repository inside a submodule; a file that git ls-files still lists
+// uncommitted, in the bundle n-k, where k is the line of the submodule in subs-n. A repository
+// the run made stays behind and writes n.nested. Any other work that stays behind writes n.left;
+// [Dir.Left] reads both: a change in a submodule that the clone did not copy, or in a repository inside a submodule; a file that git ls-files still lists
 // after the add, such as one the session's user cannot read, which includes a path left out
 // here that a commit of the run changed, when the copy has other bytes than that commit; or a
 // folder the session cannot read. The person's personal ignore rules stay in effect through
@@ -970,7 +970,7 @@ while [ "$n" -lt "$count" ]; do
 				continue
 			fi
 			printf 'qory: %s has a git repository at %s that the run made, and the commit leaves it out\n' "$shown" "$shows" >&2
-			: > "$B/$n.left"
+			: > "$B/$n.nested"
 			;;
 		esac
 	done < "$G/folders"

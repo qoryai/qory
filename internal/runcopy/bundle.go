@@ -36,11 +36,17 @@ const maxLarge = 1 << 20
 const maxBundleHeader = 1 << 20
 
 // LeftBehind reports whether the git session of repos recorded work of the run that the bundles
-// do not have, besides the files of [Left.Large]. The file's content is not read: a program in the
-// session can write it, and all it can do is keep the copy.
+// do not have, besides the files of [Left.Large]: n.nested or n.left.
 func (d Dir) LeftBehind(repos []Repository) bool {
+	return d.recorded(repos, ".nested") || d.recorded(repos, ".left")
+}
+
+// recorded reports whether the git session of repos wrote a regular file n plus suffix for a
+// repository n. The file's content is not read: a program in the session can write it, and all
+// it can do is keep the copy.
+func (d Dir) recorded(repos []Repository, suffix string) bool {
 	for i := range repos {
-		if info, err := os.Lstat(filepath.Join(d.Bundle(), strconv.Itoa(i)+".left")); err == nil && info.Mode().IsRegular() {
+		if info, err := os.Lstat(filepath.Join(d.Bundle(), strconv.Itoa(i)+suffix)); err == nil && info.Mode().IsRegular() {
 			return true
 		}
 	}
@@ -49,7 +55,11 @@ func (d Dir) LeftBehind(repos []Repository) bool {
 
 // Left is what the git session of a run's repositories recorded as staying in the copy.
 type Left struct {
-	// Behind is whether [Dir.LeftBehind] is true, or a list of large files is no regular file.
+	// Nested is whether the copy has a repository the run made, with a commit or a change: n.nested.
+	Nested bool
+	// Behind is whether other work stays, which git could not add to the run's commit, such as a
+	// file another user owns or a change in a submodule: n.left, or a list of large files that is no
+	// regular file.
 	Behind bool
 	// Large are the files the session left out of the run's commit, each of more than [MaxFile]
 	// bytes, relative to the copy, as the session listed them: text to show, which a program in
@@ -59,12 +69,13 @@ type Left struct {
 }
 
 // Any reports whether anything stays.
-func (l Left) Any() bool { return l.Behind || len(l.Large) > 0 }
+func (l Left) Any() bool { return l.Nested || l.Behind || len(l.Large) > 0 }
 
-// Left reads what the git session of repos recorded as staying in the copy: each n.large, a
+// Left reads what the git session of repos recorded as staying in the copy: n.nested, n.left, and
+// each n.large, a
 // regular file read with no link followed, at most 1 MiB of them in all.
 func (d Dir) Left(repos []Repository) Left {
-	left := Left{Behind: d.LeftBehind(repos)}
+	left := Left{Nested: d.recorded(repos, ".nested"), Behind: d.recorded(repos, ".left")}
 	budget := int64(maxLarge)
 	for i := range repos {
 		data, cut, err := readRunFile(filepath.Join(d.Bundle(), strconv.Itoa(i)+".large"), budget)
