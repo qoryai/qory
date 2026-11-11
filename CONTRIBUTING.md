@@ -140,7 +140,7 @@ id=$(docker create --platform linux/arm64 ghcr.io/qoryai/qory-prerelease@sha256:
 docker cp "$id:/qory/qory" ./qory
 ```
 
-The same run publishes four more images of the pushed commit, each tagged
+The same run publishes three more images of the pushed commit, each tagged
 `sha-<the commit's first 7 characters>`, with its index digest in the run's summary:
 
 - `images/agent`, the image a walled run of Claude Code runs in, to the private package
@@ -155,10 +155,6 @@ The same run publishes four more images of the pushed commit, each tagged
   is built FROM the agent image of the same run, by digest, and is not pushed. Each
   platform's image is built on a runner of that platform and passes `qory image check`,
   with the qory of the same commit, before the tag.
-- `images/agent-browser`, the agent image with Chromium, to
-  `ghcr.io/qoryai/qory-agent-browser-prerelease`. It is built FROM the agent image of the
-  same run, by digest. Each platform's image is built on a runner of that platform and
-  passes `qory image check`, with the qory of the same commit, before the tag.
 
 Pull any by its index digest:
 
@@ -166,7 +162,6 @@ Pull any by its index digest:
 docker pull ghcr.io/qoryai/qory-agent-prerelease@sha256:<digest>
 docker pull ghcr.io/qoryai/qory-gateway-prerelease@sha256:<digest>
 docker pull ghcr.io/qoryai/qory-prebuild-prerelease@sha256:<digest>
-docker pull ghcr.io/qoryai/qory-agent-browser-prerelease@sha256:<digest>
 ```
 
 Commit messages state what changed and why it was needed, in the imperative.
