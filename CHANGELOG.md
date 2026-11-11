@@ -288,15 +288,17 @@ release may change what an existing document does, and states it under Upgrading
   `docs/run.md`.
 - A run whose model keys all reached their limit ends with `✗ the run was paused: every
   model key reached its limit` after the runtime's line, exit 1, as a cancelled run
-  does. `qory run resend` says the end of such a run as `paused: every model key reached
-  its limit`. See `docs/run.md`.
+  does. qory closes the run `paused` with the reason `model_key_limit` and the runtime's
+  exit status, and a control plane can continue the run. `qory run resend` says the end
+  of such a run as `paused: every model key reached its limit`. `qory apiary run list
+  --state paused` lists the paused runs. See `docs/run.md`.
 
 ### Changed
 
 - qory builds with Forager main ddda67a7. A run may have several model keys of one
   provider: when the provider returns `429` for a request at a key's limit, the
   gateway's proxy sends the request again with the next key. When every key is at its limit, the
-  session stops the runtime and ends `cancelled` with the reason `model_key_limit`. A
+  session stops the runtime and ends `paused` with the reason `model_key_limit`. A
   walled run of Claude Code binds a folder of the run's directory at
   `~/.claude/projects` in the agent's home, and the session sends the runtime's
   transcript as `dev.qory.session.transcript`. `qory run end --reason model_key_limit`

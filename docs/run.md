@@ -250,7 +250,9 @@ When the run ends, qory says how, and its exit status goes with it:
 - `✗ <runtime> ended on the signal <signal>`, such as `SIGKILL` from elsewhere: exit 1.
 - `✗ the run was paused: every model key reached its limit`, after the runtime's line:
   the gateway stopped the session because every model key of the run reached its limit
-  at the model provider, exit 1.
+  at the model provider, exit 1. qory closes the run `paused` with the reason
+  `model_key_limit` and the runtime's exit status, and a control plane can continue the
+  run.
 - `✗ the run was cancelled: qory run got SIGTERM, and <runtime> was stopped`, or
   `SIGINT`, when the signal came while the runtime ran: exit 1. A signal that comes after
   the runtime exited changes neither its line nor the exit status.
@@ -2043,8 +2045,8 @@ repositories` for a run with more repositories.
 The step runs when the run works on the branch of its work item, its documents set `access`
 to `write`, `workflows` of the stack declares the workflow's access as `write`, and an agent
 session ran, however it ended. A workflow that the stack does not declare counts as `read`.
-A session that failed, timed out or was cancelled gets the same step and the same checks as
-one that succeeded. The commit keeps its subject and gets the body line `The run ended
+A session that failed, timed out, was cancelled or paused gets the same step and the same
+checks as one that succeeded. The commit keeps its subject and gets the body line `The run ended
 <state>: <reason>.`, and the version's note is the same line. `<reason>` is `exit <code>`
 for a session with no reason. A session that succeeded has neither.
 
@@ -2110,7 +2112,8 @@ second signal ends the step at once. A step that one of these ended has the stat
 `cancelled`, and the commits it made stay in the working folder.
 
 The run closes as its session ended, whatever the step did: a session that timed out closes
-`cancelled` with the reason `timeout`, exit 124, and a session that failed closes `failed`.
+`cancelled` with the reason `timeout`, exit 124, a session that paused closes `paused` with
+the reason `model_key_limit`, exit 1, and a session that failed closes `failed`.
 The line of a failed step is printed after the run's end. After a session that succeeded,
 the step sets the close:
 
@@ -2588,7 +2591,7 @@ removes the containers and networks the run's wall left, as without a gateway.
 - `the run has ended (<outcome>[: <reason>]), so no more of its events are taken; they
   stay in <dir>`, such as `the run has ended (completed: all checks passed), so no more
   of its events are taken; they stay in <dir>`: the outcome is `completed`, `failed`,
-  `cancelled` or `lost`, and the reason is said as `qory run` says it.
+  `cancelled`, `paused` or `lost`, and the reason is said as `qory run` says it.
 
 Each but the first two is exit 1, and the events stay in the run directory. Without a run
 key, Forager says `resend <dir>: the run key is needed to send to its gateway; set

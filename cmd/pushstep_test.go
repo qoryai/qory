@@ -535,6 +535,7 @@ func TestASessionThatDidNotSucceedPushes(t *testing.T) {
 		"failed":    {&session.Result{State: event.StateFailed, ExitCode: 3}, event.StateFailed, 3, "The run ended failed: exit 3."},
 		"timed out": {&session.Result{State: event.StateCancelled, TimedOut: true, ExitCode: 124}, event.StateCancelled, 124, "The run ended cancelled: timeout."},
 		"cancelled": {&session.Result{State: event.StateCancelled, Cancelled: true, ExitCode: 130}, event.StateCancelled, 1, "The run ended cancelled: interrupted."},
+		"paused":    {&session.Result{State: event.StatePaused, Reason: event.ReasonModelKeyLimit, ExitCode: 143}, event.StatePaused, 1, "The run ended paused: model_key_limit."},
 	} {
 		t.Run(name, func(t *testing.T) {
 			p := newPushRepo(t, "write")

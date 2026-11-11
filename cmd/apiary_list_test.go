@@ -193,6 +193,20 @@ func TestApiaryRunListTakesALimitFrom1To100(t *testing.T) {
 	}
 }
 
+// TestApiaryRunListSelectsEachState is --state with each state a run list selects by,
+// paused among them, sent as given.
+func TestApiaryRunListSelectsEachState(t *testing.T) {
+	s := listKeyed(t, "fixtures/runs/last-page.json")
+	for _, state := range []string{"pending", "running", "completed", "failed", "cancelled", "paused", "lost"} {
+		if _, errOut, err := runList(t, "--state", state); err != nil {
+			t.Fatalf("--state %s: %v\n%s", state, err, errOut)
+		}
+		if s.query != "limit=25&state="+state {
+			t.Errorf("--state %s: query %q", state, s.query)
+		}
+	}
+}
+
 // TestApiaryRunListStopsAtAWrongValue is each flag with a value outside its rule: qory
 // stops with exit 2 before any request, with the fix on the first line and the value on
 // the next.
@@ -202,7 +216,7 @@ func TestApiaryRunListStopsAtAWrongValue(t *testing.T) {
 		"--workspace": "Pass --workspace as <org>/<workspace>, such as acme/web: two slugs of a-z, 0-9 and -.",
 		"--work-item": "Pass --work-item as the work item's number in the workspace, such as 7.",
 		"--workflow":  "Pass --workflow as a workflow's name, such as hello: a-z, then a-z, 0-9 and -.",
-		"--state":     "Pass --state as one of pending, running, completed, failed, cancelled or lost.",
+		"--state":     "Pass --state as one of pending, running, completed, failed, cancelled, paused or lost.",
 		"--since":     "Pass --since as a duration, such as 1h, or a time, such as 2026-11-01T09:00:00Z.",
 		"--limit":     "Pass --limit as a number from 1 to 100.",
 		"--before":    "Pass --before as a run id, rn_ and 16 characters.",

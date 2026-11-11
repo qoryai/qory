@@ -30,9 +30,9 @@ const runListCommand = "qory apiary run list"
 
 // runStates are the states a run list selects by, and runStatesText the same list as the
 // help and the errors print it.
-var runStates = []string{"pending", "running", "completed", "failed", "cancelled", "lost"}
+var runStates = []string{"pending", "running", "completed", "failed", "cancelled", "paused", "lost"}
 
-const runStatesText = "pending, running, completed, failed, cancelled or lost"
+const runStatesText = "pending, running, completed, failed, cancelled, paused or lost"
 
 // The forms of the values of qory apiary run list, as runs.schema.json states them.
 var (

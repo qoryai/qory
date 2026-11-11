@@ -139,7 +139,7 @@ Each flag selects runs, and a run is listed when it matches every flag given:
 | `--workspace <org>/<workspace>` | the runs of one workspace, such as `acme/web`: two slugs of 1 to 40 characters, `a-z`, `0-9` and `-`, with no `-` at either end |
 | `--work-item <number>` | the runs of one work item, by its number in the workspace; only with `--workspace` |
 | `--workflow <name>` | the runs that start one workflow, such as `hello`: `a-z` first, then `a-z`, `0-9` and `-`, 55 characters at most |
-| `--state <state>` | the runs in one state: `pending`, `running`, `completed`, `failed`, `cancelled` or `lost` |
+| `--state <state>` | the runs in one state: `pending`, `running`, `completed`, `failed`, `cancelled`, `paused` or `lost` |
 | `--since <time>` | the runs created at or after a time: a duration counted back from now, such as `30m`, `1h` or `24h`, or an RFC 3339 time, such as `2026-11-01T09:00:00Z` |
 | `--limit <number>` | at most this many runs, from 1 to 100; 25 without the flag |
 | `--before <run id>` | the runs after this run in the list: the next page |
