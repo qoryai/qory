@@ -368,7 +368,7 @@ func (c *runCopy) leftOut(skipped []string, report func(string)) {
 // and keeps the copy, which still has them.
 func (c *runCopy) failed(paths []string, report func(string)) {
 	if len(paths) > 0 {
-		report(fmt.Sprintf(textCopyFailed, shownPaths(paths)))
+		report(fmt.Sprintf(textCopyFailed, listed(shownList(paths))))
 		c.kept(report)
 	}
 }
@@ -764,21 +764,38 @@ func actingKeys(changes []runcopy.ActingChange) string {
 // maxFileShown is [runcopy.MaxFile] as a line shows it.
 var maxFileShown = fmt.Sprintf("%d MiB", runcopy.MaxFile>>20)
 
-// largeFiles is the files of [runcopy.Left.Large] as a line lists them: text that a program in the
-// git session can write, each with no control character.
+// largeFiles is the files of [runcopy.Left.Large] as a line lists them, by [listed]: text that a
+// program in the git session can write, each with no control character.
 func largeFiles(files []string) string {
 	shown := make([]string, len(files))
 	for i, f := range files {
 		shown[i] = integration.Printable(f)
 	}
-	return strings.Join(shown, ", ")
+	return listed(shown)
 }
 
 // shownPaths is paths of a run's copy as a line lists them.
 func shownPaths(paths []string) string {
+	return strings.Join(shownList(paths), ", ")
+}
+
+// shownList is each of paths of a run's copy as a line shows it.
+func shownList(paths []string) []string {
 	shown := make([]string, len(paths))
 	for i, p := range paths {
 		shown[i] = preparation.ShownPath(p)
 	}
-	return strings.Join(shown, ", ")
+	return shown
+}
+
+// maxListed is the most entries a line of a run's copy lists from a list that a run can make as
+// long as it likes; the line counts the rest.
+const maxListed = 50
+
+// listed is items as a line lists them: the first [maxListed], then "and <n> more" for the rest.
+func listed(items []string) string {
+	if len(items) > maxListed {
+		items = append(slices.Clip(items[:maxListed]), fmt.Sprintf("and %d more", len(items)-maxListed))
+	}
+	return strings.Join(items, ", ")
 }

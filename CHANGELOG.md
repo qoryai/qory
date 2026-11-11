@@ -335,7 +335,8 @@ release may change what an existing document does, and states it under Upgrading
   The git session gives itself read access to the files and folders it owns, so a file of mode 000
   that the agent made comes back. The git session leaves each file of more than 100 MiB out of its
   commit, and the copy stays with `left out of the run's commit, as each has more than 100 MiB: ….
-  They stay in the run's copy.`; a commit of the agent keeps its files. A bundle may have up to
+  They stay in the run's copy.`, which lists the first 50 files and the count of the rest; a
+  commit of the agent keeps its files. A bundle may have up to
   8 GiB, and its check and fetch have 10 minutes and a minute more per GiB, at most 60 minutes. A
   repository the run made keeps the copy, with `part of the run's
   work did not come back: the copy has a nested repository the run made.`, other work that git
@@ -368,8 +369,8 @@ release may change what an existing document does, and states it under Upgrading
   `left out of the copy back to your folder: .qory.` or `left out of the run's copy: .qory.`.
 - The copy back of a run in a folder that is not a repository no longer stops at a file or
   folder that qory cannot read or write. It leaves that entry out, copies back the rest, and
-  prints `left out of the copy back, as qory could not read or write them: …`, and the copy
-  stays. What the run writes in a folder named `node_modules`, `.venv`, `venv`,
+  prints `left out of the copy back, as qory could not read or write them: …`, with the first
+  50 entries and the count of the rest, and the copy stays. What the run writes in a folder named `node_modules`, `.venv`, `venv`,
   `__pycache__`, `target`, `build`, `dist`, `.gradle` or `.next` comes back and counts nothing
   toward the limits of 100000 files and 8589934592 bytes. Those folders have a separate limit of
   1000000 files and 32 GiB in all. Past it, qory leaves them out, prints `left out of the copy

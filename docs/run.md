@@ -3790,7 +3790,8 @@ nothing behind.
 The session leaves out of its commit each file of more than 100 MiB (104857600 bytes) that the
 agent added or changed, in the repository and in each submodule the clone copied, and lists it. A
 commit that the agent made keeps its files as they are. Such a file stays in the copy, and the
-rest of the work comes back:
+rest of the work comes back. The line lists the first 50 files, then the count of the rest, such
+as `and 10 more`:
 
 ```text
 qory run: left out of the run's commit, as each has more than 100 MiB: data/model.bin. They stay in the run's copy.
@@ -3972,7 +3973,7 @@ qory run: left out of the copy back, as the folders that builds and package mana
 
 When qory cannot read a file or folder of the copy, or cannot write it in your folder, it
 leaves that entry out, copies back the rest, and deletes nothing in a folder it left out. It
-lists those entries, and the copy stays with them:
+lists the first 50 of those entries, then the count of the rest, and the copy stays with them:
 
 ```text
 qory run: left out of the copy back, as qory could not read or write them: closed/new.txt.
