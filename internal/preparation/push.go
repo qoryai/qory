@@ -2,6 +2,8 @@ package preparation
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -27,11 +29,14 @@ const (
 	textPushed           = "qory run: pushed %s to %s at %s"
 	textForgeLine        = "qory run: remote: %s"
 	textNestedRepository = "qory run: have the agent leave plain files in %s of %s to push them: that folder is a repository, so qory left it out of the commit, and what it has stays in the working folder"
+	textLockRemoved      = "qory run: removed .git/index.lock of %s, which the agent left when it stopped"
 	textLockUnproven     = "qory run: take the work item in again in Qory Apiary: repository %s has .git/index.lock and the stop of the agent is not proven, so qory committed and pushed nothing; the code is used"
 	textLockNotFile      = "qory run: take the work item in again in Qory Apiary: .git/index.lock of repository %s is not a regular file, so qory committed and pushed nothing; the code is used"
-	textLockNotRead      = "qory run: take the work item in again in Qory Apiary: the check of .git/index.lock of repository %s failed, so qory committed and pushed nothing: %s; the code is used"
+	textLockNotRemoved   = "qory run: take the work item in again in Qory Apiary: the removal of .git/index.lock of repository %s failed, so qory committed and pushed nothing: %s; the code is used"
 	textNotPushed        = "qory run: not pushed from %s: %s %s"
 	textFurtherLines     = "qory run: %d further lines left out"
+	textSetupNotSafe     = "qory run: take the work item in again in Qory Apiary: after the setup, the check of repository %s failed, so the agent did not start: %s; the code is used"
+	textNoSetupRecord    = "qory run: take the work item in again in Qory Apiary: the record of what the setup changed in %s failed: %s; the code is used"
 	textNotSafe          = "qory run: take the work item in again in Qory Apiary: after the agent exited, the check of repository %s failed, so qory committed and pushed nothing: %s; the code is used"
 	textNoCommitLeft     = "qory run: take the work item in again in Qory Apiary: the commit of what the agent left in %s failed: %s; the code is used"
 	textNoHistory        = "qory run: take the work item in again in Qory Apiary: the check that HEAD of %s descends from commit %s failed: %s; the code is used"
@@ -100,11 +105,13 @@ func stepGit(p *proxygit.Proxy, input string, env ...string) gitRunner {
 // helpers. No option turns a filter off: the check stops on each key that git init and
 // the fetch do not write, filter keys among them, so a filter stays out only while no
 // process writes .git/config after the check. The commits of every repository come
-// before the first push, so a failed commit pushes nothing.
+// before the first push, so a failed commit pushes nothing. A path that [RecordSetup]
+// recorded and that is as the setup left it stays out of the commit.
 //
-// Push is for an agent with no wall, whose stop leaves no proof: an .git/index.lock stops
-// the push, see [indexLocksStop]. A walled agent's work goes through [PushFrom].
-func Push(ctx context.Context, dir string, base []string, b *WorkBranch, message string, p proxygit.Proxy, report io.Writer) (*branchformat.Branch, error) {
+// An agent that was killed can leave .git/index.lock, which would stop the commit. After
+// the checks, [clearIndexLocks] removes that one file of each repository when
+// agentStopped is true, and stops the push when a lock is there and it is false.
+func Push(ctx context.Context, dir string, base []string, b *WorkBranch, message string, p proxygit.Proxy, agentStopped bool, report io.Writer) (*branchformat.Branch, error) {
 	ctx = hostgit.WithBase(ctx, proxygit.Env(base, nil))
 	dir, err := filepath.Abs(dir)
 	if err != nil {
@@ -123,25 +130,18 @@ func Push(ctx context.Context, dir string, base []string, b *WorkBranch, message
 			return nil, notSafe(r, err)
 		}
 	}
-	if err := indexLocksStop(b.Repositories, folders); err != nil {
+	if err := clearIndexLocks(b.Repositories, folders, agentStopped, report); err != nil {
 		return nil, err
 	}
 	heads := make([]string, len(b.Repositories))
 	for i, r := range b.Repositories {
-		if err := commitLeft(ctx, folders[i], r, message, report); err != nil {
+		if err := commitLeft(ctx, folders[i], r, b.setupChanges[r.Dir], message, report); err != nil {
 			return nil, fmt.Errorf(textNoCommitLeft, shownPath(r.Path), integration.Printable(exports.HideURLError(err).Error()))
 		}
 		if heads[i], err = headPast(ctx, stepGit(noRemote, ""), folders[i], r); err != nil {
 			return nil, err
 		}
 	}
-	return pushHeads(ctx, folders, heads, b, p, report)
-}
-
-// pushHeads pushes heads[i] of each repository of b from the folder folders[i], with "" in
-// heads for a repository with nothing to push, and returns the branch document of the new
-// version, nil when it pushed nothing.
-func pushHeads(ctx context.Context, folders, heads []string, b *WorkBranch, p proxygit.Proxy, report io.Writer) (*branchformat.Branch, error) {
 	version := slices.Clone(b.Version)
 	pushed := false
 	for i, r := range b.Repositories {
@@ -166,45 +166,13 @@ func pushHeads(ctx context.Context, folders, heads []string, b *WorkBranch, p pr
 	return &branchformat.Branch{Ref: b.Ref, Repositories: version}, nil
 }
 
-// Quarantined is the head of the run's commits in one repository of a [WorkBranch], in a
-// repository on this machine that no run could write.
-type Quarantined struct {
-	// Dir is the repository's [WorkRepository.Dir].
-	Dir string
-	// Path is the folder of the repository that has the commits.
-	Path string
-	// Head is the commit at the end of the run's commits.
-	Head string
-}
-
-// PushFrom pushes the commits of each repository of b that from lists, past its
-// [WorkRepository.Commit], to the branch b.Ref as a fast-forward, by the URL qory builds,
-// through the run's host proxy p, as [Push] does. Every git runs in a folder of from, and
-// none in the folder the agent wrote, so nothing the agent left there applies. It returns
-// the branch document of the new version, nil when no repository has new commits. It prints
-// a line on report for each repository pushed.
-func PushFrom(ctx context.Context, from []Quarantined, base []string, b *WorkBranch, p proxygit.Proxy, report io.Writer) (*branchformat.Branch, error) {
-	ctx = hostgit.WithBase(ctx, proxygit.Env(base, nil))
-	folders := make([]string, len(b.Repositories))
-	heads := make([]string, len(b.Repositories))
-	for i, r := range b.Repositories {
-		found := slices.IndexFunc(from, func(q Quarantined) bool { return q.Dir == r.Dir })
-		if found < 0 {
-			continue
-		}
-		folders[i] = from[found].Path
-		var err error
-		if heads[i], err = commitPast(ctx, stepGit(noRemote, ""), folders[i], from[found].Head, r); err != nil {
-			return nil, err
-		}
-	}
-	return pushHeads(ctx, folders, heads, b, p, report)
-}
-
-// indexLocksStop stops the push on an .git/index.lock of a repository, in folders by the
-// order of repositories. A .git that is not a directory has no such file, and the commit
-// reports what git finds. No lock is removed.
-func indexLocksStop(repositories []WorkRepository, folders []string) error {
+// clearIndexLocks removes .git/index.lock of each repository, in folders by the order of
+// repositories, and prints a line on report for each. It removes nothing until every
+// repository passed: with agentStopped false a lock stops the push, as does one that is
+// not a regular file. A .git that is not a directory has no such file, and the commit
+// reports what git finds. No other lock is touched.
+func clearIndexLocks(repositories []WorkRepository, folders []string, agentStopped bool, report io.Writer) error {
+	var locks []int
 	for i, r := range repositories {
 		info, err := os.Lstat(filepath.Join(folders[i], ".git"))
 		if err != nil || !info.IsDir() {
@@ -215,11 +183,20 @@ func indexLocksStop(repositories []WorkRepository, folders []string) error {
 		case errors.Is(err, fs.ErrNotExist):
 			continue
 		case err != nil:
-			return fmt.Errorf(textLockNotRead, shownPath(r.Path), integration.Printable(err.Error()))
+			return fmt.Errorf(textLockNotRemoved, shownPath(r.Path), integration.Printable(err.Error()))
 		case !lock.Mode().IsRegular():
 			return fmt.Errorf(textLockNotFile, shownPath(r.Path))
+		case !agentStopped:
+			return fmt.Errorf(textLockUnproven, shownPath(r.Path))
 		}
-		return fmt.Errorf(textLockUnproven, shownPath(r.Path))
+		locks = append(locks, i)
+	}
+	for _, i := range locks {
+		path := shownPath(repositories[i].Path)
+		if err := os.Remove(indexLock(folders[i])); err != nil {
+			return fmt.Errorf(textLockNotRemoved, path, integration.Printable(err.Error()))
+		}
+		fmt.Fprintf(report, textLockRemoved+"\n", path)
 	}
 	return nil
 }
@@ -253,7 +230,7 @@ func ShownPath(path string) string { return shownPath(path) }
 // which a line goes to report. A path of [leftOut] that a commit of the agent changed
 // goes back to what r.Commit has, because a branch with another .qory stops the later runs
 // of its work item. With no change from HEAD, nothing is committed.
-func commitLeft(ctx context.Context, dir string, r WorkRepository, message string, report io.Writer) error {
+func commitLeft(ctx context.Context, dir string, r WorkRepository, setup map[string]string, message string, report io.Writer) error {
 	git := stepGit(noRemote, "")
 	if _, err := git(ctx, dir, "reset", "--quiet"); err != nil {
 		return err
@@ -264,7 +241,7 @@ func commitLeft(ctx context.Context, dir string, r WorkRepository, message strin
 	}
 	var paths []string
 	for _, path := range changed {
-		out, err := leftOut(dir, path)
+		out, err := leftOut(dir, path, setup)
 		switch {
 		case err != nil:
 			return err
@@ -344,7 +321,7 @@ func restoreLeftOut(ctx context.Context, git gitRunner, dir, start string) error
 		if path == "" {
 			continue
 		}
-		out, err := leftOut(dir, path)
+		out, err := leftOut(dir, path, nil)
 		if err != nil {
 			return err
 		}
@@ -378,15 +355,134 @@ func changedPaths(ctx context.Context, git gitRunner, dir string) ([]string, err
 }
 
 // leftOut reports whether path, relative to the repository at dir, stays out of a commit:
-// it is [checkout.Dir] or under it, or a link that qory wrote. A run's branch stops every
-// later run of its work item when its commit has another .qory than the target version, or
-// a path where the compose writes a link.
-func leftOut(dir, path string) (bool, error) {
+// it is [checkout.Dir] or under it, a link that qory wrote, or an entry of setup as the
+// setup left it. A run's branch stops every later run of its work item when its commit
+// has another .qory than the target version, or a path where the compose writes a link.
+func leftOut(dir, path string, setup map[string]string) (bool, error) {
 	trimmed := strings.TrimSuffix(path, "/")
 	if trimmed == checkout.Dir || strings.HasPrefix(trimmed, checkout.Dir+"/") {
 		return true, nil
 	}
-	return render.OwnLink(dir, filepath.Join(dir, filepath.FromSlash(trimmed)))
+	if link, err := render.OwnLink(dir, filepath.Join(dir, filepath.FromSlash(trimmed))); link || err != nil {
+		return link, err
+	}
+	recorded, ok := setup[path]
+	if !ok {
+		return false, nil
+	}
+	now, err := entryDigest(dir, path)
+	return now == recorded, err
+}
+
+// RecordSetup records what the setup of a run that can push left changed in each
+// repository of b, in dir, the working folder, for [Push]. A caller runs it after the
+// setup and before the session joins. The setup container is still up, and git status
+// runs a filter that .git/config has, so a process in that container could add one after
+// any check of the live file. git status therefore reads a copy that no process in the
+// container can write, see [privateGitDir]. git runs as in [Push], so both read the same
+// list of ignored files.
+func RecordSetup(ctx context.Context, dir string, base []string, b *WorkBranch) error {
+	return recordWith(ctx, dir, base, b, func(env ...string) gitRunner { return stepGit(noRemote, "", env...) })
+}
+
+// recordWith is [RecordSetup], with status as the [stepGit] of its git status.
+func recordWith(ctx context.Context, dir string, base []string, b *WorkBranch, status func(env ...string) gitRunner) error {
+	ctx = hostgit.WithBase(ctx, proxygit.Env(base, nil))
+	dir, err := filepath.Abs(dir)
+	if err != nil {
+		return local(err)
+	}
+	b.setupChanges = make(map[string]map[string]string, len(b.Repositories))
+	for _, r := range b.Repositories {
+		folder := filepath.Join(dir, filepath.FromSlash(r.Dir))
+		paths, err := setupPaths(ctx, dir, folder, r, status)
+		if err != nil {
+			return err
+		}
+		digests := make(map[string]string, len(paths))
+		for _, path := range paths {
+			if digests[path], err = entryDigest(folder, path); err != nil {
+				return fmt.Errorf(textNoSetupRecord, shownPath(r.Path), integration.Printable(exports.HideError(err).Error()))
+			}
+		}
+		b.setupChanges[r.Dir] = digests
+	}
+	return nil
+}
+
+// setupPaths is each path [changedPaths] lists for the repository r at folder in the
+// working folder root, read through a [privateGitDir] that exists for this call alone.
+// That folder is in this machine's temporary folder, which a run's container does not
+// mount unless a mount of the run lists it.
+func setupPaths(ctx context.Context, root, folder string, r WorkRepository, status func(env ...string) gitRunner) ([]string, error) {
+	private, err := os.MkdirTemp("", "qory-record-")
+	if err != nil {
+		return nil, checkFailed(textSetupNotSafe, r, local(err))
+	}
+	defer os.RemoveAll(private)
+	if err := privateGitDir(ctx, root, folder, private, r.Commit); err != nil {
+		return nil, checkFailed(textSetupNotSafe, r, err)
+	}
+	git := status("GIT_DIR="+private, "GIT_WORK_TREE="+folder, "GIT_OBJECT_DIRECTORY="+filepath.Join(folder, ".git", "objects"))
+	paths, err := changedPaths(ctx, git, folder)
+	if err != nil {
+		return nil, fmt.Errorf(textNoSetupRecord, shownPath(r.Path), integration.Printable(exports.HideURLError(err).Error()))
+	}
+	return paths, nil
+}
+
+// entryDigest is the SHA-256 sum of the entry path in dir as it is on disk, read with no
+// git, so no filter runs: a missing entry, a link's target, a file's content and whether
+// it may be run, or each entry of a folder, as git status lists a repository in a
+// repository. Any other kind of file has its type alone.
+func entryDigest(dir, path string) (string, error) {
+	sum := sha256.New()
+	if err := addEntry(sum, filepath.Join(dir, filepath.FromSlash(strings.TrimSuffix(path, "/")))); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(sum.Sum(nil)), nil
+}
+
+// addEntry adds the entry at path to sum, for [entryDigest].
+func addEntry(sum io.Writer, path string) error {
+	info, err := os.Lstat(path)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		_, err = io.WriteString(sum, "missing\x00")
+		return err
+	case err != nil:
+		return err
+	case info.Mode()&fs.ModeSymlink != 0:
+		target, err := os.Readlink(path)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(sum, "link %q\x00", target)
+	case info.IsDir():
+		entries, err := os.ReadDir(path)
+		if err != nil {
+			return err
+		}
+		for _, entry := range entries {
+			fmt.Fprintf(sum, "entry %q\x00", entry.Name())
+			if err := addEntry(sum, filepath.Join(path, entry.Name())); err != nil {
+				return err
+			}
+		}
+		fmt.Fprint(sum, "end\x00")
+	case info.Mode().IsRegular():
+		f, err := os.OpenFile(path, os.O_RDONLY|render.OpenFlags, 0)
+		if err != nil {
+			return err
+		}
+		defer f.Close()
+		fmt.Fprintf(sum, "file %o\x00", info.Mode().Perm()&0o111)
+		_, err = io.Copy(sum, f)
+		return err
+	default:
+		fmt.Fprintf(sum, "other %s\x00", info.Mode().Type())
+	}
+	return nil
 }
 
 // headPast is HEAD of the repository r at dir when it is past [WorkRepository.Commit], ""
@@ -397,16 +493,11 @@ func headPast(ctx context.Context, git gitRunner, dir string, r WorkRepository) 
 	if err != nil {
 		return "", fmt.Errorf(textNoCommitLeft, shownPath(r.Path), integration.Printable(exports.HideURLError(err).Error()))
 	}
-	return commitPast(ctx, git, dir, strings.TrimSpace(out), r)
-}
-
-// commitPast is head of the repository r in the folder dir when it is past
-// [WorkRepository.Commit], as [headPast] checks it.
-func commitPast(ctx context.Context, git gitRunner, dir, head string, r WorkRepository) (string, error) {
+	head := strings.TrimSpace(out)
 	if head == r.Commit {
 		return "", nil
 	}
-	_, err := git(ctx, dir, "merge-base", "--is-ancestor", r.Commit, head)
+	_, err = git(ctx, dir, "merge-base", "--is-ancestor", r.Commit, head)
 	if ge := (*gitError)(nil); errors.As(err, &ge) && ge.exit == 1 {
 		return "", fmt.Errorf(textNotFastForward, shownPath(r.Path), shortCommit(head), shortCommit(r.Commit))
 	}

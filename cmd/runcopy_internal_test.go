@@ -51,8 +51,8 @@ func TestASignalInTheCheckOrFetchHasItsLine(t *testing.T) {
 }
 
 // TestALongCauseKeepsNoPartOfAPathOfTheCopy is a cause past the cut of [integration.Printable],
-// in a long cache folder, with a path of the copy twice: the step's log and the line of a run with
-// a push have no part of a path of the copy, and the line of a run with no push keeps the path.
+// in a long cache folder, with a path of the copy twice: the step's log has no part of a path of
+// the copy, and the line on the terminal keeps the path.
 func TestALongCauseKeepsNoPartOfAPathOfTheCopy(t *testing.T) {
 	long := filepath.Join(t.TempDir(), strings.Repeat("a-long-cache-folder/", 12))
 	t.Setenv("HOME", long)
@@ -71,29 +71,23 @@ func TestALongCauseKeepsNoPartOfAPathOfTheCopy(t *testing.T) {
 	under := errors.New("stat " + filepath.Join(dir.Work(), "sub") + ": no such file")
 	for _, c := range []struct {
 		name   string
-		pushes bool
 		logged string
 		stop   func(*runCopy) *copyStop
 	}{
-		{"no session", false, logged, func(c *runCopy) *copyStop { return c.noSession(context.Background(), cause) }},
-		{"no session, push", true, logged, func(c *runCopy) *copyStop { return c.noSession(context.Background(), cause) }},
-		{"another cause", false, logged, func(c *runCopy) *copyStop { return c.stoppedBy("%s", cause) }},
-		{"another cause, push", true, logged, func(c *runCopy) *copyStop { return c.stoppedBy("%s", cause) }},
-		{"a path under the working folder", false, "stat the run's copy/sub: no such file", func(c *runCopy) *copyStop { return c.stoppedBy("%s", under) }},
+		{"no session", logged, func(c *runCopy) *copyStop { return c.noSession(context.Background(), cause) }},
+		{"another cause", logged, func(c *runCopy) *copyStop { return c.stoppedBy("%s", cause) }},
+		{"a path under the working folder", "stat the run's copy/sub: no such file", func(c *runCopy) *copyStop { return c.stoppedBy("%s", under) }},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			stop := c.stop(&runCopy{dir: dir, pushes: c.pushes})
+			stop := c.stop(&runCopy{dir: dir})
 			if !strings.Contains(stop.log, c.logged) {
 				t.Errorf("the log's line is %q, want %q in it", stop.log, c.logged)
 			}
 			if strings.Contains(stop.log, "a-long-cache-folder") || strings.Contains(stop.log, "qory/runs") {
 				t.Errorf("the log's line has a part of a path: %q", stop.log)
 			}
-			if c.pushes && stop.Error() != stop.log {
-				t.Errorf("the line of a run with a push is %q, want the log's line %q", stop.Error(), stop.log)
-			}
-			if !c.pushes && (!strings.Contains(stop.Error(), dir.Work()) || !strings.Contains(stop.Error(), "...")) {
-				t.Errorf("the line of a run with no push is %q, want the path of the copy and the cut", stop.Error())
+			if !strings.Contains(stop.Error(), dir.Work()) || !strings.Contains(stop.Error(), "...") {
+				t.Errorf("the line is %q, want the path of the copy and the cut", stop.Error())
 			}
 		})
 	}
@@ -188,11 +182,11 @@ func TestALineOfGitKeepsNoPartOfAPathOfTheCopy(t *testing.T) {
 	if line == nil || !strings.HasPrefix(line.Error(), "git clone: fatal: destination path ") {
 		t.Fatalf("the clone's error is %v, want git's line", err)
 	}
-	stop := (&runCopy{dir: dir, pushes: true}).stoppedBy("%s", line)
+	stop := (&runCopy{dir: dir}).stoppedBy("%s", line)
 	if want := "destination path 'the run's copy/.qory/repositories/x' already exists"; !strings.Contains(stop.log, want) {
 		t.Errorf("the log's line is %q, want %q in it", stop.log, want)
 	}
-	if strings.Contains(stop.log, "a-long-cache-folder") || strings.Contains(stop.log, "qory/runs") || stop.Error() != stop.log {
+	if strings.Contains(stop.log, "a-long-cache-folder") || strings.Contains(stop.log, "qory/runs") {
 		t.Errorf("the line is %q and the log's line %q, from the error %q", stop.Error(), stop.log, line)
 	}
 	shown := runcopy.ShownError(line).Error()

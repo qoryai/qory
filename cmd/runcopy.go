@@ -25,8 +25,8 @@ import (
 
 // The lines of a walled write run, which works in a copy of the person's checkout. A line
 // with a path of the copy shows the person where the run's work stays. The texts of a cause go
-// after [textCopyRead] or [textCopyAgain], which have the fix. [textCopyBehind] also stands alone
-// beside the line of [runCopy.kept], which has the fix.
+// after [textCopyRead], which has the fix. [textCopyBehind] also stands alone beside the line of
+// [runCopy.kept], which has the fix.
 const (
 	textCopyMount      = "make the mount %s read-only, with :ro on --mount or in wall.mounts: a walled run reads the checkout or works in a copy of it, and a read-write mount lets it write your files directly"
 	textCopyOutside    = "run qory inside the checkout %s: a run that may write works in a copy of the checkout, and the working folder %s is outside it"
@@ -39,9 +39,7 @@ const (
 	textCopyWaiting    = "got %s: bringing the run's work back, for at most %s. Send a second signal to stop that."
 	textCopyOnBranch   = "the run's commits are on %s in %s."
 	textCopyActing     = " They change these qory settings, links or repository folders: %s. Check them before you check out the branch."
-	textCopyPushActing = "qory run: the run's commits in %s change these qory settings, links or repository folders: %s. Check them before you check out the branch."
-	textCopyRead       = "read the run's files in %s, and run no git there: %s%s"
-	textCopyAgain      = "take the work item in again in Qory Apiary: %s%s"
+	textCopyRead       = "read the run's files in %s, and run no git there: %s"
 	textCopyLimit      = "the git session ran past its limit of %s, so the run's commits did not come back"
 	textCopyNoSession  = "the git session did not start, so the run's commits did not come back: %s"
 	textCopyExited     = "the git session exited with %d, so the run's commits did not come back"
@@ -64,11 +62,6 @@ const (
 // files back may take. A bundle has at most 1 GiB, and git checks every object in it. A test
 // sets a shorter one.
 var copyStepLimit = 10 * time.Minute
-
-// sessionGraceFromCode is how long the git session of a run from a run code has after its stop
-// signal, see [pushAfterSignal]. git needs no time to save anything: a cut session brings no
-// commit back.
-const sessionGraceFromCode = 3 * time.Second
 
 // removeSetupLimit is how long the removal of a run's setup container may take before its work
 // comes back.
@@ -138,13 +131,6 @@ type runCopy struct {
 	// readOnly is whether the run only reads: its setup works in the copy, the agent has the copy
 	// read-only, and nothing comes back.
 	readOnly bool
-	// pushes is whether the run gets the push step. The person may have no access to this machine,
-	// so the copy does not stay, and a line that stops the return of the work is [copyStop.log],
-	// with no path of the copy. Of the lines of a method of runCopy after the agent's session, only
-	// [textCopyNoRemove], for a removal of the copy that failed, has a path of the copy.
-	pushes bool
-	// fromCode is whether the run comes from a run code: a line that ends it ends with [codeUsed].
-	fromCode bool
 	// cutBy is what ended a step whose context ended, as a line has it.
 	cutBy func() string
 	// stepCode is the exit code of a copy step that ended failed, -1 when it did not end or
@@ -156,8 +142,7 @@ type runCopy struct {
 
 // copyStop is the stop of a return of the run's work. Its error is the line on the terminal, and
 // log is the line in the step's log, which has no path of the copy: the record reaches Qory
-// Apiary, and its reader may have no access to this machine. A run with the push step has the
-// log's line on the terminal too, see [runCopy.pushes].
+// Apiary, and its reader may have no access to this machine.
 type copyStop struct{ line, log string }
 
 // Error is the line on the terminal.
@@ -177,16 +162,12 @@ func (c *runCopy) stoppedBy(text string, err error) *copyStop {
 }
 
 // stop is the stop with cause on the terminal and logged in the step's log. Past it, the copy
-// stays, unless the run gets the push step.
+// stays.
 func (c *runCopy) stop(cause, logged string) *copyStop {
-	if c.pushes {
-		line := fmt.Sprintf(textCopyAgain, logged, c.used())
-		return &copyStop{line: line, log: line}
-	}
 	c.keep = true
 	return &copyStop{
-		line: fmt.Sprintf(textCopyRead, exports.Value(c.dir.Work(), false), cause, c.used()),
-		log:  fmt.Sprintf(textCopyRead, textCopyFolder, logged, c.used()),
+		line: fmt.Sprintf(textCopyRead, exports.Value(c.dir.Work(), false), cause),
+		log:  fmt.Sprintf(textCopyRead, textCopyFolder, logged),
 	}
 }
 
@@ -199,14 +180,6 @@ func (c *runCopy) withoutPaths(text string) string {
 		text = strings.ReplaceAll(text, path, textCopyFolder)
 	}
 	return text
-}
-
-// used is what ends a line that ends the run: [codeUsed] for a run from a run code.
-func (c *runCopy) used() string {
-	if c.fromCode {
-		return codeUsed
-	}
-	return ""
 }
 
 // checkFailed is the line of a check of the run's commits that failed with err, under ctx: the
@@ -366,14 +339,13 @@ func (c *runCopy) leftOut(skipped []string, report func(string)) {
 	}
 }
 
-// kept marks the copy to stay and prints where it is, once. A run with the push step has no
-// such line, see [runCopy.pushes].
+// kept marks the copy to stay and prints where it is, once.
 func (c *runCopy) kept(report func(string)) {
-	if c.keep || c.pushes {
+	if c.keep {
 		return
 	}
 	c.keep = true
-	report(fmt.Sprintf(textCopyStays, exports.Value(c.dir.Work(), false)) + c.used())
+	report(fmt.Sprintf(textCopyStays, exports.Value(c.dir.Work(), false)))
 }
 
 // bind makes spec work in the copy: the workspace is the copy with the working folder's
@@ -469,7 +441,7 @@ func (c *runCopy) recordSetup(ctx context.Context) error {
 // gitSession is the bare session after the agent, as the run's step of kind copy: it commits
 // what the agent left in the copy and writes the run's bundles, with no agent, no model key and
 // no bind but the copy and the bundle folder. It ends at [runcopy.SessionLimit] at the latest.
-// message is the message of its commit, "" for the default. The caller has removed the setup
+// The caller has removed the setup
 // container: a process in it could write the copy during the session, and that removal
 // returns an error while the step is open.
 //
@@ -478,13 +450,13 @@ func (c *runCopy) recordSetup(ctx context.Context) error {
 //
 // A copy step that does not start stops the return of the work, as a push step that does not
 // start stops its push. A copy step that does not end stops the return too. Both go through
-// [runCopy.stop], which keeps the copy unless the run gets the push step.
-func (c *runCopy) gitSession(ctx context.Context, run openedRun, spec *runSpec, message string) error {
+// [runCopy.stop], which keeps the copy.
+func (c *runCopy) gitSession(ctx context.Context, run openedRun, spec *runSpec) error {
 	step, err := run.StartStep(event.StepCopy, textCopyStep)
 	if err != nil {
 		return c.noSession(ctx, err)
 	}
-	state, code, stop := c.joinGitSession(ctx, run, spec, message)
+	state, code, stop := c.joinGitSession(ctx, run, spec)
 	if stop == nil {
 		if err := step.Exit(state, code); err != nil {
 			return c.stoppedBy("%s", err)
@@ -504,14 +476,10 @@ func (c *runCopy) gitSession(ctx context.Context, run openedRun, spec *runSpec, 
 // ends the step failed with the session's exit code, -1 for a session with no exit code to show.
 // A cut, which is a stop or the run's time limit that ended ctx, ends it cancelled with -1, as
 // [inStep] does. A session that succeeded has no stop.
-func (c *runCopy) joinGitSession(ctx context.Context, run openedRun, spec *runSpec, message string) (string, int, *copyStop) {
-	gs, err := c.dir.GitSession(ctx, c.branch, message, c.repos, c.out)
+func (c *runCopy) joinGitSession(ctx context.Context, run openedRun, spec *runSpec) (string, int, *copyStop) {
+	gs, err := c.dir.GitSession(ctx, c.branch, "", c.repos, c.out)
 	if err != nil {
 		return c.stepEnd(-1, c.noSession(ctx, err))
-	}
-	grace := spec.StopGrace
-	if c.fromCode {
-		grace = sessionGraceFromCode
 	}
 	limited, cancel := context.WithTimeout(ctx, runcopy.SessionLimit)
 	defer cancel()
@@ -529,7 +497,7 @@ func (c *runCopy) joinGitSession(ctx context.Context, run openedRun, spec *runSp
 		Stdout:       spec.Stderr,
 		Stderr:       spec.Stderr,
 		StopSignal:   spec.StopSignal,
-		StopGrace:    grace,
+		StopGrace:    spec.StopGrace,
 		SocketGrace:  spec.SocketGrace,
 		Timeout:      runcopy.SessionLimit,
 	})
@@ -642,7 +610,7 @@ func (c *runCopy) fetchOne(ctx context.Context, q *runcopy.Quarantine, runID str
 			report(c.checkFailed(ctx, limitErr(ctx, limited, textCopyFetchLimit, err)).Error())
 			return false
 		}
-		report(shownError(err) + c.used())
+		report(shownError(err))
 		return false
 	}
 	line := fmt.Sprintf(textCopyOnBranch, exports.Value(branch, false), exports.Value(at, false))
@@ -660,9 +628,9 @@ func (c *runCopy) copyBack(ctx context.Context, report func(string)) bool {
 	res, err := c.dir.CopyBack(limited, c.root)
 	if err != nil {
 		if ctx.Err() == nil && limited.Err() != nil {
-			report(fmt.Sprintf(textCopyBackLimit, copyStepLimit) + c.used())
+			report(fmt.Sprintf(textCopyBackLimit, copyStepLimit))
 		} else {
-			report(shownError(err) + c.used())
+			report(shownError(err))
 		}
 		c.kept(report)
 		return false
@@ -682,39 +650,6 @@ func (c *runCopy) copyBack(ctx context.Context, report func(string)) bool {
 		c.kept(report)
 	}
 	return true
-}
-
-// pushable is what the push step takes from the quarantines qs: per repository its folder,
-// as [preparation.WorkRepository.Dir] has it, the commit, and the lines of acting keys the
-// commits change, in order.
-func pushable(ctx context.Context, qs []*runcopy.Quarantine) ([]preparation.Quarantined, []string, error) {
-	var from []preparation.Quarantined
-	var lines []string
-	for _, q := range qs {
-		if q == nil {
-			continue
-		}
-		dir := q.Repo.Path
-		if dir == "" {
-			dir = "."
-		}
-		from = append(from, preparation.Quarantined{Dir: dir, Path: q.Path, Head: q.Head})
-		limited, cancel := context.WithTimeout(ctx, copyStepLimit)
-		changes, err := q.ActingChanges(limited)
-		err = stepErr(ctx, limited, err)
-		cancel()
-		if err != nil {
-			return nil, nil, err
-		}
-		if keys := actingKeys(changes); keys != "" {
-			shown := exports.Value(dir, false)
-			if dir == "." {
-				shown = "the run's repository"
-			}
-			lines = append(lines, fmt.Sprintf(textCopyPushActing, shown, keys))
-		}
-	}
-	return from, lines, nil
 }
 
 // actingKeys is the keys of changes as a line lists them, each once in order: a key, or the

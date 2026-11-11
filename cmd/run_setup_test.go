@@ -8,7 +8,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/qoryai/forager/event"
 	"github.com/qoryai/forager/session"
 	"github.com/qoryai/forager/wall"
 
@@ -255,65 +254,16 @@ func TestAReadRunGetsNoCheckOfTheGitSessionsTools(t *testing.T) {
 	}
 }
 
-// TestAWriteRunChecksTheGitSessionsToolsFirst is a write run from a run code that has a setup: the
-// step comes before prepare.
-func TestAWriteRunChecksTheGitSessionsToolsFirst(t *testing.T) {
+// TestAWriteRunFromARunCodeGetsNoCheckOfTheGitSessionsTools is a write run from a run code that
+// has a setup: it works in the checkout, so no git session follows its agent.
+func TestAWriteRunFromARunCodeGetsNoCheckOfTheGitSessionsTools(t *testing.T) {
 	p := walledPush(t)
 	var got []session.SetupCommand
 	p.onSetup = func(spec session.SetupSpec) { got = spec.Commands }
 	p.run(t, nil, nil)
-	if !slices.EqualFunc(got, prepareCommand, sameCommand) {
-		t.Errorf("the setup commands: %v, want %v", got, prepareCommand)
+	if len(got) != 1 || got[0].Name != "prepare" {
+		t.Errorf("the setup commands of a write run from a run code: %v", got)
 	}
-}
-
-// missingToolDocker is a docker that stands in for the setup container of a real wall: its exec of
-// sh prints line and what must not reach the terminal on stderr, and exits 1.
-func missingToolDocker(t *testing.T, line string) string {
-	t.Helper()
-	fake, _ := fakeDocker(t)
-	script := filepath.Join(t.TempDir(), "docker")
-	writeFile(t, script, `#!/bin/sh
-case "$*" in
-"run --detach "*) echo the-setup-container; exit 0 ;;
-"inspect --format {{.State.Running}} "*) echo true; exit 0 ;;
-"exec "*"/bin/sh -c "*)
-	printf '%s\n' `+"'"+line+"'"+` >&2
-	printf 'not a line of the check\n\033[31minstall red\033[0m in the terminal\n' >&2
-	exit 1 ;;
-esac
-exec `+fake+` "$@"
-`)
-	if err := os.Chmod(script, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	return script
-}
-
-// TestAMissingToolReachesThePerson is an image with no comm, through Forager's setup and the
-// record it writes: qory run prints the install line, the fix first, in place of the exit status
-// of the step, and the line reaches no agent. Nothing else the image printed reaches the terminal.
-func TestAMissingToolReachesThePerson(t *testing.T) {
-	const line = "install comm in /usr/local/bin, /usr/bin, /bin: the git session of a walled run runs comm from these folders, to compare the run's refs and commits with what the bundle has"
-	p := newPushRepo(t, "write")
-	p.real = true
-	walledBy(t, missingToolDocker(t, strings.ReplaceAll(line, "'", `'\''`)))
-	p.flags = []string{"--home", filepath.Join(tempDir(t), "home")}
-	r := p.run(t, func(string) { t.Error("the agent started") }, nil)
-	wants(t, r.out, "qory run: "+line+"\n")
-	for _, text := range []string{"Fix Check tools", "not a line of the check", "install red", "\x1b["} {
-		if strings.Contains(r.out, text) {
-			t.Errorf("the output has %q:\n%s", text, r.out)
-		}
-	}
-	if len(r.closes) != 1 || r.closes[0].State != event.StateFailed {
-		t.Errorf("the run closed with %+v", r.closes)
-	}
-	record, err := os.ReadFile(p.record())
-	if err != nil {
-		t.Fatal(err)
-	}
-	wants(t, string(record), `"name":"Check tools"`)
 }
 
 // TestAMissingShellReachesThePerson is an exec of /bin/sh that failed in the setup container, so

@@ -295,27 +295,26 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Changed
 
-- A walled run that may write works in a copy of the checkout, under `qory/runs` in your cache
-  folder, and starts from your commit at `HEAD`, so it never gets write access to your
+- A walled run that may write and has no run code works in a copy of the checkout, under
+  `qory/runs` in your cache folder, and starts from your commit at `HEAD`, so it never gets write access to your
   `.git`. Its commits land on the branch `qory/run-<run id>`, which qory never checks out,
   and one line prints that branch and any qory settings they change. The git session after the
   agent runs in the step `copy work out`, of kind `copy`, in the run's record. After an agent
   that succeeded, a step that ends `failed` closes the run `failed` with the step's exit code, and
-  a step that a signal cuts closes it `cancelled`. A write run of a
-  work item pushes from a checked repository. A read-write `--mount` or `wall.mounts` entry
-  stops such a run. A folder that is not a repository gets its regular files back, and so
-  does a run from a run code or a run key that lists no repositories, in a folder where
+  a step that a signal cuts closes it `cancelled`. A write run from a run code, as a pool
+  starts it, gets no copy: it works in the checkout and pushes from it, as before. A read-write
+  `--mount` or `wall.mounts` entry stops a run in a copy. A folder that is not a repository gets
+  its regular files back, and so does a run with a run key that lists no repositories, in a folder where
   `git init` ran with no commit. Every such run starts with your `.qory/artifacts` and
   `.qory/work-item.json`, and gets `.qory/artifacts` back. New stops, each with its fix first: a
   local repository with no commit, a working folder absent from `HEAD`, a partial clone, a
   branch named as a parent of the run's branch, a run or compose in a folder of a run's copy,
   a run in a folder that is not a repository
-  and is or contains your home folder or qory's state directory, and a write run that lists
-  repositories on an image without a program of the git session, which stops in the setup step
+  and is or contains your home folder or qory's state directory, and a write run in a copy that
+  lists repositories on an image without a program of the git session, which stops in the setup step
   `Check tools`, before the agent, with `install <program> in /usr/local/bin, /usr/bin, /bin: …`. A copy that stays has its `.git` renamed to `.git-from-run`. Part of the run's work
   that misses the bundle, such as commits on another branch or a stash, keeps the copy, and so does a part of
-  the run's wall that could not be removed, which brings nothing back. A run with the push step keeps no
-  copy, and a stop before its push prints `take the work item in again in Qory Apiary`. A first signal leaves the
+  the run's wall that could not be removed, which brings nothing back. A first signal leaves the
   return of a local run at most 30 minutes, and `qory run` prints that time. A read run with a setup also
   works in a copy, read-only for the agent, and nothing comes back from it. A read-write
   mount stops a read run too, and so does a read run with no setup at your home folder.
@@ -562,10 +561,6 @@ release may change what an existing document does, and states it under Upgrading
   behind a wall or not: `set --home to a folder outside <dir>: …`. This stop replaces
   the one of a walled run of Claude Code with a run key on a home inside the folder,
   which came after the compose. A run without a run key and without a wall composes as before.
-- Past a run's time limit, the git session and the push step of a write run share 5 minutes, up
-  from 120 seconds, so a run can pass its limit by up to 5 minutes. A git session that uses all of
-  that time leaves the push nothing, and on an image that runs nested Docker, starting the engine
-  can use up to 120 seconds of it. A signal still cuts the step to at most 15 seconds.
 - A walled run with no run key composes its harness as a run with a run key does: into a home
   under `qory/homes` in your cache directory, unless `--home` or `harness.home` in your `qory.yaml`
   sets another, and the container has that home read-only. Before, it composed into the copy, and
