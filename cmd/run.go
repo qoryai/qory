@@ -745,11 +745,16 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					}
 					// A run with no setup binds the checkout itself, see hostWork.
 					if run.Repositories() == "" {
-						if err := readBindsReserved(at.root, cwd); err != nil {
+						if err := bindsReserved(textReadBindsReserved, at.root, cwd); err != nil {
 							return false, err
 						}
 					}
 					if err := fromCode.readExposed(at.root, cwd, at.report); err != nil {
+						return false, err
+					}
+				} else if fromCode != nil && walled {
+					// A write run from a run code gets no copy: it binds the checkout itself.
+					if err := bindsReserved(textCodeWriteBindsReserved, at.root, cwd); err != nil {
 						return false, err
 					}
 				}

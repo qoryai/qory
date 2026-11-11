@@ -590,6 +590,57 @@ func TestAReadRunAtTheHomeFolderStops(t *testing.T) {
 	}
 }
 
+// TestACodeWriteRunAtTheHomeFolderStops is a walled write run from a run code, which gets no
+// copy and binds the checkout itself, in a checkout that is the home folder or contains qory's
+// state directory: the run stops before the join, exit 2, with the fix first, and closes failed
+// with no reason and -1, as a read run at the home folder does. A checkout that is neither joins.
+func TestACodeWriteRunAtTheHomeFolderStops(t *testing.T) {
+	for name, c := range map[string]struct {
+		home  bool
+		state string
+		want  string
+	}{
+		"at the home folder":                {home: true, want: "is your home folder"},
+		"above qory's state directory":      {state: "state", want: "contains qory's state directory "},
+		"in a folder that contains neither": {},
+	} {
+		t.Run(name, func(t *testing.T) {
+			r := runFromCodeWith(t, func(string) []string {
+				root, err := os.Getwd()
+				if err != nil {
+					t.Fatal(err)
+				}
+				t.Setenv("HOME", tempDir(t))
+				if c.home {
+					t.Setenv("HOME", root)
+				}
+				t.Setenv("XDG_STATE_HOME", tempDir(t))
+				if c.state != "" {
+					t.Setenv("XDG_STATE_HOME", filepath.Join(root, c.state))
+				}
+				t.Setenv("XDG_CACHE_HOME", tempDir(t))
+				docker, _ := fakeDocker(t)
+				writeFile(t, filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "forager.yaml"),
+					"wall:\n  adapter: docker\n  command: "+docker+"\n  helper: "+staticELF(t)+"\n  user: \"1000:1000\"\n  image: "+readImage+"\n")
+				return nil
+			}, []string{"--home", filepath.Join(tempDir(t), "home")}, declares("write"), nil)
+			if c.want == "" {
+				if !r.joined {
+					t.Fatalf("%v (exit %d), want the join\n%s", r.err, cmd.ExitCode(r.err), r.out)
+				}
+				return
+			}
+			if r.joined || cmd.ExitCode(r.err) != cmd.ExitInput {
+				t.Fatalf("%v (exit %d), want exit %d before the join\n%s", r.err, cmd.ExitCode(r.err), cmd.ExitInput, r.out)
+			}
+			wants(t, r.err.Error(), "Start the run from a folder that does not contain your home folder or qory's state directory: the folder ", c.want, ", and a write run from a run code binds it into the agent's container; the code is used")
+			if want := (session.Outcome{State: "failed", ExitCode: -1}); len(r.closes) != 1 || r.closes[0] != want {
+				t.Errorf("the closes %+v, want %+v", r.closes, want)
+			}
+		})
+	}
+}
+
 // TestAWriteRunKeepsTheSetupContainer is a walled write run with a setup: it never calls
 // RemoveSetup, so the setup container stays up.
 func TestAWriteRunKeepsTheSetupContainer(t *testing.T) {

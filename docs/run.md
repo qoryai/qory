@@ -3988,6 +3988,14 @@ start the run from a folder that does not contain your home folder or qory's sta
 A run of a workflow from a run code where neither value is `read`, a run given a run key
 with no run code, and a run you start yourself see the checkout writable.
 
+A walled write run from a run code gets no copy and binds the checkout itself. It stops after
+the compose, exit 2, when its checkout or working folder is your home folder or qory's state
+directory, or contains one, since the agent could change every file there:
+
+```text
+Start the run from a folder that does not contain your home folder or qory's state directory: the folder <folder> is your home folder, and a write run from a run code binds it into the agent's container; the code is used
+```
+
 ### Qory's images
 
 `qory`'s repository defines two images for the agent under `images/`, and one a prebuild

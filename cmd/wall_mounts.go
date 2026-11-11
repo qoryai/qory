@@ -86,13 +86,24 @@ func reservedMounts(root string, mounts []wall.Mount) error {
 	return nil
 }
 
-// readBindsReserved stops a read run with no setup, which binds the checkout at root and the
-// working folder cwd themselves, when one of them is or contains the home folder or qory's
-// state directory: the agent could read every file of the person there.
-func readBindsReserved(root, cwd string) error {
+// The lines of [bindsReserved], one per kind of run that binds the checkout into the agent's
+// container: the folder's path, then how it relates to the home folder or qory's state
+// directory, see [reserved].
+const (
+	textReadBindsReserved      = "start the run from a folder that does not contain your home folder or qory's state directory: the folder %s %s, and a read run binds it into the agent's container" + codeUsed
+	textCodeWriteBindsReserved = "Start the run from a folder that does not contain your home folder or qory's state directory: the folder %s %s, and a write run from a run code binds it into the agent's container" + codeUsed
+)
+
+// bindsReserved stops a walled run that binds the checkout at root and the working folder cwd
+// themselves, with an input error of the line text, when one of them is or contains the home
+// folder or qory's state directory: the agent could read every file of the person there, and
+// a write run could change them. Two kinds of run bind them: a read run with no setup, with
+// [textReadBindsReserved], and a write run from a run code, which gets no copy, with
+// [textCodeWriteBindsReserved].
+func bindsReserved(text, root, cwd string) error {
 	for _, p := range []string{root, cwd} {
 		if relation := reserved(p); relation != "" {
-			return input(fmt.Errorf("start the run from a folder that does not contain your home folder or qory's state directory: the folder %s %s, and a read run binds it into the agent's container%s", hostgit.Shown(p), relation, codeUsed))
+			return input(fmt.Errorf(text, hostgit.Shown(p), relation))
 		}
 	}
 	return nil
