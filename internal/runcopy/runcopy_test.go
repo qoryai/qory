@@ -4853,7 +4853,6 @@ func TestAFailedStatusInANestedSubmoduleIsLeftBehind(t *testing.T) {
 	}
 }
 
-// TestAnUnreadableFileLeavesTheRestToComeBack is a file of mode 000 beside other work: the session
 // TestAnUnreadableFileComesBack is a file of mode 000 that the agent left, which the session's user
 // owns, beside a commit, a change or nothing else: the session gives itself read access, and the
 // file comes back with the rest.
