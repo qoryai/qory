@@ -195,9 +195,6 @@ func (d Dir) cloneAt(ctx context.Context, i int, src, dest, branch string) (stri
 	// and a HEAD on no branch would not be among them.
 	ref := "refs/heads/" + branch
 	if _, err := git(ctx, bare, "fetch", "--quiet", "--no-tags", "--no-recurse-submodules", "--no-write-fetch-head", "--", src, "+HEAD:"+ref); err != nil {
-		if above := branchAbove(ctx, bare, branch); above != "" {
-			return "", fmt.Errorf(textBranchAbove, shown(above), shown(src), shown(branch))
-		}
 		return "", fmt.Errorf(textNoHead, shown(src), err)
 	}
 	base, err := commitOf(ctx, bare, ref)
@@ -266,19 +263,6 @@ func partialClone(ctx context.Context, src string) bool {
 		}
 	}
 	return false
-}
-
-// branchAbove is the person's branch whose name is a parent folder of branch, which keeps git
-// from writing branch, "" for none, as the bare repository bare has the branches.
-func branchAbove(ctx context.Context, bare, branch string) string {
-	parts := strings.Split(branch, "/")
-	for i := 1; i < len(parts); i++ {
-		above := strings.Join(parts[:i], "/")
-		if _, err := git(ctx, bare, "show-ref", "--verify", "--quiet", "refs/heads/"+above); err == nil {
-			return above
-		}
-	}
-	return ""
 }
 
 // copySettings makes the copy at dest show what the person's repository at src shows:

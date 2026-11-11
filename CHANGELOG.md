@@ -298,7 +298,8 @@ release may change what an existing document does, and states it under Upgrading
 - A walled run that may write and has no run code works in a copy of the checkout, under
   `qory/runs` in your cache folder, and starts from your commit at `HEAD`, so it never gets write access to your
   `.git`. Its commits land on the branch `qory/run-<run id>`, which qory never checks out,
-  and one line prints that branch and any qory settings they change. The git session after the
+  or on a free name like it, such as `qory/run-<run id>-2`, when a branch has or blocks that
+  name. One line prints that branch and any qory settings they change. The git session after the
   agent runs in the step `copy work out`, of kind `copy`, in the run's record. After an agent
   that succeeded, a step that ends `failed` closes the run `failed` with the step's exit code, and
   a step that a signal cuts closes it `cancelled`. A write run from a run code, as a pool

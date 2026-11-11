@@ -3688,10 +3688,8 @@ The clone has your `origin` URL with any credentials removed, your `origin/*` re
 `user.name` and `user.email` of your repository's configuration. With no `origin` in your
 repository, or an address that could still have a credential in it after that, it has none.
 
-Four cases stop the run with their fix first:
+Three cases stop the run with their fix first:
 
-- A branch named as a parent of the run's branch, such as `qory`: git keeps no branch below a
-  branch, so rename yours with `git branch -m`.
 - A partial clone: the clone has only the objects your repository has. The line has the
   commands that fetch the rest, such as `git fetch --refetch origin`.
 - A folder that is not a repository, and that is your home folder or qory's state directory or
@@ -3795,8 +3793,11 @@ qory run: read the run's files in <folder>, and run no git there: the git sessio
 
 Once the run's containers are gone, qory checks the bundle, fetches it into a new repository
 with git's object checks on, and fetches the run's branch into your repository as
-`qory/run-<run id>`. qory never checks that branch out, so the files in your checkout stay
-as they are:
+`qory/run-<run id>`. When a branch has that name or blocks it, the name gets a suffix:
+`qory/run-<run id>-2`, `-3` and so on. git keeps no branch below another branch, so with a
+branch named `qory` the names start at `qory-run-<run id>`. When another git process holds a
+lock on the branch, qory fetches again, at most 5 times in 30 seconds. qory never checks the
+branch out, so the files in your checkout stay as they are:
 
 ```text
 qory run: the run's commits are on qory/run-0193 in /path/to/repo.

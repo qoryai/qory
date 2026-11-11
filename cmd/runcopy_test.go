@@ -78,7 +78,7 @@ func gitOutput(t *testing.T, dir string, args ...string) string {
 // runBranchOf is the branch that the result line of out contains.
 func runBranchOf(t *testing.T, out string) string {
 	t.Helper()
-	m := regexp.MustCompile(`the run's commits are on (qory/run-\S+) in `).FindStringSubmatch(out)
+	m := regexp.MustCompile(`the run's commits are on (qory[/-]run-\S+) in `).FindStringSubmatch(out)
 	if m == nil {
 		t.Fatalf("the output has no line with the run's branch:\n%s", out)
 	}
@@ -207,6 +207,108 @@ func TestTheRunsCommitsLandOnARunBranch(t *testing.T) {
 		}
 	}
 	lacks(t, out, "They change these")
+}
+
+// commitsInCopy makes the agent of the next run commit name in its copy.
+func commitsInCopy(t *testing.T, name string) {
+	t.Helper()
+	agentInCopy(t, func(spec session.SessionSpec) {
+		writeFile(t, filepath.Join(spec.Dir, name), name+"\n")
+		gitOutput(t, spec.Dir, "add", name)
+		gitOutput(t, spec.Dir, "-c", "user.name=agent", "-c", "user.email=agent@example.com", "commit", "--quiet", "-m", "the agent's commit")
+	})
+}
+
+// copyRunID is the run id of the tests of the run's branch name.
+const copyRunID = "0193a4b2-7c1d-4e8f-9a0b-1c2d3e4f5a6b"
+
+// TestTheRunsBranchGetsAFreeName is a person's repository where a branch has or blocks the
+// run's branch name: the commits land on the next free name, and the person's branches stay.
+func TestTheRunsBranchGetsAFreeName(t *testing.T) {
+	for _, c := range []struct {
+		name     string
+		branches []string
+		want     string
+	}{
+		{"a branch with the name", []string{"qory/run-" + copyRunID}, "qory/run-" + copyRunID + "-2"},
+		{"a branch below the name", []string{"qory/run-" + copyRunID + "/x", "qory/run-" + copyRunID + "-2"}, "qory/run-" + copyRunID + "-3"},
+		{"a branch qory", []string{"qory"}, "qory-run-" + copyRunID},
+		{"a branch qory and the other name", []string{"qory", "qory-run-" + copyRunID}, "qory-run-" + copyRunID + "-2"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			root := copyCheckout(t)
+			head := gitOutput(t, root, "rev-parse", "HEAD")
+			for _, b := range c.branches {
+				gitOutput(t, root, "branch", b, head)
+			}
+			commitsInCopy(t, "committed.txt")
+			out, err := run(t, "run", "--run-id", copyRunID, "claude", "--", "-p", "hi")
+			if err != nil {
+				t.Fatalf("%v\n%s", err, out)
+			}
+			if got := runBranchOf(t, out); got != c.want {
+				t.Errorf("the commits are on %s, want %s:\n%s", got, c.want, out)
+			}
+			gitOutput(t, root, "cat-file", "-e", c.want+":committed.txt")
+			for _, b := range c.branches {
+				if got := gitOutput(t, root, "rev-parse", "refs/heads/"+b); got != head {
+					t.Errorf("%s moved to %s", b, got)
+				}
+			}
+		})
+	}
+}
+
+// TestAReusedRunIDGetsTheNextName is two runs with the same --run-id, with the first run's
+// record removed between them, as a run in another worktree of the repository has its record
+// elsewhere: the second run's commits land on qory/run-<run id>-2, and the first run's branch
+// stays.
+func TestAReusedRunIDGetsTheNextName(t *testing.T) {
+	root := copyCheckout(t)
+	commitsInCopy(t, "first.txt")
+	out, err := run(t, "run", "--run-id", copyRunID, "claude", "--", "-p", "hi")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	first := runBranchOf(t, out)
+	if first != "qory/run-"+copyRunID {
+		t.Errorf("the first run's commits are on %s", first)
+	}
+	if err := os.RemoveAll(filepath.Join(runsDir(t, root), copyRunID)); err != nil {
+		t.Fatal(err)
+	}
+	commitsInCopy(t, "second.txt")
+	out, err = run(t, "run", "--run-id", copyRunID, "claude", "--", "-p", "hi")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if got := runBranchOf(t, out); got != first+"-2" {
+		t.Errorf("the second run's commits are on %s, want %s-2", got, first)
+	}
+	gitOutput(t, root, "cat-file", "-e", first+":first.txt")
+	gitOutput(t, root, "cat-file", "-e", first+"-2:second.txt")
+}
+
+// TestANameTakenDuringTheRunGetsTheNextName is a branch with the run's branch name that the
+// person makes while the agent runs: the commits land on the next free name.
+func TestANameTakenDuringTheRunGetsTheNextName(t *testing.T) {
+	root := copyCheckout(t)
+	head := gitOutput(t, root, "rev-parse", "HEAD")
+	name := "qory/run-" + copyRunID
+	agentInCopy(t, func(spec session.SessionSpec) {
+		gitOutput(t, root, "branch", name, head)
+		writeFile(t, filepath.Join(spec.Dir, "committed.txt"), "committed\n")
+	})
+	out, err := run(t, "run", "--run-id", copyRunID, "claude", "--", "-p", "hi")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if got := runBranchOf(t, out); got != name+"-2" {
+		t.Errorf("the commits are on %s, want %s-2", got, name)
+	}
+	if got := gitOutput(t, root, "rev-parse", "refs/heads/"+name); got != head {
+		t.Errorf("%s moved to %s", name, got)
+	}
 }
 
 // TestARunWithNoCommitSaysSo is an agent that leaves nothing: no branch, and a line that
