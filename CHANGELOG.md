@@ -317,7 +317,8 @@ release may change what an existing document does, and states it under Upgrading
   lists repositories on an image without a program of the git session, which stops in the setup step
   `Check tools`, before the agent, with `install <program> in /usr/local/bin, /usr/bin, /bin: …`. A copy that stays has its `.git` renamed to `.git-from-run`. Work that the run's branch
   does not have comes back under `refs/qory/run-<run id>` in your repository, or the first free
-  `refs/qory/run-<run id>-<n>`: each branch and tag the run made or moved, its stash, a detached
+  `refs/qory/run-<run id>-<n>`: each branch and tag the run made or moved, also at a commit you
+  have, such as a tag of your commit, its stash, a detached
   `HEAD`, commits that only a reflog reaches, and the working tree as a commit on `HEAD` when the
   session makes no commit on the branch, as in a sparse checkout. Each submodule's commits and
   changes come back under the same prefix in your git folder of that submodule. The line of the

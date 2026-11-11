@@ -3830,8 +3830,10 @@ qory run: the run's commits are on qory/run-0193 in /path/to/repo. They change t
 | `lost/<n>` | The newest commit of each line of commits that only a reflog reaches: a commit made with `HEAD` detached, an older stash, or, with nothing past your commit on the branch, any such commit, such as one that a reset took off the branch. The commits of another new ref, such as one of `git notes add`, come back here too. |
 | `uncommitted` | The changes in the working tree when the session makes no commit on the branch, as a commit on `HEAD`. In a sparse checkout, each path the checkout took out stays as `HEAD` has it. |
 
-A ref comes back only when it has a commit that your commit, a ref of the clone and a
-remote-tracking ref do not have: a tag of your commit stays out. Each submodule that the clone
+A ref other than a branch or a tag comes back only when it has a commit that your commit, a ref of
+the clone and a remote-tracking ref do not have. A branch or a tag that the run made or moved at a
+commit you have, such as a tag of your commit, comes back too: qory checks that your repository has
+that commit, and makes the ref in the same fetch. Each submodule that the clone
 copied gets the same refs, under the same prefix, in your git folder of that submodule, such as
 `.git/modules/<name>`. A change in a submodule comes back as its `uncommitted`, and a commit as its
 `HEAD`. A file that the setup left in the submodule stays out.

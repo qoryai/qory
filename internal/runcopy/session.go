@@ -104,7 +104,10 @@ type GitSession struct {
 // Under the prefix the bundle also has each branch, tag and refs/stash that the run made or
 // moved, and a detached HEAD, when it has a commit that the base commit, a ref of the clone and
 // a remote-tracking ref do not have, and lost/<n> for commits that only a reflog or another ref
-// reaches. Each submodule that the clone copied gets the same refs, with its changes as
+// reaches. A new or moved branch or tag at a commit with no such commit, such as a tag of the base
+// commit, is a line in n.known, its commit id and its name under the prefix, as a bundle leaves out
+// a ref whose commits it excludes; an annotated one is in the bundle, with its tag object. Each
+// submodule that the clone copied gets the same refs, with its changes as
 // uncommitted, in the bundle n-k, where k is the line of the submodule in subs-n. What still
 // stays behind writes n.left, which [Dir.LeftBehind] reads: a repository the run made; a change in a submodule that the clone
 // did not copy, or in a repository inside a submodule; a file that git ls-files still lists
@@ -283,7 +286,8 @@ const SessionScriptName = "qory-git-session.sh"
 // [sessionList], reads refs-n, see [Repository], sub-n, see [submoduleList], subs-n, see
 // [clonedList], and subrefs-n-k for its submodule number k, and uses exclude-n when there is
 // one. It writes n.bundle, or n.none when nothing is past the base commit, and n-k.bundle or
-// n-k.none for each submodule in subs-n, and n.large for files it leaves out by their size. Its
+// n-k.none for each submodule in subs-n, n.large for files it leaves out by their size, and n.known
+// or n-k.known for the run's refs at a commit the person has. Its
 // find takes a size in bytes, with c, which busybox and GNU find both read: [MaxFile] bytes. It needs git 2.25 or later, for --pathspec-from-file.
 const sessionScript = `set -eu
 PATH=$1 W=$2 B=$3 branch=$4 message=$5 count=$6 prefix=$7
@@ -538,6 +542,23 @@ uncommitted() {
 fresh() {
 	printf '%s\n' "$1" | cat - "$G/old" | g rev-list -1 --stdin --ignore-missing || printf '%s\n' "$1"
 }
+# known_ref takes a new or moved branch or tag $3 at the object $1, whose commit $2 the person has. A
+# bundle leaves out a ref whose commits it excludes, so a ref at the commit itself goes to the file
+# $known, as its object and its name under $prefix, for the host to make. An annotated tag is an
+# object the person does not have, and goes under $prefix in the bundle. The run's branch, $mainref,
+# and any other ref stay out.
+known_ref() {
+	case $3 in
+	"$mainref") return 0 ;;
+	refs/heads/?* | refs/tags/?*) ;;
+	*) return 0 ;;
+	esac
+	if [ "$1" = "$2" ]; then
+		printf '%s %s\n' "$1" "$prefix/${3#refs/}" >> "$known"
+	else
+		g update-ref "$prefix/${3#refs/}" "$1"
+	fi
+}
 # extra_refs writes each new or moved ref of the copy's repository at $C that has a fresh commit to
 # $prefix in the git folder $G: a branch as heads/<name>, a tag as tags/<name>, and refs/stash as
 # stash. $mainref, the run's branch, counts only when the commit $tip does not have it. HEAD,
@@ -545,7 +566,8 @@ fresh() {
 # clone. Then lost/1, lost/2 and so on are the tips of the fresh commits that no ref here reaches,
 # of these: a commit of another new or moved ref, a commit of HEAD's reflog that no branch's reflog
 # has, other than a rebase's step, which is a commit made with HEAD detached, an older stash, and,
-# with $reflogs set, any commit a reflog has.
+# with $reflogs set, any commit a reflog has. A branch or tag at a commit with no fresh commit goes
+# through known_ref.
 extra_refs() {
 	{
 		printf '^%s\n' "$base"
@@ -560,6 +582,7 @@ extra_refs() {
 	while read -r e_id e_ref; do
 		e_commit=$(g rev-parse --verify --quiet "$e_id^{commit}") || continue
 		if [ -z "$(fresh "$e_commit")" ]; then
+			known_ref "$e_id" "$e_commit" "$e_ref"
 			continue
 		fi
 		case $e_ref in
@@ -736,7 +759,7 @@ submodule_bundle() (
 	1) uncommitted ;;
 	*) exit "$changed" ;;
 	esac
-	mainref= tip= clonerefs=$B/subrefs-$n-$k reflogs=1
+	mainref= tip= clonerefs=$B/subrefs-$n-$k reflogs=1 known=$B/$n-$k.known
 	extra_refs
 	bundle "$B/$n-$k"
 )
@@ -1006,7 +1029,7 @@ while [ "$n" -lt "$count" ]; do
 	# nothing past the base commit on the branch, a commit that any reflog has comes back too, such
 	# as one that a reset took off the branch.
 	tip=$(g rev-parse --verify "refs/heads/$branch^{commit}")
-	mainref=refs/heads/$branch clonerefs=$B/refs-$n reflogs=
+	mainref=refs/heads/$branch clonerefs=$B/refs-$n reflogs= known=$B/$n.known
 	if [ "$(g rev-list --count "$mainref" "^$base")" = 0 ]; then
 		reflogs=1
 	fi

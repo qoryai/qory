@@ -3310,7 +3310,11 @@ func TestAChangeOnAScratchBranchArrivesUnderRefsQory(t *testing.T) {
 	if !slices.Contains(got, "kept.txt") || slices.Contains(got, "scratch.txt") {
 		t.Errorf("the branch at %s has %v", q.Head, got)
 	}
-	wantRefs(t, refs, "uncommitted")
+	// The branch scratch is at the base commit, which the person has.
+	wantRefs(t, refs, "uncommitted", "heads/scratch")
+	if refs["heads/scratch"] != base {
+		t.Errorf("scratch came back at %s, want %s", refs["heads/scratch"], base)
+	}
 	if got := files(t, src, prefix+"/uncommitted"); !slices.Contains(got, "scratch.txt") || slices.Contains(got, "kept.txt") {
 		t.Errorf("uncommitted has %v", got)
 	}
@@ -5194,5 +5198,147 @@ func TestLeftReadsTheListsAsText(t *testing.T) {
 		if len(f) != 1000 {
 			t.Fatalf("a listed file has %d bytes", len(f))
 		}
+	}
+}
+
+// TestARefAtTheBaseCommitComesBack is a tag and a branch at the base commit and an annotated tag
+// of it, with no other work: a bundle leaves out a ref whose commit it excludes, and each comes
+// back under the prefix all the same, at the person's commit or with its tag object.
+func TestARefAtTheBaseCommitComesBack(t *testing.T) {
+	bothChecks(t, func(t *testing.T) {
+		sessionGit(t)
+		src, base := person(t)
+		d, repos := cloneRun(t, src)
+		testGit(t, d.Work(), "tag", "v-base")
+		testGit(t, d.Work(), "branch", "scratch")
+		testGit(t, d.Work(), "tag", "-a", "-m", "annotated", "v-annotated")
+		q, refs := runRefs(t, d, src, repos, nil)
+		if q.Head != "" {
+			t.Errorf("the run's branch came back at %s", q.Head)
+		}
+		wantRefs(t, refs, "tags/v-base", "heads/scratch", "tags/v-annotated")
+		if refs["tags/v-base"] != base || refs["heads/scratch"] != base {
+			t.Errorf("the refs are %v, want them at %s", refs, base)
+		}
+		if kind := testGit(t, src, "cat-file", "-t", prefix+"/tags/v-annotated"); kind != "tag" {
+			t.Errorf("the annotated tag came back as a %s", kind)
+		}
+		if at := testGit(t, src, "rev-parse", prefix+"/tags/v-annotated^{commit}"); at != base {
+			t.Errorf("the annotated tag is at %s, want %s", at, base)
+		}
+	})
+}
+
+// TestARefAtTheBaseCommitComesBackBesideTheBranch is a tag of the base commit and a commit on the
+// run's branch: both come back, in one fetch.
+func TestARefAtTheBaseCommitComesBackBesideTheBranch(t *testing.T) {
+	isolate(t)
+	sessionGit(t)
+	src, base := person(t)
+	d, repos := cloneRun(t, src)
+	testGit(t, d.Work(), "tag", "v-base")
+	write(t, d.Work(), "x.txt", "x\n")
+	q, refs := runRefs(t, d, src, repos, nil)
+	if q.Head == "" || !slices.Contains(files(t, src, "refs/heads/"+branch), "x.txt") {
+		t.Errorf("the run's branch did not come back")
+	}
+	wantRefs(t, refs, "tags/v-base")
+	if refs["tags/v-base"] != base {
+		t.Errorf("the tag is at %s, want %s", refs["tags/v-base"], base)
+	}
+}
+
+// TestAListOfKnownRefsIsChecked is a list of refs at the person's commits that the git session
+// could have changed: an id the repository lacks, the id of a blob, a ref of another form, HEAD,
+// two names in two letter cases, and a line that is no ref: each fails the quarantine, and no ref
+// reaches the person's repository.
+func TestAListOfKnownRefsIsChecked(t *testing.T) {
+	for name, c := range map[string]struct{ line, want string }{
+		"a missing id":     {strings.Repeat("1", 40) + " " + prefix + "/tags/x", "is no commit in"},
+		"a blob":           {"BLOB " + prefix + "/tags/x", "is no commit in"},
+		"HEAD":             {"BASE " + prefix + "/HEAD", "which is not a commit id and a branch or tag under"},
+		"stash":            {"BASE " + prefix + "/stash", "which is not a commit id and a branch or tag under"},
+		"outside":          {"BASE refs/heads/main", "which is not a commit id and a branch or tag under"},
+		"another run":      {"BASE refs/qory/run-2/tags/x", "which is not a commit id and a branch or tag under"},
+		"a short id":       {"1234 " + prefix + "/tags/x", "which is not a commit id and a branch or tag under"},
+		"two letter cases": {"BASE " + prefix + "/tags/V-Base", "twice"},
+	} {
+		t.Run(strings.ReplaceAll(name, " ", "-"), func(t *testing.T) {
+			isolate(t)
+			sessionGit(t)
+			src, base := person(t)
+			blob := testGit(t, src, "rev-parse", base+":README.md")
+			before := testGit(t, src, "for-each-ref")
+			d, repos := cloneRun(t, src)
+			testGit(t, d.Work(), "tag", "v-base")
+			sessionOutput(t, d, repos, nil)
+			line := strings.NewReplacer("BASE", base, "BLOB", blob).Replace(c.line)
+			known := filepath.Join(d.Bundle(), "0.known")
+			data, err := os.ReadFile(known)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(known, append(data, line+"\n"...), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			_, err = d.Quarantine(context.Background(), branch, repos)
+			hasPrefix(t, name, err, "the run's bundle for . failed git's checks")
+			if err == nil || !strings.Contains(err.Error(), c.want) {
+				t.Errorf("the error %v does not have %q; the list:\n%s", err, c.want, read(t, d.Bundle(), "0.known"))
+			}
+			if after := testGit(t, src, "for-each-ref"); after != before {
+				t.Errorf("your repository's refs were\n%s\nand are\n%s", before, after)
+			}
+		})
+	}
+}
+
+// TestAKnownRefFetchesOnlyWhereItsCommitIs is a quarantine with a tag of the base commit, fetched
+// into a repository that lacks that commit: the fetch stops before it writes any ref.
+func TestAKnownRefFetchesOnlyWhereItsCommitIs(t *testing.T) {
+	isolate(t)
+	sessionGit(t)
+	src, _ := person(t)
+	d, repos := cloneRun(t, src)
+	testGit(t, d.Work(), "tag", "v-base")
+	runGit(t, d, repos, nil)
+	qs, err := d.Quarantine(context.Background(), branch, repos)
+	if err != nil {
+		t.Fatal(err)
+	}
+	other := t.TempDir()
+	testGit(t, other, "init", "--quiet", "-b", "main")
+	write(t, other, "other.txt", "other\n")
+	commitAll(t, other, "other")
+	before := testGit(t, other, "for-each-ref")
+	_, err = qs[0].FetchInto(context.Background(), other, "refs/heads/"+branch)
+	hasPrefix(t, "a fetch", err, "fetch "+prefix+"/* from ")
+	if err == nil || !strings.Contains(err.Error(), "is no commit in") {
+		t.Errorf("the error is %v", err)
+	}
+	if after := testGit(t, other, "for-each-ref"); after != before {
+		t.Errorf("the refs were\n%s\nand are\n%s", before, after)
+	}
+}
+
+// TestATagInASubmoduleAtItsCommitComesBack is a tag at the commit that the clone checked out in a
+// submodule: it comes back under the prefix in the person's git folder of the submodule.
+func TestATagInASubmoduleAtItsCommitComesBack(t *testing.T) {
+	isolate(t)
+	sessionGit(t)
+	src, sub := withSubmodule(t)
+	d, repos := cloneRun(t, src)
+	inner := filepath.Join(d.Work(), filepath.FromSlash(sub))
+	at := testGit(t, inner, "rev-parse", "HEAD")
+	testGit(t, inner, "tag", "v-sub")
+	q, refs := runRefs(t, d, src, repos, nil)
+	wantRefs(t, refs)
+	if len(q.Submodules) != 1 {
+		t.Fatalf("%d submodules came back", len(q.Submodules))
+	}
+	gitDir := testGit(t, filepath.Join(src, sub), "rev-parse", "--path-format=absolute", "--git-dir")
+	wantRefs(t, refsUnder(t, gitDir, prefix), "tags/v-sub")
+	if got := testGit(t, gitDir, "rev-parse", prefix+"/tags/v-sub"); got != at {
+		t.Errorf("the tag is at %s, want %s", got, at)
 	}
 }
