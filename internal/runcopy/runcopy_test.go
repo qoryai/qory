@@ -1230,7 +1230,8 @@ func TestCopyBackLeavesOutLinksGitAndQory(t *testing.T) {
 	}{
 		{"copied", r.Copied, []string{"a.txt", "b.txt", "sub/c.txt"}},
 		{"deleted", r.Deleted, []string{"gone.txt"}},
-		{"conflicts", r.Conflicts, []string{"both.txt", "edited-gone.txt"}},
+		{"conflicts", r.Conflicts, []string{"both.txt"}},
+		{"not deleted", r.NotDeleted, []string{"edited-gone.txt"}},
 		{"skipped", r.Skipped, []string{".git", ".qory", "fake", "half", "hosts", "linked", "out", "sub/.Git", "sub/.g\u200cit"}},
 	} {
 		if !slices.Equal(c.got, c.want) {
@@ -1241,11 +1242,12 @@ func TestCopyBackLeavesOutLinksGitAndQory(t *testing.T) {
 		t.Errorf("acting changes %v, want %v", r.Acting, want)
 	}
 	for rel, want := range map[string]string{
-		"a.txt":           "changed\n",
-		"both.txt":        "the person's edit\n",
-		"edited-gone.txt": "the person's edit\n",
-		"gone.txt":        "",
-		"qory.yaml":       "env:\n  A: \"1\"\n",
+		"a.txt":             "changed\n",
+		"both.txt":          "the person's edit\n",
+		"both.txt-from-run": "the run's edit\n",
+		"edited-gone.txt":   "the person's edit\n",
+		"gone.txt":          "",
+		"qory.yaml":         "env:\n  A: \"1\"\n",
 	} {
 		if got := read(t, dest, rel); got != want {
 			t.Errorf("%s is %q, want %q", rel, got, want)
@@ -1998,6 +2000,211 @@ func TestCopyBackStopsWithItsContext(t *testing.T) {
 	}
 }
 
+// TestCopyBackListsWhatItCannotReadOrWrite is a run's file and folder that qory cannot read,
+// and a new file in a folder of the person's that qory cannot write: each is listed as failed,
+// the rest comes back, and nothing in the folder that failed is deleted.
+func TestCopyBackListsWhatItCannotReadOrWrite(t *testing.T) {
+	isolate(t)
+	if os.Geteuid() == 0 {
+		t.Skip("root reads and writes every file")
+	}
+	dest := t.TempDir()
+	write(t, dest, "locked/kept.txt", "the person\n")
+	write(t, dest, "closed/old.txt", "the person\n")
+	d := newDir(t)
+	if err := d.CopyFolder(context.Background(), dest); err != nil {
+		t.Fatal(err)
+	}
+	work := d.Work()
+	write(t, work, "a.txt", "the run\n")
+	write(t, work, "secret.txt", "the run\n")
+	write(t, work, "z.txt", "the run\n")
+	write(t, work, "closed/new.txt", "the run\n")
+	for p, mode := range map[string]os.FileMode{
+		filepath.Join(work, "secret.txt"): 0,
+		filepath.Join(work, "locked"):     0,
+		filepath.Join(dest, "closed"):     0o555,
+	} {
+		if err := os.Chmod(p, mode); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Cleanup(func() { _ = os.Chmod(filepath.Join(dest, "closed"), 0o755) })
+	r, err := d.CopyBack(context.Background(), dest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"closed/new.txt", "locked", "secret.txt"}; !slices.Equal(r.Failed, want) {
+		t.Errorf("failed %q, want %q", r.Failed, want)
+	}
+	if want := []string{"a.txt", "z.txt"}; !slices.Equal(r.Copied, want) {
+		t.Errorf("copied %q, want %q", r.Copied, want)
+	}
+	if len(r.Deleted) != 0 || read(t, dest, "locked/kept.txt") != "the person\n" {
+		t.Errorf("the copy back deleted %q", r.Deleted)
+	}
+	if read(t, dest, "z.txt") != "the run\n" {
+		t.Error("the file after the failed ones did not come back")
+	}
+}
+
+// TestCopyBackCountsNoGeneratedFolder is a run that writes more into node_modules and the other
+// folders that a build writes than the budget allows: all of it comes back, and a file outside
+// them still counts.
+func TestCopyBackCountsNoGeneratedFolder(t *testing.T) {
+	isolate(t)
+	src := t.TempDir()
+	d := newDir(t)
+	if err := d.CopyFolder(context.Background(), src); err != nil {
+		t.Fatal(err)
+	}
+	var want []string
+	for name := range generatedFolders {
+		for i := range 3 {
+			rel := name + "/sub/f" + strconv.Itoa(i)
+			write(t, d.Work(), rel, "generated\n")
+			want = append(want, rel)
+		}
+	}
+	r, err := d.copyBackWith(context.Background(), src, 2, 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	slices.Sort(want)
+	if slices.Sort(r.Copied); !slices.Equal(r.Copied, want) {
+		t.Errorf("copied %q, want %q", r.Copied, want)
+	}
+	write(t, d.Work(), "a.txt", "counted\n")
+	write(t, d.Work(), "b.txt", "counted\n")
+	write(t, d.Work(), "c.txt", "counted\n")
+	if _, err := d.copyBackWith(context.Background(), src, 2, 1<<20); err == nil {
+		t.Error("three files passed a budget of two")
+	}
+}
+
+// TestCopyBackTakesALargeNodeModules is a run that writes 200,000 files into node_modules, twice
+// the budget of files: the copy back brings all of them.
+func TestCopyBackTakesALargeNodeModules(t *testing.T) {
+	if testing.Short() {
+		t.Skip("writes 200,000 files")
+	}
+	isolate(t)
+	src := t.TempDir()
+	d := newDir(t)
+	if err := d.CopyFolder(context.Background(), src); err != nil {
+		t.Fatal(err)
+	}
+	const folders, files = 200, 1000
+	for i := range folders {
+		dir := filepath.Join(d.Work(), "node_modules", "p"+strconv.Itoa(i))
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		for j := range files {
+			if err := os.WriteFile(filepath.Join(dir, strconv.Itoa(j)), nil, 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	r, err := d.CopyBack(context.Background(), src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(r.Copied) != folders*files || len(r.Failed) != 0 {
+		t.Errorf("copied %d files, failed %q", len(r.Copied), r.Failed)
+	}
+}
+
+// TestCopyBackWritesTheRunsVersionBeside is a file that the person and the run both changed, one
+// the person deleted and the run changed, and one both added: the person's file stays, and the
+// run's version goes beside it with -from-run, or with a number after that when the person or the
+// run has that name.
+func TestCopyBackWritesTheRunsVersionBeside(t *testing.T) {
+	isolate(t)
+	dest := t.TempDir()
+	for _, rel := range []string{"both.txt", "again.txt", "taken.txt", "deleted.txt", "tool.sh"} {
+		write(t, dest, rel, "first\n")
+	}
+	d := newDir(t)
+	if err := d.CopyFolder(context.Background(), dest); err != nil {
+		t.Fatal(err)
+	}
+	work := d.Work()
+	for _, rel := range []string{"both.txt", "again.txt", "taken.txt", "deleted.txt", "tool.sh", "added.txt"} {
+		write(t, work, rel, "the run\n")
+		if rel != "deleted.txt" {
+			write(t, dest, rel, "the person\n")
+		}
+	}
+	if err := os.Chmod(filepath.Join(work, "tool.sh"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(dest, "deleted.txt")); err != nil {
+		t.Fatal(err)
+	}
+	write(t, dest, "again.txt-from-run", "an earlier run\n")
+	write(t, work, "taken.txt-from-run", "the run's other file\n")
+	r, err := d.CopyBack(context.Background(), dest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"added.txt", "again.txt", "both.txt", "deleted.txt", "taken.txt", "tool.sh"}; !slices.Equal(r.Conflicts, want) {
+		t.Errorf("conflicts %q, want %q", r.Conflicts, want)
+	}
+	if want := []string{"taken.txt-from-run"}; !slices.Equal(r.Copied, want) {
+		t.Errorf("copied %q, want %q", r.Copied, want)
+	}
+	for rel, want := range map[string]string{
+		"both.txt":             "the person\n",
+		"both.txt-from-run":    "the run\n",
+		"again.txt":            "the person\n",
+		"again.txt-from-run":   "an earlier run\n",
+		"again.txt-from-run-1": "the run\n",
+		"taken.txt-from-run":   "the run's other file\n",
+		"taken.txt-from-run-1": "the run\n",
+		"deleted.txt":          "",
+		"deleted.txt-from-run": "the run\n",
+		"added.txt":            "the person\n",
+		"added.txt-from-run":   "the run\n",
+	} {
+		if got := read(t, dest, rel); got != want {
+			t.Errorf("%s is %q, want %q", rel, got, want)
+		}
+	}
+	if info, err := os.Stat(filepath.Join(dest, "tool.sh-from-run")); err != nil || info.Mode().Perm()&0o100 == 0 {
+		t.Errorf("tool.sh-from-run has no execute bit: %v, %v", info, err)
+	}
+}
+
+// TestCopyBackListsADeletionOfAChangedFile is a file that the run deleted and the person changed:
+// it stays, is listed as not deleted, and no file goes beside it.
+func TestCopyBackListsADeletionOfAChangedFile(t *testing.T) {
+	isolate(t)
+	dest := t.TempDir()
+	write(t, dest, "kept.txt", "first\n")
+	d := newDir(t)
+	if err := d.CopyFolder(context.Background(), dest); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(d.Work(), "kept.txt")); err != nil {
+		t.Fatal(err)
+	}
+	write(t, dest, "kept.txt", "the person\n")
+	r, err := d.CopyBack(context.Background(), dest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(r.NotDeleted, []string{"kept.txt"}) || len(r.Conflicts)+len(r.Deleted) != 0 {
+		t.Errorf("not deleted %q, conflicts %q, deleted %q", r.NotDeleted, r.Conflicts, r.Deleted)
+	}
+	if read(t, dest, "kept.txt") != "the person\n" {
+		t.Error("the person's file changed")
+	}
+	if _, err := os.Lstat(filepath.Join(dest, "kept.txt-from-run")); err == nil {
+		t.Error("a file went beside the one the run deleted")
+	}
+}
+
 // TestCopyFolderStopsAtItsBudget is a folder past each budget, and a context that ended.
 func TestCopyFolderStopsAtItsBudget(t *testing.T) {
 	isolate(t)
@@ -2562,8 +2769,8 @@ func TestCopyArtifactsBackBringsOnlyRegularFiles(t *testing.T) {
 	if read(t, src, store+"mine/kept.txt") != "the person\n" || read(t, src, store+"mine/both.txt") != "the person\n" {
 		t.Errorf("the person's files changed: %+v", got)
 	}
-	if !slices.Contains(got.Conflicts, store+"mine/both.txt") {
-		t.Errorf("the conflicts are %v", got.Conflicts)
+	if !slices.Contains(got.Conflicts, store+"mine/both.txt") || read(t, src, store+"mine/both.txt-from-run") != "the run\n" {
+		t.Errorf("the conflicts are %v, and the run's version is not beside the person's", got.Conflicts)
 	}
 	for _, gone := range []string{store + "out", store + "note/main/1/secret.txt", store + "sub/.git", store + "bare", store + "pipe", ".qory/harness"} {
 		if _, err := os.Lstat(filepath.Join(src, gone)); err == nil {

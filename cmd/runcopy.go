@@ -50,7 +50,9 @@ const (
 	textCopyStays      = "read the run's files in %s, run no git there, then remove the folder: it has the work that did not come back"
 	textCopyBack       = "copied %s back to %s from the run, and deleted %s there."
 	textCopyLeftOut    = "left out of the copy back to your folder: %s."
-	textCopyConflicts  = "you and the run both changed these files, so yours stay: %s."
+	textCopyFailed     = "left out of the copy back, as qory could not read or write them: %s."
+	textCopyConflicts  = "you and the run both changed these files: yours stay, and the run's version of each is beside it with -from-run: %s."
+	textCopyNotDeleted = "you and the run both changed these files, so yours stay: %s."
 	textCopyActingKept = "the run changed these qory settings, so those files stay as you have them: %s."
 	textCopyNotIn      = "left out of the run's copy: %s."
 	textCopyNoRemove   = "remove %s by hand: %s"
@@ -312,16 +314,17 @@ func withoutQoryDir(skipped []string) []string {
 
 // artifactsBack copies .qory/artifacts of the copy back to the person's, once the run's
 // containers are gone, with or without a commit: the git session leaves .qory out. It prints
-// what it left out. A file you both have keeps your version, so the copy stays with the
-// run's. It returns false when the copy back stopped.
+// what it left out. A file you both have keeps your version, with the run's beside it. The
+// copy stays with a file that qory could not read or write. It returns false when the copy
+// back stopped.
 func (c *runCopy) artifactsBack(ctx context.Context, report func(string)) bool {
 	limited, cancel := context.WithTimeout(ctx, copyStepLimit)
 	defer cancel()
 	res, err := c.dir.CopyArtifactsBack(limited, c.root)
 	c.leftOut(reportedSkips(res.Skipped, c.dir.Work()), report)
+	c.failed(res.Failed, report)
 	if len(res.Conflicts) > 0 {
 		report(fmt.Sprintf(textCopyConflicts, shownPaths(res.Conflicts)))
-		c.kept(report)
 	}
 	if err != nil {
 		report(shownError(err))
@@ -340,6 +343,15 @@ func (c *runCopy) leftOut(skipped []string, report func(string)) {
 	if len(skipped) > 0 {
 		report(fmt.Sprintf(textCopyLeftOut, shownPaths(skipped)))
 		c.qoryLeftOut = slices.Contains(skipped, checkout.Dir)
+	}
+}
+
+// failed prints the entries that a copy back left out because a read or a write of them failed,
+// and keeps the copy, which still has them.
+func (c *runCopy) failed(paths []string, report func(string)) {
+	if len(paths) > 0 {
+		report(fmt.Sprintf(textCopyFailed, shownPaths(paths)))
+		c.kept(report)
 	}
 }
 
@@ -641,6 +653,7 @@ func (c *runCopy) copyBack(ctx context.Context, report func(string)) bool {
 		} else {
 			report(shownError(err))
 		}
+		c.failed(res.Failed, report)
 		c.kept(report)
 		return false
 	}
@@ -648,14 +661,18 @@ func (c *runCopy) copyBack(ctx context.Context, report func(string)) bool {
 		report(fmt.Sprintf(textCopyBack, count(len(res.Copied), "file", "files"), exports.Value(c.root, false), count(len(res.Deleted), "file", "files")))
 	}
 	c.leftOut(copyBackSkips(res.Skipped, c.dir.Work()), report)
+	c.failed(res.Failed, report)
 	if len(res.Conflicts) > 0 {
 		report(fmt.Sprintf(textCopyConflicts, shownPaths(res.Conflicts)))
+	}
+	if len(res.NotDeleted) > 0 {
+		report(fmt.Sprintf(textCopyNotDeleted, shownPaths(res.NotDeleted)))
 	}
 	if keys := actingKeys(res.Acting); keys != "" {
 		report(fmt.Sprintf(textCopyActingKept, keys))
 	}
 	// The person's version of each such file stays, so the run's is only in the copy.
-	if len(res.Conflicts)+len(res.Acting) > 0 {
+	if len(res.Acting) > 0 {
 		c.kept(report)
 	}
 	return true

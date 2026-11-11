@@ -707,12 +707,57 @@ func TestSeveralRepositoriesLandOnTheRunsBranch(t *testing.T) {
 	}
 }
 
-// TestAPlainFolderConflictKeepsTheCopy is a plain folder whose file the person changes during
-// the run, and the run too: the person's stays, and the copy stays with the run's, disarmed.
-func TestAPlainFolderConflictKeepsTheCopy(t *testing.T) {
+// TestAPlainFolderConflictPutsTheRunsVersionBeside is a plain folder whose files the person changes during
+// the run, and the run too: the person's stay, the run's version of the changed file goes beside
+// it, the run's deletion is listed, and the copy is removed.
+func TestAPlainFolderConflictPutsTheRunsVersionBeside(t *testing.T) {
 	root := emptyDir(t)
 	copyFixture(t, "two-modules", root)
 	writeFile(t, filepath.Join(root, "both.txt"), "first\n")
+	writeFile(t, filepath.Join(root, "gone.txt"), "first\n")
+	docker, _ := fakeDocker(t)
+	walledBy(t, docker)
+	t.Setenv("QORY_RUN_KEY", "")
+	var copyDir string
+	agentInCopy(t, func(spec session.SessionSpec) {
+		copyDir = spec.Dir
+		writeFile(t, filepath.Join(spec.Dir, "both.txt"), "the run\n")
+		if err := os.Remove(filepath.Join(spec.Dir, "gone.txt")); err != nil {
+			t.Error(err)
+		}
+		writeFile(t, filepath.Join(root, "both.txt"), "the person\n")
+		writeFile(t, filepath.Join(root, "gone.txt"), "the person\n")
+	})
+	out, err := run(t, "run", "claude", "--home", filepath.Join(tempDir(t), "home"), "--", "-p", "hi")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	wants(t, out,
+		"you and the run both changed these files: yours stay, and the run's version of each is beside it with -from-run: both.txt.",
+		"you and the run both changed these files, so yours stay: gone.txt.")
+	for name, want := range map[string]string{"both.txt": "the person\n", "both.txt-from-run": "the run\n", "gone.txt": "the person\n"} {
+		if data, err := os.ReadFile(filepath.Join(root, name)); err != nil || string(data) != want {
+			t.Errorf("%s has %q (%v), want %q", name, data, err, want)
+		}
+	}
+	if strings.Contains(out, "read the run's files in") {
+		t.Errorf("the copy stays:\n%s", out)
+	}
+	if _, err := os.Lstat(copyDir); err == nil {
+		t.Errorf("the copy %s stays", copyDir)
+	}
+}
+
+// TestAPlainFolderFailedFileKeepsTheCopy is a plain folder where the person closes a folder for
+// writes during the run, and the run adds a file there: the line lists that file, the rest comes
+// back, and the copy stays with the file, disarmed.
+func TestAPlainFolderFailedFileKeepsTheCopy(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root writes every folder")
+	}
+	root := emptyDir(t)
+	copyFixture(t, "two-modules", root)
+	writeFile(t, filepath.Join(root, "closed", "old.txt"), "first\n")
 	docker, _ := fakeDocker(t)
 	walledBy(t, docker)
 	t.Setenv("QORY_RUN_KEY", "")
@@ -720,19 +765,23 @@ func TestAPlainFolderConflictKeepsTheCopy(t *testing.T) {
 	agentInCopy(t, func(spec session.SessionSpec) {
 		copyDir = spec.Dir
 		writeFile(t, filepath.Join(spec.Dir, ".git", "config"), "[core]\n\tbare = false\n")
-		writeFile(t, filepath.Join(spec.Dir, "both.txt"), "the run\n")
-		writeFile(t, filepath.Join(root, "both.txt"), "the person\n")
+		writeFile(t, filepath.Join(spec.Dir, "closed", "new.txt"), "the run\n")
+		writeFile(t, filepath.Join(spec.Dir, "other.txt"), "the run\n")
+		if err := os.Chmod(filepath.Join(root, "closed"), 0o555); err != nil {
+			t.Error(err)
+		}
 	})
+	t.Cleanup(func() { _ = os.Chmod(filepath.Join(root, "closed"), 0o755) })
 	out, err := run(t, "run", "claude", "--home", filepath.Join(tempDir(t), "home"), "--", "-p", "hi")
 	if err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
-	wants(t, out, "you and the run both changed these files, so yours stay: both.txt", "read the run's files in "+copyDir+", run no git there, then remove the folder")
-	if data, err := os.ReadFile(filepath.Join(root, "both.txt")); err != nil || string(data) != "the person\n" {
-		t.Errorf("both.txt has %q (%v)", data, err)
+	wants(t, out, "left out of the copy back, as qory could not read or write them: closed/new.txt.", "read the run's files in "+copyDir+", run no git there, then remove the folder")
+	if data, err := os.ReadFile(filepath.Join(root, "other.txt")); err != nil || string(data) != "the run\n" {
+		t.Errorf("other.txt has %q (%v)", data, err)
 	}
-	if data, err := os.ReadFile(filepath.Join(copyDir, "both.txt")); err != nil || string(data) != "the run\n" {
-		t.Errorf("the copy's both.txt has %q (%v)", data, err)
+	if data, err := os.ReadFile(filepath.Join(copyDir, "closed", "new.txt")); err != nil || string(data) != "the run\n" {
+		t.Errorf("the copy's closed/new.txt has %q (%v)", data, err)
 	}
 	wantDisarmed(t, copyDir)
 }

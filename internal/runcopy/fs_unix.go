@@ -147,10 +147,11 @@ func writable(dir int, path string, depth int) error {
 	return nil
 }
 
-// disarmedSuffix goes after the name of what [Dir.Disarm] renames.
+// disarmedSuffix goes after the name of what [Dir.Disarm] renames, and of the run's version of a
+// file that [Dir.CopyBack] writes beside the person's.
 const disarmedSuffix = "-from-run"
 
-// maxRenameTries is how many names [renameOut] tries in one folder.
+// maxRenameTries is how many names [fromRunName] tries in one folder, past the first.
 const maxRenameTries = 100
 
 // maxDisarmErrors is how many errors [Dir.Disarm] returns, so the line it goes in stays short.
@@ -266,24 +267,41 @@ func disarm(ctx context.Context, dir int, path string, depth int, gitDir bool, e
 // with a number after that when the name is taken, and returns the new name. base is the plain
 // form of name, as [folded] has it, so a long name that folds to .git fits.
 func renameOut(dir int, name, base, at string) (string, error) {
+	to, err := fromRunName(base, at, dir)
+	if err != nil {
+		return "", err
+	}
+	if err := unix.Renameat(dir, name, dir, to); err != nil {
+		return "", fileErr(at, err)
+	}
+	return to, nil
+}
+
+// fromRunName is base with [disarmedSuffix], or with a number after that: the first such name
+// that no folder of dirs has, for the entry at at. It follows no link.
+func fromRunName(base, at string, dirs ...int) (string, error) {
 	base += disarmedSuffix
 	to := base
 	for i := 1; ; i++ {
-		var st unix.Stat_t
-		err := unix.Fstatat(dir, to, &st, unix.AT_SYMLINK_NOFOLLOW)
-		if errors.Is(err, unix.ENOENT) {
+		free := true
+		for _, dir := range dirs {
+			var st unix.Stat_t
+			err := unix.Fstatat(dir, to, &st, unix.AT_SYMLINK_NOFOLLOW)
+			if errors.Is(err, unix.ENOENT) {
+				continue
+			}
+			if err != nil {
+				return "", fileErr(at, err)
+			}
+			free = false
 			break
 		}
-		if err != nil {
-			return "", fileErr(at, err)
+		if free {
+			return to, nil
 		}
 		if i > maxRenameTries {
 			return "", fmt.Errorf(textNoFreeName, shown(at), maxRenameTries+1)
 		}
 		to = base + "-" + strconv.Itoa(i)
 	}
-	if err := unix.Renameat(dir, name, dir, to); err != nil {
-		return "", fileErr(at, err)
-	}
-	return to, nil
 }
