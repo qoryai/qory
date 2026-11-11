@@ -300,7 +300,10 @@ export HOME="$B/home" GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null \
 	GIT_NO_LAZY_FETCH=1 GIT_ALLOW_PROTOCOL=none LC_ALL=C
 mkdir "$HOME"
 # g is git with settings that beat the copy's configuration and a submodule's, which the agent
-# wrote: no pager, hook, fsmonitor, replace ref, signature check or signing program runs.
+# wrote: no pager, fsmonitor, replace ref, signature check, signing program or hook in a hooks
+# folder runs. git 2.55 still runs a hook that such a configuration sets with
+# hook.<name>.command, and has a key that turns hooks off for one event only, not for all. So
+# each command run with such a configuration is a read that fires no hook event.
 g() {
 	git --no-pager -c core.hooksPath=/dev/null -c core.fsmonitor=false -c core.useReplaceRefs=false \
 		-c core.commitGraph=false -c core.attributesFile=/dev/null -c core.excludesFile=/dev/null \
@@ -325,7 +328,8 @@ kind() {
 }
 # copygit is git with the copy's git folder $C as git dir, so packed refs and reftable both work.
 # It reads the copy's configuration, inside the wall, and the settings of g beat each key there
-# that would run a program for the commands below.
+# that would run a program for the commands below, but hook.<name>.command: each command below
+# reads refs, logs or the index and fires no hook event.
 copygit() {
 	g --git-dir="$C" "$@"
 }

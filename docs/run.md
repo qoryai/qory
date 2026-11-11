@@ -3822,7 +3822,11 @@ commit as its full content, in place of a pointer.
 
 The session reads the refs and reflogs of the copy, and of each submodule the clone copied, with
 git on the copy's git settings, and overrides each setting that runs a program in these reads: no
-pager, hook, fsmonitor, signature check or signing program that the run set runs.
+pager, fsmonitor, signature check, signing program or hook in a hooks folder that the run set
+runs. git 2.55 runs a hook that the git settings set with `hook.<name>.command` even with the
+hooks folder off, and has no setting that turns such hooks off for every event. Each git command
+that the session runs on the copy's git settings reads refs, logs or the index, which fires no
+hook event.
 
 A program the agent planted in the copy can run again in this session, in a container with no
 network, so the session has a time limit: 5 minutes, plus a minute for each 20,000 files, folders
