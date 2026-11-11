@@ -295,6 +295,9 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Changed
 
+- qory builds with Forager main 1b3071e2. A run keeps its wall only when a container of
+  the run may still run; a network or folder of the wall that could not be removed no longer
+  keeps it.
 - A walled run that may write and has no run code works in a copy of the checkout, under
   `qory/runs` in your cache folder, and starts from your commit at `HEAD`, so it never gets write access to your
   `.git`. Its commits land on the branch `qory/run-<run id>`, which qory never checks out,
