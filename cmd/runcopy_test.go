@@ -913,7 +913,7 @@ func TestAPlainFolderLeavesOutGeneratedFoldersPastTheirLimit(t *testing.T) {
 		t.Fatalf("exit %d (%v), want 1\n%s", got, err, out)
 	}
 	wants(t, out,
-		"qory run: left out of the copy back, as the folders that builds and package managers write have more than 1 files or 1 MiB in all: node_modules. They stay in the run's copy.",
+		"qory run: left out of the copy back, as the folders that builds and package managers write have more than 1 files and folders or 1 MiB in all: node_modules. They stay in the run's copy.",
 		"read the run's files in "+copyDir+", run no git there, then remove the folder")
 	if data, err := os.ReadFile(filepath.Join(root, "other.txt")); err != nil || string(data) != "the run\n" {
 		t.Errorf("other.txt has %q (%v)", data, err)

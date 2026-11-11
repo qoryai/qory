@@ -2510,6 +2510,51 @@ func TestCopyBackLeavesOutGeneratedFoldersPastTheirLimit(t *testing.T) {
 	}
 }
 
+// TestCopyBackCountsGeneratedFolders is a run that makes empty folders in node_modules: each folder
+// counts toward the limit of files in the folders of a build, so past it node_modules stays out and
+// no folder comes back. At the limit, they come back.
+func TestCopyBackCountsGeneratedFolders(t *testing.T) {
+	isolate(t)
+	files := MaxGeneratedFiles
+	t.Cleanup(func() { MaxGeneratedFiles = files })
+	for _, c := range []struct {
+		limit int
+		out   bool
+	}{{5, true}, {6, false}} {
+		t.Run(strconv.Itoa(c.limit), func(t *testing.T) {
+			MaxGeneratedFiles = c.limit
+			src := t.TempDir()
+			d := newDir(t)
+			if err := d.CopyFolder(context.Background(), src); err != nil {
+				t.Fatal(err)
+			}
+			// node_modules and five folders in it: six entries.
+			for i := range 5 {
+				if err := os.MkdirAll(filepath.Join(d.Work(), "node_modules", "d"+strconv.Itoa(i)), 0o755); err != nil {
+					t.Fatal(err)
+				}
+			}
+			r, err := d.CopyBack(context.Background(), src)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, statErr := os.Lstat(filepath.Join(src, "node_modules", "d4"))
+			if c.out {
+				if want := []string{"node_modules"}; !slices.Equal(r.Generated, want) {
+					t.Errorf("left out %q, want %q", r.Generated, want)
+				}
+				if !errors.Is(statErr, os.ErrNotExist) {
+					t.Errorf("a folder in node_modules came back: %v", statErr)
+				}
+				return
+			}
+			if len(r.Generated) != 0 || statErr != nil {
+				t.Errorf("left out %q, and node_modules/d4: %v", r.Generated, statErr)
+			}
+		})
+	}
+}
+
 // TestCopyBackTakesALargeNodeModules is a run that writes 200,000 files into node_modules, twice
 // the budget of files: the copy back brings all of them.
 func TestCopyBackTakesALargeNodeModules(t *testing.T) {
