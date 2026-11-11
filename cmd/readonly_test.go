@@ -633,7 +633,7 @@ func TestACodeWriteRunAtTheHomeFolderStops(t *testing.T) {
 			if r.joined || cmd.ExitCode(r.err) != cmd.ExitInput {
 				t.Fatalf("%v (exit %d), want exit %d before the join\n%s", r.err, cmd.ExitCode(r.err), cmd.ExitInput, r.out)
 			}
-			wants(t, r.err.Error(), "Start the run from a folder that does not contain your home folder or qory's state directory: the folder ", c.want, ", and a write run from a run code binds it into the agent's container; the code is used")
+			wants(t, r.err.Error(), "start the run from a folder that does not contain your home folder or qory's state directory: the folder ", c.want, ", and a write run from a run code binds it into the agent's container; the code is used")
 			if want := (session.Outcome{State: "failed", ExitCode: -1}); len(r.closes) != 1 || r.closes[0] != want {
 				t.Errorf("the closes %+v, want %+v", r.closes, want)
 			}

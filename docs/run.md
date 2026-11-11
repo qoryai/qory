@@ -4110,7 +4110,7 @@ the compose, exit 2, when its checkout or working folder is your home folder or 
 directory, or contains one, since the agent could change every file there:
 
 ```text
-Start the run from a folder that does not contain your home folder or qory's state directory: the folder <folder> is your home folder, and a write run from a run code binds it into the agent's container; the code is used
+start the run from a folder that does not contain your home folder or qory's state directory: the folder <folder> is your home folder, and a write run from a run code binds it into the agent's container; the code is used
 ```
 
 ### Qory's images

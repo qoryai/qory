@@ -91,7 +91,7 @@ func reservedMounts(root string, mounts []wall.Mount) error {
 // directory, see [reserved].
 const (
 	textReadBindsReserved      = "start the run from a folder that does not contain your home folder or qory's state directory: the folder %s %s, and a read run binds it into the agent's container" + codeUsed
-	textCodeWriteBindsReserved = "Start the run from a folder that does not contain your home folder or qory's state directory: the folder %s %s, and a write run from a run code binds it into the agent's container" + codeUsed
+	textCodeWriteBindsReserved = "start the run from a folder that does not contain your home folder or qory's state directory: the folder %s %s, and a write run from a run code binds it into the agent's container" + codeUsed
 )
 
 // bindsReserved stops a walled run that binds the checkout at root and the working folder cwd
