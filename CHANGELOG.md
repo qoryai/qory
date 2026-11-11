@@ -301,6 +301,14 @@ release may change what an existing document does, and states it under Upgrading
   `~/.claude/projects` in the agent's home, and the session sends the runtime's
   transcript as `dev.qory.session.transcript`. `qory run end --reason model_key_limit`
   stops with exit 2, as each of Forager's reasons does.
+- On a dispatched walled run of Claude Code, qory makes `/tmp/qory-agent-home/projects`
+  a symbolic link to `~/.claude/projects` in the container when Forager binds the run's
+  transcript folder there, after the check that the agent's home is empty. Claude Code
+  writes its transcripts through the link into the run directory, so the session sends
+  them and a continuation of a paused run starts Claude Code with `--resume`. Before,
+  Claude Code wrote them in the agent's home alone, the session sent none, and a
+  continuation started without a resume. Without the bind, qory makes no link. See
+  `docs/run.md`.
 
 - A run that lists repositories starts in an empty folder as well: qory runs `git init`
   there, then fetches. A folder that is not empty and is not a git working tree still

@@ -51,8 +51,10 @@ var wrapsAgentEnv = func(freshHome, walled bool) bool { return freshHome && wall
 // programs or the repository's commands, which run as the agent's user in the agent's
 // container and can change what the agent reads by other means; against them, the boundary is the wall. The verb's words, before the launch's,
 // hold no -p, --print or --settings, so Forager reads the launch's arguments as before.
+// With link, the verb's words hold the folder of the agent's home and its place below
+// HOME that the verb links, see [preparation.LinkTranscripts].
 // It returns what removes the folder once the run is over.
-func wrapAgentEnv(spec *runSpec, runAPI bool, report func(string)) (func(), error) {
+func wrapAgentEnv(spec *runSpec, runAPI bool, link transcriptLink, report func(string)) (func(), error) {
 	d, ok := spec.Wall.(*wall.Docker)
 	if !ok {
 		return func() {}, nil
@@ -82,7 +84,7 @@ func wrapAgentEnv(spec *runSpec, runAPI bool, report func(string)) (func(), erro
 		return nil, err
 	}
 	spec.Mounts = append(spec.Mounts, wall.Mount{Path: dir, ReadOnly: true})
-	spec.Args = slices.Concat(agentEnvArgs, []string{file, "--", spec.Command}, spec.Args)
+	spec.Args = slices.Concat(agentEnvArgs, []string{file}, link.args(), []string{"--", spec.Command}, spec.Args)
 	spec.Command = wall.HelperPath
 	before := spec.OnVariables
 	spec.OnVariables = func(a session.Applied) {
@@ -100,6 +102,19 @@ func wrapAgentEnv(spec *runSpec, runAPI bool, report func(string)) (func(), erro
 		}
 	}
 	return done, nil
+}
+
+// transcriptLink is the folder of the agent's home that the agent-env verb links to the
+// place where Forager binds the run's transcript folder, and that place, relative to
+// HOME; both are empty for a run with no link.
+type transcriptLink struct{ folder, under string }
+
+// args are the link's words of the verb, none for no link.
+func (l transcriptLink) args() []string {
+	if l.folder == "" {
+		return nil
+	}
+	return []string{l.folder, l.under}
 }
 
 // keptNames are the names Forager sets for a walled run before the run's variables are
@@ -175,23 +190,29 @@ func writeKept(file string, always, ca []string) error {
 // Code starts the agent through, after the setup commands when they run inside the wall:
 // it first makes the agent's home fresh, [preparation.FreshHome], and fails on anything
 // the image or the setup commands put there, and makes the store's folder for a run that
-// cannot write its checkout, which is the verb's working folder; it then reads the kept names from the file
+// cannot write its checkout, which is the verb's working folder; with a folder and a
+// place between the file and --, it then links that folder of the home to that place
+// below HOME, [preparation.LinkTranscripts]; it then reads the kept names from the file
 // its first argument names, removes from its environment every [preparation.Dropped] name the file
 // does not keep, but a prefixed name holding the gateway's placeholder, and executes the
 // launch after -- with its arguments unchanged. It parses no flag. It prints nothing; on
 // a failure it prints one line that names no value, and the agent does not start.
 func newAgentEnv() *cobra.Command {
 	return &cobra.Command{
-		Use:                "agent-env file -- command [argument...]",
+		Use:                "agent-env file [folder place] -- command [argument...]",
 		Short:              "Start the agent without the image's values of the variables qory removes",
 		Hidden:             true,
 		Annotations:        map[string]string{inWall: "agent-env"},
 		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			// Last before the agent: its home, made fresh.
+			// Last before the agent: its home, made fresh, then the link of its
+			// transcripts, which the check of the home does not see.
 			err := preparation.FreshHome(os.Getenv, !checkoutWritable("."))
 			var path string
 			var argv, env []string
+			if err == nil {
+				err = agentEnvLink(args)
+			}
 			if err == nil {
 				path, argv, env, err = agentEnvLaunch(args, os.Environ())
 			}
@@ -205,22 +226,46 @@ func newAgentEnv() *cobra.Command {
 	}
 }
 
-// agentEnvLaunch is what the agent-env verb executes for its arguments, the kept names'
-// file, -- and the launch: the program's path, found as the shell finds it, the launch
-// as given, and env without the names it drops.
-func agentEnvLaunch(args, env []string) (string, []string, []string, error) {
-	if len(args) < 3 || args[1] != "--" {
-		return "", nil, nil, errors.New("takes the file of kept names, --, and the command")
+// agentEnvParts splits the agent-env verb's arguments: the kept names' file, then the
+// transcripts' folder and place or nothing, then --, then the launch.
+func agentEnvParts(args []string) (file string, link transcriptLink, launch []string, err error) {
+	i := slices.Index(args, "--")
+	switch {
+	case i == 1 && len(args) > 2:
+	case i == 3 && len(args) > 4 && args[1] != "":
+		link = transcriptLink{folder: args[1], under: args[2]}
+	default:
+		return "", link, nil, errors.New("takes the file of kept names, the transcripts' folder and place when it links them, --, and the command")
 	}
-	data, err := os.ReadFile(args[0])
+	return args[0], link, args[i+1:], nil
+}
+
+// agentEnvLink makes the link of the transcripts that the agent-env verb's arguments
+// have, see [preparation.LinkTranscripts], and nothing for arguments with none.
+func agentEnvLink(args []string) error {
+	_, link, _, err := agentEnvParts(args)
+	if err != nil {
+		return err
+	}
+	return preparation.LinkTranscripts(os.Getenv, link.folder, link.under)
+}
+
+// agentEnvLaunch is what the agent-env verb executes for its arguments, the kept names'
+// file, the link's words when there are any, -- and the launch: the program's path,
+// found as the shell finds it, the launch as given, and env without the names it drops.
+func agentEnvLaunch(args, env []string) (string, []string, []string, error) {
+	file, _, argv, err := agentEnvParts(args)
+	if err != nil {
+		return "", nil, nil, err
+	}
+	data, err := os.ReadFile(file)
 	if err != nil {
 		return "", nil, nil, err
 	}
 	keep, err := preparation.KeepFor(data, wall.BundlePath)
 	if err != nil {
-		return "", nil, nil, fmt.Errorf("%s: %w", args[0], err)
+		return "", nil, nil, fmt.Errorf("%s: %w", file, err)
 	}
-	argv := args[2:]
 	path, err := exec.LookPath(argv[0])
 	if err != nil {
 		return "", nil, nil, err

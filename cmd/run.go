@@ -666,6 +666,9 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			// readOnly is set once the compose has the workflows: the run only reads the
 			// checkout, see [readsOnly].
 			var readOnly bool
+			// link is the transcript link of a run whose agent starts on a fresh home, see
+			// [transcriptLinkFor].
+			var link transcriptLink
 			prepareLaunch := func(w io.Writer) (freshHome bool, err error) {
 				composing.writable = nil
 				for _, m := range spec.Mounts {
@@ -746,6 +749,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				spec.LaunchFixed, spec.LaunchDefaults, spec.HarnessHome = launch.Fixed, launch.Defaults, launch.HarnessHome
 				if h, ok := renderer.(render.AgentHomer); ok && dispatched && walled {
 					spec.LaunchFixed, freshHome = withAgentHome(spec.LaunchFixed, h.AgentHomeVariable()), true
+					link = transcriptLinkFor(renderer, rt)
 				}
 				return freshHome, nil
 			}
@@ -753,7 +757,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			// for a walled run the record of each place the container may write.
 			prepareSession := func(freshHome bool) error {
 				if wrapsAgentEnv(freshHome, walled) {
-					done, err := wrapAgentEnv(&spec, hasRunAPI(run), said)
+					done, err := wrapAgentEnv(&spec, hasRunAPI(run), link, said)
 					if err != nil {
 						return err
 					}

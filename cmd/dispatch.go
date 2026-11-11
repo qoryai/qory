@@ -7,6 +7,8 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/qoryai/forager/session/runtimes"
+
 	"github.com/qoryai/qory/internal/config"
 	"github.com/qoryai/qory/internal/exports"
 	"github.com/qoryai/qory/internal/preparation"
@@ -35,6 +37,30 @@ func withAgentHome(fixed []string, name string) []string {
 	out = append(out, name+"="+preparation.AgentHome)
 	slices.Sort(out)
 	return out
+}
+
+// transcriptLinkFor is the transcript link of a dispatched walled run whose renderer is
+// a [render.TranscriptLinker] and whose runtime rt has a descriptor with resume: the
+// renderer's folder, linked to resume.prefix without its ~/ and its last /, where Forager
+// binds the run's transcript folder below HOME. Any other run gets none.
+func transcriptLinkFor(renderer render.Runtime, rt runtimes.Runtime) transcriptLink {
+	l, ok := renderer.(render.TranscriptLinker)
+	if !ok {
+		return transcriptLink{}
+	}
+	r, ok := rt.(runtimes.Resumes)
+	if !ok {
+		return transcriptLink{}
+	}
+	rs, ok := r.Resume()
+	if !ok {
+		return transcriptLink{}
+	}
+	under := strings.TrimSuffix(strings.TrimPrefix(rs.Prefix, "~/"), "/")
+	if under == "" {
+		return transcriptLink{}
+	}
+	return transcriptLink{folder: l.TranscriptFolder(), under: under}
 }
 
 // homeInFolder stops a run given a run key whose harness home is inside the folder at

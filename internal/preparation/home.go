@@ -6,6 +6,8 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 
 	"github.com/qoryai/qory/internal/integration"
 )
@@ -150,6 +152,60 @@ func freshFolder(path string, words freshWords) error {
 		return notMade(err)
 	}
 	return nil
+}
+
+// The words of [LinkTranscripts], which qory run agent-env prints after its name. Each is
+// one format string, with the fix first.
+const (
+	textLinkBad     = "point wall.helper at the Linux build of the qory that starts the run: the transcripts' folder %s or its place %s is not a relative path without a .. name"
+	textLinkNotMade = "let the agent's user write %s, then run again: the link of the agent's transcripts to %s could not be made: %s"
+)
+
+// LinkTranscripts makes folder in the agent's home, [AgentHome], a symbolic link to under
+// below HOME, the place inside where Forager binds the run's transcript folder, so the
+// program writes its transcripts into that folder of the machine. qory run agent-env
+// calls it after [FreshHome], so the check of the home finds it empty. It does nothing
+// when getenv does not set [EnvAgentHome] to the agent's home, when folder is empty, when
+// getenv sets no HOME, and when no mount is at the place or the read of the mounts
+// failed. Without a mount there, Forager binds no transcript folder for the run: the
+// program then writes its transcripts in the agent's home, and nothing the image has at
+// the place reaches the agent.
+func LinkTranscripts(getenv func(string) string, folder, under string) error {
+	if getenv(EnvAgentHome) != AgentHome {
+		return nil
+	}
+	return linkTranscripts(AgentHome, getenv("HOME"), folder, under)
+}
+
+// linkTranscripts makes folder of the agent's home at agentHome a link to under below
+// home, see [LinkTranscripts].
+func linkTranscripts(agentHome, home, folder, under string) error {
+	if folder == "" {
+		return nil
+	}
+	if !relative(folder) || !relative(under) {
+		return fmt.Errorf(textLinkBad, integration.Printable(folder), integration.Printable(under))
+	}
+	if !filepath.IsAbs(home) {
+		return nil
+	}
+	target := filepath.Join(home, under)
+	if info, err := readMountinfo(); err != nil || !Mounted(info, target) {
+		return nil
+	}
+	link := filepath.Join(agentHome, folder)
+	if err := os.MkdirAll(filepath.Dir(link), 0o700); err != nil {
+		return fmt.Errorf(textLinkNotMade, integration.Printable(link), integration.Printable(target), integration.Printable(err.Error()))
+	}
+	if err := os.Symlink(target, link); err != nil {
+		return fmt.Errorf(textLinkNotMade, integration.Printable(link), integration.Printable(target), integration.Printable(err.Error()))
+	}
+	return nil
+}
+
+// relative reports whether p is a clean relative path that is not . and has no .. name.
+func relative(p string) bool {
+	return p != "" && !filepath.IsAbs(p) && filepath.Clean(p) == p && p != "." && !slices.Contains(strings.Split(p, "/"), "..")
 }
 
 // madeHome runs between the Mkdir of the agent's home and its open; a test puts

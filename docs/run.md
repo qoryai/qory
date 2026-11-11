@@ -1352,7 +1352,12 @@ reads the settings, `CLAUDE.md`, plugins and memory of the user running qory, as
 `--setting-sources user` reads them. Behind a wall, `CLAUDE_CONFIG_DIR` is
 `/tmp/qory-agent-home` in the container, an empty folder of mode 0700 that qory makes after
 the commands the repository's configuration runs, last before Claude Code starts; the run is
-refused when anything is at that path then. The model key comes through the gateway, so
+refused when anything is at that path then. When Forager binds the run's transcript folder
+at `~/.claude/projects` in the container, qory then makes `/tmp/qory-agent-home/projects` a
+symbolic link to it: Claude Code writes its transcripts into that folder of the run
+directory, Forager sends them to the control plane, and a continuation of a paused run
+resumes from them. Without the bind, qory makes no link, and the transcripts stay in the
+container. The model key comes through the gateway, so
 the empty folder needs no login. `HOME` stays the image's. Claude Code starts through
 qory, which removes the image's values of the variables named `ANTHROPIC_*`, `CLAUDE_*`,
 `QORY_*`, `MCP_*` and `OTEL_*`, of `NODE_OPTIONS`, `NODE_PATH`, `LD_PRELOAD`, `LD_AUDIT`,
@@ -3613,7 +3618,8 @@ with `access: write`. A read run sees the checkout read-only:
 
   Every other write stops at `dontAsk`, apart from Claude Code's memory folder,
   `/tmp/qory-agent-home/projects/<project>/memory/`, which Claude Code lets the agent write
-  with no rule. That folder stays in the container and does not reach the checkout. An
+  with no rule. That folder does not reach the checkout: it is in the run's transcript
+  folder in the run directory when Forager binds one, and in the container otherwise. An
   `Edit` or `Write` allow in the composed settings opens the rest of the container, and the
   deny rules and the read-only mount still stop a write to the checkout.
 - The setup and the host steps write the checkout, so the checkout stays among the places

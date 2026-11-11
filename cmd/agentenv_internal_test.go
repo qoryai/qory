@@ -12,6 +12,7 @@ import (
 	"github.com/qoryai/forager/wall"
 
 	"github.com/qoryai/qory/internal/preparation"
+	"github.com/qoryai/qory/internal/render"
 )
 
 // TestTheAgentEnvKeepsTheNamesForagerSets is a dispatched walled run of Claude Code
@@ -30,7 +31,7 @@ func TestTheAgentEnvKeepsTheNamesForagerSets(t *testing.T) {
 	}
 	var said []string
 	spec := runSpec{OpenSpec: session.OpenSpec{Wall: &wall.Docker{}}, SessionSpec: session.SessionSpec{Runtime: rt, Command: "sh", Args: []string{"--settings", "/h/claude/settings.json", "-p", "two words"}, HarnessHome: "/h", LaunchFixed: withAgentHome(nil, preparation.EnvAgentHome), Mounts: []wall.Mount{{Path: "/work"}}}}
-	done, err := wrapAgentEnv(&spec, false, func(line string) { said = append(said, line) })
+	done, err := wrapAgentEnv(&spec, false, transcriptLink{}, func(line string) { said = append(said, line) })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,7 +121,7 @@ func TestTheAgentEnvKeepsTheStartKeysEndpoint(t *testing.T) {
 		t.Fatal(err)
 	}
 	spec := runSpec{OpenSpec: session.OpenSpec{Wall: &wall.Docker{}}, SessionSpec: session.SessionSpec{Runtime: rt, Command: "sh", Args: []string{"-p", "two words"}, HarnessHome: "/h", LaunchFixed: withAgentHome(nil, preparation.EnvAgentHome)}}
-	done, err := wrapAgentEnv(&spec, false, func(line string) { t.Errorf("said %q", line) })
+	done, err := wrapAgentEnv(&spec, false, transcriptLink{}, func(line string) { t.Errorf("said %q", line) })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -136,5 +137,60 @@ func TestTheAgentEnvKeepsTheStartKeysEndpoint(t *testing.T) {
 	}
 	if want := env[:3]; !slices.Equal(got, want) {
 		t.Errorf("env %q\nwant %q", got, want)
+	}
+}
+
+// TestTheAgentEnvLinksClaudeCodesTranscripts is a dispatched walled run of Claude Code,
+// whose descriptor has resume.prefix ~/.claude/projects/: the verb's words hold the
+// renderer's folder projects and the place .claude/projects between the kept names' file
+// and --, still with no -p, --print or --settings, and the verb starts the launch after
+// -- unchanged. A runtime whose renderer has no transcript folder gets no link.
+func TestTheAgentEnvLinksClaudeCodesTranscripts(t *testing.T) {
+	rt, err := catalog.Lookup("claude", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	renderer, err := render.Lookup("claude")
+	if err != nil {
+		t.Fatal(err)
+	}
+	link := transcriptLinkFor(renderer, rt)
+	if link != (transcriptLink{folder: "projects", under: ".claude/projects"}) {
+		t.Fatalf("the link is %+v", link)
+	}
+	codex, err := render.Lookup("codex")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := transcriptLinkFor(codex, rt); got != (transcriptLink{}) {
+		t.Errorf("a renderer with no transcript folder gets %+v", got)
+	}
+
+	spec := runSpec{OpenSpec: session.OpenSpec{Wall: &wall.Docker{}}, SessionSpec: session.SessionSpec{Runtime: rt, Command: "sh", Args: []string{"-p", "two words"}, LaunchFixed: withAgentHome(nil, preparation.EnvAgentHome)}}
+	done, err := wrapAgentEnv(&spec, false, link, func(line string) { t.Errorf("said %q", line) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer done()
+	if len(spec.Args) < 6 || !slices.Equal(spec.Args[3:6], []string{"projects", ".claude/projects", "--"}) {
+		t.Fatalf("the launch is %s %q", spec.Command, spec.Args)
+	}
+	for _, w := range spec.Args[:6] {
+		if w == "-p" || w == "--print" || strings.HasPrefix(w, "--settings") {
+			t.Errorf("the verb's words hold %s", w)
+		}
+	}
+	file, got, launch, err := agentEnvParts(spec.Args[2:])
+	if err != nil || file != spec.Args[2] || got != link || !slices.Equal(launch, []string{"sh", "-p", "two words"}) {
+		t.Errorf("the parts are %q %+v %q, %v", file, got, launch, err)
+	}
+	_, argv, _, err := agentEnvLaunch(spec.Args[2:], []string{"PATH=" + os.Getenv("PATH")})
+	if err != nil || !slices.Equal(argv, []string{"sh", "-p", "two words"}) {
+		t.Errorf("starts %q, %v", argv, err)
+	}
+	for _, args := range [][]string{{file, "projects", "--", "sh"}, {file, "", ".claude/projects", "--", "sh"}, {file, "projects", ".claude/projects", "--"}} {
+		if _, _, _, err := agentEnvParts(args); err == nil {
+			t.Errorf("%q: no error", args)
+		}
 	}
 }
