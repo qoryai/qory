@@ -3780,6 +3780,9 @@ Part of the run's work can stay in the copy:
   submodule. An ignore rule that covers a repository's folder keeps it out of this list. The session
   prints a line with its path.
 - A commit or a change in a submodule that the clone did not copy, such as one that the agent set up.
+- A repository inside a submodule that the session cannot check: one whose path is a link or goes
+  through one, one more than 8 submodules deep, or one with no `.git` whose folder is not empty,
+  such as a nested submodule that no update populated, with a file the agent wrote there.
 - A file or a folder that the session cannot read after it gives itself read access, such as one
   that another user owns. The rest of the work comes back.
 - A setup's file that the agent commits as it is, under a filter set only in the copy's git settings,

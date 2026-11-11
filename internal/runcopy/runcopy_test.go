@@ -4651,6 +4651,184 @@ func setupRecord(t *testing.T, d Dir, r Repository) LeftOut {
 	return LeftOut{Setup: states, Submodules: submodules}
 }
 
+// gitlinks commits in the repository at dir a gitlink at each of paths, at commit.
+func gitlinks(t *testing.T, dir, commit string, paths ...string) {
+	t.Helper()
+	for _, p := range paths {
+		testGit(t, dir, "update-index", "--add", "--cacheinfo", "160000,"+commit+","+p)
+	}
+	testGit(t, dir, "commit", "--quiet", "-m", "gitlinks")
+}
+
+// TestAGitlinkThatIsALinkIsLeftBehind is a submodule with gitlinks that are links, or go through
+// one: to the submodule's folder, which would repeat its status without end, or to a repository
+// outside the copy at the gitlink's commit with no change. The status does not follow them, the
+// session ends within 30 seconds, and the copy stays.
+func TestAGitlinkThatIsALinkIsLeftBehind(t *testing.T) {
+	for name, c := range map[string]struct {
+		nested  bool
+		outside bool
+		paths   []string
+		links   map[string]string
+	}{
+		"two links to the folder":         {paths: []string{"a", "b"}, links: map[string]string{"a": ".", "b": "."}},
+		"three links to the folder":       {paths: []string{"a", "b", "c"}, links: map[string]string{"a": ".", "b": ".", "c": "."}},
+		"two links in a nested submodule": {nested: true, paths: []string{"a", "b"}, links: map[string]string{"a": ".", "b": "."}},
+		"a link to a repository":          {outside: true, paths: []string{"a"}, links: map[string]string{"a": "a"}},
+		"a gitlink through a link":        {outside: true, paths: []string{"x/a"}, links: map[string]string{"x": ""}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			isolate(t)
+			sessionGit(t)
+			var src, s string
+			if c.nested {
+				src = nestedSubmodule(t)
+			} else {
+				src, _ = withSubmodule(t)
+			}
+			d, repos := cloneRun(t, src)
+			if c.nested {
+				updateSubmodules(t, d.Work())
+				s = filepath.Join(d.Work(), "libs", "m", "inner")
+			} else {
+				s = filepath.Join(d.Work(), "libs", "s")
+			}
+			commit := testGit(t, s, "rev-parse", "HEAD")
+			outside := t.TempDir()
+			if c.outside {
+				repo := filepath.Join(outside, "a")
+				write(t, repo, "f.txt", "f\n")
+				testGit(t, repo, "init", "--quiet", "-b", "main")
+				commit = commitAll(t, repo, "outside")
+			}
+			gitlinks(t, s, commit, c.paths...)
+			for l, target := range c.links {
+				if c.outside {
+					target = filepath.Join(outside, target)
+				}
+				link(t, s, l, target)
+			}
+			start := time.Now()
+			printed := sessionOutput(t, d, repos, nil)
+			if took := time.Since(start); took > 30*time.Second {
+				t.Errorf("the session took %s", took)
+			}
+			if !leftBehind(d, repos) {
+				t.Errorf("the session recorded no work left behind:\n%s", printed)
+			}
+		})
+	}
+}
+
+// nest makes a chain of levels repositories below the folder dir, each in the folder d of the one
+// above it, with one commit that has the file f.txt and the gitlink d of the next, and commits a
+// gitlink at d in the repository at dir.
+func nest(t *testing.T, dir string, levels int) {
+	t.Helper()
+	paths := make([]string, levels)
+	p := dir
+	for i := range paths {
+		p = filepath.Join(p, "d")
+		paths[i] = p
+	}
+	for i := levels - 1; i >= 0; i-- {
+		write(t, paths[i], "f.txt", "f\n")
+		testGit(t, paths[i], "init", "--quiet", "-b", "main")
+		testGit(t, paths[i], "add", "f.txt")
+		if i+1 < levels {
+			gitlinks(t, paths[i], testGit(t, paths[i+1], "rev-parse", "HEAD"), "d")
+		} else {
+			testGit(t, paths[i], "commit", "--quiet", "-m", "level")
+		}
+	}
+	gitlinks(t, dir, testGit(t, paths[0], "rev-parse", "HEAD"), "d")
+}
+
+// TestASubmoduleMoreThanEightDeepIsLeftBehind is an agent that commits a submodule the clone did
+// not copy, the first of a chain of repositories, with no change: at 8 submodules deep the session
+// checks each, and at 9 the copy stays.
+func TestASubmoduleMoreThanEightDeepIsLeftBehind(t *testing.T) {
+	for _, deep := range []int{8, 9} {
+		t.Run(strconv.Itoa(deep), func(t *testing.T) {
+			isolate(t)
+			sessionGit(t)
+			src, _ := person(t)
+			d, repos := cloneRun(t, src)
+			nest(t, d.Work(), deep)
+			printed := sessionOutput(t, d, repos, nil)
+			if got := leftBehind(d, repos); got != (deep > 8) {
+				t.Errorf("left behind = %v:\n%s", got, printed)
+			}
+		})
+	}
+}
+
+// TestAFileInAnUnpopulatedNestedSubmoduleIsLeftBehind is a nested submodule that no update
+// populated, an empty folder after the clone: a file the agent writes there keeps the copy, and
+// the empty folder keeps nothing.
+func TestAFileInAnUnpopulatedNestedSubmoduleIsLeftBehind(t *testing.T) {
+	for _, file := range []bool{true, false} {
+		t.Run(fmt.Sprintf("a file %t", file), func(t *testing.T) {
+			isolate(t)
+			sessionGit(t)
+			d, repos := cloneRun(t, nestedSubmodule(t))
+			inner := filepath.Join(d.Work(), "libs", "m", "inner")
+			if entries, err := os.ReadDir(inner); err != nil || len(entries) > 0 {
+				t.Fatalf("the clone left %d entries in libs/m/inner: %v", len(entries), err)
+			}
+			if file {
+				write(t, inner, "new.txt", "agent work\n")
+			}
+			printed := sessionOutput(t, d, repos, nil)
+			if got := leftBehind(d, repos); got != file {
+				t.Errorf("left behind = %v:\n%s", got, printed)
+			}
+		})
+	}
+}
+
+// TestAQuotedGitlinkInASubmoduleIsLeftBehind is a gitlink with a double quote in its path, which
+// git ls-files quotes, in a submodule, at an empty folder: the session cannot check it, and the
+// copy stays.
+func TestAQuotedGitlinkInASubmoduleIsLeftBehind(t *testing.T) {
+	isolate(t)
+	sessionGit(t)
+	src, sub := withSubmodule(t)
+	d, repos := cloneRun(t, src)
+	s := filepath.Join(d.Work(), filepath.FromSlash(sub))
+	gitlinks(t, s, testGit(t, s, "rev-parse", "HEAD"), `q"x`)
+	if err := os.Mkdir(filepath.Join(s, `q"x`), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	printed := sessionOutput(t, d, repos, nil)
+	if !leftBehind(d, repos) {
+		t.Errorf("the session recorded no work left behind:\n%s", printed)
+	}
+}
+
+// TestAFailedStatusInANestedSubmoduleIsLeftBehind is a nested submodule at its gitlink's commit,
+// whose tree is missing from its objects: its status fails, and the copy stays.
+func TestAFailedStatusInANestedSubmoduleIsLeftBehind(t *testing.T) {
+	isolate(t)
+	sessionGit(t)
+	d, repos := cloneRun(t, nestedSubmodule(t))
+	updateSubmodules(t, d.Work())
+	m := filepath.Join(d.Work(), "libs", "m")
+	inner := filepath.Join(m, "inner")
+	write(t, inner, "lib.txt", "changed\n")
+	head := commitAll(t, inner, "inner")
+	tree := testGit(t, inner, "rev-parse", "HEAD^{tree}")
+	objects := testGit(t, inner, "rev-parse", "--path-format=absolute", "--git-path", "objects")
+	if err := os.Remove(filepath.Join(objects, tree[:2], tree[2:])); err != nil {
+		t.Fatal(err)
+	}
+	gitlinks(t, m, head, "inner")
+	printed := sessionOutput(t, d, repos, nil)
+	if !leftBehind(d, repos) {
+		t.Errorf("the session recorded no work left behind:\n%s", printed)
+	}
+}
+
 // TestAnUnreadableFileLeavesTheRestToComeBack is a file of mode 000 beside other work: the session
 // TestAnUnreadableFileComesBack is a file of mode 000 that the agent left, which the session's user
 // owns, beside a commit, a change or nothing else: the session gives itself read access, and the
