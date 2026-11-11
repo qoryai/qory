@@ -27,6 +27,7 @@ import (
 	"github.com/qoryai/qory/internal/preparation"
 	"github.com/qoryai/qory/internal/proxygit"
 	"github.com/qoryai/qory/internal/runapi"
+	"github.com/qoryai/qory/internal/runcopy"
 )
 
 // SetWriteLabels makes qory run keep a checkout's labels with f, and returns what
@@ -222,6 +223,14 @@ func LoseLinkAfterJoin(lost error) func() {
 		return nil, lost
 	}
 	return func() { joinSession = before }
+}
+
+// SetGeneratedLimits sets the most files and bytes in the folders of builds and package
+// managers that a copy back writes, and returns the function that restores both.
+func SetGeneratedLimits(files int, bytes int64) func() {
+	oldFiles, oldBytes := runcopy.MaxGeneratedFiles, runcopy.MaxGeneratedBytes
+	runcopy.MaxGeneratedFiles, runcopy.MaxGeneratedBytes = files, bytes
+	return func() { runcopy.MaxGeneratedFiles, runcopy.MaxGeneratedBytes = oldFiles, oldBytes }
 }
 
 // SetCopyStepLimit sets how long a check of a run's bundles or a copy back may take, and returns

@@ -883,6 +883,41 @@ func TestAPlainFolderFailedFileKeepsTheCopy(t *testing.T) {
 	wantDisarmed(t, copyDir)
 }
 
+// TestAPlainFolderLeavesOutGeneratedFoldersPastTheirLimit is a run in a plain folder that writes
+// more files into node_modules than the limit of the folders of builds allows: the line lists the
+// folder, the rest comes back, the copy stays, and qory run exits with 1.
+func TestAPlainFolderLeavesOutGeneratedFoldersPastTheirLimit(t *testing.T) {
+	t.Cleanup(cmd.SetGeneratedLimits(1, 1<<20))
+	root := emptyDir(t)
+	copyFixture(t, "two-modules", root)
+	docker, _ := fakeDocker(t)
+	walledBy(t, docker)
+	t.Setenv("QORY_RUN_KEY", "")
+	var copyDir string
+	agentInCopy(t, func(spec session.SessionSpec) {
+		copyDir = spec.Dir
+		writeFile(t, filepath.Join(spec.Dir, "node_modules", "a.js"), "a\n")
+		writeFile(t, filepath.Join(spec.Dir, "node_modules", "b.js"), "b\n")
+		writeFile(t, filepath.Join(spec.Dir, "other.txt"), "the run\n")
+	})
+	out, err := run(t, "run", "claude", "--home", filepath.Join(tempDir(t), "home"), "--", "-p", "hi")
+	if got := cmd.ExitCode(err); got != 1 {
+		t.Fatalf("exit %d (%v), want 1\n%s", got, err, out)
+	}
+	wants(t, out,
+		"qory run: left out of the copy back, as the folders that builds and package managers write have more than 1 files or 1 MiB in all: node_modules. They stay in the run's copy.",
+		"read the run's files in "+copyDir+", run no git there, then remove the folder")
+	if data, err := os.ReadFile(filepath.Join(root, "other.txt")); err != nil || string(data) != "the run\n" {
+		t.Errorf("other.txt has %q (%v)", data, err)
+	}
+	if _, err := os.Lstat(filepath.Join(root, "node_modules")); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("node_modules came back: %v", err)
+	}
+	if data, err := os.ReadFile(filepath.Join(copyDir, "node_modules", "a.js")); err != nil || string(data) != "a\n" {
+		t.Errorf("the copy's node_modules/a.js has %q (%v)", data, err)
+	}
+}
+
 // TestARunInARunsCopyStops is qory run and a compose in a folder of a run's copy, which a run
 // could have written: each stops with the fix first.
 func TestARunInARunsCopyStops(t *testing.T) {

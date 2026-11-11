@@ -2279,6 +2279,70 @@ func TestCopyBackCountsNoGeneratedFolder(t *testing.T) {
 	}
 }
 
+// TestCopyBackCountsAFileNamedAsAGeneratedFolder is a run that writes regular files named dist and
+// build: they are no folders of a build, so they count toward the budget.
+func TestCopyBackCountsAFileNamedAsAGeneratedFolder(t *testing.T) {
+	isolate(t)
+	src := t.TempDir()
+	d := newDir(t)
+	if err := d.CopyFolder(context.Background(), src); err != nil {
+		t.Fatal(err)
+	}
+	write(t, d.Work(), "dist", "counted\n")
+	write(t, d.Work(), "sub/build", "counted\n")
+	write(t, d.Work(), "x.txt", "counted\n")
+	if _, err := d.copyBackWith(context.Background(), src, 2, 1<<20); err == nil {
+		t.Error("three files passed a budget of two")
+	}
+}
+
+// TestCopyBackLeavesOutGeneratedFoldersPastTheirLimit is a run that writes more files into the
+// folders of a build than their limit allows: each such folder stays out, with all below it, and
+// is listed, the rest comes back, and nothing below them is deleted.
+func TestCopyBackLeavesOutGeneratedFoldersPastTheirLimit(t *testing.T) {
+	isolate(t)
+	files, bytes := MaxGeneratedFiles, MaxGeneratedBytes
+	t.Cleanup(func() { MaxGeneratedFiles, MaxGeneratedBytes = files, bytes })
+	for _, c := range []struct {
+		name  string
+		files int
+		bytes int64
+	}{{"files", 2, 1 << 20}, {"bytes", 100, 20}} {
+		t.Run(c.name, func(t *testing.T) {
+			MaxGeneratedFiles, MaxGeneratedBytes = c.files, c.bytes
+			src := t.TempDir()
+			write(t, src, "node_modules/old.js", "old\n")
+			d := newDir(t)
+			if err := d.CopyFolder(context.Background(), src); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Remove(filepath.Join(d.Work(), "node_modules", "old.js")); err != nil {
+				t.Fatal(err)
+			}
+			write(t, d.Work(), "node_modules/a/b.js", "generated\n")
+			write(t, d.Work(), "pkg/dist/c.js", "generated\n")
+			write(t, d.Work(), "pkg/dist/build/d.js", "generated\n")
+			write(t, d.Work(), "dist", "a file\n")
+			r, err := d.CopyBack(context.Background(), src)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if want := []string{"node_modules", "pkg/dist"}; !slices.Equal(r.Generated, want) {
+				t.Errorf("left out %q, want %q", r.Generated, want)
+			}
+			if want := []string{"dist"}; !slices.Equal(r.Copied, want) {
+				t.Errorf("copied %q, want %q", r.Copied, want)
+			}
+			if len(r.Deleted) != 0 || read(t, src, "node_modules/old.js") != "old\n" {
+				t.Errorf("the copy back deleted %q", r.Deleted)
+			}
+			if _, err := os.Lstat(filepath.Join(src, "pkg", "dist")); !errors.Is(err, os.ErrNotExist) {
+				t.Errorf("pkg/dist came back: %v", err)
+			}
+		})
+	}
+}
+
 // TestCopyBackTakesALargeNodeModules is a run that writes 200,000 files into node_modules, twice
 // the budget of files: the copy back brings all of them.
 func TestCopyBackTakesALargeNodeModules(t *testing.T) {

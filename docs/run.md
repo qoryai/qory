@@ -3954,7 +3954,15 @@ and qory prints its folder. Otherwise it deletes the copy.
 
 The copy back writes at most 100000 files and folders and 8589934592 bytes. What the run
 writes in a folder named `node_modules`, `.venv`, `venv`, `__pycache__`, `target`, `build`,
-`dist`, `.gradle` or `.next`, at any depth, comes back and counts nothing toward those limits.
+`dist`, `.gradle` or `.next`, at any depth, comes back and counts nothing toward those limits. A
+regular file with such a name counts. Those folders have a separate limit of 1000000 files and
+32 GiB in all. When the run writes more, qory leaves out every such folder, lists them, and keeps
+the copy, and `qory run` exits 1:
+
+```text
+qory run: left out of the copy back, as the folders that builds and package managers write have more than 1000000 files or 32 GiB in all: node_modules. They stay in the run's copy.
+```
+
 When qory cannot read a file or folder of the copy, or cannot write it in your folder, it
 leaves that entry out, copies back the rest, and deletes nothing in a folder it left out. It
 lists those entries, and the copy stays with them:

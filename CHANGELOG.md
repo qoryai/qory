@@ -363,9 +363,12 @@ release may change what an existing document does, and states it under Upgrading
 - The copy back of a run in a folder that is not a repository no longer stops at a file or
   folder that qory cannot read or write. It leaves that entry out, copies back the rest, and
   prints `left out of the copy back, as qory could not read or write them: …`, and the copy
-  stays. What the run writes in `node_modules`, `.venv`, `venv`, `__pycache__`, `target`,
-  `build`, `dist`, `.gradle` or `.next` comes back and counts nothing toward the limits of
-  100000 files and 8589934592 bytes.
+  stays. What the run writes in a folder named `node_modules`, `.venv`, `venv`,
+  `__pycache__`, `target`, `build`, `dist`, `.gradle` or `.next` comes back and counts nothing
+  toward the limits of 100000 files and 8589934592 bytes. Those folders have a separate limit of
+  1000000 files and 32 GiB in all. Past it, qory leaves them out, prints `left out of the copy
+  back, as the folders that builds and package managers write have more than 1000000 files or
+  32 GiB in all: …`, keeps the copy, and `qory run` exits 1.
 - When you and a run in a folder that is not a repository both changed a file, qory writes the
   run's version beside yours as `<name>-from-run`, or with a number after that when the name is
   taken, and prints `you and the run both changed these files: yours stay, and the run's version

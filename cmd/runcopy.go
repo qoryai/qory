@@ -54,6 +54,7 @@ const (
 	textCopyBack       = "copied %s back to %s from the run, and deleted %s there."
 	textCopyLeftOut    = "left out of the copy back to your folder: %s."
 	textCopyFailed     = "left out of the copy back, as qory could not read or write them: %s."
+	textCopyGenerated  = "left out of the copy back, as the folders that builds and package managers write have more than %d files or %s in all: %s. They stay in the run's copy."
 	textCopyConflicts  = "you and the run both changed these files: yours stay, and the run's version of each is beside it with -from-run: %s."
 	textCopyNotDeleted = "you and the run both changed these files, so yours stay: %s."
 	textCopyActingKept = "the run changed these qory settings, so those files stay as you have them: %s."
@@ -691,6 +692,7 @@ func (c *runCopy) copyBack(ctx context.Context, report func(string)) bool {
 			report(shownError(err))
 		}
 		c.failed(res.Failed, report)
+		c.generated(res.Generated, report)
 		c.kept(report)
 		return false
 	}
@@ -699,6 +701,7 @@ func (c *runCopy) copyBack(ctx context.Context, report func(string)) bool {
 	}
 	c.leftOut(copyBackSkips(res.Skipped, c.dir.Work()), report)
 	c.failed(res.Failed, report)
+	back := !c.generated(res.Generated, report)
 	if len(res.Conflicts) > 0 {
 		report(fmt.Sprintf(textCopyConflicts, shownPaths(res.Conflicts)))
 	}
@@ -712,7 +715,30 @@ func (c *runCopy) copyBack(ctx context.Context, report func(string)) bool {
 	if len(res.Acting) > 0 {
 		c.kept(report)
 	}
+	return back
+}
+
+// generated prints the folders of builds and package managers that a copy back left out past
+// [runcopy.MaxGeneratedFiles] or [runcopy.MaxGeneratedBytes], and keeps the copy, which still
+// has them. It reports whether it printed any.
+func (c *runCopy) generated(folders []string, report func(string)) bool {
+	if len(folders) == 0 {
+		return false
+	}
+	report(fmt.Sprintf(textCopyGenerated, runcopy.MaxGeneratedFiles, shownBytes(runcopy.MaxGeneratedBytes), shownPaths(folders)))
+	c.kept(report)
 	return true
+}
+
+// shownBytes is n bytes as a line shows it: in GiB or MiB when n is a whole number of them.
+func shownBytes(n int64) string {
+	switch {
+	case n > 0 && n%(1<<30) == 0:
+		return fmt.Sprintf("%d GiB", n>>30)
+	case n > 0 && n%(1<<20) == 0:
+		return fmt.Sprintf("%d MiB", n>>20)
+	}
+	return fmt.Sprintf("%d bytes", n)
 }
 
 // actingKeys is the keys of changes as a line lists them, each once in order: a key, or the
