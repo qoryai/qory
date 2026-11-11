@@ -3717,8 +3717,7 @@ checkout. Its name is `qory-copy-<run id>`, with the run's label. qory first rem
 container of that name, which an earlier run with the same id can leave. When that removal fails,
 no session runs, the copy stays, and the line of the git session that did not start ends with
 `remove the container qory-copy-<run id> with docker rm --force qory-copy-<run id>: …`. It commits
-what
-the agent left, with no setting from the copy's `.git` and no filter, and writes the run's
+what the agent left, with no setting from the copy's `.git` and no filter, and writes the run's
 branch to a git bundle. First it gives itself read access to each file and folder that it owns
 and cannot read, such as one of mode 000 that the agent made. With a branch
 checked out that descends from your commit, the bundle has that branch, and its commits keep
