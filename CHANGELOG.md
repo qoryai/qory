@@ -339,6 +339,12 @@ release may change what an existing document does, and states it under Upgrading
 - A plain folder whose `.qory` has only `artifacts` and `work-item.json`, and a commit with a file
   named `.qory`, no longer print
   `left out of the copy back to your folder: .qory.` or `left out of the run's copy: .qory.`.
+- The copy back of a run in a folder that is not a repository no longer stops at a file or
+  folder that qory cannot read or write. It leaves that entry out, copies back the rest, and
+  prints `left out of the copy back, as qory could not read or write them: …`, and the copy
+  stays. What the run writes in `node_modules`, `.venv`, `venv`, `__pycache__`, `target`,
+  `build`, `dist`, `.gradle` or `.next` comes back and counts nothing toward the limits of
+  100000 files and 8589934592 bytes.
 - A run that lists repositories starts in an empty folder as well: qory runs `git init`
   there, then fetches. A folder that is not empty and is not a git working tree still
   stops the run.

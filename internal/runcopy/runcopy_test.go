@@ -1998,6 +1998,121 @@ func TestCopyBackStopsWithItsContext(t *testing.T) {
 	}
 }
 
+// TestCopyBackListsWhatItCannotReadOrWrite is a run's file and folder that qory cannot read,
+// and a new file in a folder of the person's that qory cannot write: each is listed as failed,
+// the rest comes back, and nothing in the folder that failed is deleted.
+func TestCopyBackListsWhatItCannotReadOrWrite(t *testing.T) {
+	isolate(t)
+	if os.Geteuid() == 0 {
+		t.Skip("root reads and writes every file")
+	}
+	dest := t.TempDir()
+	write(t, dest, "locked/kept.txt", "the person\n")
+	write(t, dest, "closed/old.txt", "the person\n")
+	d := newDir(t)
+	if err := d.CopyFolder(context.Background(), dest); err != nil {
+		t.Fatal(err)
+	}
+	work := d.Work()
+	write(t, work, "a.txt", "the run\n")
+	write(t, work, "secret.txt", "the run\n")
+	write(t, work, "z.txt", "the run\n")
+	write(t, work, "closed/new.txt", "the run\n")
+	for p, mode := range map[string]os.FileMode{
+		filepath.Join(work, "secret.txt"): 0,
+		filepath.Join(work, "locked"):     0,
+		filepath.Join(dest, "closed"):     0o555,
+	} {
+		if err := os.Chmod(p, mode); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Cleanup(func() { _ = os.Chmod(filepath.Join(dest, "closed"), 0o755) })
+	r, err := d.CopyBack(context.Background(), dest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"closed/new.txt", "locked", "secret.txt"}; !slices.Equal(r.Failed, want) {
+		t.Errorf("failed %q, want %q", r.Failed, want)
+	}
+	if want := []string{"a.txt", "z.txt"}; !slices.Equal(r.Copied, want) {
+		t.Errorf("copied %q, want %q", r.Copied, want)
+	}
+	if len(r.Deleted) != 0 || read(t, dest, "locked/kept.txt") != "the person\n" {
+		t.Errorf("the copy back deleted %q", r.Deleted)
+	}
+	if read(t, dest, "z.txt") != "the run\n" {
+		t.Error("the file after the failed ones did not come back")
+	}
+}
+
+// TestCopyBackCountsNoGeneratedFolder is a run that writes more into node_modules and the other
+// folders that a build writes than the budget allows: all of it comes back, and a file outside
+// them still counts.
+func TestCopyBackCountsNoGeneratedFolder(t *testing.T) {
+	isolate(t)
+	src := t.TempDir()
+	d := newDir(t)
+	if err := d.CopyFolder(context.Background(), src); err != nil {
+		t.Fatal(err)
+	}
+	var want []string
+	for name := range generatedFolders {
+		for i := range 3 {
+			rel := name + "/sub/f" + strconv.Itoa(i)
+			write(t, d.Work(), rel, "generated\n")
+			want = append(want, rel)
+		}
+	}
+	r, err := d.copyBackWith(context.Background(), src, 2, 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	slices.Sort(want)
+	if slices.Sort(r.Copied); !slices.Equal(r.Copied, want) {
+		t.Errorf("copied %q, want %q", r.Copied, want)
+	}
+	write(t, d.Work(), "a.txt", "counted\n")
+	write(t, d.Work(), "b.txt", "counted\n")
+	write(t, d.Work(), "c.txt", "counted\n")
+	if _, err := d.copyBackWith(context.Background(), src, 2, 1<<20); err == nil {
+		t.Error("three files passed a budget of two")
+	}
+}
+
+// TestCopyBackTakesALargeNodeModules is a run that writes 200,000 files into node_modules, twice
+// the budget of files: the copy back brings all of them.
+func TestCopyBackTakesALargeNodeModules(t *testing.T) {
+	if testing.Short() {
+		t.Skip("writes 200,000 files")
+	}
+	isolate(t)
+	src := t.TempDir()
+	d := newDir(t)
+	if err := d.CopyFolder(context.Background(), src); err != nil {
+		t.Fatal(err)
+	}
+	const folders, files = 200, 1000
+	for i := range folders {
+		dir := filepath.Join(d.Work(), "node_modules", "p"+strconv.Itoa(i))
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		for j := range files {
+			if err := os.WriteFile(filepath.Join(dir, strconv.Itoa(j)), nil, 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	r, err := d.CopyBack(context.Background(), src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(r.Copied) != folders*files || len(r.Failed) != 0 {
+		t.Errorf("copied %d files, failed %q", len(r.Copied), r.Failed)
+	}
+}
+
 // TestCopyFolderStopsAtItsBudget is a folder past each budget, and a context that ended.
 func TestCopyFolderStopsAtItsBudget(t *testing.T) {
 	isolate(t)

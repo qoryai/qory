@@ -3860,6 +3860,17 @@ out and what you both changed. When you both changed a file, or the run changed 
 setting, the copy stays with the run's version of each, and qory prints its folder. Otherwise
 it deletes the copy.
 
+The copy back writes at most 100000 files and folders and 8589934592 bytes. What the run
+writes in a folder named `node_modules`, `.venv`, `venv`, `__pycache__`, `target`, `build`,
+`dist`, `.gradle` or `.next`, at any depth, comes back and counts nothing toward those limits.
+When qory cannot read a file or folder of the copy, or cannot write it in your folder, it
+leaves that entry out, copies back the rest, and deletes nothing in a folder it left out. It
+lists those entries, and the copy stays with them:
+
+```text
+left out of the copy back, as qory could not read or write them: closed/new.txt.
+```
+
 **Mounts.** A read-write `--mount` or `wall.mounts` entry stops a walled run that works in a
 copy or reads the checkout, since it would give the run write access outside the copy or the
 read-only checkout. Read-only mounts

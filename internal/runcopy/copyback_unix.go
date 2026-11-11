@@ -31,11 +31,31 @@ const maxCopyBackFiles = 100_000
 // 8 GiB keeps a run from filling the person's disk with files nobody asked for.
 const maxCopyBackBytes = 8 << 30
 
+// generatedFolders are the names of folders that a build or a package manager writes. What a
+// run writes in such a folder, at any depth, counts nothing toward the budget of [Dir.CopyBack].
+var generatedFolders = map[string]bool{
+	"node_modules": true, ".venv": true, "venv": true, "__pycache__": true, "target": true,
+	"build": true, "dist": true, ".gradle": true, ".next": true,
+}
+
+// generated reports whether rel is a folder of [generatedFolders] or lies in one.
+func generated(rel string) bool {
+	for part := range strings.SplitSeq(rel, "/") {
+		if generatedFolders[part] {
+			return true
+		}
+	}
+	return false
+}
+
 // CopyBackResult is what [Dir.CopyBack] did, each path relative to the folder with
 // forward slashes, in order.
 type CopyBackResult struct {
 	// Copied are the new and changed regular files it wrote.
 	Copied []string
+	// Failed are the entries it left out because a read or a write of them failed. Nothing
+	// below such a folder is deleted.
+	Failed []string
 	// Deleted are the files the run deleted that it deleted in the folder too.
 	Deleted []string
 	// Conflicts are the files that the run and the person both changed, or that one
@@ -60,14 +80,30 @@ type copyBack struct {
 	result   *CopyBackResult
 	qory     map[string]bool
 	skipped  map[string]bool
-	bytes    int64
-	// folders are the folders it made in the destination.
+	// in is true for [Dir.CopyArtifactsIn]: a failed read or write stops the walk.
+	in bool
+	// bytes, files and folders are what it wrote and made in the destination outside
+	// [generatedFolders], which the budget counts.
+	bytes   int64
+	files   int
 	folders int
 }
 
 // overBudget reports whether one more entry of size bytes passes the budget.
 func (c *copyBack) overBudget(size int64) bool {
-	return len(c.result.Copied)+c.folders+1 > c.maxFiles || c.bytes+size > c.maxBytes
+	return c.files+c.folders+1 > c.maxFiles || c.bytes+size > c.maxBytes
+}
+
+// fail lists rel among the failed entries and returns nil, so the walk goes on, and nothing at
+// or below rel is deleted. It returns err, the failure, when ctx ended, and for
+// [Dir.CopyArtifactsIn].
+func (c *copyBack) fail(rel string, err error) error {
+	if c.in || c.ctx.Err() != nil {
+		return err
+	}
+	c.result.Failed = append(c.result.Failed, rel)
+	c.skipped[rel] = true
+	return nil
 }
 
 // ctxReader stops a read of r once ctx ends.
@@ -118,7 +154,9 @@ var errBudget = errors.New("past the budget")
 // It follows no link on any part of a path, in the copy or in dest: it opens each
 // folder from the one above it with O_NOFOLLOW, and keeps at most [maxOpenFolders]
 // levels open. It stops past [maxCopyBackFiles] files or [maxCopyBackBytes] bytes, with
-// an error that lists what it copied. A changed file keeps the permission bits it has
+// an error that lists what it copied; what it writes in a folder of [generatedFolders] counts
+// nothing toward them. A read or a write of an entry that fails lists the entry as failed,
+// and the walk goes on. A changed file keeps the permission bits it has
 // in dest, with the run's change to the owner's execute bit, and a new one gets the
 // process's umask, with the execute bits when the copy has the owner's.
 func (d Dir) CopyBack(ctx context.Context, dest string) (CopyBackResult, error) {
@@ -199,7 +237,7 @@ func (d Dir) artifactsInWith(ctx context.Context, src string, maxFiles int, maxB
 		return result, fileErr(d.Work(), err)
 	}
 	defer unix.Close(work)
-	c := &copyBack{ctx: ctx, maxFiles: maxFiles, maxBytes: maxBytes, rec: folderRecord{}, result: &result, qory: map[string]bool{}, skipped: map[string]bool{}}
+	c := &copyBack{ctx: ctx, maxFiles: maxFiles, maxBytes: maxBytes, rec: folderRecord{}, result: &result, qory: map[string]bool{}, skipped: map[string]bool{}, in: true}
 	err = c.artifactsIn(top, work)
 	if errors.Is(err, errBudget) {
 		return result, fmt.Errorf(textCopyInLimit, shown(filepath.Join(src, checkout.Dir, artifactsFolder)), maxFiles, maxBytes)
@@ -418,11 +456,11 @@ func (c *copyBack) dir(src, dst int, rel string, depth int) error {
 	}
 	names, err := readNames(src)
 	if err != nil {
-		return fileErr(shownRel, err)
+		return c.fail(shownRel, fileErr(shownRel, err))
 	}
 	have, err := readNames(dst)
 	if err != nil {
-		return fileErr(shownRel, err)
+		return c.fail(shownRel, fileErr(shownRel, err))
 	}
 	if gitDirLike(names) || gitDirLike(append(slices.Clone(names), have...)) {
 		c.skip(shownRel, true)
@@ -439,7 +477,10 @@ func (c *copyBack) dir(src, dst int, rel string, depth int) error {
 		}
 		var st unix.Stat_t
 		if err := unix.Fstatat(src, name, &st, unix.AT_SYMLINK_NOFOLLOW); err != nil {
-			return fileErr(at, err)
+			if err := c.fail(at, fileErr(at, err)); err != nil {
+				return err
+			}
+			continue
 		}
 		switch st.Mode & unix.S_IFMT {
 		case unix.S_IFDIR:
@@ -487,16 +528,17 @@ func (c *copyBack) skip(rel string, folder bool) {
 }
 
 // sub copies back the folder name in src, at rel, into the folder of that name in dst,
-// which it makes when there is none.
+// which it makes when there is none. A folder of [generatedFolders] counts nothing toward the
+// budget.
 func (c *copyBack) sub(src, dst int, name, rel string, depth int) error {
 	from, err := unix.Openat(src, name, dirFlags, 0)
 	if err != nil {
-		return fileErr(rel, err)
+		return c.fail(rel, fileErr(rel, err))
 	}
 	defer unix.Close(from)
 	names, err := readNames(from)
 	if err != nil {
-		return fileErr(rel, err)
+		return c.fail(rel, fileErr(rel, err))
 	}
 	if gitDirLike(names) {
 		// Before the folder is made in dst, so not even an empty one is.
@@ -505,12 +547,14 @@ func (c *copyBack) sub(src, dst int, name, rel string, depth int) error {
 	}
 	switch err := unix.Mkdirat(dst, name, 0o777); {
 	case err == nil:
-		c.folders++
-		if c.overBudget(0) {
-			return errBudget
+		if !generated(rel) {
+			c.folders++
+			if c.overBudget(0) {
+				return errBudget
+			}
 		}
 	case !errors.Is(err, unix.EEXIST):
-		return fileErr(rel, err)
+		return c.fail(rel, fileErr(rel, err))
 	}
 	to, err := unix.Openat(dst, name, dirFlags, 0)
 	if errors.Is(err, unix.ELOOP) || errors.Is(err, unix.ENOTDIR) {
@@ -519,18 +563,19 @@ func (c *copyBack) sub(src, dst int, name, rel string, depth int) error {
 		return nil
 	}
 	if err != nil {
-		return fileErr(rel, err)
+		return c.fail(rel, fileErr(rel, err))
 	}
 	defer unix.Close(to)
 	return c.dir(from, to, rel, depth+1)
 }
 
 // file copies back the regular file name in src, at rel, whose owner may run it when
-// exec is true, into dst, by the rules of [Dir.CopyBack].
+// exec is true, into dst, by the rules of [Dir.CopyBack]. A file in a folder of
+// [generatedFolders] counts nothing toward the budget.
 func (c *copyBack) file(src, dst int, name, rel string, exec bool) error {
 	in, err := openFileAt(src, name, rel)
 	if err != nil {
-		return fileErr(rel, err)
+		return c.fail(rel, fileErr(rel, err))
 	}
 	defer in.Close()
 	info, err := in.Stat()
@@ -539,13 +584,14 @@ func (c *copyBack) file(src, dst int, name, rel string, exec bool) error {
 		return nil
 	}
 	was, recorded := c.rec.Files[rel]
+	counted := !generated(rel)
 	// A size past the budget stops the copy before any hash reads the file.
-	if !(recorded && info.Size() == was.Size) && c.overBudget(info.Size()) {
+	if counted && !(recorded && info.Size() == was.Size) && c.overBudget(info.Size()) {
 		return errBudget
 	}
 	now, err := hashState(boundedRead(c.ctx, in, info.Size()), exec)
 	if err != nil {
-		return fileErr(rel, err)
+		return c.fail(rel, fileErr(rel, err))
 	}
 	if recorded && now == was {
 		return nil
@@ -556,18 +602,18 @@ func (c *copyBack) file(src, dst int, name, rel string, exec bool) error {
 		c.skip(rel, false)
 		return nil
 	case err != nil:
-		return fileErr(rel, err)
+		return c.fail(rel, fileErr(rel, err))
 	case have != nil && *have == now:
 		return nil
 	case recorded && (have == nil || *have != was), !recorded && have != nil:
 		c.result.Conflicts = append(c.result.Conflicts, rel)
 		return nil
 	}
-	if c.overBudget(now.Size) {
+	if counted && c.overBudget(now.Size) {
 		return errBudget
 	}
 	if _, err := in.Seek(0, io.SeekStart); err != nil {
-		return fileErr(rel, err)
+		return c.fail(rel, fileErr(rel, err))
 	}
 	mode, replaces := uint32(0o666), have != nil
 	if exec {
@@ -584,9 +630,12 @@ func (c *copyBack) file(src, dst int, name, rel string, exec bool) error {
 	}
 	// At most what the hash read, which the budget counted.
 	if err := writeAt(dst, name, rel, boundedRead(c.ctx, in, now.Size), mode, replaces); err != nil {
-		return err
+		return c.fail(rel, err)
 	}
-	c.bytes += now.Size
+	if counted {
+		c.bytes += now.Size
+		c.files++
+	}
 	c.result.Copied = append(c.result.Copied, rel)
 	return nil
 }
