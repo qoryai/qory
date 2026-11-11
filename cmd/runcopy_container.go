@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -32,8 +33,6 @@ type gitContainer struct {
 	// User is the wall's user, Runtime the wall's container runtime, "" for the engine's
 	// default, and Image the run's image.
 	User, Runtime, Image string
-	// Limits are the agent's limits, which the git session keeps.
-	Limits wall.Limits
 	// Mounts are the binds of the git session, [runcopy.Dir.SessionMounts], each at its path.
 	Mounts []wall.Mount
 	// Session is the program the container runs.
@@ -41,6 +40,11 @@ type gitContainer struct {
 	// Output gets what the container and the docker command print.
 	Output io.Writer
 }
+
+// gitContainerPIDs is the most processes the git container may have. The container gets no
+// memory or CPU limit, and none of the agent's limits, which are set for the agent and can stop
+// git on a large copy.
+const gitContainerPIDs = 4096
 
 // containerRemoveWait is how long the removal of a git container that a cut or its limit
 // stopped may take.
@@ -92,18 +96,7 @@ func (c gitContainer) args() ([]string, error) {
 	if c.Runtime != "" {
 		args = append(args, "--runtime", c.Runtime)
 	}
-	if c.Limits.CPUs != "" {
-		args = append(args, "--cpus", c.Limits.CPUs)
-	}
-	if c.Limits.Memory != "" {
-		args = append(args, "--memory", c.Limits.Memory)
-	}
-	if c.Limits.ShmSize != "" {
-		args = append(args, "--shm-size", c.Limits.ShmSize)
-	}
-	if c.Limits.PIDs > 0 {
-		args = append(args, "--pids-limit", fmt.Sprint(c.Limits.PIDs))
-	}
+	args = append(args, "--pids-limit", strconv.Itoa(gitContainerPIDs))
 	for _, m := range c.Mounts {
 		mount, err := bindAt(m)
 		if err != nil {
@@ -200,7 +193,7 @@ func gitContainerFor(run openedRun, spec *runSpec, runID string, gs runcopy.GitS
 		Name: "qory-copy-" + runID, Label: runLabel + runID,
 		// The wall's default user is the uid:gid of this process.
 		User:   fmt.Sprintf("%d:%d", os.Getuid(), os.Getgid()),
-		Limits: spec.Limits, Mounts: mounts, Session: gs, Output: out,
+		Mounts: mounts, Session: gs, Output: out,
 	}
 	img := run.Image()
 	c.Image, c.Runtime = img.Ref, img.Runtime

@@ -18,13 +18,13 @@ import (
 )
 
 // TestTheGitContainerHasNoNetwork is the docker run of the git session: no network, no
-// capability, the wall's user and runtime, the run's image, the agent's limits, and a bind of
-// the copy and of the bundle folder alone, each at its path.
+// capability, the wall's user and runtime, the run's image, a limit of 4096 processes and none of
+// the agent's limits, and a bind of the copy and of the bundle folder alone, each at its path.
 func TestTheGitContainerHasNoNetwork(t *testing.T) {
 	run := &nowhere{image: session.Image{Ref: "registry.example/agent@sha256:" + strings.Repeat("a", 64), Runtime: "runsc"}}
 	spec := &runSpec{}
 	spec.Wall = &wall.Docker{Command: "/usr/local/bin/docker", User: "1001:1001"}
-	spec.Limits = wall.Limits{PIDs: 512, Memory: "2g"}
+	spec.Limits = wall.Limits{CPUs: "1.5", Memory: "2g", PIDs: 512, ShmSize: "1g"}
 	mounts := []wall.Mount{{Path: "/cache/qory/runs/run-01/work"}, {Path: "/cache/qory/runs/run-01/bundle"}}
 	gs := runcopy.GitSession{Command: "/bin/sh", Args: []string{"/cache/qory/runs/run-01/bundle/" + runcopy.SessionScriptName, "/usr/bin:/bin"}, Env: []string{"PATH=/usr/bin:/bin"}, Dir: "/cache/qory/runs/run-01/work"}
 	c := gitContainerFor(run, spec, "run-01", gs, mounts, io.Discard)
@@ -37,7 +37,7 @@ func TestTheGitContainerHasNoNetwork(t *testing.T) {
 	}
 	got := strings.Join(args, " ")
 	want := "run --rm --pull never --network none --cap-drop ALL --security-opt no-new-privileges --init --no-healthcheck" +
-		" --user 1001:1001 --label dev.qory.run=run-01 --name qory-copy-run-01 --runtime runsc --memory 2g --pids-limit 512" +
+		" --user 1001:1001 --label dev.qory.run=run-01 --name qory-copy-run-01 --runtime runsc --pids-limit 4096" +
 		" --mount type=bind,src=/cache/qory/runs/run-01/work,dst=/cache/qory/runs/run-01/work" +
 		" --mount type=bind,src=/cache/qory/runs/run-01/bundle,dst=/cache/qory/runs/run-01/bundle" +
 		" --env PATH=/usr/bin:/bin --workdir /cache/qory/runs/run-01/work --entrypoint /bin/sh " + run.image.Ref +

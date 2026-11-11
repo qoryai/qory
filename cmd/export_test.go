@@ -116,12 +116,12 @@ func RunGitSessionsOnHost() {
 }
 
 // gitContainerSession is the git container c as the spec of a session, which a test of the git
-// session reads: its program, its environment and its folder, the binds, the limits and the
-// writer of its lines.
+// session reads: its program, its environment and its folder, the binds and the writer of its
+// lines.
 func gitContainerSession(c gitContainer) session.SessionSpec {
 	return session.SessionSpec{
 		Command: c.Session.Command, Args: c.Session.Args, Env: c.Session.Env, Dir: c.Session.Dir,
-		Mounts: c.Mounts, Limits: c.Limits, Stdin: strings.NewReader(""), Stdout: c.Output, Stderr: c.Output,
+		Mounts: c.Mounts, Stdin: strings.NewReader(""), Stdout: c.Output, Stderr: c.Output,
 	}
 }
 
@@ -190,6 +190,23 @@ func GitSessionsInDocker(seen func(argv []string)) func() {
 			seen(append([]string{c.Docker}, args...))
 		}
 		return dockerGitContainer(ctx, c)
+	}
+	return func() { runGitContainer = before }
+}
+
+// SeeGitContainer makes the git session run as a process on this machine, as
+// [RunGitSessionsOnHost] does, with the arguments of its docker run passed to seen first, and
+// returns what restores the default.
+func SeeGitContainer(seen func(args []string)) func() {
+	before := runGitContainer
+	onHost := containerOf(GitSessionOnHost)
+	runGitContainer = func(ctx context.Context, c gitContainer) (int, error) {
+		args, err := c.args()
+		if err != nil {
+			return -1, err
+		}
+		seen(args)
+		return onHost(ctx, c)
 	}
 	return func() { runGitContainer = before }
 }

@@ -1188,7 +1188,8 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			// [pushEnding.copyOutcome]. After a join that returned an error once the agent may
 			// have run, a run the gateway closed, a removal of the setup container that failed or
 			// a container of the run kept, it runs after the close instead, with no step, see
-			// [runCopy.gitSessionAfterClose]. The work comes back after the close, under
+			// [runCopy.gitSessionAfterClose]. A removal that failed after a session that succeeded
+			// closes the run as a copy step that did not start. The work comes back after the close, under
 			// [returnContext], unless the close shows [session.Closed.WallKept]: then no git
 			// session runs after it either. A return that fails after the close changes only
 			// qory run's exit status: only the close proves that no container is left.
@@ -1216,7 +1217,14 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				if !afterClose {
 					sessionErr = copied.gitSession(backCtx, run, &spec, streams.errOut)
 				}
-				if sessionErr != nil {
+				switch {
+				case removeErr != nil:
+					// The run closes as after a copy step that did not start: failed, or
+					// cancelled when a stop or the run's time limit ended the removal.
+					ending.settle(stopNow())
+					ending.cut = backCtx.Err() != nil
+					out = ending.copyOutcome(copied.stepCode)
+				case sessionErr != nil:
 					ending.settle(stopNow())
 					ending.cut = copied.cut
 					out = ending.copyOutcome(copied.stepCode)

@@ -444,8 +444,8 @@ func TestTheTimeLimitOfTheGitSessionKeepsTheCopy(t *testing.T) {
 		writeFile(t, filepath.Join(spec.Dir, "left.txt"), "left\n")
 	})
 	t.Cleanup(cmd.SetGitSession(func(ctx context.Context, spec session.SessionSpec) (*session.Result, error) {
-		if at, ok := ctx.Deadline(); !ok || time.Until(at) > runcopy.SessionLimit {
-			t.Errorf("the git session has until %s, %v, want at most %s", at, ok, runcopy.SessionLimit)
+		if at, ok := ctx.Deadline(); !ok || time.Until(at) > runcopy.SessionBase {
+			t.Errorf("the git session has until %s, %v, want at most %s", at, ok, runcopy.SessionBase)
 		}
 		return &session.Result{TimedOut: true}, nil
 	}))
@@ -462,6 +462,66 @@ func TestTheTimeLimitOfTheGitSessionKeepsTheCopy(t *testing.T) {
 		t.Errorf("the run's branch came back: %s", got)
 	}
 	t.Cleanup(func() { os.RemoveAll(filepath.Dir(copyDir)) })
+}
+
+// TestTheTimeLimitOfTheGitSessionGrowsWithTheCopy is a copy with 2 GiB in a sparse file: the git
+// session has a minute more, and the line of its limit has that limit.
+func TestTheTimeLimitOfTheGitSessionGrowsWithTheCopy(t *testing.T) {
+	copyCheckout(t)
+	var copyDir string
+	agentInCopy(t, func(spec session.SessionSpec) {
+		copyDir = spec.Dir
+		if err := os.Truncate(filepath.Join(spec.Dir, "README.md"), 2<<30); err != nil {
+			t.Fatal(err)
+		}
+	})
+	t.Cleanup(cmd.SetGitSession(func(ctx context.Context, spec session.SessionSpec) (*session.Result, error) {
+		if at, ok := ctx.Deadline(); !ok || time.Until(at) <= runcopy.SessionBase || time.Until(at) > runcopy.SessionBase+time.Minute {
+			t.Errorf("the git session has until %s, %v, want a minute past %s", at, ok, runcopy.SessionBase)
+		}
+		return &session.Result{TimedOut: true}, nil
+	}))
+	out, err := run(t, "run", "claude", "--", "-p", "hi")
+	if cmd.ExitCode(err) != 1 {
+		t.Errorf("exit %d (%v), want 1", cmd.ExitCode(err), err)
+	}
+	wants(t, out, "and run no git there: the git session ran past its limit of 6m0s, so the run's commits did not come back")
+	t.Cleanup(func() { os.RemoveAll(filepath.Dir(copyDir)) })
+}
+
+// TestNoHostVariableReachesTheGitContainer is a run with a token and a model key in qory's
+// environment: the docker run of the git container passes only the variables of the git
+// session's script, each with its value, and neither of the two.
+func TestNoHostVariableReachesTheGitContainer(t *testing.T) {
+	root := copyCheckout(t)
+	t.Setenv("GH_TOKEN", "fake-gh-token")
+	t.Setenv("ANTHROPIC_API_KEY", "fake-model-key")
+	agentInCopy(t, func(spec session.SessionSpec) {
+		writeFile(t, filepath.Join(spec.Dir, "left.txt"), "left\n")
+	})
+	var args []string
+	t.Cleanup(cmd.SeeGitContainer(func(a []string) { args = a }))
+	out, err := run(t, "run", "claude", "--", "-p", "hi")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	gitOutput(t, root, "cat-file", "-e", runBranchOf(t, out)+":left.txt")
+	var names []string
+	for i, a := range args {
+		if strings.Contains(a, "fake-") {
+			t.Errorf("a host variable reaches the git container: %s", a)
+		}
+		if a == "--env" {
+			name, _, ok := strings.Cut(args[i+1], "=")
+			if !ok {
+				t.Errorf("--env %s takes its value from the docker command's environment", args[i+1])
+			}
+			names = append(names, name)
+		}
+	}
+	if got, want := strings.Join(names, " "), "PATH HOME GIT_CONFIG_NOSYSTEM GIT_CONFIG_GLOBAL"; got != want {
+		t.Errorf("the git container gets %s, want %s", got, want)
+	}
 }
 
 // wantDisarmed checks that the copy at work has no .git, and that git status finds no
@@ -1397,7 +1457,7 @@ func TestARunsEndWithAFailedCopyStep(t *testing.T) {
 		}}, git: cmd.GitSessionOnHost, want: session.Outcome{State: event.StateFailed, ExitCode: -1}, status: 1},
 		{name: "the removal of the setup container fails", agent: agentOK, values: cmd.Nowhere{RemoveSetup: func(context.Context) error {
 			return errors.New("the engine failed")
-		}}, git: exits(128), want: session.Outcome{State: event.StateSucceeded}, status: 1},
+		}}, git: exits(128), want: session.Outcome{State: event.StateFailed, ExitCode: -1}, status: 1},
 		{name: "a container of the run is kept", agent: agentOK, values: cmd.Nowhere{ContainerKept: true}, git: exits(128), want: session.Outcome{State: event.StateSucceeded}, status: 1},
 		{name: "a signal cuts the step", agent: agentOK, git: func(ctx context.Context, _ session.SessionSpec) (*session.Result, error) {
 			term(t)
@@ -1410,7 +1470,7 @@ func TestARunsEndWithAFailedCopyStep(t *testing.T) {
 			term(t)
 			<-ctx.Done()
 			return ctx.Err()
-		}}, git: exits(0), want: session.Outcome{State: event.StateSucceeded}, status: 1},
+		}}, git: exits(0), want: interrupted, status: 1},
 		{name: "a signal, and the step exits 128 within its time", agent: agentOK, git: func(context.Context, session.SessionSpec) (*session.Result, error) {
 			term(t)
 			return &session.Result{ExitCode: 128}, nil
@@ -2438,8 +2498,9 @@ func TestAKeptContainerMovesTheGitSessionPastTheClose(t *testing.T) {
 }
 
 // TestAFailedRemovalOfTheSetupMovesTheGitSessionPastTheClose is a removal of the setup container
-// that fails after the agent's session: the run closes with the agent's end, and the git session
-// runs after the close, which shows no container left here, so the work comes back.
+// that fails after the agent's session: the run closes failed with -1, as after a copy step that
+// did not start, and the git session runs after the close, which shows no container left here,
+// so the work comes back.
 func TestAFailedRemovalOfTheSetupMovesTheGitSessionPastTheClose(t *testing.T) {
 	root := copyCheckout(t)
 	agentSucceedsInCopy(t, func(spec session.SessionSpec) {
@@ -2459,8 +2520,8 @@ func TestAFailedRemovalOfTheSetupMovesTheGitSessionPastTheClose(t *testing.T) {
 	if err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
-	if got := closes(); len(got) != 1 || got[0].State != event.StateSucceeded {
-		t.Errorf("the run closed with %+v, want succeeded", got)
+	if got, want := closes(), (session.Outcome{State: event.StateFailed, ExitCode: -1}); len(got) != 1 || got[0] != want {
+		t.Errorf("the run closed with %+v, want %+v", got, want)
 	}
 	gitOutput(t, root, "cat-file", "-e", runBranchOf(t, out)+":left.txt")
 }
