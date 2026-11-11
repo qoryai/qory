@@ -3815,6 +3815,10 @@ qory run: part of the run's work did not come back: the copy has changes that gi
 Git LFS: because the session runs no filter, an LFS file the agent changes goes into the
 commit as its full content, in place of a pointer.
 
+The session reads the refs and reflogs of the copy, and of each submodule the clone copied, with
+git on the copy's git settings, and overrides each setting that runs a program in these reads: no
+pager, hook, fsmonitor, signature check or signing program that the run set runs.
+
 A program the agent planted in the copy can run again in this session, in a container with no
 network, so the session has a time limit: 5 minutes, plus a minute for each 20,000 files, folders
 and links in the copy and a minute for each 2 GiB its files take on disk, at most 60 minutes. qory

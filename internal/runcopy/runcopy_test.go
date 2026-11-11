@@ -702,6 +702,48 @@ func TestGitSessionBringsTheWorkBackAndRunsNothingPlanted(t *testing.T) {
 	})
 }
 
+// forgedSignature makes a commit on HEAD of the repository at work with a gpgsig header that no key
+// made, moves HEAD's branch to it, and sets log.showSignature and gpg.program to program there: a
+// git log of HEAD's reflog with that configuration runs program to check the signature.
+func forgedSignature(t *testing.T, work, program string) {
+	t.Helper()
+	head := testGit(t, work, "rev-parse", "HEAD")
+	tree := testGit(t, work, "rev-parse", "HEAD^{tree}")
+	commit := "tree " + tree + "\nparent " + head + "\n" +
+		"author Example <example@example.com> 1700000000 +0000\n" +
+		"committer Example <example@example.com> 1700000000 +0000\n" +
+		"gpgsig -----BEGIN PGP SIGNATURE-----\n \n iQEzBAABCAAdFiEEforged\n -----END PGP SIGNATURE-----\n" +
+		"\nforged\n"
+	id := gitIn(t, work, commit, "hash-object", "-t", "commit", "-w", "--stdin")
+	testGit(t, work, "update-ref", "-m", "forged", "HEAD", id)
+	testGit(t, work, "config", "log.showSignature", "true")
+	testGit(t, work, "config", "gpg.program", program)
+}
+
+// TestASignatureCheckPlantedInTheCopyRunsNothing is an agent that sets log.showSignature and
+// gpg.program in the copy's configuration, and puts a commit with a forged signature in HEAD's
+// reflog, in the repository and in a submodule: the session reads the reflogs, and the program
+// never runs.
+func TestASignatureCheckPlantedInTheCopyRunsNothing(t *testing.T) {
+	isolate(t)
+	sessionGit(t)
+	src, sub := withSubmodule(t)
+	d, repos := cloneRun(t, src)
+	program, ran := marker(t)
+	forgedSignature(t, filepath.Join(d.Work(), filepath.FromSlash(sub)), program)
+	forgedSignature(t, d.Work(), program)
+	printed := sessionOutput(t, d, repos, nil)
+	if b, err := os.ReadFile(ran); err == nil {
+		t.Fatalf("the planted program ran:\n%s\n%s", b, printed)
+	}
+	// The control: git log of HEAD's reflog in the copy runs the planted program, so the check
+	// above has teeth.
+	_ = gitCmd(d.Work(), "log", "-g", "--format=%H %gs", "HEAD").Run()
+	if _, err := os.Stat(ran); err != nil {
+		t.Errorf("git log -g in the copy did not run the planted program, so the test shows nothing: %v", err)
+	}
+}
+
 func TestGitSessionBringsAFurtherRepositoryBack(t *testing.T) {
 	bothChecks(t, func(t *testing.T) {
 		sessionGit(t)

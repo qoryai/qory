@@ -298,20 +298,31 @@ func TestARealWriteRunInACopyBringsTheWorkBack(t *testing.T) {
 // plantingAgent is the program of the agent's container in
 // [TestARealWriteRunRunsNoFilterPlantedInASubmodule]: it plants a clean filter in the
 // configuration of the submodule libs/s that appends to planted-ran at the top of the copy, applies
-// it to every file there, and changes lib.txt to other bytes of the same size.
+// it to every file there, and changes lib.txt to other bytes of the same size. It also sets
+// log.showSignature and gpg.program in the copy's configuration, to a program that marks work left
+// behind in the git session's folder, and moves the run's branch to a commit with a forged
+// signature, which HEAD's reflog then has.
 const plantingAgent = `#!/bin/sh
 top=$PWD
 git -C libs/s config filter.planted.clean "sh -c 'echo ran >> $top/planted-ran; cat'"
 echo '* filter=planted' > libs/s/.gitattributes
 echo LIB > libs/s/lib.txt
 echo left > left.txt
+printf '#!/bin/sh\n: > "%s/../bundle/0.left"\ncat > /dev/null\n' "$top" > .git/check-signature
+chmod +x .git/check-signature
+git config log.showSignature true
+git config gpg.program "$top/.git/check-signature"
+forged=$(printf 'tree %s\nparent %s\nauthor agent <agent@example.invalid> 1700000000 +0000\ncommitter agent <agent@example.invalid> 1700000000 +0000\ngpgsig -----BEGIN PGP SIGNATURE-----\n \n iQEzBAABCAAdFiEEforged\n -----END PGP SIGNATURE-----\n\nforged\n' \
+	"$(git rev-parse 'HEAD^{tree}')" "$(git rev-parse HEAD)" | git hash-object -t commit -w --stdin)
+git update-ref -m forged HEAD "$forged"
 `
 
 // TestARealWriteRunRunsNoFilterPlantedInASubmodule is a local walled write run behind a real wall
 // whose agent plants a clean filter in a submodule's configuration: the git session in its
 // container reads the submodule's changes with a configuration it makes, so the filter never
 // runs, and the submodule's change comes back under the run's prefix in the person's git folder
-// of the submodule. It runs only with QORY_TEST_DOCKER=1 and docker on the PATH.
+// of the submodule. The planted signature check never runs either, so no work stays behind. It
+// runs only with QORY_TEST_DOCKER=1 and docker on the PATH.
 func TestARealWriteRunRunsNoFilterPlantedInASubmodule(t *testing.T) {
 	if os.Getenv("QORY_TEST_DOCKER") != "1" {
 		t.Skip("QORY_TEST_DOCKER=1 runs it")
@@ -339,6 +350,9 @@ func TestARealWriteRunRunsNoFilterPlantedInASubmodule(t *testing.T) {
 	t.Logf("qory run:\n%s", out)
 	if err != nil {
 		t.Fatalf("%v\n%s", err, out)
+	}
+	if strings.Contains(out, "did not come back") {
+		t.Errorf("part of the run's work stayed behind, so the planted signature check ran:\n%s", out)
 	}
 	branch := runBranchOf(t, out)
 	gitOutput(t, root, "cat-file", "-e", branch+":left.txt")

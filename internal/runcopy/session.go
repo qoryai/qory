@@ -298,11 +298,15 @@ export HOME="$B/home" GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null \
 	GIT_NO_REPLACE_OBJECTS=1 GIT_TERMINAL_PROMPT=0 GIT_OPTIONAL_LOCKS=0 \
 	GIT_NO_LAZY_FETCH=1 GIT_ALLOW_PROTOCOL=none LC_ALL=C
 mkdir "$HOME"
+# g is git with settings that beat the copy's configuration and a submodule's, which the agent
+# wrote: no pager, hook, fsmonitor, replace ref, signature check or signing program runs.
 g() {
-	git -c core.hooksPath=/dev/null -c core.fsmonitor=false -c core.useReplaceRefs=false \
+	git --no-pager -c core.hooksPath=/dev/null -c core.fsmonitor=false -c core.useReplaceRefs=false \
 		-c core.commitGraph=false -c core.attributesFile=/dev/null -c core.excludesFile=/dev/null \
 		-c core.untrackedCache=false -c gc.auto=0 -c maintenance.auto=false \
-		-c protocol.allow=never -c commit.gpgSign=false -c core.safecrlf=false "$@"
+		-c protocol.allow=never -c commit.gpgSign=false -c core.safecrlf=false \
+		-c log.showSignature=false -c gpg.program=false -c gpg.openpgp.program=false \
+		-c gpg.x509.program=false -c gpg.ssh.program=false "$@"
 }
 nl='
 '
@@ -318,7 +322,8 @@ kind() {
 	esac
 }
 # copygit is git with the copy's git folder $C as git dir, so packed refs and reftable both work.
-# It reads the copy's configuration, inside the wall.
+# It reads the copy's configuration, inside the wall, and the settings of g beat each key there
+# that would run a program for the commands below.
 copygit() {
 	g --git-dir="$C" "$@"
 }

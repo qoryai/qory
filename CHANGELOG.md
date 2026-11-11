@@ -330,7 +330,9 @@ release may change what an existing document does, and states it under Upgrading
   session makes no commit on the branch, as in a sparse checkout. Each submodule's commits and
   changes come back under the same prefix in your git folder of that submodule. The git session
   reads a submodule's changes through a git folder that it makes, with an empty configuration,
-  so no filter, hook or fsmonitor that the run wrote in the submodule's configuration runs. The line of the
+  so no filter, hook or fsmonitor that the run wrote in the submodule's configuration runs. It
+  reads the refs and reflogs of the copy with settings that run no pager, hook, fsmonitor,
+  signature check or signing program that the run set in the copy's configuration. The line of the
   branch adds `The run's other refs are under <prefix>: list them with git for-each-ref <prefix>.`
   The git session gives itself read access to the files and folders it owns, so a file of mode 000
   that the agent made comes back. The git session leaves each file of more than 100 MiB out of its
