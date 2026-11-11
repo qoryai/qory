@@ -183,10 +183,12 @@ func hidden(text string) string {
 	return exports.HideURLError(errors.New(hideHTTP(text))).Error()
 }
 
-// firstLine is the first line of text that is not empty, with a secret in it masked as
-// [exports.Value] masks it. It is not cut and can have characters that do not print: a
-// caller takes a path of the copy out of it before [integration.Printable] cuts it, or
-// prints it through [ShownError].
+// firstLine is the first line of text with a character other than white space, trimmed
+// of the white space at its ends, as [exports.Value] prints it bare: a line that contains
+// an access key secret, a run key, a run code or an enrolment code is the phrase in its
+// place. It is "" when text has no such line. firstLine does not cut the line or replace
+// a character that does not print: before the cut of [integration.Printable], a caller
+// takes each path of the copy out of the line, or [ShownError] cuts it.
 func firstLine(text string) string {
 	for line := range strings.SplitSeq(text, "\n") {
 		if line = strings.TrimSpace(line); line != "" {
