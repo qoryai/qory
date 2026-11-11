@@ -11,15 +11,9 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/qoryai/forager/wall"
 )
-
-// SessionLimit is the longest the git session may run; the caller that starts the
-// session stops it then. A program the agent planted in the copy can run again in that
-// session, under the run's egress policy, so the session ends after this time.
-const SessionLimit time.Duration = 5 * time.Minute
 
 // sessionPath is the PATH of the git session's script: folders of the run's image,
 // none of them in the copy, where git is found. A test sets it to the folder of this

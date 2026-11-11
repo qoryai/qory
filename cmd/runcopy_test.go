@@ -444,8 +444,8 @@ func TestTheTimeLimitOfTheGitSessionKeepsTheCopy(t *testing.T) {
 		writeFile(t, filepath.Join(spec.Dir, "left.txt"), "left\n")
 	})
 	t.Cleanup(cmd.SetGitSession(func(ctx context.Context, spec session.SessionSpec) (*session.Result, error) {
-		if at, ok := ctx.Deadline(); !ok || time.Until(at) > runcopy.SessionLimit {
-			t.Errorf("the git session has until %s, %v, want at most %s", at, ok, runcopy.SessionLimit)
+		if at, ok := ctx.Deadline(); !ok || time.Until(at) > runcopy.SessionBase {
+			t.Errorf("the git session has until %s, %v, want at most %s", at, ok, runcopy.SessionBase)
 		}
 		return &session.Result{TimedOut: true}, nil
 	}))
@@ -461,6 +461,31 @@ func TestTheTimeLimitOfTheGitSessionKeepsTheCopy(t *testing.T) {
 	if got := gitOutput(t, root, "for-each-ref", "refs/heads/qory/"); got != "" {
 		t.Errorf("the run's branch came back: %s", got)
 	}
+	t.Cleanup(func() { os.RemoveAll(filepath.Dir(copyDir)) })
+}
+
+// TestTheTimeLimitOfTheGitSessionGrowsWithTheCopy is a copy with 2 GiB in a sparse file: the git
+// session has a minute more, and the line of its limit has that limit.
+func TestTheTimeLimitOfTheGitSessionGrowsWithTheCopy(t *testing.T) {
+	copyCheckout(t)
+	var copyDir string
+	agentInCopy(t, func(spec session.SessionSpec) {
+		copyDir = spec.Dir
+		if err := os.Truncate(filepath.Join(spec.Dir, "README.md"), 2<<30); err != nil {
+			t.Fatal(err)
+		}
+	})
+	t.Cleanup(cmd.SetGitSession(func(ctx context.Context, spec session.SessionSpec) (*session.Result, error) {
+		if at, ok := ctx.Deadline(); !ok || time.Until(at) <= runcopy.SessionBase || time.Until(at) > runcopy.SessionBase+time.Minute {
+			t.Errorf("the git session has until %s, %v, want a minute past %s", at, ok, runcopy.SessionBase)
+		}
+		return &session.Result{TimedOut: true}, nil
+	}))
+	out, err := run(t, "run", "claude", "--", "-p", "hi")
+	if cmd.ExitCode(err) != 1 {
+		t.Errorf("exit %d (%v), want 1", cmd.ExitCode(err), err)
+	}
+	wants(t, out, "and run no git there: the git session ran past its limit of 6m0s, so the run's commits did not come back")
 	t.Cleanup(func() { os.RemoveAll(filepath.Dir(copyDir)) })
 }
 

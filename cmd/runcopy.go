@@ -503,7 +503,8 @@ func (c *runCopy) gitSessionAfterClose(ctx context.Context, run openedRun, spec 
 
 // inContainer runs the git session in a container of the run's image that qory starts, with no
 // network, no gateway and no bind but the copy and the bundle folder, see [runGitContainer]. It
-// ends at [runcopy.SessionLimit] at the latest. It returns the session's exit code, -1 for a
+// ends at the time limit of [runcopy.SessionLimitFor] at the latest, from a count of the copy
+// with lstat, [runcopy.Dir.WorkSize], which follows no link. It returns the session's exit code, -1 for a
 // session with no exit code to show, and the stop of the return of the run's work, nil for a
 // session that succeeded. A cut, which is a stop or the run's time limit that ended ctx, sets
 // [runCopy.cut].
@@ -512,7 +513,10 @@ func (c *runCopy) inContainer(ctx context.Context, run openedRun, spec *runSpec,
 	if err != nil {
 		return -1, c.noSession(ctx, err)
 	}
-	limited, cancel := context.WithTimeout(ctx, runcopy.SessionLimit)
+	// A count that a cut ended gives a limit too: the cut ends the container at once.
+	entries, size, _ := c.dir.WorkSize(ctx)
+	limit := runcopy.SessionLimitFor(entries, size)
+	limited, cancel := context.WithTimeout(ctx, limit)
 	defer cancel()
 	code, err := runGitContainer(limited, gitContainerFor(run, spec, spec.RunID, gs, c.dir.SessionMounts(), out))
 	timedOut := limited.Err() != nil || errors.Is(err, context.DeadlineExceeded)
@@ -520,7 +524,7 @@ func (c *runCopy) inContainer(ctx context.Context, run openedRun, spec *runSpec,
 	case ctx.Err() != nil && (err != nil || timedOut) && c.cutBy != nil:
 		return -1, c.cutStop()
 	case timedOut:
-		return -1, c.stopped(fmt.Sprintf(textCopyLimit, runcopy.SessionLimit))
+		return -1, c.stopped(fmt.Sprintf(textCopyLimit, limit))
 	case err != nil:
 		return -1, c.noSession(ctx, err)
 	case code != 0:

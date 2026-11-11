@@ -508,7 +508,7 @@ works in a copy](#a-run-that-may-write-works-in-a-copy). The step's log has the 
 session's container, and no other step starts inside it. It ends `succeeded` with 0 when the git session
 exits 0 within its limit. It ends `cancelled` with -1 when a stop cuts the session. Otherwise it ends `failed`
 with the git session's exit status, or with -1 when the session has none to show, such as one
-that did not start or one that reached its limit of 5 minutes. Unless it ends `succeeded`,
+that did not start or one that reached its time limit. Unless it ends `succeeded`,
 its last line is the error line, with `the run's copy` in place of each path of the copy.
 A run that the gateway closed during the agent's session, a run whose agent's join returned an
 error, and a run in which a container could not be removed after the agent's session have no
@@ -791,7 +791,9 @@ run's open, so it covers the compose and the session. When the limit is reached:
 A compose that is running when the limit is reached runs to its end; the runtime does
 not start after it.
 
-A walled write run in a copy can run past the limit: its setup removal has up to 2 minutes, and its git session up to 5.
+A walled write run in a copy can run past the limit: its setup removal has up to 2 minutes, and its git session
+up to 5 minutes, plus a minute for each 20,000 files, folders and links in the copy and a minute for each 2 GiB
+in its files, at most 60 minutes.
 
 `--timeout 0` lifts the limit `forager.yaml` sets.
 
@@ -3706,8 +3708,9 @@ Three cases stop the run with their fix first:
 
 When the agent has ended, however it ended, qory runs the git session in a container that it
 starts on the run's engine itself: `docker run` with the run's image, the wall's user, the wall's
-container runtime when one is set, the agent's limits, no network and no capability. The container
-joins no gateway and runs no agent, and gets no model key and no run code. It binds two folders,
+container runtime when one is set, at most 4096 processes, no memory or CPU limit, no network and no
+capability. The container joins no gateway and runs no agent, and gets no model key and no run
+code. It binds two folders,
 both writable, and nothing else: the copy, and a new folder for its bundles. It never binds your
 checkout. Its name is `qory-copy-<run id>`, with the run's label. It commits what
 the agent left, with no setting from the copy's `.git` and no filter, and writes the run's
@@ -3780,8 +3783,11 @@ Git LFS: because the session runs no filter, an LFS file the agent changes goes 
 commit as its full content, in place of a pointer.
 
 A program the agent planted in the copy can run again in this session, under the run's egress
-policy, so the session has at most 5 minutes. A first signal to `qory run` leaves it that time,
-and a second signal ends it. qory prints how long the return of the work may take:
+policy, so the session has a time limit: 5 minutes, plus a minute for each 20,000 files, folders
+and links in the copy and a minute for each 2 GiB in its files, at most 60 minutes. qory counts
+them in the copy once the agent has ended, with `lstat`, and follows no link. A first signal to
+`qory run` leaves the session that limit, within the time that the return of the work has after
+the signal, and a second signal ends it. qory prints how long the return of the work may take:
 
 ```text
 qory run: got SIGTERM: bringing the run's work back, for at most 30m0s. Send a second signal to stop that.
@@ -3859,7 +3865,7 @@ that succeeded.
 After a session that succeeded, a git session in the step `copy work out` that stops the return
 also sets how the run closes: `failed` with the exit code of the step `copy work out`, or -1 when it has none. A signal
 that cuts the session closes the run `cancelled` with the reason `interrupted`, exit 1. The run has
-no time limit during the git session: the session has its limit of 5 minutes.
+no time limit during the git session: the session has its time limit.
 A return that stops after the run closed, in the check, the fetch or the copy back, leaves the run
 `succeeded`, and `qory run` exits 1: only the close proves that no container of the run is left.
 
