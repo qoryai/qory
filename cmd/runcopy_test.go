@@ -2082,6 +2082,38 @@ func TestARepositoryTheRunMadeKeepsTheCopyOfALocalRun(t *testing.T) {
 	}
 }
 
+// TestAFileOverTheSizeCapKeepsTheCopy is an agent that leaves a file of more than 100 MiB and a
+// small one: the small one comes back on the run's branch, the line lists the large one, the copy
+// stays with it, and qory run exits 1.
+func TestAFileOverTheSizeCapKeepsTheCopy(t *testing.T) {
+	root := copyCheckout(t)
+	var work string
+	agentInCopy(t, func(spec session.SessionSpec) {
+		work = spec.Dir
+		writeFile(t, filepath.Join(spec.Dir, "small.txt"), "small\n")
+		big := filepath.Join(spec.Dir, "data", "big.bin")
+		writeFile(t, big, "")
+		if err := os.Truncate(big, runcopy.MaxFile+1); err != nil {
+			t.Fatal(err)
+		}
+	})
+	cmd.RunGitSessionsOnHost()
+	out, err := run(t, "run", "claude", "--", "-p", "hi")
+	if cmd.ExitCode(err) != 1 {
+		t.Errorf("exit %d, want 1:\n%s", cmd.ExitCode(err), out)
+	}
+	lacks(t, out, "no action needed", "nested repository")
+	wants(t, out,
+		"qory run: left out of the run's commit, as each has more than 100 MiB: data/big.bin. They stay in the run's copy.",
+		"read the run's files in "+work+", run no git there, then remove the folder")
+	if got := gitOutput(t, root, "ls-tree", "-r", "--name-only", runBranchOf(t, out)); !strings.Contains(got, "small.txt") || strings.Contains(got, "big.bin") {
+		t.Errorf("the run's branch has:\n%s", got)
+	}
+	if info, err := os.Lstat(filepath.Join(work, "data", "big.bin")); err != nil || info.Size() != runcopy.MaxFile+1 {
+		t.Errorf("the large file in the copy: %v", err)
+	}
+}
+
 // TestAHeadBeforeTheBaseCommitLosesNoFile is an agent that checked out a commit older than the
 // base commit and left no other work: no commit that deletes the base commit's files comes back.
 func TestAHeadBeforeTheBaseCommitLosesNoFile(t *testing.T) {

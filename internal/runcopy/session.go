@@ -104,14 +104,21 @@ type GitSession struct {
 // Under the prefix the bundle also has each branch, tag and refs/stash that the run made or
 // moved, and a detached HEAD, when it has a commit that the base commit, a ref of the clone and
 // a remote-tracking ref do not have, and lost/<n> for commits that only a reflog or another ref
-// reaches. Each submodule that the clone copied gets the same refs, with its changes as
-// uncommitted, in the bundle n-k, where k is the line of the submodule in subs-n. What still
-// stays behind writes n.left, which [Dir.LeftBehind] reads: a repository the run made; a change in a submodule that the clone
-// did not copy, or in a repository inside a submodule; a file that git ls-files still lists
+// reaches. A new or moved branch or tag at a commit with no such commit, such as a tag of the base
+// commit, is a line in n.known, its commit id and its name under the prefix, as a bundle leaves out
+// a ref whose commits it excludes; an annotated one is in the bundle, with its tag object. Each
+// submodule that the clone copied gets the same refs, with its changes as
+// uncommitted, in the bundle n-k, where k is the line of the submodule in subs-n. A repository
+// the run made stays behind and writes n.nested. Any other work that stays behind writes n.left;
+// [Dir.Left] reads both: a change in a submodule that the clone did not copy, or in a repository inside a submodule; a file that git ls-files still lists
 // after the add, such as one the session's user cannot read, which includes a path left out
 // here that a commit of the run changed, when the copy has other bytes than that commit; or a
 // folder the session cannot read. The person's personal ignore rules stay in effect through
 // the info/exclude of that git folder.
+//
+// The add leaves out each regular file of more than [MaxFile] bytes that it would add, in the
+// repository and in each submodule, and lists its path, relative to the copy, in n.large, which
+// [Dir.Left] reads. A commit the agent made keeps such a file: no commit is rewritten.
 //
 // The script runs no filter: a file a filter changed at the checkout, such as a Git LFS
 // file, stays out while the copy has what the checkout wrote, and one the agent changed
@@ -279,7 +286,9 @@ const SessionScriptName = "qory-git-session.sh"
 // [sessionList], reads refs-n, see [Repository], sub-n, see [submoduleList], subs-n, see
 // [clonedList], and subrefs-n-k for its submodule number k, and uses exclude-n when there is
 // one. It writes n.bundle, or n.none when nothing is past the base commit, and n-k.bundle or
-// n-k.none for each submodule in subs-n. It needs git 2.25 or later, for --pathspec-from-file.
+// n-k.none for each submodule in subs-n, n.large for files it leaves out by their size, and n.known
+// or n-k.known for the run's refs at a commit the person has. Its
+// find takes a size in bytes, with c, which busybox and GNU find both read: [MaxFile] bytes. It needs git 2.25 or later, for --pathspec-from-file.
 const sessionScript = `set -eu
 PATH=$1 W=$2 B=$3 branch=$4 message=$5 count=$6 prefix=$7
 export PATH
@@ -431,6 +440,54 @@ state() {
 		printf missing
 	fi
 }
+# large leaves out of the add each regular file of more than 100 MiB that git add would add: the
+# pathspec file $2 gets an exclude for it, the file $3 of the paths that stay out gets its path, and
+# n.large gets the path after the folder $1. find skips ./.git and $4. The other arguments are the
+# pathspecs that the add excludes. $G/large is the list. A path with a line break
+# goes out unchecked, as its pieces would match no line of that list, with ? for each line break in
+# n.large. A commit the agent made keeps its files.
+large() {
+	l_at=$1 l_add=$2 l_out=$3 l_skip=$4
+	shift 4
+	: > "$G/large-found"
+	: > "$G/large"
+	find . -path ./.git -prune -o -path "$l_skip" -prune -o -type f -size +104857600c -exec sh -c '
+		found=$1 add=$2 out=$3 list=$4 at=$5
+		shift 5
+		for p do
+			p=${p#./}
+			case $p in
+			*"
+"*)
+				printf ":(exclude,top,literal)%s\0" "$p" >> "$add"
+				printf "%s\n" "$p" >> "$out"
+				printf "%s%s" "$at" "$p" | tr "\n" "?" >> "$list"
+				printf "\n" >> "$list"
+				;;
+			*) printf "%s\n" "$p" >> "$found" ;;
+			esac
+		done' sh "$G/large-found" "$l_add" "$l_out" "$B/$n.large" "$l_at" {} + 2>/dev/null || :
+	if [ ! -s "$G/large-found" ]; then
+		return 0
+	fi
+	# ls-files hashes only the files found, to tell a changed one. A failed ls-files leaves out every
+	# file found, which keeps more in the copy, not less.
+	while IFS= read -r p; do
+		set -- "$@" ":(top,literal)$p"
+	done < "$G/large-found"
+	if g ls-files -z -m -o --exclude-standard -- "$@" > "$G/large-z" 2>/dev/null; then
+		tr '\000' '\n' < "$G/large-z" > "$G/large-added"
+	else
+		cp "$G/large-found" "$G/large-added"
+	fi
+	both "$G/large-found" "$G/large-added" > "$G/large-both"
+	lacking "$G/large-both" "$l_out" > "$G/large"
+	while IFS= read -r p; do
+		printf ':(exclude,top,literal)%s\0' "$p" >> "$l_add"
+		printf '%s\n' "$p" >> "$l_out"
+		printf '%s%s\n' "$l_at" "$p" >> "$B/$n.large"
+	done < "$G/large"
+}
 # add_lines prints the lines of git add in $G/add-errors, for $1, but its list of ignored paths.
 # They decide nothing.
 add_lines() {
@@ -485,6 +542,23 @@ uncommitted() {
 fresh() {
 	printf '%s\n' "$1" | cat - "$G/old" | g rev-list -1 --stdin --ignore-missing || printf '%s\n' "$1"
 }
+# known_ref takes a new or moved branch or tag $3 at the object $1, whose commit $2 the person has. A
+# bundle leaves out a ref whose commits it excludes, so a ref at the commit itself goes to the file
+# $known, as its object and its name under $prefix, for the host to make. An annotated tag is an
+# object the person does not have, and goes under $prefix in the bundle. The run's branch, $mainref,
+# and any other ref stay out.
+known_ref() {
+	case $3 in
+	"$mainref") return 0 ;;
+	refs/heads/?* | refs/tags/?*) ;;
+	*) return 0 ;;
+	esac
+	if [ "$1" = "$2" ]; then
+		printf '%s %s\n' "$1" "$prefix/${3#refs/}" >> "$known"
+	else
+		g update-ref "$prefix/${3#refs/}" "$1"
+	fi
+}
 # extra_refs writes each new or moved ref of the copy's repository at $C that has a fresh commit to
 # $prefix in the git folder $G: a branch as heads/<name>, a tag as tags/<name>, and refs/stash as
 # stash. $mainref, the run's branch, counts only when the commit $tip does not have it. HEAD,
@@ -492,7 +566,8 @@ fresh() {
 # clone. Then lost/1, lost/2 and so on are the tips of the fresh commits that no ref here reaches,
 # of these: a commit of another new or moved ref, a commit of HEAD's reflog that no branch's reflog
 # has, other than a rebase's step, which is a commit made with HEAD detached, an older stash, and,
-# with $reflogs set, any commit a reflog has.
+# with $reflogs set, any commit a reflog has. A branch or tag at a commit with no fresh commit goes
+# through known_ref.
 extra_refs() {
 	{
 		printf '^%s\n' "$base"
@@ -507,6 +582,7 @@ extra_refs() {
 	while read -r e_id e_ref; do
 		e_commit=$(g rev-parse --verify --quiet "$e_id^{commit}") || continue
 		if [ -z "$(fresh "$e_commit")" ]; then
+			known_ref "$e_id" "$e_commit" "$e_ref"
 			continue
 		fi
 		case $e_ref in
@@ -661,11 +737,14 @@ submodule_bundle() (
 		printf 'qory: %s has a git repository with commits or changes that the commit leaves out\n' "$shows" >&2
 		: > "$B/$n.left"
 	fi
-	add "$G/add" "$shows"
 	set -- ':/'
 	while IFS= read -r p; do
 		set -- "$@" ":(exclude,top,literal)$p"
 	done < "$G/nested"
+	shift
+	large "$top$d/" "$G/add" "$G/setup-paths" ./.git "$@"
+	set -- ':/' "$@"
+	add "$G/add" "$shows"
 	g ls-files -z -m -o --exclude-standard -- "$@" > "$G/unadded-z" 2>/dev/null || : > "$B/$n.left"
 	tr '\000' '\n' < "$G/unadded-z" > "$G/unadded"
 	if [ -n "$(lacking "$G/unadded" "$G/setup-paths")" ]; then
@@ -680,14 +759,14 @@ submodule_bundle() (
 	1) uncommitted ;;
 	*) exit "$changed" ;;
 	esac
-	mainref= tip= clonerefs=$B/subrefs-$n-$k reflogs=1
+	mainref= tip= clonerefs=$B/subrefs-$n-$k reflogs=1 known=$B/$n-$k.known
 	extra_refs
 	bundle "$B/$n-$k"
 )
 n=0
 while [ "$n" -lt "$count" ]; do
 	. "$B/list-$n"
-	if [ "$rel" = . ]; then T=$W shown="the copy"; else T=$W/$rel shown="the copy of $rel"; fi
+	if [ "$rel" = . ]; then T=$W shown="the copy" top=; else T=$W/$rel shown="the copy of $rel" top=$rel/; fi
 	G=$B/git-$n C=$T/.git
 	cd "$T"
 	gitfolder "$B/exclude-$n"
@@ -891,10 +970,11 @@ while [ "$n" -lt "$count" ]; do
 				continue
 			fi
 			printf 'qory: %s has a git repository at %s that the run made, and the commit leaves it out\n' "$shown" "$shows" >&2
-			: > "$B/$n.left"
+			: > "$B/$n.nested"
 			;;
 		esac
 	done < "$G/folders"
+	large "$top" "$P" "$G/out-paths" ./.qory ':(exclude,top,literal,icase).qory' "$@"
 	add "$P" "$shown"
 	# What stays behind is what the add left: a file that ls-files still lists, or a folder this
 	# process cannot read, which no git lists, unless an ignore rule covers it.
@@ -910,7 +990,9 @@ while [ "$n" -lt "$count" ]; do
 		g diff-tree -r --no-renames --name-only -z "$base" "$at" > "$G/changed-z" 2>/dev/null || : > "$B/$n.left"
 		tr '\000' '\n' < "$G/changed-z" > "$G/changed"
 		both "$G/unadded" "$G/out-paths" > "$G/kept"
-		both "$G/kept" "$G/changed" > "$G/undone"
+		both "$G/kept" "$G/changed" > "$G/kept-changed"
+		# A file left out as too large has its line in n.large.
+		lacking "$G/kept-changed" "$G/large" > "$G/undone"
 		if [ -s "$G/undone" ]; then
 			: > "$B/$n.left"
 		fi
@@ -947,7 +1029,7 @@ while [ "$n" -lt "$count" ]; do
 	# nothing past the base commit on the branch, a commit that any reflog has comes back too, such
 	# as one that a reset took off the branch.
 	tip=$(g rev-parse --verify "refs/heads/$branch^{commit}")
-	mainref=refs/heads/$branch clonerefs=$B/refs-$n reflogs=
+	mainref=refs/heads/$branch clonerefs=$B/refs-$n reflogs= known=$B/$n.known
 	if [ "$(g rev-list --count "$mainref" "^$base")" = 0 ]; then
 		reflogs=1
 	fi

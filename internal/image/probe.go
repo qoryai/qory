@@ -250,7 +250,7 @@ var sessionTools = []struct{ name, why string }{
 	{"chmod", "to give itself read access to the files and folders the run made"},
 	{"comm", "to compare the run's refs and commits with what the bundle has"},
 	{"cp", "to copy the person's ignore rules to its git folder"},
-	{"find", "to list executable files and embedded repositories"},
+	{"find", "to list executable files, embedded repositories and files over 100 MiB"},
 	{"grep", "to find a sparse checkout and what the setup left in a submodule"},
 	{"mkdir", "to make its git folder"},
 	{"mv", "to put the finished bundle in place"},

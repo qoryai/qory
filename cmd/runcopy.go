@@ -25,14 +25,16 @@ import (
 
 // The lines of a walled write run, which works in a copy of the person's checkout. A line
 // with a path of the copy shows the person where the run's work stays. The texts of a cause go
-// after [textCopyRead], which has the fix. [textCopyBehind] also stands alone beside the line of
-// [runCopy.kept], which has the fix.
+// after [textCopyRead], which has the fix. [textCopyBehind], [textCopyNotAdded] and [textCopyLarge]
+// stand alone beside the line of [runCopy.kept], which has the fix.
 const (
 	textCopyMount      = "make the mount %s read-only, with :ro on --mount or in wall.mounts: a walled run reads the checkout or works in a copy of it, and a read-write mount lets it write your files directly"
 	textCopyOutside    = "run qory inside the checkout %s: a run that may write works in a copy of the checkout, and the working folder %s is outside it"
 	textCopyNoFolder   = "commit %[1]s, or run qory in a folder that the commit at HEAD has: a run that may write works in a copy of that commit, which has no folder %[1]s"
 	textCopyReserved   = "start the run from a folder that does not contain your home folder or qory's state directory: the folder %s %s, and the run's copy of it would have every file there"
 	textCopyBehind     = "part of the run's work did not come back: the copy has a nested repository the run made."
+	textCopyNotAdded   = "part of the run's work did not come back: the copy has changes that git could not add to the run's commit, such as a file another user owns or a change in a submodule."
+	textCopyLarge      = "left out of the run's commit, as each has more than %s: %s. They stay in the run's copy."
 	textCopyStepLimit  = "the check of the run's commits ran past its limit of %s, so those commits did not come back"
 	textCopyFetchLimit = "the fetch of the run's commits ran past its limit of %s, so those commits did not come back"
 	textCopyBackLimit  = "the copy back of the run's files ran past its limit of %s, so part of them did not come back"
@@ -61,25 +63,36 @@ const (
 	textCopyFolder     = "the run's copy"
 )
 
-// copyStepLimit is how long the check of a run's bundles, a fetch from them, or a copy of a run's
-// files back may take. A bundle has at most 1 GiB, and git checks every object in it. A test
-// sets a shorter one.
+// copyStepLimit is how long a copy of a run's files back may take, and the base of how long the
+// check of a run's bundles or a fetch from them may take, see [stepLimitFor]. A test sets a
+// shorter one.
 var copyStepLimit = 10 * time.Minute
+
+// maxStepLimit is the longest the check of a run's bundles or a fetch from them may take.
+const maxStepLimit = 60 * time.Minute
+
+// stepLimitFor is how long the check of bundles of size bytes, or a fetch from them, may take:
+// [copyStepLimit] and a minute for each full GiB, as git checks every object, at most
+// [maxStepLimit]. A bundle has at most [runcopy.MaxBundle].
+func stepLimitFor(size int64) time.Duration {
+	limit := copyStepLimit + time.Duration(size>>30)*time.Minute
+	return min(limit, max(maxStepLimit, copyStepLimit))
+}
 
 // removeSetupLimit is how long the removal of a run's setup container may take before its work
 // comes back.
 const removeSetupLimit = 2 * time.Minute
 
-// stepErr is err of a step under limited, the context of ctx with [copyStepLimit]: the line of
-// that limit when the limit ended the step. A stop that ended ctx stays err, for [runCopy.checkFailed].
-func stepErr(ctx, limited context.Context, err error) error {
-	return limitErr(ctx, limited, textCopyStepLimit, err)
+// stepErr is err of a step under limited, the context of ctx with limit: the line of that limit
+// when the limit ended the step. A stop that ended ctx stays err, for [runCopy.checkFailed].
+func stepErr(ctx, limited context.Context, limit time.Duration, err error) error {
+	return limitErr(ctx, limited, textCopyStepLimit, limit, err)
 }
 
 // limitErr is [stepErr] with text, the line of the limit.
-func limitErr(ctx, limited context.Context, text string, err error) error {
+func limitErr(ctx, limited context.Context, text string, limit time.Duration, err error) error {
 	if err != nil && ctx.Err() == nil && limited.Err() != nil {
-		return fmt.Errorf(text, copyStepLimit)
+		return fmt.Errorf(text, limit)
 	}
 	return err
 }
@@ -131,6 +144,9 @@ type runCopy struct {
 	out map[string]runcopy.LeftOut
 	// keep is whether the copy stays when the run ends: nothing, or not everything, came back.
 	keep bool
+	// limit is how long the check of the run's bundles and each fetch from them may take, from
+	// [stepLimitFor].
+	limit time.Duration
 	// readOnly is whether the run only reads: its setup works in the copy, the agent has the copy
 	// read-only, and nothing comes back.
 	readOnly bool
@@ -554,20 +570,22 @@ func (c *runCopy) noSession(ctx context.Context, err error) *copyStop {
 	return c.stoppedBy(textCopyNoSession, err)
 }
 
-// quarantine checks the bundles of the git session, with [copyStepLimit], once the session's
-// container is gone. It returns the quarantine per repository, nil for one with no commit
-// past its base, and nil with no commit in any: [runcopy.ErrNoBundle] goes to report.
-func (c *runCopy) quarantine(ctx context.Context, report func(string)) ([]*runcopy.Quarantine, error) {
-	limited, cancel := context.WithTimeout(ctx, copyStepLimit)
+// quarantine checks the bundles of the git session, with [runCopy.limit] from their size, once the
+// session's container is gone. It returns the quarantine per repository, nil for one with no commit
+// past its base, and nil with no commit in any: [runcopy.ErrNoBundle] goes to report, when left
+// has nothing.
+func (c *runCopy) quarantine(ctx context.Context, left runcopy.Left, report func(string)) ([]*runcopy.Quarantine, error) {
+	c.limit = stepLimitFor(c.dir.BundleBytes(c.repos))
+	limited, cancel := context.WithTimeout(ctx, c.limit)
 	defer cancel()
 	qs, err := c.dir.Quarantine(limited, c.branch, c.repos)
 	if errors.Is(err, runcopy.ErrNoBundle) {
-		if report != nil && !c.dir.LeftBehind(c.repos) {
+		if report != nil && !left.Any() {
 			report(err.Error())
 		}
 		return nil, nil
 	}
-	return qs, stepErr(ctx, limited, err)
+	return qs, stepErr(ctx, limited, c.limit, err)
 }
 
 // comeBack brings the run's work to the person: for a plain folder the files, and for a
@@ -578,7 +596,8 @@ func (c *runCopy) comeBack(ctx context.Context, runID string, report func(string
 	if c.plain {
 		return c.copyBack(ctx, report)
 	}
-	qs, err := c.quarantine(ctx, report)
+	left := c.dir.Left(c.repos)
+	qs, err := c.quarantine(ctx, left, report)
 	if err != nil {
 		report(c.checkFailed(ctx, err).Error())
 		return false
@@ -592,8 +611,16 @@ func (c *runCopy) comeBack(ctx context.Context, runID string, report func(string
 			ok = false
 		}
 	}
-	if c.dir.LeftBehind(c.repos) {
+	if len(left.Large) > 0 {
+		report(fmt.Sprintf(textCopyLarge, maxFileShown, largeFiles(left.Large)))
+		ok = false
+	}
+	if left.Nested {
 		report(textCopyBehind)
+		ok = false
+	}
+	if left.Behind {
+		report(textCopyNotAdded)
 		ok = false
 	}
 	if !ok {
@@ -607,25 +634,25 @@ func (c *runCopy) comeBack(ctx context.Context, runID string, report func(string
 // acting key. The branch is [runCopy.back], or the next free name when a branch there has or
 // blocks it by now.
 func (c *runCopy) fetchOne(ctx context.Context, q *runcopy.Quarantine, runID string, report func(string)) bool {
-	limited, cancel := context.WithTimeout(ctx, copyStepLimit)
+	limited, cancel := context.WithTimeout(ctx, c.limit)
 	defer cancel()
 	changes, err := q.ActingChanges(limited)
 	if err != nil {
-		report(c.checkFailed(ctx, stepErr(ctx, limited, err)).Error())
+		report(c.checkFailed(ctx, stepErr(ctx, limited, c.limit, err)).Error())
 		return false
 	}
 	at := filepath.Join(c.root, filepath.FromSlash(q.Repo.Path))
 	branch := ""
 	if q.Head != "" {
 		if branch, err = runcopy.FreeBranchAgain(limited, at, c.back, runID); err != nil {
-			report(c.checkFailed(ctx, stepErr(ctx, limited, err)).Error())
+			report(c.checkFailed(ctx, stepErr(ctx, limited, c.limit, err)).Error())
 			return false
 		}
 	}
 	prefix, err := q.FetchInto(limited, at, "refs/heads/"+branch)
 	if err != nil {
 		if limited.Err() != nil {
-			report(c.checkFailed(ctx, limitErr(ctx, limited, textCopyFetchLimit, err)).Error())
+			report(c.checkFailed(ctx, limitErr(ctx, limited, textCopyFetchLimit, c.limit, err)).Error())
 			return false
 		}
 		report(shownError(err))
@@ -700,6 +727,19 @@ func actingKeys(changes []runcopy.ActingChange) string {
 		}
 	}
 	return strings.Join(keys, ", ")
+}
+
+// maxFileShown is [runcopy.MaxFile] as a line shows it.
+var maxFileShown = fmt.Sprintf("%d MiB", runcopy.MaxFile>>20)
+
+// largeFiles is the files of [runcopy.Left.Large] as a line lists them: text that a program in the
+// git session can write, each with no control character.
+func largeFiles(files []string) string {
+	shown := make([]string, len(files))
+	for i, f := range files {
+		shown[i] = integration.Printable(f)
+	}
+	return strings.Join(shown, ", ")
 }
 
 // shownPaths is paths of a run's copy as a line lists them.

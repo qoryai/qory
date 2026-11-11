@@ -3310,7 +3310,11 @@ func TestAChangeOnAScratchBranchArrivesUnderRefsQory(t *testing.T) {
 	if !slices.Contains(got, "kept.txt") || slices.Contains(got, "scratch.txt") {
 		t.Errorf("the branch at %s has %v", q.Head, got)
 	}
-	wantRefs(t, refs, "uncommitted")
+	// The branch scratch is at the base commit, which the person has.
+	wantRefs(t, refs, "uncommitted", "heads/scratch")
+	if refs["heads/scratch"] != base {
+		t.Errorf("scratch came back at %s, want %s", refs["heads/scratch"], base)
+	}
 	if got := files(t, src, prefix+"/uncommitted"); !slices.Contains(got, "scratch.txt") || slices.Contains(got, "kept.txt") {
 		t.Errorf("uncommitted has %v", got)
 	}
@@ -3625,6 +3629,9 @@ func TestAnEmbeddedRepositoryWithNoFindIsLeftBehind(t *testing.T) {
 	}
 	if !d.LeftBehind(repos) {
 		t.Error("the session did not record the embedded repository")
+	}
+	if left := d.Left(repos); left.Nested || !left.Behind {
+		t.Errorf("Left = %+v, want work git could not add", left)
 	}
 }
 
@@ -3991,6 +3998,9 @@ func TestARepositoryTheRunMadeIsLeftBehind(t *testing.T) {
 			printed := noBundle(t, d, repos, true)
 			if want := "qory: the copy has a git repository at inner that the run made, and the commit leaves it out"; !strings.Contains(printed, want) {
 				t.Errorf("the session printed:\n%s", printed)
+			}
+			if left := d.Left(repos); !left.Nested || left.Behind {
+				t.Errorf("Left = %+v, want a nested repository alone", left)
 			}
 		})
 	}
@@ -4842,8 +4852,8 @@ func TestAnUndoOfACommitOnAFileKeptOutIsLeftBehind(t *testing.T) {
 			commitAll(t, d.Work(), "edit")
 			write(t, d.Work(), "legacy.txt", found)
 			printed := sessionOutput(t, d, repos, map[string]LeftOut{"": out})
-			if !d.LeftBehind(repos) {
-				t.Errorf("the session did not record the undo:\n%s", printed)
+			if left := d.Left(repos); !left.Behind || left.Nested {
+				t.Errorf("the session did not record the undo as work git could not add: %+v\n%s", left, printed)
 			}
 		})
 	}
@@ -5069,5 +5079,272 @@ func TestTheGitSessionRunsItsScriptFromAFile(t *testing.T) {
 			}
 			testGit(t, src, "cat-file", "-e", branch+":left.txt")
 		})
+	}
+}
+
+// sparseFile makes the file rel in dir with size bytes and no data written, so a test of the size
+// cap writes nothing to the disk.
+func sparseFile(t *testing.T, dir, rel string, size int64) {
+	t.Helper()
+	write(t, dir, rel, "")
+	if err := os.Truncate(filepath.Join(dir, filepath.FromSlash(rel)), size); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestAFileOverTheSizeCapStaysInTheCopy is an agent that commits two files of more than MaxFile
+// bytes, changes one of them, and leaves a new one, an ignored one, one of MaxFile bytes and a
+// small change: the run's commit leaves out the changed file and the new one, and n.large lists
+// both. The commit of the agent keeps its files, and nothing else stays behind.
+func TestAFileOverTheSizeCapStaysInTheCopy(t *testing.T) {
+	isolate(t)
+	sessionGit(t)
+	src, _ := person(t)
+	write(t, src, ".gitignore", "ignored.bin\n")
+	commitAll(t, src, "ignore")
+	d, repos := cloneRun(t, src)
+	sparseFile(t, d.Work(), "committed.bin", MaxFile+1)
+	sparseFile(t, d.Work(), "changed.bin", MaxFile+1)
+	agentCommit := commitAll(t, d.Work(), "two large files")
+	sparseFile(t, d.Work(), "changed.bin", MaxFile+2)
+	sparseFile(t, d.Work(), "big/new.bin", MaxFile+1)
+	sparseFile(t, d.Work(), "ignored.bin", MaxFile+1)
+	sparseFile(t, d.Work(), "exact.bin", MaxFile)
+	write(t, d.Work(), "small.txt", "small\n")
+	q := bringBack(t, d, src, repos, nil)
+	got := files(t, src, q.Head)
+	for _, want := range []string{"committed.bin", "changed.bin", "exact.bin", "small.txt"} {
+		if !slices.Contains(got, want) {
+			t.Errorf("the run's commit lacks %s: %v", want, got)
+		}
+	}
+	for _, out := range []string{"big/new.bin", "ignored.bin"} {
+		if slices.Contains(got, out) {
+			t.Errorf("the run's commit has %s", out)
+		}
+	}
+	if size := testGit(t, src, "cat-file", "-s", q.Head+":changed.bin"); size != strconv.Itoa(MaxFile+1) {
+		t.Errorf("changed.bin in the run's commit has %s bytes, want the agent's commit", size)
+	}
+	if parent := testGit(t, src, "rev-parse", q.Head+"^"); parent != agentCommit {
+		t.Errorf("the run's commit follows %s, want the agent's commit %s", parent, agentCommit)
+	}
+	left := d.Left(repos)
+	if want := []string{"big/new.bin", "changed.bin"}; !slices.Equal(left.Large, want) || left.Behind {
+		t.Errorf("Left = %+v, want large %v and nothing behind", left, want)
+	}
+}
+
+// TestALargeFileAloneBringsNoCommit is a run whose only change is a file over the cap: no bundle,
+// and the file is listed.
+func TestALargeFileAloneBringsNoCommit(t *testing.T) {
+	isolate(t)
+	sessionGit(t)
+	src, _ := person(t)
+	d, repos := cloneRun(t, src)
+	sparseFile(t, d.Work(), "data.bin", MaxFile+1)
+	printed := sessionOutput(t, d, repos, nil)
+	if _, err := d.Quarantine(context.Background(), branch, repos); !errors.Is(err, ErrNoBundle) {
+		t.Errorf("Quarantine = %v, want no bundle\n%s", err, printed)
+	}
+	if left := d.Left(repos); !slices.Equal(left.Large, []string{"data.bin"}) || left.Behind || !left.Any() {
+		t.Errorf("Left = %+v\n%s", left, printed)
+	}
+}
+
+// TestALargeFileInASubmoduleStaysInTheCopy is a file over the cap in a submodule the clone copied:
+// it stays out of the submodule's uncommitted, and n.large lists it by its path in the copy.
+func TestALargeFileInASubmoduleStaysInTheCopy(t *testing.T) {
+	isolate(t)
+	sessionGit(t)
+	src, sub := withSubmodule(t)
+	d, repos := cloneRun(t, src)
+	inner := filepath.Join(d.Work(), filepath.FromSlash(sub))
+	sparseFile(t, inner, "data.bin", MaxFile+1)
+	write(t, inner, "small.txt", "small\n")
+	q, _ := runRefs(t, d, src, repos, nil)
+	if len(q.Submodules) != 1 {
+		t.Fatalf("%d submodules came back", len(q.Submodules))
+	}
+	gitDir := testGit(t, filepath.Join(src, sub), "rev-parse", "--path-format=absolute", "--git-dir")
+	got := files(t, gitDir, prefix+"/uncommitted")
+	if !slices.Contains(got, "small.txt") || slices.Contains(got, "data.bin") {
+		t.Errorf("the submodule's uncommitted has %v", got)
+	}
+	if left := d.Left(repos); !slices.Equal(left.Large, []string{sub + "/data.bin"}) || left.Behind {
+		t.Errorf("Left = %+v", left)
+	}
+}
+
+// TestLeftReadsTheListsAsText is a list that is no regular file, which counts as work left behind,
+// and lists past 1 MiB, which end with "..." and keep no line the cut ended.
+func TestLeftReadsTheListsAsText(t *testing.T) {
+	d := newDir(t)
+	repos := []Repository{{}, {}}
+	if err := os.Mkdir(d.Bundle(), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(d.Bundle(), "0.large"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if left := d.Left(repos); !left.Behind || len(left.Large) > 0 {
+		t.Errorf("a folder at 0.large: Left = %+v", left)
+	}
+	if err := os.Remove(filepath.Join(d.Bundle(), "0.large")); err != nil {
+		t.Fatal(err)
+	}
+	line := strings.Repeat("a", 1000) + "\n"
+	write(t, d.Bundle(), "0.large", strings.Repeat(line, 1000))
+	write(t, d.Bundle(), "1.large", strings.Repeat(line, 100))
+	left := d.Left(repos)
+	if left.Behind || len(left.Large) != 1047+1 || left.Large[len(left.Large)-1] != "..." {
+		t.Errorf("past 1 MiB: %d files, behind %v, last %.10q", len(left.Large), left.Behind, left.Large[len(left.Large)-1])
+	}
+	for _, f := range left.Large[:len(left.Large)-1] {
+		if len(f) != 1000 {
+			t.Fatalf("a listed file has %d bytes", len(f))
+		}
+	}
+}
+
+// TestARefAtTheBaseCommitComesBack is a tag and a branch at the base commit and an annotated tag
+// of it, with no other work: a bundle leaves out a ref whose commit it excludes, and each comes
+// back under the prefix all the same, at the person's commit or with its tag object.
+func TestARefAtTheBaseCommitComesBack(t *testing.T) {
+	bothChecks(t, func(t *testing.T) {
+		sessionGit(t)
+		src, base := person(t)
+		d, repos := cloneRun(t, src)
+		testGit(t, d.Work(), "tag", "v-base")
+		testGit(t, d.Work(), "branch", "scratch")
+		testGit(t, d.Work(), "tag", "-a", "-m", "annotated", "v-annotated")
+		q, refs := runRefs(t, d, src, repos, nil)
+		if q.Head != "" {
+			t.Errorf("the run's branch came back at %s", q.Head)
+		}
+		wantRefs(t, refs, "tags/v-base", "heads/scratch", "tags/v-annotated")
+		if refs["tags/v-base"] != base || refs["heads/scratch"] != base {
+			t.Errorf("the refs are %v, want them at %s", refs, base)
+		}
+		if kind := testGit(t, src, "cat-file", "-t", prefix+"/tags/v-annotated"); kind != "tag" {
+			t.Errorf("the annotated tag came back as a %s", kind)
+		}
+		if at := testGit(t, src, "rev-parse", prefix+"/tags/v-annotated^{commit}"); at != base {
+			t.Errorf("the annotated tag is at %s, want %s", at, base)
+		}
+	})
+}
+
+// TestARefAtTheBaseCommitComesBackBesideTheBranch is a tag of the base commit and a commit on the
+// run's branch: both come back, in one fetch.
+func TestARefAtTheBaseCommitComesBackBesideTheBranch(t *testing.T) {
+	isolate(t)
+	sessionGit(t)
+	src, base := person(t)
+	d, repos := cloneRun(t, src)
+	testGit(t, d.Work(), "tag", "v-base")
+	write(t, d.Work(), "x.txt", "x\n")
+	q, refs := runRefs(t, d, src, repos, nil)
+	if q.Head == "" || !slices.Contains(files(t, src, "refs/heads/"+branch), "x.txt") {
+		t.Errorf("the run's branch did not come back")
+	}
+	wantRefs(t, refs, "tags/v-base")
+	if refs["tags/v-base"] != base {
+		t.Errorf("the tag is at %s, want %s", refs["tags/v-base"], base)
+	}
+}
+
+// TestAListOfKnownRefsIsChecked is a list of refs at the person's commits that the git session
+// could have changed: an id the repository lacks, the id of a blob, a ref of another form, HEAD,
+// two names in two letter cases, and a line that is no ref: each fails the quarantine, and no ref
+// reaches the person's repository.
+func TestAListOfKnownRefsIsChecked(t *testing.T) {
+	for name, c := range map[string]struct{ line, want string }{
+		"a missing id":     {strings.Repeat("1", 40) + " " + prefix + "/tags/x", "is no commit in"},
+		"a blob":           {"BLOB " + prefix + "/tags/x", "is no commit in"},
+		"HEAD":             {"BASE " + prefix + "/HEAD", "which is not a commit id and a branch or tag under"},
+		"stash":            {"BASE " + prefix + "/stash", "which is not a commit id and a branch or tag under"},
+		"outside":          {"BASE refs/heads/main", "which is not a commit id and a branch or tag under"},
+		"another run":      {"BASE refs/qory/run-2/tags/x", "which is not a commit id and a branch or tag under"},
+		"a short id":       {"1234 " + prefix + "/tags/x", "which is not a commit id and a branch or tag under"},
+		"two letter cases": {"BASE " + prefix + "/tags/V-Base", "twice"},
+	} {
+		t.Run(strings.ReplaceAll(name, " ", "-"), func(t *testing.T) {
+			isolate(t)
+			sessionGit(t)
+			src, base := person(t)
+			blob := testGit(t, src, "rev-parse", base+":README.md")
+			before := testGit(t, src, "for-each-ref")
+			d, repos := cloneRun(t, src)
+			testGit(t, d.Work(), "tag", "v-base")
+			sessionOutput(t, d, repos, nil)
+			line := strings.NewReplacer("BASE", base, "BLOB", blob).Replace(c.line)
+			known := filepath.Join(d.Bundle(), "0.known")
+			data, err := os.ReadFile(known)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(known, append(data, line+"\n"...), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			_, err = d.Quarantine(context.Background(), branch, repos)
+			hasPrefix(t, name, err, "the run's bundle for . failed git's checks")
+			if err == nil || !strings.Contains(err.Error(), c.want) {
+				t.Errorf("the error %v does not have %q; the list:\n%s", err, c.want, read(t, d.Bundle(), "0.known"))
+			}
+			if after := testGit(t, src, "for-each-ref"); after != before {
+				t.Errorf("your repository's refs were\n%s\nand are\n%s", before, after)
+			}
+		})
+	}
+}
+
+// TestAKnownRefFetchesOnlyWhereItsCommitIs is a quarantine with a tag of the base commit, fetched
+// into a repository that lacks that commit: the fetch stops before it writes any ref.
+func TestAKnownRefFetchesOnlyWhereItsCommitIs(t *testing.T) {
+	isolate(t)
+	sessionGit(t)
+	src, _ := person(t)
+	d, repos := cloneRun(t, src)
+	testGit(t, d.Work(), "tag", "v-base")
+	runGit(t, d, repos, nil)
+	qs, err := d.Quarantine(context.Background(), branch, repos)
+	if err != nil {
+		t.Fatal(err)
+	}
+	other := t.TempDir()
+	testGit(t, other, "init", "--quiet", "-b", "main")
+	write(t, other, "other.txt", "other\n")
+	commitAll(t, other, "other")
+	before := testGit(t, other, "for-each-ref")
+	_, err = qs[0].FetchInto(context.Background(), other, "refs/heads/"+branch)
+	hasPrefix(t, "a fetch", err, "fetch "+prefix+"/* from ")
+	if err == nil || !strings.Contains(err.Error(), "is no commit in") {
+		t.Errorf("the error is %v", err)
+	}
+	if after := testGit(t, other, "for-each-ref"); after != before {
+		t.Errorf("the refs were\n%s\nand are\n%s", before, after)
+	}
+}
+
+// TestATagInASubmoduleAtItsCommitComesBack is a tag at the commit that the clone checked out in a
+// submodule: it comes back under the prefix in the person's git folder of the submodule.
+func TestATagInASubmoduleAtItsCommitComesBack(t *testing.T) {
+	isolate(t)
+	sessionGit(t)
+	src, sub := withSubmodule(t)
+	d, repos := cloneRun(t, src)
+	inner := filepath.Join(d.Work(), filepath.FromSlash(sub))
+	at := testGit(t, inner, "rev-parse", "HEAD")
+	testGit(t, inner, "tag", "v-sub")
+	q, refs := runRefs(t, d, src, repos, nil)
+	wantRefs(t, refs)
+	if len(q.Submodules) != 1 {
+		t.Fatalf("%d submodules came back", len(q.Submodules))
+	}
+	gitDir := testGit(t, filepath.Join(src, sub), "rev-parse", "--path-format=absolute", "--git-dir")
+	wantRefs(t, refsUnder(t, gitDir, prefix), "tags/v-sub")
+	if got := testGit(t, gitDir, "rev-parse", prefix+"/tags/v-sub"); got != at {
+		t.Errorf("the tag is at %s, want %s", got, at)
 	}
 }

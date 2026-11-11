@@ -3769,11 +3769,27 @@ Part of the run's work can stay in the copy:
 Other lines of `git add` print too, such as its warning about a link at `.gitignore`. They keep
 nothing behind.
 
-A local run then keeps the copy and exits 1:
+The session leaves out of its commit each file of more than 100 MiB (104857600 bytes) that the
+agent added or changed, in the repository and in each submodule the clone copied, and lists it. A
+commit that the agent made keeps its files as they are. Such a file stays in the copy, and the
+rest of the work comes back:
+
+```text
+qory run: left out of the run's commit, as each has more than 100 MiB: data/model.bin. They stay in the run's copy.
+qory run: read the run's files in <folder>, run no git there, then remove the folder: it has the work that did not come back
+```
+
+A local run then keeps the copy and exits 1. A repository the run made has this line:
 
 ```text
 qory run: part of the run's work did not come back: the copy has a nested repository the run made.
 qory run: read the run's files in <folder>, run no git there, then remove the folder: it has the work that did not come back
+```
+
+Each of the other cases, a repository inside a submodule too, has this line in place of the first:
+
+```text
+qory run: part of the run's work did not come back: the copy has changes that git could not add to the run's commit, such as a file another user owns or a change in a submodule.
 ```
 
 Git LFS: because the session runs no filter, an LFS file the agent changes goes into the
@@ -3806,6 +3822,10 @@ branch out, so the files in your checkout stay as they are:
 qory run: the run's commits are on qory/run-0193 in /path/to/repo.
 ```
 
+The check and the fetch have 10 minutes, and a minute more for each full GiB of the bundles, at
+most 60 minutes. A bundle of more than 8 GiB (8589934592 bytes), which only the agent's commits can
+reach, brings nothing back.
+
 When the commits change a setting that qory acts on, such as `harness.launch` or `env` in
 `qory.yaml`, or add a link, the line continues with what they change:
 
@@ -3825,8 +3845,10 @@ qory run: the run's commits are on qory/run-0193 in /path/to/repo. They change t
 | `lost/<n>` | The newest commit of each line of commits that only a reflog reaches: a commit made with `HEAD` detached, an older stash, or, with nothing past your commit on the branch, any such commit, such as one that a reset took off the branch. The commits of another new ref, such as one of `git notes add`, come back here too. |
 | `uncommitted` | The changes in the working tree when the session makes no commit on the branch, as a commit on `HEAD`. In a sparse checkout, each path the checkout took out stays as `HEAD` has it. |
 
-A ref comes back only when it has a commit that your commit, a ref of the clone and a
-remote-tracking ref do not have: a tag of your commit stays out. Each submodule that the clone
+A ref other than a branch or a tag comes back only when it has a commit that your commit, a ref of
+the clone and a remote-tracking ref do not have. A branch or a tag that the run made or moved at a
+commit you have, such as a tag of your commit, comes back too: qory checks that your repository has
+that commit, and makes the ref in the same fetch. Each submodule that the clone
 copied gets the same refs, under the same prefix, in your git folder of that submodule, such as
 `.git/modules/<name>`. A change in a submodule comes back as its `uncommitted`, and a commit as its
 `HEAD`. A file that the setup left in the submodule stays out.

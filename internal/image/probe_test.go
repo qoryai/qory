@@ -317,5 +317,5 @@ func TestTheGitCheckNeedsFind(t *testing.T) {
 	root := imageRoot(t, files)
 	p := image.Probe{Root: root, Env: env(map[string]string{"PATH": "/usr/bin"}), Exec: goodVersions().exec}
 	checks := byName(p.Report(context.Background()))
-	want(t, checks, "git", image.Fail, "install find in /usr/local/bin, /usr/bin, /bin: the git session of a walled run runs find from these folders, to list executable files and embedded repositories")
+	want(t, checks, "git", image.Fail, "install find in /usr/local/bin, /usr/bin, /bin: the git session of a walled run runs find from these folders, to list executable files, embedded repositories and files over 100 MiB")
 }

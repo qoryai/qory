@@ -3,9 +3,11 @@ package cmd
 import (
 	"context"
 	"errors"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -24,7 +26,7 @@ func TestAFetchPastItsLimitHasItsLine(t *testing.T) {
 	limited, cancel := context.WithCancel(context.Background())
 	cancel()
 	failed := errors.New("the fetch failed")
-	err := limitErr(context.Background(), limited, textCopyFetchLimit, failed)
+	err := limitErr(context.Background(), limited, textCopyFetchLimit, copyStepLimit, failed)
 	want := "the fetch of the run's commits ran past its limit of " + copyStepLimit.String()
 	if err == nil || !strings.HasPrefix(err.Error(), want) {
 		t.Errorf("the line is %v", err)
@@ -32,8 +34,27 @@ func TestAFetchPastItsLimitHasItsLine(t *testing.T) {
 	stop, cancelStop := context.WithTimeout(context.Background(), time.Nanosecond)
 	defer cancelStop()
 	<-stop.Done()
-	if err := limitErr(stop, limited, textCopyFetchLimit, failed); !errors.Is(err, failed) {
+	if err := limitErr(stop, limited, textCopyFetchLimit, copyStepLimit, failed); !errors.Is(err, failed) {
 		t.Errorf("after a stop the error is %v", err)
+	}
+}
+
+// TestTheCheckLimitGrowsWithTheBundles is the limit of the check and the fetch: the base under
+// 1 GiB, a minute more for each full GiB, and at most an hour.
+func TestTheCheckLimitGrowsWithTheBundles(t *testing.T) {
+	for _, c := range []struct {
+		size int64
+		want time.Duration
+	}{
+		{0, copyStepLimit},
+		{1<<30 - 1, copyStepLimit},
+		{1 << 30, copyStepLimit + time.Minute},
+		{runcopy.MaxBundle, copyStepLimit + 8*time.Minute},
+		{100 << 30, maxStepLimit},
+	} {
+		if got := stepLimitFor(c.size); got != c.want {
+			t.Errorf("the limit for %d bytes is %s, want %s", c.size, got, c.want)
+		}
 	}
 }
 
@@ -245,5 +266,64 @@ func TestNowhereKeepsTheRulesOfACopyStep(t *testing.T) {
 	}
 	if _, err := r.HostProxy(); err != nil {
 		t.Errorf("HostProxy after the copy step: %v", err)
+	}
+}
+
+// TestEachLeftoverHasItsLine is a git session that recorded a repository the run made, other work
+// git could not add, or a large file with a control character, and nothing past the base commit:
+// each prints its line, none prints that no action is needed, and the copy stays.
+func TestEachLeftoverHasItsLine(t *testing.T) {
+	for name, c := range map[string]struct {
+		files map[string]string
+		want  []string
+	}{
+		"nested":    {map[string]string{"0.nested": ""}, []string{textCopyBehind}},
+		"not added": {map[string]string{"0.left": ""}, []string{textCopyNotAdded}},
+		"large": {map[string]string{"0.large": "data/a\x1bb.bin\n"},
+			[]string{"left out of the run's commit, as each has more than 100 MiB: data/a?b.bin. They stay in the run's copy."}},
+		"all": {map[string]string{"0.nested": "", "0.left": "", "0.large": "x.bin\n"},
+			[]string{textCopyBehind, textCopyNotAdded, "more than 100 MiB: x.bin."}},
+	} {
+		t.Run(strings.ReplaceAll(name, " ", "-"), func(t *testing.T) {
+			for _, v := range []string{"HOME", "XDG_CACHE_HOME", "XDG_STATE_HOME", "XDG_CONFIG_HOME"} {
+				t.Setenv(v, t.TempDir())
+			}
+			t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
+			t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
+			dir, err := runcopy.New("run-1")
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = dir.Remove() })
+			if err := os.MkdirAll(dir.Bundle(), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			files := map[string]string{"0.none": ""}
+			maps.Copy(files, c.files)
+			for f, text := range files {
+				if err := os.WriteFile(filepath.Join(dir.Bundle(), f), []byte(text), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			cp := &runCopy{dir: dir, root: t.TempDir(), branch: "qory/run-1", back: "qory/run-1", repos: []runcopy.Repository{{}}}
+			var lines []string
+			if cp.comeBack(context.Background(), "run-1", func(line string) { lines = append(lines, line) }) {
+				t.Error("comeBack reports that everything came back")
+			}
+			out := strings.Join(lines, "\n")
+			for _, w := range c.want {
+				if !strings.Contains(out, w) {
+					t.Errorf("the lines lack %q:\n%s", w, out)
+				}
+			}
+			for _, text := range []string{textCopyBehind, textCopyNotAdded} {
+				if !slices.Contains(c.want, text) && strings.Contains(out, text) {
+					t.Errorf("the lines have %q:\n%s", text, out)
+				}
+			}
+			if strings.Contains(out, "no action needed") || !cp.keep || !strings.Contains(out, "then remove the folder") {
+				t.Errorf("keep %v, lines:\n%s", cp.keep, out)
+			}
+		})
 	}
 }

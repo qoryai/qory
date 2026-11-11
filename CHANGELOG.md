@@ -320,14 +320,22 @@ release may change what an existing document does, and states it under Upgrading
   lists repositories on an image without a program of the git session, which stops in the setup step
   `Check tools`, before the agent, with `install <program> in /usr/local/bin, /usr/bin, /bin: …`. A copy that stays has its `.git` renamed to `.git-from-run`. Work that the run's branch
   does not have comes back under `refs/qory/run-<run id>` in your repository, or the first free
-  `refs/qory/run-<run id>-<n>`: each branch and tag the run made or moved, its stash, a detached
+  `refs/qory/run-<run id>-<n>`: each branch and tag the run made or moved, also at a commit you
+  have, such as a tag of your commit, its stash, a detached
   `HEAD`, commits that only a reflog reaches, and the working tree as a commit on `HEAD` when the
   session makes no commit on the branch, as in a sparse checkout. Each submodule's commits and
   changes come back under the same prefix in your git folder of that submodule. The line of the
   branch adds `The run's other refs are under <prefix>: list them with git for-each-ref <prefix>.`
   The git session gives itself read access to the files and folders it owns, so a file of mode 000
-  that the agent made comes back. A repository the run made keeps the copy, with `part of the run's
-  work did not come back: the copy has a nested repository the run made.`, and so does a container
+  that the agent made comes back. The git session leaves each file of more than 100 MiB out of its
+  commit, and the copy stays with `left out of the run's commit, as each has more than 100 MiB: ….
+  They stay in the run's copy.`; a commit of the agent keeps its files. A bundle may have up to
+  8 GiB, and its check and fetch have 10 minutes and a minute more per GiB, at most 60 minutes. A
+  repository the run made keeps the copy, with `part of the run's
+  work did not come back: the copy has a nested repository the run made.`, other work that git
+  could not add to the commit keeps it with `part of the run's work did not come back: the copy has
+  changes that git could not add to the run's commit, such as a file another user owns or a change
+  in a submodule.`, and so does a container
   of the run that could not be removed, which brings nothing back. A first signal leaves the
   return of a local run at most 30 minutes, and `qory run` prints that time. A read run with a setup also
   works in a copy, read-only for the agent, and nothing comes back from it. A read-write

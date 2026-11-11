@@ -18,24 +18,139 @@ import (
 	"github.com/qoryai/qory/internal/checkout"
 )
 
-// MaxBundle is the largest bundle qory reads back from a run.
-// 1 GiB is far above an agent's change, and keeps a planted file from filling the disk.
-const MaxBundle = 1 << 30
+// MaxBundle is the largest bundle qory reads back from a run. The git session leaves each file
+// of more than [MaxFile] bytes out of its commit, so only a commit of the agent's, or a session
+// that a program the agent planted changed, comes near it; it keeps a planted file from filling
+// the disk.
+const MaxBundle = 8 << 30
+
+// MaxFile is the largest file the git session adds to the run's commit. A larger one stays in the
+// copy, and n.large lists it.
+const MaxFile = 100 << 20
+
+// maxLarge is the most bytes qory reads of the lists of large files, all together.
+const maxLarge = 1 << 20
 
 // maxBundleHeader is the largest header of a bundle, its refs and prerequisites, that
 // qory reads when it checks the pack itself.
 const maxBundleHeader = 1 << 20
 
 // LeftBehind reports whether the git session of repos recorded work of the run that the bundles
-// do not have. The file's content is not read: a program in the session can write it, and all
-// it can do is keep the copy.
+// do not have, besides the files of [Left.Large]: n.nested or n.left.
 func (d Dir) LeftBehind(repos []Repository) bool {
+	return d.recorded(repos, ".nested") || d.recorded(repos, ".left")
+}
+
+// recorded reports whether the git session of repos wrote a regular file n plus suffix for a
+// repository n. The file's content is not read: a program in the session can write it, and all
+// it can do is keep the copy.
+func (d Dir) recorded(repos []Repository, suffix string) bool {
 	for i := range repos {
-		if info, err := os.Lstat(filepath.Join(d.Bundle(), strconv.Itoa(i)+".left")); err == nil && info.Mode().IsRegular() {
+		if info, err := os.Lstat(filepath.Join(d.Bundle(), strconv.Itoa(i)+suffix)); err == nil && info.Mode().IsRegular() {
 			return true
 		}
 	}
 	return false
+}
+
+// Left is what the git session of a run's repositories recorded as staying in the copy.
+type Left struct {
+	// Nested is whether the copy has a repository the run made, with a commit or a change: n.nested.
+	Nested bool
+	// Behind is whether other work stays, which git could not add to the run's commit, such as a
+	// file another user owns or a change in a submodule: n.left, or a list of large files that is no
+	// regular file.
+	Behind bool
+	// Large are the files the session left out of the run's commit, each of more than [MaxFile]
+	// bytes, relative to the copy, as the session listed them: text to show, which a program in
+	// the session can write, and never a path to open. The last is "..." when the lists have more
+	// than qory reads.
+	Large []string
+}
+
+// Any reports whether anything stays.
+func (l Left) Any() bool { return l.Nested || l.Behind || len(l.Large) > 0 }
+
+// Left reads what the git session of repos recorded as staying in the copy: n.nested, n.left, and
+// each n.large, a
+// regular file read with no link followed, at most 1 MiB of them in all.
+func (d Dir) Left(repos []Repository) Left {
+	left := Left{Nested: d.recorded(repos, ".nested"), Behind: d.recorded(repos, ".left")}
+	budget := int64(maxLarge)
+	for i := range repos {
+		data, cut, err := readRunFile(filepath.Join(d.Bundle(), strconv.Itoa(i)+".large"), budget)
+		switch {
+		case errors.Is(err, fs.ErrNotExist):
+			continue
+		case err != nil:
+			left.Behind = true
+			continue
+		}
+		budget -= int64(len(data))
+		lines := strings.Split(string(data), "\n")
+		// The last piece follows the last line break: "" or a line that the cut ended.
+		for _, line := range lines[:len(lines)-1] {
+			if line != "" {
+				left.Large = append(left.Large, line)
+			}
+		}
+		if cut {
+			left.Large = append(left.Large, "...")
+			break
+		}
+	}
+	return left
+}
+
+// readRunFile reads at most limit bytes of the file at path, which the git session wrote: only a
+// regular file, as lstat reads it, that opens with no link followed as that same file. It reports
+// whether the file has more than limit bytes.
+func readRunFile(path string, limit int64) ([]byte, bool, error) {
+	before, err := os.Lstat(path)
+	if err != nil {
+		return nil, false, err
+	}
+	if !before.Mode().IsRegular() {
+		return nil, false, errRunFile
+	}
+	f, err := openNoFollow(path)
+	if err != nil {
+		return nil, false, err
+	}
+	defer f.Close()
+	if info, err := f.Stat(); err != nil || !os.SameFile(before, info) {
+		return nil, false, errRunFile
+	}
+	data, err := io.ReadAll(io.LimitReader(f, limit+1))
+	if err != nil {
+		return nil, false, err
+	}
+	if int64(len(data)) > limit {
+		return data[:limit], true, nil
+	}
+	return data, false, nil
+}
+
+// errRunFile is a file of the git session that is not a regular file, or that changed while qory
+// opened it.
+var errRunFile = errors.New("the file is not a regular file, or it changed while qory opened it")
+
+// BundleBytes is the size of the bundles the git session of repos wrote, as lstat reads each
+// regular file, for the time their check may take.
+func (d Dir) BundleBytes(repos []Repository) int64 {
+	var total int64
+	for i, r := range repos {
+		names := []string{strconv.Itoa(i) + ".bundle"}
+		for k := range r.submodules {
+			names = append(names, strconv.Itoa(i)+"-"+strconv.Itoa(k)+".bundle")
+		}
+		for _, name := range names {
+			if info, err := os.Lstat(filepath.Join(d.Bundle(), name)); err == nil && info.Mode().IsRegular() {
+				total += info.Size()
+			}
+		}
+	}
+	return total
 }
 
 // ErrNoBundle is a git session that recorded, for every repository, that the run made
@@ -116,6 +231,8 @@ type Quarantine struct {
 	// gitDir is the person's git folder of a submodule, where its refs come back; "" for a
 	// repository.
 	gitDir string
+	// known are the refs of n.known, at commits the person has, which the quarantine made.
+	known []bundleRef
 }
 
 // Quarantine checks the bundle the git session wrote for each repository of repos, as
@@ -155,31 +272,45 @@ func (d Dir) Quarantine(ctx context.Context, branch string, repos []Repository) 
 		}
 		var subs []*Quarantine
 		for k, s := range r.submodules {
-			bundle := filepath.Join(d.Bundle(), strconv.Itoa(i)+"-"+strconv.Itoa(k)+".bundle")
-			if _, err := os.Lstat(bundle); errors.Is(err, fs.ErrNotExist) {
-				continue
+			name := strconv.Itoa(i) + "-" + strconv.Itoa(k)
+			known, err := d.readKnown(name, path.Join(rel, s.path))
+			if err != nil {
+				return nil, err
 			}
-			q, err := d.quarantineSub(ctx, i, k, r, s, rel, bundle)
+			bundle := filepath.Join(d.Bundle(), name+".bundle")
+			if _, err := os.Lstat(bundle); errors.Is(err, fs.ErrNotExist) {
+				if len(known) == 0 {
+					continue
+				}
+				bundle = ""
+			}
+			q, err := d.quarantineSub(ctx, i, k, r, s, rel, bundle, known)
 			if err != nil {
 				return nil, err
 			}
 			subs = append(subs, q)
 		}
-		none := filepath.Join(d.Bundle(), strconv.Itoa(i)+".none")
-		if info, err := os.Lstat(none); err == nil && info.Mode().IsRegular() {
-			if len(subs) > 0 {
-				out[i], found = &Quarantine{Repo: r, Branch: branch, Submodules: subs, prefix: d.RefPrefix()}, true
-			}
-			continue
+		known, err := d.readKnown(strconv.Itoa(i), rel)
+		if err != nil {
+			return nil, err
 		}
 		bundle := filepath.Join(d.Bundle(), strconv.Itoa(i)+".bundle")
-		if _, err := os.Lstat(bundle); errors.Is(err, fs.ErrNotExist) {
+		none := filepath.Join(d.Bundle(), strconv.Itoa(i)+".none")
+		if info, err := os.Lstat(none); err == nil && info.Mode().IsRegular() {
+			if len(known) == 0 {
+				if len(subs) > 0 {
+					out[i], found = &Quarantine{Repo: r, Branch: branch, Submodules: subs, prefix: d.RefPrefix()}, true
+				}
+				continue
+			}
+			bundle = ""
+		} else if _, err := os.Lstat(bundle); errors.Is(err, fs.ErrNotExist) {
 			if rel == "." {
 				return nil, fmt.Errorf(textNoBundle, "the run's repository")
 			}
 			return nil, fmt.Errorf(textNoBundle, shown(rel))
 		}
-		q, err := d.quarantineOne(ctx, i, r, rel, branch, bundle)
+		q, err := d.quarantineOne(ctx, i, r, rel, branch, bundle, known)
 		if err != nil {
 			return nil, err
 		}
@@ -192,9 +323,10 @@ func (d Dir) Quarantine(ctx context.Context, branch string, repos []Repository) 
 	return out, nil
 }
 
-// quarantineOne is [Dir.Quarantine] for the repository r, number i, at rel in the copy.
-func (d Dir) quarantineOne(ctx context.Context, i int, r Repository, rel, branch, bundle string) (*Quarantine, error) {
-	q := &Quarantine{Path: d.quarantine(r.index), Repo: r, Branch: branch, prefix: d.RefPrefix()}
+// quarantineOne is [Dir.Quarantine] for the repository r, number i, at rel in the copy, with its
+// bundle, "" for none, and the refs of its n.known.
+func (d Dir) quarantineOne(ctx context.Context, i int, r Repository, rel, branch, bundle string, known []bundleRef) (*Quarantine, error) {
+	q := &Quarantine{Path: d.quarantine(r.index), Repo: r, Branch: branch, prefix: d.RefPrefix(), known: known}
 	checked := filepath.Join(d.root, quarantineName, strconv.Itoa(i)+".bundle")
 	if err := q.fetchBundle(ctx, d.root, d.source(r.index), bundle, checked, "refs/heads/"+branch, rel); err != nil {
 		return nil, err
@@ -203,13 +335,13 @@ func (d Dir) quarantineOne(ctx context.Context, i int, r Repository, rel, branch
 }
 
 // quarantineSub is [Dir.Quarantine] for the submodule s, number k, of the repository r, number i,
-// at rel in the copy.
-func (d Dir) quarantineSub(ctx context.Context, i, k int, r Repository, s submodule, rel, bundle string) (*Quarantine, error) {
+// at rel in the copy, with its bundle, "" for none, and the refs of its n-k.known.
+func (d Dir) quarantineSub(ctx context.Context, i, k int, r Repository, s submodule, rel, bundle string, known []bundleRef) (*Quarantine, error) {
 	name := strconv.Itoa(i) + "-" + strconv.Itoa(k)
 	at := path.Join(r.Path, s.path)
 	q := &Quarantine{
 		Path: filepath.Join(d.root, quarantineName, name+".git"), Repo: Repository{Path: at, Base: s.link, index: r.index},
-		prefix: d.RefPrefix(), gitDir: s.gitDir,
+		prefix: d.RefPrefix(), gitDir: s.gitDir, known: known,
 	}
 	checked := filepath.Join(d.root, quarantineName, name+".bundle")
 	if err := q.fetchBundle(ctx, d.root, s.gitDir, bundle, checked, "", path.Join(rel, s.path)); err != nil {
@@ -221,11 +353,16 @@ func (d Dir) quarantineSub(ctx context.Context, i, k int, r Repository, s submod
 // fetchBundle copies the bundle at path to checked, makes q.Path a bare repository with the
 // objects of the git folder source as its alternates, checks the bundle's header, and fetches
 // its refs into q.Path: ref, the run's branch, "" for none, and the run's refs under q.prefix.
-// It sets Head, Refs and their commits, and checks the top of each commit. root is the folder
-// git init runs in, and rel is the repository as an error shows it.
+// With bundle "", there is no bundle. It then makes the refs of q.known in q.Path, each at a
+// commit that source has, which takes them as the person's: the bare clone of the person's
+// repository, or the person's git folder of a submodule. It sets Head, Refs and their commits,
+// and checks the top of each commit. root is the folder git init runs in, and rel is the
+// repository as an error shows it.
 func (q *Quarantine) fetchBundle(ctx context.Context, root, source, bundle, checked, ref, rel string) error {
-	if err := copyBundle(bundle, checked); err != nil {
-		return err
+	if bundle != "" {
+		if err := copyBundle(bundle, checked); err != nil {
+			return err
+		}
 	}
 	format, err := git(ctx, source, "--git-dir="+source, "rev-parse", "--show-object-format")
 	if err != nil {
@@ -239,6 +376,9 @@ func (q *Quarantine) fetchBundle(ctx context.Context, root, source, bundle, chec
 	}
 	if err := copyShallow(source, q.Path); err != nil {
 		return fileErr(q.Path, err)
+	}
+	if bundle == "" {
+		return q.addKnown(ctx, source, nil, ref, rel)
 	}
 	// git fetch follows a file that has gitdir: <path>, so nothing but a bundle reaches it.
 	refs, err := checkBundleHeader(checked, ref, q.prefix)
@@ -258,10 +398,105 @@ func (q *Quarantine) fetchBundle(ctx context.Context, root, source, bundle, chec
 	if err != nil {
 		return fmt.Errorf(textBundleChecks, shown(rel), err)
 	}
-	if err := q.readRefs(ctx, refs, ref); err != nil {
+	return q.addKnown(ctx, source, refs, ref, rel)
+}
+
+// addKnown checks q.known beside refs, the refs of the bundle's header, as [bundleHeader] checks
+// a header's refs, checks that source has each of their objects as a commit, makes them in q.Path
+// all or none, then reads the refs and checks the top of each commit, as [Quarantine.fetchBundle]
+// says.
+func (q *Quarantine) addKnown(ctx context.Context, source string, refs []bundleRef, ref, rel string) error {
+	all := slices.Concat(refs, q.known)
+	if err := checkRefSet(all); err != nil {
+		return fmt.Errorf(textBundleChecks, shown(rel), err)
+	}
+	if len(q.known) > 0 {
+		if err := knownCommits(ctx, source, "--git-dir="+source, q.known); err != nil {
+			return fmt.Errorf(textBundleChecks, shown(rel), err)
+		}
+		var updates strings.Builder
+		for _, r := range q.known {
+			updates.WriteString("create " + r.name + " " + r.id + "\n")
+		}
+		if _, err := gitWith(ctx, q.Path, nil, strings.NewReader(updates.String()), "update-ref", "--stdin"); err != nil {
+			return fmt.Errorf(textBundleChecks, shown(rel), err)
+		}
+	}
+	if err := q.readRefs(ctx, all, ref); err != nil {
 		return fmt.Errorf(textBundleChecks, shown(rel), err)
 	}
 	return q.checkTops(ctx, rel)
+}
+
+// checkRefSet returns an error for refs that list a name twice in any letter case, or that number
+// more than [maxBundleRefs].
+func checkRefSet(refs []bundleRef) error {
+	if len(refs) > maxBundleRefs {
+		return fmt.Errorf(textBundleRefs, maxBundleRefs)
+	}
+	seen := map[string]bool{}
+	for _, r := range refs {
+		folded := strings.ToLower(r.name)
+		if seen[folded] {
+			return fmt.Errorf(textBundleRefTwice, shown(r.name))
+		}
+		seen[folded] = true
+	}
+	return nil
+}
+
+// knownCommits returns an error unless the repository that git runs in at dir, with args before
+// its subcommand, has each object of refs as a commit, by git cat-file.
+func knownCommits(ctx context.Context, dir, args string, refs []bundleRef) error {
+	var ids strings.Builder
+	for _, r := range refs {
+		ids.WriteString(r.id + "\n")
+	}
+	gitArgs := []string{"cat-file", "--batch-check=%(objecttype)"}
+	if args != "" {
+		gitArgs = append([]string{args}, gitArgs...)
+	}
+	out, err := gitWith(ctx, dir, nil, strings.NewReader(ids.String()), gitArgs...)
+	if err != nil {
+		return err
+	}
+	lines := strings.Split(strings.TrimSuffix(out, "\n"), "\n")
+	for i, r := range refs {
+		if i >= len(lines) || lines[i] != "commit" {
+			return fmt.Errorf(textKnownMissing, shown(r.name), r.id, shown(dir))
+		}
+	}
+	return nil
+}
+
+// maxKnown is the largest n.known qory reads.
+const maxKnown = 1 << 20
+
+// readKnown reads the refs of the file name.known in the bundle folder, nil when there is none: a
+// commit id and a name per line, each name prefix/heads/<name> or prefix/tags/<name> as [runRef]
+// takes it, under the run's [Dir.RefPrefix]. rel is the repository as an error shows it.
+func (d Dir) readKnown(name, rel string) ([]bundleRef, error) {
+	data, cut, err := readRunFile(filepath.Join(d.Bundle(), name+".known"), maxKnown)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		return nil, nil
+	case err != nil:
+		return nil, fmt.Errorf(textBundleChecks, shown(rel), err)
+	case cut:
+		return nil, fmt.Errorf(textBundleChecks, shown(rel), fmt.Errorf(textKnownSize, maxKnown))
+	}
+	prefix := d.RefPrefix()
+	var refs []bundleRef
+	for line := range strings.Lines(string(data)) {
+		line = strings.TrimSuffix(line, "\n")
+		id, ref, _ := strings.Cut(line, " ")
+		rest, _ := strings.CutPrefix(ref, prefix+"/")
+		if !objectID.MatchString(id) || !runRef(prefix, ref) || !strings.HasPrefix(rest, "heads/") && !strings.HasPrefix(rest, "tags/") {
+			return nil, fmt.Errorf(textBundleChecks, shown(rel), fmt.Errorf(textKnownLine, shown(line), prefix))
+		}
+		refs = append(refs, bundleRef{id, ref})
+	}
+	return refs, nil
 }
 
 // readRefs checks that the quarantine has the refs of the bundle's header and no other, and sets
@@ -595,6 +830,9 @@ func (q *Quarantine) FetchInto(ctx context.Context, checkout, ref string) (strin
 		}
 		specs = append(specs, from+":"+ref)
 	}
+	if err := q.knownThere(ctx, checkout); err != nil {
+		return "", err
+	}
 	prefix := ""
 	if q.hasRefs() {
 		dirs := []string{checkout}
@@ -626,6 +864,25 @@ func (q *Quarantine) FetchInto(ctx context.Context, checkout, ref string) (strin
 		}
 	}
 	return prefix, nil
+}
+
+// knownThere checks that the person's repository at checkout, and each submodule's git folder,
+// has the commit of each ref of known there, before any fetch.
+func (q *Quarantine) knownThere(ctx context.Context, checkout string) error {
+	if len(q.known) > 0 {
+		if err := knownCommits(ctx, checkout, "", q.known); err != nil {
+			return fmt.Errorf(textFetchFailed, shown(q.Path), q.prefix, shown(checkout), q.prefix+"/*", err)
+		}
+	}
+	for _, s := range q.Submodules {
+		if len(s.known) == 0 {
+			continue
+		}
+		if err := knownCommits(ctx, s.gitDir, "--git-dir="+s.gitDir, s.known); err != nil {
+			return fmt.Errorf(textFetchFailed, shown(s.Path), q.prefix, shown(s.gitDir), q.prefix+"/*", err)
+		}
+	}
+	return nil
 }
 
 // hasRefs reports whether q or one of its submodules has refs under the run's prefix.
