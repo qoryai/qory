@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -204,5 +205,92 @@ func TestARealWriteRunRemovesTheSetupContainerBeforeThePush(t *testing.T) {
 	}
 	if got := proxygittest.Git(t, p.bare, "diff", "--name-only", p.first, head); got != "left.txt" {
 		t.Errorf("the branch differs from the start in %q", got)
+	}
+}
+
+// copyAgent is the program of the agent's container in
+// [TestARealWriteRunInACopyBringsTheWorkBack]: it commits a file and leaves
+// another uncommitted.
+const copyAgent = `#!/bin/sh
+echo left > left.txt
+git add left.txt
+git -c user.name=agent -c user.email=agent@example.invalid commit -q -m "Add the agent's file"
+echo more > more.txt
+`
+
+// TestARealWriteRunInACopyBringsTheWorkBack is a local walled write run behind a real wall on
+// this machine's engine. With the link kept, the git session runs in its container before the
+// close, in the step copy work out. With the link lost, the join returns an error after the
+// agent's session, as a join whose link to the gateway was lost does, and the git session runs
+// in its container after the close. Both times the agent's commit and its uncommitted file are
+// on the run's branch, and no container of the run is left. It runs only with
+// QORY_TEST_DOCKER=1 and docker on the PATH.
+func TestARealWriteRunInACopyBringsTheWorkBack(t *testing.T) {
+	if os.Getenv("QORY_TEST_DOCKER") != "1" {
+		t.Skip("QORY_TEST_DOCKER=1 runs it")
+	}
+	if _, err := exec.LookPath("docker"); err != nil {
+		t.Skip("no docker command")
+	}
+	helper, image := realWallImage(t, "copy-agent", copyAgent)
+	for _, lost := range []bool{false, true} {
+		t.Run(fmt.Sprintf("lost %t", lost), func(t *testing.T) {
+			root := newCheckout(t)
+			copyFixture(t, "two-modules", root)
+			composedForFake(t, root, "/usr/local/bin/copy-agent")
+			runGit(t, root, "add", "qory.yaml", "modules")
+			runGit(t, root, "commit", "--quiet", "-m", "first")
+			writeFile(t, filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "forager.yaml"),
+				"wall:\n  adapter: docker\n  helper: "+helper+"\n  user: \"1000:1000\"\n  image: "+image+"\n")
+			t.Setenv("QORY_RUN_KEY", "")
+			var argv []string
+			t.Cleanup(cmd.GitSessionsInDocker(func(a []string) { argv = a }))
+			if lost {
+				t.Cleanup(cmd.LoseLinkAfterJoin(errors.New("the link to the gateway is lost")))
+			}
+			start := time.Now()
+			out, err := run(t, "run", "claude", "--", "-p", "hi")
+			end := time.Now().Add(time.Second)
+			t.Logf("the git container: %s", strings.Join(argv, " "))
+			t.Logf("qory run:\n%s", out)
+			if lost {
+				if err == nil {
+					t.Fatalf("the run passed:\n%s", out)
+				}
+				wants(t, out, "the link to the gateway is lost")
+			} else if err != nil {
+				t.Fatalf("%v\n%s", err, out)
+			}
+			branch := runBranchOf(t, out)
+			gitOutput(t, root, "cat-file", "-e", branch+":left.txt")
+			gitOutput(t, root, "cat-file", "-e", branch+":more.txt")
+			log := gitOutput(t, root, "log", "--format=%s", "main.."+branch)
+			t.Logf("git log main..%s:\n%s", branch, log)
+			if log != "Add the work the agent left uncommitted\nAdd the agent's file" {
+				t.Errorf("the run's branch has the commits %q", log)
+			}
+			id := strings.TrimPrefix(branch, "qory/run-")
+			if left := dockerOut(t, "", "ps", "--all", "--filter", "label=dev.qory.run="+id, "--format", "{{.Names}}"); left != "" {
+				t.Errorf("containers of the run are left: %s", left)
+			}
+			events := dockerOut(t, "", "events", "--since", start.Format(time.RFC3339), "--until", end.Format(time.RFC3339),
+				"--filter", "label=dev.qory.run="+id, "--filter", "type=container",
+				"--format", "{{.Action}} {{.Actor.Attributes.name}} {{.Actor.Attributes.exitCode}}")
+			t.Logf("the engine's events of the run's containers:\n%s", events)
+			wants(t, events, "start qory-copy-"+id, "die qory-copy-"+id+" 0", "destroy qory-copy-"+id)
+			agentGone, created, relayGone := strings.Index(events, "destroy qory-"+id+"-agent"), strings.Index(events, "create qory-copy-"+id), strings.Index(events, "destroy qory-"+id+"-relay")
+			if agentGone < 0 || created < agentGone {
+				t.Errorf("the git container was created before the agent's container was removed:\n%s", events)
+			}
+			// The close removes the relay: the git container comes after it only with the link lost.
+			if lost != (relayGone < created) {
+				t.Errorf("the git container, lost %t, against the close:\n%s", lost, events)
+			}
+			steps := strings.Join(stepsAndSessions(sessionRecord(t, root)), "\n")
+			if strings.Contains(steps, "copy started") == lost {
+				t.Errorf("the record's steps, lost %t:\n%s", lost, steps)
+			}
+			wants(t, strings.Join(argv, " "), "--network none", "--cap-drop ALL", "--user 1000:1000", "--label dev.qory.run="+id)
+		})
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -12,7 +13,6 @@ import (
 	"time"
 
 	"github.com/qoryai/forager/event"
-	"github.com/qoryai/forager/session"
 	"github.com/qoryai/forager/wall"
 
 	"github.com/qoryai/qory/internal/checkout"
@@ -47,8 +47,7 @@ const (
 	textCopyExited     = "the git session exited with %d, so the run's commits did not come back"
 	textCopyCut        = "%s during the git session, so the run's commits did not come back"
 	textCopyCheckCut   = "%s during the check or the fetch of the run's commits, so those commits did not come back"
-	textCopyWallKept   = "removing a part of the run's wall failed during the run, so a process may have written the copy after its session ended, and nothing came back from the run"
-	textCopyClosed     = "the run ended before the git session started, so the run's commits did not come back"
+	textCopyWallKept   = "a container of the run could not be removed and may still run and write the copy, so nothing came back from the run"
 	textCopyStays      = "read the run's files in %s, run no git there, then remove the folder: it has the work that did not come back"
 	textCopyBack       = "copied %s back to %s from the run, and deleted %s there."
 	textCopyLeftOut    = "left out of the copy back to your folder: %s."
@@ -138,8 +137,8 @@ type runCopy struct {
 	// cutBy is what ended a step whose context ended, as a line has it.
 	cutBy func() string
 	// stepCode is the exit code of a copy step that ended failed, -1 when it did not end or
-	// has none. cut is whether a stop or the run's time limit ended the step, or the removal of
-	// the setup container before it. The run's close reads both, see [pushEnding.copyOutcome].
+	// has none. cut is whether a stop or the run's time limit ended the git session. The run's
+	// close reads both, see [pushEnding.copyOutcome].
 	stepCode int
 	cut      bool
 }
@@ -456,96 +455,88 @@ func (c *runCopy) recordSetup(ctx context.Context) error {
 	return nil
 }
 
-// gitSession is the bare session after the agent, as the run's step of kind copy: it commits
-// what the agent left in the copy and writes the run's bundles, with no agent, no model key and
-// no bind but the copy and the bundle folder. It ends at [runcopy.SessionLimit] at the latest.
-// The caller has removed the setup
-// container: a process in it could write the copy during the session, and that removal
-// returns an error while the step is open.
+// gitSession is the git session after the agent, in the run's step of kind copy, on a run that
+// is still open: it commits what the agent left in the copy and writes the run's bundles, in the
+// container of [runCopy.inContainer]. The caller has removed the setup container and found no
+// container of the run kept, so no process of the run writes the copy during the session.
 //
-// The step ends before this returns, so the run's close finds it ended, with the state that
-// [runCopy.joinGitSession] returns. Unless it succeeds, its last line is [copyStop.log].
+// The step ends before this returns, so the run's close finds it ended, with the state of
+// [runCopy.stepEnd]. The container's lines go into the step's log. Unless the session succeeds,
+// the step's last line is [copyStop.log]. stderr is qory run's stderr, masked with the run's
+// mask list, which the container's lines go to as well.
 //
 // A copy step that does not start stops the return of the work, as a push step that does not
 // start stops its push. A copy step that does not end stops the return too. Both go through
 // [runCopy.stop], which keeps the copy.
-func (c *runCopy) gitSession(ctx context.Context, run openedRun, spec *runSpec) error {
+func (c *runCopy) gitSession(ctx context.Context, run openedRun, spec *runSpec, stderr io.Writer) error {
 	step, err := run.StartStep(event.StepCopy, textCopyStep)
 	if err != nil {
 		return c.noSession(ctx, err)
 	}
-	state, code, stop := c.joinGitSession(ctx, run, spec)
+	lines := &stepLines{stderr: stderr, step: step}
+	code, stop := c.inContainer(ctx, run, spec, lines)
+	lines.flush()
 	if stop == nil {
-		if err := step.Exit(state, code); err != nil {
+		if err := step.Exit(event.StateSucceeded, 0); err != nil {
 			return c.stoppedBy("%s", err)
 		}
 		return nil
 	}
+	state, code := c.stepEnd(code)
 	c.stepCode = code
-	lines := &stepLines{stderr: spec.Stderr, step: step}
 	lines.log(stepFailure(errors.New(stop.log)))
 	// The line of the stop stays when the exit fails too.
 	_ = step.Exit(state, code)
 	return stop
 }
 
-// joinGitSession runs the git session in the open copy step. It returns the state and the exit
-// code the step ends with, and the stop of the return of the run's work. A session that failed
-// ends the step failed with the session's exit code, -1 for a session with no exit code to show.
-// A cut, which is a stop or the run's time limit that ended ctx, ends it cancelled with -1, as
-// [inStep] does. A session that succeeded has no stop.
-func (c *runCopy) joinGitSession(ctx context.Context, run openedRun, spec *runSpec) (string, int, *copyStop) {
+// gitSessionAfterClose is the git session of [runCopy.gitSession] after the run's close, with no
+// step: the gateway closed the run, the agent's join returned an error, or a container of the
+// run may have been left before the close. The caller runs it only once the close showed that no
+// container of the run is left. Its lines go to stderr alone, as for [runCopy.gitSession].
+func (c *runCopy) gitSessionAfterClose(ctx context.Context, run openedRun, spec *runSpec, stderr io.Writer) error {
+	if _, stop := c.inContainer(ctx, run, spec, stderr); stop != nil {
+		return stop
+	}
+	return nil
+}
+
+// inContainer runs the git session in a container of the run's image that qory starts, with no
+// network, no gateway and no bind but the copy and the bundle folder, see [runGitContainer]. It
+// ends at [runcopy.SessionLimit] at the latest. It returns the session's exit code, -1 for a
+// session with no exit code to show, and the stop of the return of the run's work, nil for a
+// session that succeeded. A cut, which is a stop or the run's time limit that ended ctx, sets
+// [runCopy.cut].
+func (c *runCopy) inContainer(ctx context.Context, run openedRun, spec *runSpec, out io.Writer) (int, *copyStop) {
 	gs, err := c.dir.GitSession(ctx, c.branch, "", c.repos, c.out)
 	if err != nil {
-		return c.stepEnd(-1, c.noSession(ctx, err))
+		return -1, c.noSession(ctx, err)
 	}
 	limited, cancel := context.WithTimeout(ctx, runcopy.SessionLimit)
 	defer cancel()
-	res, err := joinSession(run, limited, session.SessionSpec{
-		Command:      gs.Command,
-		Args:         gs.Args,
-		Env:          gs.Env,
-		Dir:          gs.Dir,
-		Mounts:       c.dir.SessionMounts(),
-		Exec:         spec.Exec,
-		ForagerFiles: spec.ForagerFiles,
-		Written:      spec.Written,
-		Limits:       spec.Limits,
-		Stdin:        strings.NewReader(""),
-		Stdout:       spec.Stderr,
-		Stderr:       spec.Stderr,
-		StopSignal:   spec.StopSignal,
-		StopGrace:    spec.StopGrace,
-		SocketGrace:  spec.SocketGrace,
-		Timeout:      runcopy.SessionLimit,
-	})
-	timedOut := err == nil && res.TimedOut || limited.Err() != nil
-	// A session can exit 0 at its limit or at a cut, and that is no success.
-	code := -1
-	if err == nil && res.ExitCode != 0 {
-		code = res.ExitCode
-	}
+	code, err := runGitContainer(limited, gitContainerFor(run, spec, spec.RunID, gs, c.dir.SessionMounts(), out))
+	timedOut := limited.Err() != nil || errors.Is(err, context.DeadlineExceeded)
 	switch {
 	case ctx.Err() != nil && (err != nil || timedOut) && c.cutBy != nil:
-		return c.stepEnd(code, c.cutStop())
+		return -1, c.cutStop()
 	case timedOut:
-		return c.stepEnd(code, c.stopped(fmt.Sprintf(textCopyLimit, runcopy.SessionLimit)))
+		return -1, c.stopped(fmt.Sprintf(textCopyLimit, runcopy.SessionLimit))
 	case err != nil:
-		return c.stepEnd(code, c.noSession(ctx, err))
-	case res.ExitCode != 0:
+		return -1, c.noSession(ctx, err)
+	case code != 0:
 		// A session that failed can leave a bundle of part of the work: no bundle is used.
-		return c.stepEnd(code, c.stopped(fmt.Sprintf(textCopyExited, res.ExitCode)))
+		return code, c.stopped(fmt.Sprintf(textCopyExited, code))
 	}
-	return event.StateSucceeded, 0, nil
+	return 0, nil
 }
 
-// stepEnd is the state and the exit code of a copy step with the stop, and the stop: the line of
-// the stop and the state come from the one read of the cut.
-func (c *runCopy) stepEnd(code int, stop *copyStop) (string, int, *copyStop) {
+// stepEnd is the state and the exit code of a copy step whose session stopped with code: cancelled
+// with -1 after a cut, failed with code otherwise.
+func (c *runCopy) stepEnd(code int) (string, int) {
 	if c.cut {
-		return event.StateCancelled, -1, stop
+		return event.StateCancelled, -1
 	}
-	return event.StateFailed, code, stop
+	return event.StateFailed, code
 }
 
 // cutStop is the stop of a git session that a stop or the run's time limit cut.

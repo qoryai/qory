@@ -2013,16 +2013,19 @@ func TestAWallThatStaysRunsNoGit(t *testing.T) {
 	}
 
 	t.Run("a local run", func(t *testing.T) {
-		const line = ", and run no git there: removing a part of the run's wall failed during the run, so a process may have written the copy after its session ended, and nothing came back from the run"
+		const line = ", and run no git there: a container of the run could not be removed and may still run and write the copy, so nothing came back from the run"
 		for name, c := range map[string]struct {
 			wall  cmd.Nowhere
 			wants string
 		}{
-			// The agent's Unwrap or the close failed, and the join of the git session went on.
-			"Unwrap or the close": {wall: cmd.Nowhere{WallKept: true}, wants: line},
+			// The close failed to remove a container, and the git session ran before it.
+			"the close": {wall: cmd.Nowhere{WallKept: true}, wants: line},
+			// The agent's Unwrap failed, so the git session waits for the close.
+			"Unwrap": {wall: cmd.Nowhere{ContainerKept: true, WallKept: true}, wants: line},
+			// The removal of the setup container failed, so the git session waits for the close.
 			"RemoveSetup": {
 				wall:  cmd.Nowhere{WallKept: true, RemoveSetup: func(context.Context) error { return errors.New(refused) }},
-				wants: ", and run no git there: the git session did not start, so the run's commits did not come back: ",
+				wants: line,
 			},
 		} {
 			t.Run(name, func(t *testing.T) {
@@ -2089,7 +2092,7 @@ func TestAWallThatStaysRunsNoGit(t *testing.T) {
 		if cmd.ExitCode(err) != 1 {
 			t.Errorf("exit %d (%v), want 1\n%s", cmd.ExitCode(err), err, out)
 		}
-		wants(t, out, "read the run's files in "+work+", and run no git there: removing a part of the run's wall failed")
+		wants(t, out, "read the run's files in "+work+", and run no git there: a container of the run could not be removed")
 		if _, err := os.Lstat(filepath.Join(root, "left.txt")); err == nil {
 			t.Error("the run's file came back")
 		}

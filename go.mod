@@ -36,3 +36,5 @@ require (
 	go.yaml.in/yaml/v3 v3.0.4 // indirect
 	golang.org/x/term v0.46.0 // indirect
 )
+
+replace github.com/qoryai/forager => /Users/voldy/code/qoryai/.work/Michael/496/forager-83ae60bd

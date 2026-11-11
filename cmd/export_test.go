@@ -27,7 +27,6 @@ import (
 	"github.com/qoryai/qory/internal/preparation"
 	"github.com/qoryai/qory/internal/proxygit"
 	"github.com/qoryai/qory/internal/runapi"
-	"github.com/qoryai/qory/internal/runcopy"
 )
 
 // SetWriteLabels makes qory run keep a checkout's labels with f, and returns what
@@ -73,9 +72,7 @@ func SetPrepareSeed(dir string) func() {
 func SetJoinSession(f func(session.SessionSpec)) func() {
 	before := joinSession
 	joinSession = func(r openedRun, ctx context.Context, spec session.SessionSpec) (*session.Result, error) {
-		if !isGitSession(spec) {
-			f(spec)
-		}
+		f(spec)
 		return before(r, ctx, spec)
 	}
 	return func() { joinSession = before }
@@ -85,18 +82,10 @@ func SetJoinSession(f func(session.SessionSpec)) func() {
 // session that ended that way does, and returns what restores the default.
 func SetJoinResult(f func(session.SessionSpec) (*session.Result, error)) func() {
 	before := joinSession
-	joinSession = func(r openedRun, ctx context.Context, spec session.SessionSpec) (*session.Result, error) {
-		if isGitSession(spec) {
-			return before(r, ctx, spec)
-		}
+	joinSession = func(_ openedRun, _ context.Context, spec session.SessionSpec) (*session.Result, error) {
 		return f(spec)
 	}
 	return func() { joinSession = before }
-}
-
-// isGitSession is whether spec is a run's git session, see [runcopy.Dir.GitSession].
-func isGitSession(spec session.SessionSpec) bool {
-	return len(spec.Args) > 1 && filepath.Base(spec.Args[0]) == runcopy.SessionScriptName
 }
 
 // hostGitFolder is the folder of this machine's git, for the PATH of a git session in a
@@ -120,30 +109,35 @@ func hostGitFolder(spec session.SessionSpec) (session.SessionSpec, error) {
 }
 
 // RunGitSessionsOnHost makes every git session of a test run as a process on this machine,
-// since a test has no image with git and runs no docker. A test that wants the session to
-// reach its join uses [SetGitSession].
+// since a test has no image with git and runs no docker. A test that wants another end of the
+// session uses [SetGitSession].
 func RunGitSessionsOnHost() {
-	before := joinSession
-	joinSession = func(r openedRun, ctx context.Context, spec session.SessionSpec) (*session.Result, error) {
-		if !isGitSession(spec) {
-			return before(r, ctx, spec)
-		}
-		return inFakeJoin(r, spec, func() (*session.Result, error) { return GitSessionOnHost(ctx, spec) })
+	runGitContainer = containerOf(GitSessionOnHost)
+}
+
+// gitContainerSession is the git container c as the spec of a session, which a test of the git
+// session reads: its program, its environment and its folder, the binds, the limits and the
+// writer of its lines.
+func gitContainerSession(c gitContainer) session.SessionSpec {
+	return session.SessionSpec{
+		Command: c.Session.Command, Args: c.Session.Args, Env: c.Session.Env, Dir: c.Session.Dir,
+		Mounts: c.Mounts, Limits: c.Limits, Stdin: strings.NewReader(""), Stdout: c.Output, Stderr: c.Output,
 	}
 }
 
-// inFakeJoin runs f as a join of a git session that never reaches r.Join: on a run
-// [OpenNowhere] opened, the join keeps Forager's rules of a join, see [nowhere.startJoin].
-func inFakeJoin(r openedRun, spec session.SessionSpec, f func() (*session.Result, error)) (*session.Result, error) {
-	n, ok := r.(*nowhere)
-	if !ok {
-		return f()
+// containerOf is a [runGitContainer] that ends as f ends: an error is a container that did
+// not start, a result that timed out one past its limit, and otherwise its exit code.
+func containerOf(f func(context.Context, session.SessionSpec) (*session.Result, error)) func(context.Context, gitContainer) (int, error) {
+	return func(ctx context.Context, c gitContainer) (int, error) {
+		res, err := f(ctx, gitContainerSession(c))
+		switch {
+		case err != nil:
+			return -1, err
+		case res.TimedOut:
+			return -1, context.DeadlineExceeded
+		}
+		return res.ExitCode, nil
 	}
-	if err := n.startJoin(spec); err != nil {
-		return nil, err
-	}
-	defer n.endJoin()
-	return f()
 }
 
 // GitSessionOnHost runs the git session spec as a process on this machine.
@@ -177,33 +171,38 @@ func SetReturnAfterSignal(d time.Duration) func() {
 	return func() { returnAfterSignal = before }
 }
 
-// SetGitSession makes the join of a git session return what f returns, and returns what
-// restores the default.
+// SetGitSession makes the git session's container end as f ends, see [containerOf], and returns
+// what restores the default.
 func SetGitSession(f func(context.Context, session.SessionSpec) (*session.Result, error)) func() {
-	before := joinSession
-	joinSession = func(r openedRun, ctx context.Context, spec session.SessionSpec) (*session.Result, error) {
-		if isGitSession(spec) {
-			return inFakeJoin(r, spec, func() (*session.Result, error) { return f(ctx, spec) })
-		}
-		return before(r, ctx, spec)
-	}
-	return func() { joinSession = before }
+	before := runGitContainer
+	runGitContainer = containerOf(f)
+	return func() { runGitContainer = before }
 }
 
-// GitSessionThroughJoin makes a git session join its run as any session does, with this
-// machine's git on its PATH, for a test with a wall that runs its containers on this
-// machine. It returns what restores the default.
-func GitSessionThroughJoin() func() {
+// GitSessionsInDocker makes the git session run in its container on this machine's engine, as
+// outside a test, with the docker command and its arguments passed to seen first, and returns
+// what restores the default.
+func GitSessionsInDocker(seen func(argv []string)) func() {
+	before := runGitContainer
+	runGitContainer = func(ctx context.Context, c gitContainer) (int, error) {
+		args, err := c.args()
+		if err == nil {
+			seen(append([]string{c.Docker}, args...))
+		}
+		return dockerGitContainer(ctx, c)
+	}
+	return func() { runGitContainer = before }
+}
+
+// LoseLinkAfterJoin makes each join run as it does and then return lost, as a join whose link
+// to the gateway was lost during the session does, and returns what restores the default.
+func LoseLinkAfterJoin(lost error) func() {
 	before := joinSession
 	joinSession = func(r openedRun, ctx context.Context, spec session.SessionSpec) (*session.Result, error) {
-		if !isGitSession(spec) {
-			return before(r, ctx, spec)
-		}
-		spec, err := hostGitFolder(spec)
-		if err != nil {
+		if _, err := before(r, ctx, spec); err != nil {
 			return nil, err
 		}
-		return r.Join(ctx, spec)
+		return nil, lost
 	}
 	return func() { joinSession = before }
 }
@@ -314,6 +313,8 @@ type Nowhere struct {
 	CloseErr error
 	// WallKept is [session.Closed.WallKept] of the run's Close.
 	WallKept bool
+	// ContainerKept is the run's ContainerKept before the close; after it, WallKept is.
+	ContainerKept bool
 	// RunAPI is the base URL of the run's run API, "" for a server that returns 404 with
 	// no error code to every request, as Qory Apiary does with its feature workflow_model
 	// off.
@@ -574,6 +575,18 @@ func (n *nowhere) RemoveSetup(ctx context.Context) error {
 		return n.values.RemoveSetup(ctx)
 	}
 	return nil
+}
+
+// ContainerKept is [Nowhere.ContainerKept] until the close and [Nowhere.WallKept] after it, and
+// Forager's of a run with Real.
+func (n *nowhere) ContainerKept() bool {
+	if n.values.Real {
+		return n.at.run.ContainerKept()
+	}
+	if n.ended {
+		return n.values.WallKept
+	}
+	return n.values.ContainerKept
 }
 
 func (n *nowhere) FetchImage(ctx context.Context) error {
