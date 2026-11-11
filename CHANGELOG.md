@@ -380,8 +380,8 @@ release may change what an existing document does, and states it under Upgrading
 - The git session of a walled write run in a copy runs in a container that qory starts with
   `docker run`, from the run's image, as the wall's user, with the wall's container runtime when
   one is set, no network, no capability, and binds of the copy and its bundle folder alone. It
-  joins no gateway. It has at most 4096 processes and no memory or CPU limit, and none of the
-  agent's limits. Its time limit is 5 minutes, plus a minute for each 20,000 files, folders and
+  joins no gateway. It has at most 4096 processes, and the agent's limits of memory and processors
+  when the wall sets them. Its time limit is 5 minutes, plus a minute for each 20,000 files, folders and
   links in the copy and a minute for each 2 GiB its files take on disk, at most 60 minutes, so a walled
   write run in a copy can run that long past its time limit. When the gateway closed the run during the agent's session, when the agent's
   join returned an error after the agent may have run, when the step `copy work out` could not

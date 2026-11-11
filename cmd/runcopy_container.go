@@ -33,6 +33,9 @@ type gitContainer struct {
 	// User is the wall's user, Runtime the wall's container runtime, "" for the engine's
 	// default, and Image the run's image.
 	User, Runtime, Image string
+	// Memory and CPUs are the agent's limits of memory and processors, as the wall passes them
+	// to docker run, "" for none.
+	Memory, CPUs string
 	// Mounts are the binds of the git session, [runcopy.Dir.SessionMounts], each at its path.
 	Mounts []wall.Mount
 	// Session is the program the container runs.
@@ -41,9 +44,9 @@ type gitContainer struct {
 	Output io.Writer
 }
 
-// gitContainerPIDs is the most processes the git container may have. The container gets no
-// memory or CPU limit, and none of the agent's limits, which are set for the agent and can stop
-// git on a large copy.
+// gitContainerPIDs is the most processes the git container may have. The container gets the
+// agent's limits of memory and processors when the wall sets them, and none otherwise, so a
+// program the agent planted in the copy gets no more of either than the agent had.
 const gitContainerPIDs = 4096
 
 // containerRemoveWait is how long the removal of a git container that a cut or its limit
@@ -97,6 +100,12 @@ func (c gitContainer) args() ([]string, error) {
 		args = append(args, "--runtime", c.Runtime)
 	}
 	args = append(args, "--pids-limit", strconv.Itoa(gitContainerPIDs))
+	if c.Memory != "" {
+		args = append(args, "--memory", c.Memory)
+	}
+	if c.CPUs != "" {
+		args = append(args, "--cpus", c.CPUs)
+	}
 	for _, m := range c.Mounts {
 		mount, err := bindAt(m)
 		if err != nil {
@@ -194,6 +203,7 @@ func gitContainerFor(run openedRun, spec *runSpec, runID string, gs runcopy.GitS
 		// The wall's default user is the uid:gid of this process.
 		User:   fmt.Sprintf("%d:%d", os.Getuid(), os.Getgid()),
 		Mounts: mounts, Session: gs, Output: out,
+		Memory: spec.Limits.Memory, CPUs: spec.Limits.CPUs,
 	}
 	img := run.Image()
 	c.Image, c.Runtime = img.Ref, img.Runtime

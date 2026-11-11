@@ -3708,8 +3708,8 @@ Three cases stop the run with their fix first:
 
 When the agent has ended, however it ended, qory runs the git session in a container that it
 starts on the run's engine itself: `docker run` with the run's image, the wall's user, the wall's
-container runtime when one is set, at most 4096 processes, no memory or CPU limit, no network and no
-capability. The container joins no gateway and runs no agent, and gets no model key and no run
+container runtime when one is set, at most 4096 processes, the agent's limits of memory and
+processors when the wall sets them, no network and no capability. The container joins no gateway and runs no agent, and gets no model key and no run
 code. It binds two folders,
 both writable, and nothing else: the copy, and a new folder for its bundles. It never binds your
 checkout. Its name is `qory-copy-<run id>`, with the run's label. It commits what
