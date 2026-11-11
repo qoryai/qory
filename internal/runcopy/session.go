@@ -398,11 +398,18 @@ through_link() {
 	done
 }
 # filled reports whether $1 is anything but an empty folder that the session can list: a folder
-# with an entry or one it cannot list, or any other file. The shell lists the folder, as the
-# image may have no ls.
+# with an entry or one it cannot list, or any other file. find lists the folder, as the image may
+# have no ls, and ends at its next write after the read of the first entry. With no find, the
+# shell lists every entry.
 filled() {
 	if [ ! -d "$1" ] || [ ! -r "$1" ] || [ ! -x "$1" ]; then
 		return 0
+	fi
+	if command -v find > /dev/null 2>&1; then
+		if find "$1/." ! -name . -prune -print 2>/dev/null | { IFS= read -r f_e; }; then
+			return 0
+		fi
+		return 1
 	fi
 	for f_e in "$1"/* "$1"/.[!.]* "$1"/..?*; do
 		if [ -e "$f_e" ] || [ -h "$f_e" ]; then
