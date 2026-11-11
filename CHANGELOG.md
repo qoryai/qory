@@ -303,7 +303,9 @@ release may change what an existing document does, and states it under Upgrading
   agent runs in the step `copy work out`, of kind `copy`, in the run's record. After an agent
   that succeeded, a step that ends `failed` closes the run `failed` with the step's exit code, and
   a step that a signal cuts closes it `cancelled`. A write run from a run code, as a pool
-  starts it, gets no copy: it works in the checkout and pushes from it, as before. A read-write
+  starts it, gets no copy: it works in the checkout and pushes from it, as before. Such a walled
+  run stops after the compose, exit 2, when its checkout or working folder is or contains your
+  home folder or qory's state directory, as a read run with no setup does. A read-write
   `--mount` or `wall.mounts` entry stops a run in a copy. A folder that is not a repository gets
   its regular files back, and so does a run with a run key that lists no repositories, in a folder where
   `git init` ran with no commit. Every such run starts with your `.qory/artifacts` and
