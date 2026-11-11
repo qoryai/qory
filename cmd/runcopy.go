@@ -359,7 +359,7 @@ func (c *runCopy) leftOut(skipped []string, report func(string)) {
 		skipped = withoutQoryDir(skipped)
 	}
 	if len(skipped) > 0 {
-		report(fmt.Sprintf(textCopyLeftOut, shownPaths(skipped)))
+		report(fmt.Sprintf(textCopyLeftOut, listed(shownList(skipped))))
 		c.qoryLeftOut = slices.Contains(skipped, checkout.Dir)
 	}
 }
@@ -737,7 +737,7 @@ func (c *runCopy) generated(folders []string, report func(string)) bool {
 	if len(folders) == 0 {
 		return false
 	}
-	report(fmt.Sprintf(textCopyGenerated, runcopy.MaxGeneratedFiles, shownBytes(runcopy.MaxGeneratedBytes), shownPaths(folders)))
+	report(fmt.Sprintf(textCopyGenerated, runcopy.MaxGeneratedFiles, shownBytes(runcopy.MaxGeneratedBytes), listed(shownList(folders))))
 	c.kept(report)
 	return true
 }

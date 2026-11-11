@@ -379,8 +379,9 @@ release may change what an existing document does, and states it under Upgrading
   toward the limits of 100000 files and 8589934592 bytes. Those folders have a separate limit of
   1000000 files and folders, each such folder included, and 32 GiB in all. Past it, qory leaves
   them out, prints `left out of the copy back, as the folders that builds and package managers
-  write have more than 1000000 files and folders or 32 GiB in all: …`, keeps the copy, and `qory
-  run` exits 1.
+  write have more than 1000000 files and folders or 32 GiB in all: …`, with the first 50 folders
+  and the count of the rest, keeps the copy, and `qory run` exits 1. The line of what the copy
+  back left out, such as links, lists the first 50 entries and the count of the rest too.
 - When you and a run in a folder that is not a repository both changed a file, qory writes the
   run's version beside yours as `<name>-from-run`, or with a number after that when the name is
   taken, and prints `you and the run both changed these files: yours stay, and the run's version
