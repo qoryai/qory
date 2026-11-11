@@ -507,7 +507,7 @@ large() {
 	done < "$G/large"
 }
 # add_lines prints the lines of git add in $G/add-errors, for $1, but its list of ignored paths.
-# They decide nothing.
+# The lines are for the person to read: no check of the script reads them.
 add_lines() {
 	block=
 	while IFS= read -r line || [ -n "$line" ]; do

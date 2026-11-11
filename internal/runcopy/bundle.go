@@ -398,7 +398,7 @@ func (q *Quarantine) fetchBundle(ctx context.Context, root, source, bundle, chec
 // addKnown checks q.known beside refs, the refs of the bundle's header, as [bundleHeader] checks
 // a header's refs, checks that source has each of their objects as a commit, makes them in q.Path
 // all or none, then reads the refs and checks the top of each commit, as [Quarantine.fetchBundle]
-// says.
+// describes.
 func (q *Quarantine) addKnown(ctx context.Context, source string, refs []bundleRef, ref, rel string) error {
 	all := slices.Concat(refs, q.known)
 	if err := checkRefSet(all); err != nil {
