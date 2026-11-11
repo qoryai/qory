@@ -3692,7 +3692,7 @@ with no run code, and a run you start yourself see the checkout writable.
 
 ### Qory's images
 
-`qory`'s repository defines five images for the agent under `images/`, and one a prebuild
+`qory`'s repository defines two images for the agent under `images/`, and one a prebuild
 runs in, for `linux/amd64` and `linux/arm64`. They are not published for you to pull: you build them, by hand as
 below, and a workflow of the repository builds and checks them on a change. Build them
 from a checkout of `qory` at the commit `qory version` prints, since each commit pins the
@@ -3703,20 +3703,13 @@ git clone https://github.com/qoryai/qory && cd qory
 git checkout <commit>                    # the commit qory version prints
 docker build -t qory-agent images/agent
 docker build -t qory-agent-docker --build-arg BASE=qory-agent images/agent-docker
-docker build -t qory-agent-go --build-arg BASE=qory-agent images/agent-go
-docker build -t qory-agent-go-docker --build-arg BASE=qory-agent-docker \
-  --build-arg TITLE=agent-go-docker images/agent-go
-docker build -t qory-agent-browser --build-arg BASE=qory-agent images/agent-browser
 docker build -t qory-prebuild --build-arg BASE=qory-agent-docker images/prebuild
 ```
 
 | Image | What it holds |
 |---|---|
-| `agent` | Claude Code at the version Forager's descriptor sets, `git`, `gh`, poppler's `pdftoppm`, Node, the system's authorities |
+| `agent` | Claude Code at the version Forager's descriptor sets, `git`, `gh`, Node, the system's authorities, Chromium, and the tools under **Tools** below |
 | `agent-docker` | `agent`, and Docker's daemon and command |
-| `agent-go` | `agent`, and Go |
-| `agent-go-docker` | `agent-docker`, and Go |
-| `agent-browser` | `agent`, and Chromium |
 | `prebuild` | `agent-docker`, the `devcontainer` command `@devcontainers/cli` 0.89.0, and Docker's `buildx` plugin: the image a prebuild runs in behind its wall |
 
 Every version and every download's sum is a build argument, with its default in the
@@ -3735,18 +3728,27 @@ What each of them does:
   runtime such as Sysbox. The image starts nothing: define it in `wall.images` with
   `runtime: sysbox-runc` and `docker: true`, and `qory run nest` starts the daemon. See
   [Nested Docker](#nested-docker).
-- **Go.** `agent-go` has Go at the version the image pins, with `GOTOOLCHAIN=local`, so a
-  `go.mod` that asks for a newer one fails instead of downloading it. `GOPATH` and the
-  caches are under `HOME`. It has no C compiler, so cgo is off.
-- **Browser.** `agent-browser` has Chromium and the packages Chromium depends on, with no
-  recommended packages. It has no sandbox helper, so start Chromium with `--no-sandbox`.
-  On a read-only `HOME`, set `XDG_CONFIG_HOME` and `XDG_CACHE_HOME` to a writable folder.
+- **Browser.** `agent` has Chromium at `/usr/bin/chromium` and the packages Chromium
+  depends on, with no recommended packages, and Noto's fonts for Latin and other
+  scripts, CJK and color emoji. It has no sandbox helper, so start Chromium with
+  `--no-sandbox`. On a read-only `HOME`, set `XDG_CONFIG_HOME` and `XDG_CACHE_HOME` to a
+  writable folder.
+- **Tools.** `agent` has `ffmpeg` and `ffprobe`, ImageMagick's `magick`, poppler's
+  `pdftoppm`, `qpdf`, `rsvg-convert`, Graphviz's `dot`, Tesseract OCR's `tesseract` with
+  28 languages, `pandoc`, Python 3 with PyYAML, Requests, Beautiful Soup, lxml,
+  cssselect, Pillow, openpyxl and python-docx, `jq`, `yq` (the Python wrapper of `jq`
+  for YAML), `curl`, ripgrep's `rg`, `sqlite3`, `zip`, `unzip`, `xz`, `file`, `tree`,
+  `less`, `bc`, `envsubst`, `rsync` and `patch`, each from Debian's snapshot with no
+  recommended packages. Tesseract's languages are Bulgarian, Croatian, Czech, Danish,
+  Dutch, English, Estonian, Finnish, French, German, Greek, Hungarian, Irish, Italian,
+  Latvian, Lithuanian, Maltese, Norwegian, Polish, Portuguese, Romanian, Russian,
+  Serbian, Slovak, Slovenian, Spanish, Swedish and Ukrainian.
 
 To add what your agents need, build yours FROM one of them, and check it:
 
 ```dockerfile
 FROM qory-agent
-RUN apt-get update && apt-get install -y --no-install-recommends python3 \
+RUN apt-get update && apt-get install -y --no-install-recommends make \
  && rm -rf /var/lib/apt/lists/*
 ```
 
@@ -3796,8 +3798,6 @@ wall:
       ref: ghcr.io/acme/agent-go-docker@sha256:…
       runtime: sysbox-runc
       docker: true
-    browser:                # Chromium
-      ref: ghcr.io/acme/agent-browser@sha256:…
 ```
 
 ```yaml
@@ -3863,7 +3863,7 @@ What the image holds:
 - `dockerd`, and what it starts, `containerd`, `runc` and `iptables` among them, in
   `/usr/local/sbin`, `/usr/local/bin`, `/usr/sbin`, `/usr/bin`, `/sbin` or `/bin`. These
   directories are the daemon's whole `PATH`; the run's `PATH` is never searched.
-  [Qory's](#qorys-images) `agent-docker` and `agent-go-docker` have them there, as does
+  [Qory's](#qorys-images) `agent-docker` has them there, as does
   `docker:dind`. `qory image check` says whether an image does.
 - The agent's user and group, in its `/etc/passwd` and `/etc/group`, when `wall.user`
   names the user by name, or by a uid with no gid.

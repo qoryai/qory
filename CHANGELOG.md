@@ -100,8 +100,6 @@ release may change what an existing document does, and states it under Upgrading
   characters, and `action`: `answer`, with `question`, the id of an open question, or
   `run_again`. The text member `gaps` is gone. See The verdict format in
   `contracts/harness/v1/README.md`.
-- `images/agent-browser`: the agent image with Chromium. `images.yml` builds and checks
-  it, and `prerelease.yml` publishes it by digest. See Qory's images in `docs/run.md`.
 - `-f` on `qory harness compose`, `qory run` and `qory worktree add` takes a stack by
   reference, `<https URL>#<ref>:<folder>`: qory fetches the folder as it fetches a git
   module and composes its `qory-stack.yaml`. `examples/hello` has one, so a run takes it
@@ -328,6 +326,14 @@ release may change what an existing document does, and states it under Upgrading
   `files/claude/rules/qory-harness.md`, or a file at `files/claude/rules`, fails the
   compose.
 - The `agent` image contains Claude Code 2.1.316, up from 2.1.273.
+- The `agent` image is the one standard image for a run. It adds Chromium, Noto's fonts
+  for Latin and other scripts, CJK and color emoji, `ffmpeg` and `ffprobe`, ImageMagick,
+  `qpdf`, `rsvg-convert`, Graphviz, Tesseract OCR with 28 languages, `pandoc`,
+  Python 3 with PyYAML, Requests, Beautiful Soup, lxml, cssselect, Pillow, openpyxl and
+  python-docx, `jq`, `yq`, `curl`, ripgrep, `sqlite3`, `zip`, `unzip`, `xz`, `file`,
+  `tree`, `less`, `bc`, `envsubst`, `rsync` and `patch`, from the same Debian snapshot.
+  `images/agent-go`, with the images `agent-go` and `agent-go-docker`, is removed: build
+  an image with Go FROM `agent` or `agent-docker`. See Qory's images in `docs/run.md`.
 - Claude Code runs with `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` and
   `CLAUDE_CODE_DISABLE_OFFICIAL_MARKETPLACE_AUTOINSTALL=1` in every run,
   walled or not, and the `env` of its `--settings` copy sets both.

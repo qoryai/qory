@@ -10,7 +10,7 @@ import (
 // debianSnapshot is the default of DEBIAN_SNAPSHOT in a Dockerfile.
 var debianSnapshot = regexp.MustCompile(`(?m)^ARG DEBIAN_SNAPSHOT=(\S+)$`)
 
-// TestDebianSnapshotIsOneDate reads the three Dockerfiles that install Debian's packages
+// TestDebianSnapshotIsOneDate reads the two Dockerfiles that install Debian's packages
 // from a snapshot: an image FROM the agent image installs from the agent image's date.
 func TestDebianSnapshotIsOneDate(t *testing.T) {
 	for _, name := range []string{"HOME", "XDG_CONFIG_HOME", "XDG_STATE_HOME", "XDG_CACHE_HOME", "XDG_DATA_HOME"} {
@@ -19,7 +19,7 @@ func TestDebianSnapshotIsOneDate(t *testing.T) {
 
 	const first = "agent"
 	var want string
-	for _, image := range []string{first, "agent-docker", "agent-browser"} {
+	for _, image := range []string{first, "agent-docker"} {
 		path := filepath.Join("..", "..", "images", image, "Dockerfile")
 		data, err := os.ReadFile(path)
 		if err != nil {
