@@ -4788,11 +4788,11 @@ func TestASubmoduleMoreThanEightDeepIsLeftBehind(t *testing.T) {
 }
 
 // TestAFileInAnUnpopulatedNestedSubmoduleIsLeftBehind is a nested submodule that no update
-// populated, an empty folder after the clone: a file the agent writes there keeps the copy, and
-// the empty folder keeps nothing.
+// populated, an empty folder after the clone: a file the agent writes there, with a dot at the
+// start of its name or not, keeps the copy, and the empty folder keeps nothing.
 func TestAFileInAnUnpopulatedNestedSubmoduleIsLeftBehind(t *testing.T) {
-	for _, file := range []bool{true, false} {
-		t.Run(fmt.Sprintf("a file %t", file), func(t *testing.T) {
+	for _, file := range []string{"new.txt", ".new", ""} {
+		t.Run(fmt.Sprintf("a file %q", file), func(t *testing.T) {
 			isolate(t)
 			sessionGit(t)
 			d, repos := cloneRun(t, nestedSubmodule(t))
@@ -4800,11 +4800,11 @@ func TestAFileInAnUnpopulatedNestedSubmoduleIsLeftBehind(t *testing.T) {
 			if entries, err := os.ReadDir(inner); err != nil || len(entries) > 0 {
 				t.Fatalf("the clone left %d entries in libs/m/inner: %v", len(entries), err)
 			}
-			if file {
-				write(t, inner, "new.txt", "agent work\n")
+			if file != "" {
+				write(t, inner, file, "agent work\n")
 			}
 			printed := sessionOutput(t, d, repos, nil)
-			if got := leftBehind(d, repos); got != file {
+			if got := leftBehind(d, repos); got != (file != "") {
 				t.Errorf("left behind = %v:\n%s", got, printed)
 			}
 		})

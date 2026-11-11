@@ -397,6 +397,20 @@ through_link() {
 		esac
 	done
 }
+# filled reports whether $1 is anything but an empty folder that the session can list: a folder
+# with an entry or one it cannot list, or any other file. The shell lists the folder, as the
+# image may have no ls.
+filled() {
+	if [ ! -d "$1" ] || [ ! -r "$1" ] || [ ! -x "$1" ]; then
+		return 0
+	fi
+	for f_e in "$1"/* "$1"/.[!.]* "$1"/..?*; do
+		if [ -e "$f_e" ] || [ -h "$f_e" ]; then
+			return 0
+		fi
+	done
+	return 1
+}
 # tree_status writes to the file $2 the changes of the repository at the folder $1, which is $4
 # submodules deep: what its working tree changed since its HEAD. As for the top repository, git
 # runs through a new git folder $3 that gitfolder makes, with an empty configuration, the
@@ -407,8 +421,8 @@ through_link() {
 # fails, the submodule is a change in $2, and n.left is written. These gitlinks cannot be checked,
 # so each is a change, and n.left is written: one whose path ls-files quotes; one whose path is a
 # link or goes through one, since a link to . would repeat the status without end; one with no
-# .git and a folder that is not empty or that ls cannot list, such as a nested submodule that no
-# update populated; and one more than 8 submodules deep. A call in a condition ignores set -e, so
+# .git and a folder that is not empty or that the session cannot list, such as a nested
+# submodule that no update populated; and one more than 8 submodules deep. A call in a condition ignores set -e, so
 # each step that can fail exits 1 on its failure.
 tree_status() (
 	t_at=$1 t_out=$2 G=$3 t_depth=$4
@@ -450,11 +464,7 @@ tree_status() (
 			continue
 		fi
 		if [ ! -e "$t_at/$t_p/.git" ] && [ ! -h "$t_at/$t_p/.git" ]; then
-			t_ls=
-			if [ -e "$t_at/$t_p" ] && ! t_ls=$(ls -A "$t_at/$t_p" 2>/dev/null); then
-				t_ls=unread
-			fi
-			if [ -n "$t_ls" ]; then
+			if [ -e "$t_at/$t_p" ] && filled "$t_at/$t_p"; then
 				printf ' M %s\0' "$t_p" >> "$t_out" || exit 1
 				: > "$B/$n.left"
 			fi
