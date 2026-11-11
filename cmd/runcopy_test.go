@@ -1866,7 +1866,7 @@ func wantHomeStop(t *testing.T, seen *string, relation string) {
 	if code := cmd.ExitCode(err); code != 2 {
 		t.Errorf("exit %d, want 2: %v", code, err)
 	}
-	wants(t, err.Error(), "start the run from a folder that does not contain your home folder or qory's state directory: the folder ", relation)
+	wants(t, err.Error(), "start the run from a folder that does not contain your home folder, qory's state directory or the folder of the runs' copies: the folder ", relation)
 }
 
 // TestAPlainFolderAtTheHomeFolderStops is a run that may write in a plain folder at the home

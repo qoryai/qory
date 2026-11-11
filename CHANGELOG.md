@@ -310,7 +310,8 @@ release may change what an existing document does, and states it under Upgrading
   a step that a signal cuts closes it `cancelled`. A write run from a run code, as a pool
   starts it, gets no copy: it works in the checkout and pushes from it, as before. Such a walled
   run stops after the compose, exit 2, when its checkout or working folder is or contains your
-  home folder or qory's state directory, as a read run with no setup does. A read-write
+  home folder or qory's state directory, as a read run with no setup does, or contains the
+  folder of the runs' copies, `qory/runs` in your cache folder. A read-write
   `--mount` or `wall.mounts` entry stops a run in a copy. A folder that is not a repository gets
   its regular files back, and so does a run with a run key that lists no repositories, in a folder where
   `git init` ran with no commit. Every such run starts with your `.qory/artifacts` and
@@ -318,7 +319,8 @@ release may change what an existing document does, and states it under Upgrading
   local repository with no commit, a working folder absent from `HEAD`, a partial clone, a
   branch named as a parent of the run's branch, a run or compose in a folder of a run's copy,
   a run in a folder that is not a repository
-  and is or contains your home folder or qory's state directory, and a write run in a copy that
+  and is or contains your home folder or qory's state directory, or contains `qory/runs` in your
+  cache folder, and a write run in a copy that
   lists repositories on an image without a program of the git session, which stops in the setup step
   `Check tools`, before the agent, with `install <program> in /usr/local/bin, /usr/bin, /bin: …`. A copy that stays has its `.git` renamed to `.git-from-run`. Work that the run's branch
   does not have comes back under `refs/qory/run-<run id>` in your repository, or the first free

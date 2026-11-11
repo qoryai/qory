@@ -31,7 +31,7 @@ const (
 	textCopyMount      = "make the mount %s read-only, with :ro on --mount or in wall.mounts: a walled run reads the checkout or works in a copy of it, and a read-write mount lets it write your files directly"
 	textCopyOutside    = "run qory inside the checkout %s: a run that may write works in a copy of the checkout, and the working folder %s is outside it"
 	textCopyNoFolder   = "commit %[1]s, or run qory in a folder that the commit at HEAD has: a run that may write works in a copy of that commit, which has no folder %[1]s"
-	textCopyReserved   = "start the run from a folder that does not contain your home folder or qory's state directory: the folder %s %s, and the run's copy of it would have every file there"
+	textCopyReserved   = "start the run from a folder that does not contain your home folder, qory's state directory or the folder of the runs' copies: the folder %s %s, and the run's copy of it would have every file there"
 	textCopyBehind     = "part of the run's work did not come back: the copy has a nested repository the run made."
 	textCopyNotAdded   = "part of the run's work did not come back: the copy has changes that git could not add to the run's commit, such as a file another user owns or a change in a submodule."
 	textCopyLarge      = "left out of the run's commit, as each has more than %s: %s. They stay in the run's copy."

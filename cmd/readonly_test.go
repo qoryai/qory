@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"syscall"
@@ -596,12 +597,13 @@ func TestAReadRunAtTheHomeFolderStops(t *testing.T) {
 // with no reason and -1, as a read run at the home folder does. A checkout that is neither joins.
 func TestACodeWriteRunAtTheHomeFolderStops(t *testing.T) {
 	for name, c := range map[string]struct {
-		home  bool
-		state string
-		want  string
+		home, cache bool
+		state       string
+		want        string
 	}{
 		"at the home folder":                {home: true, want: "is your home folder"},
 		"above qory's state directory":      {state: "state", want: "contains qory's state directory "},
+		"above the runs' copies":            {cache: true, want: "contains the folder of the runs' copies "},
 		"in a folder that contains neither": {},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -619,6 +621,9 @@ func TestACodeWriteRunAtTheHomeFolderStops(t *testing.T) {
 					t.Setenv("XDG_STATE_HOME", filepath.Join(root, c.state))
 				}
 				t.Setenv("XDG_CACHE_HOME", tempDir(t))
+				if c.cache {
+					cacheIn(t, filepath.Join(root, "cache"))
+				}
 				docker, _ := fakeDocker(t)
 				writeFile(t, filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "forager.yaml"),
 					"wall:\n  adapter: docker\n  command: "+docker+"\n  helper: "+staticELF(t)+"\n  user: \"1000:1000\"\n  image: "+readImage+"\n")
@@ -633,12 +638,30 @@ func TestACodeWriteRunAtTheHomeFolderStops(t *testing.T) {
 			if r.joined || cmd.ExitCode(r.err) != cmd.ExitInput {
 				t.Fatalf("%v (exit %d), want exit %d before the join\n%s", r.err, cmd.ExitCode(r.err), cmd.ExitInput, r.out)
 			}
-			wants(t, r.err.Error(), "start the run from a folder that does not contain your home folder or qory's state directory: the folder ", c.want, ", and a write run from a run code binds it into the agent's container; the code is used")
+			wants(t, r.err.Error(), "start the run from a folder that does not contain your home folder, qory's state directory or the folder of the runs' copies: the folder ", c.want, ", and a write run from a run code binds it into the agent's container; the code is used")
 			if want := (session.Outcome{State: "failed", ExitCode: -1}); len(r.closes) != 1 || r.closes[0] != want {
 				t.Errorf("the closes %+v, want %+v", r.closes, want)
 			}
 		})
 	}
+}
+
+// cacheIn makes the user cache folder, as os.UserCacheDir finds it, lie in dir, with HOME outside
+// dir: on macOS through a link from Library in a new home folder, elsewhere with XDG_CACHE_HOME.
+func cacheIn(t *testing.T, dir string) {
+	t.Helper()
+	if runtime.GOOS != "darwin" {
+		t.Setenv("XDG_CACHE_HOME", dir)
+		return
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "Caches"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	home := tempDir(t)
+	if err := os.Symlink(dir, filepath.Join(home, "Library")); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", home)
 }
 
 // TestAWriteRunKeepsTheSetupContainer is a walled write run with a setup: it never calls

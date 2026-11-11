@@ -67,7 +67,7 @@ func writtenPlaces(root string, mounts []wall.Mount) []string {
 
 // reservedMounts stops a walled run with an input error when one of the read-write mounts
 // of mounts, other than its checkout at root, is the person's home folder or qory's state
-// directory, or an ancestor of either: a walled run may change any file in a read-write
+// directory, or an ancestor of either, see [homeOrState]: a walled run may change any file in a read-write
 // mount. A read-only mount and the checkout's mount are not compared. The paths are
 // compared as written, made absolute, and again as [session.Overlap] compares them: a home
 // folder or a state directory reached through a link inside the mount lies in it as written, and
@@ -79,7 +79,7 @@ func reservedMounts(root string, mounts []wall.Mount) error {
 		if m.ReadOnly || m.Path == root {
 			continue
 		}
-		if relation := reserved(m.Path); relation != "" {
+		if relation := homeOrState(m.Path); relation != "" {
 			return input(fmt.Errorf("make the mount %s read-only, with :ro on --mount or in wall.mounts: it %s, and a walled run may change any file in a read-write mount", hostgit.Shown(m.Path), relation))
 		}
 	}
@@ -91,30 +91,45 @@ func reservedMounts(root string, mounts []wall.Mount) error {
 // directory, see [reserved].
 const (
 	textReadBindsReserved      = "start the run from a folder that does not contain your home folder or qory's state directory: the folder %s %s, and a read run binds it into the agent's container" + codeUsed
-	textCodeWriteBindsReserved = "start the run from a folder that does not contain your home folder or qory's state directory: the folder %s %s, and a write run from a run code binds it into the agent's container" + codeUsed
+	textCodeWriteBindsReserved = "start the run from a folder that does not contain your home folder, qory's state directory or the folder of the runs' copies: the folder %s %s, and a write run from a run code binds it into the agent's container" + codeUsed
 )
 
 // bindsReserved stops a walled run that binds the checkout at root and the working folder cwd
-// themselves, with an input error of the line text, when one of them is or contains the home
-// folder or qory's state directory: the agent could read every file of the person there, and
-// a write run could change them. Two kinds of run bind them: a read run with no setup, with
-// [textReadBindsReserved], and a write run from a run code, which gets no copy, with
-// [textCodeWriteBindsReserved].
-func bindsReserved(text, root, cwd string) error {
+// themselves, with an input error of the line text, when relation, [reserved] or [homeOrState],
+// relates one of them to a folder it is or contains: the agent could read every file of the
+// person there, and a write run could change them. Two kinds of run bind them: a read run with no
+// setup, with [textReadBindsReserved] and [homeOrState], as [codeRun.readExposed] checks qory's
+// cache folder with a line that has the harness report, and a write run from a run code, which
+// gets no copy, with [textCodeWriteBindsReserved] and [reserved].
+func bindsReserved(text, root, cwd string, relation func(string) string) error {
 	for _, p := range []string{root, cwd} {
-		if relation := reserved(p); relation != "" {
+		if relation := relation(p); relation != "" {
 			return input(fmt.Errorf(text, hostgit.Shown(p), relation))
 		}
 	}
 	return nil
 }
 
-// reserved is how the folder at path relates to the home folder, or else to qory's state
+// reserved is [homeOrState], or else how the folder at path relates to the folder of the runs'
+// copies, [runCopiesDir], which a run could have written, when path is that folder or an ancestor
+// of it. A relative cache folder, from a relative HOME, is not compared.
+func reserved(path string) string {
+	if relation := homeOrState(path); relation != "" {
+		return relation
+	}
+	if dir := runCopiesDir(); filepath.IsAbs(dir) && liesIn(dir, path) {
+		return contains(path, dir, "the folder of the runs' copies")
+	}
+	return ""
+}
+
+// homeOrState is how the folder at path relates to the home folder, or else to qory's state
 // directory, when path is that folder or an ancestor of it: "is" and the folder's
 // description, or "contains", the description and the folder's path. It is "" for a
 // path that is neither. A relative HOME is not compared: resolved against the working
-// folder, it would change with it.
-func reserved(path string) string {
+// folder, it would change with it. A read-write mount of qory's cache folder, which contains the
+// folder of the runs' copies, stops in [codeRun.reportExposed].
+func homeOrState(path string) string {
 	if dir, err := os.UserHomeDir(); err == nil && filepath.IsAbs(dir) && liesIn(dir, path) {
 		return contains(path, dir, "your home folder")
 	}

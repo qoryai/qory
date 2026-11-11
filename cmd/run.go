@@ -745,7 +745,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					}
 					// A run with no setup binds the checkout itself, see hostWork.
 					if run.Repositories() == "" {
-						if err := bindsReserved(textReadBindsReserved, at.root, cwd); err != nil {
+						if err := bindsReserved(textReadBindsReserved, at.root, cwd, homeOrState); err != nil {
 							return false, err
 						}
 					}
@@ -754,7 +754,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					}
 				} else if fromCode != nil && walled {
 					// A write run from a run code gets no copy: it binds the checkout itself.
-					if err := bindsReserved(textCodeWriteBindsReserved, at.root, cwd); err != nil {
+					if err := bindsReserved(textCodeWriteBindsReserved, at.root, cwd, reserved); err != nil {
 						return false, err
 					}
 				}

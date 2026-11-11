@@ -3698,8 +3698,9 @@ Three cases stop the run with their fix first:
 - A partial clone: the clone has only the objects your repository has. The line has the
   commands that fetch the rest, such as `git fetch --refetch origin`.
 - A folder that is not a repository, and that is your home folder or qory's state directory or
-  contains one, with exit 2: the copy would have every file there, such as `~/.ssh`. Start the run
-  from a folder that does not contain them. A home folder that is a repository runs when
+  contains one, or contains the folder of the runs' copies, `qory/runs` in your cache folder, with
+  exit 2: the copy would have every file there, such as `~/.ssh`. Start the run from a folder
+  that does not contain them. A home folder that is a repository runs when
   `--home` or `harness.home` sets a harness home outside it: its copy has only the files of the
   commit at `HEAD`. The default home is under your cache directory, which on macOS, and on Linux
   with no `XDG_CACHE_HOME` outside it, is inside your home folder.
@@ -4107,10 +4108,12 @@ with no run code, and a run you start yourself see the checkout writable.
 
 A walled write run from a run code gets no copy and binds the checkout itself. It stops after
 the compose, exit 2, when its checkout or working folder is your home folder or qory's state
-directory, or contains one, since the agent could change every file there:
+directory, or contains one, since the agent could change every file there, and when it contains
+the folder of the runs' copies, `qory/runs` in your cache folder, since the agent could change
+the copies of other runs:
 
 ```text
-start the run from a folder that does not contain your home folder or qory's state directory: the folder <folder> is your home folder, and a write run from a run code binds it into the agent's container; the code is used
+start the run from a folder that does not contain your home folder, qory's state directory or the folder of the runs' copies: the folder <folder> is your home folder, and a write run from a run code binds it into the agent's container; the code is used
 ```
 
 ### Qory's images
