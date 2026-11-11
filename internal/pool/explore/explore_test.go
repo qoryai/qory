@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/qoryai/qory/internal/pool/explore"
@@ -56,5 +57,33 @@ func TestRemove(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(state, "pool")); err != nil {
 		t.Errorf("the pool's directory went: %v", err)
+	}
+}
+
+// TestRecordedRuns lists the run id of each record folder of RecordDir's layout, and
+// leaves out a file, a folder whose name is no run id, and a run id at another depth.
+// A state folder with no records lists nothing.
+func TestRecordedRuns(t *testing.T) {
+	state := t.TempDir()
+	if ids := explore.RecordedRuns(state); len(ids) != 0 {
+		t.Errorf("an empty state folder lists %q", ids)
+	}
+	work := t.TempDir()
+	record, err := explore.RecordDir(state, work, testRunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	other := filepath.Join(filepath.Dir(record), "not-a-run")
+	deeper := filepath.Join(record, "0191f2a4-3c5e-7b8d-9e0f-000000000000")
+	for _, d := range []string{record, other, deeper} {
+		if err := os.MkdirAll(d, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(filepath.Dir(record), "0191f2a4-3c5e-7b8d-9e0f-111111111111"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if ids := explore.RecordedRuns(state); !slices.Equal(ids, []string{testRunID}) {
+		t.Errorf("the runs are %q, want %q", ids, testRunID)
 	}
 }

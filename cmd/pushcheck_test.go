@@ -237,9 +237,11 @@ func TestTheAgentsPushIsCheckedBeforeItLeaves(t *testing.T) {
 			t.Errorf("the folder at %s is not in %s:\n%s", dst, parent, created)
 		}
 	}
-	wantMode := fs.FileMode(0o700)
-	if os.Getuid() != 1000 {
-		wantMode = 0o711
+	// The wall's user is 1000:1000. When the test runs as that user too, no other user
+	// passes through the folder, so it stays qory's user's alone.
+	wantMode := fs.FileMode(0o711)
+	if os.Getuid() == 1000 {
+		wantMode = 0o700
 	}
 	if parentMode != wantMode {
 		t.Errorf("%s had mode %o during the check, want %o", parent, parentMode, wantMode)

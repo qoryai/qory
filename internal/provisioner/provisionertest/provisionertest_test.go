@@ -215,3 +215,51 @@ func TestTheFakeTakesOneMachineLog(t *testing.T) {
 		t.Errorf("an unknown dispatch: %d signed %v %s", status, signed, body)
 	}
 }
+
+// TestTheFakeTakesMachineEnds posts the contract's machine-end fixtures to a claimed
+// dispatch at the fixtures' time: each invalid one is a signed 400 invalid_request, and
+// each valid one a signed 204 that the fake records, in order. A machine end of an
+// unknown dispatch is a signed 403 forbidden, and a 503 unavailable scripted for the
+// route is answered signed.
+func TestTheFakeTakesMachineEnds(t *testing.T) {
+	s := provisionertest.New(t)
+	now := time.Date(2026, 10, 15, 12, 10, 0, 0, time.UTC)
+	s.Now = func() time.Time { return now }
+	s.Offer(provisionertest.Run{})
+	c := s.Client()
+	cl, ok, err := c.Claim(context.Background())
+	if err != nil || !ok {
+		t.Fatalf("claim: %v %v", ok, err)
+	}
+	cl.RunCode.Clear()
+	path := "/v1/dispatches/" + cl.DispatchID + "/machine-end"
+	read := func(name string) []byte {
+		b, err := fs.ReadFile(contracts.ProvisionerFS, "fixtures/"+name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return b
+	}
+	for _, name := range []string{"machine-end-undefined-member.json", "machine-end-unknown-state.json", "machine-end-version-2.json", "machine-end-without-state.json"} {
+		if status, signed, body := post(t, s, s.Pool, path, read("invalid/"+name), nil); status != 400 || !signed || !strings.Contains(body, `"invalid_request"`) {
+			t.Errorf("%s: %d signed %v %s", name, status, signed, body)
+		}
+	}
+	for _, name := range []string{"deleting", "delete-failed", "gone"} {
+		if status, signed, _ := post(t, s, s.Pool, path, read("machine-end/"+name+".json"), nil); status != 204 || !signed {
+			t.Errorf("%s: %d signed %v", name, status, signed)
+		}
+	}
+	if d, _ := s.Dispatch(cl.DispatchID); strings.Join(d.MachineEnds, " ") != "deleting delete_failed gone" {
+		t.Errorf("the fake recorded %q", d.MachineEnds)
+	}
+	gone := read("machine-end/gone.json")
+	if status, signed, body := post(t, s, s.Pool, "/v1/dispatches/dp_0123456789abcdef/machine-end", gone, nil); status != 403 || !signed || !strings.Contains(body, `"forbidden"`) {
+		t.Errorf("an unknown dispatch: %d signed %v %s", status, signed, body)
+	}
+	s.Script(provisionertest.RouteMachineEnd, provisionertest.Reply{Status: 503, Code: "unavailable"})
+	// The spaces after the body make its signature one the fake has not seen.
+	if status, signed, body := post(t, s, s.Pool, path, append(gone, ' '), nil); status != 503 || !signed || !strings.Contains(body, `"unavailable"`) {
+		t.Errorf("a scripted 503: %d signed %v %s", status, signed, body)
+	}
+}

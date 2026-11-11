@@ -2,7 +2,7 @@
 
 What `qory harness compose` reads and what it writes.
 
-## Eight files
+## Nine files
 
 | File | Lives in | Defines |
 |---|---|---|
@@ -14,6 +14,7 @@ What `qory harness compose` reads and what it writes.
 | a questions document | the file of a version of the artifact type `questions` | a work item's questions, their answers and the decisions of its runs (§The questions format). No compose reads it |
 | a review comments document | the file of a version of the artifact type `review-comments` | a work item's review comments on its artifact versions and the replies to them (§The review comments format). No compose reads it |
 | a proposal sources document | the file `sources.json` of a version of the artifact type `proposal` | every source a run used to write the proposal, with the reason for each (§The proposal sources format). No compose reads it |
+| a verdict document | the file of a version of the artifact type `verdict`, which `qory run verdict` stores | a run's verdict, and for `escalate` the points a person acts on (§The verdict format). No compose reads it |
 
 Every module has a `qory-module.yaml`; it defines the module's name, and a directory
 without one is not a module. `qory.yaml` is optional: every setting has a default. It has
@@ -552,12 +553,12 @@ answer keeps `decision` too. This is version 1 of the format ([questions.schema.
 ## The review comments format
 
 A review comments document records the members' review comments on a work item's artifact
-versions, such as a proposal, and the replies to them, one document per work item and at
-most 1 MiB. The control plane writes the members' review comments and replies. A version
-that a run pushes only adds the run's reply to any of the open review comments, at most
-one reply to each, and closes each review comment it adds a reply to: it changes no
-member's text, drops no id and adds no review comment. A closed review comment has at
-least one reply by a run. A run's reply has an `outcome`:
+versions, such as a proposal, or on the whole round of a run, and the replies to them, one
+document per work item and at most 1 MiB. The control plane writes the members' review
+comments and replies. A version that a run pushes only adds the run's reply to any of the
+open review comments, at most one reply to each, and closes each review comment it adds a
+reply to: it changes no member's text, drops no id and adds no review comment. A closed
+review comment has at least one reply by a run. A run's reply has an `outcome`:
 
 | `outcome` | Meaning |
 |---|---|
@@ -566,8 +567,21 @@ least one reply by a run. A run's reply has an `outcome`:
 | `declined` | the review comment is a request for a change that the run did not make, and the reply contains the reason |
 | `asked` | the run could not settle the review comment and added a question for a person to the `questions` artifact; the reply's `question` is the id of that question in the newest `questions` version, so the run pushes the questions before the review comments |
 
-A member's reply has no `outcome` and no `question`. This is version 1 of the format
-([review-comments.schema.json](review-comments.schema.json)).
+A member's reply has no `outcome` and no `question`.
+
+A review comment's `on` has one of two forms:
+
+- On an output, `on` has the artifact type's name in `artifact` and the version's number
+  in `version`: the review comment is about that artifact version. For a review comment
+  on one screen of a mockup, `on` also has `screen`: the id of a screen in that artifact
+  version, 1 to 32 characters on one line.
+- On a round, `on` has only `run`, the number of a run, from 1: the review comment is
+  about everything that run produced and the round as a whole. `run` is the number of the
+  run whose round the member commented on.
+
+A version that a run pushes keeps `on` unchanged.
+
+This is version 1 of the format ([review-comments.schema.json](review-comments.schema.json)).
 
 ## The proposal sources format
 
@@ -579,6 +593,41 @@ a file in a repository. Each source has a `kind` from an open list, such as `pag
 `record`, a `ref` in the form that its kind needs, and a `why`; `system`, `container` and
 `locator` are optional. This is version 1 of the format
 ([proposal-sources.schema.json](proposal-sources.schema.json)).
+
+## The verdict format
+
+A verdict document records a run's verdict on the work of its round. `qory run verdict`
+stores it as a version of the artifact type `verdict`. This is version 1 of the format
+([verdict.schema.json](verdict.schema.json)):
+
+```json
+{"verdict": "escalate",
+ "points": [{"text": "The spec does not say which customers see the new price.", "action": "answer", "question": "q4"},
+            {"text": "The checks script failed on the spec's links.", "action": "run_again"}]}
+```
+
+| Member | Meaning |
+|---|---|
+| `verdict` | `passed`: the work meets the bar; `changes-requested`: the work needs another round; `escalate`: a person must act |
+| `points` | what is wrong or missing and what a person can do, 1 to 20 points: required with `escalate`, and absent with the other verdicts |
+| `text` | what is wrong or missing, in one plain sentence for a person on one line, 1 to 500 characters, with no action and no question id, because Qory Apiary adds the action from `action`: it has no control character, so no tab, line feed or carriage return, and the schema's `$defs` `line`, the `line` of the questions format, lists the format characters it cannot have |
+| `action` | `answer`: the person answers the question in `question`; `run_again`: the person runs another round |
+| `question` | the id of an open question in the work item's newest `questions` version, in the id form of the questions format: required with `answer`, and absent with `run_again` |
+
+A document and a point have no other member. A JSON Schema cannot check that the
+question is open, so the run pushes its questions before its verdict. Each of these
+documents fails the schema:
+
+```json
+{"verdict": "escalate"}
+{"verdict": "passed", "points": [{"text": "The checks script failed on the spec's links.", "action": "run_again"}]}
+{"verdict": "escalate", "points": []}
+{"verdict": "escalate", "points": [{"text": "The spec does not say who sees the price."}]}
+{"verdict": "escalate", "points": [{"text": "The spec does not say who sees the price.", "action": "answer"}]}
+{"verdict": "escalate", "points": [{"text": "The checks script failed.", "action": "run_again", "question": "q4"}]}
+{"verdict": "escalate", "points": [{"text": "The checks script failed.\nThe spec's links are broken.", "action": "run_again"}]}
+{"verdict": "changes-requested", "gaps": "Add the empty cart."}
+```
 
 ## The module manifest
 
@@ -1152,9 +1201,13 @@ Per runtime, the files written into its directory:
   with the servers under `mcpServers`, and `plugin/`, the launch spec, never linked into
   the checkout (§Launching).
 - **copilot**: `agents/<name>.agent.md` with `name`, `description`, `tools` and `model`,
-  the `settings/copilot/` files written under `hooks/`, so `settings/copilot/hooks.json`
-  reaches `.github/hooks/hooks.json`, and for a launch `workspace/.github` with the
-  skills and agents, and `mcp.json` with the servers (§Launching).
+  each `settings/copilot/<name>` file written under `hooks/` as `qory-<name>`, so
+  `settings/copilot/hooks.json` reaches `.github/hooks/qory-hooks.json`, and for a launch
+  `workspace/.github` with the skills and agents, and `mcp.json` with the servers
+  (§Launching). Copilot CLI loads every `*.json` file in `.github/hooks`, so a
+  repository's `.github/hooks/hooks.json` runs beside the harness's hooks and stays as
+  the repository has it. qory passes over a file at a `qory-` name that it did not write,
+  and lists it under `kept`.
 - **amp**: the `settings/amp/` files such as `settings.json`, with the servers under
   `amp.mcpServers`.
 - **goose**: `agents/<name>.md` with `name`, `description` and `model`.

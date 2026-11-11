@@ -448,11 +448,15 @@ func firstLine(s string) string {
 // description, as it is printed to a terminal: at most [maxLine] runes, with ... after
 // what is cut, and each character that does not print as ?, so it stays one line and
 // moves no cursor.
-func Printable(s string) string {
+func Printable(s string) string { return PrintableWithin(s, maxLine) }
+
+// PrintableWithin is [Printable] with at most limit runes in place of [maxLine], for a
+// caller whose text has a known length above maxLine that a cut would lose part of.
+func PrintableWithin(s string, limit int) string {
 	var b strings.Builder
 	n := 0
 	for _, r := range s {
-		if n == maxLine {
+		if n == limit {
 			b.WriteString("...")
 			break
 		}

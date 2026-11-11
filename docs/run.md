@@ -526,14 +526,30 @@ qory run: push the image to its registry, or select another image in the run's p
 qory run: set USER in the image to a user other than root that its /etc/passwd lists, or select another image in the run's policy: <Forager's reason> (image_user_root)
 ```
 
+A check of the image's manifest that gets 401 or 403 from the registry, its token realm
+or the run's proxy closes the run `failed` with `image_access_denied`. A check that gets
+429 from one of them closes it with `image_rate_limited`. A check that does not reach the
+registry or its token realm closes it with `image_registry_unreachable`: a host name that
+does not resolve, a connection refused or reset, a TLS handshake or certificate that
+fails, or a timeout. The line is Forager's reason, which starts with the fix and contains
+the image's reference, with its first letter in lower case:
+
+```
+qory run: <Forager's reason> (image_access_denied)
+qory run: <Forager's reason> (image_rate_limited)
+qory run: <Forager's reason> (image_registry_unreachable)
+```
+
 Any other failure closes the run `failed` with `no_session`:
 
 ```
 qory run: run again: the fetch of the run's image failed: <Forager's error>
 ```
 
-For a run from a run code, the code is used by then. Each refusal line ends with `; the
-code is used`, and any other failure says:
+For a run from a run code, the code is used by then. The lines of `image_missing` and
+`image_user_root` end with `; the code is used`. The lines of `image_access_denied`,
+`image_rate_limited` and `image_registry_unreachable` end with `; the code is used, so
+start the stage again from the work item in Qory Apiary`. Any other failure says:
 
 ```
 qory run: take the work item in again in Qory Apiary: the fetch of the run's image failed: <Forager's error>; the code is used
@@ -2299,6 +2315,81 @@ composes its harness under `home/` of that folder, outside `work/`. Once the run
 the pool removes the run's folder and the harness home in it, so no later run on the
 machine reads that harness.
 
+A run can outlast the pool: after a crash of the pool, or after a second SIGINT or
+SIGTERM, which ends the pool at once. The pool locks `run.lock` in the run's folder
+before the run starts, and passes the lock's file to `qory run` as descriptor 4. The
+lock stays held while `qory run`, or a program it started, still runs. `qory run`
+starts in a new session, whose id is its process id. Once `qory run` started, the pool
+writes that id and the start of `qory run` to `run.session` beside the lock: on Linux,
+field 22 of `/proc/<pid>/stat` in clock ticks, and on macOS the process's start as
+seconds and microseconds. When the pool starts, before it acts on a run of the
+journal, it checks that run's lock:
+
+1. If the lock is held, the pool stops the run: it logs `a qory run of the dispatch is
+   left from before the pool started, so the pool stops it`, and sends SIGTERM to each
+   process of the run's session, in any process group. If the run still holds the
+   lock 30 seconds later, the pool lists the session's processes again and sends
+   SIGKILL to each, up to 3 times while new processes appear. While the run stops, it
+   counts against `pool.runs`. Before each signal, the pool checks that the session is
+   the run's:
+   - A process of the session was in an earlier list of it that the pool proved to be
+     the run's, and has the same start as then. The session has had processes since
+     then, and no process gets the id of a session that has processes.
+   - The process whose id is in `run.session` has the start in `run.session`: it is
+     `qory run`.
+   - On Linux, no process has that id, and a process of the session has `run.lock`
+     open, matched by device and inode in `/proc/<pid>/fd`. On macOS, the pool does
+     not read which files a process has open, so a session whose `qory run` ended
+     before the pool started gets no signal.
+
+   Otherwise the pool sends no signal, or no further signal once SIGTERM went out, and
+   waits 30 seconds for the lock: a process with another start has the id, the session
+   has no process, or none of its processes was in an earlier proven list or has
+   `run.lock` open. A program that the run starts in a new session, as `setsid` does,
+   is outside the run's session and gets no signal.
+2. If the lock is still held after these waits, the pool logs `stop the programs that
+   hold run.lock in the dispatch's folder, then restart the pool: a qory run left from
+   before the pool started still holds that lock, so the pool keeps the dispatch for its
+   next start and reports no gone`. The run keeps its place in `pool.runs`. If the pool
+   cannot try the lock, for example because `run.lock` is a link, it logs ``make
+   `<the run's folder>/run.lock` a regular file the pool's user can open, then restart
+   the pool: the pool could not lock it (<error>), so it keeps the dispatch for its
+   next start and reports no gone``. If the pool is stopped
+   during the waits, the waits end, and the pool keeps the dispatch for its next start.
+3. Once the lock is free, the pool removes the containers and networks the run's wall
+   left, as `qory run resend` does. If the removal fails, the pool logs `remove the
+   containers and networks with the label dev.qory.run=<run_id> from the container
+   engine: the removal of the wall of a qory run left from before the pool started
+   failed; the pool reports the machine as gone all the same`.
+4. The pool reports the run's machine as gone.
+
+The `pool` section of the pool's `forager.yaml` sets what the pool runs by:
+
+```yaml
+pool:
+  runs: 1                             # how many runs this host runs at once; 1 when not set
+  registry: localhost:5001/qory-env   # the image name the builds are pushed under
+  run_config: /etc/qory/pool-runs     # each run's XDG_CONFIG_HOME, an absolute path
+```
+
+Without `pool.runs`, the pool runs one run at a time on this machine. With `pool.runs`
+above 1, runs share the machine's processors, memory, disk and network at once, so the
+runs' `forager.yaml`, `<pool.run_config>/qory/forager.yaml`, must limit the processes and
+the memory of each run's containers (see Limits in [The wall](#the-wall)):
+
+```yaml
+wall:
+  pids_limit: 4096                    # at most 4096 processes in each container
+  memory: 14g                         # at most 14 GB of memory in each container
+```
+
+If `pool.runs` is above 1, set `wall.pids_limit` and `wall.memory` in the runs'
+`forager.yaml`; otherwise the pool exits 2 before its first claim, with this error:
+
+```text
+set wall.pids_limit and wall.memory in <pool.run_config>/qory/forager.yaml: with pool.runs above 1, runs share this machine, and a run without both limits can take the processes and memory the others need
+```
+
 Each run's `HOME` is `home-user/` of the run's folder, mode `0700`, which the pool makes
 empty and removes with the folder. `XDG_CONFIG_HOME` stays `pool.run_config`. So a run
 reads none of these files under the `HOME` of the user the pool runs as:
@@ -2316,15 +2407,6 @@ since every run would see the paths it lists, with exit 2:
 
 ```text
 remove wall.mounts from <pool.run_config>/qory/forager.yaml: every run of the pool would see the paths it lists, so the runs would share them
-```
-
-With `pool.runs` above 1, runs share the machine's processors, memory, disk and network
-at once. The pool stops before its first claim, with exit 2, unless the runs'
-`forager.yaml` sets both `wall.pids_limit` and `wall.memory` (see Limits in [The
-wall](#the-wall)):
-
-```text
-set wall.pids_limit and wall.memory in <pool.run_config>/qory/forager.yaml: with pool.runs above 1, runs share this machine, and a run without both limits can take the processes and memory the others need
 ```
 
 The pool also stops before its first claim, with exit 2, when the runs' `forager.yaml`
@@ -2748,9 +2830,24 @@ works in a run and on a laptop. A wall mounts `qory` at `/qory/qory` and does no
 | `qory work-item show` | Prints the work item as JSON. | Prints `.qory/work-item.json`. With no file, exits 3. |
 | `qory artifact pull [<type>] [--version <N>]` | Fetches artifacts into the store, under `<type>/<name>/v<N>/`, writes `index.json` there, and prints the store's directory. | Fetches nothing, and says so. |
 | `qory artifact push <type> <file>... [--name <name>] [--note <text>]` | Stores the files as one new version, keeps a copy in the store, and prints the version. | Keeps the files in `.qory/artifacts`, and sends nothing. |
-| `qory run verdict passed\|changes-requested\|escalate [--gaps <file>]` | Stores the verdict. Qory Apiary acts on it when the run ends. | Prints the verdict and keeps it in `.qory/artifacts/verdict/`. Nothing acts on it. |
+| `qory run verdict passed\|changes-requested\|escalate [--points <file>]` | Stores the verdict. Qory Apiary acts on it when the run ends. | Prints the verdict and keeps it in `.qory/artifacts/verdict/`. Nothing acts on it. |
 
 In a run, the types `questions` and `review-comments` take only the name `main`.
+
+`escalate` needs `--points <file>`, and `passed` and `changes-requested` take no
+`--points`. The file is a JSON array of 1 to 20 points for a person, in the [verdict
+format](../contracts/harness/v1/README.md#the-verdict-format):
+
+```json
+[{"text": "The spec does not say which customers see the new price.", "action": "answer", "question": "q4"},
+ {"text": "The checks script failed on the spec's links.", "action": "run_again"}]
+```
+
+qory checks the file before it sends or keeps the verdict. A file that breaks a rule
+stops the command with exit 2, and the first line of the error is the fix, such as
+`Write each point as {text, action}: point 2 has no action.` qory does not check that the
+question of an `answer` point is open; push the `questions` artifact with that question
+before the verdict.
 
 A run with a control plane sets `QORY_RUN_API` to
 `http://run-api.qory.invalid/v1/runs/<run id>`. The commands send their requests there
@@ -3847,7 +3944,7 @@ with `access: write`. A read run sees the checkout read-only:
 
   ```
   /qory/qory artifact push review /tmp/qory-artifacts/review.md
-  /qory/qory run verdict changes-requested --gaps /tmp/qory-artifacts/gaps.md
+  /qory/qory run verdict escalate --points /tmp/qory-artifacts/points.json
   ```
 
   Every other write stops at `dontAsk`, apart from Claude Code's memory folder,
@@ -3927,7 +4024,7 @@ with no run code, and a run you start yourself see the checkout writable.
 
 ### Qory's images
 
-`qory`'s repository defines four images for the agent under `images/`, and one a prebuild
+`qory`'s repository defines two images for the agent under `images/`, and one a prebuild
 runs in, for `linux/amd64` and `linux/arm64`. They are not published for you to pull: you build them, by hand as
 below, and a workflow of the repository builds and checks them on a change. Build them
 from a checkout of `qory` at the commit `qory version` prints, since each commit pins the
@@ -3938,22 +4035,17 @@ git clone https://github.com/qoryai/qory && cd qory
 git checkout <commit>                    # the commit qory version prints
 docker build -t qory-agent images/agent
 docker build -t qory-agent-docker --build-arg BASE=qory-agent images/agent-docker
-docker build -t qory-agent-go --build-arg BASE=qory-agent images/agent-go
-docker build -t qory-agent-go-docker --build-arg BASE=qory-agent-docker \
-  --build-arg TITLE=agent-go-docker images/agent-go
 docker build -t qory-prebuild --build-arg BASE=qory-agent-docker images/prebuild
 ```
 
 | Image | What it holds |
 |---|---|
-| `agent` | Claude Code at the version Forager's descriptor sets, `git`, `gh`, poppler's `pdftoppm`, Node, the system's authorities |
+| `agent` | Claude Code at the version Forager's descriptor sets, `git`, `gh`, Node, the system's authorities, Chromium, and the tools under **Tools** below |
 | `agent-docker` | `agent`, and Docker's daemon and command |
-| `agent-go` | `agent`, and Go |
-| `agent-go-docker` | `agent-docker`, and Go |
 | `prebuild` | `agent-docker`, the `devcontainer` command `@devcontainers/cli` 0.89.0, and Docker's `buildx` plugin: the image a prebuild runs in behind its wall |
 
 Every version and every download's sum is a build argument, with its default in the
-Dockerfile. A build checks each download against its sum, and installs Debian's packages
+Dockerfile. Debian's packages follow the snapshot date. A build checks each download against its sum, and installs Debian's packages
 from the snapshot the base image was built from.
 
 What each of them does:
@@ -3968,15 +4060,27 @@ What each of them does:
   runtime such as Sysbox. The image starts nothing: define it in `wall.images` with
   `runtime: sysbox-runc` and `docker: true`, and `qory run nest` starts the daemon. See
   [Nested Docker](#nested-docker).
-- **Go.** `agent-go` has Go at the version the image pins, with `GOTOOLCHAIN=local`, so a
-  `go.mod` that asks for a newer one fails instead of downloading it. `GOPATH` and the
-  caches are under `HOME`. It has no C compiler, so cgo is off.
+- **Browser.** `agent` has Chromium at `/usr/bin/chromium` and the packages Chromium
+  depends on, with no recommended packages, and Noto's fonts for Latin and other
+  scripts, CJK and color emoji. It has no sandbox helper, so start Chromium with
+  `--no-sandbox`. On a read-only `HOME`, set `XDG_CONFIG_HOME` and `XDG_CACHE_HOME` to a
+  writable folder.
+- **Tools.** `agent` has `ffmpeg` and `ffprobe`, ImageMagick's `magick`, poppler's
+  `pdftoppm`, `qpdf`, `rsvg-convert`, Graphviz's `dot`, Tesseract OCR's `tesseract` with
+  28 languages, `pandoc`, Python 3 with PyYAML, Requests, Beautiful Soup, lxml,
+  cssselect, Pillow, openpyxl and python-docx, `jq`, `yq` (the Python wrapper of `jq`
+  for YAML), `curl`, ripgrep's `rg`, `sqlite3`, `zip`, `unzip`, `xz`, `file`, `tree`,
+  `less`, `bc`, `envsubst`, `rsync` and `patch`, each from Debian's snapshot with no
+  recommended packages. Tesseract's languages are Bulgarian, Croatian, Czech, Danish,
+  Dutch, English, Estonian, Finnish, French, German, Greek, Hungarian, Irish, Italian,
+  Latvian, Lithuanian, Maltese, Norwegian, Polish, Portuguese, Romanian, Russian,
+  Serbian, Slovak, Slovenian, Spanish, Swedish and Ukrainian.
 
 To add what your agents need, build yours FROM one of them, and check it:
 
 ```dockerfile
 FROM qory-agent
-RUN apt-get update && apt-get install -y --no-install-recommends python3 \
+RUN apt-get update && apt-get install -y --no-install-recommends make \
  && rm -rf /var/lib/apt/lists/*
 ```
 
@@ -4091,7 +4195,7 @@ What the image holds:
 - `dockerd`, and what it starts, `containerd`, `runc` and `iptables` among them, in
   `/usr/local/sbin`, `/usr/local/bin`, `/usr/sbin`, `/usr/bin`, `/sbin` or `/bin`. These
   directories are the daemon's whole `PATH`; the run's `PATH` is never searched.
-  [Qory's](#qorys-images) `agent-docker` and `agent-go-docker` have them there, as does
+  [Qory's](#qorys-images) `agent-docker` has them there, as does
   `docker:dind`. `qory image check` says whether an image does.
 - The agent's user and group, in its `/etc/passwd` and `/etc/group`, when `wall.user`
   names the user by name, or by a uid with no gid.

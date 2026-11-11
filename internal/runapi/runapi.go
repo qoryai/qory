@@ -55,6 +55,12 @@ const (
 	VerdictEscalate         = "escalate"
 )
 
+// The actions of a [Point].
+const (
+	ActionAnswer   = "answer"
+	ActionRunAgain = "run_again"
+)
+
 // Client sends a run's requests to the run API.
 type Client struct {
 	base string
@@ -122,8 +128,6 @@ type Snapshot struct {
 	Outputs []Output `json:"outputs"`
 	// Verdict is the work item's newest verdict, nil for none.
 	Verdict *GivenVerdict `json:"verdict"`
-	// Gaps is the stage's gaps, nil for none.
-	Gaps *string `json:"gaps"`
 
 	Raw json.RawMessage `json:"-"`
 }
@@ -148,8 +152,17 @@ type Output struct {
 // GivenVerdict is a verdict that the work item has.
 type GivenVerdict struct {
 	Verdict string      `json:"verdict"`
-	Gaps    *string     `json:"gaps"`
 	Version *VersionRef `json:"version"`
+}
+
+// Point is one point of an escalation that [Client.PushVerdict] sends: what is wrong or
+// missing, and what a person can do. Question is the id of a question for the action
+// answer, and empty for run_again. The contract is
+// contracts/harness/v1/verdict.schema.json.
+type Point struct {
+	Text     string `json:"text"`
+	Action   string `json:"action"`
+	Question string `json:"question,omitempty"`
 }
 
 // Index is the work item's artifacts with their versions. Raw is the whole response, as
@@ -381,18 +394,29 @@ func CheckVersion(artifactType string, sizes []int64) error {
 	return nil
 }
 
-// PushVerdict stores the run's verdict, one of the Verdict constants. Empty gaps are left
-// out of the request.
-func (c *Client) PushVerdict(ctx context.Context, verdict, gaps string) (*Pushed, error) {
-	body, err := encode(struct {
-		Verdict string `json:"verdict"`
-		Gaps    string `json:"gaps,omitempty"`
-	}{verdict, gaps})
+// PushVerdict stores the run's verdict, one of the Verdict constants, with the body of
+// [VerdictBody].
+func (c *Client) PushVerdict(ctx context.Context, verdict string, points []Point) (*Pushed, error) {
+	body, err := VerdictBody(verdict, points)
 	if err != nil {
-		return nil, fmt.Errorf("Check the verdict's text. Encoding the request failed: %w", err)
+		return nil, err
 	}
 
 	return c.post(ctx, "/verdict", body)
+}
+
+// VerdictBody is the document of a verdict, as POST verdict reads it and as the file of
+// a version of the artifact type verdict: verdict, and points when there are any.
+func VerdictBody(verdict string, points []Point) ([]byte, error) {
+	body, err := encode(struct {
+		Verdict string  `json:"verdict"`
+		Points  []Point `json:"points,omitempty"`
+	}{verdict, points})
+	if err != nil {
+		return nil, fmt.Errorf("Check the verdict's points. Encoding the request failed: %w", err)
+	}
+
+	return body, nil
 }
 
 func (c *Client) post(ctx context.Context, path string, body []byte) (*Pushed, error) {

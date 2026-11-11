@@ -15,6 +15,7 @@ import (
 	"github.com/qoryai/forager/accesskey"
 	"github.com/qoryai/forager/policy"
 	"github.com/qoryai/forager/server"
+	"github.com/qoryai/forager/wall"
 	"github.com/spf13/cobra"
 
 	"github.com/qoryai/qory/internal/config"
@@ -82,9 +83,21 @@ While a run runs, the pool sends dispatched every 60 s. It stops the run when Qo
 Apiary ends the dispatch or the claim's max_lifetime_minutes pass. Once the run ends,
 the pool uploads the run's output as the dispatch's machine log: at most the last
 768 KiB, with each line that contains qak_, qrk_, qecr_, qecn_, qecp_, qecg_ or qeci_
-replaced. It releases a claim that sets a machine type, and a claim it could not start.
-The pool section of forager.yaml sets it: runs, registry, run_config. SIGINT or SIGTERM
-stops it: it claims no new run, stops the runs it started, and exits 0.`,
+replaced. Then it reports the dispatch's machine as gone, and sends that report again
+after each failure until Qory Apiary returns a signed 204, 400, 403 or 404 to it; a
+report that has not got a signed 204, 400, 403 or 404 when the pool stops is sent
+again at its next start. It releases a claim that sets a machine type, and a claim it
+could not start. A release that fails is sent again after each failure while the pool
+runs, and at the pool's next start; no run starts for that claim. At its start, the
+pool stops each run left from a crash of the pool. It sends SIGTERM to each process of
+the run's session, then SIGKILL to each one still there 30 s later while the run still
+holds its lock. It signals a session only when it can prove that the session belongs
+to the run; otherwise it keeps the run and prints why. Then it removes the containers
+and networks of the run's wall, and reports the run's machine as gone.
+The pool section of forager.yaml sets it: runs (how many runs this host runs at once; 1
+when not set), registry and run_config. If runs is above 1, set wall.pids_limit and
+wall.memory in the runs' forager.yaml; otherwise the pool exits 2 before its first
+claim. SIGINT or SIGTERM stops it: it claims no new run, stops the runs it started, and exits 0.`,
 		Hidden: true,
 		Args:   noArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -277,7 +290,8 @@ func runPool(ctx context.Context, s *poolSettings, key *accesskey.Key, pin acces
 
 // poolLoop is the loop [runPool] runs with s, key and pin, logging to log: it reaches the
 // server directly for every call, and checks the cloud metadata service with the runs'
-// wall first, [poolProbe]. Each qory run it starts is this binary.
+// wall first, [poolProbe]. Each qory run it starts is this binary. A qory run left from
+// before the pool started has its wall removed as [poolReap] has it.
 func poolLoop(s *poolSettings, key *accesskey.Key, pin accesskey.Pin, log *slog.Logger) *pool.Pool {
 	return &pool.Pool{
 		Settings: pool.Settings{Runs: s.Pool.Runs, State: s.State, RunConfig: s.Pool.RunConfig, Probe: poolProbe(s.Runs)},
@@ -285,7 +299,21 @@ func poolLoop(s *poolSettings, key *accesskey.Key, pin accesskey.Pin, log *slog.
 			URL: strings.TrimSuffix(s.Forager.Server.URL, "/"), KeyID: s.Forager.Server.AccessKeyID, Key: key, Pin: pin,
 			InstanceID: s.InstanceID, UserAgent: userAgent(), Log: log,
 		},
-		Log: log,
+		Log:  log,
+		Reap: poolReap(s.Runs),
+	}
+}
+
+// poolReap removes the containers and networks of a run's wall with the wall command of
+// the runs' forager.yaml r, as qory run resend does, see [reapWall]; nil when r has no
+// wall.
+func poolReap(r *config.Forager) func(ctx context.Context, runID string) error {
+	if r == nil || r.Wall == nil {
+		return nil
+	}
+	return func(ctx context.Context, runID string) error {
+		_, err := (&wall.Docker{Command: r.Wall.Command}).Reap(ctx, runID)
+		return err
 	}
 }
 

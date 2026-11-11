@@ -540,3 +540,21 @@ func TestTheContractsReaderFixturesAreRefused(t *testing.T) {
 		}
 	}
 }
+
+// TestPrintableWithinCutsAtItsLimit checks that PrintableWithin cuts text at its limit
+// and Printable at 200 runes: text up to the limit prints whole, longer text is cut at
+// the limit with ... after it, and a character that does not print is ? in both.
+func TestPrintableWithinCutsAtItsLimit(t *testing.T) {
+	long := "é\n" + strings.Repeat("x", 248)
+	shown := "é?" + strings.Repeat("x", 248)
+	for _, c := range []struct{ got, want string }{
+		{integration.Printable(long), shown[:201] + "..."},
+		{integration.PrintableWithin(long, 1000), shown},
+		{integration.PrintableWithin(long, 250), shown},
+		{integration.PrintableWithin(long+"y", 250), shown + "..."},
+	} {
+		if c.got != c.want {
+			t.Errorf("got %q, want %q", c.got, c.want)
+		}
+	}
+}
