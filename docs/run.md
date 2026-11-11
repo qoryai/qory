@@ -2118,7 +2118,8 @@ second signal ends the step at once. A step that one of these ended has the stat
 
 The run closes as its session ended, whatever the step did: a session that timed out closes
 `cancelled` with the reason `timeout`, exit 124, a session that paused closes `paused` with
-the reason `model_key_limit`, exit 1, and a session that failed closes `failed`.
+the reason `model_key_limit` and the runtime's exit status, and a session that failed
+closes `failed`.
 The line of a failed step is printed after the run's end. After a session that succeeded,
 the step sets the close:
 

@@ -51,8 +51,8 @@ var wrapsAgentEnv = func(freshHome, walled bool) bool { return freshHome && wall
 // programs or the repository's commands, which run as the agent's user in the agent's
 // container and can change what the agent reads by other means; against them, the boundary is the wall. The verb's words, before the launch's,
 // hold no -p, --print or --settings, so Forager reads the launch's arguments as before.
-// With link, the verb's words hold the folder of the agent's home and its place below
-// HOME that the verb links, see [preparation.LinkTranscripts].
+// With link, the verb's words also contain the folder of the agent's home and its place
+// below HOME that the verb links, see [preparation.LinkTranscripts].
 // It returns what removes the folder once the run is over.
 func wrapAgentEnv(spec *runSpec, runAPI bool, link transcriptLink, report func(string)) (func(), error) {
 	d, ok := spec.Wall.(*wall.Docker)
@@ -206,7 +206,7 @@ func newAgentEnv() *cobra.Command {
 		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Last before the agent: its home, made fresh, then the link of its
-			// transcripts, which the check of the home does not see.
+			// transcripts, made after the check that the home is empty.
 			err := preparation.FreshHome(os.Getenv, !checkoutWritable("."))
 			var path string
 			var argv, env []string
@@ -235,7 +235,7 @@ func agentEnvParts(args []string) (file string, link transcriptLink, launch []st
 	case i == 3 && len(args) > 4 && args[1] != "":
 		link = transcriptLink{folder: args[1], under: args[2]}
 	default:
-		return "", link, nil, errors.New("takes the file of kept names, the transcripts' folder and place when it links them, --, and the command")
+		return "", link, nil, errors.New("point wall.helper at the Linux build of the qory that starts the run: the verb takes the file of kept names, the transcripts' folder and place when it links them, --, and the command")
 	}
 	return args[0], link, args[i+1:], nil
 }

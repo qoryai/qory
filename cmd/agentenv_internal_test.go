@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/qoryai/forager/session"
+	"github.com/qoryai/forager/session/runtimes"
 	"github.com/qoryai/forager/session/runtimes/catalog"
 	"github.com/qoryai/forager/wall"
 
@@ -141,7 +142,7 @@ func TestTheAgentEnvKeepsTheStartKeysEndpoint(t *testing.T) {
 }
 
 // TestTheAgentEnvLinksClaudeCodesTranscripts is a dispatched walled run of Claude Code,
-// whose descriptor has resume.prefix ~/.claude/projects/: the verb's words hold the
+// whose descriptor has resume.prefix ~/.claude/projects/: the verb's words contain the
 // renderer's folder projects and the place .claude/projects between the kept names' file
 // and --, still with no -p, --print or --settings, and the verb starts the launch after
 // -- unchanged. A runtime whose renderer has no transcript folder gets no link.
@@ -177,7 +178,7 @@ func TestTheAgentEnvLinksClaudeCodesTranscripts(t *testing.T) {
 	}
 	for _, w := range spec.Args[:6] {
 		if w == "-p" || w == "--print" || strings.HasPrefix(w, "--settings") {
-			t.Errorf("the verb's words hold %s", w)
+			t.Errorf("the verb's words contain %s", w)
 		}
 	}
 	file, got, launch, err := agentEnvParts(spec.Args[2:])
@@ -192,5 +193,45 @@ func TestTheAgentEnvLinksClaudeCodesTranscripts(t *testing.T) {
 		if _, _, _, err := agentEnvParts(args); err == nil {
 			t.Errorf("%q: no error", args)
 		}
+	}
+}
+
+// resumeRuntime is a runtime whose descriptor has resume rs.
+type resumeRuntime struct {
+	runtimes.Runtime
+	rs runtimes.Resume
+}
+
+// Resume is rs.
+func (r resumeRuntime) Resume() (runtimes.Resume, bool) { return r.rs, true }
+
+// TestATranscriptLinkNeedsForagersBind is Claude Code with a user's descriptor whose
+// resume Forager binds no transcript folder for: a prefix that is not a clean path, such
+// as ~/.claude/./projects/, or a resume.path that is not resume.prefix followed by
+// {cwd_slug}/{session_id}.jsonl. The run gets no link, so qory run agent-env starts the
+// agent as it does without one.
+func TestATranscriptLinkNeedsForagersBind(t *testing.T) {
+	rt, err := catalog.Lookup("claude", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	renderer, err := render.Lookup("claude")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, rs := range []runtimes.Resume{
+		{Prefix: "~/.claude/./projects/", Path: "~/.claude/./projects/{cwd_slug}/{session_id}.jsonl"},
+		{Prefix: "~/.claude//projects/", Path: "~/.claude//projects/{cwd_slug}/{session_id}.jsonl"},
+		{Prefix: "/etc/projects/", Path: "/etc/projects/{cwd_slug}/{session_id}.jsonl"},
+		{Prefix: "~/", Path: "~/{cwd_slug}/{session_id}.jsonl"},
+		{Prefix: "~/.claude/projects/", Path: "~/.claude/projects/{session_id}.jsonl"},
+	} {
+		if got := transcriptLinkFor(renderer, resumeRuntime{rt, rs}); got != (transcriptLink{}) {
+			t.Errorf("%+v gets %+v", rs, got)
+		}
+	}
+	rs := runtimes.Resume{Prefix: "~/.config/agent/projects/", Path: "~/.config/agent/projects/{cwd_slug}/{session_id}.jsonl"}
+	if got := transcriptLinkFor(renderer, resumeRuntime{rt, rs}); got != (transcriptLink{folder: "projects", under: ".config/agent/projects"}) {
+		t.Errorf("%+v gets %+v", rs, got)
 	}
 }

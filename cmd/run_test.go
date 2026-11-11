@@ -804,8 +804,9 @@ func staticELF(t *testing.T) string {
 // Engine 28, the engine's version a run with nested Docker asks for, adds an IPv6
 // subnet to the inside network created with --ipv6, answers that it holds no image by
 // reference, as an engine that has not pulled it, and for run logs the environment
-// file, prints a line and exits 4, as a container's runtime would. It answers for the
-// image and an agent's container with a transcript bind as [agentImageAnswers] does.
+// file, prints a line and exits 4, as a container's runtime would. It runs the arms of
+// [agentImageAnswers] for the agent image and an agent's container with a transcript
+// bind.
 func fakeDocker(t *testing.T) (string, string) {
 	t.Helper()
 	dir := t.TempDir()
@@ -844,14 +845,16 @@ esac
 	return script, log
 }
 
-// agentImageAnswers returns the arms of a shell case on "$*" with which a program in
-// place of docker answers as the engine does for the agent image, and writes the files
-// the arms read into dir. The image's Config sets no user and HOME=/home/agent. A
-// docker cp out of a container of it writes the tar of a directory owned by root, mode
-// 0755, for /, /home and /home/agent, and exits 1 with "Could not find the file" for
-// any other path. An agent's container with a transcript bind starts with create and
-// then start --attach: create keeps its arguments, and start --attach runs the program
-// again as docker run with them, so the program's arm for run starts the container.
+// agentImageAnswers returns the arms of a shell case on "$*" for a program in place of
+// docker, which print what the engine prints for the agent image, and writes the files
+// the arms read into dir. For the image's Config, an arm prints a Config with no user and
+// HOME=/home/agent. For a docker cp out of a container of it, an arm prints the tar of a
+// directory owned by root, mode 0755, for /, /home and /home/agent, and for any other
+// path prints "Could not find the file" to stderr and exits 1. An agent's container
+// with a transcript bind starts with create and then start --attach: the arm for create
+// writes its arguments into a script, and the arm for start --attach runs that script,
+// which runs the program again as docker run with them, so the program's arm for run
+// starts the container.
 func agentImageAnswers(t *testing.T, dir string) string {
 	t.Helper()
 	var b bytes.Buffer
@@ -901,9 +904,9 @@ var containerRun = regexp.MustCompile(`(?m)^run `)
 // program after its -- starts through the script again, without the hook's variable.
 // The run's preparation script runs as it is, with a program that exits 0 in place of
 // each setup command, which runs through qory's Linux build inside. A run on a machine that holds an access key needs a wall;
-// this one lets such a run reach its runtime as an unwalled run would. It answers for
-// the image and an agent's container with a transcript bind as [agentImageAnswers]
-// does.
+// this one lets such a run reach its runtime as an unwalled run would. It runs the arms
+// of [agentImageAnswers] for the agent image and an agent's container with a transcript
+// bind.
 func passingWall(t *testing.T) string {
 	t.Helper()
 	bin, err := os.Executable()

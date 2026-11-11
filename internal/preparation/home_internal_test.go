@@ -316,8 +316,11 @@ func TestTheTranscriptsLinkToTheBind(t *testing.T) {
 }
 
 // TestTheTranscriptsStayInTheHomeWithoutABind is a run whose transcript folder Forager
-// does not bind: with no mount at the place, even where the image has a folder there,
-// with no HOME, and with no folder to link, the agent's home stays empty.
+// does not bind, or a launch with no HOME or no folder to link: the agent's home stays
+// empty. Each case but "no mount" lists a mount at the place it would link to, so the
+// check under test is what stops the link: with no mount at the place, even where the
+// image has a folder there and a mount is above it; with no HOME; with a relative HOME;
+// and with no folder to link.
 func TestTheTranscriptsStayInTheHomeWithoutABind(t *testing.T) {
 	for name, c := range map[string]struct{ home, folder string }{
 		"no mount":   {"home", "projects"},
@@ -334,7 +337,11 @@ func TestTheTranscriptsStayInTheHomeWithoutABind(t *testing.T) {
 				if err := os.MkdirAll(filepath.Join(home, ".claude", "projects"), 0o700); err != nil {
 					t.Fatal(err)
 				}
+			}
+			if name == "no mount" {
 				mountsAt(t, home)
+			} else {
+				mountsAt(t, filepath.Join(home, ".claude", "projects"))
 			}
 			if err := freshHome(agentHome); err != nil {
 				t.Fatal(err)
@@ -343,6 +350,40 @@ func TestTheTranscriptsStayInTheHomeWithoutABind(t *testing.T) {
 				t.Fatal(err)
 			}
 			wantFreshHome(t, agentHome)
+		})
+	}
+}
+
+// TestTheTranscriptsLinkStopsAtSomethingInTheHome is a program that wrote into the
+// agent's home after qory made it fresh: a file at the link's path, or at a folder above
+// it. The link is not made, and the error's fix is to leave no such program running.
+func TestTheTranscriptsLinkStopsAtSomethingInTheHome(t *testing.T) {
+	for name, c := range map[string]struct{ file, folder string }{
+		"at the link":    {"projects", "projects"},
+		"above the link": {"a", "a/projects"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			dir := realTemp(t)
+			agentHome, home := filepath.Join(dir, "qory-agent-home"), filepath.Join(dir, "home")
+			bind := filepath.Join(home, ".claude", "projects")
+			if err := os.MkdirAll(bind, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			mountsAt(t, bind)
+			if err := freshHome(agentHome); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(agentHome, c.file), nil, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			err := linkTranscripts(agentHome, home, c.folder, ".claude/projects")
+			want := fmt.Sprintf(textLinkExists, agentHome, filepath.Join(agentHome, c.folder))
+			if err == nil || err.Error() != want {
+				t.Errorf("%v, want %s", err, want)
+			}
+			if fi, err := os.Lstat(filepath.Join(agentHome, c.file)); err != nil || !fi.Mode().IsRegular() {
+				t.Errorf("the file at %s is gone or replaced: %v", c.file, err)
+			}
 		})
 	}
 }

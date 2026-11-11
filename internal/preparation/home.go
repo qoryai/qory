@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"syscall"
 
 	"github.com/qoryai/qory/internal/integration"
 )
@@ -158,6 +159,7 @@ func freshFolder(path string, words freshWords) error {
 // one format string, with the fix first.
 const (
 	textLinkBad     = "point wall.helper at the Linux build of the qory that starts the run: the transcripts' folder %s or its place %s is not a relative path without a .. name"
+	textLinkExists  = "leave no program of the image or the setup commands running that writes into %s: something was at %s when qory linked the agent's transcripts there, so a run given a run key does not start"
 	textLinkNotMade = "let the agent's user write %s, then run again: the link of the agent's transcripts to %s could not be made: %s"
 )
 
@@ -183,7 +185,7 @@ func linkTranscripts(agentHome, home, folder, under string) error {
 	if folder == "" {
 		return nil
 	}
-	if !relative(folder) || !relative(under) {
+	if !Relative(folder) || !Relative(under) {
 		return fmt.Errorf(textLinkBad, integration.Printable(folder), integration.Printable(under))
 	}
 	if !filepath.IsAbs(home) {
@@ -194,17 +196,24 @@ func linkTranscripts(agentHome, home, folder, under string) error {
 		return nil
 	}
 	link := filepath.Join(agentHome, folder)
-	if err := os.MkdirAll(filepath.Dir(link), 0o700); err != nil {
+	notMade := func(err error) error {
+		if errors.Is(err, os.ErrExist) || errors.Is(err, syscall.ENOTDIR) {
+			return fmt.Errorf(textLinkExists, integration.Printable(agentHome), integration.Printable(link))
+		}
 		return fmt.Errorf(textLinkNotMade, integration.Printable(link), integration.Printable(target), integration.Printable(err.Error()))
 	}
+	if err := os.MkdirAll(filepath.Dir(link), 0o700); err != nil {
+		return notMade(err)
+	}
 	if err := os.Symlink(target, link); err != nil {
-		return fmt.Errorf(textLinkNotMade, integration.Printable(link), integration.Printable(target), integration.Printable(err.Error()))
+		return notMade(err)
 	}
 	return nil
 }
 
-// relative reports whether p is a clean relative path that is not . and has no .. name.
-func relative(p string) bool {
+// Relative reports whether p is a clean relative path that is not . and has no .. name,
+// as Forager checks the place where it binds a run's transcript folder.
+func Relative(p string) bool {
 	return p != "" && !filepath.IsAbs(p) && filepath.Clean(p) == p && p != "." && !slices.Contains(strings.Split(p, "/"), "..")
 }
 
