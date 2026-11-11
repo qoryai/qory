@@ -3835,8 +3835,12 @@ Once the run's containers are gone, qory checks the bundle, fetches it into a ne
 with git's object checks on, and fetches the run's branch into your repository as
 `qory/run-<run id>`. When a branch has that name or blocks it, the name gets a suffix:
 `qory/run-<run id>-2`, `-3` and so on. git keeps no branch below another branch, so with a
-branch named `qory` the names start at `qory-run-<run id>`. When another git process holds a
-lock on the branch, qory fetches again, at most 5 times in 30 seconds. qory never checks the
+branch named `qory` the names start at `qory-run-<run id>`. qory fetches the commits under the
+run's prefix first, then makes the branch only when no branch has that name and no working tree
+has it checked out, so no branch of yours moves, even one you made during the fetch: then qory
+tries the next free name, at most 3 names in all. When another git process holds a lock on the
+branch, qory tries again, at most 5 times in 30 seconds. When qory makes no branch, the commits
+stay at `refs/qory/run-<run id>/branch`, and the line lists the run's refs. qory never checks the
 branch out, so the files in your checkout stay as they are:
 
 ```text
@@ -3865,6 +3869,7 @@ qory run: the run's commits are on qory/run-0193 in /path/to/repo. They change t
 | `HEAD` | A detached `HEAD` at a commit that the branch does not have. |
 | `lost/<n>` | The newest commit of each line of commits that only a reflog reaches: a commit made with `HEAD` detached, an older stash, or, with nothing past your commit on the branch, any such commit, such as one that a reset took off the branch. The commits of another new ref, such as one of `git notes add`, come back here too. |
 | `uncommitted` | The changes in the working tree when the session makes no commit on the branch, as a commit on `HEAD`. In a sparse checkout, each path the checkout took out stays as `HEAD` has it. |
+| `branch` | The commits of the run's branch, only when qory could make no branch for them. |
 
 A ref other than a branch or a tag comes back only when it has a commit that your commit, a ref of
 the clone and a remote-tracking ref do not have. A branch or a tag that the run made or moved at a

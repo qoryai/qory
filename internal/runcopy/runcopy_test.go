@@ -262,7 +262,7 @@ func bringBack(t *testing.T, d Dir, src string, repos []Repository, out map[stri
 	if qs[0] == nil {
 		t.Fatal("no quarantine for the person's repository")
 	}
-	if _, err := qs[0].FetchInto(ctx, src, "refs/heads/"+branch); err != nil {
+	if _, _, err := qs[0].FetchInto(ctx, src, branch, "run-1"); err != nil {
 		t.Fatal(err)
 	}
 	return qs[0]
@@ -287,7 +287,7 @@ func runRefs(t *testing.T, d Dir, src string, repos []Repository, out map[string
 	if qs[0] == nil {
 		t.Fatalf("no quarantine for the person's repository\n%s", printed)
 	}
-	got, err := qs[0].FetchInto(context.Background(), src, "refs/heads/"+branch)
+	_, got, err := qs[0].FetchInto(context.Background(), src, branch, "run-1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -721,7 +721,7 @@ func TestGitSessionBringsAFurtherRepositoryBack(t *testing.T) {
 		if len(qs) != 2 || qs[0] != nil || qs[1] == nil {
 			t.Fatalf("quarantines %v, want none for the person's repository and one for the further one", qs)
 		}
-		if _, err := qs[1].FetchInto(ctx, further, "refs/heads/"+branch); err != nil {
+		if _, _, err := qs[1].FetchInto(ctx, further, branch, "run-1"); err != nil {
 			t.Fatal(err)
 		}
 		head := testGit(t, further, "rev-parse", "refs/heads/"+branch)
@@ -1110,7 +1110,7 @@ func TestTheRunsRefsTakeAFreePrefix(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			got, err := qs[0].FetchInto(context.Background(), src, "refs/heads/"+branch)
+			_, got, err := qs[0].FetchInto(context.Background(), src, branch, "run-1")
 			if c.want == "" {
 				hasPrefix(t, name, err, "delete the refs under "+prefix+" and "+prefix+"-<number> in ")
 				return
@@ -1130,7 +1130,10 @@ func TestTheRunsRefsTakeAFreePrefix(t *testing.T) {
 	}
 }
 
-func TestFetchIntoSaysWhatToDo(t *testing.T) {
+// TestFetchIntoMovesNoBranchOfThePersons is a run's branch whose name the person's repository has:
+// the checked-out main, and side on another line. Neither moves, the commits land on the next free
+// name, a short name with no valid ref stops, and a second fetch lands on the name after that.
+func TestFetchIntoMovesNoBranchOfThePersons(t *testing.T) {
 	isolate(t)
 	sessionGit(t)
 	ctx := context.Background()
@@ -1147,35 +1150,53 @@ func TestFetchIntoSaysWhatToDo(t *testing.T) {
 		t.Fatal(err)
 	}
 	q := qs[0]
-
-	_, err = q.FetchInto(ctx, src, "refs/heads/main")
-	hasPrefix(t, "checked-out branch", err, "give the run's commits a ref other than refs/heads/main")
+	for _, c := range []struct{ name, want string }{{"main", "qory/run-run-1"}, {"side", "qory/run-run-1-2"}} {
+		landed, prefix, err := q.FetchInto(ctx, src, c.name, "run-1")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if landed != c.want || prefix != "" {
+			t.Errorf("%s: the commits landed on %q with the prefix %q, want %q and none", c.name, landed, prefix, c.want)
+		}
+		testGit(t, src, "cat-file", "-e", c.want+":new.txt")
+	}
 	if got := testGit(t, src, "rev-parse", "refs/heads/main"); got != base {
 		t.Errorf("main moved to %s", got)
-	}
-	_, err = q.FetchInto(ctx, src, "refs/heads/side")
-	hasPrefix(t, "branch on another line", err, "delete refs/heads/side in ")
-	if err == nil || !strings.Contains(err.Error(), q.Path) {
-		t.Errorf("the error %v does not say the quarantine's path %s", err, q.Path)
 	}
 	if got := testGit(t, src, "rev-parse", "refs/heads/side"); got != side {
 		t.Errorf("side moved to %s", got)
 	}
-	if _, err := os.Lstat(q.Path); err != nil {
-		t.Errorf("the quarantine is gone after a failed fetch: %v", err)
+	if got := testGit(t, src, "for-each-ref", "refs/qory/"); got != "" {
+		t.Errorf("refs stay under refs/qory:\n%s", got)
 	}
-	_, err = q.FetchInto(ctx, src, "main")
-	hasPrefix(t, "short ref", err, "give a full ref name")
-
-	// A second fetch, and a second quarantine, work.
-	for range 2 {
-		if _, err := q.FetchInto(ctx, src, "refs/heads/"+branch); err != nil {
-			t.Fatal(err)
-		}
-	}
+	_, _, err = q.FetchInto(ctx, src, "bad..name", "run-1")
+	hasPrefix(t, "a name that is no ref", err, "give a full ref name")
 	if _, err := d.Quarantine(ctx, branch, repos); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// TestFetchIntoMakesNoBranchThatAppearedAfterTheFetch is a branch that the person makes at the
+// base commit with the name of the run's branch, between the pick of the name and the fetch, as
+// the fetch's lock wait leaves time for: the run's commits descend from it, and still it stays
+// where the person made it, and the commits land on the next free name.
+func TestFetchIntoMakesNoBranchThatAppearedAfterTheFetch(t *testing.T) {
+	isolate(t)
+	sessionGit(t)
+	src, base := person(t)
+	q := fetchQuarantine(t, src)
+	testGit(t, src, "branch", branch, base)
+	landed, prefix, err := q.FetchInto(context.Background(), src, branch, "run-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if landed != "qory/run-run-1" || prefix != "" {
+		t.Errorf("the commits landed on %q with the prefix %q", landed, prefix)
+	}
+	if got := testGit(t, src, "rev-parse", "refs/heads/"+branch); got != base {
+		t.Errorf("%s moved to %s", branch, got)
+	}
+	testGit(t, src, "cat-file", "-e", landed+":new.txt")
 }
 
 // fetchQuarantine is the quarantine of a run that added one file to the person's repository at
@@ -1217,7 +1238,7 @@ func TestFetchIntoWaitsForALock(t *testing.T) {
 	released := time.AfterFunc(2*time.Second, func() { _ = os.Remove(lock) })
 	t.Cleanup(func() { released.Stop() })
 	start := time.Now()
-	if _, err := q.FetchInto(context.Background(), src, "refs/heads/"+branch); err != nil {
+	if _, _, err := q.FetchInto(context.Background(), src, branch, "run-1"); err != nil {
 		t.Fatal(err)
 	}
 	if took := time.Since(start); took < 2*time.Second {
@@ -1226,8 +1247,9 @@ func TestFetchIntoWaitsForALock(t *testing.T) {
 	testGit(t, src, "cat-file", "-e", branch+":new.txt")
 }
 
-// TestFetchIntoStopsAfterTheLockWaits is a lock that stays: the fetch runs once and once more
-// per wait, then fails with the fix first. The waits are 5 and last 30 s.
+// TestFetchIntoStopsAfterTheLockWaits is a lock on the run's branch that stays: git makes the
+// branch once and once more per wait, then the commits stay under the run's prefix. The waits are
+// 5 and last 30 s.
 func TestFetchIntoStopsAfterTheLockWaits(t *testing.T) {
 	var total time.Duration
 	for _, w := range lockWaits {
@@ -1245,21 +1267,21 @@ func TestFetchIntoStopsAfterTheLockWaits(t *testing.T) {
 	lockWaits = []time.Duration{10 * time.Millisecond, 10 * time.Millisecond, 10 * time.Millisecond, 10 * time.Millisecond, 10 * time.Millisecond}
 	t.Cleanup(func() { lockWaits = old })
 	start := time.Now()
-	_, err := q.FetchInto(context.Background(), src, "refs/heads/"+branch)
-	hasPrefix(t, "a lock that stays", err, "fetch refs/heads/"+branch+" from ")
-	if err == nil || !strings.Contains(err.Error(), "cannot lock ref") {
-		t.Errorf("the error %v does not have git's line", err)
+	landed, prefix, err := q.FetchInto(context.Background(), src, branch, "run-1")
+	if err != nil {
+		t.Fatal(err)
 	}
+	if landed != "" || prefix != "refs/qory/run-run-1" {
+		t.Errorf("the commits landed on %q with the prefix %q", landed, prefix)
+	}
+	testGit(t, src, "cat-file", "-e", prefix+"/branch:new.txt")
 	if took := time.Since(start); took < 50*time.Millisecond {
 		t.Errorf("the fetch took %s, less than its waits", took)
-	}
-	if _, err := os.Lstat(q.Path); err != nil {
-		t.Errorf("the quarantine is gone after a failed fetch: %v", err)
 	}
 }
 
 // TestFetchIntoStopsWaitingAtTheEndOfItsContext is a lock that stays and a context that ends
-// during a wait: the fetch fails then.
+// during a wait: the commits stay under the run's prefix, and no wait follows.
 func TestFetchIntoStopsWaitingAtTheEndOfItsContext(t *testing.T) {
 	isolate(t)
 	sessionGit(t)
@@ -1269,8 +1291,9 @@ func TestFetchIntoStopsWaitingAtTheEndOfItsContext(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 	defer cancel()
 	start := time.Now()
-	if _, err := q.FetchInto(ctx, src, "refs/heads/"+branch); err == nil {
-		t.Fatal("the fetch passed a held lock")
+	landed, _, err := q.FetchInto(ctx, src, branch, "run-1")
+	if err == nil && landed != "" {
+		t.Fatalf("the commits landed on %s past a held lock", landed)
 	}
 	if took := time.Since(start); took > 10*time.Second {
 		t.Errorf("the fetch took %s after its context ended", took)
@@ -2987,7 +3010,7 @@ func TestTheGitSessionUsesTheMessageItIsGiven(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := qs[0].FetchInto(context.Background(), src, "refs/heads/"+branch); err != nil {
+	if _, _, err := qs[0].FetchInto(context.Background(), src, branch, "run-1"); err != nil {
 		t.Fatal(err)
 	}
 	if got := testGit(t, src, "log", "-1", "--format=%B", branch); !strings.Contains(got, "Changes left by run 7\n\nThe run ended failed.") {
@@ -5170,7 +5193,7 @@ func TestTheGitSessionRunsItsScriptFromAFile(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := qs[0].FetchInto(context.Background(), src, "refs/heads/"+branch); err != nil {
+			if _, _, err := qs[0].FetchInto(context.Background(), src, branch, "run-1"); err != nil {
 				t.Fatal(err)
 			}
 			testGit(t, src, "cat-file", "-e", branch+":left.txt")
@@ -5413,7 +5436,7 @@ func TestAKnownRefFetchesOnlyWhereItsCommitIs(t *testing.T) {
 	write(t, other, "other.txt", "other\n")
 	commitAll(t, other, "other")
 	before := testGit(t, other, "for-each-ref")
-	_, err = qs[0].FetchInto(context.Background(), other, "refs/heads/"+branch)
+	_, _, err = qs[0].FetchInto(context.Background(), other, branch, "run-1")
 	hasPrefix(t, "a fetch", err, "fetch "+prefix+"/* from ")
 	if err == nil || !strings.Contains(err.Error(), "is no commit in") {
 		t.Errorf("the error is %v", err)

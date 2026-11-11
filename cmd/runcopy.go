@@ -638,7 +638,8 @@ func (c *runCopy) comeBack(ctx context.Context, runID string, report func(string
 // fetchOne fetches the run's commits from the quarantine q into the person's repository, and
 // prints the line that lists the branch, the prefix of the run's other refs and any changed
 // acting key. The branch is [runCopy.back], or the next free name when a branch there has or
-// blocks it by now.
+// blocks it by now, or when one appears before qory makes it. When qory could make no branch, the
+// run's commits stay under the prefix, and the line lists the prefix alone.
 func (c *runCopy) fetchOne(ctx context.Context, q *runcopy.Quarantine, runID string, report func(string)) bool {
 	limited, cancel := context.WithTimeout(ctx, c.limit)
 	defer cancel()
@@ -655,7 +656,7 @@ func (c *runCopy) fetchOne(ctx context.Context, q *runcopy.Quarantine, runID str
 			return false
 		}
 	}
-	prefix, err := q.FetchInto(limited, at, "refs/heads/"+branch)
+	branch, prefix, err := q.FetchInto(limited, at, branch, runID)
 	if err != nil {
 		if limited.Err() != nil {
 			report(c.checkFailed(ctx, limitErr(ctx, limited, textCopyFetchLimit, c.limit, err)).Error())
