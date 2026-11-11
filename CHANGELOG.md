@@ -317,7 +317,7 @@ release may change what an existing document does, and states it under Upgrading
   `git init` ran with no commit. Every such run starts with your `.qory/artifacts` and
   `.qory/work-item.json`, and gets `.qory/artifacts` back. New stops, each with its fix first: a
   local repository with no commit, a working folder absent from `HEAD`, a partial clone, a
-  branch named as a parent of the run's branch, a run or compose in a folder of a run's copy,
+  run or compose in a folder of a run's copy,
   a run in a folder that is not a repository
   and is or contains your home folder or qory's state directory, or contains `qory/runs` in your
   cache folder, and a write run in a copy that
@@ -380,7 +380,8 @@ release may change what an existing document does, and states it under Upgrading
   run's version beside yours as `<name>-from-run`, or with a number after that when the name is
   taken, and prints `you and the run both changed these files: yours stay, and the run's version
   of each is beside it with -from-run: …`. The same goes for `.qory/artifacts` after any run. A
-  file that the run deleted and you changed stays and is listed. Neither keeps the copy any
+  file that the run deleted and you changed stays and is listed with `the run deleted these
+  files, which you changed, so yours stay: …`. Neither keeps the copy any
   more.
 - The git session of a walled write run in a copy runs in a container that qory starts with
   `docker run`, from the run's image, as the wall's user, with the wall's container runtime when

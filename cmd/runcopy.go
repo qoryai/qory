@@ -56,7 +56,7 @@ const (
 	textCopyFailed     = "left out of the copy back, as qory could not read or write them: %s."
 	textCopyGenerated  = "left out of the copy back, as the folders that builds and package managers write have more than %d files or %s in all: %s. They stay in the run's copy."
 	textCopyConflicts  = "you and the run both changed these files: yours stay, and the run's version of each is beside it with -from-run: %s."
-	textCopyNotDeleted = "you and the run both changed these files, so yours stay: %s."
+	textCopyNotDeleted = "the run deleted these files, which you changed, so yours stay: %s."
 	textCopyActingKept = "the run changed these qory settings, so those files stay as you have them: %s."
 	textCopyNotIn      = "left out of the run's copy: %s."
 	textCopyNoRemove   = "remove %s by hand: %s"

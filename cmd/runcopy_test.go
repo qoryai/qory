@@ -831,7 +831,7 @@ func TestAPlainFolderConflictPutsTheRunsVersionBeside(t *testing.T) {
 	}
 	wants(t, out,
 		"you and the run both changed these files: yours stay, and the run's version of each is beside it with -from-run: both.txt.",
-		"you and the run both changed these files, so yours stay: gone.txt.")
+		"the run deleted these files, which you changed, so yours stay: gone.txt.")
 	for name, want := range map[string]string{"both.txt": "the person\n", "both.txt-from-run": "the run\n", "gone.txt": "the person\n"} {
 		if data, err := os.ReadFile(filepath.Join(root, name)); err != nil || string(data) != want {
 			t.Errorf("%s has %q (%v), want %q", name, data, err, want)

@@ -502,7 +502,7 @@ the error line. An image step that fails ends `failed` with -1, and its last lin
 Forager's error. A step that fails once the run is stopped, or out of time, ends
 `cancelled`.
 
-After the agent, a walled run that may write in a repository has the step `copy work out`,
+After the agent, a walled run that may write in a repository and has no run code has the step `copy work out`,
 of kind `copy`, around the git session, while the run is open: see [A run that may write
 works in a copy](#a-run-that-may-write-works-in-a-copy). The step's log has the lines of the git
 session's container, and no other step starts inside it. It ends `succeeded` with 0 when the git session
@@ -3707,8 +3707,8 @@ Three cases stop the run with their fix first:
 - A folder of a run's copy under `qory/runs` in your cache folder: a run could have written
   it, so `qory run` and `qory harness compose` also stop there. Run qory in your checkout.
 
-When the agent has ended, however it ended, qory runs the git session in a container that it
-starts on the run's engine itself: `docker run` with the run's image, the wall's user, the wall's
+When the agent has ended, however it ended, qory runs the git session, unless a container of the
+run may still run. The session runs in a container that qory starts on the run's engine itself: `docker run` with the run's image, the wall's user, the wall's
 container runtime when one is set, at most 4096 processes, the agent's limits of memory and
 processors when the wall sets them, no network and no capability. The container joins no gateway and runs no agent, and gets no model key and no run
 code. It binds two folders,
@@ -3955,7 +3955,7 @@ changed stays. qory prints what it left out and what you both changed:
 
 ```text
 qory run: you and the run both changed these files: yours stay, and the run's version of each is beside it with -from-run: notes.txt.
-qory run: you and the run both changed these files, so yours stay: old.txt.
+qory run: the run deleted these files, which you changed, so yours stay: old.txt.
 ```
 
 When the run changed a qory setting, the copy stays with the run's version of each such file,
