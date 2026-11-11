@@ -246,7 +246,8 @@ const pinnedImage = "registry.example/agents/go@sha256:0123456789abcdef012345678
 // repository digests with image when held or once pulled, and with no such image
 // otherwise; the image's config with user; and a pull by sending a request for
 // http://registry.example/v2/ through proxyURL, which [enginePull] writes the results of
-// into the file it returns.
+// into the file it returns. For the rest of the image and an agent's container with a
+// transcript bind it answers as [agentImageAnswers] does.
 func engineDocker(t *testing.T, image, user string, held bool, proxyURL string) (docker, log, pulled string) {
 	t.Helper()
 	bin, err := os.Executable()
@@ -269,6 +270,7 @@ case "$*" in
 "image inspect --format {{json .RepoDigests}} "*) `+inspect+` ;;
 "image inspect --format {{json .Config}} "*) echo '{"User":"`+user+`"}'; exit 0 ;;
 "pull "*) : > `+holds+`; QORY_TEST_ENGINE_PULL=1 exec '`+bin+`' -test.run='^$' -- '`+proxyURL+`' http://registry.example/v2/ `+pulled+` ;;
+`+agentImageAnswers(t, dir)+`
 esac
 case "$1 $2" in
 "version --format") echo "28.0.0" ;;

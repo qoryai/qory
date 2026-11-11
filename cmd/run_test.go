@@ -804,18 +804,56 @@ func staticELF(t *testing.T) string {
 // Engine 28, the engine's version a run with nested Docker asks for, adds an IPv6
 // subnet to the inside network created with --ipv6, answers that it holds no image by
 // reference, as an engine that has not pulled it, and for run logs the environment
-// file, prints a line and exits 4, as a container's runtime would. An agent's container
-// with a transcript bind starts with create, which logs the environment file, and then
-// start --attach, which prints the line and exits 4. The image is the agent image: its
-// Config sets no user and HOME=/home/agent; a docker cp out of it writes the tar of a
-// directory owned by root, mode 0755, for /, /home and /home/agent, and exits 1 with
-// "Could not find the file" for a path below /home/agent.
+// file, prints a line and exits 4, as a container's runtime would. It answers for the
+// image and an agent's container with a transcript bind as [agentImageAnswers] does.
 func fakeDocker(t *testing.T) (string, string) {
 	t.Helper()
 	dir := t.TempDir()
 	log := filepath.Join(dir, "docker.log")
 	ipv6 := filepath.Join(dir, "ipv6")
 	script := filepath.Join(dir, "docker")
+	writeFile(t, script, `#!/bin/sh
+echo "$*" >> `+log+`
+case "$*" in
+"network create "*" --ipv6 "*) : > `+ipv6+` ;;
+"network create "*" --internal "*) rm -f `+ipv6+` ;;
+"network inspect "*.Subnet*) test -e `+ipv6+` && { echo "172.30.0.0/16 fd00:db8::/64 "; exit 0; } ;;
+"image inspect --format {{json .RepoDigests}} "*) echo "Error response from daemon: No such image: $5" >&2; exit 1 ;;
+`+agentImageAnswers(t, dir)+`
+esac
+case "$1 $2" in
+"version --format") echo "28.0.0" ;;
+"network inspect")
+	case "$*" in
+	*.Subnet*) echo "172.30.0.0/16 " ;;
+	*) echo "172.30.0.1 " ;;
+	esac ;;
+"logs "*) echo "relay: listening" ;;
+"run "*)
+	while [ $# -gt 0 ]; do
+		if [ "$1" = --env-file ]; then sed 's/^/env: /' "$2" >> `+log+`; fi
+		shift
+	done
+	echo "inside the container"
+	exit 4 ;;
+esac
+`)
+	if err := os.Chmod(script, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return script, log
+}
+
+// agentImageAnswers returns the arms of a shell case on "$*" with which a program in
+// place of docker answers as the engine does for the agent image, and writes the files
+// the arms read into dir. The image's Config sets no user and HOME=/home/agent. A
+// docker cp out of a container of it writes the tar of a directory owned by root, mode
+// 0755, for /, /home and /home/agent, and exits 1 with "Could not find the file" for
+// any other path. An agent's container with a transcript bind starts with create and
+// then start --attach: create keeps its arguments, and start --attach runs the program
+// again as docker run with them, so the program's arm for run starts the container.
+func agentImageAnswers(t *testing.T, dir string) string {
+	t.Helper()
 	var b bytes.Buffer
 	w := tar.NewWriter(&b)
 	if err := w.WriteHeader(&tar.Header{Name: "agent/", Typeflag: tar.TypeDir, Mode: 0o755, ModTime: time.Unix(0, 0)}); err != nil {
@@ -828,39 +866,22 @@ func fakeDocker(t *testing.T) (string, string) {
 	if err := os.WriteFile(dirTar, b.Bytes(), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	writeFile(t, script, `#!/bin/sh
-echo "$*" >> `+log+`
-case "$*" in
-"network create "*" --ipv6 "*) : > `+ipv6+` ;;
-"network create "*" --internal "*) rm -f `+ipv6+` ;;
-"network inspect "*.Subnet*) test -e `+ipv6+` && { echo "172.30.0.0/16 fd00:db8::/64 "; exit 0; } ;;
-"image inspect --format {{json .RepoDigests}} "*) echo "Error response from daemon: No such image: $5" >&2; exit 1 ;;
-"image inspect --format {{json .Config}} "*) echo '{"User":"","Env":["PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin","HOME=/home/agent"]}' ;;
-"cp "*":/ -"|"cp "*":/home -"|"cp "*":/home/agent -") cat `+dirTar+` ;;
-"cp "*":/home/agent/"*" -") echo "Error response from daemon: Could not find the file ${2#*:} in container ${2%%:*}" >&2; exit 1 ;;
-esac
-case "$1 $2" in
-"version --format") echo "28.0.0" ;;
-"network inspect")
-	case "$*" in
-	*.Subnet*) echo "172.30.0.0/16 " ;;
-	*) echo "172.30.0.1 " ;;
-	esac ;;
-"logs "*) echo "relay: listening" ;;
-"run "*|"create --rm")
-	c=$1
-	while [ $# -gt 0 ]; do
-		if [ "$1" = --env-file ]; then sed 's/^/env: /' "$2" >> `+log+`; fi
-		shift
-	done
-	if [ "$c" = run ]; then echo "inside the container"; exit 4; fi ;;
-"start --attach") echo "inside the container"; exit 4 ;;
-esac
-`)
-	if err := os.Chmod(script, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	return script, log
+	created := filepath.Join(dir, "created")
+	return `"image inspect --format {{json .Config}} "*) echo '{"User":"","Env":["PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin","HOME=/home/agent"]}'; exit 0 ;;
+"cp "*":/ -"|"cp "*":/home -"|"cp "*":/home/agent -") cat ` + dirTar + `; exit 0 ;;
+"cp "*":/"*" -")
+	src=$2
+	if [ "$src" = --follow-link ]; then src=$3; fi
+	echo "Error response from daemon: Could not find the file ${src#*:} in container ${src%%:*}" >&2
+	exit 1 ;;
+"create --rm "*)
+	shift
+	{
+		printf "exec '%s' run" "$0"
+		for a do printf " '%s'" "$(printf '%s' "$a" | sed "s/'/'\\\\''/g")"; done
+	} > ` + created + `
+	exit 0 ;;
+"start --attach "*) exec /bin/sh ` + created + ` ;;`
 }
 
 // containerRun matches a docker run in the fake docker's log: the start of the agent's
@@ -880,7 +901,9 @@ var containerRun = regexp.MustCompile(`(?m)^run `)
 // program after its -- starts through the script again, without the hook's variable.
 // The run's preparation script runs as it is, with a program that exits 0 in place of
 // each setup command, which runs through qory's Linux build inside. A run on a machine that holds an access key needs a wall;
-// this one lets such a run reach its runtime as an unwalled run would.
+// this one lets such a run reach its runtime as an unwalled run would. It answers for
+// the image and an agent's container with a transcript bind as [agentImageAnswers]
+// does.
 func passingWall(t *testing.T) string {
 	t.Helper()
 	bin, err := os.Executable()
@@ -929,6 +952,9 @@ exec "$@"
 `)
 	script := filepath.Join(dir, "docker")
 	writeFile(t, script, `#!/bin/sh
+case "$*" in
+`+agentImageAnswers(t, dir)+`
+esac
 case "$1 $2" in
 "network inspect") echo "172.30.0.1 " ;;
 "logs "*) echo "relay: listening" ;;
@@ -1051,7 +1077,15 @@ func TestRunBehindAWall(t *testing.T) {
 	lacks(t, lines, "HOST_ONLY", "NOT_SET_HERE", "env: PATH=", "env: HOME=", ".qory/runs")
 	// The record is bound read-only from the state directory, outside the checkout.
 	wants(t, lines, "--mount type=bind,src="+runsDir(t, root)+string(filepath.Separator))
-	if strings.Count(lines, " --mount type=bind,src="+root+",") != 1 {
+	// With a transcript bind the agent's container is created with the arguments of its
+	// run, and the run follows, [agentImageAnswers]: the create's line is not counted.
+	mounted := 0
+	for _, line := range strings.Split(lines, "\n") {
+		if !strings.HasPrefix(line, "create --rm ") {
+			mounted += strings.Count(line, " --mount type=bind,src="+root+",")
+		}
+	}
+	if mounted != 1 {
 		t.Error("the checkout is mounted more than once")
 	}
 	if strings.Contains(strings.ReplaceAll(lines, "env: MODEL_KEY=not-a-real-key", ""), "not-a-real-key") {
@@ -2194,6 +2228,7 @@ func TestRunInACheckoutOfARunWhoseContainerCannotBeCheckedStopsAtGit(t *testing.
 echo "$*" >> `+log+`
 case "$*" in
 "ps --all "*label=dev.qory.run=*) test -e `+filepath.Join(dir, "unreachable")+` && { echo "cannot connect" >&2; exit 1; } ;;
+`+agentImageAnswers(t, dir)+`
 esac
 case "$1 $2" in
 "info --format") echo "ENGINE-0001" ;;
