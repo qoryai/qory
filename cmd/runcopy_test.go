@@ -728,6 +728,30 @@ func TestCommitsOnAnotherBranchArriveUnderRefsQory(t *testing.T) {
 	}
 }
 
+// TestAMovedRemoteTrackingRefKeepsTheRunsCommitsFresh is an agent that commits, points a
+// remote-tracking ref at that commit and makes a branch there: the person does not have the
+// commit, so the branch comes back in the bundle under the run's prefix, and the run's branch has
+// the commit.
+func TestAMovedRemoteTrackingRefKeepsTheRunsCommitsFresh(t *testing.T) {
+	root := copyCheckout(t)
+	agentInCopy(t, func(spec session.SessionSpec) {
+		writeFile(t, filepath.Join(spec.Dir, "made.txt"), "x\n")
+		gitOutput(t, spec.Dir, "add", "made.txt")
+		gitOutput(t, spec.Dir, "-c", "user.name=agent", "-c", "user.email=agent@example.com", "commit", "--quiet", "-m", "made")
+		gitOutput(t, spec.Dir, "update-ref", "refs/remotes/origin/x", "HEAD")
+		gitOutput(t, spec.Dir, "branch", "feature")
+	})
+	cmd.RunGitSessionsOnHost()
+	out, err := run(t, "run", "claude", "--", "-p", "hi")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	lacks(t, out, "did not come back", "read the run's files in ")
+	branch, prefix := runBranchOf(t, out), runRefsOf(t, out)
+	gitOutput(t, root, "cat-file", "-e", branch+":made.txt")
+	gitOutput(t, root, "cat-file", "-e", prefix+"/heads/feature:made.txt")
+}
+
 // TestAFailedCloseKeepsTheCopy is a run whose close fails: a container of the run may be left,
 // so qory reads nothing of the copy, and the copy stays.
 func TestAFailedCloseKeepsTheCopy(t *testing.T) {

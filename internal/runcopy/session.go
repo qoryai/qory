@@ -530,9 +530,9 @@ uncommitted() {
 		g commit-tree "$tree" "$@" -m "$message")
 	g update-ref "$prefix/uncommitted" "$made"
 }
-# fresh prints a commit when the commit $1 has one that $G/old does not reach: the base commit, a
-# ref of the clone, or a remote-tracking ref, and $1 itself when that check fails. A commit in a
-# remote-tracking ref is at its remote.
+# fresh prints a commit when the commit $1 has one that $G/old does not reach: the base commit or a
+# ref at the end of the clone, and $1 itself when that check fails. A ref that the agent wrote, such
+# as a remote-tracking ref it moved, does not count, since the person may not have its commits.
 fresh() {
 	printf '%s\n' "$1" | cat - "$G/old" | g rev-list -1 --stdin --ignore-missing || printf '%s\n' "$1"
 }
@@ -568,7 +568,6 @@ extra_refs() {
 		while read -r e_id e_ref; do
 			printf '^%s\n' "$e_id"
 		done < "$clonerefs"
-		copygit for-each-ref --format='^%(objectname)' refs/remotes/
 	} > "$G/old"
 	copygit for-each-ref --format='%(objectname) %(refname)' > "$G/refs-now"
 	lacking "$G/refs-now" "$clonerefs" > "$G/moved-refs"
