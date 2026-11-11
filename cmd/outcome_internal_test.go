@@ -63,6 +63,10 @@ func TestRunEndedSaysTheOutcome(t *testing.T) {
 			"the run failed: its run credential could not be checked, and claude was stopped\n", 1},
 		{"no valid answer to the check", closed("failed", oldReasonCredentialInvalid), "",
 			"the run failed: its run credential could not be checked, and claude was stopped\n", 1},
+		{"every model key at its limit", closed("cancelled", event.ReasonModelKeyLimit), "",
+			"the run was paused: every model key reached its limit, and claude was stopped\n", 1},
+		{"every model key at its limit, in a later state", closed("paused", event.ReasonModelKeyLimit), "",
+			"the run was paused: every model key reached its limit, and claude was stopped\n", 1},
 		{"stopped with no outcome", closed("cancelled", event.ReasonStopped), "",
 			"the run was cancelled, with no outcome given, and claude was stopped\n", 1},
 		{"stopped before the gateway gives its state", closed("failed", event.ReasonStopped), "",
@@ -115,6 +119,10 @@ func TestRunEndedSaysTheOutcome(t *testing.T) {
 			"claude ended on the signal SIGKILL\nthe run completed\n", 0},
 		{"exit 3, the starter's cancel", &session.Result{State: "cancelled", ExitCode: 3}, "",
 			"claude exited 3\nthe run was cancelled\n", 1},
+		{"a kill at the model key limit", &session.Result{State: "cancelled", Reason: event.ReasonModelKeyLimit, ExitCode: -1, Signal: "SIGTERM"}, "",
+			"claude ended on the signal SIGTERM\nthe run was paused: every model key reached its limit\n", 1},
+		{"exit 0 at the model key limit", &session.Result{State: "cancelled", Reason: event.ReasonModelKeyLimit}, "",
+			"claude exited 0\nthe run was paused: every model key reached its limit\n", 1},
 	} {
 		said, code := endOf(c.res, runEnd{runtime: "claude", timeout: 5 * time.Minute, got: c.got})
 		if said != c.want || code != c.code {
@@ -139,6 +147,7 @@ func TestRunEndedMarksTheOutcome(t *testing.T) {
 		{&session.Result{RunClosed: true, ClosedReason: event.ReasonStopped, State: "cancelled", Reason: event.ReasonStopped}, "✗ the run was cancelled, with no outcome given, and claude was stopped\n"},
 		{&session.Result{State: "failed", Reason: "checks_failed"}, "✓ claude exited 0\n✗ the run failed: checks failed\n"},
 		{&session.Result{State: "succeeded", ExitCode: 2}, "✗ claude exited 2\n✓ the run completed\n"},
+		{&session.Result{State: "cancelled", Reason: event.ReasonModelKeyLimit}, "✓ claude exited 0\n✗ the run was paused: every model key reached its limit\n"},
 	} {
 		var out strings.Builder
 		runEnded(ui.New(&out), c.res, runEnd{runtime: "claude"})
@@ -177,6 +186,8 @@ func TestGatewayEndedResendSaysTheOutcome(t *testing.T) {
 		{session.ResendResult{RunClosed: true, ClosedReason: event.ReasonRunClosed, State: "cancelled", Reason: event.ReasonInterrupted}, "the run has ended (cancelled)" + tail},
 		{session.ResendResult{RunClosed: true, ClosedReason: oldReasonCredentialExpired}, "the run has ended (cancelled: the run credential expired)" + tail},
 		{session.ResendResult{RunClosed: true, ClosedReason: event.ReasonSessionLost}, "the run has ended (lost: it lost contact with the gateway for 1m30s)" + tail},
+		{session.ResendResult{RunClosed: true, ClosedReason: event.ReasonRunClosed, State: "cancelled", Reason: event.ReasonModelKeyLimit}, "the run has ended (paused: every model key reached its limit)" + tail},
+		{session.ResendResult{RunClosed: true, ClosedReason: event.ReasonRunClosed, State: "paused", Reason: event.ReasonModelKeyLimit}, "the run has ended (paused: every model key reached its limit)" + tail},
 		{session.ResendResult{RunClosed: true, ClosedReason: event.ReasonBatchRefused}, "the run has ended (failed: its events could not be recorded)" + tail},
 		{session.ResendResult{RunClosed: true, ClosedReason: oldReasonCredentialInvalid}, "the run has ended (failed: its run credential could not be checked)" + tail},
 		{session.ResendResult{RunClosed: true, ClosedReason: "another_code"}, "the run has ended (failed: the gateway stopped during the run)" + tail},
@@ -316,6 +327,8 @@ func TestEndsAsSaysTheResendsEnd(t *testing.T) {
 		{"failed", "checks_failed", "failed: checks failed"},
 		{"cancelled", event.ReasonStopped, "cancelled"},
 		{"cancelled", event.ReasonInterrupted, "cancelled"},
+		{"cancelled", event.ReasonModelKeyLimit, "paused: every model key reached its limit"},
+		{"paused", event.ReasonModelKeyLimit, "paused: every model key reached its limit"},
 	} {
 		if got := endsAs(c.state, c.reason); got != c.want {
 			t.Errorf("%q, %q: %q, want %q", c.state, c.reason, got, c.want)

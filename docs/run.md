@@ -248,6 +248,9 @@ When the run ends, qory says how, and its exit status goes with it:
 - `✓ <runtime> exited 0` or `✗ <runtime> exited <n>`: the runtime exited by itself, and
   the exit status is the runtime's.
 - `✗ <runtime> ended on the signal <signal>`, such as `SIGKILL` from elsewhere: exit 1.
+- `✗ the run was paused: every model key reached its limit`, after the runtime's line:
+  the gateway stopped the session because every model key of the run reached its limit
+  at the model provider, exit 1.
 - `✗ the run was cancelled: qory run got SIGTERM, and <runtime> was stopped`, or
   `SIGINT`, when the signal came while the runtime ran: exit 1. A signal that comes after
   the runtime exited changes neither its line nor the exit status.

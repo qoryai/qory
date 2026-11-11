@@ -286,6 +286,10 @@ release may change what an existing document does, and states it under Upgrading
   and `qory run --help` does not show it. With a bad file, such as one that is missing,
   the run has no such step, qory prints one line, and the run goes on. See The record in
   `docs/run.md`.
+- A run whose model keys all reached their limit ends with `✗ the run was paused: every
+  model key reached its limit` after the runtime's line, exit 1, as a cancelled run
+  does. `qory run resend` says the end of such a run as `paused: every model key reached
+  its limit`. See `docs/run.md`.
 
 ### Changed
 
