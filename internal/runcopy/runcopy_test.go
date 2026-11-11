@@ -981,6 +981,105 @@ func TestFetchIntoSaysWhatToDo(t *testing.T) {
 	}
 }
 
+// fetchQuarantine is the quarantine of a run that added one file to the person's repository at
+// src.
+func fetchQuarantine(t *testing.T, src string) *Quarantine {
+	t.Helper()
+	d, repos := cloneRun(t, src)
+	write(t, d.Work(), "new.txt", "new\n")
+	runGit(t, d, repos, nil)
+	qs, err := d.Quarantine(context.Background(), branch, repos)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return qs[0]
+}
+
+// holdLock writes the lock file of the branch qory/run-1 in the repository at src, as a git
+// process that writes the branch does.
+func holdLock(t *testing.T, src string) string {
+	t.Helper()
+	lock := filepath.Join(src, ".git", "refs", "heads", "qory", "run-1.lock")
+	if err := os.MkdirAll(filepath.Dir(lock), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(lock, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return lock
+}
+
+// TestFetchIntoWaitsForALock is a lock on the run's branch that another git process holds for
+// 2 seconds: the fetch runs again and lands the commits.
+func TestFetchIntoWaitsForALock(t *testing.T) {
+	isolate(t)
+	sessionGit(t)
+	src, _ := person(t)
+	q := fetchQuarantine(t, src)
+	lock := holdLock(t, src)
+	released := time.AfterFunc(2*time.Second, func() { _ = os.Remove(lock) })
+	t.Cleanup(func() { released.Stop() })
+	start := time.Now()
+	if err := q.FetchInto(context.Background(), src, "refs/heads/"+branch); err != nil {
+		t.Fatal(err)
+	}
+	if took := time.Since(start); took < 2*time.Second {
+		t.Errorf("the fetch took %s, less than the lock's 2s", took)
+	}
+	testGit(t, src, "cat-file", "-e", branch+":new.txt")
+}
+
+// TestFetchIntoStopsAfterTheLockWaits is a lock that stays: the fetch runs once and once more
+// per wait, then fails with the fix first. The waits are 5 and last 30 s.
+func TestFetchIntoStopsAfterTheLockWaits(t *testing.T) {
+	var total time.Duration
+	for _, w := range lockWaits {
+		total += w
+	}
+	if len(lockWaits) != 5 || total != 30*time.Second {
+		t.Errorf("the waits are %v, want 5 that last 30s", lockWaits)
+	}
+	isolate(t)
+	sessionGit(t)
+	src, _ := person(t)
+	q := fetchQuarantine(t, src)
+	holdLock(t, src)
+	old := lockWaits
+	lockWaits = []time.Duration{10 * time.Millisecond, 10 * time.Millisecond, 10 * time.Millisecond, 10 * time.Millisecond, 10 * time.Millisecond}
+	t.Cleanup(func() { lockWaits = old })
+	start := time.Now()
+	err := q.FetchInto(context.Background(), src, "refs/heads/"+branch)
+	hasPrefix(t, "a lock that stays", err, "fetch refs/heads/"+branch+" from ")
+	if err == nil || !strings.Contains(err.Error(), "cannot lock ref") {
+		t.Errorf("the error %v does not have git's line", err)
+	}
+	if took := time.Since(start); took < 50*time.Millisecond {
+		t.Errorf("the fetch took %s, less than its waits", took)
+	}
+	if _, err := os.Lstat(q.Path); err != nil {
+		t.Errorf("the quarantine is gone after a failed fetch: %v", err)
+	}
+}
+
+// TestFetchIntoStopsWaitingAtTheEndOfItsContext is a lock that stays and a context that ends
+// during a wait: the fetch fails then.
+func TestFetchIntoStopsWaitingAtTheEndOfItsContext(t *testing.T) {
+	isolate(t)
+	sessionGit(t)
+	src, _ := person(t)
+	q := fetchQuarantine(t, src)
+	holdLock(t, src)
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	if err := q.FetchInto(ctx, src, "refs/heads/"+branch); err == nil {
+		t.Fatal("the fetch passed a held lock")
+	}
+	if took := time.Since(start); took > 10*time.Second {
+		t.Errorf("the fetch took %s after its context ended", took)
+	}
+}
+
 // actingRun commits the files of person, by path, in the person's repository, clones
 // it, lets change edit the copy, and returns the acting changes of the run's head.
 func actingRun(t *testing.T, person map[string]string, change func(work string)) []ActingChange {
@@ -1635,16 +1734,84 @@ func TestAPartialCloneStops(t *testing.T) {
 	}
 }
 
-// TestABranchAboveTheRunsBranchStops is a person's branch named qory: the run's branch cannot
-// go below it, and the line has the rename as its fix.
-func TestABranchAboveTheRunsBranchStops(t *testing.T) {
+// TestFreeBranchSkipsTakenNames is a person's repository, and one under .qory/repositories,
+// with branches that have or block the run's branch name: FreeBranch picks the next free name,
+// and the clone works on it.
+func TestFreeBranchSkipsTakenNames(t *testing.T) {
+	for _, c := range []struct {
+		name            string
+		person, further []string
+		want            string
+	}{
+		{"no branch", nil, nil, "qory/run-1"},
+		{"the name", []string{"qory/run-1"}, nil, "qory/run-1-2"},
+		{"the name in a further repository", nil, []string{"qory/run-1"}, "qory/run-1-2"},
+		{"a name below", []string{"qory/run-1/x", "qory/run-1-2"}, nil, "qory/run-1-3"},
+		{"another case", []string{"QORY/run-1"}, nil, "qory/run-1-2"},
+		{"a branch qory", []string{"qory"}, nil, "qory-run-1"},
+		{"a branch qory in a further repository", nil, []string{"qory"}, "qory-run-1"},
+		{"a branch qory and the other name", []string{"qory", "qory-run-1"}, nil, "qory-run-1-2"},
+		{"other branches below qory", []string{"qory/run-10", "qory/other"}, nil, "qory/run-1"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			isolate(t)
+			src, base := person(t)
+			further := filepath.Join(src, ".qory", "repositories", "other")
+			if err := os.MkdirAll(further, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			testGit(t, further, "init", "--quiet", "-b", "main")
+			write(t, further, "a.txt", "a\n")
+			furtherBase := commitAll(t, further, "first")
+			for _, b := range c.person {
+				testGit(t, src, "branch", b, base)
+			}
+			for _, b := range c.further {
+				testGit(t, further, "branch", b, furtherBase)
+			}
+			got, err := FreeBranch(context.Background(), src, "1")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got != c.want {
+				t.Errorf("FreeBranch = %s, want %s", got, c.want)
+			}
+			if _, err := newDir(t).Clone(context.Background(), src, got); err != nil {
+				t.Errorf("the clone on %s: %v", got, err)
+			}
+		})
+	}
+}
+
+// TestFreeBranchAgainKeepsAFreeName is the run's branch name at the fetch: a name that is
+// still free stays, and a name taken by now gives way to the next free one.
+func TestFreeBranchAgainKeepsAFreeName(t *testing.T) {
 	isolate(t)
+	ctx := context.Background()
 	src, base := person(t)
-	testGit(t, src, "branch", "qory", base)
-	d := newDir(t)
-	_, err := d.Clone(context.Background(), src, branch)
-	if err == nil || !strings.HasPrefix(err.Error(), "rename your branch qory in ") {
-		t.Errorf("err = %v", err)
+	testGit(t, src, "branch", "qory/run-1", base)
+	if got, err := FreeBranchAgain(ctx, src, "qory/run-1-2", "1"); err != nil || got != "qory/run-1-2" {
+		t.Errorf("a free name: %s, %v", got, err)
+	}
+	testGit(t, src, "branch", "qory/run-1-2", base)
+	if got, err := FreeBranchAgain(ctx, src, "qory/run-1-2", "1"); err != nil || got != "qory/run-1-3" {
+		t.Errorf("a name taken by now: %s, %v", got, err)
+	}
+	_, err := FreeBranchAgain(ctx, t.TempDir(), "qory/run-1", "1")
+	hasPrefix(t, "no repository", err, "check that ")
+}
+
+// TestFreeBranchStopsWhenEveryNameIsTaken is a repository with every name FreeBranch tries:
+// the line starts with the branches to delete.
+func TestFreeBranchStopsWhenEveryNameIsTaken(t *testing.T) {
+	branches := []string{"qory/run-1"}
+	for n := 2; n <= branchTries; n++ {
+		branches = append(branches, "qory/run-1-"+strconv.Itoa(n))
+	}
+	_, err := freeName(branches, "1", "/repo")
+	hasPrefix(t, "every name taken", err, "delete the branches qory/run-1 and qory/run-1-<number> in /repo")
+	if got, err := freeName(branches[:branchTries-1], "1", "/repo"); err != nil || got != "qory/run-1-100" {
+		t.Errorf("one name left: %s, %v", got, err)
 	}
 }
 

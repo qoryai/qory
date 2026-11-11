@@ -91,10 +91,6 @@ func limitErr(ctx, limited context.Context, text string, err error) error {
 // disarmLimit is how long the renames in a copy that stays may take.
 const disarmLimit = time.Minute
 
-// runBranch is the branch a run's commits land on in the person's repository. qory never checks
-// it out.
-func runBranch(runID string) string { return "qory/run-" + runID }
-
 // runCopiesDir is the folder of the copies of walled runs, <user cache>/qory/runs, "" when
 // the lookup of the cache folder fails. No program qory runs, and no file it reads for a
 // run, may lie there, since a run could have written it.
@@ -124,6 +120,10 @@ type runCopy struct {
 	root string
 	// branch is the branch of the copy that the run works on.
 	branch string
+	// back is the branch the run's commits land on in the person's repository, from
+	// [runcopy.FreeBranch]: the same as branch for a run with no branch of a work item. qory
+	// never checks it out. It is "" for a plain folder.
+	back string
 	// plain is whether the checkout is not a git working tree: [runcopy.Dir.CopyBack] brings the
 	// files back.
 	plain bool
@@ -219,14 +219,12 @@ func (c *runCopy) checkFailed(ctx context.Context, err error) error {
 }
 
 // startCopy makes the copy of the checkout at root for the run runID. branch is the branch
-// the run works on, "" for [runBranch]. keepOut are the folders the copy must not overlap.
+// the run works on, "" for the free name of [runcopy.FreeBranch]. keepOut are the folders the
+// copy must not overlap.
 // noRepository is whether the run comes from a run code or a run key and lists no repositories: in
 // a folder where git init ran and that has no commit, it gets the copy of a plain folder with
 // .git left out. A local run in such a folder stops, since a repository needs a commit.
 func startCopy(ctx context.Context, root, runID, branch string, noRepository bool, keepOut ...string) (*runCopy, error) {
-	if branch == "" {
-		branch = runBranch(runID)
-	}
 	git, err := workingTree(root)
 	if err != nil {
 		return nil, err
@@ -246,7 +244,13 @@ func startCopy(ctx context.Context, root, runID, branch string, noRepository boo
 	case c.plain:
 		err = dir.CopyFolder(ctx, root)
 	default:
-		c.repos, err = dir.Clone(ctx, root, branch)
+		if c.back, err = runcopy.FreeBranch(ctx, root, runID); err != nil {
+			break
+		}
+		if c.branch == "" {
+			c.branch = c.back
+		}
+		c.repos, err = dir.Clone(ctx, root, c.branch)
 	}
 	if err != nil {
 		// No [integration.Printable] runs on the whole line, so a line of git in err is cut here.
@@ -594,7 +598,7 @@ func (c *runCopy) quarantine(ctx context.Context, report func(string)) ([]*runco
 }
 
 // comeBack brings the run's work to the person: for a plain folder the files, and for a
-// repository the commits, which land on [runBranch] in each repository, with one line per
+// repository the commits, which land on [runCopy.back] in each repository, with one line per
 // repository. Every git here runs after the run closed, so no container of the run is left.
 // report prints a line of qory run. It reports whether everything came back.
 func (c *runCopy) comeBack(ctx context.Context, runID string, report func(string)) bool {
@@ -626,7 +630,8 @@ func (c *runCopy) comeBack(ctx context.Context, runID string, report func(string
 }
 
 // fetchOne fetches the run's commits from the quarantine q into the person's repository, and
-// prints the line that lists the branch and any changed acting key.
+// prints the line that lists the branch and any changed acting key. The branch is
+// [runCopy.back], or the next free name when a branch there has or blocks it by now.
 func (c *runCopy) fetchOne(ctx context.Context, q *runcopy.Quarantine, runID string, report func(string)) bool {
 	limited, cancel := context.WithTimeout(ctx, copyStepLimit)
 	defer cancel()
@@ -636,7 +641,11 @@ func (c *runCopy) fetchOne(ctx context.Context, q *runcopy.Quarantine, runID str
 		return false
 	}
 	at := filepath.Join(c.root, filepath.FromSlash(q.Repo.Path))
-	branch := runBranch(runID)
+	branch, err := runcopy.FreeBranchAgain(limited, at, c.back, runID)
+	if err != nil {
+		report(c.checkFailed(ctx, stepErr(ctx, limited, err)).Error())
+		return false
+	}
 	if err := q.FetchInto(limited, at, "refs/heads/"+branch); err != nil {
 		if limited.Err() != nil {
 			report(c.checkFailed(ctx, limitErr(ctx, limited, textCopyFetchLimit, err)).Error())

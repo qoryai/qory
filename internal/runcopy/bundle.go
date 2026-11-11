@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/qoryai/qory/internal/checkout"
 )
@@ -382,15 +383,27 @@ func writeNew(path, text string) error {
 // how long it may take. The fetch checks every object, writes no tag and no submodule,
 // and moves ref only forward. git stops the fetch when ref is a branch checked out in a
 // working tree of the repository: the person's files never change to what the run
-// wrote. When the fetch fails, the quarantine stays, and the error contains its path.
+// wrote. When another git process holds a lock that the fetch needs, the fetch runs again
+// after each wait of [lockWaits]. When the fetch fails, the quarantine stays, and the error
+// contains its path.
 func (q *Quarantine) FetchInto(ctx context.Context, checkout, ref string) error {
 	if err := checkRef(ctx, ref); err != nil {
 		return err
 	}
 	from := "refs/heads/" + q.Branch
-	_, err := git(ctx, checkout, "-c", "transfer.fsckObjects=true", "-c", "fetch.fsckObjects=true",
-		"fetch", "--quiet", "--no-tags", "--no-recurse-submodules", "--no-write-fetch-head",
-		"--", q.Path, from+":"+ref)
+	fetch := func() error {
+		_, err := git(ctx, checkout, "-c", "transfer.fsckObjects=true", "-c", "fetch.fsckObjects=true",
+			"fetch", "--quiet", "--no-tags", "--no-recurse-submodules", "--no-write-fetch-head",
+			"--", q.Path, from+":"+ref)
+		return err
+	}
+	err := fetch()
+	for _, wait := range lockWaits {
+		if err == nil || !lockHeld(err) || !sleep(ctx, wait) {
+			break
+		}
+		err = fetch()
+	}
 	if err == nil {
 		return nil
 	}
@@ -401,6 +414,33 @@ func (q *Quarantine) FetchInto(ctx context.Context, checkout, ref string) error 
 		return fmt.Errorf(textFetchExists, shown(q.Path), shown(ref), shown(checkout), from, err)
 	}
 	return fmt.Errorf(textFetchFailed, shown(q.Path), shown(ref), shown(checkout), from, err)
+}
+
+// lockWaits are the waits of [Quarantine.FetchInto] before it fetches again while another git
+// process holds a lock: 5 more fetches within 30 s. A test sets shorter ones.
+var lockWaits = []time.Duration{time.Second, 2 * time.Second, 4 * time.Second, 8 * time.Second, 15 * time.Second}
+
+// sleep waits for d, and reports whether d passed before ctx ended.
+func sleep(ctx context.Context, d time.Duration) bool {
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-timer.C:
+		return true
+	}
+}
+
+// lockHeld reports whether git failed in err because another git process held a lock: a ref's
+// lock or the index's.
+func lockHeld(err error) bool {
+	for _, ge := range gitErrors(err) {
+		if strings.Contains(ge.line, "cannot lock ref") && strings.Contains(ge.line, ".lock") || strings.Contains(ge.line, "index.lock") {
+			return true
+		}
+	}
+	return false
 }
 
 // checkedOut is the working tree of the repository at checkout that has ref checked
