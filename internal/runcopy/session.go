@@ -307,6 +307,7 @@ g() {
 nl='
 '
 cr=$(printf '\r')
+st=0
 # kind is exec for a file with the owner's execute bit, as git and SetupPath.State read it, and
 # file for any other. [ -x ] tests what the process may do, which differs for root or for another
 # user. $execs is what one find listed, since a process per file takes minutes for 10000 paths.
@@ -366,7 +367,7 @@ readable() {
 }
 # submodule_status writes the changes of the submodule at the folder $1 of $T to $G/status: what its
 # working tree changed since its HEAD. As for the top repository, git runs through the git folder
-# $G/status-git that gitfolder makes, with an empty configuration, the submodule's objects as
+# $G/status-$st that gitfolder makes, $st being a number the caller raises for each call, with an empty configuration, the submodule's objects as
 # alternates, HEAD at the submodule's commit and an index of its tree, so no program, hook,
 # fsmonitor or filter that the agent wrote in the submodule's configuration runs. A submodule
 # inside it counts as changed only at another commit: a status of its working tree would run git
@@ -385,8 +386,7 @@ submodule_status() (
 	if [ -n "$now" ]; then
 		base=$now
 	fi
-	G=$S/status-git
-	rm -rf "$G"
+	G=$S/status-$st
 	gitfolder /dev/null
 	export GIT_DIR="$G" GIT_WORK_TREE="$T/$1" GIT_INDEX_FILE="$G/index"
 	if [ -n "$now" ]; then
@@ -970,6 +970,7 @@ while [ "$n" -lt "$count" ]; do
 					break
 				fi
 			done < "$B/subs-$n"
+			st=$((st + 1))
 			if [ -n "$k" ]; then
 				submodule_status "$d"
 				from_setup "$d" || :
