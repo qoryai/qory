@@ -93,7 +93,10 @@ ARG CLAUDE_CODE_VERSION
 # limit of 3 GiB.
 #
 # Debian's packages, one a line, in alphabetical order. To add a tool, add a line with
-# its package below, and a line that runs the tool to the check after gh is copied.
+# its package below, and a line that runs the tool to the check after gh is copied. To
+# add a Tesseract language, add tesseract-ocr-<code> below and <code> to the check's
+# loop. To add a font, add its package below and a line to the check that finds one of
+# its fonts in fc-list.
 RUN apt="-o Dir::Etc::SourceList=/tmp/snapshot.sources -o Dir::Etc::SourceParts=- -o Acquire::Check-Valid-Until=false -o Acquire::Retries::Delay=false" \
  && sed -e "s|^URIs: http://deb.debian.org/debian-security\$|URIs: http://snapshot.debian.org/archive/debian-security/${DEBIAN_SNAPSHOT}|" \
         -e "s|^URIs: http://deb.debian.org/debian\$|URIs: http://snapshot.debian.org/archive/debian/${DEBIAN_SNAPSHOT}|" \
@@ -182,14 +185,15 @@ RUN --mount=type=bind,from=claude,source=/out,target=/tmp/claude \
 COPY --from=gh /out/bin/gh /usr/local/bin/gh
 
 # Each tool runs, Chromium from /usr/bin, Tesseract lists each language installed, and
-# fontconfig lists the Noto fonts for CJK and color emoji. HOME is one directory every
-# user may write, with the sticky bit, because the wall runs the agent as the machine's
-# user id, which has no entry in this image.
+# fontconfig lists a font of each Noto package; a check that fails prints its fix. HOME
+# is one directory every user may write, with the sticky bit, because the wall runs the
+# agent as the machine's user id, which has no entry in this image.
 RUN gh --version \
  && git --version \
  && pdftoppm -v \
  && rg --version \
- && test "$(command -v chromium)" = /usr/bin/chromium \
+ && { test "$(command -v chromium)" = /usr/bin/chromium \
+      || { echo "Install chromium at /usr/bin/chromium: command -v chromium prints '$(command -v chromium)'" >&2; exit 1; }; } \
  && chromium --version \
  && ffmpeg -version \
  && ffprobe -version \
@@ -219,8 +223,9 @@ RUN gh --version \
  && envsubst --version \
  && rsync --version \
  && patch --version \
- && fc-list | grep -q 'Noto Sans CJK' \
- && fc-list | grep -q 'Noto Color Emoji' \
+ && { fc-list | grep -q 'Noto Sans Arabic' || { echo "Add fonts-noto-core: fontconfig lists no Noto Sans Arabic" >&2; exit 1; }; } \
+ && { fc-list | grep -q 'Noto Sans CJK' || { echo "Add fonts-noto-cjk: fontconfig lists no Noto Sans CJK" >&2; exit 1; }; } \
+ && { fc-list | grep -q 'Noto Color Emoji' || { echo "Add fonts-noto-color-emoji: fontconfig lists no Noto Color Emoji" >&2; exit 1; }; } \
  && mkdir -p /home/agent \
  && chmod 1777 /home/agent \
  && find / -xdev -type f \( -perm -4000 -o -perm -2000 \) -exec chmod ug-s {} +
