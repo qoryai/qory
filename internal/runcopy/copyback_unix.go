@@ -763,7 +763,8 @@ func destState(dst int, name, rel string) (*fileState, uint32, error) {
 }
 
 // deletions deletes in dst each recorded file that is gone from src, by the rules of
-// [Dir.CopyBack].
+// [Dir.CopyBack]. A read or a delete of an entry that fails lists the entry as failed, and the
+// deletions go on.
 func (c *copyBack) deletions(src, dst int) error {
 	paths := make([]string, 0, len(c.rec.Files))
 	for p := range c.rec.Files {
@@ -774,37 +775,44 @@ func (c *copyBack) deletions(src, dst int) error {
 		if !cleanRel(rel) || c.leftOut(rel) {
 			continue
 		}
-		gone, err := missingAt(src, rel)
-		if err != nil {
-			return fileErr(rel, err)
+		if err := c.deletion(src, dst, rel); err != nil {
+			return err
 		}
-		if !gone {
-			continue
-		}
-		dir, name, err := lookup(dst, rel)
-		if errors.Is(err, errNoEntry) {
-			continue
-		}
-		if err != nil {
-			return fileErr(rel, err)
-		}
-		have, _, err := destState(dir, name, rel)
-		switch {
-		case errors.Is(err, errNotRegular) || err == nil && have != nil && *have != c.rec.Files[rel]:
-			c.result.NotDeleted = append(c.result.NotDeleted, rel)
-		case err != nil:
-			unix.Close(dir)
-			return fileErr(rel, err)
-		case have != nil:
-			if err := unix.Unlinkat(dir, name, 0); err != nil {
-				unix.Close(dir)
-				return fileErr(rel, err)
-			}
-			c.result.Deleted = append(c.result.Deleted, rel)
-		}
-		unix.Close(dir)
 	}
 	sort.Strings(c.result.Conflicts)
+	return nil
+}
+
+// deletion deletes the recorded file rel in dst when it is gone from src, by the rules of
+// [Dir.CopyBack]. It returns an error only as [copyBack.fail] does.
+func (c *copyBack) deletion(src, dst int, rel string) error {
+	gone, err := missingAt(src, rel)
+	if err != nil {
+		return c.fail(rel, fileErr(rel, err))
+	}
+	if !gone {
+		return nil
+	}
+	dir, name, err := lookup(dst, rel)
+	if errors.Is(err, errNoEntry) {
+		return nil
+	}
+	if err != nil {
+		return c.fail(rel, fileErr(rel, err))
+	}
+	defer unix.Close(dir)
+	have, _, err := destState(dir, name, rel)
+	switch {
+	case errors.Is(err, errNotRegular) || err == nil && have != nil && *have != c.rec.Files[rel]:
+		c.result.NotDeleted = append(c.result.NotDeleted, rel)
+	case err != nil:
+		return c.fail(rel, fileErr(rel, err))
+	case have != nil:
+		if err := unix.Unlinkat(dir, name, 0); err != nil {
+			return c.fail(rel, fileErr(rel, err))
+		}
+		c.result.Deleted = append(c.result.Deleted, rel)
+	}
 	return nil
 }
 

@@ -2274,6 +2274,45 @@ func TestCopyBackListsWhatItCannotReadOrWrite(t *testing.T) {
 	}
 }
 
+// TestCopyBackListsADeletionThatFails is a run that deletes a file in a folder of the person's
+// that qory cannot write, and another one elsewhere: the first is listed as failed and stays, and
+// the second is deleted.
+func TestCopyBackListsADeletionThatFails(t *testing.T) {
+	isolate(t)
+	if os.Geteuid() == 0 {
+		t.Skip("root writes every folder")
+	}
+	dest := t.TempDir()
+	write(t, dest, "closed/old.txt", "the person\n")
+	write(t, dest, "z.txt", "the person\n")
+	d := newDir(t)
+	if err := d.CopyFolder(context.Background(), dest); err != nil {
+		t.Fatal(err)
+	}
+	for _, rel := range []string{"closed/old.txt", "z.txt"} {
+		if err := os.Remove(filepath.Join(d.Work(), filepath.FromSlash(rel))); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Chmod(filepath.Join(dest, "closed"), 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(filepath.Join(dest, "closed"), 0o755) })
+	r, err := d.CopyBack(context.Background(), dest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"closed/old.txt"}; !slices.Equal(r.Failed, want) {
+		t.Errorf("failed %q, want %q", r.Failed, want)
+	}
+	if want := []string{"z.txt"}; !slices.Equal(r.Deleted, want) {
+		t.Errorf("deleted %q, want %q", r.Deleted, want)
+	}
+	if read(t, dest, "closed/old.txt") != "the person\n" {
+		t.Error("closed/old.txt is gone")
+	}
+}
+
 // TestCopyBackCountsNoGeneratedFolder is a run that writes more into node_modules and the other
 // folders that a build writes than the budget allows: all of it comes back, and a file outside
 // them still counts.

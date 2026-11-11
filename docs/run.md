@@ -3972,7 +3972,7 @@ the copy, and `qory run` exits 1:
 qory run: left out of the copy back, as the folders that builds and package managers write have more than 1000000 files or 32 GiB in all: node_modules. They stay in the run's copy.
 ```
 
-When qory cannot read a file or folder of the copy, or cannot write it in your folder, it
+When qory cannot read a file or folder of the copy, or cannot write or delete it in your folder, it
 leaves that entry out, copies back the rest, and deletes nothing in a folder it left out. It
 lists the first 50 of those entries, then the count of the rest, and the copy stays with them:
 
