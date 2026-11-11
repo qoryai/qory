@@ -4024,6 +4024,38 @@ func TestASubmodulePastItsGitlinkArrivesUnderRefsQory(t *testing.T) {
 	}
 }
 
+// TestAFilterPlantedInASubmoduleRunsNothing is an agent that writes a clean filter into the
+// configuration of a submodule and an attribute that applies it, and changes a file there: the
+// session reads the submodule's changes with a configuration it made, so the filter never runs,
+// and the change comes back.
+func TestAFilterPlantedInASubmoduleRunsNothing(t *testing.T) {
+	isolate(t)
+	sessionGit(t)
+	src, sub := withSubmodule(t)
+	gitDir := testGit(t, filepath.Join(src, sub), "rev-parse", "--path-format=absolute", "--git-dir")
+	d, repos := cloneRun(t, src)
+	inner := filepath.Join(d.Work(), filepath.FromSlash(sub))
+	marker := filepath.Join(t.TempDir(), "ran")
+	testGit(t, inner, "config", "filter.planted.clean", "touch "+marker+"; cat")
+	write(t, inner, ".gitattributes", "* filter=planted\n")
+	// The same size and a later time: a status of the submodule's index hashes the file, through
+	// the filter.
+	write(t, inner, "lib.txt", "LIB\n")
+	later := time.Now().Add(time.Hour)
+	if err := os.Chtimes(filepath.Join(inner, "lib.txt"), later, later); err != nil {
+		t.Fatal(err)
+	}
+	_, refs := runRefs(t, d, src, repos, nil)
+	wantRefs(t, refs)
+	if _, err := os.Lstat(marker); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("the planted filter ran: %v", err)
+	}
+	wantRefs(t, refsUnder(t, gitDir, prefix), "uncommitted")
+	if text := testGit(t, gitDir, "show", prefix+"/uncommitted:lib.txt"); text != "LIB" {
+		t.Errorf("lib.txt is %q", text)
+	}
+}
+
 // TestASubmoduleAtItsGitlinkLeavesNothingBehind is a submodule the agent did not change.
 func TestASubmoduleAtItsGitlinkLeavesNothingBehind(t *testing.T) {
 	isolate(t)

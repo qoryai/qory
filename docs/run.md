@@ -793,7 +793,7 @@ not start after it.
 
 A walled write run in a copy can run past the limit: its setup removal has up to 2 minutes, and its git session
 up to 5 minutes, plus a minute for each 20,000 files, folders and links in the copy and a minute for each 2 GiB
-in its files, at most 60 minutes.
+its files take on disk, at most 60 minutes.
 
 `--timeout 0` lifts the limit `forager.yaml` sets.
 
@@ -3812,10 +3812,11 @@ qory run: part of the run's work did not come back: the copy has changes that gi
 Git LFS: because the session runs no filter, an LFS file the agent changes goes into the
 commit as its full content, in place of a pointer.
 
-A program the agent planted in the copy can run again in this session, under the run's egress
-policy, so the session has a time limit: 5 minutes, plus a minute for each 20,000 files, folders
-and links in the copy and a minute for each 2 GiB in its files, at most 60 minutes. qory counts
-them in the copy once the agent has ended, with `lstat`, and follows no link. A first signal to
+A program the agent planted in the copy can run again in this session, in a container with no
+network, so the session has a time limit: 5 minutes, plus a minute for each 20,000 files, folders
+and links in the copy and a minute for each 2 GiB its files take on disk, at most 60 minutes. qory
+counts them in the copy once the agent has ended, with `lstat`, follows no link, and stops
+counting at 60 minutes. A sparse file counts only the blocks it takes on disk. A first signal to
 `qory run` leaves the session that limit, within the time that the return of the work has after
 the signal, and a second signal ends it. qory prints how long the return of the work may take:
 

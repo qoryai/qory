@@ -3,10 +3,13 @@ package runcopy
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
+
+	"golang.org/x/sys/unix"
 )
 
 // TestTheSessionLimitScalesWithTheCopy is the time limit of the git session: 5 minutes on a small
@@ -59,8 +62,67 @@ func TestTheWorkSizeFollowsNoLink(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if entries != 4 || bytes != 16 {
-		t.Errorf("%d entries and %d bytes, want 4 and 16", entries, bytes)
+	want := blocks(t, filepath.Join(work, "a.txt")) + blocks(t, filepath.Join(work, "src", "b.txt"))
+	if entries != 4 || bytes != want {
+		t.Errorf("%d entries and %d bytes, want 4 and %d", entries, bytes, want)
+	}
+}
+
+// blocks is the bytes the file at path takes on disk, as lstat counts its blocks.
+func blocks(t *testing.T, path string) int64 {
+	t.Helper()
+	var st unix.Stat_t
+	if err := unix.Lstat(path, &st); err != nil {
+		t.Fatal(err)
+	}
+	return int64(st.Blocks) * 512
+}
+
+// TestTheWorkSizeCountsTheBlocksOfASparseFile is a sparse file of 1 TiB in the copy: it counts
+// the blocks it takes, far less than its size, so it does not raise the session's time limit.
+func TestTheWorkSizeCountsTheBlocksOfASparseFile(t *testing.T) {
+	isolate(t)
+	d := newDir(t)
+	if err := os.MkdirAll(d.Work(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	f, err := os.Create(filepath.Join(d.Work(), "sparse"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Truncate(1 << 40); err != nil {
+		f.Close()
+		t.Skipf("the file system takes no sparse file of 1 TiB: %v", err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	_, bytes, err := d.WorkSize(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes >= 1<<30 {
+		t.Errorf("the sparse file counts %d bytes", bytes)
+	}
+}
+
+// TestTheWorkSizeStopsAtTheLongestLimit is a copy with more entries than the longest time limit
+// needs: the count stops at that limit, with no error.
+func TestTheWorkSizeStopsAtTheLongestLimit(t *testing.T) {
+	isolate(t)
+	before := sessionEntriesPerMinute
+	sessionEntriesPerMinute = 1
+	t.Cleanup(func() { sessionEntriesPerMinute = before })
+	d := newDir(t)
+	for i := range 100 {
+		write(t, d.Work(), fmt.Sprintf("f%d", i), "x")
+	}
+	entries, _, err := d.WorkSize(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := int64((SessionMax - SessionBase) / time.Minute); entries != want {
+		t.Errorf("%d entries, want the count stopped at %d", entries, want)
 	}
 }
 
@@ -87,8 +149,8 @@ func TestTheWorkSizeGoesPastAFolderItCannotRead(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if entries != 2 || bytes != 3 {
-		t.Errorf("%d entries and %d bytes, want 2 and 3", entries, bytes)
+	if want := blocks(t, filepath.Join(work, "a.txt")); entries != 2 || bytes != want {
+		t.Errorf("%d entries and %d bytes, want 2 and %d", entries, bytes, want)
 	}
 }
 
