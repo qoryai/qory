@@ -159,6 +159,7 @@ func TestEngineFindsSetuidFilesAndCapabilities(t *testing.T) {
 		tarFile{name: "usr/bin/ping", mode: 0o755, capability: true},
 		tarFile{name: "usr/bin/git", mode: 0o755},
 		tarFile{name: "usr/bin/cat", mode: 0o755},
+		tarFile{name: "usr/bin/chmod", mode: 0o755},
 		tarFile{name: "usr/bin/comm", mode: 0o755},
 		tarFile{name: "usr/bin/cp", mode: 0o755},
 		tarFile{name: "usr/bin/find", mode: 0o755},

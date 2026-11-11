@@ -32,12 +32,14 @@ const (
 	textCopyOutside    = "run qory inside the checkout %s: a run that may write works in a copy of the checkout, and the working folder %s is outside it"
 	textCopyNoFolder   = "commit %[1]s, or run qory in a folder that the commit at HEAD has: a run that may write works in a copy of that commit, which has no folder %[1]s"
 	textCopyReserved   = "start the run from a folder that does not contain your home folder or qory's state directory: the folder %s %s, and the run's copy of it would have every file there"
-	textCopyBehind     = "part of the run's work did not come back: the copy has changes not committed, commits on another branch or in a submodule, a detached commit, a commit a reset took off the branch, a stash, a tag, a sparse checkout, a nested repository, or files that git add could not read."
+	textCopyBehind     = "part of the run's work did not come back: the copy has a nested repository the run made."
 	textCopyStepLimit  = "the check of the run's commits ran past its limit of %s, so those commits did not come back"
 	textCopyFetchLimit = "the fetch of the run's commits ran past its limit of %s, so those commits did not come back"
 	textCopyBackLimit  = "the copy back of the run's files ran past its limit of %s, so part of them did not come back"
 	textCopyWaiting    = "got %s: bringing the run's work back, for at most %s. Send a second signal to stop that."
 	textCopyOnBranch   = "the run's commits are on %s in %s."
+	textCopyOtherRefs  = " The run's other refs are under %s: list them with git for-each-ref %s."
+	textCopyRefs       = "the run's refs are under %s in %s: list them with git for-each-ref %s."
 	textCopyActing     = " They change these qory settings, links or repository folders: %s. Check them before you check out the branch."
 	textCopyRead       = "read the run's files in %s, and run no git there: %s"
 	textCopyLimit      = "the git session ran past its limit of %s, so the run's commits did not come back"
@@ -598,8 +600,9 @@ func (c *runCopy) comeBack(ctx context.Context, runID string, report func(string
 }
 
 // fetchOne fetches the run's commits from the quarantine q into the person's repository, and
-// prints the line that lists the branch and any changed acting key. The branch is
-// [runCopy.back], or the next free name when a branch there has or blocks it by now.
+// prints the line that lists the branch, the prefix of the run's other refs and any changed
+// acting key. The branch is [runCopy.back], or the next free name when a branch there has or
+// blocks it by now.
 func (c *runCopy) fetchOne(ctx context.Context, q *runcopy.Quarantine, runID string, report func(string)) bool {
 	limited, cancel := context.WithTimeout(ctx, copyStepLimit)
 	defer cancel()
@@ -609,12 +612,15 @@ func (c *runCopy) fetchOne(ctx context.Context, q *runcopy.Quarantine, runID str
 		return false
 	}
 	at := filepath.Join(c.root, filepath.FromSlash(q.Repo.Path))
-	branch, err := runcopy.FreeBranchAgain(limited, at, c.back, runID)
-	if err != nil {
-		report(c.checkFailed(ctx, stepErr(ctx, limited, err)).Error())
-		return false
+	branch := ""
+	if q.Head != "" {
+		if branch, err = runcopy.FreeBranchAgain(limited, at, c.back, runID); err != nil {
+			report(c.checkFailed(ctx, stepErr(ctx, limited, err)).Error())
+			return false
+		}
 	}
-	if err := q.FetchInto(limited, at, "refs/heads/"+branch); err != nil {
+	prefix, err := q.FetchInto(limited, at, "refs/heads/"+branch)
+	if err != nil {
 		if limited.Err() != nil {
 			report(c.checkFailed(ctx, limitErr(ctx, limited, textCopyFetchLimit, err)).Error())
 			return false
@@ -622,7 +628,15 @@ func (c *runCopy) fetchOne(ctx context.Context, q *runcopy.Quarantine, runID str
 		report(shownError(err))
 		return false
 	}
-	line := fmt.Sprintf(textCopyOnBranch, exports.Value(branch, false), exports.Value(at, false))
+	var line string
+	switch {
+	case branch == "":
+		line = fmt.Sprintf(textCopyRefs, prefix, exports.Value(at, false), prefix)
+	case prefix != "":
+		line = fmt.Sprintf(textCopyOnBranch, exports.Value(branch, false), exports.Value(at, false)) + fmt.Sprintf(textCopyOtherRefs, prefix, prefix)
+	default:
+		line = fmt.Sprintf(textCopyOnBranch, exports.Value(branch, false), exports.Value(at, false))
+	}
 	if keys := actingKeys(changes); keys != "" {
 		line += fmt.Sprintf(textCopyActing, keys)
 	}

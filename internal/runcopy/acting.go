@@ -10,44 +10,62 @@ import (
 )
 
 // ActingChanges lists the acting keys, by package acting's list, that differ between
-// the qory files at the repository's base commit and at the run's head, both in the
-// quarantine: qory.yaml, harness.yaml and qory-stack.yaml at the top, by a name that
-// matches regardless of letter case, and each stack file in the repository that one of
-// them extends by a path. It also lists each link the run's commits add or change, and each
-// folder they add that [gitDirLike] matches, which git takes as a repository at a checkout.
+// the qory files at the repository's base commit and at the run's head, or at the commit of
+// one of the run's other refs, all in the quarantine: qory.yaml, harness.yaml and
+// qory-stack.yaml at the top, by a name that matches regardless of letter case, and each
+// stack file in the repository that one of them extends by a path. It also lists each link
+// those commits add or change, and each folder they add that [gitDirLike] matches, which git
+// takes as a repository at a checkout. A quarantine with no head and no other ref has none.
 //
 // Every file is read from the commit's tree with git ls-tree and git cat-file, which
 // run no filter, part by part of its path, so a link or a submodule on the way counts
 // as a change to the file. Path values are compared as written: nothing is resolved on
-// this machine. The list is sorted by file, then by key.
+// this machine. The list is sorted by file, then by key, with each change once.
 func (q *Quarantine) ActingChanges(ctx context.Context) ([]ActingChange, error) {
+	commits := slices.Clone(q.commits)
+	if q.Head != "" {
+		commits = append([]string{q.Head}, commits...)
+	}
+	var out []ActingChange
+	for _, c := range commits {
+		changes, err := q.actingAt(ctx, c)
+		if err != nil {
+			return nil, fmt.Errorf(textActingFailed, shown(q.Path), err)
+		}
+		out = append(out, changes...)
+	}
+	return sortChanges(out), nil
+}
+
+// actingAt is [Quarantine.ActingChanges] for the one commit head.
+func (q *Quarantine) actingAt(ctx context.Context, head string) ([]ActingChange, error) {
 	before, err := q.topNames(ctx, q.Repo.Base)
 	if err != nil {
-		return nil, fmt.Errorf(textActingFailed, shown(q.Path), err)
+		return nil, err
 	}
-	after, err := q.topNames(ctx, q.Head)
+	after, err := q.topNames(ctx, head)
 	if err != nil {
-		return nil, fmt.Errorf(textActingFailed, shown(q.Path), err)
+		return nil, err
 	}
-	out, err := qoryChanges(before, q.treeReader(ctx, q.Repo.Base), after, q.treeReader(ctx, q.Head))
+	out, err := qoryChanges(before, q.treeReader(ctx, q.Repo.Base), after, q.treeReader(ctx, head))
 	if err != nil {
-		return nil, fmt.Errorf(textActingFailed, shown(q.Path), err)
+		return nil, err
 	}
-	links, err := q.changedLinks(ctx)
+	links, err := q.changedLinks(ctx, head)
 	if err != nil {
-		return nil, fmt.Errorf(textActingFailed, shown(q.Path), err)
+		return nil, err
 	}
 	for _, l := range links {
 		out = append(out, ActingChange{File: l})
 	}
-	folders, err := q.addedGitFolders(ctx)
+	folders, err := q.addedGitFolders(ctx, head)
 	if err != nil {
-		return nil, fmt.Errorf(textActingFailed, shown(q.Path), err)
+		return nil, err
 	}
 	for _, f := range folders {
 		out = append(out, ActingChange{File: f})
 	}
-	return sortChanges(out), nil
+	return out, nil
 }
 
 // topNames is the names at the top of commit's tree.
@@ -143,10 +161,10 @@ func (q *Quarantine) readBlob(ctx context.Context, id string) (qoryFile, []byte,
 	return qoryFile{shape: shapeYAML, id: id}, []byte(data), nil
 }
 
-// changedLinks is each path whose entry at the run's head is a link that the base
-// commit does not have there as it is, by git diff-tree.
-func (q *Quarantine) changedLinks(ctx context.Context) ([]string, error) {
-	out, err := git(ctx, q.Path, "diff-tree", "-r", "-z", "--no-renames", "--no-commit-id", q.Repo.Base, q.Head)
+// changedLinks is each path whose entry at head is a link that the base commit does not have
+// there as it is, by git diff-tree.
+func (q *Quarantine) changedLinks(ctx context.Context, head string) ([]string, error) {
+	out, err := git(ctx, q.Path, "diff-tree", "-r", "-z", "--no-renames", "--no-commit-id", q.Repo.Base, head)
 	if err != nil {
 		return nil, err
 	}
@@ -161,14 +179,14 @@ func (q *Quarantine) changedLinks(ctx context.Context) ([]string, error) {
 	return links, nil
 }
 
-// addedGitFolders is each folder at the run's head that [gitDirLike] matches and that the base
-// commit does not have as such, "." for the top.
-func (q *Quarantine) addedGitFolders(ctx context.Context) ([]string, error) {
+// addedGitFolders is each folder at head that [gitDirLike] matches and that the base commit does
+// not have as such, "." for the top.
+func (q *Quarantine) addedGitFolders(ctx context.Context, head string) ([]string, error) {
 	before, err := q.gitFolders(ctx, q.Repo.Base)
 	if err != nil {
 		return nil, err
 	}
-	after, err := q.gitFolders(ctx, q.Head)
+	after, err := q.gitFolders(ctx, head)
 	if err != nil {
 		return nil, err
 	}

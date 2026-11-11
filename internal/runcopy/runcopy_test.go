@@ -262,10 +262,65 @@ func bringBack(t *testing.T, d Dir, src string, repos []Repository, out map[stri
 	if qs[0] == nil {
 		t.Fatal("no quarantine for the person's repository")
 	}
-	if err := qs[0].FetchInto(ctx, src, "refs/heads/"+branch); err != nil {
+	if _, err := qs[0].FetchInto(ctx, src, "refs/heads/"+branch); err != nil {
 		t.Fatal(err)
 	}
 	return qs[0]
+}
+
+// prefix is where the run's other refs come back in every test: [Dir.RefPrefix] of the run id run-1.
+const prefix = "refs/qory/run-run-1"
+
+// runRefs runs the git session for repos with out, wants no work left behind, fetches what came
+// back into the person's repository at src, as qory run does, and returns the quarantine and the
+// refs under [prefix] in src, each without the prefix and with its object.
+func runRefs(t *testing.T, d Dir, src string, repos []Repository, out map[string]LeftOut) (*Quarantine, map[string]string) {
+	t.Helper()
+	printed := sessionOutput(t, d, repos, out)
+	if d.LeftBehind(repos) {
+		t.Errorf("the session recorded work left behind:\n%s", printed)
+	}
+	qs, err := d.Quarantine(context.Background(), branch, repos)
+	if err != nil {
+		t.Fatalf("Quarantine: %v\n%s", err, printed)
+	}
+	if qs[0] == nil {
+		t.Fatalf("no quarantine for the person's repository\n%s", printed)
+	}
+	got, err := qs[0].FetchInto(context.Background(), src, "refs/heads/"+branch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := prefix; qs[0].hasRefs() && got != want {
+		t.Errorf("the refs came back under %q, want %q", got, want)
+	}
+	return qs[0], refsUnder(t, src, prefix)
+}
+
+// refsUnder is each ref under prefix in the repository at dir, without the prefix and its slash,
+// with its object.
+func refsUnder(t *testing.T, dir, prefix string) map[string]string {
+	t.Helper()
+	refs := map[string]string{}
+	for line := range strings.Lines(testGit(t, dir, "for-each-ref", "--format=%(refname) %(objectname)", prefix+"/")) {
+		name, id, _ := strings.Cut(strings.TrimSpace(line), " ")
+		refs[strings.TrimPrefix(name, prefix+"/")] = id
+	}
+	return refs
+}
+
+// wantRefs fails the test unless refs has exactly the names of want.
+func wantRefs(t *testing.T, refs map[string]string, want ...string) {
+	t.Helper()
+	var got []string
+	for name := range refs {
+		got = append(got, name)
+	}
+	slices.Sort(got)
+	slices.Sort(want)
+	if !slices.Equal(got, want) {
+		t.Errorf("the run's other refs are %v, want %v", got, want)
+	}
 }
 
 // files is the files of commit in the repository at dir.
@@ -666,7 +721,7 @@ func TestGitSessionBringsAFurtherRepositoryBack(t *testing.T) {
 		if len(qs) != 2 || qs[0] != nil || qs[1] == nil {
 			t.Fatalf("quarantines %v, want none for the person's repository and one for the further one", qs)
 		}
-		if err := qs[1].FetchInto(ctx, further, "refs/heads/"+branch); err != nil {
+		if _, err := qs[1].FetchInto(ctx, further, "refs/heads/"+branch); err != nil {
 			t.Fatal(err)
 		}
 		head := testGit(t, further, "rev-parse", "refs/heads/"+branch)
@@ -933,6 +988,148 @@ func TestTopEntryFailsTheQuarantine(t *testing.T) {
 	}
 }
 
+// editedBundle writes the bundle of the person's repository for the git session, from the copy of d,
+// with refs/heads/<branch> at commit, past base, and the run's refs under prefix in names, each at
+// commit too; then each name of the header that edits has is replaced by its value.
+func editedBundle(t *testing.T, d Dir, commit, base string, names []string, edits map[string]string) {
+	t.Helper()
+	testGit(t, d.Work(), "update-ref", "refs/heads/"+branch, commit)
+	args := []string{"bundle", "create", "--quiet", filepath.Join(d.Bundle(), "0.bundle"), "refs/heads/" + branch}
+	for _, name := range names {
+		testGit(t, d.Work(), "update-ref", name, commit)
+		args = append(args, name)
+	}
+	if err := os.Mkdir(d.Bundle(), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	testGit(t, d.Work(), append(args, "^"+base)...)
+	path := filepath.Join(d.Bundle(), "0.bundle")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	end := bytes.Index(data, []byte("\n\n")) + 1
+	header := string(data[:end])
+	for from, to := range edits {
+		if !strings.Contains(header, " "+from+"\n") {
+			t.Fatalf("the header has no %s:\n%s", from, header)
+		}
+		header = strings.Replace(header, " "+from+"\n", " "+to+"\n", 1)
+	}
+	if err := os.WriteFile(path, append([]byte(header), data[end:]...), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestABundleWithARefOutsideThePrefixFails is a bundle whose header has a ref other than the run's
+// branch and the run's refs under its prefix, a ref under the prefix with a trick in its name, or
+// two refs that differ only in letter case: the quarantine fails, and nothing reaches the person's
+// repository.
+func TestABundleWithARefOutsideThePrefixFails(t *testing.T) {
+	for name, c := range map[string]struct {
+		names []string
+		edits map[string]string
+		want  string
+	}{
+		"a branch":         {[]string{"refs/heads/main"}, nil, "the bundle has the ref refs/heads/main"},
+		"HEAD":             {[]string{prefix + "/HEAD"}, map[string]string{prefix + "/HEAD": "HEAD"}, "the bundle has the ref HEAD"},
+		"another run":      {[]string{"refs/qory/run-2/heads/x"}, nil, "the bundle has the ref refs/qory/run-2/heads/x"},
+		"another form":     {[]string{prefix + "/other"}, nil, "the bundle has the ref " + prefix + "/other"},
+		"a dot dot":        {[]string{prefix + "/heads/aa"}, map[string]string{prefix + "/heads/aa": prefix + "/heads/../../heads/main"}, "the bundle has the ref"},
+		"a lock":           {[]string{prefix + "/heads/aa"}, map[string]string{prefix + "/heads/aa": prefix + "/heads/x.lock"}, "the bundle has the ref"},
+		"a control":        {[]string{prefix + "/heads/aa"}, map[string]string{prefix + "/heads/aa": prefix + "/heads/a\tb"}, "the bundle has the ref"},
+		"a lost name":      {[]string{prefix + "/lost/01"}, nil, "the bundle has the ref " + prefix + "/lost/01"},
+		"two letter cases": {[]string{prefix + "/heads/aa", prefix + "/heads/bb"}, map[string]string{prefix + "/heads/bb": prefix + "/heads/AA"}, "the bundle has the ref " + prefix + "/heads/AA twice"},
+		"the branch twice": {[]string{prefix + "/heads/aa"}, map[string]string{prefix + "/heads/aa": "refs/heads/" + branch}, "the bundle has the ref refs/heads/" + branch + " twice"},
+	} {
+		t.Run(strings.ReplaceAll(name, " ", "-"), func(t *testing.T) {
+			bothChecks(t, func(t *testing.T) {
+				src, base := person(t)
+				before := testGit(t, src, "for-each-ref")
+				d, repos := cloneRun(t, src)
+				write(t, d.Work(), "x.txt", "x\n")
+				commit := commitAll(t, d.Work(), "x")
+				editedBundle(t, d, commit, base, c.names, c.edits)
+				_, err := d.Quarantine(context.Background(), branch, repos)
+				hasPrefix(t, name, err, "the run's bundle for . failed git's checks")
+				if err == nil || !strings.Contains(err.Error(), c.want) {
+					t.Errorf("the error %v does not have %q", err, c.want)
+				}
+				if after := testGit(t, src, "for-each-ref"); after != before {
+					t.Errorf("your repository's refs were\n%s\nand are\n%s", before, after)
+				}
+				noRunCommit(t, src, commit)
+			})
+		})
+	}
+}
+
+// TestRunRefTakesTheFormsOfTheRunsRefs is the check of each ref name under the run's prefix.
+func TestRunRefTakesTheFormsOfTheRunsRefs(t *testing.T) {
+	for name, want := range map[string]bool{
+		prefix + "/HEAD": true, prefix + "/uncommitted": true, prefix + "/stash": true,
+		prefix + "/lost/1": true, prefix + "/lost/12": true, prefix + "/heads/a/b": true,
+		prefix + "/tags/v1.0": true, prefix + "/heads/qory/run-1": true,
+		prefix + "/lost/0": false, prefix + "/lost/": false, prefix + "/lost/x": false,
+		prefix + "/lost/1234567890": false, prefix + "/heads/": false, prefix + "/heads/a//b": false,
+		prefix + "/heads/.a": false, prefix + "/heads/a.": false, prefix + "/heads/a.lock": false,
+		prefix + "/heads/a..b": false, prefix + "/heads/a@{1}": false, prefix + "/heads/@": false,
+		prefix + "/heads/a b": false, prefix + "/heads/a~1": false, prefix + "/heads/a^": false,
+		prefix + "/heads/a:b": false, prefix + "/heads/a?": false, prefix + "/heads/a*": false,
+		prefix + "/heads/a[": false, prefix + "/heads/a\\b": false, prefix + "/heads/a\x7f": false,
+		prefix + "/heads/a/": false, prefix + "/notes/a": false, prefix + "/HEADS/a": false,
+		prefix: false, prefix + "-2/HEAD": false, "refs/heads/main": false, "HEAD": false,
+	} {
+		if got := runRef(prefix, name); got != want {
+			t.Errorf("runRef(%q) = %v, want %v", name, got, want)
+		}
+	}
+}
+
+// TestTheRunsRefsTakeAFreePrefix is a person's repository that has refs under the run's prefix, as
+// after an earlier run with the same id: the run's refs come back under the next free prefix, and the
+// earlier refs stay. A ref above every prefix, refs/qory, leaves none free, and the fetch stops.
+func TestTheRunsRefsTakeAFreePrefix(t *testing.T) {
+	for name, c := range map[string]struct{ ref, want string }{
+		"a ref under it":        {prefix + "/heads/old", prefix + "-2"},
+		"a ref in another case": {"refs/QORY/run-run-1/heads/old", prefix + "-2"},
+		"a ref above it":        {"refs/qory", ""},
+		"the prefix as a ref":   {prefix, prefix + "-2"},
+		"a ref beside it":       {prefix + "-x/heads/old", prefix},
+	} {
+		t.Run(strings.ReplaceAll(name, " ", "-"), func(t *testing.T) {
+			isolate(t)
+			sessionGit(t)
+			src, base := person(t)
+			testGit(t, src, "update-ref", c.ref, base)
+			d, repos := cloneRun(t, src)
+			write(t, d.Work(), "x.txt", "x\n")
+			testGit(t, d.Work(), "stash", "--quiet", "--include-untracked")
+			runGit(t, d, repos, nil)
+			qs, err := d.Quarantine(context.Background(), branch, repos)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got, err := qs[0].FetchInto(context.Background(), src, "refs/heads/"+branch)
+			if c.want == "" {
+				hasPrefix(t, name, err, "delete the refs under "+prefix+" and "+prefix+"-<number> in ")
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got != c.want {
+				t.Errorf("the refs came back under %s, want %s", got, c.want)
+			}
+			// On a disk that ignores case, for-each-ref lists a ref by the case of a folder that exists.
+			testGit(t, src, "rev-parse", "--verify", "--quiet", c.want+"/stash")
+			if at := testGit(t, src, "rev-parse", c.ref); at != base {
+				t.Errorf("%s moved to %s", c.ref, at)
+			}
+		})
+	}
+}
+
 func TestFetchIntoSaysWhatToDo(t *testing.T) {
 	isolate(t)
 	sessionGit(t)
@@ -951,12 +1148,12 @@ func TestFetchIntoSaysWhatToDo(t *testing.T) {
 	}
 	q := qs[0]
 
-	err = q.FetchInto(ctx, src, "refs/heads/main")
+	_, err = q.FetchInto(ctx, src, "refs/heads/main")
 	hasPrefix(t, "checked-out branch", err, "give the run's commits a ref other than refs/heads/main")
 	if got := testGit(t, src, "rev-parse", "refs/heads/main"); got != base {
 		t.Errorf("main moved to %s", got)
 	}
-	err = q.FetchInto(ctx, src, "refs/heads/side")
+	_, err = q.FetchInto(ctx, src, "refs/heads/side")
 	hasPrefix(t, "branch on another line", err, "delete refs/heads/side in ")
 	if err == nil || !strings.Contains(err.Error(), q.Path) {
 		t.Errorf("the error %v does not say the quarantine's path %s", err, q.Path)
@@ -967,12 +1164,12 @@ func TestFetchIntoSaysWhatToDo(t *testing.T) {
 	if _, err := os.Lstat(q.Path); err != nil {
 		t.Errorf("the quarantine is gone after a failed fetch: %v", err)
 	}
-	err = q.FetchInto(ctx, src, "main")
+	_, err = q.FetchInto(ctx, src, "main")
 	hasPrefix(t, "short ref", err, "give a full ref name")
 
 	// A second fetch, and a second quarantine, work.
 	for range 2 {
-		if err := q.FetchInto(ctx, src, "refs/heads/"+branch); err != nil {
+		if _, err := q.FetchInto(ctx, src, "refs/heads/"+branch); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -1020,7 +1217,7 @@ func TestFetchIntoWaitsForALock(t *testing.T) {
 	released := time.AfterFunc(2*time.Second, func() { _ = os.Remove(lock) })
 	t.Cleanup(func() { released.Stop() })
 	start := time.Now()
-	if err := q.FetchInto(context.Background(), src, "refs/heads/"+branch); err != nil {
+	if _, err := q.FetchInto(context.Background(), src, "refs/heads/"+branch); err != nil {
 		t.Fatal(err)
 	}
 	if took := time.Since(start); took < 2*time.Second {
@@ -1048,7 +1245,7 @@ func TestFetchIntoStopsAfterTheLockWaits(t *testing.T) {
 	lockWaits = []time.Duration{10 * time.Millisecond, 10 * time.Millisecond, 10 * time.Millisecond, 10 * time.Millisecond, 10 * time.Millisecond}
 	t.Cleanup(func() { lockWaits = old })
 	start := time.Now()
-	err := q.FetchInto(context.Background(), src, "refs/heads/"+branch)
+	_, err := q.FetchInto(context.Background(), src, "refs/heads/"+branch)
 	hasPrefix(t, "a lock that stays", err, "fetch refs/heads/"+branch+" from ")
 	if err == nil || !strings.Contains(err.Error(), "cannot lock ref") {
 		t.Errorf("the error %v does not have git's line", err)
@@ -1072,7 +1269,7 @@ func TestFetchIntoStopsWaitingAtTheEndOfItsContext(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 	defer cancel()
 	start := time.Now()
-	if err := q.FetchInto(ctx, src, "refs/heads/"+branch); err == nil {
+	if _, err := q.FetchInto(ctx, src, "refs/heads/"+branch); err == nil {
 		t.Fatal("the fetch passed a held lock")
 	}
 	if took := time.Since(start); took > 10*time.Second {
@@ -2153,7 +2350,7 @@ func TestASubmoduleBehindALinkIsSkipped(t *testing.T) {
 	if err := os.Symlink(outside, top); err != nil {
 		t.Fatal(err)
 	}
-	if err := d.cloneSubmodules(context.Background(), src, d.Work(), base); err != nil {
+	if _, err := d.cloneSubmodules(context.Background(), src, d.Work(), base); err != nil {
 		t.Fatal(err)
 	}
 	entries, err := os.ReadDir(outside)
@@ -2519,7 +2716,7 @@ func TestTheGitSessionUsesTheMessageItIsGiven(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := qs[0].FetchInto(context.Background(), src, "refs/heads/"+branch); err != nil {
+	if _, err := qs[0].FetchInto(context.Background(), src, "refs/heads/"+branch); err != nil {
 		t.Fatal(err)
 	}
 	if got := testGit(t, src, "log", "-1", "--format=%B", branch); !strings.Contains(got, "Changes left by run 7\n\nThe run ended failed.") {
@@ -2889,9 +3086,10 @@ func TestTheBranchComesBackWithHeadAtTheBaseCommit(t *testing.T) {
 	}
 }
 
-// TestAChangeOnAScratchBranchIsLeftBehind is the same with a file left in the working tree, which
-// the branch does not start from: the commit stays out, and the session records that.
-func TestAChangeOnAScratchBranchIsLeftBehind(t *testing.T) {
+// TestAChangeOnAScratchBranchArrivesUnderRefsQory is the same with a file left in the working
+// tree, which the branch does not start from: the branch comes back as it is, and the file comes
+// back in a commit on HEAD, under the run's prefix.
+func TestAChangeOnAScratchBranchArrivesUnderRefsQory(t *testing.T) {
 	isolate(t)
 	sessionGit(t)
 	src, base := person(t)
@@ -2900,54 +3098,64 @@ func TestAChangeOnAScratchBranchIsLeftBehind(t *testing.T) {
 	commitAll(t, d.Work(), "on the branch")
 	testGit(t, d.Work(), "checkout", "--quiet", "-b", "scratch", base)
 	write(t, d.Work(), "scratch.txt", "x\n")
-	q := bringBack(t, d, src, repos, nil)
+	q, refs := runRefs(t, d, src, repos, nil)
 	got := files(t, src, "refs/heads/"+branch)
 	if !slices.Contains(got, "kept.txt") || slices.Contains(got, "scratch.txt") {
 		t.Errorf("the branch at %s has %v", q.Head, got)
 	}
-	if !d.LeftBehind(repos) {
-		t.Error("the session did not record the file left behind")
+	wantRefs(t, refs, "uncommitted")
+	if got := files(t, src, prefix+"/uncommitted"); !slices.Contains(got, "scratch.txt") || slices.Contains(got, "kept.txt") {
+		t.Errorf("uncommitted has %v", got)
+	}
+	if got := testGit(t, src, "rev-parse", prefix+"/uncommitted^"); got != base {
+		t.Errorf("uncommitted has the parent %s, want HEAD %s", got, base)
 	}
 }
 
-// TestACommitOnAnotherBranchIsLeftBehind is an agent that committed on a branch and then checked
-// out the run's branch: no bundle comes back, and the session records the commit.
-func TestACommitOnAnotherBranchIsLeftBehind(t *testing.T) {
+// TestACommitOnAnotherBranchArrivesUnderRefsQory is an agent that committed on a branch and then
+// checked out the run's branch: the branch comes back under the run's prefix, and the run's
+// branch, with no commit, does not.
+func TestACommitOnAnotherBranchArrivesUnderRefsQory(t *testing.T) {
 	isolate(t)
 	sessionGit(t)
 	src, _ := person(t)
 	d, repos := cloneRun(t, src)
 	testGit(t, d.Work(), "checkout", "--quiet", "-b", "feature")
 	write(t, d.Work(), "feature.txt", "x\n")
-	commitAll(t, d.Work(), "on feature")
+	tip := commitAll(t, d.Work(), "on feature")
 	testGit(t, d.Work(), "checkout", "--quiet", branch)
-	runGit(t, d, repos, nil)
-	if _, err := d.Quarantine(t.Context(), branch, repos); !errors.Is(err, ErrNoBundle) {
-		t.Errorf("%v, want no bundle", err)
+	q, refs := runRefs(t, d, src, repos, nil)
+	if q.Head != "" {
+		t.Errorf("the run's branch came back at %s", q.Head)
 	}
-	if !d.LeftBehind(repos) {
-		t.Error("the session did not record the commit on feature")
+	wantRefs(t, refs, "heads/feature")
+	if refs["heads/feature"] != tip {
+		t.Errorf("heads/feature is at %s, want %s", refs["heads/feature"], tip)
+	}
+	if out := testGit(t, src, "for-each-ref", "refs/heads/qory/"); out != "" {
+		t.Errorf("a run's branch came back: %s", out)
 	}
 }
 
-// TestABranchPastHeadIsLeftBehind is commits on two branches from the base commit: HEAD's come
-// back, and the session records the others.
-func TestABranchPastHeadIsLeftBehind(t *testing.T) {
+// TestABranchPastHeadArrivesUnderRefsQory is commits on two branches from the base commit: HEAD's
+// come back on the run's branch, and the run's branch in the copy under the run's prefix.
+func TestABranchPastHeadArrivesUnderRefsQory(t *testing.T) {
 	isolate(t)
 	sessionGit(t)
 	src, base := person(t)
 	d, repos := cloneRun(t, src)
 	write(t, d.Work(), "one.txt", "x\n")
-	commitAll(t, d.Work(), "on the branch")
+	one := commitAll(t, d.Work(), "on the branch")
 	testGit(t, d.Work(), "checkout", "--quiet", "-b", "side", base)
 	write(t, d.Work(), "two.txt", "x\n")
 	commitAll(t, d.Work(), "on side")
-	bringBack(t, d, src, repos, nil)
+	_, refs := runRefs(t, d, src, repos, nil)
 	if got := files(t, src, "refs/heads/"+branch); !slices.Contains(got, "two.txt") {
 		t.Errorf("the branch has %v", got)
 	}
-	if !d.LeftBehind(repos) {
-		t.Error("the session did not record the commit on the run's branch")
+	wantRefs(t, refs, "heads/side", "heads/"+branch)
+	if refs["heads/"+branch] != one {
+		t.Errorf("heads/%s is at %s, want %s", branch, refs["heads/"+branch], one)
 	}
 }
 
@@ -2974,36 +3182,29 @@ func TestABranchInHeadLeavesNothingBehind(t *testing.T) {
 	}
 }
 
-// TestAFolderGitCannotReadIsLeftBehind is new work in a folder of mode 000: git add exits 0, the
-// session prints git's line, and it records the work left behind.
-func TestAFolderGitCannotReadIsLeftBehind(t *testing.T) {
-	if os.Geteuid() == 0 {
-		t.Skip("root reads a folder of mode 000")
-	}
+// TestAFolderGitCannotReadComesBack is new work in a folder of mode 000 and in a file of mode 000,
+// which the session's user owns: the session gives itself read access, and the work comes back.
+func TestAFolderGitCannotReadComesBack(t *testing.T) {
 	isolate(t)
 	sessionGit(t)
 	src, _ := person(t)
 	d, repos := cloneRun(t, src)
 	write(t, d.Work(), "ok.txt", "ok\n")
 	write(t, d.Work(), "locked/new.txt", "x\n")
-	locked := filepath.Join(d.Work(), "locked")
-	if err := os.Chmod(locked, 0); err != nil {
-		t.Fatal(err)
+	write(t, d.Work(), "unread.txt", "y\n")
+	for _, p := range []string{"locked/new.txt", "unread.txt", "locked"} {
+		locked := filepath.Join(d.Work(), filepath.FromSlash(p))
+		if err := os.Chmod(locked, 0); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = os.Chmod(locked, 0o755) })
 	}
-	t.Cleanup(func() { os.Chmod(locked, 0o755) })
-	out := sessionOutput(t, d, repos, nil)
-	if !strings.Contains(out, "qory: git add printed in the copy: ") || !strings.Contains(out, "could not open directory") {
-		t.Errorf("the session printed:\n%s", out)
-	}
-	if !d.LeftBehind(repos) {
-		t.Error("the session did not record the folder left behind")
-	}
-	qs, err := d.Quarantine(t.Context(), branch, repos)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !slices.Contains(files(t, qs[0].Path, qs[0].Head), "ok.txt") {
-		t.Error("ok.txt did not come back")
+	q, _ := runRefs(t, d, src, repos, nil)
+	got := files(t, q.Path, q.Head)
+	for _, want := range []string{"ok.txt", "locked/new.txt", "unread.txt"} {
+		if !slices.Contains(got, want) {
+			t.Errorf("%s did not come back: %v", want, got)
+		}
 	}
 }
 
@@ -3220,6 +3421,19 @@ func TestAnEmbeddedRepositoryWithNoFindIsLeftBehind(t *testing.T) {
 	}
 }
 
+// noBundleWith runs the git session for repos with out, and wants nothing to come back and
+// nothing left behind.
+func noBundleWith(t *testing.T, d Dir, repos []Repository, out map[string]LeftOut) {
+	t.Helper()
+	printed := sessionOutput(t, d, repos, out)
+	if _, err := d.Quarantine(context.Background(), branch, repos); !errors.Is(err, ErrNoBundle) {
+		t.Errorf("Quarantine = %v, want no bundle\n%s", err, printed)
+	}
+	if d.LeftBehind(repos) {
+		t.Errorf("the session recorded work left behind\n%s", printed)
+	}
+}
+
 // noBundle runs the git session and wants no commit past the base commit in the person's
 // repository, and wants left as what the session recorded as left behind.
 func noBundle(t *testing.T, d Dir, repos []Repository, left bool) string {
@@ -3236,7 +3450,8 @@ func noBundle(t *testing.T, d Dir, repos []Repository, left bool) string {
 
 // TestAHeadBeforeTheBaseCommitCommitsNothing is an agent that checked out a commit older than the
 // base commit: the working tree lacks the base commit's files, and the session commits no deletion
-// of them. With nothing else in the copy no work stays behind, and a change there does.
+// of them. With nothing else in the copy nothing comes back, and a change there comes back in a
+// commit on HEAD, under the run's prefix.
 func TestAHeadBeforeTheBaseCommitCommitsNothing(t *testing.T) {
 	for _, changed := range []bool{false, true} {
 		t.Run("", func(t *testing.T) {
@@ -3247,18 +3462,27 @@ func TestAHeadBeforeTheBaseCommitCommitsNothing(t *testing.T) {
 			commitAll(t, src, "newer")
 			d, repos := cloneRun(t, src)
 			testGit(t, d.Work(), "checkout", "--quiet", "--detach", older)
-			if changed {
-				write(t, d.Work(), "README.md", "changed\n")
+			if !changed {
+				noBundle(t, d, repos, false)
+				return
 			}
-			noBundle(t, d, repos, changed)
+			write(t, d.Work(), "README.md", "changed\n")
+			_, refs := runRefs(t, d, src, repos, nil)
+			wantRefs(t, refs, "uncommitted")
+			if got := files(t, src, prefix+"/uncommitted"); slices.Contains(got, "newer.txt") {
+				t.Errorf("uncommitted has %v", got)
+			}
+			if got := testGit(t, src, "show", prefix+"/uncommitted:README.md"); got != "changed" {
+				t.Errorf("uncommitted has README.md %q", got)
+			}
 		})
 	}
 }
 
 // TestAResetBelowTheBaseCommitCommitsNothing is an agent that runs reset --hard HEAD~1 on the run's
 // branch and leaves a new file: HEAD and the branch are one commit, older than the base commit, so
-// a commit of that working tree would delete the base commit's file. The session makes no commit,
-// so no bundle comes back and the branch stays at the base commit, and the new file keeps the copy.
+// a commit of that working tree on the branch would delete the base commit's file. The branch stays
+// at the base commit, and the new file comes back in a commit on HEAD, under the run's prefix.
 func TestAResetBelowTheBaseCommitCommitsNothing(t *testing.T) {
 	isolate(t)
 	sessionGit(t)
@@ -3273,24 +3497,20 @@ func TestAResetBelowTheBaseCommitCommitsNothing(t *testing.T) {
 			t.Fatalf("%s is at %s, want the older commit %s", ref, got, older)
 		}
 	}
-	printed := sessionOutput(t, d, repos, nil)
-	if !d.LeftBehind(repos) {
-		t.Errorf("the session did not record the new file:\n%s", printed)
+	q, refs := runRefs(t, d, src, repos, nil)
+	if q.Head != "" {
+		t.Errorf("the run's branch came back at %s", q.Head)
 	}
-	qs, err := d.Quarantine(context.Background(), branch, repos)
-	if errors.Is(err, ErrNoBundle) {
-		return
+	wantRefs(t, refs, "uncommitted")
+	got := files(t, src, prefix+"/uncommitted")
+	if !slices.Contains(got, "left.txt") || slices.Contains(got, "newer.txt") {
+		t.Errorf("uncommitted has %v", got)
 	}
-	if err != nil {
-		t.Fatalf("Quarantine: %v\n%s", err, printed)
-	}
-	got := files(t, qs[0].Path, qs[0].Head)
-	t.Errorf("the session made a commit, which has %v; newer.txt present = %t", got, slices.Contains(got, "newer.txt"))
 }
 
 // TestAnOrphanHeadCommitsNothing is an agent on a branch with no commit, past the run's branch:
-// the session commits no deletion of every tracked file, the branch comes back as it is, and the
-// new file stays behind.
+// the session commits no deletion of every tracked file on the branch, the branch comes back as
+// it is, and the new file comes back in a commit with no parent, under the run's prefix.
 func TestAnOrphanHeadCommitsNothing(t *testing.T) {
 	isolate(t)
 	sessionGit(t)
@@ -3302,12 +3522,13 @@ func TestAnOrphanHeadCommitsNothing(t *testing.T) {
 	testGit(t, d.Work(), "checkout", "--quiet", "--orphan", "o")
 	testGit(t, d.Work(), "rm", "-rf", "--quiet", ".")
 	write(t, d.Work(), "new.txt", "new\n")
-	q := bringBack(t, d, src, repos, nil)
+	q, refs := runRefs(t, d, src, repos, nil)
 	if q.Head != tip {
 		t.Errorf("the bundle has %s, want the agent's commit %s", q.Head, tip)
 	}
-	if !d.LeftBehind(repos) {
-		t.Error("the session did not record the new file")
+	wantRefs(t, refs, "uncommitted")
+	if got := files(t, src, prefix+"/uncommitted"); !slices.Equal(got, []string{"new.txt"}) {
+		t.Errorf("uncommitted has %v", got)
 	}
 }
 
@@ -3323,52 +3544,119 @@ func TestAnEmptyOrphanHeadLeavesNothingBehind(t *testing.T) {
 	noBundle(t, d, repos, false)
 }
 
-// TestWorkOutsideTheBundleIsLeftBehind is each way an agent can leave work that the bundle does
-// not have, with nothing past the base commit: the session records it, so the copy stays.
-func TestWorkOutsideTheBundleIsLeftBehind(t *testing.T) {
-	for name, agent := range map[string]func(t *testing.T, work, base string){
-		"stash": func(t *testing.T, work, _ string) {
+// TestWorkOutsideTheBranchArrivesUnderRefsQory is each way an agent can leave work that the run's
+// branch does not have, with nothing past the base commit: the work comes back under the run's
+// prefix, and no copy stays.
+func TestWorkOutsideTheBranchArrivesUnderRefsQory(t *testing.T) {
+	for name, c := range map[string]struct {
+		agent func(t *testing.T, work, base string)
+		refs  []string
+	}{
+		"stash": {func(t *testing.T, work, _ string) {
 			write(t, work, "README.md", "stashed\n")
 			testGit(t, work, "stash", "--quiet")
-		},
-		"tag then reset": func(t *testing.T, work, base string) {
+		}, []string{"stash"}},
+		"tag then reset": {func(t *testing.T, work, base string) {
 			write(t, work, "x.txt", "x\n")
 			commitAll(t, work, "x")
 			testGit(t, work, "tag", "keep")
 			testGit(t, work, "reset", "--quiet", "--hard", base)
-		},
-		"annotated tag then reset": func(t *testing.T, work, base string) {
+		}, []string{"tags/keep"}},
+		"annotated tag then reset": {func(t *testing.T, work, base string) {
 			write(t, work, "x.txt", "x\n")
 			commitAll(t, work, "x")
 			testGit(t, work, "tag", "-a", "-m", "keep", "keep")
 			testGit(t, work, "reset", "--quiet", "--hard", base)
-		},
-		"reset": func(t *testing.T, work, base string) {
+		}, []string{"tags/keep"}},
+		"reset": {func(t *testing.T, work, base string) {
 			write(t, work, "x.txt", "x\n")
 			commitAll(t, work, "x")
 			testGit(t, work, "reset", "--quiet", "--hard", base)
-		},
-		"detached commit": func(t *testing.T, work, _ string) {
+		}, []string{"lost/1"}},
+		"detached commit": {func(t *testing.T, work, _ string) {
 			testGit(t, work, "checkout", "--quiet", "--detach")
 			write(t, work, "x.txt", "x\n")
 			commitAll(t, work, "x")
 			testGit(t, work, "checkout", "--quiet", branch)
-		},
+		}, []string{"lost/1"}},
+		"two resets": {func(t *testing.T, work, base string) {
+			write(t, work, "x.txt", "x\n")
+			commitAll(t, work, "x")
+			write(t, work, "y.txt", "y\n")
+			commitAll(t, work, "y")
+			testGit(t, work, "reset", "--quiet", "--hard", "HEAD~1")
+			testGit(t, work, "reset", "--quiet", "--hard", base)
+		}, []string{"lost/1"}},
+		"notes": {func(t *testing.T, work, _ string) {
+			testGit(t, work, "notes", "add", "-m", "a note")
+		}, []string{"lost/1"}},
 	} {
 		t.Run(strings.ReplaceAll(name, " ", "-"), func(t *testing.T) {
 			isolate(t)
 			sessionGit(t)
 			src, base := person(t)
 			d, repos := cloneRun(t, src)
-			agent(t, d.Work(), base)
-			noBundle(t, d, repos, true)
+			c.agent(t, d.Work(), base)
+			q, refs := runRefs(t, d, src, repos, nil)
+			if q.Head != "" {
+				t.Errorf("the run's branch came back at %s", q.Head)
+			}
+			wantRefs(t, refs, c.refs...)
+			for name := range refs {
+				if got := testGit(t, src, "rev-parse", prefix+"/"+name+"^{commit}"); got == base {
+					t.Errorf("%s is at the base commit", name)
+				}
+			}
 		})
 	}
 }
 
-// TestADetachedCommitBesideTheBranchIsLeftBehind is an agent with a commit on the branch and one
-// made with HEAD detached: the branch comes back, and the other commit keeps the copy.
-func TestADetachedCommitBesideTheBranchIsLeftBehind(t *testing.T) {
+// TestTwoStashesBesideTheBranchArriveUnderRefsQory is an agent with a commit on the branch and two
+// stashes: the branch comes back, the newer stash as stash, and the older one as lost/1.
+func TestTwoStashesBesideTheBranchArriveUnderRefsQory(t *testing.T) {
+	isolate(t)
+	sessionGit(t)
+	src, _ := person(t)
+	d, repos := cloneRun(t, src)
+	write(t, d.Work(), "kept.txt", "kept\n")
+	commitAll(t, d.Work(), "on the branch")
+	write(t, d.Work(), "README.md", "older\n")
+	testGit(t, d.Work(), "stash", "--quiet")
+	older := testGit(t, d.Work(), "rev-parse", "refs/stash")
+	write(t, d.Work(), "README.md", "newer\n")
+	testGit(t, d.Work(), "stash", "--quiet")
+	newer := testGit(t, d.Work(), "rev-parse", "refs/stash")
+	q, refs := runRefs(t, d, src, repos, nil)
+	if !slices.Contains(files(t, src, q.Head), "kept.txt") {
+		t.Error("kept.txt did not come back")
+	}
+	wantRefs(t, refs, "stash", "lost/1")
+	if refs["stash"] != newer || refs["lost/1"] != older {
+		t.Errorf("stash is %s and lost/1 %s, want %s and %s", refs["stash"], refs["lost/1"], newer, older)
+	}
+}
+
+// TestAStashThatAddsQoryFailsTheQuarantine is a stash whose untracked files have .qory at the top,
+// which git stash apply would write: nothing comes back.
+func TestAStashThatAddsQoryFailsTheQuarantine(t *testing.T) {
+	isolate(t)
+	sessionGit(t)
+	src, _ := person(t)
+	d, repos := cloneRun(t, src)
+	write(t, d.Work(), ".qory/qory.yaml", "env:\n  A: \"2\"\n")
+	testGit(t, d.Work(), "stash", "--quiet", "--include-untracked")
+	printed := sessionOutput(t, d, repos, nil)
+	_, err := d.Quarantine(context.Background(), branch, repos)
+	hasPrefix(t, "a stash with .qory", err, "the run's commit ")
+	if err == nil || !strings.Contains(err.Error(), "adds .qory at the top") {
+		t.Errorf("the error is %v\n%s", err, printed)
+	}
+	noRunCommit(t, src, testGit(t, d.Work(), "rev-parse", "refs/stash"))
+}
+
+// TestADetachedCommitBesideTheBranchArrivesUnderRefsQory is an agent with a commit on the branch and
+// one made with HEAD detached: the branch comes back, and the other commit as lost/1.
+func TestADetachedCommitBesideTheBranchArrivesUnderRefsQory(t *testing.T) {
 	isolate(t)
 	sessionGit(t)
 	src, _ := person(t)
@@ -3377,18 +3665,19 @@ func TestADetachedCommitBesideTheBranchIsLeftBehind(t *testing.T) {
 	commitAll(t, d.Work(), "on the branch")
 	testGit(t, d.Work(), "checkout", "--quiet", "--detach")
 	write(t, d.Work(), "x.txt", "x\n")
-	commitAll(t, d.Work(), "x")
+	detached := commitAll(t, d.Work(), "x")
 	testGit(t, d.Work(), "checkout", "--quiet", branch)
-	bringBack(t, d, src, repos, nil)
-	if !d.LeftBehind(repos) {
-		t.Error("the session did not record the detached commit")
+	_, refs := runRefs(t, d, src, repos, nil)
+	wantRefs(t, refs, "lost/1")
+	if refs["lost/1"] != detached {
+		t.Errorf("lost/1 is at %s, want %s", refs["lost/1"], detached)
 	}
 }
 
-// TestAnUnrelatedHeadIsLeftBehind is a detached commit that does not descend from the base commit,
-// with the branch past that commit: the branch comes back, and the commit keeps the copy. The
+// TestAnUnrelatedHeadArrivesUnderRefsQory is a detached commit that does not descend from the base
+// commit, with the branch past that commit: the branch comes back, and the commit as HEAD. The
 // working tree is at that commit, so the session finds no change there.
-func TestAnUnrelatedHeadIsLeftBehind(t *testing.T) {
+func TestAnUnrelatedHeadArrivesUnderRefsQory(t *testing.T) {
 	isolate(t)
 	sessionGit(t)
 	src, _ := person(t)
@@ -3398,35 +3687,60 @@ func TestAnUnrelatedHeadIsLeftBehind(t *testing.T) {
 	tip := testGit(t, d.Work(), "rev-parse", "HEAD")
 	testGit(t, d.Work(), "checkout", "--quiet", "--orphan", "y")
 	write(t, d.Work(), "y.txt", "y\n")
-	commitAll(t, d.Work(), "y")
+	y := commitAll(t, d.Work(), "y")
 	testGit(t, d.Work(), "checkout", "--quiet", "--detach")
 	testGit(t, d.Work(), "branch", "-q", "-D", "y")
-	q := bringBack(t, d, src, repos, nil)
+	q, refs := runRefs(t, d, src, repos, nil)
 	if q.Head != tip {
 		t.Errorf("the bundle has %s, want %s", q.Head, tip)
 	}
-	if !d.LeftBehind(repos) {
-		t.Error("the session did not record the commit at HEAD")
+	wantRefs(t, refs, "HEAD")
+	if refs["HEAD"] != y {
+		t.Errorf("HEAD is at %s, want %s", refs["HEAD"], y)
 	}
 }
 
-// TestASubmodulePastItsGitlinkIsLeftBehind is a commit or a change in a submodule: the session
-// prints a line, and the copy stays.
-func TestASubmodulePastItsGitlinkIsLeftBehind(t *testing.T) {
+// TestASubmodulePastItsGitlinkArrivesUnderRefsQory is a commit or a change in a submodule: it
+// comes back under the run's prefix in the person's git folder of the submodule, as HEAD or as
+// uncommitted, and no ref outside the prefix there moves.
+func TestASubmodulePastItsGitlinkArrivesUnderRefsQory(t *testing.T) {
 	for name, commit := range map[string]bool{"commit": true, "change": false} {
 		t.Run(name, func(t *testing.T) {
 			isolate(t)
 			sessionGit(t)
 			src, sub := withSubmodule(t)
+			gitDir := testGit(t, filepath.Join(src, sub), "rev-parse", "--path-format=absolute", "--git-dir")
+			before := testGit(t, gitDir, "for-each-ref")
+			head := testGit(t, gitDir, "rev-parse", "HEAD")
 			d, repos := cloneRun(t, src)
 			inner := filepath.Join(d.Work(), filepath.FromSlash(sub))
 			write(t, inner, "lib.txt", "changed\n")
+			want := "uncommitted"
 			if commit {
 				commitAll(t, inner, "in the submodule")
+				want = "HEAD"
 			}
-			printed := noBundle(t, d, repos, true)
-			if want := "qory: the submodule libs/s in the copy has commits or changes that the commit leaves out"; !strings.Contains(printed, want) {
-				t.Errorf("the session printed:\n%s", printed)
+			q, refs := runRefs(t, d, src, repos, nil)
+			wantRefs(t, refs)
+			if q.Head != "" || len(q.Submodules) != 1 {
+				t.Fatalf("the quarantine has the head %q and %d submodules", q.Head, len(q.Submodules))
+			}
+			got := refsUnder(t, gitDir, prefix)
+			wantRefs(t, got, want)
+			if text := testGit(t, gitDir, "show", prefix+"/"+want+":lib.txt"); text != "changed" {
+				t.Errorf("lib.txt in %s is %q", want, text)
+			}
+			var after []string
+			for line := range strings.Lines(testGit(t, gitDir, "for-each-ref")) {
+				if !strings.Contains(line, "\t"+prefix+"/") {
+					after = append(after, strings.TrimSuffix(line, "\n"))
+				}
+			}
+			if strings.Join(after, "\n") != before {
+				t.Errorf("the submodule's refs were\n%s\nand are\n%s", before, after)
+			}
+			if got := testGit(t, gitDir, "rev-parse", "HEAD"); got != head {
+				t.Errorf("the submodule's HEAD moved to %s", got)
 			}
 		})
 	}
@@ -3641,7 +3955,8 @@ func TestAnOrphanHeadInASHA256Repository(t *testing.T) {
 			testGit(t, d.Work(), "checkout", "--quiet", "--orphan", "o")
 			testGit(t, d.Work(), "rm", "-rf", "--quiet", ".")
 			write(t, d.Work(), "new.txt", "new\n")
-			noBundle(t, d, repos, true)
+			_, refs := runRefs(t, d, src, repos, nil)
+			wantRefs(t, refs, "uncommitted")
 		})
 	}
 }
@@ -3759,17 +4074,13 @@ func setupRecord(t *testing.T, d Dir, r Repository) LeftOut {
 }
 
 // TestAnUnreadableFileLeavesTheRestToComeBack is a file of mode 000 beside other work: the session
-// ends well, the rest comes back, and the file keeps the copy.
-func TestAnUnreadableFileLeavesTheRestToComeBack(t *testing.T) {
-	if os.Geteuid() == 0 {
-		t.Skip("root reads a file of mode 000")
-	}
-	for name, c := range map[string]struct {
-		commit, change bool
-		bundle         bool
-	}{
-		"a commit":      {commit: true, bundle: true},
-		"a change":      {change: true, bundle: true},
+// TestAnUnreadableFileComesBack is a file of mode 000 that the agent left, which the session's user
+// owns, beside a commit, a change or nothing else: the session gives itself read access, and the
+// file comes back with the rest.
+func TestAnUnreadableFileComesBack(t *testing.T) {
+	for name, c := range map[string]struct{ commit, change bool }{
+		"a commit":      {commit: true},
+		"a change":      {change: true},
 		"no other work": {},
 	} {
 		t.Run(strings.ReplaceAll(name, " ", "-"), func(t *testing.T) {
@@ -3790,22 +4101,14 @@ func TestAnUnreadableFileLeavesTheRestToComeBack(t *testing.T) {
 				t.Fatal(err)
 			}
 			t.Cleanup(func() { _ = os.Chmod(locked, 0o644) })
-			printed := sessionOutput(t, d, repos, nil)
-			if !d.LeftBehind(repos) {
-				t.Errorf("the session did not record the file:\n%s", printed)
-			}
-			qs, err := d.Quarantine(context.Background(), branch, repos)
-			if !c.bundle {
-				if !errors.Is(err, ErrNoBundle) {
-					t.Errorf("Quarantine = %v, want no bundle", err)
+			q, _ := runRefs(t, d, src, repos, nil)
+			got := files(t, q.Path, q.Head)
+			if c.commit || c.change {
+				if !slices.Contains(got, "kept.txt") {
+					t.Errorf("the commit has %v", got)
 				}
-				return
 			}
-			if err != nil {
-				t.Fatal(err)
-			}
-			got := files(t, qs[0].Path, qs[0].Head)
-			if !slices.Contains(got, "kept.txt") || slices.Contains(got, "locked.txt") {
+			if !slices.Contains(got, "locked.txt") {
 				t.Errorf("the commit has %v", got)
 			}
 		})
@@ -3895,35 +4198,54 @@ func TestTextAutoHasNoCommit(t *testing.T) {
 	noBundle(t, d, repos, false)
 }
 
-// TestASparseCheckoutCommitsNoDeletion is an agent that took files out of the working tree: no
-// commit deletes them, and the copy stays.
+// TestASparseCheckoutCommitsNoDeletion is a sparse checkout in the copy, with or without a change:
+// the run's branch gets no commit, and a change comes back on HEAD under the run's prefix, with
+// each path the checkout took out as HEAD has it.
 func TestASparseCheckoutCommitsNoDeletion(t *testing.T) {
 	for name, agent := range map[string]func(t *testing.T, work string){
 		"sparse-checkout": func(t *testing.T, work string) {
 			testGit(t, work, "sparse-checkout", "set", "nothing-here")
 		},
 		"skip-worktree": func(t *testing.T, work string) {
-			testGit(t, work, "update-index", "--skip-worktree", "README.md")
-			if err := os.Remove(filepath.Join(work, "README.md")); err != nil {
+			testGit(t, work, "update-index", "--skip-worktree", "sub/a.txt")
+			if err := os.Remove(filepath.Join(work, "sub", "a.txt")); err != nil {
 				t.Fatal(err)
 			}
 		},
 	} {
-		t.Run(name, func(t *testing.T) {
-			isolate(t)
-			sessionGit(t)
-			src, _ := person(t)
-			write(t, src, "sub/a.txt", "a\n")
-			commitAll(t, src, "a folder")
-			d, repos := cloneRun(t, src)
-			agent(t, d.Work())
-			noBundle(t, d, repos, true)
-		})
+		for _, changed := range []bool{false, true} {
+			t.Run(name, func(t *testing.T) {
+				isolate(t)
+				sessionGit(t)
+				src, base := person(t)
+				write(t, src, "sub/a.txt", "a\n")
+				write(t, src, "sub/b.txt", "b\n")
+				base = commitAll(t, src, "a folder")
+				d, repos := cloneRun(t, src)
+				agent(t, d.Work())
+				if !changed {
+					noBundle(t, d, repos, false)
+					return
+				}
+				write(t, d.Work(), "README.md", "changed\n")
+				q, refs := runRefs(t, d, src, repos, nil)
+				if q.Head != "" {
+					t.Errorf("the run's branch came back at %s", q.Head)
+				}
+				wantRefs(t, refs, "uncommitted")
+				if got := files(t, src, prefix+"/uncommitted"); !slices.Equal(got, files(t, src, base)) {
+					t.Errorf("uncommitted has %v", got)
+				}
+				if got := testGit(t, src, "show", prefix+"/uncommitted:README.md"); got != "changed" {
+					t.Errorf("README.md is %q", got)
+				}
+			})
+		}
 	}
 }
 
 // TestASetupFileInASubmoduleLeavesNothingBehind is a setup that wrote a file in a submodule: the
-// file is the setup's, and a change the agent makes after that keeps the copy.
+// file is the setup's and stays out, and a change the agent makes after that comes back.
 func TestASetupFileInASubmoduleLeavesNothingBehind(t *testing.T) {
 	for _, agentChanges := range []bool{false, true} {
 		t.Run("", func(t *testing.T) {
@@ -3934,12 +4256,18 @@ func TestASetupFileInASubmoduleLeavesNothingBehind(t *testing.T) {
 			inner := filepath.Join(d.Work(), filepath.FromSlash(sub))
 			write(t, inner, "gen.o", "generated\n")
 			out := setupRecord(t, d, repos[0])
-			if agentChanges {
-				write(t, inner, "gen.o", "the agent's\n")
+			if !agentChanges {
+				noBundleWith(t, d, repos, map[string]LeftOut{"": out})
+				return
 			}
-			printed := sessionOutput(t, d, repos, map[string]LeftOut{"": out})
-			if got := d.LeftBehind(repos); got != agentChanges {
-				t.Errorf("left behind = %v, want %v:\n%s", got, agentChanges, printed)
+			write(t, inner, "gen.o", "the agent's\n")
+			q, _ := runRefs(t, d, src, repos, map[string]LeftOut{"": out})
+			if len(q.Submodules) != 1 {
+				t.Fatalf("%d submodules came back", len(q.Submodules))
+			}
+			gitDir := testGit(t, filepath.Join(src, sub), "rev-parse", "--path-format=absolute", "--git-dir")
+			if got := testGit(t, gitDir, "show", prefix+"/uncommitted:gen.o"); got != "the agent's" {
+				t.Errorf("gen.o is %q", got)
 			}
 		})
 	}
@@ -4331,18 +4659,19 @@ func TestACommitOfASetupFileAsItIsLeavesNothingBehind(t *testing.T) {
 	}
 }
 
-// TestALockedSetupFileInASubmoduleKeepsTheCopy is a setup that leaves a file of mode 000 or a folder
-// of mode 0444 in a submodule: the run goes on, and the session keeps the copy.
-func TestALockedSetupFileInASubmoduleKeepsTheCopy(t *testing.T) {
+// TestALockedSetupFileInASubmoduleComesBack is a setup that leaves a file of mode 000 or a folder
+// of mode 0444 in a submodule, which the record of the setup cannot read: the session gives itself
+// read access, and the file comes back in the submodule's uncommitted.
+func TestALockedSetupFileInASubmoduleComesBack(t *testing.T) {
 	if os.Geteuid() == 0 {
-		t.Skip("root reads any mode")
+		t.Skip("root reads a file of mode 000, so the record of the setup has it, and it stays out")
 	}
 	for name, c := range map[string]struct {
-		path string
-		mode os.FileMode
+		path, file string
+		mode       os.FileMode
 	}{
-		"a file of mode 000":    {"gen.o", 0},
-		"a folder of mode 0444": {"gen", 0o444},
+		"a file of mode 000":    {"gen.o", "gen.o", 0},
+		"a folder of mode 0444": {"gen", "gen/f.o", 0o444},
 	} {
 		t.Run(strings.ReplaceAll(name, " ", "-"), func(t *testing.T) {
 			isolate(t)
@@ -4358,18 +4687,22 @@ func TestALockedSetupFileInASubmoduleKeepsTheCopy(t *testing.T) {
 			}
 			t.Cleanup(func() { _ = os.Chmod(locked, 0o755) })
 			out := setupRecord(t, d, repos[0])
-			printed := sessionOutput(t, d, repos, map[string]LeftOut{"": out})
-			if !d.LeftBehind(repos) {
-				t.Errorf("the session did not keep the copy:\n%s", printed)
+			q, _ := runRefs(t, d, src, repos, map[string]LeftOut{"": out})
+			if len(q.Submodules) != 1 {
+				t.Fatalf("%d submodules came back", len(q.Submodules))
+			}
+			gitDir := testGit(t, filepath.Join(src, sub), "rev-parse", "--path-format=absolute", "--git-dir")
+			if got := testGit(t, gitDir, "show", prefix+"/uncommitted:"+c.file); got != "generated" {
+				t.Errorf("%s is %q", c.file, got)
 			}
 		})
 	}
 }
 
-// TestANameThatReadsAsTwoStatusLinesKeepsTheCopy is an agent's file in a submodule whose name has a
-// line break, and whose pieces read as two status lines of files the setup left: the file does not
-// come back, so the copy stays.
-func TestANameThatReadsAsTwoStatusLinesKeepsTheCopy(t *testing.T) {
+// TestANameThatReadsAsTwoStatusLinesComesBack is an agent's file in a submodule whose name has a
+// line break, and whose pieces read as two status lines of files the setup left: no file counts as
+// the setup's, and the file comes back in the submodule's uncommitted.
+func TestANameThatReadsAsTwoStatusLinesComesBack(t *testing.T) {
 	isolate(t)
 	sessionGit(t)
 	src, sub := withSubmodule(t)
@@ -4379,9 +4712,13 @@ func TestANameThatReadsAsTwoStatusLinesKeepsTheCopy(t *testing.T) {
 	write(t, inner, "gen.o", "generated\n")
 	out := setupRecord(t, d, repos[0])
 	write(t, inner, "foo.o\n?? gen.o", "the agent's\n")
-	printed := sessionOutput(t, d, repos, map[string]LeftOut{"": out})
-	if !d.LeftBehind(repos) {
-		t.Errorf("the session did not keep the copy:\n%s", printed)
+	q, _ := runRefs(t, d, src, repos, map[string]LeftOut{"": out})
+	if len(q.Submodules) != 1 {
+		t.Fatalf("%d submodules came back", len(q.Submodules))
+	}
+	gitDir := testGit(t, filepath.Join(src, sub), "rev-parse", "--path-format=absolute", "--git-dir")
+	if got := testGit(t, gitDir, "show", prefix+"/uncommitted:foo.o\n?? gen.o"); got != "the agent's" {
+		t.Errorf("the file is %q", got)
 	}
 }
 
@@ -4520,7 +4857,7 @@ func TestTheGitSessionRunsItsScriptFromAFile(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err := qs[0].FetchInto(context.Background(), src, "refs/heads/"+branch); err != nil {
+			if _, err := qs[0].FetchInto(context.Background(), src, "refs/heads/"+branch); err != nil {
 				t.Fatal(err)
 			}
 			testGit(t, src, "cat-file", "-e", branch+":left.txt")

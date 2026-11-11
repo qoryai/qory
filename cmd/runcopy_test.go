@@ -85,6 +85,17 @@ func runBranchOf(t *testing.T, out string) string {
 	return m[1]
 }
 
+// runRefsOf is the prefix of the run's other refs in the line of out that lists them, as it says it
+// twice: in the text and in the command that lists them.
+func runRefsOf(t *testing.T, out string) string {
+	t.Helper()
+	m := regexp.MustCompile(`refs are under (refs/qory/run-[^ :]+)(?: in [^:]+)?: list them with git for-each-ref (refs/qory/run-\S+)\.`).FindStringSubmatch(out)
+	if m == nil || m[1] != m[2] {
+		t.Fatalf("the output has no line with the run's other refs:\n%s", out)
+	}
+	return m[1]
+}
+
 // TestAWalledWriteRunBindsACopy is a walled write run: its session starts in a copy under
 // qory's cache folder, no mount is the person's checkout or lies in it, and the copy is gone
 // once its commits came back.
@@ -626,10 +637,11 @@ func TestACheckPastItsLimitHasItsLine(t *testing.T) {
 	wants(t, out, "and run no git there: the check of the run's commits ran past its limit of 1ns, so those commits did not come back")
 }
 
-// TestCommitsOnAnotherBranchKeepTheCopy is an agent that committed on a branch and checked out the
-// run's branch: the line is not that the run made no commit, and the copy stays, with its path.
-func TestCommitsOnAnotherBranchKeepTheCopy(t *testing.T) {
-	copyCheckout(t)
+// TestCommitsOnAnotherBranchArriveUnderRefsQory is an agent that committed on a branch and checked
+// out the run's branch: the branch comes back under the run's prefix, the line says where and how to
+// list it, and the copy goes.
+func TestCommitsOnAnotherBranchArriveUnderRefsQory(t *testing.T) {
+	root := copyCheckout(t)
 	var work string
 	agentInCopy(t, func(spec session.SessionSpec) {
 		work = spec.Dir
@@ -642,17 +654,21 @@ func TestCommitsOnAnotherBranchKeepTheCopy(t *testing.T) {
 	})
 	cmd.RunGitSessionsOnHost()
 	out, err := run(t, "run", "claude", "--", "-p", "hi")
-	if cmd.ExitCode(err) != 1 {
-		t.Errorf("exit %d, want 1:\n%s", cmd.ExitCode(err), out)
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
 	}
-	lacks(t, out, "no action needed")
-	wants(t, out,
-		"part of the run's work did not come back: the copy has changes not committed, commits on another branch or in a submodule, a detached commit, a commit a reset took off the branch, a stash, a tag, a sparse checkout, a nested repository, or files that git add could not read.",
-		"read the run's files in "+work+", run no git there, then remove the folder")
-	if _, err := os.Lstat(work); err != nil {
-		t.Errorf("the copy is gone: %v", err)
+	lacks(t, out, "no action needed", "did not come back", "the run's commits are on")
+	prefix := runRefsOf(t, out)
+	wants(t, out, "qory run: the run's refs are under "+prefix+" in ")
+	if got := gitOutput(t, root, "ls-tree", "-r", "--name-only", prefix+"/heads/feature"); !strings.Contains(got, "feature.txt") {
+		t.Errorf("heads/feature has:\n%s", got)
 	}
-	wantDisarmed(t, work)
+	if got := gitOutput(t, root, "for-each-ref", "refs/heads/qory/"); got != "" {
+		t.Errorf("a run's branch came back: %s", got)
+	}
+	if _, err := os.Lstat(work); err == nil {
+		t.Errorf("the copy %s stays", work)
+	}
 }
 
 // TestAFailedCloseKeepsTheCopy is a run whose close fails: a container of the run may be left,
@@ -1954,65 +1970,92 @@ func commitIn(t *testing.T, dir, message string) {
 	gitOutput(t, dir, "-c", "user.name=agent", "-c", "user.email=agent@example.com", "commit", "--quiet", "--allow-empty", "-m", message)
 }
 
-// workLeftBehind is each way an agent leaves work that no bundle has, with nothing past the base
-// commit, in the copy at dir.
-var workLeftBehind = map[string]func(t *testing.T, dir string){
-	"stash": func(t *testing.T, dir string) {
+// workUnderRefsQory is each way an agent leaves work that the run's branch does not have, with
+// nothing past the base commit, in the copy at dir, with the ref under the run's prefix it comes
+// back as.
+var workUnderRefsQory = map[string]struct {
+	agent func(t *testing.T, dir string)
+	ref   string
+}{
+	"stash": {func(t *testing.T, dir string) {
 		writeFile(t, filepath.Join(dir, "README.md"), "stashed\n")
 		gitOutput(t, dir, "-c", "user.name=agent", "-c", "user.email=agent@example.com", "stash", "--quiet")
-	},
-	"tag then reset": func(t *testing.T, dir string) {
+	}, "stash"},
+	"tag then reset": {func(t *testing.T, dir string) {
 		writeFile(t, filepath.Join(dir, "x.txt"), "x\n")
 		commitIn(t, dir, "x")
 		gitOutput(t, dir, "tag", "keep")
 		gitOutput(t, dir, "reset", "--quiet", "--hard", "HEAD~1")
-	},
-	"detached commit": func(t *testing.T, dir string) {
+	}, "tags/keep"},
+	"detached commit": {func(t *testing.T, dir string) {
 		on := strings.TrimSpace(gitOutput(t, dir, "branch", "--show-current"))
 		gitOutput(t, dir, "checkout", "--quiet", "--detach")
 		writeFile(t, filepath.Join(dir, "x.txt"), "x\n")
 		commitIn(t, dir, "x")
 		gitOutput(t, dir, "checkout", "--quiet", on)
-	},
-	"new repository": func(t *testing.T, dir string) {
-		inner := filepath.Join(dir, "inner")
-		writeFile(t, filepath.Join(inner, "x.txt"), "x\n")
-		gitOutput(t, inner, "init", "--quiet")
-		commitIn(t, inner, "x")
-	},
-	"orphan": func(t *testing.T, dir string) {
+	}, "lost/1"},
+	"orphan": {func(t *testing.T, dir string) {
 		gitOutput(t, dir, "checkout", "--quiet", "--orphan", "o")
 		gitOutput(t, dir, "rm", "-rf", "--quiet", ".")
 		writeFile(t, filepath.Join(dir, "new.txt"), "new\n")
-	},
+	}, "uncommitted"},
 }
 
-// TestWorkLeftBehindKeepsTheCopyOfALocalRun is each way of [workLeftBehind] in a local run: the
-// line is not that the run made no commit, the run exits 1, and the copy stays.
-func TestWorkLeftBehindKeepsTheCopyOfALocalRun(t *testing.T) {
-	for name, agent := range workLeftBehind {
+// TestWorkOffTheBranchArrivesUnderRefsQory is each way of [workUnderRefsQory] in a local run: the
+// work comes back under the run's prefix, the run exits 0, and the copy goes.
+func TestWorkOffTheBranchArrivesUnderRefsQory(t *testing.T) {
+	for name, c := range workUnderRefsQory {
 		t.Run(strings.ReplaceAll(name, " ", "-"), func(t *testing.T) {
 			root := copyCheckout(t)
 			var work string
 			agentInCopy(t, func(spec session.SessionSpec) {
 				work = spec.Dir
-				agent(t, spec.Dir)
+				c.agent(t, spec.Dir)
 			})
 			cmd.RunGitSessionsOnHost()
 			out, err := run(t, "run", "claude", "--", "-p", "hi")
-			if cmd.ExitCode(err) != 1 {
-				t.Errorf("exit %d, want 1:\n%s", cmd.ExitCode(err), out)
+			if err != nil {
+				t.Fatalf("%v\n%s", err, out)
 			}
-			lacks(t, out, "no action needed")
-			wants(t, out, "part of the run's work did not come back", "read the run's files in "+work)
-			if _, err := os.Lstat(work); err != nil {
-				t.Errorf("the copy is gone: %v", err)
+			lacks(t, out, "no action needed", "did not come back")
+			prefix := runRefsOf(t, out)
+			if got := gitOutput(t, root, "for-each-ref", "--format=%(refname)", prefix+"/"); strings.TrimSpace(got) != prefix+"/"+c.ref {
+				t.Errorf("the run's other refs are %q, want %s", got, prefix+"/"+c.ref)
 			}
-			wantDisarmed(t, work)
-			if got := gitOutput(t, root, "for-each-ref", "refs/heads/qory/"); got != "" {
-				t.Errorf("a run's branch came back: %s", got)
+			if _, err := os.Lstat(work); err == nil {
+				t.Errorf("the copy %s stays", work)
 			}
 		})
+	}
+}
+
+// TestARepositoryTheRunMadeKeepsTheCopyOfALocalRun is a repository the run made in the copy: the
+// line says so, the run exits 1, and the copy stays.
+func TestARepositoryTheRunMadeKeepsTheCopyOfALocalRun(t *testing.T) {
+	root := copyCheckout(t)
+	var work string
+	agentInCopy(t, func(spec session.SessionSpec) {
+		work = spec.Dir
+		inner := filepath.Join(spec.Dir, "inner")
+		writeFile(t, filepath.Join(inner, "x.txt"), "x\n")
+		gitOutput(t, inner, "init", "--quiet")
+		commitIn(t, inner, "x")
+	})
+	cmd.RunGitSessionsOnHost()
+	out, err := run(t, "run", "claude", "--", "-p", "hi")
+	if cmd.ExitCode(err) != 1 {
+		t.Errorf("exit %d, want 1:\n%s", cmd.ExitCode(err), out)
+	}
+	lacks(t, out, "no action needed")
+	wants(t, out,
+		"qory run: part of the run's work did not come back: the copy has a nested repository the run made.",
+		"read the run's files in "+work+", run no git there, then remove the folder")
+	if _, err := os.Lstat(work); err != nil {
+		t.Errorf("the copy is gone: %v", err)
+	}
+	wantDisarmed(t, work)
+	if got := gitOutput(t, root, "for-each-ref", "refs/heads/qory/", "refs/qory/"); got != "" {
+		t.Errorf("a run's ref came back: %s", got)
 	}
 }
 
@@ -2039,7 +2082,8 @@ func TestAHeadBeforeTheBaseCommitLosesNoFile(t *testing.T) {
 
 // TestAnOrphanHeadBringsBackNoDeletion is a local run whose agent made a commit on the run's
 // branch, then checked out a branch with no commit: the run's branch comes back as the agent left
-// it, with no commit that deletes its files, and the line says that part of the work stayed.
+// it, with no commit that deletes its files, the new file comes back as uncommitted under the run's
+// prefix, and one line says both.
 func TestAnOrphanHeadBringsBackNoDeletion(t *testing.T) {
 	root := copyCheckout(t)
 	agentInCopy(t, func(spec session.SessionSpec) {
@@ -2051,14 +2095,19 @@ func TestAnOrphanHeadBringsBackNoDeletion(t *testing.T) {
 	})
 	cmd.RunGitSessionsOnHost()
 	out, err := run(t, "run", "claude", "--", "-p", "hi")
-	if cmd.ExitCode(err) != 1 {
-		t.Errorf("exit %d (%v), want 1\n%s", cmd.ExitCode(err), err, out)
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
 	}
-	wants(t, out, "part of the run's work did not come back")
+	lacks(t, out, "did not come back")
 	branch := runBranchOf(t, out)
+	prefix := runRefsOf(t, out)
+	wants(t, out, ". The run's other refs are under "+prefix+": list them with git for-each-ref "+prefix+".")
 	tree := gitOutput(t, root, "ls-tree", "-r", "--name-only", branch)
 	wants(t, tree, "committed.txt", "README.md")
 	lacks(t, tree, "new.txt")
+	if got := strings.TrimSpace(gitOutput(t, root, "ls-tree", "-r", "--name-only", prefix+"/uncommitted")); got != "new.txt" {
+		t.Errorf("uncommitted has %q", got)
+	}
 	if got := gitOutput(t, root, "log", "-1", "--format=%s", branch); !strings.Contains(got, "Add a file") {
 		t.Errorf("the branch ends with %q", got)
 	}
@@ -2102,7 +2151,7 @@ func TestANestedSubmoduleComesBackThroughARun(t *testing.T) {
 }
 
 // TestASparseCheckoutBringsBackNoDeletion is a local run whose agent took files out of the working
-// tree: no commit that deletes them comes back.
+// tree and changed nothing: nothing comes back, and no commit deletes them.
 func TestASparseCheckoutBringsBackNoDeletion(t *testing.T) {
 	for name, agent := range map[string]func(t *testing.T, dir string){
 		"sparse-checkout": func(t *testing.T, dir string) {
@@ -2119,9 +2168,13 @@ func TestASparseCheckoutBringsBackNoDeletion(t *testing.T) {
 			root := copyCheckout(t)
 			agentInCopy(t, func(spec session.SessionSpec) { agent(t, spec.Dir) })
 			cmd.RunGitSessionsOnHost()
-			out, _ := run(t, "run", "claude", "--", "-p", "hi")
-			wants(t, out, "part of the run's work did not come back")
-			for _, ref := range strings.Fields(gitOutput(t, root, "for-each-ref", "--format=%(refname)", "refs/heads/qory/")) {
+			out, err := run(t, "run", "claude", "--", "-p", "hi")
+			if err != nil {
+				t.Fatalf("%v\n%s", err, out)
+			}
+			lacks(t, out, "did not come back")
+			wants(t, out, "no action needed: the run made no commit past its base commit")
+			for _, ref := range strings.Fields(gitOutput(t, root, "for-each-ref", "--format=%(refname)", "refs/heads/qory/", "refs/qory/")) {
 				if tree := gitOutput(t, root, "ls-tree", "-r", "--name-only", ref); !strings.Contains(tree, "README.md") {
 					t.Errorf("%s came back without README.md:\n%s", ref, tree)
 				}

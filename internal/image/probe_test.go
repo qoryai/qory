@@ -48,6 +48,7 @@ func agentFiles() map[string]string {
 		"usr/local/bin/claude":              "",
 		"usr/bin/git":                       "",
 		"usr/bin/cat":                       "",
+		"usr/bin/chmod":                     "",
 		"usr/bin/comm":                      "",
 		"usr/bin/cp":                        "",
 		"usr/bin/find":                      "",
