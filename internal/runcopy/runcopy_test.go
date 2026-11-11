@@ -1247,6 +1247,34 @@ func TestFetchIntoMakesNoBranchThatAppearedAfterTheFetch(t *testing.T) {
 	testGit(t, src, "cat-file", "-e", landed+":new.txt")
 }
 
+// TestFetchIntoMakesNoBranchAWorkingTreeHasUnborn is a working tree of the person's repository on
+// the run's branch with no commit yet, which no ref lists: qory makes no branch of that name, since
+// the working tree would then be at the run's commit, and the commits stay under the prefix.
+func TestFetchIntoMakesNoBranchAWorkingTreeHasUnborn(t *testing.T) {
+	isolate(t)
+	sessionGit(t)
+	src, _ := person(t)
+	q := fetchQuarantine(t, src)
+	tree := filepath.Join(t.TempDir(), "tree")
+	testGit(t, src, "worktree", "add", "--quiet", "--detach", tree)
+	testGit(t, tree, "checkout", "--quiet", "--orphan", branch)
+	before := testGit(t, tree, "status", "--porcelain")
+	landed, got, err := q.FetchInto(context.Background(), src, branch, "run-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if landed != "" || got != prefix {
+		t.Errorf("the commits landed on %q with the prefix %q, want none and %q", landed, got, prefix)
+	}
+	if err := gitCmd(src, "rev-parse", "--verify", "--quiet", "refs/heads/"+branch).Run(); err == nil {
+		t.Errorf("your repository has the branch %s", branch)
+	}
+	testGit(t, src, "cat-file", "-e", prefix+"/branch:new.txt")
+	if after := testGit(t, tree, "status", "--porcelain"); after != before {
+		t.Errorf("the working tree's status was\n%s\nand is\n%s", before, after)
+	}
+}
+
 // fetchQuarantine is the quarantine of a run that added one file to the person's repository at
 // src.
 func fetchQuarantine(t *testing.T, src string) *Quarantine {
