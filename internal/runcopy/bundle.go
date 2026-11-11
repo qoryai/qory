@@ -534,7 +534,7 @@ func sortRefs(refs []bundleRef) {
 // errQuarantineRefs is a quarantine whose refs differ from what the bundle's header lists.
 var errQuarantineRefs = errors.New("the refs the fetch wrote differ from the refs of the bundle's header")
 
-// copyShallow gives the quarantine q the shallow list of its bare source, when the source
+// copyShallow copies the shallow list of the bare source into the quarantine q, when the source
 // has one: a repository fetched at depth one has a base commit whose parents no alternate
 // has, and git stops at the commits of the list when it walks the history.
 func copyShallow(source, q string) error {

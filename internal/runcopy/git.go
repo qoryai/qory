@@ -321,7 +321,7 @@ var httpURL = regexp.MustCompile(`(?i)(?:https?|ftps?)://`)
 
 // hideHTTP is text with the first such URL and all that follows it, later lines too, replaced by
 // textHiddenURL, when an @, a ? or a # follows the URL's start in text. A credential can have a
-// space, a quote, a / or a line break, so no rule can tell where it ends, and nothing after the URL's
+// space, a quote, a / or a line break, so no rule finds where it ends, and nothing after the URL's
 // start stays. With no such character, text stays as it is.
 func hideHTTP(text string) string {
 	start := httpURL.FindStringIndex(text)

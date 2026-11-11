@@ -96,8 +96,8 @@ type GitSession struct {
 // amended base commit, get a commit as usual.
 //
 // Under the prefix the bundle also has each branch, tag and refs/stash that the run made or
-// moved, and a detached HEAD, when it has a commit that the base commit, a ref of the clone and
-// a remote-tracking ref do not have, and lost/<n> for commits that only a reflog or another ref
+// moved, and a detached HEAD, when it has a commit that neither the base commit nor a ref at the end of
+// the clone has, and lost/<n> for commits that only a reflog or another ref
 // reaches. A new or moved branch or tag at a commit with no such commit, such as a tag of the base
 // commit, is a line in n.known, its commit id and its name under the prefix, as a bundle leaves out
 // a ref whose commits it excludes; an annotated one is in the bundle, with its tag object. Each
@@ -365,8 +365,8 @@ both() {
 printable() {
 	printf '%s' "$1" | tr -d '\000-\037\177' 2>/dev/null || printf 'a folder'
 }
-# readable gives the session's user read access to each file and folder below the current folder
-# that lacks it, but the top .git and .qory, so git add reads them. chmod changes only what that
+# readable adds read access for the session's user to each file and folder below the current
+# folder that lacks it, but the top .git and .qory, so git add reads them. chmod changes only what that
 # user owns; any other stays as it is.
 readable() {
 	find . -path ./.git -prune -o -path ./.qory -prune -o -type d ! -perm -500 -exec chmod u+rx {} \; \
@@ -524,7 +524,7 @@ large() {
 	if [ ! -s "$G/large-found" ]; then
 		return 0
 	fi
-	# ls-files hashes only the files found, to tell a changed one. A failed ls-files leaves out every
+	# ls-files hashes only the files found, to find the changed ones. A failed ls-files leaves out every
 	# file found, which keeps more in the copy, not less.
 	while IFS= read -r p; do
 		set -- "$@" ":(top,literal)$p"
