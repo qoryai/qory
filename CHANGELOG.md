@@ -374,6 +374,8 @@ release may change what an existing document does, and states it under Upgrading
   join returned an error after the agent may have run, or when a container of the run could not
   be removed after the agent's session, the work comes back too: qory runs the git session after
   the close, with no step `copy work out`, and a failure changes only `qory run`'s exit status.
+  After an agent that succeeded, a setup container that could not be removed closes the run
+  `failed` with -1, or `cancelled` when a stop cut the removal.
   When a container of the run could not be removed, qory prints `a container of the run could
   not be removed and may still run and write the copy, so nothing came back from the run`; a
   network or a private folder of the wall that stays brings the work back.

@@ -1422,7 +1422,7 @@ func TestARunsEndWithAFailedCopyStep(t *testing.T) {
 		}}, git: cmd.GitSessionOnHost, want: session.Outcome{State: event.StateFailed, ExitCode: -1}, status: 1},
 		{name: "the removal of the setup container fails", agent: agentOK, values: cmd.Nowhere{RemoveSetup: func(context.Context) error {
 			return errors.New("the engine failed")
-		}}, git: exits(128), want: session.Outcome{State: event.StateSucceeded}, status: 1},
+		}}, git: exits(128), want: session.Outcome{State: event.StateFailed, ExitCode: -1}, status: 1},
 		{name: "a container of the run is kept", agent: agentOK, values: cmd.Nowhere{ContainerKept: true}, git: exits(128), want: session.Outcome{State: event.StateSucceeded}, status: 1},
 		{name: "a signal cuts the step", agent: agentOK, git: func(ctx context.Context, _ session.SessionSpec) (*session.Result, error) {
 			term(t)
@@ -1435,7 +1435,7 @@ func TestARunsEndWithAFailedCopyStep(t *testing.T) {
 			term(t)
 			<-ctx.Done()
 			return ctx.Err()
-		}}, git: exits(0), want: session.Outcome{State: event.StateSucceeded}, status: 1},
+		}}, git: exits(0), want: interrupted, status: 1},
 		{name: "a signal, and the step exits 128 within its time", agent: agentOK, git: func(context.Context, session.SessionSpec) (*session.Result, error) {
 			term(t)
 			return &session.Result{ExitCode: 128}, nil
@@ -2431,8 +2431,9 @@ func TestAKeptContainerMovesTheGitSessionPastTheClose(t *testing.T) {
 }
 
 // TestAFailedRemovalOfTheSetupMovesTheGitSessionPastTheClose is a removal of the setup container
-// that fails after the agent's session: the run closes with the agent's end, and the git session
-// runs after the close, which shows no container left here, so the work comes back.
+// that fails after the agent's session: the run closes failed with -1, as after a copy step that
+// did not start, and the git session runs after the close, which shows no container left here,
+// so the work comes back.
 func TestAFailedRemovalOfTheSetupMovesTheGitSessionPastTheClose(t *testing.T) {
 	root := copyCheckout(t)
 	agentSucceedsInCopy(t, func(spec session.SessionSpec) {
@@ -2452,8 +2453,8 @@ func TestAFailedRemovalOfTheSetupMovesTheGitSessionPastTheClose(t *testing.T) {
 	if err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
-	if got := closes(); len(got) != 1 || got[0].State != event.StateSucceeded {
-		t.Errorf("the run closed with %+v, want succeeded", got)
+	if got, want := closes(), (session.Outcome{State: event.StateFailed, ExitCode: -1}); len(got) != 1 || got[0] != want {
+		t.Errorf("the run closed with %+v, want %+v", got, want)
 	}
 	gitOutput(t, root, "cat-file", "-e", runBranchOf(t, out)+":left.txt")
 }

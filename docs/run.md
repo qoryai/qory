@@ -3754,7 +3754,9 @@ first: the gateway closed the run during the agent's session, the agent's join r
 after the agent may have run, as when the link to the gateway is lost, or a container of the run
 could not be removed after the agent's session. Then the git session runs after the close, when
 the close shows that no container of the run is left, and its work comes back as usual. Its
-lines reach only your terminal, and a failure changes only `qory run`'s exit status.
+lines reach only your terminal, and a failure changes only `qory run`'s exit status. After an
+agent that succeeded, a setup container that could not be removed closes the run `failed` with
+-1, or `cancelled` with the reason `interrupted` when a signal cut the removal.
 
 Part of the run's work can stay in the copy:
 
