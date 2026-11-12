@@ -144,11 +144,15 @@ func (d Dir) Recorded(repos []Repository, out map[string]LeftOut, ran bool) {
 }
 
 // setupRules reports whether the setup can have written ignore rules in the repository of o: it
-// wrote, changed or deleted a .gitignore there or in a submodule, or left a folder that
-// [Dir.SetupChanges] lists whole, such as a repository it made.
+// wrote, changed or deleted a .gitignore there or in a submodule, or left a folder that the walk
+// after the setup did not enter: a repository it made, a folder too deep, which is other, or a
+// folder of a submodule that [LeftOut.SubmodulesPartial] reports.
 func setupRules(o LeftOut) bool {
+	if o.SubmodulesPartial {
+		return true
+	}
 	for _, s := range slices.Concat(o.Setup, o.Submodules) {
-		if s.State == StateRepo || strings.HasSuffix(s.Path, "/") || s.Path == ".gitignore" || strings.HasSuffix(s.Path, "/.gitignore") {
+		if s.State == StateRepo || s.State == "other" || s.Path == ".gitignore" || strings.HasSuffix(s.Path, "/.gitignore") {
 			return true
 		}
 	}

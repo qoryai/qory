@@ -463,12 +463,12 @@ func (c *runCopy) recordSetup(ctx context.Context, run openedRun, spec *runSpec)
 		if err != nil {
 			return runcopy.ShownError(err)
 		}
-		submodules, err := c.dir.SubmoduleSetup(ctx, r)
+		submodules, partial, err := c.dir.SubmoduleSetup(ctx, r)
 		if err != nil {
 			return runcopy.ShownError(err)
 		}
 		o := c.out[r.Path]
-		o.Setup, o.Submodules = states, submodules
+		o.Setup, o.Submodules, o.SubmodulesPartial = states, submodules, partial
 		c.out[r.Path] = o
 	}
 	return c.recordRepositories(ctx, run, spec)

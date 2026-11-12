@@ -42,6 +42,9 @@ type LeftOut struct {
 	// Submodules are the files the setup left in a submodule, as [Dir.SubmoduleSetup] lists them.
 	// A change in a submodule that is one of these keeps nothing behind.
 	Submodules []SetupPath
+	// SubmodulesPartial is whether [Dir.SubmoduleSetup] left a folder of a submodule out of
+	// Submodules, so the setup can have written a .gitignore there that Submodules does not list.
+	SubmodulesPartial bool
 	// SetupEnd is the second of the setup's end, as [Dir.Recorded] read it: a path that an ignore
 	// rule of the setup covers and whose change time is past it keeps the copy. 0 is a run whose
 	// setup can have written no ignore rules, or with no record, and -1 a setup whose end the

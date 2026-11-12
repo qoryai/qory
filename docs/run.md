@@ -3807,9 +3807,10 @@ Part of the run's work can stay in the copy:
   `.gitignore` of a repository `tool` that the setup cloned. A commit that the agent made in a
   repository in such a folder, also a bare repository such as `cache/b.git`, is such a change too.
   The session finds these files by their change time, which the agent cannot set back as
-  `touch -d` sets a file's time: after a setup that wrote or changed a `.gitignore` or made a
-  repository, the container `qory-record-<run id>`, which binds the copy read-only, records the
-  second in which the setup ended, and the session lists each file under the setup's rules with a
+  `touch -d` sets a file's time: after a setup that wrote or changed a `.gitignore`, made a
+  repository, or left a folder that qory could not walk, such as one more than 64 folders deep,
+  the container `qory-record-<run id>`, which binds the copy read-only, records the second in
+  which the setup ended, and the session lists each file under the setup's rules with a
   later change time. A folder that the session cannot enter, such as one of mode `000`, is listed
   as one entry, such as `cache/`. A file that the agent deleted, a file in a folder named
   `node_modules`, `.venv`, `venv`, `__pycache__`, `target`, `build`, `dist`, `.gradle` or `.next`,

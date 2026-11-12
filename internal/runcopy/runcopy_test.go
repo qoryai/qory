@@ -4668,11 +4668,11 @@ func setupRecord(t *testing.T, d Dir, r Repository) LeftOut {
 	if err != nil {
 		t.Fatal(err)
 	}
-	submodules, err := d.SubmoduleSetup(t.Context(), r)
+	submodules, partial, err := d.SubmoduleSetup(t.Context(), r)
 	if err != nil {
 		t.Fatal(err)
 	}
-	out := map[string]LeftOut{r.Path: {Setup: states, Submodules: submodules}}
+	out := map[string]LeftOut{r.Path: {Setup: states, Submodules: submodules, SubmodulesPartial: partial}}
 	recordRepositories(t, d, []Repository{r}, out)
 	return out[r.Path]
 }
@@ -5914,6 +5914,39 @@ func TestGitStatusInARepositoryOfTheSetupKeepsNoCopy(t *testing.T) {
 			write(t, d.Work(), "README.md", "agent\n")
 			printed := sessionOutput(t, d, repos, out)
 			if left := d.Left(repos); left.Behind || left.Nested {
+				t.Errorf("Left = %+v:\n%s", left, printed)
+			}
+		})
+	}
+}
+
+// TestADeepGitignoreOfTheSetupKeepsTheCopy is a setup that writes a .gitignore of * in a folder
+// deeper than the walk after the setup goes, at the top or in a submodule, and an agent that
+// writes a file there: the record runs, and the copy stays. At the top, the folder too deep keeps
+// the copy whole; in the submodule, no record lists the .gitignore, so its rule counts as the
+// agent's, and the line lists no file.
+func TestADeepGitignoreOfTheSetupKeepsTheCopy(t *testing.T) {
+	deep := strings.Repeat("d/", maxOpenFolders+6) + "x"
+	for _, inSub := range []bool{false, true} {
+		t.Run(fmt.Sprintf("submodule %t", inSub), func(t *testing.T) {
+			isolate(t)
+			sessionGit(t)
+			src, sub := withSubmodule(t)
+			d, repos := cloneRun(t, src)
+			at := d.Work()
+			if inSub {
+				at = filepath.Join(d.Work(), filepath.FromSlash(sub))
+			}
+			write(t, at, deep+"/.gitignore", "*\n")
+			write(t, at, deep+"/a.txt", "setup\n")
+			out := map[string]LeftOut{"": setupRecord(t, d, repos[0])}
+			if out[""].SetupEnd <= 0 {
+				t.Errorf("the setup's end is %d", out[""].SetupEnd)
+			}
+			write(t, at, deep+"/new.txt", "agent\n")
+			printed := sessionOutput(t, d, repos, out)
+			left := d.Left(repos)
+			if !left.Behind || len(left.Ignored) > 0 {
 				t.Errorf("Left = %+v:\n%s", left, printed)
 			}
 		})

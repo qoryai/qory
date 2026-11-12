@@ -176,7 +176,7 @@ func TestARecordContainerThatFailsMakesTheRepositoryOther(t *testing.T) {
 func TestASetupWithNoRulesStartsNoRecordContainer(t *testing.T) {
 	c := recordCopy(t)
 	c.out[""] = runcopy.LeftOut{
-		Setup:      []runcopy.SetupPath{{Path: "tool", State: "other"}, {Path: "a.gitignore", State: "missing"}},
+		Setup:      []runcopy.SetupPath{{Path: "tool/x.go", State: "missing"}, {Path: "a.gitignore", State: "missing"}},
 		Submodules: []runcopy.SetupPath{{Path: "sub/x.go", State: "missing"}},
 	}
 	run, spec := recordSpec()
@@ -196,13 +196,15 @@ func TestASetupWithNoRulesStartsNoRecordContainer(t *testing.T) {
 
 // TestASetupThatWroteAGitignoreStartsARecordContainer is a setup that made no repository but
 // wrote a .gitignore, at the top, in a folder, in a submodule, or that left a folder too deep to
-// list: the record container starts, and the second it writes to setup-end.time is the setup's end.
+// list, at the top or in a submodule: the record container starts, and the second it writes to
+// setup-end.time is the setup's end.
 func TestASetupThatWroteAGitignoreStartsARecordContainer(t *testing.T) {
 	for i, out := range []runcopy.LeftOut{
 		{Setup: []runcopy.SetupPath{{Path: ".gitignore", State: "missing"}}},
 		{Setup: []runcopy.SetupPath{{Path: "cache/.gitignore", State: "missing"}}},
-		{Setup: []runcopy.SetupPath{{Path: "deep/", State: "other"}}},
+		{Setup: []runcopy.SetupPath{{Path: "deep", State: "other"}}},
 		{Submodules: []runcopy.SetupPath{{Path: "sub/.gitignore", State: "missing"}}},
+		{SubmodulesPartial: true},
 	} {
 		t.Run(strconv.Itoa(i), func(t *testing.T) {
 			c := recordCopy(t)
