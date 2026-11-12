@@ -91,8 +91,8 @@ type GitSession struct {
 // commit and branch is past it, or when HEAD has no commit or does not descend from the base
 // commit, the bundle has branch as it is and the script commits the working tree on HEAD, as
 // the ref uncommitted under the prefix, since a commit on branch would undo branch's files. The
-// same goes for a sparse checkout in the copy, where each path the checkout took out stays as
-// HEAD has it. HEAD and branch at one commit that the base commit does not have, such as an
+// same goes for a sparse checkout in the copy, where each path the checkout took out and the
+// working tree does not have stays as HEAD has it. HEAD and branch at one commit that the base commit does not have, such as an
 // amended base commit, get a commit as usual.
 //
 // Under the prefix the bundle also has each branch, tag and refs/stash that the run made or
@@ -108,9 +108,11 @@ type GitSession struct {
 // inside a submodule, such as a submodule of a submodule with a change in its working tree; a file
 // that git ls-files still lists after the add, such as one the session's user cannot read, which
 // includes a path left out here that a commit of the run changed, when the copy has other bytes
-// than that commit; a folder the session cannot read; or any other path that the commit leaves out,
-// which a last check lists after the commit. The person's personal ignore rules stay in effect through
-// the info/exclude of that git folder.
+// than that commit; a folder the session cannot read; a file at a link of [LeftOut.Links] that is no
+// longer a link; a change in a repository the setup made; or any other path that the commit leaves
+// out, which a last check lists after the commit. The person's personal ignore rules stay in effect
+// through the info/exclude of that git folder. A path that an ignore rule covers counts as left out
+// unless the person's rules cover it too: those rules and the .gitignore files of the base commit.
 //
 // The add leaves out each regular file of more than [MaxFile] bytes that it would add, in the
 // repository and in each submodule, and lists its path, relative to the copy, in n.large, which
@@ -636,28 +638,115 @@ add() {
 	esac
 	add_lines "$2"
 }
+# rules writes each regular .gitignore of the commit $base to the same path below the folder
+# $G/rules, through the index $G/rules-index. These files and $G/info/exclude are the person's
+# ignore rules, which person_ignored reads. A failure leaves fewer files there, so that more paths
+# count as left out.
+rules() {
+	mkdir "$G/rules"
+	(
+		export GIT_INDEX_FILE="$G/rules-index"
+		g read-tree "$base" && g -c core.quotePath=false ls-files -s > "$G/rules-all" || exit 0
+		{ grep -e "$tab\.gitignore\$" -e '/\.gitignore$' "$G/rules-all" || :; } > "$G/rules-found"
+		while IFS= read -r line; do
+			case $line in
+			100644\ * | 100755\ *) ;;
+			*) continue ;;
+			esac
+			case ${line#*"$tab"} in
+			\"*) ;;
+			*) printf '%s\0' "${line#*"$tab"}" ;;
+			esac
+		done < "$G/rules-found" > "$G/rules-paths"
+		g checkout-index -q -z --stdin --prefix="$G/rules/" < "$G/rules-paths" 2>/dev/null || :
+	)
+}
+# person_ignored writes to the file $2 each path of the file $1, a path and a NUL each, that the
+# person's ignore rules cover, as rules wrote them. A path with a final / is a folder. check-ignore
+# reads a path that starts with : as a pathspec, so the caller leaves such a path out. A failure
+# writes nothing, so that each path counts as left out.
+person_ignored() {
+	: > "$2"
+	p_status=0
+	(
+		cd "$G/rules" && export GIT_WORK_TREE="$G/rules" &&
+			g check-ignore --no-index -z --stdin < "$1" > "$2" 2>/dev/null
+	) || p_status=$?
+	if [ "$p_status" -gt 1 ]; then
+		: > "$2"
+	fi
+}
+# kept_out reports whether both the ignore rules of the work tree and the person's cover the folder
+# $1 of $T.
+kept_out() {
+	g check-ignore -q -- "./$1" 2>/dev/null || return 1
+	case $1 in
+	:*) return 1 ;;
+	esac
+	printf '%s/\0' "$1" > "$G/asked-z"
+	person_ignored "$G/asked-z" "$G/person-z"
+	[ -s "$G/person-z" ]
+}
+# outside prints each line of the file $1 that is neither a folder of the file $2 nor below one. sort
+# puts a folder and the paths below it in one run of lines, as each line is a path, a /, a tab and 0
+# for a folder or 1 for a path, so one pass reads each line once. A failed sort prints every line of
+# $1, so that a failure keeps the copy.
+outside() {
+	{
+		while IFS= read -r o_p; do
+			printf '%s/\t0\n' "$o_p"
+		done < "$2"
+		while IFS= read -r o_p; do
+			printf '%s/\t1\n' "$o_p"
+		done < "$1"
+	} > "$G/marks"
+	if ! sort "$G/marks" > "$G/marks-sorted" 2>/dev/null; then
+		cat "$1"
+		return 0
+	fi
+	o_in=
+	while IFS= read -r o_line; do
+		o_key=${o_line%"$tab"*}
+		if [ -n "$o_in" ]; then
+			case $o_key in
+			"$o_in"*) continue ;;
+			esac
+		fi
+		case $o_line in
+		*"$tab"0) o_in=$o_key ;;
+		*) printf '%s\n' "${o_key%/}" ;;
+		esac
+	done < "$G/marks-sorted"
+}
 # leftover is the check under the others, once the index is what the commit has: it writes n.left
 # when the work tree at $T has a path that the commit leaves out. One git ls-files lists each path
 # that differs from the index and each path the index does not have, but an ignored one, with no
 # exclude of the folders with a .git: it lists an untracked repository as its folder, and no path in
-# a gitlink. A path in the file $1, which stays out on purpose with its line, such as a file of more
-# than 100 MiB, a path in a folder of the file $2, a repository the run made with its line, and a
-# gitlink of $from, which the checks of submodules cover, count for nothing. The other arguments
-# are the pathspecs that ls-files excludes. Each path that counts goes to $G/leftover. A gitlink
-# that the commit has and $from does not is a repository that git add put in as a link, and a
-# gitlink with no .git at a folder that is not empty has files that no ls-files lists: each writes
-# n.left too. A failed git keeps the copy.
+# a gitlink. A second one lists each ignored path, and a path that the person's ignore rules do not
+# cover counts too: the run wrote or changed the rule that covers it. A path in the file $1, which
+# stays out on purpose with its line, such as a file of more than 100 MiB, a path in a folder of the
+# file $2, a repository the run made with its line, and a gitlink of $from, which the checks of
+# submodules cover, count for nothing. The other arguments are the pathspecs that ls-files
+# excludes. Each path that counts goes to $G/leftover. A gitlink that the commit has and $from does
+# not is a repository that git add put in as a link, and a gitlink with no .git at a folder that is
+# not empty has files that no ls-files lists: each writes n.left too. A failed git keeps the copy.
 leftover() {
 	lo_out=$1 lo_made=$2
 	shift 2
 	: > "$G/leftover"
 	if ! g ls-files -z -m -o --exclude-standard -- ':/' "$@" > "$G/after-z" 2>/dev/null ||
+		! g ls-files -z -o -i --exclude-standard -- ':/' "$@" > "$G/ignored-z" 2>/dev/null ||
 		! g -c core.quotePath=false ls-tree -r "$from" > "$G/from-tree" 2>/dev/null ||
 		! g -c core.quotePath=false ls-files -s > "$G/index-tree" 2>/dev/null; then
 		: > "$B/$n.left"
 		return 0
 	fi
 	tr '\000' '\n' < "$G/after-z" > "$G/after"
+	tr '\000' '\n' < "$G/ignored-z" > "$G/ignored"
+	{ grep -v -e '^:' -e '^$' "$G/ignored" || :; } | tr '\n' '\000' > "$G/asked-z"
+	person_ignored "$G/asked-z" "$G/person-z"
+	tr '\000' '\n' < "$G/person-z" > "$G/person"
+	lacking "$G/ignored" "$G/person" >> "$G/after"
 	for lo_tree in from-tree index-tree; do
 		while IFS= read -r line; do
 			case $line in
@@ -668,25 +757,12 @@ leftover() {
 	if [ -n "$(lacking "$G/index-tree-links" "$G/from-tree-links")" ]; then
 		: > "$B/$n.left"
 	fi
-	lo_links=$nl$(cat "$G/from-tree-links")$nl
-	lo_made=$nl$(cat "$lo_made")$nl
 	lacking "$G/after" "$lo_out" > "$G/after-out"
 	while IFS= read -r p; do
-		p=${p%/} up=$p
-		case $lo_links in
-		*"$nl$p$nl"*) continue ;;
-		esac
-		while :; do
-			case $lo_made in
-			*"$nl$up$nl"*) continue 2 ;;
-			esac
-			case $up in
-			*/*) up=${up%/*} ;;
-			*) break ;;
-			esac
-		done
-		printf '%s\n' "$p" >> "$G/leftover"
-	done < "$G/after-out"
+		printf '%s\n' "${p%/}"
+	done < "$G/after-out" > "$G/after-paths"
+	lacking "$G/after-paths" "$G/from-tree-links" > "$G/after-unlinked"
+	outside "$G/after-unlinked" "$lo_made" > "$G/leftover"
 	while IFS= read -r p; do
 		case $p in
 		\"*)
@@ -889,6 +965,7 @@ submodule_bundle() (
 		from=$(g hash-object -t tree /dev/null)
 	fi
 	g read-tree "$from"
+	rules
 	printf ':/\0' > "$G/add"
 	# A folder with a .git below another one stays out with it: git stops at a pathspec inside a
 	# submodule of the submodule.
@@ -985,21 +1062,10 @@ submodule_bundle() (
 	# A path that the check under the others finds in a folder with a .git gets the line of such a
 	# folder.
 	leftover "$G/setup-paths" "$G/made"
-	while IFS= read -r p && [ -z "$told" ]; do
-		while :; do
-			case $all in
-			*"$nl$p$nl"*)
-				printf 'qory: %s has a git repository with commits or changes that the commit leaves out\n' "$shows" >&2
-				told=1
-				break
-				;;
-			esac
-			case $p in
-			*/*) p=${p%/*} ;;
-			*) break ;;
-			esac
-		done
-	done < "$G/leftover"
+	outside "$G/leftover" "$G/all" > "$G/leftover-outside"
+	if [ -z "$told" ] && [ -n "$(lacking "$G/leftover" "$G/leftover-outside")" ]; then
+		printf 'qory: %s has a git repository with commits or changes that the commit leaves out\n' "$shows" >&2
+	fi
 	mainref= tip= clonerefs=$B/subrefs-$n-$k reflogs=1 known=$B/$n-$k.known
 	extra_refs
 	bundle "$B/$n-$k"
@@ -1055,6 +1121,7 @@ while [ "$n" -lt "$count" ]; do
 		from=$(g hash-object -t tree /dev/null)
 	fi
 	g read-tree "$from"
+	rules
 	# With moved set, the paths the commit sets back stay as HEAD has them, so they differ in nothing.
 	back=$base
 	if [ -n "$moved" ]; then
@@ -1074,8 +1141,10 @@ while [ "$n" -lt "$count" ]; do
 		: > "$B/$n.left"
 	fi
 	readable
-	# Each path that the sparse checkout took out stays out. A path with a line break would read as
-	# other paths here, so with one the session makes no commit of the working tree.
+	# Each path that the sparse checkout took out, and that the working tree does not have, stays out.
+	# A path that the working tree has goes into the commit as any other, such as a file the agent
+	# changed and then marked with git update-index --skip-worktree. A path with a line break would
+	# read as other paths here, so with one the session makes no commit of the working tree.
 	nocommit=
 	if [ -n "$sparse" ]; then
 		tr -cd '\n' < "$G/sparse-z" > "$G/breaks"
@@ -1086,7 +1155,11 @@ while [ "$n" -lt "$count" ]; do
 		tr '\000' '\n' < "$G/sparse-z" > "$G/sparse"
 		while IFS= read -r line; do
 			case $line in
-			'S '*) printf '%s\n' "${line#S }" ;;
+			'S '*)
+				if [ ! -e "$T/${line#S }" ] && [ ! -h "$T/${line#S }" ]; then
+					printf '%s\n' "${line#S }"
+				fi
+				;;
 			esac
 		done < "$G/sparse" > "$G/sparse-paths"
 		while IFS= read -r p; do
@@ -1127,11 +1200,17 @@ while [ "$n" -lt "$count" ]; do
 				;;
 			esac
 		done' sh "$G/folders" "$P" "$from" "$B/$n.left" {} + 2>/dev/null || :
+	# A link into .qory stays out and the commit sets it back. While it is a link or is gone, it stays
+	# out with no line. Any other file there, such as a regular file that replaced the link, may have
+	# the run's text from .qory, so it stays out of the commit too, but in the copy: the checks after
+	# the add list it when it differs from the commit, and write n.left.
 	i=0
 	while [ "$i" -lt "$links" ]; do
 		printf ':(exclude,top,literal)%s\0' "$1" >> "$P"
 		printf ':(top,literal)%s\0' "$1" >> "$R"
-		printf '%s\n' "$1" >> "$G/out-paths"
+		if [ -h "$T/$1" ] || [ ! -e "$T/$1" ]; then
+			printf '%s\n' "$1" >> "$G/out-paths"
+		fi
 		shift
 		i=$((i + 1))
 	done
@@ -1176,6 +1255,15 @@ while [ "$n" -lt "$count" ]; do
 			if [ "$2" = other ]; then
 				known=$known$1$nl
 				printf '%s\n' "$1" >> "$G/out-folders"
+				# Such a folder stays out whole, and no record shows what it had after the setup. A
+				# repository there keeps the copy when git status lists a change against its HEAD, and
+				# any other folder keeps it always.
+				if [ -d "$f" ] && [ ! -h "$f" ]; then
+					st=$((st + 1))
+					if { [ ! -e "$f/.git" ] && [ ! -h "$f/.git" ]; } || ! submodule_status "$1" || [ -s "$G/status" ]; then
+						: > "$B/$n.left"
+					fi
+				fi
 			else
 				printf '%s\n' "$1" >> "$G/out-paths"
 			fi
@@ -1228,7 +1316,7 @@ while [ "$n" -lt "$count" ]; do
 			case $known in
 			*"$nl$d$nl"*) continue ;;
 			esac
-			if g check-ignore -q -- "./$d" 2>/dev/null; then
+			if kept_out "$d"; then
 				continue
 			fi
 			printf 'qory: %s has a git repository at %s that the run made, and the commit leaves it out\n' "$shown" "$shows" >&2
@@ -1265,7 +1353,7 @@ while [ "$n" -lt "$count" ]; do
 			test -r "$p" && test -x "$p" || printf "%s\n" "$p"
 		done' sh {} + > "$G/closed" 2>/dev/null || :
 	while IFS= read -r d; do
-		if ! g check-ignore -q -- "$d" 2>/dev/null; then
+		if ! kept_out "${d#./}"; then
 			: > "$B/$n.left"
 		fi
 	done < "$G/closed"

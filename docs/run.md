@@ -3739,8 +3739,10 @@ descend from yours, the bundle has the run's branch as it is. A commit of that w
 branch would undo the branch's files, so the session commits it on `HEAD` instead, as
 `refs/qory/run-<run id>/uncommitted`. After an amended commit or
 `git pull --rebase`, with `HEAD` and the run's branch at one commit, the session commits as usual.
-Your `.gitignore`, `.git/info/exclude` and global excludes file keep their files out of
-the commit. The image needs git 2.25 or later, `cat`, `chmod`, `comm`, `cp`, `find`, `grep`, `mkdir`, `mv`,
+The ignore rules that keep a file out of the commit, with no line, are yours: the `.gitignore`
+files of your commit at the start of the run, your `.git/info/exclude` and your global excludes
+file. A file that only a `.gitignore` the run wrote or changed ignores stays in the copy, as the
+list below describes. The image needs git 2.25 or later, `cat`, `chmod`, `comm`, `cp`, `find`, `grep`, `mkdir`, `mv`,
 `readlink`, `sh`, `sort` and `tr` in `/usr/local/bin`,
 `/usr/bin` or `/bin`: `qory image check` tests them. A write run in a copy that lists repositories
 tests them too, in a first setup step named `Check tools`, in the setup container or, with `wall.setup: inside`,
@@ -3789,8 +3791,17 @@ agent that succeeded, the run closes `failed` with -1, or `cancelled` with the r
 Part of the run's work can stay in the copy:
 
 - A repository the run made, with a commit or a change, or a change in a repository inside a
-  submodule. An ignore rule that covers a repository's folder keeps it out of this list. The session
-  prints a line with its path.
+  submodule. Your ignore rules keep a repository's folder out of this list when the rules in the
+  copy cover it too. The session prints a line with its path.
+- A file that an ignore rule covers, when that rule is not one of yours: the run wrote or changed
+  the `.gitignore` that has it, such as `foo/.gitignore` with `*`.
+- A file at the path of a link into `.qory`, such as `CLAUDE.md`, that is no longer a link and
+  differs from the commit: it may have the run's text from `.qory`, so the commit keeps the path as
+  your commit has it.
+- A change in a repository that the setup made, such as a file the agent wrote there: the commit
+  leaves that repository out, and the session finds the change with `git status` against the
+  repository's `HEAD`. Any other folder that the commit leaves out whole for the setup, such as
+  one more than 64 levels deep, stays in the copy whether or not it changed.
 - A commit or a change in a submodule that the clone did not copy, such as one that the agent set up.
 - A repository inside a submodule that the session cannot check: one whose path is a link or goes
   through one, one more than 8 submodules deep, or one with no `.git` whose folder is not empty,
@@ -3901,7 +3912,7 @@ qory run: the run's commits are on qory/run-0193 in /path/to/repo. They change t
 | `stash` | The run's latest stash; older stashes come back as `lost/<n>`. |
 | `HEAD` | A detached `HEAD` at a commit that the branch does not have. |
 | `lost/<n>` | The newest commit of each line of commits that only a reflog reaches: a commit made with `HEAD` detached, an older stash, or, with nothing past your commit on the branch, any such commit, such as one that a reset took off the branch. The commits of another new ref, such as one of `git notes add`, come back here too. |
-| `uncommitted` | The changes in the working tree when the session makes no commit on the branch, as a commit on `HEAD`. In a sparse checkout, each path the checkout took out stays as `HEAD` has it. |
+| `uncommitted` | The changes in the working tree when the session makes no commit on the branch, as a commit on `HEAD`. In a sparse checkout, each path the checkout took out and the working tree does not have stays as `HEAD` has it. |
 | `branch` | The commits of the run's branch, only when qory could make no branch for them. |
 
 A ref other than a branch or a tag comes back only when it has a commit that your commit and the
