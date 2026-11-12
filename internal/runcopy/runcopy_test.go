@@ -4681,9 +4681,12 @@ func setupRecord(t *testing.T, d Dir, r Repository) LeftOut {
 // container, sets the states in out from it, and removes its folder, so a further call can make it.
 func recordRepositories(t *testing.T, d Dir, repos []Repository, out map[string]LeftOut) {
 	t.Helper()
-	s, err := d.RecordSession(t.Context(), repos, out)
-	if err != nil {
-		t.Fatal(err)
+	s, needed, err := d.RecordSession(t.Context(), repos, out)
+	if err != nil || !needed {
+		if err != nil {
+			t.Fatal(err)
+		}
+		return
 	}
 	printed, err := boundedSession(t, s)
 	if err != nil {
@@ -5821,6 +5824,118 @@ func TestAChangeUnderARuleOfTheSetupInASubmodule(t *testing.T) {
 	}
 }
 
+// setupWithIgnore is [setupWith] on a person's commit with a .gitignore of rules.
+func setupWithIgnore(t *testing.T, rules string, mk func(t *testing.T, w string)) (Dir, []Repository, map[string]LeftOut) {
+	t.Helper()
+	isolate(t)
+	sessionGit(t)
+	src, _ := person(t)
+	write(t, src, ".gitignore", rules)
+	commitAll(t, src, "ignore")
+	d, repos := cloneRun(t, src)
+	mk(t, d.Work())
+	return d, repos, map[string]LeftOut{"": setupRecord(t, d, repos[0])}
+}
+
+// TestAClosedFolderUnderARuleOfTheSetupKeepsTheCopy is a setup that ignores a folder with a rule
+// for folders only, and an agent that writes there and takes the read or search right off the
+// folder: the copy stays, and n.ignored lists the folder.
+func TestAClosedFolderUnderARuleOfTheSetupKeepsTheCopy(t *testing.T) {
+	for _, mode := range []os.FileMode{0o000, 0o300, 0o100} {
+		t.Run(mode.String(), func(t *testing.T) {
+			d, repos, out := setupWith(t, func(t *testing.T, w string) {
+				write(t, w, ".gitignore", "cache/\n")
+				write(t, w, "cache/a.txt", "setup\n")
+			})
+			cache := filepath.Join(d.Work(), "cache")
+			write(t, cache, "new.txt", "agent\n")
+			if err := os.Chmod(cache, mode); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = os.Chmod(cache, 0o755) })
+			printed := sessionOutput(t, d, repos, out)
+			if left := d.Left(repos); !left.Behind || !slices.Equal(left.Ignored, []string{"cache/"}) {
+				t.Errorf("Left = %+v:\n%s", left, printed)
+			}
+		})
+	}
+}
+
+// TestANameWithALineBreakKeepsTheCopy is a file under the setup's rules whose name has a line
+// break, and whose first line is a file that the person's rules ignore: the copy stays. With no
+// line break, n.ignored lists the file.
+func TestANameWithALineBreakKeepsTheCopy(t *testing.T) {
+	for _, c := range []struct {
+		file string
+		want []string
+	}{
+		{"x.tmp\nb.log", nil},
+		{"b.log", []string{"b.log"}},
+	} {
+		t.Run(strconv.Quote(c.file), func(t *testing.T) {
+			d, repos, out := setupWithIgnore(t, "*.tmp\n", func(t *testing.T, w string) {
+				write(t, w, ".gitignore", "*.tmp\n*.log\n")
+				write(t, w, "x.log", "setup\n")
+			})
+			write(t, d.Work(), "x.tmp", "scratch\n")
+			write(t, d.Work(), c.file, "agent\n")
+			printed := sessionOutput(t, d, repos, out)
+			if left := d.Left(repos); !left.Behind || !slices.Equal(left.Ignored, c.want) {
+				t.Errorf("Left = %+v, want %v:\n%s", left, c.want, printed)
+			}
+		})
+	}
+}
+
+// TestGitStatusInARepositoryOfTheSetupKeepsNoCopy is a repository that the setup cloned in a
+// folder that its rules ignore, and an agent that runs git status there, which can write the
+// index, or changes only a file of the person's: no copy stays.
+func TestGitStatusInARepositoryOfTheSetupKeepsNoCopy(t *testing.T) {
+	for _, c := range []struct {
+		name  string
+		agent func(t *testing.T, b string)
+	}{
+		{"no git", func(*testing.T, string) {}},
+		{"git status", func(t *testing.T, b string) {
+			testGit(t, b, "status", "--porcelain")
+		}},
+		{"a refreshed index", func(t *testing.T, b string) {
+			testGit(t, b, "update-index", "--really-refresh")
+			testGit(t, b, "status", "--porcelain")
+		}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			d, repos, out := setupWith(t, func(t *testing.T, w string) {
+				write(t, w, ".gitignore", "cache/\n")
+				write(t, w, "cache/a.txt", "setup\n")
+				setupRepository(t, w, "cache/b")
+			})
+			c.agent(t, filepath.Join(d.Work(), "cache", "b"))
+			write(t, d.Work(), "README.md", "agent\n")
+			printed := sessionOutput(t, d, repos, out)
+			if left := d.Left(repos); left.Behind || left.Nested {
+				t.Errorf("Left = %+v:\n%s", left, printed)
+			}
+		})
+	}
+}
+
+// TestASetupWithNoRulesRecordsNoEnd is a setup that writes no .gitignore and makes no
+// repository: no record runs, and the setup's end is 0, so the git session lists no change.
+func TestASetupWithNoRulesRecordsNoEnd(t *testing.T) {
+	d, repos, out := setupWith(t, func(t *testing.T, w string) {
+		write(t, w, "made/x.txt", "setup\n")
+	})
+	if out[""].SetupEnd != 0 {
+		t.Errorf("the setup's end is %d", out[""].SetupEnd)
+	}
+	write(t, d.Work(), "made/x.txt", "agent\n")
+	printed := sessionOutput(t, d, repos, out)
+	if left := d.Left(repos); left.Behind || left.Nested {
+		t.Errorf("Left = %+v:\n%s", left, printed)
+	}
+}
+
 // TestACloneOfTheSetupWithNoChange is a repository that the setup cloned, with names of each kind
 // in its .gitignore files and in its reflogs, and a link in its refs: with no change, the session
 // keeps no copy. A tab or a byte below it at the end of a name sorts the same in the setup's record
@@ -5951,8 +6066,8 @@ func TestARecordThatDidNotRunKeepsTheCopy(t *testing.T) {
 	if _, err := d.GitSession(t.Context(), branch, "", repos, out); err == nil {
 		t.Error("a git session took a repository with no record")
 	}
-	if _, err := d.RecordSession(t.Context(), repos, out); err != nil {
-		t.Fatalf("a record of a repository of the setup: %v", err)
+	if _, needed, err := d.RecordSession(t.Context(), repos, out); err != nil || !needed {
+		t.Fatalf("a record of a repository of the setup: %t, %v", needed, err)
 	}
 	d.Recorded(repos, out, false)
 	if got := out[""].Setup; len(got) != 1 || got[0].State != "other" || out[""].SetupEnd != -1 {

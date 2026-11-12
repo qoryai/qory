@@ -43,8 +43,9 @@ type LeftOut struct {
 	// A change in a submodule that is one of these keeps nothing behind.
 	Submodules []SetupPath
 	// SetupEnd is the second of the setup's end, as [Dir.Recorded] read it: a path that an ignore
-	// rule of the setup covers and whose change time is past it keeps the copy. 0 is a run with no
-	// setup to record, and -1 a setup whose end the record session could not read.
+	// rule of the setup covers and whose change time is past it keeps the copy. 0 is a run whose
+	// setup can have written no ignore rules, or with no record, and -1 a setup whose end the
+	// record session could not read.
 	SetupEnd int64
 }
 
@@ -122,7 +123,9 @@ type GitSession struct {
 // stays out, and stays behind when what repo_state reads there differs from its [SetupPath.State],
 // which [Dir.RecordSession] read after the setup. A path that the setup's rules ignore, also those
 // of a repository the setup made, and whose change time is past [LeftOut.SetupEnd], stays behind
-// too, and n.ignored lists it, unless it is in a folder of [generatedFolders].
+// too, and n.ignored lists it, unless it is in a folder of [generatedFolders] or is the .git/index
+// of a repository. A folder the session cannot enter is one such path, with a final /, and a
+// name with a line break writes n.left alone.
 //
 // The add leaves out each regular file of more than [MaxFile] bytes that it would add, in the
 // repository and in each submodule, and lists its path, relative to the copy, in n.large, which
@@ -706,7 +709,7 @@ rules() {
 # person_ignored writes to the file $2 each path of the file $1, a path and a NUL each, that the
 # person's ignore rules cover, as rules wrote them. A path with a final / is a folder. check-ignore
 # reads a path that starts with : as a pathspec, so the caller leaves such a path out. A failure
-# writes nothing, so that each path counts as left out.
+# writes nothing, so that each path counts as left out, and sets p_status past 1.
 person_ignored() {
 	: > "$2"
 	p_status=0
@@ -749,12 +752,19 @@ stat_args() {
 		return 1
 	fi
 }
-# changed writes to $G/new each path whose change time is past $since, the setup's end, or every
+# changed writes to the file $1 each path whose change time is past $since, the setup's end, or every
 # path with $since below 0. A write sets the change time from the clock, and touch -d cannot set it.
-# It skips each folder named in $generated, and lists a folder only when find cannot enter it.
+# It skips each folder named in $generated and each repository's .git/index, which git status
+# rewrites, and lists a folder, with a final /, only when find cannot enter it. The list has a path a
+# line, so a name with a line break, which find stats as x, writes n.left.
 changed() {
-	: > "$G/new"
+	c_out=$1
+	: > "$c_out"
 	if [ "$since" -eq 0 ]; then
+		return 0
+	fi
+	if ! stat_args; then
+		: > "$B/$n.left"
 		return 0
 	fi
 	set --
@@ -764,26 +774,18 @@ changed() {
 	if [ $# -gt 0 ]; then
 		shift
 	fi
-	if [ "$since" -lt 0 ]; then
-		find . \( -path ./.git -o -path ./.qory -o -type d \( "$@" \) \) -prune -o -type d ! -perm -500 -prune -print \
-			-o ! -type d -print > "$G/new-found" 2>/dev/null || : > "$B/$n.left"
-		while IFS= read -r c_p; do
-			printf '%s\n' "${c_p#./}"
-		done < "$G/new-found" > "$G/new"
-		return 0
+	find . \( -path ./.git -o -path ./.qory -o -type d \( "$@" \) \) -prune -o -name "*$nl*" -exec stat "$s_opt" x {} + \
+		-o -type d ! -perm -500 -prune -exec stat "$s_opt" "$s_line/" {} + \
+		-o ! -type d -exec stat "$s_opt" "$s_line" {} + > "$c_out-times" 2>/dev/null || : > "$B/$n.left"
+	c_status=0
+	grep -q -x x "$c_out-times" 2>/dev/null || c_status=$?
+	if [ "$c_status" -ne 1 ]; then
+		: > "$B/$n.left"
 	fi
-	if ! stat_args; then
+	if ! sort -n -r "$c_out-times" > "$c_out-sorted" 2>/dev/null; then
 		: > "$B/$n.left"
 		return 0
 	fi
-	find . \( -path ./.git -o -path ./.qory -o -type d \( "$@" \) \) -prune -o -type d ! -perm -500 -prune -exec stat "$s_opt" "$s_line" {} + \
-		-o ! -type d -exec stat "$s_opt" "$s_line" {} + > "$G/times" 2>/dev/null || : > "$B/$n.left"
-	if ! sort -n -r "$G/times" > "$G/times-sorted" 2>/dev/null; then
-		: > "$B/$n.left"
-		return 0
-	fi
-	# A name with a line break adds lines that are no time and path. One past $since whose path is
-	# not there writes n.left, so such a name can add a line but never hide one.
 	while IFS= read -r c_line; do
 		c_t=${c_line%% *}
 		case $c_t in
@@ -798,12 +800,15 @@ changed() {
 		fi
 		c_p=${c_line#* }
 		c_p=${c_p#./}
+		case $c_p in
+		*/.git/index) continue ;;
+		esac
 		if [ -e "$c_p" ] || [ -h "$c_p" ]; then
 			printf '%s\n' "$c_p"
 		else
 			: > "$B/$n.left"
 		fi
-	done < "$G/times-sorted" > "$G/new"
+	done < "$c_out-sorted" > "$c_out"
 }
 # new_ignored writes to $G/new-ignored-z each path of $G/new, as ./path, that the work tree's rules
 # ignore, and to $G/new-person-z those that the person's rules ignore. check-ignore stops at a path in
@@ -838,12 +843,16 @@ new_ignored() {
 }
 # setup_ignored writes n.left, and with $since past 0 each path after $1 to n.ignored, for each path
 # of $G/new-ignored-z that the person's rules leave and either the rules after setup_rules ignore or
-# a repository of $setup_repos holds: check-ignore read that repository's rules.
+# a repository of $setup_repos holds: check-ignore read that repository's rules. When person_ignored
+# fails on the rules after setup_rules, it writes n.left alone.
 setup_ignored() {
 	if [ ! -s "$G/new-ignored-z" ]; then
 		return 0
 	fi
 	person_ignored "$G/new-ignored-z" "$G/new-setup-z"
+	if [ "$p_status" -gt 1 ]; then
+		: > "$B/$n.left"
+	fi
 	tr '\000' '\n' < "$G/new-ignored-z" > "$G/new-ignored"
 	tr '\000' '\n' < "$G/new-setup-z" > "$G/new-setup"
 	tr '\000' '\n' < "$G/new-person-z" > "$G/new-person"
@@ -1280,7 +1289,7 @@ submodule_bundle() (
 	rules
 	while IFS= read -r p; do
 		case $p in
-		"$d"/*) printf '%s\n' "${p#"$d"/}" ;;
+		"$d"/?*) printf '%s\n' "${p#"$d"/}" ;;
 		esac
 	done < "$PG/new" > "$G/new"
 	new_ignored
@@ -1394,7 +1403,16 @@ submodule_bundle() (
 `
 
 // sessionMain is the part of [sessionScript] that commits and writes the bundles.
-const sessionMain = `n=0
+const sessionMain = `# changed runs for each repository before the session changes a file in any, such as with chmod in
+# readable.
+n=0
+while [ "$n" -lt "$count" ]; do
+	. "$B/list-$n"
+	if [ "$rel" = . ]; then cd "$W"; else cd "$W/$rel"; fi
+	changed "$B/new-$n"
+	n=$((n + 1))
+done
+n=0
 while [ "$n" -lt "$count" ]; do
 	. "$B/list-$n"
 	if [ "$rel" = . ]; then T=$W shown="the copy" top=; else T=$W/$rel shown="the copy of $rel" top=$rel/; fi
@@ -1464,8 +1482,7 @@ while [ "$n" -lt "$count" ]; do
 	if ! command -v find > /dev/null 2>&1; then
 		: > "$B/$n.left"
 	fi
-	# Before the session changes a file, such as with chmod below.
-	changed
+	mv "$B/new-$n" "$G/new"
 	readable
 	# Each path that the sparse checkout took out, and that the working tree does not have, stays out.
 	# A path that the working tree has goes into the commit as any other, such as a file the agent

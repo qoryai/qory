@@ -68,19 +68,21 @@ func scriptPrograms(script string) []string {
 	return words
 }
 
-// TestSessionToolsListsEveryProgramOfTheScript fails when the script of the git session runs a
-// program that qory image check does not test for.
+// TestSessionToolsListsEveryProgramOfTheScript fails when the script of the git session or of the
+// record session, which runs in the same image, runs a program that qory image check does not
+// test for.
 func TestSessionToolsListsEveryProgramOfTheScript(t *testing.T) {
 	tools := append(image.SessionTools(), "git")
-	for _, word := range scriptPrograms(sessionScript) {
+	programs := scriptPrograms(sessionScript + recordScript)
+	for _, word := range programs {
 		if !slices.Contains(tools, word) {
-			t.Errorf("the script runs %s, which image.SessionTools does not list", word)
+			t.Errorf("the scripts run %s, which image.SessionTools does not list", word)
 		}
 	}
 	for _, tool := range tools {
 		// The session's command runs the script under sh, which the script does not call.
-		if tool != "sh" && !slices.Contains(scriptPrograms(sessionScript), tool) {
-			t.Errorf("image.SessionTools lists %s, which the script does not run", tool)
+		if tool != "sh" && !slices.Contains(programs, tool) {
+			t.Errorf("image.SessionTools lists %s, which the scripts do not run", tool)
 		}
 	}
 }

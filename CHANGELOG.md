@@ -377,18 +377,20 @@ release may change what an existing document does, and states it under Upgrading
   So does a file that the agent wrote or changed under the setup's ignore rules, also those of a
   repository that the setup cloned, and a commit in a repository in a folder that those rules
   ignore, also a bare one: the line then ends with `Changed under the setup's ignore rules: ….`,
-  which lists the first 50 files and the count of the rest. After every setup, the container
-  `qory-record-<run id>` records the second in which the setup ended, and a file counts by its
-  change time, which the agent cannot set back as `touch -d` sets a file's time. A file in a folder
-  named `node_modules`, `.venv`, `venv`, `__pycache__`, `target`, `build`, `dist`, `.gradle` or
-  `.next`, and a file that the agent deleted, keep nothing behind. A container of the run that
+  which lists the first 50 files and the count of the rest. After a setup that wrote or changed a
+  `.gitignore` or made a repository, the container `qory-record-<run id>` records the second in
+  which the setup ended, and a file counts by its change time, which the agent cannot set back as
+  `touch -d` sets a file's time. With `wall.setup: inside`, no record runs, and such a file keeps
+  the copy with a line that lists none. A file in a folder named `node_modules`, `.venv`, `venv`,
+  `__pycache__`, `target`, `build`, `dist`, `.gradle` or `.next`, the `.git/index` of a repository,
+  and a file that the agent deleted, keep nothing behind. A container of the run that
   could not be removed keeps the copy too, and brings nothing back. A first signal leaves the
   return of a local run at most 30 minutes, and `qory run` prints that time. A read run with a setup also
   works in a copy, read-only for the agent, and nothing comes back from it. A read-write
   mount stops a read run too, and so does a read run with no setup at your home folder.
   `make the mount … read-only` replaces `mount a narrower folder` in the line of a read-write
   mount of your home folder. `qory image check` tests that git is 2.25 or later and that `cat`,
-  `chmod`, `comm`, `cp`, `find`, `grep`, `mkdir`, `mv`, `readlink`, `sh`, `sort`, `stat` and `tr` are there, in `/usr/local/bin`, `/usr/bin` or `/bin`. See A run that may write works in a copy in
+  `chmod`, `comm`, `cp`, `find`, `grep`, `mkdir`, `mv`, `readlink`, `sh`, `sleep`, `sort`, `stat` and `tr` are there, in `/usr/local/bin`, `/usr/bin` or `/bin`. See A run that may write works in a copy in
   `docs/run.md`.
 - A walled run with no run key, `--home` or `harness.home` composes into
   `qory/homes/runs/<name>-<hash>/<run id>` in your cache directory, a home for that run alone, and

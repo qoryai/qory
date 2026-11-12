@@ -34,8 +34,8 @@ const (
 	textCopyReserved   = "start the run from a folder that does not contain your home folder, qory's state directory or the folder of the runs' copies: the folder %s %s, and the run's copy of it would have every file there"
 	textCopyBehind     = "part of the run's work did not come back: the copy has a nested repository the run made."
 	textCopyNotAdded   = "part of the run's work did not come back: the copy has changes that git could not add to the run's commit, such as a file another user owns, a change in a submodule, or a file under ignore rules that the setup wrote."
-	textCopyIgnored    = " Changed under the setup's ignore rules: %s."
-	textCopyLarge      = "left out of the run's commit, as each has more than %s: %s. They stay in the run's copy."
+	textCopyIgnored    = " Changed under the setup's ignore rules: %s"
+	textCopyLarge      = "left out of the run's commit, as each has more than %s: %s They stay in the run's copy."
 	textCopyStepLimit  = "the check of the run's commits ran past its limit of %s, so those commits did not come back"
 	textCopyFetchLimit = "the fetch of the run's commits ran past its limit of %s, so those commits did not come back"
 	textCopyBackLimit  = "the copy back of the run's files ran past its limit of %s, so part of them did not come back"
@@ -478,18 +478,22 @@ func (c *runCopy) recordSetup(ctx context.Context, run openedRun, spec *runSpec)
 // test replaces it.
 var runRecordContainer = func(ctx context.Context, c gitContainer) (int, error) { return runGitContainer(ctx, c) }
 
-// recordRepositories runs [runcopy.Dir.RecordSession] after the setup: it records the setup's end
-// and each repository that the setup made, in a container that qory starts as the git session's,
-// see [gitContainerFor], named qory-record-<run id>, with the copy read-only, within the time limit
-// that the git session gets, [runcopy.SessionLimitFor] of [runcopy.Dir.WorkSize] after the setup.
-// No git on this machine opens the copy. The container's lines go nowhere.
-// When the container does not start, fails or runs past that limit, each such repository is
-// other and the setup's end is unknown, so the git session keeps the copy for such a repository
-// and for a path under the setup's ignore rules. A stop or the run's time limit that ends ctx is the error.
+// recordRepositories runs [runcopy.Dir.RecordSession] after the setup, when the setup can have
+// written ignore rules: it records the setup's end and each repository that the setup made, in a
+// container that qory starts as the git session's, see [gitContainerFor], named
+// qory-record-<run id>, with the copy read-only, within the time limit that the git session gets,
+// [runcopy.SessionLimitFor] of [runcopy.Dir.WorkSize] after the setup. No git on this machine
+// opens the copy. The container's lines go nowhere. When the container does not start, fails or
+// runs past that limit, each such repository is other and the setup's end is unknown, so the git
+// session keeps the copy for such a repository and for a path under the setup's ignore rules. A
+// stop or the run's time limit that ends ctx is the error.
 func (c *runCopy) recordRepositories(ctx context.Context, run openedRun, spec *runSpec) error {
-	gs, err := c.dir.RecordSession(ctx, c.repos, c.out)
+	gs, needed, err := c.dir.RecordSession(ctx, c.repos, c.out)
 	if err != nil {
 		return runcopy.ShownError(err)
+	}
+	if !needed {
+		return nil
 	}
 	entries, size, _ := c.dir.WorkSize(ctx)
 	limited, cancel := context.WithTimeout(ctx, runcopy.SessionLimitFor(entries, size))
@@ -650,7 +654,7 @@ func (c *runCopy) comeBack(ctx context.Context, runID string, report func(string
 		}
 	}
 	if len(left.Large) > 0 {
-		report(fmt.Sprintf(textCopyLarge, maxFileShown, sessionPaths(left.Large)))
+		report(fmt.Sprintf(textCopyLarge, maxFileShown, sessionList(left.Large)))
 		ok = false
 	}
 	if left.Nested {
@@ -660,7 +664,7 @@ func (c *runCopy) comeBack(ctx context.Context, runID string, report func(string
 	if left.Behind {
 		line := textCopyNotAdded
 		if len(left.Ignored) > 0 {
-			line += fmt.Sprintf(textCopyIgnored, sessionPaths(left.Ignored))
+			line += fmt.Sprintf(textCopyIgnored, sessionList(left.Ignored))
 		}
 		report(line)
 		ok = false
@@ -821,6 +825,15 @@ func actingKeys(changes []runcopy.ActingChange) string {
 		}
 	}
 	return strings.Join(keys, ", ")
+}
+
+// sessionList is [sessionPaths] of files and the dot that ends its sentence, which a list that
+// [runcopy.Dir.Left] cut has in the ... at its end.
+func sessionList(files []string) string {
+	if n := len(files); n > 0 && n <= maxListed && files[n-1] == "..." {
+		return sessionPaths(files)
+	}
+	return sessionPaths(files) + "."
 }
 
 // maxFileShown is [runcopy.MaxFile] as a line shows it.

@@ -37,27 +37,31 @@ func (d Dir) RecordMounts() []wall.Mount {
 	return []wall.Mount{{Path: d.Work(), ReadOnly: true}, {Path: d.SetupRecord()}}
 }
 
-// RecordSession is the session that runs after the setup and before the agent's session. It
-// writes the second of the setup's end, which [Dir.Recorded] reads into [LeftOut.SetupEnd], and
-// records each repository that the setup made, which out has with [StateRepo]. It runs repo_state,
-// as the git session does, so the two compare the same bytes: the HEAD, refs, reflogs and
-// .gitignore files of such a repository and what git status lists there, with its submodules,
-// through a git folder with an empty configuration. The caller runs it as it runs
-// [Dir.GitSession], in a container of the run's image, and then calls [Dir.Recorded].
-// RecordSession makes [Dir.SetupRecord], an empty folder that the session alone binds.
-func (d Dir) RecordSession(ctx context.Context, repos []Repository, out map[string]LeftOut) (GitSession, error) {
+// RecordSession is the session that runs after the setup and before the agent's session, when a
+// repository of out has setup rules, as [setupRules] finds them. It writes the second of the
+// setup's end, which [Dir.Recorded] reads into [LeftOut.SetupEnd], and records each repository
+// that the setup made, which out has with [StateRepo]. It runs repo_state, as the git session
+// does, so the two compare the same bytes: the HEAD, refs, reflogs and .gitignore files of such a
+// repository and what git status lists there, with its submodules, through a git folder with an
+// empty configuration. The caller runs it as it runs [Dir.GitSession], in a container of the
+// run's image, and then calls [Dir.Recorded]. It reports false, and makes nothing, when no
+// repository has setup rules. RecordSession makes [Dir.SetupRecord], an empty folder that the
+// session alone binds.
+func (d Dir) RecordSession(ctx context.Context, repos []Repository, out map[string]LeftOut) (GitSession, bool, error) {
 	if err := ctx.Err(); err != nil {
-		return GitSession{}, err
+		return GitSession{}, false, err
 	}
 	lists := make([]string, len(repos))
+	needed := false
 	for n, r := range repos {
 		rel, err := repositoryRel(r)
 		if err != nil {
-			return GitSession{}, err
+			return GitSession{}, false, err
 		}
 		if !objectID.MatchString(r.Base) {
-			return GitSession{}, fmt.Errorf(textBase, shown(rel), shown(r.Base))
+			return GitSession{}, false, fmt.Errorf(textBase, shown(rel), shown(r.Base))
 		}
+		needed = needed || setupRules(out[r.Path])
 		var b strings.Builder
 		count := 0
 		for _, s := range out[r.Path].Setup {
@@ -65,27 +69,30 @@ func (d Dir) RecordSession(ctx context.Context, repos []Repository, out map[stri
 				continue
 			}
 			if !cleanRel(s.Path) {
-				return GitSession{}, fmt.Errorf(textLeftOut, shown(s.Path))
+				return GitSession{}, false, fmt.Errorf(textLeftOut, shown(s.Path))
 			}
 			b.WriteString(" " + shellQuote(s.Path))
 			count++
 		}
 		lists[n] = fmt.Sprintf("rel=%s base=%s icase=%t setup=%d\nset --%s\n", shellQuote(rel), r.Base, r.ignorecase, count, b.String())
 	}
+	if !needed {
+		return GitSession{}, false, nil
+	}
 	if err := os.Mkdir(d.SetupRecord(), 0o700); err != nil {
 		if errors.Is(err, fs.ErrExist) {
-			return GitSession{}, fmt.Errorf(textExists, shown(d.SetupRecord()))
+			return GitSession{}, false, fmt.Errorf(textExists, shown(d.SetupRecord()))
 		}
-		return GitSession{}, fileErr(d.SetupRecord(), err)
+		return GitSession{}, false, fileErr(d.SetupRecord(), err)
 	}
 	script := filepath.Join(d.SetupRecord(), RecordScriptName)
 	if err := writeNew(script, recordScript); err != nil {
-		return GitSession{}, fileErr(script, err)
+		return GitSession{}, false, fileErr(script, err)
 	}
 	for n, list := range lists {
 		p := filepath.Join(d.SetupRecord(), "list-"+strconv.Itoa(n))
 		if err := writeNew(p, list); err != nil {
-			return GitSession{}, fileErr(p, err)
+			return GitSession{}, false, fileErr(p, err)
 		}
 	}
 	return GitSession{
@@ -96,14 +103,14 @@ func (d Dir) RecordSession(ctx context.Context, repos []Repository, out map[stri
 			"GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=/dev/null",
 		},
 		Dir: d.Work(),
-	}, nil
+	}, true, nil
 }
 
 // Recorded replaces each [StateRepo] in out with the state that [Dir.RecordSession] wrote for it,
 // when ran is set, and with other when ran is unset or the session wrote none: then the git
-// session keeps the copy for that folder. It sets [LeftOut.SetupEnd] of each repository to the
-// second that the session wrote, or -1 without one. ran is whether the record session exited 0
-// within its time limit.
+// session keeps the copy for that folder. It sets [LeftOut.SetupEnd] of each repository with
+// setup rules to the second that the session wrote, or -1 without one, and of any other to 0. ran
+// is whether the record session exited 0 within its time limit.
 func (d Dir) Recorded(repos []Repository, out map[string]LeftOut, ran bool) {
 	end := int64(-1)
 	if ran {
@@ -113,7 +120,10 @@ func (d Dir) Recorded(repos []Repository, out map[string]LeftOut, ran bool) {
 	}
 	for n, r := range repos {
 		o := out[r.Path]
-		o.SetupEnd = end
+		o.SetupEnd = 0
+		if setupRules(o) {
+			o.SetupEnd = end
+		}
 		setup := slices.Clone(o.Setup)
 		i := 0
 		for k, s := range setup {
@@ -131,6 +141,18 @@ func (d Dir) Recorded(repos []Repository, out map[string]LeftOut, ran bool) {
 		o.Setup = setup
 		out[r.Path] = o
 	}
+}
+
+// setupRules reports whether the setup can have written ignore rules in the repository of o: it
+// wrote, changed or deleted a .gitignore there or in a submodule, or left a folder that
+// [Dir.SetupChanges] lists whole, such as a repository it made.
+func setupRules(o LeftOut) bool {
+	for _, s := range slices.Concat(o.Setup, o.Submodules) {
+		if s.State == StateRepo || strings.HasSuffix(s.Path, "/") || s.Path == ".gitignore" || strings.HasSuffix(s.Path, "/.gitignore") {
+			return true
+		}
+	}
+	return false
 }
 
 // setupEndForm is the form of the file setup-end.time: a second, at most 15 digits, and a line

@@ -122,8 +122,8 @@ func TestTheTimeLimitOfTheRecordGrowsWithTheCopy(t *testing.T) {
 
 // TestARecordContainerThatFailsMakesTheRepositoryOther is a record container that does not start,
 // exits with an error or runs past its limit: the repository that the setup made is other and the
-// setup's end unknown, so the git session keeps the copy for them, and the record returns no error. A stop that ends the run's
-// context is the error.
+// setup's end unknown, so the git session keeps the copy for them, and the record returns no
+// error. A stop that ends the run's context is the error.
 func TestARecordContainerThatFailsMakesTheRepositoryOther(t *testing.T) {
 	for _, f := range []struct {
 		name string
@@ -170,23 +170,56 @@ func TestARecordContainerThatFailsMakesTheRepositoryOther(t *testing.T) {
 	}
 }
 
-// TestASetupWithNoRepositoryStartsARecordContainer is a setup that made no repository: the record
-// container starts all the same, and the second it writes to setup-end.time is the setup's end of
-// each repository.
-func TestASetupWithNoRepositoryStartsARecordContainer(t *testing.T) {
+// TestASetupWithNoRulesStartsNoRecordContainer is a setup that made no repository and wrote no
+// .gitignore: no record container starts, and the setup's end stays 0, so the git session looks
+// for no change under the setup's ignore rules.
+func TestASetupWithNoRulesStartsNoRecordContainer(t *testing.T) {
 	c := recordCopy(t)
-	c.out[""] = runcopy.LeftOut{Setup: []runcopy.SetupPath{{Path: "tool", State: "other"}}}
+	c.out[""] = runcopy.LeftOut{
+		Setup:      []runcopy.SetupPath{{Path: "tool", State: "other"}, {Path: "a.gitignore", State: "missing"}},
+		Submodules: []runcopy.SetupPath{{Path: "sub/x.go", State: "missing"}},
+	}
 	run, spec := recordSpec()
 	before := runRecordContainer
 	t.Cleanup(func() { runRecordContainer = before })
 	runRecordContainer = func(context.Context, gitContainer) (int, error) {
-		return 0, os.WriteFile(filepath.Join(c.dir.SetupRecord(), "setup-end.time"), []byte("1794469868\n"), 0o600)
+		t.Error("a record container started")
+		return 0, nil
 	}
 	if err := c.recordRepositories(t.Context(), run, spec); err != nil {
 		t.Fatal(err)
 	}
-	if got := c.out[""].SetupEnd; got != 1794469868 {
+	if got := c.out[""].SetupEnd; got != 0 {
 		t.Errorf("the setup's end is %d", got)
+	}
+}
+
+// TestASetupThatWroteAGitignoreStartsARecordContainer is a setup that made no repository but
+// wrote a .gitignore, at the top, in a folder, in a submodule, or that left a folder too deep to
+// list: the record container starts, and the second it writes to setup-end.time is the setup's end.
+func TestASetupThatWroteAGitignoreStartsARecordContainer(t *testing.T) {
+	for i, out := range []runcopy.LeftOut{
+		{Setup: []runcopy.SetupPath{{Path: ".gitignore", State: "missing"}}},
+		{Setup: []runcopy.SetupPath{{Path: "cache/.gitignore", State: "missing"}}},
+		{Setup: []runcopy.SetupPath{{Path: "deep/", State: "other"}}},
+		{Submodules: []runcopy.SetupPath{{Path: "sub/.gitignore", State: "missing"}}},
+	} {
+		t.Run(strconv.Itoa(i), func(t *testing.T) {
+			c := recordCopy(t)
+			c.out[""] = out
+			run, spec := recordSpec()
+			before := runRecordContainer
+			t.Cleanup(func() { runRecordContainer = before })
+			runRecordContainer = func(context.Context, gitContainer) (int, error) {
+				return 0, os.WriteFile(filepath.Join(c.dir.SetupRecord(), "setup-end.time"), []byte("1794469868\n"), 0o600)
+			}
+			if err := c.recordRepositories(t.Context(), run, spec); err != nil {
+				t.Fatal(err)
+			}
+			if got := c.out[""].SetupEnd; got != 1794469868 {
+				t.Errorf("the setup's end is %d", got)
+			}
+		})
 	}
 }
 

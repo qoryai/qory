@@ -274,7 +274,7 @@ func TestNowhereKeepsTheRulesOfACopyStep(t *testing.T) {
 // TestEachLeftoverHasItsLine is a git session that recorded a repository the run made, other work
 // git could not add, a large file with a control character, or changes under the setup's ignore
 // rules, and nothing past the base commit: each prints its line, none prints that no action is
-// needed, and the copy stays.
+// needed, and the copy stays. A list that [runcopy.Dir.Left] cut ends with one ... and no dot.
 func TestEachLeftoverHasItsLine(t *testing.T) {
 	for name, c := range map[string]struct {
 		files map[string]string
@@ -290,6 +290,10 @@ func TestEachLeftoverHasItsLine(t *testing.T) {
 			[]string{textCopyNotAdded, textCopyNotAdded + " Changed under the setup's ignore rules: cache/a?b, .cache/x."}},
 		"ignored alone": {map[string]string{"0.ignored": "cache/a\n"},
 			[]string{textCopyNotAdded, textCopyNotAdded + " Changed under the setup's ignore rules: cache/a."}},
+		"ignored cut": {map[string]string{"0.ignored": strings.Repeat("a", 600<<10) + "\n" + strings.Repeat("b", 600<<10) + "\n"},
+			[]string{textCopyNotAdded, textCopyNotAdded + " Changed under the setup's ignore rules: " + integration.Printable(strings.Repeat("a", 600<<10)) + ", ..."}},
+		"large cut": {map[string]string{"0.large": strings.Repeat("a", 600<<10) + "\n" + strings.Repeat("b", 600<<10) + "\n"},
+			[]string{"more than 100 MiB: " + integration.Printable(strings.Repeat("a", 600<<10)) + ", ... They stay in the run's copy."}},
 	} {
 		t.Run(strings.ReplaceAll(name, " ", "-"), func(t *testing.T) {
 			for _, v := range []string{"HOME", "XDG_CACHE_HOME", "XDG_STATE_HOME", "XDG_CONFIG_HOME"} {
@@ -322,6 +326,9 @@ func TestEachLeftoverHasItsLine(t *testing.T) {
 				if !strings.Contains(out, w) {
 					t.Errorf("the lines lack %q:\n%s", w, out)
 				}
+			}
+			if strings.Contains(out, "....") {
+				t.Error("a line ends a cut list with four dots")
 			}
 			for _, text := range []string{textCopyBehind, textCopyNotAdded} {
 				if !slices.Contains(c.want, text) && strings.Contains(out, text) {
