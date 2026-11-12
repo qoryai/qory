@@ -3816,7 +3816,9 @@ Part of the run's work can stay in the copy:
   as one entry, such as `cache/`. A file that the agent deleted, a file in a folder named
   `node_modules`, `.venv`, `venv`, `__pycache__`, `target`, `build`, `dist`, `.gradle` or `.next`,
   and the `.git/index` of a repository that has what the repository's `HEAD` has, as after
-  `git status` rewrote it, keep nothing behind. After
+  `git status` rewrote it, keep nothing behind. A `.git/index` whose entries match `HEAD` is not
+  checked further, so data that the agent writes into the index file by hand, outside its
+  entries, does not come back. After
   such a setup, a name with a line break anywhere else in the copy keeps the copy, and the line
   lists none. A process of the setup that still writes under these rules while the agent runs
   keeps the copy too. When the record container failed or ran past its limit, any file under the
