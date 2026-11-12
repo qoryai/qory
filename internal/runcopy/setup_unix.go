@@ -145,8 +145,9 @@ func newerFiles(dir int, rel string, since time.Time, depth int, paths *[]string
 // returned it, for [Dir.SetupStates]: each regular file and link that differs from the commit
 // the copy starts at, each one gone from it, and each new one that the .gitignore files do
 // not ignore, sorted. A repository in the copy is one path with a trailing /, and so is each
-// folder with a .git folder below a new one. .qory, a submodule and every .git stay out. Call it
-// after the setup and before the agent's session.
+// folder with a .git folder below a new one. .qory, a submodule and every .git stay out. It
+// reports true, for [LeftOut.SetupGit], when a folder that the rules ignore has a git folder below
+// it, see [gitBelow]. Call it after the setup and before the agent's session.
 //
 // No git opens the copy, since the setup could write it. The tree of the commit comes from
 // the bare source of r. A walk opens each folder from the one above it with O_NOFOLLOW, so it
@@ -154,39 +155,39 @@ func newerFiles(dir int, rel string, since time.Time, depth int, paths *[]string
 // of the blob, in the object format of the bare source.
 // git check-ignore reads the regular .gitignore files from a mirror in the run's folder, which
 // no run binds, with an empty configuration: a program named in the copy has no way to run.
-func (d Dir) SetupChanges(ctx context.Context, r Repository) ([]string, error) {
+func (d Dir) SetupChanges(ctx context.Context, r Repository) ([]string, bool, error) {
 	rel, err := repositoryRel(r)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	top := filepath.Join(d.Work(), filepath.FromSlash(rel))
-	paths, err := d.setupChanges(ctx, top, r)
+	paths, git, err := d.setupChanges(ctx, top, r)
 	if err != nil {
-		return nil, fmt.Errorf(textSetupStatus, shown(top), err)
+		return nil, false, fmt.Errorf(textSetupStatus, shown(top), err)
 	}
-	return paths, nil
+	return paths, git, nil
 }
 
 // setupChanges is [Dir.SetupChanges] of the copy of r at top.
-func (d Dir) setupChanges(ctx context.Context, top string, r Repository) ([]string, error) {
+func (d Dir) setupChanges(ctx context.Context, top string, r Repository) ([]string, bool, error) {
 	source := d.source(r.index)
 	base, err := os.MkdirTemp(d.root, "status-")
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	defer os.RemoveAll(base)
 	private, mirror := filepath.Join(base, "git"), filepath.Join(base, "tree")
 	for _, sub := range []string{filepath.Join(private, "objects"), filepath.Join(private, "refs"), mirror} {
 		if err := os.MkdirAll(sub, 0o700); err != nil {
-			return nil, err
+			return nil, false, err
 		}
 	}
 	if err := copyFormat(ctx, source, private, r.Base); err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	format, err := objectFormat(ctx, source)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	w := &setupWalk{
 		source: source, format: format, mirror: mirror, gitDir: private,
@@ -194,11 +195,11 @@ func (d Dir) setupChanges(ctx context.Context, top string, r Repository) ([]stri
 		hashes: make(chan struct{}, maxHashes),
 	}
 	if err := w.readTree(ctx, r.Base); err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	root, err := unix.Open(top, dirFlags, 0)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	defer unix.Close(root)
 	err = w.folder(ctx, root, "", 0)
@@ -207,7 +208,7 @@ func (d Dir) setupChanges(ctx context.Context, top string, r Repository) ([]stri
 		err = w.err
 	}
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	for file := range w.tracked {
 		if !w.seen[file] {
@@ -215,7 +216,7 @@ func (d Dir) setupChanges(ctx context.Context, top string, r Repository) ([]stri
 		}
 	}
 	slices.Sort(w.changed)
-	return w.changed, nil
+	return w.changed, w.git, nil
 }
 
 // maxHashes is the most files [setupWalk] hashes at one time.
@@ -247,6 +248,8 @@ type setupWalk struct {
 	mu      sync.Mutex
 	changed []string
 	err     error
+	// git is whether a folder that the rules ignore has a git folder below it.
+	git bool
 }
 
 // readTree reads the tree of commit from the bare source, leaving out .qory.
@@ -359,7 +362,11 @@ func (w *setupWalk) folder(ctx context.Context, dir int, rel string, depth int) 
 	}
 	for i, e := range untracked {
 		switch {
-		case ignored[asked[i]] && (e.folder || e.name != ".gitignore"):
+		case ignored[asked[i]] && e.folder:
+			if !w.git {
+				w.git = gitBelowAt(dir, e.name, depth+1)
+			}
+		case ignored[asked[i]] && e.name != ".gitignore":
 		case !e.folder:
 			w.note(e.at)
 		default:
@@ -400,6 +407,52 @@ func (w *setupWalk) subfolder(ctx context.Context, sub int, rel string, depth in
 		}
 	}
 	return w.folder(ctx, sub, rel, depth+1)
+}
+
+// gitBelowAt is [gitBelow] of the folder name in dir, at depth, and true when it cannot open it.
+func gitBelowAt(dir int, name string, depth int) bool {
+	sub, err := unix.Openat(dir, name, dirFlags, 0)
+	if err != nil {
+		return true
+	}
+	defer unix.Close(sub)
+	return gitBelow(sub, depth)
+}
+
+// gitBelow reports whether the folder dir, at depth, or a folder below it has a .git, or a HEAD
+// file and objects and refs folders, as a bare repository has. It follows no link, and reports true
+// for a folder it cannot read, and past [maxOpenFolders], so that such a folder needs a record.
+func gitBelow(dir int, depth int) bool {
+	if depth >= maxOpenFolders {
+		return true
+	}
+	names, err := readNames(dir)
+	if err != nil {
+		return true
+	}
+	var head, objects, refs bool
+	var folders []string
+	for _, name := range names {
+		if folds(name, ".git") {
+			return true
+		}
+		var st unix.Stat_t
+		if unix.Fstatat(dir, name, &st, unix.AT_SYMLINK_NOFOLLOW) != nil {
+			return true
+		}
+		switch st.Mode & unix.S_IFMT {
+		case unix.S_IFDIR:
+			folders = append(folders, name)
+			objects = objects || name == "objects"
+			refs = refs || name == "refs"
+		case unix.S_IFREG:
+			head = head || name == "HEAD"
+		}
+	}
+	if head && objects && refs {
+		return true
+	}
+	return slices.ContainsFunc(folders, func(name string) bool { return gitBelowAt(dir, name, depth+1) })
 }
 
 // repositories adds each folder below the folder dir at rel, with the entries list, that has a
