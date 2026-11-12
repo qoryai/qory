@@ -5100,13 +5100,15 @@ func TestTheCheckUnderTheOthersInTheCopy(t *testing.T) {
 }
 
 // TestTheCheckUnderTheOthersFindsNothingWhenAllComesBack is an agent that adds, changes and
-// deletes files, writes an ignored one, leaves a setup's file as the setup left it, commits in a
-// submodule and writes a file there, and adds a gitlink at an empty folder: everything comes back,
-// and nothing stays.
+// deletes files, writes a file that the person's .gitignore ignores, leaves a setup's file as the
+// setup left it, commits in a submodule and writes a file there, and adds a gitlink at an empty
+// folder: everything comes back, and nothing stays.
 func TestTheCheckUnderTheOthersFindsNothingWhenAllComesBack(t *testing.T) {
 	isolate(t)
 	sessionGit(t)
 	src, sub := withSubmodule(t)
+	write(t, src, ".gitignore", "ignored/\n")
+	commitAll(t, src, "ignore rule")
 	d, repos := cloneRun(t, src)
 	w := d.Work()
 	write(t, w, "setup.txt", "setup\n")
@@ -5123,7 +5125,6 @@ func TestTheCheckUnderTheOthersFindsNothingWhenAllComesBack(t *testing.T) {
 	if err := os.Remove(filepath.Join(w, "CLAUDE.md")); err != nil {
 		t.Fatal(err)
 	}
-	write(t, w, ".gitignore", "ignored/\n")
 	write(t, w, "ignored/x.txt", "x\n")
 	s := filepath.Join(w, filepath.FromSlash(sub))
 	write(t, s, "lib.txt", "changed\n")
@@ -5133,6 +5134,206 @@ func TestTheCheckUnderTheOthersFindsNothingWhenAllComesBack(t *testing.T) {
 	got := files(t, q.Path, q.Head)
 	if !slices.Contains(got, "new.txt") || slices.Contains(got, "CLAUDE.md") || slices.Contains(got, "setup.txt") || slices.Contains(got, "ignored/x.txt") {
 		t.Errorf("the commit has %v", got)
+	}
+}
+
+// TestARuleOfTheRunIgnoresNothing is a path that only an ignore rule the run wrote or changed
+// covers: the commit leaves it out, and the copy stays, with the line of a repository for a
+// repository the run made. A path that the person's .gitignore or .git/info/exclude ignores stays
+// out with no line.
+func TestARuleOfTheRunIgnoresNothing(t *testing.T) {
+	for _, c := range []struct {
+		name         string
+		run          func(t *testing.T, w string)
+		nested, left bool
+	}{
+		{"a .gitignore of the agent", func(t *testing.T, w string) {
+			write(t, w, "foo/.gitignore", "*\n")
+			write(t, w, "foo/work.go", "package foo\n")
+		}, false, true},
+		{"a rule the agent adds to the person's .gitignore", func(t *testing.T, w string) {
+			write(t, w, ".gitignore", "build/\n*.log\nwork.go\n")
+			write(t, w, "work.go", "package main\n")
+		}, false, true},
+		{"a rule the agent commits", func(t *testing.T, w string) {
+			write(t, w, "foo/.gitignore", "*.go\n")
+			commitAll(t, w, "rule")
+			write(t, w, "foo/work.go", "package foo\n")
+		}, false, true},
+		{"a repository that a rule of the agent ignores", func(t *testing.T, w string) {
+			write(t, w, "foo/.gitignore", "*\n")
+			r := filepath.Join(w, "foo", "repo")
+			write(t, r, "a.txt", "a\n")
+			testGit(t, r, "init", "--quiet")
+		}, true, true},
+		{"a file next to a repository the run made", func(t *testing.T, w string) {
+			write(t, w, ".gitignore", "build/\n*.log\nlib.go\n")
+			write(t, w, "lib.go", "package main\n")
+			r := filepath.Join(w, "lib")
+			write(t, r, "a.txt", "a\n")
+			testGit(t, r, "init", "--quiet")
+		}, true, true},
+		{"files the person's rules ignore", func(t *testing.T, w string) {
+			write(t, w, "build/out.bin", "out\n")
+			write(t, w, "sub/run.log", "log\n")
+			write(t, w, "personal.txt", "mine\n")
+			r := filepath.Join(w, "build", "repo")
+			write(t, r, "a.txt", "a\n")
+			testGit(t, r, "init", "--quiet")
+		}, false, false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			isolate(t)
+			sessionGit(t)
+			src, _ := person(t)
+			write(t, src, ".gitignore", "build/\n*.log\n")
+			commitAll(t, src, "rules")
+			write(t, src, ".git/info/exclude", "personal.txt\n")
+			d, repos := cloneRun(t, src)
+			c.run(t, d.Work())
+			printed := sessionOutput(t, d, repos, nil)
+			if left := d.Left(repos); left.Nested != c.nested || left.Behind != c.left {
+				t.Errorf("Left = %+v:\n%s", left, printed)
+			}
+		})
+	}
+}
+
+// TestAFileMarkedSkipWorktreeComesBack is an agent that changes README.md or adds a file, and
+// marks it with git update-index --skip-worktree: the file is in the working tree, so it comes back
+// in the commit on HEAD, as for a sparse checkout.
+func TestAFileMarkedSkipWorktreeComesBack(t *testing.T) {
+	for _, file := range []string{"README.md", "new.go"} {
+		t.Run(file, func(t *testing.T) {
+			isolate(t)
+			sessionGit(t)
+			src, _ := person(t)
+			d, repos := cloneRun(t, src)
+			w := d.Work()
+			write(t, w, file, "the agent's\n")
+			testGit(t, w, "add", file)
+			testGit(t, w, "update-index", "--skip-worktree", file)
+			_, refs := runRefs(t, d, src, repos, nil)
+			wantRefs(t, refs, "uncommitted")
+			if got := testGit(t, src, "show", prefix+"/uncommitted:"+file); got != "the agent's" {
+				t.Errorf("%s is %q", file, got)
+			}
+		})
+	}
+}
+
+// TestALinkReplacedByAFileKeepsTheCopy is a link into .qory at CLAUDE.md that the agent replaces
+// with a regular file or a folder: the file may have the run's text from .qory, so the commit keeps
+// CLAUDE.md as the base commit has it, and the copy stays. A link that stays a link, or is gone,
+// keeps nothing behind, and nor does a file with what the base commit has.
+func TestALinkReplacedByAFileKeepsTheCopy(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		run  func(t *testing.T, w string)
+		left bool
+	}{
+		{"a regular file", func(t *testing.T, w string) {
+			write(t, w, "CLAUDE.md", "the agent's\n")
+		}, true},
+		{"a folder", func(t *testing.T, w string) {
+			write(t, w, "CLAUDE.md/notes.md", "the agent's\n")
+		}, true},
+		{"a file the agent commits", func(t *testing.T, w string) {
+			write(t, w, "CLAUDE.md", "the agent's\n")
+			commitAll(t, w, "claude")
+		}, true},
+		{"the base commit's file", func(t *testing.T, w string) {
+			write(t, w, "CLAUDE.md", "base\n")
+		}, false},
+		{"a link", func(t *testing.T, w string) {
+			link(t, w, "CLAUDE.md", ".qory/CLAUDE.md")
+			write(t, w, ".qory/CLAUDE.md", "changed through the link\n")
+		}, false},
+		{"nothing", func(t *testing.T, w string) {}, false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			isolate(t)
+			sessionGit(t)
+			src, base := person(t)
+			d, repos := cloneRun(t, src)
+			w := d.Work()
+			write(t, w, ".qory/CLAUDE.md", "the run's text\n")
+			if err := os.Remove(filepath.Join(w, "CLAUDE.md")); err != nil {
+				t.Fatal(err)
+			}
+			c.run(t, w)
+			write(t, w, "new.txt", "new\n")
+			out := map[string]LeftOut{"": {Links: []string{"CLAUDE.md"}}}
+			printed := sessionOutput(t, d, repos, out)
+			if left := d.Left(repos); left.Behind != c.left || left.Nested {
+				t.Errorf("Left = %+v:\n%s", left, printed)
+			}
+			q, err := d.Quarantine(context.Background(), branch, repos)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, _, err := q[0].FetchInto(context.Background(), src, branch, "run-1"); err != nil {
+				t.Fatal(err)
+			}
+			if got, want := testGit(t, src, "show", q[0].Head+":CLAUDE.md"), testGit(t, src, "show", base+":CLAUDE.md"); got != want {
+				t.Errorf("CLAUDE.md is %q at the run's commit, want %q", got, want)
+			}
+		})
+	}
+}
+
+// TestAChangeInARepositoryOfTheSetupKeepsTheCopy is a setup that makes repositories at tool and
+// a/b: the commit leaves both out, a file the agent writes in one keeps the copy, and a file at
+// toolx or a/bc comes back.
+func TestAChangeInARepositoryOfTheSetupKeepsTheCopy(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		file string
+		left bool
+	}{
+		{"nothing", "", false},
+		{"a file in tool", "tool/new.go", true},
+		{"a changed file in tool", "tool/a.go", true},
+		{"a file in a/b", "a/b/new.go", true},
+		{"a file at toolx", "toolx/new.go", false},
+		{"a file at a/bc", "a/bc", false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			isolate(t)
+			sessionGit(t)
+			src, _ := person(t)
+			d, repos := cloneRun(t, src)
+			w := d.Work()
+			for _, r := range []string{"tool", "a/b"} {
+				at := filepath.Join(w, filepath.FromSlash(r))
+				write(t, at, "a.go", "package a\n")
+				testGit(t, at, "init", "--quiet")
+				commitAll(t, at, "setup")
+			}
+			out := setupRecord(t, d, repos[0])
+			if want := []SetupPath{{Path: "a/b", State: "other"}, {Path: "tool", State: "other"}}; !slices.Equal(out.Setup, want) {
+				t.Fatalf("the setup's paths are %v, want %v", out.Setup, want)
+			}
+			if c.file == "" {
+				noBundleWith(t, d, repos, map[string]LeftOut{"": out})
+				return
+			}
+			write(t, w, c.file, "the agent's\n")
+			printed := sessionOutput(t, d, repos, map[string]LeftOut{"": out})
+			if left := d.Left(repos); left.Behind != c.left || left.Nested {
+				t.Errorf("Left = %+v:\n%s", left, printed)
+			}
+			if c.left {
+				return
+			}
+			q, err := d.Quarantine(context.Background(), branch, repos)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := files(t, q[0].Path, q[0].Head); !slices.Contains(got, c.file) {
+				t.Errorf("the commit has %v", got)
+			}
+		})
 	}
 }
 
