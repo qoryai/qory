@@ -3800,8 +3800,8 @@ Part of the run's work can stay in the copy:
   folder out of this list when the rules in the copy cover it too and the setup's end is recorded:
   the change times of the files in its git folder then show the run's commits, as the item on the
   setup's ignore rules describes. With no record, a repository that the rules cover and that has a
-  commit or a ref, also a bare one such as `.venv/b.git`, is in this list. The session prints a
-  line with its path.
+  commit or a ref, also a bare one such as `.venv/b.git` and one in a submodule, is in this list.
+  The session prints a line with its path.
 - A file that an ignore rule covers, when that rule is not one of yours: the agent wrote or changed
   the `.gitignore` that has it, such as `foo/.gitignore` with `*`, in the repository or in a
   submodule. Such a file whose name has a line break keeps the copy, also when your rules cover
@@ -3825,11 +3825,13 @@ Part of the run's work can stay in the copy:
   object, or a new repository there, such as a commit in `.venv/src/pkg` that `pip install -e`
   cloned from git, keeps the copy, and the line lists its files in the git folder. So does such a
   change in a repository in a folder that your rules ignore, such as `vendor/dep` with `vendor/` in
-  your `.gitignore`. A fetch or a reset to `HEAD` that writes only `FETCH_HEAD`, `ORIG_HEAD` and the
+  your `.gitignore`. A folder there whose mode changed after the setup and that the session cannot
+  enter, such as `vendor/dep` at mode `000`, keeps the copy too, and the line lists it as
+  `vendor/dep/`. A fetch or a reset to `HEAD` that writes only `FETCH_HEAD`, `ORIG_HEAD` and the
   reflogs, as `pip install -e` does again on an existing checkout, keeps nothing behind. A git
   folder that the agent builds by hand without a `HEAD` file and `objects` and `refs` folders, such
   as one with a renamed `HEAD` or one that has its objects and refs through a `commondir` file, is
-  not checked in a folder named such as `.venv`, and its commits do not come back, as other files
+  not checked in a folder that ignore rules cover, and its commits do not come back, as other files
   there do not. After such a setup, a name with a line break anywhere else in the copy keeps the
   copy, and the line lists none. A host clock that was set back between the setup and the agent can
   give a change a time before the setup's end: the session then misses the change, and the work is

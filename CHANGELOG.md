@@ -386,10 +386,11 @@ release may change what an existing document does, and states it under Upgrading
   `__pycache__`, `target`, `build`, `dist`, `.gradle` or `.next`, the `.git/index` of a repository
   that has what its `HEAD` has, and a file that the agent deleted, keep nothing behind, but a
   commit, a new ref or object, or a new repository in such a folder keeps the copy, and so does
-  one in a folder that your rules ignore. A fetch or a reset to `HEAD` that writes only
+  one in a folder that your rules ignore, also a folder there that the agent closed. A fetch
+  or a reset to `HEAD` that writes only
   `FETCH_HEAD`, `ORIG_HEAD` and the reflogs keeps nothing behind. A git folder that the agent
-  builds by hand without a `HEAD` file and `objects` and `refs` folders is not checked in such a
-  folder. A file
+  builds by hand without a `HEAD` file and `objects` and `refs` folders is not checked in a folder
+  that ignore rules cover. A file
   whose name has a line break, under an ignore rule that is not yours, keeps the copy. A host
   clock set back between the setup and the agent can hide a change, and the work is then lost
   with no line. A `.gitignore` that ignores itself, which the setup writes into a submodule with
