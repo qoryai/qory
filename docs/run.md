@@ -3742,7 +3742,9 @@ branch would undo the branch's files, so the session commits it on `HEAD` instea
 The ignore rules that keep a file out of the commit, with no line, are yours: the `.gitignore`
 files of your commit at the start of the run, with each `.gitignore` as the setup left it where the
 setup wrote or changed one, also one that ignores its folder, such as `.venv/.gitignore` with `*`,
-your `.git/info/exclude` and your global excludes file. In a submodule, they
+your `.git/info/exclude` and your global excludes file. In a repository that the setup made, its
+`.gitignore` files count as yours, so a file that the agent writes at a path they cover, such as
+`tool/build/x.go` with `build/` in `tool/.gitignore`, stays out of the commit with no line. In a submodule, they
 are its `.gitignore` files at its commit, and the setup's files there stay out as the setup left
 them. A file that only a `.gitignore` the agent wrote or changed ignores stays in the copy, as the
 list below describes. The image needs git 2.25 or later, `cat`, `chmod`, `comm`, `cp`, `find`, `grep`, `mkdir`, `mv`,
@@ -3814,7 +3816,7 @@ Part of the run's work can stay in the copy:
   `git status` runs with no filter, so a file under a filter, such as one of Git LFS, and a file
   that the setup left changed in a submodule, are a change only when they differ from what the
   setup left. A repository whose record qory could not make, such as one with a `.git` file or one
-  whose record container failed or ran past 5 minutes, and any other folder that the commit leaves
+  whose record container failed or ran past the git session's time limit, and any other folder that the commit leaves
   out whole for the setup, such as one more than 64 levels deep, stay in the copy whether or not
   they changed.
 - A commit or a change in a submodule that the clone did not copy, such as one that the agent set up.

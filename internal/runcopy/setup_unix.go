@@ -132,8 +132,9 @@ func newerFiles(dir int, rel string, since time.Time, depth int, paths *[]string
 // SetupChanges lists what the setup changed in the copy of the repository r, as [Dir.Clone]
 // returned it, for [Dir.SetupStates]: each regular file and link that differs from the commit
 // the copy starts at, each one gone from it, and each new one that the .gitignore files do
-// not ignore, sorted. A repository in the copy is one path with a trailing /. .qory, a
-// submodule and every .git stay out. Call it after the setup and before the agent's session.
+// not ignore, sorted. A repository in the copy is one path with a trailing /, and so is each
+// folder with a .git folder below a new one. .qory, a submodule and every .git stay out. Call it
+// after the setup and before the agent's session.
 //
 // No git opens the copy, since the setup could write it. The tree of the commit comes from
 // the bare source of r. A walk opens each folder from the one above it with O_NOFOLLOW, so it
@@ -368,7 +369,8 @@ func (w *setupWalk) folder(ctx context.Context, dir int, rel string, depth int) 
 }
 
 // subfolder walks the folder sub at rel: a new folder with a .git is a repository, one path
-// that no walk enters, and so is a folder too deep.
+// that no walk enters, and so is a folder too deep. Each repository below a new one, a folder
+// with a .git folder, is one more path, see [setupWalk.repositories].
 func (w *setupWalk) subfolder(ctx context.Context, sub int, rel string, depth int) error {
 	if depth >= maxOpenFolders {
 		w.note(rel + "/")
@@ -381,10 +383,42 @@ func (w *setupWalk) subfolder(ctx context.Context, sub int, rel string, depth in
 		}
 		if slices.ContainsFunc(names, func(n string) bool { return folds(n, ".git") }) {
 			w.note(rel + "/")
+			w.repositories(sub, rel, names, depth+1)
 			return nil
 		}
 	}
 	return w.folder(ctx, sub, rel, depth+1)
+}
+
+// repositories adds each folder below the folder dir at rel, with the entries list, that has a
+// .git folder, such as a clone that the setup made inside a repository it made, as a path with a
+// trailing /. [Dir.SetupStates] records each as one more repository, so the git session
+// compares its working tree too. The walk enters no .git and no link, and skips a folder it
+// cannot open or read, and what is past [maxOpenFolders]: the git session finds such a
+// repository with no record, and keeps the copy for it with its line.
+func (w *setupWalk) repositories(dir int, rel string, entries []string, depth int) {
+	if depth >= maxOpenFolders {
+		return
+	}
+	for _, name := range entries {
+		var st unix.Stat_t
+		if folds(name, ".git") || unix.Fstatat(dir, name, &st, unix.AT_SYMLINK_NOFOLLOW) != nil || st.Mode&unix.S_IFMT != unix.S_IFDIR {
+			continue
+		}
+		sub, err := unix.Openat(dir, name, dirFlags, 0)
+		if err != nil {
+			continue
+		}
+		at := path.Join(rel, name)
+		var git unix.Stat_t
+		if unix.Fstatat(sub, ".git", &git, unix.AT_SYMLINK_NOFOLLOW) == nil && git.Mode&unix.S_IFMT == unix.S_IFDIR {
+			w.note(at + "/")
+		}
+		if inside, err := readNames(sub); err == nil {
+			w.repositories(sub, at, inside, depth+1)
+		}
+		unix.Close(sub)
+	}
 }
 
 // compareFile adds at to the changed paths when the regular file name in dir, of size bytes,

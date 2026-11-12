@@ -5502,6 +5502,145 @@ func TestASubmoduleOfARepositoryOfTheSetup(t *testing.T) {
 	}
 }
 
+// toolWithClone makes a repository at tool, as a setup does, with a further clone at third/b inside
+// it, in a folder that tool's .gitignore ignores, with ignored set, or that no rule covers.
+func toolWithClone(ignored bool) func(t *testing.T, w string) {
+	return func(t *testing.T, w string) {
+		up := t.TempDir()
+		write(t, up, "b.go", "package b\n")
+		testGit(t, up, "init", "--quiet")
+		commitAll(t, up, "b")
+		tool := setupRepository(t, w, "tool")
+		if ignored {
+			write(t, tool, ".gitignore", "third/\n")
+			commitAll(t, tool, "ignore")
+		}
+		testGit(t, tool, "clone", "--quiet", up, "third/b")
+	}
+}
+
+// TestACloneInARepositoryOfTheSetup is a repository that the setup made, with a clone that the
+// setup made inside it, in a folder that no rule covers or that its .gitignore ignores: the setup's
+// paths have both repositories, and with no change the session keeps no copy. A change or a new
+// file the agent writes in the clone, or a repository the agent makes in that folder, also one whose
+// git folder is no .git, keeps the copy.
+func TestACloneInARepositoryOfTheSetup(t *testing.T) {
+	for _, ignored := range []bool{false, true} {
+		for _, c := range []struct {
+			name string
+			run  func(t *testing.T, tool string)
+		}{
+			{"no change", nil},
+			{"a change", func(t *testing.T, tool string) {
+				write(t, tool, "third/b/b.go", "package b // agent\n")
+			}},
+			{"a new file", func(t *testing.T, tool string) {
+				write(t, tool, "third/b/new.go", "package b\n")
+			}},
+			{"a repository", func(t *testing.T, tool string) {
+				setupRepository(t, tool, "third/c")
+			}},
+			{"a repository with its git folder beside it", func(t *testing.T, tool string) {
+				up := t.TempDir()
+				write(t, up, "c.go", "package c\n")
+				testGit(t, up, "init", "--quiet")
+				commitAll(t, up, "c")
+				testGit(t, tool, "clone", "--quiet", "--separate-git-dir", filepath.Join(tool, "third", "c-git"), up, "third/c")
+			}},
+		} {
+			t.Run(fmt.Sprintf("%s, ignored %t", c.name, ignored), func(t *testing.T) {
+				d, repos, out := setupWith(t, toolWithClone(ignored))
+				setup := out[""].Setup
+				if len(setup) != 2 || setup[0].Path != "tool" || setup[1].Path != "tool/third/b" ||
+					!strings.HasPrefix(setup[0].State, "repo:") || !strings.HasPrefix(setup[1].State, "repo:") {
+					t.Fatalf("the setup's paths are %v", setup)
+				}
+				if c.run != nil {
+					c.run(t, filepath.Join(d.Work(), "tool"))
+				}
+				printed := sessionOutput(t, d, repos, out)
+				if left := d.Left(repos); (left.Behind || left.Nested) != (c.run != nil) {
+					t.Errorf("Left = %+v:\n%s", left, printed)
+				}
+			})
+		}
+	}
+}
+
+// TestASubmoduleWithNoCommitInARepositoryOfTheSetup is a repository that the setup made, with a
+// submodule that it added and did not commit, whose git folder is below the repository's
+// .git/modules: with no change, the session keeps no copy.
+func TestASubmoduleWithNoCommitInARepositoryOfTheSetup(t *testing.T) {
+	d, repos, out := setupWith(t, func(t *testing.T, w string) {
+		up := t.TempDir()
+		write(t, up, "l.go", "package l\n")
+		testGit(t, up, "init", "--quiet")
+		commitAll(t, up, "lib")
+		tool := setupRepository(t, w, "tool")
+		testGit(t, tool, "-c", "protocol.file.allow=always", "submodule", "add", "--quiet", up, "lib")
+	})
+	if setup := out[""].Setup; len(setup) != 1 || !strings.HasPrefix(setup[0].State, "repo:") {
+		t.Fatalf("the setup's paths are %v", setup)
+	}
+	printed := sessionOutput(t, d, repos, out)
+	if left := d.Left(repos); left.Behind || left.Nested {
+		t.Errorf("Left = %+v:\n%s", left, printed)
+	}
+}
+
+// TestASubmoduleWithASeparateGitFolderInARepositoryOfTheSetup is a repository that the setup made,
+// with a gitlink in its HEAD at a clone whose git folder is elsewhere in the repository's .git: with
+// no change, the session keeps no copy, and a change there keeps it.
+func TestASubmoduleWithASeparateGitFolderInARepositoryOfTheSetup(t *testing.T) {
+	for _, change := range []bool{false, true} {
+		t.Run(fmt.Sprintf("change %t", change), func(t *testing.T) {
+			d, repos, out := setupWith(t, func(t *testing.T, w string) {
+				up := t.TempDir()
+				write(t, up, "l.go", "package l\n")
+				testGit(t, up, "init", "--quiet")
+				commitAll(t, up, "lib")
+				tool := setupRepository(t, w, "tool")
+				testGit(t, tool, "clone", "--quiet", "--separate-git-dir", filepath.Join(tool, ".git", "lib.git"), up, "lib")
+				gitlinks(t, tool, strings.TrimSpace(testGit(t, up, "rev-parse", "HEAD")), "lib")
+			})
+			if setup := out[""].Setup; len(setup) != 1 || !strings.HasPrefix(setup[0].State, "repo:") {
+				t.Fatalf("the setup's paths are %v", setup)
+			}
+			if change {
+				write(t, d.Work(), "tool/lib/l.go", "package l // agent\n")
+			}
+			printed := sessionOutput(t, d, repos, out)
+			if left := d.Left(repos); (left.Behind || left.Nested) != change {
+				t.Errorf("Left = %+v:\n%s", left, printed)
+			}
+		})
+	}
+}
+
+// TestAFileThatARepositoryOfTheSetupIgnores is a file the agent writes in a repository that the
+// setup made, at a path that the repository's .gitignore covers: the repository's ignore rules
+// count as the person's, so the file stays out of the commit with no line, and the session keeps
+// no copy.
+func TestAFileThatARepositoryOfTheSetupIgnores(t *testing.T) {
+	for _, file := range []string{"build/x.go", "third/x.go"} {
+		t.Run(file, func(t *testing.T) {
+			d, repos, out := setupWith(t, func(t *testing.T, w string) {
+				tool := setupRepository(t, w, "tool")
+				write(t, tool, ".gitignore", "build/\nthird/\n")
+				commitAll(t, tool, "ignore")
+			})
+			write(t, filepath.Join(d.Work(), "tool"), file, "package x\n")
+			printed := sessionOutput(t, d, repos, out)
+			if left := d.Left(repos); left.Behind || left.Nested {
+				t.Errorf("Left = %+v:\n%s", left, printed)
+			}
+			if printed != "" {
+				t.Errorf("the session printed %q", printed)
+			}
+		})
+	}
+}
+
 // TestACloneOfTheSetupWithNoChange is a repository that the setup cloned, with names of each kind
 // in its .gitignore files and in its reflogs, and a link in its refs: with no change, the session
 // keeps no copy. A tab or a byte below it at the end of a name sorts the same in the setup's record
