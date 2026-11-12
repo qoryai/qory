@@ -49,14 +49,15 @@ type LeftOut struct {
 type SetupPath struct {
 	Path string
 	// State is what the setup left at Path: missing; other, for a folder or a file that
-	// is neither regular nor a link; or file:, exec: or link: and the git blob id of the
-	// content or of the link's target. exec: is a regular file with the owner's execute
-	// bit.
+	// is neither regular nor a link; file:, exec: or link: and the git blob id of the
+	// content or of the link's target; or repo: and the blob id of a list of the HEAD,
+	// refs and .gitignore files of a repository that the setup made, as repoState
+	// reads it. exec: is a regular file with the owner's execute bit.
 	State string
 }
 
 // stateForm is the form of [SetupPath.State].
-var stateForm = regexp.MustCompile(`^(?:missing|other|(?:file|exec|link):(?:[0-9a-f]{40}|[0-9a-f]{64}))$`)
+var stateForm = regexp.MustCompile(`^(?:missing|other|(?:file|exec|link|repo):(?:[0-9a-f]{40}|[0-9a-f]{64}))$`)
 
 // GitSession is the bare session that runs after the agent: the program, its arguments
 // and its environment, for a Forager SessionSpec with no Runtime. The arguments and the
@@ -112,7 +113,9 @@ type GitSession struct {
 // longer a link; a change in a repository the setup made; or any other path that the commit leaves
 // out, which a last check lists after the commit. The person's personal ignore rules stay in effect
 // through the info/exclude of that git folder. A path that an ignore rule covers counts as left out
-// unless the person's rules cover it too: those rules and the .gitignore files of the base commit.
+// unless the person's rules cover it too: those rules and the .gitignore files of the base commit,
+// with each .gitignore that the setup changed as the setup left it. A repository the setup made
+// stays out, and stays behind when its [SetupPath.State] differs or git status lists a change.
 //
 // The add leaves out each regular file of more than [MaxFile] bytes that it would add, in the
 // repository and in each submodule, and lists its path, relative to the copy, in n.large, which
@@ -380,10 +383,11 @@ readable() {
 		-o ! -type d ! -type l ! -perm -400 -exec chmod u+r {} + 2>/dev/null || :
 }
 # submodule_status writes the changes of the submodule at the folder $1 of $T to $G/status, through
-# the git folder $G/status-$st, $st being a number the caller raises for each call: see tree_status.
+# the git folder $G/status-$st, $st being a number the caller raises for each call: see tree_status,
+# which takes $2 as its fifth argument.
 submodule_status() (
 	unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE
-	tree_status "$T/$1" "$G/status" "$G/status-$st" 1
+	tree_status "$T/$1" "$G/status" "$G/status-$st" 1 "${2-}"
 )
 # through_link reports whether the path $2 below the folder $1, or a folder on the way to it, is a
 # link.
@@ -433,10 +437,13 @@ filled() {
 # so each is a change, and n.left is written: one whose path ls-files quotes; one whose path is a
 # link or goes through one, since a link to . would repeat the status without end; one with no
 # .git and a folder that is not empty or that the session cannot list, such as a nested
-# submodule that no update populated; and one more than 8 submodules deep. A call in a condition ignores set -e, so
-# each step that can fail exits 1 on its failure.
+# submodule that no update populated; and one more than 8 submodules deep. With $5 set, each path
+# that an ignore rule covers, which the .gitignore files of HEAD do not cover, is a change too, as
+# ?? and its path: the run wrote or changed that rule. Such a repository and each one inside it
+# get this check. A call in a condition ignores set -e, so each step that can fail exits 1 on its
+# failure.
 tree_status() (
-	t_at=$1 t_out=$2 G=$3 t_depth=$4
+	t_at=$1 t_out=$2 G=$3 t_depth=$4 t_rules=${5-}
 	cd "$t_at" || exit 1
 	objects=$(g --git-dir=.git rev-parse --git-path objects) || exit 1
 	case $objects in
@@ -455,6 +462,18 @@ tree_status() (
 		g read-tree "$now" || exit 1
 	fi
 	g status --porcelain -z --untracked-files=all --ignore-submodules=dirty > "$t_out" || exit 1
+	if [ -n "$t_rules" ]; then
+		rules || exit 1
+		g ls-files -z -o -i --exclude-standard > "$G/ignored-z" || exit 1
+		tr '\000' '\n' < "$G/ignored-z" > "$G/ignored" || exit 1
+		{ grep -v -e '^:' -e '^$' "$G/ignored" || :; } | tr '\n' '\000' > "$G/asked-z" || exit 1
+		person_ignored "$G/asked-z" "$G/person-z"
+		tr '\000' '\n' < "$G/person-z" > "$G/person" || exit 1
+		lacking "$G/ignored" "$G/person" > "$G/hidden" || exit 1
+		while IFS= read -r t_p; do
+			printf '?? %s\0' "$t_p"
+		done < "$G/hidden" >> "$t_out" || exit 1
+	fi
 	g -c core.quotePath=false ls-files -s > "$G/entries" || exit 1
 	t_k=0
 	while IFS= read -r t_line; do
@@ -487,7 +506,7 @@ tree_status() (
 			continue
 		fi
 		t_k=$((t_k + 1))
-		if ! tree_status "$t_at/$t_p" "$G/status-$t_k.out" "$G/status-$t_k" $((t_depth + 1)) || [ -s "$G/status-$t_k.out" ]; then
+		if ! tree_status "$t_at/$t_p" "$G/status-$t_k.out" "$G/status-$t_k" $((t_depth + 1)) "$t_rules" || [ -s "$G/status-$t_k.out" ]; then
 			printf ' M %s\0' "$t_p" >> "$t_out" || exit 1
 			: > "$B/$n.left"
 		fi
@@ -499,7 +518,7 @@ submodule_at() (
 	unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE
 	now=$(g --git-dir="$T/$1/.git" rev-parse --verify --quiet "HEAD^{commit}") || exit 1
 	[ "$now" = "$2" ] || exit 1
-	submodule_status "$1"
+	submodule_status "$1" rules
 )
 # from_setup reports whether each change in $G/status of the submodule at the folder $1 is what the
 # setup left there, as sub-n has it, and writes the state and path of each change to $G/now. One
@@ -676,6 +695,68 @@ person_ignored() {
 		: > "$2"
 	fi
 }
+# setup_rules puts in $G/rules each .gitignore of the file $1, a list of the setup's paths that the
+# work tree at $T still has as the setup left them: a regular file replaces the one of $base, and
+# any other, which git reads no rules from, empties it. So where the setup changed a .gitignore, the
+# person's rules are the setup's.
+setup_rules() {
+	while IFS= read -r s_p; do
+		case $s_p in
+		.gitignore | */.gitignore) ;;
+		*) continue ;;
+		esac
+		if [ -f "$T/$s_p" ] && ! through_link "$T" "$s_p"; then
+			case $s_p in
+			*/*) mkdir -p "$G/rules/${s_p%/*}" 2>/dev/null || : ;;
+			esac
+			cp "$T/$s_p" "$G/rules/$s_p" 2>/dev/null || : > "$G/rules/$s_p" 2>/dev/null || :
+		elif [ -f "$G/rules/$s_p" ]; then
+			: > "$G/rules/$s_p"
+		fi
+	done < "$1"
+}
+# repo_state prints the state of the repository that the setup made at the folder $1 of $T, as
+# SetupPath.State has it for repoState: repo: and the blob id of a list, sorted, of a line per file,
+# kind:id and its path below $1. The files are HEAD, packed-refs and each file below refs and
+# reftable in .git, and each .gitignore below $1 but in a folder named .git. kind is file, with the
+# blob id of the content, or link, with that of its target. It exits 1 when a find, a git or a
+# readlink fails, or a path has a carriage return.
+repo_state() (
+	cd "$T/$1" || exit 1
+	r_f=$G/repo-files r_l=$G/repo-links
+	find . -name .git -prune -o -name .gitignore -type f -print > "$r_f" || exit 1
+	find . -name .git -prune -o -name .gitignore -type l -print > "$r_l" || exit 1
+	for r_p in .git/HEAD .git/packed-refs .git/refs .git/reftable; do
+		if [ -h "$r_p" ]; then
+			printf './%s\n' "$r_p" >> "$r_l"
+		elif [ -f "$r_p" ]; then
+			printf './%s\n' "$r_p" >> "$r_f"
+		elif [ -d "$r_p" ]; then
+			find "./$r_p" -type f -print >> "$r_f" || exit 1
+			find "./$r_p" -type l -print >> "$r_l" || exit 1
+		fi
+	done
+	if [ -n "$(cat "$r_f" "$r_l" | tr -cd '\r')" ]; then
+		exit 1
+	fi
+	while IFS= read -r r_p; do
+		printf '%s/%s\n' "$T/$1" "${r_p#./}"
+	done < "$r_f" > "$G/repo-paths" || exit 1
+	g hash-object --no-filters --stdin-paths < "$G/repo-paths" > "$G/repo-ids" || exit 1
+	{
+		while IFS= read -r r_p && IFS= read -r r_id <&4; do
+			printf 'file:%s %s\n' "$r_id" "${r_p#./}"
+		done < "$r_f" 4< "$G/repo-ids"
+		while IFS= read -r r_p; do
+			r_t=$(readlink "$r_p") || exit 1
+			r_id=$(printf '%s' "$r_t" | g hash-object --no-filters --stdin) || exit 1
+			printf 'link:%s %s\n' "$r_id" "${r_p#./}"
+		done < "$r_l"
+	} > "$G/repo-lines" || exit 1
+	sort "$G/repo-lines" > "$G/repo-sorted" || exit 1
+	r_id=$(g hash-object --no-filters --stdin < "$G/repo-sorted") || exit 1
+	printf 'repo:%s' "$r_id"
+)
 # kept_out reports whether both the ignore rules of the work tree and the person's cover the folder
 # $1 of $T.
 kept_out() {
@@ -1024,6 +1105,7 @@ submodule_bundle() (
 		printf '%s\n' "$p" >> "$G/setup-paths"
 		printf ':(exclude,top,literal)%s\0' "$p" >> "$G/add"
 	done < "$G/setup"
+	setup_rules "$G/setup-paths"
 	tr '\000' '\n' < "$PG/status" > "$G/changes"
 	while IFS= read -r line; do
 		p=${line#???}
@@ -1121,7 +1203,6 @@ while [ "$n" -lt "$count" ]; do
 		from=$(g hash-object -t tree /dev/null)
 	fi
 	g read-tree "$from"
-	rules
 	# With moved set, the paths the commit sets back stay as HEAD has them, so they differ in nothing.
 	back=$base
 	if [ -n "$moved" ]; then
@@ -1137,6 +1218,7 @@ while [ "$n" -lt "$count" ]; do
 	: > "$G/out-paths"
 	: > "$G/out-folders"
 	: > "$G/made"
+	: > "$G/setup-kept"
 	if ! command -v find > /dev/null 2>&1; then
 		: > "$B/$n.left"
 	fi
@@ -1250,28 +1332,44 @@ while [ "$n" -lt "$count" ]; do
 		if [ -z "$have" ]; then
 			have=$(state "$1")
 		fi
-		if [ "$have" = "$2" ]; then
+		case $2 in
+		repo:*)
+			# A repository the setup made stays out whole, and keeps the copy when its HEAD, refs or
+			# .gitignore files differ from what the setup left, or git status lists a change against
+			# its HEAD.
+			if [ -d "$f" ] && [ ! -h "$f" ] && [ -d "$f/.git" ] && [ ! -h "$f/.git" ]; then
+				printf ':(exclude,top,literal)%s\0' "$1" >> "$P"
+				known=$known$1$nl
+				printf '%s\n' "$1" >> "$G/out-folders"
+				st=$((st + 1))
+				if [ "$(repo_state "$1" || :)" != "$2" ] || ! submodule_status "$1" || [ -s "$G/status" ]; then
+					: > "$B/$n.left"
+				fi
+			fi
+			;;
+		"$have")
 			printf ':(exclude,top,literal)%s\0' "$1" >> "$P"
 			if [ "$2" = other ]; then
 				known=$known$1$nl
 				printf '%s\n' "$1" >> "$G/out-folders"
-				# Such a folder stays out whole, and no record shows what it had after the setup. A
-				# repository there keeps the copy when git status lists a change against its HEAD, and
-				# any other folder keeps it always.
+				# Such a folder stays out whole, and no record shows what it had after the setup, so
+				# it keeps the copy: a repository whose state the setup could not record, or another
+				# folder, such as one too deep.
 				if [ -d "$f" ] && [ ! -h "$f" ]; then
-					st=$((st + 1))
-					if { [ ! -e "$f/.git" ] && [ ! -h "$f/.git" ]; } || ! submodule_status "$1" || [ -s "$G/status" ]; then
-						: > "$B/$n.left"
-					fi
+					: > "$B/$n.left"
 				fi
 			else
 				printf '%s\n' "$1" >> "$G/out-paths"
+				printf '%s\n' "$1" >> "$G/setup-kept"
 			fi
-		fi
+			;;
+		esac
 		shift 2
 		i=$((i + 1))
 	done
 	exec 3<&-
+	rules
+	setup_rules "$G/setup-kept"
 	# The positional parameters are now what stays out besides .qory and $G/out-paths, for ls-files.
 	while IFS= read -r d; do
 		set -- "$@" ":(exclude,top,literal)$d"
@@ -1304,7 +1402,7 @@ while [ "$n" -lt "$count" ]; do
 			done < "$B/subs-$n"
 			st=$((st + 1))
 			if [ -n "$k" ]; then
-				submodule_status "$d"
+				submodule_status "$d" rules
 				from_setup "$d" || :
 				submodule_bundle "$d" "$k" "$cloned"
 			elif ! submodule_at "$d" "$link" || ! from_setup "$d"; then
