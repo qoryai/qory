@@ -4958,6 +4958,222 @@ func TestARepositoryTheRunMadeInASubmoduleFolderIsLeftBehind(t *testing.T) {
 	}
 }
 
+// TestEveryFolderWithAGitInASubmoduleIsLeftBehind is an agent that makes a folder with a .git in a
+// submodule the clone copied, in each of the ways below, and writes new.txt in it: the session
+// exits 0, prints the line of a git repository, and the copy stays. An empty .git folder or a .git
+// file that git cannot read makes no repository, so git lists new.txt in that folder, and the check
+// under the others finds it. A folder named :x is no pathspec magic to the session.
+func TestEveryFolderWithAGitInASubmoduleIsLeftBehind(t *testing.T) {
+	type step func(t *testing.T, s string)
+	initAt := func(rel string) step {
+		return func(t *testing.T, s string) {
+			if err := os.MkdirAll(filepath.Join(s, rel), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			testGit(t, filepath.Join(s, rel), "init", "--quiet")
+		}
+	}
+	file := func(rel string) step {
+		return func(t *testing.T, s string) { write(t, s, rel, "new\n") }
+	}
+	tracked := func(dir string) step {
+		return func(t *testing.T, s string) {
+			write(t, s, filepath.Join(dir, "f.txt"), "f\n")
+			commitAll(t, s, "tracked")
+		}
+	}
+	emptyGit := func(rel string) step {
+		return func(t *testing.T, s string) {
+			if err := os.MkdirAll(filepath.Join(s, rel, ".git"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	gitFile := func(rel, text string) step {
+		return func(t *testing.T, s string) { write(t, s, filepath.Join(rel, ".git"), text) }
+	}
+	outside := func(rel string) step {
+		return func(t *testing.T, s string) {
+			repo := t.TempDir()
+			testGit(t, repo, "init", "--quiet")
+			write(t, s, filepath.Join(rel, ".git"), "gitdir: "+filepath.Join(repo, ".git")+"\n")
+		}
+	}
+	nested := func(t *testing.T, s string) { nest(t, s, 1) }
+	for _, c := range []struct {
+		name  string
+		steps []step
+		made  string
+	}{
+		{"a chain in a tracked folder", []step{tracked("a"), initAt("a"), initAt("a/b"), file("a/b/new.txt")}, ""},
+		{"a chain in a new folder", []step{initAt("u"), initAt("u/v"), file("u/v/new.txt")}, ""},
+		{"a chain in a new folder in a tracked folder", []step{tracked("a"), initAt("a/u"), initAt("a/u/v"), file("a/u/v/new.txt")}, ""},
+		{"a tracked folder two deep", []step{tracked("d1/d2"), initAt("d1/d2"), file("d1/d2/new.txt")}, "d1/d2"},
+		{"a tracked folder with a space", []step{tracked("a b"), initAt("a b"), file("a b/new.txt")}, "a b"},
+		{"a new folder with a space", []step{initAt("u v"), file("u v/new.txt")}, ""},
+		{"a tracked folder with a line break", []step{tracked("a\nb"), initAt("a\nb"), file("a\nb/new.txt")}, ""},
+		{"a new folder with a line break", []step{initAt("u\nv"), file("u\nv/new.txt")}, ""},
+		{"a tracked folder named *", []step{tracked("*"), initAt("*"), file("*/new.txt")}, "*"},
+		{"a new folder named a* beside ab", []step{tracked("ab"), initAt("a*"), file("a*/new.txt")}, ""},
+		{"a tracked folder named -a", []step{tracked("-a"), initAt("-a"), file("-a/new.txt")}, "-a"},
+		{"a tracked folder named :x", []step{tracked(":x"), initAt(":x"), file(":x/new.txt")}, ":x"},
+		{"a tracked folder named :/x", []step{tracked(":/x"), initAt(":/x"), file(":/x/new.txt")}, ":/x"},
+		{"an empty .git in a tracked folder", []step{tracked("a"), emptyGit("a"), file("a/new.txt")}, "a"},
+		{"an empty .git in a new folder", []step{emptyGit("u"), file("u/new.txt")}, ""},
+		{"a .git file to a missing folder", []step{gitFile("u", "gitdir: /nonexistent/x\n"), file("u/new.txt")}, ""},
+		{"a .git file of junk", []step{gitFile("u", "junk\n"), file("u/new.txt")}, ""},
+		{"a .git file to a repository outside", []step{outside("u"), file("u/new.txt")}, ""},
+		{"a tracked folder in a nested submodule", []step{nested, func(t *testing.T, s string) {
+			write(t, s, "d/x/f.txt", "f\n")
+			commitAll(t, filepath.Join(s, "d"), "x")
+		}, initAt("d/x"), file("d/x/new.txt")}, ""},
+		{"a new folder in a nested submodule", []step{nested, initAt("d/u"), file("d/u/new.txt")}, ""},
+		{"an empty .git in a nested submodule", []step{nested, emptyGit("d/u"), file("d/u/new.txt")}, ""},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			isolate(t)
+			sessionGit(t)
+			src, sub := withSubmodule(t)
+			d, repos := cloneRun(t, src)
+			s := filepath.Join(d.Work(), filepath.FromSlash(sub))
+			for _, st := range c.steps {
+				st(t, s)
+			}
+			printed := sessionOutput(t, d, repos, nil)
+			left := d.Left(repos)
+			if !left.Any() || !strings.Contains(printed, " has a git repository ") {
+				t.Errorf("Left = %+v:\n%s", left, printed)
+			}
+			if c.made == "" {
+				return
+			}
+			line := "qory: the submodule libs/s in the copy has a git repository at " + c.made + " that the run made, and the commit leaves it out"
+			if !left.Nested || !strings.Contains(printed, line) {
+				t.Errorf("Left = %+v:\n%s", left, printed)
+			}
+		})
+	}
+}
+
+// TestTheCheckUnderTheOthersInTheCopy is an agent that writes a file in an empty gitlink folder
+// that git lists no path in, makes a repository with a commit at :x/y below the gitlink x, or adds
+// the submodule :x at its commit with no change. The file and the repository keep the copy, and
+// the submodule keeps nothing.
+func TestTheCheckUnderTheOthersInTheCopy(t *testing.T) {
+	for _, c := range []struct {
+		name         string
+		run          func(t *testing.T, w, head string)
+		nested, left bool
+		line         string
+	}{
+		{"a file in an empty gitlink folder", func(t *testing.T, w, head string) {
+			gitlinks(t, w, head, "x")
+			write(t, w, "x/new.txt", "new\n")
+		}, false, true, ""},
+		{"a repository below a gitlink", func(t *testing.T, w, head string) {
+			gitlinks(t, w, head, "x")
+			y := filepath.Join(w, ":x", "y")
+			write(t, y, "new.txt", "new\n")
+			testGit(t, y, "init", "--quiet")
+			commitAll(t, y, "y")
+		}, true, false, "qory: the copy has a git repository at :x/y that the run made, and the commit leaves it out"},
+		{"a submodule named :x", func(t *testing.T, w, head string) {
+			testGit(t, w, "clone", "--quiet", w, filepath.Join(w, ":x"))
+			gitlinks(t, w, head, ":x")
+		}, false, false, ""},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			isolate(t)
+			sessionGit(t)
+			src, base := person(t)
+			d, repos := cloneRun(t, src)
+			c.run(t, d.Work(), base)
+			printed := sessionOutput(t, d, repos, nil)
+			if left := d.Left(repos); left.Nested != c.nested || left.Behind != c.left {
+				t.Errorf("Left = %+v:\n%s", left, printed)
+			}
+			if c.line != "" && !strings.Contains(printed, c.line) {
+				t.Errorf("the session printed:\n%s", printed)
+			}
+		})
+	}
+}
+
+// TestTheCheckUnderTheOthersFindsNothingWhenAllComesBack is an agent that adds, changes and
+// deletes files, writes an ignored one, leaves a setup's file as the setup left it, commits in a
+// submodule and writes a file there, and adds a gitlink at an empty folder: everything comes back,
+// and nothing stays.
+func TestTheCheckUnderTheOthersFindsNothingWhenAllComesBack(t *testing.T) {
+	isolate(t)
+	sessionGit(t)
+	src, sub := withSubmodule(t)
+	d, repos := cloneRun(t, src)
+	w := d.Work()
+	write(t, w, "setup.txt", "setup\n")
+	states, err := d.SetupStates(context.Background(), repos[0], []string{"setup.txt"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	gitlinks(t, w, testGit(t, w, "rev-parse", "HEAD"), "empty")
+	if err := os.Mkdir(filepath.Join(w, "empty"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	write(t, w, "new.txt", "new\n")
+	write(t, w, "README.md", "changed\n")
+	if err := os.Remove(filepath.Join(w, "CLAUDE.md")); err != nil {
+		t.Fatal(err)
+	}
+	write(t, w, ".gitignore", "ignored/\n")
+	write(t, w, "ignored/x.txt", "x\n")
+	s := filepath.Join(w, filepath.FromSlash(sub))
+	write(t, s, "lib.txt", "changed\n")
+	commitAll(t, s, "lib")
+	write(t, s, "new.txt", "new\n")
+	q, _ := runRefs(t, d, src, repos, map[string]LeftOut{"": {Setup: states}})
+	got := files(t, q.Path, q.Head)
+	if !slices.Contains(got, "new.txt") || slices.Contains(got, "CLAUDE.md") || slices.Contains(got, "setup.txt") || slices.Contains(got, "ignored/x.txt") {
+		t.Errorf("the commit has %v", got)
+	}
+}
+
+// TestAFolderFindFailsToListKeepsTheCopy is a nested submodule that no update populated, with a
+// file the agent wrote there or with nothing, and a find that fails when it lists that folder: the
+// folder counts as not empty, and the copy stays.
+func TestAFolderFindFailsToListKeepsTheCopy(t *testing.T) {
+	for _, file := range []string{"new.txt", ""} {
+		t.Run(fmt.Sprintf("a file %q", file), func(t *testing.T) {
+			isolate(t)
+			sessionGit(t)
+			bin := t.TempDir()
+			for _, name := range []string{"git", "cat", "chmod", "comm", "cp", "find", "grep", "mkdir", "mv", "readlink", "rm", "sh", "sort", "tr"} {
+				real, err := exec.LookPath(name)
+				if err != nil {
+					t.Skipf("no %s here: %v", name, err)
+				}
+				text := "#!/bin/sh\nexec '" + real + "' \"$@\"\n"
+				if name == "find" {
+					text = "#!/bin/sh\nif [ \"$2\" = '!' ] && [ \"$3\" = -name ] && [ \"$4\" = . ]; then exit 1; fi\n" + text[len("#!/bin/sh\n"):]
+				}
+				write(t, bin, name, text)
+				if err := os.Chmod(filepath.Join(bin, name), 0o755); err != nil {
+					t.Fatal(err)
+				}
+			}
+			old := sessionPath
+			sessionPath = bin
+			t.Cleanup(func() { sessionPath = old })
+			d, repos := cloneRun(t, nestedSubmodule(t))
+			if file != "" {
+				write(t, filepath.Join(d.Work(), "libs", "m", "inner"), file, "agent work\n")
+			}
+			printed := sessionOutput(t, d, repos, nil)
+			if !d.Left(repos).Behind {
+				t.Errorf("the session recorded no work left behind:\n%s", printed)
+			}
+		})
+	}
+}
+
 // TestAnUnreadableFileComesBack is a file of mode 000 that the agent left, which the session's user
 // owns, beside a commit, a change or nothing else: the session gives itself read access, and the
 // file comes back with the rest.

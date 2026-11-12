@@ -351,7 +351,8 @@ release may change what an existing document does, and states it under Upgrading
   work did not come back: the copy has a nested repository the run made.`, other work that git
   could not add to the commit keeps it with `part of the run's work did not come back: the copy has
   changes that git could not add to the run's commit, such as a file another user owns or a change
-  in a submodule.`, and so does a container
+  in a submodule.`, as does any other path that the commit leaves out and no ignore rule covers,
+  such as a file in a folder with an empty `.git`. So does a container
   of the run that could not be removed, which brings nothing back. A first signal leaves the
   return of a local run at most 30 minutes, and `qory run` prints that time. A read run with a setup also
   works in a copy, read-only for the agent, and nothing comes back from it. A read-write
