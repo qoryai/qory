@@ -15,6 +15,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/qoryai/qory/internal/exports"
 )
@@ -130,9 +132,7 @@ func (p Probe) Report(ctx context.Context) Report {
 	for _, rt := range p.Runtimes {
 		checks = append(checks, p.runtime(ctx, rt))
 	}
-	for _, name := range []string{"git", "gh"} {
-		checks = append(checks, p.program(ctx, name))
-	}
+	checks = append(checks, p.git(ctx), p.program(ctx, "gh"))
 	checks = append(checks, p.docker())
 	return Report{Version: ReportVersion, Checks: checks}
 }
@@ -238,6 +238,252 @@ func (p Probe) program(ctx context.Context, name string) Check {
 		return Check{name, Fail, err.Error()}
 	}
 	return Check{name, Pass, out}
+}
+
+// gitSessionDirs are the folders of the PATH of a walled run's git session.
+var gitSessionDirs = []string{"/usr/local/bin", "/usr/bin", "/bin"}
+
+// sessionTools are the programs the script of a walled run's git session runs besides git, with
+// what it runs each for.
+var sessionTools = []struct{ name, why string }{
+	{"cat", "to read its lists of commits and git's lines"},
+	{"chmod", "to give itself read access to the files and folders the run made"},
+	{"comm", "to compare the run's refs and commits with what the bundle has"},
+	{"cp", "to copy the person's ignore rules to its git folder"},
+	{"find", "to list executable files, embedded repositories and files over 100 MiB"},
+	{"grep", "to find a sparse checkout and what the setup left in a submodule"},
+	{"mkdir", "to make its git folder"},
+	{"mv", "to put the finished bundle in place"},
+	{"readlink", "to read a link the setup left"},
+	{"sh", "to run its script"},
+	{"sleep", "to wait for the clock's next second after the setup"},
+	{"sort", "to compare the run's refs and commits with what the bundle has"},
+	{"stat", "to find the files that the agent changed under the setup's ignore rules"},
+	{"tr", "to print a folder's name with no control character"},
+}
+
+// SessionTools is the name of each of [sessionTools].
+func SessionTools() []string {
+	names := make([]string, 0, len(sessionTools))
+	for _, tool := range sessionTools {
+		names = append(names, tool.name)
+	}
+	return names
+}
+
+// noSessionGit is the fix for an image with no git in [gitSessionDirs].
+func noSessionGit() string {
+	return "install git in " + strings.Join(gitSessionDirs, ", ") + ": the git session of a walled run runs git from there, and the image has none in them"
+}
+
+// noSessionTool is the fix for an image with no program name in [gitSessionDirs], which the git
+// session runs for why.
+func noSessionTool(name, why string) string {
+	return "install " + name + " in " + strings.Join(gitSessionDirs, ", ") + ": the git session of a walled run runs " + name + " from these folders, " + why
+}
+
+// sessionGitFailed is the fix for an image whose git at the path at fails with cause.
+func sessionGitFailed(at, cause string) string {
+	return "install git 2.25 or later in " + strings.Join(gitSessionDirs, ", ") + ": " + at + " --version failed: " + cause
+}
+
+// sessionGitOld is the fix for an image whose git at the path at prints line, older than 2.25.
+func sessionGitOld(at, line string) string {
+	return "install git 2.25 or later in " + strings.Join(gitSessionDirs, ", ") + ": the git session of a walled run needs it, and " + at + " prints " + line
+}
+
+// SessionShellFix is the line for a setup step that could not start /bin/sh.
+func SessionShellFix() string {
+	for _, tool := range sessionTools {
+		if tool.name == "sh" {
+			return noSessionTool(tool.name, tool.why)
+		}
+	}
+	return ""
+}
+
+// SessionCheckScript is the sh script of a walled write run's setup step that checks, before the
+// agent, what [Probe.git] checks of the image: each of [sessionTools] and git 2.25 or later, on
+// the PATH of the git session. It prints nothing and exits 0 when all of it is there. Otherwise it
+// prints the line of [Probe.git] for each failure on stderr, the fix first, and exits 1. It runs
+// only the shell's builtins and git, under dash and busybox ash as well.
+func SessionCheckScript() string {
+	return sessionCheckScript(strings.Join(gitSessionDirs, ":"))
+}
+
+// sessionCheckScript is [SessionCheckScript] with path as the session's PATH.
+func sessionCheckScript(path string) string {
+	var b strings.Builder
+	b.WriteString("PATH=" + shellQuoted(path) + "\nexport PATH\nfailed=0\n")
+	b.WriteString(sessionCheckFunctions)
+	for _, tool := range sessionTools {
+		b.WriteString("need " + tool.name + " " + shellQuoted(noSessionTool(tool.name, tool.why)) + "\n")
+	}
+	b.WriteString("if found git; then\n")
+	b.WriteString("\tline=$(\"$at\" --version 2>/dev/null)\n\tstatus=$?\n\tline=${line%%\n*}\n")
+	b.WriteString("\tif test \"$status\" -ne 0; then\n")
+	b.WriteString("\t\tfail " + shellQuoted(sessionGitFailed("@AT@", "exit status @STATUS@")) + "\n")
+	b.WriteString("\telif ! at_least_225 \"$line\"; then\n")
+	b.WriteString("\t\tfail " + shellQuoted(sessionGitOld("@AT@", "@LINE@")) + "\n")
+	b.WriteString("\tfi\nelse\n")
+	b.WriteString("\tfail " + shellQuoted(noSessionGit()) + "\n")
+	b.WriteString("fi\nexit \"$failed\"\n")
+	return b.String()
+}
+
+// sessionCheckFunctions are the functions of [SessionCheckScript]. found sets at to the first
+// executable file with that name in a folder of the PATH, where dash's command -v returns the
+// first file, executable or not. A builtin of /bin/sh counts as well, since the session's script
+// runs under the same shell. fail
+// prints a line with what git's run gave in place of @AT@, @STATUS@ and @LINE@. at_least_225 is
+// [gitAtLeast225].
+const sessionCheckFunctions = `found() {
+	dirs=$PATH:
+	while test -n "$dirs"; do
+		at=${dirs%%:*}/$1
+		dirs=${dirs#*:}
+		if test -x "$at" && test ! -d "$at"; then
+			return 0
+		fi
+	done
+	at=$(command -v "$1" 2>/dev/null) || at=
+	case $at in
+	'' | /*) return 1 ;;
+	esac
+}
+fail() {
+	text=$1
+	case $text in *@AT@*) text=${text%%@AT@*}$at${text#*@AT@} ;; esac
+	case $text in *@STATUS@*) text=${text%%@STATUS@*}$status${text#*@STATUS@} ;; esac
+	case $text in *@LINE@*) text=${text%%@LINE@*}$line${text#*@LINE@} ;; esac
+	printf '%s\n' "$text" >&2
+	failed=1
+}
+need() {
+	found "$1" || fail "$2"
+}
+at_least_225() {
+	case $1 in
+	'git version '[0-9]*.[0-9]*) ;;
+	*) return 1 ;;
+	esac
+	rest=${1#git version }
+	major=${rest%%.*}
+	case $major in *[!0-9]*) return 1 ;; esac
+	minor=${rest#*.}
+	minor=${minor%%[!0-9]*}
+	case $minor in '') return 1 ;; esac
+	test "$major" -gt 2 || { test "$major" -eq 2 && test "$minor" -ge 25; }
+}
+`
+
+// shellQuoted is s as one word of sh, in single quotes.
+func shellQuoted(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
+// maxSessionGitLine is the longest line about git that [SessionCheckLine] takes, in bytes. The
+// line for git version 2.24.0 in /usr/local/bin has 151 bytes.
+const maxSessionGitLine = 200
+
+// SessionCheckLine is line, one line of what [SessionCheckScript] printed, as qory prints it, and
+// whether the script can print it. The image runs the script, so the line can contain anything: a
+// line about a program is one of the fixed lines, and a line about git's version has one of the
+// script's forms, at most [maxSessionGitLine] bytes of valid UTF-8 with no control or format
+// character.
+func SessionCheckLine(line string) (string, bool) {
+	if line == noSessionGit() {
+		return line, true
+	}
+	for _, tool := range sessionTools {
+		if line == noSessionTool(tool.name, tool.why) {
+			return line, true
+		}
+	}
+	if len(line) > maxSessionGitLine || !utf8.ValidString(line) || strings.IndexFunc(line, unprintable) >= 0 {
+		return "", false
+	}
+	for _, dir := range gitSessionDirs {
+		at := dir + "/git"
+		if strings.HasPrefix(line, sessionGitOld(at, "")) {
+			return exports.HideValues(line), true
+		}
+		if status, ok := strings.CutPrefix(line, sessionGitFailed(at, "exit status ")); ok && isStatus(status) {
+			return line, true
+		}
+	}
+	return "", false
+}
+
+// SessionCheckFixes is what qory prints of text, the output of [SessionCheckScript]: each line
+// [SessionCheckLine] takes, and at most as many as the script can print.
+func SessionCheckFixes(text string) []string {
+	var fixes []string
+	for line := range strings.Lines(text) {
+		if fix, ok := SessionCheckLine(strings.TrimRight(line, "\n")); ok {
+			fixes = append(fixes, fix)
+			if len(fixes) == len(sessionTools)+1 {
+				break
+			}
+		}
+	}
+	return fixes
+}
+
+// unprintable reports whether r is a control or format character, which a terminal can act on.
+func unprintable(r rune) bool { return unicode.IsControl(r) || unicode.Is(unicode.Cf, r) }
+
+// isStatus reports whether s is an exit status: one to three digits.
+func isStatus(s string) bool {
+	if s == "" || len(s) > 3 {
+		return false
+	}
+	return strings.Trim(s, "0123456789") == ""
+}
+
+// git checks that git runs, and what the git session of a walled run that may write needs of
+// it: git 2.25 or later, for --pathspec-from-file, and [sessionTools], in [gitSessionDirs].
+func (p Probe) git(ctx context.Context) Check {
+	line, at, err := p.run(ctx, "git", "--version")
+	if err != nil {
+		return Check{"git", Fail, err.Error()}
+	}
+	session := p.lookPath("git", gitSessionDirs)
+	if session == "" {
+		return Check{"git", Fail, noSessionGit()}
+	}
+	for _, tool := range sessionTools {
+		if p.lookPath(tool.name, gitSessionDirs) != "" {
+			continue
+		}
+		return Check{"git", Fail, noSessionTool(tool.name, tool.why)}
+	}
+	shown := line
+	if session != at {
+		run := p.Exec
+		if run == nil {
+			run = execute
+		}
+		out, err := run(ctx, p.host(session), "--version")
+		if err != nil {
+			return Check{"git", Fail, sessionGitFailed(exports.Value(session, false), exports.HideValueError(err, session).Error())}
+		}
+		shown, _, _ = strings.Cut(strings.TrimSpace(string(out)), "\n")
+		shown = exports.HideValues(shown)
+	}
+	if !gitAtLeast225(shown) {
+		return Check{"git", Fail, sessionGitOld(exports.Value(session, false), shown)}
+	}
+	return Check{"git", Pass, line}
+}
+
+// gitAtLeast225 reports whether line, as git --version prints it, has git 2.25 or later.
+func gitAtLeast225(line string) bool {
+	var major, minor int
+	if _, err := fmt.Sscanf(line, "git version %d.%d", &major, &minor); err != nil {
+		return false
+	}
+	return major > 2 || major == 2 && minor >= 25
 }
 
 // run finds a program on the image's PATH and runs it, returning the first line it

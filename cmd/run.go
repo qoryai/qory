@@ -1,8 +1,10 @@
 package cmd
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -42,14 +44,15 @@ import (
 	"github.com/qoryai/qory/internal/exports"
 	"github.com/qoryai/qory/internal/foragerdir"
 	"github.com/qoryai/qory/internal/hostgit"
+	"github.com/qoryai/qory/internal/image"
 	"github.com/qoryai/qory/internal/preparation"
 	"github.com/qoryai/qory/internal/provisioner"
 	"github.com/qoryai/qory/internal/proxygit"
 	"github.com/qoryai/qory/internal/render"
 	"github.com/qoryai/qory/internal/report"
+	"github.com/qoryai/qory/internal/runcopy"
 	"github.com/qoryai/qory/internal/secretmask"
 	"github.com/qoryai/qory/internal/source"
-	"github.com/qoryai/qory/internal/stack"
 	"github.com/qoryai/qory/internal/statusfd"
 	"github.com/qoryai/qory/internal/ui"
 )
@@ -94,9 +97,12 @@ and 1 otherwise.
 
 qory run opens the run, then composes the harness, as qory harness compose does, into
 the same home, and prints the result on stderr. -f, --model, --effort, --tier and
---tier-effort mean what they mean there. With a run key, the home is outside the folder
-the run runs in, under qory/homes in the cache directory, unless --home or harness.home
-sets another, and a home inside the folder stops the run.
+--tier-effort mean what they mean there. With a run key or behind a wall, the home is
+outside the folder the run runs in, under qory/homes in the cache directory, unless --home
+or harness.home sets another, and a home inside the folder stops the run. A walled run with
+no run key, --home or harness.home gets a home for that run alone, which qory removes when
+the run ends: runs/<name>-<hash>/<run id> under qory/homes. The harness report stays per
+checkout, as runs/<name>-<hash>-report.json there.
 
 The agent is the runtime of the stack's target. Name another first, and the run composes
 for it instead; name one when the target has several. Arguments after -- go to the
@@ -190,9 +196,18 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					return err
 				}
 			}
-			at, conf, err := locateRun(h, remote, true)
+			// linksNone is harness.links: none as the configuration sets it: [locateRun] sets it for
+			// every walled run.
+			linksNone := false
+			at, conf, err := locateRun(h, remote, true, func(c config.Config) bool {
+				linksNone = c.Links == config.LinksNone
+				return wallNamed(c.Forager, o)
+			})
 			if err != nil {
 				return err
+			}
+			if err := runcopy.InRunCopies(at.root); err != nil {
+				return input(err)
 			}
 			if err := enrolmentCodeFileFor(conf.Forager, "qory run"); err != nil {
 				return err
@@ -377,6 +392,15 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			if pol != nil {
 				selected = pol.Image
 			}
+			// A person's walled run with no --home and no harness.home composes into a home for
+			// this run alone, so a second run of the checkout leaves the first run's home as it
+			// is. The report stays per checkout, so a module keeps its pin between runs.
+			runHome := ""
+			homeGiven := h.home != "" || conf.Origin("harness.home") != config.Default
+			if !remote && !homeGiven && wallNamed(conf.Forager, o) {
+				at = runHomeAt(at, spec.RunID)
+				runHome = at.home
+			}
 			if err := enclose(&spec, conf.Forager, o, selected, remote || server != nil && !local, exe, at.root, at.home); err != nil {
 				return err
 			}
@@ -391,22 +415,24 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			if key != nil && key.inEnvironment() && spec.Wall == nil {
 				return runKeyNeedsWall()
 			}
-			if spec.Wall == nil {
-				if err := unwalledHere(at.root, cwd); err != nil {
-					return err
-				}
-			}
-			// A walled run records its checkout and its read-write mounts, and the record
-			// stays after the run: the home folder or the state directory stops the run
+			// A read-write mount of the home folder or the state directory stops the run
 			// here, before a run code is redeemed or anything starts. The mounts added
 			// later are read-only.
 			if spec.Wall != nil {
-				if err := walledPlaces(at.root, spec.Mounts); err != nil {
+				if err := reservedMounts(at.root, spec.Mounts); err != nil {
 					return err
+				}
+				// A run with no run code can only write, so it works in a copy, which a
+				// read-write mount would go around. A run code's access is known once the
+				// harness is composed, see prepareLaunch.
+				if code == nil {
+					if err := writableMount(at.root, spec.Mounts, ""); err != nil {
+						return err
+					}
 				}
 			}
 			if spec.Wall != nil && h.home == "" {
-				if err := userHome(at, conf, remote); err != nil {
+				if err := userHome(at, conf); err != nil {
 					return err
 				}
 			}
@@ -466,7 +492,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					return err
 				}
 				if spec.Wall != nil {
-					if err := fromCode.reportExposed(at.root, cwd, at.home, at.report, spec.given); err != nil {
+					if err := fromCode.reportExposed(at.home, at.report, spec.given); err != nil {
 						return err
 					}
 				}
@@ -474,6 +500,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				// A run whose harness is hidden composes a home with no link, which Forager
 				// reads to mask the harness's text in the session's log and events.
 				composing.hidden, spec.HarnessHidden = fromCode.hidden, fromCode.hidden
+				composing.fromCode = true
 				timeout = provisioner.TimeLimit(fromCode.minutes, 0)
 				var remove func()
 				in, remove, err = fromCode.writeInputs()
@@ -491,8 +518,8 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				return err
 			}
 			defer runLock.Release()
-			// What the session holds until the run is over, the agent's environment folder
-			// and the hold on the walled run's places, is let go in the reverse order.
+			// What the session keeps open until the run is over, such as the agent's
+			// environment folder, is let go in the reverse order.
 			var cleanups []func()
 			defer func() {
 				for i := len(cleanups) - 1; i >= 0; i-- {
@@ -535,10 +562,8 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			}
 			if r := conf.Forager; r != nil && !remote {
 				gw.LockMemory, gw.RunLimits, gw.StackHosts = r.LockMemory, gatewayRunLimits(r), r.StackHosts
-				e, err := expansion(r, pol, server != nil && !local, at.root, cwd, spec.Mounts)
-				if err != nil {
-					return err
-				}
+				e := expansion(r, pol, server != nil && !local, at.root, cwd, spec.Mounts)
+				var err error
 				if gw.Credentials, err = machineCredentials(ctx, r, e, "run", stderr); err != nil {
 					return err
 				}
@@ -624,7 +649,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			}
 			// A walled run whose composed home has push checks checks each POST of its run
 			// API from behind the wall, see [runPushChecks].
-			checks := &runPushChecks{report: said}
+			checks := &runPushChecks{report: said, fromCode: code != nil}
 			run, err := openRun(ctx, spec.OpenSpec)
 			if err != nil {
 				closeGateway()
@@ -633,10 +658,10 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				}
 				return failed(err)
 			}
-			// The open listed a walled run among the walled runs going under its id, which
-			// no other run can be listed under: the entry of that id is this run's.
-			if walled {
-				defer openingRun(spec.RunID)()
+			// Only an open that went through makes the run's id this run's: before it, a folder
+			// at runHome can be the home of another run that has this id.
+			if runHome != "" {
+				defer removeRunHome(runHome, said)
 			}
 			// The start of the machine comes first in the run's record, before the fetch.
 			if machineSteps != "" {
@@ -658,6 +683,9 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				return closed
 			}
 			name := ""
+			// copied is the copy that a walled run with no run code, or a read run with a setup,
+			// works in, nil before it is made and for any other run.
+			var copied *runCopy
 			// prepareLaunch composes the harness into the home the session starts on and
 			// makes the session's launch from it, writing the compose's lines to w;
 			// freshHome is true for a dispatched walled run of a runtime that is a
@@ -676,7 +704,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 						composing.writable = append(composing.writable, m.Path)
 					}
 				}
-				harness, workflows, err := composeForRun(w, composing, at, runtime, dispatched, walled)
+				c, err := composeForRun(w, composing, at, runtime, dispatched, walled)
 				if err != nil && composing.git != nil && composing.git.Named != nil {
 					return false, namedComposeError(err, composing.git.Named)
 				}
@@ -686,10 +714,8 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				if err != nil {
 					return false, err
 				}
-				rep, err := readReport(at)
-				if err != nil {
-					return false, err
-				}
+				// The report on disk can be another run's by now, so the run reads what it composed.
+				rep, harness, workflows := c.rep, c.harness, c.workflows
 				var launch render.Launch
 				if name, launch, err = resolveLaunch(rep, conf, runtime, at.home); err != nil {
 					return false, err
@@ -697,6 +723,10 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				renderer, err := render.Lookup(name)
 				if err != nil {
 					return false, input(err)
+				}
+				// A dispatched run has no person who could start it with --wall none.
+				if parts := c.checkoutOnly[name]; walled && !dispatched && len(parts) > 0 {
+					fmt.Fprintln(w, "qory run:", checkoutOnlyLine(name, parts, homeGiven || linksNone))
 				}
 				if fromCode != nil {
 					if extra, err = fromCode.workflowArgs(name, rep, in, run.System()); err != nil {
@@ -710,6 +740,24 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				readOnly = readsOnly(fromCode, workflows)
 				if readOnly {
 					if err := readOnlyCheckout(&spec, at.root, fromCode.workflow, run.Image()); err != nil {
+						return false, err
+					}
+					// The checkout's mount is read-only by now, so any other mount that writes stops.
+					if err := writableMount(at.root, spec.Mounts, codeUsed); err != nil {
+						return false, err
+					}
+					// A run with no setup binds the checkout itself, see hostWork.
+					if run.Repositories() == "" {
+						if err := bindsReserved(textReadBindsReserved, at.root, cwd, homeOrState); err != nil {
+							return false, err
+						}
+					}
+					if err := fromCode.readExposed(at.root, cwd, at.report); err != nil {
+						return false, err
+					}
+				} else if fromCode != nil && walled {
+					// A write run from a run code gets no copy: it binds the checkout itself.
+					if err := bindsReserved(textCodeWriteBindsReserved, at.root, cwd, reserved); err != nil {
 						return false, err
 					}
 				}
@@ -754,7 +802,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				return freshHome, nil
 			}
 			// prepareSession makes the rest of the session's spec once its launch is made:
-			// for a walled run the record of each place the container may write.
+			// for a walled run the places the container may write.
 			prepareSession := func(freshHome bool) error {
 				if wrapsAgentEnv(freshHome, walled) {
 					done, err := wrapAgentEnv(&spec, hasRunAPI(run), link, said)
@@ -763,29 +811,11 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					}
 					cleanups = append(cleanups, done)
 				}
-				// Every place the container may write is recorded before the session starts,
-				// so qory reads what a run could have written there against what the place
-				// held before, and held until the session has registered the run, from when
-				// qory's checks find it.
+				// Forager ends the join before the runtime starts when it reads a file for
+				// the run from any place the container may write, or reaches a mount or
+				// workspace through a link inside one.
 				if walled {
-					hold, err := recordPlaces(ctx, &spec, at.root, at)
-					if err != nil {
-						return err
-					}
-					cleanups = append(cleanups, hold.Release)
-					registered := spec.OnVariables
-					spec.OnVariables = func(a session.Applied) {
-						hold.Release()
-						if registered != nil {
-							registered(a)
-						}
-					}
-					// Forager ends the join before the runtime starts when it reads a file for
-					// the run from any of those places, or reaches a mount or workspace through
-					// a link inside one.
-					if spec.Written, err = writtenPlaces(at.root, spec.Mounts); err != nil {
-						return err
-					}
+					spec.Written = writtenPlaces(at.root, spec.Mounts)
 				}
 				return nil
 			}
@@ -795,6 +825,39 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			}
 			// branch is the branch of the run's work item, set by hostWork, nil for none.
 			var branch *preparation.WorkBranch
+			// codeLine ends a line that stops a run from a run code with [codeUsed].
+			codeLine := func(err error) error {
+				if code != nil {
+					return fmt.Errorf("%w%s", err, codeUsed)
+				}
+				return err
+			}
+			controlPlane := remote || server != nil && !local
+			// makeCopy makes the copy of a walled run that may write, see [startCopy], within the
+			// run's time limit: the working folder's state is that of its commit at HEAD.
+			makeCopy := func() error {
+				copyCtx, cancel := ctx, func() {}
+				if timeout > 0 {
+					copyCtx, cancel = context.WithDeadline(ctx, opened.Add(timeout))
+				}
+				defer cancel()
+				ref := ""
+				if branch != nil {
+					ref = branch.Ref
+				}
+				var err error
+				if copied, err = startCopy(copyCtx, at.root, spec.RunID, ref, remote && run.Repositories() == "", state, spec.RunsDir); err != nil {
+					return &runLineError{codeLine(err)}
+				}
+				cleanups = append(cleanups, func() { copied.done(said) })
+				// .qory/artifacts is the store only outside a control plane.
+				if !controlPlane {
+					if err := copied.artifactsIn(copyCtx, said); err != nil {
+						return &runLineError{codeLine(err)}
+					}
+				}
+				return nil
+			}
 			// hostWork is the run's work on this machine before its session joins, in two
 			// steps of the run's record: the fetch, when the run configuration lists
 			// repositories, and the compose. When the run configuration lists repositories,
@@ -811,8 +874,8 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			// that commit, and stops before the compose when the run configuration lists no
 			// repository while the target is on its system. A run of a work item at that
 			// version reads the work item's branch first: the fetch takes its commit, the
-			// compose reads the target version, and the branch is checked out last, after
-			// the record of the run's places, so no file of the branch counts as the person's.
+			// compose reads the target version, and the branch is checked out last, so no
+			// file of the branch reaches the harness.
 			hostWork := func() error {
 				if run.Repositories() != "" {
 					var err error
@@ -916,21 +979,31 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				if err := prepareSession(freshHome); err != nil {
 					return err
 				}
-				if branch == nil {
+				if branch != nil {
+					switchCtx, cancel := ctx, func() {}
+					if timeout > 0 {
+						switchCtx, cancel = context.WithDeadline(ctx, opened.Add(timeout))
+					}
+					defer cancel()
+					if err := preparation.Switch(switchCtx, cwd, os.Environ(), branch, stderr); err != nil {
+						return &runLineError{err}
+					}
+				}
+				// A read run with no setup binds the person's checkout read-only. A setup can write
+				// what it binds, the .git too, so a read run with one gets a copy. A write run from a
+				// run code works in the checkout, and its push step pushes from there.
+				if !walled || readOnly && run.Repositories() == "" || code != nil && !readOnly {
 					return nil
 				}
-				switchCtx, cancel := ctx, func() {}
-				if timeout > 0 {
-					switchCtx, cancel = context.WithDeadline(ctx, opened.Add(timeout))
+				if err := makeCopy(); err != nil {
+					return err
 				}
-				defer cancel()
-				// A walled run's record holds the working folder until its session registers.
-				checkOut := preparation.Switch
-				if walled {
-					checkOut = preparation.SwitchHeld
+				copied.readOnly = readOnly
+				if err := copied.bind(&spec, at, cwd); err != nil {
+					return &runLineError{codeLine(err)}
 				}
-				if err := checkOut(switchCtx, cwd, os.Environ(), branch, stderr); err != nil {
-					return &runLineError{err}
+				if err := copied.recordLinks(); err != nil {
+					return &runLineError{codeLine(err)}
 				}
 				return nil
 			}
@@ -945,7 +1018,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					setupCtx, cancel = context.WithDeadline(ctx, opened.Add(timeout))
 				}
 				defer cancel()
-				err := runSetup(setupCtx, run, &spec)
+				err := runSetup(setupCtx, run, &spec, copied != nil && !copied.plain && !copied.readOnly)
 				var exited *session.SetupError
 				switch {
 				case err == nil:
@@ -953,7 +1026,12 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				case errors.As(err, &exited):
 					return &runLineError{err}
 				}
-				if m := mountRefused(err, passed{foragerDir: foragerDir, stateDir: state, spec: &spec, root: at.root, own: own}); m != nil {
+				// The checkout's mount is the copy's by now.
+				bound := at.root
+				if copied != nil {
+					bound = copied.dir.Work()
+				}
+				if m := mountRefused(err, passed{foragerDir: foragerDir, stateDir: state, spec: &spec, root: bound, own: own}); m != nil {
 					return m
 				}
 				return err
@@ -986,16 +1064,24 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					return fetchImage(imageCtx, run, spec.EngineProxy, code != nil)
 				})
 			}
-			// recordSetupWork records what the setup left changed, within the run's time limit,
-			// so the push step leaves it out, see [preparation.RecordSetup].
+			// recordSetupWork records what the setup left changed, within the run's time limit:
+			// in the copy, so the git session leaves it out, see [runCopy.recordSetup], or in the
+			// working folder of a run with no copy, so the push step leaves it out, see
+			// [preparation.RecordSetup].
 			recordSetupWork := func() error {
 				recordCtx, cancel := ctx, func() {}
 				if timeout > 0 {
 					recordCtx, cancel = context.WithDeadline(ctx, opened.Add(timeout))
 				}
 				defer cancel()
-				if err := preparation.RecordSetup(recordCtx, cwd, os.Environ(), branch); err != nil {
-					return &runLineError{err}
+				if copied == nil {
+					if err := preparation.RecordSetup(recordCtx, cwd, os.Environ(), branch); err != nil {
+						return &runLineError{err}
+					}
+					return nil
+				}
+				if err := copied.recordSetup(recordCtx, run, &spec); err != nil {
+					return &runLineError{codeLine(err)}
 				}
 				return nil
 			}
@@ -1012,7 +1098,10 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				if prepErr == nil && readOnly {
 					prepErr = removeSetupWork()
 				}
-				if prepErr == nil && walled && spec.setupWhere != config.SetupInside && canPush(fromCode, readOnly, branch) {
+				if prepErr == nil && copied == nil && walled && spec.setupWhere != config.SetupInside && canPush(fromCode, readOnly, branch) {
+					prepErr = recordSetupWork()
+				}
+				if prepErr == nil && copied != nil && !copied.plain && !copied.readOnly && run.Repositories() != "" && spec.setupWhere != config.SetupInside {
 					prepErr = recordSetupWork()
 				}
 				if beforeJoin != nil {
@@ -1052,7 +1141,13 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				lines.done(nil)
 				var line *runLineError
 				if errors.As(prepErr, &line) {
-					said(line.Error())
+					fixes := toolFixes(record, prepErr)
+					if fixes == nil {
+						fixes = []string{line.Error()}
+					}
+					for _, fix := range fixes {
+						said(fix)
+					}
 					if recorded(record) {
 						said("the record is in " + record)
 					}
@@ -1068,6 +1163,16 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			// Forager's session masks the runtime's output with the run's masker, on a
 			// terminal and on pipes.
 			spec.Stdout, spec.Stderr = streams.session()
+			// joined is whether the join passed its checks. Past them the agent may have run,
+			// and a join that returned an error has no result to show it.
+			joined := false
+			onVariables := spec.OnVariables
+			spec.OnVariables = func(a session.Applied) {
+				joined = true
+				if onVariables != nil {
+					onVariables(a)
+				}
+			}
 			res, err := joinSession(run, ctx, spec.SessionSpec)
 			out := sessionOutcome(res, err)
 			// pushWork is the push step of a run with an agent session that may write, see
@@ -1075,19 +1180,77 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			// The step runs under [pushContext], since a stop has ended ctx or spent the time
 			// limit. A failed step changes the close only of a session that succeeded. The stop
 			// of a walled agent is proven: the join removes its container, and when it could
-			// not, the step's [openedRun.HostProxy] fails, so the step runs no git. An unwalled
-			// agent's process leaves no proof that it stopped.
+			// not, [openedRun.RemoveSetup] and the step's [openedRun.HostProxy] fail, so the step
+			// runs no git. An unwalled agent's process leaves no proof that it stopped.
+			//
+			// A walled write run with no run code works in a copy, and the git session commits
+			// and bundles the agent's work there, in a container qory starts, see
+			// [runCopy.inContainer]. While the run is open, the session runs here, in the copy
+			// step, once [openedRun.RemoveSetup] removed the setup container and
+			// [openedRun.ContainerKept] shows no container of the run left: a git session that
+			// fails then changes the close of a session that succeeded, see
+			// [pushEnding.copyOutcome]. After a join that returned an error once the agent may
+			// have run, a run the gateway closed, or a copy step that did not start, it runs
+			// after the close instead, with no step, see [runCopy.gitSessionAfterClose]. A
+			// removal of the setup container that failed, or a container of the run kept, sets
+			// [session.Closed.WallKept] in Forager: then no git session runs after the close,
+			// and nothing comes back. A removal or a copy step that failed after a session that
+			// succeeded closes the run as a copy step that did not start, and qory run exits
+			// with 1. The work comes back after the close, under [returnContext]. A return that
+			// fails after the close changes only qory run's exit status: only the close proves
+			// that no container is left.
 			ending := pushEnding{session: out, limit: timeout}
-			var pushErr error
-			if keepsWork(fromCode, readOnly, branch, res, err) {
+			var pushErr, sessionErr error
+			pushes := keepsWork(fromCode, readOnly, branch, res, err)
+			returns := copied != nil && !copied.readOnly && (err == nil && res != nil || joined)
+			stopNow := func() stopRead { return stopRead{ctx.Err() != nil, again.Err() != nil, got()} }
+			if copied != nil {
+				copied.cutBy = func() string { return ending.cutLine(stopNow(), returnAfterSignal) }
+			}
+			backCtx, cancelBack := returnContext(ctx, again, func(wait time.Duration) {
+				if returns && again.Err() == nil {
+					said(fmt.Sprintf(textCopyWaiting, got(), wait))
+				}
+			})
+			defer cancelBack()
+			// afterClose is whether the git session runs after the close.
+			afterClose := returns && !copied.plain && (err != nil || res == nil || res.RunClosed)
+			// returnFailed is whether a part of the return failed before the close: qory run then
+			// exits with 1 even when the work comes back.
+			returnFailed := false
+			if returns && !copied.plain && !afterClose {
+				removeCtx, cancelRemove := context.WithTimeout(backCtx, removeSetupLimit)
+				removeErr := run.RemoveSetup(removeCtx)
+				cancelRemove()
+				afterClose = removeErr != nil || run.ContainerKept()
+				var stepErr error
+				if !afterClose {
+					stepErr, sessionErr = copied.gitSession(backCtx, run, &spec, streams.errOut)
+					afterClose = stepErr != nil
+				}
+				switch {
+				case removeErr != nil || stepErr != nil:
+					// The run closes as after a copy step that did not start: failed, or
+					// cancelled when a stop or the run's time limit ended the removal or the step.
+					said(shownError(errors.Join(removeErr, stepErr)))
+					returnFailed = true
+					ending.settle(stopNow())
+					ending.cut = backCtx.Err() != nil
+					out = ending.copyOutcome(-1)
+				case sessionErr != nil:
+					ending.settle(stopNow())
+					ending.cut = copied.cut
+					out = ending.copyOutcome(copied.stepCode)
+				}
+			}
+			if pushes {
 				var limit time.Time
 				if timeout > 0 {
 					limit = opened.Add(timeout)
 				}
 				pushCtx, cancel := pushContext(ctx, again, limit, pushTimes.limit, pushTimes.signal)
 				ending.noStep, pushErr = removeThenPush(pushCtx, run, streams.errOut, branch, cwd, spec.RunID, fromCode.runNumber, out, walled, checks)
-				ending.stopped = ctx.Err() != nil
-				ending.again, ending.got = again.Err() != nil, got()
+				ending.settle(stopNow())
 				ending.cut = pushCtx.Err() != nil
 				cancel()
 				if pushErr != nil {
@@ -1095,7 +1258,30 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				}
 			}
 			closed := closeRun(out)
+			// Nothing of the copy comes back when a process of the run could have written it past
+			// its session's end: a close that failed may leave a container, and with WallKept
+			// a container of the run could not be removed at some point of the run.
+			trusted := closed != nil && !closed.WallKept
+			artifactsBack := true
+			if copied != nil && !copied.readOnly && trusted && !controlPlane {
+				artifactsBack = copied.artifactsBack(backCtx, said)
+			}
+			if afterClose && trusted {
+				sessionErr = copied.gitSessionAfterClose(backCtx, run, &spec, streams.errOut)
+			}
 			if err != nil {
+				switch {
+				case copied == nil || copied.readOnly:
+				case closed != nil && closed.WallKept:
+					said(copied.stopped(textCopyWallKept).Error())
+				case !joined:
+				case closed == nil:
+					said(copied.stoppedBy("%s", err).Error())
+				case sessionErr != nil:
+					said(sessionErr.Error())
+				default:
+					copied.comeBack(backCtx, spec.RunID, said)
+				}
 				return failed(err)
 			}
 			defer fmt.Fprintln(stderr, "qory run: the record is in", record)
@@ -1134,6 +1320,25 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			ended := runEnded(u, res, end)
 			if pushErr != nil {
 				return ending.ended(u, said, pushErr, branch, ended)
+			}
+			if !returns {
+				return ended
+			}
+			back := false
+			switch {
+			case sessionErr != nil:
+				said(sessionErr.Error())
+			case closed == nil:
+				// The close failed, so a container of the run may be left.
+				copied.kept(said)
+			case closed.WallKept:
+				said(copied.stopped(textCopyWallKept).Error())
+			default:
+				back = copied.comeBack(backCtx, spec.RunID, said)
+			}
+			// A run the gateway closed as completed ends with an exit status of 0 that is not nil.
+			if (!back || !artifactsBack || returnFailed) && ExitCode(ended) == 0 {
+				return reported(&exitError{code: 1})
 			}
 			return ended
 		},
@@ -1300,14 +1505,18 @@ type openedRun interface {
 	// Setup runs the run's setup commands in the setup container, before the join.
 	Setup(ctx context.Context, spec session.SetupSpec) error
 	// RemoveSetup removes the run's setup container, if it has one: before the first join
-	// of a read run, and after the session of a run that gets the push step.
+	// of a read run, and after the session of a run that gets the push step or the copy step.
 	RemoveSetup(ctx context.Context) error
+	// ContainerKept is whether a container of the run that can write its binds may still run:
+	// a removal of the agent's container or of the setup container failed. See
+	// [session.Run.ContainerKept].
+	ContainerKept() bool
 	// FetchImage fetches a walled run's image by reference as the run's image step,
 	// before the first join; see [fetchImage].
 	FetchImage(ctx context.Context) error
 	Close(ctx context.Context, out session.Outcome) (*session.Closed, error)
-	// StartStep starts a step of the run's host work, of kind fetch, compose, push or
-	// machine.
+	// StartStep starts a step of the run's host work, of kind fetch, compose, push, machine
+	// or copy.
 	StartStep(kind, name string) (hostStep, error)
 	// HostProxy starts the run's host proxy, for the fetch and the push of the run's
 	// repositories on this machine.
@@ -1665,13 +1874,9 @@ func (e *saidError) Unwrap() error { return e.err }
 // integration whose key the credentials section defines itself defines nothing for the
 // run and is not described. A program the run may write is refused: one in the
 // checkout, in the working directory when that is inside the checkout, or in a
-// read-write mount of the wall's container, or in a place a walled run has used.
-func expansion(r *config.Forager, pol *gateway.Policy, fromServer bool, root, cwd string, mounts []wall.Mount) (config.Expansion, error) {
-	recorded, err := recordedPlaces()
-	if err != nil {
-		return config.Expansion{}, err
-	}
-	e := config.Expansion{Workspace: append([]string{root}, recorded...)}
+// read-write mount of the wall's container.
+func expansion(r *config.Forager, pol *gateway.Policy, fromServer bool, root, cwd string, mounts []wall.Mount) config.Expansion {
+	e := config.Expansion{Workspace: []string{root}}
 	if cwd != root && reallyWithin(root, cwd) {
 		e.Workspace = append(e.Workspace, cwd)
 	}
@@ -1679,6 +1884,9 @@ func expansion(r *config.Forager, pol *gateway.Policy, fromServer bool, root, cw
 		if !m.ReadOnly {
 			e.Workspace = append(e.Workspace, m.Path)
 		}
+	}
+	if runs := runCopiesDir(); runs != "" {
+		e.Workspace = append(e.Workspace, runs)
 	}
 	shadowed := r.Shadowed()
 	selected := map[string]bool{}
@@ -1690,7 +1898,7 @@ func expansion(r *config.Forager, pol *gateway.Policy, fromServer bool, root, cw
 	e.Only = func(key string) bool {
 		return !slices.Contains(shadowed, key) && (fromServer || selected[key])
 	}
-	return e, nil
+	return e
 }
 
 // shadowed is the line that reports that the credentials section defines the credential
@@ -1714,6 +1922,20 @@ type wallOptions struct {
 // --env is the run's own variables, with a wall or without.
 func (o wallOptions) walled() bool {
 	return o.image != "" || len(o.mounts) > 0 || o.limits != (wall.Limits{})
+}
+
+// wallName is the wall that the flags, else wall.adapter of r, name: "" or [wallOff] for none.
+func wallName(r *config.Forager, o wallOptions) string {
+	if o.name != "" || r == nil || r.Wall == nil {
+		return o.name
+	}
+	return r.Wall.Adapter
+}
+
+// wallNamed reports whether the flags and r start a wall.
+func wallNamed(r *config.Forager, o wallOptions) bool {
+	name := wallName(r, o)
+	return name != "" && name != wallOff
 }
 
 // exitTimeout is the exit status of a run stopped at its --timeout, timeout(1)'s.
@@ -1813,10 +2035,7 @@ func enclose(spec *runSpec, r *config.Forager, o wallOptions, selected string, f
 	if r != nil {
 		spec.Machine = r.Machine
 	}
-	name := o.name
-	if name == "" {
-		name = section.Adapter
-	}
+	name := wallName(r, o)
 	run, err := passedVariables(o.env)
 	if err != nil {
 		return err
@@ -1990,11 +2209,6 @@ func (p passed) workspace(path string) bool {
 	return path == p.root && slices.ContainsFunc(p.spec.Mounts, func(m wall.Mount) bool { return m.Path == p.root })
 }
 
-// ofRun reports whether path is one of the run's places: the workspace, or a mount.
-func (p passed) ofRun(path string) bool {
-	return p.workspace(path) || slices.ContainsFunc(p.spec.Mounts, func(m wall.Mount) bool { return m.Path == path })
-}
-
 // place is how a refusal names one of the run's places: the workspace, or a mount.
 func (p passed) place(path string) string {
 	if p.workspace(path) {
@@ -2059,10 +2273,10 @@ func (p passed) modes(path string) (writable, readOnly, changed bool) {
 // Dir; for two paths, the outer's one mode decides, else that same entry.
 //
 // mount_through_link is a place, writable or read-only, reached through a link inside a
-// writable mount, the workspace or a place a walled run has used, where its path
-// resolves outside that place: the agent could repoint the link. The text names the
-// place, the link and the place that holds it; a place that is the link itself, its
-// absolute, cleaned form equal to the link, is named as a link inside that place.
+// writable mount or the workspace, where its path resolves outside that place: the agent
+// could repoint the link. The text names the place, the link and the place that holds it;
+// a place that is the link itself, its absolute, cleaned form equal to the link, is named
+// as a link inside that place.
 //
 // mount_shared_with_run is a place that is, holds or lies inside one another walled run
 // also uses, its mounts or its run directory, while that run is still going or its
@@ -2168,10 +2382,6 @@ func mountRefused(err error, p passed) error {
 		// The link and the places are paths a walled agent could have named, so each is
 		// printed through hostgit.Shown.
 		inside := p.placeShown(outer)
-		if !p.ofRun(outer) {
-			// A place of SessionSpec.Written that is none of this run's: an earlier walled run used it.
-			inside = hostgit.Shown(outer) + ", a place a walled run has used"
-		}
 		text = fmt.Sprintf("%s is reached through the link %s inside %s, which a walled agent can change, so the run does not start. List the link's target itself", p.placeShown(place), hostgit.Shown(link), inside)
 		if abs, err := filepath.Abs(place); err == nil && abs == link {
 			text = fmt.Sprintf("%s is a link inside %s, which a walled agent can change, so the run does not start. List the link's target itself", p.placeShown(place), inside)
@@ -2657,7 +2867,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md#resending-a-runs-reco
 			if key != nil {
 				secretmask.Default().Add(key.value)
 			}
-			at, conf, err := locateRun(homeOptions{}, key != nil, false)
+			at, conf, err := locateRun(homeOptions{}, key != nil, false, nil)
 			if err != nil {
 				return err
 			}
@@ -3110,12 +3320,69 @@ func newSetupCommand() *cobra.Command {
 // setupStep is the name of the setup step of qory run prepare.
 const setupStep = "prepare"
 
+// textCheckoutOnlyNoLinks starts the line of [checkoutOnlyLine] for a run that has no links with
+// --wall none as well.
+const textCheckoutOnlyNoLinks = "remove --home, harness.home and harness.links: none, and "
+
+// textCheckoutOnly is the line of [checkoutOnlyLine].
+const textCheckoutOnly = "run with --wall none for %s's %s: a walled run has the harness in a home outside the checkout, and %s reads those from the checkout."
+
+// checkToolsStep is the name of the setup step that checks the programs of the git session.
+const checkToolsStep = "Check tools"
+
 // setupCommands are the setup commands of a walled run whose run configuration lists
 // repositories: qory run prepare, in one setup step, which adds the image's copy of the
 // run's repository and then runs the start commands of the repository's development
-// container configuration.
-func setupCommands() []session.SetupCommand {
-	return []session.SetupCommand{{Name: setupStep, Args: append([]string{wall.HelperPath}, prepareArgs...)}}
+// container configuration. With gitSession set, for a run that has a git session after the
+// agent, the step [checkToolsStep] comes first, so an image with no program of that session
+// stops the run before the agent.
+func setupCommands(gitSession bool) []session.SetupCommand {
+	var commands []session.SetupCommand
+	if gitSession {
+		commands = append(commands, session.SetupCommand{Name: checkToolsStep, Args: []string{"/bin/sh", "-c", image.SessionCheckScript()}})
+	}
+	return append(commands, session.SetupCommand{Name: setupStep, Args: append([]string{wall.HelperPath}, prepareArgs...)})
+}
+
+// toolFixes is what a person reads of err, a step [checkToolsStep] of the run with the record
+// dir that failed in the setup container: the step's install lines from session.jsonl, which
+// has the step's output, since [session.SetupError] has only its exit status. The run's image
+// writes that output, so [image.SessionCheckFixes] keeps only the lines of the check. A docker
+// exec with no /bin/sh exits 127 and the step prints nothing, so that is the line for sh. It is
+// nil for another error, and for a step with no line, also for exit 126, where docker could not
+// run the command for another cause, such as the image's architecture. [session.SetupError] then
+// reports the step.
+func toolFixes(dir string, err error) []string {
+	var exited *session.SetupError
+	if !errors.As(err, &exited) || exited.Name != checkToolsStep {
+		return nil
+	}
+	var fixes []string
+	data, readErr := os.ReadFile(filepath.Join(dir, "session.jsonl"))
+	if readErr == nil {
+		var text []byte
+		for line := range bytes.Lines(data) {
+			var ev struct {
+				Type string `json:"type"`
+				Data struct {
+					Stream string `json:"stream"`
+					Bytes  string `json:"bytes"`
+					Step   int    `json:"step"`
+				} `json:"data"`
+			}
+			if json.Unmarshal(line, &ev) != nil || ev.Type != event.RunLog || ev.Data.Step != exited.Step || ev.Data.Stream != "stderr" {
+				continue
+			}
+			if chunk, err := base64.StdEncoding.DecodeString(ev.Data.Bytes); err == nil {
+				text = append(text, chunk...)
+			}
+		}
+		fixes = image.SessionCheckFixes(string(text))
+	}
+	if fixes == nil && exited.ExitCode == 127 {
+		fixes = []string{image.SessionShellFix()}
+	}
+	return fixes
 }
 
 // runSetup makes the setup of a walled run whose run configuration lists repositories,
@@ -3126,9 +3393,10 @@ func setupCommands() []session.SetupCommand {
 // the run's image on the wall's network, which runs until the run closes, or on a read
 // run until [removeSetup]. The setup container is checked and limited as the session is: it gets the session's working
 // folder, ForagerFiles, Written and Limits, and the agent's variables, see [setupEnv].
-// Inside, the setup commands get the agent's environment.
-func runSetup(ctx context.Context, run openedRun, spec *runSpec) error {
-	commands := setupCommands()
+// Inside, the setup commands get the agent's environment. gitSession is what
+// [setupCommands] takes.
+func runSetup(ctx context.Context, run openedRun, spec *runSpec, gitSession bool) error {
+	commands := setupCommands(gitSession)
 	if spec.setupWhere == config.SetupInside {
 		spec.SessionSpec.Setup = commands
 		spec.SetupRunner = append([]string{wall.HelperPath}, setupCommandArgs...)
@@ -3270,9 +3538,8 @@ func samePath(a, b string) bool {
 // value in another file that leaves the home where the configuration directory's file
 // alone puts it is harmless and passes. With no configuration directory, any other file
 // that sets harness.home is refused, as the run records are with no state directory.
-// keyed is a run given a run key or a run code, whose home with no harness.home in the
-// configuration directory's file is [runKeyHomes].
-func userHome(at places, conf config.Config, keyed bool) error {
+// With no harness.home in the configuration directory's file, the home is [cacheHomes].
+func userHome(at places, conf config.Config) error {
 	origin := conf.Origin("harness.home")
 	yours := ""
 	dir, err := config.UserDir()
@@ -3301,10 +3568,8 @@ func userHome(at places, conf config.Config, keyed bool) error {
 	}
 	mine := conf
 	mine.Home = own.Home
-	if keyed {
-		if mine, err = withRunKeyHome(at.root, mine); err != nil {
-			return err
-		}
+	if mine, err = withCacheHome(at.root, mine); err != nil {
+		return err
 	}
 	if want, err := placesFor(at.root, mine, homeOptions{}); err == nil && samePath(want.home, at.home) {
 		return nil
@@ -3418,18 +3683,17 @@ func exitStatusOf(err error) bool {
 
 // composeForRun composes the harness of a qory run before its session starts: the
 // compose of qory harness compose, with the flags o contains and the run's runtime as its
-// --runtime, into the home at that the run starts on. It returns the git sources the
-// compose resolved and the composed stack's workflows. inCheckout is set for a run given a
+// --runtime, into the home at that the run starts on. It returns what it composed. inCheckout is set for a run given a
 // run key, see [extendsInCheckout], and walled for a run behind a wall, whose home
 // contains copies of the modules' files, see [copies], as the home of a run whose
 // harness is hidden, o.hidden, does. stdout is the agent's, so the compose prints there
 // nothing; on stderr it prints a collision as compose does, a line per git source whose
 // remote could not be reached, and its result line last.
-func composeForRun(stderr io.Writer, o composeOptions, at places, runtime string, inCheckout, walled bool) ([]session.HarnessSource, map[string]stack.Workflow, error) {
+func composeForRun(stderr io.Writer, o composeOptions, at places, runtime string, inCheckout, walled bool) (*composed, error) {
 	o.runtime, o.at, o.run, o.inCheckout, o.walled = runtime, &at, true, inCheckout, walled
 	c, err := composeHome(io.Discard, stderr, o)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	for _, w := range c.warnings {
 		fmt.Fprintln(stderr, "qory run:", w)
@@ -3439,7 +3703,22 @@ func composeForRun(stderr io.Writer, o composeOptions, at places, runtime string
 		names = append(names, rt.Name())
 	}
 	fmt.Fprintf(stderr, "qory run: composed %s from %s for %s\n", count(len(c.rep.Entries), "entry", "entries"), count(len(c.rep.Modules), "module", "modules"), strings.Join(names, ", "))
-	return c.harness, c.workflows, nil
+	return c, nil
+}
+
+// checkoutOnlyLine is the line of a walled run of the runtime name, whose program reads parts of
+// the composed harness from the checkout alone, see [render.CheckoutOnly]. noLinks is a run that
+// has no links with --wall none as well: --home, harness.home or harness.links: none.
+func checkoutOnlyLine(name string, parts []string, noLinks bool) string {
+	listed := parts[len(parts)-1]
+	if len(parts) > 1 {
+		listed = strings.Join(parts[:len(parts)-1], ", ") + " and " + listed
+	}
+	line := fmt.Sprintf(textCheckoutOnly, name, listed, name)
+	if noLinks {
+		return textCheckoutOnlyNoLinks + line
+	}
+	return line
 }
 
 // harnessSources is the harness's git sources a compose resolved, each with the full

@@ -60,15 +60,12 @@ func pushWith(dir string, b *WorkBranch, agentStopped bool) (*branchformat.Branc
 func TestAfterTheRunTheCheckTakesWhatTheFetchWrote(t *testing.T) {
 	dir, _ := onBranch(t, "acme/shop,acme/lib")
 	ctx := context.Background()
-	if hold, err := safeRepository(ctx, dir); err == nil || err.Error() != textHasRemote {
-		hold.Release()
+	if err := safeRepository(ctx, dir); err == nil || err.Error() != textHasRemote {
 		t.Errorf("the check of a fetch: %v", err)
 	}
-	hold, err := safeAfterRun(ctx, dir)
-	if err != nil {
+	if err := safeAfterRun(ctx, dir); err != nil {
 		t.Fatal(err)
 	}
-	hold.Release()
 	if err := safeFurther(ctx, dir, filepath.Join(dir, filepath.FromSlash(Repositories), "acme", "lib"), true); err != nil {
 		t.Errorf("the check of a further repository: %v", err)
 	}
@@ -1032,12 +1029,9 @@ func TestACheckThatFailedHasAFixAPersonCanCarryOut(t *testing.T) {
 	for name, err := range map[string]error{
 		"git":     gitFailed(errors.New("fatal: a line of git")),
 		"machine": local(errors.New("a read failed")),
-		"a remote file": &unsafeError{"the line", (&hostgit.RefusedError{
-			Dir: "/w", Key: "remotes/x", Reason: hostgit.RefusedRemoteFile}).Cause()},
-		"a pointer": &unsafeError{"the line", (&hostgit.RefusedError{Reason: hostgit.RefusedPointer}).Cause()},
 	} {
 		got := notSafe(r, err).Error()
-		for _, fix := range []string{"run again", "Remove it", "--accept-checkout", "docker ps"} {
+		for _, fix := range []string{"run again", "Remove it"} {
 			if strings.Contains(got, fix) {
 				t.Errorf("%s: %q has %q", name, got, fix)
 			}

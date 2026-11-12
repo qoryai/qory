@@ -47,6 +47,19 @@ func agentFiles() map[string]string {
 		"bin/sh":                            "#!/bin/sh\n",
 		"usr/local/bin/claude":              "",
 		"usr/bin/git":                       "",
+		"usr/bin/cat":                       "",
+		"usr/bin/chmod":                     "",
+		"usr/bin/comm":                      "",
+		"usr/bin/cp":                        "",
+		"usr/bin/find":                      "",
+		"usr/bin/grep":                      "",
+		"usr/bin/mkdir":                     "",
+		"usr/bin/mv":                        "",
+		"usr/bin/readlink":                  "",
+		"usr/bin/sort":                      "",
+		"usr/bin/sleep":                     "",
+		"usr/bin/stat":                      "",
+		"usr/bin/tr":                        "",
 		"usr/local/bin/gh":                  "",
 		"usr/share/doc/git/copyright":       "",
 	}
@@ -152,7 +165,7 @@ func TestProbePassesAnImageWithWhatTheWallNeeds(t *testing.T) {
 // TestProbeNamesWhatAnImageLacks probes a root with none of it: every line fails and
 // says what to add.
 func TestProbeNamesWhatAnImageLacks(t *testing.T) {
-	root := imageRoot(t, map[string]string{"usr/bin/git": "", "etc/ssl/cert.pem": "no certificate here\n"})
+	root := imageRoot(t, sessionFiles("etc/ssl/cert.pem", "no certificate here\n"))
 	p := image.Probe{Root: root, Env: env(map[string]string{"PATH": "/usr/bin"}), Exec: (&versions{}).exec, Runtimes: claudeAt("2.1.316"), User: "65532:65532"}
 	checks := byName(p.Report(context.Background()))
 	want(t, checks, "home", image.Fail, "HOME is not set", "ENV HOME=")
@@ -250,4 +263,61 @@ func TestProbeReportsEveryCheck(t *testing.T) {
 	if want := "home authorities shell claude git gh docker"; strings.Join(names, " ") != want || strings.Join(image.ProbeChecks([]string{"claude"}), " ") != want {
 		t.Errorf("lines %v, want %s", names, want)
 	}
+}
+
+// TestTheGitLineChecksWhatTheGitSessionNeeds is an image whose git is too old, or is in no
+// folder of the git session's PATH: the line fails with the fix first.
+func TestTheGitLineChecksWhatTheGitSessionNeeds(t *testing.T) {
+	old := goodVersions()
+	old.lines["git"] = "git version 2.24.4"
+	root := imageRoot(t, sessionFiles())
+	p := image.Probe{Root: root, Env: env(map[string]string{"PATH": "/usr/bin"}), Exec: old.exec}
+	checks := byName(p.Report(context.Background()))
+	want(t, checks, "git", image.Fail, "install git 2.25 or later in /usr/local/bin, /usr/bin, /bin: ", "git version 2.24.4")
+
+	root = imageRoot(t, map[string]string{"opt/git/bin/git": ""})
+	p = image.Probe{Root: root, Env: env(map[string]string{"PATH": "/opt/git/bin"}), Exec: goodVersions().exec}
+	checks = byName(p.Report(context.Background()))
+	want(t, checks, "git", image.Fail, "install git in /usr/local/bin, /usr/bin, /bin: ")
+
+	root = imageRoot(t, sessionFiles())
+	p = image.Probe{Root: root, Env: env(map[string]string{"PATH": "/usr/bin"}), Exec: goodVersions().exec}
+	checks = byName(p.Report(context.Background()))
+	want(t, checks, "git", image.Pass, "git version 2.47.3")
+}
+
+// sessionFiles is an image's git and each program of the git session, and the files of extra, in
+// pairs of a path and its content.
+func sessionFiles(extra ...string) map[string]string {
+	files := map[string]string{"usr/bin/git": ""}
+	for _, tool := range image.SessionTools() {
+		files["usr/bin/"+tool] = ""
+	}
+	for i := 0; i+1 < len(extra); i += 2 {
+		files[extra[i]] = extra[i+1]
+	}
+	return files
+}
+
+// TestTheGitCheckNeedsEveryTool is an image without one program the script of the git session
+// runs: the line starts with its install.
+func TestTheGitCheckNeedsEveryTool(t *testing.T) {
+	for _, tool := range image.SessionTools() {
+		t.Run(tool, func(t *testing.T) {
+			files := sessionFiles()
+			delete(files, "usr/bin/"+tool)
+			p := image.Probe{Root: imageRoot(t, files), Env: env(map[string]string{"PATH": "/usr/bin"}), Exec: goodVersions().exec}
+			want(t, byName(p.Report(context.Background())), "git", image.Fail, "install "+tool+" in /usr/local/bin, /usr/bin, /bin: the git session of a walled run runs "+tool+" from these folders, to ")
+		})
+	}
+}
+
+// TestTheGitCheckNeedsFind is an image with git and no find in the folders of the git session.
+func TestTheGitCheckNeedsFind(t *testing.T) {
+	files := sessionFiles()
+	delete(files, "usr/bin/find")
+	root := imageRoot(t, files)
+	p := image.Probe{Root: root, Env: env(map[string]string{"PATH": "/usr/bin"}), Exec: goodVersions().exec}
+	checks := byName(p.Report(context.Background()))
+	want(t, checks, "git", image.Fail, "install find in /usr/local/bin, /usr/bin, /bin: the git session of a walled run runs find from these folders, to list executable files, embedded repositories and files over 100 MiB")
 }

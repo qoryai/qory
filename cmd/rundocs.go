@@ -176,9 +176,9 @@ func codeRunOf(doc contracts.Documents) (*codeRun, error) {
 		}
 		harness = append(harness, '\n')
 	}
-	var target preparation.Target
+	target := preparation.Target{FromCode: true}
 	if doc.Target != nil {
-		target = preparation.Target{System: doc.Target.System, Path: doc.Target.Path, Version: doc.TargetVersion}
+		target.System, target.Path, target.Version = doc.Target.System, doc.Target.Path, doc.TargetVersion
 	}
 	r := &codeRun{runtime: runtime, settings: settings, harness: harness, defines: defines, workflow: doc.Workflow, inputs: doc.Inputs, minutes: minutes, hidden: hidden, target: target, access: doc.Access}
 	if doc.WorkItem != nil {
@@ -344,20 +344,19 @@ type givenMount struct {
 // would get a harness report, which contains the address of each harness source. It
 // stops a run whose harness is shown as well: through <cache>/qory, such a run would
 // read the reports of the runs on this machine whose harness is hidden. The container
-// gets each mount of given, the checkout at root and the working folder cwd, both
-// writable, and the home, read-only. The run stops when a mount of given, the checkout
-// or the working folder is, contains or lies inside qory's folder in the cache
-// directory, <cache>/qory, where qory writes the home and harness report of each run
-// with a run key or a run code and no --home or harness.home; when one of them is or
-// contains report, this run's harness report, beside its home; and when the home is or
-// contains <cache>/qory. A home that lies inside it, as the default one under
+// gets each mount of given and the home, read-only; [codeRun.readExposed] checks the
+// checkout and the working folder of a read run. The run stops when a mount of given is,
+// contains or lies inside qory's folder in the cache directory, <cache>/qory, where qory
+// writes the home and harness report of each run with a run key or a run code and no
+// --home or harness.home; when one of them is or contains report, this run's harness
+// report, beside its home; and when the home is or contains <cache>/qory. A home that lies inside it, as the default one under
 // <cache>/qory/homes does, passes: report is beside it, and the other runs' reports are
 // not inside it. The paths are compared as Forager compares a mount, by
 // [session.Overlap]: by file through links and in any letter case on a disk that
 // ignores case. The cache folder passes when the lookup of the cache directory fails,
 // as qory then writes no home under it. It runs before the harness is fetched and
 // before the run writes its inputs, home or report; each error ends with [codeUsed].
-func (r *codeRun) reportExposed(root, cwd, home, report string, given []givenMount) error {
+func (r *codeRun) reportExposed(home, report string, given []givenMount) error {
 	cache := ""
 	if base, err := os.UserCacheDir(); err == nil {
 		cache = filepath.Join(base, "qory")
@@ -376,6 +375,32 @@ func (r *codeRun) reportExposed(root, cwd, home, report string, given []givenMou
 		if how := overlap(m.path, report); how == "is" || how == "contains" {
 			return input(fmt.Errorf("remove %s from %s: it %s %s, the harness report of this run, and the agent's container has every mount%s", shown(m.path), m.from, how, shown(report), codeUsed))
 		}
+	}
+	if how := overlap(home, cache); how == "is" || how == "contains" {
+		where := "other than"
+		if how == "contains" {
+			where = "that does not contain"
+		}
+		return input(fmt.Errorf("set --home or harness.home to a folder %s %s: the home %s is mounted read-only into the agent's container, and qory writes the harness report of each run with a run key or a run code that has no --home or harness.home under %s%s", where, shown(cache), shown(home), shown(cache), codeUsed))
+	}
+	return nil
+}
+
+// readExposed stops a run from the run code r that only reads the checkout, when the
+// checkout at root or the working folder cwd, which the agent's container binds read-only,
+// overlaps qory's cache folder or the harness report of the run. A run that may write works
+// in a copy, and binds neither.
+func (r *codeRun) readExposed(root, cwd, report string) error {
+	cache := ""
+	if base, err := os.UserCacheDir(); err == nil {
+		cache = filepath.Join(base, "qory")
+	}
+	shown := func(p string) string { return exports.Value(p, false) }
+	overlap := func(mount, path string) string {
+		if path == "" {
+			return ""
+		}
+		return session.Overlap(mount, path)
 	}
 	if how := overlap(root, cache); how != "" {
 		where := "outside"
@@ -396,13 +421,6 @@ func (r *codeRun) reportExposed(root, cwd, home, report string, given []givenMou
 	}
 	if how := overlap(cwd, report); how == "is" || how == "contains" {
 		return input(fmt.Errorf("run qory from a folder that does not contain %s: the working folder %s is mounted into the agent's container, and %s is the harness report of this run%s", shown(report), shown(cwd), shown(report), codeUsed))
-	}
-	if how := overlap(home, cache); how == "is" || how == "contains" {
-		where := "other than"
-		if how == "contains" {
-			where = "that does not contain"
-		}
-		return input(fmt.Errorf("set --home or harness.home to a folder %s %s: the home %s is mounted read-only into the agent's container, and qory writes the harness report of each run with a run key or a run code that has no --home or harness.home under %s%s", where, shown(cache), shown(home), shown(cache), codeUsed))
 	}
 	return nil
 }

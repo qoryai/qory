@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"syscall"
@@ -146,7 +147,12 @@ func TestAReadRunOpensTheStoreToAComposedBlock(t *testing.T) {
 // the workspace and the checkout's mount stay writable, and Claude Code's settings get
 // no rules from qory.
 func TestAWriteWorkflowSeesTheCheckoutWritable(t *testing.T) {
-	r, _ := readRun(t, declares("write"), readImage, "")
+	r := runFromCodeWith(t, func(string) []string {
+		docker, _ := fakeDocker(t)
+		writeFile(t, filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "forager.yaml"),
+			"wall:\n  adapter: docker\n  command: "+docker+"\n  helper: "+staticELF(t)+"\n  user: \"1000:1000\"\n  image: "+readImage+"\n")
+		return nil
+	}, []string{"--home", filepath.Join(tempDir(t), "home")}, declares("write"), nil)
 	if !r.joined {
 		t.Fatalf("%v (exit %d), want the join\n%s", r.err, cmd.ExitCode(r.err), r.out)
 	}
@@ -482,6 +488,180 @@ func TestAReadRunRemovesTheSetupContainerBeforeTheJoin(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestAReadRunsSetupWorksInACopy is a read run with a setup that writes a key and a file: both
+// stay in the copy, the agent has the copy read-only, the person's repository stays as it was,
+// and nothing comes back.
+func TestAReadRunsSetupWorksInACopy(t *testing.T) {
+	listsRepositories(t)
+	canary := filepath.Join(tempDir(t), "canary")
+	var setupDir, root string
+	codeSetup = func(spec session.SetupSpec) error {
+		setupDir = spec.Dir
+		root, _ = os.Getwd()
+		config := filepath.Join(spec.Dir, ".git", "config")
+		data, err := os.ReadFile(config)
+		if err != nil {
+			return err
+		}
+		writeFile(t, config, string(data)+"[core]\n\tfsmonitor = touch "+canary+"\n")
+		writeFile(t, filepath.Join(spec.Dir, "setup.txt"), "the setup\n")
+		return nil
+	}
+	t.Cleanup(func() { codeSetup = nil })
+	r, _ := readRun(t, nil, readImage, "")
+	if !r.joined {
+		t.Fatalf("%v (exit %d), want the join\n%s", r.err, cmd.ExitCode(r.err), r.out)
+	}
+	if setupDir == "" || setupDir == root {
+		t.Fatalf("the setup ran in %q, the checkout is %q", setupDir, root)
+	}
+	if r.spec.Dir != setupDir || !r.spec.WorkspaceReadOnly {
+		t.Errorf("the session starts in %s, read-only %v; the setup ran in %s", r.spec.Dir, r.spec.WorkspaceReadOnly, setupDir)
+	}
+	for _, m := range checkoutMounts(r.spec) {
+		if !m.ReadOnly {
+			t.Errorf("the session has the read-write mount %s", m.Path)
+		}
+		if m.Path == root {
+			t.Errorf("the session has the checkout %s", root)
+		}
+	}
+	data, err := os.ReadFile(filepath.Join(root, ".git", "config"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	lacks(t, string(data), canary)
+	if _, err := os.Lstat(filepath.Join(root, "setup.txt")); err == nil {
+		t.Error("the setup's file reached the checkout")
+	}
+	if got := gitOutput(t, root, "for-each-ref", "refs/heads/qory/"); got != "" {
+		t.Errorf("a branch came back: %s", got)
+	}
+	if _, err := os.Lstat(setupDir); err == nil {
+		t.Errorf("the copy %s stays", setupDir)
+	}
+}
+
+// TestAReadRunWithAReadWriteMountStops is a read run with a read-write mount from --mount: the
+// run stops with exit 2, before the join, with the fix first. A read-only mount passes.
+func TestAReadRunWithAReadWriteMountStops(t *testing.T) {
+	mount := tempDir(t)
+	t.Run("read-write", func(t *testing.T) {
+		r, _ := readRunArgs(t, []string{"--mount", mount}, nil, readImage, "")
+		if r.joined || cmd.ExitCode(r.err) != cmd.ExitInput {
+			t.Fatalf("%v (exit %d), want exit %d before the join\n%s", r.err, cmd.ExitCode(r.err), cmd.ExitInput, r.out)
+		}
+		wants(t, r.err.Error(), "make the mount "+mount+" read-only, with :ro on --mount or in wall.mounts: ", "; the code is used")
+	})
+	t.Run("read-only", func(t *testing.T) {
+		r, _ := readRunArgs(t, []string{"--mount", mount + ":ro"}, nil, readImage, "")
+		if !r.joined {
+			t.Fatalf("%v (exit %d), want the join\n%s", r.err, cmd.ExitCode(r.err), r.out)
+		}
+	})
+}
+
+// TestAReadRunAtTheHomeFolderStops is a read run with no setup in a checkout that is the home
+// folder or contains it, which it would bind: the run stops before the join, with the fix
+// first. With a setup, the run binds a copy and passes.
+func TestAReadRunAtTheHomeFolderStops(t *testing.T) {
+	for name, below := range map[string]string{"at the home folder": "", "above the home folder": "below"} {
+		t.Run(name, func(t *testing.T) {
+			var docker string
+			r := runFromCodeWith(t, func(string) []string {
+				root, err := os.Getwd()
+				if err != nil {
+					t.Fatal(err)
+				}
+				t.Setenv("HOME", filepath.Join(root, below))
+				t.Setenv("XDG_STATE_HOME", tempDir(t))
+				t.Setenv("XDG_CACHE_HOME", tempDir(t))
+				docker, _ = fakeDocker(t)
+				writeFile(t, filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "forager.yaml"),
+					"wall:\n  adapter: docker\n  command: "+docker+"\n  helper: "+staticELF(t)+"\n  user: \"1000:1000\"\n  image: "+readImage+"\n")
+				return nil
+			}, []string{"--home", filepath.Join(tempDir(t), "home")}, nil, nil)
+			if r.joined || cmd.ExitCode(r.err) != cmd.ExitInput {
+				t.Fatalf("%v (exit %d), want exit %d before the join\n%s", r.err, cmd.ExitCode(r.err), cmd.ExitInput, r.out)
+			}
+			wants(t, r.err.Error(), "start the run from a folder that does not contain your home folder or qory's state directory: the folder ", "your home folder", "; the code is used")
+		})
+	}
+}
+
+// TestACodeWriteRunAtTheHomeFolderStops is a walled write run from a run code, which gets no
+// copy and binds the checkout itself, in a checkout that is the home folder or contains qory's
+// state directory: the run stops before the join, exit 2, with the fix first, and closes failed
+// with no reason and -1, as a read run at the home folder does. A checkout that is neither joins.
+func TestACodeWriteRunAtTheHomeFolderStops(t *testing.T) {
+	for name, c := range map[string]struct {
+		home, cache bool
+		state       string
+		want        string
+	}{
+		"at the home folder":                {home: true, want: "is your home folder"},
+		"above qory's state directory":      {state: "state", want: "contains qory's state directory "},
+		"above the runs' copies":            {cache: true, want: "contains the folder of the runs' copies "},
+		"in a folder that contains neither": {},
+	} {
+		t.Run(name, func(t *testing.T) {
+			r := runFromCodeWith(t, func(string) []string {
+				root, err := os.Getwd()
+				if err != nil {
+					t.Fatal(err)
+				}
+				t.Setenv("HOME", tempDir(t))
+				if c.home {
+					t.Setenv("HOME", root)
+				}
+				t.Setenv("XDG_STATE_HOME", tempDir(t))
+				if c.state != "" {
+					t.Setenv("XDG_STATE_HOME", filepath.Join(root, c.state))
+				}
+				t.Setenv("XDG_CACHE_HOME", tempDir(t))
+				if c.cache {
+					cacheIn(t, filepath.Join(root, "cache"))
+				}
+				docker, _ := fakeDocker(t)
+				writeFile(t, filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "forager.yaml"),
+					"wall:\n  adapter: docker\n  command: "+docker+"\n  helper: "+staticELF(t)+"\n  user: \"1000:1000\"\n  image: "+readImage+"\n")
+				return nil
+			}, []string{"--home", filepath.Join(tempDir(t), "home")}, declares("write"), nil)
+			if c.want == "" {
+				if !r.joined {
+					t.Fatalf("%v (exit %d), want the join\n%s", r.err, cmd.ExitCode(r.err), r.out)
+				}
+				return
+			}
+			if r.joined || cmd.ExitCode(r.err) != cmd.ExitInput {
+				t.Fatalf("%v (exit %d), want exit %d before the join\n%s", r.err, cmd.ExitCode(r.err), cmd.ExitInput, r.out)
+			}
+			wants(t, r.err.Error(), "start the run from a folder that does not contain your home folder, qory's state directory or the folder of the runs' copies: the folder ", c.want, ", and a write run from a run code binds it into the agent's container; the code is used")
+			if want := (session.Outcome{State: "failed", ExitCode: -1}); len(r.closes) != 1 || r.closes[0] != want {
+				t.Errorf("the closes %+v, want %+v", r.closes, want)
+			}
+		})
+	}
+}
+
+// cacheIn makes the user cache folder, as os.UserCacheDir finds it, lie in dir, with HOME outside
+// dir: on macOS through a link from Library in a new home folder, elsewhere with XDG_CACHE_HOME.
+func cacheIn(t *testing.T, dir string) {
+	t.Helper()
+	if runtime.GOOS != "darwin" {
+		t.Setenv("XDG_CACHE_HOME", dir)
+		return
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "Caches"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	home := tempDir(t)
+	if err := os.Symlink(dir, filepath.Join(home, "Library")); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", home)
 }
 
 // TestAWriteRunKeepsTheSetupContainer is a walled write run with a setup: it never calls

@@ -56,6 +56,9 @@ func (opencode) Links(res *compose.Result) []render.Link {
 	return links
 }
 
+// CheckoutParts are what the package comment lists as read from the checkout alone.
+func (opencode) CheckoutParts() []string { return []string{render.Instructions} }
+
 // Skips are output styles, the one kind OpenCode has no place for.
 func (opencode) Skips() []string { return []string{"output-styles"} }
 

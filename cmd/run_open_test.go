@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
-	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -17,7 +16,6 @@ import (
 	"github.com/qoryai/forager/session"
 
 	"github.com/qoryai/qory/cmd"
-	"github.com/qoryai/qory/internal/places"
 )
 
 // runEvent is one event of a run's record: its type and its data.
@@ -197,29 +195,28 @@ func TestRunCancelsARunStoppedBeforeTheJoin(t *testing.T) {
 	}
 }
 
-// TestRunClosesARunWhoseJoinCheckFails is a walled run with a read-only mount inside the
-// checkout, which the container sees writable: the join check fails, the session records
-// its session.exited with the code mount_mode_conflict, and the run closes failed with
-// no reason and -1, since a join started; qory says why, names the record and exits 1.
+// TestRunClosesARunWhoseJoinCheckFails is a walled run with a read-only mount that contains
+// the file GITHUB_ENV names: the join check fails, the session records its session.exited
+// with the code mount_contains_forager_files, and the run closes failed with no reason and
+// -1, since a join started; qory says why, names the record and exits 1.
 func TestRunClosesARunWhoseJoinCheckFails(t *testing.T) {
 	root := newCheckout(t)
 	copyFixture(t, "two-modules", root)
 	composedForFake(t, root, "claude")
 	docker, _ := fakeDocker(t)
 	writeFile(t, filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "forager.yaml"), "wall:\n  adapter: docker\n  image: example.com/agent:1\n  command: "+docker+"\n  helper: "+staticELF(t)+"\n  user: \"1000:1000\"\n")
-	vendor := filepath.Join(root, "vendor")
-	if err := os.MkdirAll(vendor, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	out, err := run(t, "run", "claude", "--mount", vendor+":ro")
-	if cmd.ExitCode(err) != 1 || !strings.Contains(out, "(mount_mode_conflict)\nqory run: the record is in ") {
+	runner := tempDir(t)
+	writeFile(t, filepath.Join(runner, "github_env"), "")
+	t.Setenv("GITHUB_ENV", filepath.Join(runner, "github_env"))
+	out, err := run(t, "run", "claude", "--mount", runner+":ro")
+	if cmd.ExitCode(err) != 1 || !strings.Contains(out, "(mount_contains_forager_files)\nqory run: the record is in ") {
 		t.Fatalf("%v (exit %d)\n%s", err, cmd.ExitCode(err), out)
 	}
 	rec := sessionRecord(t, root)
 	if got, want := typesOf(rec), []string{"run.started", "session.exited", "run.exited"}; !slices.Equal(got, want) {
 		t.Errorf("the record's events are %q, want %q", got, want)
 	}
-	if state, reason, exit := endOf(dataOf(rec, "dev.qory.session.exited")); state != "failed" || reason != "mount_mode_conflict" || exit != -1 {
+	if state, reason, exit := endOf(dataOf(rec, "dev.qory.session.exited")); state != "failed" || reason != "mount_contains_forager_files" || exit != -1 {
 		t.Errorf("session.exited is %s, %q, %v", state, reason, exit)
 	}
 	if state, reason, exit := endOf(dataOf(rec, "dev.qory.run.exited")); state != "failed" || reason != "" || exit != -1 {
@@ -291,33 +288,5 @@ func TestARunKeySaysItsGatewayBeforeTheCompose(t *testing.T) {
 	}
 	if !n.joined {
 		t.Errorf("the run did not go on to the join\n%s", out)
-	}
-}
-
-// TestRunLeavesOutTheWalledRunItOpened is a run opened nowhere, unwalled and then
-// walled. Between the open and the join, the places' checks leave out the walled run's
-// id, which its open listed among the walled runs going, and no id for the unwalled
-// run, which Forager lists nowhere. Once the run ends, the checks leave out no run.
-func TestRunLeavesOutTheWalledRunItOpened(t *testing.T) {
-	root := newCheckout(t)
-	copyFixture(t, "two-modules", root)
-	composedForFake(t, root, "claude")
-	_, restore := cmd.OpenNowhere()
-	defer restore()
-	var seen []string
-	defer cmd.SetBeforeJoin(func() { seen = append(seen, places.ThisRun()) })()
-	const unwalled, walled = "0191f2a4-3c5e-7b8d-9e0f-1a2b3c4d5e01", "0191f2a4-3c5e-7b8d-9e0f-1a2b3c4d5e02"
-	if out, err := run(t, "run", "claude", "--run-id", unwalled); !errors.Is(err, cmd.ErrJoinedNowhere) {
-		t.Fatalf("the unwalled run: %v\n%s", err, out)
-	}
-	walledSection(t)
-	if out, err := run(t, "run", "claude", "--run-id", walled); !errors.Is(err, cmd.ErrJoinedNowhere) {
-		t.Fatalf("the walled run: %v\n%s", err, out)
-	}
-	if want := []string{"", walled}; !slices.Equal(seen, want) {
-		t.Errorf("the checks left out %q before the joins, want %q", seen, want)
-	}
-	if id := places.ThisRun(); id != "" {
-		t.Errorf("after the runs, the checks leave out %q", id)
 	}
 }

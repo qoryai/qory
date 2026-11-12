@@ -77,6 +77,7 @@ func TestMain(m *testing.M) {
 		os.Exit(enginePull(args[0], args[1], args[2]))
 	}
 	cmd.ShortenSocketGrace(10 * time.Millisecond)
+	cmd.RunGitSessionsOnHost()
 	os.Exit(m.Run())
 }
 
@@ -152,6 +153,15 @@ func emptyDir(t *testing.T) string {
 // an origin remote, so no command reads the machine's git identity and the title of every
 // command is the same in every run.
 func newCheckout(t *testing.T) string {
+	t.Helper()
+	root := checkoutWithNoCommit(t)
+	// A walled run that may write works in a copy of the commit at HEAD.
+	runGit(t, root, "commit", "--quiet", "--allow-empty", "-m", "first")
+	return root
+}
+
+// checkoutWithNoCommit is [newCheckout] before its first commit.
+func checkoutWithNoCommit(t *testing.T) string {
 	t.Helper()
 	root := emptyDir(t)
 	runGit(t, root, "init", "--quiet", "--initial-branch=main")

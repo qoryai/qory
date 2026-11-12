@@ -86,7 +86,7 @@ func TestFetchesTheRunRepositoryAtItsCommit(t *testing.T) {
 }
 
 // TestFetchesTheHeadWithNoCommit is a fetch with no commit: the working folder is at the
-// default branch's head, as [Run] fetches it.
+// default branch's head, as [RunAt] fetches it with no version.
 func TestFetchesTheHeadWithNoCommit(t *testing.T) {
 	needGit(t)
 	_, head := movedRemote(t, t.TempDir(), "acme/shop")

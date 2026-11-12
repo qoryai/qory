@@ -74,7 +74,7 @@ var branchWait = func(ctx context.Context, d time.Duration) error {
 }
 
 // The time the push step has after a stop. A signal leaves pushAfterSignal: it fits inside
-// the 30 seconds [child.DefaultGrace] gives a pool's run after SIGTERM, with the 10 seconds
+// the 30 seconds that [child.DefaultGrace] sets for a pool's run after SIGTERM, with the 10 seconds
 // of a runtime's default stop and the close. Past a run's time limit no process stops
 // qory run, so the step has pushAfterLimit, and the run can pass its limit by that time.
 const (
@@ -98,8 +98,9 @@ func keepsWork(fromCode *codeRun, readOnly bool, branch *preparation.WorkBranch,
 
 // pushContext is the context of the push step: not ended by ctx, which a stop ended
 // already. It ends at limit, or afterLimit from now when that is later; with a zero limit
-// there is no such end. It ends afterSignal after ctx ends, unless it ends sooner, and at
-// once when again ends. Run passes [pushAfterLimit] and [pushAfterSignal].
+// there is no such end. It ends afterSignal after ctx ends or after this call, whichever is
+// later, unless it ends sooner, and at once when again ends. A signal comes before this call when
+// it stopped the agent, so the agent's stop adds to afterSignal. Run passes [pushAfterLimit] and [pushAfterSignal].
 func pushContext(ctx, again context.Context, limit time.Time, afterLimit, afterSignal time.Duration) (context.Context, func()) {
 	push, cancel := context.WithCancel(context.WithoutCancel(ctx))
 	wait := time.Duration(math.MaxInt64)
@@ -136,9 +137,35 @@ func canPush(fromCode *codeRun, readOnly bool, branch *preparation.WorkBranch) b
 	return fromCode.writes() && !readOnly && branch != nil
 }
 
+// returnContext is the context of the return of a local run's work: a stop has ended ctx, so
+// it is not ended by ctx. It ends at a second signal, again, and [returnAfterSignal] after ctx
+// ends, so a first signal leaves the return that time, and the git session and each check have
+// their limits within it. started is what prints the line of the wait, when the first signal
+// comes; it does not print for a return that ended first.
+func returnContext(ctx, again context.Context, started func(time.Duration)) (context.Context, func()) {
+	back, stop := pushContext(ctx, again, time.Time{}, returnAfterSignal, returnAfterSignal)
+	printed := make(chan struct{})
+	stopLine := context.AfterFunc(ctx, func() {
+		defer close(printed)
+		started(returnAfterSignal)
+	})
+	return back, func() {
+		// A line that started is written before the run's last lines.
+		if !stopLine() {
+			<-printed
+		}
+		stop()
+	}
+}
+
+// returnAfterSignal is how long the return of a local run's work has after a first signal: the
+// removal of the setup container, the git session, and the checks of its bundles. A test sets a
+// shorter one.
+var returnAfterSignal = 30 * time.Minute
+
 // removeThenPush removes the setup container of a run that gets the push step, then runs
 // [pushWork], with ctx as the bound of both. A process in that container can write the
-// working folder, so the check of the step holds only once the container is gone. After a
+// working folder, so the check of the step is valid only once the container is gone. After a
 // failed removal [openedRun.HostProxy] and [openedRun.StartStep] still work, so this
 // check alone stops the push, and the run has no step.
 func removeThenPush(ctx context.Context, run openedRun, stderr io.Writer, branch *preparation.WorkBranch, dir, runID string, runNumber int, out session.Outcome, agentStopped bool, checks *runPushChecks) (noStep bool, err error) {
@@ -343,11 +370,42 @@ type pushEnding struct {
 	// session is the outcome of the session, and limit the run's time limit.
 	session session.Outcome
 	limit   time.Duration
-	// stopped is whether qory run got a signal, again whether it got a second, and cut
-	// whether the step's context ended, each as the step exited. got is the first signal,
-	// and noStep whether the removal of the setup container failed, so no step ran.
+	// stopped is whether qory run got a signal, again whether it got a second, and got the
+	// first signal: as [pushEnding.settle] sets them. cut is whether the step's context ended
+	// as the step exited, or [runCopy.cut] on a run with a copy. noStep is whether the removal
+	// of the setup container failed, so no push step ran.
 	stopped, again, cut, noStep bool
 	got                         string
+	// afterSignal is the time a first signal leaves the step, 0 for [pushTimes].signal.
+	afterSignal time.Duration
+	// lineRead is what the last [pushEnding.cutLine] read, nil when none ran.
+	lineRead *stopRead
+}
+
+// stopRead is one read of what stopped a run: whether qory run got a signal, whether it got a
+// second, and the first signal.
+type stopRead struct {
+	stopped, again bool
+	got            string
+}
+
+// cutLine is [pushEnding.cutBy] for a line, with now as what stopped the run and afterSignal as
+// the time a first signal leaves the step. [pushEnding.settle] uses now for the close, so a
+// signal after this line does not change the close.
+func (e *pushEnding) cutLine(now stopRead, afterSignal time.Duration) string {
+	e.lineRead = &now
+	line := *e
+	line.stopped, line.again, line.got, line.afterSignal = now.stopped, now.again, now.got, afterSignal
+	return line.cutBy()
+}
+
+// settle sets what stopped the run, for the close: what the last [pushEnding.cutLine] read, or
+// now when none ran.
+func (e *pushEnding) settle(now stopRead) {
+	if e.lineRead != nil {
+		now = *e.lineRead
+	}
+	e.stopped, e.again, e.got = now.stopped, now.again, now.got
 }
 
 // outcome is the outcome a run closes with after its push step failed with err. A session
@@ -366,12 +424,22 @@ func (e pushEnding) outcome(err error) session.Outcome {
 	return session.Outcome{State: event.StateFailed, ExitCode: ExitCode(err)}
 }
 
+// copyOutcome is the outcome a run closes with when its copy step did not succeed or did not
+// open, code being [runCopy.stepCode]: as [pushEnding.outcome], with code as the exit code of a
+// run that closes failed.
+func (e pushEnding) copyOutcome(code int) session.Outcome {
+	return e.outcome(&exitError{code: code})
+}
+
 // cutBy is what ended a step whose context ended, as a line has it.
 func (e pushEnding) cutBy() string {
 	switch {
 	case e.again:
 		return textCutSecondSignal
 	case e.stopped:
+		if e.afterSignal > 0 {
+			return fmt.Sprintf(textCutSignal, e.got, e.afterSignal)
+		}
 		return fmt.Sprintf(textCutSignal, e.got, pushTimes.signal)
 	case e.session.Reason == event.ReasonTimeout:
 		return fmt.Sprintf(textCutPushLimit, pushTimes.limit)

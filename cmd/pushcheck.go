@@ -39,6 +39,29 @@ const (
 	textCheckNotFinished = "the check before a push did not finish, and the push was not stored (503 " + runapi.CodePushCheckUnavailable + "): %s"
 )
 
+// The errors of [runPushChecks.load] and [runPushChecks.set] for a run from a run code. The
+// code is used by then, so the run starts again only from the new run code that taking the
+// work item in again makes. That run opens on the engine selected at its start, so switching
+// the engine back does not help this one.
+const (
+	textChecksNoWallFromCode    = "Set wall.adapter to docker, then take the work item in again in Qory Apiary: the push checks of %s run in containers of the docker wall alone" + codeUsed
+	textChecksNoRunAPIFromCode  = "Take the work item in again in Qory Apiary, through a gateway that sends the run API address: the push checks read the artifacts through the run API, which failed: %s" + codeUsed
+	textChecksBadRunAPIFromCode = "Update the run's gateway, then take the work item in again in Qory Apiary: the run API address that the gateway sent is not one the push checks can use: %s" + codeUsed
+	textChecksEngineFromCode    = "Take the work item in again in Qory Apiary, and do not switch the engine while that run starts: the push checks would run on the engine %s, and the run's containers are on the engine %s" + codeUsed
+	textChecksNoFolderFromCode  = "Check %s, then take the work item in again in Qory Apiary: making the folder of the push checks' files failed: %s" + codeUsed
+	textChecksNotSetFromCode    = "Take the work item in again in Qory Apiary: turning on the push checks for the POSTs from behind the wall failed, so the run stopped before the setup: %s" + codeUsed
+	textChecksUnreadFromCode    = "Take the work item in again in Qory Apiary, so that the new run composes the harness again: the push checks in %s could not be read: %s" + codeUsed
+)
+
+// checksStop is the error of a line that stops a run with push checks, with args in it:
+// text, or textFromCode for a run from a run code, fromCode.
+func checksStop(fromCode bool, text, textFromCode string, args ...any) error {
+	if fromCode {
+		text = textFromCode
+	}
+	return fmt.Errorf(text, args...)
+}
+
 // The folder in the run directory that holds the temporary folders of the run's push
 // checks, and the label, NAME=value, that the wall removes the run's containers by,
 // followed by the run's id, as Forager's wall has it.
@@ -62,6 +85,9 @@ type runPushChecks struct {
 	checker *pushcheck.Checker
 	// report writes one status line of qory run, masked; nil writes none.
 	report func(string)
+	// fromCode is whether the run comes from a run code: its load and set errors are the
+	// lines of [checksStop] for such a run.
+	fromCode bool
 }
 
 // current is the checker, nil before the load or for a home with no push check.
@@ -79,7 +105,7 @@ func (p *runPushChecks) set(run openedRun) error {
 		return nil
 	}
 	if err := run.SetRunAPICheck(p.runAPICheck); err != nil {
-		return fmt.Errorf(textChecksNotSet, strings.TrimSuffix(shownError(err), "."))
+		return checksStop(p.fromCode, textChecksNotSet, textChecksNotSetFromCode, strings.TrimSuffix(shownError(err), "."))
 	}
 	return nil
 }
@@ -117,7 +143,7 @@ func (p *runPushChecks) check(ctx context.Context, artifactType string, files []
 // removes. A home with no push check, and a run with no control plane, controlPlane
 // false, load nothing. An error starts with its fix.
 func (p *runPushChecks) load(ctx context.Context, run openedRun, home, runID string, spec *runSpec, controlPlane bool) (done func(), err error) {
-	checker, err := pushChecker(ctx, run, home, runID, spec, controlPlane)
+	checker, err := pushChecker(ctx, run, home, runID, spec, controlPlane, p.fromCode)
 	if err != nil || checker == nil {
 		return func() {}, err
 	}
@@ -128,25 +154,30 @@ func (p *runPushChecks) load(ctx context.Context, run openedRun, home, runID str
 }
 
 // pushChecker is the checker of [runPushChecks.load], nil for a home with no push check
-// and for a run with no control plane, which has no run API and takes no push.
-func pushChecker(ctx context.Context, run openedRun, home, runID string, spec *runSpec, controlPlane bool) (*pushcheck.Checker, error) {
+// and for a run with no control plane, which has no run API and takes no push. fromCode
+// is a run from a run code, see [checksStop].
+func pushChecker(ctx context.Context, run openedRun, home, runID string, spec *runSpec, controlPlane, fromCode bool) (*pushcheck.Checker, error) {
 	checks, err := loadPushChecks(home)
+	var unread *pushcheck.UnreadError
+	if fromCode && errors.As(err, &unread) {
+		return nil, fmt.Errorf(textChecksUnreadFromCode, unread.File, unread.Cause)
+	}
 	if err != nil || len(checks) == 0 || !controlPlane {
 		return nil, err
 	}
 	d, ok := spec.Wall.(*wall.Docker)
 	if !ok {
-		return nil, fmt.Errorf(textChecksNoWall, exports.Value(home, false))
+		return nil, checksStop(fromCode, textChecksNoWall, textChecksNoWallFromCode, exports.Value(home, false))
 	}
 	httpClient, base, err := run.RunAPI()
 	if err != nil {
-		return nil, fmt.Errorf(textChecksNoRunAPI, strings.TrimSuffix(shownError(err), "."))
+		return nil, checksStop(fromCode, textChecksNoRunAPI, textChecksNoRunAPIFromCode, strings.TrimSuffix(shownError(err), "."))
 	}
 	client, err := runapi.New(base, httpClient)
 	if err != nil {
-		return nil, fmt.Errorf(textChecksBadRunAPI, strings.TrimSuffix(shownError(err), "."))
+		return nil, checksStop(fromCode, textChecksBadRunAPI, textChecksBadRunAPIFromCode, strings.TrimSuffix(shownError(err), "."))
 	}
-	engine, err := checkEngine(ctx, d)
+	engine, err := checkEngine(ctx, d, fromCode)
 	if err != nil {
 		return nil, err
 	}
@@ -170,12 +201,15 @@ func pushChecker(ctx context.Context, run openedRun, home, runID string, spec *r
 	if uid, _, _ := strings.Cut(user, ":"); uid != strconv.Itoa(os.Getuid()) {
 		mode = 0o711
 	}
+	noFolder := func(err error) error {
+		return checksStop(fromCode, textChecksNoFolder, textChecksNoFolderFromCode, exports.Value(checker.Dir, false), strings.TrimSuffix(shownError(exports.HideError(err)), "."))
+	}
 	if err := os.Mkdir(checker.Dir, 0o700); err != nil {
-		return nil, fmt.Errorf(textChecksNoFolder, exports.Value(checker.Dir, false), strings.TrimSuffix(shownError(exports.HideError(err)), "."))
+		return nil, noFolder(err)
 	}
 	if err := os.Chmod(checker.Dir, mode); err != nil {
 		os.RemoveAll(checker.Dir)
-		return nil, fmt.Errorf(textChecksNoFolder, exports.Value(checker.Dir, false), strings.TrimSuffix(shownError(exports.HideError(err)), "."))
+		return nil, noFolder(err)
 	}
 	return checker, nil
 }
@@ -185,8 +219,9 @@ func pushChecker(ctx context.Context, run openedRun, home, runID string, spec *r
 // [wall.Docker.Engine] reads it. A new selection that reaches an engine with another id
 // than the recorded one is an error, which starts with its fix: the checks would run
 // on another engine than the run's containers. With no recorded selection, or an engine
-// that gives no id, it is d's command with this process's environment.
-func checkEngine(ctx context.Context, d *wall.Docker) (pushcheck.Engine, error) {
+// that gives no id, it is d's command with this process's environment. fromCode is a run
+// from a run code, see [checksStop].
+func checkEngine(ctx context.Context, d *wall.Docker, fromCode bool) (pushcheck.Engine, error) {
 	ctx, cancel := context.WithTimeout(ctx, engineSelectWait)
 	defer cancel()
 	e := pushcheck.Engine{Command: d.Command}
@@ -196,7 +231,7 @@ func checkEngine(ctx context.Context, d *wall.Docker) (pushcheck.Engine, error) 
 	}
 	selected := (&wall.Docker{Command: d.Command}).Engine(ctx)
 	if selected.ID != id {
-		return pushcheck.Engine{}, fmt.Errorf(textChecksEngine, engineShown(selected.ID), engineShown(id))
+		return pushcheck.Engine{}, checksStop(fromCode, textChecksEngine, textChecksEngineFromCode, engineShown(selected.ID), engineShown(id))
 	}
 	return pushcheck.Engine{Command: selected.Command, Env: append([]string{}, selected.Env...)}, nil
 }

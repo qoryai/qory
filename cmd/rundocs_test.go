@@ -180,6 +180,10 @@ type codeRun struct {
 	image session.Image
 }
 
+// codeSetup is the Setup of each run [runFromCodeGiven] opens; nil is one that succeeds. A
+// test sets it.
+var codeSetup func(session.SetupSpec) error
+
 // codeFetchImage is the FetchImage of each run [runFromCodeGiven] opens; nil is one
 // that succeeds. A test sets it.
 var codeFetchImage func(context.Context) error
@@ -276,6 +280,7 @@ func runFromCodeGiven(t *testing.T, before func(code string) []string, args []st
 		StackProxy: h.server.Proxy.URL, StackCABundle: h.server.Proxy.CABundle,
 		OnOpen:      func(s session.OpenSpec) { r.open = s },
 		FetchImage:  codeFetchImage,
+		Setup:       codeSetup,
 		RemoveSetup: codeRemoveSetup,
 		Real:        codeReal,
 		AtGateway:   codeAtGateway,

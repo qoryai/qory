@@ -21,8 +21,8 @@
 // --additional-mcp-config takes a file of servers for one session. The runtime's
 // directory contains workspace/.github with the skills linked and the agents written, and
 // mcp.json with the servers when the compose contains one, so the MCP kind has a place
-// there and is not skipped. The hooks and the instructions are read from the checkout
-// alone. [Template] passes both.
+// there and is not skipped. The hooks, the instructions and the files entries are read
+// from the checkout alone. [Template] passes both.
 package copilot
 
 import (
@@ -74,6 +74,11 @@ func (copilot) Links(res *compose.Result) []render.Link {
 		}
 	}
 	return links
+}
+
+// CheckoutParts are what the package comment lists as read from the checkout alone.
+func (copilot) CheckoutParts() []string {
+	return []string{"hooks", render.Instructions, render.FilesKind}
 }
 
 // Skips are commands, output styles and MCP servers: Copilot CLI reads no project prompt

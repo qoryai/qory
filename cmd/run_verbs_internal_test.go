@@ -20,7 +20,6 @@ import (
 
 	"github.com/qoryai/qory/internal/config"
 	"github.com/qoryai/qory/internal/foragerdir"
-	walled "github.com/qoryai/qory/internal/places"
 	"github.com/qoryai/qory/internal/render"
 )
 
@@ -320,16 +319,13 @@ func TestMountRefusedNamesTheLinkOnTheWay(t *testing.T) {
 			t.Errorf("%s: %v, want %q", c.name, err, c.want)
 		}
 	}
-	// A link, a mount and a place a walled run has used whose names hold a rune Go does
-	// not print as it is are quoted.
+	// A link and a mount whose names hold a rune Go does not print as it is are quoted.
 	odd := filepath.Join(root, "ven\u202edor")
 	oddLink := filepath.Join(root, "third\u200b_party")
-	oddUsed := filepath.Join(t.TempDir(), "used\x1b[2J")
 	p := passed{root: root, spec: &runSpec{SessionSpec: session.SessionSpec{Dir: root, Mounts: []wall.Mount{{Path: root}, {Path: odd}}}}}
 	for _, c := range []struct{ name, place, link, outer, want string }{
 		{"a mount and a link", odd, oddLink, root, "the mount " + strconv.Quote(odd) + " is reached through the link " + strconv.Quote(oddLink) + " inside the workspace " + root + tail},
 		{"the mount is the link", odd, odd, root, "the mount " + strconv.Quote(odd) + " is a link inside the workspace " + root + tail},
-		{"a place a walled run has used", odd, oddLink, oddUsed, "the mount " + strconv.Quote(odd) + " is reached through the link " + strconv.Quote(oddLink) + " inside " + strconv.Quote(oddUsed) + ", a place a walled run has used" + tail},
 	} {
 		err := mountRefused(&session.Refusal{Code: "mount_through_link", Names: []string{c.place, c.link, c.outer}}, p)
 		if err == nil || err.Error() != c.want {
@@ -425,8 +421,9 @@ func TestRunsDirIsTheCheckoutsFolder(t *testing.T) {
 		}
 	}
 	t.Setenv("XDG_STATE_HOME", "relative/state")
-	if got, err := stateDir(); got != "" || !errors.Is(err, walled.ErrRelativeStateHome) {
-		t.Errorf("XDG_STATE_HOME=relative/state: %q, %v", got, err)
+	const relative = "set XDG_STATE_HOME to an absolute path, or unset it: qory keeps its state only in an absolute path, so that the state does not move with the working folder"
+	if got, err := stateDir(); got != "" || !errors.Is(err, errRelativeStateHome) || err.Error() != relative {
+		t.Errorf("XDG_STATE_HOME=relative/state: %q, %v; want %q", got, err, relative)
 	}
 	t.Setenv("XDG_STATE_HOME", "")
 	real, err := filepath.EvalSymlinks(t.TempDir())
@@ -736,7 +733,6 @@ func TestUserHomeNeedsAConfigurationDirectory(t *testing.T) {
 	}
 	t.Setenv("XDG_CONFIG_HOME", "")
 	t.Setenv("HOME", "")
-	// The records of the places need a state directory, which XDG_STATE_HOME gives.
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	if dir, _ := config.UserDir(); dir != "" {
 		t.Skip("this system has a home directory without HOME")
@@ -745,11 +741,11 @@ func TestUserHomeNeedsAConfigurationDirectory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = userHome(places{root: root}, conf, false)
+	err = userHome(places{root: root}, conf)
 	if want := "no configuration directory: set HOME or XDG_CONFIG_HOME"; err == nil || err.Error() != want || ExitCode(err) != ExitCode(errors.New("")) {
 		t.Errorf("no configuration directory: %v (exit %d), want %q", err, ExitCode(err), want)
 	}
-	if err := userHome(places{root: root}, config.Defaults(), false); err != nil {
+	if err := userHome(places{root: root}, config.Defaults()); err != nil {
 		t.Errorf("a home no file sets: %v", err)
 	}
 }

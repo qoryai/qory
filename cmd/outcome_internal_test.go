@@ -470,6 +470,57 @@ func TestPushEndingOutcome(t *testing.T) {
 	}
 }
 
+// TestCopyEndingOutcome is the close of a run for each end of its session and its copy step. A
+// run in a copy has no time limit past its session, and it exits 1 when its work does not come
+// back. A run the gateway closed takes no such close: see TestARunsEndWithAFailedCopyStep.
+func TestCopyEndingOutcome(t *testing.T) {
+	succeeded := session.Outcome{State: event.StateSucceeded}
+	failed := session.Outcome{State: event.StateFailed, ExitCode: 3}
+	timedOut := session.Outcome{State: event.StateCancelled, Reason: event.ReasonTimeout, ExitCode: exitTimeout}
+	cancelled := session.Outcome{State: event.StateCancelled, Reason: event.ReasonInterrupted, ExitCode: 130}
+	interrupted := session.Outcome{State: event.StateCancelled, Reason: event.ReasonInterrupted, ExitCode: -1}
+	for _, c := range []struct {
+		name   string
+		ending pushEnding
+		code   int
+		want   session.Outcome
+	}{
+		{"the step exits 128", pushEnding{session: succeeded}, 128, session.Outcome{State: event.StateFailed, ExitCode: 128}},
+		{"the step has no exit code", pushEnding{session: succeeded}, -1, session.Outcome{State: event.StateFailed, ExitCode: -1}},
+		{"a signal cuts the step", pushEnding{session: succeeded, cut: true, stopped: true}, -1, interrupted},
+		{"the agent failed", pushEnding{session: failed}, 128, failed},
+		{"the agent timed out", pushEnding{session: timedOut, cut: true, stopped: true}, -1, timedOut},
+		{"the agent was cancelled", pushEnding{session: cancelled, cut: true, stopped: true}, -1, cancelled},
+	} {
+		if got := c.ending.copyOutcome(c.code); got != c.want {
+			t.Errorf("%s: %+v, want %+v", c.name, got, c.want)
+		}
+	}
+}
+
+// TestACutLineAndTheCloseReadOneStop is a time limit that cuts a copy step and a signal that comes
+// after the step's line: the close has the reason of the line, and a run with no line reads the
+// stop as it closes.
+func TestACutLineAndTheCloseReadOneStop(t *testing.T) {
+	succeeded := session.Outcome{State: event.StateSucceeded}
+	signal := stopRead{stopped: true, got: "SIGTERM"}
+	e := pushEnding{session: succeeded, limit: time.Hour, cut: true}
+	line := e.cutLine(stopRead{}, 0)
+	e.settle(signal)
+	if want := "the run reached its time limit of 1h0m0s"; line != want || e.cutBy() != want {
+		t.Errorf("the line is %q and then %q, want %q", line, e.cutBy(), want)
+	}
+	if got := e.copyOutcome(-1); got.Reason != event.ReasonTimeout || got.ExitCode != exitTimeout {
+		t.Errorf("the close is %+v, want the time limit", got)
+	}
+
+	e = pushEnding{session: succeeded, limit: time.Hour, cut: true}
+	e.settle(signal)
+	if got := e.copyOutcome(-1); got.Reason != event.ReasonInterrupted || got.ExitCode != -1 {
+		t.Errorf("with no line the close is %+v, want the signal", got)
+	}
+}
+
 // TestPushEndingLines is the line of a cut step, with and without a push that landed, and
 // the exit status of each end.
 func TestPushEndingLines(t *testing.T) {
@@ -512,6 +563,29 @@ func TestFailedEnd(t *testing.T) {
 		if got := failedEnd(out); got != want {
 			t.Errorf("%+v: %q, want %q", out, got, want)
 		}
+	}
+}
+
+// TestThePushHasTwoMinutesPastTheLimit is the time past a run's time limit that the push step
+// has, and a first signal during that time: it leaves at most 15 seconds.
+func TestThePushHasTwoMinutesPastTheLimit(t *testing.T) {
+	if pushTimes.limit != 2*time.Minute {
+		t.Errorf("the time past the limit is %s, want 2m0s", pushTimes.limit)
+	}
+	signalled, signal := context.WithCancel(context.Background())
+	defer signal()
+	push, done := pushContext(signalled, context.Background(), time.Now().Add(-time.Hour), pushTimes.limit, pushTimes.signal)
+	defer done()
+	if endsWithin(push, time.Second) {
+		t.Fatal("the step past the limit ended at once")
+	}
+	started := time.Now()
+	signal()
+	if !endsWithin(push, 16*time.Second) {
+		t.Fatal("the step did not end within 15 seconds of the signal")
+	}
+	if took := time.Since(started); took < 14*time.Second {
+		t.Errorf("the step ended %s after the signal, want 15s", took)
 	}
 }
 

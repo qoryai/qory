@@ -15,22 +15,20 @@ import (
 
 	"github.com/qoryai/forager/accesskey"
 
-	"github.com/qoryai/qory/internal/exports"
 	"github.com/qoryai/qory/internal/hostgit"
 	"github.com/qoryai/qory/internal/integration"
-	"github.com/qoryai/qory/internal/places"
 	"github.com/qoryai/qory/internal/proxygit"
 	"github.com/qoryai/qory/internal/render"
 )
 
 // safeRepository stops on a working folder whose repository git on this machine must not
 // fetch into, before any git reaches a remote from there through the run's host proxy: the
-// fetch runs on this machine, and a walled run of an earlier run could have written the
-// working folder's .git. A key of the repository's configuration can make git run a program, as
-// a filter does on checkout, or take the fetch past the gateway or past its check of
-// the host's certificate, as remote.<name>.proxy and http.sslVerify do. A link under
-// .git can send git's reads and writes outside the working folder, and alternates make
-// git read objects from a store outside it.
+// fetch runs on this machine, and an earlier run could have written the working folder's
+// .git. A key of the repository's configuration can make git run a program, as a filter does
+// on checkout, or take the fetch past the gateway or past its check of the host's
+// certificate, as remote.<name>.proxy and http.sslVerify do. A link under .git can send git's
+// reads and writes outside the working folder, and alternates make git read objects from a
+// store outside it.
 //
 // It stops on the folder, in this order, when:
 //   - its .git has a link anywhere under it ([textGitLink]); a regular file outside objects
@@ -39,19 +37,9 @@ import (
 //     ([textAlternates]); a config or config.worktree that is not a regular file
 //     ([textConfigNotFile]); or no HEAD, objects or refs ([textNoGitPart]);
 //   - its .qory has a regular file with another name ([textHardLink]);
-//   - hostgit's settings check stops on it ([textPlaceRefused]): the folder is in a place
-//     a walled run used, and its configuration has a key qory and git do not write, or
-//     changed since the place was recorded, or a walled run uses it now;
 //   - its configuration has a remote's key ([textHasRemote]), such as
-//     remote.origin.proxy, or another key git init does not write ([textConfigKey]), in
-//     any folder, recorded or not.
-//
-// The files are checked once before hostgit's check, so its line is the one for what
-// the folder has, and again after it, under the hold: [hostgit.Hold] takes the lock of
-// the folder's place, so a walled run that starts there waits for the release.
-// safeRepository returns that hold, which its caller releases once the fetch and the
-// checkout end; on a stop, it releases the hold first.
-func safeRepository(ctx context.Context, dir string) (*places.Hold, error) {
+//     remote.origin.proxy, or another key git init does not write ([textConfigKey]).
+func safeRepository(ctx context.Context, dir string) error {
 	return checkedRepository(ctx, dir, false)
 }
 
@@ -60,19 +48,16 @@ func safeRepository(ctx context.Context, dir string) (*places.Hold, error) {
 // the two keys of a commit's identity, see [hostgit.Identity], since an agent sets those to
 // commit and the commit of the push step sets all four of git's identity variables. git
 // reaches the repository's remote by the URL qory builds, so this check takes any value of
-// remote.origin.url, and hostgit's settings check of a walled run's place takes only the
-// URL it recorded. Every other stop of safeRepository applies, and the error is an
+// remote.origin.url. Every other stop of safeRepository applies, and the error is an
 // [*unsafeError].
-func safeAfterRun(ctx context.Context, dir string) (*places.Hold, error) {
+func safeAfterRun(ctx context.Context, dir string) error {
 	return checkedRepository(ctx, dir, true)
 }
 
 // safeFurther is [safeAfterRun] for a further repository at dir in the working folder
-// root, without hostgit's settings check: a walled run's record has the fingerprint of
-// the working folder's repository alone, so that check stops on any remote URL here. git
-// reaches the remote by the URL qory builds, the keys and the files are checked, and every
-// git qory runs here has replace refs and the commit-graph off. The caller holds root.
-// The check also stops on a link anywhere on the way from root to dir, which would take
+// root. git reaches the remote by the URL qory builds, the keys and the files are
+// checked, and every git qory runs here has replace refs and the commit-graph off. The
+// check also stops on a link anywhere on the way from root to dir, which would take
 // every read and write outside the working folder. afterRun is for the check after the
 // agent exited, which takes the keys of a commit's identity as [safeAfterRun] does.
 func safeFurther(ctx context.Context, root, dir string, afterRun bool) error {
@@ -179,7 +164,7 @@ func noLinkTo(root, dir string) error {
 		case info.Mode()&fs.ModeSymlink != 0:
 			shown, _ := filepath.Rel(root, at)
 			shown = integration.Printable(filepath.ToSlash(shown))
-			return &unsafeError{fmt.Sprintf(textGitLink, shown), fmt.Sprintf(causeGitLink, shown)}
+			return &unsafeError{lineOf(textGitLink, shown), fmt.Sprintf(causeGitLink, shown)}
 		}
 	}
 	return nil
@@ -192,7 +177,7 @@ func gitParts(gitDir string) error {
 		_, err := os.Lstat(filepath.Join(gitDir, name))
 		switch {
 		case errors.Is(err, fs.ErrNotExist):
-			return &unsafeError{fmt.Sprintf(textNoGitPart, name), fmt.Sprintf(causeNoGitPart, name)}
+			return &unsafeError{lineOf(textNoGitPart, name), fmt.Sprintf(causeNoGitPart, name)}
 		case err != nil:
 			return local(err)
 		}
@@ -202,47 +187,29 @@ func gitParts(gitDir string) error {
 
 // unsafeError is a stop of [safeRepository]. Its text is the line for a run that has not
 // started, and cause is what the folder has, for a line after the agent exited.
-type unsafeError struct{ line, cause string }
+type unsafeError struct {
+	line  *runLine
+	cause string
+}
 
-func (e *unsafeError) Error() string { return e.line }
+func (e *unsafeError) Error() string { return e.line.Error() }
+
+// Unwrap is the line, so [Target.stop] finds it.
+func (e *unsafeError) Unwrap() error { return e.line }
 
 // checkedRepository is [safeRepository], and [safeAfterRun] with fetched set.
-func checkedRepository(ctx context.Context, dir string, fetched bool) (*places.Hold, error) {
+func checkedRepository(ctx context.Context, dir string, fetched bool) error {
 	gitDir := filepath.Join(dir, ".git")
 	if _, err := gitFiles(gitDir); err != nil {
-		return nil, err
+		return err
 	}
 	if err := gitParts(gitDir); err != nil {
-		return nil, err
+		return err
 	}
 	if err := qoryFiles(dir); err != nil {
-		return nil, err
+		return err
 	}
-	holdCtx := ctx
-	if fetched {
-		holdCtx = hostgit.WithIdentity(ctx)
-	}
-	hold, err := hostgit.Hold(holdCtx, dir)
-	if err != nil {
-		if hostgit.Refused(err) {
-			line := integration.Printable(exports.HideError(err).Error())
-			cause := line
-			if refused := (*hostgit.RefusedError)(nil); errors.As(err, &refused) {
-				cause = integration.Printable(exports.HideError(errors.New(refused.Cause())).Error())
-			}
-			return nil, &unsafeError{fmt.Sprintf(textPlaceRefused, line), cause}
-		}
-		return nil, gitFailed(err)
-	}
-	if err := keysOf(ctx, gitDir, fetched, fetched); err != nil {
-		hold.Release()
-		return nil, err
-	}
-	if err := qoryFiles(dir); err != nil {
-		hold.Release()
-		return nil, err
-	}
-	return hold, nil
+	return keysOf(ctx, gitDir, fetched, fetched)
 }
 
 // keysOf checks the files of the git directory gitDir, as [gitFiles] does, and the keys
@@ -275,7 +242,7 @@ func keysIn(ctx context.Context, dir string, files []string, fetched, afterRun b
 				// A key's subsection can be a URL with a password, as in
 				// http.<url>.sslVerify: it is shown without its userinfo, as hostgit shows it.
 				shown := hostgit.ShownKey(accesskey.ShownName(key, false))
-				return &unsafeError{fmt.Sprintf(textConfigKey, shown, ".git/"+name), fmt.Sprintf(causeConfigKey, shown, ".git/"+name)}
+				return &unsafeError{lineOf(textConfigKey, shown, ".git/"+name), fmt.Sprintf(causeConfigKey, shown, ".git/"+name)}
 			}
 		}
 	}
@@ -297,7 +264,7 @@ func hardLinked(rel string, d fs.DirEntry) error {
 	}
 	if linkCount(info) > 1 {
 		shown := integration.Printable(filepath.ToSlash(rel))
-		return &unsafeError{fmt.Sprintf(textHardLink, shown), fmt.Sprintf(causeHardLink, shown)}
+		return &unsafeError{lineOf(textHardLink, shown), fmt.Sprintf(causeHardLink, shown)}
 	}
 	return nil
 }
@@ -339,7 +306,7 @@ func gitFiles(gitDir string) ([]string, error) {
 		rel, _ := filepath.Rel(filepath.Dir(gitDir), path)
 		if d.Type()&fs.ModeSymlink != 0 {
 			shown := integration.Printable(filepath.ToSlash(rel))
-			link = &unsafeError{fmt.Sprintf(textGitLink, shown), fmt.Sprintf(causeGitLink, shown)}
+			link = &unsafeError{lineOf(textGitLink, shown), fmt.Sprintf(causeGitLink, shown)}
 			return filepath.SkipAll
 		}
 		// Git writes each object to a temporary file and renames it, so a hard link under
@@ -362,11 +329,11 @@ func gitFiles(gitDir string) ([]string, error) {
 		_, err := os.Lstat(filepath.Join(gitDir, filepath.FromSlash(name)))
 		switch {
 		case err == nil && name == "commondir":
-			return nil, &unsafeError{textCommonDir, causeCommonDir}
+			return nil, &unsafeError{lineOf(textCommonDir), causeCommonDir}
 		case err == nil && name == "info/grafts":
-			return nil, &unsafeError{textGrafts, causeGrafts}
+			return nil, &unsafeError{lineOf(textGrafts), causeGrafts}
 		case err == nil:
-			return nil, &unsafeError{fmt.Sprintf(textAlternates, ".git/"+name), fmt.Sprintf(causeAlternates, ".git/"+name)}
+			return nil, &unsafeError{lineOf(textAlternates, ".git/"+name), fmt.Sprintf(causeAlternates, ".git/"+name)}
 		case !errors.Is(err, fs.ErrNotExist):
 			return nil, local(err)
 		}
@@ -380,7 +347,7 @@ func gitFiles(gitDir string) ([]string, error) {
 		case err != nil:
 			return nil, local(err)
 		case !info.Mode().IsRegular():
-			return nil, &unsafeError{fmt.Sprintf(textConfigNotFile, ".git/"+name), fmt.Sprintf(causeConfigNotFile, ".git/"+name)}
+			return nil, &unsafeError{lineOf(textConfigNotFile, ".git/"+name), fmt.Sprintf(causeConfigNotFile, ".git/"+name)}
 		}
 		files = append(files, name)
 	}

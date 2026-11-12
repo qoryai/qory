@@ -1,29 +1,26 @@
 package worktree_test
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"testing"
 
 	"github.com/qoryai/qory/internal/hostgit"
-	"github.com/qoryai/qory/internal/places"
 	"github.com/qoryai/qory/internal/worktree"
 )
 
-// TestMainReturnsARecordThatCannotBeRead puts a file in the directory of the records of
-// the places that is no record: the settings check cannot read the records, so no git
-// runs, and Main returns that error rather than saying the folder is outside a git
-// working tree.
-func TestMainReturnsARecordThatCannotBeRead(t *testing.T) {
+// TestMainReturnsAGitTooOld puts first on the PATH a git that prints version 2.34.1:
+// no git runs, and Main returns the line for it rather than saying the folder is outside
+// a git working tree.
+func TestMainReturnsAGitTooOld(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
 	t.Setenv("XDG_STATE_HOME", filepath.Join(home, ".local", "state"))
 	t.Setenv("GIT_CONFIG_GLOBAL", filepath.Join(home, ".gitconfig"))
 	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
-	hostgit.Forget()
-	t.Cleanup(hostgit.Forget)
 	root, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -32,25 +29,17 @@ func TestMainReturnsARecordThatCannotBeRead(t *testing.T) {
 		t.Fatalf("%v\n%s", err, out)
 	}
 	if got, err := worktree.Main(root); err != nil || got != root {
-		t.Fatalf("with no record: %q, %v", got, err)
+		t.Fatalf("with git: %q, %v", got, err)
 	}
-	dir, err := places.Dir()
-	if err != nil {
+	bin := t.TempDir()
+	script := "#!/bin/sh\nif [ \"$1\" = version ]; then echo 'git version 2.34.1'; exit 0; fi\nexit 1\n"
+	if err := os.WriteFile(filepath.Join(bin, "git"), []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "broken.json"), []byte("not a record"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	hostgit.Forget()
-	_, want := places.Load()
-	if want == nil {
-		t.Fatal("the broken record reads")
-	}
-	if _, err := worktree.Main(root); err == nil || err.Error() != want.Error() {
-		t.Errorf("got %v, want %v", err, want)
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	var old *hostgit.GitVersionError
+	if _, err := worktree.Main(root); !errors.As(err, &old) {
+		t.Errorf("got %v, want the line for git 2.34.1", err)
 	}
 }
 
@@ -67,8 +56,6 @@ func TestMainAndListReadAPathWithALineEndWhole(t *testing.T) {
 	t.Setenv("GIT_CEILING_DIRECTORIES", filepath.Dir(home))
 	t.Setenv("GIT_CONFIG_GLOBAL", filepath.Join(home, ".gitconfig"))
 	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
-	hostgit.Forget()
-	t.Cleanup(hostgit.Forget)
 	base, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
 		t.Fatal(err)

@@ -35,6 +35,7 @@ const (
 	textFetchStepBranch  = "%s at %s %s"
 	textComposeStep      = "compose the harness for %s"
 	textComposeStepAny   = "compose the harness"
+	textCopyStep         = "copy work out"
 )
 
 // fetchStepName is the name of the fetch step of a run whose server's values getenv

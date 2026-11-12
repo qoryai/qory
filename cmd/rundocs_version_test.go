@@ -43,7 +43,9 @@ func versionRepository(t *testing.T) (h *hostFetch, first, head string, files ma
 // runAtVersion runs qory run from a run code whose documents set the workflow hello, the
 // target acme/site on git.test and target_version version, its run opened nowhere on
 // git.test with the repositories given, through h's host proxy, and returns the output,
-// the error, what the run came to and the arguments of the session that joined.
+// the error, what the run came to and the arguments of the session that joined. An empty
+// version leaves target_version out and adds a harness document, as the schema of the
+// documents requires.
 func runAtVersion(t *testing.T, h *hostFetch, repositories, version string) (string, error, keyRun, []string) {
 	t.Helper()
 	return runAtVersionOn(t, h, proxygittest.Host, repositories, version)
@@ -57,6 +59,10 @@ func runAtVersionOn(t *testing.T, h *hostFetch, system, repositories, version st
 		target := map[string]any{"system": proxygittest.Host, "path": "acme/site"}
 		d["target"], d["inputs"].(map[string]any)["target"] = target, target
 		d["target_version"] = version
+		if version == "" {
+			delete(d, "target_version")
+			d["harness"] = map[string]any{"harness": map[string]any{"extends": map[string]any{"git": "https://" + proxygittest.Host + "/acme/harness.git", "ref": "main", "path": "stack"}}}
+		}
 		d["harness_hidden"] = false
 		d["run_settings"] = map[string]any{"runtime": "claude"}
 	})
@@ -172,6 +178,34 @@ func TestARunCodeAtACommitTheServerLacksStops(t *testing.T) {
 	wants(t, out, "\nqory run: take the work item in again in Qory Apiary: the commit 0123456789ab that the run's documents set is not on acme/site on git.test. The fetch through the run's gateway failed: ", "; the code is used\n")
 	lacks(t, out, "qory run: composed ")
 	h.noPassword(t, out)
+}
+
+// TestARunCodeWhoseFetchFailsSendsThePersonToANewTakeIn is a run from a run code whose
+// further repository is not on the server, at a commit of the target and with no
+// target_version: the run stops before the compose, exit 1, and the fix of the whole line is
+// a new take-in, since the code is used.
+func TestARunCodeWhoseFetchFailsSendsThePersonToANewTakeIn(t *testing.T) {
+	const head = "\nqory run: add a credential for git.test that reads acme/missing to the run configuration, then take the work item in again in Qory Apiary: the fetch of acme/missing through the run's gateway failed: "
+	for name, version := range map[string]func(first string) string{
+		"at a commit": func(first string) string { return first },
+		"no version":  func(string) string { return "" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			h, first, _, _ := versionRepository(t)
+			out, err, n, _ := runAtVersion(t, h, "acme/site,acme/missing", version(first))
+			if cmd.ExitCode(err) != 1 || !n.stoppedBeforeJoin() {
+				t.Fatalf("%v (exit %d), want exit 1 before the join\n%s", err, cmd.ExitCode(err), out)
+			}
+			wants(t, out, head)
+			line := out[strings.Index(out, head)+1:]
+			line = line[:strings.Index(line, "\n")]
+			if !strings.HasSuffix(line, "; the code is used") || strings.Contains(line, "run again") {
+				t.Errorf("the line is %q", line)
+			}
+			lacks(t, out, "qory run: composed ")
+			h.noPassword(t, out)
+		})
+	}
 }
 
 // TestARunCodeAtATargetVersionWithNoRepositoryRunsOn is a run from a run code whose

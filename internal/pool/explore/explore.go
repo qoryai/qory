@@ -69,25 +69,14 @@ func RecordedRuns(state string) []string {
 	return ids
 }
 
-// Remove removes the run directory of the run runID, and drops its place record.
+// Remove removes the run directory of the run runID.
 func Remove(state, runID string) error {
 	if !runIDShape.MatchString(runID) {
 		return errors.New("the run id is not a UUID in the canonical lower-case form")
 	}
 	dir := Dir(state, runID)
-	if err := os.RemoveAll(dir); err != nil {
-		return err
-	}
-	dropPlace(dir)
-	return nil
+	return os.RemoveAll(dir)
 }
-
-// dropPlace drops the place record of the run directory dir, once it is removed. It
-// is a variable so a test sees it called.
-//
-// TODO: drop it through internal/places when the host-git work carries that package
-// onto integrate. Until then there is no place record, and nothing to drop.
-var dropPlace = func(dir string) { _ = dir }
 
 // checkoutFolder is the name of the folder of a checkout's records, for the checkout
 // at real, an absolute path with links resolved: its name, "-", and the first 12 hex

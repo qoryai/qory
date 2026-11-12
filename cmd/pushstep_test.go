@@ -220,12 +220,15 @@ type pushRepo struct {
 	flags        []string
 	waits        []time.Duration
 	setup        func(dir string)
+	onSetup      func(session.SetupSpec)
 	mask         string
 	// pushStarted, when set, runs as the push step starts. removeSetup, when set, is the
 	// run's RemoveSetup, and proxyErr the error of the run's HostProxy.
 	pushStarted func()
 	removeSetup func(context.Context) error
 	proxyErr    func() error
+	// mountsOf, when set, gets the spec of the agent's session.
+	mountsOf func(session.SessionSpec)
 	// onOpen, when set, gets the spec of each open. onSetCheck, when set, gets the check
 	// of each SetRunAPICheck, and its error is the call's.
 	onOpen     func(session.OpenSpec)
@@ -308,8 +311,11 @@ func (p *pushRepo) run(t *testing.T, agent func(dir string), result func() (*ses
 			if spec.OnVariables != nil {
 				spec.OnVariables(session.Applied{})
 			}
+			if p.mountsOf != nil {
+				p.mountsOf(spec)
+			}
 			if agent != nil {
-				agent(p.h.dir)
+				agent(spec.Dir)
 			}
 			return result()
 		}))
@@ -321,9 +327,12 @@ func (p *pushRepo) run(t *testing.T, agent func(dir string), result func() (*ses
 		Proxy: p.h.server.Proxy.URL, CABundle: p.h.server.Proxy.CABundle, Dir: p.h.runDir,
 		RemoveSetup: p.removeSetup, HostProxyErr: p.proxyErr, AtGateway: p.real, Real: p.real,
 		SetRunAPICheck: p.onSetCheck, RunAPIErr: p.runAPIErr,
-		Setup: func(session.SetupSpec) error {
+		Setup: func(spec session.SetupSpec) error {
 			if p.setup != nil {
-				p.setup(p.h.dir)
+				p.setup(spec.Dir)
+			}
+			if p.onSetup != nil {
+				p.onSetup(spec)
 			}
 			return nil
 		},
@@ -1274,8 +1283,7 @@ func subcommand(args []string) string {
 
 // TestEveryGitOfThePushStepIsHardened records each git of the record after the setup and
 // of the push step: each reads no system or global configuration file, and each has
-// [proxygit.Hardened] apart from the two checks of a recorded place in a walled run,
-// which hostgit runs.
+// [proxygit.Hardened].
 func TestEveryGitOfThePushStepIsHardened(t *testing.T) {
 	for name, walled := range map[string]bool{"unwalled": false, "walled": true} {
 		t.Run(name, func(t *testing.T) {
@@ -1336,9 +1344,6 @@ func TestEveryGitOfThePushStepIsHardened(t *testing.T) {
 					t.Errorf("git %s reaches no remote and has the password of the proxy %q", all, proxy)
 				}
 				keyList := sub == "config" && strings.Contains(all, "--name-only")
-				if walled && (slices.Contains(args, "--path-format=absolute") || sub == "config" && !keyList) {
-					continue
-				}
 				if !strings.Contains(strings.Join(args, " "), strings.Join(proxygit.Hardened, " ")) {
 					t.Errorf("git %s has no options %v", all, proxygit.Hardened)
 				}
@@ -2007,4 +2012,90 @@ func TestAWallThatStaysRunsNoGit(t *testing.T) {
 			}
 		})
 	}
+
+	t.Run("a local run", func(t *testing.T) {
+		const line = ", and run no git there: a container of the run could not be removed and may still run and write the copy, so nothing came back from the run"
+		for name, c := range map[string]struct {
+			wall  cmd.Nowhere
+			wants string
+		}{
+			// The close failed to remove a container, and the git session ran before it.
+			"the close": {wall: cmd.Nowhere{WallKept: true}, wants: line},
+			// The agent's Unwrap failed, so the git session waits for the close.
+			"Unwrap": {wall: cmd.Nowhere{ContainerKept: true, WallKept: true}, wants: line},
+			// The removal of the setup container failed, so the git session waits for the close.
+			"RemoveSetup": {
+				wall:  cmd.Nowhere{WallKept: true, RemoveSetup: func(context.Context) error { return errors.New(refused) }},
+				wants: line,
+			},
+		} {
+			t.Run(name, func(t *testing.T) {
+				root := copyCheckout(t)
+				artifact := filepath.Join(root, ".qory", "artifacts", "run.txt")
+				t.Cleanup(cmd.SetGitSession(func(context.Context, session.SessionSpec) (*session.Result, error) {
+					return &session.Result{}, nil
+				}))
+				empty := filepath.Join(tempDir(t), "gitconfig")
+				writeFile(t, empty, "")
+				calls := recordGit(t, empty)
+				var after int64
+				var work string
+				agentInCopy(t, func(spec session.SessionSpec) {
+					work = spec.Dir
+					writeFile(t, filepath.Join(spec.Dir, "left.txt"), "left\n")
+					writeFile(t, filepath.Join(spec.Dir, ".qory", "artifacts", "run.txt"), "the run\n")
+					info, err := os.Stat(calls)
+					if err != nil {
+						t.Fatal(err)
+					}
+					after = info.Size()
+				})
+				_, _, restore := cmd.OpenNowhereWith(c.wall)
+				defer restore()
+				out, err := run(t, "run", "claude", "--", "-p", "hi")
+				if cmd.ExitCode(err) != 1 {
+					t.Errorf("exit %d (%v), want 1\n%s", cmd.ExitCode(err), err, out)
+				}
+				wants(t, out, "read the run's files in "+work+c.wants)
+				log, err := os.ReadFile(calls)
+				if err != nil {
+					t.Fatal(err)
+				}
+				for line := range strings.Lines(string(log[after:])) {
+					if !strings.Contains(line, " check-ref-format ") {
+						t.Errorf("git ran after the session:\n%s", line)
+					}
+				}
+				if got := gitOutput(t, root, "for-each-ref", "refs/heads/qory/"); got != "" {
+					t.Errorf("the run's branch came back: %s", got)
+				}
+				if _, err := os.Lstat(artifact); err == nil {
+					t.Error("the run's artifact came back")
+				}
+				wantDisarmed(t, work)
+			})
+		}
+	})
+	t.Run("a local run in a plain folder", func(t *testing.T) {
+		root := emptyDir(t)
+		copyFixture(t, "two-modules", root)
+		docker, _ := fakeDocker(t)
+		walledBy(t, docker)
+		t.Setenv("QORY_RUN_KEY", "")
+		var work string
+		agentInCopy(t, func(spec session.SessionSpec) {
+			work = spec.Dir
+			writeFile(t, filepath.Join(spec.Dir, "left.txt"), "left\n")
+		})
+		_, _, restore := cmd.OpenNowhereWith(cmd.Nowhere{WallKept: true})
+		defer restore()
+		out, err := run(t, "run", "claude", "--home", filepath.Join(tempDir(t), "home"), "--", "-p", "hi")
+		if cmd.ExitCode(err) != 1 {
+			t.Errorf("exit %d (%v), want 1\n%s", cmd.ExitCode(err), err, out)
+		}
+		wants(t, out, "read the run's files in "+work+", and run no git there: a container of the run could not be removed")
+		if _, err := os.Lstat(filepath.Join(root, "left.txt")); err == nil {
+			t.Error("the run's file came back")
+		}
+	})
 }

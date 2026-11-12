@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -14,6 +15,7 @@ import (
 	"time"
 
 	"github.com/qoryai/forager/accesskey"
+	"github.com/qoryai/forager/event"
 	"github.com/qoryai/forager/gateway"
 	"github.com/qoryai/forager/server"
 	"github.com/qoryai/forager/session"
@@ -21,11 +23,11 @@ import (
 
 	"github.com/qoryai/qory/internal/compose"
 	"github.com/qoryai/qory/internal/foragerdir"
-	walled "github.com/qoryai/qory/internal/places"
 	"github.com/qoryai/qory/internal/pool/prebuild"
 	"github.com/qoryai/qory/internal/preparation"
 	"github.com/qoryai/qory/internal/proxygit"
 	"github.com/qoryai/qory/internal/runapi"
+	"github.com/qoryai/qory/internal/runcopy"
 )
 
 // SetWriteLabels makes qory run keep a checkout's labels with f, and returns what
@@ -48,38 +50,6 @@ func SetAfterStep(f func(step string) error) func() {
 func SetStartGateway(f func(gateway.Config) error) func() {
 	startGateway = func(_ context.Context, cfg gateway.Config) (*gateway.Gateway, error) { return nil, f(cfg) }
 	return func() { startGateway = gateway.Start }
-}
-
-// RecordCheckout records the checkout at root as the place of a walled run, the way qory
-// run does before its session: its git settings, its qory files and its harness.
-func RecordCheckout(root string) error {
-	at, err := placesAt(root)
-	if err != nil {
-		return err
-	}
-	files, err := qoryFiles(root)
-	if err != nil {
-		return err
-	}
-	return recordPlace(context.Background(), root, walled.KindCheckout, "run-1", files, at, nil)
-}
-
-// RecordPlaces records the places a walled run in the checkout at root with mounts may
-// write, the way qory run does before its session, and returns the hold on them.
-func RecordPlaces(root string, mounts []wall.Mount) (*walled.Hold, error) {
-	at, err := placesAt(root)
-	if err != nil {
-		return nil, err
-	}
-	spec := &runSpec{OpenSpec: session.OpenSpec{RunID: "run-2"}, SessionSpec: session.SessionSpec{Mounts: mounts}}
-	return recordPlaces(context.Background(), spec, root, at)
-}
-
-// SetTerminal makes qory take stdin for a terminal when terminal is set, and returns
-// what restores the default.
-func SetTerminal(terminal bool) func() {
-	askTerminal = func(any) bool { return terminal }
-	return func() { askTerminal = isTerminal }
 }
 
 // ShortenSocketGrace has every run's socket keep accepting for d after the runtime
@@ -119,7 +89,159 @@ func SetJoinResult(f func(session.SessionSpec) (*session.Result, error)) func() 
 	return func() { joinSession = before }
 }
 
-// SetPushTimes sets the time the push step has past a time limit and after a signal, and
+// hostGitFolder is the folder of this machine's git, for the PATH of a git session in a
+// test: the run's image has its git in other folders. The session's first argument after
+// the script file is that PATH.
+func hostGitFolder(spec session.SessionSpec) (session.SessionSpec, error) {
+	path, err := exec.LookPath("git")
+	if err != nil {
+		return spec, err
+	}
+	folders := filepath.Dir(path) + ":/usr/bin:/bin"
+	spec.Args = slices.Clone(spec.Args)
+	spec.Args[1] = folders
+	spec.Env = slices.Clone(spec.Env)
+	for i, e := range spec.Env {
+		if strings.HasPrefix(e, "PATH=") {
+			spec.Env[i] = "PATH=" + folders
+		}
+	}
+	return spec, nil
+}
+
+// RunGitSessionsOnHost makes every git session of a test run as a process on this machine,
+// since a test has no image with git and runs no docker. A test that wants another end of the
+// session uses [SetGitSession].
+func RunGitSessionsOnHost() {
+	runGitContainer = containerOf(GitSessionOnHost)
+}
+
+// gitContainerSession is the git container c as the spec of a session, which a test of the git
+// session reads: its program, its environment and its folder, the binds and the writer of its
+// lines.
+func gitContainerSession(c gitContainer) session.SessionSpec {
+	return session.SessionSpec{
+		Command: c.Session.Command, Args: c.Session.Args, Env: c.Session.Env, Dir: c.Session.Dir,
+		Mounts: c.Mounts, Stdin: strings.NewReader(""), Stdout: c.Output, Stderr: c.Output,
+	}
+}
+
+// containerOf is a [runGitContainer] that ends as f ends: an error is a container that did
+// not start, a result that timed out one past its limit, and otherwise its exit code.
+func containerOf(f func(context.Context, session.SessionSpec) (*session.Result, error)) func(context.Context, gitContainer) (int, error) {
+	return func(ctx context.Context, c gitContainer) (int, error) {
+		res, err := f(ctx, gitContainerSession(c))
+		switch {
+		case err != nil:
+			return -1, err
+		case res.TimedOut:
+			return -1, context.DeadlineExceeded
+		}
+		return res.ExitCode, nil
+	}
+}
+
+// GitSessionOnHost runs the git session spec as a process on this machine.
+func GitSessionOnHost(ctx context.Context, spec session.SessionSpec) (*session.Result, error) {
+	spec, err := hostGitFolder(spec)
+	if err != nil {
+		return nil, err
+	}
+	c := exec.CommandContext(ctx, spec.Command, spec.Args...)
+	c.Dir, c.Env, c.Stdout, c.Stderr = spec.Dir, spec.Env, spec.Stdout, spec.Stderr
+	res := &session.Result{}
+	if err := c.Run(); err != nil {
+		if ctx.Err() != nil {
+			res.TimedOut = true
+			return res, nil
+		}
+		var exit *exec.ExitError
+		if !errors.As(err, &exit) {
+			return nil, err
+		}
+		res.ExitCode = exit.ExitCode()
+	}
+	return res, nil
+}
+
+// SetReturnAfterSignal sets how long the return of a local run has after a signal, and returns
+// what restores the default.
+func SetReturnAfterSignal(d time.Duration) func() {
+	before := returnAfterSignal
+	returnAfterSignal = d
+	return func() { returnAfterSignal = before }
+}
+
+// SetGitSession makes the git session's container end as f ends, see [containerOf], and returns
+// what restores the default.
+func SetGitSession(f func(context.Context, session.SessionSpec) (*session.Result, error)) func() {
+	before := runGitContainer
+	runGitContainer = containerOf(f)
+	return func() { runGitContainer = before }
+}
+
+// GitSessionsInDocker makes the git session run in its container on this machine's engine, as
+// outside a test, with the docker command and its arguments passed to seen first, and returns
+// what restores the default.
+func GitSessionsInDocker(seen func(argv []string)) func() {
+	before := runGitContainer
+	runGitContainer = func(ctx context.Context, c gitContainer) (int, error) {
+		args, err := c.args()
+		if err == nil {
+			seen(append([]string{c.Docker}, args...))
+		}
+		return dockerGitContainer(ctx, c)
+	}
+	return func() { runGitContainer = before }
+}
+
+// SeeGitContainer makes the git session run as a process on this machine, as
+// [RunGitSessionsOnHost] does, with the arguments of its docker run passed to seen first, and
+// returns what restores the default.
+func SeeGitContainer(seen func(args []string)) func() {
+	before := runGitContainer
+	onHost := containerOf(GitSessionOnHost)
+	runGitContainer = func(ctx context.Context, c gitContainer) (int, error) {
+		args, err := c.args()
+		if err != nil {
+			return -1, err
+		}
+		seen(args)
+		return onHost(ctx, c)
+	}
+	return func() { runGitContainer = before }
+}
+
+// LoseLinkAfterJoin makes each join run as it does and then return lost, as a join whose link
+// to the gateway was lost during the session does, and returns what restores the default.
+func LoseLinkAfterJoin(lost error) func() {
+	before := joinSession
+	joinSession = func(r openedRun, ctx context.Context, spec session.SessionSpec) (*session.Result, error) {
+		if _, err := before(r, ctx, spec); err != nil {
+			return nil, err
+		}
+		return nil, lost
+	}
+	return func() { joinSession = before }
+}
+
+// SetGeneratedLimits sets the most files and bytes in the folders of builds and package
+// managers that a copy back writes, and returns the function that restores both.
+func SetGeneratedLimits(files int, bytes int64) func() {
+	oldFiles, oldBytes := runcopy.MaxGeneratedFiles, runcopy.MaxGeneratedBytes
+	runcopy.MaxGeneratedFiles, runcopy.MaxGeneratedBytes = files, bytes
+	return func() { runcopy.MaxGeneratedFiles, runcopy.MaxGeneratedBytes = oldFiles, oldBytes }
+}
+
+// SetCopyStepLimit sets how long a check of a run's bundles or a copy back may take, and returns
+// what restores the default.
+func SetCopyStepLimit(limit time.Duration) func() {
+	before := copyStepLimit
+	copyStepLimit = limit
+	return func() { copyStepLimit = before }
+}
+
+// SetPushTimes sets the time the push step has past a run's limit and after a signal, and
 // returns what restores the defaults.
 func SetPushTimes(limit, signal time.Duration) func() {
 	before := pushTimes
@@ -213,6 +335,14 @@ type Nowhere struct {
 	Real         bool
 	PolicyImage  string
 	OnImage      func(session.Image)
+	// CloseErr, when not nil, is the error of the run's Close, which then returns no result.
+	CloseErr error
+	// WallKept is [session.Closed.WallKept] of the run's Close. A RemoveSetup that returns
+	// an error sets it, as Forager's does.
+	WallKept bool
+	// ContainerKept is the run's ContainerKept before the close; after it, WallKept is. A
+	// RemoveSetup that returns an error sets it too.
+	ContainerKept bool
 	// RunAPI is the base URL of the run's run API, "" for a server that returns 404 with
 	// no error code to every request, as Qory Apiary does with its feature workflow_model
 	// off.
@@ -223,6 +353,9 @@ type Nowhere struct {
 	// StepErr, when not nil, is called by each StartStep with the step's kind, and a
 	// StartStep whose call returns an error writes no step and returns it.
 	StepErr func(kind string) error
+	// StepExitErr, when not nil, is called by each Step.Exit with the step's kind, and an
+	// Exit whose call returns an error writes nothing and returns it.
+	StepExitErr func(kind string) error
 	// SetRunAPICheck, when not nil, gets the check of each SetRunAPICheck, and its error
 	// is the call's; nil takes the check. A run at a gateway sets it on the run too.
 	SetRunAPICheck func(check func(context.Context, session.RunAPIRequest) (*session.RunAPIRefusal, error)) error
@@ -302,19 +435,41 @@ func OpenNowhereWith(n Nowhere) (outcomes func() []session.Outcome, calls func()
 }
 
 // nowhere is a run [OpenNowhere] opened. Its steps are numbered as Forager numbers
-// them, one open at a time, and Close ends an open one cancelled with -1.
+// them, one open at a time, and Close ends an open one cancelled with -1. It keeps
+// Forager's rules of a copy step: only a session with no runtime joins during one, and
+// the step's Log and Exit, and HostProxy, return an error during that join. HostProxy
+// also returns an error all through the step.
 type nowhere struct {
-	id     string
-	dir    string
-	values Nowhere
-	image  session.Image
-	note   func(string)
-	closed func(session.Outcome)
-	at     *gatewayRun
-	steps  int
-	open   *nowhereStep
-	ended  bool
+	id      string
+	dir     string
+	values  Nowhere
+	image   session.Image
+	note    func(string)
+	closed  func(session.Outcome)
+	at      *gatewayRun
+	steps   int
+	open    *nowhereStep
+	ended   bool
+	joining bool
 }
+
+// startJoin checks a join of spec against Forager's rules of an open host step, and marks
+// the run as joining until [nowhere.endJoin].
+func (n *nowhere) startJoin(spec session.SessionSpec) error {
+	if n.open != nil {
+		if n.open.kind != event.StepCopy {
+			return fmt.Errorf("exit step %d before the join", n.open.n)
+		}
+		if spec.Runtime != nil {
+			return fmt.Errorf("exit step %d before the join: only a session with no runtime joins during a copy step", n.open.n)
+		}
+	}
+	n.joining = true
+	return nil
+}
+
+// endJoin marks the run's join as ended.
+func (n *nowhere) endJoin() { n.joining = false }
 
 // errNowhereClosed is what [Run.HostProxy] and [Run.RunAPI] of Forager return after Close.
 var errNowhereClosed = errors.New("the run is closed")
@@ -397,9 +552,10 @@ func (noRunAPI) RoundTrip(r *http.Request) (*http.Response, error) {
 }
 
 func (n *nowhere) Join(ctx context.Context, spec session.SessionSpec) (*session.Result, error) {
-	if n.open != nil {
-		return nil, fmt.Errorf("exit step %d before the join", n.open.n)
+	if err := n.startJoin(spec); err != nil {
+		return nil, err
 	}
+	defer n.endJoin()
 	n.note("join")
 	if n.values.Real {
 		return n.at.run.Join(ctx, spec)
@@ -444,9 +600,26 @@ func (n *nowhere) RemoveSetup(ctx context.Context) error {
 		return n.at.run.RemoveSetup(ctx)
 	}
 	if n.values.RemoveSetup != nil {
-		return n.values.RemoveSetup(ctx)
+		if err := n.values.RemoveSetup(ctx); err != nil {
+			// Forager marks the wall kept on a failed removal of the setup container: it
+			// may still run.
+			n.values.WallKept, n.values.ContainerKept = true, true
+			return err
+		}
 	}
 	return nil
+}
+
+// ContainerKept is [Nowhere.ContainerKept] until the close and [Nowhere.WallKept] after it, and
+// Forager's of a run with Real.
+func (n *nowhere) ContainerKept() bool {
+	if n.values.Real {
+		return n.at.run.ContainerKept()
+	}
+	if n.ended {
+		return n.values.WallKept
+	}
+	return n.values.ContainerKept
 }
 
 func (n *nowhere) FetchImage(ctx context.Context) error {
@@ -484,18 +657,27 @@ func (n *nowhere) Close(ctx context.Context, out session.Outcome) (*session.Clos
 	}
 	n.ended = true
 	n.closed(out)
+	if n.values.CloseErr != nil {
+		return nil, n.values.CloseErr
+	}
 	if n.at != nil {
 		closed, err := n.at.run.Close(ctx, out)
 		_, endErr := n.at.g.Close(ctx)
 		return closed, errors.Join(err, endErr)
 	}
-	return &session.Closed{RunID: n.id, State: out.State, Reason: out.Reason, ExitCode: out.ExitCode}, nil
+	return &session.Closed{RunID: n.id, State: out.State, Reason: out.Reason, ExitCode: out.ExitCode, WallKept: n.values.WallKept}, nil
 }
 
 func (n *nowhere) HostProxy() (hostProxy, error) {
 	n.note("host proxy")
 	if n.ended {
 		return hostProxy{}, errNowhereClosed
+	}
+	if n.joining {
+		return hostProxy{}, errors.New("start the host proxy after Join returns")
+	}
+	if n.open != nil && n.open.kind == event.StepCopy {
+		return hostProxy{}, fmt.Errorf("exit step %d before you start the host proxy", n.open.n)
 	}
 	if n.values.ProxyErr != nil {
 		return hostProxy{}, n.values.ProxyErr
@@ -529,6 +711,9 @@ func (n *nowhere) StackProxy() (hostProxy, error) {
 }
 
 func (n *nowhere) StartStep(kind, name string) (hostStep, error) {
+	if n.joining {
+		return nil, errors.New("start the host step after Join returns")
+	}
 	if n.open != nil {
 		return nil, fmt.Errorf("exit step %d before the next host step starts", n.open.n)
 	}
@@ -538,7 +723,7 @@ func (n *nowhere) StartStep(kind, name string) (hostStep, error) {
 		}
 	}
 	n.steps++
-	n.open = &nowhereStep{r: n, n: n.steps}
+	n.open = &nowhereStep{r: n, n: n.steps, kind: kind}
 	n.event(StepEvent{Type: "step_started", Step: n.steps, Name: name, Kind: kind})
 	return n.open, nil
 }
@@ -554,10 +739,14 @@ func (n *nowhere) event(e StepEvent) {
 type nowhereStep struct {
 	r      *nowhere
 	n      int
+	kind   string
 	exited bool
 }
 
 func (s *nowhereStep) Log(b []byte) error {
+	if s.r.joining {
+		return fmt.Errorf("write step %d's lines after Join returns", s.n)
+	}
 	if s.exited {
 		return fmt.Errorf("step %d exited", s.n)
 	}
@@ -566,8 +755,16 @@ func (s *nowhereStep) Log(b []byte) error {
 }
 
 func (s *nowhereStep) Exit(state string, exitCode int) error {
+	if s.r.joining {
+		return fmt.Errorf("exit step %d after Join returns", s.n)
+	}
 	if s.exited {
 		return fmt.Errorf("step %d exited already", s.n)
+	}
+	if s.r.values.StepExitErr != nil {
+		if err := s.r.values.StepExitErr(s.kind); err != nil {
+			return err
+		}
 	}
 	s.exited = true
 	s.r.open = nil
@@ -662,10 +859,12 @@ func SetLaunchPrebuild(f func(ctx context.Context, s prebuild.Settings, r prebui
 	return func() { launchPrebuild = before }
 }
 
-// WalledPlaces is the check of a walled run's checkout at root and of its read-write
-// mounts against the home folder and the state directory, which qory run makes before
-// the run starts anything.
-func WalledPlaces(root string, mounts []wall.Mount) error { return walledPlaces(root, mounts) }
+// ReservedMounts is the check of a walled run's read-write mounts, other than its
+// checkout at root, against the home folder and the state directory, which qory run
+// makes before the run starts anything.
+func ReservedMounts(root string, mounts []wall.Mount) error {
+	return reservedMounts(root, mounts)
+}
 
 // SetTempStoreDir sets the store of a run whose checkout is read-only to dir, and returns
 // a function that restores it.

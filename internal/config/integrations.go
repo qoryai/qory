@@ -196,10 +196,10 @@ func writeString(b *bytes.Buffer, s string) {
 // Expansion selects which integrations [Forager.Expand] describes, and where their
 // programs may not be.
 type Expansion struct {
-	// Workspace are the files and directories a run may write: its checkout, the mounts a
-	// wall passes to the container read-write, and every place a walled run has used. A
-	// program that is one of them, or under one, is refused: what a run may change may
-	// not choose what runs with the machine's credentials.
+	// Workspace are the files and directories a run may write: its checkout and the
+	// mounts a wall passes to the container read-write. A program that is one of them, or
+	// under one, is an error: what a run may change may not choose what runs with the
+	// machine's credentials.
 	Workspace []string
 	// Only, when set, selects which integrations are described, by key: the ones a run's
 	// policy selects. Nil describes every one.
@@ -484,7 +484,7 @@ func outside(path string, workspace []string, what string) error {
 				if p == path {
 					where = ""
 				}
-				return fmt.Errorf("%swhich a run may write; qory runs %s from outside the checkout, the container's read-write mounts and the places a walled run has used", where, what)
+				return fmt.Errorf("%swhich a run may write; qory runs %s from outside the checkout and the container's read-write mounts", where, what)
 			}
 			if p == filepath.Dir(p) {
 				break

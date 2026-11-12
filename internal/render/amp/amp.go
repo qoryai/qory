@@ -10,8 +10,8 @@
 //	settings.json  Amp reads it as settings; a module sets those through settings/amp/settings.json
 //
 // Amp also takes its settings file from --settings-file, so the servers and the
-// permissions reach a session from outside the checkout; the skills and the instructions
-// are read from the checkout alone. [Template] passes the file.
+// permissions reach a session from outside the checkout; the skills, the instructions and
+// the files entries are read from the checkout alone. [Template] passes the file.
 package amp
 
 import (
@@ -42,6 +42,9 @@ func (amp) Links(res *compose.Result) []render.Link {
 	}
 	return links
 }
+
+// CheckoutParts are what the package comment lists as read from the checkout alone.
+func (amp) CheckoutParts() []string { return []string{"skills", render.Instructions, render.FilesKind} }
 
 // Skips are agents, commands and output styles, which Amp defines through plugins rather
 // than project files.

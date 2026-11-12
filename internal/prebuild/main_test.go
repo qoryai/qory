@@ -8,8 +8,7 @@ import (
 )
 
 // TestMain runs every test with HOME and the XDG folders in a new temporary folder, so
-// that no test reads the records of places, or any other state, of the machine it runs
-// on.
+// that no test reads the state or the configuration of the machine it runs on.
 func TestMain(m *testing.M) {
 	home, err := os.MkdirTemp("", "prebuild-home-")
 	if err != nil {

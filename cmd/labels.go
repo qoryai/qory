@@ -58,8 +58,8 @@ type keptLabels struct {
 
 // originLabels is what the origin remote of the checkout at root gives, forge and
 // repository, both empty when [checkout.Origin] gives none. A run reads it once, so the
-// labels it sends are the ones it checks and keeps. The error is the settings check's
-// refusal of the checkout's repository.
+// labels it sends are the ones it checks and keeps. The error is that of
+// [checkout.Origin]: a git older than 2.36.
 func originLabels(root string) (foragerdir.Labels, error) {
 	forge, repository, _, err := checkout.Origin(root)
 	if err != nil {

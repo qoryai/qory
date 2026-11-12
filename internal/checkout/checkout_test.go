@@ -1,7 +1,6 @@
 package checkout_test
 
 import (
-	"context"
 	"errors"
 	"os"
 	"os/exec"
@@ -11,7 +10,6 @@ import (
 
 	"github.com/qoryai/qory/internal/checkout"
 	"github.com/qoryai/qory/internal/hostgit"
-	"github.com/qoryai/qory/internal/places"
 )
 
 // hermetic points git at an empty global configuration and away from the system one, so no
@@ -27,7 +25,6 @@ func hermetic(t *testing.T) {
 	t.Setenv("GIT_CEILING_DIRECTORIES", filepath.Dir(home))
 	t.Setenv("GIT_CONFIG_GLOBAL", filepath.Join(home, ".gitconfig"))
 	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
-	hostgit.Forget()
 }
 
 // initRepo makes dir a git checkout with a local identity and returns dir.
@@ -368,7 +365,7 @@ func TestKeyNamesACheckoutOnceHoweverItIsReached(t *testing.T) {
 	}
 }
 
-// must is v, for a call whose error is the settings check's refusal, which no test here
+// must is v, for a call whose error is a git older than 2.36, which no test here
 // expects: it panics on one.
 func must[T any](v T, err error) T {
 	if err != nil {
@@ -386,20 +383,12 @@ func origin(root string) (string, string, bool) {
 	return forge, repository, ok
 }
 
-// TestEveryFunctionReturnsTheRefusal records the checkout as a walled run's, adds a key
-// after the record, and has every function that runs git return the settings check's
-// refusal in place of its fallback.
-func TestEveryFunctionReturnsTheRefusal(t *testing.T) {
+// TestEveryFunctionReturnsAGitTooOld puts first on the PATH a git that prints version
+// 2.34.1, and has every function that runs git return the line for it in place of its
+// fallback: no git ran, so the error says nothing of whether the folder is a checkout.
+func TestEveryFunctionReturnsAGitTooOld(t *testing.T) {
 	hermetic(t)
 	root := real(t, initRepo(t, t.TempDir()))
-	if err := hostgit.Record(context.Background(), root, places.KindCheckout, "run-1"); err != nil {
-		t.Fatal(err)
-	}
-	cmd := exec.Command("git", "config", "alias.x", "log")
-	cmd.Dir = root
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("%v\n%s", err, out)
-	}
 	path := filepath.Join(root, "AGENTS.md")
 	calls := map[string]func() error{
 		"Root":        func() error { _, err := checkout.Root(root); return err },
@@ -412,54 +401,21 @@ func TestEveryFunctionReturnsTheRefusal(t *testing.T) {
 		"Init":        func() error { return checkout.Init(root) },
 	}
 	for name, call := range calls {
-		var r *hostgit.RefusedError
-		if err := call(); !errors.As(err, &r) || r.Key != "alias.x" {
-			t.Errorf("%s: %v", name, err)
-		}
+		t.Run(name, func(t *testing.T) {
+			// A fake git at a new path each time: hostgit keeps the version of each git it
+			// found.
+			bin := t.TempDir()
+			script := "#!/bin/sh\nif [ \"$1\" = version ]; then echo 'git version 2.34.1'; exit 0; fi\nexit 1\n"
+			if err := os.WriteFile(filepath.Join(bin, "git"), []byte(script), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+			var old *hostgit.GitVersionError
+			if err := call(); !errors.As(err, &old) {
+				t.Errorf("got %v, want the line for git 2.34.1", err)
+			}
+		})
 	}
-}
-
-// TestARecordThatCannotBeReadIsAnError puts a file in the directory of the records of
-// the places that is no record: the settings check cannot read the records, so no git
-// runs, and Root, RepoKey, Origin, ExcludeFile, Worktrees and Restorable each return
-// that error rather than reading the checkout as outside git.
-func TestARecordThatCannotBeReadIsAnError(t *testing.T) {
-	hermetic(t)
-	root := initRepo(t, real(t, t.TempDir()))
-	dir, err := places.Dir()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "broken.json"), []byte("not a record"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	hostgit.Forget()
-	t.Cleanup(hostgit.Forget)
-	_, want := places.Load()
-	if want == nil {
-		t.Fatal("the broken record reads")
-	}
-	check := func(what string, err error) {
-		t.Helper()
-		if err == nil || err.Error() != want.Error() {
-			t.Errorf("%s: %v, want %v", what, err, want)
-		}
-	}
-	_, err = checkout.Root(root)
-	check("Root", err)
-	_, err = checkout.RepoKey(root)
-	check("RepoKey", err)
-	_, _, _, err = checkout.Origin(root)
-	check("Origin", err)
-	_, err = checkout.ExcludeFile(root)
-	check("ExcludeFile", err)
-	_, err = checkout.Worktrees(root)
-	check("Worktrees", err)
-	_, err = checkout.Restorable(root, filepath.Join(root, "file"))
-	check("Restorable", err)
 }
 
 // TestAPathWithALineEndIsReadWhole looks up a checkout, its exclude file and its working

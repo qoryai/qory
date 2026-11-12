@@ -136,13 +136,14 @@ func TestAWalledRunCodeWithAHiddenHarnessComposesNoLink(t *testing.T) {
 // TestARunCodeWithAHiddenHarnessStopsOnALinkOutOfAModule is a run from a run code whose
 // documents set harness_hidden to true, of a stack whose hello module contains a link
 // to the stack's README.md, outside the module: the compose stops before the join, exit
-// 1, with a line that starts with its fix, as the copy of a walled run's module stops.
+// 1, with the start of a stop of any status but 2, before the line of the copy of a walled
+// run's module.
 func TestARunCodeWithAHiddenHarnessStopsOnALinkOutOfAModule(t *testing.T) {
 	r := runFromCodeLinks(t, nil, nil, nil, nil, nil, map[string]string{"examples/hello/modules/hello/README.md": "../../README.md"})
 	if r.joined || cmd.ExitCode(r.err) != 1 {
 		t.Fatalf("%v (exit %d), want exit 1 before the join\n%s", r.err, cmd.ExitCode(r.err), r.out)
 	}
-	wants(t, r.err.Error(), "module hello: Remove the link README.md or point it inside the module. It links to README.md in the base of the workspace's harness, outside the module, and qory copies only the module's files into the home.")
+	wants(t, r.err.Error(), "fix the cause, then take the work item in again in Qory Apiary: module hello: Remove the link README.md or point it inside the module. It links to README.md in the base of the workspace's harness, outside the module, and qory copies only the module's files into the home; the code is used")
 }
 
 // TestARunCodeWithAHiddenHarnessStopsAtAPluginOf10000 is a run from a run code whose
@@ -161,6 +162,6 @@ func TestARunCodeWithAHiddenHarnessStopsAtAPluginOf10000(t *testing.T) {
 	if r.joined || cmd.ExitCode(r.err) != 1 {
 		t.Fatalf("%v (exit %d), want exit 1 before the join\n%s", r.err, cmd.ExitCode(r.err), r.out)
 	}
-	wants(t, r.err.Error(), "Ship fewer files in the modules. claude/plugin contains more than 10,000 files, directories and links, the most a Claude Code run behind a wall or with a hidden harness takes.")
+	wants(t, r.err.Error(), "fix the cause, then take the work item in again in Qory Apiary: Ship fewer files in the modules. claude/plugin contains more than 10,000 files, directories and links, the most a Claude Code run behind a wall or with a hidden harness takes; the code is used")
 	lacks(t, r.err.Error(), "Move a module out of the checkout")
 }

@@ -41,8 +41,6 @@ func TestRecordDir(t *testing.T) {
 }
 
 func TestRemove(t *testing.T) {
-	var dropped []string
-	defer explore.SetDropPlace(func(dir string) { dropped = append(dropped, dir) })()
 	state := t.TempDir()
 	dir := explore.Dir(state, testRunID)
 	if err := os.MkdirAll(filepath.Join(dir, "work"), 0o700); err != nil {
@@ -53,9 +51,6 @@ func TestRemove(t *testing.T) {
 	}
 	if _, err := os.Stat(dir); !os.IsNotExist(err) {
 		t.Errorf("the run directory is still there: %v", err)
-	}
-	if !slices.Equal(dropped, []string{dir}) {
-		t.Errorf("places dropped %q, want %q", dropped, dir)
 	}
 	if err := explore.Remove(state, "../pool"); err == nil {
 		t.Error("removed a directory by a path that is no run id")

@@ -17,7 +17,6 @@ import (
 	"github.com/qoryai/forager/accesskey"
 	"gopkg.in/yaml.v3"
 
-	"github.com/qoryai/qory/internal/acting"
 	"github.com/qoryai/qory/internal/checkout"
 	"github.com/qoryai/qory/internal/exports"
 )
@@ -530,9 +529,6 @@ func loadFile(path string) (*Stack, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := acting.Check(path, data); err != nil {
-		return nil, err
-	}
 	p := &Stack{}
 	dec := yaml.NewDecoder(strings.NewReader(string(data)))
 	dec.KnownFields(true)
@@ -734,6 +730,10 @@ func (p *Stack) validate(compose bool) error {
 		}
 		if l.Source.Path != "" || l.Source.Git != "" || l.Source.Ref != "" || l.Source.exported() {
 			if err := l.Source.validate(); err != nil {
+				var path *SourcePathError
+				if errors.As(err, &path) {
+					path.Module = strings.TrimPrefix(who, "module ")
+				}
 				return fmt.Errorf("%s: %w", who, err)
 			}
 			if l.Source.Stack != "" {
@@ -831,8 +831,9 @@ func (s Source) validate() error {
 
 // SourcePathError is a git source's source.path that is not a directory inside the
 // repository: an absolute path, the repository's root, or a path that leads out of it.
-// Path is the path as written.
-type SourcePathError struct{ Path string }
+// Path is the path as written. Module is the module whose source it is, by its name or as
+// modules[i] with no name, and "" for the source of extends.
+type SourcePathError struct{ Path, Module string }
 
 func (e *SourcePathError) Error() string {
 	return fmt.Sprintf("source.path %s is not a directory inside the repository", exports.Value(e.Path, true))

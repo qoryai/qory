@@ -35,7 +35,6 @@ import (
 	"github.com/qoryai/forager/accesskey"
 	"github.com/qoryai/qory/internal/exports"
 	"github.com/qoryai/qory/internal/hostgit"
-	"github.com/qoryai/qory/internal/places"
 	"github.com/qoryai/qory/internal/proxygit"
 	"github.com/qoryai/qory/internal/secretmask"
 	"github.com/qoryai/qory/internal/stack"
@@ -140,6 +139,20 @@ func (e *GoneError) Error() string {
 		return "the repository of " + e.Name + " has no branch or tag by the ref it is set to"
 	}
 	return secretmask.Default().Replace(fmt.Sprintf("%s has no branch or tag %s; to keep the old harness, set ref to a commit id", exports.URL(e.URL), exports.Value(e.Ref, false)))
+}
+
+// ExportGoneError is a source of a [Named] compose that selects an export whose folder its
+// repository does not have.
+type ExportGoneError struct {
+	// Where is the source as a text of the compose shows it.
+	Where string
+	// Export is the export the source selects, such as module tools.
+	Export string
+}
+
+// Error has the source and the export, and no address or folder.
+func (e *ExportGoneError) Error() string {
+	return fmt.Sprintf("%s exports %s at a folder that is not there", e.Where, e.Export)
 }
 
 // SchemeError is a git source that is not an https URL, in a compose that fetches
@@ -356,9 +369,6 @@ func Resolve(baseDir string, s stack.Source, opts Options) (Resolved, error) {
 	if !filepath.IsAbs(dir) {
 		dir = filepath.Join(baseDir, dir)
 	}
-	if err := LeadsOut(dir); err != nil {
-		return Resolved{}, err
-	}
 	info, err := os.Stat(dir)
 	if err != nil {
 		return Resolved{}, exports.HideError(err)
@@ -373,9 +383,6 @@ func Resolve(baseDir string, s stack.Source, opts Options) (Resolved, error) {
 		}
 		repo := dir
 		dir = filepath.Join(repo, rel)
-		if err := LeadsOut(dir); err != nil {
-			return Resolved{}, err
-		}
 		if info, err := os.Stat(dir); err != nil || !info.IsDir() {
 			return Resolved{}, fmt.Errorf("%s exports %s at %s, which is not a directory there", exports.Value(repo, false), exportName(s), exports.Value(rel, false))
 		}
@@ -385,92 +392,6 @@ func Resolve(baseDir string, s stack.Source, opts Options) (Resolved, error) {
 		return Resolved{}, err
 	}
 	return Resolved{Dir: dir, Pin: WorkingTree, Dirty: d}, nil
-}
-
-// LinkOutError is a folder qory reads a module or a stack from that passes through a
-// place a walled run has used, and leads out of it through a link.
-type LinkOutError struct {
-	// Folder is the folder, absolute and clean as written; Place is the place.
-	Folder, Place string
-}
-
-func (e *LinkOutError) Error() string {
-	return fmt.Sprintf("%s leads through a link out of %s, a place a walled run has used; qory does not read a module or a stack from it, since the run could have pointed the link elsewhere. Remove the link to go on", shownPath(e.Folder), shownPath(e.Place))
-}
-
-// LeadsOut refuses folder, a folder qory reads a module or a stack from, with a
-// [*LinkOutError] when it passes through a recorded place but leads out of it through a
-// link: a walled run there could have pointed the link at any folder of this machine,
-// whichever stack file names or derives the folder, one in no place included. folder
-// passes through a place when a folder its resolution visits, see [visited], lies in
-// the place, so a path that reaches the place through a link of its own, such as /tmp on
-// macOS, or through a link elsewhere that leads into it, counts.
-func LeadsOut(folder string) error {
-	recs, err := places.Cached()
-	if err != nil {
-		return err
-	}
-	abs, err := filepath.Abs(folder)
-	if err != nil {
-		return err
-	}
-	seen := visited(abs)
-	real := places.Real(abs)
-	for _, r := range recs {
-		if places.Inside(r.Path, real) {
-			continue
-		}
-		for _, v := range seen {
-			if places.Inside(r.Path, v) {
-				return &LinkOutError{Folder: abs, Place: r.Path}
-			}
-		}
-	}
-	return nil
-}
-
-// maxLinks is how many links [visited] follows before it stops, as the kernel does.
-const maxLinks = 255
-
-// visited returns each folder that resolving path, absolute and clean, passes through,
-// with its links resolved, in order: each folder above it as the resolution reaches it,
-// and each folder a link on the way leads through. A name that is not there is taken as
-// written; a loop of links, or a link qory cannot read, ends the list.
-func visited(path string) []string {
-	sep := string(filepath.Separator)
-	var out []string
-	cur := sep
-	rest := strings.Split(path, sep)
-	links := 0
-	for len(rest) > 0 {
-		c := rest[0]
-		rest = rest[1:]
-		switch c {
-		case "", ".":
-			continue
-		case "..":
-			cur = filepath.Dir(cur)
-			out = append(out, cur)
-			continue
-		}
-		next := filepath.Join(cur, c)
-		info, err := os.Lstat(next)
-		if err != nil || info.Mode()&os.ModeSymlink == 0 {
-			cur = next
-			out = append(out, cur)
-			continue
-		}
-		links++
-		target, err := os.Readlink(next)
-		if err != nil || links > maxLinks {
-			return out
-		}
-		if filepath.IsAbs(target) {
-			cur = sep
-		}
-		rest = append(strings.Split(target, sep), rest...)
-	}
-	return out
 }
 
 // exported returns the directory of the export s names, relative to the repository at
@@ -525,15 +446,6 @@ func exportName(s stack.Source) string {
 		return "stack " + accesskey.ShownName(s.Stack, false)
 	}
 	return "module " + accesskey.ShownName(s.Module, false)
-}
-
-// shownPath is a path as [LinkOutError] prints it: as [hostgit.Shown] prints it, or as
-// [exports.Value] prints it when it contains an access key secret or a run key.
-func shownPath(p string) string {
-	if accesskey.ContainsSecret(p) {
-		return exports.Value(p, false)
-	}
-	return hostgit.Shown(p)
 }
 
 // at is a git source's URL and ref as a message prints them, <url> at <ref>, each
@@ -630,7 +542,7 @@ func resolveGit(s stack.Source, opts Options) (Resolved, error) {
 	}
 	info, err := os.Stat(module)
 	if errors.Is(err, os.ErrNotExist) && s.Path == "" && sub != "" && n != nil {
-		return Resolved{}, fmt.Errorf("%s exports %s at a folder that is not there", where, exportName(s))
+		return Resolved{}, &ExportGoneError{Where: where, Export: exportName(s)}
 	}
 	if errors.Is(err, os.ErrNotExist) && s.Path == "" && sub != "" {
 		return Resolved{}, fmt.Errorf("%s exports %s at %s, which is not there", where, exportName(s), exports.Value(sub, false))
@@ -833,9 +745,6 @@ func lsRemote(dir string, s stack.Source, opts Options, names ...string) (map[st
 		in = tmp
 	}
 	out, err := git(in, opts, args...)
-	if hostgit.Refused(err) {
-		return nil, err
-	}
 	if err != nil {
 		return nil, &FetchError{Source: s.Git + "#" + s.Ref, URL: s.Git, Ref: s.Ref, Output: string(out), Err: err}
 	}
@@ -954,16 +863,11 @@ func fetch(dir string, s stack.Source, ref string, opts Options) (string, error)
 		{"checkout", "--quiet", "--detach", "FETCH_HEAD"},
 	}
 	for _, args := range steps {
-		if out, err := git(tmp, opts, args...); hostgit.Refused(err) {
-			return "", err
-		} else if err != nil {
+		if out, err := git(tmp, opts, args...); err != nil {
 			return "", &FetchError{Source: s.Git + "#" + s.Ref, URL: s.Git, Ref: s.Ref, Output: string(out), Err: err}
 		}
 	}
 	out, err := git(tmp, opts, "rev-parse", "HEAD")
-	if hostgit.Refused(err) {
-		return "", err
-	}
 	if err != nil {
 		return "", &FetchError{Source: s.Git + "#" + s.Ref, URL: s.Git, Ref: s.Ref, Output: string(out), Err: err}
 	}
@@ -1041,8 +945,7 @@ func cacheName(v string) string {
 // With opts.Git nil, git runs through [hostgit.Command], with every prompt off, the
 // terminal's, an askpass program's and ssh's, so a remote that wants a password or an
 // unknown host key fails instead of waiting. A GIT_SSH_COMMAND the environment already
-// carries is kept. The settings check's refusal is a [*hostgit.RefusedError] and no
-// output.
+// carries is kept.
 //
 // With opts.Git set, git is the one [hostgit.Unchecked] finds, with the options of
 // [proxygit.Hardened] and [proxygit.HTTPSOnly] and the environment [proxygit.Env]
@@ -1095,7 +998,7 @@ func git(dir string, opts Options, args ...string) ([]byte, error) {
 // It runs git on dir alone, so changes elsewhere in the same repository do not count.
 // A directory outside a git working tree, and a host without git, read as clean, because
 // the dirty mark is a note in the report and not a reason to refuse a compose. The error
-// is the settings check's refusal of the repository, which is one.
+// is a git older than 2.36, see [hostgit.Ready], which is one.
 func dirty(dir string) (bool, error) {
 	cmd, err := hostgit.Command(context.Background(), dir, "status", "--porcelain", "--", ".")
 	if err != nil {

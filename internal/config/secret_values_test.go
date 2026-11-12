@@ -315,7 +315,7 @@ func TestAProgramWithASecretInItsPathIsAPhrase(t *testing.T) {
 	}{
 		{"/opt/qak_tool", nil, accessKeyValue + " is not a program this user may run"},
 		{"QRK_tool", nil, runKeyValue + " is not on the PATH; install it there, or give its absolute path"},
-		{inside, []string{workspace}, accessKeyValue + ", inside " + accessKeyValue + ", which a run may write; qory runs a tool from outside the checkout, the container's read-write mounts and the places a walled run has used"},
+		{inside, []string{workspace}, accessKeyValue + ", inside " + accessKeyValue + ", which a run may write; qory runs a tool from outside the checkout and the container's read-write mounts"},
 		{open, nil, accessKeyValue + ", and " + accessKeyValue + " may be written by every user; qory runs a program only root and its owner may change"},
 	} {
 		if _, err := config.Program(c.name, c.workspace, "a tool"); err == nil || err.Error() != c.want {

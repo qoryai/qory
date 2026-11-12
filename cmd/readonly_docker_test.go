@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -204,5 +205,163 @@ func TestARealWriteRunRemovesTheSetupContainerBeforeThePush(t *testing.T) {
 	}
 	if got := proxygittest.Git(t, p.bare, "diff", "--name-only", p.first, head); got != "left.txt" {
 		t.Errorf("the branch differs from the start in %q", got)
+	}
+}
+
+// copyAgent is the program of the agent's container in
+// [TestARealWriteRunInACopyBringsTheWorkBack]: it commits a file and leaves
+// another uncommitted.
+const copyAgent = `#!/bin/sh
+echo left > left.txt
+git add left.txt
+git -c user.name=agent -c user.email=agent@example.invalid commit -q -m "Add the agent's file"
+echo more > more.txt
+`
+
+// TestARealWriteRunInACopyBringsTheWorkBack is a local walled write run behind a real wall on
+// this machine's engine. With the link kept, the git session runs in its container before the
+// close, in the step copy work out. With the link lost, the join returns an error after the
+// agent's session, as a join whose link to the gateway was lost does, and the git session runs
+// in its container after the close. Both times the agent's commit and its uncommitted file are
+// on the run's branch, and no container of the run is left. It runs only with
+// QORY_TEST_DOCKER=1 and docker on the PATH.
+func TestARealWriteRunInACopyBringsTheWorkBack(t *testing.T) {
+	if os.Getenv("QORY_TEST_DOCKER") != "1" {
+		t.Skip("QORY_TEST_DOCKER=1 runs it")
+	}
+	if _, err := exec.LookPath("docker"); err != nil {
+		t.Skip("no docker command")
+	}
+	helper, image := realWallImage(t, "copy-agent", copyAgent)
+	for _, lost := range []bool{false, true} {
+		t.Run(fmt.Sprintf("lost %t", lost), func(t *testing.T) {
+			root := newCheckout(t)
+			copyFixture(t, "two-modules", root)
+			composedForFake(t, root, "/usr/local/bin/copy-agent")
+			runGit(t, root, "add", "qory.yaml", "modules")
+			runGit(t, root, "commit", "--quiet", "-m", "first")
+			writeFile(t, filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "forager.yaml"),
+				"wall:\n  adapter: docker\n  helper: "+helper+"\n  user: \"1000:1000\"\n  image: "+image+"\n")
+			t.Setenv("QORY_RUN_KEY", "")
+			var argv []string
+			t.Cleanup(cmd.GitSessionsInDocker(func(a []string) { argv = a }))
+			if lost {
+				t.Cleanup(cmd.LoseLinkAfterJoin(errors.New("the link to the gateway is lost")))
+			}
+			start := time.Now()
+			out, err := run(t, "run", "claude", "--", "-p", "hi")
+			end := time.Now().Add(time.Second)
+			t.Logf("the git container: %s", strings.Join(argv, " "))
+			t.Logf("qory run:\n%s", out)
+			if lost {
+				if err == nil {
+					t.Fatalf("the run passed:\n%s", out)
+				}
+				wants(t, out, "the link to the gateway is lost")
+			} else if err != nil {
+				t.Fatalf("%v\n%s", err, out)
+			}
+			branch := runBranchOf(t, out)
+			gitOutput(t, root, "cat-file", "-e", branch+":left.txt")
+			gitOutput(t, root, "cat-file", "-e", branch+":more.txt")
+			log := gitOutput(t, root, "log", "--format=%s", "main.."+branch)
+			t.Logf("git log main..%s:\n%s", branch, log)
+			if log != "Add the work the agent left uncommitted\nAdd the agent's file" {
+				t.Errorf("the run's branch has the commits %q", log)
+			}
+			id := strings.TrimPrefix(branch, "qory/run-")
+			if left := dockerOut(t, "", "ps", "--all", "--filter", "label=dev.qory.run="+id, "--format", "{{.Names}}"); left != "" {
+				t.Errorf("containers of the run are left: %s", left)
+			}
+			events := dockerOut(t, "", "events", "--since", start.Format(time.RFC3339), "--until", end.Format(time.RFC3339),
+				"--filter", "label=dev.qory.run="+id, "--filter", "type=container",
+				"--format", "{{.Action}} {{.Actor.Attributes.name}} {{.Actor.Attributes.exitCode}}")
+			t.Logf("the engine's events of the run's containers:\n%s", events)
+			wants(t, events, "start qory-copy-"+id, "die qory-copy-"+id+" 0", "destroy qory-copy-"+id)
+			agentGone, created, relayGone := strings.Index(events, "destroy qory-"+id+"-agent"), strings.Index(events, "create qory-copy-"+id), strings.Index(events, "destroy qory-"+id+"-relay")
+			if agentGone < 0 || created < agentGone {
+				t.Errorf("the git container was created before the agent's container was removed:\n%s", events)
+			}
+			// The close removes the relay: the git container comes after it only with the link lost.
+			if lost != (relayGone < created) {
+				t.Errorf("the git container, lost %t, against the close:\n%s", lost, events)
+			}
+			steps := strings.Join(stepsAndSessions(sessionRecord(t, root)), "\n")
+			if strings.Contains(steps, "copy started") == lost {
+				t.Errorf("the record's steps, lost %t:\n%s", lost, steps)
+			}
+			wants(t, strings.Join(argv, " "), "--network none", "--cap-drop ALL", "--user 1000:1000", "--label dev.qory.run="+id)
+		})
+	}
+}
+
+// plantingAgent is the program of the agent's container in
+// [TestARealWriteRunRunsNoFilterPlantedInASubmodule]: it plants a clean filter in the
+// configuration of the submodule libs/s that appends to planted-ran at the top of the copy, applies
+// it to every file there, and changes lib.txt to other bytes of the same size. It also sets
+// log.showSignature and gpg.program in the copy's configuration, to a program that marks work left
+// behind in the git session's folder, and moves the run's branch to a commit with a forged
+// signature, which HEAD's reflog then has.
+const plantingAgent = `#!/bin/sh
+top=$PWD
+git -C libs/s config filter.planted.clean "sh -c 'echo ran >> $top/planted-ran; cat'"
+echo '* filter=planted' > libs/s/.gitattributes
+echo LIB > libs/s/lib.txt
+echo left > left.txt
+printf '#!/bin/sh\n: > "%s/../bundle/0.left"\ncat > /dev/null\n' "$top" > .git/check-signature
+chmod +x .git/check-signature
+git config log.showSignature true
+git config gpg.program "$top/.git/check-signature"
+forged=$(printf 'tree %s\nparent %s\nauthor agent <agent@example.invalid> 1700000000 +0000\ncommitter agent <agent@example.invalid> 1700000000 +0000\ngpgsig -----BEGIN PGP SIGNATURE-----\n \n iQEzBAABCAAdFiEEforged\n -----END PGP SIGNATURE-----\n\nforged\n' \
+	"$(git rev-parse 'HEAD^{tree}')" "$(git rev-parse HEAD)" | git hash-object -t commit -w --stdin)
+git update-ref -m forged HEAD "$forged"
+`
+
+// TestARealWriteRunRunsNoFilterPlantedInASubmodule is a local walled write run behind a real wall
+// whose agent plants a clean filter in a submodule's configuration: the git session in its
+// container reads the submodule's changes with a configuration it makes, so the filter never
+// runs, and the submodule's change comes back under the run's prefix in the person's git folder
+// of the submodule. The planted signature check never runs either, so no work stays behind. It
+// runs only with QORY_TEST_DOCKER=1 and docker on the PATH.
+func TestARealWriteRunRunsNoFilterPlantedInASubmodule(t *testing.T) {
+	if os.Getenv("QORY_TEST_DOCKER") != "1" {
+		t.Skip("QORY_TEST_DOCKER=1 runs it")
+	}
+	if _, err := exec.LookPath("docker"); err != nil {
+		t.Skip("no docker command")
+	}
+	helper, image := realWallImage(t, "planting-agent", plantingAgent)
+	sub := filepath.Join(tempDir(t), "sub")
+	writeFile(t, filepath.Join(sub, "lib.txt"), "lib\n")
+	runGit(t, sub, "init", "--quiet", "-b", "main")
+	runGit(t, sub, "add", "lib.txt")
+	runGit(t, sub, "-c", "user.name=person", "-c", "user.email=person@example.invalid", "commit", "--quiet", "-m", "lib")
+	root := newCheckout(t)
+	copyFixture(t, "two-modules", root)
+	composedForFake(t, root, "/usr/local/bin/planting-agent")
+	runGit(t, root, "-c", "protocol.file.allow=always", "submodule", "add", "--quiet", sub, "libs/s")
+	runGit(t, root, "add", "qory.yaml", "modules")
+	runGit(t, root, "commit", "--quiet", "-m", "first")
+	writeFile(t, filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "forager.yaml"),
+		"wall:\n  adapter: docker\n  helper: "+helper+"\n  user: \"1000:1000\"\n  image: "+image+"\n")
+	t.Setenv("QORY_RUN_KEY", "")
+	t.Cleanup(cmd.GitSessionsInDocker(func([]string) {}))
+	out, err := run(t, "run", "claude", "--", "-p", "hi")
+	t.Logf("qory run:\n%s", out)
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if strings.Contains(out, "did not come back") {
+		t.Errorf("part of the run's work stayed behind, so the planted signature check ran:\n%s", out)
+	}
+	branch := runBranchOf(t, out)
+	gitOutput(t, root, "cat-file", "-e", branch+":left.txt")
+	if files := gitOutput(t, root, "ls-tree", "-r", "--name-only", branch); strings.Contains(files, "planted-ran") {
+		t.Errorf("the planted filter ran: the run's branch has planted-ran:\n%s", files)
+	}
+	prefix := runRefsOf(t, out)
+	gitDir := gitOutput(t, filepath.Join(root, "libs", "s"), "rev-parse", "--path-format=absolute", "--git-dir")
+	if got := gitOutput(t, gitDir, "show", prefix+"/uncommitted:lib.txt"); got != "LIB" {
+		t.Errorf("lib.txt of the submodule's uncommitted is %q", got)
 	}
 }
