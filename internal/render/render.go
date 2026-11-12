@@ -265,6 +265,19 @@ type AgentHomer interface {
 	AgentHomeVariable() string
 }
 
+// TranscriptLinker is an [AgentHomer] whose program writes the transcripts of its
+// sessions in a folder of its configuration directory. On a dispatched walled run, qory
+// links that folder to the place where Forager binds the run's transcript folder, the
+// runtime descriptor's resume.prefix below the agent's HOME, so the transcripts reach
+// the machine and a continuation of a paused run resumes from them. A runtime that does
+// not implement it gets no link.
+type TranscriptLinker interface {
+	AgentHomer
+	// TranscriptFolder is the folder, relative to the configuration directory and with
+	// no .. name, such as projects.
+	TranscriptFolder() string
+}
+
 // Installer is a [Launcher] whose program installs at a version from one package, the
 // one qory image check names when an image has another version.
 type Installer interface {

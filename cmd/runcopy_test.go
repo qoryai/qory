@@ -2611,6 +2611,51 @@ func TestACopyStepThatDoesNotStartMovesTheGitSessionPastTheClose(t *testing.T) {
 	gitOutput(t, root, "cat-file", "-e", runBranchOf(t, out)+":left.txt")
 }
 
+// TestAPausedRunBringsItsWorkBack is a session paused at the model key limit in a copy: the run
+// closes paused, and the agent's file comes back for a continuation, from the copy step before the
+// close and, when that step does not start, from the git session after the close.
+func TestAPausedRunBringsItsWorkBack(t *testing.T) {
+	paused := session.Outcome{State: event.StatePaused, Reason: event.ReasonModelKeyLimit, ExitCode: 143}
+	for name, stepErr := range map[string]error{"in the copy step": nil, "after the close": errors.New("the link to the gateway dropped")} {
+		t.Run(name, func(t *testing.T) {
+			root := copyCheckout(t)
+			t.Cleanup(cmd.SetJoinResult(func(spec session.SessionSpec) (*session.Result, error) {
+				if spec.OnVariables != nil {
+					spec.OnVariables(session.Applied{})
+				}
+				writeFile(t, filepath.Join(spec.Dir, "left.txt"), "left\n")
+				return &session.Result{State: event.StatePaused, Reason: event.ReasonModelKeyLimit, ExitCode: 143}, nil
+			}))
+			closes, _, restore := cmd.OpenNowhereWith(cmd.Nowhere{StepErr: func(kind string) error {
+				if kind == event.StepCopy {
+					return stepErr
+				}
+				return nil
+			}})
+			defer restore()
+			sessions := 0
+			t.Cleanup(cmd.SetGitSession(func(ctx context.Context, spec session.SessionSpec) (*session.Result, error) {
+				sessions++
+				if after := len(closes()) == 1; after != (stepErr != nil) {
+					t.Errorf("the git session ran after the close: %t, want %t", after, stepErr != nil)
+				}
+				return cmd.GitSessionOnHost(ctx, spec)
+			}))
+			out, err := run(t, "run", "claude", "--", "-p", "hi")
+			if got := cmd.ExitCode(err); got != 1 {
+				t.Errorf("exit %d (%v), want 1\n%s", got, err, out)
+			}
+			if sessions != 1 {
+				t.Errorf("%d git sessions ran, want 1", sessions)
+			}
+			if got := closes(); len(got) != 1 || got[0] != paused {
+				t.Errorf("the run closed with %+v, want %+v\n%s", got, paused, out)
+			}
+			gitOutput(t, root, "cat-file", "-e", runBranchOf(t, out)+":left.txt")
+		})
+	}
+}
+
 // TestAJoinStoppedAtItsChecksKeepsNoCopy is a join that its checks stopped: no agent ran, so no line tells the
 // person to read a copy, and the copy goes.
 func TestAJoinStoppedAtItsChecksKeepsNoCopy(t *testing.T) {

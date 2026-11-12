@@ -63,6 +63,8 @@ func TestRunEndedSaysTheOutcome(t *testing.T) {
 			"the run failed: its run credential could not be checked, and claude was stopped\n", 1},
 		{"no valid answer to the check", closed("failed", oldReasonCredentialInvalid), "",
 			"the run failed: its run credential could not be checked, and claude was stopped\n", 1},
+		{"every model key at its limit", closed("paused", event.ReasonModelKeyLimit), "",
+			"the run was paused: every model key reached its limit, and claude was stopped\n", 1},
 		{"stopped with no outcome", closed("cancelled", event.ReasonStopped), "",
 			"the run was cancelled, with no outcome given, and claude was stopped\n", 1},
 		{"stopped before the gateway gives its state", closed("failed", event.ReasonStopped), "",
@@ -115,6 +117,10 @@ func TestRunEndedSaysTheOutcome(t *testing.T) {
 			"claude ended on the signal SIGKILL\nthe run completed\n", 0},
 		{"exit 3, the starter's cancel", &session.Result{State: "cancelled", ExitCode: 3}, "",
 			"claude exited 3\nthe run was cancelled\n", 1},
+		{"a kill at the model key limit", &session.Result{State: "paused", Reason: event.ReasonModelKeyLimit, ExitCode: -1, Signal: "SIGTERM"}, "",
+			"claude ended on the signal SIGTERM\nthe run was paused: every model key reached its limit\n", 1},
+		{"exit 0 at the model key limit", &session.Result{State: "paused", Reason: event.ReasonModelKeyLimit}, "",
+			"claude exited 0\nthe run was paused: every model key reached its limit\n", 1},
 	} {
 		said, code := endOf(c.res, runEnd{runtime: "claude", timeout: 5 * time.Minute, got: c.got})
 		if said != c.want || code != c.code {
@@ -139,6 +145,7 @@ func TestRunEndedMarksTheOutcome(t *testing.T) {
 		{&session.Result{RunClosed: true, ClosedReason: event.ReasonStopped, State: "cancelled", Reason: event.ReasonStopped}, "✗ the run was cancelled, with no outcome given, and claude was stopped\n"},
 		{&session.Result{State: "failed", Reason: "checks_failed"}, "✓ claude exited 0\n✗ the run failed: checks failed\n"},
 		{&session.Result{State: "succeeded", ExitCode: 2}, "✗ claude exited 2\n✓ the run completed\n"},
+		{&session.Result{State: "paused", Reason: event.ReasonModelKeyLimit}, "✓ claude exited 0\n✗ the run was paused: every model key reached its limit\n"},
 	} {
 		var out strings.Builder
 		runEnded(ui.New(&out), c.res, runEnd{runtime: "claude"})
@@ -177,6 +184,7 @@ func TestGatewayEndedResendSaysTheOutcome(t *testing.T) {
 		{session.ResendResult{RunClosed: true, ClosedReason: event.ReasonRunClosed, State: "cancelled", Reason: event.ReasonInterrupted}, "the run has ended (cancelled)" + tail},
 		{session.ResendResult{RunClosed: true, ClosedReason: oldReasonCredentialExpired}, "the run has ended (cancelled: the run credential expired)" + tail},
 		{session.ResendResult{RunClosed: true, ClosedReason: event.ReasonSessionLost}, "the run has ended (lost: it lost contact with the gateway for 1m30s)" + tail},
+		{session.ResendResult{RunClosed: true, ClosedReason: event.ReasonRunClosed, State: "paused", Reason: event.ReasonModelKeyLimit}, "the run has ended (paused: every model key reached its limit)" + tail},
 		{session.ResendResult{RunClosed: true, ClosedReason: event.ReasonBatchRefused}, "the run has ended (failed: its events could not be recorded)" + tail},
 		{session.ResendResult{RunClosed: true, ClosedReason: oldReasonCredentialInvalid}, "the run has ended (failed: its run credential could not be checked)" + tail},
 		{session.ResendResult{RunClosed: true, ClosedReason: "another_code"}, "the run has ended (failed: the gateway stopped during the run)" + tail},
@@ -316,6 +324,8 @@ func TestEndsAsSaysTheResendsEnd(t *testing.T) {
 		{"failed", "checks_failed", "failed: checks failed"},
 		{"cancelled", event.ReasonStopped, "cancelled"},
 		{"cancelled", event.ReasonInterrupted, "cancelled"},
+		{"paused", event.ReasonModelKeyLimit, "paused: every model key reached its limit"},
+		{"paused", "", "paused: every model key reached its limit"},
 	} {
 		if got := endsAs(c.state, c.reason); got != c.want {
 			t.Errorf("%q, %q: %q, want %q", c.state, c.reason, got, c.want)
@@ -438,6 +448,7 @@ func TestPushEndingOutcome(t *testing.T) {
 	succeeded := session.Outcome{State: event.StateSucceeded}
 	timedOut := session.Outcome{State: event.StateCancelled, Reason: event.ReasonTimeout, ExitCode: exitTimeout}
 	failed := session.Outcome{State: event.StateFailed, ExitCode: 3}
+	paused := session.Outcome{State: event.StatePaused, Reason: event.ReasonModelKeyLimit, ExitCode: 143}
 	refused := &exitError{code: 2}
 	for _, c := range []struct {
 		name   string
@@ -450,6 +461,8 @@ func TestPushEndingOutcome(t *testing.T) {
 		{"failed step, failed session", pushEnding{session: failed}, failed},
 		{"cut step, failed session", pushEnding{session: failed, cut: true}, failed},
 		{"cut step, timed out session", pushEnding{session: timedOut, cut: true, stopped: true}, timedOut},
+		{"failed step, paused session", pushEnding{session: paused}, paused},
+		{"cut step, paused session", pushEnding{session: paused, cut: true, stopped: true}, paused},
 	} {
 		if got := c.ending.outcome(refused); got != c.want {
 			t.Errorf("%s: %+v, want %+v", c.name, got, c.want)
@@ -545,6 +558,7 @@ func TestFailedEnd(t *testing.T) {
 		{State: event.StateFailed, ExitCode: 3}:                        "The run ended failed: exit 3.",
 		{State: event.StateCancelled, Reason: event.ReasonTimeout}:     "The run ended cancelled: timeout.",
 		{State: event.StateCancelled, Reason: event.ReasonInterrupted}: "The run ended cancelled: interrupted.",
+		{State: event.StatePaused, Reason: event.ReasonModelKeyLimit}:  "The run ended paused: model_key_limit.",
 	} {
 		if got := failedEnd(out); got != want {
 			t.Errorf("%+v: %q, want %q", out, got, want)
@@ -572,5 +586,35 @@ func TestThePushHasTwoMinutesPastTheLimit(t *testing.T) {
 	}
 	if took := time.Since(started); took < 14*time.Second {
 		t.Errorf("the step ended %s after the signal, want 15s", took)
+	}
+}
+
+// TestSessionOutcome is the outcome qory closes a run with for each end of its one
+// session: a session paused at the model key limit closes the run paused with
+// model_key_limit and the runtime's exit code.
+func TestSessionOutcome(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		res  *session.Result
+		err  error
+		want session.Outcome
+	}{
+		{"no session", nil, errors.New("join"), session.Outcome{State: event.StateFailed, ExitCode: -1}},
+		{"closed by the gateway", &session.Result{RunClosed: true, State: event.StateCancelled, Reason: event.ReasonStopped}, nil,
+			session.Outcome{State: event.StateFailed, ExitCode: -1}},
+		{"timed out", &session.Result{TimedOut: true, State: event.StateCancelled, Reason: event.ReasonTimeout, ExitCode: 143}, nil,
+			session.Outcome{State: event.StateCancelled, Reason: event.ReasonTimeout, ExitCode: exitTimeout}},
+		{"interrupted", &session.Result{Cancelled: true, State: event.StateCancelled, Reason: event.ReasonInterrupted, ExitCode: 130}, nil,
+			session.Outcome{State: event.StateCancelled, Reason: event.ReasonInterrupted, ExitCode: 130}},
+		{"paused at the model key limit", &session.Result{State: event.StatePaused, Reason: event.ReasonModelKeyLimit, ExitCode: 143}, nil,
+			session.Outcome{State: event.StatePaused, Reason: event.ReasonModelKeyLimit, ExitCode: 143}},
+		{"paused, exit 0", &session.Result{State: event.StatePaused, Reason: event.ReasonModelKeyLimit}, nil,
+			session.Outcome{State: event.StatePaused, Reason: event.ReasonModelKeyLimit}},
+		{"succeeded", &session.Result{State: event.StateSucceeded}, nil, session.Outcome{State: event.StateSucceeded}},
+		{"failed", &session.Result{State: event.StateFailed, ExitCode: 3}, nil, session.Outcome{State: event.StateFailed, ExitCode: 3}},
+	} {
+		if got := sessionOutcome(c.res, c.err); got != c.want {
+			t.Errorf("%s: %+v, want %+v", c.name, got, c.want)
+		}
 	}
 }

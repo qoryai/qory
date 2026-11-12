@@ -49,7 +49,7 @@ qory apiary run list [flags]
       --limit <number>                list at most <number> runs, from 1 to 100 (default 25)
       --server string                 the Qory Apiary server, by its URL; needed when diagnostics keys for several servers are on this computer
       --since <time>                  list the runs created at or after <time>: a duration back from now, such as 1h, or an RFC 3339 time
-      --state <state>                 list the runs in <state>: pending, running, completed, failed, cancelled or lost
+      --state <state>                 list the runs in <state>: pending, running, completed, failed, cancelled, paused or lost
       --work-item <number>            list the runs of the work item <number> in the workspace; needs --workspace
       --workflow <name>               list the runs that start the workflow <name>, such as hello
       --workspace <org>/<workspace>   list the runs of one workspace, as <org>/<workspace>, such as acme/web

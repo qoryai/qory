@@ -417,6 +417,25 @@ func TestAWalledRunCodeMountsItsInputsReadOnly(t *testing.T) {
 	}
 }
 
+// TestAWalledRunCodeLinksClaudeCodesTranscripts is a walled run of Claude Code from a
+// run code: its agent starts through qory run agent-env, and the verb's words between
+// the kept names' file and -- are the folder projects of the agent's home and the place
+// .claude/projects below HOME, where Forager binds the run's transcript folder.
+func TestAWalledRunCodeLinksClaudeCodesTranscripts(t *testing.T) {
+	r := runFromCodeWith(t, func(string) []string {
+		docker, _ := fakeDocker(t)
+		walledBy(t, docker)
+		return nil
+	}, []string{"--home", filepath.Join(tempDir(t), "home")}, nil, nil)
+	if !r.joined {
+		t.Fatalf("%v (exit %d), want the join\n%s", r.err, cmd.ExitCode(r.err), r.out)
+	}
+	i := slices.Index(r.spec.Args, "agent-env")
+	if r.spec.Command != wall.HelperPath || i < 0 || len(r.spec.Args) < i+5 || !slices.Equal(r.spec.Args[i+2:i+5], []string{"projects", ".claude/projects", "--"}) {
+		t.Errorf("the launch is %s %q", r.spec.Command, r.spec.Args)
+	}
+}
+
 // walledBy writes a forager.yaml whose wall runs docker as its docker program.
 func walledBy(t *testing.T, docker string) {
 	t.Helper()

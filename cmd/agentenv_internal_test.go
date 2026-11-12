@@ -8,10 +8,12 @@ import (
 	"testing"
 
 	"github.com/qoryai/forager/session"
+	"github.com/qoryai/forager/session/runtimes"
 	"github.com/qoryai/forager/session/runtimes/catalog"
 	"github.com/qoryai/forager/wall"
 
 	"github.com/qoryai/qory/internal/preparation"
+	"github.com/qoryai/qory/internal/render"
 )
 
 // TestTheAgentEnvKeepsTheNamesForagerSets is a dispatched walled run of Claude Code
@@ -30,7 +32,7 @@ func TestTheAgentEnvKeepsTheNamesForagerSets(t *testing.T) {
 	}
 	var said []string
 	spec := runSpec{OpenSpec: session.OpenSpec{Wall: &wall.Docker{}}, SessionSpec: session.SessionSpec{Runtime: rt, Command: "sh", Args: []string{"--settings", "/h/claude/settings.json", "-p", "two words"}, HarnessHome: "/h", LaunchFixed: withAgentHome(nil, preparation.EnvAgentHome), Mounts: []wall.Mount{{Path: "/work"}}}}
-	done, err := wrapAgentEnv(&spec, false, func(line string) { said = append(said, line) })
+	done, err := wrapAgentEnv(&spec, false, transcriptLink{}, func(line string) { said = append(said, line) })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,7 +122,7 @@ func TestTheAgentEnvKeepsTheStartKeysEndpoint(t *testing.T) {
 		t.Fatal(err)
 	}
 	spec := runSpec{OpenSpec: session.OpenSpec{Wall: &wall.Docker{}}, SessionSpec: session.SessionSpec{Runtime: rt, Command: "sh", Args: []string{"-p", "two words"}, HarnessHome: "/h", LaunchFixed: withAgentHome(nil, preparation.EnvAgentHome)}}
-	done, err := wrapAgentEnv(&spec, false, func(line string) { t.Errorf("said %q", line) })
+	done, err := wrapAgentEnv(&spec, false, transcriptLink{}, func(line string) { t.Errorf("said %q", line) })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -136,5 +138,100 @@ func TestTheAgentEnvKeepsTheStartKeysEndpoint(t *testing.T) {
 	}
 	if want := env[:3]; !slices.Equal(got, want) {
 		t.Errorf("env %q\nwant %q", got, want)
+	}
+}
+
+// TestTheAgentEnvLinksClaudeCodesTranscripts is a dispatched walled run of Claude Code,
+// whose descriptor has resume.prefix ~/.claude/projects/: the verb's words contain the
+// renderer's folder projects and the place .claude/projects between the kept names' file
+// and --, still with no -p, --print or --settings, and the verb starts the launch after
+// -- unchanged. A runtime whose renderer has no transcript folder gets no link.
+func TestTheAgentEnvLinksClaudeCodesTranscripts(t *testing.T) {
+	rt, err := catalog.Lookup("claude", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	renderer, err := render.Lookup("claude")
+	if err != nil {
+		t.Fatal(err)
+	}
+	link := transcriptLinkFor(renderer, rt)
+	if link != (transcriptLink{folder: "projects", under: ".claude/projects"}) {
+		t.Fatalf("the link is %+v", link)
+	}
+	codex, err := render.Lookup("codex")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := transcriptLinkFor(codex, rt); got != (transcriptLink{}) {
+		t.Errorf("a renderer with no transcript folder gets %+v", got)
+	}
+
+	spec := runSpec{OpenSpec: session.OpenSpec{Wall: &wall.Docker{}}, SessionSpec: session.SessionSpec{Runtime: rt, Command: "sh", Args: []string{"-p", "two words"}, LaunchFixed: withAgentHome(nil, preparation.EnvAgentHome)}}
+	done, err := wrapAgentEnv(&spec, false, link, func(line string) { t.Errorf("said %q", line) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer done()
+	if len(spec.Args) < 6 || !slices.Equal(spec.Args[3:6], []string{"projects", ".claude/projects", "--"}) {
+		t.Fatalf("the launch is %s %q", spec.Command, spec.Args)
+	}
+	for _, w := range spec.Args[:6] {
+		if w == "-p" || w == "--print" || strings.HasPrefix(w, "--settings") {
+			t.Errorf("the verb's words contain %s", w)
+		}
+	}
+	file, got, launch, err := agentEnvParts(spec.Args[2:])
+	if err != nil || file != spec.Args[2] || got != link || !slices.Equal(launch, []string{"sh", "-p", "two words"}) {
+		t.Errorf("the parts are %q %+v %q, %v", file, got, launch, err)
+	}
+	_, argv, _, err := agentEnvLaunch(spec.Args[2:], []string{"PATH=" + os.Getenv("PATH")})
+	if err != nil || !slices.Equal(argv, []string{"sh", "-p", "two words"}) {
+		t.Errorf("starts %q, %v", argv, err)
+	}
+	for _, args := range [][]string{{file, "projects", "--", "sh"}, {file, "", ".claude/projects", "--", "sh"}, {file, "projects", ".claude/projects", "--"}} {
+		if _, _, _, err := agentEnvParts(args); err == nil {
+			t.Errorf("%q: no error", args)
+		}
+	}
+}
+
+// resumeRuntime is a runtime whose descriptor has resume rs.
+type resumeRuntime struct {
+	runtimes.Runtime
+	rs runtimes.Resume
+}
+
+// Resume is rs.
+func (r resumeRuntime) Resume() (runtimes.Resume, bool) { return r.rs, true }
+
+// TestATranscriptLinkNeedsForagersBind is Claude Code with a user's descriptor whose
+// resume Forager binds no transcript folder for: a prefix that is not a clean path, such
+// as ~/.claude/./projects/, or a resume.path that is not resume.prefix followed by
+// {cwd_slug}/{session_id}.jsonl. The run gets no link, so qory run agent-env starts the
+// agent as it does without one.
+func TestATranscriptLinkNeedsForagersBind(t *testing.T) {
+	rt, err := catalog.Lookup("claude", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	renderer, err := render.Lookup("claude")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, rs := range []runtimes.Resume{
+		{Prefix: "~/.claude/./projects/", Path: "~/.claude/./projects/{cwd_slug}/{session_id}.jsonl"},
+		{Prefix: "~/.claude//projects/", Path: "~/.claude//projects/{cwd_slug}/{session_id}.jsonl"},
+		{Prefix: "/etc/projects/", Path: "/etc/projects/{cwd_slug}/{session_id}.jsonl"},
+		{Prefix: "~/", Path: "~/{cwd_slug}/{session_id}.jsonl"},
+		{Prefix: "~/.claude/projects/", Path: "~/.claude/projects/{session_id}.jsonl"},
+	} {
+		if got := transcriptLinkFor(renderer, resumeRuntime{rt, rs}); got != (transcriptLink{}) {
+			t.Errorf("%+v gets %+v", rs, got)
+		}
+	}
+	rs := runtimes.Resume{Prefix: "~/.config/agent/projects/", Path: "~/.config/agent/projects/{cwd_slug}/{session_id}.jsonl"}
+	if got := transcriptLinkFor(renderer, resumeRuntime{rt, rs}); got != (transcriptLink{folder: "projects", under: ".config/agent/projects"}) {
+		t.Errorf("%+v gets %+v", rs, got)
 	}
 }

@@ -20,7 +20,7 @@ func walledSection(t *testing.T) string {
 	t.Helper()
 	docker, log := fakeDocker(t)
 	wrapper := filepath.Join(t.TempDir(), "docker")
-	writeFile(t, wrapper, "#!/bin/sh\ncase \"$1\" in run) echo \"container started\" >> "+log+" ;; esac\nexec "+docker+" \"$@\"\n")
+	writeFile(t, wrapper, "#!/bin/sh\ncase \"$1 $2\" in \"run \"*|\"start --attach\") echo \"container started\" >> "+log+" ;; esac\nexec "+docker+" \"$@\"\n")
 	if err := os.Chmod(wrapper, 0o755); err != nil {
 		t.Fatal(err)
 	}
