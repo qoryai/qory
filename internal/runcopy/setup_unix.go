@@ -27,15 +27,14 @@ import (
 // [LeftOut.Setup]. Call it after the setup and before the agent's session. A trailing
 // / of a path is dropped. It opens each folder on the way from the one above it with
 // O_NOFOLLOW, so it follows no link, and hashes a file's content, or a link's target,
-// in the object format of the bare source of r. For a repository that the setup made, it
-// hashes the list of its HEAD, refs and .gitignore files, see [repoState]. No git opens the
-// copy.
+// in the object format of the bare source of r. A repository that the setup made, a folder with
+// a .git folder, gets [StateRepo], which [Dir.Recorded] replaces. No git opens the copy.
 func (d Dir) SetupStates(ctx context.Context, r Repository, paths []string) ([]SetupPath, error) {
 	rel, err := repositoryRel(r)
 	if err != nil {
 		return nil, err
 	}
-	return d.setupStatesAt(ctx, filepath.Join(d.Work(), filepath.FromSlash(rel)), r.index, paths)
+	return d.setupStatesAt(ctx, filepath.Join(d.Work(), filepath.FromSlash(rel)), r.index, paths, true)
 }
 
 // SubmoduleSetup lists each regular file and link in a submodule of the repository r, as
@@ -80,7 +79,7 @@ func (d Dir) SubmoduleSetup(ctx context.Context, r Repository) ([]SetupPath, err
 	if len(paths) == 0 {
 		return nil, nil
 	}
-	return d.setupStatesAt(ctx, top, r.index, paths)
+	return d.setupStatesAt(ctx, top, r.index, paths, false)
 }
 
 // newerFiles adds to paths each regular file and link below the folder dir, at rel, with a time
@@ -347,7 +346,7 @@ func (w *setupWalk) folder(ctx context.Context, dir int, rel string, depth int) 
 	}
 	for i, e := range untracked {
 		switch {
-		case ignored[asked[i]]:
+		case ignored[asked[i]] && (e.folder || e.name != ".gitignore"):
 		case !e.folder:
 			w.note(e.at)
 		default:
@@ -514,8 +513,9 @@ func copyFormat(ctx context.Context, source, private, base string) error {
 	return writeNew(filepath.Join(private, "HEAD"), base+"\n")
 }
 
-// setupStatesAt is [Dir.SetupStates] for the repository number index at top.
-func (d Dir) setupStatesAt(ctx context.Context, top string, index int, paths []string) ([]SetupPath, error) {
+// setupStatesAt is [Dir.SetupStates] for the repository number index at top. With repos unset, a
+// folder is other, also a repository the setup made.
+func (d Dir) setupStatesAt(ctx context.Context, top string, index int, paths []string, repos bool) ([]SetupPath, error) {
 	format, err := objectFormat(ctx, d.source(index))
 	if err != nil {
 		return nil, err
@@ -531,7 +531,7 @@ func (d Dir) setupStatesAt(ctx context.Context, top string, index int, paths []s
 		if !cleanRel(p) {
 			return nil, fmt.Errorf(textSetupPath, shown(p))
 		}
-		state, err := setupState(ctx, root, format, p)
+		state, err := setupState(ctx, root, format, p, repos)
 		if err != nil {
 			return nil, fileErr(filepath.Join(top, filepath.FromSlash(p)), err)
 		}
@@ -541,8 +541,8 @@ func (d Dir) setupStatesAt(ctx context.Context, top string, index int, paths []s
 }
 
 // setupState is what the folder root has at rel, in the form of [SetupPath.State]: other for a
-// file past [maxHashBytes], and for a folder that is no repository or whose [repoState] fails.
-func setupState(ctx context.Context, root int, format, rel string) (string, error) {
+// file past [maxHashBytes], and for a folder, but [StateRepo] for a repository with repos set.
+func setupState(ctx context.Context, root int, format, rel string, repos bool) (string, error) {
 	dir, name, err := lookup(root, rel)
 	if errors.Is(err, errNoEntry) {
 		return "missing", nil
@@ -585,6 +585,9 @@ func setupState(ctx context.Context, root int, format, rel string) (string, erro
 		id, err := hashBlob(ctx, format, f, info.Size())
 		return kind + id, err
 	case unix.S_IFDIR:
+		if !repos {
+			return "other", nil
+		}
 		sub, err := unix.Openat(dir, name, dirFlags, 0)
 		if err != nil {
 			return "other", nil
@@ -594,158 +597,10 @@ func setupState(ctx context.Context, root int, format, rel string) (string, erro
 		if err := unix.Fstatat(sub, ".git", &git, unix.AT_SYMLINK_NOFOLLOW); err != nil || git.Mode&unix.S_IFMT != unix.S_IFDIR {
 			return "other", nil
 		}
-		id, err := repoState(ctx, sub, format)
-		if err != nil {
-			return "other", ctx.Err()
-		}
-		return "repo:" + id, nil
+		return StateRepo, nil
 	}
 	return "other", nil
 }
-
-// repoState is the blob id, in format, of the list that the git session's repo_state writes for
-// the repository at the folder dir, which the setup made: a line per file, kind:id and its path
-// below dir, sorted by bytes. The files are HEAD, packed-refs and each file below refs, reftable
-// and logs in .git, which have the repository's HEAD, refs and reflogs, and each .gitignore below
-// dir but in a folder named .git, which have its ignore rules. kind is file for a regular file, with the blob id
-// of its content, and link for a link, with the blob id of its target. It reads the files with
-// no git and follows no link. It fails for a path with a line break or a carriage return, a file
-// past [maxHashBytes], a folder more than [maxOpenFolders] deep, and any failed read.
-func repoState(ctx context.Context, dir int, format string) (string, error) {
-	var lines []string
-	if err := repoIgnores(ctx, dir, "", format, 0, &lines); err != nil {
-		return "", err
-	}
-	git, err := unix.Openat(dir, ".git", dirFlags, 0)
-	if err != nil {
-		return "", err
-	}
-	defer unix.Close(git)
-	for _, name := range []string{"HEAD", "packed-refs", "refs", "reftable", "logs"} {
-		if err := repoEntry(ctx, git, name, ".git/"+name, format, 0, true, &lines); err != nil {
-			return "", err
-		}
-	}
-	slices.Sort(lines)
-	text := strings.Join(lines, "")
-	return hashBlob(ctx, format, strings.NewReader(text), int64(len(text)))
-}
-
-// repoIgnores adds to lines each .gitignore below the folder dir at rel, as [repoState] lists it.
-func repoIgnores(ctx context.Context, dir int, rel, format string, depth int, lines *[]string) error {
-	if depth >= maxOpenFolders {
-		return errTooDeep
-	}
-	names, err := readNames(dir)
-	if err != nil {
-		return err
-	}
-	for _, name := range names {
-		if name == ".git" {
-			continue
-		}
-		at := path.Join(rel, name)
-		if name == ".gitignore" {
-			if err := repoEntry(ctx, dir, name, at, format, depth, false, lines); err != nil {
-				return err
-			}
-		}
-		var st unix.Stat_t
-		if err := unix.Fstatat(dir, name, &st, unix.AT_SYMLINK_NOFOLLOW); err != nil {
-			return err
-		}
-		if st.Mode&unix.S_IFMT != unix.S_IFDIR {
-			continue
-		}
-		sub, err := unix.Openat(dir, name, dirFlags, 0)
-		if err != nil {
-			return err
-		}
-		err = repoIgnores(ctx, sub, at, format, depth+1, lines)
-		unix.Close(sub)
-		if err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// repoEntry adds to lines the line of the entry name in the folder dir at rel, as [repoState]
-// lists it: a regular file or a link, and nothing for another kind. With walk set, a folder there
-// adds each regular file and link below it.
-func repoEntry(ctx context.Context, dir int, name, rel, format string, depth int, walk bool, lines *[]string) error {
-	if strings.ContainsAny(rel, "\n\r") {
-		return errRepoPath
-	}
-	var st unix.Stat_t
-	err := unix.Fstatat(dir, name, &st, unix.AT_SYMLINK_NOFOLLOW)
-	if errors.Is(err, unix.ENOENT) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	switch st.Mode & unix.S_IFMT {
-	case unix.S_IFLNK:
-		buf := make([]byte, unix.PathMax)
-		n, err := unix.Readlinkat(dir, name, buf)
-		if err != nil {
-			return err
-		}
-		id, err := hashBlob(ctx, format, bytes.NewReader(buf[:n]), int64(n))
-		if err != nil {
-			return err
-		}
-		*lines = append(*lines, "link:"+id+" "+rel+"\n")
-	case unix.S_IFREG:
-		f, err := openFileAt(dir, name, rel)
-		if err != nil {
-			return err
-		}
-		defer f.Close()
-		info, err := f.Stat()
-		if err != nil {
-			return err
-		}
-		if !info.Mode().IsRegular() || info.Size() > maxHashBytes {
-			return errRepoPath
-		}
-		id, err := hashBlob(ctx, format, f, info.Size())
-		if err != nil {
-			return err
-		}
-		*lines = append(*lines, "file:"+id+" "+rel+"\n")
-	case unix.S_IFDIR:
-		if !walk {
-			return nil
-		}
-		if depth >= maxOpenFolders {
-			return errTooDeep
-		}
-		sub, err := unix.Openat(dir, name, dirFlags, 0)
-		if err != nil {
-			return err
-		}
-		defer unix.Close(sub)
-		names, err := readNames(sub)
-		if err != nil {
-			return err
-		}
-		for _, n := range names {
-			if err := repoEntry(ctx, sub, n, rel+"/"+n, format, depth+1, true, lines); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
-}
-
-// errRepoPath and errTooDeep are what [repoState] cannot list: a path with a line break or a
-// carriage return or a file too large to hash, and a folder too deep.
-var (
-	errRepoPath = errors.New("a path or a file that the list cannot have")
-	errTooDeep  = errors.New("a folder too deep")
-)
 
 // openRoot opens the folder at path with O_NOFOLLOW, for [lookup].
 func openRoot(path string) (int, error) {

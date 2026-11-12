@@ -4672,7 +4672,30 @@ func setupRecord(t *testing.T, d Dir, r Repository) LeftOut {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return LeftOut{Setup: states, Submodules: submodules}
+	out := map[string]LeftOut{r.Path: {Setup: states, Submodules: submodules}}
+	recordRepositories(t, d, []Repository{r}, out)
+	return out[r.Path]
+}
+
+// recordRepositories runs the record session for repos on this machine with sh, in place of its
+// container, sets the states in out from it, and removes its folder, so a further call can make it.
+func recordRepositories(t *testing.T, d Dir, repos []Repository, out map[string]LeftOut) {
+	t.Helper()
+	s, needed, err := d.RecordSession(t.Context(), repos, out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !needed {
+		return
+	}
+	printed, err := boundedSession(t, s)
+	if err != nil {
+		t.Fatalf("record session: %v\n%s", err, printed)
+	}
+	d.Recorded(repos, out, true)
+	if err := os.RemoveAll(d.SetupRecord()); err != nil {
+		t.Fatal(err)
+	}
 }
 
 // gitlinks commits in the repository at dir a gitlink at each of paths, at commit.
@@ -5399,6 +5422,339 @@ func TestACommitInARepositoryOfTheSetupKeepsTheCopy(t *testing.T) {
 			}
 			printed := sessionOutput(t, d, repos, map[string]LeftOut{"": out})
 			if left := d.Left(repos); !left.Behind || left.Nested {
+				t.Errorf("Left = %+v:\n%s", left, printed)
+			}
+		})
+	}
+}
+
+// setupWith clones a run of a new person's repository, runs mk on its copy as a setup, and returns
+// the record of that setup.
+func setupWith(t *testing.T, mk func(t *testing.T, w string)) (Dir, []Repository, map[string]LeftOut) {
+	t.Helper()
+	isolate(t)
+	sessionGit(t)
+	src, _ := person(t)
+	d, repos := cloneRun(t, src)
+	mk(t, d.Work())
+	return d, repos, map[string]LeftOut{"": setupRecord(t, d, repos[0])}
+}
+
+// toolWithSubmodule makes a repository at tool with a submodule at lib, as a setup that runs git
+// clone --recursive does.
+func toolWithSubmodule(t *testing.T, w string) {
+	up := t.TempDir()
+	write(t, up, "l.go", "package l\n")
+	testGit(t, up, "init", "--quiet")
+	commitAll(t, up, "lib")
+	tool := setupRepository(t, w, "tool")
+	testGit(t, tool, "-c", "protocol.file.allow=always", "submodule", "add", "--quiet", up, "lib")
+	commitAll(t, tool, "submodule")
+}
+
+// TestASubmoduleOfARepositoryOfTheSetup is a repository that the setup made with a submodule: with
+// no change, the session keeps no copy. A commit the agent leaves on a branch of the submodule, also
+// after git submodule deinit, a change or a stash there, or a repository the agent makes in the
+// repository keeps the copy.
+func TestASubmoduleOfARepositoryOfTheSetup(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		run  func(t *testing.T, tool string)
+	}{
+		{"no change", nil},
+		{"a branch", func(t *testing.T, tool string) {
+			lib := filepath.Join(tool, "lib")
+			testGit(t, lib, "checkout", "--quiet", "-b", "side")
+			write(t, lib, "new.go", "package l\n")
+			commitAll(t, lib, "agent")
+			testGit(t, lib, "checkout", "--quiet", "-")
+		}},
+		{"a branch and a deinit", func(t *testing.T, tool string) {
+			lib := filepath.Join(tool, "lib")
+			testGit(t, lib, "checkout", "--quiet", "-b", "side")
+			write(t, lib, "new.go", "package l\n")
+			commitAll(t, lib, "agent")
+			testGit(t, lib, "checkout", "--quiet", "-")
+			testGit(t, tool, "submodule", "deinit", "--quiet", "-f", "lib")
+		}},
+		{"a change", func(t *testing.T, tool string) {
+			write(t, tool, "lib/l.go", "package l // agent\n")
+		}},
+		{"a stash", func(t *testing.T, tool string) {
+			lib := filepath.Join(tool, "lib")
+			write(t, lib, "l.go", "package l // agent\n")
+			testGit(t, lib, "stash", "--quiet")
+		}},
+		{"a repository", func(t *testing.T, tool string) {
+			setupRepository(t, tool, "x")
+		}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			d, repos, out := setupWith(t, toolWithSubmodule)
+			if c.run != nil {
+				c.run(t, filepath.Join(d.Work(), "tool"))
+			}
+			printed := sessionOutput(t, d, repos, out)
+			if left := d.Left(repos); (left.Behind || left.Nested) != (c.run != nil) {
+				t.Errorf("Left = %+v:\n%s", left, printed)
+			}
+		})
+	}
+}
+
+// TestACloneOfTheSetupWithNoChange is a repository that the setup cloned, with names of each kind
+// in its .gitignore files and in its reflogs, and a link in its refs: with no change, the session
+// keeps no copy. A tab or a byte below it at the end of a name sorts the same in the setup's record
+// and in the session.
+func TestACloneOfTheSetupWithNoChange(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		up   func(t *testing.T, up string)
+		dep  func(t *testing.T, dep string)
+	}{
+		{"plain", nil, nil},
+		{"names", func(t *testing.T, up string) {
+			write(t, up, "x y/\tt\\b/.gitignore", "*.o\n")
+			write(t, up, "-a/.gitignore", "*.o\n")
+			write(t, up, "B/.gitignore", "*.o\n")
+			write(t, up, "a/.gitignore", "*.o\n")
+			write(t, up, "a.b/.gitignore", "*.o\n")
+			write(t, up, "a-b/.gitignore", "*.o\n")
+			write(t, up, "dir/.gitignore/in/.gitignore", "x\n")
+			link(t, up, "sub/.gitignore", "../a/.gitignore")
+		}, nil},
+		{"a link in refs", nil, func(t *testing.T, dep string) {
+			link(t, dep, ".git/refs/tags/l", "../heads/main")
+		}},
+		{"a control byte in logs", nil, func(t *testing.T, dep string) {
+			write(t, dep, ".git/logs/refs/a\x01", "x\n")
+			write(t, dep, ".git/logs/refs/a", "x\n")
+		}},
+		{"a tab in logs", nil, func(t *testing.T, dep string) {
+			write(t, dep, ".git/logs/refs/a\t", "x\n")
+			write(t, dep, ".git/logs/refs/a", "x\n")
+		}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			d, repos, out := setupWith(t, func(t *testing.T, w string) {
+				up := t.TempDir()
+				write(t, up, "a.go", "package a\n")
+				if c.up != nil {
+					c.up(t, up)
+				}
+				testGit(t, up, "init", "--quiet")
+				commitAll(t, up, "one")
+				testGit(t, up, "tag", "v1")
+				testGit(t, up, "tag", "-a", "-m", "t", "v2")
+				testGit(t, up, "branch", "other")
+				testGit(t, w, "clone", "--quiet", up, "dep")
+				if c.dep != nil {
+					c.dep(t, filepath.Join(w, "dep"))
+				}
+			})
+			if len(out[""].Setup) != 1 || !strings.HasPrefix(out[""].Setup[0].State, "repo:") {
+				t.Fatalf("the setup's paths are %v", out[""].Setup)
+			}
+			printed := sessionOutput(t, d, repos, out)
+			if left := d.Left(repos); left.Behind || left.Nested {
+				t.Errorf("Left = %+v:\n%s", left, printed)
+			}
+		})
+	}
+}
+
+// TestAFolderOfTheSetupThatIgnoresItself is a setup that writes folders with a .gitignore that
+// ignores the folder, as python -m venv and pytest do: with no change, the session keeps no copy.
+func TestAFolderOfTheSetupThatIgnoresItself(t *testing.T) {
+	d, repos, out := setupWith(t, func(t *testing.T, w string) {
+		write(t, w, ".venv/.gitignore", "# created by venv\n*\n")
+		write(t, w, ".venv/bin/python", "x\n")
+		write(t, w, ".pytest_cache/.gitignore", "# Created by pytest automatically.\n*\n")
+		write(t, w, ".pytest_cache/v/cache/nodeids", "[]\n")
+	})
+	printed := sessionOutput(t, d, repos, out)
+	if left := d.Left(repos); left.Behind || left.Nested {
+		t.Errorf("Left = %+v:\n%s", left, printed)
+	}
+}
+
+// TestAFilterInARepositoryOfTheSetup is a repository that the setup made with a clean and a smudge
+// filter, which the session's git does not run, so git status there lists the filtered file: with
+// no change, the session keeps no copy, and a change of that file keeps it.
+func TestAFilterInARepositoryOfTheSetup(t *testing.T) {
+	for _, change := range []bool{false, true} {
+		t.Run(fmt.Sprint("change ", change), func(t *testing.T) {
+			d, repos, out := setupWith(t, func(t *testing.T, w string) {
+				tool := filepath.Join(w, "tool")
+				write(t, tool, ".gitattributes", "*.dat filter=up\n")
+				write(t, tool, "a.dat", "abc\n")
+				testGit(t, tool, "init", "--quiet")
+				testGit(t, tool, "config", "filter.up.clean", "tr a-z A-Z")
+				testGit(t, tool, "config", "filter.up.smudge", "tr A-Z a-z")
+				commitAll(t, tool, "setup")
+				if s := testGit(t, tool, "status", "--porcelain"); s != "" {
+					t.Fatalf("git status lists %q", s)
+				}
+			})
+			if change {
+				write(t, d.Work(), "tool/a.dat", "abcd\n")
+			}
+			printed := sessionOutput(t, d, repos, out)
+			if left := d.Left(repos); left.Behind != change || left.Nested {
+				t.Errorf("Left = %+v:\n%s", left, printed)
+			}
+		})
+	}
+}
+
+// TestARecordThatDidNotRunKeepsTheCopy is a repository that the setup made, whose record session
+// did not run or failed: the repository is other, and the copy stays with no change. With no such
+// repository, no record session is needed, and a git session takes no path that still has
+// [StateRepo].
+func TestARecordThatDidNotRunKeepsTheCopy(t *testing.T) {
+	isolate(t)
+	sessionGit(t)
+	src, _ := person(t)
+	d, repos := cloneRun(t, src)
+	out := map[string]LeftOut{"": {}}
+	if _, needed, err := d.RecordSession(t.Context(), repos, out); err != nil || needed {
+		t.Fatalf("a record with no repository of the setup: %t, %v", needed, err)
+	}
+	if _, err := os.Lstat(d.SetupRecord()); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("the record's folder: %v", err)
+	}
+	setupRepository(t, d.Work(), "tool")
+	paths, err := d.SetupChanges(t.Context(), repos[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	states, err := d.SetupStates(t.Context(), repos[0], paths)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(states) != 1 || states[0].State != StateRepo {
+		t.Fatalf("the setup's paths are %v", states)
+	}
+	out[""] = LeftOut{Setup: states}
+	if _, err := d.GitSession(t.Context(), branch, "", repos, out); err == nil {
+		t.Error("a git session took a repository with no record")
+	}
+	if _, needed, err := d.RecordSession(t.Context(), repos, out); err != nil || !needed {
+		t.Fatalf("a record of a repository of the setup: %t, %v", needed, err)
+	}
+	d.Recorded(repos, out, false)
+	if got := out[""].Setup; len(got) != 1 || got[0].State != "other" {
+		t.Fatalf("the setup's paths are %v", got)
+	}
+	printed := sessionOutput(t, d, repos, out)
+	if left := d.Left(repos); !left.Behind || left.Nested {
+		t.Errorf("Left = %+v:\n%s", left, printed)
+	}
+}
+
+// TestAReftableRepositoryOfTheSetup is a repository that the setup made with its refs in a
+// reftable: with no change, the session keeps no copy, and a branch the agent makes there keeps
+// it. It needs git 2.45 or later.
+func TestAReftableRepositoryOfTheSetup(t *testing.T) {
+	isolate(t)
+	if out, err := exec.Command("git", "init", "--quiet", "--ref-format=reftable", t.TempDir()).CombinedOutput(); err != nil {
+		t.Skipf("this git has no reftable: %v: %s", err, out)
+	}
+	for _, branchToo := range []bool{false, true} {
+		t.Run(fmt.Sprint("branch ", branchToo), func(t *testing.T) {
+			d, repos, out := setupWith(t, func(t *testing.T, w string) {
+				tool := filepath.Join(w, "tool")
+				write(t, tool, "a.go", "package a\n")
+				testGit(t, tool, "init", "--quiet", "--ref-format=reftable")
+				commitAll(t, tool, "setup")
+			})
+			if len(out[""].Setup) != 1 || !strings.HasPrefix(out[""].Setup[0].State, "repo:") {
+				t.Fatalf("the setup's paths are %v", out[""].Setup)
+			}
+			if branchToo {
+				testGit(t, filepath.Join(d.Work(), "tool"), "branch", "side")
+			}
+			printed := sessionOutput(t, d, repos, out)
+			if left := d.Left(repos); left.Behind != branchToo || left.Nested {
+				t.Errorf("Left = %+v:\n%s", left, printed)
+			}
+		})
+	}
+}
+
+// TestASubmoduleTheSetupLeftChanged is a repository that the setup made with a submodule, in which
+// the setup left a changed file: with no change, the session keeps no copy. A further change of
+// that file, or one that sets it back, keeps the copy.
+func TestASubmoduleTheSetupLeftChanged(t *testing.T) {
+	for _, c := range []struct {
+		name, text string
+	}{
+		{"no change", ""},
+		{"a further change", "package l // agent\n"},
+		{"the file set back", "package l\n"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			d, repos, out := setupWith(t, func(t *testing.T, w string) {
+				toolWithSubmodule(t, w)
+				write(t, w, "tool/lib/l.go", "package l // setup\n")
+			})
+			if c.text != "" {
+				write(t, d.Work(), "tool/lib/l.go", c.text)
+			}
+			printed := sessionOutput(t, d, repos, out)
+			if left := d.Left(repos); left.Behind != (c.text != "") || left.Nested {
+				t.Errorf("Left = %+v:\n%s", left, printed)
+			}
+		})
+	}
+}
+
+// TestACommitInASubmoduleWithItsGitFolder is a repository that the setup made with a submodule
+// whose .git is a folder in the submodule's working tree, not in .git/modules: a commit that the
+// agent leaves on a branch of the submodule, and then leaves, keeps the copy.
+func TestACommitInASubmoduleWithItsGitFolder(t *testing.T) {
+	d, repos, out := setupWith(t, func(t *testing.T, w string) {
+		up := t.TempDir()
+		write(t, up, "l.go", "package l\n")
+		testGit(t, up, "init", "--quiet")
+		commitAll(t, up, "lib")
+		tool := setupRepository(t, w, "tool")
+		testGit(t, tool, "clone", "--quiet", up, "lib")
+		testGit(t, tool, "-c", "protocol.file.allow=always", "submodule", "add", "--quiet", up, "lib")
+		commitAll(t, tool, "submodule")
+		if info, err := os.Lstat(filepath.Join(tool, "lib", ".git")); err != nil || !info.IsDir() {
+			t.Fatalf("lib/.git is no folder: %v", err)
+		}
+	})
+	lib := filepath.Join(d.Work(), "tool", "lib")
+	testGit(t, lib, "checkout", "--quiet", "-b", "side")
+	write(t, lib, "new.go", "package l\n")
+	commitAll(t, lib, "agent")
+	testGit(t, lib, "checkout", "--quiet", "-")
+	printed := sessionOutput(t, d, repos, out)
+	if left := d.Left(repos); !left.Behind {
+		t.Errorf("Left = %+v:\n%s", left, printed)
+	}
+}
+
+// TestADecomposedNameInARepositoryOfTheSetup is a repository that the setup made with names in
+// Unicode's decomposed form, as macOS writes them: a file that git status lists and a folder with a
+// .gitignore. With no change, the session keeps no copy, and a change of that file keeps it.
+func TestADecomposedNameInARepositoryOfTheSetup(t *testing.T) {
+	const name = "cafe\u0301.txt"
+	for _, change := range []bool{false, true} {
+		t.Run(fmt.Sprint("change ", change), func(t *testing.T) {
+			d, repos, out := setupWith(t, func(t *testing.T, w string) {
+				tool := setupRepository(t, w, "tool")
+				write(t, tool, "e\u0301/.gitignore", "*.o\n")
+				commitAll(t, tool, "folder")
+				write(t, tool, name, "setup\n")
+			})
+			if change {
+				write(t, d.Work(), "tool/"+name, "agent\n")
+			}
+			printed := sessionOutput(t, d, repos, out)
+			if left := d.Left(repos); left.Behind != change || left.Nested {
 				t.Errorf("Left = %+v:\n%s", left, printed)
 			}
 		})

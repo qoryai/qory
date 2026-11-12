@@ -3741,7 +3741,8 @@ branch would undo the branch's files, so the session commits it on `HEAD` instea
 `git pull --rebase`, with `HEAD` and the run's branch at one commit, the session commits as usual.
 The ignore rules that keep a file out of the commit, with no line, are yours: the `.gitignore`
 files of your commit at the start of the run, with each `.gitignore` as the setup left it where the
-setup changed one, your `.git/info/exclude` and your global excludes file. In a submodule, they
+setup wrote or changed one, also one that ignores its folder, such as `.venv/.gitignore` with `*`,
+your `.git/info/exclude` and your global excludes file. In a submodule, they
 are its `.gitignore` files at its commit, and the setup's files there stay out as the setup left
 them. A file that only a `.gitignore` the agent wrote or changed ignores stays in the copy, as the
 list below describes. The image needs git 2.25 or later, `cat`, `chmod`, `comm`, `cp`, `find`, `grep`, `mkdir`, `mv`,
@@ -3793,8 +3794,9 @@ agent that succeeded, the run closes `failed` with -1, or `cancelled` with the r
 Part of the run's work can stay in the copy:
 
 - A repository the run made, with a commit or a change, or a change in a repository inside a
-  submodule. Your ignore rules keep a repository's folder out of this list when the rules in the
-  copy cover it too. The session prints a line with its path.
+  submodule. A repository inside a folder that the setup made, such as a submodule of a repository
+  the setup cloned, is not in this list. Your ignore rules keep a repository's folder out of this
+  list when the rules in the copy cover it too. The session prints a line with its path.
 - A file that an ignore rule covers, when that rule is not one of yours: the agent wrote or changed
   the `.gitignore` that has it, such as `foo/.gitignore` with `*`, in the repository or in a
   submodule.
@@ -3802,12 +3804,19 @@ Part of the run's work can stay in the copy:
   differs from the commit: it may have the run's text from `.qory`, so the commit keeps the path as
   your commit has it.
 - A change in a repository that the setup made, such as a file the agent wrote there or a commit:
-  the commit leaves that repository out. At the end of the setup, qory records the repository's
-  `HEAD`, refs, reflogs and `.gitignore` files, and the session finds a change in them, or one
-  that `git status` lists against the repository's `HEAD`. The reflogs show a commit that the
-  agent made and then reset. A repository whose record qory could not
-  make, such as one with a `.git` file, and any other folder that the commit leaves out whole for
-  the setup, such as one more than 64 levels deep, stay in the copy whether or not they changed.
+  the commit leaves that repository out. After the setup and before the agent starts, qory records
+  the repository in a container that it starts as it starts the git session's, named
+  `qory-record-<run id>`, which binds the copy read-only. No git on your machine opens the copy.
+  The record has the `HEAD`, refs, reflogs and `.gitignore` files of the repository and of each of
+  its submodules and worktrees, and what `git status` lists against `HEAD` there. The session finds
+  a change in any of them. The reflogs show a commit that the agent made and then reset, and
+  `.git/modules` one in a submodule that the agent then took out with `git submodule deinit`.
+  `git status` runs with no filter, so a file under a filter, such as one of Git LFS, and a file
+  that the setup left changed in a submodule, are a change only when they differ from what the
+  setup left. A repository whose record qory could not make, such as one with a `.git` file or one
+  whose record container failed or ran past 5 minutes, and any other folder that the commit leaves
+  out whole for the setup, such as one more than 64 levels deep, stay in the copy whether or not
+  they changed.
 - A commit or a change in a submodule that the clone did not copy, such as one that the agent set up.
 - A repository inside a submodule that the session cannot check: one whose path is a link or goes
   through one, one more than 8 submodules deep, or one with no `.git` whose folder is not empty,
