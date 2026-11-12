@@ -3803,8 +3803,9 @@ Part of the run's work can stay in the copy:
   your commit has it.
 - A change in a repository that the setup made, such as a file the agent wrote there or a commit:
   the commit leaves that repository out. At the end of the setup, qory records the repository's
-  `HEAD`, refs and `.gitignore` files, and the session finds a change in them, or one that
-  `git status` lists against the repository's `HEAD`. A repository whose record qory could not
+  `HEAD`, refs, reflogs and `.gitignore` files, and the session finds a change in them, or one
+  that `git status` lists against the repository's `HEAD`. The reflogs show a commit that the
+  agent made and then reset. A repository whose record qory could not
   make, such as one with a `.git` file, and any other folder that the commit leaves out whole for
   the setup, such as one more than 64 levels deep, stay in the copy whether or not they changed.
 - A commit or a change in a submodule that the clone did not copy, such as one that the agent set up.

@@ -5348,8 +5348,8 @@ func setupRepository(t *testing.T, w, rel string) string {
 	return at
 }
 
-// TestACommitInARepositoryOfTheSetupKeepsTheCopy is an agent that commits, tags or writes ignore
-// rules in a repository that the setup made: each keeps the copy. A repository whose state the
+// TestACommitInARepositoryOfTheSetupKeepsTheCopy is an agent that commits, tags, commits and resets
+// back, or writes ignore rules in a repository that the setup made: each keeps the copy. A repository whose state the
 // setup could not record, here one with a .git file, keeps the copy with no change.
 func TestACommitInARepositoryOfTheSetupKeepsTheCopy(t *testing.T) {
 	for _, c := range []struct {
@@ -5362,6 +5362,11 @@ func TestACommitInARepositoryOfTheSetupKeepsTheCopy(t *testing.T) {
 		}},
 		{"a tag", func(t *testing.T, tool string) {
 			testGit(t, tool, "tag", "v1")
+		}},
+		{"a commit and a reset", func(t *testing.T, tool string) {
+			write(t, tool, "new.go", "package a\n")
+			commitAll(t, tool, "agent")
+			testGit(t, tool, "reset", "--quiet", "--hard", "HEAD~1")
 		}},
 		{"a branch", func(t *testing.T, tool string) {
 			testGit(t, tool, "branch", "side")

@@ -605,9 +605,9 @@ func setupState(ctx context.Context, root int, format, rel string) (string, erro
 
 // repoState is the blob id, in format, of the list that the git session's repo_state writes for
 // the repository at the folder dir, which the setup made: a line per file, kind:id and its path
-// below dir, sorted by bytes. The files are HEAD, packed-refs and each file below refs and reftable
-// in .git, which have the repository's HEAD and refs, and each .gitignore below dir but in a
-// folder named .git, which have its ignore rules. kind is file for a regular file, with the blob id
+// below dir, sorted by bytes. The files are HEAD, packed-refs and each file below refs, reftable
+// and logs in .git, which have the repository's HEAD, refs and reflogs, and each .gitignore below
+// dir but in a folder named .git, which have its ignore rules. kind is file for a regular file, with the blob id
 // of its content, and link for a link, with the blob id of its target. It reads the files with
 // no git and follows no link. It fails for a path with a line break or a carriage return, a file
 // past [maxHashBytes], a folder more than [maxOpenFolders] deep, and any failed read.
@@ -621,7 +621,7 @@ func repoState(ctx context.Context, dir int, format string) (string, error) {
 		return "", err
 	}
 	defer unix.Close(git)
-	for _, name := range []string{"HEAD", "packed-refs", "refs", "reftable"} {
+	for _, name := range []string{"HEAD", "packed-refs", "refs", "reftable", "logs"} {
 		if err := repoEntry(ctx, git, name, ".git/"+name, format, 0, true, &lines); err != nil {
 			return "", err
 		}

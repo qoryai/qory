@@ -717,8 +717,8 @@ setup_rules() {
 }
 # repo_state prints the state of the repository that the setup made at the folder $1 of $T, as
 # SetupPath.State has it for repoState: repo: and the blob id of a list, sorted, of a line per file,
-# kind:id and its path below $1. The files are HEAD, packed-refs and each file below refs and
-# reftable in .git, and each .gitignore below $1 but in a folder named .git. kind is file, with the
+# kind:id and its path below $1. The files are HEAD, packed-refs and each file below refs, reftable
+# and logs in .git, and each .gitignore below $1 but in a folder named .git. kind is file, with the
 # blob id of the content, or link, with that of its target. It exits 1 when a find, a git or a
 # readlink fails, or a path has a carriage return.
 repo_state() (
@@ -726,7 +726,7 @@ repo_state() (
 	r_f=$G/repo-files r_l=$G/repo-links
 	find . -name .git -prune -o -name .gitignore -type f -print > "$r_f" || exit 1
 	find . -name .git -prune -o -name .gitignore -type l -print > "$r_l" || exit 1
-	for r_p in .git/HEAD .git/packed-refs .git/refs .git/reftable; do
+	for r_p in .git/HEAD .git/packed-refs .git/refs .git/reftable .git/logs; do
 		if [ -h "$r_p" ]; then
 			printf './%s\n' "$r_p" >> "$r_l"
 		elif [ -f "$r_p" ]; then
