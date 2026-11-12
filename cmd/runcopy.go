@@ -479,8 +479,9 @@ var runRecordContainer = func(ctx context.Context, c gitContainer) (int, error) 
 
 // recordRepositories records each repository that the setup made in the copy, when there is one:
 // [runcopy.Dir.RecordSession] runs in a container that qory starts as the git session's, see
-// [gitContainerFor], named qory-record-<run id>, with the copy read-only, within
-// [runcopy.SessionBase]. No git on this machine opens the copy. The container's lines go nowhere.
+// [gitContainerFor], named qory-record-<run id>, with the copy read-only, within the time limit
+// that the git session gets, [runcopy.SessionLimitFor] of [runcopy.Dir.WorkSize] after the setup.
+// No git on this machine opens the copy. The container's lines go nowhere.
 // When the container does not start, fails or runs past that limit, each such repository is
 // other, so the git session keeps the copy for it with its usual line. A stop or the run's time
 // limit that ends ctx is the error.
@@ -492,7 +493,8 @@ func (c *runCopy) recordRepositories(ctx context.Context, run openedRun, spec *r
 	if !needed {
 		return nil
 	}
-	limited, cancel := context.WithTimeout(ctx, runcopy.SessionBase)
+	entries, size, _ := c.dir.WorkSize(ctx)
+	limited, cancel := context.WithTimeout(ctx, runcopy.SessionLimitFor(entries, size))
 	defer cancel()
 	rc := gitContainerFor(run, spec, spec.RunID, gs, c.dir.RecordMounts(), io.Discard)
 	rc.Name = "qory-record-" + spec.RunID

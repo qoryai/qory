@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -47,8 +48,8 @@ func recordSpec() (*nowhere, *runSpec) {
 
 // TestTheRecordContainerIsAGitContainer is the record of a repository that the setup made: it runs
 // in a container named qory-record-<run id>, with the flags of the git container, the copy
-// read-only and the record's folder read-write, within [runcopy.SessionBase]. The state it writes
-// is the repository's state.
+// read-only and the record's folder read-write, within [runcopy.SessionBase] for a small copy. The
+// state it writes is the repository's state.
 func TestTheRecordContainerIsAGitContainer(t *testing.T) {
 	c := recordCopy(t)
 	run, spec := recordSpec()
@@ -84,6 +85,38 @@ func TestTheRecordContainerIsAGitContainer(t *testing.T) {
 	}
 	if setup := c.out[""].Setup; setup[0].State != "missing" || setup[1].State != state {
 		t.Errorf("the setup's paths are %v", setup)
+	}
+}
+
+// TestTheTimeLimitOfTheRecordGrowsWithTheCopy is a setup that left 20,000 more files in the copy:
+// the record container has a minute more, as the git session has.
+func TestTheTimeLimitOfTheRecordGrowsWithTheCopy(t *testing.T) {
+	c := recordCopy(t)
+	run, spec := recordSpec()
+	many := filepath.Join(c.dir.Work(), "many")
+	if err := os.Mkdir(many, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for i := range 20_000 {
+		if err := os.WriteFile(filepath.Join(many, strconv.Itoa(i)), nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	before := runRecordContainer
+	t.Cleanup(func() { runRecordContainer = before })
+	ran := false
+	runRecordContainer = func(ctx context.Context, rc gitContainer) (int, error) {
+		ran = true
+		if at, ok := ctx.Deadline(); !ok || time.Until(at) <= runcopy.SessionBase || time.Until(at) > runcopy.SessionBase+time.Minute {
+			t.Errorf("the record has until %s, %v, want a minute past %s", at, ok, runcopy.SessionBase)
+		}
+		return 1, nil
+	}
+	if err := c.recordRepositories(t.Context(), run, spec); err != nil {
+		t.Fatal(err)
+	}
+	if !ran {
+		t.Error("no record container started")
 	}
 }
 

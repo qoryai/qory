@@ -807,6 +807,35 @@ repo_state() (
 	r_id=$(g hash-object --no-filters --stdin < "$G/repo-sorted") || exit 1
 	printf 'repo:%s' "$r_id"
 )
+# submodule_of reports whether the folder $2 of the repository at the folder $1 of $T is a submodule
+# of it: a gitlink of its HEAD, or a folder whose .git file points below the folder modules of its
+# .git, as for a submodule of a submodule or one that no commit has yet.
+submodule_of() (
+	unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE
+	case $(g --git-dir="$T/$1/.git" ls-tree HEAD -- ":(top,literal)$2" 2>/dev/null) in
+	"160000 "*) exit 0 ;;
+	esac
+	s_git=$T/$1/$2/.git
+	if [ -h "$s_git" ] || [ ! -f "$s_git" ]; then
+		exit 1
+	fi
+	s_line=
+	IFS= read -r s_line < "$s_git" || [ -n "$s_line" ] || exit 1
+	case $s_line in
+	"gitdir: "*) s_at=${s_line#gitdir: } ;;
+	*) exit 1 ;;
+	esac
+	case $s_at in
+	/*) ;;
+	*) s_at=$T/$1/$2/$s_at ;;
+	esac
+	s_modules=$(cd -P "$T/$1/.git/modules" 2>/dev/null && pwd -P) || exit 1
+	s_at=$(cd -P "$s_at" 2>/dev/null && pwd -P) || exit 1
+	case $s_at in
+	"$s_modules"/*) exit 0 ;;
+	esac
+	exit 1
+)
 # kept_out reports whether both the ignore rules of the work tree and the person's cover the folder
 # $1 of $T.
 kept_out() {
@@ -1369,7 +1398,7 @@ while [ "$n" -lt "$count" ]; do
 	g hash-object --no-filters --stdin-paths < "$G/regular" > "$G/ids"
 	exec 3< "$G/ids"
 	i=0
-	known=$nl
+	known=$nl setup_repos=$nl
 	while [ "$i" -lt "$setup" ]; do
 		f=$T/$1
 		have=
@@ -1393,6 +1422,7 @@ while [ "$n" -lt "$count" ]; do
 			if [ -d "$f" ] && [ ! -h "$f" ] && [ -d "$f/.git" ] && [ ! -h "$f/.git" ]; then
 				printf ':(exclude,top,literal)%s\0' "$1" >> "$P"
 				known=$known$1$nl
+				setup_repos=$setup_repos$1$nl
 				printf '%s\n' "$1" >> "$G/out-folders"
 				st=$((st + 1))
 				if ! submodule_status "$1" "" deep || [ "$(repo_state "$1" "$G/status" || :)" != "$2" ]; then
@@ -1464,12 +1494,25 @@ while [ "$n" -lt "$count" ]; do
 			fi
 			;;
 		*)
-			# A folder of the setup's, or a repository in one, such as a submodule of a repository
-			# the setup made, is no repository the run made.
+			# A folder of the setup's is no repository the run made, and neither is a repository in
+			# one that keeps the copy, nor a submodule of a repository the setup made, whose state
+			# has that of its submodules. Any other repository in a repository the setup made, such
+			# as a clone in a folder it ignores, is one the run made: the setup's paths list each
+			# such repository that the setup made.
 			k_up=$d
 			while :; do
 				case $known in
-				*"$nl$k_up$nl"*) continue 2 ;;
+				*"$nl$k_up$nl"*)
+					case $setup_repos in
+					*"$nl$k_up$nl"*)
+						if [ "$k_up" = "$d" ] || submodule_of "$k_up" "${d#"$k_up"/}"; then
+							continue 2
+						fi
+						break
+						;;
+					esac
+					continue 2
+					;;
 				esac
 				case $k_up in
 				*/*) k_up=${k_up%/*} ;;
