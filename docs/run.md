@@ -3801,7 +3801,8 @@ Part of the run's work can stay in the copy:
   its path.
 - A file that an ignore rule covers, when that rule is not one of yours: the agent wrote or changed
   the `.gitignore` that has it, such as `foo/.gitignore` with `*`, in the repository or in a
-  submodule.
+  submodule. Such a file whose name has a line break keeps the copy, also when your rules cover
+  each line of the name.
 - A file that the agent wrote or changed under the setup's ignore rules, such as `cache/new.txt`
   with `*` in a `cache/.gitignore` that the setup wrote, or `tool/third/x.go` with `third/` in the
   `.gitignore` of a repository `tool` that the setup cloned. A commit that the agent made in a
@@ -3814,7 +3815,8 @@ Part of the run's work can stay in the copy:
   later change time. A folder that the session cannot enter, such as one of mode `000`, is listed
   as one entry, such as `cache/`. A file that the agent deleted, a file in a folder named
   `node_modules`, `.venv`, `venv`, `__pycache__`, `target`, `build`, `dist`, `.gradle` or `.next`,
-  and the `.git/index` of a repository, which `git status` can rewrite, keep nothing behind. After
+  and the `.git/index` of a repository that has what the repository's `HEAD` has, as after
+  `git status` rewrote it, keep nothing behind. After
   such a setup, a name with a line break anywhere else in the copy keeps the copy, and the line
   lists none. A process of the setup that still writes under these rules while the agent runs
   keeps the copy too. When the record container failed or ran past its limit, any file under the

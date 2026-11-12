@@ -383,8 +383,9 @@ release may change what an existing document does, and states it under Upgrading
   ended, and a file counts by its change time, which the agent cannot set back as
   `touch -d` sets a file's time. With `wall.setup: inside`, no record runs, and such a file keeps
   the copy with a line that lists none. A file in a folder named `node_modules`, `.venv`, `venv`,
-  `__pycache__`, `target`, `build`, `dist`, `.gradle` or `.next`, the `.git/index` of a repository,
-  and a file that the agent deleted, keep nothing behind. A container of the run that
+  `__pycache__`, `target`, `build`, `dist`, `.gradle` or `.next`, the `.git/index` of a repository
+  that has what its `HEAD` has, and a file that the agent deleted, keep nothing behind. A file
+  whose name has a line break, under an ignore rule that is not yours, keeps the copy. A container of the run that
   could not be removed keeps the copy too, and brings nothing back. A first signal leaves the
   return of a local run at most 30 minutes, and `qory run` prints that time. A read run with a setup also
   works in a copy, read-only for the agent, and nothing comes back from it. A read-write

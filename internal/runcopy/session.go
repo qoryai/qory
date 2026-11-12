@@ -127,8 +127,9 @@ type GitSession struct {
 // which [Dir.RecordSession] read after the setup. A path that the setup's rules ignore, also those
 // of a repository the setup made, and whose change time is past [LeftOut.SetupEnd], stays behind
 // too, and n.ignored lists it, unless it is in a folder of [generatedFolders] or is the .git/index
-// of a repository. A folder the session cannot enter is one such path, with a final /, and a
-// name with a line break writes n.left alone.
+// of a repository that has what HEAD there has. A folder the session cannot enter is one such
+// path, with a final /, and a name with a line break writes n.left alone, as does a path with a
+// line break in any list of paths that git writes.
 //
 // The add leaves out each regular file of more than [MaxFile] bytes that it would add, in the
 // repository and in each submodule, and lists its path, relative to the copy, in n.large, which
@@ -376,6 +377,12 @@ c_quoted() {
 	done
 	printf '"%s"\n' "$line"
 }
+# broken reports whether the file $1, a list of paths each with a NUL, has a path with a line
+# break, which the lines read from the list split into paths that other checks may cover.
+broken() {
+	tr -cd '\n' < "$1" > "$1-breaks" 2>/dev/null || return 0
+	[ -s "$1-breaks" ]
+}
 # lacking prints the lines of the file $1 that the file $2 does not have, and every line of $1 when
 # sort or comm fails, so a failure keeps the copy. LC_ALL=C is what both sort by.
 lacking() {
@@ -486,6 +493,9 @@ tree_status() (
 	if [ -n "$t_rules" ]; then
 		rules || exit 1
 		g ls-files -z -o -i --exclude-standard > "$G/ignored-z" || exit 1
+		if broken "$G/ignored-z"; then
+			: > "$B/$n.left"
+		fi
 		tr '\000' '\n' < "$G/ignored-z" > "$G/ignored" || exit 1
 		{ grep -v -e '^:' -e '^$' "$G/ignored" || :; } | tr '\n' '\000' > "$G/asked-z" || exit 1
 		person_ignored "$G/asked-z" "$G/person-z"
@@ -531,6 +541,9 @@ tree_status() (
 			printf ' M %s\0' "$t_p" >> "$t_out" || exit 1
 			: > "$B/$n.left"
 		elif [ -s "$G/status-$t_k.out" ] && [ -n "$t_deep" ]; then
+			if broken "$G/status-$t_k.out"; then
+				: > "$B/$n.left"
+			fi
 			tr '\000' '\n' < "$G/status-$t_k.out" > "$G/status-$t_k.lines" || exit 1
 			while IFS= read -r t_e; do
 				printf '%s %s/%s\0' "${t_e%"${t_e#??}"}" "$t_p" "${t_e#???}"
@@ -640,6 +653,9 @@ large() {
 		set -- "$@" ":(top,literal)$p"
 	done < "$G/large-found"
 	if g ls-files -z -m -o --exclude-standard -- "$@" > "$G/large-z" 2>/dev/null; then
+		if broken "$G/large-z"; then
+			: > "$B/$n.left"
+		fi
 		tr '\000' '\n' < "$G/large-z" > "$G/large-added"
 	else
 		cp "$G/large-found" "$G/large-added"
@@ -757,9 +773,10 @@ stat_args() {
 }
 # changed writes to the file $1 each path whose change time is past $since, the setup's end, or every
 # path with $since below 0. A write sets the change time from the clock, and touch -d cannot set it.
-# It skips each folder named in $generated and each repository's .git/index, which git status
-# rewrites, and lists a folder, with a final /, only when find cannot enter it. The list has a path a
-# line, so a name with a line break, which find stats as x, writes n.left.
+# It skips each folder named in $generated and each .git/index that index_clean finds with no
+# work, such as one that git status rewrote, and lists a folder, with a final /, only when find
+# cannot enter it. The list has a path a line, so a name with a line break, which find stats as x,
+# writes n.left.
 changed() {
 	c_out=$1
 	: > "$c_out"
@@ -804,7 +821,11 @@ changed() {
 		c_p=${c_line#* }
 		c_p=${c_p#./}
 		case $c_p in
-		*/.git/index) continue ;;
+		*/.git/index)
+			if index_clean "$c_p"; then
+				continue
+			fi
+			;;
 		esac
 		if [ -e "$c_p" ] || [ -h "$c_p" ]; then
 			printf '%s\n' "$c_p"
@@ -813,6 +834,15 @@ changed() {
 		fi
 	done < "$c_out-sorted" > "$c_out"
 }
+# index_clean reports whether the file $1, a .git/index, holds no work: git reads a copy of it, with
+# the folder above it as git folder, and finds what HEAD there has, as after a git status. A folder
+# that is no git folder, or a failed git, returns 1.
+index_clean() (
+	unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE
+	cp "$1" "$c_out-index" 2>/dev/null || exit 1
+	export GIT_INDEX_FILE="$c_out-index"
+	g --git-dir="${1%/index}" diff-index --cached --quiet --no-ext-diff HEAD -- > /dev/null 2>&1
+)
 # new_ignored writes to $G/new-ignored-z each path of $G/new, as ./path, that the work tree's rules
 # ignore, and to $G/new-person-z those that the person's rules ignore. check-ignore stops at a path in
 # a submodule, so such a path is not asked: the checks of submodules cover it.
@@ -945,6 +975,9 @@ repo_state() (
 		printf '%s/%s\n' "$T/$1" "${r_p#./}"
 	done < "$r_f" > "$G/repo-paths" || exit 1
 	g hash-object --no-filters --stdin-paths < "$G/repo-paths" > "$G/repo-ids" || exit 1
+	if broken "$2"; then
+		exit 1
+	fi
 	tr '\000' '\n' < "$2" > "$G/repo-status" || exit 1
 	{
 		while IFS= read -r r_p && IFS= read -r r_id <&4; do
@@ -1064,6 +1097,9 @@ leftover() {
 		! g -c core.quotePath=false ls-files -s > "$G/index-tree" 2>/dev/null; then
 		: > "$B/$n.left"
 		return 0
+	fi
+	if broken "$G/after-z" || broken "$G/ignored-z"; then
+		: > "$B/$n.left"
 	fi
 	tr '\000' '\n' < "$G/after-z" > "$G/after"
 	tr '\000' '\n' < "$G/ignored-z" > "$G/ignored"
@@ -1357,6 +1393,9 @@ submodule_bundle() (
 	setup_rules "$G/setup-paths"
 	setup_repos=$nl
 	setup_ignored "$top$d/"
+	if broken "$PG/status"; then
+		: > "$B/$n.left"
+	fi
 	tr '\000' '\n' < "$PG/status" > "$G/changes"
 	while IFS= read -r line; do
 		p=${line#???}
@@ -1379,6 +1418,9 @@ submodule_bundle() (
 	set -- ':/' "$@"
 	add "$G/add" "$shows"
 	g ls-files -z -m -o --exclude-standard -- "$@" > "$G/unadded-z" 2>/dev/null || : > "$B/$n.left"
+	if broken "$G/unadded-z"; then
+		: > "$B/$n.left"
+	fi
 	tr '\000' '\n' < "$G/unadded-z" > "$G/unadded"
 	if [ -n "$(lacking "$G/unadded" "$G/setup-paths")" ]; then
 		: > "$B/$n.left"
@@ -1717,6 +1759,9 @@ while [ "$n" -lt "$count" ]; do
 	# What stays behind is what the add left: a file that ls-files still lists, or a folder this
 	# process cannot read, which no git lists, unless an ignore rule covers it.
 	g ls-files -z -m -o --exclude-standard -- ':/' ':(exclude,top,literal,icase).qory' "$@" > "$G/unadded-z" 2>/dev/null || : > "$B/$n.left"
+	if broken "$G/unadded-z"; then
+		: > "$B/$n.left"
+	fi
 	tr '\000' '\n' < "$G/unadded-z" > "$G/unadded"
 	lacking "$G/unadded" "$G/out-paths" > "$G/missed"
 	if [ -s "$G/missed" ]; then
@@ -1726,6 +1771,9 @@ while [ "$n" -lt "$count" ]; do
 	# that commit: the undo of the commit's change is in no commit.
 	if [ -n "$at" ] && [ "$at" != "$base" ]; then
 		g diff-tree -r --no-renames --name-only -z "$base" "$at" > "$G/changed-z" 2>/dev/null || : > "$B/$n.left"
+		if broken "$G/changed-z"; then
+			: > "$B/$n.left"
+		fi
 		tr '\000' '\n' < "$G/changed-z" > "$G/changed"
 		both "$G/unadded" "$G/out-paths" > "$G/kept"
 		both "$G/kept" "$G/changed" > "$G/kept-changed"

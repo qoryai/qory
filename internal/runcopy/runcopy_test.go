@@ -5953,6 +5953,106 @@ func TestADeepGitignoreOfTheSetupKeepsTheCopy(t *testing.T) {
 	}
 }
 
+// TestAFileNamedGitIndexUnderARuleOfTheSetupKeepsTheCopy is a file that the agent writes at
+// .git/index in a folder that the setup's rules ignore, with no repository there, or in a
+// repository there with a change staged: the copy stays, and n.ignored lists the file.
+func TestAFileNamedGitIndexUnderARuleOfTheSetupKeepsTheCopy(t *testing.T) {
+	for _, c := range []struct {
+		name  string
+		agent func(t *testing.T, w string) string
+	}{
+		{"no repository", func(t *testing.T, w string) string {
+			write(t, w, "cache/notes/.git/index", "agent\n")
+			return "cache/notes/.git/index"
+		}},
+		{"a staged change", func(t *testing.T, w string) string {
+			b := filepath.Join(w, "cache", "b")
+			write(t, b, "staged.go", "package a\n")
+			testGit(t, b, "add", "staged.go")
+			return "cache/b/.git/index"
+		}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			d, repos, out := setupWith(t, func(t *testing.T, w string) {
+				write(t, w, ".gitignore", "cache/\n")
+				write(t, w, "cache/a.txt", "setup\n")
+				setupRepository(t, w, "cache/b")
+			})
+			want := c.agent(t, d.Work())
+			printed := sessionOutput(t, d, repos, out)
+			if left := d.Left(repos); !left.Behind || !slices.Contains(left.Ignored, want) {
+				t.Errorf("Left = %+v, want %s in Ignored:\n%s", left, want, printed)
+			}
+		})
+	}
+}
+
+// TestALineBreakUnderARuleOfTheAgentKeepsTheCopy is a run with no rules of the setup, an agent
+// that adds a rule to the .gitignore, and a file under it whose name has a line break, and each of
+// whose lines the person's rules cover: the copy stays.
+func TestALineBreakUnderARuleOfTheAgentKeepsTheCopy(t *testing.T) {
+	d, repos, out := setupWithIgnore(t, "*.tmp\nz\n", func(t *testing.T, w string) {
+		write(t, w, "setup.txt", "setup\n")
+	})
+	if out[""].SetupEnd != 0 {
+		t.Fatalf("the setup's end is %d", out[""].SetupEnd)
+	}
+	write(t, d.Work(), ".gitignore", "*.tmp\nz\n*z\n")
+	write(t, d.Work(), "a.tmp", "scratch\n")
+	write(t, d.Work(), "a.tmp\nz", "agent\n")
+	printed := sessionOutput(t, d, repos, out)
+	if left := d.Left(repos); !left.Behind {
+		t.Errorf("Left = %+v:\n%s", left, printed)
+	}
+}
+
+// TestMoreLineBreaksAndClosedFoldersKeepTheCopy are names with a line break under the setup's
+// rules, one whose second line reads as a time and a path, and a folder; and a folder that the
+// agent closes under a rule that it wrote, with no rules of the setup: each keeps the copy.
+func TestMoreLineBreaksAndClosedFoldersKeepTheCopy(t *testing.T) {
+	for _, c := range []struct {
+		name   string
+		person string
+		setup  func(t *testing.T, w string)
+		agent  func(t *testing.T, w string)
+	}{
+		{"a time in a name", "*.tmp\n", func(t *testing.T, w string) {
+			write(t, w, ".gitignore", "*.tmp\n*.log\n")
+			write(t, w, "x.log", "setup\n")
+		}, func(t *testing.T, w string) {
+			write(t, w, "x.tmp", "scratch\n")
+			write(t, w, "y.tmp", "scratch\n")
+			write(t, w, "x.tmp\n1999999999 ./y.tmp\nb.log", "agent\n")
+		}},
+		{"a folder with a line break", "", func(t *testing.T, w string) {
+			write(t, w, ".gitignore", "cache/\n")
+			write(t, w, "cache/a.txt", "setup\n")
+		}, func(t *testing.T, w string) {
+			write(t, w, "cache/a\nb/work.txt", "agent\n")
+		}},
+		{"a closed folder under a rule of the agent", "", func(t *testing.T, w string) {
+			write(t, w, "setup.txt", "setup\n")
+		}, func(t *testing.T, w string) {
+			write(t, w, "cache/.gitignore", "*\n")
+			write(t, w, "cache/new.txt", "agent\n")
+			cache := filepath.Join(w, "cache")
+			if err := os.Chmod(cache, 0o000); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = os.Chmod(cache, 0o755) })
+		}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			d, repos, out := setupWithIgnore(t, c.person, c.setup)
+			c.agent(t, d.Work())
+			printed := sessionOutput(t, d, repos, out)
+			if left := d.Left(repos); !left.Behind {
+				t.Errorf("Left = %+v:\n%s", left, printed)
+			}
+		})
+	}
+}
+
 // TestASetupWithNoRulesRecordsNoEnd is a setup that writes no .gitignore and makes no
 // repository: no record runs, and the setup's end is 0, so the git session lists no change.
 func TestASetupWithNoRulesRecordsNoEnd(t *testing.T) {
