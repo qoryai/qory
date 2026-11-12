@@ -1823,8 +1823,13 @@ while [ "$n" -lt "$count" ]; do
 	fi
 	find . -path ./.git -prune -o -path ./.qory -prune -o -type d -exec sh -c '
 		for p do
-			test -r "$p" && test -x "$p" || printf "%s\n" "$p"
-		done' sh {} + > "$G/closed" 2>/dev/null || :
+			test -r "$p" && test -x "$p" || printf "%s\0" "$p"
+		done' sh {} + > "$G/closed-z" 2>/dev/null || :
+	# A name with a line break reads as other folders, which the ignore rules could cover.
+	if broken "$G/closed-z"; then
+		: > "$B/$n.left"
+	fi
+	tr '\000' '\n' < "$G/closed-z" > "$G/closed"
 	while IFS= read -r d; do
 		if ! kept_out "${d#./}"; then
 			: > "$B/$n.left"

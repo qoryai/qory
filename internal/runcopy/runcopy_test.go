@@ -6069,6 +6069,35 @@ func TestALineBreakThatSplitsIntoKeptPathsKeepsTheCopy(t *testing.T) {
 	}
 }
 
+// TestAClosedFolderWithALineBreakKeepsTheCopy is a folder with work in it that the session cannot
+// open, as one that another user owns, whose name has a line break and whose lines your rules each
+// ignore: the copy stays. A chmod that fails stands in for the other owner.
+func TestAClosedFolderWithALineBreakKeepsTheCopy(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root opens a folder with no read bit")
+	}
+	d, repos, out := setupWithIgnore(t, "*.log\n.env\n", func(t *testing.T, w string) {
+		write(t, w, "setup.txt", "setup\n")
+	})
+	closed := filepath.Join(d.Work(), "x.log\n.env")
+	write(t, closed, "work.txt", "agent\n")
+	if err := os.Chmod(closed, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(closed, 0o755) })
+	stub := t.TempDir()
+	if err := os.WriteFile(filepath.Join(stub, "chmod"), []byte("#!/bin/sh\nexit 1\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	old := sessionPath
+	sessionPath = stub + ":" + old
+	t.Cleanup(func() { sessionPath = old })
+	printed := sessionOutput(t, d, repos, out)
+	if left := d.Left(repos); !left.Behind {
+		t.Errorf("Left = %+v:\n%s", left, printed)
+	}
+}
+
 // TestASetupWithNoRulesRecordsNoEnd is a setup that writes no .gitignore and makes no
 // repository: no record runs, and the setup's end is 0, so the git session lists no change.
 func TestASetupWithNoRulesRecordsNoEnd(t *testing.T) {
