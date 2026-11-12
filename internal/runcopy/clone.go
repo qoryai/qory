@@ -501,7 +501,7 @@ func (d Dir) filteredFiles(ctx context.Context, i int, dest string) ([]SetupPath
 	if len(paths) == 0 {
 		return nil, nil
 	}
-	return d.setupStatesAt(ctx, dest, i, paths)
+	return d.setupStatesAt(ctx, dest, i, paths, nil)
 }
 
 // ignoreCase reports whether the clone at dest has core.ignorecase set to true.
@@ -539,7 +539,7 @@ func (d Dir) lineEndFiles(ctx context.Context, i int, dest, base string) ([]Setu
 			paths = append(paths, p)
 		}
 	}
-	return d.setupStatesAt(ctx, dest, i, paths)
+	return d.setupStatesAt(ctx, dest, i, paths, nil)
 }
 
 // cloneSubmodules clones, into the copy at dest, each submodule that .gitmodules at

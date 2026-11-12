@@ -51,8 +51,8 @@ type SetupPath struct {
 	// State is what the setup left at Path: missing; other, for a folder or a file that
 	// is neither regular nor a link; file:, exec: or link: and the git blob id of the
 	// content or of the link's target; or repo: and the blob id of a list of the HEAD,
-	// refs and .gitignore files of a repository that the setup made, as repoState
-	// reads it. exec: is a regular file with the owner's execute bit.
+	// refs, reflogs, .gitignore files and git status of a repository that the setup made,
+	// as repoRecord.state reads it. exec: is a regular file with the owner's execute bit.
 	State string
 }
 
@@ -440,8 +440,8 @@ filled() {
 # submodule that no update populated; and one more than 8 submodules deep. With $5 set, each path
 # that an ignore rule covers, which the .gitignore files of HEAD do not cover, is a change too, as
 # ?? and its path: the run wrote or changed that rule. Such a repository and each one inside it
-# get this check. A call in a condition ignores set -e, so each step that can fail exits 1 on its
-# failure.
+# get this check. $3/plain gets git status as it ran, before the other checks, for repo_state. A
+# call in a condition ignores set -e, so each step that can fail exits 1 on its failure.
 tree_status() (
 	t_at=$1 t_out=$2 G=$3 t_depth=$4 t_rules=${5-}
 	cd "$t_at" || exit 1
@@ -462,6 +462,7 @@ tree_status() (
 		g read-tree "$now" || exit 1
 	fi
 	g status --porcelain -z --untracked-files=all --ignore-submodules=dirty > "$t_out" || exit 1
+	cp "$t_out" "$G/plain" || exit 1
 	if [ -n "$t_rules" ]; then
 		rules || exit 1
 		g ls-files -z -o -i --exclude-standard > "$G/ignored-z" || exit 1
@@ -715,25 +716,48 @@ setup_rules() {
 		fi
 	done < "$1"
 }
+# repo_git adds to the files $r_f and $r_l the regular files and the links of HEAD, packed-refs,
+# refs, reftable and logs of the git folder $1, relative to the current folder, for repo_state.
+repo_git() {
+	for r_p in "$1/HEAD" "$1/packed-refs" "$1/refs" "$1/reftable" "$1/logs"; do
+		if [ -h "$r_p" ]; then
+			printf './%s\n' "$r_p" >> "$r_l"
+		elif [ -f "$r_p" ]; then
+			printf './%s\n' "$r_p" >> "$r_f"
+		elif [ -d "$r_p" ]; then
+			find "./$r_p" -type f -print >> "$r_f" || return 1
+			find "./$r_p" -type l -print >> "$r_l" || return 1
+		fi
+	done
+}
 # repo_state prints the state of the repository that the setup made at the folder $1 of $T, as
-# SetupPath.State has it for repoState: repo: and the blob id of a list, sorted, of a line per file,
-# kind:id and its path below $1. The files are HEAD, packed-refs and each file below refs, reftable
-# and logs in .git, and each .gitignore below $1 but in a folder named .git. kind is file, with the
-# blob id of the content, or link, with that of its target. It exits 1 when a find, a git or a
+# SetupPath.State has it for repoRecord.state: repo: and the blob id of a list, sorted, of a line
+# per file or change. The files are HEAD, packed-refs and each file below refs, reftable and logs of
+# .git and of each folder below .git/modules and .git/worktrees with a regular file HEAD and a
+# folder refs or a regular file commondir, and each .gitignore below $1 but in a folder named
+# .git: kind:id and the path below $1, kind being file, with the blob id of the content, or link,
+# with that of its target. The
+# changes are the entries of the file $2, the repository's git status as tree_status ran it before
+# its other checks: status, the path's state, and the path. It exits 1 when a find, a git or a
 # readlink fails, or a path has a carriage return.
 repo_state() (
 	cd "$T/$1" || exit 1
 	r_f=$G/repo-files r_l=$G/repo-links
 	find . -name .git -prune -o -name .gitignore -type f -print > "$r_f" || exit 1
 	find . -name .git -prune -o -name .gitignore -type l -print > "$r_l" || exit 1
-	for r_p in .git/HEAD .git/packed-refs .git/refs .git/reftable .git/logs; do
-		if [ -h "$r_p" ]; then
-			printf './%s\n' "$r_p" >> "$r_l"
-		elif [ -f "$r_p" ]; then
-			printf './%s\n' "$r_p" >> "$r_f"
-		elif [ -d "$r_p" ]; then
-			find "./$r_p" -type f -print >> "$r_f" || exit 1
-			find "./$r_p" -type l -print >> "$r_l" || exit 1
+	repo_git .git || exit 1
+	for r_top in .git/modules .git/worktrees; do
+		if [ -d "$r_top" ] && [ ! -h "$r_top" ]; then
+			find "./$r_top" -type d -print > "$G/repo-dirs" || exit 1
+			while IFS= read -r r_d; do
+				r_d=${r_d#./}
+				if [ -f "$r_d/HEAD" ] && [ ! -h "$r_d/HEAD" ]; then
+					if { [ -d "$r_d/refs" ] && [ ! -h "$r_d/refs" ]; } ||
+						{ [ -f "$r_d/commondir" ] && [ ! -h "$r_d/commondir" ]; }; then
+						repo_git "$r_d" || exit 1
+					fi
+				fi
+			done < "$G/repo-dirs"
 		fi
 	done
 	if [ -n "$(cat "$r_f" "$r_l" | tr -cd '\r')" ]; then
@@ -743,6 +767,7 @@ repo_state() (
 		printf '%s/%s\n' "$T/$1" "${r_p#./}"
 	done < "$r_f" > "$G/repo-paths" || exit 1
 	g hash-object --no-filters --stdin-paths < "$G/repo-paths" > "$G/repo-ids" || exit 1
+	tr '\000' '\n' < "$2" > "$G/repo-status" || exit 1
 	{
 		while IFS= read -r r_p && IFS= read -r r_id <&4; do
 			printf 'file:%s %s\n' "$r_id" "${r_p#./}"
@@ -752,6 +777,11 @@ repo_state() (
 			r_id=$(printf '%s' "$r_t" | g hash-object --no-filters --stdin) || exit 1
 			printf 'link:%s %s\n' "$r_id" "${r_p#./}"
 		done < "$r_l"
+		while IFS= read -r r_line; do
+			r_p=${r_line#???}
+			r_p=${r_p%/}
+			printf 'status %s %s\n' "$(state "$1/$r_p")" "$r_p"
+		done < "$G/repo-status"
 	} > "$G/repo-lines" || exit 1
 	sort "$G/repo-lines" > "$G/repo-sorted" || exit 1
 	r_id=$(g hash-object --no-filters --stdin < "$G/repo-sorted") || exit 1
@@ -1334,15 +1364,15 @@ while [ "$n" -lt "$count" ]; do
 		fi
 		case $2 in
 		repo:*)
-			# A repository the setup made stays out whole, and keeps the copy when its HEAD, refs or
-			# .gitignore files differ from what the setup left, or git status lists a change against
-			# its HEAD.
+			# A repository the setup made stays out whole, and keeps the copy when its HEAD, refs,
+			# reflogs, .gitignore files or git status differ from what the setup left. tree_status
+			# writes n.left for a change in a submodule in it.
 			if [ -d "$f" ] && [ ! -h "$f" ] && [ -d "$f/.git" ] && [ ! -h "$f/.git" ]; then
 				printf ':(exclude,top,literal)%s\0' "$1" >> "$P"
 				known=$known$1$nl
 				printf '%s\n' "$1" >> "$G/out-folders"
 				st=$((st + 1))
-				if [ "$(repo_state "$1" || :)" != "$2" ] || ! submodule_status "$1" || [ -s "$G/status" ]; then
+				if ! submodule_status "$1" || [ "$(repo_state "$1" "$G/status-$st/plain" || :)" != "$2" ]; then
 					: > "$B/$n.left"
 				fi
 			fi
@@ -1411,9 +1441,18 @@ while [ "$n" -lt "$count" ]; do
 			fi
 			;;
 		*)
-			case $known in
-			*"$nl$d$nl"*) continue ;;
-			esac
+			# A folder of the setup's, or a repository in one, such as a submodule of a repository
+			# the setup made, is no repository the run made.
+			k_up=$d
+			while :; do
+				case $known in
+				*"$nl$k_up$nl"*) continue 2 ;;
+				esac
+				case $k_up in
+				*/*) k_up=${k_up%/*} ;;
+				*) break ;;
+				esac
+			done
 			if kept_out "$d"; then
 				continue
 			fi
