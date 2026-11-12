@@ -3740,15 +3740,14 @@ branch would undo the branch's files, so the session commits it on `HEAD` instea
 `refs/qory/run-<run id>/uncommitted`. After an amended commit or
 `git pull --rebase`, with `HEAD` and the run's branch at one commit, the session commits as usual.
 The ignore rules that keep a file out of the commit, with no line, are yours: the `.gitignore`
-files of your commit at the start of the run, with each `.gitignore` as the setup left it where the
-setup wrote or changed one, also one that ignores its folder, such as `.venv/.gitignore` with `*`,
-your `.git/info/exclude` and your global excludes file. In a repository that the setup made, its
-`.gitignore` files count as yours, so a file that the agent writes at a path they cover, such as
-`tool/build/x.go` with `build/` in `tool/.gitignore`, stays out of the commit with no line. In a submodule, they
-are its `.gitignore` files at its commit, and the setup's files there stay out as the setup left
-them. A file that only a `.gitignore` the agent wrote or changed ignores stays in the copy, as the
-list below describes. The image needs git 2.25 or later, `cat`, `chmod`, `comm`, `cp`, `find`, `grep`, `mkdir`, `mv`,
-`readlink`, `sh`, `sort` and `tr` in `/usr/local/bin`,
+files of your commit at the start of the run, your `.git/info/exclude` and your global excludes
+file. In a submodule, they are its `.gitignore` files at its commit. The setup's ignore rules keep
+what the setup wrote out of the commit with no line too: each `.gitignore` as the setup left it
+where the setup wrote or changed one, also one that ignores its folder, such as `.venv/.gitignore`
+with `*`, and the `.gitignore` files of a repository that the setup made. A file that the agent
+writes or changes under the setup's rules, or under a `.gitignore` that the agent wrote or changed,
+stays in the copy, as the list below describes. The image needs git 2.25 or later, `cat`, `chmod`, `comm`, `cp`, `find`, `grep`, `mkdir`, `mv`,
+`readlink`, `sh`, `sleep`, `sort`, `stat` and `tr` in `/usr/local/bin`,
 `/usr/bin` or `/bin`: `qory image check` tests them. A write run in a copy that lists repositories
 tests them too, in a first setup step named `Check tools`, in the setup container or, with `wall.setup: inside`,
 in the agent's container. The step prints nothing when they are there. When one is missing in the
@@ -3797,11 +3796,35 @@ Part of the run's work can stay in the copy:
 
 - A repository the run made, with a commit or a change, or a change in a repository inside a
   submodule. A repository inside a folder that the setup made, such as a submodule of a repository
-  the setup cloned, is not in this list. Your ignore rules keep a repository's folder out of this
-  list when the rules in the copy cover it too. The session prints a line with its path.
+  the setup cloned, is not in this list. Your ignore rules and the setup's keep a repository's
+  folder out of this list when the rules in the copy cover it too. The session prints a line with
+  its path.
 - A file that an ignore rule covers, when that rule is not one of yours: the agent wrote or changed
   the `.gitignore` that has it, such as `foo/.gitignore` with `*`, in the repository or in a
-  submodule.
+  submodule. Such a file whose name has a line break keeps the copy, also when your rules cover
+  each line of the name.
+- A file that the agent wrote or changed under the setup's ignore rules, such as `cache/new.txt`
+  with `*` in a `cache/.gitignore` that the setup wrote, or `tool/third/x.go` with `third/` in the
+  `.gitignore` of a repository `tool` that the setup cloned. A commit that the agent made in a
+  repository in such a folder, also a bare repository such as `cache/b.git`, is such a change too.
+  The session finds these files by their change time, which the agent cannot set back as
+  `touch -d` sets a file's time: after a setup that wrote or changed a `.gitignore`, made a
+  repository, or left a folder that qory could not walk, such as one more than 64 folders deep,
+  the container `qory-record-<run id>`, which binds the copy read-only, records the second in
+  which the setup ended, and the session lists each file under the setup's rules with a
+  later change time. A folder that the session cannot enter, such as one of mode `000`, is listed
+  as one entry, such as `cache/`. A file that the agent deleted, a file in a folder named
+  `node_modules`, `.venv`, `venv`, `__pycache__`, `target`, `build`, `dist`, `.gradle` or `.next`,
+  and the `.git/index` of a repository that has what the repository's `HEAD` has, as after
+  `git status` rewrote it, keep nothing behind. A `.git/index` whose entries match `HEAD` is not
+  checked further, so data that the agent writes into the index file by hand, outside its
+  entries, does not come back. After
+  such a setup, a name with a line break anywhere else in the copy keeps the copy, and the line
+  lists none. A process of the setup that still writes under these rules while the agent runs
+  keeps the copy too. When the record container failed or ran past its limit, any file under the
+  setup's rules keeps the copy, and the line lists none. With `wall.setup: inside`, the setup runs
+  in the agent's container and no record runs: what the setup wrote counts as the agent's, as the
+  two items above describe, and the line lists no file.
 - A file at the path of a link into `.qory`, such as `CLAUDE.md`, that is no longer a link and
   differs from the commit: it may have the run's text from `.qory`, so the commit keeps the path as
   your commit has it.
@@ -3858,7 +3881,14 @@ qory run: read the run's files in <folder>, run no git there, then remove the fo
 Each of the other cases, a repository inside a submodule too, has this line in place of the first:
 
 ```text
-qory run: part of the run's work did not come back: the copy has changes that git could not add to the run's commit, such as a file another user owns or a change in a submodule.
+qory run: part of the run's work did not come back: the copy has changes that git could not add to the run's commit, such as a file another user owns, a change in a submodule, or a file under ignore rules that the setup wrote.
+```
+
+When the agent changed files under the setup's ignore rules, the line ends with them, the first
+50 and then the count of the rest:
+
+```text
+qory run: part of the run's work did not come back: the copy has changes that git could not add to the run's commit, such as a file another user owns, a change in a submodule, or a file under ignore rules that the setup wrote. Changed under the setup's ignore rules: cache/new.txt, tool/third/x.go.
 ```
 
 Git LFS: because the session runs no filter, an LFS file the agent changes goes into the

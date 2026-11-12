@@ -42,23 +42,25 @@ func (d Dir) SetupStates(ctx context.Context, r Repository, paths []string) ([]S
 // [LeftOut.Submodules]. [Dir.SetupChanges] leaves submodules out, so a git session that finds a
 // change in one compares it with this. Call it after the setup and before the agent's session.
 // No git opens the copy, and the walk follows no link. A file the setup deleted, or wrote with an
-// older time, is not listed, so that change keeps the copy.
-func (d Dir) SubmoduleSetup(ctx context.Context, r Repository) ([]SetupPath, error) {
+// older time, is not listed, so that change keeps the copy. It reports true, for
+// [LeftOut.SubmodulesPartial], when the walk left a folder out, such as one past [maxOpenFolders].
+func (d Dir) SubmoduleSetup(ctx context.Context, r Repository) ([]SetupPath, bool, error) {
 	rel, err := repositoryRel(r)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	top := filepath.Join(d.Work(), filepath.FromSlash(rel))
 	out, err := git(ctx, d.source(r.index), "ls-tree", "-r", "-z", "--full-tree", r.Base)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	root, err := unix.Open(top, dirFlags, 0)
 	if err != nil {
-		return nil, fileErr(top, err)
+		return nil, false, fileErr(top, err)
 	}
 	defer unix.Close(root)
 	var paths []string
+	partial := false
 	for entry := range strings.SplitSeq(out, "\x00") {
 		meta, file, ok := strings.Cut(entry, "\t")
 		if !ok || !strings.HasPrefix(meta, "160000 ") || !cleanRel(file) {
@@ -73,34 +75,43 @@ func (d Dir) SubmoduleSetup(ctx context.Context, r Repository) ([]SetupPath, err
 		if err != nil {
 			continue
 		}
-		newerFiles(sub, file, r.cloned, 0, &paths)
+		newerFiles(sub, file, r.cloned, 0, &paths, &partial)
 		unix.Close(sub)
 	}
 	if len(paths) == 0 {
-		return nil, nil
+		return nil, partial, nil
 	}
-	return d.setupStatesAt(ctx, top, r.index, paths, false)
+	states, err := d.setupStatesAt(ctx, top, r.index, paths, false)
+	return states, partial, err
 }
 
 // newerFiles adds to paths each regular file and link below the folder dir, at rel, with a time
 // past since, and walks each folder but .git. A path with a line break stays out, since sub-n has
 // one path per line. A folder or a file this process cannot read stays out too, such as a file of
 // mode 000 or a folder of mode 0444. The git session finds each as a change that sub-n does not
-// have, or as a folder it cannot read, and keeps the copy.
-func newerFiles(dir int, rel string, since time.Time, depth int, paths *[]string) {
+// have, or as a folder it cannot read, and keeps the copy. It sets partial when it leaves out a
+// folder, or an entry that may be one: a .gitignore there would have no path in paths.
+func newerFiles(dir int, rel string, since time.Time, depth int, paths *[]string, partial *bool) {
 	if depth >= maxOpenFolders {
+		*partial = true
 		return
 	}
 	names, err := readNames(dir)
 	if err != nil {
+		*partial = true
 		return
 	}
 	for _, name := range names {
-		if folds(name, ".git") || strings.Contains(name, "\n") {
+		if folds(name, ".git") {
 			continue
 		}
 		var st unix.Stat_t
 		if err := unix.Fstatat(dir, name, &st, unix.AT_SYMLINK_NOFOLLOW); err != nil {
+			*partial = true
+			continue
+		}
+		if strings.Contains(name, "\n") {
+			*partial = *partial || st.Mode&unix.S_IFMT == unix.S_IFDIR
 			continue
 		}
 		at := path.Join(rel, name)
@@ -108,9 +119,10 @@ func newerFiles(dir int, rel string, since time.Time, depth int, paths *[]string
 		case unix.S_IFDIR:
 			sub, err := unix.Openat(dir, name, dirFlags, 0)
 			if err != nil {
+				*partial = true
 				continue
 			}
-			newerFiles(sub, at, since, depth+1, paths)
+			newerFiles(sub, at, since, depth+1, paths, partial)
 			unix.Close(sub)
 		case unix.S_IFREG:
 			file, err := unix.Openat(dir, name, unix.O_RDONLY|unix.O_NOFOLLOW|unix.O_NONBLOCK|unix.O_CLOEXEC, 0)

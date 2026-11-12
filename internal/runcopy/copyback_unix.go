@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"maps"
 	"os"
 	"path"
 	"path/filepath"
@@ -38,6 +39,12 @@ const maxCopyBackBytes = 8 << 30
 var generatedFolders = map[string]bool{
 	"node_modules": true, ".venv": true, "venv": true, "__pycache__": true, "target": true,
 	"build": true, "dist": true, ".gradle": true, ".next": true,
+}
+
+// generatedNames is the names of [generatedFolders], sorted, with a space between them, for the
+// git session's find, which leaves such folders out of its check of the setup's ignore rules.
+func generatedNames() string {
+	return strings.Join(slices.Sorted(maps.Keys(generatedFolders)), " ")
 }
 
 // MaxGeneratedFiles and MaxGeneratedBytes are the most entries and bytes in all folders of

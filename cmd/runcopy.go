@@ -33,8 +33,9 @@ const (
 	textCopyNoFolder   = "commit %[1]s, or run qory in a folder that the commit at HEAD has: a run that may write works in a copy of that commit, which has no folder %[1]s"
 	textCopyReserved   = "start the run from a folder that does not contain your home folder, qory's state directory or the folder of the runs' copies: the folder %s %s, and the run's copy of it would have every file there"
 	textCopyBehind     = "part of the run's work did not come back: the copy has a nested repository the run made."
-	textCopyNotAdded   = "part of the run's work did not come back: the copy has changes that git could not add to the run's commit, such as a file another user owns or a change in a submodule."
-	textCopyLarge      = "left out of the run's commit, as each has more than %s: %s. They stay in the run's copy."
+	textCopyNotAdded   = "part of the run's work did not come back: the copy has changes that git could not add to the run's commit, such as a file another user owns, a change in a submodule, or a file under ignore rules that the setup wrote."
+	textCopyIgnored    = " Changed under the setup's ignore rules: %s"
+	textCopyLarge      = "left out of the run's commit, as each has more than %s: %s They stay in the run's copy."
 	textCopyStepLimit  = "the check of the run's commits ran past its limit of %s, so those commits did not come back"
 	textCopyFetchLimit = "the fetch of the run's commits ran past its limit of %s, so those commits did not come back"
 	textCopyBackLimit  = "the copy back of the run's files ran past its limit of %s, so part of them did not come back"
@@ -462,12 +463,12 @@ func (c *runCopy) recordSetup(ctx context.Context, run openedRun, spec *runSpec)
 		if err != nil {
 			return runcopy.ShownError(err)
 		}
-		submodules, err := c.dir.SubmoduleSetup(ctx, r)
+		submodules, partial, err := c.dir.SubmoduleSetup(ctx, r)
 		if err != nil {
 			return runcopy.ShownError(err)
 		}
 		o := c.out[r.Path]
-		o.Setup, o.Submodules = states, submodules
+		o.Setup, o.Submodules, o.SubmodulesPartial = states, submodules, partial
 		c.out[r.Path] = o
 	}
 	return c.recordRepositories(ctx, run, spec)
@@ -477,14 +478,15 @@ func (c *runCopy) recordSetup(ctx context.Context, run openedRun, spec *runSpec)
 // test replaces it.
 var runRecordContainer = func(ctx context.Context, c gitContainer) (int, error) { return runGitContainer(ctx, c) }
 
-// recordRepositories records each repository that the setup made in the copy, when there is one:
-// [runcopy.Dir.RecordSession] runs in a container that qory starts as the git session's, see
-// [gitContainerFor], named qory-record-<run id>, with the copy read-only, within the time limit
-// that the git session gets, [runcopy.SessionLimitFor] of [runcopy.Dir.WorkSize] after the setup.
-// No git on this machine opens the copy. The container's lines go nowhere.
-// When the container does not start, fails or runs past that limit, each such repository is
-// other, so the git session keeps the copy for it with its usual line. A stop or the run's time
-// limit that ends ctx is the error.
+// recordRepositories runs [runcopy.Dir.RecordSession] after the setup, when the setup can have
+// written ignore rules: it records the setup's end and each repository that the setup made, in a
+// container that qory starts as the git session's, see [gitContainerFor], named
+// qory-record-<run id>, with the copy read-only, within the time limit that the git session gets,
+// [runcopy.SessionLimitFor] of [runcopy.Dir.WorkSize] after the setup. No git on this machine
+// opens the copy. The container's lines go nowhere. When the container does not start, fails or
+// runs past that limit, each such repository is other and the setup's end is unknown, so the git
+// session keeps the copy for such a repository and for a path under the setup's ignore rules. A
+// stop or the run's time limit that ends ctx is the error.
 func (c *runCopy) recordRepositories(ctx context.Context, run openedRun, spec *runSpec) error {
 	gs, needed, err := c.dir.RecordSession(ctx, c.repos, c.out)
 	if err != nil {
@@ -652,7 +654,7 @@ func (c *runCopy) comeBack(ctx context.Context, runID string, report func(string
 		}
 	}
 	if len(left.Large) > 0 {
-		report(fmt.Sprintf(textCopyLarge, maxFileShown, largeFiles(left.Large)))
+		report(fmt.Sprintf(textCopyLarge, maxFileShown, sessionList(left.Large)))
 		ok = false
 	}
 	if left.Nested {
@@ -660,7 +662,11 @@ func (c *runCopy) comeBack(ctx context.Context, runID string, report func(string
 		ok = false
 	}
 	if left.Behind {
-		report(textCopyNotAdded)
+		line := textCopyNotAdded
+		if len(left.Ignored) > 0 {
+			line += fmt.Sprintf(textCopyIgnored, sessionList(left.Ignored))
+		}
+		report(line)
 		ok = false
 	}
 	if !ok {
@@ -821,12 +827,21 @@ func actingKeys(changes []runcopy.ActingChange) string {
 	return strings.Join(keys, ", ")
 }
 
+// sessionList is [sessionPaths] of files and the dot that ends its sentence, which a list that
+// [runcopy.Dir.Left] cut has in the ... at its end.
+func sessionList(files []string) string {
+	if n := len(files); n > 0 && n <= maxListed && files[n-1] == "..." {
+		return sessionPaths(files)
+	}
+	return sessionPaths(files) + "."
+}
+
 // maxFileShown is [runcopy.MaxFile] as a line shows it.
 var maxFileShown = fmt.Sprintf("%d MiB", runcopy.MaxFile>>20)
 
-// largeFiles is the files of [runcopy.Left.Large] as a line lists them, by [listed]: text that a
-// program in the git session can write, each with no control character.
-func largeFiles(files []string) string {
+// sessionPaths is the paths of [runcopy.Left.Large] or [runcopy.Left.Ignored] as a line lists them,
+// by [listed]: text that a program in the git session can write, each with no control character.
+func sessionPaths(files []string) string {
 	shown := make([]string, len(files))
 	for i, f := range files {
 		shown[i] = integration.Printable(f)

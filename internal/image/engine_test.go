@@ -168,6 +168,8 @@ func TestEngineFindsSetuidFilesAndCapabilities(t *testing.T) {
 		tarFile{name: "usr/bin/mv", mode: 0o755},
 		tarFile{name: "usr/bin/readlink", mode: 0o755},
 		tarFile{name: "usr/bin/sort", mode: 0o755},
+		tarFile{name: "usr/bin/sleep", mode: 0o755},
+		tarFile{name: "usr/bin/stat", mode: 0o755},
 		tarFile{name: "usr/bin/tr", mode: 0o755},
 	)}
 	checks := image.Engine{Run: f.run}.Check(context.Background(), "linux/arm64", image.Target{Ref: "a:1", Helper: "/q"})

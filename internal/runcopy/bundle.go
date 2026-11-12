@@ -28,7 +28,8 @@ const MaxBundle = 8 << 30
 // copy, and n.large lists it.
 const MaxFile = 100 << 20
 
-// maxLarge is the most bytes qory reads of the lists of large files, all together.
+// maxLarge is the most bytes qory reads of the lists of large files, all together, and of the
+// lists of changes under the setup's ignore rules.
 const maxLarge = 1 << 20
 
 // maxBundleHeader is the largest header of a bundle, its refs and prerequisites, that
@@ -60,40 +61,58 @@ type Left struct {
 	// the session can write, and never a path to open. The last is "..." when the lists have more
 	// than qory reads.
 	Large []string
+	// Ignored are the paths that the agent changed under the setup's ignore rules, relative to the
+	// copy, as the session listed them in n.ignored: text to show, as Large is. Each keeps the
+	// copy, with Behind.
+	Ignored []string
 }
 
 // Any reports whether anything stays.
 func (l Left) Any() bool { return l.Nested || l.Behind || len(l.Large) > 0 }
 
 // Left reads what the git session of repos recorded as staying in the copy: n.nested, n.left, and
-// each n.large, a
-// regular file read with no link followed, at most 1 MiB of them in all.
+// each n.large and n.ignored, a regular file read with no link followed, at most 1 MiB of each
+// kind in all.
 func (d Dir) Left(repos []Repository) Left {
 	left := Left{Nested: d.recorded(repos, ".nested"), Behind: d.recorded(repos, ".left")}
+	var bad bool
+	left.Large, bad = d.lists(repos, ".large")
+	left.Behind = left.Behind || bad
+	left.Ignored, bad = d.lists(repos, ".ignored")
+	left.Behind = left.Behind || bad || len(left.Ignored) > 0
+	return left
+}
+
+// lists reads the lines of each file n plus suffix of the git session of repos, at most
+// [maxLarge] bytes of them in all, then "..." when there are more. It reports whether a file that
+// is there could not be read.
+func (d Dir) lists(repos []Repository, suffix string) ([]string, bool) {
+	var lines []string
+	bad := false
 	budget := int64(maxLarge)
 	for i := range repos {
-		data, cut, err := readRunFile(filepath.Join(d.Bundle(), strconv.Itoa(i)+".large"), budget)
+		data, cut, err := readRunFile(filepath.Join(d.Bundle(), strconv.Itoa(i)+suffix), budget)
 		switch {
 		case errors.Is(err, fs.ErrNotExist):
 			continue
 		case err != nil:
-			left.Behind = true
+			bad = true
 			continue
 		}
 		budget -= int64(len(data))
-		lines := strings.Split(string(data), "\n")
+		pieces := strings.Split(string(data), "\n")
 		// The last piece follows the last line break: "" or a line that the cut ended.
-		for _, line := range lines[:len(lines)-1] {
+		for _, line := range pieces[:len(pieces)-1] {
 			if line != "" {
-				left.Large = append(left.Large, line)
+				lines = append(lines, line)
 			}
 		}
 		if cut {
-			left.Large = append(left.Large, "...")
+			lines = append(lines, "...")
 			break
 		}
 	}
-	return left
+	return lines, bad
 }
 
 // readRunFile reads at most limit bytes of the file at path, which the git session wrote: only a

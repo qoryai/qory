@@ -42,6 +42,14 @@ type LeftOut struct {
 	// Submodules are the files the setup left in a submodule, as [Dir.SubmoduleSetup] lists them.
 	// A change in a submodule that is one of these keeps nothing behind.
 	Submodules []SetupPath
+	// SubmodulesPartial is whether [Dir.SubmoduleSetup] left a folder of a submodule out of
+	// Submodules, so the setup can have written a .gitignore there that Submodules does not list.
+	SubmodulesPartial bool
+	// SetupEnd is the second of the setup's end, as [Dir.Recorded] read it: a path that an ignore
+	// rule of the setup covers and whose change time is past it keeps the copy. 0 is a run whose
+	// setup can have written no ignore rules, or with no record, and -1 a setup whose end the
+	// record session could not read.
+	SetupEnd int64
 }
 
 // SetupPath is a path the setup changed, relative to the top of its repository with
@@ -116,7 +124,13 @@ type GitSession struct {
 // unless the person's rules cover it too: those rules and the .gitignore files of the base commit,
 // with each .gitignore that the setup changed as the setup left it. A repository the setup made
 // stays out, and stays behind when what repo_state reads there differs from its [SetupPath.State],
-// which [Dir.RecordSession] read after the setup.
+// which [Dir.RecordSession] read after the setup. A path that the setup's rules ignore, also those
+// of a repository the setup made, and whose change time is past [LeftOut.SetupEnd], stays behind
+// too, and n.ignored lists it, unless it is in a folder of [generatedFolders] or is the .git/index
+// of a repository that has what HEAD there has. A folder the session cannot enter is one such
+// path, with a final /, and a name with a line break writes n.left alone, as does a path with a
+// line break in a list that git writes whose pieces other paths could cover, such as the ignored
+// paths.
 //
 // The add leaves out each regular file of more than [MaxFile] bytes that it would add, in the
 // repository and in each submodule, and lists its path, relative to the copy, in n.large, which
@@ -233,7 +247,8 @@ func sessionList(r Repository, o LeftOut) (string, error) {
 	}
 	setup := slices.Concat(o.Setup, r.filtered)
 	var b strings.Builder
-	fmt.Fprintf(&b, "rel=%s base=%s icase=%t links=%d setup=%d\nset --", shellQuote(rel), r.Base, r.ignorecase, len(o.Links), len(setup))
+	fmt.Fprintf(&b, "rel=%s base=%s icase=%t links=%d setup=%d since=%d generated=%s\nset --",
+		shellQuote(rel), r.Base, r.ignorecase, len(o.Links), len(setup), max(o.SetupEnd, -1), shellQuote(generatedNames()))
 	for _, p := range o.Links {
 		if !cleanRel(p) {
 			return "", fmt.Errorf(textLeftOut, shown(p))
@@ -288,8 +303,9 @@ const SessionScriptName = "qory-git-session.sh"
 // [sessionList], reads refs-n, see [Repository], sub-n, see [submoduleList], subs-n, see
 // [clonedList], and subrefs-n-k for its submodule number k, and uses exclude-n when there is
 // one. It writes n.bundle, or n.none when nothing is past the base commit, and n-k.bundle or
-// n-k.none for each submodule in subs-n, n.large for files it leaves out by their size, and n.known
-// or n-k.known for the run's refs at a commit the person has. Its
+// n-k.none for each submodule in subs-n, n.large for files it leaves out by their size, n.ignored for
+// changes under the setup's ignore rules, and n.known or n-k.known for the run's refs at a commit the
+// person has. Its
 // find takes a size in bytes, with c, which busybox and GNU find both read: [MaxFile] bytes. It needs git 2.25 or later, for --pathspec-from-file.
 const sessionScript = scriptFunctions + sessionMain
 
@@ -361,6 +377,43 @@ c_quoted() {
 		esac
 	done
 	printf '"%s"\n' "$line"
+}
+# broken reports whether the file $1, a list of paths each with a NUL, has a path with a line
+# break, which the lines read from the list split into paths that other checks may cover.
+broken() {
+	tr -cd '\n' < "$1" > "$1-breaks" 2>/dev/null || return 0
+	[ -s "$1-breaks" ]
+}
+# split_hidden reports whether a path of the NUL list $1 has a line break and a piece of it, as
+# the lines read from $1 split it, is a line of the file $2, with or without a final /, or is below
+# a folder of the file ${3-}: that piece counts as kept out on purpose, and the path with it. A path
+# that $2-z, the NUL list of the paths with a line break in $2, has whole is kept out as itself. A
+# \001 in a path counts as a line break too, and a failure returns 0.
+split_hidden() {
+	tr '\n\000' '\001\n' < "$1" > "$1-lines" 2>/dev/null || return 0
+	{ grep "$(printf '\001')" "$1-lines" || :; } > "$1-broken" 2>/dev/null || return 0
+	if [ ! -s "$1-broken" ]; then
+		return 1
+	fi
+	: > "$1-whole"
+	if [ -f "$2-z" ]; then
+		tr '\n\000' '\001\n' < "$2-z" > "$1-whole" 2>/dev/null || return 0
+	fi
+	lacking "$1-broken" "$1-whole" | tr '\001' '\n' > "$1-split" 2>/dev/null || return 0
+	while IFS= read -r h_p; do
+		printf '%s\n' "$h_p" "${h_p%/}"
+	done < "$1-split" > "$1-pieces"
+	if [ ! -s "$1-pieces" ]; then
+		return 1
+	fi
+	if [ -n "$(both "$1-pieces" "$2")" ]; then
+		return 0
+	fi
+	if [ -n "${3-}" ]; then
+		outside "$1-pieces" "$3" > "$1-outside"
+		[ -n "$(lacking "$1-pieces" "$1-outside")" ] && return 0
+	fi
+	return 1
 }
 # lacking prints the lines of the file $1 that the file $2 does not have, and every line of $1 when
 # sort or comm fails, so a failure keeps the copy. LC_ALL=C is what both sort by.
@@ -472,6 +525,9 @@ tree_status() (
 	if [ -n "$t_rules" ]; then
 		rules || exit 1
 		g ls-files -z -o -i --exclude-standard > "$G/ignored-z" || exit 1
+		if broken "$G/ignored-z"; then
+			: > "$B/$n.left"
+		fi
 		tr '\000' '\n' < "$G/ignored-z" > "$G/ignored" || exit 1
 		{ grep -v -e '^:' -e '^$' "$G/ignored" || :; } | tr '\n' '\000' > "$G/asked-z" || exit 1
 		person_ignored "$G/asked-z" "$G/person-z"
@@ -517,6 +573,9 @@ tree_status() (
 			printf ' M %s\0' "$t_p" >> "$t_out" || exit 1
 			: > "$B/$n.left"
 		elif [ -s "$G/status-$t_k.out" ] && [ -n "$t_deep" ]; then
+			if broken "$G/status-$t_k.out"; then
+				: > "$B/$n.left"
+			fi
 			tr '\000' '\n' < "$G/status-$t_k.out" > "$G/status-$t_k.lines" || exit 1
 			while IFS= read -r t_e; do
 				printf '%s %s/%s\0' "${t_e%"${t_e#??}"}" "$t_p" "${t_e#???}"
@@ -611,6 +670,7 @@ large() {
 "*)
 				printf ":(exclude,top,literal)%s\0" "$p" >> "$add"
 				printf "%s\n" "$p" >> "$out"
+				printf "%s\0" "$p" >> "$out-z"
 				printf "%s%s" "$at" "$p" | tr "\n" "?" >> "$list"
 				printf "\n" >> "$list"
 				;;
@@ -626,6 +686,9 @@ large() {
 		set -- "$@" ":(top,literal)$p"
 	done < "$G/large-found"
 	if g ls-files -z -m -o --exclude-standard -- "$@" > "$G/large-z" 2>/dev/null; then
+		if broken "$G/large-z"; then
+			: > "$B/$n.left"
+		fi
 		tr '\000' '\n' < "$G/large-z" > "$G/large-added"
 	else
 		cp "$G/large-found" "$G/large-added"
@@ -698,7 +761,7 @@ rules() {
 # person_ignored writes to the file $2 each path of the file $1, a path and a NUL each, that the
 # person's ignore rules cover, as rules wrote them. A path with a final / is a folder. check-ignore
 # reads a path that starts with : as a pathspec, so the caller leaves such a path out. A failure
-# writes nothing, so that each path counts as left out.
+# writes nothing, so that each path counts as left out, and sets p_status past 1.
 person_ignored() {
 	: > "$2"
 	p_status=0
@@ -729,6 +792,161 @@ setup_rules() {
 			: > "$G/rules/$s_p"
 		fi
 	done < "$1"
+}
+# stat_args sets s_opt, s_time and s_line to the arguments of stat that print a change time in seconds,
+# alone or before a path: busybox and GNU stat take -c, and BSD stat -f. It returns 1 with neither.
+stat_args() {
+	if stat -c %Z . > /dev/null 2>&1; then
+		s_opt=-c s_time=%Z s_line='%Z %n'
+	elif stat -f %c . > /dev/null 2>&1; then
+		s_opt=-f s_time=%c s_line='%c %N'
+	else
+		return 1
+	fi
+}
+# changed writes to the file $1 each path whose change time is past $since, the setup's end, or every
+# path with $since below 0. A write sets the change time from the clock, and touch -d cannot set it.
+# It skips each folder named in $generated and each .git/index that index_clean finds with no
+# work, such as one that git status rewrote, and lists a folder, with a final /, only when find
+# cannot enter it. The list has a path a line, so a name with a line break, which find stats as x,
+# writes n.left.
+changed() {
+	c_out=$1
+	: > "$c_out"
+	if [ "$since" -eq 0 ]; then
+		return 0
+	fi
+	if ! stat_args; then
+		: > "$B/$n.left"
+		return 0
+	fi
+	set --
+	for c_n in $generated; do
+		set -- "$@" -o -name "$c_n"
+	done
+	if [ $# -gt 0 ]; then
+		shift
+	fi
+	find . \( -path ./.git -o -path ./.qory -o -type d \( "$@" \) \) -prune -o -name "*$nl*" -exec stat "$s_opt" x {} + \
+		-o -type d ! -perm -500 -prune -exec stat "$s_opt" "$s_line/" {} + \
+		-o ! -type d -exec stat "$s_opt" "$s_line" {} + > "$c_out-times" 2>/dev/null || : > "$B/$n.left"
+	c_status=0
+	grep -q -x x "$c_out-times" 2>/dev/null || c_status=$?
+	if [ "$c_status" -ne 1 ]; then
+		: > "$B/$n.left"
+	fi
+	if ! sort -n -r "$c_out-times" > "$c_out-sorted" 2>/dev/null; then
+		: > "$B/$n.left"
+		return 0
+	fi
+	while IFS= read -r c_line; do
+		c_t=${c_line%% *}
+		case $c_t in
+		'' | *[!0-9]*) continue ;;
+		esac
+		if [ ${#c_t} -gt 15 ]; then
+			: > "$B/$n.left"
+			continue
+		fi
+		if [ "$c_t" -le "$since" ]; then
+			break
+		fi
+		c_p=${c_line#* }
+		c_p=${c_p#./}
+		case $c_p in
+		*/.git/index)
+			if index_clean "$c_p"; then
+				continue
+			fi
+			;;
+		esac
+		if [ -e "$c_p" ] || [ -h "$c_p" ]; then
+			printf '%s\n' "$c_p"
+		else
+			: > "$B/$n.left"
+		fi
+	done < "$c_out-sorted" > "$c_out"
+}
+# index_clean reports whether the file $1, a .git/index, holds no work: git reads a copy of it, with
+# the folder above it as git folder, and finds what HEAD there has, as after a git status. A folder
+# that is no git folder, or a failed git, returns 1.
+index_clean() (
+	unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE
+	cp "$1" "$c_out-index" 2>/dev/null || exit 1
+	export GIT_INDEX_FILE="$c_out-index"
+	g --git-dir="${1%/index}" diff-index --cached --quiet --no-ext-diff HEAD -- > /dev/null 2>&1
+)
+# new_ignored writes to $G/new-ignored-z each path of $G/new, as ./path, that the work tree's rules
+# ignore, and to $G/new-person-z those that the person's rules ignore. check-ignore stops at a path in
+# a submodule, so such a path is not asked: the checks of submodules cover it.
+new_ignored() {
+	: > "$G/new-ignored-z"
+	: > "$G/new-person-z"
+	if [ ! -s "$G/new" ]; then
+		return 0
+	fi
+	if ! g -c core.quotePath=false ls-files -s > "$G/new-index" 2>/dev/null; then
+		: > "$B/$n.left"
+		return 0
+	fi
+	while IFS= read -r line; do
+		case $line in
+		"160000 "*) printf '%s\n' "${line#*"$tab"}" ;;
+		esac
+	done < "$G/new-index" > "$G/new-links"
+	outside "$G/new" "$G/new-links" > "$G/new-asked"
+	while IFS= read -r p; do
+		printf './%s\0' "$p"
+	done < "$G/new-asked" > "$G/new-asked-z"
+	n_status=0
+	g check-ignore -z --stdin < "$G/new-asked-z" > "$G/new-ignored-z" 2>/dev/null || n_status=$?
+	if [ "$n_status" -gt 1 ]; then
+		: > "$G/new-ignored-z"
+		: > "$B/$n.left"
+		return 0
+	fi
+	person_ignored "$G/new-ignored-z" "$G/new-person-z"
+}
+# setup_ignored writes n.left, and with $since past 0 each path after $1 to n.ignored, for each path
+# of $G/new-ignored-z that the person's rules leave and either the rules after setup_rules ignore or
+# a repository of $setup_repos holds: check-ignore read that repository's rules. When person_ignored
+# fails on the rules after setup_rules, it writes n.left alone.
+setup_ignored() {
+	if [ ! -s "$G/new-ignored-z" ]; then
+		return 0
+	fi
+	person_ignored "$G/new-ignored-z" "$G/new-setup-z"
+	if [ "$p_status" -gt 1 ]; then
+		: > "$B/$n.left"
+	fi
+	tr '\000' '\n' < "$G/new-ignored-z" > "$G/new-ignored"
+	tr '\000' '\n' < "$G/new-setup-z" > "$G/new-setup"
+	tr '\000' '\n' < "$G/new-person-z" > "$G/new-person"
+	while IFS= read -r p; do
+		up=${p#./}
+		while :; do
+			case $setup_repos in
+			*"$nl$up$nl"*)
+				printf '%s\n' "$p"
+				break
+				;;
+			esac
+			case $up in
+			*/*) up=${up%/*} ;;
+			*) break ;;
+			esac
+		done
+	done < "$G/new-ignored" >> "$G/new-setup"
+	lacking "$G/new-setup" "$G/new-person" > "$G/new-left"
+	if [ ! -s "$G/new-left" ]; then
+		return 0
+	fi
+	: > "$B/$n.left"
+	if [ "$since" -gt 0 ]; then
+		while IFS= read -r p; do
+			printf '%s%s\n' "$1" "${p#./}"
+		done < "$G/new-left" >> "$B/$n.ignored"
+	fi
 }
 # repo_git adds to the files $r_f and $r_l the regular files and the links of HEAD, packed-refs,
 # refs, reftable and logs of the git folder $1, relative to the current folder, for repo_state.
@@ -790,6 +1008,9 @@ repo_state() (
 		printf '%s/%s\n' "$T/$1" "${r_p#./}"
 	done < "$r_f" > "$G/repo-paths" || exit 1
 	g hash-object --no-filters --stdin-paths < "$G/repo-paths" > "$G/repo-ids" || exit 1
+	if broken "$2"; then
+		exit 1
+	fi
 	tr '\000' '\n' < "$2" > "$G/repo-status" || exit 1
 	{
 		while IFS= read -r r_p && IFS= read -r r_id <&4; do
@@ -910,6 +1131,9 @@ leftover() {
 		: > "$B/$n.left"
 		return 0
 	fi
+	if broken "$G/ignored-z"; then
+		: > "$B/$n.left"
+	fi
 	tr '\000' '\n' < "$G/after-z" > "$G/after"
 	tr '\000' '\n' < "$G/ignored-z" > "$G/ignored"
 	{ grep -v -e '^:' -e '^$' "$G/ignored" || :; } | tr '\n' '\000' > "$G/asked-z"
@@ -924,6 +1148,11 @@ leftover() {
 		done < "$G/$lo_tree" > "$G/$lo_tree-links"
 	done
 	if [ -n "$(lacking "$G/index-tree-links" "$G/from-tree-links")" ]; then
+		: > "$B/$n.left"
+	fi
+	cat "$lo_out" "$G/from-tree-links" > "$G/after-kept"
+	cat "$lo_out-z" > "$G/after-kept-z" 2>/dev/null || :
+	if split_hidden "$G/after-z" "$G/after-kept" "$lo_made"; then
 		: > "$B/$n.left"
 	fi
 	lacking "$G/after" "$lo_out" > "$G/after-out"
@@ -1135,6 +1364,12 @@ submodule_bundle() (
 	fi
 	g read-tree "$from"
 	rules
+	while IFS= read -r p; do
+		case $p in
+		"$d"/?*) printf '%s\n' "${p#"$d"/}" ;;
+		esac
+	done < "$PG/new" > "$G/new"
+	new_ignored
 	printf ':/\0' > "$G/add"
 	# A folder with a .git below another one stays out with it: git stops at a pathspec inside a
 	# submodule of the submodule.
@@ -1187,6 +1422,7 @@ submodule_bundle() (
 		: > "$G/setup"
 	fi
 	: > "$G/setup-paths"
+	: > "$G/setup-paths-z"
 	while IFS= read -r line; do
 		p=${line#* }
 		p=${p#"$d"/}
@@ -1194,6 +1430,8 @@ submodule_bundle() (
 		printf ':(exclude,top,literal)%s\0' "$p" >> "$G/add"
 	done < "$G/setup"
 	setup_rules "$G/setup-paths"
+	setup_repos=$nl
+	setup_ignored "$top$d/"
 	tr '\000' '\n' < "$PG/status" > "$G/changes"
 	while IFS= read -r line; do
 		p=${line#???}
@@ -1217,7 +1455,7 @@ submodule_bundle() (
 	add "$G/add" "$shows"
 	g ls-files -z -m -o --exclude-standard -- "$@" > "$G/unadded-z" 2>/dev/null || : > "$B/$n.left"
 	tr '\000' '\n' < "$G/unadded-z" > "$G/unadded"
-	if [ -n "$(lacking "$G/unadded" "$G/setup-paths")" ]; then
+	if [ -n "$(lacking "$G/unadded" "$G/setup-paths")" ] || split_hidden "$G/unadded-z" "$G/setup-paths"; then
 		: > "$B/$n.left"
 	fi
 	set +e
@@ -1243,7 +1481,16 @@ submodule_bundle() (
 `
 
 // sessionMain is the part of [sessionScript] that commits and writes the bundles.
-const sessionMain = `n=0
+const sessionMain = `# changed runs for each repository before the session changes a file in any, such as with chmod in
+# readable.
+n=0
+while [ "$n" -lt "$count" ]; do
+	. "$B/list-$n"
+	if [ "$rel" = . ]; then cd "$W"; else cd "$W/$rel"; fi
+	changed "$B/new-$n"
+	n=$((n + 1))
+done
+n=0
 while [ "$n" -lt "$count" ]; do
 	. "$B/list-$n"
 	if [ "$rel" = . ]; then T=$W shown="the copy" top=; else T=$W/$rel shown="the copy of $rel" top=$rel/; fi
@@ -1307,12 +1554,14 @@ while [ "$n" -lt "$count" ]; do
 	printf ':(top,literal,icase).qory\0' > "$R"
 	: > "$G/folders"
 	: > "$G/out-paths"
+	: > "$G/out-paths-z"
 	: > "$G/out-folders"
 	: > "$G/made"
 	: > "$G/setup-kept"
 	if ! command -v find > /dev/null 2>&1; then
 		: > "$B/$n.left"
 	fi
+	mv "$B/new-$n" "$G/new"
 	readable
 	# Each path that the sparse checkout took out, and that the working tree does not have, stays out.
 	# A path that the working tree has goes into the commit as any other, such as a file the agent
@@ -1383,6 +1632,9 @@ while [ "$n" -lt "$count" ]; do
 		printf ':(top,literal)%s\0' "$1" >> "$R"
 		if [ -h "$T/$1" ] || [ ! -e "$T/$1" ]; then
 			printf '%s\n' "$1" >> "$G/out-paths"
+			case $1 in
+			*"$nl"*) printf '%s\0' "$1" >> "$G/out-paths-z" ;;
+			esac
 		fi
 		shift
 		i=$((i + 1))
@@ -1452,6 +1704,9 @@ while [ "$n" -lt "$count" ]; do
 				fi
 			else
 				printf '%s\n' "$1" >> "$G/out-paths"
+				case $1 in
+				*"$nl"*) printf '%s\0' "$1" >> "$G/out-paths-z" ;;
+				esac
 				printf '%s\n' "$1" >> "$G/setup-kept"
 			fi
 			;;
@@ -1461,7 +1716,9 @@ while [ "$n" -lt "$count" ]; do
 	done
 	exec 3<&-
 	rules
+	new_ignored
 	setup_rules "$G/setup-kept"
+	setup_ignored "$top"
 	# The positional parameters are now what stays out besides .qory and $G/out-paths, for ls-files.
 	while IFS= read -r d; do
 		set -- "$@" ":(exclude,top,literal)$d"
@@ -1544,7 +1801,7 @@ while [ "$n" -lt "$count" ]; do
 	g ls-files -z -m -o --exclude-standard -- ':/' ':(exclude,top,literal,icase).qory' "$@" > "$G/unadded-z" 2>/dev/null || : > "$B/$n.left"
 	tr '\000' '\n' < "$G/unadded-z" > "$G/unadded"
 	lacking "$G/unadded" "$G/out-paths" > "$G/missed"
-	if [ -s "$G/missed" ]; then
+	if [ -s "$G/missed" ] || split_hidden "$G/unadded-z" "$G/out-paths"; then
 		: > "$B/$n.left"
 	fi
 	# A path that stays out, that a commit of the run changed, and that here has other bytes than
@@ -1553,6 +1810,10 @@ while [ "$n" -lt "$count" ]; do
 		g diff-tree -r --no-renames --name-only -z "$base" "$at" > "$G/changed-z" 2>/dev/null || : > "$B/$n.left"
 		tr '\000' '\n' < "$G/changed-z" > "$G/changed"
 		both "$G/unadded" "$G/out-paths" > "$G/kept"
+		# A changed path with a line break reads as other paths, which the kept ones could match.
+		if [ -s "$G/kept" ] && broken "$G/changed-z"; then
+			: > "$B/$n.left"
+		fi
 		both "$G/kept" "$G/changed" > "$G/kept-changed"
 		# A file left out as too large has its line in n.large.
 		lacking "$G/kept-changed" "$G/large" > "$G/undone"
@@ -1562,8 +1823,13 @@ while [ "$n" -lt "$count" ]; do
 	fi
 	find . -path ./.git -prune -o -path ./.qory -prune -o -type d -exec sh -c '
 		for p do
-			test -r "$p" && test -x "$p" || printf "%s\n" "$p"
-		done' sh {} + > "$G/closed" 2>/dev/null || :
+			test -r "$p" && test -x "$p" || printf "%s\0" "$p"
+		done' sh {} + > "$G/closed-z" 2>/dev/null || :
+	# A name with a line break reads as other folders, which the ignore rules could cover.
+	if broken "$G/closed-z"; then
+		: > "$B/$n.left"
+	fi
+	tr '\000' '\n' < "$G/closed-z" > "$G/closed"
 	while IFS= read -r d; do
 		if ! kept_out "${d#./}"; then
 			: > "$B/$n.left"

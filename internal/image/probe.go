@@ -256,7 +256,9 @@ var sessionTools = []struct{ name, why string }{
 	{"mv", "to put the finished bundle in place"},
 	{"readlink", "to read a link the setup left"},
 	{"sh", "to run its script"},
+	{"sleep", "to wait for the clock's next second after the setup"},
 	{"sort", "to compare the run's refs and commits with what the bundle has"},
+	{"stat", "to find the files that the agent changed under the setup's ignore rules"},
 	{"tr", "to print a folder's name with no control character"},
 }
 
