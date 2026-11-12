@@ -384,6 +384,37 @@ broken() {
 	tr -cd '\n' < "$1" > "$1-breaks" 2>/dev/null || return 0
 	[ -s "$1-breaks" ]
 }
+# split_hidden reports whether a path of the NUL list $1 has a line break and a piece of it, as
+# the lines read from $1 split it, is a line of the file $2, with or without a final /, or is below
+# a folder of the file ${3-}: that piece counts as kept out on purpose, and the path with it. A path
+# that $2-z, the NUL list of the paths with a line break in $2, has whole is kept out as itself. A
+# \001 in a path counts as a line break too, and a failure returns 0.
+split_hidden() {
+	tr '\n\000' '\001\n' < "$1" > "$1-lines" 2>/dev/null || return 0
+	{ grep "$(printf '\001')" "$1-lines" || :; } > "$1-broken" 2>/dev/null || return 0
+	if [ ! -s "$1-broken" ]; then
+		return 1
+	fi
+	: > "$1-whole"
+	if [ -f "$2-z" ]; then
+		tr '\n\000' '\001\n' < "$2-z" > "$1-whole" 2>/dev/null || return 0
+	fi
+	lacking "$1-broken" "$1-whole" | tr '\001' '\n' > "$1-split" 2>/dev/null || return 0
+	while IFS= read -r h_p; do
+		printf '%s\n' "$h_p" "${h_p%/}"
+	done < "$1-split" > "$1-pieces"
+	if [ ! -s "$1-pieces" ]; then
+		return 1
+	fi
+	if [ -n "$(both "$1-pieces" "$2")" ]; then
+		return 0
+	fi
+	if [ -n "${3-}" ]; then
+		outside "$1-pieces" "$3" > "$1-outside"
+		[ -n "$(lacking "$1-pieces" "$1-outside")" ] && return 0
+	fi
+	return 1
+}
 # lacking prints the lines of the file $1 that the file $2 does not have, and every line of $1 when
 # sort or comm fails, so a failure keeps the copy. LC_ALL=C is what both sort by.
 lacking() {
@@ -639,6 +670,7 @@ large() {
 "*)
 				printf ":(exclude,top,literal)%s\0" "$p" >> "$add"
 				printf "%s\n" "$p" >> "$out"
+				printf "%s\0" "$p" >> "$out-z"
 				printf "%s%s" "$at" "$p" | tr "\n" "?" >> "$list"
 				printf "\n" >> "$list"
 				;;
@@ -1118,6 +1150,11 @@ leftover() {
 	if [ -n "$(lacking "$G/index-tree-links" "$G/from-tree-links")" ]; then
 		: > "$B/$n.left"
 	fi
+	cat "$lo_out" "$G/from-tree-links" > "$G/after-kept"
+	cat "$lo_out-z" > "$G/after-kept-z" 2>/dev/null || :
+	if split_hidden "$G/after-z" "$G/after-kept" "$lo_made"; then
+		: > "$B/$n.left"
+	fi
 	lacking "$G/after" "$lo_out" > "$G/after-out"
 	while IFS= read -r p; do
 		printf '%s\n' "${p%/}"
@@ -1385,6 +1422,7 @@ submodule_bundle() (
 		: > "$G/setup"
 	fi
 	: > "$G/setup-paths"
+	: > "$G/setup-paths-z"
 	while IFS= read -r line; do
 		p=${line#* }
 		p=${p#"$d"/}
@@ -1417,7 +1455,7 @@ submodule_bundle() (
 	add "$G/add" "$shows"
 	g ls-files -z -m -o --exclude-standard -- "$@" > "$G/unadded-z" 2>/dev/null || : > "$B/$n.left"
 	tr '\000' '\n' < "$G/unadded-z" > "$G/unadded"
-	if [ -n "$(lacking "$G/unadded" "$G/setup-paths")" ]; then
+	if [ -n "$(lacking "$G/unadded" "$G/setup-paths")" ] || split_hidden "$G/unadded-z" "$G/setup-paths"; then
 		: > "$B/$n.left"
 	fi
 	set +e
@@ -1516,6 +1554,7 @@ while [ "$n" -lt "$count" ]; do
 	printf ':(top,literal,icase).qory\0' > "$R"
 	: > "$G/folders"
 	: > "$G/out-paths"
+	: > "$G/out-paths-z"
 	: > "$G/out-folders"
 	: > "$G/made"
 	: > "$G/setup-kept"
@@ -1593,6 +1632,9 @@ while [ "$n" -lt "$count" ]; do
 		printf ':(top,literal)%s\0' "$1" >> "$R"
 		if [ -h "$T/$1" ] || [ ! -e "$T/$1" ]; then
 			printf '%s\n' "$1" >> "$G/out-paths"
+			case $1 in
+			*"$nl"*) printf '%s\0' "$1" >> "$G/out-paths-z" ;;
+			esac
 		fi
 		shift
 		i=$((i + 1))
@@ -1662,6 +1704,9 @@ while [ "$n" -lt "$count" ]; do
 				fi
 			else
 				printf '%s\n' "$1" >> "$G/out-paths"
+				case $1 in
+				*"$nl"*) printf '%s\0' "$1" >> "$G/out-paths-z" ;;
+				esac
 				printf '%s\n' "$1" >> "$G/setup-kept"
 			fi
 			;;
@@ -1756,7 +1801,7 @@ while [ "$n" -lt "$count" ]; do
 	g ls-files -z -m -o --exclude-standard -- ':/' ':(exclude,top,literal,icase).qory' "$@" > "$G/unadded-z" 2>/dev/null || : > "$B/$n.left"
 	tr '\000' '\n' < "$G/unadded-z" > "$G/unadded"
 	lacking "$G/unadded" "$G/out-paths" > "$G/missed"
-	if [ -s "$G/missed" ]; then
+	if [ -s "$G/missed" ] || split_hidden "$G/unadded-z" "$G/out-paths"; then
 		: > "$B/$n.left"
 	fi
 	# A path that stays out, that a commit of the run changed, and that here has other bytes than

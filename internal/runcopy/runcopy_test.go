@@ -6053,6 +6053,22 @@ func TestMoreLineBreaksAndClosedFoldersKeepTheCopy(t *testing.T) {
 	}
 }
 
+// TestALineBreakThatSplitsIntoKeptPathsKeepsTheCopy is a file that git cannot add, at a path with a
+// line break whose lines are each a path that the setup left and the commit keeps out: the copy
+// stays. A part GIT~1 makes a path that git refuses. A line-end file with a line break in its name,
+// which the commit keeps out whole, keeps no copy: see TestALineEndRewriteStaysOut.
+func TestALineBreakThatSplitsIntoKeptPathsKeepsTheCopy(t *testing.T) {
+	d, repos, out := setupWith(t, func(t *testing.T, w string) {
+		write(t, w, "GIT~1/a", "setup\n")
+		write(t, w, "cfg", "setup\n")
+	})
+	write(t, d.Work(), "GIT~1/a\ncfg", "agent\n")
+	printed := sessionOutput(t, d, repos, out)
+	if left := d.Left(repos); !left.Behind {
+		t.Errorf("Left = %+v:\n%s", left, printed)
+	}
+}
+
 // TestASetupWithNoRulesRecordsNoEnd is a setup that writes no .gitignore and makes no
 // repository: no record runs, and the setup's end is 0, so the git session lists no change.
 func TestASetupWithNoRulesRecordsNoEnd(t *testing.T) {
