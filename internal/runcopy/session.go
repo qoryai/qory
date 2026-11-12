@@ -129,7 +129,8 @@ type GitSession struct {
 // too, and n.ignored lists it, unless it is in a folder of [generatedFolders] or is the .git/index
 // of a repository that has what HEAD there has. A folder the session cannot enter is one such
 // path, with a final /, and a name with a line break writes n.left alone, as does a path with a
-// line break in any list of paths that git writes.
+// line break in a list that git writes whose pieces other paths could cover, such as the ignored
+// paths.
 //
 // The add leaves out each regular file of more than [MaxFile] bytes that it would add, in the
 // repository and in each submodule, and lists its path, relative to the copy, in n.large, which
@@ -1098,7 +1099,7 @@ leftover() {
 		: > "$B/$n.left"
 		return 0
 	fi
-	if broken "$G/after-z" || broken "$G/ignored-z"; then
+	if broken "$G/ignored-z"; then
 		: > "$B/$n.left"
 	fi
 	tr '\000' '\n' < "$G/after-z" > "$G/after"
@@ -1393,9 +1394,6 @@ submodule_bundle() (
 	setup_rules "$G/setup-paths"
 	setup_repos=$nl
 	setup_ignored "$top$d/"
-	if broken "$PG/status"; then
-		: > "$B/$n.left"
-	fi
 	tr '\000' '\n' < "$PG/status" > "$G/changes"
 	while IFS= read -r line; do
 		p=${line#???}
@@ -1418,9 +1416,6 @@ submodule_bundle() (
 	set -- ':/' "$@"
 	add "$G/add" "$shows"
 	g ls-files -z -m -o --exclude-standard -- "$@" > "$G/unadded-z" 2>/dev/null || : > "$B/$n.left"
-	if broken "$G/unadded-z"; then
-		: > "$B/$n.left"
-	fi
 	tr '\000' '\n' < "$G/unadded-z" > "$G/unadded"
 	if [ -n "$(lacking "$G/unadded" "$G/setup-paths")" ]; then
 		: > "$B/$n.left"
@@ -1759,9 +1754,6 @@ while [ "$n" -lt "$count" ]; do
 	# What stays behind is what the add left: a file that ls-files still lists, or a folder this
 	# process cannot read, which no git lists, unless an ignore rule covers it.
 	g ls-files -z -m -o --exclude-standard -- ':/' ':(exclude,top,literal,icase).qory' "$@" > "$G/unadded-z" 2>/dev/null || : > "$B/$n.left"
-	if broken "$G/unadded-z"; then
-		: > "$B/$n.left"
-	fi
 	tr '\000' '\n' < "$G/unadded-z" > "$G/unadded"
 	lacking "$G/unadded" "$G/out-paths" > "$G/missed"
 	if [ -s "$G/missed" ]; then
@@ -1771,11 +1763,12 @@ while [ "$n" -lt "$count" ]; do
 	# that commit: the undo of the commit's change is in no commit.
 	if [ -n "$at" ] && [ "$at" != "$base" ]; then
 		g diff-tree -r --no-renames --name-only -z "$base" "$at" > "$G/changed-z" 2>/dev/null || : > "$B/$n.left"
-		if broken "$G/changed-z"; then
-			: > "$B/$n.left"
-		fi
 		tr '\000' '\n' < "$G/changed-z" > "$G/changed"
 		both "$G/unadded" "$G/out-paths" > "$G/kept"
+		# A changed path with a line break reads as other paths, which the kept ones could match.
+		if [ -s "$G/kept" ] && broken "$G/changed-z"; then
+			: > "$B/$n.left"
+		fi
 		both "$G/kept" "$G/changed" > "$G/kept-changed"
 		# A file left out as too large has its line in n.large.
 		lacking "$G/kept-changed" "$G/large" > "$G/undone"
