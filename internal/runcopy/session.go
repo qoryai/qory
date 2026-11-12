@@ -108,7 +108,8 @@ type GitSession struct {
 // inside a submodule, such as a submodule of a submodule with a change in its working tree; a file
 // that git ls-files still lists after the add, such as one the session's user cannot read, which
 // includes a path left out here that a commit of the run changed, when the copy has other bytes
-// than that commit; or a folder the session cannot read. The person's personal ignore rules stay in effect through
+// than that commit; a folder the session cannot read; or any other path that the commit leaves out,
+// which a last check lists after the commit. The person's personal ignore rules stay in effect through
 // the info/exclude of that git folder.
 //
 // The add leaves out each regular file of more than [MaxFile] bytes that it would add, in the
@@ -399,14 +400,15 @@ through_link() {
 }
 # filled reports whether $1 is anything but an empty folder that the session can list: a folder
 # with an entry or one it cannot list, or any other file. find lists the folder, as the image may
-# have no ls, and ends at its next write after the read of the first entry. With no find, the
-# shell lists every entry.
+# have no ls, and ends at its next write after the read of the first entry. A find that fails
+# prints a line in place of an entry, so the folder counts as not empty. With no find, the shell
+# lists every entry.
 filled() {
 	if [ ! -d "$1" ] || [ ! -r "$1" ] || [ ! -x "$1" ]; then
 		return 0
 	fi
 	if command -v find > /dev/null 2>&1; then
-		if find "$1/." ! -name . -prune -print 2>/dev/null | { IFS= read -r f_e; }; then
+		if { find "$1/." ! -name . -prune -print 2>/dev/null || echo; } | { IFS= read -r f_e; }; then
 			return 0
 		fi
 		return 1
@@ -533,7 +535,7 @@ below_gitlink() {
 		*/*) p=${p%/*} ;;
 		*) return 1 ;;
 		esac
-		case $(g ls-tree "$from" -- "$p" 2>/dev/null) in
+		case $(g ls-tree "$from" -- ":(top,literal)$p" 2>/dev/null) in
 		"160000 "*) return 0 ;;
 		esac
 	done
@@ -633,6 +635,75 @@ add() {
 		;;
 	esac
 	add_lines "$2"
+}
+# leftover is the check under the others, once the index is what the commit has: it writes n.left
+# when the work tree at $T has a path that the commit leaves out. One git ls-files lists each path
+# that differs from the index and each path the index does not have, but an ignored one, with no
+# exclude of the folders with a .git: it lists an untracked repository as its folder, and no path in
+# a gitlink. A path in the file $1, which stays out on purpose with its line, such as a file of more
+# than 100 MiB, a path in a folder of the file $2, a repository the run made with its line, and a
+# gitlink of $from, which the checks of submodules cover, count for nothing. The other arguments
+# are the pathspecs that ls-files excludes. Each path that counts goes to $G/leftover. A gitlink
+# that the commit has and $from does not is a repository that git add put in as a link, and a
+# gitlink with no .git at a folder that is not empty has files that no ls-files lists: each writes
+# n.left too. A failed git keeps the copy.
+leftover() {
+	lo_out=$1 lo_made=$2
+	shift 2
+	: > "$G/leftover"
+	if ! g ls-files -z -m -o --exclude-standard -- ':/' "$@" > "$G/after-z" 2>/dev/null ||
+		! g -c core.quotePath=false ls-tree -r "$from" > "$G/from-tree" 2>/dev/null ||
+		! g -c core.quotePath=false ls-files -s > "$G/index-tree" 2>/dev/null; then
+		: > "$B/$n.left"
+		return 0
+	fi
+	tr '\000' '\n' < "$G/after-z" > "$G/after"
+	for lo_tree in from-tree index-tree; do
+		while IFS= read -r line; do
+			case $line in
+			"160000 "*) printf '%s\n' "${line#*"$tab"}" ;;
+			esac
+		done < "$G/$lo_tree" > "$G/$lo_tree-links"
+	done
+	if [ -n "$(lacking "$G/index-tree-links" "$G/from-tree-links")" ]; then
+		: > "$B/$n.left"
+	fi
+	lo_links=$nl$(cat "$G/from-tree-links")$nl
+	lo_made=$nl$(cat "$lo_made")$nl
+	lacking "$G/after" "$lo_out" > "$G/after-out"
+	while IFS= read -r p; do
+		p=${p%/} up=$p
+		case $lo_links in
+		*"$nl$p$nl"*) continue ;;
+		esac
+		while :; do
+			case $lo_made in
+			*"$nl$up$nl"*) continue 2 ;;
+			esac
+			case $up in
+			*/*) up=${up%/*} ;;
+			*) break ;;
+			esac
+		done
+		printf '%s\n' "$p" >> "$G/leftover"
+	done < "$G/after-out"
+	while IFS= read -r p; do
+		case $p in
+		\"*)
+			: > "$B/$n.left"
+			continue
+			;;
+		esac
+		if through_link "$T" "$p" || [ -e "$T/$p/.git" ] || [ -h "$T/$p/.git" ]; then
+			continue
+		fi
+		if [ -e "$T/$p" ] && filled "$T/$p"; then
+			: > "$B/$n.left"
+		fi
+	done < "$G/index-tree-links"
+	if [ -s "$G/leftover" ]; then
+		: > "$B/$n.left"
+	fi
 }
 # uncommitted writes the index as a commit whose parent is HEAD, at $at, to $prefix/uncommitted, for
 # a working tree the session makes no commit of on the run's branch.
@@ -835,14 +906,16 @@ submodule_bundle() (
 	# init makes. The status lists each change in it by its file, never the folder, and the add
 	# leaves the changes out, so it stays behind as such a repository does in the top repository.
 	# No ignore rule covers such a folder: git ignores no folder that has a file of the index.
+	: > "$G/made"
 	while IFS= read -r p; do
-		entry=$(g ls-tree "$from" -- "$p" 2>/dev/null) || entry=
+		entry=$(g ls-tree "$from" -- ":(top,literal)$p" 2>/dev/null) || entry=
 		case $entry in
 		"040000 "*) ;;
 		*) continue ;;
 		esac
 		printf 'qory: %s has a git repository at %s that the run made, and the commit leaves it out\n' "$shows" "$(printable "$p")" >&2
 		: > "$B/$n.nested"
+		printf '%s\n' "$p" >> "$G/made"
 	done < "$G/all"
 	: > "$G/nested"
 	while IFS= read -r p; do
@@ -881,9 +954,11 @@ submodule_bundle() (
 	done < "$G/changes" > "$G/changed"
 	# Each folder with a .git, not only the first of a chain, since the status lists a repository
 	# inside the folder of another by its path, such as a/b/ in the folder a.
+	told=
 	if [ -s "$G/all" ] && [ -n "$(both "$G/all" "$G/changed")" ]; then
 		printf 'qory: %s has a git repository with commits or changes that the commit leaves out\n' "$shows" >&2
 		: > "$B/$n.left"
+		told=1
 	fi
 	set -- ':/'
 	while IFS= read -r p; do
@@ -907,6 +982,24 @@ submodule_bundle() (
 	1) uncommitted ;;
 	*) exit "$changed" ;;
 	esac
+	# A path that the check under the others finds in a folder with a .git gets the line of such a
+	# folder.
+	leftover "$G/setup-paths" "$G/made"
+	while IFS= read -r p && [ -z "$told" ]; do
+		while :; do
+			case $all in
+			*"$nl$p$nl"*)
+				printf 'qory: %s has a git repository with commits or changes that the commit leaves out\n' "$shows" >&2
+				told=1
+				break
+				;;
+			esac
+			case $p in
+			*/*) p=${p%/*} ;;
+			*) break ;;
+			esac
+		done
+	done < "$G/leftover"
 	mainref= tip= clonerefs=$B/subrefs-$n-$k reflogs=1 known=$B/$n-$k.known
 	extra_refs
 	bundle "$B/$n-$k"
@@ -976,6 +1069,7 @@ while [ "$n" -lt "$count" ]; do
 	: > "$G/folders"
 	: > "$G/out-paths"
 	: > "$G/out-folders"
+	: > "$G/made"
 	if ! command -v find > /dev/null 2>&1; then
 		: > "$B/$n.left"
 	fi
@@ -1000,20 +1094,39 @@ while [ "$n" -lt "$count" ]; do
 		done < "$G/sparse-paths" >> "$P"
 		cat "$G/sparse-paths" >> "$G/out-paths"
 	fi
-	# A path with a line break is written whole here, and its pieces in the list match nothing.
+	# A path with a line break is written whole here, and its pieces in the list match nothing. git
+	# add stops at an exclude inside a submodule, so such a path below a gitlink of $from gets no
+	# exclude and writes n.left.
 	find . -path ./.git -prune -o -path ./.qory -prune -o -name .git -exec sh -c '
 		list=$1
 		add=$2
-		shift 2
+		from=$3
+		left=$4
+		shift 4
 		for p do
 			d=${p%/.git}
 			d=${d#./}
 			printf "%s\n" "$d" >> "$list"
 			case $d in
 			*"
-"*) printf ":(exclude,top,literal)%s\0" "$d" >> "$add" ;;
+"*)
+				up=$d
+				while :; do
+					case $up in
+					*/*) up=${up%/*} ;;
+					*) break ;;
+					esac
+					case $(git --no-pager ls-tree "$from" -- ":(top,literal)$up" 2>/dev/null) in
+					"160000 "*)
+						: > "$left"
+						continue 2
+						;;
+					esac
+				done
+				printf ":(exclude,top,literal)%s\0" "$d" >> "$add"
+				;;
 			esac
-		done' sh "$G/folders" "$P" {} + 2>/dev/null || :
+		done' sh "$G/folders" "$P" "$from" "$B/$n.left" {} + 2>/dev/null || :
 	i=0
 	while [ "$i" -lt "$links" ]; do
 		printf ':(exclude,top,literal)%s\0' "$1" >> "$P"
@@ -1087,7 +1200,7 @@ while [ "$n" -lt "$count" ]; do
 		fi
 		printf ':(exclude,top,literal)%s\0' "$d" >> "$P"
 		set -- "$@" ":(exclude,top,literal)$d"
-		entry=$(g ls-tree "$from" -- "$d" 2>/dev/null) || entry=
+		entry=$(g ls-tree "$from" -- ":(top,literal)$d" 2>/dev/null) || entry=
 		shows=$(printable "$d")
 		case $entry in
 		"160000 "*)
@@ -1120,6 +1233,7 @@ while [ "$n" -lt "$count" ]; do
 			fi
 			printf 'qory: %s has a git repository at %s that the run made, and the commit leaves it out\n' "$shown" "$shows" >&2
 			: > "$B/$n.nested"
+			printf '%s\n' "$d" >> "$G/made"
 			;;
 		esac
 	done < "$G/folders"
@@ -1173,6 +1287,14 @@ while [ "$n" -lt "$count" ]; do
 		;;
 	*) exit "$changed" ;;
 	esac
+	# With nocommit set, n.left is already written and the index is in no commit.
+	if [ -z "$nocommit" ]; then
+		set -- ':(exclude,top,literal,icase).qory'
+		while IFS= read -r d; do
+			set -- "$@" ":(exclude,top,literal)$d"
+		done < "$G/out-folders"
+		leftover "$G/out-paths" "$G/made" "$@"
+	fi
 
 	# The bundle: the branch and the run's other refs, without base and the commits before it. With
 	# nothing past the base commit on the branch, a commit that any reflog has comes back too, such

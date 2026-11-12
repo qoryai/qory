@@ -3797,6 +3797,10 @@ Part of the run's work can stay in the copy:
   such as a nested submodule that no update populated, with a file the agent wrote there.
 - A file or a folder that the session cannot read after it gives itself read access, such as one
   that another user owns. The rest of the work comes back.
+- Any other path that the commit leaves out and no ignore rule covers, such as a file in a folder
+  with an empty `.git` folder, or in a gitlink's folder that has no `.git`. After the commit, the
+  session lists each path that differs from the commit or that the commit does not have, other
+  than the files of more than 100 MiB, the setup's files and the repositories the run made.
 - A setup's file that the agent commits as it is, under a filter set only in the copy's git settings,
   `core.autocrlf=true` with a CRLF file, or `core.fileMode=false` with an executable file: the git that
   compares and commits has none of the copy's git settings, so a local run keeps the copy with no work
