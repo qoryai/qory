@@ -924,6 +924,13 @@ index_clean() (
 	export GIT_INDEX_FILE="$c_out-index"
 	g --git-dir="${1%/index}" diff-index --cached --quiet --no-ext-diff HEAD -- > /dev/null 2>&1
 )
+# has_refs reports whether the git folder $1 has a ref or a HEAD at a commit, or whether git could
+# not read it.
+has_refs() (
+	unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE
+	h_refs=$(g --git-dir="$1" for-each-ref --count=1 2>/dev/null) || exit 0
+	[ -n "$h_refs" ] || g --git-dir="$1" rev-parse -q --verify HEAD > /dev/null 2>&1
+)
 # new_ignored writes to $G/new-ignored-z each path of $G/new, as ./path, that the work tree's rules
 # ignore, and to $G/new-person-z those that the person's rules ignore. check-ignore stops at a path in
 # a submodule, so such a path is not asked: the checks of submodules cover it.
@@ -1836,8 +1843,9 @@ while [ "$n" -lt "$count" ]; do
 				*) break ;;
 				esac
 			done
-			# With no setup's end, the setup left no git folder that ignore rules cover.
-			if [ "$since" -ne 0 ] && kept_out "$d"; then
+			# With no setup's end, the setup left no git folder that ignore rules cover, so such a
+			# repository with a ref is the run's work.
+			if kept_out "$d" && { [ "$since" -ne 0 ] || ! has_refs "./$d/.git"; }; then
 				continue
 			fi
 			printf 'qory: %s has a git repository at %s that the run made, and the commit leaves it out\n' "$shown" "$shows" >&2
@@ -1861,7 +1869,7 @@ while [ "$n" -lt "$count" ]; do
 		fi
 		tr '\000' '\n' < "$G/bare-z" > "$G/bare"
 		while IFS= read -r d; do
-			if below_gitlink "$d" || ! g check-ignore -q -- "./$d/" 2>/dev/null; then
+			if below_gitlink "$d" || ! g check-ignore -q -- "./$d/" 2>/dev/null || ! has_refs "./$d"; then
 				continue
 			fi
 			printf 'qory: %s has a git repository at %s that the run made, and the commit leaves it out\n' "$shown" "$(printable "$d")" >&2

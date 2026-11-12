@@ -4366,9 +4366,10 @@ func TestARepositoryTheRunMadeIsLeftBehind(t *testing.T) {
 	}
 }
 
-// TestAnIgnoredRepositoryLeavesNothingBehind is a repository in a folder an ignore rule covers,
-// such as a tool's cache: git add leaves such a folder out with or without a .git.
-func TestAnIgnoredRepositoryLeavesNothingBehind(t *testing.T) {
+// TestAnIgnoredRepositoryWithACommitKeepsTheCopy is a repository with a commit that the agent makes
+// in a folder that the person's rules cover, such as a tool's cache, with no setup: git add leaves
+// the folder out, and the copy stays for the commit, as for any repository the run made.
+func TestAnIgnoredRepositoryWithACommitKeepsTheCopy(t *testing.T) {
 	isolate(t)
 	sessionGit(t)
 	src, _ := person(t)
@@ -4379,8 +4380,9 @@ func TestAnIgnoredRepositoryLeavesNothingBehind(t *testing.T) {
 	write(t, inner, "x.txt", "x\n")
 	testGit(t, inner, "init", "--quiet")
 	commitAll(t, inner, "inside")
-	if printed := noBundle(t, d, repos, false); printed != "" {
-		t.Errorf("the session printed:\n%s", printed)
+	printed := sessionOutput(t, d, repos, nil)
+	if left := d.Left(repos); !left.Nested || left.Behind || !strings.Contains(printed, "repository at cache/dep that the run made") {
+		t.Errorf("Left = %+v:\n%s", left, printed)
 	}
 }
 
@@ -6238,19 +6240,27 @@ func TestARepositoryUnderThePersonsRules(t *testing.T) {
 }
 
 // TestARepositoryUnderThePersonsRulesWithNoRecord is a setup that leaves no git folder and writes
-// no ignore rule, so no record runs, and an agent that makes a repository or a bare one in .venv,
-// which the person's .gitignore covers: the copy stays as for any repository the run made.
+// no ignore rule, so no record runs, and an agent that makes a repository or a bare one with a ref
+// in .venv, which the person's .gitignore covers: the copy stays as for any repository the run
+// made. An empty repository there, with no ref, keeps no copy.
 func TestARepositoryUnderThePersonsRulesWithNoRecord(t *testing.T) {
 	for _, c := range []struct {
 		name  string
 		agent func(t *testing.T, w string)
 	}{
 		{"no change", func(*testing.T, string) {}},
+		{"an empty repository", func(t *testing.T, w string) {
+			testGit(t, w, "init", "--quiet", ".venv/empty")
+			testGit(t, w, "init", "--quiet", "--bare", ".venv/empty.git")
+		}},
 		{"a repository", func(t *testing.T, w string) {
 			setupRepository(t, w, ".venv/new")
 		}},
 		{"a bare repository", func(t *testing.T, w string) {
 			testGit(t, w, "init", "--quiet", "--bare", ".venv/lib/b.git")
+			git := filepath.Join(w, ".venv", "lib", "b.git")
+			tree := gitIn(t, git, "", "mktree")
+			testGit(t, git, "update-ref", "refs/heads/main", testGit(t, git, "commit-tree", "-m", "agent", tree))
 		}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
@@ -6262,7 +6272,7 @@ func TestARepositoryUnderThePersonsRulesWithNoRecord(t *testing.T) {
 			}
 			c.agent(t, d.Work())
 			printed := sessionOutput(t, d, repos, out)
-			want := c.name != "no change"
+			want := c.name != "no change" && c.name != "an empty repository"
 			if left := d.Left(repos); left.Nested != want || left.Behind {
 				t.Errorf("Left = %+v, want Nested %t:\n%s", left, want, printed)
 			}

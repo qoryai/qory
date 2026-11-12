@@ -3799,8 +3799,9 @@ Part of the run's work can stay in the copy:
   the setup cloned, is not in this list. Your ignore rules and the setup's keep a repository's
   folder out of this list when the rules in the copy cover it too and the setup's end is recorded:
   the change times of the files in its git folder then show the run's commits, as the item on the
-  setup's ignore rules describes. With no record, a repository that the rules cover, also a bare
-  one such as `.venv/b.git`, is in this list. The session prints a line with its path.
+  setup's ignore rules describes. With no record, a repository that the rules cover and that has a
+  commit or a ref, also a bare one such as `.venv/b.git`, is in this list. The session prints a
+  line with its path.
 - A file that an ignore rule covers, when that rule is not one of yours: the agent wrote or changed
   the `.gitignore` that has it, such as `foo/.gitignore` with `*`, in the repository or in a
   submodule. Such a file whose name has a line break keeps the copy, also when your rules cover
