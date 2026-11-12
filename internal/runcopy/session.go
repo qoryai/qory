@@ -829,8 +829,9 @@ submodule_of() (
 	/*) ;;
 	*) s_at=$T/$1/$2/$s_at ;;
 	esac
-	s_modules=$(cd -P "$T/$1/.git/modules" 2>/dev/null && pwd -P) || exit 1
-	s_at=$(cd -P "$s_at" 2>/dev/null && pwd -P) || exit 1
+	# After cd -P, PWD is the folder with no link on its path.
+	s_modules=$(cd -P "$T/$1/.git/modules" 2>/dev/null && printf '%s' "$PWD") || exit 1
+	s_at=$(cd -P "$s_at" 2>/dev/null && printf '%s' "$PWD") || exit 1
 	case $s_at in
 	"$s_modules"/*) exit 0 ;;
 	esac
