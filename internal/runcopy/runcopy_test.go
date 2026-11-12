@@ -5311,8 +5311,8 @@ func TestAChangeInARepositoryOfTheSetupKeepsTheCopy(t *testing.T) {
 				commitAll(t, at, "setup")
 			}
 			out := setupRecord(t, d, repos[0])
-			if want := []SetupPath{{Path: "a/b", State: "other"}, {Path: "tool", State: "other"}}; !slices.Equal(out.Setup, want) {
-				t.Fatalf("the setup's paths are %v, want %v", out.Setup, want)
+			if len(out.Setup) != 2 || out.Setup[0].Path != "a/b" || out.Setup[1].Path != "tool" || !strings.HasPrefix(out.Setup[0].State, "repo:") || !strings.HasPrefix(out.Setup[1].State, "repo:") {
+				t.Fatalf("the setup's paths are %v, want a/b and tool as repositories", out.Setup)
 			}
 			if c.file == "" {
 				noBundleWith(t, d, repos, map[string]LeftOut{"": out})
@@ -5331,6 +5331,142 @@ func TestAChangeInARepositoryOfTheSetupKeepsTheCopy(t *testing.T) {
 				t.Fatal(err)
 			}
 			if got := files(t, q[0].Path, q[0].Head); !slices.Contains(got, c.file) {
+				t.Errorf("the commit has %v", got)
+			}
+		})
+	}
+}
+
+// setupRepository makes a repository with a commit at the folder rel of the copy at w, as a setup
+// does.
+func setupRepository(t *testing.T, w, rel string) string {
+	t.Helper()
+	at := filepath.Join(w, filepath.FromSlash(rel))
+	write(t, at, "a.go", "package a\n")
+	testGit(t, at, "init", "--quiet")
+	commitAll(t, at, "setup")
+	return at
+}
+
+// TestACommitInARepositoryOfTheSetupKeepsTheCopy is an agent that commits, tags, commits and resets
+// back, or writes ignore rules in a repository that the setup made: each keeps the copy. A repository whose state the
+// setup could not record, here one with a .git file, keeps the copy with no change.
+func TestACommitInARepositoryOfTheSetupKeepsTheCopy(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		run  func(t *testing.T, tool string)
+	}{
+		{"a commit", func(t *testing.T, tool string) {
+			write(t, tool, "new.go", "package a\n")
+			commitAll(t, tool, "agent")
+		}},
+		{"a tag", func(t *testing.T, tool string) {
+			testGit(t, tool, "tag", "v1")
+		}},
+		{"a commit and a reset", func(t *testing.T, tool string) {
+			write(t, tool, "new.go", "package a\n")
+			commitAll(t, tool, "agent")
+			testGit(t, tool, "reset", "--quiet", "--hard", "HEAD~1")
+		}},
+		{"a branch", func(t *testing.T, tool string) {
+			testGit(t, tool, "branch", "side")
+		}},
+		{"an ignore rule", func(t *testing.T, tool string) {
+			write(t, tool, "x/.gitignore", "*\n")
+			write(t, tool, "x/new.go", "package x\n")
+		}},
+		{"a state the setup did not record", nil},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			isolate(t)
+			sessionGit(t)
+			src, _ := person(t)
+			d, repos := cloneRun(t, src)
+			tool := filepath.Join(d.Work(), "tool")
+			if c.run == nil {
+				write(t, tool, "a.go", "package a\n")
+				testGit(t, tool, "init", "--quiet", "--separate-git-dir", filepath.Join(t.TempDir(), "git"))
+				commitAll(t, tool, "setup")
+			} else {
+				setupRepository(t, d.Work(), "tool")
+			}
+			out := setupRecord(t, d, repos[0])
+			if want := c.run == nil; len(out.Setup) != 1 || (out.Setup[0].State == "other") != want {
+				t.Fatalf("the setup's paths are %v", out.Setup)
+			}
+			if c.run != nil {
+				c.run(t, tool)
+			}
+			printed := sessionOutput(t, d, repos, map[string]LeftOut{"": out})
+			if left := d.Left(repos); !left.Behind || left.Nested {
+				t.Errorf("Left = %+v:\n%s", left, printed)
+			}
+		})
+	}
+}
+
+// TestARuleOfTheRunInASubmoduleTheCloneDidNotCopy is a nested submodule that the setup updated, and
+// an agent that writes a file there with a .gitignore that covers it: the commit leaves the file out,
+// and the copy stays.
+func TestARuleOfTheRunInASubmoduleTheCloneDidNotCopy(t *testing.T) {
+	isolate(t)
+	sessionGit(t)
+	src := nestedSubmodule(t)
+	d, repos := cloneRun(t, src)
+	updateSubmodules(t, d.Work())
+	out := setupRecord(t, d, repos[0])
+	inner := filepath.Join(d.Work(), "libs", "m", "inner")
+	write(t, inner, "x/.gitignore", "*\n")
+	write(t, inner, "x/new.go", "package x\n")
+	printed := sessionOutput(t, d, repos, map[string]LeftOut{"": out})
+	if !leftBehind(d, repos) {
+		t.Errorf("the session recorded no work left behind:\n%s", printed)
+	}
+}
+
+// TestARuleOfTheSetupIsAsThePersons is a setup that changes or writes a .gitignore and then a file
+// that it covers, in the repository or in a submodule, where a file with a time before the clone's
+// is in no record of the setup: the file stays out with no line, and the agent's work comes back.
+func TestARuleOfTheSetupIsAsThePersons(t *testing.T) {
+	for _, c := range []struct {
+		name  string
+		setup func(t *testing.T, w, sub string)
+	}{
+		{"a changed .gitignore", func(t *testing.T, w, sub string) {
+			write(t, w, ".gitignore", "build/\ngen/\n")
+			write(t, w, "gen/out.txt", "generated\n")
+		}},
+		{"a new .gitignore", func(t *testing.T, w, sub string) {
+			write(t, w, "pkg/.gitignore", "*.o\n")
+			write(t, w, "pkg/a.o", "object\n")
+		}},
+		{"a .gitignore in a submodule", func(t *testing.T, w, sub string) {
+			s := filepath.Join(w, filepath.FromSlash(sub))
+			write(t, s, ".gitignore", "gen/\n")
+			write(t, s, "gen/out.txt", "generated\n")
+		}},
+		{"a file of an old time in a submodule", func(t *testing.T, w, sub string) {
+			s := filepath.Join(w, filepath.FromSlash(sub))
+			write(t, s, ".gitignore", "gen/\n")
+			write(t, s, "gen/out.txt", "unpacked\n")
+			old := time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)
+			if err := os.Chtimes(filepath.Join(s, "gen", "out.txt"), old, old); err != nil {
+				t.Fatal(err)
+			}
+		}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			isolate(t)
+			sessionGit(t)
+			src, sub := withSubmodule(t)
+			write(t, src, ".gitignore", "build/\n")
+			commitAll(t, src, "rules")
+			d, repos := cloneRun(t, src)
+			c.setup(t, d.Work(), sub)
+			out := setupRecord(t, d, repos[0])
+			write(t, d.Work(), "new.txt", "new\n")
+			q, _ := runRefs(t, d, src, repos, map[string]LeftOut{"": out})
+			if got := files(t, q.Path, q.Head); !slices.Contains(got, "new.txt") || slices.Contains(got, "gen/out.txt") || slices.Contains(got, "pkg/a.o") {
 				t.Errorf("the commit has %v", got)
 			}
 		})
