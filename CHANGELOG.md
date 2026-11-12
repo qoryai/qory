@@ -386,7 +386,11 @@ release may change what an existing document does, and states it under Upgrading
   `__pycache__`, `target`, `build`, `dist`, `.gradle` or `.next`, the `.git/index` of a repository
   that has what its `HEAD` has, and a file that the agent deleted, keep nothing behind, but a
   commit, a new ref or object, or a new repository in such a folder keeps the copy. A file
-  whose name has a line break, under an ignore rule that is not yours, keeps the copy. A container of the run that
+  whose name has a line break, under an ignore rule that is not yours, keeps the copy. A host
+  clock set back between the setup and the agent can hide a change, and the work is then lost
+  with no line. A `.gitignore` that ignores itself, which the setup writes into a submodule with
+  an old modification time, as `tar` or `cp -p` do, is not in the record: the copy stays, and the
+  line lists no file. A container of the run that
   could not be removed keeps the copy too, and brings nothing back. A first signal leaves the
   return of a local run at most 30 minutes, and `qory run` prints that time. A read run with a setup also
   works in a copy, read-only for the agent, and nothing comes back from it. A read-write

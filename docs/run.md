@@ -3822,7 +3822,11 @@ Part of the run's work can stay in the copy:
   new ref or object, or a new repository there, such as a commit in `.venv/src/pkg` that
   `pip install -e` cloned from git, keeps the copy, and the line lists its files in the git
   folder. After such a setup, a name with a line break anywhere else in the copy keeps the copy,
-  and the line lists none. A process of the setup that still writes under these rules while the agent runs
+  and the line lists none. A host clock that was set back between the setup and the agent can give
+  a change a time before the setup's end: the session then misses the change, and the work is lost
+  with no line. A `.gitignore` that ignores itself, which the setup writes into a submodule with
+  an old modification time, as `tar` or `cp -p` do, is not in the record: a change under its rules
+  keeps the copy, and the line lists no file. A process of the setup that still writes under these rules while the agent runs
   keeps the copy too. When the record container failed or ran past its limit, any file under the
   setup's rules keeps the copy, and the line lists none. With `wall.setup: inside`, the setup runs
   in the agent's container and no record runs: what the setup wrote counts as the agent's, as the
