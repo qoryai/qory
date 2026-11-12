@@ -378,14 +378,18 @@ release may change what an existing document does, and states it under Upgrading
   repository that the setup cloned, and a commit in a repository in a folder that those rules
   ignore, also a bare one: the line then ends with `Changed under the setup's ignore rules: ….`,
   which lists the first 50 files and the count of the rest. After a setup that wrote or changed a
-  `.gitignore`, made a repository, or left a folder that qory could not walk, such as one more than
-  64 folders deep, the container `qory-record-<run id>` records the second in which the setup
-  ended, and a file counts by its change time, which the agent cannot set back as
+  `.gitignore`, made a repository, also in a folder that your rules ignore, or left a folder that
+  qory could not walk, such as one more than 64 folders deep, the container
+  `qory-record-<run id>` records the second in which the setup ended, and a file counts by its change time, which the agent cannot set back as
   `touch -d` sets a file's time. With `wall.setup: inside`, no record runs, and such a file keeps
   the copy with a line that lists none. A file in a folder named `node_modules`, `.venv`, `venv`,
   `__pycache__`, `target`, `build`, `dist`, `.gradle` or `.next`, the `.git/index` of a repository
   that has what its `HEAD` has, and a file that the agent deleted, keep nothing behind, but a
-  commit, a new ref or object, or a new repository in such a folder keeps the copy. A file
+  commit, a new ref or object, or a new repository in such a folder keeps the copy, and so does
+  one in a folder that your rules ignore. A fetch or a reset to `HEAD` that writes only
+  `FETCH_HEAD`, `ORIG_HEAD` and the reflogs keeps nothing behind. A git folder that the agent
+  builds by hand without a `HEAD` file and `objects` and `refs` folders is not checked in such a
+  folder. A file
   whose name has a line break, under an ignore rule that is not yours, keeps the copy. A host
   clock set back between the setup and the agent can hide a change, and the work is then lost
   with no line. A `.gitignore` that ignores itself, which the setup writes into a submodule with

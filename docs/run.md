@@ -3797,8 +3797,10 @@ Part of the run's work can stay in the copy:
 - A repository the run made, with a commit or a change, or a change in a repository inside a
   submodule. A repository inside a folder that the setup made, such as a submodule of a repository
   the setup cloned, is not in this list. Your ignore rules and the setup's keep a repository's
-  folder out of this list when the rules in the copy cover it too. The session prints a line with
-  its path.
+  folder out of this list when the rules in the copy cover it too and the setup's end is recorded:
+  the change times of the files in its git folder then show the run's commits, as the item on the
+  setup's ignore rules describes. With no record, a repository that the rules cover, also a bare
+  one such as `.venv/b.git`, is in this list. The session prints a line with its path.
 - A file that an ignore rule covers, when that rule is not one of yours: the agent wrote or changed
   the `.gitignore` that has it, such as `foo/.gitignore` with `*`, in the repository or in a
   submodule. Such a file whose name has a line break keeps the copy, also when your rules cover
@@ -3807,30 +3809,36 @@ Part of the run's work can stay in the copy:
   with `*` in a `cache/.gitignore` that the setup wrote, or `tool/third/x.go` with `third/` in the
   `.gitignore` of a repository `tool` that the setup cloned. A commit that the agent made in a
   repository in such a folder, also a bare repository such as `cache/b.git`, is such a change too.
-  The session finds these files by their change time, which the agent cannot set back as
-  `touch -d` sets a file's time: after a setup that wrote or changed a `.gitignore`, made a
-  repository, or left a folder that qory could not walk, such as one more than 64 folders deep,
-  the container `qory-record-<run id>`, which binds the copy read-only, records the second in
-  which the setup ended, and the session lists each file under the setup's rules with a
-  later change time. A folder that the session cannot enter, such as one of mode `000`, is listed
-  as one entry, such as `cache/`. A file that the agent deleted, a file in a folder named
+  The session finds these files by their change time, which the agent cannot set back as `touch -d`
+  sets a file's time: after a setup that wrote or changed a `.gitignore`, made a repository, also in
+  a folder that your rules ignore, or left a folder that qory could not walk, such as one more than
+  64 folders deep, the container `qory-record-<run id>`, which binds the copy read-only, records the
+  second in which the setup ended, and the session lists each file under the setup's rules with a
+  later change time. A folder that the session cannot enter, such as one of mode `000`, is listed as
+  one entry, such as `cache/`. A file that the agent deleted, a file in a folder named
   `node_modules`, `.venv`, `venv`, `__pycache__`, `target`, `build`, `dist`, `.gradle` or `.next`,
   and the `.git/index` of a repository that has what the repository's `HEAD` has, as after
   `git status` rewrote it, keep nothing behind. A `.git/index` whose entries match `HEAD` is not
-  checked further, so data that the agent writes into the index file by hand, outside its
-  entries, does not come back. In such a folder the session checks only git folders: a commit, a
-  new ref or object, or a new repository there, such as a commit in `.venv/src/pkg` that
-  `pip install -e` cloned from git, keeps the copy, and the line lists its files in the git
-  folder. After such a setup, a name with a line break anywhere else in the copy keeps the copy,
-  and the line lists none. A host clock that was set back between the setup and the agent can give
-  a change a time before the setup's end: the session then misses the change, and the work is lost
-  with no line. A `.gitignore` that ignores itself, which the setup writes into a submodule with
-  an old modification time, as `tar` or `cp -p` do, is not in the record: a change under its rules
-  keeps the copy, and the line lists no file. A process of the setup that still writes under these rules while the agent runs
-  keeps the copy too. When the record container failed or ran past its limit, any file under the
-  setup's rules keeps the copy, and the line lists none. With `wall.setup: inside`, the setup runs
-  in the agent's container and no record runs: what the setup wrote counts as the agent's, as the
-  two items above describe, and the line lists no file.
+  checked further, so data that the agent writes into the index file by hand, outside its entries,
+  does not come back. In such a folder the session checks only git folders: a commit, a new ref or
+  object, or a new repository there, such as a commit in `.venv/src/pkg` that `pip install -e`
+  cloned from git, keeps the copy, and the line lists its files in the git folder. So does such a
+  change in a repository in a folder that your rules ignore, such as `vendor/dep` with `vendor/` in
+  your `.gitignore`. A fetch or a reset to `HEAD` that writes only `FETCH_HEAD`, `ORIG_HEAD` and the
+  reflogs, as `pip install -e` does again on an existing checkout, keeps nothing behind. A git
+  folder that the agent builds by hand without a `HEAD` file and `objects` and `refs` folders, such
+  as one with a renamed `HEAD` or one that has its objects and refs through a `commondir` file, is
+  not checked in a folder named such as `.venv`, and its commits do not come back, as other files
+  there do not. After such a setup, a name with a line break anywhere else in the copy keeps the
+  copy, and the line lists none. A host clock that was set back between the setup and the agent can
+  give a change a time before the setup's end: the session then misses the change, and the work is
+  lost with no line. A `.gitignore` that ignores itself, which the setup writes into a submodule
+  with an old modification time, as `tar` or `cp -p` do, is not in the record: every such run keeps
+  the copy, and the line lists no file. A process of the setup that still writes under these rules
+  while the agent runs keeps the copy too. When the record container failed or ran past its limit,
+  any file under the setup's rules keeps the copy, and the line lists none. With
+  `wall.setup: inside`, the setup runs in the agent's container and no record runs: what the setup
+  wrote counts as the agent's, as the two items above describe, and the line lists no file.
 - A file at the path of a link into `.qory`, such as `CLAUDE.md`, that is no longer a link and
   differs from the commit: it may have the run's text from `.qory`, so the commit keeps the path as
   your commit has it.
