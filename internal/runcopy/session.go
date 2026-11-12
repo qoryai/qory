@@ -766,7 +766,10 @@ repo_state() (
 		r_g=${r_g#./}
 		repo_git "$r_g" || exit 1
 		for r_top in "$r_g/modules" "$r_g/worktrees"; do
-			if [ -d "$r_top" ] && [ ! -h "$r_top" ]; then
+			# A link there is a line too, as the link's target.
+			if [ -h "$r_top" ]; then
+				printf './%s\n' "$r_top" >> "$r_l"
+			elif [ -d "$r_top" ]; then
 				find "./$r_top" -type d -print > "$G/repo-dirs" || exit 1
 				while IFS= read -r r_d; do
 					r_d=${r_d#./}
@@ -829,7 +832,12 @@ submodule_of() (
 	/*) ;;
 	*) s_at=$T/$1/$2/$s_at ;;
 	esac
-	# After cd -P, PWD is the folder with no link on its path.
+	# A link at .git or modules could point at any folder, such as one that the repository ignores,
+	# and repo_state reads no git folder through one. After cd -P, PWD is the folder with no link
+	# on its path, so a git folder whose path there is below modules has no link below modules.
+	if [ -h "$T/$1/.git" ] || [ -h "$T/$1/.git/modules" ]; then
+		exit 1
+	fi
 	s_modules=$(cd -P "$T/$1/.git/modules" 2>/dev/null && printf '%s' "$PWD") || exit 1
 	s_at=$(cd -P "$s_at" 2>/dev/null && printf '%s' "$PWD") || exit 1
 	case $s_at in
