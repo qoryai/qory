@@ -806,10 +806,10 @@ stat_args() {
 }
 # changed writes to the file $1 each path whose change time is past $since, the setup's end, or every
 # path with $since below 0. A write sets the change time from the clock, and touch -d cannot set it.
-# It skips each folder named in $generated and each .git/index that index_clean finds with no
-# work, such as one that git status rewrote, and lists a folder, with a final /, only when find
-# cannot enter it. The list has a path a line, so a name with a line break, which find stats as x,
-# writes n.left.
+# In each folder named in $generated it looks only at git folders, as git_paths finds them, and it
+# skips each .git/index that index_clean finds with no work, such as one that git status rewrote. It
+# lists a folder, with a final /, only when find cannot enter it. The list has a path a line, so a
+# name with a line break, which find stats as x, writes n.left.
 changed() {
 	c_out=$1
 	: > "$c_out"
@@ -827,18 +827,36 @@ changed() {
 	if [ $# -gt 0 ]; then
 		shift
 	fi
-	find . \( -path ./.git -o -path ./.qory -o -type d \( "$@" \) \) -prune -o -name "*$nl*" -exec stat "$s_opt" x {} + \
+	find . \( -path ./.git -o -path ./.qory \) -prune -o -type d \( "$@" \) -prune -print \
+		-o -name "*$nl*" -exec stat "$s_opt" x {} + \
 		-o -type d ! -perm -500 -prune -exec stat "$s_opt" "$s_line/" {} + \
 		-o ! -type d -exec stat "$s_opt" "$s_line" {} + > "$c_out-times" 2>/dev/null || : > "$B/$n.left"
+	# The generated folders are the lines that start with ./, which no time does.
+	{ grep '^\./' "$c_out-times" || :; } > "$c_out-generated"
+	: > "$c_out-gits"
+	while IFS= read -r c_g; do
+		find "$c_g" -name "*$nl*" -exec stat "$s_opt" x {} + -o ! -type d \( -path '*/.git' -o -path '*/.git/*' \
+			-o -path '*/objects/*' -o -path '*/refs/*' -o -path '*/logs/*' -o -name HEAD -o -name packed-refs \) \
+			-exec stat "$s_opt" "$s_line" {} + >> "$c_out-gits" 2>/dev/null || : > "$B/$n.left"
+	done < "$c_out-generated"
 	c_status=0
-	grep -q -x x "$c_out-times" 2>/dev/null || c_status=$?
+	grep -q -x x "$c_out-times" "$c_out-gits" 2>/dev/null || c_status=$?
 	if [ "$c_status" -ne 1 ]; then
 		: > "$B/$n.left"
 	fi
-	if ! sort -n -r "$c_out-times" > "$c_out-sorted" 2>/dev/null; then
+	if ! sort -n -r "$c_out-times" > "$c_out-sorted" 2>/dev/null || ! sort -n -r "$c_out-gits" > "$c_out-gits-sorted" 2>/dev/null; then
 		: > "$B/$n.left"
 		return 0
 	fi
+	{
+		past_since "$c_out-sorted"
+		past_since "$c_out-gits-sorted" | git_paths
+	} > "$c_out"
+}
+# past_since prints the path of each line of the file $1, a change time and a path sorted by time
+# from the latest, whose time is past $since, but a .git/index that index_clean finds with no work.
+# A path that is not there writes n.left.
+past_since() {
 	while IFS= read -r c_line; do
 		c_t=${c_line%% *}
 		case $c_t in
@@ -865,7 +883,28 @@ changed() {
 		else
 			: > "$B/$n.left"
 		fi
-	done < "$c_out-sorted" > "$c_out"
+	done < "$1"
+}
+# git_paths prints each line of its input that is a path in a git folder: a .git file, a path in a
+# .git folder, or a path in a folder with a HEAD file and objects and refs folders, such as a bare
+# repository. It tests the folder above the path and the folders before the first and last
+# objects, refs and logs in it.
+git_paths() {
+	while IFS= read -r c_p; do
+		case $c_p in
+		.git | */.git | .git/* | */.git/*)
+			printf '%s\n' "$c_p"
+			continue
+			;;
+		esac
+		for c_r in "${c_p%/*}" "${c_p%%/objects/*}" "${c_p%/objects/*}" "${c_p%%/refs/*}" "${c_p%/refs/*}" \
+			"${c_p%%/logs/*}" "${c_p%/logs/*}"; do
+			if [ "$c_r" != "$c_p" ] && [ -f "$c_r/HEAD" ] && [ -d "$c_r/objects" ] && [ -d "$c_r/refs" ]; then
+				printf '%s\n' "$c_p"
+				break
+			fi
+		done
+	done
 }
 # index_clean reports whether the file $1, a .git/index, holds no work: git reads a copy of it, with
 # the folder above it as git folder, and finds what HEAD there has, as after a git status. A folder

@@ -3818,9 +3818,11 @@ Part of the run's work can stay in the copy:
   and the `.git/index` of a repository that has what the repository's `HEAD` has, as after
   `git status` rewrote it, keep nothing behind. A `.git/index` whose entries match `HEAD` is not
   checked further, so data that the agent writes into the index file by hand, outside its
-  entries, does not come back. After
-  such a setup, a name with a line break anywhere else in the copy keeps the copy, and the line
-  lists none. A process of the setup that still writes under these rules while the agent runs
+  entries, does not come back. In such a folder the session checks only git folders: a commit, a
+  new ref or object, or a new repository there, such as a commit in `.venv/src/pkg` that
+  `pip install -e` cloned from git, keeps the copy, and the line lists its files in the git
+  folder. After such a setup, a name with a line break anywhere else in the copy keeps the copy,
+  and the line lists none. A process of the setup that still writes under these rules while the agent runs
   keeps the copy too. When the record container failed or ran past its limit, any file under the
   setup's rules keeps the copy, and the line lists none. With `wall.setup: inside`, the setup runs
   in the agent's container and no record runs: what the setup wrote counts as the agent's, as the

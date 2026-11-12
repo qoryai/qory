@@ -6098,6 +6098,70 @@ func TestAClosedFolderWithALineBreakKeepsTheCopy(t *testing.T) {
 	}
 }
 
+// TestARepositoryInAGeneratedFolder is a repository that the setup cloned into .venv/src/pkg, as
+// pip install -e does from git, and a bare one in node_modules, under the setup's rules: a commit
+// the agent makes there, a ref and an object it writes in the bare one, or a repository it makes
+// in .venv keep the copy, and n.ignored lists a path in the git folder. git status there, a package
+// folder named refs that the agent writes in node_modules, or no change keep no copy.
+func TestARepositoryInAGeneratedFolder(t *testing.T) {
+	for _, c := range []struct {
+		name  string
+		agent func(t *testing.T, w string)
+		want  string
+	}{
+		{"no change", func(*testing.T, string) {}, ""},
+		{"git status", func(t *testing.T, w string) {
+			pkg := filepath.Join(w, ".venv", "src", "pkg")
+			testGit(t, pkg, "update-index", "--really-refresh")
+			testGit(t, pkg, "status", "--porcelain")
+		}, ""},
+		{"a package folder named refs", func(t *testing.T, w string) {
+			write(t, w, "node_modules/p/refs/x.js", "agent\n")
+			write(t, w, "node_modules/p/HEAD", "agent\n")
+		}, ""},
+		{"a commit", func(t *testing.T, w string) {
+			pkg := filepath.Join(w, ".venv", "src", "pkg")
+			write(t, pkg, "new.py", "agent\n")
+			commitAll(t, pkg, "agent")
+		}, ".venv/src/pkg/.git/"},
+		{"a ref in a bare repository", func(t *testing.T, w string) {
+			git := filepath.Join(w, "node_modules", "b.git")
+			blob := gitIn(t, git, "agent\n", "hash-object", "-w", "--stdin")
+			tree := gitIn(t, git, "100644 blob "+blob+"\tx.txt\n", "mktree")
+			commit := testGit(t, git, "commit-tree", "-m", "agent", tree)
+			testGit(t, git, "update-ref", "refs/heads/main", commit)
+		}, "node_modules/b.git/"},
+		{"a new repository", func(t *testing.T, w string) {
+			at := filepath.Join(w, ".venv", "new")
+			write(t, at, "x.py", "agent\n")
+			testGit(t, at, "init", "--quiet")
+			commitAll(t, at, "agent")
+		}, ".venv/new/.git/"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			d, repos, out := setupWith(t, func(t *testing.T, w string) {
+				write(t, w, ".venv/.gitignore", "*\n")
+				setupRepository(t, w, ".venv/src/pkg")
+				write(t, w, ".gitignore", "node_modules/\n")
+				write(t, w, "node_modules/p/index.js", "setup\n")
+				testGit(t, w, "init", "--quiet", "--bare", "node_modules/b.git")
+			})
+			c.agent(t, d.Work())
+			printed := sessionOutput(t, d, repos, out)
+			left := d.Left(repos)
+			if c.want == "" {
+				if left.Behind || left.Nested {
+					t.Errorf("Left = %+v:\n%s", left, printed)
+				}
+				return
+			}
+			if !left.Behind || !slices.ContainsFunc(left.Ignored, func(p string) bool { return strings.HasPrefix(p, c.want) }) {
+				t.Errorf("Left = %+v, want a path under %s in Ignored:\n%s", left, c.want, printed)
+			}
+		})
+	}
+}
+
 // TestASetupWithNoRulesRecordsNoEnd is a setup that writes no .gitignore and makes no
 // repository: no record runs, and the setup's end is 0, so the git session lists no change.
 func TestASetupWithNoRulesRecordsNoEnd(t *testing.T) {
