@@ -6349,6 +6349,116 @@ func TestAClosedFolderUnderThePersonsRules(t *testing.T) {
 	}
 }
 
+// TestAFolderThatTheSessionCanEnterButNotRead is vendor/ at mode 0100 or 0300, which the setup
+// leaves with vendor/dep in it, under the person's rules or the setup's, and an agent that commits
+// in vendor/dep by its name: the copy stays, and n.ignored lists vendor/.
+func TestAFolderThatTheSessionCanEnterButNotRead(t *testing.T) {
+	for _, c := range []struct {
+		name, person, setup string
+		mode                os.FileMode
+	}{
+		{"the person's rules, 0100", "vendor/\n", "", 0o100},
+		{"the person's rules, 0300", "vendor/\n", "", 0o300},
+		{"the setup's rules, 0100", "", "vendor/\n", 0o100},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			var vendor string
+			mk := func(t *testing.T, w string) {
+				if c.setup != "" {
+					write(t, w, ".gitignore", c.setup)
+				}
+				setupRepository(t, w, "vendor/dep")
+				vendor = filepath.Join(w, "vendor")
+				t.Cleanup(func() { _ = os.Chmod(vendor, 0o755) })
+				if err := os.Chmod(vendor, c.mode); err != nil {
+					t.Fatal(err)
+				}
+			}
+			var d Dir
+			var repos []Repository
+			var out map[string]LeftOut
+			if c.person != "" {
+				d, repos, out = setupWithIgnore(t, c.person, mk)
+			} else {
+				d, repos, out = setupWith(t, mk)
+			}
+			dep := filepath.Join(vendor, "dep")
+			write(t, dep, "new.go", "package a\n")
+			commitAll(t, dep, "agent")
+			printed := sessionOutput(t, d, repos, out)
+			if left := d.Left(repos); !left.Behind || !slices.Contains(left.Ignored, "vendor/") {
+				t.Errorf("Left = %+v:\n%s", left, printed)
+			}
+		})
+	}
+}
+
+// TestAClosedFolderOfTheSetupKeepsNoCopy is a folder that the setup closes, vendor/ or .venv/lib,
+// which the person's rules cover, and no change: the copy does not stay. A commit in .venv/src/pkg
+// that the agent then closes keeps it.
+func TestAClosedFolderOfTheSetupKeepsNoCopy(t *testing.T) {
+	for _, c := range []string{"vendor", ".venv/lib", ".venv/src/pkg"} {
+		t.Run(c, func(t *testing.T) {
+			var closed string
+			d, repos, out := setupWithIgnore(t, "vendor/\n.venv/\n", func(t *testing.T, w string) {
+				setupRepository(t, w, "vendor/dep")
+				setupRepository(t, w, ".venv/src/pkg")
+				closed = filepath.Join(w, filepath.FromSlash(c))
+				write(t, closed, "x.txt", "x\n")
+				t.Cleanup(func() { _ = os.Chmod(closed, 0o755) })
+				if c != ".venv/src/pkg" {
+					if err := os.Chmod(closed, 0o000); err != nil {
+						t.Fatal(err)
+					}
+				}
+			})
+			if c == ".venv/src/pkg" {
+				write(t, closed, "new.go", "package a\n")
+				commitAll(t, closed, "agent")
+				if err := os.Chmod(closed, 0o000); err != nil {
+					t.Fatal(err)
+				}
+			}
+			printed := sessionOutput(t, d, repos, out)
+			want := c == ".venv/src/pkg"
+			if left := d.Left(repos); left.Any() != want {
+				t.Errorf("Left = %+v, want a kept copy %t:\n%s", left, want, printed)
+			}
+		})
+	}
+}
+
+// TestARepositoryInANestedSubmoduleThatNoUpdatePopulated is a submodule in a submodule that the
+// clone left empty, where the agent makes a repository with a commit, with no record, and a file in
+// the top repository: the session ends, the file comes back, and the copy stays.
+func TestARepositoryInANestedSubmoduleThatNoUpdatePopulated(t *testing.T) {
+	isolate(t)
+	sessionGit(t)
+	src, _ := person(t)
+	inner := filepath.Join(t.TempDir(), "inner")
+	write(t, inner, "i.txt", "i\n")
+	write(t, inner, ".gitignore", ".venv/\n")
+	testGit(t, inner, "init", "--quiet", "-b", "main")
+	commitAll(t, inner, "inner")
+	outer := filepath.Join(t.TempDir(), "outer")
+	write(t, outer, "o.txt", "o\n")
+	testGit(t, outer, "init", "--quiet", "-b", "main")
+	testGit(t, outer, "-c", "protocol.file.allow=always", "submodule", "add", "--quiet", inner, "in")
+	commitAll(t, outer, "outer")
+	testGit(t, src, "-c", "protocol.file.allow=always", "submodule", "add", "--quiet", outer, "libs/o")
+	commitAll(t, src, "submodule")
+	d, repos := cloneRun(t, src)
+	setupRepository(t, filepath.Join(d.Work(), "libs", "o", "in"), ".venv/pkg")
+	write(t, d.Work(), "work.go", "package main\n")
+	printed := sessionOutput(t, d, repos, map[string]LeftOut{"": {}})
+	if left := d.Left(repos); !left.Behind {
+		t.Errorf("Left = %+v:\n%s", left, printed)
+	}
+	if _, err := d.Quarantine(context.Background(), branch, repos); err != nil {
+		t.Errorf("Quarantine = %v, want the bundle of work.go:\n%s", err, printed)
+	}
+}
+
 // TestARepositoryInAnIgnoredFolderOfASubmodule is a repository that the setup cloned into
 // libs/s/.venv/pkg, with .venv/ in the submodule's .gitignore, after a setup with a record and
 // after one with none, as with wall.setup: inside. A commit there, or a repository that the agent

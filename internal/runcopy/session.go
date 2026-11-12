@@ -812,8 +812,9 @@ stat_args() {
 # path with $since below 0. A write sets the change time from the clock, and touch -d cannot set it.
 # In each folder named in $generated it looks only at git folders, as git_paths finds them, and it
 # skips each .git/index that index_clean finds with no work, such as one that git status rewrote. It
-# lists a folder, with a final /, only when find cannot enter it. The list has a path a line, so a
-# name with a line break, which find stats as x, writes n.left.
+# lists a folder, with a final /, that find can enter but not read whatever its time, since a path
+# below it is reachable by name, and one that find cannot enter by its time. The list has a path a
+# line, so a name with a line break, which find stats as x, writes n.left.
 changed() {
 	c_out=$1
 	: > "$c_out"
@@ -831,16 +832,22 @@ changed() {
 	if [ $# -gt 0 ]; then
 		shift
 	fi
+	# 999999999999999, the largest time that past_since reads, lists a folder that find can enter
+	# but not read.
 	find . \( -path ./.git -o -path ./.qory \) -prune -o -type d \( "$@" \) -prune -print \
 		-o -name "*$nl*" -exec stat "$s_opt" x {} + \
+		-o -type d -perm -100 ! -perm -400 -prune -exec printf '999999999999999 %s/\n' {} + \
 		-o -type d ! -perm -500 -prune -exec stat "$s_opt" "$s_line/" {} + \
 		-o ! -type d -exec stat "$s_opt" "$s_line" {} + > "$c_out-times" 2>/dev/null || : > "$B/$n.left"
 	# The generated folders are the lines that start with ./, which no time does.
 	{ grep '^\./' "$c_out-times" || :; } > "$c_out-generated"
 	: > "$c_out-gits"
 	while IFS= read -r c_g; do
-		find "$c_g" -name "*$nl*" -exec stat "$s_opt" x {} + -o ! -type d \( -path '*/.git' -o -path '*/.git/*' \
-			-o -path '*/objects/*' -o -path '*/refs/*' -o -path '*/reftable/*' -o -name HEAD -o -name packed-refs \) \
+		find "$c_g" -name "*$nl*" -exec stat "$s_opt" x {} + \
+			-o -type d -perm -100 ! -perm -400 -prune -exec printf '999999999999999 %s/\n' {} + \
+			-o -type d ! -perm -500 -prune -exec stat "$s_opt" "$s_line/" {} + \
+			-o ! -type d \( -path '*/.git' -o -path '*/.git/*' -o -path '*/objects/*' -o -path '*/refs/*' \
+			-o -path '*/reftable/*' -o -name HEAD -o -name packed-refs \) \
 			-exec stat "$s_opt" "$s_line" {} + >> "$c_out-gits" 2>/dev/null || : > "$B/$n.left"
 	done < "$c_out-generated"
 	c_status=0
@@ -852,9 +859,12 @@ changed() {
 		: > "$B/$n.left"
 		return 0
 	fi
+	past_since "$c_out-gits-sorted" > "$c_out-gits-new"
+	# A folder, with its final /, is one that find did not enter, which can hold a git folder.
 	{
 		past_since "$c_out-sorted"
-		past_since "$c_out-gits-sorted" | git_paths
+		grep '/$' "$c_out-gits-new" || :
+		grep -v '/$' "$c_out-gits-new" | git_paths
 	} > "$c_out"
 }
 # past_since prints the path of each line of the file $1, a change time and a path sorted by time
@@ -1514,6 +1524,11 @@ submodule_bundle() (
 			*"$nl$up$nl"*) continue 2 ;;
 			esac
 		done
+		# git stops at a pathspec inside a submodule of the submodule: leftover writes n.left for a
+		# folder there with no .git that is not empty.
+		if below_gitlink "$p"; then
+			continue
+		fi
 		printf '%s\n' "$p" >> "$G/nested"
 		printf ':(exclude,top,literal)%s\0' "$p" >> "$G/add"
 	done < "$PG/folders"
