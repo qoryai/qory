@@ -5617,6 +5617,43 @@ func TestASubmoduleWithASeparateGitFolderInARepositoryOfTheSetup(t *testing.T) {
 	}
 }
 
+// TestALinkAtTheModulesOfARepositoryOfTheSetup is an agent that replaces .git/modules of a
+// repository that the setup made, with no submodules, with a link to third, a folder that the
+// repository ignores. A repository the agent makes at third/c, with its git folder at third/gd,
+// is no submodule: the session writes its nested line. The link alone keeps the copy too.
+func TestALinkAtTheModulesOfARepositoryOfTheSetup(t *testing.T) {
+	for _, repo := range []bool{true, false} {
+		t.Run(fmt.Sprintf("repository %t", repo), func(t *testing.T) {
+			d, repos, out := setupWith(t, func(t *testing.T, w string) {
+				tool := setupRepository(t, w, "tool")
+				write(t, tool, ".gitignore", "third/\n")
+				commitAll(t, tool, "ignore")
+			})
+			tool := filepath.Join(d.Work(), "tool")
+			if err := os.MkdirAll(filepath.Join(tool, "third"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if repo {
+				c := filepath.Join(tool, "third", "c")
+				if err := os.Mkdir(c, 0o755); err != nil {
+					t.Fatal(err)
+				}
+				testGit(t, c, "init", "--quiet", "--separate-git-dir", filepath.Join(tool, "third", "gd"))
+				write(t, c, "agent.go", "package agent\n")
+				commitAll(t, c, "agent")
+			}
+			if err := os.Symlink("../third", filepath.Join(tool, ".git", "modules")); err != nil {
+				t.Fatal(err)
+			}
+			printed := sessionOutput(t, d, repos, out)
+			left := d.Left(repos)
+			if !left.Behind || left.Nested != repo {
+				t.Errorf("Left = %+v:\n%s", left, printed)
+			}
+		})
+	}
+}
+
 // TestAFileThatARepositoryOfTheSetupIgnores is a file the agent writes in a repository that the
 // setup made, at a path that the repository's .gitignore covers: the repository's ignore rules
 // count as the person's, so the file stays out of the commit with no line, and the session keeps
