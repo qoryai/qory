@@ -19,6 +19,7 @@ import (
 
 	"github.com/qoryai/qory/internal/exports"
 	"github.com/qoryai/qory/internal/preparation"
+	"golang.org/x/sys/unix"
 )
 
 // branch is the run's branch in every test.
@@ -6277,6 +6278,168 @@ func TestARepositoryUnderThePersonsRulesWithNoRecord(t *testing.T) {
 				t.Errorf("Left = %+v, want Nested %t:\n%s", left, want, printed)
 			}
 		})
+	}
+}
+
+// TestAClosedFolderUnderThePersonsRules is vendor/dep, a repository that the setup cloned, with
+// vendor/ in the person's .gitignore. The agent commits there and closes vendor/dep, or the setup
+// closes vendor/ and the agent opens it, commits and closes it again: the copy stays, and
+// n.ignored lists the closed folder. A vendor/ that the setup closed, with no change, keeps none.
+func TestAClosedFolderUnderThePersonsRules(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root reads a folder of mode 000")
+	}
+	for _, c := range []struct {
+		name, want  string
+		setupCloses bool
+		agent       func(t *testing.T, vendor string)
+	}{
+		{"the agent closes the repository", "vendor/dep/", false, func(t *testing.T, vendor string) {
+			dep := filepath.Join(vendor, "dep")
+			write(t, dep, "new.go", "package a\n")
+			commitAll(t, dep, "agent")
+			if err := os.Chmod(dep, 0o000); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{"the setup closed the folder", "vendor/", true, func(t *testing.T, vendor string) {
+			if err := os.Chmod(vendor, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			dep := filepath.Join(vendor, "dep")
+			write(t, dep, "new.go", "package a\n")
+			commitAll(t, dep, "agent")
+			if err := os.Chmod(vendor, 0o000); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{"no change", "", true, func(*testing.T, string) {}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			var vendor string
+			d, repos, out := setupWithIgnore(t, "vendor/\n", func(t *testing.T, w string) {
+				setupRepository(t, w, "vendor/dep")
+				vendor = filepath.Join(w, "vendor")
+				t.Cleanup(func() {
+					_ = os.Chmod(vendor, 0o755)
+					_ = os.Chmod(filepath.Join(vendor, "dep"), 0o755)
+				})
+				if c.setupCloses {
+					if err := os.Chmod(vendor, 0o000); err != nil {
+						t.Fatal(err)
+					}
+				}
+			})
+			if !out[""].SetupGit || out[""].SetupEnd <= 0 {
+				t.Fatalf("the record is %+v", out[""])
+			}
+			c.agent(t, vendor)
+			printed := sessionOutput(t, d, repos, out)
+			left := d.Left(repos)
+			if c.want == "" {
+				if left.Any() {
+					t.Errorf("Left = %+v:\n%s", left, printed)
+				}
+				return
+			}
+			if !left.Behind || !slices.Contains(left.Ignored, c.want) {
+				t.Errorf("Left = %+v, want %s in Ignored:\n%s", left, c.want, printed)
+			}
+		})
+	}
+}
+
+// TestARepositoryInAnIgnoredFolderOfASubmodule is a repository that the setup cloned into
+// libs/s/.venv/pkg, with .venv/ in the submodule's .gitignore, after a setup with a record and
+// after one with none, as with wall.setup: inside. A commit there, or a repository that the agent
+// makes there, keeps the copy. With a record, no change keeps none; with no record, the setup's
+// repository counts as the run's.
+func TestARepositoryInAnIgnoredFolderOfASubmodule(t *testing.T) {
+	for _, record := range []bool{true, false} {
+		for _, c := range []struct {
+			name  string
+			agent func(t *testing.T, s string)
+		}{
+			{"no change", func(*testing.T, string) {}},
+			{"a commit", func(t *testing.T, s string) {
+				pkg := filepath.Join(s, ".venv", "pkg")
+				write(t, pkg, "new.go", "package a\n")
+				commitAll(t, pkg, "agent")
+			}},
+			{"a new repository", func(t *testing.T, s string) {
+				setupRepository(t, s, ".venv/agent")
+			}},
+		} {
+			t.Run(fmt.Sprintf("record %t/%s", record, c.name), func(t *testing.T) {
+				isolate(t)
+				sessionGit(t)
+				src, _ := person(t)
+				sub := filepath.Join(t.TempDir(), "sub")
+				write(t, sub, "lib.txt", "lib\n")
+				write(t, sub, ".gitignore", ".venv/\n")
+				testGit(t, sub, "init", "--quiet", "-b", "main")
+				commitAll(t, sub, "lib")
+				testGit(t, src, "-c", "protocol.file.allow=always", "submodule", "add", "--quiet", sub, "libs/s")
+				commitAll(t, src, "submodule")
+				d, repos := cloneRun(t, src)
+				s := filepath.Join(d.Work(), "libs", "s")
+				setupRepository(t, s, ".venv/pkg")
+				out := map[string]LeftOut{"": {}}
+				if record {
+					out[""] = setupRecord(t, d, repos[0])
+					if out[""].SetupEnd <= 0 {
+						t.Fatalf("the record is %+v", out[""])
+					}
+				}
+				c.agent(t, s)
+				printed := sessionOutput(t, d, repos, out)
+				left := d.Left(repos)
+				if want := c.name != "no change" || !record; left.Any() != want {
+					t.Errorf("Left = %+v, want a kept copy %t:\n%s", left, want, printed)
+				}
+			})
+		}
+	}
+}
+
+// TestABareRepositoryWithNoHeadUnderThePersonsRules is the gap that docs/run.md names: a bare
+// repository in vendor/, which the person's .gitignore covers, where the agent commits and renames
+// HEAD. The session finds no git folder there, and the copy does not stay.
+func TestABareRepositoryWithNoHeadUnderThePersonsRules(t *testing.T) {
+	d, repos, out := setupWithIgnore(t, "vendor/\n", func(t *testing.T, w string) {
+		setupRepository(t, w, "vendor/src")
+		testGit(t, w, "clone", "--quiet", "--bare", filepath.Join(w, "vendor", "src"), filepath.Join(w, "vendor", "b.git"))
+	})
+	git := filepath.Join(d.Work(), "vendor", "b.git")
+	blob := gitIn(t, git, "agent\n", "hash-object", "-w", "--stdin")
+	tree := gitIn(t, git, "100644 blob "+blob+"\tx.txt\n", "mktree")
+	testGit(t, git, "update-ref", "refs/heads/main", testGit(t, git, "commit-tree", "-m", "agent", tree))
+	if err := os.Rename(filepath.Join(git, "HEAD"), filepath.Join(git, "HEAD.off")); err != nil {
+		t.Fatal(err)
+	}
+	printed := sessionOutput(t, d, repos, out)
+	if left := d.Left(repos); left.Any() {
+		t.Errorf("Left = %+v; if the session now finds this commit, update docs/run.md:\n%s", left, printed)
+	}
+}
+
+// TestGitBelowStopsWhenTheContextEnds is a folder with no git folder and a context that ended: the
+// walk stops at once and reports true, as for a folder it cannot read.
+func TestGitBelowStopsWhenTheContextEnds(t *testing.T) {
+	dir := t.TempDir()
+	write(t, dir, "a/b/c.txt", "c\n")
+	fd, err := unix.Open(dir, dirFlags, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer unix.Close(fd)
+	if gitBelow(t.Context(), fd, 0) {
+		t.Fatal("gitBelow found a git folder in a folder with none")
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	if !gitBelow(ctx, fd, 0) {
+		t.Error("gitBelow went on after its context ended")
 	}
 }
 

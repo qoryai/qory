@@ -931,6 +931,32 @@ has_refs() (
 	h_refs=$(g --git-dir="$1" for-each-ref --count=1 2>/dev/null) || exit 0
 	[ -n "$h_refs" ] || g --git-dir="$1" rev-parse -q --verify HEAD > /dev/null 2>&1
 )
+# bare_made writes n.nested and the line of a repository the run made in $1, the copy or a
+# submodule, for each bare repository below the current folder, one with a HEAD file and objects
+# and refs folders, that ignore rules cover and that has_refs finds with a ref. Call it with $since
+# at 0: the setup then left no git folder that ignore rules cover. A bare repository that they do
+# not cover goes into the commit as other files.
+bare_made() {
+	find . \( -path ./.qory -o -name .git \) -prune -o -type f -name HEAD -exec sh -c '
+		for p do
+			d=${p%/HEAD}
+			if [ -d "$d/objects" ] && [ -d "$d/refs" ]; then
+				printf "%s\0" "${d#./}"
+			fi
+		done' sh {} + > "$G/bare-z" 2>/dev/null || : > "$B/$n.left"
+	if broken "$G/bare-z"; then
+		: > "$B/$n.left"
+	fi
+	tr '\000' '\n' < "$G/bare-z" > "$G/bare"
+	while IFS= read -r b_d; do
+		if below_gitlink "$b_d" || ! g check-ignore -q -- "./$b_d/" 2>/dev/null || ! has_refs "./$b_d"; then
+			continue
+		fi
+		printf 'qory: %s has a git repository at %s that the run made, and the commit leaves it out\n' "$1" "$(printable "$b_d")" >&2
+		: > "$B/$n.nested"
+		printf '%s\n' "$b_d" >> "$G/made"
+	done < "$G/bare"
+}
 # new_ignored writes to $G/new-ignored-z each path of $G/new, as ./path, that the work tree's rules
 # ignore, and to $G/new-person-z those that the person's rules ignore. check-ignore stops at a path in
 # a submodule, so such a path is not asked: the checks of submodules cover it.
@@ -965,8 +991,8 @@ new_ignored() {
 # setup_ignored writes n.left, and with $since past 0 each path after $1 to n.ignored, for each path
 # of $G/new-ignored-z that the person's rules leave and either the rules after setup_rules ignore or
 # a repository of $setup_repos holds: check-ignore read that repository's rules. So does each path
-# in a git folder that the person's rules ignore. When person_ignored fails on the rules after
-# setup_rules, it writes n.left alone.
+# in a git folder, and each folder that changed lists as closed, that the person's rules ignore.
+# When person_ignored fails on the rules after setup_rules, it writes n.left alone.
 setup_ignored() {
 	if [ ! -s "$G/new-ignored-z" ]; then
 		return 0
@@ -995,7 +1021,11 @@ setup_ignored() {
 	done < "$G/new-ignored" >> "$G/new-setup"
 	lacking "$G/new-setup" "$G/new-person" > "$G/new-left"
 	# The copy starts at a commit, so a git folder under the person's rules is the setup's or the run's.
-	git_paths < "$G/new-person" >> "$G/new-left"
+	# A folder there that the session cannot enter can hide one.
+	{
+		git_paths < "$G/new-person"
+		grep '/$' "$G/new-person" || :
+	} >> "$G/new-left"
 	if [ ! -s "$G/new-left" ]; then
 		return 0
 	fi
@@ -1456,6 +1486,18 @@ submodule_bundle() (
 		: > "$B/$n.nested"
 		printf '%s\n' "$p" >> "$G/made"
 	done < "$G/all"
+	# With no setup's end, a repository with a ref that ignore rules cover is the run's, as in the top
+	# repository.
+	if [ "$since" -eq 0 ]; then
+		while IFS= read -r p; do
+			if g check-ignore -q -- "./$p/" 2>/dev/null && has_refs "./$p/.git"; then
+				printf 'qory: %s has a git repository at %s that the run made, and the commit leaves it out\n' "$shows" "$(printable "$p")" >&2
+				: > "$B/$n.nested"
+				printf '%s\n' "$p" >> "$G/made"
+			fi
+		done < "$G/all"
+		bare_made "$shows"
+	fi
 	: > "$G/nested"
 	while IFS= read -r p; do
 		case $p in
@@ -1854,28 +1896,8 @@ while [ "$n" -lt "$count" ]; do
 			;;
 		esac
 	done < "$G/folders"
-	# The same holds for a bare repository, a folder with a HEAD file and objects and refs folders,
-	# that ignore rules cover. One that they do not cover goes into the commit as other files.
 	if [ "$since" -eq 0 ]; then
-		find . \( -path ./.qory -o -name .git \) -prune -o -type f -name HEAD -exec sh -c '
-			for p do
-				d=${p%/HEAD}
-				if [ -d "$d/objects" ] && [ -d "$d/refs" ]; then
-					printf "%s\0" "${d#./}"
-				fi
-			done' sh {} + > "$G/bare-z" 2>/dev/null || : > "$B/$n.left"
-		if broken "$G/bare-z"; then
-			: > "$B/$n.left"
-		fi
-		tr '\000' '\n' < "$G/bare-z" > "$G/bare"
-		while IFS= read -r d; do
-			if below_gitlink "$d" || ! g check-ignore -q -- "./$d/" 2>/dev/null || ! has_refs "./$d"; then
-				continue
-			fi
-			printf 'qory: %s has a git repository at %s that the run made, and the commit leaves it out\n' "$shown" "$(printable "$d")" >&2
-			: > "$B/$n.nested"
-			printf '%s\n' "$d" >> "$G/made"
-		done < "$G/bare"
+		bare_made "$shown"
 	fi
 	large "$top" "$P" "$G/out-paths" ./.qory ':(exclude,top,literal,icase).qory' "$@"
 	add "$P" "$shown"

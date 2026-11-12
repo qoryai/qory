@@ -364,7 +364,10 @@ func (w *setupWalk) folder(ctx context.Context, dir int, rel string, depth int) 
 		switch {
 		case ignored[asked[i]] && e.folder:
 			if !w.git {
-				w.git = gitBelowAt(dir, e.name, depth+1)
+				w.git = gitBelowAt(ctx, dir, e.name, depth+1)
+				if err := ctx.Err(); err != nil {
+					return err
+				}
 			}
 		case ignored[asked[i]] && e.name != ".gitignore":
 		case !e.folder:
@@ -410,20 +413,21 @@ func (w *setupWalk) subfolder(ctx context.Context, sub int, rel string, depth in
 }
 
 // gitBelowAt is [gitBelow] of the folder name in dir, at depth, and true when it cannot open it.
-func gitBelowAt(dir int, name string, depth int) bool {
+func gitBelowAt(ctx context.Context, dir int, name string, depth int) bool {
 	sub, err := unix.Openat(dir, name, dirFlags, 0)
 	if err != nil {
 		return true
 	}
 	defer unix.Close(sub)
-	return gitBelow(sub, depth)
+	return gitBelow(ctx, sub, depth)
 }
 
 // gitBelow reports whether the folder dir, at depth, or a folder below it has a .git, or a HEAD
 // file and objects and refs folders, as a bare repository has. It follows no link, and reports true
-// for a folder it cannot read, and past [maxOpenFolders], so that such a folder needs a record.
-func gitBelow(dir int, depth int) bool {
-	if depth >= maxOpenFolders {
+// for a folder it cannot read, and past [maxOpenFolders], so that such a folder needs a record. It
+// stops with true when ctx ends.
+func gitBelow(ctx context.Context, dir int, depth int) bool {
+	if depth >= maxOpenFolders || ctx.Err() != nil {
 		return true
 	}
 	names, err := readNames(dir)
@@ -452,7 +456,7 @@ func gitBelow(dir int, depth int) bool {
 	if head && objects && refs {
 		return true
 	}
-	return slices.ContainsFunc(folders, func(name string) bool { return gitBelowAt(dir, name, depth+1) })
+	return slices.ContainsFunc(folders, func(name string) bool { return gitBelowAt(ctx, dir, name, depth+1) })
 }
 
 // repositories adds each folder below the folder dir at rel, with the entries list, that has a
