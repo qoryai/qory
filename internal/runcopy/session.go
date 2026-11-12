@@ -52,7 +52,7 @@ type SetupPath struct {
 	// is neither regular nor a link; file:, exec: or link: and the git blob id of the
 	// content or of the link's target; or repo: and the blob id of a list of the HEAD,
 	// refs, reflogs, .gitignore files and git status of a repository that the setup made,
-	// as repoRecord.state reads it. exec: is a regular file with the owner's execute bit.
+	// as [Dir.RecordSession] reads it. exec: is a regular file with the owner's execute bit.
 	State string
 }
 
@@ -115,7 +115,8 @@ type GitSession struct {
 // through the info/exclude of that git folder. A path that an ignore rule covers counts as left out
 // unless the person's rules cover it too: those rules and the .gitignore files of the base commit,
 // with each .gitignore that the setup changed as the setup left it. A repository the setup made
-// stays out, and stays behind when its [SetupPath.State] differs or git status lists a change.
+// stays out, and stays behind when what repo_state reads there differs from its [SetupPath.State],
+// which [Dir.RecordSession] read after the setup.
 //
 // The add leaves out each regular file of more than [MaxFile] bytes that it would add, in the
 // repository and in each submodule, and lists its path, relative to the copy, in n.large, which
@@ -290,7 +291,11 @@ const SessionScriptName = "qory-git-session.sh"
 // n-k.none for each submodule in subs-n, n.large for files it leaves out by their size, and n.known
 // or n-k.known for the run's refs at a commit the person has. Its
 // find takes a size in bytes, with c, which busybox and GNU find both read: [MaxFile] bytes. It needs git 2.25 or later, for --pathspec-from-file.
-const sessionScript = `set -eu
+const sessionScript = scriptFunctions + sessionMain
+
+// scriptFunctions is the start of [sessionScript] and of [recordScript]: their settings and
+// functions, with the same arguments.
+const scriptFunctions = `set -eu
 PATH=$1 W=$2 B=$3 branch=$4 message=$5 count=$6 prefix=$7
 export PATH
 unset XDG_CONFIG_HOME GIT_CONFIG GIT_CONFIG_PARAMETERS GIT_CONFIG_COUNT GIT_CONFIG_SYSTEM \
@@ -384,10 +389,10 @@ readable() {
 }
 # submodule_status writes the changes of the submodule at the folder $1 of $T to $G/status, through
 # the git folder $G/status-$st, $st being a number the caller raises for each call: see tree_status,
-# which takes $2 as its fifth argument.
+# which takes $2 and $3 as its fifth and sixth arguments.
 submodule_status() (
 	unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE
-	tree_status "$T/$1" "$G/status" "$G/status-$st" 1 "${2-}"
+	tree_status "$T/$1" "$G/status" "$G/status-$st" 1 "${2-}" "${3-}"
 )
 # through_link reports whether the path $2 below the folder $1, or a folder on the way to it, is a
 # link.
@@ -440,10 +445,12 @@ filled() {
 # submodule that no update populated; and one more than 8 submodules deep. With $5 set, each path
 # that an ignore rule covers, which the .gitignore files of HEAD do not cover, is a change too, as
 # ?? and its path: the run wrote or changed that rule. Such a repository and each one inside it
-# get this check. $3/plain gets git status as it ran, before the other checks, for repo_state. A
-# call in a condition ignores set -e, so each step that can fail exits 1 on its failure.
+# get this check. With $6 set, a submodule with a change, in place of that change in $2 and n.left,
+# adds its entries to $2, each with the submodule's path in front of its path: repo_state then
+# compares them with what the setup left. A call in a condition ignores set -e, so each step that
+# can fail exits 1 on its failure.
 tree_status() (
-	t_at=$1 t_out=$2 G=$3 t_depth=$4 t_rules=${5-}
+	t_at=$1 t_out=$2 G=$3 t_depth=$4 t_rules=${5-} t_deep=${6-}
 	cd "$t_at" || exit 1
 	objects=$(g --git-dir=.git rev-parse --git-path objects) || exit 1
 	case $objects in
@@ -462,7 +469,6 @@ tree_status() (
 		g read-tree "$now" || exit 1
 	fi
 	g status --porcelain -z --untracked-files=all --ignore-submodules=dirty > "$t_out" || exit 1
-	cp "$t_out" "$G/plain" || exit 1
 	if [ -n "$t_rules" ]; then
 		rules || exit 1
 		g ls-files -z -o -i --exclude-standard > "$G/ignored-z" || exit 1
@@ -507,7 +513,15 @@ tree_status() (
 			continue
 		fi
 		t_k=$((t_k + 1))
-		if ! tree_status "$t_at/$t_p" "$G/status-$t_k.out" "$G/status-$t_k" $((t_depth + 1)) "$t_rules" || [ -s "$G/status-$t_k.out" ]; then
+		if ! tree_status "$t_at/$t_p" "$G/status-$t_k.out" "$G/status-$t_k" $((t_depth + 1)) "$t_rules" "$t_deep"; then
+			printf ' M %s\0' "$t_p" >> "$t_out" || exit 1
+			: > "$B/$n.left"
+		elif [ -s "$G/status-$t_k.out" ] && [ -n "$t_deep" ]; then
+			tr '\000' '\n' < "$G/status-$t_k.out" > "$G/status-$t_k.lines" || exit 1
+			while IFS= read -r t_e; do
+				printf '%s %s/%s\0' "${t_e%"${t_e#??}"}" "$t_p" "${t_e#???}"
+			done < "$G/status-$t_k.lines" >> "$t_out" || exit 1
+		elif [ -s "$G/status-$t_k.out" ]; then
 			printf ' M %s\0' "$t_p" >> "$t_out" || exit 1
 			: > "$B/$n.left"
 		fi
@@ -731,35 +745,41 @@ repo_git() {
 	done
 }
 # repo_state prints the state of the repository that the setup made at the folder $1 of $T, as
-# SetupPath.State has it for repoRecord.state: repo: and the blob id of a list, sorted, of a line
-# per file or change. The files are HEAD, packed-refs and each file below refs, reftable and logs of
-# .git and of each folder below .git/modules and .git/worktrees with a regular file HEAD and a
-# folder refs or a regular file commondir, and each .gitignore below $1 but in a folder named
-# .git: kind:id and the path below $1, kind being file, with the blob id of the content, or link,
-# with that of its target. The
-# changes are the entries of the file $2, the repository's git status as tree_status ran it before
-# its other checks: status, the path's state, and the path. It exits 1 when a find, a git or a
-# readlink fails, or a path has a carriage return.
+# SetupPath.State has it: repo: and the blob id of a list, sorted, of a line per file or change. The
+# files are HEAD, packed-refs and each file below refs, reftable and logs of each git folder: each
+# folder named .git below $1, and each folder below its modules and worktrees with a regular file
+# HEAD and a folder refs or a regular file commondir, such as the git folder of a submodule. They
+# have the refs and reflogs of the repository and of its submodules and worktrees. The other files
+# are each .gitignore below $1 but in a folder named .git. Each such line is kind:id and the path
+# below $1, kind being file, with the blob id of the content, or link, with that of its target. The
+# changes are the entries of the file $2, as tree_status writes it with $6 set: status, the path's
+# state, and the path. It exits 1 when a find, a git or a readlink fails, or a path has a carriage
+# return. The record session and the git session both run it, so the two lists match while the
+# repository stays as the setup left it.
 repo_state() (
 	cd "$T/$1" || exit 1
 	r_f=$G/repo-files r_l=$G/repo-links
 	find . -name .git -prune -o -name .gitignore -type f -print > "$r_f" || exit 1
 	find . -name .git -prune -o -name .gitignore -type l -print > "$r_l" || exit 1
-	repo_git .git || exit 1
-	for r_top in .git/modules .git/worktrees; do
-		if [ -d "$r_top" ] && [ ! -h "$r_top" ]; then
-			find "./$r_top" -type d -print > "$G/repo-dirs" || exit 1
-			while IFS= read -r r_d; do
-				r_d=${r_d#./}
-				if [ -f "$r_d/HEAD" ] && [ ! -h "$r_d/HEAD" ]; then
-					if { [ -d "$r_d/refs" ] && [ ! -h "$r_d/refs" ]; } ||
-						{ [ -f "$r_d/commondir" ] && [ ! -h "$r_d/commondir" ]; }; then
-						repo_git "$r_d" || exit 1
+	find . -name .git -prune -type d -print > "$G/repo-gits" || exit 1
+	while IFS= read -r r_g; do
+		r_g=${r_g#./}
+		repo_git "$r_g" || exit 1
+		for r_top in "$r_g/modules" "$r_g/worktrees"; do
+			if [ -d "$r_top" ] && [ ! -h "$r_top" ]; then
+				find "./$r_top" -type d -print > "$G/repo-dirs" || exit 1
+				while IFS= read -r r_d; do
+					r_d=${r_d#./}
+					if [ -f "$r_d/HEAD" ] && [ ! -h "$r_d/HEAD" ]; then
+						if { [ -d "$r_d/refs" ] && [ ! -h "$r_d/refs" ]; } ||
+							{ [ -f "$r_d/commondir" ] && [ ! -h "$r_d/commondir" ]; }; then
+							repo_git "$r_d" || exit 1
+						fi
 					fi
-				fi
-			done < "$G/repo-dirs"
-		fi
-	done
+				done < "$G/repo-dirs"
+			fi
+		done
+	done < "$G/repo-gits"
 	if [ -n "$(cat "$r_f" "$r_l" | tr -cd '\r')" ]; then
 		exit 1
 	fi
@@ -1182,7 +1202,10 @@ submodule_bundle() (
 	extra_refs
 	bundle "$B/$n-$k"
 )
-n=0
+`
+
+// sessionMain is the part of [sessionScript] that commits and writes the bundles.
+const sessionMain = `n=0
 while [ "$n" -lt "$count" ]; do
 	. "$B/list-$n"
 	if [ "$rel" = . ]; then T=$W shown="the copy" top=; else T=$W/$rel shown="the copy of $rel" top=$rel/; fi
@@ -1365,14 +1388,14 @@ while [ "$n" -lt "$count" ]; do
 		case $2 in
 		repo:*)
 			# A repository the setup made stays out whole, and keeps the copy when its HEAD, refs,
-			# reflogs, .gitignore files or git status differ from what the setup left. tree_status
-			# writes n.left for a change in a submodule in it.
+			# reflogs, .gitignore files or git status, with that of its submodules, differ from what
+			# the record session read after the setup.
 			if [ -d "$f" ] && [ ! -h "$f" ] && [ -d "$f/.git" ] && [ ! -h "$f/.git" ]; then
 				printf ':(exclude,top,literal)%s\0' "$1" >> "$P"
 				known=$known$1$nl
 				printf '%s\n' "$1" >> "$G/out-folders"
 				st=$((st + 1))
-				if ! submodule_status "$1" || [ "$(repo_state "$1" "$G/status-$st/plain" || :)" != "$2" ]; then
+				if ! submodule_status "$1" "" deep || [ "$(repo_state "$1" "$G/status" || :)" != "$2" ]; then
 					: > "$B/$n.left"
 				fi
 			fi

@@ -44,6 +44,8 @@ const (
 	bundleName     = "bundle"
 	sourcesName    = "sources"
 	quarantineName = "quarantine"
+	// setupRecordName is the record session's folder, see [Dir.SetupRecord].
+	setupRecordName = "setup-record"
 	// recordName is the record of the files [Dir.CopyFolder] copied.
 	recordName = "folder.json"
 )
@@ -53,8 +55,9 @@ const (
 var runIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`)
 
 // Dir is the folder of one run's copy, <user cache>/qory/runs/<run id>: the copy in
-// work, the git session's folder in bundle, the bare clones of the person's
-// repositories in sources, and the quarantine repositories in quarantine.
+// work, the git session's folder in bundle, the record session's folder in setup-record, the
+// bare clones of the person's repositories in sources, and the quarantine repositories in
+// quarantine.
 type Dir struct{ root string }
 
 // New makes the folder of the run with id runID under the user's cache folder,

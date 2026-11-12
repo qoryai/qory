@@ -3804,15 +3804,19 @@ Part of the run's work can stay in the copy:
   differs from the commit: it may have the run's text from `.qory`, so the commit keeps the path as
   your commit has it.
 - A change in a repository that the setup made, such as a file the agent wrote there or a commit:
-  the commit leaves that repository out. At the end of the setup, qory records the repository's
-  `HEAD`, refs, reflogs and `.gitignore` files, the same of each submodule and worktree in its
-  `.git/modules` and `.git/worktrees`, and what `git status` lists against its `HEAD`. The session
-  finds a change in any of them, or a change in a submodule there. The reflogs show a commit that
-  the agent made and then reset, and `.git/modules` one in a submodule that the agent then took
-  out with `git submodule deinit`. `git status` runs with no filter, so a file under a filter, such
-  as one of Git LFS, is a change only when it differs from what the setup left. A repository whose record qory could not
-  make, such as one with a `.git` file, and any other folder that the commit leaves out whole for
-  the setup, such as one more than 64 levels deep, stay in the copy whether or not they changed.
+  the commit leaves that repository out. After the setup and before the agent starts, qory records
+  the repository in a container that it starts as it starts the git session's, named
+  `qory-record-<run id>`, which binds the copy read-only. No git on your machine opens the copy.
+  The record has the `HEAD`, refs, reflogs and `.gitignore` files of the repository and of each of
+  its submodules and worktrees, and what `git status` lists against `HEAD` there. The session finds
+  a change in any of them. The reflogs show a commit that the agent made and then reset, and
+  `.git/modules` one in a submodule that the agent then took out with `git submodule deinit`.
+  `git status` runs with no filter, so a file under a filter, such as one of Git LFS, and a file
+  that the setup left changed in a submodule, are a change only when they differ from what the
+  setup left. A repository whose record qory could not make, such as one with a `.git` file or one
+  whose record container failed or ran past 5 minutes, and any other folder that the commit leaves
+  out whole for the setup, such as one more than 64 levels deep, stay in the copy whether or not
+  they changed.
 - A commit or a change in a submodule that the clone did not copy, such as one that the agent set up.
 - A repository inside a submodule that the session cannot check: one whose path is a link or goes
   through one, one more than 8 submodules deep, or one with no `.git` whose folder is not empty,

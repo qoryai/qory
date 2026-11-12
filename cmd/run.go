@@ -1080,7 +1080,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					}
 					return nil
 				}
-				if err := copied.recordSetup(recordCtx); err != nil {
+				if err := copied.recordSetup(recordCtx, run, &spec); err != nil {
 					return &runLineError{codeLine(err)}
 				}
 				return nil

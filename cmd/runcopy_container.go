@@ -20,15 +20,16 @@ import (
 	"github.com/qoryai/qory/internal/runcopy"
 )
 
-// gitContainer is the git session of a walled write run as a container that qory starts on the
-// run's engine, with no network and no join of the run's gateway: see [runGitContainer].
+// gitContainer is the git session of a walled write run, or its record session after the setup,
+// as a container that qory starts on the run's engine, with no network and no join of the run's
+// gateway: see [runGitContainer].
 type gitContainer struct {
 	// Docker is the engine's command, the wall's, and Env its environment: this process's,
 	// without the access key's variables and the run key.
 	Docker string
 	Env    []string
-	// Name is the container's name, qory-copy-<run id>, and Label the run's label, which the
-	// wall's removal of what a run left finds.
+	// Name is the container's name, qory-copy-<run id>, or qory-record-<run id> for the record
+	// session, and Label the run's label, which the wall's removal of what a run left finds.
 	Name, Label string
 	// User is the wall's user, Runtime the wall's container runtime, "" for the engine's
 	// default, and Image the run's image.
@@ -36,7 +37,8 @@ type gitContainer struct {
 	// Memory and CPUs are the agent's limits of memory and processors, as the wall passes them
 	// to docker run, "" for none.
 	Memory, CPUs string
-	// Mounts are the binds of the git session, [runcopy.Dir.SessionMounts], each at its path.
+	// Mounts are the binds of the session, [runcopy.Dir.SessionMounts] or
+	// [runcopy.Dir.RecordMounts], each at its path.
 	Mounts []wall.Mount
 	// Session is the program the container runs.
 	Session runcopy.GitSession

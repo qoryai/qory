@@ -27,16 +27,14 @@ import (
 // [LeftOut.Setup]. Call it after the setup and before the agent's session. A trailing
 // / of a path is dropped. It opens each folder on the way from the one above it with
 // O_NOFOLLOW, so it follows no link, and hashes a file's content, or a link's target,
-// in the object format of the bare source of r. For a repository that the setup made, it
-// hashes the list of its HEAD, refs, reflogs, .gitignore files and git status, see
-// [repoRecord.state]. The only git that runs is that git status, through a new git folder with
-// an empty configuration, so no program that the setup wrote runs.
+// in the object format of the bare source of r. A repository that the setup made, a folder with
+// a .git folder, gets [StateRepo], which [Dir.Recorded] replaces. No git opens the copy.
 func (d Dir) SetupStates(ctx context.Context, r Repository, paths []string) ([]SetupPath, error) {
 	rel, err := repositoryRel(r)
 	if err != nil {
 		return nil, err
 	}
-	return d.setupStatesAt(ctx, filepath.Join(d.Work(), filepath.FromSlash(rel)), r.index, paths, &repoRecord{tmp: d.root, icase: r.ignorecase})
+	return d.setupStatesAt(ctx, filepath.Join(d.Work(), filepath.FromSlash(rel)), r.index, paths, true)
 }
 
 // SubmoduleSetup lists each regular file and link in a submodule of the repository r, as
@@ -81,7 +79,7 @@ func (d Dir) SubmoduleSetup(ctx context.Context, r Repository) ([]SetupPath, err
 	if len(paths) == 0 {
 		return nil, nil
 	}
-	return d.setupStatesAt(ctx, top, r.index, paths, nil)
+	return d.setupStatesAt(ctx, top, r.index, paths, false)
 }
 
 // newerFiles adds to paths each regular file and link below the folder dir, at rel, with a time
@@ -515,9 +513,9 @@ func copyFormat(ctx context.Context, source, private, base string) error {
 	return writeNew(filepath.Join(private, "HEAD"), base+"\n")
 }
 
-// setupStatesAt is [Dir.SetupStates] for the repository number index at top. With rec nil, a
+// setupStatesAt is [Dir.SetupStates] for the repository number index at top. With repos unset, a
 // folder is other, also a repository the setup made.
-func (d Dir) setupStatesAt(ctx context.Context, top string, index int, paths []string, rec *repoRecord) ([]SetupPath, error) {
+func (d Dir) setupStatesAt(ctx context.Context, top string, index int, paths []string, repos bool) ([]SetupPath, error) {
 	format, err := objectFormat(ctx, d.source(index))
 	if err != nil {
 		return nil, err
@@ -533,12 +531,7 @@ func (d Dir) setupStatesAt(ctx context.Context, top string, index int, paths []s
 		if !cleanRel(p) {
 			return nil, fmt.Errorf(textSetupPath, shown(p))
 		}
-		var repo func(sub int) (string, error)
-		if rec != nil {
-			at := filepath.Join(top, filepath.FromSlash(p))
-			repo = func(sub int) (string, error) { return rec.state(ctx, sub, format, at) }
-		}
-		state, err := setupState(ctx, root, format, p, repo)
+		state, err := setupState(ctx, root, format, p, repos)
 		if err != nil {
 			return nil, fileErr(filepath.Join(top, filepath.FromSlash(p)), err)
 		}
@@ -548,9 +541,8 @@ func (d Dir) setupStatesAt(ctx context.Context, top string, index int, paths []s
 }
 
 // setupState is what the folder root has at rel, in the form of [SetupPath.State]: other for a
-// file past [maxHashBytes], and for a folder, but a repository that repo, when it is set, reads
-// with no failure.
-func setupState(ctx context.Context, root int, format, rel string, repo func(sub int) (string, error)) (string, error) {
+// file past [maxHashBytes], and for a folder, but [StateRepo] for a repository with repos set.
+func setupState(ctx context.Context, root int, format, rel string, repos bool) (string, error) {
 	dir, name, err := lookup(root, rel)
 	if errors.Is(err, errNoEntry) {
 		return "missing", nil
@@ -593,7 +585,7 @@ func setupState(ctx context.Context, root int, format, rel string, repo func(sub
 		id, err := hashBlob(ctx, format, f, info.Size())
 		return kind + id, err
 	case unix.S_IFDIR:
-		if repo == nil {
+		if !repos {
 			return "other", nil
 		}
 		sub, err := unix.Openat(dir, name, dirFlags, 0)
@@ -605,11 +597,7 @@ func setupState(ctx context.Context, root int, format, rel string, repo func(sub
 		if err := unix.Fstatat(sub, ".git", &git, unix.AT_SYMLINK_NOFOLLOW); err != nil || git.Mode&unix.S_IFMT != unix.S_IFDIR {
 			return "other", nil
 		}
-		id, err := repo(sub)
-		if err != nil {
-			return "other", ctx.Err()
-		}
-		return "repo:" + id, nil
+		return StateRepo, nil
 	}
 	return "other", nil
 }

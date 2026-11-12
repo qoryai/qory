@@ -451,7 +451,8 @@ func (c *runCopy) recordLinks() error {
 // recordSetup records what the setup left changed in each repository of the copy, so the
 // git session leaves it out while it stays as the setup left it. No [integration.Printable]
 // runs on the whole line of its error, so a line of git in it is cut, see [runcopy.ShownError].
-func (c *runCopy) recordSetup(ctx context.Context) error {
+// A repository that the setup made gets its record from [runCopy.recordRepositories].
+func (c *runCopy) recordSetup(ctx context.Context, run openedRun, spec *runSpec) error {
 	for _, r := range c.repos {
 		paths, err := c.dir.SetupChanges(ctx, r)
 		if err != nil {
@@ -469,6 +470,37 @@ func (c *runCopy) recordSetup(ctx context.Context) error {
 		o.Setup, o.Submodules = states, submodules
 		c.out[r.Path] = o
 	}
+	return c.recordRepositories(ctx, run, spec)
+}
+
+// runRecordContainer runs the record container c as [runGitContainer] runs the git container; a
+// test replaces it.
+var runRecordContainer = func(ctx context.Context, c gitContainer) (int, error) { return runGitContainer(ctx, c) }
+
+// recordRepositories records each repository that the setup made in the copy, when there is one:
+// [runcopy.Dir.RecordSession] runs in a container that qory starts as the git session's, see
+// [gitContainerFor], named qory-record-<run id>, with the copy read-only, within
+// [runcopy.SessionBase]. No git on this machine opens the copy. The container's lines go nowhere.
+// When the container does not start, fails or runs past that limit, each such repository is
+// other, so the git session keeps the copy for it with its usual line. A stop or the run's time
+// limit that ends ctx is the error.
+func (c *runCopy) recordRepositories(ctx context.Context, run openedRun, spec *runSpec) error {
+	gs, needed, err := c.dir.RecordSession(ctx, c.repos, c.out)
+	if err != nil {
+		return runcopy.ShownError(err)
+	}
+	if !needed {
+		return nil
+	}
+	limited, cancel := context.WithTimeout(ctx, runcopy.SessionBase)
+	defer cancel()
+	rc := gitContainerFor(run, spec, spec.RunID, gs, c.dir.RecordMounts(), io.Discard)
+	rc.Name = "qory-record-" + spec.RunID
+	code, err := runRecordContainer(limited, rc)
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	c.dir.Recorded(c.repos, c.out, err == nil && code == 0 && limited.Err() == nil)
 	return nil
 }
 
