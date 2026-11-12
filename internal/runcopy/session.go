@@ -45,6 +45,10 @@ type LeftOut struct {
 	// SubmodulesPartial is whether [Dir.SubmoduleSetup] left a folder of a submodule out of
 	// Submodules, so the setup can have written a .gitignore there that Submodules does not list.
 	SubmodulesPartial bool
+	// SetupGit is whether [Dir.SetupChanges] found a git folder in a folder that ignore rules
+	// cover, or a folder there that it could not read. The copy starts at a commit, so the setup
+	// made it, and the change times of its files show what the agent did there.
+	SetupGit bool
 	// SetupEnd is the second of the setup's end, as [Dir.Recorded] read it: a path that an ignore
 	// rule of the setup covers and whose change time is past it keeps the copy. 0 is a run whose
 	// setup can have written no ignore rules, or with no record, and -1 a setup whose end the
@@ -806,10 +810,11 @@ stat_args() {
 }
 # changed writes to the file $1 each path whose change time is past $since, the setup's end, or every
 # path with $since below 0. A write sets the change time from the clock, and touch -d cannot set it.
-# It skips each folder named in $generated and each .git/index that index_clean finds with no
-# work, such as one that git status rewrote, and lists a folder, with a final /, only when find
-# cannot enter it. The list has a path a line, so a name with a line break, which find stats as x,
-# writes n.left.
+# In each folder named in $generated it looks only at git folders, as git_paths finds them, and it
+# skips each .git/index that index_clean finds with no work, such as one that git status rewrote. It
+# lists a folder, with a final /, that find can enter but not read whatever its time, since a path
+# below it is reachable by name, and one that find cannot enter by its time. The list has a path a
+# line, so a name with a line break, which find stats as x, writes n.left.
 changed() {
 	c_out=$1
 	: > "$c_out"
@@ -827,18 +832,46 @@ changed() {
 	if [ $# -gt 0 ]; then
 		shift
 	fi
-	find . \( -path ./.git -o -path ./.qory -o -type d \( "$@" \) \) -prune -o -name "*$nl*" -exec stat "$s_opt" x {} + \
+	# 999999999999999, the largest time that past_since reads, lists a folder that find can enter
+	# but not read.
+	find . \( -path ./.git -o -path ./.qory \) -prune -o -type d \( "$@" \) -prune -print \
+		-o -name "*$nl*" -exec stat "$s_opt" x {} + \
+		-o -type d -perm -100 ! -perm -400 -prune -exec printf '999999999999999 %s/\n' {} + \
 		-o -type d ! -perm -500 -prune -exec stat "$s_opt" "$s_line/" {} + \
 		-o ! -type d -exec stat "$s_opt" "$s_line" {} + > "$c_out-times" 2>/dev/null || : > "$B/$n.left"
+	# The generated folders are the lines that start with ./, which no time does.
+	{ grep '^\./' "$c_out-times" || :; } > "$c_out-generated"
+	: > "$c_out-gits"
+	while IFS= read -r c_g; do
+		find "$c_g" -name "*$nl*" -exec stat "$s_opt" x {} + \
+			-o -type d -perm -100 ! -perm -400 -prune -exec printf '999999999999999 %s/\n' {} + \
+			-o -type d ! -perm -500 -prune -exec stat "$s_opt" "$s_line/" {} + \
+			-o ! -type d \( -path '*/.git' -o -path '*/.git/*' -o -path '*/objects/*' -o -path '*/refs/*' \
+			-o -path '*/reftable/*' -o -name HEAD -o -name packed-refs \) \
+			-exec stat "$s_opt" "$s_line" {} + >> "$c_out-gits" 2>/dev/null || : > "$B/$n.left"
+	done < "$c_out-generated"
 	c_status=0
-	grep -q -x x "$c_out-times" 2>/dev/null || c_status=$?
+	grep -q -x x "$c_out-times" "$c_out-gits" 2>/dev/null || c_status=$?
 	if [ "$c_status" -ne 1 ]; then
 		: > "$B/$n.left"
 	fi
-	if ! sort -n -r "$c_out-times" > "$c_out-sorted" 2>/dev/null; then
+	if ! sort -n -r "$c_out-times" > "$c_out-sorted" 2>/dev/null || ! sort -n -r "$c_out-gits" > "$c_out-gits-sorted" 2>/dev/null; then
 		: > "$B/$n.left"
 		return 0
 	fi
+	past_since "$c_out-gits-sorted" > "$c_out-gits-new"
+	# A folder, with its final /, is one that find did not enter, which can hold a git folder.
+	{
+		past_since "$c_out-sorted"
+		grep '/$' "$c_out-gits-new" || :
+		grep -v '/$' "$c_out-gits-new" | git_paths
+	} > "$c_out"
+}
+# past_since prints the path of each line of the file $1, a change time and a path sorted by time
+# from the latest, whose time is past $since, but a .git/index that index_clean finds with no work
+# and the FETCH_HEAD, ORIG_HEAD and logs of a .git, which a fetch or a reset to HEAD writes. A path
+# that is not there writes n.left.
+past_since() {
 	while IFS= read -r c_line; do
 		c_t=${c_line%% *}
 		case $c_t in
@@ -859,13 +892,38 @@ changed() {
 				continue
 			fi
 			;;
+		*/.git/FETCH_HEAD | */.git/ORIG_HEAD | */.git/logs/*) continue ;;
 		esac
 		if [ -e "$c_p" ] || [ -h "$c_p" ]; then
 			printf '%s\n' "$c_p"
 		else
 			: > "$B/$n.left"
 		fi
-	done < "$c_out-sorted" > "$c_out"
+	done < "$1"
+}
+# git_paths prints each line of its input that is a path in a git folder: a .git file, a path in a
+# .git folder, or a path in a folder with a HEAD file and objects and refs folders, such as a bare
+# repository, but its FETCH_HEAD and ORIG_HEAD. It tests the folder above the path and the folders
+# before the first and last objects, refs and reftable in it.
+git_paths() {
+	while IFS= read -r c_p; do
+		case $c_p in
+		.git | */.git | .git/* | */.git/*)
+			printf '%s\n' "$c_p"
+			continue
+			;;
+		esac
+		for c_r in "${c_p%/*}" "${c_p%%/objects/*}" "${c_p%/objects/*}" "${c_p%%/refs/*}" "${c_p%/refs/*}" \
+			"${c_p%%/reftable/*}" "${c_p%/reftable/*}"; do
+			if [ "$c_r" != "$c_p" ] && [ -f "$c_r/HEAD" ] && [ -d "$c_r/objects" ] && [ -d "$c_r/refs" ]; then
+				case ${c_p#"$c_r"/} in
+				FETCH_HEAD | ORIG_HEAD) ;;
+				*) printf '%s\n' "$c_p" ;;
+				esac
+				break
+			fi
+		done
+	done
 }
 # index_clean reports whether the file $1, a .git/index, holds no work: git reads a copy of it, with
 # the folder above it as git folder, and finds what HEAD there has, as after a git status. A folder
@@ -876,6 +934,39 @@ index_clean() (
 	export GIT_INDEX_FILE="$c_out-index"
 	g --git-dir="${1%/index}" diff-index --cached --quiet --no-ext-diff HEAD -- > /dev/null 2>&1
 )
+# has_refs reports whether the git folder $1 has a ref or a HEAD at a commit, or whether git could
+# not read it.
+has_refs() (
+	unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE
+	h_refs=$(g --git-dir="$1" for-each-ref --count=1 2>/dev/null) || exit 0
+	[ -n "$h_refs" ] || g --git-dir="$1" rev-parse -q --verify HEAD > /dev/null 2>&1
+)
+# bare_made writes n.nested and the line of a repository the run made in $1, the copy or a
+# submodule, for each bare repository below the current folder, one with a HEAD file and objects
+# and refs folders, that ignore rules cover and that has_refs finds with a ref. Call it with $since
+# at 0: the setup then left no git folder that ignore rules cover. A bare repository that they do
+# not cover goes into the commit as other files.
+bare_made() {
+	find . \( -path ./.qory -o -name .git \) -prune -o -type f -name HEAD -exec sh -c '
+		for p do
+			d=${p%/HEAD}
+			if [ -d "$d/objects" ] && [ -d "$d/refs" ]; then
+				printf "%s\0" "${d#./}"
+			fi
+		done' sh {} + > "$G/bare-z" 2>/dev/null || : > "$B/$n.left"
+	if broken "$G/bare-z"; then
+		: > "$B/$n.left"
+	fi
+	tr '\000' '\n' < "$G/bare-z" > "$G/bare"
+	while IFS= read -r b_d; do
+		if below_gitlink "$b_d" || ! g check-ignore -q -- "./$b_d/" 2>/dev/null || ! has_refs "./$b_d"; then
+			continue
+		fi
+		printf 'qory: %s has a git repository at %s that the run made, and the commit leaves it out\n' "$1" "$(printable "$b_d")" >&2
+		: > "$B/$n.nested"
+		printf '%s\n' "$b_d" >> "$G/made"
+	done < "$G/bare"
+}
 # new_ignored writes to $G/new-ignored-z each path of $G/new, as ./path, that the work tree's rules
 # ignore, and to $G/new-person-z those that the person's rules ignore. check-ignore stops at a path in
 # a submodule, so such a path is not asked: the checks of submodules cover it.
@@ -909,8 +1000,9 @@ new_ignored() {
 }
 # setup_ignored writes n.left, and with $since past 0 each path after $1 to n.ignored, for each path
 # of $G/new-ignored-z that the person's rules leave and either the rules after setup_rules ignore or
-# a repository of $setup_repos holds: check-ignore read that repository's rules. When person_ignored
-# fails on the rules after setup_rules, it writes n.left alone.
+# a repository of $setup_repos holds: check-ignore read that repository's rules. So does each path
+# in a git folder, and each folder that changed lists as closed, that the person's rules ignore.
+# When person_ignored fails on the rules after setup_rules, it writes n.left alone.
 setup_ignored() {
 	if [ ! -s "$G/new-ignored-z" ]; then
 		return 0
@@ -938,6 +1030,12 @@ setup_ignored() {
 		done
 	done < "$G/new-ignored" >> "$G/new-setup"
 	lacking "$G/new-setup" "$G/new-person" > "$G/new-left"
+	# The copy starts at a commit, so a git folder under the person's rules is the setup's or the run's.
+	# A folder there that the session cannot enter can hide one.
+	{
+		git_paths < "$G/new-person"
+		grep '/$' "$G/new-person" || :
+	} >> "$G/new-left"
 	if [ ! -s "$G/new-left" ]; then
 		return 0
 	fi
@@ -1398,6 +1496,18 @@ submodule_bundle() (
 		: > "$B/$n.nested"
 		printf '%s\n' "$p" >> "$G/made"
 	done < "$G/all"
+	# With no setup's end, a repository with a ref that ignore rules cover is the run's, as in the top
+	# repository.
+	if [ "$since" -eq 0 ]; then
+		while IFS= read -r p; do
+			if g check-ignore -q -- "./$p/" 2>/dev/null && has_refs "./$p/.git"; then
+				printf 'qory: %s has a git repository at %s that the run made, and the commit leaves it out\n' "$shows" "$(printable "$p")" >&2
+				: > "$B/$n.nested"
+				printf '%s\n' "$p" >> "$G/made"
+			fi
+		done < "$G/all"
+		bare_made "$shows"
+	fi
 	: > "$G/nested"
 	while IFS= read -r p; do
 		case $p in
@@ -1414,6 +1524,11 @@ submodule_bundle() (
 			*"$nl$up$nl"*) continue 2 ;;
 			esac
 		done
+		# git stops at a pathspec inside a submodule of the submodule: leftover writes n.left for a
+		# folder there with no .git that is not empty.
+		if below_gitlink "$p"; then
+			continue
+		fi
 		printf '%s\n' "$p" >> "$G/nested"
 		printf ':(exclude,top,literal)%s\0' "$p" >> "$G/add"
 	done < "$PG/folders"
@@ -1785,7 +1900,9 @@ while [ "$n" -lt "$count" ]; do
 				*) break ;;
 				esac
 			done
-			if kept_out "$d"; then
+			# With no setup's end, the setup left no git folder that ignore rules cover, so such a
+			# repository with a ref is the run's work.
+			if kept_out "$d" && { [ "$since" -ne 0 ] || ! has_refs "./$d/.git"; }; then
 				continue
 			fi
 			printf 'qory: %s has a git repository at %s that the run made, and the commit leaves it out\n' "$shown" "$shows" >&2
@@ -1794,6 +1911,9 @@ while [ "$n" -lt "$count" ]; do
 			;;
 		esac
 	done < "$G/folders"
+	if [ "$since" -eq 0 ]; then
+		bare_made "$shown"
+	fi
 	large "$top" "$P" "$G/out-paths" ./.qory ':(exclude,top,literal,icase).qory' "$@"
 	add "$P" "$shown"
 	# What stays behind is what the add left: a file that ls-files still lists, or a folder this

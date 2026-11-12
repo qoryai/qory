@@ -455,7 +455,7 @@ func (c *runCopy) recordLinks() error {
 // A repository that the setup made gets its record from [runCopy.recordRepositories].
 func (c *runCopy) recordSetup(ctx context.Context, run openedRun, spec *runSpec) error {
 	for _, r := range c.repos {
-		paths, err := c.dir.SetupChanges(ctx, r)
+		paths, git, err := c.dir.SetupChanges(ctx, r)
 		if err != nil {
 			return runcopy.ShownError(err)
 		}
@@ -468,7 +468,7 @@ func (c *runCopy) recordSetup(ctx context.Context, run openedRun, spec *runSpec)
 			return runcopy.ShownError(err)
 		}
 		o := c.out[r.Path]
-		o.Setup, o.Submodules, o.SubmodulesPartial = states, submodules, partial
+		o.Setup, o.Submodules, o.SubmodulesPartial, o.SetupGit = states, submodules, partial, git
 		c.out[r.Path] = o
 	}
 	return c.recordRepositories(ctx, run, spec)
