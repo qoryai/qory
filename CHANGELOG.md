@@ -386,8 +386,8 @@ release may change what an existing document does, and states it under Upgrading
   `__pycache__`, `target`, `build`, `dist`, `.gradle` or `.next`, the `.git/index` of a repository
   that has what its `HEAD` has, and a file that the agent deleted, keep nothing behind, but a
   commit, a new ref or object, or a new repository in such a folder keeps the copy, and so does
-  one in a folder that your rules ignore, also a folder there that the agent closed. A fetch
-  or a reset to `HEAD` that writes only
+  one in a folder that your rules ignore, also a folder there that the agent closed or that
+  the session can enter but not read. A fetch or a reset to `HEAD` that writes only
   `FETCH_HEAD`, `ORIG_HEAD` and the reflogs keeps nothing behind. A git folder that the agent
   builds by hand without a `HEAD` file and `objects` and `refs` folders is not checked in a folder
   that ignore rules cover. A file
