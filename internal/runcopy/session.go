@@ -42,6 +42,10 @@ type LeftOut struct {
 	// Submodules are the files the setup left in a submodule, as [Dir.SubmoduleSetup] lists them.
 	// A change in a submodule that is one of these keeps nothing behind.
 	Submodules []SetupPath
+	// SetupEnd is the second of the setup's end, as [Dir.Recorded] read it: a path that an ignore
+	// rule of the setup covers and whose change time is past it keeps the copy. 0 is a run with no
+	// setup to record, and -1 a setup whose end the record session could not read.
+	SetupEnd int64
 }
 
 // SetupPath is a path the setup changed, relative to the top of its repository with
@@ -116,7 +120,9 @@ type GitSession struct {
 // unless the person's rules cover it too: those rules and the .gitignore files of the base commit,
 // with each .gitignore that the setup changed as the setup left it. A repository the setup made
 // stays out, and stays behind when what repo_state reads there differs from its [SetupPath.State],
-// which [Dir.RecordSession] read after the setup.
+// which [Dir.RecordSession] read after the setup. A path that the setup's rules ignore, also those
+// of a repository the setup made, and whose change time is past [LeftOut.SetupEnd], stays behind
+// too, and n.ignored lists it, unless it is in a folder of [generatedFolders].
 //
 // The add leaves out each regular file of more than [MaxFile] bytes that it would add, in the
 // repository and in each submodule, and lists its path, relative to the copy, in n.large, which
@@ -233,7 +239,8 @@ func sessionList(r Repository, o LeftOut) (string, error) {
 	}
 	setup := slices.Concat(o.Setup, r.filtered)
 	var b strings.Builder
-	fmt.Fprintf(&b, "rel=%s base=%s icase=%t links=%d setup=%d\nset --", shellQuote(rel), r.Base, r.ignorecase, len(o.Links), len(setup))
+	fmt.Fprintf(&b, "rel=%s base=%s icase=%t links=%d setup=%d since=%d generated=%s\nset --",
+		shellQuote(rel), r.Base, r.ignorecase, len(o.Links), len(setup), max(o.SetupEnd, -1), shellQuote(generatedNames()))
 	for _, p := range o.Links {
 		if !cleanRel(p) {
 			return "", fmt.Errorf(textLeftOut, shown(p))
@@ -288,8 +295,9 @@ const SessionScriptName = "qory-git-session.sh"
 // [sessionList], reads refs-n, see [Repository], sub-n, see [submoduleList], subs-n, see
 // [clonedList], and subrefs-n-k for its submodule number k, and uses exclude-n when there is
 // one. It writes n.bundle, or n.none when nothing is past the base commit, and n-k.bundle or
-// n-k.none for each submodule in subs-n, n.large for files it leaves out by their size, and n.known
-// or n-k.known for the run's refs at a commit the person has. Its
+// n-k.none for each submodule in subs-n, n.large for files it leaves out by their size, n.ignored for
+// changes under the setup's ignore rules, and n.known or n-k.known for the run's refs at a commit the
+// person has. Its
 // find takes a size in bytes, with c, which busybox and GNU find both read: [MaxFile] bytes. It needs git 2.25 or later, for --pathspec-from-file.
 const sessionScript = scriptFunctions + sessionMain
 
@@ -730,6 +738,141 @@ setup_rules() {
 		fi
 	done < "$1"
 }
+# stat_args sets s_opt, s_time and s_line to the arguments of stat that print a change time in seconds,
+# alone or before a path: busybox and GNU stat take -c, and BSD stat -f. It returns 1 with neither.
+stat_args() {
+	if stat -c %Z . > /dev/null 2>&1; then
+		s_opt=-c s_time=%Z s_line='%Z %n'
+	elif stat -f %c . > /dev/null 2>&1; then
+		s_opt=-f s_time=%c s_line='%c %N'
+	else
+		return 1
+	fi
+}
+# changed writes to $G/new each path whose change time is past $since, the setup's end, or every
+# path with $since below 0. A write sets the change time from the clock, and touch -d cannot set it.
+# It skips each folder named in $generated, and lists a folder only when find cannot enter it.
+changed() {
+	: > "$G/new"
+	if [ "$since" -eq 0 ]; then
+		return 0
+	fi
+	set --
+	for c_n in $generated; do
+		set -- "$@" -o -name "$c_n"
+	done
+	if [ $# -gt 0 ]; then
+		shift
+	fi
+	if [ "$since" -lt 0 ]; then
+		find . \( -path ./.git -o -path ./.qory -o -type d \( "$@" \) \) -prune -o -type d ! -perm -500 -prune -print \
+			-o ! -type d -print > "$G/new-found" 2>/dev/null || : > "$B/$n.left"
+		while IFS= read -r c_p; do
+			printf '%s\n' "${c_p#./}"
+		done < "$G/new-found" > "$G/new"
+		return 0
+	fi
+	if ! stat_args; then
+		: > "$B/$n.left"
+		return 0
+	fi
+	find . \( -path ./.git -o -path ./.qory -o -type d \( "$@" \) \) -prune -o -type d ! -perm -500 -prune -exec stat "$s_opt" "$s_line" {} + \
+		-o ! -type d -exec stat "$s_opt" "$s_line" {} + > "$G/times" 2>/dev/null || : > "$B/$n.left"
+	if ! sort -n -r "$G/times" > "$G/times-sorted" 2>/dev/null; then
+		: > "$B/$n.left"
+		return 0
+	fi
+	# A name with a line break adds lines that are no time and path. One past $since whose path is
+	# not there writes n.left, so such a name can add a line but never hide one.
+	while IFS= read -r c_line; do
+		c_t=${c_line%% *}
+		case $c_t in
+		'' | *[!0-9]*) continue ;;
+		esac
+		if [ ${#c_t} -gt 15 ]; then
+			: > "$B/$n.left"
+			continue
+		fi
+		if [ "$c_t" -le "$since" ]; then
+			break
+		fi
+		c_p=${c_line#* }
+		c_p=${c_p#./}
+		if [ -e "$c_p" ] || [ -h "$c_p" ]; then
+			printf '%s\n' "$c_p"
+		else
+			: > "$B/$n.left"
+		fi
+	done < "$G/times-sorted" > "$G/new"
+}
+# new_ignored writes to $G/new-ignored-z each path of $G/new, as ./path, that the work tree's rules
+# ignore, and to $G/new-person-z those that the person's rules ignore. check-ignore stops at a path in
+# a submodule, so such a path is not asked: the checks of submodules cover it.
+new_ignored() {
+	: > "$G/new-ignored-z"
+	: > "$G/new-person-z"
+	if [ ! -s "$G/new" ]; then
+		return 0
+	fi
+	if ! g -c core.quotePath=false ls-files -s > "$G/new-index" 2>/dev/null; then
+		: > "$B/$n.left"
+		return 0
+	fi
+	while IFS= read -r line; do
+		case $line in
+		"160000 "*) printf '%s\n' "${line#*"$tab"}" ;;
+		esac
+	done < "$G/new-index" > "$G/new-links"
+	outside "$G/new" "$G/new-links" > "$G/new-asked"
+	while IFS= read -r p; do
+		printf './%s\0' "$p"
+	done < "$G/new-asked" > "$G/new-asked-z"
+	n_status=0
+	g check-ignore -z --stdin < "$G/new-asked-z" > "$G/new-ignored-z" 2>/dev/null || n_status=$?
+	if [ "$n_status" -gt 1 ]; then
+		: > "$G/new-ignored-z"
+		: > "$B/$n.left"
+		return 0
+	fi
+	person_ignored "$G/new-ignored-z" "$G/new-person-z"
+}
+# setup_ignored writes n.left, and with $since past 0 each path after $1 to n.ignored, for each path
+# of $G/new-ignored-z that the person's rules leave and either the rules after setup_rules ignore or
+# a repository of $setup_repos holds: check-ignore read that repository's rules.
+setup_ignored() {
+	if [ ! -s "$G/new-ignored-z" ]; then
+		return 0
+	fi
+	person_ignored "$G/new-ignored-z" "$G/new-setup-z"
+	tr '\000' '\n' < "$G/new-ignored-z" > "$G/new-ignored"
+	tr '\000' '\n' < "$G/new-setup-z" > "$G/new-setup"
+	tr '\000' '\n' < "$G/new-person-z" > "$G/new-person"
+	while IFS= read -r p; do
+		up=${p#./}
+		while :; do
+			case $setup_repos in
+			*"$nl$up$nl"*)
+				printf '%s\n' "$p"
+				break
+				;;
+			esac
+			case $up in
+			*/*) up=${up%/*} ;;
+			*) break ;;
+			esac
+		done
+	done < "$G/new-ignored" >> "$G/new-setup"
+	lacking "$G/new-setup" "$G/new-person" > "$G/new-left"
+	if [ ! -s "$G/new-left" ]; then
+		return 0
+	fi
+	: > "$B/$n.left"
+	if [ "$since" -gt 0 ]; then
+		while IFS= read -r p; do
+			printf '%s%s\n' "$1" "${p#./}"
+		done < "$G/new-left" >> "$B/$n.ignored"
+	fi
+}
 # repo_git adds to the files $r_f and $r_l the regular files and the links of HEAD, packed-refs,
 # refs, reftable and logs of the git folder $1, relative to the current folder, for repo_state.
 repo_git() {
@@ -1135,6 +1278,12 @@ submodule_bundle() (
 	fi
 	g read-tree "$from"
 	rules
+	while IFS= read -r p; do
+		case $p in
+		"$d"/*) printf '%s\n' "${p#"$d"/}" ;;
+		esac
+	done < "$PG/new" > "$G/new"
+	new_ignored
 	printf ':/\0' > "$G/add"
 	# A folder with a .git below another one stays out with it: git stops at a pathspec inside a
 	# submodule of the submodule.
@@ -1194,6 +1343,8 @@ submodule_bundle() (
 		printf ':(exclude,top,literal)%s\0' "$p" >> "$G/add"
 	done < "$G/setup"
 	setup_rules "$G/setup-paths"
+	setup_repos=$nl
+	setup_ignored "$top$d/"
 	tr '\000' '\n' < "$PG/status" > "$G/changes"
 	while IFS= read -r line; do
 		p=${line#???}
@@ -1313,6 +1464,8 @@ while [ "$n" -lt "$count" ]; do
 	if ! command -v find > /dev/null 2>&1; then
 		: > "$B/$n.left"
 	fi
+	# Before the session changes a file, such as with chmod below.
+	changed
 	readable
 	# Each path that the sparse checkout took out, and that the working tree does not have, stays out.
 	# A path that the working tree has goes into the commit as any other, such as a file the agent
@@ -1461,7 +1614,9 @@ while [ "$n" -lt "$count" ]; do
 	done
 	exec 3<&-
 	rules
+	new_ignored
 	setup_rules "$G/setup-kept"
+	setup_ignored "$top"
 	# The positional parameters are now what stays out besides .qory and $G/out-paths, for ls-files.
 	while IFS= read -r d; do
 		set -- "$@" ":(exclude,top,literal)$d"

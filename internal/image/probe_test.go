@@ -57,6 +57,7 @@ func agentFiles() map[string]string {
 		"usr/bin/mv":                        "",
 		"usr/bin/readlink":                  "",
 		"usr/bin/sort":                      "",
+		"usr/bin/stat":                      "",
 		"usr/bin/tr":                        "",
 		"usr/local/bin/gh":                  "",
 		"usr/share/doc/git/copyright":       "",

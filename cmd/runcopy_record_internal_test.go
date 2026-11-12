@@ -121,8 +121,8 @@ func TestTheTimeLimitOfTheRecordGrowsWithTheCopy(t *testing.T) {
 }
 
 // TestARecordContainerThatFailsMakesTheRepositoryOther is a record container that does not start,
-// exits with an error or runs past its limit: the repository that the setup made is other, so the
-// git session keeps the copy for it, and the record returns no error. A stop that ends the run's
+// exits with an error or runs past its limit: the repository that the setup made is other and the
+// setup's end unknown, so the git session keeps the copy for them, and the record returns no error. A stop that ends the run's
 // context is the error.
 func TestARecordContainerThatFailsMakesTheRepositoryOther(t *testing.T) {
 	for _, f := range []struct {
@@ -139,8 +139,11 @@ func TestARecordContainerThatFailsMakesTheRepositoryOther(t *testing.T) {
 			before := runRecordContainer
 			t.Cleanup(func() { runRecordContainer = before })
 			runRecordContainer = func(ctx context.Context, rc gitContainer) (int, error) {
-				// A state the session wrote before it failed is not used.
+				// A state or an end the session wrote before it failed is not used.
 				if err := os.WriteFile(filepath.Join(c.dir.SetupRecord(), "0-0.state"), []byte("repo:"+strings.Repeat("b", 40)+"\n"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(c.dir.SetupRecord(), "setup-end.time"), []byte("1794469868\n"), 0o600); err != nil {
 					t.Fatal(err)
 				}
 				return f.end(ctx)
@@ -148,8 +151,8 @@ func TestARecordContainerThatFailsMakesTheRepositoryOther(t *testing.T) {
 			if err := c.recordRepositories(t.Context(), run, spec); err != nil {
 				t.Fatal(err)
 			}
-			if setup := c.out[""].Setup; setup[1].State != "other" {
-				t.Errorf("the setup's paths are %v", setup)
+			if setup := c.out[""].Setup; setup[1].State != "other" || c.out[""].SetupEnd != -1 {
+				t.Errorf("the setup's paths are %v, its end %d", setup, c.out[""].SetupEnd)
 			}
 		})
 	}
@@ -167,19 +170,45 @@ func TestARecordContainerThatFailsMakesTheRepositoryOther(t *testing.T) {
 	}
 }
 
-// TestASetupWithNoRepositoryStartsNoRecordContainer is a setup that made no repository: no record
-// container starts.
-func TestASetupWithNoRepositoryStartsNoRecordContainer(t *testing.T) {
+// TestASetupWithNoRepositoryStartsARecordContainer is a setup that made no repository: the record
+// container starts all the same, and the second it writes to setup-end.time is the setup's end of
+// each repository.
+func TestASetupWithNoRepositoryStartsARecordContainer(t *testing.T) {
 	c := recordCopy(t)
 	c.out[""] = runcopy.LeftOut{Setup: []runcopy.SetupPath{{Path: "tool", State: "other"}}}
 	run, spec := recordSpec()
 	before := runRecordContainer
 	t.Cleanup(func() { runRecordContainer = before })
 	runRecordContainer = func(context.Context, gitContainer) (int, error) {
-		t.Error("a record container started")
-		return 0, nil
+		return 0, os.WriteFile(filepath.Join(c.dir.SetupRecord(), "setup-end.time"), []byte("1794469868\n"), 0o600)
 	}
 	if err := c.recordRepositories(t.Context(), run, spec); err != nil {
 		t.Fatal(err)
+	}
+	if got := c.out[""].SetupEnd; got != 1794469868 {
+		t.Errorf("the setup's end is %d", got)
+	}
+}
+
+// TestASetupEndThatIsNoSecondIsUnknown is a record container that wrote no second to
+// setup-end.time: the setup's end is -1, so the git session keeps the copy for a path under the
+// setup's ignore rules.
+func TestASetupEndThatIsNoSecondIsUnknown(t *testing.T) {
+	for _, text := range []string{"", "1794469868", "0\n", "-5\n", "12345678901234567\n", "1794469868\nx\n", "17944a9868\n"} {
+		t.Run(strconv.Quote(text), func(t *testing.T) {
+			c := recordCopy(t)
+			run, spec := recordSpec()
+			before := runRecordContainer
+			t.Cleanup(func() { runRecordContainer = before })
+			runRecordContainer = func(context.Context, gitContainer) (int, error) {
+				return 0, os.WriteFile(filepath.Join(c.dir.SetupRecord(), "setup-end.time"), []byte(text), 0o600)
+			}
+			if err := c.recordRepositories(t.Context(), run, spec); err != nil {
+				t.Fatal(err)
+			}
+			if got := c.out[""].SetupEnd; got != -1 {
+				t.Errorf("the setup's end is %d", got)
+			}
+		})
 	}
 }

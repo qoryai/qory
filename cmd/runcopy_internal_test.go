@@ -272,8 +272,9 @@ func TestNowhereKeepsTheRulesOfACopyStep(t *testing.T) {
 }
 
 // TestEachLeftoverHasItsLine is a git session that recorded a repository the run made, other work
-// git could not add, or a large file with a control character, and nothing past the base commit:
-// each prints its line, none prints that no action is needed, and the copy stays.
+// git could not add, a large file with a control character, or changes under the setup's ignore
+// rules, and nothing past the base commit: each prints its line, none prints that no action is
+// needed, and the copy stays.
 func TestEachLeftoverHasItsLine(t *testing.T) {
 	for name, c := range map[string]struct {
 		files map[string]string
@@ -285,6 +286,10 @@ func TestEachLeftoverHasItsLine(t *testing.T) {
 			[]string{"left out of the run's commit, as each has more than 100 MiB: data/a?b.bin. They stay in the run's copy."}},
 		"all": {map[string]string{"0.nested": "", "0.left": "", "0.large": "x.bin\n"},
 			[]string{textCopyBehind, textCopyNotAdded, "more than 100 MiB: x.bin."}},
+		"ignored": {map[string]string{"0.left": "", "0.ignored": "cache/a\x1bb\n.cache/x\n"},
+			[]string{textCopyNotAdded, textCopyNotAdded + " Changed under the setup's ignore rules: cache/a?b, .cache/x."}},
+		"ignored alone": {map[string]string{"0.ignored": "cache/a\n"},
+			[]string{textCopyNotAdded, textCopyNotAdded + " Changed under the setup's ignore rules: cache/a."}},
 	} {
 		t.Run(strings.ReplaceAll(name, " ", "-"), func(t *testing.T) {
 			for _, v := range []string{"HOME", "XDG_CACHE_HOME", "XDG_STATE_HOME", "XDG_CONFIG_HOME"} {
@@ -339,7 +344,7 @@ func TestALongListShowsItsFirstFiftyEntries(t *testing.T) {
 		files = append(files, "f"+strconv.Itoa(i))
 	}
 	want := strings.Join(files[:50], ", ") + ", and 10 more"
-	if got := largeFiles(files); got != want {
+	if got := sessionPaths(files); got != want {
 		t.Errorf("the large files are listed as %q, want %q", got, want)
 	}
 	var lines []string
@@ -359,7 +364,7 @@ func TestALongListShowsItsFirstFiftyEntries(t *testing.T) {
 	if wantLine := fmt.Sprintf(textCopyGenerated, runcopy.MaxGeneratedFiles, shownBytes(runcopy.MaxGeneratedBytes), want); len(lines) != 1 || lines[0] != wantLine {
 		t.Errorf("the generated-folder lines are %q, want %q", lines, wantLine)
 	}
-	if got := largeFiles(files[:50]); got != strings.Join(files[:50], ", ") {
+	if got := sessionPaths(files[:50]); got != strings.Join(files[:50], ", ") {
 		t.Errorf("50 large files are listed as %q", got)
 	}
 }

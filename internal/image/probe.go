@@ -257,6 +257,7 @@ var sessionTools = []struct{ name, why string }{
 	{"readlink", "to read a link the setup left"},
 	{"sh", "to run its script"},
 	{"sort", "to compare the run's refs and commits with what the bundle has"},
+	{"stat", "to find the files that the agent changed under the setup's ignore rules"},
 	{"tr", "to print a folder's name with no control character"},
 }
 
