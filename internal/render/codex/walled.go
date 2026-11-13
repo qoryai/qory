@@ -246,7 +246,9 @@ func checkoutSkillPaths(checkout string, projects []string) []string {
 // nearest folder at or above checkout with a .git folder that has HEAD or a .git file,
 // and, for a .git file of a worktree, the main repository's folder, the folder of the
 // common git folder that the worktree's gitdir file names (codex-rs/git-utils/src/
-// trust.rs, resolve_root_git_project_for_trust). Codex looks up the trust of the working
+// trust.rs, resolve_root_git_project_for_trust). As in Codex, a .git link to a folder
+// counts as the folder, and a .git link to anything else, or one that leads nowhere,
+// gives no root. Codex looks up the trust of the working
 // folder, then of that root (codex-rs/config/src/config_toml.rs, get_active_project);
 // with neither, it trusts the root for the process. Each root is put under each project
 // by its path relative to checkout, so a root above checkout is above the project too.
@@ -254,19 +256,22 @@ func gitRootsInWall(checkout string, projects []string) []string {
 	var roots []string
 	for dir := checkout; ; {
 		dotGit := filepath.Join(dir, ".git")
-		info, err := os.Lstat(dotGit)
-		if err == nil && info.IsDir() {
+		if link, err := os.Lstat(dotGit); err == nil {
+			info, err := os.Stat(dotGit)
+			if err != nil || !info.IsDir() && link.Mode()&fs.ModeSymlink != 0 {
+				break
+			}
+			if !info.IsDir() {
+				roots = append(roots, dir)
+				if main := mainRepository(dotGit); main != "" {
+					roots = append(roots, main)
+				}
+				break
+			}
 			if _, err := os.Stat(filepath.Join(dotGit, "HEAD")); err == nil {
 				roots = append(roots, dir)
 				break
 			}
-		}
-		if err == nil && info.Mode().IsRegular() {
-			roots = append(roots, dir)
-			if main := mainRepository(dotGit); main != "" {
-				roots = append(roots, main)
-			}
-			break
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {

@@ -477,14 +477,14 @@ func TestWriteWalledHomeWritesThroughNoLink(t *testing.T) {
 	}
 }
 
-// TestWriteWalledHomeLeavesNoCwdTrusted is a working folder under each path where the wall
-// shows the checkout, for a checkout that is a repository's root, one that is a folder
-// inside a repository, and one that is a worktree. Codex looks up the trust of the
-// working folder, then of its git root, and trusts the root for the process when neither
-// has an entry; every lookup here finds untrusted. The run's copy is at the same path in
-// the wall as on this machine, so its git root is too; /workspace shows the checkout
-// alone, so a cwd under it has /workspace as its git root only when the checkout is the
-// repository's root.
+// TestWriteWalledHomeLeavesNoCwdTrusted is a working folder under each path where the
+// wall shows the checkout, for a checkout that is a repository's root, one that is a
+// folder inside a repository, one that is a worktree, and one whose .git is a link to a
+// git folder, which Codex follows. Codex looks up the trust of the working folder, then
+// of its git root, and trusts the root for the process when neither has an entry; every
+// lookup here finds untrusted. The run's copy is at the same path in the wall as on this
+// machine, so its git root is too; /workspace shows the checkout alone, so a cwd under it
+// has /workspace as its git root only when the checkout is the repository's root.
 func TestWriteWalledHomeLeavesNoCwdTrusted(t *testing.T) {
 	mkdir := func(p string) {
 		t.Helper()
@@ -507,6 +507,12 @@ func TestWriteWalledHomeLeavesNoCwdTrusted(t *testing.T) {
 	writeFile(filepath.Join(repo, ".git/worktrees/work/HEAD"), "ref: refs/heads/w\n")
 	writeFile(filepath.Join(worktree, ".git"), "gitdir: "+filepath.Join(repo, ".git/worktrees/work")+"\n")
 	mkdir(filepath.Join(worktree, "sub"))
+	linked := filepath.Join(base, "linked")
+	writeFile(filepath.Join(base, "gitdata/HEAD"), "ref: refs/heads/main\n")
+	mkdir(filepath.Join(linked, "sub"))
+	if err := os.Symlink(filepath.Join(base, "gitdata"), filepath.Join(linked, ".git")); err != nil {
+		t.Fatal(err)
+	}
 	for _, c := range []struct {
 		name, checkout string
 		// lookups are cwd and git root pairs as Codex sees them in the wall.
@@ -524,6 +530,10 @@ func TestWriteWalledHomeLeavesNoCwdTrusted(t *testing.T) {
 		{"a worktree", worktree, [][2]string{
 			{filepath.Join(worktree, "sub"), repo},
 			{filepath.Join(worktree, "sub"), worktree},
+			{"/workspace/sub", "/workspace"},
+		}},
+		{"a .git link to a folder", linked, [][2]string{
+			{filepath.Join(linked, "sub"), linked},
 			{"/workspace/sub", "/workspace"},
 		}},
 	} {
