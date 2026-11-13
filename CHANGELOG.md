@@ -308,8 +308,11 @@ release may change what an existing document does, and states it under Upgrading
   on the same directory within 120 seconds continues them, and the agent sessions behind
   it go on. Before, a run open at a gateway that stopped was over. The directory is
   `qory/gateway` in qory's state directory; keep it on a volume that outlives the
-  gateway's container. During a deploy, do not run `qory run resend` on a run record in
-  the gateway's directory: it ends the run with `gateway_lost`.
+  gateway's container. The gateway that starts again also needs the same instance id,
+  so keep `instance-id` beside `forager.yaml` and the machine's identity:
+  `/etc/machine-id` on Linux, the hardware UUID on macOS, else the host name. qory
+  replaces an `instance-id` made under another identity, and a gateway with a new
+  instance id cannot attach the runs again, so they end.
 - A run may have several model keys of one provider: when the provider returns `429` for a request at a key's limit, the
   gateway's proxy sends the request again with the next key. When every key is at its limit, the
   session stops the runtime and ends `paused` with the reason `model_key_limit`. A
@@ -514,7 +517,7 @@ release may change what an existing document does, and states it under Upgrading
   so a value from the server's run configuration, `--env`, `wall.env`,
   `env` in `qory.yaml`, the `env` of `harness.launch.claude`, a settings
   fragment, a module's export or the shell `qory run` starts in is not
-  used. Claude Code tries a failed API request up to 15 times, up from 10,
+  used. Claude Code retries a failed API request up to 15 times, up from 10,
   so a run goes on through a longer outage of its proxy, such as a restart
   of a separate gateway.
 - In a run from a run code, `events.jsonl` in the run's record has
