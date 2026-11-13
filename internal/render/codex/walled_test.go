@@ -346,7 +346,8 @@ func walledState(t *testing.T, config string, projects []string) map[string]stri
 // and a copy of the compose's skills beside an empty rules and agents, in a fixed order,
 // each at its path under the home in the wall, and no auth.json. Every source is in the
 // folder WriteWalledHome writes, none in the composed home. The copy keeps a script's
-// executable bit, and a relative link of the skills leads where it led.
+// executable bit, and a relative link of the skills is a regular file with the text of
+// the file it led to.
 func TestWriteWalledHome(t *testing.T) {
 	dir, files := t.TempDir(), filepath.Join(t.TempDir(), "fixed")
 	write := func(name, content string) {
@@ -405,8 +406,8 @@ func TestWriteWalledHome(t *testing.T) {
 	if info, err := os.Stat(filepath.Join(files, "skills/review/run.sh")); err != nil || info.Mode().Perm()&0o111 == 0 {
 		t.Errorf("skills/review/run.sh: %v, want an executable file", err)
 	}
-	if target, err := os.Readlink(filepath.Join(files, "skills", "linked.md")); err != nil || target != filepath.Join(dir, "skills", "review", "SKILL.md") {
-		t.Errorf("skills/linked.md links to %q (%v), want the composed home's SKILL.md", target, err)
+	if info, err := os.Lstat(filepath.Join(files, "skills", "linked.md")); err != nil || !info.Mode().IsRegular() || read("skills/linked.md") != "skill\n" {
+		t.Errorf("skills/linked.md: %v, want a regular file with the text of the SKILL.md it linked to", err)
 	}
 	for _, name := range []string{"rules", "agents"} {
 		if entries, err := os.ReadDir(filepath.Join(files, name)); err != nil || len(entries) > 0 {
@@ -550,5 +551,41 @@ func TestWriteWalledHomeLeavesNoCwdTrusted(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestWriteWalledHomeCopiesALinkedSkillFile is a composed home whose skills/review is a
+// folder with SKILL.md a link to a module's file, as qory places a skill: the walled
+// home has a regular SKILL.md with the module's text when the module's folder is a link
+// root, and WriteWalledHome fails, naming the link, when it is not.
+func TestWriteWalledHomeCopiesALinkedSkillFile(t *testing.T) {
+	dir, module := t.TempDir(), t.TempDir()
+	src := filepath.Join(module, "skills", "review", "SKILL.md")
+	if err := os.MkdirAll(filepath.Dir(src), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(src, []byte("module text\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "skills", "review"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(src, filepath.Join(dir, "skills", "review", "SKILL.md")); err != nil {
+		t.Fatal(err)
+	}
+	files := filepath.Join(t.TempDir(), "fixed")
+	if _, err := codex.WriteWalledHome(dir, files, codex.WalledRun{LinkRoots: []string{module}}); err != nil {
+		t.Fatal(err)
+	}
+	p := filepath.Join(files, "skills", "review", "SKILL.md")
+	if info, err := os.Lstat(p); err != nil || !info.Mode().IsRegular() {
+		t.Fatalf("%s: %v, want a regular file", p, err)
+	}
+	if b, err := os.ReadFile(p); err != nil || string(b) != "module text\n" {
+		t.Errorf("SKILL.md %q %v, want the module's text", b, err)
+	}
+	_, err := codex.WriteWalledHome(dir, filepath.Join(t.TempDir(), "fixed"), codex.WalledRun{})
+	if err == nil || !strings.Contains(err.Error(), "the composed home's skills/review/SKILL.md links to ") {
+		t.Errorf("WriteWalledHome with no link root: %v, want the refusal of the link", err)
 	}
 }

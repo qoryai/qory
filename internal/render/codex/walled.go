@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path"
@@ -74,6 +75,11 @@ type WalledRun struct {
 	// ReadRules are the harness's Codex execpolicy rules for a read run,
 	// compose.Result.CodexReadRules; nil when it has none.
 	ReadRules []byte
+	// LinkRoots are the folders, written by qory, that a link in the composed home may
+	// lead into for the copy of its skills, rules and agents: the composed home and
+	// qory's module cache, the folder of source.CacheDir. A link to anywhere else fails
+	// [WriteWalledHome].
+	LinkRoots []string
 }
 
 // ReadRulesName is the file in the rules folder of a walled read run's home that
@@ -82,18 +88,19 @@ const ReadRulesName = "read-access.rules"
 
 // WriteWalledHome makes the folder files, which must not exist, on this machine apart
 // from the writable home and from every other mount of the run, such as
-// <user cache>/qory/runs/<run id>/codex-fixed, and writes into it every part of a walled run's Codex home
-// that the run binds read-only: the config.toml from dir, the runtime's directory of the
-// composed home, with [WalledConfig]'s additions for run.Projects and the git roots of
-// run.Checkouts, see [gitRootsInWall], and with every skill
-// that is not in run.Skills disabled, a hooks.json with no hook, an empty .env,
-// environments.toml and AGENTS.override.md, dir's AGENTS.md, or an empty one, and a copy
-// of each folder of [boundDirs] that dir has, or an empty folder. For a run whose access
-// is read, rules/ also contains run.ReadRules as [ReadRulesName], in place of any file of
-// that name in dir's rules; for any other access, rules/ is the copy alone. A mount with
-// a target may share no path on this machine with another mount, so nothing is bound
-// from dir itself, which the run mounts as the harness home. It writes no auth.json. It
-// returns the binds, files first, in a fixed order.
+// <user cache>/qory/runs/<run id>/codex-fixed, and writes into it every part of a walled
+// run's Codex home that the run binds read-only: the config.toml from dir, the runtime's
+// directory of the composed home, with [WalledConfig]'s additions for run.Projects and
+// the git roots of run.Checkouts, see [gitRootsInWall], and with every skill that is not
+// in run.Skills disabled, a hooks.json with no hook, an empty .env, environments.toml and
+// AGENTS.override.md, dir's AGENTS.md, or an empty one, and a copy of each folder of
+// [boundDirs] that dir has, with each link replaced by what it leads to, see [copyTree],
+// or an empty folder. For a run whose access is read, rules/ also contains run.ReadRules
+// as [ReadRulesName], in place of any file of that name in dir's rules; for any other
+// access, rules/ is the copy alone. A mount with a target may share no path on this
+// machine with another mount, so nothing is bound from dir itself, which the run mounts
+// as the harness home. It writes no auth.json. It returns the binds, files first, in a
+// fixed order.
 //
 // The skills disabled are every name, other than run.Skills, of a skill in the copy of
 // dir's skills and in run.Checkouts, by [skillNames], and every skill of run.Checkouts
@@ -115,7 +122,7 @@ func WriteWalledHome(dir, files string, run WalledRun) ([]Bound, error) {
 			return nil, err
 		}
 		if info, err := os.Lstat(filepath.Join(dir, name)); err == nil && info.IsDir() {
-			if err := copyTree(filepath.Join(dir, name), dst); err != nil {
+			if err := copyTree(filepath.Join(dir, name), dst, append([]string{dir}, run.LinkRoots...)); err != nil {
 				return nil, err
 			}
 		}
@@ -123,8 +130,7 @@ func WriteWalledHome(dir, files string, run WalledRun) ([]Bound, error) {
 	}
 	if run.Access == stack.AccessRead && len(run.ReadRules) > 0 {
 		p := filepath.Join(files, "rules", ReadRulesName)
-		// The copy may have a link of this name to the composed home; writing through
-		// it would change the home.
+		// The copy may have a file of this name from dir's rules.
 		if err := os.Remove(p); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			return nil, err
 		}
@@ -311,46 +317,118 @@ func relTo(dir, file string) string {
 	return filepath.ToSlash(rel)
 }
 
-// copyTree copies the folder src into dst, which exists: folders, regular files with
-// their executable bits, and links, each written with an absolute target, so a relative
-// link leads where it led from src. The harness home that such a target lies in is
-// mounted at the same path in the wall. Any other kind of file is an error.
-func copyTree(src, dst string) error {
-	return filepath.WalkDir(src, func(p string, d fs.DirEntry, err error) error {
+// maxCopiedFile is the largest file the copy of a walled home's folders takes: Codex
+// 0.167.2 reads no larger file (codex-rs/exec-server/src/local_file_system_read.rs,
+// MAX_READ_FILE_BYTES).
+const maxCopiedFile = maxSkillSize
+
+// textOutsideLink is the refusal of a link in the composed home whose target is in none
+// of the folders [WalledRun.LinkRoots] lists, with the link and its target.
+const textOutsideLink = "Use a harness from a git source for a walled Codex run: the composed home's %s links to %s, outside the composed home and qory's module cache."
+
+// copyTree copies the folder src into dst, which exists, as folders and regular files
+// only: Codex 0.167.2 passes over a SKILL.md that is a link
+// (codex-rs/exec-server/src/local_file_system.rs, the walk). A link is followed when its
+// target, with every link resolved, lies inside one of roots, the folders qory wrote:
+// a link to a folder is copied as a folder, and a link to a file as a regular file. A
+// link with any other target fails the copy rather than leaving a file out, which would
+// change a skill without a word. Each file keeps its executable bits, is at most
+// [maxCopiedFile] bytes, and is written new, see [writeNew]. Any other kind of file, and
+// a folder that contains itself through a link, is an error.
+func copyTree(src, dst string, roots []string) error {
+	var realRoots []string
+	for _, r := range roots {
+		if real, err := filepath.EvalSymlinks(r); err == nil {
+			realRoots = append(realRoots, real)
+		}
+	}
+	open := map[string]bool{}
+	var copyDir func(src, dst, shown string) error
+	copyDir = func(src, dst, shown string) error {
+		real, err := filepath.EvalSymlinks(src)
 		if err != nil {
 			return err
 		}
-		rel, err := filepath.Rel(src, p)
-		if err != nil || rel == "." {
+		if open[real] {
+			return fmt.Errorf("copy %s for the walled Codex home: the folder contains itself through a link", shown)
+		}
+		open[real] = true
+		defer delete(open, real)
+		entries, err := os.ReadDir(src)
+		if err != nil {
 			return err
 		}
-		to := filepath.Join(dst, rel)
-		switch {
-		case d.IsDir():
-			return os.Mkdir(to, 0o755)
-		case d.Type()&fs.ModeSymlink != 0:
-			target, err := os.Readlink(p)
+		for _, e := range entries {
+			p, to, name := filepath.Join(src, e.Name()), filepath.Join(dst, e.Name()), path.Join(shown, e.Name())
+			info, err := os.Lstat(p)
 			if err != nil {
 				return err
 			}
-			if !filepath.IsAbs(target) {
-				target = filepath.Join(filepath.Dir(p), target)
+			if info.Mode()&fs.ModeSymlink != 0 {
+				target, err := filepath.EvalSymlinks(p)
+				if err != nil {
+					return fmt.Errorf("copy %s for the walled Codex home: %w", name, err)
+				}
+				if !slices.ContainsFunc(realRoots, func(r string) bool { return within(target, r) }) {
+					return fmt.Errorf(textOutsideLink, name, target)
+				}
+				if info, err = os.Stat(target); err != nil {
+					return err
+				}
+				p = target
 			}
-			return os.Symlink(target, to)
-		case d.Type().IsRegular():
-			info, err := d.Info()
-			if err != nil {
-				return err
+			switch {
+			case info.IsDir():
+				if err := os.Mkdir(to, 0o755); err != nil {
+					return err
+				}
+				if err := copyDir(p, to, name); err != nil {
+					return err
+				}
+			case info.Mode().IsRegular():
+				if err := copyFile(p, to, 0o644|info.Mode().Perm()&0o111); err != nil {
+					return fmt.Errorf("copy %s for the walled Codex home: %w", name, err)
+				}
+			default:
+				return fmt.Errorf("copy %s for the walled Codex home: it is neither a folder, a regular file nor a link", name)
 			}
-			data, err := os.ReadFile(p)
-			if err != nil {
-				return err
-			}
-			return writeNew(to, data, 0o644|info.Mode().Perm()&0o111)
-		default:
-			return fmt.Errorf("copy %s for the walled Codex home: it is neither a folder, a regular file nor a link", p)
 		}
-	})
+		return nil
+	}
+	return copyDir(src, dst, filepath.Base(src))
+}
+
+// copyFile copies the regular file src to a new file dst with mode perm, see
+// [writeNew]. It reads no device or pipe, and fails for a file of more than
+// [maxCopiedFile] bytes.
+func copyFile(src, dst string, perm os.FileMode) error {
+	in, err := os.OpenFile(src, os.O_RDONLY|syscall.O_NONBLOCK, 0)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	info, err := in.Stat()
+	if err != nil {
+		return err
+	}
+	if !info.Mode().IsRegular() {
+		return errors.New("it is no regular file")
+	}
+	if info.Size() > maxCopiedFile {
+		return fmt.Errorf("it has %d bytes, more than Codex reads, %d", info.Size(), maxCopiedFile)
+	}
+	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_EXCL|syscall.O_NOFOLLOW, perm)
+	if err != nil {
+		return err
+	}
+	n, err := io.Copy(out, io.LimitReader(in, maxCopiedFile+1))
+	if err == nil && n > maxCopiedFile {
+		err = fmt.Errorf("it grew past %d bytes while qory copied it", maxCopiedFile)
+	}
+	if cerr := out.Close(); err == nil {
+		err = cerr
+	}
+	return err
 }
 
 // WalledConfig is config, a config.toml the compose rendered, with what a walled run adds

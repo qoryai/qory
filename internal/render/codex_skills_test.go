@@ -9,6 +9,7 @@ import (
 
 	"github.com/BurntSushi/toml"
 
+	"github.com/qoryai/qory/internal/compose"
 	"github.com/qoryai/qory/internal/render"
 	"github.com/qoryai/qory/internal/render/codex"
 	"github.com/qoryai/qory/internal/stack"
@@ -52,7 +53,7 @@ func TestWalledCodexDisablesSkillsTheHarnessDoesNotAllow(t *testing.T) {
 		}
 	}
 	fixed := filepath.Join(t.TempDir(), "fixed")
-	if _, err := codex.WriteWalledHome(filepath.Join(home, "codex"), fixed, codex.WalledRun{Projects: []string{"/workspace"}, Checkouts: []string{checkout}, Skills: allowed}); err != nil {
+	if _, err := codex.WriteWalledHome(filepath.Join(home, "codex"), fixed, codex.WalledRun{Projects: []string{"/workspace"}, Checkouts: []string{checkout}, Skills: allowed, LinkRoots: linkRoots(res, home)}); err != nil {
 		t.Fatal(err)
 	}
 	disabled, paths, bundled, cloud := walledSkills(t, fixed)
@@ -110,7 +111,7 @@ func TestWalledCodexSkillsUnderAPatternOrNoRule(t *testing.T) {
 				t.Fatal(err)
 			}
 			fixed := filepath.Join(t.TempDir(), "fixed")
-			run := codex.WalledRun{Projects: []string{"/workspace"}, Checkouts: []string{checkout}, Skills: allowed}
+			run := codex.WalledRun{Projects: []string{"/workspace"}, Checkouts: []string{checkout}, Skills: allowed, LinkRoots: linkRoots(res, home)}
 			if _, err := codex.WriteWalledHome(filepath.Join(home, "codex"), fixed, run); err != nil {
 				t.Fatal(err)
 			}
@@ -125,6 +126,48 @@ func TestWalledCodexSkillsUnderAPatternOrNoRule(t *testing.T) {
 				t.Error("the skills Codex ships or a cloud's skills are on")
 			}
 		})
+	}
+}
+
+// linkRoots are the folders a walled run's copy of the composed home may follow a link
+// into: the composed home and the folder of each module, which stands in for qory's
+// module cache, since the test composes its modules from a temporary folder.
+func linkRoots(res *compose.Result, home string) []string {
+	roots := []string{home}
+	for _, m := range res.Modules {
+		roots = append(roots, m.Dir)
+	}
+	return roots
+}
+
+// TestWalledCodexCopiesLinkedSkillsAsFiles composes a harness whose skill review the home
+// links to, with its SKILL.md: the walled home's copy has a folder and a regular SKILL.md
+// with the module's text, since Codex passes over a SKILL.md that is a link. A copy that
+// may follow no link into the module fails with the line that says so.
+func TestWalledCodexCopiesLinkedSkillsAsFiles(t *testing.T) {
+	const skill = "---\nname: review\ndescription: review\n---\nbody\n"
+	res, home := composeEnv(t, withFile("modules/core/skills/review/SKILL.md", skill), nil, "codex")
+	if err := render.Build(res, home, lookup(t, "codex")); err != nil {
+		t.Fatal(err)
+	}
+	if info, err := os.Lstat(filepath.Join(home, "codex", "skills", "review")); err != nil || info.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("the composed home's skills/review: %v, want a link", err)
+	}
+	fixed := filepath.Join(t.TempDir(), "fixed")
+	if _, err := codex.WriteWalledHome(filepath.Join(home, "codex"), fixed, codex.WalledRun{LinkRoots: linkRoots(res, home)}); err != nil {
+		t.Fatal(err)
+	}
+	p := filepath.Join(fixed, "skills", "review", "SKILL.md")
+	info, err := os.Lstat(p)
+	if err != nil || !info.Mode().IsRegular() {
+		t.Fatalf("%s: %v %v, want a regular file", p, info, err)
+	}
+	if got := read(t, p); got != skill {
+		t.Errorf("SKILL.md %q, want %q", got, skill)
+	}
+	_, err = codex.WriteWalledHome(filepath.Join(home, "codex"), filepath.Join(t.TempDir(), "fixed"), codex.WalledRun{LinkRoots: []string{home}})
+	if err == nil || !strings.HasPrefix(err.Error(), "Use a harness from a git source for a walled Codex run: the composed home's skills/review links to ") {
+		t.Errorf("WriteWalledHome with no module folder: %v, want the refusal of a link outside", err)
 	}
 }
 
@@ -195,7 +238,7 @@ func TestWalledCodexReadRulesOnlyInAReadRun(t *testing.T) {
 	}{{stack.AccessRead, true}, {stack.AccessWrite, false}} {
 		t.Run(c.access, func(t *testing.T) {
 			fixed := filepath.Join(t.TempDir(), "fixed")
-			run := codex.WalledRun{Projects: []string{"/workspace"}, Access: c.access, ReadRules: res.CodexReadRules}
+			run := codex.WalledRun{Projects: []string{"/workspace"}, Access: c.access, ReadRules: res.CodexReadRules, LinkRoots: linkRoots(res, home)}
 			if _, err := codex.WriteWalledHome(filepath.Join(home, "codex"), fixed, run); err != nil {
 				t.Fatal(err)
 			}
