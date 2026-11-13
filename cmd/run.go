@@ -1190,9 +1190,8 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			}
 			res, err := joinSession(run, ctx, spec.SessionSpec)
 			out := sessionOutcome(res, err)
-			// The test found /etc/codex, so Codex never started: the run closes and ends as
-			// a failed check of the image's tools before the join does, with the line and
-			// status 1.
+			// The test found /etc/codex, so Codex never started: qory closes the run as
+			// failed, as a failed Check tools step does, prints the line and exits 1.
 			if insideCheck && err == nil && res != nil && codexSettingsRefused(res.Dir) {
 				closeRun(session.Outcome{State: event.StateFailed, ExitCode: -1})
 				lines.done(nil)

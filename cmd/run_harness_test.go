@@ -325,7 +325,7 @@ func TestAWalledCodexRunRefusesAReservedConfigArgument(t *testing.T) {
 }
 
 // joinedWithStep makes the join of each run note the session's spec in specs and end as a
-// session whose setup step Check tools exited with code, in a record of its own.
+// session whose setup step Check tools exited with code, in a record in a new temp folder.
 func joinedWithStep(t *testing.T, code int, specs *[]session.SessionSpec) {
 	t.Helper()
 	t.Cleanup(cmd.SetJoinResult(func(spec session.SessionSpec) (*session.Result, error) {
@@ -333,10 +333,14 @@ func joinedWithStep(t *testing.T, code int, specs *[]session.SessionSpec) {
 			spec.OnVariables(session.Applied{})
 		}
 		*specs = append(*specs, spec)
+		state := event.StateSucceeded
+		if code != 0 {
+			state = event.StateFailed
+		}
 		dir := t.TempDir()
 		lines := fmt.Sprintf(`{"type":%q,"data":{"step":4,"kind":%q,"name":"Check tools"}}
-{"type":%q,"data":{"step":4,"state":"done","exit_code":%d}}
-`, event.StepStarted, event.StepSetup, event.StepExited, code)
+{"type":%q,"data":{"step":4,"state":%q,"exit_code":%d}}
+`, event.StepStarted, event.StepSetup, event.StepExited, state, code)
 		writeFile(t, filepath.Join(dir, "session.jsonl"), lines)
 		if code == 0 {
 			return &session.Result{Dir: dir, State: event.StateSucceeded}, nil
@@ -375,14 +379,18 @@ func TestAWalledCodexRunWithNoRepositoriesChecksEtcCodexInside(t *testing.T) {
 }
 
 // TestAWalledCodexRunWithNothingAtEtcCodexStarts is the same run with a step that exited 0:
-// Codex started, and qory run prints its end, not the line for /etc/codex.
+// Codex started and exited 0, and qory run prints the session's end, not the line for
+// /etc/codex.
 func TestAWalledCodexRunWithNothingAtEtcCodexStarts(t *testing.T) {
 	exportingCheckout(t, fakeRuntime(t))
 	walledForager(t)
 	t.Setenv("QORY_RUN_KEY", "")
 	var specs []session.SessionSpec
 	joinedWithStep(t, 0, &specs)
-	out, _ := run(t, "run", "codex", "--", "hi")
+	out, err := run(t, "run", "codex", "--", "hi")
+	if err != nil {
+		t.Fatalf("%v (exit %d)\n%s", err, cmd.ExitCode(err), out)
+	}
 	lacks(t, out, "/etc/codex")
 	if len(specs) != 1 || len(specs[0].Setup) != 1 {
 		t.Fatalf("joins: %d\n%s", len(specs), out)
