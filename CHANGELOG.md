@@ -890,8 +890,9 @@ release may change what an existing document does, and states it under Upgrading
 - The Codex directory of a home, `codex`, contains the skills as folders and regular
   files copied from the modules, not as links. Codex 0.167.2 skips a `SKILL.md` that is a
   link, so a skill with a reference in another of its files did not load in a run
-  outside the wall. An edit to a module's skill reaches `codex/skills` on the next
-  compose; until then `qory harness compose --check` exits 6.
+  outside the wall. A skill edit reaches a Codex run on the next compose. Until then
+  `qory harness compose --check` exits 6 and names the changed file, such as
+  `codex/skills/review/SKILL.md  changed`.
 
 ### Fixed
 

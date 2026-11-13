@@ -332,7 +332,7 @@ const maxCopiedFile = maxSkillSize
 // textOutsideLink is the refusal of a link whose target lies outside the composed home
 // and every module folder, [WalledRun.LinkRoots] for [WriteWalledHome] and
 // compose.Result.SourceDirs for [placeSkills], with the link's path and its target.
-const textOutsideLink = "Remove the link `%s` from the harness: it leads to `%s`, outside the harness's modules, and a walled Codex run copies only files inside them."
+const textOutsideLink = "Remove the link `%s` from the harness: it leads to `%s`, outside the harness's modules, and a Codex run copies only files inside them."
 
 // copyTree copies the folder src into dst, which exists, as folders and regular files
 // only: Codex 0.167.2 passes over a SKILL.md that is a link
@@ -358,7 +358,7 @@ func copyTree(src, dst string, roots []string) error {
 			return err
 		}
 		if open[real] {
-			return fmt.Errorf("copy %s for the walled Codex home: the folder contains itself through a link", shown)
+			return fmt.Errorf("copy %s for the Codex home: the folder contains itself through a link", shown)
 		}
 		open[real] = true
 		defer delete(open, real)
@@ -375,7 +375,7 @@ func copyTree(src, dst string, roots []string) error {
 			if info.Mode()&fs.ModeSymlink != 0 {
 				target, err := filepath.EvalSymlinks(p)
 				if err != nil {
-					return fmt.Errorf("copy %s for the walled Codex home: %w", name, err)
+					return fmt.Errorf("copy %s for the Codex home: %w", name, err)
 				}
 				if !slices.ContainsFunc(realRoots, func(r string) bool { return within(target, r) }) {
 					return fmt.Errorf(textOutsideLink, name, target)
@@ -395,10 +395,10 @@ func copyTree(src, dst string, roots []string) error {
 				}
 			case info.Mode().IsRegular():
 				if err := copyFile(p, to, 0o644|info.Mode().Perm()&0o111); err != nil {
-					return fmt.Errorf("copy %s for the walled Codex home: %w", name, err)
+					return fmt.Errorf("copy %s for the Codex home: %w", name, err)
 				}
 			default:
-				return fmt.Errorf("copy %s for the walled Codex home: it is neither a folder, a regular file nor a link", name)
+				return fmt.Errorf("copy %s for the Codex home: it is neither a folder, a regular file nor a link", name)
 			}
 		}
 		return nil

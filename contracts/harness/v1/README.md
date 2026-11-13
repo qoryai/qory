@@ -864,7 +864,7 @@ above: Claude Code's `.claude/rules/*.md`, Cursor's `.cursor/rules/*.mdc`, Copil
 `.github/instructions/*.instructions.md`. Each file is one entry, `<runtime>/<path>`,
 linked to `<path>` under the runtime's directory in the checkout (§Runtimes), so two modules
 shipping one path collide like two skills of one name and an exclude lists the path. A
-path the runtime reads as settings, one qory writes, or one a kind is linked at is
+path the runtime reads as settings, one qory writes, or one a kind is linked or copied at is
 reserved and fails the compose, and so does a runtime qory does not render; a file
 directly under `files/` fails, since the runtime segment decides where it lands. A
 directory under `settings/<runtime>/` fails and the message points here. A file for a
@@ -1152,14 +1152,14 @@ a launch, `goose` and `any`, gets none of them.
 
 A `files/<runtime>/<path>` entry may not use a path the runtime reserves under its
 directory, whatever stack composes it: the files qory writes, the directories a kind is
-linked at, and every file the program reads as settings, which a fragment under
+linked or copied at, and every file the program reads as settings, which a fragment under
 `settings/<runtime>/` sets instead. A directory reserves what is below it, by path
 segment. The refusal lists the module, the entry and the reason, with status 2:
 
-| `target.runtime` | qory writes | The program reads as settings | A kind is linked at | Runs without the agent |
+| `target.runtime` | qory writes | The program reads as settings | A kind is linked or copied at | Runs without the agent |
 |---|---|---|---|---|
 | `claude` | `rules/qory-harness.md`, `settings.json`, `mcp.json`, `plugin`, `launch`; `rules` as a file, since qory links that directory one file at a time | `settings.local.json` | `skills`, `agents`, `commands`, `hooks`, `output-styles` | |
-| `codex` | `config.toml`, `AGENTS.md` | | `agents`, `skills` | |
+| `codex` | `config.toml`, `AGENTS.md` | | `agents`; `skills`, copied as folders and regular files | |
 | `gemini` | `settings.json` | | `skills`, `hooks`, `agents`, `commands` | |
 | `opencode` | `opencode.json` | | `commands`, `hooks`, `agents`, `skills` | |
 | `cursor` | `plugin` | `mcp.json`, `hooks.json`, `cli.json`, `environment.json` | `agents`, `hooks` | |

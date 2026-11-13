@@ -11,7 +11,7 @@
 //
 //	config.toml  qory writes it
 //	agents       agents are linked there; ship it as agents/<name>
-//	skills       qory links them there for a launch; ship it as skills/<name>
+//	skills       qory copies them there for a launch; ship it as skills/<name>
 //	AGENTS.md    qory writes it for a launch
 //	auth.json    Codex's login file, which no home of qory's has
 //	hooks.json, .env, environments.toml, AGENTS.override.md, rules/read-access.rules
@@ -92,7 +92,7 @@ func (codex) Reserved() []render.Reserved {
 	out := []render.Reserved{
 		{Path: "config.toml", Why: "qory writes it"},
 		{Path: "agents", Why: "agents are linked there; ship it as agents/<name>"},
-		{Path: "skills", Why: "qory links them there for a launch; ship it as skills/<name>"},
+		{Path: "skills", Why: "qory copies them there for a launch; ship it as skills/<name>"},
 		{Path: "AGENTS.md", Why: "qory writes it for a launch"},
 		{Path: "auth.json", Refusal: textAuthFile},
 	}

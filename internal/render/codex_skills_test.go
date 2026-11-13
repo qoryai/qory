@@ -266,7 +266,7 @@ func TestCodexRefusesALinkOutOfTheModules(t *testing.T) {
 		t.Skip("no /etc/hosts:", err)
 	}
 	err = render.Build(res, home, lookup(t, "codex"))
-	want := "Remove the link `skills/review/hosts` from the harness: it leads to `" + target + "`, outside the harness's modules, and a walled Codex run copies only files inside them."
+	want := "Remove the link `skills/review/hosts` from the harness: it leads to `" + target + "`, outside the harness's modules, and a Codex run copies only files inside them."
 	if err == nil || err.Error() != want {
 		t.Errorf("Build: %v, want %q", err, want)
 	}

@@ -266,6 +266,7 @@ func TestCheckFilesRefusesReservedPaths(t *testing.T) {
 		{"claude/settings.local.json", "module nextjs ships files/claude/settings.local.json, and Claude Code reads it as settings; a module sets those through settings/claude/settings.json"},
 		{"claude/skills/review/SKILL.md", "module nextjs ships files/claude/skills/review/SKILL.md, and skills are linked there; ship it as skills/<name>"},
 		{"copilot/workflows/ci.yml", "module nextjs ships files/copilot/workflows/ci.yml, and GitHub runs it on every push"},
+		{"codex/skills/review/SKILL.md", "module nextjs ships files/codex/skills/review/SKILL.md, and qory copies them there for a launch; ship it as skills/<name>"},
 		{"codex/auth.json", "Remove `files/codex/auth.json` from module nextjs: a Codex run takes its model key from the run, not from a file."},
 		{"codex/hooks.json", "Remove `files/codex/hooks.json` from module nextjs: qory writes it for every walled Codex run."},
 		{"codex/.env", "Remove `files/codex/.env` from module nextjs: qory writes it for every walled Codex run."},
