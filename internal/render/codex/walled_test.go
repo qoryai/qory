@@ -128,6 +128,62 @@ async = false
 	}
 }
 
+// TestWalledConfigNormalizesAsCodex is a hook of each rule Codex 0.167.2 normalizes before
+// it hashes (codex-rs/hooks/src/engine/discovery.rs, append_matcher_groups): a matcher
+// where the event takes one, statusMessage, additionalContextLimit only on the events
+// that keep it and not at its default 2500, a timeout raised to 1, a SessionEnd timeout
+// held at 3, an Interrupt timeout of 1 by default, and a command with a tab, a control
+// character and a backslash. A command of only white space gets no key. The control
+// characters' hash comes from trust-hook.py; the others from the same JSON in Python:
+//
+//	json.dumps(identity, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+func TestWalledConfigNormalizesAsCodex(t *testing.T) {
+	config := `[[hooks.PreToolUse]]
+matcher = "Bash"
+[[hooks.PreToolUse.hooks]]
+type = "command"
+command = "/bin/check"
+timeout = 0
+statusMessage = "checking"
+additionalContextLimit = 100
+[[hooks.SessionEnd]]
+[[hooks.SessionEnd.hooks]]
+type = "command"
+command = "/bin/end"
+timeout = 9
+async = true
+[[hooks.Interrupt]]
+[[hooks.Interrupt.hooks]]
+type = "command"
+command = "/bin/int"
+additionalContextLimit = 50
+[[hooks.PostToolUse]]
+[[hooks.PostToolUse.hooks]]
+type = "command"
+command = "/bin/post"
+additionalContextLimit = 2500
+[[hooks.Stop]]
+[[hooks.Stop.hooks]]
+type = "command"
+command = "  "
+[[hooks.Stop.hooks]]
+type = "command"
+command = "a\tb\u0001c\\d"
+timeout = 30
+`
+	key := codex.HomeInWall + "/config.toml:"
+	want := map[string]string{
+		key + "pre_tool_use:0:0":  "sha256:500e7100a547b86e63104adc7a4ed0ea1662017fc62f326050956607867b7f21",
+		key + "session_end:0:0":   "sha256:40705d49d9cd1a41fb51fba7346276ec5196e12b6a4c0204513c68e7adac7d30",
+		key + "interrupt:0:0":     "sha256:a7d100ff9d5d584786b571d0b65be0dc8b9b8b95c2a2ac755cd581ea196a4e39",
+		key + "post_tool_use:0:0": "sha256:7bd471240b678be053e62ae1ed64763490b210f38aeafd6d216b94728b72a9c9",
+		key + "stop:0:1":          "sha256:9db311ec503d58207150226ca9891ab7c8971e4a8b7f60713b2dba3303d816f2",
+	}
+	if got := walledState(t, config, nil); !reflect.DeepEqual(got, want) {
+		t.Errorf("hooks.state:\n%v\nwant:\n%v", got, want)
+	}
+}
+
 // TestWalledConfigTrustsNoProjectAndAddsNoState is a config.toml with no hooks and no
 // project path: neither table is written.
 func TestWalledConfigTrustsNoProjectAndAddsNoState(t *testing.T) {
@@ -166,8 +222,9 @@ func walledState(t *testing.T, config string, projects []string) map[string]stri
 
 // TestWriteWalledHome is the read-only part of a walled run's home: config.toml with the
 // run's trust, a hooks.json with no hook, an empty .env, environments.toml and
-// AGENTS.override.md, which Codex passes over for AGENTS.md, the compose's AGENTS.md, and the compose's skills beside an empty rules and agents, in a
-// fixed order, and no auth.json.
+// AGENTS.override.md, which Codex passes over for AGENTS.md, the compose's AGENTS.md,
+// and the compose's skills beside an empty rules and agents, in a fixed order, and no
+// auth.json.
 func TestWriteWalledHome(t *testing.T) {
 	dir, files := t.TempDir(), t.TempDir()
 	write := func(name, content string) {

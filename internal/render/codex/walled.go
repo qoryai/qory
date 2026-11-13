@@ -12,6 +12,7 @@ import (
 	"path"
 	"path/filepath"
 	"strconv"
+	"strings"
 
 	"github.com/BurntSushi/toml"
 
@@ -190,14 +191,14 @@ const defaultContextLimit = 2500
 // the compact JSON, keys sorted, of the event's label, the matcher where the event takes
 // one, and the one handler normalized: type, command as written, timeout with Codex's
 // default and limits, async, and statusMessage and additionalContextLimit when they
-// count. False for a handler that is no command, and for a command with U+2028 or
-// U+2029, which get no trust.
+// count. False for a handler that is no command, for a command of only white space,
+// which Codex skips, and for a command with U+2028 or U+2029; none of them gets trust.
 func hookHash(event string, group, handler map[string]any) (string, bool, error) {
 	if handler["type"] != "command" {
 		return "", false, nil
 	}
 	command, ok := handler["command"].(string)
-	if !ok {
+	if !ok || strings.TrimSpace(command) == "" {
 		return "", false, nil
 	}
 	normalized := map[string]any{"type": "command", "command": command, "timeout": hookTimeout(event, handler["timeout"]), "async": handler["async"] == true}
