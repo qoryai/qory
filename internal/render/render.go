@@ -269,19 +269,19 @@ type SettingsInliner interface {
 }
 
 // AgentHomer is a [Launcher] whose program reads its configuration directory from a
-// variable. A dispatched walled run sets the variable to a new, empty folder inside the
-// container, so nothing the image has there reaches the agent.
+// variable. A walled run sets the variable to a new, empty folder inside the container,
+// so nothing the image has there reaches the agent.
 type AgentHomer interface {
 	// AgentHomeVariable is the variable, such as CLAUDE_CONFIG_DIR.
 	AgentHomeVariable() string
 }
 
 // TranscriptLinker is an [AgentHomer] whose program writes the transcripts of its
-// sessions in a folder of its configuration directory. On a dispatched walled run, qory
-// links that folder to the place where Forager binds the run's transcript folder, the
-// runtime descriptor's resume.prefix below the agent's HOME, so the transcripts reach
-// the machine and a continuation of a paused run resumes from them. A runtime that does
-// not implement it gets no link.
+// sessions in a folder of its configuration directory. On a walled run, qory links that
+// folder to the place where Forager binds the run's transcript folder, the runtime
+// descriptor's resume.prefix below the agent's HOME, so the transcripts reach the
+// machine and a continuation of a paused run resumes from them. A runtime that does not
+// implement it gets no link.
 type TranscriptLinker interface {
 	AgentHomer
 	// TranscriptFolder is the folder, relative to the configuration directory and with
