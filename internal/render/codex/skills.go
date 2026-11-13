@@ -14,11 +14,16 @@ import (
 	"github.com/qoryai/qory/internal/render"
 )
 
+// AllSkills in [AllowedSkills] allows every skill of the harness, as Skill(harness:*)
+// does in Claude Code.
+const AllSkills = "*"
+
 // AllowedSkills are the skills a walled Codex run may load: the <name> of each
 // Skill(harness:<name>) rule in permissions.allow of the harness's
-// settings/claude/settings.json, sorted, with no name twice. Codex has no list of its
-// own, so the harness's Claude Code list is the Codex list too. A rule with a pattern,
-// such as Skill(harness:*), allows no skill here. A harness with no such rule allows none.
+// settings/claude/settings.json, and [AllSkills] for Skill(harness:*), sorted, with no
+// name twice. Codex has no list of its own, so the harness's Claude Code list is the
+// Codex list too. Any other rule with a pattern, such as Skill(harness:review-*), allows
+// no skill here. A harness with no such rule allows none.
 func AllowedSkills(res *compose.Result) []string {
 	perms, _ := res.Settings["claude"]["settings.json"]["permissions"].(map[string]any)
 	allow, _ := perms["allow"].([]any)
@@ -30,7 +35,7 @@ func AllowedSkills(res *compose.Result) []string {
 			continue
 		}
 		name, ok = strings.CutSuffix(name, ")")
-		if !ok || name == "" || strings.ContainsAny(name, "*()") {
+		if !ok || name == "" || name != AllSkills && strings.ContainsAny(name, "*()") {
 			continue
 		}
 		out = append(out, name)

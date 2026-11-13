@@ -64,7 +64,8 @@ type WalledRun struct {
 	// Checkouts are the folders on this machine that the wall shows at Projects. qory
 	// reads the skills of each one's .codex/skills and .agents/skills.
 	Checkouts []string
-	// Skills are the skills the run may load, from [AllowedSkills].
+	// Skills are the skills the run may load, from [AllowedSkills]. With [AllSkills],
+	// the run may load every skill of the home's skills folder.
 	Skills []string
 	// Access is what the run may do on its target, stack.AccessRead or
 	// stack.AccessWrite.
@@ -94,7 +95,9 @@ const ReadRulesName = "read-access.rules"
 // auth.json. It returns the binds, files first, in a fixed order.
 //
 // The skills disabled are every name, other than run.Skills, of a skill in the copy of
-// dir's skills and in run.Checkouts, by [skillNames]. A skill that is not there when
+// dir's skills and in run.Checkouts, by [skillNames]. When run.Skills contains
+// [AllSkills], every name of a skill in the copy of dir's skills counts as in
+// run.Skills. A skill that is not there when
 // WriteWalledHome runs keeps its name enabled: one the agent writes during the run, and
 // one in ~/.agents/skills or /etc/codex/skills of the image.
 func WriteWalledHome(dir, files string, run WalledRun) ([]Bound, error) {
@@ -128,6 +131,14 @@ func WriteWalledHome(dir, files string, run WalledRun) ([]Bound, error) {
 			roots = append(roots, filepath.Join(c, r))
 		}
 	}
+	allowed := slices.Clone(run.Skills)
+	if slices.Contains(run.Skills, AllSkills) {
+		names, err := skillNames(roots[0])
+		if err != nil {
+			return nil, err
+		}
+		allowed = append(allowed, names...)
+	}
 	var disabled []string
 	for _, root := range roots {
 		names, err := skillNames(root)
@@ -135,7 +146,7 @@ func WriteWalledHome(dir, files string, run WalledRun) ([]Bound, error) {
 			return nil, err
 		}
 		for _, n := range names {
-			if !slices.Contains(run.Skills, n) {
+			if !slices.Contains(allowed, n) {
 				disabled = append(disabled, n)
 			}
 		}
