@@ -817,6 +817,15 @@ release may change what an existing document does, and states it under Upgrading
   Codex reads them as `--config features.<feature>=true` or `false`. The text is
   ``Remove `--enable <feature>` from the run's Codex arguments: a Codex run takes this
   key from qory and Forager, not from the arguments.``, or the same with `--disable`.
+- A walled Codex run refuses `--ignore-user-config` before `--`, with ``Remove
+  `--ignore-user-config` from the run's Codex arguments: a Codex run takes its settings
+  from qory and Forager, not from the arguments.``, and `--search`, with ``Remove
+  `--search` from the run's Codex arguments: a Codex run takes its web search setting
+  from qory and Forager, not from the arguments.``
+- On a walled Codex write run in a copy that lists repositories, the `Check tools` setup
+  step also fails when the image has anything at `/etc/codex`, with ``Use an image
+  without /etc/codex: Codex reads its settings there before qory's, so the run does not
+  start.`` The step of a Claude Code run is unchanged.
 - Compose accepts `settings/codex/read-access.rules`, a file of Codex execpolicy rules.
   It joins the files of all modules in module order, merges them into no target file and
   places them in no home, so no run reads them. Any other file under `settings/` that is

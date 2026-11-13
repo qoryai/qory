@@ -1225,7 +1225,11 @@ Per runtime, the files written into its directory:
   profile.``, and on `--enable` or `--disable` with any feature, which Codex reads as
   `--config features.<feature>=true` or `false`, with ``Remove `--enable <feature>` from
   the run's Codex arguments: a Codex run takes this key from qory and Forager, not from
-  the arguments.`` (`--disable <feature>` likewise). A hook in
+  the arguments.`` (`--disable <feature>` likewise). It stops on `--ignore-user-config`
+  with ``Remove `--ignore-user-config` from the run's Codex arguments: a Codex run takes
+  its settings from qory and Forager, not from the arguments.``, and on `--search` with
+  ``Remove `--search` from the run's Codex arguments: a Codex run takes its web search
+  setting from qory and Forager, not from the arguments.`` A hook in
   `settings/codex/config.toml` or `settings/codex/hooks.json` whose `timeout` or
   `additionalContextLimit` is negative or fractional, such as 2.0, fails the compose
   with ``Set `<key>` of the `<event>` hook in the harness's `settings/codex/<file>` to a

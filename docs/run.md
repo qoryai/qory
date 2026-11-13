@@ -3784,6 +3784,13 @@ program, such as:
 qory run: install comm in /usr/local/bin, /usr/bin, /bin: the git session of a walled run runs comm from these folders, to compare the run's refs and commits with what the bundle has
 ```
 
+On a Codex run, the step also fails when the image has anything at `/etc/codex`, where Codex reads
+settings before the ones qory writes:
+
+```text
+qory run: Use an image without /etc/codex: Codex reads its settings there before qory's, so the run does not start.
+```
+
 If the step exits 127 with no such line, which is what docker does for an image with no `/bin/sh`,
 qory prints the line for `sh`. Any other failure with no such line prints
 `Fix Check tools: setup step <n> exited with <n>.`, also exit 126, where docker could not run the
