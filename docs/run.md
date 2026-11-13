@@ -2229,10 +2229,18 @@ seconds. A first signal, before or during the step, cuts the step to at most 15 
 second signal ends the step at once. A step that one of these ended has the state
 `cancelled`, and the commits it made stay in the working folder.
 
-The run closes as its session ended, whatever the step did: a session that timed out closes
-`cancelled` with the reason `timeout`, exit 124, a session that paused closes `paused` with
-the reason `model_key_limit` and the runtime's exit status, and a session that failed
-closes `failed`.
+The run closes as its session ended, whatever the step did:
+
+- A session that timed out closes `cancelled` with the reason `timeout`, exit 124.
+- A session that paused because the model provider rejected its model key, while another
+  model key of the run is usable, closes `paused` with the reason `model_key_switch` and
+  the runtime's exit status.
+- Any other session that paused, at the model key limit, closes `paused` with the reason
+  `model_key_limit` and the runtime's exit status.
+- A session that failed because the model provider rejected every model key of the run
+  closes `failed` with the reason `model_key_unauthorized` and the runtime's exit status.
+- Any other session that failed closes `failed`.
+
 The line of a failed step is printed after the run's end. After a session that succeeded,
 the step sets the close:
 
