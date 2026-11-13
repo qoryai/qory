@@ -773,9 +773,11 @@ release may change what an existing document does, and states it under Upgrading
   configuration's `env`, in `harness.launch.claude.env` and in a module's `env` export.
 - Compose refuses a Codex `settings/codex/config.toml` that sets `model_provider`,
   `model_providers`, `projects`, `hooks.state`, `features`, `analytics`, `otel` or
-  `notify`, with one line per key, such as ``Remove `model_provider` from the harness's
-  `settings/codex/config.toml`: qory writes it from the run's model key.`` A fragment
-  may still set `web_search` and the other keys of `hooks`, such as `hooks.Stop`.
+  `notify`, with one line per key. For `model_provider` and `model_providers` the line is
+  ``Remove `<key>` from the harness's `settings/codex/config.toml`: qory writes it from
+  the run's model key.``, and for the others ``Remove `<key>` from the harness's
+  `settings/codex/config.toml`: qory sets it for every Codex run.`` A fragment may still
+  set `web_search` and the other keys of `hooks`, such as `hooks.Stop`.
 - A walled `qory run` given a run key does not start when `--env` or `wall.env` names a
   variable the runtime reads its model key from: `ANTHROPIC_API_KEY`,
   `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_AUTH_TOKEN` for Claude Code. An unwalled run,

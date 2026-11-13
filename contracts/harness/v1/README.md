@@ -1189,9 +1189,11 @@ Per runtime, the files written into its directory:
   `ignore_default_excludes = true`. Codex reads `AGENTS.override.md` before `AGENTS.md`,
   and a project `.codex` only in a trusted project. A fragment that sets
   `model_provider`, `model_providers`, `projects`, `hooks.state`, `features`,
-  `analytics`, `otel` or `notify` fails the compose with one line per key, such as
-  ``Remove `model_provider` from the harness's `settings/codex/config.toml`: qory writes
-  it from the run's model key.``
+  `analytics`, `otel` or `notify` fails the compose with one line per key: ``Remove
+  `<key>` from the harness's `settings/codex/config.toml`: qory writes it from the run's
+  model key.`` for `model_provider` and `model_providers`, and ``Remove `<key>` from the
+  harness's `settings/codex/config.toml`: qory sets it for every Codex run.`` for the
+  others.
 - **gemini**: `settings.json` with `model.name` and `mcpServers`, links for skills and hooks,
   one `agents/<name>.md` with `name` and `description`, one `commands/<name>.toml` with
   `$ARGUMENTS` as `{{args}}`. Gemini reads a project `.gemini` only in a trusted folder.

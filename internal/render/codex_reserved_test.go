@@ -12,20 +12,21 @@ import (
 // or qory sets for a run: the compose's build fails with the line that names the key, and
 // writes no config.toml. hooks.Stop and web_search stay allowed.
 func TestCodexRefusesReservedKeys(t *testing.T) {
-	for _, c := range []struct{ fragment, key string }{
-		{"model_provider = \"other\"\n", "model_provider"},
-		{"[model_providers.other]\nbase_url = \"https://example.com/v1\"\n", "model_providers"},
-		{"[projects.\"/work\"]\ntrust_level = \"trusted\"\n", "projects"},
-		{"[hooks.state.\"/x/config.toml:stop:0:0\"]\ntrusted_hash = \"sha256:00\"\n", "hooks.state"},
-		{"[features]\nplugins = true\n", "features"},
-		{"[analytics]\nenabled = true\n", "analytics"},
-		{"[otel]\nexporter = \"none\"\n", "otel"},
-		{"notify = [\"/bin/true\"]\n", "notify"},
+	const fromKey, everyRun = "qory writes it from the run's model key.", "qory sets it for every Codex run."
+	for _, c := range []struct{ fragment, key, why string }{
+		{"model_provider = \"other\"\n", "model_provider", fromKey},
+		{"[model_providers.other]\nbase_url = \"https://example.com/v1\"\n", "model_providers", fromKey},
+		{"[projects.\"/work\"]\ntrust_level = \"trusted\"\n", "projects", everyRun},
+		{"[hooks.state.\"/x/config.toml:stop:0:0\"]\ntrusted_hash = \"sha256:00\"\n", "hooks.state", everyRun},
+		{"[features]\nplugins = true\n", "features", everyRun},
+		{"[analytics]\nenabled = true\n", "analytics", everyRun},
+		{"[otel]\nexporter = \"none\"\n", "otel", everyRun},
+		{"notify = [\"/bin/true\"]\n", "notify", everyRun},
 	} {
 		t.Run(c.key, func(t *testing.T) {
 			res, home := composeEnv(t, withFile("modules/core/settings/codex/config.toml", c.fragment), nil, "codex")
 			err := render.Build(res, home, lookup(t, "codex"))
-			want := "Remove `" + c.key + "` from the harness's `settings/codex/config.toml`: qory writes it from the run's model key."
+			want := "Remove `" + c.key + "` from the harness's `settings/codex/config.toml`: " + c.why
 			if err == nil || err.Error() != want {
 				t.Fatalf("Build: %v, want %q", err, want)
 			}
