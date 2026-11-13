@@ -1,7 +1,6 @@
 package preparation
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -45,11 +44,7 @@ func approveStandIn(getenv func(string) string, home string) error {
 	if getenv(EnvAgentHome) != home || getenv(envAPIKey) != runtimes.Placeholder {
 		return nil
 	}
-	key, err := json.Marshal(approvedKey())
-	if err != nil {
-		return nil
-	}
-	data := `{"customApiKeyResponses":{"approved":[` + string(key) + `],"rejected":[]}}`
+	data := `{"customApiKeyResponses":{"approved":["` + approvedKey() + `"],"rejected":[]}}`
 	path := filepath.Join(home, ".claude.json")
 	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if errors.Is(err, os.ErrExist) {

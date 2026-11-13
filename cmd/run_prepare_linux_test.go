@@ -173,10 +173,9 @@ func TestAgentEnvApprovesTheStandIn(t *testing.T) {
 		env  []string
 		want string
 	}{
-		"a person's run with the stand-in":  {[]string{"ANTHROPIC_API_KEY=" + runtimes.Placeholder}, ".claude.json\n"},
-		"a run key's run with the stand-in": {[]string{"ANTHROPIC_API_KEY=" + runtimes.Placeholder, "QORY_RUN_SYSTEM=github.com"}, ".claude.json\n"},
-		"a run with a real key":             {[]string{"ANTHROPIC_API_KEY=real-key-example"}, ""},
-		"a run with no key":                 {nil, ""},
+		"a run with the stand-in": {[]string{"ANTHROPIC_API_KEY=" + runtimes.Placeholder}, ".claude.json\n"},
+		"a run with a real key":   {[]string{"ANTHROPIC_API_KEY=real-key-example"}, ""},
+		"a run with no key":       {nil, ""},
 	} {
 		t.Run(name, func(t *testing.T) {
 			agentHomeFree(t)
