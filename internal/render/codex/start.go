@@ -1,6 +1,7 @@
 package codex
 
 import (
+	"fmt"
 	"path"
 	"slices"
 	"strings"
@@ -29,21 +30,103 @@ func (codex) Install(version string) string { return "@openai/codex@" + version 
 // asks for --approve-for-me or its alias --not-so-yolo, which Codex refuses beside
 // --sandbox (codex-rs/utils/cli/src/shared_options.rs). The prompt stays $<name>: no run
 // binds the home at [HomeInWall] yet, so a mention by that path, see [mentionByPath],
-// would lead to no skill.
-func (codex) WalledArgs(args []string) []string {
+// would lead to no skill. Arguments that set a key of [reservedKeys] or
+// [argReservedKeys] with --config or -c are refused, see [checkConfigArgs].
+func (codex) WalledArgs(args []string) ([]string, error) {
+	if err := checkConfigArgs(args); err != nil {
+		return nil, err
+	}
 	i := slices.Index(args, "exec")
 	if i < 0 {
-		return args
+		return args, nil
 	}
 	for _, a := range args {
 		if a == "--" {
 			break
 		}
 		if setsSandbox(a) {
-			return args
+			return args, nil
 		}
 	}
-	return slices.Concat(args[:i+1], []string{"--sandbox", "danger-full-access"}, args[i+1:])
+	return slices.Concat(args[:i+1], []string{"--sandbox", "danger-full-access"}, args[i+1:]), nil
+}
+
+// textConfigArg is the refusal of a walled run whose Codex arguments set a key of
+// [reservedKeys] or [argReservedKeys] with --config or -c, with the key as given for its
+// %s.
+const textConfigArg = "Remove `--config %s` from the run's Codex arguments: a Codex run takes this key from qory and Forager, not from the arguments."
+
+// argReservedKeys are the key paths that the arguments of a walled run may not set
+// beside [reservedKeys]. Forager sets model_reasoning_effort from the run's effort as a
+// --config flag; a harness's config.toml may still set it as a default.
+var argReservedKeys = []reservedKey{{"model_reasoning_effort"}}
+
+// checkConfigArgs refuses args, a walled run's Codex arguments, when one before --
+// sets a key of [reservedKeys] or [argReservedKeys] with --config or -c, in the forms
+// --config <k=v>, --config=<k=v>, -c <k=v>, -c<k=v> and -c=<k=v>. Forager puts its
+// --config flags ahead of these arguments, and Codex 0.167.2 takes the last flag for a
+// key, so such an argument would replace Forager's value. Codex reads the key as the
+// text before the first =, without spaces at either end, with use_legacy_landlock read
+// as features.use_legacy_landlock, as a dotted path
+// (codex-rs/utils/cli/src/config_override.rs, codex-rs/config/src/overrides.rs). A
+// key at a reserved path, under one, or above one, whose table value sets the reserved
+// path, is refused. Codex refuses a --config or -c with no value after it, or with a
+// value that starts with -, so such a flag passes here.
+func checkConfigArgs(args []string) error {
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		var pair string
+		switch {
+		case a == "--":
+			return nil
+		case a == "--config" || a == "-c":
+			if i+1 == len(args) || strings.HasPrefix(args[i+1], "-") {
+				continue
+			}
+			i++
+			pair = args[i]
+		case strings.HasPrefix(a, "--config="):
+			pair = strings.TrimPrefix(a, "--config=")
+		case strings.HasPrefix(a, "-c"):
+			pair = strings.TrimPrefix(strings.TrimPrefix(a, "-c"), "=")
+		default:
+			continue
+		}
+		key, _, ok := strings.Cut(pair, "=")
+		if !ok {
+			continue
+		}
+		if key = strings.TrimSpace(key); reservedArg(key) {
+			return fmt.Errorf(textConfigArg, key)
+		}
+	}
+	return nil
+}
+
+// reservedArg reports whether key, a dotted key path of a --config flag, is a path of
+// [reservedKeys] or [argReservedKeys], lies under one, or lies above one.
+func reservedArg(key string) bool {
+	if key == "use_legacy_landlock" {
+		key = "features.use_legacy_landlock"
+	}
+	names := strings.Split(key, ".")
+	for _, k := range slices.Concat(reservedKeys, argReservedKeys) {
+		if overlaps(k, names) {
+			return true
+		}
+	}
+	return false
+}
+
+// overlaps reports whether each name of the shorter of k and names matches the
+// pattern of k at the same place: names is then k, a path under k, or a path above k.
+func overlaps(k reservedKey, names []string) bool {
+	for i := range min(len(k), len(names)) {
+		if ok, _ := path.Match(k[i], names[i]); !ok {
+			return false
+		}
+	}
+	return true
 }
 
 // mentionByPath is prompt with a leading $<name> written as [$<name>](<path>), the path

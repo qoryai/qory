@@ -776,8 +776,12 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 						return false, err
 					}
 				}
+				// A refusal of the arguments stops the run here, as a refusal of the
+				// harness's settings stops the compose.
 				if walled {
-					launchArgs = walledArgs(renderer, launchArgs)
+					if launchArgs, err = walledArgs(renderer, launchArgs); err != nil {
+						return false, err
+					}
 				}
 				rt, err := catalog.Lookup(name, filepath.Join(user, DescriptorsDir))
 				if err != nil {

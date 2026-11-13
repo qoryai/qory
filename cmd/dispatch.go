@@ -26,12 +26,13 @@ func dispatchedArgs(rt render.Runtime, args []string) []string {
 }
 
 // walledArgs are the launch arguments of a walled run of rt: the runtime's
-// [render.Walled] arguments, and args as given for a runtime that is none.
-func walledArgs(rt render.Runtime, args []string) []string {
+// [render.Walled] arguments or its refusal of args, and args as given for a runtime that
+// is none.
+func walledArgs(rt render.Runtime, args []string) ([]string, error) {
 	if w, ok := rt.(render.Walled); ok {
 		return w.WalledArgs(args)
 	}
-	return args
+	return args, nil
 }
 
 // withAgentHome is the fixed variables of a dispatched walled run of a runtime that is a

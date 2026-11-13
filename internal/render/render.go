@@ -256,8 +256,10 @@ type Dispatcher interface {
 // the limit of what the program may change. A runtime that does not implement it starts
 // a walled run with the launch's arguments.
 type Walled interface {
-	// WalledArgs are args, the launch's arguments, as a walled run passes them.
-	WalledArgs(args []string) []string
+	// WalledArgs are args, the launch's arguments, as a walled run passes them, or an
+	// error when args set what a walled run takes from qory and Forager alone; the run
+	// then stops before the launch.
+	WalledArgs(args []string) ([]string, error)
 }
 
 // SettingsInliner is a [Launcher] whose settings file a run passes to Forager as its

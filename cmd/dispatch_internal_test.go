@@ -143,11 +143,11 @@ func TestAWalledLaunchOfCodexHasNoSandboxOfItsOwn(t *testing.T) {
 	}
 	args := []string{"exec", "--json", "--add-dir", "/in", "$explore /in/inputs.json"}
 	want := []string{"exec", "--sandbox", "danger-full-access", "--json", "--add-dir", "/in", "$explore /in/inputs.json"}
-	if got := walledArgs(rt, args); !slices.Equal(got, want) {
-		t.Errorf("codex: got %q, want %q", got, want)
+	if got, err := walledArgs(rt, args); err != nil || !slices.Equal(got, want) {
+		t.Errorf("codex: got %q, %v, want %q", got, err, want)
 	}
-	if got := walledArgs(claudeRuntime(t), args); !slices.Equal(got, args) {
-		t.Errorf("claude: got %q, want %q", got, args)
+	if got, err := walledArgs(claudeRuntime(t), args); err != nil || !slices.Equal(got, args) {
+		t.Errorf("claude: got %q, %v, want %q", got, err, args)
 	}
 }
 
