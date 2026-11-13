@@ -6,9 +6,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/qoryai/qory/cmd"
+	"github.com/qoryai/qory/internal/render/codex"
 )
 
 // stubCodex is the program codex of the image in
@@ -80,6 +82,57 @@ func TestARealWalledCodexReadRunHasItsHomeBound(t *testing.T) {
 		wants(t, r.out, "stub: cannot move "+name+"\n", "stub: cannot remove "+name+"\n")
 	}
 	wants(t, r.out, "stub: wrote sessions\n", "stub: skill\n", "stub: read rules\n", "stub: untrusted\n")
+	cache, err := os.UserCacheDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if left, err := os.ReadDir(filepath.Join(cache, "qory", "runs")); err != nil && !os.IsNotExist(err) || len(left) != 0 {
+		t.Errorf("left after the run: %v, %v", left, err)
+	}
+}
+
+// TestARealWalledCodexContinuationResumesInItsFreshHome is the continuation of a paused
+// Codex run, from a run code that only reads, behind a real wall on this machine's
+// engine, with the stub [stubResumedCodex] as Codex in the image, at a gateway whose
+// control plane has the paused run's resume. Forager writes the paused run's transcript
+// into the run's fresh Codex home, the folder mounted writable at
+// /var/lib/qory-codex-home, at the paused run's path below sessions/, before Codex
+// starts, and starts codex exec with --sandbox danger-full-access after exec and resume
+// and the session id right before the prompt. The run's folder, with the home, is gone
+// once the run ends. It runs only with QORY_TEST_DOCKER=1 and docker on the PATH.
+func TestARealWalledCodexContinuationResumesInItsFreshHome(t *testing.T) {
+	if os.Getenv("QORY_TEST_DOCKER") != "1" {
+		t.Skip("QORY_TEST_DOCKER=1 runs it")
+	}
+	if _, err := exec.LookPath("docker"); err != nil {
+		t.Skip("no docker command")
+	}
+	helper, image := realWallImage(t, "codex", stubResumedCodex)
+	atGateway(t)
+	codeReal = true
+	t.Cleanup(func() { codeReal = false })
+	ctl := startResumeControl(t)
+	r := runFromCodeLinks(t, func(string) []string {
+		machineConfig(t, "harness:\n  launch:\n    codex:\n      command: /usr/local/bin/codex\n")
+		writeFile(t, filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "forager.yaml"),
+			"wall:\n  adapter: docker\n  helper: "+helper+"\n  user: \"1000:1000\"\n  image: "+image+"\n")
+		return nil
+	}, []string{"--home", filepath.Join(tempDir(t), "home")}, declares("read"), func(d map[string]any) {
+		d["run_settings"] = map[string]any{"runtime": "codex"}
+	}, helloSkill, nil)
+	if !r.joined || r.err != nil {
+		record, _ := os.ReadFile(filepath.Join(r.open.RunsDir, r.open.RunID, "session.jsonl"))
+		t.Fatalf("%v (exit %d), want the join and exit 0\n%s\n%s", r.err, cmd.ExitCode(r.err), r.out, record)
+	}
+	t.Logf("qory run:\n%s", r.out)
+	ctl.transcriptAsked(t)
+	checkHomeMounts(t, r.spec)
+	wants(t, r.out, "stub: CODEX_HOME="+codex.HomeInWall+"\n", "stub: file sessions/"+pausedRolloutRel+"\n", "stub: text "+strings.TrimSuffix(pausedTranscript, "\n")+"\n")
+	if r.inputDir == "" {
+		t.Fatalf("no --add-dir in %q", r.spec.Args)
+	}
+	args := checkResumedArgs(t, stubArgs(r.out), []string{"exec", "--sandbox", "danger-full-access", "--json", "--add-dir", r.inputDir}, "[$workflow-hello]("+codex.HomeInWall+"/skills/workflow-hello/SKILL.md)")
+	t.Logf("Codex started with %q from exec on", args)
 	cache, err := os.UserCacheDir()
 	if err != nil {
 		t.Fatal(err)
