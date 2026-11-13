@@ -19,10 +19,11 @@ import (
 	"github.com/qoryai/qory/internal/render"
 )
 
-// HomeInWall is the folder in the agent image where a walled run binds Codex's
-// writable home and sets CODEX_HOME: ~/.codex of the agent image's HOME, /home/agent.
-// Codex keys each hook's trust by this path, see [WalledConfig].
-const HomeInWall = "/home/agent/.codex"
+// HomeInWall is the folder in the wall where a walled run binds Codex's writable home
+// and sets CODEX_HOME: one fixed path in every image, whatever HOME the image sets, so
+// qory knows it before the join. Codex keys each hook's trust by this path, see
+// [WalledConfig].
+const HomeInWall = "/tmp/qory-codex-home"
 
 // Bound is one file or folder of a walled run's Codex home that the run binds read-only
 // over its path in [HomeInWall].

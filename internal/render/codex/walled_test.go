@@ -67,9 +67,9 @@ func TestWalledConfigIsGolden(t *testing.T) {
       command = "/bin/true"
       type = "command"
   [hooks.state]
-    [hooks.state."/home/agent/.codex/config.toml:stop:0:0"]
+    [hooks.state."/tmp/qory-codex-home/config.toml:stop:0:0"]
       trusted_hash = "` + endCheckHash + `"
-    [hooks.state."/home/agent/.codex/config.toml:stop:0:1"]
+    [hooks.state."/tmp/qory-codex-home/config.toml:stop:0:1"]
       trusted_hash = "` + trueHash + `"
 
 [mcp_servers]
@@ -109,8 +109,8 @@ async = false
 `
 	state := walledState(t, config, nil)
 	want := map[string]string{
-		"/home/agent/.codex/config.toml:stop:0:0": "",
-		"/home/agent/.codex/config.toml:stop:1:1": endCheckHash,
+		"/tmp/qory-codex-home/config.toml:stop:0:0": "",
+		"/tmp/qory-codex-home/config.toml:stop:1:1": endCheckHash,
 	}
 	if len(state) != len(want) {
 		t.Fatalf("hooks.state %v, want the keys of %v", state, want)
@@ -123,7 +123,7 @@ async = false
 			t.Errorf("%s: %s, want %s", key, state[key], hash)
 		}
 	}
-	if _, ok := state["/home/agent/.codex/config.toml:stop:1:0"]; ok {
+	if _, ok := state["/tmp/qory-codex-home/config.toml:stop:1:0"]; ok {
 		t.Error("the MCP tool hook got a trusted_hash")
 	}
 }
