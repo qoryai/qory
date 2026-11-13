@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -44,9 +45,12 @@ func withCodexHome(fixed, defaults []string) ([]string, []string) {
 // bound read-only at its target, one name below [codex.HomeInWall]. checkout is the folder
 // the run binds as its checkout, the copy or the person's checkout, at its path; the
 // trust entries and the disabled skills of the checkout are written for that path and for
-// /workspace, where a run whose policy names its image by its reference sees it. A run
-// whose access is read, readOnly, gets parts.readRules in rules/read-access.rules.
-func walledCodexHome(root, harnessHome, checkout string, readOnly bool, parts codexParts) ([]wall.Mount, error) {
+// /workspace, where a run whose policy names its image by its reference sees it. workDir
+// is the run's working folder, at or below checkout: it gets an untrusted entry at its
+// path, and at its path under /workspace when it is below checkout, see
+// [codex.WalledRun.WorkDirs]. A run whose
+// access is read, readOnly, gets parts.readRules in rules/read-access.rules.
+func walledCodexHome(root, harnessHome, checkout, workDir string, readOnly bool, parts codexParts) ([]wall.Mount, error) {
 	home := filepath.Join(root, codexHomeName)
 	if err := os.Mkdir(home, 0o700); err != nil {
 		return nil, err
@@ -59,9 +63,18 @@ func walledCodexHome(root, harnessHome, checkout string, readOnly bool, parts co
 	if checkout != workspaceInWall {
 		projects = append(projects, workspaceInWall)
 	}
+	var workDirs []string
+	if workDir != "" && workDir != checkout {
+		workDirs = append(workDirs, workDir)
+		rel, err := filepath.Rel(realPath(checkout), realPath(workDir))
+		if err == nil && rel != "." && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && checkout != workspaceInWall {
+			workDirs = append(workDirs, path.Join(workspaceInWall, filepath.ToSlash(rel)))
+		}
+	}
 	binds, err := codex.WriteWalledHome(filepath.Join(harnessHome, codex.Runtime), filepath.Join(root, codexFixedName), codex.WalledRun{
 		Projects:  projects,
 		Checkouts: []string{checkout},
+		WorkDirs:  workDirs,
 		Skills:    parts.skills,
 		Access:    access,
 		ReadRules: parts.readRules,

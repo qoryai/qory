@@ -69,6 +69,14 @@ type WalledRun struct {
 	// Checkouts are the folders on this machine that the wall shows at Projects. qory
 	// reads the skills of each one's .codex/skills and .agents/skills.
 	Checkouts []string
+	// WorkDirs are the paths in the wall of the folder Codex starts in, the run's working
+	// folder, at each path where the wall shows it. Codex trusts that folder for the
+	// process when neither it nor its git root has a trust entry, a .git is at or above
+	// it and the sandbox gives full access. Its lookup of the git root finds none for a
+	// submodule's .git file, and for a worktree whose main .git the wall does not show
+	// or shows at another path, as at /workspace (codex-rs/config/src/config_toml.rs,
+	// get_active_project). Each one gets an untrusted entry.
+	WorkDirs []string
 	// Skills are the skills the run may load, from [AllowedSkills]. With [AllSkills],
 	// the run may load every skill of the home's skills folder.
 	Skills []string
@@ -93,8 +101,8 @@ const ReadRulesName = "read-access.rules"
 // from the writable home and from every other mount of the run, such as
 // <user cache>/qory/runs/<run id>/codex-fixed, and writes into it every part of a walled
 // run's Codex home that the run binds read-only: the config.toml from dir, the runtime's
-// directory of the composed home, with [WalledConfig]'s additions for run.Projects and
-// the git roots of run.Checkouts, see [gitRootsInWall], and with every skill that is not
+// directory of the composed home, with [WalledConfig]'s additions for run.Projects,
+// run.WorkDirs and the git roots of run.Checkouts, see [gitRootsInWall], and with every skill that is not
 // in run.Skills disabled, a hooks.json with no hook, an empty .env, environments.toml and
 // AGENTS.override.md, dir's AGENTS.md, or an empty one, and a copy of each folder of
 // [boundDirs] that dir has, with each link replaced by what it leads to, see [copyTree],
@@ -177,7 +185,7 @@ func WriteWalledHome(dir, files string, run WalledRun) ([]Bound, error) {
 	} else if err != nil {
 		return nil, err
 	}
-	untrusted := slices.Clone(run.Projects)
+	untrusted := slices.Concat(run.Projects, run.WorkDirs)
 	for _, c := range run.Checkouts {
 		untrusted = append(untrusted, gitRootsInWall(c, run.Projects)...)
 	}

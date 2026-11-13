@@ -1045,7 +1045,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					})
 					root = d.Root()
 				}
-				mounts, err := walledCodexHome(root, at.home, checkout, readOnly, codexFrom)
+				mounts, err := walledCodexHome(root, at.home, checkout, spec.Dir, readOnly, codexFrom)
 				if err != nil {
 					return &runLineError{codeLine(err)}
 				}
