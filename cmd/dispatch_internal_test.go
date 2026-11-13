@@ -143,17 +143,25 @@ func TestAWalledLaunchOfCodexHasNoSandboxOfItsOwn(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	home := t.TempDir()
+	skill := filepath.Join(home, "codex", "skills", "explore", "SKILL.md")
+	if err := os.MkdirAll(filepath.Dir(skill), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(skill, []byte("---\nname: explore\n---\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	args := []string{"exec", "--json", "--add-dir", "/in", "$explore /in/inputs.json"}
 	want := []string{"exec", "--sandbox", "danger-full-access", "--json", "--add-dir", "/in", "[$explore](/var/lib/qory-codex-home/skills/explore/SKILL.md) /in/inputs.json"}
-	if got, err := walledArgs(rt, args); err != nil || !slices.Equal(got, want) {
+	if got, err := walledArgs(rt, args, home); err != nil || !slices.Equal(got, want) {
 		t.Errorf("codex: got %q, %v, want %q", got, err, want)
 	}
-	if got, err := walledArgs(claudeRuntime(t), args); err != nil || !slices.Equal(got, args) {
+	if got, err := walledArgs(claudeRuntime(t), args, home); err != nil || !slices.Equal(got, args) {
 		t.Errorf("claude: got %q, %v, want %q", got, err, args)
 	}
 	// Claude Code's -p is --print, and Codex's flags mean nothing to it.
 	printed := []string{"-p", "hi", "--profile", "x", "--oss", "-c", "model_provider=x", "--enable", "apps", "--search", "--ignore-user-config"}
-	if got, err := walledArgs(claudeRuntime(t), printed); err != nil || !slices.Equal(got, printed) {
+	if got, err := walledArgs(claudeRuntime(t), printed, home); err != nil || !slices.Equal(got, printed) {
 		t.Errorf("claude: got %q, %v, want %q", got, err, printed)
 	}
 }

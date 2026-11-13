@@ -1636,7 +1636,9 @@ the work item. Then a run of the step explore:
   `[$<name>](/var/lib/qory-codex-home/skills/<name>/SKILL.md) <in>/inputs.json`. Codex
   selects a skill mentioned by its path by that path alone, so it starts the harness's
   skill and not a skill of the repository with the same name; a bare `$<name>` selects
-  the first enabled skill of that name, and a repository's skill comes first;
+  the first enabled skill of that name, and a repository's skill comes first. A prompt
+  whose `$<name>` is no skill of the composed harness, such as `$HOME is unset`, stays
+  as given;
 - takes its time limit as [Time limits](#time-limits) says.
 
 So the command line sets none of these. After the redemption, qory prints `qory run: the

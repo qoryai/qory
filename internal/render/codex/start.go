@@ -3,7 +3,9 @@ package codex
 import (
 	"errors"
 	"fmt"
+	"os"
 	"path"
+	"path/filepath"
 	"slices"
 	"strings"
 
@@ -36,13 +38,15 @@ func (codex) Install(version string) string { return "@openai/codex@" + version 
 // --sandbox (codex-rs/utils/cli/src/shared_options.rs).
 //
 // The last argument after exec, the prompt, mentions the skill of [HeadlessArgs] by its
-// path in the home that a walled run binds at [HomeInWall] when it starts with $<name>,
-// see [mentionByPath], also when the arguments set a sandbox mode.
+// path in the home that a walled run binds at [HomeInWall] when it starts with $<name>
+// and the runtime's directory of home, the composed harness home, has skills/<name>/
+// SKILL.md, see [mentionByPath], also when the arguments set a sandbox mode. Any other
+// prompt, such as "$HOME is unset", stays as given.
 //
 // Arguments that set the model provider, a profile, a feature, web search, hook trust, a
 // remote app server, or a key of [reservedKeys] or [argReservedKeys] with --config or -c,
 // or that skip qory's config.toml, are refused, see [checkArgs].
-func (codex) WalledArgs(args []string) ([]string, error) {
+func (codex) WalledArgs(args []string, home string) ([]string, error) {
 	if err := checkArgs(args); err != nil {
 		return nil, err
 	}
@@ -52,7 +56,13 @@ func (codex) WalledArgs(args []string) ([]string, error) {
 	}
 	args = slices.Clone(args)
 	if n := len(args) - 1; n > i {
-		args[n] = mentionByPath(args[n])
+		args[n] = mentionByPath(args[n], func(name string) bool {
+			if home == "" {
+				return false
+			}
+			info, err := os.Stat(filepath.Join(home, Runtime, "skills", name, "SKILL.md"))
+			return err == nil && info.Mode().IsRegular()
+		})
 	}
 	for _, a := range args {
 		if a == "--" {
@@ -235,13 +245,14 @@ func overlaps(k reservedKey, names []string) bool {
 }
 
 // mentionByPath is prompt with a leading $<name> written as [$<name>](<path>), the path
-// of the skill <name> in the home in the wall, and prompt as it is otherwise. Codex
+// of the skill <name> in the home in the wall, when isSkill(<name>), and prompt as it is
+// otherwise. Codex
 // selects a skill mentioned by path by that path alone, and a skill mentioned by $<name>
 // by the first enabled skill of that name, which may be one of the repository's
 // (codex-rs/ext/skills/src/selection.rs). A name is one or more of the characters Codex
 // reads in a mention, A-Z, a-z, 0-9, _ and -; a plugin's name has a colon and no folder in
 // the home, so it is none.
-func mentionByPath(prompt string) string {
+func mentionByPath(prompt string, isSkill func(string) bool) string {
 	rest, ok := strings.CutPrefix(prompt, "$")
 	if !ok {
 		return prompt
@@ -252,7 +263,7 @@ func mentionByPath(prompt string) string {
 	if end < 0 {
 		end = len(rest)
 	}
-	if end == 0 || end < len(rest) && rest[end] != ' ' {
+	if end == 0 || end < len(rest) && rest[end] != ' ' || !isSkill(rest[:end]) {
 		return prompt
 	}
 	name := rest[:end]

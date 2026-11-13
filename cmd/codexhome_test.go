@@ -187,8 +187,9 @@ func TestOnlyAWalledCodexRunMountsACodexHome(t *testing.T) {
 
 // TestAWalledCodexReadRunGetsTheReadRules is a walled Codex run from a run code that only
 // reads, with no copy: it mounts the Codex home from a new folder of the run under the
-// user's cache, its rules/ has read-access.rules with the module's rules, and the folder
-// is gone once the run ends.
+// user's cache, its rules/ has read-access.rules with the module's rules, its prompt
+// mentions the workflow's skill, which the composed home has, by its path in the home,
+// and the folder is gone once the run ends.
 func TestAWalledCodexReadRunGetsTheReadRules(t *testing.T) {
 	var seen []seenHome
 	t.Cleanup(cmd.SetJoinSession(func(s session.SessionSpec) { seen = append(seen, sawHome(t, s)) }))
@@ -209,6 +210,9 @@ func TestAWalledCodexReadRunGetsTheReadRules(t *testing.T) {
 	home := checkHomeMounts(t, seen[0].spec)
 	if !slices.Contains(seen[0].rules, codex.ReadRulesName) {
 		t.Errorf("a read run's rules: %q", seen[0].rules)
+	}
+	if args := seen[0].spec.Args; len(args) == 0 || !strings.HasPrefix(args[len(args)-1], "[$workflow-hello](/var/lib/qory-codex-home/skills/workflow-hello/SKILL.md) ") {
+		t.Errorf("the arguments %q, want the prompt to mention workflow-hello by its path", args)
 	}
 	if _, err := os.Lstat(filepath.Dir(home)); !os.IsNotExist(err) {
 		t.Errorf("the run's folder %s is left after the run: %v", filepath.Dir(home), err)

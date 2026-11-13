@@ -1,6 +1,8 @@
 package codex_test
 
 import (
+	"os"
+	"path/filepath"
 	"slices"
 	"testing"
 
@@ -11,9 +13,10 @@ import (
 // code starts it, gets --sandbox danger-full-access right after exec, also with a sandbox
 // flag after --; a start with no exec, and arguments that set a sandbox mode, bypass one
 // or ask for --approve-for-me, before exec or after it, stay as given. A last argument
-// after exec that starts with $<name> mentions the skill by its path in the walled home,
-// also beside a sandbox flag; a plugin's name, a bare $, and a $<name> that is not the
-// last argument stay as given.
+// after exec that starts with $<name> of a skill of the composed home mentions the skill
+// by its path in the walled home, also beside a sandbox flag; a $<name> that is no skill
+// there, such as $HOME, a plugin's name, a bare $, and a $<name> that is not the last
+// argument stay as given.
 func TestWalledArgs(t *testing.T) {
 	rt, err := render.Lookup("codex")
 	if err != nil {
@@ -23,12 +26,24 @@ func TestWalledArgs(t *testing.T) {
 	if !ok {
 		t.Fatal("codex is no render.Walled")
 	}
+	home := t.TempDir()
+	for _, name := range []string{"explore", "workflow-explore"} {
+		p := filepath.Join(home, "codex", "skills", name, "SKILL.md")
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte("---\nname: "+name+"\n---\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
 	for _, c := range []struct{ args, want []string }{
 		{[]string{"exec", "--json", "$explore x"}, []string{"exec", "--sandbox", "danger-full-access", "--json", "[$explore](/var/lib/qory-codex-home/skills/explore/SKILL.md) x"}},
 		{[]string{"exec", "$workflow-explore"}, []string{"exec", "--sandbox", "danger-full-access", "[$workflow-explore](/var/lib/qory-codex-home/skills/workflow-explore/SKILL.md)"}},
 		{[]string{"exec", "--sandbox", "read-only", "$explore x"}, []string{"exec", "--sandbox", "read-only", "[$explore](/var/lib/qory-codex-home/skills/explore/SKILL.md) x"}},
 		{[]string{"exec", "$pack:review x"}, []string{"exec", "--sandbox", "danger-full-access", "$pack:review x"}},
 		{[]string{"exec", "$ x"}, []string{"exec", "--sandbox", "danger-full-access", "$ x"}},
+		{[]string{"exec", "$HOME is unset"}, []string{"exec", "--sandbox", "danger-full-access", "$HOME is unset"}},
+		{[]string{"exec", "$review x"}, []string{"exec", "--sandbox", "danger-full-access", "$review x"}},
 		{[]string{"exec", "$explore", "x"}, []string{"exec", "--sandbox", "danger-full-access", "$explore", "x"}},
 		{[]string{"$explore", "exec"}, []string{"$explore", "exec", "--sandbox", "danger-full-access"}},
 		{[]string{"--model", "m", "exec", "hi"}, []string{"--model", "m", "exec", "--sandbox", "danger-full-access", "hi"}},
@@ -49,7 +64,7 @@ func TestWalledArgs(t *testing.T) {
 		{[]string{"--approve-for-me", "exec", "hi"}, []string{"--approve-for-me", "exec", "hi"}},
 		{[]string{"exec", "--json", "hi"}, []string{"exec", "--sandbox", "danger-full-access", "--json", "hi"}},
 	} {
-		if got, err := w.WalledArgs(c.args); err != nil || !slices.Equal(got, c.want) {
+		if got, err := w.WalledArgs(c.args, home); err != nil || !slices.Equal(got, c.want) {
 			t.Errorf("WalledArgs(%q) = %q, %v, want %q", c.args, got, err, c.want)
 		}
 	}
@@ -66,7 +81,7 @@ func TestWalledArgsRefuseAReservedConfigKey(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	w := rt.(render.Walled)
+	w, home := rt.(render.Walled), ""
 	for _, c := range []struct {
 		args []string
 		key  string
@@ -91,7 +106,7 @@ func TestWalledArgsRefuseAReservedConfigKey(t *testing.T) {
 		{[]string{"exec", "-c", "use_legacy_landlock=true", "hi"}, "use_legacy_landlock"},
 		{[]string{"exec", "-c", "model_verbosity=low", "-c", "web_search=live", "hi"}, "web_search"},
 	} {
-		got, err := w.WalledArgs(c.args)
+		got, err := w.WalledArgs(c.args, home)
 		want := "Remove `--config " + c.key + "` from the run's Codex arguments: a Codex run takes this key from qory and Forager, not from the arguments."
 		if err == nil || err.Error() != want || got != nil {
 			t.Errorf("WalledArgs(%q) = %q, %v, want %q", c.args, got, err, want)
@@ -113,7 +128,7 @@ func TestWalledArgsRefuseAReservedConfigKey(t *testing.T) {
 		{"exec", "-C", "model_provider=x"},
 		{"--model", "m"},
 	} {
-		if _, err := w.WalledArgs(args); err != nil {
+		if _, err := w.WalledArgs(args, home); err != nil {
 			t.Errorf("WalledArgs(%q): %v", args, err)
 		}
 	}
@@ -127,7 +142,7 @@ func TestWalledArgsRefuseAProviderOrAProfile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	w := rt.(render.Walled)
+	w, home := rt.(render.Walled), ""
 	provider := func(flag string) string {
 		return "Remove `" + flag + "` from the run's Codex arguments: a Codex run takes its model provider from qory and Forager, not from the arguments."
 	}
@@ -152,7 +167,7 @@ func TestWalledArgsRefuseAProviderOrAProfile(t *testing.T) {
 		{[]string{"exec", "--profile", "x", "--oss", "hi"}, profile},
 		{[]string{"exec", "--oss", "-c", "model_provider=x", "hi"}, provider("--oss")},
 	} {
-		got, err := w.WalledArgs(c.args)
+		got, err := w.WalledArgs(c.args, home)
 		if err == nil || err.Error() != c.want || got != nil {
 			t.Errorf("WalledArgs(%q) = %q, %v, want %q", c.args, got, err, c.want)
 		}
@@ -167,7 +182,7 @@ func TestWalledArgsRefuseAFeature(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	w := rt.(render.Walled)
+	w, home := rt.(render.Walled), ""
 	for _, c := range []struct {
 		args []string
 		flag string
@@ -183,7 +198,7 @@ func TestWalledArgsRefuseAFeature(t *testing.T) {
 		{[]string{"--enable", "apps"}, "--enable apps"},
 	} {
 		want := "Remove `" + c.flag + "` from the run's Codex arguments: a Codex run takes this key from qory and Forager, not from the arguments."
-		got, err := w.WalledArgs(c.args)
+		got, err := w.WalledArgs(c.args, home)
 		if err == nil || err.Error() != want || got != nil {
 			t.Errorf("WalledArgs(%q) = %q, %v, want %q", c.args, got, err, want)
 		}
@@ -198,7 +213,7 @@ func TestWalledArgsRefuseSkippedSettingsAndSearch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	w := rt.(render.Walled)
+	w, home := rt.(render.Walled), ""
 	ignore := "Remove `--ignore-user-config` from the run's Codex arguments: a Codex run takes its settings from qory and Forager, not from the arguments."
 	search := "Remove `--search` from the run's Codex arguments: a Codex run takes its web search setting from qory and Forager, not from the arguments."
 	for _, c := range []struct {
@@ -214,7 +229,7 @@ func TestWalledArgsRefuseSkippedSettingsAndSearch(t *testing.T) {
 		{[]string{"exec", "--search", "hi"}, search},
 		{[]string{"hi", "--search"}, search},
 	} {
-		got, err := w.WalledArgs(c.args)
+		got, err := w.WalledArgs(c.args, home)
 		if err == nil || err.Error() != c.want || got != nil {
 			t.Errorf("WalledArgs(%q) = %q, %v, want %q", c.args, got, err, c.want)
 		}
@@ -229,7 +244,7 @@ func TestWalledArgsRefuseHookTrustAndRemote(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	w := rt.(render.Walled)
+	w, home := rt.(render.Walled), ""
 	hooks := "Remove `--dangerously-bypass-hook-trust` from the run's Codex arguments: a Codex run takes its hook trust from qory and Forager, not from the arguments."
 	remote := "Remove `--remote` from the run's Codex arguments: a Codex run takes its app server from qory and Forager, not from the arguments."
 	token := "Remove `--remote-auth-token-env` from the run's Codex arguments: a Codex run takes its app server from qory and Forager, not from the arguments."
@@ -246,7 +261,7 @@ func TestWalledArgsRefuseHookTrustAndRemote(t *testing.T) {
 		{[]string{"--remote-auth-token-env", "TOKEN"}, token},
 		{[]string{"--remote-auth-token-env=TOKEN", "hi"}, token},
 	} {
-		got, err := w.WalledArgs(c.args)
+		got, err := w.WalledArgs(c.args, home)
 		if err == nil || err.Error() != c.want || got != nil {
 			t.Errorf("WalledArgs(%q) = %q, %v, want %q", c.args, got, err, c.want)
 		}
@@ -257,7 +272,7 @@ func TestWalledArgsRefuseHookTrustAndRemote(t *testing.T) {
 		{"exec", "--", "--remote-auth-token-env=TOKEN"},
 		{"exec", "use --remote"},
 	} {
-		if _, err := w.WalledArgs(args); err != nil {
+		if _, err := w.WalledArgs(args, home); err != nil {
 			t.Errorf("WalledArgs(%q): %v", args, err)
 		}
 	}
@@ -270,7 +285,7 @@ func TestWalledArgsRefuseSkills(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	w := rt.(render.Walled)
+	w, home := rt.(render.Walled), ""
 	for _, c := range []struct{ pair, key string }{
 		{"skills.bundled.enabled=true", "skills.bundled.enabled"},
 		{"skills.config=[]", "skills.config"},
@@ -281,14 +296,14 @@ func TestWalledArgsRefuseSkills(t *testing.T) {
 	} {
 		want := "Remove `--config " + c.key + "` from the run's Codex arguments: a Codex run takes this key from qory and Forager, not from the arguments."
 		for _, args := range [][]string{{"-c", c.pair}, {"--config=" + c.pair}, {"-c=" + c.pair}} {
-			got, err := w.WalledArgs(args)
+			got, err := w.WalledArgs(args, home)
 			if err == nil || err.Error() != want || got != nil {
 				t.Errorf("WalledArgs(%q) = %q, %v, want %q", args, got, err, want)
 			}
 		}
 	}
 	for _, pair := range []string{"cloud.other=true", "skills_extra=true", "model_verbosity=low", "tools.web_search=false"} {
-		if _, err := w.WalledArgs([]string{"-c", pair}); err != nil {
+		if _, err := w.WalledArgs([]string{"-c", pair}, home); err != nil {
 			t.Errorf("WalledArgs(-c %q): %v", pair, err)
 		}
 	}
@@ -302,7 +317,7 @@ func TestWalledArgsRefusalsEscapeControlCharacters(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	w := rt.(render.Walled)
+	w, home := rt.(render.Walled), ""
 	for _, c := range []struct {
 		args []string
 		want string
@@ -311,7 +326,7 @@ func TestWalledArgsRefusalsEscapeControlCharacters(t *testing.T) {
 		{[]string{"--enable", "x\ay"}, "Remove `--enable x\\ay` from the run's Codex arguments: a Codex run takes this key from qory and Forager, not from the arguments."},
 		{[]string{"--disable=x\ry"}, "Remove `--disable x\\ry` from the run's Codex arguments: a Codex run takes this key from qory and Forager, not from the arguments."},
 	} {
-		_, err := w.WalledArgs(c.args)
+		_, err := w.WalledArgs(c.args, home)
 		if err == nil || err.Error() != c.want {
 			t.Errorf("WalledArgs(%q): %v, want %q", c.args, err, c.want)
 		}

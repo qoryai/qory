@@ -333,8 +333,8 @@ release may change what an existing document does, and states it under Upgrading
   `--approve-for-me` or `--not-so-yolo`, which Codex refuses beside `--sandbox`. Inside
   the wall every other sandbox mode of Codex fails before it runs a command. The prompt
   of a walled `codex exec` mentions the skill by its path,
-  `[$<name>](/var/lib/qory-codex-home/skills/<name>/SKILL.md)`, not `$<name>`. An unwalled
-  run is unchanged.
+  `[$<name>](/var/lib/qory-codex-home/skills/<name>/SKILL.md)`, not `$<name>`, when the
+  composed harness has that skill. An unwalled run is unchanged.
 - A walled Codex run starts Codex on a new home: `CODEX_HOME` is
   `/var/lib/qory-codex-home`, where qory binds `<user cache>/qory/runs/<run id>/codex-home`
   writable for Codex's sessions, temporary files and state database. qory writes
