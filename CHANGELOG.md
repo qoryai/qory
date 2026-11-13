@@ -779,16 +779,10 @@ release may change what an existing document does, and states it under Upgrading
   `settings/codex/config.toml`: qory sets it for every Codex run.`` A fragment may still
   set `web_search` and the other keys of `hooks`, such as `hooks.Stop`.
 - Compose accepts `settings/codex/read-access.rules`, Codex execpolicy rules for a run
-  whose access is `read`. It merges the file into no target file and places it in no
-  home. A walled read run on Codex writes it to `read-access.rules` in the `rules/`
-  folder of the Codex home; a run with any other access gets none. Several modules'
-  files are joined in module order. Any other file under `settings/` that is neither
-  `.json` nor `.toml` is still refused. See `contracts/harness/v1/README.md`.
-- The home of a walled Codex run disables, by name, every skill that no
-  `Skill(harness:<name>)` rule in `permissions.allow` of the harness's
-  `settings/claude/settings.json` allows: each skill in the home and in the checkout's
-  `.codex/skills` and `.agents/skills`. It turns off the skills Codex ships and a cloud's
-  skills. See the codex entry in `contracts/harness/v1/README.md`.
+  whose access is `read`. It keeps the files of all modules, joined in module order,
+  merges them into no target file and places them in no home. Any other file under
+  `settings/` that is neither `.json` nor `.toml` is still refused. See
+  `contracts/harness/v1/README.md`.
 - Compose refuses a module that ships `files/codex/auth.json`, Codex's login file, with
   ``Remove `files/codex/auth.json` from module <name>: qory gives Codex its model key
   through the gateway.``

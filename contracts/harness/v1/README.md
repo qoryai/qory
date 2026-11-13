@@ -855,13 +855,9 @@ and so on, merged per file across modules.
 `settings/codex/read-access.rules` is the one file under `settings/` that is not merged
 into a target file. It contains Codex execpolicy rules in Starlark, such as
 `prefix_rule(pattern=["rm"], decision="forbidden")`, for a run whose access is `read`.
-The compose places it in no home. A walled read run on Codex writes it read-only to
-`read-access.rules` in the `rules/` folder of the Codex home, and a run with any other
-access gets none. When several modules ship the file, the run gets them joined in module
-order, as fragments of one target file merge. The rules are best effort: a command
-can get past a rule, for example by a path such as `/bin/rm`, and the wall is the limit.
-Any other file under `settings/` that is neither `.json` nor `.toml`, another `.rules`
-name included, fails the compose with `settings fragments are .json or .toml`.
+The compose keeps the files of all modules, joined in module order, and places them in
+no home. Any other file under `settings/` that is neither `.json` nor `.toml`, another
+`.rules` name included, fails the compose with `settings fragments are .json or .toml`.
 
 `files/<runtime>/<path>` is for what a runtime reads from its directory beyond the kinds
 above: Claude Code's `.claude/rules/*.md`, Cursor's `.cursor/rules/*.mdc`, Copilot's
@@ -1208,17 +1204,7 @@ Per runtime, the files written into its directory:
   `<key>` from the harness's `settings/codex/config.toml`: qory writes it from the run's
   model key.`` for `model_provider` and `model_providers`, and ``Remove `<key>` from the
   harness's `settings/codex/config.toml`: qory sets it for every Codex run.`` for the
-  others. Codex has no allow list of skills, so the `Skill(harness:<name>)` rules in
-  `permissions.allow` of `settings/claude/settings.json` are the Codex list too. In the
-  home of a walled Codex run, `config.toml` disables every other skill by name, with a
-  `[[skills.config]]` entry with `enabled = false` after any entry the fragment has: each
-  skill of the home's `skills/` and of the checkout's `.codex/skills` and
-  `.agents/skills`, by its frontmatter `name` and its folder's name, and after the name
-  of each plugin above it. It also sets `skills.bundled.enabled = false` and
-  `cloud.skills.enabled = false`. A rule with a pattern, such as `Skill(harness:*)`,
-  allows no skill, and a harness with no such rule runs with none. Codex still loads a
-  skill that is not there when qory writes the home, such as one the agent writes, and a
-  skill of the checkout with an allowed name.
+  others.
 - **gemini**: `settings.json` with `model.name` and `mcpServers`, links for skills and hooks,
   one `agents/<name>.md` with `name` and `description`, one `commands/<name>.toml` with
   `$ARGUMENTS` as `{{args}}`. Gemini reads a project `.gemini` only in a trusted folder.
