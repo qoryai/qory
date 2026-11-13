@@ -812,6 +812,11 @@ release may change what an existing document does, and states it under Upgrading
   `--profile` from the run's Codex arguments: a Codex run takes its settings from qory
   and Forager, not from a profile.`` The run stops before the agent starts, with exit
   status 1. An unwalled run, and a run of another runtime, is unchanged.
+- A walled Codex run refuses `--enable <feature>` and `--disable <feature>` before `--`,
+  also as `--enable=<feature>`, for every feature, the legacy name `connectors` too:
+  Codex reads them as `--config features.<feature>=true` or `false`. The text is
+  ``Remove `--enable <feature>` from the run's Codex arguments: a Codex run takes this
+  key from qory and Forager, not from the arguments.``, or the same with `--disable`.
 - Compose accepts `settings/codex/read-access.rules`, a file of Codex execpolicy rules.
   It joins the files of all modules in module order, merges them into no target file and
   places them in no home, so no run reads them. Any other file under `settings/` that is
