@@ -331,8 +331,26 @@ release may change what an existing document does, and states it under Upgrading
 - A walled run starts `codex exec` with `--sandbox danger-full-access` after `exec`,
   unless an argument before `--` sets a sandbox mode, bypasses one, or is
   `--approve-for-me` or `--not-so-yolo`, which Codex refuses beside `--sandbox`. Inside
-  the wall every other sandbox mode of Codex fails before it runs a command. An unwalled
+  the wall every other sandbox mode of Codex fails before it runs a command. The prompt
+  of a walled `codex exec` mentions the skill by its path,
+  `[$<name>](/var/lib/qory-codex-home/skills/<name>/SKILL.md)`, not `$<name>`. An unwalled
   run is unchanged.
+- A walled Codex run starts Codex on a new home: `CODEX_HOME` is
+  `/var/lib/qory-codex-home`, where qory binds `<user cache>/qory/runs/<run id>/codex-home`
+  writable for Codex's sessions, temporary files and state database. qory writes
+  `config.toml` with its additions, `hooks.json` with no hook, an empty `.env`,
+  `environments.toml` and `AGENTS.override.md`, the harness's `AGENTS.md`, and copies of
+  `rules/`, `skills/` and `agents/` into `<user cache>/qory/runs/<run id>/codex-fixed`,
+  and binds each read-only at its path in the home. A walled Codex run copies the
+  composed home's `skills/`, `rules/` and `agents/` with every link replaced by the file
+  or folder it leads to, since Codex 0.167.2 passes over a `SKILL.md` that is a link. A
+  link whose target lies outside the composed home, the folders of the harness's modules
+  and qory's module cache fails the run with ``Remove the link `<path>` from the harness:
+  it leads to `<target>`, outside the harness's modules, and a Codex run copies only files
+  inside them.`` qory removes both folders when the run ends. Before, `CODEX_HOME` was the
+  runtime's directory of the composed home, which a walled run binds read-only. A
+  `CODEX_HOME` in `harness.launch.codex.env` no longer applies behind a wall. An unwalled
+  run is unchanged. See Codex behind a wall in `docs/run.md`.
 - qory builds with Forager main 37dc0148. A run keeps its wall only when a container of
   the run may still run; a network or folder of the wall that could not be removed no longer
   keeps it.
@@ -870,10 +888,19 @@ release may change what an existing document does, and states it under Upgrading
   exits with 1.
 - The line for an image with no `sh` reads ``the setup of a walled run runs sh from these
   folders``, in place of ``the git session of a walled run``.
-- Compose accepts `settings/codex/read-access.rules`, a file of Codex execpolicy rules.
-  It joins the files of all modules in module order, merges them into no target file and
-  places them in no home, so no run reads them. Any other file under `settings/` that is
-  neither `.json` nor `.toml` is still refused. See `contracts/harness/v1/README.md`.
+- Compose accepts `settings/codex/read-access.rules`, Codex execpolicy rules for a run
+  whose access is `read`. It merges the file into no target file and places it in no
+  home. A walled read run on Codex writes it to `read-access.rules` in the `rules/`
+  folder of the Codex home; a run with any other access gets none. Several modules'
+  files are joined in module order. Any other file under `settings/` that is neither
+  `.json` nor `.toml` is still refused. See `contracts/harness/v1/README.md`.
+- The home of a walled Codex run disables, by name, every skill that no
+  `Skill(harness:<name>)` rule in `permissions.allow` of the harness's
+  `settings/claude/settings.json` allows: each skill in the home and in the checkout's
+  `.codex/skills` and `.agents/skills`, and every skill of the checkout by its path,
+  whatever its name. `Skill(harness:*)` allows every skill of the harness. It turns off
+  the skills Codex ships and a cloud's skills. See the codex entry
+  in `contracts/harness/v1/README.md`.
 - Compose refuses a Codex `settings/codex/config.toml` or `settings/codex/hooks.json`
   with a hook whose `timeout` or `additionalContextLimit` is negative or fractional,
   with ``Set `<key>` of the `<event>` hook in the harness's `settings/codex/<file>` to a

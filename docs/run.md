@@ -1631,7 +1631,12 @@ the work item. Then a run of the step explore:
   qory adds no `--sandbox` when an argument before `--`, before `exec` or after it, sets
   a sandbox mode (`--sandbox`, `-s`, `-s<mode>`), bypasses one (`--yolo`,
   `--dangerously-bypass-approvals-and-sandbox`), or is `--approve-for-me` or
-  `--not-so-yolo`, which Codex refuses beside `--sandbox`;
+  `--not-so-yolo`, which Codex refuses beside `--sandbox`.
+  Behind a wall, the prompt mentions the skill by its path,
+  `[$<name>](/var/lib/qory-codex-home/skills/<name>/SKILL.md) <in>/inputs.json`. Codex
+  selects a skill mentioned by its path by that path alone, so it starts the harness's
+  skill and not a skill of the repository with the same name; a bare `$<name>` selects
+  the first enabled skill of that name, and a repository's skill comes first;
 - takes its time limit as [Time limits](#time-limits) says.
 
 So the command line sets none of these. After the redemption, qory prints `qory run: the
@@ -3721,6 +3726,45 @@ stops when the image has `/etc/claude-code`, where Claude Code reads managed set
 
 These checks guard against what the image and the repository's files leave in place, not
 against a repository that acts against them: see [The run key](#the-run-key).
+
+### Codex behind a wall
+
+Every walled Codex run starts Codex on a new home. `CODEX_HOME` is
+`/var/lib/qory-codex-home` in the container, a fixed variable: a `CODEX_HOME` in
+`harness.launch.codex.env` does not apply behind a wall. Without a wall, `CODEX_HOME` is
+the runtime's directory of the composed home, as before.
+
+qory makes two folders for the home in `<user cache>/qory/runs/<run id>`, the folder of the
+run's copy, or, for a run with no copy, a new folder at that path:
+
+- `codex-home`, bound writable at `/var/lib/qory-codex-home`. Codex writes its sessions,
+  its temporary files and its state database there. The home is outside `/tmp`, because
+  Codex 0.167.2 writes its helper programs, such as `apply_patch`, under
+  `$CODEX_HOME/tmp/arg0-linux`, and writes none when the home is under the temporary
+  folder.
+- `codex-fixed`, with the parts of the home the agent may not change: `config.toml` with
+  qory's additions, `hooks.json` with no hook, an empty `.env`, an empty
+  `environments.toml`, an empty `AGENTS.override.md`, the harness's `AGENTS.md`, and
+  copies of the harness's `rules/`, `skills/` and `agents/`. qory binds each one
+  read-only at its path under `/var/lib/qory-codex-home`, so a write into it fails, and
+  so does a move or a removal of one of them.
+
+`config.toml` marks the checkout untrusted, at its path in the container and at
+`/workspace`, so Codex reads no hook, rule or setting of the repository's `.codex`. A
+walled read run whose harness ships `settings/codex/read-access.rules` gets those rules
+as `rules/read-access.rules`; a run with any other access gets none.
+
+A walled Codex run copies the composed home's `skills/`, `rules/` and `agents/` with every
+link replaced by the file or folder it leads to, since Codex 0.167.2 passes over a
+`SKILL.md` that is a link. A link whose target lies outside the composed home, the folders
+of the harness's modules and qory's module cache fails the run with ``Remove the link
+`<path>` from the harness: it leads to `<target>`, outside the harness's modules, and a
+Codex run copies only files inside them.``
+
+qory removes both folders when the run ends, also when the copy stays. A run with no copy
+whose folder `<user cache>/qory/runs/<run id>` exists stops before the agent starts with
+``remove <folder>, or start the run again with another id: a walled Codex run writes its
+Codex home in a new folder, and that folder exists``.
 
 ### Codex arguments a walled run refuses
 

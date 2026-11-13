@@ -339,7 +339,11 @@ var setKey = []string{"shell_environment_policy", "set"}
 // launch's variables the way it filters any other.
 func (codex) EnvAt() (string, []string) { return "config.toml", setKey }
 
-// Template starts Codex with the runtime's directory as its home.
+// HomeVariable is the variable Codex reads its home from.
+const HomeVariable = "CODEX_HOME"
+
+// Template starts Codex with the runtime's directory as its home. A walled run sets
+// HomeVariable to [HomeInWall] in its place.
 func (codex) Template() render.Template {
-	return render.Template{Command: "codex", Env: map[string]string{"CODEX_HOME": "${dir}"}}
+	return render.Template{Command: "codex", Env: map[string]string{HomeVariable: "${dir}"}}
 }

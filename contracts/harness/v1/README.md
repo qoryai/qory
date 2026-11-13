@@ -854,10 +854,15 @@ and so on, merged per file across modules.
 
 `settings/codex/read-access.rules` is the one file under `settings/` that is not merged
 into a target file. It contains Codex execpolicy rules in Starlark, such as
-`prefix_rule(pattern=["rm"], decision="forbidden")`. The compose accepts the file, joins
-the files of all modules in module order, and places them in no home, so no run reads
-them. Any other file under `settings/` that is neither `.json` nor `.toml`, another
-`.rules` name included, fails the compose with `settings fragments are .json or .toml`.
+`prefix_rule(pattern=["rm"], decision="forbidden")`, for a run whose access is `read`.
+The compose places it in no home. A walled read run on Codex writes it read-only to
+`read-access.rules` in the `rules/` folder of the Codex home, and a run with any other
+access gets none. When several modules ship the file, the run gets them joined in module
+order. The rules stop no command: a command gets
+past a prefix rule through `bash -c` or a path such as `/bin/rm`. The read-only mount of
+the checkout is what keeps a read run from changing it.
+Any other file under `settings/` that is neither `.json` nor `.toml`, another `.rules`
+name included, fails the compose with `settings fragments are .json or .toml`.
 
 `files/<runtime>/<path>` is for what a runtime reads from its directory beyond the kinds
 above: Claude Code's `.claude/rules/*.md`, Cursor's `.cursor/rules/*.mdc`, Copilot's
@@ -1178,7 +1183,10 @@ run takes its model key from the run, not from a file.``
 `codex` also reserves `hooks.json`, `.env`, `environments.toml`, `AGENTS.override.md`
 and `rules/read-access.rules`: compose refuses a module that ships one of them under
 `files/codex/`. The refusal is ``Remove `files/codex/<path>` from module <name>: qory writes it for every
-walled Codex run.`` Other files under `rules/` stay allowed. Each skill under `codex/skills/`
+walled Codex run.`` qory writes `hooks.json`, `.env`, `environments.toml` and
+`AGENTS.override.md` in the Codex home of every walled Codex run, and
+`rules/read-access.rules` in the Codex home of a walled read run whose harness ships
+`settings/codex/read-access.rules`. Other files under `rules/` stay allowed. Each skill under `codex/skills/`
 is copied within the limits of a copy of one module entry and leaves out `.git`. A walled Codex run's copy
 of `rules/` and `agents/` takes at most 10,000 files, directories and links, 1 GiB in all
 and 64 MiB a file.
@@ -1246,6 +1254,23 @@ Per runtime, the files written into its directory:
   `additionalContextLimit` is negative or fractional, such as 2.0, fails the compose
   with ``Set `<key>` of the `<event>` hook in the harness's `settings/codex/<file>` to a
   whole number of 0 or more: Codex ignores the whole file otherwise.``
+  Codex has no allow list of skills, so the `Skill(harness:<name>)` rules in
+  `permissions.allow` of `settings/claude/settings.json` are the Codex list too. In the
+  home of a walled Codex run, `config.toml` disables every other skill by name, with a
+  `[[skills.config]]` entry with `enabled = false` after any entry the fragment has: each
+  skill of the home's `skills/` and of the checkout's `.codex/skills` and
+  `.agents/skills`, by its frontmatter `name` and its folder's name, and after the name
+  of each plugin above it. It also sets `skills.bundled.enabled = false` and
+  `cloud.skills.enabled = false`. Any other rule with a pattern, such as
+  `Skill(harness:review-*)`, allows no skill. Every skill of the checkout's
+  `.codex/skills` and `.agents/skills` also gets a `[[skills.config]]` entry with its
+  `SKILL.md` path in the wall and `enabled = false`, after the name entries, so a
+  checkout skill with the name of an allowed harness skill is disabled too.
+  `Skill(harness:*)` allows every skill of the harness home, so none of them gets a
+  `[[skills.config]]` entry; a skill of the checkout with another name still gets one.
+  A harness with no `Skill(harness:<name>)` rule gets no skill on Codex.
+  qory does not cover a skill that the agent writes during the run, or one the agent
+  reads as a file with shell commands; the wall is the limit.
 - **gemini**: `settings.json` with `model.name` and `mcpServers`, links for skills and hooks,
   one `agents/<name>.md` with `name` and `description`, one `commands/<name>.toml` with
   `$ARGUMENTS` as `{{args}}`. Gemini reads a project `.gemini` only in a trusted folder.
@@ -1350,7 +1375,7 @@ reports it with status 2: `goose` and `any`.
 | `claude` | `claude --plugin-dir ${dir}/plugin --settings ${dir}/settings.json --mcp-config ${dir}/mcp.json --append-system-prompt-file ${dir}/launch/AGENTS.md --setting-sources user` | `plugin/`, a plugin in Claude Code's layout: the skills and commands linked, or written where a document contains a reference, the agents copied, since Claude Code passes over a link in a plugin's `agents/` where it follows one everywhere else, the output styles under `output-styles/` with the manifest's `outputStyles` pointing there, `.claude-plugin/plugin.json` setting its name to `harness`, so a skill is `/harness:<name>` and an agent `harness:<name>`, and every reference in the plugin resolves to that name; `launch/AGENTS.md`, the instructions with their references resolved the same way and, after them, the names the session registers, per kind, with each role | everything: the plugin, the permissions, hooks and model in `settings.json`, the environment the line sets, the servers, the instructions appended to the system prompt; `--setting-sources user` keeps every `.claude` of the checkout and of the directories above it out | nothing |
 | `cursor` | `cursor-agent --plugin-dir ${dir}/plugin` | `plugin/`, the same layout under `.cursor-plugin/plugin.json`, with the agents in Cursor's shape, a copy of `hooks.json` as `hooks/hooks.json` and of `mcp.json` as `.mcp.json`, since the CLI takes no settings file | the skills, agents, hooks and servers | the instructions, `AGENTS.md` |
 | `copilot` | `copilot --add-dir ${dir}/workspace --additional-mcp-config @${dir}/mcp.json` | `workspace/.github/skills` linked and `workspace/.github/agents` written, which `--add-dir` loads as trusted configuration, and `mcp.json` with the servers under `mcpServers`, so the MCP kind has a place in copilot | the skills, agents and servers | the hooks and the instructions |
-| `codex` | `env CODEX_HOME=${dir} codex` | `skills/` copied as folders and regular files and the instructions as `AGENTS.md`, ending with the names the session registers, which a Codex home registers as the modules wrote them, beside `config.toml` and the agents, so the directory is a Codex home | everything | nothing; Codex reads its model key from `OPENAI_API_KEY`. qory writes no `auth.json`, Codex's login file, and a module that ships `files/codex/auth.json` fails the compose with ``Remove `files/codex/auth.json` from module <name>: a Codex run takes its model key from the run, not from a file.`` |
+| `codex` | `env CODEX_HOME=${dir} codex` | `skills/` copied as folders and regular files and the instructions as `AGENTS.md`, ending with the names the session registers, which a Codex home registers as the modules wrote them, beside `config.toml` and the agents, so the directory is a Codex home. Behind a wall, `CODEX_HOME` is `/var/lib/qory-codex-home`, a writable folder of the run, and qory binds `config.toml`, `hooks.json`, `.env`, `environments.toml`, `AGENTS.override.md`, `AGENTS.md`, `rules/`, `skills/` and `agents/` read-only over it, see [docs/run.md](../../../docs/run.md#codex-behind-a-wall) | everything | nothing; Codex reads its model key from `OPENAI_API_KEY`. qory writes no `auth.json`, Codex's login file, and a module that ships `files/codex/auth.json` fails the compose with ``Remove `files/codex/auth.json` from module <name>: a Codex run takes its model key from the run, not from a file.`` |
 | `opencode` | `env OPENCODE_CONFIG_DIR=${dir} opencode` | `skills/` linked, beside `opencode.json`, the agents, commands and hooks, since OpenCode reads the directory the way it reads `.opencode` | the model, servers, agents, commands, hooks and skills | the instructions, `AGENTS.md` |
 | `amp` | `amp --settings-file ${dir}/settings.json` | nothing more | the servers and the permissions | the skills and the instructions |
 | `gemini` | `env GEMINI_CLI_SYSTEM_SETTINGS_PATH=${dir}/settings.json gemini` | nothing more; the file is read as the system settings, over the user's and the workspace's | the model, servers and hooks | the skills, agents, commands and instructions |

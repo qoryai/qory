@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -42,8 +41,9 @@ func exportingCheckout(t *testing.T, command string) (root, home string) {
 // TestRunTakesAModuleExportAsADefault is a walled run whose server sets LOG_DIR, a name
 // module core exports, and whose --env sets CORE_SCRIPTS, another: an export is a written
 // default, so the server's value and the run's win over it, the deny list leaves out the
-// export DOCKER_HOST, and the template's CODEX_HOME stays fixed over --env. The report
-// records every export as a default.
+// export DOCKER_HOST, and CODEX_HOME stays fixed over --env, at the walled Codex home,
+// which Codex's deny list keeps from --env. The report records every export as a
+// default.
 func TestRunTakesAModuleExportAsADefault(t *testing.T) {
 	root, home := exportingCheckout(t, "codex")
 	rep, err := report.Read(filepath.Join(root, ".qory", "harness-report.json"))
@@ -72,9 +72,7 @@ func TestRunTakesAModuleExportAsADefault(t *testing.T) {
 		t.Fatal(err)
 	}
 	wants(t, string(data), "env: CORE_SCRIPTS=/elsewhere\n", "env: LOG_DIR=from-server\n")
-	if want := regexp.MustCompile(`env: CODEX_HOME=` + regexp.QuoteMeta(runHomesFolder(t, root)) + `/[^/\n]+/codex\n`); !want.Match(data) {
-		t.Errorf("the environment file has no CODEX_HOME in the run's home:\n%s", data)
-	}
+	wants(t, string(data), "env: CODEX_HOME=/var/lib/qory-codex-home\n")
 	lacks(t, string(data), "DOCKER_HOST=", "/not-the-template", "LOG_DIR="+home)
 	_, evs := events(t, root)
 	got, _ := json.Marshal(sessionApplied(t, evs)["variables"])
