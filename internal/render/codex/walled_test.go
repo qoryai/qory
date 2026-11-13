@@ -227,6 +227,36 @@ func TestWalledConfigTrustsNoProjectAndAddsNoState(t *testing.T) {
 	}
 }
 
+// TestWalledConfigTrustsNoLineSeparator is a hook with U+2028 or U+2029 in its command,
+// statusMessage or matcher: encoding/json escapes them and serde_json does not, so the
+// hook gets no trust. A command with the text \u2028, a backslash and five letters, gets
+// its hash, from the same JSON in Python as TestWalledConfigNormalizesAsCodex.
+func TestWalledConfigTrustsNoLineSeparator(t *testing.T) {
+	config := `[[hooks.Stop]]
+[[hooks.Stop.hooks]]
+type = "command"
+command = "echo \u2028"
+[[hooks.Stop.hooks]]
+type = "command"
+command = "/bin/true"
+statusMessage = "a\u2029b"
+[[hooks.Stop.hooks]]
+type = "command"
+command = 'echo \u2028'
+[[hooks.PreToolUse]]
+matcher = "Bash\u2028"
+[[hooks.PreToolUse.hooks]]
+type = "command"
+command = "/bin/true"
+`
+	want := map[string]string{
+		codex.HomeInWall + "/config.toml:stop:0:2": "sha256:62952c1af1eb1d3c580409562f1776a3da6cc48eefdc6cb6a3b04528df5d043b",
+	}
+	if got := walledState(t, config, nil); !reflect.DeepEqual(got, want) {
+		t.Errorf("hooks.state:\n%v\nwant:\n%v", got, want)
+	}
+}
+
 // walledState is the hooks.state table of [codex.WalledConfig] for config, key to hash.
 func walledState(t *testing.T, config string, projects []string) map[string]string {
 	t.Helper()

@@ -342,7 +342,8 @@ const defaultContextLimit = 2500
 // one, and the one handler normalized: type, command as written, timeout with Codex's
 // default and limits, async, and statusMessage and additionalContextLimit when they
 // count. False for a handler that is no command, for a command of only white space,
-// which Codex skips, and for a command with U+2028 or U+2029; none of them gets trust.
+// which Codex skips, and for a hook with U+2028 or U+2029 in its command, statusMessage or
+// matcher, see [lineSeparator]; none of them gets trust.
 func hookHash(event string, group, handler map[string]any) (string, bool, error) {
 	if handler["type"] != "command" {
 		return "", false, nil
@@ -351,8 +352,14 @@ func hookHash(event string, group, handler map[string]any) (string, bool, error)
 	if !ok || strings.TrimSpace(command) == "" {
 		return "", false, nil
 	}
+	if lineSeparator(command) {
+		return "", false, nil
+	}
 	normalized := map[string]any{"type": "command", "command": command, "timeout": hookTimeout(event, handler["timeout"]), "async": handler["async"] == true}
 	if s, ok := handler["statusMessage"].(string); ok {
+		if lineSeparator(s) {
+			return "", false, nil
+		}
 		normalized["statusMessage"] = s
 	}
 	if n, ok := handler["additionalContextLimit"].(int64); ok && contextEvents[event] && n != defaultContextLimit {
@@ -360,6 +367,9 @@ func hookHash(event string, group, handler map[string]any) (string, bool, error)
 	}
 	identity := map[string]any{"event_name": eventLabels[event], "hooks": []any{normalized}}
 	if matcher, ok := group["matcher"].(string); ok && matched[event] {
+		if lineSeparator(matcher) {
+			return "", false, nil
+		}
 		identity["matcher"] = matcher
 	}
 	var b bytes.Buffer
@@ -368,14 +378,15 @@ func hookHash(event string, group, handler map[string]any) (string, bool, error)
 	if err := enc.Encode(identity); err != nil {
 		return "", false, fmt.Errorf("hash the %s hook %q: %w", event, command, err)
 	}
-	data := bytes.TrimSuffix(b.Bytes(), []byte("\n"))
-	// serde_json writes U+2028 and U+2029 as they are, and encoding/json escapes them,
-	// so a hook with either gets no trust rather than a hash Codex does not compute.
-	if bytes.Contains(data, []byte(`\u2028`)) || bytes.Contains(data, []byte(`\u2029`)) {
-		return "", false, nil
-	}
-	sum := sha256.Sum256(data)
+	sum := sha256.Sum256(bytes.TrimSuffix(b.Bytes(), []byte("\n")))
 	return "sha256:" + hex.EncodeToString(sum[:]), true, nil
+}
+
+// lineSeparator reports whether s contains U+2028 or U+2029. serde_json writes them as
+// they are, and encoding/json escapes them, so a hook with either in a string it hashes
+// gets no trust rather than a hash Codex does not compute.
+func lineSeparator(s string) bool {
+	return strings.ContainsAny(s, "\u2028\u2029")
 }
 
 // hookTimeout is a hook's timeout in seconds as Codex normalizes it: SessionEnd and
