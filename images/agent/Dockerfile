@@ -210,15 +210,22 @@ RUN --mount=type=bind,from=claude,source=/out,target=/tmp/claude \
  && test "$(claude --version | cut -d' ' -f1)" = "${CLAUDE_CODE_VERSION}"
 
 # The launcher from its checked archive, with no registry and no install script, then the
-# native build's vendor/ folder from the second archive into the launcher's package,
-# where bin/codex.js looks for it: the native archive's package is also named
-# @openai/codex, so npm cannot install it beside the launcher. Codex writes
+# native build's vendor/ folder from the second archive into the launcher's package: the
+# native archive's package is also named @openai/codex, so npm cannot install it beside
+# the launcher. The codex command links to the native build itself, not to bin/codex.js:
+# the launcher looks for the native build through Node's module lookup, which also
+# reads $HOME/.node_modules, a folder the agent writes. The native build finds its rg
+# and its other files by its own path, and needs nothing the launcher sets. Codex writes
 # $CODEX_HOME/tmp at every start, so the version test runs on a home under /tmp.
 RUN --mount=type=bind,from=codex,source=/out,target=/tmp/codex \
     npm install --global --offline --omit=optional --ignore-scripts --no-fund --no-audit --no-update-notifier \
       /tmp/codex/codex.tgz \
  && tar -xzf /tmp/codex/codex-native.tgz -C "$(npm root --global)/@openai/codex" \
       --strip-components=1 --no-same-owner package/vendor \
+ && native="$(npm root --global)/@openai/codex/vendor/$(uname -m)-unknown-linux-musl/bin/codex" \
+ && test -x "$native" \
+ && ln -sfn "$native" "$(npm prefix --global)/bin/codex" \
+ && test "$(readlink -f "$(command -v codex)")" = "$native" \
  && npm cache clean --force \
  && rm -rf /root/.npm \
  && test "$(HOME=/tmp/codex-check CODEX_HOME=/tmp/codex-check/codex codex --version 2>/dev/null)" = "codex-cli ${CODEX_VERSION}" \
