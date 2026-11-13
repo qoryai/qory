@@ -3351,14 +3351,20 @@ const checkToolsStep = "Check tools"
 // container configuration. With gitSession set, for a run that has a git session after the
 // agent, the step [checkToolsStep] comes first, so an image with no program of that session
 // stops the run before the agent. On a run of the runtime named runtime codex, the step also
-// stops an image with /etc/codex, see [image.CodexSessionCheckScript].
+// stops an image with /etc/codex, see [image.CodexSessionCheckScript], and a Codex run with no
+// git session gets the step with that check alone, see [image.CodexSettingsCheckScript].
 func setupCommands(gitSession bool, runtime string) []session.SetupCommand {
+	var script string
+	switch {
+	case gitSession && runtime == codex.Runtime:
+		script = image.CodexSessionCheckScript()
+	case gitSession:
+		script = image.SessionCheckScript()
+	case runtime == codex.Runtime:
+		script = image.CodexSettingsCheckScript()
+	}
 	var commands []session.SetupCommand
-	if gitSession {
-		script := image.SessionCheckScript()
-		if runtime == codex.Runtime {
-			script = image.CodexSessionCheckScript()
-		}
+	if script != "" {
 		commands = append(commands, session.SetupCommand{Name: checkToolsStep, Args: []string{"/bin/sh", "-c", script}})
 	}
 	return append(commands, session.SetupCommand{Name: setupStep, Args: append([]string{wall.HelperPath}, prepareArgs...)})

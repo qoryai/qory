@@ -327,6 +327,21 @@ func CodexSessionCheckScript() string {
 	return sessionCheckScript(strings.Join(gitSessionDirs, ":"), CodexSettings)
 }
 
+// CodexSettingsCheckScript is the sh script of the setup step of a walled Codex run that
+// has no git session: it prints the line of [CodexSessionCheckScript] for [CodexSettings]
+// on stderr and exits 1 when the image has anything there, and prints nothing and exits 0
+// otherwise. It runs only the shell's builtins.
+func CodexSettingsCheckScript() string { return codexSettingsCheckScript(CodexSettings) }
+
+// codexSettingsCheckScript is [CodexSettingsCheckScript] with settings in place of
+// [CodexSettings].
+func codexSettingsCheckScript(settings string) string {
+	return "if test -e " + shellQuoted(settings) + " || test -h " + shellQuoted(settings) + "; then\n" +
+		"\tprintf '%s\\n' " + shellQuoted(noCodexSettings()) + " >&2\n" +
+		"\texit 1\n" +
+		"fi\n"
+}
+
 // sessionCheckScript is [SessionCheckScript] with path as the session's PATH, and with the
 // check of [CodexSettings] at settings when settings is not empty.
 func sessionCheckScript(path, settings string) string {

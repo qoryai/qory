@@ -248,23 +248,81 @@ func TestToolFixesKeepsAtMostWhatTheCheckPrints(t *testing.T) {
 	}
 }
 
-// TestTheCheckOfACodexRunLooksForEtcCodex is the step [checkToolsStep] of a run with a git
-// session: on Codex, the script with the check of /etc/codex, and on Claude Code, the script
-// as before. A run with no git session has no such step on either.
+// TestTheCheckOfACodexRunLooksForEtcCodex is the step [checkToolsStep] of a run that lists
+// repositories: with a git session, one step on Codex with the check of /etc/codex added, and
+// on Claude Code the script as before; with none, such as a read run, one step on Codex with
+// the check of /etc/codex alone, and no step on Claude Code.
 func TestTheCheckOfACodexRunLooksForEtcCodex(t *testing.T) {
-	for runtime, want := range map[string]string{
-		"codex":  image.CodexSessionCheckScript(),
-		"claude": image.SessionCheckScript(),
+	for _, c := range []struct {
+		gitSession bool
+		runtime    string
+		want       string
+	}{
+		{true, "codex", image.CodexSessionCheckScript()},
+		{true, "claude", image.SessionCheckScript()},
+		{false, "codex", image.CodexSettingsCheckScript()},
 	} {
-		got := setupCommands(true, runtime)
-		if len(got) != 2 || got[0].Name != checkToolsStep || !slices.Equal(got[0].Args, []string{"/bin/sh", "-c", want}) {
-			t.Errorf("%s: %q", runtime, got)
+		got := setupCommands(c.gitSession, c.runtime)
+		if len(got) != 2 || got[0].Name != checkToolsStep || !slices.Equal(got[0].Args, []string{"/bin/sh", "-c", c.want}) || got[1].Name != setupStep {
+			t.Errorf("%s, git session %v: %q", c.runtime, c.gitSession, got)
 		}
-		if got := setupCommands(false, runtime); len(got) != 1 || got[0].Name != setupStep {
-			t.Errorf("%s with no git session: %q", runtime, got)
-		}
+	}
+	if got := setupCommands(false, "claude"); len(got) != 1 || got[0].Name != setupStep {
+		t.Errorf("claude with no git session: %q", got)
 	}
 	if strings.Contains(image.SessionCheckScript(), "/etc/codex") || !strings.Contains(image.CodexSessionCheckScript(), "/etc/codex") {
 		t.Error("/etc/codex is not in the Codex script alone")
+	}
+}
+
+// TestASetupOfCodexChecksEtcCodexOnce is runSetup for a walled run that lists repositories,
+// outside and inside the wall: a Codex read run, with no git session, gets the step
+// [checkToolsStep] with the check of /etc/codex alone before prepare, a Codex write run in
+// a copy gets one such step, the combined script, and a Claude Code read run gets none.
+func TestASetupOfCodexChecksEtcCodexOnce(t *testing.T) {
+	for _, where := range []string{"", config.SetupInside} {
+		for _, c := range []struct {
+			runtime    string
+			gitSession bool
+			want       []string
+		}{
+			{"codex", false, []string{image.CodexSettingsCheckScript(), ""}},
+			{"codex", true, []string{image.CodexSessionCheckScript(), ""}},
+			{"claude", false, []string{""}},
+		} {
+			rt, err := catalog.Lookup(c.runtime, "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			var spec runSpec
+			r := &config.Forager{Wall: &config.ForagerWall{Adapter: config.WallDocker, Image: "example.com/agent:1", Helper: "/opt/qory/qory-linux", Setup: where}}
+			if err := enclose(&spec, r, wallOptions{}, "", true, "/usr/local/bin/qory", t.TempDir(), t.TempDir()); err != nil {
+				t.Fatal(err)
+			}
+			spec.Runtime = rt
+			var got []session.SetupCommand
+			run := &nowhere{note: func(string) {}, values: Nowhere{System: "git.example.com", Repositories: "acme/shop", Setup: func(s session.SetupSpec) error {
+				got = s.Commands
+				return nil
+			}}}
+			if err := runSetup(t.Context(), run, &spec, c.gitSession); err != nil {
+				t.Fatal(err)
+			}
+			if where == config.SetupInside {
+				got = spec.SessionSpec.Setup
+			}
+			var scripts []string
+			for _, command := range got {
+				switch command.Name {
+				case checkToolsStep:
+					scripts = append(scripts, command.Args[2])
+				case setupStep:
+					scripts = append(scripts, "")
+				}
+			}
+			if !slices.Equal(scripts, c.want) || len(got) != len(c.want) {
+				t.Errorf("setup %q, %s, git session %v: %q", where, c.runtime, c.gitSession, got)
+			}
+		}
 	}
 }

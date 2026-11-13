@@ -288,3 +288,46 @@ func TestTheCodexCheckRefusesEtcCodex(t *testing.T) {
 		t.Errorf("the line: %q", noCodexSettings())
 	}
 }
+
+// TestTheCodexSettingsCheckAlone is the step of a Codex run with no git session: with a
+// file, a folder or a link that leads nowhere at the place of /etc/codex, the line for
+// /etc/codex and exit 1, also with an empty PATH; with nothing there, no output and exit
+// 0. CodexSettingsCheckScript checks /etc/codex itself.
+func TestTheCodexSettingsCheckAlone(t *testing.T) {
+	base := t.TempDir()
+	file, folder, link := filepath.Join(base, "file"), filepath.Join(base, "folder"), filepath.Join(base, "link")
+	if err := os.WriteFile(file, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(folder, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(base, "nowhere"), link); err != nil {
+		t.Fatal(err)
+	}
+	run := func(shell, settings string) (string, string, int) {
+		c := exec.Command(shell, "-c", codexSettingsCheckScript(settings))
+		c.Env = []string{}
+		var stdout, stderr strings.Builder
+		c.Stdout, c.Stderr = &stdout, &stderr
+		err := c.Run()
+		if _, exited := err.(*exec.ExitError); err != nil && !exited {
+			t.Fatal(err)
+		}
+		return stdout.String(), stderr.String(), c.ProcessState.ExitCode()
+	}
+	for _, shell := range shells(t) {
+		for _, at := range []string{file, folder, link} {
+			out, errOut, code := run(shell, at)
+			if want := noCodexSettings() + "\n"; out != "" || errOut != want || code != 1 {
+				t.Errorf("%s, %s: %q, %q, exit %d, want %q", shell, at, out, errOut, code, want)
+			}
+		}
+		if out, errOut, code := run(shell, filepath.Join(base, "absent")); out != "" || errOut != "" || code != 0 {
+			t.Errorf("%s, nothing there: %q, %q, exit %d", shell, out, errOut, code)
+		}
+	}
+	if CodexSettingsCheckScript() != codexSettingsCheckScript("/etc/codex") {
+		t.Errorf("CodexSettingsCheckScript checks another place:\n%s", CodexSettingsCheckScript())
+	}
+}
