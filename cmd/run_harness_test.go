@@ -281,3 +281,38 @@ func TestWalledRunTakesTheHomeFromYourOwnFile(t *testing.T) {
 	}
 	wants(t, string(data), "--mount type=bind,src="+homes+string(filepath.Separator))
 }
+
+// TestAWalledCodexRunRefusesAReservedConfigArgument is a run of codex given -c
+// model_provider=x after qory run's --: without a wall the program gets the argument,
+// and a walled run stops before the agent's container starts, in the compose step, with
+// exit status 1, as a harness's config.toml that sets the key stops it. A walled run
+// given -c model_verbosity=low passes the argument to the agent's container.
+func TestAWalledCodexRunRefusesAReservedConfigArgument(t *testing.T) {
+	root, _ := exportingCheckout(t, fakeRuntime(t))
+	out, err := run(t, "run", "codex", "--", "-c", "model_provider=x")
+	if cmd.ExitCode(err) != 3 {
+		t.Fatalf("a run without a wall: %v (exit %d)\n%s", err, cmd.ExitCode(err), out)
+	}
+	wants(t, out, " with -c model_provider=x\n")
+	if err := os.RemoveAll(runsDir(t, root)); err != nil {
+		t.Fatal(err)
+	}
+	log := walledForager(t)
+	_, err = run(t, "run", "codex", "--", "-c", "model_provider=x")
+	want := "Remove `--config model_provider` from the run's Codex arguments: a Codex run takes this key from qory and Forager, not from the arguments."
+	if cmd.ExitCode(err) != 1 || err == nil || err.Error() != want {
+		t.Errorf("a walled run: %v (exit %d), want %q", err, cmd.ExitCode(err), want)
+	}
+	data, err := os.ReadFile(log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lacks(t, string(data), "model_provider")
+	if out, err := run(t, "run", "codex", "--", "-c", "model_verbosity=low"); err != nil && cmd.ExitCode(err) == 1 {
+		t.Fatalf("a walled run with an allowed key: %v\n%s", err, out)
+	}
+	if data, err = os.ReadFile(log); err != nil {
+		t.Fatal(err)
+	}
+	wants(t, string(data), "model_verbosity=low")
+}
