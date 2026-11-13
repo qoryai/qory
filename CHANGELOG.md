@@ -805,6 +805,13 @@ release may change what an existing document does, and states it under Upgrading
   from the arguments.`` The run stops before the agent starts, with exit status 1.
   Forager puts its `--config` flags first, and Codex takes the last one for a key. An
   unwalled run is unchanged.
+- A walled Codex run refuses `--oss` and `--local-provider` before `--`, with
+  ``Remove `<flag>` from the run's Codex arguments: a Codex run takes its model provider
+  from qory and Forager, not from the arguments.``, and `--profile` in the forms
+  `--profile <name>`, `--profile=<name>`, `-p <name>` and `-p<name>`, with ``Remove
+  `--profile` from the run's Codex arguments: a Codex run takes its settings from qory
+  and Forager, not from a profile.`` The run stops before the agent starts, with exit
+  status 1. An unwalled run, and a run of another runtime, is unchanged.
 - Compose accepts `settings/codex/read-access.rules`, a file of Codex execpolicy rules.
   It joins the files of all modules in module order, merges them into no target file and
   places them in no home, so no run reads them. Any other file under `settings/` that is

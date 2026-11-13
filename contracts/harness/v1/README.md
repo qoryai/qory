@@ -1217,7 +1217,12 @@ Per runtime, the files written into its directory:
   table above one, with `--config`, `--config=`, `-c` or `-c<key>=<value>`, stops
   before the agent starts with ``Remove `--config <key>` from the run's Codex
   arguments: a Codex run takes this key from qory and Forager, not from the
-  arguments.`` A fragment may still set `model_reasoning_effort`. A hook in
+  arguments.`` A fragment may still set `model_reasoning_effort`. Such a run also stops
+  on `--oss` or `--local-provider` before `--`, with ``Remove `<flag>` from the run's
+  Codex arguments: a Codex run takes its model provider from qory and Forager, not from
+  the arguments.``, and on `--profile` or `-p`, with ``Remove `--profile` from the run's
+  Codex arguments: a Codex run takes its settings from qory and Forager, not from a
+  profile.`` A hook in
   `settings/codex/config.toml` or `settings/codex/hooks.json` whose `timeout` or
   `additionalContextLimit` is negative or fractional, such as 2.0, fails the compose
   with ``Set `<key>` of the `<event>` hook in the harness's `settings/codex/<file>` to a
