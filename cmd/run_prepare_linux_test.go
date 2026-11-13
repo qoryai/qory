@@ -17,7 +17,7 @@ import (
 // agentHomeFree skips the test unless qory run agent-env can make the agent's home at
 // [preparation.AgentHome] on this machine: nothing is there yet, no folder above it is
 // a symbolic link, and Claude Code's managed settings are not at /etc/claude-code. It
-// sets CLAUDE_CONFIG_DIR to the agent's home, as a dispatched walled run of Claude Code
+// sets CLAUDE_CONFIG_DIR to the agent's home, as a walled run of Claude Code
 // has it, and removes the home once the test is over.
 func agentHomeFree(t *testing.T) {
 	t.Helper()
@@ -94,7 +94,7 @@ func agentEnvLinking(t *testing.T, link []string, env ...string) (string, string
 	return stdout.String(), stderr.String(), err
 }
 
-// TestAgentEnvMakesTheAgentHomeFirst is the agent of a dispatched walled run of Claude
+// TestAgentEnvMakesTheAgentHomeFirst is the agent of a walled run of Claude
 // Code started through qory run agent-env, after the setup commands: the verb makes the
 // agent's home, an empty folder of mode 0700, before the launch starts and finds it.
 func TestAgentEnvMakesTheAgentHomeFirst(t *testing.T) {

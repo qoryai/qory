@@ -53,7 +53,7 @@ func TestAgentEnvStartsTheLaunchAsGiven(t *testing.T) {
 }
 
 // TestAWalledRunThroughAgentEnv is a walled run started through the agent-env verb, as a
-// dispatched run of Claude Code is: the container starts qory inside with the verb, its
+// walled run of Claude Code is: the container starts qory inside with the verb, its
 // file of kept names and the launch, and Forager still puts its settings, with the
 // hooks, in place of the launch's --settings; the file's folder is mounted read-only
 // and holds the names Forager sets and the run's --env, and goes once the run is over.
@@ -95,7 +95,7 @@ exec `+docker+` "$@"
 	runs := runsDir(t, root)
 	wants(t, lines,
 		" -- "+wall.HelperPath+" run agent-env ",
-		"/kept -- ",
+		"/kept projects .claude/projects -- ",
 		"/fake-runtime --settings "+runs,
 		"/settings.json -p hi",
 		"kept: HTTP_PROXY\n", "kept: QORY_RUN_ID\n", "kept: QORY_RUN_SOCKET\n", "kept: ANTHROPIC_API_KEY\n",

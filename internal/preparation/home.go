@@ -17,11 +17,11 @@ import (
 // settings, CLAUDE.md, plugins, memory, .claude.json and transcripts.
 const EnvAgentHome = "CLAUDE_CONFIG_DIR"
 
-// AgentHome is the agent's configuration directory on a dispatched walled run of Claude
-// Code, a fixed path inside the container that qory owns. It is under /tmp, which an
-// image usually has and any user may write, so it does not depend on the image's HOME
-// or user; it is in the container alone, so nothing of it reaches the machine or the
-// checkout, and it goes with the container.
+// AgentHome is the agent's configuration directory on a walled run of Claude Code, a
+// fixed path inside the container that qory owns. It is under /tmp, which an image
+// usually has and any user may write, so it does not depend on the image's HOME or user;
+// it is in the container alone, so nothing of it reaches the machine or the checkout, and
+// it goes with the container.
 const AgentHome = "/tmp/qory-agent-home"
 
 // TempStore is the folder of the artifact files of a run that cannot write its checkout,
@@ -66,7 +66,7 @@ var (
 )
 
 // FreshHome makes the agent's home, [AgentHome], new and empty when getenv sets
-// [EnvAgentHome] to it, as qory run does for a dispatched walled run of Claude Code, and
+// [EnvAgentHome] to it, as qory run does for a walled run of Claude Code, and
 // does nothing otherwise. qory run agent-env calls it last before the agent starts, after
 // the setup commands, and it refuses anything at the home when it runs, such as a home
 // the image holds or the setup commands made. It refuses first an image with Claude Code's managed settings, which no

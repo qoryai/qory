@@ -688,7 +688,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			var copied *runCopy
 			// prepareLaunch composes the harness into the home the session starts on and
 			// makes the session's launch from it, writing the compose's lines to w;
-			// freshHome is true for a dispatched walled run of a runtime that is a
+			// freshHome is true for a walled run of a runtime that is a
 			// [render.AgentHomer], whose agent starts on a new, empty configuration
 			// directory.
 			// readOnly is set once the compose has the workflows: the run only reads the
@@ -798,7 +798,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				}
 				spec.Runtime, spec.Command, spec.Args, spec.Declared, spec.Harness = rt, launch.Command, launchArgs, rep.Hosts(), harness
 				spec.LaunchFixed, spec.LaunchDefaults, spec.HarnessHome = launch.Fixed, launch.Defaults, launch.HarnessHome
-				if h, ok := renderer.(render.AgentHomer); ok && dispatched && walled {
+				if h, ok := renderer.(render.AgentHomer); ok && walled {
 					spec.LaunchFixed, freshHome = withAgentHome(spec.LaunchFixed, h.AgentHomeVariable()), true
 					link = transcriptLinkFor(renderer, rt)
 				}
@@ -3147,7 +3147,7 @@ func reallyWithin(root, path string) bool {
 // run's code into, the exec step that starts the launch with the names nothing sets
 // unset, the program that keeps the setup container running, and the runner of a setup
 // command inside the wall; [agentEnvArgs] selects agent-env, which starts the agent of
-// a dispatched walled run of Claude Code. Each verb carries [inWall], so no look for a
+// a walled run of Claude Code. Each verb carries [inWall], so no look for a
 // release runs inside a container.
 var (
 	relayArgs        = []string{"run", "relay"}

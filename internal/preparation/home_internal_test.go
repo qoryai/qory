@@ -406,7 +406,7 @@ func TestTheTranscriptsLinkStopsAtAPathOutside(t *testing.T) {
 }
 
 // TestLinkTranscriptsNeedsTheAgentHome is a launch whose CLAUDE_CONFIG_DIR is not the
-// agent's home, as on a run that is not dispatched or not walled: no link is made.
+// agent's home, as on a run that is not walled: no link is made.
 func TestLinkTranscriptsNeedsTheAgentHome(t *testing.T) {
 	getenv := func(name string) string {
 		if name == "HOME" {
