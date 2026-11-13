@@ -1,6 +1,7 @@
 package codex
 
 import (
+	"errors"
 	"fmt"
 	"path"
 	"slices"
@@ -30,10 +31,10 @@ func (codex) Install(version string) string { return "@openai/codex@" + version 
 // asks for --approve-for-me or its alias --not-so-yolo, which Codex refuses beside
 // --sandbox (codex-rs/utils/cli/src/shared_options.rs). The prompt stays $<name>: no run
 // binds the home at [HomeInWall] yet, so a mention by that path, see [mentionByPath],
-// would lead to no skill. Arguments that set a key of [reservedKeys] or
-// [argReservedKeys] with --config or -c are refused, see [checkConfigArgs].
+// would lead to no skill. Arguments that set the model provider, a profile, or a key of
+// [reservedKeys] or [argReservedKeys] with --config or -c are refused, see [checkArgs].
 func (codex) WalledArgs(args []string) ([]string, error) {
-	if err := checkConfigArgs(args); err != nil {
+	if err := checkArgs(args); err != nil {
 		return nil, err
 	}
 	i := slices.Index(args, "exec")
@@ -56,29 +57,55 @@ func (codex) WalledArgs(args []string) ([]string, error) {
 // %s.
 const textConfigArg = "Remove `--config %s` from the run's Codex arguments: a Codex run takes this key from qory and Forager, not from the arguments."
 
+// textProviderArg is the refusal of a walled run whose Codex arguments contain --oss or
+// --local-provider, with the flag for its %s.
+const textProviderArg = "Remove `%s` from the run's Codex arguments: a Codex run takes its model provider from qory and Forager, not from the arguments."
+
+// textProfileArg is the refusal of a walled run whose Codex arguments contain --profile
+// or -p.
+const textProfileArg = "Remove `--profile` from the run's Codex arguments: a Codex run takes its settings from qory and Forager, not from a profile."
+
 // argReservedKeys are the key paths that the arguments of a walled run may not set
 // beside [reservedKeys]. Forager sets model_reasoning_effort from the run's effort as a
 // --config flag; a harness's config.toml may still set it as a default.
 var argReservedKeys = []reservedKey{{"model_reasoning_effort"}}
 
-// checkConfigArgs refuses args, a walled run's Codex arguments, when one before --
-// sets a key of [reservedKeys] or [argReservedKeys] with --config or -c, in the forms
-// --config <k=v>, --config=<k=v>, -c <k=v>, -c<k=v> and -c=<k=v>. Forager puts its
-// --config flags ahead of these arguments, and Codex 0.167.2 takes the last flag for a
-// key, so such an argument would replace Forager's value. Codex reads the key as the
-// text before the first =, without spaces at either end, with use_legacy_landlock read
-// as features.use_legacy_landlock, as a dotted path
-// (codex-rs/utils/cli/src/config_override.rs, codex-rs/config/src/overrides.rs). A
-// key at a reserved path, under one, or above one, whose table value sets the reserved
-// path, is refused. Codex refuses a --config or -c with no value after it, or with a
-// value that starts with -, so such a flag passes here.
-func checkConfigArgs(args []string) error {
+// checkArgs refuses args, a walled run's Codex arguments, when one before -- changes
+// what Forager and qory set for the run, naming the first in args:
+//
+//   - --oss, which starts Codex on an open-source model provider, or --local-provider,
+//     which names one, in the forms --local-provider <name> and --local-provider=<name>
+//     (codex-rs/utils/cli/src/shared_options.rs, oss and oss_provider);
+//   - --profile, which lays $CODEX_HOME/<name>.config.toml over the settings, in the
+//     forms --profile <name>, --profile=<name>, -p <name>, -p<name> and -p=<name>
+//     (the same file, config_profile_v2). -p is --profile in codex and in codex exec;
+//   - --config or -c that sets a key of [reservedKeys] or [argReservedKeys], in the
+//     forms --config <k=v>, --config=<k=v>, -c <k=v>, -c<k=v> and -c=<k=v>
+//     (codex-rs/utils/cli/src/config_override.rs).
+//
+// Forager puts its --config flags ahead of these arguments, and Codex 0.167.2 takes the
+// last flag for a key, so such an argument would replace Forager's value. Codex reads
+// the key of --config as the text before the first =, without spaces at either end,
+// with use_legacy_landlock read as features.use_legacy_landlock, as a dotted path
+// (codex-rs/config/src/overrides.rs). A key at a reserved path, under one, or above one,
+// whose table value sets the reserved path, is refused. Codex refuses a --config or -c
+// with no value after it, or with a value that starts with -, so such a flag passes
+// here. Codex reads no long flag by a shortened name: its parser does not turn on
+// infer_long_args. Of its short flags, only -h and -V take no value, and both print and
+// exit, so no other flag comes before -c or -p in one word.
+func checkArgs(args []string) error {
 	for i := 0; i < len(args); i++ {
 		a := args[i]
 		var pair string
 		switch {
 		case a == "--":
 			return nil
+		case a == "--oss" || strings.HasPrefix(a, "--oss="):
+			return fmt.Errorf(textProviderArg, "--oss")
+		case a == "--local-provider" || strings.HasPrefix(a, "--local-provider="):
+			return fmt.Errorf(textProviderArg, "--local-provider")
+		case a == "--profile" || strings.HasPrefix(a, "--profile=") || strings.HasPrefix(a, "-p"):
+			return errors.New(textProfileArg)
 		case a == "--config" || a == "-c":
 			if i+1 == len(args) || strings.HasPrefix(args[i+1], "-") {
 				continue

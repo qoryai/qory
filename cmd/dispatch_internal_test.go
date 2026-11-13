@@ -135,7 +135,8 @@ func TestADispatchedLaunchOfAnotherRuntimeIsAsGiven(t *testing.T) {
 
 // TestAWalledLaunchOfCodexHasNoSandboxOfItsOwn is a walled run's launch of Codex: codex
 // exec gets --sandbox danger-full-access after exec, and its prompt stays $<name>. The
-// same launch of Claude Code stays as given.
+// same launch of Claude Code stays as given, also with the flags a walled Codex run
+// refuses.
 func TestAWalledLaunchOfCodexHasNoSandboxOfItsOwn(t *testing.T) {
 	rt, err := render.Lookup("codex")
 	if err != nil {
@@ -148,6 +149,11 @@ func TestAWalledLaunchOfCodexHasNoSandboxOfItsOwn(t *testing.T) {
 	}
 	if got, err := walledArgs(claudeRuntime(t), args); err != nil || !slices.Equal(got, args) {
 		t.Errorf("claude: got %q, %v, want %q", got, err, args)
+	}
+	// Claude Code's -p is --print, and Codex's flags mean nothing to it.
+	printed := []string{"-p", "hi", "--profile", "x", "--oss", "-c", "model_provider=x"}
+	if got, err := walledArgs(claudeRuntime(t), printed); err != nil || !slices.Equal(got, printed) {
+		t.Errorf("claude: got %q, %v, want %q", got, err, printed)
 	}
 }
 

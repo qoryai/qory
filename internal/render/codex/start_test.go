@@ -93,6 +93,8 @@ func TestWalledArgsRefuseAReservedConfigKey(t *testing.T) {
 	}
 	for _, args := range [][]string{
 		{"exec", "-c", "model_verbosity=low", "hi"},
+		{"exec", "-m", "gpt-5", "-C", "/w", "hi"},
+		{"exec", "--", "--oss", "--local-provider=x", "--profile", "x", "-px"},
 		{"exec", "--config=hooks.Stop=[]", "hi"},
 		{"exec", "-c", "model=gpt-5", "hi"},
 		{"exec", "-c", "hooks_x=1", "hi"},
@@ -105,6 +107,46 @@ func TestWalledArgsRefuseAReservedConfigKey(t *testing.T) {
 	} {
 		if _, err := w.WalledArgs(args); err != nil {
 			t.Errorf("WalledArgs(%q): %v", args, err)
+		}
+	}
+}
+
+// TestWalledArgsRefuseAProviderOrAProfile is each form of --oss, --local-provider and
+// --profile, before exec, after it and after the prompt: each is refused with its text,
+// which writes -p as --profile. The first such argument is the one refused.
+func TestWalledArgsRefuseAProviderOrAProfile(t *testing.T) {
+	rt, err := render.Lookup("codex")
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := rt.(render.Walled)
+	provider := func(flag string) string {
+		return "Remove `" + flag + "` from the run's Codex arguments: a Codex run takes its model provider from qory and Forager, not from the arguments."
+	}
+	profile := "Remove `--profile` from the run's Codex arguments: a Codex run takes its settings from qory and Forager, not from a profile."
+	for _, c := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"exec", "--oss", "hi"}, provider("--oss")},
+		{[]string{"--oss", "exec", "hi"}, provider("--oss")},
+		{[]string{"--oss"}, provider("--oss")},
+		{[]string{"exec", "--local-provider", "ollama", "hi"}, provider("--local-provider")},
+		{[]string{"exec", "--local-provider=ollama", "hi"}, provider("--local-provider")},
+		{[]string{"exec", "hi", "--local-provider", "ollama"}, provider("--local-provider")},
+		{[]string{"exec", "--profile", "x", "hi"}, profile},
+		{[]string{"exec", "--profile=x", "hi"}, profile},
+		{[]string{"exec", "-p", "x", "hi"}, profile},
+		{[]string{"exec", "-px", "hi"}, profile},
+		{[]string{"exec", "-p=x", "hi"}, profile},
+		{[]string{"-p", "x", "exec", "hi"}, profile},
+		{[]string{"-p", "x"}, profile},
+		{[]string{"exec", "--profile", "x", "--oss", "hi"}, profile},
+		{[]string{"exec", "--oss", "-c", "model_provider=x", "hi"}, provider("--oss")},
+	} {
+		got, err := w.WalledArgs(c.args)
+		if err == nil || err.Error() != c.want || got != nil {
+			t.Errorf("WalledArgs(%q) = %q, %v, want %q", c.args, got, err, c.want)
 		}
 	}
 }
