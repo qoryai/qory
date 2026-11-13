@@ -79,15 +79,20 @@ const textAuthFile = "Remove `files/codex/auth.json` from module %s: a Codex run
 // file's path under files/codex for the first %s; the module's name is left as %%s.
 const textWalledFile = "Remove `files/codex/%s` from module %%s: qory writes it for every walled Codex run."
 
+// textReadRulesFile is the refusal of a module that ships files/codex/rules/
+// read-access.rules, with the module's name: qory writes that file only for a walled run
+// that only reads, from the harness's read rules, see [WriteWalledHome].
+const textReadRulesFile = "Remove `files/codex/rules/" + ReadRulesName + "` from module %s: qory writes it for a walled Codex run that only reads, from the harness's `settings/codex/" + ReadRulesName + "`."
+
 // walledFiles are the paths under .codex that qory writes in the home of every walled
 // Codex run, see [WriteWalledHome]: the hooks file, the variables Codex sets, the
-// environments Codex starts, the instructions Codex reads ahead of AGENTS.md, and the
-// read run's rules.
-var walledFiles = []string{"hooks.json", ".env", "environments.toml", "AGENTS.override.md", "rules/" + ReadRulesName}
+// environments Codex starts, and the instructions Codex reads ahead of AGENTS.md.
+var walledFiles = []string{"hooks.json", ".env", "environments.toml", "AGENTS.override.md"}
 
 // Reserved are config.toml and the agents directory, which Render writes, the skills and
 // AGENTS.md, which qory places for a launch, auth.json, Codex's login file, which no
-// home of qory's has, and the [walledFiles].
+// home of qory's has, the [walledFiles], and rules/read-access.rules, which qory writes
+// for a walled read run.
 func (codex) Reserved() []render.Reserved {
 	out := []render.Reserved{
 		{Path: "config.toml", Why: "qory writes it"},
@@ -99,7 +104,7 @@ func (codex) Reserved() []render.Reserved {
 	for _, p := range walledFiles {
 		out = append(out, render.Reserved{Path: p, Refusal: fmt.Sprintf(textWalledFile, p)})
 	}
-	return out
+	return append(out, render.Reserved{Path: "rules/" + ReadRulesName, Refusal: textReadRulesFile})
 }
 
 // Render writes config.toml, with the target model as model, the MCP servers as

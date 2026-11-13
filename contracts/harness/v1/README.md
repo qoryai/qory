@@ -1182,11 +1182,13 @@ run takes its model key from the run, not from a file.``
 
 `codex` also reserves `hooks.json`, `.env`, `environments.toml`, `AGENTS.override.md`
 and `rules/read-access.rules`: compose refuses a module that ships one of them under
-`files/codex/`. The refusal is ``Remove `files/codex/<path>` from module <name>: qory writes it for every
-walled Codex run.`` qory writes `hooks.json`, `.env`, `environments.toml` and
-`AGENTS.override.md` in the Codex home of every walled Codex run, and
-`rules/read-access.rules` in the Codex home of a walled read run whose harness ships
-`settings/codex/read-access.rules`. Other files under `rules/` stay allowed. Each skill under `codex/skills/`
+`files/codex/`. qory writes `hooks.json`, `.env`, `environments.toml` and
+`AGENTS.override.md` in the Codex home of every walled Codex run, and the refusal is
+``Remove `files/codex/<path>` from module <name>: qory writes it for every walled Codex
+run.`` qory writes `rules/read-access.rules` in the Codex home of a walled read run whose
+harness ships `settings/codex/read-access.rules`, and the refusal is ``Remove
+`files/codex/rules/read-access.rules` from module <name>: qory writes it for a walled
+Codex run that only reads, from the harness's `settings/codex/read-access.rules`.`` Other files under `rules/` stay allowed. Each skill under `codex/skills/`
 is copied within the limits of a copy of one module entry and leaves out `.git`. A walled Codex run's copy
 of `rules/` and `agents/` takes at most 10,000 files, directories and links, 1 GiB in all
 and 64 MiB a file.

@@ -911,9 +911,11 @@ release may change what an existing document does, and states it under Upgrading
   ``Remove `files/codex/auth.json` from module <name>: a Codex run takes its model key
   from the run, not from a file.``
 - Compose refuses a module that ships `files/codex/hooks.json`, `files/codex/.env`,
-  `files/codex/environments.toml`, `files/codex/AGENTS.override.md` or
-  `files/codex/rules/read-access.rules`, with ``Remove `files/codex/<path>` from module
-  <name>: qory writes it for every walled Codex run.``
+  `files/codex/environments.toml` or `files/codex/AGENTS.override.md`, with ``Remove
+  `files/codex/<path>` from module <name>: qory writes it for every walled Codex run.``
+  It refuses a module that ships `files/codex/rules/read-access.rules` with ``Remove
+  `files/codex/rules/read-access.rules` from module <name>: qory writes it for a walled
+  Codex run that only reads, from the harness's `settings/codex/read-access.rules`.``
 - A walled `qory run` given a run key does not start when `--env` or `wall.env` names a
   variable the runtime reads its model key from: `ANTHROPIC_API_KEY`,
   `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_AUTH_TOKEN` for Claude Code. An unwalled run,
