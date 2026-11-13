@@ -142,7 +142,7 @@ func TestAWalledLaunchOfCodexHasNoSandboxOfItsOwn(t *testing.T) {
 		t.Fatal(err)
 	}
 	args := []string{"exec", "--json", "--add-dir", "/in", "$explore /in/inputs.json"}
-	want := []string{"exec", "--sandbox", "danger-full-access", "--json", "--add-dir", "/in", "[$explore](/tmp/qory-codex-home/skills/explore/SKILL.md) /in/inputs.json"}
+	want := []string{"exec", "--sandbox", "danger-full-access", "--json", "--add-dir", "/in", "[$explore](/var/lib/qory-codex-home/skills/explore/SKILL.md) /in/inputs.json"}
 	if got := walledArgs(rt, args); !slices.Equal(got, want) {
 		t.Errorf("codex: got %q, want %q", got, want)
 	}

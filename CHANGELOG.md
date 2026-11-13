@@ -319,7 +319,7 @@ release may change what an existing document does, and states it under Upgrading
   `--approve-for-me` or `--not-so-yolo`, which Codex refuses beside `--sandbox`. Inside
   the wall every other sandbox mode of Codex fails before it runs a command. The prompt
   of a walled `codex exec` mentions the skill by its path,
-  `[$<name>](/tmp/qory-codex-home/skills/<name>/SKILL.md)`, not `$<name>`. An unwalled
+  `[$<name>](/var/lib/qory-codex-home/skills/<name>/SKILL.md)`, not `$<name>`. An unwalled
   run is unchanged.
 - qory builds with Forager main 1b3071e2. A run keeps its wall only when a container of
   the run may still run; a network or folder of the wall that could not be removed no longer

@@ -26,8 +26,10 @@ import (
 // HomeInWall is the folder in the wall where a walled run binds Codex's writable home
 // and sets CODEX_HOME: one fixed path in every image, whatever HOME the image sets, so
 // qory knows it before the join. Codex keys each hook's trust by this path, see
-// [WalledConfig].
-const HomeInWall = "/tmp/qory-codex-home"
+// [WalledConfig]. The folder is outside /tmp, since Codex 0.167.2 writes no helper
+// program, such as apply_patch, in a home under the temporary folder
+// (codex-rs/arg0/src/lib.rs).
+const HomeInWall = "/var/lib/qory-codex-home"
 
 // Bound is one file or folder of a walled run's Codex home that the run binds read-only
 // at Target, its path in [HomeInWall].

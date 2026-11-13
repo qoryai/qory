@@ -85,9 +85,9 @@ model = "gpt-6.1-sol"
       command = "/bin/true"
       type = "command"
   [hooks.state]
-    [hooks.state."/tmp/qory-codex-home/config.toml:stop:0:0"]
+    [hooks.state."/var/lib/qory-codex-home/config.toml:stop:0:0"]
       trusted_hash = "` + endCheckHash + `"
-    [hooks.state."/tmp/qory-codex-home/config.toml:stop:0:1"]
+    [hooks.state."/var/lib/qory-codex-home/config.toml:stop:0:1"]
       trusted_hash = "` + trueHash + `"
 
 [mcp_servers]
@@ -155,9 +155,9 @@ async = false
 `
 	state := walledState(t, config, nil)
 	want := map[string]string{
-		"/tmp/qory-codex-home/config.toml:stop:0:0": "sha256:5cde819ee8866303693164854d02d8bfc2d76a0b837bb47a63777a72243e20db",
-		"/tmp/qory-codex-home/config.toml:stop:1:0": "sha256:a32fadf67dd9ba6b779757c3db73589e436c56976457f459c05f7e453a1f589f",
-		"/tmp/qory-codex-home/config.toml:stop:1:1": endCheckHash,
+		"/var/lib/qory-codex-home/config.toml:stop:0:0": "sha256:5cde819ee8866303693164854d02d8bfc2d76a0b837bb47a63777a72243e20db",
+		"/var/lib/qory-codex-home/config.toml:stop:1:0": "sha256:a32fadf67dd9ba6b779757c3db73589e436c56976457f459c05f7e453a1f589f",
+		"/var/lib/qory-codex-home/config.toml:stop:1:1": endCheckHash,
 	}
 	if len(state) != len(want) {
 		t.Fatalf("hooks.state %v, want the keys of %v", state, want)
@@ -376,7 +376,7 @@ func TestWriteWalledHome(t *testing.T) {
 	}
 	var want []codex.Bound
 	for _, name := range []string{"config.toml", "hooks.json", ".env", "environments.toml", "AGENTS.override.md", "AGENTS.md", "rules", "skills", "agents"} {
-		want = append(want, codex.Bound{Path: name, Source: filepath.Join(files, name), Target: "/tmp/qory-codex-home/" + name, Dir: !strings.Contains(name, ".")})
+		want = append(want, codex.Bound{Path: name, Source: filepath.Join(files, name), Target: "/var/lib/qory-codex-home/" + name, Dir: !strings.Contains(name, ".")})
 	}
 	if !reflect.DeepEqual(binds, want) {
 		t.Errorf("binds:\n%+v\nwant:\n%+v", binds, want)

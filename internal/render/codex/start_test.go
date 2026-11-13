@@ -23,9 +23,9 @@ func TestWalledArgs(t *testing.T) {
 		t.Fatal("codex is no render.Walled")
 	}
 	for _, c := range []struct{ args, want []string }{
-		{[]string{"exec", "--json", "$explore x"}, []string{"exec", "--sandbox", "danger-full-access", "--json", "[$explore](/tmp/qory-codex-home/skills/explore/SKILL.md) x"}},
-		{[]string{"exec", "$workflow-explore"}, []string{"exec", "--sandbox", "danger-full-access", "[$workflow-explore](/tmp/qory-codex-home/skills/workflow-explore/SKILL.md)"}},
-		{[]string{"exec", "--sandbox", "read-only", "$explore x"}, []string{"exec", "--sandbox", "read-only", "[$explore](/tmp/qory-codex-home/skills/explore/SKILL.md) x"}},
+		{[]string{"exec", "--json", "$explore x"}, []string{"exec", "--sandbox", "danger-full-access", "--json", "[$explore](/var/lib/qory-codex-home/skills/explore/SKILL.md) x"}},
+		{[]string{"exec", "$workflow-explore"}, []string{"exec", "--sandbox", "danger-full-access", "[$workflow-explore](/var/lib/qory-codex-home/skills/workflow-explore/SKILL.md)"}},
+		{[]string{"exec", "--sandbox", "read-only", "$explore x"}, []string{"exec", "--sandbox", "read-only", "[$explore](/var/lib/qory-codex-home/skills/explore/SKILL.md) x"}},
 		{[]string{"exec", "$pack:review x"}, []string{"exec", "--sandbox", "danger-full-access", "$pack:review x"}},
 		{[]string{"exec", "$ x"}, []string{"exec", "--sandbox", "danger-full-access", "$ x"}},
 		{[]string{"exec", "$explore", "x"}, []string{"exec", "--sandbox", "danger-full-access", "$explore", "x"}},

@@ -1647,7 +1647,7 @@ the work item. Then a run of the step explore:
   it, sets a sandbox mode (`--sandbox`, `-s`, `-s<mode>`), bypasses one (`--yolo`,
   `--dangerously-bypass-approvals-and-sandbox`), or is `--approve-for-me` or
   `--not-so-yolo`, which Codex refuses beside `--sandbox`. Behind a wall, the prompt
-  mentions the skill by its path, `[$<name>](/tmp/qory-codex-home/skills/<name>/SKILL.md)
+  mentions the skill by its path, `[$<name>](/var/lib/qory-codex-home/skills/<name>/SKILL.md)
   <in>/inputs.json`;
 - takes its time limit as [Time limits](#time-limits) says.
 
