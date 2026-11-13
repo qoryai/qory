@@ -1446,24 +1446,9 @@ none of these flags. For any runtime, a run given a run key reads no `git`, `env
 machine key under `harness`, such as `launch` or `home`, from the checkout's `qory.yaml`:
 your `qory.yaml` and the files above the checkout set those. Without a wall, Claude Code
 reads the settings, `CLAUDE.md`, plugins and memory of the user running qory, as
-`--setting-sources user` reads them. Behind a wall, `CLAUDE_CONFIG_DIR` is
-`/tmp/qory-agent-home` in the container, an empty folder of mode 0700 that qory makes after
-the commands the repository's configuration runs, last before Claude Code starts; the run is
-refused when anything is at that path then. When Forager binds the run's transcript folder
-at `~/.claude/projects` in the container, qory then makes `/tmp/qory-agent-home/projects` a
-symbolic link to it: Claude Code writes its transcripts into that folder of the run
-directory, Forager sends them to the control plane, and a continuation of a paused run
-resumes from them. Without the bind, qory makes no link, and the transcripts stay in the
-container. The model key comes through the gateway, so
-the empty folder needs no login. `HOME` stays the image's. Claude Code starts through
-qory, which removes the image's values of the variables named `ANTHROPIC_*`, `CLAUDE_*`,
-`QORY_*`, `MCP_*` and `OTEL_*`, of `NODE_OPTIONS`, `NODE_PATH`, `LD_PRELOAD`, `LD_AUDIT`,
-`BASH_ENV` and `ENV`, of `HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY` and `ALL_PROXY` in either
-case, and of `SSL_CERT_FILE`, `SSL_CERT_DIR` and `NODE_EXTRA_CA_CERTS`; the values Forager,
-the wall and the server set for the run stay, and so does a value of a variable named
-`ANTHROPIC_*`, `CLAUDE_*`, `QORY_*`, `MCP_*` or `OTEL_*` that is the gateway's placeholder.
-Behind a wall, the run also stops when the image has `/etc/claude-code`, where Claude
-Code reads managed settings.
+`--setting-sources user` reads them. Behind a wall, Claude Code starts on an empty
+configuration folder, as on every walled run of Claude Code: see [Claude Code behind a
+wall](#claude-code-behind-a-wall).
 
 These checks guard against what the run's image and the repository's files leave in place: a
 configuration folder, managed settings or variables that change what Claude Code does. A
@@ -3556,9 +3541,9 @@ With a wall:
 - The runtime starts in a container, on a network with no route out.
 - It reaches the proxy, and nothing else, through a relay.
 - The container sees a copy of the checkout, or the checkout read-only for a read run,
-  and the composed home, and the run's record directory, read-only. A run of Claude Code given a
-  run key also sees a folder that holds the names of the variables its agent keeps,
-  read-only. It sees nothing else of your machine.
+  and the composed home, and the run's record directory, read-only. A run of Claude Code
+  also sees a folder that holds the names of the variables its agent keeps, read-only. It
+  sees nothing else of your machine.
 - The composed home contains copies of the module files that the stack selects, in place
   of links: a module's folder outside the checkout is not mounted in the container.
 - Of your environment, the container gets the ones `wall.env` or `--env` lists, and
@@ -3585,7 +3570,7 @@ What to know:
   Linux archive of the same release, for your engine's architecture. Set `wall.helper` to
   that binary.
 - **What the container sees.** The checkout it was started in, or its copy, the run's
-  record directory, read-only, and for a run of Claude Code given a run key, the folder of the names of the
+  record directory, read-only, and for a run of Claude Code, the folder of the names of the
   variables its agent keeps, read-only; no other directory. `--mount <path>[:ro]` or `wall.mounts` shows it another one, at the same path as on your machine, such as a
   sibling checkout the session reads. A socket is never mounted. A read-write mount stops
   a run that works in a copy: see [A run that may write works in a
@@ -3701,6 +3686,36 @@ What to know:
   runtime's hooks do not reach the session. So a walled run there has no hook events. The
   log, the egress record and the structured output are there. On a Linux host, the hooks
   cross.
+
+### Claude Code behind a wall
+
+Every walled run of Claude Code, a person's run and a run given a run key, starts Claude
+Code on an empty configuration folder. `CLAUDE_CONFIG_DIR` is `/tmp/qory-agent-home` in
+the container, an empty folder of mode 0700 that qory makes after the commands the
+repository's configuration runs, last before Claude Code starts; the run is refused when
+anything is at that path then. A `CLAUDE_CONFIG_DIR` in `harness.launch.claude.env` does
+not apply behind a wall: qory sets `/tmp/qory-agent-home` in its place. Without a wall, the
+value in `harness.launch.claude.env` applies as before.
+
+When Forager binds the run's transcript folder at `~/.claude/projects` in the container,
+qory then makes `/tmp/qory-agent-home/projects` a symbolic link to it: Claude Code writes
+its transcripts into that folder of the run directory, Forager sends them to the control
+plane, and a continuation of a paused run resumes from them. Without the bind, qory makes
+no link, and the transcripts stay in the container.
+
+The empty folder holds no login, so pass the model key as a variable: see [The model
+key](#the-model-key). `HOME` stays the image's, and Claude Code reads nothing from
+`~/.claude` or `~/.claude.json` there. Claude Code starts through qory, which removes the
+image's values of the variables named `ANTHROPIC_*`, `CLAUDE_*`, `QORY_*`, `MCP_*` and
+`OTEL_*`, of `NODE_OPTIONS`, `NODE_PATH`, `LD_PRELOAD`, `LD_AUDIT`, `BASH_ENV` and `ENV`, of
+`HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY` and `ALL_PROXY` in either case, and of
+`SSL_CERT_FILE`, `SSL_CERT_DIR` and `NODE_EXTRA_CA_CERTS`; the values Forager, the wall and
+the server set for the run stay, and so does a value of a variable named `ANTHROPIC_*`,
+`CLAUDE_*`, `QORY_*`, `MCP_*` or `OTEL_*` that is the gateway's placeholder. The run also
+stops when the image has `/etc/claude-code`, where Claude Code reads managed settings.
+
+These checks guard against what the image and the repository's files leave in place, not
+against a repository that acts against them: see [The run key](#the-run-key).
 
 ### A run that may write works in a copy
 
