@@ -333,8 +333,8 @@ An edit to a module's instruction section or a settings fragment is not. The mer
 is generated. It stays as it was until the next compose.
 
 `qory harness compose --check` compares the home with what the stack and modules define.
-It exits 6 when a merged copy, a copied module or a copied Codex skill is behind. That is the check a CI job
-runs.
+It exits 6 when a merged copy, a copied module or a copied Codex skill is behind. That is
+the check a CI job runs.
 
 ### Links in the checkout
 
