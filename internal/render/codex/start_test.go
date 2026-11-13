@@ -94,7 +94,9 @@ func TestWalledArgsRefuseAReservedConfigKey(t *testing.T) {
 	for _, args := range [][]string{
 		{"exec", "-c", "model_verbosity=low", "hi"},
 		{"exec", "-m", "gpt-5", "-C", "/w", "hi"},
-		{"exec", "--", "--oss", "--local-provider=x", "--profile", "x", "-px"},
+		{"exec", "--", "--oss", "--local-provider=x", "--profile", "x", "-px", "--enable", "apps"},
+		{"exec", "--enable", "--json", "hi"},
+		{"exec", "--disable=", "hi"},
 		{"exec", "--config=hooks.Stop=[]", "hi"},
 		{"exec", "-c", "model=gpt-5", "hi"},
 		{"exec", "-c", "hooks_x=1", "hi"},
@@ -147,6 +149,37 @@ func TestWalledArgsRefuseAProviderOrAProfile(t *testing.T) {
 		got, err := w.WalledArgs(c.args)
 		if err == nil || err.Error() != c.want || got != nil {
 			t.Errorf("WalledArgs(%q) = %q, %v, want %q", c.args, got, err, c.want)
+		}
+	}
+}
+
+// TestWalledArgsRefuseAFeature is each form of --enable and --disable, before exec, after
+// it, repeated, and with the legacy name connectors: each is refused in the --config
+// form of the flag, with the first such argument named.
+func TestWalledArgsRefuseAFeature(t *testing.T) {
+	rt, err := render.Lookup("codex")
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := rt.(render.Walled)
+	for _, c := range []struct {
+		args []string
+		flag string
+	}{
+		{[]string{"exec", "--enable", "shell_snapshot", "hi"}, "--enable shell_snapshot"},
+		{[]string{"exec", "--enable=shell_snapshot", "hi"}, "--enable shell_snapshot"},
+		{[]string{"exec", "--disable", "plugins", "hi"}, "--disable plugins"},
+		{[]string{"exec", "--disable=plugins", "hi"}, "--disable plugins"},
+		{[]string{"--enable", "apps", "exec", "hi"}, "--enable apps"},
+		{[]string{"exec", "--enable", "connectors", "hi"}, "--enable connectors"},
+		{[]string{"exec", "--enable", "a", "--enable", "b", "hi"}, "--enable a"},
+		{[]string{"exec", "hi", "--disable", "apps"}, "--disable apps"},
+		{[]string{"--enable", "apps"}, "--enable apps"},
+	} {
+		want := "Remove `" + c.flag + "` from the run's Codex arguments: a Codex run takes this key from qory and Forager, not from the arguments."
+		got, err := w.WalledArgs(c.args)
+		if err == nil || err.Error() != want || got != nil {
+			t.Errorf("WalledArgs(%q) = %q, %v, want %q", c.args, got, err, want)
 		}
 	}
 }

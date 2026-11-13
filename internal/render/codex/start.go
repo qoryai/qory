@@ -31,8 +31,9 @@ func (codex) Install(version string) string { return "@openai/codex@" + version 
 // asks for --approve-for-me or its alias --not-so-yolo, which Codex refuses beside
 // --sandbox (codex-rs/utils/cli/src/shared_options.rs). The prompt stays $<name>: no run
 // binds the home at [HomeInWall] yet, so a mention by that path, see [mentionByPath],
-// would lead to no skill. Arguments that set the model provider, a profile, or a key of
-// [reservedKeys] or [argReservedKeys] with --config or -c are refused, see [checkArgs].
+// would lead to no skill. Arguments that set the model provider, a profile, a feature,
+// or a key of [reservedKeys] or [argReservedKeys] with --config or -c are refused, see
+// [checkArgs].
 func (codex) WalledArgs(args []string) ([]string, error) {
 	if err := checkArgs(args); err != nil {
 		return nil, err
@@ -61,6 +62,10 @@ const textConfigArg = "Remove `--config %s` from the run's Codex arguments: a Co
 // --local-provider, with the flag for its %s.
 const textProviderArg = "Remove `%s` from the run's Codex arguments: a Codex run takes its model provider from qory and Forager, not from the arguments."
 
+// textFeatureArg is the refusal of a walled run whose Codex arguments contain --enable or
+// --disable, with the flag and the feature as given for its two %s.
+const textFeatureArg = "Remove `%s %s` from the run's Codex arguments: a Codex run takes this key from qory and Forager, not from the arguments."
+
 // textProfileArg is the refusal of a walled run whose Codex arguments contain --profile
 // or -p.
 const textProfileArg = "Remove `--profile` from the run's Codex arguments: a Codex run takes its settings from qory and Forager, not from a profile."
@@ -81,7 +86,12 @@ var argReservedKeys = []reservedKey{{"model_reasoning_effort"}}
 //     (the same file, config_profile_v2). -p is --profile in codex and in codex exec;
 //   - --config or -c that sets a key of [reservedKeys] or [argReservedKeys], in the
 //     forms --config <k=v>, --config=<k=v>, -c <k=v>, -c<k=v> and -c=<k=v>
-//     (codex-rs/utils/cli/src/config_override.rs).
+//     (codex-rs/utils/cli/src/config_override.rs);
+//   - --enable or --disable, in the forms --enable <feature> and --enable=<feature>,
+//     which Codex reads as --config features.<feature>=true or false: features is a
+//     key of [reservedKeys], so every feature is refused, also a legacy name such as
+//     connectors for apps (codex-rs/cli/src/main.rs, FeatureToggles). Neither flag has
+//     a short form.
 //
 // Forager puts its --config flags ahead of these arguments, and Codex 0.167.2 takes the
 // last flag for a key, so such an argument would replace Forager's value. Codex reads
@@ -89,8 +99,8 @@ var argReservedKeys = []reservedKey{{"model_reasoning_effort"}}
 // with use_legacy_landlock read as features.use_legacy_landlock, as a dotted path
 // (codex-rs/config/src/overrides.rs). A key at a reserved path, under one, or above one,
 // whose table value sets the reserved path, is refused. Codex refuses a --config or -c
-// with no value after it, or with a value that starts with -, so such a flag passes
-// here. Codex reads no long flag by a shortened name: its parser does not turn on
+// or an --enable or --disable with no value after it, or with a value that starts with
+// -, so such a flag passes here. Codex reads no long flag by a shortened name: its parser does not turn on
 // infer_long_args. Of its short flags, only -h and -V take no value, and both print and
 // exit, so no other flag comes before -c or -p in one word.
 func checkArgs(args []string) error {
@@ -106,6 +116,16 @@ func checkArgs(args []string) error {
 			return fmt.Errorf(textProviderArg, "--local-provider")
 		case a == "--profile" || strings.HasPrefix(a, "--profile=") || strings.HasPrefix(a, "-p"):
 			return errors.New(textProfileArg)
+		case a == "--enable" || a == "--disable":
+			if i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
+				return fmt.Errorf(textFeatureArg, a, args[i+1])
+			}
+			continue
+		case strings.HasPrefix(a, "--enable=") || strings.HasPrefix(a, "--disable="):
+			if flag, feature, _ := strings.Cut(a, "="); feature != "" {
+				return fmt.Errorf(textFeatureArg, flag, feature)
+			}
+			continue
 		case a == "--config" || a == "-c":
 			if i+1 == len(args) || strings.HasPrefix(args[i+1], "-") {
 				continue

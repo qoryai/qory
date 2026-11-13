@@ -151,7 +151,7 @@ func TestAWalledLaunchOfCodexHasNoSandboxOfItsOwn(t *testing.T) {
 		t.Errorf("claude: got %q, %v, want %q", got, err, args)
 	}
 	// Claude Code's -p is --print, and Codex's flags mean nothing to it.
-	printed := []string{"-p", "hi", "--profile", "x", "--oss", "-c", "model_provider=x"}
+	printed := []string{"-p", "hi", "--profile", "x", "--oss", "-c", "model_provider=x", "--enable", "apps"}
 	if got, err := walledArgs(claudeRuntime(t), printed); err != nil || !slices.Equal(got, printed) {
 		t.Errorf("claude: got %q, %v, want %q", got, err, printed)
 	}
