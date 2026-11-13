@@ -42,17 +42,27 @@ const composed = `model = "gpt-6.1-sol"
 
 [mcp_servers.db]
   command = "/srv/harness/modules/core/scripts/db.py"
+
+[[skills.config]]
+  name = "visuals"
+  enabled = true
 `
 
 // TestWalledConfigIsGolden is the config.toml a walled run binds, for a copy of the
-// checkout: the compose's keys as they were, each project path untrusted, and a
-// trusted_hash for each Stop hook, keyed by config.toml in the home in the wall.
+// checkout: the compose's keys as they were, each project path untrusted, a
+// trusted_hash for each Stop hook, keyed by config.toml in the home in the wall, the
+// skills Codex ships and a cloud's skills off, and a disabling entry for each skill name,
+// after the compose's entry.
 func TestWalledConfigIsGolden(t *testing.T) {
-	got, err := codex.WalledConfig([]byte(composed), codex.HomeInWall, []string{"/cache/qory/runs/r1/work", "/workspace"})
+	got, err := codex.WalledConfig([]byte(composed), codex.HomeInWall, []string{"/cache/qory/runs/r1/work", "/workspace"}, []string{"deploying", "plugin:review", "review"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	want := `model = "gpt-6.1-sol"
+
+[cloud]
+  [cloud.skills]
+    enabled = false
 
 [hooks]
 
@@ -81,6 +91,26 @@ func TestWalledConfigIsGolden(t *testing.T) {
     trust_level = "untrusted"
   [projects."/workspace"]
     trust_level = "untrusted"
+
+[skills]
+  [skills.bundled]
+    enabled = false
+
+  [[skills.config]]
+    enabled = true
+    name = "visuals"
+
+  [[skills.config]]
+    enabled = false
+    name = "deploying"
+
+  [[skills.config]]
+    enabled = false
+    name = "plugin:review"
+
+  [[skills.config]]
+    enabled = false
+    name = "review"
 `
 	if string(got) != want {
 		t.Errorf("config.toml:\n%s\nwant:\n%s", got, want)
@@ -184,14 +214,15 @@ timeout = 30
 	}
 }
 
-// TestWalledConfigTrustsNoProjectAndAddsNoState is a config.toml with no hooks and no
-// project path: neither table is written.
+// TestWalledConfigTrustsNoProjectAndAddsNoState is a config.toml with no hooks, no
+// project path and no skill to disable: neither hooks.state nor projects is written, and
+// no skills.config entry, but the skills Codex ships and a cloud's skills are off.
 func TestWalledConfigTrustsNoProjectAndAddsNoState(t *testing.T) {
-	got, err := codex.WalledConfig([]byte("model = \"m\"\n"), codex.HomeInWall, nil)
+	got, err := codex.WalledConfig([]byte("model = \"m\"\n"), codex.HomeInWall, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(got) != "model = \"m\"\n" {
+	if want := "model = \"m\"\n\n[cloud]\n  [cloud.skills]\n    enabled = false\n\n[skills]\n  [skills.bundled]\n    enabled = false\n"; string(got) != want {
 		t.Errorf("config.toml %q", got)
 	}
 }
@@ -199,7 +230,7 @@ func TestWalledConfigTrustsNoProjectAndAddsNoState(t *testing.T) {
 // walledState is the hooks.state table of [codex.WalledConfig] for config, key to hash.
 func walledState(t *testing.T, config string, projects []string) map[string]string {
 	t.Helper()
-	got, err := codex.WalledConfig([]byte(config), codex.HomeInWall, projects)
+	got, err := codex.WalledConfig([]byte(config), codex.HomeInWall, projects, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -249,7 +280,7 @@ func TestWriteWalledHome(t *testing.T) {
 	if err := os.Symlink("review/SKILL.md", filepath.Join(dir, "skills", "linked.md")); err != nil {
 		t.Fatal(err)
 	}
-	binds, err := codex.WriteWalledHome(dir, files, []string{"/workspace"})
+	binds, err := codex.WriteWalledHome(dir, files, codex.WalledRun{Projects: []string{"/workspace"}})
 	if err != nil {
 		t.Fatal(err)
 	}

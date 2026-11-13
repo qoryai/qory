@@ -778,6 +778,11 @@ release may change what an existing document does, and states it under Upgrading
   the run's model key.``, and for the others ``Remove `<key>` from the harness's
   `settings/codex/config.toml`: qory sets it for every Codex run.`` A fragment may still
   set `web_search` and the other keys of `hooks`, such as `hooks.Stop`.
+- The home of a walled Codex run disables, by name, every skill that no
+  `Skill(harness:<name>)` rule in `permissions.allow` of the harness's
+  `settings/claude/settings.json` allows: each skill in the home and in the checkout's
+  `.codex/skills` and `.agents/skills`. It turns off the skills Codex ships and a cloud's
+  skills. See the codex entry in `contracts/harness/v1/README.md`.
 - Compose refuses a module that ships `files/codex/auth.json`, Codex's login file, with
   ``Remove `files/codex/auth.json` from module <name>: qory gives Codex its model key
   through the gateway.``

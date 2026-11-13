@@ -1197,7 +1197,17 @@ Per runtime, the files written into its directory:
   `<key>` from the harness's `settings/codex/config.toml`: qory writes it from the run's
   model key.`` for `model_provider` and `model_providers`, and ``Remove `<key>` from the
   harness's `settings/codex/config.toml`: qory sets it for every Codex run.`` for the
-  others.
+  others. Codex has no allow list of skills, so the `Skill(harness:<name>)` rules in
+  `permissions.allow` of `settings/claude/settings.json` are the Codex list too. In the
+  home of a walled Codex run, `config.toml` disables every other skill by name, with a
+  `[[skills.config]]` entry with `enabled = false` after any entry the fragment has: each
+  skill of the home's `skills/` and of the checkout's `.codex/skills` and
+  `.agents/skills`, by its frontmatter `name` and its folder's name, and after the name
+  of each plugin above it. It also sets `skills.bundled.enabled = false` and
+  `cloud.skills.enabled = false`. A rule with a pattern, such as `Skill(harness:*)`,
+  allows no skill, and a harness with no such rule runs with none. Codex still loads a
+  skill that is not there when qory writes the home, such as one the agent writes, and a
+  skill of the checkout with an allowed name.
 - **gemini**: `settings.json` with `model.name` and `mcpServers`, links for skills and hooks,
   one `agents/<name>.md` with `name` and `description`, one `commands/<name>.toml` with
   `$ARGUMENTS` as `{{args}}`. Gemini reads a project `.gemini` only in a trusted folder.

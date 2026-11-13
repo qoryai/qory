@@ -11,6 +11,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -55,24 +56,73 @@ var (
 // noHooks is the hooks.json of a walled run's home: a file with no hook.
 const noHooks = "{\"hooks\": {}}\n"
 
+// WalledRun is what [WriteWalledHome] needs to know of the run.
+type WalledRun struct {
+	// Projects are the paths where the run's checkout is in the wall.
+	Projects []string
+	// Checkouts are the folders on this machine that the wall shows at Projects. qory
+	// reads the skills of each one's .codex/skills and .agents/skills.
+	Checkouts []string
+	// Skills are the skills the run may load, from [AllowedSkills].
+	Skills []string
+}
+
 // WriteWalledHome writes into files, a new, empty folder on this machine apart from the
 // writable home and from every other mount of the run, such as
 // <user cache>/qory/runs/<run id>/codex-fixed, every part of a walled run's Codex home
 // that the run binds read-only: the config.toml from dir, the runtime's directory of the
-// composed home, with [WalledConfig]'s additions for projects, a hooks.json with no hook,
+// composed home, with [WalledConfig]'s additions for run.Projects and with every skill
+// that is not in run.Skills disabled, a hooks.json with no hook,
 // an empty .env, environments.toml and AGENTS.override.md, dir's AGENTS.md, or an empty
 // one, and a copy of each folder of [boundDirs] that dir has, or an empty folder. A mount
 // with a target may share no path on this machine with another mount, so nothing is
 // bound from dir itself, which the run mounts as the harness home. It writes no
 // auth.json. It returns the binds, files first, in a fixed order.
-func WriteWalledHome(dir, files string, projects []string) ([]Bound, error) {
+//
+// The skills disabled are every name, other than run.Skills, of a skill in the copy of
+// dir's skills and in run.Checkouts, by [skillNames]. A skill that is not there when
+// WriteWalledHome runs keeps its name enabled: one the agent writes during the run, and
+// one in ~/.agents/skills or /etc/codex/skills of the image.
+func WriteWalledHome(dir, files string, run WalledRun) ([]Bound, error) {
+	var dirs []Bound
+	for _, name := range boundDirs {
+		dst := filepath.Join(files, name)
+		if err := os.Mkdir(dst, 0o755); err != nil {
+			return nil, err
+		}
+		if info, err := os.Lstat(filepath.Join(dir, name)); err == nil && info.IsDir() {
+			if err := copyTree(filepath.Join(dir, name), dst); err != nil {
+				return nil, err
+			}
+		}
+		dirs = append(dirs, Bound{Path: name, Source: dst, Target: path.Join(HomeInWall, name), Dir: true})
+	}
+	roots := []string{filepath.Join(files, "skills")}
+	for _, c := range run.Checkouts {
+		for _, r := range skillRoots {
+			roots = append(roots, filepath.Join(c, r))
+		}
+	}
+	var disabled []string
+	for _, root := range roots {
+		names, err := skillNames(root)
+		if err != nil {
+			return nil, err
+		}
+		for _, n := range names {
+			if !slices.Contains(run.Skills, n) {
+				disabled = append(disabled, n)
+			}
+		}
+	}
+	slices.Sort(disabled)
 	config, err := os.ReadFile(filepath.Join(dir, "config.toml"))
 	if errors.Is(err, fs.ErrNotExist) {
 		config = nil
 	} else if err != nil {
 		return nil, err
 	}
-	config, err = WalledConfig(config, HomeInWall, projects)
+	config, err = WalledConfig(config, HomeInWall, run.Projects, slices.Compact(disabled))
 	if err != nil {
 		return nil, err
 	}
@@ -91,19 +141,7 @@ func WriteWalledHome(dir, files string, projects []string) ([]Bound, error) {
 		}
 		out = append(out, Bound{Path: name, Source: p, Target: path.Join(HomeInWall, name)})
 	}
-	for _, name := range boundDirs {
-		dst := filepath.Join(files, name)
-		if err := os.Mkdir(dst, 0o755); err != nil {
-			return nil, err
-		}
-		if info, err := os.Lstat(filepath.Join(dir, name)); err == nil && info.IsDir() {
-			if err := copyTree(filepath.Join(dir, name), dst); err != nil {
-				return nil, err
-			}
-		}
-		out = append(out, Bound{Path: name, Source: dst, Target: path.Join(HomeInWall, name), Dir: true})
-	}
-	return out, nil
+	return append(out, dirs...), nil
 }
 
 // copyTree copies the folder src into dst, which exists: folders, regular files with
@@ -156,11 +194,36 @@ func copyTree(src, dst string) error {
 // for each command hook of config's hooks, so Codex runs the harness's hooks without
 // --dangerously-bypass-hook-trust, which would trust an agent's hooks too. home is
 // absolute and contains no link, as Codex resolves it.
-func WalledConfig(config []byte, home string, projects []string) ([]byte, error) {
+//
+// It also turns off the skills Codex ships and the skills of a cloud provider, with
+// skills.bundled.enabled = false and cloud.skills.enabled = false, and adds a
+// skills.config entry with enabled = false for each name of disabled, after the entries
+// config has, since a later entry decides (codex-rs/config/src/skills_config.rs). Codex
+// reads skills.config from this file alone, never from a repository's .codex.
+func WalledConfig(config []byte, home string, projects, disabled []string) ([]byte, error) {
 	m := map[string]any{}
 	if _, err := toml.NewDecoder(bytes.NewReader(config)).Decode(&m); err != nil {
 		return nil, err
 	}
+	skills, _ := m["skills"].(map[string]any)
+	if skills == nil {
+		skills = map[string]any{}
+	}
+	skills["bundled"] = map[string]any{"enabled": false}
+	entries, _ := skills["config"].([]map[string]any)
+	for _, name := range disabled {
+		entries = append(entries, map[string]any{"name": name, "enabled": false})
+	}
+	if len(entries) > 0 {
+		skills["config"] = entries
+	}
+	m["skills"] = skills
+	cloud, _ := m["cloud"].(map[string]any)
+	if cloud == nil {
+		cloud = map[string]any{}
+	}
+	cloud["skills"] = map[string]any{"enabled": false}
+	m["cloud"] = cloud
 	if len(projects) > 0 {
 		trust := map[string]any{}
 		for _, p := range projects {
