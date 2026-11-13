@@ -34,7 +34,6 @@ import (
 	"path"
 	"path/filepath"
 	"slices"
-	"strconv"
 	"strings"
 
 	"github.com/qoryai/qory/internal/compose"
@@ -255,26 +254,22 @@ func findKey(m map[string]any, pattern []string) ([]string, bool) {
 
 // textHookNumber is the refusal of a hook number that Codex cannot read, with the key,
 // the hook's event and the settings file it is in.
-const textHookNumber = "Set `%s` of the `%s` hook in the harness's `settings/codex/%s` to a whole number of 1 or more: Codex ignores the whole file otherwise."
+const textHookNumber = "Set `%s` of the `%s` hook in the harness's `settings/codex/%s` to a whole number of 0 or more: Codex ignores the whole file otherwise."
 
 // hookNumbers are the keys of a hook that Codex 0.167.2 reads as an unsigned whole
-// number, by the hook's type, with the least value qory accepts for each
-// (codex-rs/protocol/src/hooks.rs, HookHandlerConfig). A timeout of 0 means 1 second to
-// Codex and is refused; an additionalContextLimit of 0 turns off the spilling of the
-// hook's context to a file, so 0 passes. Codex ignores these keys on a hook of any other
-// type.
-var hookNumbers = map[string][]struct {
-	key   string
-	least float64
-}{
-	"command":  {{"timeout", 1}, {"additionalContextLimit", 0}},
-	"mcp_tool": {{"timeout", 1}},
+// number, by the hook's type (codex-rs/protocol/src/hooks.rs, HookHandlerConfig). Codex
+// reads a timeout of 0 as 1 second, and an additionalContextLimit of 0 turns off the
+// spilling of the hook's context to a file. Codex ignores these keys on a hook of any
+// other type.
+var hookNumbers = map[string][]string{
+	"command":  {"timeout", "additionalContextLimit"},
+	"mcp_tool": {"timeout"},
 }
 
 // checkHookNumbers refuses m, the harness's fragment of config.toml or hooks.json, when
-// a hook in it has a number of [hookNumbers] that is fractional or below its least
-// value, naming the first event in sorted order. Codex 0.167.2 then reads none of
-// config.toml and starts with its defaults, or drops every hook of hooks.json
+// a hook in it has a number of [hookNumbers] that is negative or fractional, naming the
+// first event in sorted order. Codex 0.167.2 then reads none of config.toml and starts
+// with its defaults, or drops every hook of hooks.json
 // (codex-rs/hooks/src/engine/discovery.rs, load_hooks_json). Codex refuses a float such
 // as 2.0 as well: config.toml decodes it as a float, which is refused, and a hooks.json
 // fragment read by [exactJSON] has it as a number with a ".", which is refused too.
@@ -288,10 +283,10 @@ func checkHookNumbers(file string, m map[string]any) error {
 			for _, h := range handlers {
 				handler, _ := h.(map[string]any)
 				kind, _ := handler["type"].(string)
-				for _, n := range hookNumbers[kind] {
-					v, ok := handler[n.key]
-					if _, float := v.(float64); ok && (!wholeAtLeast(v, n.least) || float && file == "config.toml") {
-						return fmt.Errorf(textHookNumber, n.key, event, file)
+				for _, key := range hookNumbers[kind] {
+					v, ok := handler[key]
+					if _, float := v.(float64); ok && (!whole(v) || float && file == "config.toml") {
+						return fmt.Errorf(textHookNumber, key, event, file)
 					}
 				}
 			}
@@ -313,26 +308,19 @@ func exactJSON(data []byte) map[string]any {
 	return m
 }
 
-// wholeAtLeast reports whether v, a decoded settings value, is a whole number of least
-// or more. A value that is no number passes: Codex refuses it too, and the refusal of a
-// number would name the wrong fault.
-func wholeAtLeast(v any, least float64) bool {
+// whole reports whether v, a decoded settings value, is a whole number of 0 or more. A
+// value that is no number passes: Codex refuses it too, and the refusal of a number
+// would name the wrong fault.
+func whole(v any) bool {
 	switch n := v.(type) {
 	case json.Number:
-		if strings.ContainsAny(string(n), ".eE") {
-			return false
-		}
-		i, err := strconv.ParseInt(string(n), 10, 64)
-		if err != nil {
-			return !strings.HasPrefix(string(n), "-")
-		}
-		return float64(i) >= least
+		return !strings.ContainsAny(string(n), ".eE-")
 	case int64:
-		return float64(n) >= least
+		return n >= 0
 	case int:
-		return float64(n) >= least
+		return n >= 0
 	case float64:
-		return n == math.Trunc(n) && n >= least
+		return n == math.Trunc(n) && n >= 0
 	}
 	return true
 }

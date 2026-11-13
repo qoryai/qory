@@ -65,19 +65,19 @@ func TestCodexRefusesReservedKeys(t *testing.T) {
 // TestCodexRefusesABadHookNumber is a Codex config.toml or hooks.json fragment with a
 // hook whose timeout or additionalContextLimit Codex cannot read: the compose's build
 // fails with the line that names the key, the event and the file, and writes no
-// config.toml. A float such as 2.0 counts as fractional in both files. An
-// additionalContextLimit of 0, a timeout of 1 or 2, and a bad number on a hook type that
-// has no such key stay allowed.
+// config.toml. A float such as 2.0 counts as fractional in both files. A timeout and an
+// additionalContextLimit of 0, and a bad number on a hook type that has no such key, stay
+// allowed.
 func TestCodexRefusesABadHookNumber(t *testing.T) {
 	const command = "[[hooks.SessionStart]]\n[[hooks.SessionStart.hooks]]\ntype = \"command\"\ncommand = \"/bin/true\"\n"
 	for _, c := range []struct{ name, file, fragment, key string }{
 		{"negative timeout", "config.toml", "[[hooks.Stop]]\n[[hooks.Stop.hooks]]\ntype = \"command\"\ncommand = \"/bin/true\"\n\n" + command + "timeout = 5\n[[hooks.SessionStart.hooks]]\ntype = \"mcp_tool\"\nserver = \"s\"\ntool = \"t\"\ntimeout = -1\n", "timeout"},
-		{"zero timeout", "config.toml", command + "timeout = 0\n", "timeout"},
 		{"fractional timeout", "config.toml", command + "timeout = 1.5\n", "timeout"},
 		{"float timeout", "config.toml", command + "timeout = 2.0\n", "timeout"},
 		{"negative limit", "config.toml", command + "additionalContextLimit = -1\n", "additionalContextLimit"},
 		{"fractional limit", "config.toml", command + "additionalContextLimit = 0.5\n", "additionalContextLimit"},
 		{"json timeout", "hooks.json", `{"hooks": {"SessionStart": [{"hooks": [{"type": "command", "command": "/bin/true", "timeout": -1.5}]}]}}`, "timeout"},
+		{"json negative", "hooks.json", `{"hooks": {"SessionStart": [{"hooks": [{"type": "command", "command": "/bin/true", "additionalContextLimit": -1}]}]}}`, "additionalContextLimit"},
 		{"json whole float", "hooks.json", `{"hooks": {"SessionStart": [{"hooks": [{"type": "command", "command": "/bin/true", "timeout": 2.0}]}]}}`, "timeout"},
 		{"json exponent", "hooks.json", `{"hooks": {"SessionStart": [{"hooks": [{"type": "mcp_tool", "server": "s", "tool": "t", "timeout": 1e1}]}]}}`, "timeout"},
 		{"json limit", "hooks.json", `{"hooks": {"SessionStart": [{"hooks": [{"type": "command", "command": "/bin/true", "additionalContextLimit": 2.5}]}]}}`, "additionalContextLimit"},
@@ -85,7 +85,7 @@ func TestCodexRefusesABadHookNumber(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			res, home := composeEnv(t, withFile("modules/core/settings/codex/"+c.file, c.fragment), nil, "codex")
 			err := render.Build(res, home, lookup(t, "codex"))
-			want := "Set `" + c.key + "` of the `SessionStart` hook in the harness's `settings/codex/" + c.file + "` to a whole number of 1 or more: Codex ignores the whole file otherwise."
+			want := "Set `" + c.key + "` of the `SessionStart` hook in the harness's `settings/codex/" + c.file + "` to a whole number of 0 or more: Codex ignores the whole file otherwise."
 			if err == nil || err.Error() != want {
 				t.Fatalf("Build: %v, want %q", err, want)
 			}
@@ -94,12 +94,12 @@ func TestCodexRefusesABadHookNumber(t *testing.T) {
 			}
 		})
 	}
-	allowed := command + "timeout = 1\nadditionalContextLimit = 0\n[[hooks.SessionStart.hooks]]\ntype = \"mcp_tool\"\nserver = \"s\"\ntool = \"t\"\nadditionalContextLimit = -1\n"
+	allowed := command + "timeout = 0\nadditionalContextLimit = 0\n[[hooks.SessionStart.hooks]]\ntype = \"mcp_tool\"\nserver = \"s\"\ntool = \"t\"\nadditionalContextLimit = -1\n"
 	res, home := composeEnv(t, withFile("modules/core/settings/codex/config.toml", allowed), nil, "codex")
 	if err := render.Build(res, home, lookup(t, "codex")); err != nil {
-		t.Fatalf("Build with a timeout of 1 and a limit of 0: %v", err)
+		t.Fatalf("Build with a timeout and a limit of 0: %v", err)
 	}
-	res, home = composeEnv(t, withFile("modules/core/settings/codex/hooks.json", `{"hooks": {"Stop": [{"hooks": [{"type": "command", "command": "/bin/true", "timeout": 2, "additionalContextLimit": 0}]}]}}`), nil, "codex")
+	res, home = composeEnv(t, withFile("modules/core/settings/codex/hooks.json", `{"hooks": {"Stop": [{"hooks": [{"type": "command", "command": "/bin/true", "timeout": 0, "additionalContextLimit": 0}]}]}}`), nil, "codex")
 	if err := render.Build(res, home, lookup(t, "codex")); err != nil {
 		t.Fatalf("Build with whole numbers in hooks.json: %v", err)
 	}
