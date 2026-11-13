@@ -300,6 +300,16 @@ func copyTree(src, dst string) error {
 // also reads no cloud-config-bundle-cache.json, whose managed hooks would run without
 // trust (codex-rs/cloud-config/src/service.rs, load_startup_bundle). A model provider's
 // env_key reads its variable and needs no stored login.
+//
+// It turns off what runs or keeps the agent's files at the start of a later Codex
+// process: features.shell_snapshot = false, since the snapshot sources ~/.bashrc and
+// ~/.profile in a login shell (codex-rs/core/src/shell_snapshot.rs); allow_login_shell =
+// false, so Codex runs commands with bash -c, not bash -lc (codex-rs/core/src/shell.rs);
+// features.goals = false, which would continue a goal the agent set
+// (codex-rs/ext/goal/src/runtime.rs); and features.memories = false. Codex 0.167.2 turns
+// the first three on by default (codex-rs/features/src/lib.rs). A --config flag, a
+// trusted project's .codex and the requirements files of /etc/codex can set them again;
+// projects are untrusted here, and the agent image has no /etc/codex.
 func WalledConfig(config []byte, home string, projects, disabled, disabledPaths []string) ([]byte, error) {
 	m := map[string]any{}
 	if _, err := toml.NewDecoder(bytes.NewReader(config)).Decode(&m); err != nil {
@@ -328,6 +338,15 @@ func WalledConfig(config []byte, home string, projects, disabled, disabledPaths 
 	cloud["skills"] = map[string]any{"enabled": false}
 	m["cloud"] = cloud
 	m["cli_auth_credentials_store"] = "ephemeral"
+	m["allow_login_shell"] = false
+	features, _ := m["features"].(map[string]any)
+	if features == nil {
+		features = map[string]any{}
+	}
+	for _, f := range []string{"shell_snapshot", "goals", "memories"} {
+		features[f] = false
+	}
+	m["features"] = features
 	if len(projects) > 0 {
 		trust := map[string]any{}
 		for _, p := range projects {
