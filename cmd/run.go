@@ -49,6 +49,7 @@ import (
 	"github.com/qoryai/qory/internal/provisioner"
 	"github.com/qoryai/qory/internal/proxygit"
 	"github.com/qoryai/qory/internal/render"
+	"github.com/qoryai/qory/internal/render/codex"
 	"github.com/qoryai/qory/internal/report"
 	"github.com/qoryai/qory/internal/runcopy"
 	"github.com/qoryai/qory/internal/secretmask"
@@ -3349,11 +3350,16 @@ const checkToolsStep = "Check tools"
 // run's repository and then runs the start commands of the repository's development
 // container configuration. With gitSession set, for a run that has a git session after the
 // agent, the step [checkToolsStep] comes first, so an image with no program of that session
-// stops the run before the agent.
-func setupCommands(gitSession bool) []session.SetupCommand {
+// stops the run before the agent. On a run of the runtime named runtime codex, the step also
+// stops an image with /etc/codex, see [image.CodexSessionCheckScript].
+func setupCommands(gitSession bool, runtime string) []session.SetupCommand {
 	var commands []session.SetupCommand
 	if gitSession {
-		commands = append(commands, session.SetupCommand{Name: checkToolsStep, Args: []string{"/bin/sh", "-c", image.SessionCheckScript()}})
+		script := image.SessionCheckScript()
+		if runtime == codex.Runtime {
+			script = image.CodexSessionCheckScript()
+		}
+		commands = append(commands, session.SetupCommand{Name: checkToolsStep, Args: []string{"/bin/sh", "-c", script}})
 	}
 	return append(commands, session.SetupCommand{Name: setupStep, Args: append([]string{wall.HelperPath}, prepareArgs...)})
 }
@@ -3407,10 +3413,14 @@ func toolFixes(dir string, err error) []string {
 // the run's image on the wall's network, which runs until the run closes, or on a read
 // run until [removeSetup]. The setup container is checked and limited as the session is: it gets the session's working
 // folder, ForagerFiles, Written and Limits, and the agent's variables, see [setupEnv].
-// Inside, the setup commands get the agent's environment. gitSession is what
-// [setupCommands] takes.
+// Inside, the setup commands get the agent's environment. gitSession and the name of the
+// spec's runtime are what [setupCommands] takes.
 func runSetup(ctx context.Context, run openedRun, spec *runSpec, gitSession bool) error {
-	commands := setupCommands(gitSession)
+	runtime := ""
+	if spec.Runtime != nil {
+		runtime = spec.Runtime.Name()
+	}
+	commands := setupCommands(gitSession, runtime)
 	if spec.setupWhere == config.SetupInside {
 		spec.SessionSpec.Setup = commands
 		spec.SetupRunner = append([]string{wall.HelperPath}, setupCommandArgs...)

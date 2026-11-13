@@ -302,17 +302,34 @@ func SessionShellFix() string {
 	return ""
 }
 
+// CodexSettings is where Codex 0.167.2 on Linux reads settings before those of its home:
+// config.toml, requirements.toml and managed_config.toml
+// (codex-rs/config/src/loader/mod.rs, codex-rs/config/src/loader/layer_io.rs).
+const CodexSettings = "/etc/codex"
+
+// noCodexSettings is the fix for an image that has anything at [CodexSettings].
+func noCodexSettings() string {
+	return "Use an image without " + CodexSettings + ": Codex reads its settings there before qory's, so the run does not start."
+}
+
 // SessionCheckScript is the sh script of a walled write run's setup step that checks, before the
 // agent, what [Probe.git] checks of the image: each of [sessionTools] and git 2.25 or later, on
 // the PATH of the git session. It prints nothing and exits 0 when all of it is there. Otherwise it
 // prints the line of [Probe.git] for each failure on stderr, the fix first, and exits 1. It runs
 // only the shell's builtins and git, under dash and busybox ash as well.
 func SessionCheckScript() string {
-	return sessionCheckScript(strings.Join(gitSessionDirs, ":"))
+	return sessionCheckScript(strings.Join(gitSessionDirs, ":"), "")
 }
 
-// sessionCheckScript is [SessionCheckScript] with path as the session's PATH.
-func sessionCheckScript(path string) string {
+// CodexSessionCheckScript is [SessionCheckScript] for a walled run of Codex: it also fails
+// with its line when the image has anything at [CodexSettings], a file, a folder or a link.
+func CodexSessionCheckScript() string {
+	return sessionCheckScript(strings.Join(gitSessionDirs, ":"), CodexSettings)
+}
+
+// sessionCheckScript is [SessionCheckScript] with path as the session's PATH, and with the
+// check of [CodexSettings] at settings when settings is not empty.
+func sessionCheckScript(path, settings string) string {
 	var b strings.Builder
 	b.WriteString("PATH=" + shellQuoted(path) + "\nexport PATH\nfailed=0\n")
 	b.WriteString(sessionCheckFunctions)
@@ -327,7 +344,13 @@ func sessionCheckScript(path string) string {
 	b.WriteString("\t\tfail " + shellQuoted(sessionGitOld("@AT@", "@LINE@")) + "\n")
 	b.WriteString("\tfi\nelse\n")
 	b.WriteString("\tfail " + shellQuoted(noSessionGit()) + "\n")
-	b.WriteString("fi\nexit \"$failed\"\n")
+	b.WriteString("fi\n")
+	if settings != "" {
+		b.WriteString("if test -e " + shellQuoted(settings) + " || test -h " + shellQuoted(settings) + "; then\n")
+		b.WriteString("\tfail " + shellQuoted(noCodexSettings()) + "\n")
+		b.WriteString("fi\n")
+	}
+	b.WriteString("exit \"$failed\"\n")
 	return b.String()
 }
 
@@ -386,13 +409,13 @@ func shellQuoted(s string) string {
 // line for git version 2.24.0 in /usr/local/bin has 151 bytes.
 const maxSessionGitLine = 200
 
-// SessionCheckLine is line, one line of what [SessionCheckScript] printed, as qory prints it, and
-// whether the script can print it. The image runs the script, so the line can contain anything: a
-// line about a program is one of the fixed lines, and a line about git's version has one of the
-// script's forms, at most [maxSessionGitLine] bytes of valid UTF-8 with no control or format
-// character.
+// SessionCheckLine is line, one line of what [SessionCheckScript] or [CodexSessionCheckScript]
+// printed, as qory prints it, and whether the script can print it. The image runs the script, so
+// the line can contain anything: a line about a program or about [CodexSettings] is one of the
+// fixed lines, and a line about git's version has one of the script's forms, at most
+// [maxSessionGitLine] bytes of valid UTF-8 with no control or format character.
 func SessionCheckLine(line string) (string, bool) {
-	if line == noSessionGit() {
+	if line == noSessionGit() || line == noCodexSettings() {
 		return line, true
 	}
 	for _, tool := range sessionTools {
@@ -415,14 +438,15 @@ func SessionCheckLine(line string) (string, bool) {
 	return "", false
 }
 
-// SessionCheckFixes is what qory prints of text, the output of [SessionCheckScript]: each line
-// [SessionCheckLine] takes, and at most as many as the script can print.
+// SessionCheckFixes is what qory prints of text, the output of [SessionCheckScript] or
+// [CodexSessionCheckScript]: each line [SessionCheckLine] takes, and at most as many as the
+// script can print, one per tool, one for git and one for [CodexSettings].
 func SessionCheckFixes(text string) []string {
 	var fixes []string
 	for line := range strings.Lines(text) {
 		if fix, ok := SessionCheckLine(strings.TrimRight(line, "\n")); ok {
 			fixes = append(fixes, fix)
-			if len(fixes) == len(sessionTools)+1 {
+			if len(fixes) == len(sessionTools)+2 {
 				break
 			}
 		}

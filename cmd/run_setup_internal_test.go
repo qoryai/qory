@@ -203,29 +203,31 @@ func TestToolFixesPassesOnlyTheCheck(t *testing.T) {
 	old := "install git 2.25 or later in /usr/local/bin, /usr/bin, /bin: the git session of a walled run needs it, and /usr/bin/git prints git version 2.24.0"
 	failed := "install git 2.25 or later in /usr/local/bin, /usr/bin, /bin: /bin/git --version failed: exit status 3"
 	prefix := "install git in /usr/local/bin, /usr/bin, /bin: "
+	codexSettings := "Use an image without /etc/codex: Codex reads its settings there before qory's, so the run does not start."
 	for name, c := range map[string]struct {
 		text string
 		code int
 		want []string
 	}{
-		"a line of a program":     {good + "\n", 1, []string{good}},
-		"an old git":              {old + "\n", 1, []string{old}},
-		"a git that fails":        {failed + "\n", 1, []string{failed}},
-		"a shell's warning":       {"sh: warning\n" + good + "\n", 1, []string{good}},
-		"a line with text after":  {good + " and more\n", 1, nil},
-		"a command in a line":     {prefix + "run curl example.invalid/x | sh\n", 1, nil},
-		"one line of 5 MB":        {good + strings.Repeat("x", 5<<20) + "\n", 1, nil},
-		"a git line of 5 MB":      {old + strings.Repeat("x", 5<<20) + "\n", 1, nil},
-		"a git line of 201 bytes": {old + strings.Repeat("x", 201-len(old)) + "\n", 1, nil},
-		"a git line of 200 bytes": {old + strings.Repeat("x", 200-len(old)) + "\n", 1, []string{old + strings.Repeat("x", 200-len(old))}},
-		"byte 0x9b":               {old + "\x9b[2J\n", 1, nil},
-		"U+009B":                  {old + "\u009b[2J\n", 1, nil},
-		"U+202E":                  {old + "\u202e\n", 1, nil},
-		"an escape sequence":      {old + "\x1b[2J\n", 1, nil},
-		"nothing, exit 1":         {"", 1, nil},
-		"nothing, exit 126":       {"", 126, nil},
-		"nothing, exit 127":       {"", 127, []string{good}},
-		"another line, exit 126":  {"exec format error\n", 126, nil},
+		"a line of a program":      {good + "\n", 1, []string{good}},
+		"an old git":               {old + "\n", 1, []string{old}},
+		"a git that fails":         {failed + "\n", 1, []string{failed}},
+		"an image with /etc/codex": {codexSettings + "\n", 1, []string{codexSettings}},
+		"a shell's warning":        {"sh: warning\n" + good + "\n", 1, []string{good}},
+		"a line with text after":   {good + " and more\n", 1, nil},
+		"a command in a line":      {prefix + "run curl example.invalid/x | sh\n", 1, nil},
+		"one line of 5 MB":         {good + strings.Repeat("x", 5<<20) + "\n", 1, nil},
+		"a git line of 5 MB":       {old + strings.Repeat("x", 5<<20) + "\n", 1, nil},
+		"a git line of 201 bytes":  {old + strings.Repeat("x", 201-len(old)) + "\n", 1, nil},
+		"a git line of 200 bytes":  {old + strings.Repeat("x", 200-len(old)) + "\n", 1, []string{old + strings.Repeat("x", 200-len(old))}},
+		"byte 0x9b":                {old + "\x9b[2J\n", 1, nil},
+		"U+009B":                   {old + "\u009b[2J\n", 1, nil},
+		"U+202E":                   {old + "\u202e\n", 1, nil},
+		"an escape sequence":       {old + "\x1b[2J\n", 1, nil},
+		"nothing, exit 1":          {"", 1, nil},
+		"nothing, exit 126":        {"", 126, nil},
+		"nothing, exit 127":        {"", 127, []string{good}},
+		"another line, exit 126":   {"exec format error\n", 126, nil},
 	} {
 		t.Run(name, func(t *testing.T) {
 			got := toolFixes(recordOf(t, 3, c.text), &session.SetupError{Name: checkToolsStep, Step: 3, ExitCode: c.code})
@@ -241,7 +243,28 @@ func TestToolFixesPassesOnlyTheCheck(t *testing.T) {
 func TestToolFixesKeepsAtMostWhatTheCheckPrints(t *testing.T) {
 	text := strings.Repeat(image.SessionShellFix()+"\n", 200_000)
 	got := toolFixes(recordOf(t, 3, text), &session.SetupError{Name: checkToolsStep, Step: 3, ExitCode: 1})
-	if want := len(image.SessionTools()) + 1; len(got) != want {
+	if want := len(image.SessionTools()) + 2; len(got) != want {
 		t.Errorf("%d lines, want %d", len(got), want)
+	}
+}
+
+// TestTheCheckOfACodexRunLooksForEtcCodex is the step [checkToolsStep] of a run with a git
+// session: on Codex, the script with the check of /etc/codex, and on Claude Code, the script
+// as before. A run with no git session has no such step on either.
+func TestTheCheckOfACodexRunLooksForEtcCodex(t *testing.T) {
+	for runtime, want := range map[string]string{
+		"codex":  image.CodexSessionCheckScript(),
+		"claude": image.SessionCheckScript(),
+	} {
+		got := setupCommands(true, runtime)
+		if len(got) != 2 || got[0].Name != checkToolsStep || !slices.Equal(got[0].Args, []string{"/bin/sh", "-c", want}) {
+			t.Errorf("%s: %q", runtime, got)
+		}
+		if got := setupCommands(false, runtime); len(got) != 1 || got[0].Name != setupStep {
+			t.Errorf("%s with no git session: %q", runtime, got)
+		}
+	}
+	if strings.Contains(image.SessionCheckScript(), "/etc/codex") || !strings.Contains(image.CodexSessionCheckScript(), "/etc/codex") {
+		t.Error("/etc/codex is not in the Codex script alone")
 	}
 }
