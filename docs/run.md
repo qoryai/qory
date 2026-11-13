@@ -3744,7 +3744,9 @@ run's copy, or, for a run with no copy, a new folder at that path:
   its temporary files and its state database there. The home is outside `/tmp`, because
   Codex 0.167.2 writes its helper programs, such as `apply_patch`, under
   `$CODEX_HOME/tmp/arg0-linux`, and writes none when the home is under the temporary
-  folder.
+  folder. Codex 0.167.2 puts its helper folder, `$CODEX_HOME/tmp/arg0-linux/…`, first on
+  the `PATH` of the processes it starts, so the agent can change which program a later
+  hook or MCP server of the same run finds for a name such as `git`.
 - `codex-fixed`, with the parts of the home the agent may not change: `config.toml` with
   qory's additions, `hooks.json` with no hook, an empty `.env`, an empty
   `environments.toml`, an empty `AGENTS.override.md`, the harness's `AGENTS.md`, and
