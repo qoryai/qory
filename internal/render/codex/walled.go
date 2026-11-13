@@ -77,10 +77,10 @@ type WalledRun struct {
 	// ReadRules are the harness's Codex execpolicy rules for a read run,
 	// compose.Result.CodexReadRules; nil when it has none.
 	ReadRules []byte
-	// LinkRoots are the folders, written by qory, that a link in the composed home may
-	// lead into for the copy of its skills, rules and agents: the composed home and
-	// qory's module cache, the folder of source.CacheDir. A link to anywhere else fails
-	// [WriteWalledHome].
+	// LinkRoots are the folders, besides the composed home, that a link in the composed
+	// home may lead into for the copy of its skills, rules and agents: every folder the
+	// compose read a module from and qory's module cache, compose.Result.SourceDirs. A
+	// link to anywhere else fails [WriteWalledHome].
 	LinkRoots []string
 }
 
@@ -124,7 +124,7 @@ func WriteWalledHome(dir, files string, run WalledRun) ([]Bound, error) {
 			return nil, err
 		}
 		if info, err := os.Lstat(filepath.Join(dir, name)); err == nil && info.IsDir() {
-			if err := copyTree(filepath.Join(dir, name), dst, append([]string{dir}, run.LinkRoots...)); err != nil {
+			if err := copyTree(filepath.Join(dir, name), dst, append([]string{filepath.Dir(dir)}, run.LinkRoots...)); err != nil {
 				return nil, err
 			}
 		}
@@ -324,17 +324,18 @@ func relTo(dir, file string) string {
 // MAX_READ_FILE_BYTES).
 const maxCopiedFile = maxSkillSize
 
-// textOutsideLink is the refusal of a link in the composed home whose target is in none
-// of the folders [WalledRun.LinkRoots] lists, with the link and its target.
-const textOutsideLink = "Use a harness from a git source for a walled Codex run: the composed home's %s links to %s, outside the composed home and qory's module cache."
+// textOutsideLink is the refusal of a link in the composed home whose target lies
+// outside the composed home and every folder of [WalledRun.LinkRoots], with the link's
+// path in the composed home and its target.
+const textOutsideLink = "Remove the link `%s` from the harness: it leads to `%s`, outside the harness's modules, and a walled Codex run copies only files inside them."
 
 // copyTree copies the folder src into dst, which exists, as folders and regular files
 // only: Codex 0.167.2 passes over a SKILL.md that is a link
 // (codex-rs/exec-server/src/local_file_system.rs, the walk). A link is followed when its
-// target, with every link resolved, lies inside one of roots, the folders qory wrote:
-// a link to a folder is copied as a folder, and a link to a file as a regular file. A
-// link with any other target fails the copy rather than leaving a file out, which would
-// change a skill without a word. Each file keeps its executable bits, is at most
+// target, with every link resolved, lies inside one of roots, the composed home and the
+// module folders: a link to a folder is copied as a folder, and a link to a file as a
+// regular file. A link with any other target fails the copy rather than leaving a file
+// out, which would change a skill without a word. Each file keeps its executable bits, is at most
 // [maxCopiedFile] bytes, and is written new, see [writeNew]. Any other kind of file, and
 // a folder that contains itself through a link, is an error.
 func copyTree(src, dst string, roots []string) error {

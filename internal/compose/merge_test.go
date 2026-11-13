@@ -186,3 +186,21 @@ func TestOnlyBringsInWhatANamedEntryRequires(t *testing.T) {
 		}
 	}
 }
+
+// TestSourceDirsAreTheModulesAndTheCache composes two modules from local paths with a
+// cache folder: SourceDirs lists each module's folder in module order, then the cache.
+func TestSourceDirsAreTheModulesAndTheCache(t *testing.T) {
+	cache := t.TempDir()
+	res, err := composeTreeWith(t, map[string]string{
+		stack.FileName:                twoModules,
+		"modules/a/skills/x/SKILL.md": "x\n",
+		"modules/b/skills/y/SKILL.md": "y\n",
+	}, compose.Options{Cache: cache})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := res.SourceDirs()
+	if len(got) != 3 || filepath.Base(got[0]) != "a" || filepath.Base(got[1]) != "b" || got[2] != cache {
+		t.Errorf("SourceDirs %v, want modules/a, modules/b and %s", got, cache)
+	}
+}

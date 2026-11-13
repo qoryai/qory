@@ -192,6 +192,9 @@ type Result struct {
 	// sorted by type, one per type; nil when no module declares one. [Result.PushChecksFor]
 	// renders them for a home.
 	PushChecks []PushCheck
+	// Cache is the folder git sources are fetched to, [Options.Cache] or
+	// [source.CacheDir]; "" when neither is known.
+	Cache string
 	// roots are the module roots the compose opened, which [Result.Close] closes.
 	roots []*os.Root
 	// setBy is the module that set each settings leaf, keyed
@@ -258,7 +261,11 @@ func Compose(p *stack.Stack) (*Result, error) { return ComposeWith(p, Options{})
 // be fetched a [*source.FetchError]. The package comment has the order of the rules and
 // the merge semantics.
 func ComposeWith(p *stack.Stack, opts Options) (_ *Result, err error) {
-	res := &Result{Stack: p, Base: opts.Base, Settings: map[string]map[string]map[string]any{}, MCP: map[string]map[string]any{}, Env: map[string]string{}, Exported: map[string]string{}, setBy: map[string]string{}}
+	cache := opts.Cache
+	if cache == "" {
+		cache, _ = source.CacheDir()
+	}
+	res := &Result{Stack: p, Base: opts.Base, Cache: cache, Settings: map[string]map[string]map[string]any{}, MCP: map[string]map[string]any{}, Env: map[string]string{}, Exported: map[string]string{}, setBy: map[string]string{}}
 	defer func() {
 		if err != nil {
 			res.Close()
@@ -1558,6 +1565,25 @@ func (r *Result) SettingsFor(runtime, file, home string) map[string]any {
 		src = map[string]any{}
 	}
 	return ForHome(src, home).(map[string]any)
+}
+
+// SourceDirs are the folders the compose read its modules from: each module's Dir and,
+// when it differs, its RealDir, in module order without repeats, then [Result.Cache]
+// when it is known. A walled Codex run copies a file of the composed home that a link
+// leads to only when it lies in one of them.
+func (r *Result) SourceDirs() []string {
+	var dirs []string
+	for _, m := range r.Modules {
+		for _, d := range []string{m.Dir, m.RealDir} {
+			if d != "" && !slices.Contains(dirs, d) {
+				dirs = append(dirs, d)
+			}
+		}
+	}
+	if r.Cache != "" && !slices.Contains(dirs, r.Cache) {
+		dirs = append(dirs, r.Cache)
+	}
+	return dirs
 }
 
 // MCPFor is a copy of the composed MCP servers rendered for a home, name to object, with

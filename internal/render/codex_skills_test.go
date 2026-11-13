@@ -9,7 +9,6 @@ import (
 
 	"github.com/BurntSushi/toml"
 
-	"github.com/qoryai/qory/internal/compose"
 	"github.com/qoryai/qory/internal/render"
 	"github.com/qoryai/qory/internal/render/codex"
 	"github.com/qoryai/qory/internal/stack"
@@ -53,7 +52,7 @@ func TestWalledCodexDisablesSkillsTheHarnessDoesNotAllow(t *testing.T) {
 		}
 	}
 	fixed := filepath.Join(t.TempDir(), "fixed")
-	if _, err := codex.WriteWalledHome(filepath.Join(home, "codex"), fixed, codex.WalledRun{Projects: []string{"/workspace"}, Checkouts: []string{checkout}, Skills: allowed, LinkRoots: linkRoots(res, home)}); err != nil {
+	if _, err := codex.WriteWalledHome(filepath.Join(home, "codex"), fixed, codex.WalledRun{Projects: []string{"/workspace"}, Checkouts: []string{checkout}, Skills: allowed, LinkRoots: res.SourceDirs()}); err != nil {
 		t.Fatal(err)
 	}
 	disabled, paths, bundled, cloud := walledSkills(t, fixed)
@@ -111,7 +110,7 @@ func TestWalledCodexSkillsUnderAPatternOrNoRule(t *testing.T) {
 				t.Fatal(err)
 			}
 			fixed := filepath.Join(t.TempDir(), "fixed")
-			run := codex.WalledRun{Projects: []string{"/workspace"}, Checkouts: []string{checkout}, Skills: allowed, LinkRoots: linkRoots(res, home)}
+			run := codex.WalledRun{Projects: []string{"/workspace"}, Checkouts: []string{checkout}, Skills: allowed, LinkRoots: res.SourceDirs()}
 			if _, err := codex.WriteWalledHome(filepath.Join(home, "codex"), fixed, run); err != nil {
 				t.Fatal(err)
 			}
@@ -129,21 +128,11 @@ func TestWalledCodexSkillsUnderAPatternOrNoRule(t *testing.T) {
 	}
 }
 
-// linkRoots are the folders a walled run's copy of the composed home may follow a link
-// into: the composed home and the folder of each module, which stands in for qory's
-// module cache, since the test composes its modules from a temporary folder.
-func linkRoots(res *compose.Result, home string) []string {
-	roots := []string{home}
-	for _, m := range res.Modules {
-		roots = append(roots, m.Dir)
-	}
-	return roots
-}
-
-// TestWalledCodexCopiesLinkedSkillsAsFiles composes a harness whose skill review the home
-// links to, with its SKILL.md: the walled home's copy has a folder and a regular SKILL.md
-// with the module's text, since Codex passes over a SKILL.md that is a link. A copy that
-// may follow no link into the module fails with the line that says so.
+// TestWalledCodexCopiesLinkedSkillsAsFiles composes a harness from a local path whose
+// skill review the home links to, with its SKILL.md: the walled home's copy has a folder
+// and a regular SKILL.md with the module's text, since Codex passes over a SKILL.md that
+// is a link. A copy that may follow no link into the module fails with the line that
+// says so.
 func TestWalledCodexCopiesLinkedSkillsAsFiles(t *testing.T) {
 	const skill = "---\nname: review\ndescription: review\n---\nbody\n"
 	res, home := composeEnv(t, withFile("modules/core/skills/review/SKILL.md", skill), nil, "codex")
@@ -154,7 +143,7 @@ func TestWalledCodexCopiesLinkedSkillsAsFiles(t *testing.T) {
 		t.Fatalf("the composed home's skills/review: %v, want a link", err)
 	}
 	fixed := filepath.Join(t.TempDir(), "fixed")
-	if _, err := codex.WriteWalledHome(filepath.Join(home, "codex"), fixed, codex.WalledRun{LinkRoots: linkRoots(res, home)}); err != nil {
+	if _, err := codex.WriteWalledHome(filepath.Join(home, "codex"), fixed, codex.WalledRun{LinkRoots: res.SourceDirs()}); err != nil {
 		t.Fatal(err)
 	}
 	p := filepath.Join(fixed, "skills", "review", "SKILL.md")
@@ -165,9 +154,31 @@ func TestWalledCodexCopiesLinkedSkillsAsFiles(t *testing.T) {
 	if got := read(t, p); got != skill {
 		t.Errorf("SKILL.md %q, want %q", got, skill)
 	}
-	_, err = codex.WriteWalledHome(filepath.Join(home, "codex"), filepath.Join(t.TempDir(), "fixed"), codex.WalledRun{LinkRoots: []string{home}})
-	if err == nil || !strings.HasPrefix(err.Error(), "Use a harness from a git source for a walled Codex run: the composed home's skills/review links to ") {
+	_, err = codex.WriteWalledHome(filepath.Join(home, "codex"), filepath.Join(t.TempDir(), "fixed"), codex.WalledRun{})
+	if err == nil || !strings.HasPrefix(err.Error(), "Remove the link `skills/review` from the harness: it leads to `") {
 		t.Errorf("WriteWalledHome with no module folder: %v, want the refusal of a link outside", err)
+	}
+}
+
+// TestWalledCodexRefusesALinkOutOfTheModules composes a harness whose skill review has
+// a file that links to /etc/hosts: the walled home's copy fails with the line that
+// contains the link and its target, though the module's folder is a link root.
+func TestWalledCodexRefusesALinkOutOfTheModules(t *testing.T) {
+	res, home := composeEnv(t, withFile("modules/core/skills/review/SKILL.md", "---\nname: review\ndescription: review\n---\n"), nil, "codex")
+	if err := os.Symlink("/etc/hosts", filepath.Join(res.Modules[0].Dir, "skills", "review", "hosts")); err != nil {
+		t.Fatal(err)
+	}
+	if err := render.Build(res, home, lookup(t, "codex")); err != nil {
+		t.Fatal(err)
+	}
+	target, err := filepath.EvalSymlinks("/etc/hosts")
+	if err != nil {
+		t.Skip("no /etc/hosts:", err)
+	}
+	_, err = codex.WriteWalledHome(filepath.Join(home, "codex"), filepath.Join(t.TempDir(), "fixed"), codex.WalledRun{LinkRoots: res.SourceDirs()})
+	want := "Remove the link `skills/review/hosts` from the harness: it leads to `" + target + "`, outside the harness's modules, and a walled Codex run copies only files inside them."
+	if err == nil || err.Error() != want {
+		t.Errorf("WriteWalledHome: %v, want %q", err, want)
 	}
 }
 
@@ -238,7 +249,7 @@ func TestWalledCodexReadRulesOnlyInAReadRun(t *testing.T) {
 	}{{stack.AccessRead, true}, {stack.AccessWrite, false}} {
 		t.Run(c.access, func(t *testing.T) {
 			fixed := filepath.Join(t.TempDir(), "fixed")
-			run := codex.WalledRun{Projects: []string{"/workspace"}, Access: c.access, ReadRules: res.CodexReadRules, LinkRoots: linkRoots(res, home)}
+			run := codex.WalledRun{Projects: []string{"/workspace"}, Access: c.access, ReadRules: res.CodexReadRules, LinkRoots: res.SourceDirs()}
 			if _, err := codex.WriteWalledHome(filepath.Join(home, "codex"), fixed, run); err != nil {
 				t.Fatal(err)
 			}

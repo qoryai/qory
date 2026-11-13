@@ -559,7 +559,7 @@ func TestWriteWalledHomeLeavesNoCwdTrusted(t *testing.T) {
 // home has a regular SKILL.md with the module's text when the module's folder is a link
 // root, and WriteWalledHome fails, naming the link, when it is not.
 func TestWriteWalledHomeCopiesALinkedSkillFile(t *testing.T) {
-	dir, module := t.TempDir(), t.TempDir()
+	dir, module := filepath.Join(t.TempDir(), "home", "codex"), t.TempDir()
 	src := filepath.Join(module, "skills", "review", "SKILL.md")
 	if err := os.MkdirAll(filepath.Dir(src), 0o755); err != nil {
 		t.Fatal(err)
@@ -585,7 +585,7 @@ func TestWriteWalledHomeCopiesALinkedSkillFile(t *testing.T) {
 		t.Errorf("SKILL.md %q %v, want the module's text", b, err)
 	}
 	_, err := codex.WriteWalledHome(dir, filepath.Join(t.TempDir(), "fixed"), codex.WalledRun{})
-	if err == nil || !strings.Contains(err.Error(), "the composed home's skills/review/SKILL.md links to ") {
+	if err == nil || !strings.HasPrefix(err.Error(), "Remove the link `skills/review/SKILL.md` from the harness: it leads to `") {
 		t.Errorf("WriteWalledHome with no link root: %v, want the refusal of the link", err)
 	}
 }
