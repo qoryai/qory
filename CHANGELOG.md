@@ -804,8 +804,8 @@ release may change what an existing document does, and states it under Upgrading
   places them in no home, so no run reads them. Any other file under `settings/` that is
   neither `.json` nor `.toml` is still refused. See `contracts/harness/v1/README.md`.
 - Compose refuses a module that ships `files/codex/auth.json`, Codex's login file, with
-  ``Remove `files/codex/auth.json` from module <name>: qory gives Codex its model key
-  through the gateway.``
+  ``Remove `files/codex/auth.json` from module <name>: a Codex run takes its model key
+  from the run, not from a file.``
 - Compose refuses a module that ships `files/codex/hooks.json`, `files/codex/.env`,
   `files/codex/environments.toml`, `files/codex/AGENTS.override.md` or
   `files/codex/rules/read-access.rules`, with ``Remove `files/codex/<path>` from module

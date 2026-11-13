@@ -1172,8 +1172,8 @@ segment. The refusal lists the module, the entry and the reason, with status 2:
 `.claude`, and a module ships its instructions as `AGENTS.md` at the module root.
 
 `codex` reserves `auth.json`, Codex's login file, which no home of qory's has. The
-refusal is ``Remove `files/codex/auth.json` from module <name>: qory
-gives Codex its model key through the gateway.``
+refusal is ``Remove `files/codex/auth.json` from module <name>: a Codex
+run takes its model key from the run, not from a file.``
 
 `codex` also reserves `hooks.json`, `.env`, `environments.toml`, `AGENTS.override.md`
 and `rules/read-access.rules`, which qory writes in the Codex home of every walled run.

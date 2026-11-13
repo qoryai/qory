@@ -70,7 +70,7 @@ func (codex) Skips() []string { return []string{"commands", "output-styles"} }
 
 // textAuthFile is the refusal of a module that ships Codex's login file, with the module's
 // name.
-const textAuthFile = "Remove `files/codex/auth.json` from module %s: qory gives Codex its model key through the gateway."
+const textAuthFile = "Remove `files/codex/auth.json` from module %s: a Codex run takes its model key from the run, not from a file."
 
 // textWalledFile is the refusal of a module that ships a file of [walledFiles], with the
 // file's path under files/codex for the first %s; the module's name is left as %%s.
