@@ -1628,7 +1628,10 @@ the work item. Then a run of the step explore:
   | `cursor` | `--print --output-format stream-json --add-dir <in> "/<name> <in>/inputs.json"` | a skill |
 
   `amp`, `copilot`, `goose` and `any` have no headless start, so a run from a run code
-  does not start on them;
+  does not start on them. Behind a wall, `codex exec` also gets `--sandbox
+  danger-full-access` right after `exec`, unless its arguments set a sandbox mode or
+  bypass one: in the wall every other sandbox mode of Codex fails before it runs a
+  command, and the wall is the limit of what the agent changes;
 - takes its time limit as [Time limits](#time-limits) says.
 
 So the command line sets none of these. After the redemption, qory prints `qory run: the

@@ -302,6 +302,9 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Changed
 
+- A walled run starts `codex exec` with `--sandbox danger-full-access` after `exec`,
+  unless the arguments set a sandbox mode or bypass one. Inside the wall every other
+  sandbox mode of Codex fails before it runs a command. An unwalled run is unchanged.
 - qory builds with Forager main 1b3071e2. A run keeps its wall only when a container of
   the run may still run; a network or folder of the wall that could not be removed no longer
   keeps it.
@@ -769,6 +772,21 @@ release may change what an existing document does, and states it under Upgrading
 - Compose refuses a Claude Code settings `env` that sets one of 10 model or effort
   variables, such as `ANTHROPIC_MODEL`. It refuses them the same way in the
   configuration's `env`, in `harness.launch.claude.env` and in a module's `env` export.
+- Compose refuses a Codex `settings/codex/config.toml` that sets `model_provider`,
+  `model_providers`, `projects`, `hooks.state`, `features`, `analytics`, `otel` or
+  `notify`, with one line per key. For `model_provider` and `model_providers` the line is
+  ``Remove `<key>` from the harness's `settings/codex/config.toml`: qory writes it from
+  the run's model key.``, and for the others ``Remove `<key>` from the harness's
+  `settings/codex/config.toml`: qory sets it for every Codex run.`` A fragment may still
+  set `web_search` and the other keys of `hooks`, such as `hooks.Stop`.
+- Compose accepts `settings/codex/read-access.rules`, Codex execpolicy rules for a run
+  whose access is `read`. It keeps the files of all modules, joined in module order,
+  merges them into no target file and places them in no home. Any other file under
+  `settings/` that is neither `.json` nor `.toml` is still refused. See
+  `contracts/harness/v1/README.md`.
+- Compose refuses a module that ships `files/codex/auth.json`, Codex's login file, with
+  ``Remove `files/codex/auth.json` from module <name>: qory gives Codex its model key
+  through the gateway.``
 - A walled `qory run` given a run key does not start when `--env` or `wall.env` names a
   variable the runtime reads its model key from: `ANTHROPIC_API_KEY`,
   `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_AUTH_TOKEN` for Claude Code. An unwalled run,

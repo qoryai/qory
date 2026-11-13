@@ -25,6 +25,15 @@ func dispatchedArgs(rt render.Runtime, args []string) []string {
 	return args
 }
 
+// walledArgs are the launch arguments of a walled run of rt: the runtime's
+// [render.Walled] arguments, and args as given for a runtime that is none.
+func walledArgs(rt render.Runtime, args []string) []string {
+	if w, ok := rt.(render.Walled); ok {
+		return w.WalledArgs(args)
+	}
+	return args
+}
+
 // withAgentHome is the fixed variables of a dispatched walled run of a runtime that is a
 // [render.AgentHomer], with its variable, name, pointing at [preparation.AgentHome],
 // which qory run agent-env makes new and empty as the last step before the agent starts

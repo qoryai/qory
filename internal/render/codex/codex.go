@@ -13,16 +13,19 @@
 //	agents       agents are linked there; ship it as agents/<name>
 //	skills       qory links them there for a launch; ship it as skills/<name>
 //	AGENTS.md    qory writes it for a launch
+//	auth.json    Codex's login file; the model key reaches Codex through the gateway
 //
 // Codex also takes its whole home from CODEX_HOME, and the runtime's directory is one:
 // config.toml, the agents, the skills linked under skills/ and the instructions as
 // AGENTS.md, the global instructions file Codex reads there. [Template] sets the
-// variable. Codex keeps its login in the same home, auth.json, so a launcher on such a
-// home authenticates through OPENAI_API_KEY or puts auth.json there. The checkout's
+// variable. Codex reads its login from auth.json in the same home; qory writes none there
+// and refuses a module that ships one, and Codex reads its model key from
+// OPENAI_API_KEY. The checkout's
 // .codex never links the skills or the instructions.
 package codex
 
 import (
+	"fmt"
 	"path/filepath"
 	"strings"
 
@@ -61,13 +64,20 @@ func (codex) Links(res *compose.Result) []render.Link {
 // home only and has no output styles.
 func (codex) Skips() []string { return []string{"commands", "output-styles"} }
 
-// Reserved are config.toml and the agents directory, which Render writes.
+// textAuthFile is the refusal of a module that ships Codex's login file, with the module's
+// name.
+const textAuthFile = "Remove `files/codex/auth.json` from module %s: qory gives Codex its model key through the gateway."
+
+// Reserved are config.toml and the agents directory, which Render writes, the skills and
+// AGENTS.md, which qory places for a launch, and auth.json, Codex's login file, which no
+// home of qory's has.
 func (codex) Reserved() []render.Reserved {
 	return []render.Reserved{
 		{Path: "config.toml", Why: "qory writes it"},
 		{Path: "agents", Why: "agents are linked there; ship it as agents/<name>"},
 		{Path: "skills", Why: "qory links them there for a launch; ship it as skills/<name>"},
 		{Path: "AGENTS.md", Why: "qory writes it for a launch"},
+		{Path: "auth.json", Refusal: textAuthFile},
 	}
 }
 
@@ -78,8 +88,12 @@ func (codex) Reserved() []render.Reserved {
 // name, description and its body as developer_instructions. The instructions written as AGENTS.md end with the names the
 // session registers, see [render.Addressing]: a Codex home registers them as the modules
 // wrote them, and the file states that. Codex reads a project .codex only in a project
-// the user has marked trusted.
+// the user has marked trusted. A fragment that sets a key of [reservedKeys] is refused
+// before anything is written.
 func (codex) Render(res *compose.Result, dir, home string) error {
+	if err := checkReserved(res.SettingsFor(Runtime, "config.toml", home)); err != nil {
+		return err
+	}
 	err := render.WriteSettings(res, Runtime, dir, home, []string{"config.toml"}, func(file string, m map[string]any) {
 		if file != "config.toml" {
 			return
@@ -126,6 +140,57 @@ func (codex) Render(res *compose.Result, dir, home string) error {
 		}
 	}
 	return nil
+}
+
+// reservedKey is a key path of config.toml that a harness fragment may not set, with the
+// refusal's text: the key as a dotted path fills its %s.
+type reservedKey struct {
+	path []string
+	text string
+}
+
+// The refusals of a fragment that sets a key of [reservedKeys]: one for the keys that come
+// from the run's model key, one for the keys qory sets the same way for every run.
+const (
+	textKeyFromModelKey = "Remove `%s` from the harness's `settings/codex/config.toml`: qory writes it from the run's model key."
+	textKeyEveryRun     = "Remove `%s` from the harness's `settings/codex/config.toml`: qory sets it for every Codex run."
+)
+
+// reservedKeys are the key paths of config.toml that a harness fragment may not set,
+// because Forager's launch of Codex sets them as --config flags, which win over every
+// config.toml, or because qory writes them for a run: the model provider and its
+// settings, project trust, hook trust, features, analytics, OpenTelemetry and the notify
+// program. A fragment may set the other keys of hooks, such as hooks.Stop.
+var reservedKeys = []reservedKey{
+	{[]string{"model_provider"}, textKeyFromModelKey},
+	{[]string{"model_providers"}, textKeyFromModelKey},
+	{[]string{"projects"}, textKeyEveryRun},
+	{[]string{"hooks", "state"}, textKeyEveryRun},
+	{[]string{"features"}, textKeyEveryRun},
+	{[]string{"analytics"}, textKeyEveryRun},
+	{[]string{"otel"}, textKeyEveryRun},
+	{[]string{"notify"}, textKeyEveryRun},
+}
+
+// checkReserved refuses m, the harness's config.toml fragment, when it sets a key of
+// [reservedKeys], naming the first in that list's order.
+func checkReserved(m map[string]any) error {
+	for _, k := range reservedKeys {
+		if hasKey(m, k.path) {
+			return fmt.Errorf(k.text, strings.Join(k.path, "."))
+		}
+	}
+	return nil
+}
+
+// hasKey reports whether m has the key path.
+func hasKey(m map[string]any, path []string) bool {
+	v, ok := m[path[0]]
+	if !ok || len(path) == 1 {
+		return ok
+	}
+	sub, ok := v.(map[string]any)
+	return ok && hasKey(sub, path[1:])
 }
 
 // setKey is where a codex fragment sets variables, which Codex sets in every command it

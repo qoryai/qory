@@ -266,6 +266,7 @@ func TestCheckFilesRefusesReservedPaths(t *testing.T) {
 		{"claude/settings.local.json", "module nextjs ships files/claude/settings.local.json, and Claude Code reads it as settings; a module sets those through settings/claude/settings.json"},
 		{"claude/skills/review/SKILL.md", "module nextjs ships files/claude/skills/review/SKILL.md, and skills are linked there; ship it as skills/<name>"},
 		{"copilot/workflows/ci.yml", "module nextjs ships files/copilot/workflows/ci.yml, and GitHub runs it on every push"},
+		{"codex/auth.json", "Remove `files/codex/auth.json` from module nextjs: qory gives Codex its model key through the gateway."},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			res, _, _ := composeFixture(t, "claude")

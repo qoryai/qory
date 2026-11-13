@@ -776,6 +776,9 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 						return false, err
 					}
 				}
+				if walled {
+					launchArgs = walledArgs(renderer, launchArgs)
+				}
 				rt, err := catalog.Lookup(name, filepath.Join(user, DescriptorsDir))
 				if err != nil {
 					return false, input(err)

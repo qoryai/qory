@@ -200,6 +200,10 @@ func checkExtending(l *module.Module, base *Base) error {
 		}
 		sort.Strings(files)
 		for _, f := range files {
+			if rt == "codex" && f == CodexReadRulesName {
+				// Rules that forbid more commands in a read run set no key.
+				continue
+			}
 			keys, err := leafKeys(l.Settings[rt][f])
 			if err != nil {
 				return fmt.Errorf("module %s: %w", shown(l.Name), err)

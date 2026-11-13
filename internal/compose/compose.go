@@ -153,7 +153,14 @@ type Result struct {
 	// Excludes are the entries the modules left out, in module order, by kind.
 	Excludes []Exclude
 	// Settings are the merged fragments: per runtime, per target file, in module order.
+	// [CodexReadRules] is not among them.
 	Settings map[string]map[string]map[string]any
+	// CodexReadRules is every module's settings/codex/read-access.rules, Codex
+	// execpolicy rules for a run whose access is read, joined in module order, each
+	// ending in a newline; nil when no module ships one. Compose merges the file into
+	// no target file, and no render places it in a home: a read run on Codex places it
+	// in the run's rules folder.
+	CodexReadRules []byte
 	// MCP contains the composed MCP servers by name, each the object its module's
 	// mcp/<name>.json contains, with every $QORY_HARNESS_HOME as written, before
 	// substitution. [Result.MCPFor] renders it for a home.
@@ -411,6 +418,17 @@ func ComposeWith(p *stack.Stack, opts Options) (_ *Result, err error) {
 				res.Settings[runtime] = map[string]map[string]any{}
 			}
 			for file, path := range files {
+				if runtime == "codex" && file == CodexReadRulesName {
+					data, err := readFile(path)
+					if err != nil {
+						return nil, exports.HideError(err)
+					}
+					if len(data) > 0 && data[len(data)-1] != '\n' {
+						data = append(data, '\n')
+					}
+					res.CodexReadRules = append(res.CodexReadRules, data...)
+					continue
+				}
 				if res.Settings[runtime][file] == nil {
 					res.Settings[runtime][file] = map[string]any{}
 				}
@@ -1342,6 +1360,10 @@ func collisions(owners map[string][]string, modules []Module, base *Base, checko
 	}
 	return e
 }
+
+// CodexReadRulesName is the one file under settings/codex/ that is no fragment: Codex
+// execpolicy rules for a read run, kept as [Result.CodexReadRules].
+const CodexReadRulesName = "read-access.rules"
 
 // mergeFile decodes one settings fragment of the named module, read with readFile, and
 // folds it into the result's target file for the runtime. The extension decides the format, and a TOML

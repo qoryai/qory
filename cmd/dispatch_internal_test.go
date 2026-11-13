@@ -133,6 +133,24 @@ func TestADispatchedLaunchOfAnotherRuntimeIsAsGiven(t *testing.T) {
 	}
 }
 
+// TestAWalledLaunchOfCodexHasNoSandboxOfItsOwn is a walled run's launch of Codex: codex
+// exec gets --sandbox danger-full-access after exec, and the same launch of Claude Code,
+// which has no such arguments, stays as given.
+func TestAWalledLaunchOfCodexHasNoSandboxOfItsOwn(t *testing.T) {
+	rt, err := render.Lookup("codex")
+	if err != nil {
+		t.Fatal(err)
+	}
+	args := []string{"exec", "--json", "--add-dir", "/in", "$explore /in/inputs.json"}
+	want := []string{"exec", "--sandbox", "danger-full-access", "--json", "--add-dir", "/in", "$explore /in/inputs.json"}
+	if got := walledArgs(rt, args); !slices.Equal(got, want) {
+		t.Errorf("codex: got %q, want %q", got, want)
+	}
+	if got := walledArgs(claudeRuntime(t), args); !slices.Equal(got, args) {
+		t.Errorf("claude: got %q, want %q", got, args)
+	}
+}
+
 // TestTheAgentHomeIsAFixedVariable is CLAUDE_CONFIG_DIR among a dispatched walled run's
 // fixed variables, once, at the agent's home, beside the template's, sorted by name, and
 // the launch's list of fixed variables unchanged.
