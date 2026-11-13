@@ -36,8 +36,8 @@ const (
 )
 
 // outcome is how qory says a run ended, by the state and the reason Forager gives: the
-// outcome, as qory says it after "the run", and the reason in qory's words, empty when
-// there is none to say.
+// outcome, as qory says it after "the run", the reason in qory's words, empty when there
+// is none to say, and what can happen next, empty when there is nothing to say.
 type outcome struct {
 	// lost is the outcome of a run whose session went silent or whose end was never
 	// recorded, failed with session_lost or gateway_lost, as Qory Apiary shows it.
@@ -55,6 +55,9 @@ type outcome struct {
 	// known is false when neither the state nor the reason says how the run ended.
 	known  bool
 	reason string
+	// next is what can happen to the run next, said after the reason, such as "the run
+	// can continue on another key".
+	next string
 }
 
 // outcomeOf is how the run ended, by state and reason. Forager's own reasons have the
@@ -69,7 +72,7 @@ func outcomeOf(state, reason string) outcome {
 	if state == event.StatePaused {
 		o.paused, o.reason = true, "every model key reached its limit"
 		if reason == reasonModelKeySwitch {
-			o.reason = "the model provider rejected a model key, and the run continues on another key"
+			o.reason, o.next = "the model provider rejected a model key", "the run can continue on another key"
 		}
 		return o
 	}
@@ -142,16 +145,35 @@ func (o outcome) phrase() string {
 
 // said is the run's end as qory says it: "the run <outcome>: <reason>", ": <reason>"
 // left out when there is none to say, and ", with no outcome given" for a run its
-// starter ended without one.
+// starter ended without one. A next step follows the reason after ", and ".
 func (o outcome) said() string {
 	s := "the run " + o.phrase()
 	switch {
 	case o.noOutcome:
 		s += ", with no outcome given"
 	case o.reason != "":
-		s += ": " + o.reason
+		s += ": " + o.because()
 	}
 	return s
+}
+
+// because is the reason, and the next step after ", and " when there is one.
+func (o outcome) because() string {
+	if o.next == "" {
+		return o.reason
+	}
+	return o.reason + ", and " + o.next
+}
+
+// stopped is the run's end as qory says it when the gateway closed the run and the
+// runtime was stopped: [outcome.said] with ", and <runtime> was stopped" after it, or, for
+// an outcome with a next step, before that step: "<reason>, <runtime> was stopped, and
+// <next>".
+func (o outcome) stopped(runtime string) string {
+	if o.next == "" || o.noOutcome {
+		return o.said() + ", and " + runtime + " was stopped"
+	}
+	return "the run " + o.phrase() + ": " + o.reason + ", " + runtime + " was stopped, and " + o.next
 }
 
 // exitCode is qory's exit status for a run with this outcome: 0 when it completed, 1
@@ -188,5 +210,5 @@ func endsAs(state, reason string) string {
 	if o.reason == "" {
 		return o.word()
 	}
-	return o.word() + ": " + o.reason
+	return o.word() + ": " + o.because()
 }

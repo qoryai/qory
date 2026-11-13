@@ -318,11 +318,14 @@ When the run ends, qory says how, and its exit status goes with it:
   at the model provider, exit 1. qory closes the run `paused` with the reason
   `model_key_limit` and the runtime's exit status, and a control plane can continue the
   run.
-- `✗ the run was paused: the model provider rejected a model key, and the run continues
-  on another key`, after the runtime's line: the gateway stopped the session because the
-  model provider rejected the session's model key, and another model key of the run is
-  usable, exit 1. qory closes the run `paused` with the reason `model_key_switch` and the
-  runtime's exit status, and a control plane can continue the run on the other key.
+- `✗ the run was paused: the model provider rejected a model key, and the run can
+  continue on another key`, after the runtime's line: the gateway stopped the session
+  because the model provider rejected the session's model key, and another model key of
+  the run is usable, exit 1. qory closes the run `paused` with the reason
+  `model_key_switch` and the runtime's exit status, and a control plane can continue the
+  run on the other key. When the gateway closed the run and stopped the runtime, the
+  line is `✗ the run was paused: the model provider rejected a model key, <runtime> was
+  stopped, and the run can continue on another key`, with no runtime's line before it.
 - `✗ the run failed: the model provider rejected every model key`, after the runtime's
   line: the gateway stopped the session because the model provider rejected every model
   key of the run, exit 1. qory closes the run `failed` with the reason

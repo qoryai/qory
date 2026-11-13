@@ -454,7 +454,7 @@ func recordedAs(o server.Outcome) string {
 	if out.reason == "" {
 		return out.word()
 	}
-	return out.word() + ": " + out.reason
+	return out.word() + ": " + out.because()
 }
 
 // explainDiscoveryForEnd words a refusal of the discovery qory run end reads before it

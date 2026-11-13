@@ -1754,7 +1754,7 @@ func runEnded(u *ui.UI, res *session.Result, e runEnd) error {
 	switch {
 	case res.RunClosed:
 		o := outcomeOf(res.State, res.Reason)
-		say(o, o.said()+", and "+accesskey.ShownName(e.runtime, false)+" was stopped")
+		say(o, o.stopped(accesskey.ShownName(e.runtime, false)))
 		return reported(&exitError{code: o.exitCode()})
 	case res.TimedOut:
 		u.Fail(fmt.Errorf("the run was cancelled: it reached the time limit of %s, and %s was stopped", e.timeout, accesskey.ShownName(e.runtime, false)))

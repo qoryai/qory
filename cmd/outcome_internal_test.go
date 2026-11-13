@@ -131,9 +131,9 @@ func TestRunEndedSaysTheOutcome(t *testing.T) {
 		// usable, and fails when none is. Forager stopped the runtime, so the outcome
 		// follows the runtime's line whatever its exit.
 		{"a kill at a rejected key", &session.Result{State: "paused", Reason: reasonModelKeySwitch, ExitCode: -1, Signal: "SIGTERM"}, "",
-			"claude ended on the signal SIGTERM\nthe run was paused: the model provider rejected a model key, and the run continues on another key\n", 1},
+			"claude ended on the signal SIGTERM\nthe run was paused: the model provider rejected a model key, and the run can continue on another key\n", 1},
 		{"exit 0 at a rejected key", &session.Result{State: "paused", Reason: reasonModelKeySwitch}, "",
-			"claude exited 0\nthe run was paused: the model provider rejected a model key, and the run continues on another key\n", 1},
+			"claude exited 0\nthe run was paused: the model provider rejected a model key, and the run can continue on another key\n", 1},
 		{"a kill at every key rejected", &session.Result{State: "failed", Reason: reasonModelKeyUnauthorized, ExitCode: -1, Signal: "SIGTERM"}, "",
 			"claude ended on the signal SIGTERM\nthe run failed: the model provider rejected every model key\n", 1},
 		{"exit 3 at every key rejected", &session.Result{State: "failed", Reason: reasonModelKeyUnauthorized, ExitCode: 3}, "",
@@ -141,7 +141,7 @@ func TestRunEndedSaysTheOutcome(t *testing.T) {
 		{"exit 0 at every key rejected", &session.Result{State: "failed", Reason: reasonModelKeyUnauthorized}, "",
 			"claude exited 0\nthe run failed: the model provider rejected every model key\n", 1},
 		{"a key rejected, closed paused", closed("paused", reasonModelKeySwitch), "",
-			"the run was paused: the model provider rejected a model key, and the run continues on another key, and claude was stopped\n", 1},
+			"the run was paused: the model provider rejected a model key, claude was stopped, and the run can continue on another key\n", 1},
 		{"every key rejected, closed failed", closed("failed", reasonModelKeyUnauthorized), "",
 			"the run failed: the model provider rejected every model key, and claude was stopped\n", 1},
 	} {
@@ -170,9 +170,13 @@ func TestRunEndedMarksTheOutcome(t *testing.T) {
 		{&session.Result{State: "succeeded", ExitCode: 2}, "✗ claude exited 2\n✓ the run completed\n"},
 		{&session.Result{State: "paused", Reason: event.ReasonModelKeyLimit}, "✓ claude exited 0\n✗ the run was paused: every model key reached its limit\n"},
 		{&session.Result{State: "paused", Reason: reasonModelKeySwitch, ExitCode: 143},
-			"✗ claude exited 143\n✗ the run was paused: the model provider rejected a model key, and the run continues on another key\n"},
+			"✗ claude exited 143\n✗ the run was paused: the model provider rejected a model key, and the run can continue on another key\n"},
 		{&session.Result{State: "failed", Reason: reasonModelKeyUnauthorized, ExitCode: 143},
 			"✗ claude exited 143\n✗ the run failed: the model provider rejected every model key\n"},
+		{&session.Result{RunClosed: true, ClosedReason: event.ReasonRunClosed, State: "paused", Reason: reasonModelKeySwitch},
+			"✗ the run was paused: the model provider rejected a model key, claude was stopped, and the run can continue on another key\n"},
+		{&session.Result{RunClosed: true, ClosedReason: event.ReasonRunClosed, State: "paused", Reason: event.ReasonModelKeyLimit},
+			"✗ the run was paused: every model key reached its limit, and claude was stopped\n"},
 	} {
 		var out strings.Builder
 		runEnded(ui.New(&out), c.res, runEnd{runtime: "claude"})
@@ -212,6 +216,7 @@ func TestGatewayEndedResendSaysTheOutcome(t *testing.T) {
 		{session.ResendResult{RunClosed: true, ClosedReason: oldReasonCredentialExpired}, "the run has ended (cancelled: the run credential expired)" + tail},
 		{session.ResendResult{RunClosed: true, ClosedReason: event.ReasonSessionLost}, "the run has ended (lost: it lost contact with the gateway for 1m30s)" + tail},
 		{session.ResendResult{RunClosed: true, ClosedReason: event.ReasonRunClosed, State: "paused", Reason: event.ReasonModelKeyLimit}, "the run has ended (paused: every model key reached its limit)" + tail},
+		{session.ResendResult{RunClosed: true, ClosedReason: event.ReasonRunClosed, State: "paused", Reason: reasonModelKeySwitch}, "the run has ended (paused: the model provider rejected a model key, and the run can continue on another key)" + tail},
 		{session.ResendResult{RunClosed: true, ClosedReason: event.ReasonBatchRefused}, "the run has ended (failed: its events could not be recorded)" + tail},
 		{session.ResendResult{RunClosed: true, ClosedReason: oldReasonCredentialInvalid}, "the run has ended (failed: its run credential could not be checked)" + tail},
 		{session.ResendResult{RunClosed: true, ClosedReason: "another_code"}, "the run has ended (failed: the gateway stopped during the run)" + tail},
@@ -353,7 +358,7 @@ func TestEndsAsSaysTheResendsEnd(t *testing.T) {
 		{"cancelled", event.ReasonInterrupted, "cancelled"},
 		{"paused", event.ReasonModelKeyLimit, "paused: every model key reached its limit"},
 		{"paused", "", "paused: every model key reached its limit"},
-		{"paused", reasonModelKeySwitch, "paused: the model provider rejected a model key, and the run continues on another key"},
+		{"paused", reasonModelKeySwitch, "paused: the model provider rejected a model key, and the run can continue on another key"},
 		{"failed", reasonModelKeyUnauthorized, "failed: the model provider rejected every model key"},
 	} {
 		if got := endsAs(c.state, c.reason); got != c.want {
