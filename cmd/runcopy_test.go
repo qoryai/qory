@@ -2007,6 +2007,7 @@ func TestAHomeFolderWrittenAnotherWayStops(t *testing.T) {
 		t.Skip("the two Unicode forms and the firmlink are one folder only on macOS")
 	}
 	const nfc, nfd = "Café", "Café"
+	emptyDir(t)
 	top, err := filepath.EvalSymlinks(tempDir(t))
 	if err != nil {
 		t.Fatal(err)
