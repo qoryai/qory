@@ -14,6 +14,8 @@
 //	skills       qory links them there for a launch; ship it as skills/<name>
 //	AGENTS.md    qory writes it for a launch
 //	auth.json    Codex's login file; the model key reaches Codex through the gateway
+//	hooks.json, .env, environments.toml, AGENTS.override.md, rules/read-access.rules
+//	             qory writes them for every walled run
 //
 // Codex also takes its whole home from CODEX_HOME, and the runtime's directory is one:
 // config.toml, the agents, the skills linked under skills/ and the instructions as
@@ -68,17 +70,31 @@ func (codex) Skips() []string { return []string{"commands", "output-styles"} }
 // name.
 const textAuthFile = "Remove `files/codex/auth.json` from module %s: qory gives Codex its model key through the gateway."
 
+// textWalledFile is the refusal of a module that ships a file of [walledFiles], with the
+// file's path under files/codex for the first %s; the module's name is left as %%s.
+const textWalledFile = "Remove `files/codex/%s` from module %%s: qory writes it for every walled Codex run."
+
+// walledFiles are the paths under .codex that qory writes in the home of every walled
+// Codex run, see [WriteWalledHome]: the hooks file, the variables Codex sets, the
+// environments Codex starts, the instructions Codex reads ahead of AGENTS.md, and the
+// read run's rules.
+var walledFiles = []string{"hooks.json", ".env", "environments.toml", "AGENTS.override.md", "rules/" + ReadRulesName}
+
 // Reserved are config.toml and the agents directory, which Render writes, the skills and
-// AGENTS.md, which qory places for a launch, and auth.json, Codex's login file, which no
-// home of qory's has.
+// AGENTS.md, which qory places for a launch, auth.json, Codex's login file, which no
+// home of qory's has, and the [walledFiles].
 func (codex) Reserved() []render.Reserved {
-	return []render.Reserved{
+	out := []render.Reserved{
 		{Path: "config.toml", Why: "qory writes it"},
 		{Path: "agents", Why: "agents are linked there; ship it as agents/<name>"},
 		{Path: "skills", Why: "qory links them there for a launch; ship it as skills/<name>"},
 		{Path: "AGENTS.md", Why: "qory writes it for a launch"},
 		{Path: "auth.json", Refusal: textAuthFile},
 	}
+	for _, p := range walledFiles {
+		out = append(out, render.Reserved{Path: p, Refusal: fmt.Sprintf(textWalledFile, p)})
+	}
+	return out
 }
 
 // Render writes config.toml, with the target model as model, the MCP servers as

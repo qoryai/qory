@@ -1175,6 +1175,11 @@ segment. The refusal lists the module, the entry and the reason, with status 2:
 the gateway, and the refusal is ``Remove `files/codex/auth.json` from module <name>: qory
 gives Codex its model key through the gateway.``
 
+`codex` also reserves `hooks.json`, `.env`, `environments.toml`, `AGENTS.override.md`
+and `rules/read-access.rules`, which qory writes in the Codex home of every walled run.
+The refusal is ``Remove `files/codex/<path>` from module <name>: qory writes it for every
+walled Codex run.`` Other files under `rules/` stay allowed.
+
 Per runtime, the files written into its directory:
 
 - **claude**: links for every kind, `settings.json` with the model and without `env`,
