@@ -1212,7 +1212,12 @@ Per runtime, the files written into its directory:
   `model_instructions_file`, `experimental_compact_prompt_file`, `model_catalog_json`,
   `js_repl_node_path`, `sqlite_home` or `log_dir` fails the compose with ``Remove
   `<key>` from the harness's `settings/codex/config.toml`: a Codex run takes this key
-  from qory and Forager, not from the harness.`` A hook in
+  from qory and Forager, not from the harness.`` A walled run whose Codex arguments
+  before `--` set one of these keys or `model_reasoning_effort`, a key under one, or a
+  table above one, with `--config`, `--config=`, `-c` or `-c<key>=<value>`, stops
+  before the agent starts with ``Remove `--config <key>` from the run's Codex
+  arguments: a Codex run takes this key from qory and Forager, not from the
+  arguments.`` A fragment may still set `model_reasoning_effort`. A hook in
   `settings/codex/config.toml` or `settings/codex/hooks.json` whose `timeout` or
   `additionalContextLimit` is negative or fractional, such as 2.0, fails the compose
   with ``Set `<key>` of the `<event>` hook in the harness's `settings/codex/<file>` to a

@@ -797,6 +797,14 @@ release may change what an existing document does, and states it under Upgrading
   ``Remove `<key>` from the harness's `settings/codex/config.toml`: a Codex run takes
   this key from qory and Forager, not from the harness.`` A fragment may still set the
   other keys of `hooks`, such as `hooks.Stop`.
+- A walled Codex run refuses Codex arguments before `--` that set one of those keys or
+  `model_reasoning_effort`, a key under one, or a table above one, such as
+  `-c features.shell_snapshot=true` or `--config model_providers={}`, in the forms
+  `--config`, `--config=`, `-c` and `-c<key>=<value>`, with ``Remove `--config <key>`
+  from the run's Codex arguments: a Codex run takes this key from qory and Forager, not
+  from the arguments.`` The run stops before the agent starts, with exit status 1.
+  Forager puts its `--config` flags first, and Codex takes the last one for a key. An
+  unwalled run is unchanged.
 - Compose accepts `settings/codex/read-access.rules`, a file of Codex execpolicy rules.
   It joins the files of all modules in module order, merges them into no target file and
   places them in no home, so no run reads them. Any other file under `settings/` that is
