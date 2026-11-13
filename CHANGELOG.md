@@ -792,11 +792,10 @@ release may change what an existing document does, and states it under Upgrading
   ``Remove `<key>` from the harness's `settings/codex/config.toml`: a Codex run takes
   this key from qory and Forager, not from the harness.`` A fragment may still set the
   other keys of `hooks`, such as `hooks.Stop`.
-- Compose accepts `settings/codex/read-access.rules`, Codex execpolicy rules for a run
-  whose access is `read`. It keeps the files of all modules, joined in module order,
-  merges them into no target file and places them in no home. Any other file under
-  `settings/` that is neither `.json` nor `.toml` is still refused. See
-  `contracts/harness/v1/README.md`.
+- Compose accepts `settings/codex/read-access.rules`, a file of Codex execpolicy rules.
+  It joins the files of all modules in module order, merges them into no target file and
+  places them in no home, so no run reads them. Any other file under `settings/` that is
+  neither `.json` nor `.toml` is still refused. See `contracts/harness/v1/README.md`.
 - Compose refuses a module that ships `files/codex/auth.json`, Codex's login file, with
   ``Remove `files/codex/auth.json` from module <name>: qory gives Codex its model key
   through the gateway.``

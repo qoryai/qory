@@ -13,7 +13,7 @@
 //	agents       agents are linked there; ship it as agents/<name>
 //	skills       qory links them there for a launch; ship it as skills/<name>
 //	AGENTS.md    qory writes it for a launch
-//	auth.json    Codex's login file; the model key reaches Codex through the gateway
+//	auth.json    Codex's login file, which no home of qory's has
 //	hooks.json, .env, environments.toml, AGENTS.override.md, rules/read-access.rules
 //	             qory writes them for every walled run
 //

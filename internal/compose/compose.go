@@ -158,8 +158,8 @@ type Result struct {
 	// CodexReadRules is every module's settings/codex/read-access.rules, Codex
 	// execpolicy rules for a run whose access is read, joined in module order, each
 	// ending in a newline; nil when no module ships one. Compose merges the file into
-	// no target file, and no render places it in a home: a read run on Codex places it
-	// in the run's rules folder.
+	// no target file, and no render places it in a home: the Codex renderer's
+	// WriteWalledHome writes it to the rules folder of a walled read run's home.
 	CodexReadRules []byte
 	// MCP contains the composed MCP servers by name, each the object its module's
 	// mcp/<name>.json contains, with every $QORY_HARNESS_HOME as written, before
