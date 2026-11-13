@@ -887,6 +887,11 @@ release may change what an existing document does, and states it under Upgrading
   such a folder, they stop with exit 2 and the line `set --home or harness.home to a
   folder outside <folder>, or run git init in <folder>: a home inside a folder needs a
   git working tree there, and <folder> is not one`.
+- The Codex directory of a home, `codex`, contains the skills as folders and regular
+  files copied from the modules, not as links. Codex 0.167.2 skips a `SKILL.md` that is a
+  link, so a skill with a reference in another of its files did not load in a run
+  outside the wall. An edit to a module's skill reaches `codex/skills` on the next
+  compose; until then `qory harness compose --check` exits 6.
 
 ### Fixed
 

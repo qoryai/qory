@@ -309,6 +309,8 @@ The composed tree lives in the **home**, `.qory/harness`. The home has one direc
 runtime.
 
 Most of the home is symlinks to files in modules: every skill, agent, command and hook.
+The Codex directory, `codex`, contains copies of the skills instead, as folders and
+regular files, because Codex 0.167.2 skips a `SKILL.md` that is a link.
 A home outside the checkout contains copies instead for a module that lies in the checkout.
 The home of a walled run contains copies for every module, of the files the stack selects.
 The home of a run whose documents set `harness_hidden: true` contains copies for every
@@ -325,13 +327,13 @@ Beside the links are generated copies. Each is joined from the modules' fragment
 
 An edit to a module's file is live, through the link. In a home outside the checkout, a
 module that lies in the checkout is copied, so an edit there reaches the home on the next
-compose.
+compose. An edit to a skill reaches the copy in `codex/skills` on the next compose too.
 
 An edit to a module's instruction section or a settings fragment is not. The merged copy
 is generated. It stays as it was until the next compose.
 
 `qory harness compose --check` compares the home with what the stack and modules define.
-It exits 6 when a merged copy, or a copied module, is behind. That is the check a CI job
+It exits 6 when a merged copy, a copied module or a copied Codex skill is behind. That is the check a CI job
 runs.
 
 ### Links in the checkout
