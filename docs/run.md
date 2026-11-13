@@ -1646,7 +1646,9 @@ the work item. Then a run of the step explore:
   The arguments stay as they are when one of them before `--`, before `exec` or after
   it, sets a sandbox mode (`--sandbox`, `-s`, `-s<mode>`), bypasses one (`--yolo`,
   `--dangerously-bypass-approvals-and-sandbox`), or is `--approve-for-me` or
-  `--not-so-yolo`, which Codex refuses beside `--sandbox`;
+  `--not-so-yolo`, which Codex refuses beside `--sandbox`. Behind a wall, the prompt
+  mentions the skill by its path, `[$<name>](/tmp/qory-codex-home/skills/<name>/SKILL.md)
+  <in>/inputs.json`;
 - takes its time limit as [Time limits](#time-limits) says.
 
 So the command line sets none of these. After the redemption, qory prints `qory run: the
