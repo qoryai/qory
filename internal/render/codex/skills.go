@@ -2,8 +2,6 @@ package codex
 
 import (
 	"encoding/json"
-	"errors"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
@@ -54,58 +52,93 @@ var skillRoots = []string{".codex/skills", ".agents/skills"}
 // (codex-rs/exec-server-protocol/src/protocol.rs, DISCOVERABLE_PLUGIN_MANIFEST_PATHS).
 var pluginManifests = []string{".codex-plugin/plugin.json", ".claude-plugin/plugin.json", ".cursor-plugin/plugin.json"}
 
-// skillNames are the names under which Codex may load each SKILL.md below root, sorted,
-// with no name twice; none when root does not exist. Codex names a skill by the name of
-// its frontmatter, or by its folder when the frontmatter has none, and puts the name of
-// the nearest plugin above it before that name. The names here are a superset: for each
-// skill, both the frontmatter's name and the folder's, each alone and after the name of
-// every plugin above the skill, in the folder qory reads and where its links lead.
-// Links to folders are followed, every folder is read, a hidden one included, and a
-// folder reached twice is read once.
-func skillNames(root string) ([]string, error) {
-	var names []string
-	seen := map[string]bool{}
-	var walk func(dir string) error
-	walk = func(dir string) error {
-		real, err := filepath.EvalSymlinks(dir)
+// maxScanDepth is how deep Codex 0.167.2 looks for skills below a root, which is at
+// depth 0: it reads the folders down to depth 6 and enters none below
+// (codex-rs/ext/skills/src/loader/mod.rs, MAX_SCAN_DEPTH).
+const maxScanDepth = 6
+
+// skillFile is one SKILL.md below a root.
+type skillFile struct {
+	// path is the file as reached from the root.
+	path string
+	// real is path with every link resolved, as Codex names the skill.
+	real string
+}
+
+// findSkills are the SKILL.md files below root, as Codex looks for them: folders down
+// to [maxScanDepth], links to folders followed, and a folder reached twice read once. It
+// also reads hidden folders, which Codex passes over, so the list is a superset. A root
+// that does not exist or is no folder has none, and an entry that cannot be read is
+// passed over, as Codex passes over both. When bound is not "", only folders whose real
+// path lies inside bound are read, root included: a checkout's link that leads out of the
+// checkout is not followed.
+func findSkills(root, bound string) []skillFile {
+	realBound := ""
+	if bound != "" {
+		r, err := filepath.EvalSymlinks(bound)
 		if err != nil {
-			return err
-		}
-		if seen[real] {
 			return nil
+		}
+		realBound = r
+	}
+	var out []skillFile
+	seen := map[string]bool{}
+	var walk func(dir string, depth int)
+	walk = func(dir string, depth int) {
+		real, err := filepath.EvalSymlinks(dir)
+		if err != nil || seen[real] || realBound != "" && !within(real, realBound) {
+			return
 		}
 		seen[real] = true
 		entries, err := os.ReadDir(dir)
 		if err != nil {
-			return err
+			return
 		}
 		for _, e := range entries {
 			p := filepath.Join(dir, e.Name())
 			info, err := os.Stat(p)
 			if err != nil {
-				// A link that leads nowhere is no skill Codex loads.
 				continue
 			}
 			if info.IsDir() {
-				if err := walk(p); err != nil {
-					return err
+				if depth < maxScanDepth {
+					walk(p, depth+1)
 				}
 				continue
 			}
 			if e.Name() == "SKILL.md" {
-				names = append(names, namesOf(root, p)...)
+				r, err := filepath.EvalSymlinks(p)
+				if err != nil {
+					continue
+				}
+				out = append(out, skillFile{path: p, real: r})
 			}
 		}
-		return nil
 	}
-	if _, err := os.Stat(root); errors.Is(err, fs.ErrNotExist) {
-		return nil, nil
+	if info, err := os.Stat(root); err == nil && info.IsDir() {
+		walk(root, 0)
 	}
-	if err := walk(root); err != nil {
-		return nil, err
+	return out
+}
+
+// within reports whether path is dir or lies below it.
+func within(path, dir string) bool {
+	return path == dir || strings.HasPrefix(path, dir+string(filepath.Separator))
+}
+
+// skillNames are the names under which Codex may load each skill of [findSkills] below
+// root and bound, sorted, with no name twice. Codex names a skill by the name of its
+// frontmatter, or by its folder when the frontmatter has none, and puts the name of the
+// nearest plugin above it before that name. The names here are a superset: for each
+// skill, both the frontmatter's name and the folder's, each alone and after the name of
+// every plugin above the skill, in the folder qory reads and where its links lead.
+func skillNames(root, bound string) []string {
+	var names []string
+	for _, f := range findSkills(root, bound) {
+		names = append(names, namesOf(root, f.path)...)
 	}
 	slices.Sort(names)
-	return slices.Compact(names), nil
+	return slices.Compact(names)
 }
 
 // namesOf are the names of the skill whose SKILL.md is at file, below root: see

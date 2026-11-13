@@ -129,27 +129,20 @@ func WriteWalledHome(dir, files string, run WalledRun) ([]Bound, error) {
 			return nil, err
 		}
 	}
-	roots := []string{filepath.Join(files, "skills")}
+	type root struct{ path, bound string }
+	roots := []root{{path: filepath.Join(files, "skills")}}
 	for _, c := range run.Checkouts {
 		for _, r := range skillRoots {
-			roots = append(roots, filepath.Join(c, r))
+			roots = append(roots, root{path: filepath.Join(c, r), bound: c})
 		}
 	}
 	allowed := slices.Clone(run.Skills)
 	if slices.Contains(run.Skills, AllSkills) {
-		names, err := skillNames(roots[0])
-		if err != nil {
-			return nil, err
-		}
-		allowed = append(allowed, names...)
+		allowed = append(allowed, skillNames(roots[0].path, "")...)
 	}
 	var disabled []string
-	for _, root := range roots {
-		names, err := skillNames(root)
-		if err != nil {
-			return nil, err
-		}
-		for _, n := range names {
+	for _, r := range roots {
+		for _, n := range skillNames(r.path, r.bound) {
 			if !slices.Contains(allowed, n) {
 				disabled = append(disabled, n)
 			}
