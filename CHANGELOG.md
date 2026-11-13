@@ -785,12 +785,11 @@ release may change what an existing document does, and states it under Upgrading
   variables, such as `ANTHROPIC_MODEL`. It refuses them the same way in the
   configuration's `env`, in `harness.launch.claude.env` and in a module's `env` export.
 - Compose refuses a Codex `settings/codex/config.toml` that sets `model_provider`,
-  `model_providers`, `projects`, `hooks.state`, `features`, `analytics`, `otel` or
-  `notify`, with one line per key. For `model_provider` and `model_providers` the line is
-  ``Remove `<key>` from the harness's `settings/codex/config.toml`: qory writes it from
-  the run's model key.``, and for the others ``Remove `<key>` from the harness's
-  `settings/codex/config.toml`: qory sets it for every Codex run.`` A fragment may still
-  set `web_search` and the other keys of `hooks`, such as `hooks.Stop`.
+  `model_providers`, `projects`, `hooks.state`, `features`, `analytics`, `otel`,
+  `notify`, `web_search`, `feedback.enabled` or `check_for_update_on_startup`, with
+  ``Remove `<key>` from the harness's `settings/codex/config.toml`: a Codex run takes
+  this key from qory and Forager, not from the harness.`` A fragment may still set the
+  other keys of `hooks`, such as `hooks.Stop`.
 - Compose accepts `settings/codex/read-access.rules`, Codex execpolicy rules for a run
   whose access is `read`. It keeps the files of all modules, joined in module order,
   merges them into no target file and places them in no home. Any other file under

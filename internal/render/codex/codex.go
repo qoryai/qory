@@ -142,42 +142,39 @@ func (codex) Render(res *compose.Result, dir, home string) error {
 	return nil
 }
 
-// reservedKey is a key path of config.toml that a harness fragment may not set, with the
-// refusal's text: the key as a dotted path fills its %s.
-type reservedKey struct {
-	path []string
-	text string
-}
+// reservedKey is a key path of config.toml that a harness fragment may not set.
+type reservedKey []string
 
-// The refusals of a fragment that sets a key of [reservedKeys]: one for the keys that come
-// from the run's model key, one for the keys qory sets the same way for every run.
-const (
-	textKeyFromModelKey = "Remove `%s` from the harness's `settings/codex/config.toml`: qory writes it from the run's model key."
-	textKeyEveryRun     = "Remove `%s` from the harness's `settings/codex/config.toml`: qory sets it for every Codex run."
-)
+// textReservedKey is the refusal of a fragment that sets a key of [reservedKeys], with
+// the key as a dotted path for its %s.
+const textReservedKey = "Remove `%s` from the harness's `settings/codex/config.toml`: a Codex run takes this key from qory and Forager, not from the harness."
 
 // reservedKeys are the key paths of config.toml that a harness fragment may not set,
 // because Forager's launch of Codex sets them as --config flags, which win over every
 // config.toml, or because qory writes them for a run: the model provider and its
-// settings, project trust, hook trust, features, analytics, OpenTelemetry and the notify
-// program. A fragment may set the other keys of hooks, such as hooks.Stop.
+// settings, project trust, hook trust, features, analytics, OpenTelemetry, the notify
+// program, web search, feedback and the update check. A fragment may set the other keys
+// of hooks, such as hooks.Stop.
 var reservedKeys = []reservedKey{
-	{[]string{"model_provider"}, textKeyFromModelKey},
-	{[]string{"model_providers"}, textKeyFromModelKey},
-	{[]string{"projects"}, textKeyEveryRun},
-	{[]string{"hooks", "state"}, textKeyEveryRun},
-	{[]string{"features"}, textKeyEveryRun},
-	{[]string{"analytics"}, textKeyEveryRun},
-	{[]string{"otel"}, textKeyEveryRun},
-	{[]string{"notify"}, textKeyEveryRun},
+	{"model_provider"},
+	{"model_providers"},
+	{"projects"},
+	{"hooks", "state"},
+	{"features"},
+	{"analytics"},
+	{"otel"},
+	{"notify"},
+	{"web_search"},
+	{"feedback", "enabled"},
+	{"check_for_update_on_startup"},
 }
 
 // checkReserved refuses m, the harness's config.toml fragment, when it sets a key of
 // [reservedKeys], naming the first in that list's order.
 func checkReserved(m map[string]any) error {
 	for _, k := range reservedKeys {
-		if hasKey(m, k.path) {
-			return fmt.Errorf(k.text, strings.Join(k.path, "."))
+		if hasKey(m, k) {
+			return fmt.Errorf(textReservedKey, strings.Join(k, "."))
 		}
 	}
 	return nil
