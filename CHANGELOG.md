@@ -328,13 +328,10 @@ release may change what an existing document does, and states it under Upgrading
   qory writes `.claude.json` with the approval of that placeholder into the empty
   configuration folder, so an interactive Claude Code starts without asking you to
   approve the key.
-- A walled run starts `codex exec` with `-c sandbox_mode="danger-full-access"` after
-  `exec`, unless an argument before `--` sets `sandbox_mode` with `--config` or `-c`.
-  Inside the wall every other sandbox mode of Codex fails before it runs a command. The
-  setting is a `-c` pair because a paused run continues with `codex exec resume <id>`,
-  which takes `-c` and not `--sandbox`. For the same reason a walled `codex exec` has no
-  `--add-dir`: qory leaves out each one after `exec` and before `--`, which with no
-  Codex sandbox changes nothing. The prompt
+- A walled run starts `codex exec` with `--sandbox danger-full-access` after `exec`,
+  unless an argument before `--` sets a sandbox mode, bypasses one, or is
+  `--approve-for-me` or `--not-so-yolo`, which Codex refuses beside `--sandbox`. Inside
+  the wall every other sandbox mode of Codex fails before it runs a command. The prompt
   of a walled `codex exec` mentions the skill by its path,
   `[$<name>](/var/lib/qory-codex-home/skills/<name>/SKILL.md)`, not `$<name>`. An unwalled
   run is unchanged.
@@ -875,11 +872,6 @@ release may change what an existing document does, and states it under Upgrading
   and `--remote-auth-token-env`, also with `=`, with ``Remove `--remote` from the run's
   Codex arguments: a Codex run takes its app server from qory and Forager, not from the
   arguments.`` (`--remote-auth-token-env` likewise).
-- A walled Codex run refuses, after `exec` and before `--`, each flag that `codex exec
-  resume` does not take: `--sandbox` or `-s`, `--approve-for-me` or `--not-so-yolo`,
-  `--cd` or `-C`, and `--color`, also with `=` or a value joined to the short flag, with
-  ``Remove `<flag>` from the run's Codex arguments: a paused Codex run continues with
-  `codex exec resume`, which does not take it.``
 - A walled Codex run refuses `--config` keys at `skills` or `cloud.skills`, under one,
   or above one, such as `-c skills.bundled.enabled=true` or `-c cloud={}`, with the
   `--config` line.
