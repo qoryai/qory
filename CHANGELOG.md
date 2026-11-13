@@ -803,6 +803,12 @@ release may change what an existing document does, and states it under Upgrading
   It joins the files of all modules in module order, merges them into no target file and
   places them in no home, so no run reads them. Any other file under `settings/` that is
   neither `.json` nor `.toml` is still refused. See `contracts/harness/v1/README.md`.
+- Compose refuses a Codex `settings/codex/config.toml` or `settings/codex/hooks.json`
+  with a hook whose `timeout` is negative, with ``Set `timeout` of the `<event>` hook in
+  the harness's `settings/codex/<file>` to 1 or more: Codex ignores the whole file when
+  one is negative.`` Codex 0.167.2 starts with its defaults when `config.toml` has a
+  negative timeout, and drops every hook of a `hooks.json` that has one. A timeout of 0
+  passes: Codex reads it as 1 second.
 - Compose refuses a module that ships `files/codex/auth.json`, Codex's login file, with
   ``Remove `files/codex/auth.json` from module <name>: a Codex run takes its model key
   from the run, not from a file.``

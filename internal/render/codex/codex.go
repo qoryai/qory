@@ -107,10 +107,16 @@ func (codex) Reserved() []render.Reserved {
 // AGENTS.md end with the names the session registers, see [render.Addressing]: a Codex
 // home registers them as the modules wrote them, and the file states that. Codex reads a
 // project .codex only in a project the user has marked trusted. A fragment that sets a
-// key of [reservedKeys] is refused before anything is written.
+// key of [reservedKeys], or a hook with a negative timeout, see [checkHookTimeouts], is
+// refused before anything is written.
 func (codex) Render(res *compose.Result, dir, home string) error {
 	if err := checkReserved(res.SettingsFor(Runtime, "config.toml", home)); err != nil {
 		return err
+	}
+	for _, file := range []string{"config.toml", "hooks.json"} {
+		if err := checkHookTimeouts(file, res.SettingsFor(Runtime, file, home)); err != nil {
+			return err
+		}
 	}
 	err := render.WriteSettings(res, Runtime, dir, home, []string{"config.toml"}, func(file string, m map[string]any) {
 		if file != "config.toml" {
@@ -236,6 +242,48 @@ func findKey(m map[string]any, pattern []string) ([]string, bool) {
 		}
 	}
 	return nil, false
+}
+
+// textHookTimeout is the refusal of a hook with a negative timeout, with the hook's event
+// and the settings file it is in.
+const textHookTimeout = "Set `timeout` of the `%s` hook in the harness's `settings/codex/%s` to 1 or more: Codex ignores the whole file when one is negative."
+
+// checkHookTimeouts refuses m, the harness's file fragment of config.toml or hooks.json,
+// when a hook in it has a negative timeout, naming the first event in sorted order. Codex
+// 0.167.2 reads a hook's timeout as an unsigned number
+// (codex-rs/protocol/src/hooks.rs, HookHandlerConfig): a negative one makes config.toml
+// invalid, and Codex then starts with its defaults and none of the file, or makes Codex
+// drop every hook of hooks.json (codex-rs/hooks/src/engine/discovery.rs,
+// load_hooks_json). Codex reads a timeout of 0 as 1 second, so 0 passes.
+func checkHookTimeouts(file string, m map[string]any) error {
+	events, _ := m["hooks"].(map[string]any)
+	for _, event := range slices.Sorted(maps.Keys(events)) {
+		groups, _ := events[event].([]any)
+		for _, g := range groups {
+			group, _ := g.(map[string]any)
+			handlers, _ := group["hooks"].([]any)
+			for _, h := range handlers {
+				handler, _ := h.(map[string]any)
+				if negative(handler["timeout"]) {
+					return fmt.Errorf(textHookTimeout, event, file)
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// negative reports whether v, a decoded settings value, is a number below 0.
+func negative(v any) bool {
+	switch n := v.(type) {
+	case int64:
+		return n < 0
+	case int:
+		return n < 0
+	case float64:
+		return n < 0
+	}
+	return false
 }
 
 // setKey is where a codex fragment sets variables, which Codex sets in every command it

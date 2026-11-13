@@ -61,3 +61,30 @@ func TestCodexRefusesReservedKeys(t *testing.T) {
 	config := read(t, filepath.Join(home, "codex", "config.toml"))
 	has(t, "codex config.toml", config, "other = true", `command = "/bin/true"`)
 }
+
+// TestCodexRefusesANegativeHookTimeout is a Codex config.toml or hooks.json fragment with
+// a hook whose timeout is negative: the compose's build fails with the line that names
+// the event and the file, and writes no config.toml. A timeout of 0, which Codex reads as
+// 1 second, stays allowed.
+func TestCodexRefusesANegativeHookTimeout(t *testing.T) {
+	for _, c := range []struct{ file, fragment string }{
+		{"config.toml", "[[hooks.Stop]]\n[[hooks.Stop.hooks]]\ntype = \"command\"\ncommand = \"/bin/true\"\n\n[[hooks.SessionStart]]\n[[hooks.SessionStart.hooks]]\ntype = \"command\"\ncommand = \"/bin/true\"\ntimeout = 5\n[[hooks.SessionStart.hooks]]\ntype = \"mcp_tool\"\nserver = \"s\"\ntool = \"t\"\ntimeout = -1\n"},
+		{"hooks.json", `{"hooks": {"SessionStart": [{"hooks": [{"type": "command", "command": "/bin/true", "timeout": -1.5}]}]}}`},
+	} {
+		t.Run(c.file, func(t *testing.T) {
+			res, home := composeEnv(t, withFile("modules/core/settings/codex/"+c.file, c.fragment), nil, "codex")
+			err := render.Build(res, home, lookup(t, "codex"))
+			want := "Set `timeout` of the `SessionStart` hook in the harness's `settings/codex/" + c.file + "` to 1 or more: Codex ignores the whole file when one is negative."
+			if err == nil || err.Error() != want {
+				t.Fatalf("Build: %v, want %q", err, want)
+			}
+			if _, err := os.Stat(filepath.Join(home, "codex", "config.toml")); err == nil {
+				t.Error("the refused compose wrote config.toml")
+			}
+		})
+	}
+	res, home := composeEnv(t, withFile("modules/core/settings/codex/config.toml", "[[hooks.Stop]]\n[[hooks.Stop.hooks]]\ntype = \"command\"\ncommand = \"/bin/true\"\ntimeout = 0\n"), nil, "codex")
+	if err := render.Build(res, home, lookup(t, "codex")); err != nil {
+		t.Fatalf("Build with a timeout of 0: %v", err)
+	}
+}

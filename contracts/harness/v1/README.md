@@ -1212,7 +1212,11 @@ Per runtime, the files written into its directory:
   `model_instructions_file`, `experimental_compact_prompt_file`, `model_catalog_json`,
   `js_repl_node_path`, `sqlite_home` or `log_dir` fails the compose with ``Remove `<key>` from the
   harness's `settings/codex/config.toml`: a Codex run takes this key from qory and
-  Forager, not from the harness.``
+  Forager, not from the harness.`` A hook with a negative `timeout` in
+  `settings/codex/config.toml` or `settings/codex/hooks.json` fails the compose with
+  ``Set `timeout` of the `<event>` hook in the harness's `settings/codex/<file>` to 1 or
+  more: Codex ignores the whole file when one is negative.`` Codex reads a timeout of 0
+  as 1 second.
 - **gemini**: `settings.json` with `model.name` and `mcpServers`, links for skills and hooks,
   one `agents/<name>.md` with `name` and `description`, one `commands/<name>.toml` with
   `$ARGUMENTS` as `{{args}}`. Gemini reads a project `.gemini` only in a trusted folder.
