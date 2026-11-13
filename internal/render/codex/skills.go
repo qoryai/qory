@@ -46,6 +46,30 @@ func AllowedSkills(res *compose.Result) []string {
 	return slices.Compact(out)
 }
 
+// placeSkills writes every composed skill into dir/skills, the skills folder of the Codex
+// home dir, as folders and regular files only. Codex 0.167.2 passes over a SKILL.md that
+// is a link, see [copyTree], and [render.PlaceEntries] links a file of a skill that
+// contains no reference. So placeSkills places the skills with [render.PlaceEntries] in
+// a scratch folder in dir, copies them with [copyTree], and removes the scratch folder.
+// The copy follows a link only into the composed home, the parent of dir, and the folders
+// of [compose.Result.SourceDirs]; any other link fails the copy with [textOutsideLink].
+func placeSkills(res *compose.Result, dir string) error {
+	scratch, err := os.MkdirTemp(dir, ".skills-")
+	if err != nil {
+		return err
+	}
+	// The scratch folder contains links and files that qory wrote; RemoveAll follows no link.
+	defer os.RemoveAll(scratch)
+	if err := render.PlaceEntries(res, scratch, render.Bare, "skills"); err != nil {
+		return err
+	}
+	dst := filepath.Join(dir, "skills")
+	if err := os.Mkdir(dst, 0o755); err != nil {
+		return err
+	}
+	return copyTree(filepath.Join(scratch, "skills"), dst, append([]string{filepath.Dir(dir)}, res.SourceDirs()...))
+}
+
 // skillRoots are the folders of a checkout that Codex 0.167.2 reads skills from, trusted
 // or not: a project's .codex/skills and .agents/skills
 // (codex-rs/ext/skills/src/host_roots.rs).

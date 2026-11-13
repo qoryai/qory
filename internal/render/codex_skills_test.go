@@ -129,56 +129,149 @@ func TestWalledCodexSkillsUnderAPatternOrNoRule(t *testing.T) {
 }
 
 // TestWalledCodexCopiesLinkedSkillsAsFiles composes a harness from a local path whose
-// skill review the home links to, with its SKILL.md: the walled home's copy has a folder
-// and a regular SKILL.md with the module's text, since Codex passes over a SKILL.md that
-// is a link. A copy that may follow no link into the module fails with the line that
-// says so.
+// skill review the shared skills folder of the home links to: the Codex home has a
+// folder and a regular SKILL.md with the module's text, since Codex passes over a
+// SKILL.md that is a link, and the walled home's copy has the same. With no module
+// folder to follow a link into, the walled copy still succeeds: the Codex home has no
+// link.
 func TestWalledCodexCopiesLinkedSkillsAsFiles(t *testing.T) {
 	const skill = "---\nname: review\ndescription: review\n---\nbody\n"
 	res, home := composeEnv(t, withFile("modules/core/skills/review/SKILL.md", skill), nil, "codex")
 	if err := render.Build(res, home, lookup(t, "codex")); err != nil {
 		t.Fatal(err)
 	}
-	if info, err := os.Lstat(filepath.Join(home, "codex", "skills", "review")); err != nil || info.Mode()&os.ModeSymlink == 0 {
+	if info, err := os.Lstat(filepath.Join(home, "skills", "review")); err != nil || info.Mode()&os.ModeSymlink == 0 {
 		t.Fatalf("the composed home's skills/review: %v, want a link", err)
+	}
+	if info, err := os.Lstat(filepath.Join(home, "codex", "skills", "review")); err != nil || !info.IsDir() {
+		t.Fatalf("the Codex home's skills/review: %v, want a folder", err)
 	}
 	fixed := filepath.Join(t.TempDir(), "fixed")
 	if _, err := codex.WriteWalledHome(filepath.Join(home, "codex"), fixed, codex.WalledRun{LinkRoots: res.SourceDirs()}); err != nil {
 		t.Fatal(err)
 	}
-	p := filepath.Join(fixed, "skills", "review", "SKILL.md")
-	info, err := os.Lstat(p)
-	if err != nil || !info.Mode().IsRegular() {
-		t.Fatalf("%s: %v %v, want a regular file", p, info, err)
+	for _, p := range []string{filepath.Join(home, "codex", "skills", "review", "SKILL.md"), filepath.Join(fixed, "skills", "review", "SKILL.md")} {
+		info, err := os.Lstat(p)
+		if err != nil || !info.Mode().IsRegular() {
+			t.Fatalf("%s: %v %v, want a regular file", p, info, err)
+		}
+		if got := read(t, p); got != skill {
+			t.Errorf("%s %q, want %q", p, got, skill)
+		}
 	}
-	if got := read(t, p); got != skill {
-		t.Errorf("SKILL.md %q, want %q", got, skill)
-	}
-	_, err = codex.WriteWalledHome(filepath.Join(home, "codex"), filepath.Join(t.TempDir(), "fixed"), codex.WalledRun{})
-	if err == nil || !strings.HasPrefix(err.Error(), "Remove the link `skills/review` from the harness: it leads to `") {
-		t.Errorf("WriteWalledHome with no module folder: %v, want the refusal of a link outside", err)
+	if _, err := codex.WriteWalledHome(filepath.Join(home, "codex"), filepath.Join(t.TempDir(), "fixed"), codex.WalledRun{}); err != nil {
+		t.Errorf("WriteWalledHome with no module folder: %v, want no error", err)
 	}
 }
 
-// TestWalledCodexRefusesALinkOutOfTheModules composes a harness whose skill review has
-// a file that links to /etc/hosts: the walled home's copy fails with the line that
-// contains the link and its target, though the module's folder is a link root.
-func TestWalledCodexRefusesALinkOutOfTheModules(t *testing.T) {
-	res, home := composeEnv(t, withFile("modules/core/skills/review/SKILL.md", "---\nname: review\ndescription: review\n---\n"), nil, "codex")
-	if err := os.Symlink("/etc/hosts", filepath.Join(res.Modules[0].Dir, "skills", "review", "hosts")); err != nil {
+// TestCodexHomeHasSkillsAsRegularFiles composes a skill whose guide.md has a reference
+// and whose SKILL.md and script have none. The shared skills folder of the home has
+// SKILL.md and the script as links, as for every runtime; the Codex home has them as
+// regular files, with the module's text and the script's executable bits, and
+// guide.md with its reference resolved. Nothing under the Codex home's skills is a link,
+// so Codex 0.167.2 loads SKILL.md.
+func TestCodexHomeHasSkillsAsRegularFiles(t *testing.T) {
+	const skill = "---\nname: review\ndescription: review\n---\nRead guide.md.\n"
+	files := withFile("modules/core/skills/review/SKILL.md", skill)
+	files["modules/core/skills/review/guide.md"] = "Then run ${qory:skills/review}.\n"
+	files["modules/core/skills/review/scripts/check.sh"] = "#!/bin/sh\n"
+	res, home := composeEnv(t, files, nil, "codex")
+	script := filepath.Join(res.Modules[0].Dir, "skills", "review", "scripts", "check.sh")
+	if err := os.Chmod(script, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	if err := render.Build(res, home, lookup(t, "codex")); err != nil {
+		t.Fatal(err)
+	}
+	if info, err := os.Lstat(filepath.Join(home, "skills", "review", "SKILL.md")); err != nil || info.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("the composed home's skills/review/SKILL.md: %v, want a link", err)
+	}
+	skills := filepath.Join(home, "codex", "skills")
+	err := filepath.WalkDir(skills, func(p string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.Type()&os.ModeSymlink != 0 {
+			t.Errorf("%s is a link, want a folder or a regular file", p)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := read(t, filepath.Join(skills, "review", "SKILL.md")); got != skill {
+		t.Errorf("SKILL.md %q, want %q", got, skill)
+	}
+	if got := read(t, filepath.Join(skills, "review", "guide.md")); got != "Then run review.\n" {
+		t.Errorf("guide.md %q, want the reference resolved", got)
+	}
+	if info, err := os.Stat(filepath.Join(skills, "review", "scripts", "check.sh")); err != nil || info.Mode().Perm() != 0o755 {
+		t.Errorf("scripts/check.sh: %v %v, want mode 0755", info, err)
+	}
+	if entries, err := os.ReadDir(filepath.Join(home, "codex")); err == nil {
+		for _, e := range entries {
+			if strings.HasPrefix(e.Name(), ".skills-") {
+				t.Errorf("the Codex home keeps the scratch folder %s", e.Name())
+			}
+		}
+	}
+}
+
+// TestCodexHomeCopiesALinkIntoAnotherModule composes two modules, where a file of the
+// skill review in core links to a file of the module shared: the Codex home has the file
+// as a regular file with the text of shared's file.
+func TestCodexHomeCopiesALinkIntoAnotherModule(t *testing.T) {
+	files := map[string]string{
+		"qory.yaml":                           "apiVersion: qory.dev/v1alpha1\nharness:\n  target:\n    runtime: codex\n  modules:\n    - name: core\n      source: {path: modules/core}\n    - name: shared\n      source: {path: modules/shared}\n",
+		"modules/core/qory-module.yaml":       "apiVersion: qory.dev/v1alpha1\nname: core\n",
+		"modules/core/skills/review/SKILL.md": "---\nname: review\ndescription: review\n---\n",
+		"modules/shared/qory-module.yaml":     "apiVersion: qory.dev/v1alpha1\nname: shared\n",
+		"modules/shared/docs/style.md":        "shared style\n",
+	}
+	res, home := composeEnv(t, files, nil, "codex")
+	var core, shared string
+	for _, m := range res.Modules {
+		switch m.Name {
+		case "core":
+			core = m.Dir
+		case "shared":
+			shared = m.Dir
+		}
+	}
+	if err := os.Symlink(filepath.Join(shared, "docs", "style.md"), filepath.Join(core, "skills", "review", "style.md")); err != nil {
+		t.Fatal(err)
+	}
+	if err := render.Build(res, home, lookup(t, "codex")); err != nil {
+		t.Fatal(err)
+	}
+	p := filepath.Join(home, "codex", "skills", "review", "style.md")
+	if info, err := os.Lstat(p); err != nil || !info.Mode().IsRegular() {
+		t.Fatalf("%s: %v, want a regular file", p, err)
+	}
+	if got := read(t, p); got != "shared style\n" {
+		t.Errorf("style.md %q, want the text of shared's file", got)
+	}
+}
+
+// TestCodexRefusesALinkOutOfTheModules composes a harness whose skill review has a file
+// that links to /etc/hosts: the compose for Codex fails with the line that contains the
+// link and its target, and writes no home.
+func TestCodexRefusesALinkOutOfTheModules(t *testing.T) {
+	res, home := composeEnv(t, withFile("modules/core/skills/review/SKILL.md", "---\nname: review\ndescription: review\n---\n"), nil, "codex")
+	if err := os.Symlink("/etc/hosts", filepath.Join(res.Modules[0].Dir, "skills", "review", "hosts")); err != nil {
 		t.Fatal(err)
 	}
 	target, err := filepath.EvalSymlinks("/etc/hosts")
 	if err != nil {
 		t.Skip("no /etc/hosts:", err)
 	}
-	_, err = codex.WriteWalledHome(filepath.Join(home, "codex"), filepath.Join(t.TempDir(), "fixed"), codex.WalledRun{LinkRoots: res.SourceDirs()})
+	err = render.Build(res, home, lookup(t, "codex"))
 	want := "Remove the link `skills/review/hosts` from the harness: it leads to `" + target + "`, outside the harness's modules, and a walled Codex run copies only files inside them."
 	if err == nil || err.Error() != want {
-		t.Errorf("WriteWalledHome: %v, want %q", err, want)
+		t.Errorf("Build: %v, want %q", err, want)
+	}
+	if _, err := os.Lstat(home); err == nil {
+		t.Errorf("Build wrote the home %s", home)
 	}
 }
 

@@ -329,9 +329,9 @@ func relTo(dir, file string) string {
 // MAX_READ_FILE_BYTES).
 const maxCopiedFile = maxSkillSize
 
-// textOutsideLink is the refusal of a link in the composed home whose target lies
-// outside the composed home and every folder of [WalledRun.LinkRoots], with the link's
-// path in the composed home and its target.
+// textOutsideLink is the refusal of a link whose target lies outside the composed home
+// and every module folder, [WalledRun.LinkRoots] for [WriteWalledHome] and
+// compose.Result.SourceDirs for [placeSkills], with the link's path and its target.
 const textOutsideLink = "Remove the link `%s` from the harness: it leads to `%s`, outside the harness's modules, and a walled Codex run copies only files inside them."
 
 // copyTree copies the folder src into dst, which exists, as folders and regular files

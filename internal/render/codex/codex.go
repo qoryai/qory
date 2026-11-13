@@ -18,7 +18,7 @@
 //	             qory writes them for every walled run
 //
 // Codex also takes its whole home from CODEX_HOME, and the runtime's directory is one:
-// config.toml, the agents, the skills linked under skills/ and the instructions as
+// config.toml, the agents, the skills copied under skills/ and the instructions as
 // AGENTS.md, the global instructions file Codex reads there. [Template] sets the
 // variable. Codex reads its login from auth.json in the same home; qory writes none there
 // and refuses a module that ships one, and Codex reads its model key from OPENAI_API_KEY.
@@ -163,7 +163,7 @@ func (codex) Render(res *compose.Result, dir, home string) error {
 			return err
 		}
 	}
-	if err := render.PlaceEntries(res, dir, render.Bare, "skills"); err != nil {
+	if err := placeSkills(res, dir); err != nil {
 		return err
 	}
 	if text := render.WithAddressing(res, render.Bare, codex{}.Skips()); text != "" {
