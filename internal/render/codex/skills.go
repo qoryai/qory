@@ -2,10 +2,12 @@ package codex
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -48,26 +50,46 @@ func AllowedSkills(res *compose.Result) []string {
 
 // placeSkills writes every composed skill into dir/skills, the skills folder of the Codex
 // home dir, as folders and regular files only. Codex 0.167.2 passes over a SKILL.md that
-// is a link, see [copyTree], and [render.PlaceEntries] links a file of a skill that
+// is a link, see [treeCopy], and [render.PlaceEntries] links a file of a skill that
 // contains no reference. So placeSkills places the skills with [render.PlaceEntries] in
-// a scratch folder in dir, copies them with [copyTree], and removes the scratch folder.
-// The copy follows a link only into the composed home, the parent of dir, and the folders
-// of [compose.Result.SourceDirs]; any other link fails the copy with [textOutsideLink].
-func placeSkills(res *compose.Result, dir string) error {
+// a scratch folder in dir, copies each skill with a [treeCopy], and removes the scratch
+// folder. The copy follows a link only into the composed home, the parent of dir, and the
+// folders of [compose.Result.SourceDirs]; any other link fails the copy with
+// [textOutsideLink]. Each skill is copied within the limits of a copy of one entry of
+// its module, see [render.LimitFor].
+func placeSkills(res *compose.Result, dir string) (err error) {
 	scratch, err := os.MkdirTemp(dir, ".skills-")
 	if err != nil {
-		return err
+		return failed("skills", err)
 	}
 	// The scratch folder contains links and files that qory wrote; RemoveAll follows no link.
-	defer os.RemoveAll(scratch)
+	defer func() {
+		if rerr := os.RemoveAll(scratch); err == nil && rerr != nil {
+			err = failed("skills", rerr)
+		}
+	}()
 	if err := render.PlaceEntries(res, scratch, render.Bare, "skills"); err != nil {
 		return err
 	}
 	dst := filepath.Join(dir, "skills")
 	if err := os.Mkdir(dst, 0o755); err != nil {
-		return err
+		return failed("skills", err)
 	}
-	return copyTree(filepath.Join(scratch, "skills"), dst, append([]string{filepath.Dir(dir)}, res.SourceDirs()...))
+	roots := append([]string{filepath.Dir(dir)}, res.SourceDirs()...)
+	for _, e := range res.Entries {
+		if e.Kind != "skills" {
+			continue
+		}
+		src := filepath.Join(scratch, "skills", e.Name)
+		if _, err := os.Lstat(src); errors.Is(err, fs.ErrNotExist) {
+			continue
+		}
+		limit := render.LimitFor(e.Module)
+		if err := newTreeCopy(roots, &limit).entry(src, filepath.Join(dst, e.Name), path.Join("skills", e.Name)); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // skillRoots are the folders of a checkout that Codex 0.167.2 reads skills from, trusted

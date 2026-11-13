@@ -1,9 +1,13 @@
 package codex
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	"github.com/qoryai/qory/internal/render"
 )
 
 // TestWriteNewWritesThroughNoLink is a link to a file elsewhere at the path writeNew
@@ -53,5 +57,52 @@ func TestCopyFileWritesOverNothing(t *testing.T) {
 		if b, err := os.ReadFile(c.read); err != nil || string(b) != c.want {
 			t.Errorf("%s: %q %v, want it unchanged", filepath.Base(c.read), b, err)
 		}
+	}
+}
+
+// TestCopyTreeKeepsToItsLimit copies a folder of three files of 4 bytes each with a
+// limit of two entries, of 10 bytes, and of 3 bytes a file: each copy fails with the
+// limit's refusal for that limit. Within every limit the copy succeeds.
+func TestCopyTreeKeepsToItsLimit(t *testing.T) {
+	src := t.TempDir()
+	for _, name := range []string{"a", "b", "c"} {
+		if err := os.WriteFile(filepath.Join(src, name), []byte("text"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tooMany, tooManyBytes, tooLarge := errors.New("too many"), errors.New("too many bytes"), errors.New("too large")
+	limit := func(entries int, bytes, file int64) *render.CopyLimit {
+		return &render.CopyLimit{Entries: entries, Bytes: bytes, FileBytes: file, TooMany: tooMany, TooManyBytes: tooManyBytes, TooLarge: func(string) error { return tooLarge }}
+	}
+	for _, c := range []struct {
+		name  string
+		limit *render.CopyLimit
+		want  error
+	}{
+		{"entries", limit(2, 100, 100), tooMany},
+		{"bytes", limit(10, 10, 100), tooManyBytes},
+		{"file", limit(10, 100, 3), tooLarge},
+		{"within", limit(3, 12, 4), nil},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			err := copyTree(src, t.TempDir(), "skills", []string{src}, c.limit)
+			if !errors.Is(err, c.want) {
+				t.Errorf("copyTree: %v, want %v", err, c.want)
+			}
+		})
+	}
+}
+
+// TestCopyTreeShowsNoAbsolutePath copies a folder with a link that leads nowhere: the
+// error starts with the copy's prefix and the link's path in the copy, and contains no
+// path of this machine.
+func TestCopyTreeShowsNoAbsolutePath(t *testing.T) {
+	src := t.TempDir()
+	if err := os.Symlink(filepath.Join(src, "gone"), filepath.Join(src, "link")); err != nil {
+		t.Fatal(err)
+	}
+	err := copyTree(src, t.TempDir(), "skills", []string{src}, nil)
+	if err == nil || !strings.HasPrefix(err.Error(), "copy skills/link for the Codex home: ") || strings.Contains(err.Error(), src) {
+		t.Errorf("copyTree: %v, want the prefix and no path of this machine", err)
 	}
 }
