@@ -26,6 +26,7 @@ import (
 	"github.com/qoryai/qory/internal/pool/prebuild"
 	"github.com/qoryai/qory/internal/preparation"
 	"github.com/qoryai/qory/internal/proxygit"
+	"github.com/qoryai/qory/internal/render/codex"
 	"github.com/qoryai/qory/internal/runapi"
 	"github.com/qoryai/qory/internal/runcopy"
 )
@@ -256,6 +257,14 @@ func ArtifactsForCheck(base string) (func(ctx context.Context, dir string, types
 		return nil, err
 	}
 	return artifactsForCheck(client), nil
+}
+
+// SetWriteWalledHome makes a walled Codex run write the read-only parts of its Codex home
+// with f, and returns what restores the writer.
+func SetWriteWalledHome(f func(dir, files string, run codex.WalledRun) ([]codex.Bound, error)) func() {
+	before := writeWalledHome
+	writeWalledHome = f
+	return func() { writeWalledHome = before }
 }
 
 // SetLoadPushChecks makes qory run read the push checks of a home with f, and returns

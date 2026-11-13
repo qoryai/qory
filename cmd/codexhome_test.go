@@ -1,6 +1,7 @@
 package cmd_test
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"slices"
@@ -257,11 +258,108 @@ func TestAWalledCodexWriteRunFromACodeWithTheCacheInItsCheckoutStops(t *testing.
 		t.Fatalf("%v (exit %d), want exit %d before the join\n%s", r.err, cmd.ExitCode(r.err), cmd.ExitInput, r.out)
 	}
 	wants(t, r.err.Error(), "start the run from a folder that does not contain your home folder, qory's state directory or the folder of the runs' copies: the folder ", "contains the folder of the runs' copies ")
+	runsLeft(t)
+}
+
+// TestAWalledCodexWriteRunFromACodeWritesInTheCheckout is a walled Codex write run from a
+// run code: it gets no copy, binds the checkout writable, and mounts the Codex home from a
+// new folder of the run under the user's cache. config.toml marks the checkout untrusted,
+// rules/ has no read-access.rules although the harness has read rules, and the run's
+// folder is gone once the run ends.
+func TestAWalledCodexWriteRunFromACodeWritesInTheCheckout(t *testing.T) {
+	var seen []seenHome
+	r := codexWriteFromCode(t, &seen, nil)
+	if !r.joined || len(seen) != 1 {
+		t.Fatalf("%v (exit %d), want one join\n%s", r.err, cmd.ExitCode(r.err), r.out)
+	}
+	if got := checkoutMounts(r.spec); len(got) != 1 || got[0] != (wall.Mount{Path: r.spec.Dir}) {
+		t.Errorf("the mounts of the checkout are %+v, want %s writable alone", got, r.spec.Dir)
+	}
+	home := checkHomeMounts(t, seen[0].spec)
+	wants(t, seen[0].config, "[projects.\""+r.spec.Dir+"\"]\n    trust_level = \"untrusted\"\n")
+	if slices.Contains(seen[0].rules, codex.ReadRulesName) {
+		t.Errorf("a write run's rules: %q", seen[0].rules)
+	}
+	if _, err := os.Lstat(filepath.Dir(home)); !os.IsNotExist(err) {
+		t.Errorf("the run's folder %s is left after the run: %v", filepath.Dir(home), err)
+	}
+}
+
+// runsLeft fails the test when the folder of the runs' copies, under the user's cache
+// folder, has anything in it.
+func runsLeft(t *testing.T) {
+	t.Helper()
 	cache, err := os.UserCacheDir()
 	if err != nil {
 		t.Fatal(err)
 	}
 	if left, err := os.ReadDir(filepath.Join(cache, "qory", "runs")); err != nil && !os.IsNotExist(err) || len(left) != 0 {
 		t.Errorf("left in the runs' folder: %v, %v", left, err)
+	}
+}
+
+// TestAWalledCodexRunThatFailsPartwayLeavesNoRunFolder is a walled Codex run whose Codex
+// home fails after part of it is written, in a copy and from a run code with no copy:
+// the run stops before the join, and nothing is left in the folder of the runs' copies.
+func TestAWalledCodexRunThatFailsPartwayLeavesNoRunFolder(t *testing.T) {
+	failing := func(t *testing.T) {
+		t.Cleanup(cmd.SetWriteWalledHome(func(dir, files string, run codex.WalledRun) ([]codex.Bound, error) {
+			if _, err := codex.WriteWalledHome(dir, files, run); err != nil {
+				t.Errorf("the home's parts: %v", err)
+			}
+			return nil, errors.New("the write failed")
+		}))
+	}
+	t.Run("in a copy", func(t *testing.T) {
+		exportingCheckout(t, fakeRuntime(t))
+		walledForager(t)
+		t.Setenv("QORY_RUN_KEY", "")
+		var seen []seenHome
+		joinsSeeingHome(t, &seen)
+		failing(t)
+		out, err := run(t, "run", "codex", "--", "hi")
+		if err == nil || len(seen) != 0 {
+			t.Fatalf("%v, %d joins, want an error before the join\n%s", err, len(seen), out)
+		}
+		wants(t, out+err.Error(), "the write failed")
+		runsLeft(t)
+	})
+	t.Run("with no copy", func(t *testing.T) {
+		var seen []seenHome
+		r := codexWriteFromCode(t, &seen, func(string) { failing(t) })
+		if r.joined || r.err == nil {
+			t.Fatalf("%v (exit %d), want an error before the join\n%s", r.err, cmd.ExitCode(r.err), r.out)
+		}
+		wants(t, r.out+r.err.Error(), "the write failed")
+		runsLeft(t)
+	})
+}
+
+// TestTheCodexHomeGoesWhileTheCopyStays is a walled Codex run in a copy whose agent
+// deletes the run's branch, so the copy stays: the copy is there after the run, and the
+// folders codex-home and codex-fixed beside it are gone.
+func TestTheCodexHomeGoesWhileTheCopyStays(t *testing.T) {
+	exportingCheckout(t, fakeRuntime(t))
+	walledForager(t)
+	t.Setenv("QORY_RUN_KEY", "")
+	var work string
+	agentInCopy(t, func(spec session.SessionSpec) {
+		work = spec.Dir
+		checkHomeMounts(t, spec)
+		branch := gitOutput(t, spec.Dir, "symbolic-ref", "--short", "HEAD")
+		gitOutput(t, spec.Dir, "update-ref", "-d", "refs/heads/"+branch)
+	})
+	out, err := run(t, "run", "codex", "--", "hi")
+	if cmd.ExitCode(err) != 1 || work == "" {
+		t.Fatalf("exit %d (%v), want 1 after the join\n%s", cmd.ExitCode(err), err, out)
+	}
+	wants(t, out, "read the run's files in "+work+", and run no git there: ")
+	if _, err := os.Lstat(work); err != nil {
+		t.Errorf("the copy %s is gone: %v", work, err)
+	}
+	for _, name := range []string{"codex-home", "codex-fixed"} {
+		if _, err := os.Lstat(filepath.Join(filepath.Dir(work), name)); !os.IsNotExist(err) {
+			t.Errorf("%s is left beside the copy: %v", name, err)
+		}
 	}
 }

@@ -25,6 +25,10 @@ const (
 	codexFixedName = "codex-fixed"
 )
 
+// writeWalledHome writes the read-only parts of a walled Codex run's home; a test
+// replaces it to fail partway.
+var writeWalledHome = codex.WriteWalledHome
+
 // withCodexHome is the fixed variables and the defaults of a walled Codex run, with
 // CODEX_HOME at [codex.HomeInWall] among the fixed ones and in neither set otherwise. A
 // fixed value wins over every other source, and the runtime's deny list leaves it in.
@@ -71,7 +75,7 @@ func walledCodexHome(root, harnessHome, checkout, workDir string, readOnly bool,
 			workDirs = append(workDirs, path.Join(workspaceInWall, filepath.ToSlash(rel)))
 		}
 	}
-	binds, err := codex.WriteWalledHome(filepath.Join(harnessHome, codex.Runtime), filepath.Join(root, codexFixedName), codex.WalledRun{
+	binds, err := writeWalledHome(filepath.Join(harnessHome, codex.Runtime), filepath.Join(root, codexFixedName), codex.WalledRun{
 		Projects:  projects,
 		Checkouts: []string{checkout},
 		WorkDirs:  workDirs,
