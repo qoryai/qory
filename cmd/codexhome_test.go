@@ -214,3 +214,50 @@ func TestAWalledCodexReadRunGetsTheReadRules(t *testing.T) {
 		t.Errorf("the run's folder %s is left after the run: %v", filepath.Dir(home), err)
 	}
 }
+
+// codexWriteFromCode is a walled Codex write run from a run code, which gets no copy and
+// binds the checkout writable, with before run first in the checkout, and what each join
+// saw of the Codex home in seen.
+func codexWriteFromCode(t *testing.T, seen *[]seenHome, before func(root string)) codeRun {
+	t.Helper()
+	t.Cleanup(cmd.SetJoinSession(func(s session.SessionSpec) { *seen = append(*seen, sawHome(t, s)) }))
+	return runFromCodeLinks(t, func(string) []string {
+		root, err := os.Getwd()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if before != nil {
+			before(root)
+		}
+		docker, _ := fakeDocker(t)
+		writeFile(t, filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "forager.yaml"),
+			"wall:\n  adapter: docker\n  command: "+docker+"\n  helper: "+staticELF(t)+"\n  user: \"1000:1000\"\n  image: "+readImage+"\n")
+		return nil
+	}, []string{"--home", filepath.Join(tempDir(t), "home")}, declares("write"), func(d map[string]any) {
+		d["run_settings"] = map[string]any{"runtime": "codex"}
+	}, map[string]string{
+		"examples/hello/modules/hello/skills/workflow-hello/SKILL.md":   "---\nname: workflow-hello\ndescription: Say hello.\n---\n\nSay hello.\n",
+		"examples/hello/modules/hello/settings/codex/read-access.rules": "prefix_rule(pattern=[\"rm\"], decision=\"forbidden\")\n",
+	}, nil)
+}
+
+// TestAWalledCodexWriteRunFromACodeWithTheCacheInItsCheckoutStops is a walled Codex write
+// run from a run code in a checkout that contains the user's cache folder, where the run's
+// Codex home would go: the run stops before it makes the home, exit 2, with qory's line
+// for a checkout that contains the folder of the runs' copies, and nothing is left in
+// that folder.
+func TestAWalledCodexWriteRunFromACodeWithTheCacheInItsCheckoutStops(t *testing.T) {
+	var seen []seenHome
+	r := codexWriteFromCode(t, &seen, func(root string) { cacheIn(t, filepath.Join(root, "cache")) })
+	if r.joined || cmd.ExitCode(r.err) != cmd.ExitInput {
+		t.Fatalf("%v (exit %d), want exit %d before the join\n%s", r.err, cmd.ExitCode(r.err), cmd.ExitInput, r.out)
+	}
+	wants(t, r.err.Error(), "start the run from a folder that does not contain your home folder, qory's state directory or the folder of the runs' copies: the folder ", "contains the folder of the runs' copies ")
+	cache, err := os.UserCacheDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if left, err := os.ReadDir(filepath.Join(cache, "qory", "runs")); err != nil && !os.IsNotExist(err) || len(left) != 0 {
+		t.Errorf("left in the runs' folder: %v, %v", left, err)
+	}
+}
