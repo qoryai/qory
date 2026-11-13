@@ -3578,7 +3578,8 @@ What to know:
   that binary.
 - **What the container sees.** The checkout it was started in, or its copy, the run's
   record directory, read-only, and for a run of Claude Code, the folder of the names of the
-  variables its agent keeps, read-only; no other directory. `--mount <path>[:ro]` or `wall.mounts` shows it another one, at the same path as on your machine, such as a
+  variables its agent keeps, read-only; no other directory. A walled Codex run also sees
+  its Codex home: see [Codex behind a wall](#codex-behind-a-wall). `--mount <path>[:ro]` or `wall.mounts` shows it another one, at the same path as on your machine, such as a
   sibling checkout the session reads. A socket is never mounted. A read-write mount stops
   a run that works in a copy: see [A run that may write works in a
   copy](#a-run-that-may-write-works-in-a-copy). A read-write mount that
@@ -3763,8 +3764,11 @@ of the harness's modules and qory's module cache fails the run with ``Remove the
 `<path>` from the harness: it leads to `<target>`, outside the harness's modules, and a
 Codex run copies only files inside them.``
 
-qory removes both folders when the run ends, also when the copy stays. A run with no copy
-whose folder `<user cache>/qory/runs/<run id>` exists stops before the agent starts with
+qory removes both folders when the run ends, also when the copy stays. If qory is killed
+or crashes, `<user cache>/qory/runs/<run id>` stays, with Codex's session transcript in
+`codex-home/sessions`. Remove that folder yourself: qory does not remove it later. A run
+with no copy whose folder `<user cache>/qory/runs/<run id>` exists stops before the agent
+starts with
 ``remove <folder>, or start the run again with another id: a walled Codex run writes its
 Codex home in a new folder, and that folder exists``.
 
