@@ -39,8 +39,11 @@ type Bound struct {
 // sets each variable of .env that is not named CODEX_*, starts the program an
 // environments.toml lists, and reads the instructions, rules, skills and agents of its
 // home; bound read-only, none of them is one the agent changes for a later Codex process.
+// Codex reads AGENTS.override.md ahead of AGENTS.md in its home and passes over one that
+// is empty or only white space (codex-rs/codex-home/src/instructions/mod.rs), so an
+// empty one keeps AGENTS.md the instructions.
 var (
-	boundFiles = []string{"config.toml", "hooks.json", ".env", "environments.toml", "AGENTS.md"}
+	boundFiles = []string{"config.toml", "hooks.json", ".env", "environments.toml", "AGENTS.override.md", "AGENTS.md"}
 	boundDirs  = []string{"rules", "skills", "agents"}
 )
 
@@ -50,8 +53,8 @@ const noHooks = "{\"hooks\": {}}\n"
 // WriteWalledHome writes into files, a new folder on this machine that no mount of the
 // run writes, the parts of a walled run's Codex home that the run binds read-only: the
 // config.toml from dir, the runtime's directory of the composed home, with
-// [WalledConfig]'s additions for projects, a hooks.json with no hook, an empty .env and
-// environments.toml, and dir's AGENTS.md, or an empty one. Each folder of [boundDirs] is
+// [WalledConfig]'s additions for projects, a hooks.json with no hook, an empty .env,
+// environments.toml and AGENTS.override.md, and dir's AGENTS.md, or an empty one. Each folder of [boundDirs] is
 // dir's when the compose wrote it, and an empty folder in files when it did not. It
 // writes no auth.json. It returns the binds, files first, in a fixed order.
 func WriteWalledHome(dir, files string, projects []string) ([]Bound, error) {

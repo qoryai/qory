@@ -165,8 +165,8 @@ func walledState(t *testing.T, config string, projects []string) map[string]stri
 }
 
 // TestWriteWalledHome is the read-only part of a walled run's home: config.toml with the
-// run's trust, a hooks.json with no hook, an empty .env and environments.toml, the
-// compose's AGENTS.md, and the compose's skills beside an empty rules and agents, in a
+// run's trust, a hooks.json with no hook, an empty .env, environments.toml and
+// AGENTS.override.md, which Codex passes over for AGENTS.md, the compose's AGENTS.md, and the compose's skills beside an empty rules and agents, in a
 // fixed order, and no auth.json.
 func TestWriteWalledHome(t *testing.T) {
 	dir, files := t.TempDir(), t.TempDir()
@@ -192,6 +192,7 @@ func TestWriteWalledHome(t *testing.T) {
 		{Path: "hooks.json", Source: filepath.Join(files, "hooks.json")},
 		{Path: ".env", Source: filepath.Join(files, ".env")},
 		{Path: "environments.toml", Source: filepath.Join(files, "environments.toml")},
+		{Path: "AGENTS.override.md", Source: filepath.Join(files, "AGENTS.override.md")},
 		{Path: "AGENTS.md", Source: filepath.Join(files, "AGENTS.md")},
 		{Path: "rules", Source: filepath.Join(files, "rules"), Dir: true},
 		{Path: "skills", Source: filepath.Join(dir, "skills"), Dir: true},
@@ -211,7 +212,7 @@ func TestWriteWalledHome(t *testing.T) {
 	if got := read("hooks.json"); got != "{\"hooks\": {}}\n" {
 		t.Errorf("hooks.json %q", got)
 	}
-	for _, name := range []string{".env", "environments.toml"} {
+	for _, name := range []string{".env", "environments.toml", "AGENTS.override.md"} {
 		if got := read(name); got != "" {
 			t.Errorf("%s %q, want empty", name, got)
 		}
