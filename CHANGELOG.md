@@ -778,6 +778,12 @@ release may change what an existing document does, and states it under Upgrading
   the run's model key.``, and for the others ``Remove `<key>` from the harness's
   `settings/codex/config.toml`: qory sets it for every Codex run.`` A fragment may still
   set `web_search` and the other keys of `hooks`, such as `hooks.Stop`.
+- Compose accepts `settings/codex/read-access.rules`, Codex execpolicy rules for a run
+  whose access is `read`. It merges the file into no target file and places it in no
+  home. A walled read run on Codex writes it to `read-access.rules` in the `rules/`
+  folder of the Codex home; a run with any other access gets none. Several modules'
+  files are joined in module order. Any other file under `settings/` that is neither
+  `.json` nor `.toml` is still refused. See `contracts/harness/v1/README.md`.
 - The home of a walled Codex run disables, by name, every skill that no
   `Skill(harness:<name>)` rule in `permissions.allow` of the harness's
   `settings/claude/settings.json` allows: each skill in the home and in the checkout's

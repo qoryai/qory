@@ -852,6 +852,17 @@ harness reads nothing the report does not list. Settings are runtime-native: `se
 `settings/codex/config.toml`, `settings/gemini/settings.json`, `settings/cursor/hooks.json`,
 and so on, merged per file across modules.
 
+`settings/codex/read-access.rules` is the one file under `settings/` that is not merged
+into a target file. It contains Codex execpolicy rules in Starlark, such as
+`prefix_rule(pattern=["rm"], decision="forbidden")`, for a run whose access is `read`.
+The compose places it in no home. A walled read run on Codex writes it read-only to
+`read-access.rules` in the `rules/` folder of the Codex home, and a run with any other
+access gets none. When several modules ship the file, the run gets them joined in module
+order, as fragments of one target file merge. The rules are best effort: a command
+can get past a rule, for example by a path such as `/bin/rm`, and the wall is the limit.
+Any other file under `settings/` that is neither `.json` nor `.toml`, another `.rules`
+name included, fails the compose with `settings fragments are .json or .toml`.
+
 `files/<runtime>/<path>` is for what a runtime reads from its directory beyond the kinds
 above: Claude Code's `.claude/rules/*.md`, Cursor's `.cursor/rules/*.mdc`, Copilot's
 `.github/instructions/*.instructions.md`. Each file is one entry, `<runtime>/<path>`,

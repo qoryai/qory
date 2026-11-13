@@ -18,6 +18,7 @@ import (
 	"github.com/BurntSushi/toml"
 
 	"github.com/qoryai/qory/internal/render"
+	"github.com/qoryai/qory/internal/stack"
 )
 
 // HomeInWall is the folder in the wall where a walled run binds Codex's writable home
@@ -65,7 +66,17 @@ type WalledRun struct {
 	Checkouts []string
 	// Skills are the skills the run may load, from [AllowedSkills].
 	Skills []string
+	// Access is what the run may do on its target, stack.AccessRead or
+	// stack.AccessWrite.
+	Access string
+	// ReadRules are the harness's Codex execpolicy rules for a read run,
+	// compose.Result.CodexReadRules; nil when it has none.
+	ReadRules []byte
 }
+
+// ReadRulesName is the file in the rules folder of a walled read run's home that
+// contains [WalledRun.ReadRules].
+const ReadRulesName = "read-access.rules"
 
 // WriteWalledHome writes into files, a new, empty folder on this machine apart from the
 // writable home and from every other mount of the run, such as
@@ -74,7 +85,10 @@ type WalledRun struct {
 // composed home, with [WalledConfig]'s additions for run.Projects and with every skill
 // that is not in run.Skills disabled, a hooks.json with no hook,
 // an empty .env, environments.toml and AGENTS.override.md, dir's AGENTS.md, or an empty
-// one, and a copy of each folder of [boundDirs] that dir has, or an empty folder. A mount
+// one, and a copy of each folder of [boundDirs] that dir has, or an empty folder. For a
+// run whose access is read, rules/ also contains run.ReadRules as [ReadRulesName], in
+// place of any file of that name in dir's rules; for any other access, rules/ is the
+// copy alone. A mount
 // with a target may share no path on this machine with another mount, so nothing is
 // bound from dir itself, which the run mounts as the harness home. It writes no
 // auth.json. It returns the binds, files first, in a fixed order.
@@ -96,6 +110,17 @@ func WriteWalledHome(dir, files string, run WalledRun) ([]Bound, error) {
 			}
 		}
 		dirs = append(dirs, Bound{Path: name, Source: dst, Target: path.Join(HomeInWall, name), Dir: true})
+	}
+	if run.Access == stack.AccessRead && len(run.ReadRules) > 0 {
+		p := filepath.Join(files, "rules", ReadRulesName)
+		// The copy may have a link of this name to the composed home; writing through
+		// it would change the home.
+		if err := os.Remove(p); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return nil, err
+		}
+		if err := os.WriteFile(p, run.ReadRules, 0o644); err != nil {
+			return nil, err
+		}
 	}
 	roots := []string{filepath.Join(files, "skills")}
 	for _, c := range run.Checkouts {

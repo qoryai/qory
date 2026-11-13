@@ -4,12 +4,14 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/BurntSushi/toml"
 
 	"github.com/qoryai/qory/internal/render"
 	"github.com/qoryai/qory/internal/render/codex"
+	"github.com/qoryai/qory/internal/stack"
 )
 
 // TestWalledCodexDisablesSkillsTheHarnessDoesNotAllow composes a harness whose Claude
@@ -77,5 +79,58 @@ func TestWalledCodexDisablesSkillsTheHarnessDoesNotAllow(t *testing.T) {
 	}
 	if config.Skills.Bundled.Enabled || config.Cloud.Skills.Enabled {
 		t.Error("the skills Codex ships or a cloud's skills are on")
+	}
+}
+
+// TestWalledCodexReadRulesOnlyInAReadRun composes a module that ships
+// settings/codex/read-access.rules: Build places it nowhere in the home and merges it into
+// no config.toml. A walled read run's rules folder contains it, and a write run's does
+// not.
+func TestWalledCodexReadRulesOnlyInAReadRun(t *testing.T) {
+	const rules = "prefix_rule(pattern=[\"rm\"], decision=\"forbidden\", justification=\"read run: rm deletes or moves files\")\n"
+	files := withFile("modules/core/settings/codex/read-access.rules", rules)
+	res, home := composeEnv(t, files, nil, "codex")
+	if err := render.Build(res, home, lookup(t, "codex")); err != nil {
+		t.Fatal(err)
+	}
+	if string(res.CodexReadRules) != rules {
+		t.Fatalf("read rules %q, want %q", res.CodexReadRules, rules)
+	}
+	err := filepath.WalkDir(home, func(p string, d os.DirEntry, err error) error {
+		if err == nil && d.Name() == codex.ReadRulesName {
+			t.Errorf("the home has %s", p)
+		}
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if config := read(t, filepath.Join(home, "codex", "config.toml")); strings.Contains(config, "prefix_rule") {
+		t.Errorf("config.toml contains the rules:\n%s", config)
+	}
+	for _, c := range []struct {
+		access string
+		want   bool
+	}{{stack.AccessRead, true}, {stack.AccessWrite, false}} {
+		t.Run(c.access, func(t *testing.T) {
+			fixed := t.TempDir()
+			run := codex.WalledRun{Projects: []string{"/workspace"}, Access: c.access, ReadRules: res.CodexReadRules}
+			if _, err := codex.WriteWalledHome(filepath.Join(home, "codex"), fixed, run); err != nil {
+				t.Fatal(err)
+			}
+			entries, err := os.ReadDir(filepath.Join(fixed, "rules"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !c.want {
+				if len(entries) > 0 {
+					t.Errorf("a %s run's rules folder has %v", c.access, entries)
+				}
+				return
+			}
+			if got := read(t, filepath.Join(fixed, "rules", codex.ReadRulesName)); got != rules {
+				t.Errorf("%s %q, want %q", codex.ReadRulesName, got, rules)
+			}
+		})
 	}
 }
