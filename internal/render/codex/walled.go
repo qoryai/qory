@@ -264,8 +264,9 @@ func checkoutSkillPaths(checkout string, projects []string) []string {
 // counts as the folder, and a .git link to anything else, or one that leads nowhere,
 // gives no root. Codex looks up the trust of the working
 // folder, then of that root (codex-rs/config/src/config_toml.rs, get_active_project);
-// with neither, it trusts the root for the process. Each root is put under each project
-// by its path relative to checkout, so a root above checkout is above the project too.
+// with neither, it trusts the root for the process, or the working folder when it finds
+// no root (app-server thread_processor.rs). Each root is put under each project by its
+// path relative to checkout, so a root above checkout is above the project too.
 func gitRootsInWall(checkout string, projects []string) []string {
 	var roots []string
 	for dir := checkout; ; {
