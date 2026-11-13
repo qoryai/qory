@@ -149,7 +149,7 @@ func TestAgentEnvRefusesAnAgentHomeTheSetupMade(t *testing.T) {
 				t.Fatal(err)
 			}
 			stdout, stderr, err := agentEnv(t)
-			want := "qory run agent-env: remove " + preparation.AgentHome + " from the image and from the setup commands: qory makes the agent's home only where nothing is, so a run given a run key does not start\n"
+			want := "qory run agent-env: remove " + preparation.AgentHome + " from the image and from the setup commands: qory makes the agent's home only where nothing is, so the run does not start\n"
 			if stderr != want || stdout != "" {
 				t.Errorf("printed %q and %q, want %q", stdout, stderr, want)
 			}

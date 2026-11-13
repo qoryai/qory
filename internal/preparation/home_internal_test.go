@@ -95,7 +95,7 @@ func TestFreshHomeRefusesWhatIsThere(t *testing.T) {
 				t.Fatal(err)
 			}
 			err = freshHome(path)
-			if want := "remove " + path + " from the image and from the setup commands: qory makes the agent's home only where nothing is, so a run given a run key does not start"; err == nil || err.Error() != want {
+			if want := "remove " + path + " from the image and from the setup commands: qory makes the agent's home only where nothing is, so the run does not start"; err == nil || err.Error() != want {
 				t.Errorf("%v, want %q", err, want)
 			}
 			after, err := os.Lstat(path)
@@ -213,7 +213,7 @@ func TestAgentHomeRefusesManagedSettings(t *testing.T) {
 			t.Cleanup(func() { managedSettings = before })
 			home := filepath.Join(dir, "qory-agent-home")
 			err := agentHome(home)
-			if want := "use an image without " + managed + ": Claude Code reads managed settings there above every other source, so a run given a run key does not start"; err == nil || err.Error() != want {
+			if want := "use an image without " + managed + ": Claude Code reads managed settings there above every other source, so the run does not start"; err == nil || err.Error() != want {
 				t.Errorf("%v, want %q", err, want)
 			}
 			if _, err := os.Lstat(home); !os.IsNotExist(err) {
@@ -257,7 +257,7 @@ func TestFreshHomeRefusesAFolderPutThereAfterMkdir(t *testing.T) {
 		}
 	}
 	err := freshHome(path)
-	if want := "leave no program of the image or the setup commands running that writes into " + path + ": the agent's home held something once qory made it, so a run given a run key does not start"; err == nil || err.Error() != want {
+	if want := "leave no program of the image or the setup commands running that writes into " + path + ": the agent's home held something once qory made it, so the run does not start"; err == nil || err.Error() != want {
 		t.Errorf("%v, want %q", err, want)
 	}
 	fi, err := os.Stat(path)
