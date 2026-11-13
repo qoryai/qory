@@ -104,3 +104,27 @@ func TestSkillNamesStopAtCodexsDepth(t *testing.T) {
 		t.Errorf("skill names %v, want %v", got, want)
 	}
 }
+
+// TestSkillNamesOfARenamingLink is a skill with no frontmatter name in a folder that a
+// link of another name leads to: Codex names it after the real folder, so the names
+// contain both folders' names.
+func TestSkillNamesOfARenamingLink(t *testing.T) {
+	checkout := t.TempDir()
+	root := filepath.Join(checkout, ".agents/skills")
+	p := filepath.Join(checkout, "tools/real-name/SKILL.md")
+	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(p, []byte("---\ndescription: no name\n---\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Dir(p), filepath.Join(root, "link-name")); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := skillNames(root, checkout), []string{"link-name", "real-name"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("skill names %v, want %v", got, want)
+	}
+}

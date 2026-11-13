@@ -128,24 +128,35 @@ func within(path, dir string) bool {
 
 // skillNames are the names under which Codex may load each skill of [findSkills] below
 // root and bound, sorted, with no name twice. Codex names a skill by the name of its
-// frontmatter, or by its folder when the frontmatter has none, and puts the name of the
-// nearest plugin above it before that name. The names here are a superset: for each
-// skill, both the frontmatter's name and the folder's, each alone and after the name of
-// every plugin above the skill, in the folder qory reads and where its links lead.
+// frontmatter, or by its real folder, with every link resolved, when the frontmatter has
+// none, and puts the name of the nearest plugin above it before that name. The names
+// here are a superset: for each skill, the frontmatter's name, the name of the folder
+// qory reached and the name of the real folder, each alone and after the name of every
+// plugin above the skill, between it and root and between its real folder and bound, or
+// the file system's root when bound is "".
 func skillNames(root, bound string) []string {
+	stop := string(filepath.Separator)
+	if bound != "" {
+		if r, err := filepath.EvalSymlinks(bound); err == nil {
+			stop = r
+		}
+	}
 	var names []string
 	for _, f := range findSkills(root, bound) {
-		names = append(names, namesOf(root, f.path)...)
+		names = append(names, namesOf(root, f, stop)...)
 	}
 	slices.Sort(names)
 	return slices.Compact(names)
 }
 
-// namesOf are the names of the skill whose SKILL.md is at file, below root: see
-// [skillNames].
-func namesOf(root, file string) []string {
-	base := []string{filepath.Base(filepath.Dir(file))}
-	if n := frontName(file); n != "" {
+// namesOf are the names of the skill f below root: see [skillNames]. The plugins above
+// f's real folder are looked for up to stop.
+func namesOf(root string, f skillFile, stop string) []string {
+	// Codex names a skill without a frontmatter name after its real folder
+	// (codex-rs/ext/skills/src/loader/host.rs, default_skill_name), which differs from
+	// the folder qory reached when a link with another name leads there.
+	base := []string{filepath.Base(filepath.Dir(f.path)), filepath.Base(filepath.Dir(f.real))}
+	if n := frontName(f.real); n != "" {
 		base = append(base, n)
 	}
 	var plugins []string
@@ -161,10 +172,8 @@ func namesOf(root, file string) []string {
 			dir = parent
 		}
 	}
-	addPlugins(filepath.Dir(file), root)
-	if real, err := filepath.EvalSymlinks(filepath.Dir(file)); err == nil {
-		addPlugins(real, string(filepath.Separator))
-	}
+	addPlugins(filepath.Dir(f.path), root)
+	addPlugins(filepath.Dir(f.real), stop)
 	out := slices.Clone(base)
 	for _, p := range plugins {
 		for _, b := range base {
