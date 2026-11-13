@@ -323,6 +323,10 @@ release may change what an existing document does, and states it under Upgrading
   `ANTHROPIC_*`, `CLAUDE_*` and `NODE_OPTIONS`, and the run stops when the image has
   `/etc/claude-code`. An unwalled run is unchanged. See Claude Code behind a wall in
   `docs/run.md`.
+- On a walled run of Claude Code whose `ANTHROPIC_API_KEY` is the gateway's placeholder,
+  qory writes `.claude.json` with the approval of that placeholder into the empty
+  configuration folder, so an interactive Claude Code starts without asking you to
+  approve the key.
 - A walled run starts `codex exec` with `--sandbox danger-full-access` after `exec`,
   unless an argument before `--` sets a sandbox mode, bypasses one, or is
   `--approve-for-me` or `--not-so-yolo`, which Codex refuses beside `--sandbox`. Inside

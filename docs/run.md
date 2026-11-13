@@ -3697,6 +3697,11 @@ anything is at that path then. A `CLAUDE_CONFIG_DIR` in `harness.launch.claude.e
 not apply behind a wall: qory sets `/tmp/qory-agent-home` in its place. Without a wall, the
 value in `harness.launch.claude.env` applies as before.
 
+When `ANTHROPIC_API_KEY` is the gateway's placeholder, qory then writes
+`/tmp/qory-agent-home/.claude.json` with Claude Code's approval of that placeholder and
+nothing else, mode 0600, so an interactive Claude Code starts without asking you to approve
+the key. With any other key, or none, qory writes no file there.
+
 When Forager binds the run's transcript folder at `~/.claude/projects` in the container,
 qory then makes `/tmp/qory-agent-home/projects` a symbolic link to it: Claude Code writes
 its transcripts into that folder of the run directory, Forager sends them to the control

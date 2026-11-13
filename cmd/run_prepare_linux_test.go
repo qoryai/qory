@@ -9,7 +9,10 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
+
+	"github.com/qoryai/forager/session/runtimes"
 
 	"github.com/qoryai/qory/internal/preparation"
 )
@@ -155,6 +158,44 @@ func TestAgentEnvRefusesAnAgentHomeTheSetupMade(t *testing.T) {
 			}
 			if err == nil {
 				t.Error("qory run agent-env exited 0")
+			}
+		})
+	}
+}
+
+// TestAgentEnvApprovesTheStandIn is the agent of a walled run of Claude Code started
+// through qory run agent-env, a person's run and a run given a run key alike, which
+// start the verb with the same words: with Forager's stand-in as the API key, the verb
+// writes .claude.json with the stand-in's approval, mode 0600, into the fresh home
+// before the launch starts and finds it; with a real key or none, it writes nothing.
+func TestAgentEnvApprovesTheStandIn(t *testing.T) {
+	for name, c := range map[string]struct {
+		env  []string
+		want string
+	}{
+		"a person's run with the stand-in":  {[]string{"ANTHROPIC_API_KEY=" + runtimes.Placeholder}, ".claude.json\n"},
+		"a run key's run with the stand-in": {[]string{"ANTHROPIC_API_KEY=" + runtimes.Placeholder, "QORY_RUN_SYSTEM=github.com"}, ".claude.json\n"},
+		"a run with a real key":             {[]string{"ANTHROPIC_API_KEY=real-key-example"}, ""},
+		"a run with no key":                 {nil, ""},
+	} {
+		t.Run(name, func(t *testing.T) {
+			agentHomeFree(t)
+			stdout, stderr, err := agentEnvLinking(t, nil, c.env...)
+			if err != nil || stdout != c.want || stderr != "" {
+				t.Fatalf("%v, printed %q and %q, want %q", err, stdout, stderr, c.want)
+			}
+			if c.want == "" {
+				return
+			}
+			path := filepath.Join(preparation.AgentHome, ".claude.json")
+			data, err := os.ReadFile(path)
+			key := strings.TrimSpace(runtimes.Placeholder)
+			want := `{"customApiKeyResponses":{"approved":["` + key[len(key)-20:] + `"],"rejected":[]}}`
+			if err != nil || string(data) != want {
+				t.Errorf(".claude.json is %s (%v), want %s", data, err, want)
+			}
+			if fi, err := os.Lstat(path); err != nil || fi.Mode().Perm() != 0o600 {
+				t.Errorf(".claude.json is %v (%v), want mode 0600", fi, err)
 			}
 		})
 	}

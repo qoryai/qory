@@ -192,7 +192,9 @@ func writeKept(file string, always, ca []string) error {
 // the image or the setup commands put there, and makes the store's folder for a run that
 // cannot write its checkout, which is the verb's working folder; with a folder and a
 // place between the file and --, it then links that folder of the home to that place
-// below HOME, [preparation.LinkTranscripts]; it then reads the kept names from the file
+// below HOME, [preparation.LinkTranscripts]; it then writes the approval of Forager's
+// stand-in for the API key into the home, [preparation.ApproveStandIn], when
+// ANTHROPIC_API_KEY is the stand-in; it then reads the kept names from the file
 // its first argument names, removes from its environment every [preparation.Dropped] name the file
 // does not keep, but a prefixed name holding the gateway's placeholder, and executes the
 // launch after -- with its arguments unchanged. It parses no flag. It prints nothing; on
@@ -212,6 +214,9 @@ func newAgentEnv() *cobra.Command {
 			var argv, env []string
 			if err == nil {
 				err = agentEnvLink(args)
+			}
+			if err == nil {
+				err = preparation.ApproveStandIn(os.Getenv)
 			}
 			if err == nil {
 				path, argv, env, err = agentEnvLaunch(args, os.Environ())
