@@ -508,7 +508,7 @@ func TestRunRecordsTheSession(t *testing.T) {
 	if err := json.Unmarshal(settings, &copied); err != nil {
 		t.Fatal(err)
 	}
-	if want := map[string]string{"CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1", "CLAUDE_CODE_DISABLE_OFFICIAL_MARKETPLACE_AUTOINSTALL": "1"}; !maps.Equal(copied.Env, want) {
+	if want := map[string]string{"CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1", "CLAUDE_CODE_DISABLE_OFFICIAL_MARKETPLACE_AUTOINSTALL": "1", "CLAUDE_CODE_MAX_RETRIES": "15"}; !maps.Equal(copied.Env, want) {
 		t.Errorf("the settings copy's env is %v, want %v", copied.Env, want)
 	}
 	if !strings.Contains(string(settings), "\"timeout\"") {

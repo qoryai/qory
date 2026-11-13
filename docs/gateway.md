@@ -190,6 +190,9 @@ qory gateway: stopping
 ✓ the gateway stopped
 ```
 
+Stopping keeps the gateway's runs: a gateway started again on the same directory within
+120 seconds continues them.
+
 It refuses to start, before it listens:
 
 - `~/.config/qory/forager.yaml has no gateway section, so there is no gateway to run`

@@ -28,6 +28,8 @@ that reach Qory Apiary only through it, the gateway passes on their enrolment,
 registrations and outcomes unchanged.
 
 SIGINT or SIGTERM stops it: it takes no new run, sends what it holds, and exits 0.
+Stopping keeps the gateway's runs: a gateway started again on the same directory within
+120 seconds continues them.
 
 More: https://github.com/qoryai/qory/blob/main/docs/gateway.md
 
