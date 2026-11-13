@@ -335,9 +335,9 @@ const textOutsideLink = "Remove the link `%s` from the harness: it leads to `%s`
 // target, with every link resolved, lies inside one of roots, the composed home and the
 // module folders: a link to a folder is copied as a folder, and a link to a file as a
 // regular file. A link with any other target fails the copy rather than leaving a file
-// out, which would change a skill without a word. Each file keeps its executable bits, is at most
-// [maxCopiedFile] bytes, and is written new, see [writeNew]. Any other kind of file, and
-// a folder that contains itself through a link, is an error.
+// out, which would change a skill without a word. Each file keeps its executable bits,
+// is at most [maxCopiedFile] bytes, and is written new, see [writeNew]. Any other kind
+// of file, and a folder that contains itself through a link, is an error.
 func copyTree(src, dst string, roots []string) error {
 	var realRoots []string
 	for _, r := range roots {
