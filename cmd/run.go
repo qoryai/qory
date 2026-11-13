@@ -1613,11 +1613,14 @@ var beforeJoin func()
 // sessionOutcome is the run's outcome qory closes the run with once its one session
 // ended with res, or did not start, err: the time limit's, cancelled with timeout and
 // 124; a stop from where the run was started, cancelled with interrupted and the
-// runtime's exit code; a session that paused at the model key limit, paused with
-// model_key_limit and the runtime's exit code; otherwise succeeded or failed by the
-// session's state, with the runtime's exit code. A session that did not start, or whose
-// run the gateway closed, is failed with -1: Forager closes a run the gateway closed
-// with the gateway's end.
+// runtime's exit code; a session paused after the model provider rejected its key while
+// another key is usable, paused with model_key_switch and the runtime's exit code; any
+// other paused session, at the model key limit, paused with model_key_limit and the
+// runtime's exit code; a session failed after the model provider rejected every key,
+// failed with model_key_unauthorized and the runtime's exit code; otherwise succeeded or
+// failed by the session's state, with the runtime's exit code. A session that did not
+// start, or whose run the gateway closed, is failed with -1: Forager closes a run the
+// gateway closed with the gateway's end.
 func sessionOutcome(res *session.Result, err error) session.Outcome {
 	switch {
 	case err != nil || res == nil || res.RunClosed:
@@ -1626,9 +1629,13 @@ func sessionOutcome(res *session.Result, err error) session.Outcome {
 		return session.Outcome{State: event.StateCancelled, Reason: event.ReasonTimeout, ExitCode: exitTimeout}
 	case res.Cancelled:
 		return session.Outcome{State: event.StateCancelled, Reason: event.ReasonInterrupted, ExitCode: res.ExitCode}
+	case res.State == event.StatePaused && res.Reason == reasonModelKeySwitch:
+		return session.Outcome{State: event.StatePaused, Reason: reasonModelKeySwitch, ExitCode: res.ExitCode}
 	case res.State == event.StatePaused:
-		// Forager pauses a session only at the model key limit, model_key_limit.
+		// Forager pauses a session otherwise only at the model key limit, model_key_limit.
 		return session.Outcome{State: event.StatePaused, Reason: event.ReasonModelKeyLimit, ExitCode: res.ExitCode}
+	case res.State == event.StateFailed && res.Reason == reasonModelKeyUnauthorized:
+		return session.Outcome{State: event.StateFailed, Reason: reasonModelKeyUnauthorized, ExitCode: res.ExitCode}
 	case res.State == event.StateSucceeded:
 		return session.Outcome{State: event.StateSucceeded, ExitCode: res.ExitCode}
 	}

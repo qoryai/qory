@@ -299,6 +299,14 @@ release may change what an existing document does, and states it under Upgrading
   of such a run as `paused: every model key reached its limit`. `qory apiary run list
   --state paused` lists the paused runs. See `docs/run.md`.
 - The `agent` image contains Codex 0.167.2.
+- A run whose model key the model provider rejected, while another model key of the run
+  is usable, ends with `✗ the run was paused: the model provider rejected a model key,
+  and the run continues on another key` after the runtime's line, exit 1. qory closes the
+  run `paused` with the reason `model_key_switch` and the runtime's exit status, and a
+  control plane can continue the run on the other key. A run whose model keys the model
+  provider all rejected ends with `✗ the run failed: the model provider rejected every
+  model key` after the runtime's line, exit 1, and qory closes it `failed` with the reason
+  `model_key_unauthorized` and the runtime's exit status. See `docs/run.md`.
 
 ### Changed
 
