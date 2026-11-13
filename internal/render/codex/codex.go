@@ -28,6 +28,7 @@ package codex
 import (
 	"fmt"
 	"maps"
+	"math"
 	"path"
 	"path/filepath"
 	"slices"
@@ -107,14 +108,14 @@ func (codex) Reserved() []render.Reserved {
 // AGENTS.md end with the names the session registers, see [render.Addressing]: a Codex
 // home registers them as the modules wrote them, and the file states that. Codex reads a
 // project .codex only in a project the user has marked trusted. A fragment that sets a
-// key of [reservedKeys], or a hook with a negative timeout, see [checkHookTimeouts], is
+// key of [reservedKeys], or a hook number Codex cannot read, see [checkHookNumbers], is
 // refused before anything is written.
 func (codex) Render(res *compose.Result, dir, home string) error {
 	if err := checkReserved(res.SettingsFor(Runtime, "config.toml", home)); err != nil {
 		return err
 	}
 	for _, file := range []string{"config.toml", "hooks.json"} {
-		if err := checkHookTimeouts(file, res.SettingsFor(Runtime, file, home)); err != nil {
+		if err := checkHookNumbers(file, res.SettingsFor(Runtime, file, home)); err != nil {
 			return err
 		}
 	}
@@ -244,18 +245,32 @@ func findKey(m map[string]any, pattern []string) ([]string, bool) {
 	return nil, false
 }
 
-// textHookTimeout is the refusal of a hook with a negative timeout, with the hook's event
-// and the settings file it is in.
-const textHookTimeout = "Set `timeout` of the `%s` hook in the harness's `settings/codex/%s` to 1 or more: Codex ignores the whole file when one is negative."
+// textHookNumber is the refusal of a hook number that Codex cannot read, with the key,
+// the hook's event and the settings file it is in.
+const textHookNumber = "Set `%s` of the `%s` hook in the harness's `settings/codex/%s` to a whole number of 1 or more: Codex ignores the whole file otherwise."
 
-// checkHookTimeouts refuses m, the harness's file fragment of config.toml or hooks.json,
-// when a hook in it has a negative timeout, naming the first event in sorted order. Codex
-// 0.167.2 reads a hook's timeout as an unsigned number
-// (codex-rs/protocol/src/hooks.rs, HookHandlerConfig): a negative one makes config.toml
-// invalid, and Codex then starts with its defaults and none of the file, or makes Codex
-// drop every hook of hooks.json (codex-rs/hooks/src/engine/discovery.rs,
-// load_hooks_json). Codex reads a timeout of 0 as 1 second, so 0 passes.
-func checkHookTimeouts(file string, m map[string]any) error {
+// hookNumbers are the keys of a hook that Codex 0.167.2 reads as an unsigned whole
+// number, by the hook's type, with the least value qory accepts for each
+// (codex-rs/protocol/src/hooks.rs, HookHandlerConfig). A timeout of 0 means 1 second to
+// Codex and is refused; an additionalContextLimit of 0 turns off the spilling of the
+// hook's context to a file, so 0 passes. Codex ignores these keys on a hook of any other
+// type.
+var hookNumbers = map[string][]struct {
+	key   string
+	least float64
+}{
+	"command":  {{"timeout", 1}, {"additionalContextLimit", 0}},
+	"mcp_tool": {{"timeout", 1}},
+}
+
+// checkHookNumbers refuses m, the harness's fragment of config.toml or hooks.json, when
+// a hook in it has a number of [hookNumbers] that is fractional or below its least
+// value, naming the first event in sorted order. Codex 0.167.2 then reads none of
+// config.toml and starts with its defaults, or drops every hook of hooks.json
+// (codex-rs/hooks/src/engine/discovery.rs, load_hooks_json). Codex refuses a float such
+// as 2.0 as well: config.toml decodes it as a float, which is refused, but every JSON
+// number is a float to the decoder, so 2.0 in hooks.json passes.
+func checkHookNumbers(file string, m map[string]any) error {
 	events, _ := m["hooks"].(map[string]any)
 	for _, event := range slices.Sorted(maps.Keys(events)) {
 		groups, _ := events[event].([]any)
@@ -264,8 +279,12 @@ func checkHookTimeouts(file string, m map[string]any) error {
 			handlers, _ := group["hooks"].([]any)
 			for _, h := range handlers {
 				handler, _ := h.(map[string]any)
-				if negative(handler["timeout"]) {
-					return fmt.Errorf(textHookTimeout, event, file)
+				kind, _ := handler["type"].(string)
+				for _, n := range hookNumbers[kind] {
+					v, ok := handler[n.key]
+					if _, float := v.(float64); ok && (!wholeAtLeast(v, n.least) || float && file == "config.toml") {
+						return fmt.Errorf(textHookNumber, n.key, event, file)
+					}
 				}
 			}
 		}
@@ -273,17 +292,19 @@ func checkHookTimeouts(file string, m map[string]any) error {
 	return nil
 }
 
-// negative reports whether v, a decoded settings value, is a number below 0.
-func negative(v any) bool {
+// wholeAtLeast reports whether v, a decoded settings value, is a whole number of least
+// or more. A value that is no number passes: Codex refuses it too, and the refusal of a
+// number would name the wrong fault.
+func wholeAtLeast(v any, least float64) bool {
 	switch n := v.(type) {
 	case int64:
-		return n < 0
+		return float64(n) >= least
 	case int:
-		return n < 0
+		return float64(n) >= least
 	case float64:
-		return n < 0
+		return n == math.Trunc(n) && n >= least
 	}
-	return false
+	return true
 }
 
 // setKey is where a codex fragment sets variables, which Codex sets in every command it

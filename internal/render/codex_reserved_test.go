@@ -62,19 +62,27 @@ func TestCodexRefusesReservedKeys(t *testing.T) {
 	has(t, "codex config.toml", config, "other = true", `command = "/bin/true"`)
 }
 
-// TestCodexRefusesANegativeHookTimeout is a Codex config.toml or hooks.json fragment with
-// a hook whose timeout is negative: the compose's build fails with the line that names
-// the event and the file, and writes no config.toml. A timeout of 0, which Codex reads as
-// 1 second, stays allowed.
-func TestCodexRefusesANegativeHookTimeout(t *testing.T) {
-	for _, c := range []struct{ file, fragment string }{
-		{"config.toml", "[[hooks.Stop]]\n[[hooks.Stop.hooks]]\ntype = \"command\"\ncommand = \"/bin/true\"\n\n[[hooks.SessionStart]]\n[[hooks.SessionStart.hooks]]\ntype = \"command\"\ncommand = \"/bin/true\"\ntimeout = 5\n[[hooks.SessionStart.hooks]]\ntype = \"mcp_tool\"\nserver = \"s\"\ntool = \"t\"\ntimeout = -1\n"},
-		{"hooks.json", `{"hooks": {"SessionStart": [{"hooks": [{"type": "command", "command": "/bin/true", "timeout": -1.5}]}]}}`},
+// TestCodexRefusesABadHookNumber is a Codex config.toml or hooks.json fragment with a
+// hook whose timeout or additionalContextLimit Codex cannot read: the compose's build
+// fails with the line that names the key, the event and the file, and writes no
+// config.toml. An additionalContextLimit of 0, a timeout of 1, and a bad number on a
+// hook type that has no such key stay allowed.
+func TestCodexRefusesABadHookNumber(t *testing.T) {
+	const command = "[[hooks.SessionStart]]\n[[hooks.SessionStart.hooks]]\ntype = \"command\"\ncommand = \"/bin/true\"\n"
+	for _, c := range []struct{ name, file, fragment, key string }{
+		{"negative timeout", "config.toml", "[[hooks.Stop]]\n[[hooks.Stop.hooks]]\ntype = \"command\"\ncommand = \"/bin/true\"\n\n" + command + "timeout = 5\n[[hooks.SessionStart.hooks]]\ntype = \"mcp_tool\"\nserver = \"s\"\ntool = \"t\"\ntimeout = -1\n", "timeout"},
+		{"zero timeout", "config.toml", command + "timeout = 0\n", "timeout"},
+		{"fractional timeout", "config.toml", command + "timeout = 1.5\n", "timeout"},
+		{"float timeout", "config.toml", command + "timeout = 2.0\n", "timeout"},
+		{"negative limit", "config.toml", command + "additionalContextLimit = -1\n", "additionalContextLimit"},
+		{"fractional limit", "config.toml", command + "additionalContextLimit = 0.5\n", "additionalContextLimit"},
+		{"json timeout", "hooks.json", `{"hooks": {"SessionStart": [{"hooks": [{"type": "command", "command": "/bin/true", "timeout": -1.5}]}]}}`, "timeout"},
+		{"json limit", "hooks.json", `{"hooks": {"SessionStart": [{"hooks": [{"type": "command", "command": "/bin/true", "additionalContextLimit": 2.5}]}]}}`, "additionalContextLimit"},
 	} {
-		t.Run(c.file, func(t *testing.T) {
+		t.Run(c.name, func(t *testing.T) {
 			res, home := composeEnv(t, withFile("modules/core/settings/codex/"+c.file, c.fragment), nil, "codex")
 			err := render.Build(res, home, lookup(t, "codex"))
-			want := "Set `timeout` of the `SessionStart` hook in the harness's `settings/codex/" + c.file + "` to 1 or more: Codex ignores the whole file when one is negative."
+			want := "Set `" + c.key + "` of the `SessionStart` hook in the harness's `settings/codex/" + c.file + "` to a whole number of 1 or more: Codex ignores the whole file otherwise."
 			if err == nil || err.Error() != want {
 				t.Fatalf("Build: %v, want %q", err, want)
 			}
@@ -83,8 +91,9 @@ func TestCodexRefusesANegativeHookTimeout(t *testing.T) {
 			}
 		})
 	}
-	res, home := composeEnv(t, withFile("modules/core/settings/codex/config.toml", "[[hooks.Stop]]\n[[hooks.Stop.hooks]]\ntype = \"command\"\ncommand = \"/bin/true\"\ntimeout = 0\n"), nil, "codex")
+	allowed := command + "timeout = 1\nadditionalContextLimit = 0\n[[hooks.SessionStart.hooks]]\ntype = \"mcp_tool\"\nserver = \"s\"\ntool = \"t\"\nadditionalContextLimit = -1\n"
+	res, home := composeEnv(t, withFile("modules/core/settings/codex/config.toml", allowed), nil, "codex")
 	if err := render.Build(res, home, lookup(t, "codex")); err != nil {
-		t.Fatalf("Build with a timeout of 0: %v", err)
+		t.Fatalf("Build with a timeout of 1 and a limit of 0: %v", err)
 	}
 }
