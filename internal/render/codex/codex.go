@@ -27,7 +27,10 @@ package codex
 
 import (
 	"fmt"
+	"maps"
+	"path"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/qoryai/qory/internal/compose"
@@ -157,7 +160,9 @@ func (codex) Render(res *compose.Result, dir, home string) error {
 	return nil
 }
 
-// reservedKey is a key path of config.toml that a harness fragment may not set.
+// reservedKey is a key path of config.toml that a harness fragment may not set. Each
+// segment is a pattern of [path.Match], so experimental_realtime_*_base_url covers every
+// key of that form.
 type reservedKey []string
 
 // textReservedKey is the refusal of a fragment that sets a key of [reservedKeys], with
@@ -166,10 +171,15 @@ const textReservedKey = "Remove `%s` from the harness's `settings/codex/config.t
 
 // reservedKeys are the key paths of config.toml that a harness fragment may not set,
 // because Forager's launch of Codex sets them as --config flags, which win over every
-// config.toml, or because qory writes them for a run: the model provider and its
-// settings, project trust, hook trust, features, analytics, OpenTelemetry, the notify
-// program, web search, feedback and the update check. A fragment may set the other keys
-// of hooks, such as hooks.Stop.
+// config.toml, or because qory writes them for a run, or because they send the model's
+// requests, the login or Codex's files elsewhere: the model provider and its settings,
+// project trust, hook trust, features, analytics, OpenTelemetry, the notify program, web
+// search, feedback, the update check, the OpenAI and ChatGPT addresses, the realtime
+// addresses, the metadata of each request, profiles, where the login is kept, the login
+// shell, the files of instructions, compaction prompt and model list, the Node program,
+// and Codex's database and log folders. Each name is one Codex 0.167.2 reads
+// (codex-rs/config/src/config_toml.rs). A fragment may set the other keys of hooks, such
+// as hooks.Stop.
 var reservedKeys = []reservedKey{
 	{"model_provider"},
 	{"model_providers"},
@@ -182,27 +192,50 @@ var reservedKeys = []reservedKey{
 	{"web_search"},
 	{"feedback", "enabled"},
 	{"check_for_update_on_startup"},
+	{"openai_base_url"},
+	{"chatgpt_base_url"},
+	{"experimental_realtime_*_base_url"},
+	{"responses_api_metadata"},
+	{"profile"},
+	{"profiles"},
+	{"cli_auth_credentials_store"},
+	{"allow_login_shell"},
+	{"model_instructions_file"},
+	{"experimental_compact_prompt_file"},
+	{"model_catalog_json"},
+	{"js_repl_node_path"},
+	{"sqlite_home"},
+	{"log_dir"},
 }
 
 // checkReserved refuses m, the harness's config.toml fragment, when it sets a key of
-// [reservedKeys], naming the first in that list's order.
+// [reservedKeys], naming the first in that list's order, and the first key of m in
+// sorted order that a pattern covers.
 func checkReserved(m map[string]any) error {
 	for _, k := range reservedKeys {
-		if hasKey(m, k) {
-			return fmt.Errorf(textReservedKey, strings.Join(k, "."))
+		if key, ok := findKey(m, k); ok {
+			return fmt.Errorf(textReservedKey, strings.Join(key, "."))
 		}
 	}
 	return nil
 }
 
-// hasKey reports whether m has the key path.
-func hasKey(m map[string]any, path []string) bool {
-	v, ok := m[path[0]]
-	if !ok || len(path) == 1 {
-		return ok
+// findKey is the first key path of m, in sorted order, that pattern covers.
+func findKey(m map[string]any, pattern []string) ([]string, bool) {
+	for _, name := range slices.Sorted(maps.Keys(m)) {
+		if ok, _ := path.Match(pattern[0], name); !ok {
+			continue
+		}
+		if len(pattern) == 1 {
+			return []string{name}, true
+		}
+		if sub, ok := m[name].(map[string]any); ok {
+			if rest, ok := findKey(sub, pattern[1:]); ok {
+				return append([]string{name}, rest...), true
+			}
+		}
 	}
-	sub, ok := v.(map[string]any)
-	return ok && hasKey(sub, path[1:])
+	return nil, false
 }
 
 // setKey is where a codex fragment sets variables, which Codex sets in every command it

@@ -788,7 +788,12 @@ release may change what an existing document does, and states it under Upgrading
   configuration's `env`, in `harness.launch.claude.env` and in a module's `env` export.
 - Compose refuses a Codex `settings/codex/config.toml` that sets `model_provider`,
   `model_providers`, `projects`, `hooks.state`, `features`, `analytics`, `otel`,
-  `notify`, `web_search`, `feedback.enabled` or `check_for_update_on_startup`, with
+  `notify`, `web_search`, `feedback.enabled`, `check_for_update_on_startup`,
+  `openai_base_url`, `chatgpt_base_url`, `responses_api_metadata`, a key of the form
+  `experimental_realtime_*_base_url`, `profile`, `profiles`,
+  `cli_auth_credentials_store`, `allow_login_shell`, `model_instructions_file`,
+  `experimental_compact_prompt_file`, `model_catalog_json`, `js_repl_node_path`,
+  `sqlite_home` or `log_dir`, with
   ``Remove `<key>` from the harness's `settings/codex/config.toml`: a Codex run takes
   this key from qory and Forager, not from the harness.`` A fragment may still set the
   other keys of `hooks`, such as `hooks.Stop`.

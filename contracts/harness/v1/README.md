@@ -1205,8 +1205,12 @@ Per runtime, the files written into its directory:
   `ignore_default_excludes = true`. Codex reads `AGENTS.override.md` before `AGENTS.md`,
   and a project `.codex` only in a trusted project. A fragment that sets
   `model_provider`, `model_providers`, `projects`, `hooks.state`, `features`,
-  `analytics`, `otel`, `notify`, `web_search`, `feedback.enabled` or
-  `check_for_update_on_startup` fails the compose with ``Remove `<key>` from the
+  `analytics`, `otel`, `notify`, `web_search`, `feedback.enabled`,
+  `check_for_update_on_startup`, `openai_base_url`, `chatgpt_base_url`,
+  `responses_api_metadata`, a key of the form `experimental_realtime_*_base_url`,
+  `profile`, `profiles`, `cli_auth_credentials_store`, `allow_login_shell`,
+  `model_instructions_file`, `experimental_compact_prompt_file`, `model_catalog_json`,
+  `js_repl_node_path`, `sqlite_home` or `log_dir` fails the compose with ``Remove `<key>` from the
   harness's `settings/codex/config.toml`: a Codex run takes this key from qory and
   Forager, not from the harness.``
 - **gemini**: `settings.json` with `model.name` and `mcpServers`, links for skills and hooks,
