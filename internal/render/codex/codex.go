@@ -21,9 +21,8 @@
 // config.toml, the agents, the skills linked under skills/ and the instructions as
 // AGENTS.md, the global instructions file Codex reads there. [Template] sets the
 // variable. Codex reads its login from auth.json in the same home; qory writes none there
-// and refuses a module that ships one, and Codex reads its model key from
-// OPENAI_API_KEY. The checkout's
-// .codex never links the skills or the instructions.
+// and refuses a module that ships one, and Codex reads its model key from OPENAI_API_KEY.
+// The checkout's .codex never links the skills or the instructions.
 package codex
 
 import (
@@ -101,11 +100,11 @@ func (codex) Reserved() []render.Reserved {
 // mcp_servers, one table per server containing the object as the module wrote it, and any
 // other codex settings fragment without shell_environment_policy.set, whose variables are
 // the launch's, see [EnvAt], then one agents/<name>.toml per agent containing the agent's
-// name, description and its body as developer_instructions. The instructions written as AGENTS.md end with the names the
-// session registers, see [render.Addressing]: a Codex home registers them as the modules
-// wrote them, and the file states that. Codex reads a project .codex only in a project
-// the user has marked trusted. A fragment that sets a key of [reservedKeys] is refused
-// before anything is written.
+// name, description and its body as developer_instructions. The instructions written as
+// AGENTS.md end with the names the session registers, see [render.Addressing]: a Codex
+// home registers them as the modules wrote them, and the file states that. Codex reads a
+// project .codex only in a project the user has marked trusted. A fragment that sets a
+// key of [reservedKeys] is refused before anything is written.
 func (codex) Render(res *compose.Result, dir, home string) error {
 	if err := checkReserved(res.SettingsFor(Runtime, "config.toml", home)); err != nil {
 		return err

@@ -84,22 +84,21 @@ const ReadRulesName = "read-access.rules"
 // <user cache>/qory/runs/<run id>/codex-fixed, every part of a walled run's Codex home
 // that the run binds read-only: the config.toml from dir, the runtime's directory of the
 // composed home, with [WalledConfig]'s additions for run.Projects and with every skill
-// that is not in run.Skills disabled, a hooks.json with no hook,
-// an empty .env, environments.toml and AGENTS.override.md, dir's AGENTS.md, or an empty
-// one, and a copy of each folder of [boundDirs] that dir has, or an empty folder. For a
-// run whose access is read, rules/ also contains run.ReadRules as [ReadRulesName], in
-// place of any file of that name in dir's rules; for any other access, rules/ is the
-// copy alone. A mount
-// with a target may share no path on this machine with another mount, so nothing is
-// bound from dir itself, which the run mounts as the harness home. It writes no
-// auth.json. It returns the binds, files first, in a fixed order.
+// that is not in run.Skills disabled, a hooks.json with no hook, an empty .env,
+// environments.toml and AGENTS.override.md, dir's AGENTS.md, or an empty one, and a copy
+// of each folder of [boundDirs] that dir has, or an empty folder. For a run whose access
+// is read, rules/ also contains run.ReadRules as [ReadRulesName], in place of any file of
+// that name in dir's rules; for any other access, rules/ is the copy alone. A mount with
+// a target may share no path on this machine with another mount, so nothing is bound
+// from dir itself, which the run mounts as the harness home. It writes no auth.json. It
+// returns the binds, files first, in a fixed order.
 //
 // The skills disabled are every name, other than run.Skills, of a skill in the copy of
 // dir's skills and in run.Checkouts, by [skillNames]. When run.Skills contains
-// [AllSkills], every name of a skill in the copy of dir's skills counts as in
-// run.Skills. A skill that is not there when
-// WriteWalledHome runs keeps its name enabled: one the agent writes during the run, and
-// one in ~/.agents/skills or /etc/codex/skills of the image.
+// [AllSkills], every name of a skill in the copy of dir's skills counts as in run.Skills.
+// A skill that is not there when WriteWalledHome runs keeps its name enabled: one the
+// agent writes during the run, and one in ~/.agents/skills or /etc/codex/skills of the
+// image.
 func WriteWalledHome(dir, files string, run WalledRun) ([]Bound, error) {
 	var dirs []Bound
 	for _, name := range boundDirs {
