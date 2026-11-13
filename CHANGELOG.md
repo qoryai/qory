@@ -888,7 +888,9 @@ release may change what an existing document does, and states it under Upgrading
   folder outside <folder>, or run git init in <folder>: a home inside a folder needs a
   git working tree there, and <folder> is not one`.
 - The Codex directory of a home, `codex`, contains the skills as folders and regular
-  files copied from the modules, not as links. A skill edit reaches a Codex run on the
+  files copied from the modules, not as links. Each skill is copied within the limits of
+  a copy of one module entry, leaves out `.git`, and keeps each file's permission bits
+  without write for group and others. A skill edit reaches a Codex run on the
   next compose. Until then `qory harness compose --check` exits 6 and names the changed
   file, such as `codex/skills/review/SKILL.md  changed`.
 - A skill with a link to a folder that contains the link, such as `self -> .` or a link

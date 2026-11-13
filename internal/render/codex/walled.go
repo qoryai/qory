@@ -98,7 +98,8 @@ const ReadRulesName = "read-access.rules"
 // in run.Skills disabled, a hooks.json with no hook, an empty .env, environments.toml and
 // AGENTS.override.md, dir's AGENTS.md, or an empty one, and a copy of each folder of
 // [boundDirs] that dir has, with each link replaced by what it leads to, see [copyTree],
-// or an empty folder. The copy of rules and agents keeps to [walledLimit]. For a run whose access is read, rules/ also contains run.ReadRules
+// or an empty folder. The copy of rules and agents keeps to [walledLimit]. For a run
+// whose access is read, rules/ also contains run.ReadRules
 // as [ReadRulesName], in place of any file of that name in dir's rules; for any other
 // access, rules/ is the copy alone. A mount with a target may share no path on this
 // machine with another mount, so nothing is bound from dir itself, which the run mounts
@@ -353,7 +354,8 @@ var walledLimit = func(name string) *render.CopyLimit {
 	return &limit
 }
 
-// maxCopiedFile is the largest file the copy of a walled home's folders takes: Codex
+// maxCopiedFile is the largest file a copy without a [render.CopyLimit] takes, the
+// skills folder of a walled home: Codex
 // 0.167.2 reads no larger file (codex-rs/exec-server/src/local_file_system_read.rs,
 // MAX_READ_FILE_BYTES).
 const maxCopiedFile = maxSkillSize
