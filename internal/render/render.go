@@ -98,6 +98,9 @@ type Reserved struct {
 	// one entry at a time, such as claude's "rules", where a module ships files below the
 	// path and not a file at it.
 	Exact bool
+	// Refusal, when set, is the whole refusal in place of the one Why ends, with the
+	// module's name for its %s.
+	Refusal string
 }
 
 // FilesKind is the entry kind of a file a module ships as it is, at
@@ -1006,7 +1009,8 @@ func FileFor(e compose.Entry, runtime string) (string, bool) {
 //
 // The refusal states the module and the entry as it sits in the module,
 // files/<runtime>/<path>, and ends with the runtime's [Reserved] clause, or with the
-// runtimes qory renders when the first segment is none of them.
+// runtimes qory renders when the first segment is none of them. A [Reserved] with a
+// Refusal is refused with that text.
 func CheckFiles(res *compose.Result) error {
 	for _, e := range res.Entries {
 		if e.Kind != FilesKind {
@@ -1019,6 +1023,9 @@ func CheckFiles(res *compose.Result) error {
 		}
 		for _, r := range p.Reserved() {
 			if path == r.Path || !r.Exact && strings.HasPrefix(path, r.Path+"/") {
+				if r.Refusal != "" {
+					return fmt.Errorf(r.Refusal, accesskey.ShownName(e.Module, false))
+				}
 				return fmt.Errorf("module %s ships files/%s, and %s", accesskey.ShownName(e.Module, false), accesskey.ShownName(e.Name, false), r.Why)
 			}
 		}

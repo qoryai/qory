@@ -1152,7 +1152,7 @@ segment. The refusal lists the module, the entry and the reason, with status 2:
 | `target.runtime` | qory writes | The program reads as settings | A kind is linked at | Runs without the agent |
 |---|---|---|---|---|
 | `claude` | `rules/qory-harness.md`, `settings.json`, `mcp.json`, `plugin`, `launch`; `rules` as a file, since qory links that directory one file at a time | `settings.local.json` | `skills`, `agents`, `commands`, `hooks`, `output-styles` | |
-| `codex` | `config.toml`, `AGENTS.md` | | `agents`, `skills` | |
+| `codex` | `config.toml`, `AGENTS.md` | `auth.json` | `agents`, `skills` | |
 | `gemini` | `settings.json` | | `skills`, `hooks`, `agents`, `commands` | |
 | `opencode` | `opencode.json` | | `commands`, `hooks`, `agents`, `skills` | |
 | `cursor` | `plugin` | `mcp.json`, `hooks.json`, `cli.json`, `environment.json` | `agents`, `hooks` | |
@@ -1163,6 +1163,10 @@ segment. The refusal lists the module, the entry and the reason, with status 2:
 
 `claude` also reserves `CLAUDE.md` and `AGENTS.md`. qory does not write them under
 `.claude`, and a module ships its instructions as `AGENTS.md` at the module root.
+
+`codex` reserves `auth.json`, Codex's login file: qory gives Codex its model key through
+the gateway, and the refusal is ``Remove `files/codex/auth.json` from module <name>: qory
+gives Codex its model key through the gateway.``
 
 Per runtime, the files written into its directory:
 
@@ -1298,7 +1302,7 @@ reports it with status 2: `goose` and `any`.
 | `claude` | `claude --plugin-dir ${dir}/plugin --settings ${dir}/settings.json --mcp-config ${dir}/mcp.json --append-system-prompt-file ${dir}/launch/AGENTS.md --setting-sources user` | `plugin/`, a plugin in Claude Code's layout: the skills and commands linked, or written where a document contains a reference, the agents copied, since Claude Code passes over a link in a plugin's `agents/` where it follows one everywhere else, the output styles under `output-styles/` with the manifest's `outputStyles` pointing there, `.claude-plugin/plugin.json` setting its name to `harness`, so a skill is `/harness:<name>` and an agent `harness:<name>`, and every reference in the plugin resolves to that name; `launch/AGENTS.md`, the instructions with their references resolved the same way and, after them, the names the session registers, per kind, with each role | everything: the plugin, the permissions, hooks and model in `settings.json`, the environment the line sets, the servers, the instructions appended to the system prompt; `--setting-sources user` keeps every `.claude` of the checkout and of the directories above it out | nothing |
 | `cursor` | `cursor-agent --plugin-dir ${dir}/plugin` | `plugin/`, the same layout under `.cursor-plugin/plugin.json`, with the agents in Cursor's shape, a copy of `hooks.json` as `hooks/hooks.json` and of `mcp.json` as `.mcp.json`, since the CLI takes no settings file | the skills, agents, hooks and servers | the instructions, `AGENTS.md` |
 | `copilot` | `copilot --add-dir ${dir}/workspace --additional-mcp-config @${dir}/mcp.json` | `workspace/.github/skills` linked and `workspace/.github/agents` written, which `--add-dir` loads as trusted configuration, and `mcp.json` with the servers under `mcpServers`, so the MCP kind has a place in copilot | the skills, agents and servers | the hooks and the instructions |
-| `codex` | `env CODEX_HOME=${dir} codex` | `skills/` linked and the instructions as `AGENTS.md`, ending with the names the session registers, which a Codex home registers as the modules wrote them, beside `config.toml` and the agents, so the directory is a Codex home | everything | nothing; Codex keeps its login in the same home, `auth.json`, so a launcher authenticates through `OPENAI_API_KEY` or puts `auth.json` there |
+| `codex` | `env CODEX_HOME=${dir} codex` | `skills/` linked and the instructions as `AGENTS.md`, ending with the names the session registers, which a Codex home registers as the modules wrote them, beside `config.toml` and the agents, so the directory is a Codex home | everything | nothing; Codex reads its model key from `OPENAI_API_KEY`, and a run gives it the key through the gateway. qory writes no `auth.json`, Codex's login file, and a module that ships `files/codex/auth.json` fails the compose with ``Remove `files/codex/auth.json` from module <name>: qory gives Codex its model key through the gateway.`` |
 | `opencode` | `env OPENCODE_CONFIG_DIR=${dir} opencode` | `skills/` linked, beside `opencode.json`, the agents, commands and hooks, since OpenCode reads the directory the way it reads `.opencode` | the model, servers, agents, commands, hooks and skills | the instructions, `AGENTS.md` |
 | `amp` | `amp --settings-file ${dir}/settings.json` | nothing more | the servers and the permissions | the skills and the instructions |
 | `gemini` | `env GEMINI_CLI_SYSTEM_SETTINGS_PATH=${dir}/settings.json gemini` | nothing more; the file is read as the system settings, over the user's and the workspace's | the model, servers and hooks | the skills, agents, commands and instructions |

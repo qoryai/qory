@@ -13,12 +13,14 @@
 //	agents       agents are linked there; ship it as agents/<name>
 //	skills       qory links them there for a launch; ship it as skills/<name>
 //	AGENTS.md    qory writes it for a launch
+//	auth.json    Codex's login file; the model key reaches Codex through the gateway
 //
 // Codex also takes its whole home from CODEX_HOME, and the runtime's directory is one:
 // config.toml, the agents, the skills linked under skills/ and the instructions as
 // AGENTS.md, the global instructions file Codex reads there. [Template] sets the
-// variable. Codex keeps its login in the same home, auth.json, so a launcher on such a
-// home authenticates through OPENAI_API_KEY or puts auth.json there. The checkout's
+// variable. Codex reads its login from auth.json in the same home; qory writes none there
+// and refuses a module that ships one, and Codex reads its model key from
+// OPENAI_API_KEY. The checkout's
 // .codex never links the skills or the instructions.
 package codex
 
@@ -62,13 +64,20 @@ func (codex) Links(res *compose.Result) []render.Link {
 // home only and has no output styles.
 func (codex) Skips() []string { return []string{"commands", "output-styles"} }
 
-// Reserved are config.toml and the agents directory, which Render writes.
+// textAuthFile is the refusal of a module that ships Codex's login file, with the module's
+// name.
+const textAuthFile = "Remove `files/codex/auth.json` from module %s: qory gives Codex its model key through the gateway."
+
+// Reserved are config.toml and the agents directory, which Render writes, the skills and
+// AGENTS.md, which qory places for a launch, and auth.json, Codex's login file, which no
+// home of qory's has.
 func (codex) Reserved() []render.Reserved {
 	return []render.Reserved{
 		{Path: "config.toml", Why: "qory writes it"},
 		{Path: "agents", Why: "agents are linked there; ship it as agents/<name>"},
 		{Path: "skills", Why: "qory links them there for a launch; ship it as skills/<name>"},
 		{Path: "AGENTS.md", Why: "qory writes it for a launch"},
+		{Path: "auth.json", Refusal: textAuthFile},
 	}
 }
 
