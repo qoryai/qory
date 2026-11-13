@@ -10,7 +10,7 @@ import (
 
 // runsBare are the runtimes qory starts that are not in Forager's runtimes.json: Forager
 // runs each as a bare runtime until its descriptor is added there.
-var runsBare = []string{"codex", "gemini", "opencode", "amp", "cursor", "copilot"}
+var runsBare = []string{"gemini", "opencode", "amp", "cursor", "copilot"}
 
 // listsDiffer are the lines on which listed, the runtimes of Forager's runtimes.json,
 // starts, the runtimes qory renders with a launch template, and bare, [runsBare],

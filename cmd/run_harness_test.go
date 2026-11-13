@@ -78,7 +78,7 @@ func TestRunTakesAModuleExportAsADefault(t *testing.T) {
 	lacks(t, string(data), "DOCKER_HOST=", "/not-the-template", "LOG_DIR="+home)
 	_, evs := events(t, root)
 	got, _ := json.Marshal(sessionApplied(t, evs)["variables"])
-	if want := `[{"from":"fixed","lost":[{"from":"run","why":"fixed"}],"name":"CODEX_HOME"},{"from":"run","lost":[{"from":"harness","why":"overridden"}],"name":"CORE_SCRIPTS"},{"lost":[{"from":"harness","why":"denied"}],"name":"DOCKER_HOST"},{"from":"apiary","lost":[{"from":"harness","why":"overridden"}],"name":"LOG_DIR"}]`; string(got) != want {
+	if want := `[{"from":"fixed","lost":[{"from":"run","why":"denied"}],"name":"CODEX_HOME"},{"from":"run","lost":[{"from":"harness","why":"overridden"}],"name":"CORE_SCRIPTS"},{"lost":[{"from":"harness","why":"denied"}],"name":"DOCKER_HOST"},{"from":"apiary","lost":[{"from":"harness","why":"overridden"}],"name":"LOG_DIR"}]`; string(got) != want {
 		t.Errorf("run.policy_applied variables %s, want %s", got, want)
 	}
 }
@@ -112,7 +112,7 @@ func TestRunComposesOverTheReportsMarks(t *testing.T) {
 	if err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
-	wants(t, out, "TOOL_PRELOAD=*** CODEX_HOME="+home+"/codex\n", "qory run: CODEX_HOME from --env is not used: the harness sets it\n")
+	wants(t, out, "TOOL_PRELOAD=*** CODEX_HOME="+home+"/codex\n", "qory run: CODEX_HOME from --env is not used: no source may set it\n")
 	lacks(t, out, "TOOL_PRELOAD from --env", "/forged")
 	again, err := report.Read(path)
 	if err != nil {
@@ -300,7 +300,7 @@ func TestAWalledCodexRunRefusesAReservedConfigArgument(t *testing.T) {
 	if cmd.ExitCode(err) != 3 {
 		t.Fatalf("a run without a wall: %v (exit %d)\n%s", err, cmd.ExitCode(err), out)
 	}
-	wants(t, out, " with -c model_provider=x\n")
+	wants(t, out, " -c model_provider=x\n")
 	if err := os.RemoveAll(runsDir(t, root)); err != nil {
 		t.Fatal(err)
 	}
