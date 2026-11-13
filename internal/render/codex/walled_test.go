@@ -119,7 +119,10 @@ func TestWalledConfigIsGolden(t *testing.T) {
 
 // TestWalledConfigHashesAsTrustHook is a hook in each place of the key: the hash is the
 // one trust-hook.py computes for the same command, whatever the group, the handler, the
-// matcher of an event that takes none, or an async false written out.
+// matcher of an event that takes none, or an async false written out. The hash of
+// /bin/false comes from the same JSON in Python, with no matcher, since Stop takes none:
+//
+//	json.dumps(identity, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
 func TestWalledConfigHashesAsTrustHook(t *testing.T) {
 	config := `[[hooks.Stop]]
 matcher = "ignored"
@@ -139,18 +142,15 @@ async = false
 `
 	state := walledState(t, config, nil)
 	want := map[string]string{
-		"/tmp/qory-codex-home/config.toml:stop:0:0": "",
+		"/tmp/qory-codex-home/config.toml:stop:0:0": "sha256:5cde819ee8866303693164854d02d8bfc2d76a0b837bb47a63777a72243e20db",
 		"/tmp/qory-codex-home/config.toml:stop:1:1": endCheckHash,
 	}
 	if len(state) != len(want) {
 		t.Fatalf("hooks.state %v, want the keys of %v", state, want)
 	}
 	for key, hash := range want {
-		if _, ok := state[key]; !ok {
-			t.Errorf("hooks.state has no %s: %v", key, state)
-		}
-		if hash != "" && state[key] != hash {
-			t.Errorf("%s: %s, want %s", key, state[key], hash)
+		if got, ok := state[key]; !ok || got != hash {
+			t.Errorf("%s: %q, want %s", key, got, hash)
 		}
 	}
 	if _, ok := state["/tmp/qory-codex-home/config.toml:stop:1:0"]; ok {
