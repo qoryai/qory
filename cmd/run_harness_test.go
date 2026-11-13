@@ -65,7 +65,7 @@ func TestRunTakesAModuleExportAsADefault(t *testing.T) {
 	if cmd.ExitCode(err) != 4 {
 		t.Fatalf("run returned %v (exit %d)\n%s", err, cmd.ExitCode(err), out)
 	}
-	wants(t, out, "qory run: CODEX_HOME from --env is not used: the harness sets it\n")
+	wants(t, out, "qory run: CODEX_HOME from --env is not used: no source may set it\n")
 	lacks(t, out, "CORE_SCRIPTS from --env")
 	data, err := os.ReadFile(log)
 	if err != nil {
