@@ -459,8 +459,9 @@ func TestWriteWalledHomeReadsNoPlantedLogin(t *testing.T) {
 }
 
 // TestWriteWalledHomeWritesThroughNoLink is a files folder that exists, with a link at
-// hooks.json to a file elsewhere: WriteWalledHome fails, and the file the link leads to
-// is unchanged.
+// hooks.json to a file elsewhere: WriteWalledHome fails when it makes the folder, before
+// it writes any file, and the file the link leads to is unchanged. writeNew and copyFile
+// refuse a link at the path they write, see their tests in walled_internal_test.go.
 func TestWriteWalledHomeWritesThroughNoLink(t *testing.T) {
 	dir, files, outside := t.TempDir(), t.TempDir(), filepath.Join(t.TempDir(), "target")
 	if err := os.WriteFile(outside, []byte("theirs\n"), 0o644); err != nil {
