@@ -106,3 +106,87 @@ func TestCopyTreeShowsNoAbsolutePath(t *testing.T) {
 		t.Errorf("copyTree: %v, want the prefix and no path of this machine", err)
 	}
 }
+
+// TestWalledLimitIsAModuleEntrysLimit is the limit of the walled copy of rules: the
+// numbers of a copy of one entry of a module, 10,000 entries, 1 GiB and 64 MiB a file,
+// with the walled refusals.
+func TestWalledLimitIsAModuleEntrysLimit(t *testing.T) {
+	l := walledLimit("rules")
+	if l.Entries != 10_000 || l.Bytes != 1<<30 || l.FileBytes != 64<<20 {
+		t.Errorf("limit %d entries, %d bytes, %d a file; want 10000, 1 GiB, 64 MiB", l.Entries, l.Bytes, l.FileBytes)
+	}
+	for _, c := range []struct {
+		err  error
+		want string
+	}{
+		{l.TooMany, "Ship fewer files in the modules. codex/rules contains more than 10,000 files, directories and links, the most a walled Codex run takes."},
+		{l.TooManyBytes, "Ship fewer files in the modules. The files of codex/rules add up to more than 1 GiB, the most a walled Codex run takes."},
+		{l.TooLarge("rules/big.rules"), "Ship codex/rules/big.rules under 64 MiB. The file is larger than 64 MiB, the most a walled Codex run takes for one file."},
+	} {
+		if c.err == nil || c.err.Error() != c.want {
+			t.Errorf("refusal %v, want %q", c.err, c.want)
+		}
+	}
+}
+
+// TestWriteWalledHomeKeepsRulesAndAgentsToTheLimit writes a walled home from a composed
+// home whose skills, rules and agents each have three files of 4 bytes and a .git folder.
+// With the limit of one folder lowered to two entries, to 10 bytes, or to 3 bytes a file,
+// the write fails with the walled refusal for that folder and that limit. With every
+// limit as it is, the write succeeds, and .git is left out of every copy. The skills
+// folder gets no such limit.
+func TestWriteWalledHomeKeepsRulesAndAgentsToTheLimit(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "home", "codex")
+	for _, folder := range []string{"skills/review", "rules", "agents"} {
+		for _, name := range []string{"a", "b", "c", ".git/HEAD"} {
+			p := filepath.Join(dir, folder, name)
+			if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(p, []byte("text"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	real := walledLimit
+	t.Cleanup(func() { walledLimit = real })
+	for _, c := range []struct {
+		name, lowered string
+		entries       int
+		bytes, file   int64
+		want          string
+	}{
+		{"rules entries", "rules", 2, 100, 100, "Ship fewer files in the modules. codex/rules contains more than 10,000 files, directories and links, the most a walled Codex run takes."},
+		{"agents entries", "agents", 2, 100, 100, "Ship fewer files in the modules. codex/agents contains more than 10,000 files, directories and links, the most a walled Codex run takes."},
+		{"agents bytes", "agents", 10, 10, 100, "Ship fewer files in the modules. The files of codex/agents add up to more than 1 GiB, the most a walled Codex run takes."},
+		{"agents file", "agents", 10, 100, 3, "Ship codex/agents/a under 64 MiB. The file is larger than 64 MiB, the most a walled Codex run takes for one file."},
+		{"skills", "skills", 2, 10, 3, ""},
+		{"within", "", 0, 0, 0, ""},
+	} {
+		t.Run(strings.ReplaceAll(c.name, " ", "-"), func(t *testing.T) {
+			walledLimit = func(name string) *render.CopyLimit {
+				l := real(name)
+				if name == c.lowered {
+					l.Entries, l.Bytes, l.FileBytes = c.entries, c.bytes, c.file
+				}
+				return l
+			}
+			files := filepath.Join(t.TempDir(), "fixed")
+			_, err := WriteWalledHome(dir, files, WalledRun{})
+			if c.want != "" {
+				if err == nil || err.Error() != c.want {
+					t.Errorf("WriteWalledHome: %v, want %q", err, c.want)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, folder := range []string{"skills/review", "rules", "agents"} {
+				if _, err := os.Lstat(filepath.Join(files, folder, ".git")); !os.IsNotExist(err) {
+					t.Errorf("%s/.git: %v, want it left out", folder, err)
+				}
+			}
+		})
+	}
+}

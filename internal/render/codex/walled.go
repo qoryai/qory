@@ -98,7 +98,7 @@ const ReadRulesName = "read-access.rules"
 // in run.Skills disabled, a hooks.json with no hook, an empty .env, environments.toml and
 // AGENTS.override.md, dir's AGENTS.md, or an empty one, and a copy of each folder of
 // [boundDirs] that dir has, with each link replaced by what it leads to, see [copyTree],
-// or an empty folder. For a run whose access is read, rules/ also contains run.ReadRules
+// or an empty folder. The copy of rules and agents keeps to [walledLimit]. For a run whose access is read, rules/ also contains run.ReadRules
 // as [ReadRulesName], in place of any file of that name in dir's rules; for any other
 // access, rules/ is the copy alone. A mount with a target may share no path on this
 // machine with another mount, so nothing is bound from dir itself, which the run mounts
@@ -125,7 +125,11 @@ func WriteWalledHome(dir, files string, run WalledRun) ([]Bound, error) {
 			return nil, err
 		}
 		if info, err := os.Lstat(filepath.Join(dir, name)); err == nil && info.IsDir() {
-			if err := copyTree(filepath.Join(dir, name), dst, name, append([]string{filepath.Dir(dir)}, run.LinkRoots...), nil); err != nil {
+			var limit *render.CopyLimit
+			if name != "skills" {
+				limit = walledLimit(name)
+			}
+			if err := copyTree(filepath.Join(dir, name), dst, name, append([]string{filepath.Dir(dir)}, run.LinkRoots...), limit); err != nil {
 				return nil, err
 			}
 		}
@@ -323,6 +327,30 @@ func relTo(dir, file string) string {
 		return ""
 	}
 	return filepath.ToSlash(rel)
+}
+
+// The refusals of the copy of a folder of a walled run's home, see [walledLimit]: past
+// 10,000 entries and past 1 GiB, with the folder, and for a file past 64 MiB, with the
+// file's path, each as a path under the home.
+const (
+	textWalledTooMany      = "Ship fewer files in the modules. codex/%s contains more than 10,000 files, directories and links, the most a walled Codex run takes."
+	textWalledTooManyBytes = "Ship fewer files in the modules. The files of codex/%s add up to more than 1 GiB, the most a walled Codex run takes."
+	textWalledTooLarge     = "Ship codex/%s under 64 MiB. The file is larger than 64 MiB, the most a walled Codex run takes for one file."
+)
+
+// walledLimit is the limit of [WriteWalledHome]'s copy of the folder name of the home,
+// rules or agents: the limits of a copy of one entry of a module, see
+// [render.LimitFor], with the refusals of a walled run. The skills folder needs none:
+// [placeSkills] copied each skill within those limits. A variable so a test can lower
+// the limits.
+var walledLimit = func(name string) *render.CopyLimit {
+	limit := render.LimitFor("")
+	limit.TooMany = fmt.Errorf(textWalledTooMany, exports.HidePath(name))
+	limit.TooManyBytes = fmt.Errorf(textWalledTooManyBytes, exports.HidePath(name))
+	limit.TooLarge = func(path string) error {
+		return fmt.Errorf(textWalledTooLarge, exports.HidePath(path))
+	}
+	return &limit
 }
 
 // maxCopiedFile is the largest file the copy of a walled home's folders takes: Codex

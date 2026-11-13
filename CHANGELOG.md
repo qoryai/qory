@@ -894,6 +894,13 @@ release may change what an existing document does, and states it under Upgrading
 - A skill with a link to a folder that contains the link, such as `self -> .` or a link
   to the module's folder, stops every compose that includes Codex with `copy <path> for
   the Codex home: the folder contains itself through a link`.
+- The copy of `rules` and `agents` into a walled Codex run's home takes at most 10,000
+  files, directories and links, 1 GiB in all and 64 MiB a file, and leaves out `.git`.
+  Past a limit it fails with ``Ship fewer files in the modules. codex/<folder> contains
+  more than 10,000 files, directories and links, the most a walled Codex run takes.``,
+  ``Ship fewer files in the modules. The files of codex/<folder> add up to more than
+  1 GiB, the most a walled Codex run takes.`` or ``Ship codex/<path> under 64 MiB. The
+  file is larger than 64 MiB, the most a walled Codex run takes for one file.``
 
 ### Fixed
 
