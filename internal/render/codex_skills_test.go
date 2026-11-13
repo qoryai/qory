@@ -49,7 +49,7 @@ func TestWalledCodexDisablesSkillsTheHarnessDoesNotAllow(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	fixed := t.TempDir()
+	fixed := filepath.Join(t.TempDir(), "fixed")
 	if _, err := codex.WriteWalledHome(filepath.Join(home, "codex"), fixed, codex.WalledRun{Projects: []string{"/workspace"}, Checkouts: []string{checkout}, Skills: allowed}); err != nil {
 		t.Fatal(err)
 	}
@@ -97,7 +97,7 @@ func TestWalledCodexSkillsUnderAPatternOrNoRule(t *testing.T) {
 			if err := os.WriteFile(p, []byte("---\nname: repo-skill\ndescription: d\n---\n"), 0o644); err != nil {
 				t.Fatal(err)
 			}
-			fixed := t.TempDir()
+			fixed := filepath.Join(t.TempDir(), "fixed")
 			run := codex.WalledRun{Projects: []string{"/workspace"}, Checkouts: []string{checkout}, Skills: allowed}
 			if _, err := codex.WriteWalledHome(filepath.Join(home, "codex"), fixed, run); err != nil {
 				t.Fatal(err)
@@ -170,7 +170,7 @@ func TestWalledCodexReadRulesOnlyInAReadRun(t *testing.T) {
 		want   bool
 	}{{stack.AccessRead, true}, {stack.AccessWrite, false}} {
 		t.Run(c.access, func(t *testing.T) {
-			fixed := t.TempDir()
+			fixed := filepath.Join(t.TempDir(), "fixed")
 			run := codex.WalledRun{Projects: []string{"/workspace"}, Access: c.access, ReadRules: res.CodexReadRules}
 			if _, err := codex.WriteWalledHome(filepath.Join(home, "codex"), fixed, run); err != nil {
 				t.Fatal(err)

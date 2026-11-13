@@ -14,6 +14,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"syscall"
 
 	"github.com/BurntSushi/toml"
 
@@ -79,9 +80,9 @@ type WalledRun struct {
 // contains [WalledRun.ReadRules].
 const ReadRulesName = "read-access.rules"
 
-// WriteWalledHome writes into files, a new, empty folder on this machine apart from the
-// writable home and from every other mount of the run, such as
-// <user cache>/qory/runs/<run id>/codex-fixed, every part of a walled run's Codex home
+// WriteWalledHome makes the folder files, which must not exist, on this machine apart
+// from the writable home and from every other mount of the run, such as
+// <user cache>/qory/runs/<run id>/codex-fixed, and writes into it every part of a walled run's Codex home
 // that the run binds read-only: the config.toml from dir, the runtime's directory of the
 // composed home, with [WalledConfig]'s additions for run.Projects and with every skill
 // that is not in run.Skills disabled, a hooks.json with no hook, an empty .env,
@@ -100,6 +101,10 @@ const ReadRulesName = "read-access.rules"
 // agent writes during the run, and one in ~/.agents/skills or /etc/codex/skills of the
 // image.
 func WriteWalledHome(dir, files string, run WalledRun) ([]Bound, error) {
+	// A folder that exists may have links planted in it; a new one has none.
+	if err := os.Mkdir(files, 0o755); err != nil {
+		return nil, err
+	}
 	var dirs []Bound
 	for _, name := range boundDirs {
 		dst := filepath.Join(files, name)
@@ -120,7 +125,7 @@ func WriteWalledHome(dir, files string, run WalledRun) ([]Bound, error) {
 		if err := os.Remove(p); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			return nil, err
 		}
-		if err := writeNew(p, run.ReadRules); err != nil {
+		if err := writeNew(p, run.ReadRules, 0o644); err != nil {
 			return nil, err
 		}
 	}
@@ -171,7 +176,7 @@ func WriteWalledHome(dir, files string, run WalledRun) ([]Bound, error) {
 		p := filepath.Join(files, name)
 		// A bind pins the file's inode, so the file is written once, in place, and never
 		// replaced by a rename.
-		if err := writeNew(p, content[name]); err != nil {
+		if err := writeNew(p, content[name], 0o644); err != nil {
 			return nil, err
 		}
 		out = append(out, Bound{Path: name, Source: p, Target: path.Join(HomeInWall, name)})
@@ -179,10 +184,10 @@ func WriteWalledHome(dir, files string, run WalledRun) ([]Bound, error) {
 	return append(out, dirs...), nil
 }
 
-// writeNew writes data to a new file at p, with mode 0644. It fails when anything is at
+// writeNew writes data to a new file at p, with mode perm. It fails when anything is at
 // p already, a link included, so it never writes through a link to another file.
-func writeNew(p string, data []byte) error {
-	f, err := os.OpenFile(p, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+func writeNew(p string, data []byte, perm os.FileMode) error {
+	f, err := os.OpenFile(p, os.O_WRONLY|os.O_CREATE|os.O_EXCL|syscall.O_NOFOLLOW, perm)
 	if err != nil {
 		return err
 	}
@@ -228,7 +233,7 @@ func copyTree(src, dst string) error {
 			if err != nil {
 				return err
 			}
-			return os.WriteFile(to, data, 0o644|info.Mode().Perm()&0o111)
+			return writeNew(to, data, 0o644|info.Mode().Perm()&0o111)
 		default:
 			return fmt.Errorf("copy %s for the walled Codex home: it is neither a folder, a regular file nor a link", p)
 		}

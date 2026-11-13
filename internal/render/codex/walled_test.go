@@ -289,7 +289,7 @@ func walledState(t *testing.T, config string, projects []string) map[string]stri
 // folder WriteWalledHome writes, none in the composed home. The copy keeps a script's
 // executable bit, and a relative link of the skills leads where it led.
 func TestWriteWalledHome(t *testing.T) {
-	dir, files := t.TempDir(), t.TempDir()
+	dir, files := t.TempDir(), filepath.Join(t.TempDir(), "fixed")
 	write := func(name, content string) {
 		t.Helper()
 		p := filepath.Join(dir, name)
@@ -364,8 +364,9 @@ func TestWriteWalledHome(t *testing.T) {
 	}
 }
 
-// TestWriteWalledHomeWritesThroughNoLink is a files folder with a link at hooks.json to a
-// file elsewhere: WriteWalledHome fails, and the file the link leads to is unchanged.
+// TestWriteWalledHomeWritesThroughNoLink is a files folder that exists, with a link at
+// hooks.json to a file elsewhere: WriteWalledHome fails, and the file the link leads to
+// is unchanged.
 func TestWriteWalledHomeWritesThroughNoLink(t *testing.T) {
 	dir, files, outside := t.TempDir(), t.TempDir(), filepath.Join(t.TempDir(), "target")
 	if err := os.WriteFile(outside, []byte("theirs\n"), 0o644); err != nil {
