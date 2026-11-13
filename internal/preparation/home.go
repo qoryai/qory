@@ -17,11 +17,11 @@ import (
 // settings, CLAUDE.md, plugins, memory, .claude.json and transcripts.
 const EnvAgentHome = "CLAUDE_CONFIG_DIR"
 
-// AgentHome is the agent's configuration directory on a dispatched walled run of Claude
-// Code, a fixed path inside the container that qory owns. It is under /tmp, which an
-// image usually has and any user may write, so it does not depend on the image's HOME
-// or user; it is in the container alone, so nothing of it reaches the machine or the
-// checkout, and it goes with the container.
+// AgentHome is the agent's configuration directory on a walled run of Claude Code, a
+// fixed path inside the container that qory owns. It is under /tmp, which an image
+// usually has and any user may write, so it does not depend on the image's HOME or user;
+// it is in the container alone, so nothing of it reaches the machine or the checkout, and
+// it goes with the container.
 const AgentHome = "/tmp/qory-agent-home"
 
 // TempStore is the folder of the artifact files of a run that cannot write its checkout,
@@ -39,10 +39,10 @@ var managedSettings = "/etc/claude-code"
 // The words of the agent's home, which qory run agent-env prints after its name. Each
 // is one format string, with the fix first.
 const (
-	textManaged        = "use an image without %s: Claude Code reads managed settings there above every other source, so a run given a run key does not start"
+	textManaged        = "use an image without %s: Claude Code reads managed settings there above every other source, so the run does not start"
 	textManagedUnread  = "make %s readable for the agent's user in the image: Claude Code reads managed settings there, and the check for them failed: %s"
-	textHomeExists     = "remove %s from the image and from the setup commands: qory makes the agent's home only where nothing is, so a run given a run key does not start"
-	textHomeNotEmpty   = "leave no program of the image or the setup commands running that writes into %s: the agent's home held something once qory made it, so a run given a run key does not start"
+	textHomeExists     = "remove %s from the image and from the setup commands: qory makes the agent's home only where nothing is, so the run does not start"
+	textHomeNotEmpty   = "leave no program of the image or the setup commands running that writes into %s: the agent's home held something once qory made it, so the run does not start"
 	textHomeParentLink = "replace the symbolic link %s with a folder in the image: the agent's home %s is made only where no link leads"
 	textHomeNotMade    = "let the agent's user make %s, then run again: the agent's home could not be made: %s"
 )
@@ -66,7 +66,7 @@ var (
 )
 
 // FreshHome makes the agent's home, [AgentHome], new and empty when getenv sets
-// [EnvAgentHome] to it, as qory run does for a dispatched walled run of Claude Code, and
+// [EnvAgentHome] to it, as qory run does for a walled run of Claude Code, and
 // does nothing otherwise. qory run agent-env calls it last before the agent starts, after
 // the setup commands, and it refuses anything at the home when it runs, such as a home
 // the image holds or the setup commands made. It refuses first an image with Claude Code's managed settings, which no
@@ -159,7 +159,7 @@ func freshFolder(path string, words freshWords) error {
 // one format string, with the fix first.
 const (
 	textLinkBad     = "point wall.helper at the Linux build of the qory that starts the run: the transcripts' folder %s or its place %s is not a relative path without a .. name"
-	textLinkExists  = "leave no program of the image or the setup commands running that writes into %s: something was at %s when qory linked the agent's transcripts there, so a run given a run key does not start"
+	textLinkExists  = "leave no program of the image or the setup commands running that writes into %s: something was at %s when qory linked the agent's transcripts there, so the run does not start"
 	textLinkNotMade = "let the agent's user write %s, then run again: the link of the agent's transcripts to %s could not be made: %s"
 )
 

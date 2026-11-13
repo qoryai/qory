@@ -314,6 +314,20 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Changed
 
+- A person's walled run of Claude Code starts Claude Code on an empty configuration folder,
+  as a walled run given a run key does: `CLAUDE_CONFIG_DIR` is `/tmp/qory-agent-home`, and
+  its `projects` folder links to the run's transcript folder. Before, Claude Code read
+  `~/.claude` and `~/.claude.json` in the image's `HOME`. A `CLAUDE_CONFIG_DIR` in
+  `harness.launch.claude.env` no longer applies behind a wall. Claude Code gets none of the
+  image's values of the variables qory removes on a run given a run key, such as
+  `ANTHROPIC_*`, `CLAUDE_*` and `NODE_OPTIONS`, and the run stops when the image has
+  `/etc/claude-code`. A read run also gets `/tmp/qory-artifacts` new and empty for its
+  artifact files, and stops when the image has something at that path. An unwalled run is
+  unchanged. See Claude Code behind a wall in `docs/run.md`.
+- On a walled run of Claude Code whose `ANTHROPIC_API_KEY` is the gateway's placeholder,
+  qory writes `.claude.json` with the approval of that placeholder into the empty
+  configuration folder, so an interactive Claude Code starts without asking you to
+  approve the key.
 - A walled run starts `codex exec` with `--sandbox danger-full-access` after `exec`,
   unless an argument before `--` sets a sandbox mode, bypasses one, or is
   `--approve-for-me` or `--not-so-yolo`, which Codex refuses beside `--sandbox`. Inside

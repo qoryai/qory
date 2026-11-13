@@ -18,16 +18,16 @@ import (
 	"github.com/qoryai/qory/internal/preparation"
 )
 
-// agentEnvArgs are the arguments that select the hidden verb a dispatched walled run of
-// Claude Code starts the agent through.
+// agentEnvArgs are the arguments that select the hidden verb a walled run of Claude Code
+// starts the agent through.
 var agentEnvArgs = []string{"run", "agent-env"}
 
 // keptFile is the name of the file of kept names in the folder [wrapAgentEnv] makes.
 const keptFile = "kept"
 
 // wrapsAgentEnv reports whether a run starts its agent through the agent-env verb: a
-// dispatched run behind a wall whose agent starts on a fresh home, that of a runtime
-// that is a [render.AgentHomer]. A test replaces it.
+// run behind a wall whose agent starts on a fresh home, that of a runtime that is a
+// [render.AgentHomer]. A test replaces it.
 var wrapsAgentEnv = func(freshHome, walled bool) bool { return freshHome && walled }
 
 // wrapAgentEnv starts the agent of a walled run through the agent-env verb, which
@@ -186,13 +186,15 @@ func writeKept(file string, always, ca []string) error {
 	return os.Rename(next, file)
 }
 
-// newAgentEnv builds the hidden agent-env verb, what a dispatched walled run of Claude
-// Code starts the agent through, after the setup commands when they run inside the wall:
+// newAgentEnv builds the hidden agent-env verb, what a walled run of Claude Code starts
+// the agent through, after the setup commands when they run inside the wall:
 // it first makes the agent's home fresh, [preparation.FreshHome], and fails on anything
 // the image or the setup commands put there, and makes the store's folder for a run that
 // cannot write its checkout, which is the verb's working folder; with a folder and a
 // place between the file and --, it then links that folder of the home to that place
-// below HOME, [preparation.LinkTranscripts]; it then reads the kept names from the file
+// below HOME, [preparation.LinkTranscripts]; it then writes the approval of Forager's
+// stand-in for the API key into the home, [preparation.ApproveStandIn], when
+// ANTHROPIC_API_KEY is the stand-in; it then reads the kept names from the file
 // its first argument names, removes from its environment every [preparation.Dropped] name the file
 // does not keep, but a prefixed name holding the gateway's placeholder, and executes the
 // launch after -- with its arguments unchanged. It parses no flag. It prints nothing; on
@@ -212,6 +214,9 @@ func newAgentEnv() *cobra.Command {
 			var argv, env []string
 			if err == nil {
 				err = agentEnvLink(args)
+			}
+			if err == nil {
+				err = preparation.ApproveStandIn(os.Getenv)
 			}
 			if err == nil {
 				path, argv, env, err = agentEnvLaunch(args, os.Environ())

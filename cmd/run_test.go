@@ -902,7 +902,10 @@ var containerRun = regexp.MustCompile(`(?m)^run `)
 // exec: this test binary through its QORY_TEST_EXEC hook, with Forager's arguments, in
 // place of qory's Linux build inside, which this machine does not have at its path; the
 // program after its -- starts through the script again, without the hook's variable.
-// The run's preparation script runs as it is, with a program that exits 0 in place of
+// The agent-env step of a walled run of Claude Code is skipped, and the launch after its
+// -- starts through the script again: the verb makes the agent's home at a fixed path
+// of the container, which this machine shares between tests or, on a Mac, has below a
+// link. The run's preparation script runs as it is, with a program that exits 0 in place of
 // each setup command, which runs through qory's Linux build inside. A run on a machine that holds an access key needs a wall;
 // this one lets such a run reach its runtime as an unwalled run would. It runs the arms
 // of [agentImageAnswers] for the agent image and an agent's container with a transcript
@@ -945,6 +948,11 @@ if [ "$1" = `+wall.HelperPath+` ] && [ "$2" = run ] && [ "$3" = exec ]; then
 		set -- "$@" "$a"
 	done
 	QORY_TEST_EXEC=1 exec '`+bin+`' -test.run='^$' -- "$@"
+fi
+if [ "$1" = `+wall.HelperPath+` ] && [ "$2" = run ] && [ "$3" = agent-env ]; then
+	while [ $# -gt 0 ] && [ "$1" != -- ]; do shift; done
+	shift
+	exec /bin/sh `+enter+` - "$@"
 fi
 if [ "$1" = /bin/sh ] && [ "${2##*/}" = `+session.PreparationScript+` ]; then
 	sed "s|^setup .*|true|" "$2" > `+prepared+`

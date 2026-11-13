@@ -34,7 +34,7 @@ func walledArgs(rt render.Runtime, args []string) []string {
 	return args
 }
 
-// withAgentHome is the fixed variables of a dispatched walled run of a runtime that is a
+// withAgentHome is the fixed variables of a walled run of a runtime that is a
 // [render.AgentHomer], with its variable, name, pointing at [preparation.AgentHome],
 // which qory run agent-env makes new and empty as the last step before the agent starts
 // when name is [preparation.EnvAgentHome], Claude Code's.
@@ -48,7 +48,7 @@ func withAgentHome(fixed []string, name string) []string {
 	return out
 }
 
-// transcriptLinkFor is the transcript link of a dispatched walled run whose renderer is
+// transcriptLinkFor is the transcript link of a walled run whose renderer is
 // a [render.TranscriptLinker] and whose runtime rt has a descriptor with resume: the
 // renderer's folder, linked to resume.prefix without its ~/ and its last /, where Forager
 // binds the run's transcript folder below HOME. It makes the checks Forager makes before

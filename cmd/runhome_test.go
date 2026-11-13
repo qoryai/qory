@@ -601,11 +601,17 @@ func (r *replacesReport) Write(p []byte) (int, error) {
 }
 
 // TestARunStartsFromItsCompose is another run's report in the shared place, between a run's compose
-// and its start: the run starts on what it composed.
+// and its start: the run starts on what it composed. The walled launch of Claude Code
+// starts through the agent-env verb, so the program is the word after its --.
 func TestARunStartsFromItsCompose(t *testing.T) {
 	root, _ := committedFixture(t)
 	var started string
-	agentInCopy(t, func(spec session.SessionSpec) { started = spec.Command })
+	agentInCopy(t, func(spec session.SessionSpec) {
+		started = spec.Command
+		if i := slices.Index(spec.Args, "--"); i >= 0 && i+1 < len(spec.Args) && slices.Contains(spec.Args[:i], "agent-env") {
+			started = spec.Args[i+1]
+		}
+	})
 	out := &replacesReport{at: runHomesFolder(t, root) + "-report.json"}
 	c := cmd.Root()
 	c.SetArgs([]string{"run", "claude", "--", "-p", "hi"})
