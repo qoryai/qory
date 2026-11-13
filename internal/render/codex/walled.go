@@ -293,6 +293,13 @@ func copyTree(src, dst string) error {
 // SKILL.md path of disabledPaths, after the entries config has, since a later entry
 // decides (codex-rs/config/src/skills_config.rs). Codex reads skills.config from this
 // file alone, never from a repository's .codex.
+//
+// It sets cli_auth_credentials_store = "ephemeral", so Codex keeps a login in memory
+// only and reads no auth.json from the writable home, which the agent could write
+// (codex-rs/login/src/auth/storage.rs, EphemeralAuthStorage). Without a login, Codex
+// also reads no cloud-config-bundle-cache.json, whose managed hooks would run without
+// trust (codex-rs/cloud-config/src/service.rs, load_startup_bundle). A model provider's
+// env_key reads its variable and needs no stored login.
 func WalledConfig(config []byte, home string, projects, disabled, disabledPaths []string) ([]byte, error) {
 	m := map[string]any{}
 	if _, err := toml.NewDecoder(bytes.NewReader(config)).Decode(&m); err != nil {
@@ -320,6 +327,7 @@ func WalledConfig(config []byte, home string, projects, disabled, disabledPaths 
 	}
 	cloud["skills"] = map[string]any{"enabled": false}
 	m["cloud"] = cloud
+	m["cli_auth_credentials_store"] = "ephemeral"
 	if len(projects) > 0 {
 		trust := map[string]any{}
 		for _, p := range projects {

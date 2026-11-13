@@ -49,7 +49,8 @@ const composed = `model = "gpt-6.1-sol"
 `
 
 // TestWalledConfigIsGolden is the config.toml a walled run binds, for a copy of the
-// checkout: the compose's keys as they were, each project path untrusted, a
+// checkout: the compose's keys as they were, the login kept in memory only, each project
+// path untrusted, a
 // trusted_hash for each Stop hook, keyed by config.toml in the home in the wall, the
 // skills Codex ships and a cloud's skills off, and a disabling entry for each skill name,
 // then for each skill path, after the compose's entry.
@@ -58,7 +59,8 @@ func TestWalledConfigIsGolden(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := `model = "gpt-6.1-sol"
+	want := `cli_auth_credentials_store = "ephemeral"
+model = "gpt-6.1-sol"
 
 [cloud]
   [cloud.skills]
@@ -225,7 +227,7 @@ func TestWalledConfigTrustsNoProjectAndAddsNoState(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := "model = \"m\"\n\n[cloud]\n  [cloud.skills]\n    enabled = false\n\n[skills]\n  [skills.bundled]\n    enabled = false\n"; string(got) != want {
+	if want := "cli_auth_credentials_store = \"ephemeral\"\nmodel = \"m\"\n\n[cloud]\n  [cloud.skills]\n    enabled = false\n\n[skills]\n  [skills.bundled]\n    enabled = false\n"; string(got) != want {
 		t.Errorf("config.toml %q", got)
 	}
 }
@@ -410,6 +412,40 @@ func TestWriteWalledHome(t *testing.T) {
 		if _, err := os.Lstat(filepath.Join(d, "auth.json")); err == nil {
 			t.Errorf("%s has an auth.json", d)
 		}
+	}
+}
+
+// TestWriteWalledHomeReadsNoPlantedLogin is a composed home with an auth.json and a
+// cloud-config-bundle-cache.json, as an agent could write them in a writable Codex home:
+// the walled home has neither, and its config.toml keeps the login in memory only, so
+// Codex reads no auth.json and, without a login, no cache.
+func TestWriteWalledHomeReadsNoPlantedLogin(t *testing.T) {
+	dir, files := t.TempDir(), filepath.Join(t.TempDir(), "fixed")
+	for name, content := range map[string]string{
+		"auth.json":                      `{"OPENAI_API_KEY": "sk-planted"}`,
+		"cloud-config-bundle-cache.json": `{"signature": "x"}`,
+		"config.toml":                    "model = \"m\"\n",
+	} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := codex.WriteWalledHome(dir, files, codex.WalledRun{}); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"auth.json", "cloud-config-bundle-cache.json"} {
+		if _, err := os.Lstat(filepath.Join(files, name)); err == nil {
+			t.Errorf("the walled home has %s", name)
+		}
+	}
+	var config struct {
+		Store string `toml:"cli_auth_credentials_store"`
+	}
+	if _, err := toml.DecodeFile(filepath.Join(files, "config.toml"), &config); err != nil {
+		t.Fatal(err)
+	}
+	if config.Store != "ephemeral" {
+		t.Errorf("cli_auth_credentials_store %q, want ephemeral", config.Store)
 	}
 }
 
