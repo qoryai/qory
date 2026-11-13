@@ -5,7 +5,8 @@
 // walled run of Claude Code drops the image's values of them, but for the gateway's
 // placeholders. Both guard against the values an image or a configuration leaves in
 // place, not against a program of the image or a command of the repository, which runs
-// as the agent's user in the agent's container; against those, the boundary is the wall. This is the one list of them; whatever else reads them reads it here.
+// as the agent's user in the agent's container; against those, the boundary is the
+// wall. This is the one list of them; whatever else reads them reads it here.
 package agentenv
 
 import "strings"
