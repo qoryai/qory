@@ -121,7 +121,7 @@ func WriteWalledHome(dir, files string, run WalledRun) ([]Bound, error) {
 		if err := os.Remove(p); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			return nil, err
 		}
-		if err := os.WriteFile(p, run.ReadRules, 0o644); err != nil {
+		if err := writeNew(p, run.ReadRules); err != nil {
 			return nil, err
 		}
 	}
@@ -172,12 +172,26 @@ func WriteWalledHome(dir, files string, run WalledRun) ([]Bound, error) {
 		p := filepath.Join(files, name)
 		// A bind pins the file's inode, so the file is written once, in place, and never
 		// replaced by a rename.
-		if err := os.WriteFile(p, content[name], 0o644); err != nil {
+		if err := writeNew(p, content[name]); err != nil {
 			return nil, err
 		}
 		out = append(out, Bound{Path: name, Source: p, Target: path.Join(HomeInWall, name)})
 	}
 	return append(out, dirs...), nil
+}
+
+// writeNew writes data to a new file at p, with mode 0644. It fails when anything is at
+// p already, a link included, so it never writes through a link to another file.
+func writeNew(p string, data []byte) error {
+	f, err := os.OpenFile(p, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+	if err != nil {
+		return err
+	}
+	if _, err := f.Write(data); err != nil {
+		f.Close()
+		return err
+	}
+	return f.Close()
 }
 
 // copyTree copies the folder src into dst, which exists: folders, regular files with
