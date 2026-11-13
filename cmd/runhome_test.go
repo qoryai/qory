@@ -274,7 +274,12 @@ func TestAWalledRunPrintsWhatDoesNotReachTheSession(t *testing.T) {
 			var printed string
 			var out output
 			root := cmd.Root()
-			root.SetArgs([]string{"run", runtime, "--", "-p", "hi"})
+			// Codex reads -p as --profile, which a walled Codex run refuses.
+			prompt := []string{"-p", "hi"}
+			if runtime == "codex" {
+				prompt = []string{"hi"}
+			}
+			root.SetArgs(append([]string{"run", runtime, "--"}, prompt...))
 			root.SetOut(&out)
 			root.SetErr(&out)
 			agentInCopy(t, func(session.SessionSpec) {

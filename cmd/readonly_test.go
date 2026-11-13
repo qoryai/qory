@@ -765,3 +765,27 @@ func TestASignalDuringTheSetupContainersRemovalEndsAsInASetup(t *testing.T) {
 	wants(t, r.out+r.err.Error(), "the run was cancelled: qory run got SIGINT before ")
 	lacks(t, r.out+r.err.Error(), "read_needs_setup_removed")
 }
+
+// TestAWalledCodexReadRunWithNoRepositoriesHasNoSetup is a walled Codex run from a run code
+// that only reads and lists no repositories: its workspace is bound read-only, and Forager
+// runs no setup step beside it, so its session joins with no setup, not even the test of
+// /etc/codex.
+func TestAWalledCodexReadRunWithNoRepositoriesHasNoSetup(t *testing.T) {
+	r := runFromCodeLinks(t, func(string) []string {
+		docker, _ := fakeDocker(t)
+		writeFile(t, filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "forager.yaml"),
+			"wall:\n  adapter: docker\n  command: "+docker+"\n  helper: "+staticELF(t)+"\n  user: \"1000:1000\"\n  image: "+readImage+"\n")
+		return nil
+	}, []string{"--home", filepath.Join(tempDir(t), "home")}, declares("read"), func(d map[string]any) {
+		d["run_settings"] = map[string]any{"runtime": "codex"}
+	}, map[string]string{
+		"examples/hello/modules/hello/skills/workflow-hello/SKILL.md": "---\nname: workflow-hello\ndescription: Say hello.\n---\n\nSay hello.\n",
+	}, nil)
+	if !r.joined {
+		t.Fatalf("%v (exit %d), want the join\n%s", r.err, cmd.ExitCode(r.err), r.out)
+	}
+	wants(t, r.out, " on codex\n")
+	if !r.spec.WorkspaceReadOnly || len(r.spec.Setup) != 0 || len(r.spec.SetupRunner) != 0 {
+		t.Errorf("read-only %v, setup %q through %q", r.spec.WorkspaceReadOnly, r.spec.Setup, r.spec.SetupRunner)
+	}
+}

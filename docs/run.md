@@ -3722,6 +3722,40 @@ stops when the image has `/etc/claude-code`, where Claude Code reads managed set
 These checks guard against what the image and the repository's files leave in place, not
 against a repository that acts against them: see [The run key](#the-run-key).
 
+### Codex arguments a walled run refuses
+
+qory and Forager set the model provider, the settings and the hooks of a walled Codex
+run. Forager puts its `--config` flags ahead of the run's Codex arguments, and Codex
+takes the last flag for a key. So a walled Codex run stops before the agent starts, with
+exit status 1, when an argument before `--` is one of these:
+
+- `--config <key>=<value>` in the forms `--config`, `--config=`, `-c`, `-c<key>=<value>`
+  and `-c=<key>=<value>`, where the key is a key qory or Forager sets, `skills` or
+  `cloud.skills`, a key under one, or a table above one, such as `cloud`. The line is
+  ``Remove `--config <key>` from the run's Codex arguments: a Codex run takes this key
+  from qory and Forager, not from the arguments.``
+- `--enable <feature>` or `--disable <feature>`, also with `=`, for every feature:
+  ``Remove `--enable <feature>` from the run's Codex arguments: a Codex run takes this key
+  from qory and Forager, not from the arguments.``
+- `--oss` or `--local-provider`: ``Remove `<flag>` from the run's Codex arguments: a Codex
+  run takes its model provider from qory and Forager, not from the arguments.``
+- `--profile <name>`, `--profile=<name>`, `-p <name>`, `-p<name>` or `-p=<name>`:
+  ``Remove `--profile` from the run's Codex arguments: a Codex run takes its settings
+  from qory and Forager, not from a profile.``
+- `--ignore-user-config`: ``Remove `--ignore-user-config` from the run's Codex arguments:
+  a Codex run takes its settings from qory and Forager, not from the arguments.``
+- `--search`: ``Remove `--search` from the run's Codex arguments: a Codex run takes its
+  web search setting from qory and Forager, not from the arguments.``
+- `--dangerously-bypass-hook-trust`: ``Remove `--dangerously-bypass-hook-trust` from the
+  run's Codex arguments: a Codex run takes its hook trust from qory and Forager, not from
+  the arguments.``
+- `--remote <addr>` or `--remote-auth-token-env <name>`, also with `=`: ``Remove
+  `--remote` from the run's Codex arguments: a Codex run takes its app server from qory
+  and Forager, not from the arguments.``, or the same with `--remote-auth-token-env`.
+
+A key or feature in the line has each control character written as an escape, such as
+`\n`. Arguments after `--`, and every argument of an unwalled run, pass unchanged.
+
 ### A run that may write works in a copy
 
 A walled run that may write and has no run code never binds your repository, so it has no write
@@ -3804,8 +3838,30 @@ program, such as:
 qory run: install comm in /usr/local/bin, /usr/bin, /bin: the git session of a walled run runs comm from these folders, to compare the run's refs and commits with what the bundle has
 ```
 
+A walled Codex run that lists repositories also has the step `Check tools`, with a test of
+`/etc/codex`, where Codex reads settings before the ones qory writes. A write run in a copy runs
+both tests in that one step; any other such run, such as a read run, runs the test of
+`/etc/codex` alone. When the image has anything at `/etc/codex`, the step fails with:
+
+```text
+qory run: Use an image without /etc/codex: Codex reads its settings there before qory's, so the run does not start.
+```
+
+A walled Codex run that lists no repositories, such as a person's walled run, runs the test of
+`/etc/codex` in the agent's container, in a setup step named `Check tools`, before Codex starts.
+The step prints nothing. When the image has anything at `/etc/codex`, qory prints the same line,
+the run closes as failed, and qory run exits with 1. A walled read run that lists no repositories
+has no such step: its workspace is mounted read-only, and Forager runs no setup step beside a
+read-only workspace. Claude Code runs and unwalled runs have no such step.
+
 If the step exits 127 with no such line, which is what docker does for an image with no `/bin/sh`,
-qory prints the line for `sh`. Any other failure with no such line prints
+qory prints:
+
+```text
+qory run: install sh in /usr/local/bin, /usr/bin, /bin: the setup of a walled run runs sh from these folders, to run its script
+```
+
+Any other failure with no such line prints
 `Fix Check tools: setup step <n> exited with <n>.`, also exit 126, where docker could not run the
 command for another cause, such as the image's architecture.
 

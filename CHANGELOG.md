@@ -811,6 +811,53 @@ release may change what an existing document does, and states it under Upgrading
   ``Remove `<key>` from the harness's `settings/codex/config.toml`: a Codex run takes
   this key from qory and Forager, not from the harness.`` A fragment may still set the
   other keys of `hooks`, such as `hooks.Stop`.
+- A walled Codex run refuses Codex arguments before `--` that set one of those keys or
+  `model_reasoning_effort`, a key under one, or a table above one, such as
+  `-c features.shell_snapshot=true` or `--config model_providers={}`, in the forms
+  `--config`, `--config=`, `-c`, `-c<key>=<value>` and `-c=<key>=<value>`, with
+  ``Remove `--config <key>` from the run's Codex arguments: a Codex run takes this key
+  from qory and Forager, not from the arguments.`` The run stops before the agent starts, with exit status 1.
+  Forager puts its `--config` flags first, and Codex takes the last one for a key. An
+  unwalled run is unchanged.
+- A walled Codex run refuses `--oss` and `--local-provider` before `--`, with
+  ``Remove `<flag>` from the run's Codex arguments: a Codex run takes its model provider
+  from qory and Forager, not from the arguments.``, and `--profile` in the forms
+  `--profile <name>`, `--profile=<name>`, `-p <name>`, `-p<name>` and `-p=<name>`, with
+  ``Remove `--profile` from the run's Codex arguments: a Codex run takes its settings
+  from qory and Forager, not from a profile.`` The run stops before the agent starts,
+  with exit status 1. An unwalled run, and a run of another runtime, is unchanged.
+- A walled Codex run refuses `--enable <feature>` and `--disable <feature>` before `--`,
+  also as `--enable=<feature>`, for every feature, the legacy name `connectors` too:
+  Codex reads them as `--config features.<feature>=true` or `false`. The text is
+  ``Remove `--enable <feature>` from the run's Codex arguments: a Codex run takes this
+  key from qory and Forager, not from the arguments.``, or the same with `--disable`.
+- A walled Codex run refuses `--ignore-user-config` before `--`, with ``Remove
+  `--ignore-user-config` from the run's Codex arguments: a Codex run takes its settings
+  from qory and Forager, not from the arguments.``, and `--search`, with ``Remove
+  `--search` from the run's Codex arguments: a Codex run takes its web search setting
+  from qory and Forager, not from the arguments.``
+- A walled Codex run refuses `--dangerously-bypass-hook-trust` before `--`, with
+  ``Remove `--dangerously-bypass-hook-trust` from the run's Codex arguments: a Codex run
+  takes its hook trust from qory and Forager, not from the arguments.``, and `--remote`
+  and `--remote-auth-token-env`, also with `=`, with ``Remove `--remote` from the run's
+  Codex arguments: a Codex run takes its app server from qory and Forager, not from the
+  arguments.`` (`--remote-auth-token-env` likewise).
+- A walled Codex run refuses `--config` keys at `skills` or `cloud.skills`, under one,
+  or above one, such as `-c skills.bundled.enabled=true` or `-c cloud={}`, with the
+  `--config` line.
+- A refusal of a walled Codex run's arguments writes each control character of the key
+  or feature it repeats as an escape, such as `\n`.
+- On a walled Codex run that lists repositories, the `Check tools` setup step fails when
+  the image has anything at `/etc/codex`, with ``Use an image without /etc/codex: Codex
+  reads its settings there before qory's, so the run does not start.`` A write run in a
+  copy runs this test in the step it has; any other such run, such as a read run, gets
+  the step with this test alone. The step of a Claude Code run is unchanged.
+- A walled Codex run that lists no repositories, except a read run, tests `/etc/codex` in
+  a `Check tools` setup step in the agent's container before Codex starts. When the image
+  has anything there, qory prints the same line, the run closes as failed, and qory run
+  exits with 1.
+- The line for an image with no `sh` reads ``the setup of a walled run runs sh from these
+  folders``, in place of ``the git session of a walled run``.
 - Compose accepts `settings/codex/read-access.rules`, a file of Codex execpolicy rules.
   It joins the files of all modules in module order, merges them into no target file and
   places them in no home, so no run reads them. Any other file under `settings/` that is
