@@ -84,7 +84,8 @@ const ReadRulesName = "read-access.rules"
 // from the writable home and from every other mount of the run, such as
 // <user cache>/qory/runs/<run id>/codex-fixed, and writes into it every part of a walled run's Codex home
 // that the run binds read-only: the config.toml from dir, the runtime's directory of the
-// composed home, with [WalledConfig]'s additions for run.Projects and with every skill
+// composed home, with [WalledConfig]'s additions for run.Projects and the git roots of
+// run.Checkouts, see [gitRootsInWall], and with every skill
 // that is not in run.Skills disabled, a hooks.json with no hook, an empty .env,
 // environments.toml and AGENTS.override.md, dir's AGENTS.md, or an empty one, and a copy
 // of each folder of [boundDirs] that dir has, or an empty folder. For a run whose access
@@ -162,7 +163,12 @@ func WriteWalledHome(dir, files string, run WalledRun) ([]Bound, error) {
 	} else if err != nil {
 		return nil, err
 	}
-	config, err = WalledConfig(config, HomeInWall, run.Projects, slices.Compact(disabled), slices.Compact(disabledPaths))
+	untrusted := slices.Clone(run.Projects)
+	for _, c := range run.Checkouts {
+		untrusted = append(untrusted, gitRootsInWall(c, run.Projects)...)
+	}
+	slices.Sort(untrusted)
+	config, err = WalledConfig(config, HomeInWall, slices.Compact(untrusted), slices.Compact(disabled), slices.Compact(disabledPaths))
 	if err != nil {
 		return nil, err
 	}
@@ -225,6 +231,75 @@ func checkoutSkillPaths(checkout string, projects []string) []string {
 		}
 	}
 	return out
+}
+
+// gitRootsInWall are the paths in the wall, under each of projects, of the folders
+// Codex takes as the git repository of checkout when it looks up a project's trust: the
+// nearest folder at or above checkout with a .git folder that has HEAD or a .git file,
+// and, for a .git file of a worktree, the main repository's folder, the folder of the
+// common git folder that the worktree's gitdir file names (codex-rs/git-utils/src/
+// trust.rs, resolve_root_git_project_for_trust). Codex looks up the trust of the working
+// folder, then of that root (codex-rs/config/src/config_toml.rs, get_active_project);
+// with neither, it trusts the root for the process. Each root is put under each project
+// by its path relative to checkout, so a root above checkout is above the project too.
+func gitRootsInWall(checkout string, projects []string) []string {
+	var roots []string
+	for dir := checkout; ; {
+		dotGit := filepath.Join(dir, ".git")
+		info, err := os.Lstat(dotGit)
+		if err == nil && info.IsDir() {
+			if _, err := os.Stat(filepath.Join(dotGit, "HEAD")); err == nil {
+				roots = append(roots, dir)
+				break
+			}
+		}
+		if err == nil && info.Mode().IsRegular() {
+			roots = append(roots, dir)
+			if main := mainRepository(dotGit); main != "" {
+				roots = append(roots, main)
+			}
+			break
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+		dir = parent
+	}
+	var out []string
+	for _, r := range roots {
+		rel, err := filepath.Rel(checkout, r)
+		if err != nil {
+			continue
+		}
+		for _, p := range projects {
+			out = append(out, path.Join(p, filepath.ToSlash(rel)))
+		}
+	}
+	return out
+}
+
+// mainRepository is the main repository's folder of the worktree whose .git file is
+// dotGit: the folder above the common git folder of the gitdir that dotGit names, when
+// that gitdir is <common>/worktrees/<name>; "" otherwise.
+func mainRepository(dotGit string) string {
+	data, err := readHead(dotGit, 64<<10, true)
+	if err != nil {
+		return ""
+	}
+	gitdir, ok := strings.CutPrefix(strings.TrimSpace(string(data)), "gitdir:")
+	if !ok {
+		return ""
+	}
+	gitdir = strings.TrimSpace(gitdir)
+	if !filepath.IsAbs(gitdir) {
+		gitdir = filepath.Join(filepath.Dir(dotGit), gitdir)
+	}
+	worktrees := filepath.Dir(gitdir)
+	if filepath.Base(worktrees) != "worktrees" {
+		return ""
+	}
+	return filepath.Dir(filepath.Dir(worktrees))
 }
 
 // relTo is file relative to dir, with forward slashes; "" when file is not below dir.

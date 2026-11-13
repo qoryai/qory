@@ -473,3 +473,80 @@ func TestWriteWalledHomeWritesThroughNoLink(t *testing.T) {
 		t.Errorf("the link's target: %q %v, want it unchanged", b, err)
 	}
 }
+
+// TestWriteWalledHomeLeavesNoCwdTrusted is a working folder under each path where the wall
+// shows the checkout, for a checkout that is a repository's root, one that is a folder
+// inside a repository, and one that is a worktree. Codex looks up the trust of the
+// working folder, then of its git root, and trusts the root for the process when neither
+// has an entry; every lookup here finds untrusted. The run's copy is at the same path in
+// the wall as on this machine, so its git root is too; /workspace shows the checkout
+// alone, so a cwd under it has /workspace as its git root only when the checkout is the
+// repository's root.
+func TestWriteWalledHomeLeavesNoCwdTrusted(t *testing.T) {
+	mkdir := func(p string) {
+		t.Helper()
+		if err := os.MkdirAll(p, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeFile := func(p, content string) {
+		t.Helper()
+		mkdir(filepath.Dir(p))
+		if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	base := t.TempDir()
+	repo := filepath.Join(base, "repo")
+	writeFile(filepath.Join(repo, ".git/HEAD"), "ref: refs/heads/main\n")
+	mkdir(filepath.Join(repo, "pkg/sub"))
+	worktree := filepath.Join(base, "work")
+	writeFile(filepath.Join(repo, ".git/worktrees/work/HEAD"), "ref: refs/heads/w\n")
+	writeFile(filepath.Join(worktree, ".git"), "gitdir: "+filepath.Join(repo, ".git/worktrees/work")+"\n")
+	mkdir(filepath.Join(worktree, "sub"))
+	for _, c := range []struct {
+		name, checkout string
+		// lookups are cwd and git root pairs as Codex sees them in the wall.
+		lookups [][2]string
+	}{
+		{"the repository's root", repo, [][2]string{
+			{filepath.Join(repo, "sub"), repo},
+			{"/workspace/sub", "/workspace"},
+			{"/workspace", "/workspace"},
+		}},
+		{"a folder of a repository", filepath.Join(repo, "pkg"), [][2]string{
+			{filepath.Join(repo, "pkg/sub"), repo},
+			{"/workspace", ""},
+		}},
+		{"a worktree", worktree, [][2]string{
+			{filepath.Join(worktree, "sub"), repo},
+			{filepath.Join(worktree, "sub"), worktree},
+			{"/workspace/sub", "/workspace"},
+		}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			files := filepath.Join(t.TempDir(), "fixed")
+			run := codex.WalledRun{Projects: []string{c.checkout, "/workspace"}, Checkouts: []string{c.checkout}}
+			if _, err := codex.WriteWalledHome(t.TempDir(), files, run); err != nil {
+				t.Fatal(err)
+			}
+			var config struct {
+				Projects map[string]struct {
+					TrustLevel string `toml:"trust_level"`
+				}
+			}
+			if _, err := toml.DecodeFile(filepath.Join(files, "config.toml"), &config); err != nil {
+				t.Fatal(err)
+			}
+			for _, l := range c.lookups {
+				level := config.Projects[l[0]].TrustLevel
+				if level == "" && l[1] != "" {
+					level = config.Projects[l[1]].TrustLevel
+				}
+				if level != "untrusted" {
+					t.Errorf("cwd %s, git root %q: trust %q, want untrusted; projects %v", l[0], l[1], level, config.Projects)
+				}
+			}
+		})
+	}
+}
