@@ -41,7 +41,7 @@ func TestWalledArgs(t *testing.T) {
 		{[]string{"exec", "--approve-for-me", "hi"}, []string{"exec", "--approve-for-me", "hi"}},
 		{[]string{"exec", "--not-so-yolo", "hi"}, []string{"exec", "--not-so-yolo", "hi"}},
 		{[]string{"--approve-for-me", "exec", "hi"}, []string{"--approve-for-me", "exec", "hi"}},
-		{[]string{"exec", "--search", "hi"}, []string{"exec", "--sandbox", "danger-full-access", "--search", "hi"}},
+		{[]string{"exec", "--json", "hi"}, []string{"exec", "--sandbox", "danger-full-access", "--json", "hi"}},
 	} {
 		if got, err := w.WalledArgs(c.args); err != nil || !slices.Equal(got, c.want) {
 			t.Errorf("WalledArgs(%q) = %q, %v, want %q", c.args, got, err, c.want)
@@ -94,7 +94,7 @@ func TestWalledArgsRefuseAReservedConfigKey(t *testing.T) {
 	for _, args := range [][]string{
 		{"exec", "-c", "model_verbosity=low", "hi"},
 		{"exec", "-m", "gpt-5", "-C", "/w", "hi"},
-		{"exec", "--", "--oss", "--local-provider=x", "--profile", "x", "-px", "--enable", "apps"},
+		{"exec", "--", "--oss", "--local-provider=x", "--profile", "x", "-px", "--enable", "apps", "--search", "--ignore-user-config"},
 		{"exec", "--enable", "--json", "hi"},
 		{"exec", "--disable=", "hi"},
 		{"exec", "--config=hooks.Stop=[]", "hi"},
@@ -180,6 +180,37 @@ func TestWalledArgsRefuseAFeature(t *testing.T) {
 		got, err := w.WalledArgs(c.args)
 		if err == nil || err.Error() != want || got != nil {
 			t.Errorf("WalledArgs(%q) = %q, %v, want %q", c.args, got, err, want)
+		}
+	}
+}
+
+// TestWalledArgsRefuseSkippedSettingsAndSearch is --ignore-user-config and --search,
+// bare and with =, before exec, after it and after the prompt: each is refused with its
+// text.
+func TestWalledArgsRefuseSkippedSettingsAndSearch(t *testing.T) {
+	rt, err := render.Lookup("codex")
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := rt.(render.Walled)
+	ignore := "Remove `--ignore-user-config` from the run's Codex arguments: a Codex run takes its settings from qory and Forager, not from the arguments."
+	search := "Remove `--search` from the run's Codex arguments: a Codex run takes its web search setting from qory and Forager, not from the arguments."
+	for _, c := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"exec", "--ignore-user-config", "hi"}, ignore},
+		{[]string{"exec", "--ignore-user-config=true", "hi"}, ignore},
+		{[]string{"--ignore-user-config", "exec", "hi"}, ignore},
+		{[]string{"exec", "hi", "--ignore-user-config"}, ignore},
+		{[]string{"--search"}, search},
+		{[]string{"--search=true", "hi"}, search},
+		{[]string{"exec", "--search", "hi"}, search},
+		{[]string{"hi", "--search"}, search},
+	} {
+		got, err := w.WalledArgs(c.args)
+		if err == nil || err.Error() != c.want || got != nil {
+			t.Errorf("WalledArgs(%q) = %q, %v, want %q", c.args, got, err, c.want)
 		}
 	}
 }

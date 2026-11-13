@@ -32,8 +32,8 @@ func (codex) Install(version string) string { return "@openai/codex@" + version 
 // --sandbox (codex-rs/utils/cli/src/shared_options.rs). The prompt stays $<name>: no run
 // binds the home at [HomeInWall] yet, so a mention by that path, see [mentionByPath],
 // would lead to no skill. Arguments that set the model provider, a profile, a feature,
-// or a key of [reservedKeys] or [argReservedKeys] with --config or -c are refused, see
-// [checkArgs].
+// web search, or a key of [reservedKeys] or [argReservedKeys] with --config or -c, or
+// that skip qory's config.toml, are refused, see [checkArgs].
 func (codex) WalledArgs(args []string) ([]string, error) {
 	if err := checkArgs(args); err != nil {
 		return nil, err
@@ -70,6 +70,13 @@ const textFeatureArg = "Remove `%s %s` from the run's Codex arguments: a Codex r
 // or -p.
 const textProfileArg = "Remove `--profile` from the run's Codex arguments: a Codex run takes its settings from qory and Forager, not from a profile."
 
+// textIgnoreConfigArg is the refusal of a walled run whose Codex arguments contain
+// --ignore-user-config.
+const textIgnoreConfigArg = "Remove `--ignore-user-config` from the run's Codex arguments: a Codex run takes its settings from qory and Forager, not from the arguments."
+
+// textSearchArg is the refusal of a walled run whose Codex arguments contain --search.
+const textSearchArg = "Remove `--search` from the run's Codex arguments: a Codex run takes its web search setting from qory and Forager, not from the arguments."
+
 // argReservedKeys are the key paths that the arguments of a walled run may not set
 // beside [reservedKeys]. Forager sets model_reasoning_effort from the run's effort as a
 // --config flag; a harness's config.toml may still set it as a default.
@@ -81,6 +88,10 @@ var argReservedKeys = []reservedKey{{"model_reasoning_effort"}}
 //   - --oss, which starts Codex on an open-source model provider, or --local-provider,
 //     which names one, in the forms --local-provider <name> and --local-provider=<name>
 //     (codex-rs/utils/cli/src/shared_options.rs, oss and oss_provider);
+//   - --ignore-user-config, with which codex exec skips $CODEX_HOME/config.toml, the
+//     file qory writes (codex-rs/exec/src/cli.rs, ignore_user_config);
+//   - --search, with which an interactive codex turns on web search
+//     (codex-rs/tui/src/cli.rs, web_search);
 //   - --profile, which lays $CODEX_HOME/<name>.config.toml over the settings, in the
 //     forms --profile <name>, --profile=<name>, -p <name>, -p<name> and -p=<name>
 //     (the same file, config_profile_v2). -p is --profile in codex and in codex exec;
@@ -98,11 +109,13 @@ var argReservedKeys = []reservedKey{{"model_reasoning_effort"}}
 // the key of --config as the text before the first =, without spaces at either end,
 // with use_legacy_landlock read as features.use_legacy_landlock, as a dotted path
 // (codex-rs/config/src/overrides.rs). A key at a reserved path, under one, or above one,
-// whose table value sets the reserved path, is refused. Codex refuses a --config or -c
-// or an --enable or --disable with no value after it, or with a value that starts with
-// -, so such a flag passes here. Codex reads no long flag by a shortened name: its parser does not turn on
-// infer_long_args. Of its short flags, only -h and -V take no value, and both print and
-// exit, so no other flag comes before -c or -p in one word.
+// whose table value sets the reserved path, is refused. Codex refuses a --config, -c,
+// --enable or --disable with no value after it, or with a value that starts with -, so
+// such a flag passes here. --oss, --ignore-user-config and --search take no value, and
+// Codex refuses one given with =; such a form is refused here as well. Codex reads no
+// long flag by a shortened name: its parser does not turn on infer_long_args. Of its
+// short flags, only -h and -V take no value, and both print and exit, so no other flag
+// comes before -c or -p in one word.
 func checkArgs(args []string) error {
 	for i := 0; i < len(args); i++ {
 		a := args[i]
@@ -112,6 +125,10 @@ func checkArgs(args []string) error {
 			return nil
 		case a == "--oss" || strings.HasPrefix(a, "--oss="):
 			return fmt.Errorf(textProviderArg, "--oss")
+		case a == "--ignore-user-config" || strings.HasPrefix(a, "--ignore-user-config="):
+			return errors.New(textIgnoreConfigArg)
+		case a == "--search" || strings.HasPrefix(a, "--search="):
+			return errors.New(textSearchArg)
 		case a == "--local-provider" || strings.HasPrefix(a, "--local-provider="):
 			return fmt.Errorf(textProviderArg, "--local-provider")
 		case a == "--profile" || strings.HasPrefix(a, "--profile=") || strings.HasPrefix(a, "-p"):
