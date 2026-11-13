@@ -270,9 +270,11 @@ command = "/bin/true"
 
 // TestWalledConfigHashesMCPToolHooks is an MCP tool hook with a matcher, a nested input,
 // a timeout and a statusMessage, and an Interrupt one with Codex's default timeout of 1:
-// each gets the hash of the same JSON in Python as TestWalledConfigNormalizesAsCodex. A
-// SessionEnd hook and one with an empty server, which Codex skips, and one whose input
-// contains a float, whose JSON qory cannot write as Codex does, get none.
+// each gets the hash that Codex 0.167.2's app-server listed for it with hooks/list, with
+// status trusted. The same JSON in Python gives both, with each integer of the input
+// written as {"$serde_json::private::Number": "<n>"}. A SessionEnd hook and one with an
+// empty server, which Codex skips, and one whose input contains a float, whose JSON qory
+// cannot write as Codex does, get none.
 func TestWalledConfigHashesMCPToolHooks(t *testing.T) {
 	config := `[[hooks.PostToolUse]]
 matcher = "Bash"
@@ -306,7 +308,7 @@ input = { ratio = 0.5 }
 `
 	key := codex.HomeInWall + "/config.toml:"
 	want := map[string]string{
-		key + "post_tool_use:0:0": "sha256:182693a500c93bc9ac24f4af0de77b990c2a4a732b86819d0856884e9e75a4a6",
+		key + "post_tool_use:0:0": "sha256:93c4a017141461f73ceaab7222ee5dcf8ae0918f3ab5a0bbf99e1c4cf192d00a",
 		key + "interrupt:0:0":     "sha256:88ed5e40feedce2304ca60f03d0d19e063250ed610c100d054e81510b9e2633c",
 	}
 	if got := walledState(t, config, nil); !reflect.DeepEqual(got, want) {

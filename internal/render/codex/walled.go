@@ -556,12 +556,13 @@ func commandHandler(event string, handler map[string]any) map[string]any {
 }
 
 // mcpToolHandler is an MCP tool hook's handler as Codex normalizes it before the hash:
-// type, server and tool as written, input, an empty table when it has none, timeout
-// with Codex's default and limits, and statusMessage when it is set. nil for a
-// SessionEnd hook and for an empty server or tool, which Codex skips, for U+2028 or
-// U+2029 in a string, and for an input whose JSON qory cannot write as Codex does: one
-// with a float or a date anywhere in it. Codex writes a float with Rust's shortest form,
-// which differs from Go's for some values, and a TOML date as a table of its own.
+// type, server and tool as written, input, an empty table when it has none, see
+// [hashedInput], timeout with Codex's default and limits, and statusMessage when it is
+// set. nil for a SessionEnd hook and for an empty server or tool, which Codex skips, for
+// U+2028 or U+2029 in a string, and for an input that [hashedInput] cannot write.
+//
+// Codex 0.167.2's app-server, asked with hooks/list, gave the same hashes for inputs
+// with strings, booleans, integers, an array and a nested table, and the status trusted.
 func mcpToolHandler(event string, handler map[string]any) map[string]any {
 	if event == "SessionEnd" {
 		return nil
@@ -574,10 +575,14 @@ func mcpToolHandler(event string, handler map[string]any) map[string]any {
 	input := map[string]any{}
 	if v, ok := handler["input"]; ok {
 		m, ok := v.(map[string]any)
-		if !ok || !hashable(m) {
+		if !ok {
 			return nil
 		}
-		input = m
+		h, ok := hashedInput(m)
+		if !ok {
+			return nil
+		}
+		input = h.(map[string]any)
 	}
 	normalized := map[string]any{"type": "mcp_tool", "server": server, "tool": tool, "input": input, "timeout": hookTimeout(event, handler["timeout"])}
 	if s, ok := handler["statusMessage"].(string); ok {
@@ -589,38 +594,56 @@ func mcpToolHandler(event string, handler map[string]any) map[string]any {
 	return normalized
 }
 
-// hashable reports whether v, a value TOML decoded, is one whose JSON encoding/json writes
-// as serde_json does: a string without U+2028 or U+2029, an integer, a boolean, or a table
-// or array of such values.
-func hashable(v any) bool {
+// numberKey is the key of the table that serde_json writes in place of a number when it
+// is built with its arbitrary_precision feature, as Codex 0.167.2 is: the number's text
+// is the key's value.
+const numberKey = "$serde_json::private::Number"
+
+// hashedInput is v, a value TOML decoded in an MCP tool hook's input, as Codex writes it
+// in the hash: a string or a boolean as it is, an integer as a table of [numberKey] and
+// its decimal text, and a table or an array with each value so written. False for a
+// string with U+2028 or U+2029, which encoding/json escapes and serde_json does not, and
+// for a float or a date, whose text qory cannot write as Codex does.
+func hashedInput(v any) (any, bool) {
 	switch v := v.(type) {
 	case string:
-		return !lineSeparator(v)
-	case int64, bool:
-		return true
+		return v, !lineSeparator(v)
+	case bool:
+		return v, true
+	case int64:
+		return map[string]any{numberKey: strconv.FormatInt(v, 10)}, true
 	case map[string]any:
+		out := make(map[string]any, len(v))
 		for k, e := range v {
-			if lineSeparator(k) || !hashable(e) {
-				return false
+			h, ok := hashedInput(e)
+			if !ok || lineSeparator(k) {
+				return nil, false
 			}
+			out[k] = h
 		}
-		return true
+		return out, true
 	case []any:
-		for _, e := range v {
-			if !hashable(e) {
-				return false
+		out := make([]any, len(v))
+		for i, e := range v {
+			h, ok := hashedInput(e)
+			if !ok {
+				return nil, false
 			}
+			out[i] = h
 		}
-		return true
+		return out, true
 	case []map[string]any:
-		for _, e := range v {
-			if !hashable(e) {
-				return false
+		out := make([]any, len(v))
+		for i, e := range v {
+			h, ok := hashedInput(e)
+			if !ok {
+				return nil, false
 			}
+			out[i] = h
 		}
-		return true
+		return out, true
 	}
-	return false
+	return nil, false
 }
 
 // lineSeparator reports whether s contains U+2028 or U+2029. serde_json writes them as
