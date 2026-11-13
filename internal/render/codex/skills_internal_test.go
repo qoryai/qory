@@ -128,3 +128,50 @@ func TestSkillNamesOfARenamingLink(t *testing.T) {
 		t.Errorf("skill names %v, want %v", got, want)
 	}
 }
+
+// TestSkillNamesReadOnlyRegularFiles is a SKILL.md that is a link to a regular file, one
+// that is a link to /dev/zero, and a plugin manifest that is a link to /dev/zero, beside
+// a skill in a regular file: Codex passes over a SKILL.md that is a link, and qory reads
+// no device, so the names come from the regular file alone.
+func TestSkillNamesReadOnlyRegularFiles(t *testing.T) {
+	checkout := t.TempDir()
+	root := filepath.Join(checkout, ".agents/skills")
+	writeSkill(t, root, "here", "here")
+	writeSkill(t, checkout, "elsewhere", "elsewhere")
+	for rel, target := range map[string]string{
+		"linked/SKILL.md":                filepath.Join(checkout, "elsewhere/SKILL.md"),
+		"zero/SKILL.md":                  "/dev/zero",
+		"here/.codex-plugin/plugin.json": "/dev/zero",
+	} {
+		p := filepath.Join(root, rel)
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(target, p); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got, want := skillNames(root, checkout), []string{"here"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("skill names %v, want %v", got, want)
+	}
+}
+
+// TestFrontNameReadsTheHead is a SKILL.md whose frontmatter ends within the bytes qory
+// reads and one whose frontmatter does not: the first has its name, the second none.
+func TestFrontNameReadsTheHead(t *testing.T) {
+	dir := t.TempDir()
+	short, long := filepath.Join(dir, "short.md"), filepath.Join(dir, "long.md")
+	body := strings.Repeat("x", maxFrontmatter)
+	if err := os.WriteFile(short, []byte("---\nname: short\n---\n"+body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(long, []byte("---\ndescription: "+body+"\nname: long\n---\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := frontName(short); got != "short" {
+		t.Errorf("frontName(short) %q, want short", got)
+	}
+	if got := frontName(long); got != "" {
+		t.Errorf("frontName(long) %q, want none", got)
+	}
+}

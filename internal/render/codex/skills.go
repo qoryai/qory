@@ -2,10 +2,14 @@ package codex
 
 import (
 	"encoding/json"
+	"fmt"
+	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
+	"syscall"
 
 	"github.com/qoryai/qory/internal/compose"
 	"github.com/qoryai/qory/internal/module"
@@ -57,6 +61,14 @@ var pluginManifests = []string{".codex-plugin/plugin.json", ".claude-plugin/plug
 // (codex-rs/ext/skills/src/loader/mod.rs, MAX_SCAN_DEPTH).
 const maxScanDepth = 6
 
+// maxSkillSize is the largest file Codex 0.167.2 reads, a SKILL.md included
+// (codex-rs/exec-server/src/local_file_system_read.rs, MAX_READ_FILE_BYTES); Codex
+// loads no larger SKILL.md.
+const maxSkillSize = 512 << 20
+
+// maxFrontmatter is how much of a SKILL.md qory reads for its frontmatter's name.
+const maxFrontmatter = 1 << 20
+
 // skillFile is one SKILL.md below a root.
 type skillFile struct {
 	// path is the file as reached from the root.
@@ -65,8 +77,9 @@ type skillFile struct {
 	real string
 }
 
-// findSkills are the SKILL.md files below root, as Codex looks for them: folders down
-// to [maxScanDepth], links to folders followed, and a folder reached twice read once. It
+// findSkills are the SKILL.md files below root, as Codex looks for them: regular files of
+// at most [maxSkillSize] bytes, folders down to [maxScanDepth], links to folders followed
+// and links to files passed over, and a folder reached twice read once. It
 // also reads hidden folders, which Codex passes over, so the list is a superset. A root
 // that does not exist or is no folder has none, and an entry that cannot be read is
 // passed over, as Codex passes over both. When bound is not "", only folders whose real
@@ -96,17 +109,22 @@ func findSkills(root, bound string) []skillFile {
 		}
 		for _, e := range entries {
 			p := filepath.Join(dir, e.Name())
-			info, err := os.Stat(p)
+			info, err := os.Lstat(p)
 			if err != nil {
 				continue
 			}
-			if info.IsDir() {
+			if info.Mode()&fs.ModeSymlink != 0 {
+				// Codex follows a link to a folder and passes over a link to a file.
+				if info, err = os.Stat(p); err != nil || !info.IsDir() {
+					continue
+				}
+			}
+			switch {
+			case info.IsDir():
 				if depth < maxScanDepth {
 					walk(p, depth+1)
 				}
-				continue
-			}
-			if e.Name() == "SKILL.md" {
+			case e.Name() == "SKILL.md" && info.Mode().IsRegular() && info.Size() <= maxSkillSize:
 				r, err := filepath.EvalSymlinks(p)
 				if err != nil {
 					continue
@@ -184,11 +202,12 @@ func namesOf(root string, f skillFile, stop string) []string {
 }
 
 // frontName is the name in the frontmatter of the SKILL.md at file, with its white space
-// folded as Codex folds it; "" when there is none. A frontmatter that YAML cannot read
-// gives the value of its first top-level name: line, since Codex repairs some values
-// before it reads them.
+// folded as Codex folds it; "" when there is none, when file is no regular file, and when
+// the frontmatter does not end within the first [maxFrontmatter] bytes. A frontmatter
+// that YAML cannot read gives the value of its first top-level name: line, since Codex
+// repairs some values before it reads them.
 func frontName(file string) string {
-	data, err := os.ReadFile(file)
+	data, err := readHead(file, maxFrontmatter, true)
 	if err != nil {
 		return ""
 	}
@@ -204,12 +223,35 @@ func frontName(file string) string {
 	return ""
 }
 
+// readHead is up to n bytes from the start of the regular file at file. It reads no device
+// or pipe, and with noFollow it opens no link, so a link swapped in after the scan reads
+// nothing.
+func readHead(file string, n int64, noFollow bool) ([]byte, error) {
+	flags := os.O_RDONLY | syscall.O_NONBLOCK
+	if noFollow {
+		flags |= syscall.O_NOFOLLOW
+	}
+	f, err := os.OpenFile(file, flags, 0)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("%s is no regular file", file)
+	}
+	return io.ReadAll(io.LimitReader(f, n))
+}
+
 // pluginName is the name of the plugin whose manifest is in dir, as Codex reads it: the
 // manifest's name, or dir's name when that is empty; "" when dir has no manifest that
-// JSON reads.
+// JSON reads within its first [maxFrontmatter] bytes, or no regular file there.
 func pluginName(dir string) string {
 	for _, m := range pluginManifests {
-		data, err := os.ReadFile(filepath.Join(dir, m))
+		data, err := readHead(filepath.Join(dir, m), maxFrontmatter, false)
 		if err != nil {
 			continue
 		}

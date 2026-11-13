@@ -279,11 +279,11 @@ func copyTree(src, dst string) error {
 }
 
 // WalledConfig is config, a config.toml the compose rendered, with what a walled run adds
-// for a Codex whose home is home in the wall: projects."<path>".trust_level =
-// "untrusted" for each of projects, the paths where the run's checkout is in the wall,
-// so Codex reads no hook, rule or setting of the repository's .codex and writes no
-// trust of its own; and hooks.state."<home>/config.toml:<event>:<group>:<handler>".trusted_hash
-// for each command hook of config's hooks, so Codex runs the harness's hooks without
+// for a Codex whose home is home in the wall: projects."<path>".trust_level = "untrusted"
+// for each of projects, the paths where the run's checkout is in the wall, so Codex reads
+// no hook, rule or setting of the repository's .codex and writes no trust of its own; and
+// hooks.state."<home>/config.toml:<event>:<group>:<handler>".trusted_hash for each
+// command and MCP tool hook of config's hooks, so Codex runs the harness's hooks without
 // --dangerously-bypass-hook-trust, which would trust an agent's hooks too. home is
 // absolute and contains no link, as Codex resolves it.
 //
@@ -395,35 +395,23 @@ var contextEvents = map[string]bool{
 // defaultContextLimit is the additionalContextLimit Codex leaves out of the hash.
 const defaultContextLimit = 2500
 
-// hookHash is the trusted_hash Codex computes for one command hook of event in group
+// hookHash is the trusted_hash Codex computes for one hook of event in group
 // (codex-rs/hooks/src/engine/discovery.rs, hook_hash, and
 // codex-rs/config/src/fingerprint.rs, version_for_toml): "sha256:" and the SHA-256 of
 // the compact JSON, keys sorted, of the event's label, the matcher where the event takes
-// one, and the one handler normalized: type, command as written, timeout with Codex's
-// default and limits, async, and statusMessage and additionalContextLimit when they
-// count. False for a handler that is no command, for a command of only white space,
-// which Codex skips, and for a hook with U+2028 or U+2029 in its command, statusMessage or
-// matcher, see [lineSeparator]; none of them gets trust.
+// one, and the one handler normalized, see [commandHandler] and [mcpToolHandler]. False
+// for a handler of any other type, for one Codex skips, and for a hook with U+2028 or
+// U+2029 in its matcher, see [lineSeparator]; none of them gets trust.
 func hookHash(event string, group, handler map[string]any) (string, bool, error) {
-	if handler["type"] != "command" {
+	var normalized map[string]any
+	switch handler["type"] {
+	case "command":
+		normalized = commandHandler(event, handler)
+	case "mcp_tool":
+		normalized = mcpToolHandler(event, handler)
+	}
+	if normalized == nil {
 		return "", false, nil
-	}
-	command, ok := handler["command"].(string)
-	if !ok || strings.TrimSpace(command) == "" {
-		return "", false, nil
-	}
-	if lineSeparator(command) {
-		return "", false, nil
-	}
-	normalized := map[string]any{"type": "command", "command": command, "timeout": hookTimeout(event, handler["timeout"]), "async": handler["async"] == true}
-	if s, ok := handler["statusMessage"].(string); ok {
-		if lineSeparator(s) {
-			return "", false, nil
-		}
-		normalized["statusMessage"] = s
-	}
-	if n, ok := handler["additionalContextLimit"].(int64); ok && contextEvents[event] && n != defaultContextLimit {
-		normalized["additionalContextLimit"] = n
 	}
 	identity := map[string]any{"event_name": eventLabels[event], "hooks": []any{normalized}}
 	if matcher, ok := group["matcher"].(string); ok && matched[event] {
@@ -436,10 +424,101 @@ func hookHash(event string, group, handler map[string]any) (string, bool, error)
 	enc := json.NewEncoder(&b)
 	enc.SetEscapeHTML(false)
 	if err := enc.Encode(identity); err != nil {
-		return "", false, fmt.Errorf("hash the %s hook %q: %w", event, command, err)
+		return "", false, fmt.Errorf("hash a %s hook: %w", event, err)
 	}
 	sum := sha256.Sum256(bytes.TrimSuffix(b.Bytes(), []byte("\n")))
 	return "sha256:" + hex.EncodeToString(sum[:]), true, nil
+}
+
+// commandHandler is a command hook's handler as Codex normalizes it before the hash:
+// type, command as written, timeout with Codex's default and limits, async, and
+// statusMessage and additionalContextLimit when they count. nil for a command of only
+// white space, which Codex skips, and for U+2028 or U+2029 in the command or
+// statusMessage.
+func commandHandler(event string, handler map[string]any) map[string]any {
+	command, ok := handler["command"].(string)
+	if !ok || strings.TrimSpace(command) == "" || lineSeparator(command) {
+		return nil
+	}
+	normalized := map[string]any{"type": "command", "command": command, "timeout": hookTimeout(event, handler["timeout"]), "async": handler["async"] == true}
+	if s, ok := handler["statusMessage"].(string); ok {
+		if lineSeparator(s) {
+			return nil
+		}
+		normalized["statusMessage"] = s
+	}
+	if n, ok := handler["additionalContextLimit"].(int64); ok && contextEvents[event] && n != defaultContextLimit {
+		normalized["additionalContextLimit"] = n
+	}
+	return normalized
+}
+
+// mcpToolHandler is an MCP tool hook's handler as Codex normalizes it before the hash:
+// type, server and tool as written, input, an empty table when it has none, timeout
+// with Codex's default and limits, and statusMessage when it is set. nil for a
+// SessionEnd hook and for an empty server or tool, which Codex skips, for U+2028 or
+// U+2029 in a string, and for an input whose JSON qory cannot write as Codex does: one
+// with a float or a date anywhere in it. Codex writes a float with Rust's shortest form,
+// which differs from Go's for some values, and a TOML date as a table of its own.
+func mcpToolHandler(event string, handler map[string]any) map[string]any {
+	if event == "SessionEnd" {
+		return nil
+	}
+	server, _ := handler["server"].(string)
+	tool, _ := handler["tool"].(string)
+	if strings.TrimSpace(server) == "" || strings.TrimSpace(tool) == "" || lineSeparator(server) || lineSeparator(tool) {
+		return nil
+	}
+	input := map[string]any{}
+	if v, ok := handler["input"]; ok {
+		m, ok := v.(map[string]any)
+		if !ok || !hashable(m) {
+			return nil
+		}
+		input = m
+	}
+	normalized := map[string]any{"type": "mcp_tool", "server": server, "tool": tool, "input": input, "timeout": hookTimeout(event, handler["timeout"])}
+	if s, ok := handler["statusMessage"].(string); ok {
+		if lineSeparator(s) {
+			return nil
+		}
+		normalized["statusMessage"] = s
+	}
+	return normalized
+}
+
+// hashable reports whether v, a value TOML decoded, is one whose JSON encoding/json writes
+// as serde_json does: a string without U+2028 or U+2029, an integer, a boolean, or a table
+// or array of such values.
+func hashable(v any) bool {
+	switch v := v.(type) {
+	case string:
+		return !lineSeparator(v)
+	case int64, bool:
+		return true
+	case map[string]any:
+		for k, e := range v {
+			if lineSeparator(k) || !hashable(e) {
+				return false
+			}
+		}
+		return true
+	case []any:
+		for _, e := range v {
+			if !hashable(e) {
+				return false
+			}
+		}
+		return true
+	case []map[string]any:
+		for _, e := range v {
+			if !hashable(e) {
+				return false
+			}
+		}
+		return true
+	}
+	return false
 }
 
 // lineSeparator reports whether s contains U+2028 or U+2029. serde_json writes them as

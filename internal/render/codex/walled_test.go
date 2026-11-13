@@ -123,8 +123,9 @@ func TestWalledConfigIsGolden(t *testing.T) {
 
 // TestWalledConfigHashesAsTrustHook is a hook in each place of the key: the hash is the
 // one trust-hook.py computes for the same command, whatever the group, the handler, the
-// matcher of an event that takes none, or an async false written out. The hash of
-// /bin/false comes from the same JSON in Python, with no matcher, since Stop takes none:
+// matcher of an event that takes none, or an async false written out. The hashes of
+// /bin/false and of the MCP tool hook come from the same JSON in Python, with no
+// matcher, since Stop takes none:
 //
 //	json.dumps(identity, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
 func TestWalledConfigHashesAsTrustHook(t *testing.T) {
@@ -147,6 +148,7 @@ async = false
 	state := walledState(t, config, nil)
 	want := map[string]string{
 		"/tmp/qory-codex-home/config.toml:stop:0:0": "sha256:5cde819ee8866303693164854d02d8bfc2d76a0b837bb47a63777a72243e20db",
+		"/tmp/qory-codex-home/config.toml:stop:1:0": "sha256:a32fadf67dd9ba6b779757c3db73589e436c56976457f459c05f7e453a1f589f",
 		"/tmp/qory-codex-home/config.toml:stop:1:1": endCheckHash,
 	}
 	if len(state) != len(want) {
@@ -156,9 +158,6 @@ async = false
 		if got, ok := state[key]; !ok || got != hash {
 			t.Errorf("%s: %q, want %s", key, got, hash)
 		}
-	}
-	if _, ok := state["/tmp/qory-codex-home/config.toml:stop:1:0"]; ok {
-		t.Error("the MCP tool hook got a trusted_hash")
 	}
 }
 
@@ -255,6 +254,52 @@ command = "/bin/true"
 `
 	want := map[string]string{
 		codex.HomeInWall + "/config.toml:stop:0:2": "sha256:62952c1af1eb1d3c580409562f1776a3da6cc48eefdc6cb6a3b04528df5d043b",
+	}
+	if got := walledState(t, config, nil); !reflect.DeepEqual(got, want) {
+		t.Errorf("hooks.state:\n%v\nwant:\n%v", got, want)
+	}
+}
+
+// TestWalledConfigHashesMCPToolHooks is an MCP tool hook with a matcher, a nested input,
+// a timeout and a statusMessage, and an Interrupt one with Codex's default timeout of 1:
+// each gets the hash of the same JSON in Python as TestWalledConfigNormalizesAsCodex. A
+// SessionEnd hook and one with an empty server, which Codex skips, and one whose input
+// contains a float, whose JSON qory cannot write as Codex does, get none.
+func TestWalledConfigHashesMCPToolHooks(t *testing.T) {
+	config := `[[hooks.PostToolUse]]
+matcher = "Bash"
+[[hooks.PostToolUse.hooks]]
+type = "mcp_tool"
+server = "db"
+tool = "log"
+timeout = 30
+statusMessage = "checking"
+input = { path = "/x", depth = 2, flags = [true, "a"], nested = { b = 1, a = "z" } }
+[[hooks.Interrupt]]
+[[hooks.Interrupt.hooks]]
+type = "mcp_tool"
+server = "db"
+tool = "stop"
+[[hooks.SessionEnd]]
+[[hooks.SessionEnd.hooks]]
+type = "mcp_tool"
+server = "db"
+tool = "end"
+[[hooks.Stop]]
+[[hooks.Stop.hooks]]
+type = "mcp_tool"
+server = " "
+tool = "t"
+[[hooks.Stop.hooks]]
+type = "mcp_tool"
+server = "db"
+tool = "t"
+input = { ratio = 0.5 }
+`
+	key := codex.HomeInWall + "/config.toml:"
+	want := map[string]string{
+		key + "post_tool_use:0:0": "sha256:182693a500c93bc9ac24f4af0de77b990c2a4a732b86819d0856884e9e75a4a6",
+		key + "interrupt:0:0":     "sha256:88ed5e40feedce2304ca60f03d0d19e063250ed610c100d054e81510b9e2633c",
 	}
 	if got := walledState(t, config, nil); !reflect.DeepEqual(got, want) {
 		t.Errorf("hooks.state:\n%v\nwant:\n%v", got, want)
