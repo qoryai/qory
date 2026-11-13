@@ -501,13 +501,16 @@ release may change what an existing document does, and states it under Upgrading
   `tree`, `less`, `bc`, `envsubst`, `rsync` and `patch`, from the same Debian snapshot.
   `images/agent-go`, with the images `agent-go` and `agent-go-docker`, is removed: build
   an image with Go FROM `agent` or `agent-docker`. See Qory's images in `docs/run.md`.
-- Claude Code runs with `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` and
-  `CLAUDE_CODE_DISABLE_OFFICIAL_MARKETPLACE_AUTOINSTALL=1` in every run,
-  walled or not, and the `env` of its `--settings` copy sets both.
-  Forager fixes the two values, so a value from the server's run
-  configuration, `--env`, `wall.env`, `env` in `qory.yaml`, the `env` of
-  `harness.launch.claude`, a settings fragment, a module's export or the
-  shell `qory run` starts in is not used.
+- Claude Code runs with `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`,
+  `CLAUDE_CODE_DISABLE_OFFICIAL_MARKETPLACE_AUTOINSTALL=1` and
+  `CLAUDE_CODE_MAX_RETRIES=15` in every run, walled or not, and the `env`
+  of its `--settings` copy sets all three. Forager fixes the three values,
+  so a value from the server's run configuration, `--env`, `wall.env`,
+  `env` in `qory.yaml`, the `env` of `harness.launch.claude`, a settings
+  fragment, a module's export or the shell `qory run` starts in is not
+  used. Claude Code tries a failed API request up to 15 times, up from 10,
+  so a run goes on through a longer outage of its proxy, such as a restart
+  of a separate gateway.
 - In a run from a run code, `events.jsonl` in the run's record has
   `dev.qory.runtime.text` for each text and thinking block of the main
   conversation, `dev.qory.runtime.tool_result` for each tool result the
