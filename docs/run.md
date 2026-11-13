@@ -4255,7 +4255,7 @@ docker build -t qory-prebuild --build-arg BASE=qory-agent-docker images/prebuild
 
 | Image | What it holds |
 |---|---|
-| `agent` | Claude Code at the version Forager's descriptor sets, `git`, `gh`, Node, the system's authorities, Chromium, and the tools under **Tools** below |
+| `agent` | Claude Code at the version Forager's descriptor sets, Codex 0.167.2, `git`, `gh`, Node, the system's authorities, Chromium, and the tools under **Tools** below |
 | `agent-docker` | `agent`, and Docker's daemon and command |
 | `prebuild` | `agent-docker`, the `devcontainer` command `@devcontainers/cli` 0.89.0, and Docker's `buildx` plugin: the image a prebuild runs in behind its wall |
 

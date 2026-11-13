@@ -298,6 +298,7 @@ release may change what an existing document does, and states it under Upgrading
   exit status, and a control plane can continue the run. `qory run resend` says the end
   of such a run as `paused: every model key reached its limit`. `qory apiary run list
   --state paused` lists the paused runs. See `docs/run.md`.
+- The `agent` image contains Codex 0.167.2.
 
 ### Changed
 

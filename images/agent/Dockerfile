@@ -1,15 +1,15 @@
 # agent: the image the wall runs the agent in, the base every other agent image of
 # Qory's is built FROM. It contains what qory's harness launches and the tools a run may
 # need to deliver its work: Claude Code at the version Forager's descriptor for it sets,
-# git, the GitHub command, Chromium with Noto's fonts for Latin and other scripts, CJK
-# and color emoji, ffmpeg and ffprobe, ImageMagick, poppler's pdftoppm (Claude Code
-# renders a PDF's pages with it), qpdf, rsvg-convert, Graphviz, Tesseract OCR with
-# 28 European languages, pandoc, Python 3 with PyYAML, Requests, Beautiful Soup, lxml,
-# cssselect, Pillow, openpyxl and python-docx, jq, yq, curl, ripgrep, SQLite, zip,
-# unzip, xz, file, tree, less, bc, envsubst, rsync, patch, and the system's authorities
-# where the wall reads them. It runs as any user the machine gives it, with HOME a
-# directory every user may write, and contains no setuid or setgid program. It sets no
-# entry point: the wall starts the launch command, or qory's helper, itself.
+# Codex, git, the GitHub command, Chromium with Noto's fonts for Latin and other
+# scripts, CJK and color emoji, ffmpeg and ffprobe, ImageMagick, poppler's pdftoppm
+# (Claude Code renders a PDF's pages with it), qpdf, rsvg-convert, Graphviz, Tesseract
+# OCR with 28 European languages, pandoc, Python 3 with PyYAML, Requests, Beautiful
+# Soup, lxml, cssselect, Pillow, openpyxl and python-docx, jq, yq, curl, ripgrep,
+# SQLite, zip, unzip, xz, file, tree, less, bc, envsubst, rsync, patch, and the system's
+# authorities where the wall reads them. It runs as any user the machine gives it, with
+# HOME a directory every user may write, and contains no setuid or setgid program. It
+# sets no entry point: the wall starts the launch command, or qory's helper, itself.
 #
 # Every version and every sum is a build argument, with its default below. Build it from
 # a checkout of qory at the commit qory version prints, for linux/amd64 or linux/arm64:
@@ -45,6 +45,12 @@ ARG CLAUDE_CODE_VERSION=2.1.316
 ARG CLAUDE_CODE_SHA512=8b7069cf20e47023e7b1ad024a45a0c463eced632ccaa0e4c64a93d120f1c840b95cc2311267149a5b964471bd55278163c572bfe97d5f7e09bc9fc18f9e2705
 ARG CLAUDE_CODE_SHA512_AMD64=4500cce8ddbce488cd29c9a53d1ae26b2373a5390426b780c39fef054f95d11dea963910e73ebfa526f37155005ef6aca0e96fb9bd112266b7356bd2b9903c0a
 ARG CLAUDE_CODE_SHA512_ARM64=c6a9409218122c231d71a7a940d22cd7eca6e57f7ef9aa6211e39cd0b1d154e1e97cb96960a01a01705171c33a4152133744fdb172c221bcbb08ed4b733bac83
+# Codex. The sums are npm's dist.integrity, sha512 in hex, of @openai/codex and of its
+# native build for each platform, @openai/codex@<version>-linux-x64 and -linux-arm64.
+ARG CODEX_VERSION=0.167.2
+ARG CODEX_SHA512=e8e164af69ddcd37456f7d8e12252533d060a5e63cfb09cc7bcbd186ebedfb6d939f1551dfd2a7276d8685acbdf0863d3a6125b6836014de0600b524c454023b
+ARG CODEX_SHA512_AMD64=d91c375645a89ccc7009280ec3e36488a2ceb8ecf2a103569b153bc7c1a789eb1d31f84a7386ac36a3b34e043024b282ad294f738ffa7d84da1fb7d872e19619
+ARG CODEX_SHA512_ARM64=c7f3e13d1ab45fe841643a97284d18226e0d6684b2085f7d29c2495919f407658d766624dde043b6334ee7ec25ef358c081c234ce7afe53cf6659ebe635e1840
 
 FROM --platform=$BUILDPLATFORM ${FETCH_IMAGE} AS gh
 ARG TARGETARCH
@@ -81,10 +87,31 @@ RUN printf '%s  %s\n' "${CLAUDE_CODE_SHA512}" /out/claude-code.tgz "${CLAUDE_COD
 
 FROM claude-${TARGETARCH} AS claude
 
+FROM --platform=$BUILDPLATFORM ${FETCH_IMAGE} AS codex-amd64
+ARG CODEX_VERSION
+ARG CODEX_SHA512
+ARG CODEX_SHA512_AMD64
+ADD https://registry.npmjs.org/@openai/codex/-/codex-${CODEX_VERSION}.tgz /out/codex.tgz
+ADD https://registry.npmjs.org/@openai/codex/-/codex-${CODEX_VERSION}-linux-x64.tgz /out/codex-native.tgz
+RUN printf '%s  %s\n' "${CODEX_SHA512}" /out/codex.tgz "${CODEX_SHA512_AMD64}" /out/codex-native.tgz \
+    | sha512sum -c -
+
+FROM --platform=$BUILDPLATFORM ${FETCH_IMAGE} AS codex-arm64
+ARG CODEX_VERSION
+ARG CODEX_SHA512
+ARG CODEX_SHA512_ARM64
+ADD https://registry.npmjs.org/@openai/codex/-/codex-${CODEX_VERSION}.tgz /out/codex.tgz
+ADD https://registry.npmjs.org/@openai/codex/-/codex-${CODEX_VERSION}-linux-arm64.tgz /out/codex-native.tgz
+RUN printf '%s  %s\n' "${CODEX_SHA512}" /out/codex.tgz "${CODEX_SHA512_ARM64}" /out/codex-native.tgz \
+    | sha512sum -c -
+
+FROM codex-${TARGETARCH} AS codex
+
 FROM ${NODE_IMAGE}
 ARG NODE_IMAGE
 ARG DEBIAN_SNAPSHOT
 ARG CLAUDE_CODE_VERSION
+ARG CODEX_VERSION
 
 # From the snapshot, through a copy of the base's sources that names it; the image keeps
 # the base's apt sources, so what is built FROM it installs from Debian as usual. Retries
@@ -182,13 +209,30 @@ RUN --mount=type=bind,from=claude,source=/out,target=/tmp/claude \
  && rm -rf /root/.npm \
  && test "$(claude --version | cut -d' ' -f1)" = "${CLAUDE_CODE_VERSION}"
 
+# The launcher from its checked archive, with no registry and no install script, then the
+# native build's vendor/ folder from the second archive into the launcher's package,
+# where bin/codex.js looks for it: the native archive's package is also named
+# @openai/codex, so npm cannot install it beside the launcher. Codex writes
+# $CODEX_HOME/tmp at every start, so the version test runs on a home under /tmp.
+RUN --mount=type=bind,from=codex,source=/out,target=/tmp/codex \
+    npm install --global --offline --omit=optional --ignore-scripts --no-fund --no-audit --no-update-notifier \
+      /tmp/codex/codex.tgz \
+ && tar -xzf /tmp/codex/codex-native.tgz -C "$(npm root --global)/@openai/codex" \
+      --strip-components=1 --no-same-owner package/vendor \
+ && npm cache clean --force \
+ && rm -rf /root/.npm \
+ && test "$(HOME=/tmp/codex-check CODEX_HOME=/tmp/codex-check/codex codex --version 2>/dev/null)" = "codex-cli ${CODEX_VERSION}" \
+ && rm -rf /tmp/codex-check
+
 COPY --from=gh /out/bin/gh /usr/local/bin/gh
 
 # Each tool runs, Chromium from /usr/bin, Tesseract lists each language installed, and
-# fontconfig lists a font of each Noto package; a check that fails prints its fix. HOME
-# is one directory every user may write, with the sticky bit, because the wall runs the
-# agent as the machine's user id, which has no entry in this image.
-RUN gh --version \
+# fontconfig lists a font of each Noto package, and /etc/codex is absent: Codex reads
+# system configuration and hooks from that fixed path. A check that fails prints its
+# fix. HOME is one directory every user may write, with the sticky bit, because the wall
+# runs the agent as the machine's user id, which has no entry in this image.
+RUN { test ! -e /etc/codex || { echo "Remove /etc/codex: Codex reads system configuration and hooks from it" >&2; exit 1; }; } \
+ && gh --version \
  && git --version \
  && pdftoppm -v \
  && rg --version \
@@ -244,6 +288,6 @@ ENTRYPOINT []
 CMD []
 
 LABEL org.opencontainers.image.title="agent" \
-      org.opencontainers.image.description="The image Qory's wall runs the agent in: Claude Code, git, gh, Chromium and the tools a run may need, for any user." \
+      org.opencontainers.image.description="The image Qory's wall runs the agent in: Claude Code, Codex, git, gh, Chromium and the tools a run may need, for any user." \
       org.opencontainers.image.source="https://github.com/qoryai/qory" \
       org.opencontainers.image.base.name="${NODE_IMAGE}"
