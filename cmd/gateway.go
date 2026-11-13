@@ -61,6 +61,8 @@ that file exists, enrols with the enrolment code Qory Apiary wrote there, and st
 ` + gatewayMachinesHelp + `
 
 SIGINT or SIGTERM stops it: it takes no new run, sends what it holds, and exits 0.
+Stopping keeps the gateway's runs: a gateway started again on the same directory within
+120 seconds continues them.
 
 More: ` + gatewayDocs,
 		Example: `  qory gateway                          # on gateway.listen of ` + config.ForagerFileName + `

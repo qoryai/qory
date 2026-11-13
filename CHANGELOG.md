@@ -301,9 +301,15 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Changed
 
-- qory builds with Forager main 1b3071e2. A run keeps its wall only when a container of
+- qory builds with Forager main 37dc0148. A run keeps its wall only when a container of
   the run may still run; a network or folder of the wall that could not be removed no longer
   keeps it.
+- `qory gateway` keeps its runs when SIGINT or SIGTERM stops it: a gateway started again
+  on the same directory within 120 seconds continues them, and the agent sessions behind
+  it go on. Before, a run open at a gateway that stopped was over. The directory is
+  `qory/gateway` in qory's state directory; keep it on a volume that outlives the
+  gateway's container. During a deploy, do not run `qory run resend` on a run of the
+  gateway's directory: it ends the run with `gateway_lost`.
 - A run may have several model keys of one provider: when the provider returns `429` for a request at a key's limit, the
   gateway's proxy sends the request again with the next key. When every key is at its limit, the
   session stops the runtime and ends `paused` with the reason `model_key_limit`. A
