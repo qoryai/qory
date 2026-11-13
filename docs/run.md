@@ -1641,9 +1641,12 @@ the work item. Then a run of the step explore:
 
   `amp`, `copilot`, `goose` and `any` have no headless start, so a run from a run code
   does not start on them. Behind a wall, `codex exec` also gets `--sandbox
-  danger-full-access` right after `exec`, unless its arguments set a sandbox mode or
-  bypass one: in the wall every other sandbox mode of Codex fails before it runs a
-  command, and the wall is the limit of what the agent changes;
+  danger-full-access` right after `exec`: in the wall every other sandbox mode of Codex
+  fails before it runs a command, and the wall is the limit of what the agent changes.
+  The arguments stay as they are when one of them before `--`, before `exec` or after
+  it, sets a sandbox mode (`--sandbox`, `-s`, `-s<mode>`), bypasses one (`--yolo`,
+  `--dangerously-bypass-approvals-and-sandbox`), or is `--approve-for-me` or
+  `--not-so-yolo`, which Codex refuses beside `--sandbox`;
 - takes its time limit as [Time limits](#time-limits) says.
 
 So the command line sets none of these. After the redemption, qory prints `qory run: the
