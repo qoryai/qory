@@ -800,18 +800,18 @@ release may change what an existing document does, and states it under Upgrading
 - A walled Codex run refuses Codex arguments before `--` that set one of those keys or
   `model_reasoning_effort`, a key under one, or a table above one, such as
   `-c features.shell_snapshot=true` or `--config model_providers={}`, in the forms
-  `--config`, `--config=`, `-c` and `-c<key>=<value>`, with ``Remove `--config <key>`
-  from the run's Codex arguments: a Codex run takes this key from qory and Forager, not
-  from the arguments.`` The run stops before the agent starts, with exit status 1.
+  `--config`, `--config=`, `-c`, `-c<key>=<value>` and `-c=<key>=<value>`, with
+  ``Remove `--config <key>` from the run's Codex arguments: a Codex run takes this key
+  from qory and Forager, not from the arguments.`` The run stops before the agent starts, with exit status 1.
   Forager puts its `--config` flags first, and Codex takes the last one for a key. An
   unwalled run is unchanged.
 - A walled Codex run refuses `--oss` and `--local-provider` before `--`, with
   ``Remove `<flag>` from the run's Codex arguments: a Codex run takes its model provider
   from qory and Forager, not from the arguments.``, and `--profile` in the forms
-  `--profile <name>`, `--profile=<name>`, `-p <name>` and `-p<name>`, with ``Remove
-  `--profile` from the run's Codex arguments: a Codex run takes its settings from qory
-  and Forager, not from a profile.`` The run stops before the agent starts, with exit
-  status 1. An unwalled run, and a run of another runtime, is unchanged.
+  `--profile <name>`, `--profile=<name>`, `-p <name>`, `-p<name>` and `-p=<name>`, with
+  ``Remove `--profile` from the run's Codex arguments: a Codex run takes its settings
+  from qory and Forager, not from a profile.`` The run stops before the agent starts,
+  with exit status 1. An unwalled run, and a run of another runtime, is unchanged.
 - A walled Codex run refuses `--enable <feature>` and `--disable <feature>` before `--`,
   also as `--enable=<feature>`, for every feature, the legacy name `connectors` too:
   Codex reads them as `--config features.<feature>=true` or `false`. The text is
@@ -822,6 +822,17 @@ release may change what an existing document does, and states it under Upgrading
   from qory and Forager, not from the arguments.``, and `--search`, with ``Remove
   `--search` from the run's Codex arguments: a Codex run takes its web search setting
   from qory and Forager, not from the arguments.``
+- A walled Codex run refuses `--dangerously-bypass-hook-trust` before `--`, with
+  ``Remove `--dangerously-bypass-hook-trust` from the run's Codex arguments: a Codex run
+  takes its hook trust from qory and Forager, not from the arguments.``, and `--remote`
+  and `--remote-auth-token-env`, also with `=`, with ``Remove `--remote` from the run's
+  Codex arguments: a Codex run takes its app server from qory and Forager, not from the
+  arguments.`` (`--remote-auth-token-env` likewise).
+- A walled Codex run refuses `--config` keys at `skills` or `cloud.skills`, under one,
+  or above one, such as `-c skills.bundled.enabled=true` or `-c cloud={}`, with the
+  `--config` line.
+- A refusal of a walled Codex run's arguments writes each control character of the key
+  or feature it repeats as an escape, such as `\n`.
 - On a walled Codex run that lists repositories, the `Check tools` setup step fails when
   the image has anything at `/etc/codex`, with ``Use an image without /etc/codex: Codex
   reads its settings there before qory's, so the run does not start.`` A write run in a

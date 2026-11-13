@@ -3702,6 +3702,40 @@ What to know:
   log, the egress record and the structured output are there. On a Linux host, the hooks
   cross.
 
+### Codex arguments a walled run refuses
+
+qory and Forager set the model provider, the settings and the hooks of a walled Codex
+run. Forager puts its `--config` flags ahead of the run's Codex arguments, and Codex
+takes the last flag for a key. So a walled Codex run stops before the agent starts, with
+exit status 1, when an argument before `--` is one of these:
+
+- `--config <key>=<value>` in the forms `--config`, `--config=`, `-c`, `-c<key>=<value>`
+  and `-c=<key>=<value>`, where the key is a key qory or Forager sets, `skills` or
+  `cloud.skills`, a key under one, or a table above one, such as `cloud`. The line is
+  ``Remove `--config <key>` from the run's Codex arguments: a Codex run takes this key
+  from qory and Forager, not from the arguments.``
+- `--enable <feature>` or `--disable <feature>`, also with `=`, for every feature:
+  ``Remove `--enable <feature>` from the run's Codex arguments: a Codex run takes this key
+  from qory and Forager, not from the arguments.``
+- `--oss` or `--local-provider`: ``Remove `<flag>` from the run's Codex arguments: a Codex
+  run takes its model provider from qory and Forager, not from the arguments.``
+- `--profile <name>`, `--profile=<name>`, `-p <name>`, `-p<name>` or `-p=<name>`:
+  ``Remove `--profile` from the run's Codex arguments: a Codex run takes its settings
+  from qory and Forager, not from a profile.``
+- `--ignore-user-config`: ``Remove `--ignore-user-config` from the run's Codex arguments:
+  a Codex run takes its settings from qory and Forager, not from the arguments.``
+- `--search`: ``Remove `--search` from the run's Codex arguments: a Codex run takes its
+  web search setting from qory and Forager, not from the arguments.``
+- `--dangerously-bypass-hook-trust`: ``Remove `--dangerously-bypass-hook-trust` from the
+  run's Codex arguments: a Codex run takes its hook trust from qory and Forager, not from
+  the arguments.``
+- `--remote <addr>` or `--remote-auth-token-env <name>`, also with `=`: ``Remove
+  `--remote` from the run's Codex arguments: a Codex run takes its app server from qory
+  and Forager, not from the arguments.``, or the same with `--remote-auth-token-env`.
+
+A key or feature in the line has each control character written as an escape, such as
+`\n`. Arguments after `--`, and every argument of an unwalled run, pass unchanged.
+
 ### A run that may write works in a copy
 
 A walled run that may write and has no run code never binds your repository, so it has no write

@@ -6,6 +6,10 @@ import (
 	"path"
 	"slices"
 	"strings"
+
+	"github.com/qoryai/forager/accesskey"
+
+	"github.com/qoryai/qory/internal/module"
 )
 
 // HeadlessArgs are codex exec: the session's events as JSON lines on stdout, in added
@@ -32,8 +36,9 @@ func (codex) Install(version string) string { return "@openai/codex@" + version 
 // --sandbox (codex-rs/utils/cli/src/shared_options.rs). The prompt stays $<name>: no run
 // binds the home at [HomeInWall] yet, so a mention by that path, see [mentionByPath],
 // would lead to no skill. Arguments that set the model provider, a profile, a feature,
-// web search, or a key of [reservedKeys] or [argReservedKeys] with --config or -c, or
-// that skip qory's config.toml, are refused, see [checkArgs].
+// web search, hook trust, a remote app server, or a key of [reservedKeys] or
+// [argReservedKeys] with --config or -c, or that skip qory's config.toml, are refused,
+// see [checkArgs].
 func (codex) WalledArgs(args []string) ([]string, error) {
 	if err := checkArgs(args); err != nil {
 		return nil, err
@@ -77,10 +82,21 @@ const textIgnoreConfigArg = "Remove `--ignore-user-config` from the run's Codex 
 // textSearchArg is the refusal of a walled run whose Codex arguments contain --search.
 const textSearchArg = "Remove `--search` from the run's Codex arguments: a Codex run takes its web search setting from qory and Forager, not from the arguments."
 
+// textHookTrustArg is the refusal of a walled run whose Codex arguments contain
+// --dangerously-bypass-hook-trust.
+const textHookTrustArg = "Remove `--dangerously-bypass-hook-trust` from the run's Codex arguments: a Codex run takes its hook trust from qory and Forager, not from the arguments."
+
+// textRemoteArg is the refusal of a walled run whose Codex arguments contain --remote or
+// --remote-auth-token-env, with the flag for its %s.
+const textRemoteArg = "Remove `%s` from the run's Codex arguments: a Codex run takes its app server from qory and Forager, not from the arguments."
+
 // argReservedKeys are the key paths that the arguments of a walled run may not set
 // beside [reservedKeys]. Forager sets model_reasoning_effort from the run's effort as a
-// --config flag; a harness's config.toml may still set it as a default.
-var argReservedKeys = []reservedKey{{"model_reasoning_effort"}}
+// --config flag; a harness's config.toml may still set it as a default. skills and
+// cloud.skills turn skills on or off and list skill folders
+// (codex-rs/config/src/config_toml.rs, SkillsConfig and CloudToml), and the composed
+// harness sets which skills a run has.
+var argReservedKeys = []reservedKey{{"model_reasoning_effort"}, {"skills"}, {"cloud", "skills"}}
 
 // checkArgs refuses args, a walled run's Codex arguments, when one before -- changes
 // what Forager and qory set for the run, naming the first in args:
@@ -95,6 +111,12 @@ var argReservedKeys = []reservedKey{{"model_reasoning_effort"}}
 //   - --profile, which lays $CODEX_HOME/<name>.config.toml over the settings, in the
 //     forms --profile <name>, --profile=<name>, -p <name>, -p<name> and -p=<name>
 //     (the same file, config_profile_v2). -p is --profile in codex and in codex exec;
+//   - --dangerously-bypass-hook-trust, with which Codex runs hooks that were never
+//     trusted (codex-rs/utils/cli/src/shared_options.rs, bypass_hook_trust);
+//   - --remote, which connects Codex to another app server, in the forms --remote <addr>
+//     and --remote=<addr>, and --remote-auth-token-env, which names the variable of that
+//     server's token, in the same two forms (codex-rs/cli/src/main.rs,
+//     InteractiveRemoteOptions). Neither flag has a short form;
 //   - --config or -c that sets a key of [reservedKeys] or [argReservedKeys], in the
 //     forms --config <k=v>, --config=<k=v>, -c <k=v>, -c<k=v> and -c=<k=v>
 //     (codex-rs/utils/cli/src/config_override.rs);
@@ -108,8 +130,9 @@ var argReservedKeys = []reservedKey{{"model_reasoning_effort"}}
 // last flag for a key, so such an argument would replace Forager's value. Codex reads
 // the key of --config as the text before the first =, without spaces at either end,
 // with use_legacy_landlock read as features.use_legacy_landlock, as a dotted path
-// (codex-rs/config/src/overrides.rs). A key at a reserved path, under one, or above one,
-// whose table value sets the reserved path, is refused. Codex refuses a --config, -c,
+// (codex-rs/config/src/overrides.rs). A key at a reserved path or under one is refused.
+// A key above one is refused whatever its value: the value replaces the whole table,
+// Forager's --config values in it too. Codex refuses a --config, -c,
 // --enable or --disable with no value after it, or with a value that starts with -, so
 // such a flag passes here. --oss, --ignore-user-config and --search take no value, and
 // Codex refuses one given with =; such a form is refused here as well. Codex reads no
@@ -131,16 +154,22 @@ func checkArgs(args []string) error {
 			return errors.New(textSearchArg)
 		case a == "--local-provider" || strings.HasPrefix(a, "--local-provider="):
 			return fmt.Errorf(textProviderArg, "--local-provider")
+		case a == "--dangerously-bypass-hook-trust" || strings.HasPrefix(a, "--dangerously-bypass-hook-trust="):
+			return errors.New(textHookTrustArg)
+		case a == "--remote" || strings.HasPrefix(a, "--remote="):
+			return fmt.Errorf(textRemoteArg, "--remote")
+		case a == "--remote-auth-token-env" || strings.HasPrefix(a, "--remote-auth-token-env="):
+			return fmt.Errorf(textRemoteArg, "--remote-auth-token-env")
 		case a == "--profile" || strings.HasPrefix(a, "--profile=") || strings.HasPrefix(a, "-p"):
 			return errors.New(textProfileArg)
 		case a == "--enable" || a == "--disable":
 			if i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
-				return fmt.Errorf(textFeatureArg, a, args[i+1])
+				return fmt.Errorf(textFeatureArg, a, shownArg(args[i+1]))
 			}
 			continue
 		case strings.HasPrefix(a, "--enable=") || strings.HasPrefix(a, "--disable="):
 			if flag, feature, _ := strings.Cut(a, "="); feature != "" {
-				return fmt.Errorf(textFeatureArg, flag, feature)
+				return fmt.Errorf(textFeatureArg, flag, shownArg(feature))
 			}
 			continue
 		case a == "--config" || a == "-c":
@@ -161,11 +190,16 @@ func checkArgs(args []string) error {
 			continue
 		}
 		if key = strings.TrimSpace(key); reservedArg(key) {
-			return fmt.Errorf(textConfigArg, key)
+			return fmt.Errorf(textConfigArg, shownArg(key))
 		}
 	}
 	return nil
 }
+
+// shownArg is a name from a run's Codex arguments as a refusal prints it: as
+// [accesskey.ShownName] prints it, with each control character written as a Go escape,
+// see [module.Escape], so the line reaches the terminal as one line of plain text.
+func shownArg(name string) string { return module.Escape(accesskey.ShownName(name, false)) }
 
 // reservedArg reports whether key, a dotted key path of a --config flag, is a path of
 // [reservedKeys] or [argReservedKeys], lies under one, or lies above one.
