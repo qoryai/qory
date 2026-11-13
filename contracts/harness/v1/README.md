@@ -864,7 +864,7 @@ above: Claude Code's `.claude/rules/*.md`, Cursor's `.cursor/rules/*.mdc`, Copil
 `.github/instructions/*.instructions.md`. Each file is one entry, `<runtime>/<path>`,
 linked to `<path>` under the runtime's directory in the checkout (§Runtimes), so two modules
 shipping one path collide like two skills of one name and an exclude lists the path. A
-path the runtime reads as settings, one qory writes, or one a kind is linked at is
+path the runtime reads as settings, one qory writes, or one a kind is linked or copied at is
 reserved and fails the compose, and so does a runtime qory does not render; a file
 directly under `files/` fails, since the runtime segment decides where it lands. A
 directory under `settings/<runtime>/` fails and the message points here. A file for a
@@ -1152,14 +1152,14 @@ a launch, `goose` and `any`, gets none of them.
 
 A `files/<runtime>/<path>` entry may not use a path the runtime reserves under its
 directory, whatever stack composes it: the files qory writes, the directories a kind is
-linked at, and every file the program reads as settings, which a fragment under
+linked or copied at, and every file the program reads as settings, which a fragment under
 `settings/<runtime>/` sets instead. A directory reserves what is below it, by path
 segment. The refusal lists the module, the entry and the reason, with status 2:
 
-| `target.runtime` | qory writes | The program reads as settings | A kind is linked at | Runs without the agent |
+| `target.runtime` | qory writes | The program reads as settings | A kind is linked or copied at | Runs without the agent |
 |---|---|---|---|---|
 | `claude` | `rules/qory-harness.md`, `settings.json`, `mcp.json`, `plugin`, `launch`; `rules` as a file, since qory links that directory one file at a time | `settings.local.json` | `skills`, `agents`, `commands`, `hooks`, `output-styles` | |
-| `codex` | `config.toml`, `AGENTS.md` | | `agents`, `skills` | |
+| `codex` | `config.toml`, `AGENTS.md` | | `agents`; `skills`, copied as folders and regular files | |
 | `gemini` | `settings.json` | | `skills`, `hooks`, `agents`, `commands` | |
 | `opencode` | `opencode.json` | | `commands`, `hooks`, `agents`, `skills` | |
 | `cursor` | `plugin` | `mcp.json`, `hooks.json`, `cli.json`, `environment.json` | `agents`, `hooks` | |
@@ -1178,7 +1178,10 @@ run takes its model key from the run, not from a file.``
 `codex` also reserves `hooks.json`, `.env`, `environments.toml`, `AGENTS.override.md`
 and `rules/read-access.rules`: compose refuses a module that ships one of them under
 `files/codex/`. The refusal is ``Remove `files/codex/<path>` from module <name>: qory writes it for every
-walled Codex run.`` Other files under `rules/` stay allowed.
+walled Codex run.`` Other files under `rules/` stay allowed. Each skill under `codex/skills/`
+is copied within the limits of a copy of one module entry and leaves out `.git`. A walled Codex run's copy
+of `rules/` and `agents/` takes at most 10,000 files, directories and links, 1 GiB in all
+and 64 MiB a file.
 
 Per runtime, the files written into its directory:
 
@@ -1197,7 +1200,8 @@ Per runtime, the files written into its directory:
 - **codex**: `config.toml` with the model, the servers as `[mcp_servers.<name>]` tables,
   and any other `settings/codex/` file, without `shell_environment_policy.set`, whose
   variables are the launch's, one `agents/<name>.toml` per agent with the body as
-  `developer_instructions`, and for a launch the skills linked under `skills/` and the
+  `developer_instructions`, and for a launch the skills copied under `skills/` as folders
+  and regular files, since Codex 0.167.2 skips a `SKILL.md` that is a link, and the
   instructions as `AGENTS.md`, neither linked into the checkout (§Launching). Codex
   passes its environment to every command it runs. Codex 0.76.0 or later filters no
   name by default. An older Codex drops the names that contain `KEY`, `SECRET` or
@@ -1321,7 +1325,7 @@ reports it with status 2: `goose` and `any`.
 | `claude` | `claude --plugin-dir ${dir}/plugin --settings ${dir}/settings.json --mcp-config ${dir}/mcp.json --append-system-prompt-file ${dir}/launch/AGENTS.md --setting-sources user` | `plugin/`, a plugin in Claude Code's layout: the skills and commands linked, or written where a document contains a reference, the agents copied, since Claude Code passes over a link in a plugin's `agents/` where it follows one everywhere else, the output styles under `output-styles/` with the manifest's `outputStyles` pointing there, `.claude-plugin/plugin.json` setting its name to `harness`, so a skill is `/harness:<name>` and an agent `harness:<name>`, and every reference in the plugin resolves to that name; `launch/AGENTS.md`, the instructions with their references resolved the same way and, after them, the names the session registers, per kind, with each role | everything: the plugin, the permissions, hooks and model in `settings.json`, the environment the line sets, the servers, the instructions appended to the system prompt; `--setting-sources user` keeps every `.claude` of the checkout and of the directories above it out | nothing |
 | `cursor` | `cursor-agent --plugin-dir ${dir}/plugin` | `plugin/`, the same layout under `.cursor-plugin/plugin.json`, with the agents in Cursor's shape, a copy of `hooks.json` as `hooks/hooks.json` and of `mcp.json` as `.mcp.json`, since the CLI takes no settings file | the skills, agents, hooks and servers | the instructions, `AGENTS.md` |
 | `copilot` | `copilot --add-dir ${dir}/workspace --additional-mcp-config @${dir}/mcp.json` | `workspace/.github/skills` linked and `workspace/.github/agents` written, which `--add-dir` loads as trusted configuration, and `mcp.json` with the servers under `mcpServers`, so the MCP kind has a place in copilot | the skills, agents and servers | the hooks and the instructions |
-| `codex` | `env CODEX_HOME=${dir} codex` | `skills/` linked and the instructions as `AGENTS.md`, ending with the names the session registers, which a Codex home registers as the modules wrote them, beside `config.toml` and the agents, so the directory is a Codex home | everything | nothing; Codex reads its model key from `OPENAI_API_KEY`. qory writes no `auth.json`, Codex's login file, and a module that ships `files/codex/auth.json` fails the compose with ``Remove `files/codex/auth.json` from module <name>: a Codex run takes its model key from the run, not from a file.`` |
+| `codex` | `env CODEX_HOME=${dir} codex` | `skills/` copied as folders and regular files and the instructions as `AGENTS.md`, ending with the names the session registers, which a Codex home registers as the modules wrote them, beside `config.toml` and the agents, so the directory is a Codex home | everything | nothing; Codex reads its model key from `OPENAI_API_KEY`. qory writes no `auth.json`, Codex's login file, and a module that ships `files/codex/auth.json` fails the compose with ``Remove `files/codex/auth.json` from module <name>: a Codex run takes its model key from the run, not from a file.`` |
 | `opencode` | `env OPENCODE_CONFIG_DIR=${dir} opencode` | `skills/` linked, beside `opencode.json`, the agents, commands and hooks, since OpenCode reads the directory the way it reads `.opencode` | the model, servers, agents, commands, hooks and skills | the instructions, `AGENTS.md` |
 | `amp` | `amp --settings-file ${dir}/settings.json` | nothing more | the servers and the permissions | the skills and the instructions |
 | `gemini` | `env GEMINI_CLI_SYSTEM_SETTINGS_PATH=${dir}/settings.json gemini` | nothing more; the file is read as the system settings, over the user's and the workspace's | the model, servers and hooks | the skills, agents, commands and instructions |

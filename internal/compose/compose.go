@@ -1581,8 +1581,8 @@ func (r *Result) SettingsFor(runtime, file, home string) map[string]any {
 
 // SourceDirs are the folders the compose read its modules from: each module's Dir and,
 // when it differs, its RealDir, in module order without repeats, then [Result.Cache]
-// when it is known. A walled Codex run copies a file of the composed home that a link
-// leads to only when it lies in one of them.
+// when it is known. qory copies a file that a link in a Codex home leads to only when it
+// lies in the composed home or in one of them.
 func (r *Result) SourceDirs() []string {
 	var dirs []string
 	for _, m := range r.Modules {

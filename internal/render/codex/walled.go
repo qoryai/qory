@@ -19,6 +19,7 @@ import (
 
 	"github.com/BurntSushi/toml"
 
+	"github.com/qoryai/qory/internal/exports"
 	"github.com/qoryai/qory/internal/render"
 	"github.com/qoryai/qory/internal/stack"
 )
@@ -97,7 +98,8 @@ const ReadRulesName = "read-access.rules"
 // in run.Skills disabled, a hooks.json with no hook, an empty .env, environments.toml and
 // AGENTS.override.md, dir's AGENTS.md, or an empty one, and a copy of each folder of
 // [boundDirs] that dir has, with each link replaced by what it leads to, see [copyTree],
-// or an empty folder. For a run whose access is read, rules/ also contains run.ReadRules
+// or an empty folder. The copy of rules and agents keeps to [walledLimit]. For a run
+// whose access is read, rules/ also contains run.ReadRules
 // as [ReadRulesName], in place of any file of that name in dir's rules; for any other
 // access, rules/ is the copy alone. A mount with a target may share no path on this
 // machine with another mount, so nothing is bound from dir itself, which the run mounts
@@ -124,7 +126,11 @@ func WriteWalledHome(dir, files string, run WalledRun) ([]Bound, error) {
 			return nil, err
 		}
 		if info, err := os.Lstat(filepath.Join(dir, name)); err == nil && info.IsDir() {
-			if err := copyTree(filepath.Join(dir, name), dst, append([]string{filepath.Dir(dir)}, run.LinkRoots...)); err != nil {
+			var limit *render.CopyLimit
+			if name != "skills" {
+				limit = walledLimit(name)
+			}
+			if err := copyTree(filepath.Join(dir, name), dst, name, append([]string{filepath.Dir(dir)}, run.LinkRoots...), limit); err != nil {
 				return nil, err
 			}
 		}
@@ -324,119 +330,286 @@ func relTo(dir, file string) string {
 	return filepath.ToSlash(rel)
 }
 
-// maxCopiedFile is the largest file the copy of a walled home's folders takes: Codex
+// The refusals of the copy of a folder of a walled run's home, see [walledLimit]: past
+// 10,000 entries and past 1 GiB, with the folder, and for a file past 64 MiB, with the
+// file's path, each as a path under the home.
+const (
+	textWalledTooMany      = "Ship fewer files in the modules. codex/%s contains more than 10,000 files, directories and links, the most a walled Codex run takes."
+	textWalledTooManyBytes = "Ship fewer files in the modules. The files of codex/%s add up to more than 1 GiB, the most a walled Codex run takes."
+	textWalledTooLarge     = "Ship codex/%s under 64 MiB. The file is larger than 64 MiB, the most a walled Codex run takes for one file."
+)
+
+// walledLimit is the limit of [WriteWalledHome]'s copy of the folder name of the home,
+// rules or agents: the limits of a copy of one entry of a module, see
+// [render.LimitFor], with the refusals of a walled run. The skills folder needs none:
+// [placeSkills] copied each skill within those limits. A variable so a test can lower
+// the limits.
+var walledLimit = func(name string) *render.CopyLimit {
+	limit := render.LimitFor("")
+	limit.TooMany = fmt.Errorf(textWalledTooMany, exports.HidePath(name))
+	limit.TooManyBytes = fmt.Errorf(textWalledTooManyBytes, exports.HidePath(name))
+	limit.TooLarge = func(path string) error {
+		return fmt.Errorf(textWalledTooLarge, exports.HidePath(path))
+	}
+	return &limit
+}
+
+// maxCopiedFile is the largest file a copy without a [render.CopyLimit] takes, the
+// skills folder of a walled home: Codex
 // 0.167.2 reads no larger file (codex-rs/exec-server/src/local_file_system_read.rs,
 // MAX_READ_FILE_BYTES).
 const maxCopiedFile = maxSkillSize
 
-// textOutsideLink is the refusal of a link in the composed home whose target lies
-// outside the composed home and every folder of [WalledRun.LinkRoots], with the link's
-// path in the composed home and its target.
-const textOutsideLink = "Remove the link `%s` from the harness: it leads to `%s`, outside the harness's modules, and a walled Codex run copies only files inside them."
+// textOutsideLink is the refusal of a link whose target lies outside the composed home
+// and every module folder, [WalledRun.LinkRoots] for [WriteWalledHome] and
+// compose.Result.SourceDirs for [placeSkills], with the link's path and its target.
+const textOutsideLink = "Remove the link `%s` from the harness: it leads to `%s`, outside the harness's modules, and a Codex run copies only files inside them."
 
 // copyTree copies the folder src into dst, which exists, as folders and regular files
-// only: Codex 0.167.2 passes over a SKILL.md that is a link
+// only, with shown, src's path as a refusal shows it; see [treeCopy].
+func copyTree(src, dst, shown string, roots []string, limit *render.CopyLimit) error {
+	t := newTreeCopy(roots, limit)
+	return t.dir(src, dst, shown)
+}
+
+// treeCopy is one copy into a Codex home, as folders and regular files only: Codex
+// 0.167.2 passes over a SKILL.md that is a link
 // (codex-rs/exec-server/src/local_file_system.rs, the walk). A link is followed when its
-// target, with every link resolved, lies inside one of roots, the composed home and the
-// module folders: a link to a folder is copied as a folder, and a link to a file as a
+// target, with every link resolved, lies inside one of the roots, the composed home and
+// the module folders: a link to a folder is copied as a folder, and a link to a file as a
 // regular file. A link with any other target fails the copy rather than leaving a file
-// out, which would change a skill without a word. Each file keeps its executable bits,
-// is at most [maxCopiedFile] bytes, and is written new, see [writeNew]. Any other kind
-// of file, and a folder that contains itself through a link, is an error.
-func copyTree(src, dst string, roots []string) error {
-	var realRoots []string
+// out, which would change a skill without a word. Every entry named .git is left out, as
+// a copy of a module leaves it out. Each file keeps its permission bits without write for
+// group and others, see [render.FileMode], and is written new, see [writeNew]. Any other
+// kind of file, and a folder that contains itself through a link, is an error.
+//
+// With a limit, the copy refuses more entries below the folder it starts at, more bytes
+// in all, or a larger file, than the limit allows, with the limit's refusals. Without
+// one, each file is at most [maxCopiedFile] bytes.
+type treeCopy struct {
+	roots   []string // the roots with every link resolved
+	limit   *render.CopyLimit
+	entries int             // the entries copied so far
+	written int64           // the bytes copied so far
+	open    map[string]bool // the folders being copied, by real path
+}
+
+// newTreeCopy is a [treeCopy] that follows links into roots, with limit or none.
+func newTreeCopy(roots []string, limit *render.CopyLimit) *treeCopy {
+	t := &treeCopy{limit: limit, open: map[string]bool{}}
 	for _, r := range roots {
 		if real, err := filepath.EvalSymlinks(r); err == nil {
-			realRoots = append(realRoots, real)
+			t.roots = append(t.roots, real)
 		}
 	}
-	open := map[string]bool{}
-	var copyDir func(src, dst, shown string) error
-	copyDir = func(src, dst, shown string) error {
-		real, err := filepath.EvalSymlinks(src)
+	return t
+}
+
+// failed is err of the copy of the path shown, with the prefix of every copy error and
+// without the absolute path a file system error contains.
+func failed(shown string, err error) error {
+	var pe *fs.PathError
+	if errors.As(err, &pe) {
+		err = pe.Err
+	}
+	return fmt.Errorf("copy %s for the Codex home: %w", exports.HidePath(shown), exports.HideError(err))
+}
+
+// readBatch is how many entries [treeCopy.dir] reads from a folder at a time, so a limit
+// stops the read of a large folder early.
+const readBatch = 256
+
+// dir copies the folder src, shown as shown, into dst, which exists.
+func (t *treeCopy) dir(src, dst, shown string) error {
+	real, err := filepath.EvalSymlinks(src)
+	if err != nil {
+		return failed(shown, err)
+	}
+	if t.open[real] {
+		return fmt.Errorf("copy %s for the Codex home: the folder contains itself through a link", exports.HidePath(shown))
+	}
+	t.open[real] = true
+	defer delete(t.open, real)
+	f, err := os.Open(src)
+	if err != nil {
+		return failed(shown, err)
+	}
+	var names []string
+	for {
+		batch, err := f.ReadDir(readBatch)
+		for _, e := range batch {
+			if e.Name() == ".git" {
+				continue
+			}
+			if t.limit != nil {
+				if t.entries++; t.entries > t.limit.Entries {
+					f.Close()
+					return t.limit.TooMany
+				}
+			}
+			names = append(names, e.Name())
+		}
+		if err == io.EOF {
+			break
+		}
 		if err != nil {
+			f.Close()
+			return failed(shown, err)
+		}
+	}
+	f.Close()
+	slices.Sort(names)
+	for _, n := range names {
+		if err := t.entry(filepath.Join(src, n), filepath.Join(dst, n), path.Join(shown, n)); err != nil {
 			return err
 		}
-		if open[real] {
-			return fmt.Errorf("copy %s for the walled Codex home: the folder contains itself through a link", shown)
-		}
-		open[real] = true
-		defer delete(open, real)
-		entries, err := os.ReadDir(src)
+	}
+	return nil
+}
+
+// entry copies the file, folder or link at p, shown as shown, to the new path to.
+func (t *treeCopy) entry(p, to, shown string) error {
+	info, err := os.Lstat(p)
+	if err != nil {
+		return failed(shown, err)
+	}
+	if info.Mode()&fs.ModeSymlink != 0 {
+		target, err := filepath.EvalSymlinks(p)
 		if err != nil {
-			return err
+			return failed(shown, err)
 		}
-		for _, e := range entries {
-			p, to, name := filepath.Join(src, e.Name()), filepath.Join(dst, e.Name()), path.Join(shown, e.Name())
-			info, err := os.Lstat(p)
-			if err != nil {
-				return err
-			}
-			if info.Mode()&fs.ModeSymlink != 0 {
-				target, err := filepath.EvalSymlinks(p)
-				if err != nil {
-					return fmt.Errorf("copy %s for the walled Codex home: %w", name, err)
-				}
-				if !slices.ContainsFunc(realRoots, func(r string) bool { return within(target, r) }) {
-					return fmt.Errorf(textOutsideLink, name, target)
-				}
-				if info, err = os.Stat(target); err != nil {
-					return err
-				}
-				p = target
-			}
-			switch {
-			case info.IsDir():
-				if err := os.Mkdir(to, 0o755); err != nil {
-					return err
-				}
-				if err := copyDir(p, to, name); err != nil {
-					return err
-				}
-			case info.Mode().IsRegular():
-				if err := copyFile(p, to, 0o644|info.Mode().Perm()&0o111); err != nil {
-					return fmt.Errorf("copy %s for the walled Codex home: %w", name, err)
-				}
-			default:
-				return fmt.Errorf("copy %s for the walled Codex home: it is neither a folder, a regular file nor a link", name)
-			}
+		if !slices.ContainsFunc(t.roots, func(r string) bool { return within(target, r) }) {
+			return fmt.Errorf(textOutsideLink, exports.HidePath(shown), exports.HidePath(target))
+		}
+		if info, err = os.Stat(target); err != nil {
+			return failed(shown, err)
+		}
+		p = target
+	}
+	switch {
+	case info.IsDir():
+		if err := os.Mkdir(to, 0o755); err != nil {
+			return failed(shown, err)
+		}
+		return t.dir(p, to, shown)
+	case info.Mode().IsRegular():
+		return t.file(p, to, shown, render.FileMode(info.Mode()))
+	default:
+		return fmt.Errorf("copy %s for the Codex home: it is neither a folder, a regular file nor a link", exports.HidePath(shown))
+	}
+}
+
+// file copies the regular file src, shown as shown, to a new file to with mode perm:
+// within the limit's file size and the bytes it has left, or within [maxCopiedFile]
+// bytes without a limit.
+func (t *treeCopy) file(src, to, shown string, perm os.FileMode) error {
+	if t.limit == nil {
+		if err := copyFile(src, to, perm); err != nil {
+			return failed(shown, err)
 		}
 		return nil
 	}
-	return copyDir(src, dst, filepath.Base(src))
+	n, err := copyLimited(src, to, perm, t.limit.FileBytes, t.limit.Bytes-t.written)
+	t.written += n
+	switch {
+	case errors.Is(err, errTooLarge):
+		return t.limit.TooLarge(shown)
+	case errors.Is(err, errPastBudget):
+		return t.limit.TooManyBytes
+	case err != nil:
+		return failed(shown, err)
+	}
+	return nil
 }
+
+// errTooLarge and errPastBudget are what [copyLimited] returns for a file larger than
+// its size limit and for a copy past the bytes it has left.
+var (
+	errTooLarge   = errors.New("the file is larger than the copy takes")
+	errPastBudget = errors.New("the copy passes the bytes it may write")
+)
 
 // copyFile copies the regular file src to a new file dst with mode perm, see
 // [writeNew]. It reads no device or pipe, and fails for a file of more than
 // [maxCopiedFile] bytes.
 func copyFile(src, dst string, perm os.FileMode) error {
-	in, err := os.OpenFile(src, os.O_RDONLY|syscall.O_NONBLOCK, 0)
+	in, info, err := openRegular(src)
 	if err != nil {
 		return err
 	}
 	defer in.Close()
-	info, err := in.Stat()
-	if err != nil {
-		return err
-	}
-	if !info.Mode().IsRegular() {
-		return errors.New("it is no regular file")
-	}
 	if info.Size() > maxCopiedFile {
 		return fmt.Errorf("it has %d bytes, more than Codex reads, %d", info.Size(), maxCopiedFile)
 	}
-	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_EXCL|syscall.O_NOFOLLOW, perm)
-	if err != nil {
-		return err
-	}
-	n, err := io.Copy(out, io.LimitReader(in, maxCopiedFile+1))
+	n, err := writeCopy(in, dst, perm, maxCopiedFile)
 	if err == nil && n > maxCopiedFile {
 		err = fmt.Errorf("it grew past %d bytes while qory copied it", maxCopiedFile)
+	}
+	return err
+}
+
+// copyLimited copies the regular file src to a new file dst with mode perm, see
+// [writeNew], and returns the bytes it wrote. It reads no device or pipe, and fails with
+// [errTooLarge] for a file of more than max bytes, and with [errPastBudget] for one of
+// more than left bytes, by the file's size or by what the read returns.
+func copyLimited(src, dst string, perm os.FileMode, max, left int64) (int64, error) {
+	in, info, err := openRegular(src)
+	if err != nil {
+		return 0, err
+	}
+	defer in.Close()
+	switch {
+	case info.Size() > max:
+		return 0, errTooLarge
+	case info.Size() > left:
+		return 0, errPastBudget
+	}
+	n, err := writeCopy(in, dst, perm, min(max, left))
+	switch {
+	case err != nil:
+	case n > max:
+		err = errTooLarge
+	case n > left:
+		err = errPastBudget
+	}
+	return n, err
+}
+
+// openRegular opens the file at src for reading, without waiting on a pipe, and fails
+// when it is no regular file.
+func openRegular(src string) (*os.File, fs.FileInfo, error) {
+	in, err := os.OpenFile(src, os.O_RDONLY|syscall.O_NONBLOCK, 0)
+	if err != nil {
+		return nil, nil, err
+	}
+	info, err := in.Stat()
+	if err != nil {
+		in.Close()
+		return nil, nil, err
+	}
+	if !info.Mode().IsRegular() {
+		in.Close()
+		return nil, nil, errors.New("it is no regular file")
+	}
+	return in, info, nil
+}
+
+// writeCopy writes up to limit+1 bytes of in to a new file dst with mode perm, see
+// [writeNew], and returns how many it wrote; more than limit means in had more.
+func writeCopy(in io.Reader, dst string, perm os.FileMode, limit int64) (int64, error) {
+	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_EXCL|syscall.O_NOFOLLOW, perm)
+	if err != nil {
+		return 0, err
+	}
+	n, err := io.Copy(out, io.LimitReader(in, limit+1))
+	if err == nil {
+		// The file was made with perm less the umask, so set perm itself.
+		err = out.Chmod(perm)
 	}
 	if cerr := out.Close(); err == nil {
 		err = cerr
 	}
-	return err
+	return n, err
 }
 
 // WalledConfig is config, a config.toml the compose rendered, with what a walled run adds

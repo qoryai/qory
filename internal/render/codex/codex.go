@@ -11,14 +11,14 @@
 //
 //	config.toml  qory writes it
 //	agents       agents are linked there; ship it as agents/<name>
-//	skills       qory links them there for a launch; ship it as skills/<name>
+//	skills       qory copies them there for a launch; ship it as skills/<name>
 //	AGENTS.md    qory writes it for a launch
 //	auth.json    Codex's login file, which no home of qory's has
 //	hooks.json, .env, environments.toml, AGENTS.override.md, rules/read-access.rules
 //	             qory writes them for every walled run
 //
 // Codex also takes its whole home from CODEX_HOME, and the runtime's directory is one:
-// config.toml, the agents, the skills linked under skills/ and the instructions as
+// config.toml, the agents, the skills copied under skills/ and the instructions as
 // AGENTS.md, the global instructions file Codex reads there. [Template] sets the
 // variable. Codex reads its login from auth.json in the same home; qory writes none there
 // and refuses a module that ships one, and Codex reads its model key from OPENAI_API_KEY.
@@ -92,7 +92,7 @@ func (codex) Reserved() []render.Reserved {
 	out := []render.Reserved{
 		{Path: "config.toml", Why: "qory writes it"},
 		{Path: "agents", Why: "agents are linked there; ship it as agents/<name>"},
-		{Path: "skills", Why: "qory links them there for a launch; ship it as skills/<name>"},
+		{Path: "skills", Why: "qory copies them there for a launch; ship it as skills/<name>"},
 		{Path: "AGENTS.md", Why: "qory writes it for a launch"},
 		{Path: "auth.json", Refusal: textAuthFile},
 	}
@@ -163,7 +163,7 @@ func (codex) Render(res *compose.Result, dir, home string) error {
 			return err
 		}
 	}
-	if err := render.PlaceEntries(res, dir, render.Bare, "skills"); err != nil {
+	if err := placeSkills(res, dir); err != nil {
 		return err
 	}
 	if text := render.WithAddressing(res, render.Bare, codex{}.Skips()); text != "" {
