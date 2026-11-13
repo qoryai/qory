@@ -199,7 +199,8 @@ func recordOf(t *testing.T, step int, text string) string {
 // TestToolFixesPassesOnlyTheCheck is what the run's image can print in the step: what reaches the
 // terminal, with nil for Forager's line of the step.
 func TestToolFixesPassesOnlyTheCheck(t *testing.T) {
-	good := image.SessionShellFix()
+	good := "install comm in /usr/local/bin, /usr/bin, /bin: the git session of a walled run runs comm from these folders, to compare the run's refs and commits with what the bundle has"
+	shell := image.SessionShellFix()
 	old := "install git 2.25 or later in /usr/local/bin, /usr/bin, /bin: the git session of a walled run needs it, and /usr/bin/git prints git version 2.24.0"
 	failed := "install git 2.25 or later in /usr/local/bin, /usr/bin, /bin: /bin/git --version failed: exit status 3"
 	prefix := "install git in /usr/local/bin, /usr/bin, /bin: "
@@ -226,7 +227,8 @@ func TestToolFixesPassesOnlyTheCheck(t *testing.T) {
 		"an escape sequence":       {old + "\x1b[2J\n", 1, nil},
 		"nothing, exit 1":          {"", 1, nil},
 		"nothing, exit 126":        {"", 126, nil},
-		"nothing, exit 127":        {"", 127, []string{good}},
+		"nothing, exit 127":        {"", 127, []string{shell}},
+		"the shell's line, exit 1": {shell + "\n", 1, nil},
 		"another line, exit 126":   {"exec format error\n", 126, nil},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -241,7 +243,7 @@ func TestToolFixesPassesOnlyTheCheck(t *testing.T) {
 // TestToolFixesKeepsAtMostWhatTheCheckPrints is an image that prints one line of the check 200,000
 // times: as many lines print as the check has failures to report.
 func TestToolFixesKeepsAtMostWhatTheCheckPrints(t *testing.T) {
-	text := strings.Repeat(image.SessionShellFix()+"\n", 200_000)
+	text := strings.Repeat("install comm in /usr/local/bin, /usr/bin, /bin: the git session of a walled run runs comm from these folders, to compare the run's refs and commits with what the bundle has\n", 200_000)
 	got := toolFixes(recordOf(t, 3, text), &session.SetupError{Name: checkToolsStep, Step: 3, ExitCode: 1})
 	if want := len(image.SessionTools()) + 2; len(got) != want {
 		t.Errorf("%d lines, want %d", len(got), want)

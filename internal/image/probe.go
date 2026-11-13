@@ -292,14 +292,11 @@ func sessionGitOld(at, line string) string {
 	return "install git 2.25 or later in " + strings.Join(gitSessionDirs, ", ") + ": the git session of a walled run needs it, and " + at + " prints " + line
 }
 
-// SessionShellFix is the line for a setup step that could not start /bin/sh.
+// SessionShellFix is the line for a setup step that could not start /bin/sh. Any setup
+// step runs through /bin/sh, so the line is about the setup, where the check's line for
+// sh, see [noSessionTool], is about the git session.
 func SessionShellFix() string {
-	for _, tool := range sessionTools {
-		if tool.name == "sh" {
-			return noSessionTool(tool.name, tool.why)
-		}
-	}
-	return ""
+	return "install sh in " + strings.Join(gitSessionDirs, ", ") + ": the setup of a walled run runs sh from these folders, to run its script"
 }
 
 // CodexSettings is where Codex 0.167.2 on Linux reads settings before those of its home:

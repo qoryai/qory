@@ -3795,7 +3795,13 @@ qory run: Use an image without /etc/codex: Codex reads its settings there before
 ```
 
 If the step exits 127 with no such line, which is what docker does for an image with no `/bin/sh`,
-qory prints the line for `sh`. Any other failure with no such line prints
+qory prints:
+
+```text
+qory run: install sh in /usr/local/bin, /usr/bin, /bin: the setup of a walled run runs sh from these folders, to run its script
+```
+
+Any other failure with no such line prints
 `Fix Check tools: setup step <n> exited with <n>.`, also exit 126, where docker could not run the
 command for another cause, such as the image's architecture.
 
