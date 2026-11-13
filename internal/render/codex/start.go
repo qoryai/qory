@@ -10,3 +10,6 @@ func (codex) HeadlessArgs(kind, name, arg, in string) ([]string, bool) {
 	}
 	return []string{"exec", "--json", "--add-dir", in, "$" + name + " " + arg}, true
 }
+
+// Install is Codex's npm package at version.
+func (codex) Install(version string) string { return "@openai/codex@" + version }
