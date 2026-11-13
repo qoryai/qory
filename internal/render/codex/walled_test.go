@@ -223,8 +223,10 @@ func walledState(t *testing.T, config string, projects []string) map[string]stri
 // TestWriteWalledHome is the read-only part of a walled run's home: config.toml with the
 // run's trust, a hooks.json with no hook, an empty .env, environments.toml and
 // AGENTS.override.md, which Codex passes over for AGENTS.md, the compose's AGENTS.md,
-// and the compose's skills beside an empty rules and agents, in a fixed order, and no
-// auth.json.
+// and a copy of the compose's skills beside an empty rules and agents, in a fixed order,
+// each at its path under the home in the wall, and no auth.json. Every source is in the
+// folder WriteWalledHome writes, none in the composed home. The copy keeps a script's
+// executable bit, and a relative link of the skills leads where it led.
 func TestWriteWalledHome(t *testing.T) {
 	dir, files := t.TempDir(), t.TempDir()
 	write := func(name, content string) {
@@ -240,20 +242,20 @@ func TestWriteWalledHome(t *testing.T) {
 	write("config.toml", composed)
 	write("AGENTS.md", "instructions\n")
 	write("skills/review/SKILL.md", "skill\n")
+	write("skills/review/run.sh", "#!/bin/sh\n")
+	if err := os.Chmod(filepath.Join(dir, "skills/review/run.sh"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("review/SKILL.md", filepath.Join(dir, "skills", "linked.md")); err != nil {
+		t.Fatal(err)
+	}
 	binds, err := codex.WriteWalledHome(dir, files, []string{"/workspace"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []codex.Bound{
-		{Path: "config.toml", Source: filepath.Join(files, "config.toml")},
-		{Path: "hooks.json", Source: filepath.Join(files, "hooks.json")},
-		{Path: ".env", Source: filepath.Join(files, ".env")},
-		{Path: "environments.toml", Source: filepath.Join(files, "environments.toml")},
-		{Path: "AGENTS.override.md", Source: filepath.Join(files, "AGENTS.override.md")},
-		{Path: "AGENTS.md", Source: filepath.Join(files, "AGENTS.md")},
-		{Path: "rules", Source: filepath.Join(files, "rules"), Dir: true},
-		{Path: "skills", Source: filepath.Join(dir, "skills"), Dir: true},
-		{Path: "agents", Source: filepath.Join(files, "agents"), Dir: true},
+	var want []codex.Bound
+	for _, name := range []string{"config.toml", "hooks.json", ".env", "environments.toml", "AGENTS.override.md", "AGENTS.md", "rules", "skills", "agents"} {
+		want = append(want, codex.Bound{Path: name, Source: filepath.Join(files, name), Target: "/tmp/qory-codex-home/" + name, Dir: !strings.Contains(name, ".")})
 	}
 	if !reflect.DeepEqual(binds, want) {
 		t.Errorf("binds:\n%+v\nwant:\n%+v", binds, want)
@@ -276,6 +278,20 @@ func TestWriteWalledHome(t *testing.T) {
 	}
 	if got := read("AGENTS.md"); got != "instructions\n" {
 		t.Errorf("AGENTS.md %q", got)
+	}
+	if got := read("skills/review/SKILL.md"); got != "skill\n" {
+		t.Errorf("skills/review/SKILL.md %q", got)
+	}
+	if info, err := os.Stat(filepath.Join(files, "skills/review/run.sh")); err != nil || info.Mode().Perm()&0o111 == 0 {
+		t.Errorf("skills/review/run.sh: %v, want an executable file", err)
+	}
+	if target, err := os.Readlink(filepath.Join(files, "skills", "linked.md")); err != nil || target != filepath.Join(dir, "skills", "review", "SKILL.md") {
+		t.Errorf("skills/linked.md links to %q (%v), want the composed home's SKILL.md", target, err)
+	}
+	for _, name := range []string{"rules", "agents"} {
+		if entries, err := os.ReadDir(filepath.Join(files, name)); err != nil || len(entries) > 0 {
+			t.Errorf("%s: %v %v, want an empty folder", name, entries, err)
+		}
 	}
 	if got := read("config.toml"); !strings.Contains(got, `[projects."/workspace"]`) || !strings.Contains(got, endCheckHash) {
 		t.Errorf("config.toml lacks the trust or the hook's hash:\n%s", got)

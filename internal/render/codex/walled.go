@@ -26,12 +26,15 @@ import (
 const HomeInWall = "/tmp/qory-codex-home"
 
 // Bound is one file or folder of a walled run's Codex home that the run binds read-only
-// over its path in [HomeInWall].
+// at Target, its path in [HomeInWall].
 type Bound struct {
 	// Path is the path under the home, such as config.toml or rules.
 	Path string
-	// Source is the file or folder on this machine.
+	// Source is the file or folder on this machine, in the folder [WriteWalledHome]
+	// writes, which shares no path with any other mount of the run.
 	Source string
+	// Target is the path in the wall: Path under [HomeInWall].
+	Target string
 	// Dir marks a folder.
 	Dir bool
 }
@@ -52,13 +55,16 @@ var (
 // noHooks is the hooks.json of a walled run's home: a file with no hook.
 const noHooks = "{\"hooks\": {}}\n"
 
-// WriteWalledHome writes into files, a new folder on this machine that no mount of the
-// run writes, the parts of a walled run's Codex home that the run binds read-only: the
-// config.toml from dir, the runtime's directory of the composed home, with
-// [WalledConfig]'s additions for projects, a hooks.json with no hook, an empty .env,
-// environments.toml and AGENTS.override.md, and dir's AGENTS.md, or an empty one. Each folder of [boundDirs] is
-// dir's when the compose wrote it, and an empty folder in files when it did not. It
-// writes no auth.json. It returns the binds, files first, in a fixed order.
+// WriteWalledHome writes into files, a new, empty folder on this machine apart from the
+// writable home and from every other mount of the run, such as
+// <user cache>/qory/runs/<run id>/codex-fixed, every part of a walled run's Codex home
+// that the run binds read-only: the config.toml from dir, the runtime's directory of the
+// composed home, with [WalledConfig]'s additions for projects, a hooks.json with no hook,
+// an empty .env, environments.toml and AGENTS.override.md, dir's AGENTS.md, or an empty
+// one, and a copy of each folder of [boundDirs] that dir has, or an empty folder. A mount
+// with a target may share no path on this machine with another mount, so nothing is
+// bound from dir itself, which the run mounts as the harness home. It writes no
+// auth.json. It returns the binds, files first, in a fixed order.
 func WriteWalledHome(dir, files string, projects []string) ([]Bound, error) {
 	config, err := os.ReadFile(filepath.Join(dir, "config.toml"))
 	if errors.Is(err, fs.ErrNotExist) {
@@ -83,19 +89,63 @@ func WriteWalledHome(dir, files string, projects []string) ([]Bound, error) {
 		if err := os.WriteFile(p, content[name], 0o644); err != nil {
 			return nil, err
 		}
-		out = append(out, Bound{Path: name, Source: p})
+		out = append(out, Bound{Path: name, Source: p, Target: path.Join(HomeInWall, name)})
 	}
 	for _, name := range boundDirs {
-		src := filepath.Join(dir, name)
-		if info, err := os.Lstat(src); err != nil || !info.IsDir() {
-			src = filepath.Join(files, name)
-			if err := os.Mkdir(src, 0o755); err != nil {
+		dst := filepath.Join(files, name)
+		if err := os.Mkdir(dst, 0o755); err != nil {
+			return nil, err
+		}
+		if info, err := os.Lstat(filepath.Join(dir, name)); err == nil && info.IsDir() {
+			if err := copyTree(filepath.Join(dir, name), dst); err != nil {
 				return nil, err
 			}
 		}
-		out = append(out, Bound{Path: name, Source: src, Dir: true})
+		out = append(out, Bound{Path: name, Source: dst, Target: path.Join(HomeInWall, name), Dir: true})
 	}
 	return out, nil
+}
+
+// copyTree copies the folder src into dst, which exists: folders, regular files with
+// their executable bits, and links, each written with an absolute target, so a relative
+// link leads where it led from src. The harness home that such a target lies in is
+// mounted at the same path in the wall. Any other kind of file is an error.
+func copyTree(src, dst string) error {
+	return filepath.WalkDir(src, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(src, p)
+		if err != nil || rel == "." {
+			return err
+		}
+		to := filepath.Join(dst, rel)
+		switch {
+		case d.IsDir():
+			return os.Mkdir(to, 0o755)
+		case d.Type()&fs.ModeSymlink != 0:
+			target, err := os.Readlink(p)
+			if err != nil {
+				return err
+			}
+			if !filepath.IsAbs(target) {
+				target = filepath.Join(filepath.Dir(p), target)
+			}
+			return os.Symlink(target, to)
+		case d.Type().IsRegular():
+			info, err := d.Info()
+			if err != nil {
+				return err
+			}
+			data, err := os.ReadFile(p)
+			if err != nil {
+				return err
+			}
+			return os.WriteFile(to, data, 0o644|info.Mode().Perm()&0o111)
+		default:
+			return fmt.Errorf("copy %s for the walled Codex home: it is neither a folder, a regular file nor a link", p)
+		}
+	})
 }
 
 // WalledConfig is config, a config.toml the compose rendered, with what a walled run adds
