@@ -1187,7 +1187,11 @@ Per runtime, the files written into its directory:
   name by default. An older Codex drops the names that contain `KEY`, `SECRET` or
   `TOKEN`, unless a fragment's `shell_environment_policy` sets
   `ignore_default_excludes = true`. Codex reads `AGENTS.override.md` before `AGENTS.md`,
-  and a project `.codex` only in a trusted project.
+  and a project `.codex` only in a trusted project. A fragment that sets
+  `model_provider`, `model_providers`, `projects`, `hooks.state`, `features`,
+  `analytics`, `otel` or `notify` fails the compose with one line per key, such as
+  ``Remove `model_provider` from the harness's `settings/codex/config.toml`: qory writes
+  it from the run's model key.``
 - **gemini**: `settings.json` with `model.name` and `mcpServers`, links for skills and hooks,
   one `agents/<name>.md` with `name` and `description`, one `commands/<name>.toml` with
   `$ARGUMENTS` as `{{args}}`. Gemini reads a project `.gemini` only in a trusted folder.

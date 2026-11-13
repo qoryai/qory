@@ -23,6 +23,7 @@
 package codex
 
 import (
+	"fmt"
 	"path/filepath"
 	"strings"
 
@@ -78,8 +79,12 @@ func (codex) Reserved() []render.Reserved {
 // name, description and its body as developer_instructions. The instructions written as AGENTS.md end with the names the
 // session registers, see [render.Addressing]: a Codex home registers them as the modules
 // wrote them, and the file states that. Codex reads a project .codex only in a project
-// the user has marked trusted.
+// the user has marked trusted. A fragment that sets a key of [reservedKeys] is refused
+// before anything is written.
 func (codex) Render(res *compose.Result, dir, home string) error {
+	if err := checkReserved(res.SettingsFor(Runtime, "config.toml", home)); err != nil {
+		return err
+	}
 	err := render.WriteSettings(res, Runtime, dir, home, []string{"config.toml"}, func(file string, m map[string]any) {
 		if file != "config.toml" {
 			return
@@ -126,6 +131,47 @@ func (codex) Render(res *compose.Result, dir, home string) error {
 		}
 	}
 	return nil
+}
+
+// reservedKeys are the key paths of config.toml that a harness fragment may not set,
+// because Forager's launch of Codex sets them as --config flags, which win over every
+// config.toml, or because qory writes them for a run: the model provider and its
+// settings, project trust, hook trust, features, analytics, OpenTelemetry and the notify
+// program. A fragment may set the other keys of hooks, such as hooks.Stop.
+var reservedKeys = [][]string{
+	{"model_provider"},
+	{"model_providers"},
+	{"projects"},
+	{"hooks", "state"},
+	{"features"},
+	{"analytics"},
+	{"otel"},
+	{"notify"},
+}
+
+// textReservedKey is the refusal of a fragment that sets a key of [reservedKeys], with the
+// key as a dotted path.
+const textReservedKey = "Remove `%s` from the harness's `settings/codex/config.toml`: qory writes it from the run's model key."
+
+// checkReserved refuses m, the harness's config.toml fragment, when it sets a key of
+// [reservedKeys], naming the first in that list's order.
+func checkReserved(m map[string]any) error {
+	for _, path := range reservedKeys {
+		if hasKey(m, path) {
+			return fmt.Errorf(textReservedKey, strings.Join(path, "."))
+		}
+	}
+	return nil
+}
+
+// hasKey reports whether m has the key path.
+func hasKey(m map[string]any, path []string) bool {
+	v, ok := m[path[0]]
+	if !ok || len(path) == 1 {
+		return ok
+	}
+	sub, ok := v.(map[string]any)
+	return ok && hasKey(sub, path[1:])
 }
 
 // setKey is where a codex fragment sets variables, which Codex sets in every command it
