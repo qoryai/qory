@@ -26,12 +26,15 @@
 package codex
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"maps"
 	"math"
 	"path"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/qoryai/qory/internal/compose"
@@ -116,6 +119,11 @@ func (codex) Render(res *compose.Result, dir, home string) error {
 	}
 	for _, file := range []string{"config.toml", "hooks.json"} {
 		if err := checkHookNumbers(file, res.SettingsFor(Runtime, file, home)); err != nil {
+			return err
+		}
+	}
+	for _, data := range res.CodexHooksJSON {
+		if err := checkHookNumbers("hooks.json", exactJSON(data)); err != nil {
 			return err
 		}
 	}
@@ -268,8 +276,8 @@ var hookNumbers = map[string][]struct {
 // value, naming the first event in sorted order. Codex 0.167.2 then reads none of
 // config.toml and starts with its defaults, or drops every hook of hooks.json
 // (codex-rs/hooks/src/engine/discovery.rs, load_hooks_json). Codex refuses a float such
-// as 2.0 as well: config.toml decodes it as a float, which is refused, but every JSON
-// number is a float to the decoder, so 2.0 in hooks.json passes.
+// as 2.0 as well: config.toml decodes it as a float, which is refused, and a hooks.json
+// fragment read by [exactJSON] has it as a number with a ".", which is refused too.
 func checkHookNumbers(file string, m map[string]any) error {
 	events, _ := m["hooks"].(map[string]any)
 	for _, event := range slices.Sorted(maps.Keys(events)) {
@@ -292,11 +300,33 @@ func checkHookNumbers(file string, m map[string]any) error {
 	return nil
 }
 
+// exactJSON decodes a hooks.json fragment with every number as written, a json.Number,
+// so a number with a "." or an exponent stays apart from a whole one. A fragment that
+// does not decode is an empty map: compose decoded it before.
+func exactJSON(data []byte) map[string]any {
+	d := json.NewDecoder(bytes.NewReader(data))
+	d.UseNumber()
+	m := map[string]any{}
+	if err := d.Decode(&m); err != nil {
+		return map[string]any{}
+	}
+	return m
+}
+
 // wholeAtLeast reports whether v, a decoded settings value, is a whole number of least
 // or more. A value that is no number passes: Codex refuses it too, and the refusal of a
 // number would name the wrong fault.
 func wholeAtLeast(v any, least float64) bool {
 	switch n := v.(type) {
+	case json.Number:
+		if strings.ContainsAny(string(n), ".eE") {
+			return false
+		}
+		i, err := strconv.ParseInt(string(n), 10, 64)
+		if err != nil {
+			return !strings.HasPrefix(string(n), "-")
+		}
+		return float64(i) >= least
 	case int64:
 		return float64(n) >= least
 	case int:

@@ -161,6 +161,11 @@ type Result struct {
 	// no target file, and no render places it in a home: the Codex renderer's
 	// WriteWalledHome writes it to the rules folder of a walled read run's home.
 	CodexReadRules []byte
+	// CodexHooksJSON are the bytes of every module's settings/codex/hooks.json fragment,
+	// as written, in module order; nil when no module ships one. The fragments are also
+	// merged into Settings like any other; the Codex renderer reads these to tell a
+	// number such as 2.0, which Codex refuses, from 2, which the merge cannot.
+	CodexHooksJSON [][]byte
 	// MCP contains the composed MCP servers by name, each the object its module's
 	// mcp/<name>.json contains, with every $QORY_HARNESS_HOME as written, before
 	// substitution. [Result.MCPFor] renders it for a home.
@@ -435,6 +440,13 @@ func ComposeWith(p *stack.Stack, opts Options) (_ *Result, err error) {
 					}
 					res.CodexReadRules = append(res.CodexReadRules, data...)
 					continue
+				}
+				if runtime == "codex" && file == "hooks.json" {
+					data, err := readFile(path)
+					if err != nil {
+						return nil, exports.HideError(err)
+					}
+					res.CodexHooksJSON = append(res.CodexHooksJSON, data)
 				}
 				if res.Settings[runtime][file] == nil {
 					res.Settings[runtime][file] = map[string]any{}
