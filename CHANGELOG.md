@@ -301,6 +301,9 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Changed
 
+- A walled run starts `codex exec` with `--sandbox danger-full-access` after `exec`,
+  unless the arguments set a sandbox mode or bypass one. Inside the wall every other
+  sandbox mode of Codex fails before it runs a command. An unwalled run is unchanged.
 - qory builds with Forager main 1b3071e2. A run keeps its wall only when a container of
   the run may still run; a network or folder of the wall that could not be removed no longer
   keeps it.

@@ -249,6 +249,14 @@ type Dispatcher interface {
 	DispatchedArgs(args []string) []string
 }
 
+// Walled is a [Launcher] whose launch arguments differ behind a wall, where the wall is
+// the limit of what the program may change. A runtime that does not implement it starts
+// a walled run with the launch's arguments.
+type Walled interface {
+	// WalledArgs are args, the launch's arguments, as a walled run passes them.
+	WalledArgs(args []string) []string
+}
+
 // SettingsInliner is a [Launcher] whose settings file a run passes to Forager as its
 // JSON, read from the home by qory, after the home's check: Forager reads no file of
 // the home. The flag takes a file or the JSON itself.
