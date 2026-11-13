@@ -95,7 +95,9 @@ const ReadRulesName = "read-access.rules"
 // returns the binds, files first, in a fixed order.
 //
 // The skills disabled are every name, other than run.Skills, of a skill in the copy of
-// dir's skills and in run.Checkouts, by [skillNames]. When run.Skills contains
+// dir's skills and in run.Checkouts, by [skillNames], and every skill of run.Checkouts
+// by its path in the wall, by [checkoutSkillPaths], so a checkout's skill with the name
+// of an allowed one is disabled too. When run.Skills contains
 // [AllSkills], every name of a skill in the copy of dir's skills counts as in run.Skills.
 // A skill that is not there when WriteWalledHome runs keeps its name enabled: one the
 // agent writes during the run, and one in ~/.agents/skills or /etc/codex/skills of the
@@ -149,13 +151,18 @@ func WriteWalledHome(dir, files string, run WalledRun) ([]Bound, error) {
 		}
 	}
 	slices.Sort(disabled)
+	var disabledPaths []string
+	for _, c := range run.Checkouts {
+		disabledPaths = append(disabledPaths, checkoutSkillPaths(c, run.Projects)...)
+	}
+	slices.Sort(disabledPaths)
 	config, err := os.ReadFile(filepath.Join(dir, "config.toml"))
 	if errors.Is(err, fs.ErrNotExist) {
 		config = nil
 	} else if err != nil {
 		return nil, err
 	}
-	config, err = WalledConfig(config, HomeInWall, run.Projects, slices.Compact(disabled))
+	config, err = WalledConfig(config, HomeInWall, run.Projects, slices.Compact(disabled), slices.Compact(disabledPaths))
 	if err != nil {
 		return nil, err
 	}
@@ -189,6 +196,44 @@ func writeNew(p string, data []byte, perm os.FileMode) error {
 		return err
 	}
 	return f.Close()
+}
+
+// checkoutSkillPaths are the paths in the wall of each SKILL.md that [findSkills] finds
+// in the skill folders of checkout, for each of projects, the paths where the wall shows
+// checkout. Codex compares a skills.config path with a skill's SKILL.md path with every
+// link resolved, as Codex sees it in the wall, and falls back to the path it reached
+// when that fails (codex-rs/ext/skills/src/loader/host.rs). Both paths are here: the
+// file's real path and the path qory reached, each relative to checkout and put under
+// each project. A project is taken as Codex resolves it, as for the trust entry of
+// [WalledConfig].
+func checkoutSkillPaths(checkout string, projects []string) []string {
+	realCheckout, err := filepath.EvalSymlinks(checkout)
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for _, r := range skillRoots {
+		for _, f := range findSkills(filepath.Join(checkout, r), checkout) {
+			for _, rel := range []string{relTo(realCheckout, f.real), relTo(checkout, f.path)} {
+				if rel == "" {
+					continue
+				}
+				for _, p := range projects {
+					out = append(out, path.Join(p, rel))
+				}
+			}
+		}
+	}
+	return out
+}
+
+// relTo is file relative to dir, with forward slashes; "" when file is not below dir.
+func relTo(dir, file string) string {
+	rel, err := filepath.Rel(dir, file)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return ""
+	}
+	return filepath.ToSlash(rel)
 }
 
 // copyTree copies the folder src into dst, which exists: folders, regular files with
@@ -244,10 +289,11 @@ func copyTree(src, dst string) error {
 //
 // It also turns off the skills Codex ships and the skills of a cloud provider, with
 // skills.bundled.enabled = false and cloud.skills.enabled = false, and adds a
-// skills.config entry with enabled = false for each name of disabled, after the entries
-// config has, since a later entry decides (codex-rs/config/src/skills_config.rs). Codex
-// reads skills.config from this file alone, never from a repository's .codex.
-func WalledConfig(config []byte, home string, projects, disabled []string) ([]byte, error) {
+// skills.config entry with enabled = false for each name of disabled, then one for each
+// SKILL.md path of disabledPaths, after the entries config has, since a later entry
+// decides (codex-rs/config/src/skills_config.rs). Codex reads skills.config from this
+// file alone, never from a repository's .codex.
+func WalledConfig(config []byte, home string, projects, disabled, disabledPaths []string) ([]byte, error) {
 	m := map[string]any{}
 	if _, err := toml.NewDecoder(bytes.NewReader(config)).Decode(&m); err != nil {
 		return nil, err
@@ -260,6 +306,9 @@ func WalledConfig(config []byte, home string, projects, disabled []string) ([]by
 	entries, _ := skills["config"].([]map[string]any)
 	for _, name := range disabled {
 		entries = append(entries, map[string]any{"name": name, "enabled": false})
+	}
+	for _, p := range disabledPaths {
+		entries = append(entries, map[string]any{"path": p, "enabled": false})
 	}
 	if len(entries) > 0 {
 		skills["config"] = entries

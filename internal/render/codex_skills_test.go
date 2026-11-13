@@ -15,9 +15,11 @@ import (
 )
 
 // TestWalledCodexDisablesSkillsTheHarnessDoesNotAllow composes a harness whose Claude
-// Code settings allow two of its four skills, and a checkout with skills of its own in
-// .codex/skills and .agents/skills, one of them in a plugin. The walled config.toml
-// disables every other name Codex could load them under, and no allowed one.
+// Code settings allow two of its four skills, and a checkout with skills in
+// .codex/skills and .agents/skills, one of them in a plugin and one named as an allowed
+// harness skill. The walled config.toml disables every other name Codex could load them
+// under, and no allowed one, and then every skill of the checkout by its path in the
+// wall, the one with an allowed name included.
 func TestWalledCodexDisablesSkillsTheHarnessDoesNotAllow(t *testing.T) {
 	files := withFile("modules/core/settings/claude/settings.json",
 		`{"permissions": {"allow": ["Read", "Skill(harness:review)", "Skill(harness:visuals)", "Skill(other:notes)", "Skill(harness:dep*)", "Agent(harness:deploying)"]}}`)
@@ -53,10 +55,20 @@ func TestWalledCodexDisablesSkillsTheHarnessDoesNotAllow(t *testing.T) {
 	if _, err := codex.WriteWalledHome(filepath.Join(home, "codex"), fixed, codex.WalledRun{Projects: []string{"/workspace"}, Checkouts: []string{checkout}, Skills: allowed}); err != nil {
 		t.Fatal(err)
 	}
-	disabled, bundled, cloud := walledSkills(t, fixed)
+	disabled, paths, bundled, cloud := walledSkills(t, fixed)
 	want := []string{"broken", "broken: yes", "deploying", "hidden", "notes", "pack:packed", "packed", "repo tool", "repo-only"}
 	if !reflect.DeepEqual(disabled, want) {
 		t.Errorf("disabled skills %v, want %v", disabled, want)
+	}
+	wantPaths := []string{
+		"/workspace/.agents/skills/broken/SKILL.md",
+		"/workspace/.agents/skills/group/.hidden/deep/hidden/SKILL.md",
+		"/workspace/.agents/skills/pack/skills/packed/SKILL.md",
+		"/workspace/.agents/skills/visuals/SKILL.md",
+		"/workspace/.codex/skills/repo-only/SKILL.md",
+	}
+	if !reflect.DeepEqual(paths, wantPaths) {
+		t.Errorf("disabled skill paths %v, want %v", paths, wantPaths)
 	}
 	if bundled || cloud {
 		t.Error("the skills Codex ships or a cloud's skills are on")
@@ -102,9 +114,12 @@ func TestWalledCodexSkillsUnderAPatternOrNoRule(t *testing.T) {
 			if _, err := codex.WriteWalledHome(filepath.Join(home, "codex"), fixed, run); err != nil {
 				t.Fatal(err)
 			}
-			disabled, bundled, cloud := walledSkills(t, fixed)
+			disabled, paths, bundled, cloud := walledSkills(t, fixed)
 			if !reflect.DeepEqual(disabled, c.disabled) {
 				t.Errorf("disabled skills %v, want %v", disabled, c.disabled)
+			}
+			if want := []string{"/workspace/.agents/skills/repo-skill/SKILL.md"}; !reflect.DeepEqual(paths, want) {
+				t.Errorf("disabled skill paths %v, want %v", paths, want)
 			}
 			if bundled || cloud {
 				t.Error("the skills Codex ships or a cloud's skills are on")
@@ -114,14 +129,16 @@ func TestWalledCodexSkillsUnderAPatternOrNoRule(t *testing.T) {
 }
 
 // walledSkills reads the config.toml that WriteWalledHome wrote into fixed: the names
-// that skills.config disables, in order, and whether bundled and cloud skills are on.
-func walledSkills(t *testing.T, fixed string) (disabled []string, bundled, cloud bool) {
+// and then the paths that skills.config disables, each in order, and whether bundled and
+// cloud skills are on. Every name entry comes before every path entry.
+func walledSkills(t *testing.T, fixed string) (disabled, paths []string, bundled, cloud bool) {
 	t.Helper()
 	var config struct {
 		Skills struct {
 			Bundled struct{ Enabled bool }
 			Config  []struct {
 				Name    string
+				Path    string
 				Enabled bool
 			}
 		}
@@ -132,11 +149,18 @@ func walledSkills(t *testing.T, fixed string) (disabled []string, bundled, cloud
 	}
 	for _, e := range config.Skills.Config {
 		if e.Enabled {
-			t.Errorf("skills.config enables %s", e.Name)
+			t.Errorf("skills.config enables %s%s", e.Name, e.Path)
+		}
+		if e.Path != "" {
+			paths = append(paths, e.Path)
+			continue
+		}
+		if len(paths) > 0 {
+			t.Errorf("skills.config disables the name %s after a path", e.Name)
 		}
 		disabled = append(disabled, e.Name)
 	}
-	return disabled, config.Skills.Bundled.Enabled, config.Cloud.Skills.Enabled
+	return disabled, paths, config.Skills.Bundled.Enabled, config.Cloud.Skills.Enabled
 }
 
 // TestWalledCodexReadRulesOnlyInAReadRun composes a module that ships

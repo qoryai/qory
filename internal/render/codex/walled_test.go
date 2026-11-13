@@ -52,9 +52,9 @@ const composed = `model = "gpt-6.1-sol"
 // checkout: the compose's keys as they were, each project path untrusted, a
 // trusted_hash for each Stop hook, keyed by config.toml in the home in the wall, the
 // skills Codex ships and a cloud's skills off, and a disabling entry for each skill name,
-// after the compose's entry.
+// then for each skill path, after the compose's entry.
 func TestWalledConfigIsGolden(t *testing.T) {
-	got, err := codex.WalledConfig([]byte(composed), codex.HomeInWall, []string{"/cache/qory/runs/r1/work", "/workspace"}, []string{"deploying", "plugin:review", "review"})
+	got, err := codex.WalledConfig([]byte(composed), codex.HomeInWall, []string{"/cache/qory/runs/r1/work", "/workspace"}, []string{"deploying", "plugin:review", "review"}, []string{"/workspace/.agents/skills/review/SKILL.md"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -111,6 +111,10 @@ func TestWalledConfigIsGolden(t *testing.T) {
   [[skills.config]]
     enabled = false
     name = "review"
+
+  [[skills.config]]
+    enabled = false
+    path = "/workspace/.agents/skills/review/SKILL.md"
 `
 	if string(got) != want {
 		t.Errorf("config.toml:\n%s\nwant:\n%s", got, want)
@@ -218,7 +222,7 @@ timeout = 30
 // project path and no skill to disable: neither hooks.state nor projects is written, and
 // no skills.config entry, but the skills Codex ships and a cloud's skills are off.
 func TestWalledConfigTrustsNoProjectAndAddsNoState(t *testing.T) {
-	got, err := codex.WalledConfig([]byte("model = \"m\"\n"), codex.HomeInWall, nil, nil)
+	got, err := codex.WalledConfig([]byte("model = \"m\"\n"), codex.HomeInWall, nil, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -260,7 +264,7 @@ command = "/bin/true"
 // walledState is the hooks.state table of [codex.WalledConfig] for config, key to hash.
 func walledState(t *testing.T, config string, projects []string) map[string]string {
 	t.Helper()
-	got, err := codex.WalledConfig([]byte(config), codex.HomeInWall, projects, nil)
+	got, err := codex.WalledConfig([]byte(config), codex.HomeInWall, projects, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
