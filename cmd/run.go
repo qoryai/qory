@@ -1181,8 +1181,27 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					onVariables(a)
 				}
 			}
+			// A walled Codex run with no setup container tests /etc/codex in the agent's
+			// container before Codex starts. A run whose workspace is bound read-only
+			// cannot: Forager refuses a session's setup beside it.
+			insideCheck := walled && name == codex.Runtime && run.Repositories() == "" && !spec.WorkspaceReadOnly
+			if insideCheck {
+				withCodexSettingsCheck(&spec)
+			}
 			res, err := joinSession(run, ctx, spec.SessionSpec)
 			out := sessionOutcome(res, err)
+			// The test found /etc/codex, so Codex never started: the run closes and ends as
+			// a failed check of the image's tools before the join does, with the line and
+			// status 1.
+			if insideCheck && err == nil && res != nil && codexSettingsRefused(res.Dir) {
+				closeRun(session.Outcome{State: event.StateFailed, ExitCode: -1})
+				lines.done(nil)
+				said(image.CodexSettingsFix())
+				if recorded(record) {
+					said("the record is in " + record)
+				}
+				return reported(&exitError{code: 1})
+			}
 			// pushWork is the push step of a run with an agent session that may write, see
 			// [keepsWork], before the close: Qory Apiary takes no version of a run that ended.
 			// The step runs under [pushContext], since a stop has ended ctx or spent the time
@@ -3368,6 +3387,50 @@ func setupCommands(gitSession bool, runtime string) []session.SetupCommand {
 		commands = append(commands, session.SetupCommand{Name: checkToolsStep, Args: []string{"/bin/sh", "-c", script}})
 	}
 	return append(commands, session.SetupCommand{Name: setupStep, Args: append([]string{wall.HelperPath}, prepareArgs...)})
+}
+
+// withCodexSettingsCheck puts the step [checkToolsStep] with
+// [image.CodexSettingsInsideScript] first in the session's setup of spec, before any
+// command the setup has, and sets the setup runner when the spec has none.
+func withCodexSettingsCheck(spec *runSpec) {
+	check := session.SetupCommand{Name: checkToolsStep, Args: []string{"/bin/sh", "-c", image.CodexSettingsInsideScript()}}
+	spec.SessionSpec.Setup = append([]session.SetupCommand{check}, spec.SessionSpec.Setup...)
+	if len(spec.SetupRunner) == 0 {
+		spec.SetupRunner = append([]string{wall.HelperPath}, setupCommandArgs...)
+	}
+}
+
+// codexSettingsRefused reports whether the record in dir, session.jsonl, has the last
+// setup step named [checkToolsStep] ending with [image.CodexSettingsInsideExit]: the test
+// that [withCodexSettingsCheck] adds found /etc/codex. A record that cannot be read has no
+// such step.
+func codexSettingsRefused(dir string) bool {
+	data, err := os.ReadFile(filepath.Join(dir, "session.jsonl"))
+	if err != nil {
+		return false
+	}
+	step, code := 0, -1
+	for line := range bytes.Lines(data) {
+		var ev struct {
+			Type string `json:"type"`
+			Data struct {
+				Step     int    `json:"step"`
+				Kind     string `json:"kind"`
+				Name     string `json:"name"`
+				ExitCode *int   `json:"exit_code"`
+			} `json:"data"`
+		}
+		if json.Unmarshal(line, &ev) != nil {
+			continue
+		}
+		switch {
+		case ev.Type == event.StepStarted && ev.Data.Kind == event.StepSetup && ev.Data.Name == checkToolsStep:
+			step, code = ev.Data.Step, -1
+		case ev.Type == event.StepExited && step > 0 && ev.Data.Step == step && ev.Data.ExitCode != nil:
+			code = *ev.Data.ExitCode
+		}
+	}
+	return code == image.CodexSettingsInsideExit
 }
 
 // toolFixes is what a person reads of err, a step [checkToolsStep] of the run with the record

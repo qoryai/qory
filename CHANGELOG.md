@@ -827,6 +827,10 @@ release may change what an existing document does, and states it under Upgrading
   reads its settings there before qory's, so the run does not start.`` A write run in a
   copy runs this test in the step it has; any other such run, such as a read run, gets
   the step with this test alone. The step of a Claude Code run is unchanged.
+- A walled Codex run that lists no repositories, except a read run, tests `/etc/codex` in
+  a `Check tools` setup step in the agent's container before Codex starts. When the image
+  has anything there, qory prints the same line, the run closes as failed, and qory run
+  exits with 1.
 - The line for an image with no `sh` reads ``the setup of a walled run runs sh from these
   folders``, in place of ``the git session of a walled run``.
 - Compose accepts `settings/codex/read-access.rules`, a file of Codex execpolicy rules.

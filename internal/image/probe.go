@@ -339,6 +339,31 @@ func codexSettingsCheckScript(settings string) string {
 		"fi\n"
 }
 
+// CodexSettingsFix is the line qory prints for an image that has anything at
+// [CodexSettings].
+func CodexSettingsFix() string { return noCodexSettings() }
+
+// CodexSettingsInsideExit is the exit status of [CodexSettingsInsideScript] for an image
+// that has anything at [CodexSettings]. No other part of the step exits with it: sh exits
+// 2 on a script it cannot read, and the setup runner 125 or 127 on a command it cannot
+// start.
+const CodexSettingsInsideExit = 3
+
+// CodexSettingsInsideScript is the sh script of the step that a walled Codex run with no
+// setup runs in the agent's container before Codex starts: it prints nothing, since the
+// session writes each line of the step to the terminal and qory prints
+// [CodexSettingsFix] itself, and exits [CodexSettingsInsideExit] when the image has
+// anything at [CodexSettings], 0 otherwise. It runs only the shell's builtins.
+func CodexSettingsInsideScript() string { return codexSettingsInsideScript(CodexSettings) }
+
+// codexSettingsInsideScript is [CodexSettingsInsideScript] with settings in place of
+// [CodexSettings].
+func codexSettingsInsideScript(settings string) string {
+	return "if test -e " + shellQuoted(settings) + " || test -h " + shellQuoted(settings) + "; then\n" +
+		"\texit " + strconv.Itoa(CodexSettingsInsideExit) + "\n" +
+		"fi\n"
+}
+
 // sessionCheckScript is [SessionCheckScript] with path as the session's PATH, and with the
 // check of [CodexSettings] at settings when settings is not empty.
 func sessionCheckScript(path, settings string) string {

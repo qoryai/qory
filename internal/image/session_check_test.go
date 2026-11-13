@@ -331,3 +331,47 @@ func TestTheCodexSettingsCheckAlone(t *testing.T) {
 		t.Errorf("CodexSettingsCheckScript checks another place:\n%s", CodexSettingsCheckScript())
 	}
 }
+
+// TestTheCodexSettingsCheckInside is the step a walled Codex run with no setup runs in
+// the agent's container: with a file, a folder or a link that leads nowhere at the place
+// of /etc/codex, no output and exit [CodexSettingsInsideExit]; with nothing there, no
+// output and exit 0. CodexSettingsInsideScript checks /etc/codex itself, and its line is
+// the line of the step outside.
+func TestTheCodexSettingsCheckInside(t *testing.T) {
+	base := t.TempDir()
+	file, folder, link := filepath.Join(base, "file"), filepath.Join(base, "folder"), filepath.Join(base, "link")
+	if err := os.WriteFile(file, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(folder, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(base, "nowhere"), link); err != nil {
+		t.Fatal(err)
+	}
+	run := func(shell, settings string) (string, int) {
+		c := exec.Command(shell, "-c", codexSettingsInsideScript(settings))
+		c.Env = []string{}
+		out, err := c.CombinedOutput()
+		if _, exited := err.(*exec.ExitError); err != nil && !exited {
+			t.Fatal(err)
+		}
+		return string(out), c.ProcessState.ExitCode()
+	}
+	for _, shell := range shells(t) {
+		for _, at := range []string{file, folder, link} {
+			if out, code := run(shell, at); out != "" || code != CodexSettingsInsideExit {
+				t.Errorf("%s, %s: %q, exit %d", shell, at, out, code)
+			}
+		}
+		if out, code := run(shell, filepath.Join(base, "absent")); out != "" || code != 0 {
+			t.Errorf("%s, nothing there: %q, exit %d", shell, out, code)
+		}
+	}
+	if CodexSettingsInsideScript() != codexSettingsInsideScript("/etc/codex") {
+		t.Errorf("CodexSettingsInsideScript checks another place:\n%s", CodexSettingsInsideScript())
+	}
+	if CodexSettingsFix() != noCodexSettings() {
+		t.Errorf("the line: %q", CodexSettingsFix())
+	}
+}
