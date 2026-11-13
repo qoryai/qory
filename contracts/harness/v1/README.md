@@ -1248,8 +1248,11 @@ Per runtime, the files written into its directory:
   from the arguments.``, and on `--remote` or `--remote-auth-token-env`, also with `=`,
   with ``Remove `--remote` from the run's Codex arguments: a Codex run takes its app
   server from qory and Forager, not from the arguments.`` (`--remote-auth-token-env`
-  likewise). A key or feature in these lines has each control character written as an
-  escape. A hook in
+  likewise). After `exec`, it stops on each flag that `codex exec resume` does not take,
+  `--sandbox` or `-s`, `--approve-for-me` or `--not-so-yolo`, `--cd` or `-C`, and
+  `--color`, with ``Remove `<flag>` from the run's Codex arguments: a paused Codex run
+  continues with `codex exec resume`, which does not take it.`` A key or feature in
+  these lines has each control character written as an escape. A hook in
   `settings/codex/config.toml` or `settings/codex/hooks.json` whose `timeout` or
   `additionalContextLimit` is negative or fractional, such as 2.0, fails the compose
   with ``Set `<key>` of the `<event>` hook in the harness's `settings/codex/<file>` to a

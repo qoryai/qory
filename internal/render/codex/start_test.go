@@ -2,18 +2,20 @@ package codex_test
 
 import (
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/qoryai/qory/internal/render"
 )
 
 // TestWalledArgs is each form of a walled launch of Codex: codex exec, as a run from a run
-// code starts it, gets --sandbox danger-full-access right after exec, also with a sandbox
-// flag after --; a start with no exec, and arguments that set a sandbox mode, bypass one
-// or ask for --approve-for-me, before exec or after it, stay as given. A last argument
+// code starts it, gets -c sandbox_mode="danger-full-access" right after exec, also with
+// --yolo and with a sandbox flag after --; a start with no exec stays as given, and
+// arguments that set sandbox_mode with --config or -c, in each form, before exec or after
+// it, get no pair. Each --add-dir after exec and before -- is left out, with its folder. A last argument
 // after exec that starts with $<name> mentions the skill by its path in the walled home,
-// also beside a sandbox flag; a plugin's name, a bare $, and a $<name> that is not the
-// last argument stay as given.
+// also beside a sandbox_mode pair; a plugin's name, a bare $, and a $<name> that is not
+// the last argument stay as given.
 func TestWalledArgs(t *testing.T) {
 	rt, err := render.Lookup("codex")
 	if err != nil {
@@ -23,34 +25,124 @@ func TestWalledArgs(t *testing.T) {
 	if !ok {
 		t.Fatal("codex is no render.Walled")
 	}
+	off := []string{"-c", `sandbox_mode="danger-full-access"`}
+	with := func(parts ...[]string) []string { return slices.Concat(parts...) }
 	for _, c := range []struct{ args, want []string }{
-		{[]string{"exec", "--json", "$explore x"}, []string{"exec", "--sandbox", "danger-full-access", "--json", "[$explore](/var/lib/qory-codex-home/skills/explore/SKILL.md) x"}},
-		{[]string{"exec", "$workflow-explore"}, []string{"exec", "--sandbox", "danger-full-access", "[$workflow-explore](/var/lib/qory-codex-home/skills/workflow-explore/SKILL.md)"}},
-		{[]string{"exec", "--sandbox", "read-only", "$explore x"}, []string{"exec", "--sandbox", "read-only", "[$explore](/var/lib/qory-codex-home/skills/explore/SKILL.md) x"}},
-		{[]string{"exec", "$pack:review x"}, []string{"exec", "--sandbox", "danger-full-access", "$pack:review x"}},
-		{[]string{"exec", "$ x"}, []string{"exec", "--sandbox", "danger-full-access", "$ x"}},
-		{[]string{"exec", "$explore", "x"}, []string{"exec", "--sandbox", "danger-full-access", "$explore", "x"}},
-		{[]string{"$explore", "exec"}, []string{"$explore", "exec", "--sandbox", "danger-full-access"}},
-		{[]string{"--model", "m", "exec", "hi"}, []string{"--model", "m", "exec", "--sandbox", "danger-full-access", "hi"}},
-		{[]string{"exec", "--", "--sandbox"}, []string{"exec", "--sandbox", "danger-full-access", "--", "--sandbox"}},
+		{[]string{"exec", "--json", "$explore x"}, with([]string{"exec"}, off, []string{"--json", "[$explore](/var/lib/qory-codex-home/skills/explore/SKILL.md) x"})},
+		{[]string{"exec", "$workflow-explore"}, with([]string{"exec"}, off, []string{"[$workflow-explore](/var/lib/qory-codex-home/skills/workflow-explore/SKILL.md)"})},
+		{[]string{"exec", "-c", "sandbox_mode=read-only", "$explore x"}, []string{"exec", "-c", "sandbox_mode=read-only", "[$explore](/var/lib/qory-codex-home/skills/explore/SKILL.md) x"}},
+		{[]string{"exec", "$pack:review x"}, with([]string{"exec"}, off, []string{"$pack:review x"})},
+		{[]string{"exec", "$ x"}, with([]string{"exec"}, off, []string{"$ x"})},
+		{[]string{"exec", "$explore", "x"}, with([]string{"exec"}, off, []string{"$explore", "x"})},
+		{[]string{"$explore", "exec"}, with([]string{"$explore", "exec"}, off)},
+		{[]string{"--model", "m", "exec", "hi"}, with([]string{"--model", "m", "exec"}, off, []string{"hi"})},
+		{[]string{"exec", "--", "--sandbox"}, with([]string{"exec"}, off, []string{"--", "--sandbox"})},
+		{[]string{"exec", "--", "-c", "sandbox_mode=read-only"}, with([]string{"exec"}, off, []string{"--", "-c", "sandbox_mode=read-only"})},
 		{[]string{"--model", "m"}, []string{"--model", "m"}},
-		{[]string{"exec", "--sandbox", "read-only", "hi"}, []string{"exec", "--sandbox", "read-only", "hi"}},
-		{[]string{"exec", "-s", "workspace-write", "hi"}, []string{"exec", "-s", "workspace-write", "hi"}},
-		{[]string{"exec", "--sandbox=read-only", "hi"}, []string{"exec", "--sandbox=read-only", "hi"}},
-		{[]string{"exec", "--dangerously-bypass-approvals-and-sandbox", "hi"}, []string{"exec", "--dangerously-bypass-approvals-and-sandbox", "hi"}},
-		{[]string{"exec", "--yolo", "hi"}, []string{"exec", "--yolo", "hi"}},
-		{[]string{"exec", "-sread-only", "hi"}, []string{"exec", "-sread-only", "hi"}},
-		{[]string{"exec", "-s=read-only", "hi"}, []string{"exec", "-s=read-only", "hi"}},
-		{[]string{"--sandbox", "read-only", "exec", "hi"}, []string{"--sandbox", "read-only", "exec", "hi"}},
-		{[]string{"-s", "read-only", "exec", "hi"}, []string{"-s", "read-only", "exec", "hi"}},
-		{[]string{"--yolo", "exec", "hi"}, []string{"--yolo", "exec", "hi"}},
-		{[]string{"exec", "--approve-for-me", "hi"}, []string{"exec", "--approve-for-me", "hi"}},
-		{[]string{"exec", "--not-so-yolo", "hi"}, []string{"exec", "--not-so-yolo", "hi"}},
-		{[]string{"--approve-for-me", "exec", "hi"}, []string{"--approve-for-me", "exec", "hi"}},
-		{[]string{"exec", "--json", "hi"}, []string{"exec", "--sandbox", "danger-full-access", "--json", "hi"}},
+		{[]string{"exec", "--config", "sandbox_mode=read-only", "hi"}, []string{"exec", "--config", "sandbox_mode=read-only", "hi"}},
+		{[]string{"exec", "--config=sandbox_mode=read-only", "hi"}, []string{"exec", "--config=sandbox_mode=read-only", "hi"}},
+		{[]string{"exec", "-csandbox_mode=read-only", "hi"}, []string{"exec", "-csandbox_mode=read-only", "hi"}},
+		{[]string{"exec", "-c=sandbox_mode=read-only", "hi"}, []string{"exec", "-c=sandbox_mode=read-only", "hi"}},
+		{[]string{"exec", "-c", " sandbox_mode = read-only", "hi"}, []string{"exec", "-c", " sandbox_mode = read-only", "hi"}},
+		{[]string{"-c", "sandbox_mode=read-only", "exec", "hi"}, []string{"-c", "sandbox_mode=read-only", "exec", "hi"}},
+		{[]string{"exec", "-c", "sandbox_mode", "hi"}, with([]string{"exec"}, off, []string{"-c", "sandbox_mode", "hi"})},
+		{[]string{"exec", "--dangerously-bypass-approvals-and-sandbox", "hi"}, with([]string{"exec"}, off, []string{"--dangerously-bypass-approvals-and-sandbox", "hi"})},
+		{[]string{"--yolo", "exec", "hi"}, with([]string{"--yolo", "exec"}, off, []string{"hi"})},
+		{[]string{"exec", "--json", "--add-dir", "/in", "hi"}, with([]string{"exec"}, off, []string{"--json", "hi"})},
+		{[]string{"exec", "--add-dir=/in", "--add-dir", "/more", "hi"}, with([]string{"exec"}, off, []string{"hi"})},
+		{[]string{"--add-dir", "/in", "exec", "hi"}, with([]string{"--add-dir", "/in", "exec"}, off, []string{"hi"})},
+		{[]string{"exec", "--add-dir", "--json", "hi"}, with([]string{"exec"}, off, []string{"--json", "hi"})},
+		{[]string{"exec", "hi", "--", "--add-dir", "/in"}, with([]string{"exec"}, off, []string{"hi", "--", "--add-dir", "/in"})},
+		{[]string{"exec", "--json", "hi"}, with([]string{"exec"}, off, []string{"--json", "hi"})},
 	} {
 		if got, err := w.WalledArgs(c.args); err != nil || !slices.Equal(got, c.want) {
 			t.Errorf("WalledArgs(%q) = %q, %v, want %q", c.args, got, err, c.want)
+		}
+	}
+}
+
+// TestWalledArgsRefuseWhatResumeDoesNotTake is each form of a flag that codex exec resume
+// of Codex 0.167.2 does not take, after exec and after the prompt: each is refused with
+// its text, which names the flag as given, long or short. The same flags before exec,
+// which the continuation reads as the first start does, after -- and with no exec pass,
+// and so do --image and -i, which exec resume takes.
+func TestWalledArgsRefuseWhatResumeDoesNotTake(t *testing.T) {
+	rt, err := render.Lookup("codex")
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := rt.(render.Walled)
+	for _, c := range []struct {
+		args []string
+		flag string
+	}{
+		{[]string{"exec", "--sandbox", "read-only", "hi"}, "--sandbox"},
+		{[]string{"exec", "--sandbox=read-only", "hi"}, "--sandbox"},
+		{[]string{"exec", "-s", "workspace-write", "hi"}, "-s"},
+		{[]string{"exec", "-sread-only", "hi"}, "-s"},
+		{[]string{"exec", "-s=read-only", "hi"}, "-s"},
+		{[]string{"exec", "hi", "-s", "read-only"}, "-s"},
+		{[]string{"exec", "--approve-for-me", "hi"}, "--approve-for-me"},
+		{[]string{"exec", "--approve-for-me=true", "hi"}, "--approve-for-me"},
+		{[]string{"exec", "--not-so-yolo", "hi"}, "--not-so-yolo"},
+		{[]string{"exec", "--cd", "/w", "hi"}, "--cd"},
+		{[]string{"exec", "--cd=/w", "hi"}, "--cd"},
+		{[]string{"exec", "-C", "/w", "hi"}, "-C"},
+		{[]string{"exec", "-C/w", "hi"}, "-C"},
+		{[]string{"exec", "-C=/w", "hi"}, "-C"},
+		{[]string{"exec", "-m", "gpt-5", "-C", "/w", "hi"}, "-C"},
+		{[]string{"exec", "--color", "never", "hi"}, "--color"},
+		{[]string{"exec", "--color=never", "hi"}, "--color"},
+		{[]string{"exec", "--json", "--add-dir", "/in", "--sandbox", "read-only", "--cd", "/w"}, "--sandbox"},
+	} {
+		got, err := w.WalledArgs(c.args)
+		want := "Remove `" + c.flag + "` from the run's Codex arguments: a paused Codex run continues with `codex exec resume`, which does not take it."
+		if err == nil || err.Error() != want || got != nil {
+			t.Errorf("WalledArgs(%q) = %q, %v, want %q", c.args, got, err, want)
+		}
+	}
+	for _, args := range [][]string{
+		{"exec", "--", "--sandbox", "read-only", "-s", "x", "--approve-for-me", "--not-so-yolo", "--cd", "/w", "-C", "/w", "--color", "never"},
+		{"--sandbox", "read-only", "-s", "x", "--approve-for-me", "--cd", "/w", "-C/w", "exec", "hi"},
+		{"--color", "never"},
+		{"exec", "--image", "a.png", "-i", "b.png", "hi"},
+		{"exec", "--sandboxes", "hi"},
+		{"exec", "--json", "--add-dir", "/in", "hi"},
+	} {
+		if _, err := w.WalledArgs(args); err != nil {
+			t.Errorf("WalledArgs(%q): %v", args, err)
+		}
+	}
+}
+
+// TestAWalledLaunchResumesWithEveryArgument is the launch of a paused walled Codex run that
+// continues, built as Forager builds it: qory's walled arguments, then the descriptor's
+// resume arguments, resume <id>, right after exec. exec resume of Codex 0.167.2 takes
+// none of --sandbox, -s, --approve-for-me, --not-so-yolo, --cd, -C, --add-dir and
+// --color after resume <id>, and the launch has none of them; the sandbox setting is a
+// -c pair, which exec resume takes, and the prompt follows.
+func TestAWalledLaunchResumesWithEveryArgument(t *testing.T) {
+	rt, err := render.Lookup("codex")
+	if err != nil {
+		t.Fatal(err)
+	}
+	headless, ok := rt.(render.Headless).HeadlessArgs("skills", "hello", "/in/inputs.json", "/in")
+	if !ok {
+		t.Fatal("codex has no headless start of a skill")
+	}
+	walled, err := rt.(render.Walled).WalledArgs(slices.Concat([]string{"--model", "gpt-5"}, headless))
+	if err != nil {
+		t.Fatal(err)
+	}
+	at := slices.Index(walled, "exec") + 1
+	resumed := slices.Concat(walled[:at], []string{"resume", "0199a213-81c0-7800-8aa1-bbab2a035a53"}, walled[at:])
+	want := []string{"--model", "gpt-5", "exec", "resume", "0199a213-81c0-7800-8aa1-bbab2a035a53", "-c", `sandbox_mode="danger-full-access"`, "--json", "[$hello](/var/lib/qory-codex-home/skills/hello/SKILL.md) /in/inputs.json"}
+	if !slices.Equal(resumed, want) {
+		t.Errorf("the continuation's arguments %q, want %q", resumed, want)
+	}
+	for _, a := range resumed[at:] {
+		if f := strings.SplitN(a, "=", 2)[0]; slices.Contains([]string{"--sandbox", "-s", "--approve-for-me", "--not-so-yolo", "--cd", "-C", "--add-dir", "--color"}, f) {
+			t.Errorf("the continuation has %s after exec resume", a)
 		}
 	}
 }
@@ -99,7 +191,6 @@ func TestWalledArgsRefuseAReservedConfigKey(t *testing.T) {
 	}
 	for _, args := range [][]string{
 		{"exec", "-c", "model_verbosity=low", "hi"},
-		{"exec", "-m", "gpt-5", "-C", "/w", "hi"},
 		{"exec", "--", "--oss", "--local-provider=x", "--profile", "x", "-px", "--enable", "apps", "--search", "--ignore-user-config"},
 		{"exec", "--enable", "--json", "hi"},
 		{"exec", "--disable=", "hi"},
@@ -110,7 +201,6 @@ func TestWalledArgsRefuseAReservedConfigKey(t *testing.T) {
 		{"exec", "-c", "--json", "model_provider=x"},
 		{"exec", "--", "-c", "model_provider=x"},
 		{"exec", "--", "--config=features.x=true"},
-		{"exec", "-C", "model_provider=x"},
 		{"--model", "m"},
 	} {
 		if _, err := w.WalledArgs(args); err != nil {

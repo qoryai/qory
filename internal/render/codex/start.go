@@ -26,43 +26,101 @@ func (codex) HeadlessArgs(kind, name, arg, in string) ([]string, bool) {
 // Install is Codex's npm package at version.
 func (codex) Install(version string) string { return "@openai/codex@" + version }
 
-// WalledArgs are args with --sandbox danger-full-access after exec, so Codex runs
-// commands outside a Codex sandbox: inside the wall, every other sandbox mode fails
+// WalledArgs are args with -c sandbox_mode="danger-full-access" after exec, so Codex
+// runs commands outside a Codex sandbox: inside the wall, every other sandbox mode fails
 // before it runs a command, since bubblewrap cannot create a namespace there, and the
-// wall is the limit of what the agent changes. The flag is left out when args have no
-// exec, an interactive start, and when any argument before -- sets a sandbox mode, in
-// the forms --sandbox, --sandbox=<mode>, -s, -s=<mode> and -s<mode>, bypasses one, or
-// asks for --approve-for-me or its alias --not-so-yolo, which Codex refuses beside
-// --sandbox (codex-rs/utils/cli/src/shared_options.rs).
+// wall is the limit of what the agent changes. The setting is a --config pair, not
+// --sandbox: a paused run continues as codex exec resume <id>, with resume <id> right
+// after exec, and exec resume of Codex 0.167.2 takes -c, which the root command defines
+// for every subcommand, but not --sandbox (codex-rs/utils/cli/src/config_override.rs,
+// codex-rs/exec/src/cli.rs). The pair is left out when args have no exec, an interactive
+// start, and when an argument before -- sets sandbox_mode with --config or -c, in the
+// forms of [checkArgs]. Each --add-dir after exec and before --, in the forms
+// --add-dir <dir> and --add-dir=<dir>, is left out too: exec resume does not take it,
+// and with no Codex sandbox it adds no folder Codex may write that it could not write
+// before. [HeadlessArgs] has one, for a run without a wall, whose Codex has a sandbox.
 //
 // The last argument after exec, the prompt, mentions the skill of [HeadlessArgs] by its
 // path in the home that a walled run binds at [HomeInWall] when it starts with $<name>,
-// see [mentionByPath], also when the arguments set a sandbox mode.
+// see [mentionByPath], also when the arguments set sandbox_mode.
 //
 // Arguments that set the model provider, a profile, a feature, web search, hook trust, a
 // remote app server, or a key of [reservedKeys] or [argReservedKeys] with --config or -c,
-// or that skip qory's config.toml, are refused, see [checkArgs].
+// that skip qory's config.toml, or that exec resume does not take, are refused, see
+// [checkArgs].
 func (codex) WalledArgs(args []string) ([]string, error) {
 	if err := checkArgs(args); err != nil {
 		return nil, err
 	}
-	i := slices.Index(args, "exec")
-	if i < 0 {
+	if slices.Index(args, "exec") < 0 {
 		return args, nil
 	}
-	args = slices.Clone(args)
+	args = withoutAddDir(args, slices.Index(args, "exec"))
+	i := slices.Index(args, "exec")
 	if n := len(args) - 1; n > i {
 		args[n] = mentionByPath(args[n])
 	}
-	for _, a := range args {
-		if a == "--" {
-			break
+	if setsSandboxMode(args) {
+		return args, nil
+	}
+	return slices.Concat(args[:i+1], []string{"-c", `sandbox_mode="danger-full-access"`}, args[i+1:]), nil
+}
+
+// withoutAddDir is a copy of args without each --add-dir after args[ex], exec, and before
+// --, with its folder: the forms --add-dir <dir>, where a next argument that starts with
+// - is no folder, and --add-dir=<dir>.
+func withoutAddDir(args []string, ex int) []string {
+	out := slices.Clone(args[:ex+1])
+	for i := ex + 1; i < len(args); i++ {
+		a := args[i]
+		switch {
+		case a == "--":
+			return append(out, args[i:]...)
+		case a == "--add-dir":
+			if i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
+				i++
+			}
+			continue
+		case strings.HasPrefix(a, "--add-dir="):
+			continue
 		}
-		if setsSandbox(a) {
-			return args, nil
+		out = append(out, a)
+	}
+	return out
+}
+
+// textResumeArg is the refusal of a walled run whose Codex arguments contain a flag that
+// codex exec resume does not take, with the flag for its %s.
+const textResumeArg = "Remove `%s` from the run's Codex arguments: a paused Codex run continues with `codex exec resume`, which does not take it."
+
+// resumeFlags are the flags of codex exec that exec resume of Codex 0.167.2 does not
+// take, by their long name, short name and alias, beside --oss, --local-provider and
+// --profile, which [checkArgs] refuses with a text of their own, and --add-dir, which
+// [WalledArgs] leaves out. They are the flags of exec that are not global: --color of
+// exec, and --sandbox, --approve-for-me and --cd of the options exec shares with codex
+// (codex-rs/exec/src/cli.rs, mark_exec_global_args; codex-rs/utils/cli/src/
+// shared_options.rs). --image and -i pass: exec resume has a flag of that name.
+var resumeFlags = []struct{ long, short string }{
+	{"--sandbox", "-s"},
+	{"--approve-for-me", ""},
+	{"--not-so-yolo", ""},
+	{"--cd", "-C"},
+	{"--color", ""},
+}
+
+// resumeFlag is the flag of [resumeFlags] that the argument a sets, as the refusal names
+// it, in the forms --<long>, --<long>=<value>, -<short>, -<short><value> and
+// -<short>=<value>, and "" for none.
+func resumeFlag(a string) string {
+	for _, f := range resumeFlags {
+		if a == f.long || strings.HasPrefix(a, f.long+"=") {
+			return f.long
+		}
+		if f.short != "" && strings.HasPrefix(a, f.short) {
+			return f.short
 		}
 	}
-	return slices.Concat(args[:i+1], []string{"--sandbox", "danger-full-access"}, args[i+1:]), nil
+	return ""
 }
 
 // textConfigArg is the refusal of a walled run whose Codex arguments set a key of
@@ -131,7 +189,11 @@ var argReservedKeys = []reservedKey{{"model_reasoning_effort"}, {"skills"}, {"cl
 //     which Codex reads as --config features.<feature>=true or false: features is a
 //     key of [reservedKeys], so every feature is refused, also a legacy name such as
 //     connectors for apps (codex-rs/cli/src/main.rs, FeatureToggles). Neither flag has
-//     a short form.
+//     a short form;
+//   - a flag of [resumeFlags] after exec, which exec resume does not take: --sandbox
+//     and -s, --approve-for-me and its alias --not-so-yolo, --cd and -C, and --color, in
+//     the forms of [resumeFlag]. Before exec they pass: Forager puts resume <id> after
+//     exec, so the continuation reads them as the first start does.
 //
 // Forager puts its --config flags ahead of these arguments, and Codex 0.167.2 takes the
 // last flag for a key, so such an argument would replace Forager's value. Codex reads
@@ -141,12 +203,13 @@ var argReservedKeys = []reservedKey{{"model_reasoning_effort"}, {"skills"}, {"cl
 // A key above one is refused whatever its value: the value replaces the whole table,
 // Forager's --config values in it too. Codex refuses a --config, -c,
 // --enable or --disable with no value after it, or with a value that starts with -, so
-// such a flag passes here. --oss, --ignore-user-config and --search take no value, and
-// Codex refuses one given with =; such a form is refused here as well. Codex reads no
-// long flag by a shortened name: its parser does not turn on infer_long_args. Of its
-// short flags, only -h and -V take no value, and both print and exit, so no other flag
-// comes before -c or -p in one word.
+// such a flag passes here. --oss, --ignore-user-config, --search, --approve-for-me and
+// --not-so-yolo take no value, and Codex refuses one given with =; such a form is
+// refused here as well. Codex reads no long flag by a shortened name: its parser does
+// not turn on infer_long_args. Of its short flags, only -h and -V take no value, and
+// both print and exit, so no other flag comes before -c, -p, -s or -C in one word.
 func checkArgs(args []string) error {
+	ex := slices.Index(args, "exec")
 	for i := 0; i < len(args); i++ {
 		a := args[i]
 		var pair string
@@ -169,6 +232,8 @@ func checkArgs(args []string) error {
 			return fmt.Errorf(textRemoteArg, "--remote-auth-token-env")
 		case a == "--profile" || strings.HasPrefix(a, "--profile=") || strings.HasPrefix(a, "-p"):
 			return errors.New(textProfileArg)
+		case ex >= 0 && i > ex && resumeFlag(a) != "":
+			return fmt.Errorf(textResumeArg, resumeFlag(a))
 		case a == "--enable" || a == "--disable":
 			if i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
 				return fmt.Errorf(textFeatureArg, a, shownArg(args[i+1]))
@@ -259,12 +324,31 @@ func mentionByPath(prompt string) string {
 	return "[$" + name + "](" + path.Join(HomeInWall, "skills", name, "SKILL.md") + ")" + rest[end:]
 }
 
-// setsSandbox reports whether the argument a sets Codex's sandbox mode, bypasses the
-// sandbox, or asks for a mode that conflicts with --sandbox.
-func setsSandbox(a string) bool {
-	switch a {
-	case "--sandbox", "--dangerously-bypass-approvals-and-sandbox", "--yolo", "--approve-for-me", "--not-so-yolo":
-		return true
+// setsSandboxMode reports whether an argument of args before -- sets sandbox_mode with
+// --config or -c, in the forms of [checkArgs], whatever its value.
+func setsSandboxMode(args []string) bool {
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		var pair string
+		switch {
+		case a == "--":
+			return false
+		case a == "--config" || a == "-c":
+			if i+1 == len(args) || strings.HasPrefix(args[i+1], "-") {
+				continue
+			}
+			i++
+			pair = args[i]
+		case strings.HasPrefix(a, "--config="):
+			pair = strings.TrimPrefix(a, "--config=")
+		case strings.HasPrefix(a, "-c"):
+			pair = strings.TrimPrefix(strings.TrimPrefix(a, "-c"), "=")
+		default:
+			continue
+		}
+		if key, _, ok := strings.Cut(pair, "="); ok && strings.TrimSpace(key) == "sandbox_mode" {
+			return true
+		}
 	}
-	return strings.HasPrefix(a, "--sandbox=") || strings.HasPrefix(a, "-s") && !strings.HasPrefix(a, "--")
+	return false
 }

@@ -1625,13 +1625,16 @@ the work item. Then a run of the step explore:
   | `cursor` | `--print --output-format stream-json --add-dir <in> "/<name> <in>/inputs.json"` | a skill |
 
   `amp`, `copilot`, `goose` and `any` have no headless start, so a run from a run code
-  does not start on them. Behind a wall, `codex exec` also gets `--sandbox
-  danger-full-access` right after `exec`: in the wall every other sandbox mode of Codex
-  fails before it runs a command, and the wall is the limit of what the agent changes.
-  qory adds no `--sandbox` when an argument before `--`, before `exec` or after it, sets
-  a sandbox mode (`--sandbox`, `-s`, `-s<mode>`), bypasses one (`--yolo`,
-  `--dangerously-bypass-approvals-and-sandbox`), or is `--approve-for-me` or
-  `--not-so-yolo`, which Codex refuses beside `--sandbox`.
+  does not start on them. Behind a wall, `codex exec` also gets `-c
+  sandbox_mode="danger-full-access"` right after `exec`: in the wall every other sandbox
+  mode of Codex fails before it runs a command, and the wall is the limit of what the
+  agent changes. The setting is a `-c` pair, not `--sandbox`, because a paused run
+  continues with `codex exec resume <id>`, which takes `-c` and not `--sandbox`. qory
+  adds no pair when an argument before `--`, before `exec` or after it, sets
+  `sandbox_mode` with `--config` or `-c`, in the forms of [Codex arguments a walled run
+  refuses](#codex-arguments-a-walled-run-refuses). Behind a wall, qory also leaves out
+  `--add-dir <in>`, and each other `--add-dir` after `exec` and before `--`: `codex exec
+  resume` does not take it, and with no Codex sandbox it changes nothing.
   Behind a wall, the prompt mentions the skill by its path,
   `[$<name>](/var/lib/qory-codex-home/skills/<name>/SKILL.md) <in>/inputs.json`. Codex
   selects a skill mentioned by its path by that path alone, so it starts the harness's
@@ -3796,6 +3799,13 @@ exit status 1, when an argument before `--` is one of these:
 - `--remote <addr>` or `--remote-auth-token-env <name>`, also with `=`: ``Remove
   `--remote` from the run's Codex arguments: a Codex run takes its app server from qory
   and Forager, not from the arguments.``, or the same with `--remote-auth-token-env`.
+- after `exec`, a flag that `codex exec resume` does not take: `--sandbox` or `-s`,
+  `--approve-for-me` or its alias `--not-so-yolo`, `--cd` or `-C`, and `--color`, in the
+  forms `--<flag> <value>`, `--<flag>=<value>`, `-s <mode>`, `-s<mode>`, `-s=<mode>` and
+  the same three for `-C`: ``Remove `<flag>` from the run's Codex arguments: a paused
+  Codex run continues with `codex exec resume`, which does not take it.`` The line names
+  the flag as given, such as `-s`. Before `exec`, these flags pass: Forager puts
+  `resume <id>` after `exec`, so the continuation reads them as the first start does.
 
 A key or feature in the line has each control character written as an escape, such as
 `\n`. Arguments after `--`, and every argument of an unwalled run, pass unchanged.
