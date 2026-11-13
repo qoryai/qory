@@ -3784,8 +3784,11 @@ program, such as:
 qory run: install comm in /usr/local/bin, /usr/bin, /bin: the git session of a walled run runs comm from these folders, to compare the run's refs and commits with what the bundle has
 ```
 
-On a Codex run, the step also fails when the image has anything at `/etc/codex`, where Codex reads
-settings before the ones qory writes:
+A walled Codex run that lists repositories also has the step `Check tools`, with a test of
+`/etc/codex`, where Codex reads settings before the ones qory writes. A write run in a copy runs
+both tests in that one step; any other such run, such as a read run, runs the test of
+`/etc/codex` alone. A walled Codex run that lists no repositories, and every unwalled run, has no
+such step. When the image has anything at `/etc/codex`, the step fails with:
 
 ```text
 qory run: Use an image without /etc/codex: Codex reads its settings there before qory's, so the run does not start.

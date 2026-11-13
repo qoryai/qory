@@ -822,10 +822,11 @@ release may change what an existing document does, and states it under Upgrading
   from qory and Forager, not from the arguments.``, and `--search`, with ``Remove
   `--search` from the run's Codex arguments: a Codex run takes its web search setting
   from qory and Forager, not from the arguments.``
-- On a walled Codex write run in a copy that lists repositories, the `Check tools` setup
-  step also fails when the image has anything at `/etc/codex`, with ``Use an image
-  without /etc/codex: Codex reads its settings there before qory's, so the run does not
-  start.`` The step of a Claude Code run is unchanged.
+- On a walled Codex run that lists repositories, the `Check tools` setup step fails when
+  the image has anything at `/etc/codex`, with ``Use an image without /etc/codex: Codex
+  reads its settings there before qory's, so the run does not start.`` A write run in a
+  copy runs this test in the step it has; any other such run, such as a read run, gets
+  the step with this test alone. The step of a Claude Code run is unchanged.
 - Compose accepts `settings/codex/read-access.rules`, a file of Codex execpolicy rules.
   It joins the files of all modules in module order, merges them into no target file and
   places them in no home, so no run reads them. Any other file under `settings/` that is
