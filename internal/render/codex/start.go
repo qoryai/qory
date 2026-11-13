@@ -27,21 +27,13 @@ func (codex) Install(version string) string { return "@openai/codex@" + version 
 // exec, an interactive start, and when any argument before -- sets a sandbox mode, in
 // the forms --sandbox, --sandbox=<mode>, -s, -s=<mode> and -s<mode>, bypasses one, or
 // asks for --approve-for-me or its alias --not-so-yolo, which Codex refuses beside
-// --sandbox (codex-rs/utils/cli/src/shared_options.rs).
-//
-// The last argument after exec, the prompt, mentions the skill of [HeadlessArgs] by its
-// path in the home in the wall when it starts with $<name>: [$<name>](<path>), with
-// <path> HomeInWall/skills/<name>/SKILL.md. Codex selects a skill mentioned by path by
-// that path alone, and a skill mentioned by $<name> by the first enabled skill of that
-// name, which may be one of the repository's (codex-rs/ext/skills/src/selection.rs).
+// --sandbox (codex-rs/utils/cli/src/shared_options.rs). The prompt stays $<name>: no run
+// binds the home at [HomeInWall] yet, so a mention by that path, see [mentionByPath],
+// would lead to no skill.
 func (codex) WalledArgs(args []string) []string {
 	i := slices.Index(args, "exec")
 	if i < 0 {
 		return args
-	}
-	args = slices.Clone(args)
-	if n := len(args) - 1; n > i {
-		args[n] = mentionByPath(args[n])
 	}
 	for _, a := range args {
 		if a == "--" {
@@ -55,7 +47,11 @@ func (codex) WalledArgs(args []string) []string {
 }
 
 // mentionByPath is prompt with a leading $<name> written as [$<name>](<path>), the path
-// of the skill <name> in the home in the wall, and prompt as it is otherwise. A name is
+// of the skill <name> in the home in the wall, and prompt as it is otherwise. Codex
+// selects a skill mentioned by path by that path alone, and a skill mentioned by $<name>
+// by the first enabled skill of that name, which may be one of the repository's
+// (codex-rs/ext/skills/src/selection.rs). [WalledArgs] calls it once a walled run binds
+// the home at [HomeInWall]. A name is
 // one or more of the characters Codex reads in a mention, A-Z, a-z, 0-9, _ and -, and
 // the colon of a plugin's name, which has no folder of its own in the home, is none.
 func mentionByPath(prompt string) string {

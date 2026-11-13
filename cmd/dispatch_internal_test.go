@@ -134,15 +134,15 @@ func TestADispatchedLaunchOfAnotherRuntimeIsAsGiven(t *testing.T) {
 }
 
 // TestAWalledLaunchOfCodexHasNoSandboxOfItsOwn is a walled run's launch of Codex: codex
-// exec gets --sandbox danger-full-access after exec, and its prompt mentions the skill by
-// its path in the walled home. The same launch of Claude Code stays as given.
+// exec gets --sandbox danger-full-access after exec, and its prompt stays $<name>. The
+// same launch of Claude Code stays as given.
 func TestAWalledLaunchOfCodexHasNoSandboxOfItsOwn(t *testing.T) {
 	rt, err := render.Lookup("codex")
 	if err != nil {
 		t.Fatal(err)
 	}
 	args := []string{"exec", "--json", "--add-dir", "/in", "$explore /in/inputs.json"}
-	want := []string{"exec", "--sandbox", "danger-full-access", "--json", "--add-dir", "/in", "[$explore](/var/lib/qory-codex-home/skills/explore/SKILL.md) /in/inputs.json"}
+	want := []string{"exec", "--sandbox", "danger-full-access", "--json", "--add-dir", "/in", "$explore /in/inputs.json"}
 	if got := walledArgs(rt, args); !slices.Equal(got, want) {
 		t.Errorf("codex: got %q, want %q", got, want)
 	}

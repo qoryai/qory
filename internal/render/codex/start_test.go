@@ -10,9 +10,8 @@ import (
 // TestWalledArgs is each form of a walled launch of Codex: codex exec, as a run from a run
 // code starts it, gets --sandbox danger-full-access right after exec, also with a sandbox
 // flag after --; a start with no exec, and arguments that set a sandbox mode, bypass one
-// or ask for --approve-for-me, before exec or after it, stay as given. A last argument
-// after exec that starts with $<name> mentions the skill by its path in the walled home;
-// a plugin's name, a bare $, and a $<name> that is not the last argument stay as given.
+// or ask for --approve-for-me, before exec or after it, stay as given. The prompt
+// $<name> stays as given.
 func TestWalledArgs(t *testing.T) {
 	rt, err := render.Lookup("codex")
 	if err != nil {
@@ -23,12 +22,8 @@ func TestWalledArgs(t *testing.T) {
 		t.Fatal("codex is no render.Walled")
 	}
 	for _, c := range []struct{ args, want []string }{
-		{[]string{"exec", "--json", "$explore x"}, []string{"exec", "--sandbox", "danger-full-access", "--json", "[$explore](/var/lib/qory-codex-home/skills/explore/SKILL.md) x"}},
-		{[]string{"exec", "$workflow-explore"}, []string{"exec", "--sandbox", "danger-full-access", "[$workflow-explore](/var/lib/qory-codex-home/skills/workflow-explore/SKILL.md)"}},
-		{[]string{"exec", "--sandbox", "read-only", "$explore x"}, []string{"exec", "--sandbox", "read-only", "[$explore](/var/lib/qory-codex-home/skills/explore/SKILL.md) x"}},
-		{[]string{"exec", "$pack:review x"}, []string{"exec", "--sandbox", "danger-full-access", "$pack:review x"}},
-		{[]string{"exec", "$ x"}, []string{"exec", "--sandbox", "danger-full-access", "$ x"}},
-		{[]string{"exec", "$explore", "x"}, []string{"exec", "--sandbox", "danger-full-access", "$explore", "x"}},
+		{[]string{"exec", "--json", "$explore x"}, []string{"exec", "--sandbox", "danger-full-access", "--json", "$explore x"}},
+		{[]string{"exec", "--sandbox", "read-only", "$explore x"}, []string{"exec", "--sandbox", "read-only", "$explore x"}},
 		{[]string{"$explore", "exec"}, []string{"$explore", "exec", "--sandbox", "danger-full-access"}},
 		{[]string{"--model", "m", "exec", "hi"}, []string{"--model", "m", "exec", "--sandbox", "danger-full-access", "hi"}},
 		{[]string{"exec", "--", "--sandbox"}, []string{"exec", "--sandbox", "danger-full-access", "--", "--sandbox"}},
