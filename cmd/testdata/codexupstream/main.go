@@ -3,10 +3,11 @@
 // cmd. It runs in a container: it signs a certificate for the container's addresses with
 // the authority in QORY_TEST_UPSTREAM_CA and QORY_TEST_UPSTREAM_CA_KEY, each DER in
 // standard base64, serves HTTPS on 8443, and prints "upstream: listening" once it
-// listens. It answers a POST to /v1/responses with a streamed message with the text Hi,
-// and every other request with 404. It appends one JSON line per request to
-// /tmp/upstream.jsonl: the method, the path, the SHA-256 of the Authorization header's
-// bearer value, the chatgpt-account-id header, and the text of each input message.
+// listens, with /tmp/upstream.jsonl made empty. It appends one JSON line per request to
+// that file before it answers: a POST to /v1/responses with a streamed message with the
+// text Hi, and every other request with 404. Each line has the method, the path, the
+// SHA-256 of the Authorization header's bearer value, the chatgpt-account-id header,
+// and the text of each input message.
 package main
 
 import (
@@ -71,13 +72,19 @@ func (s *stub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+	s.write(e)
 	if r.Method == http.MethodPost && r.URL.Path == "/v1/responses" {
 		answer(w)
-	} else {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusNotFound)
-		io.WriteString(w, `{"error":{"message":"stub: not found","type":"invalid_request_error"}}`)
+		return
 	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusNotFound)
+	io.WriteString(w, `{"error":{"message":"stub: not found","type":"invalid_request_error"}}`)
+}
+
+// write appends e to the log, before the answer, so the log has the request once the
+// client has the answer.
+func (s *stub) write(e entry) {
 	b, _ := json.Marshal(e)
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -162,6 +169,10 @@ func main() {
 	}
 	ln, err := tls.Listen("tcp", ":8443", &tls.Config{Certificates: []tls.Certificate{*cert}})
 	if err != nil {
+		fmt.Fprintln(os.Stderr, "upstream:", err)
+		os.Exit(1)
+	}
+	if err := os.WriteFile(logFile, nil, 0o644); err != nil {
 		fmt.Fprintln(os.Stderr, "upstream:", err)
 		os.Exit(1)
 	}
