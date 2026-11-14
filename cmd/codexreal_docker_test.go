@@ -5,6 +5,7 @@ package cmd_test
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -50,21 +51,26 @@ const (
 
 // codexScan is the launch command of the image of
 // [TestARealWalledCodexRunReachesTheModelThroughTheGateway], with MARK replaced by the
-// mark of the test's fake keys. It prints whether OPENAI_API_KEY is set and whether it
-// has the mark, starts codex with its arguments, and then prints CODEX_HOME, whether a
-// write into config.toml passes, each transcript below sessions/, each file of the home,
-// and whether a file of the home has the mark. It exits with codex's status.
+// mark of the test's fake keys. It prints whether OPENAI_API_KEY is set and whether a
+// variable of its environment has the mark, starts codex with its arguments, and then
+// prints CODEX_HOME, whether a write into config.toml passes, each transcript below
+// sessions/, each file of the home, and whether a file of the home has the mark. It
+// prints "scan: grep failed" with grep's status when a search fails. It exits with
+// codex's status.
 const codexScan = `#!/bin/sh
 mark=MARK
 if [ -n "$OPENAI_API_KEY" ]; then echo "scan: OPENAI_API_KEY is set"; fi
-case "$OPENAI_API_KEY" in *"$mark"*) echo "scan: OPENAI_API_KEY has the key";; esac
+env | grep -qF -- "$mark"
+case $? in 0) echo "scan: a variable has the key";; 1) echo "scan: no variable has the key";; *) echo "scan: grep failed on the environment";; esac
 codex "$@"
 status=$?
 echo "scan: CODEX_HOME=$CODEX_HOME"
 if { echo x >> "$CODEX_HOME/config.toml"; } 2>/dev/null; then echo "scan: wrote config.toml"; else echo "scan: cannot write config.toml"; fi
 for f in "$CODEX_HOME"/sessions/*/*/*/rollout-*.jsonl; do [ -f "$f" ] && echo "scan: rollout $f"; done
 find "$CODEX_HOME" -type f | while read -r f; do echo "scan: file $f"; done
-if grep -rlF -- "$mark" "$CODEX_HOME"; then echo "scan: a file has the key"; else echo "scan: no file has the key"; fi
+grep -rlF -- "$mark" "$CODEX_HOME"
+found=$?
+case $found in 0) echo "scan: a file has the key";; 1) echo "scan: no file has the key";; *) echo "scan: grep failed with status $found";; esac
 exit $status
 `
 
@@ -189,8 +195,10 @@ type upstreamEntry struct {
 type upstream struct{ name, host string }
 
 // startUpstream builds cmd/testdata/codexupstream for this engine's machines and starts
-// it in a container on alpine, with a certificate of ca, removed at the test's end. It
-// returns once the stub listens.
+// it in a container on alpine, with a certificate of ca, removed at the test's end and
+// when it stops. It returns once the stub listens and this machine reaches it at the
+// container's address. A published port on 127.0.0.1 would not do: the wall's NO_PROXY
+// has the loopback addresses, so Codex would not send to it through the gateway.
 func startUpstream(t *testing.T, ca *x509.Certificate, caKey *ecdsa.PrivateKey) upstream {
 	t.Helper()
 	_, arch, _ := strings.Cut(dockerOut(t, "", "version", "--format", "{{.Server.Os}}/{{.Server.Arch}}"), "/")
@@ -209,7 +217,7 @@ func startUpstream(t *testing.T, ca *x509.Certificate, caKey *ecdsa.PrivateKey) 
 	_, _ = rand.Read(id[:])
 	u := upstream{name: "qory-test-upstream-" + hex.EncodeToString(id[:])}
 	t.Cleanup(func() { _ = exec.Command("docker", "rm", "--force", u.name).Run() })
-	dockerOut(t, "", "run", "--detach", "--name", u.name, "--mount", "type=bind,src="+bin+",dst=/upstream,readonly",
+	dockerOut(t, "", "run", "--rm", "--detach", "--stop-timeout", "1", "--name", u.name, "--mount", "type=bind,src="+bin+",dst=/upstream,readonly",
 		"--env", "QORY_TEST_UPSTREAM_CA="+base64.StdEncoding.EncodeToString(ca.Raw),
 		"--env", "QORY_TEST_UPSTREAM_CA_KEY="+base64.StdEncoding.EncodeToString(der),
 		"--entrypoint", "/upstream", "public.ecr.aws/docker/library/alpine:3.22")
@@ -224,6 +232,12 @@ func startUpstream(t *testing.T, ca *x509.Certificate, caKey *ecdsa.PrivateKey) 
 		time.Sleep(100 * time.Millisecond)
 	}
 	u.host = dockerOut(t, "", "inspect", "--format", "{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}", u.name)
+	conn, err := net.DialTimeout("tcp", net.JoinHostPort(u.host, "8443"), 5*time.Second)
+	if err != nil {
+		t.Fatalf("use an engine whose containers this machine reaches at their own addresses, such as OrbStack or Docker on Linux: "+
+			"the gateway of this process dials the upstream at %s:8443, and the dial failed: %v", u.host, err)
+	}
+	conn.Close()
 	return u
 }
 
@@ -232,7 +246,7 @@ func (u upstream) log(t *testing.T) []upstreamEntry {
 	t.Helper()
 	b, err := exec.Command("docker", "exec", u.name, "cat", "/tmp/upstream.jsonl").Output()
 	if err != nil {
-		return nil
+		t.Fatalf("the upstream's log: %v", err)
 	}
 	var out []upstreamEntry
 	sc := bufio.NewScanner(bytes.NewReader(b))
@@ -362,20 +376,95 @@ func recordEvents(t *testing.T, path, typ string) []map[string]any {
 	return out
 }
 
+// realCodexSetup is what [runRealCodexChild] makes for the test binary it starts, which
+// gets it as JSON in [envRealCodexChild]: the mark of the fake keys, the wall's helper and
+// image, the upstream's container and address, and the authority of the upstream's
+// certificate, its certificate and its PKCS #8 key, each DER in standard base64.
+type realCodexSetup struct {
+	Mark, Helper, Image, Upstream, Host, CA, CAKey string
+}
+
+// authority is the setup's authority and its key.
+func (s realCodexSetup) authority(t *testing.T) (*x509.Certificate, *ecdsa.PrivateKey) {
+	t.Helper()
+	certDER, err1 := base64.StdEncoding.DecodeString(s.CA)
+	keyDER, err2 := base64.StdEncoding.DecodeString(s.CAKey)
+	if err1 != nil || err2 != nil {
+		t.Fatalf("the setup's authority: %v, %v", err1, err2)
+	}
+	ca, err := x509.ParseCertificate(certDER)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsed, err := x509.ParsePKCS8PrivateKey(keyDER)
+	if err != nil {
+		t.Fatal(err)
+	}
+	key, ok := parsed.(*ecdsa.PrivateKey)
+	if !ok {
+		t.Fatalf("the setup's authority has a key of type %T, want ECDSA", parsed)
+	}
+	return ca, key
+}
+
+// runRealCodexChild builds the wall's helper and the image, starts the upstream, and
+// runs test t in a test binary of its own, with the setup in [envRealCodexChild]: this
+// process may have read its roots already, and that binary reads them from the
+// upstream's authority. The test binary has until a minute before t's deadline, so this
+// process removes the upstream and the image also when that binary runs out of time.
+func runRealCodexChild(t *testing.T) {
+	t.Helper()
+	var id [6]byte
+	_, _ = rand.Read(id[:])
+	setup := realCodexSetup{Mark: "qorytest-" + hex.EncodeToString(id[:]), Helper: wallHelper(t)}
+	setup.Image = realCodexImage(t, setup.Mark)
+	ca, caKey := testAuthority(t)
+	u := startUpstream(t, ca, caKey)
+	keyDER, err := x509.MarshalPKCS8PrivateKey(caKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	setup.Upstream, setup.Host = u.name, u.host
+	setup.CA, setup.CAKey = base64.StdEncoding.EncodeToString(ca.Raw), base64.StdEncoding.EncodeToString(keyDER)
+	doc, err := json.Marshal(setup)
+	if err != nil {
+		t.Fatal(err)
+	}
+	limit := 20 * time.Minute
+	if deadline, ok := t.Deadline(); ok {
+		limit = time.Until(deadline) - time.Minute
+	}
+	if limit < 2*time.Minute {
+		t.Fatalf("the test has %v left, want at least 3 minutes", limit+time.Minute)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), limit)
+	defer cancel()
+	c := exec.CommandContext(ctx, os.Args[0], "-test.run=^"+t.Name()+"$", "-test.v", "-test.count=1", "-test.timeout="+(limit-30*time.Second).String())
+	c.Env = append(os.Environ(), envRealCodexChild+"="+string(doc))
+	out, err := c.CombinedOutput()
+	t.Logf("the test binary:\n%s", out)
+	if err != nil || !bytes.Contains(out, []byte("--- PASS: "+t.Name())) {
+		t.Fatalf("the test binary: %v, want --- PASS: %s", err, t.Name())
+	}
+}
+
 // TestARealWalledCodexRunReachesTheModelThroughTheGateway is a walled Codex run from a run
-// code that only reads, behind a real wall on this machine's engine, with Codex 0.167.2
-// itself in the image, at a gateway of Forager's in this process whose control plane has
-// a fake model key for a stub of the Responses API in a container: an API key, and a
-// subscription login's token. Codex starts on the run's fresh home at
-// /var/lib/qory-codex-home, with config.toml bound read-only, and OPENAI_API_KEY set
-// without the key. The stub gets each request with the key as the bearer, and with the
-// token the account header from its claim; the prompt mentions the skill workflow-hello
-// at its path in the home. Codex prints the stub's text and no error, writes its
-// transcript below sessions/ in the home, and the run ends succeeded, with egress to
-// the stub alone. No file of the home, of the run's record or of qory's folders contains
-// the key, nor does qory's output, and the home is gone once the run ends. It runs only
-// with QORY_TEST_DOCKER=1 and docker on the PATH, in a test binary of its own, which
-// reads its roots from SSL_CERT_FILE.
+// code that only reads, behind a real wall on this machine's engine, with Codex itself in
+// the image, at the version images/agent/Dockerfile installs, at a gateway of Forager's
+// in this process whose control plane has a fake model key for a stub of the Responses
+// API in a container: an API key, and a subscription login's token. Codex starts on the
+// run's fresh home at /var/lib/qory-codex-home, with config.toml bound read-only, and
+// OPENAI_API_KEY set; no variable of its environment contains the key. The stub gets
+// each request with the key as the bearer, and with the token the account header from
+// its claim; the prompt mentions the skill workflow-hello at its path in the home. Codex
+// prints the stub's text and no error, writes its transcript below sessions/ in the
+// home, and the run ends succeeded, with egress to the stub alone. No file of the home,
+// of the run's record or of qory's folders contains the key, nor does qory's output, and
+// the home is gone once the run ends. It runs only with QORY_TEST_DOCKER=1 and docker on
+// the PATH, in a test binary of its own, which reads its roots from SSL_CERT_FILE. It
+// needs an engine whose containers this machine reaches at their own addresses, such as
+// OrbStack or Docker on Linux, and fails on Docker Desktop for Mac, which routes no
+// container address to this machine.
 func TestARealWalledCodexRunReachesTheModelThroughTheGateway(t *testing.T) {
 	if os.Getenv("QORY_TEST_DOCKER") != "1" {
 		t.Skip("QORY_TEST_DOCKER=1 runs it")
@@ -383,26 +472,18 @@ func TestARealWalledCodexRunReachesTheModelThroughTheGateway(t *testing.T) {
 	if _, err := exec.LookPath("docker"); err != nil {
 		t.Skip("no docker command")
 	}
-	if os.Getenv(envRealCodexChild) != "1" {
-		// This process may have read its roots already, so the test runs in a test binary
-		// that reads them from the test's authority.
-		c := exec.Command(os.Args[0], "-test.run=^"+t.Name()+"$", "-test.v", "-test.count=1", "-test.timeout=20m")
-		c.Env = append(os.Environ(), envRealCodexChild+"=1")
-		out, err := c.CombinedOutput()
-		t.Logf("the test binary:\n%s", out)
-		if err != nil || !bytes.Contains(out, []byte("--- PASS: "+t.Name())) {
-			t.Fatalf("the test binary: %v, want --- PASS: %s", err, t.Name())
-		}
+	if os.Getenv(envRealCodexChild) == "" {
+		runRealCodexChild(t)
 		return
 	}
-	var id [6]byte
-	_, _ = rand.Read(id[:])
-	mark := "qorytest-" + hex.EncodeToString(id[:])
-	helper := wallHelper(t)
-	image := realCodexImage(t, mark)
-	ca, caKey := testAuthority(t)
-	u := startUpstream(t, ca, caKey)
+	var setup realCodexSetup
+	if err := json.Unmarshal([]byte(os.Getenv(envRealCodexChild)), &setup); err != nil {
+		t.Fatal(err)
+	}
+	ca, caKey := setup.authority(t)
 	trustOnly(t, ca, caKey)
+	mark, helper, image := setup.Mark, setup.Helper, setup.Image
+	u := upstream{name: setup.Upstream, host: setup.Host}
 	for _, c := range []struct {
 		name    string
 		login   bool
@@ -443,7 +524,8 @@ func TestARealWalledCodexRunReachesTheModelThroughTheGateway(t *testing.T) {
 			home := checkHomeMounts(t, r.spec)
 			wants(t, r.out, "scan: OPENAI_API_KEY is set\n", "scan: CODEX_HOME="+codex.HomeInWall+"\n", "scan: cannot write config.toml\n",
 				"scan: rollout "+codex.HomeInWall+"/sessions/", "scan: no file has the key\n", `"text":"Hi"`)
-			lacks(t, r.out, `"type":"error"`, "scan: OPENAI_API_KEY has the key", "scan: wrote config.toml", "scan: a file has the key")
+			wants(t, r.out, "scan: no variable has the key\n")
+			lacks(t, r.out, `"type":"error"`, "scan: a variable has the key", "scan: wrote config.toml", "scan: a file has the key", "scan: grep failed")
 			log := u.log(t)[before:]
 			mention := "[$workflow-hello](" + codex.HomeInWall + "/skills/workflow-hello/SKILL.md)"
 			if !slices.ContainsFunc(log, func(e upstreamEntry) bool {
@@ -475,7 +557,11 @@ func TestARealWalledCodexRunReachesTheModelThroughTheGateway(t *testing.T) {
 				}
 			}
 			started := recordEvents(t, events, "dev.qory.session.started")
-			if len(started) != 1 || !slices.Contains(started[0]["args"].([]any), any(`model_providers.qory.base_url="https://`+u.host+`:8443/v1"`)) {
+			var args []any
+			if len(started) == 1 {
+				args, _ = started[0]["args"].([]any)
+			}
+			if !slices.Contains(args, any(`model_providers.qory.base_url="https://`+u.host+`:8443/v1"`)) {
 				t.Errorf("dev.qory.session.started is %v, want one whose arguments set the upstream as the model provider's address", started)
 			}
 			if _, err := os.Stat(home); !os.IsNotExist(err) {
