@@ -338,7 +338,8 @@ release may change what an existing document does, and states it under Upgrading
 - A walled Codex run starts Codex on a new home: `CODEX_HOME` is
   `/var/lib/qory-codex-home`, where qory binds `<user cache>/qory/runs/<run id>/codex-home`
   writable for Codex's sessions, temporary files and state database. qory writes
-  `config.toml` with its additions, `hooks.json` with no hook, an empty `.env`,
+  `config.toml` with its additions, which mark untrusted the checkout, the working folder
+  and each folder that a `-C` or `--cd` argument names, `hooks.json` with no hook, an empty `.env`,
   `environments.toml` and `AGENTS.override.md`, the harness's `AGENTS.md`, and copies of
   `rules/`, `skills/` and `agents/` into `<user cache>/qory/runs/<run id>/codex-fixed`,
   and binds each read-only at its path in the home. A walled Codex run copies the

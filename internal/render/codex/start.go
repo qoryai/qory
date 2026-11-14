@@ -75,6 +75,40 @@ func (codex) WalledArgs(args []string, home string) ([]string, error) {
 	return slices.Concat(args[:i+1], []string{"--sandbox", "danger-full-access"}, args[i+1:]), nil
 }
 
+// StartDirs are the folders that args, a walled run's Codex arguments, start Codex in:
+// the value of each -C and --cd before --, in the forms -C <dir>, -C<dir>, -C=<dir>,
+// --cd <dir> and --cd=<dir>, in the order of args. Codex starts in the folder of the
+// last one (codex-rs/utils/cli/src/shared_options.rs, cwd); each one is returned, so
+// that each gets a trust entry. A flag with an empty value, or with no argument after
+// it, adds none.
+func StartDirs(args []string) []string {
+	var dirs []string
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		var dir string
+		switch {
+		case a == "--":
+			return dirs
+		case a == "-C" || a == "--cd":
+			if i+1 == len(args) {
+				return dirs
+			}
+			i++
+			dir = args[i]
+		case strings.HasPrefix(a, "--cd="):
+			dir = strings.TrimPrefix(a, "--cd=")
+		case strings.HasPrefix(a, "-C"):
+			dir = strings.TrimPrefix(strings.TrimPrefix(a, "-C"), "=")
+		default:
+			continue
+		}
+		if dir != "" {
+			dirs = append(dirs, dir)
+		}
+	}
+	return dirs
+}
+
 // textConfigArg is the refusal of a walled run whose Codex arguments set a key of
 // [reservedKeys] or [argReservedKeys] with --config or -c, with the key as given for its
 // %s.

@@ -75,7 +75,9 @@ type WalledRun struct {
 	// it and the sandbox gives full access. Its lookup of the git root finds none for a
 	// submodule's .git file, and for a worktree whose main .git the wall does not show
 	// or shows at another path, as at /workspace (codex-rs/config/src/config_toml.rs,
-	// get_active_project). Each one gets an untrusted entry.
+	// get_active_project). Each one gets an untrusted entry. WorkDirs also has the paths
+	// in the wall of each folder that a -C or --cd argument of the run names, see
+	// [StartDirs], since Codex starts in such a folder.
 	WorkDirs []string
 	// Skills are the skills the run may load, from [AllowedSkills]. With [AllSkills],
 	// the run may load every skill of the home's skills folder.
