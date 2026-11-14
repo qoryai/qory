@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -186,6 +187,50 @@ func TestWriteWalledHomeKeepsRulesAndAgentsToTheLimit(t *testing.T) {
 				if _, err := os.Lstat(filepath.Join(files, folder, ".git")); !os.IsNotExist(err) {
 					t.Errorf("%s/.git: %v, want it left out", folder, err)
 				}
+			}
+		})
+	}
+}
+
+// TestGitRootsInWallFindsTheMainRepository is gitRootsInWall for a worktree, from its root
+// and from its folder sub, and for a submodule: a worktree's roots are its folder and the
+// main repository's folder, which its .git file leads to, each under each project by its
+// path relative to the checkout; a submodule's root is its folder alone, since its gitdir
+// is in no worktrees folder.
+func TestGitRootsInWallFindsTheMainRepository(t *testing.T) {
+	base := t.TempDir()
+	write := func(p, content string) {
+		t.Helper()
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	repo := filepath.Join(base, "repo")
+	write(filepath.Join(repo, ".git/HEAD"), "ref: refs/heads/main\n")
+	worktree := filepath.Join(base, "work")
+	write(filepath.Join(repo, ".git/worktrees/work/HEAD"), "ref: refs/heads/w\n")
+	write(filepath.Join(worktree, ".git"), "gitdir: "+filepath.Join(repo, ".git/worktrees/work")+"\n")
+	if err := os.MkdirAll(filepath.Join(worktree, "sub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	submodule := filepath.Join(repo, "lib")
+	write(filepath.Join(repo, ".git/modules/lib/HEAD"), "ref: refs/heads/main\n")
+	write(filepath.Join(submodule, ".git"), "gitdir: ../.git/modules/lib\n")
+	for _, c := range []struct {
+		name, checkout string
+		want           []string
+	}{
+		{"a worktree", worktree, []string{worktree, "/workspace", repo, "/repo"}},
+		{"a worktree's folder", filepath.Join(worktree, "sub"), []string{worktree, "/", repo, "/repo"}},
+		{"a submodule", submodule, []string{submodule, "/workspace"}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			got := gitRootsInWall(c.checkout, []string{c.checkout, "/workspace"})
+			if !slices.Equal(got, c.want) {
+				t.Errorf("gitRootsInWall(%s) = %q, want %q", c.checkout, got, c.want)
 			}
 		})
 	}
