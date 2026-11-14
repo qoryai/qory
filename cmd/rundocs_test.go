@@ -17,6 +17,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/qoryai/forager/gateway"
 	"github.com/qoryai/forager/session"
 	"github.com/qoryai/forager/wall"
 	"github.com/qoryai/integrations/contracts"
@@ -192,6 +193,10 @@ var codeFetchImage func(context.Context) error
 // Forager's in this process as well, as [cmd.Nowhere] AtGateway does. A test sets it.
 var codeAtGateway bool
 
+// codeGatewayServer is the control plane of the gateway of [codeAtGateway], as
+// [cmd.Nowhere] GatewayServer is; nil starts that gateway with none. A test sets it.
+var codeGatewayServer *gateway.Server
+
 // codePolicyImage is the image the policy of each run [runFromCodeGiven] opens selects,
 // as [cmd.Nowhere] PolicyImage is; "" selects none. A test sets it.
 var codePolicyImage string
@@ -278,14 +283,15 @@ func runFromCodeGiven(t *testing.T, before func(code string) []string, args []st
 		System: proxygittest.Host, Repositories: codeRepositories,
 		Proxy: h.server.Proxy.URL, CABundle: h.server.Proxy.CABundle, Dir: h.runDir,
 		StackProxy: h.server.Proxy.URL, StackCABundle: h.server.Proxy.CABundle,
-		OnOpen:      func(s session.OpenSpec) { r.open = s },
-		FetchImage:  codeFetchImage,
-		Setup:       codeSetup,
-		RemoveSetup: codeRemoveSetup,
-		Real:        codeReal,
-		AtGateway:   codeAtGateway,
-		PolicyImage: codePolicyImage,
-		OnImage:     func(i session.Image) { r.image = i },
+		OnOpen:        func(s session.OpenSpec) { r.open = s },
+		FetchImage:    codeFetchImage,
+		Setup:         codeSetup,
+		RemoveSetup:   codeRemoveSetup,
+		Real:          codeReal,
+		AtGateway:     codeAtGateway,
+		GatewayServer: codeGatewayServer,
+		PolicyImage:   codePolicyImage,
+		OnImage:       func(i session.Image) { r.image = i },
 	})
 	defer restore()
 	if given == nil {

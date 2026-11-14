@@ -1631,7 +1631,14 @@ the work item. Then a run of the step explore:
   qory adds no `--sandbox` when an argument before `--`, before `exec` or after it, sets
   a sandbox mode (`--sandbox`, `-s`, `-s<mode>`), bypasses one (`--yolo`,
   `--dangerously-bypass-approvals-and-sandbox`), or is `--approve-for-me` or
-  `--not-so-yolo`, which Codex refuses beside `--sandbox`;
+  `--not-so-yolo`, which Codex refuses beside `--sandbox`.
+  Behind a wall, the prompt mentions the skill by its path,
+  `[$<name>](/var/lib/qory-codex-home/skills/<name>/SKILL.md) <in>/inputs.json`. Codex
+  selects a skill mentioned by its path by that path alone, so it starts the harness's
+  skill and not a skill of the repository with the same name; a bare `$<name>` selects
+  the first enabled skill of that name, and a repository's skill comes first. A prompt
+  whose `$<name>` is no skill of the composed harness, such as `$HOME is unset`, stays
+  as given;
 - takes its time limit as [Time limits](#time-limits) says.
 
 So the command line sets none of these. After the redemption, qory prints `qory run: the
@@ -3571,7 +3578,8 @@ What to know:
   that binary.
 - **What the container sees.** The checkout it was started in, or its copy, the run's
   record directory, read-only, and for a run of Claude Code, the folder of the names of the
-  variables its agent keeps, read-only; no other directory. `--mount <path>[:ro]` or `wall.mounts` shows it another one, at the same path as on your machine, such as a
+  variables its agent keeps, read-only; no other directory. A walled Codex run also sees
+  its Codex home: see [Codex behind a wall](#codex-behind-a-wall). `--mount <path>[:ro]` or `wall.mounts` shows it another one, at the same path as on your machine, such as a
   sibling checkout the session reads. A socket is never mounted. A read-write mount stops
   a run that works in a copy: see [A run that may write works in a
   copy](#a-run-that-may-write-works-in-a-copy). A read-write mount that
@@ -3722,7 +3730,57 @@ stops when the image has `/etc/claude-code`, where Claude Code reads managed set
 These checks guard against what the image and the repository's files leave in place, not
 against a repository that acts against them: see [The run key](#the-run-key).
 
-### Codex arguments a walled run refuses
+### Codex behind a wall
+
+Every walled Codex run starts Codex on a new home. `CODEX_HOME` is
+`/var/lib/qory-codex-home` in the container, a fixed variable: a `CODEX_HOME` in
+`harness.launch.codex.env` does not apply behind a wall. Without a wall, `CODEX_HOME` is
+the runtime's directory of the composed home, as before.
+
+qory makes two folders for the home in `<user cache>/qory/runs/<run id>`, the folder of the
+run's copy, or, for a run with no copy, a new folder at that path:
+
+- `codex-home`, bound writable at `/var/lib/qory-codex-home`. Codex writes its sessions,
+  its temporary files and its state database there. The home is outside `/tmp`, because
+  Codex 0.167.2 writes its helper programs, such as `apply_patch`, under
+  `$CODEX_HOME/tmp/arg0-linux`, and writes none when the home is under the temporary
+  folder. Codex 0.167.2 puts its helper folder, `$CODEX_HOME/tmp/arg0-linux/…`, first on
+  the `PATH` of the processes it starts, so the agent can change which program a later
+  hook or MCP server of the same run finds for a name such as `git`.
+- `codex-fixed`, with the parts of the home the agent may not change: `config.toml` with
+  qory's additions, `hooks.json` with no hook, an empty `.env`, an empty
+  `environments.toml`, an empty `AGENTS.override.md`, the harness's `AGENTS.md`, and
+  copies of the harness's `rules/`, `skills/` and `agents/`. qory binds each one
+  read-only at its path under `/var/lib/qory-codex-home`, so a write into it fails, and
+  so does a move or a removal of one of them.
+
+`config.toml` marks the checkout untrusted, at its path in the container and at
+`/workspace`, so Codex reads no hook, rule or setting of the repository's `.codex`. It
+marks the working folder untrusted at both paths too, with and without its links
+resolved: in a submodule or a worktree, Codex
+finds no git root for that folder and trusts it otherwise. Codex starts in the folder
+that `-C` or `--cd` names, so each such folder in the run's Codex arguments is untrusted
+too, resolved against the working folder, at both paths, with and without its links
+resolved. A
+walled read run whose harness ships `settings/codex/read-access.rules` gets those rules
+as `rules/read-access.rules`; a run with any other access gets none.
+
+A walled Codex run copies the composed home's `skills/`, `rules/` and `agents/` with every
+link replaced by the file or folder it leads to, since Codex 0.167.2 passes over a
+`SKILL.md` that is a link. A link whose target lies outside the composed home, the folders
+of the harness's modules and qory's module cache fails the run with ``Remove the link
+`<path>` from the harness: it leads to `<target>`, outside the harness's modules, and a
+Codex run copies only files inside them.``
+
+qory removes both folders when the run ends, also when the copy stays. If qory is killed
+or crashes, `<user cache>/qory/runs/<run id>` stays, with Codex's session transcript in
+`codex-home/sessions`. Remove that folder yourself: qory does not remove it later. A run
+with no copy whose folder `<user cache>/qory/runs/<run id>` exists stops before the agent
+starts with
+``remove <folder>, or start the run again with another id: a walled Codex run writes its
+Codex home in a new folder, and that folder exists``.
+
+### Codex arguments a run refuses
 
 qory and Forager set the model provider, the settings and the hooks of a walled Codex
 run. Forager puts its `--config` flags ahead of the run's Codex arguments, and Codex
@@ -3754,7 +3812,24 @@ exit status 1, when an argument before `--` is one of these:
   and Forager, not from the arguments.``, or the same with `--remote-auth-token-env`.
 
 A key or feature in the line has each control character written as an escape, such as
-`\n`. Arguments after `--`, and every argument of an unwalled run, pass unchanged.
+`\n`. Arguments after `--` pass unchanged.
+
+An unwalled Codex run gets a shorter check, from Forager: the run stops before Codex
+starts, with exit status 1, when a Codex argument before `--` is one of these:
+
+- `--config <key>=<value>` or `-c` in any form, where the key is a key Forager sets for
+  Codex, such as `model_provider`, `web_search` or `features.apps`, or `model_providers`,
+  `profile`, `profiles`, `projects`, `responses_api_metadata`, `openai_base_url`,
+  `chatgpt_base_url`, `experimental_realtime_*_base_url`, `skills` or `cloud.skills`, a
+  key under one, or a table above one.
+- `--enable` or `--disable` of `plugins`, `apps` or `connectors`.
+- `--oss`, `--local-provider`, `--profile`, `-p`, `--search`, `--ignore-user-config`,
+  `--dangerously-bypass-hook-trust` or `--remote`.
+
+qory prints Forager's line, which contains the flag, such as ``✗ remove the -c that sets
+model_provider from the launch's arguments: the session sets that setting for Codex, or
+the setting changes where Codex sends its requests`` for `-c model_provider=x`. Every
+other argument of an unwalled run passes unchanged.
 
 ### A run that may write works in a copy
 

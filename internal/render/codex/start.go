@@ -3,7 +3,9 @@ package codex
 import (
 	"errors"
 	"fmt"
+	"os"
 	"path"
+	"path/filepath"
 	"slices"
 	"strings"
 
@@ -27,25 +29,40 @@ func (codex) HeadlessArgs(kind, name, arg, in string) ([]string, bool) {
 func (codex) Install(version string) string { return "@openai/codex@" + version }
 
 // WalledArgs are args with --sandbox danger-full-access after exec, so Codex runs
-// commands with no sandbox of its own: inside the wall, every other sandbox mode fails
+// commands outside a Codex sandbox: inside the wall, every other sandbox mode fails
 // before it runs a command, since bubblewrap cannot create a namespace there, and the
 // wall is the limit of what the agent changes. The flag is left out when args have no
 // exec, an interactive start, and when any argument before -- sets a sandbox mode, in
 // the forms --sandbox, --sandbox=<mode>, -s, -s=<mode> and -s<mode>, bypasses one, or
 // asks for --approve-for-me or its alias --not-so-yolo, which Codex refuses beside
-// --sandbox (codex-rs/utils/cli/src/shared_options.rs). The prompt stays $<name>: no run
-// binds the home at [HomeInWall] yet, so a mention by that path, see [mentionByPath],
-// would lead to no skill. Arguments that set the model provider, a profile, a feature,
-// web search, hook trust, a remote app server, or a key of [reservedKeys] or
-// [argReservedKeys] with --config or -c, or that skip qory's config.toml, are refused,
-// see [checkArgs].
-func (codex) WalledArgs(args []string) ([]string, error) {
+// --sandbox (codex-rs/utils/cli/src/shared_options.rs).
+//
+// The last argument after exec, the prompt, mentions the skill of [HeadlessArgs] by its
+// path in the home that a walled run binds at [HomeInWall] when it starts with $<name>
+// and the runtime's directory of home, the composed harness home, has skills/<name>/
+// SKILL.md, see [mentionByPath], also when the arguments set a sandbox mode. Any other
+// prompt, such as "$HOME is unset", stays as given.
+//
+// Arguments that set the model provider, a profile, a feature, web search, hook trust, a
+// remote app server, or a key of [reservedKeys] or [argReservedKeys] with --config or -c,
+// or that skip qory's config.toml, are refused, see [checkArgs].
+func (codex) WalledArgs(args []string, home string) ([]string, error) {
 	if err := checkArgs(args); err != nil {
 		return nil, err
 	}
 	i := slices.Index(args, "exec")
 	if i < 0 {
 		return args, nil
+	}
+	args = slices.Clone(args)
+	if n := len(args) - 1; n > i {
+		args[n] = mentionByPath(args[n], func(name string) bool {
+			if home == "" {
+				return false
+			}
+			info, err := os.Stat(filepath.Join(home, Runtime, "skills", name, "SKILL.md"))
+			return err == nil && info.Mode().IsRegular()
+		})
 	}
 	for _, a := range args {
 		if a == "--" {
@@ -56,6 +73,40 @@ func (codex) WalledArgs(args []string) ([]string, error) {
 		}
 	}
 	return slices.Concat(args[:i+1], []string{"--sandbox", "danger-full-access"}, args[i+1:]), nil
+}
+
+// StartDirs are the folders that args, a walled run's Codex arguments, start Codex in:
+// the value of each -C and --cd before --, in the forms -C <dir>, -C<dir>, -C=<dir>,
+// --cd <dir> and --cd=<dir>, in the order of args. Codex starts in the folder of the
+// last one (codex-rs/utils/cli/src/shared_options.rs, cwd); each one is returned, so
+// that each gets a trust entry. A flag with an empty value, or with no argument after
+// it, adds none.
+func StartDirs(args []string) []string {
+	var dirs []string
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		var dir string
+		switch {
+		case a == "--":
+			return dirs
+		case a == "-C" || a == "--cd":
+			if i+1 == len(args) {
+				return dirs
+			}
+			i++
+			dir = args[i]
+		case strings.HasPrefix(a, "--cd="):
+			dir = strings.TrimPrefix(a, "--cd=")
+		case strings.HasPrefix(a, "-C"):
+			dir = strings.TrimPrefix(strings.TrimPrefix(a, "-C"), "=")
+		default:
+			continue
+		}
+		if dir != "" {
+			dirs = append(dirs, dir)
+		}
+	}
+	return dirs
 }
 
 // textConfigArg is the refusal of a walled run whose Codex arguments set a key of
@@ -228,14 +279,14 @@ func overlaps(k reservedKey, names []string) bool {
 }
 
 // mentionByPath is prompt with a leading $<name> written as [$<name>](<path>), the path
-// of the skill <name> in the home in the wall, and prompt as it is otherwise. Codex
+// of the skill <name> in the home in the wall, when isSkill(<name>), and prompt as it is
+// otherwise. Codex
 // selects a skill mentioned by path by that path alone, and a skill mentioned by $<name>
 // by the first enabled skill of that name, which may be one of the repository's
-// (codex-rs/ext/skills/src/selection.rs). [WalledArgs] calls it once a walled run binds
-// the home at [HomeInWall]. A name is
-// one or more of the characters Codex reads in a mention, A-Z, a-z, 0-9, _ and -, and
-// the colon of a plugin's name, which has no folder of its own in the home, is none.
-func mentionByPath(prompt string) string {
+// (codex-rs/ext/skills/src/selection.rs). A name is one or more of the characters Codex
+// reads in a mention, A-Z, a-z, 0-9, _ and -; a plugin's name has a colon and no folder in
+// the home, so it is none.
+func mentionByPath(prompt string, isSkill func(string) bool) string {
 	rest, ok := strings.CutPrefix(prompt, "$")
 	if !ok {
 		return prompt
@@ -246,7 +297,7 @@ func mentionByPath(prompt string) string {
 	if end < 0 {
 		end = len(rest)
 	}
-	if end == 0 || end < len(rest) && rest[end] != ' ' {
+	if end == 0 || end < len(rest) && rest[end] != ' ' || !isSkill(rest[:end]) {
 		return prompt
 	}
 	name := rest[:end]

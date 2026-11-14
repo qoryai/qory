@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -42,8 +41,9 @@ func exportingCheckout(t *testing.T, command string) (root, home string) {
 // TestRunTakesAModuleExportAsADefault is a walled run whose server sets LOG_DIR, a name
 // module core exports, and whose --env sets CORE_SCRIPTS, another: an export is a written
 // default, so the server's value and the run's win over it, the deny list leaves out the
-// export DOCKER_HOST, and the template's CODEX_HOME stays fixed over --env. The report
-// records every export as a default.
+// export DOCKER_HOST, and CODEX_HOME stays fixed over --env, at the walled Codex home,
+// which Codex's deny list keeps from --env. The report records every export as a
+// default.
 func TestRunTakesAModuleExportAsADefault(t *testing.T) {
 	root, home := exportingCheckout(t, "codex")
 	rep, err := report.Read(filepath.Join(root, ".qory", "harness-report.json"))
@@ -65,20 +65,18 @@ func TestRunTakesAModuleExportAsADefault(t *testing.T) {
 	if cmd.ExitCode(err) != 4 {
 		t.Fatalf("run returned %v (exit %d)\n%s", err, cmd.ExitCode(err), out)
 	}
-	wants(t, out, "qory run: CODEX_HOME from --env is not used: the harness sets it\n")
+	wants(t, out, "qory run: CODEX_HOME from --env is not used: no source may set it\n")
 	lacks(t, out, "CORE_SCRIPTS from --env")
 	data, err := os.ReadFile(log)
 	if err != nil {
 		t.Fatal(err)
 	}
 	wants(t, string(data), "env: CORE_SCRIPTS=/elsewhere\n", "env: LOG_DIR=from-server\n")
-	if want := regexp.MustCompile(`env: CODEX_HOME=` + regexp.QuoteMeta(runHomesFolder(t, root)) + `/[^/\n]+/codex\n`); !want.Match(data) {
-		t.Errorf("the environment file has no CODEX_HOME in the run's home:\n%s", data)
-	}
+	wants(t, string(data), "env: CODEX_HOME=/var/lib/qory-codex-home\n")
 	lacks(t, string(data), "DOCKER_HOST=", "/not-the-template", "LOG_DIR="+home)
 	_, evs := events(t, root)
 	got, _ := json.Marshal(sessionApplied(t, evs)["variables"])
-	if want := `[{"from":"fixed","lost":[{"from":"run","why":"fixed"}],"name":"CODEX_HOME"},{"from":"run","lost":[{"from":"harness","why":"overridden"}],"name":"CORE_SCRIPTS"},{"lost":[{"from":"harness","why":"denied"}],"name":"DOCKER_HOST"},{"from":"apiary","lost":[{"from":"harness","why":"overridden"}],"name":"LOG_DIR"}]`; string(got) != want {
+	if want := `[{"from":"fixed","lost":[{"from":"run","why":"denied"}],"name":"CODEX_HOME"},{"from":"run","lost":[{"from":"harness","why":"overridden"}],"name":"CORE_SCRIPTS"},{"lost":[{"from":"harness","why":"denied"}],"name":"DOCKER_HOST"},{"from":"apiary","lost":[{"from":"harness","why":"overridden"}],"name":"LOG_DIR"}]`; string(got) != want {
 		t.Errorf("run.policy_applied variables %s, want %s", got, want)
 	}
 }
@@ -112,7 +110,7 @@ func TestRunComposesOverTheReportsMarks(t *testing.T) {
 	if err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
-	wants(t, out, "TOOL_PRELOAD=*** CODEX_HOME="+home+"/codex\n", "qory run: CODEX_HOME from --env is not used: the harness sets it\n")
+	wants(t, out, "TOOL_PRELOAD=*** CODEX_HOME="+home+"/codex\n", "qory run: CODEX_HOME from --env is not used: no source may set it\n")
 	lacks(t, out, "TOOL_PRELOAD from --env", "/forged")
 	again, err := report.Read(path)
 	if err != nil {
@@ -290,17 +288,26 @@ func TestWalledRunTakesTheHomeFromYourOwnFile(t *testing.T) {
 }
 
 // TestAWalledCodexRunRefusesAReservedConfigArgument is a run of codex given -c
-// model_provider=x after qory run's --: without a wall the program gets the argument,
-// and a walled run stops before the agent's container starts, in the compose step, with
-// exit status 1, as a harness's config.toml that sets the key stops it. A walled run
-// given -c model_verbosity=low passes the argument to the agent's container.
+// model_provider=x after qory run's --: without a wall Forager's join stops the run
+// before the program starts, with exit status 1, and a walled run stops before the
+// agent's container starts, in the compose step, with exit status 1, as a harness's
+// config.toml that sets the key stops it. Given -c model_verbosity=low, a run without a
+// wall passes the argument to the program, and a walled run passes it to the agent's
+// container.
 func TestAWalledCodexRunRefusesAReservedConfigArgument(t *testing.T) {
 	root, _ := exportingCheckout(t, fakeRuntime(t))
 	out, err := run(t, "run", "codex", "--", "-c", "model_provider=x")
-	if cmd.ExitCode(err) != 3 {
-		t.Fatalf("a run without a wall: %v (exit %d)\n%s", err, cmd.ExitCode(err), out)
+	refused := "remove the -c that sets model_provider from the launch's arguments: the session sets that setting for Codex, or the setting changes where Codex sends its requests"
+	if cmd.ExitCode(err) != 1 || err == nil || err.Error() != refused {
+		t.Fatalf("a run without a wall: %v (exit %d), want %q\n%s", err, cmd.ExitCode(err), refused, out)
 	}
-	wants(t, out, " with -c model_provider=x\n")
+	wants(t, out, "✗ "+refused+"\n")
+	lacks(t, out, " -c model_provider=x\n")
+	out, err = run(t, "run", "codex", "--", "-c", "model_verbosity=low")
+	if cmd.ExitCode(err) != 3 {
+		t.Fatalf("a run without a wall with an allowed key: %v (exit %d)\n%s", err, cmd.ExitCode(err), out)
+	}
+	wants(t, out, " -c model_verbosity=low\n")
 	if err := os.RemoveAll(runsDir(t, root)); err != nil {
 		t.Fatal(err)
 	}

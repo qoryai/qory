@@ -25,12 +25,12 @@ func dispatchedArgs(rt render.Runtime, args []string) []string {
 	return args
 }
 
-// walledArgs are the launch arguments of a walled run of rt: the runtime's
-// [render.Walled] arguments or its refusal of args, and args as given for a runtime that
-// is none.
-func walledArgs(rt render.Runtime, args []string) ([]string, error) {
+// walledArgs are the launch arguments of a walled run of rt whose composed harness home is
+// home: the runtime's [render.Walled] arguments or its refusal of args, and args as given
+// for a runtime that is none.
+func walledArgs(rt render.Runtime, args []string, home string) ([]string, error) {
 	if w, ok := rt.(render.Walled); ok {
-		return w.WalledArgs(args)
+		return w.WalledArgs(args, home)
 	}
 	return args, nil
 }

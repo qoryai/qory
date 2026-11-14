@@ -2098,7 +2098,7 @@ func TestResendSaysTheServerWantsNoMoreEvents(t *testing.T) {
 func TestRunRunsARuntimeTheForagerShipsNothingFor(t *testing.T) {
 	root := newCheckout(t)
 	copyFixture(t, "two-modules", root)
-	script := filepath.Join(t.TempDir(), "fake-codex")
+	script := filepath.Join(t.TempDir(), "fake-gemini")
 	writeFile(t, script, `#!/bin/sh
 echo '{"kind":"done","text":"all good","session":"s-1","ok":true}'
 test -n "$QORY_TEST_WAIT" || exit 0
@@ -2112,20 +2112,20 @@ sleep 30 & wait
 	writeFile(t, filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "qory.yaml"), `apiVersion: qory.dev/v1alpha1
 harness:
   launch:
-    codex:
+    gemini:
       command: `+script+`
       args: []
 `)
-	if out, err := run(t, "harness", "compose", "--runtime", "codex", "--no-links"); err != nil {
+	if out, err := run(t, "harness", "compose", "--runtime", "gemini", "--no-links"); err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
-	out, err := run(t, "run", "codex", "--headless")
+	out, err := run(t, "run", "gemini", "--headless")
 	if err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
-	wants(t, out, "codex exited 0")
+	wants(t, out, "gemini exited 0")
 	dir, evs := events(t, root)
-	if started := sessionStarted(t, evs); started["runtime"] != "codex" || started["runtime_version"] != nil {
+	if started := sessionStarted(t, evs); started["runtime"] != "gemini" || started["runtime_version"] != nil {
 		t.Errorf("session.started %v", started)
 	}
 	if len(evs["dev.qory.runtime.result"]) != 0 || len(evs["dev.qory.run.exited"]) != 1 {
@@ -2138,8 +2138,8 @@ harness:
 		t.Fatal(err)
 	}
 
-	writeFile(t, filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", cmd.DescriptorsDir, "codex.yaml"), `version: 1
-runtime: codex
+	writeFile(t, filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", cmd.DescriptorsDir, "gemini.yaml"), `version: 1
+runtime: gemini
 runtime_version: "0.9"
 sources:
   output: {format: jsonl}
@@ -2152,7 +2152,7 @@ rules:
 `)
 	t.Setenv("QORY_TEST_WAIT", "1")
 	// A short grace: the runtime's sleep holds its output open until the grace ends, 10s by default.
-	out, err = run(t, "run", "codex", "--headless", "--timeout", "500ms", "--stop-grace", "1s")
+	out, err = run(t, "run", "gemini", "--headless", "--timeout", "500ms", "--stop-grace", "1s")
 	if cmd.ExitCode(err) != 124 {
 		t.Fatalf("%v\n%s", err, out)
 	}

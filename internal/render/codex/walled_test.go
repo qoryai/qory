@@ -480,12 +480,15 @@ func TestWriteWalledHomeWritesThroughNoLink(t *testing.T) {
 
 // TestWriteWalledHomeLeavesNoCwdTrusted is a working folder under each path where the
 // wall shows the checkout, for a checkout that is a repository's root, one that is a
-// folder inside a repository, one that is a worktree, and one whose .git is a link to a
-// git folder, which Codex follows. Codex looks up the trust of the working folder, then
-// of its git root, and trusts the root for the process when neither has an entry; every
-// lookup here finds untrusted. The run's copy is at the same path in the wall as on this
-// machine, so its git root is too; /workspace shows the checkout alone, so a cwd under it
-// has /workspace as its git root only when the checkout is the repository's root.
+// folder inside a repository, one that is a worktree, one that is a submodule, and one
+// whose .git is a link to a git folder, which Codex follows. Codex looks up the trust of
+// the working folder, then of its git root, and trusts the working folder for the
+// process when neither has an entry; every lookup here finds untrusted. The run's copy
+// is at the same path in the wall as on this machine, so its git root is too;
+// /workspace shows the checkout alone, so a cwd under it has /workspace as its git root
+// only when the checkout is the repository's root. For a worktree and a submodule,
+// Codex's lookup of the git root finds none, so the working folder's entry, from
+// WorkDirs, decides.
 func TestWriteWalledHomeLeavesNoCwdTrusted(t *testing.T) {
 	mkdir := func(p string) {
 		t.Helper()
@@ -514,33 +517,42 @@ func TestWriteWalledHomeLeavesNoCwdTrusted(t *testing.T) {
 	if err := os.Symlink(filepath.Join(base, "gitdata"), filepath.Join(linked, ".git")); err != nil {
 		t.Fatal(err)
 	}
+	submodule := filepath.Join(repo, "lib")
+	writeFile(filepath.Join(repo, ".git/modules/lib/HEAD"), "ref: refs/heads/main\n")
+	writeFile(filepath.Join(submodule, ".git"), "gitdir: ../.git/modules/lib\n")
+	mkdir(filepath.Join(submodule, "sub"))
 	for _, c := range []struct {
 		name, checkout string
+		// workDirs are the run's working folder in the wall, at each path.
+		workDirs []string
 		// lookups are cwd and git root pairs as Codex sees them in the wall.
 		lookups [][2]string
 	}{
-		{"the repository's root", repo, [][2]string{
+		{"the repository's root", repo, nil, [][2]string{
 			{filepath.Join(repo, "sub"), repo},
 			{"/workspace/sub", "/workspace"},
 			{"/workspace", "/workspace"},
 		}},
-		{"a folder of a repository", filepath.Join(repo, "pkg"), [][2]string{
+		{"a folder of a repository", filepath.Join(repo, "pkg"), nil, [][2]string{
 			{filepath.Join(repo, "pkg/sub"), repo},
 			{"/workspace", ""},
 		}},
-		{"a worktree", worktree, [][2]string{
-			{filepath.Join(worktree, "sub"), repo},
-			{filepath.Join(worktree, "sub"), worktree},
-			{"/workspace/sub", "/workspace"},
+		{"a worktree", worktree, []string{filepath.Join(worktree, "sub"), "/workspace/sub"}, [][2]string{
+			{filepath.Join(worktree, "sub"), ""},
+			{"/workspace/sub", ""},
 		}},
-		{"a .git link to a folder", linked, [][2]string{
+		{"a submodule", submodule, []string{filepath.Join(submodule, "sub"), "/workspace/sub"}, [][2]string{
+			{filepath.Join(submodule, "sub"), ""},
+			{"/workspace/sub", ""},
+		}},
+		{"a .git link to a folder", linked, nil, [][2]string{
 			{filepath.Join(linked, "sub"), linked},
 			{"/workspace/sub", "/workspace"},
 		}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			files := filepath.Join(t.TempDir(), "fixed")
-			run := codex.WalledRun{Projects: []string{c.checkout, "/workspace"}, Checkouts: []string{c.checkout}}
+			run := codex.WalledRun{Projects: []string{c.checkout, "/workspace"}, Checkouts: []string{c.checkout}, WorkDirs: c.workDirs}
 			if _, err := codex.WriteWalledHome(t.TempDir(), files, run); err != nil {
 				t.Fatal(err)
 			}

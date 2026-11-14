@@ -272,7 +272,7 @@ func TestCheckFilesRefusesReservedPaths(t *testing.T) {
 		{"codex/.env", "Remove `files/codex/.env` from module nextjs: qory writes it for every walled Codex run."},
 		{"codex/environments.toml", "Remove `files/codex/environments.toml` from module nextjs: qory writes it for every walled Codex run."},
 		{"codex/AGENTS.override.md", "Remove `files/codex/AGENTS.override.md` from module nextjs: qory writes it for every walled Codex run."},
-		{"codex/rules/read-access.rules", "Remove `files/codex/rules/read-access.rules` from module nextjs: qory writes it for every walled Codex run."},
+		{"codex/rules/read-access.rules", "Remove `files/codex/rules/read-access.rules` from module nextjs: qory writes it for a walled Codex run that only reads, from the harness's `settings/codex/read-access.rules`."},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			res, _, _ := composeFixture(t, "claude")

@@ -258,8 +258,8 @@ type Dispatcher interface {
 type Walled interface {
 	// WalledArgs are args, the launch's arguments, as a walled run passes them, or an
 	// error when args set what a walled run takes from qory and Forager alone; the run
-	// then stops before the launch.
-	WalledArgs(args []string) ([]string, error)
+	// then stops before the launch. home is the composed harness home.
+	WalledArgs(args []string, home string) ([]string, error)
 }
 
 // SettingsInliner is a [Launcher] whose settings file a run passes to Forager as its

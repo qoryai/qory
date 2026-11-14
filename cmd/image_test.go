@@ -20,6 +20,10 @@ const probeLines = `{"name":"home","result":"pass","detail":"HOME is /home/agent
 	`{"name":"gh","result":"pass","detail":"gh version 2.101.0"},` +
 	`{"name":"docker","result":"info","detail":"no dockerd: the image carries no Docker of the agent own"}`
 
+// probeCodex is the line of a probe's report for Codex, at the version of Forager's
+// descriptor.
+const probeCodex = `{"name":"codex","result":"pass","detail":"codex at /usr/local/bin/codex is 0.167.2"}`
+
 // fakeImageDocker puts a program named docker first on the PATH. It logs every command
 // line, runs an engine for linux/amd64 that holds every image but example.com/missing:1,
 // exports a container's files as a tar stream of one program, and answers a run with a
@@ -46,8 +50,8 @@ export) tar -cf - -C `+files+` usr ;;
 rm) ;;
 run)
 	case "$*" in
-	*example.com/broken:1*) echo '{"version":1,"checks":[`+probeLines+`,{"name":"claude","result":"fail","detail":"no claude on the image PATH, /usr/bin"}]}' ;;
-	*) echo '{"version":1,"checks":[`+probeLines+`,{"name":"claude","result":"pass","detail":"claude at /usr/local/bin/claude is 2.1.316"}]}' ;;
+	*example.com/broken:1*) echo '{"version":1,"checks":[`+probeLines+`,{"name":"claude","result":"fail","detail":"no claude on the image PATH, /usr/bin"},`+probeCodex+`]}' ;;
+	*) echo '{"version":1,"checks":[`+probeLines+`,{"name":"claude","result":"pass","detail":"claude at /usr/local/bin/claude is 2.1.316"},`+probeCodex+`]}' ;;
 	esac ;;
 *) exit 64 ;;
 esac
@@ -99,11 +103,15 @@ func TestImageCheckChecksTheMachinesImage(t *testing.T) {
 		t.Fatal(err)
 	}
 	wants(t, out, "claude  "+rt.Version()+", Forager's descriptor's")
+	cx, err := catalog.Lookup("codex", "")
+	if err != nil {
+		t.Fatal(err)
+	}
 	data, err := os.ReadFile(log)
 	if err != nil {
 		t.Fatal(err)
 	}
-	wants(t, string(data), "create --pull never --network none --entrypoint /qory/qory example.com/agent:1\nexport c0ffee\nrm --force --volumes c0ffee\n", "run --rm --pull never --network none --user 65532:65532 --cap-drop ALL --security-opt no-new-privileges --init --mount type=bind,src="+helper+",dst=/qory/qory,readonly --entrypoint /qory/qory example.com/agent:1 image probe claude="+rt.Version()+"\n")
+	wants(t, string(data), "create --pull never --network none --entrypoint /qory/qory example.com/agent:1\nexport c0ffee\nrm --force --volumes c0ffee\n", "run --rm --pull never --network none --user 65532:65532 --cap-drop ALL --security-opt no-new-privileges --init --mount type=bind,src="+helper+",dst=/qory/qory,readonly --entrypoint /qory/qory example.com/agent:1 image probe claude="+rt.Version()+" codex="+cx.Version()+"\n")
 }
 
 // TestImageCheckFailsWhenOneImageFails checks three images, one the engine does not hold

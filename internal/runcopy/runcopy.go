@@ -66,18 +66,39 @@ type Dir struct{ root string }
 // Forager's runs folder, which a walled run must not write. The folder must not exist
 // yet.
 func New(runID string, keepOut ...string) (Dir, error) {
+	return makeDir(runID, copyTexts, keepOut)
+}
+
+// NewCodexHome makes the folder of the run with id runID as [New] does, for a walled
+// Codex run with no copy, which writes only its Codex home there; its errors name the
+// Codex home in place of the copy.
+func NewCodexHome(runID string, keepOut ...string) (Dir, error) {
+	return makeDir(runID, codexHomeTexts, keepOut)
+}
+
+// dirTexts are the errors of [makeDir]: a run id that is no folder name, a failed lookup
+// of the cache folder, a folder that overlaps one of keepOut, and a folder that exists.
+type dirTexts struct{ runID, noCache, overlap, exists string }
+
+var (
+	copyTexts      = dirTexts{textRunID, textNoCache, textOverlap, textRunExists}
+	codexHomeTexts = dirTexts{textCodexHomeRunID, textCodexHomeNoCache, textCodexHomeOverlap, textCodexHomeExists}
+)
+
+// makeDir is [New] with the errors of texts.
+func makeDir(runID string, texts dirTexts, keepOut []string) (Dir, error) {
 	if !runIDPattern.MatchString(runID) {
-		return Dir{}, fmt.Errorf(textRunID, shown(runID))
+		return Dir{}, fmt.Errorf(texts.runID, shown(runID))
 	}
 	base, err := os.UserCacheDir()
 	if err != nil {
-		return Dir{}, fmt.Errorf(textNoCache, err)
+		return Dir{}, fmt.Errorf(texts.noCache, err)
 	}
 	runs := filepath.Join(base, "qory", "runs")
 	root := filepath.Join(runs, runID)
 	for _, p := range keepOut {
 		if p != "" && session.Overlap(root, p) != "" {
-			return Dir{}, fmt.Errorf(textOverlap, shown(base), shown(root), shown(p))
+			return Dir{}, fmt.Errorf(texts.overlap, shown(base), shown(root), shown(p))
 		}
 	}
 	if err := os.MkdirAll(runs, 0o700); err != nil {
@@ -85,7 +106,7 @@ func New(runID string, keepOut ...string) (Dir, error) {
 	}
 	if err := os.Mkdir(root, 0o700); err != nil {
 		if errors.Is(err, fs.ErrExist) {
-			return Dir{}, fmt.Errorf(textRunExists, shown(root))
+			return Dir{}, fmt.Errorf(texts.exists, shown(root))
 		}
 		return Dir{}, fileErr(root, err)
 	}

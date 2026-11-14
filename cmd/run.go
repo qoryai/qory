@@ -698,6 +698,9 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			// link is the transcript link of a run whose agent starts on a fresh home, see
 			// [transcriptLinkFor].
 			var link transcriptLink
+			// codexFrom is what a walled Codex run writes its Codex home from, set by the
+			// compose, see [walledCodexHome].
+			var codexFrom codexParts
 			prepareLaunch := func(w io.Writer) (freshHome bool, err error) {
 				composing.writable = nil
 				for _, m := range spec.Mounts {
@@ -780,7 +783,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				// A refusal of the arguments stops the run here, as a refusal of the
 				// harness's settings stops the compose.
 				if walled {
-					if launchArgs, err = walledArgs(renderer, launchArgs); err != nil {
+					if launchArgs, err = walledArgs(renderer, launchArgs, at.home); err != nil {
 						return false, err
 					}
 				}
@@ -806,6 +809,11 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				if h, ok := renderer.(render.AgentHomer); ok && walled {
 					spec.LaunchFixed, freshHome = withAgentHome(spec.LaunchFixed, h.AgentHomeVariable()), true
 					link = transcriptLinkFor(renderer, rt)
+				}
+				// A walled Codex run starts Codex on the home that codexHomeWork writes.
+				if walled && name == codex.Runtime {
+					spec.LaunchFixed, spec.LaunchDefaults = withCodexHome(spec.LaunchFixed, spec.LaunchDefaults)
+					codexFrom = c.codex
 				}
 				return freshHome, nil
 			}
@@ -1015,6 +1023,36 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				}
 				return nil
 			}
+			// codexHomeWork writes the Codex home of a walled Codex run, see [walledCodexHome],
+			// once hostWork has bound the checkout or its copy, and mounts it. The home goes in
+			// the copy's folder, <user cache>/qory/runs/<run id>, or, for a run with no copy,
+			// in a new folder at that path. Both go when the run ends, as the copy does; the
+			// home goes also when the copy stays.
+			codexHomeWork := func() error {
+				checkout, root := at.root, ""
+				if copied != nil {
+					checkout, root = copied.dir.Work(), copied.dir.Root()
+					cleanups = append(cleanups, func() { removeCodexHome(root, said) })
+				} else {
+					d, err := runcopy.NewCodexHome(spec.RunID, state, spec.RunsDir)
+					if err != nil {
+						return &runLineError{codeLine(err)}
+					}
+					cleanups = append(cleanups, func() {
+						if err := d.Remove(); err != nil {
+							said(fmt.Sprintf(textCopyNoRemove, exports.Value(d.Root(), false), exports.HideError(err)))
+						}
+					})
+					root = d.Root()
+				}
+				mounts, err := walledCodexHome(root, at.home, checkout, spec.Dir, spec.Args, readOnly, codexFrom)
+				if err != nil {
+					return &runLineError{codeLine(err)}
+				}
+				spec.Mounts = append(spec.Mounts, mounts...)
+				spec.Written = writtenPlaces(checkout, spec.Mounts)
+				return nil
+			}
 			// setupWork runs the setup of a walled run whose run configuration lists
 			// repositories, see [runSetup], within the run's time limit. A setup command that
 			// exits otherwise than 0 is the run's error line, and a mount refusal of the
@@ -1097,6 +1135,9 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			var prepErr error
 			if ctx.Err() == nil && (timeout == 0 || time.Since(opened) < timeout) {
 				prepErr = hostWork()
+				if prepErr == nil && walled && name == codex.Runtime {
+					prepErr = codexHomeWork()
+				}
 				if prepErr == nil && walled {
 					prepErr = imageWork()
 				}
