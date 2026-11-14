@@ -344,9 +344,13 @@ type Nowhere struct {
 	// GatewayServer, when not nil, is the control plane the gateway of AtGateway reports
 	// each run to and takes each run's configuration from; nil starts it with none.
 	GatewayServer *gateway.Server
-	Real          bool
-	PolicyImage   string
-	OnImage       func(session.Image)
+	// GatewayAllow, when not empty, is the allow list of the policy of the machine the
+	// gateway of AtGateway starts with, under enforce: the gateway's proxy dials a
+	// private network address only when an entry of that list allows it.
+	GatewayAllow []string
+	Real         bool
+	PolicyImage  string
+	OnImage      func(session.Image)
 	// CloseErr, when not nil, is the error of the run's Close, which then returns no result.
 	CloseErr error
 	// WallKept is [session.Closed.WallKept] of the run's Close. A RemoveSetup that returns
@@ -406,7 +410,7 @@ func OpenNowhereWith(n Nowhere) (outcomes func() []session.Outcome, calls func()
 		var at *gatewayRun
 		if n.AtGateway {
 			var err error
-			if at, err = openAtGateway(ctx, spec, n.PolicyImage, n.GatewayServer); err != nil {
+			if at, err = openAtGateway(ctx, spec, n.PolicyImage, n.GatewayAllow, n.GatewayServer); err != nil {
 				return nil, err
 			}
 		}
@@ -511,12 +515,17 @@ func answeredImage(spec session.OpenSpec, selected string) session.Image {
 
 // openAtGateway starts a gateway in this process with the control plane srv, nil for
 // none, which keeps the record of each run in the folder of its id under spec.RunsDir
-// and runs each under a policy that selects image, "" for no policy, and opens the run
-// of spec there, over the gateway's local link.
-func openAtGateway(ctx context.Context, spec session.OpenSpec, image string, srv *gateway.Server) (*gatewayRun, error) {
+// and runs each under a policy that selects image and, under enforce, allows the hosts
+// of allow; with neither, under no policy. It opens the run of spec there, over the
+// gateway's local link.
+func openAtGateway(ctx context.Context, spec session.OpenSpec, image string, allow []string, srv *gateway.Server) (*gatewayRun, error) {
 	var pol *gateway.Policy
-	if image != "" {
-		pol = &gateway.Policy{Version: 1, Image: image, Egress: gateway.PolicyEgress{Mode: "observe"}}
+	if image != "" || len(allow) > 0 {
+		egress := gateway.PolicyEgress{Mode: "observe"}
+		if len(allow) > 0 {
+			egress = gateway.PolicyEgress{Mode: "enforce", Allow: allow}
+		}
+		pol = &gateway.Policy{Version: 1, Image: image, Egress: egress}
 	}
 	g, err := gateway.Start(ctx, gateway.Config{
 		RunDir:       func(id string) string { return filepath.Join(spec.RunsDir, id) },

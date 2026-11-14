@@ -197,6 +197,10 @@ var codeAtGateway bool
 // [cmd.Nowhere] GatewayServer is; nil starts that gateway with none. A test sets it.
 var codeGatewayServer *gateway.Server
 
+// codeGatewayAllow is the allow list of the policy of the gateway of [codeAtGateway], as
+// [cmd.Nowhere] GatewayAllow is; nil starts that gateway with none. A test sets it.
+var codeGatewayAllow []string
+
 // codePolicyImage is the image the policy of each run [runFromCodeGiven] opens selects,
 // as [cmd.Nowhere] PolicyImage is; "" selects none. A test sets it.
 var codePolicyImage string
@@ -290,6 +294,7 @@ func runFromCodeGiven(t *testing.T, before func(code string) []string, args []st
 		Real:          codeReal,
 		AtGateway:     codeAtGateway,
 		GatewayServer: codeGatewayServer,
+		GatewayAllow:  codeGatewayAllow,
 		PolicyImage:   codePolicyImage,
 		OnImage:       func(i session.Image) { r.image = i },
 	})
