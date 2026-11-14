@@ -887,8 +887,10 @@ release may change what an existing document does, and states it under Upgrading
   `--ignore-user-config`, `--dangerously-bypass-hook-trust` or `--remote`. qory prints
   Forager's line, such as ``✗ remove the -c that sets model_provider from the launch's
   arguments: the session sets that setting for Codex, or the setting changes where Codex
-  sends its requests`` for `-c model_provider=x`. Before, an unwalled run passed every
-  argument unchanged.
+  sends its requests`` for `-c model_provider=x`, or ``✗ remove the --config pair that
+  sets model_provider from the launch's arguments: the session sets model_provider, and a
+  later pair overrides the session's value`` for `--config model_provider=x`. Before, an
+  unwalled run passed every argument unchanged.
 - A refusal of a walled Codex run's arguments writes each control character of the key
   or feature it repeats as an escape, such as `\n`.
 - On a walled Codex run that lists repositories, the `Check tools` setup step fails when
