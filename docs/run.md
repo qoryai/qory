@@ -3780,7 +3780,7 @@ starts with
 ``remove <folder>, or start the run again with another id: a walled Codex run writes its
 Codex home in a new folder, and that folder exists``.
 
-### Codex arguments a walled run refuses
+### Codex arguments a run refuses
 
 qory and Forager set the model provider, the settings and the hooks of a walled Codex
 run. Forager puts its `--config` flags ahead of the run's Codex arguments, and Codex
