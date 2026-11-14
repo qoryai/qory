@@ -3812,7 +3812,24 @@ exit status 1, when an argument before `--` is one of these:
   and Forager, not from the arguments.``, or the same with `--remote-auth-token-env`.
 
 A key or feature in the line has each control character written as an escape, such as
-`\n`. Arguments after `--`, and every argument of an unwalled run, pass unchanged.
+`\n`. Arguments after `--` pass unchanged.
+
+An unwalled Codex run gets a shorter check, from Forager: the run stops before Codex
+starts, with exit status 1, when a Codex argument before `--` is one of these:
+
+- `--config <key>=<value>` or `-c` in any form, where the key is a key Forager sets for
+  Codex, such as `model_provider`, `web_search` or `features.apps`, or `model_providers`,
+  `profile`, `profiles`, `projects`, `responses_api_metadata`, `openai_base_url`,
+  `chatgpt_base_url`, `experimental_realtime_*_base_url`, `skills` or `cloud.skills`, a
+  key under one, or a table above one.
+- `--enable` or `--disable` of `plugins`, `apps` or `connectors`.
+- `--oss`, `--local-provider`, `--profile`, `-p`, `--search`, `--ignore-user-config`,
+  `--dangerously-bypass-hook-trust` or `--remote`.
+
+qory prints Forager's line, which contains the flag, such as ``✗ remove the -c that sets
+model_provider from the launch's arguments: the session sets that setting for Codex, or
+the setting changes where Codex sends its requests`` for `-c model_provider=x`. Every
+other argument of an unwalled run passes unchanged.
 
 ### A run that may write works in a copy
 

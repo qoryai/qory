@@ -288,17 +288,26 @@ func TestWalledRunTakesTheHomeFromYourOwnFile(t *testing.T) {
 }
 
 // TestAWalledCodexRunRefusesAReservedConfigArgument is a run of codex given -c
-// model_provider=x after qory run's --: without a wall the program gets the argument,
-// and a walled run stops before the agent's container starts, in the compose step, with
-// exit status 1, as a harness's config.toml that sets the key stops it. A walled run
-// given -c model_verbosity=low passes the argument to the agent's container.
+// model_provider=x after qory run's --: without a wall Forager's join stops the run
+// before the program starts, with exit status 1, and a walled run stops before the
+// agent's container starts, in the compose step, with exit status 1, as a harness's
+// config.toml that sets the key stops it. Given -c model_verbosity=low, a run without a
+// wall passes the argument to the program, and a walled run passes it to the agent's
+// container.
 func TestAWalledCodexRunRefusesAReservedConfigArgument(t *testing.T) {
 	root, _ := exportingCheckout(t, fakeRuntime(t))
 	out, err := run(t, "run", "codex", "--", "-c", "model_provider=x")
-	if cmd.ExitCode(err) != 3 {
-		t.Fatalf("a run without a wall: %v (exit %d)\n%s", err, cmd.ExitCode(err), out)
+	refused := "remove the -c that sets model_provider from the launch's arguments: the session sets that setting for Codex, or the setting changes where Codex sends its requests"
+	if cmd.ExitCode(err) != 1 || err == nil || err.Error() != refused {
+		t.Fatalf("a run without a wall: %v (exit %d), want %q\n%s", err, cmd.ExitCode(err), refused, out)
 	}
-	wants(t, out, " -c model_provider=x\n")
+	wants(t, out, "✗ "+refused+"\n")
+	lacks(t, out, " -c model_provider=x\n")
+	out, err = run(t, "run", "codex", "--", "-c", "model_verbosity=low")
+	if cmd.ExitCode(err) != 3 {
+		t.Fatalf("a run without a wall with an allowed key: %v (exit %d)\n%s", err, cmd.ExitCode(err), out)
+	}
+	wants(t, out, " -c model_verbosity=low\n")
 	if err := os.RemoveAll(runsDir(t, root)); err != nil {
 		t.Fatal(err)
 	}
