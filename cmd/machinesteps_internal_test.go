@@ -31,7 +31,7 @@ func TestForagerRecordsTheMachineStep(t *testing.T) {
 	id := event.NewRunID()
 	list := secretmask.New()
 	list.Add(machineSecret)
-	at, err := openAtGateway(ctx, session.OpenSpec{RunID: id, RunsDir: runs, Report: func(string) {}, Masker: list.Masker()}, "", nil)
+	at, err := openAtGateway(ctx, session.OpenSpec{RunID: id, RunsDir: runs, Report: func(string) {}, Masker: list.Masker()}, "", nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
