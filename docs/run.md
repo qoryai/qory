@@ -3756,7 +3756,8 @@ run's copy, or, for a run with no copy, a new folder at that path:
 
 `config.toml` marks the checkout untrusted, at its path in the container and at
 `/workspace`, so Codex reads no hook, rule or setting of the repository's `.codex`. It
-marks the working folder untrusted at both paths too: in a submodule or a worktree, Codex
+marks the working folder untrusted at both paths too, with and without its links
+resolved: in a submodule or a worktree, Codex
 finds no git root for that folder and trusts it otherwise. Codex starts in the folder
 that `-C` or `--cd` names, so each such folder in the run's Codex arguments is untrusted
 too, resolved against the working folder, at both paths, with and without its links

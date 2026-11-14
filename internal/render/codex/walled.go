@@ -70,7 +70,8 @@ type WalledRun struct {
 	// reads the skills of each one's .codex/skills and .agents/skills.
 	Checkouts []string
 	// WorkDirs are the paths in the wall of the folder Codex starts in, the run's working
-	// folder, at each path where the wall shows it. Codex trusts that folder for the
+	// folder, at each path where the wall shows it, as given and with its links resolved,
+	// since Codex looks up both. Codex trusts that folder for the
 	// process when neither it nor its git root has a trust entry, a .git is at or above
 	// it and the sandbox gives full access. Its lookup of the git root finds none for a
 	// submodule's .git file, and for a worktree whose main .git the wall does not show

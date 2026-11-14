@@ -50,10 +50,10 @@ func withCodexHome(fixed, defaults []string) ([]string, []string) {
 // the run binds as its checkout, the copy or the person's checkout, at its path; the
 // trust entries and the disabled skills of the checkout are written for that path and for
 // /workspace, where a run whose policy names its image by its reference sees it. workDir
-// is the run's working folder, at or below checkout: it gets an untrusted entry at its
-// path, and at its path under /workspace when it is below checkout, see
-// [codex.WalledRun.WorkDirs]. Each folder that a -C or --cd argument in args, the run's
-// Codex arguments, names gets an untrusted entry too, see [startDirsInWall]. A run whose
+// is the run's working folder, at or below checkout, and each folder that a -C or --cd
+// argument in args, the run's Codex arguments, names: each gets untrusted entries at its
+// path and under /workspace, as given and with its links resolved, see
+// [startDirsInWall] and [codex.WalledRun.WorkDirs]. A run whose
 // access is read, readOnly, gets parts.readRules in rules/read-access.rules.
 func walledCodexHome(root, harnessHome, checkout, workDir string, args []string, readOnly bool, parts codexParts) ([]wall.Mount, error) {
 	home := filepath.Join(root, codexHomeName)
@@ -68,15 +68,8 @@ func walledCodexHome(root, harnessHome, checkout, workDir string, args []string,
 	if checkout != workspaceInWall {
 		projects = append(projects, workspaceInWall)
 	}
-	var workDirs []string
-	if workDir != "" && workDir != checkout {
-		workDirs = append(workDirs, workDir)
-		rel, err := filepath.Rel(realPath(checkout), realPath(workDir))
-		if err == nil && rel != "." && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && checkout != workspaceInWall {
-			workDirs = append(workDirs, path.Join(workspaceInWall, filepath.ToSlash(rel)))
-		}
-	}
-	workDirs = append(workDirs, startDirsInWall(checkout, workDir, codex.StartDirs(args))...)
+	// The working folder gets the entries of -C . beside those of the arguments.
+	workDirs := startDirsInWall(checkout, workDir, append([]string{"."}, codex.StartDirs(args)...))
 	binds, err := writeWalledHome(filepath.Join(harnessHome, codex.Runtime), filepath.Join(root, codexFixedName), codex.WalledRun{
 		Projects:  projects,
 		Checkouts: []string{checkout},

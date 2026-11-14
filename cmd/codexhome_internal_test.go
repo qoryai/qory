@@ -139,3 +139,39 @@ func TestWalledCodexHomeLeavesStartDirsUntrusted(t *testing.T) {
 		}
 	}
 }
+
+// TestWalledCodexHomeLeavesALinkedWorkingFolderUntrusted is a walled Codex run whose
+// working folder is ln/inner, with ln a link to the checkout's folder pkg: the
+// config.toml of the home marks the working folder untrusted as given and with the link
+// resolved, at its path and at /workspace, since Codex looks up both.
+func TestWalledCodexHomeLeavesALinkedWorkingFolderUntrusted(t *testing.T) {
+	base := t.TempDir()
+	checkout := filepath.Join(base, "co")
+	if err := os.MkdirAll(filepath.Join(checkout, "pkg", "inner"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("pkg", filepath.Join(checkout, "ln")); err != nil {
+		t.Fatal(err)
+	}
+	root := filepath.Join(base, "run")
+	if err := os.Mkdir(root, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	work := filepath.Join(checkout, "ln", "inner")
+	if _, err := walledCodexHome(root, filepath.Join(base, "home"), checkout, work, nil, false, codexParts{}); err != nil {
+		t.Fatal(err)
+	}
+	var config struct {
+		Projects map[string]struct {
+			TrustLevel string `toml:"trust_level"`
+		}
+	}
+	if _, err := toml.DecodeFile(filepath.Join(root, codexFixedName, "config.toml"), &config); err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range []string{work, filepath.Join(checkout, "pkg", "inner"), "/workspace/ln/inner", "/workspace/pkg/inner"} {
+		if config.Projects[p].TrustLevel != "untrusted" {
+			t.Errorf("the trust of %s: %q, want untrusted; projects %v", p, config.Projects[p].TrustLevel, config.Projects)
+		}
+	}
+}
