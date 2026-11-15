@@ -748,15 +748,35 @@ func ReadThrough(root *os.Root, dir, realDir string) func(path string) ([]byte, 
 // maxLinks is the most links [ResolveIn] follows for one path, as many as Linux follows.
 const maxLinks = 40
 
+// ErrLeadsOut is the error [ResolveIn] wraps for a path that leads out of the module, and
+// ErrTooManyLinks the one it wraps for a path with more than 40 links. A caller matches
+// each with errors.Is.
+var (
+	ErrLeadsOut     = errors.New("the path leads out of the module")
+	ErrTooManyLinks = errors.New("the path passes more than 40 links")
+)
+
+// resolveError is an error of [ResolveIn]: its text, and the sentinel it wraps.
+type resolveError struct {
+	text string
+	err  error
+}
+
+func (e *resolveError) Error() string { return e.text }
+
+// Unwrap returns the sentinel, [ErrLeadsOut] or [ErrTooManyLinks].
+func (e *resolveError) Unwrap() error { return e.err }
+
 // ResolveIn is rel, a path relative to the directory root was opened at, with every link
 // on it followed through root: a relative link as root follows it, and an absolute one
 // only when its target lies under realDir, the real path of root's directory as recorded
 // when root was opened, at that part of the target. Nothing is resolved outside root. A
 // link that leads out of the module, an absolute link when realDir is "", and a path with
-// more than 40 links are refused. The result contains no link, as root showed it.
+// more than 40 links are refused, wrapping [ErrLeadsOut] and [ErrTooManyLinks]. The
+// result contains no link, as root showed it.
 func ResolveIn(root *os.Root, realDir, rel string) (string, error) {
 	out := func() error {
-		return fmt.Errorf("%s leads out of the module", exports.HidePath(filepath.ToSlash(rel)))
+		return &resolveError{exports.HidePath(filepath.ToSlash(rel)) + " leads out of the module", ErrLeadsOut}
 	}
 	pending := splitPath(rel)
 	var cur []string
@@ -783,7 +803,7 @@ func ResolveIn(root *os.Root, realDir, rel string) (string, error) {
 			continue
 		}
 		if hops++; hops > maxLinks {
-			return "", fmt.Errorf("%s passes more than %d links", exports.HidePath(filepath.ToSlash(rel)), maxLinks)
+			return "", &resolveError{fmt.Sprintf("%s passes more than %d links", exports.HidePath(filepath.ToSlash(rel)), maxLinks), ErrTooManyLinks}
 		}
 		target, err := root.Readlink(next)
 		if err != nil {

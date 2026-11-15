@@ -2,6 +2,7 @@ package compose_test
 
 import (
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -346,5 +347,32 @@ func TestAContractPathThroughAFileFailsAsARead(t *testing.T) {
 		if !errors.As(err, &pathErr) {
 			t.Errorf("copied %v: %v, want a *fs.PathError", opts.Copies != nil, err)
 		}
+	}
+}
+
+// TestAContractThroughMoreThan40LinksFails is a contract path that passes 41 links inside
+// a module read through a root: the compose refuses it with a fix line and its cause.
+func TestAContractThroughMoreThan40LinksFails(t *testing.T) {
+	files := contractFiles("")
+	files["modules/core/qory-module.yaml"] = "apiVersion: qory.dev/v1alpha1\nname: core\nroles:\n  agents:\n    developer: {fill: one, contract: roles/l0}\n"
+	dir := writeTree(t, files)
+	roles := filepath.Join(dir, "modules/core/roles")
+	for i := range 41 {
+		next := "developer.yaml"
+		if i < 40 {
+			next = fmt.Sprintf("l%d", i+1)
+		}
+		if err := os.Symlink(next, filepath.Join(roles, fmt.Sprintf("l%d", i))); err != nil {
+			t.Fatal(err)
+		}
+	}
+	p, err := loadFor(filepath.Join(dir, stack.FileName), "claude")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = compose.ComposeWith(p, compose.Options{Copies: copyAll})
+	want := "Replace roles/l0 of module core with a file inside the module.\n  The path passes through more than 40 links."
+	if err == nil || err.Error() != want {
+		t.Fatalf("error:\n%v\nwant:\n%s", err, want)
 	}
 }

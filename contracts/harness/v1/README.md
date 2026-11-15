@@ -940,8 +940,8 @@ Add roles/developer.yaml to module core, or remove contract from roles.agents.de
   qory-module.yaml sets roles.agents.developer.contract to roles/developer.yaml, and the module has no file at that path.
 ```
 
-So do a directory at that path, a link that leads out of the module, and a file that is
-not a contract. An absolute link fails too, unless the home contains copies of the
+So do a directory at that path, a link that leads out of the module, a path that passes
+through more than 40 links, and a file that is not a contract. An absolute link fails too, unless the home contains copies of the
 module's entries (`copied` in the report, §The report) and the link stays inside the
 module. A file is not a contract when it is not a map, or when it has a key other than
 the five, a list key that is not a list of names on one line each with no name twice, a

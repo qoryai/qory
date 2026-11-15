@@ -146,8 +146,10 @@ func readContracts(o openedModule) ([]roleContract, error) {
 			case errors.Is(err, fs.ErrNotExist):
 			case errors.As(err, &pathErr):
 				return nil, exports.HideError(err)
-			case err != nil && strings.HasSuffix(err.Error(), "leads out of the module"):
+			case errors.Is(err, module.ErrLeadsOut):
 				return nil, linked
+			case errors.Is(err, module.ErrTooManyLinks):
+				return nil, fmt.Errorf("Replace %s with a file inside the module.\n  The path passes through more than 40 links.", where)
 			case err != nil:
 				return nil, err
 			}
