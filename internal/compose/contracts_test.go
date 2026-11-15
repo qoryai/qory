@@ -1046,6 +1046,61 @@ func TestABaseModuleIsExcludedByTheNameQoryYamlListsItBy(t *testing.T) {
 	}
 }
 
+// TestABaseModuleHasOneNameInEveryRefusal is a base stack that lists the export core of
+// a git source, whose manifest declares the name core-x: each refusal that names the
+// module names it core, the name the checkout's qory.yaml lists it by, and no line names
+// core-x. The cases are a workflow that its skill starts with an agent nobody fills, a
+// member that the checkout's bind adds and the base's exclude leaves out, a reference that
+// no module ships, and a group with no member.
+func TestABaseModuleHasOneNameInEveryRefusal(t *testing.T) {
+	isolateAll(t)
+	group := "apiVersion: qory.dev/v1alpha1\nname: core-x\nroles:\n  agents:\n    reviewers: {fill: many}\n"
+	review := "---\nname: review\ndescription: review\n---\n\nStart ${qory:agents/reviewers}.\n"
+	for _, c := range []struct {
+		name     string
+		files    map[string]string
+		base, at string
+		want     string
+	}{
+		{"workflow", map[string]string{
+			"modules/core/qory-module.yaml":                       "apiVersion: qory.dev/v1alpha1\nname: core-x\n",
+			"modules/core/skills/workflow-capture-demos/SKILL.md": "---\nname: workflow-capture-demos\ndescription: d\n---\n\nStart ${qory:agents/demo-author}.\n",
+		}, "workflows:\n  capture-demos: {access: write}\n", "",
+			"Add a module that fills agents/demo-author, or drop capture-demos from the workflows and process.\n" +
+				"  The base stack software@working-tree declares the workflow capture-demos. Its skill workflow-capture-demos of module core starts agents/demo-author, and no module ships or provides that agent, and the stack does not bind it."},
+		{"left out", map[string]string{
+			"modules/core/qory-module.yaml":       group,
+			"modules/core/skills/review/SKILL.md": review,
+			"modules/core/agents/other.md":        "---\nname: other\n---\n",
+			"modules/core/agents/pr.md":           "---\nname: pr\n---\n",
+		}, "    exclude: {agents: [pr]}\nbind:\n  agents:\n    reviewers: [other]\n", "  bind:\n    agents:\n      reviewers: [other, pr]\n",
+			"Compose agent pr, or remove it from bind.agents.reviewers in qory.yaml.\n" +
+				"  Module core leaves out agent pr."},
+		{"not shipped", map[string]string{
+			"modules/core/qory-module.yaml":        "apiVersion: qory.dev/v1alpha1\nname: core-x\n",
+			"modules/core/skills/release/SKILL.md": "---\nname: release\ndescription: d\n---\n\nUse ${qory:skills/missing}.\n",
+		}, "", "",
+			"module core: skill release references skill missing, which no module ships or provides and the stack does not bind"},
+		{"no member", map[string]string{
+			"modules/core/qory-module.yaml":       group,
+			"modules/core/skills/review/SKILL.md": review,
+		}, "", "",
+			"Add a module to qory.yaml that provides agents/reviewers, or ask the base stack's maintainer.\n" +
+				"  skills/review/SKILL.md of module core references agents/reviewers, and the group has no member."},
+	} {
+		c.files["qory.yaml"] = "apiVersion: qory.dev/v1alpha1\nexports:\n  modules: [core]\n"
+		url := gitRepo(t, "", c.files)
+		files := map[string]string{
+			"base/" + stack.FileName: "apiVersion: qory.dev/v1alpha1\nname: software\nextending: {kinds: [agents]}\nmodules:\n  - source: {git: \"" + url + "\", ref: main, module: core}\n" + c.base,
+			"app/" + config.FileName: "apiVersion: qory.dev/v1alpha1\nharness:\n  extends: {path: ../base}\n  target: {runtime: claude}\n" + c.at,
+		}
+		_, err := composeExtending(t, writeTree(t, files))
+		if err == nil || err.Error() != c.want || strings.Contains(err.Error(), "core-x") {
+			t.Errorf("%s: error:\n%v\nwant:\n%s", c.name, err, c.want)
+		}
+	}
+}
+
 // TestABaseModuleQoryYamlCannotNameAsksTheMaintainer is the base stack's member of
 // TestABaseStackMemberOffersAnExclude, of a base module that the base lists by its path
 // alone: the checkout's qory.yaml cannot name the module to exclude from it, and the fix
