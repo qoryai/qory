@@ -78,11 +78,16 @@ func (d Document) String(key string) string {
 }
 
 // SetFront returns data with the top-level frontmatter key set to value, written as a YAML
-// scalar: the key's line, and the indented lines that continue it, replaced, or a line
-// added at the end of the frontmatter when there is none; data without frontmatter gets
-// one. An empty value removes the key's line instead. A byte order mark is dropped and
-// CRLF line endings become LF, as [ParseDocument] reads them. Every other line is kept as
-// written.
+// scalar: the key's line and every line of its value replaced, or a line added at the
+// end of the frontmatter when there is none; data without frontmatter gets one. An empty
+// value removes the key and its value instead. A byte order mark is dropped and CRLF line
+// endings become LF, as [ParseDocument] reads them. Every other line is kept as written.
+//
+// The value's lines are the ones from the key's line up to the next top-level key, as
+// YAML reads the frontmatter, so a block list written at the key's indentation goes with
+// the key; blank and comment lines just before the next key stay. Frontmatter that does
+// not parse as a mapping in block style loses the key's line and the indented lines
+// that continue it.
 func SetFront(data []byte, key, value string) []byte {
 	const fence = "---"
 	data = bytes.TrimPrefix(data, []byte("\ufeff"))
@@ -112,17 +117,22 @@ func SetFront(data []byte, key, value string) []byte {
 	if end < 0 {
 		return data
 	}
-	at, until := end, end
-	for i := 1; i < end; i++ {
-		rest, ok := strings.CutPrefix(lines[i], key+":")
-		if !ok || (rest != "" && rest[0] != ' ' && rest[0] != '\t') {
-			continue
+	at, until, ok := keyLines(lines[1:end], key)
+	if ok {
+		at, until = at+1, until+1
+	} else {
+		at, until = end, end
+		for i := 1; i < end; i++ {
+			rest, ok := strings.CutPrefix(lines[i], key+":")
+			if !ok || (rest != "" && rest[0] != ' ' && rest[0] != '\t') {
+				continue
+			}
+			at, until = i, i+1
+			for until < end && (strings.HasPrefix(lines[until], " ") || strings.HasPrefix(lines[until], "\t")) {
+				until++
+			}
+			break
 		}
-		at, until = i, i+1
-		for until < end && (strings.HasPrefix(lines[until], " ") || strings.HasPrefix(lines[until], "\t")) {
-			until++
-		}
-		break
 	}
 	out := append(append(append([]string{}, lines[:at]...), line...), lines[until:]...)
 	return []byte(strings.Join(out, "\n"))
@@ -144,4 +154,43 @@ func frontText(data []byte) string {
 		}
 	}
 	return ""
+}
+
+// keyLines finds the top-level key in front, the frontmatter's lines, as YAML reads them:
+// the index of the key's line and the index after the last line of its value, which ends
+// before the next top-level key, or at the end, with the blank and comment lines before
+// that left out. With no such key, both are len(front). It reports false for frontmatter
+// that does not parse as a block mapping, or whose key shares a line with the next.
+func keyLines(front []string, key string) (int, int, bool) {
+	var doc yaml.Node
+	if err := yaml.Unmarshal([]byte(strings.Join(front, "\n")), &doc); err != nil {
+		return 0, 0, false
+	}
+	if len(doc.Content) == 0 {
+		return len(front), len(front), true
+	}
+	m := doc.Content[0]
+	if m.Kind != yaml.MappingNode || m.Style&yaml.FlowStyle != 0 {
+		return 0, 0, false
+	}
+	for i := 0; i+1 < len(m.Content); i += 2 {
+		if m.Content[i].Value != key {
+			continue
+		}
+		at, until := m.Content[i].Line-1, len(front)
+		if i+2 < len(m.Content) {
+			until = m.Content[i+2].Line - 1
+		}
+		if until <= at {
+			return 0, 0, false
+		}
+		for until > at+1 {
+			if t := strings.TrimSpace(front[until-1]); t != "" && !strings.HasPrefix(t, "#") {
+				break
+			}
+			until--
+		}
+		return at, until, true
+	}
+	return len(front), len(front), true
 }
