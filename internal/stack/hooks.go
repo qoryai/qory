@@ -152,7 +152,7 @@ type HookError struct {
 	file       string
 }
 
-// Error is the fix line, a line feed and the cause line.
+// Error is the fix line, a line feed and the cause line, indented by two spaces.
 func (e *HookError) Error() string {
 	name, path := "the file", "the file"
 	if e.file != "" {
@@ -163,7 +163,7 @@ func (e *HookError) Error() string {
 	if e.file == "" {
 		cause = upperFirst(cause)
 	}
-	return r.Replace(e.fix) + "\n" + cause
+	return r.Replace(e.fix) + "\n  " + cause
 }
 
 // Fix is the fix line, with the file's name in it.

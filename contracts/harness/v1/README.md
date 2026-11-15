@@ -359,12 +359,12 @@ inside the checkout being composed, so a hook of another repository under the fo
 fails the compose of this one.
 
 Each refusal is a line with the fix, of at most 100 characters, then a line with the
-cause. A refusal of a rule that needs no base comes as the document is read, and its
+cause, indented by two spaces. A refusal of a rule that needs no base comes as the document is read, and its
 cause line has the path of `qory.yaml`, such as:
 
 ```
 Set hooks[0].timeout to whole seconds, 1s or more, such as 90s or 5m.
-/work/app/qory.yaml sets "500ms".
+  /work/app/qory.yaml sets "500ms".
 ```
 
 Those rules are: both or neither of `run` and `agent`, a `review` hook with `run`, a
