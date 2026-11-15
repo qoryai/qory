@@ -62,10 +62,10 @@ func TestBindRefusesEachShapeItDoesNotRead(t *testing.T) {
 		{"  agents/coder: [a, b]\n", "Write bind as bind.agents.coder: <name> in {path}: bind keys are kinds, and agents/coder is a kind and a role."},
 		{"  coders:\n    a: b\n", `Use agents, commands or skills as a kind under bind in {path}: "coders" is none of them.`},
 		{"  agents: rails-coder\n", "Write bind.agents in {path} as a map of roles: bind.agents is not a map."},
-		{"  skills:\n    entry: [a, b]\n", "Write one name for bind.skills.entry in {path}.\nOnly an agents role can be a group, and the value is a list."},
-		{"  agents:\n    reviewers: []\n", "Write one name or more in bind.agents.reviewers in {path}.\nThe list is empty."},
-		{"  agents:\n    reviewers: [a, {b: c}]\n", "Write entry names in bind.agents.reviewers in {path}.\nAn entry's name is one path segment with no space, @ or leading dot, and an item is not a name."},
-		{"  agents:\n    reviewers: [a, b/c]\n", "Write entry names in bind.agents.reviewers in {path}.\nAn entry's name is one path segment with no space, @ or leading dot, and an item is \"b/c\"."},
+		{"  skills:\n    entry: [a, b]\n", "Write one name for bind.skills.entry in {path}.\n  Only an agents role can be a group, and the value is a list."},
+		{"  agents:\n    reviewers: []\n", "Write one name or more in bind.agents.reviewers in {path}.\n  The list is empty."},
+		{"  agents:\n    reviewers: [a, {b: c}]\n", "Write entry names in bind.agents.reviewers in {path}.\n  An entry's name is one path segment with no space, @ or leading dot, and an item is not a name."},
+		{"  agents:\n    reviewers: [a, b/c]\n", "Write entry names in bind.agents.reviewers in {path}.\n  An entry's name is one path segment with no space, @ or leading dot, and an item is \"b/c\"."},
 		{"  agents:\n    developer: {a: b}\n", "Set bind.agents.developer in {path} to the name of one entry: the value is empty or not a name."},
 		{"  agents:\n    developer:\n", "Set bind.agents.developer in {path} to the name of one entry: the value is empty or not a name."},
 		{"  - agents\n", "Write bind in {path} as a map of kinds, then roles: bind is not a map."},
@@ -88,8 +88,8 @@ func TestReadRolesWithCountsTakesOneOrMany(t *testing.T) {
 	}
 	for _, c := range []struct{ body, want string }{
 		{"skills:\n  x: many\n", "Set roles.skills.x to one in m.yaml: only an agents role can be a group."},
-		{"agents:\n  developer: two\n", "Set roles.agents.developer to one or many in m.yaml.\nOne entry fills a role and several fill a group, and the value is \"two\"."},
-		{"agents:\n  developer: [one]\n", "Set roles.agents.developer to one or many in m.yaml.\nOne entry fills a role and several fill a group, and the value is a list."},
+		{"agents:\n  developer: two\n", "Set roles.agents.developer to one or many in m.yaml.\n  One entry fills a role and several fill a group, and the value is \"two\"."},
+		{"agents:\n  developer: [one]\n", "Set roles.agents.developer to one or many in m.yaml.\n  One entry fills a role and several fill a group, and the value is a list."},
 	} {
 		_, _, err := ReadRoles(node(t, c.body), "roles", true)
 		re, ok := err.(*RolesError)
@@ -114,9 +114,9 @@ func TestCheckRolesChecksABuiltStack(t *testing.T) {
 		f    Fills
 		want string
 	}{
-		{Fills{Many: Groups{"skills": {"entry": {"a"}}}}, "Write one name for bind.skills.entry in qory.yaml.\nOnly an agents role can be a group, and the value is a list."},
-		{Fills{Many: Groups{"agents": {"reviewers": nil}}}, "Write one name or more in bind.agents.reviewers in qory.yaml.\nThe list is empty."},
-		{Fills{Many: Groups{"agents": {"reviewers": {"a b"}}}}, "Write entry names in bind.agents.reviewers in qory.yaml.\nAn entry's name is one path segment with no space, @ or leading dot, and an item is \"a b\"."},
+		{Fills{Many: Groups{"skills": {"entry": {"a"}}}}, "Write one name for bind.skills.entry in qory.yaml.\n  Only an agents role can be a group, and the value is a list."},
+		{Fills{Many: Groups{"agents": {"reviewers": nil}}}, "Write one name or more in bind.agents.reviewers in qory.yaml.\n  The list is empty."},
+		{Fills{Many: Groups{"agents": {"reviewers": {"a b"}}}}, "Write entry names in bind.agents.reviewers in qory.yaml.\n  An entry's name is one path segment with no space, @ or leading dot, and an item is \"a b\"."},
 	} {
 		err := CheckFills(c.f, "bind")
 		if re, ok := err.(*RolesError); !ok || re.In("qory.yaml").Error() != c.want {

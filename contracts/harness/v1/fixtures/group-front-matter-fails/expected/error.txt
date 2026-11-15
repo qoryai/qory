@@ -1,2 +1,2 @@
 Remove ${qory:agents/reviewers} from the front matter of skills/review/SKILL.md of module factory.
-A group resolves to a list.
+  A group resolves to a list.

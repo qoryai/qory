@@ -496,6 +496,32 @@ func TestTheGroupFixLineNamesTheMembersList(t *testing.T) {
 	}
 }
 
+// TestAGroupCauseLineIsIndented is each refusal of a group reference or member that has
+// a cause line: the cause line comes after the fix, indented by two spaces as the
+// contract blocks indent theirs.
+func TestAGroupCauseLineIsIndented(t *testing.T) {
+	noMember := groupFiles("")
+	noMember["modules/factory/qory-module.yaml"] = "apiVersion: qory.dev/v1alpha1\nname: factory\nroles:\n  agents:\n    reviewers: many\n"
+	noMember["modules/python/qory-module.yaml"] = "apiVersion: qory.dev/v1alpha1\nname: python\n"
+	frontMatter := groupFiles("")
+	frontMatter["modules/factory/skills/review/SKILL.md"] = "---\nname: review\ndescription: Starts ${qory:agents/reviewers}.\n---\n\nReview.\n"
+	unshipped := groupFiles("")
+	delete(unshipped, "modules/python/agents/python-reviewer.md")
+	unshipped["modules/python/agents/other.md"] = "---\nname: other\n---\n"
+	for _, c := range []struct {
+		files map[string]string
+		want  string
+	}{
+		{noMember, "Give agents/reviewers an agent, or remove its reference from skills/review/SKILL.md of module factory.\n  The group has no member."},
+		{frontMatter, "Remove ${qory:agents/reviewers} from the front matter of skills/review/SKILL.md of module factory.\n  A group resolves to a list."},
+		{unshipped, "Ship agent python-reviewer, or remove it from provides.agents.reviewers of module python.\n  No module ships agent python-reviewer."},
+	} {
+		if _, err := composeTree(t, c.files); err == nil || err.Error() != c.want {
+			t.Errorf("error:\n%v\nwant:\n%s", err, c.want)
+		}
+	}
+}
+
 // TestAnExcludedGroupMemberIsNotChecked is a member of a group with a contract that the
 // providing module's exclude leaves out: it is no member, and the compose does not check
 // it.

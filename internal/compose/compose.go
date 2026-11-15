@@ -918,7 +918,7 @@ func checkResolved(res *Result, requires map[string]map[string][]Need, dropped m
 			continue
 		}
 		if r.Module != "" && r.Group {
-			lines = append(lines, fmt.Sprintf("Ship %s, or remove it from provides.%s.%s of module %s.\nNo module ships %s.", described(kind, to), shown(kind), shown(name), shown(r.Module), described(kind, to)))
+			lines = append(lines, fmt.Sprintf("Ship %s, or remove it from provides.%s.%s of module %s.\n  No module ships %s.", described(kind, to), shown(kind), shown(name), shown(r.Module), described(kind, to)))
 			continue
 		}
 		if r.Module != "" {
@@ -939,11 +939,11 @@ func checkResolved(res *Result, requires map[string]map[string][]Need, dropped m
 				continue
 			}
 			if file, ok := e.Front[ref]; ok {
-				lines = append(lines, fmt.Sprintf("Remove ${qory:%s} from the front matter of %s of module %s.\nA group resolves to a list.", shown(ref), exports.HidePath(file), shown(e.Module)))
+				lines = append(lines, fmt.Sprintf("Remove ${qory:%s} from the front matter of %s of module %s.\n  A group resolves to a list.", shown(ref), exports.HidePath(file), shown(e.Module)))
 				continue
 			}
 			if len(members) == 0 {
-				lines = append(lines, fmt.Sprintf("Give %s an agent, or remove its reference from %s of module %s.\nThe group has no member.", shown(ref), exports.HidePath(e.In[ref]), shown(e.Module)))
+				lines = append(lines, fmt.Sprintf("Give %s an agent, or remove its reference from %s of module %s.\n  The group has no member.", shown(ref), exports.HidePath(e.In[ref]), shown(e.Module)))
 			}
 		}
 		for _, need := range requires[e.Module][e.Kind+"/"+e.Name] {
