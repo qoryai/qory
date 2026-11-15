@@ -1,3 +1,4 @@
 agents/explorer example
 agents/planner example
 agents/reviewer example
+agents/writer example
