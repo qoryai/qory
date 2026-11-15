@@ -69,13 +69,14 @@ type Manifest struct {
 	// which states that the module reaches nothing. Forager distinguishes the two.
 	Egress []string
 	// Roles are the roles the module's documents reference, by kind and then by role, each
-	// set to one, the number of entries that fill the role. Nil when the manifest has no
-	// roles key.
+	// set to one, for a role one entry fills, or many, for a group role several agents
+	// fill. Only an agents role can be many. Nil when the manifest has no roles key.
 	Roles stack.Roles
-	// Provides are the roles the module fills, by kind and then by role, each to the name
-	// of the entry that fills it. The compose sets a role from the modules' provides
-	// after the base's bind and before the checkout's. Nil when the manifest has none.
-	Provides stack.Roles
+	// Provides are the roles the module fills, by kind and then by role: a role to the
+	// name of the entry that fills it, a group role to a list of agents it adds to the
+	// group. The compose sets a role from the modules' provides after the base's bind
+	// and before the checkout's. Zero when the manifest has none.
+	Provides stack.Fills
 	// PushChecks are the checks the module declares for the files of an artifact type,
 	// one per type, in the order of the file; nil when the manifest has none.
 	PushChecks []PushCheck
@@ -171,6 +172,18 @@ type Entry struct {
 	// Tier is the tier an agent's frontmatter model sets as a placeholder, one of
 	// [Tiers]; "" for an agent with a model id or none, and for every other kind.
 	Tier string
+	// Front is, per key of References that a document's frontmatter references, the
+	// first such document, relative to the module root with forward slashes; nil for
+	// none.
+	Front map[string]string
+	// In is, per key of References, the first document that references it, relative to
+	// the module root with forward slashes, in the order [Documents] lists the files.
+	In map[string]string
+	// Paths are the globs an agent's frontmatter paths sets, the files of a change the
+	// agent reads, from the checkout root; nil for an agent without the key, which reads
+	// every change, and for every other kind. A renderer leaves the key out of the
+	// agent's file.
+	Paths []string
 }
 
 // Module is a module read from disk.
@@ -275,8 +288,7 @@ var envName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 // retired spelling of it, a missing name, a default that selects something other than
 // a declared variant or "fail", an env key that is not an environment variable name or
 // is QORY_HARNESS_HOME, an env value that is not a relative path inside the module,
-// roles or provides for which [stack.ReadRoles] returns an error, roles with every
-// value one, and a push_checks item whose type is not an artifact type or repeats one,
+// roles or provides for which [stack.ReadRoles] returns an error, and a push_checks item whose type is not an artifact type or repeats one,
 // or whose command is empty or does not start with a relative path inside the module
 // with no .. part, or whose reads lists a value that is not an artifact type, or one
 // type twice. Every error contains the manifest path; an error about roles or
@@ -390,12 +402,12 @@ func parseManifest(dir string, data []byte, err error) (*Manifest, error) {
 		key    string
 		node   *yaml.Node
 		counts bool
-		to     *stack.Roles
-	}{{"roles", &raw.Roles, true, &m.Roles}, {"provides", &raw.Provides, false, &m.Provides}} {
+		to     *stack.Fills
+	}{{"roles", &raw.Roles, true, nil}, {"provides", &raw.Provides, false, &m.Provides}} {
 		if part.node.Kind == 0 {
 			continue
 		}
-		r, err := stack.ReadRoles(part.node, part.key, part.counts)
+		one, many, err := stack.ReadRoles(part.node, part.key, part.counts)
 		var re *stack.RolesError
 		if errors.As(err, &re) {
 			return nil, re.In(path)
@@ -403,7 +415,11 @@ func parseManifest(dir string, data []byte, err error) (*Manifest, error) {
 		if err != nil {
 			return nil, fmt.Errorf("%s: %s: %w", path, part.key, exports.HideValueError(err, ""))
 		}
-		*part.to = r
+		if part.to == nil {
+			m.Roles = one
+			continue
+		}
+		*part.to = stack.Fills{One: one, Many: many}
 	}
 	for name, node := range raw.Variants {
 		if name == "default" {
@@ -626,12 +642,15 @@ func ReadWith(name, dir string, m *Manifest, variant string, readFile func(path 
 				return nil, fmt.Errorf("module %s: %s/%w", shown, exports.HidePath(at), err)
 			}
 		}
-		refs, tier, err := references(abs, e)
+		refs, err := references(abs, e)
 		if err != nil {
 			return nil, fmt.Errorf("module %s: %w", shown, err)
 		}
-		l.Entries[i].References = refs
-		l.Entries[i].Tier = tier
+		l.Entries[i].References = refs.keys
+		l.Entries[i].Tier = refs.tier
+		l.Entries[i].Front = refs.front
+		l.Entries[i].In = refs.in
+		l.Entries[i].Paths = refs.paths
 	}
 	sort.Slice(l.Entries, func(i, j int) bool {
 		if l.Entries[i].Kind != l.Entries[j].Kind {

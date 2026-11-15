@@ -52,7 +52,7 @@ func TestSchemas(t *testing.T) {
 		badKind := strings.Contains(string(errText), "kind ") && !strings.Contains(string(errText), "hooks[")
 		wantInvalid := strings.Contains(string(errText), "apiVersion") || badKind || strings.Contains(string(errText), "qory \"") ||
 			strings.HasPrefix(string(errText), "qory.yaml: ") && strings.Contains(string(errText), "workflows") ||
-			strings.Contains(string(errText), "bind.") && strings.Contains(string(errText), " in qory.yaml")
+			strings.Contains(string(errText), "bind.") && strings.Contains(string(errText), " in qory.yaml") && !strings.Contains(string(errText), " as many, ")
 		err := composeSchema.Validate(document(t, filepath.Join(dir, "qory.yaml")))
 		if wantInvalid && err == nil {
 			t.Errorf("%s: the document passed the schema; want a failure", dir)

@@ -123,6 +123,15 @@ type Entry struct {
 	// Tier is the tier an agent's model sets as a placeholder; "" for an agent with a
 	// model id or none, and for every other kind.
 	Tier string
+	// Front is, per key of References that a document's frontmatter references, the
+	// first such document, relative to the module root; nil for none.
+	Front map[string]string
+	// In is, per key of References, the first document that references it, relative to
+	// the module root.
+	In map[string]string
+	// Paths are the globs an agent's frontmatter paths sets, the files of a change the
+	// agent reads; nil for an agent without the key, which reads every change.
+	Paths []string
 }
 
 // Exclude is one entry a module left out.
@@ -160,11 +169,18 @@ type Result struct {
 	MCP map[string]map[string]any
 	// Instructions are the modules' AGENTS.md files joined by a blank line, or "".
 	Instructions string
-	// Bind is the harness's roles, <kind>/<role> to the name of the entry that fills the
-	// role, every one checked against the composed entries; nil when no role is set.
-	// Roles is the same, with where each name comes from.
+	// Bind is the harness's single roles, <kind>/<role> to the name of the entry that
+	// fills the role, every one checked against the composed entries; nil when no single
+	// role is set. Roles is the same, with where each name comes from.
 	Bind map[string]string
-	// Roles are the roles of Bind, sorted by role, each with the layer that set it.
+	// Groups is the harness's group roles, <kind>/<role> to the names of the agents
+	// that fill the role, in their order, every one checked against the composed
+	// entries: each group role a module declares many, nil for a group with no member.
+	// Nil when no module declares one.
+	Groups map[string][]string
+	// Roles are the roles of Bind and the members of Groups, sorted by role, each with
+	// the layer that set it, a group's members in their order, then the members the
+	// checkout's bind replaced.
 	Roles []Role
 	// Env are the variables the harness exports, name to value, with every
 	// $QORY_HARNESS_HOME as written, before substitution: what the module manifests
@@ -334,13 +350,16 @@ func ComposeWith(p *stack.Stack, opts Options) (_ *Result, err error) {
 	// The roles before the selection: a provided entry that the providing module's exclude
 	// lists provides nothing, and a role that two modules provide keeps the name of the
 	// layer below. The roles are set again once the selection is known.
-	roles, _ := setRoles(p, opened, excludedBy, true)
-	res.Bind = flatRoles(roles)
+	roles, groups, _ := setRoles(p, opened, excludedBy, true)
+	res.Bind, res.Groups = flatRoles(roles), groups
 	owners := map[string][]string{}
 	paths := map[string]string{}
 	fors := map[string]string{}
 	refs := map[string][]string{}
 	tiers := map[string]string{}
+	// sites are, per entry, where its documents reference each entry, and an agent's
+	// paths.
+	sites := map[string]module.Entry{}
 	servers := map[string]map[string]any{}
 	exporters := map[string]string{}
 	// checkers is the module that declares the push check of each type.
@@ -369,7 +388,7 @@ func ComposeWith(p *stack.Stack, opts Options) (_ *Result, err error) {
 		}
 		read[name] = l
 		rl := Module{Name: name, Description: m.Description, Dir: l.Dir, Source: ps.String(), Pin: src.Pin, Commit: src.Commit, Ref: ps.Ref, Previous: src.Previous, Warning: src.Warning, Dirty: src.Dirty, Variant: variant, Link: pl.Link, Base: pl.Base, BaseName: pl.BaseName, RetiredAPIVersion: m.RetiredAPIVersion, Egress: m.Egress, Copy: copied, Walled: copied && opts.Walled, Hidden: copied && opts.Hidden, Root: root, RealDir: realDir, DirInfo: rootInfo}
-		requires[name] = needs(l, m.Requires, res.Bind)
+		requires[name] = needs(l, m.Requires, res.Bind, res.Groups)
 		// The selection comes first, so that what the base allows and what the module
 		// exports are checked on what the module contributes, not on what it ships.
 		env, pulled, err := applySelection(l, pl, m.Env, requires[name], res)
@@ -410,6 +429,7 @@ func ComposeWith(p *stack.Stack, opts Options) (_ *Result, err error) {
 			}
 			refs[key+"@"+name] = e.References
 			tiers[key+"@"+name] = e.Tier
+			sites[key+"@"+name] = e
 			if e.Kind == "mcp" {
 				servers[key+"@"+name] = l.MCP[e.Name]
 			}
@@ -443,7 +463,7 @@ func ComposeWith(p *stack.Stack, opts Options) (_ *Result, err error) {
 	}
 	for key, ls := range owners {
 		kind, name, _ := strings.Cut(key, "/")
-		res.Entries = append(res.Entries, Entry{Kind: kind, Name: name, Module: ls[0], Path: paths[key+"@"+ls[0]], For: fors[key+"@"+ls[0]], References: refs[key+"@"+ls[0]], Tier: tiers[key+"@"+ls[0]]})
+		res.Entries = append(res.Entries, Entry{Kind: kind, Name: name, Module: ls[0], Path: paths[key+"@"+ls[0]], For: fors[key+"@"+ls[0]], References: refs[key+"@"+ls[0]], Tier: tiers[key+"@"+ls[0]], Front: sites[key+"@"+ls[0]].Front, In: sites[key+"@"+ls[0]].In, Paths: sites[key+"@"+ls[0]].Paths})
 		if tier := tiers[key+"@"+ls[0]]; tier != "" {
 			if t, ok := opts.Tiers[tier]; ok {
 				if res.Tiers == nil {
@@ -471,13 +491,13 @@ func ComposeWith(p *stack.Stack, opts Options) (_ *Result, err error) {
 	leftOut := func(_ openedModule, kind, name string) bool {
 		return !composed[kind+"/"+name] && excludeOf(res, kind, name) != nil
 	}
-	res.Roles, err = setRoles(p, opened, leftOut, false)
+	res.Roles, res.Groups, err = setRoles(p, opened, leftOut, false)
 	if err != nil {
 		return nil, err
 	}
 	res.Bind = flatRoles(res.Roles)
 	for _, o := range opened {
-		requires[o.m.Name] = needs(read[o.m.Name], o.m.Requires, res.Bind)
+		requires[o.m.Name] = needs(read[o.m.Name], o.m.Requires, res.Bind, res.Groups)
 	}
 	if err := checkResolved(res, requires, droppedProviders(opened, leftOut)); err != nil {
 		return nil, err
@@ -790,9 +810,9 @@ type Need struct {
 
 // needs joins, per entry of the module, what the manifest's requires names and what the
 // entry's documents reference, a reference to a bound role resolved to the entry it is
-// bound to. Each key comes once per entry, the manifest's first, then the references in
-// their sorted order.
-func needs(l *module.Module, requires map[string][]string, bind map[string]string) map[string][]Need {
+// bound to, and a reference to a group role to each of its members. Each key comes once
+// per entry, the manifest's first, then the references in their sorted order.
+func needs(l *module.Module, requires map[string][]string, bind map[string]string, groups map[string][]string) map[string][]Need {
 	out := map[string][]Need{}
 	for key, list := range requires {
 		for _, need := range list {
@@ -802,20 +822,29 @@ func needs(l *module.Module, requires map[string][]string, bind map[string]strin
 	for _, e := range l.Entries {
 		key := e.Kind + "/" + e.Name
 		for _, ref := range e.References {
-			need := Need{Key: ref, Reference: true}
+			kind, _, _ := strings.Cut(ref, "/")
+			list := []Need{{Key: ref, Reference: true}}
 			if to, ok := bind[ref]; ok {
-				kind, _, _ := strings.Cut(ref, "/")
-				need.Key, need.Role = kind+"/"+to, ref
-			}
-			dup := false
-			for _, have := range out[key] {
-				if have.Key == need.Key {
-					dup = true
-					break
+				list = []Need{{Key: kind + "/" + to, Role: ref, Reference: true}}
+			} else if members, ok := groups[ref]; ok {
+				// A group with no member needs nothing here; [checkResolved] refuses a
+				// reference to it.
+				list = nil
+				for _, m := range members {
+					list = append(list, Need{Key: kind + "/" + m, Role: ref, Reference: true})
 				}
 			}
-			if !dup {
-				out[key] = append(out[key], need)
+			for _, need := range list {
+				dup := false
+				for _, have := range out[key] {
+					if have.Key == need.Key {
+						dup = true
+						break
+					}
+				}
+				if !dup {
+					out[key] = append(out[key], need)
+				}
 			}
 		}
 	}
@@ -855,10 +884,16 @@ func checkResolved(res *Result, requires map[string]map[string][]Need, dropped m
 		return x.Module
 	}
 	var lines []string
+	named := map[string]bool{}
 	for _, r := range res.Roles {
+		if r.Replaced {
+			continue
+		}
 		role, to := r.Role, r.Name
 		kind, name, _ := strings.Cut(role, "/")
-		if composed[role] {
+		if composed[role] && !named[role] {
+			// A group's members share the role's name, which is checked once.
+			named[role] = true
 			for _, e := range res.Entries {
 				if e.Kind != kind || e.Name != name {
 					continue
@@ -873,6 +908,10 @@ func checkResolved(res *Result, requires map[string]map[string][]Need, dropped m
 		if composed[kind+"/"+to] {
 			continue
 		}
+		if r.Module != "" && r.Group {
+			lines = append(lines, fmt.Sprintf("Ship %s, or remove it from provides.%s.%s of module %s.\nNo module ships %s.", described(kind, to), shown(kind), shown(name), shown(r.Module), described(kind, to)))
+			continue
+		}
 		if r.Module != "" {
 			// A provided entry that an exclude left out provides nothing, see [setRoles].
 			lines = append(lines, fmt.Sprintf("Ship %s in a module, or remove provides.%s.%s from module %s: no module ships %s.", described(kind, to), shown(kind), shown(name), shown(r.Module), described(kind, to)))
@@ -885,6 +924,19 @@ func checkResolved(res *Result, requires map[string]map[string][]Need, dropped m
 		lines = append(lines, fmt.Sprintf("bind %s selects %s, which no module ships", shown(role), described(kind, to)))
 	}
 	for _, e := range res.Entries {
+		for _, ref := range e.References {
+			members, group := res.Groups[ref]
+			if !group {
+				continue
+			}
+			if file, ok := e.Front[ref]; ok {
+				lines = append(lines, fmt.Sprintf("Remove ${qory:%s} from the front matter of %s of module %s.\nA group resolves to a list.", shown(ref), exports.HidePath(file), shown(e.Module)))
+				continue
+			}
+			if len(members) == 0 {
+				lines = append(lines, fmt.Sprintf("Give %s an agent, or remove its reference from %s of module %s.\nThe group has no member.", shown(ref), exports.HidePath(e.In[ref]), shown(e.Module)))
+			}
+		}
 		for _, need := range requires[e.Module][e.Kind+"/"+e.Name] {
 			if composed[need.Key] || need.Role != "" {
 				continue
@@ -952,6 +1004,13 @@ func (r *Result) Resolve(kind, name string) (string, string) {
 // there.
 func (r *Result) Substitute(text string, address func(kind, name string) string) string {
 	return module.Substitute(text, func(kind, name string) string {
+		if members, ok := r.Groups[kind+"/"+name]; ok {
+			names := make([]string, len(members))
+			for i, m := range members {
+				names[i] = address(kind, m)
+			}
+			return strings.Join(names, ", ")
+		}
 		return address(r.Resolve(kind, name))
 	})
 }

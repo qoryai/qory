@@ -166,8 +166,8 @@ func sortedNames(m map[string]string) []string {
 // of each Markdown file that does, so the module's files stay live wherever nothing had
 // to change. An entry of a module the home holds a copy of, see [compose.Module.Copy], is
 // a copy instead, files and directories, with the references of each Markdown file that
-// holds one resolved. An agent with a tier is written with the tier's model and effort, see
-// [TierFront]. Every kind directory in keep is created, with no entry of that kind as well,
+// holds one resolved. An agent with a tier or paths is written as [AgentFront] returns
+// it. Every kind directory in keep is created, with no entry of that kind as well,
 // so a checkout link to it resolves. Entries of any other kind are left out, and it is
 // the caller's job to pass every kind the runtime reads from the directory.
 func PlaceEntries(res *compose.Result, dir string, addr Address, keep ...string) error {
@@ -191,7 +191,7 @@ func PlaceEntries(res *compose.Result, dir string, addr Address, keep ...string)
 			name += ".md"
 		}
 		dst := filepath.Join(dir, name)
-		if e.Kind == "agents" && e.Tier != "" {
+		if e.Kind == "agents" && (e.Tier != "" || e.Paths != nil) {
 			data, err := readSource(res, e)
 			if errors.Is(err, errLeftOut) {
 				continue
@@ -199,7 +199,7 @@ func PlaceEntries(res *compose.Result, dir string, addr Address, keep ...string)
 			if err != nil {
 				return err
 			}
-			data = TierFront(res, e, []byte(res.Substitute(string(data), addr)))
+			data = AgentFront(res, e, []byte(res.Substitute(string(data), addr)))
 			if err := WriteFile(filepath.Dir(dst), filepath.Base(dst), data); err != nil {
 				return err
 			}

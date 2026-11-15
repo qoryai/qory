@@ -194,6 +194,19 @@ func TierFront(res *compose.Result, e compose.Entry, data []byte) []byte {
 	return data
 }
 
+// AgentFront returns an agent file as a runtime that reads the file whole gets it: with
+// its tier written as [TierFront] writes it, when the agent has one, and without the
+// frontmatter key paths, which qory reads and not every runtime accepts.
+func AgentFront(res *compose.Result, e compose.Entry, data []byte) []byte {
+	if e.Tier != "" {
+		data = TierFront(res, e, data)
+	}
+	if e.Paths != nil {
+		data = module.SetFront(data, "paths", "")
+	}
+	return data
+}
+
 // Declarer is a runtime whose program reaches hosts of its own, such as its model
 // endpoint, which no module declares. When the modules of a harness declare egress, the
 // compose adds these to the report's union under the runtime's name, so a stack does not
@@ -500,10 +513,7 @@ func WritePlugin(res *compose.Result, dir, manifestDir string, extra map[string]
 		if err != nil {
 			return err
 		}
-		data = []byte(res.Substitute(string(data), PluginAddress))
-		if e.Tier != "" {
-			data = TierFront(res, e, data)
-		}
+		data = AgentFront(res, e, []byte(res.Substitute(string(data), PluginAddress)))
 		if err := WriteFile(dir, filepath.Join("agents", e.Name+".md"), data); err != nil {
 			return err
 		}
@@ -631,8 +641,9 @@ func Build(res *compose.Result, home string, runtimes ...Runtime) (err error) {
 // directory as modules/<name>, links the shared skills and hooks for the bare address and
 // writes AGENTS.md at the staging root with its references resolved the same way, since
 // every checkout link reads them, push-checks.json beside it when a module declares a
-// push check, [PushChecksFile], and hooks.json when the checkout lists a workflow hook,
-// [HooksFile], then calls each runtime's Render for the subdirectory
+// push check, [PushChecksFile], hooks.json when the checkout lists a workflow hook,
+// [HooksFile], and roles.json when the harness has a role, [RolesFile], then calls each
+// runtime's Render for the subdirectory
 // named after it and links the runtime's files entries into that subdirectory. The links
 // point at the modules by absolute path, so a tree staged anywhere contains the same
 // links. A module the home holds a copy of, see [compose.Module.Copy], is copied in place
@@ -665,6 +676,9 @@ func BuildAt(res *compose.Result, stage, home string, runtimes ...Runtime) error
 		return err
 	}
 	if err := writeHooks(res, stage); err != nil {
+		return err
+	}
+	if err := writeRoles(res, stage); err != nil {
 		return err
 	}
 	for _, p := range runtimes {
@@ -726,6 +740,61 @@ func writeHooks(res *compose.Result, stage string) error {
 		return err
 	}
 	return WriteFile(stage, HooksFile, append(data, '\n'))
+}
+
+// RolesFile is the file at the root of a home with the roles of the composed harness,
+// for a script that starts the members of a group, written only when the harness has a
+// role.
+const RolesFile = "roles.json"
+
+// Roles is the content of [RolesFile]: one row per role, and per member of a group role.
+type Roles struct {
+	Roles []RoleRow `json:"roles"`
+}
+
+// RoleRow is one row of [Roles]: a role and the agent that fills it.
+type RoleRow struct {
+	// Role is the role as a reference writes it, <kind>/<role>.
+	Role string `json:"role"`
+	// Agent is the name of the entry that fills the role, or one member of a group.
+	Agent string `json:"agent"`
+	// From is the layer that set the name: base, provides <module> or bind.
+	From string `json:"from"`
+	// Group marks a member of a group role.
+	Group bool `json:"group,omitempty"`
+	// Paths are the globs of a member's frontmatter paths, from the checkout root;
+	// absent for a member without them, which reads every change, and for a single role.
+	Paths []string `json:"paths,omitempty"`
+}
+
+// writeRoles writes [RolesFile] into stage: each role of res and each member of a group
+// role, in the order of [compose.Result.Roles], a member the checkout's bind replaced
+// left out; nothing when the harness has no role.
+func writeRoles(res *compose.Result, stage string) error {
+	var rows []RoleRow
+	for _, r := range res.Roles {
+		if r.Replaced {
+			continue
+		}
+		row := RoleRow{Role: r.Role, Agent: r.Name, From: r.From, Group: r.Group}
+		if r.Group {
+			kind, _, _ := strings.Cut(r.Role, "/")
+			for _, e := range res.Entries {
+				if e.Kind == kind && e.Name == r.Name {
+					row.Paths = e.Paths
+				}
+			}
+		}
+		rows = append(rows, row)
+	}
+	if len(rows) == 0 {
+		return nil
+	}
+	data, err := json.MarshalIndent(Roles{Roles: rows}, "", "  ")
+	if err != nil {
+		return err
+	}
+	return WriteFile(stage, RolesFile, append(data, '\n'))
 }
 
 // Difference is one path at which two trees differ, as [Diff] reports it.

@@ -1,0 +1,8 @@
+apiVersion: qory.dev/v1alpha1
+name: python
+roles:
+  agents:
+    reviewers: one
+provides:
+  agents:
+    reviewers: [python-reviewer]
