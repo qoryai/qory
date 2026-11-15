@@ -594,6 +594,17 @@ An agent in a module sets `model: ${qory:light}`, `${qory:fast}` or `${qory:thin
 
 A tier's entry may also set an effort value: `{model: claude-opus-5-5, effort: max}` in `harness.tiers`, or `--tier thinking=claude-opus-5-5 --tier-effort thinking=max` on the command line. The entry comes whole from one of the three places, so `--tier-effort` needs `--tier` for the same tier. An agent whose entry sets no effort keeps the effort its file sets.
 
+Each runtime writes a tier into an agent file in these keys:
+
+| Runtime                 | Model   | Effort                                                                   |
+| ----------------------- | ------- | ------------------------------------------------------------------------ |
+| claude                  | `model` | `effort`: `low`, `medium`, `high`, `xhigh` or `max`                      |
+| copilot                 | `model` | `reasoning-effort`: `minimal`, `low`, `medium`, `high`, `xhigh` or `max` |
+| cursor, opencode, goose | `model` | none: the agent runs at the session's effort                             |
+| codex, gemini           | none    | none: the agent runs on the main model                                   |
+
+An effort outside the runtime's values stops the compose with exit 2. For a runtime that writes no effort or no model, the compose prints a `skipped` row with the agents it concerns.
+
 ## Removing the harness
 
 `qory harness remove` removes the composed tree and its links from the checkout. A home

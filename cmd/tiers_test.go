@@ -135,12 +135,14 @@ func TestComposeWritesEachAgentsTier(t *testing.T) {
 	}
 }
 
-// TestComposeWritesATierForEachRuntime composes one map for claude, opencode and codex:
-// opencode gets the model and a row for the effort it does not write, codex a row for the
-// model it does not write.
+// TestComposeWritesATierForEachRuntime composes one map for every runtime that writes
+// agents: claude gets the model and the effort, copilot the model and reasoning-effort;
+// cursor, opencode and goose get the model and a row for the effort they do not write, so
+// the agents run at the session's effort; codex and gemini get a row for the model they
+// do not write.
 func TestComposeWritesATierForEachRuntime(t *testing.T) {
 	root := tierCheckout(t)
-	tierModule(t, root, "[claude, opencode, codex]", map[string]string{
+	tierModule(t, root, "[claude, copilot, cursor, opencode, goose, gemini, codex]", map[string]string{
 		"planner": "---\nname: planner\ndescription: Plans.\nmodel: ${qory:thinking}\n---\nPlans.\n",
 		"scout":   "---\nname: scout\ndescription: Scouts.\nmodel: ${qory:thinking}\n---\nScouts.\n",
 	}, "tiers: {thinking: {model: claude-opus-5-5, effort: max}}")
@@ -150,14 +152,32 @@ func TestComposeWritesATierForEachRuntime(t *testing.T) {
 	}
 	wantsRow(t, out, "tier", "thinking  claude-opus-5-5, effort max  (agents planner, scout; from qory.yaml)")
 	if got, want := fieldRows(out)["skipped"], []string{
-		"effort max of tier thinking for opencode  (qory writes no effort into opencode agents)",
+		"effort max of tier thinking for cursor  (qory writes no effort into cursor agents; agents planner, scout run at the session's effort)",
+		"effort max of tier thinking for opencode  (qory writes no effort into opencode agents; agents planner, scout run at the session's effort)",
+		"effort max of tier thinking for goose  (qory writes no effort into goose agents; agents planner, scout run at the session's effort)",
+		"tier thinking for gemini  (gemini agents have no model setting; agents planner, scout run on the main model)",
 		"tier thinking for codex  (codex agents have no model setting; agents planner, scout run on the main model)",
 	}; !reflect.DeepEqual(got, want) {
 		t.Errorf("skipped rows %q\nwant %q\n%s", got, want, out)
 	}
-	opencode := readText(t, filepath.Join(root, ".qory", "harness", "opencode", "agents", "planner.md"))
-	if !strings.Contains(opencode, "model: claude-opus-5-5\n") || strings.Contains(opencode, "effort") || strings.Contains(opencode, "${qory:") {
-		t.Errorf("opencode agents/planner.md:\n%s", opencode)
+	home := filepath.Join(root, ".qory", "harness")
+	for _, path := range []string{"claude/agents/planner.md", "claude/plugin/agents/planner.md"} {
+		if got := readText(t, filepath.Join(home, path)); !strings.Contains(got, "model: claude-opus-5-5\neffort: max\n") {
+			t.Errorf("%s:\n%s", path, got)
+		}
+	}
+	for _, path := range []string{"copilot/agents/planner.agent.md", "copilot/workspace/.github/agents/planner.agent.md"} {
+		if got := readText(t, filepath.Join(home, path)); !strings.Contains(got, "model: claude-opus-5-5\n") || !strings.Contains(got, "reasoning-effort: max\n") || strings.Contains(got, "${qory:") {
+			t.Errorf("%s:\n%s", path, got)
+		}
+	}
+	for _, path := range []string{"cursor/agents/planner.md", "opencode/agents/planner.md", "goose/agents/planner.md"} {
+		if got := readText(t, filepath.Join(home, path)); !strings.Contains(got, "model: claude-opus-5-5\n") || strings.Contains(got, "effort") || strings.Contains(got, "${qory:") {
+			t.Errorf("%s:\n%s", path, got)
+		}
+	}
+	if got := readText(t, filepath.Join(home, "gemini", "agents", "planner.md")); strings.Contains(got, "model") || strings.Contains(got, "effort") || strings.Contains(got, "${qory:") {
+		t.Errorf("gemini/agents/planner.md:\n%s", got)
 	}
 	codex := readText(t, filepath.Join(root, ".qory", "harness", "codex", "agents", "planner.toml"))
 	if strings.Contains(codex, "model") || strings.Contains(codex, "${qory:") {
@@ -201,13 +221,28 @@ func TestComposeRefusesATierMistake(t *testing.T) {
 	}
 }
 
+// TestComposeRefusesAnEffortCopilotAgentsDoNotTake refuses a tier's effort that a copilot
+// agent does not take, the fix first, in a first line of at most 100 characters.
+func TestComposeRefusesAnEffortCopilotAgentsDoNotTake(t *testing.T) {
+	root := tierCheckout(t)
+	tierModule(t, root, "copilot", tierAgents, "tiers: {thinking: {model: example-model, effort: ultra}}")
+	_, err := run(t, "harness", "compose")
+	want := "set tier thinking's effort to one of minimal, low, medium, high, xhigh, max for copilot agents\nultra is not one (from qory.yaml)"
+	if cmd.ExitCode(err) != 2 || err == nil || err.Error() != want {
+		t.Errorf("exit %d, err %v\nwant %s", cmd.ExitCode(err), err, want)
+	}
+	if first, _, _ := strings.Cut(want, "\n"); len(first) > 100 {
+		t.Errorf("first line is %d characters, more than 100", len(first))
+	}
+}
+
 // TestComposeRefusesAnEffortClaudeAgentsDoNotTake refuses a tier's effort that a claude
 // agent does not take, with the values it does and the file the entry came from.
 func TestComposeRefusesAnEffortClaudeAgentsDoNotTake(t *testing.T) {
 	root := tierCheckout(t)
 	tierModule(t, root, "claude", tierAgents, "tiers: {thinking: {model: claude-opus-5-5, effort: ultra}}")
 	_, err := run(t, "harness", "compose")
-	want := "tier thinking: set effort to one of low, medium, high, xhigh, max for claude agents; ultra is not one (from qory.yaml)"
+	want := "set tier thinking's effort to one of low, medium, high, xhigh, max for claude agents\nultra is not one (from qory.yaml)"
 	if cmd.ExitCode(err) != 2 || err == nil || err.Error() != want {
 		t.Errorf("exit %d, err %v\nwant %s", cmd.ExitCode(err), err, want)
 	}

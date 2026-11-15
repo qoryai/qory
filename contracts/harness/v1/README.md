@@ -1354,8 +1354,9 @@ Per runtime, the files written into its directory:
   the `settings/cursor/` files such as `hooks.json`, `cli.json` and `mcp.json`, the last
   with the servers under `mcpServers`, and `plugin/`, the launch spec, never linked into
   the checkout (§Launching).
-- **copilot**: `agents/<name>.agent.md` with `name`, `description`, `tools` and `model`,
-  each `settings/copilot/<name>` file written under `hooks/` as `qory-<name>`, so
+- **copilot**: `agents/<name>.agent.md` with `name`, `description`, `tools`, `model` and,
+  for an agent whose tier's entry sets an effort, `reasoning-effort`, each
+  `settings/copilot/<name>` file written under `hooks/` as `qory-<name>`, so
   `settings/copilot/hooks.json` reaches `.github/hooks/qory-hooks.json`, and for a launch
   `workspace/.github` with the skills and agents, and `mcp.json` with the servers
   (§Launching). Copilot CLI loads every `*.json` file in `.github/hooks`, so a
@@ -1367,7 +1368,7 @@ Per runtime, the files written into its directory:
 - **goose**: `agents/<name>.md` with `name`, `description` and `model`.
 - **any**: nothing.
 
-An agent's tier is written as `model` and `effort` in a claude agent; as `model` alone for opencode, cursor, copilot and goose, with a row for an effort not written; and not at all for codex and gemini, with a row. On every compose for claude, qory refuses `env` in a `settings/claude/settings.json` fragment that sets `ANTHROPIC_MODEL`, `ANTHROPIC_DEFAULT_OPUS_MODEL`, `ANTHROPIC_DEFAULT_SONNET_MODEL`, `ANTHROPIC_DEFAULT_HAIKU_MODEL`, `ANTHROPIC_DEFAULT_FABLE_MODEL`, `CLAUDE_CODE_SUBAGENT_MODEL`, `CLAUDE_CODE_SUBAGENT_MODEL_FORCE`, `CLAUDE_CODE_EFFORT_LEVEL`, `CLAUDE_CODE_SUBAGENT_EFFORT` or `CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL`. It refuses them the same way in the configuration's `env`, in `harness.launch.claude.env` and in a module's `env` export. With the home inside the checkout, it also refuses them in the checkout's `.claude/settings.json` and `.claude/settings.local.json` and in the user's Claude Code settings file.
+An agent's tier is written as `model` and `effort` in a claude agent, and as `model` and `reasoning-effort` in a copilot agent. The effort is one of `low`, `medium`, `high`, `xhigh` and `max` for claude, and one of `minimal`, `low`, `medium`, `high`, `xhigh` and `max` for copilot; another value fails the compose with exit 2. Copilot CLI reports a level the agent's model does not offer and leaves it unapplied. Cursor and opencode take an agent's effort only inside `model`, as `<id>[effort=<level>]` and `<provider>/<model>#<variant>`, which qory does not write: a tier is written as `model` alone for cursor, opencode and goose, and the agent runs at the session's effort, with a `skipped` row that lists the agents. A tier is not written at all for codex and gemini, with a row. On every compose for claude, qory refuses `env` in a `settings/claude/settings.json` fragment that sets `ANTHROPIC_MODEL`, `ANTHROPIC_DEFAULT_OPUS_MODEL`, `ANTHROPIC_DEFAULT_SONNET_MODEL`, `ANTHROPIC_DEFAULT_HAIKU_MODEL`, `ANTHROPIC_DEFAULT_FABLE_MODEL`, `CLAUDE_CODE_SUBAGENT_MODEL`, `CLAUDE_CODE_SUBAGENT_MODEL_FORCE`, `CLAUDE_CODE_EFFORT_LEVEL`, `CLAUDE_CODE_SUBAGENT_EFFORT` or `CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL`. It refuses them the same way in the configuration's `env`, in `harness.launch.claude.env` and in a module's `env` export. With the home inside the checkout, it also refuses them in the checkout's `.claude/settings.json` and `.claude/settings.local.json` and in the user's Claude Code settings file.
 
 Programs that read `AGENTS.md` and `.agents/skills` and have no separate package include
 DeepSeek Harness, Kilo Code, Kimi CLI, Factory Droid, Mistral Vibe, JetBrains Junie, Augment

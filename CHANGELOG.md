@@ -161,6 +161,8 @@ release may change what an existing document does, and states it under Upgrading
   `harness.tiers` in the repository's `qory.yaml`.
 - Give the agents of a tier an effort value with `--tier-effort <tier>=<effort>` on
   `qory harness compose` and `qory run`, beside `--tier <tier>=<model id>`.
+- A compose for GitHub Copilot CLI writes the effort of an agent's tier into the agent
+  file as `reasoning-effort`; Cursor, OpenCode and Goose agents run at the session's effort.
 - `wall.images_allow` in forager.yaml: where a run's image may come from when the run's
   policy names one by a reference pinned by digest, a list of the prefixes of the
   references the machine runs. Without it, such a run is refused.

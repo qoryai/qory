@@ -145,5 +145,7 @@ func (cursor) Template() render.Template {
 }
 
 // AgentEfforts is nil: an agent's file gets the model a tier maps to, and qory writes no
-// effort into it.
+// effort into it. Cursor takes an agent's effort only inside model, as
+// <id>[effort=<level>], which qory does not write, so the agent runs at the session's
+// effort.
 func (cursor) AgentEfforts() []string { return nil }
