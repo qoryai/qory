@@ -260,6 +260,10 @@ type Extending struct {
 	// Target is the targets the stack is written for, and so the ones a checkout
 	// extending it may compose for; nil accepts every target.
 	Target *TargetPolicy `yaml:"target,omitempty"`
+	// Hooks lets a checkout extending the stack add workflow hooks at the hook points
+	// its workflows declare, within these limits; nil allows no workflow hook. A
+	// workflow hook is not a runtime hook, which Kinds never allows.
+	Hooks *HookLimits `yaml:"hooks,omitempty"`
 }
 
 // TargetPolicy is what a stack sets under extending.target: the runtimes and the
@@ -414,6 +418,10 @@ type Stack struct {
 	// the harness section of a checkout's qory.yaml that defines a stack; a section that
 	// extends a stack sets none, and [Extend] takes the base's.
 	Workflows map[string]Workflow `yaml:"workflows,omitempty"`
+	// Hooks are the workflow hooks of a checkout's qory.yaml, from harness.hooks, read
+	// only in a document that extends a stack; a stack file has none. After [Extend],
+	// they are the checkout's.
+	Hooks []Hook `yaml:"-"`
 
 	// RetiredAPIVersion is the apiVersion the file declared when it is a retired
 	// spelling of [APIVersion], one of [exports.RetiredAPIVersions], "" when the file
@@ -445,6 +453,9 @@ type Workflow struct {
 	// dispatched run of the workflow works on: read or write, "" when the workflow sets
 	// none. [Stack.AccessOf] reads "" as read.
 	Access string `yaml:"access,omitempty"`
+	// HookPoints are the points of the workflow where a checkout extending the stack
+	// may add workflow hooks, by the point's name; nil for none.
+	HookPoints map[string]HookPoint `yaml:"hook_points,omitempty"`
 }
 
 // The access levels a workflow declares, see [Workflow.Access].
@@ -686,6 +697,11 @@ func (p *Stack) validate(compose bool) error {
 				return err
 			}
 		}
+		if p.Extending.Hooks != nil {
+			if err := p.Extending.Hooks.validate(); err != nil {
+				return err
+			}
+		}
 	}
 	for _, name := range slices.Sorted(maps.Keys(p.Workflows)) {
 		if !workflowName.MatchString(name) {
@@ -704,6 +720,17 @@ func (p *Stack) validate(compose bool) error {
 		}
 		w.TimeLimit = d
 		p.Workflows[name] = w
+	}
+	// A stack that a checkout's qory.yaml defines cannot be extended, so no hook can
+	// reach a point it declares.
+	if compose && p.hasHookPoints() {
+		return hookErrorf("Remove hook_points from the workflows in {file}.", "A checkout adds workflow hooks to a stack it extends, so only a qory-stack.yaml declares hook points.")
+	}
+	if err := p.validateHookPoints(); err != nil {
+		return err
+	}
+	if err := p.validateHooks(); err != nil {
+		return err
 	}
 	if err := CheckFills(p.Bind, "bind"); err != nil {
 		return err

@@ -1,0 +1,5 @@
+0 review-changes after-review-round end check check-licences.sh run scripts/check-licences.sh required 600
+1 review-changes after-review-round end review licence-reviewer agent licence-reviewer optional 600
+2 plan-the-build after-plan end enrich notes run scripts/write-notes.sh --all required 120
+3 verify before-matrix start check check-licences.sh run scripts/check-licences.sh --matrix required 600
+4 plan-the-build after-code-map inside enrich code-map-notes agent licence-reviewer required 90

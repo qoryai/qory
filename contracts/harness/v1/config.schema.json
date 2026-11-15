@@ -139,6 +139,32 @@
               }
             }
           }
+        },
+        "hooks": {
+          "description": "The workflow hooks the checkout adds at the hook points of the stack it extends, read only beside extends or under qory harness compose -f <stack>. Each runs a program in the checkout or a composed agent; a review hook runs an agent, and an enrich hook writes notes for the agents that start after it. A key present with an empty value or null is refused. The base stack declares the points and the kinds each takes, and its extending.hooks the counts and the longest timeout.",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["at", "kind"],
+            "additionalProperties": false,
+            "properties": {
+              "at": {"description": "The name of a hook point of the base stack.", "type": "string", "pattern": "^[a-z][a-z0-9-]{0,54}$"},
+              "kind": {"enum": ["check", "review", "enrich"]},
+              "run": {"description": "The program, by its path from the directory of qory.yaml, alone or followed by its arguments, separated by spaces. The program is a file inside the checkout being composed, and hooks.json has its path from the checkout's root.", "type": "string", "pattern": "\\S"},
+              "agent": {"description": "The name of an agent that a module of the composed harness ships.", "type": "string", "pattern": "^[^/\\\\@ .][^/\\\\@ ]*$"},
+              "name": {"description": "Unique at the point. Default: the agent's name, else the file name of the program.", "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"},
+              "required": {"description": "Whether a red result blocks. Default: true.", "type": "boolean"},
+              "timeout": {
+                "description": "The longest the hook may run, at most the base stack's extending.hooks.timeout, as a duration in whole seconds, 1s or more: 90s or 5m. Default: the base stack's.",
+                "type": "string",
+                "pattern": "^([0-9]+(\\.[0-9]+)?(s|m|h))+$",
+                "not": {"pattern": "^([0.]+(s|m|h))+$"}
+              }
+            },
+            "oneOf": [{"required": ["run"]}, {"required": ["agent"]}],
+            "if": {"properties": {"kind": {"const": "review"}}},
+            "then": {"required": ["agent"]}
+          }
         }
       },
       "if": {"required": ["extends"]},

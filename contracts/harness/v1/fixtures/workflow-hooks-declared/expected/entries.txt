@@ -1,0 +1,4 @@
+agents/licence-reviewer licence
+skills/workflow-plan-the-build core
+skills/workflow-review-changes core
+skills/workflow-verify core

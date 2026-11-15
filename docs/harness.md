@@ -380,14 +380,79 @@ The rules:
 - The entry contains `name` and `exclude` only. A `source`, `only`, `variant` or `link`
   fails the compose.
 - The exclude lists entries of the kinds the stack's `extending` block lets your modules
-  ship, and files under its `extending.files` prefixes. The delivered hooks, MCP
-  servers, instructions, settings and variables stay as they are.
+  ship, and files under its `extending.files` prefixes. The delivered runtime hooks,
+  MCP servers, instructions, settings and variables stay as they are.
 - An entry the delivered module does not compose fails the compose, `remove skills/x
   from the exclude of module core in qory.yaml: …`.
 
 Without the exclude, the two skills collide. The compose fails, exit 3, and prints the
 entry to write. When `qory.yaml` lists the module already, it prints the whole entry to
 replace it with.
+
+### Add a step to a delivered workflow
+
+To add a step to a workflow of the stack you extend, list a workflow hook under
+`harness.hooks`. You copy no workflow, and the workflow's files do not change. A workflow
+hook has one of three kinds: a `check` hook reports pass or fail, a `review` hook runs an
+agent that reviews the work, and an `enrich` hook writes notes for the agents that start
+after it.
+
+Commit a hook's program before you compose. The hook runner runs the file as committed
+in git, so the compose reads the program from the commit at HEAD of your checkout. An
+untracked or ignored program fails the compose with exit 2:
+
+```
+Commit the program of hooks[0].run: a hook runs the file as committed in git.
+hooks[0].run, scripts/check-licences.sh, has no file in the commit at HEAD of the checkout.
+```
+
+```yaml
+harness:
+  extends: {git: https://github.com/acme/harness, ref: v2.4.0, stack: software}
+  target: {runtime: claude}
+  hooks:
+    - {at: after-review-round, kind: check, run: scripts/check-licences.sh}
+    - {at: after-review-round, kind: review, agent: licence-reviewer, required: false}
+```
+
+The stack you extend sets where a workflow hook may go. Each of its workflows lists its
+hook points under `hook_points`, with the kinds each point takes, and `extending.hooks`
+sets the limits: 3 workflow hooks per point, 10 per workflow and 10 minutes per hook when
+the stack sets no other. A stack without `extending.hooks` takes no workflow hook.
+
+Each workflow hook has:
+
+- `at`, a hook point of the stack you extend,
+- `kind`, `check`, `review` or `enrich`, one that the point takes,
+- `run`, a program in the checkout by its path from `qory.yaml`, with its arguments
+  after it. The program is a file in the commit at HEAD, and neither it nor a folder on
+  its way may be a link, since the hook runner runs the file as committed in git,
+- or, in place of `run`, `agent`, an agent that a module of your harness ships; a
+  `review` hook runs an agent,
+- optionally `name`, unique at its point; `required`, `true` when left out; and
+  `timeout`, whole seconds of 1s or more, at most the stack's.
+
+A key you write with an empty value or null, such as `run: ~`, fails the compose; leave
+the key out instead.
+
+The compose writes `hooks.json` into the home, with each program by its path in git from
+the root of the checkout. When the `qory.yaml` that lists the workflow hooks is in a folder
+above the checkout, one that covers several repositories, each program has to be inside
+the checkout you compose: `app/scripts/check.sh` from that folder is `scripts/check.sh`
+in `hooks.json`, and a program of another repository fails the compose of `app`.
+
+A workflow hook at a point the stack does not declare, of a kind the point does not take,
+or over a limit fails the compose with exit 2. The first line of the message is the fix,
+and the second the cause:
+
+```
+Set hooks[0].at to a hook point of the base stack.
+The base stack software@4b8e2f1a9c7d declares after-plan, after-review-round; after-merge is not one.
+```
+
+A workflow hook is not a runtime hook, a module's `hooks/<file>`, which the runtime runs
+and a module of yours never ships. The full rules are in
+[§Workflow hooks](../contracts/harness/v1/README.md#workflow-hooks) of the format.
 
 ## The composed tree
 
