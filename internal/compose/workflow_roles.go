@@ -1,7 +1,6 @@
 package compose
 
 import (
-	"errors"
 	"fmt"
 	"maps"
 	"path/filepath"
@@ -13,29 +12,32 @@ import (
 	"github.com/qoryai/qory/internal/stack"
 )
 
-// checkWorkflowRoles returns an error for a compose in which a workflow of the stack
-// starts an agent role that nothing fills. A run starts a workflow at its first composed
-// entry of skill workflow-<name>, command workflow-<name>, skill <name> and command
-// <name>, and that entry starts each agent its documents reference. A reference to an
-// agent that no module ships or provides, that the stack does not bind, and that no
-// exclude left out, is one block of the error, by workflow and then by agent. The stack's
-// workflows include every workflow of its process, which the exports check holds the
-// process to, so the check covers what the process lists. Any other unresolved reference
-// is rule 4's, see [checkResolved]: dropped are the roles a module provides with an
-// entry that a block left out.
+// workflowRoles are the failures of a compose in which a workflow of the stack starts an
+// agent role that nothing fills, as lines of [UnresolvedError], and the pairs they
+// replace among rule 4's lines, each "<kind>/<name> <reference>": the entry and the
+// reference. A run starts a workflow at its first composed entry of skill
+// workflow-<name>, command workflow-<name>, skill <name> and command <name>, and that
+// entry starts each agent its documents reference. A reference to an agent that no module
+// ships or provides, that the stack does not bind, and that no exclude left out, is one
+// block, by workflow and then by agent. The exports check refuses a process with a
+// workflow that the stack does not declare, so the stack's workflows include every
+// workflow of its process, and the check covers what the process lists. Any other unresolved reference is rule 4's alone, see
+// [checkResolved]: dropped are the roles a module provides with an entry that a block
+// left out.
 //
 // The stack is shown as the base stack for a stack that extends base, as as when set,
 // and otherwise by its file.
-func checkWorkflowRoles(res *Result, dropped map[string][]Role, base *Base, as string) error {
+func workflowRoles(res *Result, dropped map[string][]Role, base *Base, as string) ([]string, map[string]bool) {
 	p := res.Stack
 	if p == nil || len(p.Workflows) == 0 {
-		return nil
+		return nil, nil
 	}
 	entries := map[string]Entry{}
 	for _, e := range res.Entries {
 		entries[e.Kind+"/"+e.Name] = e
 	}
 	var blocks []string
+	var replaced map[string]bool
 	for _, w := range slices.Sorted(maps.Keys(p.Workflows)) {
 		start, ok := startedBy(entries, w)
 		if !ok {
@@ -55,14 +57,15 @@ func checkWorkflowRoles(res *Result, dropped map[string][]Role, base *Base, as s
 			if excludeOf(res, kind, name) != nil || len(dropped[ref]) > 0 {
 				continue
 			}
-			blocks = append(blocks, fmt.Sprintf("Add a module that fills %s, or drop %s from the workflows and process.\n  %s declares the workflow %s. Its %s of module %s starts %s, and no module ships, provides or binds that agent.",
+			blocks = append(blocks, fmt.Sprintf("Add a module that fills %s, or drop %s from the workflows and process.\n  %s declares the workflow %s. Its %s of module %s starts %s, and no module ships or provides that agent, and the stack does not bind it.",
 				shownKey(ref), shown(w), stackPhrase(p, base, as), shown(w), described(start.Kind, start.Name), shown(start.Module), shownKey(ref)))
+			if replaced == nil {
+				replaced = map[string]bool{}
+			}
+			replaced[start.Kind+"/"+start.Name+" "+ref] = true
 		}
 	}
-	if len(blocks) == 0 {
-		return nil
-	}
-	return errors.New(strings.Join(blocks, "\n"))
+	return blocks, replaced
 }
 
 // startedBy is the entry a run starts the workflow w at, in the order a run looks the

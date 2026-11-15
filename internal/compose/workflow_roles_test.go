@@ -1,9 +1,11 @@
 package compose_test
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
+	"github.com/qoryai/qory/internal/compose"
 	"github.com/qoryai/qory/internal/stack"
 )
 
@@ -31,7 +33,7 @@ func workflowFiles() map[string]string {
 // by entry.
 func workflowRefusal(role, entry string) string {
 	return "Add a module that fills agents/" + role + ", or drop capture-demos from the workflows and process.\n" +
-		"  The stack in qory-stack.yaml declares the workflow capture-demos. Its " + entry + " of module software-factory starts agents/" + role + ", and no module ships, provides or binds that agent."
+		"  The stack in qory-stack.yaml declares the workflow capture-demos. Its " + entry + " of module software-factory starts agents/" + role + ", and no module ships or provides that agent, and the stack does not bind it."
 }
 
 // TestAWorkflowThatStartsAnUnfilledRoleFails is the workflow's skill referencing an agent
@@ -130,5 +132,23 @@ func TestTwoRolesGetTwoBlocks(t *testing.T) {
 	want := workflowRefusal("demo-author", "skill workflow-capture-demos") + "\n" + workflowRefusal("screen-reviewer", "skill workflow-capture-demos")
 	if err == nil || err.Error() != want {
 		t.Fatalf("error:\n%v\nwant:\n%s", err, want)
+	}
+}
+
+// TestAWorkflowRoleAndOtherFailuresComeTogether is the workflow's unfilled role beside an
+// unrelated reference that nothing meets: one error lists the workflow's block first, then
+// rule 4's line, and no rule 4 line for the workflow's reference.
+func TestAWorkflowRoleAndOtherFailuresComeTogether(t *testing.T) {
+	files := workflowFiles()
+	files["modules/software-factory/skills/release/SKILL.md"] = "---\nname: release\ndescription: d\n---\n\nRun ${qory:skills/missing}.\n"
+	_, err := composeTree(t, files)
+	want := workflowRefusal("demo-author", "skill workflow-capture-demos") + "\n" +
+		"module software-factory: skill release references skill missing, which no module ships or provides and the stack does not bind"
+	if err == nil || err.Error() != want {
+		t.Fatalf("error:\n%v\nwant:\n%s", err, want)
+	}
+	var unresolved *compose.UnresolvedError
+	if !errors.As(err, &unresolved) || len(unresolved.Lines) != 2 {
+		t.Fatalf("an UnresolvedError of 2 lines: %#v", err)
 	}
 }
