@@ -198,7 +198,7 @@ func TestAMissingContractFileFails(t *testing.T) {
 	delete(files, "modules/core/roles/developer.yaml")
 	_, err := composeTree(t, files)
 	want := "Add roles/developer.yaml to module core, or remove contract from roles.agents.developer.\n" +
-		"  The module's qory-module.yaml names the file as the contract of agents/developer, and the module has no file at that path."
+		"  qory-module.yaml sets roles.agents.developer.contract to roles/developer.yaml, and the module has no file at that path."
 	if err == nil || err.Error() != want {
 		t.Fatalf("error:\n%v\nwant:\n%s", err, want)
 	}
@@ -226,7 +226,7 @@ func TestAContractThatLinksOutOfTheModuleFails(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = compose.Compose(p)
-	want := "Replace roles/developer.yaml of module core with a file inside the module.\n  It is a link to a place outside the module, and qory reads only the module's files."
+	want := "Replace roles/developer.yaml of module core with a file inside the module.\n  It is an absolute link, or a link that leads out of the module, and qory reads only the module's files."
 	if err == nil || err.Error() != want {
 		t.Fatalf("error:\n%v\nwant:\n%s", err, want)
 	}
@@ -255,7 +255,18 @@ func TestTheFirstLineOfEachRefusalFitsIn100Characters(t *testing.T) {
 	directory["modules/core/roles/developer.yaml/a"] = "a\n"
 	bad := contractFiles("")
 	bad["modules/core/roles/developer.yaml"] = "front_matter: [\"\"]\n"
-	for _, files := range []map[string]string{contractFiles("Writes code.\n"), missing, directory, bad, workflowFiles()} {
+	trees := []map[string]string{contractFiles("Writes code.\n"), missing, directory, bad, workflowFiles()}
+	for _, roles := range []string{
+		"agents:\n    developer: {fill: one, paths: [a]}",
+		"agents:\n    developer: {contract: roles/developer.yaml}",
+		"skills:\n    deploy-target: {fill: one}",
+		"agents:\n    developer: {fill: one, contract: ../developer.yaml}",
+	} {
+		files := contractFiles("")
+		files["modules/core/qory-module.yaml"] = "apiVersion: qory.dev/v1alpha1\nname: core\nroles:\n  " + roles + "\n"
+		trees = append(trees, files)
+	}
+	for _, files := range trees {
 		_, err := composeTree(t, files)
 		if err == nil {
 			t.Fatal("composed")
@@ -265,5 +276,55 @@ func TestTheFirstLineOfEachRefusalFitsIn100Characters(t *testing.T) {
 				t.Errorf("%d characters: %s", len(line), line)
 			}
 		}
+	}
+}
+
+// copyAll marks every module as one whose home contains copies of its entries, so the
+// compose reads it through a root.
+func copyAll(string) bool { return true }
+
+// TestACopiedModuleIsChecked is the contract check on modules read through a root: an
+// agent with every part composes, and one that lacks a part fails as it does otherwise.
+func TestACopiedModuleIsChecked(t *testing.T) {
+	if _, err := composeTreeWith(t, contractFiles(""), compose.Options{Copies: copyAll}); err != nil {
+		t.Fatal(err)
+	}
+	_, err := composeTreeWith(t, contractFiles(strings.Replace(fullAgent, "## Guardrails\n", "", 1)), compose.Options{Copies: copyAll})
+	if want := contractRefusal(`the heading "## Guardrails"`); err == nil || err.Error() != want {
+		t.Fatalf("error:\n%v\nwant:\n%s", err, want)
+	}
+}
+
+// TestAnAbsoluteLinkInsideACopiedModuleIsRead is a contract that is an absolute link to a
+// file inside the module: a module read through a root reads it, and any other module
+// refuses it, since its root follows only relative links.
+func TestAnAbsoluteLinkInsideACopiedModuleIsRead(t *testing.T) {
+	files := contractFiles("")
+	files["modules/core/contracts/developer.yaml"] = "sections: [Tests]\n"
+	files["modules/core/roles/reviewer.yaml"] = "{}\n"
+	delete(files, "modules/core/roles/developer.yaml")
+	dir := writeTree(t, files)
+	real, err := filepath.EvalSymlinks(filepath.Join(dir, "modules/core/contracts/developer.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(real, filepath.Join(dir, "modules/core/roles/developer.yaml")); err != nil {
+		t.Fatal(err)
+	}
+	p, err := loadFor(filepath.Join(dir, stack.FileName), "claude")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = compose.ComposeWith(p, compose.Options{Copies: copyAll})
+	if want := "  - the heading \"## Tests\""; err == nil || !strings.HasSuffix(err.Error(), want) {
+		t.Fatalf("a copied module: %v, want the contract read", err)
+	}
+	p, err = loadFor(filepath.Join(dir, stack.FileName), "claude")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = compose.Compose(p)
+	if want := "Replace roles/developer.yaml of module core with a file inside the module.\n"; err == nil || !strings.HasPrefix(err.Error(), want) {
+		t.Fatalf("a module not copied: %v", err)
 	}
 }

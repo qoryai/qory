@@ -24,7 +24,7 @@ var contractKinds = []string{"agents", "commands", "skills"}
 // that [stack.ReadRoles] reads the role as the short form one. A map for a skills or
 // commands role fails, and so does a map with a key other than fill and contract,
 // without fill, or with a contract that is not a path inside the module with no ..
-// part. Every error contains path.
+// part. Every error is a fix line, then a cause line that ends with path.
 func readContracts(path string, roles *yaml.Node) (map[string]string, error) {
 	if roles.Kind != yaml.MappingNode {
 		return nil, nil
@@ -42,7 +42,7 @@ func readContracts(path string, roles *yaml.Node) (map[string]string, error) {
 			}
 			at := "roles." + kind + "." + accesskey.ShownName(role, false)
 			if kind != "agents" {
-				return nil, fmt.Errorf("Set %s to one in %s: only an agents role is a map, to give it a contract.", at, path)
+				return nil, fmt.Errorf("Set %s to one.\n  Only an agents role is a map, to give it a contract. The role is in %s.", at, path)
 			}
 			var fill, contract *yaml.Node
 			for k := 0; k+1 < len(value.Content); k += 2 {
@@ -52,20 +52,20 @@ func readContracts(path string, roles *yaml.Node) (map[string]string, error) {
 				case "contract":
 					contract = value.Content[k+1]
 				default:
-					return nil, fmt.Errorf("Remove key %s from %s in %s: a role's map has fill and contract.", accesskey.ShownName(key, false), at, path)
+					return nil, fmt.Errorf("Remove key %s from %s.\n  A role's map has fill and contract. The map is in %s.", accesskey.ShownName(key, false), at, path)
 				}
 			}
 			if fill == nil {
-				return nil, fmt.Errorf("Add fill: one to %s in %s: a role's map sets fill.", at, path)
+				return nil, fmt.Errorf("Add fill: one to %s.\n  A role's map sets fill. The map is in %s.", at, path)
 			}
 			if contract != nil {
 				clean, ok := contractPath(contract)
 				if !ok {
-					why := "the value is empty or not a path."
+					why := "The value is empty or not a path."
 					if contract.Kind == yaml.ScalarNode && contract.Tag == "!!str" && contract.Value != "" {
-						why = "the value is " + exports.Value(contract.Value, true) + "."
+						why = "The value is " + exports.Value(contract.Value, true) + "."
 					}
-					return nil, fmt.Errorf("Set %s.contract to a path inside the module in %s: %s", at, path, why)
+					return nil, fmt.Errorf("Set %s.contract to a path inside the module.\n  %s The map is in %s.", at, why, path)
 				}
 				if out == nil {
 					out = map[string]string{}
@@ -91,9 +91,9 @@ func contractPath(n *yaml.Node) (string, bool) {
 	return clean, true
 }
 
-// Contract is a role contract: the parts an agent needs to fill an agents role. A module
-// that declares the role names the file under roles.agents.<role>.contract, and the
-// compose checks every agent that fills the role against it.
+// Contract is a role contract: the parts an agent needs to fill an agents role. The
+// module that declares the role sets roles.agents.<role>.contract to the file's path,
+// and the compose checks every agent that fills the role against it.
 type Contract struct {
 	// Sections are the level-2 headings the agent's body has, each the heading's text
 	// without the ##; nil for none.

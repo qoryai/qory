@@ -80,8 +80,8 @@ type Manifest struct {
 	// one per type, in the order of the file; nil when the manifest has none.
 	PushChecks []PushCheck
 	// Contracts are the role contracts the module declares, each the path of the
-	// contract file inside the module, cleaned, keyed <kind>/<role>: the file the role's
-	// map form names, roles: {agents: {developer: {fill: one, contract: <path>}}}. Nil
+	// contract file inside the module, cleaned, keyed <kind>/<role>: the path in the
+	// role's map form, roles: {agents: {developer: {fill: one, contract: <path>}}}. Nil
 	// when the manifest declares none. See [Contract].
 	Contracts map[string]string
 }

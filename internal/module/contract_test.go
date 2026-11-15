@@ -38,17 +38,17 @@ func TestReadManifestReadsARoleContract(t *testing.T) {
 func TestReadManifestRefusesABadRoleMap(t *testing.T) {
 	const head = "apiVersion: qory.dev/v1alpha1\nname: core\nroles:\n"
 	for _, c := range []struct{ body, want string }{
-		{"  agents:\n    developer: {fill: one, paths: [a]}\n", "Remove key paths from roles.agents.developer in {path}: a role's map has fill and contract."},
-		{"  agents:\n    developer: {contract: roles/developer.yaml}\n", "Add fill: one to roles.agents.developer in {path}: a role's map sets fill."},
+		{"  agents:\n    developer: {fill: one, paths: [a]}\n", "Remove key paths from roles.agents.developer.\n  A role's map has fill and contract. The map is in {path}."},
+		{"  agents:\n    developer: {contract: roles/developer.yaml}\n", "Add fill: one to roles.agents.developer.\n  A role's map sets fill. The map is in {path}."},
 		{"  agents:\n    developer: {fill: many}\n", `Set roles.agents.developer to one in {path}: a role is filled by one entry, and the value is "many".`},
-		{"  skills:\n    lint: {fill: one, contract: roles/lint.yaml}\n", "Set roles.skills.lint to one in {path}: only an agents role is a map, to give it a contract."},
-		{"  commands:\n    ship: {fill: one}\n", "Set roles.commands.ship to one in {path}: only an agents role is a map, to give it a contract."},
-		{"  agents:\n    developer: {fill: one, contract: ../developer.yaml}\n", `Set roles.agents.developer.contract to a path inside the module in {path}: the value is "../developer.yaml".`},
-		{"  agents:\n    developer: {fill: one, contract: roles/../developer.yaml}\n", `Set roles.agents.developer.contract to a path inside the module in {path}: the value is "roles/../developer.yaml".`},
-		{"  agents:\n    developer: {fill: one, contract: /etc/developer.yaml}\n", `Set roles.agents.developer.contract to a path inside the module in {path}: the value is "/etc/developer.yaml".`},
-		{"  agents:\n    developer: {fill: one, contract: \"\"}\n", "Set roles.agents.developer.contract to a path inside the module in {path}: the value is empty or not a path."},
-		{"  agents:\n    developer: {fill: one, contract: [a]}\n", "Set roles.agents.developer.contract to a path inside the module in {path}: the value is empty or not a path."},
-		{"  agents:\n    qak_x: {fill: one, paths: [a]}\n", "Remove key paths from roles.agents.(a name that contains an access key secret) in {path}:"},
+		{"  skills:\n    lint: {fill: one, contract: roles/lint.yaml}\n", "Set roles.skills.lint to one.\n  Only an agents role is a map, to give it a contract. The role is in {path}."},
+		{"  commands:\n    ship: {fill: one}\n", "Set roles.commands.ship to one.\n  Only an agents role is a map, to give it a contract. The role is in {path}."},
+		{"  agents:\n    developer: {fill: one, contract: ../developer.yaml}\n", "Set roles.agents.developer.contract to a path inside the module.\n  The value is \"../developer.yaml\". The map is in {path}."},
+		{"  agents:\n    developer: {fill: one, contract: roles/../developer.yaml}\n", "Set roles.agents.developer.contract to a path inside the module.\n  The value is \"roles/../developer.yaml\". The map is in {path}."},
+		{"  agents:\n    developer: {fill: one, contract: /etc/developer.yaml}\n", "Set roles.agents.developer.contract to a path inside the module.\n  The value is \"/etc/developer.yaml\". The map is in {path}."},
+		{"  agents:\n    developer: {fill: one, contract: \"\"}\n", "Set roles.agents.developer.contract to a path inside the module.\n  The value is empty or not a path. The map is in {path}."},
+		{"  agents:\n    developer: {fill: one, contract: [a]}\n", "Set roles.agents.developer.contract to a path inside the module.\n  The value is empty or not a path. The map is in {path}."},
+		{"  agents:\n    qak_x: {fill: one, paths: [a]}\n", "Remove key paths from roles.agents.(a name that contains an access key secret).\n  A role's map has fill and contract. The map is in {path}."},
 	} {
 		dir := tree(t, map[string]string{ManifestName: head + c.body})
 		_, err := ReadManifest(dir)
@@ -117,7 +117,7 @@ func TestParseContractRefusesWhatItDoesNotRead(t *testing.T) {
 
 // TestHeadings is the level-2 headings of a body: a closing sequence is removed, a
 // heading of another level, one indented four spaces and one inside a fenced code block
-// do not count, and a fence closes only with its own character.
+// do not count, and a fence closes only with a run of the character that opened it.
 func TestHeadings(t *testing.T) {
 	body := strings.Join([]string{
 		"## Guardrails",

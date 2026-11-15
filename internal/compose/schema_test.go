@@ -72,9 +72,10 @@ func TestSchemas(t *testing.T) {
 		manifests = append(manifests, more...)
 		for _, m := range manifests {
 			// A manifest the compose refuses for its roles or provides is in the error
-			// by its path in the fixture.
+			// by its path in the fixture: after the fix, or, for a role's map, at the end
+			// of the cause line.
 			rel, _ := filepath.Rel(dir, m)
-			wantBad := strings.Contains(string(errText), " in "+rel+":")
+			wantBad := strings.Contains(string(errText), " in "+rel+":") || strings.Contains(string(errText), " is in "+rel+".")
 			err := moduleSchema.Validate(document(t, m))
 			if wantBad && err == nil {
 				t.Errorf("%s passed the schema; want a failure", m)

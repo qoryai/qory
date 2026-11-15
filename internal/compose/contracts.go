@@ -114,7 +114,11 @@ func checkContracts(res *Result, opened []openedModule) error {
 }
 
 // readContracts reads the contracts the opened module o declares, by role, through the
-// module's directory opened as a root, so a link that leads out of the module is refused.
+// module's directory opened as a root. For a module read through a root, see
+// [Module.Root], each link on a contract's path is followed as [module.ResolveIn] follows
+// it, so an absolute link that stays inside the module is read. For any other module,
+// root follows only relative links. A link that leads out of the module is refused, and so
+// is an absolute link that root does not follow.
 func readContracts(o openedModule) ([]roleContract, error) {
 	name := o.m.Name
 	root := o.root
@@ -126,32 +130,37 @@ func readContracts(o openedModule) ([]roleContract, error) {
 		defer opened.Close()
 		root = opened
 	}
-	readFile := func(path string) ([]byte, error) { return root.ReadFile(path) }
-	if o.root != nil {
-		through := module.ReadThrough(o.root, o.src.Dir, o.realDir)
-		readFile = func(path string) ([]byte, error) { return through(filepath.Join(o.src.Dir, path)) }
-	}
 	var out []roleContract
 	for _, role := range sortedKeys(o.m.Contracts) {
 		path := o.m.Contracts[role]
-		where := exports.Value(filepath.ToSlash(path), false) + " of module " + shown(name)
 		shownPath := exports.Value(filepath.ToSlash(path), false)
-		at := strings.Replace(role, "/", ".", 1)
-		info, err := root.Stat(path)
+		where := shownPath + " of module " + shown(name)
+		linked := fmt.Errorf("Replace %s with a file inside the module.\n  It is an absolute link, or a link that leads out of the module, and qory reads only the module's files.", where)
+		inner, err := path, error(nil)
+		if o.root != nil {
+			inner, err = module.ResolveIn(o.root, o.realDir, path)
+			if err != nil && !errors.Is(err, fs.ErrNotExist) {
+				return nil, linked
+			}
+		}
+		var info fs.FileInfo
+		if err == nil {
+			info, err = root.Stat(inner)
+		}
 		switch {
 		case leavesRoot(root, err):
-			return nil, fmt.Errorf("Replace %s with a file inside the module.\n  It is a link to a place outside the module, and qory reads only the module's files.", where)
+			return nil, linked
 		case errors.Is(err, fs.ErrNotExist):
-			return nil, fmt.Errorf("Add %s to module %s, or remove contract from roles.%s.\n  The module's %s names the file as the contract of %s, and the module has no file at that path.",
-				shownPath, shown(name), shown(at), module.ManifestName, shownKey(role))
+			return nil, fmt.Errorf("Add %s to module %s, or remove contract from roles.%s.\n  %s sets roles.%s.contract to %s, and the module has no file at that path.",
+				shownPath, shown(name), shown(strings.Replace(role, "/", ".", 1)), module.ManifestName, shown(strings.Replace(role, "/", ".", 1)), shownPath)
 		case err != nil:
 			return nil, exports.HideError(err)
 		case info.IsDir():
 			return nil, fmt.Errorf("Point the contract of %s in module %s at a file.\n  %s is a directory.", shownKey(role), shown(name), shownPath)
 		}
-		data, err := readFile(path)
+		data, err := root.ReadFile(inner)
 		if leavesRoot(root, err) {
-			return nil, fmt.Errorf("Replace %s with a file inside the module.\n  It is a link to a place outside the module, and qory reads only the module's files.", where)
+			return nil, linked
 		}
 		if err != nil {
 			return nil, exports.HideError(err)
