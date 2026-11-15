@@ -263,7 +263,7 @@ func checkAgent(res *Result, e Entry, m Module, role string, member *Role, contr
 		}
 		contract := exports.Value(c.Path, false) + " of module " + checkoutName(res, c.Module)
 		block := fmt.Sprintf("Complete agent %s of module %s, or bind %s to another agent.\n  The contract %s requires these parts, which %s lacks:",
-			shown(e.Name), shown(e.Module), shownKey(role), contract, exports.Value(file, false))
+			shown(e.Name), checkoutName(res, e.Module), shownKey(role), contract, exports.Value(file, false))
 		tail := ""
 		if member != nil {
 			block, tail = memberHead(res, e, m, *member, contract, exports.Value(file, false))
@@ -340,7 +340,7 @@ func memberHead(res *Result, e Entry, m Module, r Role, contract, file string) (
 		cause := fmt.Sprintf("  The contract %s requires these parts, which %s of module %s lacks:", contract, file, checkoutName(res, e.Module))
 		return fix + "\n" + cause, "\n  These lists add it:" + itemLines(listsOf(res, r))
 	}
-	cause := fmt.Sprintf("  The contract %s requires these parts, which %s of module %s lacks:", contract, file, shown(e.Module))
+	cause := fmt.Sprintf("  The contract %s requires these parts, which %s of module %s lacks:", contract, file, checkoutName(res, e.Module))
 	lead := "Complete agent " + name + ", or "
 	remove, items, many := addedBy(lead, listsOf(res, r))
 	head = lead + remove + "."

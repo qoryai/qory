@@ -63,7 +63,7 @@ func workflowRoles(res *Result, dropped map[string][]Role, base *Base, as string
 				continue
 			}
 			blocks = append(blocks, fmt.Sprintf("Add a module that fills %s, or drop %s from the workflows and process.\n  %s declares the workflow %s. Its %s of module %s starts %s, and no module ships or provides that agent, and the stack does not bind it.",
-				shownKey(ref), shown(w), stackPhrase(p, base, as), shown(w), described(start.Kind, start.Name), shown(start.Module), shownKey(ref)))
+				shownKey(ref), shown(w), stackPhrase(p, base, as), shown(w), described(start.Kind, start.Name), checkoutName(res, start.Module), shownKey(ref)))
 			if replaced == nil {
 				replaced = map[string]bool{}
 			}

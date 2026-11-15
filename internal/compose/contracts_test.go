@@ -981,9 +981,17 @@ func TestAnEmptyGroupWithAContractComposes(t *testing.T) {
 // export core of a git source, whose manifest declares the name core-x, and binds its
 // agent pr, which lacks a part of the contract: the fix offers the exclude of module
 // core, the name the checkout's qory.yaml lists it by, and that exclude composes. No
-// line of the refusal names the module core-x, also when the module's provides adds pr.
+// line of the refusal names the module core-x, also when the module's provides adds pr,
+// and when pr fills a role of one agent.
 func TestABaseModuleIsExcludedByTheNameQoryYamlListsItBy(t *testing.T) {
 	isolateAll(t)
+	single := gitRepo(t, "", map[string]string{
+		"qory.yaml":                           "apiVersion: qory.dev/v1alpha1\nexports:\n  modules: [core]\n",
+		"modules/core/qory-module.yaml":       "apiVersion: qory.dev/v1alpha1\nname: core-x\nroles:\n  agents:\n    reviewer: {fill: one, contract: roles/reviewer.yaml}\n",
+		"modules/core/roles/reviewer.yaml":    "tools: [Read]\n",
+		"modules/core/skills/review/SKILL.md": "---\nname: review\ndescription: review\n---\n\nStart ${qory:agents/reviewer}.\n",
+		"modules/core/agents/pr.md":           "---\nname: pr\n---\n",
+	})
 	manifest := "apiVersion: qory.dev/v1alpha1\nname: core-x\nroles:\n  agents:\n    reviewers: {fill: many, contract: roles/reviewer.yaml}\n"
 	provided := gitRepo(t, "", map[string]string{
 		"qory.yaml":                           "apiVersion: qory.dev/v1alpha1\nexports:\n  modules: [core]\n",
@@ -1008,7 +1016,16 @@ func TestABaseModuleIsExcludedByTheNameQoryYamlListsItBy(t *testing.T) {
 			"app/" + config.FileName: "apiVersion: qory.dev/v1alpha1\nharness:\n  extends: {path: ../base}\n  target: {runtime: claude}\n",
 		}
 	}
-	_, err := composeExtending(t, writeTree(t, tree(provided)))
+	singleTree := tree(single)
+	singleTree["base/"+stack.FileName] = strings.Replace(singleTree["base/"+stack.FileName], "reviewers: [other, pr]", "reviewer: pr", 1)
+	_, err := composeExtending(t, writeTree(t, singleTree))
+	want := "Complete agent pr of module core, or bind agents/reviewer to another agent.\n" +
+		"  The contract roles/reviewer.yaml of module core requires these parts, which agents/pr.md lacks:\n" +
+		"  - the tool Read"
+	if err == nil || err.Error() != want {
+		t.Fatalf("with a role of one agent, error:\n%v\nwant:\n%s", err, want)
+	}
+	_, err = composeExtending(t, writeTree(t, tree(provided)))
 	fix := "Exclude agents/pr in qory.yaml, or ask the base stack's maintainer to complete it."
 	if err == nil || !strings.HasPrefix(err.Error(), fix+"\n") || !strings.HasSuffix(err.Error(), "\n  - provides.agents.reviewers of module core") || strings.Contains(err.Error(), "core-x") {
 		t.Fatalf("with the module's provides, error:\n%v\nwant the fix line:\n%s\nand no line with core-x", err, fix)

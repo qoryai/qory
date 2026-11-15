@@ -908,10 +908,10 @@ func checkResolved(res *Result, requires map[string]map[string][]Need, dropped m
 					continue
 				}
 				if r.Module != "" {
-					lines = append(lines, fmt.Sprintf("Rename role %s in the provides of module %s: module %s ships %s, and a role's name is no entry's.", shown(role), shown(r.Module), shown(e.Module), described(kind, name)))
+					lines = append(lines, fmt.Sprintf("Rename role %s in the provides of module %s: module %s ships %s, and a role's name is no entry's.", shown(role), checkoutName(res, r.Module), checkoutName(res, e.Module), described(kind, name)))
 					continue
 				}
-				lines = append(lines, fmt.Sprintf("bind %s defines a role, and module %s ships %s; a role's name is no entry's", shown(role), shown(e.Module), described(kind, name)))
+				lines = append(lines, fmt.Sprintf("bind %s defines a role, and module %s ships %s; a role's name is no entry's", shown(role), checkoutName(res, e.Module), described(kind, name)))
 			}
 		}
 		if composed[kind+"/"+to] {
@@ -954,7 +954,7 @@ func checkResolved(res *Result, requires map[string]map[string][]Need, dropped m
 			// A member only a bind adds, which a module's exclude or only left out.
 			lead := "Compose " + described(kind, to) + ", or "
 			remove, items, _ := addedBy(lead, listsOf(res, r))
-			cause := fmt.Sprintf("Module %s leaves out %s.", shown(by), described(kind, to))
+			cause := fmt.Sprintf("Module %s leaves out %s.", checkoutName(res, by), described(kind, to))
 			if x := excludeOf(res, kind, to); x != nil && x.Listed != "" {
 				cause = fmt.Sprintf("The exclude of module %s in qory.yaml leaves out %s.", shown(x.Listed), described(kind, to))
 			}
@@ -966,11 +966,11 @@ func checkResolved(res *Result, requires map[string]map[string][]Need, dropped m
 		}
 		if r.Module != "" {
 			// A provided entry that an exclude left out provides nothing, see [setRoles].
-			lines = append(lines, fmt.Sprintf("Ship %s in a module, or remove provides.%s.%s from module %s: no module ships %s.", described(kind, to), shown(kind), shown(name), shown(r.Module), described(kind, to)))
+			lines = append(lines, fmt.Sprintf("Ship %s in a module, or remove provides.%s.%s from module %s: no module ships %s.", described(kind, to), shown(kind), shown(name), checkoutName(res, r.Module), described(kind, to)))
 			continue
 		}
 		if by := leftOut(kind, to); by != "" {
-			lines = append(lines, fmt.Sprintf("bind %s selects %s, which module %s leaves out", shown(role), described(kind, to), shown(by)))
+			lines = append(lines, fmt.Sprintf("bind %s selects %s, which module %s leaves out", shown(role), described(kind, to), checkoutName(res, by)))
 			continue
 		}
 		lines = append(lines, fmt.Sprintf("bind %s selects %s, which no module ships", shown(role), described(kind, to)))
@@ -982,7 +982,7 @@ func checkResolved(res *Result, requires map[string]map[string][]Need, dropped m
 				continue
 			}
 			if file, ok := e.Front[ref]; ok {
-				lines = append(lines, fmt.Sprintf("Remove ${qory:%s} from the front matter of %s of module %s.\n  A group resolves to a list.", shown(ref), exports.HidePath(file), shown(e.Module)))
+				lines = append(lines, fmt.Sprintf("Remove ${qory:%s} from the front matter of %s of module %s.\n  A group resolves to a list.", shown(ref), exports.HidePath(file), checkoutName(res, e.Module)))
 				continue
 			}
 			if len(members) == 0 {
@@ -999,21 +999,21 @@ func checkResolved(res *Result, requires map[string]map[string][]Need, dropped m
 				verb = "references"
 			}
 			if x := excludeOf(res, kind, name); x != nil && x.Listed != "" {
-				lines = append(lines, fmt.Sprintf("remove %s from the exclude of module %s in qory.yaml, or ship it in a module of the repository: module %s: %s %s %s, which the exclude of module %s in qory.yaml leaves out", shownKey(need.Key), shown(x.Listed), shown(e.Module), described(e.Kind, e.Name), verb, described(kind, name), shown(x.Listed)))
+				lines = append(lines, fmt.Sprintf("remove %s from the exclude of module %s in qory.yaml, or ship it in a module of the repository: module %s: %s %s %s, which the exclude of module %s in qory.yaml leaves out", shownKey(need.Key), shown(x.Listed), checkoutName(res, e.Module), described(e.Kind, e.Name), verb, described(kind, name), shown(x.Listed)))
 				continue
 			}
 			if by := leftOut(kind, name); by != "" {
-				lines = append(lines, fmt.Sprintf("module %s: %s %s %s, which module %s leaves out", shown(e.Module), described(e.Kind, e.Name), verb, described(kind, name), shown(by)))
+				lines = append(lines, fmt.Sprintf("module %s: %s %s %s, which module %s leaves out", checkoutName(res, e.Module), described(e.Kind, e.Name), verb, described(kind, name), checkoutName(res, by)))
 				continue
 			}
 			if ps := dropped[need.Key]; need.Reference && len(ps) > 0 {
 				for _, r := range ps {
-					provided := fmt.Sprintf("module %s: %s %s %s, which module %s provides as %s", shown(e.Module), described(e.Kind, e.Name), verb, described(kind, name), shown(r.Module), described(kind, r.Name))
+					provided := fmt.Sprintf("module %s: %s %s %s, which module %s provides as %s", checkoutName(res, e.Module), described(e.Kind, e.Name), verb, described(kind, name), checkoutName(res, r.Module), described(kind, r.Name))
 					if x := excludeOf(res, kind, r.Name); x != nil && x.Listed != "" {
 						lines = append(lines, fmt.Sprintf("remove %s from the exclude of module %s in qory.yaml, or ship it in a module of the repository: %s, which the exclude of module %s in qory.yaml leaves out", shownKey(kind+"/"+r.Name), shown(x.Listed), provided, shown(x.Listed)))
 						continue
 					}
-					lines = append(lines, fmt.Sprintf("%s, which module %s leaves out", provided, shown(leftOut(kind, r.Name))))
+					lines = append(lines, fmt.Sprintf("%s, which module %s leaves out", provided, checkoutName(res, leftOut(kind, r.Name))))
 				}
 				continue
 			}
@@ -1021,7 +1021,7 @@ func checkResolved(res *Result, requires map[string]map[string][]Need, dropped m
 			if need.Reference {
 				why += " or provides and the stack does not bind"
 			}
-			lines = append(lines, fmt.Sprintf("module %s: %s %s %s, %s", shown(e.Module), described(e.Kind, e.Name), verb, described(kind, name), why))
+			lines = append(lines, fmt.Sprintf("module %s: %s %s %s, %s", checkoutName(res, e.Module), described(e.Kind, e.Name), verb, described(kind, name), why))
 		}
 	}
 	if len(lines) == 0 {
@@ -1038,13 +1038,13 @@ func checkResolved(res *Result, requires map[string]map[string][]Need, dropped m
 func noMember(res *Result, e Entry, ref string) string {
 	file := exports.HidePath(e.In[ref])
 	if !baseModule(res, e.Module) || res.Base == nil {
-		return fmt.Sprintf("Fill %s, or remove it from %s of module %s.\n  The group has no member.", shown(ref), file, shown(e.Module))
+		return fmt.Sprintf("Fill %s, or remove it from %s of module %s.\n  The group has no member.", shown(ref), file, checkoutName(res, e.Module))
 	}
 	fix := fmt.Sprintf("Ask the base stack's maintainer to fill %s.", shownKey(ref))
 	if baseAllowsAgents(res) {
 		fix = fmt.Sprintf("Add a module to %s that provides %s, or ask the base stack's maintainer.", docFile(res.Stack), shownKey(ref))
 	}
-	return fmt.Sprintf("%s\n  %s of module %s references %s, and the group has no member.", fix, file, shown(e.Module), shownKey(ref))
+	return fmt.Sprintf("%s\n  %s of module %s references %s, and the group has no member.", fix, file, checkoutName(res, e.Module), shownKey(ref))
 }
 
 // excludeOf is the first exclude in res that left out the entry of kind and name, nil
