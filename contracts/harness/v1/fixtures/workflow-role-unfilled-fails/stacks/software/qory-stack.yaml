@@ -1,0 +1,8 @@
+apiVersion: qory.dev/v1alpha1
+name: software
+modules:
+  - name: software-factory
+    source: {path: modules/software-factory}
+extending: {}
+workflows:
+  capture-demos: {access: write}

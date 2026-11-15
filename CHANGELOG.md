@@ -333,6 +333,13 @@ release may change what an existing document does, and states it under Upgrading
   writes `hooks.json` into the home, with each program by its path in git from the
   checkout's root, and the workflows' files stay the same. See Add a step to a
   delivered workflow in `docs/harness.md`.
+- A module's `roles` takes a contract for an agents role: `roles: {agents: {developer:
+  {fill: one, contract: roles/developer.yaml}}}`. The contract lists the level-2 headings,
+  the front-matter keys and the tools that an agent needs, and whether it needs a tier.
+  The compose fails with exit 2 when an agent that fills the role lacks one of them, and
+  lists each missing part. A group role takes a contract with `fill: many`, and the
+  compose checks each member. A contract file that is missing or malformed fails the
+  same way. See The role contract in `contracts/harness/v1/README.md`.
 
 ### Changed
 
@@ -888,6 +895,11 @@ release may change what an existing document does, and states it under Upgrading
   such a folder, they stop with exit 2 and the line `set --home or harness.home to a
   folder outside <folder>, or run git init in <folder>: a home inside a folder needs a
   git working tree there, and <folder> is not one`.
+- When a workflow that the stack declares starts an agent role that no module ships or
+  provides and the stack does not bind, the compose error shows the role and the
+  workflow, such as `agents/demo-author` and `capture-demos`, and the fix: add a module
+  that fills the role, or drop the workflow. The other failures of the same check follow
+  it in the same error. Before, the line showed only the skill and the agent.
 
 ### Fixed
 

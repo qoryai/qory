@@ -1,0 +1,9 @@
+apiVersion: qory.dev/v1alpha1
+name: software
+modules:
+  - name: core
+    source: {path: modules/core}
+bind:
+  agents:
+    developer: core-developer
+extending: {kinds: [agents]}

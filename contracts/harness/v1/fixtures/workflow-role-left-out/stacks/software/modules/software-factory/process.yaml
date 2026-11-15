@@ -1,0 +1,13 @@
+apiVersion: qory.dev/v1alpha1
+name: Software factory
+summary: A person checks each change.
+description: In Check, a person reads the change and approves it or sends it back.
+type: software
+stack: software
+process:
+  schema: qory.process/v1
+  stages:
+    - id: st_0000000001
+      name: Check
+      sequence: []
+      gate: {kind: person, approvers: members}

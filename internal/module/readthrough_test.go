@@ -1,6 +1,8 @@
 package module
 
 import (
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -114,5 +116,46 @@ func TestResolveInHidesASecret(t *testing.T) {
 		if err == nil || strings.Contains(strings.ToLower(err.Error()), "qak_") || !strings.Contains(err.Error(), "(a name that contains an access key secret)") {
 			t.Errorf("%s: %v", rel, err)
 		}
+	}
+}
+
+// TestResolveInWrapsItsSentinels is a path that leads out of the module and a chain of 41
+// links inside it: each error wraps its sentinel, with the text it had before.
+func TestResolveInWrapsItsSentinels(t *testing.T) {
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "end"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for i := range maxLinks + 1 {
+		next := "end"
+		if i < maxLinks {
+			next = fmt.Sprintf("l%d", i+1)
+		}
+		if err := os.Symlink(next, filepath.Join(dir, fmt.Sprintf("l%d", i))); err != nil {
+			t.Fatal(err)
+		}
+	}
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer root.Close()
+	for _, c := range []struct {
+		rel, text string
+		sentinel  error
+	}{
+		{"../out", "../out leads out of the module", ErrLeadsOut},
+		{"l0", "l0 passes more than 40 links", ErrTooManyLinks},
+	} {
+		_, err := ResolveIn(root, dir, c.rel)
+		if !errors.Is(err, c.sentinel) || err.Error() != c.text {
+			t.Errorf("%s: %v, want %q wrapping %v", c.rel, err, c.text, c.sentinel)
+		}
+	}
+	if at, err := ResolveIn(root, dir, "l1"); err != nil || at != "end" {
+		t.Errorf("40 links: %q, %v, want end", at, err)
 	}
 }

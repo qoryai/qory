@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://qory.dev/contracts/harness/v1/role-contract.schema.json",
+  "title": "role contract",
+  "description": "A role contract: the file at the path that roles.agents.<role>.contract in a module's qory-module.yaml is set to. It lists the parts an agent needs to fill the role. The compose checks every agent that fills the role against it. Every key is optional, so {} checks nothing.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "sections": {
+      "description": "The level-2 headings the agent's body has, each the heading's text without the ##, in any order. A heading inside a fenced code block does not count.",
+      "$ref": "#/$defs/names",
+      "items": {"not": {"pattern": "^#"}}
+    },
+    "front_matter": {
+      "description": "The front-matter keys the agent sets to a value that is not empty.",
+      "$ref": "#/$defs/names"
+    },
+    "tools": {
+      "description": "The tools the agent's tools key lists, each matched exactly.",
+      "$ref": "#/$defs/names"
+    },
+    "tier": {
+      "description": "true when the agent's model must be a tier, such as ${qory:fast}.",
+      "type": "boolean"
+    },
+    "report": {
+      "description": "The form of the agent's report, which the harness's checks read. The compose checks only that it is a map.",
+      "type": "object"
+    }
+  },
+  "$defs": {
+    "names": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {"type": "string", "minLength": 1, "pattern": "^[^\\n\\r]+$"}
+    }
+  }
+}

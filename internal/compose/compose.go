@@ -499,13 +499,18 @@ func ComposeWith(p *stack.Stack, opts Options) (_ *Result, err error) {
 	for _, o := range opened {
 		requires[o.m.Name] = needs(read[o.m.Name], o.m.Requires, res.Bind, res.Groups)
 	}
-	if err := checkResolved(res, requires, droppedProviders(opened, leftOut)); err != nil {
+	dropped := droppedProviders(opened, leftOut)
+	started, replaced := workflowRoles(res, dropped, opts.Base, opts.StackAs)
+	if err := checkResolved(res, requires, dropped, started, replaced); err != nil {
 		return nil, err
 	}
 	if err := workflowsShipped(p, declared, opts.Base, opts.StackAs); err != nil {
 		return nil, err
 	}
 	if err := checkHooks(res, p, opts); err != nil {
+		return nil, err
+	}
+	if err := checkContracts(res, opened); err != nil {
 		return nil, err
 	}
 	if len(instructions) > 0 {
@@ -852,10 +857,12 @@ func needs(l *module.Module, requires map[string][]string, bind map[string]strin
 }
 
 // UnresolvedError is the compose refusing what does not resolve against the composed
-// entries: a binding to an entry that is not composed, a role bound while an entry of
-// its name is composed, a requirement or a reference that nothing composed meets. Every
-// failure comes at once, one line each, the bindings first, then the entries in their
-// sorted order, so one compose lists every site there is to fix.
+// entries: a workflow that starts an agent role nothing fills, a binding to an entry that
+// is not composed, a role bound while an entry of its name is composed, a requirement or
+// a reference that nothing composed meets. Every failure comes at once, one line each,
+// the workflows first, then the bindings, then the entries in their sorted order, so one
+// compose lists every site there is to fix. A workflow's failure is a fix line and an
+// indented cause line.
 type UnresolvedError struct {
 	// Lines are the failures, one per line, in the order they print.
 	Lines []string
@@ -864,14 +871,16 @@ type UnresolvedError struct {
 func (e *UnresolvedError) Error() string { return strings.Join(e.Lines, "\n") }
 
 // checkResolved returns an error for a compose in which a role, a requirement or a
-// reference does not resolve. requires holds each module's needs by module name, keyed
+// reference does not resolve. started are the failures of [workflowRoles], which come
+// first, and replaced the pairs of an entry and a reference they stand for, for which
+// checkResolved adds no line. requires contains each module's needs by module name, keyed
 // <kind>/<name>. A needed entry may come from any module, since a name is composed once;
 // an entry that was left out has no needs to meet. A role is checked once, with the layer
 // that set it, and a reference through it adds no line: the role is what there is to fix.
 // The message says why an entry is missing: a module's exclude left it out, a module
 // provides the role with an entry a block left out (dropped, keyed by role), or no
 // module ships it, and for a reference that no role of that name is set either.
-func checkResolved(res *Result, requires map[string]map[string][]Need, dropped map[string][]Role) error {
+func checkResolved(res *Result, requires map[string]map[string][]Need, dropped map[string][]Role, started []string, replaced map[string]bool) error {
 	composed := map[string]bool{}
 	for _, e := range res.Entries {
 		composed[e.Kind+"/"+e.Name] = true
@@ -883,7 +892,7 @@ func checkResolved(res *Result, requires map[string]map[string][]Need, dropped m
 		}
 		return x.Module
 	}
-	var lines []string
+	lines := slices.Clone(started)
 	named := map[string]bool{}
 	for _, r := range res.Roles {
 		if r.Replaced {
@@ -938,7 +947,7 @@ func checkResolved(res *Result, requires map[string]map[string][]Need, dropped m
 			}
 		}
 		for _, need := range requires[e.Module][e.Kind+"/"+e.Name] {
-			if composed[need.Key] || need.Role != "" {
+			if composed[need.Key] || need.Role != "" || need.Reference && replaced[e.Kind+"/"+e.Name+" "+need.Key] {
 				continue
 			}
 			kind, name, _ := strings.Cut(need.Key, "/")

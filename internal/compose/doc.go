@@ -42,10 +42,13 @@
 // module provides after its excludes fails with a [*CollisionError]. There is no
 // last-wins, no rename and no precedence by module order. Excludes are applied per module
 // before the check, so an exclude is the only way to resolve a collision. Compose then
-// sorts the entries by kind and name, checks that every role, requirement and
-// reference resolves against them, failing with an [*UnresolvedError] that lists every
-// one that does not, and joins the instruction files with a blank line between them and a
-// trailing newline.
+// sorts the entries by kind and name. It checks that no workflow of the stack starts an
+// agent role that nothing fills, failing with the role and the workflow, then that every
+// role, requirement and reference resolves against the entries, failing with an
+// [*UnresolvedError] that lists every one that does not, and that each workflow has its
+// skill or command. It then checks every agent that fills a role against the role's
+// contracts, failing with each part an agent lacks, and joins the instruction files with
+// a blank line between them and a trailing newline.
 //
 // # References and roles
 //

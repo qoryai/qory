@@ -1,0 +1,12 @@
+apiVersion: qory.dev/v1alpha1
+exports:
+  dir: {stacks: stacks, modules: stacks/software/modules}
+  stacks: [software]
+  modules: [software-factory]
+harness:
+  extends: {path: stacks/software}
+  target:
+    runtime: claude
+  modules:
+    - name: browser-screens
+      source: {path: modules/browser-screens}

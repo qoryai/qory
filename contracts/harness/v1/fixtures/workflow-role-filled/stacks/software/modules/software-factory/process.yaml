@@ -1,0 +1,14 @@
+apiVersion: qory.dev/v1alpha1
+name: Software factory
+summary: Agents build each change, and a film shows it working.
+description: In Verify, an agent films each scenario of the change.
+type: software
+stack: software
+process:
+  schema: qory.process/v1
+  stages:
+    - id: st_0000000001
+      name: Verify
+      sequence:
+        - workflow: capture-demos
+      gate: {kind: person, approvers: members}

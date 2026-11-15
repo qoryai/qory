@@ -30,11 +30,11 @@
       }
     },
     "roles": {
-      "description": "The roles the module's documents reference, by kind and then by role, each set to one: one entry fills the role. An agents role may be set to many instead: a group role, which several agents fill.",
+      "description": "The roles the module's documents reference, by kind and then by role, each set to one: one entry fills the role. An agents role may be set to many instead: a group role, which several agents fill. An agents role may also be a map, {fill: one or many, contract: <path>}, where contract is a role contract file inside the module, role-contract.schema.json, that every agent filling the role, each member of a group included, must meet.",
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "agents": {"$ref": "#/$defs/agentRoleCounts"},
+        "agents": {"$ref": "#/$defs/agentRoles"},
         "commands": {"$ref": "#/$defs/roleCounts"},
         "skills": {"$ref": "#/$defs/roleCounts"}
       }
@@ -129,10 +129,29 @@
       "propertyNames": {"pattern": "^[^/\\\\@ .][^/\\\\@ ]*$"},
       "additionalProperties": {"const": "one"}
     },
-    "agentRoleCounts": {
+    "agentRoles": {
       "type": "object",
       "propertyNames": {"pattern": "^[^/\\\\@ .][^/\\\\@ ]*$"},
-      "additionalProperties": {"enum": ["one", "many"]}
+      "additionalProperties": {
+        "oneOf": [
+          {"enum": ["one", "many"]},
+          {
+            "type": "object",
+            "required": ["fill"],
+            "additionalProperties": false,
+            "properties": {
+              "fill": {"enum": ["one", "many"]},
+              "contract": {
+                "description": "The role contract: a relative path inside the module with no .. part.",
+                "type": "string",
+                "minLength": 1,
+                "pattern": "^[^/]",
+                "not": {"pattern": "(^|/)\\.\\.(/|$)"}
+              }
+            }
+          }
+        ]
+      }
     },
     "agentRoleNames": {
       "type": "object",
