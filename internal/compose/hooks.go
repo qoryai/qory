@@ -247,7 +247,12 @@ func (f *programs) find(i int, program string) (string, error) {
 		return "", err
 	}
 	if committed != "" {
-		return "", fmt.Errorf("Write hooks[%d].run as committed in git.\nhooks[%d].run is %s, and git has %s.", i, i, fromDoc(rel), fromDoc(committed))
+		// Two names that differ in Unicode form alone print the same.
+		form := ""
+		if !strings.EqualFold(rel, committed) {
+			form = " The names differ in Unicode form (NFC and NFD)."
+		}
+		return "", fmt.Errorf("Write hooks[%d].run as committed in git.\nhooks[%d].run is %s, and git has %s.%s", i, i, fromDoc(rel), fromDoc(committed), form)
 	}
 	return "", fmt.Errorf("Commit the program of hooks[%d].run: a hook runs the file as committed in git.\nhooks[%d].run, %s, has no file in the commit at HEAD of the checkout.", i, i, fromDoc(rel))
 }

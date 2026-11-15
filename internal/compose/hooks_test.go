@@ -159,7 +159,7 @@ func TestHookProgramsStayInTheCheckout(t *testing.T) {
 		{"app/scripts/*.sh, name: glob", fmt.Sprintf(commitFix, "app/scripts/*.sh")},
 		{"app/Scripts/check.sh", fmt.Sprintf(nearFix, "app/Scripts/check.sh", "app/scripts/check.sh")},
 		{"app/scripts/CHECK.sh", fmt.Sprintf(nearFix, "app/scripts/CHECK.sh", "app/scripts/check.sh")},
-		{"app/scripts/v\u00e9rifier.sh, name: v", fmt.Sprintf(nearFix, "app/scripts/v\u00e9rifier.sh", "app/scripts/ve\u0301rifier.sh")},
+		{"app/scripts/v\u00e9rifier.sh, name: v", fmt.Sprintf(nearFix, "app/scripts/v\u00e9rifier.sh", "app/scripts/ve\u0301rifier.sh") + " The names differ in Unicode form (NFC and NFD)."},
 		{"app/scripts/inside.sh", "Point run at the file itself, not a link.\nhooks[0].run, app/scripts/inside.sh, is a link."},
 		{"app/scripts/abs.sh", "Point run at the file itself, not a link.\nhooks[0].run, app/scripts/abs.sh, is a link."},
 		{"app/scripts/linked.sh", "Point run at the file itself, not a link.\nhooks[0].run, app/scripts/linked.sh, is a link."},
@@ -170,7 +170,9 @@ func TestHookProgramsStayInTheCheckout(t *testing.T) {
 	} {
 		hooks("    - {at: after-review-round, kind: check, run: " + tc.run + "}\n")
 		_, err := composeHooks(t, doc, checkout)
-		if err == nil || !strings.HasPrefix(err.Error(), tc.want) {
+		// The refusal of a program outside the checkout ends in a temporary path, so
+		// only its start is compared; every other refusal is compared whole.
+		if err == nil || err.Error() != tc.want && !(strings.HasSuffix(tc.want, " is outside the checkout ") && strings.HasPrefix(err.Error(), tc.want)) {
 			t.Errorf("%s:\nerr = %v\nwant %s", tc.run, err, tc.want)
 		}
 	}
