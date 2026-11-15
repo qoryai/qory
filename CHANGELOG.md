@@ -346,6 +346,11 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Changed
 
+- `qory artifact pull` and the working folder of a push check take, of each artifact, the
+  newest version that the run API's artifact index does not mark `cancelled`. A version
+  that a cancelled run made counts for no stage, and an artifact whose versions are all
+  cancelled gets no folder. Before, both took `newest_version`, cancelled or not. An
+  index without the field `cancelled` reads as no version cancelled.
 - qory builds with Forager main 37dc0148. A run keeps its wall only when a container of
   the run may still run; a network or folder of the wall that could not be removed no longer
   keeps it.

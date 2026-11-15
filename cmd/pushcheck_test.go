@@ -91,6 +91,59 @@ func TestAPushCheckReadsTheNewestVersionsInThePullLayout(t *testing.T) {
 	}
 }
 
+// TestAPushCheckSkipsCancelledVersions is the working folder of a push check of spec
+// when the index marks versions cancelled: spec/main has v2, its newest version that is
+// not cancelled, and spec/other, whose versions are all cancelled, has no folder.
+// index.json is the index byte for byte, cancelled versions included.
+func TestAPushCheckSkipsCancelledVersions(t *testing.T) {
+	inCheckout(t)
+	server := startRunAPI(t)
+	server.index = indexOf(
+		artifactEntry("spec", "main", "", 3,
+			versionEntry("av_1", 1, fileEntry("spec.md", "one\n")),
+			versionEntry("av_2", 2, fileEntry("spec.md", "two\n")),
+			cancelled(versionEntry("av_3", 3, fileEntry("spec.md", "three\n")))),
+		artifactEntry("spec", "other", "", 2,
+			cancelled(versionEntry("av_4", 1, fileEntry("spec.md", "four\n"))),
+			cancelled(versionEntry("av_5", 2, fileEntry("spec.md", "five\n")))),
+	)
+	server.files = map[string]string{
+		"/artifacts/av_1/files/spec.md": "one\n",
+		"/artifacts/av_2/files/spec.md": "two\n",
+		"/artifacts/av_3/files/spec.md": "three\n",
+		"/artifacts/av_4/files/spec.md": "four\n",
+		"/artifacts/av_5/files/spec.md": "five\n",
+	}
+	fetch, err := cmd.ArtifactsForCheck(server.URL + "/v1/runs/run-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	if err := fetch(context.Background(), dir, []string{"spec"}); err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{
+		"index.json":           server.index,
+		"spec/main/v2/spec.md": "two\n",
+	}
+	got := map[string]string{}
+	filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		rel, _ := filepath.Rel(dir, path)
+		data, _ := os.ReadFile(path)
+		got[filepath.ToSlash(rel)] = string(data)
+		return nil
+	})
+	if fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Errorf("the working folder has\n%v\nwant\n%v", got, want)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "spec", "other")); !os.IsNotExist(err) {
+		t.Errorf("spec/other has a folder: %v", err)
+	}
+}
+
 // checksModule is a module that declares a push check for branch and one for spec,
 // which reads questions; its program's #! line is for node.
 var checksModule = map[string]string{

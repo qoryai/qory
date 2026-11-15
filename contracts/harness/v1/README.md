@@ -962,8 +962,9 @@ container that a stopped qory left. The container gets three read-only folders:
 
 - the home, at its path, so the program's absolute path in `push-checks.json` is valid;
 - the working folder: the work item's artifact index, `index.json`, and the newest version
-  of each artifact of the type and of each `reads` type, in the layout of `qory artifact
-  pull`, `<type>/<name>/v<N>/<files>`; a type with no version has no folder;
+  of each artifact of the type and of each `reads` type that the index does not mark
+  `cancelled`, in the layout of `qory artifact pull`, `<type>/<name>/v<N>/<files>`; an
+  artifact with no such version has no folder;
 - the pushed files, under their names, whose paths follow the command's arguments.
 
 qory makes the last two in the run directory, in a folder that only its user can list,

@@ -2875,7 +2875,10 @@ artifact pull` prints, which is a whole path. Outside a run the store is `.qory/
 `qory artifact pull` fetches the newest version of each output of the stage, and the
 version of each input that its gate approved. A type that is both counts as an output. For
 any other artifact it fetches the approved version, or the newest when none is approved.
-`<type>` limits the fetch to one type. `--version` needs `<type>`.
+The newest version is the one with the highest number that the artifact index does not
+mark `cancelled`: a version that a cancelled run made counts for no stage. An artifact
+whose versions are all cancelled gets no directory. `<type>` limits the fetch to one type.
+`--version` needs `<type>`, and fetches that version whether or not it is cancelled.
 
 `-` as a file of `qory artifact push` reads one file from standard input. Its name is
 `stdin` with the extension of its content, such as `stdin.md`. One version is at most

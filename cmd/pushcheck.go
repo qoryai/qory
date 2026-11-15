@@ -245,8 +245,8 @@ func engineShown(id string) string {
 }
 
 // artifactsForCheck is the fetch of a push check through client: the artifact index,
-// and the newest version of each artifact of the types, as qory artifact pull writes
-// them into its store.
+// and the newest version of each artifact of the types that the index does not mark
+// cancelled, as qory artifact pull writes them into its store.
 func artifactsForCheck(client *runapi.Client) pushcheck.Fetch {
 	return func(ctx context.Context, dir string, types []string) error {
 		index, err := client.Artifacts(ctx)
@@ -255,10 +255,10 @@ func artifactsForCheck(client *runapi.Client) pushcheck.Fetch {
 		}
 		store := &artifactStore{root: filepath.Dir(dir), dir: dir, fresh: true}
 		for _, artifact := range index.Artifacts {
-			if !slices.Contains(types, artifact.Type) || artifact.NewestVersion < 1 {
+			if !slices.Contains(types, artifact.Type) {
 				continue
 			}
-			chosen := chosenVersion(artifact, nil, artifact.NewestVersion)
+			chosen := newestNotCancelled(artifact)
 			if chosen == nil {
 				continue
 			}
