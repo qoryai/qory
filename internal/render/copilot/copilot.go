@@ -95,9 +95,13 @@ func (copilot) Reserved() []render.Reserved {
 	}
 }
 
+// effortKey is the frontmatter key a Copilot CLI agent file takes its effort value in.
+const effortKey = "reasoning-effort"
+
 // Render writes agents/<name>.agent.md per agent with the agent's name, description,
-// tools and model, and each settings/copilot/<name> file into hooks/ under the name
-// [hookFile] returns, so settings/copilot/hooks.json reaches .github/hooks/qory-hooks.json.
+// tools and model, and the effort of the agent's tier entry as reasoning-effort, and each
+// settings/copilot/<name> file into hooks/ under the name [hookFile] returns, so
+// settings/copilot/hooks.json reaches .github/hooks/qory-hooks.json.
 // Both directories are created even when nothing goes in them. The target model reaches
 // no file, because Copilot keeps the model in a user setting.
 func (copilot) Render(res *compose.Result, dir, home string) error {
@@ -106,7 +110,7 @@ func (copilot) Render(res *compose.Result, dir, home string) error {
 			return err
 		}
 	}
-	if err := render.WriteAgents(res, render.Bare, dir, "agents", ".agent.md", "name", "description", "tools", "model"); err != nil {
+	if err := render.WriteAgentsEffort(res, render.Bare, dir, "agents", ".agent.md", effortKey, "name", "description", "tools", "model"); err != nil {
 		return err
 	}
 	if err := render.WriteSettingsAs(res, Runtime, filepath.Join(dir, "hooks"), home, nil, nil, hookFile); err != nil {
@@ -121,7 +125,7 @@ func (copilot) Render(res *compose.Result, dir, home string) error {
 	if err := render.PlaceEntries(res, github, render.Bare, "skills"); err != nil {
 		return err
 	}
-	return render.WriteAgents(res, render.Bare, github, "agents", ".agent.md", "name", "description", "tools", "model")
+	return render.WriteAgentsEffort(res, render.Bare, github, "agents", ".agent.md", effortKey, "name", "description", "tools", "model")
 }
 
 // Template starts Copilot CLI with the workspace directory for the skills and agents,
@@ -130,6 +134,10 @@ func (copilot) Template() render.Template {
 	return render.Template{Command: "copilot", Args: [][]string{{"--add-dir", "${dir}/workspace"}, {"--additional-mcp-config", "@${dir}/mcp.json"}}}
 }
 
-// AgentEfforts is nil: an agent's file gets the model a tier maps to, and qory writes no
-// effort into it.
-func (copilot) AgentEfforts() []string { return nil }
+// AgentEfforts are the levels Copilot CLI names for an agent file's reasoning-effort
+// across its models (CLI changelog 1.0.66 and 1.0.88). Which of them a model offers
+// depends on the model; Copilot CLI reports a level the model does not offer and leaves
+// it unapplied.
+func (copilot) AgentEfforts() []string {
+	return []string{"minimal", "low", "medium", "high", "xhigh", "max"}
+}

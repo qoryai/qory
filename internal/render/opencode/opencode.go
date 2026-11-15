@@ -143,5 +143,7 @@ func (opencode) Template() render.Template {
 }
 
 // AgentEfforts is nil: an agent's file gets the model a tier maps to, and qory writes no
-// effort into it.
+// effort into it. OpenCode takes an agent's effort only inside model, as
+// <provider>/<model>#<variant>, which qory does not write, so the agent runs at the
+// session's effort.
 func (opencode) AgentEfforts() []string { return nil }
