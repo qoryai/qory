@@ -8,12 +8,14 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/qoryai/qory/internal/exports"
 	"github.com/qoryai/qory/internal/hostgit"
 	"github.com/qoryai/qory/internal/stack"
+	"golang.org/x/text/unicode/norm"
 )
 
 // Hook is one workflow hook of the composed harness, as hooks.json lists it: an entry of
@@ -60,8 +62,10 @@ type hookPoint struct {
 // module ships or a program that is no file in the checkout, with the name of another
 // hook at its point, and more hooks at a point or in a workflow than the base allows.
 // Each message is a line with the fix, of at most 100 characters, and a line with the
-// cause. checkout "" is the directory of the document.
-func checkHooks(res *Result, p *stack.Stack, base *Base, checkout string) error {
+// cause. opts.Checkout "" is the directory of the document; git reads the programs with
+// opts.Timeout and opts.GitBase.
+func checkHooks(res *Result, p *stack.Stack, opts Options) error {
+	base := opts.Base
 	if len(p.Hooks) == 0 {
 		return nil
 	}
@@ -95,7 +99,7 @@ func checkHooks(res *Result, p *stack.Stack, base *Base, checkout string) error 
 			agents[e.Name] = true
 		}
 	}
-	programs := &programs{doc: p.Dir(), checkout: checkout, file: file}
+	programs := &programs{doc: p.Dir(), checkout: opts.Checkout, file: file, timeout: opts.Timeout, base: opts.GitBase}
 	named := map[string]int{}
 	perPoint := map[string]int{}
 	perWorkflow := map[string]int{}
@@ -154,9 +158,12 @@ func checkHooks(res *Result, p *stack.Stack, base *Base, checkout string) error 
 
 // programs finds the program of a hook in the commit at HEAD of the checkout: doc is the
 // directory of the document, which a program's path is from, checkout the root of the
-// checkout that is composed, and file the document's name.
+// checkout that is composed, and file the document's name. Each git command runs at most
+// timeout, 0 for no limit, from the environment base, nil for this process's.
 type programs struct {
 	doc, checkout, file string
+	timeout             time.Duration
+	base                []string
 	// real is the checkout's path with every link resolved, "" until find sets it.
 	real string
 	// prefix is the checkout's path from the root of its git repository, "" or ending in
@@ -168,9 +175,9 @@ type programs struct {
 // find returns the path of program in the commit at HEAD of the checkout, from the root
 // of the checkout, as git has it, or the refusal of hook i: a program outside the
 // checkout, the checkout itself, a checkout with no commit, a path with no entry in that
-// commit, a link or a path through a linked folder, and an entry that is no file. The
-// hook runner runs the file as committed in git at the run's start commit, so each of
-// these would fail every run.
+// commit or one that git has in another letter case or Unicode form, a link or a path
+// through a linked folder, and an entry that is no file. The hook runner runs the file
+// as committed in git at the run's start commit, so each of these would fail every run.
 func (f *programs) find(i int, program string) (string, error) {
 	if f.real == "" {
 		checkout := f.checkout
@@ -203,6 +210,12 @@ func (f *programs) find(i int, program string) (string, error) {
 	if rel == "." {
 		return "", fmt.Errorf("Set hooks[%d].run to a program file in the checkout.\nhooks[%d].run, %s, is the checkout itself.", i, i, fromDoc(rel))
 	}
+	if !f.read {
+		if err := f.head(); err != nil {
+			return "", err
+		}
+		f.read = true
+	}
 	entries, err := f.tree(rel)
 	if err != nil {
 		return "", err
@@ -230,23 +243,23 @@ func (f *programs) find(i int, program string) (string, error) {
 			return "", fmt.Errorf("Point run at a file.\nhooks[%d].run, %s, has the mode %s in git.", i, fromDoc(e.path), e.mode)
 		}
 	}
-	return "", fmt.Errorf("Commit %s: a hook runs the file as committed in git.\nhooks[%d].run, %s, has no file in the commit at HEAD of the checkout.", exports.Value(rel, false), i, fromDoc(rel))
+	committed, err := f.near(rel)
+	if err != nil {
+		return "", err
+	}
+	if committed != "" {
+		return "", fmt.Errorf("Write hooks[%d].run as committed in git.\nhooks[%d].run is %s, and git has %s.", i, i, fromDoc(rel), fromDoc(committed))
+	}
+	return "", fmt.Errorf("Commit the program of hooks[%d].run: a hook runs the file as committed in git.\nhooks[%d].run, %s, has no file in the commit at HEAD of the checkout.", i, i, fromDoc(rel))
 }
 
 // treeEntry is one entry of the commit at HEAD, as git ls-tree prints it: its mode and
-// its path from the checkout's root.
+// its path, from the checkout's root or, in a listing of one folder, its name.
 type treeEntry struct{ mode, path string }
 
 // tree is the entries of the commit at HEAD of the checkout at the path rel, with
-// forward slashes, and at each folder on its way, or the refusal of a folder that is in
-// no git checkout or a checkout with no commit.
+// forward slashes, and at each folder on its way.
 func (f *programs) tree(rel string) ([]treeEntry, error) {
-	if !f.read {
-		if err := f.head(); err != nil {
-			return nil, err
-		}
-		f.read = true
-	}
 	// Each folder on the way is a pathspec too: git ls-tree lists a link and stops there,
 	// so a linked folder is an entry of its own path and the paths below it have none.
 	// The paths are from the root of the repository, which the checkout may be a folder
@@ -259,61 +272,150 @@ func (f *programs) tree(rel string) ([]treeEntry, error) {
 		args = append(args, path)
 		asked[path] = true
 	}
-	list, err := hostgit.Command(context.Background(), f.real, args...)
+	listed, err := f.list(args...)
 	if err != nil {
 		return nil, err
 	}
-	list.Env = append(list.Env, "GIT_LITERAL_PATHSPECS=1")
-	out, err := list.Output()
-	if err != nil {
-		return nil, exports.HideError(err)
-	}
 	var entries []treeEntry
-	for _, line := range strings.Split(strings.TrimSuffix(string(out), "\x00"), "\x00") {
-		about, path, ok := strings.Cut(line, "\t")
-		fields := strings.Fields(about)
+	for _, e := range listed {
 		// A folder that is a pathspec also lists its files, so only the paths asked for
 		// count.
-		if !ok || len(fields) != 3 || !asked[path] {
+		if !asked[e.path] {
 			continue
 		}
-		path, inside := strings.CutPrefix(path, f.prefix)
-		if !inside || path == "" {
-			continue
+		if path, inside := strings.CutPrefix(e.path, f.prefix); inside && path != "" {
+			entries = append(entries, treeEntry{mode: e.mode, path: path})
 		}
-		entries = append(entries, treeEntry{mode: fields[0], path: path})
+	}
+	return entries, nil
+}
+
+// near is the path from the checkout's root of the entry in the commit at HEAD that rel,
+// with no entry of its own, differs from in letter case or Unicode form alone, or "" when
+// there is none. A file system that ignores case or Unicode form finds the file by rel,
+// and git does not.
+func (f *programs) near(rel string) (string, error) {
+	var found []string
+	mode := "040000"
+	for _, part := range strings.Split(rel, "/") {
+		if mode != "040000" {
+			return "", nil
+		}
+		listed, err := f.list("ls-tree", "-z", "HEAD:"+strings.TrimSuffix(f.prefix+strings.Join(found, "/"), "/"))
+		if err != nil {
+			return "", err
+		}
+		name := ""
+		for _, e := range listed {
+			if e.path == part {
+				name, mode = part, e.mode
+				break
+			}
+			if name == "" && strings.EqualFold(norm.NFC.String(e.path), norm.NFC.String(part)) {
+				name, mode = e.path, e.mode
+			}
+		}
+		if name == "" {
+			return "", nil
+		}
+		found = append(found, name)
+	}
+	if committed := strings.Join(found, "/"); committed != rel {
+		return committed, nil
+	}
+	return "", nil
+}
+
+// list is the entries git ls-tree prints with args, which include -z.
+func (f *programs) list(args ...string) ([]treeEntry, error) {
+	out, err := f.git(args...)
+	if err != nil {
+		return nil, f.failed(err)
+	}
+	var entries []treeEntry
+	for _, line := range strings.Split(strings.TrimSuffix(out, "\x00"), "\x00") {
+		about, path, ok := strings.Cut(line, "\t")
+		if fields := strings.Fields(about); ok && len(fields) == 3 {
+			entries = append(entries, treeEntry{mode: fields[0], path: path})
+		}
 	}
 	return entries, nil
 }
 
 // head sets prefix to the checkout's path from the root of its git repository, or
-// returns the refusal of a folder that is in no git checkout or a checkout with no
-// commit.
+// returns the refusal of a folder that is in no git checkout, a checkout with no commit,
+// or a checkout git fails to read.
 func (f *programs) head() error {
 	fix := "Run qory in a git checkout: a hook runs the file as committed in git."
-	prefix, err := hostgit.Command(context.Background(), f.real, "rev-parse", "--show-prefix")
-	if err != nil {
-		return err
+	out, err := f.git("rev-parse", "--show-prefix")
+	if exit, ok := errors.AsType[*gitExit](err); ok && strings.Contains(exit.line, "not a git repository") {
+		return fmt.Errorf("%s\nThe folder %s is in no git checkout.", fix, exports.HidePath(f.real))
 	}
-	out, err := prefix.Output()
 	if err != nil {
-		if _, ok := errors.AsType[*exec.ExitError](err); ok {
-			return fmt.Errorf("%s\nThe folder %s is in no git checkout.", fix, exports.HidePath(f.real))
-		}
-		return exports.HideError(err)
+		return f.failed(err)
 	}
-	f.prefix = strings.TrimSuffix(string(out), "\n")
-	head, err := hostgit.Command(context.Background(), f.real, "rev-parse", "--verify", "--quiet", "HEAD^{commit}")
+	f.prefix = strings.TrimSuffix(out, "\n")
+	_, err = f.git("rev-parse", "--verify", "--quiet", "HEAD^{commit}")
+	if exit, ok := errors.AsType[*gitExit](err); ok && exit.code == 1 {
+		return fmt.Errorf("%s\nThe checkout %s has no commit yet.", fix, exports.HidePath(f.real))
+	}
 	if err != nil {
-		return err
-	}
-	if err := head.Run(); err != nil {
-		if _, ok := errors.AsType[*exec.ExitError](err); ok {
-			return fmt.Errorf("%s\nThe checkout %s has no commit yet.", fix, exports.HidePath(f.real))
-		}
-		return exports.HideError(err)
+		return f.failed(err)
 	}
 	return nil
+}
+
+// failed is the refusal of err, an error of [programs.git]: git's first line for a git
+// that exited with an error.
+func (f *programs) failed(err error) error {
+	if exit, ok := errors.AsType[*gitExit](err); ok {
+		return fmt.Errorf("Fix what git reports for the checkout: a hook runs the file as committed in git.\ngit %s in %s failed: %s", exit.command, exports.HidePath(f.real), exports.Value(exit.line, false))
+	}
+	return err
+}
+
+// gitExit is a git command that exited with an error: its subcommand, its exit code and
+// the first line it wrote to its error output.
+type gitExit struct {
+	command, line string
+	code          int
+}
+
+func (e *gitExit) Error() string { return "git " + e.command + ": " + e.line }
+
+// git runs git with args in the checkout, with literal pathspecs, and returns its
+// output. An error of a git that ran and exited with one is a [*gitExit].
+func (f *programs) git(args ...string) (string, error) {
+	ctx, cancel := context.Background(), func() {}
+	if f.timeout > 0 {
+		ctx, cancel = context.WithTimeout(ctx, f.timeout)
+	}
+	defer cancel()
+	if f.base != nil {
+		ctx = hostgit.WithBase(ctx, f.base)
+	}
+	cmd, err := hostgit.Command(ctx, f.real, args...)
+	if err != nil {
+		return "", err
+	}
+	cmd.Env = append(cmd.Env, "GIT_LITERAL_PATHSPECS=1")
+	var stderr strings.Builder
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		return "", fmt.Errorf("Run the compose again, or raise git.timeout in the qory configuration.\ngit %s in %s ran past %s and was stopped.", args[0], exports.HidePath(f.real), f.timeout)
+	}
+	if exit, ok := errors.AsType[*exec.ExitError](err); ok {
+		line, _, _ := strings.Cut(strings.TrimSpace(stderr.String()), "\n")
+		if line == "" {
+			line = "exit " + strconv.Itoa(exit.ExitCode())
+		}
+		return "", &gitExit{command: args[0], line: line, code: exit.ExitCode()}
+	}
+	if err != nil {
+		return "", exports.HideError(err)
+	}
+	return string(out), nil
 }
 
 // over is how many hooks to remove, for a message: "a hook" or "<n> hooks".

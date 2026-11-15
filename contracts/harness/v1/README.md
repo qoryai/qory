@@ -343,7 +343,7 @@ harness:
 |---|---|---|
 | `at` | yes | the name of a hook point of the base stack |
 | `kind` | yes | `check`, `review` or `enrich`, and one the point takes |
-| `run` | one of run and agent | the program, by its path from the directory of `qory.yaml`, alone or followed by its arguments, separated by spaces, with no shell and no quoting. The path is relative, with forward slashes, stays inside the checkout being composed, and leads to a file in the commit at HEAD of that checkout, of mode 100644 or 100755. Neither the file nor a folder on its way may be a link, since the hook runner runs the file as committed in git and refuses a link. `hooks.json` has the path as git has it, from the checkout's root |
+| `run` | one of run and agent | the program, by its path from the directory of `qory.yaml`, alone or followed by its arguments, separated by spaces, with no shell and no quoting. The path is relative, with forward slashes, stays inside the checkout being composed, and leads to a file in the commit at HEAD of that checkout, of mode 100644 or 100755. The path is a name, not a pattern: `scripts/*.sh` is the file of that name. Neither the file nor a folder on its way may be a link, since the hook runner runs the file as committed in git and refuses a link. `hooks.json` has the path as git has it, from the checkout's root |
 | `agent` | one of run and agent | the name of an agent that a module of the composed harness ships. A `review` hook runs an agent |
 | `name` | no | the hook's name, unique at its point: letters, digits, dots, hyphens and underscores, 64 at most, starting with a letter or digit. Default: the agent's name, else the file name of the program |
 | `required` | no | whether a red result blocks. Default: `true` |
@@ -411,8 +411,9 @@ compose fails with status 2 for a hook that breaks a rule of the base or the che
   Ship the agent in a module of qory.yaml, or fix hooks[1].agent.
   No module ships the agent licence-reviewer.
   ```
-- a program outside the checkout, the checkout itself, a checkout with no commit, a
-  program not in the commit at HEAD, a link, or an entry that is no file:
+- a program outside the checkout, the checkout itself, a checkout with no commit or one
+  git fails to read, a program not in the commit at HEAD or there in another letter case
+  or Unicode form, a link, or an entry that is no file:
   ```
   Move the program into the checkout, or fix hooks[0].run.
   other/check.sh, from the directory of /work/qory.yaml, is outside the checkout /work/app.
@@ -427,11 +428,22 @@ compose fails with status 2 for a hook that breaks a rule of the base or the che
   ```
   For a folder in no git checkout, the cause is `The folder /work/app is in no git
   checkout.`
+  When git fails to read the checkout, the refusal has git's first line, such as:
   ```
-  Commit scripts/check-licences.sh: a hook runs the file as committed in git.
+  Fix what git reports for the checkout: a hook runs the file as committed in git.
+  git rev-parse in /work/app failed: fatal: detected dubious ownership in repository at '/work/app'
+  ```
+  ```
+  Commit the program of hooks[0].run: a hook runs the file as committed in git.
   hooks[0].run, scripts/check-licences.sh, has no file in the commit at HEAD of the checkout.
   ```
   An untracked file and an ignored file get this refusal too.
+  A path that git has in another letter case or Unicode form, such as an NFD name, which
+  a file system that ignores either finds on disk:
+  ```
+  Write hooks[0].run as committed in git.
+  hooks[0].run is Scripts/check-licences.sh, and git has scripts/check-licences.sh.
+  ```
   ```
   Point run at the file itself, not a link.
   hooks[0].run, scripts/check-licences.sh, is a link.

@@ -238,6 +238,10 @@ type Options struct {
 	// workflow hook is a file in the commit at HEAD of that checkout, and [Hook.Run] has
 	// its path in git from it; "" takes the directory of the stack's document.
 	Checkout string
+	// GitBase is the environment that the git commands reading the programs of the
+	// workflow hooks start from, as [hostgit.WithBase] sets it; nil takes this
+	// process's.
+	GitBase []string
 	// StackAs, when set, is the stack as an error of the compose shows it in place of its
 	// file, for a stack whose file is a copy that the person does not edit, such as the
 	// workspace's harness in Qory Apiary.
@@ -485,7 +489,7 @@ func ComposeWith(p *stack.Stack, opts Options) (_ *Result, err error) {
 	if err := workflowsShipped(p, declared, opts.Base, opts.StackAs); err != nil {
 		return nil, err
 	}
-	if err := checkHooks(res, p, opts.Base, opts.Checkout); err != nil {
+	if err := checkHooks(res, p, opts); err != nil {
 		return nil, err
 	}
 	if len(instructions) > 0 {

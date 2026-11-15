@@ -316,7 +316,7 @@ in git, so the compose reads the program from the commit at HEAD of your checkou
 untracked or ignored program fails the compose with exit 2:
 
 ```
-Commit scripts/check-licences.sh: a hook runs the file as committed in git.
+Commit the program of hooks[0].run: a hook runs the file as committed in git.
 hooks[0].run, scripts/check-licences.sh, has no file in the commit at HEAD of the checkout.
 ```
 

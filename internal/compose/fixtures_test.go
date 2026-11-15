@@ -35,8 +35,17 @@ func TestFixtures(t *testing.T) {
 			t.Fatal(err)
 		}
 		t.Run(filepath.Base(dir), func(t *testing.T) {
+			checkout := ""
+			// A workflow hook's program is read from the commit at HEAD of the checkout,
+			// so a fixture with hooks is composed from a copy that is a git checkout.
+			if name := filepath.Base(dir); strings.HasPrefix(name, "workflow-hooks-") {
+				dir = realTemp(t)
+				copyFixture(t, name, dir)
+				commitAll(t, dir)
+				checkout = dir
+			}
 			t.Chdir(dir)
-			res, err := load()
+			res, err := load(checkout)
 			if want, readErr := os.ReadFile("expected/error.txt"); readErr == nil {
 				if err == nil {
 					t.Fatalf("composed without error; want:\n%s", want)
@@ -183,10 +192,11 @@ func TestFixtures(t *testing.T) {
 	}
 }
 
-// load composes the fixture in the working directory. It first checks the fixture's
-// exports, as config.Load checks them at a repository root, so a fixture can expect an
-// exports refusal, such as one of a module's process.yaml.
-func load() (*compose.Result, error) {
+// load composes the fixture in the working directory for the checkout at checkout, ""
+// for that directory. It first checks the fixture's exports, as config.Load checks them
+// at a repository root, so a fixture can expect an exports refusal, such as one of a
+// module's process.yaml.
+func load(checkout string) (*compose.Result, error) {
 	root, err := os.Getwd()
 	if err != nil {
 		return nil, err
@@ -208,7 +218,7 @@ func load() (*compose.Result, error) {
 	if err != nil {
 		return nil, err
 	}
-	return compose.ComposeWith(merged, compose.Options{Base: base})
+	return compose.ComposeWith(merged, compose.Options{Base: base, Checkout: checkout})
 }
 
 func expectText(t *testing.T, path, got string) {

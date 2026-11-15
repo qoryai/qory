@@ -22,7 +22,13 @@ func hooksDoc(stack, hooks string) string {
 // copyHooksFixture copies the fixture workflow-hooks-declared to dir.
 func copyHooksFixture(t *testing.T, dir string) {
 	t.Helper()
-	if err := os.CopyFS(dir, os.DirFS(filepath.Join(fixtures, "workflow-hooks-declared"))); err != nil {
+	copyFixture(t, "workflow-hooks-declared", dir)
+}
+
+// copyFixture copies the fixture of that name to dir.
+func copyFixture(t *testing.T, name, dir string) {
+	t.Helper()
+	if err := os.CopyFS(dir, os.DirFS(filepath.Join(fixtures, name))); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -79,9 +85,10 @@ func commitAll(t *testing.T, dir string) {
 // TestHookProgramsStayInTheCheckout is a qory.yaml in a folder above the checkout, as a
 // file covering several repositories is: each program committed in the checkout is in
 // hooks.json by its path in git from the checkout's root. Refused are a program in
-// another repository under the folder; a file that is untracked or ignored; a committed
-// link and a file in a committed linked folder; a folder and a submodule; the checkout
-// itself; and a checkout that is no git checkout or has no commit.
+// another repository under the folder; a file that is untracked or ignored; a path such
+// as scripts/*.sh, which git takes as that name alone; a path that git has in another
+// letter case or Unicode form; a committed link and a file in a committed linked folder;
+// a folder and a submodule; and the checkout itself.
 func TestHookProgramsStayInTheCheckout(t *testing.T) {
 	above := realTemp(t)
 	copyHooksFixture(t, above)
@@ -113,7 +120,12 @@ func TestHookProgramsStayInTheCheckout(t *testing.T) {
 	commitAll(t, checkout)
 	commit := gitIn(t, checkout, "rev-parse", "HEAD")
 	gitIn(t, checkout, "update-index", "--add", "--cacheinfo", "160000,"+commit+",vendor/lib")
-	gitIn(t, checkout, "commit", "-q", "-m", "submodule")
+	// git keeps a name decomposed (NFD) as Linux writes it; core.precomposeunicode off
+	// keeps git on macOS from composing the names it reads from the command line.
+	gitIn(t, checkout, "config", "core.precomposeunicode", "false")
+	blob := gitIn(t, checkout, "rev-parse", "HEAD:scripts/check.sh")
+	gitIn(t, checkout, "update-index", "--add", "--cacheinfo", "100755,"+blob+",scripts/ve\u0301rifier.sh")
+	gitIn(t, checkout, "commit", "-q", "-m", "submodule and NFD name")
 	write("app/scripts/new.sh", "#!/bin/sh\n")
 	write("app/scripts/mine.local.sh", "#!/bin/sh\n")
 
@@ -138,11 +150,16 @@ func TestHookProgramsStayInTheCheckout(t *testing.T) {
 		t.Errorf("runs: %s, want each program by its path in git from the checkout's root", got)
 	}
 
-	commitFix := "Commit scripts/%s: a hook runs the file as committed in git.\nhooks[0].run, app/scripts/%[1]s, has no file in the commit at HEAD of the checkout."
+	commitFix := "Commit the program of hooks[0].run: a hook runs the file as committed in git.\nhooks[0].run, %s, has no file in the commit at HEAD of the checkout."
+	nearFix := "Write hooks[0].run as committed in git.\nhooks[0].run is %s, and git has %s."
 	for _, tc := range []struct{ run, want string }{
 		{"other/scripts/check.sh", "Move the program into the checkout, or fix hooks[0].run.\nother/scripts/check.sh, from the directory of " + doc + ", is outside the checkout "},
-		{"app/scripts/new.sh", fmt.Sprintf(commitFix, "new.sh")},
-		{"app/scripts/mine.local.sh", fmt.Sprintf(commitFix, "mine.local.sh")},
+		{"app/scripts/new.sh", fmt.Sprintf(commitFix, "app/scripts/new.sh")},
+		{"app/scripts/mine.local.sh", fmt.Sprintf(commitFix, "app/scripts/mine.local.sh")},
+		{"app/scripts/*.sh, name: glob", fmt.Sprintf(commitFix, "app/scripts/*.sh")},
+		{"app/Scripts/check.sh", fmt.Sprintf(nearFix, "app/Scripts/check.sh", "app/scripts/check.sh")},
+		{"app/scripts/CHECK.sh", fmt.Sprintf(nearFix, "app/scripts/CHECK.sh", "app/scripts/check.sh")},
+		{"app/scripts/v\u00e9rifier.sh, name: v", fmt.Sprintf(nearFix, "app/scripts/v\u00e9rifier.sh", "app/scripts/ve\u0301rifier.sh")},
 		{"app/scripts/inside.sh", "Point run at the file itself, not a link.\nhooks[0].run, app/scripts/inside.sh, is a link."},
 		{"app/scripts/abs.sh", "Point run at the file itself, not a link.\nhooks[0].run, app/scripts/abs.sh, is a link."},
 		{"app/scripts/linked.sh", "Point run at the file itself, not a link.\nhooks[0].run, app/scripts/linked.sh, is a link."},
@@ -159,29 +176,62 @@ func TestHookProgramsStayInTheCheckout(t *testing.T) {
 	}
 }
 
-// TestHookProgramsNeedACommit is a checkout that is no git checkout, and one with no
-// commit yet: a hook's program fails the compose in both.
+// TestHookProgramsNeedACommit is a checkout that is no git checkout, one with no commit
+// yet, and one git fails to read: a hook's program fails the compose in each, and the
+// last refusal has git's first line.
 func TestHookProgramsNeedACommit(t *testing.T) {
+	fix := "Run qory in a git checkout: a hook runs the file as committed in git.\n"
 	for _, tc := range []struct {
-		name, cause string
-		git         []string
+		name string
+		git  [][]string
+		want func(dir string) string
 	}{
-		{"no git checkout", "\nThe folder ", nil},
-		{"no commit", "\nThe checkout ", []string{"init", "-q", "-b", "main"}},
+		{"no git checkout", nil, func(dir string) string { return fix + "The folder " + dir + " is in no git checkout." }},
+		{"no commit", [][]string{{"init", "-q", "-b", "main"}}, func(dir string) string { return fix + "The checkout " + dir + " has no commit yet." }},
+		{"git fails", [][]string{{"init", "-q", "-b", "main"}, {"config", "core.repositoryformatversion", "99"}}, func(dir string) string {
+			return "Fix what git reports for the checkout: a hook runs the file as committed in git.\ngit rev-parse in " + dir + " failed: fatal: "
+		}},
 	} {
 		dir := realTemp(t)
 		copyHooksFixture(t, dir)
-		if tc.git != nil {
-			gitIn(t, dir, tc.git...)
+		for _, args := range tc.git {
+			gitIn(t, dir, args...)
 		}
 		doc := filepath.Join(dir, "qory.yaml")
 		if err := os.WriteFile(doc, []byte(hooksDoc("stack", "    - {at: after-review-round, kind: check, run: scripts/check-licences.sh}\n")), 0o644); err != nil {
 			t.Fatal(err)
 		}
 		_, err := composeHooks(t, doc, dir)
-		want := "Run qory in a git checkout: a hook runs the file as committed in git." + tc.cause
-		if err == nil || !strings.HasPrefix(err.Error(), want) {
+		if want := tc.want(dir); err == nil || !strings.HasPrefix(err.Error(), want) {
 			t.Errorf("%s: err = %v, want %q", tc.name, err, want)
+		}
+	}
+}
+
+// TestHookProgramsInAFolderOfTheRepository is a checkout that is a folder of its git
+// repository, and a checkout that is a worktree of another: each program is in
+// hooks.json by its path from the checkout's root.
+func TestHookProgramsInAFolderOfTheRepository(t *testing.T) {
+	repo := realTemp(t)
+	sub := filepath.Join(repo, "services", "api")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	copyHooksFixture(t, sub)
+	commitAll(t, repo)
+	worktree := filepath.Join(realTemp(t), "wt")
+	gitIn(t, repo, "worktree", "add", "-q", "-b", "hooks", worktree)
+	for _, checkout := range []string{sub, filepath.Join(worktree, "services", "api")} {
+		doc := filepath.Join(checkout, "qory.yaml")
+		if err := os.WriteFile(doc, []byte(hooksDoc("stack", "    - {at: after-review-round, kind: check, run: scripts/check-licences.sh --all}\n")), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		res, err := composeHooks(t, doc, checkout)
+		if err != nil {
+			t.Fatalf("%s: %v", checkout, err)
+		}
+		if got := strings.Join(res.Hooks[0].Run, " "); got != "scripts/check-licences.sh --all" {
+			t.Errorf("%s: run %s, want the program from the checkout's root", checkout, got)
 		}
 	}
 }

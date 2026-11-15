@@ -1,2 +1,2 @@
-Commit scripts/check-headers.sh: a hook runs the file as committed in git.
+Commit the program of hooks[0].run: a hook runs the file as committed in git.
 hooks[0].run, scripts/check-headers.sh, has no file in the commit at HEAD of the checkout.

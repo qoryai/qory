@@ -3,6 +3,7 @@ package render_test
 import (
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"testing"
@@ -12,16 +13,37 @@ import (
 	"github.com/qoryai/qory/internal/render"
 )
 
-// composeHooksFixture composes the fixture workflow-hooks-declared on the stack it
-// extends, with the hooks of its qory.yaml, or with none when hooks is false.
-func composeHooksFixture(t *testing.T, hooks bool) *compose.Result {
+// hooksCheckout is a copy of the fixture workflow-hooks-declared that is a git checkout
+// with every file committed, since a workflow hook's program is read from the commit at
+// HEAD of the checkout.
+func hooksCheckout(t *testing.T) string {
 	t.Helper()
 	hermetic(t)
-	file, err := filepath.Abs("../../contracts/harness/v1/fixtures/workflow-hooks-declared/qory.yaml")
+	dir, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
-	p, err := config.Compose(file)
+	if err := os.CopyFS(dir, os.DirFS("../../contracts/harness/v1/fixtures/workflow-hooks-declared")); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{
+		{"init", "-q", "-b", "main"},
+		{"add", "-A"},
+		{"-c", "user.name=Tester", "-c", "user.email=tester@example.com", "commit", "-q", "-m", "first"},
+	} {
+		if out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	return dir
+}
+
+// composeHooksFixture composes the copy at dir of the fixture workflow-hooks-declared
+// on the stack it extends, with the hooks of its qory.yaml, or with none when hooks is
+// false.
+func composeHooksFixture(t *testing.T, dir string, hooks bool) *compose.Result {
+	t.Helper()
+	p, err := config.Compose(filepath.Join(dir, "qory.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -32,7 +54,7 @@ func composeHooksFixture(t *testing.T, hooks bool) *compose.Result {
 	if err != nil {
 		t.Fatal(err)
 	}
-	res, err := compose.ComposeWith(merged, compose.Options{Base: base})
+	res, err := compose.ComposeWith(merged, compose.Options{Base: base, Checkout: dir})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -46,7 +68,7 @@ func composeHooksFixture(t *testing.T, hooks bool) *compose.Result {
 // is required and its timeout. A checkout without hooks has no file.
 func TestBuildWritesTheHooks(t *testing.T) {
 	home := filepath.Join(t.TempDir(), "home")
-	if err := render.BuildAt(composeHooksFixture(t, true), home, home, lookup(t, "claude")); err != nil {
+	if err := render.BuildAt(composeHooksFixture(t, hooksCheckout(t), true), home, home, lookup(t, "claude")); err != nil {
 		t.Fatal(err)
 	}
 	data, err := os.ReadFile(filepath.Join(home, render.HooksFile))
@@ -69,7 +91,7 @@ func TestBuildWritesTheHooks(t *testing.T) {
 	}
 
 	plain := filepath.Join(t.TempDir(), "home")
-	if err := render.BuildAt(composeHooksFixture(t, false), plain, plain, lookup(t, "claude")); err != nil {
+	if err := render.BuildAt(composeHooksFixture(t, hooksCheckout(t), false), plain, plain, lookup(t, "claude")); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(filepath.Join(plain, render.HooksFile)); !os.IsNotExist(err) {
@@ -81,13 +103,14 @@ func TestBuildWritesTheHooks(t *testing.T) {
 // one without them, at one address: the two trees differ only in hooks.json, so every
 // composed workflow file is byte-equal and the hooks change no workflow of the base.
 func TestHooksLeaveTheWorkflowsAlone(t *testing.T) {
-	dir := t.TempDir()
-	home := filepath.Join(dir, "home")
-	with, without := filepath.Join(dir, "with"), filepath.Join(dir, "without")
-	if err := render.BuildAt(composeHooksFixture(t, true), with, home, lookup(t, "claude")); err != nil {
+	dir := hooksCheckout(t)
+	out := t.TempDir()
+	home := filepath.Join(out, "home")
+	with, without := filepath.Join(out, "with"), filepath.Join(out, "without")
+	if err := render.BuildAt(composeHooksFixture(t, dir, true), with, home, lookup(t, "claude")); err != nil {
 		t.Fatal(err)
 	}
-	if err := render.BuildAt(composeHooksFixture(t, false), without, home, lookup(t, "claude")); err != nil {
+	if err := render.BuildAt(composeHooksFixture(t, dir, false), without, home, lookup(t, "claude")); err != nil {
 		t.Fatal(err)
 	}
 	diff, err := render.Diff(without, with, "")
