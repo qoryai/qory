@@ -1,14 +1,15 @@
 package stack
 
 import (
-	"errors"
 	"fmt"
 	"maps"
 	"path"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/qoryai/forager/accesskey"
 
@@ -16,9 +17,9 @@ import (
 )
 
 // A workflow hook is a step that a repository adds at a hook point of a workflow of the
-// stack it extends: a check, a review or an enrichment, run by a program in the checkout
-// or by a composed agent. It is not a runtime hook, a module's hooks/<file>, which the
-// runtime runs. The stack declares its hook points under workflows.<name>.hook_points and
+// stack it extends: a check hook, a review hook or an enrich hook, which writes notes for
+// the agents that start after it. A program in the checkout or a composed agent runs it.
+// A workflow hook is not a runtime hook, a module's hooks/<file>, which the runtime runs. The stack declares its hook points under workflows.<name>.hook_points and
 // the limits under extending.hooks; the repository lists its hooks under harness.hooks in
 // qory.yaml.
 //
@@ -78,8 +79,8 @@ type HookLimits struct {
 	PerPointValue *int `yaml:"per_point,omitempty"`
 	// PerWorkflowValue is per_workflow as written, nil when left out.
 	PerWorkflowValue *int `yaml:"per_workflow,omitempty"`
-	// TimeoutText is timeout as written, a duration such as 10m, "" when left out.
-	TimeoutText string `yaml:"timeout,omitempty"`
+	// TimeoutText is timeout as written, a duration such as 10m, nil when left out.
+	TimeoutText *string `yaml:"timeout,omitempty"`
 	// Timeout is TimeoutText read as a duration, or [DefaultHookTimeout]. It is set as the
 	// stack is validated.
 	Timeout time.Duration `yaml:"-"`
@@ -104,54 +105,119 @@ func (l *HookLimits) PerWorkflow() int {
 
 // TimeoutShown is the longest a hook may run, as the stack writes it, for a message.
 func (l *HookLimits) TimeoutShown() string {
-	if l.TimeoutText != "" {
-		return l.TimeoutText
+	if l.TimeoutText != nil {
+		return *l.TimeoutText
 	}
 	return defaultHookTimeoutText
 }
 
 // validate checks the limits and sets Timeout.
 func (l *HookLimits) validate() error {
-	if l.PerPointValue != nil && *l.PerPointValue < 1 {
-		return fmt.Errorf("set extending.hooks.per_point to 1 or more: %d lets no hook in", *l.PerPointValue)
-	}
-	if l.PerWorkflowValue != nil && *l.PerWorkflowValue < 1 {
-		return fmt.Errorf("set extending.hooks.per_workflow to 1 or more: %d lets no hook in", *l.PerWorkflowValue)
+	for _, c := range []struct {
+		key   string
+		value *int
+	}{{"per_point", l.PerPointValue}, {"per_workflow", l.PerWorkflowValue}} {
+		if c.value != nil && *c.value < 1 {
+			return hookErrorf("Set extending.hooks.%s to 1 or more.", "{path} sets %d, which lets no hook in.", c.key, *c.value)
+		}
 	}
 	l.Timeout = DefaultHookTimeout
-	if l.TimeoutText != "" {
-		d, err := time.ParseDuration(l.TimeoutText)
-		if err != nil || d <= 0 {
-			return fmt.Errorf("set extending.hooks.timeout to a duration above zero, such as 10m: %s is not one", exports.Value(l.TimeoutText, true))
+	if l.TimeoutText != nil {
+		d, ok := wholeSeconds(*l.TimeoutText)
+		if !ok {
+			return hookErrorf("Set extending.hooks.timeout to whole seconds, 1s or more, such as 10m.", "{path} sets %s.", exports.Value(*l.TimeoutText, true))
 		}
 		l.Timeout = d
 	}
 	return nil
 }
 
-// Hook is one entry of harness.hooks in a checkout's qory.yaml.
+// wholeSeconds reads text as a duration of whole seconds, 1s or more: hooks.json records
+// a timeout in seconds, so a fraction of a second would be lost.
+func wholeSeconds(text string) (time.Duration, bool) {
+	d, err := time.ParseDuration(text)
+	if err != nil || d < time.Second || d%time.Second != 0 {
+		return 0, false
+	}
+	return d, true
+}
+
+// HookError is a refusal of a hook point, of extending.hooks or of a hook, as a line
+// with the fix, of at most 100 characters, and a line with the cause. The file it is
+// about goes inside the text, see [exports.InFile]: its name at {file} and its path at
+// {path}.
+type HookError struct {
+	fix, cause string
+	file       string
+}
+
+// Error is the fix line, a line feed and the cause line.
+func (e *HookError) Error() string {
+	name, path := "the file", "the file"
+	if e.file != "" {
+		name, path = filepath.Base(e.file), e.file
+	}
+	r := strings.NewReplacer("\x00", name, "\x01", path)
+	cause := r.Replace(e.cause)
+	if e.file == "" {
+		cause = upperFirst(cause)
+	}
+	return r.Replace(e.fix) + "\n" + cause
+}
+
+// Fix is the fix line, with the file's name in it.
+func (e *HookError) Fix() string { return strings.SplitN(e.Error(), "\n", 2)[0] }
+
+// In is the error with file as the path of the file it is about.
+func (e *HookError) In(file string) error { return &HookError{fix: e.fix, cause: e.cause, file: file} }
+
+// hookErrorf is a [HookError] of the fix and the cause formatted with args, {file} and
+// {path} in either format marking the file's name and path. The text is formatted first,
+// with a NUL byte and a SOH byte at the marks, so a % in the path stays as it is.
+func hookErrorf(fix, cause string, args ...any) *HookError {
+	marks := strings.NewReplacer("{file}", "\x00", "{path}", "\x01")
+	fix, cause = marks.Replace(fix), marks.Replace(cause)
+	n := strings.Count(fix, "%") - 2*strings.Count(fix, "%%")
+	return &HookError{fix: fmt.Sprintf(fix, args[:n]...), cause: fmt.Sprintf(cause, args[n:]...)}
+}
+
+// upperFirst is s with its first letter in upper case, for a cause line that starts with
+// "the file" in place of a path.
+func upperFirst(s string) string {
+	if s == "" || !unicode.IsLower(rune(s[0])) {
+		return s
+	}
+	return strings.ToUpper(s[:1]) + s[1:]
+}
+
+// Hook is one entry of harness.hooks in a checkout's qory.yaml. A key that is present
+// with an empty value is refused, not read as left out.
 type Hook struct {
 	// At is the name of the hook point, one the base stack declares.
 	At string `yaml:"at"`
 	// Kind is one of [HookKinds], and one the point takes.
 	Kind string `yaml:"kind"`
-	// Run is the program the hook runs, by its path from the directory of qory.yaml,
-	// alone or followed by its arguments, separated by spaces. Not with Agent.
-	Run string `yaml:"run,omitempty"`
-	// Agent is the name of a composed agent the hook runs. Not with Run; a review
-	// requires it.
-	Agent string `yaml:"agent,omitempty"`
-	// NameText is name as written, "" when left out; [Hook.Name] is the name the hook
+	// RunText is run as written, nil when left out: the program, by its path from the
+	// directory of qory.yaml, alone or followed by its arguments, separated by spaces.
+	// Not with AgentText.
+	RunText *string `yaml:"run,omitempty"`
+	// AgentText is agent as written, nil when left out: the name of a composed agent.
+	// Not with RunText; a review requires it.
+	AgentText *string `yaml:"agent,omitempty"`
+	// NameText is name as written, nil when left out; [Hook.Name] is the name the hook
 	// goes by.
-	NameText string `yaml:"name,omitempty"`
+	NameText *string `yaml:"name,omitempty"`
 	// RequiredValue is required as written, nil when left out.
 	RequiredValue *bool `yaml:"required,omitempty"`
-	// TimeoutText is timeout as written, "" when left out.
-	TimeoutText string `yaml:"timeout,omitempty"`
+	// TimeoutText is timeout as written, nil when left out.
+	TimeoutText *string `yaml:"timeout,omitempty"`
 
-	// Command is Run split at spaces: the program's path, then its arguments. It is set
-	// as the document is validated.
+	// Command is RunText split at spaces: the program's path, then its arguments; nil for
+	// a hook that runs an agent. It is set as the document is validated.
 	Command []string `yaml:"-"`
+	// Agent is AgentText, "" for a hook that runs a program. It is set as the document is
+	// validated.
+	Agent string `yaml:"-"`
 	// Timeout is TimeoutText read as a duration, 0 when left out. It is set as the
 	// document is validated.
 	Timeout time.Duration `yaml:"-"`
@@ -161,8 +227,8 @@ type Hook struct {
 // file name of the program.
 func (h Hook) Name() string {
 	switch {
-	case h.NameText != "":
-		return h.NameText
+	case h.NameText != nil:
+		return *h.NameText
 	case h.Agent != "":
 		return h.Agent
 	case len(h.Command) > 0:
@@ -189,31 +255,31 @@ func (p *Stack) validateHookPoints() error {
 		w := p.Workflows[name]
 		for _, point := range slices.Sorted(maps.Keys(w.HookPoints)) {
 			hp := w.HookPoints[point]
-			where := fmt.Sprintf("workflows.%s.hook_points.%s", name, accesskey.ShownName(point, true))
 			if !workflowName.MatchString(point) {
-				return fmt.Errorf("name the hook point %s with a lower-case letter, then up to 54 lower-case letters, digits and hyphens: workflows.%s.hook_points lists it", accesskey.ShownName(point, true), name)
+				return hookErrorf("Name the hook point with a lower-case letter, then up to 54 lower-case letters, digits and hyphens.", "{path} lists %s under workflows.%s.hook_points.", accesskey.ShownName(point, true), name)
 			}
 			if other, ok := declared[point]; ok {
-				return fmt.Errorf("rename the hook point %s of workflow %s or of workflow %s: both declare it, and a hook selects a point by its name alone", point, other, name)
+				return hookErrorf("Rename one of the two hook points %s in {file}: a point name is unique in a stack.", "Workflows %s and %s both declare it.", point, other, name)
 			}
 			declared[point] = name
+			where := fmt.Sprintf("workflows.%s.hook_points.%s", name, point)
 			switch hp.At {
 			case HookAtEnd, HookAtStart, HookAtInside:
 			case "":
-				return fmt.Errorf("set %s.at to end, start or inside: the point sets none", where)
+				return hookErrorf("Set at of the hook point to end, start or inside.", "{path} sets no %s.at.", where)
 			default:
-				return fmt.Errorf("set %s.at to end, start or inside: %s is none of them", where, accesskey.ShownName(hp.At, true))
+				return hookErrorf("Set at of the hook point to end, start or inside.", "{path} sets %s.at to %s.", where, accesskey.ShownName(hp.At, true))
 			}
 			if len(hp.Kinds) == 0 {
-				return fmt.Errorf("set %s.kinds to one or more of check, review and enrich: the point takes no kind", where)
+				return hookErrorf("Add one or more kinds to the hook point: check, review or enrich.", "{path} sets no kind in %s.kinds.", where)
 			}
 			seen := map[string]bool{}
 			for _, k := range hp.Kinds {
 				if !slices.Contains(HookKinds, k) {
-					return fmt.Errorf("set %s.kinds to kinds from check, review and enrich: %s is none of them", where, accesskey.ShownName(k, true))
+					return hookErrorf("Set each kind of the hook point to check, review or enrich.", "{path} lists %s in %s.kinds.", accesskey.ShownName(k, true), where)
 				}
 				if seen[k] {
-					return fmt.Errorf("list %s once in %s.kinds", k, where)
+					return hookErrorf("List each kind of the hook point once.", "{path} lists %s twice in %s.kinds.", k, where)
 				}
 				seen[k] = true
 			}
@@ -233,15 +299,16 @@ func (p *Stack) hasHookPoints() bool {
 }
 
 // validateHooks checks each hook of a checkout's document for the rules that need no
-// base, and sets each hook's Command and Timeout. Whether the base stack has the point,
-// takes the kind, allows the timeout and the count, and whether the agent and the
-// program exist, is the compose's check, which knows the base and the composed entries.
+// base, and sets each hook's Command, Agent and Timeout. Whether the base stack has the
+// point, takes the kind, allows the timeout and the count, and whether the agent and the
+// program exist, is the compose's check, which knows the base, the checkout and the
+// composed entries.
 func (p *Stack) validateHooks() error {
 	if len(p.Hooks) == 0 {
 		return nil
 	}
 	if !p.extends() {
-		return errors.New("remove harness.hooks, or extend a stack that allows them: a hook extends a workflow of a base stack, and this harness section defines a stack")
+		return hookErrorf("Remove harness.hooks from {file}, or extend a stack that allows them.", "A hook extends a workflow of a base stack, and {path} defines a stack.")
 	}
 	for i := range p.Hooks {
 		if err := p.Hooks[i].validate(i); err != nil {
@@ -251,48 +318,60 @@ func (p *Stack) validateHooks() error {
 	return nil
 }
 
-// validate checks hook i without the base and sets its Command and Timeout.
+// validate checks hook i for the rules that need no base and sets its Command, Agent
+// and Timeout.
 func (h *Hook) validate(i int) error {
+	for _, c := range []struct {
+		key   string
+		value *string
+	}{{"run", h.RunText}, {"agent", h.AgentText}, {"name", h.NameText}, {"timeout", h.TimeoutText}} {
+		if c.value != nil && strings.TrimSpace(*c.value) == "" {
+			return hookErrorf("Remove hooks[%d].%s, or give it a value.", "{path} sets hooks[%d].%s to an empty value.", i, c.key, i, c.key)
+		}
+	}
 	if h.At == "" {
-		return fmt.Errorf("set hooks[%d].at to a hook point of the base stack: the hook sets none", i)
+		return hookErrorf("Set hooks[%d].at to a hook point of the base stack.", "{path} sets no hooks[%d].at.", i, i)
 	}
 	if h.Kind == "" {
-		return fmt.Errorf("set hooks[%d].kind to check, review or enrich: the hook sets none", i)
+		return hookErrorf("Set hooks[%d].kind to check, review or enrich.", "{path} sets no hooks[%d].kind.", i, i)
 	}
 	if !slices.Contains(HookKinds, h.Kind) {
-		return fmt.Errorf("set hooks[%d].kind to check, review or enrich: %s is none of them", i, accesskey.ShownName(h.Kind, true))
+		return hookErrorf("Set hooks[%d].kind to check, review or enrich.", "{path} sets it to %s.", i, accesskey.ShownName(h.Kind, true))
 	}
-	h.Command = strings.Fields(h.Run)
 	switch {
-	case len(h.Command) > 0 && h.Agent != "":
-		return fmt.Errorf("set hooks[%d].run or hooks[%d].agent, not both: a hook runs a program or an agent", i, i)
-	case len(h.Command) == 0 && h.Agent == "":
-		return fmt.Errorf("set hooks[%d].run or hooks[%d].agent: a hook runs a program or an agent, and this one sets neither", i, i)
-	case h.Kind == HookReview && h.Agent == "":
-		return fmt.Errorf("set hooks[%d].agent in place of run: a review hook runs an agent", i)
+	case h.RunText != nil && h.AgentText != nil:
+		return hookErrorf("Set one of hooks[%d].run and hooks[%d].agent, not both.", "A hook runs a program or an agent, and hooks[%d] in {path} sets both.", i, i, i)
+	case h.RunText == nil && h.AgentText == nil:
+		return hookErrorf("Set hooks[%d].run or hooks[%d].agent.", "A hook runs a program or an agent, and hooks[%d] in {path} sets neither.", i, i, i)
+	case h.Kind == HookReview && h.AgentText == nil:
+		return hookErrorf("Set hooks[%d].agent in place of hooks[%d].run.", "A review hook runs an agent, and hooks[%d] in {path} runs a program.", i, i, i)
 	}
-	if h.Agent != "" && !segment(h.Agent) {
-		return fmt.Errorf("set hooks[%d].agent to the name of an agent: %s is not one path segment", i, accesskey.ShownName(h.Agent, true))
+	if h.AgentText != nil {
+		h.Agent = *h.AgentText
+		if !segment(h.Agent) {
+			return hookErrorf("Set hooks[%d].agent to the name of an agent.", "{path} sets it to %s, which is not one path segment.", i, accesskey.ShownName(h.Agent, true))
+		}
 	}
-	if len(h.Command) > 0 {
+	if h.RunText != nil {
+		h.Command = strings.Fields(*h.RunText)
 		program := h.Command[0]
 		if path.IsAbs(program) || strings.Contains(program, `\`) || strings.HasPrefix(program, "~") {
-			return fmt.Errorf("set hooks[%d].run to a program by its path from the directory of qory.yaml, with forward slashes: %s is not one", i, exports.Value(program, true))
+			return hookErrorf("Set hooks[%d].run to a program by its relative path, with forward slashes.", "{path} sets the program %s; the path is from the directory of {file}.", i, exports.Value(program, true))
 		}
 		if clean := path.Clean(program); clean == ".." || strings.HasPrefix(clean, "../") {
-			return fmt.Errorf("set hooks[%d].run to a program inside the repository: %s leads out of it", i, exports.Value(program, true))
+			return hookErrorf("Set hooks[%d].run to a program inside the checkout.", "{path} sets the program %s, which leads out of the checkout.", i, exports.Value(program, true))
 		}
 	}
 	if name := h.Name(); !hookName.MatchString(name) {
-		if h.NameText != "" {
-			return fmt.Errorf("set hooks[%d].name to a letter or digit, then up to 63 letters, digits, dots, hyphens and underscores: %s is not one", i, accesskey.ShownName(name, true))
+		if h.NameText != nil {
+			return hookErrorf("Set hooks[%d].name to letters, digits, dots, hyphens and underscores, 64 at most.", "{path} sets %s; a name starts with a letter or digit.", i, accesskey.ShownName(name, true))
 		}
-		return fmt.Errorf("set hooks[%d].name to a letter or digit, then up to 63 letters, digits, dots, hyphens and underscores: the hook has no name, and the program's file name %s is not one", i, accesskey.ShownName(name, true))
+		return hookErrorf("Set hooks[%d].name to letters, digits, dots, hyphens and underscores, 64 at most.", "The hook has no name, and the program's file name %s is not one; a name starts with a letter or digit.", i, accesskey.ShownName(name, true))
 	}
-	if h.TimeoutText != "" {
-		d, err := time.ParseDuration(h.TimeoutText)
-		if err != nil || d <= 0 {
-			return fmt.Errorf("set hooks[%d].timeout to a duration above zero, such as 5m: %s is not one", i, exports.Value(h.TimeoutText, true))
+	if h.TimeoutText != nil {
+		d, ok := wholeSeconds(*h.TimeoutText)
+		if !ok {
+			return hookErrorf("Set hooks[%d].timeout to whole seconds, 1s or more, such as 90s or 5m.", "{path} sets %s.", i, exports.Value(*h.TimeoutText, true))
 		}
 		h.Timeout = d
 	}

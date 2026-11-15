@@ -101,10 +101,10 @@
             "per_point": {"description": "The most hooks one point takes. Default: 3.", "type": "integer", "minimum": 1},
             "per_workflow": {"description": "The most hooks the points of one workflow take together. Default: 10.", "type": "integer", "minimum": 1},
             "timeout": {
-              "description": "The longest a hook may run, and the timeout of a hook that sets none, as a duration: 10m. Default: 10 minutes.",
+              "description": "The longest a hook may run, and the timeout of a hook that sets none, as a duration in whole seconds, 1s or more: 10m. Default: 10 minutes.",
               "type": "string",
-              "pattern": "^([0-9]+(\\.[0-9]+)?(ns|us|ms|s|m|h))+$",
-              "not": {"pattern": "^([0.]+(ns|us|ms|s|m|h))+$"}
+              "pattern": "^([0-9]+(\\.[0-9]+)?(s|m|h))+$",
+              "not": {"pattern": "^([0.]+(s|m|h))+$"}
             }
           }
         }

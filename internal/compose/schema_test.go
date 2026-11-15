@@ -464,12 +464,17 @@ func TestSchemasKnowWorkflowHooks(t *testing.T) {
 		{composeSchema, `{"harness": {"hooks": [{"at": "after-plan", "kind": "lint", "run": "x.sh"}]}}`, false},
 		{composeSchema, `{"harness": {"hooks": [{"at": "after-plan", "kind": "check", "run": "x.sh", "when": "always"}]}}`, false},
 		{composeSchema, `{"harness": {"hooks": [{"at": "after-plan", "kind": "check", "run": "x.sh", "timeout": "0s"}]}}`, false},
+		{composeSchema, `{"harness": {"hooks": [{"at": "after-plan", "kind": "check", "run": "x.sh", "timeout": "500ms"}]}}`, false},
+		{composeSchema, `{"harness": {"hooks": [{"at": "after-plan", "kind": "check", "run": "", "agent": "a"}]}}`, false},
+		{composeSchema, `{"harness": {"hooks": [{"at": "after-plan", "kind": "check", "run": "x.sh", "name": ""}]}}`, false},
+		{composeSchema, `{"harness": {"hooks": [{"at": "after-plan", "kind": "check", "run": "x.sh", "timeout": ""}]}}`, false},
 		{stackSchema, `{` + point + `{"at": "end", "kinds": ["check", "review"]}}}}, "extending": {"hooks": {"per_point": 3, "per_workflow": 10, "timeout": "10m"}}}`, true},
 		{stackSchema, `{` + point + `{"at": "end", "kinds": ["check"]}}}}, "extending": {"hooks": {}}}`, true},
 		{stackSchema, `{` + point + `{"at": "middle", "kinds": ["check"]}}}}}`, false},
 		{stackSchema, `{` + point + `{"at": "end", "kinds": []}}}}}`, false},
 		{stackSchema, `{` + point + `{"at": "end", "kinds": ["lint"]}}}}}`, false},
 		{stackSchema, `{"modules": [{"name": "core"}], "extending": {"hooks": {"per_point": 0}}}`, false},
+		{stackSchema, `{"modules": [{"name": "core"}], "extending": {"hooks": {"timeout": "500ms"}}}`, false},
 	} {
 		var doc any
 		if err := json.Unmarshal([]byte(`{"apiVersion": "qory.dev/v1alpha1", `+c.body[1:]), &doc); err != nil {

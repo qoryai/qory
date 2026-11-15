@@ -4,10 +4,9 @@ modules:
   - name: core
     source: {path: modules/core}
 workflows:
-  plan-the-build:
-    access: write
-  review-changes:
-    access: read
+  plan-the-build: {access: write}
+  review-changes: {}
+  verify: {}
 extending:
   kinds: [agents]
   hooks: {per_point: 3, per_workflow: 10, timeout: 10m}

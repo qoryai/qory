@@ -724,7 +724,7 @@ func (p *Stack) validate(compose bool) error {
 	// A stack that a checkout's qory.yaml defines cannot be extended, so no hook can
 	// reach a point it declares.
 	if compose && p.hasHookPoints() {
-		return errors.New("remove hook_points from the workflows: a checkout adds hooks to a stack it extends, so only a qory-stack.yaml declares hook points")
+		return hookErrorf("Remove hook_points from the workflows in {file}.", "A checkout adds workflow hooks to a stack it extends, so only a qory-stack.yaml declares hook points.")
 	}
 	if err := p.validateHookPoints(); err != nil {
 		return err

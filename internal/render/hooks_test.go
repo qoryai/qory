@@ -40,10 +40,10 @@ func composeHooksFixture(t *testing.T, hooks bool) *compose.Result {
 	return res
 }
 
-// TestBuildWritesTheHooks is a checkout that lists workflow hooks: the home has
-// hooks.json with each hook, in the order of qory.yaml, with its workflow, point, kind,
-// name, what it runs, whether it is required and its timeout. A checkout without hooks
-// has no file.
+// TestBuildWritesTheHooks is a checkout that lists workflow hooks at an end, a start and
+// an inside point: the home has hooks.json with each hook, in the order of qory.yaml,
+// with its workflow, point, place in the session, kind, name, what it runs, whether it
+// is required and its timeout. A checkout without hooks has no file.
 func TestBuildWritesTheHooks(t *testing.T) {
 	home := filepath.Join(t.TempDir(), "home")
 	if err := render.BuildAt(composeHooksFixture(t, true), home, home, lookup(t, "claude")); err != nil {
@@ -61,6 +61,8 @@ func TestBuildWritesTheHooks(t *testing.T) {
 		{Workflow: "review-changes", At: "after-review-round", PointAt: "end", Kind: "check", Name: "check-licences.sh", Run: []string{"scripts/check-licences.sh"}, Required: true, TimeoutSeconds: 600, Index: 0},
 		{Workflow: "review-changes", At: "after-review-round", PointAt: "end", Kind: "review", Name: "licence-reviewer", Agent: "licence-reviewer", Required: false, TimeoutSeconds: 600, Index: 1},
 		{Workflow: "plan-the-build", At: "after-plan", PointAt: "end", Kind: "enrich", Name: "notes", Run: []string{"scripts/write-notes.sh", "--all"}, Required: true, TimeoutSeconds: 120, Index: 2},
+		{Workflow: "verify", At: "before-matrix", PointAt: "start", Kind: "check", Name: "check-licences.sh", Run: []string{"scripts/check-licences.sh", "--matrix"}, Required: true, TimeoutSeconds: 600, Index: 3},
+		{Workflow: "plan-the-build", At: "after-code-map", PointAt: "inside", Kind: "enrich", Name: "code-map-notes", Agent: "licence-reviewer", Required: true, TimeoutSeconds: 90, Index: 4},
 	}
 	if !reflect.DeepEqual(got.Hooks, want) {
 		t.Errorf("hooks:\n%s\nwant %+v", data, want)
@@ -96,7 +98,7 @@ func TestHooksLeaveTheWorkflowsAlone(t *testing.T) {
 	if !reflect.DeepEqual(diff, want) {
 		t.Errorf("the homes differ at %+v, want only %+v", diff, want)
 	}
-	for _, skill := range []string{"workflow-plan-the-build", "workflow-review-changes"} {
+	for _, skill := range []string{"workflow-plan-the-build", "workflow-review-changes", "workflow-verify"} {
 		a, errA := os.ReadFile(filepath.Join(with, "claude", "skills", skill, "SKILL.md"))
 		b, errB := os.ReadFile(filepath.Join(without, "claude", "skills", skill, "SKILL.md"))
 		if errA != nil || errB != nil || string(a) != string(b) {

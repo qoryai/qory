@@ -1,1 +1,2 @@
-Add the program scripts/check-headers.sh to the repository, or fix hooks[0].run: no file is at that path from the directory of qory.yaml.
+Add the program to the checkout, or fix hooks[0].run.
+No file is at scripts/check-headers.sh in the checkout.

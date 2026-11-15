@@ -1,1 +1,2 @@
-Remove a hook at after-review-round: the base stack allows 3, and qory.yaml has 4.
+Remove a hook at after-review-round.
+The base stack allows 3, and qory.yaml has 4.

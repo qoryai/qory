@@ -8,9 +8,13 @@ workflows:
     access: write
     hook_points:
       after-plan: {at: end, kinds: [check, enrich]}
+      after-code-map: {at: inside, kinds: [enrich]}
   review-changes:
     hook_points:
       after-review-round: {at: end, kinds: [check, review]}
+  verify:
+    hook_points:
+      before-matrix: {at: start, kinds: [check]}
 extending:
   kinds: [agents]
   hooks: {timeout: 5m}
