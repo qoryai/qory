@@ -1,2 +1,2 @@
 Remove hooks from qory.yaml, or extend a stack that declares hook points.
-The base stack software@working-tree declares none.
+  The base stack software@working-tree declares none.

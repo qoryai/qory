@@ -403,7 +403,7 @@ untracked or ignored program fails the compose with exit 2:
 
 ```
 Commit the program of hooks[0].run: a hook runs the file as committed in git.
-hooks[0].run, scripts/check-licences.sh, has no file in the commit at HEAD of the checkout.
+  hooks[0].run, scripts/check-licences.sh, has no file in the commit at HEAD of the checkout.
 ```
 
 ```yaml
@@ -447,7 +447,7 @@ and the second the cause:
 
 ```
 Set hooks[0].at to a hook point of the base stack.
-The base stack software@4b8e2f1a9c7d declares after-plan, after-review-round; after-merge is not one.
+  The base stack software@4b8e2f1a9c7d declares after-plan, after-review-round; after-merge is not one.
 ```
 
 A workflow hook is not a runtime hook, a module's `hooks/<file>`, which the runtime runs

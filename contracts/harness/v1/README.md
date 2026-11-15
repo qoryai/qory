@@ -376,94 +376,94 @@ compose fails with status 2 for a hook that breaks a rule of the base or the che
 - a base without `extending.hooks`:
   ```
   Remove hooks from qory.yaml, or extend a stack that allows them.
-  The base stack software@4b8e2f1a9c7d has no extending.hooks.
+    The base stack software@4b8e2f1a9c7d has no extending.hooks.
   ```
 - a base whose workflows declare no point:
   ```
   Remove hooks from qory.yaml, or extend a stack that declares hook points.
-  The base stack software@4b8e2f1a9c7d declares none.
+    The base stack software@4b8e2f1a9c7d declares none.
   ```
 - a point the base does not declare:
   ```
   Set hooks[0].at to a hook point of the base stack.
-  The base stack software@4b8e2f1a9c7d declares after-plan, after-review-round; after-merge is not one.
+    The base stack software@4b8e2f1a9c7d declares after-plan, after-review-round; after-merge is not one.
   ```
 - a kind the point does not take:
   ```
   Set hooks[1].kind to check or review.
-  after-review-round allows only those.
+    after-review-round allows only those.
   ```
 - more workflow hooks at a point than `per_point`, and in the points of one workflow
   than `per_workflow`:
   ```
   Remove a hook at after-review-round.
-  The base stack allows 3, and qory.yaml has 4.
+    The base stack allows 3, and qory.yaml has 4.
   ```
   ```
   Remove a hook at the points of workflow review-changes.
-  The base stack allows 10, and qory.yaml has 11.
+    The base stack allows 10, and qory.yaml has 11.
   ```
 - a timeout over the base's:
   ```
   Set hooks[0].timeout to 10m or less, or leave it out.
-  The base stack software@4b8e2f1a9c7d allows a hook no longer.
+    The base stack software@4b8e2f1a9c7d allows a hook no longer.
   ```
 - an agent no module ships:
   ```
   Ship the agent in a module of qory.yaml, or fix hooks[1].agent.
-  No module ships the agent licence-reviewer.
+    No module ships the agent licence-reviewer.
   ```
 - a program outside the checkout, the checkout itself, a checkout with no commit or one
   git fails to read, a program not in the commit at HEAD or there in another letter case
   or Unicode form, a link, or an entry that is no file:
   ```
   Move the program into the checkout, or fix hooks[0].run.
-  other/check.sh, from the directory of /work/qory.yaml, is outside the checkout /work/app.
+    other/check.sh, from the directory of /work/qory.yaml, is outside the checkout /work/app.
   ```
   ```
   Set hooks[0].run to a program file in the checkout.
-  hooks[0].run, ., is the checkout itself.
+    hooks[0].run, ., is the checkout itself.
   ```
   ```
   Run qory in a git checkout: a hook runs the file as committed in git.
-  The checkout /work/app has no commit yet.
+    The checkout /work/app has no commit yet.
   ```
   For a folder in no git checkout, the cause is `The folder /work/app is in no git
   checkout.`
   When git fails to read the checkout, the refusal has git's first line, such as:
   ```
   Fix what git reports for the checkout: a hook runs the file as committed in git.
-  git rev-parse in /work/app failed: fatal: detected dubious ownership in repository at '/work/app'
+    git rev-parse in /work/app failed: fatal: detected dubious ownership in repository at '/work/app'
   ```
   ```
   Commit the program of hooks[0].run: a hook runs the file as committed in git.
-  hooks[0].run, scripts/check-licences.sh, has no file in the commit at HEAD of the checkout.
+    hooks[0].run, scripts/check-licences.sh, has no file in the commit at HEAD of the checkout.
   ```
   An untracked file and an ignored file get this refusal too.
   A path that git has in another letter case or Unicode form, such as an NFD name, which
   a file system that ignores either finds on disk:
   ```
   Write hooks[0].run as committed in git.
-  hooks[0].run is Scripts/check-licences.sh, and git has scripts/check-licences.sh.
+    hooks[0].run is Scripts/check-licences.sh, and git has scripts/check-licences.sh.
   ```
   ```
   Point run at the file itself, not a link.
-  hooks[0].run, scripts/check-licences.sh, is a link.
+    hooks[0].run, scripts/check-licences.sh, is a link.
   ```
   The compose refuses a file in a linked folder the same way.
   ```
   Point run at the file itself, not a link.
-  hooks[0].run passes through the link tools.
+    hooks[0].run passes through the link tools.
   ```
   ```
   Point run at a file.
-  hooks[0].run, scripts, is a folder in git.
+    hooks[0].run, scripts, is a folder in git.
   ```
   For a submodule, the cause ends in `is a submodule in git.`
 - two workflow hooks of one name at a point:
   ```
   Set hooks[1].name to a name that no other hook at its point has.
-  hooks[0] at after-review-round has the name check-licences.sh too.
+    hooks[0] at after-review-round has the name check-licences.sh too.
   ```
 
 A stack file is refused the same way, with the fix first, for a point name that two

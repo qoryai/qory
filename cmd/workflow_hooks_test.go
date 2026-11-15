@@ -49,7 +49,7 @@ func TestComposeWritesTheWorkflowHooks(t *testing.T) {
 
 	writeFile(t, filepath.Join(root, "qory.yaml"), consumerCompose(url, hook("after-merge")))
 	_, err := run(t, "harness", "compose")
-	want := "Set hooks[0].at to a hook point of the base stack.\nThe base stack nextjs-15@"
+	want := "Set hooks[0].at to a hook point of the base stack.\n  The base stack nextjs-15@"
 	if err == nil || !strings.HasPrefix(err.Error(), want) || !strings.HasSuffix(err.Error(), " declares after-review-round; after-merge is not one.") || cmd.ExitCode(err) != 2 {
 		t.Errorf("err = %v, exit %d; want %q with exit 2", err, cmd.ExitCode(err), want)
 	}
@@ -114,7 +114,7 @@ func TestComposeKeepsAnAncestorsHooksInTheCheckout(t *testing.T) {
 	}
 	writeFile(t, filepath.Join(above, "qory.yaml"), doc("other/check.sh"))
 	_, err := run(t, "harness", "compose")
-	want := "Move the program into the checkout, or fix hooks[0].run.\nother/check.sh, from the directory of "
+	want := "Move the program into the checkout, or fix hooks[0].run.\n  other/check.sh, from the directory of "
 	if err == nil || !strings.HasPrefix(err.Error(), want) || cmd.ExitCode(err) != 2 {
 		t.Errorf("err = %v, exit %d; want %q with exit 2", err, cmd.ExitCode(err), want)
 	}

@@ -1,2 +1,2 @@
 Set hooks[0].kind to check.
-before-matrix allows only that kind.
+  before-matrix allows only that kind.
