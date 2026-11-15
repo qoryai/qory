@@ -298,6 +298,12 @@ release may change what an existing document does, and states it under Upgrading
   exit status, and a control plane can continue the run. `qory run resend` says the end
   of such a run as `paused: every model key reached its limit`. `qory apiary run list
   --state paused` lists the paused runs. See `docs/run.md`.
+- A module's `roles` takes a contract for an agents role: `roles: {agents: {developer:
+  {fill: one, contract: roles/developer.yaml}}}`. The contract lists the level-2 headings,
+  the front-matter keys and the tools that an agent needs, and whether it needs a tier.
+  The compose fails with exit 2 when an agent that fills the role lacks one of them, and
+  lists each missing part. A contract file that is missing or malformed fails the same
+  way. See The role contract in `contracts/harness/v1/README.md`.
 
 ### Changed
 
@@ -853,6 +859,10 @@ release may change what an existing document does, and states it under Upgrading
   such a folder, they stop with exit 2 and the line `set --home or harness.home to a
   folder outside <folder>, or run git init in <folder>: a home inside a folder needs a
   git working tree there, and <folder> is not one`.
+- When a workflow that the stack declares starts an agent role that no module ships,
+  provides or binds, the compose names the role and the workflow, such as
+  `agents/demo-author` and `capture-demos`, and says to add a module that fills the role
+  or to drop the workflow. Before, the line named only the skill and the agent.
 
 ### Fixed
 
