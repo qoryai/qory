@@ -62,9 +62,9 @@ type openedModule struct {
 // turn, a later layer replacing the name. Two modules that provide one single role with
 // different names fail the compose, unless the bind of p sets the role. A group's members
 // are the base bind's list, then each module's provides list in module order, each name
-// once, a later list that adds a name again in [Role.Also]; a bind of p that sets the group replaces the list, and the members it replaced
-// come back marked [Role.Replaced]. A base member for which dropped reports true is no
-// member either.
+// once, a later list that adds a name again in [Role.Also]; a bind of p that sets the
+// group replaces the list, and the members it replaced come back marked [Role.Replaced].
+// A base member for which dropped reports true is no member either.
 //
 // With first set, for the roles before the selection, no error is returned: a single
 // role that two modules provide keeps the name of the layer below, since the selection

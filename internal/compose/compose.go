@@ -510,7 +510,7 @@ func ComposeWith(p *stack.Stack, opts Options) (_ *Result, err error) {
 	if err := checkHooks(res, p, opts); err != nil {
 		return nil, err
 	}
-	if err := checkContracts(res, opened, opts.Base); err != nil {
+	if err := checkContracts(res, opened); err != nil {
 		return nil, err
 	}
 	if len(instructions) > 0 {
@@ -920,12 +920,29 @@ func checkResolved(res *Result, requires map[string]map[string][]Need, dropped m
 		if by := leftOut(kind, to); r.Group && (by == "" || r.Module != "") {
 			// Each list that adds the member is in the fix, so that following it removes
 			// the member.
-			remove, items := addedBy(listsOf(res, r))
+			lead := "Ship " + described(kind, to) + ", or "
+			remove, items, many := addedBy(lead, listsOf(res, r))
 			cause := fmt.Sprintf("No module ships %s.", described(kind, to))
-			if items != "" {
+			switch {
+			case many:
 				cause = fmt.Sprintf("No module ships %s, and these lists add it:%s", described(kind, to), items)
+			case items != "":
+				cause = fmt.Sprintf("No module ships %s, and this list adds it:%s", described(kind, to), items)
 			}
-			lines = append(lines, fmt.Sprintf("Ship %s, or %s.\n  %s", described(kind, to), remove, cause))
+			lines = append(lines, fmt.Sprintf("%s%s.\n  %s", lead, remove, cause))
+			continue
+		} else if r.Group {
+			// A member only a bind adds, which a module's exclude or only left out.
+			lead := "Compose " + described(kind, to) + ", or "
+			remove, items, _ := addedBy(lead, listsOf(res, r))
+			cause := fmt.Sprintf("Module %s leaves out %s.", shown(by), described(kind, to))
+			if x := excludeOf(res, kind, to); x != nil && x.Listed != "" {
+				cause = fmt.Sprintf("The exclude of module %s in qory.yaml leaves out %s.", shown(x.Listed), described(kind, to))
+			}
+			if items != "" {
+				cause += "\n  This list adds it:" + items
+			}
+			lines = append(lines, fmt.Sprintf("%s%s.\n  %s", lead, remove, cause))
 			continue
 		}
 		if r.Module != "" {
