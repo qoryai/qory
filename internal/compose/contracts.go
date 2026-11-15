@@ -139,8 +139,17 @@ func readContracts(o openedModule) ([]roleContract, error) {
 		inner, err := path, error(nil)
 		if o.root != nil {
 			inner, err = module.ResolveIn(o.root, o.realDir, path)
-			if err != nil && !errors.Is(err, fs.ErrNotExist) {
+			// A lookup on the path fails with a *fs.PathError, which exits 1 as a read
+			// error does elsewhere; only a path that leads out of the module is refused.
+			var pathErr *fs.PathError
+			switch {
+			case errors.Is(err, fs.ErrNotExist):
+			case errors.As(err, &pathErr):
+				return nil, exports.HideError(err)
+			case err != nil && strings.HasSuffix(err.Error(), "leads out of the module"):
 				return nil, linked
+			case err != nil:
+				return nil, err
 			}
 		}
 		var info fs.FileInfo

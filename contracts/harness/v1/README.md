@@ -1058,8 +1058,8 @@ runtime: the resolution happens in the composed tree, per path.
    typescript: no module ships agent typescript-developer.` and `Rename role
    agents/reviewer in the provides of module typescript: module core ships agent reviewer,
    and a role's name is no entry's.` Every failure of this rule comes at once, one per
-   line, the workflows' blocks below first, then the roles, then the entries in their
-   sorted order, so one compose lists every
+   line, or two for a workflow's block: the workflow blocks first (the next paragraph),
+   then the roles, then the entries in their sorted order, so one compose lists every
    site there is to fix. An entry that was left out has no requirements to meet. A
    manifest whose `requires` lists an entry the module does not ship fails as the module
    is read: `module core: requires lists skill release, which the module does not ship`.

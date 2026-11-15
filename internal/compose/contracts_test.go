@@ -1,6 +1,8 @@
 package compose_test
 
 import (
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -211,7 +213,8 @@ func TestAMissingContractFileFails(t *testing.T) {
 }
 
 // TestAContractThatLinksOutOfTheModuleFails is a contract file that is a link to a file
-// outside the module: the compose refuses it and reads nothing there.
+// outside the module: the compose refuses it and reads nothing there, for a module read
+// through a root and for any other module alike.
 func TestAContractThatLinksOutOfTheModuleFails(t *testing.T) {
 	files := contractFiles("")
 	delete(files, "modules/core/roles/developer.yaml")
@@ -221,14 +224,16 @@ func TestAContractThatLinksOutOfTheModuleFails(t *testing.T) {
 	if err := os.Symlink(filepath.Join(dir, "outside.yaml"), filepath.Join(dir, "modules/core/roles/developer.yaml")); err != nil {
 		t.Fatal(err)
 	}
-	p, err := loadFor(filepath.Join(dir, stack.FileName), "claude")
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = compose.Compose(p)
 	want := "Replace roles/developer.yaml of module core with a file inside the module.\n  It is an absolute link, or a link that leads out of the module, and qory reads only the module's files."
-	if err == nil || err.Error() != want {
-		t.Fatalf("error:\n%v\nwant:\n%s", err, want)
+	for _, opts := range []compose.Options{{}, {Copies: copyAll}} {
+		p, err := loadFor(filepath.Join(dir, stack.FileName), "claude")
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = compose.ComposeWith(p, opts)
+		if err == nil || err.Error() != want {
+			t.Fatalf("copied %v, error:\n%v\nwant:\n%s", opts.Copies != nil, err, want)
+		}
 	}
 }
 
@@ -326,5 +331,20 @@ func TestAnAbsoluteLinkInsideACopiedModuleIsRead(t *testing.T) {
 	_, err = compose.Compose(p)
 	if want := "Replace roles/developer.yaml of module core with a file inside the module.\n"; err == nil || !strings.HasPrefix(err.Error(), want) {
 		t.Fatalf("a module not copied: %v", err)
+	}
+}
+
+// TestAContractPathThroughAFileFailsAsARead is a contract path that goes through a file,
+// roles/developer.yaml/x: the lookup fails with the file system's error, which exits 1,
+// for a module read through a root and for any other module alike.
+func TestAContractPathThroughAFileFailsAsARead(t *testing.T) {
+	files := contractFiles("")
+	files["modules/core/qory-module.yaml"] = "apiVersion: qory.dev/v1alpha1\nname: core\nroles:\n  agents:\n    developer: {fill: one, contract: roles/developer.yaml/x}\n"
+	for _, opts := range []compose.Options{{}, {Copies: copyAll}} {
+		_, err := composeTreeWith(t, files, opts)
+		var pathErr *fs.PathError
+		if !errors.As(err, &pathErr) {
+			t.Errorf("copied %v: %v, want a *fs.PathError", opts.Copies != nil, err)
+		}
 	}
 }
