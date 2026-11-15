@@ -1,0 +1,2 @@
+Remove a hook at the points of workflow plan-the-build.
+The base stack allows 2, and qory.yaml has 3.

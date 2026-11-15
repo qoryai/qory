@@ -1,0 +1,10 @@
+apiVersion: qory.dev/v1alpha1
+harness:
+  extends: {path: stack}
+  target:
+    runtime: claude
+  modules:
+    - name: licence
+      source: {path: modules/licence}
+  hooks:
+    - {at: before-matrix, kind: review, agent: licence-reviewer}

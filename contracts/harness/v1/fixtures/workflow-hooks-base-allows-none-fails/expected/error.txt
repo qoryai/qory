@@ -1,0 +1,2 @@
+Remove hooks from qory.yaml, or extend a stack that allows them.
+The base stack software@working-tree has no extending.hooks.

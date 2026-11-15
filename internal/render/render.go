@@ -641,8 +641,9 @@ func Build(res *compose.Result, home string, runtimes ...Runtime) (err error) {
 // directory as modules/<name>, links the shared skills and hooks for the bare address and
 // writes AGENTS.md at the staging root with its references resolved the same way, since
 // every checkout link reads them, push-checks.json beside it when a module declares a
-// push check, [PushChecksFile], and roles.json when the harness has a role, [RolesFile],
-// then calls each runtime's Render for the subdirectory
+// push check, [PushChecksFile], hooks.json when the checkout lists a workflow hook,
+// [HooksFile], and roles.json when the harness has a role, [RolesFile], then calls each
+// runtime's Render for the subdirectory
 // named after it and links the runtime's files entries into that subdirectory. The links
 // point at the modules by absolute path, so a tree staged anywhere contains the same
 // links. A module the home holds a copy of, see [compose.Module.Copy], is copied in place
@@ -672,6 +673,9 @@ func BuildAt(res *compose.Result, stage, home string, runtimes ...Runtime) error
 		}
 	}
 	if err := writePushChecks(res, stage, home); err != nil {
+		return err
+	}
+	if err := writeHooks(res, stage); err != nil {
 		return err
 	}
 	if err := writeRoles(res, stage); err != nil {
@@ -714,6 +718,28 @@ func writePushChecks(res *compose.Result, stage, home string) error {
 		return err
 	}
 	return WriteFile(stage, PushChecksFile, append(data, '\n'))
+}
+
+// HooksFile is the file at the root of a home with the workflow hooks of the checkout's
+// qory.yaml, written only when it lists one. The workflows' files do not change with it.
+const HooksFile = "hooks.json"
+
+// Hooks is the content of [HooksFile]: each workflow hook in the order of harness.hooks,
+// a program by its path from the directory of qory.yaml.
+type Hooks struct {
+	Hooks []compose.Hook `json:"hooks"`
+}
+
+// writeHooks writes [HooksFile] into stage; nothing when the checkout lists no hook.
+func writeHooks(res *compose.Result, stage string) error {
+	if len(res.Hooks) == 0 {
+		return nil
+	}
+	data, err := json.MarshalIndent(Hooks{Hooks: res.Hooks}, "", "  ")
+	if err != nil {
+		return err
+	}
+	return WriteFile(stage, HooksFile, append(data, '\n'))
 }
 
 // RolesFile is the file at the root of a home with the roles of the composed harness,

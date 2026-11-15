@@ -1,0 +1,2 @@
+Set hooks[1].kind to check or review.
+after-review-round allows only those.

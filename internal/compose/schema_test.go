@@ -47,7 +47,10 @@ func TestSchemas(t *testing.T) {
 	dirs, _ := filepath.Glob(filepath.Join(fixtures, "*"))
 	for _, dir := range dirs {
 		errText, _ := os.ReadFile(filepath.Join(dir, "expected", "error.txt"))
-		wantInvalid := strings.Contains(string(errText), "apiVersion") || strings.Contains(string(errText), "kind ") || strings.Contains(string(errText), "qory \"") ||
+		// A workflow hook of a kind its point does not take passes the schema, which
+		// knows the kinds and not the base stack's points.
+		badKind := strings.Contains(string(errText), "kind ") && !strings.Contains(string(errText), "hooks[")
+		wantInvalid := strings.Contains(string(errText), "apiVersion") || badKind || strings.Contains(string(errText), "qory \"") ||
 			strings.HasPrefix(string(errText), "qory.yaml: ") && strings.Contains(string(errText), "workflows") ||
 			strings.Contains(string(errText), "bind.") && strings.Contains(string(errText), " in qory.yaml") && !strings.Contains(string(errText), " as many, ")
 		err := composeSchema.Validate(document(t, filepath.Join(dir, "qory.yaml")))
@@ -428,6 +431,57 @@ func TestConfigSchemaKnowsTiers(t *testing.T) {
 		var doc any
 		if err := json.Unmarshal([]byte(`{"apiVersion": "qory.dev/v1alpha1", `+c.body[1:]), &doc); err != nil {
 			t.Fatal(err)
+		}
+		if err := c.schema.Validate(doc); (err == nil) != c.valid {
+			t.Errorf("%s: valid=%v, err=%v", c.body, c.valid, err)
+		}
+	}
+}
+
+// TestSchemasKnowWorkflowHooks takes harness.hooks with a program or an agent, and hook
+// points and extending.hooks in a stack, and refuses a hook with both or neither, a
+// review with a program, an unknown kind or key, a point outside end, start and inside,
+// a point with no kind, and limits below 1.
+func TestSchemasKnowWorkflowHooks(t *testing.T) {
+	c := jsonschema.NewCompiler()
+	composeSchema, err := c.Compile("../../contracts/harness/v1/config.schema.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	stackSchema, err := c.Compile("../../contracts/harness/v1/stack.schema.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	const point = `"modules": [{"name": "core"}], "workflows": {"review-changes": {"hook_points": {"after-review-round": `
+	for _, c := range []struct {
+		schema *jsonschema.Schema
+		body   string
+		valid  bool
+	}{
+		{composeSchema, `{"harness": {"extends": {"path": "../base"}, "hooks": [{"at": "after-review-round", "kind": "check", "run": "scripts/check-licences.sh --all", "timeout": "5m"}, {"at": "after-review-round", "kind": "review", "agent": "licence-reviewer", "name": "licences", "required": false}]}}`, true},
+		{composeSchema, `{"harness": {"hooks": [{"at": "after-plan", "kind": "check", "run": "x.sh", "agent": "a"}]}}`, false},
+		{composeSchema, `{"harness": {"hooks": [{"at": "after-plan", "kind": "check"}]}}`, false},
+		{composeSchema, `{"harness": {"hooks": [{"at": "after-plan", "kind": "review", "run": "x.sh"}]}}`, false},
+		{composeSchema, `{"harness": {"hooks": [{"at": "after-plan", "kind": "lint", "run": "x.sh"}]}}`, false},
+		{composeSchema, `{"harness": {"hooks": [{"at": "after-plan", "kind": "check", "run": "x.sh", "when": "always"}]}}`, false},
+		{composeSchema, `{"harness": {"hooks": [{"at": "after-plan", "kind": "check", "run": "x.sh", "timeout": "0s"}]}}`, false},
+		{composeSchema, `{"harness": {"hooks": [{"at": "after-plan", "kind": "check", "run": "x.sh", "timeout": "500ms"}]}}`, false},
+		{composeSchema, `{"harness": {"hooks": [{"at": "after-plan", "kind": "check", "run": "", "agent": "a"}]}}`, false},
+		{composeSchema, `{"harness": {"hooks": [{"at": "after-plan", "kind": "check", "run": null, "agent": "a"}]}}`, false},
+		{composeSchema, `{"harness": {"hooks": [{"at": "after-plan", "kind": "check", "run": "x.sh", "required": null}]}}`, false},
+		{composeSchema, `{"harness": {"hooks": [{"at": "after-plan", "kind": "check", "run": "x.sh", "name": ""}]}}`, false},
+		{composeSchema, `{"harness": {"hooks": [{"at": "after-plan", "kind": "check", "run": "x.sh", "timeout": ""}]}}`, false},
+		{stackSchema, `{` + point + `{"at": "end", "kinds": ["check", "review"]}}}}, "extending": {"hooks": {"per_point": 3, "per_workflow": 10, "timeout": "10m"}}}`, true},
+		{stackSchema, `{` + point + `{"at": "end", "kinds": ["check"]}}}}, "extending": {"hooks": {}}}`, true},
+		{stackSchema, `{` + point + `{"at": "middle", "kinds": ["check"]}}}}}`, false},
+		{stackSchema, `{` + point + `{"at": "end", "kinds": []}}}}}`, false},
+		{stackSchema, `{` + point + `{"at": "end", "kinds": ["lint"]}}}}}`, false},
+		{stackSchema, `{"modules": [{"name": "core"}], "extending": {"hooks": {"per_point": 0}}}`, false},
+		{stackSchema, `{"modules": [{"name": "core"}], "extending": {"hooks": {"timeout": "500ms"}}}`, false},
+	} {
+		var doc any
+		if err := json.Unmarshal([]byte(`{"apiVersion": "qory.dev/v1alpha1", `+c.body[1:]), &doc); err != nil {
+			t.Fatalf("%s: %v", c.body, err)
 		}
 		if err := c.schema.Validate(doc); (err == nil) != c.valid {
 			t.Errorf("%s: valid=%v, err=%v", c.body, c.valid, err)

@@ -201,6 +201,10 @@ type Result struct {
 	// sorted by type, one per type; nil when no module declares one. [Result.PushChecksFor]
 	// renders them for a home.
 	PushChecks []PushCheck
+	// Hooks are the workflow hooks of the checkout's qory.yaml, in its order, each
+	// checked against the base stack; nil when it lists none. A build writes them into
+	// hooks.json.
+	Hooks []Hook
 	// roots are the module roots the compose opened, which [Result.Close] closes.
 	roots []*os.Root
 	// setBy is the module that set each settings leaf, keyed
@@ -246,6 +250,10 @@ type Options struct {
 	// Hidden is set for the compose of a run whose harness is hidden, whose Copies copies
 	// every module as well, so the home contains no link.
 	Hidden bool
+	// Checkout is the root of the checkout the harness is composed for. The program of a
+	// workflow hook is a file in the commit at HEAD of that checkout, and [Hook.Run] has
+	// its path in git from it; "" takes the directory of the stack's document.
+	Checkout string
 	// StackAs, when set, is the stack as an error of the compose shows it in place of its
 	// file, for a stack whose file is a copy that the person does not edit, such as the
 	// workspace's harness in Qory Apiary.
@@ -497,6 +505,9 @@ func ComposeWith(p *stack.Stack, opts Options) (_ *Result, err error) {
 		return nil, err
 	}
 	if err := workflowsShipped(p, declared, opts.Base, opts.StackAs); err != nil {
+		return nil, err
+	}
+	if err := checkHooks(res, p, opts); err != nil {
 		return nil, err
 	}
 	if err := checkContracts(res, opened); err != nil {
