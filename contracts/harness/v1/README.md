@@ -943,11 +943,12 @@ Add roles/developer.yaml to module core, or remove contract from roles.agents.de
 So do a directory at that path, a link that leads out of the module, a path that passes
 through more than 40 links, and a file that is not a contract. An absolute link fails
 too, unless the home contains copies of the module's entries (`copied` in the report,
-§The report) and the link stays inside the module. A file is not a contract when it is not a map, or when it has a key other than
-the five, a list key that is not a list of names on one line each with no name twice, a
-section that starts with `#`, a `tier` that is not `true` or `false`, or a `report` that
-is not a map. Each refusal starts with its fix, such as `Remove key paths from
-roles/developer.yaml of module core.`, and has its cause on the next line.
+§The report) and the link stays inside the module. A file is not a contract when it is
+not a map, or when it has a key other than the five, a list key that is not a list of
+names on one line each with no name twice, a section that starts with `#`, a `tier` that
+is not `true` or `false`, or a `report` that is not a map. Each refusal starts with its
+fix, such as `Remove key paths from roles/developer.yaml of module core.`, and has its
+cause on the next line.
 
 ## References
 
