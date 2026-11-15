@@ -1160,7 +1160,18 @@ it from provides.agents.reviewers of module python.` The fix line ends with the 
 that added the member: `bind.agents.reviewers in qory-stack.yaml` for a bind in the
 stack you compose, `bind.agents.reviewers in qory.yaml` (or `in harness.yaml`) for a
 bind in a checkout's file, and `bind.agents.reviewers in the base stack` for a bind in
-the base stack.
+the base stack. When two or more lists add the member, the fix line is `Complete agent
+python-reviewer, or remove it from the lists that add it.`, and `These lists add it:`
+follows, with a line per list, before the contract's line:
+
+```
+Complete agent python-reviewer, or remove it from the lists that add it.
+  These lists add it:
+  - provides.agents.reviewers of module software-factory
+  - provides.agents.reviewers of module python
+  The contract roles/reviewer.yaml of module software-factory requires these parts, which agents/python-reviewer.md of module python lacks:
+  - the heading "## Stop conditions"
+```
 
 The compose reads each contract whether or not an agent fills the role. A contract file
 that is missing fails it:
@@ -1312,10 +1323,13 @@ runtime: the resolution happens in the composed tree, per path.
    typescript: no module ships agent typescript-developer.` and `Rename role
    agents/reviewer in the provides of module typescript: module core ships agent reviewer,
    and a role's name is no entry's.` Each member of a group role is checked the same way,
-   a provided one with `Ship agent python-reviewer, or remove it from
-   provides.agents.reviewers of module python.` and `No module ships agent
-   python-reviewer.` on the next line. Every failure of this rule comes at once, each on
-   its line, or on two lines with the cause on the second: the workflow blocks first (the
+   with `Ship agent python-reviewer, or remove it from provides.agents.reviewers of module
+   python.` and `No module ships agent python-reviewer.` on the next line, the fix ending
+   with the list that added the member as in §The role contract. When two or more lists
+   add it, the fix is `Ship agent python-reviewer, or remove it from the lists that add
+   it.`, then `No module ships agent python-reviewer, and these lists add it:` and a line
+   per list. Every failure of this rule comes at once, each on its line, or with its cause
+   on indented lines after the fix: the workflow blocks first (the
    next paragraph), then the roles, then the entries in their sorted order, so one compose
    lists every site there is to fix. An entry that was left out has no requirements to
    meet. A manifest whose `requires` lists an entry the module does not ship fails as the

@@ -917,8 +917,15 @@ func checkResolved(res *Result, requires map[string]map[string][]Need, dropped m
 		if composed[kind+"/"+to] {
 			continue
 		}
-		if r.Module != "" && r.Group {
-			lines = append(lines, fmt.Sprintf("Ship %s, or remove it from provides.%s.%s of module %s.\n  No module ships %s.", described(kind, to), shown(kind), shown(name), shown(r.Module), described(kind, to)))
+		if by := leftOut(kind, to); r.Group && (by == "" || r.Module != "") {
+			// Each list that adds the member is in the fix, so that following it removes
+			// the member.
+			remove, items := addedBy(listsOf(res, r))
+			cause := fmt.Sprintf("No module ships %s.", described(kind, to))
+			if items != "" {
+				cause = fmt.Sprintf("No module ships %s, and these lists add it:%s", described(kind, to), items)
+			}
+			lines = append(lines, fmt.Sprintf("Ship %s, or %s.\n  %s", described(kind, to), remove, cause))
 			continue
 		}
 		if r.Module != "" {

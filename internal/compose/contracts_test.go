@@ -522,6 +522,76 @@ func TestAGroupCauseLineIsIndented(t *testing.T) {
 	}
 }
 
+// TestAMemberThatTwoListsAddNamesBothLists is a member that lacks a part, which the
+// provides of factory and of python both add: the fix offers to remove it from the lists
+// that add it, and a line per list names them.
+func TestAMemberThatTwoListsAddNamesBothLists(t *testing.T) {
+	files := groupFiles("---\nname: python-reviewer\ndescription: Reviews Python.\ntools: Read\n---\n\n## Findings\n")
+	files["modules/factory/qory-module.yaml"] = "apiVersion: qory.dev/v1alpha1\nname: factory\nroles:\n  agents:\n    reviewers: {fill: many, contract: roles/reviewer.yaml}\nprovides:\n  agents:\n    reviewers: [code-reviewer, python-reviewer]\n"
+	want := "Complete agent python-reviewer, or remove it from the lists that add it.\n" +
+		"  These lists add it:\n" +
+		"  - provides.agents.reviewers of module factory\n" +
+		"  - provides.agents.reviewers of module python\n" +
+		"  The contract roles/reviewer.yaml of module factory requires these parts, which agents/python-reviewer.md of module python lacks:\n" +
+		"  - the heading \"## Stop conditions\""
+	if _, err := composeTree(t, files); err == nil || err.Error() != want {
+		t.Fatalf("error:\n%v\nwant:\n%s", err, want)
+	}
+}
+
+// baseGroupFiles is a checkout whose qory.yaml extends the base stack software, which
+// declares the group role agents/reviewers in module factory and binds python-reviewer to
+// it. With python set, the checkout composes the module python too, which provides
+// python-reviewer to the group. The agent python-reviewer has the text member, in python
+// when python is set and in factory otherwise; with member "" no module ships it.
+func baseGroupFiles(member string, python bool) map[string]string {
+	files := map[string]string{
+		"base/" + stack.FileName:                      "apiVersion: qory.dev/v1alpha1\nname: software\nextending: {kinds: [agents]}\nmodules:\n  - name: factory\n    source: {path: modules/factory}\nbind:\n  agents:\n    reviewers: [python-reviewer]\n",
+		"base/modules/factory/qory-module.yaml":       "apiVersion: qory.dev/v1alpha1\nname: factory\nroles:\n  agents:\n    reviewers: {fill: many, contract: roles/reviewer.yaml}\n",
+		"base/modules/factory/roles/reviewer.yaml":    "tools: [Read]\n",
+		"base/modules/factory/skills/review/SKILL.md": "---\nname: review\ndescription: review\n---\n\nStart ${qory:agents/reviewers}.\n",
+		"base/modules/factory/agents/other.md":        "---\nname: other\ntools: Read\n---\n",
+		"app/" + config.FileName:                      "apiVersion: qory.dev/v1alpha1\nharness:\n  extends: {path: ../base}\n  target: {runtime: claude}\n",
+	}
+	where := "base/modules/factory/agents/"
+	if python {
+		files["app/"+config.FileName] += "  modules:\n    - name: python\n      source: {path: ../python}\n"
+		files["python/qory-module.yaml"] = "apiVersion: qory.dev/v1alpha1\nname: python\nprovides:\n  agents:\n    reviewers: [python-reviewer]\n"
+		files["python/agents/python-other.md"] = "---\nname: python-other\ntools: Read\n---\n"
+		where = "python/agents/"
+	}
+	if member != "" {
+		files[where+"python-reviewer.md"] = member
+	}
+	return files
+}
+
+// TestAnUnshippedMemberHasItsFixFirst is a member of a group that no module ships: added
+// by the base stack's bind and python's provides, the fix offers to remove it from the
+// lists that add it, and a line per list names them; added by one bind, the fix names
+// that bind.
+func TestAnUnshippedMemberHasItsFixFirst(t *testing.T) {
+	want := "Ship agent python-reviewer, or remove it from the lists that add it.\n" +
+		"  No module ships agent python-reviewer, and these lists add it:\n" +
+		"  - bind.agents.reviewers in the base stack\n" +
+		"  - provides.agents.reviewers of module python"
+	if _, err := composeExtending(t, writeTree(t, baseGroupFiles("", true))); err == nil || err.Error() != want {
+		t.Errorf("error:\n%v\nwant:\n%s", err, want)
+	}
+	want = "Ship agent python-reviewer, or remove it from bind.agents.reviewers in the base stack.\n" +
+		"  No module ships agent python-reviewer."
+	if _, err := composeExtending(t, writeTree(t, baseGroupFiles("", false))); err == nil || err.Error() != want {
+		t.Errorf("error:\n%v\nwant:\n%s", err, want)
+	}
+	files := groupFiles("")
+	files[stack.FileName] += "bind:\n  agents:\n    reviewers: [code-reviewer, docs-reviewer]\n"
+	want = "Ship agent docs-reviewer, or remove it from bind.agents.reviewers in qory-stack.yaml.\n" +
+		"  No module ships agent docs-reviewer."
+	if _, err := composeTree(t, files); err == nil || err.Error() != want {
+		t.Errorf("error:\n%v\nwant:\n%s", err, want)
+	}
+}
+
 // TestAnExcludedGroupMemberIsNotChecked is a member of a group with a contract that the
 // providing module's exclude leaves out: it is no member, and the compose does not check
 // it.

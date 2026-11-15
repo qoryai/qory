@@ -34,6 +34,10 @@ type Role struct {
 	// replaced: the group had it from the base or a module's provides, and the bind's
 	// list does not have it. A replaced member fills nothing.
 	Replaced bool
+	// Also is, for a member of a group role, each later list that adds the same name: a
+	// module's provides after the base's bind or after another module's. Only From and
+	// Module are set.
+	Also []Role
 }
 
 // openedModule is one module of the stack with its source resolved and its manifest
@@ -58,7 +62,7 @@ type openedModule struct {
 // turn, a later layer replacing the name. Two modules that provide one single role with
 // different names fail the compose, unless the bind of p sets the role. A group's members
 // are the base bind's list, then each module's provides list in module order, each name
-// once; a bind of p that sets the group replaces the list, and the members it replaced
+// once, a later list that adds a name again in [Role.Also]; a bind of p that sets the group replaces the list, and the members it replaced
 // come back marked [Role.Replaced]. A base member for which dropped reports true is no
 // member either.
 //
@@ -177,8 +181,9 @@ func setRoles(p *stack.Stack, opened []openedModule, dropped func(o openedModule
 		kind, role, _ := strings.Cut(key, "/")
 		var list []Role
 		add := func(r Role) {
-			for _, have := range list {
+			for i, have := range list {
 				if have.Name == r.Name {
+					list[i].Also = append(list[i].Also, Role{From: r.From, Module: r.Module})
 					return
 				}
 			}

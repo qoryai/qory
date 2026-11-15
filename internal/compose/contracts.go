@@ -81,11 +81,11 @@ func checkContracts(res *Result, opened []openedModule) error {
 			if !ok {
 				continue
 			}
-			list := ""
+			var lists []string
 			if group {
-				list = memberList(res, role, filler)
+				lists = memberLists(res, role, filler)
 			}
-			agentBlocks, err := checkAgent(e, modules[e.Module], role, list, contracts)
+			agentBlocks, err := checkAgent(e, modules[e.Module], role, lists, contracts)
 			if err != nil {
 				return err
 			}
@@ -98,32 +98,64 @@ func checkContracts(res *Result, opened []openedModule) error {
 	return errors.New(strings.Join(blocks, "\n"))
 }
 
-// memberList is the list that adds the member of the group role to the group, as rule
-// 4's texts write it: provides.<kind>.<role> of module <m>, bind.<kind>.<role> in the
-// base stack, or bind.<kind>.<role> in the file of the document composed.
-func memberList(res *Result, role, member string) string {
-	kind, name, _ := strings.Cut(role, "/")
-	key := "bind." + shown(kind) + "." + shown(name)
+// memberLists is each list that adds the member of the group role to the group, in
+// the order the members are read, as rule 4's texts write a list: provides.<kind>.<role>
+// of module <m>, bind.<kind>.<role> in the base stack, or bind.<kind>.<role> in the file
+// of the document composed.
+func memberLists(res *Result, role, member string) []string {
 	for _, r := range res.Roles {
 		if r.Role != role || r.Name != member || r.Replaced {
 			continue
 		}
-		switch {
-		case r.Module != "":
-			return "provides." + shown(kind) + "." + shown(name) + " of module " + shown(r.Module)
-		case r.From == "base":
-			return key + " in the base stack"
-		}
-		break
+		return listsOf(res, r)
 	}
-	return key + " in " + docFile(res.Stack)
+	kind, name, _ := strings.Cut(role, "/")
+	return []string{"bind." + shown(kind) + "." + shown(name) + " in " + docFile(res.Stack)}
+}
+
+// listsOf is each list that adds r, a member of a group role: the list that set it, then
+// those of [Role.Also].
+func listsOf(res *Result, r Role) []string {
+	lists := []string{listOf(res, r)}
+	for _, also := range r.Also {
+		also.Role = r.Role
+		lists = append(lists, listOf(res, also))
+	}
+	return lists
+}
+
+// listOf is the list that set r, a member of a group role, as rule 4's texts write it,
+// see [memberLists].
+func listOf(res *Result, r Role) string {
+	kind, name, _ := strings.Cut(r.Role, "/")
+	switch {
+	case r.Module != "":
+		return "provides." + shown(kind) + "." + shown(name) + " of module " + shown(r.Module)
+	case r.From == "base":
+		return "bind." + shown(kind) + "." + shown(name) + " in the base stack"
+	}
+	return "bind." + shown(kind) + "." + shown(name) + " in " + docFile(res.Stack)
+}
+
+// addedBy is the fix and the items of a member of a group role that lists add: for one
+// list, "remove it from <list>" and no items; for several, "remove it from the lists that
+// add it" and one item line per list, each "  - <list>".
+func addedBy(lists []string) (fix string, items string) {
+	if len(lists) == 1 {
+		return "remove it from " + lists[0], ""
+	}
+	for _, l := range lists {
+		items += "\n  - " + l
+	}
+	return "remove it from the lists that add it", items
 }
 
 // checkAgent is a block for each contract of role that the agent e, of the composed
-// module m, lacks a part of. list is "" for a single role, and for a member of a group
-// role the list that adds it to the group, see [memberList]: the fix line then offers to
-// remove the member from that list, and the cause line names the member's module.
-func checkAgent(e Entry, m Module, role, list string, contracts []roleContract) ([]string, error) {
+// module m, lacks a part of. lists is nil for a single role, and for a member of a group
+// role each list that adds it to the group, see [memberLists]: the fix line then offers
+// to remove the member from that list, or from the lists that add it with a line per
+// list, and the cause line names the member's module.
+func checkAgent(e Entry, m Module, role string, lists []string, contracts []roleContract) ([]string, error) {
 	var blocks []string
 	readFile := os.ReadFile
 	if m.Root != nil {
@@ -151,8 +183,12 @@ func checkAgent(e Entry, m Module, role, list string, contracts []roleContract) 
 		}
 		fix := fmt.Sprintf("Complete agent %s of module %s, or bind %s to another agent.", shown(e.Name), shown(e.Module), shownKey(role))
 		agent := exports.Value(file, false)
-		if list != "" {
-			fix = fmt.Sprintf("Complete agent %s, or remove it from %s.", shown(e.Name), list)
+		if len(lists) > 0 {
+			remove, items := addedBy(lists)
+			fix = fmt.Sprintf("Complete agent %s, or %s.", shown(e.Name), remove)
+			if items != "" {
+				fix += "\n  These lists add it:" + items
+			}
 			agent += " of module " + shown(e.Module)
 		}
 		block := fmt.Sprintf("%s\n  The contract %s of module %s requires these parts, which %s lacks:",
