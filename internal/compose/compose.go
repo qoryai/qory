@@ -967,7 +967,7 @@ func checkResolved(res *Result, requires map[string]map[string][]Need, dropped m
 				continue
 			}
 			if len(members) == 0 {
-				lines = append(lines, fmt.Sprintf("Fill %s, or remove it from %s of module %s.\n  The group has no member.", shown(ref), exports.HidePath(e.In[ref]), shown(e.Module)))
+				lines = append(lines, noMember(res, e, ref))
 			}
 		}
 		for _, need := range requires[e.Module][e.Kind+"/"+e.Name] {
@@ -1009,6 +1009,29 @@ func checkResolved(res *Result, requires map[string]map[string][]Need, dropped m
 		return nil
 	}
 	return &UnresolvedError{Lines: lines}
+}
+
+// noMember is the refusal of the reference to ref, a group role with no member, in a
+// document of the entry e. A document of a base module is one the reader of a checkout's
+// qory.yaml does not edit: the fix offers a module in qory.yaml that provides members,
+// when the base lets an extending module ship agents, or asks the base stack's
+// maintainer, and the cause line names the document.
+func noMember(res *Result, e Entry, ref string) string {
+	file := exports.HidePath(e.In[ref])
+	base := false
+	for _, m := range res.Modules {
+		if m.Name == e.Module {
+			base = m.Base
+		}
+	}
+	if !base || res.Base == nil {
+		return fmt.Sprintf("Fill %s, or remove it from %s of module %s.\n  The group has no member.", shown(ref), file, shown(e.Module))
+	}
+	fix := fmt.Sprintf("Ask the base stack's maintainer to fill %s.", shownKey(ref))
+	if res.Base.Extending != nil && slices.Contains(res.Base.Extending.Kinds, "agents") {
+		fix = fmt.Sprintf("Add a module to %s that provides %s, or ask the base stack's maintainer.", docFile(res.Stack), shownKey(ref))
+	}
+	return fmt.Sprintf("%s\n  %s of module %s references %s, and the group has no member.", fix, file, shown(e.Module), shownKey(ref))
 }
 
 // excludeOf is the first exclude in res that left out the entry of kind and name, nil

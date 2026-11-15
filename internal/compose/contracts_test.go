@@ -816,6 +816,55 @@ func TestTheNoMemberFixLineFitsIn100Characters(t *testing.T) {
 	}
 }
 
+// TestABaseDocumentWithAnEmptyGroupOffersAModule is a checkout whose qory.yaml extends
+// the base stack software, whose skill review of module factory references a group that
+// has no member: the reader edits neither, so the fix offers a module in qory.yaml that
+// provides members, or asks the base stack's maintainer. Such a module fills the group,
+// and the compose succeeds. A base that lets an extending module ship no agents leaves
+// only the request to its maintainer.
+func TestABaseDocumentWithAnEmptyGroupOffersAModule(t *testing.T) {
+	const fixed = "---\nname: python-reviewer\ntools: Read\n---\n"
+	unbound := func(python bool) map[string]string {
+		files := baseGroupFiles(fixed, python)
+		files["base/"+stack.FileName] = strings.Replace(files["base/"+stack.FileName], "bind:\n  agents:\n    reviewers: [python-reviewer]\n", "", 1)
+		if !python {
+			delete(files, "base/modules/factory/agents/python-reviewer.md")
+		}
+		return files
+	}
+	want := "Add a module to qory.yaml that provides agents/reviewers, or ask the base stack's maintainer.\n" +
+		"  skills/review/SKILL.md of module factory references agents/reviewers, and the group has no member."
+	if _, err := composeExtending(t, writeTree(t, unbound(false))); err == nil || err.Error() != want {
+		t.Errorf("error:\n%v\nwant:\n%s", err, want)
+	}
+	if _, err := composeExtending(t, writeTree(t, unbound(true))); err != nil {
+		t.Errorf("with a module that provides a member: %v", err)
+	}
+	files := unbound(false)
+	files["base/"+stack.FileName] = strings.Replace(files["base/"+stack.FileName], "extending: {kinds: [agents]}", "extending: {}", 1)
+	want = "Ask the base stack's maintainer to fill agents/reviewers.\n" +
+		"  skills/review/SKILL.md of module factory references agents/reviewers, and the group has no member."
+	if _, err := composeExtending(t, writeTree(t, files)); err == nil || err.Error() != want {
+		t.Errorf("error:\n%v\nwant:\n%s", err, want)
+	}
+}
+
+// TestACheckoutDocumentWithAnEmptyGroupKeepsTheFillLine is a checkout whose module
+// python ships a skill that references the base's group, which has no member: the reader
+// edits the skill, and the fix offers to fill the group or to remove the reference.
+func TestACheckoutDocumentWithAnEmptyGroupKeepsTheFillLine(t *testing.T) {
+	files := baseGroupFiles("", true)
+	files["base/"+stack.FileName] = strings.Replace(files["base/"+stack.FileName], "bind:\n  agents:\n    reviewers: [python-reviewer]\n", "", 1)
+	files["base/"+stack.FileName] = strings.Replace(files["base/"+stack.FileName], "kinds: [agents]", "kinds: [agents, skills]", 1)
+	files["base/modules/factory/skills/review/SKILL.md"] = "---\nname: review\ndescription: review\n---\n\nReview.\n"
+	files["python/qory-module.yaml"] = "apiVersion: qory.dev/v1alpha1\nname: python\n"
+	files["python/skills/check/SKILL.md"] = "---\nname: check\ndescription: check\n---\n\nStart ${qory:agents/reviewers}.\n"
+	want := "Fill agents/reviewers, or remove it from skills/check/SKILL.md of module python.\n  The group has no member."
+	if _, err := composeExtending(t, writeTree(t, files)); err == nil || err.Error() != want {
+		t.Errorf("error:\n%v\nwant:\n%s", err, want)
+	}
+}
+
 // TestAnExcludedGroupMemberIsNotChecked is a member of a group with a contract that the
 // providing module's exclude leaves out: it is no member, and the compose does not check
 // it.

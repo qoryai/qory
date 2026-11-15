@@ -1286,7 +1286,13 @@ ${qory:agents/reviewers} from the front matter of skills/review/SKILL.md of modu
 with `A group resolves to a list.` on the next line. A group with no member fails the compose
 when a document references it: `Fill agents/reviewers, or remove it from
 skills/review/SKILL.md of module core.` with `The group has no member.` on
-the next line. The home contains
+the next line. When the document is in a module of the base stack a checkout extends,
+which the checkout does not edit, the fix is `Add a module to qory.yaml that provides
+agents/reviewers, or ask the base stack's maintainer.`, with `skills/review/SKILL.md of
+module core references agents/reviewers, and the group has no member.` on the next line.
+When the base's `extending.kinds` does not list `agents`, a module of the checkout cannot
+provide members, and the fix is `Ask the base stack's maintainer to fill
+agents/reviewers.` The home contains
 `roles.json`, written when the harness has a role: `{"roles": [...]}`, one row per role
 and per member of a group, in the report's order, each `{role, agent, from}` as the
 report has it, with `group: true` for a member and the member's `paths` (§The module
