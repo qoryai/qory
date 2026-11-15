@@ -924,6 +924,10 @@ func checkResolved(res *Result, requires map[string]map[string][]Need, dropped m
 				fix := fmt.Sprintf("Ask the base stack's maintainer to ship %s.", described(kind, to))
 				if baseAllowsAgents(res) {
 					fix = fmt.Sprintf("Ship %s in a module of %s, or ask the base stack's maintainer to ship it.", described(kind, to), docFile(res.Stack))
+					if !fits(fix) {
+						// The cause line names the agent.
+						fix = fmt.Sprintf("Ship the agent in a module of %s, or ask the base stack's maintainer to ship it.", docFile(res.Stack))
+					}
 				}
 				lists := listsOf(res, r)
 				these := "this list adds it:"
@@ -1033,17 +1037,11 @@ func checkResolved(res *Result, requires map[string]map[string][]Need, dropped m
 // maintainer, and the cause line names the document.
 func noMember(res *Result, e Entry, ref string) string {
 	file := exports.HidePath(e.In[ref])
-	base := false
-	for _, m := range res.Modules {
-		if m.Name == e.Module {
-			base = m.Base
-		}
-	}
-	if !base || res.Base == nil {
+	if !baseModule(res, e.Module) || res.Base == nil {
 		return fmt.Sprintf("Fill %s, or remove it from %s of module %s.\n  The group has no member.", shown(ref), file, shown(e.Module))
 	}
 	fix := fmt.Sprintf("Ask the base stack's maintainer to fill %s.", shownKey(ref))
-	if res.Base.Extending != nil && slices.Contains(res.Base.Extending.Kinds, "agents") {
+	if baseAllowsAgents(res) {
 		fix = fmt.Sprintf("Add a module to %s that provides %s, or ask the base stack's maintainer.", docFile(res.Stack), shownKey(ref))
 	}
 	return fmt.Sprintf("%s\n  %s of module %s references %s, and the group has no member.", fix, file, shown(e.Module), shownKey(ref))

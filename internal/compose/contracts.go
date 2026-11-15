@@ -130,12 +130,28 @@ func fixedLists(res *Result, r Role) int {
 // baseModule reports whether the composed module of that name is a module of the base
 // stack a checkout extends.
 func baseModule(res *Result, name string) bool {
+	m, _ := moduleOf(res, name)
+	return m.Base
+}
+
+// moduleOf is the composed module of that name, false for none.
+func moduleOf(res *Result, name string) (Module, bool) {
 	for _, m := range res.Modules {
 		if m.Name == name {
-			return m.Base
+			return m, true
 		}
 	}
-	return false
+	return Module{}, false
+}
+
+// checkoutName is the module of that name as the checkout's qory.yaml lists it: a base
+// module by its [Module.BaseName], which differs from the manifest's name when the base
+// lists an export of another name, and any other module by its name.
+func checkoutName(res *Result, name string) string {
+	if m, ok := moduleOf(res, name); ok && m.Base && m.BaseName != "" {
+		return shown(m.BaseName)
+	}
+	return shown(name)
 }
 
 // baseAllowsAgents reports whether the base stack a checkout extends lets an extending
@@ -148,7 +164,7 @@ func baseAllowsAgents(res *Result) bool {
 // group role that only a list of the base stack adds, adds the agent bound to the group.
 func addsTo(res *Result, r Role, bound string) string {
 	if r.Module != "" {
-		return fmt.Sprintf("Module %s of the base stack %s provides %s to %s", shown(r.Module), res.Base, bound, shownKey(r.Role))
+		return fmt.Sprintf("Module %s of the base stack %s provides %s to %s", checkoutName(res, r.Module), res.Base, bound, shownKey(r.Role))
 	}
 	return fmt.Sprintf("The base stack %s binds %s to %s", res.Base, bound, shownKey(r.Role))
 }
@@ -175,7 +191,7 @@ func listsOf(res *Result, r Role) []string {
 }
 
 // listOf is the list that set r, a member of a group role, as rule 4's texts write it,
-// see [memberLists].
+// see [addedBy].
 func listOf(res *Result, r Role) string {
 	kind, name, _ := strings.Cut(r.Role, "/")
 	switch {
@@ -250,7 +266,7 @@ func checkAgent(res *Result, e Entry, m Module, role string, member *Role, contr
 			shown(e.Name), shown(e.Module), shownKey(role), contract, exports.Value(file, false))
 		tail := ""
 		if member != nil {
-			block, tail = memberHead(res, e, m, *member, contract, exports.Value(file, false)+" of module "+shown(e.Module))
+			block, tail = memberHead(res, e, m, *member, contract, exports.Value(file, false))
 		}
 		for _, part := range missing {
 			block += "\n  - " + part
@@ -262,7 +278,7 @@ func checkAgent(res *Result, e Entry, m Module, role string, member *Role, contr
 
 // memberHead is the fix and the cause line of a block of the agent e, of module m, that
 // lacks parts of contract and fills r, a member of a group role; tail is what follows the
-// parts. agent is e's file as the cause line names it.
+// parts. file is e's file as the cause line names it.
 //
 // A member that lists the reader edits add gets the fix that removes it from those
 // lists: from the one list, or from the lists that add it with a line per list. The
@@ -273,25 +289,36 @@ func checkAgent(res *Result, e Entry, m Module, role string, member *Role, contr
 // request to the base stack's maintainer; the cause line names the list and the
 // contract. A member that such a list and another add gets the exclude, or the change to
 // the agent where the reader can make it, and the lists after the parts.
-func memberHead(res *Result, e Entry, m Module, r Role, contract, agent string) (head, tail string) {
+func memberHead(res *Result, e Entry, m Module, r Role, contract, file string) (head, tail string) {
 	name := shown(e.Name)
-	cause := fmt.Sprintf("  The contract %s requires these parts, which %s lacks:", contract, agent)
 	key, in := shownKey(e.Kind+"/"+e.Name), " in "+docFile(res.Stack)
 	exclude := "Exclude " + key + in
+	askComplete := ", or ask the base stack's maintainer to complete it."
 	lacking := ", and the agent lacks these parts of the contract " + contract + ":"
 	fixed := fixedLists(res, r)
 	switch {
 	case fixed == 1 && len(r.Also) == 0 && !m.Base:
 		return "Complete agent " + name + " in module " + shown(e.Module) + ".\n  " + addsTo(res, r, name) + lacking, ""
 	case fixed == 1 && len(r.Also) == 0:
-		bound := name + " of module " + shown(e.Module)
+		// The module is on the cause line unless the fix line names it, or the list is
+		// the module's provides, which the cause line names.
+		mod := checkoutName(res, e.Module)
+		of := " of module " + mod
+		if r.Module == e.Module {
+			of = ""
+		}
+		bound := name + of
 		fix := "Ask the base stack's maintainer to complete agent " + name + "."
 		if excludable(res, m) {
-			fix = "Exclude " + key + " of module " + shown(e.Module) + in + ", or ask the base stack's maintainer to complete it."
-			if fits(fix) {
+			fix = "Exclude " + key + " of module " + mod + in + askComplete
+			switch {
+			case fits(fix):
 				bound = name
-			} else {
-				fix = exclude + ", or ask the base stack's maintainer to complete it."
+			case fits(exclude + askComplete):
+				fix = exclude + askComplete
+			default:
+				fix = "Exclude the agent" + in + askComplete
+				bound = key + of
 			}
 		}
 		return fix + "\n  " + addsTo(res, r, bound) + lacking, ""
@@ -304,10 +331,16 @@ func memberHead(res *Result, e Entry, m Module, r Role, contract, agent string) 
 				fix = exclude + ", or complete it."
 			}
 		case excludable(res, m):
-			fix = exclude + ", or ask the base stack's maintainer to complete it."
+			fix = exclude + askComplete
+			if !fits(fix) {
+				fix = "Exclude the agent" + in + askComplete
+			}
 		}
+		// A base module is named as the checkout's qory.yaml lists it, for the exclude.
+		cause := fmt.Sprintf("  The contract %s requires these parts, which %s of module %s lacks:", contract, file, checkoutName(res, e.Module))
 		return fix + "\n" + cause, "\n  These lists add it:" + itemLines(listsOf(res, r))
 	}
+	cause := fmt.Sprintf("  The contract %s requires these parts, which %s of module %s lacks:", contract, file, shown(e.Module))
 	lead := "Complete agent " + name + ", or "
 	remove, items, many := addedBy(lead, listsOf(res, r))
 	head = lead + remove + "."
