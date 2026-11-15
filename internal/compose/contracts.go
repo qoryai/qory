@@ -196,7 +196,7 @@ func listOf(res *Result, r Role) string {
 	kind, name, _ := strings.Cut(r.Role, "/")
 	switch {
 	case r.Module != "":
-		return "provides." + shown(kind) + "." + shown(name) + " of module " + shown(r.Module)
+		return "provides." + shown(kind) + "." + shown(name) + " of module " + checkoutName(res, r.Module)
 	case r.From == "base":
 		return "bind." + shown(kind) + "." + shown(name) + " in the base stack"
 	}
@@ -261,7 +261,7 @@ func checkAgent(res *Result, e Entry, m Module, role string, member *Role, contr
 		if len(missing) == 0 {
 			continue
 		}
-		contract := exports.Value(c.Path, false) + " of module " + shown(c.Module)
+		contract := exports.Value(c.Path, false) + " of module " + checkoutName(res, c.Module)
 		block := fmt.Sprintf("Complete agent %s of module %s, or bind %s to another agent.\n  The contract %s requires these parts, which %s lacks:",
 			shown(e.Name), shown(e.Module), shownKey(role), contract, exports.Value(file, false))
 		tail := ""

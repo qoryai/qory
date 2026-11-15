@@ -980,27 +980,45 @@ func TestAnEmptyGroupWithAContractComposes(t *testing.T) {
 // TestABaseModuleIsExcludedByTheNameQoryYamlListsItBy is a base stack that lists the
 // export core of a git source, whose manifest declares the name core-x, and binds its
 // agent pr, which lacks a part of the contract: the fix offers the exclude of module
-// core, the name the checkout's qory.yaml lists it by, and that exclude composes.
+// core, the name the checkout's qory.yaml lists it by, and that exclude composes. No
+// line of the refusal names the module core-x, also when the module's provides adds pr.
 func TestABaseModuleIsExcludedByTheNameQoryYamlListsItBy(t *testing.T) {
 	isolateAll(t)
+	manifest := "apiVersion: qory.dev/v1alpha1\nname: core-x\nroles:\n  agents:\n    reviewers: {fill: many, contract: roles/reviewer.yaml}\n"
+	provided := gitRepo(t, "", map[string]string{
+		"qory.yaml":                           "apiVersion: qory.dev/v1alpha1\nexports:\n  modules: [core]\n",
+		"modules/core/qory-module.yaml":       manifest + "provides:\n  agents:\n    reviewers: [pr]\n",
+		"modules/core/roles/reviewer.yaml":    "tools: [Read]\n",
+		"modules/core/skills/review/SKILL.md": "---\nname: review\ndescription: review\n---\n\nStart ${qory:agents/reviewers}.\n",
+		"modules/core/agents/other.md":        "---\nname: other\ntools: Read\n---\n",
+		"modules/core/agents/pr.md":           "---\nname: pr\n---\n",
+	})
 	url := gitRepo(t, "", map[string]string{
 		"qory.yaml":                              "apiVersion: qory.dev/v1alpha1\nexports:\n  modules: [core]\n",
-		"modules/core/qory-module.yaml":          "apiVersion: qory.dev/v1alpha1\nname: core-x\nroles:\n  agents:\n    reviewers: {fill: many, contract: roles/reviewer.yaml}\n",
+		"modules/core/qory-module.yaml":          manifest,
 		"modules/core/roles/reviewer.yaml":       "tools: [Read]\n",
 		"modules/core/skills/review/SKILL.md":    "---\nname: review\ndescription: review\n---\n\nStart ${qory:agents/reviewers}.\n",
 		"modules/core/agents/other.md":           "---\nname: other\ntools: Read\n---\n",
 		"modules/core/agents/pr.md":              "---\nname: pr\n---\n",
 		"modules/core/agents/python-reviewer.md": "---\nname: python-reviewer\ntools: Read\n---\n",
 	})
-	files := map[string]string{
-		"base/" + stack.FileName: "apiVersion: qory.dev/v1alpha1\nname: software\nextending: {kinds: [agents]}\nmodules:\n  - source: {git: \"" + url + "\", ref: main, module: core}\nbind:\n  agents:\n    reviewers: [other, pr]\n",
-		"app/" + config.FileName: "apiVersion: qory.dev/v1alpha1\nharness:\n  extends: {path: ../base}\n  target: {runtime: claude}\n",
+	tree := func(url string) map[string]string {
+		return map[string]string{
+			"base/" + stack.FileName: "apiVersion: qory.dev/v1alpha1\nname: software\nextending: {kinds: [agents]}\nmodules:\n  - source: {git: \"" + url + "\", ref: main, module: core}\nbind:\n  agents:\n    reviewers: [other, pr]\n",
+			"app/" + config.FileName: "apiVersion: qory.dev/v1alpha1\nharness:\n  extends: {path: ../base}\n  target: {runtime: claude}\n",
+		}
 	}
+	_, err := composeExtending(t, writeTree(t, tree(provided)))
+	fix := "Exclude agents/pr in qory.yaml, or ask the base stack's maintainer to complete it."
+	if err == nil || !strings.HasPrefix(err.Error(), fix+"\n") || !strings.HasSuffix(err.Error(), "\n  - provides.agents.reviewers of module core") || strings.Contains(err.Error(), "core-x") {
+		t.Fatalf("with the module's provides, error:\n%v\nwant the fix line:\n%s\nand no line with core-x", err, fix)
+	}
+	files := tree(url)
 	dir := writeTree(t, files)
-	_, err := composeExtending(t, dir)
-	fix := "Exclude agents/pr of module core in qory.yaml, or ask the base stack's maintainer to complete it."
-	if err == nil || !strings.HasPrefix(err.Error(), fix+"\n  The base stack software@") || !strings.Contains(err.Error(), " binds pr to agents/reviewers, ") {
-		t.Fatalf("error:\n%v\nwant the fix line:\n%s", err, fix)
+	_, err = composeExtending(t, dir)
+	fix = "Exclude agents/pr of module core in qory.yaml, or ask the base stack's maintainer to complete it."
+	if err == nil || !strings.HasPrefix(err.Error(), fix+"\n  The base stack software@") || !strings.Contains(err.Error(), " binds pr to agents/reviewers, ") || strings.Contains(err.Error(), "core-x") {
+		t.Fatalf("error:\n%v\nwant the fix line:\n%s\nand no line with core-x", err, fix)
 	}
 	doc := filepath.Join(dir, "app", config.FileName)
 	if err := os.WriteFile(doc, []byte(files["app/"+config.FileName]+"  modules:\n    - name: core\n      exclude: {agents: [pr]}\n"), 0o644); err != nil {
@@ -1125,7 +1143,7 @@ func TestALeftOutBindMemberNamesTheExcludeOfQoryYaml(t *testing.T) {
 
 // TestALongLeftOutLineMovesTheBind is the left-out member of
 // TestALeftOutBindMemberHasItsFixFirst with a name that makes the fix line 100
-// characters, and one that makes it 101: the bind moves to a line of its own.
+// characters, and one that makes it 101: the bind moves to the next line.
 func TestALongLeftOutLineMovesTheBind(t *testing.T) {
 	leftOut := func(name string) map[string]string {
 		files := renamed(groupFiles(""), name)
