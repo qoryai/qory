@@ -19,9 +19,10 @@ import (
 var contractKinds = []string{"agents", "commands", "skills"}
 
 // readContracts reads the map form of an agents role under roles, the manifest at path's
-// roles key: {fill: one, contract: <path>}. It returns each contract's path, cleaned,
-// keyed <kind>/<role>, nil for none, and replaces each map in roles with its fill, so
-// that [stack.ReadRoles] reads the role as the short form one. A map for a skills or
+// roles key: {fill: one, contract: <path>}, or fill: many for a group role. It returns
+// each contract's path, cleaned, keyed <kind>/<role>, nil for none, and replaces each map
+// in roles with its fill, so that [stack.ReadRoles] reads the role as the short form,
+// one or many, and checks the value. A map for a skills or
 // commands role fails, and so does a map with a key other than fill and contract,
 // without fill, or with a contract that is not a path inside the module with no ..
 // part. Every error is a fix line, then a cause line that ends with path.

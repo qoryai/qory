@@ -920,7 +920,7 @@ The schema is [module.schema.json](module.schema.json).
 A module that declares an `agents` role may give it a contract: a file inside the module
 that lists the parts an agent needs to fill the role. The contract's path goes in the
 role's map in `qory-module.yaml`: `roles: {agents: {developer: {fill: one, contract:
-roles/developer.yaml}}}`.
+roles/developer.yaml}}}`. A group role takes a contract the same way, with `fill: many`.
 
 ```yaml
 # roles/developer.yaml
@@ -947,8 +947,9 @@ Every key is optional, so `{}` checks nothing. The schema is
 After the composition rules hold, the compose checks every agent that fills the role
 against each of the role's contracts: the agent the bind or a module's `provides` sets,
 the base's agent included, or the agent of the role's name when no layer sets the role.
-An agent that lacks parts fails the compose with one block per agent and contract, which
-lists every part the agent lacks:
+For a group role, it checks each member, and not a member that the checkout's bind
+replaced. An agent that lacks parts fails the compose with one block per agent and
+contract, which lists every part the agent lacks:
 
 ```
 Complete agent python-developer of module python, or bind agents/developer to another agent.
@@ -958,6 +959,9 @@ Complete agent python-developer of module python, or bind agents/developer to an
   - the tool Bash
   - a tier in model, such as ${qory:fast}
 ```
+
+For a member of a group role, the fix line is `Complete agent python-reviewer of module
+python, or remove it from the group agents/reviewers.`
 
 The compose reads each contract whether or not an agent fills the role. A contract file
 that is missing fails it:

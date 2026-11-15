@@ -261,7 +261,7 @@ func TestTheFirstLineOfEachRefusalFitsIn100Characters(t *testing.T) {
 	directory["modules/core/roles/developer.yaml/a"] = "a\n"
 	bad := contractFiles("")
 	bad["modules/core/roles/developer.yaml"] = "front_matter: [\"\"]\n"
-	trees := []map[string]string{contractFiles("Writes code.\n"), missing, directory, bad, workflowFiles()}
+	trees := []map[string]string{contractFiles("Writes code.\n"), missing, directory, bad, workflowFiles(), groupFiles("---\nname: python-reviewer\n---\n")}
 	for _, roles := range []string{
 		"agents:\n    developer: {fill: one, paths: [a]}",
 		"agents:\n    developer: {contract: roles/developer.yaml}",
@@ -374,5 +374,69 @@ func TestAContractThroughMoreThan40LinksFails(t *testing.T) {
 	want := "Replace roles/l0 of module core with a file inside the module.\n  The path passes through more than 40 links."
 	if err == nil || err.Error() != want {
 		t.Fatalf("error:\n%v\nwant:\n%s", err, want)
+	}
+}
+
+// groupFiles is a tree in which the group role agents/reviewers of module factory has the
+// contract roles/reviewer.yaml, and factory and python provide its members code-reviewer
+// and python-reviewer, with python-reviewer's text replaced by member when it is not "".
+func groupFiles(member string) map[string]string {
+	full := func(name string) string {
+		return "---\nname: " + name + "\ndescription: Reviews a change.\ntools: Read, Grep\n---\n\n## Findings\n\n## Stop conditions\n"
+	}
+	if member == "" {
+		member = full("python-reviewer")
+	}
+	return map[string]string{
+		stack.FileName: `apiVersion: qory.dev/v1alpha1
+modules:
+  - name: factory
+    source: {path: modules/factory}
+  - name: python
+    source: {path: modules/python}
+`,
+		"modules/factory/qory-module.yaml":         "apiVersion: qory.dev/v1alpha1\nname: factory\nroles:\n  agents:\n    reviewers: {fill: many, contract: roles/reviewer.yaml}\nprovides:\n  agents:\n    reviewers: [code-reviewer]\n",
+		"modules/factory/roles/reviewer.yaml":      "sections: [Findings, Stop conditions]\nfront_matter: [name, description]\ntools: [Read]\n",
+		"modules/factory/skills/review/SKILL.md":   "---\nname: review\ndescription: review\n---\n\nStart ${qory:agents/reviewers}.\n",
+		"modules/factory/agents/code-reviewer.md":  full("code-reviewer"),
+		"modules/python/qory-module.yaml":          "apiVersion: qory.dev/v1alpha1\nname: python\nprovides:\n  agents:\n    reviewers: [python-reviewer]\n",
+		"modules/python/agents/python-reviewer.md": member,
+	}
+}
+
+// TestAGroupWhoseMembersMeetTheContractComposes is a group role with a contract, each of
+// whose two members has every part: the compose succeeds.
+func TestAGroupWhoseMembersMeetTheContractComposes(t *testing.T) {
+	res, err := composeTree(t, groupFiles(""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := res.Groups["agents/reviewers"]; len(got) != 2 {
+		t.Fatalf("members %v, want 2", got)
+	}
+}
+
+// TestAGroupMemberThatLacksAPartFails is a group role with a contract, one of whose
+// members lacks a heading and a tool: the compose fails with that member named, and the
+// fix offers to remove it from the group.
+func TestAGroupMemberThatLacksAPartFails(t *testing.T) {
+	_, err := composeTree(t, groupFiles("---\nname: python-reviewer\ndescription: Reviews Python.\ntools: Grep\n---\n\n## Findings\n"))
+	want := "Complete agent python-reviewer of module python, or remove it from the group agents/reviewers.\n" +
+		"  The contract roles/reviewer.yaml of module factory requires these parts, which agents/python-reviewer.md lacks:\n" +
+		"  - the heading \"## Stop conditions\"\n" +
+		"  - the tool Read"
+	if err == nil || err.Error() != want {
+		t.Fatalf("error:\n%v\nwant:\n%s", err, want)
+	}
+}
+
+// TestAMemberTheBindReplacedIsNotChecked is a group whose members the stack's bind
+// replaces with code-reviewer alone: python-reviewer, which lacks parts, fills nothing and
+// is not checked.
+func TestAMemberTheBindReplacedIsNotChecked(t *testing.T) {
+	files := groupFiles("---\nname: python-reviewer\n---\n")
+	files[stack.FileName] += "bind:\n  agents:\n    reviewers: [code-reviewer]\n"
+	if _, err := composeTree(t, files); err != nil {
+		t.Fatal(err)
 	}
 }

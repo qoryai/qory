@@ -303,10 +303,10 @@ var envName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 // [accesskey.ShownName] prints it, and a value it writes as [exports.Value] prints it.
 // The env values come back cleaned, "." for the root.
 //
-// A role under roles may be a map, {fill: one, contract: <path>}, which reads as one,
-// with the contract's path in [Manifest.Contracts]. A map with another key or without
-// fill, a contract that is not a path inside the module, and a contract for a role that
-// is not an agents role are errors.
+// An agents role under roles may be a map, {fill: one, contract: <path>}, which reads as
+// its fill, one or many, with the contract's path in [Manifest.Contracts]. A map with
+// another key or without fill, a contract that is not a path inside the module, and a
+// map for a role that is not an agents role are errors.
 //
 // A requires item selects one entry of the module by its singular kind and lists what it
 // needs under the plural kinds:

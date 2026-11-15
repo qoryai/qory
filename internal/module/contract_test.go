@@ -10,19 +10,19 @@ import (
 	"github.com/qoryai/qory/internal/stack"
 )
 
-// TestReadManifestReadsARoleContract is a role written as a map with a contract: the role
-// reads as one, as the short form does, and the contract's path is in Contracts, keyed
-// by role. A map without a contract adds none.
+// TestReadManifestReadsARoleContract is a role and a group role written as maps with a
+// contract: each reads as its fill, one or many, as the short form does, and the
+// contract's path is in Contracts, keyed by role. A map without a contract adds none.
 func TestReadManifestReadsARoleContract(t *testing.T) {
-	dir := tree(t, map[string]string{ManifestName: "apiVersion: qory.dev/v1alpha1\nname: core\nroles:\n  agents:\n    developer: {fill: one, contract: ./roles/developer.yaml}\n    reviewer: {fill: one}\n  skills:\n    lint: one\n"})
+	dir := tree(t, map[string]string{ManifestName: "apiVersion: qory.dev/v1alpha1\nname: core\nroles:\n  agents:\n    developer: {fill: one, contract: ./roles/developer.yaml}\n    reviewer: {fill: one}\n    reviewers: {fill: many, contract: roles/reviewer.yaml}\n  skills:\n    lint: one\n"})
 	m, err := ReadManifest(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := (stack.Roles{"agents": {"developer": "one", "reviewer": "one"}, "skills": {"lint": "one"}}); !reflect.DeepEqual(m.Roles, want) {
+	if want := (stack.Roles{"agents": {"developer": "one", "reviewer": "one", "reviewers": "many"}, "skills": {"lint": "one"}}); !reflect.DeepEqual(m.Roles, want) {
 		t.Errorf("roles = %v, want %v", m.Roles, want)
 	}
-	if want := map[string]string{"agents/developer": filepath.Join("roles", "developer.yaml")}; !reflect.DeepEqual(m.Contracts, want) {
+	if want := map[string]string{"agents/developer": filepath.Join("roles", "developer.yaml"), "agents/reviewers": filepath.Join("roles", "reviewer.yaml")}; !reflect.DeepEqual(m.Contracts, want) {
 		t.Errorf("contracts = %v, want %v", m.Contracts, want)
 	}
 	m, err = ReadManifest(tree(t, map[string]string{ManifestName: "apiVersion: qory.dev/v1alpha1\nname: core\nroles:\n  agents:\n    reviewer: one\n"}))

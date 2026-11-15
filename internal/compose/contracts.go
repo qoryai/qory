@@ -30,10 +30,12 @@ type roleContract struct {
 // that the opened modules declare, in module order and by role, whether or not an agent
 // fills the role, so that a contract file that is missing or does not read fails the
 // compose of the stack that declares it. It then checks every agent that fills a role
-// with a contract: the agent [Result.Bind] sets, or the agent of the role's name when the
-// role is not bound. A role that no composed agent fills is rule 4's to refuse. Each
-// agent that lacks a part of a contract is one block of the error, by role, then in the
-// order of the contracts; the block lists every part it lacks.
+// with a contract: each member of a group role, in the group's order, the agent
+// [Result.Bind] sets for a single role, or the agent of the role's name when the role is
+// not bound. A member that the bind replaced fills nothing and is not checked. A role
+// that no composed agent fills is rule 4's to refuse. Each agent that lacks a part of a
+// contract is one block of the error, by role, then by agent, then in the order of the
+// contracts; the block lists every part it lacks.
 func checkContracts(res *Result, opened []openedModule) error {
 	var contracts []roleContract
 	for _, o := range opened {
@@ -67,50 +69,71 @@ func checkContracts(res *Result, opened []openedModule) error {
 	slices.Sort(roles)
 	for _, role := range roles {
 		kind, name, _ := strings.Cut(role, "/")
-		if to, ok := res.Bind[role]; ok {
-			name = to
+		fillers := []string{name}
+		members, group := res.Groups[role]
+		if group {
+			fillers = members
+		} else if to, ok := res.Bind[role]; ok {
+			fillers = []string{to}
 		}
-		e, ok := entries[kind+"/"+name]
-		if !ok {
-			continue
-		}
-		m := modules[e.Module]
-		readFile := os.ReadFile
-		if m.Root != nil {
-			readFile = module.ReadThrough(m.Root, m.Dir, m.RealDir)
-		}
-		data, err := readFile(e.Path)
-		if err != nil {
-			return exports.HideError(err)
-		}
-		doc, err := module.ParseDocument(data, e.Path)
-		if err != nil {
-			return err
-		}
-		file := e.Path
-		if rel, err := filepath.Rel(m.Dir, e.Path); err == nil {
-			file = filepath.ToSlash(rel)
-		}
-		for _, c := range contracts {
-			if c.Role != role {
+		for _, filler := range fillers {
+			e, ok := entries[kind+"/"+filler]
+			if !ok {
 				continue
 			}
-			missing := lacks(c.Contract, doc, e.Tier)
-			if len(missing) == 0 {
-				continue
+			agentBlocks, err := checkAgent(e, modules[e.Module], role, group, contracts)
+			if err != nil {
+				return err
 			}
-			block := fmt.Sprintf("Complete agent %s of module %s, or bind %s to another agent.\n  The contract %s of module %s requires these parts, which %s lacks:",
-				shown(e.Name), shown(e.Module), shownKey(role), exports.Value(c.Path, false), shown(c.Module), exports.Value(file, false))
-			for _, part := range missing {
-				block += "\n  - " + part
-			}
-			blocks = append(blocks, block)
+			blocks = append(blocks, agentBlocks...)
 		}
 	}
 	if len(blocks) == 0 {
 		return nil
 	}
 	return errors.New(strings.Join(blocks, "\n"))
+}
+
+// checkAgent is a block for each contract of role that the agent e, of the composed
+// module m, lacks a part of; group marks a member of a group role.
+func checkAgent(e Entry, m Module, role string, group bool, contracts []roleContract) ([]string, error) {
+	var blocks []string
+	readFile := os.ReadFile
+	if m.Root != nil {
+		readFile = module.ReadThrough(m.Root, m.Dir, m.RealDir)
+	}
+	data, err := readFile(e.Path)
+	if err != nil {
+		return nil, exports.HideError(err)
+	}
+	doc, err := module.ParseDocument(data, e.Path)
+	if err != nil {
+		return nil, err
+	}
+	file := e.Path
+	if rel, err := filepath.Rel(m.Dir, e.Path); err == nil {
+		file = filepath.ToSlash(rel)
+	}
+	for _, c := range contracts {
+		if c.Role != role {
+			continue
+		}
+		missing := lacks(c.Contract, doc, e.Tier)
+		if len(missing) == 0 {
+			continue
+		}
+		other := "bind " + shownKey(role) + " to another agent"
+		if group {
+			other = "remove it from the group " + shownKey(role)
+		}
+		block := fmt.Sprintf("Complete agent %s of module %s, or %s.\n  The contract %s of module %s requires these parts, which %s lacks:",
+			shown(e.Name), shown(e.Module), other, exports.Value(c.Path, false), shown(c.Module), exports.Value(file, false))
+		for _, part := range missing {
+			block += "\n  - " + part
+		}
+		blocks = append(blocks, block)
+	}
+	return blocks, nil
 }
 
 // readContracts reads the contracts the opened module o declares, by role, through the

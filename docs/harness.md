@@ -210,7 +210,8 @@ tier: true
 ```
 
 The compose checks every agent that fills the role, the agent that the base stack binds
-included. An agent that lacks a level-2 heading, a front-matter key, a tool or a tier in
+included. For a group role, written `{fill: many, contract: roles/reviewer.yaml}`, it
+checks each member. An agent that lacks a level-2 heading, a front-matter key, a tool or a tier in
 its model fails the compose with exit 2, and the message lists each part it lacks:
 
 ```

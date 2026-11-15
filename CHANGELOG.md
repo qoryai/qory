@@ -324,8 +324,9 @@ release may change what an existing document does, and states it under Upgrading
   {fill: one, contract: roles/developer.yaml}}}`. The contract lists the level-2 headings,
   the front-matter keys and the tools that an agent needs, and whether it needs a tier.
   The compose fails with exit 2 when an agent that fills the role lacks one of them, and
-  lists each missing part. A contract file that is missing or malformed fails the same
-  way. See The role contract in `contracts/harness/v1/README.md`.
+  lists each missing part. A group role takes a contract with `fill: many`, and the
+  compose checks each member. A contract file that is missing or malformed fails the
+  same way. See The role contract in `contracts/harness/v1/README.md`.
 
 ### Changed
 

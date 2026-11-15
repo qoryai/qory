@@ -18,8 +18,8 @@ import (
 // reference. A run starts a workflow at its first composed entry of skill
 // workflow-<name>, command workflow-<name>, skill <name> and command <name>, and that
 // entry starts each agent its documents reference. A reference to an agent that no module
-// ships or provides, that the stack does not bind, and that no exclude left out, is one
-// block, by workflow and then by agent. The exports check refuses a process with a
+// ships or provides, that the stack does not bind, that is no group role, and that no
+// exclude left out, is one block, by workflow and then by agent. The exports check refuses a process with a
 // workflow that the stack does not declare, so the stack's workflows include every
 // workflow of its process, and the check covers what the process lists. Any other unresolved reference is rule 4's alone, see
 // [checkResolved]: dropped are the roles a module provides with an entry that a block
@@ -49,6 +49,11 @@ func workflowRoles(res *Result, dropped map[string][]Role, base *Base, as string
 				continue
 			}
 			if _, bound := res.Bind[ref]; bound {
+				continue
+			}
+			// A group role, with members or none, is rule 4's: it refuses a reference to a
+			// group with no member.
+			if _, group := res.Groups[ref]; group {
 				continue
 			}
 			if _, composed := entries[ref]; composed {

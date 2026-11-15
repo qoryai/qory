@@ -152,3 +152,20 @@ func TestAWorkflowRoleAndOtherFailuresComeTogether(t *testing.T) {
 		t.Fatalf("an UnresolvedError of 2 lines: %#v", err)
 	}
 }
+
+// TestAWorkflowThatStartsAGroupComposes is the workflow's skill referencing a group role
+// that a module fills: the workflow check passes it, and with no member rule 4 refuses
+// it, not the workflow check.
+func TestAWorkflowThatStartsAGroupComposes(t *testing.T) {
+	files := workflowFiles()
+	files["modules/software-factory/qory-module.yaml"] = "apiVersion: qory.dev/v1alpha1\nname: software-factory\nroles:\n  agents:\n    demo-author: many\nprovides:\n  agents:\n    demo-author: [browser-demo-author]\n"
+	files["modules/software-factory/agents/browser-demo-author.md"] = "---\nname: browser-demo-author\n---\n"
+	if _, err := composeTree(t, files); err != nil {
+		t.Fatal(err)
+	}
+	files["modules/software-factory/qory-module.yaml"] = "apiVersion: qory.dev/v1alpha1\nname: software-factory\nroles:\n  agents:\n    demo-author: many\n"
+	_, err := composeTree(t, files)
+	if err == nil || !strings.HasSuffix(err.Error(), "The group has no member.") || strings.Contains(err.Error(), "drop capture-demos") {
+		t.Fatalf("a group with no member: %v", err)
+	}
+}
