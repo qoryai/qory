@@ -919,11 +919,11 @@ func checkResolved(res *Result, requires map[string]map[string][]Need, dropped m
 				continue
 			}
 			if file, ok := e.Front[ref]; ok {
-				lines = append(lines, fmt.Sprintf("Remove the reference to %s from the front matter of %s.\nA group resolves to a list.", shown(ref), exports.HidePath(file)))
+				lines = append(lines, fmt.Sprintf("Remove ${qory:%s} from the front matter of %s of module %s.\nA group resolves to a list.", shown(ref), exports.HidePath(file), shown(e.Module)))
 				continue
 			}
 			if len(members) == 0 {
-				lines = append(lines, fmt.Sprintf("Provide an agent for %s, or remove its reference from %s.\nThe group has no member.", shown(ref), exports.HidePath(e.In[ref])))
+				lines = append(lines, fmt.Sprintf("Give %s an agent, or remove its reference from %s of module %s.\nThe group has no member.", shown(ref), exports.HidePath(e.In[ref]), shown(e.Module)))
 			}
 		}
 		for _, need := range requires[e.Module][e.Kind+"/"+e.Name] {

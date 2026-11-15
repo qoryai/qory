@@ -961,12 +961,12 @@ that an `exclude` or an `only` leaves out is no member. With `software-factory` 
 test-reviewer, python-reviewer.`: the members' names at the path's address, joined by
 `, `, in the order of the group's rows in `roles.json`. A reference expands anywhere in a
 document's body, in a code span and in a fenced code block too. A reference to a group
-resolves only in a document's body. In front matter it fails the compose: `Remove the
-reference to agents/reviewers from the front matter of skills/review/SKILL.md.` with `A
-group resolves to a list.` on the next line. A group with no member fails the compose
-when a document references it: `Provide an agent for agents/reviewers, or remove its
-reference from skills/review/SKILL.md.` with `The group has no member.` on the next line.
-The file is the document's path in its module. The home contains
+resolves only in a document's body. In front matter it fails the compose: `Remove
+${qory:agents/reviewers} from the front matter of skills/review/SKILL.md of module core.`
+with `A group resolves to a list.` on the next line. A group with no member fails the compose
+when a document references it: `Give agents/reviewers an agent, or remove its reference
+from skills/review/SKILL.md of module core.` with `The group has no member.` on
+the next line. The home contains
 `roles.json`, written when the harness has a role: `{"roles": [...]}`, one row per role
 and per member of a group, in the report's order, each `{role, agent, from}` as the
 report has it, with `group: true` for a member and the member's `paths` (§The module
