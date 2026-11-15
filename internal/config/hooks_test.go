@@ -38,7 +38,7 @@ func TestComposeReadsTheHooks(t *testing.T) {
 
 // TestComposeRefusesHooksOutsideAnExtension refuses harness.hooks in a section that
 // defines a stack, hook points in the workflows of such a stack, a key a hook does not
-// have, a key present with an empty value and a timeout under a second, so that nothing
+// have, a key present with an empty value or null and a timeout under a second, so that nothing
 // a file sets is left unread. The path of qory.yaml is in the cause line, after the fix.
 func TestComposeRefusesHooksOutsideAnExtension(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "qory.yaml")
@@ -53,6 +53,10 @@ func TestComposeRefusesHooksOutsideAnExtension(t *testing.T) {
 			"Set hooks[0].agent in place of hooks[0].run.\nA review hook runs an agent, and hooks[0] in " + path + " runs a program."},
 		{"harness:\n  extends: {path: ../base}\n  hooks:\n    - {at: after-plan, kind: review, agent: licence-reviewer, run: \"\"}\n",
 			"Remove hooks[0].run, or give it a value.\n" + path + " sets hooks[0].run to an empty value."},
+		{"harness:\n  extends: {path: ../base}\n  hooks:\n    - {at: after-plan, kind: review, agent: licence-reviewer, run: ~}\n",
+			"Remove hooks[0].run, or give it a value.\n" + path + " sets hooks[0].run to an empty value."},
+		{"harness:\n  extends: {path: ../base}\n  hooks:\n    - at: after-plan\n      kind: check\n      run: x.sh\n      timeout:\n",
+			"Remove hooks[0].timeout, or give it a value.\n" + path + " sets hooks[0].timeout to an empty value."},
 		{"harness:\n  extends: {path: ../base}\n  hooks:\n    - {at: after-plan, kind: check, run: x.sh, timeout: 500ms}\n",
 			"Set hooks[0].timeout to whole seconds, 1s or more, such as 90s or 5m.\n" + path + ` sets "500ms".`},
 	} {

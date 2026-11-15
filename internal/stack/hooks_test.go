@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"gopkg.in/yaml.v3"
 )
 
 // TestLoadReadsTheHookPoints reads each workflow's hook points and the limits under
@@ -53,7 +55,7 @@ func TestLoadRefusesABrokenHookPoint(t *testing.T) {
 		{withWorkflows("  build:\n    hook_points:\n      after-plan: {at: end, kinds: []}\n"), "Add one or more kinds to the hook point: check, review or enrich.", `{path} sets no kind in workflows.build.hook_points.after-plan.kinds.`},
 		{withWorkflows("  build:\n    hook_points:\n      after-plan: {at: end, kinds: [lint]}\n"), "Set each kind of the hook point to check, review or enrich.", `{path} lists "lint" in workflows.build.hook_points.after-plan.kinds.`},
 		{withWorkflows("  build:\n    hook_points:\n      after-plan: {at: end, kinds: [check, check]}\n"), "List each kind of the hook point once.", `{path} lists check twice in workflows.build.hook_points.after-plan.kinds.`},
-		{withWorkflows("  build:\n    hook_points:\n      after-plan: {at: end, kinds: [check]}\n  plan:\n    hook_points:\n      after-plan: {at: end, kinds: [check]}\n"), "Rename one of the two hook points after-plan in qory-stack.yaml: a point name is unique in a stack.", "Workflows build and plan both declare it."},
+		{withWorkflows("  build:\n    hook_points:\n      after-plan: {at: end, kinds: [check]}\n  plan:\n    hook_points:\n      after-plan: {at: end, kinds: [check]}\n"), "Rename one of the two hook points in qory-stack.yaml: a point name is unique in a stack.", "Workflows build and plan both declare after-plan."},
 		{valid + "extending:\n  hooks: {per_point: 0}\n", "Set extending.hooks.per_point to 1 or more.", "{path} sets 0, which lets no hook in."},
 		{valid + "extending:\n  hooks: {per_workflow: -1}\n", "Set extending.hooks.per_workflow to 1 or more.", "{path} sets -1, which lets no hook in."},
 		{valid + "extending:\n  hooks: {timeout: soon}\n", fixTimeout, `{path} sets "soon".`},
@@ -153,6 +155,40 @@ func TestValidateRefusesABrokenHook(t *testing.T) {
 	h = Hook{At: "after-plan", Kind: "review", AgentText: text("licence-reviewer")}
 	if err := h.validate(0); err != nil || h.Agent != "licence-reviewer" || h.Command != nil {
 		t.Errorf("an agent hook: %+v, %v", h, err)
+	}
+}
+
+// TestHookReadsANullAsSet reads an entry of harness.hooks with a key set to null as a key
+// that is present, which validate refuses as an empty value; a key the entry leaves out
+// is not in Null, and a key a hook does not have is the decoder's unknown field, with its
+// line.
+func TestHookReadsANullAsSet(t *testing.T) {
+	for _, tc := range []struct{ body, key string }{
+		{"{at: after-plan, kind: check, run: ~}", "run"},
+		{"{at: after-plan, kind: review, agent: null}", "agent"},
+		{"at: after-plan\nkind: check\nrun: x.sh\nname:\n", "name"},
+		{"at: after-plan\nkind: check\nrun: x.sh\ntimeout:\n", "timeout"},
+		{"{at: after-plan, kind: check, run: x.sh, required: null}", "required"},
+	} {
+		var h Hook
+		if err := yaml.Unmarshal([]byte(tc.body), &h); err != nil {
+			t.Fatalf("%s: %v", tc.body, err)
+		}
+		if len(h.Null) != 1 || h.Null[0] != tc.key {
+			t.Errorf("%s: null %q, want [%s]", tc.body, h.Null, tc.key)
+		}
+		want := "Remove hooks[0]." + tc.key + ", or give it a value.\nThe file sets hooks[0]." + tc.key + " to an empty value."
+		if err := h.validate(0); err == nil || err.Error() != want {
+			t.Errorf("%s:\nerr = %v\nwant %s", tc.body, err, want)
+		}
+	}
+	var h Hook
+	if err := yaml.Unmarshal([]byte("{at: after-plan, kind: check, run: x.sh, required: false}"), &h); err != nil || h.Null != nil || h.Required() || *h.RunText != "x.sh" {
+		t.Errorf("no null: %+v, %v", h, err)
+	}
+	err := yaml.Unmarshal([]byte("at: after-plan\nkind: check\nwhen: always\n"), &h)
+	if err == nil || !strings.Contains(err.Error(), "line 3: field when not found in type stack.Hook") {
+		t.Errorf("an unknown key: %v", err)
 	}
 }
 

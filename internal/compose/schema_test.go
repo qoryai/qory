@@ -466,6 +466,8 @@ func TestSchemasKnowWorkflowHooks(t *testing.T) {
 		{composeSchema, `{"harness": {"hooks": [{"at": "after-plan", "kind": "check", "run": "x.sh", "timeout": "0s"}]}}`, false},
 		{composeSchema, `{"harness": {"hooks": [{"at": "after-plan", "kind": "check", "run": "x.sh", "timeout": "500ms"}]}}`, false},
 		{composeSchema, `{"harness": {"hooks": [{"at": "after-plan", "kind": "check", "run": "", "agent": "a"}]}}`, false},
+		{composeSchema, `{"harness": {"hooks": [{"at": "after-plan", "kind": "check", "run": null, "agent": "a"}]}}`, false},
+		{composeSchema, `{"harness": {"hooks": [{"at": "after-plan", "kind": "check", "run": "x.sh", "required": null}]}}`, false},
 		{composeSchema, `{"harness": {"hooks": [{"at": "after-plan", "kind": "check", "run": "x.sh", "name": ""}]}}`, false},
 		{composeSchema, `{"harness": {"hooks": [{"at": "after-plan", "kind": "check", "run": "x.sh", "timeout": ""}]}}`, false},
 		{stackSchema, `{` + point + `{"at": "end", "kinds": ["check", "review"]}}}}, "extending": {"hooks": {"per_point": 3, "per_workflow": 10, "timeout": "10m"}}}`, true},

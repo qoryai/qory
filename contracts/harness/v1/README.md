@@ -348,8 +348,8 @@ harness:
 | `timeout` | no | the longest the hook may run, a duration in whole seconds, 1s or more, at most the base's `extending.hooks.timeout`. Default: the base's, else 10 minutes |
 
 `hooks` is read beside `extends` and under `qory harness compose -f <stack>`, where
-workflow hooks alone are a document. A key present with an empty value is refused, as
-is a key a hook does not have. A `qory.yaml` in a folder above the checkout, one that
+workflow hooks alone are a document. A key present with an empty value or null, such as
+`run: ~`, is refused, as is a key a hook does not have. A `qory.yaml` in a folder above the checkout, one that
 covers several repositories, may list workflow hooks; each program is then a file
 inside the checkout being composed, so a hook of another repository under the folder
 fails the compose of this one.
@@ -364,7 +364,7 @@ Set hooks[0].timeout to whole seconds, 1s or more, such as 90s or 5m.
 ```
 
 Those rules are: both or neither of `run` and `agent`, a `review` hook with `run`, a
-kind other than the three, a missing `at` or `kind`, an empty value, a program path
+kind other than the three, a missing `at` or `kind`, an empty value or null, a program path
 that is absolute or leads out of the checkout, a malformed name, a timeout that is not
 whole seconds of 1s or more, and `harness.hooks` in a section that defines a stack. The
 compose fails with status 2 for a hook that breaks a rule of the base or the checkout:
@@ -429,9 +429,9 @@ compose fails with status 2 for a hook that breaks a rule of the base or the che
   ```
 
 A stack file is refused the same way, with the fix first, for a point name that two
-workflows declare, `Rename one of the two hook points after-plan in qory-stack.yaml: a
-point name is unique in a stack.`, then `Workflows build and plan both declare it.`, and
-for a point or a limit that breaks the rules of §The stack.
+workflows declare, `Rename one of the two hook points in qory-stack.yaml: a point name is
+unique in a stack.`, then `Workflows build and plan both declare after-review-round.`,
+and for a point or a limit that breaks the rules of §The stack.
 
 The home contains `hooks.json` with each workflow hook, in the order of `harness.hooks`;
 a checkout without workflow hooks has no such file. The workflows' files are the same

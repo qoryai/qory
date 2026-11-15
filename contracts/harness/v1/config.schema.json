@@ -141,7 +141,7 @@
           }
         },
         "hooks": {
-          "description": "The workflow hooks the checkout adds at the hook points of the stack it extends, read only beside extends or under qory harness compose -f <stack>. Each runs a program in the checkout or a composed agent; a review hook runs an agent, and an enrich hook writes notes for the agents that start after it. A key present with an empty value is refused. The base stack declares the points and the kinds each takes, and its extending.hooks the counts and the longest timeout.",
+          "description": "The workflow hooks the checkout adds at the hook points of the stack it extends, read only beside extends or under qory harness compose -f <stack>. Each runs a program in the checkout or a composed agent; a review hook runs an agent, and an enrich hook writes notes for the agents that start after it. A key present with an empty value or null is refused. The base stack declares the points and the kinds each takes, and its extending.hooks the counts and the longest timeout.",
           "type": "array",
           "items": {
             "type": "object",

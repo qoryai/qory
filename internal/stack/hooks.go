@@ -12,6 +12,7 @@ import (
 	"unicode"
 
 	"github.com/qoryai/forager/accesskey"
+	"gopkg.in/yaml.v3"
 
 	"github.com/qoryai/qory/internal/exports"
 )
@@ -211,6 +212,10 @@ type Hook struct {
 	RequiredValue *bool `yaml:"required,omitempty"`
 	// TimeoutText is timeout as written, nil when left out.
 	TimeoutText *string `yaml:"timeout,omitempty"`
+	// Null are the keys the entry sets to null, such as run: ~, in the order the entry
+	// lists them: each is refused as an empty value, since a nil above would read as left
+	// out. Set by [Hook.UnmarshalYAML].
+	Null []string `yaml:"-"`
 
 	// Command is RunText split at spaces: the program's path, then its arguments; nil for
 	// a hook that runs an agent. It is set as the document is validated.
@@ -221,6 +226,39 @@ type Hook struct {
 	// Timeout is TimeoutText read as a duration, 0 when left out. It is set as the
 	// document is validated.
 	Timeout time.Duration `yaml:"-"`
+}
+
+// hookKeys are the keys an entry of harness.hooks may set.
+var hookKeys = []string{"at", "kind", "run", "agent", "name", "required", "timeout"}
+
+// UnmarshalYAML reads one entry of harness.hooks and records in Null each key the entry
+// sets to null, which the decoder would leave as if the key were left out. A key a hook
+// does not have is reported as the decoder reports an unknown field, so the file's reader
+// names it with its line.
+func (h *Hook) UnmarshalYAML(n *yaml.Node) error {
+	type plain Hook
+	var null, unknown []string
+	if n.Kind == yaml.MappingNode {
+		for i := 0; i+1 < len(n.Content); i += 2 {
+			key, value := n.Content[i], n.Content[i+1]
+			switch {
+			case !slices.Contains(hookKeys, key.Value):
+				unknown = append(unknown, fmt.Sprintf("line %d: field %s not found in type stack.Hook", key.Line, key.Value))
+			case value.Kind == yaml.ScalarNode && value.ShortTag() == "!!null":
+				null = append(null, key.Value)
+			}
+		}
+	}
+	if len(unknown) > 0 {
+		return &yaml.TypeError{Errors: unknown}
+	}
+	var p plain
+	if err := n.Decode(&p); err != nil {
+		return err
+	}
+	*h = Hook(p)
+	h.Null = null
+	return nil
 }
 
 // Name is the name the hook goes by: name as written, else the agent's name, else the
@@ -259,7 +297,7 @@ func (p *Stack) validateHookPoints() error {
 				return hookErrorf("Name the hook point with a lower-case letter, then up to 54 lower-case letters, digits and hyphens.", "{path} lists %s under workflows.%s.hook_points.", accesskey.ShownName(point, true), name)
 			}
 			if other, ok := declared[point]; ok {
-				return hookErrorf("Rename one of the two hook points %s in {file}: a point name is unique in a stack.", "Workflows %s and %s both declare it.", point, other, name)
+				return hookErrorf("Rename one of the two hook points in {file}: a point name is unique in a stack.", "Workflows %s and %s both declare %s.", other, name, point)
 			}
 			declared[point] = name
 			where := fmt.Sprintf("workflows.%s.hook_points.%s", name, point)
@@ -321,6 +359,9 @@ func (p *Stack) validateHooks() error {
 // validate checks hook i for the rules that need no base and sets its Command, Agent
 // and Timeout.
 func (h *Hook) validate(i int) error {
+	if len(h.Null) > 0 {
+		return hookErrorf("Remove hooks[%d].%s, or give it a value.", "{path} sets hooks[%d].%s to an empty value.", i, h.Null[0], i, h.Null[0])
+	}
 	for _, c := range []struct {
 		key   string
 		value *string

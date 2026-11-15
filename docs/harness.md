@@ -335,7 +335,8 @@ Each workflow hook has:
 - optionally `name`, unique at its point; `required`, `true` when left out; and
   `timeout`, whole seconds of 1s or more, at most the stack's.
 
-A key you write with an empty value fails the compose; leave the key out instead.
+A key you write with an empty value or null, such as `run: ~`, fails the compose; leave
+the key out instead.
 
 The compose writes `hooks.json` into the home, with each program by its path from the
 root of the checkout. When the `qory.yaml` that lists the workflow hooks is in a folder
