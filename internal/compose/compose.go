@@ -950,7 +950,7 @@ func checkResolved(res *Result, requires map[string]map[string][]Need, dropped m
 				continue
 			}
 			if len(members) == 0 {
-				lines = append(lines, fmt.Sprintf("Give %s an agent, or remove its reference from %s of module %s.\n  The group has no member.", shown(ref), exports.HidePath(e.In[ref]), shown(e.Module)))
+				lines = append(lines, fmt.Sprintf("Fill %s, or remove it from %s of module %s.\n  The group has no member.", shown(ref), exports.HidePath(e.In[ref]), shown(e.Module)))
 			}
 		}
 		for _, need := range requires[e.Module][e.Kind+"/"+e.Name] {

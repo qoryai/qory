@@ -1254,8 +1254,8 @@ document's body, in a code span and in a fenced code block too. A reference to a
 resolves only in a document's body. In front matter it fails the compose: `Remove
 ${qory:agents/reviewers} from the front matter of skills/review/SKILL.md of module core.`
 with `A group resolves to a list.` on the next line. A group with no member fails the compose
-when a document references it: `Give agents/reviewers an agent, or remove its reference
-from skills/review/SKILL.md of module core.` with `The group has no member.` on
+when a document references it: `Fill agents/reviewers, or remove it from
+skills/review/SKILL.md of module core.` with `The group has no member.` on
 the next line. The home contains
 `roles.json`, written when the harness has a role: `{"roles": [...]}`, one row per role
 and per member of a group, in the report's order, each `{role, agent, from}` as the

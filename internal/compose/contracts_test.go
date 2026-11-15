@@ -512,7 +512,7 @@ func TestAGroupCauseLineIsIndented(t *testing.T) {
 		files map[string]string
 		want  string
 	}{
-		{noMember, "Give agents/reviewers an agent, or remove its reference from skills/review/SKILL.md of module factory.\n  The group has no member."},
+		{noMember, "Fill agents/reviewers, or remove it from skills/review/SKILL.md of module factory.\n  The group has no member."},
 		{frontMatter, "Remove ${qory:agents/reviewers} from the front matter of skills/review/SKILL.md of module factory.\n  A group resolves to a list."},
 		{unshipped, "Ship agent python-reviewer, or remove it from provides.agents.reviewers of module python.\n  No module ships agent python-reviewer."},
 	} {
@@ -589,6 +589,28 @@ func TestAnUnshippedMemberHasItsFixFirst(t *testing.T) {
 		"  No module ships agent docs-reviewer."
 	if _, err := composeTree(t, files); err == nil || err.Error() != want {
 		t.Errorf("error:\n%v\nwant:\n%s", err, want)
+	}
+}
+
+// TestTheNoMemberFixLineFitsIn100Characters is a reference to a group with no member in
+// a module whose name is 16 characters long: the fix line has at most 100.
+func TestTheNoMemberFixLineFitsIn100Characters(t *testing.T) {
+	files := groupFiles("")
+	delete(files, "modules/factory/qory-module.yaml")
+	delete(files, "modules/factory/roles/reviewer.yaml")
+	delete(files, "modules/factory/skills/review/SKILL.md")
+	delete(files, "modules/factory/agents/code-reviewer.md")
+	files[stack.FileName] = strings.Replace(files[stack.FileName], "name: factory\n    source: {path: modules/factory}", "name: software-factory\n    source: {path: modules/software-factory}", 1)
+	files["modules/software-factory/qory-module.yaml"] = "apiVersion: qory.dev/v1alpha1\nname: software-factory\nroles:\n  agents:\n    reviewers: many\n"
+	files["modules/software-factory/skills/review/SKILL.md"] = "---\nname: review\ndescription: review\n---\n\nStart ${qory:agents/reviewers}.\n"
+	files["modules/python/qory-module.yaml"] = "apiVersion: qory.dev/v1alpha1\nname: python\n"
+	want := "Fill agents/reviewers, or remove it from skills/review/SKILL.md of module software-factory.\n  The group has no member."
+	_, err := composeTree(t, files)
+	if err == nil || err.Error() != want {
+		t.Fatalf("error:\n%v\nwant:\n%s", err, want)
+	}
+	if first, _, _ := strings.Cut(err.Error(), "\n"); len(first) > 100 {
+		t.Fatalf("fix line has %d characters: %s", len(first), first)
 	}
 }
 

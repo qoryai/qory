@@ -293,7 +293,7 @@ These stop the compose with exit 2:
 ```
 Write provides.agents.reviewers in module python as a list: it is a group role.
 Declare agents/reviewers as many in module python, or remove it: module software-factory declares it many.
-Give agents/reviewers an agent, or remove its reference from skills/review/SKILL.md of module software-factory.
+Fill agents/reviewers, or remove it from skills/review/SKILL.md of module software-factory.
   The group has no member.
 ```
 
