@@ -736,9 +736,11 @@ func TestVerdictSchema(t *testing.T) {
 		return strings.Replace(verdictDocument, from, to, 1)
 	}
 	point := `{"text": "The checks script failed.", "action": "run_again"}`
-	points := func(n int) string {
-		return `{"verdict": "escalate", "points": [` + strings.TrimSuffix(strings.Repeat(point+", ", n), ", ") + `]}`
+	pointsOf := func(verdict string, n int) string {
+		return `{"verdict": "` + verdict + `", "points": [` + strings.TrimSuffix(strings.Repeat(point+", ", n), ", ") + `]}`
 	}
+	points := func(n int) string { return pointsOf("escalate", n) }
+	answer := `{"text": "The spec does not say who sees the price.", "action": "answer", "question": "q4"}`
 	text := func(s string) string {
 		return replace(`"text": "The checks script failed on the spec's links."`, `"text": "`+s+`"`)
 	}
@@ -753,16 +755,30 @@ func TestVerdictSchema(t *testing.T) {
 		{`{}`, false},
 		{`[]`, false},
 		{`{"verdict": "failed"}`, false},
-		// points is required with escalate and absent otherwise.
+		// points is required with escalate, optional with changes-requested, and absent
+		// with passed.
 		{`{"verdict": "escalate"}`, false},
 		{replace(`"verdict": "escalate"`, `"verdict": "passed"`), false},
-		{replace(`"verdict": "escalate"`, `"verdict": "changes-requested"`), false},
+		{pointsOf("passed", 1), false},
 		{`{"verdict": "passed", "points": []}`, false},
-		// 1 to 20 points
+		// with changes-requested, 1 to 20 points, each with the action run_again
+		{pointsOf("changes-requested", 1), true},
+		{pointsOf("changes-requested", 20), true},
+		{pointsOf("changes-requested", 0), false},
+		{pointsOf("changes-requested", 21), false},
+		{replace(`"verdict": "escalate"`, `"verdict": "changes-requested"`), false},
+		{`{"verdict": "changes-requested", "points": [` + answer + `]}`, false},
+		{`{"verdict": "changes-requested", "points": [` + point + `, ` + answer + `]}`, false},
+		{`{"verdict": "changes-requested", "points": [{"text": "The checks script failed.", "action": "ask"}]}`, false},
+		{`{"verdict": "changes-requested", "points": [{"text": "The checks script failed."}]}`, false},
+		{`{"verdict": "changes-requested", "points": [{"text": "The checks script failed.", "action": "run_again", "question": "q4"}]}`, false},
+		{`{"verdict": "changes-requested", "points": {}}`, false},
+		// with escalate, 1 to 20 points
 		{points(1), true},
 		{points(20), true},
 		{points(0), false},
 		{points(21), false},
+		{`{"verdict": "escalate", "points": [` + answer + `]}`, true},
 		{`{"verdict": "escalate", "points": {}}`, false},
 		{`{"verdict": "escalate", "points": ["The spec's links are broken."]}`, false},
 		// text and action are required.
