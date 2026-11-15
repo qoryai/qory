@@ -1,0 +1,2 @@
+Write bind.agents.reviewers in the base stack as a list.
+It is a group role.

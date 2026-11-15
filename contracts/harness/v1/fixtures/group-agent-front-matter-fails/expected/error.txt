@@ -1,0 +1,2 @@
+Remove the reference to agents/reviewers from the front matter of agents/lead.md.
+A group resolves to a list.

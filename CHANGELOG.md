@@ -295,11 +295,15 @@ release may change what an existing document does, and states it under Upgrading
   member. These stop the compose with exit 2: a name in `provides` or `bind` for a group
   role, a list for a role no module declares `many`, `many` for a kind other than
   `agents`, one module declaring `one` for a role another declares `many`, a reference
-  to a group in frontmatter, and a reference to a group with no member. See Let several
+  to a group in front matter, and a reference to a group with no member. See Let several
   modules add reviewers in `docs/harness.md`.
 - An agent's frontmatter `paths` lists the files of a change it reads, as globs from the
   checkout root. `roles.json` contains the `paths` of each member of a group role. qory
-  leaves the key out of every agent file it writes for a runtime.
+  leaves the key and its whole value out of every agent file it writes for a runtime.
+- The compose checks every agent's `paths`: a `paths` that is not a glob or a list of
+  globs stops the compose with exit 2.
+- A list in `bind` for a role that is not a group stops the compose with exit 2, where
+  before qory refused it when it read `qory.yaml`.
 - A walled run whose read-write `--mount` or `wall.mounts` entry is your home folder or
   qory's state directory, or a folder that contains either, stops with exit 2 before
   anything starts, as `mount a narrower folder: the mount <path> is your home folder, and

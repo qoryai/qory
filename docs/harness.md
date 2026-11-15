@@ -245,11 +245,13 @@ These stop the compose with exit 2:
 ```
 Write provides.agents.reviewers in module python as a list: it is a group role.
 Declare agents/reviewers as many in module python, or remove it: module software-factory declares it many.
-Provide an agent for agents/reviewers, or remove its reference from skills/review/SKILL.md of module software-factory: the group has no member.
+Provide an agent for agents/reviewers, or remove its reference from skills/review/SKILL.md.
+The group has no member.
 ```
 
-A reference to a group in frontmatter stops the compose as well, since a group resolves to
-a list. The rules are in [the contract's section on
+A reference to a group in front matter stops the compose as well, since a group resolves
+to a list. A reference expands anywhere in a body, in a code span and in a fenced code
+block too, and lists the members in the order of their rows in `roles.json`. The rules are in [the contract's section on
 references](../contracts/harness/v1/README.md#references).
 
 ## See a collision

@@ -640,8 +640,9 @@ func Build(res *compose.Result, home string, runtimes ...Runtime) (err error) {
 // and renames; a check stages elsewhere and compares. BuildAt links every module's
 // directory as modules/<name>, links the shared skills and hooks for the bare address and
 // writes AGENTS.md at the staging root with its references resolved the same way, since
-// every checkout link reads them, and push-checks.json beside it when a module declares a
-// push check, [PushChecksFile], then calls each runtime's Render for the subdirectory
+// every checkout link reads them, push-checks.json beside it when a module declares a
+// push check, [PushChecksFile], and roles.json when the harness has a role, [RolesFile],
+// then calls each runtime's Render for the subdirectory
 // named after it and links the runtime's files entries into that subdirectory. The links
 // point at the modules by absolute path, so a tree staged anywhere contains the same
 // links. A module the home holds a copy of, see [compose.Module.Copy], is copied in place

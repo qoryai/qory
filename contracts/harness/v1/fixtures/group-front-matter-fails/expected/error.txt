@@ -1,1 +1,2 @@
-Move the reference to agents/reviewers out of the frontmatter of skills/review/SKILL.md of module factory: a group resolves to a list, and only a document body takes one.
+Remove the reference to agents/reviewers from the front matter of skills/review/SKILL.md.
+A group resolves to a list.

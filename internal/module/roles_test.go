@@ -38,12 +38,12 @@ func TestReadManifestRefusesRolesItDoesNotRead(t *testing.T) {
 	const head = "apiVersion: qory.dev/v1alpha1\nname: typescript\n"
 	for _, c := range []struct{ body, want string }{
 		{"roles:\n  skills:\n    x: many\n", "Set roles.skills.x to one in {path}: only an agents role can be a group."},
-		{"roles:\n  agents:\n    developer: [one, one]\n", "Set roles.agents.developer to one or many in {path}: one entry fills a role and several fill a group, and the value is a list."},
-		{"provides:\n  skills:\n    lint: [a, b]\n", "Write one name for provides.skills.lint in {path}: only an agents role can be a group, and the value is a list."},
+		{"roles:\n  agents:\n    developer: [one, one]\n", "Set roles.agents.developer to one or many in {path}.\nOne entry fills a role and several fill a group, and the value is a list."},
+		{"provides:\n  skills:\n    lint: [a, b]\n", "Write one name for provides.skills.lint in {path}.\nOnly an agents role can be a group, and the value is a list."},
 		{"provides:\n  agents/developer: typescript-developer\n", "Write provides as provides.agents.developer: typescript-developer in {path}: provides keys are kinds, and agents/developer is a kind and a role."},
 		{"provides:\n  mcp:\n    a: b\n", `Use agents, commands or skills as a kind under provides in {path}: "mcp" is none of them.`},
 		{"provides:\n  agents:\n    developer: qak_/x\n", "Set provides.agents.developer in {path} to an entry's name"},
-		{"provides:\n  skills:\n    qak_x: [a, b]\n", "Write one name for provides.skills.(a name that contains an access key secret) in {path}:"},
+		{"provides:\n  skills:\n    qak_x: [a, b]\n", "Write one name for provides.skills.(a name that contains an access key secret) in {path}.\n"},
 		{"roles:\n  skills:\n    qak_x: many\n", "Set roles.skills.(a name that contains an access key secret) to one in {path}:"},
 		{"provides:\n  agents:\n    qak_x: a\n    qak_x: b\n", "{path}: provides: "},
 	} {

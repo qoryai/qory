@@ -18,7 +18,7 @@ import (
 type Roles map[string]map[string]string
 
 // Groups maps the kind agents to its group roles, and each group role to the names of
-// the agents a list wrote for it, in the order written, each once: bind: {agents:
+// the agents listed for it, in the order written, each once: bind: {agents:
 // {reviewers: [code-reviewer, test-reviewer]}} is Groups{"agents": {"reviewers":
 // {"code-reviewer", "test-reviewer"}}}. Only an agents role can be a group.
 type Groups map[string]map[string][]string
@@ -33,8 +33,8 @@ func (g Groups) Len() int {
 }
 
 // Fills is a bind or a provides: the roles set to one name, and the group roles set to
-// a list of names. Whether a role is a group is the manifests' roles key to say, which
-// the compose checks a list against.
+// a list of names. The roles key of a manifest sets whether a role is a group, and the
+// compose checks a list against it.
 type Fills struct {
 	// One are the roles set to one name.
 	One Roles
@@ -176,9 +176,9 @@ func ReadRoles(n *yaml.Node, key string, counts bool) (Roles, Groups, error) {
 			if x.Kind == yaml.SequenceNode {
 				switch {
 				case counts:
-					return nil, nil, rolesError("Set %s to one or many in {file}: one entry fills a role and several fill a group, and the value is a list.", path)
+					return nil, nil, rolesError("Set %s to one or many in {file}.\nOne entry fills a role and several fill a group, and the value is a list.", path)
 				case kind != "agents":
-					return nil, nil, rolesError("Write one name for %s in {file}: only an agents role can be a group, and the value is a list.", path)
+					return nil, nil, rolesError("Write one name for %s in {file}.\nOnly an agents role can be a group, and the value is a list.", path)
 				}
 				names, err := readNames(x, path)
 				if err != nil {
@@ -202,7 +202,7 @@ func ReadRoles(n *yaml.Node, key string, counts bool) (Roles, Groups, error) {
 				case name == "many" && kind != "agents":
 					return nil, nil, rolesError("Set %s to one in {file}: only an agents role can be a group.", path)
 				case name != "one" && name != "many":
-					return nil, nil, rolesError("Set %s to one or many in {file}: one entry fills a role and several fill a group, and the value is %s.", path, accesskey.ShownName(name, true))
+					return nil, nil, rolesError("Set %s to one or many in {file}.\nOne entry fills a role and several fill a group, and the value is %s.", path, accesskey.ShownName(name, true))
 				}
 			} else if !entryName(name) {
 				return nil, nil, rolesError("Set %s in {file} to an entry's name, one path segment with no space, @ or leading dot: the value is %s.", path, accesskey.ShownName(name, true))
@@ -224,7 +224,7 @@ func ReadRoles(n *yaml.Node, key string, counts bool) (Roles, Groups, error) {
 // errors.
 func readNames(x yaml.Node, path string) ([]string, error) {
 	if len(x.Content) == 0 {
-		return nil, rolesError("Write one name or more in %s in {file}: the list is empty.", path)
+		return nil, rolesError("Write one name or more in %s in {file}.\nThe list is empty.", path)
 	}
 	var names []string
 	for _, item := range x.Content {
@@ -233,7 +233,7 @@ func readNames(x yaml.Node, path string) ([]string, error) {
 			if item.Kind == yaml.ScalarNode && item.Value != "" {
 				value = accesskey.ShownName(item.Value, true)
 			}
-			return nil, rolesError("Set each item of %s in {file} to an entry's name, one path segment with no space, @ or leading dot: an item is %s.", path, value)
+			return nil, rolesError("Write entry names in %s in {file}.\nAn entry's name is one path segment with no space, @ or leading dot, and an item is %s.", path, value)
 		}
 		if !slices.Contains(names, item.Value) {
 			names = append(names, item.Value)
@@ -282,18 +282,18 @@ func CheckFills(f Fills, key string) error {
 		for _, role := range roles {
 			path := key + "." + accesskey.ShownName(kind, false) + "." + accesskey.ShownName(role, false)
 			if kind != "agents" {
-				return rolesError("Write one name for %s in {file}: only an agents role can be a group, and the value is a list.", path)
+				return rolesError("Write one name for %s in {file}.\nOnly an agents role can be a group, and the value is a list.", path)
 			}
 			if !segment(role) || strings.Contains(role, " ") {
 				return rolesError("Rename role %s of %s.%s in {file} to one path segment with no space, @ or leading dot.", accesskey.ShownName(role, false), key, kind)
 			}
 			names := f.Many[kind][role]
 			if len(names) == 0 {
-				return rolesError("Write one name or more in %s in {file}: the list is empty.", path)
+				return rolesError("Write one name or more in %s in {file}.\nThe list is empty.", path)
 			}
 			for _, name := range names {
 				if !entryName(name) {
-					return rolesError("Set each item of %s in {file} to an entry's name, one path segment with no space, @ or leading dot: an item is %s.", path, accesskey.ShownName(name, true))
+					return rolesError("Write entry names in %s in {file}.\nAn entry's name is one path segment with no space, @ or leading dot, and an item is %s.", path, accesskey.ShownName(name, true))
 				}
 			}
 		}

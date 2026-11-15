@@ -139,7 +139,7 @@ func TestReadRefusesPathsThatAreNoGlobs(t *testing.T) {
 	for _, value := range []string{"{a: b}", "[]", "[a, [b]]", `""`} {
 		dir := tree(t, map[string]string{"agents/reviewer.md": "---\nname: reviewer\npaths: " + value + "\n---\n\nReviews.\n"})
 		_, err := Read("core", dir, nil, "")
-		want := `module core: agents/reviewer.md: set paths to a glob or a list of globs from the checkout root, such as ["**/*.py"], or remove it: the value is not one`
+		want := "module core: agents/reviewer.md: set paths to globs, such as [\"**/*.py\"], or remove it\nthe value is not a glob or a list of globs"
 		if err == nil || err.Error() != want {
 			t.Errorf("paths: %s: %v\nwant %q", value, err, want)
 		}

@@ -704,8 +704,8 @@ or `many`, for a group role, which several agents fill (§References). Only an `
 role can be `many`: `module core: Set roles.skills.lint to one in
 modules/core/qory-module.yaml: only an agents role can be a group.` Any other value fails
 the compose, `module core: Set roles.agents.developer to one or many in
-modules/core/qory-module.yaml: one entry fills a role and several fill a group, and the
-value is "two".`, and so does a list. A module that sets a role to `one` while another
+modules/core/qory-module.yaml.` with `One entry fills a role and several fill a group, and
+the value is "two".` on the next line, and so does a list. A module that sets a role to `one` while another
 sets it to `many` fails the compose: `Declare agents/reviewers as many in module python,
 or remove it: module software-factory declares it many.` Apart from `many`, the compose
 checks nothing else against `roles`.
@@ -717,8 +717,9 @@ checkout. The name is a composed entry of any module. A group role takes a list 
 agents the module adds to the group, `provides: {agents: {reviewers: [python-reviewer]}}`.
 A name for a group role fails the compose, `Write provides.agents.reviewers in module
 python as a list: it is a group role.`, and so does a list for a role no module declares
-`many`: `Write one name for provides.agents.developer in module python: no module
-declares agents/developer as many, so one agent fills it.` A list for a kind other than
+`many`: `Write one name for provides.agents.developer in module python.` with `No module
+declares agents/developer as many, so one agent fills it.` on the next line. The compose
+refuses a list in a `bind` the same way, not when it reads the file. A list for a kind other than
 `agents`, an empty list, a flat `agents/developer` key and a kind other than the three are
 refused, each with the manifest's path.
 `push_checks`, optional, declares checks for the files of an artifact type, one item per
@@ -825,13 +826,16 @@ process.yaml                     a factory's process template, checked when expo
 `model` may be a tier, `${qory:light}`, `${qory:fast}` or `${qory:thinking}`, which the compose replaces with the model id the tier maps to (§ The configuration). A tier with no map leaves the agent without a model, so it runs on the main model, and the compose prints a row.
 
 `paths`, optional, lists the files of a change an agent reads, as globs from the checkout
-root: `paths: ["**/*.py", pyproject.toml]`, or one glob as a string. An agent without
-`paths` reads every change. The home's `roles.json` contains the `paths` of each member of
-a group role (§References), for a script that starts the members a change needs. qory
-leaves the key out of every agent file it writes for a runtime, since not every runtime
-accepts a key it does not know. Any other value fails the compose: `module core:
-agents/python-reviewer.md: set paths to a glob or a list of globs from the checkout root,
-such as ["**/*.py"], or remove it: the value is not one`.
+root: `paths: ["**/*.py", pyproject.toml]`, or one glob as a string. A glob matches a path
+from the checkout root with forward slashes: `**` matches any number of directories, `*`
+and `?` match within one directory, and a glob without a slash matches at any depth only
+through `**/`. An agent without `paths` reads every change. The home's `roles.json`
+contains the `paths` of each member of a group role (§References), for a script that
+starts the members a change needs. qory leaves the key and its whole value out of every
+agent file it writes for a runtime, since not every runtime accepts a key it does not
+know. The compose checks the `paths` of every agent, and any other value fails it:
+`module core: agents/python-reviewer.md: set paths to globs, such as ["**/*.py"], or
+remove it` with `the value is not a glob or a list of globs` on the next line.
 
 Below `skills`, a folder with `SKILL.md` is a skill, and everything below it is that skill's
 files, a nested `SKILL.md` included. A real folder with no `SKILL.md` and with a folder below
@@ -955,12 +959,14 @@ that an `exclude` or an `only` leaves out is no member. With `software-factory` 
 `reviewers: [code-reviewer, test-reviewer]` and `python` providing `reviewers:
 [python-reviewer]`, `Start ${qory:agents/reviewers}.` resolves to `Start code-reviewer,
 test-reviewer, python-reviewer.`: the members' names at the path's address, joined by
-`, `. A reference to a group resolves only in a document's body. In frontmatter it fails
-the compose: `Move the reference to agents/reviewers out of the frontmatter of
-skills/review/SKILL.md of module core: a group resolves to a list, and only a document
-body takes one.` A group with no member fails the compose when a document references it:
-`Provide an agent for agents/reviewers, or remove its reference from
-skills/review/SKILL.md of module core: the group has no member.` The home contains
+`, `, in the order of the group's rows in `roles.json`. A reference expands anywhere in a
+document's body, in a code span and in a fenced code block too. A reference to a group
+resolves only in a document's body. In front matter it fails the compose: `Remove the
+reference to agents/reviewers from the front matter of skills/review/SKILL.md.` with `A
+group resolves to a list.` on the next line. A group with no member fails the compose
+when a document references it: `Provide an agent for agents/reviewers, or remove its
+reference from skills/review/SKILL.md.` with `The group has no member.` on the next line.
+The file is the document's path in its module. The home contains
 `roles.json`, written when the harness has a role: `{"roles": [...]}`, one row per role
 and per member of a group, in the report's order, each `{role, agent, from}` as the
 report has it, with `group: true` for a member and the member's `paths` (§The module
@@ -1027,10 +1033,10 @@ runtime: the resolution happens in the composed tree, per path.
    typescript: no module ships agent typescript-developer.` and `Rename role
    agents/reviewer in the provides of module typescript: module core ships agent reviewer,
    and a role's name is no entry's.` Each member of a group role is checked the same way,
-   a provided one with `Ship agent python-reviewer in a module, or remove python-reviewer
-   from provides.agents.reviewers of module python: no module ships agent
-   python-reviewer.` Every failure of this rule comes at once, one per
-   line, the roles first and then the entries in their sorted order, so one compose lists every
+   a provided one with `Ship agent python-reviewer, or remove it from
+   provides.agents.reviewers of module python.` and `No module ships agent
+   python-reviewer.` on the next line. Every failure of this rule comes at once, each on
+   its line, or on two lines with the cause on the second, the roles first and then the entries in their sorted order, so one compose lists every
    site there is to fix. An entry that was left out has no requirements to meet. A
    manifest whose `requires` lists an entry the module does not ship fails as the module
    is read: `module core: requires lists skill release, which the module does not ship`.
