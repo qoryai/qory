@@ -93,7 +93,6 @@ func checkHooks(res *Result, p *stack.Stack, base *Base, checkout string) error 
 		}
 	}
 	programs := &programs{doc: p.Dir(), checkout: checkout, file: file}
-	defer programs.close()
 	named := map[string]int{}
 	perPoint := map[string]int{}
 	perWorkflow := map[string]int{}
@@ -155,27 +154,24 @@ func checkHooks(res *Result, p *stack.Stack, base *Base, checkout string) error 
 // composed, and file the document's name.
 type programs struct {
 	doc, checkout, file string
-	// root is the checkout opened, so a link on the way leads nowhere outside it.
-	root *os.Root
-	// real is the checkout's path with every link resolved.
+	// real is the checkout's path with every link resolved, "" until find sets it.
 	real string
 }
 
 // find returns the path of program from the root of the checkout, with forward slashes,
-// or the refusal of hook i: a program outside the checkout, one that a link leads out of
-// it, one that is a link or sits in a linked folder inside the checkout, and one that is
-// no regular file.
+// or the refusal of hook i: a program outside the checkout, one whose path resolves out
+// of it through a link, a path that is a link or passes through a linked folder inside
+// the checkout, a path whose names differ in case from the names on disk, the checkout
+// itself, and a path that is no regular file. The hook runner runs the file as committed
+// in git, by its exact path, and refuses a link, so each of these would fail every run.
 func (f *programs) find(i int, program string) (string, error) {
-	if f.root == nil {
+	if f.real == "" {
 		checkout := f.checkout
 		if checkout == "" {
 			checkout = f.doc
 		}
 		real, err := filepath.EvalSymlinks(checkout)
 		if err != nil {
-			return "", exports.HideError(err)
-		}
-		if f.root, err = os.OpenRoot(real); err != nil {
 			return "", exports.HideError(err)
 		}
 		f.real = real
@@ -189,26 +185,42 @@ func (f *programs) find(i int, program string) (string, error) {
 	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		return "", fmt.Errorf("Move the program into the checkout, or fix hooks[%d].run.\n%s, from the directory of %s, is outside the checkout %s.", i, exports.Value(program, false), exports.HidePath(filepath.Join(f.doc, f.file)), exports.HidePath(f.real))
 	}
-	shownRel := exports.Value(filepath.ToSlash(rel), false)
-	// A path that the root cannot reach and the file system can goes through a link
-	// that leads out of the checkout.
-	if _, err := f.root.Stat(rel); err != nil {
-		if _, statErr := os.Stat(abs); statErr == nil {
-			return "", fmt.Errorf("Set hooks[%d].run to a program inside the checkout.\nA link on the way to %s leads out of the checkout.", i, shownRel)
+	// fromDoc is a path inside the checkout as the hook's run writes it, from doc.
+	fromDoc := func(path string) string {
+		if r, err := filepath.Rel(doc, path); err == nil {
+			return exports.Value(filepath.ToSlash(r), false)
 		}
+		return exports.Value(filepath.ToSlash(path), false)
 	}
-	// The hook runner runs the program's file as git holds it and refuses a link, so a
-	// link anywhere on the path, to a file or a folder inside the checkout too, is refused
-	// here.
+	if rel == "." {
+		return "", fmt.Errorf("Set hooks[%d].run to a program file in the checkout.\nhooks[%d].run, %s, is the checkout itself.", i, i, fromDoc(abs))
+	}
+	shownRel := exports.Value(filepath.ToSlash(rel), false)
+	if !within(resolve(abs, 0), f.real) {
+		return "", fmt.Errorf("Set hooks[%d].run to a program inside the checkout.\nA link on the way to %s leads out of the checkout.", i, shownRel)
+	}
 	parts := strings.Split(rel, string(filepath.Separator))
+	at := f.real
 	var info os.FileInfo
-	for n := range parts {
-		var err error
-		if info, err = f.root.Lstat(filepath.Join(parts[:n+1]...)); err != nil {
+	for n, part := range parts {
+		name, err := nameOnDisk(at, part)
+		if err != nil {
+			return "", fmt.Errorf("Add the program to the checkout, or fix hooks[%d].run.\nNo file is at %s in the checkout.", i, shownRel)
+		}
+		if name != part {
+			named := filepath.Join(append([]string{f.real}, append(parts[:n:n], name)...)...)
+			named = filepath.Join(named, filepath.Join(parts[n+1:]...))
+			return "", fmt.Errorf("Write hooks[%d].run as the file is named.\nhooks[%d].run is %s, and the file on disk is %s.", i, i, fromDoc(abs), fromDoc(named))
+		}
+		at = filepath.Join(at, name)
+		if info, err = os.Lstat(at); err != nil {
 			return "", fmt.Errorf("Add the program to the checkout, or fix hooks[%d].run.\nNo file is at %s in the checkout.", i, shownRel)
 		}
 		if info.Mode()&os.ModeSymlink != 0 {
-			return "", fmt.Errorf("Point run at the file itself, not a link.\n%s in %s is a link.", exports.Value(program, false), exports.HidePath(filepath.Join(f.doc, f.file)))
+			if n == len(parts)-1 {
+				return "", fmt.Errorf("Point run at the file itself, not a link.\nhooks[%d].run, %s, is a link.", i, fromDoc(at))
+			}
+			return "", fmt.Errorf("Point run at the file itself, not a link.\nhooks[%d].run passes through the link %s.", i, fromDoc(at))
 		}
 	}
 	if !info.Mode().IsRegular() {
@@ -217,11 +229,54 @@ func (f *programs) find(i int, program string) (string, error) {
 	return filepath.ToSlash(rel), nil
 }
 
-// close closes the checkout, when find opened it.
-func (f *programs) close() {
-	if f.root != nil {
-		_ = f.root.Close()
+// nameOnDisk is the name of the entry of the folder dir that part names: part itself
+// when the folder has an entry of exactly that name, else the entry whose name differs
+// from part in case alone, which a file system that ignores case also finds by part.
+func nameOnDisk(dir, part string) (string, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return "", err
 	}
+	other := ""
+	for _, e := range entries {
+		switch {
+		case e.Name() == part:
+			return part, nil
+		case other == "" && strings.EqualFold(e.Name(), part):
+			other = e.Name()
+		}
+	}
+	if other == "" {
+		return "", os.ErrNotExist
+	}
+	return other, nil
+}
+
+// resolve is path with every link resolved, a link whose target is missing included: the
+// part that exists is resolved, and the rest of the path joined to it. depth stops a
+// loop of links.
+func resolve(path string, depth int) string {
+	if real, err := filepath.EvalSymlinks(path); err == nil {
+		return real
+	}
+	parent := filepath.Dir(path)
+	if parent == path || depth > 40 {
+		return path
+	}
+	dir := resolve(parent, depth+1)
+	here := filepath.Join(dir, filepath.Base(path))
+	if target, err := os.Readlink(here); err == nil {
+		if !filepath.IsAbs(target) {
+			target = filepath.Join(dir, target)
+		}
+		return resolve(target, depth+1)
+	}
+	return here
+}
+
+// within reports whether path is root or inside it.
+func within(path, root string) bool {
+	return path == root || strings.HasPrefix(path, root+string(filepath.Separator))
 }
 
 // over is how many hooks to remove, for a message: "a hook" or "<n> hooks".

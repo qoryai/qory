@@ -331,7 +331,8 @@ Each workflow hook has:
 - `kind`, `check`, `review` or `enrich`, one that the point takes,
 - `run`, a program in the checkout by its path from `qory.yaml`, with its arguments
   after it. The program is a regular file, and neither it nor a folder on its way may be
-  a link, since the hook runner runs the file as git holds it,
+  a link, since the hook runner runs the file as committed in git. Write each name on
+  the path as it is on disk, letter case included,
 - or, in place of `run`, `agent`, an agent that a module of your harness ships; a
   `review` hook runs an agent,
 - optionally `name`, unique at its point; `required`, `true` when left out; and
