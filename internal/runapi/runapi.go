@@ -155,8 +155,8 @@ type GivenVerdict struct {
 	Version *VersionRef `json:"version"`
 }
 
-// Point is one point of an escalation that [Client.PushVerdict] sends: what is wrong or
-// missing, and what a person can do. Question is the id of a question for the action
+// Point is one point of a verdict that [Client.PushVerdict] sends: what is wrong or
+// missing, and its action. Question is the id of a question for the action
 // answer, and empty for run_again. The contract is
 // contracts/harness/v1/verdict.schema.json.
 type Point struct {

@@ -818,6 +818,8 @@ A `changes-requested` verdict may list what the next round fixes:
  "points": [{"text": "The checks script failed on the spec's links.", "action": "run_again"}]}
 ```
 
+`qory run verdict` sends points only with `escalate`.
+
 A document and a point have no other member. A JSON Schema cannot check that the
 question is open, so the run pushes its questions before its verdict. Each of these
 documents fails the schema:

@@ -1,5 +1,5 @@
 // Package verdictformat is version 1 of the verdict format: a run's verdict, and for
-// escalate the points that a person acts on. The contract is
+// escalate or changes-requested its points. The contract is
 // contracts/harness/v1/verdict.schema.json.
 package verdictformat
 
@@ -25,7 +25,7 @@ import (
 
 // The limits of the format.
 const (
-	// MaxPoints is the most points of an escalation.
+	// MaxPoints is the most points of a verdict.
 	MaxPoints = 20
 	// MaxText is the most characters of a point's text.
 	MaxText = 500
