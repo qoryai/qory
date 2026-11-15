@@ -130,7 +130,7 @@ func checkTierEfforts(res *compose.Result, runtimes []render.Runtime, root strin
 			if !mapped || t.Effort == "" || len(used[name]) == 0 || slices.Contains(am.AgentEfforts(), t.Effort) {
 				continue
 			}
-			return fmt.Errorf("tier %s: set effort to one of %s for %s agents; %s is not one (from %s)", name, strings.Join(am.AgentEfforts(), ", "), rt.Name(), exports.Value(t.Effort, false), tierEffortFrom(t, root))
+			return fmt.Errorf("set tier %s's effort to one of %s for %s agents\n%s is not one (from %s)", name, strings.Join(am.AgentEfforts(), ", "), rt.Name(), exports.Value(t.Effort, false), tierEffortFrom(t, root))
 		}
 	}
 	return nil
@@ -202,15 +202,15 @@ func tierRows(res *compose.Result, runtimes []render.Runtime, root string) [][2]
 				continue
 			}
 			w, many := who(used[name])
+			verb := "runs"
+			if many {
+				verb = "run"
+			}
 			switch {
 			case !writesModel:
-				verb := "runs"
-				if many {
-					verb = "run"
-				}
 				rows = append(rows, [2]string{"skipped", "tier " + name + " for " + rt.Name() + "  (" + rt.Name() + " agents have no model setting; " + w + " " + verb + " on the main model)"})
 			case t.Effort != "" && am.AgentEfforts() == nil:
-				rows = append(rows, [2]string{"skipped", "effort " + exports.Value(t.Effort, false) + " of tier " + name + " for " + rt.Name() + "  (qory writes no effort into " + rt.Name() + " agents)"})
+				rows = append(rows, [2]string{"skipped", "effort " + exports.Value(t.Effort, false) + " of tier " + name + " for " + rt.Name() + "  (qory writes no effort into " + rt.Name() + " agents; " + w + " " + verb + " at the session's effort)"})
 			}
 		}
 	}

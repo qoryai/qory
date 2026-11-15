@@ -2182,6 +2182,13 @@ func tables(v any) any {
 // the entry's name fills it. The keys come out in alphabetical order, not the order of
 // keep.
 func WriteAgents(res *compose.Result, addr Address, dir, sub, suffix string, keep ...string) error {
+	return WriteAgentsEffort(res, addr, dir, sub, suffix, "", keep...)
+}
+
+// WriteAgentsEffort is [WriteAgents] for a runtime whose agent file takes an effort value
+// in the frontmatter key effortKey: an agent whose tier's entry sets an effort gets it
+// there, beside the tier's model. An empty effortKey writes no effort, as WriteAgents.
+func WriteAgentsEffort(res *compose.Result, addr Address, dir, sub, suffix, effortKey string, keep ...string) error {
 	for _, e := range res.Entries {
 		if e.Kind != "agents" {
 			continue
@@ -2203,6 +2210,9 @@ func WriteAgents(res *compose.Result, addr Address, dir, sub, suffix string, kee
 			delete(front, "model")
 			if t, ok := res.Tiers[e.Tier]; ok && contains(keep, "model") {
 				front["model"] = t.Model
+				if effortKey != "" && t.Effort != "" {
+					front[effortKey] = t.Effort
+				}
 			}
 		}
 		var b bytes.Buffer

@@ -657,7 +657,21 @@ files.
 
 An agent in a module sets `model: ${qory:light}`, `${qory:fast}` or `${qory:thinking}` in place of a model id. You map each tier to a model id with `--tier`, `harness.tiers` in your `qory.yaml`, or `harness.tiers` in the repository's `qory.yaml`, in that order of precedence. A tier with no map leaves the agent on the main model.
 
-A tier's entry may also set an effort value: `{model: claude-opus-5-5, effort: max}` in `harness.tiers`, or `--tier thinking=claude-opus-5-5 --tier-effort thinking=max` on the command line. The entry comes whole from one of the three places, so `--tier-effort` needs `--tier` for the same tier. An agent whose entry sets no effort keeps the effort its file sets.
+A tier's entry may also set an effort value: `{model: claude-opus-5-5, effort: max}` in `harness.tiers`, or `--tier thinking=claude-opus-5-5 --tier-effort thinking=max` on the command line. The entry comes whole from one of the three places, so `--tier-effort` needs `--tier` for the same tier. In a claude agent, an entry with no effort leaves the effort the agent's file sets. For the other runtimes, qory writes no effort from the agent's file.
+
+The session's effort is the effort the runtime's session runs at; qory passes `--effort` to claude only.
+
+qory writes a tier into these keys of each runtime's agent file:
+
+| Runtime                 | Model                                  | Effort                                                                   |
+| ----------------------- | -------------------------------------- | ------------------------------------------------------------------------ |
+| claude                  | `model`                                | `effort`: `low`, `medium`, `high`, `xhigh` or `max`                      |
+| copilot                 | `model`                                | `reasoning-effort`: `minimal`, `low`, `medium`, `high`, `xhigh` or `max` |
+| cursor, opencode, goose | `model`                                | none: the agent runs at the session's effort                             |
+| codex, gemini           | none: the agent runs on the main model | none                                                                     |
+| amp, `any`              | no agent files                         | no agent files                                                           |
+
+For claude and copilot, an effort outside the runtime's values stops the compose with exit 2. For cursor, opencode and goose, the compose prints a `skipped` row for a tier's effort, with the agents it concerns, and for codex and gemini a `skipped` row for a tier's model.
 
 ## Removing the harness
 
