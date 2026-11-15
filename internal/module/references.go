@@ -2,10 +2,12 @@ package module
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -214,21 +216,36 @@ func Documents(e Entry) ([]string, error) {
 	return nil, nil
 }
 
+// documentRefs is what [references] reads from the documents of one entry.
+type documentRefs struct {
+	// keys are the entries referenced, sorted, each once across the files.
+	keys []string
+	// tier is the tier an agent's model sets, "" for none.
+	tier string
+	// front is, per key a frontmatter references, the first file that does.
+	front map[string]string
+	// in is, per key, the first file that references it, relative to the root.
+	in map[string]string
+	// paths are an agent's frontmatter paths, nil for none.
+	paths []string
+}
+
 // references reads every document of e and returns what they reference, as sorted keys,
-// each once across the files, and for an agent the tier its model sets, "" for none. The
+// each once across the files, with the first file of each and the keys a frontmatter
+// references, and for an agent the tier its model sets and the globs its paths set. The
 // error contains the file, relative to root, as [exports.HidePath] prints it, and the
-// reference.
-func references(root string, e Entry) ([]string, string, error) {
+// reference or the key.
+func references(root string, e Entry) (documentRefs, error) {
+	var out documentRefs
 	files, err := Documents(e)
 	if err != nil {
-		return nil, "", err
+		return out, err
 	}
 	seen := map[string]bool{}
-	var tier string
 	for _, f := range files {
 		data, err := os.ReadFile(f)
 		if err != nil {
-			return nil, "", exports.HideError(err)
+			return out, exports.HideError(err)
 		}
 		rel, relErr := filepath.Rel(root, f)
 		if relErr != nil {
@@ -238,25 +255,87 @@ func references(root string, e Entry) ([]string, string, error) {
 		// shown is the path as the errors print it.
 		shown := exports.HidePath(rel)
 		if e.Kind == "agents" {
-			if tier, data, err = agentTier(data, rel); err != nil {
-				return nil, "", fmt.Errorf("%s: %w", shown, err)
+			if out.paths, err = agentPaths(data, rel); err != nil {
+				return out, fmt.Errorf("%s: %w", shown, err)
+			}
+			if out.tier, data, err = agentTier(data, rel); err != nil {
+				return out, fmt.Errorf("%s: %w", shown, err)
 			}
 		}
 		keys, err := References(string(data))
 		if err != nil {
-			return nil, "", fmt.Errorf("%s: %w", shown, err)
+			return out, fmt.Errorf("%s: %w", shown, err)
 		}
 		for _, k := range keys {
+			if !seen[k] {
+				if out.in == nil {
+					out.in = map[string]string{}
+				}
+				out.in[k] = rel
+			}
 			seen[k] = true
 		}
+		if text := frontText(data); text != "" {
+			keys, _ := References(text)
+			for _, k := range keys {
+				if _, ok := out.front[k]; ok {
+					continue
+				}
+				if out.front == nil {
+					out.front = map[string]string{}
+				}
+				out.front[k] = rel
+			}
+		}
 	}
-	if len(seen) == 0 {
-		return nil, tier, nil
+	out.keys = sortedSet(seen)
+	return out, nil
+}
+
+// sortedSet is the keys of set, sorted; nil for none.
+func sortedSet(set map[string]bool) []string {
+	if len(set) == 0 {
+		return nil
 	}
-	keys := make([]string, 0, len(seen))
-	for k := range seen {
+	keys := make([]string, 0, len(set))
+	for k := range set {
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
-	return keys, tier, nil
+	return keys
+}
+
+// agentPaths returns the globs an agent's frontmatter paths sets: one string, or a list
+// of strings, none empty. Nil for an agent without the key, and for a file whose
+// frontmatter does not parse, which the renderer refuses. Any other value is an error.
+func agentPaths(data []byte, name string) ([]string, error) {
+	if !bytes.Contains(data, []byte("paths:")) {
+		return nil, nil
+	}
+	doc, err := ParseDocument(data, name)
+	if err != nil {
+		return nil, nil
+	}
+	v, ok := doc.Front["paths"]
+	if !ok {
+		return nil, nil
+	}
+	notGlobs := errors.New("set paths to globs, such as [\"**/*.py\"], or remove it\nthe value is not a glob or a list of globs")
+	var globs []string
+	switch v := v.(type) {
+	case string:
+		globs = []string{v}
+	case []any:
+		for _, item := range v {
+			s, ok := item.(string)
+			if !ok {
+				return nil, notGlobs
+			}
+			globs = append(globs, s)
+		}
+	}
+	if len(globs) == 0 || slices.Contains(globs, "") {
+		return nil, notGlobs
+	}
+	return globs, nil
 }

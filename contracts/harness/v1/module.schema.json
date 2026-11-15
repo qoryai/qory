@@ -30,21 +30,21 @@
       }
     },
     "roles": {
-      "description": "The roles the module's documents reference, by kind and then by role, each set to one: one entry fills the role.",
+      "description": "The roles the module's documents reference, by kind and then by role, each set to one: one entry fills the role. An agents role may be set to many instead: a group role, which several agents fill.",
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "agents": {"$ref": "#/$defs/roleCounts"},
+        "agents": {"$ref": "#/$defs/agentRoleCounts"},
         "commands": {"$ref": "#/$defs/roleCounts"},
         "skills": {"$ref": "#/$defs/roleCounts"}
       }
     },
     "provides": {
-      "description": "The roles the module fills, by kind and then by role, each to the name of one entry of that kind. A provided role fills a reference such as ${qory:agents/developer} unless the checkout's bind sets the role.",
+      "description": "The roles the module fills, by kind and then by role, each to the name of one entry of that kind. A provided role fills a reference such as ${qory:agents/developer} unless the checkout's bind sets the role. A group role takes a list of agents, which the module adds to the group.",
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "agents": {"$ref": "#/$defs/roleNames"},
+        "agents": {"$ref": "#/$defs/agentRoleNames"},
         "commands": {"$ref": "#/$defs/roleNames"},
         "skills": {"$ref": "#/$defs/roleNames"}
       }
@@ -128,6 +128,21 @@
       "type": "object",
       "propertyNames": {"pattern": "^[^/\\\\@ .][^/\\\\@ ]*$"},
       "additionalProperties": {"const": "one"}
+    },
+    "agentRoleCounts": {
+      "type": "object",
+      "propertyNames": {"pattern": "^[^/\\\\@ .][^/\\\\@ ]*$"},
+      "additionalProperties": {"enum": ["one", "many"]}
+    },
+    "agentRoleNames": {
+      "type": "object",
+      "propertyNames": {"pattern": "^[^/\\\\@ .][^/\\\\@ ]*$"},
+      "additionalProperties": {
+        "oneOf": [
+          {"type": "string", "pattern": "^[^/\\\\@ .][^/\\\\@ ]*$"},
+          {"type": "array", "minItems": 1, "items": {"type": "string", "pattern": "^[^/\\\\@ .][^/\\\\@ ]*$"}}
+        ]
+      }
     },
     "roleNames": {
       "type": "object",

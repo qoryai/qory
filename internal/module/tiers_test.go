@@ -126,9 +126,10 @@ func TestReferencesStillRefuseANameThatIsNoTier(t *testing.T) {
 }
 
 // TestSetFrontReplacesAddsAndRemovesAKey sets a top-level frontmatter key: the line and
-// its indented continuation replaced, a missing key added before the closing fence, an
-// empty value removing the line, a value YAML must quote quoted, and CRLF read as LF. The
-// other lines stay as written.
+// every line of its value replaced, a block list at the key's indentation included, a
+// missing key added before the closing fence, an empty value removing the key and its
+// value, a value YAML must quote quoted, and CRLF read as LF. The other lines stay as
+// written.
 func TestSetFrontReplacesAddsAndRemovesAKey(t *testing.T) {
 	isolate(t)
 	for _, c := range []struct{ in, key, value, want string }{
@@ -141,6 +142,13 @@ func TestSetFrontReplacesAddsAndRemovesAKey(t *testing.T) {
 		{"---\nmodel: a\n---\n", "model", "us.vendor:model@1: x", "---\nmodel: 'us.vendor:model@1: x'\n---\n"},
 		{"---\r\nmodel: a\r\n---\r\nBody.\r\n", "model", "b", "---\nmodel: b\n---\nBody.\n"},
 		{"Body only.\n", "model", "b", "---\nmodel: b\n---\nBody only.\n"},
+		// A block list at the key's indentation goes with the key, and so does a comment
+		// inside it; the blank and comment lines before the next key stay.
+		{"---\nname: a\npaths:\n- \"**/*.py\"\n# the build file\n- pyproject.toml\n\n# tools\ntools: Read\n---\nBody.\n", "paths", "", "---\nname: a\n\n# tools\ntools: Read\n---\nBody.\n"},
+		{"---\nname: a\npaths:\n  - \"**/*.py\"\n  - docs/**\n---\nBody.\n", "paths", "", "---\nname: a\n---\nBody.\n"},
+		{"---\nname: a\npaths:\n- x\n---\n", "paths", "y", "---\nname: a\npaths: \"y\"\n---\n"},
+		// Frontmatter that is no block mapping loses the key's line and its indented lines.
+		{"---\n{name: a, model: b}\n---\n", "model", "", "---\n{name: a, model: b}\n---\n"},
 	} {
 		if got := string(SetFront([]byte(c.in), c.key, c.value)); got != c.want {
 			t.Errorf("SetFront(%q, %s, %q) =\n%q\nwant\n%q", c.in, c.key, c.value, got, c.want)

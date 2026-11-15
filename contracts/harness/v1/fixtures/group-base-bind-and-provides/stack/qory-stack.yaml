@@ -1,0 +1,10 @@
+apiVersion: qory.dev/v1alpha1
+name: base
+modules:
+  - name: factory
+    source: {path: modules/factory}
+bind:
+  agents:
+    reviewers: [code-reviewer, test-reviewer]
+extending:
+  kinds: [agents]

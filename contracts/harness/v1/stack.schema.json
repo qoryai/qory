@@ -21,7 +21,7 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "agents": {"$ref": "#/$defs/bindRoles"},
+        "agents": {"$ref": "#/$defs/bindAgentRoles"},
         "commands": {"$ref": "#/$defs/bindRoles"},
         "skills": {"$ref": "#/$defs/bindRoles"}
       }
@@ -80,6 +80,17 @@
       "type": "object",
       "propertyNames": {"pattern": "^[^/\\\\@ .][^/\\\\@ ]*$"},
       "additionalProperties": {"type": "string", "pattern": "^[^/\\\\@ .][^/\\\\@ ]*$"}
+    },
+    "bindAgentRoles": {
+      "description": "The agents roles, each to the name of the one agent that fills the role, or, for a group role, to the list of agents that fill it, which replaces the group's members.",
+      "type": "object",
+      "propertyNames": {"pattern": "^[^/\\\\@ .][^/\\\\@ ]*$"},
+      "additionalProperties": {
+        "oneOf": [
+          {"type": "string", "pattern": "^[^/\\\\@ .][^/\\\\@ ]*$"},
+          {"type": "array", "minItems": 1, "items": {"type": "string", "pattern": "^[^/\\\\@ .][^/\\\\@ ]*$"}}
+        ]
+      }
     },
     "oneOrMore": {
       "description": "One name, or a list of them.",
