@@ -30,11 +30,11 @@
       }
     },
     "roles": {
-      "description": "The roles the module's documents reference, by kind and then by role, each set to one: one entry fills the role.",
+      "description": "The roles the module's documents reference, by kind and then by role, each set to one: one entry fills the role. An agents role may be a map instead, {fill: one, contract: <path>}, where contract is a role contract file inside the module, role-contract.schema.json, that every agent filling the role must meet.",
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "agents": {"$ref": "#/$defs/roleCounts"},
+        "agents": {"$ref": "#/$defs/agentRoles"},
         "commands": {"$ref": "#/$defs/roleCounts"},
         "skills": {"$ref": "#/$defs/roleCounts"}
       }
@@ -128,6 +128,30 @@
       "type": "object",
       "propertyNames": {"pattern": "^[^/\\\\@ .][^/\\\\@ ]*$"},
       "additionalProperties": {"const": "one"}
+    },
+    "agentRoles": {
+      "type": "object",
+      "propertyNames": {"pattern": "^[^/\\\\@ .][^/\\\\@ ]*$"},
+      "additionalProperties": {
+        "oneOf": [
+          {"const": "one"},
+          {
+            "type": "object",
+            "required": ["fill"],
+            "additionalProperties": false,
+            "properties": {
+              "fill": {"const": "one"},
+              "contract": {
+                "description": "The role contract: a relative path inside the module with no .. part.",
+                "type": "string",
+                "minLength": 1,
+                "pattern": "^[^/]",
+                "not": {"pattern": "(^|/)\\.\\.(/|$)"}
+              }
+            }
+          }
+        ]
+      }
     },
     "roleNames": {
       "type": "object",

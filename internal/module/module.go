@@ -79,6 +79,11 @@ type Manifest struct {
 	// PushChecks are the checks the module declares for the files of an artifact type,
 	// one per type, in the order of the file; nil when the manifest has none.
 	PushChecks []PushCheck
+	// Contracts are the role contracts the module declares, each the path of the
+	// contract file inside the module, cleaned, keyed <kind>/<role>: the file the role's
+	// map form names, roles: {agents: {developer: {fill: one, contract: <path>}}}. Nil
+	// when the manifest declares none. See [Contract].
+	Contracts map[string]string
 }
 
 // PushCheck is one check a module declares for the files of one artifact type.
@@ -286,6 +291,11 @@ var envName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 // [accesskey.ShownName] prints it, and a value it writes as [exports.Value] prints it.
 // The env values come back cleaned, "." for the root.
 //
+// A role under roles may be a map, {fill: one, contract: <path>}, which reads as one,
+// with the contract's path in [Manifest.Contracts]. A map with another key or without
+// fill, a contract that is not a path inside the module, and a contract for a role that
+// is not an agents role are errors.
+//
 // A requires item selects one entry of the module by its singular kind and lists what it
 // needs under the plural kinds:
 //
@@ -384,6 +394,9 @@ func parseManifest(dir string, data []byte, err error) (*Manifest, error) {
 		sort.Strings(m.Egress)
 	}
 	if m.PushChecks, err = readPushChecks(path, raw.PushChecks); err != nil {
+		return nil, err
+	}
+	if m.Contracts, err = readContracts(path, &raw.Roles); err != nil {
 		return nil, err
 	}
 	for _, part := range []struct {

@@ -1,0 +1,1 @@
+module core: Set roles.agents.developer.contract to a path inside the module in modules/core/qory-module.yaml: the value is "../developer.yaml".
