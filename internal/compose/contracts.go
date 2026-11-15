@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/qoryai/qory/internal/exports"
 	"github.com/qoryai/qory/internal/module"
@@ -36,7 +37,7 @@ type roleContract struct {
 // that no composed agent fills is rule 4's to refuse. Each agent that lacks a part of a
 // contract is one block of the error, by role, then by agent, then in the order of the
 // contracts; the block lists every part it lacks.
-func checkContracts(res *Result, opened []openedModule) error {
+func checkContracts(res *Result, opened []openedModule, base *Base) error {
 	var contracts []roleContract
 	for _, o := range opened {
 		if len(o.m.Contracts) == 0 {
@@ -82,10 +83,14 @@ func checkContracts(res *Result, opened []openedModule) error {
 				continue
 			}
 			var lists []string
+			var boundBy *Base
 			if group {
 				lists = memberLists(res, role, filler)
+				if base != nil && onlyBaseBinds(res, role, filler) {
+					boundBy = base
+				}
 			}
-			agentBlocks, err := checkAgent(e, modules[e.Module], role, lists, contracts)
+			agentBlocks, err := checkAgent(e, modules[e.Module], role, lists, boundBy, docFile(res.Stack), contracts)
 			if err != nil {
 				return err
 			}
@@ -111,6 +116,17 @@ func memberLists(res *Result, role, member string) []string {
 	}
 	kind, name, _ := strings.Cut(role, "/")
 	return []string{"bind." + shown(kind) + "." + shown(name) + " in " + docFile(res.Stack)}
+}
+
+// onlyBaseBinds reports whether the bind of the base stack is the one list that adds the
+// member to the group role.
+func onlyBaseBinds(res *Result, role, member string) bool {
+	for _, r := range res.Roles {
+		if r.Role == role && r.Name == member && !r.Replaced {
+			return r.From == "base" && len(r.Also) == 0
+		}
+	}
+	return false
 }
 
 // listsOf is each list that adds r, a member of a group role: the list that set it, then
@@ -154,8 +170,11 @@ func addedBy(lists []string) (fix string, items string) {
 // module m, lacks a part of. lists is nil for a single role, and for a member of a group
 // role each list that adds it to the group, see [memberLists]: the fix line then offers
 // to remove the member from that list, or from the lists that add it with a line per
-// list, and the cause line names the member's module.
-func checkAgent(e Entry, m Module, role string, lists []string, contracts []roleContract) ([]string, error) {
+// list, and the cause line names the member's module. base is set when the base stack's
+// bind is the one list that adds the member, a list the reader of docName, the document
+// composed, does not edit: the fix line then offers an exclude in docName, or to ask the
+// base stack's maintainer, and the cause line names the base stack.
+func checkAgent(e Entry, m Module, role string, lists []string, base *Base, docName string, contracts []roleContract) ([]string, error) {
 	var blocks []string
 	readFile := os.ReadFile
 	if m.Root != nil {
@@ -193,12 +212,31 @@ func checkAgent(e Entry, m Module, role string, lists []string, contracts []role
 		}
 		block := fmt.Sprintf("%s\n  The contract %s of module %s requires these parts, which %s lacks:",
 			fix, exports.Value(c.Path, false), shown(c.Module), agent)
+		if base != nil {
+			block = baseMemberLacks(e, role, base, docName)
+		}
 		for _, part := range missing {
 			block += "\n  - " + part
 		}
 		blocks = append(blocks, block)
 	}
 	return blocks, nil
+}
+
+// baseMemberLacks is the fix and the cause line of the agent e, a member of the group
+// role that only the bind of base adds, which lacks parts of a contract. The fix names
+// e's module when the line stays within 100 characters, and the cause line names it
+// otherwise.
+func baseMemberLacks(e Entry, role string, base *Base, doc string) string {
+	agent := shownKey(e.Kind + "/" + e.Name)
+	tail := " in " + doc + ", or ask the base stack's maintainer to complete it."
+	fix := "Exclude " + agent + " of module " + shown(e.Module) + tail
+	bound := shown(e.Name)
+	if utf8.RuneCountInString(fix) > 100 {
+		fix = "Exclude " + agent + tail
+		bound += " of module " + shown(e.Module)
+	}
+	return fmt.Sprintf("%s\n  The base stack %s binds %s to %s, and the agent lacks:", fix, base, bound, shownKey(role))
 }
 
 // readContracts reads the contracts the opened module o declares, by role, through the

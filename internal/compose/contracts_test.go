@@ -484,12 +484,13 @@ func groupMemberFixLines(t *testing.T) []string {
 }
 
 // TestTheGroupFixLineNamesTheMembersList is a member that lacks a part in each of the
-// three lists: the fix line names the list that added it, in rule 4's words.
+// three lists: the fix line names the list that added it, in rule 4's words, and for the
+// base stack's bind, which the checkout does not edit, offers an exclude in qory.yaml.
 func TestTheGroupFixLineNamesTheMembersList(t *testing.T) {
 	want := []string{
 		"Complete agent python-reviewer, or remove it from provides.agents.reviewers of module python.",
 		"Complete agent python-reviewer, or remove it from bind.agents.reviewers in qory-stack.yaml.",
-		"Complete agent python-reviewer, or remove it from bind.agents.reviewers in the base stack.",
+		"Exclude agents/python-reviewer in qory.yaml, or ask the base stack's maintainer to complete it.",
 	}
 	if got := groupMemberFixLines(t); !slices.Equal(got, want) {
 		t.Fatalf("fix lines:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
@@ -587,6 +588,48 @@ func TestAnUnshippedMemberHasItsFixFirst(t *testing.T) {
 	files[stack.FileName] += "bind:\n  agents:\n    reviewers: [code-reviewer, docs-reviewer]\n"
 	want = "Ship agent docs-reviewer, or remove it from bind.agents.reviewers in qory-stack.yaml.\n" +
 		"  No module ships agent docs-reviewer."
+	if _, err := composeTree(t, files); err == nil || err.Error() != want {
+		t.Errorf("error:\n%v\nwant:\n%s", err, want)
+	}
+}
+
+// TestABaseStackMemberOffersAnExclude is a checkout whose qory.yaml extends the base
+// stack software, whose bind alone adds python-reviewer of module factory to the group,
+// and the agent lacks a part of the contract: the fix offers to exclude the agent in
+// qory.yaml or to ask the base stack's maintainer, and the cause line names the base
+// stack. The module is on the cause line when the fix line would pass 100 characters.
+func TestABaseStackMemberOffersAnExclude(t *testing.T) {
+	want := "Exclude agents/python-reviewer in qory.yaml, or ask the base stack's maintainer to complete it.\n" +
+		"  The base stack software@working-tree binds python-reviewer of module factory to agents/reviewers, and the agent lacks:\n" +
+		"  - the tool Read"
+	if _, err := composeExtending(t, writeTree(t, baseGroupFiles("---\nname: python-reviewer\n---\n", false))); err == nil || err.Error() != want {
+		t.Errorf("error:\n%v\nwant:\n%s", err, want)
+	}
+	short := map[string]string{}
+	for path, text := range baseGroupFiles("---\nname: pr\n---\n", false) {
+		short[strings.ReplaceAll(path, "python-reviewer", "pr")] = strings.ReplaceAll(text, "python-reviewer", "pr")
+	}
+	want = "Exclude agents/pr of module factory in qory.yaml, or ask the base stack's maintainer to complete it.\n" +
+		"  The base stack software@working-tree binds pr to agents/reviewers, and the agent lacks:\n" +
+		"  - the tool Read"
+	if _, err := composeExtending(t, writeTree(t, short)); err == nil || err.Error() != want {
+		t.Errorf("error:\n%v\nwant:\n%s", err, want)
+	}
+}
+
+// TestTheBindOfTheStackComposedKeepsItsRemoveLine is the base stack of
+// [baseGroupFiles] composed by itself: its bind is in the document composed, and the
+// fix offers to remove the member from that bind.
+func TestTheBindOfTheStackComposedKeepsItsRemoveLine(t *testing.T) {
+	files := map[string]string{}
+	for path, text := range baseGroupFiles("---\nname: python-reviewer\n---\n", false) {
+		if inner, ok := strings.CutPrefix(path, "base/"); ok {
+			files[inner] = text
+		}
+	}
+	want := "Complete agent python-reviewer, or remove it from bind.agents.reviewers in qory-stack.yaml.\n" +
+		"  The contract roles/reviewer.yaml of module factory requires these parts, which agents/python-reviewer.md of module factory lacks:\n" +
+		"  - the tool Read"
 	if _, err := composeTree(t, files); err == nil || err.Error() != want {
 		t.Errorf("error:\n%v\nwant:\n%s", err, want)
 	}

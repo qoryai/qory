@@ -510,7 +510,7 @@ func ComposeWith(p *stack.Stack, opts Options) (_ *Result, err error) {
 	if err := checkHooks(res, p, opts); err != nil {
 		return nil, err
 	}
-	if err := checkContracts(res, opened); err != nil {
+	if err := checkContracts(res, opened, opts.Base); err != nil {
 		return nil, err
 	}
 	if len(instructions) > 0 {

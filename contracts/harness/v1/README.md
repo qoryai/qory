@@ -1158,9 +1158,20 @@ Complete agent python-developer of module python, or bind agents/developer to an
 For a member of a group role, the fix line is `Complete agent python-reviewer, or remove
 it from provides.agents.reviewers of module python.` The fix line ends with the list
 that added the member: `bind.agents.reviewers in qory-stack.yaml` for a bind in the
-stack you compose, `bind.agents.reviewers in qory.yaml` (or `in harness.yaml`) for a
-bind in a checkout's file, and `bind.agents.reviewers in the base stack` for a bind in
-the base stack. When two or more lists add the member, the fix line is `Complete agent
+stack you compose, and `bind.agents.reviewers in qory.yaml` (or `in harness.yaml`) for a
+bind in a checkout's file. When only the bind of the base stack a checkout extends adds
+the member, the checkout does not edit that bind, and the block offers an exclude in
+`qory.yaml` instead, with the base stack and its pin on the cause line. The fix line
+names the agent's module when the line stays within 100 characters, and the cause line
+names it otherwise:
+
+```
+Exclude agents/python-reviewer in qory.yaml, or ask the base stack's maintainer to complete it.
+  The base stack software@4b8e2f1a9c7d binds python-reviewer of module factory to agents/reviewers, and the agent lacks:
+  - the tool Read
+```
+
+When two or more lists add the member, the fix line is `Complete agent
 python-reviewer, or remove it from the lists that add it.`, and `These lists add it:`
 follows, with a line per list, before the contract's line:
 
