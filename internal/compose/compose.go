@@ -918,6 +918,21 @@ func checkResolved(res *Result, requires map[string]map[string][]Need, dropped m
 			continue
 		}
 		if by := leftOut(kind, to); r.Group && (by == "" || r.Module != "") {
+			if fixedLists(res, r) > 0 {
+				// The reader edits no list of the base stack: a module of qory.yaml that
+				// ships the agent fills the member.
+				fix := fmt.Sprintf("Ask the base stack's maintainer to ship %s.", described(kind, to))
+				if baseAllowsAgents(res) {
+					fix = fmt.Sprintf("Ship %s in a module of %s, or ask the base stack's maintainer to ship it.", described(kind, to), docFile(res.Stack))
+				}
+				lists := listsOf(res, r)
+				these := "this list adds it:"
+				if len(lists) > 1 {
+					these = "these lists add it:"
+				}
+				lines = append(lines, fmt.Sprintf("%s\n  No module ships %s, and %s%s", fix, described(kind, to), these, itemLines(lists)))
+				continue
+			}
 			// Each list that adds the member is in the fix, so that following it removes
 			// the member.
 			lead := "Ship " + described(kind, to) + ", or "

@@ -1158,9 +1158,8 @@ Complete agent python-developer of module python, or bind agents/developer to an
 For a member of a group role, the fix line is `Complete agent python-reviewer, or remove
 it from provides.agents.reviewers of module python.` The fix line ends with the list
 that added the member: `bind.agents.reviewers in qory-stack.yaml` for a bind in the
-stack you compose, `bind.agents.reviewers in qory.yaml` (or `in harness.yaml`) for a
-bind in a checkout's file, and `bind.agents.reviewers in the base stack` for a bind in
-the base stack when a module of the checkout's `qory.yaml` ships the agent. When the fix
+stack you compose, and `bind.agents.reviewers in qory.yaml` (or `in harness.yaml`) for a
+bind in a checkout's file. When the fix
 line would pass 100 characters, it ends with `remove it from the list that adds it.`, and
 `This list adds it:` follows with the list on a line of its own. When two or more lists
 add the member, the fix line is `Complete agent python-reviewer, or remove it from the
@@ -1176,11 +1175,14 @@ Complete agent python-reviewer, or remove it from the lists that add it.
   - the heading "## Stop conditions"
 ```
 
-A checkout does not edit the bind of the base stack it extends, nor a base module. When
-only that bind adds the member and a base module ships the agent, the block offers an
-exclude in `qory.yaml`, or asks the base stack's maintainer, and the cause line names the
-base stack, its pin and the contract. The fix line names the agent's module when the line
-stays within 100 characters, and the cause line names it otherwise:
+A checkout does not edit the bind of the base stack it extends, nor the `provides` of a
+base module. When one such list alone adds the member and a module of the checkout's
+`qory.yaml` ships the agent, the fix line is `Complete agent python-reviewer in module
+python.`, and the cause line names the list. When a base module ships the agent, the
+block offers an exclude in `qory.yaml`, or asks the base stack's maintainer, and the
+cause line names the list, the base stack, its pin and the contract. The fix line names
+the agent's module when the line stays within 100 characters, and the cause line names it
+otherwise:
 
 ```
 Exclude agents/python-reviewer in qory.yaml, or ask the base stack's maintainer to complete it.
@@ -1190,9 +1192,11 @@ Exclude agents/python-reviewer in qory.yaml, or ask the base stack's maintainer 
 
 The exclude is offered only when `qory.yaml` can list it: the base's `extending.kinds`
 lists `agents`, and the checkout can name the module. Otherwise the fix line is `Ask the
-base stack's maintainer to complete agent python-reviewer.` When the base's bind and a
-module's `provides` both add the member, the fix line offers the exclude, or the change
-to the agent where the checkout can make it, and the lists follow the missing parts:
+base stack's maintainer to complete agent python-reviewer.` For a base module's
+`provides`, the cause line starts `Module factory of the base stack software@4b8e2f1a9c7d
+provides python-reviewer`. When such a list and another both add the member, the fix line
+offers the exclude, or the change to the agent where the checkout can make it, and the
+lists follow the missing parts:
 
 ```
 Exclude agents/python-reviewer in qory.yaml, or complete it in module python.
@@ -1366,7 +1370,13 @@ runtime: the resolution happens in the composed tree, per path.
    it.`, then `No module ships agent python-reviewer, and these lists add it:` and a line
    per list, and a single list that would make the fix line pass 100 characters moves to
    a line of its own after `No module ships agent python-reviewer, and this list adds
-   it:`. A member that only a bind adds and that a module leaves out fails with `Compose
+   it:`. When the bind of the base stack a checkout extends or the `provides` of a base
+   module adds the member, which the checkout does not edit, the fix is `Ship agent
+   python-reviewer in a module of qory.yaml, or ask the base stack's maintainer to ship
+   it.`, since an agent that a module of `qory.yaml` ships fills the member, with the
+   lists on the lines after `No module ships agent python-reviewer, and this list adds
+   it:`. When the base's `extending.kinds` does not list `agents`, the fix is `Ask the
+   base stack's maintainer to ship agent python-reviewer.` A member that only a bind adds and that a module leaves out fails with `Compose
    agent python-reviewer, or remove it from bind.agents.reviewers in qory-stack.yaml.`
    and `Module python leaves out agent python-reviewer.` on the next line. Every failure
    of this rule comes at once, each on its line, or with its cause

@@ -111,16 +111,46 @@ func memberRole(res *Result, role, member string) *Role {
 	return &Role{Role: role, Name: member, From: "bind", Group: true}
 }
 
-// fromBaseOnly reports whether the bind of the base stack a checkout extends is the one
-// list that adds r, a member of a group role.
-func fromBaseOnly(res *Result, r *Role) bool {
-	return res.Base != nil && r.From == "base" && len(r.Also) == 0
+// fixedLists is the number of lists that add r, a member of a group role, that the
+// reader of a checkout's qory.yaml does not edit: the bind of the base stack it extends,
+// and the provides of a module of that base.
+func fixedLists(res *Result, r Role) int {
+	if res.Base == nil {
+		return 0
+	}
+	n := 0
+	for _, l := range append([]Role{r}, r.Also...) {
+		if l.From == "base" || l.Module != "" && baseModule(res, l.Module) {
+			n++
+		}
+	}
+	return n
 }
 
-// fromBaseAndMore reports whether the bind of the base stack a checkout extends adds r, a
-// member of a group role, and one or more modules' provides add it too.
-func fromBaseAndMore(res *Result, r *Role) bool {
-	return res.Base != nil && r.From == "base" && len(r.Also) > 0
+// baseModule reports whether the composed module of that name is a module of the base
+// stack a checkout extends.
+func baseModule(res *Result, name string) bool {
+	for _, m := range res.Modules {
+		if m.Name == name {
+			return m.Base
+		}
+	}
+	return false
+}
+
+// baseAllowsAgents reports whether the base stack a checkout extends lets an extending
+// module ship agents.
+func baseAllowsAgents(res *Result) bool {
+	return res.Base != nil && res.Base.Extending != nil && slices.Contains(res.Base.Extending.Kinds, "agents")
+}
+
+// addsTo is how the cause line of a refusal says that the list that set r, a member of a
+// group role that only a list of the base stack adds, adds the agent bound to the group.
+func addsTo(res *Result, r Role, bound string) string {
+	if r.Module != "" {
+		return fmt.Sprintf("Module %s of the base stack %s provides %s to %s", shown(r.Module), res.Base, bound, shownKey(r.Role))
+	}
+	return fmt.Sprintf("The base stack %s binds %s to %s", res.Base, bound, shownKey(r.Role))
 }
 
 // excludable reports whether the checkout's qory.yaml can exclude an agent of m: any
@@ -130,7 +160,7 @@ func excludable(res *Result, m Module) bool {
 	if !m.Base {
 		return true
 	}
-	return m.BaseName != "" && res.Base != nil && res.Base.Extending != nil && slices.Contains(res.Base.Extending.Kinds, "agents")
+	return m.BaseName != "" && baseAllowsAgents(res)
 }
 
 // listsOf is each list that adds r, a member of a group role: the list that set it, then
@@ -235,20 +265,25 @@ func checkAgent(res *Result, e Entry, m Module, role string, member *Role, contr
 // parts. agent is e's file as the cause line names it.
 //
 // A member that lists the reader edits add gets the fix that removes it from those
-// lists: from the one list, or from the lists that add it with a line per list. A member
-// that only the bind of the base stack adds, of an agent of a base module, gets an
-// exclude in the checkout's qory.yaml when the base allows one, see [excludable], or the
-// request to the base stack's maintainer, and the cause line names the base stack and
-// the contract. A member that the base's bind and a module's provides add gets the
-// exclude, or the change to the agent where the reader can make it, and the lists after
-// the parts.
+// lists: from the one list, or from the lists that add it with a line per list. The
+// reader of a checkout's qory.yaml does not edit the base stack's bind nor a base
+// module's provides, see [fixedLists]. A member that one such list alone adds gets, for
+// an agent of a module of qory.yaml, the change to the agent, and for an agent of a base
+// module an exclude in qory.yaml when the base allows one, see [excludable], or the
+// request to the base stack's maintainer; the cause line names the list and the
+// contract. A member that such a list and another add gets the exclude, or the change to
+// the agent where the reader can make it, and the lists after the parts.
 func memberHead(res *Result, e Entry, m Module, r Role, contract, agent string) (head, tail string) {
 	name := shown(e.Name)
 	cause := fmt.Sprintf("  The contract %s requires these parts, which %s lacks:", contract, agent)
 	key, in := shownKey(e.Kind+"/"+e.Name), " in "+docFile(res.Stack)
 	exclude := "Exclude " + key + in
+	lacking := ", and the agent lacks these parts of the contract " + contract + ":"
+	fixed := fixedLists(res, r)
 	switch {
-	case fromBaseOnly(res, &r) && m.Base:
+	case fixed == 1 && len(r.Also) == 0 && !m.Base:
+		return "Complete agent " + name + " in module " + shown(e.Module) + ".\n  " + addsTo(res, r, name) + lacking, ""
+	case fixed == 1 && len(r.Also) == 0:
 		bound := name + " of module " + shown(e.Module)
 		fix := "Ask the base stack's maintainer to complete agent " + name + "."
 		if excludable(res, m) {
@@ -259,8 +294,8 @@ func memberHead(res *Result, e Entry, m Module, r Role, contract, agent string) 
 				fix = exclude + ", or ask the base stack's maintainer to complete it."
 			}
 		}
-		return fmt.Sprintf("%s\n  The base stack %s binds %s to %s, and the agent lacks these parts of the contract %s:", fix, res.Base, bound, shownKey(r.Role), contract), ""
-	case fromBaseAndMore(res, &r):
+		return fix + "\n  " + addsTo(res, r, bound) + lacking, ""
+	case fixed > 0:
 		fix := "Ask the base stack's maintainer to complete agent " + name + "."
 		switch {
 		case !m.Base:
