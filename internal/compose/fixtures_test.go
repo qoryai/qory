@@ -92,7 +92,9 @@ func TestFixtures(t *testing.T) {
 			}
 			// expected/references.txt lists the entries that reference others, and
 			// expected/bind.txt the roles, each with the entry that fills it and the
-			// layer that set it; each when the fixture has any.
+			// layer that set it, one line per member of a group role, marked group, and
+			// a member the checkout's bind replaced marked replaced; each when the
+			// fixture has any.
 			b.Reset()
 			for _, e := range res.Entries {
 				if len(e.References) > 0 {
@@ -103,14 +105,27 @@ func TestFixtures(t *testing.T) {
 				expectText(t, "expected/references.txt", b.String())
 			}
 			b.Reset()
+			single := 0
 			for _, r := range res.Roles {
+				switch {
+				case r.Replaced:
+					fmt.Fprintf(&b, "%s %s %s group replaced\n", r.Role, r.Name, r.From)
+					continue
+				case r.Group:
+					if !slices.Contains(res.Groups[r.Role], r.Name) {
+						t.Fatalf("Groups %s is %v, and Roles has %s", r.Role, res.Groups[r.Role], r.Name)
+					}
+					fmt.Fprintf(&b, "%s %s %s group\n", r.Role, r.Name, r.From)
+					continue
+				}
+				single++
 				if res.Bind[r.Role] != r.Name {
 					t.Fatalf("Bind %s is %s, and Roles has %s", r.Role, res.Bind[r.Role], r.Name)
 				}
 				fmt.Fprintf(&b, "%s %s %s\n", r.Role, r.Name, r.From)
 			}
-			if len(res.Bind) != len(res.Roles) {
-				t.Fatalf("Bind has %d roles, and Roles %d", len(res.Bind), len(res.Roles))
+			if len(res.Bind) != single {
+				t.Fatalf("Bind has %d roles, and Roles %d", len(res.Bind), single)
 			}
 			if _, err := os.Stat("expected/bind.txt"); err == nil || b.Len() > 0 {
 				expectText(t, "expected/bind.txt", b.String())

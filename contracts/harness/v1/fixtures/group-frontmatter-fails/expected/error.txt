@@ -1,0 +1,1 @@
+Move the reference to agents/reviewers out of the frontmatter of skills/review/SKILL.md of module factory: a group resolves to a list, and only a document body takes one.

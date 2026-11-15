@@ -1,0 +1,11 @@
+apiVersion: qory.dev/v1alpha1
+harness:
+  extends: {path: stack}
+  target:
+    runtime: claude
+  modules:
+    - name: factory
+      exclude:
+        agents: [test-reviewer]
+    - name: python
+      source: {path: modules/python}

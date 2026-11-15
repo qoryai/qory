@@ -1,0 +1,1 @@
+Provide an agent for agents/developer, or remove its reference from skills/deploy/SKILL.md of module core: the group has no member.

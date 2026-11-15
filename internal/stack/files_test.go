@@ -137,8 +137,8 @@ func TestExtendRefusesWhatABaseModuleCannotExclude(t *testing.T) {
 // the base's bind goes to BaseBind and the checkout's stays in Bind, so the compose can
 // put the modules' provides between the two.
 func TestExtendKeepsTheBindsApart(t *testing.T) {
-	base := &Stack{Modules: []Module{{Name: "core", Source: Source{Path: "modules/core"}}}, Bind: Roles{"agents": {"coder": "base-coder", "reviewer-role": "reviewer"}}, Extending: &Extending{}, Root: "/repo", File: "/repo/qory-stack.yaml"}
-	p := &Stack{Extends: Source{Path: "../base"}, Bind: Roles{"agents": {"coder": "rails-coder"}, "skills": {"entry": "implement"}}, File: "/app/qory-stack.yaml"}
+	base := &Stack{Modules: []Module{{Name: "core", Source: Source{Path: "modules/core"}}}, Bind: Fills{One: Roles{"agents": {"coder": "base-coder", "reviewer-role": "reviewer"}}, Many: Groups{"agents": {"reviewers": {"code-reviewer"}}}}, Extending: &Extending{}, Root: "/repo", File: "/repo/qory-stack.yaml"}
+	p := &Stack{Extends: Source{Path: "../base"}, Bind: Fills{One: Roles{"agents": {"coder": "rails-coder"}, "skills": {"entry": "implement"}}}, File: "/app/qory-stack.yaml"}
 	out, err := Extend(base, p)
 	if err != nil {
 		t.Fatal(err)
@@ -149,7 +149,7 @@ func TestExtendKeepsTheBindsApart(t *testing.T) {
 	if !reflect.DeepEqual(out.Bind, p.Bind) {
 		t.Errorf("Bind = %v, want the checkout's %v", out.Bind, p.Bind)
 	}
-	if base.Bind["agents"]["coder"] != "base-coder" {
+	if base.Bind.One["agents"]["coder"] != "base-coder" {
 		t.Error("Extend wrote into the base's bind")
 	}
 }

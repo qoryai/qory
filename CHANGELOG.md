@@ -282,6 +282,24 @@ release may change what an existing document does, and states it under Upgrading
   `qory harness launch --json` and `--address` print them. The Bind table that
   `qory harness inspect` and `qory harness compose --dry-run` print has a third column,
   `from`.
+- A group role is an agents role that several agents fill, so each module of a stack
+  can add one. A module declares it with `roles: {agents: {reviewers: many}}`, and each
+  module adds its agents with a list: `provides: {agents: {reviewers:
+  [python-reviewer]}}`. The members come from the base's `bind`, then the modules'
+  `provides` in module order, each once; a list in the checkout's `bind` replaces them,
+  and an `exclude` leaves one out. `${qory:agents/reviewers}` in a document's body becomes
+  the members' names joined by `, `. A role that no module declares `many` keeps one
+  agent, and two modules that provide it still stop the compose. The report has one
+  `roles` row per member, with `group: true`, and a row with `replaced: true` for each
+  member the checkout's `bind` replaced. The home has `roles.json` with each role and
+  member. These stop the compose with exit 2: a name in `provides` or `bind` for a group
+  role, a list for a role no module declares `many`, `many` for a kind other than
+  `agents`, one module declaring `one` for a role another declares `many`, a reference
+  to a group in frontmatter, and a reference to a group with no member. See Let several
+  modules add reviewers in `docs/harness.md`.
+- An agent's frontmatter `paths` lists the files of a change it reads, as globs from the
+  checkout root. `roles.json` contains the `paths` of each member of a group role. qory
+  leaves the key out of every agent file it writes for a runtime.
 - A walled run whose read-write `--mount` or `wall.mounts` entry is your home folder or
   qory's state directory, or a folder that contains either, stops with exit 2 before
   anything starts, as `mount a narrower folder: the mount <path> is your home folder, and

@@ -216,6 +216,42 @@ module core: rename skills/a/review or skills/b/review: each skill goes to skill
 module core: rename skills/a/Review or skills/b/review: each skill goes to skills/<name>, and these two names differ only in case
 ```
 
+### Let several modules add reviewers
+
+A role is a name a document writes in place of an agent, such as
+`${qory:agents/developer}`. One agent fills a role, and two modules that provide one role
+stop the compose. A group role is an agents role that several agents fill, so each module
+can add one. One module declares the group `many`, and each module adds its agents with a
+list:
+
+```yaml
+# modules/software-factory/qory-module.yaml
+roles: {agents: {reviewers: many}}
+provides: {agents: {reviewers: [code-reviewer, test-reviewer]}}
+
+# modules/python/qory-module.yaml
+provides: {agents: {reviewers: [python-reviewer]}}
+```
+
+`Start ${qory:agents/reviewers}.` in a skill's body becomes `Start code-reviewer,
+test-reviewer, python-reviewer.` The members come in module order, each once. A list in the
+`bind` of your `qory.yaml` replaces the members, and an `exclude` leaves one out. A
+reviewer that reads only some files lists them in its frontmatter, `paths: ["**/*.py"]`.
+The home's `roles.json` contains each member with its `paths`, and the agent files that
+qory writes for a runtime leave the key out.
+
+These stop the compose with exit 2:
+
+```
+Write provides.agents.reviewers in module python as a list: it is a group role.
+Declare agents/reviewers as many in module python, or remove it: module software-factory declares it many.
+Provide an agent for agents/reviewers, or remove its reference from skills/review/SKILL.md of module software-factory: the group has no member.
+```
+
+A reference to a group in frontmatter stops the compose as well, since a group resolves to
+a list. The rules are in [the contract's section on
+references](../contracts/harness/v1/README.md#references).
+
 ## See a collision
 
 `qory setup example` writes a stack and two modules. Both modules ship a greet skill. The
@@ -317,6 +353,8 @@ module too, and no link: see [A hidden harness](run.md#a-hidden-harness).
 Beside the links are generated copies. Each is joined from the modules' fragments:
 
 - `AGENTS.md`, at the root of the home,
+- `roles.json`, at the root of the home, when the harness has a role: each role and each
+  member of a group role, with the agent that fills it,
 - the instruction file each runtime wants,
 - its settings,
 - its MCP file.
@@ -450,7 +488,8 @@ cd <checkout> && eval "$(qory harness launch --runtime claude)"
 `--json` prints the command, the arguments and all those variables as one JSON object. It is
 for a launcher that starts the program without a shell. Under `addresses`, it lists the
 name the session gives each composed agent, skill and command, per kind. A role is
-listed beside them, as the entry that fills it, from a `bind` or a module's `provides`.
+listed beside them, as the entry that fills it, from a `bind` or a module's `provides`. A
+group role is not listed; its members are, as agents.
 
 - For Claude Code, the plugin prefixes every name: `harness:<name>`.
 - For the other tools, the name is the one the module wrote.

@@ -66,9 +66,14 @@
 // set again after the last module, when a provided entry that a block left out provides
 // nothing and two modules that provide one role with different names fail, unless the
 // document's bind sets it. A reference to a role is checked against the entry
-// that fills it, and a role is checked to select a composed entry and no entry's name. A
-// reference resolves within the composed entries and the roles alone: it never brings in
-// a module the stack did not list. The text is left as written in the result; a renderer resolves it
+// that fills it, and a role is checked to select a composed entry and no entry's name.
+//
+// A role that a module's roles declares many is a group role, [Result.Groups]: its
+// members are the base's bind list, then each module's provides list in module order,
+// each name once, and the document's bind list replaces them. A reference to a group
+// needs each member, resolves to the members' names joined by ", ", and fails the compose
+// in frontmatter and for a group with no member. A reference resolves within the composed
+// entries and the roles alone: it never brings in a module the stack did not list. The text is left as written in the result; a renderer resolves it
 // per delivery path with [Result.Substitute], passing in the name the program registers
 // an entry under on that path.
 //

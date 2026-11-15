@@ -127,3 +127,21 @@ func SetFront(data []byte, key, value string) []byte {
 	out := append(append(append([]string{}, lines[:at]...), line...), lines[until:]...)
 	return []byte(strings.Join(out, "\n"))
 }
+
+// frontText is the frontmatter of data as written, without its fences, "" when data has
+// none or its frontmatter is not closed. It splits data the way [ParseDocument] does.
+func frontText(data []byte) string {
+	const fence = "---"
+	data = bytes.TrimPrefix(data, []byte("\ufeff"))
+	data = bytes.ReplaceAll(data, []byte("\r\n"), []byte("\n"))
+	lines := strings.Split(string(data), "\n")
+	if lines[0] != fence {
+		return ""
+	}
+	for i := 1; i < len(lines); i++ {
+		if strings.TrimRight(lines[i], " \t") == fence {
+			return strings.Join(lines[1:i], "\n")
+		}
+	}
+	return ""
+}

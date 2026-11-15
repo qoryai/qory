@@ -1,0 +1,1 @@
+Ship agent python-reviewer in a module, or remove python-reviewer from provides.agents.reviewers of module python: no module ships agent python-reviewer.
