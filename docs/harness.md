@@ -294,8 +294,8 @@ The rules:
 - The entry contains `name` and `exclude` only. A `source`, `only`, `variant` or `link`
   fails the compose.
 - The exclude lists entries of the kinds the stack's `extending` block lets your modules
-  ship, and files under its `extending.files` prefixes. The delivered hooks, MCP
-  servers, instructions, settings and variables stay as they are.
+  ship, and files under its `extending.files` prefixes. The delivered runtime hooks,
+  MCP servers, instructions, settings and variables stay as they are.
 - An entry the delivered module does not compose fails the compose, `remove skills/x
   from the exclude of module core in qory.yaml: …`.
 
@@ -305,9 +305,11 @@ replace it with.
 
 ### Add a step to a delivered workflow
 
-To add a check, a review or a note writer to a workflow of the stack you extend, list a
-workflow hook under `harness.hooks`. You copy no workflow, and the workflow's files do not
-change:
+To add a step to a workflow of the stack you extend, list a workflow hook under
+`harness.hooks`. You copy no workflow, and the workflow's files do not change. A workflow
+hook has one of three kinds: a `check` hook reports pass or fail, a `review` hook runs an
+agent that reviews the work, and an `enrich` hook writes notes for the agents that start
+after it.
 
 ```yaml
 harness:
@@ -318,31 +320,40 @@ harness:
     - {at: after-review-round, kind: review, agent: licence-reviewer, required: false}
 ```
 
-The stack you extend sets where a hook may go. Each of its workflows lists its hook
-points under `hook_points`, with the kinds each point takes, and `extending.hooks` sets
-the limits: 3 hooks per point, 10 per workflow and 10 minutes per hook when the stack
-sets no other. A stack without `extending.hooks` takes no hook.
+The stack you extend sets where a workflow hook may go. Each of its workflows lists its
+hook points under `hook_points`, with the kinds each point takes, and `extending.hooks`
+sets the limits: 3 workflow hooks per point, 10 per workflow and 10 minutes per hook when
+the stack sets no other. A stack without `extending.hooks` takes no workflow hook.
 
-Each hook has:
+Each workflow hook has:
 
 - `at`, a hook point of the stack you extend,
 - `kind`, `check`, `review` or `enrich`, one that the point takes,
-- `run`, a program in your repository by its path from `qory.yaml`, with its arguments
-  after it, or `agent`, an agent that a module of your harness ships; a review runs an
-  agent,
+- `run`, a program in the checkout by its path from `qory.yaml`, with its arguments
+  after it, or `agent`, an agent that a module of your harness ships; a `review` hook
+  runs an agent,
 - optionally `name`, unique at its point; `required`, `true` when left out; and
-  `timeout`, at most the stack's.
+  `timeout`, whole seconds of 1s or more, at most the stack's.
 
-The compose writes `hooks.json` into the home. A hook at a point the stack does not
-declare, of a kind the point does not take, or over a limit fails the compose with exit
-2, and the message starts with the fix:
+A key you write with an empty value fails the compose; leave the key out instead.
+
+The compose writes `hooks.json` into the home, with each program by its path from the
+root of the checkout. When the `qory.yaml` that lists the workflow hooks is in a folder
+above the checkout, one that covers several repositories, each program has to be inside
+the checkout you compose: `app/scripts/check.sh` from that folder is `scripts/check.sh`
+in `hooks.json`, and a program of another repository fails the compose of `app`.
+
+A workflow hook at a point the stack does not declare, of a kind the point does not take,
+or over a limit fails the compose with exit 2. The first line of the message is the fix,
+and the second the cause:
 
 ```
-Set hooks[0].at to a hook point of the base stack software@4b8e2f1a9c7d: after-plan, after-review-round; after-merge is not one.
+Set hooks[0].at to a hook point of the base stack.
+The base stack software@4b8e2f1a9c7d declares after-plan, after-review-round; after-merge is not one.
 ```
 
-A workflow hook is not a runtime hook, a module's `hooks/<file>`, which a module of yours
-never ships. The full rules are in
+A workflow hook is not a runtime hook, a module's `hooks/<file>`, which the runtime runs
+and a module of yours never ships. The full rules are in
 [§Workflow hooks](../contracts/harness/v1/README.md#workflow-hooks) of the format.
 
 ## The composed tree

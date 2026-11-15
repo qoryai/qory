@@ -298,14 +298,16 @@ release may change what an existing document does, and states it under Upgrading
   exit status, and a control plane can continue the run. `qory run resend` says the end
   of such a run as `paused: every model key reached its limit`. `qory apiary run list
   --state paused` lists the paused runs. See `docs/run.md`.
-- A repository adds a check, a review or a note writer to a workflow of the stack it
-  extends with `harness.hooks` in its `qory.yaml`, and copies no workflow. The stack
-  declares the hook points of each workflow under `workflows.<name>.hook_points` and
-  allows hooks with `extending.hooks`: 3 per point, 10 per workflow and 10 minutes per
-  hook when it sets no other. A hook at a point the stack does not declare, of a kind
-  the point does not take, or over a limit fails the compose with exit 2. The compose
-  writes `hooks.json` into the home, and the workflows' files stay the same. See Add a
-  step to a delivered workflow in `docs/harness.md`.
+- A repository adds a step to a workflow of the stack it extends with a workflow hook
+  under `harness.hooks` in its `qory.yaml`, and copies no workflow. A workflow hook is a
+  `check` hook, a `review` hook or an `enrich` hook, which writes notes for the agents
+  that start after it. The stack declares the hook points of each workflow under
+  `workflows.<name>.hook_points` and allows workflow hooks with `extending.hooks`: 3 per
+  point, 10 per workflow and 10 minutes per hook when it sets no other. A workflow hook at
+  a point the stack does not declare, of a kind the point does not take, or over a limit
+  fails the compose with exit 2. The compose writes `hooks.json` into the home, with each
+  program by its path from the checkout's root, and the workflows' files stay the same.
+  See Add a step to a delivered workflow in `docs/harness.md`.
 
 ### Changed
 
