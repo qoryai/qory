@@ -859,10 +859,11 @@ release may change what an existing document does, and states it under Upgrading
   such a folder, they stop with exit 2 and the line `set --home or harness.home to a
   folder outside <folder>, or run git init in <folder>: a home inside a folder needs a
   git working tree there, and <folder> is not one`.
-- When a workflow that the stack declares starts an agent role that no module ships,
-  provides or binds, the compose names the role and the workflow, such as
-  `agents/demo-author` and `capture-demos`, and says to add a module that fills the role
-  or to drop the workflow. Before, the line named only the skill and the agent.
+- When a workflow that the stack declares starts an agent role that no module ships or
+  provides and the stack does not bind, the compose error shows the role and the
+  workflow, such as `agents/demo-author` and `capture-demos`, and the fix: add a module
+  that fills the role, or drop the workflow. The other failures of the same check follow
+  it in the same error. Before, the line showed only the skill and the agent.
 
 ### Fixed
 

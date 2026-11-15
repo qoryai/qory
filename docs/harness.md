@@ -177,12 +177,12 @@ workflows. A checkout's exclude does not count either: the compose checks what t
 modules ship before it applies that exclude.
 
 The skill or command that starts a workflow starts each agent its documents reference.
-When nothing fills such an agent role, the compose fails with exit 2 and names the role
-and the workflow:
+When nothing fills such an agent role, the compose fails with exit 2, and the error shows
+the role and the workflow:
 
 ```
 Add a module that fills agents/demo-author, or drop capture-demos from the workflows and process.
-  The base stack software@4b8e2f1a9c7d declares the workflow capture-demos. Its skill workflow-capture-demos of module software-factory starts agents/demo-author, and no module ships, provides or binds that agent.
+  The base stack software@4b8e2f1a9c7d declares the workflow capture-demos. Its skill workflow-capture-demos of module software-factory starts agents/demo-author, and no module ships or provides that agent, and the stack does not bind it.
 ```
 
 Add the module that provides the agent, or bind the role to an agent a module ships. A
@@ -209,9 +209,9 @@ tools: [Read, Edit, Write, Bash]
 tier: true
 ```
 
-The compose checks every agent that fills the role, the stack's own agent included. An
-agent that lacks a level-2 heading, a front-matter key, a tool or a tier in its model
-fails the compose with exit 2, and the message lists each part it lacks:
+The compose checks every agent that fills the role, the agent that the base stack binds
+included. An agent that lacks a level-2 heading, a front-matter key, a tool or a tier in
+its model fails the compose with exit 2, and the message lists each part it lacks:
 
 ```
 Complete agent python-developer of module python, or bind agents/developer to another agent.

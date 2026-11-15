@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://qory.dev/contracts/harness/v1/role-contract.schema.json",
   "title": "role contract",
-  "description": "A role contract: the file that roles.agents.<role>.contract in a module's qory-module.yaml names. It lists the parts an agent needs to fill the role. The compose checks every agent that fills the role against it. Every key is optional, so {} checks nothing.",
+  "description": "A role contract: the file at the path that roles.agents.<role>.contract in a module's qory-module.yaml is set to. It lists the parts an agent needs to fill the role. The compose checks every agent that fills the role against it. Every key is optional, so {} checks nothing.",
   "type": "object",
   "additionalProperties": false,
   "properties": {
