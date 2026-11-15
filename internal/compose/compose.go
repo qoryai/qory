@@ -185,6 +185,10 @@ type Result struct {
 	// sorted by type, one per type; nil when no module declares one. [Result.PushChecksFor]
 	// renders them for a home.
 	PushChecks []PushCheck
+	// Hooks are the workflow hooks of the checkout's qory.yaml, in its order, each
+	// checked against the base stack; nil when it lists none. A build writes them into
+	// hooks.json.
+	Hooks []Hook
 	// roots are the module roots the compose opened, which [Result.Close] closes.
 	roots []*os.Root
 	// setBy is the module that set each settings leaf, keyed
@@ -475,6 +479,9 @@ func ComposeWith(p *stack.Stack, opts Options) (_ *Result, err error) {
 		return nil, err
 	}
 	if err := workflowsShipped(p, declared, opts.Base, opts.StackAs); err != nil {
+		return nil, err
+	}
+	if err := checkHooks(res, p, opts.Base); err != nil {
 		return nil, err
 	}
 	if len(instructions) > 0 {

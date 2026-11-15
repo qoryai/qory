@@ -9,7 +9,7 @@ What `qory harness compose` reads and what it writes.
 | `qory-stack.yaml` | a directory that `extends` or `-f` selects; an ancestor directory covering several repositories; the root of the harness repository that delivers it | a stack delivered to be extended: the ordered modules, the excludes, what a checkout extending it may add and the runtimes and models it is written for |
 | `qory-module.yaml` | the root of a module | the module: its name, its variants per runtime, the variables it exports |
 | `process.yaml` | optional; the folder root of a module that `exports.modules` lists, which makes the module a factory | a process template: its name, summary and description, the workspace type, the exported stack its workflows run on, its `qory.process/v1` process, and optionally the artifact types its workspaces use. Every command that reads the configuration checks it; the compose does not read it (§Exports) |
-| `qory.yaml`, or `harness.yaml` | the repository root, committed; the user's configuration directory and the checkout's ancestor directories, for the machine | the repository's document and the machine's: under `harness`, this repository's stack, its target and modules, or the stack it extends, the target it composes it for and the modules it appends, and the runtime and model this machine composes for; under `worktree`, what a worktree of the repository needs and where the machine puts one; under `exports`, the stacks and modules this repository publishes for others, by name (§Exports); `git` and `env` (§The configuration) |
+| `qory.yaml`, or `harness.yaml` | the repository root, committed; the user's configuration directory and the checkout's ancestor directories, for the machine | the repository's document and the machine's: under `harness`, this repository's stack, its target and modules, or the stack it extends, the target it composes it for, the modules it appends and the workflow hooks it adds, and the runtime and model this machine composes for; under `worktree`, what a worktree of the repository needs and where the machine puts one; under `exports`, the stacks and modules this repository publishes for others, by name (§Exports); `git` and `env` (§The configuration) |
 | a branch document | the file of a version of a structured artifact type `branch` | a work item's branch and the commit in each repository (§The branch format). No compose reads it |
 | a questions document | the file of a version of the artifact type `questions` | a work item's questions, their answers and the decisions of its runs (§The questions format). No compose reads it |
 | a review comments document | the file of a version of the artifact type `review-comments` | a work item's review comments on its artifact versions and the replies to them (§The review comments format). No compose reads it |
@@ -113,6 +113,7 @@ extending:                       # optional; without it the stack cannot be exte
   target:                        # optional; the runtimes and models the stack is written for
     runtime: [claude]
     model: [opus, sonnet]        # listed, the checkout's target selects one of them
+  hooks: {per_point: 3, per_workflow: 10, timeout: 10m}   # optional; without it a checkout adds no workflow hook
 extensions:                      # optional; copied into the report, not read
   required_check: Harness self-tests
   corpus_roots: [scripts]        # a value is any shape: a scalar, a list, a map of any depth
@@ -120,6 +121,8 @@ workflows:                       # optional; the settings of the workflows a dis
   example:
     time_limit: 45m              # optional; a duration, such as 45m or 7h
     access: write                # optional; read or write, read when left out
+    hook_points:                 # optional; where a checkout extending the stack may add workflow hooks
+      after-review-round: {at: end, kinds: [check, review]}
 ```
 
 A stack has no `target`: it is delivered to be extended, and the checkout extending it
@@ -152,11 +155,14 @@ harness:
     - name: app
     - name: marketing
       source: {git: git@git.example.com:acme/harness, ref: v2.4.0, module: marketing}
+  hooks:                         # optional; workflow hooks at the base's hook points (§Workflow hooks)
+    - {at: after-review-round, kind: check, run: scripts/check-licences.sh}
 ```
 
 The section takes `name`, `description`, `modules`, `bind` and `extensions` as a stack
-does, `workflows` when it defines a stack, and `target`, which a stack does not; never
-`extending`, since a stack to be extended is a `qory-stack.yaml`. A section extends a
+does, `workflows` when it defines a stack, `hooks` when it extends one (§Workflow hooks),
+and `target`, which a stack does not; never `extending`, since a stack to be extended is
+a `qory-stack.yaml`. A section extends a
 stack or defines one. A section that extends a stack takes the base's `workflows`; one
 that also lists `workflows` is refused with status 2, `remove workflows or extends: a
 harness section that extends a stack takes the workflows of its base`. A stack it
@@ -198,8 +204,10 @@ schema is [config.schema.json](config.schema.json).
 | `extensions` | no | a map of keys the author chooses, each a value of any shape, a scalar, a list or a map of any depth; written into the report as it is and printed by `qory harness inspect`; qory reads nothing in it |
 | `workflows` | no | the settings of each workflow of the stack, by its name: a lower-case letter, then up to 54 lower-case letters, digits and hyphens, 55 characters at most, so `workflow-<name>` has at most 64 characters. A run that Qory Apiary dispatches from a run code starts the first of these that the runtime can start: the skill `workflow-<name>`, the command `workflow-<name>`, the skill `<name>`, the command `<name>` (docs/run.md, §The run key from a run code). A plain name works, and when a harness ships both names, the prefixed one runs. The compose fails with status 2 for each workflow that no module of the stack composes as a skill or command under either name, after the modules' `exclude` and `only`: `add a skill or command workflow-<name> to a module of the base stack <stack>, or remove <name> from the workflows of its qory-stack.yaml: the stack declares the workflow <name>, and none of its modules ships a skill or command workflow-<name> or <name>`, or, for a stack that extends none, `add a skill or command workflow-<name> to a module of the stack in <file>, or remove <name> from its workflows: …`, where `<file>` is the `qory-stack.yaml` or the `qory.yaml` that defines the stack. For a stack that the harness document of a run from a run code defines, the line has `the workspace's harness in Qory Apiary` in place of `the stack in <file>`. A module that a checkout adds to the stack it extends does not count, and neither does a checkout's exclude: the compose checks what the stack's modules ship before it applies that exclude. The harness section of a `qory.yaml` that defines a stack lists them with the same keys and checks; a section that extends a stack takes the base's and lists none |
 | `workflows.<name>.time_limit` | no | how long a dispatched run of the workflow may run, counted from the run's open, as a Go duration above zero, such as `7h`, `45m` or `1h30m`; qory stops with an error on any other value: `set workflows.<name>.time_limit to a duration above zero, such as 7h or 45m: <value> is not one`. The run's `run_settings.time_limit_minutes`, when Qory Apiary sets it, applies instead, and a workflow without it runs for at most 3 hours |
+| `workflows.<name>.hook_points` | no | the points of the workflow where a checkout extending the stack may add workflow hooks, by the point's name: `{at: end, kinds: [check, review]}`. `at` is where the point sits in the workflow's session, `end`, `start` or `inside`; `kinds` is one or more of `check`, `review` and `enrich`, each once. A point's name has the form of a workflow's name, and two workflows of a stack never declare one name, since a hook selects a point by its name alone. Only a `qory-stack.yaml` declares points: a `qory.yaml` that defines a stack, which nothing extends, is refused with `remove hook_points from the workflows: …` (§Workflow hooks) |
 | `workflows.<name>.access` | no | the access level the workflow declares for what a dispatched run of it works on, `read` or `write`, and `read` when left out; qory stops with an error on any other value: `set workflows.<name>.access to read or write: <value> is neither`. A dispatched run from a run code sees the checkout read-only when this access is `read` or `access` in the run's documents is `read`, and on Claude Code its settings deny `Edit`, `Write` and `NotebookEdit`; such a run with no wall, with `wall.setup: inside`, or whose image chosen at the run's open has nested Docker, whichever way it was selected, stops before the agent starts (docs/run.md, §Read workflows). The run sees the checkout writable only when both are `write`, or when this access is `write` and the documents have no `access`, as documents with no target do |
 | `extending` | no | what a module of a checkout extending this stack may ship: `kinds`, `instructions`, `settings`, `files` (§Extending a stack). A base without the block cannot be extended |
+| `extending.hooks` | no | lets a checkout extending the stack add workflow hooks at the points of its workflows: `per_point`, the most hooks one point takes, 3 when left out; `per_workflow`, the most the points of one workflow take together, 10 when left out; `timeout`, a duration, the longest a hook may run and the timeout of a hook that sets none, 10 minutes when left out. A count below 1 is refused. Without the block a checkout adds no workflow hook (§Workflow hooks) |
 | `extending.target` | no | the runtimes and the models the stack is written for, `runtime` and `model`, each one name or a list, one of the two at least. A checkout's resolved target outside either list fails the compose; listed models make the model required, since a target without one runs whatever the runtime defaults to, which is a model the stack did not list. Left out, every target is accepted, a model left out included (§Extending a stack) |
 
 A name is composed once: two entries resolving to modules of one name fail the compose,
@@ -250,7 +258,7 @@ checkout appends:
 - The machine's keys of the checkout's `qory.yaml`, `harness.runtime`,
   `harness.model`, `harness.effort`, `force`, `update`, `home`, `links`, `launch`, `git` and `env`, are not
   read under `extends`, and the compose reports it; the document, `target`, `modules`,
-  `bind` and `extensions`, is. The runner's configuration, in the user's directory or an
+  `bind`, `extensions` and `hooks`, is. The runner's configuration, in the user's directory or an
   ancestor the runner's user owns, is the only one. The `worktree` section is the
   repository's and is read.
 - The base's `extending` block defines what an appended module may ship: `kinds`, from
@@ -302,6 +310,94 @@ rules. A wide `files` prefix, such as `claude/`, is safe for the same reason: th
 runtime reads as settings are reserved for every module (§Rendering), so a file cannot
 reach them. Keeping a copy of the harness from leaving the machine is the gateway's egress
 control, not the format's.
+
+### Workflow hooks
+
+A workflow hook is a step that a repository adds at a hook point of a workflow of the
+stack it extends, so the repository extends the workflow without a copy of it: a check
+that runs a program, a review that runs an agent, or an enrichment that runs either. It
+is not a runtime hook, a module's `hooks/<file>`, which the runtime runs and an extending
+module never ships. The base stack declares the points under
+`workflows.<name>.hook_points`, with the kinds each point takes, and the limits under
+`extending.hooks` (§The stack). The repository lists its hooks under `harness.hooks` in
+its `qory.yaml`:
+
+```yaml
+harness:
+  extends: {git: https://github.com/example-org/harness, ref: v1.2.0, stack: software}
+  hooks:
+    - {at: after-review-round, kind: check, run: scripts/check-licences.sh}
+    - {at: after-review-round, kind: review, agent: licence-reviewer, required: false}
+```
+
+| Field | Required | Meaning |
+|---|---|---|
+| `at` | yes | the name of a hook point of the base stack |
+| `kind` | yes | `check`, `review` or `enrich`, and one the point takes |
+| `run` | one of run and agent | the program, by its path from the directory of `qory.yaml`, alone or followed by its arguments, separated by spaces, with no shell and no quoting. The path is relative, with forward slashes, inside the repository, and a file there |
+| `agent` | one of run and agent | the name of an agent that a module of the composed harness ships. A `review` runs an agent |
+| `name` | no | the hook's name, unique at its point: a letter or digit, then up to 63 letters, digits, dots, hyphens and underscores. Default: the agent's name, else the file name of the program |
+| `required` | no | whether a red result blocks. Default: `true` |
+| `timeout` | no | the longest the hook may run, a duration above zero, at most the base's `extending.hooks.timeout`. Default: the base's, else 10 minutes |
+
+`hooks` is read beside `extends` and under `qory harness compose -f <stack>`, where hooks
+alone are a document. A section that defines a stack is refused with `remove
+harness.hooks, or extend a stack that allows them: …`. A key a hook does not have is
+refused as every unknown key is. The compose fails with status 2 for each hook that
+breaks a rule, and the message starts with its fix:
+
+- a base without `extending.hooks`: `Remove hooks from qory.yaml, or extend a stack that
+  allows them: software@4b8e2f1a9c7d has no extending.hooks.`, and a base whose workflows
+  declare no point: `Remove hooks from qory.yaml, or extend a stack that declares hook
+  points: software@4b8e2f1a9c7d declares none.`
+- a point the base does not declare: `Set hooks[0].at to a hook point of the base stack
+  software@4b8e2f1a9c7d: after-plan, after-review-round; after-merge is not one.`
+- a kind the point does not take: `Set hooks[1].kind to check or review:
+  after-review-round allows only those.`
+- more hooks at a point than `per_point`: `Remove a hook at after-review-round: the base
+  stack allows 3, and qory.yaml has 4.`, and in the points of one workflow than
+  `per_workflow`: `Remove a hook at the points of workflow review-changes: the base stack
+  allows 10, and qory.yaml has 11.`
+- a timeout over the base's: `Set hooks[0].timeout to 10m or less, or leave it out: the
+  base stack software@4b8e2f1a9c7d allows a hook no longer.`
+- an agent no module ships: `Ship agent licence-reviewer in a module of qory.yaml, or fix
+  hooks[1].agent: no module ships it.`
+- a program that is no file: `Add the program scripts/check-licences.sh to the
+  repository, or fix hooks[0].run: no file is at that path from the directory of
+  qory.yaml.`
+- two hooks of one name at a point: `Set hooks[1].name to a name that no other hook at
+  after-review-round has: hooks[0] has the name check-licences.sh there.`
+- both or neither of `run` and `agent`, a review with `run`, a kind other than the three,
+  a program path that is absolute or leads out of the repository, a malformed name and a
+  timeout that is no duration are refused as the document is read, with the path of
+  `qory.yaml` and the fix first.
+
+The home contains `hooks.json` with each hook, in the order of `harness.hooks`; a
+checkout without hooks has no such file. The workflows' files are the same with and
+without hooks: the compose writes no hook into a skill, an agent or a command.
+
+```json
+{
+  "hooks": [
+    {
+      "workflow": "review-changes",
+      "at": "after-review-round",
+      "point_at": "end",
+      "kind": "check",
+      "name": "check-licences.sh",
+      "run": ["scripts/check-licences.sh"],
+      "required": true,
+      "timeout_seconds": 600,
+      "index": 0
+    }
+  ]
+}
+```
+
+`workflow` is the workflow that declares the point, `point_at` the point's `at`, `run` the
+program and its arguments with the program by its path from the directory of
+`qory.yaml`, or `agent` in its place, `timeout_seconds` the hook's timeout, and `index`
+the hook's place in `harness.hooks`, from 0.
 
 ## Sources
 

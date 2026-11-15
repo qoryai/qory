@@ -47,6 +47,29 @@
           "access": {
             "description": "The access level the workflow declares for what a dispatched run of it works on: read or write. Left out, it is read. A dispatched run from a run code sees the checkout read-only when this access is read or access in the run's documents is read, and on Claude Code its settings deny Edit, Write and NotebookEdit; such a run with no wall, with wall.setup: inside, or whose image chosen at the run's open has nested Docker, whichever way it was selected, stops before the agent starts (docs/run.md, §Read workflows). The run sees the checkout writable only when both are write, or when this access is write and the documents have no access, as documents with no target do.",
             "enum": ["read", "write"]
+          },
+          "hook_points": {
+            "description": "The points of the workflow where a checkout extending the stack may add workflow hooks, by the point's name, unique across the workflows of the stack. A workflow hook is not a runtime hook, a module's hooks/<file>.",
+            "type": "object",
+            "propertyNames": {"pattern": "^[a-z][a-z0-9-]{0,54}$"},
+            "additionalProperties": {
+              "type": "object",
+              "required": ["at", "kinds"],
+              "additionalProperties": false,
+              "properties": {
+                "at": {
+                  "description": "Where the point sits in the workflow's session: end, when its agent has exited and before its verdict counts; start, before its agent starts; inside, where the session's agent reaches it.",
+                  "enum": ["end", "start", "inside"]
+                },
+                "kinds": {
+                  "description": "The kinds of hook the point takes.",
+                  "type": "array",
+                  "minItems": 1,
+                  "uniqueItems": true,
+                  "items": {"enum": ["check", "review", "enrich"]}
+                }
+              }
+            }
           }
         }
       }
@@ -68,6 +91,21 @@
           "properties": {
             "runtime": {"$ref": "#/$defs/oneOrMore"},
             "model": {"$ref": "#/$defs/oneOrMore"}
+          }
+        },
+        "hooks": {
+          "description": "Lets a checkout extending the stack add workflow hooks at the hook points of its workflows, within these limits. Left out, a checkout adds none.",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "per_point": {"description": "The most hooks one point takes. Default: 3.", "type": "integer", "minimum": 1},
+            "per_workflow": {"description": "The most hooks the points of one workflow take together. Default: 10.", "type": "integer", "minimum": 1},
+            "timeout": {
+              "description": "The longest a hook may run, and the timeout of a hook that sets none, as a duration: 10m. Default: 10 minutes.",
+              "type": "string",
+              "pattern": "^([0-9]+(\\.[0-9]+)?(ns|us|ms|s|m|h))+$",
+              "not": {"pattern": "^([0.]+(ns|us|ms|s|m|h))+$"}
+            }
           }
         }
       }

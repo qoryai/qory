@@ -1,0 +1,1 @@
+Ship agent security-reviewer in a module of qory.yaml, or fix hooks[0].agent: no module ships it.

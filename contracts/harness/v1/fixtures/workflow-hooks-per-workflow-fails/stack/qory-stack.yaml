@@ -1,0 +1,16 @@
+apiVersion: qory.dev/v1alpha1
+name: software
+modules:
+  - name: core
+    source: {path: modules/core}
+workflows:
+  plan-the-build:
+    access: write
+    hook_points:
+      after-plan: {at: end, kinds: [check, enrich]}
+  review-changes:
+    hook_points:
+      after-review-round: {at: end, kinds: [check, review]}
+extending:
+  kinds: [agents]
+  hooks: {per_workflow: 2}

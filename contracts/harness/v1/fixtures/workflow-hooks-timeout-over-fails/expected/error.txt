@@ -1,0 +1,1 @@
+Set hooks[0].timeout to 5m or less, or leave it out: the base stack software@working-tree allows a hook no longer.

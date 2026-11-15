@@ -1,0 +1,1 @@
+Set hooks[1].name to a name that no other hook at after-review-round has: hooks[0] has the name check-licences.sh there.

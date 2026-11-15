@@ -1,0 +1,13 @@
+apiVersion: qory.dev/v1alpha1
+harness:
+  extends: {path: stack}
+  target:
+    runtime: claude
+  modules:
+    - name: licence
+      source: {path: modules/licence}
+  hooks:
+    - {at: after-plan, kind: check, name: check-1, run: scripts/check-licences.sh --part 1}
+    - {at: after-plan, kind: check, name: check-2, run: scripts/check-licences.sh --part 2}
+    - {at: after-plan, kind: check, name: check-3, run: scripts/check-licences.sh --part 3}
+    - {at: after-review-round, kind: check, run: scripts/check-licences.sh}

@@ -400,12 +400,16 @@ type harnessSection struct {
 	// Workflows are the workflows of the stack the section defines, as a stack file
 	// sets them; a section that extends a stack takes the base's and sets none.
 	Workflows map[string]stack.Workflow `yaml:"workflows,omitempty"`
+	// Hooks are the workflow hooks the checkout adds at the hook points of the stack it
+	// extends; a section that defines a stack sets none.
+	Hooks []stack.Hook `yaml:"hooks,omitempty"`
 }
 
 // composes reports whether the section carries a compose document: modules, extends,
-// bindings, extensions or workflows. A section of machine keys alone is not a document.
+// bindings, extensions, workflows or hooks. A section of machine keys alone is not a
+// document.
 func (h *harnessSection) composes() bool {
-	return h != nil && (len(h.Modules) > 0 || h.extends() || h.Bind.Len() > 0 || len(h.Extensions) > 0 || len(h.Workflows) > 0)
+	return h != nil && (len(h.Modules) > 0 || h.extends() || h.Bind.Len() > 0 || len(h.Extensions) > 0 || len(h.Workflows) > 0 || len(h.Hooks) > 0)
 }
 
 // extends reports whether the section names a stack to extend, by directory or by export.
@@ -721,7 +725,7 @@ func OnBase(path, base string) (*stack.Stack, stack.Source, error) {
 // document is the file's harness section as the stack it holds, before validation.
 func (f file) document() *stack.Stack {
 	h := f.Harness
-	return &stack.Stack{APIVersion: f.APIVersion, RetiredAPIVersion: f.retired, Qory: f.Qory, Name: h.Name, Description: h.Description, Extends: h.Extends, Target: h.Target, Modules: h.Modules, Bind: h.Bind, Extensions: h.Extensions, Workflows: h.Workflows}
+	return &stack.Stack{APIVersion: f.APIVersion, RetiredAPIVersion: f.retired, Qory: f.Qory, Name: h.Name, Description: h.Description, Extends: h.Extends, Target: h.Target, Modules: h.Modules, Bind: h.Bind, Extensions: h.Extensions, Workflows: h.Workflows, Hooks: h.Hooks}
 }
 
 // ErrRelativeConfigHome is the refusal of an XDG_CONFIG_HOME that is no absolute path,

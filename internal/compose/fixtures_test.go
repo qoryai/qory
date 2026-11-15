@@ -22,7 +22,8 @@ const fixtures = "../../contracts/harness/v1/fixtures"
 
 // TestFixtures runs every fixture: the document in its qory.yaml, on the stack it
 // extends when it extends one, composes to the expected entries, settings, instructions,
-// push checks and workflow access levels, or fails with the expected error text.
+// push checks, workflow hooks and workflow access levels, or fails with the expected
+// error text.
 func TestFixtures(t *testing.T) {
 	dirs, err := filepath.Glob(filepath.Join(fixtures, "*"))
 	if err != nil || len(dirs) == 0 {
@@ -150,6 +151,24 @@ func TestFixtures(t *testing.T) {
 			}
 			if _, err := os.Stat("expected/push-checks.txt"); err == nil || b.Len() > 0 {
 				expectText(t, "expected/push-checks.txt", b.String())
+			}
+			// expected/hooks.txt is each workflow hook, in the order of harness.hooks, with
+			// its workflow, point, place in the session, kind, name, what it runs, whether
+			// it is required and its timeout in seconds, when the checkout lists any.
+			b.Reset()
+			for _, h := range res.Hooks {
+				runs := "run " + strings.Join(h.Run, " ")
+				if h.Agent != "" {
+					runs = "agent " + h.Agent
+				}
+				required := "required"
+				if !h.Required {
+					required = "optional"
+				}
+				fmt.Fprintf(&b, "%d %s %s %s %s %s %s %s %d\n", h.Index, h.Workflow, h.At, h.PointAt, h.Kind, h.Name, runs, required, h.TimeoutSeconds)
+			}
+			if _, err := os.Stat("expected/hooks.txt"); err == nil || b.Len() > 0 {
+				expectText(t, "expected/hooks.txt", b.String())
 			}
 			// expected/access.txt is the access level of each workflow of the stack, as
 			// a dispatched run reads it, when the stack has any workflows.

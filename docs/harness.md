@@ -303,6 +303,48 @@ Without the exclude, the two skills collide. The compose fails, exit 3, and prin
 entry to write. When `qory.yaml` lists the module already, it prints the whole entry to
 replace it with.
 
+### Add a step to a delivered workflow
+
+To add a check, a review or a note writer to a workflow of the stack you extend, list a
+workflow hook under `harness.hooks`. You copy no workflow, and the workflow's files do not
+change:
+
+```yaml
+harness:
+  extends: {git: https://github.com/acme/harness, ref: v2.4.0, stack: software}
+  target: {runtime: claude}
+  hooks:
+    - {at: after-review-round, kind: check, run: scripts/check-licences.sh}
+    - {at: after-review-round, kind: review, agent: licence-reviewer, required: false}
+```
+
+The stack you extend sets where a hook may go. Each of its workflows lists its hook
+points under `hook_points`, with the kinds each point takes, and `extending.hooks` sets
+the limits: 3 hooks per point, 10 per workflow and 10 minutes per hook when the stack
+sets no other. A stack without `extending.hooks` takes no hook.
+
+Each hook has:
+
+- `at`, a hook point of the stack you extend,
+- `kind`, `check`, `review` or `enrich`, one that the point takes,
+- `run`, a program in your repository by its path from `qory.yaml`, with its arguments
+  after it, or `agent`, an agent that a module of your harness ships; a review runs an
+  agent,
+- optionally `name`, unique at its point; `required`, `true` when left out; and
+  `timeout`, at most the stack's.
+
+The compose writes `hooks.json` into the home. A hook at a point the stack does not
+declare, of a kind the point does not take, or over a limit fails the compose with exit
+2, and the message starts with the fix:
+
+```
+Set hooks[0].at to a hook point of the base stack software@4b8e2f1a9c7d: after-plan, after-review-round; after-merge is not one.
+```
+
+A workflow hook is not a runtime hook, a module's `hooks/<file>`, which a module of yours
+never ships. The full rules are in
+[§Workflow hooks](../contracts/harness/v1/README.md#workflow-hooks) of the format.
+
 ## The composed tree
 
 The composed tree lives in the **home**, `.qory/harness`. The home has one directory per

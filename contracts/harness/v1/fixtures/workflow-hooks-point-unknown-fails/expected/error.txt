@@ -1,0 +1,1 @@
+Set hooks[0].at to a hook point of the base stack software@working-tree: after-plan, after-review-round; after-merge is not one.
