@@ -963,7 +963,8 @@ Complete agent python-developer of module python, or bind agents/developer to an
 For a member of a group role, the fix line is `Complete agent python-reviewer, or remove
 it from provides.agents.reviewers of module python.` The fix line ends with the list that
 added the member: `bind.agents.reviewers in qory-stack.yaml` for a bind in the stack you
-compose, and `bind.agents.reviewers in the base stack` for a bind in the base stack.
+compose, `bind.agents.reviewers in qory.yaml` for a bind in a checkout's `qory.yaml`, and
+`bind.agents.reviewers in the base stack` for a bind in the base stack.
 
 The compose reads each contract whether or not an agent fills the role. A contract file
 that is missing fails it:
