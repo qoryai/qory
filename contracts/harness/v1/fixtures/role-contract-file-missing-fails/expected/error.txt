@@ -1,0 +1,2 @@
+Add roles/developer.yaml to module core, or remove contract from roles.agents.developer.
+  The module's qory-module.yaml names the file as the contract of agents/developer, and the module has no file at that path.

@@ -1,0 +1,2 @@
+agents/browser-demo-author browser-screens
+skills/workflow-capture-demos software-factory

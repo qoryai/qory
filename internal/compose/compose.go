@@ -471,10 +471,17 @@ func ComposeWith(p *stack.Stack, opts Options) (_ *Result, err error) {
 	for _, o := range opened {
 		requires[o.m.Name] = needs(read[o.m.Name], o.m.Requires, res.Bind)
 	}
-	if err := checkResolved(res, requires, droppedProviders(opened, leftOut)); err != nil {
+	dropped := droppedProviders(opened, leftOut)
+	if err := checkWorkflowRoles(res, dropped, opts.Base, opts.StackAs); err != nil {
+		return nil, err
+	}
+	if err := checkResolved(res, requires, dropped); err != nil {
 		return nil, err
 	}
 	if err := workflowsShipped(p, declared, opts.Base, opts.StackAs); err != nil {
+		return nil, err
+	}
+	if err := checkContracts(res, opened); err != nil {
 		return nil, err
 	}
 	if len(instructions) > 0 {

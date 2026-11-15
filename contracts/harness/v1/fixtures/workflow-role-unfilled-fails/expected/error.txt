@@ -1,0 +1,2 @@
+Add a module that fills agents/demo-author, or drop capture-demos from the workflows and process.
+  The base stack software@working-tree declares the workflow capture-demos. Its skill workflow-capture-demos of module software-factory starts agents/demo-author, and no module ships, provides or binds that agent.

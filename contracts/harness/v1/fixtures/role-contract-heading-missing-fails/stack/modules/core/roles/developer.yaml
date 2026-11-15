@@ -1,0 +1,5 @@
+sections: [Guardrails, The work, Stop conditions, Expected output]
+front_matter: [name, description, tools, model]
+tools: [Read, Edit, Write, Bash]
+tier: true
+report: {}
