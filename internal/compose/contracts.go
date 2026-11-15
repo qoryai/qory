@@ -81,7 +81,11 @@ func checkContracts(res *Result, opened []openedModule) error {
 			if !ok {
 				continue
 			}
-			agentBlocks, err := checkAgent(e, modules[e.Module], role, group, contracts)
+			list := ""
+			if group {
+				list = memberList(res, role, filler)
+			}
+			agentBlocks, err := checkAgent(e, modules[e.Module], role, list, contracts)
 			if err != nil {
 				return err
 			}
@@ -94,9 +98,32 @@ func checkContracts(res *Result, opened []openedModule) error {
 	return errors.New(strings.Join(blocks, "\n"))
 }
 
+// memberList is the list that adds the member of the group role to the group, as rule
+// 4's texts write it: provides.<kind>.<role> of module <m>, bind.<kind>.<role> in the
+// base stack, or bind.<kind>.<role> in the file of the document composed.
+func memberList(res *Result, role, member string) string {
+	kind, name, _ := strings.Cut(role, "/")
+	key := "bind." + shown(kind) + "." + shown(name)
+	for _, r := range res.Roles {
+		if r.Role != role || r.Name != member || r.Replaced {
+			continue
+		}
+		switch {
+		case r.Module != "":
+			return "provides." + shown(kind) + "." + shown(name) + " of module " + shown(r.Module)
+		case r.From == "base":
+			return key + " in the base stack"
+		}
+		break
+	}
+	return key + " in " + docFile(res.Stack)
+}
+
 // checkAgent is a block for each contract of role that the agent e, of the composed
-// module m, lacks a part of; group marks a member of a group role.
-func checkAgent(e Entry, m Module, role string, group bool, contracts []roleContract) ([]string, error) {
+// module m, lacks a part of. list is "" for a single role, and for a member of a group
+// role the list that adds it to the group, see [memberList]: the fix line then offers to
+// remove the member from that list, and the cause line names the member's module.
+func checkAgent(e Entry, m Module, role, list string, contracts []roleContract) ([]string, error) {
 	var blocks []string
 	readFile := os.ReadFile
 	if m.Root != nil {
@@ -122,12 +149,14 @@ func checkAgent(e Entry, m Module, role string, group bool, contracts []roleCont
 		if len(missing) == 0 {
 			continue
 		}
-		other := "bind " + shownKey(role) + " to another agent"
-		if group {
-			other = "remove it from the group " + shownKey(role)
+		fix := fmt.Sprintf("Complete agent %s of module %s, or bind %s to another agent.", shown(e.Name), shown(e.Module), shownKey(role))
+		agent := exports.Value(file, false)
+		if list != "" {
+			fix = fmt.Sprintf("Complete agent %s, or remove it from %s.", shown(e.Name), list)
+			agent += " of module " + shown(e.Module)
 		}
-		block := fmt.Sprintf("Complete agent %s of module %s, or %s.\n  The contract %s of module %s requires these parts, which %s lacks:",
-			shown(e.Name), shown(e.Module), other, exports.Value(c.Path, false), shown(c.Module), exports.Value(file, false))
+		block := fmt.Sprintf("%s\n  The contract %s of module %s requires these parts, which %s lacks:",
+			fix, exports.Value(c.Path, false), shown(c.Module), agent)
 		for _, part := range missing {
 			block += "\n  - " + part
 		}

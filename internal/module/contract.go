@@ -57,7 +57,7 @@ func readContracts(path string, roles *yaml.Node) (map[string]string, error) {
 				}
 			}
 			if fill == nil {
-				return nil, fmt.Errorf("Add fill: one to %s.\n  A role's map sets fill. The map is in %s.", at, path)
+				return nil, fmt.Errorf("Add fill: one or fill: many to %s.\n  A role's map sets fill. The map is in %s.", at, path)
 			}
 			if contract != nil {
 				clean, ok := contractPath(contract)

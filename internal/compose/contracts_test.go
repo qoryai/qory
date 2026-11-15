@@ -6,10 +6,12 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/qoryai/qory/internal/compose"
+	"github.com/qoryai/qory/internal/config"
 	"github.com/qoryai/qory/internal/stack"
 )
 
@@ -283,6 +285,11 @@ func TestTheFirstLineOfEachRefusalFitsIn100Characters(t *testing.T) {
 			}
 		}
 	}
+	for _, line := range groupMemberFixLines(t) {
+		if len(line) > 100 {
+			t.Errorf("%d characters: %s", len(line), line)
+		}
+	}
 }
 
 // copyAll marks every module as one whose home contains copies of its entries, so the
@@ -418,11 +425,11 @@ func TestAGroupWhoseMembersMeetTheContractComposes(t *testing.T) {
 
 // TestAGroupMemberThatLacksAPartFails is a group role with a contract, one of whose
 // members lacks a heading and a tool: the compose fails with that member named, and the
-// fix offers to remove it from the group.
+// fix offers to remove it from the provides list that added it.
 func TestAGroupMemberThatLacksAPartFails(t *testing.T) {
 	_, err := composeTree(t, groupFiles("---\nname: python-reviewer\ndescription: Reviews Python.\ntools: Grep\n---\n\n## Findings\n"))
-	want := "Complete agent python-reviewer of module python, or remove it from the group agents/reviewers.\n" +
-		"  The contract roles/reviewer.yaml of module factory requires these parts, which agents/python-reviewer.md lacks:\n" +
+	want := "Complete agent python-reviewer, or remove it from provides.agents.reviewers of module python.\n" +
+		"  The contract roles/reviewer.yaml of module factory requires these parts, which agents/python-reviewer.md of module python lacks:\n" +
 		"  - the heading \"## Stop conditions\"\n" +
 		"  - the tool Read"
 	if err == nil || err.Error() != want {
@@ -438,5 +445,86 @@ func TestAMemberTheBindReplacedIsNotChecked(t *testing.T) {
 	files[stack.FileName] += "bind:\n  agents:\n    reviewers: [code-reviewer]\n"
 	if _, err := composeTree(t, files); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// groupMemberFixLines are the first lines of the refusals of a group member that lacks a
+// part, added to the group by each of the three lists: a module's provides, the bind of
+// the stack composed, and the bind of the base stack a checkout extends.
+func groupMemberFixLines(t *testing.T) []string {
+	t.Helper()
+	const bad = "---\nname: python-reviewer\n---\n"
+	var out []string
+	_, err := composeTree(t, groupFiles(bad))
+	if err == nil {
+		t.Fatal("provides: composed")
+	}
+	out = append(out, strings.SplitN(err.Error(), "\n", 2)[0])
+	files := groupFiles(bad)
+	files[stack.FileName] += "bind:\n  agents:\n    reviewers: [code-reviewer, python-reviewer]\n"
+	files["modules/python/qory-module.yaml"] = "apiVersion: qory.dev/v1alpha1\nname: python\n"
+	_, err = composeTree(t, files)
+	if err == nil {
+		t.Fatal("bind: composed")
+	}
+	out = append(out, strings.SplitN(err.Error(), "\n", 2)[0])
+	dir := writeTree(t, map[string]string{
+		"base/" + stack.FileName:                         "apiVersion: qory.dev/v1alpha1\nname: web\nextending: {}\nmodules:\n  - name: factory\n    source: {path: modules/factory}\nbind:\n  agents:\n    reviewers: [python-reviewer]\n",
+		"base/modules/factory/qory-module.yaml":          "apiVersion: qory.dev/v1alpha1\nname: factory\nroles:\n  agents:\n    reviewers: {fill: many, contract: roles/reviewer.yaml}\n",
+		"base/modules/factory/roles/reviewer.yaml":       "tools: [Read]\n",
+		"base/modules/factory/skills/review/SKILL.md":    "---\nname: review\ndescription: review\n---\n\nStart ${qory:agents/reviewers}.\n",
+		"base/modules/factory/agents/python-reviewer.md": bad,
+		"app/" + config.FileName:                         "apiVersion: qory.dev/v1alpha1\nharness:\n  extends: {path: ../base}\n  target: {runtime: claude}\n",
+	})
+	_, err = composeExtending(t, dir)
+	if err == nil {
+		t.Fatal("base: composed")
+	}
+	return append(out, strings.SplitN(err.Error(), "\n", 2)[0])
+}
+
+// TestTheGroupFixLineNamesTheMembersList is a member that lacks a part in each of the
+// three lists: the fix line names the list that added it, in rule 4's words.
+func TestTheGroupFixLineNamesTheMembersList(t *testing.T) {
+	want := []string{
+		"Complete agent python-reviewer, or remove it from provides.agents.reviewers of module python.",
+		"Complete agent python-reviewer, or remove it from bind.agents.reviewers in qory-stack.yaml.",
+		"Complete agent python-reviewer, or remove it from bind.agents.reviewers in the base stack.",
+	}
+	if got := groupMemberFixLines(t); !slices.Equal(got, want) {
+		t.Fatalf("fix lines:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+}
+
+// TestAnExcludedGroupMemberIsNotChecked is a member of a group with a contract that the
+// providing module's exclude leaves out: it is no member, and the compose does not check
+// it.
+func TestAnExcludedGroupMemberIsNotChecked(t *testing.T) {
+	files := groupFiles("---\nname: python-reviewer\n---\n")
+	files[stack.FileName] += "    exclude: {agents: [python-reviewer]}\n"
+	files["modules/python/agents/other.md"] = "---\nname: other\n---\n"
+	res, err := composeTree(t, files)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := res.Groups["agents/reviewers"]; !slices.Equal(got, []string{"code-reviewer"}) {
+		t.Fatalf("members %v, want [code-reviewer]", got)
+	}
+}
+
+// TestAnEmptyGroupWithAContractComposes is a group role with a contract, no member and no
+// reference: the compose succeeds, and a contract file that does not read still fails it.
+func TestAnEmptyGroupWithAContractComposes(t *testing.T) {
+	files := groupFiles("")
+	files["modules/factory/qory-module.yaml"] = "apiVersion: qory.dev/v1alpha1\nname: factory\nroles:\n  agents:\n    reviewers: {fill: many, contract: roles/reviewer.yaml}\n"
+	files["modules/python/qory-module.yaml"] = "apiVersion: qory.dev/v1alpha1\nname: python\n"
+	files["modules/factory/skills/review/SKILL.md"] = "---\nname: review\ndescription: review\n---\n\nReview the change.\n"
+	if _, err := composeTree(t, files); err != nil {
+		t.Fatal(err)
+	}
+	files["modules/factory/roles/reviewer.yaml"] = "tier: \"yes\"\n"
+	want := "Set tier in roles/reviewer.yaml of module factory to true or false.\n  tier is \"yes\"."
+	if _, err := composeTree(t, files); err == nil || err.Error() != want {
+		t.Fatalf("error:\n%v\nwant:\n%s", err, want)
 	}
 }

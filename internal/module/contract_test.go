@@ -39,7 +39,7 @@ func TestReadManifestRefusesABadRoleMap(t *testing.T) {
 	const head = "apiVersion: qory.dev/v1alpha1\nname: core\nroles:\n"
 	for _, c := range []struct{ body, want string }{
 		{"  agents:\n    developer: {fill: one, paths: [a]}\n", "Remove key paths from roles.agents.developer.\n  A role's map has fill and contract. The map is in {path}."},
-		{"  agents:\n    developer: {contract: roles/developer.yaml}\n", "Add fill: one to roles.agents.developer.\n  A role's map sets fill. The map is in {path}."},
+		{"  agents:\n    developer: {contract: roles/developer.yaml}\n", "Add fill: one or fill: many to roles.agents.developer.\n  A role's map sets fill. The map is in {path}."},
 		{"  agents:\n    developer: {fill: two}\n", "Set roles.agents.developer to one or many in {path}."},
 		{"  skills:\n    lint: {fill: one, contract: roles/lint.yaml}\n", "Set roles.skills.lint to one.\n  Only an agents role is a map, to give it a contract. The role is in {path}."},
 		{"  commands:\n    ship: {fill: one}\n", "Set roles.commands.ship to one.\n  Only an agents role is a map, to give it a contract. The role is in {path}."},
