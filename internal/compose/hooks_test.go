@@ -98,6 +98,30 @@ func TestHookProgramsStayInTheCheckout(t *testing.T) {
 		t.Errorf("runs: %s, want each program from the checkout's root", got)
 	}
 
+	// A name the file system keeps decomposed (NFD), such as macOS does, matches the
+	// composed name (NFC) that git stores, and hooks.json has the name in NFC.
+	if err := os.WriteFile(filepath.Join(checkout, "scripts", "ve\u0301rifier.sh"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	write("    - {at: after-review-round, kind: check, run: app/scripts/v\u00e9rifier.sh, name: verifier}\n")
+	res, err = composeHooks(t, doc, checkout)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := res.Hooks[0].Run[0]; got != "scripts/v\u00e9rifier.sh" {
+		t.Errorf("run: %q, want the name in NFC", got)
+	}
+
+	// The checkout's folder written in another letter case is refused as a case
+	// mismatch where the file system ignores case, and is outside the checkout where it
+	// does not.
+	caseWant := "Move the program into the checkout, or fix hooks[0].run.\nAPP/scripts/check.sh, from the directory of "
+	if a, err := os.Stat(filepath.Join(above, "APP")); err == nil {
+		if b, err := os.Stat(checkout); err == nil && os.SameFile(a, b) {
+			caseWant = "Write hooks[0].run as the file is named.\nhooks[0].run is APP/scripts/check.sh, and the file on disk is app/scripts/check.sh."
+		}
+	}
+
 	for _, tc := range []struct{ run, want string }{
 		{"other/scripts/check.sh", "Move the program into the checkout, or fix hooks[0].run.\nother/scripts/check.sh, from the directory of " + doc + ", is outside the checkout "},
 		{"app/scripts/linked.sh", "Set hooks[0].run to a program inside the checkout.\nA link on the way to scripts/linked.sh leads out of the checkout."},
@@ -108,6 +132,7 @@ func TestHookProgramsStayInTheCheckout(t *testing.T) {
 		{"app/scripts/dangling.sh", "Point run at the file itself, not a link.\nhooks[0].run, app/scripts/dangling.sh, is a link."},
 		{"app/tools/check.sh", "Point run at the file itself, not a link.\nhooks[0].run passes through the link app/tools."},
 		{"app/Scripts/check.sh", "Write hooks[0].run as the file is named.\nhooks[0].run is app/Scripts/check.sh, and the file on disk is app/scripts/check.sh."},
+		{"APP/scripts/check.sh", caseWant},
 		{"app/scripts/Check.sh", "Write hooks[0].run as the file is named.\nhooks[0].run is app/scripts/Check.sh, and the file on disk is app/scripts/check.sh."},
 		{"app", "Set hooks[0].run to a program file in the checkout.\nhooks[0].run, app, is the checkout itself."},
 		{"app/scripts", "Add the program to the checkout, or fix hooks[0].run.\nscripts in the checkout is not a file."},

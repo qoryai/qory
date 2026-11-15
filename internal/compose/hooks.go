@@ -11,6 +11,7 @@ import (
 
 	"github.com/qoryai/qory/internal/exports"
 	"github.com/qoryai/qory/internal/stack"
+	"golang.org/x/text/unicode/norm"
 )
 
 // Hook is one workflow hook of the composed harness, as hooks.json lists it: an entry of
@@ -181,10 +182,6 @@ func (f *programs) find(i int, program string) (string, error) {
 		return "", exports.HideError(err)
 	}
 	abs := filepath.Join(doc, filepath.FromSlash(program))
-	rel, err := filepath.Rel(f.real, abs)
-	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return "", fmt.Errorf("Move the program into the checkout, or fix hooks[%d].run.\n%s, from the directory of %s, is outside the checkout %s.", i, exports.Value(program, false), exports.HidePath(filepath.Join(f.doc, f.file)), exports.HidePath(f.real))
-	}
 	// fromDoc is a path inside the checkout as the hook's run writes it, from doc.
 	fromDoc := func(path string) string {
 		if r, err := filepath.Rel(doc, path); err == nil {
@@ -192,10 +189,22 @@ func (f *programs) find(i int, program string) (string, error) {
 		}
 		return exports.Value(filepath.ToSlash(path), false)
 	}
+	rel, err := filepath.Rel(f.real, abs)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		spelled, rest, ok := checkoutSpelled(abs, f.real)
+		if !ok {
+			return "", fmt.Errorf("Move the program into the checkout, or fix hooks[%d].run.\n%s, from the directory of %s, is outside the checkout %s.", i, exports.Value(program, false), exports.HidePath(filepath.Join(f.doc, f.file)), exports.HidePath(f.real))
+		}
+		if !spelled {
+			return "", fmt.Errorf("Write hooks[%d].run as the file is named.\nhooks[%d].run is %s, and the file on disk is %s.", i, i, fromDoc(abs), fromDoc(filepath.Join(f.real, rest)))
+		}
+		rel = rest
+	}
 	if rel == "." {
 		return "", fmt.Errorf("Set hooks[%d].run to a program file in the checkout.\nhooks[%d].run, %s, is the checkout itself.", i, i, fromDoc(abs))
 	}
-	shownRel := exports.Value(filepath.ToSlash(rel), false)
+	abs = filepath.Join(f.real, rel)
+	shownRel := exports.Value(filepath.ToSlash(norm.NFC.String(rel)), false)
 	if !within(resolve(abs, 0), f.real) {
 		return "", fmt.Errorf("Set hooks[%d].run to a program inside the checkout.\nA link on the way to %s leads out of the checkout.", i, shownRel)
 	}
@@ -207,7 +216,7 @@ func (f *programs) find(i int, program string) (string, error) {
 		if err != nil {
 			return "", fmt.Errorf("Add the program to the checkout, or fix hooks[%d].run.\nNo file is at %s in the checkout.", i, shownRel)
 		}
-		if name != part {
+		if norm.NFC.String(name) != norm.NFC.String(part) {
 			named := filepath.Join(append([]string{f.real}, append(parts[:n:n], name)...)...)
 			named = filepath.Join(named, filepath.Join(parts[n+1:]...))
 			return "", fmt.Errorf("Write hooks[%d].run as the file is named.\nhooks[%d].run is %s, and the file on disk is %s.", i, i, fromDoc(abs), fromDoc(named))
@@ -226,23 +235,60 @@ func (f *programs) find(i int, program string) (string, error) {
 	if !info.Mode().IsRegular() {
 		return "", fmt.Errorf("Add the program to the checkout, or fix hooks[%d].run.\n%s in the checkout is not a file.", i, shownRel)
 	}
-	return filepath.ToSlash(rel), nil
+	// Git stores a path in NFC, also where the file system keeps the name decomposed.
+	return filepath.ToSlash(norm.NFC.String(rel)), nil
 }
 
-// nameOnDisk is the name of the entry of the folder dir that part names: part itself
-// when the folder has an entry of exactly that name, else the entry whose name differs
-// from part in case alone, which a file system that ignores case also finds by part.
+// checkoutSpelled reports whether abs is inside the checkout at real although its path
+// differs from real in letter case or Unicode normalization: the components of abs that
+// stand for real match them when compared case-blind in NFC, and lead to the same folder.
+// ok is false for any other path. spelled is true when those components equal real's in
+// NFC, so only the normalization differs; rest is the path of abs from the checkout.
+func checkoutSpelled(abs, real string) (spelled bool, rest string, ok bool) {
+	sep := string(filepath.Separator)
+	want := strings.Split(strings.TrimPrefix(real, sep), sep)
+	have := strings.Split(strings.TrimPrefix(abs, sep), sep)
+	if len(have) < len(want) {
+		return false, "", false
+	}
+	spelled = true
+	for n := range want {
+		w, h := norm.NFC.String(want[n]), norm.NFC.String(have[n])
+		if !strings.EqualFold(w, h) {
+			return false, "", false
+		}
+		spelled = spelled && w == h
+	}
+	prefix := filepath.Join(append([]string{sep}, have[:len(want)]...)...)
+	a, err := os.Stat(prefix)
+	if err != nil {
+		return false, "", false
+	}
+	b, err := os.Stat(real)
+	if err != nil || !os.SameFile(a, b) {
+		return false, "", false
+	}
+	rest = filepath.Join(append([]string{"."}, have[len(want):]...)...)
+	return spelled, rest, true
+}
+
+// nameOnDisk is the name of the entry of the folder dir that part names: the entry whose
+// name equals part in NFC, so a name that macOS keeps decomposed matches the composed
+// name git stores, else the entry whose name differs from part in letter case alone,
+// which a file system that ignores case also finds by part.
 func nameOnDisk(dir, part string) (string, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return "", err
 	}
+	want := norm.NFC.String(part)
 	other := ""
 	for _, e := range entries {
+		name := norm.NFC.String(e.Name())
 		switch {
-		case e.Name() == part:
-			return part, nil
-		case other == "" && strings.EqualFold(e.Name(), part):
+		case name == want:
+			return e.Name(), nil
+		case other == "" && strings.EqualFold(name, want):
 			other = e.Name()
 		}
 	}

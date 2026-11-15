@@ -341,7 +341,7 @@ harness:
 |---|---|---|
 | `at` | yes | the name of a hook point of the base stack |
 | `kind` | yes | `check`, `review` or `enrich`, and one the point takes |
-| `run` | one of run and agent | the program, by its path from the directory of `qory.yaml`, alone or followed by its arguments, separated by spaces, with no shell and no quoting. The path is relative, with forward slashes, and leads to a regular file inside the checkout being composed. Neither the file nor a folder on its way may be a link, since the hook runner runs the file as committed in git and refuses a link. Each name on the path is written as it is on disk, letter case included |
+| `run` | one of run and agent | the program, by its path from the directory of `qory.yaml`, alone or followed by its arguments, separated by spaces, with no shell and no quoting. The path is relative, with forward slashes, and leads to a regular file inside the checkout being composed. Neither the file nor a folder on its way may be a link, since the hook runner runs the file as committed in git and refuses a link. Each name on the path is written as it is on disk, letter case included; the compose compares names in Unicode NFC, and `hooks.json` has the path in NFC, as git stores it |
 | `agent` | one of run and agent | the name of an agent that a module of the composed harness ships. A `review` hook runs an agent |
 | `name` | no | the hook's name, unique at its point: letters, digits, dots, hyphens and underscores, 64 at most, starting with a letter or digit. Default: the agent's name, else the file name of the program |
 | `required` | no | whether a red result blocks. Default: `true` |
