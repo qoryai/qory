@@ -65,7 +65,7 @@ func TestLoadRefusesABrokenHookPoint(t *testing.T) {
 	} {
 		path := write(t, tc.body)
 		_, err := Load(path)
-		want := tc.fix + "\n" + strings.ReplaceAll(tc.cause, "{path}", path)
+		want := tc.fix + "\n  " + strings.ReplaceAll(tc.cause, "{path}", path)
 		if err == nil || err.Error() != want {
 			t.Errorf("%s:\nerr = %v\nwant %s", tc.body, err, want)
 		}
@@ -138,7 +138,7 @@ func TestValidateRefusesABrokenHook(t *testing.T) {
 	} {
 		h := tc.h
 		err := h.validate(0)
-		if want := tc.fix + "\n" + tc.cause; err == nil || err.Error() != want {
+		if want := tc.fix + "\n  " + tc.cause; err == nil || err.Error() != want {
 			t.Errorf("%+v:\nerr = %v\nwant %s", tc.h, err, want)
 		}
 		if len(tc.fix) > 100 {
@@ -177,7 +177,7 @@ func TestHookReadsANullAsSet(t *testing.T) {
 		if len(h.Null) != 1 || h.Null[0] != tc.key {
 			t.Errorf("%s: null %q, want [%s]", tc.body, h.Null, tc.key)
 		}
-		want := "Remove hooks[0]." + tc.key + ", or give it a value.\nThe file sets hooks[0]." + tc.key + " to an empty value."
+		want := "Remove hooks[0]." + tc.key + ", or give it a value.\n  The file sets hooks[0]." + tc.key + " to an empty value."
 		if err := h.validate(0); err == nil || err.Error() != want {
 			t.Errorf("%s:\nerr = %v\nwant %s", tc.body, err, want)
 		}
@@ -197,7 +197,28 @@ func TestHookReadsANullAsSet(t *testing.T) {
 func TestHookErrorTakesTheFile(t *testing.T) {
 	err := hookErrorf("Remove harness.hooks from {file}.", "{path} defines a stack, and %s has %d.", "x", 2)
 	got := err.In("/repo/100%/qory.yaml").Error()
-	if want := "Remove harness.hooks from qory.yaml.\n/repo/100%/qory.yaml defines a stack, and x has 2."; got != want {
+	if want := "Remove harness.hooks from qory.yaml.\n  /repo/100%/qory.yaml defines a stack, and x has 2."; got != want {
 		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+// TestAHookErrorIndentsItsCause is a refusal of a hook with and without its file: the
+// cause line follows the fix line, indented by two spaces, as the compose's refusals
+// indent theirs, and Fix is the fix line alone.
+func TestAHookErrorIndentsItsCause(t *testing.T) {
+	err := hookErrorf("Set extending.hooks.per_point to 1 or more.", "{path} sets %d, which lets no hook in.", 0)
+	for _, c := range []struct {
+		err  *HookError
+		want string
+	}{
+		{err, "Set extending.hooks.per_point to 1 or more.\n  The file sets 0, which lets no hook in."},
+		{err.In("/work/qory-stack.yaml").(*HookError), "Set extending.hooks.per_point to 1 or more.\n  /work/qory-stack.yaml sets 0, which lets no hook in."},
+	} {
+		if got := c.err.Error(); got != c.want {
+			t.Errorf("got %q, want %q", got, c.want)
+		}
+		if got := c.err.Fix(); got != "Set extending.hooks.per_point to 1 or more." {
+			t.Errorf("fix %q", got)
+		}
 	}
 }

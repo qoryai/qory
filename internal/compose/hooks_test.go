@@ -150,23 +150,23 @@ func TestHookProgramsStayInTheCheckout(t *testing.T) {
 		t.Errorf("runs: %s, want each program by its path in git from the checkout's root", got)
 	}
 
-	commitFix := "Commit the program of hooks[0].run: a hook runs the file as committed in git.\nhooks[0].run, %s, has no file in the commit at HEAD of the checkout."
-	nearFix := "Write hooks[0].run as committed in git.\nhooks[0].run is %s, and git has %s."
+	commitFix := "Commit the program of hooks[0].run: a hook runs the file as committed in git.\n  hooks[0].run, %s, has no file in the commit at HEAD of the checkout."
+	nearFix := "Write hooks[0].run as committed in git.\n  hooks[0].run is %s, and git has %s."
 	for _, tc := range []struct{ run, want string }{
-		{"other/scripts/check.sh", "Move the program into the checkout, or fix hooks[0].run.\nother/scripts/check.sh, from the directory of " + doc + ", is outside the checkout "},
+		{"other/scripts/check.sh", "Move the program into the checkout, or fix hooks[0].run.\n  other/scripts/check.sh, from the directory of " + doc + ", is outside the checkout "},
 		{"app/scripts/new.sh", fmt.Sprintf(commitFix, "app/scripts/new.sh")},
 		{"app/scripts/mine.local.sh", fmt.Sprintf(commitFix, "app/scripts/mine.local.sh")},
 		{"app/scripts/*.sh, name: glob", fmt.Sprintf(commitFix, "app/scripts/*.sh")},
 		{"app/Scripts/check.sh", fmt.Sprintf(nearFix, "app/Scripts/check.sh", "app/scripts/check.sh")},
 		{"app/scripts/CHECK.sh", fmt.Sprintf(nearFix, "app/scripts/CHECK.sh", "app/scripts/check.sh")},
 		{"app/scripts/v\u00e9rifier.sh, name: v", fmt.Sprintf(nearFix, "app/scripts/v\u00e9rifier.sh", "app/scripts/ve\u0301rifier.sh") + " The names differ in Unicode form (NFC and NFD)."},
-		{"app/scripts/inside.sh", "Point run at the file itself, not a link.\nhooks[0].run, app/scripts/inside.sh, is a link."},
-		{"app/scripts/abs.sh", "Point run at the file itself, not a link.\nhooks[0].run, app/scripts/abs.sh, is a link."},
-		{"app/scripts/linked.sh", "Point run at the file itself, not a link.\nhooks[0].run, app/scripts/linked.sh, is a link."},
-		{"app/tools/check.sh", "Point run at the file itself, not a link.\nhooks[0].run passes through the link app/tools."},
-		{"app/scripts", "Point run at a file.\nhooks[0].run, app/scripts, is a folder in git."},
-		{"app/vendor/lib", "Point run at a file.\nhooks[0].run, app/vendor/lib, is a submodule in git."},
-		{"app", "Set hooks[0].run to a program file in the checkout.\nhooks[0].run, app, is the checkout itself."},
+		{"app/scripts/inside.sh", "Point run at the file itself, not a link.\n  hooks[0].run, app/scripts/inside.sh, is a link."},
+		{"app/scripts/abs.sh", "Point run at the file itself, not a link.\n  hooks[0].run, app/scripts/abs.sh, is a link."},
+		{"app/scripts/linked.sh", "Point run at the file itself, not a link.\n  hooks[0].run, app/scripts/linked.sh, is a link."},
+		{"app/tools/check.sh", "Point run at the file itself, not a link.\n  hooks[0].run passes through the link app/tools."},
+		{"app/scripts", "Point run at a file.\n  hooks[0].run, app/scripts, is a folder in git."},
+		{"app/vendor/lib", "Point run at a file.\n  hooks[0].run, app/vendor/lib, is a submodule in git."},
+		{"app", "Set hooks[0].run to a program file in the checkout.\n  hooks[0].run, app, is the checkout itself."},
 	} {
 		hooks("    - {at: after-review-round, kind: check, run: " + tc.run + "}\n")
 		_, err := composeHooks(t, doc, checkout)
@@ -182,7 +182,7 @@ func TestHookProgramsStayInTheCheckout(t *testing.T) {
 // yet, and one git fails to read: a hook's program fails the compose in each, and the
 // last refusal has git's first line.
 func TestHookProgramsNeedACommit(t *testing.T) {
-	fix := "Run qory in a git checkout: a hook runs the file as committed in git.\n"
+	fix := "Run qory in a git checkout: a hook runs the file as committed in git.\n  "
 	for _, tc := range []struct {
 		name string
 		git  [][]string
@@ -191,7 +191,7 @@ func TestHookProgramsNeedACommit(t *testing.T) {
 		{"no git checkout", nil, func(dir string) string { return fix + "The folder " + dir + " is in no git checkout." }},
 		{"no commit", [][]string{{"init", "-q", "-b", "main"}}, func(dir string) string { return fix + "The checkout " + dir + " has no commit yet." }},
 		{"git fails", [][]string{{"init", "-q", "-b", "main"}, {"config", "core.repositoryformatversion", "99"}}, func(dir string) string {
-			return "Fix what git reports for the checkout: a hook runs the file as committed in git.\ngit rev-parse in " + dir + " failed: fatal: "
+			return "Fix what git reports for the checkout: a hook runs the file as committed in git.\n  git rev-parse in " + dir + " failed: fatal: "
 		}},
 	} {
 		dir := realTemp(t)
@@ -240,7 +240,7 @@ func TestHookProgramsInAFolderOfTheRepository(t *testing.T) {
 			t.Fatal(err)
 		}
 		_, err = composeHooks(t, doc, checkout)
-		want := "Write hooks[0].run as committed in git.\nhooks[0].run is scripts/Check-licences.sh, and git has scripts/check-licences.sh."
+		want := "Write hooks[0].run as committed in git.\n  hooks[0].run is scripts/Check-licences.sh, and git has scripts/check-licences.sh."
 		if err == nil || err.Error() != want {
 			t.Errorf("%s: err = %v, want %q", checkout, err, want)
 		}
@@ -281,6 +281,32 @@ func TestHookRefusalsFitTheFixLine(t *testing.T) {
 		lines := strings.Split(strings.TrimRight(string(data), "\n"), "\n")
 		if len(lines) != 2 || utf8.RuneCountInString(lines[0]) > 100 || lines[1] == "" {
 			t.Errorf("%s: want a fix line of at most 100 characters and a cause line, got %q", file, lines)
+		}
+	}
+}
+
+// TestAHookCauseLineIsIndented is a hook at a point the base does not declare, and one
+// over the base's timeout: each refusal is the fix line, then the cause line indented by
+// two spaces, as the group and contract refusals indent theirs.
+func TestAHookCauseLineIsIndented(t *testing.T) {
+	dir := realTemp(t)
+	copyHooksFixture(t, dir)
+	commitAll(t, dir)
+	doc := filepath.Join(dir, "qory.yaml")
+	for _, c := range []struct{ hook, fix string }{
+		{"    - {at: after-merge, kind: check, run: scripts/check-licences.sh}\n", "Set hooks[0].at to a hook point of the base stack."},
+		{"    - {at: after-review-round, kind: check, run: scripts/check-licences.sh, timeout: 1h}\n", "Set hooks[0].timeout to 10m or less, or leave it out."},
+	} {
+		if err := os.WriteFile(doc, []byte(hooksDoc("stack", c.hook)), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		_, err := composeHooks(t, doc, dir)
+		if err == nil {
+			t.Fatalf("%s: composed", c.hook)
+		}
+		fix, cause, _ := strings.Cut(err.Error(), "\n")
+		if fix != c.fix || !strings.HasPrefix(cause, "  The base stack ") || strings.Contains(cause, "\n") {
+			t.Errorf("error:\n%v\nwant %q, then a cause line indented by two spaces", err, c.fix)
 		}
 	}
 }

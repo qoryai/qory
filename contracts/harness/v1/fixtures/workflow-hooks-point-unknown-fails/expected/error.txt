@@ -1,2 +1,2 @@
 Set hooks[0].at to a hook point of the base stack.
-The base stack software@working-tree declares after-code-map, after-plan, after-review-round, before-matrix; after-merge is not one.
+  The base stack software@working-tree declares after-code-map, after-plan, after-review-round, before-matrix; after-merge is not one.

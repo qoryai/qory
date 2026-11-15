@@ -74,10 +74,10 @@ func checkHooks(res *Result, p *stack.Stack, opts Options) error {
 		file = filepath.Base(p.File)
 	}
 	if base == nil {
-		return fmt.Errorf("Remove hooks from %s, or extend a stack that allows them.\nA hook extends a workflow of a base stack.", file)
+		return fmt.Errorf("Remove hooks from %s, or extend a stack that allows them.\n  A hook extends a workflow of a base stack.", file)
 	}
 	if base.Extending == nil || base.Extending.Hooks == nil {
-		return fmt.Errorf("Remove hooks from %s, or extend a stack that allows them.\nThe base stack %s has no extending.hooks.", file, base)
+		return fmt.Errorf("Remove hooks from %s, or extend a stack that allows them.\n  The base stack %s has no extending.hooks.", file, base)
 	}
 	limits := base.Extending.Hooks
 	points := map[string]hookPoint{}
@@ -87,7 +87,7 @@ func checkHooks(res *Result, p *stack.Stack, opts Options) error {
 		}
 	}
 	if len(points) == 0 {
-		return fmt.Errorf("Remove hooks from %s, or extend a stack that declares hook points.\nThe base stack %s declares none.", file, base)
+		return fmt.Errorf("Remove hooks from %s, or extend a stack that declares hook points.\n  The base stack %s declares none.", file, base)
 	}
 	timeout := limits.Timeout
 	if timeout == 0 {
@@ -107,23 +107,23 @@ func checkHooks(res *Result, p *stack.Stack, opts Options) error {
 	for i, h := range p.Hooks {
 		hp, ok := points[h.At]
 		if !ok {
-			return fmt.Errorf("Set hooks[%d].at to a hook point of the base stack.\nThe base stack %s declares %s; %s is not one.", i, base, strings.Join(slices.Sorted(maps.Keys(points)), ", "), shown(h.At))
+			return fmt.Errorf("Set hooks[%d].at to a hook point of the base stack.\n  The base stack %s declares %s; %s is not one.", i, base, strings.Join(slices.Sorted(maps.Keys(points)), ", "), shown(h.At))
 		}
 		if !slices.Contains(hp.point.Kinds, h.Kind) {
 			if len(hp.point.Kinds) == 1 {
-				return fmt.Errorf("Set hooks[%d].kind to %s.\n%s allows only that kind.", i, hp.point.Kinds[0], h.At)
+				return fmt.Errorf("Set hooks[%d].kind to %s.\n  %s allows only that kind.", i, hp.point.Kinds[0], h.At)
 			}
-			return fmt.Errorf("Set hooks[%d].kind to %s.\n%s allows only those.", i, orList(hp.point.Kinds), h.At)
+			return fmt.Errorf("Set hooks[%d].kind to %s.\n  %s allows only those.", i, orList(hp.point.Kinds), h.At)
 		}
 		limit := timeout
 		if h.Timeout > 0 {
 			if h.Timeout > timeout {
-				return fmt.Errorf("Set hooks[%d].timeout to %s or less, or leave it out.\nThe base stack %s allows a hook no longer.", i, limits.TimeoutShown(), base)
+				return fmt.Errorf("Set hooks[%d].timeout to %s or less, or leave it out.\n  The base stack %s allows a hook no longer.", i, limits.TimeoutShown(), base)
 			}
 			limit = h.Timeout
 		}
 		if h.Agent != "" && !agents[h.Agent] {
-			return fmt.Errorf("Ship the agent in a module of %s, or fix hooks[%d].agent.\nNo module ships the agent %s.", file, i, shown(h.Agent))
+			return fmt.Errorf("Ship the agent in a module of %s, or fix hooks[%d].agent.\n  No module ships the agent %s.", file, i, shown(h.Agent))
 		}
 		var run []string
 		if len(h.Command) > 0 {
@@ -135,7 +135,7 @@ func checkHooks(res *Result, p *stack.Stack, opts Options) error {
 		}
 		key := h.At + "/" + h.Name()
 		if j, ok := named[key]; ok {
-			return fmt.Errorf("Set hooks[%d].name to a name that no other hook at its point has.\nhooks[%d] at %s has the name %s too.", i, j, h.At, shown(h.Name()))
+			return fmt.Errorf("Set hooks[%d].name to a name that no other hook at its point has.\n  hooks[%d] at %s has the name %s too.", i, j, h.At, shown(h.Name()))
 		}
 		named[key] = i
 		perPoint[h.At]++
@@ -144,12 +144,12 @@ func checkHooks(res *Result, p *stack.Stack, opts Options) error {
 	}
 	for _, point := range slices.Sorted(maps.Keys(perPoint)) {
 		if n := perPoint[point]; n > limits.PerPoint() {
-			return fmt.Errorf("Remove %s at %s.\nThe base stack allows %d, and %s has %d.", over(n-limits.PerPoint()), point, limits.PerPoint(), file, n)
+			return fmt.Errorf("Remove %s at %s.\n  The base stack allows %d, and %s has %d.", over(n-limits.PerPoint()), point, limits.PerPoint(), file, n)
 		}
 	}
 	for _, name := range slices.Sorted(maps.Keys(perWorkflow)) {
 		if n := perWorkflow[name]; n > limits.PerWorkflow() {
-			return fmt.Errorf("Remove %s at the points of workflow %s.\nThe base stack allows %d, and %s has %d.", over(n-limits.PerWorkflow()), name, limits.PerWorkflow(), file, n)
+			return fmt.Errorf("Remove %s at the points of workflow %s.\n  The base stack allows %d, and %s has %d.", over(n-limits.PerWorkflow()), name, limits.PerWorkflow(), file, n)
 		}
 	}
 	res.Hooks = hooks
@@ -196,7 +196,7 @@ func (f *programs) find(i int, program string) (string, error) {
 	abs := filepath.Join(doc, filepath.FromSlash(program))
 	rel, err := filepath.Rel(f.real, abs)
 	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return "", fmt.Errorf("Move the program into the checkout, or fix hooks[%d].run.\n%s, from the directory of %s, is outside the checkout %s.", i, exports.Value(program, false), exports.HidePath(filepath.Join(f.doc, f.file)), exports.HidePath(f.real))
+		return "", fmt.Errorf("Move the program into the checkout, or fix hooks[%d].run.\n  %s, from the directory of %s, is outside the checkout %s.", i, exports.Value(program, false), exports.HidePath(filepath.Join(f.doc, f.file)), exports.HidePath(f.real))
 	}
 	// fromDoc is a path from the checkout's root as the hook's run writes it, from doc.
 	fromDoc := func(path string) string {
@@ -207,7 +207,7 @@ func (f *programs) find(i int, program string) (string, error) {
 	}
 	rel = filepath.ToSlash(rel)
 	if rel == "." {
-		return "", fmt.Errorf("Set hooks[%d].run to a program file in the checkout.\nhooks[%d].run, %s, is the checkout itself.", i, i, fromDoc(rel))
+		return "", fmt.Errorf("Set hooks[%d].run to a program file in the checkout.\n  hooks[%d].run, %s, is the checkout itself.", i, i, fromDoc(rel))
 	}
 	if !f.read {
 		if err := f.head(); err != nil {
@@ -222,7 +222,7 @@ func (f *programs) find(i int, program string) (string, error) {
 	depth := strings.Count(rel, "/") + 1
 	for _, e := range entries {
 		if e.mode == "120000" && strings.Count(e.path, "/")+1 < depth {
-			return "", fmt.Errorf("Point run at the file itself, not a link.\nhooks[%d].run passes through the link %s.", i, fromDoc(e.path))
+			return "", fmt.Errorf("Point run at the file itself, not a link.\n  hooks[%d].run passes through the link %s.", i, fromDoc(e.path))
 		}
 	}
 	for _, e := range entries {
@@ -233,13 +233,13 @@ func (f *programs) find(i int, program string) (string, error) {
 		case "100644", "100755":
 			return e.path, nil
 		case "120000":
-			return "", fmt.Errorf("Point run at the file itself, not a link.\nhooks[%d].run, %s, is a link.", i, fromDoc(e.path))
+			return "", fmt.Errorf("Point run at the file itself, not a link.\n  hooks[%d].run, %s, is a link.", i, fromDoc(e.path))
 		case "040000":
-			return "", fmt.Errorf("Point run at a file.\nhooks[%d].run, %s, is a folder in git.", i, fromDoc(e.path))
+			return "", fmt.Errorf("Point run at a file.\n  hooks[%d].run, %s, is a folder in git.", i, fromDoc(e.path))
 		case "160000":
-			return "", fmt.Errorf("Point run at a file.\nhooks[%d].run, %s, is a submodule in git.", i, fromDoc(e.path))
+			return "", fmt.Errorf("Point run at a file.\n  hooks[%d].run, %s, is a submodule in git.", i, fromDoc(e.path))
 		default:
-			return "", fmt.Errorf("Point run at a file.\nhooks[%d].run, %s, has the mode %s in git.", i, fromDoc(e.path), e.mode)
+			return "", fmt.Errorf("Point run at a file.\n  hooks[%d].run, %s, has the mode %s in git.", i, fromDoc(e.path), e.mode)
 		}
 	}
 	committed, err := f.near(rel)
@@ -252,9 +252,9 @@ func (f *programs) find(i int, program string) (string, error) {
 		if !strings.EqualFold(rel, committed) {
 			form = " The names differ in Unicode form (NFC and NFD)."
 		}
-		return "", fmt.Errorf("Write hooks[%d].run as committed in git.\nhooks[%d].run is %s, and git has %s.%s", i, i, fromDoc(rel), fromDoc(committed), form)
+		return "", fmt.Errorf("Write hooks[%d].run as committed in git.\n  hooks[%d].run is %s, and git has %s.%s", i, i, fromDoc(rel), fromDoc(committed), form)
 	}
-	return "", fmt.Errorf("Commit the program of hooks[%d].run: a hook runs the file as committed in git.\nhooks[%d].run, %s, has no file in the commit at HEAD of the checkout.", i, i, fromDoc(rel))
+	return "", fmt.Errorf("Commit the program of hooks[%d].run: a hook runs the file as committed in git.\n  hooks[%d].run, %s, has no file in the commit at HEAD of the checkout.", i, i, fromDoc(rel))
 }
 
 // treeEntry is one entry of the commit at HEAD, as git ls-tree prints it: its mode and
@@ -355,7 +355,7 @@ func (f *programs) head() error {
 	fix := "Run qory in a git checkout: a hook runs the file as committed in git."
 	out, err := f.git("rev-parse", "--show-prefix")
 	if exit, ok := errors.AsType[*gitExit](err); ok && strings.Contains(exit.line, "not a git repository") {
-		return fmt.Errorf("%s\nThe folder %s is in no git checkout.", fix, exports.HidePath(f.real))
+		return fmt.Errorf("%s\n  The folder %s is in no git checkout.", fix, exports.HidePath(f.real))
 	}
 	if err != nil {
 		return f.failed(err)
@@ -363,7 +363,7 @@ func (f *programs) head() error {
 	f.prefix = strings.TrimSuffix(out, "\n")
 	_, err = f.git("rev-parse", "--verify", "--quiet", "HEAD^{commit}")
 	if exit, ok := errors.AsType[*gitExit](err); ok && exit.code == 1 {
-		return fmt.Errorf("%s\nThe checkout %s has no commit yet.", fix, exports.HidePath(f.real))
+		return fmt.Errorf("%s\n  The checkout %s has no commit yet.", fix, exports.HidePath(f.real))
 	}
 	if err != nil {
 		return f.failed(err)
@@ -375,7 +375,7 @@ func (f *programs) head() error {
 // that exited with an error.
 func (f *programs) failed(err error) error {
 	if exit, ok := errors.AsType[*gitExit](err); ok {
-		return fmt.Errorf("Fix what git reports for the checkout: a hook runs the file as committed in git.\ngit %s in %s failed: %s", exit.command, exports.HidePath(f.real), exports.HidePath(exit.line))
+		return fmt.Errorf("Fix what git reports for the checkout: a hook runs the file as committed in git.\n  git %s in %s failed: %s", exit.command, exports.HidePath(f.real), exports.HidePath(exit.line))
 	}
 	return err
 }
@@ -407,7 +407,7 @@ func (f *programs) git(args ...string) (string, error) {
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-		return "", fmt.Errorf("Run the compose again, or raise `git.timeout` in `qory.yaml`.\ngit %s in %s ran past %s and was stopped.", args[0], exports.HidePath(f.real), f.timeout)
+		return "", fmt.Errorf("Run the compose again, or raise `git.timeout` in `qory.yaml`.\n  git %s in %s ran past %s and was stopped.", args[0], exports.HidePath(f.real), f.timeout)
 	}
 	if exit, ok := errors.AsType[*exec.ExitError](err); ok {
 		line, _, _ := strings.Cut(strings.TrimSpace(stderr.String()), "\n")

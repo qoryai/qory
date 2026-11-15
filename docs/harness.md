@@ -293,8 +293,8 @@ These stop the compose with exit 2:
 ```
 Write provides.agents.reviewers in module python as a list: it is a group role.
 Declare agents/reviewers as many in module python, or remove it: module software-factory declares it many.
-Give agents/reviewers an agent, or remove its reference from skills/review/SKILL.md of module software-factory.
-The group has no member.
+Fill agents/reviewers, or remove it from skills/review/SKILL.md of module software-factory.
+  The group has no member.
 ```
 
 A reference to a group in front matter stops the compose as well, since a group resolves
@@ -403,7 +403,7 @@ untracked or ignored program fails the compose with exit 2:
 
 ```
 Commit the program of hooks[0].run: a hook runs the file as committed in git.
-hooks[0].run, scripts/check-licences.sh, has no file in the commit at HEAD of the checkout.
+  hooks[0].run, scripts/check-licences.sh, has no file in the commit at HEAD of the checkout.
 ```
 
 ```yaml
@@ -447,7 +447,7 @@ and the second the cause:
 
 ```
 Set hooks[0].at to a hook point of the base stack.
-The base stack software@4b8e2f1a9c7d declares after-plan, after-review-round; after-merge is not one.
+  The base stack software@4b8e2f1a9c7d declares after-plan, after-review-round; after-merge is not one.
 ```
 
 A workflow hook is not a runtime hook, a module's `hooks/<file>`, which the runtime runs

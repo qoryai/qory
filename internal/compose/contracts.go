@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/qoryai/qory/internal/exports"
 	"github.com/qoryai/qory/internal/module"
@@ -81,11 +82,11 @@ func checkContracts(res *Result, opened []openedModule) error {
 			if !ok {
 				continue
 			}
-			list := ""
+			var member *Role
 			if group {
-				list = memberList(res, role, filler)
+				member = memberRole(res, role, filler)
 			}
-			agentBlocks, err := checkAgent(e, modules[e.Module], role, list, contracts)
+			agentBlocks, err := checkAgent(res, e, modules[e.Module], role, member, contracts)
 			if err != nil {
 				return err
 			}
@@ -98,32 +99,143 @@ func checkContracts(res *Result, opened []openedModule) error {
 	return errors.New(strings.Join(blocks, "\n"))
 }
 
-// memberList is the list that adds the member of the group role to the group, as rule
-// 4's texts write it: provides.<kind>.<role> of module <m>, bind.<kind>.<role> in the
-// base stack, or bind.<kind>.<role> in the file of the document composed.
-func memberList(res *Result, role, member string) string {
-	kind, name, _ := strings.Cut(role, "/")
-	key := "bind." + shown(kind) + "." + shown(name)
+// memberRole is the member of the group role that fills it with the entry named member,
+// with each list that adds it. A member no list adds is set by the bind of the document
+// composed.
+func memberRole(res *Result, role, member string) *Role {
 	for _, r := range res.Roles {
-		if r.Role != role || r.Name != member || r.Replaced {
-			continue
+		if r.Role == role && r.Name == member && !r.Replaced {
+			return &r
 		}
-		switch {
-		case r.Module != "":
-			return "provides." + shown(kind) + "." + shown(name) + " of module " + shown(r.Module)
-		case r.From == "base":
-			return key + " in the base stack"
-		}
-		break
 	}
-	return key + " in " + docFile(res.Stack)
+	return &Role{Role: role, Name: member, From: "bind", Group: true}
 }
 
+// fixedLists is the number of lists that add r, a member of a group role, that the
+// reader of a checkout's qory.yaml does not edit: the bind of the base stack it extends,
+// and the provides of a module of that base.
+func fixedLists(res *Result, r Role) int {
+	if res.Base == nil {
+		return 0
+	}
+	n := 0
+	for _, l := range append([]Role{r}, r.Also...) {
+		if l.From == "base" || l.Module != "" && baseModule(res, l.Module) {
+			n++
+		}
+	}
+	return n
+}
+
+// baseModule reports whether the composed module of that name is a module of the base
+// stack a checkout extends.
+func baseModule(res *Result, name string) bool {
+	m, _ := moduleOf(res, name)
+	return m.Base
+}
+
+// moduleOf is the composed module of that name, false for none.
+func moduleOf(res *Result, name string) (Module, bool) {
+	for _, m := range res.Modules {
+		if m.Name == name {
+			return m, true
+		}
+	}
+	return Module{}, false
+}
+
+// checkoutName is the module of that name as the checkout's qory.yaml lists it: a base
+// module by its [Module.BaseName], which differs from the manifest's name when the base
+// lists an export of another name, and any other module by its name.
+func checkoutName(res *Result, name string) string {
+	if m, ok := moduleOf(res, name); ok && m.Base && m.BaseName != "" {
+		return shown(m.BaseName)
+	}
+	return shown(name)
+}
+
+// baseAllowsAgents reports whether the base stack a checkout extends lets an extending
+// module ship agents.
+func baseAllowsAgents(res *Result) bool {
+	return res.Base != nil && res.Base.Extending != nil && slices.Contains(res.Base.Extending.Kinds, "agents")
+}
+
+// addsTo is how the cause line of a refusal says that the list that set r, a member of a
+// group role that only a list of the base stack adds, adds the agent bound to the group.
+func addsTo(res *Result, r Role, bound string) string {
+	if r.Module != "" {
+		return fmt.Sprintf("Module %s of the base stack %s provides %s to %s", checkoutName(res, r.Module), res.Base, bound, shownKey(r.Role))
+	}
+	return fmt.Sprintf("The base stack %s binds %s to %s", res.Base, bound, shownKey(r.Role))
+}
+
+// excludable reports whether the checkout's qory.yaml can exclude an agent of m: any
+// agent of a module qory.yaml adds, and an agent of a base module that qory.yaml can list
+// when the base lets an extending module ship agents.
+func excludable(res *Result, m Module) bool {
+	if !m.Base {
+		return true
+	}
+	return m.BaseName != "" && baseAllowsAgents(res)
+}
+
+// listsOf is each list that adds r, a member of a group role: the list that set it, then
+// those of [Role.Also].
+func listsOf(res *Result, r Role) []string {
+	lists := []string{listOf(res, r)}
+	for _, also := range r.Also {
+		also.Role = r.Role
+		lists = append(lists, listOf(res, also))
+	}
+	return lists
+}
+
+// listOf is the list that set r, a member of a group role, as rule 4's texts write it,
+// see [addedBy].
+func listOf(res *Result, r Role) string {
+	kind, name, _ := strings.Cut(r.Role, "/")
+	switch {
+	case r.Module != "":
+		return "provides." + shown(kind) + "." + shown(name) + " of module " + checkoutName(res, r.Module)
+	case r.From == "base":
+		return "bind." + shown(kind) + "." + shown(name) + " in the base stack"
+	}
+	return "bind." + shown(kind) + "." + shown(name) + " in " + docFile(res.Stack)
+}
+
+// addedBy is the fix and the items of a member of a group role that lists add, for a
+// fix line that starts with lead: for one list, "remove it from <list>" and no items; for
+// several, "remove it from the lists that add it" and one item line per list, each
+// "  - <list>". When lead and one list make a fix line over 100 characters, the list
+// moves to an item line, after "remove it from the list that adds it". many reports
+// whether the items are those of several lists.
+func addedBy(lead string, lists []string) (fix, items string, many bool) {
+	if len(lists) == 1 && fits(lead+"remove it from "+lists[0]+".") {
+		return "remove it from " + lists[0], "", false
+	}
+	items = itemLines(lists)
+	if len(lists) == 1 {
+		return "remove it from the list that adds it", items, false
+	}
+	return "remove it from the lists that add it", items, true
+}
+
+// itemLines is lists, each on an item line "  - <list>", each line after a newline.
+func itemLines(lists []string) string {
+	out := ""
+	for _, l := range lists {
+		out += "\n  - " + l
+	}
+	return out
+}
+
+// fits reports whether line, the first line of a refusal, has at most 100 characters.
+func fits(line string) bool { return utf8.RuneCountInString(line) <= 100 }
+
 // checkAgent is a block for each contract of role that the agent e, of the composed
-// module m, lacks a part of. list is "" for a single role, and for a member of a group
-// role the list that adds it to the group, see [memberList]: the fix line then offers to
-// remove the member from that list, and the cause line names the member's module.
-func checkAgent(e Entry, m Module, role, list string, contracts []roleContract) ([]string, error) {
+// module m, lacks a part of. member is nil for a single role, and for a group role the
+// member e fills, see [memberHead].
+func checkAgent(res *Result, e Entry, m Module, role string, member *Role, contracts []roleContract) ([]string, error) {
 	var blocks []string
 	readFile := os.ReadFile
 	if m.Root != nil {
@@ -149,20 +261,96 @@ func checkAgent(e Entry, m Module, role, list string, contracts []roleContract) 
 		if len(missing) == 0 {
 			continue
 		}
-		fix := fmt.Sprintf("Complete agent %s of module %s, or bind %s to another agent.", shown(e.Name), shown(e.Module), shownKey(role))
-		agent := exports.Value(file, false)
-		if list != "" {
-			fix = fmt.Sprintf("Complete agent %s, or remove it from %s.", shown(e.Name), list)
-			agent += " of module " + shown(e.Module)
+		contract := exports.Value(c.Path, false) + " of module " + checkoutName(res, c.Module)
+		block := fmt.Sprintf("Complete agent %s of module %s, or bind %s to another agent.\n  The contract %s requires these parts, which %s lacks:",
+			shown(e.Name), checkoutName(res, e.Module), shownKey(role), contract, exports.Value(file, false))
+		tail := ""
+		if member != nil {
+			block, tail = memberHead(res, e, m, *member, contract, exports.Value(file, false))
 		}
-		block := fmt.Sprintf("%s\n  The contract %s of module %s requires these parts, which %s lacks:",
-			fix, exports.Value(c.Path, false), shown(c.Module), agent)
 		for _, part := range missing {
 			block += "\n  - " + part
 		}
-		blocks = append(blocks, block)
+		blocks = append(blocks, block+tail)
 	}
 	return blocks, nil
+}
+
+// memberHead is the fix and the cause line of a block of the agent e, of module m, that
+// lacks parts of contract and fills r, a member of a group role; tail is what follows the
+// parts. file is e's file as the cause line names it.
+//
+// A member that lists the reader edits add gets the fix that removes it from those
+// lists: from the one list, or from the lists that add it with a line per list. The
+// reader of a checkout's qory.yaml does not edit the base stack's bind nor a base
+// module's provides, see [fixedLists]. A member that one such list alone adds gets, for
+// an agent of a module of qory.yaml, the change to the agent, and for an agent of a base
+// module an exclude in qory.yaml when the base allows one, see [excludable], or the
+// request to the base stack's maintainer; the cause line names the list and the
+// contract. A member that such a list and another add gets the exclude, or the change to
+// the agent where the reader can make it, and the lists after the parts.
+func memberHead(res *Result, e Entry, m Module, r Role, contract, file string) (head, tail string) {
+	name := shown(e.Name)
+	key, in := shownKey(e.Kind+"/"+e.Name), " in "+docFile(res.Stack)
+	exclude := "Exclude " + key + in
+	askComplete := ", or ask the base stack's maintainer to complete it."
+	lacking := ", and the agent lacks these parts of the contract " + contract + ":"
+	fixed := fixedLists(res, r)
+	switch {
+	case fixed == 1 && len(r.Also) == 0 && !m.Base:
+		return "Complete agent " + name + " in module " + shown(e.Module) + ".\n  " + addsTo(res, r, name) + lacking, ""
+	case fixed == 1 && len(r.Also) == 0:
+		// The module is on the cause line unless the fix line names it, or the list is
+		// the module's provides, which the cause line names.
+		mod := checkoutName(res, e.Module)
+		of := " of module " + mod
+		if r.Module == e.Module {
+			of = ""
+		}
+		bound := name + of
+		fix := "Ask the base stack's maintainer to complete agent " + name + "."
+		if excludable(res, m) {
+			fix = "Exclude " + key + " of module " + mod + in + askComplete
+			switch {
+			case fits(fix):
+				bound = name
+			case fits(exclude + askComplete):
+				fix = exclude + askComplete
+			default:
+				fix = "Exclude the agent" + in + askComplete
+				bound = key + of
+			}
+		}
+		return fix + "\n  " + addsTo(res, r, bound) + lacking, ""
+	case fixed > 0:
+		fix := "Ask the base stack's maintainer to complete agent " + name + "."
+		switch {
+		case !m.Base:
+			fix = exclude + ", or complete it in module " + shown(e.Module) + "."
+			if !fits(fix) {
+				fix = exclude + ", or complete it."
+			}
+		case excludable(res, m):
+			fix = exclude + askComplete
+			if !fits(fix) {
+				fix = "Exclude the agent" + in + askComplete
+			}
+		}
+		// A base module is named as the checkout's qory.yaml lists it, for the exclude.
+		cause := fmt.Sprintf("  The contract %s requires these parts, which %s of module %s lacks:", contract, file, checkoutName(res, e.Module))
+		return fix + "\n" + cause, "\n  These lists add it:" + itemLines(listsOf(res, r))
+	}
+	cause := fmt.Sprintf("  The contract %s requires these parts, which %s of module %s lacks:", contract, file, checkoutName(res, e.Module))
+	lead := "Complete agent " + name + ", or "
+	remove, items, many := addedBy(lead, listsOf(res, r))
+	head = lead + remove + "."
+	switch {
+	case many:
+		head += "\n  These lists add it:" + items
+	case items != "":
+		head += "\n  This list adds it:" + items
+	}
+	return head + "\n" + cause, ""
 }
 
 // readContracts reads the contracts the opened module o declares, by role, through the

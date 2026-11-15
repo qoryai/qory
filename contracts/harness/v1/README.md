@@ -359,12 +359,12 @@ inside the checkout being composed, so a hook of another repository under the fo
 fails the compose of this one.
 
 Each refusal is a line with the fix, of at most 100 characters, then a line with the
-cause. A refusal of a rule that needs no base comes as the document is read, and its
-cause line has the path of `qory.yaml`, such as:
+cause, indented by two spaces. A refusal of a rule that needs no base comes as the
+document is read, and its cause line has the path of `qory.yaml`, such as:
 
 ```
 Set hooks[0].timeout to whole seconds, 1s or more, such as 90s or 5m.
-/work/app/qory.yaml sets "500ms".
+  /work/app/qory.yaml sets "500ms".
 ```
 
 Those rules are: both or neither of `run` and `agent`, a `review` hook with `run`, a
@@ -376,94 +376,94 @@ compose fails with status 2 for a hook that breaks a rule of the base or the che
 - a base without `extending.hooks`:
   ```
   Remove hooks from qory.yaml, or extend a stack that allows them.
-  The base stack software@4b8e2f1a9c7d has no extending.hooks.
+    The base stack software@4b8e2f1a9c7d has no extending.hooks.
   ```
 - a base whose workflows declare no point:
   ```
   Remove hooks from qory.yaml, or extend a stack that declares hook points.
-  The base stack software@4b8e2f1a9c7d declares none.
+    The base stack software@4b8e2f1a9c7d declares none.
   ```
 - a point the base does not declare:
   ```
   Set hooks[0].at to a hook point of the base stack.
-  The base stack software@4b8e2f1a9c7d declares after-plan, after-review-round; after-merge is not one.
+    The base stack software@4b8e2f1a9c7d declares after-plan, after-review-round; after-merge is not one.
   ```
 - a kind the point does not take:
   ```
   Set hooks[1].kind to check or review.
-  after-review-round allows only those.
+    after-review-round allows only those.
   ```
 - more workflow hooks at a point than `per_point`, and in the points of one workflow
   than `per_workflow`:
   ```
   Remove a hook at after-review-round.
-  The base stack allows 3, and qory.yaml has 4.
+    The base stack allows 3, and qory.yaml has 4.
   ```
   ```
   Remove a hook at the points of workflow review-changes.
-  The base stack allows 10, and qory.yaml has 11.
+    The base stack allows 10, and qory.yaml has 11.
   ```
 - a timeout over the base's:
   ```
   Set hooks[0].timeout to 10m or less, or leave it out.
-  The base stack software@4b8e2f1a9c7d allows a hook no longer.
+    The base stack software@4b8e2f1a9c7d allows a hook no longer.
   ```
 - an agent no module ships:
   ```
   Ship the agent in a module of qory.yaml, or fix hooks[1].agent.
-  No module ships the agent licence-reviewer.
+    No module ships the agent licence-reviewer.
   ```
 - a program outside the checkout, the checkout itself, a checkout with no commit or one
   git fails to read, a program not in the commit at HEAD or there in another letter case
   or Unicode form, a link, or an entry that is no file:
   ```
   Move the program into the checkout, or fix hooks[0].run.
-  other/check.sh, from the directory of /work/qory.yaml, is outside the checkout /work/app.
+    other/check.sh, from the directory of /work/qory.yaml, is outside the checkout /work/app.
   ```
   ```
   Set hooks[0].run to a program file in the checkout.
-  hooks[0].run, ., is the checkout itself.
+    hooks[0].run, ., is the checkout itself.
   ```
   ```
   Run qory in a git checkout: a hook runs the file as committed in git.
-  The checkout /work/app has no commit yet.
+    The checkout /work/app has no commit yet.
   ```
   For a folder in no git checkout, the cause is `The folder /work/app is in no git
   checkout.`
   When git fails to read the checkout, the refusal has git's first line, such as:
   ```
   Fix what git reports for the checkout: a hook runs the file as committed in git.
-  git rev-parse in /work/app failed: fatal: detected dubious ownership in repository at '/work/app'
+    git rev-parse in /work/app failed: fatal: detected dubious ownership in repository at '/work/app'
   ```
   ```
   Commit the program of hooks[0].run: a hook runs the file as committed in git.
-  hooks[0].run, scripts/check-licences.sh, has no file in the commit at HEAD of the checkout.
+    hooks[0].run, scripts/check-licences.sh, has no file in the commit at HEAD of the checkout.
   ```
   An untracked file and an ignored file get this refusal too.
   A path that git has in another letter case or Unicode form, such as an NFD name, which
   a file system that ignores either finds on disk:
   ```
   Write hooks[0].run as committed in git.
-  hooks[0].run is Scripts/check-licences.sh, and git has scripts/check-licences.sh.
+    hooks[0].run is Scripts/check-licences.sh, and git has scripts/check-licences.sh.
   ```
   ```
   Point run at the file itself, not a link.
-  hooks[0].run, scripts/check-licences.sh, is a link.
+    hooks[0].run, scripts/check-licences.sh, is a link.
   ```
   The compose refuses a file in a linked folder the same way.
   ```
   Point run at the file itself, not a link.
-  hooks[0].run passes through the link tools.
+    hooks[0].run passes through the link tools.
   ```
   ```
   Point run at a file.
-  hooks[0].run, scripts, is a folder in git.
+    hooks[0].run, scripts, is a folder in git.
   ```
   For a submodule, the cause ends in `is a submodule in git.`
 - two workflow hooks of one name at a point:
   ```
   Set hooks[1].name to a name that no other hook at its point has.
-  hooks[0] at after-review-round has the name check-licences.sh too.
+    hooks[0] at after-review-round has the name check-licences.sh too.
   ```
 
 A stack file is refused the same way, with the fix first, for a point name that two
@@ -1156,11 +1156,59 @@ Complete agent python-developer of module python, or bind agents/developer to an
 ```
 
 For a member of a group role, the fix line is `Complete agent python-reviewer, or remove
-it from provides.agents.reviewers of module python.` The fix line ends with the list
-that added the member: `bind.agents.reviewers in qory-stack.yaml` for a bind in the
-stack you compose, `bind.agents.reviewers in qory.yaml` (or `in harness.yaml`) for a
-bind in a checkout's file, and `bind.agents.reviewers in the base stack` for a bind in
-the base stack.
+it from provides.agents.reviewers of module python.` The fix line ends with the list that
+added the member: `bind.agents.reviewers in qory-stack.yaml` for a bind in the stack you
+compose, and `bind.agents.reviewers in qory.yaml` (or `in harness.yaml`) for a bind in a
+checkout's file. When the fix line would pass 100 characters, it ends with `remove it
+from the list that adds it.`, and `This list adds it:` follows with the list on the next
+line. When two or more lists add the member, the fix line is `Complete agent
+python-reviewer, or remove it from the lists that add it.`, and `These lists add it:`
+follows, with a line per list, before the contract's line:
+
+```
+Complete agent python-reviewer, or remove it from the lists that add it.
+  These lists add it:
+  - provides.agents.reviewers of module software-factory
+  - provides.agents.reviewers of module python
+  The contract roles/reviewer.yaml of module software-factory requires these parts, which agents/python-reviewer.md of module python lacks:
+  - the heading "## Stop conditions"
+```
+
+A checkout does not edit the bind of the base stack it extends, nor the `provides` of a
+base module. When one such list alone adds the member and a module of the checkout's
+`qory.yaml` ships the agent, the fix line is `Complete agent python-reviewer in module
+python.`, and the cause line names the list. When a base module ships the agent, the
+block offers an exclude in `qory.yaml`, or asks the base stack's maintainer, and the
+cause line names the list, the base stack, its pin and the contract. The fix line names
+the agent's module when the line stays within 100 characters, and the cause line names it
+otherwise:
+
+```
+Exclude agents/python-reviewer in qory.yaml, or ask the base stack's maintainer to complete it.
+  The base stack software@4b8e2f1a9c7d binds python-reviewer of module factory to agents/reviewers, and the agent lacks these parts of the contract roles/reviewer.yaml of module factory:
+  - the tool Read
+```
+
+When the line without the module still passes 100 characters, the fix line is `Exclude
+the agent in qory.yaml, or ask the base stack's maintainer to complete it.`, and the
+cause line names `agents/python-reviewer` and its module. A base module is named as the
+checkout's `qory.yaml` lists it, by the name of the export when the base lists an export
+whose manifest declares another name. The exclude is offered only when `qory.yaml` can
+list it: the base's `extending.kinds` lists `agents`, and the checkout can name the
+module. Otherwise the fix line is `Ask the base stack's maintainer to complete agent
+python-reviewer.` For a base module's `provides`, the cause line starts `Module factory
+of the base stack software@4b8e2f1a9c7d provides python-reviewer`. When such a list and
+another both add the member, the fix line offers the exclude, or the change to the agent
+where the checkout can make it, and the lists follow the missing parts:
+
+```
+Exclude agents/python-reviewer in qory.yaml, or complete it in module python.
+  The contract roles/reviewer.yaml of module factory requires these parts, which agents/python-reviewer.md of module python lacks:
+  - the tool Read
+  These lists add it:
+  - bind.agents.reviewers in the base stack
+  - provides.agents.reviewers of module python
+```
 
 The compose reads each contract whether or not an agent fills the role. A contract file
 that is missing fails it:
@@ -1243,9 +1291,15 @@ document's body, in a code span and in a fenced code block too. A reference to a
 resolves only in a document's body. In front matter it fails the compose: `Remove
 ${qory:agents/reviewers} from the front matter of skills/review/SKILL.md of module core.`
 with `A group resolves to a list.` on the next line. A group with no member fails the compose
-when a document references it: `Give agents/reviewers an agent, or remove its reference
-from skills/review/SKILL.md of module core.` with `The group has no member.` on
-the next line. The home contains
+when a document references it: `Fill agents/reviewers, or remove it from
+skills/review/SKILL.md of module core.` with `The group has no member.` on
+the next line. When the document is in a module of the base stack a checkout extends,
+which the checkout does not edit, the fix is `Add a module to qory.yaml that provides
+agents/reviewers, or ask the base stack's maintainer.`, with `skills/review/SKILL.md of
+module core references agents/reviewers, and the group has no member.` on the next line.
+When the base's `extending.kinds` does not list `agents`, a module of the checkout cannot
+provide members, and the fix is `Ask the base stack's maintainer to fill
+agents/reviewers.` The home contains
 `roles.json`, written when the harness has a role: `{"roles": [...]}`, one row per role
 and per member of a group, in the report's order, each `{role, agent, from}` as the
 report has it, with `group: true` for a member and the member's `paths` (§The module
@@ -1310,16 +1364,33 @@ runtime: the resolution happens in the composed tree, per path.
    cannot be rebound. A role a module provides is checked the same way, with `Ship agent
    typescript-developer in a module, or remove provides.agents.developer from module
    typescript: no module ships agent typescript-developer.` and `Rename role
-   agents/reviewer in the provides of module typescript: module core ships agent reviewer,
-   and a role's name is no entry's.` Each member of a group role is checked the same way,
-   a provided one with `Ship agent python-reviewer, or remove it from
+   agents/reviewer in the provides of module typescript: module core ships agent
+   reviewer, and a role's name is no entry's.` Each member of a group role is checked the
+   same way, with `Ship agent python-reviewer, or remove it from
    provides.agents.reviewers of module python.` and `No module ships agent
-   python-reviewer.` on the next line. Every failure of this rule comes at once, each on
-   its line, or on two lines with the cause on the second: the workflow blocks first (the
-   next paragraph), then the roles, then the entries in their sorted order, so one compose
-   lists every site there is to fix. An entry that was left out has no requirements to
-   meet. A manifest whose `requires` lists an entry the module does not ship fails as the
-   module is read: `module core: requires lists skill release, which the module does not ship`.
+   python-reviewer.` on the next line, the fix ending with the list that added the member
+   as in §The role contract. When two or more lists add it, the fix is `Ship agent
+   python-reviewer, or remove it from the lists that add it.`, then `No module ships
+   agent python-reviewer, and these lists add it:` and a line per list, and a single list
+   that would make the fix line pass 100 characters goes on the next line after `No
+   module ships agent python-reviewer, and this list adds it:`. When the bind of the base
+   stack a checkout extends or the `provides` of a base module adds the member, which the
+   checkout does not edit, the fix is `Ship agent python-reviewer in a module of
+   qory.yaml, or ask the base stack's maintainer to ship it.`, or `Ship the agent in a
+   module of qory.yaml, or ask the base stack's maintainer to ship it.` when that line
+   would pass 100 characters, since an agent that a module of `qory.yaml` ships fills the
+   member, with the lists on the lines after `No module ships agent python-reviewer, and
+   this list adds it:`. When the base's `extending.kinds` does not list `agents`, the fix
+   is `Ask the base stack's maintainer to ship agent python-reviewer.` A member that only
+   a bind adds and that a module leaves out fails with `Compose agent python-reviewer, or
+   remove it from bind.agents.reviewers in qory-stack.yaml.` and `Module python leaves
+   out agent python-reviewer.` on the next line. Every failure of this rule comes at
+   once, each on its line, or with its cause on indented lines after the fix: the
+   workflow blocks first (the next paragraph), then the roles, then the entries in their
+   sorted order, so one compose lists every site there is to fix. An entry that was left
+   out has no requirements to meet. A manifest whose `requires` lists an entry the module
+   does not ship fails as the module is read: `module core: requires lists skill release,
+   which the module does not ship`.
 
    A run starts a workflow of the stack at its skill or command (§The stack), and that
    entry starts each agent its documents reference. A reference of that entry to an agent

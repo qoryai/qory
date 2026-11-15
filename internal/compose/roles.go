@@ -34,6 +34,10 @@ type Role struct {
 	// replaced: the group had it from the base or a module's provides, and the bind's
 	// list does not have it. A replaced member fills nothing.
 	Replaced bool
+	// Also is, for a member of a group role, each later list that adds the same name: a
+	// module's provides after the base's bind or after another module's. Only From and
+	// Module are set.
+	Also []Role
 }
 
 // openedModule is one module of the stack with its source resolved and its manifest
@@ -58,9 +62,9 @@ type openedModule struct {
 // turn, a later layer replacing the name. Two modules that provide one single role with
 // different names fail the compose, unless the bind of p sets the role. A group's members
 // are the base bind's list, then each module's provides list in module order, each name
-// once; a bind of p that sets the group replaces the list, and the members it replaced
-// come back marked [Role.Replaced]. A base member for which dropped reports true is no
-// member either.
+// once, a later list that adds a name again in [Role.Also]; a bind of p that sets the
+// group replaces the list, and the members it replaced come back marked [Role.Replaced].
+// A base member for which dropped reports true is no member either.
 //
 // With first set, for the roles before the selection, no error is returned: a single
 // role that two modules provide keeps the name of the layer below, since the selection
@@ -88,7 +92,7 @@ func setRoles(p *stack.Stack, opened []openedModule, dropped func(o openedModule
 		for _, role := range sortedKeys(p.BaseBind.One[kind]) {
 			key := kind + "/" + role
 			if declared[key] != "" {
-				if err := wrong("Write bind.%s.%s in the base stack as a list.\nIt is a group role.", shown(kind), shown(role)); err != nil {
+				if err := wrong("Write bind.%s.%s in the base stack as a list.\n  It is a group role.", shown(kind), shown(role)); err != nil {
 					return nil, nil, err
 				}
 				continue
@@ -99,7 +103,7 @@ func setRoles(p *stack.Stack, opened []openedModule, dropped func(o openedModule
 	for _, kind := range sortedKeys(p.BaseBind.Many) {
 		for _, role := range sortedKeys(p.BaseBind.Many[kind]) {
 			if declared[kind+"/"+role] == "" {
-				if err := wrong("Write one name for bind.%s.%s in the base stack.\nNo module declares %s as many, so one agent fills it.", shown(kind), shown(role), shown(kind+"/"+role)); err != nil {
+				if err := wrong("Write one name for bind.%s.%s in the base stack.\n  No module declares %s as many, so one agent fills it.", shown(kind), shown(role), shown(kind+"/"+role)); err != nil {
 					return nil, nil, err
 				}
 			}
@@ -125,7 +129,7 @@ func setRoles(p *stack.Stack, opened []openedModule, dropped func(o openedModule
 		for _, kind := range sortedKeys(o.m.Provides.Many) {
 			for _, role := range sortedKeys(o.m.Provides.Many[kind]) {
 				if declared[kind+"/"+role] == "" {
-					if err := wrong("Write one name for provides.%s.%s in module %s.\nNo module declares %s as many, so one agent fills it.", shown(kind), shown(role), shown(o.m.Name), shown(kind+"/"+role)); err != nil {
+					if err := wrong("Write one name for provides.%s.%s in module %s.\n  No module declares %s as many, so one agent fills it.", shown(kind), shown(role), shown(o.m.Name), shown(kind+"/"+role)); err != nil {
 						return nil, nil, err
 					}
 				}
@@ -155,7 +159,7 @@ func setRoles(p *stack.Stack, opened []openedModule, dropped func(o openedModule
 		for _, role := range sortedKeys(p.Bind.One[kind]) {
 			key := kind + "/" + role
 			if declared[key] != "" {
-				if err := wrong("Write bind.%s.%s in %s as a list.\nIt is a group role.", shown(kind), shown(role), file); err != nil {
+				if err := wrong("Write bind.%s.%s in %s as a list.\n  It is a group role.", shown(kind), shown(role), file); err != nil {
 					return nil, nil, err
 				}
 				continue
@@ -166,7 +170,7 @@ func setRoles(p *stack.Stack, opened []openedModule, dropped func(o openedModule
 	for _, kind := range sortedKeys(p.Bind.Many) {
 		for _, role := range sortedKeys(p.Bind.Many[kind]) {
 			if declared[kind+"/"+role] == "" {
-				if err := wrong("Write one name for bind.%s.%s in %s.\nNo module declares %s as many, so one agent fills it.", shown(kind), shown(role), file, shown(kind+"/"+role)); err != nil {
+				if err := wrong("Write one name for bind.%s.%s in %s.\n  No module declares %s as many, so one agent fills it.", shown(kind), shown(role), file, shown(kind+"/"+role)); err != nil {
 					return nil, nil, err
 				}
 			}
@@ -177,8 +181,9 @@ func setRoles(p *stack.Stack, opened []openedModule, dropped func(o openedModule
 		kind, role, _ := strings.Cut(key, "/")
 		var list []Role
 		add := func(r Role) {
-			for _, have := range list {
+			for i, have := range list {
 				if have.Name == r.Name {
+					list[i].Also = append(list[i].Also, Role{From: r.From, Module: r.Module})
 					return
 				}
 			}

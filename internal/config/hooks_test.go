@@ -44,21 +44,21 @@ func TestComposeRefusesHooksOutsideAnExtension(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "qory.yaml")
 	for _, tc := range []struct{ body, want string }{
 		{"harness:\n  target: {runtime: claude}\n  modules: [{name: app}]\n  hooks:\n    - {at: after-plan, kind: check, run: x.sh}\n",
-			"Remove harness.hooks from qory.yaml, or extend a stack that allows them.\nA hook extends a workflow of a base stack, and " + path + " defines a stack."},
+			"Remove harness.hooks from qory.yaml, or extend a stack that allows them.\n  A hook extends a workflow of a base stack, and " + path + " defines a stack."},
 		{"harness:\n  target: {runtime: claude}\n  modules: [{name: app}]\n  workflows:\n    build:\n      hook_points: {after-plan: {at: end, kinds: [check]}}\n",
-			"Remove hook_points from the workflows in qory.yaml.\nA checkout adds workflow hooks to a stack it extends, so only a qory-stack.yaml declares hook points."},
+			"Remove hook_points from the workflows in qory.yaml.\n  A checkout adds workflow hooks to a stack it extends, so only a qory-stack.yaml declares hook points."},
 		{"harness:\n  extends: {path: ../base}\n  hooks:\n    - {at: after-plan, kind: check, run: x.sh, when: always}\n",
 			path + `: line 4: key "when" is not one qory.yaml reads`},
 		{"harness:\n  extends: {path: ../base}\n  hooks:\n    - {at: after-plan, kind: review, run: x.sh}\n",
-			"Set hooks[0].agent in place of hooks[0].run.\nA review hook runs an agent, and hooks[0] in " + path + " runs a program."},
+			"Set hooks[0].agent in place of hooks[0].run.\n  A review hook runs an agent, and hooks[0] in " + path + " runs a program."},
 		{"harness:\n  extends: {path: ../base}\n  hooks:\n    - {at: after-plan, kind: review, agent: licence-reviewer, run: \"\"}\n",
-			"Remove hooks[0].run, or give it a value.\n" + path + " sets hooks[0].run to an empty value."},
+			"Remove hooks[0].run, or give it a value.\n  " + path + " sets hooks[0].run to an empty value."},
 		{"harness:\n  extends: {path: ../base}\n  hooks:\n    - {at: after-plan, kind: review, agent: licence-reviewer, run: ~}\n",
-			"Remove hooks[0].run, or give it a value.\n" + path + " sets hooks[0].run to an empty value."},
+			"Remove hooks[0].run, or give it a value.\n  " + path + " sets hooks[0].run to an empty value."},
 		{"harness:\n  extends: {path: ../base}\n  hooks:\n    - at: after-plan\n      kind: check\n      run: x.sh\n      timeout:\n",
-			"Remove hooks[0].timeout, or give it a value.\n" + path + " sets hooks[0].timeout to an empty value."},
+			"Remove hooks[0].timeout, or give it a value.\n  " + path + " sets hooks[0].timeout to an empty value."},
 		{"harness:\n  extends: {path: ../base}\n  hooks:\n    - {at: after-plan, kind: check, run: x.sh, timeout: 500ms}\n",
-			"Set hooks[0].timeout to whole seconds, 1s or more, such as 90s or 5m.\n" + path + ` sets "500ms".`},
+			"Set hooks[0].timeout to whole seconds, 1s or more, such as 90s or 5m.\n  " + path + ` sets "500ms".`},
 	} {
 		writeRaw(t, path, tc.body)
 		_, err := config.Compose(path)

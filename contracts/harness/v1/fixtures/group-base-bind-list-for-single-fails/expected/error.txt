@@ -1,2 +1,2 @@
 Write one name for bind.agents.coder in the base stack.
-No module declares agents/coder as many, so one agent fills it.
+  No module declares agents/coder as many, so one agent fills it.

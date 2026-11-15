@@ -1,2 +1,2 @@
-Give agents/developer an agent, or remove its reference from skills/deploy/SKILL.md of module core.
-The group has no member.
+Fill agents/developer, or remove it from skills/deploy/SKILL.md of module core.
+  The group has no member.

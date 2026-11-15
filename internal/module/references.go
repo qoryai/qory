@@ -320,7 +320,7 @@ func agentPaths(data []byte, name string) ([]string, error) {
 	if !ok {
 		return nil, nil
 	}
-	notGlobs := errors.New("set paths to globs, such as [\"**/*.py\"], or remove it\nthe value is not a glob or a list of globs")
+	notGlobs := errors.New("set paths to globs, such as [\"**/*.py\"], or remove it\n  the value is not a glob or a list of globs")
 	var globs []string
 	switch v := v.(type) {
 	case string:
