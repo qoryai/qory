@@ -44,9 +44,10 @@ func composeHooks(t *testing.T, doc, checkout string) (*compose.Result, error) {
 }
 
 // TestHookProgramsStayInTheCheckout is a qory.yaml in a folder above the checkout, as a
-// file covering several repositories is: a program in the checkout is in hooks.json by
-// its path from the checkout's root, and a program in another repository under the
-// folder, or one a link leads out of the checkout to, is refused.
+// file covering several repositories is: a regular file in the checkout is in hooks.json
+// by its path from the checkout's root. A program in another repository under the folder,
+// one a link leads out of the checkout to, a link to a file inside the checkout, a file
+// in a linked folder inside it, a folder and a missing file are refused.
 func TestHookProgramsStayInTheCheckout(t *testing.T) {
 	above := t.TempDir()
 	copyHooksFixture(t, above)
@@ -69,6 +70,9 @@ func TestHookProgramsStayInTheCheckout(t *testing.T) {
 	if err := os.Symlink("..", filepath.Join(checkout, "up")); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.Symlink("scripts", filepath.Join(checkout, "tools")); err != nil {
+		t.Fatal(err)
+	}
 	doc := filepath.Join(above, "qory.yaml")
 	write := func(hooks string) {
 		t.Helper()
@@ -77,20 +81,23 @@ func TestHookProgramsStayInTheCheckout(t *testing.T) {
 		}
 	}
 
-	write("    - {at: after-review-round, kind: check, run: app/scripts/check.sh --all}\n    - {at: before-matrix, kind: check, run: app/scripts/inside.sh}\n")
+	write("    - {at: after-review-round, kind: check, run: app/scripts/check.sh --all}\n")
 	res, err := composeHooks(t, doc, checkout)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := strings.Join(res.Hooks[0].Run, " ") + "|" + strings.Join(res.Hooks[1].Run, " "); got != "scripts/check.sh --all|scripts/inside.sh" {
-		t.Errorf("run: %s, want each program from the checkout's root", got)
+	if got := strings.Join(res.Hooks[0].Run, " "); got != "scripts/check.sh --all" {
+		t.Errorf("run: %s, want the program from the checkout's root", got)
 	}
 
 	for _, tc := range []struct{ run, want string }{
 		{"other/scripts/check.sh", "Move the program into the checkout, or fix hooks[0].run.\nother/scripts/check.sh, from the directory of " + doc + ", is outside the checkout "},
 		{"app/scripts/linked.sh", "Set hooks[0].run to a program inside the checkout.\nA link on the way to scripts/linked.sh leads out of the checkout."},
 		{"app/up/outside.sh", "Set hooks[0].run to a program inside the checkout.\nA link on the way to up/outside.sh leads out of the checkout."},
+		{"app/scripts/inside.sh", "Point run at the file itself, not a link.\napp/scripts/inside.sh in " + doc + " is a link."},
+		{"app/tools/check.sh", "Point run at the file itself, not a link.\napp/tools/check.sh in " + doc + " is a link."},
 		{"app/scripts", "Add the program to the checkout, or fix hooks[0].run.\nscripts in the checkout is not a file."},
+		{"app/scripts/missing.sh", "Add the program to the checkout, or fix hooks[0].run.\nNo file is at scripts/missing.sh in the checkout."},
 	} {
 		write("    - {at: after-review-round, kind: check, run: " + tc.run + "}\n")
 		_, err := composeHooks(t, doc, checkout)

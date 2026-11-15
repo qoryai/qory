@@ -341,7 +341,7 @@ harness:
 |---|---|---|
 | `at` | yes | the name of a hook point of the base stack |
 | `kind` | yes | `check`, `review` or `enrich`, and one the point takes |
-| `run` | one of run and agent | the program, by its path from the directory of `qory.yaml`, alone or followed by its arguments, separated by spaces, with no shell and no quoting. The path is relative, with forward slashes, and leads to a file inside the checkout being composed, with no link on the way that leads out of it |
+| `run` | one of run and agent | the program, by its path from the directory of `qory.yaml`, alone or followed by its arguments, separated by spaces, with no shell and no quoting. The path is relative, with forward slashes, and leads to a regular file inside the checkout being composed. Neither the file nor a folder on its way may be a link, since the hook runner runs the file as git holds it and refuses a link |
 | `agent` | one of run and agent | the name of an agent that a module of the composed harness ships. A `review` hook runs an agent |
 | `name` | no | the hook's name, unique at its point: letters, digits, dots, hyphens and underscores, 64 at most, starting with a letter or digit. Default: the agent's name, else the file name of the program |
 | `required` | no | whether a red result blocks. Default: `true` |
@@ -409,7 +409,8 @@ compose fails with status 2 for a hook that breaks a rule of the base or the che
   Ship the agent in a module of qory.yaml, or fix hooks[1].agent.
   No module ships the agent licence-reviewer.
   ```
-- a program outside the checkout, behind a link that leads out of it, or no file:
+- a program outside the checkout, behind a link that leads out of it, behind a link
+  inside it, or no regular file:
   ```
   Move the program into the checkout, or fix hooks[0].run.
   other/check.sh, from the directory of /work/qory.yaml, is outside the checkout /work/app.
@@ -418,6 +419,11 @@ compose fails with status 2 for a hook that breaks a rule of the base or the che
   Set hooks[0].run to a program inside the checkout.
   A link on the way to scripts/check.sh leads out of the checkout.
   ```
+  ```
+  Point run at the file itself, not a link.
+  scripts/check-licences.sh in /work/app/qory.yaml is a link.
+  ```
+  The same refusal comes for a file in a linked folder that stays inside the checkout.
   ```
   Add the program to the checkout, or fix hooks[0].run.
   No file is at scripts/check-licences.sh in the checkout.

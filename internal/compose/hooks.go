@@ -163,7 +163,8 @@ type programs struct {
 
 // find returns the path of program from the root of the checkout, with forward slashes,
 // or the refusal of hook i: a program outside the checkout, one that a link leads out of
-// it, and one that is no file.
+// it, one that is a link or sits in a linked folder inside the checkout, and one that is
+// no regular file.
 func (f *programs) find(i int, program string) (string, error) {
 	if f.root == nil {
 		checkout := f.checkout
@@ -189,17 +190,26 @@ func (f *programs) find(i int, program string) (string, error) {
 		return "", fmt.Errorf("Move the program into the checkout, or fix hooks[%d].run.\n%s, from the directory of %s, is outside the checkout %s.", i, exports.Value(program, false), exports.HidePath(filepath.Join(f.doc, f.file)), exports.HidePath(f.real))
 	}
 	shownRel := exports.Value(filepath.ToSlash(rel), false)
-	info, err := f.root.Lstat(rel)
-	if err == nil && info.Mode()&os.ModeSymlink != 0 {
-		info, err = f.root.Stat(rel)
-	}
-	if err != nil {
-		// A path that the root cannot reach and the file system can goes through a link
-		// that leads out of the checkout.
+	// A path that the root cannot reach and the file system can goes through a link
+	// that leads out of the checkout.
+	if _, err := f.root.Stat(rel); err != nil {
 		if _, statErr := os.Stat(abs); statErr == nil {
 			return "", fmt.Errorf("Set hooks[%d].run to a program inside the checkout.\nA link on the way to %s leads out of the checkout.", i, shownRel)
 		}
-		return "", fmt.Errorf("Add the program to the checkout, or fix hooks[%d].run.\nNo file is at %s in the checkout.", i, shownRel)
+	}
+	// The hook runner runs the program's file as git holds it and refuses a link, so a
+	// link anywhere on the path, to a file or a folder inside the checkout too, is refused
+	// here.
+	parts := strings.Split(rel, string(filepath.Separator))
+	var info os.FileInfo
+	for n := range parts {
+		var err error
+		if info, err = f.root.Lstat(filepath.Join(parts[:n+1]...)); err != nil {
+			return "", fmt.Errorf("Add the program to the checkout, or fix hooks[%d].run.\nNo file is at %s in the checkout.", i, shownRel)
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return "", fmt.Errorf("Point run at the file itself, not a link.\n%s in %s is a link.", exports.Value(program, false), exports.HidePath(filepath.Join(f.doc, f.file)))
+		}
 	}
 	if !info.Mode().IsRegular() {
 		return "", fmt.Errorf("Add the program to the checkout, or fix hooks[%d].run.\n%s in the checkout is not a file.", i, shownRel)
