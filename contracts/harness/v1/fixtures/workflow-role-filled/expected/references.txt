@@ -1,0 +1,1 @@
+skills/workflow-capture-demos: agents/demo-author

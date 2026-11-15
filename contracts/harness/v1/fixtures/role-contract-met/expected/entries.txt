@@ -1,0 +1,3 @@
+agents/core-developer core
+agents/python-developer python
+skills/deploy core

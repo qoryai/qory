@@ -176,6 +176,54 @@ A module that a checkout adds to the stack does not count, because the stack lis
 workflows. A checkout's exclude does not count either: the compose checks what the stack's
 modules ship before it applies that exclude.
 
+The skill or command that starts a workflow starts each agent its documents reference.
+When nothing fills such an agent role, the compose fails with exit 2, and the error shows
+the role and the workflow:
+
+```
+Add a module that fills agents/demo-author, or drop capture-demos from the workflows and process.
+  The base stack software@4b8e2f1a9c7d declares the workflow capture-demos. Its skill workflow-capture-demos of module software-factory starts agents/demo-author, and no module ships or provides that agent, and the stack does not bind it.
+```
+
+Add the module that provides the agent, or bind the role to an agent a module ships. A
+stack that has no module for the role excludes the workflow's skill, and lists the
+workflow in neither its `workflows` nor its process.
+
+### Give a role a contract
+
+A module that references a role, such as `${qory:agents/developer}`, can list the parts
+an agent needs to fill it. Write the role as a map in `qory-module.yaml`, with the path of
+a contract file inside the module:
+
+```yaml
+roles:
+  agents:
+    developer: {fill: one, contract: roles/developer.yaml}
+```
+
+```yaml
+# roles/developer.yaml
+sections: [Guardrails, The work, Stop conditions, Expected output]
+front_matter: [name, description, tools, model]
+tools: [Read, Edit, Write, Bash]
+tier: true
+```
+
+The compose checks every agent that fills the role, the agent that the base stack binds
+included. For a group role, written `{fill: many, contract: roles/reviewer.yaml}`, it
+checks each member. An agent that lacks a level-2 heading, a front-matter key, a tool or
+a tier in its model fails the compose with exit 2, and the message lists each part it
+lacks:
+
+```
+Complete agent python-developer of module python, or bind agents/developer to another agent.
+  The contract roles/developer.yaml of module core requires these parts, which agents/python-developer.md lacks:
+  - the heading "## Stop conditions"
+```
+
+The keys and what the compose checks are in [the contract's section on the role
+contract](../contracts/harness/v1/README.md#the-role-contract).
+
 ### Group skills in folders
 
 A module may group its skills in folders. qory writes each skill flat for every runtime:

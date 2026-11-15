@@ -2,13 +2,14 @@
 
 What `qory harness compose` reads and what it writes.
 
-## Nine files
+## Ten files
 
 | File | Lives in | Defines |
 |---|---|---|
 | `qory-stack.yaml` | a directory that `extends` or `-f` selects; an ancestor directory covering several repositories; the root of the harness repository that delivers it | a stack delivered to be extended: the ordered modules, the excludes, what a checkout extending it may add and the runtimes and models it is written for |
 | `qory-module.yaml` | the root of a module | the module: its name, its variants per runtime, the variables it exports |
 | `process.yaml` | optional; the folder root of a module that `exports.modules` lists, which makes the module a factory | a process template: its name, summary and description, the workspace type, the exported stack its workflows run on, its `qory.process/v1` process, and optionally the artifact types its workspaces use. Every command that reads the configuration checks it; the compose does not read it (§Exports) |
+| a role contract | optional; a file of a module that declares an agents role, at the path that `roles.agents.<role>.contract` in the module's `qory-module.yaml` is set to | the parts an agent needs to fill the role: level-2 headings, front-matter keys, tools, a tier, and the form of its report (§The role contract). The compose checks every agent that fills the role against it; the harness's checks read the report's form |
 | `qory.yaml`, or `harness.yaml` | the repository root, committed; the user's configuration directory and the checkout's ancestor directories, for the machine | the repository's document and the machine's: under `harness`, this repository's stack, its target and modules, or the stack it extends, the target it composes it for and the modules it appends, and the runtime and model this machine composes for; under `worktree`, what a worktree of the repository needs and where the machine puts one; under `exports`, the stacks and modules this repository publishes for others, by name (§Exports); `git` and `env` (§The configuration) |
 | a branch document | the file of a version of a structured artifact type `branch` | a work item's branch and the commit in each repository (§The branch format). No compose reads it |
 | a questions document | the file of a version of the artifact type `questions` | a work item's questions, their answers and the decisions of its runs (§The questions format). No compose reads it |
@@ -655,6 +656,7 @@ roles:                           # the roles the module's documents reference
   agents:
     reviewer: one                # one entry fills the role
     reviewers: many              # a group role: several agents fill it
+    developer: {fill: one, contract: roles/developer.yaml}  # and the parts its agent needs
 provides:                        # the roles the module fills
   agents:
     developer: nextjs-developer  # ${qory:agents/developer} is the agent nextjs-developer
@@ -707,8 +709,20 @@ the compose, `module core: Set roles.agents.developer to one or many in
 modules/core/qory-module.yaml.` with `One entry fills a role and several fill a group, and
 the value is "two".` on the next line, and so does a list. A module that sets a role to `one` while another
 sets it to `many` fails the compose: `Declare agents/reviewers as many in module python,
-or remove it: module software-factory declares it many.` Apart from `many`, the compose
-checks nothing else against `roles`.
+or remove it: module software-factory declares it many.` An `agents` role may be a map
+instead, `{fill: one, contract: roles/developer.yaml}`: `fill` is `one` or `many`, as
+above, and `contract`, optional, is the path of a role contract inside the module, with
+no `..` part (§The role contract). A map with another key fails, and so do a map without
+`fill`, a map for a `skills` or `commands` role, and a `contract` that is not a path
+inside the module. Each refusal is a fix line, then a cause line that ends with the
+manifest's path:
+
+```
+module core: Set roles.agents.developer.contract to a path inside the module.
+  The value is "../developer.yaml". The map is in modules/core/qory-module.yaml.
+```
+
+Apart from `many` and the contracts, the compose checks nothing else against `roles`.
 `provides`, optional, fills roles (§References), by kind and then by role, each to the
 name of one entry of that kind, as `bind` does: a technology module `typescript` writes
 `provides: {agents: {developer: typescript-developer}}`, and a workflow skill's
@@ -901,6 +915,76 @@ the composed tree.
 
 The schema is [module.schema.json](module.schema.json).
 
+### The role contract
+
+A module that declares an `agents` role may give it a contract: a file inside the module
+that lists the parts an agent needs to fill the role. The contract's path goes in the
+role's map in `qory-module.yaml`: `roles: {agents: {developer: {fill: one, contract:
+roles/developer.yaml}}}`. A group role takes a contract the same way, with `fill: many`.
+
+```yaml
+# roles/developer.yaml
+sections: [Guardrails, The work, Stop conditions, Expected output]
+front_matter: [name, description, tools, model]
+tools: [Read, Edit, Write, Bash]
+tier: true
+report: {}
+```
+
+- `sections` are the level-2 headings the agent's body has, each the heading's text
+  without the `##`, in any order. A heading inside a fenced code block does not count.
+- `front_matter` are the front-matter keys the agent sets to a value that is not empty.
+- `tools` are the tools the agent's `tools` key lists, as a comma-separated string or a
+  list, each matched exactly: `Bash(git:*)` is not `Bash`. An agent without a `tools` key
+  lacks every tool listed.
+- `tier: true` requires the agent's model to be a tier, such as `${qory:fast}`.
+- `report` is the form of the agent's report, which the harness's checks read. The compose
+  checks only that it is a map.
+
+Every key is optional, so `{}` checks nothing. The schema is
+[role-contract.schema.json](role-contract.schema.json).
+
+After the composition rules hold, the compose checks every agent that fills the role
+against each of the role's contracts: the agent the bind or a module's `provides` sets,
+the base's agent included, or the agent of the role's name when no layer sets the role.
+For a group role, it checks each member, and not a member that the checkout's bind
+replaced. An agent that lacks parts fails the compose with one block per agent and
+contract, which lists every part the agent lacks:
+
+```
+Complete agent python-developer of module python, or bind agents/developer to another agent.
+  The contract roles/developer.yaml of module core requires these parts, which agents/python-developer.md lacks:
+  - the heading "## Stop conditions"
+  - the front-matter key model
+  - the tool Bash
+  - a tier in model, such as ${qory:fast}
+```
+
+For a member of a group role, the fix line is `Complete agent python-reviewer, or remove
+it from provides.agents.reviewers of module python.` The fix line ends with the list
+that added the member: `bind.agents.reviewers in qory-stack.yaml` for a bind in the
+stack you compose, `bind.agents.reviewers in qory.yaml` (or `in harness.yaml`) for a
+bind in a checkout's file, and `bind.agents.reviewers in the base stack` for a bind in
+the base stack.
+
+The compose reads each contract whether or not an agent fills the role. A contract file
+that is missing fails it:
+
+```
+Add roles/developer.yaml to module core, or remove contract from roles.agents.developer.
+  qory-module.yaml sets roles.agents.developer.contract to roles/developer.yaml, and the module has no file at that path.
+```
+
+So do a directory at that path, a link that leads out of the module, a path that passes
+through more than 40 links, and a file that is not a contract. An absolute link fails
+too, unless the home contains copies of the module's entries (`copied` in the report,
+§The report) and the link stays inside the module. A file is not a contract when it is
+not a map, or when it has a key other than the five, a list key that is not a list of
+names on one line each with no name twice, a section that starts with `#`, a `tier` that
+is not `true` or `false`, or a `report` that is not a map. Each refusal starts with its
+fix, such as `Remove key paths from roles/developer.yaml of module core.`, and has its
+cause on the next line.
+
 ## References
 
 A document that dispatches another composed entry refers to it by a reference, and the
@@ -1036,10 +1120,28 @@ runtime: the resolution happens in the composed tree, per path.
    a provided one with `Ship agent python-reviewer, or remove it from
    provides.agents.reviewers of module python.` and `No module ships agent
    python-reviewer.` on the next line. Every failure of this rule comes at once, each on
-   its line, or on two lines with the cause on the second, the roles first and then the entries in their sorted order, so one compose lists every
-   site there is to fix. An entry that was left out has no requirements to meet. A
-   manifest whose `requires` lists an entry the module does not ship fails as the module
-   is read: `module core: requires lists skill release, which the module does not ship`.
+   its line, or on two lines with the cause on the second: the workflow blocks first (the
+   next paragraph), then the roles, then the entries in their sorted order, so one compose
+   lists every site there is to fix. An entry that was left out has no requirements to
+   meet. A manifest whose `requires` lists an entry the module does not ship fails as the
+   module is read: `module core: requires lists skill release, which the module does not ship`.
+
+   A run starts a workflow of the stack at its skill or command (§The stack), and that
+   entry starts each agent its documents reference. A reference of that entry to an agent
+   that no module ships or provides, that the stack does not bind and that no `exclude` or
+   `only` left out fails the compose with the role and the workflow. Each such pair of an
+   entry and a reference is a block of two lines, which replaces this rule's line for the
+   pair; the blocks come first among this rule's failures:
+
+   ```
+   Add a module that fills agents/demo-author, or drop capture-demos from the workflows and process.
+     The base stack software@working-tree declares the workflow capture-demos. Its skill workflow-capture-demos of module software-factory starts agents/demo-author, and no module ships or provides that agent, and the stack does not bind it.
+   ```
+
+   Every workflow of a factory's process is a workflow of its stack (§A factory's
+   process.yaml), so this covers what the process lists. A stack that has no module to fill
+   such a role excludes the workflow's skill and lists the workflow in neither its
+   `workflows` nor its process.
 5. **Merged kinds join, and a value is set once.** A settings target file merges across
    the modules that ship a fragment for it, JSON or TOML by extension: objects deep-merge,
    `permissions` lists concatenate and deduplicate, `hooks` arrays concatenate. Every
