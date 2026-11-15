@@ -1,17 +1,19 @@
 package compose
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"maps"
-	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
 	"time"
 
 	"github.com/qoryai/qory/internal/exports"
+	"github.com/qoryai/qory/internal/hostgit"
 	"github.com/qoryai/qory/internal/stack"
-	"golang.org/x/text/unicode/norm"
 )
 
 // Hook is one workflow hook of the composed harness, as hooks.json lists it: an entry of
@@ -150,21 +152,25 @@ func checkHooks(res *Result, p *stack.Stack, base *Base, checkout string) error 
 	return nil
 }
 
-// programs finds the program of a hook in the checkout: doc is the directory of the
-// document, which a program's path is from, checkout the root of the checkout that is
-// composed, and file the document's name.
+// programs finds the program of a hook in the commit at HEAD of the checkout: doc is the
+// directory of the document, which a program's path is from, checkout the root of the
+// checkout that is composed, and file the document's name.
 type programs struct {
 	doc, checkout, file string
 	// real is the checkout's path with every link resolved, "" until find sets it.
 	real string
+	// prefix is the checkout's path from the root of its git repository, "" or ending in
+	// a slash, set once read is true.
+	prefix string
+	read   bool
 }
 
-// find returns the path of program from the root of the checkout, with forward slashes,
-// or the refusal of hook i: a program outside the checkout, one whose path resolves out
-// of it through a link, a path that is a link or passes through a linked folder inside
-// the checkout, a path whose names differ in case from the names on disk, the checkout
-// itself, and a path that is no regular file. The hook runner runs the file as committed
-// in git, by its exact path, and refuses a link, so each of these would fail every run.
+// find returns the path of program in the commit at HEAD of the checkout, from the root
+// of the checkout, as git has it, or the refusal of hook i: a program outside the
+// checkout, the checkout itself, a checkout with no commit, a path with no entry in that
+// commit, a link or a path through a linked folder, and an entry that is no file. The
+// hook runner runs the file as committed in git at the run's start commit, so each of
+// these would fail every run.
 func (f *programs) find(i int, program string) (string, error) {
 	if f.real == "" {
 		checkout := f.checkout
@@ -182,147 +188,132 @@ func (f *programs) find(i int, program string) (string, error) {
 		return "", exports.HideError(err)
 	}
 	abs := filepath.Join(doc, filepath.FromSlash(program))
-	// fromDoc is a path inside the checkout as the hook's run writes it, from doc.
-	fromDoc := func(path string) string {
-		if r, err := filepath.Rel(doc, path); err == nil {
-			return exports.Value(filepath.ToSlash(r), false)
-		}
-		return exports.Value(filepath.ToSlash(path), false)
-	}
 	rel, err := filepath.Rel(f.real, abs)
 	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		spelled, rest, ok := checkoutSpelled(abs, f.real)
-		if !ok {
-			return "", fmt.Errorf("Move the program into the checkout, or fix hooks[%d].run.\n%s, from the directory of %s, is outside the checkout %s.", i, exports.Value(program, false), exports.HidePath(filepath.Join(f.doc, f.file)), exports.HidePath(f.real))
-		}
-		if !spelled {
-			return "", fmt.Errorf("Write hooks[%d].run as the file is named.\nhooks[%d].run is %s, and the file on disk is %s.", i, i, fromDoc(abs), fromDoc(filepath.Join(f.real, rest)))
-		}
-		rel = rest
+		return "", fmt.Errorf("Move the program into the checkout, or fix hooks[%d].run.\n%s, from the directory of %s, is outside the checkout %s.", i, exports.Value(program, false), exports.HidePath(filepath.Join(f.doc, f.file)), exports.HidePath(f.real))
 	}
+	// fromDoc is a path from the checkout's root as the hook's run writes it, from doc.
+	fromDoc := func(path string) string {
+		if r, err := filepath.Rel(doc, filepath.Join(f.real, filepath.FromSlash(path))); err == nil {
+			return exports.Value(filepath.ToSlash(r), false)
+		}
+		return exports.Value(path, false)
+	}
+	rel = filepath.ToSlash(rel)
 	if rel == "." {
-		return "", fmt.Errorf("Set hooks[%d].run to a program file in the checkout.\nhooks[%d].run, %s, is the checkout itself.", i, i, fromDoc(abs))
+		return "", fmt.Errorf("Set hooks[%d].run to a program file in the checkout.\nhooks[%d].run, %s, is the checkout itself.", i, i, fromDoc(rel))
 	}
-	abs = filepath.Join(f.real, rel)
-	shownRel := exports.Value(filepath.ToSlash(norm.NFC.String(rel)), false)
-	if !within(resolve(abs, 0), f.real) {
-		return "", fmt.Errorf("Set hooks[%d].run to a program inside the checkout.\nA link on the way to %s leads out of the checkout.", i, shownRel)
-	}
-	parts := strings.Split(rel, string(filepath.Separator))
-	at := f.real
-	var info os.FileInfo
-	for n, part := range parts {
-		name, err := nameOnDisk(at, part)
-		if err != nil {
-			return "", fmt.Errorf("Add the program to the checkout, or fix hooks[%d].run.\nNo file is at %s in the checkout.", i, shownRel)
-		}
-		if norm.NFC.String(name) != norm.NFC.String(part) {
-			named := filepath.Join(append([]string{f.real}, append(parts[:n:n], name)...)...)
-			named = filepath.Join(named, filepath.Join(parts[n+1:]...))
-			return "", fmt.Errorf("Write hooks[%d].run as the file is named.\nhooks[%d].run is %s, and the file on disk is %s.", i, i, fromDoc(abs), fromDoc(named))
-		}
-		at = filepath.Join(at, name)
-		if info, err = os.Lstat(at); err != nil {
-			return "", fmt.Errorf("Add the program to the checkout, or fix hooks[%d].run.\nNo file is at %s in the checkout.", i, shownRel)
-		}
-		if info.Mode()&os.ModeSymlink != 0 {
-			if n == len(parts)-1 {
-				return "", fmt.Errorf("Point run at the file itself, not a link.\nhooks[%d].run, %s, is a link.", i, fromDoc(at))
-			}
-			return "", fmt.Errorf("Point run at the file itself, not a link.\nhooks[%d].run passes through the link %s.", i, fromDoc(at))
-		}
-	}
-	if !info.Mode().IsRegular() {
-		return "", fmt.Errorf("Add the program to the checkout, or fix hooks[%d].run.\n%s in the checkout is not a file.", i, shownRel)
-	}
-	// Git stores a path in NFC, also where the file system keeps the name decomposed.
-	return filepath.ToSlash(norm.NFC.String(rel)), nil
-}
-
-// checkoutSpelled reports whether abs is inside the checkout at real although its path
-// differs from real in letter case or Unicode normalization: the components of abs that
-// stand for real match them when compared case-blind in NFC, and lead to the same folder.
-// ok is false for any other path. spelled is true when those components equal real's in
-// NFC, so only the normalization differs; rest is the path of abs from the checkout.
-func checkoutSpelled(abs, real string) (spelled bool, rest string, ok bool) {
-	sep := string(filepath.Separator)
-	want := strings.Split(strings.TrimPrefix(real, sep), sep)
-	have := strings.Split(strings.TrimPrefix(abs, sep), sep)
-	if len(have) < len(want) {
-		return false, "", false
-	}
-	spelled = true
-	for n := range want {
-		w, h := norm.NFC.String(want[n]), norm.NFC.String(have[n])
-		if !strings.EqualFold(w, h) {
-			return false, "", false
-		}
-		spelled = spelled && w == h
-	}
-	prefix := filepath.Join(append([]string{sep}, have[:len(want)]...)...)
-	a, err := os.Stat(prefix)
-	if err != nil {
-		return false, "", false
-	}
-	b, err := os.Stat(real)
-	if err != nil || !os.SameFile(a, b) {
-		return false, "", false
-	}
-	rest = filepath.Join(append([]string{"."}, have[len(want):]...)...)
-	return spelled, rest, true
-}
-
-// nameOnDisk is the name of the entry of the folder dir that part names: the entry whose
-// name equals part in NFC, so a name that macOS keeps decomposed matches the composed
-// name git stores, else the entry whose name differs from part in letter case alone,
-// which a file system that ignores case also finds by part.
-func nameOnDisk(dir, part string) (string, error) {
-	entries, err := os.ReadDir(dir)
+	entries, err := f.tree(rel)
 	if err != nil {
 		return "", err
 	}
-	want := norm.NFC.String(part)
-	other := ""
+	depth := strings.Count(rel, "/") + 1
 	for _, e := range entries {
-		name := norm.NFC.String(e.Name())
-		switch {
-		case name == want:
-			return e.Name(), nil
-		case other == "" && strings.EqualFold(name, want):
-			other = e.Name()
+		if e.mode == "120000" && strings.Count(e.path, "/")+1 < depth {
+			return "", fmt.Errorf("Point run at the file itself, not a link.\nhooks[%d].run passes through the link %s.", i, fromDoc(e.path))
 		}
 	}
-	if other == "" {
-		return "", os.ErrNotExist
-	}
-	return other, nil
-}
-
-// resolve is path with every link resolved, a link whose target is missing included: the
-// part that exists is resolved, and the rest of the path joined to it. depth stops a
-// loop of links.
-func resolve(path string, depth int) string {
-	if real, err := filepath.EvalSymlinks(path); err == nil {
-		return real
-	}
-	parent := filepath.Dir(path)
-	if parent == path || depth > 40 {
-		return path
-	}
-	dir := resolve(parent, depth+1)
-	here := filepath.Join(dir, filepath.Base(path))
-	if target, err := os.Readlink(here); err == nil {
-		if !filepath.IsAbs(target) {
-			target = filepath.Join(dir, target)
+	for _, e := range entries {
+		if strings.Count(e.path, "/")+1 != depth {
+			continue
 		}
-		return resolve(target, depth+1)
+		switch e.mode {
+		case "100644", "100755":
+			return e.path, nil
+		case "120000":
+			return "", fmt.Errorf("Point run at the file itself, not a link.\nhooks[%d].run, %s, is a link.", i, fromDoc(e.path))
+		case "040000":
+			return "", fmt.Errorf("Point run at a file.\nhooks[%d].run, %s, is a folder in git.", i, fromDoc(e.path))
+		case "160000":
+			return "", fmt.Errorf("Point run at a file.\nhooks[%d].run, %s, is a submodule in git.", i, fromDoc(e.path))
+		default:
+			return "", fmt.Errorf("Point run at a file.\nhooks[%d].run, %s, has the mode %s in git.", i, fromDoc(e.path), e.mode)
+		}
 	}
-	return here
+	return "", fmt.Errorf("Commit %s: a hook runs the file as committed in git.\nhooks[%d].run, %s, has no file in the commit at HEAD of the checkout.", exports.Value(rel, false), i, fromDoc(rel))
 }
 
-// within reports whether path is root or inside it.
-func within(path, root string) bool {
-	return path == root || strings.HasPrefix(path, root+string(filepath.Separator))
+// treeEntry is one entry of the commit at HEAD, as git ls-tree prints it: its mode and
+// its path from the checkout's root.
+type treeEntry struct{ mode, path string }
+
+// tree is the entries of the commit at HEAD of the checkout at the path rel, with
+// forward slashes, and at each folder on its way, or the refusal of a folder that is in
+// no git checkout or a checkout with no commit.
+func (f *programs) tree(rel string) ([]treeEntry, error) {
+	if !f.read {
+		if err := f.head(); err != nil {
+			return nil, err
+		}
+		f.read = true
+	}
+	// Each folder on the way is a pathspec too: git ls-tree lists a link and stops there,
+	// so a linked folder is an entry of its own path and the paths below it have none.
+	// The paths are from the root of the repository, which the checkout may be a folder
+	// of.
+	parts := strings.Split(f.prefix+rel, "/")
+	args := []string{"ls-tree", "-t", "-z", "--full-tree", "HEAD", "--"}
+	asked := map[string]bool{}
+	for n := range parts {
+		path := strings.Join(parts[:n+1], "/")
+		args = append(args, path)
+		asked[path] = true
+	}
+	list, err := hostgit.Command(context.Background(), f.real, args...)
+	if err != nil {
+		return nil, err
+	}
+	list.Env = append(list.Env, "GIT_LITERAL_PATHSPECS=1")
+	out, err := list.Output()
+	if err != nil {
+		return nil, exports.HideError(err)
+	}
+	var entries []treeEntry
+	for _, line := range strings.Split(strings.TrimSuffix(string(out), "\x00"), "\x00") {
+		about, path, ok := strings.Cut(line, "\t")
+		fields := strings.Fields(about)
+		// A folder that is a pathspec also lists its files, so only the paths asked for
+		// count.
+		if !ok || len(fields) != 3 || !asked[path] {
+			continue
+		}
+		path, inside := strings.CutPrefix(path, f.prefix)
+		if !inside || path == "" {
+			continue
+		}
+		entries = append(entries, treeEntry{mode: fields[0], path: path})
+	}
+	return entries, nil
+}
+
+// head sets prefix to the checkout's path from the root of its git repository, or
+// returns the refusal of a folder that is in no git checkout or a checkout with no
+// commit.
+func (f *programs) head() error {
+	fix := "Run qory in a git checkout: a hook runs the file as committed in git."
+	prefix, err := hostgit.Command(context.Background(), f.real, "rev-parse", "--show-prefix")
+	if err != nil {
+		return err
+	}
+	out, err := prefix.Output()
+	if err != nil {
+		if _, ok := errors.AsType[*exec.ExitError](err); ok {
+			return fmt.Errorf("%s\nThe folder %s is in no git checkout.", fix, exports.HidePath(f.real))
+		}
+		return exports.HideError(err)
+	}
+	f.prefix = strings.TrimSuffix(string(out), "\n")
+	head, err := hostgit.Command(context.Background(), f.real, "rev-parse", "--verify", "--quiet", "HEAD^{commit}")
+	if err != nil {
+		return err
+	}
+	if err := head.Run(); err != nil {
+		if _, ok := errors.AsType[*exec.ExitError](err); ok {
+			return fmt.Errorf("%s\nThe checkout %s has no commit yet.", fix, exports.HidePath(f.real))
+		}
+		return exports.HideError(err)
+	}
+	return nil
 }
 
 // over is how many hooks to remove, for a message: "a hook" or "<n> hooks".

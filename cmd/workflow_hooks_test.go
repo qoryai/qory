@@ -35,6 +35,7 @@ func TestComposeWritesTheWorkflowHooks(t *testing.T) {
 	url := baseRepoWith(t, hooksStack)
 	root := consumerCheckout(t, url)
 	writeFile(t, filepath.Join(root, "scripts", "check-licences.sh"), "#!/bin/sh\nexit 0\n")
+	commitHookProgram(t, root)
 	hook := func(at string) string {
 		return "  hooks:\n    - {at: " + at + ", kind: check, run: scripts/check-licences.sh --all}\n"
 	}
@@ -78,6 +79,7 @@ func TestComposeTakesTheHooksUnderTheFlag(t *testing.T) {
 	stackFile := filepath.Join(strings.TrimPrefix(url, "file://"), "nextjs-15", "qory-stack.yaml")
 	root := newCheckout(t)
 	writeFile(t, filepath.Join(root, "scripts", "check-licences.sh"), "#!/bin/sh\nexit 0\n")
+	commitHookProgram(t, root)
 	writeFile(t, filepath.Join(root, "qory.yaml"), "harness:\n  target: {runtime: claude}\n  hooks:\n    - {at: after-review-round, kind: check, run: scripts/check-licences.sh, timeout: 2m}\n")
 	if _, err := run(t, "harness", "compose", "-f", stackFile); err != nil {
 		t.Fatal(err)
@@ -97,6 +99,7 @@ func TestComposeKeepsAnAncestorsHooksInTheCheckout(t *testing.T) {
 	root := newCheckout(t)
 	above := filepath.Dir(root)
 	writeFile(t, filepath.Join(root, "scripts", "check-licences.sh"), "#!/bin/sh\nexit 0\n")
+	commitHookProgram(t, root)
 	writeFile(t, filepath.Join(above, "other", "check.sh"), "#!/bin/sh\nexit 0\n")
 	doc := func(run string) string {
 		return "harness:\n  extends: {git: " + url + ", ref: main, path: nextjs-15}\n  target: {runtime: claude}\n  hooks:\n    - {at: after-review-round, kind: check, run: " + run + "}\n"
@@ -115,4 +118,12 @@ func TestComposeKeepsAnAncestorsHooksInTheCheckout(t *testing.T) {
 	if err == nil || !strings.HasPrefix(err.Error(), want) || cmd.ExitCode(err) != 2 {
 		t.Errorf("err = %v, exit %d; want %q with exit 2", err, cmd.ExitCode(err), want)
 	}
+}
+
+// commitHookProgram commits every file of the checkout at root, so the hook's program is
+// in the commit at HEAD, from which the hook runner runs it.
+func commitHookProgram(t *testing.T, root string) {
+	t.Helper()
+	runGit(t, root, "add", "-A")
+	runGit(t, root, "commit", "--quiet", "-m", "Add the hook's program")
 }

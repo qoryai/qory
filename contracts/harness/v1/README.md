@@ -327,7 +327,9 @@ and an extending module never ships. A workflow hook has one of three kinds:
 
 The base stack declares the points under `workflows.<name>.hook_points`, with the kinds
 each point takes, and the limits under `extending.hooks` (§The stack). The repository
-lists its workflow hooks under `harness.hooks` in its `qory.yaml`:
+lists its workflow hooks under `harness.hooks` in its `qory.yaml`. Commit a hook's
+program before you compose: the hook runner runs the file as committed in git, so the
+compose reads the program from the commit at HEAD of the checkout.
 
 ```yaml
 harness:
@@ -341,7 +343,7 @@ harness:
 |---|---|---|
 | `at` | yes | the name of a hook point of the base stack |
 | `kind` | yes | `check`, `review` or `enrich`, and one the point takes |
-| `run` | one of run and agent | the program, by its path from the directory of `qory.yaml`, alone or followed by its arguments, separated by spaces, with no shell and no quoting. The path is relative, with forward slashes, and leads to a regular file inside the checkout being composed. Neither the file nor a folder on its way may be a link, since the hook runner runs the file as committed in git and refuses a link. Each name on the path is written as it is on disk, letter case included; the compose compares names in Unicode NFC, and `hooks.json` has the path in NFC, as git stores it |
+| `run` | one of run and agent | the program, by its path from the directory of `qory.yaml`, alone or followed by its arguments, separated by spaces, with no shell and no quoting. The path is relative, with forward slashes, stays inside the checkout being composed, and leads to a file in the commit at HEAD of that checkout, of mode 100644 or 100755. Neither the file nor a folder on its way may be a link, since the hook runner runs the file as committed in git and refuses a link. `hooks.json` has the path as git has it, from the checkout's root |
 | `agent` | one of run and agent | the name of an agent that a module of the composed harness ships. A `review` hook runs an agent |
 | `name` | no | the hook's name, unique at its point: letters, digits, dots, hyphens and underscores, 64 at most, starting with a letter or digit. Default: the agent's name, else the file name of the program |
 | `required` | no | whether a red result blocks. Default: `true` |
@@ -409,38 +411,41 @@ compose fails with status 2 for a hook that breaks a rule of the base or the che
   Ship the agent in a module of qory.yaml, or fix hooks[1].agent.
   No module ships the agent licence-reviewer.
   ```
-- a program outside the checkout, behind a link that leads out of it, behind a link
-  inside it, written in another letter case than on disk, the checkout itself, or no
-  regular file:
+- a program outside the checkout, the checkout itself, a checkout with no commit, a
+  program not in the commit at HEAD, a link, or an entry that is no file:
   ```
   Move the program into the checkout, or fix hooks[0].run.
   other/check.sh, from the directory of /work/qory.yaml, is outside the checkout /work/app.
-  ```
-  ```
-  Set hooks[0].run to a program inside the checkout.
-  A link on the way to scripts/check.sh leads out of the checkout.
-  ```
-  ```
-  Point run at the file itself, not a link.
-  hooks[0].run, scripts/check-licences.sh, is a link.
-  ```
-  The compose refuses a file in a linked folder inside the checkout the same way.
-  ```
-  Point run at the file itself, not a link.
-  hooks[0].run passes through the link tools.
-  ```
-  ```
-  Write hooks[0].run as the file is named.
-  hooks[0].run is Scripts/check-licences.sh, and the file on disk is scripts/check-licences.sh.
   ```
   ```
   Set hooks[0].run to a program file in the checkout.
   hooks[0].run, ., is the checkout itself.
   ```
   ```
-  Add the program to the checkout, or fix hooks[0].run.
-  No file is at scripts/check-licences.sh in the checkout.
+  Run qory in a git checkout: a hook runs the file as committed in git.
+  The checkout /work/app has no commit yet.
   ```
+  For a folder in no git checkout, the cause is `The folder /work/app is in no git
+  checkout.`
+  ```
+  Commit scripts/check-licences.sh: a hook runs the file as committed in git.
+  hooks[0].run, scripts/check-licences.sh, has no file in the commit at HEAD of the checkout.
+  ```
+  An untracked file and an ignored file get this refusal too.
+  ```
+  Point run at the file itself, not a link.
+  hooks[0].run, scripts/check-licences.sh, is a link.
+  ```
+  The compose refuses a file in a linked folder the same way.
+  ```
+  Point run at the file itself, not a link.
+  hooks[0].run passes through the link tools.
+  ```
+  ```
+  Point run at a file.
+  hooks[0].run, scripts, is a folder in git.
+  ```
+  For a submodule, the cause ends in `is a submodule in git.`
 - two workflow hooks of one name at a point:
   ```
   Set hooks[1].name to a name that no other hook at its point has.

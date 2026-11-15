@@ -235,8 +235,8 @@ type Options struct {
 	// every module as well, so the home contains no link.
 	Hidden bool
 	// Checkout is the root of the checkout the harness is composed for. The program of a
-	// workflow hook is a file inside it, and [Hook.Run] has its path from it; "" takes the
-	// directory of the stack's document.
+	// workflow hook is a file in the commit at HEAD of that checkout, and [Hook.Run] has
+	// its path in git from it; "" takes the directory of the stack's document.
 	Checkout string
 	// StackAs, when set, is the stack as an error of the compose shows it in place of its
 	// file, for a stack whose file is a copy that the person does not edit, such as the

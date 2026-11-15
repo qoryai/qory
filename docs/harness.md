@@ -311,6 +311,15 @@ hook has one of three kinds: a `check` hook reports pass or fail, a `review` hoo
 agent that reviews the work, and an `enrich` hook writes notes for the agents that start
 after it.
 
+Commit a hook's program before you compose. The hook runner runs the file as committed
+in git, so the compose reads the program from the commit at HEAD of your checkout. An
+untracked or ignored program fails the compose with exit 2:
+
+```
+Commit scripts/check-licences.sh: a hook runs the file as committed in git.
+hooks[0].run, scripts/check-licences.sh, has no file in the commit at HEAD of the checkout.
+```
+
 ```yaml
 harness:
   extends: {git: https://github.com/acme/harness, ref: v2.4.0, stack: software}
@@ -330,9 +339,8 @@ Each workflow hook has:
 - `at`, a hook point of the stack you extend,
 - `kind`, `check`, `review` or `enrich`, one that the point takes,
 - `run`, a program in the checkout by its path from `qory.yaml`, with its arguments
-  after it. The program is a regular file, and neither it nor a folder on its way may be
-  a link, since the hook runner runs the file as committed in git. Write each name on
-  the path as it is on disk, letter case included,
+  after it. The program is a file in the commit at HEAD, and neither it nor a folder on
+  its way may be a link, since the hook runner runs the file as committed in git,
 - or, in place of `run`, `agent`, an agent that a module of your harness ships; a
   `review` hook runs an agent,
 - optionally `name`, unique at its point; `required`, `true` when left out; and
@@ -341,8 +349,8 @@ Each workflow hook has:
 A key you write with an empty value or null, such as `run: ~`, fails the compose; leave
 the key out instead.
 
-The compose writes `hooks.json` into the home, with each program by its path from the
-root of the checkout. When the `qory.yaml` that lists the workflow hooks is in a folder
+The compose writes `hooks.json` into the home, with each program by its path in git from
+the root of the checkout. When the `qory.yaml` that lists the workflow hooks is in a folder
 above the checkout, one that covers several repositories, each program has to be inside
 the checkout you compose: `app/scripts/check.sh` from that folder is `scripts/check.sh`
 in `hooks.json`, and a program of another repository fails the compose of `app`.

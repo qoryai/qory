@@ -1,2 +1,2 @@
-Add the program to the checkout, or fix hooks[0].run.
-No file is at scripts/check-headers.sh in the checkout.
+Commit scripts/check-headers.sh: a hook runs the file as committed in git.
+hooks[0].run, scripts/check-headers.sh, has no file in the commit at HEAD of the checkout.

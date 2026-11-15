@@ -1,7 +1,9 @@
 package compose_test
 
 import (
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -43,48 +45,86 @@ func composeHooks(t *testing.T, doc, checkout string) (*compose.Result, error) {
 	return res, err
 }
 
+// gitIn runs git with args in dir, with a test identity for a commit.
+func gitIn(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	c := exec.Command("git", append([]string{"-c", "user.name=Tester", "-c", "user.email=tester@example.com"}, args...)...)
+	c.Dir = dir
+	out, err := c.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// realTemp is a new temporary folder by its path with every link resolved, as git
+// prints the root of a checkout in it.
+func realTemp(t *testing.T) string {
+	t.Helper()
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+// commitAll makes dir a git checkout whose commit at HEAD has every file in dir.
+func commitAll(t *testing.T, dir string) {
+	t.Helper()
+	gitIn(t, dir, "init", "-q", "-b", "main")
+	gitIn(t, dir, "add", "-A")
+	gitIn(t, dir, "commit", "-q", "-m", "first")
+}
+
 // TestHookProgramsStayInTheCheckout is a qory.yaml in a folder above the checkout, as a
-// file covering several repositories is: each regular file in the checkout is in
-// hooks.json by its path from the checkout's root. Refused are a program in another
-// repository under the folder; a link that leads out of the checkout, to a file or to
-// nothing; a link inside the checkout, relative, absolute or to nothing; a file in a
-// linked folder; a path whose names differ in case from the names on disk; the checkout
-// itself; a folder; and a missing file.
+// file covering several repositories is: each program committed in the checkout is in
+// hooks.json by its path in git from the checkout's root. Refused are a program in
+// another repository under the folder; a file that is untracked or ignored; a committed
+// link and a file in a committed linked folder; a folder and a submodule; the checkout
+// itself; and a checkout that is no git checkout or has no commit.
 func TestHookProgramsStayInTheCheckout(t *testing.T) {
-	above := t.TempDir()
+	above := realTemp(t)
 	copyHooksFixture(t, above)
 	checkout := filepath.Join(above, "app")
-	for _, file := range []string{"app/scripts/check.sh", "app/bin/lint.sh", "other/scripts/check.sh", "outside.sh"} {
-		path := filepath.Join(above, file)
+	write := func(file, text string) {
+		t.Helper()
+		path := filepath.Join(above, filepath.FromSlash(file))
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(path, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		if err := os.WriteFile(path, []byte(text), 0o755); err != nil {
 			t.Fatal(err)
 		}
 	}
+	for _, file := range []string{"app/scripts/check.sh", "app/bin/lint.sh", "other/scripts/check.sh", "outside.sh"} {
+		write(file, "#!/bin/sh\n")
+	}
+	write("app/.gitignore", "*.local.sh\n")
 	for link, target := range map[string]string{
-		"scripts/linked.sh":   "../../outside.sh",
-		"scripts/gone.sh":     "../../gone.sh",
-		"scripts/inside.sh":   "check.sh",
-		"scripts/abs.sh":      filepath.Join(checkout, "scripts", "check.sh"),
-		"scripts/dangling.sh": "nothing.sh",
-		"up":                  "..",
-		"tools":               "scripts",
+		"scripts/inside.sh": "check.sh",
+		"scripts/abs.sh":    filepath.Join(checkout, "scripts", "check.sh"),
+		"scripts/linked.sh": "../../outside.sh",
+		"tools":             "scripts",
 	} {
 		if err := os.Symlink(target, filepath.Join(checkout, filepath.FromSlash(link))); err != nil {
 			t.Fatal(err)
 		}
 	}
+	commitAll(t, checkout)
+	commit := gitIn(t, checkout, "rev-parse", "HEAD")
+	gitIn(t, checkout, "update-index", "--add", "--cacheinfo", "160000,"+commit+",vendor/lib")
+	gitIn(t, checkout, "commit", "-q", "-m", "submodule")
+	write("app/scripts/new.sh", "#!/bin/sh\n")
+	write("app/scripts/mine.local.sh", "#!/bin/sh\n")
+
 	doc := filepath.Join(above, "qory.yaml")
-	write := func(hooks string) {
+	hooks := func(hooks string) {
 		t.Helper()
 		if err := os.WriteFile(doc, []byte(hooksDoc("stack", hooks)), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
-
-	write("    - {at: after-review-round, kind: check, run: app/scripts/check.sh --all}\n" +
+	hooks("    - {at: after-review-round, kind: check, run: app/scripts/check.sh --all}\n" +
 		"    - {at: after-review-round, kind: check, run: ./app/bin/../bin/lint.sh}\n")
 	res, err := composeHooks(t, doc, checkout)
 	if err != nil {
@@ -95,50 +135,23 @@ func TestHookProgramsStayInTheCheckout(t *testing.T) {
 		runs = append(runs, strings.Join(h.Run, " "))
 	}
 	if got := strings.Join(runs, "; "); got != "scripts/check.sh --all; bin/lint.sh" {
-		t.Errorf("runs: %s, want each program from the checkout's root", got)
+		t.Errorf("runs: %s, want each program by its path in git from the checkout's root", got)
 	}
 
-	// A name the file system keeps decomposed (NFD), such as macOS does, matches the
-	// composed name (NFC) that git stores, and hooks.json has the name in NFC.
-	if err := os.WriteFile(filepath.Join(checkout, "scripts", "ve\u0301rifier.sh"), []byte("#!/bin/sh\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	write("    - {at: after-review-round, kind: check, run: app/scripts/v\u00e9rifier.sh, name: verifier}\n")
-	res, err = composeHooks(t, doc, checkout)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := res.Hooks[0].Run[0]; got != "scripts/v\u00e9rifier.sh" {
-		t.Errorf("run: %q, want the name in NFC", got)
-	}
-
-	// The checkout's folder written in another letter case is refused as a case
-	// mismatch where the file system ignores case, and is outside the checkout where it
-	// does not.
-	caseWant := "Move the program into the checkout, or fix hooks[0].run.\nAPP/scripts/check.sh, from the directory of "
-	if a, err := os.Stat(filepath.Join(above, "APP")); err == nil {
-		if b, err := os.Stat(checkout); err == nil && os.SameFile(a, b) {
-			caseWant = "Write hooks[0].run as the file is named.\nhooks[0].run is APP/scripts/check.sh, and the file on disk is app/scripts/check.sh."
-		}
-	}
-
+	commitFix := "Commit scripts/%s: a hook runs the file as committed in git.\nhooks[0].run, app/scripts/%[1]s, has no file in the commit at HEAD of the checkout."
 	for _, tc := range []struct{ run, want string }{
 		{"other/scripts/check.sh", "Move the program into the checkout, or fix hooks[0].run.\nother/scripts/check.sh, from the directory of " + doc + ", is outside the checkout "},
-		{"app/scripts/linked.sh", "Set hooks[0].run to a program inside the checkout.\nA link on the way to scripts/linked.sh leads out of the checkout."},
-		{"app/scripts/gone.sh", "Set hooks[0].run to a program inside the checkout.\nA link on the way to scripts/gone.sh leads out of the checkout."},
-		{"app/up/outside.sh", "Set hooks[0].run to a program inside the checkout.\nA link on the way to up/outside.sh leads out of the checkout."},
+		{"app/scripts/new.sh", fmt.Sprintf(commitFix, "new.sh")},
+		{"app/scripts/mine.local.sh", fmt.Sprintf(commitFix, "mine.local.sh")},
 		{"app/scripts/inside.sh", "Point run at the file itself, not a link.\nhooks[0].run, app/scripts/inside.sh, is a link."},
 		{"app/scripts/abs.sh", "Point run at the file itself, not a link.\nhooks[0].run, app/scripts/abs.sh, is a link."},
-		{"app/scripts/dangling.sh", "Point run at the file itself, not a link.\nhooks[0].run, app/scripts/dangling.sh, is a link."},
+		{"app/scripts/linked.sh", "Point run at the file itself, not a link.\nhooks[0].run, app/scripts/linked.sh, is a link."},
 		{"app/tools/check.sh", "Point run at the file itself, not a link.\nhooks[0].run passes through the link app/tools."},
-		{"app/Scripts/check.sh", "Write hooks[0].run as the file is named.\nhooks[0].run is app/Scripts/check.sh, and the file on disk is app/scripts/check.sh."},
-		{"APP/scripts/check.sh", caseWant},
-		{"app/scripts/Check.sh", "Write hooks[0].run as the file is named.\nhooks[0].run is app/scripts/Check.sh, and the file on disk is app/scripts/check.sh."},
+		{"app/scripts", "Point run at a file.\nhooks[0].run, app/scripts, is a folder in git."},
+		{"app/vendor/lib", "Point run at a file.\nhooks[0].run, app/vendor/lib, is a submodule in git."},
 		{"app", "Set hooks[0].run to a program file in the checkout.\nhooks[0].run, app, is the checkout itself."},
-		{"app/scripts", "Add the program to the checkout, or fix hooks[0].run.\nscripts in the checkout is not a file."},
-		{"app/scripts/missing.sh", "Add the program to the checkout, or fix hooks[0].run.\nNo file is at scripts/missing.sh in the checkout."},
 	} {
-		write("    - {at: after-review-round, kind: check, run: " + tc.run + "}\n")
+		hooks("    - {at: after-review-round, kind: check, run: " + tc.run + "}\n")
 		_, err := composeHooks(t, doc, checkout)
 		if err == nil || !strings.HasPrefix(err.Error(), tc.want) {
 			t.Errorf("%s:\nerr = %v\nwant %s", tc.run, err, tc.want)
@@ -146,11 +159,39 @@ func TestHookProgramsStayInTheCheckout(t *testing.T) {
 	}
 }
 
+// TestHookProgramsNeedACommit is a checkout that is no git checkout, and one with no
+// commit yet: a hook's program fails the compose in both.
+func TestHookProgramsNeedACommit(t *testing.T) {
+	for _, tc := range []struct {
+		name, cause string
+		git         []string
+	}{
+		{"no git checkout", "\nThe folder ", nil},
+		{"no commit", "\nThe checkout ", []string{"init", "-q", "-b", "main"}},
+	} {
+		dir := realTemp(t)
+		copyHooksFixture(t, dir)
+		if tc.git != nil {
+			gitIn(t, dir, tc.git...)
+		}
+		doc := filepath.Join(dir, "qory.yaml")
+		if err := os.WriteFile(doc, []byte(hooksDoc("stack", "    - {at: after-review-round, kind: check, run: scripts/check-licences.sh}\n")), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		_, err := composeHooks(t, doc, dir)
+		want := "Run qory in a git checkout: a hook runs the file as committed in git." + tc.cause
+		if err == nil || !strings.HasPrefix(err.Error(), want) {
+			t.Errorf("%s: err = %v, want %q", tc.name, err, want)
+		}
+	}
+}
+
 // TestHookTimeoutAtTheLimit is a hook whose timeout is the base's: it composes, with
 // that timeout in seconds.
 func TestHookTimeoutAtTheLimit(t *testing.T) {
-	dir := t.TempDir()
+	dir := realTemp(t)
 	copyHooksFixture(t, dir)
+	commitAll(t, dir)
 	doc := filepath.Join(dir, "qory.yaml")
 	if err := os.WriteFile(doc, []byte(hooksDoc("stack", "    - {at: after-review-round, kind: check, run: scripts/check-licences.sh, timeout: 10m}\n")), 0o644); err != nil {
 		t.Fatal(err)
