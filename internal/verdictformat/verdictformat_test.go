@@ -176,6 +176,8 @@ func TestCheck(t *testing.T) {
 	}{
 		{`{"verdict": "passed"}`, true},
 		{`{"verdict": "changes-requested"}`, true},
+		{`{"verdict": "changes-requested", "points": [` + runAgainPoint + `]}`, true},
+		{`{"verdict": "changes-requested", "points": [` + answerPoint + `]}`, false},
 		{`{"verdict": "escalate", "points": [` + answerPoint + `]}`, true},
 		{`{"verdict": "escalate"}`, false},
 		{`{"verdict": "passed", "points": [` + runAgainPoint + `]}`, false},
