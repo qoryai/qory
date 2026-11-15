@@ -1,0 +1,3 @@
+agents/reviewers python-reviewer bind group
+agents/reviewers code-reviewer bind group
+agents/reviewers test-reviewer provides factory group replaced

@@ -1,1 +1,2 @@
-Write one name for bind.agents.developer in qory.yaml: a role is filled by one entry, and the value is a list.
+Write one name for bind.agents.developer in qory.yaml.
+No module declares agents/developer as many, so one agent fills it.

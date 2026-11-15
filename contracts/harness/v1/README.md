@@ -195,7 +195,7 @@ schema is [config.schema.json](config.schema.json).
 | `modules[].only` | no | the only things of this module that are composed, with the same keys as `exclude`, plus what the listed entries require from this module (`requires` in its manifest, followed transitively). Everything else is left out: a kind not listed contributes no entry beyond those, a part not listed is left out. `only: {skills: [deploy]}` is the deploy skill, what it needs, and nothing else. An `exclude` beside it lists entries the `only` brought in, to leave them out after all; a requirement left out that way has to come from another module (rule 4). It lists no part, and nothing the `only` lists |
 | `modules[].variant` | no | forces one of the module's variants instead of the one with the targeted runtime's name |
 | `modules[].link` | no | a name at the checkout root, one path segment, linked to the module's directory in the composed tree, so a permission rule or a script refers to the module's files by a checkout-relative path: `harness/scripts/check.sh`. A hard link (§Rendering), each name used once across the modules |
-| `bind` | no | the entry that fills each role a document references (§References), by kind and then by role, to the name of one entry of that kind: `bind: {agents: {coder: rails-coder}}`. The kind is `agents`, `skills` or `commands`. A role's value is one name; a list is refused. A flat key, `agents/coder: rails-coder`, is refused with `Write bind as bind.agents.coder: rails-coder in qory.yaml: bind keys are kinds, and agents/coder is a kind and a role.` A checkout's `bind` sets a role over the base's `bind` and over the modules' `provides` |
+| `bind` | no | the entry that fills each role a document references (§References), by kind and then by role, to the name of one entry of that kind: `bind: {agents: {coder: rails-coder}}`. The kind is `agents`, `skills` or `commands`. A role's value is one name. A group role (§References) takes a list of agents, `bind: {agents: {reviewers: [code-reviewer, python-reviewer]}}`, and only a group role takes one. A flat key, `agents/coder: rails-coder`, is refused with `Write bind as bind.agents.coder: rails-coder in qory.yaml: bind keys are kinds, and agents/coder is a kind and a role.` A checkout's `bind` sets a role over the base's `bind` and over the modules' `provides` |
 | `extensions` | no | a map of keys the author chooses, each a value of any shape, a scalar, a list or a map of any depth; written into the report as it is and printed by `qory harness inspect`; qory reads nothing in it |
 | `workflows` | no | the settings of each workflow of the stack, by its name: a lower-case letter, then up to 54 lower-case letters, digits and hyphens, 55 characters at most, so `workflow-<name>` has at most 64 characters. A run that Qory Apiary dispatches from a run code starts the first of these that the runtime can start: the skill `workflow-<name>`, the command `workflow-<name>`, the skill `<name>`, the command `<name>` (docs/run.md, §The run key from a run code). A plain name works, and when a harness ships both names, the prefixed one runs. The compose fails with status 2 for each workflow that no module of the stack composes as a skill or command under either name, after the modules' `exclude` and `only`: `add a skill or command workflow-<name> to a module of the base stack <stack>, or remove <name> from the workflows of its qory-stack.yaml: the stack declares the workflow <name>, and none of its modules ships a skill or command workflow-<name> or <name>`, or, for a stack that extends none, `add a skill or command workflow-<name> to a module of the stack in <file>, or remove <name> from its workflows: …`, where `<file>` is the `qory-stack.yaml` or the `qory.yaml` that defines the stack. For a stack that the harness document of a run from a run code defines, the line has `the workspace's harness in Qory Apiary` in place of `the stack in <file>`. A module that a checkout adds to the stack it extends does not count, and neither does a checkout's exclude: the compose checks what the stack's modules ship before it applies that exclude. The harness section of a `qory.yaml` that defines a stack lists them with the same keys and checks; a section that extends a stack takes the base's and lists none |
 | `workflows.<name>.time_limit` | no | how long a dispatched run of the workflow may run, counted from the run's open, as a Go duration above zero, such as `7h`, `45m` or `1h30m`; qory stops with an error on any other value: `set workflows.<name>.time_limit to a duration above zero, such as 7h or 45m: <value> is not one`. The run's `run_settings.time_limit_minutes`, when Qory Apiary sets it, applies instead, and a workflow without it runs for at most 3 hours |
@@ -283,7 +283,8 @@ checkout appends:
   base's. Nothing under a key is merged.
 - The base's `bind` applies, then the `provides` of the modules, then the checkout's
   `bind`, each layer replacing the name a role has from the one before (§References):
-  which entry fills a role is a target's choice, like the model.
+  which entry fills a role is a target's choice, like the model. A group role adds the
+  modules' agents to the base's list, and the checkout's `bind` replaces the list.
 - The report records the base with its source and pin, and marks the base's modules.
 - The base may come from `-f` in place of `extends` (§Discovery): `qory harness compose
   -f <stack>` in a checkout whose document extends a stack composes the document on that
@@ -654,10 +655,12 @@ egress:                          # the hosts the module's skills, hooks and serv
 roles:                           # the roles the module's documents reference
   agents:
     reviewer: one                # one entry fills the role
+    reviewers: many              # a group role: several agents fill it
     developer: {fill: one, contract: roles/developer.yaml}  # and the parts its agent needs
 provides:                        # the roles the module fills
   agents:
     developer: nextjs-developer  # ${qory:agents/developer} is the agent nextjs-developer
+    reviewers: [nextjs-reviewer] # the module adds nextjs-reviewer to the group
 push_checks:                     # optional: a check for the files of one artifact type
   - type: spec
     command: [scripts/checks.js, push, spec]  # a program in the module, then its arguments
@@ -698,29 +701,41 @@ A module with no `egress` key declares nothing, and a harness in which no module
 passes Forager no list. `egress: []` is a declaration that the module reaches
 nothing.
 `roles`, optional, lists the roles the module's documents reference, by kind, `agents`,
-`skills` or `commands`, and then by role, each set to `one`: one entry fills the role.
-Any other value fails the compose, `module core: Set roles.agents.developer to one in
-modules/core/qory-module.yaml: a role is filled by one entry, and the value is "many".`,
-and so does a list. An `agents` role may be a map instead, `{fill: one, contract:
-roles/developer.yaml}`: `fill` is the value above, and `contract`, optional, is the path of
-a role contract inside the module, with no `..` part (§The role contract). A map with
-another key fails, and so do a map without `fill`, a map for a `skills` or `commands`
-role, and a `contract` that is not a path inside the module. Each refusal is a fix line,
-then a cause line that ends with the manifest's path:
+`skills` or `commands`, and then by role, each set to `one`, for a role one entry fills,
+or `many`, for a group role, which several agents fill (§References). Only an `agents`
+role can be `many`: `module core: Set roles.skills.lint to one in
+modules/core/qory-module.yaml: only an agents role can be a group.` Any other value fails
+the compose, `module core: Set roles.agents.developer to one or many in
+modules/core/qory-module.yaml.` with `One entry fills a role and several fill a group, and
+the value is "two".` on the next line, and so does a list. A module that sets a role to `one` while another
+sets it to `many` fails the compose: `Declare agents/reviewers as many in module python,
+or remove it: module software-factory declares it many.` An `agents` role may be a map
+instead, `{fill: one, contract: roles/developer.yaml}`: `fill` is `one` or `many`, as
+above, and `contract`, optional, is the path of a role contract inside the module, with
+no `..` part (§The role contract). A map with another key fails, and so do a map without
+`fill`, a map for a `skills` or `commands` role, and a `contract` that is not a path
+inside the module. Each refusal is a fix line, then a cause line that ends with the
+manifest's path:
 
 ```
 module core: Set roles.agents.developer.contract to a path inside the module.
   The value is "../developer.yaml". The map is in modules/core/qory-module.yaml.
 ```
 
-The compose checks this value and the contracts; it checks nothing else against `roles`.
+Apart from `many` and the contracts, the compose checks nothing else against `roles`.
 `provides`, optional, fills roles (§References), by kind and then by role, each to the
 name of one entry of that kind, as `bind` does: a technology module `typescript` writes
 `provides: {agents: {developer: typescript-developer}}`, and a workflow skill's
 `${qory:agents/developer}` resolves to `typescript-developer` with no `bind` in the
-checkout. The name is a composed entry of any module. A list as a value, a flat
-`agents/developer` key and a kind other than the three are refused, each with the
-manifest's path.
+checkout. The name is a composed entry of any module. A group role takes a list of the
+agents the module adds to the group, `provides: {agents: {reviewers: [python-reviewer]}}`.
+A name for a group role fails the compose, `Write provides.agents.reviewers in module
+python as a list: it is a group role.`, and so does a list for a role no module declares
+`many`: `Write one name for provides.agents.developer in module python.` with `No module
+declares agents/developer as many, so one agent fills it.` on the next line. The compose
+refuses a list in a `bind` the same way, not when it reads the file. A list for a kind other than
+`agents`, an empty list, a flat `agents/developer` key and a kind other than the three are
+refused, each with the manifest's path.
 `push_checks`, optional, declares checks for the files of an artifact type, one item per
 type: `type`, the artifact type, `command`, the program and its arguments, and `reads`,
 optional. `reads` lists the other artifact types the check reads. The program is a file in
@@ -811,7 +826,7 @@ A module's tree contains these entry kinds:
 ```
 AGENTS.md                        merged; the instruction section, read by every runtime
 skills/<name>/SKILL.md           atomic; the Agent Skills layout, read by every runtime; may sit in folders that group skills, skills/<group>/<name>/SKILL.md
-agents/<name>.md                 atomic; frontmatter name, description, and the keys some runtimes read (model, tools, mode); body = system prompt
+agents/<name>.md                 atomic; frontmatter name, description, paths, and the keys some runtimes read (model, tools, mode); body = system prompt
 commands/<name>.md               atomic; frontmatter description; body = prompt, $ARGUMENTS for the arguments
 output-styles/<name>.md          atomic; Claude Code only
 hooks/<file>                     atomic; scripts that a settings fragment refers to as $QORY_HARNESS_HOME/hooks/<file>; files only
@@ -823,6 +838,18 @@ process.yaml                     a factory's process template, checked when expo
 ```
 
 `model` may be a tier, `${qory:light}`, `${qory:fast}` or `${qory:thinking}`, which the compose replaces with the model id the tier maps to (§ The configuration). A tier with no map leaves the agent without a model, so it runs on the main model, and the compose prints a row.
+
+`paths`, optional, lists the files of a change an agent reads, as globs from the checkout
+root: `paths: ["**/*.py", pyproject.toml]`, or one glob as a string. A glob matches a path
+from the checkout root with forward slashes: `**` matches any number of directories, `*`
+and `?` match within one directory, and a glob without a slash matches at any depth only
+through `**/`. An agent without `paths` reads every change. The home's `roles.json`
+contains the `paths` of each member of a group role (§References), for a script that
+starts the members a change needs. qory leaves the key and its whole value out of every
+agent file it writes for a runtime, since not every runtime accepts a key it does not
+know. The compose checks the `paths` of every agent, and any other value fails it:
+`module core: agents/python-reviewer.md: set paths to globs, such as ["**/*.py"], or
+remove it` with `the value is not a glob or a list of globs` on the next line.
 
 Below `skills`, a folder with `SKILL.md` is a skill, and everything below it is that skill's
 files, a nested `SKILL.md` included. A real folder with no `SKILL.md` and with a folder below
@@ -999,6 +1026,29 @@ did not list, and never an entry a module's `only` or `exclude` left out. A refe
 (rule 4), so an entry needs no `requires` line for what its documents reference, and an
 `only` follows references the way it follows `requires`.
 
+A group role is an `agents` role that several agents fill, its members. A module declares
+it with `many` under `roles` (§The module manifest), and each module adds its members
+with a list under `provides`; a role such as `developer` that no module declares `many`
+keeps one agent. The members are the base's `bind` list, then each module's `provides`
+list in module order, each name once. The checkout's `bind` list replaces them. A member
+that an `exclude` or an `only` leaves out is no member. With `software-factory` providing
+`reviewers: [code-reviewer, test-reviewer]` and `python` providing `reviewers:
+[python-reviewer]`, `Start ${qory:agents/reviewers}.` resolves to `Start code-reviewer,
+test-reviewer, python-reviewer.`: the members' names at the path's address, joined by
+`, `, in the order of the group's rows in `roles.json`. A reference expands anywhere in a
+document's body, in a code span and in a fenced code block too. A reference to a group
+resolves only in a document's body. In front matter it fails the compose: `Remove
+${qory:agents/reviewers} from the front matter of skills/review/SKILL.md of module core.`
+with `A group resolves to a list.` on the next line. A group with no member fails the compose
+when a document references it: `Give agents/reviewers an agent, or remove its reference
+from skills/review/SKILL.md of module core.` with `The group has no member.` on
+the next line. The home contains
+`roles.json`, written when the harness has a role: `{"roles": [...]}`, one row per role
+and per member of a group, in the report's order, each `{role, agent, from}` as the
+report has it, with `group: true` for a member and the member's `paths` (§The module
+manifest) when its agent file sets them. A member the checkout's `bind` replaced is not in
+it.
+
 Each place a renderer puts a document in front of a program has an address, the name
 the program registers an entry under when it reads it there, and the document is
 placed with its references resolved at that address (§Rendering). A launch path whose
@@ -1058,12 +1108,15 @@ runtime: the resolution happens in the composed tree, per path.
    typescript-developer in a module, or remove provides.agents.developer from module
    typescript: no module ships agent typescript-developer.` and `Rename role
    agents/reviewer in the provides of module typescript: module core ships agent reviewer,
-   and a role's name is no entry's.` Every failure of this rule comes at once, one per
-   line, or two for a workflow's block: the workflow blocks first (the next paragraph),
-   then the roles, then the entries in their sorted order, so one compose lists every
-   site there is to fix. An entry that was left out has no requirements to meet. A
-   manifest whose `requires` lists an entry the module does not ship fails as the module
-   is read: `module core: requires lists skill release, which the module does not ship`.
+   and a role's name is no entry's.` Each member of a group role is checked the same way,
+   a provided one with `Ship agent python-reviewer, or remove it from
+   provides.agents.reviewers of module python.` and `No module ships agent
+   python-reviewer.` on the next line. Every failure of this rule comes at once, each on
+   its line, or on two lines with the cause on the second: the workflow blocks first (the
+   next paragraph), then the roles, then the entries in their sorted order, so one compose
+   lists every site there is to fix. An entry that was left out has no requirements to
+   meet. A manifest whose `requires` lists an entry the module does not ship fails as the
+   module is read: `module core: requires lists skill release, which the module does not ship`.
 
    A run starts a workflow of the stack at its skill or command (§The stack), and that
    entry starts each agent its documents reference. A reference of that entry to an agent
@@ -1420,8 +1473,12 @@ entry that fills it, from the base's `bind`, the modules' `provides` and the che
 `bind`, absent when there are none; and `roles`, the same roles sorted, each `{role,
 agent, from}`, `from` being `base`, `provides <module>` or `bind`:
 `[{"role": "agents/developer", "agent": "typescript-developer", "from": "provides
-typescript"}]`. `qory harness inspect` and `qory harness compose --dry-run` print them in
-the Bind table, with `from` as the third column. An agent with a tier has `tier`. `tiers` lists each tier the agents use that has a map, with `model`, `effort` when set, and `from`: `--tier`, for an entry of `--tier` and `--tier-effort`, or the file that set it. `egress` is the union of the hosts the modules
+typescript"}]`. A group role (§References) is in `roles` alone, one row per member in the
+members' order, each with `group: true`, and after them one row with `replaced: true` for
+each member the checkout's `bind` replaced, so a reader sees which member the checkout
+dropped. `qory harness inspect` and `qory harness compose --dry-run` print them in
+the Bind table, with `from` as the third column and `group` or `replaced by bind` as the
+fourth. An agent with a tier has `tier`. `tiers` lists each tier the agents use that has a map, with `model`, `effort` when set, and `from`: `--tier`, for an entry of `--tier` and `--tier-effort`, or the file that set it. `egress` is the union of the hosts the modules
 declared (§The module manifest), sorted by host, each with the `modules` that declared it
 in stack order, and absent when no module declares; when one does, the target runtime's
 hosts, the model endpoint for `claude`, join under the runtime's name, so a stack

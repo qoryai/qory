@@ -104,6 +104,12 @@ type Role struct {
 	// checkout's qory.yaml extends, "provides <module>" for a module's provides, and
 	// "bind" for the bind of the document composed.
 	From string `json:"from"`
+	// Group marks a member of a group role, a role that several agents fill: the report
+	// has one row per member.
+	Group bool `json:"group,omitempty"`
+	// Replaced marks a member of a group role that the bind of the document composed
+	// replaced, so a reader sees which member the checkout dropped. It fills nothing.
+	Replaced bool `json:"replaced,omitempty"`
 }
 
 // Tier is the entry a tier the agents use maps to.
@@ -225,12 +231,13 @@ type Report struct {
 	// QORY_HARNESS_HOME, sorted by name; a runtime the harness sets none for is left out,
 	// and so is the field when it sets none for any.
 	LaunchEnv map[string][]Var `json:"launch_env,omitempty"`
-	// Bind is the harness's roles, <kind>/<role> to the name of the entry that fills the
-	// role, from the base's bind, the modules' provides and the checkout's bind; absent
-	// when no role is set.
+	// Bind is the harness's single roles, <kind>/<role> to the name of the entry that
+	// fills the role, from the base's bind, the modules' provides and the checkout's
+	// bind; absent when no single role is set. A group role is in Roles alone.
 	Bind map[string]string `json:"bind,omitempty"`
-	// Roles are the roles of Bind, sorted by role, each with the layer that set its
-	// name; absent when no role is set.
+	// Roles are the roles of Bind and one row per member of a group role, sorted by
+	// role, each with the layer that set its name, a group's members in their order and
+	// the members the checkout's bind replaced after them; absent when no role is set.
 	Roles []Role `json:"roles,omitempty"`
 	// Tiers is, for each tier an agent sets that has a map, the entry it maps to; a tier
 	// an agent sets that is absent here has no map. Absent when no such tier has one.
@@ -353,7 +360,7 @@ func New(res *compose.Result, name, checkout, home string) Report {
 		r.Bind = res.Bind
 	}
 	for _, role := range res.Roles {
-		r.Roles = append(r.Roles, Role{Role: role.Role, Agent: role.Name, From: role.From})
+		r.Roles = append(r.Roles, Role{Role: role.Role, Agent: role.Name, From: role.From, Group: role.Group, Replaced: role.Replaced})
 	}
 	if res.Base != nil {
 		r.Base = &Base{Name: res.Base.Name, Source: res.Base.Source, Pin: res.Base.Pin}
@@ -505,24 +512,35 @@ func (r Report) PrintBody(w io.Writer) error {
 		rows = append(rows, row)
 	}
 	u.Table(rows)
-	if len(r.Bind) > 0 {
+	if len(r.Bind) > 0 || len(r.Roles) > 0 {
 		u.Blank()
 		u.Heading("Bind")
 		rows = nil
-		from := map[string]string{}
-		for _, role := range r.Roles {
-			from[role.Role] = role.From
-		}
-		for _, role := range sorted(r.Bind) {
-			row := []string{accesskey.ShownName(role, false), accesskey.ShownName(r.Bind[role], false)}
-			if f := from[role]; f != "" {
-				layer, module, _ := strings.Cut(f, " ")
-				if module != "" {
-					layer += " " + accesskey.ShownName(module, false)
-				}
-				row = append(row, layer)
+		// layer is a row's from column, the module's name printed as a name is.
+		layer := func(f string) string {
+			layer, module, _ := strings.Cut(f, " ")
+			if module != "" {
+				layer += " " + accesskey.ShownName(module, false)
 			}
+			return layer
+		}
+		listed := map[string]bool{}
+		for _, role := range r.Roles {
+			row := []string{accesskey.ShownName(role.Role, false), accesskey.ShownName(role.Agent, false), layer(role.From)}
+			switch {
+			case role.Replaced:
+				row = append(row, "replaced by bind")
+			case role.Group:
+				row = append(row, "group")
+			}
+			listed[role.Role] = true
 			rows = append(rows, row)
+		}
+		// A report written before roles has the bind alone.
+		for _, role := range sorted(r.Bind) {
+			if !listed[role] {
+				rows = append(rows, []string{accesskey.ShownName(role, false), accesskey.ShownName(r.Bind[role], false)})
+			}
 		}
 		u.Table(rows)
 	}

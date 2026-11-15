@@ -30,7 +30,7 @@
       }
     },
     "roles": {
-      "description": "The roles the module's documents reference, by kind and then by role, each set to one: one entry fills the role. An agents role may be a map instead, {fill: one, contract: <path>}, where contract is a role contract file inside the module, role-contract.schema.json, that every agent filling the role must meet.",
+      "description": "The roles the module's documents reference, by kind and then by role, each set to one: one entry fills the role. An agents role may be set to many instead: a group role, which several agents fill. An agents role may also be a map, {fill: one or many, contract: <path>}, where contract is a role contract file inside the module, role-contract.schema.json, that every agent filling the role, each member of a group included, must meet.",
       "type": "object",
       "additionalProperties": false,
       "properties": {
@@ -40,11 +40,11 @@
       }
     },
     "provides": {
-      "description": "The roles the module fills, by kind and then by role, each to the name of one entry of that kind. A provided role fills a reference such as ${qory:agents/developer} unless the checkout's bind sets the role.",
+      "description": "The roles the module fills, by kind and then by role, each to the name of one entry of that kind. A provided role fills a reference such as ${qory:agents/developer} unless the checkout's bind sets the role. A group role takes a list of agents, which the module adds to the group.",
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "agents": {"$ref": "#/$defs/roleNames"},
+        "agents": {"$ref": "#/$defs/agentRoleNames"},
         "commands": {"$ref": "#/$defs/roleNames"},
         "skills": {"$ref": "#/$defs/roleNames"}
       }
@@ -134,13 +134,13 @@
       "propertyNames": {"pattern": "^[^/\\\\@ .][^/\\\\@ ]*$"},
       "additionalProperties": {
         "oneOf": [
-          {"const": "one"},
+          {"enum": ["one", "many"]},
           {
             "type": "object",
             "required": ["fill"],
             "additionalProperties": false,
             "properties": {
-              "fill": {"const": "one"},
+              "fill": {"enum": ["one", "many"]},
               "contract": {
                 "description": "The role contract: a relative path inside the module with no .. part.",
                 "type": "string",
@@ -150,6 +150,16 @@
               }
             }
           }
+        ]
+      }
+    },
+    "agentRoleNames": {
+      "type": "object",
+      "propertyNames": {"pattern": "^[^/\\\\@ .][^/\\\\@ ]*$"},
+      "additionalProperties": {
+        "oneOf": [
+          {"type": "string", "pattern": "^[^/\\\\@ .][^/\\\\@ ]*$"},
+          {"type": "array", "minItems": 1, "items": {"type": "string", "pattern": "^[^/\\\\@ .][^/\\\\@ ]*$"}}
         ]
       }
     },

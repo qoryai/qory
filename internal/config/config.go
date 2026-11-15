@@ -395,7 +395,7 @@ type harnessSection struct {
 	Extends     stack.Source             `yaml:"extends,omitempty"`
 	Target      stack.Target             `yaml:"target,omitempty"`
 	Modules     []stack.Module           `yaml:"modules,omitempty"`
-	Bind        stack.Roles              `yaml:"bind,omitempty"`
+	Bind        stack.Fills              `yaml:"bind,omitempty"`
 	Extensions  map[string]any           `yaml:"extensions,omitempty"`
 	// Workflows are the workflows of the stack the section defines, as a stack file
 	// sets them; a section that extends a stack takes the base's and sets none.

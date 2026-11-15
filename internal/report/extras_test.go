@@ -107,3 +107,38 @@ func TestNewCarriesBindingsAndReferences(t *testing.T) {
 		t.Errorf("a report without bindings prints the section:\n%s", buf.String())
 	}
 }
+
+// TestNewCarriesAGroupRole is a result with a group role of two members and one the
+// checkout's bind replaced: the report has one row per member, marked group, the
+// replaced one marked replaced, no bind entry for the group, and Print shows each row.
+func TestNewCarriesAGroupRole(t *testing.T) {
+	t.Setenv("NO_COLOR", "1")
+	t.Setenv("HOME", t.TempDir())
+	res := result()
+	res.Groups = map[string][]string{"agents/reviewers": {"python-reviewer", "code-reviewer"}}
+	res.Roles = []compose.Role{
+		{Role: "agents/reviewers", Name: "python-reviewer", From: "bind", Group: true},
+		{Role: "agents/reviewers", Name: "code-reviewer", From: "bind", Group: true},
+		{Role: "agents/reviewers", Name: "test-reviewer", From: "provides factory", Module: "factory", Group: true, Replaced: true},
+	}
+	r := report.New(res, "app", "/work/app", "/work/app/.qory/harness")
+	if r.Bind != nil {
+		t.Errorf("bind = %v, want none", r.Bind)
+	}
+	data, err := json.Marshal(r.Roles)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := `[{"role":"agents/reviewers","agent":"python-reviewer","from":"bind","group":true},{"role":"agents/reviewers","agent":"code-reviewer","from":"bind","group":true},{"role":"agents/reviewers","agent":"test-reviewer","from":"provides factory","group":true,"replaced":true}]`; string(data) != want {
+		t.Errorf("roles = %s, want %s", data, want)
+	}
+	var buf bytes.Buffer
+	if err := r.Print(&buf); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"Bind", "agents/reviewers  python-reviewer  bind              group", "agents/reviewers  code-reviewer    bind              group", "agents/reviewers  test-reviewer    provides factory  replaced by bind"} {
+		if !strings.Contains(buf.String(), want) {
+			t.Errorf("print lacks %q:\n%s", want, buf.String())
+		}
+	}
+}

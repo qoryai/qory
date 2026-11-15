@@ -93,3 +93,55 @@ func TestReadCollectsReferencesPerEntry(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 }
+
+// TestReadRecordsWhereEachReferenceIs is a skill whose frontmatter and body reference
+// roles, and agents with frontmatter paths: each entry has the first file of each
+// reference, the references a frontmatter makes, and an agent's globs, one string read
+// as a list of one.
+func TestReadRecordsWhereEachReferenceIs(t *testing.T) {
+	dir := tree(t, map[string]string{
+		"skills/review/SKILL.md":        "---\nname: review\ndescription: Starts ${qory:agents/lead}.\n---\n\nStart ${qory:agents/reviewers}.\n",
+		"skills/review/steps.md":        "Then ${qory:agents/reviewers} and ${qory:agents/lead}.\n",
+		"agents/python-reviewer.md":     "---\nname: python-reviewer\npaths: [\"**/*.py\", pyproject.toml]\n---\n\nReviews.\n",
+		"agents/docs-reviewer.md":       "---\nname: docs-reviewer\npaths: docs/**\n---\n\nReviews.\n",
+		"agents/everything-reviewer.md": "---\nname: everything-reviewer\n---\n\nReviews paths: all of them.\n",
+	})
+	l, err := Read("core", dir, nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]Entry{}
+	for _, e := range l.Entries {
+		got[e.Kind+"/"+e.Name] = e
+	}
+	skill := got["skills/review"]
+	if want := map[string]string{"agents/lead": "skills/review/SKILL.md", "agents/reviewers": "skills/review/SKILL.md"}; !reflect.DeepEqual(skill.In, want) {
+		t.Errorf("in = %v, want %v", skill.In, want)
+	}
+	if want := map[string]string{"agents/lead": "skills/review/SKILL.md"}; !reflect.DeepEqual(skill.Front, want) {
+		t.Errorf("front = %v, want %v", skill.Front, want)
+	}
+	for name, want := range map[string][]string{
+		"agents/python-reviewer":     {"**/*.py", "pyproject.toml"},
+		"agents/docs-reviewer":       {"docs/**"},
+		"agents/everything-reviewer": nil,
+	} {
+		if !reflect.DeepEqual(got[name].Paths, want) {
+			t.Errorf("%s: paths = %v, want %v", name, got[name].Paths, want)
+		}
+	}
+}
+
+// TestReadRefusesPathsThatAreNoGlobs is an agent whose frontmatter paths is a map, an
+// empty list, a list with an item that is no string, or an empty string: each refused
+// with the fix first and the agent's file.
+func TestReadRefusesPathsThatAreNoGlobs(t *testing.T) {
+	for _, value := range []string{"{a: b}", "[]", "[a, [b]]", `""`} {
+		dir := tree(t, map[string]string{"agents/reviewer.md": "---\nname: reviewer\npaths: " + value + "\n---\n\nReviews.\n"})
+		_, err := Read("core", dir, nil, "")
+		want := "module core: agents/reviewer.md: set paths to globs, such as [\"**/*.py\"], or remove it\nthe value is not a glob or a list of globs"
+		if err == nil || err.Error() != want {
+			t.Errorf("paths: %s: %v\nwant %q", value, err, want)
+		}
+	}
+}

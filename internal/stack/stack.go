@@ -394,13 +394,13 @@ type Stack struct {
 	// Bind selects the entry that fills each role a document references, by kind and
 	// then by role, to the entry's name in that kind: a module writes
 	// ${qory:agents/coder}, and bind: {agents: {coder: rails-coder}} selects which agent
-	// that is. After [Extend], it is the bind of the checkout's qory.yaml, and BaseBind
-	// is the base's.
-	Bind Roles `yaml:"bind,omitempty"`
+	// that is. A group role takes a list of agents. After [Extend], it is the bind of the
+	// checkout's qory.yaml, and BaseBind is the base's.
+	Bind Fills `yaml:"bind,omitempty"`
 	// BaseBind is the bind of the stack a checkout's qory.yaml extends, set by
 	// [Extend]; nil for a stack that extends none. The compose sets each role from
 	// BaseBind first, then from the modules' provides, then from Bind.
-	BaseBind Roles `yaml:"-"`
+	BaseBind Fills `yaml:"-"`
 	// Extending, on a stack, is what a checkout's own modules may ship. A stack that
 	// leaves it out cannot be extended.
 	Extending *Extending `yaml:"extending,omitempty"`
@@ -705,7 +705,7 @@ func (p *Stack) validate(compose bool) error {
 		w.TimeLimit = d
 		p.Workflows[name] = w
 	}
-	if err := CheckRoles(p.Bind, "bind"); err != nil {
+	if err := CheckFills(p.Bind, "bind"); err != nil {
 		return err
 	}
 	// A document that extends a stack may append nothing and carry only what is the
