@@ -2,7 +2,7 @@ apiVersion: qory.dev/v1alpha1
 name: software
 modules:
   - name: software-factory
-    source: {path: ../../modules/software-factory}
+    source: {path: modules/software-factory}
 extending: {kinds: [agents]}
 workflows:
   capture-demos: {access: write}

@@ -1,5 +1,6 @@
 apiVersion: qory.dev/v1alpha1
 exports:
+  dir: {stacks: stacks, modules: stacks/software/modules}
   stacks: [software]
   modules: [software-factory]
 harness:
