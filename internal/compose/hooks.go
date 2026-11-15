@@ -63,7 +63,7 @@ type hookPoint struct {
 // hook at its point, and more hooks at a point or in a workflow than the base allows.
 // Each message is a line with the fix, of at most 100 characters, and a line with the
 // cause. opts.Checkout "" is the directory of the document; git reads the programs with
-// opts.Timeout and opts.GitBase.
+// opts.Timeout.
 func checkHooks(res *Result, p *stack.Stack, opts Options) error {
 	base := opts.Base
 	if len(p.Hooks) == 0 {
@@ -99,7 +99,7 @@ func checkHooks(res *Result, p *stack.Stack, opts Options) error {
 			agents[e.Name] = true
 		}
 	}
-	programs := &programs{doc: p.Dir(), checkout: opts.Checkout, file: file, timeout: opts.Timeout, base: opts.GitBase}
+	programs := &programs{doc: p.Dir(), checkout: opts.Checkout, file: file, timeout: opts.Timeout}
 	named := map[string]int{}
 	perPoint := map[string]int{}
 	perWorkflow := map[string]int{}
@@ -159,11 +159,10 @@ func checkHooks(res *Result, p *stack.Stack, opts Options) error {
 // programs finds the program of a hook in the commit at HEAD of the checkout: doc is the
 // directory of the document, which a program's path is from, checkout the root of the
 // checkout that is composed, and file the document's name. Each git command runs at most
-// timeout, 0 for no limit, from the environment base, nil for this process's.
+// timeout, 0 for no limit.
 type programs struct {
 	doc, checkout, file string
 	timeout             time.Duration
-	base                []string
 	// real is the checkout's path with every link resolved, "" until find sets it.
 	real string
 	// prefix is the checkout's path from the root of its git repository, "" or ending in
@@ -301,7 +300,9 @@ func (f *programs) near(rel string) (string, error) {
 		if mode != "040000" {
 			return "", nil
 		}
-		listed, err := f.list("ls-tree", "-z", "HEAD:"+strings.TrimSuffix(f.prefix+strings.Join(found, "/"), "/"))
+		// --full-tree lists the whole folder: in a checkout that is a folder of its
+		// repository, git ls-tree lists only the entries under that folder without it.
+		listed, err := f.list("ls-tree", "-z", "--full-tree", "HEAD:"+strings.TrimSuffix(f.prefix+strings.Join(found, "/"), "/"))
 		if err != nil {
 			return "", err
 		}
@@ -369,7 +370,7 @@ func (f *programs) head() error {
 // that exited with an error.
 func (f *programs) failed(err error) error {
 	if exit, ok := errors.AsType[*gitExit](err); ok {
-		return fmt.Errorf("Fix what git reports for the checkout: a hook runs the file as committed in git.\ngit %s in %s failed: %s", exit.command, exports.HidePath(f.real), exports.Value(exit.line, false))
+		return fmt.Errorf("Fix what git reports for the checkout: a hook runs the file as committed in git.\ngit %s in %s failed: %s", exit.command, exports.HidePath(f.real), exports.HidePath(exit.line))
 	}
 	return err
 }
@@ -384,26 +385,24 @@ type gitExit struct {
 func (e *gitExit) Error() string { return "git " + e.command + ": " + e.line }
 
 // git runs git with args in the checkout, with literal pathspecs, and returns its
-// output. An error of a git that ran and exited with one is a [*gitExit].
+// output. An error of a git that ran and exited with one is a [*gitExit]. git writes its
+// messages in English, which [programs.head] matches.
 func (f *programs) git(args ...string) (string, error) {
 	ctx, cancel := context.Background(), func() {}
 	if f.timeout > 0 {
 		ctx, cancel = context.WithTimeout(ctx, f.timeout)
 	}
 	defer cancel()
-	if f.base != nil {
-		ctx = hostgit.WithBase(ctx, f.base)
-	}
 	cmd, err := hostgit.Command(ctx, f.real, args...)
 	if err != nil {
 		return "", err
 	}
-	cmd.Env = append(cmd.Env, "GIT_LITERAL_PATHSPECS=1")
+	cmd.Env = append(cmd.Env, "GIT_LITERAL_PATHSPECS=1", "LC_ALL=C", "LANGUAGE=")
 	var stderr strings.Builder
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-		return "", fmt.Errorf("Run the compose again, or raise git.timeout in the qory configuration.\ngit %s in %s ran past %s and was stopped.", args[0], exports.HidePath(f.real), f.timeout)
+		return "", fmt.Errorf("Run the compose again, or raise `git.timeout` in `qory.yaml`.\ngit %s in %s ran past %s and was stopped.", args[0], exports.HidePath(f.real), f.timeout)
 	}
 	if exit, ok := errors.AsType[*exec.ExitError](err); ok {
 		line, _, _ := strings.Cut(strings.TrimSpace(stderr.String()), "\n")

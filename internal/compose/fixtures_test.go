@@ -16,6 +16,7 @@ import (
 	"github.com/qoryai/qory/internal/compose"
 	"github.com/qoryai/qory/internal/config"
 	"github.com/qoryai/qory/internal/exports"
+	"gopkg.in/yaml.v3"
 )
 
 const fixtures = "../../contracts/harness/v1/fixtures"
@@ -38,7 +39,7 @@ func TestFixtures(t *testing.T) {
 			checkout := ""
 			// A workflow hook's program is read from the commit at HEAD of the checkout,
 			// so a fixture with hooks is composed from a copy that is a git checkout.
-			if name := filepath.Base(dir); strings.HasPrefix(name, "workflow-hooks-") {
+			if name := filepath.Base(dir); listsHooks(t, dir) {
 				dir = realTemp(t)
 				copyFixture(t, name, dir)
 				commitAll(t, dir)
@@ -190,6 +191,29 @@ func TestFixtures(t *testing.T) {
 			}
 		})
 	}
+}
+
+// listsHooks reports whether the qory.yaml of the fixture at dir has hooks under
+// harness, whatever their value.
+func listsHooks(t *testing.T, dir string) bool {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(dir, config.FileName))
+	if errors.Is(err, os.ErrNotExist) {
+		return false
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc struct {
+		Harness struct {
+			Hooks yaml.Node `yaml:"hooks"`
+		} `yaml:"harness"`
+	}
+	// A fixture whose qory.yaml does not parse expects that refusal, before any hook.
+	if yaml.Unmarshal(data, &doc) != nil {
+		return false
+	}
+	return doc.Harness.Hooks.Kind != 0
 }
 
 // load composes the fixture in the working directory for the checkout at checkout, ""

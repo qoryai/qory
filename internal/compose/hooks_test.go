@@ -210,7 +210,8 @@ func TestHookProgramsNeedACommit(t *testing.T) {
 
 // TestHookProgramsInAFolderOfTheRepository is a checkout that is a folder of its git
 // repository, and a checkout that is a worktree of another: each program is in
-// hooks.json by its path from the checkout's root.
+// hooks.json by its path from the checkout's root, and a path that git has in another
+// letter case is refused as such.
 func TestHookProgramsInAFolderOfTheRepository(t *testing.T) {
 	repo := realTemp(t)
 	sub := filepath.Join(repo, "services", "api")
@@ -232,6 +233,14 @@ func TestHookProgramsInAFolderOfTheRepository(t *testing.T) {
 		}
 		if got := strings.Join(res.Hooks[0].Run, " "); got != "scripts/check-licences.sh --all" {
 			t.Errorf("%s: run %s, want the program from the checkout's root", checkout, got)
+		}
+		if err := os.WriteFile(doc, []byte(hooksDoc("stack", "    - {at: after-review-round, kind: check, run: scripts/Check-licences.sh}\n")), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		_, err = composeHooks(t, doc, checkout)
+		want := "Write hooks[0].run as committed in git.\nhooks[0].run is scripts/Check-licences.sh, and git has scripts/check-licences.sh."
+		if err == nil || err.Error() != want {
+			t.Errorf("%s: err = %v, want %q", checkout, err, want)
 		}
 	}
 }
