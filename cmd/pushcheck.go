@@ -1,9 +1,12 @@
 package cmd
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -291,21 +294,37 @@ func engineShown(id string) string {
 	return exports.Value(id, true)
 }
 
-// artifactsForCheck is the fetch of a push check through client: the artifact index,
-// and the newest version of each artifact of the types, as qory artifact pull writes
-// them into its store.
+// notesFile is the file of a push check's working folder with the work item's notes.
+const notesFile = "notes.json"
+
+// textNotesNotList is the error of a work item whose notes in the run API's response are
+// not a JSON array.
+const textNotesNotList = "Contact support: the notes in the run API's response are not a JSON array."
+
+// artifactsForCheck is the fetch of a push check through client: the work item's notes
+// as notes.json, the artifact index, and the newest version of each artifact of the
+// types that the index does not mark cancelled, as qory artifact pull writes them into
+// its store.
 func artifactsForCheck(client *runapi.Client) pushcheck.Fetch {
 	return func(ctx context.Context, dir string, types []string) error {
+		snapshot, err := client.WorkItem(ctx)
+		if err != nil {
+			return err
+		}
+		notes, err := checkNotes(snapshot.Notes)
+		if err != nil {
+			return err
+		}
 		index, err := client.Artifacts(ctx)
 		if err != nil {
 			return err
 		}
 		store := &artifactStore{root: filepath.Dir(dir), dir: dir, fresh: true}
 		for _, artifact := range index.Artifacts {
-			if !slices.Contains(types, artifact.Type) || artifact.NewestVersion < 1 {
+			if !slices.Contains(types, artifact.Type) {
 				continue
 			}
-			chosen := chosenVersion(artifact, nil, artifact.NewestVersion)
+			chosen := newestNotCancelled(artifact)
 			if chosen == nil {
 				continue
 			}
@@ -313,8 +332,27 @@ func artifactsForCheck(client *runapi.Client) pushcheck.Fetch {
 				return err
 			}
 		}
+		if err := store.write(dir, notesFile, func(w io.Writer) error {
+			_, err := w.Write(notes)
+			return err
+		}); err != nil {
+			return err
+		}
 		return store.writeIndex(index.Raw)
 	}
+}
+
+// checkNotes is the content of notes.json for raw, the notes of the work item's
+// snapshot: raw as the run API returned it, or [] when the response has none or null.
+func checkNotes(raw json.RawMessage) ([]byte, error) {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 || string(trimmed) == "null" {
+		return []byte("[]"), nil
+	}
+	if trimmed[0] != '[' {
+		return nil, errors.New(textNotesNotList)
+	}
+	return trimmed, nil
 }
 
 // checkBranchVersion runs the push check of the artifact type branch on content, the
