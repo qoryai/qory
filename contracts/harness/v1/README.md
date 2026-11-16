@@ -284,8 +284,9 @@ checkout appends:
   for a module of the base stack <name>@<pin> in qory.yaml, under harness.modules`. For a
   base module the base lists by a path or a git source alone, which `qory.yaml` cannot
   list, `qory harness compose` prints `It belongs to the base stack <name>@<pin>; rename
-  yours.`, and the error's text has `it belongs to the base stack <name>@<pin>; rename
-  yours`.
+  yours.`, and the error's text starts `Rename your <kind>/<name>.`, then has the lines `<n> modules
+  provide <kind>/<name>: <module>@<pin>, …` and `<kind>/<name> belongs to the base stack
+  <name>@<pin>.`
 - Both stacks' `extensions` go into the report, merged by top-level key: a key the
   checkout sets replaces the base's value whole, and a key it leaves alone stays the
   base's. Nothing under a key is merged.
@@ -934,9 +935,9 @@ or `many`, for a group role, which several agents fill (§References). Only an `
 role can be `many`: `Set roles.skills.lint of module core to one.` with `Only an agents
 role can be a group. The map is in modules/core/qory-module.yaml.` on the next line. Any
 other value fails
-the compose, `module core: Set roles.agents.developer to one or many in
-modules/core/qory-module.yaml.` with `One entry fills a role and several fill a group, and
-the value is "two".` on the next line, and so does a list. A module that sets a role to `one` while another
+the compose, `Set roles.agents.developer to one or many.` with `One entry fills a role and
+several fill a group, and the value is "two".` and `roles is in
+modules/core/qory-module.yaml.` on the next two lines, and so does a list. A module that sets a role to `one` while another
 sets it to `many` fails the compose: `Declare agents/reviewers as many in module python,
 or remove it: module software-factory declares it many.` An `agents` role may be a map
 instead, `{fill: one, contract: roles/developer.yaml}`: `fill` is `one` or `many`, as
