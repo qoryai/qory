@@ -799,9 +799,18 @@ one, and from npm otherwise:
 
 - A run that `qory run pool` starts installs from the pool's registry, the host of
   `pool.registry` in the pool's `forager.yaml`. `qory run pool` writes the host after the
-  run code, see `--run-code-file`; `qory run` accepts only letters, digits, `.` and
-  `-`, with an optional port from 1 to 65535. The registry's host decides which Claude
-  Code program the agent runs, so the run-code file is as trusted as the code that runs.
+  run code, see `--run-code-file`. The host is only letters, digits, `.` and `-`, with an
+  optional port from 1 to 65535. `qory run pool` checks `pool.registry` when it starts,
+  and stops before it claims a run when the host of the image name is another:
+
+  ```text
+  qory run: set pool.registry to an image name on a host of letters, digits, . and -, with an optional port from 1 to 65535
+  The host is "registry.example:0".
+  ```
+
+  `qory run` takes the same host from the run-code file only. The registry's host decides
+  which Claude Code program the agent runs, so the run-code file is as trusted as the
+  code that runs.
 - Any other run installs from the host of `pool.registry` in the run's `forager.yaml`.
 - Without either, the run installs from npm, `registry.npmjs.org`.
 

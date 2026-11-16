@@ -959,6 +959,10 @@ func TestAMalformedJournalIsRefused(t *testing.T) {
 	}
 }
 
+// hostFix starts the error of a registry host that the pool cannot pass to its runs: the
+// fix on the first line, and on the second the host in quotes.
+const hostFix = "set pool.registry to an image name on a host of letters, digits, . and -, with an optional port from 1 to 65535\nThe host is \""
+
 // TestTheSettingsAreChecked refuses to run by settings it cannot.
 func TestTheSettingsAreChecked(t *testing.T) {
 	for _, c := range []struct {
@@ -969,6 +973,9 @@ func TestTheSettingsAreChecked(t *testing.T) {
 		{func(p *pool.Pool) { p.Settings.State = "pool" }, `the pool's folder "pool" is not an absolute path`},
 		{func(p *pool.Pool) { p.Settings.RunConfig = "runs" }, `set pool.run_config in forager.yaml to an absolute path: "runs" is not one`},
 		{func(p *pool.Pool) { p.Client = nil }, "the pool has no client of Qory Apiary"},
+		{func(p *pool.Pool) { p.Settings.Registry = "registry.example:0" }, hostFix + `registry.example:0".`},
+		{func(p *pool.Pool) { p.Settings.Registry = "registry.example:65536" }, hostFix + `registry.example:65536".`},
+		{func(p *pool.Pool) { p.Settings.Registry = "user@registry.example" }, hostFix + `user@registry.example".`},
 	} {
 		h := newHarness(t, 1)
 		c.edit(h.pool)
@@ -1011,5 +1018,20 @@ func TestARunCodeFileIsRemovedWhereThePathHasPatternCharacters(t *testing.T) {
 				t.Errorf("another file of the folder was removed: %v", err)
 			}
 		})
+	}
+}
+
+// TestARegistryHostWithAPortStartsThePool starts the pool with the registry
+// registry.example:5000, a host and a port that its runs take: it claims, and stops with
+// no error.
+func TestARegistryHostWithAPortStartsThePool(t *testing.T) {
+	h := newHarness(t, 1)
+	h.pool.Settings.Registry = "registry.example:5000"
+	h.start()
+	h.waitFor("a claim", func() bool {
+		return slices.ContainsFunc(h.srv.Calls(), func(c provisionertest.Call) bool { return c.Route == provisionertest.RouteClaim })
+	})
+	if err := h.stop(); err != nil {
+		t.Fatalf("the pool stopped with %v", err)
 	}
 }

@@ -221,6 +221,11 @@ func (p *Pool) Run(ctx context.Context) error {
 	case p.Client == nil:
 		return errors.New("the pool has no client of Qory Apiary")
 	}
+	if s.Registry != "" {
+		if err := runtimeinstall.CheckHost(s.Registry); err != nil {
+			return err
+		}
+	}
 	p.log = slog.New(SafeHandler(slog.DiscardHandler))
 	if p.Log != nil {
 		p.log = slog.New(SafeHandler(p.Log.Handler()))

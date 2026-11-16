@@ -1,6 +1,7 @@
 package runtimeinstall_test
 
 import (
+	"strconv"
 	"testing"
 
 	"github.com/qoryai/qory/internal/runtimeinstall"
@@ -64,6 +65,42 @@ func TestTheMachineLinesTakeAHostAndAPort(t *testing.T) {
 		m, ok := runtimeinstall.ParseMachine([]string{"registry " + host})
 		if !ok || m.Registry != host {
 			t.Errorf("registry %s read as %+v %t", host, m, ok)
+		}
+	}
+}
+
+// TestRegistryOfRefusesAHostThatRunsCannotTake reads the registry of pool.registry: a
+// host that [runtimeinstall.CheckHost] takes is the registry, an image with no host has
+// none, and a first part that is a host but is not one a run takes is an error whose first
+// line is the fix and whose second line is the host.
+func TestRegistryOfRefusesAHostThatRunsCannotTake(t *testing.T) {
+	for image, host := range map[string]string{
+		"registry.example:5000/qory-env": "registry.example:5000",
+		"registry.example/qory-env":      "registry.example",
+		"localhost/qory-env":             "localhost",
+		"127.0.0.1:65535/qory-env":       "127.0.0.1:65535",
+		"qory-env":                       "",
+		"library/qory-env":               "",
+		"user@host/qory-env":             "",
+	} {
+		got, err := runtimeinstall.RegistryOf(image)
+		if err != nil || got != host || runtimeinstall.RegistryHost(image) != host {
+			t.Errorf("RegistryOf(%q) = %q, %v; want %q", image, got, err, host)
+		}
+	}
+	for image, bad := range map[string]string{
+		"registry.example:0/qory-env":     "registry.example:0",
+		"registry.example:65536/qory-env": "registry.example:65536",
+		"registry.example:port/qory-env":  "registry.example:port",
+		"user@registry.example/qory-env":  "user@registry.example",
+		"[::1]:5000/qory-env":             "[::1]:5000",
+		"registry_.example/qory-env":      "registry_.example",
+		"registry.example?x/qory-env":     "registry.example?x",
+	} {
+		got, err := runtimeinstall.RegistryOf(image)
+		want := "set pool.registry to an image name on a host of letters, digits, . and -, with an optional port from 1 to 65535\nThe host is " + strconv.Quote(bad) + "."
+		if err == nil || err.Error() != want || got != "" || runtimeinstall.RegistryHost(image) != "" {
+			t.Errorf("RegistryOf(%q) = %q, %v; want the error %q", image, got, err, want)
 		}
 	}
 }

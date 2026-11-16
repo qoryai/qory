@@ -370,6 +370,9 @@ func TestRunPoolRefusesWhatItCannotRunBy(t *testing.T) {
 		}, func(m *poolMachine) string {
 			return "remove wall.mounts from " + filepath.Join(m.runs, "qory", "forager.yaml") + ": every run of the pool would see the paths it lists, so the runs would share them"
 		}},
+		{"a registry host with port 0", []string{"registry: registry.example:0/qory-env", "run_config: {runs}"}, nil, func(*poolMachine) string {
+			return "set pool.registry to an image name on a host of letters, digits, . and -, with an optional port from 1 to 65535\nThe host is \"registry.example:0\"."
+		}},
 		{"runs above 1 with no limits", []string{"runs: 2", "registry: localhost:5001/qory-env", "run_config: {runs}"}, nil, noLimits},
 		{"runs above 1 with no pids_limit", []string{"runs: 2", "registry: localhost:5001/qory-env", "run_config: {runs}"}, func(t *testing.T, m *poolMachine) {
 			writeFile(t, filepath.Join(m.runs, "qory", "forager.yaml"), "apiVersion: qory.dev/v1alpha1\nwall:\n  adapter: docker\n  image: "+agentImage+"\n  images_allow: [localhost:5001/qory-env/]\n  memory: 8g\n")

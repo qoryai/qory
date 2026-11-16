@@ -1,6 +1,7 @@
 package runtimeinstall
 
 import (
+	"fmt"
 	"net"
 	"path/filepath"
 	"regexp"
@@ -69,7 +70,7 @@ func ParseMachine(lines []string) (m Machine, ok bool) {
 		}
 		key, value, _ := strings.Cut(line, " ")
 		switch {
-		case key == machineRegistry && m.Registry == "" && validHost(value) && RegistryHost(value+"/x") == value:
+		case key == machineRegistry && m.Registry == "" && value != "" && RegistryHost(value+"/x") == value:
 			m.Registry = value
 		case key == machineFolder && m.Folder == "" && filepath.IsAbs(value) && filepath.Clean(value) == value:
 			m.Folder = value
@@ -80,13 +81,34 @@ func ParseMachine(lines []string) (m Machine, ok bool) {
 	return m, true
 }
 
-// RegistryHost is the registry of image, an image name such as pool.registry: its first
-// part, with its port, when it is a host, one with a dot or a colon, or localhost;
-// empty otherwise.
-func RegistryHost(image string) string {
-	host, rest, ok := strings.Cut(image, "/")
-	if !ok || rest == "" || strings.ContainsAny(host, " \t\r\n@") || !strings.ContainsAny(host, ".:") && host != "localhost" {
-		return ""
+// CheckHost returns nil when host is a registry's host, as pool.registry and a run
+// code's file have it: letters, digits, . and -, with an optional port from 1 to 65535.
+// Its error starts with the fix, and the host is on the second line.
+func CheckHost(host string) error {
+	if validHost(host) {
+		return nil
 	}
+	return fmt.Errorf("set pool.registry to an image name on a host of letters, digits, . and -, with an optional port from 1 to 65535\nThe host is %q.", host)
+}
+
+// RegistryOf is the registry of image, an image name such as pool.registry: its first
+// part, with its port, when it is a host, one with a dot or a colon, or localhost; empty
+// when the first part is no host. A first part that is a host but fails [CheckHost] is an
+// error.
+func RegistryOf(image string) (string, error) {
+	host, rest, ok := strings.Cut(image, "/")
+	if !ok || rest == "" || !strings.ContainsAny(host, ".:") && host != "localhost" {
+		return "", nil
+	}
+	if err := CheckHost(host); err != nil {
+		return "", err
+	}
+	return host, nil
+}
+
+// RegistryHost is the registry of image as [RegistryOf] has it; empty for an image with
+// no host, and for a host that [CheckHost] refuses.
+func RegistryHost(image string) string {
+	host, _ := RegistryOf(image)
 	return host
 }
