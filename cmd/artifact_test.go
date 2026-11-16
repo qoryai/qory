@@ -964,20 +964,20 @@ func TestArtifactPushWithdrawRefusals(t *testing.T) {
 	}{
 		"a name with no version": {
 			[]string{"demo-script", "--name", "scenario-9"}, withdrawIndex(),
-			"Pass the name of a stored artifact to --withdraw.\ndemo-script/scenario-9 has no version.",
+			"Withdraw only a stored artifact.\ndemo-script/scenario-9 has no version outside cancelled runs.",
 		},
 		"a name whose versions are all cancelled": {
 			[]string{"demo-script", "--name", "scenario-5"},
 			indexOf(artifactEntry("demo-script", "scenario-5", "", 1, cancelled(versionEntry("av_1", 1, fileEntry("s.json", "x"))))),
-			"Pass the name of a stored artifact to --withdraw.\ndemo-script/scenario-5 has no version.",
+			"Withdraw only a stored artifact.\ndemo-script/scenario-5 has no version outside cancelled runs.",
 		},
 		"a file argument": {
 			[]string{"demo-script", "scenario-2.json", "--name", "scenario-2"}, withdrawIndex(),
-			"Pass either files or --withdraw.\nA withdrawal stores no files, and the command got 1: scenario-2.json.",
+			"Pass either files or --withdraw.\nA withdrawal stores no files, and the command has 1 file: scenario-2.json.",
 		},
 		"two file arguments": {
 			[]string{"demo-script", "a.json", "-", "--name", "scenario-2"}, withdrawIndex(),
-			"Pass either files or --withdraw.\nA withdrawal stores no files, and the command got 2: a.json, -.",
+			"Pass either files or --withdraw.\nA withdrawal stores no files, and the command has 2 files: a.json, -.",
 		},
 		"a name already withdrawn": {
 			[]string{"demo-script", "--name", "scenario-4"},
@@ -1028,7 +1028,7 @@ func TestArtifactPushWithdrawOfARefusalAfterTheIndex(t *testing.T) {
 			versionEntry("av_1", 1, fileEntry("s.json", "one")), byPerson(versionEntry("av_3", 3, fileEntry("s.json", "x"))))),
 	}
 	texts := map[string]string{
-		"no_version":        "Pass the name of a stored artifact to --withdraw.\ndemo-script/scenario-2 has no version.",
+		"no_version":        "Withdraw only a stored artifact.\ndemo-script/scenario-2 has no version outside cancelled runs.",
 		"already_withdrawn": "Leave demo-script/scenario-2 as it is.\nIts newest version, v3, is already a withdrawal.",
 		"person_version": "Leave demo-script/scenario-2 to a member.\nIts newest version, v3, is an upload by Ana, " +
 			"and a run withdraws only a name whose newest version a run wrote.",
@@ -1048,17 +1048,40 @@ func TestArtifactPushWithdrawOfARefusalAfterTheIndex(t *testing.T) {
 		})
 	}
 
-	for _, code := range []string{"no_version", "already_withdrawn", "person_version", "withdrawal_with_files", "type_not_withdrawable"} {
+	// The statuses are the ones of the run API's contract.
+	for code, status := range map[string]int{
+		"no_version": http.StatusConflict, "already_withdrawn": http.StatusConflict, "person_version": http.StatusConflict,
+		"withdrawal_with_files": http.StatusUnprocessableEntity, "type_not_withdrawable": http.StatusUnprocessableEntity,
+	} {
 		t.Run(code+" with an index that shows no cause", func(t *testing.T) {
 			inCheckout(t)
 			server := startRunAPI(t)
 			server.index = withdrawIndex()
-			server.status = http.StatusConflict
+			server.status = status
 			server.response = fmt.Sprintf(`{"error":%q,"message":"The line of the run API."}`, code)
 
 			_, err := run(t, "artifact", "push", "demo-script", "--name", "scenario-2", "--withdraw")
 			wantExit(t, err, cmd.ExitArtifactRefused, "The line of the run API.")
 		})
+	}
+}
+
+// TestArtifactPushWithdrawOfATypeTheWorkspaceLost is a 422 unknown_type for a withdrawal: the
+// workspace has no such artifact type any more, or hides it. It exits 4 with its own text, not
+// the text for a name with no version, and with the type.
+func TestArtifactPushWithdrawOfATypeTheWorkspaceLost(t *testing.T) {
+	inCheckout(t)
+	server := startRunAPI(t)
+	server.index = withdrawIndex()
+	server.status = http.StatusUnprocessableEntity
+	server.response = `{"error":"unknown_type","type":"demo-script","message":"Define the artifact type demo-script in the workspace's Artifact types, then run the round again."}`
+
+	_, err := run(t, "artifact", "push", "demo-script", "--name", "scenario-2", "--withdraw")
+	wantExit(t, err, cmd.ExitArtifactRefused, "Define or switch on the artifact type demo-script in the workspace's Artifact types.\n"+
+		"Then run the round again. The workspace has no such type, or hides it.")
+
+	if len(server.pushes) != 1 {
+		t.Errorf("pushes = %v", server.pushes)
 	}
 }
 
@@ -1072,7 +1095,7 @@ func TestArtifactPushWithdrawOutsideARunKeepsTheWithdrawal(t *testing.T) {
 	}
 
 	_, err := run(t, "artifact", "push", "demo-script", "--name", "scenario-2", "--withdraw")
-	wantExit(t, err, cmd.ExitArtifactRefused, "Pass the name of a stored artifact to --withdraw.\ndemo-script/scenario-2 has no version.")
+	wantExit(t, err, cmd.ExitArtifactRefused, "Withdraw only a stored artifact.\ndemo-script/scenario-2 has no version outside cancelled runs.")
 
 	// A refusal creates nothing, not even the store.
 	if _, err := os.Stat(filepath.Join(root, ".qory")); !os.IsNotExist(err) {
@@ -1106,7 +1129,7 @@ func TestArtifactPushWithdrawOutsideARunKeepsTheWithdrawal(t *testing.T) {
 	wantExit(t, err, cmd.ExitArtifactRefused, "Leave demo-script/scenario-2 as it is.\nIts newest version, v2, is already a withdrawal.")
 
 	_, err = run(t, "artifact", "push", "demo-script", "--name", "scenario-9", "--withdraw")
-	wantExit(t, err, cmd.ExitArtifactRefused, "Pass the name of a stored artifact to --withdraw.\ndemo-script/scenario-9 has no version.")
+	wantExit(t, err, cmd.ExitArtifactRefused, "Withdraw only a stored artifact.\ndemo-script/scenario-9 has no version outside cancelled runs.")
 
 	if after := listTree(t, filepath.Join(root, ".qory")); !slices.Equal(before, after) {
 		t.Errorf("a refusal changed the store:\n%v\nafter\n%v", before, after)

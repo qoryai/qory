@@ -20,8 +20,9 @@ import (
 // decision 654 (c). Each starts with its fix; [ExitCode] gives each [ExitArtifactRefused].
 const (
 	textWithdrawType      = "Push a new version of %s instead.\nQory Apiary reads questions, review-comments, verdict and proposal itself, so a run cannot withdraw them."
-	textWithdrawNoVersion = "Pass the name of a stored artifact to --withdraw.\n%s/%s has no version."
-	textWithdrawFiles     = "Pass either files or --withdraw.\nA withdrawal stores no files, and the command got %d: %s."
+	textWithdrawUnknown   = "Define or switch on the artifact type %s in the workspace's Artifact types.\nThen run the round again. The workspace has no such type, or hides it."
+	textWithdrawNoVersion = "Withdraw only a stored artifact.\n%s/%s has no version outside cancelled runs."
+	textWithdrawFiles     = "Pass either files or --withdraw.\nA withdrawal stores no files, and the command has %d %s: %s."
 	textWithdrawAlready   = "Leave %s/%s as it is.\nIts newest version, v%d, is already a withdrawal."
 	textWithdrawPerson    = "Leave %s/%s to a member.\nIts newest version, v%d, is an upload by %s, and a run withdraws only a name whose newest version a run wrote."
 )
@@ -53,7 +54,7 @@ func withdrawArtifact(c *cobra.Command, push runapi.Push, files []string) error 
 	}
 
 	if len(files) > 0 {
-		return withdrawRefusedError{fmt.Sprintf(textWithdrawFiles, len(files), strings.Join(files, ", "))}
+		return withdrawRefusedError{fmt.Sprintf(textWithdrawFiles, len(files), plural(len(files), "file"), strings.Join(files, ", "))}
 	}
 
 	client, err := runAPIClient()
@@ -114,7 +115,18 @@ func withdrawRefusal(index *runapi.Index, artifactType, name string) error {
 	return nil
 }
 
-// raceRefusal returns the error of a withdrawal that the run API refused. With one of the
+// plural returns noun, with an s when n is not 1.
+func plural(n int, noun string) string {
+	if n == 1 {
+		return noun
+	}
+
+	return noun + "s"
+}
+
+// raceRefusal returns the error of a withdrawal that the run API refused. With the code
+// unknown_type, the workspace changed its artifact types since qory read the index: the
+// refusal for that. With one of the
 // [withdrawalCodes], which the index that qory read did not show, it reads the index
 // again and returns the refusal that it shows, as qory words it; with an index that
 // shows none, the run API's message. Any other error comes back as it is.
@@ -122,6 +134,10 @@ func raceRefusal(c *cobra.Command, client *runapi.Client, push runapi.Push, err 
 	var apiError *runapi.Error
 	if !errors.As(err, &apiError) {
 		return err
+	}
+
+	if apiError.Code == runapi.CodeUnknownType {
+		return withdrawRefusedError{fmt.Sprintf(textWithdrawUnknown, push.Type)}
 	}
 
 	known := false
