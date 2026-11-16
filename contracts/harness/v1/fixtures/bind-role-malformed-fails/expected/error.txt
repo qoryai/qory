@@ -1,2 +1,2 @@
-Rename role .coder of bind.agents to one path segment with no space, @ or leading dot.
+Rename role .coder of bind.agents to one path segment with no space, @, or leading dot.
   bind is in qory.yaml.

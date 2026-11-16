@@ -32,7 +32,7 @@ func TestAStackRefusalPrintsNoSecret(t *testing.T) {
 		{head + "extending:\n  target:\n    runtime: [qrk_r, qrk_r]\n" + core, "extending.target.runtime lists " + nameWithRunKey + " twice"},
 		{head + "extending:\n  target:\n    model: [qak_m, qak_m]\n" + core, "extending.target.model lists " + valueWithSecret + " twice"},
 		{head + "bind:\n  qak_x: {y: z}\n" + core, "under bind: " + nameWithSecret + " is none of them.\n  bind is in "},
-		{head + "bind:\n  skills:\n    a: qak_/y\n" + core, "to an entry's name, one path segment with no space, @ or leading dot: the value is " + nameWithSecret + ".\n  bind is in "},
+		{head + "bind:\n  skills:\n    a: qak_/y\n" + core, "to an entry's name.\n  An entry's name is one path segment with no space, @, or leading dot.\n  The value is " + nameWithSecret + ".\n  bind is in "},
 		{head + "bind:\n  skills/a: qak_y\n" + core, "Write bind as bind.skills.a: " + nameWithSecret + ".\n"},
 		{head + "bind:\n  skills:\n    qak_/r: y\n" + core, "Rename role " + nameWithSecret + " of bind.skills to one path segment"},
 		{head + "bind:\n  skills:\n    qak_x: [a, b]\n" + core, "Write one name for bind.skills." + nameWithSecret + ".\n"},

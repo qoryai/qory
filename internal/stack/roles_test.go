@@ -68,8 +68,9 @@ func TestBindRefusesEachShapeItDoesNotRead(t *testing.T) {
 		{"  agents: rails-coder\n", "Write bind.agents as a map of roles: bind.agents is not a map.\n  bind is in {path}."},
 		{"  skills:\n    entry: [a, b]\n", "Write one name for bind.skills.entry.\n  Only an agents role can be a group, and the value is a list.\n  bind is in {path}."},
 		{"  agents:\n    reviewers: []\n", "Write one name or more in bind.agents.reviewers.\n  The list is empty.\n  bind is in {path}."},
-		{"  agents:\n    reviewers: [a, {b: c}]\n", "Write entry names in bind.agents.reviewers.\n  An entry's name is one path segment with no space, @ or leading dot, and an item is not a name.\n  bind is in {path}."},
-		{"  agents:\n    reviewers: [a, b/c]\n", "Write entry names in bind.agents.reviewers.\n  An entry's name is one path segment with no space, @ or leading dot, and an item is \"b/c\".\n  bind is in {path}."},
+		{"  agents:\n    reviewers: [a, {b: c}]\n", "Write entry names in bind.agents.reviewers.\n  An entry's name is one path segment with no space, @, or leading dot, and an item is not a name.\n  bind is in {path}."},
+		{"  agents:\n    reviewers: [a, b/c]\n", "Write entry names in bind.agents.reviewers.\n  An entry's name is one path segment with no space, @, or leading dot, and an item is \"b/c\".\n  bind is in {path}."},
+		{"  agents:\n    reviewer: a b\n", "Set bind.agents.reviewer to an entry's name.\n  An entry's name is one path segment with no space, @, or leading dot.\n  The value is \"a b\".\n  bind is in {path}."},
 		{"  agents:\n    developer: {a: b}\n", "Set bind.agents.developer to the name of one entry: the value is empty or not a name.\n  bind is in {path}."},
 		{"  agents:\n    developer:\n", "Set bind.agents.developer to the name of one entry: the value is empty or not a name.\n  bind is in {path}."},
 		{"  - agents\n", "Write bind as a map of kinds, then roles: bind is not a map.\n  bind is in {path}."},
@@ -95,6 +96,7 @@ func TestBindRefusalsKeepTheFixLineShortUnderALongPath(t *testing.T) {
 		"  skills:\n    entry: [a, b]\n",
 		"  agents:\n    reviewers: []\n",
 		"  agents:\n    reviewers: [a, b/c]\n",
+		"  agents:\n    reviewer: a b\n",
 		"  agents:\n    developer: {a: b}\n",
 		"  agents:\n    \"a b\": c\n",
 		"  - agents\n",
@@ -153,6 +155,11 @@ func TestCheckRolesChecksABuiltStack(t *testing.T) {
 	if err := CheckRoles(Roles{"agents": {"coder": "rails-coder"}}, "bind"); err != nil {
 		t.Fatal(err)
 	}
+	// A name with a space is refused with the fix alone on the first line.
+	want := "Set bind.agents.reviewer to an entry's name.\n  An entry's name is one path segment with no space, @, or leading dot.\n  The value is \"a b\".\n  bind is in qory.yaml."
+	if re, ok := CheckRoles(Roles{"agents": {"reviewer": "a b"}}, "bind").(*RolesError); !ok || re.In("qory.yaml").Error() != want {
+		t.Errorf("a name with a space: %v\nwant %q", re, want)
+	}
 	// A list is checked the way a file's is: only for agents, with one name or more.
 	for _, c := range []struct {
 		f    Fills
@@ -160,7 +167,7 @@ func TestCheckRolesChecksABuiltStack(t *testing.T) {
 	}{
 		{Fills{Many: Groups{"skills": {"entry": {"a"}}}}, "Write one name for bind.skills.entry.\n  Only an agents role can be a group, and the value is a list.\n  bind is in qory.yaml."},
 		{Fills{Many: Groups{"agents": {"reviewers": nil}}}, "Write one name or more in bind.agents.reviewers.\n  The list is empty.\n  bind is in qory.yaml."},
-		{Fills{Many: Groups{"agents": {"reviewers": {"a b"}}}}, "Write entry names in bind.agents.reviewers.\n  An entry's name is one path segment with no space, @ or leading dot, and an item is \"a b\".\n  bind is in qory.yaml."},
+		{Fills{Many: Groups{"agents": {"reviewers": {"a b"}}}}, "Write entry names in bind.agents.reviewers.\n  An entry's name is one path segment with no space, @, or leading dot, and an item is \"a b\".\n  bind is in qory.yaml."},
 	} {
 		err := CheckFills(c.f, "bind")
 		if re, ok := err.(*RolesError); !ok || re.In("qory.yaml").Error() != c.want {

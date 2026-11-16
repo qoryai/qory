@@ -174,7 +174,7 @@ func ReadRoles(n *yaml.Node, key string, counts bool) (Roles, Groups, error) {
 		for _, role := range sortedNodeKeys(roles) {
 			x := roles[role]
 			if !segment(role) || strings.Contains(role, " ") {
-				return nil, nil, rolesError(key, "Rename role %s of %s to one path segment with no space, @ or leading dot.", accesskey.ShownName(role, false), at)
+				return nil, nil, rolesError(key, "Rename role %s of %s to one path segment with no space, @, or leading dot.", accesskey.ShownName(role, false), at)
 			}
 			path := at + "." + accesskey.ShownName(role, false)
 			if x.Kind == yaml.SequenceNode {
@@ -210,7 +210,7 @@ func ReadRoles(n *yaml.Node, key string, counts bool) (Roles, Groups, error) {
 					return nil, nil, rolesError(key, "Set %s to one or many.\n  One entry fills a role and several fill a group, and the value is %s.", path, accesskey.ShownName(name, true))
 				}
 			} else if !entryName(name) {
-				return nil, nil, rolesError(key, "Set %s to an entry's name, one path segment with no space, @ or leading dot: the value is %s.", path, accesskey.ShownName(name, true))
+				return nil, nil, rolesError(key, "Set %s to an entry's name.\n  An entry's name is one path segment with no space, @, or leading dot.\n  The value is %s.", path, accesskey.ShownName(name, true))
 			}
 			if out == nil {
 				out = Roles{}
@@ -238,7 +238,7 @@ func readNames(x yaml.Node, key, path string) ([]string, error) {
 			if item.Kind == yaml.ScalarNode && item.Value != "" {
 				value = accesskey.ShownName(item.Value, true)
 			}
-			return nil, rolesError(key, "Write entry names in %s.\n  An entry's name is one path segment with no space, @ or leading dot, and an item is %s.", path, value)
+			return nil, rolesError(key, "Write entry names in %s.\n  An entry's name is one path segment with no space, @, or leading dot, and an item is %s.", path, value)
 		}
 		if !slices.Contains(names, item.Value) {
 			names = append(names, item.Value)
@@ -257,10 +257,10 @@ func CheckRoles(r Roles, key string) error {
 		at := key + "." + kind
 		for _, role := range sortedKeys(r[kind]) {
 			if !segment(role) || strings.Contains(role, " ") {
-				return rolesError(key, "Rename role %s of %s to one path segment with no space, @ or leading dot.", accesskey.ShownName(role, false), at)
+				return rolesError(key, "Rename role %s of %s to one path segment with no space, @, or leading dot.", accesskey.ShownName(role, false), at)
 			}
 			if name := r[kind][role]; !entryName(name) {
-				return rolesError(key, "Set %s.%s to an entry's name, one path segment with no space, @ or leading dot: the value is %s.", at, accesskey.ShownName(role, false), accesskey.ShownName(name, true))
+				return rolesError(key, "Set %s.%s to an entry's name.\n  An entry's name is one path segment with no space, @, or leading dot.\n  The value is %s.", at, accesskey.ShownName(role, false), accesskey.ShownName(name, true))
 			}
 		}
 	}
@@ -290,7 +290,7 @@ func CheckFills(f Fills, key string) error {
 				return rolesError(key, "Write one name for %s.\n  Only an agents role can be a group, and the value is a list.", path)
 			}
 			if !segment(role) || strings.Contains(role, " ") {
-				return rolesError(key, "Rename role %s of %s.%s to one path segment with no space, @ or leading dot.", accesskey.ShownName(role, false), key, kind)
+				return rolesError(key, "Rename role %s of %s.%s to one path segment with no space, @, or leading dot.", accesskey.ShownName(role, false), key, kind)
 			}
 			names := f.Many[kind][role]
 			if len(names) == 0 {
@@ -298,7 +298,7 @@ func CheckFills(f Fills, key string) error {
 			}
 			for _, name := range names {
 				if !entryName(name) {
-					return rolesError(key, "Write entry names in %s.\n  An entry's name is one path segment with no space, @ or leading dot, and an item is %s.", path, accesskey.ShownName(name, true))
+					return rolesError(key, "Write entry names in %s.\n  An entry's name is one path segment with no space, @, or leading dot, and an item is %s.", path, accesskey.ShownName(name, true))
 				}
 			}
 		}
