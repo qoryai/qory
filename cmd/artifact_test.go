@@ -1482,6 +1482,39 @@ func TestArtifactPushWithdrawOutsideARunRefusesTheTypesApiaryReads(t *testing.T)
 	}
 }
 
+// TestArtifactPushWithdrawInARunMapsTheRefusalOfTheTypesApiaryReads is a withdrawal of
+// questions in a run: qory sends the push, with no check of its own, and maps the 422
+// type_not_withdrawable of the run API to the text that it shows outside a run, exit 4.
+func TestArtifactPushWithdrawInARunMapsTheRefusalOfTheTypesApiaryReads(t *testing.T) {
+	inCheckout(t)
+	server := startRunAPI(t)
+	server.index = indexOf(artifactEntry("questions", "main", "", 1, versionEntry("av_1", 1, fileEntry("q.json", "{}"))))
+	server.status = http.StatusUnprocessableEntity
+	server.response = `{"error":"type_not_withdrawable","type":"questions","message":` +
+		`"Push a new version of questions instead. Qory Apiary reads questions, review-comments, verdict and proposal itself, so a run cannot withdraw them."}`
+
+	_, err := run(t, "artifact", "push", "--withdraw", "questions")
+
+	want := "Push a new version of questions instead.\n  Qory Apiary reads questions, review-comments, verdict and proposal itself, so a run cannot withdraw them."
+	wantExit(t, err, cmd.ExitArtifactRefused, want)
+
+	if err.Error() != want {
+		t.Errorf("err = %q, want %q", err, want)
+	}
+
+	if len(server.pushes) != 1 || server.pushes[0]["withdraw"] != true {
+		t.Errorf("pushes = %v, want one withdrawal", server.pushes)
+	}
+
+	// The same text as outside a run.
+	t.Setenv("QORY_RUN_API", "")
+
+	_, outside := run(t, "artifact", "push", "--withdraw", "questions")
+	if outside == nil || outside.Error() != err.Error() {
+		t.Errorf("outside a run: %v, want %q", outside, err)
+	}
+}
+
 // TestArtifactPushWithdrawOutsideARunReadsAnInvalidTemplate is a process.yaml that
 // qory refuses: the withdrawal stops with the file and the fix, and keeps nothing.
 func TestArtifactPushWithdrawOutsideARunReadsAnInvalidTemplate(t *testing.T) {
