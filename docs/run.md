@@ -1806,8 +1806,8 @@ is set to, with no agent:
 The build takes the user from `wall.user` in `forager.yaml`. The wall's helper is
 `wall.helper`, or on Linux the `qory` you run. When `forager.yaml` sets `pool.registry`,
 qory stops a run whose `image_destination` or `environment_destination` is not under it,
-before anything is made, with `set pool.registry to the registry of Qory Apiary's QORY_REGISTRY, or ask its
-instance admin: the run's <member> is not under <registry>`.
+before anything is made, with `set pool.registry to the registry of Qory Apiary's
+QORY_REGISTRY, or ask its instance admin: the run's <member> is not under <registry>`.
 
 The nested Docker's images, its build cache and the container the configuration's
 commands ran in go with the wall when the run closes. This machine's Docker engine
