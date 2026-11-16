@@ -3,6 +3,7 @@ package runtimeinstall_test
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/qoryai/qory/internal/runtimeinstall"
@@ -270,5 +271,38 @@ func writeIn(t *testing.T, path string) {
 	}
 	if err := os.WriteFile(path, []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// TestAWritableRuntimesFolderStopsTheInstall has a runtimes folder, and a runtime's
+// folder in it, that existed before the install and that their group can write: each
+// stops the install with chmod go-w first, and no version's folder is made. A folder
+// the install makes itself is 0755 under a umask of 002 and stops nothing.
+func TestAWritableRuntimesFolderStopsTheInstall(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		path func(folder string) string
+	}{
+		{"the runtimes folder", func(folder string) string { return folder }},
+		{"the runtime's folder", func(folder string) string { return filepath.Join(folder, "claude") }},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			in := newInstaller(t)
+			if err := os.MkdirAll(filepath.Join(in.folder, "claude"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Chmod(c.path(in.folder), 0o775); err != nil {
+				t.Fatal(err)
+			}
+			in.src.Publish("2.0.0", rt.PlainTarball(t, "2.0.0"))
+			_, err := in.install()
+			want := "Run chmod go-w " + c.path(in.folder) + ", then run again\n"
+			if err == nil || !strings.HasPrefix(err.Error(), want) {
+				t.Fatalf("the install returned %v, want it to start with %q", err, want)
+			}
+			if exists(filepath.Join(in.folder, "claude", "2.0.0")) {
+				t.Fatal("the install made the version's folder")
+			}
+		})
 	}
 }

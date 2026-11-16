@@ -76,7 +76,13 @@ func (f folder) lockInstall(ctx context.Context, version string) (*os.File, erro
 }
 
 // prepare makes the folder, mode 0755: the wall's user enters the version's folder.
+// Forager checks only the version's folder, so prepare refuses a runtime's folder that
+// existed before this call, and a runtimes folder, that its group or others can write:
+// they could replace a version's folder. A folder that this call makes is set to 0755,
+// whatever the umask.
 func (f folder) prepare() error {
+	parent := filepath.Dir(f.base)
+	parentNew, baseNew := !exists(parent), !exists(f.base)
 	if err := os.MkdirAll(f.base, 0o755); err != nil {
 		return fmt.Errorf(textState+"%w", err)
 	}
@@ -87,10 +93,34 @@ func (f folder) prepare() error {
 	if !info.IsDir() {
 		return fmt.Errorf("Remove the runtime's folder, then run again\n%s is not a folder", f.base)
 	}
+	for _, c := range []struct {
+		path string
+		made bool
+	}{{parent, parentNew}, {f.base, baseNew}} {
+		if c.made {
+			if err := os.Chmod(c.path, 0o755); err != nil {
+				return fmt.Errorf(textState+"%w", err)
+			}
+			continue
+		}
+		i, err := os.Lstat(c.path)
+		if err != nil {
+			return fmt.Errorf(textState+"%w", err)
+		}
+		if i.Mode().Perm()&0o022 != 0 {
+			return fmt.Errorf("Run chmod go-w %s, then run again\n%s has mode %04o: its group or others could replace the runtime's program", c.path, c.path, i.Mode().Perm())
+		}
+	}
 	if err := os.Chmod(f.base, 0o755); err != nil {
 		return fmt.Errorf(textState+"%w", err)
 	}
 	return nil
+}
+
+// exists reports whether path is there, without following a link.
+func exists(path string) bool {
+	_, err := os.Lstat(path)
+	return err == nil
 }
 
 // hold takes the hold of version for the run, and returns the hold file, which the run
