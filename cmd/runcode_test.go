@@ -64,6 +64,8 @@ type codeRelay struct {
 	requests  []accesskey.EnrolmentRequest
 	// redeeming, when a test sets it, runs as each request arrives, before the answer.
 	redeeming func()
+	// runID is the run's id in the answer and its run key, [keyRunID] when it is "".
+	runID string
 }
 
 // newCodeRelay serves until the test ends. Its CA file is in a directory that no other
@@ -115,8 +117,12 @@ func newCodeRelay(t *testing.T) *codeRelay {
 					keySigner = newKey(t)
 				}
 				issued := time.Now().UTC().Truncate(time.Second)
+				runID := keyRunID
+				if g.runID != "" {
+					runID = g.runID
+				}
 				key, err := runkey.Key{
-					RunID: keyRunID, Workspace: "ws_0123456789abcdef", NodeID: "np_0123456789abcdef",
+					RunID: runID, Workspace: "ws_0123456789abcdef", NodeID: "np_0123456789abcdef",
 					Gateway: testGatewayNode, InstanceID: "i_gYKDhIWGh4iJiouMjY6PkA", GatewayURL: gatewayURL,
 					GatewayKeys: []accesskey.PublicKey{newKey(t).PublicKey()},
 					Issued:      issued, AttachBy: issued.Add(600 * time.Second),
@@ -130,7 +136,7 @@ func newCodeRelay(t *testing.T) *codeRelay {
 				if g.documents != nil {
 					documents = `,"documents":` + string(g.documents)
 				}
-				g.body = []byte(`{"version":1,"run_id":"` + keyRunID + `","run_key":"` + key + `","apiary_public_key":` + keys() + documents + `}`)
+				g.body = []byte(`{"version":1,"run_id":"` + runID + `","run_key":"` + key + `","apiary_public_key":` + keys() + documents + `}`)
 			}
 			body = g.body
 		}

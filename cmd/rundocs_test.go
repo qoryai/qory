@@ -304,7 +304,8 @@ func runFromCodeGiven(t *testing.T, before func(code string) []string, args []st
 // model: qory composes the fetched harness with the model, prints which workflow of
 // which harness starts, and starts the
 // command hello, by the name Claude Code registers it under, with the path of
-// inputs.json, which contains the documents' inputs as they came, mode 0600 in a folder
+// inputs.json, which contains the documents' inputs as they came and the member qory that
+// qory adds, with no harness extensions, mode 0600 in a folder
 // of mode 0700, which the agent may read and qory removes once the run ends. The
 // workflow's time_limit, 7h, is the session's time limit.
 func TestARunCodeStartsItsWorkflow(t *testing.T) {
@@ -332,7 +333,8 @@ func TestARunCodeStartsItsWorkflow(t *testing.T) {
 	if !slices.Contains(r.spec.Args, "--strict-mcp-config") {
 		t.Errorf("not a dispatched run's arguments: %q", r.spec.Args)
 	}
-	if r.inputs != string(doc.Inputs) || r.modes != [2]fs.FileMode{0o700, 0o600} {
+	inputs := strings.TrimSuffix(string(doc.Inputs), "}") + `,"qory":{"harness_extensions":{}}}` + "\n"
+	if r.inputs != inputs || r.modes != [2]fs.FileMode{0o700, 0o600} {
 		t.Errorf("inputs.json %q, modes %v", r.inputs, r.modes)
 	}
 	if _, err := os.Stat(r.inputDir); !os.IsNotExist(err) {
