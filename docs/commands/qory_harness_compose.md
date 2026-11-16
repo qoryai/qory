@@ -17,6 +17,9 @@ home. --no-links writes the tree to .qory/harness with no link; compose still wr
 
 --verbose prints each entry and the module it came from.
 
+While a qory run uses the home, compose stops with exit 1 and writes nothing: wait for
+that run to end, or set another --home or harness.home.
+
 More: https://github.com/qoryai/qory/blob/main/docs/harness.md
 
 ```

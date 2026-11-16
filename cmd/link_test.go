@@ -65,10 +65,11 @@ func TestModuleLinkIsWrittenReportedAndRemoved(t *testing.T) {
 		t.Fatal(err)
 	}
 	wants(t, out, "removed harness")
-	gone(t, root, "harness", ".claude", ".qory")
+	gone(t, root, "harness", ".claude", ".qory/harness")
 	exclude, _ = os.ReadFile(filepath.Join(root, ".git", "info", "exclude"))
 	for _, line := range strings.Split(string(exclude), "\n") {
-		if strings.HasPrefix(line, "/") {
+		// The line of .qory stays with the lock file that remove keeps there.
+		if strings.HasPrefix(line, "/") && line != "/.qory" {
 			t.Errorf("exclude line %q outlives the harness", line)
 		}
 	}

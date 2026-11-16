@@ -390,6 +390,19 @@ release may change what an existing document does, and states it under Upgrading
   lists each missing part. A group role takes a contract with `fill: many`, and the
   compose checks each member. A contract file that is missing or malformed fails the
   same way. See The role contract in `contracts/harness/v1/README.md`.
+- A run from Qory Apiary, with a run code or a run key, adds the member `qory` to
+  `inputs.json`: `{"harness_extensions": {…}}`, the harness report's `extensions`, `{}`
+  for none. A run with a run key and no run code has no inputs, so its file has the member
+  `qory` alone. A push check of such a run gets `--inputs <path>`, with a copy of the file
+  that the run's user can read mounted read-only at that path. Inputs of a run code that
+  already have a member `qory` stop the run before it opens, with exit 1: `remove the
+  input qory: qory adds that member to inputs.json; the code is used`. Inputs that are not
+  a JSON object stop it the same way: `ask Qory Apiary's instance admin: the run code's
+  inputs are not a JSON object; the code is used`. See The run key from a run code in
+  `docs/run.md`.
+- A run from Qory Apiary also writes `inputs.json` into the composed home, so a hook of
+  the harness reads the inputs at `$QORY_HARNESS_HOME/inputs.json`, with a run key as well
+  as with a run code.
 - Each run has a route from its session to `qory run`: a program in the session sends a
   plain HTTP request to `QORY_HOST_URL`, `http://host.qory.invalid`, through `HTTP_PROXY`.
   qory serves no path on it, and answers `404` to a request of the session that runs. The
@@ -403,6 +416,25 @@ release may change what an existing document does, and states it under Upgrading
   `/qory/runtime/<runtime>`. `qory image check` checks no runtime and prints no runtime
   line; Forager checks the runtime when a run starts. A prebuild copies nothing from the
   agent image, and no image has `/qory/agent`.
+- A run with a run key or a run code, with no `--home` or `harness.home`, composes into
+  `runs/<name>-<hash>/<run id>` under `qory/homes` in the cache directory, a home for that
+  run alone, which qory removes when the run ends. Two runs of one checkout no longer
+  compose into one home. The harness report moves to `runs/<name>-<hash>-report.json`
+  there, so the first such run takes each module's commit again. A relative `HOME` counts
+  from the folder qory runs in, so the home is an absolute path.
+- `qory run` holds a lock on a home that is not for that run alone: your unwalled run's
+  `.qory/harness`, and the home of a walled run with `--home` or `harness.home`. The lock is
+  on the file `<home>.lock` beside the home, which records the run's id, qory's process id and
+  the start time, and the file stays after the run. A second run of that home stops before
+  it redeems its run code and before its compose, with exit 1 and `Wait for the run that
+  uses this home to end, or set another --home or harness.home.`, then the holder and the
+  home on the second line. `qory harness compose` and `qory harness remove` take the same
+  lock and stop the same way. `qory harness remove` keeps the lock file and, for a home in
+  the checkout, its line in `.git/info/exclude`, so `.qory/harness.lock` is all that stays
+  of `.qory`. A home in the checkout is kept out of git before the lock
+  file is made. Before, a second run's compose replaced the first run's home, its end
+  removed the first run's copy of `inputs.json`, and a run code was spent before the stop. A
+  run with a home for that run alone takes no lock. See `docs/run.md`.
 - A run from a run code that may write the checkout needs a wall: with no wall, it stops
   after the compose, exit 1, and closes `failed` with `write_needs_wall`, since its agent
   would run as this machine's user. A run is such a run when neither `access` in its
