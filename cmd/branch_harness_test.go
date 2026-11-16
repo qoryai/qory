@@ -69,11 +69,12 @@ var branchChanges = map[string]func(t *testing.T, work string){
 }
 
 // composed is the compose of the run in the checkout at root, as a run from a run code
-// writes it under the user's cache directory: the report, and every file of the home,
-// with <home> and <checkout> in place of the paths of the two folders.
+// writes it under the user's cache directory: the report, and every file of the home, which
+// the test keeps with [cmd.KeepRunHomes], with <home> and <checkout> in place of the paths
+// of the two folders.
 func composed(t *testing.T, root string) (report.Report, map[string]string) {
 	t.Helper()
-	home := runKeyHome(t, root)
+	home := runKeyRunHome(t, root)
 	tree := folderTree(t, home)
 	for path, content := range tree {
 		tree[path] = strings.NewReplacer(home, "<home>", root, "<checkout>").Replace(content)
@@ -111,6 +112,8 @@ func commandLimit(rep report.Report) any {
 // target_version whose branch has no version yet, and the working folder is on the
 // branch's commit.
 func TestABranchCommitDoesNotChangeTheHarnessOfTheNextRun(t *testing.T) {
+	// The test reads the run's home once the run is over.
+	t.Cleanup(cmd.KeepRunHomes())
 	hello := helloFiles(t)
 	for name, change := range branchChanges {
 		t.Run(name, func(t *testing.T) {
@@ -151,6 +154,8 @@ func TestABranchCommitDoesNotChangeTheHarnessOfTheNextRun(t *testing.T) {
 // branch is merged into the target's default branch: Qory Apiary sends a target_version that
 // contains the branch's commit, and the run composes it.
 func TestABranchCommitReachesTheHarnessOnceMerged(t *testing.T) {
+	// The test reads the run's home once the run is over.
+	t.Cleanup(cmd.KeepRunHomes())
 	hello := helloFiles(t)
 	for name, change := range branchChanges {
 		t.Run(name, func(t *testing.T) {
@@ -186,6 +191,8 @@ func TestABranchCommitReachesTheHarnessOnceMerged(t *testing.T) {
 // of a run: the compose reads the target version, as it does for any branch, and the
 // checkout of the branch then stops the run before the agent starts.
 func TestABranchCommitThatChangesQoryStopsAfterTheCompose(t *testing.T) {
+	// The test reads the run's home once the run is over.
+	t.Cleanup(cmd.KeepRunHomes())
 	hello := helloFiles(t)
 	h, first, _, _ := branchRepository(t, hello, func(work string) {
 		writeFile(t, filepath.Join(work, ".qory", "notes.md"), branchMarker+"\n")

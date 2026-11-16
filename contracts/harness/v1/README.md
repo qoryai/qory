@@ -202,7 +202,7 @@ schema is [config.schema.json](config.schema.json).
 | `modules[].variant` | no | forces one of the module's variants instead of the one with the targeted runtime's name |
 | `modules[].link` | no | a name at the checkout root, one path segment, linked to the module's directory in the composed tree, so a permission rule or a script refers to the module's files by a checkout-relative path: `harness/scripts/check.sh`. A hard link (§Rendering), each name used once across the modules |
 | `bind` | no | the entry that fills each role a document references (§References), by kind and then by role, to the name of one entry of that kind: `bind: {agents: {coder: rails-coder}}`. The kind is `agents`, `skills` or `commands`. A role's value is one name. A group role (§References) takes a list of agents, `bind: {agents: {reviewers: [code-reviewer, python-reviewer]}}`, and only a group role takes one. A flat key, `agents/coder: rails-coder`, is refused with `Write bind as bind.agents.coder: rails-coder in qory.yaml: bind keys are kinds, and agents/coder is a kind and a role.` A checkout's `bind` sets a role over the base's `bind` and over the modules' `provides` |
-| `extensions` | no | a map of keys the author chooses, each a value of any shape, a scalar, a list or a map of any depth; written into the report as it is and printed by `qory harness inspect`; qory reads nothing in it |
+| `extensions` | no | a map of keys the author chooses, each a value of any shape, a scalar, a list or a map of any depth; written into the report as it is and printed by `qory harness inspect`; qory reads nothing in it. A run from Qory Apiary, from a run code or a run key, writes the report's `extensions` into the run's `inputs.json` as `qory.harness_extensions` (docs/run.md, §The run key from a run code) |
 | `workflows` | no | the settings of each workflow of the stack, by its name: a lower-case letter, then up to 54 lower-case letters, digits and hyphens, 55 characters at most, so `workflow-<name>` has at most 64 characters. A run that Qory Apiary dispatches from a run code starts the first of these that the runtime can start: the skill `workflow-<name>`, the command `workflow-<name>`, the skill `<name>`, the command `<name>` (docs/run.md, §The run key from a run code). A plain name works, and when a harness ships both names, the prefixed one runs. The compose fails with status 2 for each workflow that no module of the stack composes as a skill or command under either name, after the modules' `exclude` and `only`: `add a skill or command workflow-<name> to a module of the base stack <stack>, or remove <name> from the workflows of its qory-stack.yaml: the stack declares the workflow <name>, and none of its modules ships a skill or command workflow-<name> or <name>`, or, for a stack that extends none, `add a skill or command workflow-<name> to a module of the stack in <file>, or remove <name> from its workflows: …`, where `<file>` is the `qory-stack.yaml` or the `qory.yaml` that defines the stack. For a stack that the harness document of a run from a run code defines, the line has `the workspace's harness in Qory Apiary` in place of `the stack in <file>`. A module that a checkout adds to the stack it extends does not count, and neither does a checkout's exclude: the compose checks what the stack's modules ship before it applies that exclude. The harness section of a `qory.yaml` that defines a stack lists them with the same keys and checks; a section that extends a stack takes the base's and lists none |
 | `workflows.<name>.time_limit` | no | how long a dispatched run of the workflow may run, counted from the run's open, as a Go duration above zero, such as `7h`, `45m` or `1h30m`; qory stops with an error on any other value: `set workflows.<name>.time_limit to a duration above zero, such as 7h or 45m: <value> is not one`. The run's `run_settings.time_limit_minutes`, when Qory Apiary sets it, applies instead, and a workflow without it runs for at most 3 hours |
 | `workflows.<name>.hook_points` | no | the points of the workflow where a checkout extending the stack may add workflow hooks, by the point's name: `{at: end, kinds: [check, review]}`. `at` is where the point sits in the workflow's session, `end`, `start` or `inside`; `kinds` is one or more of `check`, `review` and `enrich`, each once. A point's name has the form of a workflow's name, and is unique in the stack, since a hook selects a point by its name alone. Only a `qory-stack.yaml` declares points: a `qory.yaml` that defines a stack, which nothing extends, is refused with `Remove hook_points from the workflows in qory.yaml.` (§Workflow hooks) |
@@ -1003,8 +1003,20 @@ container that a stopped qory left. The container gets three read-only folders:
   artifact with no such version has no folder;
 - the pushed files, under their names, whose paths follow the command's arguments.
 
-qory makes the last two in the run directory, in a folder that only its user can list,
-and removes them after each check.
+In a run from Qory Apiary, from a run code or a run key, the container also mounts a copy
+of the run's `inputs.json` read-only at the file's path, mode 0644 in a folder of mode
+0755, so the run's user can read it, and the program gets `--inputs <path>` after the
+command's arguments, before the pushed files' paths, such as `checks.js push spec --inputs
+<in>/inputs.json /qory-push-check/files/spec.md`. Its member `qory.harness_extensions` is
+the report's `extensions` (docs/run.md, §The run key from a run code). The file of a run
+key has only the member `qory`, since that run has no run documents. The home of such a
+run also contains `inputs.json` with the same bytes, mode 0644, which a hook reads as
+`$QORY_HARNESS_HOME/inputs.json`. A person's run, also one that registers itself through
+`gateway.server.via`, has no `inputs.json`, and its check gets no `--inputs`.
+
+qory makes the working folder, the pushed files' folder and the copy of `inputs.json` in
+the run directory, in a folder that only its user can list, and removes them after each
+check.
 
 A check that exits 0 lets the push go on with the bytes it checked. Any other exit stops
 the push with 422 `push_check_failed` and `Fix each finding below and push again. The check
