@@ -398,7 +398,9 @@ release may change what an existing document does, and states it under Upgrading
   it redeems its run code and before its compose, with exit 1 and `Wait for the run that
   uses this home to end, or set another --home or harness.home.`, then the holder and the
   home on the second line. `qory harness compose` and `qory harness remove` take the same
-  lock and stop the same way. A home in the checkout is kept out of git before the lock
+  lock and stop the same way. `qory harness remove` keeps the lock file and, for a home in
+  the checkout, its line in `.git/info/exclude`, so `.qory/harness.lock` is all that stays
+  of `.qory`. A home in the checkout is kept out of git before the lock
   file is made. Before, a second run's compose replaced the first run's home, its end
   removed the first run's copy of `inputs.json`, and a run code was spent before the stop. A
   run with a home for that run alone takes no lock. See `docs/run.md`.

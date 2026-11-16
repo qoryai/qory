@@ -141,7 +141,7 @@ func TestRemoveOneRuntimeKeepsTheOther(t *testing.T) {
 		t.Fatalf("%v\n%s", err, out)
 	}
 	wants(t, out, "removed .claude", "removed .qory")
-	gone(t, root, claudeLink, ".qory")
+	gone(t, root, claudeLink, ".qory/harness")
 
 	out, err = run(t, "hr", "--runtime", "codex")
 	if err != nil {
@@ -167,8 +167,8 @@ func TestRemoveTakesEveryRuntimesLinks(t *testing.T) {
 		t.Fatalf("%v\n%s", err, out)
 	}
 	wants(t, out, "removed "+claudeLink, "removed .codex", "removed .mcp.json", "removed .qory")
-	gone(t, root, append([]string{claudeLink, ".mcp.json", ".qory", ".agents"}, codexLinks...)...)
-	if got := snapshot(t, root); len(got) != len(before) {
+	gone(t, root, append([]string{claudeLink, ".mcp.json", ".qory/harness", ".agents"}, codexLinks...)...)
+	if got := withoutHomeLock(snapshot(t, root)); len(got) != len(before) {
 		t.Errorf("the checkout holds %d paths, %d before the compose", len(got), len(before))
 	}
 }

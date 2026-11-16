@@ -254,7 +254,7 @@ func TestComposeStopsWhileARunHoldsTheHome(t *testing.T) {
 // TestRemoveStopsWhileARunHoldsTheHome is qory harness remove of a composed
 // .qory/harness while another run holds it: it stops with the lines of a second run, the
 // home and the lock file stay as they were, and the lock stays held. Once the run lets go,
-// remove takes the whole qory folder.
+// remove takes everything in the qory folder but the lock file, which keeps its inode.
 func TestRemoveStopsWhileARunHoldsTheHome(t *testing.T) {
 	root, _ := committedFixture(t)
 	if out, err := run(t, "harness", "compose", "--runtime", "claude"); err != nil {
@@ -278,8 +278,48 @@ func TestRemoveStopsWhileARunHoldsTheHome(t *testing.T) {
 	if out, err := run(t, "harness", "remove"); err != nil {
 		t.Fatalf("remove after the run: %v\n%s", err, out)
 	}
-	if _, err := os.Lstat(filepath.Join(root, ".qory")); !errors.Is(err, os.ErrNotExist) {
-		t.Errorf("the qory folder stays after remove: %v", err)
+	if left := snapshot(t, filepath.Join(root, ".qory")); len(left) != 1 || !hasKey(left, "harness.lock") {
+		t.Errorf("remove left %v in the qory folder, want harness.lock alone", left)
+	}
+}
+
+func hasKey(m map[string]string, k string) bool { _, ok := m[k]; return ok }
+
+// TestRemoveKeepsTheLockFile is qory harness remove of a composed .qory/harness, with no
+// run holding it: harness.lock stays as the same file, with the same inode, so a run that
+// opened it before the remove and one that starts after lock one file. The exclude line
+// stays, so git status shows nothing, and a run after the remove composes as usual.
+func TestRemoveKeepsTheLockFile(t *testing.T) {
+	root, _ := committedFixture(t)
+	if out, err := run(t, "harness", "compose", "--runtime", "claude"); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	lock := filepath.Join(root, ".qory", "harness.lock")
+	before, err := os.Stat(lock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out, err := run(t, "harness", "remove"); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	after, err := os.Stat(lock)
+	if err != nil || !os.SameFile(before, after) {
+		t.Fatalf("the lock file after remove: %v, same file %v", err, err == nil && os.SameFile(before, after))
+	}
+	if status := gitOutput(t, root, "status", "--porcelain"); status != "" {
+		t.Errorf("git status after remove:\n%s", status)
+	}
+	ran := false
+	agentInCopy(t, func(session.SessionSpec) { ran = true })
+	if out, err := run(t, "run", "claude", "--wall", "none", "--", "-p", "hi"); err != nil || !ran {
+		t.Fatalf("the run after remove: %v, the agent ran %v\n%s", err, ran, out)
+	}
+	again, err := os.Stat(lock)
+	if err != nil || !os.SameFile(before, again) {
+		t.Errorf("the run replaced the lock file: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, ".qory", "harness", "claude")); err != nil {
+		t.Errorf("the run composed no home: %v", err)
 	}
 }
 

@@ -49,11 +49,12 @@ func (l *Lock) SetText(text string) error {
 	if l == nil || l.f == nil {
 		return nil
 	}
-	if err := l.f.Truncate(0); err != nil {
+	// The new text goes first and the file is cut to its length after, so a reader never finds
+	// the file empty.
+	if _, err := l.f.WriteAt([]byte(text), 0); err != nil {
 		return err
 	}
-	_, err := l.f.WriteAt([]byte(text), 0)
-	return err
+	return l.f.Truncate(int64(len(text)))
 }
 
 // lockTextMax is the most of a lock file's text that [LockText] reads.

@@ -2025,11 +2025,12 @@ func newRemove(use string, aliases ...string) *cobra.Command {
 		Aliases: aliases,
 		Short:   "Remove the harness and its links from the checkout",
 		Long: `Remove the composed harness and its links from the checkout. A home in the checkout goes with
-the whole .qory directory, also .qory/artifacts and .qory/work-item.json. --runtime does the
-same when it removes the last composed runtime.
+everything in the .qory directory, also .qory/artifacts and .qory/work-item.json, except
+.qory/harness.lock, the lock of the home, which stays with its line in .git/info/exclude.
+--runtime does the same when it removes the last composed runtime.
 
-A home outside the checkout, under --home or harness.home, is removed with its report.
-The checkout is not touched: nothing was written there.
+A home outside the checkout, under --home or harness.home, is removed with its report; its
+lock file, <home>.lock beside it, stays. The checkout is not touched: nothing was written there.
 
 While a qory run uses the home, remove stops with exit 1 and removes nothing: wait for
 that run to end.`,
@@ -2214,28 +2215,71 @@ func removeRuntime(u *ui.UI, at places, rt render.Runtime) error {
 	return report.Write(at.report, rep)
 }
 
-// had reports whether the qory directory is there before a remove takes it, so the
-// remove can say whether it removed anything. It is read before [removeDir] runs.
+// had reports whether the qory directory has something to remove before a remove takes it,
+// so the remove can say whether it removed anything: the lock file of the home does not
+// count. It is read before [removeDir] runs.
 func had(at places) bool {
-	_, err := os.Stat(at.dir)
-	return err == nil
+	entries, err := os.ReadDir(at.dir)
+	if err != nil {
+		return false
+	}
+	lock := filepath.Base(at.home) + homeLockSuffix
+	for _, e := range entries {
+		if e.Name() != lock {
+			return true
+		}
+	}
+	return false
 }
 
-// removeDir removes the qory directory with its exclude line and says so when it was
-// there. The line goes because the directory does: a stale line would hide a .qory the
-// repository later adds. It stays while another worktree of the repository has a .qory of
-// its own, since the exclude file is one for all of them and that worktree still needs
-// the line; its own remove takes it.
+// removeDir removes what the qory directory has and says so when it was there: everything
+// but the lock file of the home, harness.lock. The lock file stays, as the file and the same
+// inode, because a run that opened it before the remove locks that inode, and a new file
+// would let two runs hold the home. The exclude line stays with it, so git sees no
+// untracked file. A qory directory with no lock file goes whole, with its exclude line. The
+// line goes because the directory does: a stale line would hide a .qory the repository
+// later adds. It stays while another worktree of the repository has a .qory of its own,
+// since the exclude file is one for all of them and that worktree still needs the line; its
+// own remove takes it.
 func removeDir(u *ui.UI, at places) error {
 	present := had(at)
-	if err := os.RemoveAll(at.dir); err != nil {
+	info, err := os.Lstat(at.dir)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	if err := render.RemoveExclude(at.root, "/"+checkout.Dir); err != nil {
-		return err
+	kept := false
+	if err == nil && info.IsDir() {
+		entries, err := os.ReadDir(at.dir)
+		if err != nil {
+			return err
+		}
+		lock := filepath.Base(at.home) + homeLockSuffix
+		for _, e := range entries {
+			if e.Name() == lock {
+				kept = true
+				continue
+			}
+			if err := os.RemoveAll(filepath.Join(at.dir, e.Name())); err != nil {
+				return err
+			}
+		}
+	} else if err == nil {
+		// A link at the qory directory goes alone, not what it leads to.
+		if err := os.Remove(at.dir); err != nil {
+			return err
+		}
+	}
+	if !kept {
+		if err := render.RemoveExclude(at.root, "/"+checkout.Dir); err != nil {
+			return err
+		}
 	}
 	if present {
-		u.Success("removed %s", ui.Short(at.dir, at.root))
+		line := ui.Short(at.dir, at.root)
+		if kept {
+			line += ", except " + filepath.Base(at.home) + homeLockSuffix + ", the lock of its home"
+		}
+		u.Success("removed %s", line)
 	}
 	return nil
 }
