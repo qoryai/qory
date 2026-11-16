@@ -632,8 +632,8 @@ artifact_types:                  # optional; the artifact types the workspaces u
 
 Every key but `artifact_types` and `submit` is required, and the file has no other key. A key left out, a text over its
 limit, a `stack` that `exports.stacks` does not list, and a `process` that is not such an
-object are refused with the file and the fix in the message: the fix is the first line, and the file is on a
-line of its own at the end, so a long path never pushes the fix past 100 characters. Each
+object are refused with the file and the fix in the message: the fix is the first line, and the file is on the
+last line, so a long path never pushes the fix past 100 characters. Each
 workflow that the stack does not declare is refused with a fix line, which has the
 workflow, the stack and the stage, a cause line, which has the `process.yaml`, and a last
 line with the stack file:
