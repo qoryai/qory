@@ -470,7 +470,7 @@ func TestRunRecordsTheSession(t *testing.T) {
 	if !strings.HasSuffix(out, "\nqory run: the record is in "+dir+"\n") {
 		t.Errorf("the last line does not name the record %s:\n%s", dir, out)
 	}
-	if session := sessionStarted(t, evs); !strings.HasSuffix(fmt.Sprint(session["command"]), "/bin/claude") || session["interactive"] != false {
+	if session := sessionStarted(t, evs); session["command"] != cmd.LastStandIn() || session["interactive"] != false {
 		t.Errorf("session.started %v", session)
 	}
 	started := evs["dev.qory.run.started"]

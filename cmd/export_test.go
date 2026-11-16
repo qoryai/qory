@@ -943,9 +943,25 @@ func SetInstallStandIn(root string) func() {
 		if err := os.WriteFile(filepath.Join(folder, "bin", "claude"), data, 0o755); err != nil {
 			return nil, err
 		}
+		standInMu.Lock()
+		lastStandIn = filepath.Join(folder, "bin", "claude")
+		standInMu.Unlock()
 		return &runtimeinstall.Installed{Runtime: "claude", Version: "0", Dir: folder}, nil
 	}
 	return func() { installStandIn = before }
+}
+
+var (
+	standInMu   sync.Mutex
+	lastStandIn string
+)
+
+// LastStandIn is the program of the stand-in install that the last run of Claude Code
+// got, from [SetInstallStandIn].
+func LastStandIn() string {
+	standInMu.Lock()
+	defer standInMu.Unlock()
+	return lastStandIn
 }
 
 // SetNpmRegistry makes qory run install from the npm registry at url, and returns what
