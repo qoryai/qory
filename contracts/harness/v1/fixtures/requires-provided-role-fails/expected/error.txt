@@ -1,1 +1,2 @@
-module core: skill deploy requires agent developer, which no module ships
+Ship agent developer in a module, or remove it from the requires of skill deploy.
+  The skill deploy of module core requires agent developer, and no module ships it.

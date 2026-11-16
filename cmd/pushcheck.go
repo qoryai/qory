@@ -50,16 +50,16 @@ const (
 // work item in again makes. That run opens on the engine selected at its start, so switching
 // the engine back does not help this one.
 const (
-	textChecksNoWallFromCode    = "Set wall.adapter to docker, then take the work item in again in Qory Apiary: the push checks of %s run in containers of the docker wall alone" + codeUsed
-	textChecksNoRunAPIFromCode  = "Take the work item in again in Qory Apiary, through a gateway that sends the run API address: the push checks read the artifacts through the run API, which failed: %s" + codeUsed
-	textChecksBadRunAPIFromCode = "Update the run's gateway, then take the work item in again in Qory Apiary: the run API address that the gateway sent is not one the push checks can use: %s" + codeUsed
-	textChecksEngineFromCode    = "Take the work item in again in Qory Apiary, and do not switch the engine while that run starts: the push checks would run on the engine %s, and the run's containers are on the engine %s" + codeUsed
-	textChecksNoFolderFromCode  = "Check %s, then take the work item in again in Qory Apiary: making the folder of the push checks' files failed: %s" + codeUsed
-	textChecksBadImageFromCode  = "Set wall.image or --image to an image reference, then take the work item in again in Qory Apiary: push checks cannot start from %s" + codeUsed
-	textChecksNoDefaultFromCode = "Set wall.image in forager.yaml, then take the work item in again in Qory Apiary: push checks run in the wall's default image" + codeUsed
-	textChecksNoImageFromCode   = "Pull the wall's default image, then take the work item in again in Qory Apiary: push checks run in it, and the engine does not have the image %s" + codeUsed
-	textChecksNotSetFromCode    = "Take the work item in again in Qory Apiary: turning on the push checks for the POSTs from behind the wall failed, so the run stopped before the setup: %s" + codeUsed
-	textChecksUnreadFromCode    = "Take the work item in again in Qory Apiary, so that the new run composes the harness again: the push checks in %s could not be read: %s" + codeUsed
+	textChecksNoWallFromCode    = "Set wall.adapter to docker, then take the work item in again in Qory Apiary.\n  The push checks of %s run in containers of the docker wall alone" + codeUsed
+	textChecksNoRunAPIFromCode  = "Take the work item in again in Qory Apiary, through a gateway that sends the run API address.\n  The push checks read the artifacts through the run API, which failed: %s" + codeUsed
+	textChecksBadRunAPIFromCode = "Update the run's gateway, then take the work item in again in Qory Apiary.\n  The run API address that the gateway sent is not one the push checks can use: %s" + codeUsed
+	textChecksEngineFromCode    = "Take the work item in again in Qory Apiary, and do not switch the engine while that run starts.\n  The push checks would run on the engine %s, and the run's containers are on the engine %s" + codeUsed
+	textChecksNoFolderFromCode  = "Check the folder of the push checks' files, then take the work item in again in Qory Apiary.\n  The folder is %s, and making it failed: %s" + codeUsed
+	textChecksBadImageFromCode  = "Set wall.image or --image to an image reference, then take the work item in again in Qory Apiary.\n  Push checks cannot start from %s" + codeUsed
+	textChecksNoDefaultFromCode = "Set wall.image in forager.yaml, then take the work item in again in Qory Apiary.\n  Push checks run in the wall's default image" + codeUsed
+	textChecksNoImageFromCode   = "Pull the wall's default image, then take the work item in again in Qory Apiary.\n  Push checks run in it, and the engine does not have the image %s" + codeUsed
+	textChecksNotSetFromCode    = "Take the work item in again in Qory Apiary.\n  Turning on the push checks for the POSTs from behind the wall failed, so the run stopped before the setup: %s" + codeUsed
+	textChecksUnreadFromCode    = "Take the work item in again in Qory Apiary, so that the new run composes the harness again.\n  The push checks in %s could not be read: %s" + codeUsed
 )
 
 // checksStop is the error of a line that stops a run with push checks, with args in it:

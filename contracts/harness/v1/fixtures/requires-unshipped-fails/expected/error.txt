@@ -1,1 +1,2 @@
-module core: requires lists skill release, which the module does not ship
+Ship skill release in module core, or remove it from the requires of the module.
+  The requires of module core lists skill release, and the module does not ship it.

@@ -6,3 +6,9 @@ func SetManifestHooks(t interface{ Cleanup(func()) }, before, after func(dir str
 	beforeManifest, afterManifest = before, after
 	t.Cleanup(func() { beforeManifest, afterManifest = nil, nil })
 }
+
+// AndList and OrList are the lists a refusal makes of names.
+var (
+	AndList = andList
+	OrList  = orList
+)

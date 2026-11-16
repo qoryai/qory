@@ -236,16 +236,16 @@ func TestTwoSkillsOfOneNameInAModuleStop(t *testing.T) {
 		files []string
 		want  string
 	}{
-		{[]string{"skills/a/review", "skills/b/review"}, "rename skills/a/review or skills/b/review: each skill goes to skills/<name>, and both are the skill review"},
-		{[]string{"skills/a/review", "skills/review"}, "rename skills/a/review or skills/review: each skill goes to skills/<name>, and both are the skill review"},
-		{[]string{"skills/a/b/review", "skills/c/review"}, "rename skills/a/b/review or skills/c/review: each skill goes to skills/<name>, and both are the skill review"},
+		{[]string{"skills/a/review", "skills/b/review"}, "Rename skills/a/review or skills/b/review in module core.\n  Each skill goes to skills/<name>, and both are the skill review."},
+		{[]string{"skills/a/review", "skills/review"}, "Rename skills/a/review or skills/review in module core.\n  Each skill goes to skills/<name>, and both are the skill review."},
+		{[]string{"skills/a/b/review", "skills/c/review"}, "Rename skills/a/b/review or skills/c/review in module core.\n  Each skill goes to skills/<name>, and both are the skill review."},
 	} {
 		files := map[string]string{}
 		for _, f := range c.files {
 			files[f+"/SKILL.md"] = "s\n"
 		}
 		_, err := Read("core", tree(t, files), nil, "")
-		if err == nil || err.Error() != "module core: "+c.want {
+		if err == nil || err.Error() != c.want {
 			t.Errorf("%v: %v\nwant %s", c.files, err, c.want)
 		}
 	}
@@ -261,7 +261,7 @@ func TestSkillNamesThatDifferOnlyInCaseStop(t *testing.T) {
 	} {
 		dir := tree(t, map[string]string{c.first + "/SKILL.md": "s\n", c.second + "/SKILL.md": "s\n"})
 		_, err := Read("core", dir, nil, "")
-		if want := "module core: rename " + c.first + " or " + c.second + ": each skill goes to skills/<name>, and these two names differ only in case"; err == nil || err.Error() != want {
+		if want := "Rename " + c.first + " or " + c.second + " in module core.\n  Each skill goes to skills/<name>, and these two names differ only in case."; err == nil || err.Error() != want {
 			t.Errorf("%v: %v\nwant %s", c, err, want)
 		}
 	}

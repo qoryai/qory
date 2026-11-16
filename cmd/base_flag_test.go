@@ -255,5 +255,5 @@ func TestARetiredAPIVersionComposesWithARow(t *testing.T) {
 	if err == nil || cmd.ExitCode(err) != cmd.ExitInput {
 		t.Fatalf("a version never written: err = %v, exit %d\n%s", err, cmd.ExitCode(err), out)
 	}
-	wants(t, err.Error(), `qory.yaml: apiVersion "qory.ai/v2" is not one this qory reads; versions: qory.dev/v1alpha1`)
+	wants(t, err.Error(), "Set apiVersion to qory.dev/v1alpha1.\n  This qory reads qory.dev/v1alpha1, and apiVersion is \"qory.ai/v2\".\n  apiVersion is in ")
 }

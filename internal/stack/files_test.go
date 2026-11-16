@@ -105,16 +105,16 @@ func TestExtendRefusesWhatABaseModuleCannotExclude(t *testing.T) {
 		l    Module
 		want string
 	}{
-		{"a source", Module{Name: "core", Source: Source{Path: "./core"}}, "list module core with its name and exclude only: it belongs to the base stack, and a checkout's qory.yaml cannot change its source, only, variant or link"},
-		{"an only", Module{Name: "core", Only: skills}, "list module core with its name and exclude only: it belongs to the base stack, and a checkout's qory.yaml cannot change its source, only, variant or link"},
-		{"a variant", Module{Name: "core", Exclude: skills, Variant: "codex"}, "list module core with its name and exclude only"},
-		{"a link", Module{Name: "core", Exclude: skills, Link: "core"}, "list module core with its name and exclude only"},
-		{"no exclude", Module{Name: "core"}, "add an exclude to module core, or remove its entry: it belongs to the base stack, and a checkout's qory.yaml lists a base module only to exclude entries from it"},
-		{"the instructions", Module{Name: "core", Exclude: Selection{Instructions: true}}, "remove instructions from the exclude of module core: it belongs to the base stack, and a checkout's qory.yaml excludes entries from a base module, not its instructions, settings or env"},
-		{"the settings", Module{Name: "core", Exclude: Selection{Settings: Part{All: true}}}, "remove settings from the exclude of module core: it belongs to the base stack"},
-		{"a variable", Module{Name: "core", Exclude: Selection{Env: Part{Names: []string{"PROFILE"}}}}, "remove env from the exclude of module core: it belongs to the base stack"},
-		{"a hook", Module{Name: "core", Exclude: Selection{Kinds: map[string][]string{"hooks": {"guard.sh"}}}}, "remove hooks/guard.sh from the exclude of module core: a checkout excludes from a base module only entries of the kinds an extending module may ship, and the base stack lets an extending module ship skills, agents"},
-		{"a file elsewhere", Module{Name: "core", Exclude: Selection{Kinds: map[string][]string{"files": {"claude/agents/x.md"}}}}, "remove files/claude/agents/x.md from the exclude of module core: a checkout excludes from a base module only files where an extending module may ship them, and the base stack lets an extending module ship files under claude/rules/"},
+		{"a source", Module{Name: "core", Source: Source{Path: "./core"}}, "List module core with its name and exclude only.\n  It belongs to the base stack, and a checkout's qory.yaml cannot change its source, only, variant, or link."},
+		{"an only", Module{Name: "core", Only: skills}, "List module core with its name and exclude only.\n  It belongs to the base stack, and a checkout's qory.yaml cannot change its source, only, variant, or link."},
+		{"a variant", Module{Name: "core", Exclude: skills, Variant: "codex"}, "List module core with its name and exclude only.\n  It belongs to the base stack"},
+		{"a link", Module{Name: "core", Exclude: skills, Link: "core"}, "List module core with its name and exclude only.\n  It belongs to the base stack"},
+		{"no exclude", Module{Name: "core"}, "Add an exclude to module core, or remove its entry.\n  It belongs to the base stack, and a checkout's qory.yaml lists a base module only to exclude entries from it."},
+		{"the instructions", Module{Name: "core", Exclude: Selection{Instructions: true}}, "Remove instructions from the exclude of module core.\n  It belongs to the base stack, and a checkout's qory.yaml excludes entries from a base module, not its instructions, settings, or env."},
+		{"the settings", Module{Name: "core", Exclude: Selection{Settings: Part{All: true}}}, "Remove settings from the exclude of module core.\n  It belongs to the base stack"},
+		{"a variable", Module{Name: "core", Exclude: Selection{Env: Part{Names: []string{"PROFILE"}}}}, "Remove env from the exclude of module core.\n  It belongs to the base stack"},
+		{"a hook", Module{Name: "core", Exclude: Selection{Kinds: map[string][]string{"hooks": {"guard.sh"}}}}, "Remove hooks/guard.sh from the exclude of module core.\n  A checkout excludes from a base module only entries of the kinds an extending module may ship, and the base stack lets an extending module ship skills, agents"},
+		{"a file elsewhere", Module{Name: "core", Exclude: Selection{Kinds: map[string][]string{"files": {"claude/agents/x.md"}}}}, "Remove files/claude/agents/x.md from the exclude of module core.\n  A checkout excludes from a base module only files where an extending module may ship them, and the base stack lets an extending module ship files under claude/rules/"},
 	} {
 		p := &Stack{Extends: Source{Path: "../base"}, Modules: []Module{c.l}, File: "/app/qory-stack.yaml"}
 		_, err := Extend(base, p)
@@ -128,7 +128,7 @@ func TestExtendRefusesWhatABaseModuleCannotExclude(t *testing.T) {
 	}
 	closed := &Stack{Modules: base.Modules, Extending: &Extending{}, Root: "/repo", File: "/repo/qory-stack.yaml"}
 	p = &Stack{Extends: Source{Path: "../base"}, Modules: []Module{{Name: "core", Exclude: skills}}, File: "/app/qory-stack.yaml"}
-	if _, err := Extend(closed, p); err == nil || !strings.HasSuffix(err.Error(), "and the base stack lets an extending module ship no entries") {
+	if _, err := Extend(closed, p); err == nil || !strings.HasSuffix(err.Error(), "and the base stack lets an extending module ship no entries.") {
 		t.Errorf("a base that lets no entry in: err = %v", err)
 	}
 }

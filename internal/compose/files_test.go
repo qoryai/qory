@@ -22,7 +22,7 @@ func TestFilesCollideByPathAndAnExcludeResolvesIt(t *testing.T) {
 	}
 	_, err := composeTree(t, tree)
 	var collision *compose.CollisionError
-	if !errors.As(err, &collision) || !strings.Contains(err.Error(), "files/claude/rules/web.md is provided by 2 modules: a@working-tree, b@working-tree") {
+	if !errors.As(err, &collision) || !strings.Contains(err.Error(), "2 modules provide files/claude/rules/web.md: a@working-tree, b@working-tree") {
 		t.Fatalf("err = %v", err)
 	}
 	tree["qory-stack.yaml"] = strings.Replace(twoModules, "  - name: b\n", "  - name: b\n    exclude: {files: [claude/rules/web.md]}\n", 1)

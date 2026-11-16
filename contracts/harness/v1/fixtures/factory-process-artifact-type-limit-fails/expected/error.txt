@@ -1,1 +1,3 @@
-modules/support-desk/process.yaml: set size_limit of artifact type customer-facts to a whole number from 1 to 1048576, the most for base_view structured: size_limit is 2097152
+Set size_limit of artifact type customer-facts to a whole number from 1 to 1048576.
+  1048576 is the most for base_view structured, and size_limit is 2097152.
+  The type is in modules/support-desk/process.yaml.

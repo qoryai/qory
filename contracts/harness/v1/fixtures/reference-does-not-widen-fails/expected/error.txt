@@ -1,1 +1,2 @@
-module core: skill deploy references agent profiler, which no module ships or provides and the stack does not bind
+Ship agent profiler, bind agents.profiler in qory.yaml, or remove the reference from skill deploy.
+  The skill deploy of module core references agent profiler. No module ships or provides it, and the stack does not bind it.
