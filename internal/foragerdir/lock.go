@@ -21,7 +21,8 @@ type Lock struct {
 }
 
 // Release drops the lock and closes its file. A text that SetText wrote is removed first,
-// since after the release it names a holder that is gone. A nil Lock releases nothing.
+// since after the release it is the text of a holder that is gone. A nil Lock releases
+// nothing.
 func (l *Lock) Release() error {
 	if l == nil || l.f == nil {
 		return nil
