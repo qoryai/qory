@@ -93,6 +93,8 @@ func TestARoleWithoutAShellToolGetsNoShell(t *testing.T) {
 		{"bash-rule", "tools: [Read, \"Bash(git:*)\"]\n", false},
 		{"powershell", "tools: [PowerShell]\n", false},
 		{"no-tools-key", "", false},
+		{"null-tools", "tools: ~\n", false},
+		{"empty-tools-value", "tools:\n", false},
 	}
 	agents := map[string]string{}
 	for _, c := range cases {

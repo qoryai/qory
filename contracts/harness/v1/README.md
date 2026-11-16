@@ -1691,7 +1691,7 @@ Per runtime, the files written into its directory:
   variables are the launch's, one `agents/<name>.toml` per agent with the body as
   `developer_instructions`, with `[features]` `shell_tool = false` when the agent's `tools`
   key lists no `Bash` or `PowerShell` (an agent with no `tools` key keeps the shell; Codex
-  0.149.0 or later reads the setting), and for a launch the skills linked under `skills/` and the
+  0.149.0 or later reads this setting), and for a launch the skills linked under `skills/` and the
   instructions as `AGENTS.md`, neither linked into the checkout (§Launching). Codex
   passes its environment to every command it runs. Codex 0.76.0 or later filters no
   name by default. An older Codex drops the names that contain `KEY`, `SECRET` or

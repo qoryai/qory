@@ -686,9 +686,9 @@ For claude and copilot, an effort outside the runtime's values stops the compose
 
 An agent's `tools` key limits what the agent can use on Claude Code. An agent with no `tools` key can use every tool.
 
-On Codex, qory writes `[features]` with `shell_tool = false` into the agent's file `agents/<name>.toml` when the agent has a `tools` key that lists no shell tool. A shell tool is `Bash` or `PowerShell`, also with a rule such as `Bash(git:*)`. That agent has no shell. An agent with no `tools` key keeps the shell. Codex 0.149.0 or later reads the setting; an earlier Codex ignores it.
+On Codex, qory writes `[features]` with `shell_tool = false` into the agent's file `agents/<name>.toml` when the agent has a `tools` key that lists no shell tool. A shell tool is `Bash` or `PowerShell`, also with a rule such as `Bash(git:*)`. That agent has no shell. An agent with no `tools` key keeps the shell. Codex 0.149.0 or later reads this setting.
 
-Codex has no setting for any other tool of an agent. An agent without `Write` or `Edit` in its `tools` key can still write files with Codex's `apply_patch` tool, because Codex cannot turn that tool off for one agent. An agent's file cannot set the agent's sandbox either.
+Codex has no setting for any other tool of an agent. An agent without `Write` or `Edit` in its `tools` key can still write files with Codex's `apply_patch` tool, because Codex cannot turn that tool off for one agent. An agent's file [cannot set the agent's sandbox](https://learn.chatgpt.com/docs/agent-configuration/subagents) either.
 
 ## Removing the harness
 

@@ -20,7 +20,8 @@ release may change what an existing document does, and states it under Upgrading
 
 - On Codex, an agent whose `tools` key lists no shell tool (`Bash` or `PowerShell`) gets
   `[features]` `shell_tool = false` in its agent file, so it has no shell. An agent with no
-  `tools` key keeps the shell. It can still write files with Codex's `apply_patch` tool.
+  `tools` key keeps the shell. A role without write tools can still write files through Codex's
+  `apply_patch` tool.
 - A run of a work item works on the branch `qory/<work item id>`, at the commit of the
   artifact `branch` that its stage starts from. The harness still comes from
   `target_version`. A commit on the branch reaches a run's harness after you merge the
