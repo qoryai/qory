@@ -277,6 +277,11 @@ func TestComposeRefuses(t *testing.T) {
 			fixture: "mcp-server-fails",
 			wantErr: []string{"Write mcp/db.json in module core as one JSON object.", "The file does not contain a JSON object"},
 		},
+		{
+			name:    "an MCP server with a key no runtime reads",
+			fixture: "mcp-server-key-fails",
+			wantErr: []string{"Remove the key \"comand\" from the MCP server file.", "The file is mcp/db.json in module core."},
+		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

@@ -195,9 +195,9 @@ func TestReadRefusesAnMCPServerThatIsNotAnObject(t *testing.T) {
 // key nothing reads, both transports, neither.
 func TestReadRefusesAnMCPServerNoRuntimeCouldStart(t *testing.T) {
 	for _, c := range []struct{ body, want string }{
-		{`{"comand": "x"}`, `module core: mcp/db.json: key "comand" is not one of an MCP server's; keys: type, command, args, env, url, headers, description`},
-		{`{"command": "x", "url": "https://x"}`, "module core: mcp/db.json: sets both a command and a url; a server is one or the other"},
-		{`{"args": ["x"]}`, "module core: mcp/db.json: sets neither a command nor a url"},
+		{`{"comand": "x"}`, "Remove the key \"comand\" from the MCP server file.\n  An MCP server has only type, command, args, env, url, headers, and description.\n  The file is mcp/db.json in module core."},
+		{`{"command": "x", "url": "https://x"}`, "Remove command or url from the MCP server file.\n  A server sets one of them, and the file sets both.\n  The file is mcp/db.json in module core."},
+		{`{"args": ["x"]}`, "Add command or url to the MCP server file.\n  A server sets one of them, and the file sets neither.\n  The file is mcp/db.json in module core."},
 	} {
 		dir := tree(t, map[string]string{"mcp/db.json": c.body})
 		_, err := Read("core", dir, nil, "")

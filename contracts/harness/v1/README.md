@@ -1159,7 +1159,9 @@ An MCP server is one JSON object per file, in the shape Claude Code's `.mcp.json
 remote one, `type` for either, and `description` for a note to the module's readers, which
 the compose leaves out of every runtime's file. Exactly one of `command` and `url`, and
 no other key; the schema is [mcp.schema.json](mcp.schema.json). Every runtime with a project-level place for
-servers gets it there, rewritten where its shape differs (§Runtimes). A directory under
+servers gets it there, rewritten where its shape differs (§Runtimes). A server file the schema
+refuses fails the compose with the fix first, such as `Remove the key "comand" from the MCP server
+file.`, then the cause, and `The file is mcp/db.json in module core.` on the last line. A directory under
 `hooks/`, or a link to one, fails the compose: a hook is one file, and a script's helpers
 live anywhere else in the module, such as under `scripts/`, reached through `modules/<name>` in
 the composed tree. The refusal is `Move hooks/scripts out of the hooks directory of

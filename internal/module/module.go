@@ -1384,8 +1384,8 @@ func readMCP(rel, dir string, readFile func(string) ([]byte, error)) ([]Entry, m
 		if server == nil {
 			return nil, nil, jsonObjectRefusal(file, "The file contains null, which is no JSON object.")
 		}
-		if err := checkServer(server); err != nil {
-			return nil, nil, fmt.Errorf("%s: %w", file, err)
+		if err := checkServer(file, server); err != nil {
+			return nil, nil, err
 		}
 		name := strings.TrimSuffix(it.Name(), ".json")
 		servers[name] = server
@@ -1401,38 +1401,43 @@ func readMCP(rel, dir string, readFile func(string) ([]byte, error)) ([]Entry, m
 // mcp.schema.json refuses: a key no runtime reads, no command and no url, both, a command
 // or url that is not a non-empty string, a type outside stdio, http and sse, an args
 // element or an env or headers value that is not a string, a description that is not a
-// string. A value the refusal prints is printed as [shownJSON] prints it.
-func checkServer(server map[string]any) error {
-	for k := range server {
+// string. The refusal starts with its fix, and its last line has file, the path of the
+// server file in the module. A value the refusal prints is printed as [shownJSON] prints
+// it.
+func checkServer(file string, server map[string]any) error {
+	refuse := func(fix, cause string) error {
+		return exports.Refuse(fix, cause, "The file is "+file+" in "+exports.ModulePlace+".")
+	}
+	for _, k := range slices.Sorted(maps.Keys(server)) {
 		if !serverKeys[k] {
-			return fmt.Errorf("key %s is not one of an MCP server's; keys: type, command, args, env, url, headers, description", accesskey.ShownName(k, true))
+			return refuse("Remove the key "+accesskey.ShownName(k, true)+" from the MCP server file.", "An MCP server has only type, command, args, env, url, headers, and description.")
 		}
 	}
 	command, hasCommand := server["command"]
 	url, hasURL := server["url"]
 	switch {
 	case hasCommand && hasURL:
-		return errors.New("sets both a command and a url; a server is one or the other")
+		return refuse("Remove command or url from the MCP server file.", "A server sets one of them, and the file sets both.")
 	case !hasCommand && !hasURL:
-		return errors.New("sets neither a command nor a url")
+		return refuse("Add command or url to the MCP server file.", "A server sets one of them, and the file sets neither.")
 	case hasCommand && !nonEmptyString(command):
-		return errors.New("command is not a non-empty string")
+		return refuse("Set command of the MCP server to a non-empty string.", "command is not a non-empty string.")
 	case hasURL && !nonEmptyString(url):
-		return errors.New("url is not a non-empty string")
+		return refuse("Set url of the MCP server to a non-empty string.", "url is not a non-empty string.")
 	}
 	if t, ok := server["type"]; ok {
 		if s, _ := t.(string); s != "stdio" && s != "http" && s != "sse" {
-			return fmt.Errorf("type %s is not stdio, http or sse", shownJSON(t))
+			return refuse("Set type of the MCP server to stdio, http, or sse.", "type is "+shownJSON(t)+".")
 		}
 	}
 	if args, ok := server["args"]; ok {
 		list, isList := args.([]any)
 		if !isList {
-			return errors.New("args is not a list")
+			return refuse("Set args of the MCP server to a list of strings.", "args is not a list.")
 		}
 		for _, a := range list {
 			if _, ok := a.(string); !ok {
-				return fmt.Errorf("args contains %s, which is not a string", shownJSON(a))
+				return refuse("Set each item of args of the MCP server to a string.", "args contains "+shownJSON(a)+", which is not a string.")
 			}
 		}
 	}
@@ -1443,17 +1448,17 @@ func checkServer(server map[string]any) error {
 		}
 		m, isMap := v.(map[string]any)
 		if !isMap {
-			return fmt.Errorf("%s is not an object", key)
+			return refuse("Set "+key+" of the MCP server to an object of strings.", key+" is not an object.")
 		}
-		for k, e := range m {
-			if _, ok := e.(string); !ok {
-				return fmt.Errorf("%s.%s is %s, which is not a string", key, accesskey.ShownName(k, false), shownJSON(e))
+		for _, k := range slices.Sorted(maps.Keys(m)) {
+			if _, ok := m[k].(string); !ok {
+				return refuse("Set each value of "+key+" of the MCP server to a string.", key+"."+accesskey.ShownName(k, false)+" is "+shownJSON(m[k])+", which is not a string.")
 			}
 		}
 	}
 	if d, ok := server["description"]; ok {
 		if _, isString := d.(string); !isString {
-			return fmt.Errorf("description is %s, which is not a string", shownJSON(d))
+			return refuse("Set description of the MCP server to a string.", "description is "+shownJSON(d)+", which is not a string.")
 		}
 	}
 	return nil

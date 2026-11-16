@@ -131,8 +131,8 @@ func TestAVariantNameWithASecretIsLeftOutOfItsRefusal(t *testing.T) {
 func TestAnMCPServerKeyWithASecretIsLeftOutOfItsRefusal(t *testing.T) {
 	isolate(t)
 	for _, c := range []struct{ server, want string }{
-		{`{"command": "x", "qak_x": 1}`, "mcp/s.json: key " + accessKeyPhrase + " is not one of an MCP server's; keys: type, command, args, env, url, headers, description"},
-		{`{"command": "x", "env": {"QRK_X": 1}}`, "mcp/s.json: env." + runKeyPhrase + " is 1, which is not a string"},
+		{`{"command": "x", "qak_x": 1}`, "Remove the key " + accessKeyPhrase + " from the MCP server file.\n  An MCP server has only type, command, args, env, url, headers, and description.\n  The file is mcp/s.json in module core."},
+		{`{"command": "x", "env": {"QRK_X": 1}}`, "Set each value of env of the MCP server to a string.\n  env." + runKeyPhrase + " is 1, which is not a string.\n  The file is mcp/s.json in module core."},
 	} {
 		dir := tree(t, map[string]string{"mcp/s.json": c.server})
 		_, err := Read("core", dir, nil, "")
@@ -172,7 +172,7 @@ func TestAModuleNameWithASecretIsLeftOutOfItsRefusals(t *testing.T) {
 	for _, c := range []struct{ body, want string }{
 		{"[1]", "Write the MCP server file in module core as one JSON object.\n  The file is mcp/" + accessKeyPhrase + ".json.\n  The file does not contain a JSON object: "},
 		{"null", "Write the MCP server file in module core as one JSON object.\n  The file is mcp/" + accessKeyPhrase + ".json.\n  The file contains null, which is no JSON object."},
-		{`{"command": "x", "bad": 1}`, "module core: mcp/" + accessKeyPhrase + `.json: key "bad" is not one of an MCP server's`},
+		{`{"command": "x", "bad": 1}`, "Remove the key \"bad\" from the MCP server file.\n  An MCP server has only type, command, args, env, url, headers, and description.\n  The file is mcp/" + accessKeyPhrase + ".json in module core."},
 	} {
 		d := tree(t, map[string]string{"mcp/qak_srv.json": c.body})
 		if _, err := Read("core", d, nil, ""); err == nil || !strings.HasPrefix(err.Error(), c.want) {

@@ -31,17 +31,17 @@ func containsSecret(text string) bool {
 func TestAnMCPServerValueWithASecretIsLeftOutOfItsRefusal(t *testing.T) {
 	isolate(t)
 	for _, c := range []struct{ server, want string }{
-		{`{"command": "x", "type": "qak_t"}`, "mcp/s.json: type " + accessKeyValuePhrase + " is not stdio, http or sse"},
-		{`{"command": "x", "type": ["QRK_t"]}`, "mcp/s.json: type " + runKeyValuePhrase + " is not stdio, http or sse"},
-		{`{"command": "x", "args": ["a", {"k": "qrk_a"}]}`, "mcp/s.json: args contains " + runKeyValuePhrase + ", which is not a string"},
-		{`{"url": "https://git.example", "headers": {"Authorization": ["Bearer qak_AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA"]}}`, "mcp/s.json: headers.Authorization is " + accessKeyValuePhrase + ", which is not a string"},
-		{`{"command": "x", "env": {"TOKEN": {"v": "qak_x"}}}`, "mcp/s.json: env.TOKEN is " + accessKeyValuePhrase + ", which is not a string"},
-		{`{"command": "x", "description": ["qrk_d"]}`, "mcp/s.json: description is " + runKeyValuePhrase + ", which is not a string"},
-		{`{"url": "https://git.example", "headers": {"Authorization": ["Bearer token-123"]}}`, "mcp/s.json: headers.Authorization is [Bearer token-123], which is not a string"},
+		{`{"command": "x", "type": "qak_t"}`, "Set type of the MCP server to stdio, http, or sse.\n  type is " + accessKeyValuePhrase + "."},
+		{`{"command": "x", "type": ["QRK_t"]}`, "Set type of the MCP server to stdio, http, or sse.\n  type is " + runKeyValuePhrase + "."},
+		{`{"command": "x", "args": ["a", {"k": "qrk_a"}]}`, "Set each item of args of the MCP server to a string.\n  args contains " + runKeyValuePhrase + ", which is not a string."},
+		{`{"url": "https://git.example", "headers": {"Authorization": ["Bearer qak_AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA"]}}`, "Set each value of headers of the MCP server to a string.\n  headers.Authorization is " + accessKeyValuePhrase + ", which is not a string."},
+		{`{"command": "x", "env": {"TOKEN": {"v": "qak_x"}}}`, "Set each value of env of the MCP server to a string.\n  env.TOKEN is " + accessKeyValuePhrase + ", which is not a string."},
+		{`{"command": "x", "description": ["qrk_d"]}`, "Set description of the MCP server to a string.\n  description is " + runKeyValuePhrase + ", which is not a string."},
+		{`{"url": "https://git.example", "headers": {"Authorization": ["Bearer token-123"]}}`, "Set each value of headers of the MCP server to a string.\n  headers.Authorization is [Bearer token-123], which is not a string."},
 	} {
 		dir := tree(t, map[string]string{"mcp/s.json": c.server})
 		_, err := Read("core", dir, nil, "")
-		if want := "module core: " + c.want; err == nil || err.Error() != want {
+		if want := c.want + "\n  The file is mcp/s.json in module core."; err == nil || err.Error() != want {
 			t.Errorf("%s: %v, want %q", c.server, err, want)
 		}
 	}
