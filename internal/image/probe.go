@@ -10,9 +10,6 @@ import (
 	"os/exec"
 	"path"
 	"path/filepath"
-	"regexp"
-	"slices"
-	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -34,7 +31,7 @@ const (
 // Check is one line of a check's result.
 type Check struct {
 	// Name is what the line is about, one word: image, home, reference, files, probe, or
-	// one of [ProbeChecks], a runtime's name among them.
+	// one of [ProbeChecks].
 	Name string `json:"name"`
 	// Result is [Pass], [Fail] or [Info].
 	Result string `json:"result"`
@@ -60,32 +57,16 @@ const ReportVersion = 1
 type Report struct {
 	// Version is [ReportVersion].
 	Version int `json:"version"`
-	// Checks are the probe's lines, one of each of [ProbeChecks] for the runtimes it
-	// checked, in that order.
+	// Checks are the probe's lines, one of each of [ProbeChecks], in that order.
 	Checks []Check `json:"checks"`
 }
 
-// ProbeChecks are the names of the lines a [Report] of a probe for runtimes contains, in
-// the order they print: one line per runtime after shell. A report that lacks one did
-// not check it, and the outside counts that as a failure.
-func ProbeChecks(runtimes []string) []string {
-	return slices.Concat([]string{"home", "authorities", "shell"}, runtimes, []string{"git", "gh", "docker"})
-}
-
-// Runtime is one runtime the probe checks the image for: its program on the image's
-// PATH, at the version Forager's descriptor sets.
-type Runtime struct {
-	// Name is the runtime's name, the name of its line.
-	Name string
-	// Command is the program the runtime's launch starts, as found on the PATH; empty
-	// for a runtime this qory does not render, whose line fails.
-	Command string
-	// Version is the version <Command> --version must report, Forager's descriptor's
-	// runtime_version; empty takes any.
-	Version string
-	// Install is the package at Version that a failed line has as its fix, such as
-	// @anthropic-ai/claude-code@2.1.316; empty for a runtime with no package.
-	Install string
+// ProbeChecks are the names of the lines a [Report] contains, in the order they print. A
+// report that lacks one did not check it, and the outside counts that as a failure. No
+// line is about a runtime: no image contains one, and Forager mounts the machine's
+// install of the runtime at run time.
+func ProbeChecks() []string {
+	return []string{"home", "authorities", "shell", "git", "gh", "docker"}
 }
 
 // Bundles are where the wall reads an image's authorities, the first that holds a
@@ -116,8 +97,6 @@ type Probe struct {
 	// Exec runs a program of the image, by its path under Root, and returns what it
 	// printed on both streams. Nil runs it with [ProgramWait] as its limit.
 	Exec func(ctx context.Context, program string, args ...string) ([]byte, error)
-	// Runtimes are the runtimes to check, Forager's list in its order.
-	Runtimes []Runtime
 	// User is the user the probe runs as, uid:gid, as the lines name it.
 	User string
 }
@@ -129,9 +108,6 @@ func (p Probe) Report(ctx context.Context) Report {
 		p.Env = os.Getenv
 	}
 	checks := []Check{p.home(), p.authorities(), p.shell()}
-	for _, rt := range p.Runtimes {
-		checks = append(checks, p.runtime(ctx, rt))
-	}
 	checks = append(checks, p.git(ctx), p.program(ctx, "gh"))
 	checks = append(checks, p.docker())
 	return Report{Version: ReportVersion, Checks: checks}
@@ -198,37 +174,6 @@ func (p Probe) shell() Check {
 		return Check{"shell", Fail, "no /bin/sh; the runtime's hooks and the session's API-key approval run under sh"}
 	}
 	return Check{"shell", Pass, "/bin/sh runs the runtime's hooks and the API-key approval"}
-}
-
-// version is the first version number in what a program printed: 2.1.316 in
-// "2.1.316 (Claude Code)".
-var version = regexp.MustCompile(`\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?`)
-
-// runtime checks that rt's program is on the image's PATH, where the wall's launch
-// finds it, and reports the version Forager's descriptor sets.
-func (p Probe) runtime(ctx context.Context, rt Runtime) Check {
-	if rt.Command == "" {
-		return Check{rt.Name, Fail, "set wall.helper to the Linux build of this qory: the probe's build renders no runtime " + rt.Name}
-	}
-	out, where, err := p.run(ctx, rt.Command, "--version")
-	if err != nil {
-		return Check{rt.Name, Fail, err.Error()}
-	}
-	got := version.FindString(out)
-	if rt.Version != "" && got != rt.Version {
-		if got == "" {
-			got = strconv.Quote(out)
-		}
-		fix := "install that version"
-		if rt.Install != "" {
-			fix = "install " + rt.Install
-		}
-		return Check{rt.Name, Fail, fmt.Sprintf("%s at %s is %s, and Forager's descriptor sets %s; %s", rt.Command, exports.Value(where, false), got, rt.Version, fix)}
-	}
-	if rt.Version == "" {
-		return Check{rt.Name, Pass, fmt.Sprintf("%s at %s is %s", rt.Command, exports.Value(where, false), got)}
-	}
-	return Check{rt.Name, Pass, fmt.Sprintf("%s at %s is %s, the version Forager's descriptor sets", rt.Command, exports.Value(where, false), got)}
 }
 
 // program checks that a program is on the image's PATH and answers --version.

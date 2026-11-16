@@ -391,6 +391,11 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Changed
 
+- The `agent`, `agent-docker` and `prebuild` images contain no agent runtime. The machine
+  installs the runtime at run time, and Forager mounts it read-only at
+  `/qory/runtime/<runtime>`. `qory image check` checks no runtime and prints no runtime
+  line; Forager checks the runtime when a run starts. A prebuild copies nothing from the
+  agent image, and no image has `/qory/agent`.
 - `qory artifact pull` and the working folder of a push check take, of each artifact, the
   newest version that the run API's artifact index does not mark `cancelled`. A version
   that a cancelled run made counts for no stage, and an artifact whose versions are all
@@ -954,6 +959,12 @@ release may change what an existing document does, and states it under Upgrading
   workflow, such as `agents/demo-author` and `capture-demos`, and the fix: add a module
   that fills the role, or drop the workflow. The other failures of the same check follow
   it in the same error. Before, the line showed only the skill and the agent.
+
+### Removed
+
+- `--agent-image` of `qory run prebuild-step`, the helper that a prebuild runs behind its
+  wall. The step uses no agent image. A prebuild also no longer stops with `the agent
+  image is not pinned by digest`.
 
 ### Fixed
 
