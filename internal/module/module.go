@@ -695,7 +695,7 @@ func ReadWith(name, dir string, m *Manifest, variant string, readFile func(path 
 			if !shipped[key] {
 				kind, entry, _ := strings.Cut(key, "/")
 				needed := Describe(kind, accesskey.ShownName(entry, false))
-				return nil, fmt.Errorf("Ship %s in module %s, or remove it from the requires of the module.\n  The requires of module %s lists %s, and the module does not ship it.", needed, shown, shown, needed)
+				return nil, exports.Errorf("Ship %s in module %s, or remove it from the requires of the module.\n  The requires of module %s lists %s, and the module does not ship it.", needed, shown, shown, needed)
 			}
 		}
 	}
@@ -754,7 +754,7 @@ func ReadThrough(root *os.Root, dir, realDir string) func(path string) ([]byte, 
 		}
 		rel, err := filepath.Rel(abs, path)
 		if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
-			return nil, fmt.Errorf("Move %s inside the module. It lies outside the module, and qory reads only the module's files.", exports.HidePath(path))
+			return nil, exports.Errorf("Move %s inside the module. It lies outside the module, and qory reads only the module's files.", exports.HidePath(path))
 		}
 		inner, err := ResolveIn(root, realDir, rel)
 		if err != nil {
@@ -1049,10 +1049,11 @@ func (r *skillReader) add(at, name, path string) error {
 	return nil
 }
 
-// fits reports whether line, the first line of a refusal, has at most 100 characters
-// when [exports.ModulePlace] in it is a module as long as a refusal prints one.
+// fits reports whether line, the first line of a refusal, has at most 100 characters, with
+// [exports.ModulePlace] in it a module as long as a refusal prints one: "module " and a
+// name of [exports.NameMax] characters.
 func fits(line string) bool {
-	line = strings.ReplaceAll(line, exports.ModulePlace, strings.Repeat("m", exports.NameMax))
+	line = strings.ReplaceAll(line, exports.ModulePlace, strings.Repeat("m", len("module ")+exports.NameMax))
 	return utf8.RuneCountInString(line) <= 100
 }
 
@@ -1321,9 +1322,9 @@ func readHooks(name, rel, dir string) ([]Entry, error) {
 		}
 		if info.IsDir() {
 			sub := exports.HidePath(filepath.ToSlash(filepath.Join(rel, it.Name())))
-			fix := fmt.Sprintf("Move %s out of the hooks directory of module %s.", sub, exports.Short(name))
+			fix := fmt.Sprintf("Move %s out of the hooks directory of module %s.", sub, name)
 			if !fits(fix) {
-				fix = fmt.Sprintf("Move the directory out of the hooks directory of module %s.", exports.Short(name))
+				fix = fmt.Sprintf("Move the directory out of the hooks directory of module %s.", name)
 			}
 			return nil, exports.Refuse(fix,
 				fmt.Sprintf("%s is a directory, and a hook is one file.", sub),

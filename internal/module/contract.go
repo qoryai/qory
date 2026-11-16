@@ -43,7 +43,7 @@ func readContracts(path string, roles *yaml.Node) (map[string]string, error) {
 			}
 			at := "roles." + kind + "." + accesskey.ShownName(role, false)
 			if kind != "agents" {
-				return nil, fmt.Errorf("Set %s to one.\n  Only an agents role is a map, to give it a contract. The role is in %s.", at, path)
+				return nil, exports.Errorf("Set %s to one.\n  Only an agents role is a map, to give it a contract. The role is in %s.", at, path)
 			}
 			var fill, contract *yaml.Node
 			for k := 0; k+1 < len(value.Content); k += 2 {
@@ -53,11 +53,11 @@ func readContracts(path string, roles *yaml.Node) (map[string]string, error) {
 				case "contract":
 					contract = value.Content[k+1]
 				default:
-					return nil, fmt.Errorf("Remove key %s from %s.\n  A role's map has fill and contract. The map is in %s.", accesskey.ShownName(key, false), at, path)
+					return nil, exports.Errorf("Remove key %s from %s.\n  A role's map has fill and contract. The map is in %s.", accesskey.ShownName(key, false), at, path)
 				}
 			}
 			if fill == nil {
-				return nil, fmt.Errorf("Add fill: one or fill: many to %s.\n  A role's map sets fill. The map is in %s.", at, path)
+				return nil, exports.Errorf("Add fill: one or fill: many to %s.\n  A role's map sets fill. The map is in %s.", at, path)
 			}
 			if contract != nil {
 				clean, ok := contractPath(contract)

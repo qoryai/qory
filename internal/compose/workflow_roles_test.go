@@ -4,6 +4,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/qoryai/qory/internal/compose"
 	"github.com/qoryai/qory/internal/stack"
@@ -32,7 +33,12 @@ func workflowFiles() map[string]string {
 // workflowRefusal is the refusal of the workflow capture-demos for the role role, started
 // by entry.
 func workflowRefusal(role, entry string) string {
-	return "Add a module that fills agents/" + role + ", or drop capture-demos from the workflows and process.\n" +
+	fix := "Add a module that fills agents/" + role + ", or drop capture-demos from the workflows and process.\n"
+	if utf8.RuneCountInString(fix) > 101 {
+		// The first line passes 100 characters: the alternative moves to the next line.
+		fix = "Add a module that fills agents/" + role + ".\n  You can also drop capture-demos from the workflows and process.\n"
+	}
+	return fix +
 		"  The stack in qory-stack.yaml declares the workflow capture-demos. Its " + entry + " of module software-factory starts agents/" + role + ", and no module ships or provides that agent, and the stack does not bind it."
 }
 

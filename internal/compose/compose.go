@@ -561,20 +561,20 @@ func addPushChecks(res *Result, checkers map[string]string, dir string, root *os
 	}
 	for _, c := range checks {
 		if c.Type == verdictType {
-			return fmt.Errorf("Remove the push check for %s from module %s.\n  qory run verdict sends a verdict, and push checks do not cover it.", verdictType, shown(name))
+			return exports.Errorf("Remove the push check for %s from module %s.\n  qory run verdict sends a verdict, and push checks do not cover it.", verdictType, shown(name))
 		}
 		if other, ok := checkers[c.Type]; ok {
-			return fmt.Errorf("Remove the push check for %s from module %s or module %s.\n  A type has one push check, and both modules declare one.", c.Type, shown(other), shown(name))
+			return exports.Errorf("Remove the push check for %s from module %s or module %s.\n  A type has one push check, and both modules declare one.", c.Type, shown(other), shown(name))
 		}
 		checkers[c.Type] = name
 		program := c.Command[0]
 		shownProgram := exports.Value(filepath.ToSlash(program), false)
 		info, err := root.Stat(program)
 		if err != nil {
-			return fmt.Errorf("Add %s to module %s, or change its push check for %s.\n  Module %s has no file at %s.", shownProgram, shown(name), c.Type, shown(name), shownProgram)
+			return exports.Errorf("Add %s to module %s, or change its push check for %s.\n  Module %s has no file at %s.", shownProgram, shown(name), c.Type, shown(name), shownProgram)
 		}
 		if !info.Mode().IsRegular() {
-			return fmt.Errorf("Set the push check for %s of module %s to a program file.\n  %s is not a file.", c.Type, shown(name), shownProgram)
+			return exports.Errorf("Set the push check for %s of module %s to a program file.\n  %s is not a file.", c.Type, shown(name), shownProgram)
 		}
 		for _, e := range res.Excludes {
 			if e.Module != name || e.Path == "" {
@@ -584,8 +584,8 @@ func addPushChecks(res *Result, checkers map[string]string, dir string, root *os
 			if err != nil || entry != program && !strings.HasPrefix(program, entry+string(filepath.Separator)) {
 				continue
 			}
-			return fmt.Errorf("Keep %s/%s in module %s, or move %s out of it.\n  The program of the push check for %s is in %s/%s, and an exclude or only of module %s leaves %s/%s out.",
-				e.Kind, shown(e.Name), shown(name), shownProgram, c.Type, e.Kind, shown(e.Name), shown(name), e.Kind, shown(e.Name))
+			return exports.Errorf("%s\n  The program of the push check for %s is in %s/%s, and an exclude or only of module %s leaves %s/%s out.",
+				altFix(fmt.Sprintf("Keep %s/%s in module %s", e.Kind, shown(e.Name), shown(name)), "move "+shownProgram+" out of it"), c.Type, e.Kind, shown(e.Name), shown(name), e.Kind, shown(e.Name))
 		}
 		command := append([]string{"$QORY_HARNESS_HOME/modules/" + name + "/" + filepath.ToSlash(program)}, c.Command[1:]...)
 		res.PushChecks = append(res.PushChecks, PushCheck{Type: c.Type, Module: name, Command: command, Reads: c.Reads})
@@ -653,7 +653,7 @@ func workflowsShipped(p *stack.Stack, composed map[string]bool, base *Base, as s
 	if len(lines) == 0 {
 		return nil
 	}
-	return errors.New(strings.Join(lines, "\n"))
+	return errors.New(exports.Fit(strings.Join(lines, "\n")))
 }
 
 // exportEnv adds a module's exported variables to the result, each as
@@ -888,7 +888,7 @@ type UnresolvedError struct {
 	Lines []string
 }
 
-func (e *UnresolvedError) Error() string { return strings.Join(e.Lines, "\n") }
+func (e *UnresolvedError) Error() string { return exports.Fit(strings.Join(e.Lines, "\n")) }
 
 // checkResolved returns an error for a compose in which a role, a requirement or a
 // reference does not resolve. started are the failures of [workflowRoles], which come
@@ -1026,7 +1026,7 @@ func checkResolved(res *Result, requires map[string]map[string][]Need, dropped m
 				drop = "remove the reference from " + described(e.Kind, e.Name)
 			}
 			if x := excludeOf(res, kind, name); x != nil && x.Listed != "" {
-				lines = append(lines, fmt.Sprintf("Remove %s from the exclude of module %s, or ship it in a module of the repository.\n  %s.\n  The exclude of module %s in qory.yaml leaves %s out.", shownKey(need.Key), shown(x.Listed), entry, shown(x.Listed), described(kind, name)))
+				lines = append(lines, fmt.Sprintf("%s\n  %s.\n  The exclude of module %s in qory.yaml leaves %s out.", altFix(fmt.Sprintf("Remove %s from the exclude of module %s", shownKey(need.Key), shown(x.Listed)), "ship it in a module of the repository"), entry, shown(x.Listed), described(kind, name)))
 				continue
 			}
 			if by := leftOut(kind, name); by != "" {
@@ -1037,7 +1037,7 @@ func checkResolved(res *Result, requires map[string]map[string][]Need, dropped m
 				for _, r := range ps {
 					provided := fmt.Sprintf("%s, which module %s provides as %s.", entry, checkoutName(res, r.Module), described(kind, r.Name))
 					if x := excludeOf(res, kind, r.Name); x != nil && x.Listed != "" {
-						lines = append(lines, fmt.Sprintf("Remove %s from the exclude of module %s, or ship it in a module of the repository.\n  %s\n  The exclude of module %s in qory.yaml leaves %s out.", shownKey(kind+"/"+r.Name), shown(x.Listed), provided, shown(x.Listed), described(kind, r.Name)))
+						lines = append(lines, fmt.Sprintf("%s\n  %s\n  The exclude of module %s in qory.yaml leaves %s out.", altFix(fmt.Sprintf("Remove %s from the exclude of module %s", shownKey(kind+"/"+r.Name), shown(x.Listed)), "ship it in a module of the repository"), provided, shown(x.Listed), described(kind, r.Name)))
 						continue
 					}
 					by := checkoutName(res, leftOut(kind, r.Name))
@@ -1153,7 +1153,7 @@ func applySelection(l *module.Module, pl stack.Module, env map[string]string, re
 	for _, kind := range sel.KindNames() {
 		for _, name := range sel.Kinds[kind] {
 			if !shipped[kind+"/"+name] {
-				return nil, nil, fmt.Errorf("Remove %s/%s from the %s of module %s.\n  Module %s does not ship %s/%s.", shown(kind), shown(name), block, shown(l.Name), shown(l.Name), shown(kind), shown(name))
+				return nil, nil, exports.Errorf("Remove %s/%s from the %s of module %s.\n  Module %s does not ship %s/%s.", shown(kind), shown(name), block, shown(l.Name), shown(l.Name), shown(kind), shown(name))
 			}
 			named[kind+"/"+name] = true
 		}
@@ -1185,9 +1185,9 @@ func applySelection(l *module.Module, pl stack.Module, env map[string]string, re
 				key := kind + "/" + name
 				if _, ok := pulled[key]; !ok {
 					if !shipped[key] {
-						return nil, nil, fmt.Errorf("Remove %s from the exclude of module %s.\n  Module %s does not ship %s.", shown(key), shown(l.Name), shown(l.Name), shown(key))
+						return nil, nil, exports.Errorf("Remove %s from the exclude of module %s.\n  Module %s does not ship %s.", shown(key), shown(l.Name), shown(l.Name), shown(key))
 					}
-					return nil, nil, fmt.Errorf("Remove %s from the exclude of module %s.\n  The only of module %s does not bring in %s, so the exclude selects nothing.", shown(key), shown(l.Name), shown(l.Name), shown(key))
+					return nil, nil, exports.Errorf("Remove %s from the exclude of module %s.\n  The only of module %s does not bring in %s, so the exclude selects nothing.", shown(key), shown(l.Name), shown(l.Name), shown(key))
 				}
 				delete(pulled, key)
 			}
@@ -1242,7 +1242,7 @@ func applySelection(l *module.Module, pl stack.Module, env map[string]string, re
 	}
 	// The exported variables.
 	if sel.Env.All && len(env) == 0 {
-		return nil, nil, fmt.Errorf("Remove env from the %s of module %s.\n  Module %s exports no variable.", block, shown(l.Name), shown(l.Name))
+		return nil, nil, exports.Errorf("Remove env from the %s of module %s.\n  Module %s exports no variable.", block, shown(l.Name), shown(l.Name))
 	}
 	for _, name := range sel.Env.Names {
 		if _, ok := env[name]; !ok {
@@ -1287,7 +1287,7 @@ func applyCheckoutExclude(l *module.Module, pl stack.Module, res *Result, base *
 			if base != nil {
 				stackText += " " + base.String()
 			}
-			return fmt.Errorf("Remove %s from the exclude of module %s in qory.yaml.\n  %s composes no %s from module %s.", shownKey(key), shown(pl.BaseName), upperFirst(stackText), shownKey(key), shown(l.Name))
+			return exports.Errorf("Remove %s from the exclude of module %s in qory.yaml.\n  %s composes no %s from module %s.", shownKey(key), shown(pl.BaseName), upperFirst(stackText), shownKey(key), shown(l.Name))
 		}
 	}
 	var kept []module.Entry
@@ -1462,7 +1462,7 @@ func (e *CollisionError) Error() string {
 			b.WriteString("\n")
 		}
 	}
-	return strings.TrimRight(b.String(), "\n")
+	return exports.Fit(strings.TrimRight(b.String(), "\n"))
 }
 
 // flowBlock writes an exclude in YAML's flow form, kinds sorted: {agents: [a], skills:

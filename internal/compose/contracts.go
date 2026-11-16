@@ -96,7 +96,7 @@ func checkContracts(res *Result, opened []openedModule) error {
 	if len(blocks) == 0 {
 		return nil
 	}
-	return errors.New(strings.Join(blocks, "\n"))
+	return errors.New(exports.Fit(strings.Join(blocks, "\n")))
 }
 
 // memberRole is the member of the group role that fills it with the entry named member,
@@ -232,6 +232,15 @@ func itemLines(lists []string) string {
 // fits reports whether line, the first line of a refusal, has at most 100 characters.
 func fits(line string) bool { return utf8.RuneCountInString(line) <= 100 }
 
+// altFix is the fix line "<main>, or <alt>." when it fits, and otherwise the fix line
+// "<main>." with a second line that has the alternative: "  You can also <alt>."
+func altFix(main, alt string) string {
+	if fix := main + ", or " + alt + "."; fits(fix) {
+		return fix
+	}
+	return main + ".\n  You can also " + alt + "."
+}
+
 // checkAgent is a block for each contract of role that the agent e, of the composed
 // module m, lacks a part of. member is nil for a single role, and for a group role the
 // member e fills, see [memberHead].
@@ -262,8 +271,8 @@ func checkAgent(res *Result, e Entry, m Module, role string, member *Role, contr
 			continue
 		}
 		contract := exports.Value(c.Path, false) + " of module " + checkoutName(res, c.Module)
-		block := fmt.Sprintf("Complete agent %s of module %s, or bind %s to another agent.\n  The contract %s requires these parts, which %s lacks:",
-			shown(e.Name), checkoutName(res, e.Module), bindKey(role), contract, exports.Value(file, false))
+		block := altFix(fmt.Sprintf("Complete agent %s of module %s", shown(e.Name), checkoutName(res, e.Module)), fmt.Sprintf("bind %s to another agent", bindKey(role))) +
+			fmt.Sprintf("\n  The contract %s requires these parts, which %s lacks:", contract, exports.Value(file, false))
 		tail := ""
 		if member != nil {
 			block, tail = memberHead(res, e, m, *member, contract, exports.Value(file, false))
@@ -375,7 +384,7 @@ func readContracts(o openedModule) ([]roleContract, error) {
 		path := o.m.Contracts[role]
 		shownPath := exports.Value(filepath.ToSlash(path), false)
 		where := shownPath + " of module " + shown(name)
-		linked := fmt.Errorf("Replace %s with a file inside the module.\n  It is an absolute link, or a link that leads out of the module, and qory reads only the module's files.", where)
+		linked := exports.Errorf("Replace %s with a file inside the module.\n  It is an absolute link, or a link that leads out of the module, and qory reads only the module's files.", where)
 		inner, err := path, error(nil)
 		if o.root != nil {
 			inner, err = module.ResolveIn(o.root, o.realDir, path)
@@ -389,7 +398,7 @@ func readContracts(o openedModule) ([]roleContract, error) {
 			case errors.Is(err, module.ErrLeadsOut):
 				return nil, linked
 			case errors.Is(err, module.ErrTooManyLinks):
-				return nil, fmt.Errorf("Replace %s with a file inside the module.\n  The path passes through more than 40 links.", where)
+				return nil, exports.Errorf("Replace %s with a file inside the module.\n  The path passes through more than 40 links.", where)
 			case err != nil:
 				return nil, err
 			}
@@ -402,12 +411,12 @@ func readContracts(o openedModule) ([]roleContract, error) {
 		case leavesRoot(root, err):
 			return nil, linked
 		case errors.Is(err, fs.ErrNotExist):
-			return nil, fmt.Errorf("Add %s to module %s, or remove contract from roles.%s.\n  %s sets roles.%s.contract to %s, and the module has no file at that path.",
-				shownPath, shown(name), shown(strings.Replace(role, "/", ".", 1)), module.ManifestName, shown(strings.Replace(role, "/", ".", 1)), shownPath)
+			return nil, exports.Errorf("%s\n  %s sets roles.%s.contract to %s, and the module has no file at that path.",
+				altFix(fmt.Sprintf("Add %s to module %s", shownPath, shown(name)), "remove contract from roles."+shown(strings.Replace(role, "/", ".", 1))), module.ManifestName, shown(strings.Replace(role, "/", ".", 1)), shownPath)
 		case err != nil:
 			return nil, exports.HideError(err)
 		case info.IsDir():
-			return nil, fmt.Errorf("Point the contract of %s in module %s at a file.\n  %s is a directory.", shownKey(role), shown(name), shownPath)
+			return nil, exports.Errorf("Point the contract of %s in module %s at a file.\n  %s is a directory.", shownKey(role), shown(name), shownPath)
 		}
 		data, err := root.ReadFile(inner)
 		if leavesRoot(root, err) {

@@ -298,7 +298,8 @@ func TestExtendSaysWhichExcludeLeftARequirementOut(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err := composeExtending(t, dir)
-	want := "Remove skills/explore-a-ticket from the exclude of module core, or ship it in a module of the repository.\n" +
+	want := "Remove skills/explore-a-ticket from the exclude of module core.\n" +
+		"  You can also ship it in a module of the repository.\n" +
 		"  The command ship of module core references skill explore-a-ticket.\n" +
 		"  The exclude of module core in qory.yaml leaves skill explore-a-ticket out."
 	if err == nil || err.Error() != want {
