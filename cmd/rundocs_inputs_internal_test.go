@@ -131,7 +131,7 @@ func TestACopyOfTheInputsOverAFileInTheHomeStops(t *testing.T) {
 		t.Errorf("the file in the home is %q, want it as it was", data)
 	}
 	lines := strings.Split(inputsNotCopied(home, err).Error(), "\n")
-	want := "Remove inputs.json from the home or unset --home and harness.home, then take the work item in again."
+	want := "Remove inputs.json from the home, or omit --home and harness.home, then take the work item in again."
 	if len(lines) != 2 || lines[0] != want || !strings.Contains(lines[1], home) || !strings.HasSuffix(lines[1], codeUsed) {
 		t.Errorf("the error's lines are %q, want %q, then a line with %s", lines, want, home)
 	}
