@@ -51,6 +51,7 @@ import (
 	"github.com/qoryai/qory/internal/render"
 	"github.com/qoryai/qory/internal/report"
 	"github.com/qoryai/qory/internal/runcopy"
+	"github.com/qoryai/qory/internal/runtimeinstall"
 	"github.com/qoryai/qory/internal/secretmask"
 	"github.com/qoryai/qory/internal/source"
 	"github.com/qoryai/qory/internal/statusfd"
@@ -858,6 +859,25 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				}
 				return nil
 			}
+			// installWork installs the program of the session's runtime, see [installRuntime],
+			// within the run's time limit, prints the installed version, and gives the
+			// session the install, see [useInstalledRuntime].
+			installWork := func() error {
+				installCtx, cancel := ctx, func() {}
+				if timeout > 0 {
+					installCtx, cancel = context.WithDeadline(ctx, opened.Add(timeout))
+				}
+				defer cancel()
+				in, err := installRuntime(installCtx, run, name, state)
+				if err != nil {
+					return &runLineError{codeLine(installFailed(err))}
+				}
+				if in != nil {
+					said(installedLine(*in))
+					useInstalledRuntime(&spec, in)
+				}
+				return nil
+			}
 			// hostWork is the run's work on this machine before its session joins, in two
 			// steps of the run's record: the fetch, when the run configuration lists
 			// repositories, and the compose. When the run configuration lists repositories,
@@ -952,6 +972,13 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				})
 				if err != nil {
 					return err
+				}
+				// A walled run installs its runtime once the compose named it, and before
+				// prepareSession wraps the session's command for the wall.
+				if walled {
+					if err := installWork(); err != nil {
+						return err
+					}
 				}
 				// A home whose push checks qory cannot run stops the run here, before the
 				// setup and the agent. The run's forwarder checks the POSTs from behind the
@@ -1496,6 +1523,9 @@ type runSpec struct {
 	// engineProxyFile is wall.engine_proxy_file of a walled run with an engine proxy,
 	// whose engine lock the run holds around its image step: see [withEngineLock].
 	engineProxyFile string
+	// installed is the runtime qory run installed for the session, nil for none: see
+	// [useInstalledRuntime].
+	installed *runtimeinstall.Installed
 }
 
 // openedRun is a run open at its gateway, as qory run uses it: a [*session.Run], as

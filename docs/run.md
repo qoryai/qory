@@ -772,6 +772,52 @@ describes another runtime, or replaces the one shipped.
 A runtime that nothing describes still runs. The run, its log and its egress are
 recorded. The session's events are not.
 
+### The runtime's program
+
+A walled run of Claude Code, the runtime `claude`, installs the runtime's program on the
+machine before its session starts: after the compose, and before the image step. The
+source of the releases is not set in this version of qory, so a run installs nothing
+and starts the program that its image contains.
+
+With a source, `qory run` gets the newest release of Claude Code from it: the version,
+npm's sha512 checksum, and npm's tarball of the package. It keeps each version in
+`<state>/runtimes/claude/<version>/`, where `<state>` is `$XDG_STATE_HOME/qory`, or
+`~/.local/state/qory` without `XDG_STATE_HOME`. The folder contains `bin/claude`, mode
+`0755`, and `integrity`, the checksum of the tarball it came from.
+
+1. When the version's folder exists, the run uses it and reads no tarball: a later run on
+   the same machine with the same newest version downloads nothing.
+2. Otherwise qory reads the tarball into a temporary file in `<state>/runtimes/claude/`,
+   at most 1 GiB, and checks it against the checksum. It extracts only the entry
+   `package/claude`, a regular file of at most 1 GiB, into a temporary folder; the
+   tarball may unpack to at most 4 GiB. No other entry is written, and a link at
+   `package/claude` is refused. qory then renames the temporary folder to the version's
+   folder, so a folder at that path is always a complete install.
+
+Every session of the run uses that one version, and the folder stays until the run ends.
+qory removes no version's folder.
+
+Once the program is installed, `qory run` prints one line:
+
+```text
+qory run: installed claude 2.1.320
+```
+
+If the install fails, the run closes `failed` with -1 before the image step, no session
+starts, and `qory run` exits 1 with the error, whose first line is the fix. A tarball that
+does not match its checksum stops the run with:
+
+```text
+qory run: check the source of the runtime's releases: the tarball of claude 2.1.320 does not match its checksum sha512-<checksum>
+```
+
+A version's folder that was not installed from the tarball with the release's checksum
+stops the run with:
+
+```text
+qory run: remove <state>/runtimes/claude/2.1.320 once no run uses it, then run again: it was not installed from the tarball with the checksum sha512-<checksum>
+```
+
 ## Hosts a module declares
 
 A module declares the hosts it reaches, under `egress` in its manifest. The compose

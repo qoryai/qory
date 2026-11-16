@@ -18,6 +18,12 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Added
 
+- A walled run of Claude Code can install the runtime's program before its session:
+  qory checks npm's sha512 checksum of the tarball, extracts only `package/claude` into
+  `<state>/runtimes/claude/<version>/bin/claude`, reuses a version's folder that an
+  earlier run installed, and prints `qory run: installed claude <version>`. This version
+  of qory has no source of releases set, so a run installs nothing yet. See The
+  runtime's program in `docs/run.md`.
 - A run of a work item works on the branch `qory/<work item id>`, at the commit of the
   artifact `branch` that its stage starts from. The harness still comes from
   `target_version`.
