@@ -33,21 +33,21 @@ func (f folder) complete(version, integrity string) (bool, error) {
 		return false, nil
 	}
 	if err != nil {
-		return false, fmt.Errorf("check that qory can read its state folder: %w", err)
+		return false, fmt.Errorf("Check that qory can read its state folder: %w", err)
 	}
 	if !info.IsDir() {
-		return false, fmt.Errorf("remove the version's entry in the runtimes folder, then run again\n"+
+		return false, fmt.Errorf("Remove the version's entry in the runtimes folder, then run again\n"+
 			"%s is where %s %s is installed, and it is not a folder.", dir, f.runtime, version)
 	}
 	program := filepath.Join(dir, "bin", f.runtime)
 	p, err := os.Lstat(program)
 	if err != nil || !p.Mode().IsRegular() || p.Mode().Perm()&0o555 != 0o555 {
-		return false, fmt.Errorf("remove the version's folder once no run uses it, then run again\n"+
+		return false, fmt.Errorf("Remove the version's folder once no run uses it, then run again\n"+
 			"%s has no program bin/%s that everyone can read and run.", dir, f.runtime)
 	}
 	held, err := readSmall(filepath.Join(dir, checksumFile))
 	if err != nil || strings.TrimSpace(held) != integrity {
-		return false, fmt.Errorf("remove the version's folder once no run uses it, then run again\n"+
+		return false, fmt.Errorf("Remove the version's folder once no run uses it, then run again\n"+
 			"%s was not installed from the tarball with the checksum %s", dir, integrity)
 	}
 	return true, nil
@@ -67,7 +67,7 @@ func readSmall(path string) (string, error) {
 }
 
 // textState starts each error of a folder qory cannot write.
-const textState = "check that qory can write its state folder: "
+const textState = "Check that qory can write its state folder: "
 
 // install reads the tarball of rel into a temporary file in the folder and checks it
 // against sum, the sha512 digest of rel's checksum. It extracts the program into a
@@ -135,7 +135,7 @@ func download(ctx context.Context, rel Release, sum []byte, w io.Writer, what st
 		return check
 	}
 	if err != nil {
-		return fmt.Errorf("run again\nThe download of %s stopped: %w", what, err)
+		return fmt.Errorf("Run again\nThe download of %s stopped: %w", what, err)
 	}
 	if n > maxTarball {
 		return fmt.Errorf(textRelease+"The tarball of %s has more than %d bytes", what, maxTarball)

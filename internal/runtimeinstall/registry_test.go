@@ -89,7 +89,7 @@ func TestTheRegistryFetchRefuses(t *testing.T) {
 			bad := bytes.Clone(good)
 			bad[len(bad)/2] ^= 0xff
 			r.Publish("2.1.320", true, map[string]rt.Layer{"amd64": {Tarball: good, Served: bad}})
-		}, "ask the instance admin to check the registry's runtime cache\nThe layer of claude 2.1.320 does not match its digest sha256:"},
+		}, "Ask Qory Apiary's instance admin to check the registry's runtime cache\nThe layer of claude 2.1.320 does not match its digest sha256:"},
 		{"sha512 checksum", func(t *testing.T, r *rt.Registry) {
 			r.Publish("2.1.320", true, map[string]rt.Layer{"amd64": {Tarball: rt.PlainTarball(t, "2.1.320"), Integrity: rt.Integrity([]byte("another tarball"))}})
 		}, "The tarball of claude 2.1.320 does not match the checksum sha512-"},
@@ -98,7 +98,7 @@ func TestTheRegistryFetchRefuses(t *testing.T) {
 			newest := r.Tag("newest")
 			r.Publish("2.1.320", false, map[string]rt.Layer{"amd64": {Tarball: rt.PlainTarball(t, "other")}})
 			r.SetTag("newest", newest)
-		}, "ask the instance admin to check the registry's runtime cache\nshared/runtimes/claude:2.1.320 has the digest sha256:"},
+		}, "Ask Qory Apiary's instance admin to check the registry's runtime cache\nshared/runtimes/claude:2.1.320 has the digest sha256:"},
 		{"version that climbs", func(t *testing.T, r *rt.Registry) {
 			r.Publish("..", true, map[string]rt.Layer{"amd64": {Tarball: rt.PlainTarball(t, "x")}})
 		}, `shared/runtimes/claude:newest has the version "..", and a version is 1 to 64 letters`},
@@ -117,7 +117,7 @@ func TestTheRegistryFetchRefuses(t *testing.T) {
 			if err == nil || !strings.Contains(err.Error(), c.want) {
 				t.Fatalf("err = %v, want one that contains %q", err, c.want)
 			}
-			if !strings.HasPrefix(err.Error(), "ask the instance admin") && !strings.HasPrefix(err.Error(), "check the source") {
+			if !strings.HasPrefix(err.Error(), "Ask Qory Apiary's instance admin") && !strings.HasPrefix(err.Error(), "Check the source") {
 				t.Fatalf("err = %v, want one that starts with its fix", err)
 			}
 			if first, _, _ := strings.Cut(err.Error(), "\n"); len(first) > 100 {
@@ -139,7 +139,7 @@ func TestANewestTheRegistryNeverHeldStartsWithTheFix(t *testing.T) {
 		t.Fatalf("err = %v, want ErrNotCached", err)
 	}
 	first, rest, _ := strings.Cut(err.Error(), "\n")
-	if want := "check that the instance's registry reaches the publisher of claude, then run again"; first != want || len(first) > 100 {
+	if want := "Check that the instance's registry reaches the publisher of claude, then run again"; first != want || len(first) > 100 {
 		t.Fatalf("first line = %q, want %q", first, want)
 	}
 	if want := "The registry has never held claude and could not fetch it: shared/runtimes/claude:newest returned 404."; rest != want {
@@ -207,7 +207,7 @@ func TestACacheThatStaysUnavailableEndsWithTheFix(t *testing.T) {
 				t.Fatal("the install succeeded")
 			}
 			first, rest, _ := strings.Cut(err.Error(), "\n")
-			if want := "run again later: " + f.reg.Host() + " is still filling its cache of claude newest"; first != want || len(first) > 100 {
+			if want := "Run again later: " + f.reg.Host() + " is still filling its cache of claude newest"; first != want || len(first) > 100 {
 				t.Fatalf("first line = %q, want %q", first, want)
 			}
 			if want := "The registry's cache had no shared/runtimes/claude:newest after 25m0s: the registry returned 503."; rest != want {
@@ -234,7 +234,7 @@ func TestAnotherStatusIsNotRetried(t *testing.T) {
 		Fetch:   runtimeinstall.RegistryFetch(http.DefaultClient, strings.TrimPrefix(reg.URL, "http://"), "amd64", ""),
 		Runtime: "claude", Folder: t.TempDir(),
 	})
-	if err == nil || !strings.HasPrefix(err.Error(), "check that the run's proxy reaches the registry at ") || len(*waits) != 0 {
+	if err == nil || !strings.HasPrefix(err.Error(), "Check that the run's proxy reaches the registry at ") || len(*waits) != 0 {
 		t.Fatalf("err = %v, waits = %v", err, *waits)
 	}
 }
@@ -270,17 +270,17 @@ func TestATokenRealmElsewhereIsRefused(t *testing.T) {
 		want     string
 	}{
 		{"the registry's host", "http://localhost:%PORT%", func(registry, _ string) string { return "http://" + registry + "/registry/token" },
-			"ask the instance admin to put the registry's token realm at http://localhost:%PORT%/registry/token\nIt is http://%REGISTRY%/registry/token"},
+			"Ask Qory Apiary's instance admin to put the registry's token realm at http://localhost:%PORT%/registry/token\nIt is http://%REGISTRY%/registry/token"},
 		{"another host", "http://localhost:%PORT%", func(_, port string) string { return "http://127.0.0.1:" + port + "/registry/token" },
-			"ask the instance admin to put the registry's token realm at http://localhost:%PORT%/registry/token\nIt is http://127.0.0.1:%PORT%/registry/token"},
+			"Ask Qory Apiary's instance admin to put the registry's token realm at http://localhost:%PORT%/registry/token\nIt is http://127.0.0.1:%PORT%/registry/token"},
 		{"another port", "http://localhost:%PORT%", func(_, _ string) string { return "http://localhost:1/registry/token" },
-			"ask the instance admin to put the registry's token realm at http://localhost:%PORT%/registry/token\nIt is http://localhost:1/registry/token"},
+			"Ask Qory Apiary's instance admin to put the registry's token realm at http://localhost:%PORT%/registry/token\nIt is http://localhost:1/registry/token"},
 		{"http when the instance is https", "https://localhost:%PORT%", func(_, port string) string { return "http://localhost:" + port + "/registry/token" },
-			"ask the instance admin to put the registry's token realm at https://localhost:%PORT%/registry/token\nIt is http://localhost:%PORT%/registry/token"},
+			"Ask Qory Apiary's instance admin to put the registry's token realm at https://localhost:%PORT%/registry/token\nIt is http://localhost:%PORT%/registry/token"},
 		{"another path", "http://localhost:%PORT%", func(_, port string) string { return "http://localhost:" + port + "/api/token" },
-			"ask the instance admin to put the registry's token realm at http://localhost:%PORT%/registry/token\nIt is http://localhost:%PORT%/api/token"},
+			"Ask Qory Apiary's instance admin to put the registry's token realm at http://localhost:%PORT%/registry/token\nIt is http://localhost:%PORT%/api/token"},
 		{"a longer path", "http://localhost:%PORT%", func(_, port string) string { return "http://localhost:" + port + "/registry/token/x" },
-			"ask the instance admin to put the registry's token realm at http://localhost:%PORT%/registry/token\nIt is http://localhost:%PORT%/registry/token/x"},
+			"Ask Qory Apiary's instance admin to put the registry's token realm at http://localhost:%PORT%/registry/token\nIt is http://localhost:%PORT%/registry/token/x"},
 		{"no address of the instance", "", func(_, port string) string { return "http://localhost:" + port + "/registry/token" },
 			"Set gateway.server.url in forager.yaml to the address of Qory Apiary\nThe realm is http://localhost:%PORT%/registry/token, and the run has no address of Qory Apiary to check it against."},
 	} {
@@ -322,7 +322,7 @@ func TestAProxyThatRefusesIsNotRetried(t *testing.T) {
 	_, err = runtimeinstall.Install(context.Background(), runtimeinstall.Options{
 		Fetch: runtimeinstall.RegistryFetch(client, f.reg.Host(), "amd64", f.reg.Instance()), Runtime: "claude", Folder: f.folder,
 	})
-	if err == nil || !strings.HasPrefix(err.Error(), "check that the run's proxy reaches the registry at "+f.reg.Host()) || f.proxy.Refusals() == 0 || len(*waits) != 0 {
+	if err == nil || !strings.HasPrefix(err.Error(), "Check that the run's proxy reaches the registry at "+f.reg.Host()) || f.proxy.Refusals() == 0 || len(*waits) != 0 {
 		t.Fatalf("err = %v, refusals = %d, waits = %v", err, f.proxy.Refusals(), *waits)
 	}
 }
@@ -383,7 +383,7 @@ func TestARegistryThatNeverRespondsEndsWithTheCause(t *testing.T) {
 		t.Fatal("the install succeeded")
 	}
 	first, rest, _ := strings.Cut(err.Error(), "\n")
-	if want := "run again later: " + host + " is still filling its cache of claude newest"; first != want {
+	if want := "Run again later: " + host + " is still filling its cache of claude newest"; first != want {
 		t.Fatalf("first line = %q, want %q", first, want)
 	}
 	if want := "The registry's cache had no shared/runtimes/claude:newest after 25m0s: the request got no response ("; !strings.HasPrefix(rest, want) {
@@ -406,7 +406,7 @@ func TestAConnectTheProxyRefusesIsNotRetried(t *testing.T) {
 		Fetch:   runtimeinstall.RegistryFetch(client, "registry.example", "amd64", ""),
 		Runtime: "claude", Folder: t.TempDir(),
 	})
-	if err == nil || !strings.HasPrefix(err.Error(), "check that the run's proxy reaches the registry at registry.example\n") ||
+	if err == nil || !strings.HasPrefix(err.Error(), "Check that the run's proxy reaches the registry at registry.example\n") ||
 		!strings.Contains(err.Error(), "the run's proxy returned 403 to the CONNECT to registry.example:443") || proxy.Refusals() != 1 || len(*waits) != 0 {
 		t.Fatalf("err = %v, refusals = %d, waits = %v", err, proxy.Refusals(), *waits)
 	}

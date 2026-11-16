@@ -117,18 +117,18 @@ func (i Installed) Program() string { return filepath.Join(i.Dir, "bin", i.Runti
 
 // textRelease is the first line of each refusal of what the fetch returned: the fix. The
 // cause follows on the second line.
-const textRelease = "check the source of the runtime's releases\n"
+const textRelease = "Check the source of the runtime's releases\n"
 
 // Install installs the runtime o names, as the package's documentation says, and
 // returns it. It takes as long as ctx allows. Every error's text starts with what to
 // fix.
 func Install(ctx context.Context, o Options) (Installed, error) {
 	if !runtimeShape.MatchString(o.Runtime) {
-		return Installed{}, fmt.Errorf("name the runtime with a lowercase letter, then lowercase letters, digits or -\n"+
+		return Installed{}, fmt.Errorf("Name the runtime with a lowercase letter, then lowercase letters, digits or -\n"+
 			"%q is not a runtime's name, which has 1 to 64 characters.", o.Runtime)
 	}
 	if !filepath.IsAbs(o.Folder) {
-		return Installed{}, fmt.Errorf("keep runtimes in an absolute folder\n%q is not one.", o.Folder)
+		return Installed{}, fmt.Errorf("Keep runtimes in an absolute folder\n%q is not one.", o.Folder)
 	}
 	rel, err := o.Fetch(ctx, o.Runtime)
 	if err != nil {

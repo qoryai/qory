@@ -311,10 +311,10 @@ func TestARunCodeFileThatHoldsNoCodeIsRefused(t *testing.T) {
 		{dir, "give --run-code-file a regular file: %s is not one"},
 		{codeFile(t, ""), "write the run code into %s: the file is empty"},
 		{codeFile(t, "\n"), "write the run code into %s: the file is empty"},
-		{codeFile(t, g.code()+"\n\n"), "write the run code, then at most the lines `registry <host>`, `apiary <url>` and `runtimes <folder>`\nThe file %s contains more than that."},
-		{codeFile(t, g.code()+"\r\n"), "write the run code, then at most the lines `registry <host>`, `apiary <url>` and `runtimes <folder>`\nThe file %s contains more than that."},
-		{codeFile(t, " "+g.code()), "write the run code, then at most the lines `registry <host>`, `apiary <url>` and `runtimes <folder>`\nThe file %s contains more than that."},
-		{codeFile(t, strings.Repeat("A", 1025)), "write the run code, then at most the lines `registry <host>`, `apiary <url>` and `runtimes <folder>`\nThe file %s contains more than that."},
+		{codeFile(t, g.code()+"\n\n"), "Write the run code, then at most the lines `registry <host>`, `apiary <url>` and `runtimes <folder>`\nThe file %s contains more than that."},
+		{codeFile(t, g.code()+"\r\n"), "Write the run code, then at most the lines `registry <host>`, `apiary <url>` and `runtimes <folder>`\nThe file %s contains more than that."},
+		{codeFile(t, " "+g.code()), "Write the run code, then at most the lines `registry <host>`, `apiary <url>` and `runtimes <folder>`\nThe file %s contains more than that."},
+		{codeFile(t, strings.Repeat("A", 1025)), "Write the run code, then at most the lines `registry <host>`, `apiary <url>` and `runtimes <folder>`\nThe file %s contains more than that."},
 		{codeFile(t, "qecr_F1XT-0RE0-0000.x"), "write a run code (qecr_…) into %s: the file does not contain an enrolment code of Qory Apiary"},
 		{codeFile(t, "qecn_F1XT-0RE0-0000-0000-0000-0000-00."+g.signer.Fingerprint()), "write a run code (qecr_…) into %s: the file contains the enrolment code of an access key of kind node"},
 	} {
@@ -652,7 +652,7 @@ func TestARunCodeOnStdinThatContainsNoCodeIsRefused(t *testing.T) {
 		content, want string
 	}{
 		{"", "write the run code into /dev/stdin: the file is empty"},
-		{g.code() + "\n" + g.code() + "\n", "write the run code, then at most the lines `registry <host>`, `apiary <url>` and `runtimes <folder>`\nThe file /dev/stdin contains more than that."},
+		{g.code() + "\n" + g.code() + "\n", "Write the run code, then at most the lines `registry <host>`, `apiary <url>` and `runtimes <folder>`\nThe file /dev/stdin contains more than that."},
 	} {
 		in := stdinPipe(t, c.content)
 		out, err := runReading(t, in, "run", "--run-code-file", "/dev/stdin", "--gateway", g.URL)

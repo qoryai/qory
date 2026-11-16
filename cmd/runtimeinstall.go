@@ -29,7 +29,7 @@ const installedRuntime = "claude"
 
 // textNoRuntimeProxy is the line of a run whose host proxy, through which qory reads the
 // runtime, did not open, with the runtime and Forager's error after it.
-const textNoRuntimeProxy = "run again: the run's host proxy, through which qory installs %s, did not open: %s"
+const textNoRuntimeProxy = "Run again: the run's host proxy, through which qory installs %s, did not open: %s"
 
 // The seams of the install that a test replaces: the npm registry, whether a run
 // installs at all, which the tests of other parts of qory run turn off, and where the

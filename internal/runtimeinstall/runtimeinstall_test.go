@@ -182,7 +182,7 @@ func TestInstallRefuses(t *testing.T) {
 	}{
 		{"wrong integrity", func(t *testing.T, s *rt.Source) {
 			s.PublishWith("2.1.320", rt.PlainTarball(t, "2.1.320"), rt.Integrity([]byte("another tarball")))
-		}, "check the source of the runtime's releases\nThe tarball of claude 2.1.320 does not match the checksum sha512-"},
+		}, "Check the source of the runtime's releases\nThe tarball of claude 2.1.320 does not match the checksum sha512-"},
 		{"tarball changed after its checksum", func(t *testing.T, s *rt.Source) {
 			good := rt.PlainTarball(t, "2.1.320")
 			bad := bytes.Clone(good)
@@ -222,7 +222,7 @@ func TestInstallRefuses(t *testing.T) {
 			if err == nil || !strings.Contains(err.Error(), c.want) {
 				t.Fatalf("err = %v, want one that contains %q", err, c.want)
 			}
-			if !strings.HasPrefix(err.Error(), "check the source of the runtime's releases\n") {
+			if !strings.HasPrefix(err.Error(), "Check the source of the runtime's releases\n") {
 				t.Fatalf("err = %v, want one that starts with its fix", err)
 			}
 			if first, _, _ := strings.Cut(err.Error(), "\n"); len(first) > 100 {
@@ -265,7 +265,7 @@ func TestAFolderOfAnotherTarballIsRefused(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = in.install()
-	want := "remove the version's folder once no run uses it, then run again\n" + got.Dir + " was not installed from the tarball with the checksum " + rt.Integrity(rt.PlainTarball(t, "2.1.320"))
+	want := "Remove the version's folder once no run uses it, then run again\n" + got.Dir + " was not installed from the tarball with the checksum " + rt.Integrity(rt.PlainTarball(t, "2.1.320"))
 	if err == nil || err.Error() != want {
 		t.Fatalf("err = %v, want %s", err, want)
 	}
@@ -293,7 +293,7 @@ func TestAProgramReplacedByALinkIsRefused(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = in.install()
-	if err == nil || !strings.HasPrefix(err.Error(), "remove the version's folder once no run uses it, then run again\n"+got.Dir+" has no program bin/claude") {
+	if err == nil || !strings.HasPrefix(err.Error(), "Remove the version's folder once no run uses it, then run again\n"+got.Dir+" has no program bin/claude") {
 		t.Fatalf("err = %v", err)
 	}
 }
@@ -323,7 +323,7 @@ func TestOversizedTarballsAreRefused(t *testing.T) {
 			in := newInstaller(t)
 			in.src.Publish("2.1.320", rt.Tarball(t, c.entries...))
 			_, err := in.install()
-			if err == nil || !strings.Contains(err.Error(), c.want) || !strings.HasPrefix(err.Error(), "check the source of the runtime's releases\n") {
+			if err == nil || !strings.Contains(err.Error(), c.want) || !strings.HasPrefix(err.Error(), "Check the source of the runtime's releases\n") {
 				t.Fatalf("err = %v, want one that starts with its fix and contains %q", err, c.want)
 			}
 			if got := files(t, in.folder); len(got) > 1 {

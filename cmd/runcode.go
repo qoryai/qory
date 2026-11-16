@@ -267,7 +267,7 @@ func runCodeFrom(r io.Reader, file string) (string, runtimeinstall.Machine, erro
 	case len(raw) == 0 && !found:
 		return "", none, input(fmt.Errorf("write the run code into %s: the file is empty", shown))
 	case len(b) > maxRunCodeFile || bytes.ContainsAny(raw, " \t\r\n\v\f") || !ok || len(raw) == 0:
-		return "", none, input(fmt.Errorf("write the run code, then at most the lines `registry <host>`, `apiary <url>` and `runtimes <folder>`\n"+
+		return "", none, input(fmt.Errorf("Write the run code, then at most the lines `registry <host>`, `apiary <url>` and `runtimes <folder>`\n"+
 			"The file %s contains more than that.", shown))
 	}
 	code, err := accesskey.NormaliseCode(string(raw))

@@ -53,7 +53,7 @@ const (
 
 // textCache is the first line of each refusal of what the registry's runtime cache
 // contains: the fix. The cause follows on the second line.
-const textCache = "ask the instance admin to check the registry's runtime cache\n"
+const textCache = "Ask Qory Apiary's instance admin to check the registry's runtime cache\n"
 
 // ErrNotCached is the error of a registry that returned 404 for newest: its cache never
 // held the runtime, and the publisher was unreachable when the registry asked.
@@ -78,7 +78,7 @@ var ErrNotCached = errors.New("the registry has no copy of the runtime")
 func RegistryFetch(client *http.Client, host, arch, instance string) Fetch {
 	return func(ctx context.Context, runtime string) (Release, error) {
 		if arch != "amd64" && arch != "arm64" {
-			return Release{}, fmt.Errorf("run on an amd64 or arm64 machine\nThe registry has %s for linux/amd64 and linux/arm64, and this machine is %s", runtime, arch)
+			return Release{}, fmt.Errorf("Run on an amd64 or arm64 machine\nThe registry has %s for linux/amd64 and linux/arm64, and this machine is %s", runtime, arch)
 		}
 		r := &registry{client: client, host: host, instance: instance, runtime: runtime, repository: "shared/runtimes/" + runtime, started: now()}
 		return r.resolve(ctx, arch)
@@ -147,7 +147,7 @@ func (r *registry) resolve(ctx context.Context, arch string) (Release, error) {
 	body, digest, err := r.manifest(ctx, newestTag, newestTag)
 	var status *statusError
 	if errors.As(err, &status) && status.status == http.StatusNotFound {
-		return Release{}, &notCachedError{text: fmt.Sprintf("check that the instance's registry reaches the publisher of %s, then run again\n"+
+		return Release{}, &notCachedError{text: fmt.Sprintf("Check that the instance's registry reaches the publisher of %s, then run again\n"+
 			"The registry has never held %s and could not fetch it: %s.", r.runtime, r.runtime, status)}
 	}
 	if err != nil {
@@ -388,7 +388,7 @@ func (r *registry) get(ctx context.Context, path, accept, what, ref string) (*ht
 	for n := 0; ; {
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, scheme(r.host)+"://"+r.host+path, nil)
 		if err != nil {
-			return nil, fmt.Errorf("set pool.registry to an image name under the instance's registry\n%w", err)
+			return nil, fmt.Errorf("Set pool.registry to an image name under the instance's registry\n%w", err)
 		}
 		if accept != "" {
 			req.Header.Set("Accept", accept)
@@ -429,7 +429,7 @@ func (r *registry) get(ctx context.Context, path, accept, what, ref string) (*ht
 			} else {
 				cause = "the registry returned " + strconv.Itoa(resp.StatusCode)
 			}
-			return nil, fmt.Errorf("run again later: %s is still filling its cache of %s %s\n"+
+			return nil, fmt.Errorf("Run again later: %s is still filling its cache of %s %s\n"+
 				"The registry's cache had no %s after %s: %s.", r.host, r.runtime, ref, what, retryLimit, cause)
 		}
 		if err := sleep(ctx, d); err != nil {
@@ -449,25 +449,25 @@ func (r *registry) refused(what string, status int, location string) error {
 		if u, perr := url.Parse(location); perr == nil && u.Host != "" {
 			to = u.Host
 		}
-		return fmt.Errorf("ask the instance admin to make the registry serve this with no redirect, which qory does not follow\n%w\nThe Location is on %s.", err, to)
+		return fmt.Errorf("Ask Qory Apiary's instance admin to make the registry serve this with no redirect\n%w, which qory does not follow\nThe Location is on %s.", err, to)
 	}
 	switch status {
 	case http.StatusNotFound:
 		return fmt.Errorf(textCache+"%w", err)
 	case http.StatusUnauthorized, http.StatusForbidden:
-		return fmt.Errorf("check that Qory Apiary lets the run pull %s\n%w", r.repository, err)
+		return fmt.Errorf("Check that Qory Apiary lets the run pull %s\n%w", r.repository, err)
 	case http.StatusTooManyRequests:
-		return fmt.Errorf("run again once the registry's rate limit resets\n%w", err)
+		return fmt.Errorf("Run again once the registry's rate limit resets\n%w", err)
 	}
-	return fmt.Errorf("check that the run's proxy reaches the registry at %s\n%w", r.host, err)
+	return fmt.Errorf("Check that the run's proxy reaches the registry at %s\n%w", r.host, err)
 }
 
 // failed is the error of the request what that got no response.
 func (r *registry) failed(what string, err error) error {
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-		return fmt.Errorf("run again with more time\nThe run ended before the registry at %s returned %s: %w", r.host, what, err)
+		return fmt.Errorf("Run again with more time\nThe run ended before the registry at %s returned %s: %w", r.host, what, err)
 	}
-	return fmt.Errorf("check that the run's proxy reaches the registry at %s\n%s failed: %w", r.host, what, err)
+	return fmt.Errorf("Check that the run's proxy reaches the registry at %s\n%s failed: %w", r.host, what, err)
 }
 
 // tokenFor gets a pull token for the repository from the realm of the first Bearer
@@ -479,12 +479,12 @@ func (r *registry) failed(what string, err error) error {
 func (r *registry) tokenFor(ctx context.Context, challenges []string) (string, error) {
 	params, ok := bearer(challenges)
 	if !ok {
-		return "", fmt.Errorf("check that the registry at %s asks for a Bearer token\nIt returned 401 with no Bearer challenge", r.host)
+		return "", fmt.Errorf("Check that the registry at %s asks for a Bearer token\nIt returned 401 with no Bearer challenge", r.host)
 	}
 	realm, err := url.Parse(params["realm"])
 	if err != nil || realm.Host == "" || realm.User != nil ||
 		realm.Scheme != "https" && (realm.Scheme != "http" || scheme(realm.Host) != "http") {
-		return "", fmt.Errorf("check the registry at %s\nThe realm of its Bearer challenge is not an https URL, or http on loopback", r.host)
+		return "", fmt.Errorf("Check the registry at %s\nThe realm of its Bearer challenge is not an https URL, or http on loopback", r.host)
 	}
 	if r.instance == "" {
 		return "", fmt.Errorf("Set gateway.server.url in forager.yaml to the address of Qory Apiary\nThe realm is %s, and the run has no address of Qory Apiary to check it against.", realm.Redacted())
@@ -494,7 +494,7 @@ func (r *registry) tokenFor(ctx context.Context, challenges []string) (string, e
 		return "", err
 	}
 	if !sameRoute(realm, want) {
-		return "", fmt.Errorf("ask the instance admin to put the registry's token realm at %s\nIt is %s", want.Redacted(), realm.Redacted())
+		return "", fmt.Errorf("Ask Qory Apiary's instance admin to put the registry's token realm at %s\nIt is %s", want.Redacted(), realm.Redacted())
 	}
 	// The request is to the instance's token route, with the service and the scope alone:
 	// nothing else of the realm, such as its query or fragment, goes with it.
@@ -511,19 +511,19 @@ func (r *registry) tokenFor(ctx context.Context, challenges []string) (string, e
 	}
 	resp, err := send(r.client, req)
 	if err != nil {
-		return "", fmt.Errorf("check that the run's proxy reaches the token realm at %s\n%w", realm.Host, err)
+		return "", fmt.Errorf("Check that the run's proxy reaches the token realm at %s\n%w", realm.Host, err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		drain(resp)
-		return "", fmt.Errorf("check that Qory Apiary lets the run pull %s\nThe token realm at %s returned %d", r.repository, realm.Host, resp.StatusCode)
+		return "", fmt.Errorf("Check that Qory Apiary lets the run pull %s\nThe token realm at %s returned %d", r.repository, realm.Host, resp.StatusCode)
 	}
 	var reply struct {
 		Token       string `json:"token"`
 		AccessToken string `json:"access_token"`
 	}
 	if json.NewDecoder(io.LimitReader(resp.Body, maxToken)).Decode(&reply) != nil || reply.Token == "" && reply.AccessToken == "" {
-		return "", fmt.Errorf("check the token realm at %s\nIts response contains no token", realm.Host)
+		return "", fmt.Errorf("Check the token realm at %s\nIts response contains no token", realm.Host)
 	}
 	if reply.Token == "" {
 		return reply.AccessToken, nil
@@ -540,7 +540,7 @@ const tokenPath = "/registry/token"
 func tokenRoute(instance string) (*url.URL, error) {
 	u, err := url.Parse(instance)
 	if err != nil || u.Host == "" || u.User != nil || u.Scheme != "https" && u.Scheme != "http" {
-		return nil, errors.New("set the address of Qory Apiary to an https URL\nThe run's address of Qory Apiary is not one.")
+		return nil, errors.New("Set the address of Qory Apiary to an https URL\nThe run's address of Qory Apiary is not one.")
 	}
 	return &url.URL{Scheme: u.Scheme, Host: u.Host, Path: strings.TrimSuffix(u.Path, "/") + tokenPath}, nil
 }
@@ -669,22 +669,22 @@ func refusedConnect(err error) bool { return connectRefusal(err) != nil }
 func ProxyClient(proxyURL, caBundle string) (*http.Client, error) {
 	u, err := url.Parse(proxyURL)
 	if err != nil || u.Scheme != "http" || u.Host == "" {
-		return nil, errors.New("run again: the run's host proxy has no http URL")
+		return nil, errors.New("Run again: the run's host proxy has no http URL")
 	}
 	tlsConfig := &tls.Config{MinVersion: tls.VersionTLS12}
 	if caBundle != "" {
 		f, err := os.Open(caBundle)
 		if err != nil {
-			return nil, fmt.Errorf("run again: the run's CA bundle cannot be read: %w", err)
+			return nil, fmt.Errorf("Run again: the run's CA bundle cannot be read: %w", err)
 		}
 		pem, err := io.ReadAll(io.LimitReader(f, maxBundle))
 		f.Close()
 		if err != nil {
-			return nil, fmt.Errorf("run again: the run's CA bundle cannot be read: %w", err)
+			return nil, fmt.Errorf("Run again: the run's CA bundle cannot be read: %w", err)
 		}
 		roots := x509.NewCertPool()
 		if !roots.AppendCertsFromPEM(pem) {
-			return nil, fmt.Errorf("run again: the run's CA bundle %s has no certificate", caBundle)
+			return nil, fmt.Errorf("Run again: the run's CA bundle %s has no certificate", caBundle)
 		}
 		tlsConfig.RootCAs = roots
 	}

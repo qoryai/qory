@@ -104,7 +104,7 @@ func TestAWaitingInstallEndsWithTheRun(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
 	defer cancel()
 	_, err := runtimeinstall.Install(ctx, runtimeinstall.Options{Fetch: in.src.Fetch, Runtime: "claude", Folder: in.folder})
-	if err == nil || !strings.HasPrefix(err.Error(), "run again with more time\nThe run ended while another run installed claude 2.1.320: ") {
+	if err == nil || !strings.HasPrefix(err.Error(), "Run again with more time\nThe run ended while another run installed claude 2.1.320: ") {
 		t.Fatalf("err = %v", err)
 	}
 	close(release)
@@ -255,16 +255,16 @@ func TestAResponseThatStopsSendingEndsTheInstall(t *testing.T) {
 		want  string
 	}{
 		{"dist-tags", npm("tags"), func(u string) runtimeinstall.Fetch { return runtimeinstall.NpmFetch(http.DefaultClient, u, "amd64") },
-			"run again\nThe read of the dist-tags of @anthropic-ai/claude-code from "},
+			"Run again\nThe read of the dist-tags of @anthropic-ai/claude-code from "},
 		{"tarball", npm(""), func(u string) runtimeinstall.Fetch { return runtimeinstall.NpmFetch(http.DefaultClient, u, "amd64") },
-			"run again\nThe download of claude 2.1.320 stopped: the response sent no byte for 200ms"},
+			"Run again\nThe download of claude 2.1.320 stopped: the response sent no byte for 200ms"},
 		{"manifest", func(w http.ResponseWriter, _ *http.Request, stall func()) bool {
 			_, _ = io.WriteString(w, `{"sche`)
 			stall()
 			return true
 		}, func(u string) runtimeinstall.Fetch {
 			return runtimeinstall.RegistryFetch(http.DefaultClient, strings.TrimPrefix(u, "http://"), "amd64", "")
-		}, "check that the run's proxy reaches the registry at "},
+		}, "Check that the run's proxy reaches the registry at "},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			s := newStalling(t, c.serve)
@@ -283,11 +283,11 @@ func TestAResponseThatStopsSendingEndsTheInstall(t *testing.T) {
 	}
 }
 
-// TestARedirectFromTheRegistryFailsWithItsOwnCause has a registry that redirects the
+// TestARedirectFromTheRegistryFailsWithTheRedirectAsItsCause has a registry that redirects the
 // request that carries the token to a storage host: the install does not follow it, asks
 // the storage host for nothing, and the error says the registry returned a redirect, with
 // the status and the Location's host on later lines.
-func TestARedirectFromTheRegistryFailsWithItsOwnCause(t *testing.T) {
+func TestARedirectFromTheRegistryFailsWithTheRedirectAsItsCause(t *testing.T) {
 	asked := false
 	storage := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { asked = true }))
 	t.Cleanup(storage.Close)
@@ -309,8 +309,8 @@ func TestARedirectFromTheRegistryFailsWithItsOwnCause(t *testing.T) {
 		Fetch:   runtimeinstall.RegistryFetch(runtimeinstall.DirectClient(), host, "amd64", srv.URL),
 		Runtime: "claude", Folder: t.TempDir(),
 	})
-	want := "ask the instance admin to make the registry serve this with no redirect, which qory does not follow\n" +
-		"shared/runtimes/claude:newest returned 307\n" +
+	want := "Ask Qory Apiary's instance admin to make the registry serve this with no redirect\n" +
+		"shared/runtimes/claude:newest returned 307, which qory does not follow\n" +
 		"The Location is on " + strings.TrimPrefix(storage.URL, "http://") + "."
 	if err == nil || err.Error() != want || asked {
 		t.Fatalf("err = %v, asked = %v\nwant %s", err, asked, want)
@@ -320,8 +320,8 @@ func TestARedirectFromTheRegistryFailsWithItsOwnCause(t *testing.T) {
 	}
 }
 
-// TestTheTokenRequestHasOnlyTheServiceAndTheScope has a registry whose realm carries a
-// query and a fragment of its own: the request to the token route has the service and
+// TestTheTokenRequestHasOnlyTheServiceAndTheScope has a registry whose realm has a
+// query and a fragment: the request to the token route has the service and
 // the scope alone.
 func TestTheTokenRequestHasOnlyTheServiceAndTheScope(t *testing.T) {
 	var mu sync.Mutex

@@ -102,7 +102,7 @@ func CheckHost(host string) error {
 	if validHost(host) {
 		return nil
 	}
-	return fmt.Errorf("set pool.registry to an image name on a host of letters, digits, . and -, with an optional port from 1 to 65535\nThe host is %q.", host)
+	return fmt.Errorf("Set pool.registry to an image name on a host of letters, digits, . and -, with an optional port from 1 to 65535\nThe host is %q.", host)
 }
 
 // CheckInstance returns nil when address is the address of a Qory Apiary instance as a
@@ -115,7 +115,7 @@ func CheckInstance(address string) error {
 		CheckHost(u.Host) == nil && u.User == nil && u.Path == "" && u.Opaque == "" && !strings.ContainsAny(address, "?#") {
 		return nil
 	}
-	return fmt.Errorf("set gateway.server.url in forager.yaml to an https URL of a host and an optional port alone\nThe address is %q.", address)
+	return fmt.Errorf("Set gateway.server.url in forager.yaml to an https URL of a host and an optional port alone\nThe address is %q.", address)
 }
 
 // RegistryOf is the registry of image, an image name such as pool.registry: its first

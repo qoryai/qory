@@ -804,7 +804,7 @@ one, and from npm otherwise:
   and stops before it claims a run when the host of the image name is another:
 
   ```text
-  qory run: set pool.registry to an image name on a host of letters, digits, . and -, with an optional port from 1 to 65535
+  qory run: Set pool.registry to an image name on a host of letters, digits, . and -, with an optional port from 1 to 65535
   The host is "registry.example:0".
   ```
 
@@ -825,7 +825,7 @@ body. A run without a time limit stops with the error of the request that waited
 for example:
 
 ```text
-qory run: run again
+qory run: Run again
 The download of claude 2.1.320 stopped: the response sent no byte for 1m0s
 ```
 
@@ -848,7 +848,7 @@ response, `qory run` sends the same request again after 2, 4 and 8 seconds, then
 503 while it fills its cache of a new version. After 25 minutes `qory run` stops with:
 
 ```text
-qory run: run again later: registry.example.com is still filling its cache of claude newest
+qory run: Run again later: registry.example.com is still filling its cache of claude newest
 The registry's cache had no shared/runtimes/claude:newest after 25m0s: the registry returned 503.
 ```
 
@@ -859,11 +859,11 @@ the run uses: the scheme, host and port of the instance's address, then the path
 for a run from a run code, which `qory run pool` writes from its `gateway.server.url`;
 otherwise it is `gateway.server.url` in the run's `forager.yaml`. When a run has both, the
 run-code file's line is the address. The registry's host is never the realm, since the
-instance refuses to start with the same host for both. A realm with another scheme, host, port or
+instance does not start with the same host for both. A realm with another scheme, host, port or
 path stops the run with:
 
 ```text
-qory run: ask the instance admin to put the registry's token realm at https://apiary.example.com/registry/token
+qory run: Ask Qory Apiary's instance admin to put the registry's token realm at https://apiary.example.com/registry/token
 It is https://registry.example.com/registry/token
 ```
 
@@ -880,7 +880,7 @@ other status stops the run at once. A registry whose cache never held Claude Cod
 stops the run with:
 
 ```text
-qory run: check that the instance's registry reaches the publisher of claude, then run again
+qory run: Check that the instance's registry reaches the publisher of claude, then run again
 ```
 
 From npm, `qory run` reads, in this order:
@@ -948,7 +948,7 @@ line is the fix; a run with a control plane closes `failed` with -1. A tarball t
 not match its sha512 checksum stops the run with:
 
 ```text
-qory run: check the source of the runtime's releases
+qory run: Check the source of the runtime's releases
 The tarball of claude 2.1.320 does not match the checksum sha512-<checksum>
 ```
 
@@ -956,7 +956,7 @@ A version's folder that was not installed from the tarball with the release's ch
 stops the run with:
 
 ```text
-qory run: remove the version's folder once no run uses it, then run again
+qory run: Remove the version's folder once no run uses it, then run again
 <runtimes>/claude/2.1.320 was not installed from the tarball with the checksum sha512-<checksum>
 ```
 
@@ -1727,7 +1727,7 @@ Each of these errors stops the run before it starts, exit 2:
 - `give --run-code-file a regular file: <file> is not one`, for a named pipe, a device or
   a folder, which qory opens without waiting, unless it is the pipe or device that stdin is
 - `write the run code into <file>: the file is empty`
-- `write the run code, then at most the lines `registry <host>`, `apiary <url>` and
+- `Write the run code, then at most the lines `registry <host>`, `apiary <url>` and
   `runtimes <folder>``, with `The file <file> contains more than that.` on the second line
 - `write a run code (qecr_…) into <file>: the file does not contain an enrolment code of
   Qory Apiary`, or `…: the file contains the enrolment code of an access key of kind

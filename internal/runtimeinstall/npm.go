@@ -39,15 +39,15 @@ func NpmFetch(client *http.Client, base, arch string) Fetch {
 	return func(ctx context.Context, runtime string) (Release, error) {
 		pkg, ok := npmPackages[runtime]
 		if !ok {
-			return Release{}, fmt.Errorf("install %s some other way: qory installs only claude from npm", runtime)
+			return Release{}, fmt.Errorf("Install %s some other way: qory installs only claude from npm", runtime)
 		}
 		cpu, ok := map[string]string{"amd64": "x64", "arm64": "arm64"}[arch]
 		if !ok {
-			return Release{}, fmt.Errorf("run on an amd64 or arm64 machine\nnpm has %s for linux/amd64 and linux/arm64, and this machine is %s", runtime, arch)
+			return Release{}, fmt.Errorf("Run on an amd64 or arm64 machine\nnpm has %s for linux/amd64 and linux/arm64, and this machine is %s", runtime, arch)
 		}
 		root, err := url.Parse(strings.TrimSuffix(base, "/"))
 		if err != nil || root.Host == "" || root.Scheme != "https" && !(root.Scheme == "http" && loopback(root.Hostname())) {
-			return Release{}, fmt.Errorf("set the npm registry to an https URL: %q is not one", base)
+			return Release{}, fmt.Errorf("Set the npm registry to an https URL: %q is not one", base)
 		}
 		n := &npm{client: sameHost(client, root), root: root, runtime: runtime}
 		var tags map[string]string
@@ -107,7 +107,7 @@ func (n *npm) document(ctx context.Context, path string, limit int64, what strin
 	defer resp.Body.Close()
 	body, err := io.ReadAll(io.LimitReader(resp.Body, limit+1))
 	if err != nil {
-		return fmt.Errorf("run again\nThe read of %s from %s stopped: %w", what, n.root.Host, err)
+		return fmt.Errorf("Run again\nThe read of %s from %s stopped: %w", what, n.root.Host, err)
 	}
 	if int64(len(body)) > limit {
 		return fmt.Errorf(textRelease+"%s has more than %d bytes", upper(what), limit)
@@ -132,11 +132,11 @@ func (n *npm) get(ctx context.Context, u, accept, what string) (*http.Response, 
 	resp, err := send(n.client, req)
 	switch {
 	case err != nil && ctx.Err() != nil:
-		return nil, fmt.Errorf("run again with more time\nThe run ended before %s returned %s: %w", n.root.Host, what, err)
+		return nil, fmt.Errorf("Run again with more time\nThe run ended before %s returned %s: %w", n.root.Host, what, err)
 	case refusedConnect(err):
 		return nil, n.noRegistry(connectRefusal(err))
 	case err != nil:
-		return nil, fmt.Errorf("check that this machine reaches %s\nThe request of %s failed: %w", n.root.Host, what, err)
+		return nil, fmt.Errorf("Check that this machine reaches %s\nThe request of %s failed: %w", n.root.Host, what, err)
 	case resp.StatusCode == http.StatusOK:
 		return resp, nil
 	}
@@ -144,7 +144,7 @@ func (n *npm) get(ctx context.Context, u, accept, what string) (*http.Response, 
 	if resp.StatusCode == http.StatusNotFound {
 		return nil, fmt.Errorf(textRelease+"%s returned 404: npm has no such %s release", upper(what), n.runtime)
 	}
-	return nil, fmt.Errorf("check that this machine reaches %s\n%s returned %d", n.root.Host, what, resp.StatusCode)
+	return nil, fmt.Errorf("Check that this machine reaches %s\n%s returned %d", n.root.Host, what, resp.StatusCode)
 }
 
 // noRegistry is the error of a run whose proxy returned 403 or 407 to the CONNECT to

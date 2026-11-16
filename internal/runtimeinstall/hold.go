@@ -62,7 +62,7 @@ func (f folder) lockInstall(ctx context.Context, version string) (*os.File, erro
 			select {
 			case <-ctx.Done():
 				l.Close()
-				return nil, fmt.Errorf("run again with more time\nThe run ended while another run installed %s %s: %w", f.runtime, version, ctx.Err())
+				return nil, fmt.Errorf("Run again with more time\nThe run ended while another run installed %s %s: %w", f.runtime, version, ctx.Err())
 			case <-time.After(installPoll):
 			}
 		}
@@ -85,7 +85,7 @@ func (f folder) prepare() error {
 		return fmt.Errorf(textState+"%w", err)
 	}
 	if !info.IsDir() {
-		return fmt.Errorf("remove the runtime's folder, then run again\n%s is not a folder", f.base)
+		return fmt.Errorf("Remove the runtime's folder, then run again\n%s is not a folder", f.base)
 	}
 	if err := os.Chmod(f.base, 0o755); err != nil {
 		return fmt.Errorf(textState+"%w", err)

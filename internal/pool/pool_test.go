@@ -961,7 +961,7 @@ func TestAMalformedJournalIsRefused(t *testing.T) {
 
 // hostFix starts the error of a registry host that the pool cannot pass to its runs: the
 // fix on the first line, and on the second the host in quotes.
-const hostFix = "set pool.registry to an image name on a host of letters, digits, . and -, with an optional port from 1 to 65535\nThe host is \""
+const hostFix = "Set pool.registry to an image name on a host of letters, digits, . and -, with an optional port from 1 to 65535\nThe host is \""
 
 // TestTheSettingsAreChecked refuses to run by settings it cannot.
 func TestTheSettingsAreChecked(t *testing.T) {

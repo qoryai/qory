@@ -133,7 +133,7 @@ func TestARuntimeTheRegistryNeverHeldEndsTheRunWithItsFix(t *testing.T) {
 	if len(r.joins) != 0 || cmd.ExitCode(r.err) != 1 {
 		t.Fatalf("%d joins, %v (exit %d)\n%s", len(r.joins), r.err, cmd.ExitCode(r.err), r.out)
 	}
-	want := "qory run: check that the instance's registry reaches the publisher of claude, then run again\n" +
+	want := "qory run: Check that the instance's registry reaches the publisher of claude, then run again\n" +
 		"The registry has never held claude and could not fetch it: shared/runtimes/claude:newest returned 404.\n"
 	if !strings.Contains(r.out, want) {
 		t.Fatalf("the output has no fix-first line:\n%s", r.out)
@@ -212,7 +212,7 @@ func TestATarballThatDoesNotMatchItsChecksumEndsTheRun(t *testing.T) {
 	if len(r.joins) != 0 || cmd.ExitCode(r.err) != 1 {
 		t.Fatalf("%d joins, %v (exit %d)\n%s", len(r.joins), r.err, cmd.ExitCode(r.err), r.out)
 	}
-	want := "qory run: check the source of the runtime's releases: the tarball of claude 2.1.320 does not match its checksum " + rt.Integrity(other) + "\n"
+	want := "qory run: Check the source of the runtime's releases: the tarball of claude 2.1.320 does not match its checksum " + rt.Integrity(other) + "\n"
 	if !strings.Contains(r.out, want) {
 		t.Fatalf("the output has no checksum line:\n%s", r.out)
 	}
@@ -301,7 +301,7 @@ func TestARunCodeFileTakesTheMachineLines(t *testing.T) {
 		"\nregistry registry.example/x\n", "\nregistry registry.example \n", "\nregistry registry.example:0\n", "\nregistry registry.example:65536\n"} {
 		file := codeFile(t, code+rest)
 		_, err := cmd.GiveRunCode(file)
-		want := "write the run code, then at most the lines `registry <host>`, `apiary <url>` and `runtimes <folder>`\nThe file " + file + " contains more than that."
+		want := "Write the run code, then at most the lines `registry <host>`, `apiary <url>` and `runtimes <folder>`\nThe file " + file + " contains more than that."
 		if err == nil || err.Error() != want {
 			t.Errorf("%q: %v, want %s", rest, err, want)
 		}
@@ -374,7 +374,7 @@ func TestTheApiaryLineOfARunCodeFileWinsOverTheServersURL(t *testing.T) {
 	}
 	t.Chdir(pkg)
 	_, err = runCodeInstalling(t, lines("http://127.0.0.1:1"), proxy, reg.Instance())
-	if err == nil || !strings.HasPrefix(err.Error(), "ask the instance admin to put the registry's token realm at http://127.0.0.1:1/registry/token\n") {
+	if err == nil || !strings.HasPrefix(err.Error(), "Ask Qory Apiary's instance admin to put the registry's token realm at http://127.0.0.1:1/registry/token\n") {
 		t.Fatalf("a wrong line: %v", err)
 	}
 }
