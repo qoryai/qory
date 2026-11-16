@@ -991,8 +991,9 @@ container that a stopped qory left. The container gets three read-only folders:
   pull`, `<type>/<name>/v<N>/<files>`; a type with no version has no folder;
 - the pushed files, under their names, whose paths follow the command's arguments.
 
-In a run from a run code, the container also mounts the run's `inputs.json` read-only at
-its path, and the program gets `--inputs <path>` after the command's arguments, before the
+In a run from a run code, the container also mounts a copy of the run's `inputs.json`
+read-only at the file's path, which the run's user can read whatever user wrote the file,
+and the program gets `--inputs <path>` after the command's arguments, before the
 pushed files' paths, such as `checks.js push spec --inputs <in>/inputs.json
 /qory-push-check/files/spec.md`. Its member `qory.harness_extensions` is the report's
 `extensions` (docs/run.md, §The run key from a run code). A run with no run code has no `inputs.json`, and its check gets no

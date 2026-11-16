@@ -185,8 +185,9 @@ type Checker struct {
 	// Mask replaces each secret value of the run in a text; nil leaves the text as it is.
 	Mask func(string) string
 	// Inputs is the path of the run's inputs.json, "" for a run with none. The check's
-	// container mounts the file read-only at this path, and the program gets
-	// --inputs <path> after the command's arguments, before the pushed files' paths.
+	// container mounts a copy of the file read-only at this path, which the run's user can
+	// read, and the program gets --inputs <path> after the command's arguments, before
+	// the pushed files' paths.
 	Inputs string
 	// Limit, when set, replaces [Limit]. Tests set it.
 	Limit time.Duration
@@ -335,10 +336,23 @@ func (c *Checker) Check(ctx context.Context, artifactType string, files []File) 
 	if err != nil {
 		return nil, fmt.Errorf("the fetch of the artifacts for the check of %s failed: %w", artifactType, err)
 	}
-	if err := c.openTo(pulled, pushed); err != nil {
+	opened := []string{pulled, pushed}
+	inputs := ""
+	if c.Inputs != "" {
+		dir, err := c.tempFolder()
+		if err != nil {
+			return nil, err
+		}
+		defer os.RemoveAll(dir)
+		if inputs, err = copyInputs(c.Inputs, dir); err != nil {
+			return nil, err
+		}
+		opened = append(opened, dir)
+	}
+	if err := c.openTo(opened...); err != nil {
 		return nil, err
 	}
-	end, err := c.run(ctx, check.Command[0], args, pulled, pushed)
+	end, err := c.run(ctx, check.Command[0], args, pulled, pushed, inputs)
 	if err != nil {
 		return nil, err
 	}
@@ -383,6 +397,23 @@ func (c *Checker) tempFolder() (string, error) {
 		return "", fmt.Errorf("making a temporary folder for the check failed: %w", exports.HideError(err))
 	}
 	return dir, nil
+}
+
+// copyInputs copies the run's inputs.json at path into dir, a folder of
+// [Checker.tempFolder], and returns the copy's path. The run's file is mode 0600 in a
+// folder of mode 0700, which a container that runs as another user cannot read through
+// a mount; [Checker.openTo] opens the copy to that user, and the run's file keeps its
+// mode.
+func copyInputs(path, dir string) (string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("reading the run's inputs for the check failed: %w", exports.HideError(err))
+	}
+	copied := filepath.Join(dir, filepath.Base(path))
+	if err := writeNew(copied, data); err != nil {
+		return "", fmt.Errorf("copying the run's inputs for the check failed: %w", exports.HideError(err))
+	}
+	return copied, nil
 }
 
 // otherUser reports whether the run's user is not this process's user.
@@ -436,17 +467,19 @@ type state struct {
 	Error    string
 }
 
-// run runs program with args in a new container and returns how it ended. The engine's
+// run runs program with args in a new container and returns how it ended. inputs, when
+// not "", is the copy of the run's inputs.json that the container mounts at
+// [Checker.Inputs]. The engine's
 // failures, such as an engine that is not reachable or that does not have the image,
 // are errors; a program that does not start is an end with startErr set.
-func (c *Checker) run(ctx context.Context, program string, args []string, pulled, pushed string) (ended, error) {
+func (c *Checker) run(ctx context.Context, program string, args []string, pulled, pushed, inputs string) (ended, error) {
 	name, err := containerName()
 	if err != nil {
 		return ended{}, err
 	}
 	binds := [][2]string{{c.Home, c.Home}, {pulled, WorkDir}, {pushed, FilesDir}}
-	if c.Inputs != "" {
-		binds = append(binds, [2]string{c.Inputs, c.Inputs})
+	if inputs != "" {
+		binds = append(binds, [2]string{inputs, c.Inputs})
 	}
 	mounts := make([]string, 0, len(binds))
 	for _, m := range binds {

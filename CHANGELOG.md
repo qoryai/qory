@@ -356,8 +356,8 @@ release may change what an existing document does, and states it under Upgrading
   same way. See The role contract in `contracts/harness/v1/README.md`.
 - A run from a run code adds the member `qory` to `inputs.json`:
   `{"harness_extensions": {…}}`, the harness report's `extensions`, `{}` for none. A push
-  check of such a run gets `--inputs <path>`, with the file mounted read-only at that
-  path. Inputs that already have a member `qory` stop the run before it opens, with exit
+  check of such a run gets `--inputs <path>`, with a copy of the file that the run's user
+  can read mounted read-only at that path. Inputs that already have a member `qory` stop the run before it opens, with exit
   1: `remove the input qory: qory adds that member to inputs.json; the code is used`. See
   The run key from a run code in `docs/run.md`.
 
