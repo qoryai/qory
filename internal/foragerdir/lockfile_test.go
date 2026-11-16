@@ -101,3 +101,21 @@ func TestSetTextReplacesTheHoldersText(t *testing.T) {
 		t.Errorf("SetText of a nil lock: %v", err)
 	}
 }
+
+// TestSetTextWithAShorterTextLeavesNoTail is a holder that sets a text shorter than the
+// file holds: the file has exactly the new text, with no bytes of the old one after it.
+func TestSetTextWithAShorterTextLeavesNoTail(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "home.lock")
+	l, err := foragerdir.LockFileText(path, "run a-long-run-id\npid 12345\nstarted 2026-11-16T10:00:00Z\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Release()
+	if err := l.SetText("pid 1\n"); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil || string(data) != "pid 1\n" {
+		t.Errorf("the file holds %q (%v), want exactly %q", data, err, "pid 1\n")
+	}
+}
