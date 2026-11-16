@@ -119,7 +119,7 @@ func readImages(path string, node *yaml.Node) ([]ForagerImage, error) {
 			return nil, fail("Set "+at+".ref to the image's reference.", at+".ref is required.")
 		}
 		if img.Docker && img.Runtime == "" {
-			return nil, fail("Set "+at+".runtime to a runtime that runs a daemon without privileges, such as sysbox-runc.", "docker: true needs one.")
+			return nil, fail("Set a runtime, such as sysbox-runc, on "+at+".", "docker: true needs a runtime that runs a daemon without privileges.")
 		}
 		if err := img.Session().Check(); err != nil {
 			return nil, fail("Correct "+at+".", sentence(err))

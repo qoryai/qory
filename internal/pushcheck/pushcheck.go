@@ -89,7 +89,7 @@ const (
 )
 
 // textUnread is the error of a home's push checks that cannot be read.
-const textUnread = "Compose the harness again, and run again. The push checks in %s could not be read: %s."
+const textUnread = "Compose the harness again, and run again.\n  The push checks in %s could not be read: %s."
 
 // UnreadError is the error of [Load] for a home's push checks that cannot be read: File is
 // the file as a text shows it, and Cause the cause with no final period.

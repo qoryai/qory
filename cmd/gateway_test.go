@@ -135,7 +135,7 @@ func TestGatewayRefusesWhatItCannotServe(t *testing.T) {
 				return []string{"gateway"}
 			},
 			want: func() string {
-				return file() + `: gateway.listen is not host:port, such as 0.0.0.0:8443`
+				return "Set gateway.listen to host:port, such as 0.0.0.0:8443.\n  The value is not host:port.\n  gateway.listen is in " + file() + "."
 			},
 		},
 		{
@@ -411,7 +411,7 @@ func TestGatewayRefusesRunCredentials(t *testing.T) {
 	emptyDir(t)
 	serverFile(t, newFakeServer(t, ""), "  listen: 127.0.0.1:0\n  run_credentials:\n    - issuer: https://issuer.example\n")
 	_, err := run(t, "gateway")
-	if want := foragerFile() + `: line 8: key "run_credentials" is not one forager.yaml reads`; err == nil || err.Error() != want {
+	if want := "Remove the key, or rename it to one forager.yaml reads.\n  Key \"run_credentials\" is not one forager.yaml reads.\n  It is at line 8 of " + foragerFile() + "."; err == nil || err.Error() != want {
 		t.Errorf("error %v, want %q", err, want)
 	}
 	if code := cmd.ExitCode(err); code != cmd.ExitInput {

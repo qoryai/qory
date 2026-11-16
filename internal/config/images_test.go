@@ -112,7 +112,7 @@ func TestForagerFileRefusesAnImageItCannotRun(t *testing.T) {
 		{wall + " {go: {ref: [a]}}\n", "Set wall.images.go.ref to an image reference, such as ghcr.io/acme/agent@sha256:…"},
 		{wall + " {go: {ref: a, runtime: \"--privileged\"}}\n", "Set wall.images.go.runtime to a container runtime's name, such as sysbox-runc."},
 		{wall + " {go: {ref: a, docker: yes}}\n", "Set wall.images.go.docker to true or false."},
-		{wall + " {go: {ref: a, docker: true}}\n", "Set wall.images.go.runtime to a runtime that runs a daemon without privileges, such as sysbox-runc."},
+		{wall + " {go: {ref: a, docker: true}}\n", "Set a runtime, such as sysbox-runc, on wall.images.go."},
 		{wall + " {go: {ref: a, privileged: true}}\n", "wall.images.go: key \"privileged\" is not one. An image has ref, runtime, docker."},
 		{wall + " {go: {ref: a, mounts: [/var/run/docker.sock]}}\n", "wall.images.go: key \"mounts\" is not one."},
 		{wall + " {go: {ref: a, ref: b}}\n", "Write wall.images.go.ref once."},

@@ -31,17 +31,18 @@ import (
 // not pass its push check.
 const textNotChecked = "the version did not pass the check for %s"
 
-// The texts of qory run for its push checks. The load's errors start with their fix;
+// The texts of qory run for its push checks. The load's errors start with their fix, alone
+// in the first line, and the cause follows on an indented line;
 // textCheckNotFinished is the status line of a push whose check returned an error.
 const (
-	textChecksNoWall     = "Set wall.adapter to docker, and run again. The push checks of %s run in containers of the docker wall alone."
-	textChecksNoRunAPI   = "Open the run through a gateway that sends the run API address, and run again. The push checks read the artifacts through the run API, which failed: %s."
-	textChecksBadRunAPI  = "Update the run's gateway, and run again. The run API address that the gateway sent is not one the push checks can use: %s."
-	textChecksEngine     = "Switch the engine back to the one the run started on, and run again. The push checks would run on the engine %s, and the run's containers are on the engine %s."
-	textChecksNoFolder   = "Check %s, and run again. Making the folder of the push checks' files failed: %s."
-	textChecksBadImage   = "Set wall.image or --image to an image reference, and run again. Push checks cannot start from %s: a reference starts with a letter or a digit and has only letters, digits and . _ / : @ -."
-	textChecksNoImage    = "Pull the wall's default image onto this machine, and run again: push checks run in it. The engine does not have the image %s."
-	textChecksNotSet     = "Run again. Turning on the push checks for the POSTs from behind the wall failed, so the run stopped before the setup: %s."
+	textChecksNoWall     = "Set wall.adapter to docker, and run again.\n  The push checks of %s run in containers of the docker wall alone."
+	textChecksNoRunAPI   = "Open the run through a gateway that sends the run API address, and run again.\n  The push checks read the artifacts through the run API, which failed: %s."
+	textChecksBadRunAPI  = "Update the run's gateway, and run again.\n  The run API address that the gateway sent is not one the push checks can use: %s."
+	textChecksEngine     = "Switch the engine back to the one the run started on, and run again.\n  The push checks would run on the engine %s, and the run's containers are on the engine %s."
+	textChecksNoFolder   = "Check the folder of the push checks' files, and run again.\n  The folder is %s, and making it failed: %s."
+	textChecksBadImage   = "Set wall.image or --image to an image reference, and run again.\n  Push checks cannot start from %s. A reference starts with a letter or a digit and has only letters, digits, and . _ / : @ -."
+	textChecksNoImage    = "Pull the wall's default image onto this machine, and run again.\n  Push checks run in it, and the engine does not have the image %s."
+	textChecksNotSet     = "Run again.\n  Turning on the push checks for the POSTs from behind the wall failed, so the run stopped before the setup: %s."
 	textCheckNotFinished = "the check before a push did not finish, and the push was not stored (503 " + runapi.CodePushCheckUnavailable + "): %s"
 )
 

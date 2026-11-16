@@ -155,7 +155,7 @@ func TestRunRefusesAnImageSelectionItCannotStart(t *testing.T) {
 		t.Errorf("--wall docker with no wall section, under a policy that selects an image: %v", err)
 	}
 	writeFile(t, file, strings.Replace(imagesSection(docker, helper), "runtime: sysbox-runc, ", "", 1))
-	want := "forager.yaml: wall.images.go-docker: docker needs a runtime that runs a daemon without privileges, such as runtime: sysbox-runc"
+	want := "Set a runtime, such as sysbox-runc, on wall.images.go-docker.\n  docker: true needs a runtime that runs a daemon without privileges."
 	for _, args := range [][]string{{"run"}, {"config"}} {
 		if _, err := run(t, args...); cmd.ExitCode(err) != cmd.ExitInput || !strings.Contains(err.Error(), want) {
 			t.Errorf("%v with a Docker of its own and no runtime: %v", args, err)

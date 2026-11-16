@@ -218,7 +218,7 @@ func TestLoadReadsTheHomesPushChecks(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(home, render.PushChecksFile), []byte("{"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	want := "Compose the harness again, and run again. The push checks in " + filepath.Join(home, render.PushChecksFile) + " could not be read: it is not JSON in the form the compose writes: unexpected end of JSON input."
+	want := "Compose the harness again, and run again.\n  The push checks in " + filepath.Join(home, render.PushChecksFile) + " could not be read: it is not JSON in the form the compose writes: unexpected end of JSON input."
 	if _, err := pushcheck.Load(home); err == nil || err.Error() != want {
 		t.Errorf("Load of a broken file = %v, want %q", err, want)
 	}
