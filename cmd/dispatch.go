@@ -80,29 +80,33 @@ func homeInFolder(root, home string) error {
 
 // cacheHomes is the root of the homes of walled runs and runs given a run key when neither
 // --home nor harness.home sets one: qory/homes under the user's cache directory, ~/Library/Caches
-// on macOS and $XDG_CACHE_HOME or ~/.cache on Linux, one folder per checkout under it. A run
-// given a run key composes into that folder, with its report beside it, as
-// <name>-<hash>-report.json. A person's walled run takes [runHomeAt]. The root is
+// on macOS and $XDG_CACHE_HOME or ~/.cache on Linux, one folder per checkout under it, as
+// <name>-<hash>. qory run takes [runHomeAt] of that folder. The root is
 // not under qory's state directory: a walled run mounts its home, and Forager stops
 // a run with a mount inside that directory, which contains the run records. root is the
 // checkout the run runs in, which the error of a failed lookup prints.
 func cacheHomes(root string) (string, error) {
 	base, err := os.UserCacheDir()
+	if err == nil {
+		// A relative HOME makes a relative cache directory: the home, which the agent gets
+		// as QORY_HARNESS_HOME, is absolute, from the working directory.
+		base, err = filepath.Abs(base)
+	}
 	if err != nil {
 		return "", input(fmt.Errorf("set HOME, or give --home a folder outside %s: a walled run or a run with a run key composes its harness under the cache directory, and the lookup of that directory failed: %w", exports.Value(root, false), err))
 	}
 	return filepath.Join(base, "qory", "homes"), nil
 }
 
-// runHomesDir is the folder under [cacheHomes] of the homes of a person's walled runs. A checkout's
+// runHomesDir is the folder under [cacheHomes] of the homes of qory run's runs. A checkout's
 // folder there ends in a hash, see [checkout.Key], so it is never this one.
 const runHomesDir = "runs"
 
-// runHomeAt is at, a checkout's folder under [cacheHomes], for a person's walled run with the id:
-// the home is runs/<name>-<hash>/<id> there, which [removeRunHome] removes, so a second run leaves
-// the first run's home as it is. The report is runs/<name>-<hash>-report.json, so a module keeps its
-// pin between runs. A --home of the root writes and removes only <name>-<hash> and its report, and
-// neither is in runs.
+// runHomeAt is at, a checkout's folder under [cacheHomes], for the run id of a run given a run
+// key or a run code, or of a person's walled run: the home is runs/<name>-<hash>/<id> there,
+// which [removeRunHome] removes, so a second run leaves the first run's home as it is. The
+// report is runs/<name>-<hash>-report.json, so a module keeps its pin between runs. A --home of
+// the root writes and removes only <name>-<hash> and its report, and neither is in runs.
 func runHomeAt(at places, id string) places {
 	runs := filepath.Join(filepath.Dir(at.home), runHomesDir, filepath.Base(at.home))
 	at.home, at.report = filepath.Join(runs, id), reportFor(runs)
@@ -123,9 +127,15 @@ func withCacheHome(root string, conf config.Config) (config.Config, error) {
 	return conf, nil
 }
 
-// removeRunHome removes the home of a person's walled run, and what a compose cut short left
+// runHomesKept is set by the tests that read a run's home once the run is over.
+var runHomesKept bool
+
+// removeRunHome removes the home of a run of [runHomeAt], and what a compose cut short left
 // beside it, when the run ends. report prints a line of qory run.
 func removeRunHome(home string, report func(string)) {
+	if runHomesKept {
+		return
+	}
 	for _, path := range []string{home, home + ".tmp"} {
 		if err := os.RemoveAll(path); err != nil {
 			report(fmt.Sprintf(textCopyNoRemove, exports.Value(path, false), shownError(err)))

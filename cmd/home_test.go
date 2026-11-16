@@ -305,7 +305,7 @@ func TestNoLinksKeepsTheHomeInTheCheckout(t *testing.T) {
 	if err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
-	gone(t, root, ".qory", ".claude")
+	gone(t, root, ".qory/harness", ".claude")
 }
 
 // TestLaunchNeedsARuntimeWithASpec is launch on a home composed for two runtimes: the

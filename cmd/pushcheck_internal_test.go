@@ -443,3 +443,34 @@ func TestAnAgentThatCouldChangeThePushChecksStops(t *testing.T) {
 		})
 	}
 }
+
+// TestThePushChecksGetTheRunsInputs is the load of a run's push checks: the checker gets
+// the path of the run's inputs.json and the bytes qory wrote there, and none for a run
+// with none.
+func TestThePushChecksGetTheRunsInputs(t *testing.T) {
+	was := loadPushChecks
+	t.Cleanup(func() { loadPushChecks = was })
+	loadPushChecks = func(string) ([]compose.PushCheck, error) {
+		return []compose.PushCheck{{Type: "proposal"}}, nil
+	}
+	unsetenv(t, "DOCKER_HOST")
+	unsetenv(t, "DOCKER_CONTEXT")
+	for _, inputs := range []string{filepath.Join(t.TempDir(), "in", inputsFile), ""} {
+		var data []byte
+		if inputs != "" {
+			data = []byte(`{"qory":{"harness_extensions":{}}}`)
+		}
+		p := &runPushChecks{inputs: inputs, inputsData: data}
+		spec := &runSpec{}
+		spec.Wall = &wall.Docker{Command: engineScript(t, "a")}
+		run := runAPIOnly{base: "http://run-api.qory.invalid/v1/runs/r1", dir: t.TempDir()}
+		done, err := p.load(context.Background(), run, t.TempDir(), "r1", spec, true)
+		if err != nil {
+			t.Fatalf("with %q: %v", inputs, err)
+		}
+		done()
+		if got := p.current(); got == nil || got.Inputs != inputs || !slices.Equal(got.InputsData, data) {
+			t.Errorf("with %q: the checker %+v", inputs, got)
+		}
+	}
+}

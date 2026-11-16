@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -156,7 +157,7 @@ func TestAWorkflowStartsItsPrefixedEntryFirst(t *testing.T) {
 	} {
 		for _, rt := range []string{"claude", "codex", "cursor", "gemini", "opencode"} {
 			t.Run(c.name+"/"+rt, func(t *testing.T) {
-				r, err := codeRunOf(contracts.Documents{Workflow: "example", RunSettings: &contracts.RunSettings{Runtime: rt}})
+				r, err := codeRunOf(contracts.Documents{Inputs: json.RawMessage(`{}`), Workflow: "example", RunSettings: &contracts.RunSettings{Runtime: rt}})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -189,7 +190,7 @@ func TestAWorkflowStartsItsPrefixedEntryFirst(t *testing.T) {
 func TestAWorkflowInNoFormStopsWithItsReason(t *testing.T) {
 	for rt, add := range map[string]string{"claude": "skill", "codex": "skill", "cursor": "skill", "gemini": "command", "opencode": "command"} {
 		want := "add a " + add + " workflow-example to the checkout's harness, or set another workflow in Qory Apiary: the composed harness has no skill or command workflow-example or example (workflow_not_in_harness); the code is used"
-		r, err := codeRunOf(contracts.Documents{Workflow: "example", RunSettings: &contracts.RunSettings{Runtime: rt}})
+		r, err := codeRunOf(contracts.Documents{Inputs: json.RawMessage(`{}`), Workflow: "example", RunSettings: &contracts.RunSettings{Runtime: rt}})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -206,7 +207,7 @@ func TestAWorkflowInNoFormStopsWithItsReason(t *testing.T) {
 // which runs no skill by its name, stops with the add a command line.
 func TestARoleBoundAtThePrefixedNameIsAWorkflowsSkill(t *testing.T) {
 	const bind = "bind:\n  skills:\n    workflow-example: a\n"
-	r, err := codeRunOf(contracts.Documents{Workflow: "example", RunSettings: &contracts.RunSettings{Runtime: "claude"}})
+	r, err := codeRunOf(contracts.Documents{Inputs: json.RawMessage(`{}`), Workflow: "example", RunSettings: &contracts.RunSettings{Runtime: "claude"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -224,7 +225,7 @@ func TestARoleBoundAtThePrefixedNameIsAWorkflowsSkill(t *testing.T) {
 // starts with the prefix: the plain lookup finds its entry, and nothing strips the
 // prefix from a shorter one.
 func TestAWorkflowOfAPrefixedNameLooksUpTheNameItIsGiven(t *testing.T) {
-	r, err := codeRunOf(contracts.Documents{Workflow: "workflow-example", RunSettings: &contracts.RunSettings{Runtime: "claude"}})
+	r, err := codeRunOf(contracts.Documents{Inputs: json.RawMessage(`{}`), Workflow: "workflow-example", RunSettings: &contracts.RunSettings{Runtime: "claude"}})
 	if err != nil {
 		t.Fatal(err)
 	}

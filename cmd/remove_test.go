@@ -29,8 +29,8 @@ func TestRemoveTakesTheLinksAndTheQoryDir(t *testing.T) {
 	}
 	wants(t, out, ui.Mark+" acme/app", "removed .claude", "removed .mcp.json", "removed .qory")
 
-	gone(t, root, ".claude", ".mcp.json", ".qory")
-	if after := snapshot(t, root); !maps.Equal(after, before) {
+	gone(t, root, ".claude", ".mcp.json", ".qory/harness")
+	if after := withoutHomeLock(snapshot(t, root)); !maps.Equal(after, before) {
 		t.Errorf("the checkout after remove is not the checkout before compose:\nbefore %v\nafter  %v", before, after)
 	}
 }
@@ -60,7 +60,7 @@ func TestRemoveKeepsTheCheckoutsOwnAgentsFile(t *testing.T) {
 	}
 	wants(t, out, "removed .agents/skills", "removed .qory")
 	lacks(t, out, "removed AGENTS.md")
-	gone(t, root, ".qory", ".agents")
+	gone(t, root, ".qory/harness", ".agents")
 	ownedByCheckout(t, own, "The checkout's own instructions.\n")
 }
 
@@ -91,7 +91,7 @@ func TestComposeKeepsClaudeCodesOwnLocalSettings(t *testing.T) {
 	}
 	wants(t, out, "removed .claude")
 	ownedByCheckout(t, local, "{\"permissions\": {\"allow\": [\"Bash(ls)\"]}}\n")
-	gone(t, root, ".claude/settings.json", ".qory")
+	gone(t, root, ".claude/settings.json", ".qory/harness")
 }
 
 // TestComposeForceReplacesTrackedFiles is a run machine composing over a repository that
@@ -207,7 +207,7 @@ func TestRemoveLeavesTheExcludeLinesASiblingWorktreeNeeds(t *testing.T) {
 		t.Fatalf("%v\n%s", err, out)
 	}
 	wants(t, out, "removed .claude", "removed .mcp.json", "removed .qory")
-	gone(t, wt, ".claude", ".mcp.json", ".qory")
+	gone(t, wt, ".claude", ".mcp.json", ".qory/harness")
 	data, _ := os.ReadFile(exclude)
 	wants(t, string(data), "/.qory\n", "/.claude/settings.json\n", "/.mcp.json\n")
 	status := gitOut(t, root, "status", "--porcelain", "--untracked-files=all")
@@ -218,5 +218,16 @@ func TestRemoveLeavesTheExcludeLinesASiblingWorktreeNeeds(t *testing.T) {
 		t.Fatalf("%v\n%s", err, out)
 	}
 	data, _ = os.ReadFile(exclude)
-	lacks(t, string(data), "/.qory\n", "/.claude/settings.json\n", "/.mcp.json\n")
+	// Each worktree keeps its lock file in .qory, so the line for it stays.
+	wants(t, string(data), "/.qory\n")
+	lacks(t, string(data), "/.claude/settings.json\n", "/.mcp.json\n")
+}
+
+// withoutHomeLock is a snapshot of a checkout without the qory folder that a remove leaves,
+// which has the lock file of the home alone.
+func withoutHomeLock(m map[string]string) map[string]string {
+	out := maps.Clone(m)
+	delete(out, ".qory")
+	delete(out, ".qory/harness.lock")
+	return out
 }

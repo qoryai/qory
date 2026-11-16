@@ -367,7 +367,8 @@ func specPush(t *testing.T) []byte {
 // check for spec: the run's open gets the check, a push of spec from behind the wall
 // gets 422 push_check_failed with the check's findings, a verdict passes unchecked, and
 // the check's container starts from the wall's default image, as the wall's user, with
-// the composed home read-only at its path.
+// the composed home read-only at its path, a copy of the run's inputs.json read-only at
+// the file's path, and --inputs.
 func TestTheAgentsPushIsCheckedBeforeItLeaves(t *testing.T) {
 	docker, log := checkDocker(t, 1, "spec.md: the section Goal is missing\n")
 	p, home := newCheckedRepo(t, docker)
@@ -434,10 +435,16 @@ func TestTheAgentsPushIsCheckedBeforeItLeaves(t *testing.T) {
 	if _, err := os.Stat(parent); !os.IsNotExist(err) {
 		t.Errorf("%s is left after the run: %v", parent, err)
 	}
+	// A copy of the run's inputs.json, in the run directory's push-checks, is mounted
+	// read-only at the file's path, which follows --inputs.
+	inputs := regexp.MustCompile(`--mount type=bind,src=(\S+),dst=(\S+/in/inputs\.json),readonly`).FindStringSubmatch(created)
+	if inputs == nil || filepath.Dir(filepath.Dir(inputs[1])) != parent {
+		t.Fatalf("the check's container does not mount a copy of the run's inputs.json from %s read-only at the file's path:\n%s", parent, created)
+	}
 	for _, want := range []string{
 		"--label dev.qory.run=" + p.runID, "--pids-limit 512",
 		"--network none", "--user 1000:1000",
-		"--entrypoint " + program + " example.com/agent:1 push spec /qory-push-check/files/spec.md",
+		"--entrypoint " + program + " example.com/agent:1 push spec --inputs " + inputs[2] + " /qory-push-check/files/spec.md",
 	} {
 		if !strings.Contains(created, want) {
 			t.Errorf("the check's container lacks %q:\n%s", want, created)

@@ -189,6 +189,12 @@ type Checker struct {
 	Label string
 	// Mask replaces each secret value of the run in a text; nil leaves the text as it is.
 	Mask func(string) string
+	// Inputs is the path of the run's inputs.json, "" for a run with none, and InputsData
+	// the bytes qory wrote there. The check's container mounts a copy of InputsData
+	// read-only at Inputs, which the run's user can read, and the program gets
+	// --inputs <path> after the command's arguments, before the pushed files' paths.
+	Inputs     string
+	InputsData []byte
 	// Limit, when set, replaces [Limit]. Tests set it.
 	Limit time.Duration
 }
@@ -325,6 +331,9 @@ func (c *Checker) Check(ctx context.Context, artifactType string, files []File) 
 	}
 	defer os.RemoveAll(pushed)
 	args := slices.Clone(check.Command[1:])
+	if c.Inputs != "" {
+		args = append(args, "--inputs", c.Inputs)
+	}
 	for i, f := range files {
 		err := writeNew(filepath.Join(pushed, f.Name), f.Content)
 		if errors.Is(err, fs.ErrExist) {
@@ -341,10 +350,23 @@ func (c *Checker) Check(ctx context.Context, artifactType string, files []File) 
 	if err != nil {
 		return nil, fmt.Errorf("the fetch of the artifacts for the check of %s failed: %w", artifactType, err)
 	}
-	if err := c.openTo(pulled, pushed); err != nil {
+	opened := []string{pulled, pushed}
+	inputs := ""
+	if c.Inputs != "" {
+		dir, err := c.tempFolder()
+		if err != nil {
+			return nil, err
+		}
+		defer os.RemoveAll(dir)
+		if inputs, err = copyInputs(c.Inputs, c.InputsData, dir); err != nil {
+			return nil, err
+		}
+		opened = append(opened, dir)
+	}
+	if err := c.openTo(opened...); err != nil {
 		return nil, err
 	}
-	end, err := c.run(ctx, check.Command[0], args, pulled, pushed)
+	end, err := c.run(ctx, check.Command[0], args, pulled, pushed, inputs)
 	if err != nil {
 		return nil, err
 	}
@@ -389,6 +411,19 @@ func (c *Checker) tempFolder() (string, error) {
 		return "", fmt.Errorf("making a temporary folder for the check failed: %w", exports.HideError(err))
 	}
 	return dir, nil
+}
+
+// copyInputs writes data, the bytes of the run's inputs.json at path, into dir, a folder
+// of [Checker.tempFolder], under the file's name, and returns the copy's path. The run's
+// file is mode 0600 in a folder of mode 0700, which a container that runs as another
+// user cannot read through a mount; [Checker.openTo] opens the copy to that user, and
+// the run's file keeps its mode.
+func copyInputs(path string, data []byte, dir string) (string, error) {
+	copied := filepath.Join(dir, filepath.Base(path))
+	if err := writeNew(copied, data); err != nil {
+		return "", fmt.Errorf("Free space in the check's folder or make it writable, then push again.\nCopying the run's inputs to %s for the check failed: %w", exports.Value(copied, false), exports.HideError(err))
+	}
+	return copied, nil
 }
 
 // otherUser reports whether the run's user is not this process's user.
@@ -442,16 +477,22 @@ type state struct {
 	Error    string
 }
 
-// run runs program with args in a new container and returns how it ended. The engine's
-// failures, such as an engine that is not reachable or that does not have the image,
-// are errors; a program that does not start is an end with startErr set.
-func (c *Checker) run(ctx context.Context, program string, args []string, pulled, pushed string) (ended, error) {
+// run runs program with args in a new container and returns how it ended. inputs, when
+// not "", is the copy of the run's inputs.json that the container mounts at
+// [Checker.Inputs]. The engine's failures, such as an engine that is not reachable or
+// that does not have the image, are errors; a program that does not start is an end
+// with startErr set.
+func (c *Checker) run(ctx context.Context, program string, args []string, pulled, pushed, inputs string) (ended, error) {
 	name, err := containerName()
 	if err != nil {
 		return ended{}, err
 	}
-	mounts := make([]string, 0, 3)
-	for _, m := range [][2]string{{c.Home, c.Home}, {pulled, WorkDir}, {pushed, FilesDir}} {
+	binds := [][2]string{{c.Home, c.Home}, {pulled, WorkDir}, {pushed, FilesDir}}
+	if inputs != "" {
+		binds = append(binds, [2]string{inputs, c.Inputs})
+	}
+	mounts := make([]string, 0, len(binds))
+	for _, m := range binds {
 		mount, err := bindMount(m[0], m[1])
 		if err != nil {
 			return ended{}, err
