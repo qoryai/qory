@@ -83,6 +83,12 @@ func (f folder) lockInstall(ctx context.Context, version string) (*os.File, erro
 // them: a shared one such as /tmp is group- and other-writable.
 func (f folder) prepare() error {
 	parent := filepath.Dir(f.base)
+	// A link is refused before any MkdirAll, which would make a folder behind it.
+	for _, path := range []string{parent, f.base} {
+		if i, err := os.Lstat(path); err == nil && i.Mode()&fs.ModeSymlink != 0 {
+			return fmt.Errorf("Replace %s with a folder\n%s is a link, and the install checks and binds the folder itself, not what a link leads to", path, path)
+		}
+	}
 	parentNew, baseNew := !exists(parent), !exists(f.base)
 	if err := os.MkdirAll(f.base, 0o755); err != nil {
 		return fmt.Errorf(textState+"%w", err)
@@ -90,9 +96,6 @@ func (f folder) prepare() error {
 	info, err := os.Lstat(f.base)
 	if err != nil {
 		return fmt.Errorf(textState+"%w", err)
-	}
-	if info.Mode()&fs.ModeSymlink != 0 {
-		return fmt.Errorf("Replace %s with a folder\n%s is a link, and the install checks and binds the folder itself, not what a link leads to", f.base, f.base)
 	}
 	if !info.IsDir() {
 		return fmt.Errorf("Remove the runtime's folder, then run again\n%s is not a folder", f.base)
@@ -110,9 +113,6 @@ func (f folder) prepare() error {
 		i, err := os.Lstat(c.path)
 		if err != nil {
 			return fmt.Errorf(textState+"%w", err)
-		}
-		if i.Mode()&fs.ModeSymlink != 0 {
-			return fmt.Errorf("Replace %s with a folder\n%s is a link, and the install checks and binds the folder itself, not what a link leads to", c.path, c.path)
 		}
 		if i.Mode().Perm()&0o022 != 0 {
 			return fmt.Errorf("Run chmod go-w %s, then run again\n%s has mode %04o: its group or others could replace the runtime's program", c.path, c.path, i.Mode().Perm())

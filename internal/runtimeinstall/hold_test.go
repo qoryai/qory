@@ -341,8 +341,8 @@ func TestALinkAtTheRuntimesFolderStopsTheInstall(t *testing.T) {
 			if err == nil || !strings.HasPrefix(err.Error(), want) {
 				t.Fatalf("the install returned %v, want it to start with %q", err, want)
 			}
-			if exists(filepath.Join(target, "2.0.0")) || exists(filepath.Join(target, "claude", "2.0.0")) {
-				t.Fatal("the install made the version's folder behind the link")
+			if entries, err := os.ReadDir(target); err != nil || len(entries) != 0 {
+				t.Fatalf("the install made %d entries behind the link: %v", len(entries), err)
 			}
 		})
 	}
