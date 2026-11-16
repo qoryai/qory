@@ -964,36 +964,36 @@ func TestArtifactPushWithdrawRefusals(t *testing.T) {
 	}{
 		"a name with no version": {
 			[]string{"demo-script", "--name", "scenario-9"}, withdrawIndex(),
-			"Pass the name of a stored artifact to --withdraw. demo-script/scenario-9 has no version.",
+			"Pass the name of a stored artifact to --withdraw.\ndemo-script/scenario-9 has no version.",
 		},
 		"a name whose versions are all cancelled": {
 			[]string{"demo-script", "--name", "scenario-5"},
 			indexOf(artifactEntry("demo-script", "scenario-5", "", 1, cancelled(versionEntry("av_1", 1, fileEntry("s.json", "x"))))),
-			"Pass the name of a stored artifact to --withdraw. demo-script/scenario-5 has no version.",
+			"Pass the name of a stored artifact to --withdraw.\ndemo-script/scenario-5 has no version.",
 		},
 		"a file argument": {
 			[]string{"demo-script", "scenario-2.json", "--name", "scenario-2"}, withdrawIndex(),
-			"Pass either files or --withdraw. A withdrawal stores no files, and the command got 1: scenario-2.json.",
+			"Pass either files or --withdraw.\nA withdrawal stores no files, and the command got 1: scenario-2.json.",
 		},
 		"two file arguments": {
 			[]string{"demo-script", "a.json", "-", "--name", "scenario-2"}, withdrawIndex(),
-			"Pass either files or --withdraw. A withdrawal stores no files, and the command got 2: a.json, -.",
+			"Pass either files or --withdraw.\nA withdrawal stores no files, and the command got 2: a.json, -.",
 		},
 		"a name already withdrawn": {
 			[]string{"demo-script", "--name", "scenario-4"},
 			indexOf(artifactEntry("demo-script", "scenario-4", "", 3, versionEntry("av_1", 1, fileEntry("s.json", "x")),
 				versionEntry("av_2", 2, fileEntry("s.json", "y")), withdrawn(versionEntry("av_3", 3)))),
-			"Leave demo-script/scenario-4 as it is. Its newest version, v3, is already a withdrawal.",
+			"Leave demo-script/scenario-4 as it is.\nIts newest version, v3, is already a withdrawal.",
 		},
 		"a withdrawal under a cancelled version": {
 			[]string{"demo-script", "--name", "scenario-4"},
 			indexOf(artifactEntry("demo-script", "scenario-4", "", 3, versionEntry("av_1", 1, fileEntry("s.json", "x")),
 				withdrawn(versionEntry("av_2", 2)), cancelled(versionEntry("av_3", 3, fileEntry("s.json", "y"))))),
-			"Leave demo-script/scenario-4 as it is. Its newest version, v2, is already a withdrawal.",
+			"Leave demo-script/scenario-4 as it is.\nIts newest version, v2, is already a withdrawal.",
 		},
 		"a person's upload": {
 			[]string{"demo-script", "--name", "scenario-3"}, withdrawIndex(),
-			"Leave demo-script/scenario-3 to a member. Its newest version, v1, is an upload by Ana, and a run withdraws only a name whose newest version a run wrote.",
+			"Leave demo-script/scenario-3 to a member.\nIts newest version, v1, is an upload by Ana, and a run withdraws only a name whose newest version a run wrote.",
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -1028,9 +1028,9 @@ func TestArtifactPushWithdrawOfARefusalAfterTheIndex(t *testing.T) {
 			versionEntry("av_1", 1, fileEntry("s.json", "one")), byPerson(versionEntry("av_3", 3, fileEntry("s.json", "x"))))),
 	}
 	texts := map[string]string{
-		"no_version":        "Pass the name of a stored artifact to --withdraw. demo-script/scenario-2 has no version.",
-		"already_withdrawn": "Leave demo-script/scenario-2 as it is. Its newest version, v3, is already a withdrawal.",
-		"person_version": "Leave demo-script/scenario-2 to a member. Its newest version, v3, is an upload by Ana, " +
+		"no_version":        "Pass the name of a stored artifact to --withdraw.\ndemo-script/scenario-2 has no version.",
+		"already_withdrawn": "Leave demo-script/scenario-2 as it is.\nIts newest version, v3, is already a withdrawal.",
+		"person_version": "Leave demo-script/scenario-2 to a member.\nIts newest version, v3, is an upload by Ana, " +
 			"and a run withdraws only a name whose newest version a run wrote.",
 	}
 
@@ -1072,7 +1072,12 @@ func TestArtifactPushWithdrawOutsideARunKeepsTheWithdrawal(t *testing.T) {
 	}
 
 	_, err := run(t, "artifact", "push", "demo-script", "--name", "scenario-2", "--withdraw")
-	wantExit(t, err, cmd.ExitArtifactRefused, "Pass the name of a stored artifact to --withdraw. demo-script/scenario-2 has no version.")
+	wantExit(t, err, cmd.ExitArtifactRefused, "Pass the name of a stored artifact to --withdraw.\ndemo-script/scenario-2 has no version.")
+
+	// A refusal creates nothing, not even the store.
+	if _, err := os.Stat(filepath.Join(root, ".qory")); !os.IsNotExist(err) {
+		t.Errorf(".qory after a refusal: %v", err)
+	}
 
 	if _, err := run(t, "artifact", "push", "demo-script", path, "--name", "scenario-2"); err != nil {
 		t.Fatal(err)
@@ -1083,7 +1088,7 @@ func TestArtifactPushWithdrawOutsideARunKeepsTheWithdrawal(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	want := "Kept the withdrawal in .qory/artifacts/demo-script/scenario-2/v2/; not sent: outside a Qory Apiary run, qory keeps versions only in .qory/artifacts.\n"
+	want := "Kept the withdrawal in .qory/artifacts/demo-script/scenario-2/v2/. Outside a Qory Apiary run, qory sends nothing.\n"
 	if out != want {
 		t.Errorf("out = %q, want %q", out, want)
 	}
@@ -1095,8 +1100,17 @@ func TestArtifactPushWithdrawOutsideARunKeepsTheWithdrawal(t *testing.T) {
 
 	wantFile(t, filepath.Join(root, ".qory", "artifacts", "demo-script", "scenario-2", "v1", "s.json"), "{}")
 
+	before := listTree(t, filepath.Join(root, ".qory"))
+
 	_, err = run(t, "artifact", "push", "demo-script", "--name", "scenario-2", "--withdraw")
-	wantExit(t, err, cmd.ExitArtifactRefused, "Leave demo-script/scenario-2 as it is. Its newest version, v2, is already a withdrawal.")
+	wantExit(t, err, cmd.ExitArtifactRefused, "Leave demo-script/scenario-2 as it is.\nIts newest version, v2, is already a withdrawal.")
+
+	_, err = run(t, "artifact", "push", "demo-script", "--name", "scenario-9", "--withdraw")
+	wantExit(t, err, cmd.ExitArtifactRefused, "Pass the name of a stored artifact to --withdraw.\ndemo-script/scenario-9 has no version.")
+
+	if after := listTree(t, filepath.Join(root, ".qory")); !slices.Equal(before, after) {
+		t.Errorf("a refusal changed the store:\n%v\nafter\n%v", before, after)
+	}
 
 	// A push of files after the withdrawal is the next version.
 	if _, err := run(t, "artifact", "push", "demo-script", path, "--name", "scenario-2"); err != nil {
@@ -1104,6 +1118,54 @@ func TestArtifactPushWithdrawOutsideARunKeepsTheWithdrawal(t *testing.T) {
 	}
 
 	wantFile(t, filepath.Join(root, ".qory", "artifacts", "demo-script", "scenario-2", "v3", "s.json"), "{}")
+}
+
+// listTree returns every path under dir, sorted, folders included.
+func listTree(t *testing.T, dir string) []string {
+	t.Helper()
+
+	var paths []string
+
+	err := filepath.WalkDir(dir, func(path string, _ fs.DirEntry, err error) error {
+		paths = append(paths, path)
+
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	return paths
+}
+
+// TestArtifactPushWithdrawOfATypeApiaryReads is a withdrawal of a type that Qory Apiary
+// reads itself: exit 4 before any call, in a run and outside one, and before the other
+// refusals. Outside a run it creates nothing.
+func TestArtifactPushWithdrawOfATypeApiaryReads(t *testing.T) {
+	for _, kind := range []string{"questions", "review-comments", "verdict", "proposal"} {
+		t.Run(kind, func(t *testing.T) {
+			root := inCheckout(t)
+			server := startRunAPI(t)
+			want := "Push a new version of " + kind + " instead.\nQory Apiary reads questions, review-comments, verdict and proposal itself, so a run cannot withdraw them."
+
+			// With a file too: the type is refused first.
+			_, err := run(t, "artifact", "push", "--withdraw", kind, "a.json")
+			wantExit(t, err, cmd.ExitArtifactRefused, want)
+
+			if len(server.pushes) != 0 {
+				t.Errorf("pushes = %v", server.pushes)
+			}
+
+			t.Setenv("QORY_RUN_API", "")
+
+			_, err = run(t, "artifact", "push", "--withdraw", kind)
+			wantExit(t, err, cmd.ExitArtifactRefused, want)
+
+			if _, err := os.Stat(filepath.Join(root, ".qory")); !os.IsNotExist(err) {
+				t.Errorf(".qory after a refusal: %v", err)
+			}
+		})
+	}
 }
 
 func TestArtifactPushChecksItsArguments(t *testing.T) {

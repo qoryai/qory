@@ -18,17 +18,17 @@ does not pass.
 
 --withdraw stores a version of <type>/<name> with no files and the mark withdrawn, in place of
 uploading files. A gate, a stage input and the work item's pages leave out a name whose
-newest version is withdrawn. A later push of files lists the name again. Outside a run, qory
-records the withdrawal in .qory/artifacts and sends nothing.
+newest version is withdrawn. A later push of files lists the name again.
 
-Outside a run, qory keeps the files in .qory/artifacts and sends nothing.
+Outside a run, qory keeps the files, or the record of a withdrawal, in .qory/artifacts and
+sends nothing.
 
 --verbose adds nothing here.
 
 More: https://github.com/qoryai/qory/blob/main/docs/run.md#commands-of-a-work-item
 
 ```
-qory artifact push <type> <file>... [flags]
+qory artifact push <type> [<file>...] [flags]
 ```
 
 ### Examples

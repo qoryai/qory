@@ -12,8 +12,9 @@ it is .qory/artifacts, or /tmp/qory-artifacts when the run's checkout is read-on
 With no --version, qory fetches the newest version of each output of the stage, and the
 version of each input that its gate approved. For any other artifact, it fetches the
 approved version, or the newest when none is approved. The newest version is the newest
-that the index does not mark cancelled: a version of a cancelled run counts for no stage,
-and an artifact with only such versions gets no directory. <type> limits the fetch to one
+that the index does not mark cancelled: a version of a cancelled run counts for no stage.
+qory skips a name whose newest such version is withdrawn, and an artifact with no such
+version gets no directory. <type> limits the fetch to one
 type. --version needs <type>, and fetches that version of each artifact of the type,
 whether or not it is cancelled.
 

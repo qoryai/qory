@@ -3,24 +3,32 @@ package cmd
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
 
+	"github.com/qoryai/qory/internal/checkout"
 	"github.com/qoryai/qory/internal/runapi"
 )
 
 // The texts of qory artifact push --withdraw for a push that qory refuses, from the
 // decision 654 (c). Each starts with its fix; [ExitCode] gives each [ExitArtifactRefused].
 const (
-	textWithdrawNoVersion = "Pass the name of a stored artifact to --withdraw. %s/%s has no version."
-	textWithdrawFiles     = "Pass either files or --withdraw. A withdrawal stores no files, and the command got %d: %s."
-	textWithdrawAlready   = "Leave %s/%s as it is. Its newest version, v%d, is already a withdrawal."
-	textWithdrawPerson    = "Leave %s/%s to a member. Its newest version, v%d, is an upload by %s, and a run withdraws only a name whose newest version a run wrote."
+	textWithdrawType      = "Push a new version of %s instead.\nQory Apiary reads questions, review-comments, verdict and proposal itself, so a run cannot withdraw them."
+	textWithdrawNoVersion = "Pass the name of a stored artifact to --withdraw.\n%s/%s has no version."
+	textWithdrawFiles     = "Pass either files or --withdraw.\nA withdrawal stores no files, and the command got %d: %s."
+	textWithdrawAlready   = "Leave %s/%s as it is.\nIts newest version, v%d, is already a withdrawal."
+	textWithdrawPerson    = "Leave %s/%s to a member.\nIts newest version, v%d, is an upload by %s, and a run withdraws only a name whose newest version a run wrote."
 )
+
+// notWithdrawable are the artifact types that Qory Apiary reads itself, so a run cannot
+// withdraw them.
+var notWithdrawable = []string{"questions", "review-comments", "verdict", "proposal"}
 
 // withdrawRefusedError is a withdrawal that qory refuses, or that the run API refuses with
 // one of the codes of a withdrawal. Its text is the line for the person.
@@ -40,6 +48,10 @@ var withdrawalCodes = []string{
 // name against the run API's index, then sends the withdrawal. Outside a run it records
 // the withdrawal in the store and sends nothing. Every refusal comes before the POST.
 func withdrawArtifact(c *cobra.Command, push runapi.Push, files []string) error {
+	if slices.Contains(notWithdrawable, push.Type) {
+		return withdrawRefusedError{fmt.Sprintf(textWithdrawType, push.Type)}
+	}
+
 	if len(files) > 0 {
 		return withdrawRefusedError{fmt.Sprintf(textWithdrawFiles, len(files), strings.Join(files, ", "))}
 	}
@@ -133,14 +145,15 @@ func raceRefusal(c *cobra.Command, client *runapi.Client, push runapi.Push, err 
 
 // keepWithdrawal records a withdrawal of artifactType/name in the store, outside a run: a
 // new version directory with no files. A name with no version, or whose newest version is
-// already a withdrawal, is refused as in a run.
+// already a withdrawal, is refused as in a run. A refusal creates nothing: the store is
+// read before it is opened.
 func keepWithdrawal(c *cobra.Command, artifactType, name string) error {
-	store, err := openArtifactStore()
+	root, err := storeRoot()
 	if err != nil {
 		return err
 	}
 
-	newest, empty, err := store.newestVersion(artifactType, name)
+	newest, empty, err := newestVersion(filepath.Join(checkout.QoryDir(root), artifactsDir, artifactType, name))
 	if err != nil {
 		return err
 	}
@@ -152,26 +165,31 @@ func keepWithdrawal(c *cobra.Command, artifactType, name string) error {
 		return withdrawRefusedError{fmt.Sprintf(textWithdrawAlready, artifactType, name, newest)}
 	}
 
+	store, err := openArtifactStore()
+	if err != nil {
+		return err
+	}
+
 	dir, err := store.keep(artifactType, name, newest+1, nil)
 	if err != nil {
 		return err
 	}
 
-	_, err = fmt.Fprintf(c.OutOrStdout(), "Kept the withdrawal in %s%c; not sent: outside a Qory Apiary run, qory keeps versions only in .qory/artifacts.\n",
+	_, err = fmt.Fprintf(c.OutOrStdout(), "Kept the withdrawal in %s%c. Outside a Qory Apiary run, qory sends nothing.\n",
 		store.shown(dir), filepath.Separator)
 
 	return err
 }
 
-// newestVersion returns the number of the newest version directory of type and name, 0 for
-// none, and whether that directory has no files: only a withdrawal is stored with none.
-func (s *artifactStore) newestVersion(artifactType, name string) (number int, empty bool, err error) {
-	dir, err := s.realDir(artifactType, name)
-	if err != nil {
-		return 0, false, err
+// newestVersion returns the number of the newest version directory in dir, the folder of
+// one artifact in the store, 0 for none or for no folder, and whether that version has no
+// files: only a withdrawal is stored with none. It creates nothing.
+func newestVersion(dir string) (number int, empty bool, err error) {
+	entries, err := os.ReadDir(dir)
+	if errors.Is(err, fs.ErrNotExist) {
+		return 0, false, nil
 	}
 
-	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return 0, false, fmt.Errorf("Check %s. Reading it failed: %w", dir, err)
 	}

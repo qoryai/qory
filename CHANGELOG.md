@@ -368,15 +368,20 @@ release may change what an existing document does, and states it under Upgrading
   with no files and the mark withdrawn, in place of uploading files. A gate, a stage input
   and the work item's pages leave out a name whose newest version is withdrawn, and a later
   push of files lists it again. qory exits 4 with a fix line, before it sends the push, for
-  a name with no version, for files given with `--withdraw`, for a name whose newest version
-  is already a withdrawal, and for a name whose newest version a person uploaded. Outside a
-  run, qory records the withdrawal as a version folder with no files in `.qory/artifacts` and
-  sends nothing.
+  the types `questions`, `review-comments`, `verdict` and `proposal`, which Qory Apiary
+  reads itself, for a name with no version, for files given with `--withdraw`, for a name
+  whose newest version is already a withdrawal, and for a name whose newest version a person
+  uploaded. Outside a run, qory records the withdrawal as a version folder with no files in
+  `.qory/artifacts` and sends nothing; a refusal creates no folder.
+- A push check does not run for a withdrawal in a walled run: a push with `withdraw` true
+  and no files passes the check, because it has no file to check. A push with `withdraw`
+  true and files takes the same path as any push.
 
 ### Changed
 
-- `qory artifact pull` and the working folder of a push check fetch nothing of a name whose
-  newest version, not counting cancelled ones, is a withdrawal.
+- `qory artifact pull`, the working folder of a push check and the commit that a run starts
+  at take nothing of a name whose newest version, not counting cancelled ones, is a
+  withdrawal.
 - `qory artifact pull` and the working folder of a push check take, of each artifact, the
   newest version that the run API's artifact index does not mark `cancelled`. A version
   that a cancelled run made counts for no stage, and an artifact whose versions are all

@@ -239,8 +239,9 @@ it is .qory/artifacts, or /tmp/qory-artifacts when the run's checkout is read-on
 With no --version, qory fetches the newest version of each output of the stage, and the
 version of each input that its gate approved. For any other artifact, it fetches the
 approved version, or the newest when none is approved. The newest version is the newest
-that the index does not mark cancelled: a version of a cancelled run counts for no stage,
-and an artifact with only such versions gets no directory. <type> limits the fetch to one
+that the index does not mark cancelled: a version of a cancelled run counts for no stage.
+qory skips a name whose newest such version is withdrawn, and an artifact with no such
+version gets no directory. <type> limits the fetch to one
 type. --version needs <type>, and fetches that version of each artifact of the type,
 whether or not it is cancelled.
 
@@ -459,7 +460,7 @@ func newArtifactPush() *cobra.Command {
 	var withdraw bool
 
 	c := &cobra.Command{
-		Use:   "push <type> <file>...",
+		Use:   "push <type> [<file>...]",
 		Short: "Upload files as one new version of an artifact",
 		Long: `Upload the files as one new version of the artifact <type>/<name>, keep a copy in the store
 under <type>/<name>/v<N>/, and print the version. - reads one file from standard input.
@@ -475,10 +476,10 @@ does not pass.
 
 --withdraw stores a version of <type>/<name> with no files and the mark withdrawn, in place of
 uploading files. A gate, a stage input and the work item's pages leave out a name whose
-newest version is withdrawn. A later push of files lists the name again. Outside a run, qory
-records the withdrawal in .qory/artifacts and sends nothing.
+newest version is withdrawn. A later push of files lists the name again.
 
-Outside a run, qory keeps the files in .qory/artifacts and sends nothing.
+Outside a run, qory keeps the files, or the record of a withdrawal, in .qory/artifacts and
+sends nothing.
 
 --verbose adds nothing here.
 
