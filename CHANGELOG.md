@@ -21,8 +21,9 @@ release may change what an existing document does, and states it under Upgrading
 - A run of a work item works on the branch `qory/<work item id>`, at the commit of the
   artifact `branch` that its stage starts from. The harness still comes from
   `target_version`. A commit on the branch reaches a run's harness after you merge the
-  branch into the destination branch: the branch that Qory Apiary takes `target_version`
-  from. Qory Apiary then sends a `target_version` that contains the commit.
+  branch into the target's default branch, the branch that its `HEAD` points to. Qory
+  Apiary reads `target_version` there, so the next run's `target_version` contains the
+  commit.
 - A write run of a work item ends with a push step: qory commits what the agent left,
   pushes each repository with new commits to `qory/<work item id>`, and stores a new
   version of the artifact `branch`. The next run in the same stage starts at that commit. A

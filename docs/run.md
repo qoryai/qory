@@ -1695,8 +1695,8 @@ It reads `harness.extensions`, such as `command_limits_minutes`, the `qory` vers
 requirement, the `worktree` section and `harness.tiers` at the same commit. A commit on the
 work item's branch, such as one that a run pushed, changes none of these for the next run
 of the work item. The commit reaches a run's harness after you merge the branch into the
-destination branch: the branch that Qory Apiary takes `target_version` from. Qory Apiary
-then sends a `target_version` that contains the commit.
+target's default branch, the branch that its `HEAD` points to. Qory Apiary reads
+`target_version` there, so the next run's `target_version` contains the commit.
 
 The fetch step also fetches each repository's commit by id, at depth 1. After the compose,
 qory checks out the branch with no request to a remote: at the commit in the version, or
