@@ -16,6 +16,11 @@ for too many files, and for files over the type's size limit. One version is at 
 also exits 4 with the fix line and the findings when the harness's push check for <type>
 does not pass.
 
+--withdraw stores a version of <type>/<name> with no files and the mark withdrawn, in place of
+uploading files. A gate, a stage input and the work item's pages leave out a name whose
+newest version is withdrawn. A later push of files lists the name again. Outside a run, qory
+records the withdrawal in .qory/artifacts and sends nothing.
+
 Outside a run, qory keeps the files in .qory/artifacts and sends nothing.
 
 --verbose adds nothing here.
@@ -31,6 +36,7 @@ qory artifact push <type> <file>... [flags]
 ```
   qory artifact push screenshot shots/checkout.png --name checkout --note "After the fix."
   qory artifact push explainer -                 # read one file from standard input
+  qory artifact push demo-script --name scenario-2 --withdraw --note "demo-scenarios v3 removed scenario-2."
 ```
 
 ### Options
@@ -39,6 +45,7 @@ qory artifact push <type> <file>... [flags]
   -h, --help          help for push
       --name string   the artifact's name, for several artifacts of one type (default main; in a run, only main for questions and review-comments)
       --note string   a note on this version, for a person to read
+      --withdraw      store a version of <type>/<name> with no files, which withdraws the name
 ```
 
 ### Options inherited from parent commands

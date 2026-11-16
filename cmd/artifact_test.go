@@ -36,6 +36,9 @@ type runAPIServer struct {
 	status    int
 	response  string
 	headers   http.Header
+	// indexAfterPush, when set, replaces the index once a push arrives: another writer
+	// changed the artifacts between the index that qory read and its push.
+	indexAfterPush string
 }
 
 // startRunAPI starts the server and sets QORY_RUN_API to the run's address on it.
@@ -72,6 +75,9 @@ func (s *runAPIServer) handle(w http.ResponseWriter, r *http.Request) {
 		var body map[string]any
 		_ = json.NewDecoder(r.Body).Decode(&body)
 		s.pushes = append(s.pushes, body)
+		if s.indexAfterPush != "" {
+			s.index = s.indexAfterPush
+		}
 		w.WriteHeader(s.status)
 		_, _ = io.WriteString(w, s.response)
 	case path == "/verdict":
@@ -110,6 +116,16 @@ func versionEntry(id string, number int, files ...string) string {
 // cancelled returns the version entry with "cancelled": true, a version of a cancelled run.
 func cancelled(version string) string {
 	return strings.Replace(version, `"writer":`, `"cancelled":true,"writer":`, 1)
+}
+
+// withdrawn returns the version entry with "withdrawn": true and no files, a withdrawal.
+func withdrawn(version string) string {
+	return strings.Replace(version, `"writer":`, `"withdrawn":true,"writer":`, 1)
+}
+
+// byPerson returns the version entry written by the member Ana, not by a run.
+func byPerson(version string) string {
+	return strings.Replace(version, `{"kind":"run","run_id":"r"}`, `{"kind":"person","name":"Ana"}`, 1)
 }
 
 // artifactEntry returns an index's entry of an artifact whose newest version is newest.
@@ -444,6 +460,36 @@ func TestArtifactPullChoosesAVersionPerArtifact(t *testing.T) {
 			artifactEntry("demo", "main", "", 2, cancelled(versionEntry("av_1", 1, fileEntry("v", "one"))),
 				cancelled(versionEntry("av_2", 2, fileEntry("v", "two")))),
 			"",
+		},
+		"an output whose newest version is withdrawn is not fetched": {
+			`{"version":1,"inputs":[],"outputs":[{"type":"demo","required":true,"version":null,"check":"missing"}]}`,
+			artifactEntry("demo", "main", "", 2, versionEntry("av_1", 1, fileEntry("v", "one")),
+				withdrawn(versionEntry("av_2", 2))),
+			"",
+		},
+		"another artifact whose newest version is withdrawn is not fetched": {
+			`{"version":1,"inputs":[],"outputs":[]}`,
+			artifactEntry("demo", "main", "", 2, versionEntry("av_1", 1, fileEntry("v", "one")),
+				withdrawn(versionEntry("av_2", 2))),
+			"",
+		},
+		"an input whose newest version is withdrawn is not fetched": {
+			`{"version":1,"inputs":[{"type":"demo","required":true,"version":{"id":"av_1","number":1}}],"outputs":[]}`,
+			artifactEntry("demo", "main", "av_1", 2, versionEntry("av_1", 1, fileEntry("v", "one")),
+				withdrawn(versionEntry("av_2", 2))),
+			"",
+		},
+		"a name whose withdrawal is newer than a cancelled version is not fetched": {
+			`{"version":1,"inputs":[],"outputs":[]}`,
+			artifactEntry("demo", "main", "", 3, versionEntry("av_1", 1, fileEntry("v", "one")),
+				withdrawn(versionEntry("av_2", 2)), cancelled(versionEntry("av_3", 3, fileEntry("v", "three")))),
+			"",
+		},
+		"a push of files after a withdrawal lists the name again": {
+			`{"version":1,"inputs":[],"outputs":[]}`,
+			artifactEntry("demo", "main", "", 3, versionEntry("av_1", 1, fileEntry("v", "one")),
+				withdrawn(versionEntry("av_2", 2)), versionEntry("av_3", 3, fileEntry("v", "three"))),
+			"v3",
 		},
 		"another artifact whose versions are all cancelled is not fetched": {
 			`{"version":1,"inputs":[],"outputs":[]}`,
@@ -849,6 +895,215 @@ func TestArtifactPushOutsideARunKeepsNewVersions(t *testing.T) {
 	}
 
 	wantFile(t, filepath.Join(root, ".qory", "artifacts", "demo-video", "main", "v2", "a.md"), "bytes")
+}
+
+// withdrawIndex is the index of a run that has the artifact demo-script/scenario-2 at v2,
+// written by a run, and the artifact demo-script/scenario-3 at v1, written by Ana.
+func withdrawIndex() string {
+	return indexOf(
+		artifactEntry("demo-script", "scenario-2", "", 2, versionEntry("av_1", 1, fileEntry("s.json", "one")),
+			versionEntry("av_2", 2, fileEntry("s.json", "two"))),
+		artifactEntry("demo-script", "scenario-3", "", 1, byPerson(versionEntry("av_3", 1, fileEntry("s.json", "x")))),
+	)
+}
+
+func TestArtifactPushWithdrawSendsAWithdrawal(t *testing.T) {
+	inCheckout(t)
+	server := startRunAPI(t)
+	server.index = withdrawIndex()
+	server.response = `{"version":1,"artifact":{"type":"demo-script","name":"scenario-2","version":{"id":"av_4","number":3}}}`
+
+	out, err := run(t, "artifact", "push", "demo-script", "--name", "scenario-2", "--withdraw", "--note", "Removed.")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if out != "Withdrew demo-script/scenario-2 in version 3.\n" {
+		t.Errorf("out = %q", out)
+	}
+
+	if len(server.pushes) != 1 {
+		t.Fatalf("pushes = %v", server.pushes)
+	}
+
+	body := server.pushes[0]
+	if body["type"] != "demo-script" || body["name"] != "scenario-2" || body["note"] != "Removed." || body["withdraw"] != true {
+		t.Errorf("body = %v", body)
+	}
+
+	if files, ok := body["files"].([]any); !ok || len(files) != 0 {
+		t.Errorf("files = %v, want an empty list", body["files"])
+	}
+}
+
+func TestArtifactPushWithoutWithdrawSendsNoWithdrawMember(t *testing.T) {
+	root := inCheckout(t)
+	server := startRunAPI(t)
+
+	path := filepath.Join(root, "a.md")
+	if err := os.WriteFile(path, []byte("bytes"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := run(t, "artifact", "push", "demo-script", path); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, has := server.pushes[0]["withdraw"]; has {
+		t.Errorf("body = %v", server.pushes[0])
+	}
+}
+
+// TestArtifactPushWithdrawRefusals is each refusal of a withdrawal: exit 4, the text of
+// decision 654 (c), and no POST.
+func TestArtifactPushWithdrawRefusals(t *testing.T) {
+	for name, c := range map[string]struct {
+		args  []string
+		index string
+		want  string
+	}{
+		"a name with no version": {
+			[]string{"demo-script", "--name", "scenario-9"}, withdrawIndex(),
+			"Pass the name of a stored artifact to --withdraw. demo-script/scenario-9 has no version.",
+		},
+		"a name whose versions are all cancelled": {
+			[]string{"demo-script", "--name", "scenario-5"},
+			indexOf(artifactEntry("demo-script", "scenario-5", "", 1, cancelled(versionEntry("av_1", 1, fileEntry("s.json", "x"))))),
+			"Pass the name of a stored artifact to --withdraw. demo-script/scenario-5 has no version.",
+		},
+		"a file argument": {
+			[]string{"demo-script", "scenario-2.json", "--name", "scenario-2"}, withdrawIndex(),
+			"Pass either files or --withdraw. A withdrawal stores no files, and the command got 1: scenario-2.json.",
+		},
+		"two file arguments": {
+			[]string{"demo-script", "a.json", "-", "--name", "scenario-2"}, withdrawIndex(),
+			"Pass either files or --withdraw. A withdrawal stores no files, and the command got 2: a.json, -.",
+		},
+		"a name already withdrawn": {
+			[]string{"demo-script", "--name", "scenario-4"},
+			indexOf(artifactEntry("demo-script", "scenario-4", "", 3, versionEntry("av_1", 1, fileEntry("s.json", "x")),
+				versionEntry("av_2", 2, fileEntry("s.json", "y")), withdrawn(versionEntry("av_3", 3)))),
+			"Leave demo-script/scenario-4 as it is. Its newest version, v3, is already a withdrawal.",
+		},
+		"a withdrawal under a cancelled version": {
+			[]string{"demo-script", "--name", "scenario-4"},
+			indexOf(artifactEntry("demo-script", "scenario-4", "", 3, versionEntry("av_1", 1, fileEntry("s.json", "x")),
+				withdrawn(versionEntry("av_2", 2)), cancelled(versionEntry("av_3", 3, fileEntry("s.json", "y"))))),
+			"Leave demo-script/scenario-4 as it is. Its newest version, v2, is already a withdrawal.",
+		},
+		"a person's upload": {
+			[]string{"demo-script", "--name", "scenario-3"}, withdrawIndex(),
+			"Leave demo-script/scenario-3 to a member. Its newest version, v1, is an upload by Ana, and a run withdraws only a name whose newest version a run wrote.",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			inCheckout(t)
+			server := startRunAPI(t)
+			server.index = c.index
+
+			_, err := run(t, append([]string{"artifact", "push", "--withdraw"}, c.args...)...)
+			wantExit(t, err, cmd.ExitArtifactRefused, c.want)
+
+			if err.Error() != c.want {
+				t.Errorf("err = %q, want %q", err, c.want)
+			}
+
+			if len(server.pushes) != 0 {
+				t.Errorf("pushes = %v", server.pushes)
+			}
+		})
+	}
+}
+
+// TestArtifactPushWithdrawOfARefusalAfterTheIndex is a withdrawal that the run API refuses
+// after qory read an index that allowed it, because the artifacts changed between the
+// two. Each code that depends on the artifacts exits 4 with qory's text for what the index
+// shows now; with an index that shows nothing, with the run API's message.
+func TestArtifactPushWithdrawOfARefusalAfterTheIndex(t *testing.T) {
+	changed := map[string]string{
+		"no_version": indexOf(),
+		"already_withdrawn": indexOf(artifactEntry("demo-script", "scenario-2", "", 3,
+			versionEntry("av_1", 1, fileEntry("s.json", "one")), withdrawn(versionEntry("av_3", 3)))),
+		"person_version": indexOf(artifactEntry("demo-script", "scenario-2", "", 3,
+			versionEntry("av_1", 1, fileEntry("s.json", "one")), byPerson(versionEntry("av_3", 3, fileEntry("s.json", "x"))))),
+	}
+	texts := map[string]string{
+		"no_version":        "Pass the name of a stored artifact to --withdraw. demo-script/scenario-2 has no version.",
+		"already_withdrawn": "Leave demo-script/scenario-2 as it is. Its newest version, v3, is already a withdrawal.",
+		"person_version": "Leave demo-script/scenario-2 to a member. Its newest version, v3, is an upload by Ana, " +
+			"and a run withdraws only a name whose newest version a run wrote.",
+	}
+
+	for code, index := range changed {
+		t.Run(code, func(t *testing.T) {
+			inCheckout(t)
+			server := startRunAPI(t)
+			server.index = withdrawIndex()
+			server.indexAfterPush = index
+			server.status = http.StatusConflict
+			server.response = fmt.Sprintf(`{"error":%q,"message":"The line of the run API."}`, code)
+
+			_, err := run(t, "artifact", "push", "demo-script", "--name", "scenario-2", "--withdraw")
+			wantExit(t, err, cmd.ExitArtifactRefused, texts[code])
+		})
+	}
+
+	for _, code := range []string{"no_version", "already_withdrawn", "person_version", "withdrawal_with_files", "type_not_withdrawable"} {
+		t.Run(code+" with an index that shows no cause", func(t *testing.T) {
+			inCheckout(t)
+			server := startRunAPI(t)
+			server.index = withdrawIndex()
+			server.status = http.StatusConflict
+			server.response = fmt.Sprintf(`{"error":%q,"message":"The line of the run API."}`, code)
+
+			_, err := run(t, "artifact", "push", "demo-script", "--name", "scenario-2", "--withdraw")
+			wantExit(t, err, cmd.ExitArtifactRefused, "The line of the run API.")
+		})
+	}
+}
+
+func TestArtifactPushWithdrawOutsideARunKeepsTheWithdrawal(t *testing.T) {
+	root := inCheckout(t)
+	t.Setenv("QORY_RUN_API", "")
+
+	path := filepath.Join(root, "s.json")
+	if err := os.WriteFile(path, []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := run(t, "artifact", "push", "demo-script", "--name", "scenario-2", "--withdraw")
+	wantExit(t, err, cmd.ExitArtifactRefused, "Pass the name of a stored artifact to --withdraw. demo-script/scenario-2 has no version.")
+
+	if _, err := run(t, "artifact", "push", "demo-script", path, "--name", "scenario-2"); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := run(t, "artifact", "push", "demo-script", "--name", "scenario-2", "--withdraw")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	want := "Kept the withdrawal in .qory/artifacts/demo-script/scenario-2/v2/; not sent: outside a Qory Apiary run, qory keeps versions only in .qory/artifacts.\n"
+	if out != want {
+		t.Errorf("out = %q, want %q", out, want)
+	}
+
+	entries, err := os.ReadDir(filepath.Join(root, ".qory", "artifacts", "demo-script", "scenario-2", "v2"))
+	if err != nil || len(entries) != 0 {
+		t.Errorf("v2 = %v, %v, want a directory with no files", entries, err)
+	}
+
+	wantFile(t, filepath.Join(root, ".qory", "artifacts", "demo-script", "scenario-2", "v1", "s.json"), "{}")
+
+	_, err = run(t, "artifact", "push", "demo-script", "--name", "scenario-2", "--withdraw")
+	wantExit(t, err, cmd.ExitArtifactRefused, "Leave demo-script/scenario-2 as it is. Its newest version, v2, is already a withdrawal.")
+
+	// A push of files after the withdrawal is the next version.
+	if _, err := run(t, "artifact", "push", "demo-script", path, "--name", "scenario-2"); err != nil {
+		t.Fatal(err)
+	}
+
+	wantFile(t, filepath.Join(root, ".qory", "artifacts", "demo-script", "scenario-2", "v3", "s.json"), "{}")
 }
 
 func TestArtifactPushChecksItsArguments(t *testing.T) {

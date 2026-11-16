@@ -480,6 +480,43 @@ func TestPushArtifactLeavesOutAnEmptyNameAndNote(t *testing.T) {
 	}
 }
 
+func TestPushArtifactSendsAWithdrawalWithNoFiles(t *testing.T) {
+	client := serve(t, func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+
+		want := `{"type":"demo-script","name":"scenario-2","withdraw":true,"files":[]}`
+		if string(raw) != want {
+			t.Errorf("body = %s", raw)
+		}
+
+		respond(http.StatusCreated, pushedExample)(w, r)
+	})
+
+	_, err := client.PushArtifact(context.Background(), runapi.Push{Type: "demo-script", Name: "scenario-2", Withdraw: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestArtifactsReadsAWithdrawnVersion(t *testing.T) {
+	index := `{"version":1,"artifacts":[{"type":"demo-script","name":"scenario-2","stage_id":null,"approved_version":null,` +
+		`"newest_version":2,"changed_after_approval":false,"versions":[` +
+		`{"id":"av_1","number":1,"writer":{"kind":"run","run_id":"r"},"cancelled":false,"withdrawn":false,"files":[],"approvals":[]},` +
+		`{"id":"av_2","number":2,"writer":{"kind":"run","run_id":"r"},"cancelled":false,"withdrawn":true,"files":[],"approvals":[]}]}]}`
+
+	client := serve(t, respond(http.StatusOK, index))
+
+	got, err := client.Artifacts(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	versions := got.Artifacts[0].Versions
+	if versions[0].Withdrawn || !versions[1].Withdrawn || len(versions[1].Files) != 0 {
+		t.Errorf("versions = %+v", versions)
+	}
+}
+
 func TestPushArtifactSendsNothingOverTheLimit(t *testing.T) {
 	client := serve(t, func(_ http.ResponseWriter, r *http.Request) {
 		t.Errorf("request sent: %s", r.RequestURI)

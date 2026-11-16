@@ -190,12 +190,15 @@ type Artifact struct {
 }
 
 // Version is one version of an artifact. Cancelled is true when a member cancelled the
-// run that wrote the version; an index without the field reads as false.
+// run that wrote the version, and Withdrawn when the version is a withdrawal: it has no
+// files and removes its name from gates, stage inputs and the work item's pages. An
+// index without either field reads it as false.
 type Version struct {
 	ID        string     `json:"id"`
 	Number    int        `json:"number"`
 	Writer    Writer     `json:"writer"`
 	Cancelled bool       `json:"cancelled"`
+	Withdrawn bool       `json:"withdrawn"`
 	StageID   *string    `json:"stage_id"`
 	Note      *string    `json:"note"`
 	At        string     `json:"at"`
@@ -229,12 +232,14 @@ type Approval struct {
 }
 
 // Push is the body of a new version of an artifact. Name and Note are left out of the
-// request when they are empty, and the run API then uses the name `main`.
+// request when they are empty, and the run API then uses the name `main`. Withdraw
+// makes the version a withdrawal, which has no Files.
 type Push struct {
-	Type  string     `json:"type"`
-	Name  string     `json:"name,omitempty"`
-	Note  string     `json:"note,omitempty"`
-	Files []PushFile `json:"files"`
+	Type     string     `json:"type"`
+	Name     string     `json:"name,omitempty"`
+	Note     string     `json:"note,omitempty"`
+	Withdraw bool       `json:"withdraw,omitempty"`
+	Files    []PushFile `json:"files"`
 }
 
 // PushFile is one file of a [Push]. encoding/json writes Content as standard base64 with

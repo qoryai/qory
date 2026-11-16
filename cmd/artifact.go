@@ -96,12 +96,19 @@ type noWorkItemError struct{}
 // Error returns the line for the person.
 func (noWorkItemError) Error() string { return noWorkItemText }
 
-// artifactRefused reports whether err is a run API error for a type or a limit, or for
-// a push check that did not pass. [ExitCode] maps it to [ExitArtifactRefused].
+// artifactRefused reports whether err is a run API error for a type or a limit, for a
+// push check that did not pass, or a refused withdrawal ([withdrawRefusedError], or the
+// run API's refusal of a type that a run cannot withdraw). [ExitCode] maps it to
+// [ExitArtifactRefused].
 func artifactRefused(err error) bool {
+	var refused withdrawRefusedError
+	if errors.As(err, &refused) {
+		return true
+	}
+
 	for _, code := range []string{
 		runapi.CodeUnknownType, runapi.CodeTooManyFiles, runapi.CodeTooLarge,
-		runapi.CodePayloadTooLarge, runapi.CodePushCheckFailed,
+		runapi.CodePayloadTooLarge, runapi.CodePushCheckFailed, runapi.CodeTypeNotWithdrawable,
 	} {
 		if runapi.HasCode(err, code) {
 			return true
@@ -340,8 +347,9 @@ func pullArtifacts(c *cobra.Command, client *runapi.Client, artifactType string,
 // chosenVersion returns the version of artifact to fetch, nil for none: version when it is
 // not 0, the newest for an output of the stage, the version the stage has for an input,
 // else its approved version; and for any other artifact the approved version or the
-// newest. The newest is the version that [newestNotCancelled] returns. A type that is an
-// output and an input is an output: the stage's round works on its newest version.
+// newest. The newest is the version that [newestNotCancelled] returns. A name whose newest
+// version is withdrawn has none. A type that is an output and an input is an output: the
+// stage's round works on its newest version.
 func chosenVersion(artifact runapi.Artifact, snapshot *runapi.Snapshot, version int) *runapi.Version {
 	byNumber := func(number int) *runapi.Version {
 		for i := range artifact.Versions {
@@ -371,6 +379,11 @@ func chosenVersion(artifact runapi.Artifact, snapshot *runapi.Snapshot, version 
 
 	if version != 0 {
 		return byNumber(version)
+	}
+
+	// A name whose newest version is withdrawn is absent: no stage reads it.
+	if withdrawn(artifact) {
+		return nil
 	}
 
 	for _, output := range snapshot.Outputs {
@@ -407,9 +420,20 @@ func chosenVersion(artifact runapi.Artifact, snapshot *runapi.Snapshot, version 
 }
 
 // newestNotCancelled returns the version of artifact with the highest number that the
-// index does not mark cancelled, nil for none. A version that a cancelled run made counts
-// for no stage.
+// index does not mark cancelled, nil for none and for a name whose newest such version is
+// a withdrawal. A version that a cancelled run made counts for no stage, and a withdrawn
+// name counts as absent.
 func newestNotCancelled(artifact runapi.Artifact) *runapi.Version {
+	if newest := newestStored(artifact); newest != nil && !newest.Withdrawn {
+		return newest
+	}
+
+	return nil
+}
+
+// newestStored returns the version of artifact with the highest number that the index
+// does not mark cancelled, nil for none. It may be a withdrawal.
+func newestStored(artifact runapi.Artifact) *runapi.Version {
 	var newest *runapi.Version
 
 	for i := range artifact.Versions {
@@ -421,8 +445,18 @@ func newestNotCancelled(artifact runapi.Artifact) *runapi.Version {
 	return newest
 }
 
+// withdrawn reports whether the newest version of artifact that the index does not mark
+// cancelled is a withdrawal.
+func withdrawn(artifact runapi.Artifact) bool {
+	newest := newestStored(artifact)
+
+	return newest != nil && newest.Withdrawn
+}
+
 func newArtifactPush() *cobra.Command {
 	var name, note string
+
+	var withdraw bool
 
 	c := &cobra.Command{
 		Use:   "push <type> <file>...",
@@ -439,14 +473,25 @@ for too many files, and for files over the type's size limit. One version is at 
 also exits ` + strconv.Itoa(ExitArtifactRefused) + ` with the fix line and the findings when the harness's push check for <type>
 does not pass.
 
+--withdraw stores a version of <type>/<name> with no files and the mark withdrawn, in place of
+uploading files. A gate, a stage input and the work item's pages leave out a name whose
+newest version is withdrawn. A later push of files lists the name again. Outside a run, qory
+records the withdrawal in .qory/artifacts and sends nothing.
+
 Outside a run, qory keeps the files in .qory/artifacts and sends nothing.
 
 --verbose adds nothing here.
 
 More: https://github.com/qoryai/qory/blob/main/docs/run.md#commands-of-a-work-item`,
 		Example: `  qory artifact push screenshot shots/checkout.png --name checkout --note "After the fix."
-  qory artifact push explainer -                 # read one file from standard input`,
+  qory artifact push explainer -                 # read one file from standard input
+  qory artifact push demo-script --name scenario-2 --withdraw --note "demo-scenarios v3 removed scenario-2."`,
 		Args: func(c *cobra.Command, args []string) error {
+			if withdraw {
+				// More than the type is a refusal with exit 4, which RunE words.
+				return input(cobra.MinimumNArgs(1)(c, args))
+			}
+
 			return input(cobra.MinimumNArgs(2)(c, args))
 		},
 		Annotations: map[string]string{inWall: "true"},
@@ -461,6 +506,10 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md#commands-of-a-work-it
 				name = defaultName
 			} else if err := artifactNameError("--name", name); err != nil {
 				return input(err)
+			}
+
+			if withdraw {
+				return withdrawArtifact(c, runapi.Push{Type: artifactType, Name: name, Note: note, Withdraw: true}, files)
 			}
 
 			sources, err := readPushSources(c, files)
@@ -482,6 +531,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md#commands-of-a-work-it
 	}
 	c.Flags().StringVar(&name, "name", "", "the artifact's name, for several artifacts of one type (default main; in a run, only main for questions and review-comments)")
 	c.Flags().StringVar(&note, "note", "", "a note on this version, for a person to read")
+	c.Flags().BoolVar(&withdraw, "withdraw", false, "store a version of <type>/<name> with no files, which withdraws the name")
 
 	return c
 }
@@ -630,13 +680,7 @@ func sendPush(c *cobra.Command, client *runapi.Client, push runapi.Push, sources
 		})
 	}
 
-	pushed, err := client.PushArtifact(c.Context(), push)
-	// A not_found with a message comes from the gateway's route, and never reached Qory Apiary.
-	var apiError *runapi.Error
-	if errors.As(err, &apiError) && apiError.Code == runapi.CodeNotFound && apiError.Message == "" {
-		return errors.New(noWorkItemInRunText)
-	}
-
+	pushed, err := postVersion(c.Context(), client, push)
 	if err != nil {
 		return err
 	}
@@ -651,6 +695,19 @@ func sendPush(c *cobra.Command, client *runapi.Client, push runapi.Push, sources
 	}
 
 	return nil
+}
+
+// postVersion sends push to the run API. A run API with no work item for the run is
+// [noWorkItemInRunText].
+func postVersion(ctx context.Context, client *runapi.Client, push runapi.Push) (*runapi.Pushed, error) {
+	pushed, err := client.PushArtifact(ctx, push)
+	// A not_found with a message comes from the gateway's route, and never reached Qory Apiary.
+	var apiError *runapi.Error
+	if errors.As(err, &apiError) && apiError.Code == runapi.CodeNotFound && apiError.Message == "" {
+		return nil, errors.New(noWorkItemInRunText)
+	}
+
+	return pushed, err
 }
 
 // keepPush keeps the version in the store, outside a run. Standard input has no limit

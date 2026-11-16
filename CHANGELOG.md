@@ -364,9 +364,19 @@ release may change what an existing document does, and states it under Upgrading
   lists each missing part. A group role takes a contract with `fill: many`, and the
   compose checks each member. A contract file that is missing or malformed fails the
   same way. See The role contract in `contracts/harness/v1/README.md`.
+- `qory artifact push <type> --name <name> --withdraw` stores a version of `<type>/<name>`
+  with no files and the mark withdrawn, in place of uploading files. A gate, a stage input
+  and the work item's pages leave out a name whose newest version is withdrawn, and a later
+  push of files lists it again. qory exits 4 with a fix line, before it sends the push, for
+  a name with no version, for files given with `--withdraw`, for a name whose newest version
+  is already a withdrawal, and for a name whose newest version a person uploaded. Outside a
+  run, qory records the withdrawal as a version folder with no files in `.qory/artifacts` and
+  sends nothing.
 
 ### Changed
 
+- `qory artifact pull` and the working folder of a push check fetch nothing of a name whose
+  newest version, not counting cancelled ones, is a withdrawal.
 - `qory artifact pull` and the working folder of a push check take, of each artifact, the
   newest version that the run API's artifact index does not mark `cancelled`. A version
   that a cancelled run made counts for no stage, and an artifact whose versions are all

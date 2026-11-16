@@ -203,6 +203,43 @@ func TestAPushCheckSkipsCancelledVersions(t *testing.T) {
 	}
 }
 
+// TestAPushCheckSkipsAWithdrawnName is the working folder of a push check of spec when
+// the newest version of spec/main is a withdrawal: the name has no folder, as with one whose
+// versions are all cancelled, and spec/other, withdrawn and pushed again, has its newest.
+func TestAPushCheckSkipsAWithdrawnName(t *testing.T) {
+	inCheckout(t)
+	server := startRunAPI(t)
+	server.index = indexOf(
+		artifactEntry("spec", "main", "", 2,
+			versionEntry("av_1", 1, fileEntry("spec.md", "one\n")),
+			withdrawn(versionEntry("av_2", 2))),
+		artifactEntry("spec", "other", "", 3,
+			versionEntry("av_3", 1, fileEntry("spec.md", "three\n")),
+			withdrawn(versionEntry("av_4", 2)),
+			versionEntry("av_5", 3, fileEntry("spec.md", "five\n"))),
+	)
+	server.files = map[string]string{
+		"/artifacts/av_1/files/spec.md": "one\n",
+		"/artifacts/av_3/files/spec.md": "three\n",
+		"/artifacts/av_5/files/spec.md": "five\n",
+	}
+	fetch, err := cmd.ArtifactsForCheck(server.URL + "/v1/runs/run-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	if err := fetch(context.Background(), dir, []string{"spec"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "spec", "main")); !os.IsNotExist(err) {
+		t.Errorf("spec/main has a folder: %v", err)
+	}
+	wantFile(t, filepath.Join(dir, "spec", "other", "v3", "spec.md"), "five\n")
+	if _, err := os.Stat(filepath.Join(dir, "spec", "other", "v2")); !os.IsNotExist(err) {
+		t.Errorf("spec/other/v2 has a folder: %v", err)
+	}
+}
+
 // checksModule is a module that declares a push check for branch and one for spec,
 // which reads questions; its program's #! line is for node.
 var checksModule = map[string]string{
