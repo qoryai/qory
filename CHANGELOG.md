@@ -18,6 +18,10 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Added
 
+- On Codex, an agent whose `tools` key lists no shell tool (`Bash` or `PowerShell`) gets
+  `[features]` `shell_tool = false` in its agent file, so it has no shell. An agent with no
+  `tools` key keeps the shell. An agent without write tools can still write files through Codex's
+  `apply_patch` tool.
 - A run of a work item works on the branch `qory/<work item id>`, at the commit of the
   artifact `branch` that its stage starts from. The harness still comes from
   `target_version`. A commit on the branch reaches a run's harness after you merge the
@@ -382,6 +386,9 @@ release may change what an existing document does, and states it under Upgrading
   qory serves no path on it, and answers `404` to a request of the session that runs. The
   setup container of `wall.setup: outside` gets neither the variable nor the route. See The
   route to qory in `docs/run.md`.
+- A run whose documents have `access: write-no-push` and whose workflow is declared `write`
+  gets a writable checkout and no push step. With no wall, that run stops with
+  `write_needs_wall`.
 
 ### Changed
 
