@@ -107,6 +107,11 @@ func versionEntry(id string, number int, files ...string) string {
 		`"at":"2026-11-02T09:00:00Z","files":[%s],"approvals":[]}`, id, number, strings.Join(files, ","))
 }
 
+// cancelled returns the version entry with "cancelled": true, a version of a cancelled run.
+func cancelled(version string) string {
+	return strings.Replace(version, `"writer":`, `"cancelled":true,"writer":`, 1)
+}
+
 // artifactEntry returns an index's entry of an artifact whose newest version is newest.
 func artifactEntry(kind, name, approved string, newest int, versions ...string) string {
 	approval := "null"
@@ -421,6 +426,30 @@ func TestArtifactPullChoosesAVersionPerArtifact(t *testing.T) {
 			artifactEntry("demo", "main", "", 2, versionEntry("av_1", 1, fileEntry("v", "one")),
 				versionEntry("av_2", 2, fileEntry("v", "two"))),
 			"v2",
+		},
+		"an output takes its newest version that is not cancelled": {
+			`{"version":1,"inputs":[],"outputs":[{"type":"demo","required":true,"version":null,"check":"missing"}]}`,
+			artifactEntry("demo", "main", "", 3, versionEntry("av_1", 1, fileEntry("v", "one")),
+				versionEntry("av_2", 2, fileEntry("v", "two")), cancelled(versionEntry("av_3", 3, fileEntry("v", "three")))),
+			"v2",
+		},
+		"another artifact takes its newest version that is not cancelled": {
+			`{"version":1,"inputs":[],"outputs":[]}`,
+			artifactEntry("demo", "main", "", 3, versionEntry("av_1", 1, fileEntry("v", "one")),
+				versionEntry("av_2", 2, fileEntry("v", "two")), cancelled(versionEntry("av_3", 3, fileEntry("v", "three")))),
+			"v2",
+		},
+		"an output whose versions are all cancelled is not fetched": {
+			`{"version":1,"inputs":[],"outputs":[{"type":"demo","required":true,"version":null,"check":"missing"}]}`,
+			artifactEntry("demo", "main", "", 2, cancelled(versionEntry("av_1", 1, fileEntry("v", "one"))),
+				cancelled(versionEntry("av_2", 2, fileEntry("v", "two")))),
+			"",
+		},
+		"another artifact whose versions are all cancelled is not fetched": {
+			`{"version":1,"inputs":[],"outputs":[]}`,
+			artifactEntry("demo", "main", "", 2, cancelled(versionEntry("av_1", 1, fileEntry("v", "one"))),
+				cancelled(versionEntry("av_2", 2, fileEntry("v", "two")))),
+			"",
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
