@@ -1066,7 +1066,7 @@ func TestARunCodeWhoseHarnessBindsFlatStops(t *testing.T) {
 }
 
 // TestARunCodeWhoseHarnessBindsAGroupRoleToAListComposes is a run from a run code whose
-// harness document binds agents roles of the module review, which the base's stack
+// harness document binds roles in agents of the module review, which the base's stack
 // lists and which provides code-reviewer to its group role reviewers: the group role to
 // a list of two agents and the role lead to one name, or the role lead alone. Each
 // passes qory's checks and the harness composes, so the session joins. The review skill
