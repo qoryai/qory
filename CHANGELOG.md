@@ -382,6 +382,8 @@ release may change what an existing document does, and states it under Upgrading
   qory serves no path on it, and answers `404` to a request of the session that runs. The
   setup container of `wall.setup: outside` gets neither the variable nor the route. See The
   route to qory in `docs/run.md`.
+- A run whose documents have `access: write-no-push` gets a writable checkout and no push
+  step. With no wall, the run stops with `write_needs_wall`.
 
 ### Changed
 
