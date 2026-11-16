@@ -353,7 +353,7 @@ func TestAPassingCheckLetsThePushGoOn(t *testing.T) {
 	}
 }
 
-// TestTheContainerIsClosedOff is the check's container: from the run's image, as the
+// TestTheContainerIsClosedOff is the check's container: from the checker's image, as the
 // run's user, with no network, no capability, no variable passed, the home read-only at
 // its path, the working folder and the files read-only, and the program with its
 // arguments and the files' paths.
@@ -648,7 +648,7 @@ func TestThePushStepGetsItsLines(t *testing.T) {
 	}
 	f.e.exit(127, "", "/usr/bin/env: 'node': No such file or directory\n")
 	failed, err = f.c.Check(context.Background(), "spec", files)
-	if want := "Install node, or run in an image built FROM qory-agent. The check for spec could not start: /usr/bin/env: 'node': No such file or directory."; err != nil || failed == nil || failed.Step != want {
+	if want := "Set wall.image or --image to an image with node, such as one built FROM qory-agent. The check for spec could not start: /usr/bin/env: 'node': No such file or directory."; err != nil || failed == nil || failed.Step != want {
 		t.Errorf("a check that did not start: %+v, %v, want %q", failed, err, want)
 	}
 	f.c.Limit = 50 * time.Millisecond
@@ -684,19 +684,19 @@ func TestAProgramThatCannotStartStopsThePush(t *testing.T) {
 	}{
 		{"no node", "#!/usr/bin/env node", func(e *engine) {
 			e.exit(127, "", "/usr/bin/env: 'node': No such file or directory\n")
-		}, "Install node, or run in an image built FROM qory-agent, and push again. The check for spec could not start: /usr/bin/env: 'node': No such file or directory."},
+		}, "Set wall.image or --image to an image with node, such as one built FROM qory-agent, then run again. The check for spec could not start: /usr/bin/env: 'node': No such file or directory."},
 		{"no program", "#!/bin/sh", func(e *engine) {
 			e.exit(127, "", "[FATAL tini (7)] exec /home/c failed: No such file or directory\n")
-		}, "Install the program PROGRAM, and push again. The check for spec could not start: exec /home/c failed: No such file or directory."},
+		}, "Install the program PROGRAM, then run again. The check for spec could not start: exec /home/c failed: No such file or directory."},
 		{"not executable", "#!/bin/sh", func(e *engine) {
 			e.exit(126, "", "[FATAL tini (7)] exec /home/c failed: Permission denied\n")
-		}, "Install the program PROGRAM, and push again. The check for spec could not start: exec /home/c failed: Permission denied."},
+		}, "Install the program PROGRAM, then run again. The check for spec could not start: exec /home/c failed: Permission denied."},
 		{"busybox env", "#!/usr/bin/env node", func(e *engine) {
 			e.exit(127, "", "env: can't execute 'node': No such file or directory\n")
-		}, "Install node, or run in an image built FROM qory-agent, and push again. The check for spec could not start: env: can't execute 'node': No such file or directory."},
+		}, "Set wall.image or --image to an image with node, such as one built FROM qory-agent, then run again. The check for spec could not start: env: can't execute 'node': No such file or directory."},
 		{"interpreter", "#!/usr/local/bin/deno run", func(e *engine) {
 			e.exit(127, "", "sh: /usr/local/bin/deno: not found\n")
-		}, "Install the program PROGRAM, and push again. The check for spec could not start: sh: /usr/local/bin/deno: not found."},
+		}, "Install the program PROGRAM, then run again. The check for spec could not start: sh: /usr/local/bin/deno: not found."},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1022,7 +1022,7 @@ func TestARealCheckRunsInTheEngine(t *testing.T) {
 		t.Errorf("the failing check got %+v", r)
 	}
 	node := write("node", "#!/usr/bin/env node\n")
-	if r := check(checker(node)); r == nil || !strings.HasPrefix(r.Message, "Install node, or run in an image built FROM qory-agent, and push again. The check for spec could not start: ") {
+	if r := check(checker(node)); r == nil || !strings.HasPrefix(r.Message, "Set wall.image or --image to an image with node, such as one built FROM qory-agent, then run again. The check for spec could not start: ") {
 		t.Errorf("the check without node got %+v", r)
 	}
 	lint := write("lint", "#!/bin/sh\nnosuchlinter \"$2\"\n")
@@ -1030,7 +1030,7 @@ func TestARealCheckRunsInTheEngine(t *testing.T) {
 		t.Errorf("the check whose linter is not there got %+v", r)
 	}
 	missing := filepath.Join(home, "modules", "core", "missing")
-	if r := check(checker(missing)); r == nil || !strings.HasPrefix(r.Message, "Install the program "+missing+", and push again. The check for spec could not start: exec "+missing+" failed: No such file or directory.") {
+	if r := check(checker(missing)); r == nil || !strings.HasPrefix(r.Message, "Install the program "+missing+", then run again. The check for spec could not start: exec "+missing+" failed: No such file or directory.") {
 		t.Errorf("the missing program got %+v", r)
 	}
 	slow := write("slow", "#!/bin/sh\nsleep 30\n")
@@ -1042,5 +1042,44 @@ func TestARealCheckRunsInTheEngine(t *testing.T) {
 	out, err := exec.Command("docker", "ps", "--all", "--quiet", "--filter", "name=qory-push-check-").Output()
 	if err != nil || len(bytes.TrimSpace(out)) != 0 {
 		t.Errorf("containers of checks are left: %q, %v", out, err)
+	}
+}
+
+// TestHasImageInspectsWithoutAPull is the check that the engine has the checker's image:
+// docker image inspect of the image, true when it succeeds, false with no error when the
+// engine, Docker or Podman, does not have the image, and an error for any other failure.
+func TestHasImageInspectsWithoutAPull(t *testing.T) {
+	for name, c := range map[string]struct {
+		errOut  string
+		exitErr error
+		has     bool
+		wantErr string
+	}{
+		"present": {has: true},
+		"missing": {errOut: "Error response from daemon: No such image: registry.example/agent\n", exitErr: errors.New("exit status 1")},
+		// Podman's answer, as Forager's wall reads it too.
+		"missing on podman": {errOut: "Error: registry.example/agent: image not known\n", exitErr: errors.New("exit status 125")},
+		"engine":            {errOut: "Cannot connect to the Docker daemon at unix:///var/run/docker.sock\n", exitErr: errors.New("exit status 1"), wantErr: "the inspect of the image registry.example/agent@sha256:" + strings.Repeat("a", 64) + " failed: Cannot connect to the Docker daemon at unix:///var/run/docker.sock"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newFixture(t, "#!/usr/bin/env node")
+			var argv []string
+			f.c.Engine.Run = func(_ context.Context, a []string, _, stderr io.Writer) error {
+				argv = a
+				io.WriteString(stderr, c.errOut)
+				return c.exitErr
+			}
+			has, err := f.c.HasImage(context.Background())
+			got := ""
+			if err != nil {
+				got = err.Error()
+			}
+			if has != c.has || got != c.wantErr {
+				t.Errorf("HasImage = %v, %q, want %v, %q", has, got, c.has, c.wantErr)
+			}
+			if want := []string{"/usr/local/bin/docker", "image", "inspect", "--format", "{{.Id}}", f.c.Image}; !slices.Equal(argv, want) {
+				t.Errorf("the engine ran %q, want %q", argv, want)
+			}
+		})
 	}
 }

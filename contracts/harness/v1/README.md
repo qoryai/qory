@@ -979,7 +979,16 @@ absolute path in the home; a harness whose modules declare no check has no such 
 reaches Qory Apiary: for every push to the run API from inside the wall, through `qory
 artifact push` or any other request, and for the version that the push step stores after
 the agent. qory runs the program on the engine of the run's wall, in a new container from
-the run's image, as the run's user, with no network and no capability. The container has
+the wall's default image, as the run's user, with no network and no capability. The
+default image is `--image` or `wall.image` in `forager.yaml`, and not the image that the
+run's policy selects, so a change to the repository, such as one to its `.devcontainer/`,
+cannot turn the checks off. A run on a person's machine, with no run code, and with
+neither `--image` nor `wall.image`, whose policy selects the image, runs the checks in the
+run's image. A run from a run code with neither stops before the setup and the agent,
+with exit 2: `Set wall.image in forager.yaml, then take the work item in again in Qory Apiary: push
+checks run in the wall's default image; the code is used`. A run whose engine does not have the wall's default image stops before the setup and the agent,
+with exit 2: `Pull the wall's default image onto this machine, and run again: push checks
+run in it. The engine does not have the image <image>.` The container has
 no variable but the image's and those Docker sets: `HOME`, `HOSTNAME` and `PATH`. It has
 the wall's CPU and memory limits of the run's containers, the wall's process limit or 512
 processes, and the label of the run's containers, so the clean-up of the run removes a
@@ -1012,14 +1021,14 @@ has a line, the one finding is `The check exited with <N> and printed nothing.` 
 finding is without control characters, with the run's secrets masked, and at most 1,000
 characters; a check has at most 200 findings. qory reads at most 64 KiB of each stream.
 
-A program that does not start stops the push with 422 too: `Install node, or run in an
-image built FROM qory-agent, and push again. The check for <type> could not start:
-<error>.` when its `#!` line is for `node`, else `Install the program <path>, and push
-again. The check for <type> could not start: <error>.` A program does not start when it
-exits with 126 or 127 and the last line of its standard error is the container's init's
-line for the program, or ends with `not found`, `No such file or directory` or
-`Permission denied` for the program or a word of its `#!` line, such as
-`/usr/bin/env: 'node': No such file or directory`. Any other exit with 126 or 127, such as
+A program that does not start stops the push with 422 too: `Set wall.image or --image to
+an image with node, such as one built FROM qory-agent, then run again. The check for
+<type> could not start: <error>.` when its `#!` line is for `node`, else `Install the
+program <path>, then run again. The check for <type> could not start: <error>.` A
+program does not start when it exits with 126 or 127 and the last line of its standard
+error is the container's init's line for the program, or ends with `not found`, `No
+such file or directory` or `Permission denied` for the program or a word of its `#!`
+line, such as `/usr/bin/env: 'node': No such file or directory`. Any other exit with 126 or 127, such as
 one for a program that the check runs, is a check that failed. A program still running
 after 30 seconds is stopped, with `Make the check for <type> finish within 30 s, and push
 again. It ran longer and was stopped.`
@@ -1044,8 +1053,8 @@ In a run whose home has push checks, a push that the check cannot read gets 422
 When qory cannot run the check, the push stops with 503 `push_check_unavailable`, and qory
 run writes the cause as a line on its stderr: the fetch of the artifacts fails, two files
 of a fetched version are one file on this machine, the engine is not reachable or does
-not create the container, the engine does not have the run's image, or a temporary
-folder cannot be made. Node is needed only by a check whose program uses it: Qory's agent
+not create the container, the engine does not have the image of the checks, or a
+temporary folder cannot be made. Node is needed only by a check whose program uses it: Qory's agent
 image, and every image built FROM it, has it. A run without a wall, or without a control
 plane, runs no check, and outside a run `qory artifact push` keeps the files in
 `.qory/artifacts` and runs no check.

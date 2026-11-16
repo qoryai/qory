@@ -290,7 +290,20 @@ engine <id>.`, and when the run API of a run from a control plane fails, `Open t
 through a gateway that sends the run API address, and run again. The push checks read the
 artifacts through the run API, which failed: <cause>.`, or when the run API address is not
 an http or https URL: `Update the run's gateway, and run again. The run API address that
-the gateway sent is not one the push checks can use: <cause>.` When Forager cannot turn on
+the gateway sent is not one the push checks can use: <cause>.` The push checks run in a
+container of the wall's default image, `--image` or `wall.image`, and not of the image that
+the run's policy selects, so a change to the repository's `.devcontainer/` cannot turn them
+off. A run on a person's machine, with no run code, and with neither `--image` nor
+`wall.image`, whose policy selects the image, runs them in the run's image. A run from a
+run code with neither stops there with exit 2: `Set wall.image in forager.yaml, then take
+the work item in again in Qory Apiary: push checks run in the wall's default image; the
+code is used`. The run stops there with exit 2 too when the engine does not have
+the wall's default image: `Pull the wall's default image onto this machine, and run again:
+push checks run in it. The engine does not have the image <image>.` It stops there with
+exit 2 before any command of the engine gets the image when the image is not a
+reference, such as a value that starts with `-`: `Set wall.image or --image to an image
+reference, and run again. Push checks cannot start from <value>: a reference starts with a
+letter or a digit and has only letters, digits and . _ / : @ -.` When Forager cannot turn on
 the check of the POSTs from behind the wall, the run stops there with exit 1: `Run again.
 Turning on the push checks for the POSTs from behind the wall failed, so the run stopped
 before the setup: <cause>.` A home without push checks, and a run with no control plane,
@@ -305,6 +318,9 @@ Take the work item in again in Qory Apiary, so that the new run composes the har
 Take the work item in again in Qory Apiary, and do not switch the engine while that run starts: the push checks would run on the engine <id>, and the run's containers are on the engine <id>; the code is used
 Take the work item in again in Qory Apiary, through a gateway that sends the run API address: the push checks read the artifacts through the run API, which failed: <cause>; the code is used
 Update the run's gateway, then take the work item in again in Qory Apiary: the run API address that the gateway sent is not one the push checks can use: <cause>; the code is used
+Set wall.image in forager.yaml, then take the work item in again in Qory Apiary: push checks run in the wall's default image; the code is used
+Pull the wall's default image, then take the work item in again in Qory Apiary: push checks run in it, and the engine does not have the image <image>; the code is used
+Set wall.image or --image to an image reference, then take the work item in again in Qory Apiary: push checks cannot start from <value>; the code is used
 Take the work item in again in Qory Apiary: turning on the push checks for the POSTs from behind the wall failed, so the run stopped before the setup: <cause>; the code is used
 ```
 
@@ -4382,7 +4398,8 @@ image: go-docker
   selects no image starts in the default.
 - A run whose `--policy` selects an image needs no default, unless `wall.images_allow`
   is set. A machine that reports to a server sets `wall.image`: the server's run
-  configuration arrives once the run starts, and may select none.
+  configuration arrives once the run starts, and may select none. A run from a run code
+  also runs its push checks in that image, and stops without it.
 - `wall.images_allow` lists where a run's image may come from when the run's policy
   names it by a reference instead of a name of `wall.images`: the prefixes of the
   references the machine runs, such as `registry.example/agents/`. The reference must
