@@ -376,6 +376,11 @@ release may change what an existing document does, and states it under Upgrading
 - A push check does not run for a withdrawal in a walled run: a push with `withdraw` true
   and no files passes the check, because it has no file to check. A push with `withdraw`
   true and files takes the same path as any push.
+- Each run has a route from its session to `qory run`: a program in the session sends a
+  plain HTTP request to `QORY_HOST_URL`, `http://host.qory.invalid`, through `HTTP_PROXY`.
+  qory serves no path on it, and answers `404` to a request of the session that runs. The
+  setup container of `wall.setup: outside` gets neither the variable nor the route. See The
+  route to qory in `docs/run.md`.
 
 ### Changed
 
@@ -388,7 +393,7 @@ release may change what an existing document does, and states it under Upgrading
   cancelled gets no folder. The start commit of a run skips a cancelled version of the
   artifact `branch` too. Before, all three took the newest version, cancelled or not. An
   index without the field `cancelled` reads as no version cancelled.
-- qory builds with Forager main 37dc0148. A run keeps its wall only when a container of
+- qory builds with Forager 449b7e27. A run keeps its wall only when a container of
   the run may still run; a network or folder of the wall that could not be removed no longer
   keeps it.
 - `qory gateway` keeps its runs when SIGINT or SIGTERM stops it: a gateway started again

@@ -163,6 +163,55 @@ func returnContext(ctx, again context.Context, started func(time.Duration)) (con
 // shorter one.
 var returnAfterSignal = 30 * time.Minute
 
+// sessionPush is what the push step after a session of a write run needs, the same for
+// each session of the run: see [sessionPush.after].
+type sessionPush struct {
+	// ctx is qory run's context, which a first signal ends, and again the context a second
+	// signal ends. limit is when the run's time limit ends, the zero time for none.
+	ctx, again context.Context
+	limit      time.Time
+	// stopNow reads what stopped the run, for [pushEnding.settle].
+	stopNow func() stopRead
+	run     openedRun
+	stderr  io.Writer
+	branch  *preparation.WorkBranch
+	// dir is the working folder, runID the run's id and runNumber its number in the work
+	// item, as [pushWork] takes them.
+	dir, runID string
+	runNumber  int
+	// agentStopped is whether the stop of the session's agent is proven, see
+	// [preparation.Push]: true for a walled run.
+	agentStopped bool
+	checks       *runPushChecks
+}
+
+// after is the push step after a session that ended with out: [removeThenPush] under
+// [pushContext], so the step has the run's time limit, and at least [pushTimes] after the
+// limit or a signal. The step commits what the agent left, pushes the commits that the
+// session made past the branch's tip, and stores a new version; with no new commit, it
+// pushes and stores nothing. A later call of the same run pushes from the tip that the
+// earlier call left, see [preparation.Push]. after sets ending's state of the step, and
+// returns the outcome the run closes with: out, or [pushEnding.outcome] of the step's
+// error, with that error.
+func (p *sessionPush) after(ending *pushEnding, out session.Outcome) (session.Outcome, error) {
+	ctx, cancel := pushContext(p.ctx, p.again, p.limit, pushTimes.limit, pushTimes.signal)
+	defer cancel()
+	var err error
+	ending.noStep, err = removeThenPush(ctx, p.run, p.stderr, p.branch, p.dir, p.runID, p.runNumber, out, p.agentStopped, p.checks)
+	ending.settle(p.stopNow())
+	ending.cut = ctx.Err() != nil
+	if err != nil {
+		return ending.outcome(err), err
+	}
+	return out, nil
+}
+
+// pushAfterSession is [sessionPush.after], which qory run calls once, after its session.
+// A test replaces it to stand in for further sessions of the run around the step.
+var pushAfterSession = func(p *sessionPush, ending *pushEnding, out session.Outcome) (session.Outcome, error) {
+	return p.after(ending, out)
+}
+
 // removeThenPush removes the setup container of a run that gets the push step, then runs
 // [pushWork], with ctx as the bound of both. A process in that container can write the
 // working folder, so the check of the step is valid only once the container is gone. After a
