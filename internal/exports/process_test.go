@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/santhosh-tekuri/jsonschema/v6"
 	"gopkg.in/yaml.v3"
@@ -254,6 +255,20 @@ func TestProcessSchemaMatchesTheReader(t *testing.T) {
 		{strings.Replace(process, "name: Answer", `name: "\t"`, 1), false},
 		{strings.Replace(process, "name: Answer", "name: 3", 1), true},
 		{strings.Replace(process, "name: Answer", `name: ""`, 1), true},
+		{process + structured("submission") + "submit: {type: submission, send: end_of_run}\n", true},
+		{process + structured("submission") + "submit: {type: submission, send: after_gate}\n", true},
+		{process + structured("submission") + "submit: {type: submission, send: end_of_run, command: open-a-draft}\n", false},
+		{process + structured("submission") + "submit: {type: submission}\n", false},
+		{process + structured("submission") + "submit: {send: end_of_run}\n", false},
+		{process + structured("submission") + "submit: {type: submission, send: later}\n", false},
+		{process + structured("submission") + "submit: {type: submission, send: [end_of_run]}\n", false},
+		{process + structured("submission") + "submit: {type: Submission, send: end_of_run}\n", false},
+		{process + structured("submission") + "submit: {type: 3, send: end_of_run}\n", false},
+		{process + structured(strings.Repeat("a", 64)) + "submit: {type: " + strings.Repeat("a", 64) + ", send: end_of_run}\n", true},
+		{process + structured("submission") + "submit: {type: " + strings.Repeat("a", 65) + ", send: end_of_run}\n", false},
+		{process + structured("submission") + "submit:\n  - {type: submission, send: end_of_run}\n", false},
+		{process + structured("submission") + "submit: ~\n", false},
+		{process + structured("submission") + "submit: submission\n", false},
 	} {
 		var doc any
 		if err := yaml.Unmarshal([]byte(c.body), &doc); err != nil {
@@ -511,6 +526,82 @@ func TestVerifyChecksArtifactTypes(t *testing.T) {
 		want := refusalIn(file, c.want)
 		if err := e.Verify(); err == nil || err.Error() != want {
 			t.Errorf("%q: %v\nwant %s", c.body, err, want)
+		}
+	}
+}
+
+// structured is artifact_types with one entry: a custom structured type named name.
+func structured(name string) string {
+	return "artifact_types:\n  - {name: " + name + ", base_view: structured, size_limit: 65536, max_files: 1, json_schema: {}}\n"
+}
+
+// submitTypes is artifact_types with a structured type submission, a document type
+// reply-draft and a standard type screenshot.
+const submitTypes = `artifact_types:
+  - {name: submission, base_view: structured, size_limit: 65536, max_files: 1, json_schema: {}}
+  - {name: reply-draft, base_view: document, size_limit: 65536, max_files: 1}
+  - name: screenshot
+`
+
+// TestVerifyChecksSubmit is each mistake in submit, next to submitTypes. Each refusal
+// starts with the fix, in a first line of at most 100 characters, then the cause, then
+// the file. Both values of send pass with the structured type; a type that no entry has,
+// a custom type of another base view and a standard type fail, as does any type with no
+// artifact_types.
+func TestVerifyChecksSubmit(t *testing.T) {
+	for _, body := range []string{"{type: submission, send: end_of_run}", "{send: after_gate, type: submission}"} {
+		if err := factory(t, process+submitTypes+"submit: "+body+"\n").Verify(); err != nil {
+			t.Errorf("%q: %v", body, err)
+		}
+	}
+	const sends = "end_of_run or after_gate"
+	const fix = "Set submit.type to a structured type of artifact_types.\n  "
+	// refusal is the refusal with fix and cause of the submit in file.
+	refusal := func(file, fixAndCause string) string { return fixAndCause + "\n  submit is in " + file + "." }
+	noTypes := factory(t, process+"submit: {type: submission, send: end_of_run}\n")
+	want := refusal(filepath.Join(noTypes.Root, "modules", "desk", exports.ProcessFileName), fix+"No entry of artifact_types is named submission.")
+	if err := noTypes.Verify(); err == nil || err.Error() != want {
+		t.Errorf("no artifact_types: %v\nwant %s", err, want)
+	}
+	for _, c := range []struct{ body, want string }{
+		{" {type: submision, send: end_of_run}", fix + "No entry of artifact_types is named submision."},
+		{" {type: reply-draft, send: end_of_run}", fix + "reply-draft has base_view document."},
+		{" {type: screenshot, send: after_gate}", fix + "screenshot is a standard type."},
+		{" ~", "Set submit to an object with type and send, or remove it.\n  submit is null."},
+		{" submission", "Set submit to an object with type and send, or remove it.\n  submit is a string."},
+		{"\n  - {type: submission, send: end_of_run}", "Set submit to an object with type and send, or remove it.\n  submit is a list."},
+		{" {type: submission, send: end_of_run, command: open-a-draft}", "Remove the key \"command\" from submit.\n  submit has only type and send."},
+		{" {type: submission, send: end_of_run, [a]: b}", "Remove the key a list from submit.\n  submit has only type and send."},
+		{" {type: submission, type: reply, send: end_of_run}", "Remove the second type from submit.\n  submit has the key type twice."},
+		{" {send: end_of_run}", "Add type to submit, the name of a structured entry of artifact_types.\n  submit has no type."},
+		{" {type: 3, send: end_of_run}", "Set submit.type to the name of a structured entry of artifact_types.\n  submit.type is a number."},
+		{" {type: ~, send: end_of_run}", "Set submit.type to the name of a structured entry of artifact_types.\n  submit.type is null."},
+		{" {type: [a], send: end_of_run}", "Set submit.type to the name of a structured entry of artifact_types.\n  submit.type is a list."},
+		{" {type: 2026-11-02, send: end_of_run}", "Set submit.type to a quoted string.\n  YAML reads \"2026-11-02\" as a type that is not a string."},
+		{" {type: Submission, send: end_of_run}", "Set submit.type to a name such as reply-draft, at most 64 bytes.\n  submit.type is \"Submission\"."},
+		{" {type: \"a\\nb\", send: end_of_run}", "Set submit.type to a name such as reply-draft, at most 64 bytes.\n  submit.type is \"a\\nb\"."},
+		{" {type: a--b, send: end_of_run}", "Set submit.type to a name such as reply-draft, at most 64 bytes.\n  submit.type is \"a--b\"."},
+		{" {type: submission}", "Add send to submit, " + sends + ".\n  submit has no send."},
+		{" {type: submission, send: later}", "Set submit.send to " + sends + ".\n  submit.send is \"later\"."},
+		{" {type: submission, send: End_of_run}", "Set submit.send to " + sends + ".\n  submit.send is \"End_of_run\"."},
+		{" {type: submission, send: [end_of_run]}", "Set submit.send to " + sends + ".\n  submit.send is a list."},
+		{" {type: submission, send: ~}", "Set submit.send to " + sends + ".\n  submit.send is null."},
+		{" {type: submission, send: 1}", "Set submit.send to " + sends + ".\n  submit.send is a number."},
+		{" {type: submission, send: true}", "Set submit.send to " + sends + ".\n  submit.send is a boolean."},
+		{" {type: submission, send: {a: b}}", "Set submit.send to " + sends + ".\n  submit.send is an object."},
+		{" {type: submission, send: !foo end_of_run}", "Set submit.send to a quoted string.\n  YAML reads \"end_of_run\" as a type that is not a string."},
+		{" {type: submission, send: !!binary ZW5kX29mX3J1bg==}", "Set submit.send to a quoted string.\n  YAML reads \"ZW5kX29mX3J1bg==\" as a type that is not a string."},
+		{" {type: submission, send: \"end_of_run\\nok\"}", "Set submit.send to " + sends + ".\n  submit.send is \"end_of_run\\nok\"."},
+	} {
+		e := factory(t, process+submitTypes+"submit:"+c.body+"\n")
+		want := refusal(filepath.Join(e.Root, "modules", "desk", exports.ProcessFileName), c.want)
+		err := e.Verify()
+		if err == nil || err.Error() != want {
+			t.Errorf("%q: %v\nwant %s", c.body, err, want)
+			continue
+		}
+		if first, _, _ := strings.Cut(err.Error(), "\n"); utf8.RuneCountInString(first) > 100 {
+			t.Errorf("%q: the first line has %d characters, past 100: %s", c.body, utf8.RuneCountInString(first), first)
 		}
 	}
 }

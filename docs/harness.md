@@ -143,10 +143,10 @@ exports:
 A listed module with a `process.yaml` at its folder root is a factory. The file is a
 process template: a name, a summary, a description, a workspace type, a stack that
 `exports.stacks` lists, a `qory.process/v1` process, and optionally `artifact_types`, the
-artifact types the workspaces use. Every command that reads the
-configuration, `qory config` among them, checks the file, and checks that the stack
-declares under `workflows` each workflow that the process runs. The fields and their
-limits are in [the contract's section on a factory's
+artifact types the workspaces use, and `submit`, the submit step of a run. Every command
+that reads the configuration, `qory config` among them, checks the file, and checks that
+the stack declares under `workflows` each workflow that the process runs. The fields
+and their limits are in [the contract's section on a factory's
 process.yaml](../contracts/harness/v1/README.md#a-factorys-processyaml).
 
 The harness repository states the qory it needs once, in its `qory.yaml`:
