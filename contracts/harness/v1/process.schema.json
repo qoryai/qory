@@ -59,7 +59,7 @@
   },
   "$defs": {
     "artifact_type": {
-      "description": "An artifact type: a standard type by its name alone, or a custom type with its full definition.",
+      "description": "An artifact type: a standard type by its name alone, or a custom type with its full definition. Either may set withdrawable.",
       "type": "object",
       "required": ["name"],
       "additionalProperties": false,
@@ -68,10 +68,14 @@
         "base_view": {"description": "How a version's files are shown, and what they must be.", "enum": ["document", "image", "video", "file", "structured"]},
         "size_limit": {"description": "The most bytes of all files of one version.", "type": "integer", "minimum": 1},
         "max_files": {"description": "The most files of one version.", "type": "integer", "minimum": 1, "maximum": 20},
-        "json_schema": {"description": "The JSON Schema of a structured type's file.", "type": "object"}
+        "json_schema": {"description": "The JSON Schema of a structured type's file.", "type": "object"},
+        "withdrawable": {"description": "Whether a run may withdraw a name of the type. Optional, and true when the entry has none. A standard type and a custom type may both set it.", "type": "boolean"}
       },
       "oneOf": [
-        {"description": "A standard type: the name alone.", "maxProperties": 1},
+        {
+          "description": "A standard type: the name alone, or the name and withdrawable.",
+          "not": {"anyOf": [{"required": ["base_view"]}, {"required": ["size_limit"]}, {"required": ["max_files"]}, {"required": ["json_schema"]}]}
+        },
         {"$ref": "#/$defs/custom_document"},
         {"$ref": "#/$defs/custom_image"},
         {"$ref": "#/$defs/custom_video"},
