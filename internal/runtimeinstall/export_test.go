@@ -54,3 +54,10 @@ func SetCurrentUID(uid int) (restore func()) {
 	currentUID = func() int { return uid }
 	return func() { currentUID = before }
 }
+
+// NoteForTest makes the registry of host tell its progress once, as a retry of the
+// version with the last answer does, to report.
+func NoteForTest(host, runtime, version, answer string, report func(string)) {
+	r := &registry{host: host, runtime: runtime}
+	r.note(context.WithValue(context.Background(), progressKey{}, report), version, answer)
+}

@@ -897,10 +897,10 @@ response, `qory run` sends the same request again after 2, 4 and 8 seconds, then
 stops the tries: `qory run` sends the request again until the registry returns the file, or
 until the run's time limit passes, you cancel it (SIGINT) or it gets SIGTERM. At the first
 retry, and every 5 minutes after that, `qory run` prints one line on stderr, with the
-status of the last response, or `none` for no response:
+status of the last response, or `no response`:
 
 ```text
-qory run: waiting for registry.example.com to return the newest Claude Code (last answer: 503). If this continues, check pool.registry.
+qory run: registry.example.com has not returned the newest Claude Code yet (503); check pool.registry
 ```
 
 A run that ends while it waits ends as a run does before its session starts: at the time

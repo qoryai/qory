@@ -425,7 +425,7 @@ func (r *registry) get(ctx context.Context, path, accept, what, version string) 
 		}
 		d := wait(n, retryAfter)
 		n++
-		answer := "none"
+		answer := "no response"
 		if err == nil {
 			answer = strconv.Itoa(resp.StatusCode)
 		}
@@ -451,7 +451,7 @@ func (r *registry) note(ctx context.Context, version, answer string) {
 	if version != "newest" {
 		subject = displayName(r.runtime) + " " + version
 	}
-	report(fmt.Sprintf("waiting for %s to return %s (last answer: %s). If this continues, check pool.registry.", r.host, subject, answer))
+	report(fmt.Sprintf("%s has not returned %s yet (%s); check pool.registry", r.host, subject, answer))
 }
 
 // displayName is the runtime's name as a person reads it.
