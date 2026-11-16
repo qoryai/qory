@@ -4269,7 +4269,9 @@ with no run code, and a run you start yourself see the checkout writable.
 A run of a workflow from a run code where neither value is `read` needs a wall: without
 one, the agent runs as this machine's user and can change every file that user can. Such
 a run with no wall stops after the compose, before the image's fetch, the setup and the
-agent, exit 1. qory closes the run `failed` with the reason `write_needs_wall`, in place
+agent, exit 1. When its documents have `access` `write`, it also fetches no repository of
+the run configuration into the working folder, since that fetch runs git as this machine's
+user. qory closes the run `failed` with the reason `write_needs_wall`, in place
 of `no_session`:
 
 ```
