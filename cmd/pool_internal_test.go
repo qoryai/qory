@@ -112,7 +112,7 @@ func TestRunPoolRunsTheLoop(t *testing.T) {
 		State: filepath.Join(root, "qory", "pool"), InstanceID: provisionertest.InstanceID, InstanceName: "pool-test", Stderr: &stderr,
 	}
 	p := poolLoop(s, srv.Pool, srv.Pin(), slog.New(slog.NewTextHandler(io.Discard, nil)))
-	want := pool.Settings{Runs: 2, State: s.State, RunConfig: s.Pool.RunConfig, Registry: "localhost:5001",
+	want := pool.Settings{Runs: 2, State: s.State, RunConfig: s.Pool.RunConfig, Registry: "localhost:5001", Instance: srv.URL,
 		Probe: pool.Probe{Docker: docker, Image: agentImageOf, User: "1000:1000"}}
 	if p.Settings != want {
 		t.Errorf("the loop's settings are %+v, want %+v", p.Settings, want)

@@ -51,9 +51,9 @@ func runtimeRegistry(r *config.Forager) string {
 }
 
 // instanceAddress is the address of the Qory Apiary instance that the run uses, the URL
-// of gateway.server in forager.yaml; "" for a run with no server there, such as a run of
-// a pool, whose runs' forager.yaml has no server section, and a run from a run key. The
-// registry's token realm is checked against it, see [runtimeinstall.RegistryFetch].
+// of gateway.server in forager.yaml; "" for a run with no server there, such as a run
+// from a run key. The registry's token realm is checked against it, see
+// [runtimeinstall.RegistryFetch].
 func instanceAddress(r *config.Forager) string {
 	if r == nil || r.Server == nil {
 		return ""
@@ -66,7 +66,9 @@ func instanceAddress(r *config.Forager) string {
 // engine. It returns nil for a runtime qory installs no program of.
 //
 // The source is the registry of machine, the lines after a run code that qory run pool
-// writes, or else the registry of r, [runtimeRegistry], or else npm. The versions go to
+// writes, or else the registry of r, [runtimeRegistry], or else npm. The registry's token
+// realm must be the token route of the instance at machine's address, or else at r's,
+// [instanceAddress]. The versions go to
 // machine's folder, the runtimes folder that a pool's runs share, or else to
 // <state>/runtimes. A walled run, and a run with a control plane, reads through the
 // run's host proxy, proxied set; a run on a person's machine with neither sends its
@@ -78,6 +80,12 @@ func installRuntime(ctx context.Context, run openedRun, r *config.Forager, machi
 	registry := machine.Registry
 	if registry == "" {
 		registry = runtimeRegistry(r)
+	}
+	// A run from a run code takes the instance's address from the line that the pool
+	// wrote after the code; any other run, from gateway.server.url in forager.yaml.
+	instance := machine.Instance
+	if instance == "" {
+		instance = instanceOf(r)
 	}
 	folder := machine.Folder
 	if folder == "" {
@@ -97,7 +105,7 @@ func installRuntime(ctx context.Context, run openedRun, r *config.Forager, machi
 	}
 	fetch := runtimeinstall.NpmFetch(client, npmRegistry, goruntime.GOARCH)
 	if registry != "" {
-		fetch = runtimeinstall.RegistryFetch(client, registry, goruntime.GOARCH, instanceOf(r))
+		fetch = runtimeinstall.RegistryFetch(client, registry, goruntime.GOARCH, instance)
 	}
 	in, err := runtimeinstall.Install(ctx, runtimeinstall.Options{Fetch: fetch, Runtime: runtime, Folder: folder})
 	if err != nil {

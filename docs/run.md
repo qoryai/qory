@@ -854,9 +854,12 @@ The registry's cache had no shared/runtimes/claude:newest after 25m0s: the regis
 
 When the registry returns 401 with a Bearer challenge, `qory run` gets a token from the
 challenge's realm. The realm must be the token route of the Qory Apiary instance that
-the run uses: the scheme, host and port of `gateway.server.url` in `forager.yaml`, then
-the path `/registry/token`. The registry's host is never the realm, since the instance
-refuses to start with the same host for both. A realm with another scheme, host, port or
+the run uses: the scheme, host and port of the instance's address, then the path
+`/registry/token`. The instance's address is the `apiary <url>` line of the run-code file
+for a run from a run code, which `qory run pool` writes from its `gateway.server.url`;
+otherwise it is `gateway.server.url` in the run's `forager.yaml`. When a run has both, the
+run-code file's line is the address. The registry's host is never the realm, since the
+instance refuses to start with the same host for both. A realm with another scheme, host, port or
 path stops the run with:
 
 ```text
@@ -864,12 +867,16 @@ qory run: ask the instance admin to put the registry's token realm at https://ap
 It is https://registry.example.com/registry/token
 ```
 
-A run with no `gateway.server.url` in its `forager.yaml` has no address to check the
-realm against, and takes no realm. Its install stops with `give this run the address of
-Qory Apiary, whose token route is the registry's realm`, and the realm on the second
-line. A run that starts from a run key, and a run that `qory run pool` starts from a run
-code, have no `gateway.server` section in the `forager.yaml` they read. Any other status
-stops the run at once. A registry whose cache never held Claude Code
+A run with no address of the instance takes no realm. Its install stops with:
+
+```text
+qory run: Set gateway.server.url in forager.yaml to the address of Qory Apiary
+The realm is https://apiary.example.com/registry/token, and the run has no address of Qory Apiary to check it against.
+```
+
+A run that starts from a run key has no `gateway.server` section in the `forager.yaml`
+it reads, so it stops there when its `pool.registry` or run code names a registry. Any
+other status stops the run at once. A registry whose cache never held Claude Code
 stops the run with:
 
 ```text
@@ -1669,10 +1676,13 @@ qory run --run-code-file /run/qory/run-code --gateway https://gateway.example:84
   run key must be for this gateway.
 
 Each flag needs the other, and neither goes with `--run-key-fd` or `QORY_RUN_KEY`. The file
-contains the code, then at most two lines, each once: `registry <host>`, the host of the
-pool's registry, and `runtimes <folder>`, the pool's runtimes folder, an absolute path.
-`qory run pool` writes them, and the run installs its runtime from them, see The
-runtime's program. One newline after the last line is left out.
+contains the code, then at most three lines, each once: `registry <host>`, the host of the
+pool's registry; `apiary <url>`, the address of the pool's Qory Apiary instance, `https`
+or `http` on loopback, a host and an optional port with no user, path, query or
+fragment; and `runtimes <folder>`, the pool's runtimes folder, an absolute path. `qory
+run pool` writes them, with the `apiary` line only when it writes a `registry` line, and
+the run installs its runtime from them, see The runtime's program. One newline after the
+last line is left out.
 
 To give the code on stdin, set `<file>` to `/dev/stdin`, `/dev/fd/0` or `/proc/self/fd/0`.
 qory then reads stdin to its end and closes it, as with `--run-key-fd 0`, and the agent's
@@ -1717,8 +1727,8 @@ Each of these errors stops the run before it starts, exit 2:
 - `give --run-code-file a regular file: <file> is not one`, for a named pipe, a device or
   a folder, which qory opens without waiting, unless it is the pipe or device that stdin is
 - `write the run code into <file>: the file is empty`
-- `write the run code, then at most a `registry <host>` and a `runtimes <folder>` line, and
-  nothing else`, with `The file <file> contains more than that.` on the second line
+- `write the run code, then at most the lines `registry <host>`, `apiary <url>` and
+  `runtimes <folder>``, with `The file <file> contains more than that.` on the second line
 - `write a run code (qecr_…) into <file>: the file does not contain an enrolment code of
   Qory Apiary`, or `…: the file contains the enrolment code of an access key of kind
   <kind>`

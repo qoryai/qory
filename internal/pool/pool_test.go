@@ -80,7 +80,7 @@ func TestADispatchRunsQoryRun(t *testing.T) {
 	if !rep.FD3File || rep.CodeSum != sum([]byte(d.Run.RunCode)) {
 		t.Errorf("descriptor 3 is a file that no name links to, open for reading alone, %v; it contains the run code %v", rep.FD3File, rep.CodeSum == sum([]byte(d.Run.RunCode)))
 	}
-	if want := "registry " + harnessRegistry + "\nruntimes " + filepath.Join(h.state, "runtimes") + "\n"; rep.Machine != want {
+	if want := "registry " + harnessRegistry + "\napiary " + harnessInstance + "\nruntimes " + filepath.Join(h.state, "runtimes") + "\n"; rep.Machine != want {
 		t.Errorf("the lines after the run code are %q, want %q", rep.Machine, want)
 	}
 	if rep.Dir != filepath.Join(dir, "work") || rep.DirEntries != 0 {

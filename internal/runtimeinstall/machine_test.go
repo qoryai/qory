@@ -22,6 +22,18 @@ func TestTheMachineLinesReadBackAsWritten(t *testing.T) {
 	if (runtimeinstall.Machine{}).Lines() != "" {
 		t.Fatal("an empty machine has lines")
 	}
+	with := runtimeinstall.Machine{Registry: "registry.example:5000", Instance: "https://apiary.example.com", Folder: "/var/lib/qory-pool/runtimes"}
+	if want := "registry registry.example:5000\napiary https://apiary.example.com\nruntimes /var/lib/qory-pool/runtimes\n"; with.Lines() != want {
+		t.Fatalf("lines = %q, want %q", with.Lines(), want)
+	}
+	got, ok = runtimeinstall.ParseMachine([]string{"registry registry.example:5000", "apiary https://apiary.example.com", "runtimes /var/lib/qory-pool/runtimes"})
+	if !ok || got != with {
+		t.Fatalf("parsed %+v %t, want %+v", got, ok, with)
+	}
+	// The instance's address is written only with a registry, which it checks the realm of.
+	if got := (runtimeinstall.Machine{Instance: "https://apiary.example.com", Folder: "/x"}).Lines(); got != "runtimes /x\n" {
+		t.Fatalf("lines = %q, want the folder alone", got)
+	}
 }
 
 // TestTheMachineLinesRefuse reads lines after a run code that qory run refuses.
@@ -51,9 +63,38 @@ func TestTheMachineLinesRefuse(t *testing.T) {
 		{"registry registry.example:5000:5000"},
 		{"registry [::1]:5000"},
 		{"registry registry_.example"},
+		{"apiary"},
+		{"apiary http://apiary.example.com"},
+		{"apiary https://user@apiary.example.com"},
+		{"apiary https://user:secret@apiary.example.com"},
+		{"apiary https://apiary.example.com?x=1"},
+		{"apiary https://apiary.example.com#x"},
+		{"apiary https://apiary.example.com/"},
+		{"apiary https://apiary.example.com/registry/token"},
+		{"apiary https://apiary_.example.com"},
+		{"apiary https://apiary.example.com:0"},
+		{"apiary https://apiary.example.com:65536"},
+		{"apiary https://apiary.example.com%2f"},
+		{"apiary https://[::1]:4000"},
+		{"apiary ftp://apiary.example.com"},
+		{"apiary apiary.example.com"},
+		{"apiary  https://apiary.example.com"},
+		{"apiary https://apiary.example.com", "apiary https://apiary.example.com"},
+		{"apiary https://apiary.example.com", "apiary https://other.example.com"},
 	} {
 		if m, ok := runtimeinstall.ParseMachine(lines); ok {
 			t.Errorf("%q read as %+v, want a refusal", lines, m)
+		}
+	}
+}
+
+// TestTheMachineLinesTakeAnInstanceAddress reads apiary lines with an https URL, with a
+// port, and an http URL on loopback.
+func TestTheMachineLinesTakeAnInstanceAddress(t *testing.T) {
+	for _, address := range []string{"https://apiary.example.com", "https://apiary.example.com:8443", "http://127.0.0.1:4000", "http://localhost:4000"} {
+		m, ok := runtimeinstall.ParseMachine([]string{"apiary " + address})
+		if !ok || m.Instance != address {
+			t.Errorf("apiary %s read as %+v %t", address, m, ok)
 		}
 	}
 }

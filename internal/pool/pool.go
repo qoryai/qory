@@ -172,6 +172,10 @@ type Settings struct {
 	// qory run installs its runtime; empty, a run installs from npm. Each run gets it,
 	// and the pool's runtimes folder, after the run code, see [runtimeinstall.Machine].
 	Registry string
+	// Instance is the address of Qory Apiary, the pool's server URL, whose token route the
+	// registry's realm must be; each run gets it after the registry's line. It is
+	// written only with a Registry, and empty leaves it out.
+	Instance string
 	// Qory is the qory binary; empty is the one this process runs. A name with no path
 	// separator is found on the PATH every command gets, as [child.Program] has it.
 	Qory string
@@ -821,7 +825,7 @@ func (p *Pool) prepare(c provisioner.Claimed) (string, *os.File, *foragerdir.Loc
 	}
 	name := filepath.Join(p.Settings.State, codeFilePrefix+c.DispatchID)
 	defer os.Remove(name)
-	code, err := writeCode(name, c, runtimeinstall.Machine{Registry: p.Settings.Registry, Folder: filepath.Join(p.Settings.State, runtimesFolder)})
+	code, err := writeCode(name, c, runtimeinstall.Machine{Registry: p.Settings.Registry, Instance: p.Settings.Instance, Folder: filepath.Join(p.Settings.State, runtimesFolder)})
 	if err != nil {
 		lock.Release()
 		return "", nil, nil, err

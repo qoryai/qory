@@ -139,6 +139,9 @@ func fakeProbe() int {
 // harnessRegistry is the instance's registry the harness's pool passes each run.
 const harnessRegistry = "registry.example.com"
 
+// harnessInstance is the address of Qory Apiary that the harness's pool passes each run.
+const harnessInstance = "https://apiary.example.com"
+
 const probeImage = "registry.example.com/agent@sha256:2222222222222222222222222222222222222222222222222222222222222222"
 
 // fakeQory is qory run, as the script in $XDG_CONFIG_HOME sets it. It prints the run
@@ -429,7 +432,7 @@ func newHarness(t *testing.T, runs int) *harness {
 	log := slog.New(slog.NewJSONHandler(h.log, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	c.Log = log
 	h.pool = &pool.Pool{
-		Settings: pool.Settings{Runs: runs, State: h.state, RunConfig: h.runConfig, Registry: harnessRegistry, Qory: os.Args[0], Grace: 2 * time.Second,
+		Settings: pool.Settings{Runs: runs, State: h.state, RunConfig: h.runConfig, Registry: harnessRegistry, Instance: harnessInstance, Qory: os.Args[0], Grace: 2 * time.Second,
 			Probe: pool.Probe{Docker: os.Args[0], Image: probeImage, User: "1000:1000"}},
 		Client: c,
 		Log:    log,

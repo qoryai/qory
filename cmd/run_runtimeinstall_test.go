@@ -225,11 +225,13 @@ func TestATarballThatDoesNotMatchItsChecksumEndsTheRun(t *testing.T) {
 // as qory run pool writes it, with proxy as the run's host proxy, and no repositories,
 // at the first commit of a version repository, as
 // TestARunCodeAtATargetVersionWithNoRepositoryRunsOn runs it.
-func runCodeInstalling(t *testing.T, lines string, proxy *rt.Proxy, instance string) (string, error) {
+//
+// server is the address that forager.yaml's gateway.server.url gives the run, "" for none.
+func runCodeInstalling(t *testing.T, lines string, proxy *rt.Proxy, server string) (string, error) {
 	t.Helper()
 	defer cmd.SetInstallRuntimes(true)()
-	if instance != "" {
-		defer cmd.SetInstanceAddress(func(*config.Forager) string { return instance })()
+	if server != "" {
+		defer cmd.SetInstanceAddress(func(*config.Forager) string { return server })()
 	}
 	defer cmd.SetNpmRegistry(unreachableNpm)()
 	h, first, _, files := versionRepository(t)
@@ -262,7 +264,7 @@ func TestAPoolsRunsShareOneRuntimesFolder(t *testing.T) {
 	reg, proxy := rt.StartRegistry(t), rt.StartProxy(t)
 	reg.PublishPlain("2.1.320")
 	folder := filepath.Join(t.TempDir(), "runtimes")
-	lines := "registry " + reg.Host() + "\nruntimes " + folder + "\n"
+	lines := "registry " + reg.Host() + "\napiary " + reg.Instance() + "\nruntimes " + folder + "\n"
 	pkg, err := os.Getwd()
 	if err != nil {
 		t.Fatal(err)
@@ -270,7 +272,7 @@ func TestAPoolsRunsShareOneRuntimesFolder(t *testing.T) {
 	for i := range 2 {
 		// Each run sets up its folders from the package's folder.
 		t.Chdir(pkg)
-		out, err := runCodeInstalling(t, lines, proxy, reg.Instance())
+		out, err := runCodeInstalling(t, lines, proxy, "")
 		if !errors.Is(err, cmd.ErrJoinedNowhere) || !strings.Contains(out, "qory run: installed claude 2.1.320\n") {
 			t.Fatalf("run %d: %v\n%s", i+1, err, out)
 		}
@@ -299,7 +301,7 @@ func TestARunCodeFileTakesTheMachineLines(t *testing.T) {
 		"\nregistry registry.example/x\n", "\nregistry registry.example \n", "\nregistry registry.example:0\n", "\nregistry registry.example:65536\n"} {
 		file := codeFile(t, code+rest)
 		_, err := cmd.GiveRunCode(file)
-		want := "write the run code, then at most a `registry <host>` and a `runtimes <folder>` line\nThe file " + file + " contains more than that."
+		want := "write the run code, then at most the lines `registry <host>`, `apiary <url>` and `runtimes <folder>`\nThe file " + file + " contains more than that."
 		if err == nil || err.Error() != want {
 			t.Errorf("%q: %v, want %s", rest, err, want)
 		}
@@ -317,22 +319,23 @@ func TestARunWithNoAddressOfQoryApiaryStopsAtTheRegistrysRealm(t *testing.T) {
 	reg := rt.StartRegistry(t)
 	reg.PublishPlain("2.1.320")
 	r := runInstalling(t, installSetup{reg: reg, proxy: rt.StartProxy(t), walled: true, noInstance: true})
-	want := "qory run: give this run the address of Qory Apiary, whose token route is the registry's realm\n" +
-		"The realm is " + reg.Instance() + "/registry/token, and the run has no address to check it against.\n"
+	want := "qory run: Set gateway.server.url in forager.yaml to the address of Qory Apiary\n" +
+		"The realm is " + reg.Instance() + "/registry/token, and the run has no address of Qory Apiary to check it against.\n"
 	if len(r.joins) != 0 || cmd.ExitCode(r.err) != 1 || !strings.Contains(r.out, want) || reg.BlobGets() != 0 {
 		t.Fatalf("%d joins, %v (exit %d), %d blobs\n%s", len(r.joins), r.err, cmd.ExitCode(r.err), reg.BlobGets(), r.out)
 	}
 }
 
-// TestAPoolsRunHasNoAddressOfQoryApiary runs from the run code file of qory run pool,
-// whose lines are the registry and the runtimes folder: the run has no server in its
-// forager.yaml, so the install stops at the registry's realm with the fix first.
-func TestAPoolsRunHasNoAddressOfQoryApiary(t *testing.T) {
+// TestARunCodeFileWithNoApiaryLineStopsAtTheRegistrysRealm runs from a run code file
+// whose lines are the registry and the runtimes folder, as a pool without an address of
+// Qory Apiary writes them: the run has no server in its forager.yaml, so the install
+// stops at the registry's realm with the fix first.
+func TestARunCodeFileWithNoApiaryLineStopsAtTheRegistrysRealm(t *testing.T) {
 	reg, proxy := rt.StartRegistry(t), rt.StartProxy(t)
 	reg.PublishPlain("2.1.320")
 	lines := "registry " + reg.Host() + "\nruntimes " + filepath.Join(t.TempDir(), "runtimes") + "\n"
 	_, err := runCodeInstalling(t, lines, proxy, "")
-	if err == nil || !strings.HasPrefix(err.Error(), "give this run the address of Qory Apiary, whose token route is the registry's realm\n") || reg.BlobGets() != 0 {
+	if err == nil || !strings.HasPrefix(err.Error(), "Set gateway.server.url in forager.yaml to the address of Qory Apiary\n") || reg.BlobGets() != 0 {
 		t.Fatalf("err = %v, %d blobs", err, reg.BlobGets())
 	}
 }
@@ -347,5 +350,31 @@ func TestTheInstanceAddressIsTheServersURL(t *testing.T) {
 		if got := cmd.InstanceAddress(r); got != "" {
 			t.Errorf("the address is %q, want none", got)
 		}
+	}
+}
+
+// TestTheApiaryLineOfARunCodeFileWinsOverTheServersURL runs from run code files whose
+// apiary line and gateway.server.url differ: the instance of the run code's line is the
+// one that the registry's realm must be on, so a right line installs though the server's
+// URL is another, and a wrong line stops the run though the server's URL is right.
+func TestTheApiaryLineOfARunCodeFileWinsOverTheServersURL(t *testing.T) {
+	reg, proxy := rt.StartRegistry(t), rt.StartProxy(t)
+	reg.PublishPlain("2.1.320")
+	pkg, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	folder := filepath.Join(t.TempDir(), "runtimes")
+	lines := func(instance string) string {
+		return "registry " + reg.Host() + "\napiary " + instance + "\nruntimes " + folder + "\n"
+	}
+	out, err := runCodeInstalling(t, lines(reg.Instance()), proxy, "http://127.0.0.1:1")
+	if !errors.Is(err, cmd.ErrJoinedNowhere) || !strings.Contains(out, "qory run: installed claude 2.1.320\n") {
+		t.Fatalf("a right line: %v\n%s", err, out)
+	}
+	t.Chdir(pkg)
+	_, err = runCodeInstalling(t, lines("http://127.0.0.1:1"), proxy, reg.Instance())
+	if err == nil || !strings.HasPrefix(err.Error(), "ask the instance admin to put the registry's token realm at http://127.0.0.1:1/registry/token\n") {
+		t.Fatalf("a wrong line: %v", err)
 	}
 }

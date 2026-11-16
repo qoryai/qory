@@ -299,7 +299,7 @@ func runPool(ctx context.Context, s *poolSettings, key *accesskey.Key, pin acces
 func poolLoop(s *poolSettings, key *accesskey.Key, pin accesskey.Pin, log *slog.Logger) *pool.Pool {
 	return &pool.Pool{
 		Settings: pool.Settings{
-			Runs: s.Pool.Runs, State: s.State, RunConfig: s.Pool.RunConfig, Registry: runtimeinstall.RegistryHost(s.Pool.Registry),
+			Runs: s.Pool.Runs, State: s.State, RunConfig: s.Pool.RunConfig, Registry: runtimeinstall.RegistryHost(s.Pool.Registry), Instance: strings.TrimSuffix(s.Forager.Server.URL, "/"),
 			Probe: poolProbe(s.Runs),
 		},
 		Client: &provisioner.Client{

@@ -477,7 +477,7 @@ func (r *registry) tokenFor(ctx context.Context, challenges []string) (string, e
 		return "", fmt.Errorf("check the registry at %s\nThe realm of its Bearer challenge is not an https URL, or http on loopback", r.host)
 	}
 	if r.instance == "" {
-		return "", fmt.Errorf("give this run the address of Qory Apiary, whose token route is the registry's realm\nThe realm is %s, and the run has no address to check it against.", realm.Redacted())
+		return "", fmt.Errorf("Set gateway.server.url in forager.yaml to the address of Qory Apiary\nThe realm is %s, and the run has no address of Qory Apiary to check it against.", realm.Redacted())
 	}
 	want, err := tokenRoute(r.instance)
 	if err != nil {
