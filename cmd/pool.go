@@ -166,8 +166,16 @@ func loadPool() (*poolSettings, error) {
 		return nil, input(fmt.Errorf("%s has no pool section", r.File))
 	}
 	p := r.Pool
-	if _, err := runtimeinstall.RegistryOf(p.Registry); err != nil {
+	registry, err := runtimeinstall.RegistryOf(p.Registry)
+	if err != nil {
 		return nil, input(err)
+	}
+	// Each run installs its runtime from the registry through the instance's token
+	// realm, so the address the pool writes after each run code must be one a run takes.
+	if registry != "" {
+		if err := runtimeinstall.CheckInstance(strings.TrimSuffix(r.Server.URL, "/")); err != nil {
+			return nil, input(err)
+		}
 	}
 	if info, err := os.Stat(p.RunConfig); err != nil || !info.IsDir() {
 		return nil, input(fmt.Errorf("%s: pool.run_config is %s, which is not a folder", r.File, p.RunConfig))
