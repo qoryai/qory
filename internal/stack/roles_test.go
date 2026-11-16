@@ -149,7 +149,7 @@ func TestReadRolesWithCountsTakesOneOrMany(t *testing.T) {
 // segment: validate returns an error with the file's path and no path in front.
 func TestCheckRolesChecksABuiltStack(t *testing.T) {
 	err := CheckRoles(Roles{"agents": {"a/b": "c"}}, "bind")
-	if err == nil || !strings.HasPrefix(err.(*RolesError).In("qory.yaml").Error(), "Rename role a/b of bind.agents to one path segment") {
+	if err == nil || !strings.HasPrefix(err.(*RolesError).In("qory.yaml").Error(), "Rename role \"a/b\" of bind.agents to one path segment") {
 		t.Fatalf("err = %v", err)
 	}
 	if err := CheckRoles(Roles{"agents": {"coder": "rails-coder"}}, "bind"); err != nil {

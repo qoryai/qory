@@ -174,7 +174,7 @@ func ReadRoles(n *yaml.Node, key string, counts bool) (Roles, Groups, error) {
 		for _, role := range sortedNodeKeys(roles) {
 			x := roles[role]
 			if !segment(role) || strings.Contains(role, " ") {
-				return nil, nil, rolesError(key, "Rename role %s of %s to one path segment.\n  A path segment has no space, @, or leading dot.", accesskey.ShownName(role, false), at)
+				return nil, nil, rolesError(key, "Rename role %s of %s to one path segment.\n  A path segment has no space, @, or leading dot.", accesskey.ShownName(role, true), at)
 			}
 			path := at + "." + accesskey.ShownName(role, false)
 			if x.Kind == yaml.SequenceNode {
@@ -257,7 +257,7 @@ func CheckRoles(r Roles, key string) error {
 		at := key + "." + kind
 		for _, role := range sortedKeys(r[kind]) {
 			if !segment(role) || strings.Contains(role, " ") {
-				return rolesError(key, "Rename role %s of %s to one path segment.\n  A path segment has no space, @, or leading dot.", accesskey.ShownName(role, false), at)
+				return rolesError(key, "Rename role %s of %s to one path segment.\n  A path segment has no space, @, or leading dot.", accesskey.ShownName(role, true), at)
 			}
 			if name := r[kind][role]; !entryName(name) {
 				return rolesError(key, "Set %s.%s to an entry's name.\n  An entry's name is one path segment with no space, @, or leading dot.\n  The value is %s.", at, accesskey.ShownName(role, false), accesskey.ShownName(name, true))
@@ -290,7 +290,7 @@ func CheckFills(f Fills, key string) error {
 				return rolesError(key, "Write one name for %s.\n  Only an agents role can be a group, and the value is a list.", path)
 			}
 			if !segment(role) || strings.Contains(role, " ") {
-				return rolesError(key, "Rename role %s of %s.%s to one path segment.\n  A path segment has no space, @, or leading dot.", accesskey.ShownName(role, false), key, kind)
+				return rolesError(key, "Rename role %s of %s.%s to one path segment.\n  A path segment has no space, @, or leading dot.", accesskey.ShownName(role, true), key, kind)
 			}
 			names := f.Many[kind][role]
 			if len(names) == 0 {

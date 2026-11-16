@@ -142,3 +142,39 @@ func TestARefusalFitsItsModuleName(t *testing.T) {
 		t.Errorf("%s", err)
 	}
 }
+
+// TestFitKeepsTheKeysOfADottedName is a role of 90 characters after bind.agents.,
+// provides.skills. and agents.: Fit shortens the role and leaves the keys in front of it,
+// and the last line has the role without them.
+func TestFitKeepsTheKeysOfADottedName(t *testing.T) {
+	role := "role-" + strings.Repeat("r", 85)
+	for _, keys := range []string{"bind.agents.", "provides.skills.", "agents.", "roles.commands."} {
+		text := "Set " + keys + role + " to the name of one entry, which is a path segment and no more.\n  The cause."
+		got := exports.Fit(text)
+		want := "Set " + keys + "role-rrrr…rrrrrrrrrr to the name of one entry, which is a path segment and no more.\n  The cause.\n  The full name of role-rrrr…rrrrrrrrrr is " + role + "."
+		if got != want {
+			t.Errorf("%s:\n%s\nwant:\n%s", keys, got, want)
+		}
+	}
+	// A key path with a name of 24 characters or fewer stays whole.
+	text := "Set bind.agents." + strings.Repeat("a", 24) + " to the name of one entry, which is a path segment and no more, and more, and more.\n  The cause."
+	if got := exports.Fit(text); got != text {
+		t.Errorf("a name of 24 characters after keys:\n%s", got)
+	}
+}
+
+// TestFitTakesAQuotedValueWithSpacesAsOneName is a quoted role of 90 characters with a
+// space in it: the whole text between the quotes is one name, shortened with its
+// quotes, and the last line has it whole.
+func TestFitTakesAQuotedValueWithSpacesAsOneName(t *testing.T) {
+	role := `"role-` + strings.Repeat("r", 80) + ` x y"`
+	text := "Rename role " + role + " of bind.agents to one path segment, and keep it as a segment.\n  The cause."
+	got := exports.Fit(text)
+	first := firstLines(got)[0]
+	if !strings.HasPrefix(first, `Rename role "role-rrr`) || !strings.Contains(first, ` x y" of bind.agents`) || strings.Count(first, "…") != 1 {
+		t.Errorf("the quoted name is not shortened whole:\n%s", got)
+	}
+	if !strings.HasSuffix(got, " is "+role+".") {
+		t.Errorf("no last line has the whole name:\n%s", got)
+	}
+}

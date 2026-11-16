@@ -86,18 +86,25 @@ func shortened(names []string) map[string]string {
 }
 
 // longName matches a name of more than [NameMax] characters in a refusal's first line: a
+// quoted value, whole from its opening quote to its closing quote, spaces included, or a
 // run of letters, digits, dots, hyphens and underscores that does not end with a dot, so
-// the full stop of a sentence stays. A slash, a quote or a space ends a run, so "agents/"
-// in front of a role name and the quotes around a value stay.
-var longName = regexp.MustCompile(`[\p{L}\p{N}._-]{24,}[\p{L}\p{N}_-]`)
+// the full stop of a sentence stays. A slash or a space ends a run, so "agents/" in front
+// of a role name stays.
+var longName = regexp.MustCompile(`"(?:[^"\\\n]|\\.){23,}"|[\p{L}\p{N}._-]{24,}[\p{L}\p{N}_-]`)
+
+// keyPath matches the keys that start a dotted name in a refusal, such as the "bind." and
+// "agents." of bind.agents.<role>. [Fit] leaves them whole and shortens the name after them.
+var keyPath = regexp.MustCompile(`^(?:(?:bind|provides|roles)\.)?(?:(?:agents|commands|skills|output-styles|hooks|mcp|files)\.)?`)
 
 // Fit is text, one refusal or several, in which each refusal whose first line, an
 // unindented line, has more than 100 characters has the names in that line of more than
-// [NameMax] characters printed by [Short]. When two such names would have one form, each
-// keeps more characters, until the forms differ. When no line after the first line has
-// the whole name, a last line of the refusal has it: "The full name of <short> is
-// <name>." A first line of at most 100 characters stays as it is. Fit shortens names
-// only: a first line that is still over 100 characters has more than names in it.
+// [NameMax] characters printed by [Short]. A name is a quoted value, or a run of letters,
+// digits, dots, hyphens and underscores after the keys of its path, such as "bind." and
+// "agents.". When two names would have one form, each keeps more characters, until the
+// forms differ. When no line after the first line has the whole name, a last line of the
+// refusal has it: "The full name of <short> is <name>." A first line of at most 100
+// characters stays as it is. Fit shortens names only: a first line that is still over 100
+// characters has more than names in it.
 func Fit(text string) string {
 	var out []string
 	var full []string
@@ -116,6 +123,14 @@ func Fit(text string) string {
 		}
 		return strings.Join(lines[i+1:end], "\n")
 	}
+	// nameOf is the name in a match: the match after its leading keys.
+	nameOf := func(match string) (keys, name string) {
+		if strings.HasPrefix(match, `"`) {
+			return "", match
+		}
+		keys = keyPath.FindString(match)
+		return keys, match[len(keys):]
+	}
 	for i, line := range lines {
 		if !strings.HasPrefix(line, " ") {
 			block()
@@ -124,8 +139,8 @@ func Fit(text string) string {
 				continue
 			}
 			var names []string
-			for _, name := range longName.FindAllString(line, -1) {
-				if !slices.Contains(names, name) {
+			for _, match := range longName.FindAllString(line, -1) {
+				if _, name := nameOf(match); utf8.RuneCountInString(name) > NameMax && !slices.Contains(names, name) {
 					names = append(names, name)
 				}
 			}
@@ -136,7 +151,13 @@ func Fit(text string) string {
 					full = append(full, "  The full name of "+forms[name]+" is "+name+".")
 				}
 			}
-			line = longName.ReplaceAllStringFunc(line, func(name string) string { return forms[name] })
+			line = longName.ReplaceAllStringFunc(line, func(match string) string {
+				keys, name := nameOf(match)
+				if form, ok := forms[name]; ok {
+					return keys + form
+				}
+				return match
+			})
 		}
 		out = append(out, line)
 	}
