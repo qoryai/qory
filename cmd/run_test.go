@@ -1039,7 +1039,9 @@ func TestRunRefusesAProgramUnderAReadWriteMount(t *testing.T) {
 // the variables named, the relay and the forwarder are qory's Linux build inside, the
 // record, in the state directory, names the wall, and the exit status is the
 // container's. The section names the container's user, because a machine that runs
-// the tests as root has none to default to.
+// the tests as root has none to default to. The run has the route to qory, so the proxy
+// URL has the user qory and a password, which tells Forager's forwarder the session, and
+// QORY_HOST_URL is set.
 func TestRunBehindAWall(t *testing.T) {
 	root := newCheckout(t)
 	copyFixture(t, "two-modules", root)
@@ -1074,7 +1076,7 @@ func TestRunBehindAWall(t *testing.T) {
 		"--entrypoint /qory/qory example.com/agent:2 run exec --unset ",
 		" -- claude --settings "+runsDir(t, root),
 		" -p hi",
-		"env: MODEL_KEY=not-a-real-key", "env: FLAG_NAMED=goes in", "env: HTTPS_PROXY=http://qory-proxy:3128",
+		"env: MODEL_KEY=not-a-real-key", "env: FLAG_NAMED=goes in", "env: HTTPS_PROXY=http://qory:", "@qory-proxy:3128\n", "env: QORY_HOST_URL=http://host.qory.invalid\n",
 		"network rm",
 	)
 	lacks(t, lines, "HOST_ONLY", "NOT_SET_HERE", "env: PATH=", "env: HOME=", ".qory/runs")
