@@ -52,7 +52,7 @@
       "required": ["type", "send"],
       "additionalProperties": false,
       "properties": {
-        "type": {"description": "The artifact type of the submission: the name of a structured entry of artifact_types. Neither qory nor this schema checks that artifact_types has that entry.", "type": "string", "maxLength": 64, "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"},
+        "type": {"description": "The artifact type of the submission: the name of a custom entry of artifact_types in the same file with base_view structured. qory checks that the entry is there, which this schema cannot state.", "type": "string", "maxLength": 64, "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"},
         "send": {"description": "When the step sends the submission: end_of_run at the end of the run; after_gate after the gate of the run's stage passes, and until then the step stores the submission and sends nothing.", "enum": ["end_of_run", "after_gate"]}
       }
     }

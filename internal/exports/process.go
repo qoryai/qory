@@ -208,14 +208,14 @@ func (e *Exports) checkProcess(path string, data []byte) error {
 	if err := checkArtifactTypes(shown, &t.ArtifactTypes); err != nil {
 		return err
 	}
-	return checkSubmit(shown, &t.Submit)
+	return checkSubmit(shown, &t.Submit, &t.ArtifactTypes)
 }
 
 // checkSubmit checks submit in the process.yaml shown, which may be left out: an object
 // with type, an artifact type name, and send, one of [submitSends], and no other key.
-// qory does not check that artifact_types has an entry named type. The error starts
-// with shown and then the fix.
-func checkSubmit(shown string, submit *yaml.Node) error {
+// types, the file's artifact_types as [checkArtifactTypes] passed it, has a custom entry
+// named type with base_view structured. The error starts with shown and then the fix.
+func checkSubmit(shown string, submit, types *yaml.Node) error {
 	if submit.Kind == 0 {
 		return nil
 	}
@@ -260,7 +260,28 @@ func checkSubmit(shown string, submit *yaml.Node) error {
 	if !slices.Contains(submitSends, send.Value) {
 		return fmt.Errorf("%s: set submit.send to %s: submit.send is %s", shown, strings.Join(submitSends, " or "), scalarText(send))
 	}
-	return nil
+	return checkSubmitType(shown, typ.Value, types)
+}
+
+// checkSubmitType checks that types, a list of artifact types that [checkArtifactTypes]
+// passed or nothing, has a custom entry named name with base_view structured. The name
+// has the form of an artifact type name, so the message prints it bare.
+func checkSubmitType(shown, name string, types *yaml.Node) error {
+	const fix = "set submit.type to a structured type of artifact_types"
+	for _, entry := range types.Content {
+		if n := value(entry, "name"); n == nil || n.Value != name {
+			continue
+		}
+		view := value(entry, "base_view")
+		switch {
+		case view == nil:
+			return fmt.Errorf("%s: %s: %s is a standard type", shown, fix, name)
+		case view.Value != baseViewStructured:
+			return fmt.Errorf("%s: %s: %s has base_view %s", shown, fix, name, view.Value)
+		}
+		return nil
+	}
+	return fmt.Errorf("%s: %s: no entry is named %s", shown, fix, name)
 }
 
 // checkWorkflows checks that every workflow the stages run is declared under workflows in

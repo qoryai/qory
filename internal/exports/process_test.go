@@ -250,20 +250,20 @@ func TestProcessSchemaMatchesTheReader(t *testing.T) {
 		{strings.Replace(process, "name: Answer", `name: "\t"`, 1), false},
 		{strings.Replace(process, "name: Answer", "name: 3", 1), true},
 		{strings.Replace(process, "name: Answer", `name: ""`, 1), true},
-		{process + "submit: {type: submission, send: end_of_run}\n", true},
-		{process + "submit: {type: submission, send: after_gate}\n", true},
-		{process + "submit: {type: submission, send: end_of_run, command: open-a-draft}\n", false},
-		{process + "submit: {type: submission}\n", false},
-		{process + "submit: {send: end_of_run}\n", false},
-		{process + "submit: {type: submission, send: later}\n", false},
-		{process + "submit: {type: submission, send: [end_of_run]}\n", false},
-		{process + "submit: {type: Submission, send: end_of_run}\n", false},
-		{process + "submit: {type: 3, send: end_of_run}\n", false},
-		{process + "submit: {type: " + strings.Repeat("a", 64) + ", send: end_of_run}\n", true},
-		{process + "submit: {type: " + strings.Repeat("a", 65) + ", send: end_of_run}\n", false},
-		{process + "submit:\n  - {type: submission, send: end_of_run}\n", false},
-		{process + "submit: ~\n", false},
-		{process + "submit: submission\n", false},
+		{process + structured("submission") + "submit: {type: submission, send: end_of_run}\n", true},
+		{process + structured("submission") + "submit: {type: submission, send: after_gate}\n", true},
+		{process + structured("submission") + "submit: {type: submission, send: end_of_run, command: open-a-draft}\n", false},
+		{process + structured("submission") + "submit: {type: submission}\n", false},
+		{process + structured("submission") + "submit: {send: end_of_run}\n", false},
+		{process + structured("submission") + "submit: {type: submission, send: later}\n", false},
+		{process + structured("submission") + "submit: {type: submission, send: [end_of_run]}\n", false},
+		{process + structured("submission") + "submit: {type: Submission, send: end_of_run}\n", false},
+		{process + structured("submission") + "submit: {type: 3, send: end_of_run}\n", false},
+		{process + structured(strings.Repeat("a", 64)) + "submit: {type: " + strings.Repeat("a", 64) + ", send: end_of_run}\n", true},
+		{process + structured("submission") + "submit: {type: " + strings.Repeat("a", 65) + ", send: end_of_run}\n", false},
+		{process + structured("submission") + "submit:\n  - {type: submission, send: end_of_run}\n", false},
+		{process + structured("submission") + "submit: ~\n", false},
+		{process + structured("submission") + "submit: submission\n", false},
 	} {
 		var doc any
 		if err := yaml.Unmarshal([]byte(c.body), &doc); err != nil {
@@ -515,17 +515,40 @@ func TestVerifyChecksArtifactTypes(t *testing.T) {
 	}
 }
 
-// TestVerifyChecksSubmit is each mistake in submit. Each refusal starts with the file and
-// then the fix. Both values of send pass, and so does a type that artifact_types does not
-// list: qory does not compare the two.
+// structured is artifact_types with one entry: a custom structured type named name.
+func structured(name string) string {
+	return "artifact_types:\n  - {name: " + name + ", base_view: structured, size_limit: 65536, max_files: 1, json_schema: {}}\n"
+}
+
+// submitTypes is artifact_types with a structured type submission, a document type
+// reply-draft and a standard type screenshot.
+const submitTypes = `artifact_types:
+  - {name: submission, base_view: structured, size_limit: 65536, max_files: 1, json_schema: {}}
+  - {name: reply-draft, base_view: document, size_limit: 65536, max_files: 1}
+  - name: screenshot
+`
+
+// TestVerifyChecksSubmit is each mistake in submit, next to submitTypes. Each refusal
+// starts with the file and then the fix, in a first line of at most 100 characters. Both
+// values of send pass with the structured type; a type that no entry has, a custom type
+// of another base view and a standard type fail, as does any type with no artifact_types.
 func TestVerifyChecksSubmit(t *testing.T) {
-	for _, body := range []string{"{type: submission, send: end_of_run}", "{send: after_gate, type: reply-draft}"} {
-		if err := factory(t, process+"submit: "+body+"\n").Verify(); err != nil {
+	for _, body := range []string{"{type: submission, send: end_of_run}", "{send: after_gate, type: submission}"} {
+		if err := factory(t, process+submitTypes+"submit: "+body+"\n").Verify(); err != nil {
 			t.Errorf("%q: %v", body, err)
 		}
 	}
 	const sends = "end_of_run or after_gate"
+	const fix = "set submit.type to a structured type of artifact_types: "
+	noTypes := factory(t, process+"submit: {type: submission, send: end_of_run}\n")
+	want := filepath.Join(noTypes.Root, "modules", "desk", exports.ProcessFileName) + ": " + fix + "no entry is named submission"
+	if err := noTypes.Verify(); err == nil || err.Error() != want {
+		t.Errorf("no artifact_types: %v\nwant %s", err, want)
+	}
 	for _, c := range []struct{ body, want string }{
+		{" {type: submision, send: end_of_run}", fix + "no entry is named submision"},
+		{" {type: reply-draft, send: end_of_run}", fix + "reply-draft has base_view document"},
+		{" {type: screenshot, send: after_gate}", fix + "screenshot is a standard type"},
 		{" ~", "set submit to an object with type and send, or remove it: submit is null"},
 		{" submission", "set submit to an object with type and send, or remove it: submit is a string"},
 		{"\n  - {type: submission, send: end_of_run}", "set submit to an object with type and send, or remove it: submit is a list"},
@@ -552,7 +575,7 @@ func TestVerifyChecksSubmit(t *testing.T) {
 		{" {type: submission, send: !!binary ZW5kX29mX3J1bg==}", `set submit.send to a quoted string: YAML reads "ZW5kX29mX3J1bg==" as a type that is not a string`},
 		{" {type: submission, send: \"end_of_run\\nok\"}", "set submit.send to " + sends + `: submit.send is "end_of_run\nok"`},
 	} {
-		e := factory(t, process+"submit:"+c.body+"\n")
+		e := factory(t, process+submitTypes+"submit:"+c.body+"\n")
 		file := filepath.Join(e.Root, "modules", "desk", exports.ProcessFileName)
 		err := e.Verify()
 		if err == nil || err.Error() != file+": "+c.want {

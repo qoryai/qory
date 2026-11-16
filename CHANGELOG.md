@@ -50,8 +50,9 @@ release may change what an existing document does, and states it under Upgrading
   Artifact types in `contracts/harness/v1/README.md`.
 - Declare a factory's submit step with `submit` in its `process.yaml`: `type`, the name
   of a structured entry of `artifact_types`, and `send`, `end_of_run` or `after_gate`.
-  `process.schema.json` has `submit`, and every command that reads the configuration
-  checks its form. See The submit step in `contracts/harness/v1/README.md`.
+  `process.schema.json` has `submit`. Every command that reads the configuration checks
+  its form, and that `artifact_types` has a custom structured entry named `type`. See The
+  submit step in `contracts/harness/v1/README.md`.
 - A module can declare checks for the files of an artifact type with `push_checks` in
   `qory-module.yaml`: each item has `type`, `command`, a program in the module and its
   arguments, and optional `reads`, the other artifact types the check reads. The checks

@@ -702,9 +702,9 @@ submit:
   send: after_gate               # or end_of_run
 ```
 
-`type` is the artifact type of the submission: the name of a structured entry of
-`artifact_types`. qory checks that `type` has the form of an artifact type name, and not
-that `artifact_types` has the entry. `send` is when the step sends the submission:
+`type` is the artifact type of the submission: the name of a custom entry of
+`artifact_types` in the same file with `base_view: structured`. A name that no entry has,
+a standard type (a name alone) and a custom type of another base view are refused. `send` is when the step sends the submission:
 `end_of_run` sends it at the end of the run; `after_gate` sends it after the gate of the
 run's stage passes, and until then the step stores it and sends nothing. A `submit` that
 breaks a rule stops the command with one line, which starts with the file and then the
