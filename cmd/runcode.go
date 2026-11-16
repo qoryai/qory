@@ -198,7 +198,7 @@ func readRunCode(file string, stdin io.Reader) (string, runtimeinstall.Machine, 
 	}
 	defer f.Close()
 	if !info.Mode().IsRegular() {
-		return "", runtimeinstall.Machine{}, false, info, input(fmt.Errorf("give --%s a regular file: %s is not one", runCodeFileFlag, exports.Value(file, false)))
+		return "", runtimeinstall.Machine{}, false, info, input(fmt.Errorf("Give --%s a regular file: %s is not one", runCodeFileFlag, exports.Value(file, false)))
 	}
 	code, machine, err := runCodeFrom(f, file)
 	return code, machine, false, info, err
@@ -265,17 +265,17 @@ func runCodeFrom(r io.Reader, file string) (string, runtimeinstall.Machine, erro
 	}
 	switch {
 	case len(raw) == 0 && !found:
-		return "", none, input(fmt.Errorf("write the run code into %s: the file is empty", shown))
+		return "", none, input(fmt.Errorf("Write the run code into %s: the file is empty", shown))
 	case len(b) > maxRunCodeFile || bytes.ContainsAny(raw, " \t\r\n\v\f") || !ok || len(raw) == 0:
 		return "", none, input(fmt.Errorf("Write the run code, then at most the lines `registry <host>`, `apiary <url>` and `runtimes <folder>`\n"+
 			"The file %s contains more than that.", shown))
 	}
 	code, err := accesskey.NormaliseCode(string(raw))
 	if err != nil {
-		return "", none, input(fmt.Errorf("write a run code (qecr_…) into %s: the file does not contain an enrolment code of Qory Apiary", shown))
+		return "", none, input(fmt.Errorf("Write a run code (qecr_…) into %s: the file does not contain an enrolment code of Qory Apiary", shown))
 	}
 	if kind, _ := accesskey.CodeKind(code); kind != "run" {
-		return "", none, input(fmt.Errorf("write a run code (qecr_…) into %s: the file contains the enrolment code of an access key of kind %s", shown, kind))
+		return "", none, input(fmt.Errorf("Write a run code (qecr_…) into %s: the file contains the enrolment code of an access key of kind %s", shown, kind))
 	}
 	return code, machine, nil
 }
