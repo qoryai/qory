@@ -186,7 +186,7 @@ func TestTheLoadOfPushChecksStopsWithItsLine(t *testing.T) {
 			image:        "registry.example/agent:1",
 			controlPlane: true,
 			want:         "Pull the wall's default image onto this machine, and run again: push checks run in it. The engine does not have the image registry.example/agent:1.",
-			fromCode:     "Pull the wall's default image onto this machine, then take the work item in again in Qory Apiary: push checks run in it, and the engine does not have the image registry.example/agent:1; the code is used",
+			fromCode:     "Pull the wall's default image, then take the work item in again: push checks run in it, and the engine does not have the image registry.example/agent:1; the code is used",
 		},
 		{
 			name:     "push checks that do not read",

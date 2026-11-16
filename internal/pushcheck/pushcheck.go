@@ -76,7 +76,7 @@ const (
 const (
 	textFailed      = "The check for %s failed:"
 	textFailedFix   = "Fix each finding below and push again. "
-	textNoNode      = "Install node, or run in an image built FROM qory-agent"
+	textNoNode      = "Set wall.image to an image that has node, such as one built FROM qory-agent"
 	textNoProgram   = "Install the program %s"
 	textNotStarted  = "The check for %s could not start: %s."
 	textTimeLimit   = "Make the check for %s finish within 30 s"
@@ -725,10 +725,13 @@ func shebang(program string) []string {
 // could not start.
 var tiniFatal = regexp.MustCompile(`^\[FATAL tini \(\d+\)\] `)
 
-// noSuchImage reports whether the engine's error is for an image it does not hold.
+// noSuchImage reports whether the engine's error is for an image it does not hold:
+// Docker's and nerdctl's "No such image" or "Unable to find image", Podman's "image not
+// known", such as "Error: example.com/agent:1: image not known".
 func noSuchImage(text string) bool {
 	text = strings.ToLower(text)
-	return strings.Contains(text, "no such image") || strings.Contains(text, "unable to find image")
+	return strings.Contains(text, "no such image") || strings.Contains(text, "unable to find image") ||
+		strings.Contains(text, "image not known")
 }
 
 // engineError is the last line the engine's command printed, or err with none.

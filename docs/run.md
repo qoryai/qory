@@ -311,7 +311,7 @@ Take the work item in again in Qory Apiary, so that the new run composes the har
 Take the work item in again in Qory Apiary, and do not switch the engine while that run starts: the push checks would run on the engine <id>, and the run's containers are on the engine <id>; the code is used
 Take the work item in again in Qory Apiary, through a gateway that sends the run API address: the push checks read the artifacts through the run API, which failed: <cause>; the code is used
 Update the run's gateway, then take the work item in again in Qory Apiary: the run API address that the gateway sent is not one the push checks can use: <cause>; the code is used
-Pull the wall's default image onto this machine, then take the work item in again in Qory Apiary: push checks run in it, and the engine does not have the image <image>; the code is used
+Pull the wall's default image, then take the work item in again: push checks run in it, and the engine does not have the image <image>; the code is used
 Take the work item in again in Qory Apiary: turning on the push checks for the POSTs from behind the wall failed, so the run stopped before the setup: <cause>; the code is used
 ```
 
