@@ -824,7 +824,7 @@ func SetRunCodeCAFile(caFile string) func() {
 // key pair k, its proof made at now, as qory run redeems one, and returns the run's id
 // and its run key.
 func RedeemRunCode(ctx context.Context, k *accesskey.Key, file, gatewayURL string, now time.Time) (runID, key string, err error) {
-	code, _, _, err := readRunCode(file, nil)
+	code, _, _, _, err := readRunCode(file, nil)
 	if err != nil {
 		return "", "", err
 	}
@@ -887,4 +887,20 @@ func SetRunStartFolder(dir string) func() {
 func SetCheckoutUnwritable() func() {
 	checkoutWritable = func(string) bool { return false }
 	return func() { checkoutWritable = canWrite }
+}
+
+// SetInstallRuntimes sets whether qory run installs its runtime's program, and returns
+// what restores the setting before. TestMain turns it off for the tests of other parts.
+func SetInstallRuntimes(on bool) func() {
+	before := installRuntimes
+	installRuntimes = on
+	return func() { installRuntimes = before }
+}
+
+// SetNpmRegistry makes qory run install from the npm registry at url, and returns what
+// restores the default.
+func SetNpmRegistry(url string) func() {
+	before := npmRegistry
+	npmRegistry = url
+	return func() { npmRegistry = before }
 }

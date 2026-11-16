@@ -23,6 +23,7 @@ import (
 	"github.com/qoryai/qory/internal/foragerdir"
 	"github.com/qoryai/qory/internal/pool"
 	"github.com/qoryai/qory/internal/provisioner"
+	"github.com/qoryai/qory/internal/runtimeinstall"
 )
 
 // verbPool is qory run pool's verb, as its lines name it after "qory".
@@ -294,7 +295,10 @@ func runPool(ctx context.Context, s *poolSettings, key *accesskey.Key, pin acces
 // before the pool started has its wall removed as [poolReap] has it.
 func poolLoop(s *poolSettings, key *accesskey.Key, pin accesskey.Pin, log *slog.Logger) *pool.Pool {
 	return &pool.Pool{
-		Settings: pool.Settings{Runs: s.Pool.Runs, State: s.State, RunConfig: s.Pool.RunConfig, Probe: poolProbe(s.Runs)},
+		Settings: pool.Settings{
+			Runs: s.Pool.Runs, State: s.State, RunConfig: s.Pool.RunConfig, Registry: runtimeinstall.RegistryHost(s.Pool.Registry),
+			Probe: poolProbe(s.Runs),
+		},
 		Client: &provisioner.Client{
 			URL: strings.TrimSuffix(s.Forager.Server.URL, "/"), KeyID: s.Forager.Server.AccessKeyID, Key: key, Pin: pin,
 			InstanceID: s.InstanceID, UserAgent: userAgent(), Log: log,

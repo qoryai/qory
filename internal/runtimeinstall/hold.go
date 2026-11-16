@@ -1,0 +1,289 @@
+package runtimeinstall
+
+import (
+	"errors"
+	"fmt"
+	"io/fs"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
+)
+
+// The entries of a runtime's folder, <Folder>/<runtime>, other than the versions'
+// folders. Each run that uses a version keeps a shared lock on the version's hold file
+// until it ends, and takes it while it has the folder's lock: the cleanup, which an
+// install runs while it has the folder's lock too, sees every hold of a run that
+// started. A version's folder, or a temporary entry of a version, is removed only while
+// the cleanup has the version's hold file locked exclusively.
+const (
+	// lockName is the folder's lock.
+	lockName = ".lock"
+	// holdPrefix starts the name of a version's hold file, .hold-<version>.
+	holdPrefix = ".hold-"
+	// downloadPrefix starts a tarball being read, .download-<version>-<number>.
+	downloadPrefix = ".download-"
+	// installPrefix starts a folder being extracted, .install-<version>-<number>.
+	installPrefix = ".install-"
+)
+
+// prepare makes the folder, mode 0755: the wall's user enters the version's folder.
+func (f folder) prepare() error {
+	if err := os.MkdirAll(f.base, 0o755); err != nil {
+		return fmt.Errorf(textState+"%w", err)
+	}
+	info, err := os.Lstat(f.base)
+	if err != nil {
+		return fmt.Errorf(textState+"%w", err)
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("remove %s, then run again: it is not a folder", f.base)
+	}
+	if err := os.Chmod(f.base, 0o755); err != nil {
+		return fmt.Errorf(textState+"%w", err)
+	}
+	return nil
+}
+
+// hold takes the hold of version for the run, and returns the hold file, which the run
+// keeps open until it ends. While it has the folder's lock, it removes what no run
+// holds: [folder.cleanup]. A cleanup that fails stops nothing.
+func (f folder) hold(version string) (*os.File, error) {
+	if err := f.prepare(); err != nil {
+		return nil, err
+	}
+	lock, err := openLock(filepath.Join(f.base, lockName))
+	if err != nil {
+		return nil, fmt.Errorf(textState+"%w", err)
+	}
+	// Closing the lock's file releases its lock.
+	defer lock.Close()
+	if err := flock(lock, true, false); err != nil {
+		return nil, fmt.Errorf(textState+"%w", err)
+	}
+	h, err := openLock(f.holdPath(version))
+	if err != nil {
+		return nil, fmt.Errorf(textState+"%w", err)
+	}
+	if err := flock(h, false, false); err != nil {
+		h.Close()
+		return nil, fmt.Errorf(textState+"%w", err)
+	}
+	f.cleanup(version)
+	return h, nil
+}
+
+// holdPath is the hold file of version.
+func (f folder) holdPath(version string) string {
+	return filepath.Join(f.base, holdPrefix+version)
+}
+
+// openLock opens the lock file at path, made mode 0600 when it is not there, without
+// following a link; it must be a regular file.
+func openLock(path string) (*os.File, error) {
+	file, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE|noFollow, 0o600)
+	if err != nil {
+		return nil, err
+	}
+	info, err := file.Stat()
+	if err == nil && !info.Mode().IsRegular() {
+		err = fmt.Errorf("%s is not a regular file", path)
+	}
+	if err != nil {
+		file.Close()
+		return nil, err
+	}
+	return file, nil
+}
+
+// cleanup removes, of the folder's direct entries, each version's folder older than
+// newest, each temporary entry, and each hold file with no version's folder, that no
+// run holds. It reads entries without following a link, and removes no link, and no
+// entry whose name is not a version's or does not start with a temporary prefix or
+// holdPrefix. The caller has the folder's lock.
+func (f folder) cleanup(newest string) {
+	entries, err := os.ReadDir(f.base)
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		name := e.Name()
+		path := filepath.Join(f.base, name)
+		switch {
+		case strings.HasPrefix(name, downloadPrefix):
+			f.unheld(tempVersion(name, downloadPrefix), func() { removeIf(path, fs.FileMode(0), os.Remove) })
+		case strings.HasPrefix(name, installPrefix):
+			f.unheld(tempVersion(name, installPrefix), func() { removeIf(path, fs.ModeDir, os.RemoveAll) })
+		case strings.HasPrefix(name, holdPrefix):
+			version := strings.TrimPrefix(name, holdPrefix)
+			if _, err := os.Lstat(filepath.Join(f.base, version)); !versionShape.MatchString(version) || !errors.Is(err, fs.ErrNotExist) {
+				continue
+			}
+			f.unheld(version, func() { removeIf(path, fs.FileMode(0), os.Remove) })
+		case versionShape.MatchString(name):
+			if c, ok := compareVersions(name, newest); !ok || c >= 0 {
+				continue
+			}
+			f.unheld(name, func() {
+				if removeIf(path, fs.ModeDir, os.RemoveAll) {
+					removeIf(f.holdPath(name), fs.FileMode(0), os.Remove)
+				}
+			})
+		}
+	}
+}
+
+// unheld runs remove when no run holds version: when its hold file is not there, or
+// while the cleanup has it locked exclusively. An empty version has no hold.
+func (f folder) unheld(version string, remove func()) {
+	if version == "" {
+		remove()
+		return
+	}
+	h, err := os.OpenFile(f.holdPath(version), os.O_RDWR|noFollow, 0)
+	if errors.Is(err, fs.ErrNotExist) {
+		remove()
+		return
+	}
+	if err != nil {
+		return
+	}
+	defer h.Close()
+	if info, err := h.Stat(); err != nil || !info.Mode().IsRegular() {
+		return
+	}
+	if flock(h, true, true) != nil {
+		return
+	}
+	remove()
+}
+
+// removeIf removes path with remove when it is a folder, for kind fs.ModeDir, or a
+// regular file, for kind 0, and not a link; it reports whether it removed it.
+func removeIf(path string, kind fs.FileMode, remove func(string) error) bool {
+	info, err := os.Lstat(path)
+	if err != nil || info.Mode().Type() != kind {
+		return false
+	}
+	return remove(path) == nil
+}
+
+// tempVersion is the version in name, a temporary entry <prefix><version>-<number>;
+// empty when name has none.
+func tempVersion(name, prefix string) string {
+	rest := strings.TrimPrefix(name, prefix)
+	i := strings.LastIndex(rest, "-")
+	if i < 0 {
+		return ""
+	}
+	if _, err := strconv.ParseUint(rest[i+1:], 10, 64); err != nil || !versionShape.MatchString(rest[:i]) {
+		return ""
+	}
+	return rest[:i]
+}
+
+// compareVersions compares a and b as semantic versions, major.minor.patch with any
+// number of numeric parts, an optional -prerelease and an optional +build, which does
+// not count: -1 when a is older, 0 when they are equal, 1 when a is newer. ok is false
+// when either is not such a version, and the two are then not compared.
+func compareVersions(a, b string) (c int, ok bool) {
+	ac, ap, aok := splitVersion(a)
+	bc, bp, bok := splitVersion(b)
+	if !aok || !bok {
+		return 0, false
+	}
+	for i := range max(len(ac), len(bc)) {
+		x, y := "0", "0"
+		if i < len(ac) {
+			x = ac[i]
+		}
+		if i < len(bc) {
+			y = bc[i]
+		}
+		if c := compareNumbers(x, y); c != 0 {
+			return c, true
+		}
+	}
+	switch {
+	case ap == nil && bp == nil:
+		return 0, true
+	case ap == nil:
+		return 1, true
+	case bp == nil:
+		return -1, true
+	}
+	for i := range min(len(ap), len(bp)) {
+		x, y := ap[i], bp[i]
+		xn, yn := numeric(x), numeric(y)
+		var c int
+		switch {
+		case xn && yn:
+			c = compareNumbers(x, y)
+		case xn:
+			c = -1
+		case yn:
+			c = 1
+		default:
+			c = strings.Compare(x, y)
+		}
+		if c != 0 {
+			return c, true
+		}
+	}
+	return compareInts(len(ap), len(bp)), true
+}
+
+// splitVersion is v's numeric parts and its prerelease's parts, nil for none; ok is
+// false when v is not a semantic version.
+func splitVersion(v string) (core, pre []string, ok bool) {
+	v, _, _ = strings.Cut(v, "+")
+	c, p, hasPre := strings.Cut(v, "-")
+	core = strings.Split(c, ".")
+	for _, n := range core {
+		if !numeric(n) {
+			return nil, nil, false
+		}
+	}
+	if hasPre {
+		pre = strings.Split(p, ".")
+		for _, n := range pre {
+			if n == "" {
+				return nil, nil, false
+			}
+		}
+	}
+	return core, pre, true
+}
+
+// numeric reports whether s is one or more ASCII digits.
+func numeric(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+// compareNumbers compares two numbers written in digits, of any length.
+func compareNumbers(x, y string) int {
+	x, y = strings.TrimLeft(x, "0"), strings.TrimLeft(y, "0")
+	if c := compareInts(len(x), len(y)); c != 0 {
+		return c
+	}
+	return strings.Compare(x, y)
+}
+
+// compareInts is -1, 0 or 1 as x is less than, equal to or greater than y.
+func compareInts(x, y int) int {
+	switch {
+	case x < y:
+		return -1
+	case x > y:
+		return 1
+	}
+	return 0
+}

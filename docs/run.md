@@ -774,15 +774,24 @@ recorded. The session's events are not.
 
 ### The runtime's program
 
-A walled run of Claude Code, the runtime `claude`, installs the runtime's program on the
-machine before its session starts: after the compose, and before the image step. The
-program comes from the runtime cache of the instance's registry, the host of
-`pool.registry` in `forager.yaml`. If `forager.yaml` sets no `pool.registry`, the run
-installs nothing and starts the program that its image contains.
+Every run of Claude Code, the runtime `claude`, walled or not, installs the runtime's
+program on the machine before its session starts: after the compose, and before the
+image step. A run of another runtime installs nothing.
 
-`qory run` reads the registry through the run's host proxy, with a token for
-`repository:shared/runtimes/claude:pull`, for the platform `linux/amd64` or
-`linux/arm64` of the machine. It reads, in this order:
+The program comes from the runtime cache of the instance's registry when the machine has
+one, and from npm otherwise:
+
+- A run that `qory run pool` starts installs from the pool's registry, the host of
+  `pool.registry` in the pool's `forager.yaml`.
+- Any other run installs from the host of `pool.registry` in the run's `forager.yaml`.
+- Without either, the run installs from npm, `registry.npmjs.org`.
+
+A walled run, and a run with a control plane, reads through the run's host proxy. A run on
+a person's machine with neither sends its requests directly over HTTPS. The platform is
+`linux/amd64` or `linux/arm64`, as the machine is.
+
+From the registry, with a token for `repository:shared/runtimes/claude:pull`, `qory run`
+reads, in this order:
 
 1. `shared/runtimes/claude:newest`, and the manifest of the machine's platform by its
    digest;
@@ -808,22 +817,41 @@ stops the run with:
 qory run: check that the instance's registry reaches the publisher of claude, then run again
 ```
 
-`qory run` keeps each version in
-`<state>/runtimes/claude/<version>/`, where `<state>` is `$XDG_STATE_HOME/qory`, or
-`~/.local/state/qory` without `XDG_STATE_HOME`. The folder contains `bin/claude`, mode
-`0755`, and `integrity`, the checksum of the tarball it came from.
+From npm, `qory run` reads, in this order:
+
+1. `/-/package/@anthropic-ai/claude-code/dist-tags`, whose `latest` is the version;
+2. `/@anthropic-ai/claude-code-linux-x64/<version>`, or `-arm64`, whose `dist.integrity`
+   is the sha512 checksum and whose `dist.tarball` is the tarball, which must be on
+   `registry.npmjs.org`;
+3. the tarball, when the version's folder does not exist.
+
+`qory run` reads the registry's `newest`, or npm's `latest`, on every run, and keeps no
+version of its own: once either moves, the next run installs the new version.
+
+`qory run` keeps each version in `<runtimes>/claude/<version>/`. For a run that `qory run
+pool` starts, `<runtimes>` is `runtimes` in the pool's folder, which every run of the pool
+shares. For any other run, `<runtimes>` is `<state>/runtimes`, where `<state>` is
+`$XDG_STATE_HOME/qory`, or `~/.local/state/qory` without `XDG_STATE_HOME`. The folder
+contains `bin/claude`, mode `0755`, and `integrity`, the checksum of the tarball it came
+from.
 
 1. When the version's folder exists, the run uses it and reads no tarball: a later run on
    the same machine with the same newest version downloads nothing.
-2. Otherwise qory reads the tarball into a temporary file in `<state>/runtimes/claude/`,
-   at most 1 GiB, and checks it against the checksum. It extracts only the entry
-   `package/claude`, a regular file of at most 1 GiB, into a temporary folder; the
-   tarball may unpack to at most 4 GiB. No other entry is written, and a link at
-   `package/claude` is refused. qory then renames the temporary folder to the version's
-   folder, so a folder at that path is always a complete install.
+2. Otherwise qory reads the tarball into a temporary file in `<runtimes>/claude/`, at most
+   1 GiB, and checks it against the checksum before it extracts anything. It extracts
+   only the entry `package/claude`, a regular file of at most 1 GiB, into a temporary
+   folder; the tarball may unpack to at most 4 GiB. No other entry is written, and a link
+   at `package/claude` is refused. qory then renames the temporary folder to the
+   version's folder, so a folder at that path is always a complete install.
 
-Every session of the run uses that one version, and the folder stays until the run ends.
-qory removes no version's folder.
+Every session of the run uses that one version, and the run holds the version's folder
+until it ends. Each install removes, in `<runtimes>/claude/`, the folders of versions
+older than the newest that no run holds, and the temporary entries `.download-*` and
+`.install-*` that no run is writing. It follows no link, and removes no other entry. A run
+takes its hold, and an install looks for what to remove, only while it has the lock
+`<runtimes>/claude/.lock`, so a run that starts during an install keeps its version. Each
+run holds its version with a shared lock on `<runtimes>/claude/.hold-<version>`, which
+ends when the run ends.
 
 Once the program is installed, `qory run` prints one line:
 
@@ -831,9 +859,9 @@ Once the program is installed, `qory run` prints one line:
 qory run: installed claude 2.1.320
 ```
 
-If the install fails, the run closes `failed` with -1 before the image step, no session
-starts, and `qory run` exits 1 with the error, whose first line is the fix. A tarball that
-does not match its sha512 checksum stops the run with:
+If the install fails, no session starts and `qory run` exits 1 with the error, whose first
+line is the fix; a run with a control plane closes `failed` with -1. A tarball that does
+not match its sha512 checksum stops the run with:
 
 ```text
 qory run: check the source of the runtime's releases: the tarball of claude 2.1.320 does not match its checksum sha512-<checksum>
@@ -843,7 +871,7 @@ A version's folder that was not installed from the tarball with the release's ch
 stops the run with:
 
 ```text
-qory run: remove <state>/runtimes/claude/2.1.320 once no run uses it, then run again: it was not installed from the tarball with the checksum sha512-<checksum>
+qory run: remove <runtimes>/claude/2.1.320 once no run uses it, then run again: it was not installed from the tarball with the checksum sha512-<checksum>
 ```
 
 ## Hosts a module declares
@@ -1562,7 +1590,10 @@ qory run --run-code-file /run/qory/run-code --gateway https://gateway.example:84
   run key must be for this gateway.
 
 Each flag needs the other, and neither goes with `--run-key-fd` or `QORY_RUN_KEY`. The file
-contains the code, with at most one newline after it.
+contains the code, with at most one newline after it. A file that `qory run pool` writes
+has two more lines after the code, `registry <host>` and `runtimes <folder>`: the pool's
+registry and runtimes folder, from which the run installs its runtime, see The runtime's
+program.
 
 To give the code on stdin, set `<file>` to `/dev/stdin`, `/dev/fd/0` or `/proc/self/fd/0`.
 qory then reads stdin to its end and closes it, as with `--run-key-fd 0`, and the agent's

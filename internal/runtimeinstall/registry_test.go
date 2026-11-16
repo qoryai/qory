@@ -288,3 +288,28 @@ func TestTheProgramFromTheRegistryIsMode0755(t *testing.T) {
 		t.Fatalf("bin/claude: %v, %v", info, err)
 	}
 }
+
+// TestANewNewestInTheRegistryInstallsTheNewVersion moves the registry's newest from
+// 2.1.320 to 2.1.321 between two installs: qory keeps no newest of its own, and the
+// second install reads newest again and installs 2.1.321.
+func TestANewNewestInTheRegistryInstallsTheNewVersion(t *testing.T) {
+	f := newFromRegistry(t)
+	f.reg.PublishPlain("2.1.320")
+	first, err := f.install(t, "amd64")
+	if err != nil {
+		t.Fatal(err)
+	}
+	first.Release()
+	f.reg.PublishPlain("2.1.321")
+	got, err := f.install(t, "amd64")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer got.Release()
+	if got.Version != "2.1.321" || !got.Downloaded {
+		t.Fatalf("the second install = %+v, want 2.1.321 downloaded", got)
+	}
+	if b, _ := os.ReadFile(got.Program()); string(b) != rt.Program("2.1.321 amd64") {
+		t.Fatalf("the program is %q", b)
+	}
+}

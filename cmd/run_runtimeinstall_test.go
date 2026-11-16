@@ -16,7 +16,11 @@ import (
 	rt "github.com/qoryai/qory/internal/runtimeinstall/runtimeinstalltest"
 )
 
-// installRun is what a walled run of claude with pool.registry set came to.
+// unreachableNpm is an npm registry on a loopback port with nothing on it, for a run
+// that must not reach npm.
+const unreachableNpm = "http://127.0.0.1:9"
+
+// installRun is what a run of claude that installs its runtime came to.
 type installRun struct {
 	out          string
 	err          error
@@ -26,27 +30,48 @@ type installRun struct {
 	installFirst bool
 }
 
-// runInstalling runs qory run claude with a run key behind the fake wall, with no
-// repositories, pool.registry under reg's host when reg is not nil, and proxy as the
-// run's host proxy. The image's fetch records whether the program of claude 2.1.320 was
+// installSetup is the run [runInstalling] runs: behind the fake wall when walled, with
+// pool.registry under reg's host when reg is not nil, npm at npm's URL when npm is not
+// nil, and proxy as the run's host proxy.
+type installSetup struct {
+	reg    *rt.Registry
+	npm    *rt.Npm
+	proxy  *rt.Proxy
+	walled bool
+}
+
+// runInstalling runs qory run claude with a run key as s sets it up, with no
+// repositories. The image's
+// fetch, which only a walled run has, records whether the program of claude 2.1.320 was
 // in qory's state folder by then, mode 0755.
-func runInstalling(t *testing.T, reg *rt.Registry, proxy *rt.Proxy) installRun {
+func runInstalling(t *testing.T, s installSetup) installRun {
 	t.Helper()
-	h := newHostFetch(t, "", "main")
-	docker, _ := fakeDocker(t)
-	section := "wall:\n  adapter: docker\n  image: example.com/agent:1\n  command: " + docker + "\n  helper: " + staticELF(t) + "\n  user: \"1000:1000\"\n"
-	if reg != nil {
-		section += "pool:\n  registry: " + reg.Host() + "/qory-env\n  run_config: " + t.TempDir() + "\n"
+	defer cmd.SetInstallRuntimes(true)()
+	npmURL := unreachableNpm
+	if s.npm != nil {
+		npmURL = s.npm.URL()
 	}
-	writeFile(t, filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "forager.yaml"), section)
+	defer cmd.SetNpmRegistry(npmURL)()
+	h := newHostFetch(t, "", "main")
+	section := ""
+	if s.walled {
+		docker, _ := fakeDocker(t)
+		section += "wall:\n  adapter: docker\n  image: example.com/agent:1\n  command: " + docker + "\n  helper: " + staticELF(t) + "\n  user: \"1000:1000\"\n"
+	}
+	if s.reg != nil {
+		section += "pool:\n  registry: " + s.reg.Host() + "/qory-env\n  run_config: " + t.TempDir() + "\n"
+	}
+	if section != "" {
+		writeFile(t, filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "forager.yaml"), section)
+	}
 	gw := newKeyedGateway(t)
-	key := mintRunKey(t, keyRunID, gw.url())
+	args := []string{"run", "claude", "--home", t.TempDir(), "--run-key-fd", descriptor(t, mintRunKey(t, keyRunID, gw.url()))}
 	t.Setenv("QORY_RUN_KEY", "")
 	var r installRun
 	program := filepath.Join(os.Getenv("XDG_STATE_HOME"), "qory", "runtimes", "claude", "2.1.320", "bin", "claude")
 	defer cmd.SetJoinSession(func(s session.SessionSpec) { r.joins = append(r.joins, s) })()
 	closes, calls, restore := cmd.OpenNowhereWith(cmd.Nowhere{
-		System: proxygittest.Host, Proxy: proxy.URL(), Dir: h.runDir,
+		System: proxygittest.Host, Proxy: s.proxy.URL(), Dir: h.runDir,
 		StackProxy: h.server.Stack.URL, StackCABundle: h.server.Stack.CABundle,
 		FetchImage: func(context.Context) error {
 			info, err := os.Lstat(program)
@@ -56,42 +81,48 @@ func runInstalling(t *testing.T, reg *rt.Registry, proxy *rt.Proxy) installRun {
 	})
 	defer restore()
 	writeFile(t, filepath.Join(h.dir, "qory.yaml"), ownStack("apiVersion: qory.dev/v1alpha1\ntarget:\n  runtime: claude\nmodules:\n  - name: core\n    source: {git: \""+h.server.URL("acme/harness")+"\", ref: main, path: modules/core}\n"))
-	r.out, r.err = run(t, "run", "claude", "--home", t.TempDir(), "--run-key-fd", descriptor(t, key))
+	r.out, r.err = run(t, args...)
 	r.closes, r.calls = closes(), calls()
 	return r
+}
+
+// joined fails the test unless the run's one session joined and the run printed the
+// install line once.
+func (r installRun) joined(t *testing.T) {
+	t.Helper()
+	if !errors.Is(r.err, cmd.ErrJoinedNowhere) || len(r.joins) != 1 {
+		t.Fatalf("%d joins, %v\n%s", len(r.joins), r.err, r.out)
+	}
+	if n := strings.Count(r.out, "qory run: installed claude 2.1.320\n"); n != 1 {
+		t.Fatalf("the run prints the install line %d times:\n%s", n, r.out)
+	}
+	lacks(t, r.out, rt.ProxyPassword)
 }
 
 // TestAWalledRunInstallsItsRuntimeFromTheRegistry runs a walled run of claude on a
 // machine whose forager.yaml sets pool.registry: qory reads claude 2.1.320 from the
 // registry through the run's host proxy, prints "qory run: installed claude 2.1.320"
 // once, and the program is in qory's state folder, mode 0755, before the image's
-// fetch. The reuse of a version's folder by a later run is in the tests of
-// internal/runtimeinstall: each run here has a new state folder.
+// fetch. npm gets no request.
 func TestAWalledRunInstallsItsRuntimeFromTheRegistry(t *testing.T) {
-	reg := rt.StartRegistry(t)
+	reg, npm, proxy := rt.StartRegistry(t), rt.StartNpm(t), rt.StartProxy(t)
 	reg.PublishPlain("2.1.320")
-	proxy := rt.StartProxy(t)
-	r := runInstalling(t, reg, proxy)
-	if !errors.Is(r.err, cmd.ErrJoinedNowhere) || len(r.joins) != 1 {
-		t.Fatalf("%d joins, %v\n%s", len(r.joins), r.err, r.out)
-	}
+	npm.Publish("2.1.320")
+	r := runInstalling(t, installSetup{reg: reg, npm: npm, proxy: proxy, walled: true})
+	r.joined(t)
 	if !r.installFirst {
 		t.Fatal("the run fetched its image before the program was installed, mode 0755")
 	}
-	if n := strings.Count(r.out, "qory run: installed claude 2.1.320\n"); n != 1 {
-		t.Fatalf("the run prints the install line %d times:\n%s", n, r.out)
+	if reg.BlobGets() != 1 || len(npm.Paths()) != 0 || proxy.Passed() == 0 || proxy.Refusals() != 0 {
+		t.Fatalf("%d blobs, %d npm requests; the proxy passed %d and refused %d", reg.BlobGets(), len(npm.Paths()), proxy.Passed(), proxy.Refusals())
 	}
-	if reg.BlobGets() != 1 || proxy.Passed() == 0 || proxy.Refusals() != 0 {
-		t.Fatalf("%d blobs; the proxy passed %d and refused %d", reg.BlobGets(), proxy.Passed(), proxy.Refusals())
-	}
-	lacks(t, r.out, rt.ProxyPassword)
 }
 
 // TestARuntimeTheRegistryNeverHeldEndsTheRunWithItsFix has an empty registry: the run
 // prints the fix first, closes failed with -1 before the image's fetch, no session
 // joins, and qory run exits 1.
 func TestARuntimeTheRegistryNeverHeldEndsTheRunWithItsFix(t *testing.T) {
-	r := runInstalling(t, rt.StartRegistry(t), rt.StartProxy(t))
+	r := runInstalling(t, installSetup{reg: rt.StartRegistry(t), proxy: rt.StartProxy(t), walled: true})
 	if len(r.joins) != 0 || cmd.ExitCode(r.err) != 1 {
 		t.Fatalf("%d joins, %v (exit %d)\n%s", len(r.joins), r.err, cmd.ExitCode(r.err), r.out)
 	}
@@ -110,20 +141,155 @@ func TestARuntimeTheRegistryNeverHeldEndsTheRunWithItsFix(t *testing.T) {
 	}
 }
 
-// TestARunWithNoRegistryInstallsNothing has no pool.registry in forager.yaml: a walled
-// run of claude prints no install line, opens no host proxy, and writes no runtimes
-// folder.
-func TestARunWithNoRegistryInstallsNothing(t *testing.T) {
-	r := runInstalling(t, nil, rt.StartProxy(t))
-	if !errors.Is(r.err, cmd.ErrJoinedNowhere) || strings.Contains(r.out, "installed claude") {
-		t.Fatalf("%v\n%s", r.err, r.out)
+// TestAWalledRunWithNoRegistryInstallsFromNpm has no pool.registry in forager.yaml: a
+// walled run of claude installs claude 2.1.320 from npm through the run's host proxy:
+// the dist-tags, the version's document and its tarball, before the image's fetch.
+func TestAWalledRunWithNoRegistryInstallsFromNpm(t *testing.T) {
+	npm, proxy := rt.StartNpm(t), rt.StartProxy(t)
+	npm.Publish("2.1.320")
+	r := runInstalling(t, installSetup{npm: npm, proxy: proxy, walled: true})
+	r.joined(t)
+	if !r.installFirst {
+		t.Fatal("the run fetched its image before the program was installed, mode 0755")
 	}
-	for _, c := range r.calls {
-		if c == "host proxy" {
-			t.Errorf("the calls: %v, want no host proxy", r.calls)
+	if len(npm.Paths()) != 3 || npm.TarballGets() != 1 || proxy.Passed() != 3 || proxy.Refusals() != 0 {
+		t.Fatalf("npm requests %q; the proxy passed %d and refused %d", npm.Paths(), proxy.Passed(), proxy.Refusals())
+	}
+}
+
+// TestAnUnwalledRunInstallsFromNpmThroughTheHostProxy runs claude with a run key and no
+// wall: the install goes through the run's host proxy, and the session joins.
+func TestAnUnwalledRunInstallsFromNpmThroughTheHostProxy(t *testing.T) {
+	npm, proxy := rt.StartNpm(t), rt.StartProxy(t)
+	npm.Publish("2.1.320")
+	r := runInstalling(t, installSetup{npm: npm, proxy: proxy})
+	r.joined(t)
+	if npm.TarballGets() != 1 || proxy.Passed() != 3 {
+		t.Fatalf("%d tarballs; the proxy passed %d", npm.TarballGets(), proxy.Passed())
+	}
+}
+
+// TestARunWithNoControlPlaneInstallsFromNpmDirectly runs claude in a checkout on a
+// person's machine, with no wall and no run key, so with no host proxy: the install
+// sends its three requests to npm directly, prints its line, and the fake runtime runs.
+func TestARunWithNoControlPlaneInstallsFromNpmDirectly(t *testing.T) {
+	defer cmd.SetInstallRuntimes(true)()
+	npm := rt.StartNpm(t)
+	npm.Publish("2.1.320")
+	defer cmd.SetNpmRegistry(npm.URL())()
+	root := newCheckout(t)
+	copyFixture(t, "two-modules", root)
+	composedForFake(t, root, fakeRuntime(t))
+	t.Setenv("QORY_RUN_KEY", "")
+	out, err := run(t, "run", "claude", "--", "-p", "hi")
+	if cmd.ExitCode(err) != 3 {
+		t.Fatalf("run returned %v (exit %d)\n%s", err, cmd.ExitCode(err), out)
+	}
+	wants(t, out, "qory run: installed claude 2.1.320\n", "hello from ")
+	if len(npm.Paths()) != 3 || npm.TarballGets() != 1 {
+		t.Fatalf("npm requests %q", npm.Paths())
+	}
+}
+
+// TestATarballThatDoesNotMatchItsChecksumEndsTheRun publishes a tarball on npm whose
+// dist.integrity is another tarball's: the run stops with the checksum line, exit 1,
+// before any session, and no version's folder is written.
+func TestATarballThatDoesNotMatchItsChecksumEndsTheRun(t *testing.T) {
+	npm := rt.StartNpm(t)
+	other := rt.PlainTarball(t, "other")
+	for _, cpu := range []string{"x64", "arm64"} {
+		npm.PublishWith(cpu, "2.1.320", rt.PlainTarball(t, "2.1.320"), rt.Integrity(other), "")
+	}
+	npm.SetLatest("2.1.320")
+	r := runInstalling(t, installSetup{npm: npm, proxy: rt.StartProxy(t)})
+	if len(r.joins) != 0 || cmd.ExitCode(r.err) != 1 {
+		t.Fatalf("%d joins, %v (exit %d)\n%s", len(r.joins), r.err, cmd.ExitCode(r.err), r.out)
+	}
+	want := "qory run: check the source of the runtime's releases: the tarball of claude 2.1.320 does not match its checksum " + rt.Integrity(other) + "\n"
+	if !strings.Contains(r.out, want) {
+		t.Fatalf("the output has no checksum line:\n%s", r.out)
+	}
+	if _, err := os.Lstat(filepath.Join(os.Getenv("XDG_STATE_HOME"), "qory", "runtimes", "claude", "2.1.320")); err == nil {
+		t.Fatal("the version's folder was written")
+	}
+}
+
+// runCodeInstalling runs qory run from a run code whose file has lines after the code,
+// as qory run pool writes it, with proxy as the run's host proxy, and no repositories,
+// at the first commit of a version repository, as
+// TestARunCodeAtATargetVersionWithNoRepositoryRunsOn runs it.
+func runCodeInstalling(t *testing.T, lines string, proxy *rt.Proxy) (string, error) {
+	t.Helper()
+	defer cmd.SetInstallRuntimes(true)()
+	defer cmd.SetNpmRegistry(unreachableNpm)()
+	h, first, _, files := versionRepository(t)
+	for name, content := range files {
+		writeFile(t, filepath.Join(h.dir, filepath.FromSlash(name)), content)
+	}
+	g := newCodeRelay(t)
+	g.documents = codeDocuments(t, func(d map[string]any) {
+		target := map[string]any{"system": proxygittest.Host, "path": "acme/site"}
+		d["target"], d["inputs"].(map[string]any)["target"] = target, target
+		d["target_version"] = first
+		d["harness_hidden"] = false
+		d["run_settings"] = map[string]any{"runtime": "claude"}
+	})
+	defer cmd.SetJoinSession(func(session.SessionSpec) {})()
+	t.Setenv("QORY_RUN_KEY", "")
+	_, _, restore := cmd.OpenNowhereWith(cmd.Nowhere{
+		Proxy: proxy.URL(), Dir: h.runDir,
+		StackProxy: h.server.Proxy.URL, StackCABundle: h.server.Proxy.CABundle,
+	})
+	defer restore()
+	return run(t, "run", "--run-code-file", codeFile(t, g.code()+"\n"+lines), "--gateway", g.URL)
+}
+
+// TestAPoolsRunsShareOneRuntimesFolder runs two runs from run codes whose files name the
+// pool's registry and runtimes folder, as qory run pool writes them: the first installs
+// claude 2.1.320 into that folder, the second reads the registry's newest again and no
+// tarball, and neither writes a runtimes folder in its state folder.
+func TestAPoolsRunsShareOneRuntimesFolder(t *testing.T) {
+	reg, proxy := rt.StartRegistry(t), rt.StartProxy(t)
+	reg.PublishPlain("2.1.320")
+	folder := filepath.Join(t.TempDir(), "runtimes")
+	lines := "registry " + reg.Host() + "\nruntimes " + folder + "\n"
+	pkg, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := range 2 {
+		// Each run sets up its folders from the package's folder.
+		t.Chdir(pkg)
+		out, err := runCodeInstalling(t, lines, proxy)
+		if !errors.Is(err, cmd.ErrJoinedNowhere) || !strings.Contains(out, "qory run: installed claude 2.1.320\n") {
+			t.Fatalf("run %d: %v\n%s", i+1, err, out)
 		}
 	}
+	if reg.BlobGets() != 1 {
+		t.Fatalf("the registry returned %d tarballs, want 1", reg.BlobGets())
+	}
+	if _, err := os.Lstat(filepath.Join(folder, "claude", "2.1.320", "bin", "claude")); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := os.Lstat(filepath.Join(os.Getenv("XDG_STATE_HOME"), "qory", "runtimes")); err == nil {
-		t.Fatal("a runtimes folder was written")
+		t.Fatal("a run wrote a runtimes folder in its state folder")
+	}
+}
+
+// TestARunCodeFileTakesTheMachineLines reads run code files with the lines qory run
+// pool writes after the code, and with lines that qory run refuses as it refuses
+// anything else after the code.
+func TestARunCodeFileTakesTheMachineLines(t *testing.T) {
+	code := newCodeRelay(t).code()
+	if _, err := cmd.GiveRunCode(codeFile(t, code+"\nregistry registry.example:5000\nruntimes /var/lib/qory-pool/runtimes\n")); err != nil {
+		t.Fatalf("the machine's lines are refused: %v", err)
+	}
+	for _, rest := range []string{"\nfolder /x\n", "\nruntimes relative\n", "\n\nregistry registry.example\n", "\nregistry registry.example\nregistry registry.example\n"} {
+		file := codeFile(t, code+rest)
+		_, err := cmd.GiveRunCode(file)
+		want := "write only the run code into " + file + ", with at most one newline after it: the file contains more"
+		if err == nil || err.Error() != want {
+			t.Errorf("%q: %v, want %s", rest, err, want)
+		}
 	}
 }

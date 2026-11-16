@@ -1,11 +1,14 @@
 // Package runtimeinstall installs an agent runtime's program for qory run, before the
-// run's first session, from the publisher's npm tarball.
+// run's first session, from the publisher's npm tarball: from the runtime cache of the
+// instance's registry, [RegistryFetch], or from npm, [NpmFetch].
 //
 // [Install] asks its [Fetch] for the runtime's newest release: the version, npm's
-// sha512 checksum of the tarball, and a way to open the tarball. It uses the folder
-// <Folder>/<runtime>/<version> when an earlier install of a tarball with the same
-// checksum made it, and opens no tarball then. Otherwise it reads the tarball into a
-// temporary file, checks its checksum, and extracts only package/<runtime> to
+// sha512 checksum of the tarball, and a way to open the tarball. It takes the run's hold
+// of the version, which keeps the version's folder until the run ends, and removes the
+// older versions' folders and the temporary entries that no run holds. It uses the
+// folder <Folder>/<runtime>/<version> when an earlier install of a tarball with the
+// same checksum made it, and opens no tarball then. Otherwise it reads the tarball into
+// a temporary file, checks its checksum, and extracts only package/<runtime> to
 // bin/<runtime> in a temporary folder, which it then renames to the version's folder: a
 // folder at that path is always a complete install.
 package runtimeinstall
@@ -16,6 +19,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -90,6 +94,19 @@ type Installed struct {
 	// Downloaded is whether Install read the tarball, false for a folder an earlier
 	// install made.
 	Downloaded bool
+	// hold is the open hold file of the version, see [Installed.Release].
+	hold *os.File
+}
+
+// Release ends the run's hold of the version's folder: once no run holds it, an install
+// of a newer version removes it. A run calls it when it ends; the hold also ends when
+// the process exits, and when the Installed is garbage collected, so a run keeps it
+// until it ends. It is safe to call more than once.
+func (i *Installed) Release() {
+	if i.hold != nil {
+		i.hold.Close()
+		i.hold = nil
+	}
 }
 
 // Program is the path of the runtime's program: <Dir>/bin/<Runtime>.
@@ -121,15 +138,24 @@ func Install(ctx context.Context, o Options) (Installed, error) {
 		return Installed{}, fmt.Errorf(textRelease+"the checksum of %s %s is not sha512- and 64 bytes in base64", o.Runtime, rel.Version)
 	}
 	f := folder{base: filepath.Join(o.Folder, o.Runtime), runtime: o.Runtime}
-	in := Installed{Runtime: o.Runtime, Version: rel.Version, Dir: filepath.Join(f.base, rel.Version)}
-	done, err := f.complete(rel.Version, rel.Integrity)
-	if err != nil || done {
-		return in, err
+	hold, err := f.hold(rel.Version)
+	if err != nil {
+		return Installed{}, err
 	}
-	if rel.Open == nil {
+	in := Installed{Runtime: o.Runtime, Version: rel.Version, Dir: filepath.Join(f.base, rel.Version), hold: hold}
+	done, err := f.complete(rel.Version, rel.Integrity)
+	switch {
+	case err != nil:
+		in.Release()
+		return Installed{}, err
+	case done:
+		return in, nil
+	case rel.Open == nil:
+		in.Release()
 		return Installed{}, errors.New(textRelease + "it returned no tarball")
 	}
 	if err := f.install(ctx, rel, sum); err != nil {
+		in.Release()
 		return Installed{}, err
 	}
 	in.Downloaded = true

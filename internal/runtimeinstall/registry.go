@@ -517,13 +517,20 @@ func scheme(host string) string {
 	if h, _, err := net.SplitHostPort(host); err == nil {
 		host = h
 	}
-	if host == "localhost" {
-		return "http"
-	}
-	if ip := net.ParseIP(host); ip != nil && ip.IsLoopback() {
+	if loopback(host) {
 		return "http"
 	}
 	return "https"
+}
+
+// loopback reports whether host, a name or an address with no port, is localhost or a
+// loopback address.
+func loopback(host string) bool {
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 // bearer is the parameters of the first Bearer challenge, and whether there is one.

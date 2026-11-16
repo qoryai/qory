@@ -36,3 +36,6 @@ func SetRetryClock(limit time.Duration, onWait func(time.Duration)) (restore fun
 	}
 	return func() { retryLimit, now, sleep = l, n, s }
 }
+
+// CompareVersions is compareVersions.
+var CompareVersions = compareVersions

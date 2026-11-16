@@ -110,6 +110,7 @@ import (
 	"github.com/qoryai/qory/internal/pool/child"
 	"github.com/qoryai/qory/internal/pool/explore"
 	"github.com/qoryai/qory/internal/provisioner"
+	"github.com/qoryai/qory/internal/runtimeinstall"
 	"github.com/qoryai/qory/internal/secretmask"
 )
 
@@ -130,10 +131,12 @@ const (
 )
 
 // The pool's folder's entries besides the journal: the folder of the dispatches'
-// folders, and the prefix of a run code's file, which is unlinked once it is open.
+// folders, the prefix of a run code's file, which is unlinked once it is open, and the
+// runtimes folder that every run of the pool installs its runtime into.
 const (
 	runsFolder     = "runs"
 	codeFilePrefix = "runcode-"
+	runtimesFolder = "runtimes"
 )
 
 // The files of a dispatch's folder that outlast the pool program: the lock that the
@@ -165,6 +168,10 @@ type Settings struct {
 	State string
 	// RunConfig is each qory run's XDG_CONFIG_HOME, an absolute directory.
 	RunConfig string
+	// Registry is the instance's registry, a host and a port or a host, from which each
+	// qory run installs its runtime; empty, a run installs from npm. Each run gets it,
+	// and the pool's runtimes folder, after the run code, see [runtimeinstall.Machine].
+	Registry string
 	// Qory is the qory binary; empty is the one this process runs. A name with no path
 	// separator is found on the PATH every command gets, as [child.Program] has it.
 	Qory string
@@ -809,7 +816,7 @@ func (p *Pool) prepare(c provisioner.Claimed) (string, *os.File, *foragerdir.Loc
 	}
 	name := filepath.Join(p.Settings.State, codeFilePrefix+c.DispatchID)
 	defer os.Remove(name)
-	code, err := writeCode(name, c)
+	code, err := writeCode(name, c, runtimeinstall.Machine{Registry: p.Settings.Registry, Folder: filepath.Join(p.Settings.State, runtimesFolder)})
 	if err != nil {
 		lock.Release()
 		return "", nil, nil, err
@@ -817,14 +824,17 @@ func (p *Pool) prepare(c provisioner.Claimed) (string, *os.File, *foragerdir.Loc
 	return dir, code, lock, nil
 }
 
-// writeCode writes c's run code to a new file, mode 0600, at name, and returns the file
-// open for reading, with name unlinked.
-func writeCode(name string, c provisioner.Claimed) (*os.File, error) {
+// writeCode writes c's run code to a new file, mode 0600, at name, with the lines of m
+// after it, and returns the file open for reading, with name unlinked.
+func writeCode(name string, c provisioner.Claimed, m runtimeinstall.Machine) (*os.File, error) {
 	f, err := os.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
 		return nil, err
 	}
 	_, err = c.RunCode.WriteTo(f)
+	if lines := m.Lines(); err == nil && lines != "" {
+		_, err = f.WriteString("\n" + lines)
+	}
 	if cerr := f.Close(); err == nil {
 		err = cerr
 	}

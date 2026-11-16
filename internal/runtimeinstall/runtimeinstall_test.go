@@ -30,7 +30,9 @@ func (in *installer) install() (runtimeinstall.Installed, error) {
 	return runtimeinstall.Install(context.Background(), runtimeinstall.Options{Fetch: in.src.Fetch, Runtime: "claude", Folder: in.folder})
 }
 
-// files is every path under dir, relative, with / after each folder's.
+// files is every path under dir, relative, with / after each folder's, but for the
+// lock files of the runtime's folder, .lock and .hold-<version>, which the tests of the
+// hold check.
 func files(t *testing.T, dir string) []string {
 	t.Helper()
 	var out []string
@@ -39,7 +41,7 @@ func files(t *testing.T, dir string) []string {
 			return err
 		}
 		rel, _ := filepath.Rel(dir, path)
-		if rel == "." {
+		if rel == "." || d.Name() == ".lock" || strings.HasPrefix(d.Name(), ".hold-") {
 			return nil
 		}
 		if d.IsDir() {
@@ -86,13 +88,16 @@ func TestASecondRunReusesTheVersionFolder(t *testing.T) {
 }
 
 // TestANewVersionInstallsBesideTheEarlierOne publishes 2.1.321 after 2.1.320: the next
-// install extracts it into its folder, and the earlier version's folder stays.
+// install extracts it into its folder, and the earlier version's folder stays while a
+// run holds it.
 func TestANewVersionInstallsBesideTheEarlierOne(t *testing.T) {
 	in := newInstaller(t)
 	in.src.Publish("2.1.320", rt.PlainTarball(t, "2.1.320"))
-	if _, err := in.install(); err != nil {
+	first, err := in.install()
+	if err != nil {
 		t.Fatal(err)
 	}
+	defer first.Release()
 	in.src.Publish("2.1.321", rt.PlainTarball(t, "2.1.321"))
 	got, err := in.install()
 	if err != nil {

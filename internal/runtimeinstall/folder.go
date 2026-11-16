@@ -72,14 +72,7 @@ const textState = "check that qory can write its state folder: "
 // renamed its folder there first, that folder is used, if [folder.complete] takes it.
 // The temporary file and folder are removed on every path.
 func (f folder) install(ctx context.Context, rel Release, sum []byte) error {
-	if err := os.MkdirAll(f.base, 0o755); err != nil {
-		return fmt.Errorf(textState+"%w", err)
-	}
-	// The wall's user enters the version's folder: its parent lets everyone in.
-	if err := os.Chmod(f.base, 0o755); err != nil {
-		return fmt.Errorf(textState+"%w", err)
-	}
-	tarball, err := os.CreateTemp(f.base, ".download-*")
+	tarball, err := os.CreateTemp(f.base, downloadPrefix+rel.Version+"-*")
 	if err != nil {
 		return fmt.Errorf(textState+"%w", err)
 	}
@@ -89,7 +82,7 @@ func (f folder) install(ctx context.Context, rel Release, sum []byte) error {
 	if err := download(ctx, rel, sum, tarball, what); err != nil {
 		return err
 	}
-	tmp, err := os.MkdirTemp(f.base, ".install-*")
+	tmp, err := os.MkdirTemp(f.base, installPrefix+rel.Version+"-*")
 	if err != nil {
 		return fmt.Errorf(textState+"%w", err)
 	}

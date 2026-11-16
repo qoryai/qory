@@ -50,7 +50,8 @@ var allowed = []string{"PATH", "HOME", "TMPDIR", "LANG", "DOCKER_HOST", "DOCKER_
 // claim, dispatched, then qory run --run-code-file /dev/fd/3 --gateway <gateway_url>
 // --home <dispatch's folder>/home in an empty work/ of the dispatch's folder, with HOME
 // home-user/ of that folder, mode 0700, with the run code in a file, mode 0600, open
-// for reading alone, that no name links to, and the allow-listed environment alone. The
+// for reading alone, that no name links to, followed by the lines of the pool's registry
+// and its runtimes folder, and the allow-listed environment alone. The
 // pool releases nothing and posts no outcome; the dispatch's folder and the code's file
 // are gone, and the journal is empty. qory run's line with the run code is left out.
 func TestADispatchRunsQoryRun(t *testing.T) {
@@ -78,6 +79,9 @@ func TestADispatchRunsQoryRun(t *testing.T) {
 	}
 	if !rep.FD3File || rep.CodeSum != sum([]byte(d.Run.RunCode)) {
 		t.Errorf("descriptor 3 is a file that no name links to, open for reading alone, %v; it contains the run code %v", rep.FD3File, rep.CodeSum == sum([]byte(d.Run.RunCode)))
+	}
+	if want := "registry " + harnessRegistry + "\nruntimes " + filepath.Join(h.state, "runtimes") + "\n"; rep.Machine != want {
+		t.Errorf("the lines after the run code are %q, want %q", rep.Machine, want)
 	}
 	if rep.Dir != filepath.Join(dir, "work") || rep.DirEntries != 0 {
 		t.Errorf("qory run ran in %s, with %d entries, want the empty %s", rep.Dir, rep.DirEntries, filepath.Join(dir, "work"))

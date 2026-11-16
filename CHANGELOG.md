@@ -18,13 +18,16 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Added
 
-- A walled run of Claude Code installs the runtime's program before its session, from
-  the runtime cache of the registry in `pool.registry`: qory reads `newest`, then the
-  version by digest, checks the layer's digest and npm's sha512 checksum, extracts only
-  `package/claude` into `<state>/runtimes/claude/<version>/bin/claude`, reuses a
-  version's folder that an earlier run installed, and prints `qory run: installed claude
-  <version>`. A 503 or 429 is retried for up to 25 minutes. Without `pool.registry` a
-  run installs nothing. See The runtime's program in `docs/run.md`.
+- Every run of Claude Code installs the runtime's program before its session: from the
+  runtime cache of the pool's registry, or of `pool.registry`, or else from npm, through
+  the run's host proxy when the run has one. qory reads the registry's `newest`, or npm's
+  `latest`, on every run, checks npm's sha512 checksum before it extracts only
+  `package/claude` into `<runtimes>/claude/<version>/bin/claude`, reuses a version's
+  folder, and prints `qory run: installed claude <version>`. The runs of a pool share one
+  runtimes folder in the pool's folder. Each run holds its version until it ends, and
+  each install removes older versions and temporary entries that no run holds. A 503 or
+  429 from the registry is retried for up to 25 minutes. See The runtime's program in
+  `docs/run.md`.
 - A run of a work item works on the branch `qory/<work item id>`, at the commit of the
   artifact `branch` that its stage starts from. The harness still comes from
   `target_version`.

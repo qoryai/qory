@@ -372,6 +372,12 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					SocketGrace: socketGrace,
 				},
 			}
+			// The run holds the version's folder of its runtime until it ends.
+			defer func() {
+				if spec.installed != nil {
+					spec.installed.Release()
+				}
+			}()
 			switch {
 			case spec.RunID == "" && key != nil:
 				spec.RunID = key.key.RunID
@@ -868,7 +874,11 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					installCtx, cancel = context.WithDeadline(ctx, opened.Add(timeout))
 				}
 				defer cancel()
-				in, err := installRuntime(installCtx, run, conf.Forager, name, state)
+				var machine runtimeinstall.Machine
+				if code != nil {
+					machine = code.machine
+				}
+				in, err := installRuntime(installCtx, run, conf.Forager, machine, walled || remote, name, state)
 				if err != nil {
 					return &runLineError{codeLine(installFailed(err))}
 				}
@@ -973,12 +983,10 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				if err != nil {
 					return err
 				}
-				// A walled run installs its runtime once the compose named it, and before
+				// A run installs its runtime once the compose named it, and before
 				// prepareSession wraps the session's command for the wall.
-				if walled {
-					if err := installWork(); err != nil {
-						return err
-					}
+				if err := installWork(); err != nil {
+					return err
 				}
 				// A home whose push checks qory cannot run stops the run here, before the
 				// setup and the agent. The run's forwarder checks the POSTs from behind the

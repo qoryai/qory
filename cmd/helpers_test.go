@@ -25,6 +25,9 @@ import (
 // runtime exits, in place of Forager's 200 ms: the hooks of these tests' runtimes
 // forward their events before the runtime exits, so none needs the longer drain.
 func TestMain(m *testing.M) {
+	// No test reaches npm: qory run installs its runtime only in the tests of the
+	// install, which set a stub registry.
+	cmd.SetInstallRuntimes(false)
 	// A test that needs qory run prepare as a separate process starts this binary
 	// with QORY_TEST_PREPARE set, and the binary is that verb, which looks for the
 	// image's copy where QORY_TEST_PREPARE_SEED says when it is set.
