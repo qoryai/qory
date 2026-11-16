@@ -1687,9 +1687,18 @@ before the fetch, and picks one version of the artifact type `branch`:
 3. Else, the newest version of the artifact named `main`.
 4. With no version, the run creates the branch at `target_version`.
 
-qory composes the harness at `target_version` and with the further repositories at their
-default branches, so a branch does not change the harness of its work item's runs. The
-fetch step also fetches each repository's commit by id, at depth 1. After the compose,
+qory composes the harness at `target_version`, with the further repositories at their
+default branches, before it checks out the work item's branch. When the documents contain
+no harness document, the compose reads the checkout's `qory.yaml` or `harness.yaml`, the
+modules it lists by a path and every file of those modules as `target_version` has them.
+It reads `harness.extensions`, such as `command_limits_minutes`, the `qory` version
+requirement, the `worktree` section and `harness.tiers` at the same commit. A commit on the
+work item's branch, such as one that a run pushed, changes none of these for the next run
+of the work item. The commit reaches a run's harness after you merge the branch into the
+target's default branch, the branch that its `HEAD` points to. Qory Apiary reads
+`target_version` there, so the next run's `target_version` contains the commit.
+
+The fetch step also fetches each repository's commit by id, at depth 1. After the compose,
 qory checks out the branch with no request to a remote: at the commit in the version, or
 where the fetch left a repository with no entry in the version. The working folder then
 has the commit's files. qory leaves the ref `refs/qory/target-version` at the target
