@@ -9,9 +9,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/qoryai/qory/internal/checkout"
 	"github.com/qoryai/qory/internal/exports"
 	"github.com/qoryai/qory/internal/foragerdir"
 	"github.com/qoryai/qory/internal/integration"
+	"github.com/qoryai/qory/internal/render"
 )
 
 // homeLockSuffix is appended to a home's path for its lock file, beside the home, so the
@@ -28,10 +30,14 @@ const (
 	textHolderUnknown = "Another run"
 )
 
-// homeLockText is what a run writes into its home's lock file: its run id, its process id
-// and its start time, one per line.
+// homeLockText is what a run writes into its home's lock file: its run id, when known, its
+// process id and its start time, one per line.
 func homeLockText(runID string) string {
-	return fmt.Sprintf("run %s\npid %d\nstarted %s\n", runID, os.Getpid(), time.Now().UTC().Format(time.RFC3339))
+	run := ""
+	if runID != "" {
+		run = "run " + runID + "\n"
+	}
+	return fmt.Sprintf("%spid %d\nstarted %s\n", run, os.Getpid(), time.Now().UTC().Format(time.RFC3339))
 }
 
 // holderOf is the phrase for the run that wrote text into a home's lock file, as
@@ -54,6 +60,18 @@ func holderOf(text string) string {
 // text into its lock file. It is no mistake in the input, so the exit status is 1.
 func homeInUse(home, text string) error {
 	return fmt.Errorf(textHomeInUse, holderOf(text), exports.Value(home, false))
+}
+
+// lockHomeAt is [lockHome] for the home of at. A home inside the checkout, .qory/harness,
+// is kept out of git first, so the lock file that creates the qory directory shows as no
+// untracked file when the run stops before its compose.
+func lockHomeAt(at places, runID string) (*foragerdir.Lock, error) {
+	if at.dir != "" {
+		if err := render.Exclude(at.root, "/"+checkout.Dir); err != nil {
+			return nil, err
+		}
+	}
+	return lockHome(at.home, runID)
 }
 
 // lockHome takes the lock on the composed home at home for the run runID, before the

@@ -457,6 +457,19 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			if err := makeRunsDir(state, spec.RunsDir); err != nil {
 				return err
 			}
+			// A home that is not for this run alone, a person's .qory/harness or one that --home
+			// or harness.home sets, is held for the run's life: a second run's compose would
+			// replace it, and its end would delete this run's copy of inputs.json. The lock is
+			// taken before a run code is redeemed, which a second run could not take back, and
+			// let go after every other cleanup. A run code's run id is written into it once
+			// known.
+			var homeLock *foragerdir.Lock
+			if !perRun {
+				if homeLock, err = lockHomeAt(at, spec.RunID); err != nil {
+					return err
+				}
+				defer homeLock.Release()
+			}
 			// A run from a run code takes its harness, runtime, compose flags, inputs and
 			// time limit from the documents of the answer to the code; its workflow's
 			// time_limit is known once the harness is composed, see prepareLaunch.
@@ -470,6 +483,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				secretmask.Default().Add(key.value)
 				if spec.RunID == "" {
 					spec.RunID = key.key.RunID
+					homeLock.SetText(homeLockText(spec.RunID))
 				}
 				var doc contracts.Documents
 				if doc, err = codeDocumentsOf(documents); err != nil {
@@ -555,17 +569,6 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					cleanups[i]()
 				}
 			}()
-			// A home that is not this run's alone, a person's .qory/harness or one that --home or
-			// harness.home sets, is held for the run's life: a second run's compose would
-			// replace it, and its end would delete this run's copy of inputs.json. The lock is
-			// the first of the cleanups, so it is let go after the others.
-			if runHome == "" {
-				homeLock, err := lockHome(at.home, spec.RunID)
-				if err != nil {
-					return err
-				}
-				cleanups = append(cleanups, func() { homeLock.Release() })
-			}
 			// A machine with its own access key and gateway.server.via registers the run
 			// itself, through via, and runs it through the gateway that the run key points
 			// to, as a run its starter registered does. The run key it keeps beside

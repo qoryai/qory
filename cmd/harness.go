@@ -423,6 +423,9 @@ home. --no-links writes the tree to .qory/harness with no link; compose still wr
 
 --verbose prints each entry and the module it came from.
 
+While a qory run uses the home, compose stops with exit 1 and writes nothing: wait for
+that run to end, or set another --home or harness.home.
+
 More: https://github.com/qoryai/qory/blob/main/docs/harness.md`,
 		Example: `  qory harness compose                   # build the harness here
   qory harness compose --runtime codex   # for Codex instead
@@ -707,6 +710,16 @@ func composeHome(out, errOut io.Writer, o composeOptions) (*composed, error) {
 		u.Success("dry run: nothing written")
 		u.Fields(skippedConfig)
 		return nil, nil
+	}
+	// A verb's compose holds the home as a run does, so it neither replaces the home of a run
+	// that reads it nor is replaced by one. A worktree add composes the home of a worktree it
+	// just made, and qory run holds its own home before it composes.
+	if !o.run && o.at == nil {
+		lock, err := lockHomeAt(at, "")
+		if err != nil {
+			return nil, err
+		}
+		defer lock.Release()
 	}
 	// A checkout can be composed for several runtimes at once, and can have been
 	// composed for others before. The home is one tree that a build replaces
@@ -2016,12 +2029,23 @@ the whole .qory directory, also .qory/artifacts and .qory/work-item.json. --runt
 same when it removes the last composed runtime.
 
 A home outside the checkout, under --home or harness.home, is removed with its report.
-The checkout is not touched: nothing was written there.`,
+The checkout is not touched: nothing was written there.
+
+While a qory run uses the home, remove stops with exit 1 and removes nothing: wait for
+that run to end.`,
 		Args: noArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			at, _, err := locate(h)
 			if err != nil {
 				return err
+			}
+			// A home that a run holds is not removed from under it.
+			if _, err := os.Lstat(at.home); had(at) || err == nil {
+				lock, err := lockHomeAt(at, "")
+				if err != nil {
+					return err
+				}
+				defer lock.Release()
 			}
 			u := ui.New(cmd.OutOrStdout())
 			rep, _ := report.Read(at.report)

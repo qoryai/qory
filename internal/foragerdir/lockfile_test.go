@@ -80,3 +80,24 @@ func TestLockFileTextIsReadWhileHeld(t *testing.T) {
 		t.Errorf("the text of a missing file is %q, want none", got)
 	}
 }
+
+// TestSetTextReplacesTheHoldersText is a holder that writes its run id once it is known: a
+// reader finds the new text, and a nil lock sets nothing.
+func TestSetTextReplacesTheHoldersText(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "home.lock")
+	l, err := foragerdir.LockFileText(path, "pid 1\nstarted later than the run id\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Release()
+	if err := l.SetText("run r1\npid 1\n"); err != nil {
+		t.Fatal(err)
+	}
+	if got := foragerdir.LockText(path); got != "run r1\npid 1\n" {
+		t.Errorf("the text after SetText is %q", got)
+	}
+	var none *foragerdir.Lock
+	if err := none.SetText("x"); err != nil {
+		t.Errorf("SetText of a nil lock: %v", err)
+	}
+}

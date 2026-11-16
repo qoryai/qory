@@ -36,15 +36,24 @@ func LockFileText(path, text string) (*Lock, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := l.f.Truncate(0); err != nil {
-		l.Release()
-		return nil, err
-	}
-	if _, err := l.f.WriteAt([]byte(text), 0); err != nil {
+	if err := l.SetText(text); err != nil {
 		l.Release()
 		return nil, err
 	}
 	return l, nil
+}
+
+// SetText replaces the text of the lock file with text, for the holder. A nil Lock sets
+// nothing.
+func (l *Lock) SetText(text string) error {
+	if l == nil || l.f == nil {
+		return nil
+	}
+	if err := l.f.Truncate(0); err != nil {
+		return err
+	}
+	_, err := l.f.WriteAt([]byte(text), 0)
+	return err
 }
 
 // lockTextMax is the most of a lock file's text that [LockText] reads.

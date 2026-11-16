@@ -765,8 +765,11 @@ func TestAWalledRunOfAHiddenHarnessThatMountsTheFolderOfItsHomeStops(t *testing.
 	if data, err := os.ReadFile(log); err == nil {
 		t.Errorf("the wall ran a command:\n%s", data)
 	}
-	if entries, _ := os.ReadDir(homes); len(entries) != 0 {
-		t.Errorf("the run wrote into %s: %v", homes, entries)
+	// The lock file of the home is made before the run code is redeemed, and stays.
+	for _, e := range mustReadDir(t, homes) {
+		if !strings.HasSuffix(e.Name(), ".lock") {
+			t.Errorf("the run wrote %s into %s", e.Name(), homes)
+		}
 	}
 	r.noAddress(t)
 }
@@ -1142,4 +1145,14 @@ func harnessBind(b map[string]any) func(map[string]any) {
 	return func(d map[string]any) {
 		d["harness"].(map[string]any)["harness"].(map[string]any)["bind"] = b
 	}
+}
+
+// mustReadDir is the entries of the folder at dir, none when it is not there.
+func mustReadDir(t *testing.T, dir string) []os.DirEntry {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		t.Fatal(err)
+	}
+	return entries
 }

@@ -2,6 +2,7 @@ package cmd_test
 
 import (
 	"errors"
+	"maps"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -172,13 +173,16 @@ func TestAPerRunHomeTakesNoLock(t *testing.T) {
 
 // TestASecondRunFromARunCodeLeavesTheFirstRunsInputs is a second run from a run code of
 // the home that --home sets, which starts while the first run's agent runs: it stops
-// before its compose, so the first run's home and its copy of inputs.json stay as they are.
-func TestASecondRunFromARunCodeLeavesTheFirstRunsInputs(t *testing.T) {
+// before its compose, and before it redeems its code, which a stopped run could not give
+// back, so the relay of its code gets no request, and the first run's home and its copy of
+// inputs.json stay as they are.
+func TestASecondRunFromARunCodeStopsBeforeItRedeemsItsCode(t *testing.T) {
 	home := filepath.Join(tempDir(t), "homes")
 	var nowhere cmd.Nowhere
 	var documents []byte
 	var before map[string]string
 	var second error
+	var redeemed int
 	joins := 0
 	r := codeHarness{
 		before:  func() []string { walledByDocker(t); return []string{"--home", home} },
@@ -195,6 +199,7 @@ func TestASecondRunFromARunCodeLeavesTheFirstRunsInputs(t *testing.T) {
 			_, _, restore := cmd.OpenNowhereWith(again)
 			_, second = run(t, "run", "--run-code-file", codeFile(t, g.code()), "--gateway", g.URL, "--home", home)
 			restore()
+			redeemed = len(g.sent())
 			if after := snapshot(t, s.HarnessHome); len(after) != len(before) || after["inputs.json"] != before["inputs.json"] || before["inputs.json"] == "" {
 				t.Errorf("the second run changed the first run's home: %v, then %v", before, after)
 			}
@@ -203,7 +208,91 @@ func TestASecondRunFromARunCodeLeavesTheFirstRunsInputs(t *testing.T) {
 	if !errors.Is(r.err, cmd.ErrJoinedNowhere) || joins != 1 {
 		t.Fatalf("%v (exit %d), %d joins, want the first run's only\n%s", r.err, cmd.ExitCode(r.err), joins, r.out)
 	}
+	if redeemed != 0 {
+		t.Errorf("the second run redeemed its code %d times, want 0", redeemed)
+	}
 	if second == nil || cmd.ExitCode(second) != 1 || !strings.HasPrefix(second.Error(), homeFix+"\nRun "+keyRunID) || !strings.Contains(second.Error(), " uses the home ") {
 		t.Errorf("the second run: %v (exit %d), want exit 1 with the home's holder", second, cmd.ExitCode(second))
+	}
+}
+
+// holdHome makes the qory folder of the checkout at root and holds the lock of its
+// .qory/harness as another run does, and returns the home and the lock.
+func holdHome(t *testing.T, root string) (string, *foragerdir.Lock) {
+	t.Helper()
+	home := filepath.Join(root, ".qory", "harness")
+	if err := os.MkdirAll(filepath.Dir(home), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	held, err := foragerdir.LockFileText(home+".lock", holderText)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return home, held
+}
+
+// TestComposeStopsWhileARunHoldsTheHome is qory harness compose of the checkout's
+// .qory/harness while another run holds it: it stops with the lines of a second run, writes
+// nothing, and composes once the run lets go.
+func TestComposeStopsWhileARunHoldsTheHome(t *testing.T) {
+	root, _ := committedFixture(t)
+	home, held := holdHome(t, root)
+	out, err := run(t, "harness", "compose", "--runtime", "claude")
+	wantHomeInUse(t, err, home)
+	if _, err := os.Lstat(home); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("compose wrote the home while a run held it: %v\n%s", err, out)
+	}
+	held.Release()
+	if out, err := run(t, "harness", "compose", "--runtime", "claude"); err != nil {
+		t.Fatalf("compose after the run: %v\n%s", err, out)
+	}
+	if _, err := os.Stat(filepath.Join(home, "claude")); err != nil {
+		t.Errorf("the composed home: %v", err)
+	}
+}
+
+// TestRemoveStopsWhileARunHoldsTheHome is qory harness remove of a composed
+// .qory/harness while another run holds it: it stops with the lines of a second run, the
+// home and the lock file stay as they were, and the lock stays held. Once the run lets go,
+// remove takes the whole qory folder.
+func TestRemoveStopsWhileARunHoldsTheHome(t *testing.T) {
+	root, _ := committedFixture(t)
+	if out, err := run(t, "harness", "compose", "--runtime", "claude"); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	home, held := holdHome(t, root)
+	before := snapshot(t, filepath.Join(root, ".qory"))
+	out, err := run(t, "harness", "remove")
+	wantHomeInUse(t, err, home)
+	if after := snapshot(t, filepath.Join(root, ".qory")); !maps.Equal(before, after) {
+		t.Errorf("remove changed the qory folder while a run held the home\n%s", out)
+	}
+	if text := foragerdir.LockText(home + ".lock"); text != holderText {
+		t.Errorf("the lock file holds %q, want the holder's %q", text, holderText)
+	}
+	if again, err := foragerdir.LockFile(home + ".lock"); !errors.Is(err, foragerdir.ErrLocked) {
+		again.Release()
+		t.Errorf("the lock is not held after remove stopped: %v", err)
+	}
+	held.Release()
+	if out, err := run(t, "harness", "remove"); err != nil {
+		t.Fatalf("remove after the run: %v\n%s", err, out)
+	}
+	if _, err := os.Lstat(filepath.Join(root, ".qory")); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("the qory folder stays after remove: %v", err)
+	}
+}
+
+// TestARunThatStopsAtTheLockLeavesNoUntrackedFile is a person's run in a git checkout that
+// stops at the lock of its home, before its compose: git status shows nothing, since
+// the qory folder that the lock file made is excluded first.
+func TestARunThatStopsAtTheLockLeavesNoUntrackedFile(t *testing.T) {
+	root, _ := committedFixture(t)
+	home, held := holdHome(t, root)
+	defer held.Release()
+	_, err := run(t, "run", "claude", "--wall", "none", "--", "-p", "hi")
+	wantHomeInUse(t, err, home)
+	if status := gitOutput(t, root, "status", "--porcelain"); status != "" {
+		t.Errorf("git status after a run that stopped at the lock:\n%s", status)
 	}
 }

@@ -11,6 +11,9 @@ same when it removes the last composed runtime.
 A home outside the checkout, under --home or harness.home, is removed with its report.
 The checkout is not touched: nothing was written there.
 
+While a qory run uses the home, remove stops with exit 1 and removes nothing: wait for
+that run to end.
+
 ```
 qory harness remove [flags]
 ```
