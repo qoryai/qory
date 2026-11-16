@@ -3,6 +3,7 @@ package runtimeinstall_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -279,5 +280,76 @@ func TestAResponseThatStopsSendingEndsTheInstall(t *testing.T) {
 				t.Fatalf("the install took %s", took)
 			}
 		})
+	}
+}
+
+// TestARedirectFromTheRegistryFailsWithItsOwnCause has a registry that redirects the
+// request that carries the token to a storage host: the install does not follow it, asks
+// the storage host for nothing, and the error says the registry returned a redirect, with
+// the status and the Location's host on later lines.
+func TestARedirectFromTheRegistryFailsWithItsOwnCause(t *testing.T) {
+	asked := false
+	storage := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { asked = true }))
+	t.Cleanup(storage.Close)
+	var srv *httptest.Server
+	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/registry/token":
+			_ = json.NewEncoder(w).Encode(map[string]string{"token": rt.Token})
+		case r.Header.Get("Authorization") == "":
+			w.Header().Set("WWW-Authenticate", `Bearer realm="`+srv.URL+`/registry/token"`)
+			w.WriteHeader(http.StatusUnauthorized)
+		default:
+			http.Redirect(w, r, storage.URL+"/blob", http.StatusTemporaryRedirect)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	host := strings.TrimPrefix(srv.URL, "http://")
+	_, err := runtimeinstall.Install(context.Background(), runtimeinstall.Options{
+		Fetch:   runtimeinstall.RegistryFetch(runtimeinstall.DirectClient(), host, "amd64", srv.URL),
+		Runtime: "claude", Folder: t.TempDir(),
+	})
+	want := "ask the instance admin to make the registry serve this with no redirect, which qory does not follow\n" +
+		"shared/runtimes/claude:newest returned 307\n" +
+		"The Location is on " + strings.TrimPrefix(storage.URL, "http://") + "."
+	if err == nil || err.Error() != want || asked {
+		t.Fatalf("err = %v, asked = %v\nwant %s", err, asked, want)
+	}
+	if first, _, _ := strings.Cut(err.Error(), "\n"); len(first) > 100 {
+		t.Errorf("the first line has %d characters, want at most 100", len(first))
+	}
+}
+
+// TestTheTokenRequestHasOnlyTheServiceAndTheScope has a registry whose realm carries a
+// query and a fragment of its own: the request to the token route has the service and
+// the scope alone.
+func TestTheTokenRequestHasOnlyTheServiceAndTheScope(t *testing.T) {
+	var mu sync.Mutex
+	var queries []string
+	var srv *httptest.Server
+	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		switch {
+		case r.URL.Path == "/registry/token":
+			queries = append(queries, r.URL.RawQuery)
+			_ = json.NewEncoder(w).Encode(map[string]string{"token": rt.Token})
+		case r.Header.Get("Authorization") == "":
+			w.Header().Set("WWW-Authenticate", `Bearer realm="`+srv.URL+`/registry/token?access_token=x&scope=repository:other:push&admin=1#frag",service="stub"`)
+			w.WriteHeader(http.StatusUnauthorized)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	_, err := runtimeinstall.Install(context.Background(), runtimeinstall.Options{
+		Fetch:   runtimeinstall.RegistryFetch(http.DefaultClient, strings.TrimPrefix(srv.URL, "http://"), "amd64", srv.URL),
+		Runtime: "claude", Folder: t.TempDir(),
+	})
+	if !errors.Is(err, runtimeinstall.ErrNotCached) {
+		t.Fatalf("err = %v, want ErrNotCached after the token", err)
+	}
+	if want := "scope=repository%3Ashared%2Fruntimes%2Fclaude%3Apull&service=stub"; len(queries) != 1 || queries[0] != want {
+		t.Fatalf("the token requests' queries: %q, want [%q]", queries, want)
 	}
 }

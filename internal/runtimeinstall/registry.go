@@ -416,8 +416,9 @@ func (r *registry) get(ctx context.Context, path, accept, what, ref string) (*ht
 			retryAfter = resp.Header.Get("Retry-After")
 			drain(resp)
 		default:
+			location := resp.Header.Get("Location")
 			drain(resp)
-			return nil, r.refused(what, resp.StatusCode)
+			return nil, r.refused(what, resp.StatusCode, location)
 		}
 		d := wait(n, retryAfter)
 		n++
@@ -438,9 +439,18 @@ func (r *registry) get(ctx context.Context, path, accept, what, ref string) (*ht
 }
 
 // refused is the error of a response with the status status, other than 200, to the
-// request what.
-func (r *registry) refused(what string, status int) error {
+// request what; location is the response's Location header, which a redirect has.
+func (r *registry) refused(what string, status int, location string) error {
 	err := &statusError{what: what, status: status}
+	if status >= 300 && status < 400 {
+		// The install follows no redirect, so a layer that the registry serves from
+		// another place fails, and nothing is read from that place.
+		to := "the registry's host"
+		if u, perr := url.Parse(location); perr == nil && u.Host != "" {
+			to = u.Host
+		}
+		return fmt.Errorf("ask the instance admin to make the registry serve this with no redirect, which qory does not follow\n%w\nThe Location is on %s.", err, to)
+	}
 	switch status {
 	case http.StatusNotFound:
 		return fmt.Errorf(textCache+"%w", err)
@@ -486,13 +496,16 @@ func (r *registry) tokenFor(ctx context.Context, challenges []string) (string, e
 	if !sameRoute(realm, want) {
 		return "", fmt.Errorf("ask the instance admin to put the registry's token realm at %s\nIt is %s", want.Redacted(), realm.Redacted())
 	}
-	q := realm.Query()
+	// The request is to the instance's token route, with the service and the scope alone:
+	// nothing else of the realm, such as its query or fragment, goes with it.
+	q := url.Values{}
 	if service := params["service"]; service != "" {
 		q.Set("service", service)
 	}
 	q.Set("scope", "repository:"+r.repository+":pull")
-	realm.RawQuery = q.Encode()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, realm.String(), nil)
+	route := *want
+	route.RawQuery = q.Encode()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, route.String(), nil)
 	if err != nil {
 		return "", err
 	}
