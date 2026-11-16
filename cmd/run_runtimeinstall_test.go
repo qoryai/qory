@@ -263,7 +263,7 @@ func TestATarballThatDoesNotMatchItsChecksumEndsTheRun(t *testing.T) {
 	if len(r.joins) != 0 || cmd.ExitCode(r.err) != 1 {
 		t.Fatalf("%d joins, %v (exit %d)\n%s", len(r.joins), r.err, cmd.ExitCode(r.err), r.out)
 	}
-	want := "qory run: Check the source of the runtime's releases: the tarball of claude 2.1.320 does not match its checksum " + rt.Integrity(other) + "\n"
+	want := "qory run: Check the source of the runtime's releases\nThe tarball of claude 2.1.320 does not match the checksum " + rt.Integrity(other)
 	if !strings.Contains(r.out, want) {
 		t.Fatalf("the output has no checksum line:\n%s", r.out)
 	}
