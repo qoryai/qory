@@ -1023,6 +1023,8 @@ release may change what an existing document does, and states it under Upgrading
 - qory builds with Go 1.27.3, whose `crypto/x509` returns an error for the intermediate
   certificates that Go no longer trusts (GO-2026-6809, CVE-2026-111943). go.mod requires
   Go 1.27.3.
+- qory builds with Go 1.27.4, which includes security fixes to cgo, the go command, the
+  compiler, the linker, and `net/http`. go.mod requires Go 1.27.4.
 - `qory run pool` starts each run with `--home <the run's folder>/home`, so the run
   composes its harness in the run's folder, outside `work/`, and the pool removes the
   harness with the folder once the run ends. Before, the harness home of a pool's run
