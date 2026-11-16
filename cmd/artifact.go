@@ -340,8 +340,8 @@ func pullArtifacts(c *cobra.Command, client *runapi.Client, artifactType string,
 // chosenVersion returns the version of artifact to fetch, nil for none: version when it is
 // not 0, the newest for an output of the stage, the version the stage has for an input,
 // else its approved version; and for any other artifact the approved version or the
-// newest. The newest is [newestNotCancelled]. A type that is an output and an input is an
-// output: the stage's round works on its newest version.
+// newest. The newest is the version that [newestNotCancelled] returns. A type that is an
+// output and an input is an output: the stage's round works on its newest version.
 func chosenVersion(artifact runapi.Artifact, snapshot *runapi.Snapshot, version int) *runapi.Version {
 	byNumber := func(number int) *runapi.Version {
 		for i := range artifact.Versions {

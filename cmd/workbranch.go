@@ -104,8 +104,8 @@ func featureOff(err error) bool {
 // chosenBranch is the version of the artifact type branch that a run starts at: the
 // newest version of the artifact main when the work item's stage wrote it; else the
 // version of any artifact name that a gate approved of a stage's input; else the newest
-// version of the artifact main; nil with none of these. The newest version is
-// [newestNotCancelled].
+// version of the artifact main; nil with none of these. The newest version is the one
+// that [newestNotCancelled] returns.
 func chosenBranch(snapshot *runapi.Snapshot, index *runapi.Index) (*runapi.Version, error) {
 	var newest *runapi.Version
 

@@ -114,6 +114,11 @@ func TestChosenBranch(t *testing.T) {
 			cancelledAt(branchIndex([2]string{"av_1", "st_b"}, [2]string{"av_2", "st_b"}), "av_1", "av_2"),
 			"",
 		},
+		"every version cancelled leaves the approved input": {
+			stageSnapshot(approved("av_1")),
+			cancelledAt(branchIndex([2]string{"av_1", "st_a"}, [2]string{"av_2", "st_b"}), "av_1", "av_2"),
+			"av_1",
+		},
 		"no version":  {stageSnapshot(), branchIndex(), ""},
 		"no artifact": {stageSnapshot(), &runapi.Index{}, ""},
 		"another artifact name": {
