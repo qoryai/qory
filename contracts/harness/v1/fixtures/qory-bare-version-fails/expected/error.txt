@@ -1,1 +1,2 @@
-qory.yaml: qory "0.3.0" is not one or more comparators such as >=0.3.0
+Set qory in qory.yaml to one or more comparators, such as >=0.3.0.
+  The value is "0.3.0".

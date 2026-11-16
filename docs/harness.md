@@ -169,7 +169,9 @@ When none of the stack's modules composes one, after their `exclude` and `only`,
 compose fails with exit 2:
 
 ```
-add a skill or command workflow-deploy to a module of the base stack core@4b8e2f1a9c7d, or remove deploy from the workflows of its qory-stack.yaml: the stack declares the workflow deploy, and none of its modules ships a skill or command workflow-deploy or deploy
+Add skill workflow-deploy to a module of core@4b8e2f1a9c7d, or remove workflow deploy.
+  The base stack core@4b8e2f1a9c7d declares the workflow deploy in its qory-stack.yaml.
+  No module of core@4b8e2f1a9c7d ships a skill or command workflow-deploy or deploy.
 ```
 
 A module that a checkout adds to the stack does not count, because the stack lists the
@@ -260,8 +262,13 @@ that ignores case, so qory stops them with exit 2 on every file system, and a mo
 alike everywhere:
 
 ```
-module core: rename skills/a/review or skills/b/review: each skill goes to skills/<name>, and both are the skill review
-module core: rename skills/a/Review or skills/b/review: each skill goes to skills/<name>, and these two names differ only in case
+Rename skills/a/review or skills/b/review in module core.
+  Each skill goes to skills/<name>, and both are the skill review.
+```
+
+```
+Rename skills/a/Review or skills/b/review in module core.
+  Each skill goes to skills/<name>, and these two names differ only in case.
 ```
 
 ### Let several modules add reviewers

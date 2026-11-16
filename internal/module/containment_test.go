@@ -17,7 +17,7 @@ func TestReadRefusesMCPValuesOfTheWrongType(t *testing.T) {
 		{`{"command": "x", "type": "grpc"}`, "module core: mcp/db.json: type grpc is not stdio, http or sse"},
 		{`{"command": ""}`, "module core: mcp/db.json: command is not a non-empty string"},
 		{`{"command": "x", "description": 3}`, "module core: mcp/db.json: description is 3, which is not a string"},
-		{`{"command": "x"} trailing`, "module core: mcp/db.json does not contain a JSON object: invalid character 't' after top-level value"},
+		{`{"command": "x"} trailing`, "Write mcp/db.json in module core as one JSON object.\n  The file does not contain a JSON object: invalid character 't' after top-level value"},
 	} {
 		dir := tree(t, map[string]string{"mcp/db.json": c.body})
 		_, err := Read("core", dir, nil, "")
@@ -133,7 +133,7 @@ func TestReadNamesTheVariantDirectoryInItsMessages(t *testing.T) {
 	dir = tree(t, map[string]string{"codex/mcp/db.json": "[]\n", "qory-module.yaml": manifest})
 	m, _ = ReadManifest(dir)
 	_, err = Read("core", dir, m, "codex")
-	if err == nil || !strings.HasPrefix(err.Error(), "module core: codex/mcp/db.json does not contain a JSON object") {
+	if err == nil || !strings.HasPrefix(err.Error(), "Write codex/mcp/db.json in module core as one JSON object.\n  The file does not contain a JSON object") {
 		t.Errorf("mcp: %v", err)
 	}
 }

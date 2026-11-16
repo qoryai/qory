@@ -142,7 +142,7 @@ func TestExtendsRefusesWhatTheBaseCloses(t *testing.T) {
 	refuse("a hook", "module app ships hooks/leak.sh, and the base stack nextjs-15@", cmd.ExitInput)
 	os.Remove(filepath.Join(root, "modules", "app", "hooks", "leak.sh"))
 	writeFile(t, filepath.Join(root, "modules", "app", "skills", "review", "SKILL.md"), "# mine\n")
-	refuse("a collision with the base", "skills/review is provided by 2 modules", cmd.ExitCollision)
+	refuse("a collision with the base", "2 modules provide skills/review", cmd.ExitCollision)
 	os.RemoveAll(filepath.Join(root, "modules", "app", "skills", "review"))
 	writeFile(t, filepath.Join(root, "modules", "app", "settings", "claude", "settings.json"), `{"permissions": {"deny": ["Read"]}}`)
 	refuse("a deny rule", "module app sets permissions.deny in settings/claude/settings.json, and the base stack nextjs-15@", cmd.ExitInput)

@@ -66,7 +66,7 @@ func readContracts(path string, roles *yaml.Node) (map[string]string, error) {
 					if contract.Kind == yaml.ScalarNode && contract.Tag == "!!str" && contract.Value != "" {
 						why = "The value is " + exports.Value(contract.Value, true) + "."
 					}
-					return nil, fmt.Errorf("Set %s.contract to a path inside the module.\n  %s The map is in %s.", at, why, path)
+					return nil, exports.Refuse(fmt.Sprintf("Set %s.contract of %s to a path inside the module.", at, exports.ModulePlace), fmt.Sprintf("%s The map is in %s.", why, path))
 				}
 				if out == nil {
 					out = map[string]string{}

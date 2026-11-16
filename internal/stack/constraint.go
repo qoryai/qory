@@ -52,7 +52,7 @@ func ParseConstraint(s string) (Constraint, error) {
 			}
 		}
 		if op == "" {
-			return Constraint{}, fmt.Errorf("qory %s is not one or more comparators such as >=0.3.0", exports.Value(s, true))
+			return Constraint{}, exports.Refuse("Set qory in "+exports.FilePlace+" to one or more comparators, such as >=0.3.0.", "The value is "+exports.Value(s, true)+".")
 		}
 		v := withV(strings.TrimPrefix(field, op))
 		// A comparator names all three numbers and no build metadata, so that two

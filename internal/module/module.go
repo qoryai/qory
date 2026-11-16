@@ -354,7 +354,7 @@ func parseManifest(dir string, data []byte, err error) (*Manifest, error) {
 	}
 	current, err := exports.ResolveAPIVersion(raw.APIVersion)
 	if err != nil {
-		return nil, fmt.Errorf("%s: %w", path, exports.HideValueError(err, ""))
+		return nil, exports.HideValueError(exports.AtPath(path, err), "")
 	}
 	if raw.Name == "" {
 		return nil, fmt.Errorf("%s: name is required", path)
@@ -421,9 +421,9 @@ func parseManifest(dir string, data []byte, err error) (*Manifest, error) {
 			continue
 		}
 		one, many, err := stack.ReadRoles(part.node, part.key, part.counts)
-		var re *stack.RolesError
-		if errors.As(err, &re) {
-			return nil, re.In(path)
+		var in exports.InFile
+		if errors.As(err, &in) {
+			return nil, in.In(path)
 		}
 		if err != nil {
 			return nil, fmt.Errorf("%s: %s: %w", path, part.key, exports.HideValueError(err, ""))
@@ -606,7 +606,7 @@ func ReadWith(name, dir string, m *Manifest, variant string, readFile func(path 
 	}
 	skills, err := readSkills(dirs["skills"], filepath.Join(abs, dirs["skills"]), variantSkillDirs(m))
 	if err != nil {
-		return nil, fmt.Errorf("module %s: %w", shown, err)
+		return nil, exports.Prefixed("module "+shown, err)
 	}
 	l.Entries = append(l.Entries, skills...)
 	for _, kind := range []string{"agents", "commands", "output-styles"} {
@@ -618,12 +618,12 @@ func ReadWith(name, dir string, m *Manifest, variant string, readFile func(path 
 	}
 	hooks, err := readHooks(shown, dirs["hooks"], filepath.Join(abs, dirs["hooks"]))
 	if err != nil {
-		return nil, fmt.Errorf("module %s: %w", shown, err)
+		return nil, exports.Prefixed("module "+shown, err)
 	}
 	l.Entries = append(l.Entries, hooks...)
 	servers, mcp, err := readMCP(dirs["mcp"], filepath.Join(abs, dirs["mcp"]), readFile)
 	if err != nil {
-		return nil, fmt.Errorf("module %s: %w", shown, err)
+		return nil, exports.Prefixed("module "+shown, err)
 	}
 	l.Entries = append(l.Entries, servers...)
 	l.MCP = mcp
@@ -657,7 +657,7 @@ func ReadWith(name, dir string, m *Manifest, variant string, readFile func(path 
 		}
 		refs, err := references(abs, e)
 		if err != nil {
-			return nil, fmt.Errorf("module %s: %w", shown, err)
+			return nil, exports.Prefixed("module "+shown, err)
 		}
 		l.Entries[i].References = refs.keys
 		l.Entries[i].Tier = refs.tier
@@ -694,7 +694,8 @@ func ReadWith(name, dir string, m *Manifest, variant string, readFile func(path 
 		for _, key := range sortedKeys(m.Requires) {
 			if !shipped[key] {
 				kind, entry, _ := strings.Cut(key, "/")
-				return nil, fmt.Errorf("module %s: requires lists %s, which the module does not ship", shown, Describe(kind, accesskey.ShownName(entry, false)))
+				needed := Describe(kind, accesskey.ShownName(entry, false))
+				return nil, fmt.Errorf("Ship %s in module %s, or remove it from the requires of the module.\n  The requires of module %s lists %s, and the module does not ship it.", needed, shown, shown, needed)
 			}
 		}
 	}
@@ -1034,7 +1035,8 @@ func (r *skillReader) add(at, name, path string) error {
 		if filepath.Base(first) != name {
 			same = "these two names differ only in case"
 		}
-		return fmt.Errorf("rename %s or %s: each skill goes to skills/<name>, and %s", exports.HidePath(first), exports.HidePath(at), same)
+		return exports.Refuse(fmt.Sprintf("Rename %s or %s in %s.", exports.HidePath(first), exports.HidePath(at), exports.ModulePlace),
+			fmt.Sprintf("Each skill goes to skills/<name>, and %s.", same))
 	}
 	r.seen[key] = at
 	r.entries = append(r.entries, Entry{Kind: "skills", Name: name, Path: path})
@@ -1295,7 +1297,9 @@ func readHooks(name, rel, dir string) ([]Entry, error) {
 		}
 		if info.IsDir() {
 			sub := exports.HidePath(filepath.ToSlash(filepath.Join(rel, it.Name())))
-			return nil, fmt.Errorf("%s is a directory; a hook is one file. Keep its helpers elsewhere in the module, reached as $QORY_HARNESS_HOME/modules/%s/<path>", sub, name)
+			return nil, exports.Refuse(fmt.Sprintf("Move the helpers in %s to another directory of module %s.", sub, name),
+				fmt.Sprintf("%s is a directory, and a hook is one file.", sub),
+				fmt.Sprintf("A hook reads its helpers at $QORY_HARNESS_HOME/modules/%s/<path>.", name))
 		}
 		es = append(es, Entry{Kind: "hooks", Name: it.Name(), Path: path})
 	}
@@ -1346,7 +1350,8 @@ func readMCP(rel, dir string, readFile func(string) ([]byte, error)) ([]Entry, m
 		file := filepath.ToSlash(filepath.Join(rel, accesskey.ShownName(strings.TrimSuffix(it.Name(), ".json"), false)+".json"))
 		var server map[string]any
 		if err := json.Unmarshal(data, &server); err != nil {
-			return nil, nil, fmt.Errorf("%s does not contain a JSON object: %w", file, err)
+			return nil, nil, exports.Refuse(fmt.Sprintf("Write %s in %s as one JSON object.", file, exports.ModulePlace),
+				fmt.Sprintf("The file does not contain a JSON object: %s", exports.HideValueError(err, "").Error()))
 		}
 		if server == nil {
 			return nil, nil, fmt.Errorf("%s does not contain a JSON object", file)

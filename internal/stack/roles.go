@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/qoryai/forager/accesskey"
+	"github.com/qoryai/qory/internal/exports"
 	"gopkg.in/yaml.v3"
 )
 
@@ -154,7 +155,8 @@ func ReadRoles(n *yaml.Node, key string, counts bool) (Roles, Groups, error) {
 			if v.Kind == yaml.ScalarNode {
 				value = accesskey.ShownName(v.Value, false)
 			}
-			return nil, nil, rolesError("Write %s as %s.%s.%s: %s in {file}: %s keys are kinds, and %s is a kind and a role.", key, key, accesskey.ShownName(k, false), accesskey.ShownName(role, false), value, key, accesskey.ShownName(kind, false))
+			return nil, nil, exports.Refuse(fmt.Sprintf("Write %s as %s.%s.%s: %s in %s.", key, key, accesskey.ShownName(k, false), accesskey.ShownName(role, false), value, exports.FilePlace),
+				fmt.Sprintf("The keys of %s are kinds, and %s is a kind and a role.", key, accesskey.ShownName(kind, false)))
 		}
 		if !isReferable(kind) {
 			return nil, nil, rolesError("Use agents, commands or skills as a kind under %s in {file}: %s is none of them.", key, accesskey.ShownName(kind, true))
@@ -200,7 +202,8 @@ func ReadRoles(n *yaml.Node, key string, counts bool) (Roles, Groups, error) {
 			if counts {
 				switch {
 				case name == "many" && kind != "agents":
-					return nil, nil, rolesError("Set %s to one in {file}: only an agents role can be a group.", path)
+					return nil, nil, exports.Refuse(fmt.Sprintf("Set %s of %s to one.", path, exports.ModulePlace),
+						"Only an agents role can be a group. The map is in "+exports.FilePlace+".")
 				case name != "one" && name != "many":
 					return nil, nil, rolesError("Set %s to one or many in {file}.\n  One entry fills a role and several fill a group, and the value is %s.", path, accesskey.ShownName(name, true))
 				}

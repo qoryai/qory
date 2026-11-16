@@ -74,7 +74,7 @@ var RetiredAPIVersions = map[string]string{"qory.ai/v1alpha1": APIVersion}
 // error that contains it and the ones read. A reader stores the result in the document's
 // place and, when it differs from what the document declared, keeps the declared spelling
 // beside it, so the compose can report which files want rewriting. A reader prefixes the
-// error with the file.
+// error's [FilePlace] with the file, see [AtPath].
 func ResolveAPIVersion(version string) (string, error) {
 	if version == APIVersion {
 		return version, nil
@@ -82,7 +82,8 @@ func ResolveAPIVersion(version string) (string, error) {
 	if current, ok := RetiredAPIVersions[version]; ok {
 		return current, nil
 	}
-	return "", fmt.Errorf("apiVersion %s is not one this qory reads; versions: %s", Value(version, true), APIVersion)
+	return "", Refuse("Set apiVersion in "+FilePlace+" to "+APIVersion+".",
+		fmt.Sprintf("This qory reads %s, and apiVersion is %s.", APIVersion, Value(version, true)))
 }
 
 // StackFileName and ModuleFileName are what an exported directory contains: a stack its
@@ -337,7 +338,7 @@ func read(root string) (*document, string, error) {
 		doc.APIVersion = APIVersion
 	}
 	if doc.APIVersion, err = ResolveAPIVersion(doc.APIVersion); err != nil {
-		return nil, "", fmt.Errorf("%s: %w", file, err)
+		return nil, "", AtPath(file, err)
 	}
 	return &doc, file, nil
 }

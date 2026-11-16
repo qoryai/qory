@@ -1,1 +1,2 @@
-Remove provides.agents from module typescript, or use a base that allows agents: the base's extending.kinds is [skills].
+Remove provides.agents from module typescript, or use a base that allows agents.
+  The base's extending.kinds is [skills].

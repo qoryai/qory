@@ -85,7 +85,8 @@ var typeSchemaDrafts = []string{
 // checkArtifactTypes checks artifact_types in the process.yaml shown, which may be left
 // out, as [checkArtifactType] checks each entry, and that no two entries have one name.
 // The entries share one [patternBudget]. A list with no entries passes. The error has
-// one line for each entry it stops on, each starting with shown.
+// one refusal for each entry it stops on: one written fix first has shown at
+// [FilePlace], and any other starts with shown.
 func checkArtifactTypes(shown string, list *yaml.Node) error {
 	if list.Kind == 0 {
 		return nil
@@ -100,10 +101,12 @@ func checkArtifactTypes(shown string, list *yaml.Node) error {
 		name, why := checkArtifactType(entry, i, patterns)
 		at, twice := first[name]
 		switch {
+		case strings.Contains(why, FilePlace):
+			lines = append(lines, strings.ReplaceAll(why, FilePlace, shown))
 		case why != "":
 			lines = append(lines, shown+": "+why)
 		case twice:
-			lines = append(lines, fmt.Sprintf("%s: rename or remove entry %d of artifact_types: entry %d has the name %s too", shown, i+1, at+1, name))
+			lines = append(lines, fmt.Sprintf("Rename or remove entry %d of artifact_types in %s.\n  Entry %d has the name %s too.", i+1, shown, at+1, name))
 		}
 		if name != "" && !twice {
 			first[name] = i
@@ -118,7 +121,8 @@ func checkArtifactTypes(shown string, list *yaml.Node) error {
 // checkArtifactType checks entry i of artifact_types, counted from 0. An entry is a name
 // alone, or a name with base_view, size_limit and max_files, and with json_schema
 // exactly when base_view is structured. It returns the entry's name, "" for none of the
-// right form, and the first thing to fix in the entry, for a message; "" for an entry
+// right form, and the first thing to fix in the entry, for a message, with [FilePlace]
+// for the file in one written fix first; "" for an entry
 // that passes. qory has no list of standard types, so a name alone passes in any name
 // of the right form. patterns is the budget of the file's patterns.
 func checkArtifactType(entry *yaml.Node, i int, patterns *patternBudget) (name, why string) {
@@ -130,7 +134,7 @@ func checkArtifactType(entry *yaml.Node, i int, patterns *patternBudget) (name, 
 	for j := 0; j+1 < len(entry.Content); j += 2 {
 		key := entry.Content[j]
 		if key.Kind != yaml.ScalarNode || !slices.Contains(typeKeys, key.Value) {
-			return "", fmt.Sprintf("remove the key %s from %s: an artifact type has only name, base_view, size_limit, max_files and json_schema", scalarText(key), label)
+			return "", fmt.Sprintf("Remove the key %s from %s in %s.\n  An artifact type has only name, base_view, size_limit, max_files and json_schema.", scalarText(key), label, FilePlace)
 		}
 		if seen[key.Value] {
 			return "", fmt.Sprintf("remove the second %s from %s: the entry has the key twice", key.Value, label)
@@ -149,7 +153,7 @@ func checkArtifactType(entry *yaml.Node, i int, patterns *patternBudget) (name, 
 		return "", fmt.Sprintf("set the name of %s to a string of lowercase letters and digits in groups joined by single hyphens: the name is %s", label, nodeKind(n))
 	}
 	if !runapi.ArtifactName(n.Value) {
-		return "", fmt.Sprintf("set the name of %s to lowercase letters and digits in groups joined by single hyphens, at most %d bytes: the name is %s", label, runapi.MaxArtifactName, scalarText(n))
+		return "", fmt.Sprintf("Rename %s in %s.\n  A name is lowercase letters and digits in groups joined by single hyphens, at most %d bytes.\n  The name is %s.", label, FilePlace, runapi.MaxArtifactName, scalarText(n))
 	}
 	name = n.Value
 	if len(entry.Content) == 2 {
@@ -163,7 +167,7 @@ func checkArtifactType(entry *yaml.Node, i int, patterns *patternBudget) (name, 
 		}
 	}
 	if len(missing) > 0 {
-		return name, fmt.Sprintf("add %s to %s, or leave only its name: a custom type has base_view, size_limit and max_files", joinWords(missing), label)
+		return name, fmt.Sprintf("Add %s to %s, or leave only its name.\n  A custom type has base_view, size_limit and max_files.\n  The type is in %s.", joinWords(missing), label, FilePlace)
 	}
 	view := value(entry, "base_view")
 	most, known := baseViewSizes[view.Value]
@@ -172,7 +176,7 @@ func checkArtifactType(entry *yaml.Node, i int, patterns *patternBudget) (name, 
 	}
 	size, files := value(entry, "size_limit"), value(entry, "max_files")
 	if !wholeNumber(size, most) {
-		return name, fmt.Sprintf("set size_limit of %s to a whole number from 1 to %d, the most for base_view %s: size_limit is %s", label, most, view.Value, numberText(size))
+		return name, fmt.Sprintf("Set size_limit of %s to a whole number from 1 to %d.\n  %d is the most for base_view %s, and size_limit is %s.\n  The type is in %s.", label, most, most, view.Value, numberText(size), FilePlace)
 	}
 	structured := view.Value == baseViewStructured
 	if structured && !wholeNumber(files, 1) {
@@ -184,7 +188,7 @@ func checkArtifactType(entry *yaml.Node, i int, patterns *patternBudget) (name, 
 	schema := value(entry, "json_schema")
 	switch {
 	case !structured && schema != nil:
-		return name, fmt.Sprintf("remove json_schema from %s, or set base_view to structured: only a structured type has a JSON Schema, and base_view is %s", label, view.Value)
+		return name, fmt.Sprintf("Remove json_schema from %s, or set its base_view to structured.\n  Only a structured type has a JSON Schema, and base_view is %s.\n  The type is in %s.", label, view.Value, FilePlace)
 	case structured && schema == nil:
 		return name, fmt.Sprintf("add json_schema to %s: a structured type has a JSON Schema", label)
 	case structured:
@@ -256,7 +260,7 @@ func checkTypeSchema(label string, n *yaml.Node, patterns *patternBudget) string
 		if patterns.over > 0 {
 			return fmt.Sprintf("shorten the patterns in %s: the estimate for the patterns of all artifact types in the file is at most %d bytes, and this one brings it to %d", where, maxPatternBytes, patterns.over)
 		}
-		return fmt.Sprintf("fix %s so that it compiles as a JSON Schema: %s", where, compileReason(err))
+		return fmt.Sprintf("Fix %s so that it compiles as a JSON Schema.\n  The schema does not compile: %s\n  The type is in %s.", where, compileReason(err), FilePlace)
 	}
 	return ""
 }

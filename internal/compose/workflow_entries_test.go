@@ -32,7 +32,9 @@ func TestAWorkflowShipsInAnyOfFourForms(t *testing.T) {
 		res.Close()
 	}
 	_, err := composeTree(t, map[string]string{stack.FileName: workflowStack, "modules/core/skills/other/SKILL.md": "text\n"})
-	const want = "add a skill or command workflow-example to a module of the stack in " + stack.FileName + ", or remove example from its workflows: the stack declares the workflow example, and none of its modules ships a skill or command workflow-example or example"
+	const want = "Add skill workflow-example to a module of the stack in " + stack.FileName + ", or remove workflow example.\n" +
+		"  The stack in " + stack.FileName + " declares the workflow example.\n" +
+		"  No module of the stack in " + stack.FileName + " ships a skill or command workflow-example or example."
 	if err == nil || err.Error() != want {
 		t.Errorf("no form: %v\nwant %s", err, want)
 	}
@@ -55,7 +57,7 @@ func TestAnExcludedPrefixedEntryDoesNotShipTheWorkflow(t *testing.T) {
 		t.Fatalf("with a plain skill: %v", err)
 	}
 	res.Close()
-	if _, err := composeTree(t, files()); err == nil || !strings.HasPrefix(err.Error(), "add a skill or command workflow-example to a module of ") {
+	if _, err := composeTree(t, files()); err == nil || !strings.HasPrefix(err.Error(), "Add skill workflow-example to a module of ") {
 		t.Errorf("with no plain skill: %v", err)
 	}
 }

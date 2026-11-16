@@ -93,7 +93,7 @@ func TestReadRefusesARequirementOfAnEntryNotShipped(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = Read("core", dir, m, "")
-	if err == nil || err.Error() != "module core: requires lists skill release, which the module does not ship" {
+	if err == nil || err.Error() != "Ship skill release in module core, or remove it from the requires of the module.\n  The requires of module core lists skill release, and the module does not ship it." {
 		t.Fatalf("err = %v", err)
 	}
 	m.Requires = map[string][]string{"skills/deploy": {"commands/ship"}, "files/claude/rules/one.md": {"hooks/guard.sh"}}

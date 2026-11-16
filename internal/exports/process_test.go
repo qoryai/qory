@@ -78,7 +78,7 @@ func TestVerifyLeavesAModuleWithoutProcess(t *testing.T) {
 // TestVerifyChecksTheProcessFields is each mistake in a process.yaml: a field left out,
 // a text over its limit, a stack the section does not export, a process that is not an
 // object, a process document without its schema or a list of stages, a key the file does
-// not have and another apiVersion. Each refusal starts with the file and then the fix.
+// not have and another apiVersion. Each refusal names the file, see refusalIn.
 func TestVerifyChecksTheProcessFields(t *testing.T) {
 	without := func(key string) string {
 		var lines []string
@@ -96,37 +96,38 @@ func TestVerifyChecksTheProcessFields(t *testing.T) {
 	for _, c := range []struct{ body, want string }{
 		{"", "add apiVersion: qory.dev/v1alpha1: the file has no apiVersion"},
 		{without("apiVersion"), "add apiVersion: qory.dev/v1alpha1: the file has no apiVersion"},
-		{with("apiVersion", "qory.dev/v2"), `apiVersion "qory.dev/v2" is not one this qory reads; versions: qory.dev/v1alpha1`},
-		{without("name"), "add name, at most 60 characters: the file has no name"},
-		{with("name", strings.Repeat("é", 61)), "shorten name to at most 60 characters: name has 61"},
-		{without("summary"), "add summary, at most 200 characters: the file has no summary"},
-		{with("summary", strings.Repeat("s", 201)), "shorten summary to at most 200 characters: summary has 201"},
-		{with("description", `"  "`), "add description, at most 1200 characters: the file has no description"},
-		{with("description", strings.Repeat("d", 1201)), "shorten description to at most 1200 characters: description has 1201"},
+		{with("apiVersion", "qory.dev/v2"), "Set apiVersion in {file} to qory.dev/v1alpha1.\n  This qory reads qory.dev/v1alpha1, and apiVersion is \"qory.dev/v2\"."},
+		{without("name"), "Add name to {file}, at most 60 characters.\n  The file has no name."},
+		{with("name", strings.Repeat("é", 61)), "Shorten name in {file} to at most 60 characters.\n  The name has 61 characters."},
+		{without("summary"), "Add summary to {file}, at most 200 characters.\n  The file has no summary."},
+		{with("summary", strings.Repeat("s", 201)), "Shorten summary in {file} to at most 200 characters.\n  The summary has 201 characters."},
+		{with("description", `"  "`), "Add description to {file}, at most 1200 characters.\n  The file has no description."},
+		{with("description", strings.Repeat("d", 1201)), "Shorten description in {file} to at most 1200 characters.\n  The description has 1201 characters."},
 		{with("description", words), "shorten description to at most 80 words: description has 81"},
 		{without("type"), "add type, the workspace type the template sets up: the file has no type"},
 		{with("type", `" "`), "add type, the workspace type the template sets up: the file has no type"},
 		{without("stack"), "add stack, a name that exports.stacks lists: the file has no stack"},
-		{with("stack", "web"), "set stack to a name that exports.stacks lists: stack is web, and exports.stacks lists support"},
+		{with("stack", "web"), "Set stack in {file} to a name that exports.stacks lists.\n  The value is web, and exports.stacks lists support."},
 		{with("stack", `"web\nqory: all checks passed"`), "set stack to one line of text: it has a line break"},
 		{with("stack", `"web\rx"`), "set stack to one line of text: it has a line break"},
 		{with("stack", `"web\tx"`), "set stack to one line of text: it has a control character"},
 		{without("process"), "add process, the template's process document as an object: the file has no process"},
 		{with("process", "~"), "add process, the template's process document as an object: the file has no process"},
-		{with("process", "[a]"), "set process to an object, the template's process document: process is a list"},
-		{with("process", "stages"), "set process to an object, the template's process document: process is a string"},
-		{with("process", "3"), "set process to an object, the template's process document: process is a number"},
+		{with("process", "[a]"), "Set process in {file} to an object.\n  process is the template's process document, and the value is a list."},
+		{with("process", "stages"), "Set process in {file} to an object.\n  process is the template's process document, and the value is a string."},
+		{with("process", "3"), "Set process in {file} to an object.\n  process is the template's process document, and the value is a number."},
 		{with("process", "{stages: []}"), "add schema: qory.process/v1 under process: process has no schema"},
 		{with("process", "{schema: qory.process/v2, stages: []}"), `set process.schema to qory.process/v1: process.schema is "qory.process/v2"`},
 		{with("process", "{schema: [a], stages: []}"), "set process.schema to qory.process/v1: process.schema is a list"},
 		{with("process", "{schema: qory.process/v1}"), "add stages under process, the list of the process's stages: process has no stages"},
 		{with("process", "{schema: qory.process/v1, stages: {a: 1}}"), "set process.stages to a list of stages: process.stages is an object"},
-		{process + "owner: acme\n", `line 15: key "owner" is not one process.yaml reads`},
+		{process + "owner: acme\n", "Remove the key \"owner\" from line 15 of {file}.\n  The key is not one process.yaml reads."},
 	} {
 		e := factory(t, c.body)
 		file := filepath.Join(e.Root, "modules", "desk", exports.ProcessFileName)
-		if err := e.Verify(); err == nil || err.Error() != file+": "+c.want {
-			t.Errorf("%q: %v\nwant %s: %s", c.body, err, file, c.want)
+		want := refusalIn(file, c.want)
+		if err := e.Verify(); err == nil || err.Error() != want {
+			t.Errorf("%q: %v\nwant %s", c.body, err, want)
 		}
 	}
 	// An alias is refused as in every file qory reads.
@@ -152,9 +153,12 @@ func TestVerifyWantsEachWorkflowDeclared(t *testing.T) {
 	file := filepath.Join(e.Root, "modules", "desk", exports.ProcessFileName)
 	stackFile := filepath.Join("stacks", "support", exports.StackFileName)
 	want := strings.Join([]string{
-		file + ": declare send-a-reply under workflows in " + stackFile + ", or remove it from stage Answer: stack support does not declare it",
-		file + ": declare send-a-reply under workflows in " + stackFile + ", or remove it from stage Check: stack support does not declare it",
-		file + ": declare close-a-ticket under workflows in " + stackFile + ", or remove it from stage 3: stack support does not declare it",
+		"Declare send-a-reply in " + stackFile + ", or remove it from stage Answer.",
+		"  Stage Answer of " + file + " runs send-a-reply, and stack support does not declare it under workflows.",
+		"Declare send-a-reply in " + stackFile + ", or remove it from stage Check.",
+		"  Stage Check of " + file + " runs send-a-reply, and stack support does not declare it under workflows.",
+		"Declare close-a-ticket in " + stackFile + ", or remove it from stage 3.",
+		"  Stage 3 of " + file + " runs close-a-ticket, and stack support does not declare it under workflows.",
 	}, "\n")
 	if err := e.Verify(); err == nil || err.Error() != want {
 		t.Errorf("%v\nwant:\n%s", err, want)
@@ -164,7 +168,7 @@ func TestVerifyWantsEachWorkflowDeclared(t *testing.T) {
 		t.Fatal(err)
 	}
 	err := e.Verify()
-	if err == nil || strings.Count(err.Error(), "\n") != 4 || !strings.Contains(err.Error(), "declare draft-an-answer under workflows in "+stackFile+", or remove it from stage Answer") {
+	if err == nil || strings.Count(err.Error(), "\n") != 9 || !strings.Contains(err.Error(), "Declare draft-an-answer in "+stackFile+", or remove it from stage Answer.") {
 		t.Errorf("no workflows: %v", err)
 	}
 }
@@ -182,7 +186,7 @@ func TestVerifyWantsTheProcessStackListed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := file + ": set stack to a name that exports.stacks lists: stack is support, and exports.stacks lists no stacks"
+	want := "Set stack in " + file + " to a name that exports.stacks lists.\n  The value is support, and exports.stacks lists no stacks."
 	if err := e.Verify(); err == nil || err.Error() != want {
 		t.Errorf("%v\nwant %s", err, want)
 	}
@@ -207,7 +211,8 @@ func TestVerifyReadsProcessUnderExportsDir(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := file + ": declare write-a-reply under workflows in " + filepath.Join("lib", "stacks", "support", exports.StackFileName) + ", or remove it from stage Answer: stack support does not declare it"
+	want := "Declare write-a-reply in " + filepath.Join("lib", "stacks", "support", exports.StackFileName) + ", or remove it from stage Answer.\n" +
+		"  Stage Answer of " + file + " runs write-a-reply, and stack support does not declare it under workflows."
 	if err := e.Verify(); err == nil || err.Error() != want {
 		t.Errorf("%v\nwant %s", err, want)
 	}
@@ -320,7 +325,7 @@ func TestVerifyRefusesAProcessLinkOutside(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(folder, "real.yaml"), []byte(process+"owner: acme\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := e.Verify(); err == nil || err.Error() != file+`: line 15: key "owner" is not one process.yaml reads` {
+	if err := e.Verify(); err == nil || err.Error() != "Remove the key \"owner\" from line 15 of "+file+".\n  The key is not one process.yaml reads." {
 		t.Errorf("a wrong file behind a link inside the module: %v", err)
 	}
 	// A link inside the folder to a file that is not there is no process.yaml.
@@ -385,9 +390,18 @@ func TestVerifyRefusesAWorkflowThatIsNoString(t *testing.T) {
 		}
 	}
 	e := factory(t, strings.Replace(process, "workflow: draft-an-answer", `workflow: "123"`, 1))
-	if err := e.Verify(); err == nil || !strings.Contains(err.Error(), ": declare 123 under workflows in ") {
+	if err := e.Verify(); err == nil || !strings.Contains(err.Error(), "Declare 123 in ") {
 		t.Errorf("a quoted number: %v", err)
 	}
+}
+
+// refusalIn is want, a refusal of the process.yaml at file: one written fix first has the
+// file at {file}, and any other starts with the file.
+func refusalIn(file, want string) string {
+	if strings.Contains(want, "{file}") {
+		return strings.ReplaceAll(want, "{file}", file)
+	}
+	return file + ": " + want
 }
 
 // withTypes is process with artifact_types set to the YAML list body.
@@ -430,8 +444,8 @@ func TestVerifyPassesArtifactTypes(t *testing.T) {
 	}
 }
 
-// TestVerifyChecksArtifactTypes is each mistake in artifact_types. Each refusal starts
-// with the file and then the fix.
+// TestVerifyChecksArtifactTypes is each mistake in artifact_types. Each refusal names the
+// file, see refusalIn.
 func TestVerifyChecksArtifactTypes(t *testing.T) {
 	const structured = "size_limit: 65536, max_files: 1, json_schema: "
 	const name = "artifact type a-type"
@@ -447,39 +461,39 @@ func TestVerifyChecksArtifactTypes(t *testing.T) {
 		{"\n  - {name: ~}", "set the name of entry 1 of artifact_types to a string of lowercase letters and digits in groups joined by single hyphens: the name is null"},
 		{"\n  - {name: 2026-11-02}", `set the name of entry 1 of artifact_types to a quoted string: YAML reads "2026-11-02" as a type that is not a string`},
 		{"\n  - {name: !!binary aGk=}", `set the name of entry 1 of artifact_types to a quoted string: YAML reads "aGk=" as a type that is not a string`},
-		{"\n  - {name: \"\"}", `set the name of entry 1 of artifact_types to lowercase letters and digits in groups joined by single hyphens, at most 64 bytes: the name is ""`},
-		{"\n  - {name: a--b}", `set the name of entry 1 of artifact_types to lowercase letters and digits in groups joined by single hyphens, at most 64 bytes: the name is "a--b"`},
-		{"\n  - {name: -a}", `set the name of entry 1 of artifact_types to lowercase letters and digits in groups joined by single hyphens, at most 64 bytes: the name is "-a"`},
-		{"\n  - {name: \"a\\n\"}", `set the name of entry 1 of artifact_types to lowercase letters and digits in groups joined by single hyphens, at most 64 bytes: the name is "a\n"`},
-		{"\n  - {name: " + strings.Repeat("a", 65) + "}", `set the name of entry 1 of artifact_types to lowercase letters and digits in groups joined by single hyphens, at most 64 bytes: the name is "` + strings.Repeat("a", 65) + `"`},
-		{"\n  - {name: mockup, owner: acme}", `remove the key "owner" from entry 1 of artifact_types: an artifact type has only name, base_view, size_limit, max_files and json_schema`},
-		{"\n  - {name: mockup, [a]: b}", `remove the key a list from entry 1 of artifact_types: an artifact type has only name, base_view, size_limit, max_files and json_schema`},
+		{"\n  - {name: \"\"}", "Rename entry 1 of artifact_types in {file}.\n  A name is lowercase letters and digits in groups joined by single hyphens, at most 64 bytes.\n  The name is " + `""` + "."},
+		{"\n  - {name: a--b}", "Rename entry 1 of artifact_types in {file}.\n  A name is lowercase letters and digits in groups joined by single hyphens, at most 64 bytes.\n  The name is " + `"a--b"` + "."},
+		{"\n  - {name: -a}", "Rename entry 1 of artifact_types in {file}.\n  A name is lowercase letters and digits in groups joined by single hyphens, at most 64 bytes.\n  The name is " + `"-a"` + "."},
+		{"\n  - {name: \"a\\n\"}", "Rename entry 1 of artifact_types in {file}.\n  A name is lowercase letters and digits in groups joined by single hyphens, at most 64 bytes.\n  The name is " + `"a\n"` + "."},
+		{"\n  - {name: " + strings.Repeat("a", 65) + "}", "Rename entry 1 of artifact_types in {file}.\n  A name is lowercase letters and digits in groups joined by single hyphens, at most 64 bytes.\n  The name is " + `"` + strings.Repeat("a", 65) + `"` + "."},
+		{"\n  - {name: mockup, owner: acme}", "Remove the key \"owner\" from entry 1 of artifact_types in {file}.\n  An artifact type has only name, base_view, size_limit, max_files and json_schema."},
+		{"\n  - {name: mockup, [a]: b}", "Remove the key a list from entry 1 of artifact_types in {file}.\n  An artifact type has only name, base_view, size_limit, max_files and json_schema."},
 		{"\n  - {name: mockup, name: screenshot}", "remove the second name from entry 1 of artifact_types: the entry has the key twice"},
-		{"\n  - {name: a-type, size_limit: 1}", "add base_view and max_files to " + name + ", or leave only its name: a custom type has base_view, size_limit and max_files"},
-		{"\n  - {name: a-type, base_view: file}", "add size_limit and max_files to " + name + ", or leave only its name: a custom type has base_view, size_limit and max_files"},
-		{"\n  - {name: a-type, base_view: file, size_limit: 1}", "add max_files to " + name + ", or leave only its name: a custom type has base_view, size_limit and max_files"},
-		{"\n  - {name: a-type, json_schema: {}}", "add base_view, size_limit and max_files to " + name + ", or leave only its name: a custom type has base_view, size_limit and max_files"},
+		{"\n  - {name: a-type, size_limit: 1}", "Add base_view and max_files to " + name + ", or leave only its name.\n  A custom type has base_view, size_limit and max_files.\n  The type is in {file}."},
+		{"\n  - {name: a-type, base_view: file}", "Add size_limit and max_files to " + name + ", or leave only its name.\n  A custom type has base_view, size_limit and max_files.\n  The type is in {file}."},
+		{"\n  - {name: a-type, base_view: file, size_limit: 1}", "Add max_files to " + name + ", or leave only its name.\n  A custom type has base_view, size_limit and max_files.\n  The type is in {file}."},
+		{"\n  - {name: a-type, json_schema: {}}", "Add base_view, size_limit and max_files to " + name + ", or leave only its name.\n  A custom type has base_view, size_limit and max_files.\n  The type is in {file}."},
 		{custom("text", "size_limit: 1, max_files: 1"), `set base_view of ` + name + ` to document, image, video, file or structured: base_view is "text"`},
 		{custom("[a]", "size_limit: 1, max_files: 1"), "set base_view of " + name + " to document, image, video, file or structured: base_view is a list"},
-		{custom("document", "size_limit: 0, max_files: 1"), "set size_limit of " + name + " to a whole number from 1 to 10485760, the most for base_view document: size_limit is 0"},
-		{custom("document", "size_limit: 10485761, max_files: 1"), "set size_limit of " + name + " to a whole number from 1 to 10485760, the most for base_view document: size_limit is 10485761"},
-		{custom("image", "size_limit: 52428801, max_files: 1"), "set size_limit of " + name + " to a whole number from 1 to 52428800, the most for base_view image: size_limit is 52428801"},
-		{custom("video", "size_limit: 2147483649, max_files: 1"), "set size_limit of " + name + " to a whole number from 1 to 2147483648, the most for base_view video: size_limit is 2147483649"},
-		{custom("file", "size_limit: 1073741825, max_files: 1"), "set size_limit of " + name + " to a whole number from 1 to 1073741824, the most for base_view file: size_limit is 1073741825"},
-		{custom("structured", "size_limit: 1048577, max_files: 1, json_schema: {}"), "set size_limit of " + name + " to a whole number from 1 to 1048576, the most for base_view structured: size_limit is 1048577"},
-		{custom("file", "size_limit: 1.5, max_files: 1"), "set size_limit of " + name + " to a whole number from 1 to 1073741824, the most for base_view file: size_limit is 1.5"},
-		{custom("file", "size_limit: 1.0, max_files: 1"), "set size_limit of " + name + " to a whole number from 1 to 1073741824, the most for base_view file: size_limit is 1.0"},
-		{custom("file", `size_limit: "1", max_files: 1`), "set size_limit of " + name + " to a whole number from 1 to 1073741824, the most for base_view file: size_limit is a string"},
-		{custom("file", "size_limit: ~, max_files: 1"), "set size_limit of " + name + " to a whole number from 1 to 1073741824, the most for base_view file: size_limit is null"},
-		{custom("file", "size_limit: 99999999999999999999999, max_files: 1"), "set size_limit of " + name + " to a whole number from 1 to 1073741824, the most for base_view file: size_limit is 99999999999999999999999"},
-		{custom("file", `size_limit: !!int "1\n/src/process.yaml: all checks passed", max_files: 1`), "set size_limit of " + name + ` to a whole number from 1 to 1073741824, the most for base_view file: size_limit is "1\n/src/process.yaml: all checks passed"`},
+		{custom("document", "size_limit: 0, max_files: 1"), "Set size_limit of " + name + " to a whole number from 1 to 10485760.\n  10485760 is the most for base_view document, and size_limit is 0.\n  The type is in {file}."},
+		{custom("document", "size_limit: 10485761, max_files: 1"), "Set size_limit of " + name + " to a whole number from 1 to 10485760.\n  10485760 is the most for base_view document, and size_limit is 10485761.\n  The type is in {file}."},
+		{custom("image", "size_limit: 52428801, max_files: 1"), "Set size_limit of " + name + " to a whole number from 1 to 52428800.\n  52428800 is the most for base_view image, and size_limit is 52428801.\n  The type is in {file}."},
+		{custom("video", "size_limit: 2147483649, max_files: 1"), "Set size_limit of " + name + " to a whole number from 1 to 2147483648.\n  2147483648 is the most for base_view video, and size_limit is 2147483649.\n  The type is in {file}."},
+		{custom("file", "size_limit: 1073741825, max_files: 1"), "Set size_limit of " + name + " to a whole number from 1 to 1073741824.\n  1073741824 is the most for base_view file, and size_limit is 1073741825.\n  The type is in {file}."},
+		{custom("structured", "size_limit: 1048577, max_files: 1, json_schema: {}"), "Set size_limit of " + name + " to a whole number from 1 to 1048576.\n  1048576 is the most for base_view structured, and size_limit is 1048577.\n  The type is in {file}."},
+		{custom("file", "size_limit: 1.5, max_files: 1"), "Set size_limit of " + name + " to a whole number from 1 to 1073741824.\n  1073741824 is the most for base_view file, and size_limit is 1.5.\n  The type is in {file}."},
+		{custom("file", "size_limit: 1.0, max_files: 1"), "Set size_limit of " + name + " to a whole number from 1 to 1073741824.\n  1073741824 is the most for base_view file, and size_limit is 1.0.\n  The type is in {file}."},
+		{custom("file", `size_limit: "1", max_files: 1`), "Set size_limit of " + name + " to a whole number from 1 to 1073741824.\n  1073741824 is the most for base_view file, and size_limit is a string.\n  The type is in {file}."},
+		{custom("file", "size_limit: ~, max_files: 1"), "Set size_limit of " + name + " to a whole number from 1 to 1073741824.\n  1073741824 is the most for base_view file, and size_limit is null.\n  The type is in {file}."},
+		{custom("file", "size_limit: 99999999999999999999999, max_files: 1"), "Set size_limit of " + name + " to a whole number from 1 to 1073741824.\n  1073741824 is the most for base_view file, and size_limit is 99999999999999999999999.\n  The type is in {file}."},
+		{custom("file", `size_limit: !!int "1\n/src/process.yaml: all checks passed", max_files: 1`), "Set size_limit of " + name + " to a whole number from 1 to 1073741824.\n  1073741824 is the most for base_view file, and size_limit is " + `"1\n/src/process.yaml: all checks passed"` + ".\n  The type is in {file}."},
 		{custom("file", `size_limit: 1, max_files: !!float "1\n/src/process.yaml: all checks passed"`), "set max_files of " + name + ` to a whole number from 1 to 20: max_files is "1\n/src/process.yaml: all checks passed"`},
 		{custom("file", "size_limit: 1, max_files: 0"), "set max_files of " + name + " to a whole number from 1 to 20: max_files is 0"},
 		{custom("file", "size_limit: 1, max_files: 21"), "set max_files of " + name + " to a whole number from 1 to 20: max_files is 21"},
 		{custom("structured", "size_limit: 1, max_files: 2, json_schema: {}"), "set max_files of " + name + " to 1: a structured type has one file, and max_files is 2"},
 		{custom("structured", "size_limit: 1, max_files: 1"), "add json_schema to " + name + ": a structured type has a JSON Schema"},
-		{custom("document", "size_limit: 1, max_files: 1, json_schema: {}"), "remove json_schema from " + name + ", or set base_view to structured: only a structured type has a JSON Schema, and base_view is document"},
-		{custom("image", "size_limit: 1, max_files: 1, json_schema: ~"), "remove json_schema from " + name + ", or set base_view to structured: only a structured type has a JSON Schema, and base_view is image"},
+		{custom("document", "size_limit: 1, max_files: 1, json_schema: {}"), "Remove json_schema from " + name + ", or set its base_view to structured.\n  Only a structured type has a JSON Schema, and base_view is document.\n  The type is in {file}."},
+		{custom("image", "size_limit: 1, max_files: 1, json_schema: ~"), "Remove json_schema from " + name + ", or set its base_view to structured.\n  Only a structured type has a JSON Schema, and base_view is image.\n  The type is in {file}."},
 		{custom("structured", structured+"[a]"), "set json_schema of " + name + " to an object, a JSON Schema: json_schema is a list"},
 		{custom("structured", structured+"true"), "set json_schema of " + name + " to an object, a JSON Schema: json_schema is a boolean"},
 		{custom("structured", structured+"~"), "set json_schema of " + name + " to an object, a JSON Schema: json_schema is null"},
@@ -489,33 +503,40 @@ func TestVerifyChecksArtifactTypes(t *testing.T) {
 		{custom("structured", structured+"{const: !!int a}"), `replace "a" in json_schema of ` + name + " with a JSON value: the value does not decode as !!int"},
 		{custom("structured", structured+"{$schema: 'http://json-schema.org/draft-04/schema#'}"), `set $schema in json_schema of ` + name + ` to https://json-schema.org/draft/2020-12/schema or http://json-schema.org/draft-07/schema, or remove it: $schema is "http://json-schema.org/draft-04/schema#"`},
 		{custom("structured", structured+"{$schema: 3}"), `set $schema in json_schema of ` + name + ` to https://json-schema.org/draft/2020-12/schema or http://json-schema.org/draft-07/schema, or remove it: $schema is "3"`},
-		{custom("structured", structured+"{type: objekt}"), "fix json_schema of " + name + " so that it compiles as a JSON Schema: at '/type': value must be one of 'array', 'boolean', 'integer', 'null', 'number', 'object', 'string'; at '/type': got string, want array"},
-		{custom("structured", structured+"{$ref: '#/$defs/gone'}"), "fix json_schema of " + name + ` so that it compiles as a JSON Schema: json-pointer in "#/$defs/gone" not found`},
+		{custom("structured", structured+"{type: objekt}"), "Fix json_schema of " + name + " so that it compiles as a JSON Schema.\n  The schema does not compile: at '/type': value must be one of 'array', 'boolean', 'integer', 'null', 'number', 'object', 'string'; at '/type': got string, want array\n  The type is in {file}."},
+		{custom("structured", structured+"{$ref: '#/$defs/gone'}"), "Fix json_schema of " + name + " so that it compiles as a JSON Schema.\n  The schema does not compile: " + `json-pointer in "#/$defs/gone" not found` + "\n  The type is in {file}."},
 	} {
 		e := factory(t, withTypes(c.body))
 		file := filepath.Join(e.Root, "modules", "desk", exports.ProcessFileName)
-		if err := e.Verify(); err == nil || err.Error() != file+": "+c.want {
-			t.Errorf("%q: %v\nwant %s: %s", c.body, err, file, c.want)
+		want := refusalIn(file, c.want)
+		if err := e.Verify(); err == nil || err.Error() != want {
+			t.Errorf("%q: %v\nwant %s", c.body, err, want)
 		}
 	}
 }
 
-// TestVerifyPrintsOneLineForEachArtifactType is two entries that fail and a name listed
-// twice: one line for each, and the workflows of the stages first.
-func TestVerifyPrintsOneLineForEachArtifactType(t *testing.T) {
+// TestVerifyPrintsOneRefusalForEachArtifactType is two entries that fail and a name listed
+// twice: one refusal for each, and the workflows of the stages first.
+func TestVerifyPrintsOneRefusalForEachArtifactType(t *testing.T) {
 	e := factory(t, withTypes("\n  - name: mockup\n  - name: Mockup\n  - {name: a-type, size_limit: 1}\n  - name: mockup\n  - name: mockup"))
 	file := filepath.Join(e.Root, "modules", "desk", exports.ProcessFileName)
 	want := strings.Join([]string{
-		file + `: set the name of entry 2 of artifact_types to lowercase letters and digits in groups joined by single hyphens, at most 64 bytes: the name is "Mockup"`,
-		file + ": add base_view and max_files to artifact type a-type, or leave only its name: a custom type has base_view, size_limit and max_files",
-		file + ": rename or remove entry 4 of artifact_types: entry 1 has the name mockup too",
-		file + ": rename or remove entry 5 of artifact_types: entry 1 has the name mockup too",
+		"Rename entry 2 of artifact_types in " + file + ".",
+		"  A name is lowercase letters and digits in groups joined by single hyphens, at most 64 bytes.",
+		`  The name is "Mockup".`,
+		"Add base_view and max_files to artifact type a-type, or leave only its name.",
+		"  A custom type has base_view, size_limit and max_files.",
+		"  The type is in " + file + ".",
+		"Rename or remove entry 4 of artifact_types in " + file + ".",
+		"  Entry 1 has the name mockup too.",
+		"Rename or remove entry 5 of artifact_types in " + file + ".",
+		"  Entry 1 has the name mockup too.",
 	}, "\n")
 	if err := e.Verify(); err == nil || err.Error() != want {
 		t.Errorf("%v\nwant:\n%s", err, want)
 	}
 	bad := strings.Replace(withTypes("\n  - name: Mockup"), "workflow: draft-an-answer", "workflow: send-a-reply", 1)
-	if err := factory(t, bad).Verify(); err == nil || !strings.Contains(err.Error(), "declare send-a-reply under workflows") || strings.Contains(err.Error(), "Mockup") {
+	if err := factory(t, bad).Verify(); err == nil || !strings.Contains(err.Error(), "Declare send-a-reply in ") || strings.Contains(err.Error(), "Mockup") {
 		t.Errorf("a workflow and a type: %v", err)
 	}
 }
@@ -571,7 +592,7 @@ func TestVerifyBoundsAJSONSchema(t *testing.T) {
 		if c.want == "" && err != nil {
 			t.Errorf("%.60s: %v", c.schema, err)
 		}
-		if c.want != "" && (err == nil || err.Error() != file+": "+c.want) {
+		if c.want != "" && (err == nil || err.Error() != refusalIn(file, c.want)) {
 			t.Errorf("%.60s: %v\nwant %s", c.schema, err, c.want)
 		}
 	}
@@ -587,7 +608,7 @@ func TestVerifyReadsNothingForAJSONSchema(t *testing.T) {
 	for _, ref := range []string{"file://" + place, "https://schema.example/a.json", "branch.schema.json"} {
 		body := withTypes("\n  - {name: a-type, base_view: structured, size_limit: 1, max_files: 1, json_schema: {$ref: '" + ref + "'}}")
 		err := factory(t, body).Verify()
-		if err == nil || !strings.Contains(err.Error(), "so that it compiles as a JSON Schema: ") || strings.Contains(err.Error(), "TARGET-CONTENT") {
+		if err == nil || !strings.Contains(err.Error(), "so that it compiles as a JSON Schema.\n  The schema does not compile: ") || strings.Contains(err.Error(), "TARGET-CONTENT") {
 			t.Errorf("%s: %v", ref, err)
 		}
 	}
@@ -657,7 +678,7 @@ func TestVerifyBoundsThePatterns(t *testing.T) {
 		if c.want == "" && err != nil {
 			t.Errorf("%.80s: %v", c.body, err)
 		}
-		if c.want != "" && (err == nil || err.Error() != file+": "+c.want) {
+		if c.want != "" && (err == nil || err.Error() != refusalIn(file, c.want)) {
 			t.Errorf("%.80s: %v\nwant %s", c.body, err, c.want)
 		}
 	}
@@ -758,8 +779,9 @@ func siblings(n int) string {
 // among sibling members: the line has the name and no place, and it is the same in each
 // run. Go's maps change the order of the members in each compile.
 func TestVerifyPrintsNoPlaceForAMemberName(t *testing.T) {
-	const regex = "fix json_schema of artifact type a-type so that it compiles as a JSON Schema: invalid propertyName '('; '(' is not valid regex: error parsing regexp: missing closing ): `(`"
-	const uri = "fix json_schema of artifact type a-type so that it compiles as a JSON Schema: invalid propertyName 'not a uri'; 'not a uri' is not valid uri: relative url"
+	const fix = "Fix json_schema of artifact type a-type so that it compiles as a JSON Schema.\n  The schema does not compile: "
+	const regex = fix + "invalid propertyName '('; '(' is not valid regex: error parsing regexp: missing closing ): `(`\n  The type is in {file}."
+	const uri = fix + "invalid propertyName 'not a uri'; 'not a uri' is not valid uri: relative url\n  The type is in {file}."
 	many := siblings(30)
 	for _, c := range []struct{ schema, want string }{
 		{`{"title":"t","properties":{"u":{"title":"v","patternProperties":{"(":{}}}}}`, regex},
@@ -770,7 +792,7 @@ func TestVerifyPrintsNoPlaceForAMemberName(t *testing.T) {
 		e := factory(t, withTypes(structuredWith("a-type", c.schema)))
 		file := filepath.Join(e.Root, "modules", "desk", exports.ProcessFileName)
 		for range 30 {
-			if err := e.Verify(); err == nil || err.Error() != file+": "+c.want {
+			if err := e.Verify(); err == nil || err.Error() != refusalIn(file, c.want) {
 				t.Fatalf("%.80s: %v\nwant %s", c.schema, err, c.want)
 			}
 		}
@@ -968,7 +990,7 @@ func TestContractSchemasPassAsCustomTypes(t *testing.T) {
 			t.Errorf("%s in process.schema.json: %v", file, err)
 		}
 		broken := entry(strings.Replace(one.String(), `"type":"object"`, `"type":"objekt"`, 1))
-		if err := factory(t, broken).Verify(); err == nil || !strings.Contains(err.Error(), "so that it compiles as a JSON Schema: ") {
+		if err := factory(t, broken).Verify(); err == nil || !strings.Contains(err.Error(), "so that it compiles as a JSON Schema.\n  The schema does not compile: ") {
 			t.Errorf("%s, a schema that does not compile: %v", file, err)
 		}
 	}

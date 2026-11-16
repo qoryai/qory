@@ -47,11 +47,13 @@ func TestSchemas(t *testing.T) {
 	dirs, _ := filepath.Glob(filepath.Join(fixtures, "*"))
 	for _, dir := range dirs {
 		errText, _ := os.ReadFile(filepath.Join(dir, "expected", "error.txt"))
+		// fix is the fix line of the first refusal, which names the file to edit.
+		fix, _, _ := strings.Cut(string(errText), "\n")
 		// A workflow hook of a kind its point does not take passes the schema, which
 		// knows the kinds and not the base stack's points.
 		badKind := strings.Contains(string(errText), "kind ") && !strings.Contains(string(errText), "hooks[")
-		wantInvalid := strings.Contains(string(errText), "apiVersion") || badKind || strings.Contains(string(errText), "qory \"") ||
-			strings.HasPrefix(string(errText), "qory.yaml: ") && strings.Contains(string(errText), "workflows") ||
+		wantInvalid := strings.Contains(string(errText), "apiVersion") || badKind || strings.HasPrefix(fix, "Set qory in ") ||
+			strings.Contains(fix, "qory.yaml") && (strings.Contains(fix, " workflows.") || strings.HasPrefix(fix, "Remove workflows ")) ||
 			strings.Contains(string(errText), "bind.") && strings.Contains(string(errText), " in qory.yaml") && !strings.Contains(string(errText), " as many, ")
 		err := composeSchema.Validate(document(t, filepath.Join(dir, "qory.yaml")))
 		if wantInvalid && err == nil {
@@ -61,7 +63,7 @@ func TestSchemas(t *testing.T) {
 			t.Errorf("%s: the document failed the schema: %v", dir, err)
 		}
 		if f := filepath.Join(dir, "stack", "qory-stack.yaml"); fileExists(f) {
-			wantBadStack := strings.HasPrefix(string(errText), "stack/qory-stack.yaml: ")
+			wantBadStack := strings.Contains(fix, " in stack/qory-stack.yaml ")
 			err := stackSchema.Validate(document(t, f))
 			if wantBadStack && err == nil {
 				t.Errorf("%s passed the schema; want a failure", f)
@@ -93,9 +95,9 @@ func TestSchemas(t *testing.T) {
 		// listed twice, or a json_schema that does not compile, passes it too: a JSON
 		// Schema cannot state either rule.
 		processes, _ := filepath.Glob(filepath.Join(dir, "modules", "*", "process.yaml"))
-		wantBadProcess := strings.Contains(string(errText), "process.yaml: ") &&
-			!strings.Contains(string(errText), "exports.stacks lists") && !strings.Contains(string(errText), " under workflows in ") &&
-			!strings.Contains(string(errText), " of artifact_types: entry ") && !strings.Contains(string(errText), " compiles as a JSON Schema: ")
+		wantBadProcess := strings.Contains(string(errText), "process.yaml") &&
+			!strings.Contains(string(errText), "exports.stacks lists") && !strings.Contains(string(errText), " does not declare it under workflows") &&
+			!strings.Contains(string(errText), " has the name ") && !strings.Contains(string(errText), " so that it compiles as a JSON Schema")
 		for _, f := range processes {
 			err := processSchema.Validate(document(t, f))
 			if wantBadProcess && err == nil {

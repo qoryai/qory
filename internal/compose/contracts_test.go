@@ -1080,7 +1080,8 @@ func TestABaseModuleHasOneNameInEveryRefusal(t *testing.T) {
 			"modules/core/qory-module.yaml":        "apiVersion: qory.dev/v1alpha1\nname: core-x\n",
 			"modules/core/skills/release/SKILL.md": "---\nname: release\ndescription: d\n---\n\nUse ${qory:skills/missing}.\n",
 		}, "", "",
-			"module core: skill release references skill missing, which no module ships or provides and the stack does not bind"},
+			"Ship skill missing, bind skills/missing in qory.yaml, or remove the reference from skill release.\n" +
+				"  The skill release of module core references skill missing. No module ships or provides it, and the stack does not bind it."},
 		{"no member", map[string]string{
 			"modules/core/qory-module.yaml":       group,
 			"modules/core/skills/review/SKILL.md": review,

@@ -119,7 +119,7 @@ func TestReadRefuses(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "qory.yaml"), []byte("apiVersion: qory.dev/v2\nexports: {modules: [core]}\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := exports.Read(root); err == nil || !strings.Contains(err.Error(), `apiVersion "qory.dev/v2" is not one this qory reads`) {
+	if _, err := exports.Read(root); err == nil || !strings.Contains(err.Error(), `This qory reads qory.dev/v1alpha1, and apiVersion is "qory.dev/v2".`) {
 		t.Errorf("another apiVersion: %v", err)
 	}
 	root = write(t, "exports: {modules: [core]}\nharnes: {runtime: claude}\n")
@@ -216,7 +216,7 @@ func TestResolveAPIVersionReadsARetiredSpelling(t *testing.T) {
 	}
 	for _, version := range []string{"", "qory.dev/v2", "qory.ai/v1alpha2", "QORY.DEV/V1ALPHA1"} {
 		got, err := exports.ResolveAPIVersion(version)
-		want := `apiVersion "` + version + `" is not one this qory reads; versions: qory.dev/v1alpha1`
+		want := "Set apiVersion in the file to qory.dev/v1alpha1.\n  This qory reads qory.dev/v1alpha1, and apiVersion is \"" + version + "\"."
 		if err == nil || err.Error() != want || got != "" {
 			t.Errorf("%q: got %q, %v, want %q", version, got, err, want)
 		}

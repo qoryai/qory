@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/qoryai/qory/internal/exports"
 	"gopkg.in/yaml.v3"
 )
 
@@ -58,8 +59,8 @@ func TestBindRefusesEachShapeItDoesNotRead(t *testing.T) {
 	const head = "apiVersion: qory.dev/v1alpha1\nmodules:\n  - name: core\nbind:\n"
 	// Each text has {path}, the stack file's path as Load was given it.
 	for _, c := range []struct{ body, want string }{
-		{"  agents/coder: rails-coder\n", "Write bind as bind.agents.coder: rails-coder in {path}: bind keys are kinds, and agents/coder is a kind and a role."},
-		{"  agents/coder: [a, b]\n", "Write bind as bind.agents.coder: <name> in {path}: bind keys are kinds, and agents/coder is a kind and a role."},
+		{"  agents/coder: rails-coder\n", "Write bind as bind.agents.coder: rails-coder in {path}.\n  The keys of bind are kinds, and agents/coder is a kind and a role."},
+		{"  agents/coder: [a, b]\n", "Write bind as bind.agents.coder: <name> in {path}.\n  The keys of bind are kinds, and agents/coder is a kind and a role."},
 		{"  coders:\n    a: b\n", `Use agents, commands or skills as a kind under bind in {path}: "coders" is none of them.`},
 		{"  agents: rails-coder\n", "Write bind.agents in {path} as a map of roles: bind.agents is not a map."},
 		{"  skills:\n    entry: [a, b]\n", "Write one name for bind.skills.entry in {path}.\n  Only an agents role can be a group, and the value is a list."},
@@ -87,13 +88,13 @@ func TestReadRolesWithCountsTakesOneOrMany(t *testing.T) {
 		t.Fatalf("roles = %v, %v", r, err)
 	}
 	for _, c := range []struct{ body, want string }{
-		{"skills:\n  x: many\n", "Set roles.skills.x to one in m.yaml: only an agents role can be a group."},
+		{"skills:\n  x: many\n", "Set roles.skills.x of the module to one.\n  Only an agents role can be a group. The map is in m.yaml."},
 		{"agents:\n  developer: two\n", "Set roles.agents.developer to one or many in m.yaml.\n  One entry fills a role and several fill a group, and the value is \"two\"."},
 		{"agents:\n  developer: [one]\n", "Set roles.agents.developer to one or many in m.yaml.\n  One entry fills a role and several fill a group, and the value is a list."},
 	} {
 		_, _, err := ReadRoles(node(t, c.body), "roles", true)
-		re, ok := err.(*RolesError)
-		if !ok || re.In("m.yaml").Error() != c.want {
+		in, ok := err.(exports.InFile)
+		if !ok || in.In("m.yaml").Error() != c.want {
 			t.Errorf("%q: %v\nwant %q", c.body, err, c.want)
 		}
 	}

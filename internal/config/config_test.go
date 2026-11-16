@@ -244,7 +244,7 @@ func TestAFileWithoutAnAPIVersionReadsAsTheNewest(t *testing.T) {
 	}
 	writeRaw(t, path, "apiVersion: qory.dev/v2\nharness: {force: true}\n")
 	_, err = config.Load(root, true)
-	want := path + `: apiVersion "qory.dev/v2" is not one this qory reads; versions: qory.dev/v1alpha1`
+	want := "Set apiVersion in " + path + " to qory.dev/v1alpha1.\n  This qory reads qory.dev/v1alpha1, and apiVersion is \"qory.dev/v2\"."
 	if err == nil || err.Error() != want {
 		t.Fatalf("err = %v, want %q", err, want)
 	}

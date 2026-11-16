@@ -1,1 +1,2 @@
-stack/qory-stack.yaml: set workflows.fix.access to read or write: "admin" is neither
+Set workflows.fix.access in stack/qory-stack.yaml to read or write.
+  The value is "admin".

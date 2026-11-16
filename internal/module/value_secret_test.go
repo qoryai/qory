@@ -154,7 +154,7 @@ func TestAnEntryPathWithASecretIsLeftOutOfItsRefusal(t *testing.T) {
 		{map[string]string{"AGENTS.md": "x\n"}, Variant{"skills": "../qak_x"}, "variant v reads skills from " + accessKeyValuePhrase + ", which is not a directory inside the module"},
 		{map[string]string{"skills/qak_s/x.md": "x\n"}, nil, "add SKILL.md to skills/" + accessKeyPhrase + ": skills/" + accessKeyPhrase + " has no SKILL.md and no skill below it"},
 		{map[string]string{"qrk_d/s/x.md": "x\n"}, Variant{"skills": "qrk_d"}, "add SKILL.md to " + runKeyPhrase + "/s: " + runKeyPhrase + "/s has no SKILL.md and no skill below it"},
-		{map[string]string{"hooks/qak_d/x.sh": "x\n"}, nil, "hooks/" + accessKeyPhrase + " is a directory; a hook is one file. Keep its helpers elsewhere in the module, reached as $QORY_HARNESS_HOME/modules/core/<path>"},
+		{map[string]string{"hooks/qak_d/x.sh": "x\n"}, nil, "Move the helpers in hooks/" + accessKeyPhrase + " to another directory of module core.\n  hooks/" + accessKeyPhrase + " is a directory, and a hook is one file.\n  A hook reads its helpers at $QORY_HARNESS_HOME/modules/core/<path>."},
 		{map[string]string{"files/qak_f.txt": "x\n"}, nil, "files/" + accessKeyPhrase + " is not under a runtime directory; a file ships as files/<runtime>/<path>"},
 		{map[string]string{"qrk_d/f.txt": "x\n"}, Variant{"files": "qrk_d"}, runKeyPhrase + "/f.txt is not under a runtime directory; a file ships as " + runKeyPhrase + "/<runtime>/<path>"},
 		{map[string]string{"settings/qak_rt/qrk_d/x.json": "{}"}, nil, "settings/" + accessKeyPhrase + "/" + runKeyPhrase + " is a directory; settings contains one fragment per target file, and a runtime's other files go under files/" + accessKeyPhrase + "/" + runKeyPhrase},
@@ -165,8 +165,8 @@ func TestAnEntryPathWithASecretIsLeftOutOfItsRefusal(t *testing.T) {
 		if c.v != nil {
 			m, variant = &Manifest{Variants: map[string]Variant{"v": c.v}}, "v"
 		}
-		if _, err := Read("core", dir, m, variant); err == nil || err.Error() != "module core: "+c.want {
-			t.Errorf("%v: %v, want %q", c.files, err, "module core: "+c.want)
+		if _, err := Read("core", dir, m, variant); err == nil || err.Error() != inModuleCore(c.want) {
+			t.Errorf("%v: %v, want %q", c.files, err, inModuleCore(c.want))
 		}
 	}
 }
@@ -255,8 +255,8 @@ func TestAManifestValueWithASecretIsLeftOutOfItsRefusal(t *testing.T) {
 	isolate(t)
 	head := "apiVersion: qory.dev/v1alpha1\nname: core\n"
 	for _, c := range []struct{ body, want string }{
-		{"apiVersion: qak_v1\nname: core\n", "apiVersion " + accessKeyValuePhrase + " is not one this qory reads; versions: qory.dev/v1alpha1"},
-		{"apiVersion: v1\nname: core\n", `apiVersion "v1" is not one this qory reads; versions: qory.dev/v1alpha1`},
+		{"apiVersion: qak_v1\nname: core\n", "Set apiVersion in {path} to qory.dev/v1alpha1.\n  This qory reads qory.dev/v1alpha1, and apiVersion is " + accessKeyValuePhrase + "."},
+		{"apiVersion: v1\nname: core\n", "Set apiVersion in {path} to qory.dev/v1alpha1.\n  This qory reads qory.dev/v1alpha1, and apiVersion is \"v1\"."},
 		{head + "env:\n  BIN: /opt/qak_x\n", "env.BIN: " + accessKeyValuePhrase + " is not a path inside the module"},
 		{head + "egress: [QRK_x.example]\n", "egress: " + runKeyValuePhrase + " is not a lower-case host name or a *. suffix; no port, path or scheme"},
 		{head + "egress: [Git.example]\n", `egress: "Git.example" is not a lower-case host name or a *. suffix; no port, path or scheme`},
@@ -265,7 +265,11 @@ func TestAManifestValueWithASecretIsLeftOutOfItsRefusal(t *testing.T) {
 	} {
 		dir := tree(t, map[string]string{ManifestName: c.body})
 		_, err := ReadManifest(dir)
-		if want := filepath.Join(dir, ManifestName) + ": " + c.want; err == nil || err.Error() != want {
+		want := filepath.Join(dir, ManifestName) + ": " + c.want
+		if strings.Contains(c.want, "{path}") {
+			want = strings.ReplaceAll(c.want, "{path}", filepath.Join(dir, ManifestName))
+		}
+		if err == nil || err.Error() != want {
 			t.Errorf("%q: %v, want %q", c.body, err, want)
 		}
 		var typeErr *yaml.TypeError
@@ -285,9 +289,9 @@ func TestAReferenceWithASecretIsLeftOutOfItsRefusal(t *testing.T) {
 	isolate(t)
 	for _, c := range []struct{ file, body, want string }{
 		{"agents/a.md", "---\nmodel: ${qory:qak_t}\n---\n", "agents/a.md: model " + accessKeyValuePhrase + ": use one of the tiers light, fast and thinking; " + accessKeyPhrase + " is not a tier"},
-		{"skills/s/SKILL.md", "${qory:qrk_kind/x}\n", "skills/s/SKILL.md: " + runKeyValuePhrase + " is not a reference; after ${qory: comes one of agents, commands, skills, then /<name>"},
+		{"skills/s/SKILL.md", "${qory:qrk_kind/x}\n", "Change " + runKeyValuePhrase + " in skills/s/SKILL.md of module core to a reference.\n  " + runKeyValuePhrase + " is not a reference: after ${qory: comes one of agents, commands, skills, then /<name>."},
 		{"commands/c.md", "${qory:skills/qak_x y}\n", "commands/c.md: " + accessKeyValuePhrase + " refers to " + accessKeyPhrase + ", which is not an entry name; a name is one path segment"},
-		{"agents/qrk_a.md", "${qory:prompts/x}\n", "agents/" + runKeyPhrase + ": ${qory:prompts/x} is not a reference; after ${qory: comes one of agents, commands, skills, then /<name>"},
+		{"agents/qrk_a.md", "${qory:prompts/x}\n", "Change ${qory:prompts/x} in agents/" + runKeyPhrase + " of module core to a reference.\n  ${qory:prompts/x} is not a reference: after ${qory: comes one of agents, commands, skills, then /<name>."},
 		{"commands/c.md", "${qory:skills/a b}\n", `commands/c.md: ${qory:skills/a b} refers to "a b", which is not an entry name; a name is one path segment`},
 	} {
 		files := map[string]string{c.file: c.body}
@@ -295,8 +299,8 @@ func TestAReferenceWithASecretIsLeftOutOfItsRefusal(t *testing.T) {
 			files["skills/s/SKILL.md"] = "x\n"
 		}
 		dir := tree(t, files)
-		if _, err := Read("core", dir, nil, ""); err == nil || err.Error() != "module core: "+c.want {
-			t.Errorf("%s: %v, want %q", c.body, err, "module core: "+c.want)
+		if _, err := Read("core", dir, nil, ""); err == nil || err.Error() != inModuleCore(c.want) {
+			t.Errorf("%s: %v, want %q", c.body, err, inModuleCore(c.want))
 		}
 	}
 	if err := NotATier("--tier light=x", "QRK_t"); err == nil || err.Error() != "--tier light=x: use one of the tiers light, fast and thinking; "+runKeyPhrase+" is not a tier" {
@@ -363,4 +367,13 @@ func TestADocumentWithASecretInItsPathOrFrontmatterIsLeftOutOfItsRefusal(t *test
 			t.Errorf("%s: %v, want the suffix %q", c.name, err, c.want)
 		}
 	}
+}
+
+// inModuleCore is want, a refusal of module core: one written fix first, over several
+// lines, names the module inside it, and any other starts with "module core: ".
+func inModuleCore(want string) string {
+	if strings.Contains(want, "\n") {
+		return want
+	}
+	return "module core: " + want
 }

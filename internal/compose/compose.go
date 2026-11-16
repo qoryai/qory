@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/BurntSushi/toml"
 	"github.com/qoryai/forager/accesskey"
@@ -328,7 +329,7 @@ func ComposeWith(p *stack.Stack, opts Options) (_ *Result, err error) {
 			o.m, err = module.ReadManifest(src.Dir)
 		}
 		if err != nil {
-			return nil, fmt.Errorf("%s: %w", who, err)
+			return nil, exports.Prefixed(who, err)
 		}
 		if afterManifest != nil {
 			afterManifest(src.Dir)
@@ -443,7 +444,7 @@ func ComposeWith(p *stack.Stack, opts Options) (_ *Result, err error) {
 					res.Settings[runtime][file] = map[string]any{}
 				}
 				if err := mergeFile(res, runtime, file, path, name, opts.Env, readFile); err != nil {
-					return nil, fmt.Errorf("module %s: %w", shown(name), err)
+					return nil, exports.Prefixed("module "+shown(name), err)
 				}
 			}
 		}
@@ -560,17 +561,17 @@ func addPushChecks(res *Result, checkers map[string]string, dir string, root *os
 	}
 	for _, c := range checks {
 		if c.Type == verdictType {
-			return fmt.Errorf("Remove the push check for %s from module %s: a verdict is sent by qory run verdict, which push checks do not cover", verdictType, shown(name))
+			return fmt.Errorf("Remove the push check for %s from module %s.\n  qory run verdict sends a verdict, and push checks do not cover it.", verdictType, shown(name))
 		}
 		if other, ok := checkers[c.Type]; ok {
-			return fmt.Errorf("Remove the push check for %s from module %s or module %s: a type has one push check, and both modules declare one", c.Type, shown(other), shown(name))
+			return fmt.Errorf("Remove the push check for %s from module %s or module %s.\n  A type has one push check, and both modules declare one.", c.Type, shown(other), shown(name))
 		}
 		checkers[c.Type] = name
 		program := c.Command[0]
 		shownProgram := exports.Value(filepath.ToSlash(program), false)
 		info, err := root.Stat(program)
 		if err != nil {
-			return fmt.Errorf("Add %s to module %s, or change its push check for %s: the module has no file at that path", shownProgram, shown(name), c.Type)
+			return fmt.Errorf("Add %s to module %s, or change its push check for %s.\n  Module %s has no file at %s.", shownProgram, shown(name), c.Type, shown(name), shownProgram)
 		}
 		if !info.Mode().IsRegular() {
 			return fmt.Errorf("Set the push check for %s of module %s to a program file: %s is not a file", c.Type, shown(name), shownProgram)
@@ -583,8 +584,8 @@ func addPushChecks(res *Result, checkers map[string]string, dir string, root *os
 			if err != nil || entry != program && !strings.HasPrefix(program, entry+string(filepath.Separator)) {
 				continue
 			}
-			return fmt.Errorf("Keep %s/%s in module %s, or move %s out of it: the program of the push check for %s is in %s/%s, which an exclude or only of module %s leaves out",
-				e.Kind, shown(e.Name), shown(name), shownProgram, c.Type, e.Kind, shown(e.Name), shown(name))
+			return fmt.Errorf("Keep %s/%s in module %s, or move %s out of it.\n  The program of the push check for %s is in %s/%s, and an exclude or only of module %s leaves %s/%s out.",
+				e.Kind, shown(e.Name), shown(name), shownProgram, c.Type, e.Kind, shown(e.Name), shown(name), e.Kind, shown(e.Name))
 		}
 		command := append([]string{"$QORY_HARNESS_HOME/modules/" + name + "/" + filepath.ToSlash(program)}, c.Command[1:]...)
 		res.PushChecks = append(res.PushChecks, PushCheck{Type: c.Type, Module: name, Command: command, Reads: c.Reads})
@@ -627,7 +628,7 @@ func workflowsShipped(p *stack.Stack, composed map[string]bool, base *Base, as s
 		}
 		w, prefixed := shown(name), shown(stack.WorkflowEntry(name))
 		if base != nil {
-			lines = append(lines, fmt.Sprintf("add a skill or command %s to a module of the base stack %s, or remove %s from the workflows of its %s: the stack declares the workflow %s, and none of its modules ships a skill or command %s or %s", prefixed, base.String(), w, stack.FileName, w, prefixed, w))
+			lines = append(lines, fmt.Sprintf("Add skill %s to a module of %s, or remove workflow %s.\n  The base stack %s declares the workflow %s in its %s.\n  No module of %s ships a skill or command %s or %s.", prefixed, base.String(), w, base.String(), w, stack.FileName, base.String(), prefixed, w))
 			continue
 		}
 		in := "the stack"
@@ -637,7 +638,12 @@ func workflowsShipped(p *stack.Stack, composed map[string]bool, base *Base, as s
 		case p.File != "":
 			in += " in " + filepath.Base(p.File)
 		}
-		lines = append(lines, fmt.Sprintf("add a skill or command %s to a module of %s, or remove %s from its workflows: the stack declares the workflow %s, and none of its modules ships a skill or command %s or %s", prefixed, in, w, w, prefixed, w))
+		fix := fmt.Sprintf("Add skill %s to a module of %s, or remove workflow %s.", prefixed, in, w)
+		if !fits(fix) {
+			// The cause lines name the stack.
+			fix = fmt.Sprintf("Add skill %s to a module, or remove workflow %s.", prefixed, w)
+		}
+		lines = append(lines, fmt.Sprintf("%s\n  %s declares the workflow %s.\n  No module of %s ships a skill or command %s or %s.", fix, upperFirst(in), w, in, prefixed, w))
 	}
 	if len(lines) == 0 {
 		return nil
@@ -800,6 +806,15 @@ func shown(name string) string { return accesskey.ShownName(name, false) }
 // name as [accesskey.ShownName] prints it.
 func described(kind, name string) string { return module.Describe(shown(kind), shown(name)) }
 
+// upperFirst is s with its first letter in upper case, for a line that starts with a
+// phrase such as "the stack in qory.yaml".
+func upperFirst(s string) string {
+	if s == "" || !unicode.IsLower(rune(s[0])) {
+		return s
+	}
+	return strings.ToUpper(s[:1]) + s[1:]
+}
+
 // Need is one thing a composed entry needs beside it: an entry its manifest's requires
 // lists, or one its documents reference.
 type Need struct {
@@ -911,7 +926,7 @@ func checkResolved(res *Result, requires map[string]map[string][]Need, dropped m
 					lines = append(lines, fmt.Sprintf("Rename role %s in the provides of module %s: module %s ships %s, and a role's name is no entry's.", shown(role), checkoutName(res, r.Module), checkoutName(res, e.Module), described(kind, name)))
 					continue
 				}
-				lines = append(lines, fmt.Sprintf("bind %s defines a role, and module %s ships %s; a role's name is no entry's", shown(role), checkoutName(res, e.Module), described(kind, name)))
+				lines = append(lines, fmt.Sprintf("Rename role %s in bind, or rename %s in module %s.\n  The bind defines role %s, and module %s ships %s: a role and an entry cannot share a name.", shown(role), described(kind, name), checkoutName(res, e.Module), shown(role), checkoutName(res, e.Module), described(kind, name)))
 			}
 		}
 		if composed[kind+"/"+to] {
@@ -970,10 +985,10 @@ func checkResolved(res *Result, requires map[string]map[string][]Need, dropped m
 			continue
 		}
 		if by := leftOut(kind, to); by != "" {
-			lines = append(lines, fmt.Sprintf("bind %s selects %s, which module %s leaves out", shown(role), described(kind, to), checkoutName(res, by)))
+			lines = append(lines, fmt.Sprintf("Keep %s in module %s, or change bind %s.\n  The bind %s selects %s, and module %s leaves it out.", described(kind, to), checkoutName(res, by), shown(role), shown(role), described(kind, to), checkoutName(res, by)))
 			continue
 		}
-		lines = append(lines, fmt.Sprintf("bind %s selects %s, which no module ships", shown(role), described(kind, to)))
+		lines = append(lines, fmt.Sprintf("Ship %s in a module, or change bind %s.\n  The bind %s selects %s, and no module ships it.", described(kind, to), shown(role), shown(role), described(kind, to)))
 	}
 	for _, e := range res.Entries {
 		for _, ref := range e.References {
@@ -998,30 +1013,38 @@ func checkResolved(res *Result, requires map[string]map[string][]Need, dropped m
 			if need.Reference {
 				verb = "references"
 			}
+			// entry is the cause, the entry and what it needs; drop is the fix that removes
+			// the need.
+			entry := fmt.Sprintf("The %s of module %s %s %s", described(e.Kind, e.Name), checkoutName(res, e.Module), verb, described(kind, name))
+			drop := "remove it from the requires of " + described(e.Kind, e.Name)
+			if need.Reference {
+				drop = "remove the reference from " + described(e.Kind, e.Name)
+			}
 			if x := excludeOf(res, kind, name); x != nil && x.Listed != "" {
-				lines = append(lines, fmt.Sprintf("remove %s from the exclude of module %s in qory.yaml, or ship it in a module of the repository: module %s: %s %s %s, which the exclude of module %s in qory.yaml leaves out", shownKey(need.Key), shown(x.Listed), checkoutName(res, e.Module), described(e.Kind, e.Name), verb, described(kind, name), shown(x.Listed)))
+				lines = append(lines, fmt.Sprintf("Remove %s from the exclude of module %s, or ship it in a module of the repository.\n  %s.\n  The exclude of module %s in qory.yaml leaves %s out.", shownKey(need.Key), shown(x.Listed), entry, shown(x.Listed), described(kind, name)))
 				continue
 			}
 			if by := leftOut(kind, name); by != "" {
-				lines = append(lines, fmt.Sprintf("module %s: %s %s %s, which module %s leaves out", checkoutName(res, e.Module), described(e.Kind, e.Name), verb, described(kind, name), checkoutName(res, by)))
+				lines = append(lines, fmt.Sprintf("Keep %s in module %s, or %s.\n  %s, and module %s leaves it out.", described(kind, name), checkoutName(res, by), drop, entry, checkoutName(res, by)))
 				continue
 			}
 			if ps := dropped[need.Key]; need.Reference && len(ps) > 0 {
 				for _, r := range ps {
-					provided := fmt.Sprintf("module %s: %s %s %s, which module %s provides as %s", checkoutName(res, e.Module), described(e.Kind, e.Name), verb, described(kind, name), checkoutName(res, r.Module), described(kind, r.Name))
+					provided := fmt.Sprintf("%s, which module %s provides as %s.", entry, checkoutName(res, r.Module), described(kind, r.Name))
 					if x := excludeOf(res, kind, r.Name); x != nil && x.Listed != "" {
-						lines = append(lines, fmt.Sprintf("remove %s from the exclude of module %s in qory.yaml, or ship it in a module of the repository: %s, which the exclude of module %s in qory.yaml leaves out", shownKey(kind+"/"+r.Name), shown(x.Listed), provided, shown(x.Listed)))
+						lines = append(lines, fmt.Sprintf("Remove %s from the exclude of module %s, or ship it in a module of the repository.\n  %s\n  The exclude of module %s in qory.yaml leaves %s out.", shownKey(kind+"/"+r.Name), shown(x.Listed), provided, shown(x.Listed), described(kind, r.Name)))
 						continue
 					}
-					lines = append(lines, fmt.Sprintf("%s, which module %s leaves out", provided, checkoutName(res, leftOut(kind, r.Name))))
+					by := checkoutName(res, leftOut(kind, r.Name))
+					lines = append(lines, fmt.Sprintf("Keep %s in module %s, or bind %s to another %s.\n  %s\n  Module %s leaves out %s.", described(kind, r.Name), by, shownKey(need.Key), strings.TrimSuffix(described(kind, ""), " "), provided, by, described(kind, r.Name)))
 				}
 				continue
 			}
-			why := "which no module ships"
 			if need.Reference {
-				why += " or provides and the stack does not bind"
+				lines = append(lines, fmt.Sprintf("Ship %s, bind %s in %s, or %s.\n  %s. No module ships or provides it, and the stack does not bind it.", described(kind, name), shownKey(need.Key), docFile(res.Stack), drop, entry))
+				continue
 			}
-			lines = append(lines, fmt.Sprintf("module %s: %s %s %s, %s", checkoutName(res, e.Module), described(e.Kind, e.Name), verb, described(kind, name), why))
+			lines = append(lines, fmt.Sprintf("Ship %s in a module, or %s.\n  %s, and no module ships it.", described(kind, name), drop, entry))
 		}
 	}
 	if len(lines) == 0 {
@@ -1120,7 +1143,7 @@ func applySelection(l *module.Module, pl stack.Module, env map[string]string, re
 	for _, kind := range sel.KindNames() {
 		for _, name := range sel.Kinds[kind] {
 			if !shipped[kind+"/"+name] {
-				return nil, nil, fmt.Errorf("module %s: %s %s/%s selects nothing the module ships", shown(l.Name), block, shown(kind), shown(name))
+				return nil, nil, fmt.Errorf("Remove %s/%s from the %s of module %s.\n  Module %s does not ship %s/%s.", shown(kind), shown(name), block, shown(l.Name), shown(l.Name), shown(kind), shown(name))
 			}
 			named[kind+"/"+name] = true
 		}
@@ -1152,9 +1175,9 @@ func applySelection(l *module.Module, pl stack.Module, env map[string]string, re
 				key := kind + "/" + name
 				if _, ok := pulled[key]; !ok {
 					if !shipped[key] {
-						return nil, nil, fmt.Errorf("module %s: exclude %s selects nothing the module ships", shown(l.Name), shown(key))
+						return nil, nil, fmt.Errorf("Remove %s from the exclude of module %s.\n  Module %s does not ship %s.", shown(key), shown(l.Name), shown(l.Name), shown(key))
 					}
-					return nil, nil, fmt.Errorf("module %s: exclude %s selects nothing only brings in; only leaves it out", shown(l.Name), shown(key))
+					return nil, nil, fmt.Errorf("Remove %s from the exclude of module %s.\n  The only of module %s does not bring in %s, so the exclude selects nothing.", shown(key), shown(l.Name), shown(l.Name), shown(key))
 				}
 				delete(pulled, key)
 			}
@@ -1209,7 +1232,7 @@ func applySelection(l *module.Module, pl stack.Module, env map[string]string, re
 	}
 	// The exported variables.
 	if sel.Env.All && len(env) == 0 {
-		return nil, nil, fmt.Errorf("module %s: %s env selects nothing the module ships; it exports no variable", shown(l.Name), block)
+		return nil, nil, fmt.Errorf("Remove env from the %s of module %s.\n  Module %s exports no variable.", block, shown(l.Name), shown(l.Name))
 	}
 	for _, name := range sel.Env.Names {
 		if _, ok := env[name]; !ok {
@@ -1396,12 +1419,13 @@ func (e *CollisionError) Error() string {
 				width = len(shown(e.ExcludeName(l))) + 1
 			}
 		}
-		fmt.Fprintf(&b, "%s/%s is provided by %d modules: %s\n", shown(c.Kind), shown(c.Name), len(c.Modules), strings.Join(named, ", "))
+		entry := shown(c.Kind) + "/" + shown(c.Name)
+		provide := fmt.Sprintf("  %d modules provide %s: %s\n", len(c.Modules), entry, strings.Join(named, ", "))
 		if c.Rename {
-			fmt.Fprintf(&b, "  it belongs to the base stack %s; rename yours\n", shown(c.Base))
+			fmt.Fprintf(&b, "Rename your %s.\n%s  %s belongs to the base stack %s.\n", entry, provide, entry, shown(c.Base))
 			continue
 		}
-		b.WriteString("  keep one and exclude the others, for example\n")
+		fmt.Fprintf(&b, "Keep %s in one module, and exclude it from the others.\n%s  For example:\n", entry, provide)
 		var replaced []string
 		for _, l := range c.Modules[:len(c.Modules)-1] {
 			block := "{" + shown(c.Kind) + ": [" + shown(c.Name) + "]}"
@@ -1619,7 +1643,9 @@ func (r *Result) SetBy(key string) string { return r.setBy[key] }
 
 // collision is the error for a key path two modules set to different values.
 func (m *merger) collision(path string) error {
-	return fmt.Errorf("%s: %s is set by modules %s and %s with different values", exports.HidePath(m.file), shown(path), shown(m.setBy[m.file+"/"+path]), shown(m.module))
+	first := shown(m.setBy[m.file+"/"+path])
+	return exports.Refuse(fmt.Sprintf("Set %s to one value in %s of modules %s and %s.", shown(path), exports.HidePath(m.file), first, shown(m.module)),
+		fmt.Sprintf("Modules %s and %s set %s to different values.", first, shown(m.module), shown(path)))
 }
 
 // exportsAgainstSettings refuses a variable a module's manifest exports that a fragment's

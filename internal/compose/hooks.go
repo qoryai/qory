@@ -113,12 +113,17 @@ func checkHooks(res *Result, p *stack.Stack, opts Options) error {
 			if len(hp.point.Kinds) == 1 {
 				return fmt.Errorf("Set hooks[%d].kind to %s.\n  %s allows only that kind.", i, hp.point.Kinds[0], h.At)
 			}
-			return fmt.Errorf("Set hooks[%d].kind to %s.\n  %s allows only those.", i, orList(hp.point.Kinds), h.At)
+			return fmt.Errorf("Set hooks[%d].kind to %s.\n  %s allows only %s, and hooks[%d].kind is %s.", i, orList(hp.point.Kinds), h.At, andList(hp.point.Kinds), i, shown(h.Kind))
 		}
 		limit := timeout
 		if h.Timeout > 0 {
 			if h.Timeout > timeout {
-				return fmt.Errorf("Set hooks[%d].timeout to %s or less, or leave it out.\n  The base stack %s allows a hook no longer.", i, limits.TimeoutShown(), base)
+				// The timeout as written; it is set whenever Timeout is.
+				written := h.Timeout.String()
+				if h.TimeoutText != nil {
+					written = exports.Value(*h.TimeoutText, false)
+				}
+				return fmt.Errorf("Set hooks[%d].timeout to %s or less, or leave it out.\n  The base stack %s allows at most %s, and hooks[%d].timeout is %s.", i, limits.TimeoutShown(), base, limits.TimeoutShown(), i, written)
 			}
 			limit = h.Timeout
 		}

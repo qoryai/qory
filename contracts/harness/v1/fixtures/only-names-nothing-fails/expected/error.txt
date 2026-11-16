@@ -1,1 +1,2 @@
-module nextjs: only env selects nothing the module ships; it exports no variable
+Remove env from the only of module nextjs.
+  Module nextjs exports no variable.

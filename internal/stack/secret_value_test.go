@@ -43,7 +43,7 @@ func TestAStackRefusalPrintsNoSecret(t *testing.T) {
 		{head + "modules:\n  - name: core\n    source: {path: x, stack: qak_s}\n", "module core: source selects stack " + nameWithSecret + ";"},
 		{head + "modules:\n  - name: core\n    link: qak_/l\n", "module core: link " + nameWithSecret + " is not one path segment"},
 		{head + "modules:\n  - name: a\n    link: qak_l\n  - name: b\n    link: qak_l\n", "module a and module b both link " + nameWithSecret},
-		{head + "modules:\n  - name: core\n    only:\n      skills: [qak_s]\n    exclude:\n      skills: [qak_s]\n", "skills/" + nameWithSecret + " is listed in only and in exclude"},
+		{head + "modules:\n  - name: core\n    only:\n      skills: [qak_s]\n    exclude:\n      skills: [qak_s]\n", "Both blocks list skills/" + nameWithSecret + "."},
 		{head + "modules:\n  - name: core\n    source: {path: x, module: qak_/m}\n", "source.module " + nameWithSecret + " is not one path segment"},
 		{head + "modules:\n  - name: core\n    source: {git: https://git.example/h.git, ref: main, path: ../qak_x}\n", "source.path " + valueWithSecret + " is not a directory inside the repository"},
 		{head + "qory: \">=qak_x\"\n" + core, "qory " + valueWithSecret + ": " + valueWithSecret + " is not a version"},

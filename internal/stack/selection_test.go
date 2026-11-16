@@ -46,11 +46,12 @@ func TestSelectionRefusesAMistake(t *testing.T) {
 		"exclude:\n  env: [\"\"]":                              "module core: exclude env lists an empty name",
 		"exclude: [skills]":                                    "module core: exclude is a mapping of kinds and parts to what they select",
 		"only:\n  skills: [a]\nexclude:\n  instructions: true": "module core: exclude beside only selects a part; only leaves every part it does not select out, so exclude selects entries only brings in",
-		"only:\n  skills: [a]\nexclude:\n  skills: [a]":        "module core: skills/a is listed in only and in exclude; list it in one",
+		"only:\n  skills: [a]\nexclude:\n  skills: [a]":        "Remove skills/a from the only or the exclude of module core in {path}.\n  Both blocks list skills/a.",
 	}
 	for block, want := range cases {
-		_, err := Load(write(t, selectionStack(block)))
-		if err == nil || !strings.HasSuffix(err.Error(), want) {
+		path := write(t, selectionStack(block))
+		_, err := Load(path)
+		if want := strings.ReplaceAll(want, "{path}", path); err == nil || !strings.HasSuffix(err.Error(), want) {
 			t.Errorf("%q: err = %v, want suffix %q", block, err, want)
 		}
 	}

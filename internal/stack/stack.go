@@ -569,7 +569,7 @@ func loadFile(path string) (*Stack, error) {
 	if value != "" {
 		c, err := ParseConstraint(value)
 		if err != nil {
-			return nil, fmt.Errorf("%s: %w", file, err)
+			return nil, inPath(file, err)
 		}
 		p.Qory = p.Qory.Join(c)
 	}
@@ -650,7 +650,7 @@ func (p *Stack) validate(compose bool) error {
 			return errors.New("extending is the base stack's; a harness section that extends a stack does not set it")
 		}
 		if p.extends() && len(p.Workflows) > 0 {
-			return errors.New("remove workflows or extends: a harness section that extends a stack takes the workflows of its base")
+			return exports.Refuse("Remove workflows or extends from "+exports.FilePlace+".", "A harness section that extends a stack takes the workflows of its base.")
 		}
 		// A document extending a stack may leave the runtime to the machine's
 		// configuration or the flag; its own stack names one.
@@ -709,14 +709,14 @@ func (p *Stack) validate(compose bool) error {
 		}
 		w := p.Workflows[name]
 		if w.Access != "" && w.Access != AccessRead && w.Access != AccessWrite {
-			return fmt.Errorf("set workflows.%s.access to read or write: %s is neither", name, exports.Value(w.Access, true))
+			return exports.Refuse(fmt.Sprintf("Set workflows.%s.access in %s to read or write.", name, exports.FilePlace), fmt.Sprintf("The value is %s.", exports.Value(w.Access, true)))
 		}
 		if w.TimeLimitText == "" {
 			continue
 		}
 		d, err := time.ParseDuration(w.TimeLimitText)
 		if err != nil || d <= 0 {
-			return fmt.Errorf("set workflows.%s.time_limit to a duration above zero, such as 7h or 45m: %s is not one", name, exports.Value(w.TimeLimitText, true))
+			return exports.Refuse(fmt.Sprintf("Set workflows.%s.time_limit in %s to a duration above zero, such as 7h or 45m.", name, exports.FilePlace), fmt.Sprintf("The value is %s.", exports.Value(w.TimeLimitText, true)))
 		}
 		w.TimeLimit = d
 		p.Workflows[name] = w
@@ -777,7 +777,7 @@ func (p *Stack) validate(compose bool) error {
 			return fmt.Errorf("%s: only %w", who, err)
 		}
 		if err := p.Modules[i].besideOnly(); err != nil {
-			return fmt.Errorf("%s: %w", who, err)
+			return exports.Prefixed(who, err)
 		}
 		if l.Link != "" {
 			if strings.ContainsFunc(l.Link, unicode.IsControl) {
@@ -809,7 +809,8 @@ func (l Module) besideOnly() error {
 	for _, kind := range l.Exclude.KindNames() {
 		for _, name := range l.Exclude.Kinds[kind] {
 			if slices.Contains(l.Only.Kinds[kind], name) {
-				return fmt.Errorf("%s/%s is listed in only and in exclude; list it in one", accesskey.ShownName(kind, false), accesskey.ShownName(name, false))
+				entry := accesskey.ShownName(kind, false) + "/" + accesskey.ShownName(name, false)
+				return exports.Refuse(fmt.Sprintf("Remove %s from the only or the exclude of %s in %s.", entry, exports.ModulePlace, exports.FilePlace), fmt.Sprintf("Both blocks list %s.", entry))
 			}
 		}
 	}

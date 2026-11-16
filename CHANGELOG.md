@@ -346,6 +346,9 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Changed
 
+- A compose refusal starts with the fix, on a first line of at most 100 characters, and
+  gives the cause and the values on the indented lines after it, as the refusals of
+  workflow hooks do. Which input fails, and the exit status, stay the same.
 - qory builds with Forager main 37dc0148. A run keeps its wall only when a container of
   the run may still run; a network or folder of the wall that could not be removed no longer
   keeps it.
