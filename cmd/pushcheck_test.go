@@ -140,7 +140,7 @@ func TestNotesThatAreNotAListStopTheFetch(t *testing.T) {
 	}
 	dir := t.TempDir()
 	err = fetch(context.Background(), dir, []string{"build-plan"})
-	want := "Report this run to the instance admin of Qory Apiary. The notes in the run API's response are not a JSON array."
+	want := "Contact support: the notes in the run API's response are not a JSON array."
 	if err == nil || err.Error() != want {
 		t.Errorf("the fetch = %v, want %q", err, want)
 	}
