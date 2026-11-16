@@ -347,6 +347,38 @@ func ReadManifestIn(root *os.Root, dir string) (*Manifest, error) {
 	return parseManifest(dir, data, err)
 }
 
+// CausedRefusal is a [exports.Refusal] that unwraps to the error that caused it, so a caller
+// still matches that error, such as a *yaml.TypeError, with errors.As. The refusal's text
+// has the cause only as the caller printed it, with any value that contains a secret left
+// out, and the cause under Unwrap is as [exports.HideValueError] returns it.
+type CausedRefusal struct {
+	*exports.Refusal
+	cause error
+}
+
+// Caused is a [CausedRefusal] of cause with the fix and the lines after it, as
+// [exports.Refuse] writes them.
+func Caused(cause error, fix string, lines ...string) error {
+	return &CausedRefusal{exports.Refuse(fix, lines...), cause}
+}
+
+// Unwrap returns the error that caused the refusal.
+func (c *CausedRefusal) Unwrap() error { return c.cause }
+
+// In is the refusal with file at [exports.FilePlace], as [exports.Refusal.In].
+func (c *CausedRefusal) In(file string) error {
+	return &CausedRefusal{c.Refusal.In(file).(*exports.Refusal), c.cause}
+}
+
+// Prefixed is err with prefix at [exports.ModulePlace] when err is a [CausedRefusal], and
+// otherwise as [exports.Prefixed] returns it.
+func Prefixed(prefix string, err error) error {
+	if c, ok := err.(*CausedRefusal); ok {
+		return &CausedRefusal{exports.Prefixed(prefix, c.Refusal).(*exports.Refusal), c.cause}
+	}
+	return exports.Prefixed(prefix, err)
+}
+
 // parseManifest is the manifest of the module directory dir in data, the bytes a read of
 // its qory-module.yaml returned, or the refusal of err, that read's error.
 func parseManifest(dir string, data []byte, err error) (*Manifest, error) {
@@ -363,6 +395,11 @@ func parseManifest(dir string, data []byte, err error) (*Manifest, error) {
 	path = exports.HidePath(path)
 	refuse := func(fix string, lines ...string) error {
 		return exports.Refuse(fix, append(lines, "The manifest is "+path+".")...)
+	}
+	// caused is refuse for a refusal that unwraps to err, with its text as HideValueError prints it.
+	caused := func(err error, fix string) error {
+		err = exports.HideValueError(err, "")
+		return Caused(err, fix, err.Error(), "The manifest is "+path+".")
 	}
 	raw := rawManifest{}
 	dec := yaml.NewDecoder(strings.NewReader(string(data)))
@@ -448,7 +485,7 @@ func parseManifest(dir string, data []byte, err error) (*Manifest, error) {
 			return nil, in.In(path)
 		}
 		if err != nil {
-			return nil, refuse(fmt.Sprintf("Correct %s in the manifest.", part.key), exports.HideValueError(err, "").Error())
+			return nil, caused(err, fmt.Sprintf("Correct %s in the manifest.", part.key))
 		}
 		if part.to == nil {
 			m.Roles = one
@@ -459,14 +496,14 @@ func parseManifest(dir string, data []byte, err error) (*Manifest, error) {
 	for name, node := range raw.Variants {
 		if name == "default" {
 			if err := node.Decode(&m.Default); err != nil {
-				return nil, refuse("Set variants.default to a variant name, or fail.", exports.HideValueError(err, "").Error())
+				return nil, caused(err, "Set variants.default to a variant name, or fail.")
 			}
 			continue
 		}
 		v := Variant{}
 		if err := node.Decode(&v); err != nil {
 			// The decoder quotes up to ten characters of a value that is not a map.
-			return nil, refuse(fmt.Sprintf("Set variants.%s to a map of a kind to a directory.", accesskey.ShownName(name, false)), exports.HideValueError(err, "").Error())
+			return nil, caused(err, fmt.Sprintf("Set variants.%s to a map of a kind to a directory.", accesskey.ShownName(name, false)))
 		}
 		if m.Variants == nil {
 			m.Variants = map[string]Variant{}

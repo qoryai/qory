@@ -84,8 +84,8 @@ func TestTiersRefuseAMistake(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, "qory.yaml")
 	for body, want := range map[string]string{
-		"harness:\n  tiers:\n    heavy: claude-haiku-5-5\n":                       "harness.tiers.heavy: use one of the tiers light, fast and thinking; heavy is not a tier",
-		"harness:\n  tiers:\n    \"he\\eavy\": a\n":                               `harness.tiers.he\x1bavy: use one of the tiers light, fast and thinking; he\x1bavy is not a tier`,
+		"harness:\n  tiers:\n    heavy: claude-haiku-5-5\n":                       "Use one of the tiers light, fast, and thinking.\n  heavy is not a tier.\n  The name is in harness.tiers.heavy.",
+		"harness:\n  tiers:\n    \"he\\eavy\": a\n":                               "Use one of the tiers light, fast, and thinking.\n  he\\x1bavy is not a tier.\n  The name is in harness.tiers.he\\x1bavy.",
 		"harness:\n  tiers:\n    light: [a, b]\n":                                 "harness.tiers.light: write a model id, or {model: <model id>, effort: <value>}",
 		"harness:\n  tiers:\n    light: 5\n":                                      "harness.tiers.light: write a model id, or {model: <model id>, effort: <value>}",
 		"harness:\n  tiers:\n    light: \"\"\n":                                   "harness.tiers.light: write a model id, or {model: <model id>, effort: <value>}",

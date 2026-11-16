@@ -274,6 +274,10 @@ func TestAManifestValueWithASecretIsLeftOutOfItsRefusal(t *testing.T) {
 		if err == nil || err.Error() != want {
 			t.Errorf("%q: %v, want %q", c.body, err, want)
 		}
+		var typeErr *yaml.TypeError
+		if strings.Contains(c.body, "variants") && !errors.As(err, &typeErr) {
+			t.Errorf("%q: %v, want a *yaml.TypeError", c.body, err)
+		}
 	}
 }
 

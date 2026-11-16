@@ -333,7 +333,7 @@ func ComposeWith(p *stack.Stack, opts Options) (_ *Result, err error) {
 			o.m, err = module.ReadManifest(src.Dir)
 		}
 		if err != nil {
-			return nil, exports.Prefixed(who, err)
+			return nil, module.Prefixed(who, err)
 		}
 		if afterManifest != nil {
 			afterManifest(src.Dir)
@@ -450,7 +450,7 @@ func ComposeWith(p *stack.Stack, opts Options) (_ *Result, err error) {
 					res.Settings[runtime][file] = map[string]any{}
 				}
 				if err := mergeFile(res, runtime, file, path, name, opts.Env, readFile); err != nil {
-					return nil, exports.Prefixed("module "+shown(name), err)
+					return nil, module.Prefixed("module "+shown(name), err)
 				}
 			}
 		}
@@ -1539,29 +1539,31 @@ func collisions(owners map[string][]string, modules []Module, base *Base, checko
 // A key path another module set to a different value is an error, unless it is env.<NAME>
 // and decided lists NAME: the configuration's value is written then, whatever the
 // fragments set.
-func mergeFile(res *Result, runtime, file, path, module string, decided map[string]string, readFile func(string) ([]byte, error)) error {
+func mergeFile(res *Result, runtime, file, path, modName string, decided map[string]string, readFile func(string) ([]byte, error)) error {
 	data, err := readFile(path)
 	if err != nil {
-		return exports.Prefixed("module "+shown(module), exports.HideError(err))
+		return exports.Prefixed("module "+shown(modName), exports.HideError(err))
 	}
 	src := map[string]any{}
 	switch filepath.Ext(path) {
 	case ".json":
 		if err := json.Unmarshal(data, &src); err != nil {
-			return exports.Refuse(fmt.Sprintf("Correct the JSON in the settings fragment of module %s.", shown(module)),
-				exports.HideValueError(err, "").Error(), "The file is "+exports.HidePath(path)+".")
+			err = exports.HideValueError(err, "")
+			return module.Caused(err, fmt.Sprintf("Correct the JSON in the settings fragment of module %s.", shown(modName)),
+				err.Error(), "The file is "+exports.HidePath(path)+".")
 		}
 	case ".toml":
 		if err := toml.Unmarshal(data, &src); err != nil {
-			return exports.Refuse(fmt.Sprintf("Correct the TOML in the settings fragment of module %s.", shown(module)),
-				exports.HideValueError(err, "").Error(), "The file is "+exports.HidePath(path)+".")
+			err = exports.HideValueError(err, "")
+			return module.Caused(err, fmt.Sprintf("Correct the TOML in the settings fragment of module %s.", shown(modName)),
+				err.Error(), "The file is "+exports.HidePath(path)+".")
 		}
 		src = normalize(src).(map[string]any)
 	default:
-		return exports.Refuse(fmt.Sprintf("Rename the settings fragment of module %s to end in .json or .toml.", shown(module)),
+		return exports.Refuse(fmt.Sprintf("Rename the settings fragment of module %s to end in .json or .toml.", shown(modName)),
 			"The file is "+exports.HidePath(path)+".")
 	}
-	m := &merger{file: "settings/" + runtime + "/" + file, module: module, setBy: res.setBy}
+	m := &merger{file: "settings/" + runtime + "/" + file, module: modName, setBy: res.setBy}
 	dst := res.Settings[runtime][file]
 	for _, key := range sortedKeys(src) {
 		v := src[key]

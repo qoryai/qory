@@ -1,9 +1,14 @@
 package compose_test
 
 import (
+	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 	"unicode/utf8"
+
+	"github.com/BurntSushi/toml"
+	"gopkg.in/yaml.v3"
 
 	"github.com/qoryai/qory/internal/exports"
 	"github.com/qoryai/qory/internal/stack"
@@ -96,6 +101,35 @@ func TestAFixLineHasAtMost100CharactersWithNamesOf64Characters(t *testing.T) {
 				if strings.Contains(lines[0], exports.Short(name)) && !strings.Contains(strings.Join(lines[1:], "\n"), name) {
 					t.Errorf("the first line has %s shortened, and no later line has it whole:\n%s", exports.Short(name), err)
 				}
+			}
+		})
+	}
+}
+
+// TestAFixFirstRefusalKeepsTheErrorThatCausedIt is a settings fragment that is no JSON or
+// TOML and a manifest whose variant is no map, composed: the refusal starts with its fix,
+// has the module, and still matches the decoder's error with errors.As.
+func TestAFixFirstRefusalKeepsTheErrorThatCausedIt(t *testing.T) {
+	var syntax *json.SyntaxError
+	var parse toml.ParseError
+	var typed *yaml.TypeError
+	for _, c := range []struct {
+		name  string
+		files map[string]string
+		as    any
+		fix   string
+	}{
+		{"a JSON fragment", map[string]string{stack.FileName: twoModules, "modules/a/settings/claude/settings.json": "{\n", "modules/b/": ""}, &syntax, "Correct the JSON in the settings fragment of module a.\n"},
+		{"a TOML fragment", map[string]string{stack.FileName: twoModules, "modules/a/settings/claude/settings.toml": "model = \n", "modules/b/": ""}, &parse, "Correct the TOML in the settings fragment of module a.\n"},
+		{"a variant that is no map", map[string]string{stack.FileName: twoModules, "modules/a/qory-module.yaml": "apiVersion: qory.dev/v1alpha1\nname: a\nvariants:\n  codex: agents/codex\n", "modules/b/": ""}, &typed, "Set variants.codex to a map of a kind to a directory.\n"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			_, err := composeTree(t, c.files)
+			if err == nil || !strings.HasPrefix(err.Error(), c.fix) {
+				t.Fatalf("err = %v, want it to start with %q", err, c.fix)
+			}
+			if !errors.As(err, c.as) {
+				t.Errorf("err = %v, want it to match %T", err, c.as)
 			}
 		})
 	}

@@ -140,7 +140,7 @@ func TestConfigRefusalsPrintAPhraseForASecret(t *testing.T) {
 		{"harness: {links: qrk_l}\n", "harness.links " + runKeyValue + " is not checkout or none"},
 		{"git: {timeout: qak_t}\n", "git.timeout " + accessKeyValue + " is not a duration above zero, such as 10m"},
 		{"env: {QAK_X-1: v}\n", "env: " + accessKeyPhrase + " is not an environment variable name"},
-		{"harness: {tiers: {qak_tier: m}}\n", "harness.tiers." + accessKeyPhrase + ": use one of the tiers light, fast and thinking; " + accessKeyPhrase + " is not a tier"},
+		{"harness: {tiers: {qak_tier: m}}\n", "Use one of the tiers light, fast, and thinking.\n  " + accessKeyPhrase + " is not a tier.\n  The name is in harness.tiers." + accessKeyPhrase + "."},
 		{"harness: {tiers: {fast: \"${qory:qak_x}\"}}\n", "harness.tiers.fast: write a model id; " + accessKeyValue + " is a tier placeholder, which goes only in an agent's model"},
 		{"worktree: {name: qak_w}\n", "worktree.name " + accessKeyValue + " contains no {branch}, and without it two worktrees share one directory"},
 		{"worktree: {name: \"qak_/{branch}\"}\n", "worktree.name " + accessKeyValue + " contains a slash; it is one directory name under worktree.dir"},

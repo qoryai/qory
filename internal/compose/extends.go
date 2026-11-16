@@ -216,7 +216,7 @@ func checkExtending(l *module.Module, base *Base) error {
 		for _, f := range files {
 			keys, err := leafKeys(l.Settings[rt][f])
 			if err != nil {
-				return exports.Prefixed("module "+shown(l.Name), err)
+				return module.Prefixed("module "+shown(l.Name), err)
 			}
 			for _, key := range keys {
 				if !settingAllowed(key, base.Extending.Settings) {
@@ -246,7 +246,8 @@ func settingAllowed(key string, allowed []string) bool {
 func leafKeys(path string) ([]string, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, exports.Refuse("Check that you can read the settings fragment of "+exports.ModulePlace+".", exports.HideError(err).Error())
+		err = exports.HideError(err)
+		return nil, module.Caused(err, "Check that you can read the settings fragment of "+exports.ModulePlace+".", err.Error())
 	}
 	doc := map[string]any{}
 	switch filepath.Ext(path) {
@@ -258,7 +259,8 @@ func leafKeys(path string) ([]string, error) {
 		return nil, exports.Refuse("Rename the settings fragment of "+exports.ModulePlace+" to end in .json or .toml.", "The file is "+exports.HidePath(path)+".")
 	}
 	if err != nil {
-		return nil, exports.Refuse("Correct the settings fragment of "+exports.ModulePlace+".", exports.HideValueError(err, "").Error(), "The file is "+exports.HidePath(path)+".")
+		err = exports.HideValueError(err, "")
+		return nil, module.Caused(err, "Correct the settings fragment of "+exports.ModulePlace+".", err.Error(), "The file is "+exports.HidePath(path)+".")
 	}
 	var keys []string
 	var walk func(prefix string, v any)
