@@ -26,9 +26,9 @@ release may change what an existing document does, and states it under Upgrading
   folder, and prints `qory run: installed claude <version>`. The runs of a pool share one
   runtimes folder in the pool's folder. Each run holds its version until it ends, and
   each install removes older versions that an install made, and temporary entries, that
-  no run holds, and, with a wall in `forager.yaml`, keeps a version's folder that a running
-  container mounts, and removes none when the engine does not list its mounts. Two runs
-  that need one version read its tarball once. A 503 or 429 from
+  no run holds. With a wall in `forager.yaml`, it keeps a version's folder that a running
+  container mounts, and removes no version's folder when the engine does not list the
+  mounts. Two runs that need one version read its tarball once. A 503 or 429 from
   the registry is retried until the registry answers or the run ends, with its time
   limit, a cancel or SIGTERM. A request waits at most 30 seconds to
   connect, 30 seconds for the TLS handshake, 60 seconds for the response's headers and
