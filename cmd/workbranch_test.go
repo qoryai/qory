@@ -50,7 +50,8 @@ func branchAPI(t *testing.T, file string) string {
 	return server.URL + "/v1/runs/r"
 }
 
-// runOnBranch is [runAtVersion] with the run API at api, and the steps of the run.
+// runOnBranch is [runAtVersion] with the run API at api, and the steps of the run, with
+// the flags after a home outside the checkout.
 func runOnBranch(t *testing.T, h *hostFetch, version, api string, flags ...string) (string, error, keyRun, []cmd.StepEvent) {
 	t.Helper()
 	g := newCodeRelay(t)
@@ -70,7 +71,7 @@ func runOnBranch(t *testing.T, h *hostFetch, version, api string, flags ...strin
 		OnStep: func(e cmd.StepEvent) { steps = append(steps, e) },
 	})
 	defer restore()
-	out, err := run(t, append([]string{"run", "--run-code-file", codeFile(t, g.code()), "--gateway", g.URL}, flags...)...)
+	out, err := run(t, append([]string{"run", "--run-code-file", codeFile(t, g.code()), "--gateway", g.URL, "--home", filepath.Join(tempDir(t), "home")}, flags...)...)
 	return out, err, keyRun{closes: closes(), joined: errors.Is(err, cmd.ErrJoinedNowhere)}, steps
 }
 

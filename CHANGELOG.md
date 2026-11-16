@@ -346,7 +346,12 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Changed
 
-- qory builds with Forager main 37dc0148. A run keeps its wall only when a container of
+- A run from a run code that may write the checkout needs a wall: with no wall, it stops
+  after the compose, exit 1, and closes `failed` with `write_needs_wall`, since its agent
+  would run as this machine's user. A run is such a run when neither `access` in its
+  documents nor its workflow's access in the stack is `read`. A run you start yourself has
+  no run code and still runs without a wall. See §Read workflows in `docs/run.md`.
+- qory builds with Forager c68503c1. A run keeps its wall only when a container of
   the run may still run; a network or folder of the wall that could not be removed no longer
   keeps it.
 - `qory gateway` keeps its runs when SIGINT or SIGTERM stops it: a gateway started again

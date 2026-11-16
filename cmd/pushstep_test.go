@@ -244,7 +244,8 @@ type pushRepo struct {
 func (p *pushRepo) record() string { return filepath.Join(p.runsDir, p.runID, "session.jsonl") }
 
 // newPushRepo serves acme/site at one commit, whose stack declares the workflow hello
-// with access, and takes a push.
+// with access, and takes a push. The run is behind the wall of the fake docker, with a
+// home outside the checkout, since a run from a run code that may write needs a wall.
 func newPushRepo(t *testing.T, access string) *pushRepo {
 	t.Helper()
 	return newPushRepoWith(t, access, nil)
@@ -266,6 +267,9 @@ func newPushRepoWith(t *testing.T, access string, extra map[string]string) *push
 	maps.Copy(files, extra)
 	first := h.server.Repository(t, "acme/site", "main", files)
 	p := &pushRepo{h: h, api: newPushAPI(t), first: first, bare: filepath.Join(h.server.Root, "acme", "site.git"), repositories: "acme/site"}
+	docker, _ := fakeDocker(t)
+	walledBy(t, docker)
+	p.flags = []string{"--home", filepath.Join(tempDir(t), "home")}
 	proxygittest.Git(t, p.bare, "config", "http.receivepack", "true")
 	t.Cleanup(cmd.SetBranchWait(func(d time.Duration) { p.waits = append(p.waits, d) }))
 	return p
@@ -1171,9 +1175,6 @@ func TestAWalledRunPushes(t *testing.T) {
 	p.h.server.Repository(t, "acme/lib", "main", map[string]string{"lib.txt": "lib\n"})
 	proxygittest.Git(t, filepath.Join(p.h.server.Root, "acme", "lib.git"), "config", "http.receivepack", "true")
 	p.repositories = "acme/site,acme/lib"
-	docker, _ := fakeDocker(t)
-	walledBy(t, docker)
-	p.flags = []string{"--home", filepath.Join(tempDir(t), "home")}
 	r := p.run(t, func(dir string) {
 		writeFile(t, filepath.Join(dir, "left.txt"), "left\n")
 		writeFile(t, filepath.Join(dir, ".qory", "repositories", "acme", "lib", "left.txt"), "left\n")
@@ -1188,9 +1189,6 @@ func TestAWalledRunPushes(t *testing.T) {
 // used, which comes first: the line has its words.
 func TestAWalledRunWithAnAddedKeyFailsTheStep(t *testing.T) {
 	p := newPushRepo(t, "write")
-	docker, _ := fakeDocker(t)
-	walledBy(t, docker)
-	p.flags = []string{"--home", filepath.Join(tempDir(t), "home")}
 	r := p.run(t, func(dir string) {
 		writeFile(t, filepath.Join(dir, "left.txt"), "left\n")
 		proxygittest.Git(t, dir, "config", "core.fsmonitor", "/bin/false")
@@ -1282,87 +1280,73 @@ func subcommand(args []string) string {
 }
 
 // TestEveryGitOfThePushStepIsHardened records each git of the record after the setup and
-// of the push step: each reads no system or global configuration file, and each has
-// [proxygit.Hardened].
+// of the push step of a walled run: each reads no system or global configuration file,
+// and each has [proxygit.Hardened].
 func TestEveryGitOfThePushStepIsHardened(t *testing.T) {
-	for name, walled := range map[string]bool{"unwalled": false, "walled": true} {
-		t.Run(name, func(t *testing.T) {
-			p := newPushRepo(t, "write")
-			if walled {
-				docker, _ := fakeDocker(t)
-				walledBy(t, docker)
-				p.flags = []string{"--home", filepath.Join(tempDir(t), "home")}
-			}
-			// The values of the test differ from the ones the step must set.
-			empty := filepath.Join(tempDir(t), "gitconfig")
-			writeFile(t, empty, "")
-			t.Setenv("GIT_CONFIG_NOSYSTEM", "0")
-			t.Setenv("GIT_CONFIG_SYSTEM", empty)
-			t.Setenv("GIT_CONFIG_GLOBAL", empty)
-			calls := recordGit(t, empty)
-			// A walled run records what its setup left, so the calls start there.
-			const mark = "the calls start here"
-			startCalls := func() {
-				before, err := os.ReadFile(calls)
-				if err != nil {
-					t.Fatal(err)
-				}
-				writeFile(t, calls, string(before)+mark+"\n")
-			}
-			if walled {
-				p.setup = func(string) { startCalls() }
-			}
-			r := p.run(t, func(dir string) {
-				writeFile(t, filepath.Join(dir, "left.txt"), "left\n")
-				if !walled {
-					startCalls()
-				}
-			}, nil)
-			r.wantsClose(t, event.StateSucceeded, 0)
-			log, err := os.ReadFile(calls)
-			if err != nil {
-				t.Fatal(err)
-			}
-			_, step, ok := strings.Cut(string(log), mark+"\n")
-			if !ok {
-				t.Fatalf("the file of calls has no line %q:\n%s", mark, log)
-			}
-			seen := map[string]bool{}
-			for line := range strings.Lines(step) {
-				parts := strings.SplitN(strings.TrimSuffix(line, "\n"), "|", 5)
-				if len(parts) != 5 {
-					t.Fatalf("the line %q has no five parts", line)
-				}
-				nosystem, global, proxy, ceiling, all := parts[0], parts[1], parts[2], parts[3], parts[4]
-				args := strings.Fields(all)
-				if nosystem != "1" || global != os.DevNull {
-					t.Errorf("git %s has GIT_CONFIG_NOSYSTEM=%q and GIT_CONFIG_GLOBAL=%q", all, nosystem, global)
-				}
-				sub := subcommand(args)
-				seen[sub] = true
-				if strings.Contains(proxy, "@") && sub != "push" {
-					t.Errorf("git %s reaches no remote and has the password of the proxy %q", all, proxy)
-				}
-				keyList := sub == "config" && strings.Contains(all, "--name-only")
-				if !strings.Contains(strings.Join(args, " "), strings.Join(proxygit.Hardened, " ")) {
-					t.Errorf("git %s has no options %v", all, proxygit.Hardened)
-				}
-				if keyList {
-					continue
-				}
-				if ceiling == "" {
-					t.Errorf("git %s has no GIT_CEILING_DIRECTORIES", all)
-				}
-				if !strings.Contains(all, "-c gc.auto=0 -c maintenance.auto=false") {
-					t.Errorf("git %s has no maintenance options", all)
-				}
-			}
-			for _, want := range []string{"config", "status", "reset", "add", "diff", "commit", "rev-parse", "merge-base", "push"} {
-				if !seen[want] {
-					t.Errorf("the step ran no git %s:\n%s", want, step)
-				}
-			}
-		})
+	p := newPushRepo(t, "write")
+	// The values of the test differ from the ones the step must set.
+	empty := filepath.Join(tempDir(t), "gitconfig")
+	writeFile(t, empty, "")
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "0")
+	t.Setenv("GIT_CONFIG_SYSTEM", empty)
+	t.Setenv("GIT_CONFIG_GLOBAL", empty)
+	calls := recordGit(t, empty)
+	// A walled run records what its setup left, so the calls start there.
+	const mark = "the calls start here"
+	startCalls := func() {
+		before, err := os.ReadFile(calls)
+		if err != nil {
+			t.Fatal(err)
+		}
+		writeFile(t, calls, string(before)+mark+"\n")
+	}
+	p.setup = func(string) { startCalls() }
+	r := p.run(t, func(dir string) {
+		writeFile(t, filepath.Join(dir, "left.txt"), "left\n")
+	}, nil)
+	r.wantsClose(t, event.StateSucceeded, 0)
+	log, err := os.ReadFile(calls)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, step, ok := strings.Cut(string(log), mark+"\n")
+	if !ok {
+		t.Fatalf("the file of calls has no line %q:\n%s", mark, log)
+	}
+	seen := map[string]bool{}
+	for line := range strings.Lines(step) {
+		parts := strings.SplitN(strings.TrimSuffix(line, "\n"), "|", 5)
+		if len(parts) != 5 {
+			t.Fatalf("the line %q has no five parts", line)
+		}
+		nosystem, global, proxy, ceiling, all := parts[0], parts[1], parts[2], parts[3], parts[4]
+		args := strings.Fields(all)
+		if nosystem != "1" || global != os.DevNull {
+			t.Errorf("git %s has GIT_CONFIG_NOSYSTEM=%q and GIT_CONFIG_GLOBAL=%q", all, nosystem, global)
+		}
+		sub := subcommand(args)
+		seen[sub] = true
+		if strings.Contains(proxy, "@") && sub != "push" {
+			t.Errorf("git %s reaches no remote and has the password of the proxy %q", all, proxy)
+		}
+		keyList := sub == "config" && strings.Contains(all, "--name-only")
+		if !strings.Contains(strings.Join(args, " "), strings.Join(proxygit.Hardened, " ")) {
+			t.Errorf("git %s has no options %v", all, proxygit.Hardened)
+		}
+		if keyList {
+			continue
+		}
+		if ceiling == "" {
+			t.Errorf("git %s has no GIT_CEILING_DIRECTORIES", all)
+		}
+		if !strings.Contains(all, "-c gc.auto=0 -c maintenance.auto=false") {
+			t.Errorf("git %s has no maintenance options", all)
+		}
+	}
+	for _, want := range []string{"config", "status", "reset", "add", "diff", "commit", "rev-parse", "merge-base", "push"} {
+		if !seen[want] {
+			t.Errorf("the step ran no git %s:\n%s", want, step)
+		}
 	}
 }
 
@@ -1415,9 +1399,6 @@ func TestACredentialHelperOfAConfigFileIsNotRead(t *testing.T) {
 func walledPush(t *testing.T) *pushRepo {
 	t.Helper()
 	p := newPushRepo(t, "write")
-	docker, _ := fakeDocker(t)
-	walledBy(t, docker)
-	p.flags = []string{"--home", filepath.Join(tempDir(t), "home")}
 	p.setup = func(dir string) {
 		writeFile(t, filepath.Join(dir, "lock.txt"), "the setup\n")
 		writeFile(t, filepath.Join(dir, "README.md"), "the setup\n")
@@ -1426,27 +1407,18 @@ func walledPush(t *testing.T) *pushRepo {
 }
 
 // TestTheIdentityOfTheAgentDoesNotLoseTheWork is an agent that set user.name and user.email
-// to commit, with and without a wall, whose two gates each take those keys. Another key
-// stays stopped.
+// to commit, behind a wall, whose two gates each take those keys. Another key stays
+// stopped.
 func TestTheIdentityOfTheAgentDoesNotLoseTheWork(t *testing.T) {
-	for name, walled := range map[string]bool{"unwalled": false, "walled": true} {
-		t.Run(name, func(t *testing.T) {
-			var p *pushRepo
-			if walled {
-				p = walledPush(t)
-			} else {
-				p = newPushRepo(t, "write")
-			}
-			r := p.run(t, func(dir string) {
-				proxygittest.Git(t, dir, "config", "user.name", "Agent")
-				proxygittest.Git(t, dir, "config", "user.email", "agent@example.com")
-				writeFile(t, filepath.Join(dir, "left.txt"), "left\n")
-			}, nil)
-			r.wantsClose(t, event.StateSucceeded, 0)
-			if p.branchHead(t) == "" {
-				t.Errorf("the forge has no branch\n%s", r.out)
-			}
-		})
+	p := walledPush(t)
+	r := p.run(t, func(dir string) {
+		proxygittest.Git(t, dir, "config", "user.name", "Agent")
+		proxygittest.Git(t, dir, "config", "user.email", "agent@example.com")
+		writeFile(t, filepath.Join(dir, "left.txt"), "left\n")
+	}, nil)
+	r.wantsClose(t, event.StateSucceeded, 0)
+	if p.branchHead(t) == "" {
+		t.Errorf("the forge has no branch\n%s", r.out)
 	}
 }
 
@@ -1509,33 +1481,6 @@ func TestAWalledRunRemovesAStaleIndexLock(t *testing.T) {
 			wants(t, r.log(), "which the agent left when it stopped")
 			if posts, _, _ := p.api.counts(); posts != 1 {
 				t.Errorf("%d POST, want 1", posts)
-			}
-		})
-	}
-}
-
-// TestAnUnwalledRunWithAnIndexLockFailsTheStep is an agent on the host, whose stop leaves
-// no proof, in the target and in a further repository: the lock stays, nothing is pushed.
-func TestAnUnwalledRunWithAnIndexLockFailsTheStep(t *testing.T) {
-	for name, folder := range map[string]string{"target": "", "further": filepath.Join(".qory", "repositories", "acme", "lib")} {
-		t.Run(name, func(t *testing.T) {
-			p := newPushRepo(t, "write")
-			p.h.server.Repository(t, "acme/lib", "main", map[string]string{"lib.txt": "lib\n"})
-			proxygittest.Git(t, filepath.Join(p.h.server.Root, "acme", "lib.git"), "config", "http.receivepack", "true")
-			p.repositories = "acme/site,acme/lib"
-			var lock string
-			r := p.run(t, func(dir string) {
-				lock = filepath.Join(dir, folder, ".git", "index.lock")
-				writeFile(t, filepath.Join(dir, folder, "left.txt"), "left\n")
-				writeFile(t, lock, "")
-			}, nil)
-			r.wantsClose(t, event.StateFailed, 1)
-			wants(t, r.out, "has .git/index.lock and the stop of the agent is not proven")
-			if _, err := os.Lstat(lock); err != nil {
-				t.Errorf("the lock is gone: %v", err)
-			}
-			if posts, _, _ := p.api.counts(); posts != 0 {
-				t.Errorf("%d POST, want 0", posts)
 			}
 		})
 	}

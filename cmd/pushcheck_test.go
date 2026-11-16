@@ -103,7 +103,7 @@ var checksModule = map[string]string{
 
 // newCheckedRepo is [newPushRepoWith] whose harness has [checksModule] beside hello,
 // for a walled run with the engine docker and a home outside the checkout, which it
-// returns; with docker "", for an unwalled run.
+// returns; with docker "", for a run with no wall section in forager.yaml.
 func newCheckedRepo(t *testing.T, docker string) (*pushRepo, string) {
 	t.Helper()
 	files := map[string]string{}
@@ -115,6 +115,10 @@ func newCheckedRepo(t *testing.T, docker string) (*pushRepo, string) {
 	files["qory.yaml"] = ownStack(stack)
 	p := newPushRepoWith(t, "write", files)
 	if docker == "" {
+		if err := os.Remove(filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "forager.yaml")); err != nil {
+			t.Fatal(err)
+		}
+		p.flags = nil
 		return p, ""
 	}
 	walledBy(t, docker)
@@ -277,17 +281,21 @@ func TestAWalledRunWithoutPushChecksChecksNothing(t *testing.T) {
 	}
 }
 
-// TestAnUnwalledRunSetsNoCheck is an unwalled run whose harness declares push checks:
-// it sets no run API check, and its push step stores the version unchecked.
+// TestAnUnwalledRunSetsNoCheck is a write run with no wall whose harness declares push
+// checks: it stops before the join with write_needs_wall, sets no run API check, and
+// posts no version.
 func TestAnUnwalledRunSetsNoCheck(t *testing.T) {
 	p, _ := newCheckedRepo(t, "")
 	r := p.run(t, func(dir string) { writeFile(t, filepath.Join(dir, "left.txt"), "left\n") }, nil)
-	r.wantsClose(t, event.StateSucceeded, 0)
+	r.wantsClose(t, event.StateFailed, 1)
+	if want := []session.Outcome{{State: "failed", Reason: "write_needs_wall", ExitCode: -1}}; !slices.Equal(r.closes, want) {
+		t.Errorf("the run closed with %v, want %v", r.closes, want)
+	}
 	if slices.Contains(r.calls, "set run API check") {
 		t.Errorf("the unwalled run set a run API check: %v", r.calls)
 	}
-	if posts, _, stored := p.api.counts(); posts != 1 || stored != 1 {
-		t.Errorf("%d POST and %d versions, want 1 and 1\n%s", posts, stored, r.out)
+	if posts, _, stored := p.api.counts(); posts != 0 || stored != 0 {
+		t.Errorf("%d POST and %d versions, want none\n%s", posts, stored, r.out)
 	}
 }
 

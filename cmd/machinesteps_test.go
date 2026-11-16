@@ -20,8 +20,9 @@ var machineSteps = `{"name":"boot","started":"2026-11-06T00:31:44.104Z","ended":
 
 // machineRun runs qory run from a run code whose documents set the target acme/site on
 // git.test at its first commit, as [runAtVersion] does, with --machine-steps-file
-// path, and returns the output, the error, what the run came to and the events of its
-// host steps. stepErr, when not nil, is the run's [cmd.Nowhere.StepErr].
+// path and a home outside the checkout, and returns the output, the error, what the run
+// came to and the events of its host steps. stepErr, when not nil, is the run's
+// [cmd.Nowhere.StepErr].
 func machineRun(t *testing.T, path string, stepErr func(string) error) (string, error, keyRun, []cmd.StepEvent) {
 	t.Helper()
 	h, first, _, _ := versionRepository(t)
@@ -43,7 +44,7 @@ func machineRun(t *testing.T, path string, stepErr func(string) error) (string, 
 		StepErr: stepErr,
 	})
 	defer restore()
-	out, err := run(t, "run", "--run-code-file", codeFile(t, g.code()), "--gateway", g.URL, "--machine-steps-file", path)
+	out, err := run(t, "run", "--run-code-file", codeFile(t, g.code()), "--gateway", g.URL, "--machine-steps-file", path, "--home", filepath.Join(tempDir(t), "home"))
 	return out, err, keyRun{closes: closes(), joined: errors.Is(err, cmd.ErrJoinedNowhere)}, steps
 }
 
