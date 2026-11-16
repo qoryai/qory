@@ -202,7 +202,7 @@ schema is [config.schema.json](config.schema.json).
 | `modules[].variant` | no | forces one of the module's variants instead of the one with the targeted runtime's name |
 | `modules[].link` | no | a name at the checkout root, one path segment, linked to the module's directory in the composed tree, so a permission rule or a script refers to the module's files by a checkout-relative path: `harness/scripts/check.sh`. A hard link (§Rendering), each name used once across the modules |
 | `bind` | no | the entry that fills each role a document references (§References), by kind and then by role, to the name of one entry of that kind: `bind: {agents: {coder: rails-coder}}`. The kind is `agents`, `skills` or `commands`. A role's value is one name. A group role (§References) takes a list of agents, `bind: {agents: {reviewers: [code-reviewer, python-reviewer]}}`, and only a group role takes one. A flat key, `agents/coder: rails-coder`, is refused with `Write bind as bind.agents.coder: rails-coder in qory.yaml: bind keys are kinds, and agents/coder is a kind and a role.` A checkout's `bind` sets a role over the base's `bind` and over the modules' `provides` |
-| `extensions` | no | a map of keys the author chooses, each a value of any shape, a scalar, a list or a map of any depth; written into the report as it is and printed by `qory harness inspect`; qory reads nothing in it |
+| `extensions` | no | a map of keys the author chooses, each a value of any shape, a scalar, a list or a map of any depth; written into the report as it is and printed by `qory harness inspect`; qory reads nothing in it. A run from a run key or a run code writes the report's `extensions` into the home as `harness-extensions.json` and sets `QORY_HARNESS_EXTENSIONS` to its path (§Launching) |
 | `workflows` | no | the settings of each workflow of the stack, by its name: a lower-case letter, then up to 54 lower-case letters, digits and hyphens, 55 characters at most, so `workflow-<name>` has at most 64 characters. A run that Qory Apiary dispatches from a run code starts the first of these that the runtime can start: the skill `workflow-<name>`, the command `workflow-<name>`, the skill `<name>`, the command `<name>` (docs/run.md, §The run key from a run code). A plain name works, and when a harness ships both names, the prefixed one runs. The compose fails with status 2 for each workflow that no module of the stack composes as a skill or command under either name, after the modules' `exclude` and `only`: `add a skill or command workflow-<name> to a module of the base stack <stack>, or remove <name> from the workflows of its qory-stack.yaml: the stack declares the workflow <name>, and none of its modules ships a skill or command workflow-<name> or <name>`, or, for a stack that extends none, `add a skill or command workflow-<name> to a module of the stack in <file>, or remove <name> from its workflows: …`, where `<file>` is the `qory-stack.yaml` or the `qory.yaml` that defines the stack. For a stack that the harness document of a run from a run code defines, the line has `the workspace's harness in Qory Apiary` in place of `the stack in <file>`. A module that a checkout adds to the stack it extends does not count, and neither does a checkout's exclude: the compose checks what the stack's modules ship before it applies that exclude. The harness section of a `qory.yaml` that defines a stack lists them with the same keys and checks; a section that extends a stack takes the base's and lists none |
 | `workflows.<name>.time_limit` | no | how long a dispatched run of the workflow may run, counted from the run's open, as a Go duration above zero, such as `7h`, `45m` or `1h30m`; qory stops with an error on any other value: `set workflows.<name>.time_limit to a duration above zero, such as 7h or 45m: <value> is not one`. The run's `run_settings.time_limit_minutes`, when Qory Apiary sets it, applies instead, and a workflow without it runs for at most 3 hours |
 | `workflows.<name>.hook_points` | no | the points of the workflow where a checkout extending the stack may add workflow hooks, by the point's name: `{at: end, kinds: [check, review]}`. `at` is where the point sits in the workflow's session, `end`, `start` or `inside`; `kinds` is one or more of `check`, `review` and `enrich`, each once. A point's name has the form of a workflow's name, and is unique in the stack, since a hook selects a point by its name alone. Only a `qory-stack.yaml` declares points: a `qory.yaml` that defines a stack, which nothing extends, is refused with `Remove hook_points from the workflows in qory.yaml.` (§Workflow hooks) |
@@ -955,7 +955,8 @@ reaches Qory Apiary: for every push to the run API from inside the wall, through
 artifact push` or any other request, and for the version that the push step stores after
 the agent. qory runs the program on the engine of the run's wall, in a new container from
 the run's image, as the run's user, with no network and no capability. The container has
-no variable but the image's and those Docker sets: `HOME`, `HOSTNAME` and `PATH`. It has
+no variable but the image's, those Docker sets (`HOME`, `HOSTNAME` and `PATH`) and, in a
+run from a run key or a run code, `QORY_HARNESS_EXTENSIONS` (§Launching). It has
 the wall's CPU and memory limits of the run's containers, the wall's process limit or 512
 processes, and the label of the run's containers, so the clean-up of the run removes a
 container that a stopped qory left. The container gets three read-only folders:
@@ -1702,6 +1703,19 @@ configuration's over both. Every one of them is a default, a module's export inc
 under `launch_env` (§The report), and `qory harness compose --check` compares them with
 what the compose sets, so a changed export, a changed `env` in the configuration or a
 changed fragment variable is stale, a row `launch_env/<runtime>/<NAME>` each.
+
+A run from a run key or a run code writes `harness-extensions.json` at the root of the
+home, `{"extensions": <map>}`, with the report's `extensions` as the map, `{}` when the
+stack has none. The file contains nothing else of the report, which has paths of this
+machine. Every session of the run gets `QORY_HARNESS_EXTENSIONS`, the file's absolute
+path as the agent's process sees it, as a fixed variable, and so does the container of
+each push check, where the home is at the same path, so a program that the harness
+ships, such as a check, reads the extensions there. Behind a wall the home is mounted
+read-only, so the agent can read the file and cannot change it. A run with no wall starts
+the agent as the user that runs qory and wrote the file, so there the agent can change
+it. A person's run, with no run key and no run code, writes no such file and sets no such
+variable.
+
 The plugin and the directories below are rendered on every compose, with links or
 without, so `launch` works on a home inside the checkout too, and none of them is linked
 into the checkout. A runtime without a template reads its harness from the checkout

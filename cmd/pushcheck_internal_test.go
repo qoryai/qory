@@ -13,6 +13,7 @@ import (
 	"github.com/qoryai/forager/wall"
 	"github.com/qoryai/qory/internal/compose"
 	"github.com/qoryai/qory/internal/pushcheck"
+	"github.com/qoryai/qory/internal/render"
 )
 
 // engineScript is a docker command whose context show prints the contexts in order,
@@ -277,5 +278,41 @@ func TestAnAgentThatCouldChangeThePushChecksStops(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestThePushChecksGetTheHarnessExtensions is the load of a run's push checks: with the
+// path of the home's harness-extensions.json, the check's container gets
+// QORY_HARNESS_EXTENSIONS set to it, the home being mounted at its path there; with none,
+// it gets no variable.
+func TestThePushChecksGetTheHarnessExtensions(t *testing.T) {
+	was := loadPushChecks
+	t.Cleanup(func() { loadPushChecks = was })
+	loadPushChecks = func(string) ([]compose.PushCheck, error) {
+		return []compose.PushCheck{{Type: "proposal"}}, nil
+	}
+	unsetenv(t, "DOCKER_HOST")
+	unsetenv(t, "DOCKER_CONTEXT")
+	home := t.TempDir()
+	file := filepath.Join(home, render.ExtensionsFile)
+	for _, c := range []struct {
+		extensions string
+		want       []string
+	}{
+		{extensions: file, want: []string{"QORY_HARNESS_EXTENSIONS=" + file}},
+		{},
+	} {
+		p := &runPushChecks{extensions: c.extensions}
+		spec := &runSpec{}
+		spec.Wall = &wall.Docker{Command: engineScript(t, "a")}
+		run := runAPIOnly{base: "http://run-api.qory.invalid/v1/runs/r1", dir: t.TempDir()}
+		done, err := p.load(context.Background(), run, home, "r1", spec, true)
+		if err != nil {
+			t.Fatalf("with %q: %v", c.extensions, err)
+		}
+		done()
+		if got := p.current(); got == nil || !slices.Equal(got.Env, c.want) {
+			t.Errorf("with %q: the checker %+v, want the variables %q", c.extensions, got, c.want)
+		}
 	}
 }

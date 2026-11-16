@@ -19,6 +19,7 @@ import (
 	"github.com/qoryai/qory/internal/exports"
 	"github.com/qoryai/qory/internal/preparation"
 	"github.com/qoryai/qory/internal/pushcheck"
+	"github.com/qoryai/qory/internal/render"
 	"github.com/qoryai/qory/internal/runapi"
 	"github.com/qoryai/qory/internal/secretmask"
 )
@@ -88,6 +89,9 @@ type runPushChecks struct {
 	// fromCode is whether the run comes from a run code: its load and set errors are the
 	// lines of [checksStop] for such a run.
 	fromCode bool
+	// extensions is the path of [render.ExtensionsFile] in the home, which the check's
+	// container gets as [render.ExtensionsVariable]; "" for a home without the file.
+	extensions string
 }
 
 // current is the checker, nil before the load or for a home with no push check.
@@ -146,6 +150,10 @@ func (p *runPushChecks) load(ctx context.Context, run openedRun, home, runID str
 	checker, err := pushChecker(ctx, run, home, runID, spec, controlPlane, p.fromCode)
 	if err != nil || checker == nil {
 		return func() {}, err
+	}
+	// The container mounts the home at its path, so the file's path there is the same.
+	if p.extensions != "" {
+		checker.Env = []string{render.ExtensionsVariable + "=" + p.extensions}
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()

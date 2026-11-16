@@ -343,6 +343,11 @@ release may change what an existing document does, and states it under Upgrading
   lists each missing part. A group role takes a contract with `fill: many`, and the
   compose checks each member. A contract file that is missing or malformed fails the
   same way. See The role contract in `contracts/harness/v1/README.md`.
+- A run with a run key or a run code writes the report's `extensions` into the home as
+  `harness-extensions.json`, and sets `QORY_HARNESS_EXTENSIONS` to the file's path in
+  each session and in each push check's container, so a check that the harness ships
+  reads the stack's extensions in such a run too. Behind a wall the home is read-only to
+  the agent. See Launching in `contracts/harness/v1/README.md`.
 
 ### Changed
 

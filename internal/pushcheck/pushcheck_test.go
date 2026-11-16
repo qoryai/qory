@@ -426,6 +426,26 @@ func TestTheWallsLimitsAreTheChecks(t *testing.T) {
 	}
 }
 
+// TestTheCheckersVariablesGoIntoTheContainer is a checker with Env: the check's container
+// gets each variable with --env, in order, and no other --env.
+func TestTheCheckersVariablesGoIntoTheContainer(t *testing.T) {
+	f := newFixture(t, "#!/usr/bin/env node")
+	f.c.Env = []string{"QORY_HARNESS_EXTENSIONS=" + f.home + "/harness-extensions.json"}
+	if _, err := f.post(t, "/artifacts", pushBody(t, "spec", [2]string{"spec.md", "x"})); err != nil {
+		t.Fatal(err)
+	}
+	c := f.e.created(t)
+	var got []string
+	for i, a := range c {
+		if a == "--env" && i+1 < len(c) {
+			got = append(got, c[i+1])
+		}
+	}
+	if !slices.Equal(got, f.c.Env) {
+		t.Errorf("the create's variables are %q, want %q:\n%s", got, f.c.Env, strings.Join(c, " "))
+	}
+}
+
 // TestTheTemporaryFoldersAreInTheCheckersDir is a checker with a Dir: both folders are
 // made in it, and are gone after the check.
 func TestTheTemporaryFoldersAreInTheCheckersDir(t *testing.T) {

@@ -184,6 +184,8 @@ type Checker struct {
 	Label string
 	// Mask replaces each secret value of the run in a text; nil leaves the text as it is.
 	Mask func(string) string
+	// Env is the variables, NAME=value, that the check's container gets; nil for none.
+	Env []string
 	// Limit, when set, replaces [Limit]. Tests set it.
 	Limit time.Duration
 }
@@ -452,6 +454,9 @@ func (c *Checker) run(ctx context.Context, program string, args []string, pulled
 		create = append(create, "--label", c.Label)
 	}
 	create = append(create, c.limits()...)
+	for _, kv := range c.Env {
+		create = append(create, "--env", kv)
+	}
 	create = append(create, mounts...)
 	create = append(create, "--entrypoint", program, c.Image)
 	create = append(create, args...)

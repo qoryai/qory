@@ -799,6 +799,12 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					spec.LaunchFixed, freshHome = withAgentHome(spec.LaunchFixed, h.AgentHomeVariable()), true
 					link = transcriptLinkFor(renderer, rt)
 				}
+				// A run from a run key or a run code reads the report's extensions from the
+				// home. Forager writes a fixed value's path as the agent's process sees it.
+				if c.extensions != "" {
+					spec.LaunchFixed = withFixed(spec.LaunchFixed, render.ExtensionsVariable, c.extensions)
+					checks.extensions = c.extensions
+				}
 				return freshHome, nil
 			}
 			// prepareSession makes the rest of the session's spec once its launch is made:

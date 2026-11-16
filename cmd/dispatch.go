@@ -31,10 +31,16 @@ func dispatchedArgs(rt render.Runtime, args []string) []string {
 // when name is [preparation.EnvAgentHome], Claude Code's.
 // A fixed value wins over every other source, and the runtime's deny list leaves it in.
 func withAgentHome(fixed []string, name string) []string {
+	return withFixed(fixed, name, preparation.AgentHome)
+}
+
+// withFixed is fixed, the launch's fixed values, with name set to value in place of any
+// value fixed has for it, sorted.
+func withFixed(fixed []string, name, value string) []string {
 	out := slices.DeleteFunc(slices.Clone(fixed), func(kv string) bool {
 		return strings.HasPrefix(kv, name+"=")
 	})
-	out = append(out, name+"="+preparation.AgentHome)
+	out = append(out, name+"="+value)
 	slices.Sort(out)
 	return out
 }
