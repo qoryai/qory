@@ -792,7 +792,14 @@ recorded. The session's events are not.
 
 Every run of Claude Code, the runtime `claude`, walled or not, installs the runtime's
 program on the machine before its session starts: after the compose, and before the
-image step. A run of another runtime installs nothing.
+image step. A run of another runtime installs nothing, and a session of Codex starts the
+program from the image.
+
+The session starts the installed program, `<runtimes>/claude/<version>/bin/claude`. Behind
+a wall, Forager mounts the version's folder read-only at `/qory/runtime/claude`, so the
+agent starts `/qory/runtime/claude/bin/claude` and cannot change it, and the session's
+`dev.qory.session.started` has the installed version as `runtime_version`. Forager sets
+`DISABLE_AUTOUPDATER=1` for Claude Code, so it does not update itself.
 
 The program comes from the runtime cache of the instance's registry when the machine has
 one, and from npm otherwise:
@@ -1724,12 +1731,12 @@ Each of these errors stops the run before it starts, exit 2:
 - `set --gateway to a gateway that qory can reach: <error>`, when Forager's check of the
   URL or of its TLS settings fails
 - `give --run-code-file a file that qory can read: <file>: <error>`
-- `give --run-code-file a regular file: <file> is not one`, for a named pipe, a device or
+- `Give --run-code-file a regular file: <file> is not one`, for a named pipe, a device or
   a folder, which qory opens without waiting, unless it is the pipe or device that stdin is
-- `write the run code into <file>: the file is empty`
+- `Write the run code into <file>: the file is empty`
 - `Write the run code, then at most the lines `registry <host>`, `apiary <url>` and
   `runtimes <folder>``, with `The file <file> contains more than that.` on the second line
-- `write a run code (qecr_…) into <file>: the file does not contain an enrolment code of
+- `Write a run code (qecr_…) into <file>: the file does not contain an enrolment code of
   Qory Apiary`, or `…: the file contains the enrolment code of an access key of kind
   <kind>`
 - `ask for a new run code: the redemption returned 401, so the code was used, has expired

@@ -402,9 +402,20 @@ release may change what an existing document does, and states it under Upgrading
   cancelled gets no folder. The start commit of a run skips a cancelled version of the
   artifact `branch` too. Before, all three took the newest version, cancelled or not. An
   index without the field `cancelled` reads as no version cancelled.
-- qory builds with Forager 449b7e27. A run keeps its wall only when a container of
-  the run may still run; a network or folder of the wall that could not be removed no longer
-  keeps it.
+- qory builds with Forager 8f22399d.
+  - A run keeps its wall only when a container of the run may still run; a network or
+    folder of the wall that could not be removed no longer keeps it.
+  - A session of Claude Code starts the program that qory installed, from
+    `<runtimes>/claude/<version>`. Behind a wall, Forager mounts that folder read-only at
+    `/qory/runtime/claude`, and `dev.qory.session.started` has the installed version as
+    `runtime_version`. A session of Codex starts from the image as before.
+  - Forager sets `DISABLE_AUTOUPDATER=1` in every launch of Claude Code, so it does not
+    update itself. A value of it from the run, the machine or the harness no longer
+    applies.
+  - Forager unsets 10 more variables of Claude Code, such as `CLAUDE_CODE_USE_GATEWAY` and
+    `CLAUDE_CODE_REMOTE`, that move its endpoints or change its mode, and `BUN_OPTIONS`
+    for every runtime. No value of the run's, the machine's or the harness's reaches the
+    runtime.
 - `qory gateway` keeps its runs when SIGINT or SIGTERM stops it: a gateway started again
   on the same directory within 120 seconds continues them, and the agent sessions behind
   it go on. Before, a run open at a gateway that stopped was over. The directory is
