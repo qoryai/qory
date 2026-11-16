@@ -1,9 +1,8 @@
 name: Images
 
 # The agent's images and the prebuild's are built here; this workflow publishes none of
-# them, and prerelease.yml publishes agent and prebuild. A change to them, to the check
-# and what it reads, or to the Forager module whose descriptor sets the version of
-# claude, builds all three and checks them with the qory of the same commit.
+# them, and prerelease.yml publishes agent and prebuild. A change to them, or to the check
+# and what it reads, builds all three and checks them with the qory of the same commit.
 on:
   push:
     branches: [main]

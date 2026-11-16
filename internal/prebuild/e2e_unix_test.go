@@ -39,8 +39,9 @@ func docker(t *testing.T, args ...string) string {
 
 // TestBuildWithDocker builds a tiny development container on this machine's engine with
 // the reference devcontainer command: an alpine image whose onCreateCommand writes a
-// file, with the environment image kept apart and then removed. The image keeps the file under /qory/seed, the wall user's; it has the agent
-// image's /qory/agent, from an image pushed to a registry run for the test, its user is
+// file, with the environment image kept apart and then removed. The image keeps the file
+// under /qory/seed, the wall user's; it has nothing of the agent image, pushed to a
+// registry run for the test, which has a /qory/agent folder: no /qory/agent; its user is
 // the wall user, its working folder /workspace, empty, and it has nothing at
 // /qory/hooks. It runs only with QORY_TEST_DOCKER=1, docker and the devcontainer
 // command at [prebuild.CLIVersion] on the PATH, and it pulls registry:2 and alpine, by digest.
@@ -165,10 +166,10 @@ func TestBuildWithDocker(t *testing.T) {
 		}
 	}
 	got := docker(t, "run", "--rm", "--entrypoint", "/bin/sh", tag, "-c",
-		`stat -c %u:%g /qory/seed/created.txt /qory/seed/.git/HEAD /qory/seed /workspace; cat /qory/seed/created.txt; cat /qory/agent/AGENT.md; `+
+		`stat -c %u:%g /qory/seed/created.txt /qory/seed/.git/HEAD /qory/seed /workspace; cat /qory/seed/created.txt; test -e /qory/agent || echo no agent; `+
 			`echo $HOME; stat -c %u:%g:%a /home/agent /home/agent/x; cat ~/x; `+
 			`ls -A /workspace | wc -l; test -e /qory/hooks || echo no hooks; id -u`)
-	want := "1234:2345\n1234:2345\n1234:2345\n1234:2345\ntest\nthe agent\n/home/agent\n1234:2345:700\n1234:2345:644\nhome\n0\nno hooks\n1234"
+	want := "1234:2345\n1234:2345\n1234:2345\n1234:2345\ntest\nno agent\n/home/agent\n1234:2345:700\n1234:2345:644\nhome\n0\nno hooks\n1234"
 	if got != want {
 		t.Errorf("inside the image:\n%s\nwant\n%s", got, want)
 	}

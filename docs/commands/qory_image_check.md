@@ -17,7 +17,8 @@ network, and qory's Linux build checks from inside:
   - HOME is a directory that user writes in
   - the system's authorities are where the wall reads them
   - /bin/sh is there, for the runtime's hooks and the session's API-key approval
-  - each runtime Forager describes is the version its descriptor sets
+  - each runtime Forager describes has its program in /qory/runtime/<runtime>/bin,
+    where Forager mounts the machine's install, and every user may run it
   - git and gh run, and git 2.25 or later, cat, chmod, comm, cp, find, grep, mkdir, mv,
     readlink, sleep, sort, stat and tr are in /usr/local/bin, /usr/bin or /bin, for the git
     session of a walled run that may write

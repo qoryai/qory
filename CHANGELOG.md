@@ -346,6 +346,12 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Changed
 
+- The `agent`, `agent-docker` and `prebuild` images contain no agent runtime. The machine
+  installs the runtime at run time, and Forager mounts it read-only at
+  `/qory/runtime/<runtime>`. `qory image check` looks for each runtime's program there,
+  such as `/qory/runtime/claude/bin/claude`, not on the image's `PATH`, and no longer
+  prints or compares a runtime version. A prebuild copies nothing from the agent image,
+  and no image has `/qory/agent`.
 - qory builds with Forager main 37dc0148. A run keeps its wall only when a container of
   the run may still run; a network or folder of the wall that could not be removed no longer
   keeps it.

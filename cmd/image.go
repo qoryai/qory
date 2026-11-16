@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 
@@ -61,7 +62,8 @@ network, and qory's Linux build checks from inside:
   - HOME is a directory that user writes in
   - the system's authorities are where the wall reads them
   - /bin/sh is there, for the runtime's hooks and the session's API-key approval
-  - each runtime Forager describes is the version its descriptor sets
+  - each runtime Forager describes has its program in /qory/runtime/<runtime>/bin,
+    where Forager mounts the machine's install, and every user may run it
   - git and gh run, and git 2.25 or later, cat, chmod, comm, cp, find, grep, mkdir, mv,
     readlink, sleep, sort, stat and tr are in /usr/local/bin, /usr/bin or /bin, for the git
     session of a walled run that may write
@@ -124,15 +126,14 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md#qorys-images`,
 			if err != nil {
 				return err
 			}
-			// Each runtime of Forager's list, at the version in its descriptor, a
-			// descriptor in the machine's runtimes folder first, as a run reads it.
+			// Each runtime of Forager's list that has a descriptor, one in the machine's
+			// runtimes folder first, as a run reads it.
 			probed := make([]image.Runtime, len(listed))
 			for i, name := range listed {
-				rt, err := catalog.Lookup(name, filepath.Join(user, DescriptorsDir))
-				if err != nil {
+				if _, err := catalog.Lookup(name, filepath.Join(user, DescriptorsDir)); err != nil {
 					return input(err)
 				}
-				probed[i] = image.Runtime{Name: name, Version: rt.Version()}
+				probed[i] = image.Runtime{Name: name}
 			}
 			engine := image.Engine{Command: section.Command}
 			platform, err := engine.Platform(cmd.Context())
@@ -148,11 +149,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md#qorys-images`,
 			u.Title("qory image check", "engine "+platform)
 			fields := [][2]string{{"probe", exports.Value(ui.Short(helper, ""), false) + ", " + arch}}
 			for _, rt := range probed {
-				version := rt.Version + ", Forager's descriptor's"
-				if rt.Version == "" {
-					version = "any version; Forager's descriptor names none"
-				}
-				fields = append(fields, [2]string{rt.Name, version})
+				fields = append(fields, [2]string{rt.Name, path.Join(image.RuntimeRoot, rt.Name)})
 			}
 			u.Fields(fields)
 			var failed []string
@@ -223,12 +220,11 @@ func imageRef(section config.ForagerWall, name string) string {
 
 // newImageProbe builds the hidden probe verb, what qory image check runs as the entry
 // point of a container of the image: it checks the image from inside, as the user the
-// container runs as, for each runtime its arguments list as <name>=<version>, an empty
-// version taking any, and prints an [image.Report] as JSON on its standard output. It
+// container runs as, for each runtime its arguments name, and prints an [image.Report] as JSON on its standard output. It
 // fails only when it cannot print.
 func newImageProbe() *cobra.Command {
 	return &cobra.Command{
-		Use:    "probe [runtime=version...]",
+		Use:    "probe [runtime...]",
 		Short:  "Check the image this runs in, from inside, and print the report as JSON",
 		Hidden: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -242,24 +238,20 @@ func newImageProbe() *cobra.Command {
 	}
 }
 
-// probeRuntimes are the runtimes of the probe's arguments, each <name>=<version>, with
-// the program each one's launch template starts and its [render.Installer] package. A
+// probeRuntimes are the runtimes the probe's arguments name, with the program each
+// one's launch template starts. A
 // runtime this qory does not render, or renders with no launch template, has no
 // program, and its line fails.
 func probeRuntimes(args []string) []image.Runtime {
 	out := make([]image.Runtime, len(args))
-	for i, a := range args {
-		name, version, _ := strings.Cut(a, "=")
-		out[i] = image.Runtime{Name: name, Version: version}
+	for i, name := range args {
+		out[i] = image.Runtime{Name: name}
 		rt, err := render.Lookup(name)
 		if err != nil {
 			continue
 		}
 		if l, ok := rt.(render.Launcher); ok {
 			out[i].Command = l.Template().Command
-		}
-		if in, ok := rt.(render.Installer); ok && version != "" {
-			out[i].Install = in.Install(version)
 		}
 	}
 	return out

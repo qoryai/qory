@@ -64,8 +64,8 @@ type Target struct {
 	// Helper is the path on this machine of qory's static Linux build for the engine's
 	// architecture, the probe.
 	Helper string
-	// Runtimes are the runtimes the probe checks the image for, by Name and Version;
-	// the probe finds each runtime's program and package in its build.
+	// Runtimes are the runtimes the probe checks for, by Name; the probe finds each
+	// runtime's program in its build.
 	Runtimes []Runtime
 }
 
@@ -221,7 +221,7 @@ func (e Engine) probe(ctx context.Context, t Target) []Check {
 	names := make([]string, len(t.Runtimes))
 	for i, rt := range t.Runtimes {
 		names[i] = rt.Name
-		args = append(args, rt.Name+"="+rt.Version)
+		args = append(args, rt.Name)
 	}
 	out, errOut, err := e.run(ctx, ProbeWait, args...)
 	var rep Report

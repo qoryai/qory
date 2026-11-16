@@ -4243,7 +4243,7 @@ start the run from a folder that does not contain your home folder, qory's state
 runs in, for `linux/amd64` and `linux/arm64`. They are not published for you to pull: you build them, by hand as
 below, and a workflow of the repository builds and checks them on a change. Build them
 from a checkout of `qory` at the commit `qory version` prints, since each commit pins the
-runtime at the version the Forager it builds against is written for:
+versions of the images' tools:
 
 ```sh
 git clone https://github.com/qoryai/qory && cd qory
@@ -4255,7 +4255,7 @@ docker build -t qory-prebuild --build-arg BASE=qory-agent-docker images/prebuild
 
 | Image | What it holds |
 |---|---|
-| `agent` | Claude Code at the version Forager's descriptor sets, `git`, `gh`, Node, the system's authorities, Chromium, and the tools under **Tools** below |
+| `agent` | `git`, `gh`, Node, the system's authorities, Chromium, and the tools under **Tools** below |
 | `agent-docker` | `agent`, and Docker's daemon and command |
 | `prebuild` | `agent-docker`, the `devcontainer` command `@devcontainers/cli` 0.89.0, and Docker's `buildx` plugin: the image a prebuild runs in behind its wall |
 
@@ -4263,14 +4263,19 @@ Every version and every download's sum is a build argument, with its default in 
 Dockerfile. Debian's packages follow the snapshot date. A build checks each download against its sum, and installs Debian's packages
 from the snapshot the base image was built from.
 
+None of them contains an agent runtime, such as Claude Code or Codex. The machine installs
+the runtime at run time, and Forager mounts it read-only at `/qory/runtime/<runtime>`,
+with the program the launch starts in its `bin` folder, such as
+`/qory/runtime/claude/bin/claude`. An image you build FROM them needs no runtime either.
+
 What each of them does:
 
 - **Any user.** The container runs as your user, whom the image does not know. `HOME`
   is `/home/agent`, which every user may write.
 - **No setuid program.** None is needed, and none is there.
-- **Nothing runs by itself.** It has no entry point. Claude Code and `gh` neither update
-  themselves nor ask for input, and Claude Code sends no telemetry or error reports,
-  which a run under `enforce` would otherwise show as denied connections.
+- **Nothing runs by itself.** It has no entry point. `gh`, `git` and `npm` neither check
+  for updates nor ask for input, which a run under `enforce` would otherwise show as
+  denied connections.
 - **Docker.** `agent-docker` holds the daemon for nested Docker, under a
   runtime such as Sysbox. The image starts nothing: define it in `wall.images` with
   `runtime: sysbox-runc` and `docker: true`, and `qory run nest` starts the daemon. See
@@ -4320,8 +4325,10 @@ one fails.
   does not know, with no capability and no network. `qory`'s Linux build then checks
   that `HOME` takes a file from that user, the authorities are where the wall reads
   them, `/bin/sh` is there for the runtime's hooks and the session's API-key approval,
-  each runtime of Forager's runtime list, `runtimes.json`, is on the `PATH` at the
-  version its descriptor sets, and `git` and `gh` run. It reports whether
+  each runtime of Forager's runtime list, `runtimes.json`, has its program in
+  `/qory/runtime/<runtime>/bin`, where Forager mounts the machine's install, with the
+  folder and the program readable and the program executable by every user, and `git`
+  and `gh` run. It reports no runtime version: the version is the install's, at run time. It reports whether
   `dockerd` is in a system directory, and checks that what the daemon runs is there too.
 
 The Linux build is the one the wall uses: `wall.helper`, for your engine's architecture,

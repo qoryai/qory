@@ -10,9 +10,7 @@ import (
 	"os/exec"
 	"path"
 	"path/filepath"
-	"regexp"
 	"slices"
-	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -72,21 +70,30 @@ func ProbeChecks(runtimes []string) []string {
 	return slices.Concat([]string{"home", "authorities", "shell"}, runtimes, []string{"git", "gh", "docker"})
 }
 
-// Runtime is one runtime the probe checks the image for: its program on the image's
-// PATH, at the version Forager's descriptor sets.
+// Runtime is one runtime the probe checks for: its program in the folder Forager mounts
+// the machine's install of it at, [RuntimeRoot]/<Name>.
 type Runtime struct {
-	// Name is the runtime's name, the name of its line.
+	// Name is the runtime's name, the name of its line and of its folder.
 	Name string
-	// Command is the program the runtime's launch starts, as found on the PATH; empty
-	// for a runtime this qory does not render, whose line fails.
+	// Command is the program the runtime's launch starts, in the folder's bin; empty for a
+	// runtime this qory does not render, whose line fails.
 	Command string
-	// Version is the version <Command> --version must report, Forager's descriptor's
-	// runtime_version; empty takes any.
-	Version string
-	// Install is the package at Version that a failed line has as its fix, such as
-	// @anthropic-ai/claude-code@2.1.316; empty for a runtime with no package.
-	Install string
 }
+
+// RuntimeRoot is where Forager mounts the machine's install of each runtime, read-only, at
+// run time: /qory/runtime/<runtime>, with the program the launch starts in its bin
+// folder, such as /qory/runtime/claude/bin/claude. No image contains a runtime.
+const RuntimeRoot = "/qory/runtime"
+
+// RuntimeProgram is the path, inside the container, of the program rt's launch starts:
+// [RuntimeRoot]/<Name>/bin/<Command>.
+func RuntimeProgram(rt Runtime) string {
+	return path.Join(RuntimeRoot, rt.Name, "bin", rt.Command)
+}
+
+// everyone is the read and execute bits for other users: Forager refuses a runtime folder
+// or program that other users cannot read and, for the program, execute.
+const everyone = 0o005
 
 // Bundles are where the wall reads an image's authorities, the first that holds a
 // certificate: Debian and Alpine, Red Hat, OpenSUSE, and OpenSSL's default. The wall's own
@@ -130,7 +137,7 @@ func (p Probe) Report(ctx context.Context) Report {
 	}
 	checks := []Check{p.home(), p.authorities(), p.shell()}
 	for _, rt := range p.Runtimes {
-		checks = append(checks, p.runtime(ctx, rt))
+		checks = append(checks, p.runtime(rt))
 	}
 	checks = append(checks, p.git(ctx), p.program(ctx, "gh"))
 	checks = append(checks, p.docker())
@@ -200,35 +207,31 @@ func (p Probe) shell() Check {
 	return Check{"shell", Pass, "/bin/sh runs the runtime's hooks and the API-key approval"}
 }
 
-// version is the first version number in what a program printed: 2.1.316 in
-// "2.1.316 (Claude Code)".
-var version = regexp.MustCompile(`\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?`)
-
-// runtime checks that rt's program is on the image's PATH, where the wall's launch
-// finds it, and reports the version Forager's descriptor sets.
-func (p Probe) runtime(ctx context.Context, rt Runtime) Check {
+// runtime checks that rt's program is in the folder Forager mounts the runtime at, as
+// [RuntimeProgram] has it, and that every user may read the folder and read and run
+// the program. It runs nothing: the version is the install's, at run time.
+func (p Probe) runtime(rt Runtime) Check {
 	if rt.Command == "" {
 		return Check{rt.Name, Fail, "set wall.helper to the Linux build of this qory: the probe's build renders no runtime " + rt.Name}
 	}
-	out, where, err := p.run(ctx, rt.Command, "--version")
-	if err != nil {
-		return Check{rt.Name, Fail, err.Error()}
+	dir := path.Join(RuntimeRoot, rt.Name)
+	where := RuntimeProgram(rt)
+	missing := Check{rt.Name, Fail, fmt.Sprintf("mount the machine's install of %s read-only at %s, as Forager does for a run: %s is not there, and no image contains a runtime", rt.Name, dir, where)}
+	info, err := os.Stat(p.host(dir))
+	if err != nil || !info.IsDir() {
+		return missing
 	}
-	got := version.FindString(out)
-	if rt.Version != "" && got != rt.Version {
-		if got == "" {
-			got = strconv.Quote(out)
-		}
-		fix := "install that version"
-		if rt.Install != "" {
-			fix = "install " + rt.Install
-		}
-		return Check{rt.Name, Fail, fmt.Sprintf("%s at %s is %s, and Forager's descriptor sets %s; %s", rt.Command, exports.Value(where, false), got, rt.Version, fix)}
+	if info.Mode()&everyone != everyone {
+		return Check{rt.Name, Fail, fmt.Sprintf("make %s readable by every user, mode 0755: Forager refuses a runtime folder other users cannot read, and its mode is %04o", dir, info.Mode().Perm())}
 	}
-	if rt.Version == "" {
-		return Check{rt.Name, Pass, fmt.Sprintf("%s at %s is %s", rt.Command, exports.Value(where, false), got)}
+	info, err = os.Stat(p.host(where))
+	if err != nil || !info.Mode().IsRegular() {
+		return missing
 	}
-	return Check{rt.Name, Pass, fmt.Sprintf("%s at %s is %s, the version Forager's descriptor sets", rt.Command, exports.Value(where, false), got)}
+	if info.Mode()&everyone != everyone {
+		return Check{rt.Name, Fail, fmt.Sprintf("make %s readable and executable by every user, mode 0755: Forager refuses a runtime program other users cannot run, and its mode is %04o", where, info.Mode().Perm())}
+	}
+	return Check{rt.Name, Pass, fmt.Sprintf("%s is in %s, where Forager mounts the machine's install, and every user may run it", rt.Command, path.Dir(where))}
 }
 
 // program checks that a program is on the image's PATH and answers --version.

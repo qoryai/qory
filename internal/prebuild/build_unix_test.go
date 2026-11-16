@@ -255,7 +255,7 @@ func TestBuildBuildsTheImage(t *testing.T) {
 		"prebuild: pulled the base image example.com/acme/shop-dev@sha256:" + baseDigest + " in ",
 		"prebuild: built the development container image in ",
 		"prebuild: kept the environment image as " + testName + ":environment",
-		"prebuild: added the agent image's /qory/agent in ",
+		"prebuild: made the wall user the image's user in ",
 		"prebuild: copied the repository to /workspace in ",
 		"prebuild: ran onCreateCommand in 1.0s",
 		"prebuild: moved /workspace to /qory/seed in 0.1s",
@@ -319,7 +319,7 @@ func TestBuildBuildsTheImage(t *testing.T) {
 			}
 		}
 	}
-	wantFiles := "FROM " + testName + ":base\nCOPY --from=" + agentImage + " /qory/agent /qory/agent\nUSER 1234:2345\nENV HOME=/home/agent\n" +
+	wantFiles := "FROM " + testName + ":base\nUSER 1234:2345\nENV HOME=/home/agent\n" +
 		"FROM " + testName + ":seeded\nENTRYPOINT []\nCMD [\"/bin/sh\"]\n"
 	if got := f.read("dockerfiles"); got != wantFiles {
 		t.Errorf("the Dockerfiles are\n%s\nwant\n%s", got, wantFiles)

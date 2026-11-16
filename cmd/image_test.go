@@ -6,8 +6,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/qoryai/forager/session/runtimes/catalog"
-
 	"github.com/qoryai/qory/cmd"
 )
 
@@ -46,8 +44,8 @@ export) tar -cf - -C `+files+` usr ;;
 rm) ;;
 run)
 	case "$*" in
-	*example.com/broken:1*) echo '{"version":1,"checks":[`+probeLines+`,{"name":"claude","result":"fail","detail":"no claude on the image PATH, /usr/bin"}]}' ;;
-	*) echo '{"version":1,"checks":[`+probeLines+`,{"name":"claude","result":"pass","detail":"claude at /usr/local/bin/claude is 2.1.316"}]}' ;;
+	*example.com/broken:1*) echo '{"version":1,"checks":[`+probeLines+`,{"name":"claude","result":"fail","detail":"mount the machine'\''s install of claude read-only at /qory/runtime/claude, as Forager does for a run: /qory/runtime/claude/bin/claude is not there, and no image contains a runtime"}]}' ;;
+	*) echo '{"version":1,"checks":[`+probeLines+`,{"name":"claude","result":"pass","detail":"claude is in /qory/runtime/claude/bin, where Forager mounts the machine'\''s install, and every user may run it"}]}' ;;
 	esac ;;
 *) exit 64 ;;
 esac
@@ -72,8 +70,8 @@ func imageForager(t *testing.T, helper, image string) {
 
 // TestImageCheckChecksTheMachinesImage checks wall.image of forager.yaml with no
 // argument: the lines from outside and from the probe print, the fact that neither
-// passes nor fails prints as a field, and the probe runs as the wall runs an agent, with
-// the version Forager's descriptor for claude names.
+// passes nor fails prints as a field, and the probe runs as the wall runs an agent, for
+// claude by its name alone, with no version.
 func TestImageCheckChecksTheMachinesImage(t *testing.T) {
 	emptyDir(t)
 	log := fakeImageDocker(t)
@@ -94,16 +92,15 @@ func TestImageCheckChecksTheMachinesImage(t *testing.T) {
 		"  docker     no dockerd",
 		"✓ example.com/agent:1 has what the wall needs",
 	)
-	rt, err := catalog.Lookup("claude", "")
-	if err != nil {
-		t.Fatal(err)
+	wants(t, out, "claude  /qory/runtime/claude")
+	if strings.Contains(out, "descriptor") {
+		t.Errorf("the check prints a runtime version:\n%s", out)
 	}
-	wants(t, out, "claude  "+rt.Version()+", Forager's descriptor's")
 	data, err := os.ReadFile(log)
 	if err != nil {
 		t.Fatal(err)
 	}
-	wants(t, string(data), "create --pull never --network none --entrypoint /qory/qory example.com/agent:1\nexport c0ffee\nrm --force --volumes c0ffee\n", "run --rm --pull never --network none --user 65532:65532 --cap-drop ALL --security-opt no-new-privileges --init --mount type=bind,src="+helper+",dst=/qory/qory,readonly --entrypoint /qory/qory example.com/agent:1 image probe claude="+rt.Version()+"\n")
+	wants(t, string(data), "create --pull never --network none --entrypoint /qory/qory example.com/agent:1\nexport c0ffee\nrm --force --volumes c0ffee\n", "run --rm --pull never --network none --user 65532:65532 --cap-drop ALL --security-opt no-new-privileges --init --mount type=bind,src="+helper+",dst=/qory/qory,readonly --entrypoint /qory/qory example.com/agent:1 image probe claude\n")
 }
 
 // TestImageCheckFailsWhenOneImageFails checks three images, one the engine does not hold
@@ -119,7 +116,7 @@ func TestImageCheckFailsWhenOneImageFails(t *testing.T) {
 	}
 	wants(t, out,
 		"✗ the engine does not hold example.com/missing:1; docker pull example.com/missing:1",
-		"✗ no claude on the image PATH",
+		"✗ mount the machine's install of claude read-only at /qory/runtime/claude",
 		"✗ 2 of 3 images lack what the wall needs: example.com/missing:1, example.com/broken:1",
 	)
 }
