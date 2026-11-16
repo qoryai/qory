@@ -1065,6 +1065,52 @@ func TestARunCodeWhoseHarnessBindsFlatStops(t *testing.T) {
 	wants(t, r.err.Error(), "the response to the run code does not pass qory's checks")
 }
 
+// TestARunCodeWhoseHarnessBindsAGroupRoleToAListComposes is a run from a run code whose
+// harness document binds agents roles of the module review, which the base's stack
+// lists and which provides code-reviewer to its group role reviewers: the group role to
+// a list of two agents and the role lead to one name, or the role lead alone. Each
+// passes qory's checks and the harness composes, so the session joins. The review skill
+// in the home starts with the group's members, the bind's list when the bind sets the
+// group and the module's code-reviewer otherwise, then the lead.
+func TestARunCodeWhoseHarnessBindsAGroupRoleToAListComposes(t *testing.T) {
+	stackFile := func(s string) string {
+		return s + "  - name: review\n    source: {path: modules/review}\nworkflows:\n  hello:\n    access: write\n"
+	}
+	agent := func(name string) string {
+		return "---\nname: " + name + "\ndescription: " + name + "\n---\n\nReviews the change.\n"
+	}
+	review := map[string]string{
+		"examples/hello/modules/review/qory-module.yaml":        "apiVersion: qory.dev/v1alpha1\nname: review\nroles:\n  agents:\n    reviewers: many\n    lead: one\nprovides:\n  agents:\n    reviewers: [code-reviewer]\n",
+		"examples/hello/modules/review/skills/review/SKILL.md":  "---\nname: review\ndescription: The review skill.\n---\n\nStart ${qory:agents/reviewers}, then give the result to ${qory:agents/lead}.\n",
+		"examples/hello/modules/review/agents/code-reviewer.md": agent("code-reviewer"),
+		"examples/hello/modules/review/agents/test-reviewer.md": agent("test-reviewer"),
+		"examples/hello/modules/review/agents/review-lead.md":   agent("review-lead"),
+	}
+	for _, c := range []struct {
+		name string
+		bind map[string]any
+		body string
+	}{
+		{"a group role bound to a list of two agents", map[string]any{"reviewers": []any{"code-reviewer", "test-reviewer"}, "lead": "review-lead"},
+			"Start code-reviewer, test-reviewer, then give the result to review-lead."},
+		{"a role bound to one name", map[string]any{"lead": "review-lead"},
+			"Start code-reviewer, then give the result to review-lead."},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			r := runFromCodeLinks(t, nil, nil, stackFile, harnessBind(map[string]any{"agents": c.bind}), review, nil)
+			if !errors.Is(r.err, cmd.ErrJoinedNowhere) || !r.joined {
+				t.Fatalf("%v (exit %d), want the join\n%s", r.err, cmd.ExitCode(r.err), r.out)
+			}
+			wants(t, r.out, "qory run: composed ")
+			data, err := os.ReadFile(filepath.Join(r.spec.HarnessHome, "claude", "skills", "review", "SKILL.md"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			wants(t, string(data), c.body)
+		})
+	}
+}
+
 // harnessBind sets the bind of the harness document of a run code's documents to b.
 func harnessBind(b map[string]any) func(map[string]any) {
 	return func(d map[string]any) {

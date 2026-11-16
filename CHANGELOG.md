@@ -307,6 +307,9 @@ release may change what an existing document does, and states it under Upgrading
   globs stops the compose with exit 2.
 - A list in `bind` for a role that is not a group stops the compose with exit 2, where
   before qory refused it when it read `qory.yaml`.
+- The harness in a workspace's settings in Qory Apiary can bind a group role to a list,
+  as a checkout's `bind` can: a run from a run code composes the list as the group's
+  members.
 - A walled run whose read-write `--mount` or `wall.mounts` entry is your home folder or
   qory's state directory, or a folder that contains either, stops with exit 2 before
   anything starts, as `mount a narrower folder: the mount <path> is your home folder, and
