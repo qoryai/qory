@@ -1,6 +1,6 @@
-Keep agent core-developer in module core, or bind agents/developer to another agent.
+Keep agent core-developer in module core, or bind agents.developer to another agent.
   The skill deploy of module core references agent developer, which module web provides as agent core-developer.
   Module core leaves out agent core-developer.
-Keep agent ts-developer in module ts, or bind agents/developer to another agent.
+Keep agent ts-developer in module ts, or bind agents.developer to another agent.
   The skill deploy of module core references agent developer, which module ts provides as agent ts-developer.
   Module ts leaves out agent ts-developer.

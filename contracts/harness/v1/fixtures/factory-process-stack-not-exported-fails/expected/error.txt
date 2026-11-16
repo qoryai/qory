@@ -1,2 +1,3 @@
-Set stack in modules/software-factory/process.yaml to a name that exports.stacks lists.
+Set stack in process.yaml to a name that exports.stacks lists.
   The value is softwre, and exports.stacks lists core, software.
+  The file is modules/software-factory/process.yaml.

@@ -1,2 +1,3 @@
-Rename or remove entry 3 of artifact_types in modules/support-desk/process.yaml.
+Rename or remove entry 3 of artifact_types.
   Entry 1 has the name screenshot too.
+  The entry is in modules/support-desk/process.yaml.

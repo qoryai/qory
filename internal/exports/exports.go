@@ -82,8 +82,9 @@ func ResolveAPIVersion(version string) (string, error) {
 	if current, ok := RetiredAPIVersions[version]; ok {
 		return current, nil
 	}
-	return "", Refuse("Set apiVersion in "+FilePlace+" to "+APIVersion+".",
-		fmt.Sprintf("This qory reads %s, and apiVersion is %s.", APIVersion, Value(version, true)))
+	return "", Refuse("Set apiVersion to "+APIVersion+".",
+		fmt.Sprintf("This qory reads %s, and apiVersion is %s.", APIVersion, Value(version, true)),
+		"apiVersion is in "+FilePlace+".")
 }
 
 // StackFileName and ModuleFileName are what an exported directory contains: a stack its

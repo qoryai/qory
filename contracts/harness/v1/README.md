@@ -165,9 +165,8 @@ does, `workflows` when it defines a stack, `hooks` when it extends one (§Workfl
 and `target`, which a stack does not; never `extending`, since a stack to be extended is
 a `qory-stack.yaml`. A section extends a
 stack or defines one. A section that extends a stack takes the base's `workflows`; one
-that also lists `workflows` is refused with status 2, `Remove workflows or extends from
-qory.yaml.` with `A harness section that extends a stack takes the workflows of its base.`
-on the next line. A stack it
+that also lists `workflows` is refused with status 2, `Remove workflows or extends.` with `A harness section that extends a stack takes the workflows of its base.`
+and `Both keys are in qory.yaml.` on the next two lines. A stack it
 defines requires `target`: `runtime`, the program that runs the harness, one of the
 runtimes in §Runtimes or a list of them to compose for at once, and `model`, optional,
 written into the settings of every targeted runtime that has a project-level place for
@@ -202,12 +201,12 @@ schema is [config.schema.json](config.schema.json).
 | `modules[].only` | no | the only things of this module that are composed, with the same keys as `exclude`, plus what the listed entries require from this module (`requires` in its manifest, followed transitively). Everything else is left out: a kind not listed contributes no entry beyond those, a part not listed is left out. `only: {skills: [deploy]}` is the deploy skill, what it needs, and nothing else. An `exclude` beside it lists entries the `only` brought in, to leave them out after all; a requirement left out that way has to come from another module (rule 4). It lists no part, and nothing the `only` lists |
 | `modules[].variant` | no | forces one of the module's variants instead of the one with the targeted runtime's name |
 | `modules[].link` | no | a name at the checkout root, one path segment, linked to the module's directory in the composed tree, so a permission rule or a script refers to the module's files by a checkout-relative path: `harness/scripts/check.sh`. A hard link (§Rendering), each name used once across the modules |
-| `bind` | no | the entry that fills each role a document references (§References), by kind and then by role, to the name of one entry of that kind: `bind: {agents: {coder: rails-coder}}`. The kind is `agents`, `skills` or `commands`. A role's value is one name. A group role (§References) takes a list of agents, `bind: {agents: {reviewers: [code-reviewer, python-reviewer]}}`, and only a group role takes one. A flat key, `agents/coder: rails-coder`, is refused with `Write bind as bind.agents.coder: rails-coder in qory.yaml.` and `The keys of bind are kinds, and agents/coder is a kind and a role.` on the next line. A checkout's `bind` sets a role over the base's `bind` and over the modules' `provides` |
+| `bind` | no | the entry that fills each role a document references (§References), by kind and then by role, to the name of one entry of that kind: `bind: {agents: {coder: rails-coder}}`. The kind is `agents`, `skills` or `commands`. A role's value is one name. A group role (§References) takes a list of agents, `bind: {agents: {reviewers: [code-reviewer, python-reviewer]}}`, and only a group role takes one. A flat key, `agents/coder: rails-coder`, is refused with `Write bind as bind.agents.coder: rails-coder.` and `The keys of bind are kinds, and agents/coder is a kind and a role.` and `bind is in qory.yaml.` on the next two lines. A checkout's `bind` sets a role over the base's `bind` and over the modules' `provides` |
 | `extensions` | no | a map of keys the author chooses, each a value of any shape, a scalar, a list or a map of any depth; written into the report as it is and printed by `qory harness inspect`; qory reads nothing in it |
-| `workflows` | no | the settings of each workflow of the stack, by its name: a lower-case letter, then up to 54 lower-case letters, digits and hyphens, 55 characters at most, so `workflow-<name>` has at most 64 characters. A run that Qory Apiary dispatches from a run code starts the first of these that the runtime can start: the skill `workflow-<name>`, the command `workflow-<name>`, the skill `<name>`, the command `<name>` (docs/run.md, §The run key from a run code). A plain name works, and when a harness ships both names, the prefixed one runs. The compose fails with status 2 for each workflow that no module of the stack composes as a skill or command under either name, after the modules' `exclude` and `only`: `Add skill workflow-<name> to a module of <stack>, or remove workflow <name>.`, then `The base stack <stack> declares the workflow <name> in its qory-stack.yaml.` and `No module of <stack> ships a skill or command workflow-<name> or <name>.` on the next two lines, or, for a stack that extends none, `Add skill workflow-<name> to a module of the stack in <file>, or remove workflow <name>.`, then `The stack in <file> declares the workflow <name>.` and `No module of the stack in <file> ships …`, where `<file>` is the `qory-stack.yaml` or the `qory.yaml` that defines the stack. For a stack that the harness document of a run from a run code defines, the line has `the workspace's harness in Qory Apiary` in place of `the stack in <file>`. A module that a checkout adds to the stack it extends does not count, and neither does a checkout's exclude: the compose checks what the stack's modules ship before it applies that exclude. The harness section of a `qory.yaml` that defines a stack lists them with the same keys and checks; a section that extends a stack takes the base's and lists none |
-| `workflows.<name>.time_limit` | no | how long a dispatched run of the workflow may run, counted from the run's open, as a Go duration above zero, such as `7h`, `45m` or `1h30m`; qory stops with an error on any other value: `Set workflows.<name>.time_limit in <file> to a duration above zero, such as 7h or 45m.` with `The value is <value>.` on the next line. The run's `run_settings.time_limit_minutes`, when Qory Apiary sets it, applies instead, and a workflow without it runs for at most 3 hours |
+| `workflows` | no | the settings of each workflow of the stack, by its name: a lower-case letter, then up to 54 lower-case letters, digits and hyphens, 55 characters at most, so `workflow-<name>` has at most 64 characters. A run that Qory Apiary dispatches from a run code starts the first of these that the runtime can start: the skill `workflow-<name>`, the command `workflow-<name>`, the skill `<name>`, the command `<name>` (docs/run.md, §The run key from a run code). A plain name works, and when a harness ships both names, the prefixed one runs. The compose fails with status 2 for each workflow that no module of the stack composes as a skill or command under either name, after the modules' `exclude` and `only`: `Add skill or command workflow-<name> to a module of <stack>, or remove workflow <name>.`, then `The base stack <stack> declares the workflow <name> in its qory-stack.yaml.` and `No module of <stack> ships a skill or command workflow-<name> or <name>.` on the next two lines, or, for a stack that extends none, `Add skill or command workflow-<name> to a module of the stack in <file>, or remove workflow <name>.`, then `The stack in <file> declares the workflow <name>.` and `No module of the stack in <file> ships …`, where `<file>` is the `qory-stack.yaml` or the `qory.yaml` that defines the stack. For a stack that the harness document of a run from a run code defines, the line has `the workspace's harness in Qory Apiary` in place of `the stack in <file>`. A module that a checkout adds to the stack it extends does not count, and neither does a checkout's exclude: the compose checks what the stack's modules ship before it applies that exclude. The harness section of a `qory.yaml` that defines a stack lists them with the same keys and checks; a section that extends a stack takes the base's and lists none |
+| `workflows.<name>.time_limit` | no | how long a dispatched run of the workflow may run, counted from the run's open, as a Go duration above zero, such as `7h`, `45m` or `1h30m`; qory stops with an error on any other value: `Set workflows.<name>.time_limit to a duration above zero, such as 7h or 45m.` with `The value is <value>.` and `workflows.<name> is in <file>.` on the next two lines. The run's `run_settings.time_limit_minutes`, when Qory Apiary sets it, applies instead, and a workflow without it runs for at most 3 hours |
 | `workflows.<name>.hook_points` | no | the points of the workflow where a checkout extending the stack may add workflow hooks, by the point's name: `{at: end, kinds: [check, review]}`. `at` is where the point sits in the workflow's session, `end`, `start` or `inside`; `kinds` is one or more of `check`, `review` and `enrich`, each once. A point's name has the form of a workflow's name, and is unique in the stack, since a hook selects a point by its name alone. Only a `qory-stack.yaml` declares points: a `qory.yaml` that defines a stack, which nothing extends, is refused with `Remove hook_points from the workflows in qory.yaml.` (§Workflow hooks) |
-| `workflows.<name>.access` | no | the access level the workflow declares for what a dispatched run of it works on, `read` or `write`, and `read` when left out; qory stops with an error on any other value: `Set workflows.<name>.access in <file> to read or write.` with `The value is <value>.` on the next line. A dispatched run from a run code sees the checkout read-only when this access is `read` or `access` in the run's documents is `read`, and on Claude Code its settings deny `Edit`, `Write` and `NotebookEdit`; such a run with no wall, with `wall.setup: inside`, or whose image chosen at the run's open has nested Docker, whichever way it was selected, stops before the agent starts (docs/run.md, §Read workflows). The run sees the checkout writable only when both are `write`, or when this access is `write` and the documents have no `access`, as documents with no target do |
+| `workflows.<name>.access` | no | the access level the workflow declares for what a dispatched run of it works on, `read` or `write`, and `read` when left out; qory stops with an error on any other value: `Set workflows.<name>.access to read or write.` with `The value is <value>.` and `workflows.<name> is in <file>.` on the next two lines. A dispatched run from a run code sees the checkout read-only when this access is `read` or `access` in the run's documents is `read`, and on Claude Code its settings deny `Edit`, `Write` and `NotebookEdit`; such a run with no wall, with `wall.setup: inside`, or whose image chosen at the run's open has nested Docker, whichever way it was selected, stops before the agent starts (docs/run.md, §Read workflows). The run sees the checkout writable only when both are `write`, or when this access is `write` and the documents have no `access`, as documents with no target do |
 | `extending` | no | what a module of a checkout extending this stack may ship: `kinds`, `instructions`, `settings`, `files` (§Extending a stack). A base without the block cannot be extended |
 | `extending.hooks` | no | lets a checkout extending the stack add workflow hooks at the points of its workflows: `per_point`, the most hooks one point takes, 3 when left out; `per_workflow`, the most the points of one workflow take together, 10 when left out; `timeout`, a duration in whole seconds, 1s or more, the longest a hook may run and the timeout of a hook that sets none, 10 minutes when left out. A count below 1 is refused. Without the block a checkout adds no workflow hook (§Workflow hooks) |
 | `extending.target` | no | the runtimes and the models the stack is written for, `runtime` and `model`, each one name or a list, one of the two at least. A checkout's resolved target outside either list fails the compose; listed models make the model required, since a target without one runs whatever the runtime defaults to, which is a model the stack did not list. Left out, every target is accepted, a model left out included (§Extending a stack) |
@@ -632,13 +631,16 @@ artifact_types:                  # optional; the artifact types the workspaces u
 
 Every key but `artifact_types` and `submit` is required, and the file has no other key. A key left out, a text over its
 limit, a `stack` that `exports.stacks` does not list, and a `process` that is not such an
-object are refused with the file and the fix in the message. Each workflow that the
-stack does not declare is refused with a fix line, which has the workflow, the stack file
-and the stage, and a cause line, which has the `process.yaml`:
+object are refused with the file and the fix in the message: the fix is the first line, and the file is on a
+line of its own at the end, so a long path never pushes the fix past 100 characters. Each
+workflow that the stack does not declare is refused with a fix line, which has the
+workflow, the stack and the stage, a cause line, which has the `process.yaml`, and a last
+line with the stack file:
 
 ```text
-Declare check-the-tone in harness/stacks/support/qory-stack.yaml, or remove it from stage Answer.
+Declare check-the-tone in stack support, or remove it from stage Answer.
   Stage Answer of /src/acme-harness/harness/modules/support-desk/process.yaml runs check-the-tone, and stack support does not declare it under workflows.
+  The stack is in harness/stacks/support/qory-stack.yaml.
 ```
 
 A workflow that is empty, null, not a string, such as `123` or `true`, or has a line
@@ -690,7 +692,7 @@ fix, such as:
 
 ```text
 Add size_limit and max_files to artifact type reply-draft, or leave only its name.
-  A custom type has base_view, size_limit and max_files.
+  A custom type has base_view, size_limit, and max_files.
   The type is in /src/acme-harness/harness/modules/support-desk/process.yaml.
 ```
 
@@ -1151,7 +1153,7 @@ no other key; the schema is [mcp.schema.json](mcp.schema.json). Every runtime wi
 servers gets it there, rewritten where its shape differs (§Runtimes). A directory under
 `hooks/`, or a link to one, fails the compose: a hook is one file, and a script's helpers
 live anywhere else in the module, such as under `scripts/`, reached through `modules/<name>` in
-the composed tree. The refusal is `Move the helpers in hooks/scripts to another directory of
+the composed tree. The refusal is `Move hooks/scripts out of the hooks directory of
 module core.`, with `hooks/scripts is a directory, and a hook is one file.` and `A hook reads
 its helpers at $QORY_HARNESS_HOME/modules/core/<path>.` on the next two lines.
 
@@ -1194,7 +1196,7 @@ replaced. An agent that lacks parts fails the compose with one block per agent a
 contract, which lists every part the agent lacks:
 
 ```
-Complete agent python-developer of module python, or bind agents/developer to another agent.
+Complete agent python-developer of module python, or bind agents.developer to another agent.
   The contract roles/developer.yaml of module core requires these parts, which agents/python-developer.md lacks:
   - the heading "## Stop conditions"
   - the front-matter key model
@@ -1336,11 +1338,11 @@ test-reviewer, python-reviewer.`: the members' names at the path's address, join
 `, `, in the order of the group's rows in `roles.json`. A reference expands anywhere in a
 document's body, in a code span and in a fenced code block too. A reference to a group
 resolves only in a document's body. In front matter it fails the compose: `Remove
-${qory:agents/reviewers} from the front matter of skills/review/SKILL.md of module core.`
-with `A group resolves to a list.` on the next line. A group with no member fails the compose
-when a document references it: `Fill agents/reviewers, or remove it from
-skills/review/SKILL.md of module core.` with `The group has no member.` on
-the next line. When the document is in a module of the base stack a checkout extends,
+${qory:agents/reviewers} from the front matter.`
+with `A group resolves to a list.` and `The reference is in the front matter of
+skills/review/SKILL.md of module core.` on the next two lines. A group with no member fails the compose
+when a document references it: `Fill agents/reviewers, or remove the reference to it.` with `The group has no member.` and
+`The reference is in skills/review/SKILL.md of module core.` on the next two lines. When the document is in a module of the base stack a checkout extends,
 which the checkout does not edit, the fix is `Add a module to qory.yaml that provides
 agents/reviewers, or ask the base stack's maintainer.`, with `skills/review/SKILL.md of
 module core references agents/reviewers, and the group has no member.` on the next line.
@@ -1398,12 +1400,12 @@ runtime: the resolution happens in the composed tree, per path.
    module whose block did, and with `Ship command ship in a module, or remove it from the
    requires of skill deploy.` and `The skill deploy of module core requires command ship,
    and no module ships it.` otherwise. For a reference that neither an entry nor a role
-   matches, the fix is `Ship agent coder, bind agents/coder in qory.yaml, or remove the
+   matches, the fix is `Ship agent coder, bind agents.coder in qory.yaml, or remove the
    reference from skill deploy.`, with `The skill deploy of module core references agent
    coder. No module ships or provides it, and the stack does not bind it.` on the next
    line. When a module provides the role with an entry that an `exclude` or an `only`
    left out, the message has one refusal per such module: `Keep agent core-developer in
-   module core, or bind agents/developer to another agent.`, then `The skill deploy of
+   module core, or bind agents.developer to another agent.`, then `The skill deploy of
    module core references agent developer, which module web provides as agent
    core-developer.` and `Module core leaves out agent core-developer.` on the next two
    lines. When the exclude a checkout's `qory.yaml` lists for a base module dropped it,
@@ -1413,12 +1415,12 @@ runtime: the resolution happens in the composed tree, per path.
    next two lines; for a provided entry, the middle line ends `which module ts provides
    as agent ts-developer.` A binding is checked first: one that selects an entry that is
    not composed fails with `Ship agent rails-coder in a module, or change bind
-   agents/coder.` and `The bind agents/coder selects agent rails-coder, and no module
+   agents.coder.` and `The bind agents.coder selects agent rails-coder, and no module
    ships it.` on the next line, or `Keep agent rails-coder in module rails, or change
-   bind agents/coder.` and `The bind agents/coder selects agent rails-coder, and module
+   bind agents.coder.` and `The bind agents.coder selects agent rails-coder, and module
    rails leaves it out.`, and a role whose name an entry has fails with `Rename role
-   agents/reviewer in bind, or rename agent reviewer in module core.` and `The bind
-   defines role agents/reviewer, and module core ships agent reviewer: a role and an
+   agents.reviewer in bind, or rename agent reviewer in module core.` and `The bind
+   defines role agents.reviewer, and module core ships agent reviewer: a role and an
    entry cannot share a name.` on the next line, since such a role
    cannot be rebound. A role a module provides is checked the same way, with `Ship agent
    typescript-developer in a module, or remove provides.agents.developer from module
@@ -1473,9 +1475,9 @@ runtime: the resolution happens in the composed tree, per path.
    `permissions` lists concatenate and deduplicate, `hooks` arrays concatenate. Every
    other list and every scalar is set by one module; another module may repeat the value and
    may not change it. Two fragments setting one key path to different values fail the
-   compose with `Set <dotted.key.path> to one value in settings/<runtime>/<file> of modules
-   <a> and <b>.` and `Modules <a> and <b> set <dotted.key.path> to different values.` on
-   the next line. A top-level `env` key the configuration sets takes the
+   compose with `Set <dotted.key.path> to one value in both modules.` and `Modules <a> and <b> set
+   <dotted.key.path> to different values.` and `<dotted.key.path> is in settings/<runtime>/<file>.` on
+   the next two lines. A top-level `env` key the configuration sets takes the
    configuration's value and never collides; an `env` key a fragment sets and a module
    manifest exports with a different value fails with `settings/<runtime>/<file>:
    env.<name> is set by module <a> and exported by module <b> with different values`,

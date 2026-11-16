@@ -1,2 +1,3 @@
-Add summary to modules/support-desk/process.yaml, at most 200 characters.
+Add summary to process.yaml, at most 200 characters.
   The file has no summary.
+  The file is modules/support-desk/process.yaml.

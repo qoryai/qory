@@ -1,2 +1,3 @@
-Set env.A to one value in settings/claude/settings.json of modules core and nextjs.
+Set env.A to one value in both modules.
   Modules core and nextjs set env.A to different values.
+  env.A is in settings/claude/settings.json.

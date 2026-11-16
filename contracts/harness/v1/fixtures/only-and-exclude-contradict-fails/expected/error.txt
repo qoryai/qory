@@ -1,2 +1,3 @@
-Remove skills/deploy from the only or the exclude of module ops in qory.yaml.
+Remove skills/deploy from the only or the exclude of module ops.
   Both blocks list skills/deploy.
+  The blocks are in qory.yaml.

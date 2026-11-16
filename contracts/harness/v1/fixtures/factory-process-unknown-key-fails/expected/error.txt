@@ -1,2 +1,3 @@
-Remove the key "owner" from line 9 of modules/support-desk/process.yaml.
+Remove the key "owner" from line 9 of process.yaml.
   The key is not one process.yaml reads.
+  The file is modules/support-desk/process.yaml.

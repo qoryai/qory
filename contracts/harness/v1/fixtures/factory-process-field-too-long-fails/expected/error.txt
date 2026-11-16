@@ -1,2 +1,3 @@
-Shorten name in modules/support-desk/process.yaml to at most 60 characters.
+Shorten name in process.yaml to at most 60 characters.
   The name has 66 characters.
+  The file is modules/support-desk/process.yaml.

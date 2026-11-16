@@ -106,7 +106,7 @@ func checkArtifactTypes(shown string, list *yaml.Node) error {
 		case why != "":
 			lines = append(lines, shown+": "+why)
 		case twice:
-			lines = append(lines, fmt.Sprintf("Rename or remove entry %d of artifact_types in %s.\n  Entry %d has the name %s too.", i+1, shown, at+1, name))
+			lines = append(lines, fmt.Sprintf("Rename or remove entry %d of artifact_types.\n  Entry %d has the name %s too.\n  The entry is in %s.", i+1, at+1, name, shown))
 		}
 		if name != "" && !twice {
 			first[name] = i
@@ -134,7 +134,7 @@ func checkArtifactType(entry *yaml.Node, i int, patterns *patternBudget) (name, 
 	for j := 0; j+1 < len(entry.Content); j += 2 {
 		key := entry.Content[j]
 		if key.Kind != yaml.ScalarNode || !slices.Contains(typeKeys, key.Value) {
-			return "", fmt.Sprintf("Remove the key %s from %s in %s.\n  An artifact type has only name, base_view, size_limit, max_files and json_schema.", scalarText(key), label, FilePlace)
+			return "", fmt.Sprintf("Remove the key %s from %s.\n  An artifact type has only name, base_view, size_limit, max_files, and json_schema.\n  The entry is in %s.", scalarText(key), label, FilePlace)
 		}
 		if seen[key.Value] {
 			return "", fmt.Sprintf("remove the second %s from %s: the entry has the key twice", key.Value, label)
@@ -153,7 +153,7 @@ func checkArtifactType(entry *yaml.Node, i int, patterns *patternBudget) (name, 
 		return "", fmt.Sprintf("set the name of %s to a string of lowercase letters and digits in groups joined by single hyphens: the name is %s", label, nodeKind(n))
 	}
 	if !runapi.ArtifactName(n.Value) {
-		return "", fmt.Sprintf("Rename %s in %s.\n  A name is lowercase letters and digits in groups joined by single hyphens, at most %d bytes.\n  The name is %s.", label, FilePlace, runapi.MaxArtifactName, scalarText(n))
+		return "", fmt.Sprintf("Rename %s.\n  A name is lowercase letters and digits in groups joined by single hyphens, at most %d bytes.\n  The name is %s.\n  The entry is in %s.", label, runapi.MaxArtifactName, scalarText(n), FilePlace)
 	}
 	name = n.Value
 	if len(entry.Content) == 2 {
@@ -167,7 +167,7 @@ func checkArtifactType(entry *yaml.Node, i int, patterns *patternBudget) (name, 
 		}
 	}
 	if len(missing) > 0 {
-		return name, fmt.Sprintf("Add %s to %s, or leave only its name.\n  A custom type has base_view, size_limit and max_files.\n  The type is in %s.", joinWords(missing), label, FilePlace)
+		return name, fmt.Sprintf("Add %s to %s, or leave only its name.\n  A custom type has base_view, size_limit, and max_files.\n  The type is in %s.", joinWords(missing), label, FilePlace)
 	}
 	view := value(entry, "base_view")
 	most, known := baseViewSizes[view.Value]
@@ -218,13 +218,16 @@ func numberText(n *yaml.Node) string {
 	return n.Value
 }
 
-// joinWords is words in a sentence: a, b and c.
+// joinWords is words in a sentence: "a", "a and b", "a, b, and c".
 func joinWords(words []string) string {
-	last := len(words) - 1
-	if last == 0 {
+	switch last := len(words) - 1; last {
+	case 0:
 		return words[0]
+	case 1:
+		return words[0] + " and " + words[1]
+	default:
+		return strings.Join(words[:last], ", ") + ", and " + words[last]
 	}
-	return strings.Join(words[:last], ", ") + " and " + words[last]
 }
 
 // checkTypeSchema checks n, the json_schema of the artifact type label, for a message:

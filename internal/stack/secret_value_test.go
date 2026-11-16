@@ -33,7 +33,7 @@ func TestAStackRefusalPrintsNoSecret(t *testing.T) {
 		{head + "extending:\n  target:\n    model: [qak_m, qak_m]\n" + core, "extending.target.model lists " + valueWithSecret + " twice"},
 		{head + "bind:\n  qak_x: {y: z}\n" + core, "/qory-stack.yaml: " + nameWithSecret + " is none of them."},
 		{head + "bind:\n  skills:\n    a: qak_/y\n" + core, "/qory-stack.yaml to an entry's name, one path segment with no space, @ or leading dot: the value is " + nameWithSecret + "."},
-		{head + "bind:\n  skills/a: qak_y\n" + core, "Write bind as bind.skills.a: " + nameWithSecret + " in "},
+		{head + "bind:\n  skills/a: qak_y\n" + core, "Write bind as bind.skills.a: " + nameWithSecret + ".\n"},
 		{head + "bind:\n  skills:\n    qak_/r: y\n" + core, "Rename role " + nameWithSecret + " of bind.skills in "},
 		{head + "bind:\n  skills:\n    qak_x: [a, b]\n" + core, "Write one name for bind.skills." + nameWithSecret + " in "},
 		{head + "bind:\n  agents:\n    qak_x: {a: b}\n" + core, "Set bind.agents." + nameWithSecret + " in "},

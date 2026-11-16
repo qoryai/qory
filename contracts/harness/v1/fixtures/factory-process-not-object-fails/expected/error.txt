@@ -1,2 +1,3 @@
-Set process in modules/support-desk/process.yaml to an object.
+Set process in process.yaml to an object.
   process is the template's process document, and the value is a list.
+  The file is modules/support-desk/process.yaml.

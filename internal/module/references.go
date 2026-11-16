@@ -121,8 +121,9 @@ func References(text string) ([]string, error) {
 		kind, name, ok := strings.Cut(key, "/")
 		if !ok || !isReferable(kind) {
 			ref := exports.Value(m[0], false)
-			return nil, exports.Refuse(fmt.Sprintf("Change %s in %s of %s to a reference.", ref, exports.FilePlace, exports.ModulePlace),
-				fmt.Sprintf("%s is not a reference: after ${qory: comes one of %s, then /<name>.", ref, strings.Join(Referable, ", ")))
+			return nil, exports.Refuse(fmt.Sprintf("Change %s to a reference.", ref),
+				fmt.Sprintf("%s is not a reference: after ${qory: comes one of %s, then /<name>.", ref, strings.Join(Referable, ", ")),
+				fmt.Sprintf("The reference is in %s of %s.", exports.FilePlace, exports.ModulePlace))
 		}
 		if name == "" || strings.ContainsAny(name, `/\@ `) || strings.HasPrefix(name, ".") {
 			return nil, fmt.Errorf("%s refers to %s, which is not an entry name; a name is one path segment", exports.Value(m[0], false), accesskey.ShownName(name, true))

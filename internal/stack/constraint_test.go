@@ -29,9 +29,9 @@ func TestConstraintReadsComparatorsOnly(t *testing.T) {
 		}
 	}
 	bad := map[string]string{
-		"0.3.0":        "Set qory in the file to one or more comparators, such as >=0.3.0.\n  The value is \"0.3.0\".",
+		"0.3.0":        "Set qory to one or more comparators, such as >=0.3.0.\n  The value is \"0.3.0\".\n  qory is in the file.",
 		">=0.3":        `qory ">=0.3": "0.3" is not a version such as 0.3.0`,
-		"~0.3.0":       "Set qory in the file to one or more comparators, such as >=0.3.0.\n  The value is \"~0.3.0\".",
+		"~0.3.0":       "Set qory to one or more comparators, such as >=0.3.0.\n  The value is \"~0.3.0\".\n  qory is in the file.",
 		">=0.3.0+meta": `qory ">=0.3.0+meta": "0.3.0+meta" is not a version such as 0.3.0`,
 		"":             "qory is empty; it is one or more comparators such as >=0.3.0",
 	}
@@ -156,7 +156,7 @@ func TestLoadJoinsTheRepositoryRange(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = Load(path)
-	if want := "Set qory in " + rootFile + " to one or more comparators, such as >=0.3.0.\n  The value is \"0.5.0\"."; err == nil || err.Error() != want {
+	if want := "Set qory to one or more comparators, such as >=0.3.0.\n  The value is \"0.5.0\".\n  qory is in " + rootFile + "."; err == nil || err.Error() != want {
 		t.Errorf("a bad root key: err = %v, want %q", err, want)
 	}
 	// A root without the key, or without a file, leaves the stack's own range alone.

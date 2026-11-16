@@ -191,7 +191,7 @@ func TestAHookDirectoryRefusalLeavesOutAModuleNameWithASecret(t *testing.T) {
 	dir := tree(t, map[string]string{"hooks/sub/x.sh": "#!/bin/sh\n"})
 	t.Setenv("GIT_CEILING_DIRECTORIES", filepath.Dir(dir))
 	_, err := Read("qak_mod", dir, nil, "")
-	want := "Move the helpers in hooks/sub to another directory of module " + accessKeyPhrase + ".\n" +
+	want := "Move hooks/sub out of the hooks directory of module " + accessKeyPhrase + ".\n" +
 		"  hooks/sub is a directory, and a hook is one file.\n" +
 		"  A hook reads its helpers at $QORY_HARNESS_HOME/modules/" + accessKeyPhrase + "/<path>."
 	if err == nil || err.Error() != want {

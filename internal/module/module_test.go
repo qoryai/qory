@@ -162,7 +162,7 @@ func TestReadRefusesADirectoryUnderHooks(t *testing.T) {
 	if err == nil {
 		t.Fatal("read a module with a directory under hooks")
 	}
-	want := "Move the helpers in hooks/scripts to another directory of module core.\n" +
+	want := "Move hooks/scripts out of the hooks directory of module core.\n" +
 		"  hooks/scripts is a directory, and a hook is one file.\n" +
 		"  A hook reads its helpers at $QORY_HARNESS_HOME/modules/core/<path>."
 	if err.Error() != want {
@@ -224,7 +224,7 @@ func TestReadRefusesALinkToADirectoryUnderHooks(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = Read("core", dir, m, "claude")
-	want := "Move the helpers in claude/hooks/scripts to another directory of module core.\n" +
+	want := "Move claude/hooks/scripts out of the hooks directory of module core.\n" +
 		"  claude/hooks/scripts is a directory, and a hook is one file.\n" +
 		"  A hook reads its helpers at $QORY_HARNESS_HOME/modules/core/<path>."
 	if err == nil || err.Error() != want {
@@ -429,8 +429,7 @@ func TestReadManifestRefuses(t *testing.T) {
 				t.Fatalf("read %q without an error", c.yaml)
 			}
 			path := filepath.Join(dir, ManifestName)
-			fix, _, _ := strings.Cut(err.Error(), "\n")
-			if !strings.HasPrefix(err.Error(), path+": ") && !strings.Contains(fix, " "+path+" ") {
+			if !strings.HasPrefix(err.Error(), path+": ") && !strings.HasSuffix(err.Error(), " "+path+".") {
 				t.Fatalf("error %q does not start with %q", err, path)
 			}
 			if !strings.Contains(err.Error(), c.want) {
@@ -501,8 +500,7 @@ func TestReadManifestRefusesEnv(t *testing.T) {
 				t.Fatalf("read %q without an error", c.env)
 			}
 			path := filepath.Join(dir, ManifestName)
-			fix, _, _ := strings.Cut(err.Error(), "\n")
-			if !strings.HasPrefix(err.Error(), path+": ") && !strings.Contains(fix, " "+path+" ") {
+			if !strings.HasPrefix(err.Error(), path+": ") && !strings.HasSuffix(err.Error(), " "+path+".") {
 				t.Fatalf("error %q does not start with %q", err, path)
 			}
 			if !strings.Contains(err.Error(), c.want) {

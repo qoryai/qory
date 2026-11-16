@@ -1,10 +1,10 @@
-Ship agent rails-coder in a module, or change bind agents/coder.
-  The bind agents/coder selects agent rails-coder, and no module ships it.
-Ship agent auditor, bind agents/auditor in qory.yaml, or remove the reference from skill audit.
+Ship agent rails-coder in a module, or change bind agents.coder.
+  The bind agents.coder selects agent rails-coder, and no module ships it.
+Ship agent auditor, bind agents.auditor in qory.yaml, or remove the reference from skill audit.
   The skill audit of module core references agent auditor. No module ships or provides it, and the stack does not bind it.
-Ship agent linter, bind agents/linter in qory.yaml, or remove the reference from skill audit.
+Ship agent linter, bind agents.linter in qory.yaml, or remove the reference from skill audit.
   The skill audit of module core references agent linter. No module ships or provides it, and the stack does not bind it.
 Keep agent reviewer in module core, or remove the reference from skill deploy.
   The skill deploy of module core references agent reviewer, and module core leaves it out.
-Ship skill e2e, bind skills/e2e in qory.yaml, or remove the reference from skill deploy.
+Ship skill e2e, bind skills.e2e in qory.yaml, or remove the reference from skill deploy.
   The skill deploy of module core references skill e2e. No module ships or provides it, and the stack does not bind it.

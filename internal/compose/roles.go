@@ -290,12 +290,18 @@ func twoProviders(p *stack.Stack, key string, list []Role) error {
 	return fmt.Errorf("Bind %s.%s in %s, or compose one of %s.\n  %s provide %s: %s.", shown(kind), shown(role), docFile(p), andList(modules), upperFirst(both), shown(key), strings.Join(names, ", "))
 }
 
-// andList joins names as a sentence lists them: "a and b", "a, b and c".
-func andList(names []string) string {
-	if len(names) < 2 {
+// andList joins names as a sentence lists them: "a", "a and b", "a, b, and c".
+func andList(names []string) string { return joinList(names, "and") }
+
+// joinList joins names with the conjunction and: "a", "a and b", "a, b, and c".
+func joinList(names []string, and string) string {
+	switch len(names) {
+	case 0, 1:
 		return strings.Join(names, "")
+	case 2:
+		return names[0] + " " + and + " " + names[1]
 	}
-	return strings.Join(names[:len(names)-1], ", ") + " and " + names[len(names)-1]
+	return strings.Join(names[:len(names)-1], ", ") + ", " + and + " " + names[len(names)-1]
 }
 
 // droppedProviders is, per single role keyed <kind>/<role>, the provided entries of the

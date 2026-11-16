@@ -41,7 +41,7 @@ func TestReadManifestRefusesRolesItDoesNotRead(t *testing.T) {
 		{"roles:\n  skills:\n    x: many\n", "Set roles.skills.x of the module to one.\n  Only an agents role can be a group. The map is in {path}."},
 		{"roles:\n  agents:\n    developer: [one, one]\n", "Set roles.agents.developer to one or many in {path}.\n  One entry fills a role and several fill a group, and the value is a list."},
 		{"provides:\n  skills:\n    lint: [a, b]\n", "Write one name for provides.skills.lint in {path}.\n  Only an agents role can be a group, and the value is a list."},
-		{"provides:\n  agents/developer: typescript-developer\n", "Write provides as provides.agents.developer: typescript-developer in {path}.\n  The keys of provides are kinds, and agents/developer is a kind and a role."},
+		{"provides:\n  agents/developer: typescript-developer\n", "Write provides as provides.agents.developer: typescript-developer.\n  The keys of provides are kinds, and agents/developer is a kind and a role.\n  provides is in {path}."},
 		{"provides:\n  mcp:\n    a: b\n", `Use agents, commands or skills as a kind under provides in {path}: "mcp" is none of them.`},
 		{"provides:\n  agents:\n    developer: qak_/x\n", "Set provides.agents.developer in {path} to an entry's name"},
 		{"provides:\n  skills:\n    qak_x: [a, b]\n", "Write one name for provides.skills.(a name that contains an access key secret) in {path}.\n"},

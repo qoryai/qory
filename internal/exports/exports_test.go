@@ -216,7 +216,7 @@ func TestResolveAPIVersionReadsARetiredSpelling(t *testing.T) {
 	}
 	for _, version := range []string{"", "qory.dev/v2", "qory.ai/v1alpha2", "QORY.DEV/V1ALPHA1"} {
 		got, err := exports.ResolveAPIVersion(version)
-		want := "Set apiVersion in the file to qory.dev/v1alpha1.\n  This qory reads qory.dev/v1alpha1, and apiVersion is \"" + version + "\"."
+		want := "Set apiVersion to qory.dev/v1alpha1.\n  This qory reads qory.dev/v1alpha1, and apiVersion is \"" + version + "\".\n  apiVersion is in the file."
 		if err == nil || err.Error() != want || got != "" {
 			t.Errorf("%q: got %q, %v, want %q", version, got, err, want)
 		}

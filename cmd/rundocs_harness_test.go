@@ -394,7 +394,7 @@ func TestARunCodesHarnessDocumentWithAWorkflowItsModulesLackStops(t *testing.T) 
 	if r.joined || cmd.ExitCode(r.err) != cmd.ExitInput {
 		t.Fatalf("%v (exit %d), want exit 2 before the join\n%s", r.err, cmd.ExitCode(r.err), r.out)
 	}
-	wants(t, r.out+r.err.Error(), "Add skill workflow-deploy to a module, or remove workflow deploy.\n"+
+	wants(t, r.out+r.err.Error(), "Add skill or command workflow-deploy to a module, or remove workflow deploy.\n"+
 		"  The workspace's harness in Qory Apiary declares the workflow deploy.\n"+
 		"  No module of "+workspaceHarness+" in Qory Apiary ships a skill or command workflow-deploy or deploy")
 	lacks(t, r.out+r.err.Error(), "harness.yaml")

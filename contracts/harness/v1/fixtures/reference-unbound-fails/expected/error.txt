@@ -1,2 +1,2 @@
-Ship agent coder, bind agents/coder in qory.yaml, or remove the reference from skill deploy.
+Ship agent coder, bind agents.coder in qory.yaml, or remove the reference from skill deploy.
   The skill deploy of module core references agent coder. No module ships or provides it, and the stack does not bind it.

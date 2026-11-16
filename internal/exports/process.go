@@ -145,11 +145,11 @@ func (e *Exports) checkProcess(path string, data []byte) error {
 	if err := dec.Decode(&t); err != nil && !errors.Is(err, io.EOF) {
 		// An unknown key is refused fix first; any other error as [DecodeError] has it.
 		if m := UnknownKey.FindStringSubmatch(err.Error()); m != nil && !accesskey.ContainsSecret(m[2]) {
-			at := shown
+			at := ProcessFileName
 			if line := strings.TrimSuffix(m[1], ": "); line != "" {
-				at = line + " of " + shown
+				at = line + " of " + ProcessFileName
 			}
-			return fmt.Errorf("Remove the key %q from %s.\n  The key is not one %s reads.", m[2], at, filepath.Base(shown))
+			return fmt.Errorf("Remove the key %q from %s.\n  The key is not one %s reads.\n  The file is %s.", m[2], at, ProcessFileName, shown)
 		}
 		return DecodeError(shown, err)
 	}
@@ -164,10 +164,10 @@ func (e *Exports) checkProcess(path string, data []byte) error {
 		limit      int
 	}{{"name", t.Name, maxProcessName}, {"summary", t.Summary, maxProcessSummary}, {"description", t.Description, maxProcessDescription}} {
 		if strings.TrimSpace(f.value) == "" {
-			return fmt.Errorf("Add %s to %s, at most %d characters.\n  The file has no %s.", f.key, shown, f.limit, f.key)
+			return fmt.Errorf("Add %s to %s, at most %d characters.\n  The file has no %s.\n  The file is %s.", f.key, ProcessFileName, f.limit, f.key, shown)
 		}
 		if n := utf8.RuneCountInString(f.value); n > f.limit {
-			return fmt.Errorf("Shorten %s in %s to at most %d characters.\n  The %s has %d characters.", f.key, shown, f.limit, f.key, n)
+			return fmt.Errorf("Shorten %s in %s to at most %d characters.\n  The %s has %d characters.\n  The file is %s.", f.key, ProcessFileName, f.limit, f.key, n, shown)
 		}
 	}
 	if n := len(strings.Fields(t.Description)); n > maxDescriptionWords {
@@ -189,13 +189,13 @@ func (e *Exports) checkProcess(path string, data []byte) error {
 		if len(e.Stacks) > 0 {
 			listed = strings.Join(accesskey.ShownNames(e.Stacks), ", ")
 		}
-		return fmt.Errorf("Set stack in %s to a name that exports.stacks lists.\n  The value is %s, and exports.stacks lists %s.", shown, accesskey.ShownName(t.Stack, false), listed)
+		return fmt.Errorf("Set stack in %s to a name that exports.stacks lists.\n  The value is %s, and exports.stacks lists %s.\n  The file is %s.", ProcessFileName, accesskey.ShownName(t.Stack, false), listed, shown)
 	}
 	if t.Process.Kind == 0 || t.Process.Tag == "!!null" {
 		return fmt.Errorf("%s: add process, the template's process document as an object: the file has no process", shown)
 	}
 	if t.Process.Kind != yaml.MappingNode {
-		return fmt.Errorf("Set process in %s to an object.\n  process is the template's process document, and the value is %s.", shown, nodeKind(&t.Process))
+		return fmt.Errorf("Set process in %s to an object.\n  process is the template's process document, and the value is %s.\n  The file is %s.", ProcessFileName, nodeKind(&t.Process), shown)
 	}
 	schema, stages := value(&t.Process, "schema"), value(&t.Process, "stages")
 	if schema == nil || schema.Tag == "!!null" {
@@ -339,8 +339,8 @@ func (e *Exports) checkWorkflows(shown, stackName string, stages *yaml.Node) err
 			}
 			seen[name] = true
 			workflow := accesskey.ShownName(name, false)
-			lines = append(lines, fmt.Sprintf("Declare %s in %s, or remove it from stage %s.\n  Stage %s of %s runs %s, and stack %s does not declare it under workflows.",
-				workflow, HidePath(stackFile), label, label, shown, workflow, accesskey.ShownName(stackName, false)))
+			lines = append(lines, fmt.Sprintf("Declare %s in stack %s, or remove it from stage %s.\n  Stage %s of %s runs %s, and stack %s does not declare it under workflows.\n  The stack is in %s.",
+				workflow, accesskey.ShownName(stackName, false), label, label, shown, workflow, accesskey.ShownName(stackName, false), HidePath(stackFile)))
 		}
 	}
 	if len(lines) > 0 {

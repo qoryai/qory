@@ -421,8 +421,7 @@ func parseManifest(dir string, data []byte, err error) (*Manifest, error) {
 			continue
 		}
 		one, many, err := stack.ReadRoles(part.node, part.key, part.counts)
-		var in exports.InFile
-		if errors.As(err, &in) {
+		if in, ok := err.(exports.InFile); ok {
 			return nil, in.In(path)
 		}
 		if err != nil {
@@ -1297,7 +1296,7 @@ func readHooks(name, rel, dir string) ([]Entry, error) {
 		}
 		if info.IsDir() {
 			sub := exports.HidePath(filepath.ToSlash(filepath.Join(rel, it.Name())))
-			return nil, exports.Refuse(fmt.Sprintf("Move the helpers in %s to another directory of module %s.", sub, name),
+			return nil, exports.Refuse(fmt.Sprintf("Move %s out of the hooks directory of module %s.", sub, name),
 				fmt.Sprintf("%s is a directory, and a hook is one file.", sub),
 				fmt.Sprintf("A hook reads its helpers at $QORY_HARNESS_HOME/modules/%s/<path>.", name))
 		}

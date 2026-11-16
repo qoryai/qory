@@ -628,7 +628,12 @@ func workflowsShipped(p *stack.Stack, composed map[string]bool, base *Base, as s
 		}
 		w, prefixed := shown(name), shown(stack.WorkflowEntry(name))
 		if base != nil {
-			lines = append(lines, fmt.Sprintf("Add skill %s to a module of %s, or remove workflow %s.\n  The base stack %s declares the workflow %s in its %s.\n  No module of %s ships a skill or command %s or %s.", prefixed, base.String(), w, base.String(), w, stack.FileName, base.String(), prefixed, w))
+			fix := fmt.Sprintf("Add skill or command %s to a module of %s, or remove workflow %s.", prefixed, base.String(), w)
+			if !fits(fix) {
+				// The cause lines name the base stack.
+				fix = fmt.Sprintf("Add skill or command %s to a module, or remove workflow %s.", prefixed, w)
+			}
+			lines = append(lines, fmt.Sprintf("%s\n  The base stack %s declares the workflow %s in its %s.\n  No module of %s ships a skill or command %s or %s.", fix, base.String(), w, stack.FileName, base.String(), prefixed, w))
 			continue
 		}
 		in := "the stack"
@@ -638,10 +643,10 @@ func workflowsShipped(p *stack.Stack, composed map[string]bool, base *Base, as s
 		case p.File != "":
 			in += " in " + filepath.Base(p.File)
 		}
-		fix := fmt.Sprintf("Add skill %s to a module of %s, or remove workflow %s.", prefixed, in, w)
+		fix := fmt.Sprintf("Add skill or command %s to a module of %s, or remove workflow %s.", prefixed, in, w)
 		if !fits(fix) {
 			// The cause lines name the stack.
-			fix = fmt.Sprintf("Add skill %s to a module, or remove workflow %s.", prefixed, w)
+			fix = fmt.Sprintf("Add skill or command %s to a module, or remove workflow %s.", prefixed, w)
 		}
 		lines = append(lines, fmt.Sprintf("%s\n  %s declares the workflow %s.\n  No module of %s ships a skill or command %s or %s.", fix, upperFirst(in), w, in, prefixed, w))
 	}
@@ -926,7 +931,7 @@ func checkResolved(res *Result, requires map[string]map[string][]Need, dropped m
 					lines = append(lines, fmt.Sprintf("Rename role %s in the provides of module %s: module %s ships %s, and a role's name is no entry's.", shown(role), checkoutName(res, r.Module), checkoutName(res, e.Module), described(kind, name)))
 					continue
 				}
-				lines = append(lines, fmt.Sprintf("Rename role %s in bind, or rename %s in module %s.\n  The bind defines role %s, and module %s ships %s: a role and an entry cannot share a name.", shown(role), described(kind, name), checkoutName(res, e.Module), shown(role), checkoutName(res, e.Module), described(kind, name)))
+				lines = append(lines, fmt.Sprintf("Rename role %s in bind, or rename %s in module %s.\n  The bind defines role %s, and module %s ships %s: a role and an entry cannot share a name.", bindKey(role), described(kind, name), checkoutName(res, e.Module), bindKey(role), checkoutName(res, e.Module), described(kind, name)))
 			}
 		}
 		if composed[kind+"/"+to] {
@@ -985,10 +990,10 @@ func checkResolved(res *Result, requires map[string]map[string][]Need, dropped m
 			continue
 		}
 		if by := leftOut(kind, to); by != "" {
-			lines = append(lines, fmt.Sprintf("Keep %s in module %s, or change bind %s.\n  The bind %s selects %s, and module %s leaves it out.", described(kind, to), checkoutName(res, by), shown(role), shown(role), described(kind, to), checkoutName(res, by)))
+			lines = append(lines, fmt.Sprintf("Keep %s in module %s, or change bind %s.\n  The bind %s selects %s, and module %s leaves it out.", described(kind, to), checkoutName(res, by), bindKey(role), bindKey(role), described(kind, to), checkoutName(res, by)))
 			continue
 		}
-		lines = append(lines, fmt.Sprintf("Ship %s in a module, or change bind %s.\n  The bind %s selects %s, and no module ships it.", described(kind, to), shown(role), shown(role), described(kind, to)))
+		lines = append(lines, fmt.Sprintf("Ship %s in a module, or change bind %s.\n  The bind %s selects %s, and no module ships it.", described(kind, to), bindKey(role), bindKey(role), described(kind, to)))
 	}
 	for _, e := range res.Entries {
 		for _, ref := range e.References {
@@ -997,7 +1002,7 @@ func checkResolved(res *Result, requires map[string]map[string][]Need, dropped m
 				continue
 			}
 			if file, ok := e.Front[ref]; ok {
-				lines = append(lines, fmt.Sprintf("Remove ${qory:%s} from the front matter of %s of module %s.\n  A group resolves to a list.", shown(ref), exports.HidePath(file), checkoutName(res, e.Module)))
+				lines = append(lines, fmt.Sprintf("Remove ${qory:%s} from the front matter.\n  A group resolves to a list.\n  The reference is in the front matter of %s of module %s.", shown(ref), exports.HidePath(file), checkoutName(res, e.Module)))
 				continue
 			}
 			if len(members) == 0 {
@@ -1036,12 +1041,17 @@ func checkResolved(res *Result, requires map[string]map[string][]Need, dropped m
 						continue
 					}
 					by := checkoutName(res, leftOut(kind, r.Name))
-					lines = append(lines, fmt.Sprintf("Keep %s in module %s, or bind %s to another %s.\n  %s\n  Module %s leaves out %s.", described(kind, r.Name), by, shownKey(need.Key), strings.TrimSuffix(described(kind, ""), " "), provided, by, described(kind, r.Name)))
+					lines = append(lines, fmt.Sprintf("Keep %s in module %s, or bind %s to another %s.\n  %s\n  Module %s leaves out %s.", described(kind, r.Name), by, bindKey(need.Key), strings.TrimSuffix(described(kind, ""), " "), provided, by, described(kind, r.Name)))
 				}
 				continue
 			}
 			if need.Reference {
-				lines = append(lines, fmt.Sprintf("Ship %s, bind %s in %s, or %s.\n  %s. No module ships or provides it, and the stack does not bind it.", described(kind, name), shownKey(need.Key), docFile(res.Stack), drop, entry))
+				fix := fmt.Sprintf("Ship %s, bind %s in %s, or %s.", described(kind, name), bindKey(need.Key), docFile(res.Stack), drop)
+				if !fits(fix) {
+					// The cause line names the entry with the reference.
+					fix = fmt.Sprintf("Ship %s, bind %s in %s, or remove the reference.", described(kind, name), bindKey(need.Key), docFile(res.Stack))
+				}
+				lines = append(lines, fmt.Sprintf("%s\n  %s. No module ships or provides it, and the stack does not bind it.", fix, entry))
 				continue
 			}
 			lines = append(lines, fmt.Sprintf("Ship %s in a module, or %s.\n  %s, and no module ships it.", described(kind, name), drop, entry))
@@ -1061,7 +1071,7 @@ func checkResolved(res *Result, requires map[string]map[string][]Need, dropped m
 func noMember(res *Result, e Entry, ref string) string {
 	file := exports.HidePath(e.In[ref])
 	if !baseModule(res, e.Module) || res.Base == nil {
-		return fmt.Sprintf("Fill %s, or remove it from %s of module %s.\n  The group has no member.", shown(ref), file, checkoutName(res, e.Module))
+		return fmt.Sprintf("Fill %s, or remove the reference to it.\n  The group has no member.\n  The reference is in %s of module %s.", shown(ref), file, checkoutName(res, e.Module))
 	}
 	fix := fmt.Sprintf("Ask the base stack's maintainer to fill %s.", shownKey(ref))
 	if baseAllowsAgents(res) {
@@ -1300,6 +1310,13 @@ func shownKey(key string) string {
 		return "files/" + exports.HidePath(name)
 	}
 	return shown(kind) + "/" + shown(name)
+}
+
+// bindKey is a <kind>/<role> key as a fix line names it in bind: <kind>.<role>, the
+// form bind takes in qory.yaml.
+func bindKey(key string) string {
+	kind, role, _ := strings.Cut(key, "/")
+	return shown(kind) + "." + shown(role)
 }
 
 // Collision is one entry name that more than one module provides.
@@ -1644,8 +1661,9 @@ func (r *Result) SetBy(key string) string { return r.setBy[key] }
 // collision is the error for a key path two modules set to different values.
 func (m *merger) collision(path string) error {
 	first := shown(m.setBy[m.file+"/"+path])
-	return exports.Refuse(fmt.Sprintf("Set %s to one value in %s of modules %s and %s.", shown(path), exports.HidePath(m.file), first, shown(m.module)),
-		fmt.Sprintf("Modules %s and %s set %s to different values.", first, shown(m.module), shown(path)))
+	return exports.Refuse(fmt.Sprintf("Set %s to one value in both modules.", shown(path)),
+		fmt.Sprintf("Modules %s and %s set %s to different values.", first, shown(m.module), shown(path)),
+		fmt.Sprintf("%s is in %s.", shown(path), exports.HidePath(m.file)))
 }
 
 // exportsAgainstSettings refuses a variable a module's manifest exports that a fragment's

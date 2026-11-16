@@ -43,7 +43,18 @@ const supportStack = "apiVersion: qory.dev/v1alpha1\nmodules: [{name: desk}]\nwo
 // returns the exports read.
 func factory(t *testing.T, body string) *exports.Exports {
 	t.Helper()
-	root := write(t, "exports:\n  stacks: [support]\n  modules: [desk]\n")
+	return factoryIn(t, t.TempDir(), body)
+}
+
+// factoryIn is factory with the repository in the directory root.
+func factoryIn(t *testing.T, root, body string) *exports.Exports {
+	t.Helper()
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, exports.FileName), []byte("apiVersion: qory.dev/v1alpha1\nexports:\n  stacks: [support]\n  modules: [desk]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.MkdirAll(filepath.Join(root, "stacks", "support"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -97,32 +108,32 @@ func TestVerifyChecksTheProcessFields(t *testing.T) {
 	for _, c := range []struct{ body, want string }{
 		{"", "add apiVersion: qory.dev/v1alpha1: the file has no apiVersion"},
 		{without("apiVersion"), "add apiVersion: qory.dev/v1alpha1: the file has no apiVersion"},
-		{with("apiVersion", "qory.dev/v2"), "Set apiVersion in {file} to qory.dev/v1alpha1.\n  This qory reads qory.dev/v1alpha1, and apiVersion is \"qory.dev/v2\"."},
-		{without("name"), "Add name to {file}, at most 60 characters.\n  The file has no name."},
-		{with("name", strings.Repeat("é", 61)), "Shorten name in {file} to at most 60 characters.\n  The name has 61 characters."},
-		{without("summary"), "Add summary to {file}, at most 200 characters.\n  The file has no summary."},
-		{with("summary", strings.Repeat("s", 201)), "Shorten summary in {file} to at most 200 characters.\n  The summary has 201 characters."},
-		{with("description", `"  "`), "Add description to {file}, at most 1200 characters.\n  The file has no description."},
-		{with("description", strings.Repeat("d", 1201)), "Shorten description in {file} to at most 1200 characters.\n  The description has 1201 characters."},
+		{with("apiVersion", "qory.dev/v2"), "Set apiVersion to qory.dev/v1alpha1.\n  This qory reads qory.dev/v1alpha1, and apiVersion is \"qory.dev/v2\".\n  apiVersion is in {file}."},
+		{without("name"), "Add name to process.yaml, at most 60 characters.\n  The file has no name.\n  The file is {file}."},
+		{with("name", strings.Repeat("é", 61)), "Shorten name in process.yaml to at most 60 characters.\n  The name has 61 characters.\n  The file is {file}."},
+		{without("summary"), "Add summary to process.yaml, at most 200 characters.\n  The file has no summary.\n  The file is {file}."},
+		{with("summary", strings.Repeat("s", 201)), "Shorten summary in process.yaml to at most 200 characters.\n  The summary has 201 characters.\n  The file is {file}."},
+		{with("description", `"  "`), "Add description to process.yaml, at most 1200 characters.\n  The file has no description.\n  The file is {file}."},
+		{with("description", strings.Repeat("d", 1201)), "Shorten description in process.yaml to at most 1200 characters.\n  The description has 1201 characters.\n  The file is {file}."},
 		{with("description", words), "shorten description to at most 80 words: description has 81"},
 		{without("type"), "add type, the workspace type the template sets up: the file has no type"},
 		{with("type", `" "`), "add type, the workspace type the template sets up: the file has no type"},
 		{without("stack"), "add stack, a name that exports.stacks lists: the file has no stack"},
-		{with("stack", "web"), "Set stack in {file} to a name that exports.stacks lists.\n  The value is web, and exports.stacks lists support."},
+		{with("stack", "web"), "Set stack in process.yaml to a name that exports.stacks lists.\n  The value is web, and exports.stacks lists support.\n  The file is {file}."},
 		{with("stack", `"web\nqory: all checks passed"`), "set stack to one line of text: it has a line break"},
 		{with("stack", `"web\rx"`), "set stack to one line of text: it has a line break"},
 		{with("stack", `"web\tx"`), "set stack to one line of text: it has a control character"},
 		{without("process"), "add process, the template's process document as an object: the file has no process"},
 		{with("process", "~"), "add process, the template's process document as an object: the file has no process"},
-		{with("process", "[a]"), "Set process in {file} to an object.\n  process is the template's process document, and the value is a list."},
-		{with("process", "stages"), "Set process in {file} to an object.\n  process is the template's process document, and the value is a string."},
-		{with("process", "3"), "Set process in {file} to an object.\n  process is the template's process document, and the value is a number."},
+		{with("process", "[a]"), "Set process in process.yaml to an object.\n  process is the template's process document, and the value is a list.\n  The file is {file}."},
+		{with("process", "stages"), "Set process in process.yaml to an object.\n  process is the template's process document, and the value is a string.\n  The file is {file}."},
+		{with("process", "3"), "Set process in process.yaml to an object.\n  process is the template's process document, and the value is a number.\n  The file is {file}."},
 		{with("process", "{stages: []}"), "add schema: qory.process/v1 under process: process has no schema"},
 		{with("process", "{schema: qory.process/v2, stages: []}"), `set process.schema to qory.process/v1: process.schema is "qory.process/v2"`},
 		{with("process", "{schema: [a], stages: []}"), "set process.schema to qory.process/v1: process.schema is a list"},
 		{with("process", "{schema: qory.process/v1}"), "add stages under process, the list of the process's stages: process has no stages"},
 		{with("process", "{schema: qory.process/v1, stages: {a: 1}}"), "set process.stages to a list of stages: process.stages is an object"},
-		{process + "owner: acme\n", "Remove the key \"owner\" from line 15 of {file}.\n  The key is not one process.yaml reads."},
+		{process + "owner: acme\n", "Remove the key \"owner\" from line 15 of process.yaml.\n  The key is not one process.yaml reads.\n  The file is {file}."},
 	} {
 		e := factory(t, c.body)
 		file := filepath.Join(e.Root, "modules", "desk", exports.ProcessFileName)
@@ -143,6 +154,50 @@ func TestVerifyChecksTheProcessFields(t *testing.T) {
 	}
 }
 
+// TestVerifyKeepsTheFixLineShortUnderALongPath is each refusal of a process.yaml that
+// names the file, with the repository under a directory of 150 characters: the first
+// line, the fix, stays at most 100 characters and has no path; the path comes below it.
+func TestVerifyKeepsTheFixLineShortUnderALongPath(t *testing.T) {
+	without := func(key string) string {
+		var lines []string
+		for _, line := range strings.Split(process, "\n") {
+			if !strings.HasPrefix(line, key+":") && !(key == "process" && strings.HasPrefix(line, "  ")) {
+				lines = append(lines, line)
+			}
+		}
+		return strings.Join(lines, "\n")
+	}
+	with := func(key, value string) string {
+		return strings.Replace(without(key), "\n", "\n"+key+": "+value+"\n", 1)
+	}
+	for name, body := range map[string]string{
+		"a field missing":        without("name"),
+		"a field too long":       with("summary", strings.Repeat("s", 201)),
+		"a stack not listed":     with("stack", "web"),
+		"a process not object":   with("process", "[a]"),
+		"an unknown key":         process + "owner: acme\n",
+		"a workflow undeclared":  strings.Replace(process, "workflow: draft-an-answer", "workflow: send-a-reply", 1),
+		"a bad type name":        withTypes("\n  - name: Mockup"),
+		"a type key unknown":     withTypes("\n  - {name: mockup, owner: acme}"),
+		"a type name twice":      withTypes("\n  - name: mockup\n  - name: mockup"),
+		"a type left incomplete": withTypes("\n  - {name: a-type, size_limit: 1}"),
+	} {
+		root := filepath.Join(t.TempDir(), strings.Repeat("d", 150))
+		err := factoryIn(t, root, body).Verify()
+		if err == nil {
+			t.Errorf("%s: no refusal", name)
+			continue
+		}
+		lines := strings.Split(err.Error(), "\n")
+		if n := utf8.RuneCountInString(lines[0]); n > 100 {
+			t.Errorf("%s: the first line has %d characters, past 100: %s", name, n, lines[0])
+		}
+		if strings.Contains(lines[0], root) || !strings.Contains(err.Error(), root) {
+			t.Errorf("%s: want the path below the first line: %v", name, err)
+		}
+	}
+}
+
 // TestVerifyWantsEachWorkflowDeclared is a process whose stages run workflows the stack
 // does not declare, in a sequence and in a loop's body: one line per stage and workflow,
 // each with the stage, the workflow and the stack file. A workflow named twice in one
@@ -154,12 +209,15 @@ func TestVerifyWantsEachWorkflowDeclared(t *testing.T) {
 	file := filepath.Join(e.Root, "modules", "desk", exports.ProcessFileName)
 	stackFile := filepath.Join("stacks", "support", exports.StackFileName)
 	want := strings.Join([]string{
-		"Declare send-a-reply in " + stackFile + ", or remove it from stage Answer.",
+		"Declare send-a-reply in stack support, or remove it from stage Answer.",
 		"  Stage Answer of " + file + " runs send-a-reply, and stack support does not declare it under workflows.",
-		"Declare send-a-reply in " + stackFile + ", or remove it from stage Check.",
+		"  The stack is in " + stackFile + ".",
+		"Declare send-a-reply in stack support, or remove it from stage Check.",
 		"  Stage Check of " + file + " runs send-a-reply, and stack support does not declare it under workflows.",
-		"Declare close-a-ticket in " + stackFile + ", or remove it from stage 3.",
+		"  The stack is in " + stackFile + ".",
+		"Declare close-a-ticket in stack support, or remove it from stage 3.",
 		"  Stage 3 of " + file + " runs close-a-ticket, and stack support does not declare it under workflows.",
+		"  The stack is in " + stackFile + ".",
 	}, "\n")
 	if err := e.Verify(); err == nil || err.Error() != want {
 		t.Errorf("%v\nwant:\n%s", err, want)
@@ -169,7 +227,7 @@ func TestVerifyWantsEachWorkflowDeclared(t *testing.T) {
 		t.Fatal(err)
 	}
 	err := e.Verify()
-	if err == nil || strings.Count(err.Error(), "\n") != 9 || !strings.Contains(err.Error(), "Declare draft-an-answer in "+stackFile+", or remove it from stage Answer.") {
+	if err == nil || strings.Count(err.Error(), "\n") != 14 || !strings.Contains(err.Error(), "Declare draft-an-answer in stack support, or remove it from stage Answer.\n") {
 		t.Errorf("no workflows: %v", err)
 	}
 }
@@ -187,7 +245,7 @@ func TestVerifyWantsTheProcessStackListed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "Set stack in " + file + " to a name that exports.stacks lists.\n  The value is support, and exports.stacks lists no stacks."
+	want := "Set stack in process.yaml to a name that exports.stacks lists.\n  The value is support, and exports.stacks lists no stacks.\n  The file is " + file + "."
 	if err := e.Verify(); err == nil || err.Error() != want {
 		t.Errorf("%v\nwant %s", err, want)
 	}
@@ -212,8 +270,9 @@ func TestVerifyReadsProcessUnderExportsDir(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "Declare write-a-reply in " + filepath.Join("lib", "stacks", "support", exports.StackFileName) + ", or remove it from stage Answer.\n" +
-		"  Stage Answer of " + file + " runs write-a-reply, and stack support does not declare it under workflows."
+	want := "Declare write-a-reply in stack support, or remove it from stage Answer.\n" +
+		"  Stage Answer of " + file + " runs write-a-reply, and stack support does not declare it under workflows.\n" +
+		"  The stack is in " + filepath.Join("lib", "stacks", "support", exports.StackFileName) + "."
 	if err := e.Verify(); err == nil || err.Error() != want {
 		t.Errorf("%v\nwant %s", err, want)
 	}
@@ -340,7 +399,7 @@ func TestVerifyRefusesAProcessLinkOutside(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(folder, "real.yaml"), []byte(process+"owner: acme\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := e.Verify(); err == nil || err.Error() != "Remove the key \"owner\" from line 15 of "+file+".\n  The key is not one process.yaml reads." {
+	if err := e.Verify(); err == nil || err.Error() != "Remove the key \"owner\" from line 15 of process.yaml.\n  The key is not one process.yaml reads.\n  The file is "+file+"." {
 		t.Errorf("a wrong file behind a link inside the module: %v", err)
 	}
 	// A link inside the folder to a file that is not there is no process.yaml.
@@ -476,18 +535,18 @@ func TestVerifyChecksArtifactTypes(t *testing.T) {
 		{"\n  - {name: ~}", "set the name of entry 1 of artifact_types to a string of lowercase letters and digits in groups joined by single hyphens: the name is null"},
 		{"\n  - {name: 2026-11-02}", `set the name of entry 1 of artifact_types to a quoted string: YAML reads "2026-11-02" as a type that is not a string`},
 		{"\n  - {name: !!binary aGk=}", `set the name of entry 1 of artifact_types to a quoted string: YAML reads "aGk=" as a type that is not a string`},
-		{"\n  - {name: \"\"}", "Rename entry 1 of artifact_types in {file}.\n  A name is lowercase letters and digits in groups joined by single hyphens, at most 64 bytes.\n  The name is " + `""` + "."},
-		{"\n  - {name: a--b}", "Rename entry 1 of artifact_types in {file}.\n  A name is lowercase letters and digits in groups joined by single hyphens, at most 64 bytes.\n  The name is " + `"a--b"` + "."},
-		{"\n  - {name: -a}", "Rename entry 1 of artifact_types in {file}.\n  A name is lowercase letters and digits in groups joined by single hyphens, at most 64 bytes.\n  The name is " + `"-a"` + "."},
-		{"\n  - {name: \"a\\n\"}", "Rename entry 1 of artifact_types in {file}.\n  A name is lowercase letters and digits in groups joined by single hyphens, at most 64 bytes.\n  The name is " + `"a\n"` + "."},
-		{"\n  - {name: " + strings.Repeat("a", 65) + "}", "Rename entry 1 of artifact_types in {file}.\n  A name is lowercase letters and digits in groups joined by single hyphens, at most 64 bytes.\n  The name is " + `"` + strings.Repeat("a", 65) + `"` + "."},
-		{"\n  - {name: mockup, owner: acme}", "Remove the key \"owner\" from entry 1 of artifact_types in {file}.\n  An artifact type has only name, base_view, size_limit, max_files and json_schema."},
-		{"\n  - {name: mockup, [a]: b}", "Remove the key a list from entry 1 of artifact_types in {file}.\n  An artifact type has only name, base_view, size_limit, max_files and json_schema."},
+		{"\n  - {name: \"\"}", "Rename entry 1 of artifact_types.\n  A name is lowercase letters and digits in groups joined by single hyphens, at most 64 bytes.\n  The name is " + `""` + ".\n  The entry is in {file}."},
+		{"\n  - {name: a--b}", "Rename entry 1 of artifact_types.\n  A name is lowercase letters and digits in groups joined by single hyphens, at most 64 bytes.\n  The name is " + `"a--b"` + ".\n  The entry is in {file}."},
+		{"\n  - {name: -a}", "Rename entry 1 of artifact_types.\n  A name is lowercase letters and digits in groups joined by single hyphens, at most 64 bytes.\n  The name is " + `"-a"` + ".\n  The entry is in {file}."},
+		{"\n  - {name: \"a\\n\"}", "Rename entry 1 of artifact_types.\n  A name is lowercase letters and digits in groups joined by single hyphens, at most 64 bytes.\n  The name is " + `"a\n"` + ".\n  The entry is in {file}."},
+		{"\n  - {name: " + strings.Repeat("a", 65) + "}", "Rename entry 1 of artifact_types.\n  A name is lowercase letters and digits in groups joined by single hyphens, at most 64 bytes.\n  The name is " + `"` + strings.Repeat("a", 65) + `"` + ".\n  The entry is in {file}."},
+		{"\n  - {name: mockup, owner: acme}", "Remove the key \"owner\" from entry 1 of artifact_types.\n  An artifact type has only name, base_view, size_limit, max_files, and json_schema.\n  The entry is in {file}."},
+		{"\n  - {name: mockup, [a]: b}", "Remove the key a list from entry 1 of artifact_types.\n  An artifact type has only name, base_view, size_limit, max_files, and json_schema.\n  The entry is in {file}."},
 		{"\n  - {name: mockup, name: screenshot}", "remove the second name from entry 1 of artifact_types: the entry has the key twice"},
-		{"\n  - {name: a-type, size_limit: 1}", "Add base_view and max_files to " + name + ", or leave only its name.\n  A custom type has base_view, size_limit and max_files.\n  The type is in {file}."},
-		{"\n  - {name: a-type, base_view: file}", "Add size_limit and max_files to " + name + ", or leave only its name.\n  A custom type has base_view, size_limit and max_files.\n  The type is in {file}."},
-		{"\n  - {name: a-type, base_view: file, size_limit: 1}", "Add max_files to " + name + ", or leave only its name.\n  A custom type has base_view, size_limit and max_files.\n  The type is in {file}."},
-		{"\n  - {name: a-type, json_schema: {}}", "Add base_view, size_limit and max_files to " + name + ", or leave only its name.\n  A custom type has base_view, size_limit and max_files.\n  The type is in {file}."},
+		{"\n  - {name: a-type, size_limit: 1}", "Add base_view and max_files to " + name + ", or leave only its name.\n  A custom type has base_view, size_limit, and max_files.\n  The type is in {file}."},
+		{"\n  - {name: a-type, base_view: file}", "Add size_limit and max_files to " + name + ", or leave only its name.\n  A custom type has base_view, size_limit, and max_files.\n  The type is in {file}."},
+		{"\n  - {name: a-type, base_view: file, size_limit: 1}", "Add max_files to " + name + ", or leave only its name.\n  A custom type has base_view, size_limit, and max_files.\n  The type is in {file}."},
+		{"\n  - {name: a-type, json_schema: {}}", "Add base_view, size_limit, and max_files to " + name + ", or leave only its name.\n  A custom type has base_view, size_limit, and max_files.\n  The type is in {file}."},
 		{custom("text", "size_limit: 1, max_files: 1"), `set base_view of ` + name + ` to document, image, video, file or structured: base_view is "text"`},
 		{custom("[a]", "size_limit: 1, max_files: 1"), "set base_view of " + name + " to document, image, video, file or structured: base_view is a list"},
 		{custom("document", "size_limit: 0, max_files: 1"), "Set size_limit of " + name + " to a whole number from 1 to 10485760.\n  10485760 is the most for base_view document, and size_limit is 0.\n  The type is in {file}."},
@@ -612,16 +671,19 @@ func TestVerifyPrintsOneRefusalForEachArtifactType(t *testing.T) {
 	e := factory(t, withTypes("\n  - name: mockup\n  - name: Mockup\n  - {name: a-type, size_limit: 1}\n  - name: mockup\n  - name: mockup"))
 	file := filepath.Join(e.Root, "modules", "desk", exports.ProcessFileName)
 	want := strings.Join([]string{
-		"Rename entry 2 of artifact_types in " + file + ".",
+		"Rename entry 2 of artifact_types.",
 		"  A name is lowercase letters and digits in groups joined by single hyphens, at most 64 bytes.",
 		`  The name is "Mockup".`,
+		"  The entry is in " + file + ".",
 		"Add base_view and max_files to artifact type a-type, or leave only its name.",
-		"  A custom type has base_view, size_limit and max_files.",
+		"  A custom type has base_view, size_limit, and max_files.",
 		"  The type is in " + file + ".",
-		"Rename or remove entry 4 of artifact_types in " + file + ".",
+		"Rename or remove entry 4 of artifact_types.",
 		"  Entry 1 has the name mockup too.",
-		"Rename or remove entry 5 of artifact_types in " + file + ".",
+		"  The entry is in " + file + ".",
+		"Rename or remove entry 5 of artifact_types.",
 		"  Entry 1 has the name mockup too.",
+		"  The entry is in " + file + ".",
 	}, "\n")
 	if err := e.Verify(); err == nil || err.Error() != want {
 		t.Errorf("%v\nwant:\n%s", err, want)

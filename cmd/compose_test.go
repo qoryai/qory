@@ -260,7 +260,7 @@ func TestComposeRefuses(t *testing.T) {
 		{
 			name:    "a stack of another format",
 			fixture: "unknown-api-version",
-			wantErr: []string{"Set apiVersion in ", "qory.yaml to qory.dev/v1alpha1.", `This qory reads qory.dev/v1alpha1, and apiVersion is "qory.dev/v2".`},
+			wantErr: []string{"Set apiVersion to qory.dev/v1alpha1.", "qory.yaml.", `This qory reads qory.dev/v1alpha1, and apiVersion is "qory.dev/v2".`},
 		},
 		{
 			name:    "an exclude that selects nothing the module ships",

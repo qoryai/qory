@@ -59,8 +59,8 @@ func TestBindRefusesEachShapeItDoesNotRead(t *testing.T) {
 	const head = "apiVersion: qory.dev/v1alpha1\nmodules:\n  - name: core\nbind:\n"
 	// Each text has {path}, the stack file's path as Load was given it.
 	for _, c := range []struct{ body, want string }{
-		{"  agents/coder: rails-coder\n", "Write bind as bind.agents.coder: rails-coder in {path}.\n  The keys of bind are kinds, and agents/coder is a kind and a role."},
-		{"  agents/coder: [a, b]\n", "Write bind as bind.agents.coder: <name> in {path}.\n  The keys of bind are kinds, and agents/coder is a kind and a role."},
+		{"  agents/coder: rails-coder\n", "Write bind as bind.agents.coder: rails-coder.\n  The keys of bind are kinds, and agents/coder is a kind and a role.\n  bind is in {path}."},
+		{"  agents/coder: [a, b]\n", "Write bind as bind.agents.coder: <name>.\n  The keys of bind are kinds, and agents/coder is a kind and a role.\n  bind is in {path}."},
 		{"  coders:\n    a: b\n", `Use agents, commands or skills as a kind under bind in {path}: "coders" is none of them.`},
 		{"  agents: rails-coder\n", "Write bind.agents in {path} as a map of roles: bind.agents is not a map."},
 		{"  skills:\n    entry: [a, b]\n", "Write one name for bind.skills.entry in {path}.\n  Only an agents role can be a group, and the value is a list."},

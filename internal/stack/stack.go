@@ -605,11 +605,10 @@ func NewCompose(path string, p *Stack) (*Stack, error) {
 	return p, nil
 }
 
-// inPath is err, an error about the document at path, with path in front, or for an
-// [exports.InFile], with path inside its text.
+// inPath is err, an error about the document at path, with path in front, or, when err
+// itself is an [exports.InFile], with path inside its text, as [exports.AtPath] has it.
 func inPath(path string, err error) error {
-	var in exports.InFile
-	if errors.As(err, &in) {
+	if in, ok := err.(exports.InFile); ok {
 		return in.In(exports.HidePath(path))
 	}
 	return fmt.Errorf("%s: %w", path, err)
@@ -650,7 +649,7 @@ func (p *Stack) validate(compose bool) error {
 			return errors.New("extending is the base stack's; a harness section that extends a stack does not set it")
 		}
 		if p.extends() && len(p.Workflows) > 0 {
-			return exports.Refuse("Remove workflows or extends from "+exports.FilePlace+".", "A harness section that extends a stack takes the workflows of its base.")
+			return exports.Refuse("Remove workflows or extends.", "A harness section that extends a stack takes the workflows of its base.", "Both keys are in "+exports.FilePlace+".")
 		}
 		// A document extending a stack may leave the runtime to the machine's
 		// configuration or the flag; its own stack names one.
@@ -709,14 +708,14 @@ func (p *Stack) validate(compose bool) error {
 		}
 		w := p.Workflows[name]
 		if w.Access != "" && w.Access != AccessRead && w.Access != AccessWrite {
-			return exports.Refuse(fmt.Sprintf("Set workflows.%s.access in %s to read or write.", name, exports.FilePlace), fmt.Sprintf("The value is %s.", exports.Value(w.Access, true)))
+			return exports.Refuse(fmt.Sprintf("Set workflows.%s.access to read or write.", name), fmt.Sprintf("The value is %s.", exports.Value(w.Access, true)), fmt.Sprintf("workflows.%s is in %s.", name, exports.FilePlace))
 		}
 		if w.TimeLimitText == "" {
 			continue
 		}
 		d, err := time.ParseDuration(w.TimeLimitText)
 		if err != nil || d <= 0 {
-			return exports.Refuse(fmt.Sprintf("Set workflows.%s.time_limit in %s to a duration above zero, such as 7h or 45m.", name, exports.FilePlace), fmt.Sprintf("The value is %s.", exports.Value(w.TimeLimitText, true)))
+			return exports.Refuse(fmt.Sprintf("Set workflows.%s.time_limit to a duration above zero, such as 7h or 45m.", name), fmt.Sprintf("The value is %s.", exports.Value(w.TimeLimitText, true)), fmt.Sprintf("workflows.%s is in %s.", name, exports.FilePlace))
 		}
 		w.TimeLimit = d
 		p.Workflows[name] = w
@@ -810,7 +809,7 @@ func (l Module) besideOnly() error {
 		for _, name := range l.Exclude.Kinds[kind] {
 			if slices.Contains(l.Only.Kinds[kind], name) {
 				entry := accesskey.ShownName(kind, false) + "/" + accesskey.ShownName(name, false)
-				return exports.Refuse(fmt.Sprintf("Remove %s from the only or the exclude of %s in %s.", entry, exports.ModulePlace, exports.FilePlace), fmt.Sprintf("Both blocks list %s.", entry))
+				return exports.Refuse(fmt.Sprintf("Remove %s from the only or the exclude of %s.", entry, exports.ModulePlace), fmt.Sprintf("Both blocks list %s.", entry), "The blocks are in "+exports.FilePlace+".")
 			}
 		}
 	}

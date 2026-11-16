@@ -1,2 +1,3 @@
-Set workflows.fix.access in qory.yaml to read or write.
+Set workflows.fix.access to read or write.
   The value is "admin".
+  workflows.fix is in qory.yaml.

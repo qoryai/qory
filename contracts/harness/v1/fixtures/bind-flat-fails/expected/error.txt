@@ -1,2 +1,3 @@
-Write bind as bind.agents.coder: rails-coder in qory.yaml.
+Write bind as bind.agents.coder: rails-coder.
   The keys of bind are kinds, and agents/coder is a kind and a role.
+  bind is in qory.yaml.

@@ -46,7 +46,7 @@ func TestSelectionRefusesAMistake(t *testing.T) {
 		"exclude:\n  env: [\"\"]":                              "module core: exclude env lists an empty name",
 		"exclude: [skills]":                                    "module core: exclude is a mapping of kinds and parts to what they select",
 		"only:\n  skills: [a]\nexclude:\n  instructions: true": "module core: exclude beside only selects a part; only leaves every part it does not select out, so exclude selects entries only brings in",
-		"only:\n  skills: [a]\nexclude:\n  skills: [a]":        "Remove skills/a from the only or the exclude of module core in {path}.\n  Both blocks list skills/a.",
+		"only:\n  skills: [a]\nexclude:\n  skills: [a]":        "Remove skills/a from the only or the exclude of module core.\n  Both blocks list skills/a.\n  The blocks are in {path}.",
 	}
 	for block, want := range cases {
 		path := write(t, selectionStack(block))

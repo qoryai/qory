@@ -263,7 +263,7 @@ func checkAgent(res *Result, e Entry, m Module, role string, member *Role, contr
 		}
 		contract := exports.Value(c.Path, false) + " of module " + checkoutName(res, c.Module)
 		block := fmt.Sprintf("Complete agent %s of module %s, or bind %s to another agent.\n  The contract %s requires these parts, which %s lacks:",
-			shown(e.Name), checkoutName(res, e.Module), shownKey(role), contract, exports.Value(file, false))
+			shown(e.Name), checkoutName(res, e.Module), bindKey(role), contract, exports.Value(file, false))
 		tail := ""
 		if member != nil {
 			block, tail = memberHead(res, e, m, *member, contract, exports.Value(file, false))

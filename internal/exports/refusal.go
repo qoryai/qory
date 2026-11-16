@@ -1,7 +1,6 @@
 package exports
 
 import (
-	"errors"
 	"fmt"
 	"strings"
 )
@@ -49,21 +48,22 @@ func (r *Refusal) In(file string) error {
 	return &Refusal{text: r.text, file: file, module: r.module}
 }
 
-// Prefixed is err with prefix in front, as "<prefix>: <err>", or, for a [Refusal], the
-// refusal with prefix, such as "module core", at [ModulePlace].
+// Prefixed is err with prefix in front, as "<prefix>: <err>", or, when err itself is a
+// [Refusal], the refusal with prefix, such as "module core", at [ModulePlace]. A
+// Refusal under a wrapper, such as the one [HideValueError] returns, is prefixed as any
+// other error: rebuilding it from its text would undo what the wrapper hides.
 func Prefixed(prefix string, err error) error {
-	var r *Refusal
-	if errors.As(err, &r) {
+	if r, ok := err.(*Refusal); ok {
 		return &Refusal{text: r.text, file: r.file, module: prefix}
 	}
 	return fmt.Errorf("%s: %w", prefix, err)
 }
 
-// AtPath is err, an error about the file at path, with path in front, or, for an
-// [InFile], with path inside its text.
+// AtPath is err, an error about the file at path, with path in front, or, when err
+// itself is an [InFile], with path inside its text. An InFile under a wrapper gets the
+// path in front, for the reason [Prefixed] gives.
 func AtPath(path string, err error) error {
-	var in InFile
-	if errors.As(err, &in) {
+	if in, ok := err.(InFile); ok {
 		return in.In(path)
 	}
 	return fmt.Errorf("%s: %w", path, err)

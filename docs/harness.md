@@ -169,7 +169,7 @@ When none of the stack's modules composes one, after their `exclude` and `only`,
 compose fails with exit 2:
 
 ```
-Add skill workflow-deploy to a module of core@4b8e2f1a9c7d, or remove workflow deploy.
+Add skill or command workflow-deploy to a module of core@4b8e2f1a9c7d, or remove workflow deploy.
   The base stack core@4b8e2f1a9c7d declares the workflow deploy in its qory-stack.yaml.
   No module of core@4b8e2f1a9c7d ships a skill or command workflow-deploy or deploy.
 ```
@@ -218,7 +218,7 @@ a tier in its model fails the compose with exit 2, and the message lists each pa
 lacks:
 
 ```
-Complete agent python-developer of module python, or bind agents/developer to another agent.
+Complete agent python-developer of module python, or bind agents.developer to another agent.
   The contract roles/developer.yaml of module core requires these parts, which agents/python-developer.md lacks:
   - the heading "## Stop conditions"
 ```

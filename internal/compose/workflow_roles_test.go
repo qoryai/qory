@@ -65,7 +65,7 @@ func TestOnlyTheEntryARunStartsIsChecked(t *testing.T) {
 	files["modules/software-factory/skills/workflow-capture-demos/SKILL.md"] = "---\nname: workflow-capture-demos\ndescription: d\n---\n\nFilm it.\n"
 	files["modules/software-factory/skills/capture-demos/SKILL.md"] = "---\nname: capture-demos\ndescription: d\n---\n\nStart ${qory:agents/demo-author}.\n"
 	_, err := composeTree(t, files)
-	want := "Ship agent demo-author, bind agents/demo-author in qory-stack.yaml, or remove the reference from skill capture-demos.\n" +
+	want := "Ship agent demo-author, bind agents.demo-author in qory-stack.yaml, or remove the reference.\n" +
 		"  The skill capture-demos of module software-factory references agent demo-author. No module ships or provides it, and the stack does not bind it."
 	if err == nil || err.Error() != want {
 		t.Fatalf("error:\n%v\nwant:\n%s", err, want)
@@ -78,7 +78,7 @@ func TestASkillOfNoDeclaredWorkflowKeepsRule4sLine(t *testing.T) {
 	files := workflowFiles()
 	files[stack.FileName] = strings.Replace(demosStack, "workflows:\n  capture-demos: {access: write}\n", "", 1)
 	_, err := composeTree(t, files)
-	want := "Ship agent demo-author, bind agents/demo-author in qory-stack.yaml, or remove the reference from skill workflow-capture-demos.\n" +
+	want := "Ship agent demo-author, bind agents.demo-author in qory-stack.yaml, or remove the reference.\n" +
 		"  The skill workflow-capture-demos of module software-factory references agent demo-author. No module ships or provides it, and the stack does not bind it."
 	if err == nil || err.Error() != want {
 		t.Fatalf("error:\n%v\nwant:\n%s", err, want)
@@ -145,7 +145,7 @@ func TestAWorkflowRoleAndOtherFailuresComeTogether(t *testing.T) {
 	files["modules/software-factory/skills/release/SKILL.md"] = "---\nname: release\ndescription: d\n---\n\nRun ${qory:skills/missing}.\n"
 	_, err := composeTree(t, files)
 	want := workflowRefusal("demo-author", "skill workflow-capture-demos") + "\n" +
-		"Ship skill missing, bind skills/missing in qory-stack.yaml, or remove the reference from skill release.\n" +
+		"Ship skill missing, bind skills.missing in qory-stack.yaml, or remove the reference.\n" +
 		"  The skill release of module software-factory references skill missing. No module ships or provides it, and the stack does not bind it."
 	if err == nil || err.Error() != want {
 		t.Fatalf("error:\n%v\nwant:\n%s", err, want)
@@ -168,7 +168,7 @@ func TestAWorkflowThatStartsAGroupComposes(t *testing.T) {
 	}
 	files["modules/software-factory/qory-module.yaml"] = "apiVersion: qory.dev/v1alpha1\nname: software-factory\nroles:\n  agents:\n    demo-author: many\n"
 	_, err := composeTree(t, files)
-	if err == nil || !strings.HasSuffix(err.Error(), "The group has no member.") || strings.Contains(err.Error(), "drop capture-demos") {
+	if err == nil || !strings.Contains(err.Error(), "\n  The group has no member.\n") || strings.Contains(err.Error(), "drop capture-demos") {
 		t.Fatalf("a group with no member: %v", err)
 	}
 }

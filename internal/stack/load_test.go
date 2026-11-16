@@ -151,13 +151,13 @@ func TestLoadRefuses(t *testing.T) {
 		{
 			"an unknown apiVersion",
 			"apiVersion: qory.dev/v2\nmodules:\n  - name: core\n    source:\n      path: modules/core\n",
-			"Set apiVersion in {path} to qory.dev/v1alpha1.\n  This qory reads qory.dev/v1alpha1, and apiVersion is \"qory.dev/v2\".",
+			"Set apiVersion to qory.dev/v1alpha1.\n  This qory reads qory.dev/v1alpha1, and apiVersion is \"qory.dev/v2\".\n  apiVersion is in {path}.",
 			false,
 		},
 		{
 			"a missing apiVersion",
 			"modules:\n  - name: core\n    source:\n      path: modules/core\n",
-			"Set apiVersion in {path} to qory.dev/v1alpha1.\n  This qory reads qory.dev/v1alpha1, and apiVersion is \"\".",
+			"Set apiVersion to qory.dev/v1alpha1.\n  This qory reads qory.dev/v1alpha1, and apiVersion is \"\".\n  apiVersion is in {path}.",
 			false,
 		},
 		{

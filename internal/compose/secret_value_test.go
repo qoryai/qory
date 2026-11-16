@@ -94,11 +94,11 @@ func TestAComposeRefusalPrintsNoSecretName(t *testing.T) {
 			stack.FileName: head + "  - name: a\n  - name: b\n",
 			"modules/a/settings/claude/settings.json": "{\"qak_k\": 1}\n",
 			"modules/b/settings/claude/settings.json": "{\"qak_k\": 2}\n",
-		}, "Set " + name + " to one value in settings/claude/settings.json of modules a and b."},
+		}, "Set " + name + " to one value in both modules."},
 		{map[string]string{
 			stack.FileName:                   "apiVersion: qory.dev/v1alpha1\nbind:\n  skills:\n    r: qak_x\nmodules:\n  - name: core\n",
 			"modules/core/skills/a/SKILL.md": "# a\n",
-		}, "The bind skills/r selects skill " + name + ", and no module ships it."},
+		}, "The bind skills.r selects skill " + name + ", and no module ships it."},
 		{map[string]string{
 			stack.FileName:                   head + "  - name: core\n",
 			"modules/core/qory-module.yaml":  "apiVersion: qory.dev/v1alpha1\nname: core\nprovides:\n  skills:\n    r: qak_x\n",

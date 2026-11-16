@@ -435,10 +435,5 @@ func over(n int) string {
 	return fmt.Sprintf("%d hooks", n)
 }
 
-// orList joins names for a message: "a", "a or b", "a, b or c".
-func orList(names []string) string {
-	if len(names) < 2 {
-		return strings.Join(names, "")
-	}
-	return strings.Join(names[:len(names)-1], ", ") + " or " + names[len(names)-1]
-}
+// orList joins names for a message: "a", "a or b", "a, b, or c".
+func orList(names []string) string { return joinList(names, "or") }
