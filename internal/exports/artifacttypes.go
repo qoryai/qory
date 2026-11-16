@@ -562,7 +562,7 @@ func (e *Exports) NotWithdrawable() ([]string, error) {
 			return nil, DecodeError(file, err)
 		}
 		for _, entry := range process.ArtifactTypes.Content {
-			if flag := value(entry, "withdrawable"); flag != nil && flag.Value == "false" {
+			if flag := value(entry, "withdrawable"); flag != nil && flag.Tag == "!!bool" && !decodesTrue(flag) {
 				if name := value(entry, "name"); name != nil && !slices.Contains(names, name.Value) {
 					names = append(names, name.Value)
 				}
@@ -570,4 +570,12 @@ func (e *Exports) NotWithdrawable() ([]string, error) {
 		}
 	}
 	return names, nil
+}
+
+// decodesTrue reports whether n, a node tagged !!bool, decodes as true, as it does for
+// every spelling of a YAML boolean that [checkArtifactType] accepts: false, False and
+// FALSE are not true.
+func decodesTrue(n *yaml.Node) bool {
+	var b bool
+	return n.Decode(&b) != nil || b
 }

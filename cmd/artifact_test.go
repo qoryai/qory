@@ -1194,6 +1194,63 @@ func TestArtifactPushWithdrawOutsideARunStopsAtALink(t *testing.T) {
 	}
 }
 
+// TestArtifactPushWithdrawRefusalsKeepLine1Short is each refusal that names the type and
+// the name, with names of 64 characters: line 1 has at most 100 characters, and when a name
+// on it is cut, with ..., a last line has the full name.
+func TestArtifactPushWithdrawRefusalsKeepLine1Short(t *testing.T) {
+	kind, name := strings.Repeat("t", 64), strings.Repeat("n", 64)
+	full := kind + "/" + name
+	version := func(extra func(string) string) string {
+		return indexOf(artifactEntry(kind, name, "", 2, versionEntry("av_1", 1, fileEntry("s.json", "one")),
+			extra(versionEntry("av_2", 2, fileEntry("s.json", "two")))))
+	}
+	identity := func(v string) string { return v }
+
+	for what, c := range map[string]struct {
+		index   string
+		status  int
+		code    string
+		message string
+	}{
+		"an approved name":          {version(memberApproved), 0, "", ""},
+		"a withdrawn name":          {version(func(string) string { return withdrawn(versionEntry("av_2", 2)) }), 0, "", ""},
+		"a person's upload":         {version(func(v string) string { return byPerson(v) }), 0, "", ""},
+		"a type the workspace lost": {version(identity), http.StatusUnprocessableEntity, "unknown_type", "Define the type."},
+		"a type that is not withdrawable": {
+			version(identity), http.StatusUnprocessableEntity, "type_not_withdrawable",
+			"Push a new version of " + kind + " instead. The artifact type " + kind + " has withdrawable set to false, so a run cannot withdraw its names.",
+		},
+	} {
+		t.Run(what, func(t *testing.T) {
+			inCheckout(t)
+			server := startRunAPI(t)
+			server.index = c.index
+
+			if c.code != "" {
+				server.status = c.status
+				server.response = fmt.Sprintf(`{"error":%q,"message":%q}`, c.code, c.message)
+			}
+
+			_, err := run(t, "artifact", "push", kind, "--name", name, "--withdraw")
+			if err == nil || cmd.ExitCode(err) != cmd.ExitArtifactRefused {
+				t.Fatalf("err = %v", err)
+			}
+
+			lines := strings.Split(err.Error(), "\n")
+			if n := len([]rune(lines[0])); n > 100 {
+				t.Errorf("line 1 has %d characters: %q", n, lines[0])
+			}
+
+			// A line 1 that fits with the full names is left as it is.
+			if cut := strings.Contains(lines[0], "..."); cut == (c.code == "type_not_withdrawable") {
+				t.Errorf("cut = %v in line 1: %q", cut, lines[0])
+			} else if cut && !strings.HasPrefix(lines[len(lines)-1], "The full name is "+kind) {
+				t.Errorf("last line = %q, want the full name %s", lines[len(lines)-1], full)
+			}
+		})
+	}
+}
+
 // listTree returns every path under dir, sorted, folders included.
 func listTree(t *testing.T, dir string) []string {
 	t.Helper()

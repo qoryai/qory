@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/spf13/cobra"
 
@@ -102,18 +103,18 @@ func withdrawRefusal(index *runapi.Index, artifactType, name string) error {
 
 	switch {
 	case newest != nil && approvedByMember(*newest):
-		return withdrawRefusedError{fmt.Sprintf(textWithdrawApproved, artifactType, name, newest.Number)}
+		return nameRefusal(artifactType, name, fmt.Sprintf(textWithdrawApproved, artifactType, name, newest.Number))
 	case newest == nil:
 		return withdrawRefusedError{fmt.Sprintf(textWithdrawNoVersion, artifactType, name)}
 	case newest.Withdrawn:
-		return withdrawRefusedError{fmt.Sprintf(textWithdrawAlready, artifactType, name, newest.Number)}
+		return nameRefusal(artifactType, name, fmt.Sprintf(textWithdrawAlready, artifactType, name, newest.Number))
 	case newest.Writer.Kind == "person":
 		who := newest.Writer.Name
 		if who == "" {
 			who = "a member"
 		}
 
-		return withdrawRefusedError{fmt.Sprintf(textWithdrawPerson, artifactType, name, newest.Number, who)}
+		return nameRefusal(artifactType, name, fmt.Sprintf(textWithdrawPerson, artifactType, name, newest.Number, who))
 	}
 
 	return nil
@@ -126,6 +127,51 @@ func plural(n int, noun string) string {
 	}
 
 	return noun + "s"
+}
+
+// maxFirstLine is the most characters of the first line of a refusal.
+const maxFirstLine = 100
+
+// nameRefusal is the refusal with text, which names artifactType and, when name is not
+// empty, name. A type and a name have up to 64 bytes each, so when line 1 has more than
+// [maxFirstLine] characters, each name on it is cut and ends in "...", and a line at the
+// end gives the full name.
+func nameRefusal(artifactType, name, text string) withdrawRefusedError {
+	first, rest, hasRest := strings.Cut(text, "\n")
+
+	over := utf8.RuneCountInString(first) - maxFirstLine
+	if over <= 0 {
+		return withdrawRefusedError{text}
+	}
+
+	names := []string{artifactType}
+	full := artifactType
+
+	if name != "" {
+		names = append(names, name)
+		full += "/" + name
+	}
+
+	total := 0
+	for _, n := range names {
+		total += utf8.RuneCountInString(n)
+	}
+
+	// The names may take their share of what is left when the other words of line 1 stay.
+	allowed := (total - over) / len(names)
+
+	for _, n := range names {
+		if length := utf8.RuneCountInString(n); length > allowed {
+			first = strings.Replace(first, n, string([]rune(n)[:max(allowed-3, 1)])+"...", 1)
+		}
+	}
+
+	lines := []string{first}
+	if hasRest {
+		lines = append(lines, rest)
+	}
+
+	return withdrawRefusedError{strings.Join(append(lines, "The full name is "+full+"."), "\n")}
 }
 
 // approvedByMember reports whether a member approved version at a gate. The approval
@@ -155,7 +201,7 @@ func checkWithdrawable(artifactType string) error {
 	}
 
 	if slices.Contains(locked, artifactType) {
-		return withdrawRefusedError{fmt.Sprintf(textWithdrawLocked, artifactType, artifactType)}
+		return nameRefusal(artifactType, "", fmt.Sprintf(textWithdrawLocked, artifactType, artifactType))
 	}
 
 	return nil
@@ -191,11 +237,11 @@ func raceRefusal(c *cobra.Command, client *runapi.Client, push runapi.Push, err 
 	// The refusal for a type or a name that a run cannot withdraw: the run API's message,
 	// with its fix alone on line 1.
 	if apiError.Code == runapi.CodeTypeNotWithdrawable {
-		return withdrawRefusedError{fixFirst(apiError.Error())}
+		return nameRefusal(push.Type, push.Name, fixFirst(apiError.Error()))
 	}
 
 	if apiError.Code == runapi.CodeUnknownType {
-		return withdrawRefusedError{fmt.Sprintf(textWithdrawUnknown, push.Type)}
+		return nameRefusal(push.Type, "", fmt.Sprintf(textWithdrawUnknown, push.Type))
 	}
 
 	known := false
@@ -236,7 +282,7 @@ func keepWithdrawal(c *cobra.Command, artifactType, name string) error {
 	case newest == 0:
 		return withdrawRefusedError{fmt.Sprintf(textWithdrawNoVersion, artifactType, name)}
 	case empty:
-		return withdrawRefusedError{fmt.Sprintf(textWithdrawAlready, artifactType, name, newest)}
+		return nameRefusal(artifactType, name, fmt.Sprintf(textWithdrawAlready, artifactType, name, newest))
 	}
 
 	store, err := openArtifactStore()

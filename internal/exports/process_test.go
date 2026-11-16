@@ -528,6 +528,7 @@ func TestNotWithdrawable(t *testing.T) {
 	for body, want := range map[string]string{
 		process: "[]",
 		withTypes("\n  - {name: acceptance-lock, withdrawable: false}\n  - {name: build-ledger, withdrawable: false}\n  - {name: mockup}\n  - {name: screenshot, withdrawable: true}"): "[acceptance-lock build-ledger]",
+		withTypes("\n  - {name: acceptance-lock, withdrawable: False}\n  - {name: build-ledger, withdrawable: FALSE}\n  - {name: mockup, withdrawable: True}"):                         "[acceptance-lock build-ledger]",
 		withTypes(custom("document", "size_limit: 1, max_files: 1, withdrawable: false")):                                                                                              "[a-type]",
 	} {
 		got, err := factory(t, body).NotWithdrawable()
@@ -984,6 +985,10 @@ func TestArtifactTypesSchemaMatchesTheReader(t *testing.T) {
 		{"\n  - name: " + strings.Repeat("a", 64), true},
 		{"\n  - name: " + strings.Repeat("a", 65), false},
 		{"\n  - {name: mockup, owner: acme}", false},
+		{"\n  - {name: mockup, withdrawable: false}", true},
+		{"\n  - {name: mockup, withdrawable: true}", true},
+		{"\n  - {name: mockup, withdrawable: \"no\"}", false},
+		{custom("document", limits+", withdrawable: false"), true},
 		{"\n  - {name: a-type, base_view: file}", false},
 		{"\n  - {name: a-type, size_limit: 1}", false},
 		{"\n  - {name: a-type, json_schema: {}}", false},
