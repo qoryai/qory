@@ -961,7 +961,7 @@ func TestAMalformedJournalIsRefused(t *testing.T) {
 
 // hostFix starts the error of a registry host that the pool cannot pass to its runs: the
 // fix on the first line, and on the second the host in quotes.
-const hostFix = "Set pool.registry to an image name on a host of letters, digits, . and -, with an optional port from 1 to 65535\nThe host is \""
+const hostFix = "Set pool.registry to an image name on a host of letters, digits, . and -\nThe host is \""
 
 // TestTheSettingsAreChecked refuses to run by settings it cannot.
 func TestTheSettingsAreChecked(t *testing.T) {
@@ -973,9 +973,9 @@ func TestTheSettingsAreChecked(t *testing.T) {
 		{func(p *pool.Pool) { p.Settings.State = "pool" }, `the pool's folder "pool" is not an absolute path`},
 		{func(p *pool.Pool) { p.Settings.RunConfig = "runs" }, `set pool.run_config in forager.yaml to an absolute path: "runs" is not one`},
 		{func(p *pool.Pool) { p.Client = nil }, "the pool has no client of Qory Apiary"},
-		{func(p *pool.Pool) { p.Settings.Registry = "registry.example:0" }, hostFix + `registry.example:0".`},
-		{func(p *pool.Pool) { p.Settings.Registry = "registry.example:65536" }, hostFix + `registry.example:65536".`},
-		{func(p *pool.Pool) { p.Settings.Registry = "user@registry.example" }, hostFix + `user@registry.example".`},
+		{func(p *pool.Pool) { p.Settings.Registry = "registry.example:0" }, hostFix + `registry.example:0"; a port, if any, is from 1 to 65535.`},
+		{func(p *pool.Pool) { p.Settings.Registry = "registry.example:65536" }, hostFix + `registry.example:65536"; a port, if any, is from 1 to 65535.`},
+		{func(p *pool.Pool) { p.Settings.Registry = "user@registry.example" }, hostFix + `user@registry.example"; a port, if any, is from 1 to 65535.`},
 	} {
 		h := newHarness(t, 1)
 		c.edit(h.pool)

@@ -371,7 +371,7 @@ func TestRunPoolRefusesWhatItCannotRunBy(t *testing.T) {
 			return "remove wall.mounts from " + filepath.Join(m.runs, "qory", "forager.yaml") + ": every run of the pool would see the paths it lists, so the runs would share them"
 		}},
 		{"a registry host with port 0", []string{"registry: registry.example:0/qory-env", "run_config: {runs}"}, nil, func(*poolMachine) string {
-			return "Set pool.registry to an image name on a host of letters, digits, . and -, with an optional port from 1 to 65535\nThe host is \"registry.example:0\"."
+			return "Set pool.registry to an image name on a host of letters, digits, . and -\nThe host is \"registry.example:0\"; a port, if any, is from 1 to 65535."
 		}},
 		{"a gateway.server.url the registry's install refuses", nil, func(t *testing.T, m *poolMachine) {
 			data, err := os.ReadFile(m.file)

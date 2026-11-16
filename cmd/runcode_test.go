@@ -321,8 +321,8 @@ func TestARunCodeFileThatHoldsNoCodeIsRefused(t *testing.T) {
 		{codeFile(t, g.code()+"\r\n"), "Write the run code, then at most the lines `registry <host>`, `apiary <url>` and `runtimes <folder>`\nThe file %s contains more than that."},
 		{codeFile(t, " "+g.code()), "Write the run code, then at most the lines `registry <host>`, `apiary <url>` and `runtimes <folder>`\nThe file %s contains more than that."},
 		{codeFile(t, strings.Repeat("A", 1025)), "Write the run code, then at most the lines `registry <host>`, `apiary <url>` and `runtimes <folder>`\nThe file %s contains more than that."},
-		{codeFile(t, "qecr_F1XT-0RE0-0000.x"), "Write a run code (qecr_…) into %s: the file does not contain an enrolment code of Qory Apiary"},
-		{codeFile(t, "qecn_F1XT-0RE0-0000-0000-0000-0000-00."+g.signer.Fingerprint()), "Write a run code (qecr_…) into %s: the file contains the enrolment code of an access key of kind node"},
+		{codeFile(t, "qecr_F1XT-0RE0-0000.x"), "Write a run code (qecr_…) into the file\n%s does not contain an enrolment code of Qory Apiary"},
+		{codeFile(t, "qecn_F1XT-0RE0-0000-0000-0000-0000-00."+g.signer.Fingerprint()), "Write a run code (qecr_…) into the file\n%s contains the enrolment code of an access key of kind node"},
 	} {
 		want := strings.Replace(c.want, "%s", c.file, 1)
 		done := make(chan struct{})

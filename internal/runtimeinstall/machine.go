@@ -102,7 +102,7 @@ func CheckHost(host string) error {
 	if validHost(host) {
 		return nil
 	}
-	return fmt.Errorf("Set pool.registry to an image name on a host of letters, digits, . and -, with an optional port from 1 to 65535\nThe host is %q.", host)
+	return fmt.Errorf("Set pool.registry to an image name on a host of letters, digits, . and -\nThe host is %q; a port, if any, is from 1 to 65535.", host)
 }
 
 // CheckInstance returns nil when address is the address of a Qory Apiary instance as a

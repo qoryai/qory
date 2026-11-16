@@ -139,7 +139,7 @@ func TestRegistryOfRefusesAHostThatRunsCannotTake(t *testing.T) {
 		"registry.example?x/qory-env":     "registry.example?x",
 	} {
 		got, err := runtimeinstall.RegistryOf(image)
-		want := "Set pool.registry to an image name on a host of letters, digits, . and -, with an optional port from 1 to 65535\nThe host is " + strconv.Quote(bad) + "."
+		want := "Set pool.registry to an image name on a host of letters, digits, . and -\nThe host is " + strconv.Quote(bad) + "; a port, if any, is from 1 to 65535."
 		if err == nil || err.Error() != want || got != "" || runtimeinstall.RegistryHost(image) != "" {
 			t.Errorf("RegistryOf(%q) = %q, %v; want the error %q", image, got, err, want)
 		}

@@ -459,7 +459,7 @@ func (r *registry) failed(what string, err error) error {
 // tokenFor gets a pull token for the repository from the realm of the first Bearer
 // challenge. The realm must be https, or http on loopback, and exactly Qory Apiary's
 // token route: the scheme, host and port of the run's instance, [registry.instance], and
-// the path [tokenPath] after the instance's path. The run's proxy sets the run's
+// the path [tokenPath]; an instance with a path is refused. The run's proxy sets the run's
 // credentials on a request by its host, so a realm on another host, the registry's
 // included, could have the request carry a credential meant for another service.
 func (r *registry) tokenFor(ctx context.Context, challenges []string) (string, error) {
@@ -521,14 +521,18 @@ func (r *registry) tokenFor(ctx context.Context, challenges []string) (string, e
 const tokenPath = "/registry/token"
 
 // tokenRoute is the token route of the instance at the address instance, a URL: its
-// scheme, host and port, and the path tokenPath after the instance's path. The error is
-// for an instance that is no http or https URL with a host.
+// scheme, host and port, and the path tokenPath. The error is for an instance that is no
+// http or https URL with a host, or that has a path.
 func tokenRoute(instance string) (*url.URL, error) {
 	u, err := url.Parse(instance)
 	if err != nil || u.Host == "" || u.User != nil || u.Scheme != "https" && u.Scheme != "http" {
 		return nil, errors.New("Set the address of Qory Apiary to an https URL\nThe run's address of Qory Apiary is not one.")
 	}
-	return &url.URL{Scheme: u.Scheme, Host: u.Host, Path: strings.TrimSuffix(u.Path, "/") + tokenPath}, nil
+	if strings.TrimSuffix(u.Path, "/") != "" {
+		// [CheckInstance] refuses a path too: the route is on the instance's host.
+		return nil, fmt.Errorf("Set gateway.server.url in forager.yaml to an address with no path\nThe address is %q.", instance)
+	}
+	return &url.URL{Scheme: u.Scheme, Host: u.Host, Path: tokenPath}, nil
 }
 
 // sameRoute reports whether realm is the token route want: the same scheme, host and

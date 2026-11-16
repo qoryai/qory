@@ -272,10 +272,10 @@ func runCodeFrom(r io.Reader, file string) (string, runtimeinstall.Machine, erro
 	}
 	code, err := accesskey.NormaliseCode(string(raw))
 	if err != nil {
-		return "", none, input(fmt.Errorf("Write a run code (qecr_…) into %s: the file does not contain an enrolment code of Qory Apiary", shown))
+		return "", none, input(fmt.Errorf("Write a run code (qecr_…) into the file\n%s does not contain an enrolment code of Qory Apiary", shown))
 	}
 	if kind, _ := accesskey.CodeKind(code); kind != "run" {
-		return "", none, input(fmt.Errorf("Write a run code (qecr_…) into %s: the file contains the enrolment code of an access key of kind %s", shown, kind))
+		return "", none, input(fmt.Errorf("Write a run code (qecr_…) into the file\n%s contains the enrolment code of an access key of kind %s", shown, kind))
 	}
 	return code, machine, nil
 }

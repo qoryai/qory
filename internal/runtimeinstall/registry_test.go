@@ -298,6 +298,8 @@ func TestATokenRealmElsewhereIsRefused(t *testing.T) {
 			"Ask Qory Apiary's instance admin to put the registry's token realm at http://localhost:%PORT%/registry/token\nIt is http://localhost:%PORT%/api/token"},
 		{"a longer path", "http://localhost:%PORT%", func(_, port string) string { return "http://localhost:" + port + "/registry/token/x" },
 			"Ask Qory Apiary's instance admin to put the registry's token realm at http://localhost:%PORT%/registry/token\nIt is http://localhost:%PORT%/registry/token/x"},
+		{"an instance under a path", "http://localhost:%PORT%/base", func(_, port string) string { return "http://localhost:" + port + "/base/registry/token" },
+			"Set gateway.server.url in forager.yaml to an address with no path\nThe address is \"http://localhost:%PORT%/base\"."},
 		{"no address of the instance", "", func(_, port string) string { return "http://localhost:" + port + "/registry/token" },
 			"Set gateway.server.url in forager.yaml to the address of Qory Apiary\nThe realm is http://localhost:%PORT%/registry/token, and the run has no address of Qory Apiary to check it against."},
 	} {
