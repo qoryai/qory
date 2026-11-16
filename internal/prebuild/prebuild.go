@@ -116,7 +116,6 @@ const (
 	textCopied       = prefix + "copied the repository to " + Workspace + " in %s"
 	textCommitted    = prefix + "committed the image in %s"
 	textDone         = prefix + "built %s in %s: %s"
-	textNotDigest    = "pin wall.image by its digest, name@sha256: and 64 hexadecimal digits: the build takes the agent image by digest alone"
 	textNotUser      = "set wall.user to uid:gid, two numbers, neither of them 0"
 	textNotTag       = "set pool.registry to an image name with no tag and no digest: the name of the image to make is not one"
 	textNoRepo       = "the repository folder %s is not a folder"
@@ -220,8 +219,6 @@ func (e *ShownError) Error() string { return e.Line }
 type Options struct {
 	// Repository is the folder of the repository, fetched at a commit.
 	Repository string
-	// AgentImage is the agent image, name@sha256:digest.
-	AgentImage string
 	// User is the wall user, uid:gid, neither of them 0.
 	User string
 	// Tag is the name of the image to make.
@@ -506,9 +503,6 @@ func (b *build) line(format string, args ...any) {
 
 // checkOptions refuses options no image is built from.
 func (b *build) checkOptions() error {
-	if !digestRef.MatchString(b.o.AgentImage) {
-		return refused(errors.New(textNotDigest))
-	}
 	u, err := parseUser(b.o.User)
 	if err != nil {
 		return err

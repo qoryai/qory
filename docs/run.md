@@ -1799,8 +1799,7 @@ is set to, with no agent:
    `environment_image`, from scratch, or from an image it cannot resolve before it
    builds. Then qory closes the run as succeeded, and exits 0.
 
-The build takes the agent image and the user from `wall.image`, pinned by its digest, and
-`wall.user` in `forager.yaml`. The wall's helper is `wall.helper`, or on Linux the `qory`
+The build takes the user from `wall.user` in `forager.yaml`. The wall's helper is `wall.helper`, or on Linux the `qory`
 you run. When `forager.yaml` sets `pool.registry`, qory stops a run whose
 `image_destination` or `environment_destination` is not under it, before anything is
 made, with `set pool.registry to the registry of Qory Apiary's QORY_REGISTRY, or ask its

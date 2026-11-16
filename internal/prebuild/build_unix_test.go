@@ -23,8 +23,8 @@ import (
 	"github.com/qoryai/qory/internal/prebuild"
 )
 
-// agentImage is an agent image by digest.
-const agentImage = "example.com/acme/agent@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+// digestTag is an image by digest, which is not a name to make an image as.
+const digestTag = "example.com/acme/agent@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 
 // testName is what the temporary container and images are named after.
 const testName = "qory-prebuild-test"
@@ -202,7 +202,6 @@ const shopConfig = `{
 func options(t *testing.T, repo string, out, log io.Writer) prebuild.Options {
 	return prebuild.Options{
 		Repository: repo,
-		AgentImage: agentImage,
 		User:       "1234:2345",
 		Tag:        "acme/shop:prebuild",
 		Helper:     staticELF(t),
@@ -418,10 +417,6 @@ func TestBuildRefusesBeforeBuilding(t *testing.T) {
 		setup  func(t *testing.T, f fakes, o *prebuild.Options)
 		want   string
 	}{
-		{name: "agent image by tag", setup: func(_ *testing.T, _ fakes, o *prebuild.Options) { o.AgentImage = "example.com/acme/agent:1" },
-			want: "pin wall.image by its digest"},
-		{name: "short digest", setup: func(_ *testing.T, _ fakes, o *prebuild.Options) { o.AgentImage = "example.com/acme/agent@sha256:0123" },
-			want: "pin wall.image by its digest"},
 		{name: "root", setup: func(_ *testing.T, _ fakes, o *prebuild.Options) { o.User = "0:1000" }, want: "set wall.user to uid:gid"},
 		{name: "root written long", setup: func(_ *testing.T, _ fakes, o *prebuild.Options) { o.User = "00:0" }, want: "set wall.user to uid:gid"},
 		{name: "root's group", setup: func(_ *testing.T, _ fakes, o *prebuild.Options) { o.User = "1000:0" },
@@ -429,7 +424,7 @@ func TestBuildRefusesBeforeBuilding(t *testing.T) {
 		{name: "root's group written long", setup: func(_ *testing.T, _ fakes, o *prebuild.Options) { o.User = "1000:000" }, want: "set wall.user to uid:gid"},
 		{name: "a name", setup: func(_ *testing.T, _ fakes, o *prebuild.Options) { o.User = "agent:agent" }, want: "set wall.user to uid:gid"},
 		{name: "a uid alone", setup: func(_ *testing.T, _ fakes, o *prebuild.Options) { o.User = "1000" }, want: "set wall.user to uid:gid"},
-		{name: "tag with digest", setup: func(_ *testing.T, _ fakes, o *prebuild.Options) { o.Tag = agentImage }, want: "set pool.registry to an image name with no tag and no digest"},
+		{name: "tag with digest", setup: func(_ *testing.T, _ fakes, o *prebuild.Options) { o.Tag = digestTag }, want: "set pool.registry to an image name with no tag and no digest"},
 		{name: "tag as flag", setup: func(_ *testing.T, _ fakes, o *prebuild.Options) { o.Tag = "--privileged" }, want: "set pool.registry to an image name with no tag and no digest"},
 		{name: "no repository", setup: func(_ *testing.T, _ fakes, o *prebuild.Options) { o.Repository = "" }, want: "give the build the folder of the repository"},
 		{name: "repository missing", setup: func(_ *testing.T, _ fakes, o *prebuild.Options) { o.Repository = filepath.Join(o.Repository, "nope") },

@@ -115,7 +115,7 @@ func TestARunCodeForAPrebuildRunsTheBuild(t *testing.T) {
 			}
 			s := got.settings
 			config, state := os.Getenv("XDG_CONFIG_HOME"), filepath.Join(os.Getenv("XDG_STATE_HOME"), "qory")
-			if s.AgentImage != prebuildAgent || s.User != "1000:1000" || s.RunConfig != config || s.State != state || s.Version == "" || s.Log == nil || s.Machine != "aws-ec2" ||
+			if s.User != "1000:1000" || s.RunConfig != config || s.State != state || s.Version == "" || s.Log == nil || s.Machine != "aws-ec2" ||
 				s.Registry != "registry.example.com/targets" {
 				t.Errorf("the prebuild's settings are %+v", s)
 			}
