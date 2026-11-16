@@ -160,8 +160,9 @@ func TestAPerRunHomeTakesNoLock(t *testing.T) {
 	t.Run("a run from a run code", func(t *testing.T) {
 		var home string
 		r := codeHarness{
-			before: func() []string { walledByDocker(t); return nil },
-			joined: func(s session.SessionSpec) { home = s.HarnessHome; noLocks(t, home) },
+			perRunHome: true,
+			before:     func() []string { walledByDocker(t); return nil },
+			joined:     func(s session.SessionSpec) { home = s.HarnessHome; noLocks(t, home) },
 		}.run(t)
 		if !errors.Is(r.err, cmd.ErrJoinedNowhere) || home == "" {
 			t.Fatalf("%v (exit %d), home %q\n%s", r.err, cmd.ExitCode(r.err), home, r.out)

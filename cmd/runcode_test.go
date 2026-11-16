@@ -628,7 +628,7 @@ func TestARunCodeOnStdinLeavesTheAgentNone(t *testing.T) {
 		}{{"pipe", stdinPipe}, {"regular file", stdinFile}} {
 			t.Run(form+" "+kind.name, func(t *testing.T) {
 				var in *os.File
-				r := runFromCodeGiven(t, nil, nil, writesHello, nil, nil, nil, func(code string) (string, io.Reader) {
+				r := runFromCodeGiven(t, behindAWall(t), nil, writesHello, nil, nil, nil, func(code string) (string, io.Reader) {
 					in = kind.open(t, code+"\n")
 					return form, in
 				})
@@ -712,7 +712,7 @@ func TestARunCodeDescriptorIsClosedBeforeTheJoin(t *testing.T) {
 				flags, err := unix.FcntlInt(uintptr(n), unix.F_GETFD, 0)
 				open = err == nil && flags&unix.FD_CLOEXEC == 0
 			}))
-			r := runFromCodeGiven(t, nil, nil, writesHello, nil, nil, nil, func(code string) (string, io.Reader) {
+			r := runFromCodeGiven(t, behindAWall(t), nil, writesHello, nil, nil, nil, func(code string) (string, io.Reader) {
 				file := codeFile(t, code)
 				var err error
 				if n, err = syscall.Open(file, syscall.O_RDONLY, 0); err != nil {
@@ -763,7 +763,7 @@ func TestARunCodeInTheFileThatIsStdinLeavesTheAgentNone(t *testing.T) {
 			n := -1
 			open := true
 			t.Cleanup(cmd.SetJoinSession(func(session.SessionSpec) { open = openWithoutCloseOnExec(n) }))
-			r := runFromCodeGiven(t, nil, nil, writesHello, nil, nil, nil, func(code string) (string, io.Reader) {
+			r := runFromCodeGiven(t, behindAWall(t), nil, writesHello, nil, nil, nil, func(code string) (string, io.Reader) {
 				in = c.open(t, code+"\n")
 				n = inheritedCopy(t, in)
 				return c.path(t, in, n), in
@@ -839,7 +839,7 @@ func TestARunCodeOnTheRealStdinClosesItsCopy(t *testing.T) {
 // file too, stays open and is the session's stdin.
 func TestARunCodeFileThatIsNotStdinLeavesStdin(t *testing.T) {
 	var in *os.File
-	r := runFromCodeGiven(t, nil, nil, writesHello, nil, nil, nil, func(code string) (string, io.Reader) {
+	r := runFromCodeGiven(t, behindAWall(t), nil, writesHello, nil, nil, nil, func(code string) (string, io.Reader) {
 		in = stdinFile(t, "the agent's input\n")
 		return codeFile(t, code), in
 	})

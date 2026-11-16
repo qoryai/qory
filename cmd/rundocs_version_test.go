@@ -17,12 +17,15 @@ import (
 // versionRepository is a run from a control plane, as [newHostFetch] makes it, whose
 // server serves acme/site as well, on its default branch main: a first commit whose
 // qory.yaml lists the module hello, with the command hello, and declares the workflow
-// hello write, so a run with no wall joins, then a head commit that removes the command
-// and the workflow. It returns the run, both commits and the files of the first.
+// hello write, then a head commit that removes the command and the workflow. A run from a
+// run code that may write needs a wall, so forager.yaml has the fake docker's. It returns
+// the run, both commits and the files of the first.
 func versionRepository(t *testing.T) (h *hostFetch, first, head string, files map[string]string) {
 	t.Helper()
 	hello := helloFiles(t)
 	h = newHostFetch(t, "", "main")
+	docker, _ := fakeDocker(t)
+	walledBy(t, docker)
 	stack := "apiVersion: qory.dev/v1alpha1\ntarget:\n  runtime: claude\nmodules:\n  - name: hello\n    source: {path: modules/hello}\n"
 	files = map[string]string{
 		"qory.yaml":                       ownStack(stack + "workflows:\n  hello:\n    access: write\n"),
@@ -43,7 +46,8 @@ func versionRepository(t *testing.T) (h *hostFetch, first, head string, files ma
 // runAtVersion runs qory run from a run code whose documents set the workflow hello, the
 // target acme/site on git.test and target_version version, its run opened nowhere on
 // git.test with the repositories given, through h's host proxy, and returns the output,
-// the error, what the run came to and the arguments of the session that joined. An empty
+// the error, what the run came to and the arguments of the session that joined. The run
+// has a home outside the checkout, as a walled run of [versionRepository] needs. An empty
 // version leaves target_version out and adds a harness document, as the schema of the
 // documents requires.
 func runAtVersion(t *testing.T, h *hostFetch, repositories, version string) (string, error, keyRun, []string) {
@@ -74,7 +78,7 @@ func runAtVersionOn(t *testing.T, h *hostFetch, system, repositories, version st
 		Proxy: h.server.Proxy.URL, CABundle: h.server.Proxy.CABundle, Dir: h.runDir,
 	})
 	defer restore()
-	out, err := run(t, "run", "--run-code-file", codeFile(t, g.code()), "--gateway", g.URL)
+	out, err := run(t, "run", "--run-code-file", codeFile(t, g.code()), "--gateway", g.URL, "--home", filepath.Join(tempDir(t), "home"))
 	return out, err, keyRun{closes: closes(), joined: errors.Is(err, cmd.ErrJoinedNowhere)}, args
 }
 

@@ -1,12 +1,10 @@
 package cmd_test
 
 import (
-	"errors"
 	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
-	"slices"
 	"testing"
 
 	"github.com/qoryai/qory/cmd"
@@ -49,64 +47,6 @@ func regularFiles(t *testing.T, home string, paths ...string) {
 	for _, p := range paths {
 		if info, err := os.Lstat(filepath.Join(home, filepath.FromSlash(p))); err != nil || !info.Mode().IsRegular() {
 			t.Errorf("%s is not a regular file: %v", p, err)
-		}
-	}
-}
-
-// TestARunCodeWithAHiddenHarnessComposesNoLink is a run from a run code whose documents
-// set harness_hidden to true, without a wall, of a stack whose modules contain a link to
-// a file and a link to a directory: the home contains copies of every module, skill and
-// command, and no link, each link of a module copied as the file or directory it leads
-// to. The copy keeps the hello module's greet skill, which the stack's exclude leaves
-// out of the compose, as a link to the module would show it. The run's open sets
-// HarnessHidden.
-func TestARunCodeWithAHiddenHarnessComposesNoLink(t *testing.T) {
-	// The test reads the run's home once the run is over.
-	t.Cleanup(cmd.KeepRunHomes())
-	agents := helloFiles(t)["examples/hello/modules/hello/AGENTS.md"]
-	r := runFromCodeLinks(t, nil, nil, writesHello, nil, nil, hiddenLinks)
-	if !errors.Is(r.err, cmd.ErrJoinedNowhere) || !r.joined {
-		t.Fatalf("%v (exit %d), want the join\n%s", r.err, cmd.ExitCode(r.err), r.out)
-	}
-	if !r.open.HarnessHidden {
-		t.Error("the open of a run whose harness is hidden does not set HarnessHidden")
-	}
-	home := r.spec.HarnessHome
-	if links := linksIn(t, home); len(links) != 0 {
-		t.Errorf("the home of a hidden harness has the links %v", links)
-	}
-	regularFiles(t, home, "modules/hello/GUIDE.md", "modules/world/docs/greet/SKILL.md", "modules/hello/commands/hello.md",
-		"modules/hello/skills/greet/SKILL.md", "skills/greet/SKILL.md", "claude/plugin/skills/greet/SKILL.md", "claude/rules/qory-harness.md")
-	rule, _ := os.ReadFile(filepath.Join(home, "claude", "rules", "qory-harness.md"))
-	if shared, _ := os.ReadFile(filepath.Join(home, "AGENTS.md")); len(rule) == 0 || string(rule) != string(shared) {
-		t.Errorf("claude/rules/qory-harness.md differs from the home's AGENTS.md:\n%s", rule)
-	}
-	guide, err := os.ReadFile(filepath.Join(home, "modules", "hello", "GUIDE.md"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(guide) != agents {
-		t.Errorf("modules/hello/GUIDE.md contains %q, want the module's AGENTS.md, %q", guide, agents)
-	}
-}
-
-// TestARunCodeWithAShownHarnessKeepsItsLinks is a run from a run code whose documents set
-// harness_hidden to false, without a wall: the home links to the modules qory fetched,
-// as a run without a wall does, and the run's open leaves HarnessHidden unset.
-func TestARunCodeWithAShownHarnessKeepsItsLinks(t *testing.T) {
-	// The test reads the run's home once the run is over.
-	t.Cleanup(cmd.KeepRunHomes())
-	r := runFromCodeLinks(t, nil, nil, writesHello, func(d map[string]any) { d["harness_hidden"] = false }, nil, hiddenLinks)
-	if !errors.Is(r.err, cmd.ErrJoinedNowhere) || !r.joined {
-		t.Fatalf("%v (exit %d), want the join\n%s", r.err, cmd.ExitCode(r.err), r.out)
-	}
-	if r.open.HarnessHidden {
-		t.Error("the open of a run whose harness is shown sets HarnessHidden")
-	}
-	links := linksIn(t, r.spec.HarnessHome)
-	for _, want := range []string{"modules/hello", "modules/world", "skills/greet"} {
-		if !slices.Contains(links, want) {
-			t.Errorf("%s is not a link; the links are %v", want, links)
 		}
 	}
 }

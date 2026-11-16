@@ -25,6 +25,10 @@ const (
 	textReadNeedsSetupRemoved   = "start the run again from the work item in Qory Apiary: the setup container of this read run was not removed, so a process in the container can write the checkout: %s"
 )
 
+// textWriteNeedsWall is the line of a run from a run code that does not only read the
+// checkout, [readsOnly], and that has no wall, with the workflow's name.
+const textWriteNeedsWall = "run this workflow with a wall: this run of workflow %s writes to the checkout, and a run with no wall runs the agent as this machine's user"
+
 // readsOnly reports whether the run from the run code r only reads the checkout: the
 // access in its documents is read, or the access of its workflow in workflows, the
 // composed stack's, is read, which is also the access of a workflow the stack does not
@@ -49,15 +53,15 @@ func readsOnly(r *codeRun, workflows map[string]stack.Workflow) bool {
 func readOnlyCheckout(spec *runSpec, root, workflow string, img session.Image) error {
 	switch {
 	case spec.Wall == nil:
-		return readRefused(event.ReasonReadNeedsWall, fmt.Sprintf(textReadNeedsWall, workflow))
+		return refusedBeforeJoin(event.ReasonReadNeedsWall, fmt.Sprintf(textReadNeedsWall, workflow))
 	case spec.setupWhere == config.SetupInside:
-		return readRefused(event.ReasonReadNeedsSetupOutside, fmt.Sprintf(textReadNeedsSetupOutside, workflow))
+		return refusedBeforeJoin(event.ReasonReadNeedsSetupOutside, fmt.Sprintf(textReadNeedsSetupOutside, workflow))
 	case img.Docker:
 		shown := img.Name
 		if shown == "" {
 			shown = img.Ref
 		}
-		return readRefused(event.ReasonReadNeedsNoNestedDocker, fmt.Sprintf(textReadNeedsNoNestedDocker, workflow, accesskey.ShownName(shown, false)))
+		return refusedBeforeJoin(event.ReasonReadNeedsNoNestedDocker, fmt.Sprintf(textReadNeedsNoNestedDocker, workflow, accesskey.ShownName(shown, false)))
 	}
 	spec.WorkspaceReadOnly = true
 	for i := range spec.Mounts {
@@ -68,10 +72,18 @@ func readOnlyCheckout(spec *runSpec, root, workflow string, img session.Image) e
 	return nil
 }
 
-// readRefused is the error of a read run that stops before the join, with the reason
-// code and the line text, which ends with the code and [codeUsed].
-func readRefused(code, text string) error {
+// refusedBeforeJoin is the error of a run from a run code that stops before the join,
+// with the reason code and the line text, which ends with the code and [codeUsed].
+func refusedBeforeJoin(code, text string) error {
 	return &reasonError{code: code, text: text + " (" + code + ")" + codeUsed}
+}
+
+// writeNeedsWall is the error of a run from a run code that does not only read the
+// checkout, [readsOnly], and that has no wall: without a wall the agent runs as qory's
+// user on the host. The run stops before the image's fetch, the setup and the join,
+// closed failed with [event.ReasonWriteNeedsWall].
+func writeNeedsWall(workflow string) error {
+	return refusedBeforeJoin(event.ReasonWriteNeedsWall, fmt.Sprintf(textWriteNeedsWall, workflow))
 }
 
 // removeSetup removes the setup container of a read run, after the setup and before the
@@ -81,7 +93,7 @@ func readRefused(code, text string) error {
 // container may still run, and no session can join the run.
 func removeSetup(ctx context.Context, run openedRun) error {
 	if err := run.RemoveSetup(ctx); err != nil {
-		return readRefused(event.ReasonReadNeedsSetupRemoved, fmt.Sprintf(textReadNeedsSetupRemoved, accesskey.ShownError(err)))
+		return refusedBeforeJoin(event.ReasonReadNeedsSetupRemoved, fmt.Sprintf(textReadNeedsSetupRemoved, accesskey.ShownError(err)))
 	}
 	return nil
 }

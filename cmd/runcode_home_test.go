@@ -99,6 +99,7 @@ func TestARunFromARunCodeReadsItsInputsInItsHome(t *testing.T) {
 	var s session.SessionSpec
 	var in homeInputs
 	r := codeHarness{
+		perRunHome: true,
 		before: func() []string {
 			walledByDocker(t)
 			var err error
@@ -148,6 +149,7 @@ func TestTwoRunsFromRunCodesKeepTheirHomes(t *testing.T) {
 	var whole map[string]string
 	joins := 0
 	r := codeHarness{
+		perRunHome: true,
 		before: func() []string {
 			walledByDocker(t)
 			return nil
@@ -206,6 +208,7 @@ func TestTwoRunsFromRunCodesKeepTheirHomes(t *testing.T) {
 func TestARunFromARunCodeWithARelativeCacheFolderHasAnAbsoluteHome(t *testing.T) {
 	var home string
 	r := codeHarness{
+		perRunHome: true,
 		before: func() []string {
 			root, err := os.Getwd()
 			if err != nil {
@@ -241,6 +244,7 @@ func TestARunFromARunCodeWithARelativeCacheFolderHasAnAbsoluteHome(t *testing.T)
 func TestARunFromARunCodeWithItsRunIDTakesOneHome(t *testing.T) {
 	var root, home string
 	r := codeHarness{
+		perRunHome: true,
 		before: func() []string {
 			var err error
 			if root, err = os.Getwd(); err != nil {
