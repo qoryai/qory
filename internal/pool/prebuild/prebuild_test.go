@@ -25,6 +25,7 @@ import (
 	"github.com/qoryai/forager/accesskey"
 	"github.com/qoryai/forager/session"
 	"github.com/qoryai/forager/wall"
+	"golang.org/x/sys/unix"
 
 	"github.com/qoryai/qory/internal/pool/explore"
 	"github.com/qoryai/qory/internal/pool/prebuild"
@@ -103,10 +104,16 @@ type report struct {
 	Problems []string
 }
 
-// fd3Pipe reports whether descriptor 3 is open and a pipe, as a key's would be.
+// fd3Pipe reports whether descriptor 3 is open, a pipe, and inherited, as a key's would
+// be: FD_CLOEXEC is clear on it. On macOS the Go runtime's kqueue is descriptor 3 of a
+// fake, and reads as a pipe, but the runtime sets FD_CLOEXEC on it.
 func fd3Pipe() bool {
 	var st syscall.Stat_t
-	return syscall.Fstat(3, &st) == nil && st.Mode&syscall.S_IFMT == syscall.S_IFIFO
+	if syscall.Fstat(3, &st) != nil || st.Mode&syscall.S_IFMT != syscall.S_IFIFO {
+		return false
+	}
+	flags, err := unix.FcntlInt(3, unix.F_GETFD, 0)
+	return err == nil && flags&unix.FD_CLOEXEC == 0
 }
 
 func TestMain(m *testing.M) {
