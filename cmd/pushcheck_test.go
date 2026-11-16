@@ -25,9 +25,10 @@ import (
 
 // TestAPushCheckReadsTheNewestVersionsInThePullLayout is the working folder of a push
 // check of spec that reads questions and design: index.json byte for byte as qory
-// artifact pull writes it, the newest version of each artifact of the three types under
-// <type>/<name>/v<N>/, no folder for design, which has no version, and nothing of notes,
-// which the check does not read.
+// artifact pull writes it, notes.json with [] for a work item whose snapshot has no
+// notes, the newest version of each artifact of the three types under
+// <type>/<name>/v<N>/, no folder for design, which has no version, and nothing of the
+// artifact type notes, which the check does not read.
 func TestAPushCheckReadsTheNewestVersionsInThePullLayout(t *testing.T) {
 	root := inCheckout(t)
 	server := startRunAPI(t)
@@ -58,6 +59,7 @@ func TestAPushCheckReadsTheNewestVersionsInThePullLayout(t *testing.T) {
 	}
 	want := map[string]string{
 		"index.json":                       server.index,
+		"notes.json":                       "[]",
 		"spec/main/v2/spec.md":             "new\n",
 		"spec/main/v2/notes.md":            "notes\n",
 		"spec/other/v1/spec.md":            "other\n",
@@ -88,6 +90,62 @@ func TestAPushCheckReadsTheNewestVersionsInThePullLayout(t *testing.T) {
 	}
 	if string(pulled) != got["index.json"] {
 		t.Errorf("qory artifact pull writes index.json\n%s\nthe check's folder has\n%s", pulled, got["index.json"])
+	}
+}
+
+// TestAPushCheckReadsTheWorkItemsNotes is notes.json in the working folder of a push
+// check: the notes of the work item's snapshot byte for byte as the run API returned
+// them, and [] for a work item with none or with null.
+func TestAPushCheckReadsTheWorkItemsNotes(t *testing.T) {
+	inCheckout(t)
+	given := `[{"kind":"answer","stage_id":"plan","by":{"name":"Dana"},"note":"Use the second option.",` +
+		`"artifact_version_id":"av_1","at":"2026-11-16T09:00:00Z"},` +
+		`{"kind":"check","stage_id":"plan","by":null,"note":"build-plan: no step","artifact_version_id":null,"at":"2026-11-16T10:00:00Z"}]`
+	for _, c := range []struct{ notes, want string }{
+		{`,"notes":` + given, given},
+		{`,"notes":[]`, "[]"},
+		{`,"notes":null`, "[]"},
+		{"", "[]"},
+	} {
+		server := startRunAPI(t)
+		server.snapshot = `{"version":1,"work_item":{"id":"wi_1","number":12},"inputs":[],"outputs":[]` + c.notes + `}`
+		fetch, err := cmd.ArtifactsForCheck(server.URL + "/v1/runs/run-1")
+		if err != nil {
+			t.Fatal(err)
+		}
+		dir := t.TempDir()
+		if err := fetch(context.Background(), dir, []string{"build-plan"}); err != nil {
+			t.Fatalf("notes %q: %v", c.notes, err)
+		}
+		got, err := os.ReadFile(filepath.Join(dir, "notes.json"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(got) != c.want {
+			t.Errorf("notes %q: notes.json is\n%s\nwant\n%s", c.notes, got, c.want)
+		}
+	}
+}
+
+// TestNotesThatAreNotAListStopTheFetch is a work item whose notes in the run API's
+// response are not a JSON array: the fetch of a push check fails with its fix, and
+// writes no notes.json.
+func TestNotesThatAreNotAListStopTheFetch(t *testing.T) {
+	inCheckout(t)
+	server := startRunAPI(t)
+	server.snapshot = `{"version":1,"work_item":{"id":"wi_1","number":12},"inputs":[],"outputs":[],"notes":{"note":"x"}}`
+	fetch, err := cmd.ArtifactsForCheck(server.URL + "/v1/runs/run-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	err = fetch(context.Background(), dir, []string{"build-plan"})
+	want := "Contact support: the notes in the run API's response are not a JSON array."
+	if err == nil || err.Error() != want {
+		t.Errorf("the fetch = %v, want %q", err, want)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "notes.json")); !os.IsNotExist(err) {
+		t.Errorf("notes.json is there: %v", err)
 	}
 }
 
@@ -124,6 +182,7 @@ func TestAPushCheckSkipsCancelledVersions(t *testing.T) {
 	}
 	want := map[string]string{
 		"index.json":           server.index,
+		"notes.json":           "[]",
 		"spec/main/v2/spec.md": "two\n",
 	}
 	got := map[string]string{}

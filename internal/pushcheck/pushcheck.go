@@ -1,11 +1,12 @@
 // Package pushcheck runs the push check that a composed harness declares for an artifact
 // type, before a version of that type reaches the run API: in a new container from the
 // wall's default image, with no network, as the run's user, with the home read-only at
-// its path, and as the working folder, of each artifact of the type and its reads types,
-// the newest version that the index does not mark cancelled, with the pushed files beside
-// them. A check that exits 0 lets the version go on; any other end is a [Failure] with the
-// fix first, which a walled run's forwarder sends to the program that pushed as a
-// [session.RunAPIRefusal], and which the host's push step prints.
+// its path, and as the working folder, the work item's notes and, of each artifact of the
+// type and its reads types, the newest version that the index does not mark cancelled,
+// with the pushed files beside them. A check that exits 0 lets the version go on; any
+// other end is a [Failure] with the fix first, which a walled run's forwarder sends to
+// the program that pushed as a [session.RunAPIRefusal], and which the host's push step
+// prints.
 package pushcheck
 
 import (
@@ -52,8 +53,8 @@ const (
 	// the removal of its container, at most engineWait more, a check returns within 80
 	// seconds, within the 90-second limit of a walled run's forwarder.
 	Budget = 75 * time.Second
-	// fetchWait is how long the fetch of the artifacts may take, and engineWait one
-	// engine command other than the start.
+	// fetchWait is how long the fetch of the notes and the artifacts may take, and
+	// engineWait one engine command other than the start.
 	fetchWait  = 30 * time.Second
 	engineWait = 5 * time.Second
 	// maxOutput is the most read of the program's standard output, and of its standard
@@ -133,10 +134,12 @@ type File struct {
 	Content []byte
 }
 
-// Fetch writes into dir, an empty folder, the work item's artifact index as index.json,
-// byte for byte as the run API returned it, and, of each artifact of the types, the newest
-// version that the index does not mark cancelled, under <type>/<name>/v<N>/, as qory
-// artifact pull lays them out. An artifact with no such version has no folder.
+// Fetch writes into dir, an empty folder, the work item's notes as notes.json, a JSON
+// array byte for byte as the run API returned it or [] for none; its artifact index as
+// index.json, byte for byte as the run API returned it; and, of each artifact of the
+// types, the newest version that the index does not mark cancelled, under
+// <type>/<name>/v<N>/, as qory artifact pull lays them out. An artifact with no such
+// version has no folder.
 type Fetch func(ctx context.Context, dir string, types []string) error
 
 // Engine is the container engine the check's container runs in: the one the run's wall

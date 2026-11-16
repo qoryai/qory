@@ -128,6 +128,9 @@ type Snapshot struct {
 	Outputs []Output `json:"outputs"`
 	// Verdict is the work item's newest verdict, nil for none.
 	Verdict *GivenVerdict `json:"verdict"`
+	// Notes is the work item's notes, oldest first, byte for byte as the run API returned
+	// them: a JSON array, or null or empty for a response with no notes.
+	Notes json.RawMessage `json:"notes"`
 
 	Raw json.RawMessage `json:"-"`
 }
