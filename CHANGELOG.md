@@ -417,10 +417,10 @@ release may change what an existing document does, and states it under Upgrading
   - Forager sets `DISABLE_AUTOUPDATER=1` in every launch of Claude Code, so it does not
     update itself. A value of it from the run, the machine or the harness no longer
     applies.
-  - Forager unsets 10 more variables of Claude Code, such as `CLAUDE_CODE_USE_GATEWAY` and
-    `CLAUDE_CODE_REMOTE`, that move its endpoints or change its mode, and `BUN_OPTIONS`
-    for every runtime. No value of the run's, the machine's or the harness's reaches the
-    runtime.
+  - Forager denies 10 more variables of Claude Code, such as `CLAUDE_CODE_USE_GATEWAY`,
+    `CLAUDE_CODE_REMOTE` and `BUN_OPTIONS`, that move its endpoints, load code or change
+    its mode, and denies `BUN_OPTIONS` for every runtime. No value of the run's, the
+    machine's or the harness's reaches the runtime.
   - For each git push over HTTP through its proxy, the gateway writes
     `dev.qory.run.target_write` to the run's record twice: first with the state
     `started`, then with one of `changed`, `refused` or `cut`.
