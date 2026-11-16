@@ -1,6 +1,7 @@
 package runtimeinstall
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -8,6 +9,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // The entries of a runtime's folder, <Folder>/<runtime>, other than the versions'
@@ -25,7 +27,53 @@ const (
 	downloadPrefix = ".download-"
 	// installPrefix starts a folder being extracted, .install-<version>-<number>.
 	installPrefix = ".install-"
+	// installLockPrefix starts the name of a version's install lock, .lock-<version>.
+	// The run that installs the version holds it exclusively from before it reads the
+	// tarball until the version's folder is there, so a second run that needs the same
+	// version waits and then finds the folder. The folder's lock, lockName, is never
+	// held during a download.
+	installLockPrefix = ".lock-"
 )
+
+// installPoll is the pause between two tries to take an install lock that another run
+// holds; a test shortens it.
+var installPoll = 100 * time.Millisecond
+
+// lockInstall takes the install lock of version, waiting for the run that holds it, as
+// long as ctx allows, and returns the lock's file; closing it ends the lock. The cleanup
+// removes a lock file that no run holds, so the lock is the file that the path still
+// names once it is taken, else the wait starts again.
+func (f folder) lockInstall(ctx context.Context, version string) (*os.File, error) {
+	path := filepath.Join(f.base, installLockPrefix+version)
+	for {
+		l, err := openLock(path)
+		if err != nil {
+			return nil, fmt.Errorf(textState+"%w", err)
+		}
+		for {
+			err := flock(l, true, true)
+			if err == nil {
+				break
+			}
+			if !errors.Is(err, errHeld) {
+				l.Close()
+				return nil, fmt.Errorf(textState+"%w", err)
+			}
+			select {
+			case <-ctx.Done():
+				l.Close()
+				return nil, fmt.Errorf("run again with more time\nThe run ended while another run installed %s %s: %w", f.runtime, version, ctx.Err())
+			case <-time.After(installPoll):
+			}
+		}
+		held, herr := l.Stat()
+		named, nerr := os.Lstat(path)
+		if herr == nil && nerr == nil && os.SameFile(held, named) {
+			return l, nil
+		}
+		l.Close()
+	}
+}
 
 // prepare makes the folder, mode 0755: the wall's user enters the version's folder.
 func (f folder) prepare() error {
@@ -37,7 +85,7 @@ func (f folder) prepare() error {
 		return fmt.Errorf(textState+"%w", err)
 	}
 	if !info.IsDir() {
-		return fmt.Errorf("remove %s, then run again: it is not a folder", f.base)
+		return fmt.Errorf("remove the runtime's folder, then run again\n%s is not a folder", f.base)
 	}
 	if err := os.Chmod(f.base, 0o755); err != nil {
 		return fmt.Errorf(textState+"%w", err)
@@ -97,10 +145,12 @@ func openLock(path string) (*os.File, error) {
 }
 
 // cleanup removes, of the folder's direct entries, each version's folder older than
-// newest, each temporary entry, and each hold file with no version's folder, that no
-// run holds. It reads entries without following a link, and removes no link, and no
-// entry whose name is not a version's or does not start with a temporary prefix or
-// holdPrefix. The caller has the folder's lock.
+// newest, each temporary entry, each install lock, and each hold file with no version's
+// folder, that no run holds. A version's folder is removed only when it has the shape
+// that an install makes, [folder.installed]. It reads entries without following a link,
+// and removes no link, and no entry whose name is not a version's or does not start with
+// a temporary prefix, installLockPrefix or holdPrefix. The caller has the folder's
+// lock.
 func (f folder) cleanup(newest string) {
 	entries, err := os.ReadDir(f.base)
 	if err != nil {
@@ -114,6 +164,8 @@ func (f folder) cleanup(newest string) {
 			f.unheld(tempVersion(name, downloadPrefix), func() { removeIf(path, fs.FileMode(0), os.Remove) })
 		case strings.HasPrefix(name, installPrefix):
 			f.unheld(tempVersion(name, installPrefix), func() { removeIf(path, fs.ModeDir, os.RemoveAll) })
+		case strings.HasPrefix(name, installLockPrefix):
+			f.unlocked(path)
 		case strings.HasPrefix(name, holdPrefix):
 			version := strings.TrimPrefix(name, holdPrefix)
 			if _, err := os.Lstat(filepath.Join(f.base, version)); !versionShape.MatchString(version) || !errors.Is(err, fs.ErrNotExist) {
@@ -121,7 +173,7 @@ func (f folder) cleanup(newest string) {
 			}
 			f.unheld(version, func() { removeIf(path, fs.FileMode(0), os.Remove) })
 		case versionShape.MatchString(name):
-			if c, ok := compareVersions(name, newest); !ok || c >= 0 {
+			if c, ok := compareVersions(name, newest); !ok || c >= 0 || !f.installed(path) {
 				continue
 			}
 			f.unheld(name, func() {
@@ -131,6 +183,37 @@ func (f folder) cleanup(newest string) {
 			})
 		}
 	}
+}
+
+// installed reports whether the entry at dir has the shape that [folder.install] makes:
+// a folder with bin, a folder, with bin/<runtime>, a regular file, and checksumFile, a
+// regular file. It follows no link, at dir or below it, so a folder that something else
+// put there is not one.
+func (f folder) installed(dir string) bool {
+	for _, c := range []struct {
+		path string
+		kind fs.FileMode
+	}{{"", fs.ModeDir}, {"bin", fs.ModeDir}, {filepath.Join("bin", f.runtime), 0}, {checksumFile, 0}} {
+		info, err := os.Lstat(filepath.Join(dir, c.path))
+		if err != nil || info.Mode().Type() != c.kind {
+			return false
+		}
+	}
+	return true
+}
+
+// unlocked removes the install lock at path when no run holds it, while it has the
+// lock exclusively.
+func (f folder) unlocked(path string) {
+	l, err := os.OpenFile(path, os.O_RDWR|noFollow, 0)
+	if err != nil {
+		return
+	}
+	defer l.Close()
+	if info, err := l.Stat(); err != nil || !info.Mode().IsRegular() || flock(l, true, true) != nil {
+		return
+	}
+	removeIf(path, fs.FileMode(0), os.Remove)
 }
 
 // unheld runs remove when no run holds version: when its hold file is not there, or

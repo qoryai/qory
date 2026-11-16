@@ -284,12 +284,17 @@ func TestARunCodeFileTakesTheMachineLines(t *testing.T) {
 	if _, err := cmd.GiveRunCode(codeFile(t, code+"\nregistry registry.example:5000\nruntimes /var/lib/qory-pool/runtimes\n")); err != nil {
 		t.Fatalf("the machine's lines are refused: %v", err)
 	}
-	for _, rest := range []string{"\nfolder /x\n", "\nruntimes relative\n", "\n\nregistry registry.example\n", "\nregistry registry.example\nregistry registry.example\n"} {
+	for _, rest := range []string{"\nfolder /x\n", "\nruntimes relative\n", "\n\nregistry registry.example\n", "\nregistry registry.example\nregistry registry.example\n",
+		"\nregistry registry.example?x=1\n", "\nregistry registry.example#x\n", "\nregistry registry.example%2f\n", "\nregistry user@registry.example\n",
+		"\nregistry registry.example/x\n", "\nregistry registry.example \n", "\nregistry registry.example:0\n", "\nregistry registry.example:65536\n"} {
 		file := codeFile(t, code+rest)
 		_, err := cmd.GiveRunCode(file)
-		want := "write only the run code into " + file + ", with at most one newline after it: the file contains more"
+		want := "write the run code, then at most a `registry <host>` and a `runtimes <folder>` line\nThe file " + file + " contains more than that."
 		if err == nil || err.Error() != want {
 			t.Errorf("%q: %v, want %s", rest, err, want)
+		}
+		if first, _, _ := strings.Cut(want, "\n"); len(first) > 100 {
+			t.Errorf("the first line has %d characters, want at most 100: %s", len(first), first)
 		}
 	}
 }

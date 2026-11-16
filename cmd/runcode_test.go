@@ -311,10 +311,10 @@ func TestARunCodeFileThatHoldsNoCodeIsRefused(t *testing.T) {
 		{dir, "give --run-code-file a regular file: %s is not one"},
 		{codeFile(t, ""), "write the run code into %s: the file is empty"},
 		{codeFile(t, "\n"), "write the run code into %s: the file is empty"},
-		{codeFile(t, g.code()+"\n\n"), "write only the run code into %s, with at most one newline after it: the file contains more"},
-		{codeFile(t, g.code()+"\r\n"), "write only the run code into %s, with at most one newline after it: the file contains more"},
-		{codeFile(t, " "+g.code()), "write only the run code into %s, with at most one newline after it: the file contains more"},
-		{codeFile(t, strings.Repeat("A", 1025)), "write only the run code into %s, with at most one newline after it: the file contains more"},
+		{codeFile(t, g.code()+"\n\n"), "write the run code, then at most a `registry <host>` and a `runtimes <folder>` line\nThe file %s contains more than that."},
+		{codeFile(t, g.code()+"\r\n"), "write the run code, then at most a `registry <host>` and a `runtimes <folder>` line\nThe file %s contains more than that."},
+		{codeFile(t, " "+g.code()), "write the run code, then at most a `registry <host>` and a `runtimes <folder>` line\nThe file %s contains more than that."},
+		{codeFile(t, strings.Repeat("A", 1025)), "write the run code, then at most a `registry <host>` and a `runtimes <folder>` line\nThe file %s contains more than that."},
 		{codeFile(t, "qecr_F1XT-0RE0-0000.x"), "write a run code (qecr_…) into %s: the file does not contain an enrolment code of Qory Apiary"},
 		{codeFile(t, "qecn_F1XT-0RE0-0000-0000-0000-0000-00."+g.signer.Fingerprint()), "write a run code (qecr_…) into %s: the file contains the enrolment code of an access key of kind node"},
 	} {
@@ -652,7 +652,7 @@ func TestARunCodeOnStdinThatContainsNoCodeIsRefused(t *testing.T) {
 		content, want string
 	}{
 		{"", "write the run code into /dev/stdin: the file is empty"},
-		{g.code() + "\n" + g.code() + "\n", "write only the run code into /dev/stdin, with at most one newline after it: the file contains more"},
+		{g.code() + "\n" + g.code() + "\n", "write the run code, then at most a `registry <host>` and a `runtimes <folder>` line\nThe file /dev/stdin contains more than that."},
 	} {
 		in := stdinPipe(t, c.content)
 		out, err := runReading(t, in, "run", "--run-code-file", "/dev/stdin", "--gateway", g.URL)

@@ -39,25 +39,23 @@ const (
 	annotIntegrity = "dev.qory.runtime.integrity"
 	// newestTag is the tag that moves to each new version.
 	newestTag = "newest"
-	// tokenPath is the path of Qory Apiary's token route, where the run's proxy sets the
-	// run's registry credential.
-	tokenPath = "/registry/token"
 )
 
 // The limits of what the registry fetch reads.
 const (
 	// maxManifest is the most bytes of a manifest or an index, as registries limit them.
 	maxManifest = 4 << 20
-	// maxToken is the most bytes of a token realm's answer.
+	// maxToken is the most bytes of a token realm's response.
 	maxToken = 1 << 20
 	// maxBundle is the most bytes of the run's CA bundle that [ProxyClient] reads.
 	maxBundle = 16 << 20
 )
 
-// textCache starts each refusal of what the registry's runtime cache contains.
-const textCache = "ask the instance admin to check the registry's runtime cache: "
+// textCache is the first line of each refusal of what the registry's runtime cache
+// contains: the fix. The cause follows on the second line.
+const textCache = "ask the instance admin to check the registry's runtime cache\n"
 
-// ErrNotCached is the error of a registry that answered 404 to newest: its cache never
+// ErrNotCached is the error of a registry that returned 404 for newest: its cache never
 // held the runtime, and the publisher was unreachable when the registry asked.
 var ErrNotCached = errors.New("the registry has no copy of the runtime")
 
@@ -76,7 +74,7 @@ var ErrNotCached = errors.New("the registry has no copy of the runtime")
 func RegistryFetch(client *http.Client, host, arch string) Fetch {
 	return func(ctx context.Context, runtime string) (Release, error) {
 		if arch != "amd64" && arch != "arm64" {
-			return Release{}, fmt.Errorf("run on an amd64 or arm64 machine: the registry has %s for linux/amd64 and linux/arm64, and this machine is %s", runtime, arch)
+			return Release{}, fmt.Errorf("run on an amd64 or arm64 machine\nThe registry has %s for linux/amd64 and linux/arm64, and this machine is %s", runtime, arch)
 		}
 		r := &registry{client: client, host: host, runtime: runtime, repository: "shared/runtimes/" + runtime, started: now()}
 		return r.resolve(ctx, arch)
@@ -116,7 +114,8 @@ type manifest struct {
 	Annotations  map[string]string `json:"annotations"`
 }
 
-// statusError is a registry's answer other than 200 to a request of what.
+// statusError is a registry's response to a request of what, with a status other than
+// 200.
 type statusError struct {
 	what   string
 	status int
@@ -207,15 +206,15 @@ func (r *registry) platformLayer(ctx context.Context, entry descriptor, version,
 		return descriptor{}, err
 	}
 	if digest != entry.Digest || entry.Size != int64(len(body)) {
-		return descriptor{}, fmt.Errorf(textCache+"%s does not match its digest %s", what, entry.Digest)
+		return descriptor{}, fmt.Errorf(textCache+"%s does not match its digest %s", upper(what), entry.Digest)
 	}
 	m, err := decode(body, mediaManifest)
 	if err != nil {
-		return descriptor{}, fmt.Errorf(textCache+"%s is not a runtime's: %w", what, err)
+		return descriptor{}, fmt.Errorf(textCache+"%s is not a runtime's: %w", upper(what), err)
 	}
 	layer, err := runtimeLayer(m, version)
 	if err != nil {
-		return descriptor{}, fmt.Errorf(textCache+"%s is not a runtime's: %w", what, err)
+		return descriptor{}, fmt.Errorf(textCache+"%s is not a runtime's: %w", upper(what), err)
 	}
 	return layer, nil
 }
@@ -277,12 +276,12 @@ func (r *registry) manifest(ctx context.Context, ref, version string) ([]byte, s
 		return nil, "", r.failed(what, err)
 	}
 	if len(body) > maxManifest {
-		return nil, "", fmt.Errorf(textCache+"%s has more than %d bytes", what, maxManifest)
+		return nil, "", fmt.Errorf(textCache+"%s has more than %d bytes", upper(what), maxManifest)
 	}
 	sum := sha256.Sum256(body)
 	digest := "sha256:" + hex.EncodeToString(sum[:])
 	if got := resp.Header.Get("Docker-Content-Digest"); got != "" && got != digest {
-		return nil, "", fmt.Errorf(textCache+"%s has the digest %s, and the registry sent %q", what, digest, got)
+		return nil, "", fmt.Errorf(textCache+"%s has the digest %s, and the registry sent %q", upper(what), digest, got)
 	}
 	return body, digest, nil
 }
@@ -298,7 +297,7 @@ func (r *registry) blob(ctx context.Context, layer descriptor, version string) (
 	}
 	if resp.ContentLength >= 0 && resp.ContentLength != layer.Size {
 		resp.Body.Close()
-		return nil, fmt.Errorf(textCache+"%s has %d bytes, and its manifest says %d", what, resp.ContentLength, layer.Size)
+		return nil, fmt.Errorf(textCache+"%s has %d bytes, and its manifest lists %d", upper(what), resp.ContentLength, layer.Size)
 	}
 	return &checkedBlob{body: resp.Body, r: io.LimitReader(resp.Body, layer.Size+1), h: sha256.New(), layer: layer, what: what}, nil
 }
@@ -320,26 +319,26 @@ func (b *checkedBlob) Read(p []byte) (int, error) {
 	b.h.Write(p[:n])
 	b.n += int64(n)
 	if b.n > b.layer.Size {
-		return n, &checkError{fmt.Errorf(textCache+"%s has more bytes than its manifest's %d", b.what, b.layer.Size)}
+		return n, &checkError{fmt.Errorf(textCache+"%s has more bytes than its manifest's %d", upper(b.what), b.layer.Size)}
 	}
 	if err == io.EOF {
 		if b.n != b.layer.Size {
-			return n, &checkError{fmt.Errorf(textCache+"%s has %d bytes, and its manifest says %d", b.what, b.n, b.layer.Size)}
+			return n, &checkError{fmt.Errorf(textCache+"%s has %d bytes, and its manifest lists %d", upper(b.what), b.n, b.layer.Size)}
 		}
 		if "sha256:"+hex.EncodeToString(b.h.Sum(nil)) != b.layer.Digest {
-			return n, &checkError{fmt.Errorf(textCache+"%s does not match its digest %s", b.what, b.layer.Digest)}
+			return n, &checkError{fmt.Errorf(textCache+"%s does not match its digest %s", upper(b.what), b.layer.Digest)}
 		}
 	}
 	return n, err
 }
 
-// Close closes the answer's body.
+// Close closes the response's body.
 func (b *checkedBlob) Close() error { return b.body.Close() }
 
-// The waits between the tries of a request that the registry answered 503 or 429, or
-// that got no answer: 2, 4 and 8 seconds, then 15 seconds; a Retry-After of whole
+// The waits between the tries of a request that got 503 or 429 from the registry, or
+// that got no response: 2, 4 and 8 seconds, then 15 seconds; a Retry-After of whole
 // seconds replaces the wait, up to 30 seconds. The registry waits only 30 seconds for
-// its cache to start answering, so a first fill of a version, two tarballs of about
+// its cache to start serving, so a first fill of a version, two tarballs of about
 // 170 MB with up to 10 minutes each, gets 503 until it is done. The tries of one fetch
 // stop after [retryLimit] in all; a test shortens it and replaces the clock.
 var (
@@ -360,7 +359,7 @@ var (
 	}
 )
 
-// wait is the wait before retry n+1 of a request, n counted from 0, with the answer's
+// wait is the wait before retry n+1 of a request, n counted from 0, with the response's
 // Retry-After, "" for none.
 func wait(n int, retryAfter string) time.Duration {
 	if s, err := strconv.Atoi(strings.TrimSpace(retryAfter)); err == nil && s >= 0 {
@@ -373,9 +372,9 @@ func wait(n int, retryAfter string) time.Duration {
 }
 
 // get sends a GET of path to the registry, with Accept set to accept when it is not
-// empty, and returns its answer of 200. A 401 with a Bearer challenge gets a token from
+// empty, and returns its response with the status 200. A 401 with a Bearer challenge gets a token from
 // the challenge's realm, once, and the GET is sent again with it. A 503, a 429 or a
-// request with no answer is sent again after [wait], until [retryLimit] after the
+// request with no response is sent again after [wait], until [retryLimit] after the
 // fetch started. what is the request as an error shows it, and ref the runtime's
 // version, or newest, that it is for.
 func (r *registry) get(ctx context.Context, path, accept, what, ref string) (*http.Response, error) {
@@ -383,7 +382,7 @@ func (r *registry) get(ctx context.Context, path, accept, what, ref string) (*ht
 	for n := 0; ; {
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, scheme(r.host)+"://"+r.host+path, nil)
 		if err != nil {
-			return nil, fmt.Errorf("set pool.registry to an image name under the instance's registry: %w", err)
+			return nil, fmt.Errorf("set pool.registry to an image name under the instance's registry\n%w", err)
 		}
 		if accept != "" {
 			req.Header.Set("Accept", accept)
@@ -391,7 +390,7 @@ func (r *registry) get(ctx context.Context, path, accept, what, ref string) (*ht
 		if r.token != "" {
 			req.Header.Set("Authorization", "Bearer "+r.token)
 		}
-		resp, err := r.client.Do(req)
+		resp, err := send(r.client, req)
 		retryAfter := ""
 		switch {
 		case err != nil && (ctx.Err() != nil || refusedConnect(err)):
@@ -417,12 +416,11 @@ func (r *registry) get(ctx context.Context, path, accept, what, ref string) (*ht
 		d := wait(n, retryAfter)
 		n++
 		if now().Add(d).After(r.started.Add(retryLimit)) {
-			cause := "it did not answer"
-			if err == nil {
-				cause = "it answered " + strconv.Itoa(resp.StatusCode)
-			}
+			var cause string
 			if err != nil {
-				cause += " (" + err.Error() + ")"
+				cause = "the request got no response (" + err.Error() + ")"
+			} else {
+				cause = "the registry returned " + strconv.Itoa(resp.StatusCode)
 			}
 			return nil, fmt.Errorf("run again later: %s is still filling its cache of %s %s\n"+
 				"The registry's cache had no %s after %s: %s.", r.host, r.runtime, ref, what, retryLimit, cause)
@@ -433,45 +431,46 @@ func (r *registry) get(ctx context.Context, path, accept, what, ref string) (*ht
 	}
 }
 
-// refused is the error of an answer of status, other than 200, to the request what.
+// refused is the error of a response with the status status, other than 200, to the
+// request what.
 func (r *registry) refused(what string, status int) error {
 	err := &statusError{what: what, status: status}
 	switch status {
 	case http.StatusNotFound:
 		return fmt.Errorf(textCache+"%w", err)
 	case http.StatusUnauthorized, http.StatusForbidden:
-		return fmt.Errorf("check that Qory Apiary lets the run pull %s: %w", r.repository, err)
+		return fmt.Errorf("check that Qory Apiary lets the run pull %s\n%w", r.repository, err)
 	case http.StatusTooManyRequests:
-		return fmt.Errorf("run again once the registry's rate limit resets: %w", err)
+		return fmt.Errorf("run again once the registry's rate limit resets\n%w", err)
 	}
-	return fmt.Errorf("check that the run's proxy reaches the registry at %s: %w", r.host, err)
+	return fmt.Errorf("check that the run's proxy reaches the registry at %s\n%w", r.host, err)
 }
 
-// failed is the error of the request what that got no answer.
+// failed is the error of the request what that got no response.
 func (r *registry) failed(what string, err error) error {
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-		return fmt.Errorf("run again with more time: the run ended before the registry at %s answered %s: %w", r.host, what, err)
+		return fmt.Errorf("run again with more time\nThe run ended before the registry at %s returned %s: %w", r.host, what, err)
 	}
-	return fmt.Errorf("check that the run's proxy reaches the registry at %s: %s failed: %w", r.host, what, err)
+	return fmt.Errorf("check that the run's proxy reaches the registry at %s\n%s failed: %w", r.host, what, err)
 }
 
 // tokenFor gets a pull token for the repository from the realm of the first Bearer
-// challenge. The realm must be https, or http on loopback, and either on the registry's
-// host and port or at Qory Apiary's token route, [tokenPath]: the run's proxy sets the
-// run's credentials on a request by its host and path, so a realm elsewhere could have
-// the request carry a credential meant for another service.
+// challenge. The realm must be https, or http on loopback, with the registry's scheme,
+// host and port: the run's proxy sets the run's credentials on a request by its host, so
+// a realm on another host could have the request carry a credential meant for another
+// service.
 func (r *registry) tokenFor(ctx context.Context, challenges []string) (string, error) {
 	params, ok := bearer(challenges)
 	if !ok {
-		return "", fmt.Errorf("check that the registry at %s asks for a Bearer token: it returned 401 with no Bearer challenge", r.host)
+		return "", fmt.Errorf("check that the registry at %s asks for a Bearer token\nIt returned 401 with no Bearer challenge", r.host)
 	}
 	realm, err := url.Parse(params["realm"])
 	if err != nil || realm.Host == "" || realm.User != nil ||
 		realm.Scheme != "https" && (realm.Scheme != "http" || scheme(realm.Host) != "http") {
-		return "", fmt.Errorf("check the registry at %s: the realm of its Bearer challenge is not an https URL, or http on loopback", r.host)
+		return "", fmt.Errorf("check the registry at %s\nThe realm of its Bearer challenge is not an https URL, or http on loopback", r.host)
 	}
-	if realm.Host != r.host && realm.Path != tokenPath {
-		return "", fmt.Errorf("check the registry at %s: its token realm %s is neither on the registry's host nor at %s", r.host, realm.Redacted(), tokenPath)
+	if realm.Host != r.host || realm.Scheme != scheme(r.host) {
+		return "", fmt.Errorf("ask the instance admin to put the registry's token realm on %s://%s\nIt is %s", scheme(r.host), r.host, realm.Redacted())
 	}
 	q := realm.Query()
 	if service := params["service"]; service != "" {
@@ -483,29 +482,29 @@ func (r *registry) tokenFor(ctx context.Context, challenges []string) (string, e
 	if err != nil {
 		return "", err
 	}
-	resp, err := r.client.Do(req)
+	resp, err := send(r.client, req)
 	if err != nil {
-		return "", fmt.Errorf("check that the run's proxy reaches the token realm at %s: %w", realm.Host, err)
+		return "", fmt.Errorf("check that the run's proxy reaches the token realm at %s\n%w", realm.Host, err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		drain(resp)
-		return "", fmt.Errorf("check that Qory Apiary lets the run pull %s: the token realm at %s returned %d", r.repository, realm.Host, resp.StatusCode)
+		return "", fmt.Errorf("check that Qory Apiary lets the run pull %s\nThe token realm at %s returned %d", r.repository, realm.Host, resp.StatusCode)
 	}
-	var answer struct {
+	var reply struct {
 		Token       string `json:"token"`
 		AccessToken string `json:"access_token"`
 	}
-	if json.NewDecoder(io.LimitReader(resp.Body, maxToken)).Decode(&answer) != nil || answer.Token == "" && answer.AccessToken == "" {
-		return "", fmt.Errorf("check the token realm at %s: its answer contains no token", realm.Host)
+	if json.NewDecoder(io.LimitReader(resp.Body, maxToken)).Decode(&reply) != nil || reply.Token == "" && reply.AccessToken == "" {
+		return "", fmt.Errorf("check the token realm at %s\nIts response contains no token", realm.Host)
 	}
-	if answer.Token == "" {
-		return answer.AccessToken, nil
+	if reply.Token == "" {
+		return reply.AccessToken, nil
 	}
-	return answer.Token, nil
+	return reply.Token, nil
 }
 
-// drain reads up to 64 KiB of an answer the caller does not use, and closes it.
+// drain reads up to 64 KiB of a response the caller does not use, and closes it.
 func drain(resp *http.Response) {
 	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 64<<10))
 	resp.Body.Close()
@@ -578,27 +577,38 @@ func challengeParams(s string) map[string]string {
 	}
 }
 
-// connectRefused is a CONNECT that the run's proxy answered 403 or 407: the run's
-// policy does not allow the host, or the forwarder's password is wrong. It is never
-// retried.
-type connectRefused struct{ status int }
+// connectRefused is a CONNECT to host that the run's proxy returned 403 or 407 to: the
+// run's policy does not allow the host, or the forwarder's password is wrong. It is
+// never retried.
+type connectRefused struct {
+	status int
+	host   string
+}
 
 func (e *connectRefused) Error() string {
-	return "the run's proxy answered " + strconv.Itoa(e.status) + " to the connection"
+	return "the run's proxy returned " + strconv.Itoa(e.status) + " to the CONNECT to " + e.host
+}
+
+// connectRefusal is the [connectRefused] in err, nil when err has none.
+func connectRefusal(err error) *connectRefused {
+	var c *connectRefused
+	if errors.As(err, &c) {
+		return c
+	}
+	return nil
 }
 
 // refusedConnect reports whether err is a [connectRefused].
-func refusedConnect(err error) bool {
-	var c *connectRefused
-	return errors.As(err, &c)
-}
+func refusedConnect(err error) bool { return connectRefusal(err) != nil }
 
 // ProxyClient is a client whose every request goes through the forwarder at proxyURL,
 // http://qory:<password>@127.0.0.1:<port>, with the password as its
 // Proxy-Authorization. With caBundle set, the client trusts the authorities of that PEM
 // file alone, the machine's and the run's; without it, the machine's. It follows no
-// redirect and sets no time limit: the caller's context sets it, since a first fill of
-// the registry's cache can take minutes.
+// redirect. It sets no time limit for a whole request, since a first fill of the
+// registry's cache can take minutes, but a limit for a connection, a handshake, a
+// response's headers and a wait for the next byte of a body, see [limitTransport]; the
+// caller's context sets the rest.
 func ProxyClient(proxyURL, caBundle string) (*http.Client, error) {
 	u, err := url.Parse(proxyURL)
 	if err != nil || u.Scheme != "http" || u.Host == "" {
@@ -621,18 +631,17 @@ func ProxyClient(proxyURL, caBundle string) (*http.Client, error) {
 		}
 		tlsConfig.RootCAs = roots
 	}
-	return &http.Client{
-		Transport: &http.Transport{
-			Proxy:             http.ProxyURL(u),
-			TLSClientConfig:   tlsConfig,
-			DisableKeepAlives: true,
-			OnProxyConnectResponse: func(_ context.Context, _ *url.URL, _ *http.Request, resp *http.Response) error {
-				if resp.StatusCode == http.StatusForbidden || resp.StatusCode == http.StatusProxyAuthRequired {
-					return &connectRefused{status: resp.StatusCode}
-				}
-				return nil
-			},
+	transport := &http.Transport{
+		Proxy:             http.ProxyURL(u),
+		TLSClientConfig:   tlsConfig,
+		DisableKeepAlives: true,
+		OnProxyConnectResponse: func(_ context.Context, _ *url.URL, connect *http.Request, resp *http.Response) error {
+			if resp.StatusCode == http.StatusForbidden || resp.StatusCode == http.StatusProxyAuthRequired {
+				return &connectRefused{status: resp.StatusCode, host: connect.Host}
+			}
+			return nil
 		},
-		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
-	}, nil
+	}
+	limitTransport(transport)
+	return &http.Client{Transport: transport, CheckRedirect: noRedirect}, nil
 }

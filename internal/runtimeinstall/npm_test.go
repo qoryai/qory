@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"os"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -106,7 +107,7 @@ func TestTheNpmFetchRefuses(t *testing.T) {
 				n.PublishWith("x64", "2.1.320", rt.PlainTarball(t, "2.1.320"), rt.Integrity(other), "")
 				n.SetLatest("2.1.320")
 			},
-			want:     "check the source of the runtime's releases: the tarball of claude 2.1.320 does not match its checksum " + rt.Integrity(other),
+			want:     "check the source of the runtime's releases\nThe tarball of claude 2.1.320 does not match the checksum " + rt.Integrity(other),
 			tarballs: 1,
 		},
 		{
@@ -116,17 +117,17 @@ func TestTheNpmFetchRefuses(t *testing.T) {
 				n.PublishWith("x64", "2.1.320", b, rt.Integrity(b), "https://tarballs.example/claude.tgz")
 				n.SetLatest("2.1.320")
 			},
-			want: "check the source of the runtime's releases: the tarball of @anthropic-ai/claude-code-linux-x64 2.1.320 is not on 127.0.0.1:",
+			want: "check the source of the runtime's releases\nThe tarball of @anthropic-ai/claude-code-linux-x64 2.1.320 is not on 127.0.0.1:",
 		},
 		{
 			name:    "latest that is no version",
 			publish: func(n *rt.Npm) { n.SetLatest("../2") },
-			want:    "check the source of the runtime's releases: the dist-tag latest of @anthropic-ai/claude-code is \"../2\"",
+			want:    "check the source of the runtime's releases\nThe dist-tag latest of @anthropic-ai/claude-code is \"../2\"",
 		},
 		{
 			name:    "no platform package",
 			publish: func(n *rt.Npm) { n.SetLatest("2.1.320") },
-			want:    "check the source of the runtime's releases: @anthropic-ai/claude-code-linux-x64 2.1.320 returned 404",
+			want:    "check the source of the runtime's releases\n@anthropic-ai/claude-code-linux-x64 2.1.320 returned 404",
 		},
 		{
 			name: "registry over http off loopback",
@@ -153,6 +154,42 @@ func TestTheNpmFetchRefuses(t *testing.T) {
 				t.Errorf("%d tarballs read, want %d", f.npm.TarballGets(), c.tarballs)
 			}
 			if got := files(t, f.folder); len(got) > 1 {
+				t.Errorf("files = %q, want nothing installed", got)
+			}
+		})
+	}
+}
+
+// TestAWalledRunWithNoRegistryAndNoNpmInItsPolicyStartsWithTheFix installs from npm,
+// registry.npmjs.org, through a proxy that returns 403 or 407 to the CONNECT, as the
+// run's proxy does for a host that the run's policy does not allow: the first line of
+// the error is the fix, the second is the cause, and nothing else is requested or
+// retried.
+func TestAWalledRunWithNoRegistryAndNoNpmInItsPolicyStartsWithTheFix(t *testing.T) {
+	for _, status := range []int{http.StatusForbidden, http.StatusProxyAuthRequired} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			proxy := rt.StartProxy(t)
+			proxy.Deny(status)
+			client, err := runtimeinstall.ProxyClient(proxy.URL(), "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			folder := t.TempDir()
+			_, err = runtimeinstall.Install(context.Background(), runtimeinstall.Options{
+				Fetch: runtimeinstall.NpmFetch(client, runtimeinstall.NpmRegistry, "amd64"), Runtime: "claude", Folder: folder,
+			})
+			want := "Set up the instance's registry for this machine, or allow registry.npmjs.org in the run's policy.\n" +
+				"The run's proxy returned " + strconv.Itoa(status) + " to the CONNECT to registry.npmjs.org:443."
+			if err == nil || err.Error() != want {
+				t.Fatalf("err = %v\nwant %s", err, want)
+			}
+			if first, _, _ := strings.Cut(err.Error(), "\n"); len(first) > 100 {
+				t.Errorf("the first line has %d characters, want at most 100", len(first))
+			}
+			if proxy.Refusals() != 1 {
+				t.Errorf("the proxy refused %d requests, want 1: the refusal is not retried", proxy.Refusals())
+			}
+			if got := files(t, folder); len(got) > 1 {
 				t.Errorf("files = %q, want nothing installed", got)
 			}
 		})

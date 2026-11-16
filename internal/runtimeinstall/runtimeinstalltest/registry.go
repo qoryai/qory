@@ -228,11 +228,12 @@ func (r *Registry) Paths() []string {
 
 // Proxy stands in for the run's host proxy: it forwards each request in absolute form
 // to a loopback address that carries its password, and counts the requests it passed
-// and refused.
+// and refused. [Proxy.Deny] makes it refuse every request, a CONNECT included.
 type Proxy struct {
 	srv              *httptest.Server
 	mu               sync.Mutex
 	passed, refusals int
+	deny             int
 }
 
 // StartProxy starts a proxy on loopback until the test ends.
@@ -247,6 +248,13 @@ func (p *Proxy) serve(w http.ResponseWriter, req *http.Request) {
 	auth := &http.Request{Header: http.Header{"Authorization": req.Header.Values("Proxy-Authorization")}}
 	user, pass, ok := auth.BasicAuth()
 	p.mu.Lock()
+	if p.deny != 0 {
+		status := p.deny
+		p.refusals++
+		p.mu.Unlock()
+		http.Error(w, "the run's policy does not allow "+req.Host, status)
+		return
+	}
 	if !ok || user != "qory" || pass != ProxyPassword || !req.URL.IsAbs() {
 		p.refusals++
 		p.mu.Unlock()
@@ -281,6 +289,14 @@ func (p *Proxy) serve(w http.ResponseWriter, req *http.Request) {
 	}
 	w.WriteHeader(resp.StatusCode)
 	_, _ = io.Copy(w, resp.Body)
+}
+
+// Deny makes the proxy return status, 403 or 407, to every request from now on, a CONNECT
+// included, as a proxy does for a host that the run's policy does not allow; 0 ends it.
+func (p *Proxy) Deny(status int) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.deny = status
 }
 
 // URL is the proxy's URL with the user qory and [ProxyPassword].

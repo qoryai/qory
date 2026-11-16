@@ -39,3 +39,11 @@ func SetRetryClock(limit time.Duration, onWait func(time.Duration)) (restore fun
 
 // CompareVersions is compareVersions.
 var CompareVersions = compareVersions
+
+// SetStallLimit sets the most time that a read of a response body waits for its next
+// byte, until the returned restore runs.
+func SetStallLimit(limit time.Duration) (restore func()) {
+	old := stallLimit
+	stallLimit = limit
+	return func() { stallLimit = old }
+}

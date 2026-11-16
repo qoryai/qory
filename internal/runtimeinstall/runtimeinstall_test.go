@@ -31,7 +31,7 @@ func (in *installer) install() (runtimeinstall.Installed, error) {
 }
 
 // files is every path under dir, relative, with / after each folder's, but for the
-// lock files of the runtime's folder, .lock and .hold-<version>, which the tests of the
+// lock files of the runtime's folder, .lock, .lock-<version> and .hold-<version>, which the tests of the
 // hold check.
 func files(t *testing.T, dir string) []string {
 	t.Helper()
@@ -41,7 +41,7 @@ func files(t *testing.T, dir string) []string {
 			return err
 		}
 		rel, _ := filepath.Rel(dir, path)
-		if rel == "." || d.Name() == ".lock" || strings.HasPrefix(d.Name(), ".hold-") {
+		if rel == "." || d.Name() == ".lock" || strings.HasPrefix(d.Name(), ".hold-") || strings.HasPrefix(d.Name(), ".lock-") {
 			return nil
 		}
 		if d.IsDir() {
@@ -182,22 +182,22 @@ func TestInstallRefuses(t *testing.T) {
 	}{
 		{"wrong integrity", func(t *testing.T, s *rt.Source) {
 			s.PublishWith("2.1.320", rt.PlainTarball(t, "2.1.320"), rt.Integrity([]byte("another tarball")))
-		}, "check the source of the runtime's releases: the tarball of claude 2.1.320 does not match its checksum sha512-"},
+		}, "check the source of the runtime's releases\nThe tarball of claude 2.1.320 does not match the checksum sha512-"},
 		{"tarball changed after its checksum", func(t *testing.T, s *rt.Source) {
 			good := rt.PlainTarball(t, "2.1.320")
 			bad := bytes.Clone(good)
 			bad[len(bad)/2] ^= 0xff
 			s.PublishWith("2.1.320", bad, rt.Integrity(good))
-		}, "the tarball of claude 2.1.320 does not match its checksum"},
+		}, "The tarball of claude 2.1.320 does not match the checksum "},
 		{"checksum not sha512", func(t *testing.T, s *rt.Source) {
 			s.PublishWith("2.1.320", rt.PlainTarball(t, "2.1.320"), "sha1-AAAA")
-		}, "the checksum of claude 2.1.320 is not sha512- and 64 bytes in base64"},
+		}, "The checksum of claude 2.1.320 is not sha512- and 64 bytes in base64"},
 		{"version that climbs", func(t *testing.T, s *rt.Source) {
 			s.Publish("..", rt.PlainTarball(t, ".."))
-		}, `the newest claude has the version "..", and a version is 1 to 64 letters`},
+		}, "The newest claude has the version \"..\", and a version is 1 to 64 letters"},
 		{"version with a slash", func(t *testing.T, s *rt.Source) {
 			s.Publish("2/../../x", rt.PlainTarball(t, "x"))
-		}, `the newest claude has the version "2/../../x"`},
+		}, "The newest claude has the version \"2/../../x\""},
 		{"program is a symbolic link", func(t *testing.T, s *rt.Source) {
 			s.Publish("2.1.320", rt.Tarball(t, rt.Entry{Name: "package/claude", Kind: tar.TypeSymlink, Link: "/bin/sh"}))
 		}, "has package/claude as another kind of entry than a regular file"},
@@ -209,10 +209,10 @@ func TestInstallRefuses(t *testing.T) {
 		}, "has package/claude twice"},
 		{"no program", func(t *testing.T, s *rt.Source) {
 			s.Publish("2.1.320", rt.Tarball(t, rt.Entry{Name: "package/package.json", Body: "{}"}))
-		}, "the tarball of claude 2.1.320 has no package/claude"},
+		}, "The tarball of claude 2.1.320 has no package/claude"},
 		{"not gzip", func(t *testing.T, s *rt.Source) {
 			s.Publish("2.1.320", []byte("not a tarball"))
-		}, "the tarball of claude 2.1.320 is not gzip"},
+		}, "The tarball of claude 2.1.320 is not gzip"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -222,8 +222,11 @@ func TestInstallRefuses(t *testing.T) {
 			if err == nil || !strings.Contains(err.Error(), c.want) {
 				t.Fatalf("err = %v, want one that contains %q", err, c.want)
 			}
-			if !strings.HasPrefix(err.Error(), "check the source of the runtime's releases: ") {
+			if !strings.HasPrefix(err.Error(), "check the source of the runtime's releases\n") {
 				t.Fatalf("err = %v, want one that starts with its fix", err)
+			}
+			if first, _, _ := strings.Cut(err.Error(), "\n"); len(first) > 100 {
+				t.Fatalf("the first line has %d characters, want at most 100: %s", len(first), first)
 			}
 			if got := files(t, in.folder); len(got) > 1 {
 				t.Fatalf("files = %q, want no version folder and no temporary file", got)
@@ -262,8 +265,12 @@ func TestAFolderOfAnotherTarballIsRefused(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = in.install()
-	if err == nil || !strings.HasPrefix(err.Error(), "remove "+got.Dir+" once no run uses it, then run again") {
-		t.Fatalf("err = %v, want the fix to remove the folder", err)
+	want := "remove the version's folder once no run uses it, then run again\n" + got.Dir + " was not installed from the tarball with the checksum " + rt.Integrity(rt.PlainTarball(t, "2.1.320"))
+	if err == nil || err.Error() != want {
+		t.Fatalf("err = %v, want %s", err, want)
+	}
+	if first, _, _ := strings.Cut(err.Error(), "\n"); len(first) > 100 {
+		t.Fatalf("the first line has %d characters, want at most 100: %s", len(first), first)
 	}
 	if in.src.Opens() != 1 {
 		t.Fatalf("%d tarballs opened, want 1", in.src.Opens())
@@ -286,7 +293,7 @@ func TestAProgramReplacedByALinkIsRefused(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = in.install()
-	if err == nil || !strings.HasPrefix(err.Error(), "remove "+got.Dir+" once no run uses it, then run again: it has no program bin/claude") {
+	if err == nil || !strings.HasPrefix(err.Error(), "remove the version's folder once no run uses it, then run again\n"+got.Dir+" has no program bin/claude") {
 		t.Fatalf("err = %v", err)
 	}
 }
@@ -306,9 +313,9 @@ func TestOversizedTarballsAreRefused(t *testing.T) {
 		entries                  []rt.Entry
 		want                     string
 	}{
-		{"tarball", 512, 1 << 20, 1 << 20, []rt.Entry{{Name: "package/claude", Body: noise.String()}}, "the tarball of claude 2.1.320 has more than 512 bytes"},
+		{"tarball", 512, 1 << 20, 1 << 20, []rt.Entry{{Name: "package/claude", Body: noise.String()}}, "The tarball of claude 2.1.320 has more than 512 bytes"},
 		{"program", 1 << 20, 1 << 10, 1 << 20, []rt.Entry{{Name: "package/claude", Body: zeros}}, "has package/claude of 65536 bytes, and a program has 1 to 1024"},
-		{"unpacked", 1 << 20, 1 << 20, 32 << 10, []rt.Entry{{Name: "package/filler", Body: zeros}, {Name: "package/claude", Body: "x"}}, "the tarball of claude 2.1.320 unpacks to more than 32768 bytes"},
+		{"unpacked", 1 << 20, 1 << 20, 32 << 10, []rt.Entry{{Name: "package/filler", Body: zeros}, {Name: "package/claude", Body: "x"}}, "The tarball of claude 2.1.320 unpacks to more than 32768 bytes"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -316,7 +323,7 @@ func TestOversizedTarballsAreRefused(t *testing.T) {
 			in := newInstaller(t)
 			in.src.Publish("2.1.320", rt.Tarball(t, c.entries...))
 			_, err := in.install()
-			if err == nil || !strings.Contains(err.Error(), c.want) || !strings.HasPrefix(err.Error(), "check the source of the runtime's releases: ") {
+			if err == nil || !strings.Contains(err.Error(), c.want) || !strings.HasPrefix(err.Error(), "check the source of the runtime's releases\n") {
 				t.Fatalf("err = %v, want one that starts with its fix and contains %q", err, c.want)
 			}
 			if got := files(t, in.folder); len(got) > 1 {

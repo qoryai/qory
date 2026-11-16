@@ -5,12 +5,13 @@
 // [Install] asks its [Fetch] for the runtime's newest release: the version, npm's
 // sha512 checksum of the tarball, and a way to open the tarball. It takes the run's hold
 // of the version, which keeps the version's folder until the run ends, and removes the
-// older versions' folders and the temporary entries that no run holds. It uses the
-// folder <Folder>/<runtime>/<version> when an earlier install of a tarball with the
-// same checksum made it, and opens no tarball then. Otherwise it reads the tarball into
-// a temporary file, checks its checksum, and extracts only package/<runtime> to
-// bin/<runtime> in a temporary folder, which it then renames to the version's folder: a
-// folder at that path is always a complete install.
+// older versions' folders that an install made, and the temporary entries, that no run
+// holds. It uses the folder <Folder>/<runtime>/<version> when an earlier install of a
+// tarball with the same checksum made it, and opens no tarball then. Otherwise it takes
+// the version's install lock, so that a second run that needs the same version waits and
+// then uses the folder, reads the tarball into a temporary file, checks its checksum, and
+// extracts only package/<runtime> to bin/<runtime> in a temporary folder, which it then
+// renames to the version's folder: a folder at that path is always a complete install.
 package runtimeinstall
 
 import (
@@ -23,6 +24,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 )
 
 // The limits of what Install reads and writes; a test lowers them.
@@ -112,30 +115,31 @@ func (i *Installed) Release() {
 // Program is the path of the runtime's program: <Dir>/bin/<Runtime>.
 func (i Installed) Program() string { return filepath.Join(i.Dir, "bin", i.Runtime) }
 
-// textRelease starts each refusal of what the fetch returned.
-const textRelease = "check the source of the runtime's releases: "
+// textRelease is the first line of each refusal of what the fetch returned: the fix. The
+// cause follows on the second line.
+const textRelease = "check the source of the runtime's releases\n"
 
 // Install installs the runtime o names, as the package's documentation says, and
 // returns it. It takes as long as ctx allows. Every error's text starts with what to
 // fix.
 func Install(ctx context.Context, o Options) (Installed, error) {
 	if !runtimeShape.MatchString(o.Runtime) {
-		return Installed{}, fmt.Errorf("name the runtime with a lowercase letter and up to 63 lowercase letters, digits or -: %q is not one", o.Runtime)
+		return Installed{}, fmt.Errorf("name the runtime with a lowercase letter, then lowercase letters, digits or -\n"+
+			"%q is not a runtime's name, which has 1 to 64 characters.", o.Runtime)
 	}
 	if !filepath.IsAbs(o.Folder) {
-		return Installed{}, fmt.Errorf("keep runtimes in an absolute folder: %q is not one", o.Folder)
+		return Installed{}, fmt.Errorf("keep runtimes in an absolute folder\n%q is not one.", o.Folder)
 	}
 	rel, err := o.Fetch(ctx, o.Runtime)
 	if err != nil {
 		return Installed{}, err
 	}
 	if !versionShape.MatchString(rel.Version) {
-		return Installed{}, fmt.Errorf(textRelease+"the newest %s has the version %q, and a version is 1 to 64 letters, digits, ., + or -, the first a letter or a digit",
-			o.Runtime, rel.Version)
+		return Installed{}, fmt.Errorf(textRelease+"The newest %s has the version %q, and a version is 1 to 64 letters, digits, ., + or -, the first a letter or a digit", o.Runtime, rel.Version)
 	}
 	sum, err := sha512Of(rel.Integrity)
 	if err != nil {
-		return Installed{}, fmt.Errorf(textRelease+"the checksum of %s %s is not sha512- and 64 bytes in base64", o.Runtime, rel.Version)
+		return Installed{}, fmt.Errorf(textRelease+"The checksum of %s %s is not sha512- and 64 bytes in base64", o.Runtime, rel.Version)
 	}
 	f := folder{base: filepath.Join(o.Folder, o.Runtime), runtime: o.Runtime}
 	hold, err := f.hold(rel.Version)
@@ -152,7 +156,22 @@ func Install(ctx context.Context, o Options) (Installed, error) {
 		return in, nil
 	case rel.Open == nil:
 		in.Release()
-		return Installed{}, errors.New(textRelease + "it returned no tarball")
+		return Installed{}, errors.New(textRelease + "It returned no tarball")
+	}
+	// A second run that needs the version waits here for the run that reads its tarball,
+	// and then finds the folder.
+	lock, err := f.lockInstall(ctx, rel.Version)
+	if err != nil {
+		in.Release()
+		return Installed{}, err
+	}
+	defer lock.Close()
+	switch done, err := f.complete(rel.Version, rel.Integrity); {
+	case err != nil:
+		in.Release()
+		return Installed{}, err
+	case done:
+		return in, nil
 	}
 	if err := f.install(ctx, rel, sum); err != nil {
 		in.Release()
@@ -170,4 +189,14 @@ func sha512Of(integrity string) ([]byte, error) {
 		return nil, errors.New("not a sha512 checksum")
 	}
 	return sum, nil
+}
+
+// upper is s with its first letter in upper case: the start of a second line of an
+// error.
+func upper(s string) string {
+	if s == "" {
+		return s
+	}
+	r, n := utf8.DecodeRuneInString(s)
+	return string(unicode.ToUpper(r)) + s[n:]
 }

@@ -138,6 +138,104 @@ func TestTheCleanupFollowsNoLink(t *testing.T) {
 	}
 }
 
+// TestTheCleanupKeepsAFolderThatAnInstallDidNotMake plants, in the runtime's folder,
+// folders named as older versions that lack the shape an install makes, bin/claude and
+// integrity as regular files in a real bin folder: one with a file only, one with the
+// two files and a link at bin, one with no integrity, one whose program is a link, and
+// one whose integrity is a folder. The install of 2.0.0 keeps every one, and removes the
+// older version that an install made.
+func TestTheCleanupKeepsAFolderThatAnInstallDidNotMake(t *testing.T) {
+	in := newInstaller(t)
+	made := in.installVersion(t, "0.9.0")
+	made.Release()
+	base := filepath.Join(in.folder, "claude")
+	outside := t.TempDir()
+	writeIn(t, filepath.Join(outside, "bin", "claude"))
+	writeIn(t, filepath.Join(outside, "integrity"))
+	foreign := map[string]func(dir string){
+		"1.0.0": func(dir string) { writeIn(t, filepath.Join(dir, "notes.txt")) },
+		"1.0.1": func(dir string) {
+			if err := os.Symlink(filepath.Join(outside, "bin"), filepath.Join(dir, "bin")); err != nil {
+				t.Fatal(err)
+			}
+			writeIn(t, filepath.Join(dir, "integrity"))
+		},
+		"1.0.2": func(dir string) { writeIn(t, filepath.Join(dir, "bin", "claude")) },
+		"1.0.3": func(dir string) {
+			writeIn(t, filepath.Join(dir, "integrity"))
+			if err := os.MkdirAll(filepath.Join(dir, "bin"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink(filepath.Join(outside, "bin", "claude"), filepath.Join(dir, "bin", "claude")); err != nil {
+				t.Fatal(err)
+			}
+		},
+		"1.0.4": func(dir string) {
+			writeIn(t, filepath.Join(dir, "bin", "claude"))
+			if err := os.MkdirAll(filepath.Join(dir, "integrity"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+		},
+	}
+	for name, plant := range foreign {
+		dir := filepath.Join(base, name)
+		if err := os.Mkdir(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		plant(dir)
+	}
+	got := in.installVersion(t, "2.0.0")
+	defer got.Release()
+	if exists(made.Dir) {
+		t.Error("the install of 2.0.0 kept 0.9.0, which an install made and no run holds")
+	}
+	for name := range foreign {
+		if !exists(filepath.Join(base, name)) {
+			t.Errorf("the install of 2.0.0 removed %s, which no install made", name)
+		}
+	}
+	if !exists(filepath.Join(outside, "bin", "claude")) || !exists(filepath.Join(outside, "integrity")) {
+		t.Error("the cleanup removed a file through a link")
+	}
+}
+
+// TestAHoldFileThatIsALinkIsNotFollowed names links .hold-<version> after an older
+// version whose folder an install made, and after a version with no folder, each to a
+// file outside the folder. The install of 2.0.0 does not follow them: it removes
+// neither the files nor the links, and keeps the older version's folder, since a hold
+// that it cannot check keeps its folder.
+func TestAHoldFileThatIsALinkIsNotFollowed(t *testing.T) {
+	in := newInstaller(t)
+	old := in.installVersion(t, "1.0.0")
+	old.Release()
+	base := filepath.Join(in.folder, "claude")
+	outside := t.TempDir()
+	targets := map[string]string{".hold-1.0.0": "a", ".hold-0.5.0": "b"}
+	for name, file := range targets {
+		path := filepath.Join(outside, file)
+		writeIn(t, path)
+		if err := os.Remove(filepath.Join(base, name)); err != nil && !os.IsNotExist(err) {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(path, filepath.Join(base, name)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got := in.installVersion(t, "2.0.0")
+	defer got.Release()
+	for name, file := range targets {
+		if !exists(filepath.Join(outside, file)) {
+			t.Errorf("the cleanup removed the file that %s leads to", name)
+		}
+		if info, err := os.Lstat(filepath.Join(base, name)); err != nil || info.Mode()&os.ModeSymlink == 0 {
+			t.Errorf("the link %s is gone or changed: %v", name, err)
+		}
+	}
+	if !exists(old.Program()) {
+		t.Error("the install of 2.0.0 removed 1.0.0 although its hold file could not be checked")
+	}
+}
+
 // TestVersionsCompareAsSemanticVersions orders versions as the cleanup reads them, and
 // leaves a name that is no semantic version uncompared.
 func TestVersionsCompareAsSemanticVersions(t *testing.T) {

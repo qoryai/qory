@@ -35,9 +35,35 @@ func TestTheMachineLinesRefuse(t *testing.T) {
 		{"runtimes /var/lib/runtimes\r"},
 		{"folder /var/lib/runtimes"},
 		{"registry"},
+		{"registry registry.example?x=1"},
+		{"registry registry.example#fragment"},
+		{"registry registry.example%2fx"},
+		{"registry user@registry.example"},
+		{"registry registry.example/path"},
+		{"registry registry.example "},
+		{"registry  registry.example"},
+		{"registry registry.example\t"},
+		{"registry registry.example:0"},
+		{"registry registry.example:65536"},
+		{"registry registry.example:port"},
+		{"registry registry.example:"},
+		{"registry registry.example:5000:5000"},
+		{"registry [::1]:5000"},
+		{"registry registry_.example"},
 	} {
 		if m, ok := runtimeinstall.ParseMachine(lines); ok {
 			t.Errorf("%q read as %+v, want a refusal", lines, m)
+		}
+	}
+}
+
+// TestTheMachineLinesTakeAHostAndAPort reads registry lines with a host, an address or
+// localhost, and a port from 1 to 65535.
+func TestTheMachineLinesTakeAHostAndAPort(t *testing.T) {
+	for _, host := range []string{"registry.example", "registry.example:5000", "localhost:5001", "127.0.0.1:5000", "registry.example:1", "registry.example:65535", "a-b.registry.example"} {
+		m, ok := runtimeinstall.ParseMachine([]string{"registry " + host})
+		if !ok || m.Registry != host {
+			t.Errorf("registry %s read as %+v %t", host, m, ok)
 		}
 	}
 }

@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/http"
 	"path/filepath"
 	goruntime "runtime"
 	"strings"
@@ -71,7 +70,7 @@ func installRuntime(ctx context.Context, run openedRun, r *config.Forager, machi
 	if folder == "" {
 		folder = filepath.Join(state, "runtimes")
 	}
-	client := &http.Client{Transport: http.DefaultTransport.(*http.Transport).Clone()}
+	client := runtimeinstall.DirectClient()
 	if proxied {
 		h, err := run.HostProxy()
 		if err != nil {

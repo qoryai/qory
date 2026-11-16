@@ -798,13 +798,27 @@ The program comes from the runtime cache of the instance's registry when the mac
 one, and from npm otherwise:
 
 - A run that `qory run pool` starts installs from the pool's registry, the host of
-  `pool.registry` in the pool's `forager.yaml`.
+  `pool.registry` in the pool's `forager.yaml`. `qory run pool` writes the host after the
+  run code, see `--run-code-file`; `qory run` accepts only letters, digits, `.` and
+  `-`, with an optional port from 1 to 65535. The registry's host decides which Claude
+  Code program the agent runs, so the run-code file is as trusted as the code that runs.
 - Any other run installs from the host of `pool.registry` in the run's `forager.yaml`.
 - Without either, the run installs from npm, `registry.npmjs.org`.
 
 A walled run, and a run with a control plane, reads through the run's host proxy. A run on
 a person's machine with neither sends its requests directly over HTTPS. The platform is
-`linux/amd64` or `linux/arm64`, as the machine is.
+`linux/amd64` or `linux/arm64`, as the machine is. A request follows no redirect, except
+that a request to npm follows one to the same scheme and host.
+
+A request waits at most 30 seconds to connect and 30 seconds to finish the TLS handshake,
+60 seconds for the response's headers, and 60 seconds for the next byte of a response's
+body. A run without a time limit stops with the error of the request that waited longer,
+for example:
+
+```text
+qory run: run again
+The download of claude 2.1.320 stopped: the response sent no byte for 1m0s
+```
 
 From the registry, with a token for `repository:shared/runtimes/claude:pull`, `qory run`
 reads, in this order:
@@ -817,16 +831,22 @@ reads, in this order:
    not exist.
 
 The layer must match its size, its sha256 digest, and npm's sha512 checksum in its
-annotation `dev.qory.runtime.integrity`. If the registry answers 503 or 429, or does not
-answer, `qory run` sends the same request again after 2, 4 and 8 seconds, then every 15
-seconds, or after the answer's `Retry-After` up to 30 seconds. The registry answers 503
-while it fills its cache of a new version. After 25 minutes `qory run` stops with:
+annotation `dev.qory.runtime.integrity`. That checksum comes from the registry's
+annotation, so it guards against corruption in transit and in storage, not against a
+compromised registry. If the registry returns 503 or 429, or the request gets no
+response, `qory run` sends the same request again after 2, 4 and 8 seconds, then every
+15 seconds, or after the response's `Retry-After` up to 30 seconds. The registry returns
+503 while it fills its cache of a new version. After 25 minutes `qory run` stops with:
 
 ```text
 qory run: run again later: registry.example.com is still filling its cache of claude newest
+The registry's cache had no shared/runtimes/claude:newest after 25m0s: the registry returned 503.
 ```
 
-Any other answer stops the run at once. A registry whose cache never held Claude Code
+When the registry returns 401 with a Bearer challenge, `qory run` gets a token from the
+challenge's realm, which must be on the registry's host with the registry's scheme. A
+realm elsewhere stops the run with the fix `ask the instance admin to put the registry's
+token realm on <scheme>://<host>`. Any other status stops the run at once. A registry whose cache never held Claude Code
 stops the run with:
 
 ```text
@@ -842,7 +862,18 @@ From npm, `qory run` reads, in this order:
 3. the tarball, when the version's folder does not exist.
 
 `qory run` reads the registry's `newest`, or npm's `latest`, on every run, and keeps no
-version of its own: once either moves, the next run installs the new version.
+other record of the newest version: once either moves, the next run installs the new
+version. On this path, `dist.integrity` comes from a document on the same host as the
+tarball, so it too guards against corruption, not against a compromised host.
+
+A run with no registry that walls its agent needs npm's host in the run's policy. When
+the run's proxy returns 403 or 407 to the CONNECT to `registry.npmjs.org`, `qory run`
+stops with:
+
+```text
+qory run: Set up the instance's registry for this machine, or allow registry.npmjs.org in the run's policy.
+The run's proxy returned 403 to the CONNECT to registry.npmjs.org:443.
+```
 
 `qory run` keeps each version in `<runtimes>/claude/<version>/`. For a run that `qory run
 pool` starts, `<runtimes>` is `runtimes` in the pool's folder, which every run of the pool
@@ -857,17 +888,24 @@ from.
    1 GiB, and checks it against the checksum before it extracts anything. It extracts
    only the entry `package/claude`, a regular file of at most 1 GiB, into a temporary
    folder; the tarball may unpack to at most 4 GiB. No other entry is written, and a link
-   at `package/claude` is refused. qory then renames the temporary folder to the
+   at `package/claude` stops the run. qory then renames the temporary folder to the
    version's folder, so a folder at that path is always a complete install.
 
 Every session of the run uses that one version, and the run holds the version's folder
 until it ends. Each install removes, in `<runtimes>/claude/`, the folders of versions
 older than the newest that no run holds, and the temporary entries `.download-*` and
-`.install-*` that no run is writing. It follows no link, and removes no other entry. A run
-takes its hold, and an install looks for what to remove, only while it has the lock
-`<runtimes>/claude/.lock`, so a run that starts during an install keeps its version. Each
-run holds its version with a shared lock on `<runtimes>/claude/.hold-<version>`, which
-ends when the run ends.
+`.install-*` that no run is writing. It removes a version's folder only when the folder
+has the shape of an install: `bin/claude` and `integrity`, both regular files, in a real
+`bin` folder. A folder with another content, such as one that a person made, stays. It
+follows no link, and removes no other entry. A run takes its hold, and an install looks
+for what to remove, only while it has the lock `<runtimes>/claude/.lock`, so a run that
+starts during an install keeps its version. Each run holds its version with a shared
+lock on `<runtimes>/claude/.hold-<version>`, which ends when the run ends.
+
+Two runs that need the same version do not both read its tarball. The run that finds no
+folder takes the lock `<runtimes>/claude/.lock-<version>` and reads the tarball; the other
+waits for that lock, as long as its time limit allows, and then uses the folder. The
+lock `.lock` is not held during a download.
 
 Once the program is installed, `qory run` prints one line:
 
@@ -880,14 +918,16 @@ line is the fix; a run with a control plane closes `failed` with -1. A tarball t
 not match its sha512 checksum stops the run with:
 
 ```text
-qory run: check the source of the runtime's releases: the tarball of claude 2.1.320 does not match its checksum sha512-<checksum>
+qory run: check the source of the runtime's releases
+The tarball of claude 2.1.320 does not match the checksum sha512-<checksum>
 ```
 
 A version's folder that was not installed from the tarball with the release's checksum
 stops the run with:
 
 ```text
-qory run: remove <runtimes>/claude/2.1.320 once no run uses it, then run again: it was not installed from the tarball with the checksum sha512-<checksum>
+qory run: remove the version's folder once no run uses it, then run again
+<runtimes>/claude/2.1.320 was not installed from the tarball with the checksum sha512-<checksum>
 ```
 
 ## Hosts a module declares
@@ -1606,10 +1646,10 @@ qory run --run-code-file /run/qory/run-code --gateway https://gateway.example:84
   run key must be for this gateway.
 
 Each flag needs the other, and neither goes with `--run-key-fd` or `QORY_RUN_KEY`. The file
-contains the code, with at most one newline after it. A file that `qory run pool` writes
-has two more lines after the code, `registry <host>` and `runtimes <folder>`: the pool's
-registry and runtimes folder, from which the run installs its runtime, see The runtime's
-program.
+contains the code, then at most two lines, each once: `registry <host>`, the host of the
+pool's registry, and `runtimes <folder>`, the pool's runtimes folder, an absolute path.
+`qory run pool` writes them, and the run installs its runtime from them, see The
+runtime's program. One newline after the last line is left out.
 
 To give the code on stdin, set `<file>` to `/dev/stdin`, `/dev/fd/0` or `/proc/self/fd/0`.
 qory then reads stdin to its end and closes it, as with `--run-key-fd 0`, and the agent's
@@ -1654,8 +1694,8 @@ Each of these errors stops the run before it starts, exit 2:
 - `give --run-code-file a regular file: <file> is not one`, for a named pipe, a device or
   a folder, which qory opens without waiting, unless it is the pipe or device that stdin is
 - `write the run code into <file>: the file is empty`
-- `write only the run code into <file>, with at most one newline after it: the file
-  contains more`
+- `write the run code, then at most a `registry <host>` and a `runtimes <folder>` line, and
+  nothing else`, with `The file <file> contains more than that.` on the second line
 - `write a run code (qecr_…) into <file>: the file does not contain an enrolment code of
   Qory Apiary`, or `…: the file contains the enrolment code of an access key of kind
   <kind>`

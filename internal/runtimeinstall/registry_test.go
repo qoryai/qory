@@ -76,7 +76,7 @@ func TestTheRegistryFetchResolvesNewestOnceThenPullsByDigest(t *testing.T) {
 	}
 }
 
-// TestTheRegistryFetchRefuses checks each mismatch in the registry's runtime cache: the
+// TestTheRegistryFetchRefuses checks each mismatch in the registry's runtime cache\nthe
 // error starts with its fix, and nothing is installed.
 func TestTheRegistryFetchRefuses(t *testing.T) {
 	cases := []struct {
@@ -89,16 +89,16 @@ func TestTheRegistryFetchRefuses(t *testing.T) {
 			bad := bytes.Clone(good)
 			bad[len(bad)/2] ^= 0xff
 			r.Publish("2.1.320", true, map[string]rt.Layer{"amd64": {Tarball: good, Served: bad}})
-		}, "ask the instance admin to check the registry's runtime cache: the layer of claude 2.1.320 does not match its digest sha256:"},
+		}, "ask the instance admin to check the registry's runtime cache\nThe layer of claude 2.1.320 does not match its digest sha256:"},
 		{"sha512 checksum", func(t *testing.T, r *rt.Registry) {
 			r.Publish("2.1.320", true, map[string]rt.Layer{"amd64": {Tarball: rt.PlainTarball(t, "2.1.320"), Integrity: rt.Integrity([]byte("another tarball"))}})
-		}, "the tarball of claude 2.1.320 does not match its checksum sha512-"},
+		}, "The tarball of claude 2.1.320 does not match the checksum sha512-"},
 		{"version tag differs from newest", func(t *testing.T, r *rt.Registry) {
 			r.PublishPlain("2.1.320")
 			newest := r.Tag("newest")
 			r.Publish("2.1.320", false, map[string]rt.Layer{"amd64": {Tarball: rt.PlainTarball(t, "other")}})
 			r.SetTag("newest", newest)
-		}, "ask the instance admin to check the registry's runtime cache: shared/runtimes/claude:2.1.320 has the digest sha256:"},
+		}, "ask the instance admin to check the registry's runtime cache\nshared/runtimes/claude:2.1.320 has the digest sha256:"},
 		{"version that climbs", func(t *testing.T, r *rt.Registry) {
 			r.Publish("..", true, map[string]rt.Layer{"amd64": {Tarball: rt.PlainTarball(t, "x")}})
 		}, `shared/runtimes/claude:newest has the version "..", and a version is 1 to 64 letters`},
@@ -119,6 +119,9 @@ func TestTheRegistryFetchRefuses(t *testing.T) {
 			}
 			if !strings.HasPrefix(err.Error(), "ask the instance admin") && !strings.HasPrefix(err.Error(), "check the source") {
 				t.Fatalf("err = %v, want one that starts with its fix", err)
+			}
+			if first, _, _ := strings.Cut(err.Error(), "\n"); len(first) > 100 {
+				t.Fatalf("the first line has %d characters, want at most 100: %s", len(first), first)
 			}
 			if got := files(t, f.folder); len(got) > 1 {
 				t.Fatalf("files = %q, want nothing installed", got)
@@ -207,7 +210,7 @@ func TestACacheThatStaysUnavailableEndsWithTheFix(t *testing.T) {
 			if want := "run again later: " + f.reg.Host() + " is still filling its cache of claude newest"; first != want || len(first) > 100 {
 				t.Fatalf("first line = %q, want %q", first, want)
 			}
-			if want := "The registry's cache had no shared/runtimes/claude:newest after 25m0s: it answered 503."; rest != want {
+			if want := "The registry's cache had no shared/runtimes/claude:newest after 25m0s: the registry returned 503."; rest != want {
 				t.Fatalf("second line = %q, want %q", rest, want)
 			}
 			var total time.Duration
@@ -236,23 +239,42 @@ func TestAnotherStatusIsNotRetried(t *testing.T) {
 	}
 }
 
-// TestATokenRealmElsewhereIsRefused has the registry's challenge point at a realm on
-// another host with another path: qory asks it for no token.
+// TestATokenRealmElsewhereIsRefused has the registry's challenge point at a realm that
+// is not on the registry's host with the registry's scheme: another host at the path
+// /registry/token or another path, and the registry's host and port over https while the
+// registry is on http. qory asks no realm for a token, and the error's first line is the
+// fix.
 func TestATokenRealmElsewhereIsRefused(t *testing.T) {
-	asked := false
-	realm := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { asked = true }))
-	t.Cleanup(realm.Close)
-	reg := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("WWW-Authenticate", `Bearer realm="`+strings.Replace(realm.URL, "127.0.0.1", "localhost", 1)+`/api/token"`)
-		w.WriteHeader(http.StatusUnauthorized)
-	}))
-	t.Cleanup(reg.Close)
-	_, err := runtimeinstall.Install(context.Background(), runtimeinstall.Options{
-		Fetch:   runtimeinstall.RegistryFetch(http.DefaultClient, strings.TrimPrefix(reg.URL, "http://"), "amd64"),
-		Runtime: "claude", Folder: t.TempDir(),
-	})
-	if err == nil || !strings.Contains(err.Error(), "is neither on the registry's host nor at /registry/token") || asked {
-		t.Fatalf("err = %v, asked = %v; want the realm refused and not asked", err, asked)
+	for _, c := range []struct {
+		name  string
+		realm func(registry, other string) string
+	}{
+		{"another host", func(_, other string) string { return "http://" + other + "/api/token" }},
+		{"another host at the token route", func(_, other string) string { return "http://" + other + "/registry/token" }},
+		{"the registry's host over https", func(registry, _ string) string { return "https://" + registry + "/registry/token" }},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			asked := false
+			other := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { asked = true }))
+			t.Cleanup(other.Close)
+			var realm string
+			reg := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("WWW-Authenticate", `Bearer realm="`+realm+`"`)
+				w.WriteHeader(http.StatusUnauthorized)
+			}))
+			t.Cleanup(reg.Close)
+			host := strings.TrimPrefix(reg.URL, "http://")
+			_, port, _ := strings.Cut(strings.TrimPrefix(other.URL, "http://"), ":")
+			realm = c.realm(host, "localhost:"+port)
+			_, err := runtimeinstall.Install(context.Background(), runtimeinstall.Options{
+				Fetch:   runtimeinstall.RegistryFetch(http.DefaultClient, host, "amd64"),
+				Runtime: "claude", Folder: t.TempDir(),
+			})
+			want := "ask the instance admin to put the registry's token realm on http://" + host + "\nIt is " + realm
+			if err == nil || err.Error() != want || asked {
+				t.Fatalf("err = %v, asked = %v; want %q and the realm not asked", err, asked, want)
+			}
+		})
 	}
 }
 
@@ -290,7 +312,7 @@ func TestTheProgramFromTheRegistryIsMode0755(t *testing.T) {
 }
 
 // TestANewNewestInTheRegistryInstallsTheNewVersion moves the registry's newest from
-// 2.1.320 to 2.1.321 between two installs: qory keeps no newest of its own, and the
+// 2.1.320 to 2.1.321 between two installs: qory keeps no record of the newest version, and the
 // second install reads newest again and installs 2.1.321.
 func TestANewNewestInTheRegistryInstallsTheNewVersion(t *testing.T) {
 	f := newFromRegistry(t)
@@ -311,5 +333,50 @@ func TestANewNewestInTheRegistryInstallsTheNewVersion(t *testing.T) {
 	}
 	if b, _ := os.ReadFile(got.Program()); string(b) != rt.Program("2.1.321 amd64") {
 		t.Fatalf("the program is %q", b)
+	}
+}
+
+// TestARegistryThatNeverRespondsEndsWithTheCause has no registry at the host: each
+// request gets no response, and after the retry limit the second line of the error says
+// so, with the cause of the last try.
+func TestARegistryThatNeverRespondsEndsWithTheCause(t *testing.T) {
+	fakeClock(t, 25*time.Minute)
+	gone := httptest.NewServer(http.NotFoundHandler())
+	host := strings.TrimPrefix(gone.URL, "http://")
+	gone.Close()
+	_, err := runtimeinstall.Install(context.Background(), runtimeinstall.Options{
+		Fetch:   runtimeinstall.RegistryFetch(http.DefaultClient, host, "amd64"),
+		Runtime: "claude", Folder: t.TempDir(),
+	})
+	if err == nil {
+		t.Fatal("the install succeeded")
+	}
+	first, rest, _ := strings.Cut(err.Error(), "\n")
+	if want := "run again later: " + host + " is still filling its cache of claude newest"; first != want {
+		t.Fatalf("first line = %q, want %q", first, want)
+	}
+	if want := "The registry's cache had no shared/runtimes/claude:newest after 25m0s: the request got no response ("; !strings.HasPrefix(rest, want) {
+		t.Fatalf("second line = %q, want it to start with %q", rest, want)
+	}
+}
+
+// TestAConnectTheProxyRefusesIsNotRetried reads from a registry on a host
+// that is not on loopback, so the request is a CONNECT, through a proxy that returns 403
+// to it: qory sends it once, and the error says what the proxy returned.
+func TestAConnectTheProxyRefusesIsNotRetried(t *testing.T) {
+	waits := fakeClock(t, 25*time.Minute)
+	proxy := rt.StartProxy(t)
+	proxy.Deny(http.StatusForbidden)
+	client, err := runtimeinstall.ProxyClient(proxy.URL(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = runtimeinstall.Install(context.Background(), runtimeinstall.Options{
+		Fetch:   runtimeinstall.RegistryFetch(client, "registry.example", "amd64"),
+		Runtime: "claude", Folder: t.TempDir(),
+	})
+	if err == nil || !strings.HasPrefix(err.Error(), "check that the run's proxy reaches the registry at registry.example\n") ||
+		!strings.Contains(err.Error(), "the run's proxy returned 403 to the CONNECT to registry.example:443") || proxy.Refusals() != 1 || len(*waits) != 0 {
+		t.Fatalf("err = %v, refusals = %d, waits = %v", err, proxy.Refusals(), *waits)
 	}
 }

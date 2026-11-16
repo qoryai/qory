@@ -36,16 +36,19 @@ func (f folder) complete(version, integrity string) (bool, error) {
 		return false, fmt.Errorf("check that qory can read its state folder: %w", err)
 	}
 	if !info.IsDir() {
-		return false, fmt.Errorf("remove %s, then run again: %s %s is installed there, and it is not a folder", dir, f.runtime, version)
+		return false, fmt.Errorf("remove the version's entry in the runtimes folder, then run again\n"+
+			"%s is where %s %s is installed, and it is not a folder.", dir, f.runtime, version)
 	}
 	program := filepath.Join(dir, "bin", f.runtime)
 	p, err := os.Lstat(program)
 	if err != nil || !p.Mode().IsRegular() || p.Mode().Perm()&0o555 != 0o555 {
-		return false, fmt.Errorf("remove %s once no run uses it, then run again: it has no program bin/%s that everyone can read and run", dir, f.runtime)
+		return false, fmt.Errorf("remove the version's folder once no run uses it, then run again\n"+
+			"%s has no program bin/%s that everyone can read and run.", dir, f.runtime)
 	}
 	held, err := readSmall(filepath.Join(dir, checksumFile))
 	if err != nil || strings.TrimSpace(held) != integrity {
-		return false, fmt.Errorf("remove %s once no run uses it, then run again: it was not installed from the tarball with the checksum %s", dir, integrity)
+		return false, fmt.Errorf("remove the version's folder once no run uses it, then run again\n"+
+			"%s was not installed from the tarball with the checksum %s", dir, integrity)
 	}
 	return true, nil
 }
@@ -132,13 +135,13 @@ func download(ctx context.Context, rel Release, sum []byte, w io.Writer, what st
 		return check
 	}
 	if err != nil {
-		return fmt.Errorf("run again: the download of %s stopped: %w", what, err)
+		return fmt.Errorf("run again\nThe download of %s stopped: %w", what, err)
 	}
 	if n > maxTarball {
-		return fmt.Errorf(textRelease+"the tarball of %s has more than %d bytes", what, maxTarball)
+		return fmt.Errorf(textRelease+"The tarball of %s has more than %d bytes", what, maxTarball)
 	}
 	if subtle.ConstantTimeCompare(h.Sum(nil), sum) != 1 {
-		return fmt.Errorf(textRelease+"the tarball of %s does not match its checksum %s", what, rel.Integrity)
+		return fmt.Errorf(textRelease+"The tarball of %s does not match the checksum %s", what, rel.Integrity)
 	}
 	return nil
 }
@@ -163,7 +166,7 @@ func (c *countingReader) Read(b []byte) (int, error) {
 func extract(r io.Reader, dir, runtime, what string) error {
 	zr, err := gzip.NewReader(r)
 	if err != nil {
-		return fmt.Errorf(textRelease+"the tarball of %s is not gzip", what)
+		return fmt.Errorf(textRelease+"The tarball of %s is not gzip", what)
 	}
 	defer zr.Close()
 	unpacked := &countingReader{r: io.LimitReader(zr, maxUnpacked+1)}
@@ -176,35 +179,35 @@ func extract(r io.Reader, dir, runtime, what string) error {
 			break
 		}
 		if unpacked.n > maxUnpacked {
-			return fmt.Errorf(textRelease+"the tarball of %s unpacks to more than %d bytes", what, maxUnpacked)
+			return fmt.Errorf(textRelease+"The tarball of %s unpacks to more than %d bytes", what, maxUnpacked)
 		}
 		if err != nil {
-			return fmt.Errorf(textRelease+"the tarball of %s is not a tar archive: %w", what, err)
+			return fmt.Errorf(textRelease+"The tarball of %s is not a tar archive: %w", what, err)
 		}
 		if h.Name != want {
 			continue
 		}
 		switch {
 		case found:
-			return fmt.Errorf(textRelease+"the tarball of %s has %s twice", what, want)
+			return fmt.Errorf(textRelease+"The tarball of %s has %s twice", what, want)
 		case h.Typeflag != tar.TypeReg:
-			return fmt.Errorf(textRelease+"the tarball of %s has %s as another kind of entry than a regular file", what, want)
+			return fmt.Errorf(textRelease+"The tarball of %s has %s as another kind of entry than a regular file", what, want)
 		case h.Size < 1 || h.Size > maxProgram:
-			return fmt.Errorf(textRelease+"the tarball of %s has %s of %d bytes, and a program has 1 to %d", what, want, h.Size, maxProgram)
+			return fmt.Errorf(textRelease+"The tarball of %s has %s of %d bytes, and a program has 1 to %d", what, want, h.Size, maxProgram)
 		}
 		found = true
 		if err := writeProgram(tr, h.Size, filepath.Join(dir, "bin"), runtime); err != nil {
 			if unpacked.n > maxUnpacked {
-				return fmt.Errorf(textRelease+"the tarball of %s unpacks to more than %d bytes", what, maxUnpacked)
+				return fmt.Errorf(textRelease+"The tarball of %s unpacks to more than %d bytes", what, maxUnpacked)
 			}
 			return err
 		}
 	}
 	if unpacked.n > maxUnpacked {
-		return fmt.Errorf(textRelease+"the tarball of %s unpacks to more than %d bytes", what, maxUnpacked)
+		return fmt.Errorf(textRelease+"The tarball of %s unpacks to more than %d bytes", what, maxUnpacked)
 	}
 	if !found {
-		return fmt.Errorf(textRelease+"the tarball of %s has no %s", what, want)
+		return fmt.Errorf(textRelease+"The tarball of %s has no %s", what, want)
 	}
 	return nil
 }
@@ -225,7 +228,7 @@ func writeProgram(r io.Reader, size int64, bin, name string) error {
 	}
 	if _, err := io.CopyN(out, r, size); err != nil {
 		out.Close()
-		return fmt.Errorf(textRelease+"the tarball's program ends before its %d bytes: %w", size, err)
+		return fmt.Errorf(textRelease+"The tarball's program ends before its %d bytes: %w", size, err)
 	}
 	if err := out.Chmod(0o755); err != nil {
 		out.Close()

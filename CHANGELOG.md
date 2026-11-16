@@ -25,8 +25,14 @@ release may change what an existing document does, and states it under Upgrading
   `package/claude` into `<runtimes>/claude/<version>/bin/claude`, reuses a version's
   folder, and prints `qory run: installed claude <version>`. The runs of a pool share one
   runtimes folder in the pool's folder. Each run holds its version until it ends, and
-  each install removes older versions and temporary entries that no run holds. A 503 or
-  429 from the registry is retried for up to 25 minutes. See The runtime's program in
+  each install removes older versions that an install made, and temporary entries, that
+  no run holds. Two runs that need one version read its tarball once. A 503 or 429 from
+  the registry is retried for up to 25 minutes. A request waits at most 30 seconds to
+  connect, 30 seconds for the TLS handshake, 60 seconds for the response's headers and
+  60 seconds for the next byte of a body. A run with no registry whose policy does not
+  allow `registry.npmjs.org` stops with the fix first. The run-code file of a pool has
+  the lines `registry <host>` and `runtimes <folder>`, and `qory run` stops for a host that
+  is not letters, digits, `.` and `-` with an optional port. See The runtime's program in
   `docs/run.md`.
 - A run of a work item works on the branch `qory/<work item id>`, at the commit of the
   artifact `branch` that its stage starts from. The harness still comes from
