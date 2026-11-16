@@ -444,6 +444,22 @@ func newestStored(artifact runapi.Artifact) *runapi.Version {
 	return newest
 }
 
+// newestBeforeWithdrawal returns the version of artifact with the highest number that is
+// neither cancelled nor a withdrawal, nil for none: for a withdrawn name, the version
+// before the withdrawal.
+func newestBeforeWithdrawal(artifact runapi.Artifact) *runapi.Version {
+	var newest *runapi.Version
+
+	for i := range artifact.Versions {
+		version := &artifact.Versions[i]
+		if !version.Cancelled && !version.Withdrawn && (newest == nil || version.Number > newest.Number) {
+			newest = version
+		}
+	}
+
+	return newest
+}
+
 // withdrawn reports whether the newest version of artifact that the index does not mark
 // cancelled is a withdrawal.
 func withdrawn(artifact runapi.Artifact) bool {

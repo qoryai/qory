@@ -391,9 +391,10 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Changed
 
-- `qory artifact pull`, the working folder of a push check and the commit that a run starts
-  at take nothing of a name whose newest version, not counting cancelled ones, is a
-  withdrawal.
+- `qory artifact pull` and the commit that a run starts at take nothing of a name whose
+  newest version, not counting cancelled ones, is a withdrawal. The working folder of a
+  push check has, for such a name, the newest version that is neither cancelled nor a
+  withdrawal, so a later push of the name is checked against what it had before.
 - A run from a run code that may write the checkout needs a wall: with no wall, it stops
   after the compose, exit 1, and closes `failed` with `write_needs_wall`, since its agent
   would run as this machine's user. A run is such a run when neither `access` in its
