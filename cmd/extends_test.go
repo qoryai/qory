@@ -207,7 +207,7 @@ func TestExtendsNeedsARuntimeFromSomewhere(t *testing.T) {
 	if err == nil || cmd.ExitCode(err) != cmd.ExitInput {
 		t.Fatalf("err = %v, exit %d\n%s", err, cmd.ExitCode(err), out)
 	}
-	wants(t, err.Error(), "target.runtime is required; the base stack nextjs-15@", " defines no target, so the document sets one beside extends, or the configuration or --runtime does")
+	wants(t, err.Error(), "Set target.runtime beside extends, or set the runtime in the configuration or with --runtime.\n  target.runtime is required, and the base stack nextjs-15@", " defines no target.")
 	gone(t, root, ".qory", ".claude")
 	out, err = run(t, "harness", "compose", "--runtime", "claude")
 	if err != nil {
@@ -242,7 +242,7 @@ func TestExtendsRefusesAClosedBase(t *testing.T) {
 	writeFile(t, filepath.Join(root, "qory.yaml"), "apiVersion: qory.dev/v1alpha1\nharness:\n  extends: {path: "+base+"}\n  modules:\n    - name: app\n")
 	writeManifest(t, filepath.Join(root, "modules", "app"), "app")
 	_, err := run(t, "harness", "compose")
-	if err == nil || !strings.Contains(err.Error(), "is closed: it declares no extending block") || cmd.ExitCode(err) != cmd.ExitInput {
+	if err == nil || !strings.Contains(err.Error(), "Add an extending block to the base stack, or extend another stack.\n  The stack at ") || cmd.ExitCode(err) != cmd.ExitInput {
 		t.Fatalf("err = %v, exit %d", err, cmd.ExitCode(err))
 	}
 }

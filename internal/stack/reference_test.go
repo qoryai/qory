@@ -36,18 +36,18 @@ func TestParseReference(t *testing.T) {
 // ref, no folder, an absolute folder and a folder with a .. segment.
 func TestParseReferenceErrors(t *testing.T) {
 	for _, c := range []struct{ value, want string }{
-		{"http://github.com/example-org/harness#v1:stacks/web", "use an https URL in -f http://github.com/example-org/harness#v1:stacks/web, as <https URL>#<ref>:<folder>: qory fetches a stack reference only over https, and http://github.com/example-org/harness is not an https URL with a host"},
-		{"ssh://git@github.com/example-org/harness#v1:stacks/web", "use an https URL in -f "},
-		{"file:///srv/harness#v1:stacks/web", "use an https URL in -f "},
-		{"https:///example-org/harness#v1:stacks/web", "use an https URL in -f "},
-		{"https://github.com/example-org/harness", "add the ref to -f https://github.com/example-org/harness, as <https URL>#<ref>:<folder>: the stack reference has no branch, tag or commit after #"},
-		{"https://github.com/example-org/harness#:stacks/web", "add the ref to -f "},
-		{"https://github.com/example-org/harness#v1", "add the folder to -f https://github.com/example-org/harness#v1, as <https URL>#<ref>:<folder>: the stack reference has no folder after the ref; the folder is the one that contains the qory-stack.yaml"},
-		{"https://github.com/example-org/harness#v1:", "add the folder to -f "},
-		{"https://github.com/example-org/harness#v1:/stacks/web", "write the folder in -f https://github.com/example-org/harness#v1:/stacks/web as a path from the repository's root: /stacks/web is an absolute path"},
-		{"https://github.com/example-org/harness#v1:../web", "write the folder in -f https://github.com/example-org/harness#v1:../web without ..: ../web has a .. segment, and the folder is a path from the repository's root"},
-		{"https://github.com/example-org/harness#v1:stacks/../web", "write the folder in -f "},
-		{"https://example-org:s3cret@github.com/example-org/harness#v1", "add the folder to -f https://example-org:(hidden)@github.com/example-org/harness#v1"},
+		{"http://github.com/example-org/harness#v1:stacks/web", "Set -f to an https URL, as <https URL>#<ref>:<folder>.\n  qory fetches a stack reference only over https, and http://github.com/example-org/harness is not an https URL with a host.\n  -f is http://github.com/example-org/harness#v1:stacks/web."},
+		{"ssh://git@github.com/example-org/harness#v1:stacks/web", "Set -f to an https URL, as "},
+		{"file:///srv/harness#v1:stacks/web", "Set -f to an https URL, as "},
+		{"https:///example-org/harness#v1:stacks/web", "Set -f to an https URL, as "},
+		{"https://github.com/example-org/harness", "Add the ref to -f, as <https URL>#<ref>:<folder>.\n  The stack reference has no branch, tag, or commit after #.\n  -f is https://github.com/example-org/harness."},
+		{"https://github.com/example-org/harness#:stacks/web", "Add the ref to -f, as "},
+		{"https://github.com/example-org/harness#v1", "Add the folder to -f, as <https URL>#<ref>:<folder>.\n  The stack reference has no folder after the ref. The folder is the one that contains the qory-stack.yaml.\n  -f is https://github.com/example-org/harness#v1."},
+		{"https://github.com/example-org/harness#v1:", "Add the folder to -f, as "},
+		{"https://github.com/example-org/harness#v1:/stacks/web", "Write the folder in -f as a path from the repository's root.\n  The folder /stacks/web is an absolute path.\n  -f is https://github.com/example-org/harness#v1:/stacks/web."},
+		{"https://github.com/example-org/harness#v1:../web", "Remove the .. segment from the folder in -f.\n  The folder ../web has a .. segment, and the folder is a path from the repository's root.\n  -f is https://github.com/example-org/harness#v1:../web."},
+		{"https://github.com/example-org/harness#v1:stacks/../web", "Remove the .. segment from the folder in -f."},
+		{"https://example-org:s3cret@github.com/example-org/harness#v1", "Add the folder to -f, as <https URL>#<ref>:<folder>.\n  The stack reference has no folder after the ref. The folder is the one that contains the qory-stack.yaml.\n  -f is https://example-org:(hidden)@github.com/example-org/harness#v1."},
 	} {
 		_, ok, err := stack.ParseReference(c.value)
 		if !ok || err == nil || !strings.HasPrefix(err.Error(), c.want) {

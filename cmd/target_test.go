@@ -42,14 +42,14 @@ func TestExtendingTargetHoldsTheCheckoutsTarget(t *testing.T) {
 		}
 	}
 	document("{runtime: codex, model: opus}")
-	refuse("a runtime outside", "runtime codex is not one the base stack ", " is written for; runtimes: claude")
+	refuse("a runtime outside", "Set the target runtime to one that the base stack lists.\n  Runtime codex is not one the base stack ", " is written for.\n  Runtimes: claude.")
 	document("{runtime: claude, model: haiku}")
-	refuse("a model outside", "model haiku is not one the base stack ", " is written for; models: opus, sonnet")
+	refuse("a model outside", "Set the target model to one that the base stack lists.\n  Model haiku is not one the base stack ", " is written for.\n  Models: opus, sonnet.")
 	document("{runtime: claude}")
-	refuse("no model", "the target sets no model, and the base stack ", " is written for one of these; models: opus, sonnet")
+	refuse("no model", "Set the target model to one that the base stack lists.\n  The target sets no model, and the base stack ", " is written for one of these.\n  Models: opus, sonnet.")
 	document("{runtime: claude, model: sonnet}")
-	refuse("--runtime outside", "runtime codex is not one the base stack ", " is written for; runtimes: claude", "--runtime", "codex")
-	refuse("--model outside", "model haiku is not one the base stack ", " is written for; models: opus, sonnet", "--model", "haiku")
+	refuse("--runtime outside", "Set the target runtime to one that the base stack lists.\n  Runtime codex is not one the base stack ", " is written for.\n  Runtimes: claude.", "--runtime", "codex")
+	refuse("--model outside", "Set the target model to one that the base stack lists.\n  Model haiku is not one the base stack ", " is written for.\n  Models: opus, sonnet.", "--model", "haiku")
 	for _, args := range [][]string{{"harness", "compose"}, {"harness", "compose", "-f", file}} {
 		out, err := run(t, args...)
 		if err != nil {

@@ -1488,7 +1488,10 @@ func applyTarget(p *stack.Stack, base *compose.Base, conf config.Config, runtime
 	want.Effort = effort
 	if err := want.Runtimes.Validate(); err != nil {
 		if len(want.Runtimes) == 0 && base != nil {
-			return fmt.Errorf("target.runtime is required; the base stack %s defines no target, so the document sets one beside extends, or the configuration or --runtime does", shownBase(base))
+			return exports.Refuse("Set target.runtime beside extends, or set the runtime in the configuration or with --runtime.", fmt.Sprintf("target.runtime is required, and the base stack %s defines no target.", shownBase(base)))
+		}
+		if p.File != "" {
+			return exports.AtPath(p.File, err)
 		}
 		return err
 	}

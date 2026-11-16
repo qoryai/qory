@@ -175,67 +175,67 @@ func TestLoadRefuses(t *testing.T) {
 		{
 			"a target",
 			"apiVersion: qory.dev/v1alpha1\ntarget:\n  runtime: claude\nmodules:\n  - name: core\n    source:\n      path: modules/core\n",
-			"target is not a stack's; a stack is delivered to be extended, and the checkout extending it sets target under harness, beside extends",
+			"Remove target from the stack file.\n  A stack is delivered to be extended, and the checkout extending it sets target under harness, beside extends.\n  target is in {path}.",
 			false,
 		},
 		{
 			"a tier map",
 			"apiVersion: qory.dev/v1alpha1\ntiers:\n  light: claude-haiku-5-5\nmodules:\n  - name: core\n    source:\n      path: modules/core\n",
-			"A stack file does not set tiers; a repository maps tiers under harness.tiers in its qory.yaml, and a machine in the user's qory.yaml",
+			"Remove tiers from the stack file.\n  A repository maps tiers under harness.tiers in its qory.yaml, and a machine maps them in the user's qory.yaml.\n  tiers is in {path}.",
 			false,
 		},
 		{
 			"a target with a model alone",
 			"apiVersion: qory.dev/v1alpha1\ntarget:\n  model: opus\nmodules:\n  - name: core\n    source:\n      path: modules/core\n",
-			"target is not a stack's; a stack is delivered to be extended, and the checkout extending it sets target under harness, beside extends",
+			"Remove target from the stack file.\n  A stack is delivered to be extended, and the checkout extending it sets target under harness, beside extends.\n  target is in {path}.",
 			false,
 		},
 		{
 			"an extends",
 			"apiVersion: qory.dev/v1alpha1\nextends: {path: ../base}\nmodules:\n  - name: core\n    source:\n      path: modules/core\n",
-			"extends is not a stack's; the harness section of a checkout's qory.yaml extends a stack",
+			"Remove extends from the stack file.\n  Only the harness section of a checkout's qory.yaml extends a stack.\n  extends is in {path}.",
 			false,
 		},
 		{
 			"no modules",
 			"apiVersion: qory.dev/v1alpha1\nmodules: []\n",
-			"modules is empty; a stack lists at least one module",
+			"List at least one module under modules.\n  modules is empty, and a stack lists one or more modules.\n  modules is in {path}.",
 			false,
 		},
 		{
 			"a module with neither a name nor a source",
 			"apiVersion: qory.dev/v1alpha1\nmodules:\n  - link: harness\n",
-			"modules[0]: a module has a name, a source, or both",
+			"Add a name or a source to modules[0].\n  A module has a name, a source, or both.\n  modules is in {path}.",
 			false,
 		},
 		{
 			"the second module with neither a name nor a source",
 			"apiVersion: qory.dev/v1alpha1\nmodules:\n  - name: core\n    source:\n      path: modules/core\n  - link: harness\n",
-			"modules[1]: a module has a name, a source, or both",
+			"Add a name or a source to modules[1].\n  A module has a name, a source, or both.\n  modules is in {path}.",
 			false,
 		},
 		{
 			"an empty source without a name",
 			"apiVersion: qory.dev/v1alpha1\nmodules:\n  - source: {}\n",
-			"modules[0]: a module has a name, a source, or both",
+			"Add a name or a source to modules[0].\n  A module has a name, a source, or both.\n  modules is in {path}.",
 			false,
 		},
 		{
 			"two modules of one name",
 			"apiVersion: qory.dev/v1alpha1\nmodules:\n  - name: core\n    source:\n      path: modules/core\n  - name: core\n    source:\n      path: modules/team\n",
-			"module core is listed twice",
+			"List module core once in modules.\n  modules lists it twice.\n  modules is in {path}.",
 			false,
 		},
 		{
 			"a ref without a git source on a module without a name",
 			"apiVersion: qory.dev/v1alpha1\nmodules:\n  - source: {ref: v1}\n",
-			"modules[0]: source.ref needs source.git",
+			"Set source.git of modules[0], or remove source.ref.\n  source.ref needs source.git.\n  source is in {path}.",
 			false,
 		},
 		{
 			"an exclude over an unknown kind",
 			"apiVersion: qory.dev/v1alpha1\nmodules:\n  - name: core\n    source:\n      path: modules/core\n    exclude:\n      prompts: [greet]\n",
-			`module core: exclude selects kind "prompts"; kinds: skills, agents, commands, output-styles, hooks, mcp, files; parts: instructions, settings, env`,
+			"Rename \"prompts\" in the exclude of module core to a kind or a part.\n  Kinds: skills, agents, commands, output-styles, hooks, mcp, files.\n  Parts: instructions, settings, env.\n  The exclude is in {path}.",
 			false,
 		},
 		{
@@ -253,25 +253,25 @@ func TestLoadRefuses(t *testing.T) {
 		{
 			"two documents in one file",
 			"apiVersion: qory.dev/v1alpha1\nmodules:\n  - name: core\n    source: {path: modules/core}\n---\nkind: Other\n",
-			"contains more than one document; a stack is one",
+			"Keep one YAML document in the stack file.\n  A stack is one document, and the file contains more.\n  The file is {path}.",
 			false,
 		},
 		{
 			"a git source without a ref",
 			"apiVersion: qory.dev/v1alpha1\nmodules:\n  - name: core\n    source: {git: https://git.example.com/acme/harness}\n",
-			"module core: source.ref is required with source.git",
+			"Set source.ref of module core to a branch, tag, or commit.\n  source.ref is required with source.git.\n  source is in {path}.",
 			false,
 		},
 		{
 			"a ref without a git source",
 			"apiVersion: qory.dev/v1alpha1\nmodules:\n  - name: core\n    source: {path: modules/core, ref: v1}\n",
-			"module core: source.ref needs source.git",
+			"Set source.git of module core, or remove source.ref.\n  source.ref needs source.git.\n  source is in {path}.",
 			false,
 		},
 		{
 			"a git source whose path leaves the repository",
 			"apiVersion: qory.dev/v1alpha1\nmodules:\n  - name: core\n    source: {git: https://git.example.com/acme/harness, ref: v1, path: ../other}\n",
-			`module core: source.path "../other" is not a directory inside the repository`,
+			"Set source.path of module core to a folder inside its repository.\n  source.path is \"../other\", which is not a directory inside the repository: it is absolute, the repository's root, or leads out of it.\n  source is in {path}.",
 			false,
 		},
 		{
@@ -337,7 +337,7 @@ func TestNewComposeAcceptsADocumentWithoutModules(t *testing.T) {
 		t.Fatalf("got %+v", p)
 	}
 	_, err = Load(write(t, "apiVersion: qory.dev/v1alpha1\nmodules: []\n"))
-	if err == nil || !strings.HasSuffix(err.Error(), "modules is empty; a stack lists at least one module") {
+	if err == nil || !strings.HasPrefix(err.Error(), "List at least one module under modules.\n  modules is empty") {
 		t.Fatalf("a stack without modules: %v", err)
 	}
 }
@@ -366,7 +366,7 @@ func TestLoadReadsARetiredAPIVersion(t *testing.T) {
 
 // TestASourcePathErrorHasItsModule is a source.path that leads out of its repository, in a
 // module with a name, in one without, and in extends: the error has the module by its name,
-// as modules[i] with no name, and none for extends. Its text does not change.
+// as modules[i] with no name, and none for extends. Its text starts with the fix.
 func TestASourcePathErrorHasItsModule(t *testing.T) {
 	const source = "{git: https://git.example/h.git, ref: main, path: ../other}"
 	head := "apiVersion: qory.dev/v1alpha1\n"
@@ -384,8 +384,12 @@ func TestASourcePathErrorHasItsModule(t *testing.T) {
 			if !errors.As(err, &sp) || sp.Module != c.module {
 				t.Fatalf("%v, want the module %q", err, c.module)
 			}
-			if !strings.Contains(err.Error(), `source.path "../other" is not a directory inside the repository`) {
-				t.Errorf("the text is %q", err)
+			want := "Set source.path of " + map[string]string{"core": "module core", "modules[1]": "modules[1]"}[c.module] + " to a folder inside its repository.\n  source.path is \"../other\", which is not a directory inside the repository"
+			if !strings.HasPrefix(err.Error(), want) {
+				t.Errorf("the text is %q, want it to start with %q", err, want)
+			}
+			if hidden := sp.Hidden(); strings.Contains(hidden, "../other") || !strings.HasPrefix(hidden, "Set source.path of ") {
+				t.Errorf("the hidden text is %q", hidden)
 			}
 		})
 	}

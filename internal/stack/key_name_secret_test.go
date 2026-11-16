@@ -1,6 +1,7 @@
 package stack
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -120,16 +121,16 @@ func TestARefusalOfARuntimeListWithASecretKeepsQorysWords(t *testing.T) {
 	head := "apiVersion: qory.dev/v1alpha1\n"
 	const cannotRead = "qory cannot read the value here. The YAML decoder's message contains an access key secret, a run key, a run code or an enrolment code, so qory does not print it."
 	for _, c := range []struct{ body, want string }{
-		{head + "target:\n  runtime: [!!int qak_x]\n", ": target.runtime is one runtime name or a list of them: " + cannotRead},
-		{head + "target:\n  runtime: [!!int QRK_ab]\n", ": target.runtime is one runtime name or a list of them: " + cannotRead},
-		{head + "extending:\n  target:\n    runtime: [!!int qak_x]\n", ": one name or a list of them: " + cannotRead},
+		{head + "target:\n  runtime: [!!int qak_x]\n", "Set target.runtime to one runtime name or a list of names.\n  " + cannotRead + "\n  target.runtime is in %s."},
+		{head + "target:\n  runtime: [!!int QRK_ab]\n", "Set target.runtime to one runtime name or a list of names.\n  " + cannotRead + "\n  target.runtime is in %s."},
+		{head + "extending:\n  target:\n    runtime: [!!int qak_x]\n", "Set extending.target.runtime and extending.target.model each to one name or a list of names.\n  " + cannotRead + "\n  extending.target is in %s."},
 	} {
 		path := filepath.Join(t.TempDir(), FileName)
 		if err := os.WriteFile(path, []byte(c.body), 0o644); err != nil {
 			t.Fatal(err)
 		}
 		_, err := Load(path)
-		if want := path + c.want; err == nil || err.Error() != want {
+		if want := fmt.Sprintf(c.want, path); err == nil || err.Error() != want {
 			t.Errorf("%q: %v, want %q", c.body, err, want)
 		}
 	}
@@ -140,15 +141,15 @@ func TestARefusalOfARuntimeListWithASecretKeepsQorysWords(t *testing.T) {
 // line in place of the quoted name. A plain key is quoted as before.
 func TestASelectedKindWithASecretIsPlacedByItsLine(t *testing.T) {
 	isolate(t)
-	const rest = "; kinds: skills, agents, commands, output-styles, hooks, mcp, files; parts: instructions, settings, env"
+	const rest = "\n  Kinds: skills, agents, commands, output-styles, hooks, mcp, files.\n  Parts: instructions, settings, env.\n  The "
 	for _, c := range []struct{ block, want string }{
-		{"exclude:\n  qak_x: [greet]", "module core: exclude selects kind the name at line 5" + rest},
-		{"only:\n  skills: [a]\n  QRK_ab: [greet]", "module core: only selects kind the name at line 6" + rest},
-		{"exclude:\n  prompts: [greet]", `module core: exclude selects kind "prompts"` + rest},
+		{"exclude:\n  qak_x: [greet]", "Rename the name at line 5 in the exclude of module core to a kind or a part." + rest + "exclude is in "},
+		{"only:\n  skills: [a]\n  QRK_ab: [greet]", "Rename the name at line 6 in the only of module core to a kind or a part." + rest + "only is in "},
+		{"exclude:\n  prompts: [greet]", `Rename "prompts" in the exclude of module core to a kind or a part.` + rest + "exclude is in "},
 	} {
 		_, err := Load(write(t, selectionStack(c.block)))
-		if err == nil || !strings.HasSuffix(err.Error(), c.want) {
-			t.Errorf("%q: %v, want suffix %q", c.block, err, c.want)
+		if err == nil || !strings.HasPrefix(err.Error(), c.want) {
+			t.Errorf("%q: %v, want prefix %q", c.block, err, c.want)
 		}
 		if err != nil && (strings.Contains(err.Error(), "qak_") || strings.Contains(err.Error(), "QRK_")) {
 			t.Errorf("%q: the error contains the secret: %v", c.block, err)
@@ -163,7 +164,7 @@ func TestAModuleNameWithASecretIsLeftOutOfAStackRefusal(t *testing.T) {
 	isolate(t)
 	body := "apiVersion: qory.dev/v1alpha1\nmodules:\n  - name: qak_m\n    exclude:\n      prompts: [greet]\n"
 	_, err := Load(write(t, body))
-	want := `module (a name that contains an access key secret): exclude selects kind "prompts"`
+	want := `Rename "prompts" in the exclude of module (a name that contains an access key secret) to a kind or a part.`
 	if err == nil || !strings.Contains(err.Error(), want) || strings.Contains(err.Error(), "qak_") {
 		t.Errorf("%v, want one that contains %q", err, want)
 	}

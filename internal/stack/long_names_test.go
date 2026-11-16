@@ -30,6 +30,14 @@ func TestRefusalsKeepTheFixLineShortForLongNames(t *testing.T) {
 		"a quoted kind":                {head + "bind:\n  " + kind + ":\n    a: b\n", kind},
 		"a module not one segment":     {"apiVersion: qory.dev/v1alpha1\nmodules:\n  - name: " + module + "/x\n", module + "/x"},
 		"a module excluded":            {"apiVersion: qory.dev/v1alpha1\nmodules:\n  - name: " + module + "\n    source: {path: x}\n    exclude: {skills: [a]}\n    only: {skills: [a]}\n", module},
+		"a module listed twice":        {"apiVersion: qory.dev/v1alpha1\nmodules:\n  - name: " + module + "\n  - name: " + module + "\n", module},
+		"two modules with one link":    {"apiVersion: qory.dev/v1alpha1\nmodules:\n  - name: " + module + "\n    link: h\n  - name: other\n    link: h\n", module},
+		"an exclude over a bad kind":   {"apiVersion: qory.dev/v1alpha1\nmodules:\n  - name: " + module + "\n    exclude: {prompts: [a]}\n", module},
+		"a module with a bad link":     {"apiVersion: qory.dev/v1alpha1\nmodules:\n  - name: " + module + "\n    link: a/b\n", module},
+		"a module's source stack":      {"apiVersion: qory.dev/v1alpha1\nmodules:\n  - name: " + module + "\n    source: {git: https://h, ref: v1, stack: s}\n", module},
+		"a module's ref with no git":   {"apiVersion: qory.dev/v1alpha1\nmodules:\n  - name: " + module + "\n    source: {path: x, ref: v1}\n", module},
+		"a module's path off the repo": {"apiVersion: qory.dev/v1alpha1\nmodules:\n  - name: " + module + "\n    source: {git: https://h, ref: v1, path: ../x}\n", module},
+		"a runtime listed twice":       {head + "extending:\n  target:\n    runtime: [" + role + ", " + role + "]\n", role},
 		"a workflow name not allowed":  {head + "workflows:\n  Wf-" + strings.Repeat("w", 87) + ": {}\n", "Wf-" + strings.Repeat("w", 87)},
 	} {
 		dir := t.TempDir()
