@@ -995,9 +995,12 @@ processes, and the label of the run's containers, so the clean-up of the run rem
 container that a stopped qory left. The container gets three read-only folders:
 
 - the home, at its path, so the program's absolute path in `push-checks.json` is valid;
-- the working folder: the work item's artifact index, `index.json`, and the newest version
-  of each artifact of the type and of each `reads` type, in the layout of `qory artifact
-  pull`, `<type>/<name>/v<N>/<files>`; a type with no version has no folder;
+- the working folder: the work item's artifact index, `index.json`; the work item's notes,
+  `notes.json`, the `notes` array of the work item that `qory work-item show` prints,
+  oldest first, or `[]` when the work item has none; and the newest version of each
+  artifact of the type and of each `reads` type that the index does not mark
+  `cancelled`, in the layout of `qory artifact pull`, `<type>/<name>/v<N>/<files>`; an
+  artifact with no such version has no folder;
 - the pushed files, under their names, whose paths follow the command's arguments.
 
 In a run from a run code, the container also mounts a copy of the run's `inputs.json`
