@@ -776,11 +776,39 @@ recorded. The session's events are not.
 
 A walled run of Claude Code, the runtime `claude`, installs the runtime's program on the
 machine before its session starts: after the compose, and before the image step. The
-source of the releases is not set in this version of qory, so a run installs nothing
-and starts the program that its image contains.
+program comes from the runtime cache of the instance's registry, the host of
+`pool.registry` in `forager.yaml`. If `forager.yaml` sets no `pool.registry`, the run
+installs nothing and starts the program that its image contains.
 
-With a source, `qory run` gets the newest release of Claude Code from it: the version,
-npm's sha512 checksum, and npm's tarball of the package. It keeps each version in
+`qory run` reads the registry through the run's host proxy, with a token for
+`repository:shared/runtimes/claude:pull`, for the platform `linux/amd64` or
+`linux/arm64` of the machine. It reads, in this order:
+
+1. `shared/runtimes/claude:newest`, and the manifest of the machine's platform by its
+   digest;
+2. `shared/runtimes/claude:<version>`, the version in the manifest, which must have the
+   same digest, and the manifest by its digest again;
+3. the manifest's one layer, npm's tarball, by its digest, when the version's folder does
+   not exist.
+
+The layer must match its size, its sha256 digest, and npm's sha512 checksum in its
+annotation `dev.qory.runtime.integrity`. If the registry answers 503 or 429, or does not
+answer, `qory run` sends the same request again after 2, 4 and 8 seconds, then every 15
+seconds, or after the answer's `Retry-After` up to 30 seconds. The registry answers 503
+while it fills its cache of a new version. After 25 minutes `qory run` stops with:
+
+```text
+qory run: run again later: registry.example.com is still filling its cache of claude newest
+```
+
+Any other answer stops the run at once. A registry whose cache never held Claude Code
+stops the run with:
+
+```text
+qory run: check that the instance's registry reaches the publisher of claude, then run again
+```
+
+`qory run` keeps each version in
 `<state>/runtimes/claude/<version>/`, where `<state>` is `$XDG_STATE_HOME/qory`, or
 `~/.local/state/qory` without `XDG_STATE_HOME`. The folder contains `bin/claude`, mode
 `0755`, and `integrity`, the checksum of the tarball it came from.
@@ -805,7 +833,7 @@ qory run: installed claude 2.1.320
 
 If the install fails, the run closes `failed` with -1 before the image step, no session
 starts, and `qory run` exits 1 with the error, whose first line is the fix. A tarball that
-does not match its checksum stops the run with:
+does not match its sha512 checksum stops the run with:
 
 ```text
 qory run: check the source of the runtime's releases: the tarball of claude 2.1.320 does not match its checksum sha512-<checksum>

@@ -42,7 +42,17 @@ var (
 	versionShape = regexp.MustCompile(`^[0-9A-Za-z][0-9A-Za-z.+-]{0,63}$`)
 	// runtimeShape is a runtime's name, as Forager's descriptor schema has it.
 	runtimeShape = regexp.MustCompile(`^[a-z][a-z0-9-]{0,63}$`)
+	// digestShape is a sha256 digest.
+	digestShape = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
 )
+
+// checkError is an error of a release's tarball reader whose text starts with its fix,
+// such as bytes that do not match the layer's digest: Install returns it as it is.
+type checkError struct{ err error }
+
+func (e *checkError) Error() string { return e.err.Error() }
+
+func (e *checkError) Unwrap() error { return e.err }
 
 // Release is a runtime's newest release, as a [Fetch] returns it.
 type Release struct {

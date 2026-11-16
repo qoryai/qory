@@ -3,18 +3,23 @@ package cmd
 import (
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
+	goruntime "runtime"
 	"strings"
 
+	"github.com/qoryai/qory/internal/config"
 	"github.com/qoryai/qory/internal/exports"
 	"github.com/qoryai/qory/internal/integration"
 	"github.com/qoryai/qory/internal/runtimeinstall"
+	"github.com/qoryai/qory/internal/secretmask"
 )
 
 // A walled run installs its runtime's program before its first session, once the
-// compose named the runtime: [installRuntime] fetches the runtime's newest release and
-// keeps each version in <state>/runtimes/<runtime>/<version>, so a later run on the
-// machine with the same version reads no tarball. qory run prints one line,
+// compose named the runtime: [installRuntime] reads the runtime's newest release from
+// the runtime cache of the instance's registry, through the run's host proxy, and keeps
+// each version in <state>/runtimes/<runtime>/<version>, so a later run on the machine
+// with the same version reads no tarball. qory run prints one line,
 // "qory run: installed claude 2.1.320", and the session gets the version's folder,
 // [useInstalledRuntime].
 
@@ -22,22 +27,47 @@ import (
 // descriptor name of Claude Code.
 const installedRuntime = "claude"
 
-// fetchRuntime returns the newest release of the runtime for the run; nil until the
-// source of the releases is decided, and qory run then installs nothing. A test sets it.
-var fetchRuntime func(ctx context.Context, run openedRun, runtime string) (runtimeinstall.Release, error)
+// textNoRuntimeProxy is the line of a run whose host proxy, through which qory reads the
+// runtime from the registry, did not open, with the runtime and Forager's error after it.
+const textNoRuntimeProxy = "run again: the run's host proxy, through which qory installs %s, did not open: %s"
+
+// runtimeRegistry is the instance's registry, as the runtime's install reads it: the
+// host of pool.registry in forager.yaml, with its port; "" when forager.yaml sets no
+// pool.registry, or when its first part is no host, one with a dot or a colon, or
+// localhost.
+func runtimeRegistry(r *config.Forager) string {
+	if r == nil || r.Pool == nil {
+		return ""
+	}
+	host, rest, ok := strings.Cut(r.Pool.Registry, "/")
+	if !ok || rest == "" || !strings.ContainsAny(host, ".:") && host != "localhost" {
+		return ""
+	}
+	return host
+}
 
 // installRuntime installs the program of runtime, the runtime of the run's session,
-// into <state>/runtimes: [runtimeinstall.Install] with [fetchRuntime]. It returns nil
-// for a runtime qory installs no program of, and when fetchRuntime is nil.
-func installRuntime(ctx context.Context, run openedRun, runtime, state string) (*runtimeinstall.Installed, error) {
-	fetch := fetchRuntime
-	if fetch == nil || runtime != installedRuntime {
+// into <state>/runtimes, from the registry of r, [runtimeRegistry], through the run's
+// host proxy, for the platform linux/<this machine's architecture>, the platform of
+// the container engine. It returns nil for a runtime qory installs no program of, and
+// when r sets no registry. The host proxy closes once the install ends.
+func installRuntime(ctx context.Context, run openedRun, r *config.Forager, runtime, state string) (*runtimeinstall.Installed, error) {
+	registry := runtimeRegistry(r)
+	if runtime != installedRuntime || registry == "" {
 		return nil, nil
 	}
+	h, err := run.HostProxy()
+	if err != nil {
+		return nil, fmt.Errorf(textNoRuntimeProxy, runtime, integration.Printable(exports.HideURLError(err).Error()))
+	}
+	secretmask.Default().AddURLPassword(h.proxy.URL)
+	defer h.close()
+	client, err := runtimeinstall.ProxyClient(h.proxy.URL, h.proxy.CABundle)
+	if err != nil {
+		return nil, err
+	}
 	in, err := runtimeinstall.Install(ctx, runtimeinstall.Options{
-		Fetch: func(ctx context.Context, name string) (runtimeinstall.Release, error) {
-			return fetch(ctx, run, name)
-		},
+		Fetch:   runtimeinstall.RegistryFetch(client, registry, goruntime.GOARCH),
 		Runtime: runtime,
 		Folder:  filepath.Join(state, "runtimes"),
 	})

@@ -134,6 +134,10 @@ func download(ctx context.Context, rel Release, sum []byte, w io.Writer, what st
 	defer body.Close()
 	h := sha512.New()
 	n, err := io.Copy(io.MultiWriter(w, h), io.LimitReader(body, maxTarball+1))
+	var check *checkError
+	if errors.As(err, &check) {
+		return check
+	}
 	if err != nil {
 		return fmt.Errorf("run again: the download of %s stopped: %w", what, err)
 	}

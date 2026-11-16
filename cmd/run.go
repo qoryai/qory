@@ -868,7 +868,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					installCtx, cancel = context.WithDeadline(ctx, opened.Add(timeout))
 				}
 				defer cancel()
-				in, err := installRuntime(installCtx, run, name, state)
+				in, err := installRuntime(installCtx, run, conf.Forager, name, state)
 				if err != nil {
 					return &runLineError{codeLine(installFailed(err))}
 				}

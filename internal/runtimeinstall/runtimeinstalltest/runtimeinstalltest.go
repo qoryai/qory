@@ -1,5 +1,7 @@
-// Package runtimeinstalltest is an in-memory source of a runtime's releases, npm
-// tarballs with their checksums, for the tests of the runtime's install.
+// Package runtimeinstalltest is a source of a runtime's releases for the tests of the
+// runtime's install: in memory, [Source], and as the runtime cache of a stub registry on
+// loopback behind a stand-in for the run's host proxy, [Registry] and [Proxy]. Nothing
+// reaches a network outside this machine.
 package runtimeinstalltest
 
 import (
@@ -7,8 +9,10 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"crypto/sha256"
 	"crypto/sha512"
 	"encoding/base64"
+	"encoding/hex"
 	"io"
 	"sync"
 	"testing"
@@ -68,6 +72,12 @@ func PlainTarball(t *testing.T, version string) []byte {
 		Entry{Name: "package/claude", Body: Program(version)},
 		Entry{Name: "package/README.md", Body: "readme\n"},
 	)
+}
+
+// Digest is the sha256 digest of b.
+func Digest(b []byte) string {
+	sum := sha256.Sum256(b)
+	return "sha256:" + hex.EncodeToString(sum[:])
 }
 
 // Integrity is npm's checksum of b.
