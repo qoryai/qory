@@ -170,7 +170,7 @@ func setRoles(p *stack.Stack, opened []openedModule, dropped func(o openedModule
 	for _, kind := range sortedKeys(p.Bind.Many) {
 		for _, role := range sortedKeys(p.Bind.Many[kind]) {
 			if declared[kind+"/"+role] == "" {
-				if err := wrong("Write one name for bind.%s.%s in %s.\n  No module declares %s as many, so one agent fills it.", shown(kind), shown(role), file, shown(kind+"/"+role)); err != nil {
+				if err := wrong("Write one name for bind.%s.%s.\n  No module declares %s as many, so one agent fills it.\n  bind is in %s.", shown(kind), shown(role), shown(kind+"/"+role), file); err != nil {
 					return nil, nil, err
 				}
 			}

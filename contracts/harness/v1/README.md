@@ -968,7 +968,8 @@ A name for a group role fails the compose, `Write provides.agents.reviewers in m
 python as a list: it is a group role.`, and so does a list for a role no module declares
 `many`: `Write one name for provides.agents.developer in module python.` with `No module
 declares agents/developer as many, so one agent fills it.` on the next line. The compose
-refuses a list in a `bind` the same way, not when it reads the file. A list for a kind other than
+refuses a list in a `bind` the same way, not when it reads the file, with `Write one name for
+bind.agents.developer.`, the cause, and `bind is in <file>.` on the last line. A list for a kind other than
 `agents`, an empty list, a flat `agents/developer` key and a kind other than the three are
 refused, each with the manifest's path.
 `push_checks`, optional, declares checks for the files of an artifact type, one item per
