@@ -315,17 +315,22 @@ exit status. The code is used by then, so the fix in each line is to take the wo
 again:
 
 ```text
-Take the work item in again in Qory Apiary, so that the new run composes the harness again: the push checks in <path> could not be read: <cause>; the code is used
-Take the work item in again in Qory Apiary, and do not switch the engine while that run starts: the push checks would run on the engine <id>, and the run's containers are on the engine <id>; the code is used
-Take the work item in again in Qory Apiary, through a gateway that sends the run API address: the push checks read the artifacts through the run API, which failed: <cause>; the code is used
-Update the run's gateway, then take the work item in again in Qory Apiary: the run API address that the gateway sent is not one the push checks can use: <cause>; the code is used
+Take the work item in again in Qory Apiary, so that the new run composes the harness again.
+  The push checks in <path> could not be read: <cause>; the code is used
+Take the work item in again in Qory Apiary, and do not switch the engine while that run starts.
+  The push checks would run on the engine <id>, and the run's containers are on the engine <id>; the code is used
+Take the work item in again in Qory Apiary, through a gateway that sends the run API address.
+  The push checks read the artifacts through the run API, which failed: <cause>; the code is used
+Update the run's gateway, then take the work item in again in Qory Apiary.
+  The run API address that the gateway sent is not one the push checks can use: <cause>; the code is used
 Set wall.image in forager.yaml, then take the work item in again in Qory Apiary.
   Push checks run in the wall's default image; the code is used
 Pull the wall's default image, then take the work item in again in Qory Apiary.
   Push checks run in it, and the engine does not have the image <image>; the code is used
 Set wall.image or --image to an image reference, then take the work item in again in Qory Apiary.
   Push checks cannot start from <value>; the code is used
-Take the work item in again in Qory Apiary: turning on the push checks for the POSTs from behind the wall failed, so the run stopped before the setup: <cause>; the code is used
+Take the work item in again in Qory Apiary.
+  Turning on the push checks for the POSTs from behind the wall failed, so the run stopped before the setup: <cause>; the code is used
 ```
 
 When the run ends, qory says how, and its exit status goes with it:

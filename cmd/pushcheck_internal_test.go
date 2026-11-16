@@ -72,7 +72,8 @@ func TestTheChecksEngineIsTheWalls(t *testing.T) {
 	// The context changed after the open: the new selection reaches another engine.
 	for fromCode, want := range map[bool]string{
 		false: `Switch the engine back to the one the run started on, and run again. The push checks would run on the engine "id-b", and the run's containers are on the engine "id-a".`,
-		true:  `Take the work item in again in Qory Apiary, and do not switch the engine while that run starts: the push checks would run on the engine "id-b", and the run's containers are on the engine "id-a"; the code is used`,
+		true: `Take the work item in again in Qory Apiary, and do not switch the engine while that run starts.
+  The push checks would run on the engine "id-b", and the run's containers are on the engine "id-a"; the code is used`,
 	} {
 		other := engineScript(t, "a", "b")
 		d = &wall.Docker{Command: other}
@@ -143,14 +144,15 @@ func TestTheLoadOfPushChecksStopsWithItsLine(t *testing.T) {
 			run:          runAPIOnly{err: closed},
 			controlPlane: true,
 			want:         "Open the run through a gateway that sends the run API address, and run again. The push checks read the artifacts through the run API, which failed: Open another run to reach the run API: this run is closed.",
-			fromCode:     "Take the work item in again in Qory Apiary, through a gateway that sends the run API address: the push checks read the artifacts through the run API, which failed: Open another run to reach the run API: this run is closed; the code is used",
+			fromCode:     "Take the work item in again in Qory Apiary, through a gateway that sends the run API address.\n  The push checks read the artifacts through the run API, which failed: Open another run to reach the run API: this run is closed; the code is used",
 		},
 		{
 			name:         "a bad address",
 			run:          runAPIOnly{base: "ftp://run-api.qory.invalid/v1/runs/r1"},
 			controlPlane: true,
 			want:         `Update the run's gateway, and run again. The run API address that the gateway sent is not one the push checks can use: Set the run API's base URL to http://run-api.qory.invalid/v1/runs/<run id>. It needs http or https and no user, query or fragment. The value without those is "ftp://run-api.qory.invalid/v1/runs/r1".`,
-			fromCode:     `Update the run's gateway, then take the work item in again in Qory Apiary: the run API address that the gateway sent is not one the push checks can use: Set the run API's base URL to http://run-api.qory.invalid/v1/runs/<run id>. It needs http or https and no user, query or fragment. The value without those is "ftp://run-api.qory.invalid/v1/runs/r1"; the code is used`,
+			fromCode: `Update the run's gateway, then take the work item in again in Qory Apiary.
+  The run API address that the gateway sent is not one the push checks can use: Set the run API's base URL to http://run-api.qory.invalid/v1/runs/<run id>. It needs http or https and no user, query or fragment. The value without those is "ftp://run-api.qory.invalid/v1/runs/r1"; the code is used`,
 		},
 		{
 			name:         "a wall that is not docker",
@@ -166,7 +168,7 @@ func TestTheLoadOfPushChecksStopsWithItsLine(t *testing.T) {
 			image:        "registry.example/agent:1",
 			controlPlane: true,
 			want:         "Check " + folder + ", and run again. Making the folder of the push checks' files failed: " + folderCause + ".",
-			fromCode:     "Check " + folder + ", then take the work item in again in Qory Apiary: making the folder of the push checks' files failed: " + folderCause + "; the code is used",
+			fromCode:     "Check the folder of the push checks' files, then take the work item in again in Qory Apiary.\n  The folder is " + folder + ", and making it failed: " + folderCause + "; the code is used",
 		},
 		{
 			name:         "another engine",
@@ -174,7 +176,8 @@ func TestTheLoadOfPushChecksStopsWithItsLine(t *testing.T) {
 			docker:       otherEngine,
 			controlPlane: true,
 			want:         `Switch the engine back to the one the run started on, and run again. The push checks would run on the engine "id-b", and the run's containers are on the engine "id-a".`,
-			fromCode:     `Take the work item in again in Qory Apiary, and do not switch the engine while that run starts: the push checks would run on the engine "id-b", and the run's containers are on the engine "id-a"; the code is used`,
+			fromCode: `Take the work item in again in Qory Apiary, and do not switch the engine while that run starts.
+  The push checks would run on the engine "id-b", and the run's containers are on the engine "id-a"; the code is used`,
 		},
 		{
 			name:         "an engine whose id cannot be read",
@@ -182,7 +185,8 @@ func TestTheLoadOfPushChecksStopsWithItsLine(t *testing.T) {
 			docker:       noIDEngine,
 			controlPlane: true,
 			want:         `Switch the engine back to the one the run started on, and run again. The push checks would run on the engine with no id, and the run's containers are on the engine "id-a".`,
-			fromCode:     `Take the work item in again in Qory Apiary, and do not switch the engine while that run starts: the push checks would run on the engine with no id, and the run's containers are on the engine "id-a"; the code is used`,
+			fromCode: `Take the work item in again in Qory Apiary, and do not switch the engine while that run starts.
+  The push checks would run on the engine with no id, and the run's containers are on the engine "id-a"; the code is used`,
 		},
 		{
 			name:         "no default image",
@@ -197,7 +201,7 @@ func TestTheLoadOfPushChecksStopsWithItsLine(t *testing.T) {
 			name:     "push checks that do not read",
 			unread:   true,
 			want:     "Compose the harness again, and run again. The push checks in /h/push-checks.json could not be read: a cause.",
-			fromCode: "Take the work item in again in Qory Apiary, so that the new run composes the harness again: the push checks in /h/push-checks.json could not be read: a cause; the code is used",
+			fromCode: "Take the work item in again in Qory Apiary, so that the new run composes the harness again.\n  The push checks in /h/push-checks.json could not be read: a cause; the code is used",
 		},
 	} {
 		t.Run(c.name, func(t *testing.T) {
@@ -390,7 +394,7 @@ func TestACheckThatIsNotSetStopsWithItsLine(t *testing.T) {
 	run := checkNotSet{err: errors.New("Call SetRunAPICheck before Setup: the setup started.")}
 	for fromCode, want := range map[bool]string{
 		false: "Run again. Turning on the push checks for the POSTs from behind the wall failed, so the run stopped before the setup: Call SetRunAPICheck before Setup: the setup started.",
-		true:  "Take the work item in again in Qory Apiary: turning on the push checks for the POSTs from behind the wall failed, so the run stopped before the setup: Call SetRunAPICheck before Setup: the setup started; the code is used",
+		true:  "Take the work item in again in Qory Apiary.\n  Turning on the push checks for the POSTs from behind the wall failed, so the run stopped before the setup: Call SetRunAPICheck before Setup: the setup started; the code is used",
 	} {
 		p := &runPushChecks{checker: &pushcheck.Checker{}, fromCode: fromCode}
 		err := p.set(run)
