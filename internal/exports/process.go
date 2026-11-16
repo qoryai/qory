@@ -492,3 +492,36 @@ func nodeKind(n *yaml.Node) string {
 	}
 	return "a string"
 }
+
+// ProcessSubmit returns typ and send of submit in the process.yaml at the root of the
+// module folder dir, read through dir opened as an [os.Root], as [Exports.Verify] reads
+// it. ok is false when the folder has no such file, and when the file cannot be read or
+// decoded, has an alias, or has no submit whose type has the form of an artifact type
+// name and whose send is end_of_run or after_gate. A run takes the settings of its
+// submit step from its run documents and nothing from this file, so ProcessSubmit
+// returns no error; a caller prints typ and send as they are.
+func ProcessSubmit(dir string) (typ, send string, ok bool) {
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		return "", "", false
+	}
+	defer root.Close()
+	data, err := root.ReadFile(ProcessFileName)
+	if err != nil || RefuseAliases(ProcessFileName, data) != nil {
+		return "", "", false
+	}
+	var f struct {
+		Submit yaml.Node `yaml:"submit"`
+	}
+	if err := yaml.Unmarshal(data, &f); err != nil {
+		return "", "", false
+	}
+	t, s := value(&f.Submit, "type"), value(&f.Submit, "send")
+	if t == nil || s == nil || t.Kind != yaml.ScalarNode || t.Tag != "!!str" || s.Kind != yaml.ScalarNode || s.Tag != "!!str" {
+		return "", "", false
+	}
+	if !runapi.ArtifactName(t.Value) || !slices.Contains(submitSends, s.Value) {
+		return "", "", false
+	}
+	return t.Value, s.Value, true
+}

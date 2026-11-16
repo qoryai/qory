@@ -115,6 +115,13 @@ type codeRun struct {
 	// the documents have no target.
 	access   string
 	workItem string
+	// submit is the documents' submit, the settings of the run's submit step, type and
+	// send: the one place qory takes them from, never the composed harness's
+	// process.yaml, see [codeRun.submitLine]. nil when the documents have no submit, and
+	// the run has no submit step. submitModule is the documents' submit_module, nil for
+	// none.
+	submit       *contracts.Submit
+	submitModule *contracts.SubmitModule
 
 	// runNumber is the run's number on the server, set by [codeRun.readBranch].
 	runNumber int
@@ -198,6 +205,7 @@ func codeRunOf(doc contracts.Documents) (*codeRun, error) {
 	if hidden {
 		r.named = source.NewNamed(r.phrase())
 	}
+	r.submit, r.submitModule = doc.Submit, doc.SubmitModule
 	return r, nil
 }
 
@@ -694,4 +702,33 @@ func entryKeys(rep report.Report) []string {
 		keys = append(keys, e.Kind+"/"+e.Name)
 	}
 	return keys
+}
+
+// submitLine is the line a run from a run code prints after the compose when the
+// composed harness has a submit other than r's: the run uses r's submit, the documents'
+// value, and the line shows both values, or, for documents with no submit, that the run
+// has no submit step. The harness's submit is that of the first module of rep, in stack
+// order, whose process.yaml in the home has one, as [exports.ProcessSubmit] reads it.
+// "" when the two are equal, when no composed module has a submit, and for r nil, a run
+// not from a run code.
+func (r *codeRun) submitLine(rep report.Report) string {
+	if r == nil {
+		return ""
+	}
+	var typ, send string
+	found := false
+	for _, m := range rep.Modules {
+		if typ, send, found = exports.ProcessSubmit(filepath.Join(rep.Home, "modules", m.Name)); found {
+			break
+		}
+	}
+	switch {
+	case !found:
+		return ""
+	case r.submit == nil:
+		return fmt.Sprintf("submit: the run documents have none, so the run has no submit step and does not use the harness's %s at %s", typ, send)
+	case r.submit.Type == typ && r.submit.Send == send:
+		return ""
+	}
+	return fmt.Sprintf("submit: the run documents' %s at %s replaces the harness's %s at %s", r.submit.Type, r.submit.Send, typ, send)
 }
