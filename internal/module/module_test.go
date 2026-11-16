@@ -178,7 +178,7 @@ func TestReadRefusesAnMCPServerThatIsNotAnObject(t *testing.T) {
 		{"[]\n", "Write mcp/db.json in module core as one JSON object.\n  The file does not contain a JSON object: json: cannot unmarshal array into Go value of type map[string]interface {}"},
 		{"not json\n", "Write mcp/db.json in module core as one JSON object.\n  The file does not contain a JSON object: invalid character 'o' in literal null (expecting 'u')"},
 		{"{\"command\": \"x\",}\n", "Write mcp/db.json in module core as one JSON object.\n  The file does not contain a JSON object: invalid character '}' looking for beginning of object key string"},
-		{"null\n", "module core: mcp/db.json does not contain a JSON object"},
+		{"null\n", "Write mcp/db.json in module core as one JSON object.\n  The file contains null, which is no JSON object."},
 	} {
 		dir := tree(t, map[string]string{"mcp/db.json": c.body})
 		_, err := Read("core", dir, nil, "")

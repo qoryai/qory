@@ -12,6 +12,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/qoryai/forager/accesskey"
 	"gopkg.in/yaml.v3"
@@ -1034,12 +1035,36 @@ func (r *skillReader) add(at, name, path string) error {
 		if filepath.Base(first) != name {
 			same = "these two names differ only in case"
 		}
-		return exports.Refuse(fmt.Sprintf("Rename %s or %s in %s.", exports.HidePath(first), exports.HidePath(at), exports.ModulePlace),
-			fmt.Sprintf("Each skill goes to skills/<name>, and %s.", same))
+		a, b := exports.HidePath(first), exports.HidePath(at)
+		fix := fmt.Sprintf("Rename %s or %s in %s.", a, b, exports.ModulePlace)
+		lines := []string{fmt.Sprintf("Each skill goes to skills/<name>, and %s.", same)}
+		if !fits(fix) {
+			fix = "Rename one of two skills in " + exports.ModulePlace + "."
+			lines = append([]string{fmt.Sprintf("The skills are %s and %s.", a, b)}, lines...)
+		}
+		return exports.Refuse(fix, lines...)
 	}
 	r.seen[key] = at
 	r.entries = append(r.entries, Entry{Kind: "skills", Name: name, Path: path})
 	return nil
+}
+
+// fits reports whether line, the first line of a refusal, has at most 100 characters
+// when [exports.ModulePlace] in it is a module as long as a refusal prints one.
+func fits(line string) bool {
+	line = strings.ReplaceAll(line, exports.ModulePlace, strings.Repeat("m", exports.NameMax))
+	return utf8.RuneCountInString(line) <= 100
+}
+
+// jsonObjectRefusal is the refusal of the MCP server file, a path in the module as a
+// message prints it, whose content is no JSON object. The path moves to the second line
+// when it would push the first past 100 characters.
+func jsonObjectRefusal(file, cause string) error {
+	fix := fmt.Sprintf("Write %s in %s as one JSON object.", file, exports.ModulePlace)
+	if !fits(fix) {
+		return exports.Refuse("Write the MCP server file in "+exports.ModulePlace+" as one JSON object.", "The file is "+file+".", cause)
+	}
+	return exports.Refuse(fix, cause)
 }
 
 // checkGroup returns the stop for the folder at path, with no SKILL.md, printed as at, when
@@ -1296,7 +1321,11 @@ func readHooks(name, rel, dir string) ([]Entry, error) {
 		}
 		if info.IsDir() {
 			sub := exports.HidePath(filepath.ToSlash(filepath.Join(rel, it.Name())))
-			return nil, exports.Refuse(fmt.Sprintf("Move %s out of the hooks directory of module %s.", sub, name),
+			fix := fmt.Sprintf("Move %s out of the hooks directory of module %s.", sub, exports.Short(name))
+			if !fits(fix) {
+				fix = fmt.Sprintf("Move the directory out of the hooks directory of module %s.", exports.Short(name))
+			}
+			return nil, exports.Refuse(fix,
 				fmt.Sprintf("%s is a directory, and a hook is one file.", sub),
 				fmt.Sprintf("A hook reads its helpers at $QORY_HARNESS_HOME/modules/%s/<path>.", name))
 		}
@@ -1349,11 +1378,10 @@ func readMCP(rel, dir string, readFile func(string) ([]byte, error)) ([]Entry, m
 		file := filepath.ToSlash(filepath.Join(rel, accesskey.ShownName(strings.TrimSuffix(it.Name(), ".json"), false)+".json"))
 		var server map[string]any
 		if err := json.Unmarshal(data, &server); err != nil {
-			return nil, nil, exports.Refuse(fmt.Sprintf("Write %s in %s as one JSON object.", file, exports.ModulePlace),
-				fmt.Sprintf("The file does not contain a JSON object: %s", exports.HideValueError(err, "").Error()))
+			return nil, nil, jsonObjectRefusal(file, "The file does not contain a JSON object: "+exports.HideValueError(err, "").Error())
 		}
 		if server == nil {
-			return nil, nil, fmt.Errorf("%s does not contain a JSON object", file)
+			return nil, nil, jsonObjectRefusal(file, "The file contains null, which is no JSON object.")
 		}
 		if err := checkServer(server); err != nil {
 			return nil, nil, fmt.Errorf("%s: %w", file, err)

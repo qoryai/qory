@@ -170,8 +170,8 @@ func TestAModuleNameWithASecretIsLeftOutOfItsRefusals(t *testing.T) {
 		t.Errorf("a skill without SKILL.md: %v", err)
 	}
 	for _, c := range []struct{ body, want string }{
-		{"[1]", "Write mcp/" + accessKeyPhrase + ".json in module core as one JSON object.\n  The file does not contain a JSON object: "},
-		{"null", "module core: mcp/" + accessKeyPhrase + ".json does not contain a JSON object"},
+		{"[1]", "Write the MCP server file in module core as one JSON object.\n  The file is mcp/" + accessKeyPhrase + ".json.\n  The file does not contain a JSON object: "},
+		{"null", "Write the MCP server file in module core as one JSON object.\n  The file is mcp/" + accessKeyPhrase + ".json.\n  The file contains null, which is no JSON object."},
 		{`{"command": "x", "bad": 1}`, "module core: mcp/" + accessKeyPhrase + `.json: key "bad" is not one of an MCP server's`},
 	} {
 		d := tree(t, map[string]string{"mcp/qak_srv.json": c.body})
