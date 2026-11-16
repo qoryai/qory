@@ -8,7 +8,7 @@ What `qory harness compose` reads and what it writes.
 |---|---|---|
 | `qory-stack.yaml` | a directory that `extends` or `-f` selects; an ancestor directory covering several repositories; the root of the harness repository that delivers it | a stack delivered to be extended: the ordered modules, the excludes, what a checkout extending it may add and the runtimes and models it is written for |
 | `qory-module.yaml` | the root of a module | the module: its name, its variants per runtime, the variables it exports |
-| `process.yaml` | optional; the folder root of a module that `exports.modules` lists, which makes the module a factory | a process template: its name, summary and description, the workspace type, the exported stack its workflows run on, its `qory.process/v1` process, and optionally the artifact types its workspaces use. Every command that reads the configuration checks it; the compose does not read it (§Exports) |
+| `process.yaml` | optional; the folder root of a module that `exports.modules` lists, which makes the module a factory | a process template: its name, summary and description, the workspace type, the exported stack its workflows run on, its `qory.process/v1` process, and optionally the artifact types its workspaces use and the submit step of a run. Every command that reads the configuration checks it; the compose does not read it (§Exports) |
 | a role contract | optional; a file of a module that declares an agents role, at the path that `roles.agents.<role>.contract` in the module's `qory-module.yaml` is set to | the parts an agent needs to fill the role: level-2 headings, front-matter keys, tools, a tier, and the form of its report (§The role contract). The compose checks every agent that fills the role against it; the harness's checks read the report's form |
 | `qory.yaml`, or `harness.yaml` | the repository root, committed; the user's configuration directory and the checkout's ancestor directories, for the machine | the repository's document and the machine's: under `harness`, this repository's stack, its target and modules, or the stack it extends, the target it composes it for, the modules it appends and the workflow hooks it adds, and the runtime and model this machine composes for; under `worktree`, what a worktree of the repository needs and where the machine puts one; under `exports`, the stacks and modules this repository publishes for others, by name (§Exports); `git` and `env` (§The configuration) |
 | a branch document | the file of a version of a structured artifact type `branch` | a work item's branch and the commit in each repository (§The branch format). No compose reads it |
@@ -573,7 +573,7 @@ A module that `exports.modules` lists and that has a `process.yaml` at its folde
 a factory. The file is a process template: the texts, the workspace type, the stack and
 the process that a workspace made from it starts with
 ([process.schema.json](process.schema.json)). It may also list the artifact types its
-workspaces use, and declare their submit step. Every command that reads the
+workspaces use, and declare the submit step of a run. Every command that reads the
 configuration checks the file, once it finds each export. A module without the file is
 not checked for it.
 
@@ -705,9 +705,10 @@ submit:
 `type` is the artifact type of the submission: the name of a structured entry of
 `artifact_types`. qory checks that `type` has the form of an artifact type name, and not
 that `artifact_types` has the entry. `send` is when the step sends the submission:
-`end_of_run` sends it at the end of the run; `after_gate` stores it and sends nothing
-before the stage's gate passes. A `submit` that breaks a rule stops the command with one
-line, which starts with the file and then the fix:
+`end_of_run` sends it at the end of the run; `after_gate` sends it after the gate of the
+run's stage passes, and until then the step stores it and sends nothing. A `submit` that
+breaks a rule stops the command with one line, which starts with the file and then the
+fix:
 
 ```text
 /src/acme-harness/harness/modules/support-desk/process.yaml: remove the key "command" from submit: submit has only type and send

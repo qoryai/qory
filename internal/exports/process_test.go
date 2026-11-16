@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/santhosh-tekuri/jsonschema/v6"
 	"gopkg.in/yaml.v3"
@@ -258,6 +259,8 @@ func TestProcessSchemaMatchesTheReader(t *testing.T) {
 		{process + "submit: {type: submission, send: [end_of_run]}\n", false},
 		{process + "submit: {type: Submission, send: end_of_run}\n", false},
 		{process + "submit: {type: 3, send: end_of_run}\n", false},
+		{process + "submit: {type: " + strings.Repeat("a", 64) + ", send: end_of_run}\n", true},
+		{process + "submit: {type: " + strings.Repeat("a", 65) + ", send: end_of_run}\n", false},
 		{process + "submit:\n  - {type: submission, send: end_of_run}\n", false},
 		{process + "submit: ~\n", false},
 		{process + "submit: submission\n", false},
@@ -534,21 +537,32 @@ func TestVerifyChecksSubmit(t *testing.T) {
 		{" {type: ~, send: end_of_run}", "set submit.type to the name of a structured entry of artifact_types: submit.type is null"},
 		{" {type: [a], send: end_of_run}", "set submit.type to the name of a structured entry of artifact_types: submit.type is a list"},
 		{" {type: 2026-11-02, send: end_of_run}", `set submit.type to a quoted string: YAML reads "2026-11-02" as a type that is not a string`},
-		{" {type: Submission, send: end_of_run}", `set submit.type to lowercase letters and digits in groups joined by single hyphens, at most 64 bytes: submit.type is "Submission"`},
-		{" {type: \"a\\nb\", send: end_of_run}", `set submit.type to lowercase letters and digits in groups joined by single hyphens, at most 64 bytes: submit.type is "a\nb"`},
+		{" {type: Submission, send: end_of_run}", `set submit.type to a name such as reply-draft, at most 64 bytes: submit.type is "Submission"`},
+		{" {type: \"a\\nb\", send: end_of_run}", `set submit.type to a name such as reply-draft, at most 64 bytes: submit.type is "a\nb"`},
+		{" {type: a--b, send: end_of_run}", `set submit.type to a name such as reply-draft, at most 64 bytes: submit.type is "a--b"`},
 		{" {type: submission}", "add send to submit, " + sends + ": submit has no send"},
 		{" {type: submission, send: later}", "set submit.send to " + sends + `: submit.send is "later"`},
 		{" {type: submission, send: End_of_run}", "set submit.send to " + sends + `: submit.send is "End_of_run"`},
 		{" {type: submission, send: [end_of_run]}", "set submit.send to " + sends + ": submit.send is a list"},
 		{" {type: submission, send: ~}", "set submit.send to " + sends + ": submit.send is null"},
-		{" {type: submission, send: 1}", "set submit.send to " + sends + `: submit.send is "1"`},
-		{" {type: submission, send: !!binary ZW5kX29mX3J1bg==}", "set submit.send to " + sends + `: submit.send is "ZW5kX29mX3J1bg=="`},
-		{" {type: submission, send: \"end_of_run\\n/src/process.yaml: all checks passed\"}", "set submit.send to " + sends + `: submit.send is "end_of_run\n/src/process.yaml: all checks passed"`},
+		{" {type: submission, send: 1}", "set submit.send to " + sends + ": submit.send is a number"},
+		{" {type: submission, send: true}", "set submit.send to " + sends + ": submit.send is a boolean"},
+		{" {type: submission, send: {a: b}}", "set submit.send to " + sends + ": submit.send is an object"},
+		{" {type: submission, send: !foo end_of_run}", `set submit.send to a quoted string: YAML reads "end_of_run" as a type that is not a string`},
+		{" {type: submission, send: !!binary ZW5kX29mX3J1bg==}", `set submit.send to a quoted string: YAML reads "ZW5kX29mX3J1bg==" as a type that is not a string`},
+		{" {type: submission, send: \"end_of_run\\nok\"}", "set submit.send to " + sends + `: submit.send is "end_of_run\nok"`},
 	} {
 		e := factory(t, process+"submit:"+c.body+"\n")
 		file := filepath.Join(e.Root, "modules", "desk", exports.ProcessFileName)
-		if err := e.Verify(); err == nil || err.Error() != file+": "+c.want {
+		err := e.Verify()
+		if err == nil || err.Error() != file+": "+c.want {
 			t.Errorf("%q: %v\nwant %s: %s", c.body, err, file, c.want)
+			continue
+		}
+		// The first line after the file, which starts with the fix, fits in 100 characters.
+		first, _, _ := strings.Cut(strings.TrimPrefix(err.Error(), file+": "), "\n")
+		if n := utf8.RuneCountInString(first); n > 100 {
+			t.Errorf("%q: the message has %d characters, past 100: %s", c.body, n, first)
 		}
 	}
 }

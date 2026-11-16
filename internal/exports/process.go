@@ -38,8 +38,8 @@ const (
 
 // processFile is a process.yaml as written: the texts a list of templates shows, the
 // workspace type, the stack of the same repository its workflows run on, the process
-// document, and optionally the artifact types the workspaces use and their submit step.
-// In the document, qory checks the schema, that the stages are a list, that each
+// document, and optionally the artifact types the workspaces use and the submit step of
+// a run. In the document, qory checks the schema, that the stages are a list, that each
 // workflow of a stage is a non-empty string of one line that the stack declares, and
 // that each stage name has no line break or other control character, and checks nothing
 // else in it. In artifact_types, qory checks each entry as [checkArtifactType] has it,
@@ -245,17 +245,20 @@ func checkSubmit(shown string, submit *yaml.Node) error {
 		return fmt.Errorf("%s: set submit.type to the name of a structured entry of artifact_types: submit.type is %s", shown, nodeKind(typ))
 	}
 	if !runapi.ArtifactName(typ.Value) {
-		return fmt.Errorf("%s: set submit.type to lowercase letters and digits in groups joined by single hyphens, at most %d bytes: submit.type is %s", shown, runapi.MaxArtifactName, scalarText(typ))
+		return fmt.Errorf("%s: set submit.type to a name such as reply-draft, at most %d bytes: submit.type is %s", shown, runapi.MaxArtifactName, scalarText(typ))
 	}
 	if send == nil {
 		return fmt.Errorf("%s: add send to submit, %s: submit has no send", shown, strings.Join(submitSends, " or "))
 	}
-	if send.Kind != yaml.ScalarNode || send.Tag != "!!str" || !slices.Contains(submitSends, send.Value) {
-		got := scalarText(send)
-		if send.Tag == "!!null" {
-			got = nodeKind(send)
-		}
-		return fmt.Errorf("%s: set submit.send to %s: submit.send is %s", shown, strings.Join(submitSends, " or "), got)
+	if send.Kind == yaml.ScalarNode && send.Tag != "!!str" && nodeKind(send) == "a string" {
+		// A value with an explicit tag, such as !foo end_of_run: YAML reads it as no string.
+		return fmt.Errorf("%s: set submit.send to a quoted string: YAML reads %s as a type that is not a string", shown, scalarText(send))
+	}
+	if send.Kind != yaml.ScalarNode || send.Tag != "!!str" {
+		return fmt.Errorf("%s: set submit.send to %s: submit.send is %s", shown, strings.Join(submitSends, " or "), nodeKind(send))
+	}
+	if !slices.Contains(submitSends, send.Value) {
+		return fmt.Errorf("%s: set submit.send to %s: submit.send is %s", shown, strings.Join(submitSends, " or "), scalarText(send))
 	}
 	return nil
 }
