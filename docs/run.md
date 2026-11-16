@@ -39,9 +39,10 @@ compose` composes only then.
 A walled run, and any run with a run key, writes no harness into the folder it runs in. The harness goes into
 a home under `qory/homes` in your cache directory: `~/.cache/qory/homes/<name>-<hash>` on
 Linux, or `$XDG_CACHE_HOME/qory/homes/<name>-<hash>` when that is set, and
-`~/Library/Caches/qory/homes/<name>-<hash>` on macOS. A run with a run key composes into that
-folder. A walled run with no run key, `--home` or `harness.home` composes into
-`runs/<name>-<hash>/<run id>` under `qory/homes`, a home for that run alone. A second run of the
+`~/Library/Caches/qory/homes/<name>-<hash>` on macOS. A run with a run key or a run code, and a
+walled run, with no `--home` or `harness.home`, composes into `runs/<name>-<hash>/<run id>` under
+`qory/homes`, a home for that run alone. A relative `HOME` counts from the folder you run `qory` in,
+so the home is an absolute path; on Linux, a relative `XDG_CACHE_HOME` stops the run. A second run of the
 checkout leaves the first run's home as it is, and so do `qory harness compose`, `qory run` and
 `qory harness remove` with `--home` set to `qory/homes`, which use `<name>-<hash>` there. `qory`
 removes that home when the run ends, also after a
@@ -56,6 +57,26 @@ wall or not, before the run opens and before anything is written:
 ```text
 set --home to a folder outside /work/app: /work/app/.qory/harness is inside /work/app, and a walled run or a run with a run key writes no harness into the folder it runs in
 ```
+
+A home that is not for one run alone is held for the run's life: your unwalled run's
+`.qory/harness`, and the home of a walled run with `--home` or `harness.home`. Before it
+redeems a run code or composes, `qory run` takes a lock on the file `<home>.lock` beside the home,
+such as `.qory/harness.lock`, which records the run's id, `qory`'s process id and the start time.
+A home in the checkout is kept out of git first, so the lock file shows as no untracked file.
+The file stays after the run, and the lock ends with the run. A second run of that home stops
+with exit 1 before it redeems its run code, so the code stays unused, and before it composes, since
+its compose would replace the first run's home and its end would remove the first run's copy of
+`inputs.json`. `qory harness compose` and `qory harness remove` take the same lock and stop
+with the same lines. `qory harness remove` keeps the lock file, `.qory/harness.lock` for a home in the
+checkout, with its line in `.git/info/exclude`, and removes everything else, since a run that
+opened the file before the remove would lock the old file while a new run locked a new one:
+
+```text
+Wait for the run that uses this home to end, or set another --home or harness.home.
+Run 0192f0c1-7d4e-7a2b-8c3d-4e5f6a7b8c9d, pid 4242, started 2026-11-16T10:00:00Z uses the home /work/app/.qory/harness
+```
+
+A run with a home for that run alone takes no lock.
 
 A walled run gets no link in the folder, whatever `harness.links` sets, so
 `harness.links: checkout` does not stop it. A run with no wall keeps its links. Without the
@@ -1635,9 +1656,26 @@ the work item. Then a run of the step explore:
 - runs the runtime of `run_settings.runtime`, `claude` when the response sets no run
   settings, composed with the model, the effort and the tiers the run settings set, as
   `--model`, `--effort`, `--tier` and `--tier-effort` set them;
-- writes the inputs, unchanged, to `inputs.json`, mode 0600, in a folder `in/`, mode
-  0700, of a new temporary folder, which qory removes when the run ends. Behind a wall,
-  `in/` is mounted read-only at the same path;
+- writes the inputs to `inputs.json`, mode 0600, in a folder `in/`, mode 0700, of a new
+  temporary folder, which qory removes when the run ends. Behind a wall, `in/` is mounted
+  read-only at the same path. The file has the inputs' members as they came, then one
+  member that qory adds once the harness is composed, `qory`:
+  `{"harness_extensions": {…}}`, the harness report's `extensions`, or `{}` when the
+  harness has none. The workflow reads them from the path after its name in the prompt,
+  and a push check gets the same path after `--inputs` (see Push checks in
+  `contracts/harness/v1/README.md`). qory also writes the same bytes to `inputs.json` in
+  the composed home, mode 0644, so the harness's hooks read them as
+  `$QORY_HARNESS_HOME/inputs.json`. In a home from `--home` or `harness.home`, qory removes
+  that copy when the run ends, also after a failure or a stop; a home for that run alone goes
+  as a whole. A run with a run key and no run code gets the same files, with the member `qory`
+  alone, since it has no inputs: `{"qory": {"harness_extensions": {…}}}` in `in/` (read-only
+  behind a wall), in the composed home, and after `--inputs` of its push checks.
+  A home that already has `inputs.json` stops the run with exit 1: `Remove inputs.json from
+  the home, or omit --home and harness.home, then take the work item in again.` Inputs that
+  have a member `qory` stop the run before
+  it opens, with exit 1: `remove the input qory: qory adds that member to inputs.json; the
+  code is used`, and so do inputs that are not a JSON object: `ask Qory Apiary's instance
+  admin: the run code's inputs are not a JSON object; the code is used`;
 - starts the runtime with its headless start: the arguments that run one prompt with no
   terminal, write the session's output to stdout and exit. The prompt invokes the
   first of these that the runtime can start: the skill `workflow-<workflow>`, the command
@@ -3754,8 +3792,8 @@ repository to `<user cache>/qory/runs/<run id>/work`, `~/Library/Caches` on macO
 `$XDG_CACHE_HOME` or `~/.cache` on Linux, and binds that clone in place of the checkout. Each
 repository under `.qory/repositories` is cloned too. The harness goes into
 `<user cache>/qory/homes/runs/<name>-<hash>/<run id>`, outside the clone, and the container has that
-folder read-only. `qory` removes that folder when the run ends. A run with a run key has
-`qory/homes/<name>-<hash>` as its home, and a home from `--home` or `harness.home` stays. The clone gets no
+folder read-only. `qory` removes that folder when the run ends. A home from `--home` or
+`harness.home` stays. The clone gets no
 link to the harness, so a program that reads part of it from the checkout does not get that part:
 see [What `qory run` does](#what-qory-run-does). A read run with no setup binds your checkout
 read-only instead, and a read run with a setup gets the clone read-only: see

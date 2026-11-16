@@ -1,11 +1,16 @@
 package cmd_test
 
 import (
+	"context"
+	"errors"
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/qoryai/forager/session"
 
 	"github.com/qoryai/qory/cmd"
 	"github.com/qoryai/qory/internal/checkout"
@@ -24,11 +29,19 @@ func runKeyHome(t *testing.T, root string) string {
 	return filepath.Join(base, "qory", "homes", checkout.Key(root))
 }
 
-// runKeyReport is the report of the compose of a run given a run key, beside
-// [runKeyHome].
+// runKeyRunHome is the home of the run [keyRunID] given a run key or a run code in the
+// checkout at root, with no --home and no harness.home: runs/<name>-<hash>/<run id> beside
+// [runKeyHome]. qory removes it when the run ends, unless the test calls [cmd.KeepRunHomes].
+func runKeyRunHome(t *testing.T, root string) string {
+	t.Helper()
+	return filepath.Join(runHomesFolder(t, root), keyRunID)
+}
+
+// runKeyReport is the report of the compose of a run given a run key, beside the folder of
+// [runKeyRunHome].
 func runKeyReport(t *testing.T, root string) report.Report {
 	t.Helper()
-	rep, err := report.Read(runKeyHome(t, root) + "-report.json")
+	rep, err := report.Read(runHomesFolder(t, root) + "-report.json")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -116,10 +129,11 @@ func keyedFolder(t *testing.T, git bool) string {
 
 // TestARunKeyComposesOutsideTheFolder is a run given a run key with no --home and no
 // harness.home, in a git checkout and in a folder that is not one, behind a wall and
-// without one: the run composes into its home under qory/homes in the cache directory,
-// goes on to the join, and writes nothing into the folder it runs in: no .qory, no link
-// and no line of .git/info/exclude.
+// without one: the run composes into the home of its run id under qory/homes/runs in the
+// cache directory, goes on to the join, and writes nothing into the folder it runs in: no
+// .qory, no link and no line of .git/info/exclude.
 func TestARunKeyComposesOutsideTheFolder(t *testing.T) {
+	t.Cleanup(cmd.KeepRunHomes())
 	for _, c := range []struct {
 		name        string
 		git, walled bool
@@ -141,12 +155,99 @@ func TestARunKeyComposesOutsideTheFolder(t *testing.T) {
 			}
 			wants(t, out, "qory run: composed 8 entries from 2 modules for claude\n")
 			sameTree(t, c.name, before, folderTree(t, root))
-			home := runKeyHome(t, root)
+			home := runKeyRunHome(t, root)
 			if _, err := os.Stat(filepath.Join(home, "claude")); err != nil {
 				t.Errorf("the home %s: %v", home, err)
 			}
 			if rep := runKeyReport(t, root); rep.Links != report.NoLinks {
 				t.Errorf("the report's links are %q, want %q", rep.Links, report.NoLinks)
+			}
+		})
+	}
+}
+
+// TestARunKeyGetsInputsWithTheQoryMemberAlone is a walled run given a run key and no run
+// code, whose harness declares a push check for spec and sets extensions: the run has no
+// run documents, so inputs.json has the member qory alone, with the stack's
+// harness_extensions. The push check gets --inputs and that file, and the copy in the home
+// is there while the agent runs. With no --home the home is gone after the run, and with --home the
+// copy is.
+func TestARunKeyGetsInputsWithTheQoryMemberAlone(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		home bool
+	}{{"a home for the run", false}, {"--home", true}} {
+		t.Run(c.name, func(t *testing.T) {
+			checksCheckout(t, "extensions:\n  software-factory:\n    command_limits_minutes: {test: 10}\n")
+			docker, log := checkDocker(t, 0, "")
+			walledBy(t, docker)
+			fakeLaunch(t, fakeRuntime(t))
+			gw := newKeyedGateway(t)
+			key := mintRunKey(t, keyRunID, gw.url())
+			t.Setenv("QORY_RUN_KEY", "")
+			api := newPushAPI(t)
+			var check func(context.Context, session.RunAPIRequest) (*session.RunAPIRefusal, error)
+			_, _, restore := cmd.OpenNowhereWith(cmd.Nowhere{
+				RunAPI: api.base(),
+				OnOpen: func(spec session.OpenSpec) {
+					api.mu.Lock()
+					defer api.mu.Unlock()
+					api.runID = spec.RunID
+				},
+				SetRunAPICheck: func(c func(context.Context, session.RunAPIRequest) (*session.RunAPIRefusal, error)) error {
+					check = c
+					return nil
+				},
+			})
+			defer restore()
+			var in homeInputs
+			var home string
+			var refusal *session.RunAPIRefusal
+			var checkErr error
+			t.Cleanup(cmd.SetJoinSession(func(s session.SessionSpec) {
+				home = s.HarnessHome
+				in = inputsAtJoin(t, s)
+				if check == nil {
+					t.Error("the run's open has no RunAPICheck")
+					return
+				}
+				refusal, checkErr = check(context.Background(), session.RunAPIRequest{Path: "/artifacts", Body: specPush(t)})
+			}))
+			args := []string{"run", "claude", "--run-key-fd", descriptor(t, key)}
+			given := filepath.Join(tempDir(t), "homes")
+			if c.home {
+				args = append(args, "--home", given)
+			}
+			out, err := run(t, args...)
+			if !errors.Is(err, cmd.ErrJoinedNowhere) {
+				t.Fatalf("%v (exit %d), want the join\n%s", err, cmd.ExitCode(err), out)
+			}
+			if checkErr != nil || refusal != nil {
+				t.Fatalf("the push of spec got %+v, %v, want it to pass\n%s", refusal, checkErr, checkLog(t, log))
+			}
+			const want = `{"qory":{"harness_extensions":{"software-factory":{"command_limits_minutes":{"test":10}}}}}` + "\n"
+			if string(in.written) != want || string(in.copied) != want {
+				t.Errorf("inputs.json is %q and its copy in the home %q, want %q", in.written, in.copied, want)
+			}
+			created := ""
+			for _, line := range strings.Split(checkLog(t, log), "\n") {
+				if strings.HasPrefix(line, "create ") {
+					created = line
+				}
+			}
+			inputs := regexp.MustCompile(`--mount type=bind,src=(\S+),dst=(\S+/in/inputs\.json),readonly`).FindStringSubmatch(created)
+			if inputs == nil || !strings.Contains(created, " push spec --inputs "+inputs[2]+" /qory-push-check/files/spec.md") {
+				t.Errorf("the check's container has no copy of inputs.json after --inputs:\n%s", created)
+			}
+			if c.home {
+				if _, err := os.Stat(home); err != nil {
+					t.Errorf("the home %s: %v", home, err)
+				}
+				if _, err := os.Lstat(filepath.Join(home, "inputs.json")); !errors.Is(err, os.ErrNotExist) {
+					t.Errorf("the copy stays in the home after the run: %v", err)
+				}
+			} else if _, err := os.Lstat(home); !errors.Is(err, os.ErrNotExist) {
+				t.Errorf("the run's home stays after the run: %v", err)
 			}
 		})
 	}
