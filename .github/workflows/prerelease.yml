@@ -29,11 +29,12 @@ concurrency:
 # It then builds three more images of the same commit, each published and tagged the same
 # way, with its index digest in the summary:
 #
-# - images/agent, the image a walled run of Claude Code runs in, to
-#   ghcr.io/qoryai/qory-agent-prerelease. Its build runs programs for the image's
+# - images/agent, the image a walled run's agent runs in, to
+#   ghcr.io/qoryai/qory-agent-prerelease. It contains no runtime: the machine installs
+#   it, and Forager mounts it when a run starts. Its build runs programs for the image's
 #   platform, so each platform builds on a runner of that platform, with nothing under
 #   emulation. qory image check, with the binary from the first image, checks each
-#   platform's image before one index joins the two.
+#   platform's image before one index joins the two; the check has no runtime line.
 # - images/gateway, FROM the first image by its digest, with qory gateway as the entry
 #   point, to ghcr.io/qoryai/qory-gateway-prerelease.
 # - images/prebuild, the image a pool's prebuild runs in, to

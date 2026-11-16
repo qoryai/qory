@@ -13,10 +13,10 @@
 // agent: as a user with no name in the image, with no capability, no way to gain one and
 // no network, and qory's Linux build mounted where the wall mounts its helper, as the
 // entry point. From inside, [Probe] is what that build runs, as the hidden verb qory image
-// probe: it checks what the agent's user finds, HOME, the authorities, the shell, the
-// programs, and each runtime in the folder Forager mounts it at, and prints a [Report],
-// one JSON document, which the outside reads back and fails when it lacks one of
-// [ProbeChecks]. The two are the same release of qory, so the
+// probe: it checks what the agent's user finds, HOME, the authorities, the shell and the
+// programs, and prints a [Report], one JSON document, which the outside reads back and
+// fails when it lacks one of [ProbeChecks]. It checks no runtime: qory checks the runtime
+// Forager mounts when a run starts. The two are the same release of qory, so the
 // report's format is not a contract.
 //
 // Every result is a [Check], one line: what passed, what failed and how to mend it, or a

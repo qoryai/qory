@@ -58,7 +58,6 @@ func agentFiles() map[string]string {
 		"home/agent/":                       "",
 		"etc/ssl/certs/ca-certificates.crt": "-----BEGIN CERTIFICATE-----\nAA==\n-----END CERTIFICATE-----\n-----BEGIN CERTIFICATE-----\nAA==\n-----END CERTIFICATE-----\n",
 		"bin/sh":                            "#!/bin/sh\n",
-		"qory/runtime/claude/bin/claude":    "",
 		"usr/bin/git":                       "",
 		"usr/bin/cat":                       "",
 		"usr/bin/chmod":                     "",
@@ -102,11 +101,6 @@ func goodVersions() *versions {
 	}}
 }
 
-// claude is Claude Code as the probe checks it.
-func claude() []image.Runtime {
-	return []image.Runtime{{Name: "claude", Command: "claude"}}
-}
-
 // env is an environment of the image's.
 func env(vars map[string]string) func(string) string {
 	return func(name string) string { return vars[name] }
@@ -140,12 +134,13 @@ func want(t *testing.T, checks map[string]image.Check, name, result string, carr
 }
 
 // TestProbePassesAnImageWithWhatTheWallNeeds probes a root with HOME, a bundle, a shell,
-// git and gh on the PATH, and claude in the folder Forager mounts it at: every line
-// passes, git and gh run from under the root at the paths the PATH finds, claude not at all, and the image carries no Docker.
+// and git and gh on the PATH, and no runtime: every line passes, git and gh run from
+// under the root at the paths the PATH finds, no line is about a runtime, and the image
+// carries no Docker.
 func TestProbePassesAnImageWithWhatTheWallNeeds(t *testing.T) {
 	root := imageRoot(t, agentFiles())
 	v := goodVersions()
-	p := image.Probe{Root: root, Env: env(map[string]string{"HOME": "/home/agent", "PATH": "relative:/usr/local/bin:/usr/bin:/bin"}), Exec: v.exec, Runtimes: claude(), User: "65532:65532"}
+	p := image.Probe{Root: root, Env: env(map[string]string{"HOME": "/home/agent", "PATH": "relative:/usr/local/bin:/usr/bin:/bin"}), Exec: v.exec, User: "65532:65532"}
 	r := p.Report(context.Background())
 	if r.Version != image.ReportVersion {
 		t.Errorf("report version %d", r.Version)
@@ -154,7 +149,9 @@ func TestProbePassesAnImageWithWhatTheWallNeeds(t *testing.T) {
 	want(t, checks, "home", image.Pass, "/home/agent", "65532:65532")
 	want(t, checks, "authorities", image.Pass, "/etc/ssl/certs/ca-certificates.crt", "2 certificates")
 	want(t, checks, "shell", image.Pass, "/bin/sh runs the runtime's hooks and the API-key approval")
-	want(t, checks, "claude", image.Pass, "claude is in /qory/runtime/claude/bin, where Forager mounts the machine's install, and every user may run it")
+	if c, ok := checks["claude"]; ok {
+		t.Errorf("the probe has a runtime line: %+v", c)
+	}
 	want(t, checks, "git", image.Pass, "git version 2.47.3")
 	want(t, checks, "gh", image.Pass, "gh version 2.101.0 (2026-09-15)")
 	want(t, checks, "docker", image.Info, "no dockerd")
@@ -174,12 +171,11 @@ func TestProbePassesAnImageWithWhatTheWallNeeds(t *testing.T) {
 // says what to add.
 func TestProbeNamesWhatAnImageLacks(t *testing.T) {
 	root := imageRoot(t, sessionFiles("etc/ssl/cert.pem", "no certificate here\n"))
-	p := image.Probe{Root: root, Env: env(map[string]string{"PATH": "/usr/bin"}), Exec: (&versions{}).exec, Runtimes: claude(), User: "65532:65532"}
+	p := image.Probe{Root: root, Env: env(map[string]string{"PATH": "/usr/bin"}), Exec: (&versions{}).exec, User: "65532:65532"}
 	checks := byName(p.Report(context.Background()))
 	want(t, checks, "home", image.Fail, "HOME is not set", "ENV HOME=")
 	want(t, checks, "authorities", image.Fail, "no bundle of authorities", "ca-certificates")
 	want(t, checks, "shell", image.Fail, "no /bin/sh; the runtime's hooks and the session's API-key approval run under sh")
-	want(t, checks, "claude", image.Fail, "mount the machine's install of claude read-only at /qory/runtime/claude, as Forager does for a run: /qory/runtime/claude/bin/claude is not there")
 	want(t, checks, "git", image.Fail, "/usr/bin/git --version failed: exit status 139: segmentation fault")
 	want(t, checks, "gh", image.Fail, "no gh on the image's PATH")
 
@@ -188,74 +184,6 @@ func TestProbeNamesWhatAnImageLacks(t *testing.T) {
 	}{{"/", "HOME is /"}, {"home/agent", "not an absolute path"}, {"/nowhere", "cannot write in HOME, /nowhere"}} {
 		p.Env = env(map[string]string{"HOME": c.home})
 		want(t, byName(p.Report(context.Background())), "home", image.Fail, c.want)
-	}
-}
-
-// TestProbeTakesTheRuntimeFromTheMountOnly has claude on the image's PATH and not in
-// /qory/runtime/claude, then the folder without the program, then a folder or a program
-// that other users cannot read or run: each line fails, the fix first. With the program
-// in a folder of mode 0755, the line passes. The probe never runs claude.
-func TestProbeTakesTheRuntimeFromTheMountOnly(t *testing.T) {
-	files := agentFiles()
-	delete(files, "qory/runtime/claude/bin/claude")
-	files["usr/local/bin/claude"] = ""
-	root := imageRoot(t, files)
-	v := goodVersions()
-	p := image.Probe{Root: root, Env: env(map[string]string{"HOME": "/home/agent", "PATH": "/usr/local/bin:/usr/bin"}), Exec: v.exec, Runtimes: claude()}
-	missing := "mount the machine's install of claude read-only at /qory/runtime/claude, as Forager does for a run: /qory/runtime/claude/bin/claude is not there, and no image contains a runtime"
-	want(t, byName(p.Report(context.Background())), "claude", image.Fail, missing)
-
-	folder := filepath.Join(root, "qory", "runtime", "claude")
-	program := filepath.Join(folder, "bin", "claude")
-	if err := os.MkdirAll(filepath.Dir(program), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	want(t, byName(p.Report(context.Background())), "claude", image.Fail, missing)
-
-	if err := os.WriteFile(program, nil, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	for _, c := range []struct {
-		path       string
-		mode       os.FileMode
-		wantResult string
-		wantDetail string
-	}{
-		{folder, 0o700, image.Fail, "make /qory/runtime/claude readable by every user, mode 0755: Forager refuses a runtime folder other users cannot read, and its mode is 0700"},
-		{folder, 0o755, image.Pass, "claude is in /qory/runtime/claude/bin, where Forager mounts the machine's install"},
-		{program, 0o744, image.Fail, "make /qory/runtime/claude/bin/claude readable and executable by every user, mode 0755: Forager refuses a runtime program other users cannot run, and its mode is 0744"},
-		{program, 0o755, image.Pass, "every user may run it"},
-	} {
-		if err := os.Chmod(c.path, c.mode); err != nil {
-			t.Fatal(err)
-		}
-		want(t, byName(p.Report(context.Background())), "claude", c.wantResult, c.wantDetail)
-	}
-	for _, ran := range v.ran {
-		if strings.Contains(ran, "claude") {
-			t.Errorf("the probe ran %s", ran)
-		}
-	}
-}
-
-// TestProbeChecksEachRuntimeByItsProgram has a runtime whose program has another name
-// than the runtime, and one this build does not render: each line has the runtime's
-// name, the program is the one in the runtime's folder, and the runtime with no program
-// fails.
-func TestProbeChecksEachRuntimeByItsProgram(t *testing.T) {
-	files := agentFiles()
-	files["qory/runtime/cursor/bin/cursor-agent"] = ""
-	root := imageRoot(t, files)
-	p := image.Probe{Root: root, Env: env(map[string]string{"HOME": "/home/agent", "PATH": "/usr/local/bin:/usr/bin"}), Exec: goodVersions().exec, Runtimes: []image.Runtime{
-		{Name: "cursor", Command: "cursor-agent"},
-		{Name: "example"},
-	}}
-	r := p.Report(context.Background())
-	checks := byName(r)
-	want(t, checks, "cursor", image.Pass, "cursor-agent is in /qory/runtime/cursor/bin")
-	want(t, checks, "example", image.Fail, "set wall.helper to the Linux build of this qory: the probe's build renders no runtime example")
-	if _, ok := checks["claude"]; ok {
-		t.Error("the probe checked claude, which no argument lists")
 	}
 }
 
@@ -294,12 +222,12 @@ func TestProbeSaysWhetherTheImageCarriesADocker(t *testing.T) {
 // TestProbeReportsEveryCheck has the report hold one line for each of the checks the
 // outside counts on, in their order.
 func TestProbeReportsEveryCheck(t *testing.T) {
-	p := image.Probe{Root: imageRoot(t, agentFiles()), Env: env(nil), Exec: goodVersions().exec, Runtimes: claude()}
+	p := image.Probe{Root: imageRoot(t, agentFiles()), Env: env(nil), Exec: goodVersions().exec}
 	var names []string
 	for _, c := range p.Report(context.Background()).Checks {
 		names = append(names, c.Name)
 	}
-	if want := "home authorities shell claude git gh docker"; strings.Join(names, " ") != want || strings.Join(image.ProbeChecks([]string{"claude"}), " ") != want {
+	if want := "home authorities shell git gh docker"; strings.Join(names, " ") != want || strings.Join(image.ProbeChecks(), " ") != want {
 		t.Errorf("lines %v, want %s", names, want)
 	}
 }

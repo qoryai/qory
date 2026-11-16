@@ -4306,7 +4306,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends make \
 
 ```sh
 docker build -t my-agent:1 .
-qory image check my-agent:1
+qory image check my-agent:1   # checks everything but a runtime, which the image does not need
 ```
 
 Push it to a registry of yours and name it by digest, in `wall.image` or as a `ref` of
@@ -4325,11 +4325,12 @@ one fails.
   does not know, with no capability and no network. `qory`'s Linux build then checks
   that `HOME` takes a file from that user, the authorities are where the wall reads
   them, `/bin/sh` is there for the runtime's hooks and the session's API-key approval,
-  each runtime of Forager's runtime list, `runtimes.json`, has its program in
-  `/qory/runtime/<runtime>/bin`, where Forager mounts the machine's install, with the
-  folder and the program readable and the program executable by every user, and `git`
-  and `gh` run. It reports no runtime version: the version is the install's, at run time. It reports whether
-  `dockerd` is in a system directory, and checks that what the daemon runs is there too.
+  and `git` and `gh` run. It reports whether `dockerd` is in a system directory, and
+  checks that what the daemon runs is there too.
+
+`qory image check` checks no runtime, such as Claude Code, and prints no line for one:
+no image contains a runtime. The machine installs the runtime, and Forager mounts it at
+`/qory/runtime/<runtime>` and checks it when a run starts.
 
 The Linux build is the one the wall uses: `wall.helper`, for your engine's architecture,
 or on Linux the `qory` you run when `wall.helper` is not set.

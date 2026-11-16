@@ -10,7 +10,6 @@ import (
 	"os/exec"
 	"path"
 	"path/filepath"
-	"slices"
 	"strings"
 	"time"
 	"unicode"
@@ -32,7 +31,7 @@ const (
 // Check is one line of a check's result.
 type Check struct {
 	// Name is what the line is about, one word: image, home, reference, files, probe, or
-	// one of [ProbeChecks], a runtime's name among them.
+	// one of [ProbeChecks].
 	Name string `json:"name"`
 	// Result is [Pass], [Fail] or [Info].
 	Result string `json:"result"`
@@ -58,42 +57,17 @@ const ReportVersion = 1
 type Report struct {
 	// Version is [ReportVersion].
 	Version int `json:"version"`
-	// Checks are the probe's lines, one of each of [ProbeChecks] for the runtimes it
-	// checked, in that order.
+	// Checks are the probe's lines, one of each of [ProbeChecks], in that order.
 	Checks []Check `json:"checks"`
 }
 
-// ProbeChecks are the names of the lines a [Report] of a probe for runtimes contains, in
-// the order they print: one line per runtime after shell. A report that lacks one did
-// not check it, and the outside counts that as a failure.
-func ProbeChecks(runtimes []string) []string {
-	return slices.Concat([]string{"home", "authorities", "shell"}, runtimes, []string{"git", "gh", "docker"})
+// ProbeChecks are the names of the lines a [Report] contains, in the order they print. A
+// report that lacks one did not check it, and the outside counts that as a failure. No
+// line is about a runtime: no image contains one, and Forager mounts the machine's
+// install of the runtime at run time.
+func ProbeChecks() []string {
+	return []string{"home", "authorities", "shell", "git", "gh", "docker"}
 }
-
-// Runtime is one runtime the probe checks for: its program in the folder Forager mounts
-// the machine's install of it at, [RuntimeRoot]/<Name>.
-type Runtime struct {
-	// Name is the runtime's name, the name of its line and of its folder.
-	Name string
-	// Command is the program the runtime's launch starts, in the folder's bin; empty for a
-	// runtime this qory does not render, whose line fails.
-	Command string
-}
-
-// RuntimeRoot is where Forager mounts the machine's install of each runtime, read-only, at
-// run time: /qory/runtime/<runtime>, with the program the launch starts in its bin
-// folder, such as /qory/runtime/claude/bin/claude. No image contains a runtime.
-const RuntimeRoot = "/qory/runtime"
-
-// RuntimeProgram is the path, inside the container, of the program rt's launch starts:
-// [RuntimeRoot]/<Name>/bin/<Command>.
-func RuntimeProgram(rt Runtime) string {
-	return path.Join(RuntimeRoot, rt.Name, "bin", rt.Command)
-}
-
-// everyone is the read and execute bits for other users: Forager refuses a runtime folder
-// or program that other users cannot read and, for the program, execute.
-const everyone = 0o005
 
 // Bundles are where the wall reads an image's authorities, the first that holds a
 // certificate: Debian and Alpine, Red Hat, OpenSUSE, and OpenSSL's default. The wall's own
@@ -123,8 +97,6 @@ type Probe struct {
 	// Exec runs a program of the image, by its path under Root, and returns what it
 	// printed on both streams. Nil runs it with [ProgramWait] as its limit.
 	Exec func(ctx context.Context, program string, args ...string) ([]byte, error)
-	// Runtimes are the runtimes to check, Forager's list in its order.
-	Runtimes []Runtime
 	// User is the user the probe runs as, uid:gid, as the lines name it.
 	User string
 }
@@ -136,9 +108,6 @@ func (p Probe) Report(ctx context.Context) Report {
 		p.Env = os.Getenv
 	}
 	checks := []Check{p.home(), p.authorities(), p.shell()}
-	for _, rt := range p.Runtimes {
-		checks = append(checks, p.runtime(rt))
-	}
 	checks = append(checks, p.git(ctx), p.program(ctx, "gh"))
 	checks = append(checks, p.docker())
 	return Report{Version: ReportVersion, Checks: checks}
@@ -205,33 +174,6 @@ func (p Probe) shell() Check {
 		return Check{"shell", Fail, "no /bin/sh; the runtime's hooks and the session's API-key approval run under sh"}
 	}
 	return Check{"shell", Pass, "/bin/sh runs the runtime's hooks and the API-key approval"}
-}
-
-// runtime checks that rt's program is in the folder Forager mounts the runtime at, as
-// [RuntimeProgram] has it, and that every user may read the folder and read and run
-// the program. It runs nothing: the version is the install's, at run time.
-func (p Probe) runtime(rt Runtime) Check {
-	if rt.Command == "" {
-		return Check{rt.Name, Fail, "set wall.helper to the Linux build of this qory: the probe's build renders no runtime " + rt.Name}
-	}
-	dir := path.Join(RuntimeRoot, rt.Name)
-	where := RuntimeProgram(rt)
-	missing := Check{rt.Name, Fail, fmt.Sprintf("mount the machine's install of %s read-only at %s, as Forager does for a run: %s is not there, and no image contains a runtime", rt.Name, dir, where)}
-	info, err := os.Stat(p.host(dir))
-	if err != nil || !info.IsDir() {
-		return missing
-	}
-	if info.Mode()&everyone != everyone {
-		return Check{rt.Name, Fail, fmt.Sprintf("make %s readable by every user, mode 0755: Forager refuses a runtime folder other users cannot read, and its mode is %04o", dir, info.Mode().Perm())}
-	}
-	info, err = os.Stat(p.host(where))
-	if err != nil || !info.Mode().IsRegular() {
-		return missing
-	}
-	if info.Mode()&everyone != everyone {
-		return Check{rt.Name, Fail, fmt.Sprintf("make %s readable and executable by every user, mode 0755: Forager refuses a runtime program other users cannot run, and its mode is %04o", where, info.Mode().Perm())}
-	}
-	return Check{rt.Name, Pass, fmt.Sprintf("%s is in %s, where Forager mounts the machine's install, and every user may run it", rt.Command, path.Dir(where))}
 }
 
 // program checks that a program is on the image's PATH and answers --version.

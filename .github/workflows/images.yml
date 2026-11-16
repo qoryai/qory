@@ -63,7 +63,8 @@ jobs:
 
       - name: Check them
         # On Linux the probe is qory itself, and a configuration directory with no
-        # forager.yaml leaves every setting its default.
+        # forager.yaml leaves every setting its default. No image contains a runtime, and
+        # the check has no runtime line.
         env:
           XDG_CONFIG_HOME: ${{ runner.temp }}/config
         run: '"$RUNNER_TEMP/qory" image check qory-agent qory-agent-docker qory-prebuild'
