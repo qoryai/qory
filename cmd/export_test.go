@@ -89,6 +89,26 @@ func SetJoinResult(f func(session.SessionSpec) (*session.Result, error)) func() 
 	return func() { joinSession = before }
 }
 
+// SetLaterSessions makes the push step after a run's session stand in for a run of more
+// sessions: after the step, each of sessions runs in turn, as the next session's agent,
+// and the push step runs again after it. A step that fails ends the loop, and the run
+// closes with what the last step returned. It returns what restores the default.
+func SetLaterSessions(sessions ...func()) func() {
+	before := pushAfterSession
+	pushAfterSession = func(p *sessionPush, ending *pushEnding, out session.Outcome) (session.Outcome, error) {
+		closed, err := before(p, ending, out)
+		for _, agent := range sessions {
+			if err != nil {
+				break
+			}
+			agent()
+			closed, err = before(p, ending, out)
+		}
+		return closed, err
+	}
+	return func() { pushAfterSession = before }
+}
+
 // hostGitFolder is the folder of this machine's git, for the PATH of a git session in a
 // test: the run's image has its git in other folders. The session's first argument after
 // the script file is that PATH.

@@ -2169,8 +2169,8 @@ A write run of a work item ends with a push step: qory commits what the agent le
 it to the branch `qory/<work item id>`, and stores a new version of the artifact `branch`.
 The next run in the same stage starts at that commit. A run of another stage starts at the
 version a gate approved when its stage lists `branch` as an input, and at that commit
-otherwise. The step runs after the agent exits and before the run closes. A setup container
-is gone by then: qory removes it before the step, in the wall step `remove the setup
+otherwise. The step runs after the run's session, once the agent exited, and before the
+run closes. A setup container is gone by then: qory removes it before the step, in the wall step `remove the setup
 container`, so no process in it writes the working folder after the check. Its kind is `push` and its name is `push qory/<work item
 id> to <system>/<path>`, followed by ` and 1 further repository` or ` and <n> further
 repositories` for a run with more repositories.
@@ -2958,6 +2958,27 @@ With a home in the checkout, `qory harness remove` deletes the directory with th
 
 The client sends a POST once. If the response is lost, the version may be stored: read the
 artifact index with `qory artifact pull` before you push again.
+
+## The route to qory
+
+Each run has a route from its session to `qory run`. A program in the session sends a plain
+HTTP request to the URL in `QORY_HOST_URL`, `http://host.qory.invalid`, through
+`HTTP_PROXY`, with any method and path. The run's proxy hands the request to `qory run`,
+walled or not, with the number of the session that sent it. The session's setup commands
+with `wall.setup: inside` get `QORY_HOST_URL` too; the setup container of `wall.setup:
+outside` gets neither the variable nor the route.
+
+qory serves no path on the route. Each answer is JSON, `{"error": <code>, "message": <text>}`:
+
+| Status | `error` | When |
+|---|---|---|
+| `404` | `not_found` | a request of the session that runs |
+| `503` | `session_not_running` | a request of another session of the run, or one with no valid session number |
+
+The run's proxy answers some requests itself, in the same form, such as `503` for a request
+outside a session's launch, `413` for a body over 1 MiB, and `429` for more than 10 requests
+of the run in a second. Each request of the route is a `dev.qory.run.egress` event with the
+channel `qory_host`.
 
 ## Credentials the agent never has
 
