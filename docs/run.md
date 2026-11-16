@@ -1703,6 +1703,10 @@ before the fetch, and picks one version of the artifact type `branch`:
 3. Else, the newest version of the artifact named `main`.
 4. With no version, the run creates the branch at `target_version`.
 
+The newest version in steps 1 and 3 is the one with the highest number that the artifact
+index does not mark `cancelled`: a version that a cancelled run made counts for no stage.
+When every version of `main` is cancelled, steps 1 and 3 find none.
+
 qory composes the harness at `target_version`, with the further repositories at their
 default branches, before it checks out the work item's branch. When the documents contain
 no harness document, the compose reads the checkout's `qory.yaml` or `harness.yaml`, the
@@ -2900,7 +2904,10 @@ artifact pull` prints, which is a whole path. Outside a run the store is `.qory/
 `qory artifact pull` fetches the newest version of each output of the stage, and the
 version of each input that its gate approved. A type that is both counts as an output. For
 any other artifact it fetches the approved version, or the newest when none is approved.
-`<type>` limits the fetch to one type. `--version` needs `<type>`.
+The newest version is the one with the highest number that the artifact index does not
+mark `cancelled`: a version that a cancelled run made counts for no stage. An artifact
+whose versions are all cancelled gets no directory. `<type>` limits the fetch to one type.
+`--version` needs `<type>`, and fetches that version whether or not it is cancelled.
 
 `-` as a file of `qory artifact push` reads one file from standard input. Its name is
 `stdin` with the extension of its content, such as `stdin.md`. One version is at most

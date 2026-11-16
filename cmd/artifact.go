@@ -231,8 +231,11 @@ it is .qory/artifacts, or /tmp/qory-artifacts when the run's checkout is read-on
 
 With no --version, qory fetches the newest version of each output of the stage, and the
 version of each input that its gate approved. For any other artifact, it fetches the
-approved version, or the newest when none is approved. <type> limits the fetch to one type.
---version needs <type>, and fetches that version of each artifact of the type.
+approved version, or the newest when none is approved. The newest version is the newest
+that the index does not mark cancelled: a version of a cancelled run counts for no stage,
+and an artifact with only such versions gets no directory. <type> limits the fetch to one
+type. --version needs <type>, and fetches that version of each artifact of the type,
+whether or not it is cancelled.
 
 Outside a run, qory fetches nothing, and says so.
 
@@ -337,8 +340,8 @@ func pullArtifacts(c *cobra.Command, client *runapi.Client, artifactType string,
 // chosenVersion returns the version of artifact to fetch, nil for none: version when it is
 // not 0, the newest for an output of the stage, the version the stage has for an input,
 // else its approved version; and for any other artifact the approved version or the
-// newest. A type that is an output and an input is an output: the stage's round works on
-// its newest version.
+// newest. The newest is the version that [newestNotCancelled] returns. A type that is an
+// output and an input is an output: the stage's round works on its newest version.
 func chosenVersion(artifact runapi.Artifact, snapshot *runapi.Snapshot, version int) *runapi.Version {
 	byNumber := func(number int) *runapi.Version {
 		for i := range artifact.Versions {
@@ -372,7 +375,7 @@ func chosenVersion(artifact runapi.Artifact, snapshot *runapi.Snapshot, version 
 
 	for _, output := range snapshot.Outputs {
 		if output.Type == artifact.Type {
-			return byNumber(artifact.NewestVersion)
+			return newestNotCancelled(artifact)
 		}
 	}
 
@@ -400,7 +403,22 @@ func chosenVersion(artifact runapi.Artifact, snapshot *runapi.Snapshot, version 
 		return chosen
 	}
 
-	return byNumber(artifact.NewestVersion)
+	return newestNotCancelled(artifact)
+}
+
+// newestNotCancelled returns the version of artifact with the highest number that the
+// index does not mark cancelled, nil for none. A version that a cancelled run made counts
+// for no stage.
+func newestNotCancelled(artifact runapi.Artifact) *runapi.Version {
+	var newest *runapi.Version
+
+	for i := range artifact.Versions {
+		if !artifact.Versions[i].Cancelled && (newest == nil || artifact.Versions[i].Number > newest.Number) {
+			newest = &artifact.Versions[i]
+		}
+	}
+
+	return newest
 }
 
 func newArtifactPush() *cobra.Command {

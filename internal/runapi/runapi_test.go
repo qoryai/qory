@@ -76,6 +76,7 @@ const (
           "id": "av_2",
           "number": 2,
           "writer": {"kind": "run", "run_id": "run-1"},
+          "cancelled": true,
           "stage_id": "st_1",
           "note": null,
           "at": "2026-10-31T09:00:00Z",
@@ -280,7 +281,7 @@ func TestArtifactsReadsTheIndex(t *testing.T) {
 	}
 
 	version := artifact.Versions[0]
-	if version.Writer.Kind != "run" || version.Writer.RunID != "run-1" || version.Note != nil ||
+	if version.Writer.Kind != "run" || version.Writer.RunID != "run-1" || !version.Cancelled || version.Note != nil ||
 		version.Files[0].Size != 1048576 || version.Approvals[0].By.Name != "dana" {
 		t.Errorf("version = %+v", version)
 	}

@@ -128,6 +128,9 @@ type Snapshot struct {
 	Outputs []Output `json:"outputs"`
 	// Verdict is the work item's newest verdict, nil for none.
 	Verdict *GivenVerdict `json:"verdict"`
+	// Notes is the work item's notes, oldest first, byte for byte as the run API returned
+	// them: a JSON array, or null or empty for a response with no notes.
+	Notes json.RawMessage `json:"notes"`
 
 	Raw json.RawMessage `json:"-"`
 }
@@ -186,11 +189,13 @@ type Artifact struct {
 	Versions             []Version `json:"versions"`
 }
 
-// Version is one version of an artifact.
+// Version is one version of an artifact. Cancelled is true when a member cancelled the
+// run that wrote the version; an index without the field reads as false.
 type Version struct {
 	ID        string     `json:"id"`
 	Number    int        `json:"number"`
 	Writer    Writer     `json:"writer"`
+	Cancelled bool       `json:"cancelled"`
 	StageID   *string    `json:"stage_id"`
 	Note      *string    `json:"note"`
 	At        string     `json:"at"`
