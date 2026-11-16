@@ -446,7 +446,7 @@ release may change what an existing document does, and states it under Upgrading
   cancelled gets no folder. The start commit of a run skips a cancelled version of the
   artifact `branch` too. Before, all three took the newest version, cancelled or not. An
   index without the field `cancelled` reads as no version cancelled.
-- qory builds with Forager 8f22399d.
+- qory builds with Forager f344b7a7.
   - A run keeps its wall only when a container of the run may still run; a network or
     folder of the wall that could not be removed no longer keeps it.
   - A session of Claude Code starts the program that qory installed, from
