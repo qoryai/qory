@@ -71,8 +71,8 @@ func TestTheRouteRefusesAnotherSession(t *testing.T) {
 	}
 	for _, sessions := range [][]string{nil, {""}, {"0"}, {"-2"}, {"+2"}, {"02"}, {" 2"}, {"two"}, {"2", "2"}} {
 		status, _, code, text := routeAsk(t, q, http.MethodGet, "/", sessions...)
-		if status != http.StatusServiceUnavailable || code != routeSessionNotRunning {
-			t.Errorf("Qory-Session %q, route open: %d %s %q, want 503 %s", sessions, status, code, text, routeSessionNotRunning)
+		if status != http.StatusServiceUnavailable || code != routeSessionNotRunning || text != textRouteNoNumber {
+			t.Errorf("Qory-Session %q, route open: %d %s %q, want 503 %s %q", sessions, status, code, text, routeSessionNotRunning, textRouteNoNumber)
 		}
 	}
 	done()
@@ -80,8 +80,8 @@ func TestTheRouteRefusesAnotherSession(t *testing.T) {
 		t.Errorf("after the join returned: %d %s, want 503 %s", status, code, routeSessionNotRunning)
 	}
 	for _, sessions := range [][]string{nil, {""}, {"0"}, {"2", "2"}} {
-		if status, _, code, _ := routeAsk(t, q, http.MethodGet, "/", sessions...); status != http.StatusServiceUnavailable || code != routeSessionNotRunning {
-			t.Errorf("Qory-Session %q, route closed: %d %s, want 503 %s", sessions, status, code, routeSessionNotRunning)
+		if status, _, code, text := routeAsk(t, q, http.MethodGet, "/", sessions...); status != http.StatusServiceUnavailable || code != routeSessionNotRunning || text != textRouteNoNumber {
+			t.Errorf("Qory-Session %q, route closed: %d %s %q, want 503 %s %q", sessions, status, code, text, routeSessionNotRunning, textRouteNoNumber)
 		}
 	}
 	later := q.open(3)
@@ -95,7 +95,7 @@ func TestTheRouteRefusesAnotherSession(t *testing.T) {
 // TestTheRoutesTextsStartWithTheFix holds each text of the route to one line of at most
 // 100 characters.
 func TestTheRoutesTextsStartWithTheFix(t *testing.T) {
-	for _, text := range []string{fmt.Sprintf(textRouteNotRunning, 12), textRouteNotFound} {
+	for _, text := range []string{fmt.Sprintf(textRouteNotRunning, 12), textRouteNoNumber, textRouteNotFound} {
 		if strings.Contains(text, "\n") || len(text) > 100 {
 			t.Errorf("%q is more than one line of 100 characters", text)
 		}

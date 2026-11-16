@@ -17,6 +17,7 @@ const (
 	routeNotFound          = "not_found"
 
 	textRouteNotRunning = "Send the request from the session that runs: session %d does not run."
+	textRouteNoNumber   = "Send the request from a running session: Qory-Session is missing or is not a number of 1 or more."
 	textRouteNotFound   = "Check the request's path: qory serves nothing at it."
 )
 
@@ -59,7 +60,11 @@ func (q *qoryRoute) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	q.mu.Lock()
 	running := q.session
 	q.mu.Unlock()
-	if !ok || n != running {
+	if !ok {
+		routeAnswer(w, http.StatusServiceUnavailable, routeSessionNotRunning, textRouteNoNumber)
+		return
+	}
+	if n != running {
 		routeAnswer(w, http.StatusServiceUnavailable, routeSessionNotRunning, fmt.Sprintf(textRouteNotRunning, n))
 		return
 	}
