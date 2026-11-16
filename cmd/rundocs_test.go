@@ -315,7 +315,7 @@ func TestARunCodeStartsItsWorkflow(t *testing.T) {
 	if err := json.Unmarshal(want, &doc); err != nil {
 		t.Fatal(err)
 	}
-	r := runFromCode(t, func(s string) string { return s + "workflows:\n  hello:\n    time_limit: 7h\n    access: write\n" }, func(d map[string]any) {
+	r := runFromCodeWith(t, behindAWall(t), nil, func(s string) string { return s + "workflows:\n  hello:\n    time_limit: 7h\n    access: write\n" }, func(d map[string]any) {
 		d["run_settings"] = map[string]any{"runtime": "claude", "model": "example-large", "provider_models": []any{map[string]any{"id": "example-large"}}}
 	})
 	if !errors.Is(r.err, cmd.ErrJoinedNowhere) || !r.joined {
@@ -349,7 +349,7 @@ func TestARunCodeStartsItsWorkflow(t *testing.T) {
 // TestARunCodeWithoutAWorkflowTimeLimitRunsThreeHours is a run from a run code whose
 // base sets no time_limit for its workflow: the session's time limit is 3 hours.
 func TestARunCodeWithoutAWorkflowTimeLimitRunsThreeHours(t *testing.T) {
-	r := runFromCode(t, writesHello, nil)
+	r := runFromCodeWith(t, behindAWall(t), nil, writesHello, nil)
 	if !r.joined {
 		t.Fatalf("%v (exit %d), want the join\n%s", r.err, cmd.ExitCode(r.err), r.out)
 	}
@@ -443,6 +443,18 @@ func walledBy(t *testing.T, docker string) {
 		"wall:\n  adapter: docker\n  command: "+docker+"\n  helper: "+staticELF(t)+"\n  user: \"1000:1000\"\n  image: example.com/agent:1\n")
 }
 
+// behindAWall is a before of [runFromCodeWith] for a run that may write, which needs a
+// wall: it puts the wall of the fake docker in forager.yaml, and returns --home with a
+// home outside the checkout.
+func behindAWall(t *testing.T) func(string) []string {
+	t.Helper()
+	return func(string) []string {
+		docker, _ := fakeDocker(t)
+		walledBy(t, docker)
+		return []string{"--home", filepath.Join(tempDir(t), "home")}
+	}
+}
+
 // TestARunCodeDescriptorIsClosedBeforeTheRunStartsAProgram is a run code that its
 // starter passes as qory run pool does: in an unlinked file on an inherited descriptor
 // without close-on-exec, given as /dev/fd/N. qory reads the code and closes the
@@ -471,7 +483,7 @@ func TestARunCodeDescriptorIsClosedBeforeTheRunStartsAProgram(t *testing.T) {
 			t.Fatal(err)
 		}
 		t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
-		return []string{"--run-code-file", "/dev/fd/" + strconv.Itoa(n)}
+		return append(behindAWall(t)(code), "--run-code-file", "/dev/fd/"+strconv.Itoa(n))
 	}, nil, writesHello, nil)
 	if !errors.Is(r.err, cmd.ErrJoinedNowhere) || !r.joined {
 		t.Fatalf("%v (exit %d), want the join\n%s", r.err, cmd.ExitCode(r.err), r.out)
@@ -489,10 +501,10 @@ func TestARunCodeDescriptorIsClosedBeforeTheRunStartsAProgram(t *testing.T) {
 // TestARunCodeStartsTheWorkflowsPrefixedSkill is a whole run from a run code whose harness
 // ships the skill workflow-deploy for the workflow deploy: the run starts that skill, and
 // the start line has the workflow's name without the prefix. The stack's settings of
-// the workflow are under deploy, and access write there lets the run start with no wall.
+// the workflow are under deploy, and access write there lets the run start behind a wall.
 func TestARunCodeStartsTheWorkflowsPrefixedSkill(t *testing.T) {
 	declares := func(s string) string { return s + "workflows:\n  deploy:\n    access: write\n" }
-	r := runFromCodeLinks(t, nil, nil, declares, func(d map[string]any) { d["workflow"] = "deploy" }, map[string]string{
+	r := runFromCodeLinks(t, behindAWall(t), nil, declares, func(d map[string]any) { d["workflow"] = "deploy" }, map[string]string{
 		"examples/hello/modules/hello/skills/workflow-deploy/SKILL.md": "---\nname: workflow-deploy\ndescription: Deploys.\n---\nDeploy.\n",
 	}, nil)
 	if !r.joined {

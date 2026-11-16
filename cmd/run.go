@@ -758,7 +758,11 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					if err := fromCode.readExposed(at.root, cwd, at.report); err != nil {
 						return false, err
 					}
-				} else if fromCode != nil && walled {
+				} else if fromCode != nil && !walled {
+					// A run from a run code that may write stops here with no wall, before the
+					// image's fetch and the setup: the agent would run as this machine's user.
+					return false, writeNeedsWall(fromCode.workflow)
+				} else if fromCode != nil {
 					// A write run from a run code gets no copy: it binds the checkout itself.
 					if err := bindsReserved(textCodeWriteBindsReserved, at.root, cwd, reserved); err != nil {
 						return false, err
