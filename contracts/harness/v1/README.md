@@ -1012,12 +1012,12 @@ characters; a check has at most 200 findings. qory reads at most 64 KiB of each 
 
 A program that does not start stops the push with 422 too: `Set wall.image or --image to
 an image with node, such as one built FROM qory-agent, then run again. The check for
-<type> could not start: <error>.` when its `#!` line is for `node`, else `Install the program
-<path>, and push again. The check for <type> could not start: <error>.` A program does
-not start when it exits with 126 or 127 and the last line of its standard error is the
-container's init's line for the program, or ends with `not found`, `No such file or
-directory` or `Permission denied` for the program or a word of its `#!` line, such as
-`/usr/bin/env: 'node': No such file or directory`. Any other exit with 126 or 127, such as
+<type> could not start: <error>.` when its `#!` line is for `node`, else `Install the
+program <path>, then run again. The check for <type> could not start: <error>.` A
+program does not start when it exits with 126 or 127 and the last line of its standard
+error is the container's init's line for the program, or ends with `not found`, `No
+such file or directory` or `Permission denied` for the program or a word of its `#!`
+line, such as `/usr/bin/env: 'node': No such file or directory`. Any other exit with 126 or 127, such as
 one for a program that the check runs, is a check that failed. A program still running
 after 30 seconds is stopped, with `Make the check for <type> finish within 30 s, and push
 again. It ran longer and was stopped.`

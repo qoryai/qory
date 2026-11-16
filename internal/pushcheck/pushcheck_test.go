@@ -603,16 +603,16 @@ func TestAProgramThatCannotStartStopsThePush(t *testing.T) {
 		}, "Set wall.image or --image to an image with node, such as one built FROM qory-agent, then run again. The check for spec could not start: /usr/bin/env: 'node': No such file or directory."},
 		{"no program", "#!/bin/sh", func(e *engine) {
 			e.exit(127, "", "[FATAL tini (7)] exec /home/c failed: No such file or directory\n")
-		}, "Install the program PROGRAM, and push again. The check for spec could not start: exec /home/c failed: No such file or directory."},
+		}, "Install the program PROGRAM, then run again. The check for spec could not start: exec /home/c failed: No such file or directory."},
 		{"not executable", "#!/bin/sh", func(e *engine) {
 			e.exit(126, "", "[FATAL tini (7)] exec /home/c failed: Permission denied\n")
-		}, "Install the program PROGRAM, and push again. The check for spec could not start: exec /home/c failed: Permission denied."},
+		}, "Install the program PROGRAM, then run again. The check for spec could not start: exec /home/c failed: Permission denied."},
 		{"busybox env", "#!/usr/bin/env node", func(e *engine) {
 			e.exit(127, "", "env: can't execute 'node': No such file or directory\n")
 		}, "Set wall.image or --image to an image with node, such as one built FROM qory-agent, then run again. The check for spec could not start: env: can't execute 'node': No such file or directory."},
 		{"interpreter", "#!/usr/local/bin/deno run", func(e *engine) {
 			e.exit(127, "", "sh: /usr/local/bin/deno: not found\n")
-		}, "Install the program PROGRAM, and push again. The check for spec could not start: sh: /usr/local/bin/deno: not found."},
+		}, "Install the program PROGRAM, then run again. The check for spec could not start: sh: /usr/local/bin/deno: not found."},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -934,7 +934,7 @@ func TestARealCheckRunsInTheEngine(t *testing.T) {
 		t.Errorf("the check whose linter is not there got %+v", r)
 	}
 	missing := filepath.Join(home, "modules", "core", "missing")
-	if r := check(checker(missing)); r == nil || !strings.HasPrefix(r.Message, "Install the program "+missing+", and push again. The check for spec could not start: exec "+missing+" failed: No such file or directory.") {
+	if r := check(checker(missing)); r == nil || !strings.HasPrefix(r.Message, "Install the program "+missing+", then run again. The check for spec could not start: exec "+missing+" failed: No such file or directory.") {
 		t.Errorf("the missing program got %+v", r)
 	}
 	slow := write("slow", "#!/bin/sh\nsleep 30\n")

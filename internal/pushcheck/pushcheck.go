@@ -72,8 +72,8 @@ const (
 )
 
 // The texts of a check that did not pass. The program that pushed gets the fix, ", and
-// push again.", or ", then run again." for textNoNode, then the cause; the push step's
-// line has the fix, then the cause.
+// push again.", or ", then run again." for textNoNode and textNoProgram, then the cause;
+// the push step's line has the fix, then the cause.
 const (
 	textFailed      = "The check for %s failed:"
 	textFailedFix   = "Fix each finding below and push again. "
@@ -215,8 +215,8 @@ func failure(fix, cause string) *Failure {
 }
 
 // failureThen is [failure] whose Message has then after the fix in place of ", and push
-// again.": for a fix that only a new run applies, such as a new image of the checks,
-// which the run reads once at its start.
+// again.": for a fix that only a new run applies, such as a new image of the checks or
+// a new program in the harness home, which the run reads once at its start.
 func failureThen(fix, then, cause string) *Failure {
 	f := &Failure{Message: fix + then, Step: fix + "."}
 	if cause != "" {
@@ -631,7 +631,7 @@ func (c *Checker) failure(artifactType, program string, end ended) *Failure {
 		if namesNode(program) {
 			return failureThen(textNoNode, ", then run again.", cause)
 		}
-		return failure(fmt.Sprintf(textNoProgram, exports.Value(program, false)), cause)
+		return failureThen(fmt.Sprintf(textNoProgram, exports.Value(program, false)), ", then run again.", cause)
 	case end.exitCode == 0:
 		return nil
 	}
