@@ -1,10 +1,12 @@
 package module
 
 import (
+	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/qoryai/qory/internal/stack"
 )
@@ -39,12 +41,12 @@ func TestReadManifestRefusesRolesItDoesNotRead(t *testing.T) {
 	const head = "apiVersion: qory.dev/v1alpha1\nname: typescript\n"
 	for _, c := range []struct{ body, want string }{
 		{"roles:\n  skills:\n    x: many\n", "Set roles.skills.x of the module to one.\n  Only an agents role can be a group. The map is in {path}."},
-		{"roles:\n  agents:\n    developer: [one, one]\n", "Set roles.agents.developer to one or many in {path}.\n  One entry fills a role and several fill a group, and the value is a list."},
-		{"provides:\n  skills:\n    lint: [a, b]\n", "Write one name for provides.skills.lint in {path}.\n  Only an agents role can be a group, and the value is a list."},
+		{"roles:\n  agents:\n    developer: [one, one]\n", "Set roles.agents.developer to one or many.\n  One entry fills a role and several fill a group, and the value is a list.\n  roles is in {path}."},
+		{"provides:\n  skills:\n    lint: [a, b]\n", "Write one name for provides.skills.lint.\n  Only an agents role can be a group, and the value is a list.\n  provides is in {path}."},
 		{"provides:\n  agents/developer: typescript-developer\n", "Write provides as provides.agents.developer: typescript-developer.\n  The keys of provides are kinds, and agents/developer is a kind and a role.\n  provides is in {path}."},
-		{"provides:\n  mcp:\n    a: b\n", `Use agents, commands or skills as a kind under provides in {path}: "mcp" is none of them.`},
-		{"provides:\n  agents:\n    developer: qak_/x\n", "Set provides.agents.developer in {path} to an entry's name"},
-		{"provides:\n  skills:\n    qak_x: [a, b]\n", "Write one name for provides.skills.(a name that contains an access key secret) in {path}.\n"},
+		{"provides:\n  mcp:\n    a: b\n", "Use agents, commands, or skills as a kind under provides: \"mcp\" is none of them.\n  provides is in {path}."},
+		{"provides:\n  agents:\n    developer: qak_/x\n", "Set provides.agents.developer to an entry's name"},
+		{"provides:\n  skills:\n    qak_x: [a, b]\n", "Write one name for provides.skills.(a name that contains an access key secret).\n"},
 		{"roles:\n  skills:\n    qak_x: many\n", "Set roles.skills.(a name that contains an access key secret) of the module to one.\n  Only an agents role can be a group. The map is in {path}."},
 		{"provides:\n  agents:\n    qak_x: a\n    qak_x: b\n", "{path}: provides: "},
 	} {
@@ -56,6 +58,40 @@ func TestReadManifestRefusesRolesItDoesNotRead(t *testing.T) {
 		}
 		if err != nil && strings.Contains(err.Error(), "qak_") {
 			t.Errorf("%q: the refusal contains the secret: %v", c.body, err)
+		}
+	}
+}
+
+// TestRolesRefusalsKeepTheFixLineShortUnderALongPath is a manifest under a directory of
+// 150 characters with a roles or provides value qory does not read: the first line is
+// the fix, at most 100 characters and with no path, and the last line has the path.
+func TestRolesRefusalsKeepTheFixLineShortUnderALongPath(t *testing.T) {
+	const head = "apiVersion: qory.dev/v1alpha1\nname: typescript\n"
+	for _, body := range []string{
+		"roles:\n  agents:\n    developer: [one, one]\n",
+		"provides:\n  skills:\n    lint: [a, b]\n",
+		"provides:\n  mcp:\n    a: b\n",
+		"provides:\n  agents/developer: typescript-developer\n",
+	} {
+		dir := filepath.Join(t.TempDir(), strings.Repeat("d", 150))
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		path := filepath.Join(dir, ManifestName)
+		if err := os.WriteFile(path, []byte(head+body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		_, err := ReadManifest(dir)
+		if err == nil {
+			t.Errorf("%q: no refusal", body)
+			continue
+		}
+		lines := strings.Split(err.Error(), "\n")
+		if n := utf8.RuneCountInString(lines[0]); n > 100 || strings.Contains(lines[0], dir) {
+			t.Errorf("%q: the first line has %d characters, or the path: %s", body, n, lines[0])
+		}
+		if last := lines[len(lines)-1]; !strings.HasSuffix(last, " is in "+path+".") {
+			t.Errorf("%q: the last line is %q, want it to end with the path", body, last)
 		}
 	}
 }
