@@ -201,29 +201,6 @@ func TestAWriteRunWithNoWallStops(t *testing.T) {
 	}
 }
 
-// TestAWriteRunWithNoWallFetchesNothing is a run whose documents have access write, with
-// a run configuration that lists the repository example-org/hello: with no wall, the run
-// has no fetch of the repository into the working folder, and stops after the compose
-// with write_needs_wall. The same run behind a wall fetches it.
-func TestAWriteRunWithNoWallFetchesNothing(t *testing.T) {
-	const fetch = "qory run: fetched example-org/hello at "
-	t.Run("behind a wall", func(t *testing.T) {
-		listsRepositories(t)
-		r, _ := readRunDocuments(t, nil, declares("write"), nil, readImage, "")
-		if !r.joined {
-			t.Fatalf("%v (exit %d), want the join\n%s", r.err, cmd.ExitCode(r.err), r.out)
-		}
-		wants(t, r.out, fetch)
-	})
-	t.Run("with no wall", func(t *testing.T) {
-		listsRepositories(t)
-		r := runFromCode(t, declares("write"), nil)
-		checkStopped(t, r, "", "write_needs_wall")
-		wants(t, r.out+r.err.Error(), writeNeedsWallLine, "qory run: composed ")
-		lacks(t, r.out, fetch)
-	})
-}
-
 // TestAGatewayTakesTheCloseOfAWriteRunWithNoWall is each run of
 // [TestAWriteRunWithNoWallStops] opened and closed at a gateway of Forager's in this
 // process: the gateway accepts the close, so the last run.exited of the gateway's record

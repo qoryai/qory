@@ -370,10 +370,8 @@ release may change what an existing document does, and states it under Upgrading
 - A run from a run code that may write the checkout needs a wall: with no wall, it stops
   after the compose, exit 1, and closes `failed` with `write_needs_wall`, since its agent
   would run as this machine's user. A run is such a run when neither `access` in its
-  documents nor its workflow's access in the stack is `read`. A run with no wall whose
-  documents have `access` `write` fetches no repository of the run configuration into the
-  working folder. A run you start yourself has no run code and still runs without a wall.
-  See §Read workflows in `docs/run.md`.
+  documents nor its workflow's access in the stack is `read`. A run you start yourself has
+  no run code and still runs without a wall. See §Read workflows in `docs/run.md`.
 - `qory artifact pull` and the working folder of a push check take, of each artifact, the
   newest version that the run API's artifact index does not mark `cancelled`. A version
   that a cancelled run made counts for no stage, and an artifact whose versions are all

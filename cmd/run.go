@@ -881,11 +881,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			// compose reads the target version, and the branch is checked out last, so no
 			// file of the branch reaches the harness.
 			hostWork := func() error {
-				// A run whose documents say write, with no wall, never fetches: the fetch runs git as
-				// this machine's user, and the run stops after the compose with a reason that
-				// the composed stack sets, see prepareLaunch.
-				noFetch := fromCode.writes() && !walled
-				if run.Repositories() != "" && !noFetch {
+				if run.Repositories() != "" {
 					var err error
 					if branch, err = fromCode.readBranch(ctx, run, timeout, opened); err != nil {
 						return &runLineError{err}
