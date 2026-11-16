@@ -1,2 +1,2 @@
-Rename role agents/reviewer in the provides of module ts.
+Rename role provides.agents.reviewer in module ts.
   Module core ships agent reviewer, and a role's name is no entry's.

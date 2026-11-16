@@ -928,7 +928,7 @@ func checkResolved(res *Result, requires map[string]map[string][]Need, dropped m
 					continue
 				}
 				if r.Module != "" {
-					lines = append(lines, fmt.Sprintf("Rename role %s in the provides of module %s.\n  Module %s ships %s, and a role's name is no entry's.", shown(role), checkoutName(res, r.Module), checkoutName(res, e.Module), described(kind, name)))
+					lines = append(lines, fmt.Sprintf("Rename role provides.%s in module %s.\n  Module %s ships %s, and a role's name is no entry's.", bindKey(role), checkoutName(res, r.Module), checkoutName(res, e.Module), described(kind, name)))
 					continue
 				}
 				lines = append(lines, fmt.Sprintf("Rename role %s in bind, or rename %s in module %s.\n  The bind defines role %s, and module %s ships %s: a role and an entry cannot share a name.", bindKey(role), described(kind, name), checkoutName(res, e.Module), bindKey(role), checkoutName(res, e.Module), described(kind, name)))
