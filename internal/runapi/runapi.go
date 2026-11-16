@@ -94,6 +94,11 @@ func New(baseURL string, client *http.Client) (*Client, error) {
 	return &Client{base: strings.TrimRight(baseURL, "/"), http: client}, nil
 }
 
+// ProcessTypes are the four artifact types that Qory Apiary reads itself to drive the
+// process: questions, review-comments, verdict and proposal. A run cannot withdraw a name
+// of these types.
+var ProcessTypes = []string{"questions", "review-comments", "verdict", "proposal"}
+
 // VersionRef is one version of an artifact.
 type VersionRef struct {
 	ID     string `json:"id"`

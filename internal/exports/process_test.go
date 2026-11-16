@@ -593,6 +593,8 @@ func TestVerifyChecksArtifactTypes(t *testing.T) {
 		{"\n  - {name: mockup, owner: acme}", "Remove the key \"owner\" from entry 1 of artifact_types.\n  An artifact type has only name, base_view, size_limit, max_files, json_schema, and withdrawable.\n  The entry is in {file}."},
 		{"\n  - {name: mockup, [a]: b}", "Remove the key a list from entry 1 of artifact_types.\n  An artifact type has only name, base_view, size_limit, max_files, json_schema, and withdrawable.\n  The entry is in {file}."},
 		{"\n  - {name: mockup, withdrawable: \"no\"}", "Set withdrawable of artifact type mockup to true or false.\n  withdrawable is \"no\".\n  The type is in {file}."},
+		{"\n  - {name: mockup, withdrawable: !!bool no}", "Set withdrawable of artifact type mockup to true or false.\n  withdrawable is \"no\".\n  The type is in {file}."},
+		{"\n  - {name: mockup, withdrawable: !!bool off}", "Set withdrawable of artifact type mockup to true or false.\n  withdrawable is \"off\".\n  The type is in {file}."},
 		{"\n  - {name: mockup, withdrawable: ~}", "Set withdrawable of artifact type mockup to true or false.\n  withdrawable is null.\n  The type is in {file}."},
 		{"\n  - {name: mockup, withdrawable: [a]}", "Set withdrawable of artifact type mockup to true or false.\n  withdrawable is a list.\n  The type is in {file}."},
 		{"\n  - {name: mockup, withdrawable: false, owner: acme}", "Remove the key \"owner\" from entry 1 of artifact_types.\n  An artifact type has only name, base_view, size_limit, max_files, json_schema, and withdrawable.\n  The entry is in {file}."},
@@ -656,6 +658,12 @@ func TestNotWithdrawable(t *testing.T) {
 		got, err := factory(t, body).NotWithdrawable()
 		if err != nil || fmt.Sprint(got) != want {
 			t.Errorf("%s: got %v, %v, want %s", body[len(process):], got, err, want)
+		}
+	}
+	for _, value := range []string{`"no"`, "!!bool no", "!!bool off"} {
+		e := factory(t, withTypes("\n  - {name: mockup, withdrawable: "+value+"}"))
+		if _, err := e.NotWithdrawable(); err == nil || !strings.HasPrefix(err.Error(), "Set withdrawable of artifact type mockup to true or false.\n") {
+			t.Errorf("%s: %v", value, err)
 		}
 	}
 	e := factory(t, withTypes("\n  - {name: mockup, withdrawable: \"no\"}"))

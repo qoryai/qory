@@ -2927,10 +2927,14 @@ In a run, the types `questions` and `review-comments` take only the name `main`.
 
 `qory artifact push --withdraw` exits 4 with a fix line, and sends nothing, for a name with no
 version, a name whose newest version is already a withdrawal, an upload by a person, a
-version that a member approved at a gate, a type that the process template sets
-`withdrawable: false` for, and files given with `--withdraw`. In a run, Qory Apiary knows the
-template, and qory passes on its refusal. Outside a run, qory reads the template from the
-factory modules that the checkout exports, and has no approvals to read.
+version that a member approved at a gate, and files given with `--withdraw`.
+
+A run cannot withdraw `questions`, `review-comments`, `verdict` or `proposal`, which Qory
+Apiary reads itself, or a type that the process template sets `withdrawable: false` for. In
+a run, qory sends that push, Qory Apiary reads the template's artifact types and refuses it
+with 422, and qory exits 4 with that refusal. Outside a run, qory refuses those types
+itself, writes nothing, reads the template from the factory modules that the checkout
+exports, and has no approvals to read.
 
 `escalate` needs `--points <file>`, and `passed` and `changes-requested` take no
 `--points`. The file is a JSON array of 1 to 20 points for a person, in the [verdict

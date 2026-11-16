@@ -20,9 +20,10 @@ import (
 // The texts of qory artifact push --withdraw for a push that qory refuses, from the
 // decision 654 (c). Each starts with its fix; [ExitCode] gives each [ExitArtifactRefused].
 const (
+	textWithdrawProcess   = "Push a new version of %s instead.\n  Qory Apiary reads %s itself, so a run cannot withdraw them."
 	textWithdrawLocked    = "Push a new version of %s instead.\n  The artifact type %s has withdrawable set to false, so a run cannot withdraw its names."
 	textWithdrawApproved  = "Push a new version of %s/%s instead.\n  A member approved its newest version, v%d, so a run cannot withdraw the name."
-	textWithdrawUnknown   = "Define or switch on the artifact type %s in the workspace's Artifact types.\n  Then run the round again. The workspace has no such type, or hides it."
+	textWithdrawUnknown   = "Define or switch on the artifact type %s in the workspace's Artifact types.\n  Then run the round again. The workspace has no such type, or the type is switched off."
 	textWithdrawNoVersion = "Withdraw only a stored artifact.\n  %s/%s has no version outside cancelled runs."
 	textWithdrawFiles     = "Pass either files or --withdraw.\n  A withdrawal stores no files, and the command has %d %s: %s."
 	textWithdrawAlready   = "Leave %s/%s as it is.\n  Its newest version, v%d, is already a withdrawal."
@@ -56,8 +57,8 @@ func withdrawArtifact(c *cobra.Command, push runapi.Push, files []string) error 
 		return err
 	}
 
-	// Outside a run, qory reads the rule of the type itself. In a run, Qory Apiary knows
-	// the template of the workspace, and qory reads its refusal.
+	// Outside a run, qory applies the rules of the type itself. In a run, Qory Apiary reads
+	// the artifact types of the workspace's template, and qory shows its refusal.
 	if client == nil {
 		if err := checkWithdrawable(push.Type); err != nil {
 			return err
@@ -138,11 +139,20 @@ func approvedByMember(version runapi.Version) bool {
 	return slices.ContainsFunc(version.Approvals, func(a runapi.Approval) bool { return !a.Automatic })
 }
 
-// checkWithdrawable is the refusal of a withdrawal of artifactType outside a run: the
-// type's entry in the artifact_types of a factory module that the checkout exports has
-// withdrawable set to false. A checkout that exports no module has no such entry. The
-// store has no approvals, so the rule of an approved version has nothing to read.
+// checkWithdrawable is the refusal of a withdrawal of artifactType outside a run: the type
+// is one of [runapi.ProcessTypes], which Qory Apiary reads itself, or its entry in the
+// artifact_types of a factory module that the checkout exports has withdrawable set to
+// false. A checkout that exports no module has no such entry. The refusal for the first
+// reason is the text of the run API's 422 type_not_withdrawable for it. The store has no
+// approvals, so the rule of an approved version has nothing to read. Nothing is written.
 func checkWithdrawable(artifactType string) error {
+	if slices.Contains(runapi.ProcessTypes, artifactType) {
+		list := runapi.ProcessTypes
+		last := len(list) - 1
+
+		return refused(fmt.Sprintf(textWithdrawProcess, artifactType, strings.Join(list[:last], ", ")+" and "+list[last]))
+	}
+
 	root, err := storeRoot()
 	if err != nil {
 		return err

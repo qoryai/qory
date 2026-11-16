@@ -157,7 +157,7 @@ func checkArtifactType(entry *yaml.Node, i int, patterns *patternBudget) (name, 
 	}
 	name = n.Value
 	label = "artifact type " + name
-	if w := value(entry, "withdrawable"); w != nil && (w.Kind != yaml.ScalarNode || w.Tag != "!!bool") {
+	if w := value(entry, "withdrawable"); w != nil && !isBool(w) {
 		shown := scalarText(w)
 		if w.Tag == "!!null" {
 			shown = "null"
@@ -583,7 +583,7 @@ func (e *Exports) NotWithdrawable() ([]string, error) {
 			return nil, DecodeError(file, err)
 		}
 		for _, entry := range process.ArtifactTypes.Content {
-			if flag := value(entry, "withdrawable"); flag != nil && flag.Tag == "!!bool" && !decodesTrue(flag) {
+			if flag := value(entry, "withdrawable"); flag != nil && isBool(flag) && !boolValue(flag) {
 				if name := value(entry, "name"); name != nil && !slices.Contains(names, name.Value) {
 					names = append(names, name.Value)
 				}
@@ -593,10 +593,18 @@ func (e *Exports) NotWithdrawable() ([]string, error) {
 	return names, nil
 }
 
-// decodesTrue reports whether n, a node tagged !!bool, decodes as true, as it does for
-// every spelling of a YAML boolean that [checkArtifactType] accepts: false, False and
-// FALSE are not true.
-func decodesTrue(n *yaml.Node) bool {
+// isBool reports whether n is a YAML boolean that decodes as one: true, false, and their
+// capitalised forms. A scalar with the tag !!bool and a value that is no boolean, such as
+// !!bool no, is not.
+func isBool(n *yaml.Node) bool {
 	var b bool
-	return n.Decode(&b) != nil || b
+	return n.Kind == yaml.ScalarNode && n.Tag == "!!bool" && n.Decode(&b) == nil
+}
+
+// boolValue is the value of n, for which [isBool] is true.
+func boolValue(n *yaml.Node) bool {
+	var b bool
+	_ = n.Decode(&b)
+
+	return b
 }

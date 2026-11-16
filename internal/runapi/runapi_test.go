@@ -480,6 +480,15 @@ func TestPushArtifactLeavesOutAnEmptyNameAndNote(t *testing.T) {
 	}
 }
 
+// TestProcessTypesAreTheFourThatApiaryReads pins the list: Qory Apiary's run API refuses a
+// withdrawal of these types with 422 type_not_withdrawable.
+func TestProcessTypesAreTheFourThatApiaryReads(t *testing.T) {
+	want := []string{"questions", "review-comments", "verdict", "proposal"}
+	if fmt.Sprint(runapi.ProcessTypes) != fmt.Sprint(want) {
+		t.Errorf("ProcessTypes = %v, want %v", runapi.ProcessTypes, want)
+	}
+}
+
 func TestPushArtifactSendsAWithdrawalWithNoFiles(t *testing.T) {
 	client := serve(t, func(w http.ResponseWriter, r *http.Request) {
 		raw, _ := io.ReadAll(r.Body)

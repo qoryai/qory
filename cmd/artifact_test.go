@@ -1066,9 +1066,9 @@ func TestArtifactPushWithdrawOfARefusalAfterTheIndex(t *testing.T) {
 	}
 }
 
-// TestArtifactPushWithdrawOfATypeTheWorkspaceLost is a 422 unknown_type for a withdrawal: the
-// workspace has no such artifact type any more, or hides it. It exits 4 with its own text, not
-// the text for a name with no version, and with the type.
+// TestArtifactPushWithdrawOfATypeTheWorkspaceLost is a 422 unknown_type for a withdrawal:
+// the workspace has no such artifact type any more, or the type is switched off. It exits 4
+// with its own text, not the text for a name with no version, and with the type.
 func TestArtifactPushWithdrawOfATypeTheWorkspaceLost(t *testing.T) {
 	inCheckout(t)
 	server := startRunAPI(t)
@@ -1078,7 +1078,7 @@ func TestArtifactPushWithdrawOfATypeTheWorkspaceLost(t *testing.T) {
 
 	_, err := run(t, "artifact", "push", "demo-script", "--name", "scenario-2", "--withdraw")
 	wantExit(t, err, cmd.ExitArtifactRefused, "Define or switch on the artifact type demo-script in the workspace's Artifact types.\n  "+
-		"Then run the round again. The workspace has no such type, or hides it.")
+		"Then run the round again. The workspace has no such type, or the type is switched off.")
 
 	if len(server.pushes) != 1 {
 		t.Errorf("pushes = %v", server.pushes)
@@ -1448,6 +1448,37 @@ func TestArtifactPushWithdrawOutsideARunReadsTheTemplate(t *testing.T) {
 	for _, kind := range []string{"screenshot", "build-ledger", "demo-script"} {
 		_, err := run(t, "artifact", "push", "--withdraw", kind)
 		wantExit(t, err, cmd.ExitArtifactRefused, "Withdraw only a stored artifact.\n  "+kind+"/main has no version outside cancelled runs.")
+	}
+}
+
+// TestArtifactPushWithdrawOutsideARunRefusesTheTypesApiaryReads is a withdrawal of each of
+// the four types that Qory Apiary reads itself, outside a run: exit 4 with the text of the
+// run API's 422 type_not_withdrawable for it, before the other refusals, and nothing
+// written, with a file argument too.
+func TestArtifactPushWithdrawOutsideARunRefusesTheTypesApiaryReads(t *testing.T) {
+	for _, kind := range []string{"questions", "review-comments", "verdict", "proposal"} {
+		t.Run(kind, func(t *testing.T) {
+			root := inCheckout(t)
+			t.Setenv("QORY_RUN_API", "")
+
+			want := "Push a new version of " + kind + " instead.\n  Qory Apiary reads questions, review-comments, verdict and proposal itself, so a run cannot withdraw them."
+
+			for _, args := range [][]string{
+				{"artifact", "push", "--withdraw", kind},
+				{"artifact", "push", "--withdraw", kind, "a.json", "--name", "main"},
+			} {
+				_, err := run(t, args...)
+				wantExit(t, err, cmd.ExitArtifactRefused, want)
+
+				if err.Error() != want {
+					t.Errorf("err = %q, want %q", err, want)
+				}
+			}
+
+			if _, err := os.Stat(filepath.Join(root, ".qory")); !os.IsNotExist(err) {
+				t.Errorf(".qory after a refusal: %v", err)
+			}
+		})
 	}
 }
 

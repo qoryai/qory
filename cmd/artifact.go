@@ -494,9 +494,11 @@ newest version is withdrawn. A later push of files lists the name again.
 
 qory exits ` + strconv.Itoa(ExitArtifactRefused) + ` with a fix line, and sends nothing, for a withdrawal of a name with no version,
 a name whose newest version is already a withdrawal, an upload by a person, or a version
-that a member approved at a gate, and for files given with --withdraw. It also exits ` + strconv.Itoa(ExitArtifactRefused) + `
-for a type that the process template sets withdrawable: false for. In a run, Qory Apiary
-knows the template, and qory passes on its refusal. Outside a run, qory reads the
+that a member approved at a gate, and for files given with --withdraw. A run cannot
+withdraw questions, review-comments, verdict or proposal, which Qory Apiary reads itself,
+or a type that the process template sets withdrawable: false for. In a run, qory sends
+that push, Qory Apiary reads the template's artifact types and refuses it with 422, and
+qory exits ` + strconv.Itoa(ExitArtifactRefused) + ` with that refusal. Outside a run, qory refuses those types itself, reads the
 template from the factory modules that the checkout exports, and has no approvals to read.
 
 Outside a run, qory keeps the files, or the record of a withdrawal, in .qory/artifacts and
