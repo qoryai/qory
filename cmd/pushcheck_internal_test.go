@@ -326,7 +326,7 @@ func TestARunCodeWithNoDefaultImageStops(t *testing.T) {
 	spec.Wall = &wall.Docker{Command: docker}
 	run := imageAPI{runAPIOnly: runAPIOnly{base: "http://run-api.qory.invalid/v1/runs/r1", dir: t.TempDir()}, ref: "registry.example/devcontainer:1"}
 	checker, err := pushChecker(context.Background(), run, t.TempDir(), "r1", spec, true, true)
-	want := "Set wall.image in forager.yaml, then take the work item in again in Qory Apiary: push checks run in the wall's default image; the code is used"
+	want := "Set wall.image in forager.yaml, then take the work item in again in Qory Apiary.\n  Push checks run in the wall's default image; the code is used"
 	if checker != nil || err == nil || err.Error() != want {
 		t.Fatalf("from a run code: %v, %v, want %q", checker, err, want)
 	}
