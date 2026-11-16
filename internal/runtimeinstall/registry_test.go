@@ -450,7 +450,7 @@ func TestAWaitingFetchTellsItsProgress(t *testing.T) {
 		if !errors.Is(err, context.Canceled) {
 			t.Fatalf("the install returned %v, want the end of the context", err)
 		}
-		want := f.reg.Host() + " has not returned the newest Claude Code yet (503); check pool.registry"
+		want := f.reg.Host() + " has not returned Claude Code yet (503); check pool.registry"
 		if len(lines) != 3 || lines[0] != want || lines[1] != want || lines[2] != want {
 			t.Fatalf("lines = %q, want 3 lines of %q (at the first retry, at 5 and at 10 minutes)", lines, want)
 		}
@@ -466,7 +466,7 @@ func TestAWaitingFetchTellsItsProgress(t *testing.T) {
 			Runtime: "claude", Folder: t.TempDir(),
 			Progress: func(line string) { lines = append(lines, line) },
 		})
-		want := host + " has not returned the newest Claude Code yet (no response); check pool.registry"
+		want := host + " has not returned Claude Code yet (no response); check pool.registry"
 		if len(lines) != 1 || lines[0] != want {
 			t.Fatalf("lines = %q, want %q", lines, want)
 		}
@@ -501,6 +501,21 @@ func TestTheWaitingLineIsAtMost100Characters(t *testing.T) {
 	}
 	got := "qory run: " + lines[0]
 	if want := "qory run: apiary.example.com has not returned Claude Code 2.1.3 yet (503); check pool.registry"; got != want || len(got) > 100 {
+		t.Fatalf("line = %q (%d characters), want %q, at most 100", got, len(got), want)
+	}
+}
+
+// TestTheWaitingLineWithNoVersionIsAtMost100Characters has the line of the worst case of
+// a host such as apiary.example.com: no version known yet, and no response, with qory
+// run's prefix.
+func TestTheWaitingLineWithNoVersionIsAtMost100Characters(t *testing.T) {
+	var lines []string
+	runtimeinstall.NoteForTest("apiary.example.com", "claude", "newest", "no response", func(line string) { lines = append(lines, line) })
+	if len(lines) != 1 {
+		t.Fatalf("lines = %q", lines)
+	}
+	got := "qory run: " + lines[0]
+	if want := "qory run: apiary.example.com has not returned Claude Code yet (no response); check pool.registry"; got != want || len(got) > 100 {
 		t.Fatalf("line = %q (%d characters), want %q, at most 100", got, len(got), want)
 	}
 }

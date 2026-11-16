@@ -479,8 +479,8 @@ func TestARegistryThatKeepsReturning503StopsAtTheTimeLimit(t *testing.T) {
 	if took := time.Since(start); took > 3*time.Second+4*time.Second {
 		t.Errorf("the run took %s with a time limit of 3s", took)
 	}
-	wants(t, r.out, "the run was cancelled at its time limit of 3s, before claude started", "qory run: "+reg.Host()+" has not returned the newest Claude Code yet (503); check pool.registry\n")
-	if n := strings.Count(r.out, " has not returned the newest Claude Code yet"); n != 1 {
+	wants(t, r.out, "the run was cancelled at its time limit of 3s, before claude started", "qory run: "+reg.Host()+" has not returned Claude Code yet (503); check pool.registry\n")
+	if n := strings.Count(r.out, " has not returned Claude Code yet"); n != 1 {
 		t.Errorf("the run printed the waiting line %d times:\n%s", n, r.out)
 	}
 	lacks(t, r.out, "Run again with more time", "installed claude")
@@ -505,7 +505,7 @@ func TestARegistryThatKeepsReturning503StopsAtSIGTERM(t *testing.T) {
 	if cmd.ExitCode(r.err) != 1 || len(r.joins) != 0 {
 		t.Fatalf("%d joins, %v (exit %d)\n%s", len(r.joins), r.err, cmd.ExitCode(r.err), r.out)
 	}
-	wants(t, r.out, "qory run: "+reg.Host()+" has not returned the newest Claude Code yet", "the run was cancelled: qory run got SIGTERM before claude started")
+	wants(t, r.out, "qory run: "+reg.Host()+" has not returned Claude Code yet", "the run was cancelled: qory run got SIGTERM before claude started")
 	lacks(t, r.out, "Run again with more time", "installed claude")
 }
 

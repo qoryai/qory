@@ -447,9 +447,9 @@ func (r *registry) note(ctx context.Context, version, answer string) {
 		return
 	}
 	r.noted, r.lastNote = true, t
-	subject := "the newest " + displayName(r.runtime)
+	subject := displayName(r.runtime)
 	if version != "newest" {
-		subject = displayName(r.runtime) + " " + version
+		subject += " " + version
 	}
 	report(fmt.Sprintf("%s has not returned %s yet (%s); check pool.registry", r.host, subject, answer))
 }
