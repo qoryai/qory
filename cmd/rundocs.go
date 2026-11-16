@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -46,6 +47,10 @@ const codeUsedStartStage = codeUsed + ", so start the stage again from the work 
 
 // inputsFile is the file of a run code's inputs, in the run's inputs folder.
 const inputsFile = "inputs.json"
+
+// textInputsHaveQory is the line of a run whose inputs have the member [inputsMember],
+// which qory adds.
+const textInputsHaveQory = "remove the input " + inputsMember + ": qory adds that member to inputs.json"
 
 // runAnswerDocuments is the documents of the verified run answer ans, the bytes as the
 // server signed them.
@@ -147,6 +152,9 @@ func codeDocumentsOf(documents json.RawMessage) (contracts.Documents, error) {
 func codeRunOf(doc contracts.Documents) (*codeRun, error) {
 	if doc.Workflow == "" {
 		return nil, errors.New("set a workflow for the workspace in Qory Apiary, then take the work item in again: the response to the run code has no workflow" + codeUsed)
+	}
+	if hasQoryMember(doc.Inputs) {
+		return nil, errors.New(textInputsHaveQory + codeUsed)
 	}
 	hidden := doc.HarnessHidden != nil && *doc.HarnessHidden
 	var minutes int
@@ -456,13 +464,14 @@ func (r *codeRun) startLine(runID string) string {
 	return fmt.Sprintf("qory run: the run %s starts the workflow %s of %s on %s", runID, r.workflow, r.phrase(), r.runtime)
 }
 
-// writeInputs writes r's inputs, unchanged, to inputs.json, mode 0600, in a new folder
-// in/, mode 0700, of a new temporary folder, and returns in/, links resolved, and what
-// removes the temporary folder. in/ is outside the state directory, which holds the run
-// records that no mount may reach. The temporary folder begins with qory-inputs-:
-// Forager reserves the qory-run-, qory-tool-, qory-wall- and qory-link- folders of the
-// system's temporary directory, and the wall stops a run that mounts one.
-func (r *codeRun) writeInputs() (string, func(), error) {
+// inputsDir makes a new folder in/, mode 0700, in a new temporary folder, for r's
+// inputs.json, which [codeRun.writeInputs] writes once the harness is composed, and
+// returns in/, links resolved, and what removes the temporary folder. in/ is outside the
+// state directory, which holds the run records that no mount may reach. The temporary
+// folder begins with qory-inputs-: Forager reserves the qory-run-, qory-tool-, qory-wall-
+// and qory-link- folders of the system's temporary directory, and the wall stops a run
+// that mounts one.
+func (r *codeRun) inputsDir() (string, func(), error) {
 	top, err := os.MkdirTemp("", "qory-inputs-")
 	if err != nil {
 		return "", func() {}, err
@@ -475,15 +484,75 @@ func (r *codeRun) writeInputs() (string, func(), error) {
 	if err := os.Mkdir(in, 0o700); err != nil {
 		return "", remove, err
 	}
-	f, err := os.OpenFile(filepath.Join(in, inputsFile), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	return in, remove, nil
+}
+
+// inputsMember is the member of inputs.json that qory adds to a run's inputs, with
+// [qoryInputs] as its value. Inputs that have it stop the run, see [codeRunOf].
+const inputsMember = "qory"
+
+// qoryInputs is the value of [inputsMember]: what qory adds to the inputs of a run from
+// a run code. Each field is one member, always written.
+type qoryInputs struct {
+	// HarnessExtensions is the harness report's extensions, {} for none.
+	HarnessExtensions map[string]any `json:"harness_extensions"`
+}
+
+// writeInputs writes inputs.json, mode 0600, into in, the folder of [codeRun.inputsDir]:
+// r's inputs as they came, with the member [inputsMember] set to q added after the
+// others, and returns the file's path.
+func (r *codeRun) writeInputs(in string, q qoryInputs) (string, error) {
+	data, err := withQoryMember(r.inputs, q)
 	if err != nil {
-		return "", remove, err
+		return "", err
 	}
-	if _, err := f.Write(r.inputs); err != nil {
+	path := filepath.Join(in, inputsFile)
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return "", err
+	}
+	if _, err := f.Write(data); err != nil {
 		f.Close()
-		return "", remove, err
+		return "", err
 	}
-	return in, remove, f.Close()
+	return path, f.Close()
+}
+
+// withQoryMember is inputs, a JSON object, with the member [inputsMember] set to q added
+// after its last member; inputs' bytes from its opening brace to its last member stay as
+// they came.
+// q's nil maps are written as {}.
+func withQoryMember(inputs []byte, q qoryInputs) ([]byte, error) {
+	if q.HarnessExtensions == nil {
+		q.HarnessExtensions = map[string]any{}
+	}
+	value, err := json.Marshal(q)
+	if err != nil {
+		return nil, err
+	}
+	trimmed := bytes.TrimSpace(inputs)
+	if !json.Valid(trimmed) || len(trimmed) < 2 || trimmed[0] != '{' || trimmed[len(trimmed)-1] != '}' {
+		return nil, errors.New("the inputs are not a JSON object")
+	}
+	body := trimmed[:len(trimmed)-1]
+	out := append([]byte{}, body...)
+	if len(bytes.TrimSpace(body[1:])) > 0 {
+		out = append(out, ',')
+	}
+	out = append(out, `"`+inputsMember+`":`...)
+	out = append(out, value...)
+	return append(out, '}', '\n'), nil
+}
+
+// hasQoryMember reports whether inputs, a JSON object, has a member [inputsMember] at its
+// top level.
+func hasQoryMember(inputs []byte) bool {
+	var members map[string]json.RawMessage
+	if json.Unmarshal(inputs, &members) != nil {
+		return false
+	}
+	_, ok := members[inputsMember]
+	return ok
 }
 
 // reasonWorkflowNotInHarness is the reason a run from a run code closes with, failed,

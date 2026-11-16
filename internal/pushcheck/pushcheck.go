@@ -184,8 +184,10 @@ type Checker struct {
 	Label string
 	// Mask replaces each secret value of the run in a text; nil leaves the text as it is.
 	Mask func(string) string
-	// Env is the variables, NAME=value, that the check's container gets; nil for none.
-	Env []string
+	// Inputs is the path of the run's inputs.json, "" for a run with none. The check's
+	// container mounts the file read-only at this path, and the program gets
+	// --inputs <path> after the command's arguments, before the pushed files' paths.
+	Inputs string
 	// Limit, when set, replaces [Limit]. Tests set it.
 	Limit time.Duration
 }
@@ -314,6 +316,9 @@ func (c *Checker) Check(ctx context.Context, artifactType string, files []File) 
 	}
 	defer os.RemoveAll(pushed)
 	args := slices.Clone(check.Command[1:])
+	if c.Inputs != "" {
+		args = append(args, "--inputs", c.Inputs)
+	}
 	for i, f := range files {
 		err := writeNew(filepath.Join(pushed, f.Name), f.Content)
 		if errors.Is(err, fs.ErrExist) {
@@ -439,8 +444,12 @@ func (c *Checker) run(ctx context.Context, program string, args []string, pulled
 	if err != nil {
 		return ended{}, err
 	}
-	mounts := make([]string, 0, 3)
-	for _, m := range [][2]string{{c.Home, c.Home}, {pulled, WorkDir}, {pushed, FilesDir}} {
+	binds := [][2]string{{c.Home, c.Home}, {pulled, WorkDir}, {pushed, FilesDir}}
+	if c.Inputs != "" {
+		binds = append(binds, [2]string{c.Inputs, c.Inputs})
+	}
+	mounts := make([]string, 0, len(binds))
+	for _, m := range binds {
 		mount, err := bindMount(m[0], m[1])
 		if err != nil {
 			return ended{}, err
@@ -454,9 +463,6 @@ func (c *Checker) run(ctx context.Context, program string, args []string, pulled
 		create = append(create, "--label", c.Label)
 	}
 	create = append(create, c.limits()...)
-	for _, kv := range c.Env {
-		create = append(create, "--env", kv)
-	}
 	create = append(create, mounts...)
 	create = append(create, "--entrypoint", program, c.Image)
 	create = append(create, args...)

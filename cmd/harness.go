@@ -681,9 +681,6 @@ type composed struct {
 	workflows map[string]stack.Workflow
 	// checkoutOnly is, per runtime composed for, what [render.CheckoutOnly] lists.
 	checkoutOnly map[string][]string
-	// extensions is the path of [render.ExtensionsFile] in the home, written for a run
-	// from a run key or a run code; "" for any other compose.
-	extensions string
 }
 
 // composeHome is [runCompose] returning what it composed; nil after a check or a dry
@@ -728,14 +725,6 @@ func composeHome(out, errOut io.Writer, o composeOptions) (*composed, error) {
 	if err := render.Build(res, at.home, all...); err != nil {
 		return nil, err
 	}
-	// A run from a run key or a run code writes the report's extensions into the home,
-	// which the wall mounts read-only, for a harness's checks to read.
-	extensions := ""
-	if o.run && o.inCheckout {
-		if extensions, err = render.WriteExtensions(at.home, rep.Extensions); err != nil {
-			return nil, err
-		}
-	}
 	if err := write(out, o, at, res, rep, previous, targets, all, force, skippedConfig, u); err != nil {
 		return nil, err
 	}
@@ -747,7 +736,7 @@ func composeHome(out, errOut io.Writer, o composeOptions) (*composed, error) {
 	for _, rt := range targets {
 		checkoutOnly[rt.Name()] = render.CheckoutOnly(rt, res)
 	}
-	return &composed{rep: rep, targets: targets, warnings: pr.warnings, harness: harnessSources(res, o.named()), workflows: workflows, checkoutOnly: checkoutOnly, extensions: extensions}, nil
+	return &composed{rep: rep, targets: targets, warnings: pr.warnings, harness: harnessSources(res, o.named()), workflows: workflows, checkoutOnly: checkoutOnly}, nil
 }
 
 // pushChecksWritable stops a walled run before the home is written when a module

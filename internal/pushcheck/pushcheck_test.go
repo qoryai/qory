@@ -426,23 +426,32 @@ func TestTheWallsLimitsAreTheChecks(t *testing.T) {
 	}
 }
 
-// TestTheCheckersVariablesGoIntoTheContainer is a checker with Env: the check's container
-// gets each variable with --env, in order, and no other --env.
-func TestTheCheckersVariablesGoIntoTheContainer(t *testing.T) {
+// TestTheCheckGetsTheRunsInputs is a checker with Inputs: the check's container mounts
+// the run's inputs.json read-only at its path, which the file is readable at, and the
+// program gets --inputs and the path after the command's arguments, before the pushed
+// files' paths.
+func TestTheCheckGetsTheRunsInputs(t *testing.T) {
 	f := newFixture(t, "#!/usr/bin/env node")
-	f.c.Env = []string{"QORY_HARNESS_EXTENSIONS=" + f.home + "/harness-extensions.json"}
+	inputs := filepath.Join(t.TempDir(), "in", "inputs.json")
+	if err := os.MkdirAll(filepath.Dir(inputs), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(inputs, []byte(`{"qory":{"harness_extensions":{}}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f.c.Inputs = inputs
 	if _, err := f.post(t, "/artifacts", pushBody(t, "spec", [2]string{"spec.md", "x"})); err != nil {
 		t.Fatal(err)
 	}
-	c := f.e.created(t)
-	var got []string
-	for i, a := range c {
-		if a == "--env" && i+1 < len(c) {
-			got = append(got, c[i+1])
-		}
+	line := strings.Join(f.e.created(t), " ")
+	if want := f.program + " " + f.c.Image + " push spec --inputs " + inputs + " " + pushcheck.FilesDir + "/spec.md"; !strings.HasSuffix(line, want) {
+		t.Errorf("the create does not end %q:\n%s", want, line)
 	}
-	if !slices.Equal(got, f.c.Env) {
-		t.Errorf("the create's variables are %q, want %q:\n%s", got, f.c.Env, strings.Join(c, " "))
+	if want := "type=bind,src=" + inputs + ",dst=" + inputs + ",readonly"; !slices.Contains(f.e.mounts, want) {
+		t.Errorf("the mounts %v lack %s", f.e.mounts, want)
+	}
+	if _, ok := f.e.modes[inputs]; !ok {
+		t.Errorf("the engine could not read %s at the create", inputs)
 	}
 }
 
@@ -881,7 +890,8 @@ func TestTheEngineRunsWithoutTheAccessKey(t *testing.T) {
 const realImage = "public.ecr.aws/docker/library/alpine:3.22"
 
 // TestARealCheckRunsInTheEngine runs checks in containers of this machine's engine: one
-// that reads the working folder and the pushed file and passes, one that prints a
+// that reads the working folder and the pushed file and passes, one that reads the run's
+// inputs.json through --inputs and cannot write it, one that prints a
 // finding, one whose node the image lacks, and one past its limit, whose container is
 // removed. It runs only with QORY_TEST_DOCKER=1, docker on the PATH and the image
 // present.
@@ -940,6 +950,17 @@ func TestARealCheckRunsInTheEngine(t *testing.T) {
 	passes := write("passes", "#!/bin/sh\nset -e\ntest \"$(pwd)\" = "+pushcheck.WorkDir+"\ngrep -q version index.json\ngrep -q old spec/main/v1/spec.md\ntest \"$1\" = push\ngrep -q Spec \"$2\"\n! touch \"$2\" 2>/dev/null\n! wget -q -T 2 http://example.com 2>/dev/null\n")
 	if r := check(checker(passes)); r != nil {
 		t.Errorf("the passing check got %+v", r)
+	}
+	// The run's inputs.json: the check reads it through --inputs and cannot change it.
+	inputs := filepath.Join(t.TempDir(), "inputs.json")
+	if err := os.WriteFile(inputs, []byte(`{"qory":{"harness_extensions":{}}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	reads := write("reads", "#!/bin/sh\nset -e\ntest \"$2\" = --inputs\ngrep -q harness_extensions \"$3\"\n! sh -c ': >> \"$3\"' 2>/dev/null\ngrep -q Spec \"$4\"\n")
+	withInputs := checker(reads)
+	withInputs.Inputs = inputs
+	if r := check(withInputs); r != nil {
+		t.Errorf("the check that reads the inputs got %+v", r)
 	}
 	finds := write("finds", "#!/bin/sh\necho \"$(basename \"$2\"): a finding\"\nexit 1\n")
 	if r := check(checker(finds)); r == nil || len(r.Findings) != 1 || r.Findings[0] != "spec.md: a finding" {

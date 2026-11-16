@@ -56,15 +56,6 @@ wall or not, before the run opens and before anything is written:
 set --home to a folder outside /work/app: /work/app/.qory/harness is inside /work/app, and a walled run or a run with a run key writes no harness into the folder it runs in
 ```
 
-A run with a run key or a run code writes the report's `extensions` into the home as
-`harness-extensions.json`, `{"extensions": {…}}`, or `{"extensions": {}}` when the stack
-has none, and sets `QORY_HARNESS_EXTENSIONS` to the file's path in each session of the
-run and in the container of each push check. A program that the harness ships, such as
-a check, reads the stack's extensions there. Behind a wall the home is mounted read-only, so the agent can
-read the file and cannot change it. A run with no wall starts the agent as the user that
-runs qory and wrote the file, so there the agent can change it. A person's run writes no
-such file and sets no such variable. See Launching in `contracts/harness/v1/README.md`.
-
 A walled run gets no link in the folder, whatever `harness.links` sets, so
 `harness.links: checkout` does not stop it. A run with no wall keeps its links. Without the
 links, some programs lose part of the harness, since they read that part from the checkout alone:
@@ -919,8 +910,7 @@ gets `403`.
 Several sources may set a variable of the agent's process. For each name, the run takes
 the value of the highest source that sets it:
 
-1. The values qory and the runtime fix: Forager's names, `QORY_HARNESS_HOME`,
-   `QORY_HARNESS_EXTENSIONS` in a run with a run key or a run code, and the
+1. The values qory and the runtime fix: Forager's names, `QORY_HARNESS_HOME`, and the
    variables of the runtime's launch template, such as Codex's `CODEX_HOME`. No
    other source overrides them, `env` in `qory.yaml`, a settings fragment's and a
    module's export included. The `env` of `harness.launch.<runtime>` replaces the
@@ -1618,9 +1608,16 @@ the work item. Then a run of the step explore:
 - runs the runtime of `run_settings.runtime`, `claude` when the response sets no run
   settings, composed with the model, the effort and the tiers the run settings set, as
   `--model`, `--effort`, `--tier` and `--tier-effort` set them;
-- writes the inputs, unchanged, to `inputs.json`, mode 0600, in a folder `in/`, mode
-  0700, of a new temporary folder, which qory removes when the run ends. Behind a wall,
-  `in/` is mounted read-only at the same path;
+- writes the inputs to `inputs.json`, mode 0600, in a folder `in/`, mode 0700, of a new
+  temporary folder, which qory removes when the run ends. Behind a wall, `in/` is mounted
+  read-only at the same path. The file has the inputs' members as they came, then one
+  member that qory adds once the harness is composed, `qory`:
+  `{"harness_extensions": {…}}`, the harness report's `extensions`, or `{}` when the
+  harness has none. A harness's check reads them from the file whose path follows the
+  workflow's name in the prompt, and a push check gets the same path after `--inputs`
+  (see Push checks in `contracts/harness/v1/README.md`). Inputs that have a member
+  `qory` stop the run before it opens, with exit 1: `remove the input qory: qory adds
+  that member to inputs.json; the code is used`;
 - starts the runtime with its headless start: the arguments that run one prompt with no
   terminal, write the session's output to stdout and exit. The prompt invokes the
   first of these that the runtime can start: the skill `workflow-<workflow>`, the command

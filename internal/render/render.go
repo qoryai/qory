@@ -742,37 +742,6 @@ func writeHooks(res *compose.Result, stage string) error {
 	return WriteFile(stage, HooksFile, append(data, '\n'))
 }
 
-// ExtensionsFile is the file at the root of a home with the extensions of the composed
-// stack, the report's extensions, which a run from a run key or a run code writes for a
-// harness's checks to read. The agent reads it through [ExtensionsVariable].
-const ExtensionsFile = "harness-extensions.json"
-
-// ExtensionsVariable is the variable set to the path of [ExtensionsFile] as the agent's
-// process sees it, in a run that writes the file.
-const ExtensionsVariable = "QORY_HARNESS_EXTENSIONS"
-
-// Extensions is the content of [ExtensionsFile]: the report's extensions, an empty map
-// for none.
-type Extensions struct {
-	Extensions map[string]any `json:"extensions"`
-}
-
-// WriteExtensions writes [ExtensionsFile] into home with extensions, an empty map when
-// extensions is nil, and returns the file's path.
-func WriteExtensions(home string, extensions map[string]any) (string, error) {
-	if extensions == nil {
-		extensions = map[string]any{}
-	}
-	data, err := json.MarshalIndent(Extensions{Extensions: extensions}, "", "  ")
-	if err != nil {
-		return "", err
-	}
-	if err := WriteFile(home, ExtensionsFile, append(data, '\n')); err != nil {
-		return "", err
-	}
-	return filepath.Join(home, ExtensionsFile), nil
-}
-
 // RolesFile is the file at the root of a home with the roles of the composed harness,
 // for a script that starts the members of a group, written only when the harness has a
 // role.

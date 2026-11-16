@@ -503,10 +503,10 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				composing.fromCode = true
 				timeout = provisioner.TimeLimit(fromCode.minutes, 0)
 				var remove func()
-				in, remove, err = fromCode.writeInputs()
+				in, remove, err = fromCode.inputsDir()
 				defer remove()
 				if err != nil {
-					return fmt.Errorf("check the temporary folder %s: qory run could not write the run's inputs there: %w%s", exports.Value(os.TempDir(), false), exports.HideError(err), codeUsed)
+					return inputsNotWritten(err)
 				}
 				if spec.Wall != nil {
 					spec.Mounts = append(spec.Mounts, wall.Mount{Path: in, ReadOnly: true})
@@ -729,6 +729,12 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					fmt.Fprintln(w, "qory run:", checkoutOnlyLine(name, parts, homeGiven || linksNone))
 				}
 				if fromCode != nil {
+					// inputs.json has the inputs and what qory adds, which the report has.
+					var file string
+					if file, err = fromCode.writeInputs(in, qoryInputs{HarnessExtensions: rep.Extensions}); err != nil {
+						return false, inputsNotWritten(err)
+					}
+					checks.inputs = file
 					if extra, err = fromCode.workflowArgs(name, rep, in, run.System()); err != nil {
 						return false, err
 					}
@@ -798,12 +804,6 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				if h, ok := renderer.(render.AgentHomer); ok && dispatched && walled {
 					spec.LaunchFixed, freshHome = withAgentHome(spec.LaunchFixed, h.AgentHomeVariable()), true
 					link = transcriptLinkFor(renderer, rt)
-				}
-				// A run from a run key or a run code reads the report's extensions from the
-				// home. Forager writes a fixed value's path as the agent's process sees it.
-				if c.extensions != "" {
-					spec.LaunchFixed = withFixed(spec.LaunchFixed, render.ExtensionsVariable, c.extensions)
-					checks.extensions = c.extensions
 				}
 				return freshHome, nil
 			}
@@ -2002,6 +2002,12 @@ func withOrigin(labels map[string]string, origin foragerdir.Labels) map[string]s
 		out[k] = v
 	}
 	return out
+}
+
+// inputsNotWritten is the error of a run from a run code whose inputs.json, or its
+// folder, could not be written in the system's temporary folder.
+func inputsNotWritten(err error) error {
+	return fmt.Errorf("check the temporary folder %s: qory run could not write the run's inputs there: %w%s", exports.Value(os.TempDir(), false), exports.HideError(err), codeUsed)
 }
 
 // wallOff is the --wall value that runs without the wall forager.yaml sets.
