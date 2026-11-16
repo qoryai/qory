@@ -35,3 +35,11 @@ func SetStallLimit(limit time.Duration) (restore func()) {
 	stallLimit = limit
 	return func() { stallLimit = old }
 }
+
+// SetCurrentUID makes the install take uid for the user of this process, until the
+// returned restore runs.
+func SetCurrentUID(uid int) (restore func()) {
+	before := currentUID
+	currentUID = func() int { return uid }
+	return func() { currentUID = before }
+}

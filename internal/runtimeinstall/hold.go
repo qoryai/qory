@@ -79,7 +79,8 @@ func (f folder) lockInstall(ctx context.Context, version string) (*os.File, erro
 // Forager checks only the version's folder, so prepare refuses a runtime's folder that
 // existed before this call, and a runtimes folder, that its group or others can write:
 // they could replace a version's folder. A folder that this call makes is set to 0755,
-// whatever the umask. It refuses a link at either folder, and checks no folder above
+// whatever the umask. It refuses a folder that root and the user of this process do not
+// own, and a link at either folder, and checks no folder above
 // them: a shared one such as /tmp is group- and other-writable.
 func (f folder) prepare() error {
 	parent := filepath.Dir(f.base)
@@ -104,15 +105,18 @@ func (f folder) prepare() error {
 		path string
 		made bool
 	}{{parent, parentNew}, {f.base, baseNew}} {
+		i, err := os.Lstat(c.path)
+		if err != nil {
+			return fmt.Errorf(textState+"%w", err)
+		}
+		if ok, uid := ownerOK(i); !ok {
+			return fmt.Errorf("Give %s to root or to the user that runs qory, then run again\n%s is owned by the user id %d, who could replace the runtime's program", c.path, c.path, uid)
+		}
 		if c.made {
 			if err := os.Chmod(c.path, 0o755); err != nil {
 				return fmt.Errorf(textState+"%w", err)
 			}
 			continue
-		}
-		i, err := os.Lstat(c.path)
-		if err != nil {
-			return fmt.Errorf(textState+"%w", err)
 		}
 		if i.Mode().Perm()&0o022 != 0 {
 			return fmt.Errorf("Run chmod go-w %s, then run again\n%s has mode %04o: its group or others could replace the runtime's program", c.path, c.path, i.Mode().Perm())
