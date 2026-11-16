@@ -60,11 +60,14 @@ set --home to a folder outside /work/app: /work/app/.qory/harness is inside /wor
 
 A home that is not for one run alone is held for the run's life: your unwalled run's
 `.qory/harness`, and the home of a walled run with `--home` or `harness.home`. Before it
-composes, `qory run` takes a lock on the file `<home>.lock` beside the home, such as
-`.qory/harness.lock`, which records the run's id, `qory`'s process id and the start time. The
-file stays after the run, and the lock ends with the run. A second run of that home stops before it
-composes, with exit 1, since its compose would replace the first run's home and its end
-would remove the first run's copy of `inputs.json`:
+redeems a run code or composes, `qory run` takes a lock on the file `<home>.lock` beside the home,
+such as `.qory/harness.lock`, which records the run's id, `qory`'s process id and the start time.
+A home in the checkout is kept out of git first, so the lock file shows as no untracked file.
+The file stays after the run, and the lock ends with the run. A second run of that home stops
+with exit 1 before it redeems its run code, so the code stays unused, and before it composes, since
+its compose would replace the first run's home and its end would remove the first run's copy of
+`inputs.json`. `qory harness compose` and `qory harness remove` take the same lock and stop
+with the same lines:
 
 ```text
 Wait for the run that uses this home to end, or set another --home or harness.home.

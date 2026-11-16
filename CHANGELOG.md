@@ -395,10 +395,13 @@ release may change what an existing document does, and states it under Upgrading
   `.qory/harness`, and the home of a walled run with `--home` or `harness.home`. The lock is
   on the file `<home>.lock` beside the home, which records the run's id, qory's process id and
   the start time, and the file stays after the run. A second run of that home stops before
-  its compose with exit 1 and `Wait for the run that uses this home to end, or set another
-  --home or harness.home.`, then the holder and the home on the second line. Before, its
-  compose replaced the first run's home, and its end removed the first run's copy of
-  `inputs.json`. A run with a home for that run alone takes no lock. See `docs/run.md`.
+  it redeems its run code and before its compose, with exit 1 and `Wait for the run that
+  uses this home to end, or set another --home or harness.home.`, then the holder and the
+  home on the second line. `qory harness compose` and `qory harness remove` take the same
+  lock and stop the same way. A home in the checkout is kept out of git before the lock
+  file is made. Before, a second run's compose replaced the first run's home, its end
+  removed the first run's copy of `inputs.json`, and a run code was spent before the stop. A
+  run with a home for that run alone takes no lock. See `docs/run.md`.
 - A run from a run code that may write the checkout needs a wall: with no wall, it stops
   after the compose, exit 1, and closes `failed` with `write_needs_wall`, since its agent
   would run as this machine's user. A run is such a run when neither `access` in its
