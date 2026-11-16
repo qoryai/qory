@@ -1262,6 +1262,55 @@ func TestArtifactPushWithdrawRefusalsKeepLine1Short(t *testing.T) {
 	}
 }
 
+// TestArtifactPushWithdrawMappedRefusalsKeepLine1Short is a 422 of the run API for a
+// withdrawal, with a type and a name of 64 characters each, that qory maps after it read
+// the index: type_not_withdrawable for a name that a member approved, and unknown_type.
+// Line 1 has at most 100 characters and has neither name whole, and later lines have the
+// full names.
+func TestArtifactPushWithdrawMappedRefusalsKeepLine1Short(t *testing.T) {
+	kind, name := strings.Repeat("t", 64), strings.Repeat("n", 64)
+
+	for code, message := range map[string]string{
+		"type_not_withdrawable": "Push a new version of " + kind + "/" + name + " instead. A member approved its newest version, v1, so a run cannot withdraw the name.",
+		"unknown_type":          "Define the artifact type " + kind + " in the workspace's Artifact types, then run the round again.",
+	} {
+		t.Run(code, func(t *testing.T) {
+			inCheckout(t)
+			server := startRunAPI(t)
+			server.index = indexOf(artifactEntry(kind, name, "", 1, versionEntry("av_1", 1, fileEntry("s.json", "one"))))
+			server.status = http.StatusUnprocessableEntity
+			server.response = fmt.Sprintf(`{"error":%q,"message":%q}`, code, message)
+
+			_, err := run(t, "artifact", "push", kind, "--name", name, "--withdraw")
+			if err == nil || cmd.ExitCode(err) != cmd.ExitArtifactRefused {
+				t.Fatalf("err = %v", err)
+			}
+
+			lines := strings.Split(err.Error(), "\n")
+			if n := len([]rune(lines[0])); n > 100 {
+				t.Errorf("line 1 has %d characters: %q", n, lines[0])
+			}
+
+			if strings.Contains(lines[0], kind) || strings.Contains(lines[0], name) {
+				t.Errorf("line 1 has a whole name: %q", lines[0])
+			}
+
+			later := strings.Join(lines[1:], "\n")
+
+			wanted := []string{kind}
+			if code == "type_not_withdrawable" {
+				wanted = append(wanted, name)
+			}
+
+			for _, whole := range wanted {
+				if !strings.Contains(later, " is "+whole+".") {
+					t.Errorf("no later line with the full name %s: %q", whole, err)
+				}
+			}
+		})
+	}
+}
+
 // listTree returns every path under dir, sorted, folders included.
 func listTree(t *testing.T, dir string) []string {
 	t.Helper()
