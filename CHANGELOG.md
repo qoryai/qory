@@ -381,9 +381,9 @@ release may change what an existing document does, and states it under Upgrading
 - qory builds with Forager c68503c1. A run keeps its wall only when a container of
   the run may still run; a network or folder of the wall that could not be removed no longer
   keeps it. The same pin changes four more things you see:
-  - The gateway writes `dev.qory.run.target_write` to the run's record for each git
-    push through its proxy. The event's state is `started`, `changed`, `refused` or
-    `cut`.
+  - For each git push over HTTP through its proxy, the gateway writes
+    `dev.qory.run.target_write` to the run's record twice: first with the state
+    `started`, then with one of `changed`, `refused` or `cut`.
   - `dev.qory.runtime.result` in the record has `usage`, the tokens of the launch so far:
     `input`, `output`, `cache_read` and `cache_write`.
   - The gateway sends `session`, the number of the open session, in each model keys
