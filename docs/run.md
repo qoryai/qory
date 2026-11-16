@@ -894,13 +894,19 @@ compromised registry. If the registry returns 503 or 429, or the request gets no
 response, `qory run` sends the same request again after 2, 4 and 8 seconds, then every
 15 seconds, or after the response's `Retry-After` up to 30 seconds. The registry returns
 503 while it fills its cache of a new version. Only the end of the run
-stops the tries: `qory run` sends the request again until the registry answers, or until
-the run's time limit passes, you cancel it (SIGINT) or it gets SIGTERM. A run that ends while it waits stops with:
+stops the tries: `qory run` sends the request again until the registry returns the file, or
+until the run's time limit passes, you cancel it (SIGINT) or it gets SIGTERM. At the first
+retry, and every 5 minutes after that, `qory run` prints one line on stderr, with the
+status of the last response, or `none` for no response:
 
 ```text
-qory run: Run again with more time
-The run ended before the registry at registry.example.com returned shared/runtimes/claude:newest: context deadline exceeded
+qory run: waiting for registry.example.com to return the newest Claude Code (last answer: 503). If this continues, check pool.registry.
 ```
+
+A run that ends while it waits ends as a run does before its session starts: at the time
+limit with `give the run a longer --timeout: the run was cancelled at its time limit of
+<limit>, before claude started` and exit 124, and at SIGINT or SIGTERM with `the run was
+cancelled: qory run got SIGTERM before claude started` and exit 1.
 
 When the registry returns 401 with a Bearer challenge, `qory run` gets a token from the
 challenge's realm. The realm must be the token route of the Qory Apiary instance that
@@ -984,10 +990,11 @@ for what to remove, only while it has the lock `<runtimes>/claude/.lock`, so a r
 starts during an install keeps its version. Each run holds its version with a shared
 lock on `<runtimes>/claude/.hold-<version>`, which ends when the run ends.
 
-A run that `qory run` killed may leave its container running without a hold. When
-`forager.yaml` sets a wall, the install lists the mounts of the engine's running
-containers (`docker ps`, then `docker inspect`) and keeps each version's folder that a
-mount is, contains or lies in. When the engine does not answer, the install removes no
+A run that `qory run` killed may leave its container running without a hold. The install
+lists the mounts of the engine's running containers (`docker ps`, then `docker inspect`,
+through the wall's command in `forager.yaml`, else `docker`) and keeps each version's
+folder that a mount is, contains or lies in. A machine with no such program has no
+running container. When the program fails in another way, the install removes no
 version's folder.
 
 Two runs that need the same version do not both read its tarball. The run that finds no

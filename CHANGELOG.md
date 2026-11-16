@@ -26,11 +26,14 @@ release may change what an existing document does, and states it under Upgrading
   folder, and prints `qory run: installed claude <version>`. The runs of a pool share one
   runtimes folder in the pool's folder. Each run holds its version until it ends, and
   each install removes older versions that an install made, and temporary entries, that
-  no run holds. With a wall in `forager.yaml`, it keeps a version's folder that a running
-  container mounts, and removes no version's folder when the engine does not list the
-  mounts. Two runs that need one version read its tarball once. A 503 or 429 from
-  the registry is retried until the registry answers or the run ends, with its time
-  limit, a cancel or SIGTERM. A request waits at most 30 seconds to
+  no run holds. It also keeps a version's folder that a running container mounts, listed
+  by the wall's engine program or else `docker`, and removes no version's folder when that
+  program fails; a machine with no `docker` has no running container. Two runs that need
+  one version read its tarball once. A 503 or 429 from the registry is retried until the
+  registry returns the file or the run ends, with its time limit, a cancel or SIGTERM. At
+  the first retry, and every 5 minutes after, `qory run` prints `waiting for <host> to
+  return Claude Code <version> (last answer: 503)`, with `none` for no response, and `If
+  this continues, check pool.registry.` A request waits at most 30 seconds to
   connect, 30 seconds for the TLS handshake, 60 seconds for the response's headers and
   60 seconds for the next byte of a body. A run with no registry whose policy does not
   allow `registry.npmjs.org` stops with the fix first. The run-code file of a pool has
