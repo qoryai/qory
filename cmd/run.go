@@ -103,7 +103,9 @@ or harness.home sets another, and a home inside the folder stops the run. A run 
 key or a run code, and a walled run, with no --home or harness.home, gets a home for that
 run alone, which qory removes when the run ends: runs/<name>-<hash>/<run id> under
 qory/homes. The harness report stays per checkout, as runs/<name>-<hash>-report.json
-there. A run from a run code finds its inputs in $QORY_HARNESS_HOME/inputs.json.
+there. A run from Qory Apiary, with a run code or a run key, finds its inputs in
+$QORY_HARNESS_HOME/inputs.json. A run key's file has the member qory alone. A person's
+run, also one that registers itself through gateway.server.via, has no such file.
 
 The agent is the runtime of the stack's target. Name another first, and the run composes
 for it instead; name one when the target has several. Arguments after -- go to the
@@ -2052,7 +2054,7 @@ func withOrigin(labels map[string]string, origin foragerdir.Labels) map[string]s
 	return out
 }
 
-// inputsNotWritten is the error of a run from a run code whose inputs.json, or its
+// inputsNotWritten is the error of a run from Qory Apiary whose inputs.json, or its
 // folder, could not be written in the system's temporary folder.
 func inputsNotWritten(err error) error {
 	return fmt.Errorf("check the temporary folder %s: qory run could not write the run's inputs there: %w%s", exports.Value(os.TempDir(), false), exports.HideError(err), codeUsed)
@@ -2076,7 +2078,7 @@ const (
 		"Writing the run's inputs to %s failed: %s"
 )
 
-// inputsNotCopied is the error of a run from a run code whose copy of inputs.json could
+// inputsNotCopied is the error of a run from Qory Apiary whose copy of inputs.json could
 // not be written into the home at home, see [copyInputs].
 func inputsNotCopied(home string, err error) error {
 	if errors.Is(err, fs.ErrExist) {
