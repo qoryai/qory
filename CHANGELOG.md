@@ -89,7 +89,8 @@ release may change what an existing document does, and states it under Upgrading
   check of a type runs before each push of that type reaches Qory Apiary, from inside the
   wall or from the push step: in a new container from the wall's default image,
   `--image` or `wall.image`, with no network, the wall's limits and the run's label, the
-  home and the newest versions of the type and its `reads` read-only. The image that the
+  home and the newest versions of the type and its `reads` read-only, beside the work
+  item's notes in `notes.json`, `[]` for none. The image that the
   run's policy selects, such as one built from the repository's `.devcontainer/`, does not
   run the checks, so a change to the repository cannot turn them off. A run on a person's
   machine, with no run code, and with neither `--image` nor `wall.image` runs them in the
@@ -382,6 +383,11 @@ release may change what an existing document does, and states it under Upgrading
   lists each missing part. A group role takes a contract with `fill: many`, and the
   compose checks each member. A contract file that is missing or malformed fails the
   same way. See The role contract in `contracts/harness/v1/README.md`.
+- Each run has a route from its session to `qory run`: a program in the session sends a
+  plain HTTP request to `QORY_HOST_URL`, `http://host.qory.invalid`, through `HTTP_PROXY`.
+  qory serves no path on it, and answers `404` to a request of the session that runs. The
+  setup container of `wall.setup: outside` gets neither the variable nor the route. See The
+  route to qory in `docs/run.md`.
 
 ### Changed
 
@@ -391,7 +397,7 @@ release may change what an existing document does, and states it under Upgrading
   cancelled gets no folder. The start commit of a run skips a cancelled version of the
   artifact `branch` too. Before, all three took the newest version, cancelled or not. An
   index without the field `cancelled` reads as no version cancelled.
-- qory builds with Forager main 37dc0148. A run keeps its wall only when a container of
+- qory builds with Forager 449b7e27. A run keeps its wall only when a container of
   the run may still run; a network or folder of the wall that could not be removed no longer
   keeps it.
 - `qory gateway` keeps its runs when SIGINT or SIGTERM stops it: a gateway started again
@@ -1038,9 +1044,10 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Security
 
-- qory builds with Go 1.27.3, whose `crypto/x509` returns an error for the intermediate
-  certificates that Go no longer trusts (GO-2026-6809, CVE-2026-111943). go.mod requires
-  Go 1.27.3.
+- qory builds with Go 1.27.4, and go.mod requires Go 1.27.4. Go 1.27.4's `crypto/x509`
+  returns an error for the intermediate certificates that Go no longer trusts
+  (GO-2026-6809, CVE-2026-111943), a fix that came in Go 1.27.3. Go 1.27.4 adds security
+  fixes to cgo, the go command, the compiler, the linker, and `net/http`.
 - `qory run pool` starts each run with `--home <the run's folder>/home`, so the run
   composes its harness in the run's folder, outside `work/`, and the pool removes the
   harness with the folder once the run ends. Before, the harness home of a pool's run
