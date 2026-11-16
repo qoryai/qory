@@ -178,3 +178,16 @@ func TestFitTakesAQuotedValueWithSpacesAsOneName(t *testing.T) {
 		t.Errorf("no last line has the whole name:\n%s", got)
 	}
 }
+
+// TestFitLeavesTwoShortQuotedValuesAlone is a first line over 100 characters with two short
+// quoted values and a long text between them: the text between the closing quote of the
+// first and the opening quote of the second is no name, so the line stays as it is.
+func TestFitLeavesTwoShortQuotedValuesAlone(t *testing.T) {
+	text := `Set "a" to one of the listed values in the file, and the value "b" is not one of them, and no other value is allowed there.` + "\n  The cause."
+	if utf8.RuneCountInString(strings.SplitN(text, "\n", 2)[0]) <= 100 {
+		t.Fatal("the first line is not over 100 characters")
+	}
+	if got := exports.Fit(text); got != text {
+		t.Errorf("Fit changed the text between two short quoted values:\n%s", got)
+	}
+}

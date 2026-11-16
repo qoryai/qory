@@ -85,12 +85,13 @@ func shortened(names []string) map[string]string {
 	}
 }
 
-// longName matches a name of more than [NameMax] characters in a refusal's first line: a
-// quoted value, whole from its opening quote to its closing quote, spaces included, or a
-// run of letters, digits, dots, hyphens and underscores that does not end with a dot, so
-// the full stop of a sentence stays. A slash or a space ends a run, so "agents/" in front
-// of a role name stays.
-var longName = regexp.MustCompile(`"(?:[^"\\\n]|\\.){23,}"|[\p{L}\p{N}._-]{24,}[\p{L}\p{N}_-]`)
+// longName matches, in a refusal's first line, a short quoted value, which stays as it is
+// and is matched first so that its closing quote does not open the next match; a quoted
+// value of more than 22 characters, whole from its opening quote to its closing quote,
+// spaces included; or a run of letters, digits, dots, hyphens and underscores that does
+// not end with a dot, so the full stop of a sentence stays. A slash or a space ends a
+// run, so "agents/" in front of a role name stays.
+var longName = regexp.MustCompile(`"[^"\n]{0,22}"|"(?:[^"\\\n]|\\.){23,}"|[\p{L}\p{N}._-]{24,}[\p{L}\p{N}_-]`)
 
 // keyPath matches the keys that start a dotted name in a refusal, such as the "bind." and
 // "agents." of bind.agents.<role>. [Fit] leaves them whole and shortens the name after them.
