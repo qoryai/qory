@@ -153,7 +153,7 @@ func keepWithdrawal(c *cobra.Command, artifactType, name string) error {
 		return err
 	}
 
-	newest, empty, err := newestVersion(filepath.Join(checkout.QoryDir(root), artifactsDir, artifactType, name))
+	newest, empty, err := newestVersion(root, filepath.Join(checkout.QoryDir(root), artifactsDir, artifactType, name))
 	if err != nil {
 		return err
 	}
@@ -182,14 +182,15 @@ func keepWithdrawal(c *cobra.Command, artifactType, name string) error {
 }
 
 // newestVersion returns the number of the newest version directory in dir, the folder of
-// one artifact in the store, 0 for none or for no folder, and whether that version has no
-// files: only a withdrawal is stored with none. It creates nothing.
-func newestVersion(dir string) (number int, empty bool, err error) {
-	entries, err := os.ReadDir(dir)
-	if errors.Is(err, fs.ErrNotExist) {
-		return 0, false, nil
+// one artifact in the store under root, 0 for none or for no folder, and whether that
+// version has no files: only a withdrawal is stored with none. It creates nothing, and
+// stops at a link or a file where a folder belongs, as [artifactStore.realDir] does.
+func newestVersion(root, dir string) (number int, empty bool, err error) {
+	if exists, err := walkFolders(root, dir); err != nil || !exists {
+		return 0, false, err
 	}
 
+	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return 0, false, fmt.Errorf("Check %s. Reading it failed: %w", dir, err)
 	}
@@ -205,10 +206,46 @@ func newestVersion(dir string) (number int, empty bool, err error) {
 		return 0, false, nil
 	}
 
-	files, err := os.ReadDir(filepath.Join(dir, "v"+strconv.Itoa(number)))
+	version := filepath.Join(dir, "v"+strconv.Itoa(number))
+	if _, err := walkFolders(dir, version); err != nil {
+		return 0, false, err
+	}
+
+	files, err := os.ReadDir(version)
 	if err != nil {
-		return 0, false, fmt.Errorf("Check %s. Reading it failed: %w", dir, err)
+		return 0, false, fmt.Errorf("Check %s. Reading it failed: %w", version, err)
 	}
 
 	return number, len(files) == 0, nil
+}
+
+// walkFolders checks each folder from the one under from down to dir, which is in from:
+// each must be a folder, not a link or a file. It reports false when one is missing, and
+// creates nothing. The error is the one of [artifactStore.realDir].
+func walkFolders(from, dir string) (exists bool, err error) {
+	relative, err := filepath.Rel(from, dir)
+	if err != nil {
+		return false, err
+	}
+
+	at := from
+
+	for _, part := range strings.Split(relative, string(filepath.Separator)) {
+		at = filepath.Join(at, part)
+
+		info, err := os.Lstat(at)
+		if errors.Is(err, fs.ErrNotExist) {
+			return false, nil
+		}
+
+		if err != nil {
+			return false, fmt.Errorf("Check %s. Reading it failed: %w", at, err)
+		}
+
+		if !info.IsDir() {
+			return false, fmt.Errorf("Remove %s: it must be a directory, not a link or a file.", at)
+		}
+	}
+
+	return true, nil
 }

@@ -241,9 +241,8 @@ version of each input that its gate approved. For any other artifact, it fetches
 approved version, or the newest when none is approved. The newest version is the newest
 that the index does not mark cancelled: a version of a cancelled run counts for no stage.
 qory skips a name whose newest such version is withdrawn, and an artifact with no such
-version gets no directory. <type> limits the fetch to one
-type. --version needs <type>, and fetches that version of each artifact of the type,
-whether or not it is cancelled.
+version gets no directory. <type> limits the fetch to one type. --version needs <type>,
+and fetches that version of each artifact of the type, whether or not it is cancelled.
 
 Outside a run, qory fetches nothing, and says so.
 

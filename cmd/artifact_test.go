@@ -1120,6 +1120,57 @@ func TestArtifactPushWithdrawOutsideARunKeepsTheWithdrawal(t *testing.T) {
 	wantFile(t, filepath.Join(root, ".qory", "artifacts", "demo-script", "scenario-2", "v3", "s.json"), "{}")
 }
 
+// TestArtifactPushWithdrawOutsideARunStopsAtALink is a withdrawal outside a run whose
+// artifact folder, or whose newest version folder, is a link: the store's error, and
+// nothing created beside the link.
+func TestArtifactPushWithdrawOutsideARunStopsAtALink(t *testing.T) {
+	for name, link := range map[string]string{
+		"the name":    filepath.Join("demo-script", "scenario-2"),
+		"the type":    "demo-script",
+		"the version": filepath.Join("demo-script", "scenario-2", "v1"),
+	} {
+		t.Run(name, func(t *testing.T) {
+			root := inCheckout(t)
+			t.Setenv("QORY_RUN_API", "")
+
+			store := filepath.Join(root, ".qory", "artifacts")
+			elsewhere := t.TempDir()
+
+			if err := os.MkdirAll(filepath.Join(store, filepath.Dir(link)), 0o755); err != nil {
+				t.Fatal(err)
+			}
+
+			if err := os.Symlink(elsewhere, filepath.Join(store, link)); err != nil {
+				t.Fatal(err)
+			}
+
+			// What the link leads to has a version, so a link that is followed finds one.
+			target := map[string]string{"the name": "v1", "the type": filepath.Join("scenario-2", "v1"), "the version": "inside"}[name]
+			if err := os.MkdirAll(filepath.Join(elsewhere, target), 0o755); err != nil {
+				t.Fatal(err)
+			}
+
+			before := listTree(t, store)
+
+			_, err := run(t, "artifact", "push", "demo-script", "--name", "scenario-2", "--withdraw")
+			if err == nil || !strings.HasPrefix(err.Error(), "Remove "+filepath.Join(store, link)+": it must be a directory, not a link or a file.") {
+				t.Errorf("err = %v", err)
+			}
+
+			if after := listTree(t, store); !slices.Equal(before, after) {
+				t.Errorf("the store changed:\n%v\nafter\n%v", before, after)
+			}
+
+			entries, _ := os.ReadDir(elsewhere)
+			for _, entry := range entries {
+				if entry.Name() == "v2" {
+					t.Errorf("the link's target has %s", entry.Name())
+				}
+			}
+		})
+	}
+}
+
 // listTree returns every path under dir, sorted, folders included.
 func listTree(t *testing.T, dir string) []string {
 	t.Helper()
