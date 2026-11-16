@@ -20,6 +20,13 @@ does not pass.
 uploading files. A gate, a stage input and the work item's pages leave out a name whose
 newest version is withdrawn. A later push of files lists the name again.
 
+qory exits 4 with a fix line, and sends nothing, for a withdrawal of a name with no version,
+a name whose newest version is already a withdrawal, an upload by a person, or a version
+that a member approved at a gate, and for files given with --withdraw. It also exits 4
+for a type that the process template sets withdrawable: false for. In a run, Qory Apiary
+knows the template, and qory passes on its refusal. Outside a run, qory reads the
+template from the factory modules that the checkout exports, and has no approvals to read.
+
 Outside a run, qory keeps the files, or the record of a withdrawal, in .qory/artifacts and
 sends nothing.
 

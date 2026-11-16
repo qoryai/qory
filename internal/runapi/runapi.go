@@ -222,13 +222,16 @@ type File struct {
 	SHA256      string `json:"sha256"`
 }
 
-// Approval is a gate's approval of a version.
+// Approval is a gate's approval of a version. Automatic is true for the approval that a
+// gate with no approver records when the stage passes it, and then By has no name; it is
+// false for the approval of a member. An index without the field reads as false.
 type Approval struct {
 	By struct {
 		Name string `json:"name"`
 	} `json:"by"`
-	StageID *string `json:"stage_id"`
-	At      string  `json:"at"`
+	Automatic bool    `json:"automatic"`
+	StageID   *string `json:"stage_id"`
+	At        string  `json:"at"`
 }
 
 // Push is the body of a new version of an artifact. Name and Note are left out of the

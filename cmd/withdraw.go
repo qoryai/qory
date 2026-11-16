@@ -13,23 +13,21 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/qoryai/qory/internal/checkout"
+	"github.com/qoryai/qory/internal/exports"
 	"github.com/qoryai/qory/internal/runapi"
 )
 
 // The texts of qory artifact push --withdraw for a push that qory refuses, from the
 // decision 654 (c). Each starts with its fix; [ExitCode] gives each [ExitArtifactRefused].
 const (
-	textWithdrawType      = "Push a new version of %s instead.\nQory Apiary reads questions, review-comments, verdict and proposal itself, so a run cannot withdraw them."
+	textWithdrawLocked    = "Push a new version of %s instead.\nThe artifact type %s has withdrawable set to false, so a run cannot withdraw its names."
+	textWithdrawApproved  = "Push a new version of %s/%s instead.\nA member approved its newest version, v%d, so a run cannot withdraw the name."
 	textWithdrawUnknown   = "Define or switch on the artifact type %s in the workspace's Artifact types.\nThen run the round again. The workspace has no such type, or hides it."
 	textWithdrawNoVersion = "Withdraw only a stored artifact.\n%s/%s has no version outside cancelled runs."
 	textWithdrawFiles     = "Pass either files or --withdraw.\nA withdrawal stores no files, and the command has %d %s: %s."
 	textWithdrawAlready   = "Leave %s/%s as it is.\nIts newest version, v%d, is already a withdrawal."
 	textWithdrawPerson    = "Leave %s/%s to a member.\nIts newest version, v%d, is an upload by %s, and a run withdraws only a name whose newest version a run wrote."
 )
-
-// notWithdrawable are the artifact types that Qory Apiary reads itself, so a run cannot
-// withdraw them.
-var notWithdrawable = []string{"questions", "review-comments", "verdict", "proposal"}
 
 // withdrawRefusedError is a withdrawal that qory refuses, or that the run API refuses with
 // one of the codes of a withdrawal. Its text is the line for the person.
@@ -49,17 +47,21 @@ var withdrawalCodes = []string{
 // name against the run API's index, then sends the withdrawal. Outside a run it records
 // the withdrawal in the store and sends nothing. Every refusal comes before the POST.
 func withdrawArtifact(c *cobra.Command, push runapi.Push, files []string) error {
-	if slices.Contains(notWithdrawable, push.Type) {
-		return withdrawRefusedError{fmt.Sprintf(textWithdrawType, push.Type)}
+	client, err := runAPIClient()
+	if err != nil {
+		return err
+	}
+
+	// Outside a run, qory reads the rule of the type itself. In a run, Qory Apiary knows
+	// the template of the workspace, and qory reads its refusal.
+	if client == nil {
+		if err := checkWithdrawable(push.Type); err != nil {
+			return err
+		}
 	}
 
 	if len(files) > 0 {
 		return withdrawRefusedError{fmt.Sprintf(textWithdrawFiles, len(files), plural(len(files), "file"), strings.Join(files, ", "))}
-	}
-
-	client, err := runAPIClient()
-	if err != nil {
-		return err
 	}
 
 	if client == nil {
@@ -86,9 +88,9 @@ func withdrawArtifact(c *cobra.Command, push runapi.Push, files []string) error 
 }
 
 // withdrawRefusal returns the refusal of a withdrawal of artifactType/name against index:
-// the name has no version that a cancelled run did not write, its newest such version is
-// already a withdrawal, or a person wrote it. It returns nil when the name can be
-// withdrawn. The checks come in the order of the run API's.
+// a member approved the newest version that a cancelled run did not write, the name has no
+// such version, that version is already a withdrawal, or a person wrote it. It returns nil
+// when the name can be withdrawn. The checks come in the order of the run API's.
 func withdrawRefusal(index *runapi.Index, artifactType, name string) error {
 	var newest *runapi.Version
 
@@ -99,6 +101,8 @@ func withdrawRefusal(index *runapi.Index, artifactType, name string) error {
 	}
 
 	switch {
+	case newest != nil && approvedByMember(*newest):
+		return withdrawRefusedError{fmt.Sprintf(textWithdrawApproved, artifactType, name, newest.Number)}
 	case newest == nil:
 		return withdrawRefusedError{fmt.Sprintf(textWithdrawNoVersion, artifactType, name)}
 	case newest.Withdrawn:
@@ -124,16 +128,70 @@ func plural(n int, noun string) string {
 	return noun + "s"
 }
 
-// raceRefusal returns the error of a withdrawal that the run API refused. With the code
-// unknown_type, the workspace changed its artifact types since qory read the index: the
-// refusal for that. With one of the
-// [withdrawalCodes], which the index that qory read did not show, it reads the index
-// again and returns the refusal that it shows, as qory words it; with an index that
-// shows none, the run API's message. Any other error comes back as it is.
+// approvedByMember reports whether a member approved version at a gate. The approval
+// that a gate with no approver records for itself, automatic, does not count.
+func approvedByMember(version runapi.Version) bool {
+	return slices.ContainsFunc(version.Approvals, func(a runapi.Approval) bool { return !a.Automatic })
+}
+
+// checkWithdrawable is the refusal of a withdrawal of artifactType outside a run: the
+// type's entry in the artifact_types of a factory module that the checkout exports has
+// withdrawable set to false. A checkout that exports no module has no such entry. The
+// store has no approvals, so the rule of an approved version has nothing to read.
+func checkWithdrawable(artifactType string) error {
+	root, err := storeRoot()
+	if err != nil {
+		return err
+	}
+
+	e, err := exports.Read(root)
+	if err != nil || e == nil {
+		return err
+	}
+
+	locked, err := e.NotWithdrawable()
+	if err != nil {
+		return err
+	}
+
+	if slices.Contains(locked, artifactType) {
+		return withdrawRefusedError{fmt.Sprintf(textWithdrawLocked, artifactType, artifactType)}
+	}
+
+	return nil
+}
+
+// fixFirst returns message, a refusal of the run API that starts with "Push a new version
+// of X instead.", with that sentence alone on the first line.
+func fixFirst(message string) string {
+	const instead = " instead. "
+
+	if i := strings.Index(message, instead); strings.HasPrefix(message, "Push a new version of ") && i > 0 {
+		return message[:i+len(instead)-1] + "\n" + message[i+len(instead):]
+	}
+
+	return message
+}
+
+// raceRefusal returns the error of a withdrawal that the run API refused:
+//   - type_not_withdrawable: the run API's message, with its fix alone on line 1. qory
+//     reads no template in a run, and a member may have approved the version since the
+//     index was read.
+//   - unknown_type: the workspace changed its artifact types since qory read the index.
+//   - one of the [withdrawalCodes]: the index is read again, and the refusal that it shows
+//     is returned as qory words it, or the run API's message when it shows none.
+//
+// Any other error comes back as it is.
 func raceRefusal(c *cobra.Command, client *runapi.Client, push runapi.Push, err error) error {
 	var apiError *runapi.Error
 	if !errors.As(err, &apiError) {
 		return err
+	}
+
+	// The refusal for a type or a name that a run cannot withdraw: the run API's message,
+	// with its fix alone on line 1.
+	if apiError.Code == runapi.CodeTypeNotWithdrawable {
+		return withdrawRefusedError{fixFirst(apiError.Error())}
 	}
 
 	if apiError.Code == runapi.CodeUnknownType {

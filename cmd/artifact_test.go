@@ -1212,33 +1212,142 @@ func listTree(t *testing.T, dir string) []string {
 	return paths
 }
 
-// TestArtifactPushWithdrawOfATypeApiaryReads is a withdrawal of a type that Qory Apiary
-// reads itself: exit 4 before any call, in a run and outside one, and before the other
-// refusals. Outside a run it creates nothing.
-func TestArtifactPushWithdrawOfATypeApiaryReads(t *testing.T) {
-	for _, kind := range []string{"questions", "review-comments", "verdict", "proposal"} {
-		t.Run(kind, func(t *testing.T) {
-			root := inCheckout(t)
+// memberApproved returns the version entry with an approval of the member dana at a gate,
+// and automatically returns it with the approval that a gate with no approver records.
+func memberApproved(version string) string {
+	return strings.Replace(version, `"approvals":[]`,
+		`"approvals":[{"by":{"name":"dana"},"automatic":false,"stage_id":"st_1","at":"2026-11-02T09:00:00Z"}]`, 1)
+}
+
+func automatically(version string) string {
+	return strings.Replace(version, `"approvals":[]`,
+		`"approvals":[{"by":null,"automatic":true,"stage_id":"st_1","at":"2026-11-02T09:00:00Z"}]`, 1)
+}
+
+// TestArtifactPushWithdrawOfAnApprovedName is a withdrawal of a name whose newest version a
+// member approved at a gate: exit 4 before any POST, with the text of Qory Apiary's
+// type_not_withdrawable. An automatic approval, an approval of an older version, and an
+// approval of a version that a cancelled run wrote do not count.
+func TestArtifactPushWithdrawOfAnApprovedName(t *testing.T) {
+	older := versionEntry("av_1", 1, fileEntry("s.json", "one"))
+	newer := versionEntry("av_2", 2, fileEntry("s.json", "two"))
+
+	for name, c := range map[string]struct {
+		versions []string
+		refused  bool
+	}{
+		"a member approved the newest version":           {[]string{older, memberApproved(newer)}, true},
+		"a member approved the only version":             {[]string{memberApproved(older)}, true},
+		"a gate with no approver approved it":            {[]string{older, automatically(newer)}, false},
+		"a member approved an older version":             {[]string{memberApproved(older), newer}, false},
+		"a member approved a version of a cancelled run": {[]string{older, cancelled(memberApproved(newer))}, false},
+		"nothing is approved":                            {[]string{older, newer}, false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			inCheckout(t)
 			server := startRunAPI(t)
-			want := "Push a new version of " + kind + " instead.\nQory Apiary reads questions, review-comments, verdict and proposal itself, so a run cannot withdraw them."
+			server.index = indexOf(artifactEntry("demo-script", "scenario-2", "", len(c.versions), c.versions...))
 
-			// With a file too: the type is refused first.
-			_, err := run(t, "artifact", "push", "--withdraw", kind, "a.json")
-			wantExit(t, err, cmd.ExitArtifactRefused, want)
+			out, err := run(t, "artifact", "push", "demo-script", "--name", "scenario-2", "--withdraw")
+			if !c.refused {
+				if err != nil || out != "Withdrew demo-script/scenario-2 in version 3.\n" || len(server.pushes) != 1 {
+					t.Errorf("out = %q, err = %v, pushes = %v", out, err, server.pushes)
+				}
 
-			if len(server.pushes) != 0 {
-				t.Errorf("pushes = %v", server.pushes)
+				return
 			}
 
-			t.Setenv("QORY_RUN_API", "")
-
-			_, err = run(t, "artifact", "push", "--withdraw", kind)
+			want := fmt.Sprintf("Push a new version of demo-script/scenario-2 instead.\nA member approved its newest version, v%d, so a run cannot withdraw the name.", len(c.versions))
 			wantExit(t, err, cmd.ExitArtifactRefused, want)
 
-			if _, err := os.Stat(filepath.Join(root, ".qory")); !os.IsNotExist(err) {
-				t.Errorf(".qory after a refusal: %v", err)
+			if err.Error() != want || len(server.pushes) != 0 {
+				t.Errorf("err = %q, pushes = %v", err, server.pushes)
 			}
 		})
+	}
+}
+
+// TestArtifactPushWithdrawOfARefusedType is a 422 type_not_withdrawable for a withdrawal:
+// the run API's message, with its fix alone on line 1, and exit 4. In a run qory reads no
+// template, so it sends the push and maps the refusal, also for an approval that came after
+// the index.
+func TestArtifactPushWithdrawOfARefusedType(t *testing.T) {
+	for name, c := range map[string]struct{ name, message, want string }{
+		"a type with withdrawable false": {
+			"acceptance-lock",
+			"Push a new version of acceptance-lock instead. The artifact type acceptance-lock has withdrawable set to false, so a run cannot withdraw its names.",
+			"Push a new version of acceptance-lock instead.\nThe artifact type acceptance-lock has withdrawable set to false, so a run cannot withdraw its names.",
+		},
+		"an approval after the index": {
+			"acceptance-lock",
+			"Push a new version of acceptance-lock/main instead. A member approved its newest version, v1, so a run cannot withdraw the name.",
+			"Push a new version of acceptance-lock/main instead.\nA member approved its newest version, v1, so a run cannot withdraw the name.",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			inCheckout(t)
+			server := startRunAPI(t)
+			server.index = indexOf(artifactEntry(c.name, "main", "", 1, versionEntry("av_1", 1, fileEntry("lock.json", "x"))))
+			server.status = http.StatusUnprocessableEntity
+			server.response = fmt.Sprintf(`{"error":"type_not_withdrawable","type":%q,"message":%q}`, c.name, c.message)
+
+			_, err := run(t, "artifact", "push", c.name, "--withdraw")
+			wantExit(t, err, cmd.ExitArtifactRefused, c.want)
+
+			if err.Error() != c.want || len(server.pushes) != 1 {
+				t.Errorf("err = %q, pushes = %v", err, server.pushes)
+			}
+		})
+	}
+}
+
+// TestArtifactPushWithdrawOutsideARunReadsTheTemplate is a withdrawal outside a run in a
+// checkout that exports a factory module whose process.yaml sets withdrawable: false for
+// acceptance-lock and reply-draft: exit 4 with the type's refusal, before the other
+// refusals and with nothing created. The local store has no approvals, so no name is
+// refused for one.
+func TestArtifactPushWithdrawOutsideARunReadsTheTemplate(t *testing.T) {
+	root := inCheckout(t)
+	t.Setenv("QORY_RUN_API", "")
+	copyFixture(t, "factory-process-artifact-type-withdrawable", root)
+
+	for _, kind := range []string{"acceptance-lock", "reply-draft"} {
+		want := "Push a new version of " + kind + " instead.\nThe artifact type " + kind + " has withdrawable set to false, so a run cannot withdraw its names."
+
+		_, err := run(t, "artifact", "push", "--withdraw", kind, "a.json")
+		wantExit(t, err, cmd.ExitArtifactRefused, want)
+
+		if err.Error() != want {
+			t.Errorf("err = %q, want %q", err, want)
+		}
+	}
+
+	if _, err := os.Stat(filepath.Join(root, ".qory")); !os.IsNotExist(err) {
+		t.Errorf(".qory after a refusal: %v", err)
+	}
+
+	// A type with withdrawable true, a standard type with no entry and a type that the
+	// template does not list are not refused for the type.
+	for _, kind := range []string{"screenshot", "build-ledger", "demo-script"} {
+		_, err := run(t, "artifact", "push", "--withdraw", kind)
+		wantExit(t, err, cmd.ExitArtifactRefused, "Withdraw only a stored artifact.\n"+kind+"/main has no version outside cancelled runs.")
+	}
+}
+
+// TestArtifactPushWithdrawOutsideARunReadsAnInvalidTemplate is a process.yaml that
+// qory refuses: the withdrawal stops with the file and the fix, and keeps nothing.
+func TestArtifactPushWithdrawOutsideARunReadsAnInvalidTemplate(t *testing.T) {
+	root := inCheckout(t)
+	t.Setenv("QORY_RUN_API", "")
+	copyFixture(t, "factory-process-artifact-type-withdrawable-not-boolean-fails", root)
+
+	_, err := run(t, "artifact", "push", "--withdraw", "acceptance-lock")
+	if err == nil || !strings.Contains(err.Error(), "process.yaml: set withdrawable of artifact type acceptance-lock to true or false") {
+		t.Errorf("err = %v", err)
+	}
+
+	if _, err := os.Stat(filepath.Join(root, ".qory")); !os.IsNotExist(err) {
+		t.Errorf(".qory after a refusal: %v", err)
 	}
 }
 

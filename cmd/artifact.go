@@ -97,9 +97,8 @@ type noWorkItemError struct{}
 func (noWorkItemError) Error() string { return noWorkItemText }
 
 // artifactRefused reports whether err is a run API error for a type or a limit, for a
-// push check that did not pass, or a refused withdrawal ([withdrawRefusedError], or the
-// run API's refusal of a type that a run cannot withdraw). [ExitCode] maps it to
-// [ExitArtifactRefused].
+// push check that did not pass, or a refused withdrawal ([withdrawRefusedError]).
+// [ExitCode] maps it to [ExitArtifactRefused].
 func artifactRefused(err error) bool {
 	var refused withdrawRefusedError
 	if errors.As(err, &refused) {
@@ -108,7 +107,7 @@ func artifactRefused(err error) bool {
 
 	for _, code := range []string{
 		runapi.CodeUnknownType, runapi.CodeTooManyFiles, runapi.CodeTooLarge,
-		runapi.CodePayloadTooLarge, runapi.CodePushCheckFailed, runapi.CodeTypeNotWithdrawable,
+		runapi.CodePayloadTooLarge, runapi.CodePushCheckFailed,
 	} {
 		if runapi.HasCode(err, code) {
 			return true
@@ -476,6 +475,13 @@ does not pass.
 --withdraw stores a version of <type>/<name> with no files and the mark withdrawn, in place of
 uploading files. A gate, a stage input and the work item's pages leave out a name whose
 newest version is withdrawn. A later push of files lists the name again.
+
+qory exits ` + strconv.Itoa(ExitArtifactRefused) + ` with a fix line, and sends nothing, for a withdrawal of a name with no version,
+a name whose newest version is already a withdrawal, an upload by a person, or a version
+that a member approved at a gate, and for files given with --withdraw. It also exits ` + strconv.Itoa(ExitArtifactRefused) + `
+for a type that the process template sets withdrawable: false for. In a run, Qory Apiary
+knows the template, and qory passes on its refusal. Outside a run, qory reads the
+template from the factory modules that the checkout exports, and has no approvals to read.
 
 Outside a run, qory keeps the files, or the record of a withdrawal, in .qory/artifacts and
 sends nothing.

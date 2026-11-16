@@ -368,11 +368,18 @@ release may change what an existing document does, and states it under Upgrading
   with no files and the mark withdrawn, in place of uploading files. A gate, a stage input
   and the work item's pages leave out a name whose newest version is withdrawn, and a later
   push of files lists it again. qory exits 4 with a fix line, before it sends the push, for
-  the types `questions`, `review-comments`, `verdict` and `proposal`, which Qory Apiary
-  reads itself, for a name with no version, for files given with `--withdraw`, for a name
-  whose newest version is already a withdrawal, and for a name whose newest version a person
-  uploaded. Outside a run, qory records the withdrawal as a version folder with no files in
-  `.qory/artifacts` and sends nothing; a refusal creates no folder.
+  a name with no version, for files given with `--withdraw`, for a name whose newest version
+  is already a withdrawal, for a name whose newest version a person uploaded, and for a name
+  whose newest version a member approved at a gate. A type whose `artifact_types` entry in
+  the process template has `withdrawable: false` is refused too: in a run, qory passes on
+  the refusal of Qory Apiary, and outside a run it reads the template from the factory
+  modules that the checkout exports. Outside a run, qory records the withdrawal as a version
+  folder with no files in `.qory/artifacts` and sends nothing; a refusal creates no folder,
+  and the store has no approvals to check.
+- An entry of `artifact_types` in a `process.yaml` may set `withdrawable` to `true` or
+  `false`, for a standard type and a custom type. Without it, a run may withdraw a name of
+  the type. Any other value fails with the file and the fix. `contracts/harness/v1/process.schema.json`
+  has the key.
 - A push check does not run for a withdrawal in a walled run: a push with `withdraw` true
   and no files passes the check, because it has no file to check. A push with `withdraw`
   true and files takes the same path as any push.

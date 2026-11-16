@@ -2879,6 +2879,13 @@ works in a run and on a laptop. A wall mounts `qory` at `/qory/qory` and does no
 
 In a run, the types `questions` and `review-comments` take only the name `main`.
 
+`qory artifact push --withdraw` exits 4 with a fix line, and sends nothing, for a name with no
+version, a name whose newest version is already a withdrawal, an upload by a person, a
+version that a member approved at a gate, a type that the process template sets
+`withdrawable: false` for, and files given with `--withdraw`. In a run, Qory Apiary knows the
+template, and qory passes on its refusal. Outside a run, qory reads the template from the
+factory modules that the checkout exports, and has no approvals to read.
+
 `escalate` needs `--points <file>`, and `passed` and `changes-requested` take no
 `--points`. The file is a JSON array of 1 to 20 points for a person, in the [verdict
 format](../contracts/harness/v1/README.md#the-verdict-format):
