@@ -107,8 +107,8 @@ func TestPointsStopsAtTheFirstBrokenRule(t *testing.T) {
 		{two(`{"text": 1, "action": "run_again"}`), "Write the text of point 2 as a JSON string. The text is a JSON number."},
 		{text(""), "Write the text of point 2: one sentence on one line, 1 to 500 characters. The text is empty."},
 		{text(strings.Repeat("a", 501)), "Shorten the text of point 2 to at most 500 characters. The text has 501."},
-		{text(`One\u0007sentence.`), "Remove the character U+0007 from the text of point 2. contracts/harness/v1/verdict.schema.json lists the characters a text cannot have."},
-		{text("One \u202esentence."), "Remove the character U+202E from the text of point 2. contracts/harness/v1/verdict.schema.json lists the characters a text cannot have."},
+		{text(`One\u0007sentence.`), "Remove the character U+0007 from the text of point 2: the contract's $defs line excludes it."},
+		{text("One \u202esentence."), "Remove the character U+202E from the text of point 2: the contract's $defs line excludes it."},
 		{two(`{"text": "a", "action": "ask"}`), `Set the action of point 2 to answer or run_again. The action is "ask".`},
 		{two(`{"text": "a", "action": 3}`), `Set the action of point 2 to answer or run_again. The action is 3.`},
 		{two(`{"text": "a", "action": "answer"}`), "Add question, the id of an open question, to point 2: a point with the action answer has one."},
@@ -125,7 +125,7 @@ func TestPointsStopsAtTheFirstBrokenRule(t *testing.T) {
 		{fix(strings.Repeat("a", 501)), "Shorten the fix of point 2 to at most 500 characters. The fix has 501."},
 		{fix(`One\nsentence.`), "Write the fix of point 2 on one line. It has a line break (U+000A)."},
 		{fix(`One\tsentence.`), "Write the fix of point 2 on one line. It has a tab (U+0009)."},
-		{fix("One \u202esentence."), "Remove the character U+202E from the fix of point 2. contracts/harness/v1/verdict.schema.json lists the characters a text cannot have."},
+		{fix("One \u202esentence."), "Remove the character U+202E from the fix of point 2: the contract's $defs line excludes it."},
 	} {
 		_, err := verdictformat.Points([]byte(c.file))
 		switch {

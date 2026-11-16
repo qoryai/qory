@@ -104,7 +104,8 @@ release may change what an existing document does, and states it under Upgrading
   how a person fixes it, which Qory Apiary shows in place of the action's sentence; an
   `answer` point has no `fix`. A `changes-requested` verdict may have 1 to 20 points,
   each with the action `run_again`; `qory run verdict` sends points only with
-  `escalate`. The text member `gaps` is gone. See The verdict format in `contracts/harness/v1/README.md`.
+  `escalate`. The text member `gaps` is gone. See The verdict format in
+  `contracts/harness/v1/README.md`.
 - `-f` on `qory harness compose`, `qory run` and `qory worktree add` takes a stack by
   reference, `<https URL>#<ref>:<folder>`: qory fetches the folder as it fetches a git
   module and composes its `qory-stack.yaml`. `examples/hello` has one, so a run takes it

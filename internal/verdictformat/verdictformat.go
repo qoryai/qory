@@ -299,7 +299,7 @@ func checkLine(n int, name, line string) error {
 			return fmt.Errorf("Write the %s of point %d on one line. It has a line break (%U).", name, n, r)
 		}
 		if Excluded(r) {
-			return fmt.Errorf("Remove the character %U from the %s of point %d. %s lists the characters a text cannot have.", r, name, n, contractPath)
+			return fmt.Errorf("Remove the character %U from the %s of point %d: the contract's $defs line excludes it.", r, name, n)
 		}
 	}
 	return nil
