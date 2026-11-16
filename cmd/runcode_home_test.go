@@ -233,3 +233,61 @@ func TestARunFromARunCodeWithARelativeCacheFolderHasAnAbsoluteHome(t *testing.T)
 		t.Errorf("the home %s is not the folder of the run's id", r.spec.HarnessHome)
 	}
 }
+
+// TestARunFromARunCodeWithItsRunIDTakesOneHome is a run from a run code given --run-id, the id
+// of the run key it is redeemed for: the run composes into runs/<name>-<hash>/<run id>, not a
+// folder under it, writes the report per checkout, beside runs/<name>-<hash>, and its home is
+// gone after the run.
+func TestARunFromARunCodeWithItsRunIDTakesOneHome(t *testing.T) {
+	var root, home string
+	r := codeHarness{
+		before: func() []string {
+			var err error
+			if root, err = os.Getwd(); err != nil {
+				t.Fatal(err)
+			}
+			return []string{"--run-id", keyRunID}
+		},
+		joined: func(s session.SessionSpec) {
+			home = s.HarnessHome
+			sameFolder(t, "the home", home, filepath.Join(runHomesFolder(t, root), keyRunID))
+		},
+	}.run(t)
+	if !errors.Is(r.err, cmd.ErrJoinedNowhere) || !r.joined {
+		t.Fatalf("%v (exit %d), want the join\n%s", r.err, cmd.ExitCode(r.err), r.out)
+	}
+	if _, err := os.Lstat(home); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("the home stays after the run: %v", err)
+	}
+	if left := runHomes(t, runHomesFolder(t, root)); len(left) != 0 {
+		t.Errorf("the folders after the run: %v, want none", left)
+	}
+	runKeyReport(t, root)
+}
+
+// TestARunFromARunCodeWithAGivenHomeRemovesTheCopyOfItsInputs is a run from a run code with
+// --home: the home has the copy of the inputs while the agent runs, and once the run is over
+// the home stays and the copy is gone.
+func TestARunFromARunCodeWithAGivenHomeRemovesTheCopyOfItsInputs(t *testing.T) {
+	given := filepath.Join(tempDir(t), "homes")
+	var home string
+	r := codeHarness{
+		before: func() []string { return []string{"--home", given} },
+		joined: func(s session.SessionSpec) {
+			home = s.HarnessHome
+			inputsAtJoin(t, s)
+		},
+	}.run(t)
+	if !errors.Is(r.err, cmd.ErrJoinedNowhere) || !r.joined {
+		t.Fatalf("%v (exit %d), want the join\n%s", r.err, cmd.ExitCode(r.err), r.out)
+	}
+	if !strings.HasPrefix(home, given+string(filepath.Separator)) {
+		t.Fatalf("the home is %s, want a folder of %s", home, given)
+	}
+	if _, err := os.Stat(filepath.Join(home, "claude")); err != nil {
+		t.Errorf("the given home is gone after the run: %v", err)
+	}
+	if _, err := os.Lstat(filepath.Join(home, "inputs.json")); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("the copy of the inputs stays in the given home: %v", err)
+	}
+}

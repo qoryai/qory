@@ -110,3 +110,36 @@ func TestTheInputsAreCheckedBeforeTheRunOpens(t *testing.T) {
 		}
 	}
 }
+
+// TestACopyOfTheInputsOverAFileInTheHomeStops is a home that has inputs.json when qory
+// writes the copy of the run's inputs: the file stays as it was, and the error's first line,
+// at most 100 characters, is the fix, with the home's path on the next line. Any other
+// failure of the write has a first line of at most 100 characters too.
+func TestACopyOfTheInputsOverAFileInTheHomeStops(t *testing.T) {
+	home := t.TempDir()
+	path := filepath.Join(home, inputsFile)
+	if err := os.WriteFile(path, []byte("{}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	err := copyInputs(home, []byte(`{"qory":{"harness_extensions":{}}}`+"\n"))
+	if err == nil {
+		t.Fatal("the copy over a file in the home went through")
+	}
+	if data, _ := os.ReadFile(path); string(data) != "{}\n" {
+		t.Errorf("the file in the home is %q, want it as it was", data)
+	}
+	lines := strings.Split(inputsNotCopied(home, err).Error(), "\n")
+	want := "Remove inputs.json from the run's home, or run without --home, then take the work item in again."
+	if len(lines) != 2 || lines[0] != want || !strings.Contains(lines[1], home) || !strings.HasSuffix(lines[1], codeUsed) {
+		t.Errorf("the error's lines are %q, want %q, then a line with %s", lines, want, home)
+	}
+	other := strings.Split(inputsNotCopied(home, os.ErrPermission).Error(), "\n")
+	for _, first := range []string{lines[0], other[0]} {
+		if len(first) > 100 {
+			t.Errorf("the first line %q has %d characters, want at most 100", first, len(first))
+		}
+	}
+	if len(other) != 2 || !strings.Contains(other[1], path) {
+		t.Errorf("the lines of another failure are %q, want a second line with %s", other, path)
+	}
+}

@@ -492,7 +492,8 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				if fromCode, err = codeRunOf(doc); err != nil {
 					return err
 				}
-				if perRun {
+				// A --run-id gave the run its home before the redemption.
+				if perRun && runHome == "" {
 					shared := at.home
 					at = runHomeAt(at, spec.RunID)
 					runHome = at.home
@@ -748,6 +749,12 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					checks.inputs, checks.inputsData = file, data
 					if err := copyInputs(at.home, data); err != nil {
 						return false, inputsNotCopied(at.home, err)
+					}
+					// A home that is not this run's alone, from --home or harness.home, keeps
+					// no copy once the run is over.
+					if runHome == "" {
+						copied := filepath.Join(at.home, inputsFile)
+						cleanups = append(cleanups, func() { removeInputsCopy(copied, said) })
 					}
 					if extra, err = fromCode.workflowArgs(name, rep, in, run.System()); err != nil {
 						return false, err
@@ -2024,10 +2031,29 @@ func inputsNotWritten(err error) error {
 	return fmt.Errorf("check the temporary folder %s: qory run could not write the run's inputs there: %w%s", exports.Value(os.TempDir(), false), exports.HideError(err), codeUsed)
 }
 
+// The lines of [inputsNotCopied]: the first line is the fix, the second the cause.
+const (
+	textInputsCopyExists = "Remove inputs.json from the run's home, or run without --home, then take the work item in again.\n" +
+		"The home %s has inputs.json, where qory writes the run's inputs. With no --home or harness.home, a run gets a home for that run alone"
+	textInputsNotCopied = "Make the run's home writable for qory, then take the work item in again in Qory Apiary.\n" +
+		"Writing the run's inputs to %s failed: %s"
+)
+
 // inputsNotCopied is the error of a run from a run code whose copy of inputs.json could
 // not be written into the home at home, see [copyInputs].
 func inputsNotCopied(home string, err error) error {
-	return fmt.Errorf("check the home %s: qory run could not write the copy of the run's inputs there: %w%s", exports.Value(home, false), exports.HideError(err), codeUsed)
+	if errors.Is(err, fs.ErrExist) {
+		return fmt.Errorf(textInputsCopyExists+codeUsed, exports.Value(home, false))
+	}
+	return fmt.Errorf(textInputsNotCopied+codeUsed, exports.Value(filepath.Join(home, inputsFile), false), exports.HideError(err))
+}
+
+// removeInputsCopy removes copied, the copy of inputs.json in a home that --home or
+// harness.home sets, when the run ends. report prints a line of qory run.
+func removeInputsCopy(copied string, report func(string)) {
+	if err := os.Remove(copied); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		report(fmt.Sprintf(textCopyNoRemove, exports.Value(copied, false), shownError(err)))
+	}
 }
 
 // moveMount sets the path of each read-only mount of from in mounts to to: the home of a
