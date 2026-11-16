@@ -885,11 +885,13 @@ annotation, so it guards against corruption in transit and in storage, not again
 compromised registry. If the registry returns 503 or 429, or the request gets no
 response, `qory run` sends the same request again after 2, 4 and 8 seconds, then every
 15 seconds, or after the response's `Retry-After` up to 30 seconds. The registry returns
-503 while it fills its cache of a new version. After 25 minutes `qory run` stops with:
+503 while it fills its cache of a new version. Only the end of the run
+stops the tries: `qory run` sends the request again until the registry answers, or until
+the run's time limit passes, you cancel it (SIGINT) or it gets SIGTERM. A run that ends while it waits stops with:
 
 ```text
-qory run: Run again later: registry.example.com is still filling its cache of claude newest
-The registry's cache had no shared/runtimes/claude:newest after 25m0s: the registry returned 503.
+qory run: Run again with more time
+The run ended before the registry at registry.example.com returned shared/runtimes/claude:newest: context deadline exceeded
 ```
 
 When the registry returns 401 with a Bearer challenge, `qory run` gets a token from the
@@ -915,7 +917,7 @@ The realm is https://apiary.example.com/registry/token, and the run has no addre
 ```
 
 A run that starts from a run key has no `gateway.server` section in the `forager.yaml`
-it reads, so it stops there when its `pool.registry` or run code names a registry. Any
+it reads, so it stops there when its `pool.registry` or run code sets a registry. Any
 other status stops the run at once. A registry whose cache never held Claude Code
 stops the run with:
 

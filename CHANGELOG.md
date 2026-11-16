@@ -27,7 +27,8 @@ release may change what an existing document does, and states it under Upgrading
   runtimes folder in the pool's folder. Each run holds its version until it ends, and
   each install removes older versions that an install made, and temporary entries, that
   no run holds. Two runs that need one version read its tarball once. A 503 or 429 from
-  the registry is retried for up to 25 minutes. A request waits at most 30 seconds to
+  the registry is retried until the registry answers or the run ends, with its time
+  limit, a cancel or SIGTERM. A request waits at most 30 seconds to
   connect, 30 seconds for the TLS handshake, 60 seconds for the response's headers and
   60 seconds for the next byte of a body. A run with no registry whose policy does not
   allow `registry.npmjs.org` stops with the fix first. The run-code file of a pool has
@@ -39,7 +40,7 @@ release may change what an existing document does, and states it under Upgrading
   `gateway.server.url`. See The runtime's program in `docs/run.md`.
   With a registry, `qory run pool` stops at start, before it claims a run, when
   `gateway.server.url` is not an address a run takes: `https`, or `http` on loopback,
-  with a host and an optional port alone. The first line names `gateway.server.url`.
+  with a host and an optional port alone. The first line contains `gateway.server.url`.
   Before an install, `qory run` stops with `Run chmod go-w <path>, then run again` for a
   runtimes folder, or a `<runtimes>/claude` that existed, that its group or others can
   write, and with `Replace <path> with a folder` for a link at either. It checks no

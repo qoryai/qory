@@ -147,12 +147,28 @@ func TestANewestTheRegistryNeverHeldStartsWithTheFix(t *testing.T) {
 	}
 }
 
-// fakeClock replaces the retries' clock until the test ends: each wait moves the clock
-// on by its length at once. It returns the waits.
-func fakeClock(t *testing.T, limit time.Duration) *[]time.Duration {
+// fakeClock replaces the retries' waits until the test ends: a wait returns at once.
+// It returns the waits.
+func fakeClock(t *testing.T) *[]time.Duration {
 	var waits []time.Duration
-	t.Cleanup(runtimeinstall.SetRetryClock(limit, func(d time.Duration) { waits = append(waits, d) }))
+	t.Cleanup(runtimeinstall.SetRetryClock(func(d time.Duration) { waits = append(waits, d) }))
 	return &waits
+}
+
+// clockEndingAfter is [fakeClock] with a context that ends once the waits add up to
+// total, as the run's time limit does. It returns the context and the waits.
+func clockEndingAfter(t *testing.T, total time.Duration) (context.Context, *[]time.Duration) {
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	var waits []time.Duration
+	var sum time.Duration
+	t.Cleanup(runtimeinstall.SetRetryClock(func(d time.Duration) {
+		waits = append(waits, d)
+		if sum += d; sum >= total {
+			cancel()
+		}
+	}))
+	return ctx, &waits
 }
 
 // TestA503WhileTheCacheFillsIsRetried has the registry answer 503 several times, as
@@ -173,7 +189,7 @@ func TestA503WhileTheCacheFillsIsRetried(t *testing.T) {
 		{"Retry-After 120", "120", 2, []time.Duration{30 * s, 30 * s}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			waits := fakeClock(t, 25*time.Minute)
+			waits := fakeClock(t)
 			f := newFromRegistry(t)
 			f.reg.PublishPlain("2.1.320")
 			f.reg.Unavailable(c.n, c.retryAfter)
@@ -191,34 +207,35 @@ func TestA503WhileTheCacheFillsIsRetried(t *testing.T) {
 	}
 }
 
-// TestACacheThatStaysUnavailableEndsWithTheFix has the registry answer 503 to every
-// request, with no Retry-After and with Retry-After: 15: after 25 minutes of waits on
-// the fake clock, the error's first line starts with the fix, names the registry, the
-// runtime and newest, and has at most 100 characters.
-func TestACacheThatStaysUnavailableEndsWithTheFix(t *testing.T) {
+// TestACacheThatStaysUnavailableIsRetriedUntilTheContextEnds has the registry answer 503
+// to every request, with no Retry-After and with Retry-After: 15. The fake clock's waits
+// add up to more than the 25 minutes that an earlier limit allowed, and the tries go on:
+// they stop only when the context ends, as the run's time limit, a cancel or SIGTERM
+// ends it, with the fix first and at most 100 characters.
+func TestACacheThatStaysUnavailableIsRetriedUntilTheContextEnds(t *testing.T) {
 	for _, retryAfter := range []string{"", "15"} {
 		t.Run("Retry-After "+retryAfter, func(t *testing.T) {
-			waits := fakeClock(t, 25*time.Minute)
+			ctx, waits := clockEndingAfter(t, 2*time.Hour)
 			f := newFromRegistry(t)
 			f.reg.PublishPlain("2.1.320")
 			f.reg.Unavailable(-1, retryAfter)
-			_, err := f.install(t, "amd64")
-			if err == nil {
-				t.Fatal("the install succeeded")
+			_, err := runtimeinstall.Install(ctx, runtimeinstall.Options{
+				Fetch:   runtimeinstall.RegistryFetch(http.DefaultClient, f.reg.Host(), "amd64", f.reg.Instance()),
+				Runtime: "claude", Folder: f.folder,
+			})
+			if !errors.Is(err, context.Canceled) {
+				t.Fatalf("the install returned %v, want the end of the context", err)
 			}
-			first, rest, _ := strings.Cut(err.Error(), "\n")
-			if want := "Run again later: " + f.reg.Host() + " is still filling its cache of claude newest"; first != want || len(first) > 100 {
+			first, _, _ := strings.Cut(err.Error(), "\n")
+			if want := "Run again with more time"; first != want {
 				t.Fatalf("first line = %q, want %q", first, want)
-			}
-			if want := "The registry's cache had no shared/runtimes/claude:newest after 25m0s: the registry returned 503."; rest != want {
-				t.Fatalf("second line = %q, want %q", rest, want)
 			}
 			var total time.Duration
 			for _, w := range *waits {
 				total += w
 			}
-			if total > 25*time.Minute || total < 25*time.Minute-30*time.Second {
-				t.Fatalf("the waits add up to %s", total)
+			if total < 2*time.Hour || total <= 25*time.Minute {
+				t.Fatalf("the waits add up to %s, want the tries to go on past 25 minutes", total)
 			}
 		})
 	}
@@ -227,7 +244,7 @@ func TestACacheThatStaysUnavailableEndsWithTheFix(t *testing.T) {
 // TestAnotherStatusIsNotRetried has the registry answer 500: qory waits for nothing and
 // stops with the fix.
 func TestAnotherStatusIsNotRetried(t *testing.T) {
-	waits := fakeClock(t, 25*time.Minute)
+	waits := fakeClock(t)
 	reg := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusInternalServerError) }))
 	t.Cleanup(reg.Close)
 	_, err := runtimeinstall.Install(context.Background(), runtimeinstall.Options{
@@ -312,7 +329,7 @@ func TestATokenRealmElsewhereIsRefused(t *testing.T) {
 // TestAProxyThatRefusesIsNotRetried sends through a proxy URL with another password:
 // the proxy answers 407, and the error starts with the fix.
 func TestAProxyThatRefusesIsNotRetried(t *testing.T) {
-	waits := fakeClock(t, 25*time.Minute)
+	waits := fakeClock(t)
 	f := newFromRegistry(t)
 	f.reg.PublishPlain("2.1.320")
 	client, err := runtimeinstall.ProxyClient(strings.Replace(f.proxy.URL(), rt.ProxyPassword, "wrong", 1), "")
@@ -367,27 +384,27 @@ func TestANewNewestInTheRegistryInstallsTheNewVersion(t *testing.T) {
 	}
 }
 
-// TestARegistryThatNeverRespondsEndsWithTheCause has no registry at the host: each
-// request gets no response, and after the retry limit the second line of the error says
-// so, with the cause of the last try.
-func TestARegistryThatNeverRespondsEndsWithTheCause(t *testing.T) {
-	fakeClock(t, 25*time.Minute)
+// TestARegistryThatNeverRespondsIsRetriedUntilTheContextEnds has no registry at the host:
+// each request gets no response, the tries go on past 25 minutes on the fake clock, and
+// stop when the context ends.
+func TestARegistryThatNeverRespondsIsRetriedUntilTheContextEnds(t *testing.T) {
+	ctx, waits := clockEndingAfter(t, time.Hour)
 	gone := httptest.NewServer(http.NotFoundHandler())
 	host := strings.TrimPrefix(gone.URL, "http://")
 	gone.Close()
-	_, err := runtimeinstall.Install(context.Background(), runtimeinstall.Options{
+	_, err := runtimeinstall.Install(ctx, runtimeinstall.Options{
 		Fetch:   runtimeinstall.RegistryFetch(http.DefaultClient, host, "amd64", ""),
 		Runtime: "claude", Folder: t.TempDir(),
 	})
-	if err == nil {
-		t.Fatal("the install succeeded")
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("the install returned %v, want the end of the context", err)
 	}
-	first, rest, _ := strings.Cut(err.Error(), "\n")
-	if want := "Run again later: " + host + " is still filling its cache of claude newest"; first != want {
-		t.Fatalf("first line = %q, want %q", first, want)
+	var total time.Duration
+	for _, w := range *waits {
+		total += w
 	}
-	if want := "The registry's cache had no shared/runtimes/claude:newest after 25m0s: the request got no response ("; !strings.HasPrefix(rest, want) {
-		t.Fatalf("second line = %q, want it to start with %q", rest, want)
+	if total < time.Hour {
+		t.Fatalf("the waits add up to %s, want an hour", total)
 	}
 }
 
@@ -395,7 +412,7 @@ func TestARegistryThatNeverRespondsEndsWithTheCause(t *testing.T) {
 // that is not on loopback, so the request is a CONNECT, through a proxy that returns 403
 // to it: qory sends it once, and the error says what the proxy returned.
 func TestAConnectTheProxyRefusesIsNotRetried(t *testing.T) {
-	waits := fakeClock(t, 25*time.Minute)
+	waits := fakeClock(t)
 	proxy := rt.StartProxy(t)
 	proxy.Deny(http.StatusForbidden)
 	client, err := runtimeinstall.ProxyClient(proxy.URL(), "")

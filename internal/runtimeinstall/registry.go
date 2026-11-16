@@ -80,7 +80,7 @@ func RegistryFetch(client *http.Client, host, arch, instance string) Fetch {
 		if arch != "amd64" && arch != "arm64" {
 			return Release{}, fmt.Errorf("Run on an amd64 or arm64 machine\nThe registry has %s for linux/amd64 and linux/arm64, and this machine is %s", runtime, arch)
 		}
-		r := &registry{client: client, host: host, instance: instance, runtime: runtime, repository: "shared/runtimes/" + runtime, started: now()}
+		r := &registry{client: client, host: host, instance: instance, runtime: runtime, repository: "shared/runtimes/" + runtime}
 		return r.resolve(ctx, arch)
 	}
 }
@@ -93,8 +93,6 @@ type registry struct {
 	// instance is the address of Qory Apiary, whose token route is the only realm.
 	instance string
 	token    string
-	// started is when the fetch started: its tries stop at [retryLimit] after it.
-	started time.Time
 }
 
 // descriptor is a content an index or a manifest lists.
@@ -272,7 +270,7 @@ func (r *registry) manifest(ctx context.Context, ref, version string) ([]byte, s
 	if digestShape.MatchString(ref) {
 		what = r.repository + "@" + ref
 	}
-	resp, err := r.get(ctx, "/v2/"+r.repository+"/manifests/"+url.PathEscape(ref), mediaIndex+", "+mediaManifest, what, version)
+	resp, err := r.get(ctx, "/v2/"+r.repository+"/manifests/"+url.PathEscape(ref), mediaIndex+", "+mediaManifest, what)
 	if err != nil {
 		return nil, "", err
 	}
@@ -297,7 +295,7 @@ func (r *registry) manifest(ctx context.Context, ref, version string) ([]byte, s
 // [checkError] in place of io.EOF.
 func (r *registry) blob(ctx context.Context, layer descriptor, version string) (io.ReadCloser, error) {
 	what := fmt.Sprintf("the layer of %s %s", r.runtime, version)
-	resp, err := r.get(ctx, "/v2/"+r.repository+"/blobs/"+layer.Digest, "", what, version)
+	resp, err := r.get(ctx, "/v2/"+r.repository+"/blobs/"+layer.Digest, "", what)
 	if err != nil {
 		return nil, err
 	}
@@ -346,13 +344,12 @@ func (b *checkedBlob) Close() error { return b.body.Close() }
 // seconds replaces the wait, up to 30 seconds. The registry waits only 30 seconds for
 // its cache to start serving, so a first fill of a version, two tarballs of about
 // 170 MB with up to 10 minutes each, gets 503 until it is done. The tries of one fetch
-// stop after [retryLimit] in all; a test shortens it and replaces the clock.
+// go on until the registry answers or the fetch's context ends: the run's time limit,
+// its cancel or SIGTERM. A test replaces the wait.
 var (
 	retryWaits    = []time.Duration{2 * time.Second, 4 * time.Second, 8 * time.Second}
 	retryEvery    = 15 * time.Second
 	maxRetryAfter = 30 * time.Second
-	retryLimit    = 25 * time.Minute
-	now           = time.Now
 	sleep         = func(ctx context.Context, d time.Duration) error {
 		t := time.NewTimer(d)
 		defer t.Stop()
@@ -380,10 +377,9 @@ func wait(n int, retryAfter string) time.Duration {
 // get sends a GET of path to the registry, with Accept set to accept when it is not
 // empty, and returns its response with the status 200. A 401 with a Bearer challenge gets a token from
 // the challenge's realm, once, and the GET is sent again with it. A 503, a 429 or a
-// request with no response is sent again after [wait], until [retryLimit] after the
-// fetch started. what is the request as an error shows it, and ref the runtime's
-// version, or newest, that it is for.
-func (r *registry) get(ctx context.Context, path, accept, what, ref string) (*http.Response, error) {
+// request with no response is sent again after [wait], until the registry answers or
+// ctx ends. what is the request as an error shows it.
+func (r *registry) get(ctx context.Context, path, accept, what string) (*http.Response, error) {
 	tried := false
 	for n := 0; ; {
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, scheme(r.host)+"://"+r.host+path, nil)
@@ -422,16 +418,6 @@ func (r *registry) get(ctx context.Context, path, accept, what, ref string) (*ht
 		}
 		d := wait(n, retryAfter)
 		n++
-		if now().Add(d).After(r.started.Add(retryLimit)) {
-			var cause string
-			if err != nil {
-				cause = "the request got no response (" + err.Error() + ")"
-			} else {
-				cause = "the registry returned " + strconv.Itoa(resp.StatusCode)
-			}
-			return nil, fmt.Errorf("Run again later: %s is still filling its cache of %s %s\n"+
-				"The registry's cache had no %s after %s: %s.", r.host, r.runtime, ref, what, retryLimit, cause)
-		}
 		if err := sleep(ctx, d); err != nil {
 			return nil, r.failed(what, err)
 		}
@@ -479,7 +465,7 @@ func (r *registry) failed(what string, err error) error {
 func (r *registry) tokenFor(ctx context.Context, challenges []string) (string, error) {
 	params, ok := bearer(challenges)
 	if !ok {
-		return "", fmt.Errorf("Check that the registry at %s asks for a Bearer token\nIt returned 401 with no Bearer challenge", r.host)
+		return "", fmt.Errorf("Check that the registry at %s returns a Bearer challenge\nIt returned 401 with no Bearer challenge", r.host)
 	}
 	realm, err := url.Parse(params["realm"])
 	if err != nil || realm.Host == "" || realm.User != nil ||
