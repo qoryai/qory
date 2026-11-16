@@ -1687,6 +1687,10 @@ before the fetch, and picks one version of the artifact type `branch`:
 3. Else, the newest version of the artifact named `main`.
 4. With no version, the run creates the branch at `target_version`.
 
+The newest version in steps 1 and 3 is the one with the highest number that the artifact
+index does not mark `cancelled`: a version that a cancelled run made counts for no stage.
+When every version of `main` is cancelled, steps 1 and 3 find none.
+
 qory composes the harness at `target_version` and with the further repositories at their
 default branches, so a branch does not change the harness of its work item's runs. The
 fetch step also fetches each repository's commit by id, at depth 1. After the compose,

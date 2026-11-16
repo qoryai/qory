@@ -104,19 +104,14 @@ func featureOff(err error) bool {
 // chosenBranch is the version of the artifact type branch that a run starts at: the
 // newest version of the artifact main when the work item's stage wrote it; else the
 // version of any artifact name that a gate approved of a stage's input; else the newest
-// version of the artifact main; nil with none of these.
+// version of the artifact main; nil with none of these. The newest version is
+// [newestNotCancelled].
 func chosenBranch(snapshot *runapi.Snapshot, index *runapi.Index) (*runapi.Version, error) {
 	var newest *runapi.Version
 
 	for _, artifact := range index.Artifacts {
-		if artifact.Type != branchType || artifact.Name != defaultName {
-			continue
-		}
-
-		for i := range artifact.Versions {
-			if newest == nil || artifact.Versions[i].Number > newest.Number {
-				newest = &artifact.Versions[i]
-			}
+		if artifact.Type == branchType && artifact.Name == defaultName {
+			newest = newestNotCancelled(artifact)
 		}
 	}
 

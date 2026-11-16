@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -18,6 +19,19 @@ func branchIndex(versions ...[2]string) *runapi.Index {
 	}
 
 	return &runapi.Index{Artifacts: []runapi.Artifact{artifact}}
+}
+
+// cancelledAt marks the versions of index with the given ids cancelled, and returns index.
+func cancelledAt(index *runapi.Index, ids ...string) *runapi.Index {
+	for i := range index.Artifacts {
+		for j := range index.Artifacts[i].Versions {
+			if slices.Contains(ids, index.Artifacts[i].Versions[j].ID) {
+				index.Artifacts[i].Versions[j].Cancelled = true
+			}
+		}
+	}
+
+	return index
 }
 
 // stageSnapshot is a snapshot of the stage st_b, with the given inputs.
@@ -84,6 +98,21 @@ func TestChosenBranch(t *testing.T) {
 				{Type: branchType, Name: "other", Versions: []runapi.Version{{ID: "av_9", Number: 1}}},
 			}},
 			"av_9",
+		},
+		"a cancelled newest version is skipped": {
+			stageSnapshot(),
+			cancelledAt(branchIndex([2]string{"av_1", "st_b"}, [2]string{"av_2", "st_b"}, [2]string{"av_3", "st_b"}), "av_3"),
+			"av_2",
+		},
+		"a cancelled version of the stage leaves the approved input": {
+			stageSnapshot(approved("av_1")),
+			cancelledAt(branchIndex([2]string{"av_1", "st_a"}, [2]string{"av_2", "st_b"}), "av_2"),
+			"av_1",
+		},
+		"every version cancelled is no version": {
+			stageSnapshot(),
+			cancelledAt(branchIndex([2]string{"av_1", "st_b"}, [2]string{"av_2", "st_b"}), "av_1", "av_2"),
+			"",
 		},
 		"no version":  {stageSnapshot(), branchIndex(), ""},
 		"no artifact": {stageSnapshot(), &runapi.Index{}, ""},
