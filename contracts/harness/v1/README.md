@@ -1434,8 +1434,8 @@ runtime: the resolution happens in the composed tree, per path.
    cannot be rebound. A role a module provides is checked the same way, with `Ship agent
    typescript-developer in a module, or remove provides.agents.developer from module
    typescript: no module ships agent typescript-developer.` and `Rename role
-   agents/reviewer in the provides of module typescript: module core ships agent
-   reviewer, and a role's name is no entry's.` Each member of a group role is checked the
+   agents/reviewer in the provides of module typescript.` and `Module core ships agent
+   reviewer, and a role's name is no entry's.` on the next line Each member of a group role is checked the
    same way, with `Ship agent python-reviewer, or remove it from
    provides.agents.reviewers of module python.` and `No module ships agent
    python-reviewer.` on the next line, the fix ending with the list that added the member
