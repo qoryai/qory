@@ -2973,8 +2973,7 @@ qory serves no path on the route. Each answer is JSON, `{"error": <code>, "messa
 | Status | `error` | When |
 |---|---|---|
 | `404` | `not_found` | a request of the session that runs |
-| `503` | `session_not_running` | a request of another session of the run |
-| `403` | `no_session` | a request with no session number |
+| `503` | `session_not_running` | a request of another session of the run, or one with no valid session number |
 
 The run's proxy answers some requests itself, in the same form, such as `503` for a request
 outside a session's launch, `413` for a body over 1 MiB, and `429` for more than 10 requests

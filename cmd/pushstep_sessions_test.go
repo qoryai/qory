@@ -1,6 +1,7 @@
 package cmd_test
 
 import (
+	"net/http"
 	"path/filepath"
 	"testing"
 
@@ -90,5 +91,36 @@ func TestASessionWithNoCommitsAfterAPushPushesNothing(t *testing.T) {
 	}
 	if got, want := r.log(), "qory run: pushed qory/"+workItem+" to acme/site at "+first[:min(len(first), 12)]+"\nqory run: no new commits to push\n"; got != want {
 		t.Errorf("the push steps' lines are %q, want %q", got, want)
+	}
+}
+
+// TestAFailedStoreAfterASessionEndsTheRunBeforeTheNextSession is a write run of two
+// sessions, the second a stand-in, whose first push lands but whose POST of the version
+// fails with run_ended: the run closes failed with that failure, session 2 does not run,
+// and the branch stays at session 1's commit with no version stored.
+func TestAFailedStoreAfterASessionEndsTheRunBeforeTheNextSession(t *testing.T) {
+	p := newPushRepo(t, "write")
+	p.api.post = func(_ int, w http.ResponseWriter) (bool, bool) {
+		failing(w, http.StatusConflict, "run_ended", "")
+		return true, false
+	}
+	secondRan := false
+	t.Cleanup(cmd.SetLaterSessions(func() { secondRan = true }))
+	r := p.run(t, func(d string) {
+		writeFile(t, filepath.Join(d, "first.txt"), "first\n")
+		commitAll(t, d, "Add a first file")
+	}, nil)
+	r.wantsClose(t, event.StateFailed, 1)
+	if secondRan {
+		t.Error("session 2 ran after the push step of session 1 failed")
+	}
+	if got := r.pushSteps(); len(got) != 1 || got[0] != event.StateFailed {
+		t.Errorf("the push steps exited %v, want one failed", got)
+	}
+	if posts, _, stored := p.api.counts(); posts != 1 || stored != 0 {
+		t.Errorf("%d POST and %d versions, want 1 and 0", posts, stored)
+	}
+	if head := p.branchHead(t); head == "" || head == p.first {
+		t.Errorf("the branch is at %q: session 1's push did not land past %s", head, p.first)
 	}
 }

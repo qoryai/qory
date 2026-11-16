@@ -55,7 +55,8 @@ func TestTheRouteServesNoPath(t *testing.T) {
 
 // TestTheRouteRefusesAnotherSession is a request whose Qory-Session is not the session the
 // route is open to: 503 session_not_running, also once that session's join returned and
-// before the route opens; a request with no session number gets 403 no_session.
+// before the route opens; a request whose Qory-Session is missing or malformed counts as
+// no open session and gets 503 too, with the route open or closed.
 func TestTheRouteRefusesAnotherSession(t *testing.T) {
 	q := newQoryRoute()
 	if status, _, code, _ := routeAsk(t, q, http.MethodGet, "/", "1"); status != http.StatusServiceUnavailable || code != routeSessionNotRunning {
@@ -70,13 +71,18 @@ func TestTheRouteRefusesAnotherSession(t *testing.T) {
 	}
 	for _, sessions := range [][]string{nil, {""}, {"0"}, {"-2"}, {"+2"}, {"02"}, {" 2"}, {"two"}, {"2", "2"}} {
 		status, _, code, text := routeAsk(t, q, http.MethodGet, "/", sessions...)
-		if status != http.StatusForbidden || code != routeNoSession || text != textRouteNoSession {
-			t.Errorf("Qory-Session %q: %d %s %q, want 403 %s", sessions, status, code, text, routeNoSession)
+		if status != http.StatusServiceUnavailable || code != routeSessionNotRunning {
+			t.Errorf("Qory-Session %q, route open: %d %s %q, want 503 %s", sessions, status, code, text, routeSessionNotRunning)
 		}
 	}
 	done()
 	if status, _, code, _ := routeAsk(t, q, http.MethodGet, "/", "2"); status != http.StatusServiceUnavailable || code != routeSessionNotRunning {
 		t.Errorf("after the join returned: %d %s, want 503 %s", status, code, routeSessionNotRunning)
+	}
+	for _, sessions := range [][]string{nil, {""}, {"0"}, {"2", "2"}} {
+		if status, _, code, _ := routeAsk(t, q, http.MethodGet, "/", sessions...); status != http.StatusServiceUnavailable || code != routeSessionNotRunning {
+			t.Errorf("Qory-Session %q, route closed: %d %s, want 503 %s", sessions, status, code, routeSessionNotRunning)
+		}
 	}
 	later := q.open(3)
 	defer later()
@@ -89,7 +95,7 @@ func TestTheRouteRefusesAnotherSession(t *testing.T) {
 // TestTheRoutesTextsStartWithTheFix holds each text of the route to one line of at most
 // 100 characters.
 func TestTheRoutesTextsStartWithTheFix(t *testing.T) {
-	for _, text := range []string{textRouteNoSession, fmt.Sprintf(textRouteNotRunning, 12), textRouteNotFound} {
+	for _, text := range []string{fmt.Sprintf(textRouteNotRunning, 12), textRouteNotFound} {
 		if strings.Contains(text, "\n") || len(text) > 100 {
 			t.Errorf("%q is more than one line of 100 characters", text)
 		}

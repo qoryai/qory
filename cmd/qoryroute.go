@@ -13,11 +13,9 @@ import (
 // The codes and the words of the answers that [qoryRoute] writes itself. Each text starts
 // with its fix.
 const (
-	routeNoSession         = "no_session"
 	routeSessionNotRunning = "session_not_running"
 	routeNotFound          = "not_found"
 
-	textRouteNoSession  = "Send the request to " + link.EnvQoryHost + " from a session: it has no " + link.QorySessionHeader + " session number."
 	textRouteNotRunning = "Send the request from the session that runs: session %d does not run."
 	textRouteNotFound   = "Check the request's path: qory serves nothing at it."
 )
@@ -25,11 +23,12 @@ const (
 // qoryRoute is the handler of a run's route to qory, OpenSpec.QoryRoute: a program in a
 // session of the run sends a plain HTTP request to QORY_HOST_URL, and the session's
 // forwarder hands it here with the session's number in the header Qory-Session. The route
-// serves only the session that [qoryRoute.open] opened it to: a request with no session
-// number gets 403, and one of another session 503, as the forwarder answers a request of a
-// session that does not run. It serves no path, so every other request gets 404. Each
-// answer it writes is JSON, {"error":<code>,"message":<text>}, the form of the forwarder's
-// own answers.
+// serves only the session that [qoryRoute.open] opened it to: a request of another
+// session gets 503, as the forwarder answers a request of a session that does not run, and
+// so does a request whose Qory-Session is missing or malformed, which Forager's forwarder
+// never sends. It serves no path, so every other request gets 404. Each answer it writes
+// is JSON, {"error":<code>,"message":<text>}, the form of the responses that Forager's
+// forwarder writes.
 type qoryRoute struct {
 	mu sync.Mutex
 	// session is the number of the session the route serves, 0 for none.
@@ -57,14 +56,10 @@ func (q *qoryRoute) open(n int) (closeRoute func()) {
 // ServeHTTP answers a request of the route.
 func (q *qoryRoute) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	n, ok := sessionNumber(r.Header.Values(link.QorySessionHeader))
-	if !ok {
-		routeAnswer(w, http.StatusForbidden, routeNoSession, textRouteNoSession)
-		return
-	}
 	q.mu.Lock()
 	running := q.session
 	q.mu.Unlock()
-	if n != running {
+	if !ok || n != running {
 		routeAnswer(w, http.StatusServiceUnavailable, routeSessionNotRunning, fmt.Sprintf(textRouteNotRunning, n))
 		return
 	}

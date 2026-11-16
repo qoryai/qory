@@ -15,7 +15,7 @@ import (
 )
 
 // TestTheSetupGetsNoRouteToQory is a run with a route that Forager opens at a gateway in
-// this process, whose session's environment has a QORY_HOST_URL of its own: the
+// this process, whose session's environment sets a QORY_HOST_URL: the
 // variables qory gives the run's Setup, which Forager's AgentEnv resolves, have no
 // QORY_HOST_URL. Forager's Setup adds no QORY_ name to them, and refuses one.
 func TestTheSetupGetsNoRouteToQory(t *testing.T) {
