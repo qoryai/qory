@@ -28,10 +28,10 @@ const branchMarker = "This line is from the work item's branch."
 // branchRepository is a run from a control plane, as [newHostFetch] makes it, whose
 // server serves acme/site: a first commit on main, the target version, whose qory.yaml
 // lists the module hello by its path modules/hello, sets the command limit 10 of the
-// extension software-factory and declares the workflow hello write, then a commit on top
-// of it that change makes, pushed to the work item's branch qory/<workItem> alone. hello
-// is [helloFiles], read before the first run moves the working directory. merge
-// pushes that commit to main, as a merge of the branch into the destination does.
+// extension software-factory and declares the workflow hello write, then a commit that
+// [change] makes on top of it, pushed to the work item's branch qory/<workItem> alone.
+// hello is [helloFiles], read before the first run moves the working directory. merge
+// pushes that commit to main, as a merge of the branch into the destination branch does.
 func branchRepository(t *testing.T, hello map[string]string, change func(work string)) (h *hostFetch, first, changed string, merge func()) {
 	t.Helper()
 	h = newHostFetch(t, "", "main")
@@ -144,7 +144,7 @@ func TestABranchCommitDoesNotChangeTheHarnessOfTheNextRun(t *testing.T) {
 }
 
 // TestABranchCommitReachesTheHarnessOnceMerged is the next run of the work item once its
-// branch is merged into the destination: Qory Apiary sends a target_version that
+// branch is merged into the destination branch: Qory Apiary sends a target_version that
 // contains the branch's commit, and the run composes it.
 func TestABranchCommitReachesTheHarnessOnceMerged(t *testing.T) {
 	hello := helloFiles(t)
