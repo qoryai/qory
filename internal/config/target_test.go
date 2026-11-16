@@ -65,14 +65,14 @@ func TestTargetRefuses(t *testing.T) {
 		extends bool
 		want    string
 	}{
-		{"no runtime", "    model: opus\n", false, "harness sets no target.runtime and no stack to extend"},
-		{"an empty list", "    runtime: []\n", false, "harness sets no target.runtime and no stack to extend"},
-		{"an empty name", "    runtime: [claude, \"\"]\n", false, "target.runtime lists an empty runtime"},
-		{"the same runtime twice", "    runtime: [claude, codex, claude]\n", false, "target.runtime lists claude twice"},
-		{"a mapping", "    runtime: {claude: opus}\n", false, "one runtime name or a list of them"},
-		{"an empty name beside extends", "    runtime: [claude, \"\"]\n", true, "target.runtime lists an empty runtime"},
-		{"the same runtime twice beside extends", "    runtime: [claude, claude]\n", true, "target.runtime lists claude twice"},
-		{"a mapping beside extends", "    runtime: {claude: opus}\n", true, "one runtime name or a list of them"},
+		{"no runtime", "    model: opus\n", false, "Set target.runtime in the harness section, or extend a stack."},
+		{"an empty list", "    runtime: []\n", false, "Set target.runtime in the harness section, or extend a stack."},
+		{"an empty name", "    runtime: [claude, \"\"]\n", false, "Remove the empty name from target.runtime."},
+		{"the same runtime twice", "    runtime: [claude, codex, claude]\n", false, "List claude once in target.runtime."},
+		{"a mapping", "    runtime: {claude: opus}\n", false, "Set target.runtime to one runtime name or a list of names."},
+		{"an empty name beside extends", "    runtime: [claude, \"\"]\n", true, "Remove the empty name from target.runtime."},
+		{"the same runtime twice beside extends", "    runtime: [claude, claude]\n", true, "List claude once in target.runtime."},
+		{"a mapping beside extends", "    runtime: {claude: opus}\n", true, "Set target.runtime to one runtime name or a list of names."},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			_, err := composeTarget(t, c.target, c.extends)

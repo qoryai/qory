@@ -63,14 +63,14 @@ func TestTheGatewayServiceReads(t *testing.T) {
 		t.Errorf("the key resolves to %s, want it as written", got)
 	}
 	for _, c := range []struct{ body, want string }{
-		{"gateway: {listen: gateway.example}\n", `gateway.listen is not host:port, such as 0.0.0.0:8443`},
-		{"gateway: {listen: \"0.0.0.0:99999\"}\n", `gateway.listen is not host:port, such as 0.0.0.0:8443`},
-		{"gateway: {tls: {certificate: gateway.pem}}\n", "gateway.tls needs both certificate and key"},
-		{"gateway: {run_credentials: [{issuer: \"https://issuer.example\"}]}\n", `line 2: key "run_credentials" is not one forager.yaml reads`},
+		{"gateway: {listen: gateway.example}\n", "Set gateway.listen to host:port, such as 0.0.0.0:8443."},
+		{"gateway: {listen: \"0.0.0.0:99999\"}\n", "Set gateway.listen to host:port, such as 0.0.0.0:8443."},
+		{"gateway: {tls: {certificate: gateway.pem}}\n", "Set gateway.tls.certificate and gateway.tls.key."},
+		{"gateway: {run_credentials: [{issuer: \"https://issuer.example\"}]}\n", "Remove the key, or rename it to one forager.yaml reads.\n  Key \"run_credentials\" is not one forager.yaml reads."},
 	} {
 		path := foragerFile(t, "apiVersion: qory.dev/v1alpha1\n"+c.body)
 		_, err := config.LoadForager()
-		if err == nil || !strings.HasPrefix(err.Error(), path+": "+c.want) {
+		if err == nil || !strings.HasPrefix(err.Error(), c.want) || !strings.Contains(err.Error(), path) {
 			t.Errorf("%q: error %v, want %q after the file", c.body, err, c.want)
 		}
 	}

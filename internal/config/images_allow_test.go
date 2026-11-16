@@ -61,23 +61,23 @@ func TestForagerFileReadsTheImagesAllow(t *testing.T) {
 // digest in lower case up to a whole part of it, and what is not a list of strings.
 func TestForagerFileRefusesAnImagesAllowEntry(t *testing.T) {
 	hermetic(t)
-	const notPrefix = "is not the start of an image reference pinned by digest, in lower case, up to a whole part of it: a registry, a name or a path ending in a slash, or a name and its @"
+	const notPrefix = "to the start of an image reference pinned by digest, in lower case.\n  The start is a whole part of it: a registry, a name or a path ending in a slash, or a name and its @. The entry is not one.\n  wall.images_allow is in {path}."
 	wall := "wall:\n  adapter: docker\n  image: example.com/agent:1\n  images_allow: "
 	for _, c := range []struct{ body, want string }{
-		{wall + "[registry.example/, \"\"]\n", ": wall.images_allow[1] " + notPrefix},
-		{wall + "[\"*\"]\n", ": wall.images_allow[0] " + notPrefix},
-		{wall + "[Registry.Example/" + marker + "]\n", ": wall.images_allow[0] " + notPrefix},
-		{wall + "[\"registry.example/" + strings.ToLower(marker) + ":1\"]\n", ": wall.images_allow[0] " + notPrefix},
-		{wall + "[\"registry.example/" + strings.ToLower(marker) + "@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\"]\n", ": wall.images_allow[0] " + notPrefix},
-		{wall + "[\"https://registry.example/" + strings.ToLower(marker) + "/\"]\n", ": wall.images_allow[0] " + notPrefix},
-		{wall + "[\"registry.example/" + strings.ToLower(marker) + "-\"]\n", ": wall.images_allow[0] " + notPrefix},
-		{wall + "[registry.example/, [" + marker + "]]\n", ": wall.images_allow[1] " + notPrefix},
-		{wall + "registry.example/" + marker + "\n", ": line 4: wall.images_allow is not a list of strings"},
+		{wall + "[registry.example/, \"\"]\n", "Set wall.images_allow[1] " + notPrefix},
+		{wall + "[\"*\"]\n", "Set wall.images_allow[0] " + notPrefix},
+		{wall + "[Registry.Example/" + marker + "]\n", "Set wall.images_allow[0] " + notPrefix},
+		{wall + "[\"registry.example/" + strings.ToLower(marker) + ":1\"]\n", "Set wall.images_allow[0] " + notPrefix},
+		{wall + "[\"registry.example/" + strings.ToLower(marker) + "@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\"]\n", "Set wall.images_allow[0] " + notPrefix},
+		{wall + "[\"https://registry.example/" + strings.ToLower(marker) + "/\"]\n", "Set wall.images_allow[0] " + notPrefix},
+		{wall + "[\"registry.example/" + strings.ToLower(marker) + "-\"]\n", "Set wall.images_allow[0] " + notPrefix},
+		{wall + "[registry.example/, [" + marker + "]]\n", "Set wall.images_allow[1] " + notPrefix},
+		{wall + "registry.example/" + marker + "\n", "Set wall.images_allow to a list of strings.\n  wall.images_allow is not a list of strings.\n  It is at line 4 of {path}."},
 	} {
 		path := foragerFile(t, c.body)
 		_, err := config.Load(t.TempDir(), true)
-		if err == nil || err.Error() != path+c.want {
-			t.Errorf("%q: %v, want %q", c.body, err, path+c.want)
+		if err == nil || err.Error() != strings.ReplaceAll(c.want, "{path}", path) {
+			t.Errorf("%q: %v, want %q", c.body, err, strings.ReplaceAll(c.want, "{path}", path))
 		}
 		if err != nil && strings.Contains(strings.ToLower(err.Error()), strings.ToLower(marker)) {
 			t.Errorf("%q: the refusal holds the value: %v", c.body, err)

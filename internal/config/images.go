@@ -65,7 +65,7 @@ var imageKeys = []string{"ref", "runtime", "docker"}
 // engine has is the engine's to say when a run starts.
 func readImages(path string, node *yaml.Node) ([]ForagerImage, error) {
 	if node.Kind != yaml.MappingNode {
-		return nil, fmt.Errorf("%s: wall.images is a mapping from a name to an image", path)
+		return nil, exports.Refuse("Set wall.images to a mapping from a name to an image.", "It is not a mapping.", "wall.images is in "+path+".")
 	}
 	var out []ForagerImage
 	seen := map[string]bool{}
@@ -73,18 +73,18 @@ func readImages(path string, node *yaml.Node) ([]ForagerImage, error) {
 		name := node.Content[i].Value
 		at := entryAt("wall.images", node.Content[i])
 		if !imageName.MatchString(name) {
-			return nil, fmt.Errorf("%s: wall.images: %s is not 1 to 64 of a-z, 0-9, underscore, dot and dash, starting with a letter or a digit", path, quotedName(node.Content[i]))
+			return nil, exports.Refuse("Rename each image of wall.images to 1 to 64 of a-z, 0-9, underscore, dot, and dash.", fmt.Sprintf("%s is not one. A name starts with a letter or a digit.", quotedName(node.Content[i])), "wall.images is in "+path+".")
 		}
 		if seen[name] {
-			return nil, fmt.Errorf("%s: %s is defined twice", path, at)
+			return nil, exports.Refuse(fmt.Sprintf("Define %s once.", at), at+" is defined twice.", "wall.images is in "+path+".")
 		}
 		seen[name] = true
-		fail := func(format string, a ...any) error {
-			return fmt.Errorf("%s: %s%s", path, at, fmt.Sprintf(format, a...))
+		fail := func(fix, cause string) error {
+			return exports.Refuse(fix, cause, at+" is in "+path+".")
 		}
 		entry := node.Content[i+1]
 		if entry.Kind != yaml.MappingNode {
-			return nil, fail(" is a mapping: ref, and runtime and docker when it needs them")
+			return nil, fail("Set "+at+" to a mapping of ref, and runtime and docker when it needs them.", "It is not a mapping.")
 		}
 		img := ForagerImage{Name: name}
 		var hasRef bool
@@ -92,37 +92,37 @@ func readImages(path string, node *yaml.Node) ([]ForagerImage, error) {
 		for k := 0; k+1 < len(entry.Content); k += 2 {
 			key, value := entry.Content[k].Value, entry.Content[k+1]
 			if !slices.Contains(imageKeys, key) {
-				return nil, keyNotOne(path, at, entry.Content[k], "; an image has "+strings.Join(imageKeys, ", "))
+				return nil, keyNotOne(path, at, entry.Content[k], ". An image has "+strings.Join(imageKeys, ", "))
 			}
 			if keys[key] {
-				return nil, fail(".%s appears twice", key)
+				return nil, fail(fmt.Sprintf("Write %s.%s once.", at, key), fmt.Sprintf("%s.%s appears twice.", at, key))
 			}
 			keys[key] = true
 			switch key {
 			case "ref":
 				if value.Kind != yaml.ScalarNode || value.ShortTag() != "!!str" || !imageRef.MatchString(value.Value) {
-					return nil, fail(".ref is not an image reference, such as ghcr.io/acme/agent@sha256:…")
+					return nil, fail("Set "+at+".ref to an image reference, such as ghcr.io/acme/agent@sha256:…", "The value is not one.")
 				}
 				img.Ref, hasRef = value.Value, true
 			case "runtime":
 				if value.Kind != yaml.ScalarNode || value.ShortTag() != "!!str" || !runtimeName.MatchString(value.Value) {
-					return nil, fail(".runtime is not a container runtime's name, such as sysbox-runc")
+					return nil, fail("Set "+at+".runtime to a container runtime's name, such as sysbox-runc.", "The value is not one.")
 				}
 				img.Runtime = value.Value
 			case "docker":
 				if value.Kind != yaml.ScalarNode || value.ShortTag() != "!!bool" || value.Decode(&img.Docker) != nil {
-					return nil, fail(".docker is true or false")
+					return nil, fail("Set "+at+".docker to true or false.", "The value is neither.")
 				}
 			}
 		}
 		if !hasRef {
-			return nil, fail(".ref is required: the image's reference")
+			return nil, fail("Set "+at+".ref to the image's reference.", at+".ref is required.")
 		}
 		if img.Docker && img.Runtime == "" {
-			return nil, fail(": docker needs a runtime that runs a daemon without privileges, such as runtime: sysbox-runc")
+			return nil, fail("Set "+at+".runtime to a runtime that runs a daemon without privileges, such as sysbox-runc.", "docker: true needs one.")
 		}
 		if err := img.Session().Check(); err != nil {
-			return nil, fail(": %v", err)
+			return nil, fail("Correct "+at+".", sentence(err))
 		}
 		out = append(out, img)
 	}
@@ -135,7 +135,7 @@ func readImages(path string, node *yaml.Node) ([]ForagerImage, error) {
 // not the start of such a reference in lower case, up to a whole part of it.
 func readImagesAllow(path string, node *yaml.Node) ([]string, error) {
 	notPrefix := func(i, _ int) error {
-		return fmt.Errorf("%s: wall.images_allow[%d] is not the start of an image reference pinned by digest, in lower case, up to a whole part of it: a registry, a name or a path ending in a slash, or a name and its @", path, i)
+		return exports.Refuse(fmt.Sprintf("Set wall.images_allow[%d] to the start of an image reference pinned by digest, in lower case.", i), "The start is a whole part of it: a registry, a name or a path ending in a slash, or a name and its @. The entry is not one.", "wall.images_allow is in "+path+".")
 	}
 	allow, err := stringList(path, "wall.images_allow", node, notPrefix)
 	if err != nil {
@@ -158,9 +158,9 @@ func readPrebuildImage(path, name string, images []ForagerImage) (string, error)
 	i := slices.IndexFunc(images, func(i ForagerImage) bool { return i.Name == name })
 	switch {
 	case i < 0:
-		return "", fmt.Errorf("%s: set wall.prebuild_image to a name of wall.images: wall.images defines no image %s", path, shown)
+		return "", exports.Refuse("Set wall.prebuild_image to a name of wall.images.", "wall.images defines no image "+shown+".", "wall.prebuild_image is in "+path+".")
 	case !images[i].Docker:
-		return "", fmt.Errorf("%s: set docker: true and a runtime, such as sysbox-runc, on wall.images.%s, or name another image in wall.prebuild_image: a prebuild builds in the image's nested Docker", path, accesskey.ShownName(name, false))
+		return "", exports.Refuse(fmt.Sprintf("Set docker: true and a runtime on wall.images.%s, or name another image in wall.prebuild_image.", accesskey.ShownName(name, false)), "A prebuild builds in the image's nested Docker. A runtime is such as sysbox-runc.", "wall.prebuild_image is in "+path+".")
 	}
 	return name, nil
 }

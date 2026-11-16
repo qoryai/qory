@@ -373,7 +373,7 @@ func TestARelativeLinkIsFollowedFromWhereItStands(t *testing.T) {
 		switch links := i + 1; {
 		case links <= 3 && err != nil:
 			t.Errorf("%d links, the most followed: %v", links, err)
-		case links > 3 && (err == nil || !strings.HasSuffix(err.Error(), "gateway.integrations.far: "+next+" leads through more than 3 links")):
+		case links > 3 && (err == nil || !strings.HasPrefix(err.Error(), "Fix the program of gateway.integrations.far.\n  "+next+" leads through more than 3 links.")):
 			t.Errorf("%d links, more than the most: %v", links, err)
 		}
 	}
@@ -383,7 +383,7 @@ func TestARelativeLinkIsFollowedFromWhereItStands(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := conf.Forager.Expand(context.Background(), config.Expansion{Workspace: []string{program}}); err == nil || !strings.HasSuffix(err.Error(), "gateway.integrations.rel: "+program+", which a run may write; qory runs an integration from outside the checkout and the container's read-write mounts") {
+	if err := conf.Forager.Expand(context.Background(), config.Expansion{Workspace: []string{program}}); err == nil || !strings.HasPrefix(err.Error(), "Fix the program of gateway.integrations.rel.\n  "+program+", which a run may write; qory runs an integration from outside the checkout and the container's read-write mounts.") {
 		t.Errorf("a program that is a mounted file: %v", err)
 	}
 }
@@ -453,7 +453,7 @@ func TestAnUnknownRoleIsLeftAlone(t *testing.T) {
 	}
 	fakeIntegration(t, dir, "qory-queue", `{"version": 1, "name": "queue", "title": "Queue", "program_version": "1", "settings": {"type": "object"}, "roles": {"example_role": {}, "another_role": {}}}`)
 	path := foragerFile(t, "gateway:\n  integrations:\n    queue:\n")
-	if _, err := expand(t); err == nil || err.Error() != path+": gateway.integrations.queue: qory-queue plays the roles another_role and example_role, none of which qory expands, and defines nothing" {
+	if _, err := expand(t); err == nil || err.Error() != "Remove gateway.integrations.queue, or give it a program that defines a credential.\n  qory-queue plays the roles another_role and example_role, none of which qory expands, and defines nothing.\n  gateway.integrations.queue is in "+path+"." {
 		t.Errorf("no known role: %v", err)
 	}
 }
@@ -473,18 +473,18 @@ func TestExpandRefusesWhatDoesNotDescribe(t *testing.T) {
 	fakeIntegration(t, dir, "qory-v2", strings.Replace(fixture(t, "acme-tracker.json"), `"version": 1,`, `"version": 2,`, 1))
 	fakeIntegration(t, dir, "qory-github", fixture(t, "github.json"))
 	for _, c := range []struct{ body, want string }{
-		{"gateway:\n  integrations:\n    absent: {}\n", "gateway.integrations.absent: qory-absent is not on the PATH; install it there, or set program to its path"},
-		{"gateway:\n  integrations:\n    x: {program: /nonexistent/acme-x}\n", "gateway.integrations.x: /nonexistent/acme-x is not a program this user may run"},
-		{"gateway:\n  integrations:\n    failing: {}\n", "gateway.integrations.failing: " + resolved(t, failing) + " describe: exit status 3: the key file /k.pem is readable by others"},
-		{"gateway:\n  integrations:\n    garbled: {}\n", "describe did not print one JSON document"},
-		{"gateway:\n  integrations:\n    v2: {}\n", "describe printed a description the integration contract refuses: at '/version': value must be 1"},
-		{"gateway:\n  integrations:\n    github: {settings: {app_id: 1, private_key_file: /k.pem, private_key: NOT-A-REAL-KEY}}\n", "gateway.integrations.github: settings.private_key is a secret, and the settings go on a command line; set private_key_file, the path of a file that contains it, in its place"},
-		{"gateway:\n  integrations:\n    github: {settings: {app_id: NOT A VALID ID, private_key_file: /k.pem}}\n", "gateway.integrations.github: the settings are not what github takes: settings.app_id breaks the schema's pattern"},
-		{"gateway:\n  integrations:\n    github: {settings: {app_id: 1, private_key_file: /k.pem, permissions: {contents: NOT-A-LEVEL}}}\n", "settings.permissions.contents breaks the schema's enum"},
+		{"gateway:\n  integrations:\n    absent: {}\n", "Fix the program of gateway.integrations.absent.\n  qory-absent is not on the PATH; install it there, or set program to its path."},
+		{"gateway:\n  integrations:\n    x: {program: /nonexistent/acme-x}\n", "Fix the program of gateway.integrations.x.\n  /nonexistent/acme-x is not a program this user may run."},
+		{"gateway:\n  integrations:\n    failing: {}\n", "Fix the program of gateway.integrations.failing.\n  " + resolved(t, failing) + " describe: exit status 3: the key file /k.pem is readable by others."},
+		{"gateway:\n  integrations:\n    garbled: {}\n", "describe did not print one JSON document: unexpected EOF."},
+		{"gateway:\n  integrations:\n    v2: {}\n", "describe printed a description the integration contract refuses: at '/version': value must be 1."},
+		{"gateway:\n  integrations:\n    github: {settings: {app_id: 1, private_key_file: /k.pem, private_key: NOT-A-REAL-KEY}}\n", "Set the settings of gateway.integrations.github as its program describes them.\n  Settings.private_key is a secret, and the settings go on a command line; set private_key_file, the path of a file that contains it, in its place."},
+		{"gateway:\n  integrations:\n    github: {settings: {app_id: NOT A VALID ID, private_key_file: /k.pem}}\n", "Set the settings of gateway.integrations.github as its program describes them.\n  The settings are not what github takes: settings.app_id breaks the schema's pattern."},
+		{"gateway:\n  integrations:\n    github: {settings: {app_id: 1, private_key_file: /k.pem, permissions: {contents: NOT-A-LEVEL}}}\n", "Set the settings of gateway.integrations.github as its program describes them.\n  The settings are not what github takes: settings.permissions.contents breaks the schema's enum."},
 	} {
 		path := foragerFile(t, c.body)
 		_, err := expand(t)
-		if err == nil || !strings.Contains(err.Error(), c.want) || !strings.HasPrefix(err.Error(), path+": ") {
+		if err == nil || !strings.Contains(err.Error(), c.want) || !strings.Contains(err.Error(), path) {
 			t.Errorf("%q: error %v, want one naming the file and %q", c.body, err, c.want)
 			continue
 		}
@@ -499,25 +499,25 @@ func TestExpandRefusesWhatDoesNotDescribe(t *testing.T) {
 func TestIntegrationsSectionRefusesAMistake(t *testing.T) {
 	hermetic(t)
 	for _, c := range []struct{ body, want string }{
-		{"gateway: {integrations: [github]}\n", "gateway.integrations is a mapping from a name to an integration"},
-		{"gateway: {integrations: {acme.tracker: {}}}\n", `gateway.integrations: "acme.tracker" is not 1 to 64 of a-z, 0-9, underscore and dash`},
-		{"gateway: {integrations: {GitHub: {}}}\n", `gateway.integrations: "GitHub" is not 1 to 64`},
-		{"gateway:\n  integrations:\n    github: {}\n    github: {}\n", "gateway.integrations.github is declared twice"},
-		{"gateway: {integrations: {github: qory-github}}\n", "gateway.integrations.github is a mapping: program and settings"},
-		{"gateway: {integrations: {github: {command: /x}}}\n", `gateway.integrations.github: key "command" is not one`},
-		{"gateway: {integrations: {github: {program: bin/qory-github}}}\n", `gateway.integrations.github.program is not an absolute path; set program to an absolute path or a name on the PATH`},
-		{"gateway: {integrations: {github: {program: 7}}}\n", "gateway.integrations.github.program is a path or a name on the PATH"},
-		{"gateway: {integrations: {github: {settings: [a]}}}\n", "gateway.integrations.github.settings is a mapping, the settings document"},
-		{"gateway: {integrations: {github: {settings: {a: 1, a: 2}}}}\n", "gateway.integrations.github.settings.a appears twice"},
-		{"gateway: {integrations: {github: {settings: {1: x}}}}\n", "gateway.integrations.github.settings: line 1: a key that is not a string"},
-		{"gateway: {integrations: {github: {settings: {!!merge team: 1}}}}\n", "gateway.integrations.github.settings: line 1: a key that is not a string"},
-		{"gateway: {integrations: {github: {settings: {ratio: .nan}}}}\n", "gateway.integrations.github.settings.ratio is not a number that JSON can represent"},
-		{"gateway: {integrations: {github: {settings: {a: &b {x: 1}, c: *b}}}}\n", "gateway.integrations.github.settings.c: line 1: *b is a YAML alias"},
-		{"gateway: {integrations: {github: {settings: {<<: {app_id: 1}}}}}\n", "a YAML alias or merge, which the settings may not contain"},
+		{"gateway: {integrations: [github]}\n", "Set gateway.integrations to a mapping from a name to an integration.\n  It is not a mapping."},
+		{"gateway: {integrations: {acme.tracker: {}}}\n", "Rename each integration of gateway.integrations to 1 to 64 of a-z, 0-9, underscore, and dash.\n  \"acme.tracker\" is not one. A name starts with a letter or a digit."},
+		{"gateway: {integrations: {GitHub: {}}}\n", "Rename each integration of gateway.integrations to 1 to 64 of a-z, 0-9, underscore, and dash.\n  \"GitHub\" is not one. A name starts with a letter or a digit."},
+		{"gateway:\n  integrations:\n    github: {}\n    github: {}\n", "Declare gateway.integrations.github once.\n  gateway.integrations.github is declared twice."},
+		{"gateway: {integrations: {github: qory-github}}\n", "Set gateway.integrations.github to a mapping of program and settings.\n  It is not a mapping."},
+		{"gateway: {integrations: {github: {command: /x}}}\n", "Remove the key, or rename it to one forager.yaml reads.\n  gateway.integrations.github: key \"command\" is not one."},
+		{"gateway: {integrations: {github: {program: bin/qory-github}}}\n", "Set gateway.integrations.github.program to an absolute path or a name on the PATH.\n  The value is a relative path."},
+		{"gateway: {integrations: {github: {program: 7}}}\n", "Set gateway.integrations.github.program to a path or a name on the PATH.\n  The value is not one."},
+		{"gateway: {integrations: {github: {settings: [a]}}}\n", "Set gateway.integrations.github.settings to a mapping, the settings document.\n  It is not a mapping."},
+		{"gateway: {integrations: {github: {settings: {a: 1, a: 2}}}}\n", "Remove one of the two gateway.integrations.github.settings.a keys.\n  The key appears twice."},
+		{"gateway: {integrations: {github: {settings: {1: x}}}}\n", "Make each key of gateway.integrations.github.settings a string.\n  The key at line 1 is not a string."},
+		{"gateway: {integrations: {github: {settings: {!!merge team: 1}}}}\n", "Make each key of gateway.integrations.github.settings a string.\n  The key at line 1 is not a string."},
+		{"gateway: {integrations: {github: {settings: {ratio: .nan}}}}\n", "Set gateway.integrations.github.settings.ratio to a number that JSON can represent.\n  The value is not one."},
+		{"gateway: {integrations: {github: {settings: {a: &b {x: 1}, c: *b}}}}\n", "Write the value of gateway.integrations.github.settings.c out in full.\n  *b at line 1 is a YAML alias, which the settings may not contain."},
+		{"gateway: {integrations: {github: {settings: {<<: {app_id: 1}}}}}\n", "Write the keys of gateway.integrations.github.settings out in full.\n  The key at line 1 is a YAML alias or merge, which the settings may not contain."},
 	} {
 		path := foragerFile(t, c.body)
 		_, err := config.Load(t.TempDir(), true)
-		if err == nil || !strings.Contains(err.Error(), c.want) || !strings.HasPrefix(err.Error(), path) {
+		if err == nil || !strings.Contains(err.Error(), c.want) || !strings.Contains(err.Error(), path) {
 			t.Errorf("%q: error %v, want one naming the file and %q", c.body, err, c.want)
 		}
 	}

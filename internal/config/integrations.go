@@ -55,7 +55,7 @@ type ForagerIntegration struct {
 // program's description by [Forager.Expand], which runs the program.
 func readIntegrations(path string, node *yaml.Node) ([]ForagerIntegration, error) {
 	if node.Kind != yaml.MappingNode {
-		return nil, fmt.Errorf("%s: gateway.integrations is a mapping from a name to an integration", path)
+		return nil, exports.Refuse("Set gateway.integrations to a mapping from a name to an integration.", "It is not a mapping.", "gateway.integrations is in "+path+".")
 	}
 	var out []ForagerIntegration
 	seen := map[string]bool{}
@@ -63,10 +63,10 @@ func readIntegrations(path string, node *yaml.Node) ([]ForagerIntegration, error
 		key := node.Content[i].Value
 		at := entryAt("gateway.integrations", node.Content[i])
 		if !integrationKey.MatchString(key) {
-			return nil, fmt.Errorf("%s: gateway.integrations: %s is not 1 to 64 of a-z, 0-9, underscore and dash, starting with a letter or a digit", path, quotedName(node.Content[i]))
+			return nil, exports.Refuse("Rename each integration of gateway.integrations to 1 to 64 of a-z, 0-9, underscore, and dash.", fmt.Sprintf("%s is not one. A name starts with a letter or a digit.", quotedName(node.Content[i])), "gateway.integrations is in "+path+".")
 		}
 		if seen[key] {
-			return nil, fmt.Errorf("%s: %s is declared twice", path, at)
+			return nil, exports.Refuse(fmt.Sprintf("Declare %s once.", at), at+" is declared twice.", "gateway.integrations is in "+path+".")
 		}
 		seen[key] = true
 		in := ForagerIntegration{Key: key, Program: ProgramPrefix + key, Settings: []byte("{}")}
@@ -76,26 +76,26 @@ func readIntegrations(path string, node *yaml.Node) ([]ForagerIntegration, error
 			continue
 		}
 		if entry.Kind != yaml.MappingNode {
-			return nil, fmt.Errorf("%s: %s is a mapping: program and settings", path, at)
+			return nil, exports.Refuse(fmt.Sprintf("Set %s to a mapping of program and settings.", at), "It is not a mapping.", at+" is in "+path+".")
 		}
 		for k := 0; k+1 < len(entry.Content); k += 2 {
 			value := entry.Content[k+1]
 			switch name := entry.Content[k].Value; name {
 			case "program":
 				if value.Kind != yaml.ScalarNode || value.ShortTag() != "!!str" || value.Value == "" {
-					return nil, fmt.Errorf("%s: %s.program is a path or a name on the PATH", path, at)
+					return nil, exports.Refuse(fmt.Sprintf("Set %s.program to a path or a name on the PATH.", at), "The value is not one.", at+" is in "+path+".")
 				}
 				if strings.ContainsRune(value.Value, '/') && !filepath.IsAbs(value.Value) {
-					return nil, fmt.Errorf("%s: %s.program is not an absolute path; set program to an absolute path or a name on the PATH", path, at)
+					return nil, exports.Refuse(fmt.Sprintf("Set %s.program to an absolute path or a name on the PATH.", at), "The value is a relative path.", at+" is in "+path+".")
 				}
 				in.Program = value.Value
 			case "settings":
 				if value.Kind != yaml.MappingNode {
-					return nil, fmt.Errorf("%s: %s.settings is a mapping, the settings document", path, at)
+					return nil, exports.Refuse(fmt.Sprintf("Set %s.settings to a mapping, the settings document.", at), "It is not a mapping.", at+" is in "+path+".")
 				}
 				var b bytes.Buffer
-				if err := writeJSON(&b, value, "settings"); err != nil {
-					return nil, fmt.Errorf("%s: %s.%w", path, at, err)
+				if err := writeJSON(&b, value, at+".settings"); err != nil {
+					return nil, exports.AtPath(path, err)
 				}
 				in.Settings = b.Bytes()
 			default:
@@ -116,25 +116,25 @@ func writeJSON(b *bytes.Buffer, n *yaml.Node, at string) error {
 	switch n.Kind {
 	case yaml.AliasNode:
 		if accesskey.ContainsSecret(n.Value) {
-			return fmt.Errorf("%s: line %d: the value is a YAML alias, which the settings may not contain; write the value out in full", at, n.Line)
+			return exports.Refuse(fmt.Sprintf("Write the value of %s out in full.", at), fmt.Sprintf("The value at line %d is a YAML alias, which the settings may not contain.", n.Line), "The file is "+exports.FilePlace+".")
 		}
-		return fmt.Errorf("%s: line %d: *%s is a YAML alias, which the settings may not contain; write the value out in full", at, n.Line, n.Value)
+		return exports.Refuse(fmt.Sprintf("Write the value of %s out in full.", at), fmt.Sprintf("*%s at line %d is a YAML alias, which the settings may not contain.", n.Value, n.Line), "The file is "+exports.FilePlace+".")
 	case yaml.MappingNode:
 		b.WriteByte('{')
 		seen := map[string]int{}
 		for i := 0; i+1 < len(n.Content); i += 2 {
 			k := n.Content[i]
 			if k.Kind == yaml.AliasNode || isMergeKey(k) {
-				return fmt.Errorf("%s: line %d: a YAML alias or merge, which the settings may not contain; write the value out in full", at, k.Line)
+				return exports.Refuse(fmt.Sprintf("Write the keys of %s out in full.", at), fmt.Sprintf("The key at line %d is a YAML alias or merge, which the settings may not contain.", k.Line), "The file is "+exports.FilePlace+".")
 			}
 			if k.Kind != yaml.ScalarNode || k.ShortTag() != "!!str" {
-				return fmt.Errorf("%s: line %d: a key that is not a string", at, k.Line)
+				return exports.Refuse(fmt.Sprintf("Make each key of %s a string.", at), fmt.Sprintf("The key at line %d is not a string.", k.Line), "The file is "+exports.FilePlace+".")
 			}
 			if first, ok := seen[k.Value]; ok {
 				if accesskey.ContainsSecret(k.Value) {
-					return fmt.Errorf("%s: line %d: a key is written twice; it was first written at line %d", at, k.Line, first)
+					return exports.Refuse(fmt.Sprintf("Remove one of the two keys of %s that are written twice.", at), fmt.Sprintf("Line %d writes a key again; it was first written at line %d.", k.Line, first), "The file is "+exports.FilePlace+".")
 				}
-				return fmt.Errorf("%s.%s appears twice", at, k.Value)
+				return exports.Refuse(fmt.Sprintf("Remove one of the two %s.%s keys.", at, k.Value), "The key appears twice.", "The file is "+exports.FilePlace+".")
 			}
 			seen[k.Value] = k.Line
 			if i > 0 {
@@ -165,14 +165,14 @@ func writeJSON(b *bytes.Buffer, n *yaml.Node, at string) error {
 		case "!!bool", "!!int", "!!float":
 			var v any
 			if err := n.Decode(&v); err != nil {
-				return fmt.Errorf("%s is not a number or a boolean that JSON can represent", at)
+				return exports.Refuse(fmt.Sprintf("Set %s to a number or a boolean that JSON can represent.", at), "The value is not one.", "The file is "+exports.FilePlace+".")
 			}
 			if f, ok := v.(float64); ok && (math.IsInf(f, 0) || math.IsNaN(f)) {
-				return fmt.Errorf("%s is not a number that JSON can represent", at)
+				return exports.Refuse(fmt.Sprintf("Set %s to a number that JSON can represent.", at), "The value is not one.", "The file is "+exports.FilePlace+".")
 			}
 			out, err := json.Marshal(v)
 			if err != nil {
-				return fmt.Errorf("%s is not a value that JSON can represent", at)
+				return exports.Refuse(fmt.Sprintf("Set %s to a value that JSON can represent.", at), "The value is not one.", "The file is "+exports.FilePlace+".")
 			}
 			b.Write(out)
 		default:
@@ -180,7 +180,7 @@ func writeJSON(b *bytes.Buffer, n *yaml.Node, at string) error {
 			writeString(b, n.Value)
 		}
 	default:
-		return fmt.Errorf("%s: line %d: not a value the settings can contain", at, n.Line)
+		return exports.Refuse(fmt.Sprintf("Set %s to a value the settings can contain.", at), fmt.Sprintf("The value at line %d is not one.", n.Line), "The file is "+exports.FilePlace+".")
 	}
 	return nil
 }
@@ -242,25 +242,30 @@ func (r *Forager) Expand(ctx context.Context, e Expansion) error {
 		// prints it unquoted: each copy prints as accesskey.ShownName prints it. A value
 		// with one, such as a program path the file sets, prints as exports.Value prints
 		// it.
-		fail := func(format string, a ...any) error {
-			return fmt.Errorf("%s: gateway.integrations.%s: %s", r.File, accesskey.ShownName(in.Key, false), exports.HideValues(exports.HideName(fmt.Sprintf(format, a...), in.Key)))
+		hide := func(s string) string { return exports.HideValues(exports.HideName(s, in.Key)) }
+		at := "gateway.integrations." + accesskey.ShownName(in.Key, false)
+		fail := func(fix string, causes ...string) error {
+			for i := range causes {
+				causes[i] = hide(causes[i])
+			}
+			return exports.Refuse(hide(fix), append(causes, at+" is in "+r.File+".")...)
 		}
 		found, err := program(in.Program, e.Workspace)
 		if err != nil {
-			return fail("%v", err)
+			return fail("Fix the program of "+at+".", err.Error()+".")
 		}
 		if name := relativeFile(in.Settings); name != "" {
-			return fail("settings.%s is a relative path; qory takes the file by its absolute path, since a relative one moves with the working folder", accesskey.ShownName(name, false))
+			return fail(fmt.Sprintf("Set settings.%s to an absolute path.", accesskey.ShownName(name, false)), "A relative path moves with the working folder, and qory takes the file by its absolute path.")
 		}
 		d, err := integration.Describe(ctx, found)
 		if err != nil {
-			return fail("%v", err)
+			return fail("Fix the program of "+at+".", sentence(err))
 		}
 		if err := d.CheckSettings(in.Settings); err != nil {
-			return fail("%v", err)
+			return fail("Set the settings of "+at+" as its program describes them.", sentence(err))
 		}
 		if d.Credential == nil {
-			return fail("%s plays %s, none of which qory expands, and defines nothing", in.Program, rolesText(d.Roles))
+			return fail("Remove "+at+", or give it a program that defines a credential.", fmt.Sprintf("%s plays %s, none of which qory expands, and defines nothing.", in.Program, rolesText(d.Roles)))
 		}
 		// The version is the program's to word, and is printed as a terminal takes it.
 		in.Path, in.Version = found, integration.Printable(d.ProgramVersion)
@@ -269,7 +274,7 @@ func (r *Forager) Expand(ctx context.Context, e Expansion) error {
 		}
 		c := ForagerCredential{Name: in.Key, Adapter: integration.CredentialAdapter(found, in.Settings), Argument: d.Credential.Argument, Hosts: d.Credential.Hosts, Integration: in.Key}
 		if err := (gateway.Credential{Name: c.Name, Adapter: c.Adapter, Argument: c.Argument, Hosts: c.Hosts}).Check(); err != nil {
-			return fail("%v", err)
+			return fail("Fix the credential that "+at+" defines.", sentence(err))
 		}
 		defined = append(defined, c)
 	}

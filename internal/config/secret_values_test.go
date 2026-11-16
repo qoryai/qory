@@ -135,31 +135,31 @@ func TestTheExportsRowsPrintAPhraseForAValueWithASecret(t *testing.T) {
 func TestConfigRefusalsPrintAPhraseForASecret(t *testing.T) {
 	isolate(t)
 	for _, c := range []struct{ body, want string }{
-		{"harness: {runtime: [qak_r, qak_r]}\n", "harness.target.runtime lists " + accessKeyPhrase + " twice"},
-		{"harness: {update: qak_u}\n", "harness.update " + accessKeyValue + " is not always or never"},
-		{"harness: {links: qrk_l}\n", "harness.links " + runKeyValue + " is not checkout or none"},
-		{"git: {timeout: qak_t}\n", "git.timeout " + accessKeyValue + " is not a duration above zero, such as 10m"},
-		{"env: {QAK_X-1: v}\n", "env: " + accessKeyPhrase + " is not an environment variable name"},
-		{"harness: {tiers: {qak_tier: m}}\n", "harness.tiers." + accessKeyPhrase + ": use one of the tiers light, fast and thinking; " + accessKeyPhrase + " is not a tier"},
-		{"harness: {tiers: {fast: \"${qory:qak_x}\"}}\n", "harness.tiers.fast: write a model id; " + accessKeyValue + " is a tier placeholder, which goes only in an agent's model"},
-		{"worktree: {name: qak_w}\n", "worktree.name " + accessKeyValue + " contains no {branch}, and without it two worktrees share one directory"},
-		{"worktree: {name: \"qak_/{branch}\"}\n", "worktree.name " + accessKeyValue + " contains a slash; it is one directory name under worktree.dir"},
-		{"worktree: {pr: refs/qak_}\n", "worktree.pr " + accessKeyValue + " is not a ref under refs/ with {n} for the pull request number, as refs/pull/{n}/head"},
-		{"worktree: {branch: qrk_b}\n", "worktree.branch " + runKeyValue + " is not delete or keep"},
-		{"worktree: {link: [/opt/qak_l]}\n", "worktree.link lists " + accessKeyValue + ", which is not a path inside the checkout; a path from outside goes as {from: " + accessKeyValue + ", to: <path in the worktree>}"},
-		{"worktree: {copy: [{from: /opt/qak_c}]}\n", "worktree.copy lists " + accessKeyValue + " with no to; a path from outside the checkout sets where it goes, as {from: " + accessKeyValue + ", to: <path in the worktree>}"},
-		{"worktree: {link: [../qak_l]}\n", "worktree.link lists " + accessKeyValue + ", which is not a path inside the checkout"},
-		{"worktree: {link: [{from: /opt/qak_f, to: ../qrk_t}]}\n", "worktree.link maps " + accessKeyValue + " to " + runKeyValue + ", which is not a path inside the worktree"},
-		{"harness: {launch: {qak_rt: {command: \" \"}}}\n", "harness.launch." + accessKeyPhrase + ".command is empty; it is the program, or is left out for the runtime's program"},
-		{"harness: {launch: {qak_rt: {args: [[]]}}}\n", "harness.launch." + accessKeyPhrase + ".args[0] is empty; a group is a word or a list of words"},
-		{"harness: {launch: {qak_rt: {env: {QRK_X-1: v}}}}\n", "harness.launch." + accessKeyPhrase + ".env: " + runKeyPhrase + " is not an environment variable name"},
-		{"harness: {launch: {qak_rt: {env: {QORY_HARNESS_HOME: v}}}}\n", "harness.launch." + accessKeyPhrase + ".env.QORY_HARNESS_HOME is qory's; every launch sets it to the home"},
+		{"harness: {runtime: [qak_r, qak_r]}\n", "List " + accessKeyPhrase + " once in harness.runtime.\n  harness.runtime lists it twice.\n  harness.runtime is in {path}."},
+		{"harness: {update: qak_u}\n", "Set harness.update to always or never.\n  The value is " + accessKeyValue + ".\n  harness.update is in {path}."},
+		{"harness: {links: qrk_l}\n", "Set harness.links to checkout or none.\n  The value is " + runKeyValue + ".\n  harness.links is in {path}."},
+		{"git: {timeout: qak_t}\n", "Set git.timeout to a duration above zero, such as 10m.\n  The value is " + accessKeyValue + ".\n  git.timeout is in {path}."},
+		{"env: {QAK_X-1: v}\n", "Rename each variable in env to an environment variable name.\n  " + accessKeyPhrase + " is not one.\n  env is in {path}."},
+		{"harness: {tiers: {qak_tier: m}}\n", "Set harness.tiers." + accessKeyPhrase + " to one of the tiers light, fast and thinking.\n  " + accessKeyPhrase + " is not a tier.\n  harness.tiers is in {path}."},
+		{"harness: {tiers: {fast: \"${qory:qak_x}\"}}\n", "Set harness.tiers.fast to a model id.\n  " + accessKeyValue + " is a tier placeholder, which goes only in an agent's model.\n  harness.tiers.fast is in {path}."},
+		{"worktree: {name: qak_w}\n", "Add {branch} to worktree.name.\n  worktree.name is " + accessKeyValue + ", and without {branch} two worktrees share one directory.\n  worktree.name is in {path}."},
+		{"worktree: {name: \"qak_/{branch}\"}\n", "Remove the slash from worktree.name.\n  worktree.name is " + accessKeyValue + ". It is one directory name under worktree.dir.\n  worktree.name is in {path}."},
+		{"worktree: {pr: refs/qak_}\n", "Set worktree.pr to a ref under refs/ with {n}, as refs/pull/{n}/head.\n  worktree.pr is " + accessKeyValue + ", and {n} stands for the pull request number.\n  worktree.pr is in {path}."},
+		{"worktree: {branch: qrk_b}\n", "Set worktree.branch to delete or keep.\n  The value is " + runKeyValue + ".\n  worktree.branch is in {path}."},
+		{"worktree: {link: [/opt/qak_l]}\n", "Write the entry of worktree.link as {from: " + accessKeyValue + ", to: <path in the worktree>}.\n  worktree.link lists " + accessKeyValue + ", which is not a path inside the checkout.\n  worktree.link is in {path}."},
+		{"worktree: {copy: [{from: /opt/qak_c}]}\n", "Add a to to the entry of worktree.copy, as {from: " + accessKeyValue + ", to: <path in the worktree>}.\n  worktree.copy lists " + accessKeyValue + " with no to, and a path from outside the checkout sets where it goes.\n  worktree.copy is in {path}."},
+		{"worktree: {link: [../qak_l]}\n", "Set the entry of worktree.link to a path inside the checkout.\n  worktree.link lists " + accessKeyValue + ", which is not one.\n  worktree.link is in {path}."},
+		{"worktree: {link: [{from: /opt/qak_f, to: ../qrk_t}]}\n", "Set the to of the entry of worktree.link to a path inside the worktree.\n  worktree.link maps " + accessKeyValue + " to " + runKeyValue + ", which is not one.\n  worktree.link is in {path}."},
+		{"harness: {launch: {qak_rt: {command: \" \"}}}\n", "Set harness.launch." + accessKeyPhrase + ".command to the program, or remove it.\n  An empty command is no program. Leave it out for the runtime's program.\n  harness.launch." + accessKeyPhrase + " is in {path}."},
+		{"harness: {launch: {qak_rt: {args: [[]]}}}\n", "Set harness.launch." + accessKeyPhrase + ".args[0] to a word or a list of words.\n  The group is empty.\n  harness.launch." + accessKeyPhrase + " is in {path}."},
+		{"harness: {launch: {qak_rt: {env: {QRK_X-1: v}}}}\n", "Rename each variable in harness.launch." + accessKeyPhrase + ".env to an environment variable name.\n  " + runKeyPhrase + " is not one.\n  harness.launch." + accessKeyPhrase + " is in {path}."},
+		{"harness: {launch: {qak_rt: {env: {QORY_HARNESS_HOME: v}}}}\n", "Remove QORY_HARNESS_HOME from harness.launch." + accessKeyPhrase + ".env.\n  Every launch sets it to the home.\n  harness.launch." + accessKeyPhrase + " is in {path}."},
 	} {
 		root := t.TempDir()
 		path := filepath.Join(root, "qory.yaml")
 		write(t, path, c.body)
 		_, err := config.Load(root, true)
-		if want := path + ": " + c.want; err == nil || err.Error() != want {
+		if want := strings.ReplaceAll(c.want, "{path}", path); err == nil || err.Error() != want {
 			t.Errorf("%q: %v, want %q", c.body, err, want)
 		}
 	}
@@ -172,14 +172,14 @@ func TestAHomeRefusalPrintsAPhraseForASecret(t *testing.T) {
 	isolate(t)
 	t.Setenv("HOME", "")
 	for _, c := range []struct{ body, want string }{
-		{"harness: {home: ~/qak_h}\n", "harness.home is " + accessKeyValue + ", and the home directory is unknown: "},
-		{"worktree: {link: [{from: ~/qak_l, to: x}]}\n", "worktree.link lists " + accessKeyValue + ", and the home directory is unknown: "},
+		{"harness: {home: ~/qak_h}\n", "Set HOME, or write harness.home as an absolute path.\n  harness.home is " + accessKeyValue + ", and the home directory is unknown: "},
+		{"worktree: {link: [{from: ~/qak_l, to: x}]}\n", "Set HOME, or write the entry of worktree.link without ~.\n  worktree.link lists " + accessKeyValue + ", and the home directory is unknown: "},
 	} {
 		root := t.TempDir()
 		path := filepath.Join(root, "qory.yaml")
 		write(t, path, c.body)
 		_, err := config.Load(root, true)
-		if want := path + ": " + c.want; err == nil || !strings.HasPrefix(err.Error(), want) || strings.Contains(err.Error(), "qak_") {
+		if want := c.want; err == nil || !strings.HasPrefix(err.Error(), want) || !strings.Contains(err.Error(), path) || strings.Contains(err.Error(), "qak_") {
 			t.Errorf("%q: %v, want %q", c.body, err, want)
 		}
 	}
@@ -262,7 +262,7 @@ wall:
 // of the mount. A plain mount prints quoted, as before.
 func TestAMountWithASecretIsAPhrase(t *testing.T) {
 	for v, shown := range map[string]string{"qak_m:ro": accessKeyValue, "data/QRK_m": runKeyValue, "data": `"data"`} {
-		want := "the mount " + shown + " is not an absolute path, with :ro after it for a read-only one"
+		want := "Write the mount as an absolute path, with :ro after it for a read-only one.\n  The mount is " + shown + "."
 		if _, err := config.ParseMount(v); err == nil || err.Error() != want {
 			t.Errorf("%s: %v, want %q", v, err, want)
 		}
@@ -282,13 +282,13 @@ func TestAViaCAFileWithASecretIsAPhrase(t *testing.T) {
 		t.Fatal(err)
 	}
 	err = r.CheckVia()
-	if want := path + ": gateway.server.via.ca_file " + accessKeyValue + ": no such file or directory"; err == nil || err.Error() != want || !errors.Is(err, fs.ErrNotExist) {
+	if want := "Make the file of gateway.server.via.ca_file readable, or set another file.\n  The file " + accessKeyValue + " cannot be read: no such file or directory.\n  gateway.server.via.ca_file is in " + path + "."; err == nil || err.Error() != want || !errors.Is(err, fs.ErrNotExist) {
 		t.Errorf("missing: %v, want %q", err, want)
 	}
 	if err := os.WriteFile(ca, []byte("not a certificate"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if want := path + ": gateway.server.via.ca_file " + accessKeyValue + " holds no PEM certificate"; r.CheckVia() == nil || r.CheckVia().Error() != want {
+	if want := "Set gateway.server.via.ca_file to a file with a PEM certificate.\n  The file " + accessKeyValue + " contains no PEM certificate.\n  gateway.server.via.ca_file is in " + path + "."; r.CheckVia() == nil || r.CheckVia().Error() != want {
 		t.Errorf("no PEM: %v, want %q", r.CheckVia(), want)
 	}
 }
@@ -339,9 +339,10 @@ func TestAProgramWithASecretInItsPathIsAPhrase(t *testing.T) {
 // secret, and the key as before.
 func TestAnIntegrationProgramWithASecretIsAPhrase(t *testing.T) {
 	isolate(t)
-	at := ": gateway.integrations.plain: "
+	const fixProgram = "Fix the program of gateway.integrations.plain.\n  "
 	path := foragerFile(t, "gateway:\n  integrations:\n    plain: {program: /opt/qak_prog}\n")
-	if _, err := expand(t); err == nil || err.Error() != path+at+accessKeyValue+" is not a program this user may run" {
+	where := "\n  gateway.integrations.plain is in " + path + "."
+	if _, err := expand(t); err == nil || err.Error() != fixProgram+accessKeyValue+" is not a program this user may run."+where {
 		t.Errorf("no program: %v", err)
 	}
 	program := filepath.Join(t.TempDir(), "qak_d", "prog")
@@ -350,11 +351,12 @@ func TestAnIntegrationProgramWithASecretIsAPhrase(t *testing.T) {
 		t.Fatal(err)
 	}
 	path = foragerFile(t, "gateway:\n  integrations:\n    plain: {program: "+program+"}\n")
-	if _, err := expand(t); err == nil || err.Error() != path+at+accessKeyValue+" describe: exit status 3: the token "+runKeyValue+" is wrong" {
+	where = "\n  gateway.integrations.plain is in " + path + "."
+	if _, err := expand(t); err == nil || err.Error() != fixProgram+accessKeyValue+" describe: exit status 3: the token "+runKeyValue+" is wrong."+where {
 		t.Errorf("describe fails: %v", err)
 	}
 	fakeIntegration(t, filepath.Dir(program), "prog", `{"version": 1, "name": "queue", "title": "Queue", "program_version": "1", "settings": {"type": "object"}, "roles": {"example_role": {}}}`)
-	if _, err := expand(t); err == nil || err.Error() != path+at+accessKeyValue+" plays the role example_role, none of which qory expands, and defines nothing" {
+	if _, err := expand(t); err == nil || err.Error() != "Remove gateway.integrations.plain, or give it a program that defines a credential.\n  "+accessKeyValue+" plays the role example_role, none of which qory expands, and defines nothing."+where {
 		t.Errorf("plays no role: %v", err)
 	}
 }
@@ -367,7 +369,7 @@ func TestARelativeSettingsFileWithASecretInItsNameIsAPhrase(t *testing.T) {
 	dir := onPath(t)
 	fakeIntegration(t, dir, "qory-plain", fixture(t, "acme-tracker.json"))
 	path := foragerFile(t, "gateway:\n  integrations:\n    plain: {settings: {qak_key_file: keys/k.pem}}\n")
-	want := path + ": gateway.integrations.plain: settings." + accessKeyPhrase + " is a relative path; qory takes the file by its absolute path, since a relative one moves with the working folder"
+	want := "Set settings." + accessKeyPhrase + " to an absolute path.\n  A relative path moves with the working folder, and qory takes the file by its absolute path.\n  gateway.integrations.plain is in " + path + "."
 	if _, err := expand(t); err == nil || err.Error() != want {
 		t.Errorf("%v, want %q", err, want)
 	}

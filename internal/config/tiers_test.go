@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/qoryai/qory/internal/config"
@@ -84,21 +85,21 @@ func TestTiersRefuseAMistake(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, "qory.yaml")
 	for body, want := range map[string]string{
-		"harness:\n  tiers:\n    heavy: claude-haiku-5-5\n":                       "harness.tiers.heavy: use one of the tiers light, fast and thinking; heavy is not a tier",
-		"harness:\n  tiers:\n    \"he\\eavy\": a\n":                               `harness.tiers.he\x1bavy: use one of the tiers light, fast and thinking; he\x1bavy is not a tier`,
-		"harness:\n  tiers:\n    light: [a, b]\n":                                 "harness.tiers.light: write a model id, or {model: <model id>, effort: <value>}",
-		"harness:\n  tiers:\n    light: 5\n":                                      "harness.tiers.light: write a model id, or {model: <model id>, effort: <value>}",
-		"harness:\n  tiers:\n    light: \"\"\n":                                   "harness.tiers.light: write a model id, or {model: <model id>, effort: <value>}",
-		"harness:\n  tiers:\n    light: {effort: max}\n":                          "harness.tiers.light: write a model id, or {model: <model id>, effort: <value>}",
-		"harness:\n  tiers:\n    light: {model: a, effort: max, extra: 1}\n":      "harness.tiers.light: write a model id, or {model: <model id>, effort: <value>}",
-		"harness:\n  tiers:\n    light: {model: a, effort: \"\"}\n":               "harness.tiers.light: write a model id, or {model: <model id>, effort: <value>}",
-		"harness:\n  tiers:\n    light: ${qory:fast}\n":                           "harness.tiers.light: write a model id; ${qory:fast} is a tier placeholder, which goes only in an agent's model",
-		"harness:\n  tiers:\n    light: {model: \"${qory:fast}\", effort: max}\n": "harness.tiers.light: write a model id; ${qory:fast} is a tier placeholder, which goes only in an agent's model",
+		"harness:\n  tiers:\n    heavy: claude-haiku-5-5\n":                       "Set harness.tiers.heavy to one of the tiers light, fast and thinking.\n  heavy is not a tier.\n  harness.tiers is in {path}.",
+		"harness:\n  tiers:\n    \"he\\eavy\": a\n":                               "Set harness.tiers.he\\x1bavy to one of the tiers light, fast and thinking.\n  he\\x1bavy is not a tier.\n  harness.tiers is in {path}.",
+		"harness:\n  tiers:\n    light: [a, b]\n":                                 "Set harness.tiers.light to a model id, or to {model: <model id>, effort: <value>}.\n  harness.tiers.light is in {path}.",
+		"harness:\n  tiers:\n    light: 5\n":                                      "Set harness.tiers.light to a model id, or to {model: <model id>, effort: <value>}.\n  harness.tiers.light is in {path}.",
+		"harness:\n  tiers:\n    light: \"\"\n":                                   "Set harness.tiers.light to a model id, or to {model: <model id>, effort: <value>}.\n  harness.tiers.light is in {path}.",
+		"harness:\n  tiers:\n    light: {effort: max}\n":                          "Set harness.tiers.light to a model id, or to {model: <model id>, effort: <value>}.\n  harness.tiers.light is in {path}.",
+		"harness:\n  tiers:\n    light: {model: a, effort: max, extra: 1}\n":      "Set harness.tiers.light to a model id, or to {model: <model id>, effort: <value>}.\n  harness.tiers.light is in {path}.",
+		"harness:\n  tiers:\n    light: {model: a, effort: \"\"}\n":               "Set harness.tiers.light to a model id, or to {model: <model id>, effort: <value>}.\n  harness.tiers.light is in {path}.",
+		"harness:\n  tiers:\n    light: ${qory:fast}\n":                           "Set harness.tiers.light to a model id.\n  ${qory:fast} is a tier placeholder, which goes only in an agent's model.\n  harness.tiers.light is in {path}.",
+		"harness:\n  tiers:\n    light: {model: \"${qory:fast}\", effort: max}\n": "Set harness.tiers.light to a model id.\n  ${qory:fast} is a tier placeholder, which goes only in an agent's model.\n  harness.tiers.light is in {path}.",
 	} {
 		write(t, path, body)
 		_, err := config.Load(root, true)
-		if err == nil || err.Error() != path+": "+want {
-			t.Errorf("%q:\nerr = %v\nwant %s: %s", body, err, path, want)
+		if err == nil || err.Error() != strings.ReplaceAll(want, "{path}", path) {
+			t.Errorf("%q:\nerr = %v\nwant %s", body, err, strings.ReplaceAll(want, "{path}", path))
 		}
 	}
 }

@@ -93,7 +93,7 @@ func TestOnBaseRefusesWhatIsNoDocument(t *testing.T) {
 	base := filepath.Join(tmp, "tree", stack.FileName)
 	path := filepath.Join(tmp, "app", "harness.yaml")
 	for _, c := range []struct{ body, want string }{
-		{"harness: {runtime: codex}\n", path + ": the harness section lists no modules, no stack to extend and no extensions"},
+		{"harness: {runtime: codex}\n", "Add modules, a stack to extend, or extensions to the harness section.\n  The section lists none of them.\n  harness is in " + path + "."},
 		{"harness:\n  nope: 1\n", path + `: line 2: key "nope" is not one harness.yaml reads`},
 	} {
 		writeRaw(t, path, c.body)
@@ -118,7 +118,7 @@ func TestOnBaseRefusesWorkflows(t *testing.T) {
 			"harness:\n  extends: {path: ../tree}\n  workflows:\n    fix: {time_limit: 45m}\n",
 		} {
 			writeRaw(t, path, body)
-			want := "remove workflows from " + name + " or leave out -f: -f selects the base, and its workflows apply"
+			want := "Remove workflows from " + name + ", or leave out -f.\n  -f selects the base, and its workflows apply.\n  harness.workflows is in " + path + "."
 			if _, _, err := config.OnBase(path, base); err == nil || err.Error() != want {
 				t.Errorf("%s %q: err = %v, want %q", name, body, err, want)
 			}
