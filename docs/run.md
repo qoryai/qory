@@ -1651,7 +1651,9 @@ the work item. Then a run of the step explore:
   the composed home, mode 0644, so the harness's hooks read them as
   `$QORY_HARNESS_HOME/inputs.json`. In a home from `--home` or `harness.home`, qory removes
   that copy when the run ends, also after a failure or a stop; a home for that run alone goes
-  as a whole.
+  as a whole. A run with a run key and no run code gets the same files, with the member `qory`
+  alone, since it has no inputs: `{"qory": {"harness_extensions": {…}}}` in `in/` (read-only
+  behind a wall), in the composed home, and after `--inputs` of its push checks.
   A home that already has `inputs.json` stops the run with exit 1: `Remove inputs.json from
   the home, or omit --home and harness.home, then take the work item in again.` Inputs that
   have a member `qory` stop the run before

@@ -470,7 +470,8 @@ func (r *codeRun) startLine(runID string) string {
 // inputsDir makes a new folder in/, mode 0700, in a new temporary folder, for r's
 // inputs.json, which [codeRun.writeInputs] writes once the harness is composed, and
 // returns in/, links resolved, and what removes the temporary folder. in/ is outside the
-// state directory, which holds the run records that no mount may reach. The temporary
+// state directory, which holds the run records that no mount may reach. A nil r, a run
+// with a run key and no run code, gets the same folder. The temporary
 // folder begins with qory-inputs-: Forager reserves the qory-run-, qory-tool-, qory-wall-
 // and qory-link- folders of the system's temporary directory, and the wall stops a run
 // that mounts one.
@@ -495,7 +496,8 @@ func (r *codeRun) inputsDir() (string, func(), error) {
 const inputsMember = "qory"
 
 // qoryInputs is the value of [inputsMember]: what qory adds to the inputs of a run from
-// a run code. Each field is one member, always written.
+// a run code, and all that inputs.json has for a run with a run key and no run code. Each
+// field is one member, always written.
 type qoryInputs struct {
 	// HarnessExtensions is the harness report's extensions, {} for none.
 	HarnessExtensions map[string]any `json:"harness_extensions"`
@@ -504,9 +506,15 @@ type qoryInputs struct {
 // writeInputs writes inputs.json, mode 0600, into in, the folder of [codeRun.inputsDir]:
 // r's inputs as they came, with the member [inputsMember] set to q added after the
 // others. It returns the file's path and the bytes it wrote, which a copy of the file
-// takes from memory: a read of the file could return what something else wrote there.
+// takes from memory: a read of the file could return what something else wrote there. A nil
+// r, a run with a run key and no run code, has no inputs, so the file has the member qory
+// alone.
 func (r *codeRun) writeInputs(in string, q qoryInputs) (string, []byte, error) {
-	data, err := withQoryMember(r.inputs, q)
+	inputs := []byte("{}")
+	if r != nil {
+		inputs = r.inputs
+	}
+	data, err := withQoryMember(inputs, q)
 	if err != nil {
 		return "", nil, err
 	}

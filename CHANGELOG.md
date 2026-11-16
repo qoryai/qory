@@ -364,16 +364,19 @@ release may change what an existing document does, and states it under Upgrading
   lists each missing part. A group role takes a contract with `fill: many`, and the
   compose checks each member. A contract file that is missing or malformed fails the
   same way. See The role contract in `contracts/harness/v1/README.md`.
-- A run from a run code adds the member `qory` to `inputs.json`:
-  `{"harness_extensions": {…}}`, the harness report's `extensions`, `{}` for none. A push
-  check of such a run gets `--inputs <path>`, with a copy of the file that the run's user
-  can read mounted read-only at that path. Inputs that already have a member `qory` stop
-  the run before it opens, with exit 1: `remove the input qory: qory adds that member to
-  inputs.json; the code is used`. Inputs that are not a JSON object stop it the same way:
-  `ask Qory Apiary's instance admin: the run code's inputs are not a JSON object; the code
-  is used`. See The run key from a run code in `docs/run.md`.
-- A run from a run code also writes `inputs.json` into the composed home, so a hook of
-  the harness reads the inputs at `$QORY_HARNESS_HOME/inputs.json`.
+- A run from Qory Apiary, with a run code or a run key, adds the member `qory` to
+  `inputs.json`: `{"harness_extensions": {…}}`, the harness report's `extensions`, `{}`
+  for none. A run with a run key and no run code has no inputs, so its file has the member
+  `qory` alone. A push check of such a run gets `--inputs <path>`, with a copy of the file
+  that the run's user can read mounted read-only at that path. Inputs of a run code that
+  already have a member `qory` stop the run before it opens, with exit 1: `remove the
+  input qory: qory adds that member to inputs.json; the code is used`. Inputs that are not
+  a JSON object stop it the same way: `ask Qory Apiary's instance admin: the run code's
+  inputs are not a JSON object; the code is used`. See The run key from a run code in
+  `docs/run.md`.
+- A run from Qory Apiary also writes `inputs.json` into the composed home, so a hook of
+  the harness reads the inputs at `$QORY_HARNESS_HOME/inputs.json`, with a run key as well
+  as with a run code.
 
 ### Changed
 

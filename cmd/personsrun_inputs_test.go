@@ -42,20 +42,7 @@ func TestAPersonsUnwalledRunGetsNoInputs(t *testing.T) {
 // under qory/homes in the cache, which has no inputs.json, and its check's container
 // starts with the pushed files and no --inputs, and mounts no inputs.json.
 func TestAPersonsWalledRunsPushChecksGetNoInputs(t *testing.T) {
-	hello := helloFiles(t)
-	root := newCheckout(t)
-	for name, content := range checksModule {
-		writeFile(t, filepath.Join(root, name), content)
-	}
-	if err := os.Chmod(filepath.Join(root, "modules", "checks", "bin", "check"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	writeFile(t, filepath.Join(root, "modules", "hello", "qory-module.yaml"), hello["examples/hello/modules/hello/qory-module.yaml"])
-	writeFile(t, filepath.Join(root, "modules", "hello", "commands", "hello.md"), hello["examples/hello/modules/hello/commands/hello.md"])
-	writeFile(t, filepath.Join(root, "qory.yaml"), ownStack("apiVersion: qory.dev/v1alpha1\ntarget:\n  runtime: claude\nmodules:\n  - name: hello\n    source: {path: modules/hello}\n"+
-		"  - name: checks\n    source: {path: modules/checks}\nworkflows:\n  hello:\n    access: write\n"))
-	runGit(t, root, "add", "-A")
-	runGit(t, root, "commit", "--quiet", "-m", "second")
+	root := checksCheckout(t, "")
 	docker, log := checkDocker(t, 0, "")
 	srv := newFakeServer(t, `{"version":1,"egress":{"mode":"observe"}}`)
 	serverFile(t, srv, "wall:\n  adapter: docker\n  image: example.com/agent:1\n  command: "+docker+"\n  helper: "+staticELF(t)+"\n  user: \"1000:1000\"\n")
@@ -115,4 +102,26 @@ func TestAPersonsWalledRunsPushChecksGetNoInputs(t *testing.T) {
 			t.Errorf("the check's container has %s:\n%s", not, created)
 		}
 	}
+}
+
+// checksCheckout is a committed git checkout, made the working directory, whose harness has
+// the module hello and [checksModule], which declares push checks for branch and spec, and
+// whose stack has the extra lines given, such as an extensions block.
+func checksCheckout(t *testing.T, extra string) string {
+	t.Helper()
+	hello := helloFiles(t)
+	root := newCheckout(t)
+	for name, content := range checksModule {
+		writeFile(t, filepath.Join(root, name), content)
+	}
+	if err := os.Chmod(filepath.Join(root, "modules", "checks", "bin", "check"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(root, "modules", "hello", "qory-module.yaml"), hello["examples/hello/modules/hello/qory-module.yaml"])
+	writeFile(t, filepath.Join(root, "modules", "hello", "commands", "hello.md"), hello["examples/hello/modules/hello/commands/hello.md"])
+	writeFile(t, filepath.Join(root, "qory.yaml"), ownStack("apiVersion: qory.dev/v1alpha1\ntarget:\n  runtime: claude\nmodules:\n  - name: hello\n    source: {path: modules/hello}\n"+
+		"  - name: checks\n    source: {path: modules/checks}\nworkflows:\n  hello:\n    access: write\n"+extra))
+	runGit(t, root, "add", "-A")
+	runGit(t, root, "commit", "--quiet", "-m", "second")
+	return root
 }

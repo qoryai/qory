@@ -523,6 +523,18 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				if spec.Wall != nil {
 					spec.Mounts = append(spec.Mounts, wall.Mount{Path: in, ReadOnly: true})
 				}
+			} else if key != nil {
+				// A run with a run key and no run code has no documents, so its inputs.json
+				// has the member qory alone, written once the harness is composed.
+				var remove func()
+				in, remove, err = fromCode.inputsDir()
+				defer remove()
+				if err != nil {
+					return keyedError(nil, inputsNotWritten(err))
+				}
+				if spec.Wall != nil {
+					spec.Mounts = append(spec.Mounts, wall.Mount{Path: in, ReadOnly: true})
+				}
 			}
 			walled := spec.Wall != nil
 			runLock, err := startRun(machine, spec.RunID, walled, id)
@@ -751,16 +763,17 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				if parts := c.checkoutOnly[name]; walled && !dispatched && len(parts) > 0 {
 					fmt.Fprintln(w, "qory run:", checkoutOnlyLine(name, parts, homeGiven || linksNone))
 				}
-				if fromCode != nil {
-					// inputs.json has the inputs and what qory adds, which the report has.
+				if dispatched {
+					// inputs.json has the inputs of a run code, if any, and what qory adds, which the
+					// report has.
 					var file string
 					var data []byte
 					if file, data, err = fromCode.writeInputs(in, qoryInputs{HarnessExtensions: rep.Extensions}); err != nil {
-						return false, inputsNotWritten(err)
+						return false, keyedError(fromCode, inputsNotWritten(err))
 					}
 					checks.inputs, checks.inputsData = file, data
 					if err := copyInputs(at.home, data); err != nil {
-						return false, inputsNotCopied(at.home, err)
+						return false, keyedError(fromCode, inputsNotCopied(at.home, err))
 					}
 					// A home that is not this run's alone, from --home or harness.home, keeps
 					// no copy once the run is over.
@@ -768,6 +781,8 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 						copied := filepath.Join(at.home, inputsFile)
 						cleanups = append(cleanups, func() { removeInputsCopy(copied, said) })
 					}
+				}
+				if fromCode != nil {
 					if extra, err = fromCode.workflowArgs(name, rep, in, run.System()); err != nil {
 						return false, err
 					}
@@ -2041,6 +2056,16 @@ func withOrigin(labels map[string]string, origin foragerdir.Labels) map[string]s
 // folder, could not be written in the system's temporary folder.
 func inputsNotWritten(err error) error {
 	return fmt.Errorf("check the temporary folder %s: qory run could not write the run's inputs there: %w%s", exports.Value(os.TempDir(), false), exports.HideError(err), codeUsed)
+}
+
+// keyedError is err for a run with a run key and no run code, fromCode nil: without the
+// ending [codeUsed], which names a run code that this run was not given. A run from a run code
+// gets err as it is.
+func keyedError(fromCode *codeRun, err error) error {
+	if fromCode != nil || err == nil {
+		return err
+	}
+	return errors.New(strings.TrimSuffix(err.Error(), codeUsed))
 }
 
 // The lines of [inputsNotCopied]: the first line is the fix, the second the cause.

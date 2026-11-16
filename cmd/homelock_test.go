@@ -136,11 +136,11 @@ func TestARunHoldsItsHomeUntilItEnds(t *testing.T) {
 	}
 }
 
-// TestARunsOwnHomeTakesNoLock is a run whose home is for that run alone: a person's
+// TestAPerRunHomeTakesNoLock is a run whose home is for that run alone: a person's
 // walled run with no --home, and a run from a run code with none. While the agent runs,
 // no lock file is beside the home, beside its folder of runs, or beside the checkout's
 // folder of homes.
-func TestARunsOwnHomeTakesNoLock(t *testing.T) {
+func TestAPerRunHomeTakesNoLock(t *testing.T) {
 	noLocks := func(t *testing.T, home string) {
 		t.Helper()
 		for dir := filepath.Dir(home); dir != filepath.Dir(filepath.Dir(filepath.Dir(filepath.Dir(home)))); dir = filepath.Dir(dir) {
