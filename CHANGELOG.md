@@ -26,7 +26,9 @@ release may change what an existing document does, and states it under Upgrading
   folder, and prints `qory run: installed claude <version>`. The runs of a pool share one
   runtimes folder in the pool's folder. Each run holds its version until it ends, and
   each install removes older versions that an install made, and temporary entries, that
-  no run holds. Two runs that need one version read its tarball once. A 503 or 429 from
+  no run holds, and, with a wall in `forager.yaml`, keeps a version's folder that a running
+  container mounts, and removes none when the engine does not list its mounts. Two runs
+  that need one version read its tarball once. A 503 or 429 from
   the registry is retried until the registry answers or the run ends, with its time
   limit, a cancel or SIGTERM. A request waits at most 30 seconds to
   connect, 30 seconds for the TLS handshake, 60 seconds for the response's headers and
@@ -43,8 +45,11 @@ release may change what an existing document does, and states it under Upgrading
   with a host and an optional port alone. The first line contains `gateway.server.url`.
   Before an install, `qory run` stops with `Run chmod go-w <path>, then run again` for a
   runtimes folder, or a `<runtimes>/claude` that existed, that its group or others can
-  write, and with `Replace <path> with a folder` for a link at either. It checks no
-  folder above the runtimes folder.
+  write, with `Replace <path> with a folder` for a link at either, and with `Give <path>
+  to root or to the user that runs qory` for a folder that neither owns. It checks no
+  folder above the runtimes folder. An instance address with a path, such as
+  `https://apiary.example/base`, stops the run, and `qory run pool` at its start: the
+  token route is on the instance's host alone.
 - A run of a work item works on the branch `qory/<work item id>`, at the commit of the
   artifact `branch` that its stage starts from. The harness still comes from
   `target_version`. A commit on the branch reaches a run's harness after you merge the

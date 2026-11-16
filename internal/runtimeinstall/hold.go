@@ -197,6 +197,10 @@ func (f folder) cleanup(newest string) {
 	if err != nil {
 		return
 	}
+	// The containers' mounts are read once, when a version's folder is to go.
+	var mounts []string
+	var mountsErr error
+	read := false
 	for _, e := range entries {
 		name := e.Name()
 		path := filepath.Join(f.base, name)
@@ -217,6 +221,15 @@ func (f folder) cleanup(newest string) {
 			if c, ok := compareVersions(name, newest); !ok || c >= 0 || !f.installed(path) {
 				continue
 			}
+			if f.mounted != nil {
+				if !read {
+					mounts, mountsErr = f.mounted()
+					read = true
+				}
+				if mountsErr != nil || mountedIn(mounts, path) {
+					continue
+				}
+			}
 			f.unheld(name, func() {
 				if removeIf(path, fs.ModeDir, os.RemoveAll) {
 					removeIf(f.holdPath(name), fs.FileMode(0), os.Remove)
@@ -224,6 +237,24 @@ func (f folder) cleanup(newest string) {
 			})
 		}
 	}
+}
+
+// mountedIn reports whether a running container mounts dir: a mount's source is dir,
+// contains it or lies in it, compared by the folders each leads to.
+func mountedIn(mounts []string, dir string) bool {
+	if resolved, err := filepath.EvalSymlinks(dir); err == nil {
+		dir = resolved
+	}
+	for _, m := range mounts {
+		if resolved, err := filepath.EvalSymlinks(m); err == nil {
+			m = resolved
+		}
+		m = filepath.Clean(m)
+		if m == dir || strings.HasPrefix(m, dir+string(filepath.Separator)) || strings.HasPrefix(dir, m+string(filepath.Separator)) {
+			return true
+		}
+	}
+	return false
 }
 
 // installed reports whether the entry at dir has the shape that [folder.install] makes:

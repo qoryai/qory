@@ -18,6 +18,9 @@ import (
 // folder is the folder of a runtime's versions, <Folder>/<runtime>.
 type folder struct {
 	base, runtime string
+	// mounted returns the host folders that running containers mount, see
+	// [Options.Mounted]; nil for none.
+	mounted func() ([]string, error)
 }
 
 // complete reports whether the folder of version is a complete install of the tarball

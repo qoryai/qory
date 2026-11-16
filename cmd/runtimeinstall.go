@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os/exec"
 	"path/filepath"
 	goruntime "runtime"
 	"strings"
+	"time"
 
 	"github.com/qoryai/forager/session"
 
@@ -113,7 +115,11 @@ func installRuntime(ctx context.Context, run openedRun, r *config.Forager, machi
 	if registry != "" {
 		fetch = runtimeinstall.RegistryFetch(client, registry, goruntime.GOARCH, instance)
 	}
-	in, err := runtimeinstall.Install(ctx, runtimeinstall.Options{Fetch: fetch, Runtime: runtime, Folder: folder})
+	opts := runtimeinstall.Options{Fetch: fetch, Runtime: runtime, Folder: folder}
+	if r != nil && r.Wall != nil {
+		opts.Mounted = engineMounts(r.Wall.Command)
+	}
+	in, err := runtimeinstall.Install(ctx, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -146,4 +152,41 @@ func useInstalledRuntime(spec *runSpec, in *runtimeinstall.Installed) {
 	spec.installed = in
 	spec.RuntimeInstall = &session.RuntimeInstall{Dir: in.Dir, Version: in.Version}
 	spec.Command = in.Program()
+}
+
+// engineMountsWait is the most time that the engine's commands of [engineMounts] take.
+const engineMountsWait = 30 * time.Second
+
+// engineMounts returns a function that lists the host folders that the running
+// containers of the engine mount, through the program command, docker when it is empty.
+// The install keeps a version's folder that one of them mounts, since the run that held
+// it may have ended while its container goes on. The function returns an error when the
+// engine does not answer, and the install then removes no version's folder.
+func engineMounts(command string) func(context.Context) ([]string, error) {
+	if command == "" {
+		command = "docker"
+	}
+	return func(ctx context.Context) ([]string, error) {
+		ctx, cancel := context.WithTimeout(ctx, engineMountsWait)
+		defer cancel()
+		ids, err := exec.CommandContext(ctx, command, "ps", "--quiet", "--no-trunc").Output()
+		if err != nil {
+			return nil, fmt.Errorf("listing the engine's running containers failed: %w", err)
+		}
+		args := []string{"inspect", "--format", "{{range .Mounts}}{{println .Source}}{{end}}"}
+		if len(strings.Fields(string(ids))) == 0 {
+			return nil, nil
+		}
+		out, err := exec.CommandContext(ctx, command, append(args, strings.Fields(string(ids))...)...).Output()
+		if err != nil {
+			return nil, fmt.Errorf("reading the mounts of the engine's running containers failed: %w", err)
+		}
+		var mounts []string
+		for _, line := range strings.Split(string(out), "\n") {
+			if line = strings.TrimSpace(line); line != "" {
+				mounts = append(mounts, line)
+			}
+		}
+		return mounts, nil
+	}
 }

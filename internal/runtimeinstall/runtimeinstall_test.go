@@ -20,6 +20,8 @@ import (
 type installer struct {
 	src    *rt.Source
 	folder string
+	// mounted is Options.Mounted of the installs; nil for none.
+	mounted func(context.Context) ([]string, error)
 }
 
 func newInstaller(t *testing.T) *installer {
@@ -27,7 +29,7 @@ func newInstaller(t *testing.T) *installer {
 }
 
 func (in *installer) install() (runtimeinstall.Installed, error) {
-	return runtimeinstall.Install(context.Background(), runtimeinstall.Options{Fetch: in.src.Fetch, Runtime: "claude", Folder: in.folder})
+	return runtimeinstall.Install(context.Background(), runtimeinstall.Options{Fetch: in.src.Fetch, Runtime: "claude", Folder: in.folder, Mounted: in.mounted})
 }
 
 // files is every path under dir, relative, with / after each folder's, but for the

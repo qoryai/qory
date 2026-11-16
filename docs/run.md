@@ -835,8 +835,8 @@ one, and from npm otherwise:
   and stops before it claims a run when the host of the image name is another:
 
   ```text
-  qory run: Set pool.registry to an image name on a host of letters, digits, . and -, with an optional port from 1 to 65535
-  The host is "registry.example:0".
+  qory run: Set pool.registry to an image name on a host of letters, digits, . and -
+  The host is "registry.example:0"; a port, if any, is from 1 to 65535.
   ```
 
   With a registry, `qory run pool` also checks `gateway.server.url`, the address it writes
@@ -900,7 +900,9 @@ the run uses: the scheme, host and port of the instance's address, then the path
 `/registry/token`. The instance's address is the `apiary <url>` line of the run-code file
 for a run from a run code, which `qory run pool` writes from its `gateway.server.url`;
 otherwise it is `gateway.server.url` in the run's `forager.yaml`. When a run has both, the
-run-code file's line is the address. The registry's host is never the realm, since the
+run-code file's line is the address, and it has no path: an address with a path stops the
+run with `Set gateway.server.url in forager.yaml to an address with no path`, and so does
+`qory run pool` at its start. The registry's host is never the realm, since the
 instance does not start with the same host for both. A realm with another scheme, host, port or
 path stops the run with:
 
@@ -974,6 +976,12 @@ for what to remove, only while it has the lock `<runtimes>/claude/.lock`, so a r
 starts during an install keeps its version. Each run holds its version with a shared
 lock on `<runtimes>/claude/.hold-<version>`, which ends when the run ends.
 
+A run that `qory run` killed may leave its container running without a hold. When
+`forager.yaml` sets a wall, the install lists the mounts of the engine's running
+containers (`docker ps`, then `docker inspect`) and keeps each version's folder that a
+mount is, contains or lies in. When the engine does not answer, the install removes no
+version's folder.
+
 Two runs that need the same version do not both read its tarball. The run that finds no
 folder takes the lock `<runtimes>/claude/.lock-<version>` and reads the tarball; the other
 waits for that lock, as long as its time limit allows, and then uses the folder. The
@@ -984,7 +992,8 @@ runtimes folder and `<runtimes>/claude` too. A link at either stops the run with
 `Replace <path> with a folder`. A `<runtimes>/claude` that existed and a runtimes folder
 that its group or others can write stop the run with `Run chmod go-w <path>, then run
 again`, since they could replace a version's folder. A folder that `qory run` makes is set
-to mode 0755. qory checks no folder above the runtimes folder, since a shared one such as
+to mode 0755. A runtimes folder or `<runtimes>/claude` that neither root nor the user of
+`qory run` owns stops the run with `Give <path> to root or to the user that runs qory`. qory checks no folder above the runtimes folder, since a shared one such as
 `/tmp` is writable by others.
 
 Once the program is installed, `qory run` prints one line:
@@ -1779,9 +1788,9 @@ Each of these errors stops the run before it starts, exit 2:
 - `Write the run code into <file>: the file is empty`
 - `Write the run code, then at most the lines `registry <host>`, `apiary <url>` and
   `runtimes <folder>``, with `The file <file> contains more than that.` on the second line
-- `Write a run code (qecr_…) into <file>: the file does not contain an enrolment code of
-  Qory Apiary`, or `…: the file contains the enrolment code of an access key of kind
-  <kind>`
+- `Write a run code (qecr_…) into the file`, with `<file> does not contain an enrolment
+  code of Qory Apiary` or `<file> contains the enrolment code of an access key of kind
+  <kind>` on the second line
 - `ask for a new run code: the redemption returned 401, so the code was used, has expired
   or was cancelled, or it was redeemed with another key first (unauthorized)`
 - `ask for a new run code, and give qory run the gateway that the run key is for: the run

@@ -1,6 +1,8 @@
 package runtimeinstall_test
 
 import (
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -343,6 +345,44 @@ func TestALinkAtTheRuntimesFolderStopsTheInstall(t *testing.T) {
 			}
 			if entries, err := os.ReadDir(target); err != nil || len(entries) != 0 {
 				t.Fatalf("the install made %d entries behind the link: %v", len(entries), err)
+			}
+		})
+	}
+}
+
+// TestAVersionARunningContainerMountsIsKept has the older version 1.0.0 with no hold, as
+// a run killed while its container goes on leaves it. The install of 2.0.0 keeps 1.0.0's
+// folder when a running container mounts it, or a folder that contains it, and when the
+// check of the containers' mounts fails; it removes 1.0.0 when the containers mount
+// other folders.
+func TestAVersionARunningContainerMountsIsKept(t *testing.T) {
+	for _, c := range []struct {
+		name    string
+		mounted func(old string) func(context.Context) ([]string, error)
+		kept    bool
+	}{
+		{"the version's folder", func(old string) func(context.Context) ([]string, error) {
+			return func(context.Context) ([]string, error) { return []string{"/srv/other", old}, nil }
+		}, true},
+		{"a folder that contains it", func(old string) func(context.Context) ([]string, error) {
+			return func(context.Context) ([]string, error) { return []string{filepath.Dir(old)}, nil }
+		}, true},
+		{"a check that fails", func(string) func(context.Context) ([]string, error) {
+			return func(context.Context) ([]string, error) { return nil, errors.New("no engine") }
+		}, true},
+		{"other folders", func(string) func(context.Context) ([]string, error) {
+			return func(context.Context) ([]string, error) { return []string{"/srv/other"}, nil }
+		}, false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			in := newInstaller(t)
+			old := in.installVersion(t, "1.0.0")
+			old.Release()
+			in.mounted = c.mounted(old.Dir)
+			newer := in.installVersion(t, "2.0.0")
+			defer newer.Release()
+			if got := exists(old.Program()); got != c.kept {
+				t.Fatalf("1.0.0 is kept: %v, want %v", got, c.kept)
 			}
 		})
 	}

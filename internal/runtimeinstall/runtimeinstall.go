@@ -86,6 +86,11 @@ type Options struct {
 	Runtime string
 	// Folder is where the versions are kept: <Folder>/<Runtime>/<version>.
 	Folder string
+	// Mounted, when set, returns the host folders that running containers mount. The
+	// cleanup keeps a version's folder that one of them is, contains or lies in: a run
+	// that ended while its container went on has no hold, but its container still runs
+	// the program. When Mounted returns an error, the cleanup removes no version's folder.
+	Mounted func(ctx context.Context) ([]string, error)
 }
 
 // Installed is a runtime that [Install] installed, or found installed.
@@ -142,6 +147,9 @@ func Install(ctx context.Context, o Options) (Installed, error) {
 		return Installed{}, fmt.Errorf(textRelease+"The checksum of %s %s is not sha512- and 64 bytes in base64", o.Runtime, rel.Version)
 	}
 	f := folder{base: filepath.Join(o.Folder, o.Runtime), runtime: o.Runtime}
+	if o.Mounted != nil {
+		f.mounted = func() ([]string, error) { return o.Mounted(ctx) }
+	}
 	hold, err := f.hold(rel.Version)
 	if err != nil {
 		return Installed{}, err
