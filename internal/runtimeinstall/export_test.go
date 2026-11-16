@@ -2,6 +2,7 @@ package runtimeinstall
 
 import (
 	"context"
+	"sync"
 	"time"
 )
 
@@ -14,15 +15,25 @@ func SetLimits(tarball, program, unpacked int64) (restore func()) {
 }
 
 // SetRetryClock replaces the wait between two tries of the registry fetch with one that
-// returns at once, with the context's error, and calls onWait with the wait's length,
-// until the returned restore runs.
+// moves a fake clock on by its length and returns at once, with the context's error, and
+// calls onWait with the wait's length, until the returned restore runs.
 func SetRetryClock(onWait func(time.Duration)) (restore func()) {
-	s := sleep
+	s, n := sleep, now
+	var mu sync.Mutex
+	clock := time.Now()
+	now = func() time.Time {
+		mu.Lock()
+		defer mu.Unlock()
+		return clock
+	}
 	sleep = func(ctx context.Context, d time.Duration) error {
+		mu.Lock()
+		clock = clock.Add(d)
+		mu.Unlock()
 		onWait(d)
 		return ctx.Err()
 	}
-	return func() { sleep = s }
+	return func() { sleep, now = s, n }
 }
 
 // CompareVersions is compareVersions.

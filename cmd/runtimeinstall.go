@@ -4,12 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	goruntime "runtime"
 	"strings"
 	"time"
 
+	"github.com/qoryai/forager/accesskey"
 	"github.com/qoryai/forager/session"
 
 	"github.com/qoryai/qory/internal/config"
@@ -81,7 +83,7 @@ func instanceAddress(r *config.Forager) string {
 // <state>/runtimes. A walled run, and a run with a control plane, reads through the
 // run's host proxy, proxied set; a run on a person's machine with neither sends its
 // requests directly. The host proxy closes once the install ends.
-func installRuntime(ctx context.Context, run openedRun, r *config.Forager, machine runtimeinstall.Machine, proxied bool, runtime, state string) (*runtimeinstall.Installed, error) {
+func installRuntime(ctx context.Context, run openedRun, r *config.Forager, machine runtimeinstall.Machine, proxied bool, runtime, state string, report func(string)) (*runtimeinstall.Installed, error) {
 	if !installRuntimes || runtime != installedRuntime {
 		return nil, nil
 	}
@@ -115,10 +117,13 @@ func installRuntime(ctx context.Context, run openedRun, r *config.Forager, machi
 	if registry != "" {
 		fetch = runtimeinstall.RegistryFetch(client, registry, goruntime.GOARCH, instance)
 	}
-	opts := runtimeinstall.Options{Fetch: fetch, Runtime: runtime, Folder: folder}
+	// A container of an earlier run may still run from a version's folder, with or without
+	// a wall in this run's forager.yaml: the engine is the wall's command, else docker.
+	command := ""
 	if r != nil && r.Wall != nil {
-		opts.Mounted = engineMounts(r.Wall.Command)
+		command = r.Wall.Command
 	}
+	opts := runtimeinstall.Options{Fetch: fetch, Runtime: runtime, Folder: folder, Mounted: engineMounts(command), Progress: report}
 	in, err := runtimeinstall.Install(ctx, opts)
 	if err != nil {
 		return nil, err
@@ -160,8 +165,11 @@ const engineMountsWait = 30 * time.Second
 // engineMounts returns a function that lists the host folders that the running
 // containers of the engine mount, through the program command, docker when it is empty.
 // The install keeps a version's folder that one of them mounts, since the run that held
-// it may have ended while its container goes on. The function returns an error when the
-// engine does not answer, and the install then removes no version's folder.
+// it may have ended while its container goes on. A machine with no such program has no
+// running container, so the function returns none for it. It returns an error for any
+// other failure of the engine's commands, and the install then removes no version's
+// folder. The commands get this process's environment without the access key's variables
+// and the run key.
 func engineMounts(command string) func(context.Context) ([]string, error) {
 	if command == "" {
 		command = "docker"
@@ -169,7 +177,12 @@ func engineMounts(command string) func(context.Context) ([]string, error) {
 	return func(ctx context.Context) ([]string, error) {
 		ctx, cancel := context.WithTimeout(ctx, engineMountsWait)
 		defer cancel()
-		ids, err := exec.CommandContext(ctx, command, "ps", "--quiet", "--no-trunc").Output()
+		ps := exec.CommandContext(ctx, command, "ps", "--quiet", "--no-trunc")
+		ps.Env = accesskey.WithoutVariables(os.Environ())
+		ids, err := ps.Output()
+		if errors.Is(err, exec.ErrNotFound) {
+			return nil, nil
+		}
 		if err != nil {
 			return nil, fmt.Errorf("listing the engine's running containers failed: %w", err)
 		}
@@ -177,7 +190,9 @@ func engineMounts(command string) func(context.Context) ([]string, error) {
 		if len(strings.Fields(string(ids))) == 0 {
 			return nil, nil
 		}
-		out, err := exec.CommandContext(ctx, command, append(args, strings.Fields(string(ids))...)...).Output()
+		inspect := exec.CommandContext(ctx, command, append(args, strings.Fields(string(ids))...)...)
+		inspect.Env = accesskey.WithoutVariables(os.Environ())
+		out, err := inspect.Output()
 		if err != nil {
 			return nil, fmt.Errorf("reading the mounts of the engine's running containers failed: %w", err)
 		}

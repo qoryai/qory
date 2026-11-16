@@ -93,6 +93,10 @@ type registry struct {
 	// instance is the address of Qory Apiary, whose token route is the only realm.
 	instance string
 	token    string
+	// noted and lastNote are whether, and when, the fetch last told its progress: see
+	// [registry.note].
+	noted    bool
+	lastNote time.Time
 }
 
 // descriptor is a content an index or a manifest lists.
@@ -270,7 +274,7 @@ func (r *registry) manifest(ctx context.Context, ref, version string) ([]byte, s
 	if digestShape.MatchString(ref) {
 		what = r.repository + "@" + ref
 	}
-	resp, err := r.get(ctx, "/v2/"+r.repository+"/manifests/"+url.PathEscape(ref), mediaIndex+", "+mediaManifest, what)
+	resp, err := r.get(ctx, "/v2/"+r.repository+"/manifests/"+url.PathEscape(ref), mediaIndex+", "+mediaManifest, what, version)
 	if err != nil {
 		return nil, "", err
 	}
@@ -295,7 +299,7 @@ func (r *registry) manifest(ctx context.Context, ref, version string) ([]byte, s
 // [checkError] in place of io.EOF.
 func (r *registry) blob(ctx context.Context, layer descriptor, version string) (io.ReadCloser, error) {
 	what := fmt.Sprintf("the layer of %s %s", r.runtime, version)
-	resp, err := r.get(ctx, "/v2/"+r.repository+"/blobs/"+layer.Digest, "", what)
+	resp, err := r.get(ctx, "/v2/"+r.repository+"/blobs/"+layer.Digest, "", what, version)
 	if err != nil {
 		return nil, err
 	}
@@ -344,11 +348,14 @@ func (b *checkedBlob) Close() error { return b.body.Close() }
 // seconds replaces the wait, up to 30 seconds. The registry waits only 30 seconds for
 // its cache to start serving, so a first fill of a version, two tarballs of about
 // 170 MB with up to 10 minutes each, gets 503 until it is done. The tries of one fetch
-// go on until the registry answers or the fetch's context ends: the run's time limit,
+// go on until the registry returns the file or the fetch's context ends: the run's time limit,
 // its cancel or SIGTERM. A test replaces the wait.
 var (
-	retryWaits    = []time.Duration{2 * time.Second, 4 * time.Second, 8 * time.Second}
-	retryEvery    = 15 * time.Second
+	retryWaits = []time.Duration{2 * time.Second, 4 * time.Second, 8 * time.Second}
+	retryEvery = 15 * time.Second
+	// noteEvery is the time between two progress lines of a fetch that waits.
+	noteEvery     = 5 * time.Minute
+	now           = time.Now
 	maxRetryAfter = 30 * time.Second
 	sleep         = func(ctx context.Context, d time.Duration) error {
 		t := time.NewTimer(d)
@@ -377,9 +384,9 @@ func wait(n int, retryAfter string) time.Duration {
 // get sends a GET of path to the registry, with Accept set to accept when it is not
 // empty, and returns its response with the status 200. A 401 with a Bearer challenge gets a token from
 // the challenge's realm, once, and the GET is sent again with it. A 503, a 429 or a
-// request with no response is sent again after [wait], until the registry answers or
+// request with no response is sent again after [wait], until the registry returns the file or
 // ctx ends. what is the request as an error shows it.
-func (r *registry) get(ctx context.Context, path, accept, what string) (*http.Response, error) {
+func (r *registry) get(ctx context.Context, path, accept, what, version string) (*http.Response, error) {
 	tried := false
 	for n := 0; ; {
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, scheme(r.host)+"://"+r.host+path, nil)
@@ -418,11 +425,45 @@ func (r *registry) get(ctx context.Context, path, accept, what string) (*http.Re
 		}
 		d := wait(n, retryAfter)
 		n++
+		answer := "none"
+		if err == nil {
+			answer = strconv.Itoa(resp.StatusCode)
+		}
+		r.note(ctx, version, answer)
 		if err := sleep(ctx, d); err != nil {
 			return nil, r.failed(what, err)
 		}
 	}
 }
+
+// note tells the fetch's progress, once the first retry starts and every [noteEvery]
+// after that: the registry's host, the version waited for, "newest" when it is not known
+// yet, and the status of the last response, "none" for no response. The line has no
+// path, token, header or query.
+func (r *registry) note(ctx context.Context, version, answer string) {
+	report, _ := ctx.Value(progressKey{}).(func(string))
+	t := now()
+	if report == nil || r.noted && t.Sub(r.lastNote) < noteEvery {
+		return
+	}
+	r.noted, r.lastNote = true, t
+	subject := "the newest " + displayName(r.runtime)
+	if version != "newest" {
+		subject = displayName(r.runtime) + " " + version
+	}
+	report(fmt.Sprintf("waiting for %s to return %s (last answer: %s). If this continues, check pool.registry.", r.host, subject, answer))
+}
+
+// displayName is the runtime's name as a person reads it.
+func displayName(runtime string) string {
+	if runtime == "claude" {
+		return "Claude Code"
+	}
+	return runtime
+}
+
+// progressKey is the key of the context value that [Options.Progress] sets.
+type progressKey struct{}
 
 // refused is the error of a response with the status status, other than 200, to the
 // request what; location is the response's Location header, which a redirect has.

@@ -944,7 +944,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				if code != nil {
 					machine = code.machine
 				}
-				in, err := installRuntime(installCtx, run, conf.Forager, machine, walled || remote, name, state)
+				in, err := installRuntime(installCtx, run, conf.Forager, machine, walled || remote, name, state, said)
 				if err != nil {
 					return &runLineError{codeLine(installFailed(err))}
 				}

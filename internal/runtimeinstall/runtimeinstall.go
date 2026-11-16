@@ -91,6 +91,9 @@ type Options struct {
 	// that ended while its container went on has no hold, but its container still runs
 	// the program. When Mounted returns an error, the cleanup removes no version's folder.
 	Mounted func(ctx context.Context) ([]string, error)
+	// Progress, when set, gets a line, with no prefix, when a registry fetch waits for
+	// the registry: at the first retry, and every five minutes after that.
+	Progress func(line string)
 }
 
 // Installed is a runtime that [Install] installed, or found installed.
@@ -134,6 +137,9 @@ func Install(ctx context.Context, o Options) (Installed, error) {
 	}
 	if !filepath.IsAbs(o.Folder) {
 		return Installed{}, fmt.Errorf("Keep runtimes in an absolute folder\n%q is not one.", o.Folder)
+	}
+	if o.Progress != nil {
+		ctx = context.WithValue(ctx, progressKey{}, o.Progress)
 	}
 	rel, err := o.Fetch(ctx, o.Runtime)
 	if err != nil {

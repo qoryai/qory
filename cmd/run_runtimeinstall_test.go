@@ -8,7 +8,9 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 
 	"github.com/qoryai/forager/event"
 	"github.com/qoryai/forager/session"
@@ -47,6 +49,12 @@ type installSetup struct {
 	noInstance bool
 	// runtime is the runtime of the run; empty means claude.
 	runtime string
+	// args are flags that follow the run key's.
+	args []string
+	// during, when set, runs in its own goroutine while the run goes on.
+	during func()
+	// before, when set, runs once the test's folders are made, before the run.
+	before func()
 }
 
 // runInstalling runs qory run claude with a run key as s sets it up, with no
@@ -65,6 +73,9 @@ func runInstalling(t *testing.T, s installSetup) installRun {
 		defer cmd.SetInstanceAddress(func(*config.Forager) string { return s.reg.Instance() })()
 	}
 	h := newHostFetch(t, "", "main")
+	if s.before != nil {
+		s.before()
+	}
 	section := ""
 	if s.walled {
 		docker, _ := fakeDocker(t)
@@ -94,6 +105,10 @@ func runInstalling(t *testing.T, s installSetup) installRun {
 	})
 	defer restore()
 	writeFile(t, filepath.Join(h.dir, "qory.yaml"), ownStack("apiVersion: qory.dev/v1alpha1\ntarget:\n  runtime: "+runtime+"\nmodules:\n  - name: core\n    source: {git: \""+h.server.URL("acme/harness")+"\", ref: main, path: modules/core}\n"))
+	args = append(args, s.args...)
+	if s.during != nil {
+		go s.during()
+	}
 	r.out, r.err = run(t, args...)
 	r.closes, r.calls = closes(), calls()
 	return r
@@ -427,5 +442,128 @@ func TestTheApiaryLineOfARunCodeFileWinsOverTheServersURL(t *testing.T) {
 	_, err = runCodeInstalling(t, lines("http://127.0.0.1:1"), proxy, reg.Instance())
 	if err == nil || !strings.HasPrefix(err.Error(), "Ask Qory Apiary's instance admin to put the registry's token realm at http://127.0.0.1:1/registry/token\n") {
 		t.Fatalf("a wrong line: %v", err)
+	}
+}
+
+// endsWithin runs f, which runs a whole qory run, and fails the test when it does not
+// return within limit: a run whose install keeps its tries after the run ended.
+func endsWithin(t *testing.T, limit time.Duration, f func() installRun) installRun {
+	t.Helper()
+	done := make(chan installRun, 1)
+	go func() { done <- f() }()
+	select {
+	case r := <-done:
+		return r
+	case <-time.After(limit):
+		t.Fatalf("qory run did not end within %s of the end of its run", limit)
+		return installRun{}
+	}
+}
+
+// TestARegistryThatKeepsReturning503StopsAtTheTimeLimit has the registry return 503 to
+// every request, and a run with a time limit of 3 seconds: the run waits with the
+// registry's tries, tells so once on stderr, and ends at the limit with the line of a run
+// that ran out of time, exit 124, a few seconds later at most, with no line that asks for
+// more time.
+func TestARegistryThatKeepsReturning503StopsAtTheTimeLimit(t *testing.T) {
+	reg, proxy := rt.StartRegistry(t), rt.StartProxy(t)
+	reg.PublishPlain("2.1.320")
+	reg.Unavailable(-1, "")
+	start := time.Now()
+	r := endsWithin(t, 30*time.Second, func() installRun {
+		return runInstalling(t, installSetup{reg: reg, npm: rt.StartNpm(t), proxy: proxy, walled: true, args: []string{"--timeout", "3s"}})
+	})
+	if cmd.ExitCode(r.err) != 124 || len(r.joins) != 0 {
+		t.Fatalf("%d joins, %v (exit %d)\n%s", len(r.joins), r.err, cmd.ExitCode(r.err), r.out)
+	}
+	if took := time.Since(start); took > 3*time.Second+4*time.Second {
+		t.Errorf("the run took %s with a time limit of 3s", took)
+	}
+	wants(t, r.out, "the run was cancelled at its time limit of 3s, before claude started", "qory run: waiting for "+reg.Host()+" to return the newest Claude Code (last answer: 503). If this continues, check pool.registry.\n")
+	if n := strings.Count(r.out, "qory run: waiting for "); n != 1 {
+		t.Errorf("the run printed the waiting line %d times:\n%s", n, r.out)
+	}
+	lacks(t, r.out, "Run again with more time", "installed claude")
+}
+
+// TestARegistryThatKeepsReturning503StopsAtSIGTERM sends SIGTERM to qory run while the
+// registry's tries go on: the tries stop, the run is cancelled with the line of a run
+// that got a signal before its session joined, exit 1, and no line asks for more time.
+func TestARegistryThatKeepsReturning503StopsAtSIGTERM(t *testing.T) {
+	reg, proxy := rt.StartRegistry(t), rt.StartProxy(t)
+	reg.PublishPlain("2.1.320")
+	reg.Unavailable(-1, "")
+	r := endsWithin(t, 30*time.Second, func() installRun {
+		return runInstalling(t, installSetup{reg: reg, npm: rt.StartNpm(t), proxy: proxy, walled: true, during: func() {
+			// The second request is the first retry, 2 seconds after the first.
+			for len(reg.Paths()) < 2 {
+				time.Sleep(20 * time.Millisecond)
+			}
+			syscall.Kill(os.Getpid(), syscall.SIGTERM)
+		}})
+	})
+	if cmd.ExitCode(r.err) != 1 || len(r.joins) != 0 {
+		t.Fatalf("%d joins, %v (exit %d)\n%s", len(r.joins), r.err, cmd.ExitCode(r.err), r.out)
+	}
+	wants(t, r.out, "qory run: waiting for "+reg.Host()+" to return", "the run was cancelled: qory run got SIGTERM before claude started")
+	lacks(t, r.out, "Run again with more time", "installed claude")
+}
+
+// oldVersion makes the folder of claude 1.0.0 in qory's runtimes folder, as an install
+// makes it, with no hold on it, and returns its path.
+func oldVersion(t *testing.T) string {
+	t.Helper()
+	dir := filepath.Join(os.Getenv("XDG_STATE_HOME"), "qory", "runtimes", "claude", "1.0.0")
+	if err := os.MkdirAll(filepath.Join(dir, "bin"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(dir, "bin", "claude"), "#!/bin/sh\n")
+	if err := os.Chmod(filepath.Join(dir, "bin", "claude"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(dir, "integrity"), "sha512-x\n")
+	return dir
+}
+
+// engineOnPath puts a program called docker first on PATH for the test. Its ps prints a
+// container id, its inspect prints source as the container's mount, and it writes the
+// mount.
+func engineOnPath(t *testing.T, source string) {
+	t.Helper()
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "docker"), "#!/bin/sh\ncase \"$1\" in\nps) echo abc123 ;;\ninspect) echo '"+source+"' ;;\nesac\n")
+	if err := os.Chmod(filepath.Join(dir, "docker"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
+// TestAnOrphanContainerKeepsItsVersionWithNoWall has a run with no wall in its
+// forager.yaml, as a person's machine has, install claude 2.1.320 while the engine, the
+// docker program on PATH, lists a running container, left by a run that ended, that
+// mounts the folder of 1.0.0: 1.0.0 stays. When the container mounts another folder, the
+// install removes 1.0.0.
+func TestAnOrphanContainerKeepsItsVersionWithNoWall(t *testing.T) {
+	for _, c := range []struct {
+		name  string
+		mount func(old string) string
+		kept  bool
+	}{
+		{"a container that mounts the old version", func(old string) string { return old }, true},
+		{"a container that mounts another folder", func(string) string { return "/srv/other" }, false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			npm, proxy := rt.StartNpm(t), rt.StartProxy(t)
+			npm.Publish("2.1.320")
+			var old string
+			r := runInstalling(t, installSetup{npm: npm, proxy: proxy, before: func() {
+				old = oldVersion(t)
+				engineOnPath(t, c.mount(old))
+			}})
+			r.joined(t)
+			if _, err := os.Lstat(old); (err == nil) != c.kept {
+				t.Errorf("1.0.0 is kept: %v, want %v (%v)", err == nil, c.kept, err)
+			}
+		})
 	}
 }

@@ -430,3 +430,63 @@ func TestAConnectTheProxyRefusesIsNotRetried(t *testing.T) {
 		t.Fatalf("err = %v, refusals = %d, waits = %v", err, proxy.Refusals(), *waits)
 	}
 }
+
+// TestAWaitingFetchTellsItsProgress has the registry answer 503 to every request: on the
+// fake clock, the first retry gives one line, and nothing more until 5 minutes of waits
+// have passed, when it gives another, with the last status. A registry that answers at
+// the first try gives no line. No line has a path, a token or a header.
+func TestAWaitingFetchTellsItsProgress(t *testing.T) {
+	t.Run("a registry that returns 503", func(t *testing.T) {
+		ctx, _ := clockEndingAfter(t, 11*time.Minute)
+		f := newFromRegistry(t)
+		f.reg.PublishPlain("2.1.320")
+		f.reg.Unavailable(-1, "")
+		var lines []string
+		_, err := runtimeinstall.Install(ctx, runtimeinstall.Options{
+			Fetch:   runtimeinstall.RegistryFetch(http.DefaultClient, f.reg.Host(), "amd64", f.reg.Instance()),
+			Runtime: "claude", Folder: f.folder,
+			Progress: func(line string) { lines = append(lines, line) },
+		})
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("the install returned %v, want the end of the context", err)
+		}
+		want := "waiting for " + f.reg.Host() + " to return the newest Claude Code (last answer: 503). If this continues, check pool.registry."
+		if len(lines) != 3 || lines[0] != want || lines[1] != want || lines[2] != want {
+			t.Fatalf("lines = %q, want 3 lines of %q (at the first retry, at 5 and at 10 minutes)", lines, want)
+		}
+	})
+	t.Run("a registry that returns no response", func(t *testing.T) {
+		ctx, _ := clockEndingAfter(t, time.Minute)
+		gone := httptest.NewServer(http.NotFoundHandler())
+		host := strings.TrimPrefix(gone.URL, "http://")
+		gone.Close()
+		var lines []string
+		_, _ = runtimeinstall.Install(ctx, runtimeinstall.Options{
+			Fetch:   runtimeinstall.RegistryFetch(http.DefaultClient, host, "amd64", ""),
+			Runtime: "claude", Folder: t.TempDir(),
+			Progress: func(line string) { lines = append(lines, line) },
+		})
+		want := "waiting for " + host + " to return the newest Claude Code (last answer: none). If this continues, check pool.registry."
+		if len(lines) != 1 || lines[0] != want {
+			t.Fatalf("lines = %q, want %q", lines, want)
+		}
+	})
+	t.Run("a registry that returns the file", func(t *testing.T) {
+		fakeClock(t)
+		f := newFromRegistry(t)
+		f.reg.PublishPlain("2.1.320")
+		var lines []string
+		got, err := runtimeinstall.Install(context.Background(), runtimeinstall.Options{
+			Fetch:   runtimeinstall.RegistryFetch(http.DefaultClient, f.reg.Host(), "amd64", f.reg.Instance()),
+			Runtime: "claude", Folder: f.folder,
+			Progress: func(line string) { lines = append(lines, line) },
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		got.Release()
+		if len(lines) != 0 {
+			t.Fatalf("lines = %q, want none", lines)
+		}
+	})
+}
