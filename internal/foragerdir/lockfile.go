@@ -3,6 +3,8 @@ package foragerdir
 import (
 	"errors"
 	"fmt"
+	"io"
+	"os"
 )
 
 // ErrLocked is a lock another process holds, which [LockFile] does not wait for.
@@ -24,4 +26,39 @@ func LockFile(path string) (*Lock, error) {
 		return nil, fmt.Errorf("lock %s: %w", path, err)
 	}
 	return &Lock{f: f}, nil
+}
+
+// LockFileText is [LockFile] that also writes text into the file, for the process that
+// finds the lock held to read, see [LockText]. The text replaces what an earlier holder
+// wrote.
+func LockFileText(path, text string) (*Lock, error) {
+	l, err := LockFile(path)
+	if err != nil {
+		return nil, err
+	}
+	if err := l.f.Truncate(0); err != nil {
+		l.Release()
+		return nil, err
+	}
+	if _, err := l.f.WriteAt([]byte(text), 0); err != nil {
+		l.Release()
+		return nil, err
+	}
+	return l, nil
+}
+
+// lockTextMax is the most of a lock file's text that [LockText] reads.
+const lockTextMax = 512
+
+// LockText is the text of the lock file at path that [LockFileText] wrote, at most 512
+// bytes, "" when the file is missing, empty or cannot be read. It takes no lock, and never
+// reads through a link.
+func LockText(path string) string {
+	f, err := os.OpenFile(path, os.O_RDONLY|noFollow|nonBlock, 0)
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+	b, _ := io.ReadAll(io.LimitReader(f, lockTextMax))
+	return string(b)
 }

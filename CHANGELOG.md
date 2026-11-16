@@ -383,6 +383,14 @@ release may change what an existing document does, and states it under Upgrading
   compose into one home. The harness report moves to `runs/<name>-<hash>-report.json`
   there, so the first such run takes each module's commit again. A relative `HOME` counts
   from the folder qory runs in, so the home is an absolute path.
+- `qory run` holds a lock on a home that is not for that run alone: your unwalled run's
+  `.qory/harness`, and the home of a walled run with `--home` or `harness.home`. The lock is
+  on the file `<home>.lock` beside the home, which records the run's id, qory's process id and
+  the start time, and the file stays after the run. A second run of that home stops before
+  its compose with exit 1 and `Wait for the run that uses this home to end, or set another
+  --home or harness.home.`, then the holder and the home on the second line. Before, its
+  compose replaced the first run's home, and its end removed the first run's copy of
+  `inputs.json`. A run with a home for that run alone takes no lock. See `docs/run.md`.
 - `qory artifact pull` and the working folder of a push check take, of each artifact, the
   newest version that the run API's artifact index does not mark `cancelled`. A version
   that a cancelled run made counts for no stage, and an artifact whose versions are all

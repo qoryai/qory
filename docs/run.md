@@ -57,6 +57,21 @@ wall or not, before the run opens and before anything is written:
 set --home to a folder outside /work/app: /work/app/.qory/harness is inside /work/app, and a walled run or a run with a run key writes no harness into the folder it runs in
 ```
 
+A home that is not for one run alone is held for the run's life: your unwalled run's
+`.qory/harness`, and the home of a walled run with `--home` or `harness.home`. Before it
+composes, `qory run` takes a lock on the file `<home>.lock` beside the home, such as
+`.qory/harness.lock`, which records the run's id, `qory`'s process id and the start time. The
+file stays after the run, and the lock ends with the run. A second run of that home stops before it
+composes, with exit 1, since its compose would replace the first run's home and its end
+would remove the first run's copy of `inputs.json`:
+
+```text
+Wait for the run that uses this home to end, or set another --home or harness.home.
+Run 0192f0c1-7d4e-7a2b-8c3d-4e5f6a7b8c9d, pid 4242, started 2026-11-16T10:00:00Z uses the home /work/app/.qory/harness
+```
+
+A run with a home for that run alone takes no lock.
+
 A walled run gets no link in the folder, whatever `harness.links` sets, so
 `harness.links: checkout` does not stop it. A run with no wall keeps its links. Without the
 links, some programs lose part of the harness, since they read that part from the checkout alone:

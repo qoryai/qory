@@ -538,6 +538,17 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					cleanups[i]()
 				}
 			}()
+			// A home that is not this run's alone, a person's .qory/harness or one that --home or
+			// harness.home sets, is held for the run's life: a second run's compose would
+			// replace it, and its end would delete this run's copy of inputs.json. The lock is
+			// the first of the cleanups, so it is let go after the others.
+			if runHome == "" {
+				homeLock, err := lockHome(at.home, spec.RunID)
+				if err != nil {
+					return err
+				}
+				cleanups = append(cleanups, func() { homeLock.Release() })
+			}
 			// A machine with its own access key and gateway.server.via registers the run
 			// itself, through via, and runs it through the gateway that the run key points
 			// to, as a run its starter registered does. The run key it keeps beside

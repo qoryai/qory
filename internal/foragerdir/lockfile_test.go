@@ -44,3 +44,39 @@ func TestLockFileIsHeldOnceAtATime(t *testing.T) {
 		t.Error("a link was taken as the lock file")
 	}
 }
+
+// TestLockFileTextIsReadWhileHeld is a lock file with text: a process that finds the lock
+// held reads the text of the holder, a later holder replaces it, and a link or a missing
+// file reads as no text.
+func TestLockFileTextIsReadWhileHeld(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "home.lock")
+	l, err := foragerdir.LockFileText(path, "run one, a long first text\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := foragerdir.LockFileText(path, "run two\n"); !errors.Is(err, foragerdir.ErrLocked) {
+		t.Errorf("a second take: %v, want ErrLocked", err)
+	}
+	if got := foragerdir.LockText(path); got != "run one, a long first text\n" {
+		t.Errorf("the text while held is %q", got)
+	}
+	l.Release()
+	l, err = foragerdir.LockFileText(path, "run two\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Release()
+	if got := foragerdir.LockText(path); got != "run two\n" {
+		t.Errorf("the text of the later holder is %q, want it to replace the first", got)
+	}
+	if err := os.Symlink(path, filepath.Join(dir, "link.lock")); err != nil {
+		t.Fatal(err)
+	}
+	if got := foragerdir.LockText(filepath.Join(dir, "link.lock")); got != "" {
+		t.Errorf("the text through a link is %q, want none", got)
+	}
+	if got := foragerdir.LockText(filepath.Join(dir, "missing.lock")); got != "" {
+		t.Errorf("the text of a missing file is %q, want none", got)
+	}
+}
