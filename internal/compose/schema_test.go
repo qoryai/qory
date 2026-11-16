@@ -744,6 +744,9 @@ func TestVerdictSchema(t *testing.T) {
 	text := func(s string) string {
 		return replace(`"text": "The checks script failed on the spec's links."`, `"text": "`+s+`"`)
 	}
+	fix := func(s string) string {
+		return replace(`"action": "run_again"`, `"action": "run_again", "fix": "`+s+`"`)
+	}
 	rlo := string(rune(0x202e)) // a right-to-left override, invisible
 	for _, c := range []struct {
 		doc   string
@@ -805,6 +808,18 @@ func TestVerdictSchema(t *testing.T) {
 		{text(`One\u0007sentence.`), false},
 		{text(`One ` + rlo + `sentence.`), false},
 		{replace(`"text": "The checks script failed on the spec's links."`, `"text": 1`), false},
+		// fix: optional with run_again and absent with answer, with the rules of text
+		{fix(`Fix the link to /docs/start in the spec.`), true},
+		{`{"verdict": "changes-requested", "points": [{"text": "The checks script failed.", "action": "run_again", "fix": "Fix the link."}]}`, true},
+		{replace(`"question": "q4"`, `"question": "q4", "fix": "Answer q4."`), false},
+		{fix(strings.Repeat("a", 500)), true},
+		{fix(strings.Repeat("é", 500)), true},
+		{fix(strings.Repeat("a", 501)), false},
+		{fix(""), false},
+		{fix(`One\nsentence.`), false},
+		{fix(`One\tsentence.`), false},
+		{fix(`One ` + rlo + `sentence.`), false},
+		{replace(`"action": "run_again"`, `"action": "run_again", "fix": 1`), false},
 		// a member this schema does not define, at each level, and the old text gaps
 		{replace(`"verdict": "escalate", `, `"verdict": "escalate", "gaps": "Add the empty cart.", `), false},
 		{`{"verdict": "passed", "gaps": "Add the empty cart."}`, false},

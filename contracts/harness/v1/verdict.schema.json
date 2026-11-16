@@ -32,17 +32,18 @@
   ],
   "$defs": {
     "point": {
-      "description": "One point: what is wrong or missing and its action. question is required when action is answer, and absent when action is run_again. An answer point comes only with escalate.",
+      "description": "One point: what is wrong or missing and its action. question is required when action is answer, and absent when action is run_again. fix is optional when action is run_again, and absent when action is answer. An answer point comes only with escalate.",
       "type": "object",
       "required": ["text", "action"],
       "additionalProperties": false,
       "properties": {
         "text": {"description": "What is wrong or missing, in one plain sentence on one line, 1 to 500 characters, with no action and no question id: Qory Apiary adds the action from action.", "$ref": "#/$defs/line", "minLength": 1, "maxLength": 500},
         "action": {"description": "answer: a person answers the question in question, only with escalate. run_again: another round runs; with escalate, a person runs it.", "enum": ["answer", "run_again"]},
-        "question": {"description": "The id of an open question in the work item's newest questions version, in the id form of questions.schema.json: 1 to 32 lower-case letters, digits and hyphens, such as q1.", "type": "string", "pattern": "^[a-z0-9-]{1,32}$"}
+        "question": {"description": "The id of an open question in the work item's newest questions version, in the id form of questions.schema.json: 1 to 32 lower-case letters, digits and hyphens, such as q1.", "type": "string", "pattern": "^[a-z0-9-]{1,32}$"},
+        "fix": {"description": "What a person does to fix it, in one plain sentence on one line, 1 to 500 characters: Qory Apiary shows it in place of the sentence of the action run_again.", "$ref": "#/$defs/line", "minLength": 1, "maxLength": 500}
       },
       "if": {"required": ["action"], "properties": {"action": {"const": "answer"}}},
-      "then": {"required": ["question"]},
+      "then": {"required": ["question"], "not": {"required": ["fix"]}},
       "else": {"not": {"required": ["question"]}}
     },
     "line": {

@@ -859,18 +859,20 @@ func TestArtifactPushChecksItsArguments(t *testing.T) {
 	}
 }
 
-// verdictPoints is a file of --points with a point to answer and a point to run again,
-// and verdictPointsBody is the same points as qory sends and keeps them, with < and &
-// unescaped, as encoding/json's Marshal would not write them.
+// verdictPoints is a file of --points with a point to answer and two points to run
+// again, the second with a fix, and verdictPointsBody is the same points as qory sends
+// and keeps them, with < and & unescaped, as encoding/json's Marshal would not write them.
 const (
 	verdictPoints = `[
   {"text": "The spec does not say which customers see the new price.", "action": "answer", "question": "q4"},
-  {"text": "The checks script failed on the spec's rule a < b & c.", "action": "run_again"}
+  {"text": "The checks script failed on the spec's rule a < b & c.", "action": "run_again"},
+  {"text": "The spec links to a page that does not exist.", "action": "run_again", "fix": "Fix the link to /docs/start in the spec."}
 ]
 `
 	verdictPointsBody = `{"verdict":"escalate","points":[` +
 		`{"text":"The spec does not say which customers see the new price.","action":"answer","question":"q4"},` +
-		`{"text":"The checks script failed on the spec's rule a < b & c.","action":"run_again"}]}`
+		`{"text":"The checks script failed on the spec's rule a < b & c.","action":"run_again"},` +
+		`{"text":"The spec links to a page that does not exist.","action":"run_again","fix":"Fix the link to /docs/start in the spec."}]}`
 )
 
 // writePoints writes content to points.json in dir and returns its path.
@@ -977,6 +979,10 @@ func TestRunVerdictChecksItsArguments(t *testing.T) {
 		{[]string{"run", "verdict", "escalate", "--points", lone}, `Remove the escape of a lone surrogate, such as \ud800, from ` + lone + "."},
 		{[]string{"run", "verdict", "escalate", "--points", points(`[{"text": "The spec does not say who sees the price.", "action": "answer"}]`)},
 			"Add question, the id of an open question, to point 1: a point with the action answer has one."},
+		{[]string{"run", "verdict", "escalate", "--points", points(`[{"text": "The spec does not say who sees the price.", "action": "answer", "question": "q4", "fix": "Answer q4."}]`)},
+			"Remove fix from point 1: a point with the action answer has none."},
+		{[]string{"run", "verdict", "escalate", "--points", points(`[{"text": "The checks failed.", "action": "run_again", "fix": "` + strings.Repeat("a", 501) + `"}]`)},
+			"Shorten the fix of point 1 to at most 500 characters. The fix has 501."},
 		{[]string{"run", "verdict", "escalate", "--points", points(`{"verdict": "escalate", "gaps": "Add the empty cart."}`)},
 			`Write the points as a JSON array, such as [{"text": "…", "action": "run_again"}]. The file is a JSON object.`},
 		{[]string{"run", "verdict", "passed", "--gaps", points(verdictPoints)}, "unknown flag: --gaps"},

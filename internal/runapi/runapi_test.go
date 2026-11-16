@@ -554,6 +554,9 @@ func TestPushVerdictSendsTheBodyTheRunAPIReads(t *testing.T) {
 			{Text: "The checks script failed.", Action: runapi.ActionRunAgain},
 		}, `{"verdict":"escalate","points":[{"text":"The spec does not say which customers see the price.","action":"answer","question":"q4"},` +
 			`{"text":"The checks script failed.","action":"run_again"}]}`},
+		{runapi.VerdictChangesRequested, []runapi.Point{
+			{Text: "The checks script failed.", Action: runapi.ActionRunAgain, Fix: "Fix the link to /docs/start."},
+		}, `{"verdict":"changes-requested","points":[{"text":"The checks script failed.","action":"run_again","fix":"Fix the link to /docs/start."}]}`},
 		// Escaped, 20 points of 500 of these would pass the limit of the body.
 		{runapi.VerdictEscalate, []runapi.Point{{Text: "a < b & c", Action: runapi.ActionRunAgain}},
 			`{"verdict":"escalate","points":[{"text":"a < b & c","action":"run_again"}]}`},

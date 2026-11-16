@@ -800,7 +800,8 @@ stores it as a version of the artifact type `verdict`. This is version 1 of the 
 ```json
 {"verdict": "escalate",
  "points": [{"text": "The spec does not say which customers see the new price.", "action": "answer", "question": "q4"},
-            {"text": "The checks script failed on the spec's links.", "action": "run_again"}]}
+            {"text": "The checks script failed on the spec's links.", "action": "run_again",
+             "fix": "Fix the link to /docs/start in the spec."}]}
 ```
 
 | Member | Meaning |
@@ -810,6 +811,7 @@ stores it as a version of the artifact type `verdict`. This is version 1 of the 
 | `text` | what is wrong or missing, in one plain sentence for a person on one line, 1 to 500 characters, with no action and no question id, because Qory Apiary adds the action from `action`: it has no control character, so no tab, line feed or carriage return, and the schema's `$defs` `line`, the `line` of the questions format, lists the format characters it cannot have |
 | `action` | `answer`: a person answers the question in `question`, only with `escalate`; `run_again`: another round runs, and with `escalate` a person runs it |
 | `question` | the id of an open question in the work item's newest `questions` version, in the id form of the questions format: required with `answer`, and absent with `run_again` |
+| `fix` | what a person does to fix the point, in one plain sentence on one line, with the rules of `text`: optional with `run_again`, and absent with `answer`. Qory Apiary shows it in place of the sentence of the action `run_again` |
 
 A `changes-requested` verdict may list what the next round fixes:
 
@@ -833,6 +835,7 @@ documents fails the schema:
 {"verdict": "escalate", "points": [{"text": "The checks script failed.", "action": "run_again", "question": "q4"}]}
 {"verdict": "escalate", "points": [{"text": "The checks script failed.\nThe spec's links are broken.", "action": "run_again"}]}
 {"verdict": "changes-requested", "points": [{"text": "The spec does not say who sees the price.", "action": "answer", "question": "q4"}]}
+{"verdict": "escalate", "points": [{"text": "The spec does not say who sees the price.", "action": "answer", "question": "q4", "fix": "Answer q4."}]}
 {"verdict": "changes-requested", "gaps": "Add the empty cart."}
 ```
 
