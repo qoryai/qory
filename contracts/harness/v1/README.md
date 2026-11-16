@@ -573,7 +573,7 @@ A module that `exports.modules` lists and that has a `process.yaml` at its folde
 a factory. The file is a process template: the texts, the workspace type, the stack and
 the process that a workspace made from it starts with
 ([process.schema.json](process.schema.json)). It may also list the artifact types its
-workspaces use. Every command that reads the
+workspaces use, and declare their submit step. Every command that reads the
 configuration checks the file, once it finds each export. A module without the file is
 not checked for it.
 
@@ -627,8 +627,9 @@ artifact_types:                  # optional; the artifact types the workspaces u
 | `stack` | the stack the workspace's workflows run on, one that `exports.stacks` of the same repository lists |
 | `process` | the workspace's process, a `qory.process/v1` document. qory checks that it is an object with `schema: qory.process/v1` and a list of `stages`; that each `workflow` of a stage's `sequence`, a loop's `body` included, is a non-empty string of one line that the stack's `qory-stack.yaml` declares under `workflows`; and that each stage `name` has no line break or other control character. qory checks nothing else in it |
 | `artifact_types` | optional; the list of the artifact types the workspaces use, as [Artifact types](#artifact-types) has it. A list with no entries is valid |
+| `submit` | optional; the submit step of a run, as [The submit step](#the-submit-step) has it |
 
-Every key but `artifact_types` is required, and the file has no other key. A key left out, a text over its
+Every key but `artifact_types` and `submit` is required, and the file has no other key. A key left out, a text over its
 limit, a `stack` that `exports.stacks` does not list, and a `process` that is not such an
 object are refused with the file and the fix in the message. Each workflow that the
 stack does not declare is refused with one line, which has the stage, the workflow and
@@ -687,6 +688,29 @@ and then the fix:
 
 ```text
 /src/acme-harness/harness/modules/support-desk/process.yaml: add size_limit and max_files to artifact type reply-draft, or leave only its name: a custom type has base_view, size_limit and max_files
+```
+
+#### The submit step
+
+`submit` declares the submit step of a run of a workspace made from the template. A
+`process.yaml` has at most one `submit`, an object with `type` and `send` and no other
+key. Without `submit`, the step stores no submission.
+
+```yaml
+submit:
+  type: customer-facts           # a structured entry of artifact_types
+  send: after_gate               # or end_of_run
+```
+
+`type` is the artifact type of the submission: the name of a structured entry of
+`artifact_types`. qory checks that `type` has the form of an artifact type name, and not
+that `artifact_types` has the entry. `send` is when the step sends the submission:
+`end_of_run` sends it at the end of the run; `after_gate` stores it and sends nothing
+before the stage's gate passes. A `submit` that breaks a rule stops the command with one
+line, which starts with the file and then the fix:
+
+```text
+/src/acme-harness/harness/modules/support-desk/process.yaml: remove the key "command" from submit: submit has only type and send
 ```
 
 ## The branch format

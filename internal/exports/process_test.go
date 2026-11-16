@@ -249,6 +249,18 @@ func TestProcessSchemaMatchesTheReader(t *testing.T) {
 		{strings.Replace(process, "name: Answer", `name: "\t"`, 1), false},
 		{strings.Replace(process, "name: Answer", "name: 3", 1), true},
 		{strings.Replace(process, "name: Answer", `name: ""`, 1), true},
+		{process + "submit: {type: submission, send: end_of_run}\n", true},
+		{process + "submit: {type: submission, send: after_gate}\n", true},
+		{process + "submit: {type: submission, send: end_of_run, command: open-a-draft}\n", false},
+		{process + "submit: {type: submission}\n", false},
+		{process + "submit: {send: end_of_run}\n", false},
+		{process + "submit: {type: submission, send: later}\n", false},
+		{process + "submit: {type: submission, send: [end_of_run]}\n", false},
+		{process + "submit: {type: Submission, send: end_of_run}\n", false},
+		{process + "submit: {type: 3, send: end_of_run}\n", false},
+		{process + "submit:\n  - {type: submission, send: end_of_run}\n", false},
+		{process + "submit: ~\n", false},
+		{process + "submit: submission\n", false},
 	} {
 		var doc any
 		if err := yaml.Unmarshal([]byte(c.body), &doc); err != nil {
@@ -493,6 +505,47 @@ func TestVerifyChecksArtifactTypes(t *testing.T) {
 		{custom("structured", structured+"{$ref: '#/$defs/gone'}"), "fix json_schema of " + name + ` so that it compiles as a JSON Schema: json-pointer in "#/$defs/gone" not found`},
 	} {
 		e := factory(t, withTypes(c.body))
+		file := filepath.Join(e.Root, "modules", "desk", exports.ProcessFileName)
+		if err := e.Verify(); err == nil || err.Error() != file+": "+c.want {
+			t.Errorf("%q: %v\nwant %s: %s", c.body, err, file, c.want)
+		}
+	}
+}
+
+// TestVerifyChecksSubmit is each mistake in submit. Each refusal starts with the file and
+// then the fix. Both values of send pass, and so does a type that artifact_types does not
+// list: qory does not compare the two.
+func TestVerifyChecksSubmit(t *testing.T) {
+	for _, body := range []string{"{type: submission, send: end_of_run}", "{send: after_gate, type: reply-draft}"} {
+		if err := factory(t, process+"submit: "+body+"\n").Verify(); err != nil {
+			t.Errorf("%q: %v", body, err)
+		}
+	}
+	const sends = "end_of_run or after_gate"
+	for _, c := range []struct{ body, want string }{
+		{" ~", "set submit to an object with type and send, or remove it: submit is null"},
+		{" submission", "set submit to an object with type and send, or remove it: submit is a string"},
+		{"\n  - {type: submission, send: end_of_run}", "set submit to an object with type and send, or remove it: submit is a list"},
+		{" {type: submission, send: end_of_run, command: open-a-draft}", `remove the key "command" from submit: submit has only type and send`},
+		{" {type: submission, send: end_of_run, [a]: b}", "remove the key a list from submit: submit has only type and send"},
+		{" {type: submission, type: reply, send: end_of_run}", "remove the second type from submit: submit has the key twice"},
+		{" {send: end_of_run}", "add type to submit, the name of a structured entry of artifact_types: submit has no type"},
+		{" {type: 3, send: end_of_run}", "set submit.type to the name of a structured entry of artifact_types: submit.type is a number"},
+		{" {type: ~, send: end_of_run}", "set submit.type to the name of a structured entry of artifact_types: submit.type is null"},
+		{" {type: [a], send: end_of_run}", "set submit.type to the name of a structured entry of artifact_types: submit.type is a list"},
+		{" {type: 2026-11-02, send: end_of_run}", `set submit.type to a quoted string: YAML reads "2026-11-02" as a type that is not a string`},
+		{" {type: Submission, send: end_of_run}", `set submit.type to lowercase letters and digits in groups joined by single hyphens, at most 64 bytes: submit.type is "Submission"`},
+		{" {type: \"a\\nb\", send: end_of_run}", `set submit.type to lowercase letters and digits in groups joined by single hyphens, at most 64 bytes: submit.type is "a\nb"`},
+		{" {type: submission}", "add send to submit, " + sends + ": submit has no send"},
+		{" {type: submission, send: later}", "set submit.send to " + sends + `: submit.send is "later"`},
+		{" {type: submission, send: End_of_run}", "set submit.send to " + sends + `: submit.send is "End_of_run"`},
+		{" {type: submission, send: [end_of_run]}", "set submit.send to " + sends + ": submit.send is a list"},
+		{" {type: submission, send: ~}", "set submit.send to " + sends + ": submit.send is null"},
+		{" {type: submission, send: 1}", "set submit.send to " + sends + `: submit.send is "1"`},
+		{" {type: submission, send: !!binary ZW5kX29mX3J1bg==}", "set submit.send to " + sends + `: submit.send is "ZW5kX29mX3J1bg=="`},
+		{" {type: submission, send: \"end_of_run\\n/src/process.yaml: all checks passed\"}", "set submit.send to " + sends + `: submit.send is "end_of_run\n/src/process.yaml: all checks passed"`},
+	} {
+		e := factory(t, process+"submit:"+c.body+"\n")
 		file := filepath.Join(e.Root, "modules", "desk", exports.ProcessFileName)
 		if err := e.Verify(); err == nil || err.Error() != file+": "+c.want {
 			t.Errorf("%q: %v\nwant %s: %s", c.body, err, file, c.want)
