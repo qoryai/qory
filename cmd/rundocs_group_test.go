@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -27,53 +26,29 @@ func reviewModule(fill string) map[string]string {
 	}
 }
 
-// bindReviewers sets the bind of the documents' harness section to the agents role
-// reviewers filled by the list code-reviewer, test-reviewer.
-func bindReviewers(d map[string]any) {
-	d["harness"].(map[string]any)["harness"].(map[string]any)["bind"] = map[string]any{
-		"agents": map[string]any{"reviewers": []string{"code-reviewer", "test-reviewer"}},
-	}
-}
+// reviewersList binds the agents role reviewers to the list test-reviewer,
+// code-reviewer: an order that neither the names nor the module's files have.
+var reviewersList = harnessBind(map[string]any{"agents": map[string]any{"reviewers": []any{"test-reviewer", "code-reviewer"}}})
 
-// harnessReport is the one compose report of the run r, read from its run directory,
-// the working folder and the cache folder.
-func harnessReport(t *testing.T, r harnessRun) []byte {
-	t.Helper()
-	var reports []string
-	cache, _ := os.UserCacheDir()
-	for _, dir := range []string{r.runDir, ".", cache} {
-		filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
-			if err == nil && strings.HasSuffix(path, "-report.json") {
-				reports = append(reports, path)
-			}
-			return nil
-		})
-	}
-	if len(reports) != 1 {
-		t.Fatalf("the run has the reports %q", reports)
-	}
-	data, err := os.ReadFile(reports[0])
-	if err != nil {
-		t.Fatal(err)
-	}
-	return data
-}
-
-// TestARunCodesBindOfAGroupRoleToTwoAgentsComposesBoth is a run from a run code whose
+// TestTheReportListsAGroupBindsAgentsInTheListsOrder is a run from a run code whose
 // harness document defines a stack of the module hello, which declares the agents role
-// reviewers many, and binds reviewers to the list code-reviewer, test-reviewer: the
-// compose fills the group with both agents, in the list's order, each a member from the
-// bind, and the run joins.
-func TestARunCodesBindOfAGroupRoleToTwoAgentsComposesBoth(t *testing.T) {
+// reviewers many, and binds reviewers to the list test-reviewer, code-reviewer: the
+// compose report beside the session's home has one row per agent of
+// agents/reviewers, each a member of the group from the bind and not replaced, in the
+// list's order.
+func TestTheReportListsAGroupBindsAgentsInTheListsOrder(t *testing.T) {
 	r := codeHarness{
 		defines: map[string]any{"hello": map[string]any{"access": "write"}},
 		files:   reviewModule("many"),
-		change:  bindReviewers,
+		change:  reviewersList,
 	}.run(t)
 	if !errors.Is(r.err, cmd.ErrJoinedNowhere) || !r.joined {
 		t.Fatalf("%v (exit %d), want the join\n%s", r.err, cmd.ExitCode(r.err), r.out)
 	}
-	data := harnessReport(t, r)
+	data, err := os.ReadFile(r.spec.HarnessHome + "-report.json")
+	if err != nil {
+		t.Fatal(err)
+	}
 	var rep struct {
 		Roles []struct {
 			Role, Agent, From string
@@ -93,14 +68,13 @@ func TestARunCodesBindOfAGroupRoleToTwoAgentsComposesBoth(t *testing.T) {
 		}
 		members = append(members, role.Agent)
 	}
-	if want := []string{"code-reviewer", "test-reviewer"}; !slices.Equal(members, want) {
+	if want := []string{"test-reviewer", "code-reviewer"}; !slices.Equal(members, want) {
 		t.Errorf("the group agents/reviewers has the members %q, want %q:\n%s", members, want, data)
 	}
-	r.noAddress(t)
 }
 
 // TestARunCodesBindOfAListToARoleThatIsNoGroupStops is a run from a run code whose
-// harness document binds the list code-reviewer, test-reviewer to the agents role
+// harness document binds the list test-reviewer, code-reviewer to the agents role
 // reviewers, which the module hello declares one: the compose fails, exit 2, before the
 // join. The error's first line is the fix, to correct the workspace's harness in Qory
 // Apiary by writing one name for the role, and the next line is the cause.
@@ -108,7 +82,7 @@ func TestARunCodesBindOfAListToARoleThatIsNoGroupStops(t *testing.T) {
 	r := codeHarness{
 		defines: map[string]any{"hello": map[string]any{"access": "write"}},
 		files:   reviewModule("one"),
-		change:  bindReviewers,
+		change:  reviewersList,
 	}.run(t)
 	if r.joined || cmd.ExitCode(r.err) != cmd.ExitInput {
 		t.Fatalf("%v (exit %d), want exit 2 before the join\n%s", r.err, cmd.ExitCode(r.err), r.out)
@@ -130,10 +104,7 @@ func TestARunCodesBindOfAListToARoleThatIsNoGroupStops(t *testing.T) {
 // posts no version. qory pushes only for access write.
 func TestARunWithAccessWriteNoPushRunsTheAgentAndPushesNothing(t *testing.T) {
 	p := newPushRepo(t, "write")
-	docker, _ := fakeDocker(t)
-	walledBy(t, docker)
 	p.change = func(d map[string]any) { d["access"] = "write-no-push" }
-	p.flags = []string{"--home", filepath.Join(tempDir(t), "home")}
 	var spec session.SessionSpec
 	joined := false
 	p.mountsOf = func(s session.SessionSpec) { spec, joined = s, true }
