@@ -157,7 +157,7 @@ func TestTheLoadOfPushChecksStopsWithItsLine(t *testing.T) {
 			noWall:       true,
 			controlPlane: true,
 			want:         "Set wall.adapter to docker, and run again. The push checks of " + home + " run in containers of the docker wall alone.",
-			fromCode:     "Set wall.adapter to docker, then take the work item in again in Qory Apiary: the push checks of " + home + " run in containers of the docker wall alone; the code is used",
+			fromCode:     "Set wall.adapter to docker, then take the work item in again in Qory Apiary.\n  The push checks of " + home + " run in containers of the docker wall alone; the code is used",
 		},
 		{
 			name:         "no folder",
@@ -191,7 +191,7 @@ func TestTheLoadOfPushChecksStopsWithItsLine(t *testing.T) {
 			image:        "registry.example/agent:1",
 			controlPlane: true,
 			want:         "Pull the wall's default image onto this machine, and run again: push checks run in it. The engine does not have the image registry.example/agent:1.",
-			fromCode:     "Pull the wall's default image, then take the work item in again in Qory Apiary: push checks run in it, and the engine does not have the image registry.example/agent:1; the code is used",
+			fromCode:     "Pull the wall's default image, then take the work item in again in Qory Apiary.\n  Push checks run in it, and the engine does not have the image registry.example/agent:1; the code is used",
 		},
 		{
 			name:     "push checks that do not read",
@@ -291,7 +291,7 @@ func TestACheckImageThatIsNoReferenceStops(t *testing.T) {
 	} {
 		lines := map[bool]string{
 			false: "Set wall.image or --image to an image reference, and run again. Push checks cannot start from " + c.shown + ": a reference starts with a letter or a digit and has only letters, digits and . _ / : @ -.",
-			true:  "Set wall.image or --image to an image reference, then take the work item in again in Qory Apiary: push checks cannot start from " + c.shown + "; the code is used",
+			true:  "Set wall.image or --image to an image reference, then take the work item in again in Qory Apiary.\n  Push checks cannot start from " + c.shown + "; the code is used",
 		}
 		if c.image == "" {
 			// A run from a run code with no default image stops before its run's image is

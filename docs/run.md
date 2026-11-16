@@ -321,8 +321,10 @@ Take the work item in again in Qory Apiary, through a gateway that sends the run
 Update the run's gateway, then take the work item in again in Qory Apiary: the run API address that the gateway sent is not one the push checks can use: <cause>; the code is used
 Set wall.image in forager.yaml, then take the work item in again in Qory Apiary.
   Push checks run in the wall's default image; the code is used
-Pull the wall's default image, then take the work item in again in Qory Apiary: push checks run in it, and the engine does not have the image <image>; the code is used
-Set wall.image or --image to an image reference, then take the work item in again in Qory Apiary: push checks cannot start from <value>; the code is used
+Pull the wall's default image, then take the work item in again in Qory Apiary.
+  Push checks run in it, and the engine does not have the image <image>; the code is used
+Set wall.image or --image to an image reference, then take the work item in again in Qory Apiary.
+  Push checks cannot start from <value>; the code is used
 Take the work item in again in Qory Apiary: turning on the push checks for the POSTs from behind the wall failed, so the run stopped before the setup: <cause>; the code is used
 ```
 
