@@ -99,10 +99,11 @@ qory run opens the run, then composes the harness, as qory harness compose does,
 the same home, and prints the result on stderr. -f, --model, --effort, --tier and
 --tier-effort mean what they mean there. With a run key or behind a wall, the home is
 outside the folder the run runs in, under qory/homes in the cache directory, unless --home
-or harness.home sets another, and a home inside the folder stops the run. A walled run with
-no run key, --home or harness.home gets a home for that run alone, which qory removes when
-the run ends: runs/<name>-<hash>/<run id> under qory/homes. The harness report stays per
-checkout, as runs/<name>-<hash>-report.json there.
+or harness.home sets another, and a home inside the folder stops the run. A run with a run
+key or a run code, and a walled run, with no --home or harness.home, gets a home for that
+run alone, which qory removes when the run ends: runs/<name>-<hash>/<run id> under
+qory/homes. The harness report stays per checkout, as runs/<name>-<hash>-report.json
+there. A run from a run code finds its inputs in $QORY_HARNESS_HOME/inputs.json.
 
 The agent is the runtime of the stack's target. Name another first, and the run composes
 for it instead; name one when the target has several. Arguments after -- go to the
@@ -392,12 +393,15 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			if pol != nil {
 				selected = pol.Image
 			}
-			// A person's walled run with no --home and no harness.home composes into a home for
-			// this run alone, so a second run of the checkout leaves the first run's home as it
-			// is. The report stays per checkout, so a module keeps its pin between runs.
+			// A run given a run key or a run code, and a person's walled run, with no --home and
+			// no harness.home, composes into a home for this run alone, so a second run of the
+			// checkout leaves the first run's home as it is. The report stays per checkout, so a
+			// module keeps its pin between runs. A run code's run id is known once the code is
+			// redeemed, which moves the home there.
 			runHome := ""
 			homeGiven := h.home != "" || conf.Origin("harness.home") != config.Default
-			if !remote && !homeGiven && wallNamed(conf.Forager, o) {
+			perRun := !homeGiven && (remote || wallNamed(conf.Forager, o))
+			if perRun && spec.RunID != "" {
 				at = runHomeAt(at, spec.RunID)
 				runHome = at.home
 			}
@@ -487,6 +491,12 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				}
 				if fromCode, err = codeRunOf(doc); err != nil {
 					return err
+				}
+				if perRun {
+					shared := at.home
+					at = runHomeAt(at, spec.RunID)
+					runHome = at.home
+					moveMount(spec.Mounts, shared, at.home)
 				}
 				if err := fromCode.apply(cmd); err != nil {
 					return err
@@ -736,6 +746,9 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 						return false, inputsNotWritten(err)
 					}
 					checks.inputs, checks.inputsData = file, data
+					if err := copyInputs(at.home, data); err != nil {
+						return false, inputsNotCopied(at.home, err)
+					}
 					if extra, err = fromCode.workflowArgs(name, rep, in, run.System()); err != nil {
 						return false, err
 					}
@@ -2009,6 +2022,23 @@ func withOrigin(labels map[string]string, origin foragerdir.Labels) map[string]s
 // folder, could not be written in the system's temporary folder.
 func inputsNotWritten(err error) error {
 	return fmt.Errorf("check the temporary folder %s: qory run could not write the run's inputs there: %w%s", exports.Value(os.TempDir(), false), exports.HideError(err), codeUsed)
+}
+
+// inputsNotCopied is the error of a run from a run code whose copy of inputs.json could
+// not be written into the home at home, see [copyInputs].
+func inputsNotCopied(home string, err error) error {
+	return fmt.Errorf("check the home %s: qory run could not write the copy of the run's inputs there: %w%s", exports.Value(home, false), exports.HideError(err), codeUsed)
+}
+
+// moveMount sets the path of each read-only mount of from in mounts to to: the home of a
+// run from a run code, which the wall mounts before the code is redeemed, moves to the
+// home of the run's id.
+func moveMount(mounts []wall.Mount, from, to string) {
+	for i, m := range mounts {
+		if m.ReadOnly && m.Path == from {
+			mounts[i].Path = to
+		}
+	}
 }
 
 // wallOff is the --wall value that runs without the wall forager.yaml sets.

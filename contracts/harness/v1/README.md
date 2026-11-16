@@ -1005,8 +1005,10 @@ read-only at the file's path, mode 0644 in a folder of mode 0755, so the run's u
 read it, and the program gets `--inputs <path>` after the command's arguments, before the
 pushed files' paths, such as `checks.js push spec --inputs <in>/inputs.json
 /qory-push-check/files/spec.md`. Its member `qory.harness_extensions` is the report's
-`extensions` (docs/run.md, §The run key from a run code). A run with no run code has no
-`inputs.json`, and its check gets no `--inputs`.
+`extensions` (docs/run.md, §The run key from a run code). The home of a run from a run
+code also contains `inputs.json` with the same bytes, mode 0644, which a hook reads as
+`$QORY_HARNESS_HOME/inputs.json`. A run with no run code has no `inputs.json`, and its
+check gets no `--inputs`.
 
 qory makes the working folder, the pushed files' folder and the copy of `inputs.json` in
 the run directory, in a folder that only its user can list, and removes them after each

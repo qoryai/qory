@@ -24,11 +24,19 @@ func runKeyHome(t *testing.T, root string) string {
 	return filepath.Join(base, "qory", "homes", checkout.Key(root))
 }
 
-// runKeyReport is the report of the compose of a run given a run key, beside
-// [runKeyHome].
+// runKeyRunHome is the home of the run [keyRunID] given a run key or a run code in the
+// checkout at root, with no --home and no harness.home: runs/<name>-<hash>/<run id> beside
+// [runKeyHome]. qory removes it when the run ends, unless the test calls [cmd.KeepRunHomes].
+func runKeyRunHome(t *testing.T, root string) string {
+	t.Helper()
+	return filepath.Join(runHomesFolder(t, root), keyRunID)
+}
+
+// runKeyReport is the report of the compose of a run given a run key, beside the folder of
+// [runKeyRunHome].
 func runKeyReport(t *testing.T, root string) report.Report {
 	t.Helper()
-	rep, err := report.Read(runKeyHome(t, root) + "-report.json")
+	rep, err := report.Read(runHomesFolder(t, root) + "-report.json")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -116,10 +124,11 @@ func keyedFolder(t *testing.T, git bool) string {
 
 // TestARunKeyComposesOutsideTheFolder is a run given a run key with no --home and no
 // harness.home, in a git checkout and in a folder that is not one, behind a wall and
-// without one: the run composes into its home under qory/homes in the cache directory,
-// goes on to the join, and writes nothing into the folder it runs in: no .qory, no link
-// and no line of .git/info/exclude.
+// without one: the run composes into the home of its run id under qory/homes/runs in the
+// cache directory, goes on to the join, and writes nothing into the folder it runs in: no
+// .qory, no link and no line of .git/info/exclude.
 func TestARunKeyComposesOutsideTheFolder(t *testing.T) {
+	t.Cleanup(cmd.KeepRunHomes())
 	for _, c := range []struct {
 		name        string
 		git, walled bool
@@ -141,7 +150,7 @@ func TestARunKeyComposesOutsideTheFolder(t *testing.T) {
 			}
 			wants(t, out, "qory run: composed 8 entries from 2 modules for claude\n")
 			sameTree(t, c.name, before, folderTree(t, root))
-			home := runKeyHome(t, root)
+			home := runKeyRunHome(t, root)
 			if _, err := os.Stat(filepath.Join(home, "claude")); err != nil {
 				t.Errorf("the home %s: %v", home, err)
 			}

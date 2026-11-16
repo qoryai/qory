@@ -38,9 +38,10 @@ compose` composes only then.
 A walled run, and any run with a run key, writes no harness into the folder it runs in. The harness goes into
 a home under `qory/homes` in your cache directory: `~/.cache/qory/homes/<name>-<hash>` on
 Linux, or `$XDG_CACHE_HOME/qory/homes/<name>-<hash>` when that is set, and
-`~/Library/Caches/qory/homes/<name>-<hash>` on macOS. A run with a run key composes into that
-folder. A walled run with no run key, `--home` or `harness.home` composes into
-`runs/<name>-<hash>/<run id>` under `qory/homes`, a home for that run alone. A second run of the
+`~/Library/Caches/qory/homes/<name>-<hash>` on macOS. A run with a run key or a run code, and a
+walled run, with no `--home` or `harness.home`, composes into `runs/<name>-<hash>/<run id>` under
+`qory/homes`, a home for that run alone. A relative `HOME` counts from the folder you run `qory` in,
+so the home is an absolute path; on Linux, a relative `XDG_CACHE_HOME` stops the run. A second run of the
 checkout leaves the first run's home as it is, and so do `qory harness compose`, `qory run` and
 `qory harness remove` with `--home` set to `qory/homes`, which use `<name>-<hash>` there. `qory`
 removes that home when the run ends, also after a
@@ -1631,7 +1632,10 @@ the work item. Then a run of the step explore:
   `{"harness_extensions": {…}}`, the harness report's `extensions`, or `{}` when the
   harness has none. The workflow reads them from the path after its name in the prompt,
   and a push check gets the same path after `--inputs` (see Push checks in
-  `contracts/harness/v1/README.md`). Inputs that have a member `qory` stop the run before
+  `contracts/harness/v1/README.md`). qory also writes the same bytes to `inputs.json` in
+  the composed home, mode 0644, so the harness's hooks read them as
+  `$QORY_HARNESS_HOME/inputs.json`; a home that already has that file stops the run with
+  exit 1. Inputs that have a member `qory` stop the run before
   it opens, with exit 1: `remove the input qory: qory adds that member to inputs.json; the
   code is used`, and so do inputs that are not a JSON object: `ask Qory Apiary's instance
   admin: the run code's inputs are not a JSON object; the code is used`;
@@ -3719,8 +3723,8 @@ repository to `<user cache>/qory/runs/<run id>/work`, `~/Library/Caches` on macO
 `$XDG_CACHE_HOME` or `~/.cache` on Linux, and binds that clone in place of the checkout. Each
 repository under `.qory/repositories` is cloned too. The harness goes into
 `<user cache>/qory/homes/runs/<name>-<hash>/<run id>`, outside the clone, and the container has that
-folder read-only. `qory` removes that folder when the run ends. A run with a run key has
-`qory/homes/<name>-<hash>` as its home, and a home from `--home` or `harness.home` stays. The clone gets no
+folder read-only. `qory` removes that folder when the run ends. A home from `--home` or
+`harness.home` stays. The clone gets no
 link to the harness, so a program that reads part of it from the checkout does not get that part:
 see [What `qory run` does](#what-qory-run-does). A read run with no setup binds your checkout
 read-only instead, and a read run with a setup gets the clone read-only: see

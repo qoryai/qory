@@ -371,8 +371,17 @@ release may change what an existing document does, and states it under Upgrading
   inputs.json; the code is used`. Inputs that are not a JSON object stop it the same way:
   `ask Qory Apiary's instance admin: the run code's inputs are not a JSON object; the code
   is used`. See The run key from a run code in `docs/run.md`.
+- A run from a run code also writes `inputs.json` into the composed home, so a hook of
+  the harness reads the inputs at `$QORY_HARNESS_HOME/inputs.json`.
 
 ### Changed
+
+- A run with a run key or a run code, with no `--home` or `harness.home`, composes into
+  `runs/<name>-<hash>/<run id>` under `qory/homes` in the cache directory, a home for that
+  run alone, which qory removes when the run ends. Two runs of one checkout no longer
+  compose into one home. The harness report moves to `runs/<name>-<hash>-report.json`
+  there, so the first such run takes each module's commit again. A relative `HOME` counts
+  from the folder qory runs in, so the home is an absolute path.
 
 - qory builds with Forager main 37dc0148. A run keeps its wall only when a container of
   the run may still run; a network or folder of the wall that could not be removed no longer

@@ -866,6 +866,13 @@ func ReservedMounts(root string, mounts []wall.Mount) error {
 	return reservedMounts(root, mounts)
 }
 
+// KeepRunHomes keeps the home of each run of [runHomeAt] once the run is over, for a test
+// that reads it then, and returns a function that removes them again at a run's end.
+func KeepRunHomes() func() {
+	runHomesKept = true
+	return func() { runHomesKept = false }
+}
+
 // SetTempStoreDir sets the store of a run whose checkout is read-only to dir, and returns
 // a function that restores it.
 func SetTempStoreDir(dir string) func() {

@@ -61,6 +61,8 @@ func regularFiles(t *testing.T, home string, paths ...string) {
 // out of the compose, as a link to the module would show it. The run's open sets
 // HarnessHidden.
 func TestARunCodeWithAHiddenHarnessComposesNoLink(t *testing.T) {
+	// The test reads the run's home once the run is over.
+	t.Cleanup(cmd.KeepRunHomes())
 	agents := helloFiles(t)["examples/hello/modules/hello/AGENTS.md"]
 	r := runFromCodeLinks(t, nil, nil, writesHello, nil, nil, hiddenLinks)
 	if !errors.Is(r.err, cmd.ErrJoinedNowhere) || !r.joined {
@@ -92,6 +94,8 @@ func TestARunCodeWithAHiddenHarnessComposesNoLink(t *testing.T) {
 // harness_hidden to false, without a wall: the home links to the modules qory fetched,
 // as a run without a wall does, and the run's open leaves HarnessHidden unset.
 func TestARunCodeWithAShownHarnessKeepsItsLinks(t *testing.T) {
+	// The test reads the run's home once the run is over.
+	t.Cleanup(cmd.KeepRunHomes())
 	r := runFromCodeLinks(t, nil, nil, writesHello, func(d map[string]any) { d["harness_hidden"] = false }, nil, hiddenLinks)
 	if !errors.Is(r.err, cmd.ErrJoinedNowhere) || !r.joined {
 		t.Fatalf("%v (exit %d), want the join\n%s", r.err, cmd.ExitCode(r.err), r.out)

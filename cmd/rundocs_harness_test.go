@@ -87,6 +87,10 @@ type codeHarness struct {
 	// defines, when not nil, is the workflows of a harness document with no extends that
 	// defines a stack of one module, hello, from the folder of the base's repository.
 	defines map[string]any
+	// relay, when not nil, gets the relay of the run code before the run; joined, when not
+	// nil, gets the session's spec at each join.
+	relay  func(*codeRelay)
+	joined func(session.SessionSpec)
 }
 
 // harnessRun is what a [codeHarness] run came to: the output with its error, the run's
@@ -194,7 +198,15 @@ func (c codeHarness) run(t *testing.T) harnessRun {
 			c.change(d)
 		}
 	})
-	t.Cleanup(cmd.SetJoinSession(func(s session.SessionSpec) { r.spec, r.joined = s, true }))
+	if c.relay != nil {
+		c.relay(g)
+	}
+	t.Cleanup(cmd.SetJoinSession(func(s session.SessionSpec) {
+		r.spec, r.joined = s, true
+		if c.joined != nil {
+			c.joined(s)
+		}
+	}))
 	t.Setenv("QORY_RUN_KEY", "")
 	nowhere := cmd.Nowhere{
 		System: proxygittest.Host, Proxy: deadProxy,
@@ -1073,6 +1085,8 @@ func TestARunCodeWhoseHarnessBindsFlatStops(t *testing.T) {
 // in the home starts with the group's members, the bind's list when the bind sets the
 // group and the module's code-reviewer otherwise, then the lead.
 func TestARunCodeWhoseHarnessBindsAGroupRoleToAListComposes(t *testing.T) {
+	// The test reads the run's home once the run is over.
+	t.Cleanup(cmd.KeepRunHomes())
 	stackFile := func(s string) string {
 		return s + "  - name: review\n    source: {path: modules/review}\nworkflows:\n  hello:\n    access: write\n"
 	}

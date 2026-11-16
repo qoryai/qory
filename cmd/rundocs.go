@@ -522,6 +522,25 @@ func (r *codeRun) writeInputs(in string, q qoryInputs) (string, []byte, error) {
 	return path, data, f.Close()
 }
 
+// copyInputs writes data, the bytes of the run's inputs.json, to inputs.json in home,
+// the composed home, mode 0644 whatever the umask, so the run's user can read it as
+// $QORY_HARNESS_HOME/inputs.json. A file of that name in the home stops the run.
+func copyInputs(home string, data []byte) error {
+	f, err := os.OpenFile(filepath.Join(home, inputsFile), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+	if err != nil {
+		return err
+	}
+	if err := f.Chmod(0o644); err != nil {
+		f.Close()
+		return err
+	}
+	if _, err := f.Write(data); err != nil {
+		f.Close()
+		return err
+	}
+	return f.Close()
+}
+
 // withQoryMember is inputs, a JSON object, with the member [inputsMember] set to q added
 // after its last member. The bytes of inputs from its opening brace to its last member
 // stay as they came, and a nil map of q is written as {}.
