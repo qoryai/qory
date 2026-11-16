@@ -32,10 +32,13 @@ const branchMarker = "This line is from the work item's branch."
 // [change] makes on top of it, pushed to the work item's branch qory/<workItem> alone.
 // hello is [helloFiles], read before the first run moves the working directory. merge
 // pushes that commit to main, as a merge of the branch into the target's default branch
-// does.
+// does. A run from a run code that may write needs a wall, so forager.yaml has the fake
+// docker's.
 func branchRepository(t *testing.T, hello map[string]string, change func(work string)) (h *hostFetch, first, changed string, merge func()) {
 	t.Helper()
 	h = newHostFetch(t, "", "main")
+	docker, _ := fakeDocker(t)
+	walledBy(t, docker)
 	first = h.server.Repository(t, "acme/site", "main", map[string]string{
 		"qory.yaml":                       branchStack("10", ""),
 		"modules/hello/qory-module.yaml":  hello["examples/hello/modules/hello/qory-module.yaml"],

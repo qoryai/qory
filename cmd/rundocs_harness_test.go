@@ -216,9 +216,16 @@ func (c codeHarness) run(t *testing.T) harnessRun {
 	if c.nowhere != nil {
 		c.nowhere(&nowhere)
 	}
+	// A run from a run code starts only behind a wall: the fake docker's, with a home
+	// outside the checkout, unless before sets another wall or home.
+	docker, _ := fakeDocker(t)
+	walledBy(t, docker)
 	args := []string{"run", "--run-code-file", codeFile(t, g.code()), "--gateway", g.URL}
 	if c.before != nil {
 		args = append(args, c.before()...)
+	}
+	if !slices.Contains(args, "--home") {
+		args = append(args, "--home", filepath.Join(tempDir(t), "home"))
 	}
 	_, calls, restore := cmd.OpenNowhereWith(nowhere)
 	defer restore()
@@ -678,16 +685,18 @@ func TestARunCodeWithNoHarnessAnywhereStops(t *testing.T) {
 // a hidden harness document whose base, in the folder examples/greeter, sets no name:
 // the compose report records the base as base, not by its folder's name.
 func TestAHarnessDocumentWithNoNameInItsBaseIsTheBaseByAPhrase(t *testing.T) {
+	home := filepath.Join(tempDir(t), "home")
 	r := codeHarness{
 		folder: "examples/greeter",
 		stack:  func(s string) string { return strings.Replace(s, "\nname: hello\n", "\n", 1) },
+		before: func() []string { return []string{"--home", home} },
 	}.run(t)
 	if !r.joined {
 		t.Fatalf("%v (exit %d), want the join\n%s", r.err, cmd.ExitCode(r.err), r.out)
 	}
 	var reports []string
 	cache, _ := os.UserCacheDir()
-	for _, dir := range []string{r.runDir, ".", cache} {
+	for _, dir := range []string{r.runDir, ".", cache, filepath.Dir(home)} {
 		filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
 			if err == nil && strings.HasSuffix(path, "-report.json") {
 				reports = append(reports, path)
@@ -1047,7 +1056,7 @@ func TestAHarnessDocumentWhosePathLeadsOutStops(t *testing.T) {
 // pass qory's checks and the harness composes, so the session joins.
 func TestARunCodeWhoseHarnessBindsByKindComposes(t *testing.T) {
 	writes := func(s string) string { return s + "workflows:\n  hello:\n    access: write\n" }
-	r := runFromCode(t, writes, harnessBind(map[string]any{"commands": map[string]any{"greeting": "hello"}, "skills": map[string]any{"welcome": "greet"}}))
+	r := runFromCodeWith(t, behindAWall(t), nil, writes, harnessBind(map[string]any{"commands": map[string]any{"greeting": "hello"}, "skills": map[string]any{"welcome": "greet"}}))
 	if !errors.Is(r.err, cmd.ErrJoinedNowhere) || !r.joined {
 		t.Fatalf("%v (exit %d), want the join\n%s", r.err, cmd.ExitCode(r.err), r.out)
 	}
@@ -1097,7 +1106,7 @@ func TestARunCodeWhoseHarnessBindsAGroupRoleToAListComposes(t *testing.T) {
 			"Start code-reviewer, then give the result to review-lead."},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			r := runFromCodeLinks(t, nil, nil, stackFile, harnessBind(map[string]any{"agents": c.bind}), review, nil)
+			r := runFromCodeLinks(t, behindAWall(t), nil, stackFile, harnessBind(map[string]any{"agents": c.bind}), review, nil)
 			if !errors.Is(r.err, cmd.ErrJoinedNowhere) || !r.joined {
 				t.Fatalf("%v (exit %d), want the join\n%s", r.err, cmd.ExitCode(r.err), r.out)
 			}
