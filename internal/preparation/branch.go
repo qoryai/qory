@@ -34,8 +34,9 @@ const TargetRef = "refs/qory/target-version"
 type WorkBranch struct {
 	// Ref is the branch's name, the same in each repository: qory/<work item id>.
 	Ref string
-	// Version is the entries of the branch version the run read, nil with none. It may
-	// have repositories that the run does not list, and those are not fetched.
+	// Version is the entries of the branch version the run read, nil with none, with the
+	// commit of each repository that a [Push] of the run pushed. It may have repositories
+	// that the run does not list, and those are not fetched.
 	Version []branchformat.Repository
 	// Repositories is every repository of the run, the target first, set by [RunAt] and
 	// [Switch].
@@ -47,7 +48,7 @@ type WorkBranch struct {
 	// git status lists it, with the digest of its entry. [RecordSetup] sets it, and it is
 	// nil with no setup outside the agent's container.
 	setupChanges map[string]map[string]string
-	// pushed is each repository [Push] pushed, as a line shows it.
+	// pushed is each repository the last [Push] pushed, as a line shows it.
 	pushed []string
 }
 
@@ -57,7 +58,7 @@ func (b *WorkBranch) VersionWays() string {
 	return fmt.Sprintf(textVersionWays, b.Ref, b.PushedPaths(), shownPath(b.system))
 }
 
-// PushedPaths is each repository [Push] pushed, as one phrase of a line.
+// PushedPaths is each repository the last [Push] pushed, as one phrase of a line.
 func (b *WorkBranch) PushedPaths() string { return strings.Join(b.pushed, " and ") }
 
 // WorkRepository is one repository of a run on its [WorkBranch].
@@ -66,7 +67,8 @@ type WorkRepository struct {
 	Path string
 	// Dir is the repository's folder relative to the working folder: "." for the target.
 	Dir string
-	// Commit is HEAD after the checkout: a run's new commits are the ones past it.
+	// Commit is HEAD after the checkout, and after a [Push] that pushed the repository the
+	// commit it pushed: a run's new commits are the ones past it.
 	Commit string
 }
 

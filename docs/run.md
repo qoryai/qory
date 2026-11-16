@@ -26,11 +26,12 @@ such as `qory run: composed 42 entries from 3 modules for claude`. `-f`/`--file`
 `qory.yaml` and `harness.yaml`. A compose that fails stops the run before the agent
 starts, with the exit status of `qory harness compose`. The run's record shows that the
 run failed with no session started (`no_session`), and qory prints the path of the run's
-record after the error line. Four stops of a run from a run code, right after the
+record after the error line. Five stops of a run from a run code, right after the
 compose, close with their reason in place of `no_session`: `workflow_not_in_harness` (see
-[What the run takes from the response](#what-the-run-takes-from-the-response)), or
+[What the run takes from the response](#what-the-run-takes-from-the-response)),
 `read_needs_wall`, `read_needs_setup_outside` or `read_needs_no_nested_docker` (see [Read
-workflows](#read-workflows)). A read run whose setup container was not removed stops after
+workflows](#read-workflows)), or `write_needs_wall` for a run that may write and has no
+wall. A read run whose setup container was not removed stops after
 the setup and closes with `read_needs_setup_removed`. In a folder that is not a git
 working tree, `qory run` starts only with the home outside the folder, as `qory harness
 compose` composes only then.
@@ -683,11 +684,13 @@ If you start the agent yourself on your machine, a run without a wall is fine. T
 agent you start without qory can reach your credentials too.
 
 If nobody watches the run, such as a run that a work item or a schedule starts, run it
-with a wall. Text the agent reads, such as an issue, a web page or a file, can contain
-instructions that make the agent act against you (prompt injection). Without a wall, such
-an agent can read every credential stored on this machine, and a program that ignores the
-proxy reaches any host. To run with a wall, see [Behind a wall](#behind-a-wall) and [The
-wall](#the-wall).
+with a wall. A run from a run code needs one: with no wall, it stops before the agent
+starts, with `read_needs_wall` or `write_needs_wall` (see [Read
+workflows](#read-workflows)). Text the agent reads, such as an issue, a web page or a
+file, can contain instructions that make the agent act against you (prompt injection).
+Without a wall, such an agent can read every credential stored on this machine, and a
+program that ignores the proxy reaches any host. To run with a wall, see [Behind a
+wall](#behind-a-wall) and [The wall](#the-wall).
 
 ## forager.yaml
 
@@ -1676,7 +1679,9 @@ exit 1, and qory closes it `failed` with `read_needs_wall`, `read_needs_setup_ou
 `read_needs_no_nested_docker`. A writable mount that contains the checkout, lies inside it
 or links to it also stops the run, later, and the agent does not start. qory removes the
 setup container of such a run before the agent starts, and closes the run `failed` with
-`read_needs_setup_removed` when the removal fails. See [Read workflows](#read-workflows).
+`read_needs_setup_removed` when the removal fails. Any other run from a run code may write
+the checkout: with no wall it stops after the compose, exit 1, and qory closes it `failed`
+with `write_needs_wall`. See [Read workflows](#read-workflows).
 
 The documents of a run with a target may set `target_version`: the version at which Qory
 Apiary checked the target for a harness file. When the target's `system` is
@@ -1889,6 +1894,11 @@ These stop it after the redemption, exit 1. The code is used, so each needs a ne
   and a run with no wall mounts nothing read-only (read_needs_wall); the code is used`,
   after the compose, for a read run with no wall, which closes the run with the reason
   `read_needs_wall`
+- `run this workflow with a wall: this run of workflow <workflow> writes to the checkout,
+  and a run with no wall runs the agent as this machine's user (write_needs_wall); the
+  code is used`, after the compose, for a run that is not a read run and has no wall,
+  which closes the run with the reason `write_needs_wall`; see [Read
+  workflows](#read-workflows)
 - `set wall.setup to outside in forager.yaml, or remove it: this run of workflow
   <workflow> only reads the checkout, and setup inside runs in the agent's container,
   which sees the checkout read-only (read_needs_setup_outside); the code is used`, after
@@ -2161,17 +2171,14 @@ limits. Each error starts with its fix:
   zero byte: `make the harness files at most 16777216 bytes in all: with <path> they
   have <size>`.
 
-When `harness_hidden` is `false`, the home of a run without a wall keeps its links to
-the modules, as the home of a run started without a run code does.
-
 ### The push step of a write run
 
 A write run of a work item ends with a push step: qory commits what the agent left, pushes
 it to the branch `qory/<work item id>`, and stores a new version of the artifact `branch`.
 The next run in the same stage starts at that commit. A run of another stage starts at the
 version a gate approved when its stage lists `branch` as an input, and at that commit
-otherwise. The step runs after the agent exits and before the run closes. A setup container
-is gone by then: qory removes it before the step, in the wall step `remove the setup
+otherwise. The step runs after the run's session, once the agent exited, and before the
+run closes. A setup container is gone by then: qory removes it before the step, in the wall step `remove the setup
 container`, so no process in it writes the working folder after the check. Its kind is `push` and its name is `push qory/<work item
 id> to <system>/<path>`, followed by ` and 1 further repository` or ` and <n> further
 repositories` for a run with more repositories.
@@ -2959,6 +2966,27 @@ With a home in the checkout, `qory harness remove` deletes the directory with th
 
 The client sends a POST once. If the response is lost, the version may be stored: read the
 artifact index with `qory artifact pull` before you push again.
+
+## The route to qory
+
+Each run has a route from its session to `qory run`. A program in the session sends a plain
+HTTP request to the URL in `QORY_HOST_URL`, `http://host.qory.invalid`, through
+`HTTP_PROXY`, with any method and path. The run's proxy hands the request to `qory run`,
+walled or not, with the number of the session that sent it. The session's setup commands
+with `wall.setup: inside` get `QORY_HOST_URL` too; the setup container of `wall.setup:
+outside` gets neither the variable nor the route.
+
+qory serves no path on the route. Each answer is JSON, `{"error": <code>, "message": <text>}`:
+
+| Status | `error` | When |
+|---|---|---|
+| `404` | `not_found` | a request of the session that runs |
+| `503` | `session_not_running` | a request of another session of the run, or one with no valid session number |
+
+The run's proxy answers some requests itself, in the same form, such as `503` for a request
+outside a session's launch, `413` for a body over 1 MiB, and `429` for more than 10 requests
+of the run in a second. Each request of the route is a `dev.qory.run.egress` event with the
+channel `qory_host`.
 
 ## Credentials the agent never has
 
@@ -4259,6 +4287,19 @@ start the run from a folder that does not contain your home folder or qory's sta
 
 A run of a workflow from a run code where neither value is `read`, a run given a run key
 with no run code, and a run you start yourself see the checkout writable.
+
+A run of a workflow from a run code where neither value is `read` needs a wall: without
+one, the agent runs as this machine's user and can change every file that user can. Such
+a run with no wall stops after the compose, before the image's fetch, the setup and the
+agent, exit 1. qory closes the run `failed` with the reason `write_needs_wall`, in place
+of `no_session`:
+
+```
+run this workflow with a wall: this run of workflow <workflow> writes to the checkout, and a run with no wall runs the agent as this machine's user (write_needs_wall); the code is used
+```
+
+A run given a run key with no run code, and a run you start yourself, have no run code
+and so no access: neither stops when the machine has no wall.
 
 A walled write run from a run code gets no copy and binds the checkout itself. It stops after
 the compose, exit 2, when its checkout or working folder is your home folder or qory's state
