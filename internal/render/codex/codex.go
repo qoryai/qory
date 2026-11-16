@@ -145,7 +145,8 @@ func keepsShell(front map[string]any) bool {
 		return true
 	}
 	for _, t := range module.ToolsOf(front) {
-		if name, _, _ := strings.Cut(t, "("); name == "Bash" || name == "PowerShell" {
+		name, _, _ := strings.Cut(t, "(")
+		if name = strings.TrimSpace(name); name == "Bash" || name == "PowerShell" {
 			return true
 		}
 	}
