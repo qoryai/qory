@@ -119,6 +119,8 @@ func TestTheLoadOfPushChecksStopsWithItsLine(t *testing.T) {
 	// The same, with the next selection on an engine whose id cannot be read.
 	noIDEngine := &wall.Docker{Command: engineScript(t, "a", "none")}
 	noIDEngine.Engine(context.Background())
+	// An engine that answers every command with exit 0, as one that has every image.
+	present, _ := loggingEngine(t, "")
 	// An engine that does not have the image registry.example/agent:1.
 	noImage := filepath.Join(t.TempDir(), "docker")
 	if err := os.WriteFile(noImage, []byte("#!/bin/sh\ncase \"$*\" in\n\"image inspect --format {{.Id}} registry.example/agent:1\")\n\techo 'Error response from daemon: No such image: registry.example/agent:1' >&2\n\texit 1 ;;\nesac\n"), 0o755); err != nil {
@@ -160,6 +162,8 @@ func TestTheLoadOfPushChecksStopsWithItsLine(t *testing.T) {
 		{
 			name:         "no folder",
 			run:          runAPIOnly{base: goodAPI, dir: gone},
+			docker:       &wall.Docker{Command: present},
+			image:        "registry.example/agent:1",
 			controlPlane: true,
 			want:         "Check " + folder + ", and run again. Making the folder of the push checks' files failed: " + folderCause + ".",
 			fromCode:     "Check " + folder + ", then take the work item in again in Qory Apiary: making the folder of the push checks' files failed: " + folderCause + "; the code is used",
@@ -285,10 +289,16 @@ func TestACheckImageThatIsNoReferenceStops(t *testing.T) {
 		{image: "--privileged", shown: `"--privileged"`},
 		{runImage: "-v/:/host", shown: `"-v/:/host"`},
 	} {
-		for fromCode, want := range map[bool]string{
+		lines := map[bool]string{
 			false: "Set wall.image or --image to an image reference, and run again. Push checks cannot start from " + c.shown + ": a reference starts with a letter or a digit and has only letters, digits and . _ / : @ -.",
 			true:  "Set wall.image or --image to an image reference, then take the work item in again in Qory Apiary: push checks cannot start from " + c.shown + "; the code is used",
-		} {
+		}
+		if c.image == "" {
+			// A run from a run code with no default image stops before its run's image is
+			// read: see TestARunCodeWithNoDefaultImageStops.
+			delete(lines, true)
+		}
+		for fromCode, want := range lines {
 			docker, log := loggingEngine(t, "")
 			spec := &runSpec{}
 			spec.Wall, spec.Image = &wall.Docker{Command: docker}, c.image
@@ -301,6 +311,31 @@ func TestACheckImageThatIsNoReferenceStops(t *testing.T) {
 				t.Errorf("%q: the engine got the value:\n%s", c.shown, data)
 			}
 		}
+	}
+}
+
+// TestARunCodeWithNoDefaultImageStops is a run from a run code with push checks and
+// neither --image nor wall.image, whose run's image its policy from the server selects:
+// the load stops with the fix line before any command of the engine runs, since that
+// image may be built from the repository. A run with no run code runs the checks in the
+// run's image.
+func TestARunCodeWithNoDefaultImageStops(t *testing.T) {
+	stubChecks(t)
+	docker, log := loggingEngine(t, "")
+	spec := &runSpec{}
+	spec.Wall = &wall.Docker{Command: docker}
+	run := imageAPI{runAPIOnly: runAPIOnly{base: "http://run-api.qory.invalid/v1/runs/r1", dir: t.TempDir()}, ref: "registry.example/devcontainer:1"}
+	checker, err := pushChecker(context.Background(), run, t.TempDir(), "r1", spec, true, true)
+	want := "Set wall.image in forager.yaml, then take the work item in again in Qory Apiary: push checks run in the wall's default image; the code is used"
+	if checker != nil || err == nil || err.Error() != want {
+		t.Fatalf("from a run code: %v, %v, want %q", checker, err, want)
+	}
+	if data, _ := os.ReadFile(log); strings.Contains(string(data), "devcontainer") {
+		t.Errorf("the engine got the run's image:\n%s", data)
+	}
+	checker, err = pushChecker(context.Background(), run, t.TempDir(), "r1", spec, true, false)
+	if err != nil || checker == nil || checker.Image != "registry.example/devcontainer:1" {
+		t.Fatalf("with no run code: %v, %v, want a checker of registry.example/devcontainer:1", checker, err)
 	}
 }
 

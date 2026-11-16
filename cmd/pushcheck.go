@@ -53,6 +53,7 @@ const (
 	textChecksEngineFromCode    = "Take the work item in again in Qory Apiary, and do not switch the engine while that run starts: the push checks would run on the engine %s, and the run's containers are on the engine %s" + codeUsed
 	textChecksNoFolderFromCode  = "Check %s, then take the work item in again in Qory Apiary: making the folder of the push checks' files failed: %s" + codeUsed
 	textChecksBadImageFromCode  = "Set wall.image or --image to an image reference, then take the work item in again in Qory Apiary: push checks cannot start from %s" + codeUsed
+	textChecksNoDefaultFromCode = "Set wall.image in forager.yaml, then take the work item in again in Qory Apiary: push checks run in the wall's default image" + codeUsed
 	textChecksNoImageFromCode   = "Pull the wall's default image, then take the work item in again in Qory Apiary: push checks run in it, and the engine does not have the image %s" + codeUsed
 	textChecksNotSetFromCode    = "Take the work item in again in Qory Apiary: turning on the push checks for the POSTs from behind the wall failed, so the run stopped before the setup: %s" + codeUsed
 	textChecksUnreadFromCode    = "Take the work item in again in Qory Apiary, so that the new run composes the harness again: the push checks in %s could not be read: %s" + codeUsed
@@ -192,6 +193,11 @@ func pushChecker(ctx context.Context, run openedRun, home, runID string, spec *r
 		// The wall's default: the uid:gid of this process.
 		user = fmt.Sprintf("%d:%d", os.Getuid(), os.Getgid())
 	}
+	// A run from a run code runs its checks in the wall's default image alone: its
+	// policy, from the server, may select an image built from the repository.
+	if fromCode && spec.Image == "" {
+		return nil, errors.New(textChecksNoDefaultFromCode)
+	}
 	// The image goes on the engine's command line: a value of another shape than a
 	// reference, such as one that starts with -, stops the run before any command gets it.
 	image := checkImage(run, spec)
@@ -239,9 +245,10 @@ func pushChecker(ctx context.Context, run openedRun, home, runID string, spec *r
 // from: the wall's default image, --image or wall.image, which Forager reads as the name
 // of an image of wall.images first and as a reference otherwise. A change to the
 // repository, such as one to its .devcontainer/ that a prebuilt image is built from,
-// changes the run's image and not this one, so it cannot turn the checks off. A run with
-// no default image, which a person's machine allows when the run's policy selects the
-// image, runs them in the run's image.
+// changes the run's image and not this one, so it cannot turn the checks off. A run on a
+// person's machine, with no run code and no default image, which its policy from
+// --policy allows, runs them in the run's image; [pushChecker] stops a run from a run
+// code with no default image before it calls this.
 func checkImage(run openedRun, spec *runSpec) string {
 	if spec.Image == "" {
 		return run.Image().Ref
