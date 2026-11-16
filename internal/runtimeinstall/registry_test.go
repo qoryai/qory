@@ -35,7 +35,7 @@ func (f *fromRegistry) install(t *testing.T, arch string) (runtimeinstall.Instal
 		t.Fatal(err)
 	}
 	return runtimeinstall.Install(context.Background(), runtimeinstall.Options{
-		Fetch: runtimeinstall.RegistryFetch(client, f.reg.Host(), arch), Runtime: "claude", Folder: f.folder,
+		Fetch: runtimeinstall.RegistryFetch(client, f.reg.Host(), arch, f.reg.Instance()), Runtime: "claude", Folder: f.folder,
 	})
 }
 
@@ -231,7 +231,7 @@ func TestAnotherStatusIsNotRetried(t *testing.T) {
 	reg := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusInternalServerError) }))
 	t.Cleanup(reg.Close)
 	_, err := runtimeinstall.Install(context.Background(), runtimeinstall.Options{
-		Fetch:   runtimeinstall.RegistryFetch(http.DefaultClient, strings.TrimPrefix(reg.URL, "http://"), "amd64"),
+		Fetch:   runtimeinstall.RegistryFetch(http.DefaultClient, strings.TrimPrefix(reg.URL, "http://"), "amd64", ""),
 		Runtime: "claude", Folder: t.TempDir(),
 	})
 	if err == nil || !strings.HasPrefix(err.Error(), "check that the run's proxy reaches the registry at ") || len(*waits) != 0 {
@@ -239,24 +239,56 @@ func TestAnotherStatusIsNotRetried(t *testing.T) {
 	}
 }
 
-// TestATokenRealmElsewhereIsRefused has the registry's challenge point at a realm that
-// is not on the registry's host with the registry's scheme: another host at the path
-// /registry/token or another path, and the registry's host and port over https while the
-// registry is on http. qory asks no realm for a token, and the error's first line is the
-// fix.
+// TestATokenRealmElsewhereIsRefused has the registry's challenge point at a realm. The
+// instance is Qory Apiary's address, http://localhost:<port>: qory takes the realm on the
+// instance's scheme and host with the path /registry/token, though it is not the
+// registry's host, and asks no other realm for a token. The refused realms are the
+// registry's host, another host, http when the instance is https, another port, another
+// path, and any realm when the run has no address of the instance.
 func TestATokenRealmElsewhereIsRefused(t *testing.T) {
+	t.Run("the instance's route is taken", func(t *testing.T) {
+		f := newFromRegistry(t)
+		_, port, _ := strings.Cut(f.reg.Host(), ":")
+		f.reg.RealmHost("localhost:" + port)
+		f.reg.PublishPlain("2.1.320")
+		// The stand-in proxy forwards only to loopback addresses, so the install is direct.
+		got, err := runtimeinstall.Install(context.Background(), runtimeinstall.Options{
+			Fetch: runtimeinstall.RegistryFetch(http.DefaultClient, f.reg.Host(), "amd64", f.reg.Instance()), Runtime: "claude", Folder: f.folder,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		got.Release()
+		if f.reg.Instance() != "http://localhost:"+port {
+			t.Fatalf("the instance is %s", f.reg.Instance())
+		}
+	})
 	for _, c := range []struct {
-		name  string
-		realm func(registry, other string) string
+		name     string
+		instance string
+		realm    func(registry, port string) string
+		want     string
 	}{
-		{"another host", func(_, other string) string { return "http://" + other + "/api/token" }},
-		{"another host at the token route", func(_, other string) string { return "http://" + other + "/registry/token" }},
-		{"the registry's host over https", func(registry, _ string) string { return "https://" + registry + "/registry/token" }},
+		{"the registry's host", "http://localhost:%PORT%", func(registry, _ string) string { return "http://" + registry + "/registry/token" },
+			"ask the instance admin to put the registry's token realm at http://localhost:%PORT%/registry/token\nIt is http://%REGISTRY%/registry/token"},
+		{"another host", "http://localhost:%PORT%", func(_, port string) string { return "http://127.0.0.1:" + port + "/registry/token" },
+			"ask the instance admin to put the registry's token realm at http://localhost:%PORT%/registry/token\nIt is http://127.0.0.1:%PORT%/registry/token"},
+		{"another port", "http://localhost:%PORT%", func(_, _ string) string { return "http://localhost:1/registry/token" },
+			"ask the instance admin to put the registry's token realm at http://localhost:%PORT%/registry/token\nIt is http://localhost:1/registry/token"},
+		{"http when the instance is https", "https://localhost:%PORT%", func(_, port string) string { return "http://localhost:" + port + "/registry/token" },
+			"ask the instance admin to put the registry's token realm at https://localhost:%PORT%/registry/token\nIt is http://localhost:%PORT%/registry/token"},
+		{"another path", "http://localhost:%PORT%", func(_, port string) string { return "http://localhost:" + port + "/api/token" },
+			"ask the instance admin to put the registry's token realm at http://localhost:%PORT%/registry/token\nIt is http://localhost:%PORT%/api/token"},
+		{"a longer path", "http://localhost:%PORT%", func(_, port string) string { return "http://localhost:" + port + "/registry/token/x" },
+			"ask the instance admin to put the registry's token realm at http://localhost:%PORT%/registry/token\nIt is http://localhost:%PORT%/registry/token/x"},
+		{"no address of the instance", "", func(_, port string) string { return "http://localhost:" + port + "/registry/token" },
+			"give this run the address of Qory Apiary, whose token route is the registry's realm\nThe realm is http://localhost:%PORT%/registry/token, and the run has no address to check it against."},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			asked := false
 			other := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { asked = true }))
 			t.Cleanup(other.Close)
+			_, port, _ := strings.Cut(strings.TrimPrefix(other.URL, "http://"), ":")
 			var realm string
 			reg := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				w.Header().Set("WWW-Authenticate", `Bearer realm="`+realm+`"`)
@@ -264,14 +296,13 @@ func TestATokenRealmElsewhereIsRefused(t *testing.T) {
 			}))
 			t.Cleanup(reg.Close)
 			host := strings.TrimPrefix(reg.URL, "http://")
-			_, port, _ := strings.Cut(strings.TrimPrefix(other.URL, "http://"), ":")
-			realm = c.realm(host, "localhost:"+port)
+			realm = c.realm(host, port)
+			fill := strings.NewReplacer("%PORT%", port, "%REGISTRY%", host)
 			_, err := runtimeinstall.Install(context.Background(), runtimeinstall.Options{
-				Fetch:   runtimeinstall.RegistryFetch(http.DefaultClient, host, "amd64"),
+				Fetch:   runtimeinstall.RegistryFetch(http.DefaultClient, host, "amd64", fill.Replace(c.instance)),
 				Runtime: "claude", Folder: t.TempDir(),
 			})
-			want := "ask the instance admin to put the registry's token realm on http://" + host + "\nIt is " + realm
-			if err == nil || err.Error() != want || asked {
+			if want := fill.Replace(c.want); err == nil || err.Error() != want || asked {
 				t.Fatalf("err = %v, asked = %v; want %q and the realm not asked", err, asked, want)
 			}
 		})
@@ -289,7 +320,7 @@ func TestAProxyThatRefusesIsNotRetried(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = runtimeinstall.Install(context.Background(), runtimeinstall.Options{
-		Fetch: runtimeinstall.RegistryFetch(client, f.reg.Host(), "amd64"), Runtime: "claude", Folder: f.folder,
+		Fetch: runtimeinstall.RegistryFetch(client, f.reg.Host(), "amd64", f.reg.Instance()), Runtime: "claude", Folder: f.folder,
 	})
 	if err == nil || !strings.HasPrefix(err.Error(), "check that the run's proxy reaches the registry at "+f.reg.Host()) || f.proxy.Refusals() == 0 || len(*waits) != 0 {
 		t.Fatalf("err = %v, refusals = %d, waits = %v", err, f.proxy.Refusals(), *waits)
@@ -345,7 +376,7 @@ func TestARegistryThatNeverRespondsEndsWithTheCause(t *testing.T) {
 	host := strings.TrimPrefix(gone.URL, "http://")
 	gone.Close()
 	_, err := runtimeinstall.Install(context.Background(), runtimeinstall.Options{
-		Fetch:   runtimeinstall.RegistryFetch(http.DefaultClient, host, "amd64"),
+		Fetch:   runtimeinstall.RegistryFetch(http.DefaultClient, host, "amd64", ""),
 		Runtime: "claude", Folder: t.TempDir(),
 	})
 	if err == nil {
@@ -372,7 +403,7 @@ func TestAConnectTheProxyRefusesIsNotRetried(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = runtimeinstall.Install(context.Background(), runtimeinstall.Options{
-		Fetch:   runtimeinstall.RegistryFetch(client, "registry.example", "amd64"),
+		Fetch:   runtimeinstall.RegistryFetch(client, "registry.example", "amd64", ""),
 		Runtime: "claude", Folder: t.TempDir(),
 	})
 	if err == nil || !strings.HasPrefix(err.Error(), "check that the run's proxy reaches the registry at registry.example\n") ||

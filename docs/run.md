@@ -844,9 +844,23 @@ The registry's cache had no shared/runtimes/claude:newest after 25m0s: the regis
 ```
 
 When the registry returns 401 with a Bearer challenge, `qory run` gets a token from the
-challenge's realm, which must be on the registry's host with the registry's scheme. A
-realm elsewhere stops the run with the fix `ask the instance admin to put the registry's
-token realm on <scheme>://<host>`. Any other status stops the run at once. A registry whose cache never held Claude Code
+challenge's realm. The realm must be the token route of the Qory Apiary instance that
+the run uses: the scheme, host and port of `gateway.server.url` in `forager.yaml`, then
+the path `/registry/token`. The registry's host is never the realm, since the instance
+refuses to start with the same host for both. A realm with another scheme, host, port or
+path stops the run with:
+
+```text
+qory run: ask the instance admin to put the registry's token realm at https://apiary.example.com/registry/token
+It is https://registry.example.com/registry/token
+```
+
+A run with no `gateway.server.url` in its `forager.yaml` has no address to check the
+realm against, and takes no realm. Its install stops with `give this run the address of
+Qory Apiary, whose token route is the registry's realm`, and the realm on the second
+line. A run that starts from a run key, and a run that `qory run pool` starts from a run
+code, have no `gateway.server` section in the `forager.yaml` they read. Any other status
+stops the run at once. A registry whose cache never held Claude Code
 stops the run with:
 
 ```text

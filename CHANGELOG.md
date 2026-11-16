@@ -32,7 +32,8 @@ release may change what an existing document does, and states it under Upgrading
   60 seconds for the next byte of a body. A run with no registry whose policy does not
   allow `registry.npmjs.org` stops with the fix first. The run-code file of a pool has
   the lines `registry <host>` and `runtimes <folder>`, and `qory run` stops for a host that
-  is not letters, digits, `.` and `-` with an optional port. See The runtime's program in
+  is not letters, digits, `.` and `-` with an optional port. The registry's token realm
+  must be `/registry/token` on the scheme, host and port of `gateway.server.url`. See The runtime's program in
   `docs/run.md`.
 - A run of a work item works on the branch `qory/<work item id>`, at the commit of the
   artifact `branch` that its stage starts from. The harness still comes from

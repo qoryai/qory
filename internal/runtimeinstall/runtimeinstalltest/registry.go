@@ -34,6 +34,7 @@ type Registry struct {
 	paths       []string
 	unavailable int
 	retryAfter  string
+	realmHost   string
 }
 
 // StartRegistry starts a registry on loopback until the test ends.
@@ -42,6 +43,26 @@ func StartRegistry(t *testing.T) *Registry {
 	r.srv = httptest.NewServer(http.HandlerFunc(r.serve))
 	t.Cleanup(r.srv.Close)
 	return r
+}
+
+// RealmHost makes the Bearer challenge point at the token route on host, a host and a
+// port that reach this stub, such as localhost with the port of [Registry.Host], in place
+// of the registry's host; "" restores it.
+func (r *Registry) RealmHost(host string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.realmHost = host
+}
+
+// Instance is the address of the stub's Qory Apiary instance, whose token route the
+// challenge points at: http and the realm's host and port.
+func (r *Registry) Instance() string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.realmHost != "" {
+		return "http://" + r.realmHost
+	}
+	return r.srv.URL
 }
 
 // Host is the registry's host and port.
@@ -68,7 +89,11 @@ func (r *Registry) serve(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	if req.Header.Get("Authorization") != "Bearer "+Token {
-		w.Header().Set("WWW-Authenticate", `Bearer realm="`+r.srv.URL+`/registry/token",service="stub-registry"`)
+		realm := r.srv.URL
+		if r.realmHost != "" {
+			realm = "http://" + r.realmHost
+		}
+		w.Header().Set("WWW-Authenticate", `Bearer realm="`+realm+`/registry/token",service="stub-registry"`)
 		w.WriteHeader(http.StatusUnauthorized)
 		return
 	}

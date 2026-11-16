@@ -12,6 +12,7 @@ import (
 	"github.com/qoryai/forager/session"
 
 	"github.com/qoryai/qory/cmd"
+	"github.com/qoryai/qory/internal/config"
 	"github.com/qoryai/qory/internal/proxygit/proxygittest"
 	rt "github.com/qoryai/qory/internal/runtimeinstall/runtimeinstalltest"
 )
@@ -38,6 +39,9 @@ type installSetup struct {
 	npm    *rt.Npm
 	proxy  *rt.Proxy
 	walled bool
+	// noInstance leaves the run with no address of Qory Apiary; otherwise reg's
+	// instance is the run's.
+	noInstance bool
 }
 
 // runInstalling runs qory run claude with a run key as s sets it up, with no
@@ -52,6 +56,9 @@ func runInstalling(t *testing.T, s installSetup) installRun {
 		npmURL = s.npm.URL()
 	}
 	defer cmd.SetNpmRegistry(npmURL)()
+	if s.reg != nil && !s.noInstance {
+		defer cmd.SetInstanceAddress(func(*config.Forager) string { return s.reg.Instance() })()
+	}
 	h := newHostFetch(t, "", "main")
 	section := ""
 	if s.walled {
@@ -218,9 +225,12 @@ func TestATarballThatDoesNotMatchItsChecksumEndsTheRun(t *testing.T) {
 // as qory run pool writes it, with proxy as the run's host proxy, and no repositories,
 // at the first commit of a version repository, as
 // TestARunCodeAtATargetVersionWithNoRepositoryRunsOn runs it.
-func runCodeInstalling(t *testing.T, lines string, proxy *rt.Proxy) (string, error) {
+func runCodeInstalling(t *testing.T, lines string, proxy *rt.Proxy, instance string) (string, error) {
 	t.Helper()
 	defer cmd.SetInstallRuntimes(true)()
+	if instance != "" {
+		defer cmd.SetInstanceAddress(func(*config.Forager) string { return instance })()
+	}
 	defer cmd.SetNpmRegistry(unreachableNpm)()
 	h, first, _, files := versionRepository(t)
 	for name, content := range files {
@@ -260,7 +270,7 @@ func TestAPoolsRunsShareOneRuntimesFolder(t *testing.T) {
 	for i := range 2 {
 		// Each run sets up its folders from the package's folder.
 		t.Chdir(pkg)
-		out, err := runCodeInstalling(t, lines, proxy)
+		out, err := runCodeInstalling(t, lines, proxy, reg.Instance())
 		if !errors.Is(err, cmd.ErrJoinedNowhere) || !strings.Contains(out, "qory run: installed claude 2.1.320\n") {
 			t.Fatalf("run %d: %v\n%s", i+1, err, out)
 		}
@@ -295,6 +305,47 @@ func TestARunCodeFileTakesTheMachineLines(t *testing.T) {
 		}
 		if first, _, _ := strings.Cut(want, "\n"); len(first) > 100 {
 			t.Errorf("the first line has %d characters, want at most 100: %s", len(first), first)
+		}
+	}
+}
+
+// TestARunWithNoAddressOfQoryApiaryStopsAtTheRegistrysRealm runs from a run key, whose
+// run has no gateway.server in forager.yaml, with a pool.registry that returns a 401
+// challenge: qory has no address of Qory Apiary to check the realm against, so it takes
+// no realm, and the run's first line is the fix.
+func TestARunWithNoAddressOfQoryApiaryStopsAtTheRegistrysRealm(t *testing.T) {
+	reg := rt.StartRegistry(t)
+	reg.PublishPlain("2.1.320")
+	r := runInstalling(t, installSetup{reg: reg, proxy: rt.StartProxy(t), walled: true, noInstance: true})
+	want := "qory run: give this run the address of Qory Apiary, whose token route is the registry's realm\n" +
+		"The realm is " + reg.Instance() + "/registry/token, and the run has no address to check it against.\n"
+	if len(r.joins) != 0 || cmd.ExitCode(r.err) != 1 || !strings.Contains(r.out, want) || reg.BlobGets() != 0 {
+		t.Fatalf("%d joins, %v (exit %d), %d blobs\n%s", len(r.joins), r.err, cmd.ExitCode(r.err), reg.BlobGets(), r.out)
+	}
+}
+
+// TestAPoolsRunHasNoAddressOfQoryApiary runs from the run code file of qory run pool,
+// whose lines are the registry and the runtimes folder: the run has no server in its
+// forager.yaml, so the install stops at the registry's realm with the fix first.
+func TestAPoolsRunHasNoAddressOfQoryApiary(t *testing.T) {
+	reg, proxy := rt.StartRegistry(t), rt.StartProxy(t)
+	reg.PublishPlain("2.1.320")
+	lines := "registry " + reg.Host() + "\nruntimes " + filepath.Join(t.TempDir(), "runtimes") + "\n"
+	_, err := runCodeInstalling(t, lines, proxy, "")
+	if err == nil || !strings.HasPrefix(err.Error(), "give this run the address of Qory Apiary, whose token route is the registry's realm\n") || reg.BlobGets() != 0 {
+		t.Fatalf("err = %v, %d blobs", err, reg.BlobGets())
+	}
+}
+
+// TestTheInstanceAddressIsTheServersURL reads the address that a run checks the
+// registry's realm against: gateway.server.url, and none without a server.
+func TestTheInstanceAddressIsTheServersURL(t *testing.T) {
+	if got := cmd.InstanceAddress(&config.Forager{Server: &config.ForagerServer{URL: "https://apiary.example.com"}}); got != "https://apiary.example.com" {
+		t.Errorf("the address is %q", got)
+	}
+	for _, r := range []*config.Forager{nil, {}} {
+		if got := cmd.InstanceAddress(r); got != "" {
+			t.Errorf("the address is %q, want none", got)
 		}
 	}
 }

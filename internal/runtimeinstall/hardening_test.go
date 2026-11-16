@@ -136,7 +136,7 @@ func TestADirectClientFollowsNoRedirect(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 	_, err := runtimeinstall.Install(context.Background(), runtimeinstall.Options{
-		Fetch:   runtimeinstall.RegistryFetch(runtimeinstall.DirectClient(), strings.TrimPrefix(srv.URL, "http://"), "amd64"),
+		Fetch:   runtimeinstall.RegistryFetch(runtimeinstall.DirectClient(), strings.TrimPrefix(srv.URL, "http://"), "amd64", srv.URL),
 		Runtime: "claude", Folder: t.TempDir(),
 	})
 	if err == nil || !strings.Contains(err.Error(), "returned 302") {
@@ -262,7 +262,7 @@ func TestAResponseThatStopsSendingEndsTheInstall(t *testing.T) {
 			stall()
 			return true
 		}, func(u string) runtimeinstall.Fetch {
-			return runtimeinstall.RegistryFetch(http.DefaultClient, strings.TrimPrefix(u, "http://"), "amd64")
+			return runtimeinstall.RegistryFetch(http.DefaultClient, strings.TrimPrefix(u, "http://"), "amd64", "")
 		}, "check that the run's proxy reaches the registry at "},
 	} {
 		t.Run(c.name, func(t *testing.T) {

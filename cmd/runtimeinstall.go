@@ -31,11 +31,13 @@ const installedRuntime = "claude"
 // runtime, did not open, with the runtime and Forager's error after it.
 const textNoRuntimeProxy = "run again: the run's host proxy, through which qory installs %s, did not open: %s"
 
-// The seams of the install that a test replaces: the npm registry, and whether a run
-// installs at all, which the tests of other parts of qory run turn off.
+// The seams of the install that a test replaces: the npm registry, whether a run
+// installs at all, which the tests of other parts of qory run turn off, and where the
+// run reads the address of its Qory Apiary instance.
 var (
 	npmRegistry     = runtimeinstall.NpmRegistry
 	installRuntimes = true
+	instanceOf      = instanceAddress
 )
 
 // runtimeRegistry is the instance's registry, as the runtime's install reads it from
@@ -46,6 +48,17 @@ func runtimeRegistry(r *config.Forager) string {
 		return ""
 	}
 	return runtimeinstall.RegistryHost(r.Pool.Registry)
+}
+
+// instanceAddress is the address of the Qory Apiary instance that the run uses, the URL
+// of gateway.server in forager.yaml; "" for a run with no server there, such as a run of
+// a pool, whose runs' forager.yaml has no server section, and a run from a run key. The
+// registry's token realm is checked against it, see [runtimeinstall.RegistryFetch].
+func instanceAddress(r *config.Forager) string {
+	if r == nil || r.Server == nil {
+		return ""
+	}
+	return r.Server.URL
 }
 
 // installRuntime installs the program of runtime, the runtime of the run's session, for
@@ -84,7 +97,7 @@ func installRuntime(ctx context.Context, run openedRun, r *config.Forager, machi
 	}
 	fetch := runtimeinstall.NpmFetch(client, npmRegistry, goruntime.GOARCH)
 	if registry != "" {
-		fetch = runtimeinstall.RegistryFetch(client, registry, goruntime.GOARCH)
+		fetch = runtimeinstall.RegistryFetch(client, registry, goruntime.GOARCH, instanceOf(r))
 	}
 	in, err := runtimeinstall.Install(ctx, runtimeinstall.Options{Fetch: fetch, Runtime: runtime, Folder: folder})
 	if err != nil {

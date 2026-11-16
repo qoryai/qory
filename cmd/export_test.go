@@ -22,6 +22,7 @@ import (
 	"github.com/qoryai/forager/wall"
 
 	"github.com/qoryai/qory/internal/compose"
+	"github.com/qoryai/qory/internal/config"
 	"github.com/qoryai/qory/internal/foragerdir"
 	"github.com/qoryai/qory/internal/pool/prebuild"
 	"github.com/qoryai/qory/internal/preparation"
@@ -904,3 +905,14 @@ func SetNpmRegistry(url string) func() {
 	npmRegistry = url
 	return func() { npmRegistry = before }
 }
+
+// SetInstanceAddress makes qory run read the address of its Qory Apiary instance with
+// f, and returns what restores the default.
+func SetInstanceAddress(f func(*config.Forager) string) func() {
+	before := instanceOf
+	instanceOf = f
+	return func() { instanceOf = before }
+}
+
+// InstanceAddress is instanceAddress.
+var InstanceAddress = instanceAddress

@@ -70,13 +70,17 @@ var ErrNotCached = errors.New("the registry has no copy of the runtime")
 // bytes do not match the layer's size or sha256 digest; Install checks the sha512
 // checksum on top. A 401 with a Bearer
 // challenge gets a token for repository:shared/runtimes/<runtime>:pull from the
-// challenge's realm, once.
-func RegistryFetch(client *http.Client, host, arch string) Fetch {
+// challenge's realm, once. The realm must be Qory Apiary's token route,
+// <instance>/registry/token, where instance is the address of the Qory Apiary instance
+// that the run already uses, scheme, host and port: the registry is a different host from
+// the instance, and the run's proxy sets the run's credentials on a request by its host.
+// With no instance, "", no realm is taken.
+func RegistryFetch(client *http.Client, host, arch, instance string) Fetch {
 	return func(ctx context.Context, runtime string) (Release, error) {
 		if arch != "amd64" && arch != "arm64" {
 			return Release{}, fmt.Errorf("run on an amd64 or arm64 machine\nThe registry has %s for linux/amd64 and linux/arm64, and this machine is %s", runtime, arch)
 		}
-		r := &registry{client: client, host: host, runtime: runtime, repository: "shared/runtimes/" + runtime, started: now()}
+		r := &registry{client: client, host: host, instance: instance, runtime: runtime, repository: "shared/runtimes/" + runtime, started: now()}
 		return r.resolve(ctx, arch)
 	}
 }
@@ -86,7 +90,9 @@ func RegistryFetch(client *http.Client, host, arch string) Fetch {
 type registry struct {
 	client                    *http.Client
 	host, runtime, repository string
-	token                     string
+	// instance is the address of Qory Apiary, whose token route is the only realm.
+	instance string
+	token    string
 	// started is when the fetch started: its tries stop at [retryLimit] after it.
 	started time.Time
 }
@@ -455,10 +461,11 @@ func (r *registry) failed(what string, err error) error {
 }
 
 // tokenFor gets a pull token for the repository from the realm of the first Bearer
-// challenge. The realm must be https, or http on loopback, with the registry's scheme,
-// host and port: the run's proxy sets the run's credentials on a request by its host, so
-// a realm on another host could have the request carry a credential meant for another
-// service.
+// challenge. The realm must be https, or http on loopback, and exactly Qory Apiary's
+// token route: the scheme, host and port of the run's instance, [registry.instance], and
+// the path [tokenPath] after the instance's path. The run's proxy sets the run's
+// credentials on a request by its host, so a realm on another host, the registry's
+// included, could have the request carry a credential meant for another service.
 func (r *registry) tokenFor(ctx context.Context, challenges []string) (string, error) {
 	params, ok := bearer(challenges)
 	if !ok {
@@ -469,8 +476,15 @@ func (r *registry) tokenFor(ctx context.Context, challenges []string) (string, e
 		realm.Scheme != "https" && (realm.Scheme != "http" || scheme(realm.Host) != "http") {
 		return "", fmt.Errorf("check the registry at %s\nThe realm of its Bearer challenge is not an https URL, or http on loopback", r.host)
 	}
-	if realm.Host != r.host || realm.Scheme != scheme(r.host) {
-		return "", fmt.Errorf("ask the instance admin to put the registry's token realm on %s://%s\nIt is %s", scheme(r.host), r.host, realm.Redacted())
+	if r.instance == "" {
+		return "", fmt.Errorf("give this run the address of Qory Apiary, whose token route is the registry's realm\nThe realm is %s, and the run has no address to check it against.", realm.Redacted())
+	}
+	want, err := tokenRoute(r.instance)
+	if err != nil {
+		return "", err
+	}
+	if !sameRoute(realm, want) {
+		return "", fmt.Errorf("ask the instance admin to put the registry's token realm at %s\nIt is %s", want.Redacted(), realm.Redacted())
 	}
 	q := realm.Query()
 	if service := params["service"]; service != "" {
@@ -502,6 +516,36 @@ func (r *registry) tokenFor(ctx context.Context, challenges []string) (string, e
 		return reply.AccessToken, nil
 	}
 	return reply.Token, nil
+}
+
+// tokenPath is the path of Qory Apiary's token route, after the instance's address.
+const tokenPath = "/registry/token"
+
+// tokenRoute is the token route of the instance at the address instance, a URL: its
+// scheme, host and port, and the path tokenPath after the instance's path. The error is
+// for an instance that is no http or https URL with a host.
+func tokenRoute(instance string) (*url.URL, error) {
+	u, err := url.Parse(instance)
+	if err != nil || u.Host == "" || u.User != nil || u.Scheme != "https" && u.Scheme != "http" {
+		return nil, errors.New("set the address of Qory Apiary to an https URL\nThe run's address of Qory Apiary is not one.")
+	}
+	return &url.URL{Scheme: u.Scheme, Host: u.Host, Path: strings.TrimSuffix(u.Path, "/") + tokenPath}, nil
+}
+
+// sameRoute reports whether realm is the token route want: the same scheme, host and
+// path, and the same port, where a missing port is the scheme's default.
+func sameRoute(realm, want *url.URL) bool {
+	return realm.Scheme == want.Scheme && authority(realm) == authority(want) && realm.Path == want.Path
+}
+
+// authority is the lower-case host of u with its port, the scheme's default when u has
+// none.
+func authority(u *url.URL) string {
+	port := u.Port()
+	if port == "" {
+		port = map[string]string{"https": "443", "http": "80"}[u.Scheme]
+	}
+	return net.JoinHostPort(strings.ToLower(u.Hostname()), port)
 }
 
 // drain reads up to 64 KiB of a response the caller does not use, and closes it.
