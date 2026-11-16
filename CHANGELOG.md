@@ -396,6 +396,11 @@ release may change what an existing document does, and states it under Upgrading
   `/qory/runtime/<runtime>`. `qory image check` checks no runtime and prints no runtime
   line; Forager checks the runtime when a run starts. A prebuild copies nothing from the
   agent image, and no image has `/qory/agent`.
+- A run from a run code that may write the checkout needs a wall: with no wall, it stops
+  after the compose, exit 1, and closes `failed` with `write_needs_wall`, since its agent
+  would run as this machine's user. A run is such a run when neither `access` in its
+  documents nor its workflow's access in the stack is `read`. A run you start yourself has
+  no run code and still runs without a wall. See §Read workflows in `docs/run.md`.
 - `qory artifact pull` and the working folder of a push check take, of each artifact, the
   newest version that the run API's artifact index does not mark `cancelled`. A version
   that a cancelled run made counts for no stage, and an artifact whose versions are all
@@ -416,6 +421,19 @@ release may change what an existing document does, and states it under Upgrading
     `CLAUDE_CODE_REMOTE`, that move its endpoints or change its mode, and `BUN_OPTIONS`
     for every runtime. No value of the run's, the machine's or the harness's reaches the
     runtime.
+  - For each git push over HTTP through its proxy, the gateway writes
+    `dev.qory.run.target_write` to the run's record twice: first with the state
+    `started`, then with one of `changed`, `refused` or `cut`.
+  - `dev.qory.runtime.result` in the record has `usage`, the tokens of the launch so far:
+    `input`, `output`, `cache_read` and `cache_write`.
+  - The gateway sends `session`, the number of the open session, in each model keys
+    report. A Qory Apiary that does not accept `session` answers `400`, and the gateway
+    drops that report, cooldowns included, so deploy a Qory Apiary that accepts it
+    before the gateway.
+  - An image reference with a login, such as
+    `user:pw@registry.example/agent@sha256:…`, shows as `registry.example/agent@sha256:…`
+    in qory's lines, errors and the record. The manifest check no longer sends the
+    login as a path to Docker Hub's registry.
 - `qory gateway` keeps its runs when SIGINT or SIGTERM stops it: a gateway started again
   on the same directory within 120 seconds continues them, and the agent sessions behind
   it go on. Before, a run open at a gateway that stopped was over. The directory is
