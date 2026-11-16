@@ -139,11 +139,11 @@ func withTools(url, ref string) func(string) string {
 }
 
 // userPart is the line of a module of the base, more, whose source has a user part.
-const userPart = "correct " + workspaceHarness + ", then take the work item in again in Qory Apiary: remove the user name and password from the source of the module more in " + workspaceBase + ": the run's stack proxy sets the harness credentials of the run configuration, so a source's URL needs none; the code is used\n"
+const userPart = "correct " + workspaceHarness + ", then take the work item in again in Qory Apiary: Remove the user name and password from the URL in the source of the module more.\n  The run's stack proxy sets the harness credentials of the run configuration, so a source's URL needs none.\n  The source of the module more is in " + workspaceBase + "; the code is used\n"
 
 // nonASCII is the line of a module of the base, more, whose source has a host with a
 // character outside ASCII.
-const nonASCII = "correct " + workspaceHarness + ", then take the work item in again in Qory Apiary: write the host in the source of the module more in " + workspaceBase + " in ASCII, with the xn-- form for an international name: the host has a character outside ASCII, which git may map to another, such as a fullwidth @ to @; the code is used\n"
+const nonASCII = "correct " + workspaceHarness + ", then take the work item in again in Qory Apiary: Write the host in the source of the module more in ASCII.\n  Use the xn-- form for an international name.\n  The host has a character outside ASCII, which git may map to another, such as a fullwidth @ to @.\n  The source of the module more is in " + workspaceBase + "; the code is used\n"
 
 // thenMore is a stack file that lists the module tools, at [toolsURL], then the module
 // more at url.
@@ -535,9 +535,9 @@ func TestARunCodeOfAHiddenHarnessThatFailsShowsNoAddress(t *testing.T) {
 		{"the base's ref is gone", codeHarness{change: func(d map[string]any) { extends(d)["ref"] = "stacks-gone" }}, cmd.ExitInput,
 			[]string{"qory run: set the ref of " + workspaceBase + " to a branch, tag or commit its repository has, then take the work item in again in Qory Apiary: the repository of " + workspaceBase + " has no branch or tag by the ref it is set to; the code is used\n"}},
 		{"the folder is not there", codeHarness{change: func(d map[string]any) { extends(d)["path"] = "examples/none" }}, cmd.ExitInput,
-			[]string{"correct " + workspaceHarness + ", then take the work item in again in Qory Apiary: check " + workspaceBase + ": the repository of " + workspaceBase + " has no folder at the path it is set to; the code is used\n"}},
+			[]string{"correct " + workspaceHarness + ", then take the work item in again in Qory Apiary: Check " + workspaceBase + ".\n  the repository of " + workspaceBase + " has no folder at the path it is set to; the code is used\n"}},
 		{"the folder has no stack file", codeHarness{change: func(d map[string]any) { extends(d)["path"] = "examples" }}, cmd.ExitInput,
-			[]string{"correct " + workspaceHarness + ", then take the work item in again in Qory Apiary: check the folder of " + workspaceBase + ": its repository has no qory-stack.yaml there; the code is used\n"}},
+			[]string{"correct " + workspaceHarness + ", then take the work item in again in Qory Apiary: Check the folder of " + workspaceBase + ".\n  Its repository has no qory-stack.yaml there; the code is used\n"}},
 		{"the stack proxy returns 407 for the base", codeHarness{nowhere: func(n *cmd.Nowhere) {
 			n.StackProxy = strings.Replace(n.StackProxy, proxygittest.Password, "another-password", 1)
 		}}, 1, []string{"qory run: take the work item in again in Qory Apiary: the run's stack proxy returned 407 Proxy Authentication Required to the password Forager set for the run, so the fetch of " + workspaceBase + " failed; the code is used\n"}},
@@ -562,7 +562,7 @@ func TestARunCodeOfAHiddenHarnessThatFailsShowsNoAddress(t *testing.T) {
 		{"a module's source has an encoded fullwidth / in its host", codeHarness{stack: thenMore("https://" + proxygittest.Host + "%EF%BC%8F.evil.example/example-org/more.git"), tools: toolsModule()}, cmd.ExitInput,
 			[]string{nonASCII}},
 		{"a module's source does not parse", codeHarness{stack: thenMore("https://" + proxygittest.Host + "%40evil.example/example-org/more.git"), tools: toolsModule()}, cmd.ExitInput,
-			[]string{"correct " + workspaceHarness + ", then take the work item in again in Qory Apiary: correct the URL in the source of the module more in " + workspaceBase + ": qory could not read it as a URL; the code is used\n"}},
+			[]string{"correct " + workspaceHarness + ", then take the work item in again in Qory Apiary: Correct the URL in the source of the module more.\n  qory could not read it as a URL.\n  The source of the module more is in " + workspaceBase + "; the code is used\n"}},
 		{"a module's source is not https", codeHarness{stack: thenMore("http://" + proxygittest.Host + "/example-org/more.git"), tools: toolsModule()}, cmd.ExitInput,
 			[]string{"qory run: use an https URL for the module more, then take the work item in again in Qory Apiary: a run from a control plane fetches git sources only over https; the code is used\n"}},
 		{"two modules ship one skill", codeHarness{stack: withTools(tools, toolsRef), tools: map[string]string{
@@ -647,7 +647,7 @@ func TestARunCodeOfAHiddenCheckoutHarnessThatFailsShowsNoAddress(t *testing.T) {
 		{"the base's ref is gone", codeHarness{document: func(s string) string { return strings.Replace(s, namedRef, "stacks-gone", 1) }}, cmd.ExitInput,
 			"qory run: set the ref of " + checkoutBase + " to a branch, tag or commit its repository has, then take the work item in again in Qory Apiary: the repository of " + checkoutBase + " has no branch or tag by the ref it is set to; the code is used\n"},
 		{"the base's folder is not there", codeHarness{document: func(s string) string { return strings.Replace(s, "examples/hello", "examples/none", 1) }}, cmd.ExitInput,
-			"correct the checkout's harness, then take the work item in again in Qory Apiary: check " + checkoutBase + ": the repository of " + checkoutBase + " has no folder at the path it is set to; the code is used\n"},
+			"correct the checkout's harness, then take the work item in again in Qory Apiary: Check " + checkoutBase + ".\n  the repository of " + checkoutBase + " has no folder at the path it is set to; the code is used\n"},
 		{"the stack proxy returns 407", codeHarness{nowhere: func(n *cmd.Nowhere) {
 			n.StackProxy = strings.Replace(n.StackProxy, proxygittest.Password, "another-password", 1)
 		}}, 1, "qory run: take the work item in again in Qory Apiary: the run's stack proxy returned 407 Proxy Authentication Required to the password Forager set for the run, so the fetch of " + checkoutBase + " failed; the code is used\n"},
@@ -658,9 +658,9 @@ func TestARunCodeOfAHiddenCheckoutHarnessThatFailsShowsNoAddress(t *testing.T) {
 		{"the stack proxy returns 403 for a module's host", codeHarness{modules: []map[string]any{{"name": "tools", "source": map[string]any{"git": "https://other.test/example-org/tools.git", "ref": toolsRef, "path": "modules/tools"}}}}, 1,
 			"qory run: add the host of the module tools to gateway.stack_hosts in the gateway's forager.yaml or to the stack_hosts of the run configuration that Qory Apiary sends, and, for a private repository, a harness credential for the module tools to that run configuration, then take the work item in again: the fetch of the module tools through the run's stack proxy failed: the stack proxy returned 403, as it does for a host that neither list of stack hosts contains, and for a host of the run configuration's stack_hosts that the gateway's policy denies or has path rules for; the code is used\n"},
 		{"the base's URL has a user part", codeHarness{document: func(s string) string { return strings.Replace(s, "https://", "https://reader:s3cret@", 1) }}, cmd.ExitInput,
-			"correct the checkout's harness, then take the work item in again in Qory Apiary: remove the user name and password from the URL of " + checkoutBase + ": the run's stack proxy sets the harness credentials of the run configuration, so a source's URL needs none; the code is used\n"},
+			"correct the checkout's harness, then take the work item in again in Qory Apiary: Remove the user name and password from the URL of " + checkoutBase + ".\n  The run's stack proxy sets the harness credentials of the run configuration, so a source's URL needs none; the code is used\n"},
 		{"the base's host has a character outside ASCII", codeHarness{document: func(s string) string { return strings.Replace(s, "https://", "https://u＠", 1) }}, cmd.ExitInput,
-			"correct the checkout's harness, then take the work item in again in Qory Apiary: write the host in the URL of " + checkoutBase + " in ASCII, with the xn-- form for an international name: the host has a character outside ASCII, which git may map to another, such as a fullwidth @ to @; the code is used\n"},
+			"correct the checkout's harness, then take the work item in again in Qory Apiary: Write the host in the URL of " + checkoutBase + " in ASCII.\n  Use the xn-- form for an international name.\n  The host has a character outside ASCII, which git may map to another, such as a fullwidth @ to @; the code is used\n"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			c.c.checkout = true
@@ -899,15 +899,15 @@ func TestAHarnessWhoseFilesLinkOutOfTheirCloneStops(t *testing.T) {
 		want  string
 	}{
 		{"the stack file of the documents' base", func(t *testing.T) codeHarness { return codeHarness{links: stackFile(t)} }, false,
-			"check the folder of " + workspaceBase + ": its qory-stack.yaml links outside its repository"},
+			"Make the qory-stack.yaml link in the folder of " + workspaceBase + " point inside its repository.\n  The qory-stack.yaml links outside its repository"},
 		{"the stack file of the checkout's base", func(t *testing.T) codeHarness { return codeHarness{checkout: true, links: stackFile(t)} }, false,
-			"check the folder of " + checkoutBase + ": its qory-stack.yaml links outside its repository"},
+			"Make the qory-stack.yaml link in the folder of " + checkoutBase + " point inside its repository.\n  The qory-stack.yaml links outside its repository"},
 		{"the stack file of the checkout's base, shown", func(t *testing.T) codeHarness { return codeHarness{checkout: true, shown: true, links: stackFile(t)} }, true,
-			": qory-stack.yaml links outside the repository"},
+			"Make the qory-stack.yaml link in the base stack point inside the repository.\n  qory-stack.yaml links outside the repository.\n  extends is "},
 		{"the qory.yaml of the documents' base", func(t *testing.T) codeHarness { return codeHarness{links: config(t)} }, false,
-			"check " + workspaceBase + ": the qory.yaml of its repository links outside its repository"},
+			"Make the qory.yaml link at the root of " + workspaceBase + " point inside its repository.\n  The qory.yaml of its repository links outside its repository"},
 		{"the qory.yaml of the checkout's base", func(t *testing.T) codeHarness { return codeHarness{checkout: true, links: config(t)} }, false,
-			"check " + checkoutBase + ": the qory.yaml of its repository links outside its repository"},
+			"Make the qory.yaml link at the root of " + checkoutBase + " point inside its repository.\n  The qory.yaml of its repository links outside its repository"},
 		{"the qory.yaml of an export", func(t *testing.T) codeHarness {
 			return codeHarness{
 				modules:    []map[string]any{{"name": "tools", "source": map[string]any{"git": toolsURL, "ref": toolsRef, "module": "tools"}}},
@@ -926,7 +926,7 @@ func TestAHarnessWhoseFilesLinkOutOfTheirCloneStops(t *testing.T) {
 				t.Errorf("the run read the file outside the clone:\n%s", r.out)
 			}
 			if c.shown {
-				wants(t, r.err.Error(), "extends "+r.url+"#"+namedRef)
+				wants(t, r.err.Error(), "extends is "+r.url+"#"+namedRef)
 				return
 			}
 			r.noAddress(t)
@@ -1008,7 +1008,7 @@ func TestAHiddenHarnessShowsNoFolderOfASourceOrAnExport(t *testing.T) {
 		{"an exported module without a manifest", tools("secret-folder-8", map[string]string{"AGENTS.md": "# Tools\n"}),
 			"the module tools has no qory-module.yaml"},
 		{"an exports.dir that leads out", tools("../secret-folder-6", nil),
-			"module tools: qory.yaml in the module tools: exports.dir stacks is not a directory inside the repository"},
+			"Check the source of module tools.\n  qory.yaml in the module tools: exports.dir stacks is not a directory inside the repository"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			r := c.c.run(t)

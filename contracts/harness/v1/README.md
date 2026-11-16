@@ -302,7 +302,8 @@ checkout appends:
   `extends`. The report records the base with `source` as the path of the stack's
   directory relative to the document and the pin `working-tree`.
 - A base that cannot be fetched, on a machine without access to its repository, fails
-  with status 1 and "the stack <source> is not reachable from here".
+  with status 1. The first line is "Run qory on a machine that can reach the base stack." and a later line is
+  "The stack <source> is not reachable from here: <error>".
 - A base does not extend another.
 
 The base's runtime hooks and deny rules reach every extending checkout unchanged: the
@@ -1127,19 +1128,24 @@ resolves differently by how qory places the skill: as a link to the source folde
 A folder that a variant reads skills from composes when that variant is selected. These stop the
 compose with status 2, each with the full path below the module:
 
-- a folder with neither `SKILL.md` nor, apart from dot folders, a folder below it: `add SKILL.md
-  to skills/review: skills/review has no SKILL.md and no skill below it`
-- a group with no skill anywhere below it, by its topmost folder: `add SKILL.md to skills/review,
-  or put a skill in a folder below it: skills/review has no SKILL.md and no skill below it`
-- a folder named after a runtime, with no `SKILL.md`: `rename skills/tools/codex, or read it
-  through a variant: a folder named after a runtime is not a group`
-- a folder that another variant reads skills from, with no `SKILL.md`: `select the variant that
-  reads skills/modern, or change that variant's skills: a folder that a variant reads skills from
-  is not a group`
-- a link to a folder with no `SKILL.md`: `remove the link skills/g/docs, or point it at a skill:
-  it leads to a folder with no SKILL.md`
-- a link that leads nowhere: `remove the link skills/g/gone, or point it at a path that exists:
-  it leads nowhere`
+- a folder with neither `SKILL.md` nor, apart from dot folders, a folder below it: `Add SKILL.md
+  to the folder.` with `skills/review in module core has no SKILL.md and no skill below it.` on the
+  next line
+- a group with no skill anywhere below it, by its topmost folder: `Add SKILL.md to the
+  folder, or put a skill in a folder below it.` with `skills/review in module core has no SKILL.md
+  and no skill below it.` on the next line
+- a folder named after a runtime, with no `SKILL.md`: `Rename the folder, or read it
+  through a variant.` with `skills/tools/codex in module core is named after a runtime, and such a
+  folder is not a group.` on the next line
+- a folder that another variant reads skills from, with no `SKILL.md`: `Select the variant that
+  reads the folder, or change that variant's skills.` with `skills/modern in module core is a
+  folder that a variant reads skills from, and such a folder is not a group.` on the next line
+- a link to a folder with no `SKILL.md`: `Point the link at a skill, or
+  remove it.` with `The link skills/g/docs in module core leads to a folder with no SKILL.md.` on
+  the next line
+- a link that leads nowhere: `Point the link at a path that
+  exists, or remove it.` with `The link skills/g/gone in module core leads nowhere.` on the next
+  line
 - two skills of one module with one name: `Rename skills/a/review or skills/b/review in module
   core.` with `Each skill goes to skills/<name>, and both are the skill review.` on the next line
 - two skills of one module whose names differ only in case: `Rename skills/a/Review or

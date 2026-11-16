@@ -276,10 +276,11 @@ compose`. Given a run key, the run fetches the folder through the run's stack pr
 with a `qory run: fetched` line, and every git source of the fetched stack the same way.
 Its modules listed by a path are read from the fetched tree at the same commit. A
 reference whose URL has a user part or an `@` between `://` and the first `/` after it
-stops the run with exit 2 before anything is fetched: `remove the user name and password
-from the URL in -f: the run's stack proxy sets the harness credentials of the run
-configuration, so a source's URL needs none`. One whose host has a character outside
-ASCII stops it the same way: `write the host of the URL in -f in ASCII, …`. This run
+stops the run with exit 2 before anything is fetched: `Remove the user name and password
+from the URL in -f.`, with the line `The run's stack proxy sets the harness credentials of
+the run configuration, so a source's URL needs none.` after it. One whose host has a
+character outside ASCII stops it the same way: `Write the host of the URL in -f in
+ASCII.`, with two lines after it. This run
 composes the hello example at a commit of the qory repository:
 
 ```sh
@@ -2041,25 +2042,28 @@ shows its addresses, so the fifth line applies to it. In place of the sixth, it 
 `run again: the run's stack proxy, through which qory fetches the run's harness, did not
 open: <error>`:
 
-- `remove the user name and password from the URL of the base of the checkout's harness:
-  the run's stack proxy sets the harness credentials of the run configuration, so a
-  source's URL needs none`, exit 2, before the base is fetched, for a checkout's file
-  whose `extends` has a URL with a user part or an `@` between `://` and the first `/`
-  after it; `correct the URL of the base of …: qory could not read it as a URL` and
-  `write the host in the URL of the base of … in ASCII, …` for the other two checks of a
+- `Remove the user name and password from the URL of the base of the checkout's harness.`,
+  with the line `The run's stack proxy sets the harness credentials of the run
+  configuration, so a source's URL needs none.` after it, exit 2, before the base is
+  fetched, for a checkout's file whose `extends` has a URL with a user part or an `@`
+  between `://` and the first `/` after it; `Correct the URL of the base of ….` and
+  `Write the host in the URL of the base of … in ASCII.` for the other two checks of a
   module source below
-- `remove the user name and password from the source of the module <module> in the base
-  of the workspace's harness: the run's stack proxy sets the harness credentials of the
-  run configuration, so a source's URL needs none`, exit 2, before any module is
-  fetched, for a module source in the stack's file whose URL has a user part or an `@`
-  between `://` and the first `/` after it, and `the source of modules[<n>]` for a
-  module listed without a name
-- `correct the URL in the source of the module <module> in the base of the workspace's
-  harness: qory could not read it as a URL`, exit 2, before any module is fetched
-- `write the host in the source of the module <module> in the base of the workspace's
-  harness in ASCII, with the xn-- form for an international name: the host has a
-  character outside ASCII, which git may map to another, such as a fullwidth @ to @`,
-  exit 2, before any module is fetched
+- `Remove the user name and password from the URL in the source of the module
+  <module>.`, with the lines `The run's stack proxy sets the harness credentials of the
+  run configuration, so a source's URL needs none.` and `The source of the module
+  <module> is in the base of the workspace's harness.` after it, exit 2, before any
+  module is fetched, for a module source in the stack's file whose URL has a user part
+  or an `@` between `://` and the first `/` after it, and `the source of modules[<n>]`
+  for a module listed without a name
+- `Correct the URL in the source of the module <module>.`, with the lines `qory could
+  not read it as a URL.` and `The source of the module <module> is in the base of the
+  workspace's harness.` after it, exit 2, before any module is fetched
+- `Write the host in the source of the module <module> in ASCII.`, with the lines `Use
+  the xn-- form for an international name.`, `The host has a character outside ASCII,
+  which git may map to another, such as a fullwidth @ to @.` and `The source of the
+  module <module> is in the base of the workspace's harness.` after it, exit 2, before
+  any module is fetched
 - `check that <url> has the branch, tag or commit <ref> and that gateway.stack_hosts in
   the gateway's forager.yaml or the run configuration's stack_hosts lists <host>, and,
   for a private repository, that the run configuration has a harness credential whose
@@ -2079,13 +2083,14 @@ The stack file of a git base, the `qory.yaml` of the base's repository, and the
 the repository contains. When such a link leads outside the clone, qory stops with
 exit 2 before it reads the file, for a run from a run code and for any other run:
 
-- `check the folder of <base>: its qory-stack.yaml links outside its repository`, where
-  `<base>` is `the base of the workspace's harness` or `the base of the checkout's
-  harness`, and `extends <url>#<ref>:<path>: qory-stack.yaml links outside the
-  repository` when the harness is shown
-- `check <base>: the qory.yaml of its repository links outside its repository`, and
-  `extends <url>#<ref>:<path>: qory.yaml at the root of its repository links outside the
-  repository` when the harness is shown
+- `Make the qory-stack.yaml link in the folder of <base> point inside its repository.`,
+  where `<base>` is `the base of the workspace's harness` or `the base of the checkout's
+  harness`, and `Make the qory-stack.yaml link in the base stack point inside the
+  repository.` with the line `extends is <url>#<ref>:<path>.` last when the harness is
+  shown
+- `Make the qory.yaml link at the root of <base> point inside its repository.`, and
+  `Make the qory.yaml link at the root of the base stack's repository point inside it.`
+  with the line `extends is <url>#<ref>:<path>.` last when the harness is shown
 - `the qory.yaml of the repository of <source> links outside its repository`, and
   `qory.yaml in <url> at <ref> links outside the repository` when the harness is shown
 
