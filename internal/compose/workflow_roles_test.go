@@ -4,6 +4,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/qoryai/qory/internal/compose"
 	"github.com/qoryai/qory/internal/stack"
@@ -32,7 +33,12 @@ func workflowFiles() map[string]string {
 // workflowRefusal is the refusal of the workflow capture-demos for the role role, started
 // by entry.
 func workflowRefusal(role, entry string) string {
-	return "Add a module that fills agents/" + role + ", or drop capture-demos from the workflows and process.\n" +
+	fix := "Add a module that fills agents/" + role + ", or drop capture-demos from the workflows and process.\n"
+	if utf8.RuneCountInString(fix) > 101 {
+		// The first line passes 100 characters: the alternative moves to the next line.
+		fix = "Add a module that fills agents/" + role + ".\n  You can also drop capture-demos from the workflows and process.\n"
+	}
+	return fix +
 		"  The stack in qory-stack.yaml declares the workflow capture-demos. Its " + entry + " of module software-factory starts agents/" + role + ", and no module ships or provides that agent, and the stack does not bind it."
 }
 
@@ -65,7 +71,8 @@ func TestOnlyTheEntryARunStartsIsChecked(t *testing.T) {
 	files["modules/software-factory/skills/workflow-capture-demos/SKILL.md"] = "---\nname: workflow-capture-demos\ndescription: d\n---\n\nFilm it.\n"
 	files["modules/software-factory/skills/capture-demos/SKILL.md"] = "---\nname: capture-demos\ndescription: d\n---\n\nStart ${qory:agents/demo-author}.\n"
 	_, err := composeTree(t, files)
-	want := "module software-factory: skill capture-demos references agent demo-author, which no module ships or provides and the stack does not bind"
+	want := "Ship agent demo-author, bind agents.demo-author in qory-stack.yaml, or remove the reference.\n" +
+		"  The skill capture-demos of module software-factory references agent demo-author. No module ships or provides it, and the stack does not bind it."
 	if err == nil || err.Error() != want {
 		t.Fatalf("error:\n%v\nwant:\n%s", err, want)
 	}
@@ -77,7 +84,8 @@ func TestASkillOfNoDeclaredWorkflowKeepsRule4sLine(t *testing.T) {
 	files := workflowFiles()
 	files[stack.FileName] = strings.Replace(demosStack, "workflows:\n  capture-demos: {access: write}\n", "", 1)
 	_, err := composeTree(t, files)
-	want := "module software-factory: skill workflow-capture-demos references agent demo-author, which no module ships or provides and the stack does not bind"
+	want := "Ship agent demo-author, bind agents.demo-author in qory-stack.yaml, or remove the reference.\n" +
+		"  The skill workflow-capture-demos of module software-factory references agent demo-author. No module ships or provides it, and the stack does not bind it."
 	if err == nil || err.Error() != want {
 		t.Fatalf("error:\n%v\nwant:\n%s", err, want)
 	}
@@ -91,7 +99,7 @@ func TestAnExcludedOrDroppedRoleKeepsRule4sLine(t *testing.T) {
 	files[stack.FileName] = strings.Replace(demosStack, "    source: {path: modules/software-factory}\n", "    source: {path: modules/software-factory}\n    exclude: {agents: [demo-author]}\n", 1)
 	files["modules/software-factory/agents/demo-author.md"] = "---\nname: demo-author\n---\n"
 	_, err := composeTree(t, files)
-	if want := "which module software-factory leaves out"; err == nil || !strings.HasSuffix(err.Error(), want) {
+	if want := "and module software-factory leaves it out."; err == nil || !strings.HasSuffix(err.Error(), want) {
 		t.Fatalf("an excluded agent: %v", err)
 	}
 	files = workflowFiles()
@@ -100,7 +108,7 @@ func TestAnExcludedOrDroppedRoleKeepsRule4sLine(t *testing.T) {
 	files["modules/screens/agents/browser-demo-author.md"] = "---\nname: browser-demo-author\n---\n"
 	files["modules/screens/agents/other.md"] = "---\nname: other\n---\n"
 	_, err = composeTree(t, files)
-	if want := "which module screens provides as agent browser-demo-author, which module screens leaves out"; err == nil || !strings.HasSuffix(err.Error(), want) {
+	if want := "which module screens provides as agent browser-demo-author.\n  Module screens leaves out agent browser-demo-author."; err == nil || !strings.HasSuffix(err.Error(), want) {
 		t.Fatalf("a dropped provider: %v", err)
 	}
 }
@@ -143,7 +151,8 @@ func TestAWorkflowRoleAndOtherFailuresComeTogether(t *testing.T) {
 	files["modules/software-factory/skills/release/SKILL.md"] = "---\nname: release\ndescription: d\n---\n\nRun ${qory:skills/missing}.\n"
 	_, err := composeTree(t, files)
 	want := workflowRefusal("demo-author", "skill workflow-capture-demos") + "\n" +
-		"module software-factory: skill release references skill missing, which no module ships or provides and the stack does not bind"
+		"Ship skill missing, bind skills.missing in qory-stack.yaml, or remove the reference.\n" +
+		"  The skill release of module software-factory references skill missing. No module ships or provides it, and the stack does not bind it."
 	if err == nil || err.Error() != want {
 		t.Fatalf("error:\n%v\nwant:\n%s", err, want)
 	}
@@ -165,7 +174,7 @@ func TestAWorkflowThatStartsAGroupComposes(t *testing.T) {
 	}
 	files["modules/software-factory/qory-module.yaml"] = "apiVersion: qory.dev/v1alpha1\nname: software-factory\nroles:\n  agents:\n    demo-author: many\n"
 	_, err := composeTree(t, files)
-	if err == nil || !strings.HasSuffix(err.Error(), "The group has no member.") || strings.Contains(err.Error(), "drop capture-demos") {
+	if err == nil || !strings.Contains(err.Error(), "\n  The group has no member.\n") || strings.Contains(err.Error(), "drop capture-demos") {
 		t.Fatalf("a group with no member: %v", err)
 	}
 }

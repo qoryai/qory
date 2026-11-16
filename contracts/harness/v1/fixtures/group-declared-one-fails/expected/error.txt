@@ -1,1 +1,2 @@
-Declare agents/reviewers as many in module python, or remove it: module factory declares it many.
+Declare agents/reviewers as many in module python, or remove it.
+  Module factory declares it many.

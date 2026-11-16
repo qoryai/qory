@@ -1,0 +1,2 @@
+Ship agent typescript-developer in a module, or remove provides.agents.developer from module ts.
+  No module ships agent typescript-developer.

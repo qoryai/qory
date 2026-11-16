@@ -9,7 +9,6 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"unicode/utf8"
 
 	"github.com/spf13/cobra"
 
@@ -21,13 +20,13 @@ import (
 // The texts of qory artifact push --withdraw for a push that qory refuses, from the
 // decision 654 (c). Each starts with its fix; [ExitCode] gives each [ExitArtifactRefused].
 const (
-	textWithdrawLocked    = "Push a new version of %s instead.\nThe artifact type %s has withdrawable set to false, so a run cannot withdraw its names."
-	textWithdrawApproved  = "Push a new version of %s/%s instead.\nA member approved its newest version, v%d, so a run cannot withdraw the name."
-	textWithdrawUnknown   = "Define or switch on the artifact type %s in the workspace's Artifact types.\nThen run the round again. The workspace has no such type, or hides it."
-	textWithdrawNoVersion = "Withdraw only a stored artifact.\n%s/%s has no version outside cancelled runs."
-	textWithdrawFiles     = "Pass either files or --withdraw.\nA withdrawal stores no files, and the command has %d %s: %s."
-	textWithdrawAlready   = "Leave %s/%s as it is.\nIts newest version, v%d, is already a withdrawal."
-	textWithdrawPerson    = "Leave %s/%s to a member.\nIts newest version, v%d, is an upload by %s, and a run withdraws only a name whose newest version a run wrote."
+	textWithdrawLocked    = "Push a new version of %s instead.\n  The artifact type %s has withdrawable set to false, so a run cannot withdraw its names."
+	textWithdrawApproved  = "Push a new version of %s/%s instead.\n  A member approved its newest version, v%d, so a run cannot withdraw the name."
+	textWithdrawUnknown   = "Define or switch on the artifact type %s in the workspace's Artifact types.\n  Then run the round again. The workspace has no such type, or hides it."
+	textWithdrawNoVersion = "Withdraw only a stored artifact.\n  %s/%s has no version outside cancelled runs."
+	textWithdrawFiles     = "Pass either files or --withdraw.\n  A withdrawal stores no files, and the command has %d %s: %s."
+	textWithdrawAlready   = "Leave %s/%s as it is.\n  Its newest version, v%d, is already a withdrawal."
+	textWithdrawPerson    = "Leave %s/%s to a member.\n  Its newest version, v%d, is an upload by %s, and a run withdraws only a name whose newest version a run wrote."
 )
 
 // withdrawRefusedError is a withdrawal that qory refuses, or that the run API refuses with
@@ -36,6 +35,10 @@ type withdrawRefusedError struct{ text string }
 
 // Error returns the line for the person.
 func (e withdrawRefusedError) Error() string { return e.text }
+
+// refused is the refusal with text, fitted by [exports.Fit]: when line 1 has more than 100
+// characters, each name on it that is long is shortened, and a later line has its full name.
+func refused(text string) withdrawRefusedError { return withdrawRefusedError{exports.Fit(text)} }
 
 // withdrawalCodes are the codes of the run API's refusals of a withdrawal that depend on
 // the work item's artifacts: another run or a member may have changed them since the
@@ -103,18 +106,18 @@ func withdrawRefusal(index *runapi.Index, artifactType, name string) error {
 
 	switch {
 	case newest != nil && approvedByMember(*newest):
-		return nameRefusal(artifactType, name, fmt.Sprintf(textWithdrawApproved, artifactType, name, newest.Number))
+		return refused(fmt.Sprintf(textWithdrawApproved, artifactType, name, newest.Number))
 	case newest == nil:
 		return withdrawRefusedError{fmt.Sprintf(textWithdrawNoVersion, artifactType, name)}
 	case newest.Withdrawn:
-		return nameRefusal(artifactType, name, fmt.Sprintf(textWithdrawAlready, artifactType, name, newest.Number))
+		return refused(fmt.Sprintf(textWithdrawAlready, artifactType, name, newest.Number))
 	case newest.Writer.Kind == "person":
 		who := newest.Writer.Name
 		if who == "" {
 			who = "a member"
 		}
 
-		return nameRefusal(artifactType, name, fmt.Sprintf(textWithdrawPerson, artifactType, name, newest.Number, who))
+		return refused(fmt.Sprintf(textWithdrawPerson, artifactType, name, newest.Number, who))
 	}
 
 	return nil
@@ -127,51 +130,6 @@ func plural(n int, noun string) string {
 	}
 
 	return noun + "s"
-}
-
-// maxFirstLine is the most characters of the first line of a refusal.
-const maxFirstLine = 100
-
-// nameRefusal is the refusal with text, which names artifactType and, when name is not
-// empty, name. A type and a name have up to 64 bytes each, so when line 1 has more than
-// [maxFirstLine] characters, each name on it is cut and ends in "...", and a line at the
-// end gives the full name.
-func nameRefusal(artifactType, name, text string) withdrawRefusedError {
-	first, rest, hasRest := strings.Cut(text, "\n")
-
-	over := utf8.RuneCountInString(first) - maxFirstLine
-	if over <= 0 {
-		return withdrawRefusedError{text}
-	}
-
-	names := []string{artifactType}
-	full := artifactType
-
-	if name != "" {
-		names = append(names, name)
-		full += "/" + name
-	}
-
-	total := 0
-	for _, n := range names {
-		total += utf8.RuneCountInString(n)
-	}
-
-	// The names may take their share of what is left when the other words of line 1 stay.
-	allowed := (total - over) / len(names)
-
-	for _, n := range names {
-		if length := utf8.RuneCountInString(n); length > allowed {
-			first = strings.Replace(first, n, string([]rune(n)[:max(allowed-3, 1)])+"...", 1)
-		}
-	}
-
-	lines := []string{first}
-	if hasRest {
-		lines = append(lines, rest)
-	}
-
-	return withdrawRefusedError{strings.Join(append(lines, "The full name is "+full+"."), "\n")}
 }
 
 // approvedByMember reports whether a member approved version at a gate. The approval
@@ -201,7 +159,7 @@ func checkWithdrawable(artifactType string) error {
 	}
 
 	if slices.Contains(locked, artifactType) {
-		return nameRefusal(artifactType, "", fmt.Sprintf(textWithdrawLocked, artifactType, artifactType))
+		return refused(fmt.Sprintf(textWithdrawLocked, artifactType, artifactType))
 	}
 
 	return nil
@@ -213,7 +171,7 @@ func fixFirst(message string) string {
 	const instead = " instead. "
 
 	if i := strings.Index(message, instead); strings.HasPrefix(message, "Push a new version of ") && i > 0 {
-		return message[:i+len(instead)-1] + "\n" + message[i+len(instead):]
+		return message[:i+len(instead)-1] + "\n  " + message[i+len(instead):]
 	}
 
 	return message
@@ -237,11 +195,11 @@ func raceRefusal(c *cobra.Command, client *runapi.Client, push runapi.Push, err 
 	// The refusal for a type or a name that a run cannot withdraw: the run API's message,
 	// with its fix alone on line 1.
 	if apiError.Code == runapi.CodeTypeNotWithdrawable {
-		return nameRefusal(push.Type, push.Name, fixFirst(apiError.Error()))
+		return refused(fixFirst(apiError.Error()))
 	}
 
 	if apiError.Code == runapi.CodeUnknownType {
-		return nameRefusal(push.Type, "", fmt.Sprintf(textWithdrawUnknown, push.Type))
+		return refused(fmt.Sprintf(textWithdrawUnknown, push.Type))
 	}
 
 	known := false
@@ -282,7 +240,7 @@ func keepWithdrawal(c *cobra.Command, artifactType, name string) error {
 	case newest == 0:
 		return withdrawRefusedError{fmt.Sprintf(textWithdrawNoVersion, artifactType, name)}
 	case empty:
-		return nameRefusal(artifactType, name, fmt.Sprintf(textWithdrawAlready, artifactType, name, newest))
+		return refused(fmt.Sprintf(textWithdrawAlready, artifactType, name, newest))
 	}
 
 	store, err := openArtifactStore()

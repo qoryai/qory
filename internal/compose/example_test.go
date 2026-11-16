@@ -42,7 +42,7 @@ func TestExample(t *testing.T) {
 	}
 	p.Modules[0].Exclude = stack.Selection{}
 	_, err = compose.Compose(p)
-	if err == nil || !strings.Contains(err.Error(), "skills/greet is provided by 2 modules") {
+	if err == nil || !strings.Contains(err.Error(), "2 modules provide skills/greet") {
 		t.Fatalf("without the exclude: %v", err)
 	}
 	if _, err := os.Stat("../../examples/hello/README.md"); err != nil {

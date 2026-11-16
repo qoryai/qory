@@ -1,1 +1,2 @@
-module core: mcp/db.json does not contain a JSON object: json: cannot unmarshal array into Go value of type map[string]interface {}
+Write mcp/db.json in module core as one JSON object.
+  The file does not contain a JSON object: json: cannot unmarshal array into Go value of type map[string]interface {}

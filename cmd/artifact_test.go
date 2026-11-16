@@ -964,36 +964,36 @@ func TestArtifactPushWithdrawRefusals(t *testing.T) {
 	}{
 		"a name with no version": {
 			[]string{"demo-script", "--name", "scenario-9"}, withdrawIndex(),
-			"Withdraw only a stored artifact.\ndemo-script/scenario-9 has no version outside cancelled runs.",
+			"Withdraw only a stored artifact.\n  demo-script/scenario-9 has no version outside cancelled runs.",
 		},
 		"a name whose versions are all cancelled": {
 			[]string{"demo-script", "--name", "scenario-5"},
 			indexOf(artifactEntry("demo-script", "scenario-5", "", 1, cancelled(versionEntry("av_1", 1, fileEntry("s.json", "x"))))),
-			"Withdraw only a stored artifact.\ndemo-script/scenario-5 has no version outside cancelled runs.",
+			"Withdraw only a stored artifact.\n  demo-script/scenario-5 has no version outside cancelled runs.",
 		},
 		"a file argument": {
 			[]string{"demo-script", "scenario-2.json", "--name", "scenario-2"}, withdrawIndex(),
-			"Pass either files or --withdraw.\nA withdrawal stores no files, and the command has 1 file: scenario-2.json.",
+			"Pass either files or --withdraw.\n  A withdrawal stores no files, and the command has 1 file: scenario-2.json.",
 		},
 		"two file arguments": {
 			[]string{"demo-script", "a.json", "-", "--name", "scenario-2"}, withdrawIndex(),
-			"Pass either files or --withdraw.\nA withdrawal stores no files, and the command has 2 files: a.json, -.",
+			"Pass either files or --withdraw.\n  A withdrawal stores no files, and the command has 2 files: a.json, -.",
 		},
 		"a name already withdrawn": {
 			[]string{"demo-script", "--name", "scenario-4"},
 			indexOf(artifactEntry("demo-script", "scenario-4", "", 3, versionEntry("av_1", 1, fileEntry("s.json", "x")),
 				versionEntry("av_2", 2, fileEntry("s.json", "y")), withdrawn(versionEntry("av_3", 3)))),
-			"Leave demo-script/scenario-4 as it is.\nIts newest version, v3, is already a withdrawal.",
+			"Leave demo-script/scenario-4 as it is.\n  Its newest version, v3, is already a withdrawal.",
 		},
 		"a withdrawal under a cancelled version": {
 			[]string{"demo-script", "--name", "scenario-4"},
 			indexOf(artifactEntry("demo-script", "scenario-4", "", 3, versionEntry("av_1", 1, fileEntry("s.json", "x")),
 				withdrawn(versionEntry("av_2", 2)), cancelled(versionEntry("av_3", 3, fileEntry("s.json", "y"))))),
-			"Leave demo-script/scenario-4 as it is.\nIts newest version, v2, is already a withdrawal.",
+			"Leave demo-script/scenario-4 as it is.\n  Its newest version, v2, is already a withdrawal.",
 		},
 		"a person's upload": {
 			[]string{"demo-script", "--name", "scenario-3"}, withdrawIndex(),
-			"Leave demo-script/scenario-3 to a member.\nIts newest version, v1, is an upload by Ana, and a run withdraws only a name whose newest version a run wrote.",
+			"Leave demo-script/scenario-3 to a member.\n  Its newest version, v1, is an upload by Ana, and a run withdraws only a name whose newest version a run wrote.",
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -1028,9 +1028,9 @@ func TestArtifactPushWithdrawOfARefusalAfterTheIndex(t *testing.T) {
 			versionEntry("av_1", 1, fileEntry("s.json", "one")), byPerson(versionEntry("av_3", 3, fileEntry("s.json", "x"))))),
 	}
 	texts := map[string]string{
-		"no_version":        "Withdraw only a stored artifact.\ndemo-script/scenario-2 has no version outside cancelled runs.",
-		"already_withdrawn": "Leave demo-script/scenario-2 as it is.\nIts newest version, v3, is already a withdrawal.",
-		"person_version": "Leave demo-script/scenario-2 to a member.\nIts newest version, v3, is an upload by Ana, " +
+		"no_version":        "Withdraw only a stored artifact.\n  demo-script/scenario-2 has no version outside cancelled runs.",
+		"already_withdrawn": "Leave demo-script/scenario-2 as it is.\n  Its newest version, v3, is already a withdrawal.",
+		"person_version": "Leave demo-script/scenario-2 to a member.\n  Its newest version, v3, is an upload by Ana, " +
 			"and a run withdraws only a name whose newest version a run wrote.",
 	}
 
@@ -1077,7 +1077,7 @@ func TestArtifactPushWithdrawOfATypeTheWorkspaceLost(t *testing.T) {
 	server.response = `{"error":"unknown_type","type":"demo-script","message":"Define the artifact type demo-script in the workspace's Artifact types, then run the round again."}`
 
 	_, err := run(t, "artifact", "push", "demo-script", "--name", "scenario-2", "--withdraw")
-	wantExit(t, err, cmd.ExitArtifactRefused, "Define or switch on the artifact type demo-script in the workspace's Artifact types.\n"+
+	wantExit(t, err, cmd.ExitArtifactRefused, "Define or switch on the artifact type demo-script in the workspace's Artifact types.\n  "+
 		"Then run the round again. The workspace has no such type, or hides it.")
 
 	if len(server.pushes) != 1 {
@@ -1095,7 +1095,7 @@ func TestArtifactPushWithdrawOutsideARunKeepsTheWithdrawal(t *testing.T) {
 	}
 
 	_, err := run(t, "artifact", "push", "demo-script", "--name", "scenario-2", "--withdraw")
-	wantExit(t, err, cmd.ExitArtifactRefused, "Withdraw only a stored artifact.\ndemo-script/scenario-2 has no version outside cancelled runs.")
+	wantExit(t, err, cmd.ExitArtifactRefused, "Withdraw only a stored artifact.\n  demo-script/scenario-2 has no version outside cancelled runs.")
 
 	// A refusal creates nothing, not even the store.
 	if _, err := os.Stat(filepath.Join(root, ".qory")); !os.IsNotExist(err) {
@@ -1126,10 +1126,10 @@ func TestArtifactPushWithdrawOutsideARunKeepsTheWithdrawal(t *testing.T) {
 	before := listTree(t, filepath.Join(root, ".qory"))
 
 	_, err = run(t, "artifact", "push", "demo-script", "--name", "scenario-2", "--withdraw")
-	wantExit(t, err, cmd.ExitArtifactRefused, "Leave demo-script/scenario-2 as it is.\nIts newest version, v2, is already a withdrawal.")
+	wantExit(t, err, cmd.ExitArtifactRefused, "Leave demo-script/scenario-2 as it is.\n  Its newest version, v2, is already a withdrawal.")
 
 	_, err = run(t, "artifact", "push", "demo-script", "--name", "scenario-9", "--withdraw")
-	wantExit(t, err, cmd.ExitArtifactRefused, "Withdraw only a stored artifact.\ndemo-script/scenario-9 has no version outside cancelled runs.")
+	wantExit(t, err, cmd.ExitArtifactRefused, "Withdraw only a stored artifact.\n  demo-script/scenario-9 has no version outside cancelled runs.")
 
 	if after := listTree(t, filepath.Join(root, ".qory")); !slices.Equal(before, after) {
 		t.Errorf("a refusal changed the store:\n%v\nafter\n%v", before, after)
@@ -1196,7 +1196,7 @@ func TestArtifactPushWithdrawOutsideARunStopsAtALink(t *testing.T) {
 
 // TestArtifactPushWithdrawRefusalsKeepLine1Short is each refusal that names the type and
 // the name, with names of 64 characters: line 1 has at most 100 characters, and when a name
-// on it is cut, with ..., a last line has the full name.
+// on it is shortened by exports.Fit, a later line has the full name.
 func TestArtifactPushWithdrawRefusalsKeepLine1Short(t *testing.T) {
 	kind, name := strings.Repeat("t", 64), strings.Repeat("n", 64)
 	full := kind + "/" + name
@@ -1242,10 +1242,21 @@ func TestArtifactPushWithdrawRefusalsKeepLine1Short(t *testing.T) {
 			}
 
 			// A line 1 that fits with the full names is left as it is.
-			if cut := strings.Contains(lines[0], "..."); cut == (c.code == "type_not_withdrawable") {
+			cut := strings.Contains(lines[0], "…")
+			if cut == (c.code == "type_not_withdrawable") {
 				t.Errorf("cut = %v in line 1: %q", cut, lines[0])
-			} else if cut && !strings.HasPrefix(lines[len(lines)-1], "The full name is "+kind) {
-				t.Errorf("last line = %q, want the full name %s", lines[len(lines)-1], full)
+			}
+
+			if cut {
+				for _, long := range []string{kind, name} {
+					if strings.Contains(lines[0], long) {
+						t.Errorf("line 1 has the whole name %s: %q", long, lines[0])
+					}
+				}
+
+				if !strings.Contains(err.Error(), "\n  The full name of ") || !strings.Contains(err.Error(), " is "+kind+".") {
+					t.Errorf("no line with the full name %s: %q", full, err)
+				}
 			}
 		})
 	}
@@ -1314,7 +1325,7 @@ func TestArtifactPushWithdrawOfAnApprovedName(t *testing.T) {
 				return
 			}
 
-			want := fmt.Sprintf("Push a new version of demo-script/scenario-2 instead.\nA member approved its newest version, v%d, so a run cannot withdraw the name.", len(c.versions))
+			want := fmt.Sprintf("Push a new version of demo-script/scenario-2 instead.\n  A member approved its newest version, v%d, so a run cannot withdraw the name.", len(c.versions))
 			wantExit(t, err, cmd.ExitArtifactRefused, want)
 
 			if err.Error() != want || len(server.pushes) != 0 {
@@ -1333,12 +1344,12 @@ func TestArtifactPushWithdrawOfARefusedType(t *testing.T) {
 		"a type with withdrawable false": {
 			"acceptance-lock",
 			"Push a new version of acceptance-lock instead. The artifact type acceptance-lock has withdrawable set to false, so a run cannot withdraw its names.",
-			"Push a new version of acceptance-lock instead.\nThe artifact type acceptance-lock has withdrawable set to false, so a run cannot withdraw its names.",
+			"Push a new version of acceptance-lock instead.\n  The artifact type acceptance-lock has withdrawable set to false, so a run cannot withdraw its names.",
 		},
 		"an approval after the index": {
 			"acceptance-lock",
 			"Push a new version of acceptance-lock/main instead. A member approved its newest version, v1, so a run cannot withdraw the name.",
-			"Push a new version of acceptance-lock/main instead.\nA member approved its newest version, v1, so a run cannot withdraw the name.",
+			"Push a new version of acceptance-lock/main instead.\n  A member approved its newest version, v1, so a run cannot withdraw the name.",
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -1369,7 +1380,7 @@ func TestArtifactPushWithdrawOutsideARunReadsTheTemplate(t *testing.T) {
 	copyFixture(t, "factory-process-artifact-type-withdrawable", root)
 
 	for _, kind := range []string{"acceptance-lock", "reply-draft"} {
-		want := "Push a new version of " + kind + " instead.\nThe artifact type " + kind + " has withdrawable set to false, so a run cannot withdraw its names."
+		want := "Push a new version of " + kind + " instead.\n  The artifact type " + kind + " has withdrawable set to false, so a run cannot withdraw its names."
 
 		_, err := run(t, "artifact", "push", "--withdraw", kind, "a.json")
 		wantExit(t, err, cmd.ExitArtifactRefused, want)
@@ -1387,7 +1398,7 @@ func TestArtifactPushWithdrawOutsideARunReadsTheTemplate(t *testing.T) {
 	// template does not list are not refused for the type.
 	for _, kind := range []string{"screenshot", "build-ledger", "demo-script"} {
 		_, err := run(t, "artifact", "push", "--withdraw", kind)
-		wantExit(t, err, cmd.ExitArtifactRefused, "Withdraw only a stored artifact.\n"+kind+"/main has no version outside cancelled runs.")
+		wantExit(t, err, cmd.ExitArtifactRefused, "Withdraw only a stored artifact.\n  "+kind+"/main has no version outside cancelled runs.")
 	}
 }
 
@@ -1399,7 +1410,7 @@ func TestArtifactPushWithdrawOutsideARunReadsAnInvalidTemplate(t *testing.T) {
 	copyFixture(t, "factory-process-artifact-type-withdrawable-not-boolean-fails", root)
 
 	_, err := run(t, "artifact", "push", "--withdraw", "acceptance-lock")
-	if err == nil || !strings.Contains(err.Error(), "process.yaml: set withdrawable of artifact type acceptance-lock to true or false") {
+	if err == nil || !strings.HasPrefix(err.Error(), "Set withdrawable of artifact type acceptance-lock to true or false.\n") {
 		t.Errorf("err = %v", err)
 	}
 

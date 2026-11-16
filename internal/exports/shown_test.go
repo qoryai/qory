@@ -216,7 +216,7 @@ func TestAnExportsRefusalPrintsNoSecret(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err := exports.Read(root)
-	if want := "apiVersion " + value + " is not one this qory reads"; err == nil || !strings.Contains(err.Error(), want) {
+	if want := "and apiVersion is " + value + "."; err == nil || !strings.Contains(err.Error(), want) {
 		t.Errorf("apiVersion: %v\nwant one that contains %q", err, want)
 	}
 	e, err := exports.Read(write(t, "exports:\n  modules: [qrk_m, core]\n"))

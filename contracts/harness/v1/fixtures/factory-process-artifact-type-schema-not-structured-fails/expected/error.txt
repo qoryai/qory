@@ -1,1 +1,3 @@
-modules/support-desk/process.yaml: remove json_schema from artifact type reply-draft, or set base_view to structured: only a structured type has a JSON Schema, and base_view is document
+Remove json_schema from artifact type reply-draft, or set its base_view to structured.
+  Only a structured type has a JSON Schema, and base_view is document.
+  The type is in modules/support-desk/process.yaml.

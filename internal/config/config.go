@@ -1138,7 +1138,7 @@ func read(path string) (file, error) {
 	}
 	current, err := exports.ResolveAPIVersion(f.APIVersion)
 	if err != nil {
-		return f, fmt.Errorf("%s: %w", path, err)
+		return f, exports.AtPath(path, err)
 	}
 	if current != f.APIVersion {
 		f.retired, f.APIVersion = f.APIVersion, current

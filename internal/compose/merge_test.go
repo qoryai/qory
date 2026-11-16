@@ -59,7 +59,9 @@ func TestSettingsDifferentValuesCollide(t *testing.T) {
 				"modules/a/settings/claude/settings.json": c.a,
 				"modules/b/settings/claude/settings.json": c.b,
 			})
-			want := "module b: settings/claude/settings.json: " + c.want + " is set by modules a and b with different values"
+			want := "Set " + c.want + " to one value in both modules.\n" +
+				"  Modules a and b set " + c.want + " to different values.\n" +
+				"  " + c.want + " is in settings/claude/settings.json."
 			if err == nil || err.Error() != want {
 				t.Fatalf("error %v, want %q", err, want)
 			}

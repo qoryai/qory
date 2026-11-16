@@ -569,7 +569,7 @@ func loadFile(path string) (*Stack, error) {
 	if value != "" {
 		c, err := ParseConstraint(value)
 		if err != nil {
-			return nil, fmt.Errorf("%s: %w", file, err)
+			return nil, inPath(file, err)
 		}
 		p.Qory = p.Qory.Join(c)
 	}
@@ -605,8 +605,8 @@ func NewCompose(path string, p *Stack) (*Stack, error) {
 	return p, nil
 }
 
-// inPath is err, an error about the document at path, with path in front, or for an
-// [exports.InFile], with path inside its text.
+// inPath is err, an error about the document at path, with path in front, or, when err
+// itself is an [exports.InFile], with path inside its text, as [exports.AtPath] has it.
 func inPath(path string, err error) error {
 	var in exports.InFile
 	if errors.As(err, &in) {
@@ -650,7 +650,7 @@ func (p *Stack) validate(compose bool) error {
 			return errors.New("extending is the base stack's; a harness section that extends a stack does not set it")
 		}
 		if p.extends() && len(p.Workflows) > 0 {
-			return errors.New("remove workflows or extends: a harness section that extends a stack takes the workflows of its base")
+			return exports.Refuse("Remove workflows or extends.", "A harness section that extends a stack takes the workflows of its base.", "Both keys are in "+exports.FilePlace+".")
 		}
 		// A document extending a stack may leave the runtime to the machine's
 		// configuration or the flag; its own stack names one.
@@ -705,18 +705,18 @@ func (p *Stack) validate(compose bool) error {
 	}
 	for _, name := range slices.Sorted(maps.Keys(p.Workflows)) {
 		if !workflowName.MatchString(name) {
-			return fmt.Errorf("name the workflow %s with a lower-case letter, then up to 54 lower-case letters, digits and hyphens, 55 characters at most: workflows lists it", accesskey.ShownName(name, true))
+			return exports.Refuse("Rename the workflow "+accesskey.ShownName(name, true)+".", "A workflow name is a lower-case letter, then up to 54 lower-case letters, digits, and hyphens, 55 characters at most.", "workflows is in "+exports.FilePlace+".")
 		}
 		w := p.Workflows[name]
 		if w.Access != "" && w.Access != AccessRead && w.Access != AccessWrite {
-			return fmt.Errorf("set workflows.%s.access to read or write: %s is neither", name, exports.Value(w.Access, true))
+			return exports.Refuse(fmt.Sprintf("Set workflows.%s.access to read or write.", name), fmt.Sprintf("The value is %s.", exports.Value(w.Access, true)), fmt.Sprintf("workflows.%s is in %s.", name, exports.FilePlace))
 		}
 		if w.TimeLimitText == "" {
 			continue
 		}
 		d, err := time.ParseDuration(w.TimeLimitText)
 		if err != nil || d <= 0 {
-			return fmt.Errorf("set workflows.%s.time_limit to a duration above zero, such as 7h or 45m: %s is not one", name, exports.Value(w.TimeLimitText, true))
+			return exports.Refuse(fmt.Sprintf("Set workflows.%s.time_limit to a duration above zero, such as 7h or 45m.", name), fmt.Sprintf("The value is %s.", exports.Value(w.TimeLimitText, true)), fmt.Sprintf("workflows.%s is in %s.", name, exports.FilePlace))
 		}
 		w.TimeLimit = d
 		p.Workflows[name] = w
@@ -748,7 +748,7 @@ func (p *Stack) validate(compose bool) error {
 		if l.Name != "" {
 			who = "module " + accesskey.ShownName(l.Name, false)
 			if !segment(l.Name) {
-				return fmt.Errorf("modules[%d]: name %s is not one path segment; a module name contains no slash, backslash, @ or leading dot", i, accesskey.ShownName(l.Name, true))
+				return exports.Refuse(fmt.Sprintf("Rename the name of modules[%d] to one path segment.", i), "A module name contains no slash, backslash, @, or leading dot, and the name is "+accesskey.ShownName(l.Name, true)+".", "modules is in "+exports.FilePlace+".")
 			}
 			if seen[l.Name] {
 				return fmt.Errorf("module %s is listed twice", accesskey.ShownName(l.Name, false))
@@ -777,7 +777,7 @@ func (p *Stack) validate(compose bool) error {
 			return fmt.Errorf("%s: only %w", who, err)
 		}
 		if err := p.Modules[i].besideOnly(); err != nil {
-			return fmt.Errorf("%s: %w", who, err)
+			return exports.Prefixed(who, err)
 		}
 		if l.Link != "" {
 			if strings.ContainsFunc(l.Link, unicode.IsControl) {
@@ -809,7 +809,8 @@ func (l Module) besideOnly() error {
 	for _, kind := range l.Exclude.KindNames() {
 		for _, name := range l.Exclude.Kinds[kind] {
 			if slices.Contains(l.Only.Kinds[kind], name) {
-				return fmt.Errorf("%s/%s is listed in only and in exclude; list it in one", accesskey.ShownName(kind, false), accesskey.ShownName(name, false))
+				entry := accesskey.ShownName(kind, false) + "/" + accesskey.ShownName(name, false)
+				return exports.Refuse(fmt.Sprintf("Remove %s from the only or the exclude of %s.", entry, exports.ModulePlace), fmt.Sprintf("Both blocks list %s.", entry), "The blocks are in "+exports.FilePlace+".")
 			}
 		}
 	}
@@ -963,29 +964,29 @@ func baseName(l Module) string {
 func checkoutExclude(l Module, extending *Extending) error {
 	name := accesskey.ShownName(l.Name, false)
 	if l.Source.Path != "" || l.Source.Git != "" || l.Source.exported() || !l.Only.Empty() || l.Variant != "" || l.Link != "" {
-		return fmt.Errorf("list module %s with its name and exclude only: it belongs to the base stack, and a checkout's qory.yaml cannot change its source, only, variant or link", name)
+		return exports.Errorf("List module %s with its name and exclude only.\n  It belongs to the base stack, and a checkout's qory.yaml cannot change its source, only, variant, or link.", name)
 	}
 	if l.Exclude.Empty() {
-		return fmt.Errorf("add an exclude to module %s, or remove its entry: it belongs to the base stack, and a checkout's qory.yaml lists a base module only to exclude entries from it", name)
+		return exports.Errorf("Add an exclude to module %s, or remove its entry.\n  It belongs to the base stack, and a checkout's qory.yaml lists a base module only to exclude entries from it.", name)
 	}
 	for _, part := range []struct {
 		key string
 		set bool
 	}{{"instructions", l.Exclude.Instructions}, {"settings", l.Exclude.Settings.Set()}, {"env", l.Exclude.Env.Set()}} {
 		if part.set {
-			return fmt.Errorf("remove %s from the exclude of module %s: it belongs to the base stack, and a checkout's qory.yaml excludes entries from a base module, not its instructions, settings or env", part.key, name)
+			return exports.Errorf("Remove %s from the exclude of module %s.\n  It belongs to the base stack, and a checkout's qory.yaml excludes entries from a base module, not its instructions, settings, or env.", part.key, name)
 		}
 	}
 	for _, kind := range l.Exclude.KindNames() {
 		for _, entry := range l.Exclude.Kinds[kind] {
 			if kind == "files" {
 				if !FileAllowed(entry, extending.Files) {
-					return fmt.Errorf("remove files/%s from the exclude of module %s: a checkout excludes from a base module only files where an extending module may ship them, and the base stack lets an extending module ship files under %s", exports.HidePath(entry), name, prefixesText(extending.Files))
+					return exports.Errorf("Remove files/%s from the exclude of module %s.\n  A checkout excludes from a base module only files where an extending module may ship them, and the base stack lets an extending module ship files under %s.", exports.HidePath(entry), name, prefixesText(extending.Files))
 				}
 				continue
 			}
 			if !slices.Contains(extending.Kinds, kind) {
-				return fmt.Errorf("remove %s/%s from the exclude of module %s: a checkout excludes from a base module only entries of the kinds an extending module may ship, and the base stack lets an extending module ship %s", accesskey.ShownName(kind, false), accesskey.ShownName(entry, false), name, kindsListText(extending.Kinds))
+				return exports.Errorf("Remove %s/%s from the exclude of module %s.\n  A checkout excludes from a base module only entries of the kinds an extending module may ship, and the base stack lets an extending module ship %s.", accesskey.ShownName(kind, false), accesskey.ShownName(entry, false), name, kindsListText(extending.Kinds))
 			}
 		}
 	}
