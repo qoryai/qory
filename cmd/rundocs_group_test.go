@@ -88,7 +88,7 @@ func TestARunCodesBindOfAListToARoleThatIsNoGroupStops(t *testing.T) {
 		t.Fatalf("%v (exit %d), want exit 2 before the join\n%s", r.err, cmd.ExitCode(r.err), r.out)
 	}
 	first, rest, _ := strings.Cut(r.err.Error(), "\n")
-	if !strings.HasPrefix(first, "correct "+workspaceHarness+", then take the work item in again in Qory Apiary: Write one name for bind.agents.reviewers in ") {
+	if first != "correct "+workspaceHarness+", then take the work item in again in Qory Apiary: Write one name for bind.agents.reviewers." {
 		t.Errorf("the error's first line is not the fix:\n%v", r.err)
 	}
 	if !strings.HasPrefix(strings.TrimSpace(rest), "No module declares agents/reviewers as many, so one agent fills it") {
