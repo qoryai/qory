@@ -420,7 +420,7 @@ func (c *Checker) tempFolder() (string, error) {
 func copyInputs(path string, data []byte, dir string) (string, error) {
 	copied := filepath.Join(dir, filepath.Base(path))
 	if err := writeNew(copied, data); err != nil {
-		return "", fmt.Errorf("copying the run's inputs for the check failed: %w", exports.HideError(err))
+		return "", fmt.Errorf("Free space in the check's folder or make it writable, then push again.\nCopying the run's inputs to %s for the check failed: %w", exports.Value(copied, false), exports.HideError(err))
 	}
 	return copied, nil
 }

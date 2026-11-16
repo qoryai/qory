@@ -492,7 +492,8 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				if fromCode, err = codeRunOf(doc); err != nil {
 					return err
 				}
-				// A --run-id gave the run its home before the redemption.
+				// A run with no --run-id has no home for its run until the code's run id is
+				// known, so it takes that home here, and its mount moves with it.
 				if perRun && runHome == "" {
 					shared := at.home
 					at = runHomeAt(at, spec.RunID)

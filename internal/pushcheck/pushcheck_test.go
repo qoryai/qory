@@ -459,6 +459,26 @@ func TestTheCheckGetsTheRunsInputs(t *testing.T) {
 	}
 }
 
+// TestTheRunsInputsThatCannotBeCopiedStopTheCheck is a checker whose copy of the run's
+// inputs cannot be written, since the path is the root, whose name is the copy's folder: the error starts with
+// its fix on a first line of at most 100 characters, and the second line has the copy's
+// path and the cause.
+func TestTheRunsInputsThatCannotBeCopiedStopTheCheck(t *testing.T) {
+	f := newFixture(t, "#!/usr/bin/env node")
+	f.c.Inputs, f.c.InputsData = string(os.PathSeparator), []byte(`{}`)
+	_, err := f.post(t, "/artifacts", pushBody(t, "spec", [2]string{"spec.md", "x"}))
+	if err == nil {
+		t.Fatal("a copy that cannot be written stopped nothing")
+	}
+	first, second, _ := strings.Cut(err.Error(), "\n")
+	if want := "Free space in the check's folder or make it writable, then push again."; first != want || len(first) > 100 {
+		t.Errorf("the first line is %q (%d characters), want %q", first, len(first), want)
+	}
+	if !strings.HasPrefix(second, "Copying the run's inputs to ") || !strings.Contains(second, " for the check failed: ") {
+		t.Errorf("the second line is %q, want the copy's path and the cause", second)
+	}
+}
+
 // TestAnotherUserCanReadTheRunsInputs is a check whose container runs as a user other
 // than this process's, with the run's inputs.json mode 0600 in a folder of mode 0700, as
 // qory run writes it: the file the container mounts at the path of inputs.json has the
