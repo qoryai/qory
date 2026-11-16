@@ -40,14 +40,14 @@ func TestReadManifestRefusesABadRoleMap(t *testing.T) {
 	for _, c := range []struct{ body, want string }{
 		{"  agents:\n    developer: {fill: one, paths: [a]}\n", "Remove key paths from roles.agents.developer.\n  A role's map has fill and contract. The map is in {path}."},
 		{"  agents:\n    developer: {contract: roles/developer.yaml}\n", "Add fill: one or fill: many to roles.agents.developer.\n  A role's map sets fill. The map is in {path}."},
-		{"  agents:\n    developer: {fill: two}\n", "Set roles.agents.developer to one or many in {path}."},
+		{"  agents:\n    developer: {fill: two}\n", "Set roles.agents.developer to one or many.\n  One entry fills a role and several fill a group, and the value is \"two\".\n  roles is in {path}."},
 		{"  skills:\n    lint: {fill: one, contract: roles/lint.yaml}\n", "Set roles.skills.lint to one.\n  Only an agents role is a map, to give it a contract. The role is in {path}."},
 		{"  commands:\n    ship: {fill: one}\n", "Set roles.commands.ship to one.\n  Only an agents role is a map, to give it a contract. The role is in {path}."},
-		{"  agents:\n    developer: {fill: one, contract: ../developer.yaml}\n", "Set roles.agents.developer.contract to a path inside the module.\n  The value is \"../developer.yaml\". The map is in {path}."},
-		{"  agents:\n    developer: {fill: one, contract: roles/../developer.yaml}\n", "Set roles.agents.developer.contract to a path inside the module.\n  The value is \"roles/../developer.yaml\". The map is in {path}."},
-		{"  agents:\n    developer: {fill: one, contract: /etc/developer.yaml}\n", "Set roles.agents.developer.contract to a path inside the module.\n  The value is \"/etc/developer.yaml\". The map is in {path}."},
-		{"  agents:\n    developer: {fill: one, contract: \"\"}\n", "Set roles.agents.developer.contract to a path inside the module.\n  The value is empty or not a path. The map is in {path}."},
-		{"  agents:\n    developer: {fill: one, contract: [a]}\n", "Set roles.agents.developer.contract to a path inside the module.\n  The value is empty or not a path. The map is in {path}."},
+		{"  agents:\n    developer: {fill: one, contract: ../developer.yaml}\n", "Set roles.agents.developer.contract of the module to a path inside the module.\n  The value is \"../developer.yaml\". The map is in {path}."},
+		{"  agents:\n    developer: {fill: one, contract: roles/../developer.yaml}\n", "Set roles.agents.developer.contract of the module to a path inside the module.\n  The value is \"roles/../developer.yaml\". The map is in {path}."},
+		{"  agents:\n    developer: {fill: one, contract: /etc/developer.yaml}\n", "Set roles.agents.developer.contract of the module to a path inside the module.\n  The value is \"/etc/developer.yaml\". The map is in {path}."},
+		{"  agents:\n    developer: {fill: one, contract: \"\"}\n", "Set roles.agents.developer.contract of the module to a path inside the module.\n  The value is empty or not a path. The map is in {path}."},
+		{"  agents:\n    developer: {fill: one, contract: [a]}\n", "Set roles.agents.developer.contract of the module to a path inside the module.\n  The value is empty or not a path. The map is in {path}."},
 		{"  agents:\n    qak_x: {fill: one, paths: [a]}\n", "Remove key paths from roles.agents.(a name that contains an access key secret).\n  A role's map has fill and contract. The map is in {path}."},
 	} {
 		dir := tree(t, map[string]string{ManifestName: head + c.body})

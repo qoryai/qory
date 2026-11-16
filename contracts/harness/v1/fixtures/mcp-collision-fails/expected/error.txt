@@ -1,3 +1,4 @@
-mcp/db is provided by 2 modules: core@working-tree, nextjs@working-tree
-  keep one and exclude the others, for example
+Keep mcp/db in one module, and exclude it from the others.
+  2 modules provide mcp/db: core@working-tree, nextjs@working-tree
+  For example:
     core:   exclude: {mcp: [db]}

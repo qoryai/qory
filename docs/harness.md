@@ -169,7 +169,9 @@ When none of the stack's modules composes one, after their `exclude` and `only`,
 compose fails with exit 2:
 
 ```
-add a skill or command workflow-deploy to a module of the base stack core@4b8e2f1a9c7d, or remove deploy from the workflows of its qory-stack.yaml: the stack declares the workflow deploy, and none of its modules ships a skill or command workflow-deploy or deploy
+Add skill or command workflow-deploy to a module of core@4b8e2f1a9c7d, or remove workflow deploy.
+  The base stack core@4b8e2f1a9c7d declares the workflow deploy in its qory-stack.yaml.
+  No module of core@4b8e2f1a9c7d ships a skill or command workflow-deploy or deploy.
 ```
 
 A module that a checkout adds to the stack does not count, because the stack lists the
@@ -216,7 +218,7 @@ a tier in its model fails the compose with exit 2, and the message lists each pa
 lacks:
 
 ```
-Complete agent python-developer of module python, or bind agents/developer to another agent.
+Complete agent python-developer of module python, or bind agents.developer to another agent.
   The contract roles/developer.yaml of module core requires these parts, which agents/python-developer.md lacks:
   - the heading "## Stop conditions"
 ```
@@ -260,8 +262,13 @@ that ignores case, so qory stops them with exit 2 on every file system, and a mo
 alike everywhere:
 
 ```
-module core: rename skills/a/review or skills/b/review: each skill goes to skills/<name>, and both are the skill review
-module core: rename skills/a/Review or skills/b/review: each skill goes to skills/<name>, and these two names differ only in case
+Rename skills/a/review or skills/b/review in module core.
+  Each skill goes to skills/<name>, and both are the skill review.
+```
+
+```
+Rename skills/a/Review or skills/b/review in module core.
+  Each skill goes to skills/<name>, and these two names differ only in case.
 ```
 
 ### Let several modules add reviewers
@@ -292,9 +299,11 @@ These stop the compose with exit 2:
 
 ```
 Write provides.agents.reviewers in module python as a list: it is a group role.
-Declare agents/reviewers as many in module python, or remove it: module software-factory declares it many.
-Fill agents/reviewers, or remove it from skills/review/SKILL.md of module software-factory.
+Declare agents/reviewers as many in module python, or remove it.
+  Module software-factory declares it many.
+Fill agents/reviewers, or remove the reference to it.
   The group has no member.
+  The reference is in skills/review/SKILL.md of module software-factory.
 ```
 
 A reference to a group in front matter stops the compose as well, since a group resolves
@@ -382,8 +391,8 @@ The rules:
 - The exclude lists entries of the kinds the stack's `extending` block lets your modules
   ship, and files under its `extending.files` prefixes. The delivered runtime hooks,
   MCP servers, instructions, settings and variables stay as they are.
-- An entry the delivered module does not compose fails the compose, `remove skills/x
-  from the exclude of module core in qory.yaml: …`.
+- An entry the delivered module does not compose fails the compose, `Remove skills/x
+  from the exclude of module core in qory.yaml.`.
 
 Without the exclude, the two skills collide. The compose fails, exit 3, and prints the
 entry to write. When `qory.yaml` lists the module already, it prints the whole entry to

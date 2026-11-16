@@ -476,7 +476,7 @@ func TestAMissingDefaultImageStopsARunWithPushChecks(t *testing.T) {
 	if setUp || joined || slices.Contains(r.calls, "set run API check") {
 		t.Errorf("the run went on: %v, set up %v, joined %v", r.calls, setUp, joined)
 	}
-	wants(t, r.out, "qory run: Pull the wall's default image, then take the work item in again in Qory Apiary: push checks run in it, and the engine does not have the image example.com/agent:1; the code is used\n")
+	wants(t, r.out, "qory run: Pull the wall's default image, then take the work item in again in Qory Apiary.\n  Push checks run in it, and the engine does not have the image example.com/agent:1; the code is used\n")
 	if got := checkLog(t, log); got != "" {
 		t.Errorf("a check's container ran:\n%s", got)
 	}
@@ -579,7 +579,7 @@ func TestACheckThatCannotBeSetStopsTheRun(t *testing.T) {
 	if slices.Contains(r.calls, "setup") || joined {
 		t.Errorf("the run went on after the failed set: %v, joined %v", r.calls, joined)
 	}
-	wants(t, r.out, "qory run: Take the work item in again in Qory Apiary: turning on the push checks for the POSTs from behind the wall failed, so the run stopped before the setup: Call SetRunAPICheck before Setup: the setup started; the code is used\n")
+	wants(t, r.out, "qory run: Take the work item in again in Qory Apiary.\n  Turning on the push checks for the POSTs from behind the wall failed, so the run stopped before the setup: Call SetRunAPICheck before Setup: the setup started; the code is used\n")
 }
 
 // TestThePushStepChecksItsVersion is a walled run whose harness declares a check for
@@ -643,7 +643,7 @@ func TestAHomeWhosePushChecksDoNotReadStopsTheRun(t *testing.T) {
 	if setUp || joined {
 		t.Errorf("the setup ran %v, the agent ran %v, want neither", setUp, joined)
 	}
-	wants(t, r.out, "qory run: Take the work item in again in Qory Apiary, so that the new run composes the harness again: the push checks in "+file+" could not be read: it is not JSON in the form the compose writes: unexpected end of JSON input; the code is used\n")
+	wants(t, r.out, "qory run: Take the work item in again in Qory Apiary, so that the new run composes the harness again.\n  The push checks in "+file+" could not be read: it is not JSON in the form the compose writes: unexpected end of JSON input; the code is used\n")
 	if got := checkLog(t, log); got != "" {
 		t.Errorf("a check's container ran:\n%s", got)
 	}
@@ -758,7 +758,7 @@ func TestARunAPIThatFailsStopsARunWithPushChecks(t *testing.T) {
 	if joined || slices.Contains(r.calls, "setup") || slices.Contains(r.calls, "set run API check") {
 		t.Errorf("the run went on: %v, joined %v", r.calls, joined)
 	}
-	wants(t, r.out, "qory run: Take the work item in again in Qory Apiary, through a gateway that sends the run API address: the push checks read the artifacts through the run API, which failed: Open another run to reach the run API: this run is closed; the code is used\n")
+	wants(t, r.out, "qory run: Take the work item in again in Qory Apiary, through a gateway that sends the run API address.\n  The push checks read the artifacts through the run API, which failed: Open another run to reach the run API: this run is closed; the code is used\n")
 }
 
 // TestAWritableMountInTheHomeStopsARunCodeWithPushChecks is a walled run from a run code

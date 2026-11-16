@@ -162,7 +162,9 @@ func TestReadRefusesADirectoryUnderHooks(t *testing.T) {
 	if err == nil {
 		t.Fatal("read a module with a directory under hooks")
 	}
-	want := "module core: hooks/scripts is a directory; a hook is one file. Keep its helpers elsewhere in the module, reached as $QORY_HARNESS_HOME/modules/core/<path>"
+	want := "Move hooks/scripts out of the hooks directory of module core.\n" +
+		"  hooks/scripts is a directory, and a hook is one file.\n" +
+		"  A hook reads its helpers at $QORY_HARNESS_HOME/modules/core/<path>."
 	if err.Error() != want {
 		t.Fatalf("error %q, want %q", err, want)
 	}
@@ -173,10 +175,10 @@ func TestReadRefusesADirectoryUnderHooks(t *testing.T) {
 // null parses and gets no decoder message.
 func TestReadRefusesAnMCPServerThatIsNotAnObject(t *testing.T) {
 	for _, c := range []struct{ body, want string }{
-		{"[]\n", "module core: mcp/db.json does not contain a JSON object: json: cannot unmarshal array into Go value of type map[string]interface {}"},
-		{"not json\n", "module core: mcp/db.json does not contain a JSON object: invalid character 'o' in literal null (expecting 'u')"},
-		{"{\"command\": \"x\",}\n", "module core: mcp/db.json does not contain a JSON object: invalid character '}' looking for beginning of object key string"},
-		{"null\n", "module core: mcp/db.json does not contain a JSON object"},
+		{"[]\n", "Write mcp/db.json in module core as one JSON object.\n  The file does not contain a JSON object: json: cannot unmarshal array into Go value of type map[string]interface {}"},
+		{"not json\n", "Write mcp/db.json in module core as one JSON object.\n  The file does not contain a JSON object: invalid character 'o' in literal null (expecting 'u')"},
+		{"{\"command\": \"x\",}\n", "Write mcp/db.json in module core as one JSON object.\n  The file does not contain a JSON object: invalid character '}' looking for beginning of object key string"},
+		{"null\n", "Write mcp/db.json in module core as one JSON object.\n  The file contains null, which is no JSON object."},
 	} {
 		dir := tree(t, map[string]string{"mcp/db.json": c.body})
 		_, err := Read("core", dir, nil, "")
@@ -193,9 +195,9 @@ func TestReadRefusesAnMCPServerThatIsNotAnObject(t *testing.T) {
 // key nothing reads, both transports, neither.
 func TestReadRefusesAnMCPServerNoRuntimeCouldStart(t *testing.T) {
 	for _, c := range []struct{ body, want string }{
-		{`{"comand": "x"}`, `module core: mcp/db.json: key "comand" is not one of an MCP server's; keys: type, command, args, env, url, headers, description`},
-		{`{"command": "x", "url": "https://x"}`, "module core: mcp/db.json: sets both a command and a url; a server is one or the other"},
-		{`{"args": ["x"]}`, "module core: mcp/db.json: sets neither a command nor a url"},
+		{`{"comand": "x"}`, "Remove the key \"comand\" from the MCP server file.\n  An MCP server has only type, command, args, env, url, headers, and description.\n  The file is mcp/db.json in module core."},
+		{`{"command": "x", "url": "https://x"}`, "Remove command or url from the MCP server file.\n  A server sets one of them, and the file sets both.\n  The file is mcp/db.json in module core."},
+		{`{"args": ["x"]}`, "Add command or url to the MCP server file.\n  A server sets one of them, and the file sets neither.\n  The file is mcp/db.json in module core."},
 	} {
 		dir := tree(t, map[string]string{"mcp/db.json": c.body})
 		_, err := Read("core", dir, nil, "")
@@ -222,7 +224,9 @@ func TestReadRefusesALinkToADirectoryUnderHooks(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = Read("core", dir, m, "claude")
-	want := "module core: claude/hooks/scripts is a directory; a hook is one file. Keep its helpers elsewhere in the module, reached as $QORY_HARNESS_HOME/modules/core/<path>"
+	want := "Move claude/hooks/scripts out of the hooks directory of module core.\n" +
+		"  claude/hooks/scripts is a directory, and a hook is one file.\n" +
+		"  A hook reads its helpers at $QORY_HARNESS_HOME/modules/core/<path>."
 	if err == nil || err.Error() != want {
 		t.Fatalf("error %v, want %q", err, want)
 	}
@@ -373,7 +377,8 @@ func TestReadManifestReadsVariantsAndDefault(t *testing.T) {
 }
 
 // TestReadManifestRefuses covers every document the manifest reader turns down. The message
-// starts with the manifest path, which the command prints as it comes.
+// starts with the manifest path, which the command prints as it comes, or, written fix
+// first, has the path in its fix line.
 func TestReadManifestRefuses(t *testing.T) {
 	cases := []struct {
 		name string
@@ -383,7 +388,7 @@ func TestReadManifestRefuses(t *testing.T) {
 		{
 			"unknown apiVersion",
 			"apiVersion: qory.dev/v2\nname: core\n",
-			`apiVersion "qory.dev/v2" is not one this qory reads; versions: qory.dev/v1alpha1`,
+			`This qory reads qory.dev/v1alpha1, and apiVersion is "qory.dev/v2".`,
 		},
 		{
 			"missing name",
@@ -424,7 +429,7 @@ func TestReadManifestRefuses(t *testing.T) {
 				t.Fatalf("read %q without an error", c.yaml)
 			}
 			path := filepath.Join(dir, ManifestName)
-			if !strings.HasPrefix(err.Error(), path+": ") {
+			if !strings.HasPrefix(err.Error(), path+": ") && !strings.HasSuffix(err.Error(), " "+path+".") {
 				t.Fatalf("error %q does not start with %q", err, path)
 			}
 			if !strings.Contains(err.Error(), c.want) {
@@ -495,7 +500,7 @@ func TestReadManifestRefusesEnv(t *testing.T) {
 				t.Fatalf("read %q without an error", c.env)
 			}
 			path := filepath.Join(dir, ManifestName)
-			if !strings.HasPrefix(err.Error(), path+": ") {
+			if !strings.HasPrefix(err.Error(), path+": ") && !strings.HasSuffix(err.Error(), " "+path+".") {
 				t.Fatalf("error %q does not start with %q", err, path)
 			}
 			if !strings.Contains(err.Error(), c.want) {

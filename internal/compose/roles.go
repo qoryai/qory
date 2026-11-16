@@ -85,7 +85,7 @@ func setRoles(p *stack.Stack, opened []openedModule, dropped func(o openedModule
 		if first {
 			return nil
 		}
-		return fmt.Errorf(format, args...)
+		return exports.Errorf(format, args...)
 	}
 	set := map[string]Role{}
 	for _, kind := range sortedKeys(p.BaseBind.One) {
@@ -170,7 +170,7 @@ func setRoles(p *stack.Stack, opened []openedModule, dropped func(o openedModule
 	for _, kind := range sortedKeys(p.Bind.Many) {
 		for _, role := range sortedKeys(p.Bind.Many[kind]) {
 			if declared[kind+"/"+role] == "" {
-				if err := wrong("Write one name for bind.%s.%s in %s.\n  No module declares %s as many, so one agent fills it.", shown(kind), shown(role), file, shown(kind+"/"+role)); err != nil {
+				if err := wrong("Write one name for bind.%s.%s.\n  No module declares %s as many, so one agent fills it.\n  bind is in %s.", shown(kind), shown(role), shown(kind+"/"+role), file); err != nil {
 					return nil, nil, err
 				}
 			}
@@ -257,7 +257,7 @@ func groupRoles(opened []openedModule) (map[string]string, error) {
 			for _, role := range sortedKeys(o.m.Roles[kind]) {
 				key := kind + "/" + role
 				if by := out[key]; by != "" && o.m.Roles[kind][role] == "one" {
-					return out, fmt.Errorf("Declare %s as many in module %s, or remove it: module %s declares it many.", shown(key), shown(o.m.Name), shown(by))
+					return out, exports.Errorf("Declare %s as many in module %s, or remove it.\n  Module %s declares it many.", shown(key), shown(o.m.Name), shown(by))
 				}
 			}
 		}
@@ -287,15 +287,21 @@ func twoProviders(p *stack.Stack, key string, list []Role) error {
 	if len(list) > 2 {
 		both = fmt.Sprintf("all %d modules", len(list))
 	}
-	return fmt.Errorf("Bind %s.%s in %s, or compose one of %s: %s provide %s (%s).", shown(kind), shown(role), docFile(p), andList(modules), both, shown(key), strings.Join(names, ", "))
+	return exports.Errorf("%s\n  %s provide %s: %s.", altFix(fmt.Sprintf("Bind %s.%s in %s", shown(kind), shown(role), docFile(p)), "compose one of "+andList(modules)), upperFirst(both), shown(key), strings.Join(names, ", "))
 }
 
-// andList joins names as a sentence lists them: "a and b", "a, b and c".
-func andList(names []string) string {
-	if len(names) < 2 {
+// andList joins names as a sentence lists them: "a", "a and b", "a, b, and c".
+func andList(names []string) string { return joinList(names, "and") }
+
+// joinList joins names with the conjunction and: "a", "a and b", "a, b, and c".
+func joinList(names []string, and string) string {
+	switch len(names) {
+	case 0, 1:
 		return strings.Join(names, "")
+	case 2:
+		return names[0] + " " + and + " " + names[1]
 	}
-	return strings.Join(names[:len(names)-1], ", ") + " and " + names[len(names)-1]
+	return strings.Join(names[:len(names)-1], ", ") + ", " + and + " " + names[len(names)-1]
 }
 
 // droppedProviders is, per single role keyed <kind>/<role>, the provided entries of the
@@ -354,7 +360,7 @@ func checkProvides(m *module.Manifest, base *Base) error {
 	sort.Strings(kinds)
 	for _, kind := range kinds {
 		if !slices.Contains(base.Extending.Kinds, kind) {
-			return fmt.Errorf("Remove provides.%s from module %s, or use a base that allows %s: the base's extending.kinds is [%s].", shown(kind), shown(m.Name), shown(kind), strings.Join(shownAll(base.Extending.Kinds), ", "))
+			return exports.Errorf("Remove provides.%s from module %s, or use a base that allows %s.\n  The base's extending.kinds is [%s].", shown(kind), shown(m.Name), shown(kind), strings.Join(shownAll(base.Extending.Kinds), ", "))
 		}
 	}
 	return nil

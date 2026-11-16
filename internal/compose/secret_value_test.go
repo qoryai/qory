@@ -80,7 +80,7 @@ func TestAComposeRefusalPrintsNoSecretName(t *testing.T) {
 		{map[string]string{
 			stack.FileName:                   head + "  - name: core\n    only:\n      skills: [qak_s]\n",
 			"modules/core/skills/a/SKILL.md": "# a\n",
-		}, "module core: only skills/" + name + " selects nothing the module ships"},
+		}, "Remove skills/" + name + " from the only of module core.\n  Module core does not ship skills/" + name + "."},
 		{map[string]string{
 			stack.FileName:                  head + "  - name: core\n    exclude:\n      env: [QAK_X]\n",
 			"modules/core/qory-module.yaml": "apiVersion: qory.dev/v1alpha1\nname: core\nenv:\n  Y: .\n",
@@ -89,21 +89,21 @@ func TestAComposeRefusalPrintsNoSecretName(t *testing.T) {
 			stack.FileName:                    head + "  - name: a\n  - name: b\n",
 			"modules/a/skills/qak_s/SKILL.md": "# a\n",
 			"modules/b/skills/qak_s/SKILL.md": "# b\n",
-		}, "skills/" + name + " is provided by 2 modules: a@"},
+		}, "2 modules provide skills/" + name + ": a@"},
 		{map[string]string{
 			stack.FileName: head + "  - name: a\n  - name: b\n",
 			"modules/a/settings/claude/settings.json": "{\"qak_k\": 1}\n",
 			"modules/b/settings/claude/settings.json": "{\"qak_k\": 2}\n",
-		}, "settings/claude/settings.json: " + name + " is set by modules a and b with different values"},
+		}, "Set " + name + " to one value in both modules."},
 		{map[string]string{
 			stack.FileName:                   "apiVersion: qory.dev/v1alpha1\nbind:\n  skills:\n    r: qak_x\nmodules:\n  - name: core\n",
 			"modules/core/skills/a/SKILL.md": "# a\n",
-		}, "bind skills/r selects skill " + name + ", which no module ships"},
+		}, "The bind skills.r selects skill " + name + ", and no module ships it."},
 		{map[string]string{
 			stack.FileName:                   head + "  - name: core\n",
 			"modules/core/qory-module.yaml":  "apiVersion: qory.dev/v1alpha1\nname: core\nprovides:\n  skills:\n    r: qak_x\n",
 			"modules/core/skills/a/SKILL.md": "# a\n",
-		}, "Ship skill " + name + " in a module, or remove provides.skills.r from module core: no module ships skill " + name + "."},
+		}, "Ship skill " + name + " in a module.\n  You can also remove provides.skills.r from module core.\n  No module ships skill " + name + "."},
 	} {
 		err := composeWritten(t, c.files)
 		if err == nil || !strings.Contains(err.Error(), c.want) {

@@ -120,7 +120,10 @@ func References(text string) ([]string, error) {
 		}
 		kind, name, ok := strings.Cut(key, "/")
 		if !ok || !isReferable(kind) {
-			return nil, fmt.Errorf("%s is not a reference; after ${qory: comes one of %s, then /<name>", exports.Value(m[0], false), strings.Join(Referable, ", "))
+			ref := exports.Value(m[0], false)
+			return nil, exports.Refuse(fmt.Sprintf("Change %s to a reference.", ref),
+				fmt.Sprintf("%s is not a reference: after ${qory: comes one of %s, then /<name>.", ref, strings.Join(Referable, ", ")),
+				fmt.Sprintf("The reference is in %s of %s.", exports.FilePlace, exports.ModulePlace))
 		}
 		if name == "" || strings.ContainsAny(name, `/\@ `) || strings.HasPrefix(name, ".") {
 			return nil, fmt.Errorf("%s refers to %s, which is not an entry name; a name is one path segment", exports.Value(m[0], false), accesskey.ShownName(name, true))
@@ -264,7 +267,7 @@ func references(root string, e Entry) (documentRefs, error) {
 		}
 		keys, err := References(string(data))
 		if err != nil {
-			return out, fmt.Errorf("%s: %w", shown, err)
+			return out, exports.AtPath(shown, err)
 		}
 		for _, k := range keys {
 			if !seen[k] {

@@ -1,1 +1,3 @@
-qory.yaml: remove workflows or extends: a harness section that extends a stack takes the workflows of its base
+Remove workflows or extends.
+  A harness section that extends a stack takes the workflows of its base.
+  Both keys are in qory.yaml.

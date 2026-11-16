@@ -1,0 +1,3 @@
+Remove the key "comand" from the MCP server file.
+  An MCP server has only type, command, args, env, url, headers, and description.
+  The file is mcp/db.json in module core.

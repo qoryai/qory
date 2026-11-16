@@ -64,7 +64,9 @@ func TestLoadChecksAFactoryModulesProcess(t *testing.T) {
 	file := filepath.Join(root, "modules", "desk", "process.yaml")
 	write(t, file, "name: Support desk\nsummary: Agents draft answers.\ndescription: An agent drafts each answer.\ntype: customer-care\nstack: care\nprocess:\n  schema: qory.process/v1\n  stages: [{name: Answer, sequence: [{workflow: draft-an-answer}]}]\n")
 	_, err := config.Load(root, true)
-	want := file + ": declare draft-an-answer under workflows in stacks/care/qory-stack.yaml, or remove it from stage Answer: stack care does not declare it"
+	want := "Declare draft-an-answer in stack care, or remove it from stage Answer.\n" +
+		"  Stage Answer of " + file + " runs draft-an-answer, and stack care does not declare it under workflows.\n" +
+		"  The stack is in stacks/care/qory-stack.yaml."
 	if err == nil || err.Error() != want {
 		t.Fatalf("%v\nwant %s", err, want)
 	}

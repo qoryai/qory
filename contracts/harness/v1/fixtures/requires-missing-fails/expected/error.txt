@@ -1,1 +1,2 @@
-module core: skill deploy requires command ship, which module core leaves out
+Keep command ship in module core, or remove it from the requires of skill deploy.
+  The skill deploy of module core requires command ship, and module core leaves it out.

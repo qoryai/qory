@@ -1,1 +1,2 @@
-module ops: exclude commands/release selects nothing only brings in; only leaves it out
+Remove commands/release from the exclude of module ops.
+  The only of module ops does not bring in commands/release, so the exclude selects nothing.

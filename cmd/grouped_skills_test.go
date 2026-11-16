@@ -72,7 +72,7 @@ func TestTwoSkillsOfOneNameStopTheComposeWithTheirExit(t *testing.T) {
 	if err == nil || cmd.ExitCode(err) != cmd.ExitInput {
 		t.Fatalf("one module: %v (exit %d), want exit %d", err, cmd.ExitCode(err), cmd.ExitInput)
 	}
-	wants(t, err.Error(), "module app: rename skills/a/review or skills/b/review: each skill goes to skills/<name>, and both are the skill review")
+	wants(t, err.Error(), "Rename skills/a/review or skills/b/review in module app.\n  Each skill goes to skills/<name>, and both are the skill review.")
 
 	writeGroupedCheckout(t, map[string]string{"modules/app/skills/a/ok/SKILL.md": s, "modules/app/skills/a/nothing/notes.md": "n\n"})
 	_, err = run(t, "harness", "compose")

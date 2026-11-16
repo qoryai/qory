@@ -64,19 +64,19 @@ func TestLoadRefusesABrokenWorkflow(t *testing.T) {
 	for _, c := range []struct {
 		body, want string
 	}{
-		{"  Hello: {}\n", `name the workflow "Hello" with a lower-case letter, then up to 54 lower-case letters, digits and hyphens, 55 characters at most: workflows lists it`},
-		{"  hello_there: {}\n", `name the workflow "hello_there" with a lower-case letter, then up to 54 lower-case letters, digits and hyphens, 55 characters at most: workflows lists it`},
-		{"  hello:\n    time_limit: 7 hours\n", `set workflows.hello.time_limit to a duration above zero, such as 7h or 45m: "7 hours" is not one`},
-		{"  hello:\n    time_limit: 0s\n", `set workflows.hello.time_limit to a duration above zero, such as 7h or 45m: "0s" is not one`},
-		{"  hello:\n    time_limit: -1h\n", `set workflows.hello.time_limit to a duration above zero, such as 7h or 45m: "-1h" is not one`},
-		{"  hello:\n    access: admin\n", `set workflows.hello.access to read or write: "admin" is neither`},
-		{"  hello:\n    access: Write\n", `set workflows.hello.access to read or write: "Write" is neither`},
-		{"  hello:\n    access: write\n    time_limit: 0s\n", `set workflows.hello.time_limit to a duration above zero`},
+		{"  Hello: {}\n", "Rename the workflow \"Hello\".\n  A workflow name is a lower-case letter, then up to 54 lower-case letters, digits, and hyphens, 55 characters at most.\n  workflows is in {path}."},
+		{"  hello_there: {}\n", "Rename the workflow \"hello_there\".\n  A workflow name is a lower-case letter, then up to 54 lower-case letters, digits, and hyphens, 55 characters at most.\n  workflows is in {path}."},
+		{"  hello:\n    time_limit: 7 hours\n", "to a duration above zero, such as 7h or 45m.\n  The value is \"7 hours\"."},
+		{"  hello:\n    time_limit: 0s\n", "to a duration above zero, such as 7h or 45m.\n  The value is \"0s\"."},
+		{"  hello:\n    time_limit: -1h\n", "to a duration above zero, such as 7h or 45m.\n  The value is \"-1h\"."},
+		{"  hello:\n    access: admin\n", "Set workflows.hello.access to read or write.\n  The value is \"admin\".\n  workflows.hello is in {path}."},
+		{"  hello:\n    access: Write\n", "Set workflows.hello.access to read or write.\n  The value is \"Write\".\n  workflows.hello is in {path}."},
+		{"  hello:\n    access: write\n    time_limit: 0s\n", "Set workflows.hello.time_limit to a duration above zero"},
 		{"  hello:\n    prompt: x\n", `key "prompt" is not one qory-stack.yaml reads`},
 	} {
 		path := write(t, withWorkflows(c.body))
 		_, err := Load(path)
-		if err == nil || !strings.Contains(err.Error(), c.want) {
+		if err == nil || !strings.Contains(err.Error(), strings.ReplaceAll(c.want, "{path}", path)) {
 			t.Errorf("%q: %v, want %q", c.body, err, c.want)
 		}
 	}
@@ -152,11 +152,11 @@ func TestNewComposeReadsTheWorkflowsOfADefinedStack(t *testing.T) {
 		w    Workflow
 		want string
 	}{
-		{Workflow{Access: "admin"}, `set workflows.fix.access to read or write: "admin" is neither`},
-		{Workflow{TimeLimitText: "7 hours"}, `set workflows.fix.time_limit to a duration above zero, such as 7h or 45m: "7 hours" is not one`},
-		{Workflow{TimeLimitText: "0s"}, `set workflows.fix.time_limit to a duration above zero, such as 7h or 45m: "0s" is not one`},
+		{Workflow{Access: "admin"}, "to read or write.\n  The value is \"admin\".\n  workflows.fix is in "},
+		{Workflow{TimeLimitText: "7 hours"}, "to a duration above zero, such as 7h or 45m.\n  The value is \"7 hours\".\n  workflows.fix is in "},
+		{Workflow{TimeLimitText: "0s"}, "to a duration above zero, such as 7h or 45m.\n  The value is \"0s\".\n  workflows.fix is in "},
 	} {
-		if _, err := compose(t, defined(map[string]Workflow{"fix": c.w})); err == nil || !strings.HasSuffix(err.Error(), ": "+c.want) {
+		if _, err := compose(t, defined(map[string]Workflow{"fix": c.w})); err == nil || !strings.HasPrefix(err.Error(), "Set workflows.fix.") || !strings.Contains(err.Error(), c.want) {
 			t.Errorf("%+v: %v, want %q", c.w, err, c.want)
 		}
 	}
@@ -166,9 +166,9 @@ func TestNewComposeReadsTheWorkflowsOfADefinedStack(t *testing.T) {
 // qory.yaml that extends a stack and lists workflows: it is refused, since the section
 // takes the workflows of its base.
 func TestNewComposeRefusesWorkflowsBesideExtends(t *testing.T) {
-	const want = "remove workflows or extends: a harness section that extends a stack takes the workflows of its base"
+	const want = "\n  A harness section that extends a stack takes the workflows of its base.\n  Both keys are in "
 	_, err := compose(t, &Stack{Extends: Source{Path: "../base"}, Modules: []Module{{Name: "app"}}, Workflows: map[string]Workflow{"fix": {Access: AccessWrite}}})
-	if err == nil || !strings.HasSuffix(err.Error(), ": "+want) {
+	if err == nil || !strings.HasPrefix(err.Error(), "Remove workflows or extends.") || !strings.Contains(err.Error(), want) {
 		t.Errorf("%v, want %q", err, want)
 	}
 }
@@ -186,7 +186,7 @@ func TestAWorkflowNameHasAtMost55Characters(t *testing.T) {
 		t.Errorf("the prefixed name has %d characters, want 64", got)
 	}
 	over := limit + "a"
-	want := `name the workflow "` + over + `" with a lower-case letter, then up to 54 lower-case letters, digits and hyphens, 55 characters at most: workflows lists it`
+	want := `Rename the workflow "` + over + "\".\n  A workflow name is a lower-case letter, then up to 54 lower-case letters, digits, and hyphens, 55 characters at most."
 	if _, err := Load(write(t, withWorkflows("  "+over+": {}\n"))); err == nil || !strings.Contains(err.Error(), want) {
 		t.Errorf("56 characters: %v\nwant %s", err, want)
 	}

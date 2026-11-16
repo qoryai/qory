@@ -151,13 +151,13 @@ func TestLoadRefuses(t *testing.T) {
 		{
 			"an unknown apiVersion",
 			"apiVersion: qory.dev/v2\nmodules:\n  - name: core\n    source:\n      path: modules/core\n",
-			`apiVersion "qory.dev/v2" is not one this qory reads; versions: qory.dev/v1alpha1`,
+			"Set apiVersion to qory.dev/v1alpha1.\n  This qory reads qory.dev/v1alpha1, and apiVersion is \"qory.dev/v2\".\n  apiVersion is in {path}.",
 			false,
 		},
 		{
 			"a missing apiVersion",
 			"modules:\n  - name: core\n    source:\n      path: modules/core\n",
-			`apiVersion "" is not one this qory reads; versions: qory.dev/v1alpha1`,
+			"Set apiVersion to qory.dev/v1alpha1.\n  This qory reads qory.dev/v1alpha1, and apiVersion is \"\".\n  apiVersion is in {path}.",
 			false,
 		},
 		{
@@ -241,13 +241,13 @@ func TestLoadRefuses(t *testing.T) {
 		{
 			"a module named with a path",
 			"apiVersion: qory.dev/v1alpha1\nmodules:\n  - name: ../escaped\n    source: {path: modules/core}\n",
-			`modules[0]: name "../escaped" is not one path segment; a module name contains no slash, backslash, @ or leading dot`,
+			"Rename the name of modules[0] to one path segment.\n  A module name contains no slash, backslash, @, or leading dot, and the name is \"../escaped\".\n  modules is in {path}.",
 			false,
 		},
 		{
 			"a module named with an at sign",
 			"apiVersion: qory.dev/v1alpha1\nmodules:\n  - name: b@a\n    source: {path: modules/core}\n",
-			`modules[0]: name "b@a" is not one path segment; a module name contains no slash, backslash, @ or leading dot`,
+			"Rename the name of modules[0] to one path segment.\n  A module name contains no slash, backslash, @, or leading dot, and the name is \"b@a\".\n  modules is in {path}.",
 			false,
 		},
 		{
@@ -289,7 +289,9 @@ func TestLoadRefuses(t *testing.T) {
 			if err == nil {
 				t.Fatalf("loaded %q without an error", c.yaml)
 			}
-			if !strings.HasPrefix(err.Error(), path+": ") {
+			// A refusal written fix first has the path in its fix line, at {path} in want.
+			fixFirst := strings.Contains(c.want, "{path}")
+			if !fixFirst && !strings.HasPrefix(err.Error(), path+": ") {
 				t.Fatalf("error %q does not start with the stack path", err)
 			}
 			if c.loose {
@@ -298,7 +300,11 @@ func TestLoadRefuses(t *testing.T) {
 				}
 				return
 			}
-			if want := path + ": " + c.want; err.Error() != want {
+			want := path + ": " + c.want
+			if fixFirst {
+				want = strings.ReplaceAll(c.want, "{path}", path)
+			}
+			if err.Error() != want {
 				t.Fatalf("error:\n%s\nwant:\n%s", err, want)
 			}
 		})

@@ -1,4 +1,5 @@
-skills/test is provided by 3 modules: core@working-tree, nextjs@working-tree, team@working-tree
-  keep one and exclude the others, for example
+Keep skills/test in one module, and exclude it from the others.
+  3 modules provide skills/test: core@working-tree, nextjs@working-tree, team@working-tree
+  For example:
     core:   exclude: {skills: [test]}
     nextjs: exclude: {skills: [test]}

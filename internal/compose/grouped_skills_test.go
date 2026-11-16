@@ -23,7 +23,7 @@ func TestTheSameSkillInTwoModulesCollidesWhenGrouped(t *testing.T) {
 	}
 	_, err := composeTree(t, files(twoModules))
 	var c *compose.CollisionError
-	if !errors.As(err, &c) || !strings.Contains(err.Error(), "skills/deploy is provided by 2 modules") || !strings.Contains(err.Error(), "a:") || !strings.Contains(err.Error(), "exclude: {skills: [deploy]}") {
+	if !errors.As(err, &c) || !strings.Contains(err.Error(), "2 modules provide skills/deploy") || !strings.Contains(err.Error(), "a:") || !strings.Contains(err.Error(), "exclude: {skills: [deploy]}") {
 		t.Fatalf("got %v", err)
 	}
 	res, err := composeTree(t, files(strings.Replace(twoModules, "path: modules/a\n", "path: modules/a\n    exclude: {skills: [deploy]}\n", 1)))

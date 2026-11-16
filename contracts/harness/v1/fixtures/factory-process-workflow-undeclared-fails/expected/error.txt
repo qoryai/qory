@@ -1,1 +1,3 @@
-modules/software-factory/process.yaml: declare explore-a-ticket under workflows in stacks/software/qory-stack.yaml, or remove it from stage Explore: stack software does not declare it
+Declare explore-a-ticket in stack software, or remove it from stage Explore.
+  Stage Explore of modules/software-factory/process.yaml runs explore-a-ticket, and stack software does not declare it under workflows.
+  The stack is in stacks/software/qory-stack.yaml.

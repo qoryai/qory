@@ -1,1 +1,2 @@
-module core: rename skills/a/review or skills/b/review: each skill goes to skills/<name>, and both are the skill review
+Rename skills/a/review or skills/b/review in module core.
+  Each skill goes to skills/<name>, and both are the skill review.

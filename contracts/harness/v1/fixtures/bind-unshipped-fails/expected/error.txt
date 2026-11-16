@@ -1,1 +1,2 @@
-bind agents/coder selects agent rails-coder, which no module ships
+Ship agent rails-coder in a module, or change bind agents.coder.
+  The bind agents.coder selects agent rails-coder, and no module ships it.

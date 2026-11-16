@@ -287,7 +287,7 @@ modules:
 	if err == nil {
 		t.Fatal("composed with an exclude that names nothing")
 	}
-	if want := "module core: exclude skills/gone selects nothing the module ships"; err.Error() != want {
+	if want := "Remove skills/gone from the exclude of module core.\n  Module core does not ship skills/gone."; err.Error() != want {
 		t.Fatalf("error %q, want %q", err, want)
 	}
 }
@@ -340,12 +340,14 @@ modules:
 	if modules, _ := ce.Suggest([]string{"c", "b", "a"}); !reflect.DeepEqual(modules, []string{"b", "a"}) {
 		t.Fatalf("modules %v, want [b a] for the order the caller gave", modules)
 	}
-	want := "agents/reviewer is provided by 2 modules: a@working-tree, c@working-tree\n" +
-		"  keep one and exclude the others, for example\n" +
+	want := "Keep agents/reviewer in one module, and exclude it from the others.\n" +
+		"  2 modules provide agents/reviewer: a@working-tree, c@working-tree\n" +
+		"  For example:\n" +
 		"    a: exclude: {agents: [reviewer]}\n" +
 		"\n" +
-		"skills/greet is provided by 3 modules: a@working-tree, b@working-tree, c@working-tree\n" +
-		"  keep one and exclude the others, for example\n" +
+		"Keep skills/greet in one module, and exclude it from the others.\n" +
+		"  3 modules provide skills/greet: a@working-tree, b@working-tree, c@working-tree\n" +
+		"  For example:\n" +
 		"    a: exclude: {skills: [greet]}\n" +
 		"    b: exclude: {skills: [greet]}"
 	if ce.Error() != want {
