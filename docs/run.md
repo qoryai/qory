@@ -290,7 +290,13 @@ engine <id>.`, and when the run API of a run from a control plane fails, `Open t
 through a gateway that sends the run API address, and run again. The push checks read the
 artifacts through the run API, which failed: <cause>.`, or when the run API address is not
 an http or https URL: `Update the run's gateway, and run again. The run API address that
-the gateway sent is not one the push checks can use: <cause>.` When Forager cannot turn on
+the gateway sent is not one the push checks can use: <cause>.` The push checks run in a
+container of the wall's default image, `--image` or `wall.image`, and not of the image that
+the run's policy selects, so a change to the repository's `.devcontainer/` cannot turn them
+off. A run with neither `--image` nor `wall.image`, whose policy selects the image, runs
+them in the run's image. The run stops there with exit 2 too when the engine does not have
+the wall's default image: `Pull the wall's default image onto this machine, and run again:
+push checks run in it. The engine does not have the image <image>.` When Forager cannot turn on
 the check of the POSTs from behind the wall, the run stops there with exit 1: `Run again.
 Turning on the push checks for the POSTs from behind the wall failed, so the run stopped
 before the setup: <cause>.` A home without push checks, and a run with no control plane,
@@ -305,6 +311,7 @@ Take the work item in again in Qory Apiary, so that the new run composes the har
 Take the work item in again in Qory Apiary, and do not switch the engine while that run starts: the push checks would run on the engine <id>, and the run's containers are on the engine <id>; the code is used
 Take the work item in again in Qory Apiary, through a gateway that sends the run API address: the push checks read the artifacts through the run API, which failed: <cause>; the code is used
 Update the run's gateway, then take the work item in again in Qory Apiary: the run API address that the gateway sent is not one the push checks can use: <cause>; the code is used
+Pull the wall's default image onto this machine, then take the work item in again in Qory Apiary: push checks run in it, and the engine does not have the image <image>; the code is used
 Take the work item in again in Qory Apiary: turning on the push checks for the POSTs from behind the wall failed, so the run stopped before the setup: <cause>; the code is used
 ```
 

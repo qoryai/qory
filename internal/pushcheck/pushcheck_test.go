@@ -352,7 +352,7 @@ func TestAPassingCheckLetsThePushGoOn(t *testing.T) {
 	}
 }
 
-// TestTheContainerIsClosedOff is the check's container: from the run's image, as the
+// TestTheContainerIsClosedOff is the check's container: from the checker's image, as the
 // run's user, with no network, no capability, no variable passed, the home read-only at
 // its path, the working folder and the files read-only, and the program with its
 // arguments and the files' paths.
@@ -946,5 +946,42 @@ func TestARealCheckRunsInTheEngine(t *testing.T) {
 	out, err := exec.Command("docker", "ps", "--all", "--quiet", "--filter", "name=qory-push-check-").Output()
 	if err != nil || len(bytes.TrimSpace(out)) != 0 {
 		t.Errorf("containers of checks are left: %q, %v", out, err)
+	}
+}
+
+// TestHasImageInspectsWithoutAPull is the check that the engine has the checker's image:
+// docker image inspect of the image, true when it succeeds, false with no error when the
+// engine does not have the image, and an error for any other failure.
+func TestHasImageInspectsWithoutAPull(t *testing.T) {
+	for name, c := range map[string]struct {
+		errOut  string
+		exitErr error
+		has     bool
+		wantErr string
+	}{
+		"present": {has: true},
+		"missing": {errOut: "Error response from daemon: No such image: registry.example/agent\n", exitErr: errors.New("exit status 1")},
+		"engine":  {errOut: "Cannot connect to the Docker daemon at unix:///var/run/docker.sock\n", exitErr: errors.New("exit status 1"), wantErr: "the inspect of the image registry.example/agent@sha256:" + strings.Repeat("a", 64) + " failed: Cannot connect to the Docker daemon at unix:///var/run/docker.sock"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newFixture(t, "#!/usr/bin/env node")
+			var argv []string
+			f.c.Engine.Run = func(_ context.Context, a []string, _, stderr io.Writer) error {
+				argv = a
+				io.WriteString(stderr, c.errOut)
+				return c.exitErr
+			}
+			has, err := f.c.HasImage(context.Background())
+			got := ""
+			if err != nil {
+				got = err.Error()
+			}
+			if has != c.has || got != c.wantErr {
+				t.Errorf("HasImage = %v, %q, want %v, %q", has, got, c.has, c.wantErr)
+			}
+			if want := []string{"/usr/local/bin/docker", "image", "inspect", "--format", "{{.Id}}", f.c.Image}; !slices.Equal(argv, want) {
+				t.Errorf("the engine ran %q, want %q", argv, want)
+			}
+		})
 	}
 }

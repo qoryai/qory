@@ -1,8 +1,8 @@
 // Package pushcheck runs the push check that a composed harness declares for an artifact
 // type, before a version of that type reaches the run API: in a new container from the
-// run's image, with no network, as the run's user, with the home read-only at its path,
-// the newest versions of the work item's artifacts as the working folder and the pushed
-// files beside them. A check that exits 0 lets the version go on; any other end is a
+// wall's default image, with no network, as the run's user, with the home read-only at
+// its path, the newest versions of the work item's artifacts as the working folder and
+// the pushed files beside them. A check that exits 0 lets the version go on; any other end is a
 // [Failure] with the fix first, which a walled run's forwarder sends to the program that
 // pushed as a [session.RunAPIRefusal], and which the host's push step prints.
 package pushcheck
@@ -168,8 +168,8 @@ type Checker struct {
 	Home string
 	// Checks are the home's push checks, as [Load] reads them.
 	Checks []compose.PushCheck
-	// Image is the reference of the run's image, and User the uid:gid the run's
-	// containers run as.
+	// Image is the reference of the image the check's container starts from, the wall's
+	// default image, and User the uid:gid the run's containers run as.
 	Image, User string
 	Engine      Engine
 	Fetch       Fetch
@@ -500,6 +500,22 @@ func (c *Checker) run(ctx context.Context, program string, args []string, pulled
 		}
 	}
 	return ended{exitCode: s.ExitCode, stdout: stdout.Bytes(), stderr: stderr.Bytes()}, nil
+}
+
+// HasImage reports whether the engine has the image [Checker.Image], with docker image
+// inspect, which pulls nothing. An engine that does not have it is false with no error;
+// an inspect that fails for another cause, such as an engine that is not reachable, is
+// an error.
+func (c *Checker) HasImage(ctx context.Context) (bool, error) {
+	var errOut bytes.Buffer
+	err := c.engine(ctx, engineWait, nil, &errOut, "image", "inspect", "--format", "{{.Id}}", c.Image)
+	switch {
+	case err == nil:
+		return true, nil
+	case noSuchImage(errOut.String()):
+		return false, nil
+	}
+	return false, fmt.Errorf("the inspect of the image %s failed: %s", exports.Value(c.Image, false), engineError(errOut.Bytes(), err))
 }
 
 // limits are the flags of the check container's limits.

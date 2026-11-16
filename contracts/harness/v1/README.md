@@ -954,7 +954,14 @@ absolute path in the home; a harness whose modules declare no check has no such 
 reaches Qory Apiary: for every push to the run API from inside the wall, through `qory
 artifact push` or any other request, and for the version that the push step stores after
 the agent. qory runs the program on the engine of the run's wall, in a new container from
-the run's image, as the run's user, with no network and no capability. The container has
+the wall's default image, as the run's user, with no network and no capability. The
+default image is `--image` or `wall.image` in `forager.yaml`, and not the image that the
+run's policy selects, so a change to the repository, such as one to its `.devcontainer/`,
+cannot turn the checks off. A run on a person's machine with neither `--image` nor
+`wall.image`, whose policy selects the image, runs the checks in the run's image. A run
+whose engine does not have the wall's default image stops before the setup and the agent,
+with exit 2: `Pull the wall's default image onto this machine, and run again: push checks
+run in it. The engine does not have the image <image>.` The container has
 no variable but the image's and those Docker sets: `HOME`, `HOSTNAME` and `PATH`. It has
 the wall's CPU and memory limits of the run's containers, the wall's process limit or 512
 processes, and the label of the run's containers, so the clean-up of the run removes a
@@ -1010,8 +1017,8 @@ In a run whose home has push checks, a push that the check cannot read gets 422
 When qory cannot run the check, the push stops with 503 `push_check_unavailable`, and qory
 run writes the cause as a line on its stderr: the fetch of the artifacts fails, two files
 of a fetched version are one file on this machine, the engine is not reachable or does
-not create the container, the engine does not have the run's image, or a temporary
-folder cannot be made. Node is needed only by a check whose program uses it: Qory's agent
+not create the container, the engine does not have the image of the checks, or a
+temporary folder cannot be made. Node is needed only by a check whose program uses it: Qory's agent
 image, and every image built FROM it, has it. A run without a wall, or without a control
 plane, runs no check, and outside a run `qory artifact push` keeps the files in
 `.qory/artifacts` and runs no check.

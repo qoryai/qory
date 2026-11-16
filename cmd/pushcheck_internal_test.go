@@ -118,12 +118,18 @@ func TestTheLoadOfPushChecksStopsWithItsLine(t *testing.T) {
 	// The same, with the next selection on an engine whose id cannot be read.
 	noIDEngine := &wall.Docker{Command: engineScript(t, "a", "none")}
 	noIDEngine.Engine(context.Background())
+	// An engine that does not have the image registry.example/agent:1.
+	noImage := filepath.Join(t.TempDir(), "docker")
+	if err := os.WriteFile(noImage, []byte("#!/bin/sh\ncase \"$*\" in\n\"image inspect --format {{.Id}} registry.example/agent:1\")\n\techo 'Error response from daemon: No such image: registry.example/agent:1' >&2\n\texit 1 ;;\nesac\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	for _, c := range []struct {
 		name         string
 		run          runAPIOnly
 		unread       bool
 		noWall       bool
 		docker       *wall.Docker
+		image        string
 		controlPlane bool
 		want         string
 		fromCode     string
@@ -174,6 +180,15 @@ func TestTheLoadOfPushChecksStopsWithItsLine(t *testing.T) {
 			fromCode:     `Take the work item in again in Qory Apiary, and do not switch the engine while that run starts: the push checks would run on the engine with no id, and the run's containers are on the engine "id-a"; the code is used`,
 		},
 		{
+			name:         "no default image",
+			run:          runAPIOnly{base: goodAPI},
+			docker:       &wall.Docker{Command: noImage},
+			image:        "registry.example/agent:1",
+			controlPlane: true,
+			want:         "Pull the wall's default image onto this machine, and run again: push checks run in it. The engine does not have the image registry.example/agent:1.",
+			fromCode:     "Pull the wall's default image onto this machine, then take the work item in again in Qory Apiary: push checks run in it, and the engine does not have the image registry.example/agent:1; the code is used",
+		},
+		{
 			name:     "push checks that do not read",
 			unread:   true,
 			want:     "Compose the harness again, and run again. The push checks in /h/push-checks.json could not be read: a cause.",
@@ -188,6 +203,7 @@ func TestTheLoadOfPushChecksStopsWithItsLine(t *testing.T) {
 				return []compose.PushCheck{{Type: "proposal"}}, nil
 			}
 			spec := &runSpec{}
+			spec.Image = c.image
 			if c.docker != nil {
 				spec.Wall = c.docker
 			} else if !c.noWall {
@@ -207,6 +223,33 @@ func TestTheLoadOfPushChecksStopsWithItsLine(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// imageOnly is an opened run whose Image returns img. Its other methods are not called.
+type imageOnly struct {
+	openedRun
+	img session.Image
+}
+
+func (r imageOnly) Image() session.Image { return r.img }
+
+// TestPushChecksRunInTheWallsDefaultImage is the image of a run's push checks: the ref of
+// the image of wall.images that the default names, the default as a reference, and the
+// run's image only for a run with no default.
+func TestPushChecksRunInTheWallsDefaultImage(t *testing.T) {
+	run := imageOnly{img: session.Image{Name: "devcontainer", Ref: "registry.example/devcontainer:1"}}
+	images := []session.Image{{Name: "agent", Ref: "registry.example/agent:1"}, {Name: "devcontainer", Ref: "registry.example/devcontainer:1"}}
+	for _, c := range []struct{ image, want string }{
+		{"agent", "registry.example/agent:1"},
+		{"registry.example/other:2", "registry.example/other:2"},
+		{"", "registry.example/devcontainer:1"},
+	} {
+		spec := &runSpec{}
+		spec.Image, spec.Images = c.image, images
+		if got := checkImage(run, spec); got != c.want {
+			t.Errorf("the default %q: %q, want %q", c.image, got, c.want)
+		}
 	}
 }
 

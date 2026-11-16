@@ -60,9 +60,15 @@ release may change what an existing document does, and states it under Upgrading
   `qory` in your cache directory, stops at the compose with exit 2 when a read-write
   mount is at or inside the home. In a walled run, the
   check of a type runs before each push of that type reaches Qory Apiary, from inside the
-  wall or from the push step: in a new container from the run's image, with no network,
-  the wall's limits and the run's label, the home and the newest versions of the type and
-  its `reads` read-only. A check that does not pass stops the push with 422
+  wall or from the push step: in a new container from the wall's default image,
+  `--image` or `wall.image`, with no network, the wall's limits and the run's label, the
+  home and the newest versions of the type and its `reads` read-only. The image that the
+  run's policy selects, such as one built from the repository's `.devcontainer/`, does not
+  run the checks, so a change to the repository cannot turn them off; a run on a person's
+  machine with neither `--image` nor `wall.image` runs them in the run's image. A walled
+  run with push checks stops before the agent starts with exit 2 when the engine does not
+  have the wall's default image: `Pull the wall's default image onto this machine, and
+  run again: push checks run in it.` A check that does not pass stops the push with 422
   `push_check_failed`, its fix line and its findings, and `qory artifact push` exits 4;
   so does a push that the check cannot read, such as a body that is not a push or two
   files that are one file on the machine. A check that did not finish stops the push with
