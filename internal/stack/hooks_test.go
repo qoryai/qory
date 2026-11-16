@@ -46,14 +46,14 @@ func TestLoadReadsTheHookPoints(t *testing.T) {
 func TestLoadRefusesABrokenHookPoint(t *testing.T) {
 	isolate(t)
 	const fixName = "Name the hook point with a lower-case letter, then up to 54 lower-case letters, digits and hyphens."
-	const fixAt = "Set at of the hook point to end, start or inside."
+	const fixAt = "Set at of the hook point to end, start, or inside."
 	const fixTimeout = "Set extending.hooks.timeout to whole seconds, 1s or more, such as 10m."
 	for _, tc := range []struct{ body, fix, cause string }{
 		{withWorkflows("  build:\n    hook_points:\n      After-Plan: {at: end, kinds: [check]}\n"), fixName, `{path} lists "After-Plan" under workflows.build.hook_points.`},
 		{withWorkflows("  build:\n    hook_points:\n      after-plan: {at: middle, kinds: [check]}\n"), fixAt, `{path} sets workflows.build.hook_points.after-plan.at to "middle".`},
 		{withWorkflows("  build:\n    hook_points:\n      after-plan: {kinds: [check]}\n"), fixAt, `{path} sets no workflows.build.hook_points.after-plan.at.`},
-		{withWorkflows("  build:\n    hook_points:\n      after-plan: {at: end, kinds: []}\n"), "Add one or more kinds to the hook point: check, review or enrich.", `{path} sets no kind in workflows.build.hook_points.after-plan.kinds.`},
-		{withWorkflows("  build:\n    hook_points:\n      after-plan: {at: end, kinds: [lint]}\n"), "Set each kind of the hook point to check, review or enrich.", `{path} lists "lint" in workflows.build.hook_points.after-plan.kinds.`},
+		{withWorkflows("  build:\n    hook_points:\n      after-plan: {at: end, kinds: []}\n"), "Add one or more kinds to the hook point: check, review, or enrich.", `{path} sets no kind in workflows.build.hook_points.after-plan.kinds.`},
+		{withWorkflows("  build:\n    hook_points:\n      after-plan: {at: end, kinds: [lint]}\n"), "Set each kind of the hook point to check, review, or enrich.", `{path} lists "lint" in workflows.build.hook_points.after-plan.kinds.`},
 		{withWorkflows("  build:\n    hook_points:\n      after-plan: {at: end, kinds: [check, check]}\n"), "List each kind of the hook point once.", `{path} lists check twice in workflows.build.hook_points.after-plan.kinds.`},
 		{withWorkflows("  build:\n    hook_points:\n      after-plan: {at: end, kinds: [check]}\n  plan:\n    hook_points:\n      after-plan: {at: end, kinds: [check]}\n"), "Rename one of the two hook points in qory-stack.yaml: a point name is unique in a stack.", "Workflows build and plan both declare after-plan."},
 		{valid + "extending:\n  hooks: {per_point: 0}\n", "Set extending.hooks.per_point to 1 or more.", "{path} sets 0, which lets no hook in."},
@@ -117,8 +117,8 @@ func TestValidateRefusesABrokenHook(t *testing.T) {
 		fix, cause string
 	}{
 		{Hook{Kind: "check", RunText: text("x.sh")}, "Set hooks[0].at to a hook point of the base stack.", "The file sets no hooks[0].at."},
-		{Hook{At: "after-plan", RunText: text("x.sh")}, "Set hooks[0].kind to check, review or enrich.", "The file sets no hooks[0].kind."},
-		{Hook{At: "after-plan", Kind: "lint", RunText: text("x.sh")}, "Set hooks[0].kind to check, review or enrich.", `The file sets it to "lint".`},
+		{Hook{At: "after-plan", RunText: text("x.sh")}, "Set hooks[0].kind to check, review, or enrich.", "The file sets no hooks[0].kind."},
+		{Hook{At: "after-plan", Kind: "lint", RunText: text("x.sh")}, "Set hooks[0].kind to check, review, or enrich.", `The file sets it to "lint".`},
 		{Hook{At: "after-plan", Kind: "check", RunText: text("x.sh"), AgentText: text("a")}, "Set one of hooks[0].run and hooks[0].agent, not both.", "A hook runs a program or an agent, and hooks[0] in the file sets both."},
 		{Hook{At: "after-plan", Kind: "check"}, "Set hooks[0].run or hooks[0].agent.", "A hook runs a program or an agent, and hooks[0] in the file sets neither."},
 		{Hook{At: "after-plan", Kind: "check", RunText: text("  ")}, "Remove hooks[0].run, or give it a value.", "The file sets hooks[0].run to an empty value."},

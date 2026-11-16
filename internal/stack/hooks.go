@@ -284,7 +284,7 @@ func (h Hook) Required() bool { return h.RequiredValue == nil || *h.RequiredValu
 var hookName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`)
 
 // validateHookPoints checks the hook points of every workflow: a point's name has the
-// form of a workflow's name, its at is end, start or inside, it takes one kind or more,
+// form of a workflow's name, its at is end, start, or inside, it takes one kind or more,
 // each known and listed once, and no two workflows declare one name, since a hook
 // selects a point by its name alone.
 func (p *Stack) validateHookPoints() error {
@@ -304,17 +304,17 @@ func (p *Stack) validateHookPoints() error {
 			switch hp.At {
 			case HookAtEnd, HookAtStart, HookAtInside:
 			case "":
-				return hookErrorf("Set at of the hook point to end, start or inside.", "{path} sets no %s.at.", where)
+				return hookErrorf("Set at of the hook point to end, start, or inside.", "{path} sets no %s.at.", where)
 			default:
-				return hookErrorf("Set at of the hook point to end, start or inside.", "{path} sets %s.at to %s.", where, accesskey.ShownName(hp.At, true))
+				return hookErrorf("Set at of the hook point to end, start, or inside.", "{path} sets %s.at to %s.", where, accesskey.ShownName(hp.At, true))
 			}
 			if len(hp.Kinds) == 0 {
-				return hookErrorf("Add one or more kinds to the hook point: check, review or enrich.", "{path} sets no kind in %s.kinds.", where)
+				return hookErrorf("Add one or more kinds to the hook point: check, review, or enrich.", "{path} sets no kind in %s.kinds.", where)
 			}
 			seen := map[string]bool{}
 			for _, k := range hp.Kinds {
 				if !slices.Contains(HookKinds, k) {
-					return hookErrorf("Set each kind of the hook point to check, review or enrich.", "{path} lists %s in %s.kinds.", accesskey.ShownName(k, true), where)
+					return hookErrorf("Set each kind of the hook point to check, review, or enrich.", "{path} lists %s in %s.kinds.", accesskey.ShownName(k, true), where)
 				}
 				if seen[k] {
 					return hookErrorf("List each kind of the hook point once.", "{path} lists %s twice in %s.kinds.", k, where)
@@ -374,10 +374,10 @@ func (h *Hook) validate(i int) error {
 		return hookErrorf("Set hooks[%d].at to a hook point of the base stack.", "{path} sets no hooks[%d].at.", i, i)
 	}
 	if h.Kind == "" {
-		return hookErrorf("Set hooks[%d].kind to check, review or enrich.", "{path} sets no hooks[%d].kind.", i, i)
+		return hookErrorf("Set hooks[%d].kind to check, review, or enrich.", "{path} sets no hooks[%d].kind.", i, i)
 	}
 	if !slices.Contains(HookKinds, h.Kind) {
-		return hookErrorf("Set hooks[%d].kind to check, review or enrich.", "{path} sets it to %s.", i, accesskey.ShownName(h.Kind, true))
+		return hookErrorf("Set hooks[%d].kind to check, review, or enrich.", "{path} sets it to %s.", i, accesskey.ShownName(h.Kind, true))
 	}
 	switch {
 	case h.RunText != nil && h.AgentText != nil:

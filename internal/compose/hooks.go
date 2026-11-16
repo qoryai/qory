@@ -26,9 +26,9 @@ type Hook struct {
 	Workflow string `json:"workflow"`
 	// At is the hook point's name.
 	At string `json:"at"`
-	// PointAt is where the point sits in the workflow's session: end, start or inside.
+	// PointAt is where the point sits in the workflow's session: end, start, or inside.
 	PointAt string `json:"point_at"`
-	// Kind is check, review or enrich. An enrich hook writes notes for the agents that
+	// Kind is check, review, or enrich. An enrich hook writes notes for the agents that
 	// start after it.
 	Kind string `json:"kind"`
 	// Name is the hook's name, unique at its point: name as written, else the agent's
