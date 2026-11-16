@@ -1,8 +1,9 @@
 // Package pushcheck runs the push check that a composed harness declares for an artifact
 // type, before a version of that type reaches the run API: in a new container from the
-// run's image, with no network, as the run's user, with the home read-only at its path,
-// the work item's notes and the newest versions of its artifacts as the working folder,
-// and the pushed files beside them. A check that exits 0 lets the version go on; any
+// wall's default image, with no network, as the run's user, with the home read-only at
+// its path, and as the working folder, the work item's notes and, of each artifact of the
+// type and its reads types, the newest version that the index does not mark cancelled,
+// with the pushed files beside them. A check that exits 0 lets the version go on; any
 // other end is a [Failure] with the fix first, which a walled run's forwarder sends to
 // the program that pushed as a [session.RunAPIRefusal], and which the host's push step
 // prints.
@@ -73,11 +74,12 @@ const (
 )
 
 // The texts of a check that did not pass. The program that pushed gets the fix, ", and
-// push again.", then the cause; the push step's line has the fix, then the cause.
+// push again.", or ", then run again." for textNoNode and textNoProgram, then the cause;
+// the push step's line has the fix, then the cause.
 const (
 	textFailed      = "The check for %s failed:"
 	textFailedFix   = "Fix each finding below and push again. "
-	textNoNode      = "Install node, or run in an image built FROM qory-agent"
+	textNoNode      = "Set wall.image or --image to an image with node, such as one built FROM qory-agent"
 	textNoProgram   = "Install the program %s"
 	textNotStarted  = "The check for %s could not start: %s."
 	textTimeLimit   = "Make the check for %s finish within 30 s"
@@ -134,9 +136,10 @@ type File struct {
 
 // Fetch writes into dir, an empty folder, the work item's notes as notes.json, a JSON
 // array byte for byte as the run API returned it or [] for none; its artifact index as
-// index.json, byte for byte as the run API returned it; and the newest version of each
-// artifact of the types, under <type>/<name>/v<N>/, as qory artifact pull lays them out.
-// A type with no version has no folder.
+// index.json, byte for byte as the run API returned it; and, of each artifact of the
+// types, the newest version that the index does not mark cancelled, under
+// <type>/<name>/v<N>/, as qory artifact pull lays them out. An artifact with no such
+// version has no folder.
 type Fetch func(ctx context.Context, dir string, types []string) error
 
 // Engine is the container engine the check's container runs in: the one the run's wall
@@ -170,8 +173,8 @@ type Checker struct {
 	Home string
 	// Checks are the home's push checks, as [Load] reads them.
 	Checks []compose.PushCheck
-	// Image is the reference of the run's image, and User the uid:gid the run's
-	// containers run as.
+	// Image is the reference of the image the check's container starts from, the wall's
+	// default image, and User the uid:gid the run's containers run as.
 	Image, User string
 	Engine      Engine
 	Fetch       Fetch
@@ -212,7 +215,14 @@ func (f *Failure) Refusal() *session.RunAPIRefusal {
 
 // failure is the failure with fix and cause, which may be "".
 func failure(fix, cause string) *Failure {
-	f := &Failure{Message: fix + ", and push again.", Step: fix + "."}
+	return failureThen(fix, ", and push again.", cause)
+}
+
+// failureThen is [failure] whose Message has then after the fix in place of ", and push
+// again.": for a fix that only a new run applies, such as a new image of the checks or
+// a new program in the harness home, which the run reads once at its start.
+func failureThen(fix, then, cause string) *Failure {
+	f := &Failure{Message: fix + then, Step: fix + "."}
 	if cause != "" {
 		f.Message += " " + cause
 		f.Step += " " + cause
@@ -504,6 +514,22 @@ func (c *Checker) run(ctx context.Context, program string, args []string, pulled
 	return ended{exitCode: s.ExitCode, stdout: stdout.Bytes(), stderr: stderr.Bytes()}, nil
 }
 
+// HasImage reports whether the engine has the image [Checker.Image], with docker image
+// inspect, which pulls nothing. An engine that does not have it is false with no error;
+// an inspect that fails for another cause, such as an engine that is not reachable, is
+// an error.
+func (c *Checker) HasImage(ctx context.Context) (bool, error) {
+	var errOut bytes.Buffer
+	err := c.engine(ctx, engineWait, nil, &errOut, "image", "inspect", "--format", "{{.Id}}", c.Image)
+	switch {
+	case err == nil:
+		return true, nil
+	case noSuchImage(errOut.String()):
+		return false, nil
+	}
+	return false, fmt.Errorf("the inspect of the image %s failed: %s", exports.Value(c.Image, false), engineError(errOut.Bytes(), err))
+}
+
 // limits are the flags of the check container's limits.
 func (c *Checker) limits() []string {
 	var out []string
@@ -607,9 +633,9 @@ func (c *Checker) failure(artifactType, program string, end ended) *Failure {
 	case end.startErr != "":
 		cause := fmt.Sprintf(textNotStarted, artifactType, strings.TrimSuffix(c.mask(cleanLine(end.startErr)), "."))
 		if namesNode(program) {
-			return failure(textNoNode, cause)
+			return failureThen(textNoNode, ", then run again.", cause)
 		}
-		return failure(fmt.Sprintf(textNoProgram, exports.Value(program, false)), cause)
+		return failureThen(fmt.Sprintf(textNoProgram, exports.Value(program, false)), ", then run again.", cause)
 	case end.exitCode == 0:
 		return nil
 	}
@@ -711,10 +737,13 @@ func shebang(program string) []string {
 // could not start.
 var tiniFatal = regexp.MustCompile(`^\[FATAL tini \(\d+\)\] `)
 
-// noSuchImage reports whether the engine's error is for an image it does not hold.
+// noSuchImage reports whether the engine's error is for an image it does not hold:
+// Docker's and nerdctl's "No such image" or "Unable to find image", Podman's "image not
+// known", such as "Error: example.com/agent:1: image not known".
 func noSuchImage(text string) bool {
 	text = strings.ToLower(text)
-	return strings.Contains(text, "no such image") || strings.Contains(text, "unable to find image")
+	return strings.Contains(text, "no such image") || strings.Contains(text, "unable to find image") ||
+		strings.Contains(text, "image not known")
 }
 
 // engineError is the last line the engine's command printed, or err with none.

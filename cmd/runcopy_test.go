@@ -1848,6 +1848,10 @@ func TestARunsArtifactsComeBackWithNoCommit(t *testing.T) {
 func aHomeFolder(t *testing.T, root, home, state string) *string {
 	t.Helper()
 	copyFixture(t, "two-modules", root)
+	// walledBy writes qory/forager.yaml under XDG_CONFIG_HOME: a temporary folder keeps it
+	// out of the working folder when the variable is unset, and out of the developer's
+	// configuration when it is set.
+	t.Setenv("XDG_CONFIG_HOME", tempDir(t))
 	docker, _ := fakeDocker(t)
 	walledBy(t, docker)
 	t.Setenv("QORY_RUN_KEY", "")

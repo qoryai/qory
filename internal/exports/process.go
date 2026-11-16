@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"unicode"
@@ -14,6 +15,8 @@ import (
 
 	"github.com/qoryai/forager/accesskey"
 	"gopkg.in/yaml.v3"
+
+	"github.com/qoryai/qory/internal/runapi"
 )
 
 // ProcessFileName is the process template a factory module has at its folder root: the
@@ -35,11 +38,12 @@ const (
 
 // processFile is a process.yaml as written: the texts a list of templates shows, the
 // workspace type, the stack of the same repository its workflows run on, the process
-// document, and optionally the artifact types the workspaces use. In the document, qory
-// checks the schema, that the stages are a list, that each workflow of a stage is a
-// non-empty string of one line that the stack declares, and that each stage name has no
-// line break or other control character, and checks nothing else in it. In
-// artifact_types, qory checks each entry as [checkArtifactType] has it.
+// document, and optionally the artifact types the workspaces use and the submit step of
+// a run. In the document, qory checks the schema, that the stages are a list, that each
+// workflow of a stage is a non-empty string of one line that the stack declares, and
+// that each stage name has no line break or other control character, and checks nothing
+// else in it. In artifact_types, qory checks each entry as [checkArtifactType] has it,
+// and submit as [checkSubmit] has it.
 //
 //	apiVersion: qory.dev/v1alpha1
 //	name: Support desk
@@ -64,7 +68,12 @@ type processFile struct {
 	Stack         string    `yaml:"stack"`
 	Process       yaml.Node `yaml:"process"`
 	ArtifactTypes yaml.Node `yaml:"artifact_types"`
+	Submit        yaml.Node `yaml:"submit"`
 }
+
+// submitSends is each value submit.send may have: when the submit step sends the
+// submission.
+var submitSends = []string{"end_of_run", "after_gate"}
 
 // readProcess returns the process.yaml at the root of the module folder dir, relative to
 // [Exports.Root], with its path: nil data when the folder has no such file. The file is
@@ -122,9 +131,9 @@ func escapes(root *os.Root, err error) bool {
 // [Exports.Stacks], process is an object with schema qory.process/v1 and a list of
 // stages, every workflow of a stage's sequence, a loop's body included, is declared
 // under workflows in the stack's qory-stack.yaml, as [Exports.checkWorkflows] checks,
-// and artifact_types, when it is set, is as [checkArtifactTypes] checks. The error
-// starts with the file and then the fix; for the workflows and the artifact types it has
-// one line for each refusal.
+// artifact_types, when it is set, is as [checkArtifactTypes] checks, and submit, when it
+// is set, is as [checkSubmit] checks. The error starts with the file and then the fix;
+// for the workflows and the artifact types it has one line for each refusal.
 func (e *Exports) checkProcess(path string, data []byte) error {
 	shown := HidePath(path)
 	if err := RefuseAliases(shown, data); err != nil {
@@ -196,7 +205,83 @@ func (e *Exports) checkProcess(path string, data []byte) error {
 	if err := e.checkWorkflows(shown, t.Stack, stages); err != nil {
 		return err
 	}
-	return checkArtifactTypes(shown, &t.ArtifactTypes)
+	if err := checkArtifactTypes(shown, &t.ArtifactTypes); err != nil {
+		return err
+	}
+	return checkSubmit(shown, &t.Submit, &t.ArtifactTypes)
+}
+
+// checkSubmit checks submit in the process.yaml shown, which may be left out: an object
+// with type, an artifact type name, and send, one of [submitSends], and no other key.
+// types, the file's artifact_types as [checkArtifactTypes] passed it, has a custom entry
+// named type with base_view structured. The error starts with shown and then the fix.
+func checkSubmit(shown string, submit, types *yaml.Node) error {
+	if submit.Kind == 0 {
+		return nil
+	}
+	if submit.Kind != yaml.MappingNode {
+		return fmt.Errorf("%s: set submit to an object with type and send, or remove it: submit is %s", shown, nodeKind(submit))
+	}
+	seen := map[string]bool{}
+	for j := 0; j+1 < len(submit.Content); j += 2 {
+		key := submit.Content[j]
+		if key.Kind != yaml.ScalarNode || key.Value != "type" && key.Value != "send" {
+			return fmt.Errorf("%s: remove the key %s from submit: submit has only type and send", shown, scalarText(key))
+		}
+		if seen[key.Value] {
+			return fmt.Errorf("%s: remove the second %s from submit: submit has the key twice", shown, key.Value)
+		}
+		seen[key.Value] = true
+	}
+	typ, send := value(submit, "type"), value(submit, "send")
+	if typ == nil {
+		return fmt.Errorf("%s: add type to submit, the name of a structured entry of artifact_types: submit has no type", shown)
+	}
+	if typ.Kind == yaml.ScalarNode && typ.Tag != "!!str" && nodeKind(typ) == "a string" {
+		// A date or a value with an explicit tag: unquoted, YAML reads it as no string.
+		return fmt.Errorf("%s: set submit.type to a quoted string: YAML reads %s as a type that is not a string", shown, scalarText(typ))
+	}
+	if typ.Kind != yaml.ScalarNode || typ.Tag != "!!str" {
+		return fmt.Errorf("%s: set submit.type to the name of a structured entry of artifact_types: submit.type is %s", shown, nodeKind(typ))
+	}
+	if !runapi.ArtifactName(typ.Value) {
+		return fmt.Errorf("%s: set submit.type to a name such as reply-draft, at most %d bytes: submit.type is %s", shown, runapi.MaxArtifactName, scalarText(typ))
+	}
+	if send == nil {
+		return fmt.Errorf("%s: add send to submit, %s: submit has no send", shown, strings.Join(submitSends, " or "))
+	}
+	if send.Kind == yaml.ScalarNode && send.Tag != "!!str" && nodeKind(send) == "a string" {
+		// A value with an explicit tag, such as !foo end_of_run: YAML reads it as no string.
+		return fmt.Errorf("%s: set submit.send to a quoted string: YAML reads %s as a type that is not a string", shown, scalarText(send))
+	}
+	if send.Kind != yaml.ScalarNode || send.Tag != "!!str" {
+		return fmt.Errorf("%s: set submit.send to %s: submit.send is %s", shown, strings.Join(submitSends, " or "), nodeKind(send))
+	}
+	if !slices.Contains(submitSends, send.Value) {
+		return fmt.Errorf("%s: set submit.send to %s: submit.send is %s", shown, strings.Join(submitSends, " or "), scalarText(send))
+	}
+	return checkSubmitType(shown, typ.Value, types)
+}
+
+// checkSubmitType checks that types, a list of artifact types that [checkArtifactTypes]
+// passed or nothing, has a custom entry named name with base_view structured. The name
+// has the form of an artifact type name, so the message prints it bare.
+func checkSubmitType(shown, name string, types *yaml.Node) error {
+	const fix = "set submit.type to a structured type of artifact_types"
+	for _, entry := range types.Content {
+		if n := value(entry, "name"); n == nil || n.Value != name {
+			continue
+		}
+		view := value(entry, "base_view")
+		switch {
+		case view == nil:
+			return fmt.Errorf("%s: %s: %s is a standard type", shown, fix, name)
+		case view.Value != baseViewStructured:
+			return fmt.Errorf("%s: %s: %s has base_view %s", shown, fix, name, view.Value)
+		}
+		return nil
+	}
+	return fmt.Errorf("%s: %s: no entry is named %s", shown, fix, name)
 }
 
 // checkWorkflows checks that every workflow the stages run is declared under workflows in

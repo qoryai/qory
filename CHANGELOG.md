@@ -20,7 +20,10 @@ release may change what an existing document does, and states it under Upgrading
 
 - A run of a work item works on the branch `qory/<work item id>`, at the commit of the
   artifact `branch` that its stage starts from. The harness still comes from
-  `target_version`.
+  `target_version`. A commit on the branch reaches a run's harness after you merge the
+  branch into the target's default branch, the branch that its `HEAD` points to. Qory
+  Apiary reads `target_version` there, so the next run's `target_version` contains the
+  commit.
 - A write run of a work item ends with a push step: qory commits what the agent left,
   pushes each repository with new commits to `qory/<work item id>`, and stores a new
   version of the artifact `branch`. The next run in the same stage starts at that commit. A
@@ -48,6 +51,11 @@ release may change what an existing document does, and states it under Upgrading
   `size_limit`, `max_files` and, for `base_view: structured`, `json_schema`. Every command
   that reads the configuration checks each entry and compiles each `json_schema`. See
   Artifact types in `contracts/harness/v1/README.md`.
+- Declare a factory's submit step with `submit` in its `process.yaml`: `type`, the name
+  of a structured entry of `artifact_types`, and `send`, `end_of_run` or `after_gate`.
+  `process.schema.json` has `submit`. Every command that reads the configuration checks
+  its form, and that `artifact_types` has a custom structured entry named `type`. See The
+  submit step in `contracts/harness/v1/README.md`.
 - A module can declare checks for the files of an artifact type with `push_checks` in
   `qory-module.yaml`: each item has `type`, `command`, a program in the module and its
   arguments, and optional `reads`, the other artifact types the check reads. The checks
@@ -60,15 +68,25 @@ release may change what an existing document does, and states it under Upgrading
   `qory` in your cache directory, stops at the compose with exit 2 when a read-write
   mount is at or inside the home. In a walled run, the
   check of a type runs before each push of that type reaches Qory Apiary, from inside the
-  wall or from the push step: in a new container from the run's image, with no network,
-  the wall's limits and the run's label, the home and the newest versions of the type and
-  its `reads` read-only, beside the work item's notes in `notes.json`, `[]` for none. A
-  check that does not pass stops the push with 422 `push_check_failed`, its fix line and
-  its findings, and `qory artifact push` exits 4; so does a push that the check cannot
-  read, such as a body that is not a push or two files that are one file on the machine.
-  A check that did not finish stops the push with 503 `push_check_unavailable`, qory run
-  writes the cause on its stderr, and the push exits 1. Outside a run, `qory artifact
-  push` runs no check. See The module manifest in `contracts/harness/v1/README.md`.
+  wall or from the push step: in a new container from the wall's default image,
+  `--image` or `wall.image`, with no network, the wall's limits and the run's label, the
+  home and the newest versions of the type and its `reads` read-only, beside the work
+  item's notes in `notes.json`, `[]` for none. The image that the
+  run's policy selects, such as one built from the repository's `.devcontainer/`, does not
+  run the checks, so a change to the repository cannot turn them off. A run on a person's
+  machine, with no run code, and with neither `--image` nor `wall.image` runs them in the
+  run's image. A run from a run code with neither stops before the agent starts with
+  exit 2: `Set wall.image in forager.yaml, then take the work item in again in Qory
+  Apiary`. A walled
+  run with push checks stops before the agent starts with exit 2 when the engine does not
+  have the wall's default image: `Pull the wall's default image onto this machine, and
+  run again: push checks run in it.` A check that does not pass stops the push with 422
+  `push_check_failed`, its fix line and its findings, and `qory artifact push` exits 4;
+  so does a push that the check cannot read, such as a body that is not a push or two
+  files that are one file on the machine. A check that did not finish stops the push with
+  503 `push_check_unavailable`, qory run writes the cause on its stderr, and the push
+  exits 1. Outside a run, `qory artifact push` runs no check. See The module manifest in
+  `contracts/harness/v1/README.md`.
 - Version 1 of the branch format, `contracts/harness/v1/branch.schema.json`: a work
   item's branch, `qory/<work item id>`, and the commit in each repository. A software
   factory can use it as the `json_schema` of a custom artifact type `branch`.
@@ -307,6 +325,9 @@ release may change what an existing document does, and states it under Upgrading
   globs stops the compose with exit 2.
 - A list in `bind` for a role that is not a group stops the compose with exit 2, where
   before qory refused it when it read `qory.yaml`.
+- The harness in a workspace's settings in Qory Apiary can bind a group role to a list,
+  as a checkout's `bind` can: a run from a run code composes the list as the group's
+  members.
 - A walled run whose read-write `--mount` or `wall.mounts` entry is your home folder or
   qory's state directory, or a folder that contains either, stops with exit 2 before
   anything starts, as `mount a narrower folder: the mount <path> is your home folder, and
@@ -346,6 +367,12 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Changed
 
+- `qory artifact pull` and the working folder of a push check take, of each artifact, the
+  newest version that the run API's artifact index does not mark `cancelled`. A version
+  that a cancelled run made counts for no stage, and an artifact whose versions are all
+  cancelled gets no folder. The start commit of a run skips a cancelled version of the
+  artifact `branch` too. Before, all three took the newest version, cancelled or not. An
+  index without the field `cancelled` reads as no version cancelled.
 - qory builds with Forager main 37dc0148. A run keeps its wall only when a container of
   the run may still run; a network or folder of the wall that could not be removed no longer
   keeps it.

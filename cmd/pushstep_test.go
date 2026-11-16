@@ -234,6 +234,9 @@ type pushRepo struct {
 	onOpen     func(session.OpenSpec)
 	runAPIErr  func() error
 	onSetCheck func(func(context.Context, session.RunAPIRequest) (*session.RunAPIRefusal, error)) error
+	// policyImage, when set, is the image the run's policy selects, the run's image in
+	// place of the wall's default.
+	policyImage string
 	// real has the run's setup, removal and join use a real wall at a gateway in this
 	// process. runID and runsDir are those of the last open.
 	real           bool
@@ -326,7 +329,7 @@ func (p *pushRepo) run(t *testing.T, agent func(dir string), result func() (*ses
 		System: proxygittest.Host, Repositories: p.repositories, RunAPI: p.api.base(),
 		Proxy: p.h.server.Proxy.URL, CABundle: p.h.server.Proxy.CABundle, Dir: p.h.runDir,
 		RemoveSetup: p.removeSetup, HostProxyErr: p.proxyErr, AtGateway: p.real, Real: p.real,
-		SetRunAPICheck: p.onSetCheck, RunAPIErr: p.runAPIErr,
+		SetRunAPICheck: p.onSetCheck, RunAPIErr: p.runAPIErr, PolicyImage: p.policyImage,
 		Setup: func(spec session.SetupSpec) error {
 			if p.setup != nil {
 				p.setup(spec.Dir)

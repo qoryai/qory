@@ -19,6 +19,7 @@ import (
 	"github.com/qoryai/forager/session"
 	"github.com/qoryai/forager/wall"
 
+	"github.com/qoryai/qory/internal/config"
 	"github.com/qoryai/qory/internal/exports"
 	"github.com/qoryai/qory/internal/preparation"
 	"github.com/qoryai/qory/internal/pushcheck"
@@ -38,6 +39,8 @@ const (
 	textChecksBadRunAPI  = "Update the run's gateway, and run again. The run API address that the gateway sent is not one the push checks can use: %s."
 	textChecksEngine     = "Switch the engine back to the one the run started on, and run again. The push checks would run on the engine %s, and the run's containers are on the engine %s."
 	textChecksNoFolder   = "Check %s, and run again. Making the folder of the push checks' files failed: %s."
+	textChecksBadImage   = "Set wall.image or --image to an image reference, and run again. Push checks cannot start from %s: a reference starts with a letter or a digit and has only letters, digits and . _ / : @ -."
+	textChecksNoImage    = "Pull the wall's default image onto this machine, and run again: push checks run in it. The engine does not have the image %s."
 	textChecksNotSet     = "Run again. Turning on the push checks for the POSTs from behind the wall failed, so the run stopped before the setup: %s."
 	textCheckNotFinished = "the check before a push did not finish, and the push was not stored (503 " + runapi.CodePushCheckUnavailable + "): %s"
 )
@@ -52,6 +55,9 @@ const (
 	textChecksBadRunAPIFromCode = "Update the run's gateway, then take the work item in again in Qory Apiary: the run API address that the gateway sent is not one the push checks can use: %s" + codeUsed
 	textChecksEngineFromCode    = "Take the work item in again in Qory Apiary, and do not switch the engine while that run starts: the push checks would run on the engine %s, and the run's containers are on the engine %s" + codeUsed
 	textChecksNoFolderFromCode  = "Check %s, then take the work item in again in Qory Apiary: making the folder of the push checks' files failed: %s" + codeUsed
+	textChecksBadImageFromCode  = "Set wall.image or --image to an image reference, then take the work item in again in Qory Apiary: push checks cannot start from %s" + codeUsed
+	textChecksNoDefaultFromCode = "Set wall.image in forager.yaml, then take the work item in again in Qory Apiary: push checks run in the wall's default image" + codeUsed
+	textChecksNoImageFromCode   = "Pull the wall's default image, then take the work item in again in Qory Apiary: push checks run in it, and the engine does not have the image %s" + codeUsed
 	textChecksNotSetFromCode    = "Take the work item in again in Qory Apiary: turning on the push checks for the POSTs from behind the wall failed, so the run stopped before the setup: %s" + codeUsed
 	textChecksUnreadFromCode    = "Take the work item in again in Qory Apiary, so that the new run composes the harness again: the push checks in %s could not be read: %s" + codeUsed
 )
@@ -140,11 +146,12 @@ func (p *runPushChecks) check(ctx context.Context, artifactType string, files []
 
 // load reads the push checks of home, the home qory run composed for the run runID,
 // which the wall of spec mounts read-only at that path. The checks run in a container
-// from the run's image on the engine of the wall, as the run's user, with the wall's
-// limits and the run's label, and read the artifacts through the run's run API on this
-// machine. Their temporary folders are in a folder of the run directory, which done
-// removes. A home with no push check, and a run with no control plane, controlPlane
-// false, load nothing. An error starts with its fix.
+// from the wall's default image, see [checkImage], on the engine of the wall, as the
+// run's user, with the wall's limits and the run's label, and read the artifacts through
+// the run's run API on this machine. A run whose engine does not have the wall's default
+// image stops here, before the setup and the agent. Their temporary folders are in a
+// folder of the run directory, which done removes. A home with no push check, and a run
+// with no control plane, controlPlane false, load nothing. An error starts with its fix.
 func (p *runPushChecks) load(ctx context.Context, run openedRun, home, runID string, spec *runSpec, controlPlane bool) (done func(), err error) {
 	checker, err := pushChecker(ctx, run, home, runID, spec, controlPlane, p.fromCode)
 	if err != nil || checker == nil {
@@ -189,14 +196,34 @@ func pushChecker(ctx context.Context, run openedRun, home, runID string, spec *r
 		// The wall's default: the uid:gid of this process.
 		user = fmt.Sprintf("%d:%d", os.Getuid(), os.Getgid())
 	}
+	// A run from a run code runs its checks in the wall's default image alone: its
+	// policy, from the server, may select an image built from the repository.
+	if fromCode && spec.Image == "" {
+		return nil, errors.New(textChecksNoDefaultFromCode)
+	}
+	// The image goes on the engine's command line: a value of another shape than a
+	// reference, such as one that starts with -, stops the run before any command gets it.
+	image := checkImage(run, spec)
+	if !config.IsImageRef(image) {
+		return nil, checksStop(fromCode, textChecksBadImage, textChecksBadImageFromCode, exports.Value(image, true))
+	}
 	checker := &pushcheck.Checker{
-		Home: home, Checks: checks, Image: run.Image().Ref, User: user,
+		Home: home, Checks: checks, Image: image, User: user,
 		Engine: engine,
 		Fetch:  artifactsForCheck(client),
 		Dir:    filepath.Join(run.Dir(), pushChecksDir),
 		Limits: wall.Limits{CPUs: spec.Limits.CPUs, Memory: spec.Limits.Memory, PIDs: spec.Limits.PIDs},
 		Label:  runLabel + runID,
 		Mask:   secretmask.Default().Replace,
+	}
+	// The run's image, for a run with no default image, comes in the run's image step,
+	// after this load. An inspect that fails for another cause than a missing image lets
+	// the run go on: a check that cannot start stops its push with 503, and the push
+	// stores nothing.
+	if spec.Image != "" {
+		if has, err := checker.HasImage(ctx); err == nil && !has {
+			return nil, checksStop(fromCode, textChecksNoImage, textChecksNoImageFromCode, exports.Value(checker.Image, false))
+		}
 	}
 	// The folder is qory's user's alone. For a run's user that is another user, its mode
 	// lets that user pass through to the folders of a check, which it cannot list.
@@ -215,6 +242,26 @@ func pushChecker(ctx context.Context, run openedRun, home, runID string, spec *r
 		return nil, noFolder(err)
 	}
 	return checker, nil
+}
+
+// checkImage is the reference of the image that the push checks of a run of spec start
+// from: the wall's default image, --image or wall.image, which Forager reads as the name
+// of an image of wall.images first and as a reference otherwise. A change to the
+// repository, such as one to its .devcontainer/ that a prebuilt image is built from,
+// changes the run's image and not this one, so it cannot turn the checks off. A run on a
+// person's machine, with no run code and no default image, which its policy from
+// --policy allows, runs them in the run's image; [pushChecker] stops a run from a run
+// code with no default image before it calls this.
+func checkImage(run openedRun, spec *runSpec) string {
+	if spec.Image == "" {
+		return run.Image().Ref
+	}
+	for _, i := range spec.Images {
+		if i.Name == spec.Image {
+			return i.Ref
+		}
+	}
+	return spec.Image
 }
 
 // checkEngine is the engine of the push checks of a run behind d: d's command, with the
@@ -256,7 +303,8 @@ const textNotesNotList = "Report this run to the instance admin of Qory Apiary. 
 
 // artifactsForCheck is the fetch of a push check through client: the work item's notes
 // as notes.json, the artifact index, and the newest version of each artifact of the
-// types, as qory artifact pull writes them into its store.
+// types that the index does not mark cancelled, as qory artifact pull writes them into
+// its store.
 func artifactsForCheck(client *runapi.Client) pushcheck.Fetch {
 	return func(ctx context.Context, dir string, types []string) error {
 		snapshot, err := client.WorkItem(ctx)
@@ -273,10 +321,10 @@ func artifactsForCheck(client *runapi.Client) pushcheck.Fetch {
 		}
 		store := &artifactStore{root: filepath.Dir(dir), dir: dir, fresh: true}
 		for _, artifact := range index.Artifacts {
-			if !slices.Contains(types, artifact.Type) || artifact.NewestVersion < 1 {
+			if !slices.Contains(types, artifact.Type) {
 				continue
 			}
-			chosen := chosenVersion(artifact, nil, artifact.NewestVersion)
+			chosen := newestNotCancelled(artifact)
 			if chosen == nil {
 				continue
 			}
