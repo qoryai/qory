@@ -939,8 +939,7 @@ release may change what an existing document does, and states it under Upgrading
 ### Removed
 
 - `--agent-image` of `qory run prebuild-step`, the helper that a prebuild runs behind its
-  wall. The step builds from the environment image and copies nothing from the agent
-  image. A prebuild also no longer stops with `the agent image is not pinned by digest`.
+  wall. The step uses no agent image. A prebuild also no longer stops with `the agent image is not pinned by digest`.
 
 ### Fixed
 
