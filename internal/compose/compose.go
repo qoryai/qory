@@ -986,7 +986,7 @@ func checkResolved(res *Result, requires map[string]map[string][]Need, dropped m
 		}
 		if r.Module != "" {
 			// A provided entry that an exclude left out provides nothing, see [setRoles].
-			lines = append(lines, fmt.Sprintf("Ship %s in a module, or remove provides.%s.%s from module %s: no module ships %s.", described(kind, to), shown(kind), shown(name), checkoutName(res, r.Module), described(kind, to)))
+			lines = append(lines, fmt.Sprintf("%s\n  No module ships %s.", altFix(fmt.Sprintf("Ship %s in a module", described(kind, to)), fmt.Sprintf("remove provides.%s.%s from module %s", shown(kind), shown(name), checkoutName(res, r.Module))), described(kind, to)))
 			continue
 		}
 		if by := leftOut(kind, to); by != "" {

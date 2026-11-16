@@ -103,7 +103,7 @@ func TestAComposeRefusalPrintsNoSecretName(t *testing.T) {
 			stack.FileName:                   head + "  - name: core\n",
 			"modules/core/qory-module.yaml":  "apiVersion: qory.dev/v1alpha1\nname: core\nprovides:\n  skills:\n    r: qak_x\n",
 			"modules/core/skills/a/SKILL.md": "# a\n",
-		}, "Ship skill " + name + " in a module, or remove provides.skills.r from module core: no module ships skill " + name + "."},
+		}, "Ship skill " + name + " in a module, or remove provides.skills.r from module core.\n  No module ships skill " + name + "."},
 	} {
 		err := composeWritten(t, c.files)
 		if err == nil || !strings.Contains(err.Error(), c.want) {
