@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/santhosh-tekuri/jsonschema/v6"
 	"github.com/santhosh-tekuri/jsonschema/v6/kind"
@@ -85,14 +86,14 @@ var typeSchemaDrafts = []string{
 // checkArtifactTypes checks artifact_types in the process.yaml shown, which may be left
 // out, as [checkArtifactType] checks each entry, and that no two entries have one name.
 // The entries share one [patternBudget]. A list with no entries passes. The error has
-// one refusal for each entry it stops on: one written fix first has shown at
-// [FilePlace], and any other starts with shown.
+// one refusal for each entry it stops on, each written fix first with shown on its
+// last line.
 func checkArtifactTypes(shown string, list *yaml.Node) error {
 	if list.Kind == 0 {
 		return nil
 	}
 	if list.Kind != yaml.SequenceNode {
-		return fmt.Errorf("%s: set artifact_types to a list of artifact types, or remove it: artifact_types is %s", shown, nodeKind(list))
+		return processRefusal(shown, "Set artifact_types to a list of artifact types, or remove it.", "artifact_types is "+nodeKind(list)+".")
 	}
 	var lines []string
 	first := map[string]int{}
@@ -103,8 +104,6 @@ func checkArtifactTypes(shown string, list *yaml.Node) error {
 		switch {
 		case strings.Contains(why, FilePlace):
 			lines = append(lines, strings.ReplaceAll(why, FilePlace, shown))
-		case why != "":
-			lines = append(lines, shown+": "+why)
 		case twice:
 			lines = append(lines, fmt.Sprintf("Rename or remove entry %d of artifact_types.\n  Entry %d has the name %s too.\n  The entry is in %s.", i+1, at+1, name, shown))
 		}
@@ -128,7 +127,7 @@ func checkArtifactTypes(shown string, list *yaml.Node) error {
 func checkArtifactType(entry *yaml.Node, i int, patterns *patternBudget) (name, why string) {
 	label := fmt.Sprintf("entry %d of artifact_types", i+1)
 	if entry.Kind != yaml.MappingNode {
-		return "", fmt.Sprintf("set %s to an object with a name: the entry is %s", label, nodeKind(entry))
+		return "", fmt.Sprintf("Set %s to an object with a name.\n  The entry is %s.\n  The entry is in %s.", label, nodeKind(entry), FilePlace)
 	}
 	seen := map[string]bool{}
 	for j := 0; j+1 < len(entry.Content); j += 2 {
@@ -137,20 +136,20 @@ func checkArtifactType(entry *yaml.Node, i int, patterns *patternBudget) (name, 
 			return "", fmt.Sprintf("Remove the key %s from %s.\n  An artifact type has only name, base_view, size_limit, max_files, and json_schema.\n  The entry is in %s.", scalarText(key), label, FilePlace)
 		}
 		if seen[key.Value] {
-			return "", fmt.Sprintf("remove the second %s from %s: the entry has the key twice", key.Value, label)
+			return "", fmt.Sprintf("Remove the second %s from %s.\n  The entry has the key twice.\n  The entry is in %s.", key.Value, label, FilePlace)
 		}
 		seen[key.Value] = true
 	}
 	n := value(entry, "name")
 	if n == nil {
-		return "", fmt.Sprintf("add name to %s: the entry has no name", label)
+		return "", fmt.Sprintf("Add name to %s.\n  The entry has no name.\n  The entry is in %s.", label, FilePlace)
 	}
 	if n.Kind == yaml.ScalarNode && n.Tag != "!!str" && nodeKind(n) == "a string" {
 		// A date or a value with an explicit tag: unquoted, YAML reads it as no string.
-		return "", fmt.Sprintf("set the name of %s to a quoted string: YAML reads %s as a type that is not a string", label, scalarText(n))
+		return "", fmt.Sprintf("Set the name of %s to a quoted string.\n  YAML reads %s as a value that is not a string.\n  The entry is in %s.", label, scalarText(n), FilePlace)
 	}
 	if n.Kind != yaml.ScalarNode || n.Tag != "!!str" {
-		return "", fmt.Sprintf("set the name of %s to a string of lowercase letters and digits in groups joined by single hyphens: the name is %s", label, nodeKind(n))
+		return "", fmt.Sprintf("Set the name of %s to a string.\n  A name is lowercase letters and digits in groups joined by single hyphens, and the name is %s.\n  The entry is in %s.", label, nodeKind(n), FilePlace)
 	}
 	if !runapi.ArtifactName(n.Value) {
 		return "", fmt.Sprintf("Rename %s.\n  A name is lowercase letters and digits in groups joined by single hyphens, at most %d bytes.\n  The name is %s.\n  The entry is in %s.", label, runapi.MaxArtifactName, scalarText(n), FilePlace)
@@ -172,7 +171,7 @@ func checkArtifactType(entry *yaml.Node, i int, patterns *patternBudget) (name, 
 	view := value(entry, "base_view")
 	most, known := baseViewSizes[view.Value]
 	if view.Kind != yaml.ScalarNode || view.Tag != "!!str" || !known {
-		return name, fmt.Sprintf("set base_view of %s to document, image, video, file or structured: base_view is %s", label, scalarText(view))
+		return name, fmt.Sprintf("Set base_view of %s to document, image, video, file, or structured.\n  base_view is %s.\n  The type is in %s.", label, scalarText(view), FilePlace)
 	}
 	size, files := value(entry, "size_limit"), value(entry, "max_files")
 	if !wholeNumber(size, most) {
@@ -180,17 +179,17 @@ func checkArtifactType(entry *yaml.Node, i int, patterns *patternBudget) (name, 
 	}
 	structured := view.Value == baseViewStructured
 	if structured && !wholeNumber(files, 1) {
-		return name, fmt.Sprintf("set max_files of %s to 1: a structured type has one file, and max_files is %s", label, numberText(files))
+		return name, fmt.Sprintf("Set max_files of %s to 1.\n  A structured type has one file, and max_files is %s.\n  The type is in %s.", label, numberText(files), FilePlace)
 	}
 	if !wholeNumber(files, maxTypeFiles) {
-		return name, fmt.Sprintf("set max_files of %s to a whole number from 1 to %d: max_files is %s", label, maxTypeFiles, numberText(files))
+		return name, fmt.Sprintf("Set max_files of %s to a whole number from 1 to %d.\n  max_files is %s.\n  The type is in %s.", label, maxTypeFiles, numberText(files), FilePlace)
 	}
 	schema := value(entry, "json_schema")
 	switch {
 	case !structured && schema != nil:
 		return name, fmt.Sprintf("Remove json_schema from %s, or set its base_view to structured.\n  Only a structured type has a JSON Schema, and base_view is %s.\n  The type is in %s.", label, view.Value, FilePlace)
 	case structured && schema == nil:
-		return name, fmt.Sprintf("add json_schema to %s: a structured type has a JSON Schema", label)
+		return name, fmt.Sprintf("Add json_schema to %s.\n  A structured type has a JSON Schema.\n  The type is in %s.", label, FilePlace)
 	case structured:
 		return name, checkTypeSchema(label, schema, patterns)
 	}
@@ -236,7 +235,7 @@ func joinWords(words []string) string {
 // compiles with no file or network read. It returns the fix, "" for a schema that passes.
 func checkTypeSchema(label string, n *yaml.Node, patterns *patternBudget) string {
 	if n.Kind != yaml.MappingNode {
-		return fmt.Sprintf("set json_schema of %s to an object, a JSON Schema: json_schema is %s", label, nodeKind(n))
+		return typeRefusal(fmt.Sprintf("Set json_schema of %s to an object, a JSON Schema.", label), "json_schema is "+nodeKind(n)+".")
 	}
 	where := "json_schema of " + label
 	schema, why := jsonValue(n, where)
@@ -244,28 +243,43 @@ func checkTypeSchema(label string, n *yaml.Node, patterns *patternBudget) string
 		return why
 	}
 	if draft := value(n, "$schema"); draft != nil && !slices.Contains(typeSchemaDrafts, draft.Value) {
-		return fmt.Sprintf("set $schema in %s to %s or %s, or remove it: $schema is %s", where, typeSchemaDrafts[0], typeSchemaDrafts[2], scalarText(draft))
+		return typeRefusal("Set $schema in "+where+" to a draft qory reads, or remove it.", fmt.Sprintf("$schema is %s, and qory reads %s and %s.", scalarText(draft), typeSchemaDrafts[0], typeSchemaDrafts[2]))
 	}
 	values := 0
 	if why := overSchemaLimit(schema, 1, &values); why != "" {
-		return fmt.Sprintf("shorten %s: %s", where, why)
+		return typeRefusal("Shorten "+where+".", capital(why)+".")
 	}
 	var compact bytes.Buffer
 	enc := json.NewEncoder(&compact)
 	enc.SetEscapeHTML(false)
 	if err := enc.Encode(schema); err != nil {
-		return fmt.Sprintf("fix %s: %s", where, oneLine(err.Error()))
+		return typeRefusal("Fix "+where+".", capital(oneLine(err.Error()))+".")
 	}
 	if size := compact.Len() - 1; size > maxSchemaBytes {
-		return fmt.Sprintf("shorten %s to at most %d bytes of JSON: it has %d", where, maxSchemaBytes, size)
+		return typeRefusal(fmt.Sprintf("Shorten %s to at most %d bytes of JSON.", where, maxSchemaBytes), fmt.Sprintf("It has %d bytes.", size))
 	}
 	if err := compileTypeSchema(compact.Bytes(), patterns); err != nil {
 		if patterns.over > 0 {
-			return fmt.Sprintf("shorten the patterns in %s: the estimate for the patterns of all artifact types in the file is at most %d bytes, and this one brings it to %d", where, maxPatternBytes, patterns.over)
+			return typeRefusal("Shorten the patterns in "+where+".", fmt.Sprintf("The estimate for the patterns of all artifact types in the file is at most %d bytes, and this one brings it to %d.", maxPatternBytes, patterns.over))
 		}
 		return fmt.Sprintf("Fix %s so that it compiles as a JSON Schema.\n  The schema does not compile: %s\n  The type is in %s.", where, compileReason(err), FilePlace)
 	}
 	return ""
+}
+
+// typeRefusal is the refusal of a custom type's schema, fix first, with [FilePlace] on the
+// last line.
+func typeRefusal(fix, cause string) string {
+	return fix + "\n  " + cause + "\n  The type is in " + FilePlace + "."
+}
+
+// capital is s with its first letter in upper case.
+func capital(s string) string {
+	if s == "" {
+		return s
+	}
+	r, n := utf8.DecodeRuneInString(s)
+	return string(unicode.ToUpper(r)) + s[n:]
 }
 
 // jsonValue is n as a JSON value, with where for a message: a mapping is a
@@ -280,10 +294,10 @@ func jsonValue(n *yaml.Node, where string) (any, string) {
 		for i := 0; i+1 < len(n.Content); i += 2 {
 			key := n.Content[i]
 			if key.Kind != yaml.ScalarNode || key.Tag != "!!str" {
-				return nil, fmt.Sprintf("quote the key %s in %s: a JSON key is a string", scalarText(key), where)
+				return nil, typeRefusal(fmt.Sprintf("Quote the key %s in %s.", scalarText(key), where), "A JSON key is a string.")
 			}
 			if _, twice := m[key.Value]; twice {
-				return nil, fmt.Sprintf("remove the second %s from its object in %s: the object has the key twice", scalarText(key), where)
+				return nil, typeRefusal(fmt.Sprintf("Remove the second %s from its object in %s.", scalarText(key), where), "The object has the key twice.")
 			}
 			v, why := jsonValue(n.Content[i+1], where)
 			if why != "" {
@@ -307,10 +321,10 @@ func jsonValue(n *yaml.Node, where string) (any, string) {
 	case "!!null", "!!bool", "!!int", "!!float":
 		var v any
 		if err := n.Decode(&v); err != nil {
-			return nil, fmt.Sprintf("replace %s in %s with a JSON value: the value does not decode as %s", scalarText(n), where, n.Tag)
+			return nil, typeRefusal(fmt.Sprintf("Replace %s in %s with a JSON value.", scalarText(n), where), "The value does not decode as "+n.Tag+".")
 		}
 		if f, isFloat := v.(float64); isFloat && (math.IsInf(f, 0) || math.IsNaN(f)) {
-			return nil, fmt.Sprintf("replace %s in %s with a JSON number: JSON has no such number", n.Value, where)
+			return nil, typeRefusal(fmt.Sprintf("Replace %s in %s with a JSON number.", n.Value, where), "JSON has no such number.")
 		}
 		return v, ""
 	}

@@ -97,7 +97,7 @@ func (e *Exports) readProcess(dir string) ([]byte, string, error) {
 		data, err = root.ReadFile(ProcessFileName)
 	}
 	if escapes(root, err) {
-		return nil, path, fmt.Errorf("%s: replace %s with a file inside the module: it is a link to a place outside the module", HidePath(path), ProcessFileName)
+		return nil, path, processRefusal(HidePath(path), "Replace "+ProcessFileName+" with a file inside the module.", "It is a link to a place outside the module.")
 	}
 	if err != nil {
 		return nil, path, HideError(err)
@@ -154,7 +154,7 @@ func (e *Exports) checkProcess(path string, data []byte) error {
 		return DecodeError(shown, err)
 	}
 	if strings.TrimSpace(t.APIVersion) == "" {
-		return fmt.Errorf("%s: add apiVersion: %s: the file has no apiVersion", shown, APIVersion)
+		return processRefusal(shown, "Add apiVersion: "+APIVersion+" to "+ProcessFileName+".", "The file has no apiVersion.")
 	}
 	if _, err := ResolveAPIVersion(t.APIVersion); err != nil {
 		return HideValueError(AtPath(shown, err), "")
@@ -171,18 +171,18 @@ func (e *Exports) checkProcess(path string, data []byte) error {
 		}
 	}
 	if n := len(strings.Fields(t.Description)); n > maxDescriptionWords {
-		return fmt.Errorf("%s: shorten description to at most %d words: description has %d", shown, maxDescriptionWords, n)
+		return processRefusal(shown, fmt.Sprintf("Shorten description in %s to at most %d words.", ProcessFileName, maxDescriptionWords), fmt.Sprintf("The description has %d words.", n))
 	}
 	if strings.TrimSpace(t.Type) == "" {
-		return fmt.Errorf("%s: add type, the workspace type the template sets up: the file has no type", shown)
+		return processRefusal(shown, "Add type to "+ProcessFileName+", the workspace type the template sets up.", "The file has no type.")
 	}
 	if t.Stack == "" {
-		return fmt.Errorf("%s: add stack, a name that exports.stacks lists: the file has no stack", shown)
+		return processRefusal(shown, "Add stack to "+ProcessFileName+", a name that exports.stacks lists.", "The file has no stack.")
 	}
 	if why := notOneLine(t.Stack); why != "" {
 		// The refusal of a stack exports.stacks does not list prints the value, so a
 		// value with a line break could start a line that looks like qory's.
-		return fmt.Errorf("%s: set stack to one line of text: %s", shown, why)
+		return processRefusal(shown, "Set stack in "+ProcessFileName+" to one line of text.", "The value "+why+".")
 	}
 	if !contains(e.Stacks, t.Stack) {
 		listed := "no stacks"
@@ -192,23 +192,23 @@ func (e *Exports) checkProcess(path string, data []byte) error {
 		return fmt.Errorf("Set stack in %s to a name that exports.stacks lists.\n  The value is %s, and exports.stacks lists %s.\n  The file is %s.", ProcessFileName, accesskey.ShownName(t.Stack, false), listed, shown)
 	}
 	if t.Process.Kind == 0 || t.Process.Tag == "!!null" {
-		return fmt.Errorf("%s: add process, the template's process document as an object: the file has no process", shown)
+		return processRefusal(shown, "Add process to "+ProcessFileName+", the template's process document as an object.", "The file has no process.")
 	}
 	if t.Process.Kind != yaml.MappingNode {
 		return fmt.Errorf("Set process in %s to an object.\n  process is the template's process document, and the value is %s.\n  The file is %s.", ProcessFileName, nodeKind(&t.Process), shown)
 	}
 	schema, stages := value(&t.Process, "schema"), value(&t.Process, "stages")
 	if schema == nil || schema.Tag == "!!null" {
-		return fmt.Errorf("%s: add schema: %s under process: process has no schema", shown, ProcessSchema)
+		return processRefusal(shown, "Add schema: "+ProcessSchema+" under process.", "process has no schema.")
 	}
 	if schema.Kind != yaml.ScalarNode || schema.Value != ProcessSchema {
-		return fmt.Errorf("%s: set process.schema to %s: process.schema is %s", shown, ProcessSchema, scalarText(schema))
+		return processRefusal(shown, "Set process.schema to "+ProcessSchema+".", "process.schema is "+scalarText(schema)+".")
 	}
 	if stages == nil || stages.Tag == "!!null" {
-		return fmt.Errorf("%s: add stages under process, the list of the process's stages: process has no stages", shown)
+		return processRefusal(shown, "Add stages under process, the list of the process's stages.", "process has no stages.")
 	}
 	if stages.Kind != yaml.SequenceNode {
-		return fmt.Errorf("%s: set process.stages to a list of stages: process.stages is %s", shown, nodeKind(stages))
+		return processRefusal(shown, "Set process.stages to a list of stages.", "process.stages is "+nodeKind(stages)+".")
 	}
 	if err := e.checkWorkflows(shown, t.Stack, stages); err != nil {
 		return err
@@ -293,6 +293,13 @@ func checkSubmitType(shown, name string, types *yaml.Node) error {
 	return submitRefusal(shown, fix, "No entry of artifact_types is named "+name+".")
 }
 
+// processRefusal is a refusal of the process.yaml shown, fix first: the fix, the cause,
+// and the file on the last line, so the first line stays within 100 characters whatever
+// the path.
+func processRefusal(shown, fix, cause string) error {
+	return fmt.Errorf("%s\n  %s\n  The file is %s.", fix, cause, shown)
+}
+
 // submitRefusal is a refusal of submit in the process.yaml shown, fix first: the fix,
 // the cause, and the file on the last line, so the first line stays within 100
 // characters whatever the path.
@@ -322,7 +329,7 @@ func (e *Exports) checkWorkflows(shown, stackName string, stages *yaml.Node) err
 		label := strconv.Itoa(i + 1)
 		if n := value(stage, "name"); n != nil && n.Kind == yaml.ScalarNode {
 			if why := notOneLine(n.Value); why != "" {
-				lines = append(lines, fmt.Sprintf("%s: set the name of stage %d to one line of text: %s", shown, i+1, why))
+				lines = append(lines, processRefusal(shown, fmt.Sprintf("Set the name of stage %d to one line of text.", i+1), "The name "+why+".").Error())
 			} else if strings.TrimSpace(n.Value) != "" {
 				label = accesskey.ShownName(n.Value, false)
 			}
@@ -330,7 +337,7 @@ func (e *Exports) checkWorkflows(shown, stackName string, stages *yaml.Node) err
 		seen := map[string]bool{}
 		for _, ref := range stageWorkflows(stage) {
 			if why := badWorkflow(ref.name); why != "" {
-				lines = append(lines, fmt.Sprintf("%s: set the workflow of %s in stage %s to a workflow name: %s", shown, ref.where, label, why))
+				lines = append(lines, processRefusal(shown, fmt.Sprintf("Set the workflow of %s in stage %s to a workflow name.", ref.where, label), "The workflow "+why+".").Error())
 				continue
 			}
 			name := ref.name.Value
@@ -355,13 +362,13 @@ func (e *Exports) checkWorkflows(shown, stackName string, stages *yaml.Node) err
 func badWorkflow(n *yaml.Node) string {
 	switch {
 	case n.Tag == "!!null":
-		return "it is null"
+		return "is null"
 	case n.Kind != yaml.ScalarNode, n.Tag == "!!int", n.Tag == "!!float", n.Tag == "!!bool":
-		return "it is " + nodeKind(n)
+		return "is " + nodeKind(n)
 	case n.Tag != "!!str":
-		return "it is not a string"
+		return "is not a string"
 	case strings.TrimSpace(n.Value) == "":
-		return "it is empty"
+		return "is empty"
 	}
 	return notOneLine(n.Value)
 }
@@ -370,10 +377,10 @@ func badWorkflow(n *yaml.Node) string {
 // another control character; "" for one line.
 func notOneLine(v string) string {
 	if strings.ContainsAny(v, "\n\r") {
-		return "it has a line break"
+		return "has a line break"
 	}
 	if strings.IndexFunc(v, unicode.IsControl) >= 0 {
-		return "it has a control character"
+		return "has a control character"
 	}
 	return ""
 }
