@@ -324,6 +324,64 @@ func TestATypeWithoutACheckPasses(t *testing.T) {
 	}
 }
 
+// TestAWithdrawalRunsNoCheck is a body with withdraw true and no files, of a type whose
+// check exits 1: it passes with no fetch and no container. With files, with withdraw
+// false, and with no withdraw member, the check runs as for any push.
+func TestAWithdrawalRunsNoCheck(t *testing.T) {
+	for name, body := range map[string]string{
+		"files []":      `{"type":"spec","name":"main","withdraw":true,"files":[]}`,
+		"files null":    `{"type":"spec","name":"main","withdraw":true,"files":null}`,
+		"files missing": `{"type":"spec","name":"main","withdraw":true}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newFixture(t, "#!/usr/bin/env node")
+			f.e.exit(1, "", "The spec has no file.")
+			if r, err := f.post(t, "/artifacts", []byte(body)); r != nil || err != nil {
+				t.Fatalf("got %+v, %v, want nil, nil", r, err)
+			}
+			if len(f.fetched) != 0 || len(f.e.commands) != 0 {
+				t.Errorf("fetched %v and ran %v, want nothing", f.fetched, f.e.commands)
+			}
+		})
+	}
+	for name, body := range map[string]string{
+		"withdraw false and no files": `{"type":"spec","name":"main","withdraw":false,"files":[]}`,
+		"no withdraw and no files":    `{"type":"spec","name":"main","files":[]}`,
+		"withdraw with a file":        `{"type":"spec","name":"main","withdraw":true,"files":[{"filename":"spec.md","content_base64":"eA=="}]}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newFixture(t, "#!/usr/bin/env node")
+			f.e.exit(1, "", "The spec has no file.")
+			r, err := f.post(t, "/artifacts", []byte(body))
+			if err != nil || r == nil {
+				t.Fatalf("got %+v, %v, want a refusal of the check", r, err)
+			}
+			if len(f.e.commands) == 0 {
+				t.Errorf("the check did not run")
+			}
+		})
+	}
+}
+
+// TestABodyWithABadWithdrawGets422 is a body whose withdraw is not true or false, or is
+// there twice, or is there in another case.
+func TestABodyWithABadWithdrawGets422(t *testing.T) {
+	f := newFixture(t, "#!/usr/bin/env node")
+	fix := "Send the push as qory artifact push sends it, and push again. The body is not a push: "
+	r, err := f.post(t, "/artifacts", []byte(`{"type":"spec","withdraw":"yes","files":[]}`))
+	wantRefusal(t, "withdraw yes", r, err, fix+"withdraw is not true or false.")
+	for _, body := range []string{
+		`{"type":"spec","withdraw":true,"withdraw":false,"files":[]}`,
+		`{"type":"spec","Withdraw":true,"files":[]}`,
+	} {
+		r, err := f.post(t, "/artifacts", []byte(body))
+		wantRefusal(t, body, r, err, "Send each member of the push once, in lower case, and push again.")
+	}
+	if len(f.e.commands) != 0 {
+		t.Errorf("ran %v, want nothing", f.e.commands)
+	}
+}
+
 // TestAPassingCheckLetsThePushGoOn is a check that exits 0: nil, nil, the body as it
 // was, the pushed files decoded under their names, the fetch of the type and its reads,
 // and the container removed after the inspect.

@@ -16,46 +16,54 @@ var errAmbiguous = errors.New("the push has a member twice, or one whose name di
 
 // The members of a push that the check reads, and of each of its files.
 var (
-	pushMembers = []string{"type", "name", "note", "files"}
+	pushMembers = []string{"type", "name", "note", "withdraw", "files"}
 	fileMembers = []string{"filename", "content_type", "content_base64"}
 )
 
-// readPush reads body, a POST of /artifacts as the run API reads it: its type, and its
-// files with their names and decoded contents. A body that is not a push in that form is
-// an error, whose text says which part is not; a body whose members can be read in more
-// than one way is [errAmbiguous].
-func readPush(body []byte) (string, []File, error) {
+// readPush reads body, a POST of /artifacts as the run API reads it: its type, whether it
+// is a withdrawal, and its files with their names and decoded contents. A withdrawal, a
+// push with `withdraw` true, may leave out `files` or send null. A body that is not a push
+// in that form is an error, whose text says which part is not; a body whose members can
+// be read in more than one way is [errAmbiguous].
+func readPush(body []byte) (artifactType string, files []File, withdraw bool, err error) {
 	top, err := members(body, pushMembers)
 	if err != nil {
-		return "", nil, err
+		return "", nil, false, err
 	}
-	var artifactType string
 	if err := json.Unmarshal(top["type"], &artifactType); err != nil {
-		return "", nil, errors.New("type is missing or not a string")
+		return "", nil, false, errors.New("type is missing or not a string")
+	}
+	if raw, ok := top["withdraw"]; ok {
+		if err := json.Unmarshal(raw, &withdraw); err != nil {
+			return "", nil, false, errors.New("withdraw is not true or false")
+		}
 	}
 	var items []json.RawMessage
-	if err := json.Unmarshal(top["files"], &items); err != nil {
-		return "", nil, errors.New("files is missing or not a list")
+	raw, present := top["files"]
+	if !withdraw || (present && string(bytes.TrimSpace(raw)) != "null") {
+		if err := json.Unmarshal(raw, &items); err != nil {
+			return "", nil, false, errors.New("files is missing or not a list")
+		}
 	}
-	files := make([]File, 0, len(items))
+	files = make([]File, 0, len(items))
 	for i, item := range items {
 		m, err := members(item, fileMembers)
 		if errors.Is(err, errAmbiguous) {
-			return "", nil, err
+			return "", nil, false, err
 		}
 		if err != nil {
-			return "", nil, fmt.Errorf("files[%d]: %w", i, err)
+			return "", nil, false, fmt.Errorf("files[%d]: %w", i, err)
 		}
 		var f File
 		if err := json.Unmarshal(m["filename"], &f.Name); err != nil {
-			return "", nil, fmt.Errorf("files[%d].filename is missing or not a string", i)
+			return "", nil, false, fmt.Errorf("files[%d].filename is missing or not a string", i)
 		}
 		if err := json.Unmarshal(m["content_base64"], &f.Content); err != nil {
-			return "", nil, fmt.Errorf("files[%d].content_base64 is missing or not base64", i)
+			return "", nil, false, fmt.Errorf("files[%d].content_base64 is missing or not base64", i)
 		}
 		files = append(files, f)
 	}
-	return artifactType, files, nil
+	return artifactType, files, withdraw, nil
 }
 
 // members are the members of the JSON object raw by name. A name twice, or a name that
