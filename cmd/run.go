@@ -347,6 +347,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			}
 			ctx, again, got, stop := signalContext(cmd.Context())
 			defer stop()
+			route := newQoryRoute()
 			spec := runSpec{
 				OpenSpec: session.OpenSpec{
 					RunsDir:        runs,
@@ -357,6 +358,8 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					// The session masks the run's record, events and lines with the run's
 					// mask list, and adds the server's variables to it.
 					Masker: secretmask.Default().Masker(),
+					// Every run, walled or not, has the route from its session to qory.
+					QoryRoute: route,
 				},
 				SessionSpec: session.SessionSpec{
 					Env:         os.Environ(),
@@ -1173,7 +1176,10 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					onVariables(a)
 				}
 			}
+			// The agent's session is the run's first join, so the gateway numbers it 1.
+			closeRoute := route.open(1)
 			res, err := joinSession(run, ctx, spec.SessionSpec)
+			closeRoute()
 			out := sessionOutcome(res, err)
 			// pushWork is the push step of a run with an agent session that may write, see
 			// [keepsWork], before the close: Qory Apiary takes no version of a run that ended.
@@ -1248,14 +1254,12 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				if timeout > 0 {
 					limit = opened.Add(timeout)
 				}
-				pushCtx, cancel := pushContext(ctx, again, limit, pushTimes.limit, pushTimes.signal)
-				ending.noStep, pushErr = removeThenPush(pushCtx, run, streams.errOut, branch, cwd, spec.RunID, fromCode.runNumber, out, walled, checks)
-				ending.settle(stopNow())
-				ending.cut = pushCtx.Err() != nil
-				cancel()
-				if pushErr != nil {
-					out = ending.outcome(pushErr)
+				push := &sessionPush{
+					ctx: ctx, again: again, limit: limit, stopNow: stopNow,
+					run: run, stderr: streams.errOut, branch: branch, dir: cwd, runID: spec.RunID,
+					runNumber: fromCode.runNumber, agentStopped: walled, checks: checks,
 				}
+				out, pushErr = pushAfterSession(push, &ending, out)
 			}
 			closed := closeRun(out)
 			// Nothing of the copy comes back when a process of the run could have written it past

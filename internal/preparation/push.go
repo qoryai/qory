@@ -97,6 +97,10 @@ func stepGit(p *proxygit.Proxy, input string, env ...string) gitRunner {
 // returns the branch document of the new version, nil when no repository has new
 // commits: [WorkBranch.Version] with the commit of each repository pushed replaced, or
 // added for one with no entry. It prints a line on report for each repository pushed.
+// Each push that lands sets the repository's [WorkRepository.Commit] and its entry of
+// [WorkBranch.Version] to the commit pushed, so a later Push of the same run, after a
+// later session, pushes only the commits past it, and pushes nothing when there are none.
+// [WorkBranch.PushedPaths] lists the repositories of the last Push alone.
 //
 // Before any git writes, [safeAfterRun] checks the target and [safeFurther] each further
 // repository, since the agent could write each .git. Every git runs with the environment
@@ -142,8 +146,7 @@ func Push(ctx context.Context, dir string, base []string, b *WorkBranch, message
 			return nil, err
 		}
 	}
-	version := slices.Clone(b.Version)
-	pushed := false
+	b.pushed = nil
 	for i, r := range b.Repositories {
 		if heads[i] == "" {
 			continue
@@ -156,14 +159,15 @@ func Push(ctx context.Context, dir string, base []string, b *WorkBranch, message
 		}
 		b.pushed = append(b.pushed, shownPath(r.Path))
 		fmt.Fprintf(report, textPushed+"\n", b.Ref, shownPath(r.Path), shortCommit(heads[i]))
-		version = withCommit(version, b.system, r.Path, heads[i])
-		pushed = true
+		// The branch is at heads[i] now, so a later Push of the run starts there.
+		b.Repositories[i].Commit = heads[i]
+		b.Version = withCommit(slices.Clone(b.Version), b.system, r.Path, heads[i])
 	}
-	if !pushed {
+	if len(b.pushed) == 0 {
 		fmt.Fprintln(report, textNoNewCommits)
 		return nil, nil
 	}
-	return &branchformat.Branch{Ref: b.Ref, Repositories: version}, nil
+	return &branchformat.Branch{Ref: b.Ref, Repositories: slices.Clone(b.Version)}, nil
 }
 
 // clearIndexLocks removes .git/index.lock of each repository, in folders by the order of
