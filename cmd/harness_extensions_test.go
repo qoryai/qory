@@ -4,10 +4,12 @@ import (
 	"encoding/json"
 	"errors"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
 
+	"github.com/qoryai/forager/session"
 	"github.com/qoryai/forager/wall"
 
 	"github.com/qoryai/qory/cmd"
@@ -85,4 +87,62 @@ func TestARunCodeWhoseInputsHaveQoryStops(t *testing.T) {
 		t.Errorf("the run opened and closed with %v", r.closes)
 	}
 	wants(t, r.err.Error(), "remove the input qory: qory adds that member to inputs.json; the code is used")
+}
+
+// TestACheckoutsQoryYamlSetsTheHarnessExtensionsOfTheInputs is a run from a run code with
+// no harness document, whose checkout's qory.yaml extends a base that sets
+// software-factory and team, and sets software-factory itself with an area of the base
+// removed and an area added: inputs.json and its copy in the home have the checkout's
+// software-factory whole, which replaces the base's, and the base's team beside it.
+func TestACheckoutsQoryYamlSetsTheHarnessExtensionsOfTheInputs(t *testing.T) {
+	var in homeInputs
+	r := codeHarness{
+		checkout: true,
+		stack: func(s string) string {
+			return s + "extensions:\n  software-factory:\n    command_limits_minutes: {test: 10}\n  team:\n    name: base\n"
+		},
+		document: func(text string) string {
+			var doc map[string]any
+			if err := json.Unmarshal([]byte(text), &doc); err != nil {
+				t.Fatal(err)
+			}
+			doc["harness"].(map[string]any)["extensions"] = map[string]any{"software-factory": map[string]any{
+				"remove_sensitive_areas": []any{"billing"},
+				"add_sensitive_areas":    []any{map[string]any{"name": "search ranking", "patterns": []any{"**/search-index/**"}}},
+			}}
+			b, err := json.Marshal(doc)
+			if err != nil {
+				t.Fatal(err)
+			}
+			return string(b) + "\n"
+		},
+		before: func() []string {
+			walledByDocker(t)
+			return nil
+		},
+		joined: func(s session.SessionSpec) { in = inputsAtJoin(t, s) },
+	}.run(t)
+	if !errors.Is(r.err, cmd.ErrJoinedNowhere) || !r.joined {
+		t.Fatalf("%v (exit %d), want the join\n%s", r.err, cmd.ExitCode(r.err), r.out)
+	}
+	want := map[string]any{
+		"software-factory": map[string]any{
+			"remove_sensitive_areas": []any{"billing"},
+			"add_sensitive_areas":    []any{map[string]any{"name": "search ranking", "patterns": []any{"**/search-index/**"}}},
+		},
+		"team": map[string]any{"name": "base"},
+	}
+	for name, inputs := range map[string][]byte{"inputs.json": in.written, "its copy in the home": in.copied} {
+		var got struct {
+			Qory struct {
+				HarnessExtensions map[string]any `json:"harness_extensions"`
+			} `json:"qory"`
+		}
+		if err := json.Unmarshal(inputs, &got); err != nil {
+			t.Fatalf("%s does not read: %v\n%s", name, err, inputs)
+		}
+		if !reflect.DeepEqual(got.Qory.HarnessExtensions, want) {
+			t.Errorf("harness_extensions in %s is %v, want %v", name, got.Qory.HarnessExtensions, want)
+		}
+	}
 }
