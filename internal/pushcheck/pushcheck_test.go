@@ -440,7 +440,7 @@ func TestTheCheckGetsTheRunsInputs(t *testing.T) {
 	if err := os.WriteFile(inputs, []byte(`{"qory":{"harness_extensions":{}}}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	f.c.Inputs = inputs
+	f.c.Inputs, f.c.InputsData = inputs, []byte(`{"qory":{"harness_extensions":{}}}`)
 	if _, err := f.post(t, "/artifacts", pushBody(t, "spec", [2]string{"spec.md", "x"})); err != nil {
 		t.Fatal(err)
 	}
@@ -462,8 +462,9 @@ func TestTheCheckGetsTheRunsInputs(t *testing.T) {
 // TestAnotherUserCanReadTheRunsInputs is a check whose container runs as a user other
 // than this process's, with the run's inputs.json mode 0600 in a folder of mode 0700, as
 // qory run writes it: the file the container mounts at the path of inputs.json has the
-// same content, mode 0644, in a folder of mode 755, so that user can read it, and the
-// run's file keeps mode 0600. The copy is gone after the check.
+// bytes qory wrote, InputsData, mode 0644, in a folder of mode 755, so that user can read
+// it, and the run's file keeps mode 0600. The file on disk was changed after qory wrote
+// it, and the copy still has qory's bytes. The copy is gone after the check.
 func TestAnotherUserCanReadTheRunsInputs(t *testing.T) {
 	f := newFixture(t, "#!/usr/bin/env node")
 	f.c.User = strconv.Itoa(os.Getuid()+1) + ":" + strconv.Itoa(os.Getgid()+1)
@@ -473,10 +474,10 @@ func TestAnotherUserCanReadTheRunsInputs(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(inputs), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(inputs, []byte(content), 0o600); err != nil {
+	if err := os.WriteFile(inputs, []byte(`{"changed":"on disk"}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	f.c.Inputs = inputs
+	f.c.Inputs, f.c.InputsData = inputs, []byte(content)
 	var src, got string
 	var mode, folderMode fs.FileMode
 	f.e.create = func(io.Writer) error {
@@ -1012,7 +1013,7 @@ func TestARealCheckRunsInTheEngine(t *testing.T) {
 	}
 	reads := write("reads", "#!/bin/sh\nset -e\ntest \"$2\" = --inputs\ngrep -q harness_extensions \"$3\"\n! sh -c ': >> \"$3\"' 2>/dev/null\ngrep -q Spec \"$4\"\n")
 	withInputs := checker(reads)
-	withInputs.Inputs = inputs
+	withInputs.Inputs, withInputs.InputsData = inputs, []byte(`{"qory":{"harness_extensions":{}}}`)
 	if r := check(withInputs); r != nil {
 		t.Errorf("the check that reads the inputs got %+v", r)
 	}

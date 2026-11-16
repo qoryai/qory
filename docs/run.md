@@ -1613,11 +1613,12 @@ the work item. Then a run of the step explore:
   read-only at the same path. The file has the inputs' members as they came, then one
   member that qory adds once the harness is composed, `qory`:
   `{"harness_extensions": {…}}`, the harness report's `extensions`, or `{}` when the
-  harness has none. A harness's check reads them from the file whose path follows the
-  workflow's name in the prompt, and a push check gets the same path after `--inputs`
-  (see Push checks in `contracts/harness/v1/README.md`). Inputs that have a member
-  `qory` stop the run before it opens, with exit 1: `remove the input qory: qory adds
-  that member to inputs.json; the code is used`;
+  harness has none. The workflow reads them from the path after its name in the prompt,
+  and a push check gets the same path after `--inputs` (see Push checks in
+  `contracts/harness/v1/README.md`). Inputs that have a member `qory` stop the run before
+  it opens, with exit 1: `remove the input qory: qory adds that member to inputs.json; the
+  code is used`, and so do inputs that are not a JSON object: `ask Qory Apiary's instance
+  admin: the run code's inputs are not a JSON object; the code is used`;
 - starts the runtime with its headless start: the arguments that run one prompt with no
   terminal, write the session's output to stdout and exit. The prompt invokes the
   first of these that the runtime can start: the skill `workflow-<workflow>`, the command

@@ -89,8 +89,10 @@ type runPushChecks struct {
 	// lines of [checksStop] for such a run.
 	fromCode bool
 	// inputs is the path of the run's inputs.json, which the check gets, see
-	// [pushcheck.Checker.Inputs]; "" for a run with none.
-	inputs string
+	// [pushcheck.Checker.Inputs]; "" for a run with none. inputsData is the bytes qory
+	// wrote there.
+	inputs     string
+	inputsData []byte
 }
 
 // current is the checker, nil before the load or for a home with no push check.
@@ -150,7 +152,7 @@ func (p *runPushChecks) load(ctx context.Context, run openedRun, home, runID str
 	if err != nil || checker == nil {
 		return func() {}, err
 	}
-	checker.Inputs = p.inputs
+	checker.Inputs, checker.InputsData = p.inputs, p.inputsData
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.checker = checker

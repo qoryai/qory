@@ -731,10 +731,11 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				if fromCode != nil {
 					// inputs.json has the inputs and what qory adds, which the report has.
 					var file string
-					if file, err = fromCode.writeInputs(in, qoryInputs{HarnessExtensions: rep.Extensions}); err != nil {
+					var data []byte
+					if file, data, err = fromCode.writeInputs(in, qoryInputs{HarnessExtensions: rep.Extensions}); err != nil {
 						return false, inputsNotWritten(err)
 					}
-					checks.inputs = file
+					checks.inputs, checks.inputsData = file, data
 					if extra, err = fromCode.workflowArgs(name, rep, in, run.System()); err != nil {
 						return false, err
 					}

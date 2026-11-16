@@ -79,22 +79,34 @@ func TestTheInputsGetTheMemberQory(t *testing.T) {
 	}
 }
 
-// TestAMemberQoryInTheInputsIsFound is the check that stops a run whose inputs have the
-// member qory: only a member qory at the top level counts.
-func TestAMemberQoryInTheInputsIsFound(t *testing.T) {
-	for inputs, want := range map[string]bool{
-		`{"version":1,"qory":{}}`: true,
-		`{"qory":null}`:           true,
-		`{"version":1}`:           false,
-		`{"a":{"qory":1}}`:        false,
-		`{"Qory":1}`:              false,
-		`["qory"]`:                false,
+// TestTheInputsAreCheckedBeforeTheRunOpens is the check of a run code's inputs: a member
+// qory at the top level stops the run with its line, and so do inputs that are not a JSON
+// object, with theirs; a member qory deeper down, or in another case, does not. Each line
+// has at most 100 characters.
+func TestTheInputsAreCheckedBeforeTheRunOpens(t *testing.T) {
+	haveQory, notAnObject := textInputsHaveQory+codeUsed, textInputsNotAnObject+codeUsed
+	for inputs, want := range map[string]string{
+		`{"version":1,"qory":{}}`: haveQory,
+		`{"qory":null}`:           haveQory,
+		`{"version":1}`:           "",
+		`{"a":{"qory":1}}`:        "",
+		`{"Qory":1}`:              "",
+		`["qory"]`:                notAnObject,
+		`null`:                    notAnObject,
+		`"a"`:                     notAnObject,
+		``:                        notAnObject,
 	} {
-		if got := hasQoryMember([]byte(inputs)); got != want {
-			t.Errorf("%s: %v, want %v", inputs, got, want)
+		got := ""
+		if err := checkInputs([]byte(inputs)); err != nil {
+			got = err.Error()
+		}
+		if got != want {
+			t.Errorf("%q: %q, want %q", inputs, got, want)
 		}
 	}
-	if n := len(textInputsHaveQory + codeUsed); n > 100 {
-		t.Errorf("the line has %d characters, want at most 100", n)
+	for _, line := range []string{haveQory, notAnObject} {
+		if len(line) > 100 {
+			t.Errorf("%q has %d characters, want at most 100", line, len(line))
+		}
 	}
 }
