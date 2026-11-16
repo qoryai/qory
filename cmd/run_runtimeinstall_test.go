@@ -1,15 +1,18 @@
 package cmd_test
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/qoryai/forager/event"
 	"github.com/qoryai/forager/session"
+	"github.com/qoryai/forager/wall"
 
 	"github.com/qoryai/qory/cmd"
 	"github.com/qoryai/qory/internal/config"
@@ -42,6 +45,8 @@ type installSetup struct {
 	// noInstance leaves the run with no address of Qory Apiary; otherwise reg's
 	// instance is the run's.
 	noInstance bool
+	// runtime is the runtime of the run; empty means claude.
+	runtime string
 }
 
 // runInstalling runs qory run claude with a run key as s sets it up, with no
@@ -72,7 +77,8 @@ func runInstalling(t *testing.T, s installSetup) installRun {
 		writeFile(t, filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "forager.yaml"), section)
 	}
 	gw := newKeyedGateway(t)
-	args := []string{"run", "claude", "--home", t.TempDir(), "--run-key-fd", descriptor(t, mintRunKey(t, keyRunID, gw.url()))}
+	runtime := cmp.Or(s.runtime, "claude")
+	args := []string{"run", runtime, "--home", t.TempDir(), "--run-key-fd", descriptor(t, mintRunKey(t, keyRunID, gw.url()))}
 	t.Setenv("QORY_RUN_KEY", "")
 	var r installRun
 	program := filepath.Join(os.Getenv("XDG_STATE_HOME"), "qory", "runtimes", "claude", "2.1.320", "bin", "claude")
@@ -87,7 +93,7 @@ func runInstalling(t *testing.T, s installSetup) installRun {
 		},
 	})
 	defer restore()
-	writeFile(t, filepath.Join(h.dir, "qory.yaml"), ownStack("apiVersion: qory.dev/v1alpha1\ntarget:\n  runtime: claude\nmodules:\n  - name: core\n    source: {git: \""+h.server.URL("acme/harness")+"\", ref: main, path: modules/core}\n"))
+	writeFile(t, filepath.Join(h.dir, "qory.yaml"), ownStack("apiVersion: qory.dev/v1alpha1\ntarget:\n  runtime: "+runtime+"\nmodules:\n  - name: core\n    source: {git: \""+h.server.URL("acme/harness")+"\", ref: main, path: modules/core}\n"))
 	r.out, r.err = run(t, args...)
 	r.closes, r.calls = closes(), calls()
 	return r
@@ -122,6 +128,49 @@ func TestAWalledRunInstallsItsRuntimeFromTheRegistry(t *testing.T) {
 	}
 	if reg.BlobGets() != 1 || len(npm.Paths()) != 0 || proxy.Passed() == 0 || proxy.Refusals() != 0 {
 		t.Fatalf("%d blobs, %d npm requests; the proxy passed %d and refused %d", reg.BlobGets(), len(npm.Paths()), proxy.Passed(), proxy.Refusals())
+	}
+}
+
+// TestAWalledClaudeSessionStartsTheInstalledProgram has the session's spec at the join
+// carry RuntimeInstall with the version's folder and version, and the installed
+// program as Command, which Forager requires of a runtime whose descriptor sets
+// install_required.
+func TestAWalledClaudeSessionStartsTheInstalledProgram(t *testing.T) {
+	reg, npm, proxy := rt.StartRegistry(t), rt.StartNpm(t), rt.StartProxy(t)
+	reg.PublishPlain("2.1.320")
+	r := runInstalling(t, installSetup{reg: reg, npm: npm, proxy: proxy, walled: true})
+	r.joined(t)
+	program := filepath.Join(os.Getenv("XDG_STATE_HOME"), "qory", "runtimes", "claude", "2.1.320", "bin", "claude")
+	in := r.joins[0].RuntimeInstall
+	if in == nil || in.Version != "2.1.320" || in.Dir != filepath.Dir(filepath.Dir(program)) {
+		t.Fatalf("the session's RuntimeInstall is %+v, want the folder of claude 2.1.320", in)
+	}
+	if got := startedProgram(r.joins[0]); got != program {
+		t.Fatalf("the session starts %q, want the installed program", got)
+	}
+}
+
+// startedProgram is the program a session starts: its Command, or behind a wall, when
+// Command is Forager's helper, the argument after the first --.
+func startedProgram(s session.SessionSpec) string {
+	if s.Command != wall.HelperPath {
+		return s.Command
+	}
+	if i := slices.Index(s.Args, "--"); i >= 0 && i+1 < len(s.Args) {
+		return s.Args[i+1]
+	}
+	return s.Command
+}
+
+// TestACodexSessionStartsFromTheImage has a run of codex join with no RuntimeInstall
+// and with the Command of its launch: qory installs no program of codex.
+func TestACodexSessionStartsFromTheImage(t *testing.T) {
+	r := runInstalling(t, installSetup{proxy: rt.StartProxy(t), walled: true, runtime: "codex"})
+	if !errors.Is(r.err, cmd.ErrJoinedNowhere) || len(r.joins) != 1 {
+		t.Fatalf("%d joins, %v\n%s", len(r.joins), r.err, r.out)
+	}
+	if r.joins[0].RuntimeInstall != nil || strings.Contains(startedProgram(r.joins[0]), "runtimes") {
+		t.Fatalf("the session has RuntimeInstall %+v and Command %q, want none of the installed program", r.joins[0].RuntimeInstall, startedProgram(r.joins[0]))
 	}
 }
 

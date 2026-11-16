@@ -8,6 +8,8 @@ import (
 	goruntime "runtime"
 	"strings"
 
+	"github.com/qoryai/forager/session"
+
 	"github.com/qoryai/qory/internal/config"
 	"github.com/qoryai/qory/internal/exports"
 	"github.com/qoryai/qory/internal/integration"
@@ -130,16 +132,14 @@ func installFailed(err error) error {
 }
 
 // useInstalledRuntime is the one place where the session's spec gets the installed
-// runtime, before [wrapAgentEnv] wraps the session's command for the wall. It keeps
-// the install in the spec.
-//
-// Pin for F-08: once qory pins a Forager whose SessionSpec has RuntimeInstall, this
-// function also sets
-//
-//	spec.RuntimeInstall = &session.RuntimeInstall{Dir: in.Dir, Version: in.Version}
-//	spec.Command = in.Program()
-//
-// and Forager binds Dir read-only behind the wall and writes the program's path there.
+// runtime, before [wrapAgentEnv] wraps the session's command for the wall. It sets
+// RuntimeInstall to the version's folder and Command to the installed program, which
+// Forager requires for a runtime whose descriptor has install_required, such as
+// Claude Code. Forager binds the folder read-only behind the wall at
+// /qory/runtime/<runtime> and writes the program's path there. A session that has no
+// install keeps the Command of its launch, from the image.
 func useInstalledRuntime(spec *runSpec, in *runtimeinstall.Installed) {
 	spec.installed = in
+	spec.RuntimeInstall = &session.RuntimeInstall{Dir: in.Dir, Version: in.Version}
+	spec.Command = in.Program()
 }
