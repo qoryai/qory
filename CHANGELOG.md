@@ -37,6 +37,13 @@ release may change what an existing document does, and states it under Upgrading
   instance, which a run from a run code reads from the line `apiary <url>` that `qory run
   pool` writes from its `gateway.server.url`, and any other run from its
   `gateway.server.url`. See The runtime's program in `docs/run.md`.
+  With a registry, `qory run pool` stops at start, before it claims a run, when
+  `gateway.server.url` is not an address a run takes: `https`, or `http` on loopback,
+  with a host and an optional port alone. The first line names `gateway.server.url`.
+  Before an install, `qory run` stops with `Run chmod go-w <path>, then run again` for a
+  runtimes folder, or a `<runtimes>/claude` that existed, that its group or others can
+  write, and with `Replace <path> with a folder` for a link at either. It checks no
+  folder above the runtimes folder.
 - A run of a work item works on the branch `qory/<work item id>`, at the commit of the
   artifact `branch` that its stage starts from. The harness still comes from
   `target_version`. A commit on the branch reaches a run's harness after you merge the

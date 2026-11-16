@@ -306,3 +306,44 @@ func TestAWritableRuntimesFolderStopsTheInstall(t *testing.T) {
 		})
 	}
 }
+
+// TestALinkAtTheRuntimesFolderStopsTheInstall has a link at the runtimes folder, and at
+// the runtime's folder: each stops the install with a refusal that starts "Replace",
+// since chmod go-w cannot fix a link, and no version's folder is made.
+func TestALinkAtTheRuntimesFolderStopsTheInstall(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		set  func(t *testing.T, in *installer, target string) (link string)
+	}{
+		{"the runtimes folder", func(t *testing.T, in *installer, target string) string {
+			link := in.folder + "-link"
+			if err := os.Symlink(target, link); err != nil {
+				t.Fatal(err)
+			}
+			in.folder = link
+			return link
+		}},
+		{"the runtime's folder", func(t *testing.T, in *installer, target string) string {
+			link := filepath.Join(in.folder, "claude")
+			if err := os.Symlink(target, link); err != nil {
+				t.Fatal(err)
+			}
+			return link
+		}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			in := newInstaller(t)
+			target := t.TempDir()
+			link := c.set(t, in, target)
+			in.src.Publish("2.0.0", rt.PlainTarball(t, "2.0.0"))
+			_, err := in.install()
+			want := "Replace " + link + " with a folder\n"
+			if err == nil || !strings.HasPrefix(err.Error(), want) {
+				t.Fatalf("the install returned %v, want it to start with %q", err, want)
+			}
+			if exists(filepath.Join(target, "2.0.0")) || exists(filepath.Join(target, "claude", "2.0.0")) {
+				t.Fatal("the install made the version's folder behind the link")
+			}
+		})
+	}
+}

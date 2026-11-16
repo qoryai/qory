@@ -818,6 +818,15 @@ one, and from npm otherwise:
   The host is "registry.example:0".
   ```
 
+  With a registry, `qory run pool` also checks `gateway.server.url`, the address it writes
+  after each run code as the instance's, and stops before it claims a run when the address
+  is not `https`, or `http` on loopback, with a host and an optional port alone:
+
+  ```text
+  qory run: Set gateway.server.url in forager.yaml to an https URL of a host and an optional port alone
+  The address is "https://bad_host.example".
+  ```
+
   `qory run` takes the same host from the run-code file only. The registry's host decides
   which Claude Code program the agent runs, so the run-code file is as trusted as the
   code that runs.
@@ -946,6 +955,14 @@ Two runs that need the same version do not both read its tarball. The run that f
 folder takes the lock `<runtimes>/claude/.lock-<version>` and reads the tarball; the other
 waits for that lock, as long as its time limit allows, and then uses the folder. The
 lock `.lock` is not held during a download.
+
+Forager checks only the version's folder, so before an install, `qory run` checks the
+runtimes folder and `<runtimes>/claude` too. A link at either stops the run with
+`Replace <path> with a folder`. A `<runtimes>/claude` that existed and a runtimes folder
+that its group or others can write stop the run with `Run chmod go-w <path>, then run
+again`, since they could replace a version's folder. A folder that `qory run` makes is set
+to mode 0755. qory checks no folder above the runtimes folder, since a shared one such as
+`/tmp` is writable by others.
 
 Once the program is installed, `qory run` prints one line:
 

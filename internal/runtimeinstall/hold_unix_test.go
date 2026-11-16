@@ -9,10 +9,11 @@ import (
 	"testing"
 )
 
-// TestAFolderTheInstallMakesIsNotWritableUnderUmask002 installs under a umask of 002
-// into a runtimes folder that does not exist: the install makes both folders 0755.
-func TestAFolderTheInstallMakesIsNotWritableUnderUmask002(t *testing.T) {
-	before := syscall.Umask(0o002)
+// TestAFolderTheInstallMakesIsReadableUnderUmask077 installs under a umask of 077
+// into a runtimes folder that does not exist: the install sets both folders to 0755, so
+// the wall's user enters them.
+func TestAFolderTheInstallMakesIsReadableUnderUmask077(t *testing.T) {
+	before := syscall.Umask(0o077)
 	defer syscall.Umask(before)
 	in := newInstaller(t)
 	in.folder = filepath.Join(in.folder, "runtimes")
