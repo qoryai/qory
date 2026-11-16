@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/qoryai/forager/session"
@@ -83,8 +84,8 @@ func TestTheChecksEngineIsTheWalls(t *testing.T) {
 }
 
 // runAPIOnly is an opened run with a run API, for the load of its push checks: RunAPI
-// returns base and err, Dir returns dir, and Image returns no image. Its other methods are
-// not called.
+// returns base and err, Dir returns dir, and Image returns registry.example/run:1. Its
+// other methods are not called.
 type runAPIOnly struct {
 	openedRun
 	base, dir string
@@ -97,7 +98,7 @@ func (r runAPIOnly) RunAPI() (*http.Client, string, error) {
 
 func (r runAPIOnly) Dir() string { return r.dir }
 
-func (r runAPIOnly) Image() session.Image { return session.Image{} }
+func (r runAPIOnly) Image() session.Image { return session.Image{Ref: "registry.example/run:1"} }
 
 // TestTheLoadOfPushChecksStopsWithItsLine is each stop of the load, with the line of a run
 // with no run code and the line of a run from a run code.
@@ -186,7 +187,7 @@ func TestTheLoadOfPushChecksStopsWithItsLine(t *testing.T) {
 			image:        "registry.example/agent:1",
 			controlPlane: true,
 			want:         "Pull the wall's default image onto this machine, and run again: push checks run in it. The engine does not have the image registry.example/agent:1.",
-			fromCode:     "Pull the wall's default image, then take the work item in again: push checks run in it, and the engine does not have the image registry.example/agent:1; the code is used",
+			fromCode:     "Pull the wall's default image, then take the work item in again in Qory Apiary: push checks run in it, and the engine does not have the image registry.example/agent:1; the code is used",
 		},
 		{
 			name:     "push checks that do not read",
@@ -225,6 +226,91 @@ func TestTheLoadOfPushChecksStopsWithItsLine(t *testing.T) {
 		})
 	}
 }
+
+// stubChecks makes the load of push checks return one check for proposal, for the test.
+func stubChecks(t *testing.T) {
+	t.Helper()
+	was := loadPushChecks
+	t.Cleanup(func() { loadPushChecks = was })
+	loadPushChecks = func(string) ([]compose.PushCheck, error) {
+		return []compose.PushCheck{{Type: "proposal"}}, nil
+	}
+}
+
+// loggingEngine is a docker command that writes each command line to the log it
+// returns, and answers an image inspect with errOut on stderr and exit 1 when errOut is
+// not empty. Every other command exits 0 and prints nothing.
+func loggingEngine(t *testing.T, errOut string) (string, string) {
+	t.Helper()
+	dir := t.TempDir()
+	log := filepath.Join(dir, "engine.log")
+	script := filepath.Join(dir, "docker")
+	body := "#!/bin/sh\necho \"$*\" >> " + log + "\n"
+	if errOut != "" {
+		body += "case \"$1 $2\" in\n\"image inspect\") echo '" + errOut + "' >&2; exit 1 ;;\nesac\n"
+	}
+	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return script, log
+}
+
+// TestAnInspectThatFailsLetsTheRunGoOn is an engine whose image inspect fails for
+// another cause than a missing image: the load returns the checker and no error, so the
+// run goes on, and a check that cannot start fails its push later.
+func TestAnInspectThatFailsLetsTheRunGoOn(t *testing.T) {
+	stubChecks(t)
+	docker, log := loggingEngine(t, "Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docker daemon running?")
+	spec := &runSpec{}
+	spec.Wall, spec.Image = &wall.Docker{Command: docker}, "registry.example/agent:1"
+	run := runAPIOnly{base: "http://run-api.qory.invalid/v1/runs/r1", dir: t.TempDir()}
+	checker, err := pushChecker(context.Background(), run, t.TempDir(), "r1", spec, true, false)
+	if err != nil || checker == nil {
+		t.Fatalf("pushChecker = %v, %v, want a checker and no error", checker, err)
+	}
+	if checker.Image != "registry.example/agent:1" {
+		t.Errorf("the checks' image is %q, want registry.example/agent:1", checker.Image)
+	}
+	if data, _ := os.ReadFile(log); !strings.Contains(string(data), "image inspect --format {{.Id}} registry.example/agent:1") {
+		t.Errorf("the engine did not get the inspect:\n%s", data)
+	}
+}
+
+// TestACheckImageThatIsNoReferenceStops is a default image, or a run's image with no
+// default, whose value is no image reference, such as one that starts with -: the load
+// stops with the fix line, and no command of the engine gets the value.
+func TestACheckImageThatIsNoReferenceStops(t *testing.T) {
+	stubChecks(t)
+	for _, c := range []struct{ image, runImage, shown string }{
+		{image: "--privileged", shown: `"--privileged"`},
+		{runImage: "-v/:/host", shown: `"-v/:/host"`},
+	} {
+		for fromCode, want := range map[bool]string{
+			false: "Set wall.image or --image to an image reference, and run again. Push checks cannot start from " + c.shown + ": a reference starts with a letter or a digit and has only letters, digits and . _ / : @ -.",
+			true:  "Set wall.image or --image to an image reference, then take the work item in again in Qory Apiary: push checks cannot start from " + c.shown + "; the code is used",
+		} {
+			docker, log := loggingEngine(t, "")
+			spec := &runSpec{}
+			spec.Wall, spec.Image = &wall.Docker{Command: docker}, c.image
+			run := imageAPI{runAPIOnly: runAPIOnly{base: "http://run-api.qory.invalid/v1/runs/r1", dir: t.TempDir()}, ref: c.runImage}
+			checker, err := pushChecker(context.Background(), run, t.TempDir(), "r1", spec, true, fromCode)
+			if checker != nil || err == nil || err.Error() != want {
+				t.Errorf("%q, from a run code %v: %v, %v, want %q", c.shown, fromCode, checker, err, want)
+			}
+			if data, _ := os.ReadFile(log); strings.Contains(string(data), strings.Trim(c.shown, `"`)) {
+				t.Errorf("%q: the engine got the value:\n%s", c.shown, data)
+			}
+		}
+	}
+}
+
+// imageAPI is [runAPIOnly] whose Image returns ref.
+type imageAPI struct {
+	runAPIOnly
+	ref string
+}
+
+func (r imageAPI) Image() session.Image { return session.Image{Ref: r.ref} }
 
 // imageOnly is an opened run whose Image returns img. Its other methods are not called.
 type imageOnly struct {

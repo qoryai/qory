@@ -564,7 +564,7 @@ func TestThePushStepGetsItsLines(t *testing.T) {
 	}
 	f.e.exit(127, "", "/usr/bin/env: 'node': No such file or directory\n")
 	failed, err = f.c.Check(context.Background(), "spec", files)
-	if want := "Set wall.image to an image that has node, such as one built FROM qory-agent. The check for spec could not start: /usr/bin/env: 'node': No such file or directory."; err != nil || failed == nil || failed.Step != want {
+	if want := "Set wall.image or --image to an image with node, such as one built FROM qory-agent. The check for spec could not start: /usr/bin/env: 'node': No such file or directory."; err != nil || failed == nil || failed.Step != want {
 		t.Errorf("a check that did not start: %+v, %v, want %q", failed, err, want)
 	}
 	f.c.Limit = 50 * time.Millisecond
@@ -600,7 +600,7 @@ func TestAProgramThatCannotStartStopsThePush(t *testing.T) {
 	}{
 		{"no node", "#!/usr/bin/env node", func(e *engine) {
 			e.exit(127, "", "/usr/bin/env: 'node': No such file or directory\n")
-		}, "Set wall.image to an image that has node, such as one built FROM qory-agent, and push again. The check for spec could not start: /usr/bin/env: 'node': No such file or directory."},
+		}, "Set wall.image or --image to an image with node, such as one built FROM qory-agent, then run again. The check for spec could not start: /usr/bin/env: 'node': No such file or directory."},
 		{"no program", "#!/bin/sh", func(e *engine) {
 			e.exit(127, "", "[FATAL tini (7)] exec /home/c failed: No such file or directory\n")
 		}, "Install the program PROGRAM, and push again. The check for spec could not start: exec /home/c failed: No such file or directory."},
@@ -609,7 +609,7 @@ func TestAProgramThatCannotStartStopsThePush(t *testing.T) {
 		}, "Install the program PROGRAM, and push again. The check for spec could not start: exec /home/c failed: Permission denied."},
 		{"busybox env", "#!/usr/bin/env node", func(e *engine) {
 			e.exit(127, "", "env: can't execute 'node': No such file or directory\n")
-		}, "Set wall.image to an image that has node, such as one built FROM qory-agent, and push again. The check for spec could not start: env: can't execute 'node': No such file or directory."},
+		}, "Set wall.image or --image to an image with node, such as one built FROM qory-agent, then run again. The check for spec could not start: env: can't execute 'node': No such file or directory."},
 		{"interpreter", "#!/usr/local/bin/deno run", func(e *engine) {
 			e.exit(127, "", "sh: /usr/local/bin/deno: not found\n")
 		}, "Install the program PROGRAM, and push again. The check for spec could not start: sh: /usr/local/bin/deno: not found."},
@@ -926,7 +926,7 @@ func TestARealCheckRunsInTheEngine(t *testing.T) {
 		t.Errorf("the failing check got %+v", r)
 	}
 	node := write("node", "#!/usr/bin/env node\n")
-	if r := check(checker(node)); r == nil || !strings.HasPrefix(r.Message, "Set wall.image to an image that has node, such as one built FROM qory-agent, and push again. The check for spec could not start: ") {
+	if r := check(checker(node)); r == nil || !strings.HasPrefix(r.Message, "Set wall.image or --image to an image with node, such as one built FROM qory-agent, then run again. The check for spec could not start: ") {
 		t.Errorf("the check without node got %+v", r)
 	}
 	lint := write("lint", "#!/bin/sh\nnosuchlinter \"$2\"\n")

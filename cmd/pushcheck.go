@@ -16,6 +16,7 @@ import (
 	"github.com/qoryai/forager/session"
 	"github.com/qoryai/forager/wall"
 
+	"github.com/qoryai/qory/internal/config"
 	"github.com/qoryai/qory/internal/exports"
 	"github.com/qoryai/qory/internal/preparation"
 	"github.com/qoryai/qory/internal/pushcheck"
@@ -35,6 +36,7 @@ const (
 	textChecksBadRunAPI  = "Update the run's gateway, and run again. The run API address that the gateway sent is not one the push checks can use: %s."
 	textChecksEngine     = "Switch the engine back to the one the run started on, and run again. The push checks would run on the engine %s, and the run's containers are on the engine %s."
 	textChecksNoFolder   = "Check %s, and run again. Making the folder of the push checks' files failed: %s."
+	textChecksBadImage   = "Set wall.image or --image to an image reference, and run again. Push checks cannot start from %s: a reference starts with a letter or a digit and has only letters, digits and . _ / : @ -."
 	textChecksNoImage    = "Pull the wall's default image onto this machine, and run again: push checks run in it. The engine does not have the image %s."
 	textChecksNotSet     = "Run again. Turning on the push checks for the POSTs from behind the wall failed, so the run stopped before the setup: %s."
 	textCheckNotFinished = "the check before a push did not finish, and the push was not stored (503 " + runapi.CodePushCheckUnavailable + "): %s"
@@ -50,7 +52,8 @@ const (
 	textChecksBadRunAPIFromCode = "Update the run's gateway, then take the work item in again in Qory Apiary: the run API address that the gateway sent is not one the push checks can use: %s" + codeUsed
 	textChecksEngineFromCode    = "Take the work item in again in Qory Apiary, and do not switch the engine while that run starts: the push checks would run on the engine %s, and the run's containers are on the engine %s" + codeUsed
 	textChecksNoFolderFromCode  = "Check %s, then take the work item in again in Qory Apiary: making the folder of the push checks' files failed: %s" + codeUsed
-	textChecksNoImageFromCode   = "Pull the wall's default image, then take the work item in again: push checks run in it, and the engine does not have the image %s" + codeUsed
+	textChecksBadImageFromCode  = "Set wall.image or --image to an image reference, then take the work item in again in Qory Apiary: push checks cannot start from %s" + codeUsed
+	textChecksNoImageFromCode   = "Pull the wall's default image, then take the work item in again in Qory Apiary: push checks run in it, and the engine does not have the image %s" + codeUsed
 	textChecksNotSetFromCode    = "Take the work item in again in Qory Apiary: turning on the push checks for the POSTs from behind the wall failed, so the run stopped before the setup: %s" + codeUsed
 	textChecksUnreadFromCode    = "Take the work item in again in Qory Apiary, so that the new run composes the harness again: the push checks in %s could not be read: %s" + codeUsed
 )
@@ -189,8 +192,14 @@ func pushChecker(ctx context.Context, run openedRun, home, runID string, spec *r
 		// The wall's default: the uid:gid of this process.
 		user = fmt.Sprintf("%d:%d", os.Getuid(), os.Getgid())
 	}
+	// The image goes on the engine's command line: a value of another shape than a
+	// reference, such as one that starts with -, stops the run before any command gets it.
+	image := checkImage(run, spec)
+	if !config.IsImageRef(image) {
+		return nil, checksStop(fromCode, textChecksBadImage, textChecksBadImageFromCode, exports.Value(image, true))
+	}
 	checker := &pushcheck.Checker{
-		Home: home, Checks: checks, Image: checkImage(run, spec), User: user,
+		Home: home, Checks: checks, Image: image, User: user,
 		Engine: engine,
 		Fetch:  artifactsForCheck(client),
 		Dir:    filepath.Join(run.Dir(), pushChecksDir),

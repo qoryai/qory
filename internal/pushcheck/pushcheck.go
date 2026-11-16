@@ -72,11 +72,12 @@ const (
 )
 
 // The texts of a check that did not pass. The program that pushed gets the fix, ", and
-// push again.", then the cause; the push step's line has the fix, then the cause.
+// push again.", or ", then run again." for textNoNode, then the cause; the push step's
+// line has the fix, then the cause.
 const (
 	textFailed      = "The check for %s failed:"
 	textFailedFix   = "Fix each finding below and push again. "
-	textNoNode      = "Set wall.image to an image that has node, such as one built FROM qory-agent"
+	textNoNode      = "Set wall.image or --image to an image with node, such as one built FROM qory-agent"
 	textNoProgram   = "Install the program %s"
 	textNotStarted  = "The check for %s could not start: %s."
 	textTimeLimit   = "Make the check for %s finish within 30 s"
@@ -210,7 +211,14 @@ func (f *Failure) Refusal() *session.RunAPIRefusal {
 
 // failure is the failure with fix and cause, which may be "".
 func failure(fix, cause string) *Failure {
-	f := &Failure{Message: fix + ", and push again.", Step: fix + "."}
+	return failureThen(fix, ", and push again.", cause)
+}
+
+// failureThen is [failure] whose Message has then after the fix in place of ", and push
+// again.": for a fix that only a new run applies, such as a new image of the checks,
+// which the run reads once at its start.
+func failureThen(fix, then, cause string) *Failure {
+	f := &Failure{Message: fix + then, Step: fix + "."}
 	if cause != "" {
 		f.Message += " " + cause
 		f.Step += " " + cause
@@ -621,7 +629,7 @@ func (c *Checker) failure(artifactType, program string, end ended) *Failure {
 	case end.startErr != "":
 		cause := fmt.Sprintf(textNotStarted, artifactType, strings.TrimSuffix(c.mask(cleanLine(end.startErr)), "."))
 		if namesNode(program) {
-			return failure(textNoNode, cause)
+			return failureThen(textNoNode, ", then run again.", cause)
 		}
 		return failure(fmt.Sprintf(textNoProgram, exports.Value(program, false)), cause)
 	case end.exitCode == 0:

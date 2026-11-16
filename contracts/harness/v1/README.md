@@ -1010,9 +1010,9 @@ has a line, the one finding is `The check exited with <N> and printed nothing.` 
 finding is without control characters, with the run's secrets masked, and at most 1,000
 characters; a check has at most 200 findings. qory reads at most 64 KiB of each stream.
 
-A program that does not start stops the push with 422 too: `Set wall.image to an image
-that has node, such as one built FROM qory-agent, and push again. The check for <type>
-could not start: <error>.` when its `#!` line is for `node`, else `Install the program
+A program that does not start stops the push with 422 too: `Set wall.image or --image to
+an image with node, such as one built FROM qory-agent, then run again. The check for
+<type> could not start: <error>.` when its `#!` line is for `node`, else `Install the program
 <path>, and push again. The check for <type> could not start: <error>.` A program does
 not start when it exits with 126 or 127 and the last line of its standard error is the
 container's init's line for the program, or ends with `not found`, `No such file or

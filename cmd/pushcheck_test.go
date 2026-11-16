@@ -353,7 +353,7 @@ func TestAMissingDefaultImageStopsARunWithPushChecks(t *testing.T) {
 	if setUp || joined || slices.Contains(r.calls, "set run API check") {
 		t.Errorf("the run went on: %v, set up %v, joined %v", r.calls, setUp, joined)
 	}
-	wants(t, r.out, "qory run: Pull the wall's default image, then take the work item in again: push checks run in it, and the engine does not have the image example.com/agent:1; the code is used\n")
+	wants(t, r.out, "qory run: Pull the wall's default image, then take the work item in again in Qory Apiary: push checks run in it, and the engine does not have the image example.com/agent:1; the code is used\n")
 	if got := checkLog(t, log); got != "" {
 		t.Errorf("a check's container ran:\n%s", got)
 	}
