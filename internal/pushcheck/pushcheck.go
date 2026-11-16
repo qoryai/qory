@@ -2,9 +2,10 @@
 // type, before a version of that type reaches the run API: in a new container from the
 // run's image, with no network, as the run's user, with the home read-only at its path,
 // the work item's notes and the newest versions of its artifacts as the working folder,
-// and the pushed files beside them. A check that exits 0 lets the version go on; any other end is a
-// [Failure] with the fix first, which a walled run's forwarder sends to the program that
-// pushed as a [session.RunAPIRefusal], and which the host's push step prints.
+// and the pushed files beside them. A check that exits 0 lets the version go on; any
+// other end is a [Failure] with the fix first, which a walled run's forwarder sends to
+// the program that pushed as a [session.RunAPIRefusal], and which the host's push step
+// prints.
 package pushcheck
 
 import (
@@ -51,8 +52,8 @@ const (
 	// the removal of its container, at most engineWait more, a check returns within 80
 	// seconds, within the 90-second limit of a walled run's forwarder.
 	Budget = 75 * time.Second
-	// fetchWait is how long the fetch of the artifacts may take, and engineWait one
-	// engine command other than the start.
+	// fetchWait is how long the fetch of the notes and the artifacts may take, and
+	// engineWait one engine command other than the start.
 	fetchWait  = 30 * time.Second
 	engineWait = 5 * time.Second
 	// maxOutput is the most read of the program's standard output, and of its standard

@@ -62,13 +62,13 @@ release may change what an existing document does, and states it under Upgrading
   check of a type runs before each push of that type reaches Qory Apiary, from inside the
   wall or from the push step: in a new container from the run's image, with no network,
   the wall's limits and the run's label, the home and the newest versions of the type and
-  its `reads` read-only, beside the work item's notes in `notes.json`, `[]` for none. A check that does not pass stops the push with 422
-  `push_check_failed`, its fix line and its findings, and `qory artifact push` exits 4;
-  so does a push that the check cannot read, such as a body that is not a push or two
-  files that are one file on the machine. A check that did not finish stops the push with
-  503 `push_check_unavailable`, qory run writes the cause on its stderr, and the push
-  exits 1. Outside a run, `qory artifact push` runs no check. See The module manifest in
-  `contracts/harness/v1/README.md`.
+  its `reads` read-only, beside the work item's notes in `notes.json`, `[]` for none. A
+  check that does not pass stops the push with 422 `push_check_failed`, its fix line and
+  its findings, and `qory artifact push` exits 4; so does a push that the check cannot
+  read, such as a body that is not a push or two files that are one file on the machine.
+  A check that did not finish stops the push with 503 `push_check_unavailable`, qory run
+  writes the cause on its stderr, and the push exits 1. Outside a run, `qory artifact
+  push` runs no check. See The module manifest in `contracts/harness/v1/README.md`.
 - Version 1 of the branch format, `contracts/harness/v1/branch.schema.json`: a work
   item's branch, `qory/<work item id>`, and the commit in each repository. A software
   factory can use it as the `json_schema` of a custom artifact type `branch`.
