@@ -35,40 +35,75 @@ func Refuse(fix string, lines ...string) *Refusal {
 	return &Refusal{text: text}
 }
 
-// NameMax is the most characters of a role, module or entry name that a refusal prints
-// on its first line. A longer name is printed by [Short].
-const NameMax = 20
+// NameMax is the longest name, in characters, that [Fit] leaves whole.
+const NameMax = 24
 
-// Short is name, a role, module or entry name as a refusal prints it on its first line,
-// with its middle replaced by an ellipsis when it has more than [NameMax] characters: its
-// first 9 characters, "…", and its last 10.
-func Short(name string) string {
+// shortHead and shortTail are the characters [Short] keeps of the start and the end of a
+// name. With the "…" between them, the result has 20 characters, so a name that Short
+// shortens loses at least 5.
+const (
+	shortHead = 9
+	shortTail = 10
+)
+
+// Short is name with its middle replaced by "…" when it has more than [NameMax]
+// characters: its first 9 characters, "…", and its last 10. It returns a shorter name
+// as it is.
+func Short(name string) string { return shorten(name, 0) }
+
+// shorten is [Short] with extra more characters kept at each end.
+func shorten(name string, extra int) string {
 	r := []rune(name)
 	if len(r) <= NameMax {
 		return name
 	}
-	return string(r[:9]) + "…" + string(r[len(r)-10:])
+	head, tail := shortHead+extra, shortTail+extra
+	if head+1+tail >= len(r) {
+		return name
+	}
+	return string(r[:head]) + "…" + string(r[len(r)-tail:])
+}
+
+// shortened maps each of names, which are different, to its [Short] form, keeping more
+// characters at each end until no two names have the same form.
+func shortened(names []string) map[string]string {
+	for extra := 0; ; extra++ {
+		forms := make(map[string]string, len(names))
+		seen := make(map[string]bool, len(names))
+		distinct := true
+		for _, name := range names {
+			form := shorten(name, extra)
+			forms[name] = form
+			if seen[form] {
+				distinct = false
+			}
+			seen[form] = true
+		}
+		if distinct {
+			return forms
+		}
+	}
 }
 
 // longName matches a name of more than [NameMax] characters in a refusal's first line: a
-// run of letters, digits, hyphens and underscores, so that the "agents/" and "bind." in
-// front of a role name stay.
-var longName = regexp.MustCompile(`[\p{L}\p{N}_-]{21,}`)
+// run of letters, digits, dots, hyphens and underscores that does not end with a dot, so
+// the full stop of a sentence stays. A slash, a quote or a space ends a run, so "agents/"
+// in front of a role name and the quotes around a value stay.
+var longName = regexp.MustCompile(`[\p{L}\p{N}._-]{24,}[\p{L}\p{N}_-]`)
 
-// Fit is text, one refusal or several, with each name of more than [NameMax] characters
-// in the first line of a refusal, an unindented line of more than 100 characters,
-// printed by [Short]. A first line of at most 100 characters stays as it is. When no line
-// after that first line has the whole name, a last line of the refusal does:
-// "The full name of <short> is <name>." So the first line stays within 100 characters
-// whatever the names, and the reader still finds the whole name.
+// Fit is text, one refusal or several, in which each refusal whose first line, an
+// unindented line, has more than 100 characters has the names in that line of more than
+// [NameMax] characters printed by [Short]. When two such names would have one form, each
+// keeps more characters, until the forms differ. When no line after the first line has
+// the whole name, a last line of the refusal has it: "The full name of <short> is
+// <name>." A first line of at most 100 characters stays as it is. Fit shortens names
+// only: a first line that is still over 100 characters has more than names in it.
 func Fit(text string) string {
 	var out []string
-	var long []string
+	var full []string
 	block := func() {
-		for _, name := range long {
-			out = append(out, "  The full name of "+Short(name)+" is "+name+".")
-		}
-		long = nil
+		out = append(out, full...)
+		full = nil
 	}
 	lines := strings.Split(text, "\n")
 	rest := func(i int) string {
@@ -88,13 +123,20 @@ func Fit(text string) string {
 				out = append(out, line)
 				continue
 			}
-			after := rest(i)
+			var names []string
 			for _, name := range longName.FindAllString(line, -1) {
-				if !strings.Contains(after, name) && !slices.Contains(long, name) {
-					long = append(long, name)
+				if !slices.Contains(names, name) {
+					names = append(names, name)
 				}
 			}
-			line = longName.ReplaceAllStringFunc(line, Short)
+			forms := shortened(names)
+			after := rest(i)
+			for _, name := range names {
+				if !strings.Contains(after, name) && forms[name] != name {
+					full = append(full, "  The full name of "+forms[name]+" is "+name+".")
+				}
+			}
+			line = longName.ReplaceAllStringFunc(line, func(name string) string { return forms[name] })
 		}
 		out = append(out, line)
 	}

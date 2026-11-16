@@ -15,17 +15,22 @@ func TestRefusalsKeepTheFixLineShortForLongNames(t *testing.T) {
 	isolate(t)
 	role := "role-" + strings.Repeat("r", 85)
 	module := "mod-" + strings.Repeat("m", 86)
+	dotted := "role." + strings.Repeat("r", 40) + "." + strings.Repeat("s", 44)
+	kind := "kind-" + strings.Repeat("k", 85)
 	const head = "apiVersion: qory.dev/v1alpha1\nmodules:\n  - name: core\n"
 	for name, c := range map[string]struct{ body, long string }{
-		"a role with a space":         {head + "bind:\n  agents:\n    \"" + role + " x\": c\n", role},
-		"a role with a list":          {head + "bind:\n  skills:\n    " + role + ": [a, b]\n", role},
-		"a role with no value":        {head + "bind:\n  agents:\n    " + role + ":\n", role},
-		"a role with a bad value":     {head + "bind:\n  agents:\n    " + role + ": a b\n", role},
-		"a role with an empty list":   {head + "bind:\n  agents:\n    " + role + ": []\n", role},
-		"a role with a bad item":      {head + "bind:\n  agents:\n    " + role + ": [a/b]\n", role},
-		"a module not one segment":    {"apiVersion: qory.dev/v1alpha1\nmodules:\n  - name: " + module + "/x\n", module + "/x"},
-		"a module excluded":           {"apiVersion: qory.dev/v1alpha1\nmodules:\n  - name: " + module + "\n    source: {path: x}\n    exclude: {skills: [a]}\n    only: {skills: [a]}\n", module},
-		"a workflow name not allowed": {head + "workflows:\n  Wf-" + strings.Repeat("w", 87) + ": {}\n", "Wf-" + strings.Repeat("w", 87)},
+		"a role with a space":          {head + "bind:\n  agents:\n    \"" + role + " x\": c\n", role},
+		"a role with a list":           {head + "bind:\n  skills:\n    " + role + ": [a, b]\n", role},
+		"a role with no value":         {head + "bind:\n  agents:\n    " + role + ":\n", role},
+		"a role with a bad value":      {head + "bind:\n  agents:\n    " + role + ": a b\n", role},
+		"a role with an empty list":    {head + "bind:\n  agents:\n    " + role + ": []\n", role},
+		"a role with a bad item":       {head + "bind:\n  agents:\n    " + role + ": [a/b]\n", role},
+		"a dotted role with no value":  {head + "bind:\n  agents:\n    " + dotted + ":\n", dotted},
+		"a dotted role with a bad one": {head + "bind:\n  agents:\n    " + dotted + ": a b\n", dotted},
+		"a quoted kind":                {head + "bind:\n  " + kind + ":\n    a: b\n", kind},
+		"a module not one segment":     {"apiVersion: qory.dev/v1alpha1\nmodules:\n  - name: " + module + "/x\n", module + "/x"},
+		"a module excluded":            {"apiVersion: qory.dev/v1alpha1\nmodules:\n  - name: " + module + "\n    source: {path: x}\n    exclude: {skills: [a]}\n    only: {skills: [a]}\n", module},
+		"a workflow name not allowed":  {head + "workflows:\n  Wf-" + strings.Repeat("w", 87) + ": {}\n", "Wf-" + strings.Repeat("w", 87)},
 	} {
 		dir := t.TempDir()
 		path := filepath.Join(dir, FileName)
