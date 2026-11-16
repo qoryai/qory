@@ -111,8 +111,8 @@ type codeRun struct {
 	hidden   bool
 	target   preparation.Target
 	// access is what the run may do on its target, from the documents' access: read,
-	// write-no-push, a writable checkout with no push step, or write. It is empty when the
-	// documents have no target.
+	// write, or write-no-push (a writable checkout with no push step). It is empty when
+	// the documents have no target.
 	access   string
 	workItem string
 
