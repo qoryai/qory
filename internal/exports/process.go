@@ -97,7 +97,7 @@ func (e *Exports) readProcess(dir string) ([]byte, string, error) {
 		data, err = root.ReadFile(ProcessFileName)
 	}
 	if escapes(root, err) {
-		return nil, path, fmt.Errorf("%s: replace %s with a file inside the module: it is a link to a place outside the module", HidePath(path), ProcessFileName)
+		return nil, path, processRefusal(HidePath(path), "Replace "+ProcessFileName+" with a file inside the module.", "It is a link to a place outside the module.")
 	}
 	if err != nil {
 		return nil, path, HideError(err)
@@ -132,8 +132,8 @@ func escapes(root *os.Root, err error) bool {
 // stages, every workflow of a stage's sequence, a loop's body included, is declared
 // under workflows in the stack's qory-stack.yaml, as [Exports.checkWorkflows] checks,
 // artifact_types, when it is set, is as [checkArtifactTypes] checks, and submit, when it
-// is set, is as [checkSubmit] checks. The error starts with the file and then the fix;
-// for the workflows and the artifact types it has one line for each refusal.
+// is set, is as [checkSubmit] checks. Each refusal has the file in it; for the
+// workflows and the artifact types the error has one refusal for each entry.
 func (e *Exports) checkProcess(path string, data []byte) error {
 	shown := HidePath(path)
 	if err := RefuseAliases(shown, data); err != nil {
@@ -143,64 +143,72 @@ func (e *Exports) checkProcess(path string, data []byte) error {
 	dec := yaml.NewDecoder(strings.NewReader(string(data)))
 	dec.KnownFields(true)
 	if err := dec.Decode(&t); err != nil && !errors.Is(err, io.EOF) {
+		// An unknown key is refused fix first; any other error as [DecodeError] has it.
+		if m := UnknownKey.FindStringSubmatch(err.Error()); m != nil && !accesskey.ContainsSecret(m[2]) {
+			at := ProcessFileName
+			if line := strings.TrimSuffix(m[1], ": "); line != "" {
+				at = line + " of " + ProcessFileName
+			}
+			return fmt.Errorf("Remove the key %q from %s.\n  %s has no key `%s`.\n  The file is %s.", m[2], at, ProcessFileName, m[2], shown)
+		}
 		return DecodeError(shown, err)
 	}
 	if strings.TrimSpace(t.APIVersion) == "" {
-		return fmt.Errorf("%s: add apiVersion: %s: the file has no apiVersion", shown, APIVersion)
+		return processRefusal(shown, "Add apiVersion: "+APIVersion+" to "+ProcessFileName+".", "The file has no apiVersion.")
 	}
 	if _, err := ResolveAPIVersion(t.APIVersion); err != nil {
-		return fmt.Errorf("%s: %w", shown, HideValueError(err, ""))
+		return HideValueError(AtPath(shown, err), "")
 	}
 	for _, f := range []struct {
 		key, value string
 		limit      int
 	}{{"name", t.Name, maxProcessName}, {"summary", t.Summary, maxProcessSummary}, {"description", t.Description, maxProcessDescription}} {
 		if strings.TrimSpace(f.value) == "" {
-			return fmt.Errorf("%s: add %s, at most %d characters: the file has no %s", shown, f.key, f.limit, f.key)
+			return fmt.Errorf("Add %s to %s, at most %d characters.\n  The file has no %s.\n  The file is %s.", f.key, ProcessFileName, f.limit, f.key, shown)
 		}
 		if n := utf8.RuneCountInString(f.value); n > f.limit {
-			return fmt.Errorf("%s: shorten %s to at most %d characters: %s has %d", shown, f.key, f.limit, f.key, n)
+			return fmt.Errorf("Shorten %s in %s to at most %d characters.\n  The %s has %d characters.\n  The file is %s.", f.key, ProcessFileName, f.limit, f.key, n, shown)
 		}
 	}
 	if n := len(strings.Fields(t.Description)); n > maxDescriptionWords {
-		return fmt.Errorf("%s: shorten description to at most %d words: description has %d", shown, maxDescriptionWords, n)
+		return processRefusal(shown, fmt.Sprintf("Shorten description in %s to at most %d words.", ProcessFileName, maxDescriptionWords), fmt.Sprintf("The description has %d words.", n))
 	}
 	if strings.TrimSpace(t.Type) == "" {
-		return fmt.Errorf("%s: add type, the workspace type the template sets up: the file has no type", shown)
+		return processRefusal(shown, "Add type to "+ProcessFileName+", the workspace type the template sets up.", "The file has no type.")
 	}
 	if t.Stack == "" {
-		return fmt.Errorf("%s: add stack, a name that exports.stacks lists: the file has no stack", shown)
+		return processRefusal(shown, "Add stack to "+ProcessFileName+", a name that exports.stacks lists.", "The file has no stack.")
 	}
 	if why := notOneLine(t.Stack); why != "" {
 		// The refusal of a stack exports.stacks does not list prints the value, so a
 		// value with a line break could start a line that looks like qory's.
-		return fmt.Errorf("%s: set stack to one line of text: %s", shown, why)
+		return processRefusal(shown, "Set stack in "+ProcessFileName+" to one line of text.", "The value "+why+".")
 	}
 	if !contains(e.Stacks, t.Stack) {
 		listed := "no stacks"
 		if len(e.Stacks) > 0 {
 			listed = strings.Join(accesskey.ShownNames(e.Stacks), ", ")
 		}
-		return fmt.Errorf("%s: set stack to a name that exports.stacks lists: stack is %s, and exports.stacks lists %s", shown, accesskey.ShownName(t.Stack, false), listed)
+		return fmt.Errorf("Set stack in %s to a name that exports.stacks lists.\n  The value is %s, and exports.stacks lists %s.\n  The file is %s.", ProcessFileName, accesskey.ShownName(t.Stack, false), listed, shown)
 	}
 	if t.Process.Kind == 0 || t.Process.Tag == "!!null" {
-		return fmt.Errorf("%s: add process, the template's process document as an object: the file has no process", shown)
+		return processRefusal(shown, "Add process to "+ProcessFileName+", the template's process document as an object.", "The file has no process.")
 	}
 	if t.Process.Kind != yaml.MappingNode {
-		return fmt.Errorf("%s: set process to an object, the template's process document: process is %s", shown, nodeKind(&t.Process))
+		return fmt.Errorf("Set process in %s to an object.\n  process is the template's process document, and the value is %s.\n  The file is %s.", ProcessFileName, nodeKind(&t.Process), shown)
 	}
 	schema, stages := value(&t.Process, "schema"), value(&t.Process, "stages")
 	if schema == nil || schema.Tag == "!!null" {
-		return fmt.Errorf("%s: add schema: %s under process: process has no schema", shown, ProcessSchema)
+		return processRefusal(shown, "Add schema: "+ProcessSchema+" under process.", "process has no schema.")
 	}
 	if schema.Kind != yaml.ScalarNode || schema.Value != ProcessSchema {
-		return fmt.Errorf("%s: set process.schema to %s: process.schema is %s", shown, ProcessSchema, scalarText(schema))
+		return processRefusal(shown, "Set process.schema to "+ProcessSchema+".", "process.schema is "+scalarText(schema)+".")
 	}
 	if stages == nil || stages.Tag == "!!null" {
-		return fmt.Errorf("%s: add stages under process, the list of the process's stages: process has no stages", shown)
+		return processRefusal(shown, "Add stages under process, the list of the process's stages.", "process has no stages.")
 	}
 	if stages.Kind != yaml.SequenceNode {
-		return fmt.Errorf("%s: set process.stages to a list of stages: process.stages is %s", shown, nodeKind(stages))
+		return processRefusal(shown, "Set process.stages to a list of stages.", "process.stages is "+nodeKind(stages)+".")
 	}
 	if err := e.checkWorkflows(shown, t.Stack, stages); err != nil {
 		return err
@@ -214,51 +222,52 @@ func (e *Exports) checkProcess(path string, data []byte) error {
 // checkSubmit checks submit in the process.yaml shown, which may be left out: an object
 // with type, an artifact type name, and send, one of [submitSends], and no other key.
 // types, the file's artifact_types as [checkArtifactTypes] passed it, has a custom entry
-// named type with base_view structured. The error starts with shown and then the fix.
+// named type with base_view structured. The error is a [submitRefusal].
 func checkSubmit(shown string, submit, types *yaml.Node) error {
 	if submit.Kind == 0 {
 		return nil
 	}
 	if submit.Kind != yaml.MappingNode {
-		return fmt.Errorf("%s: set submit to an object with type and send, or remove it: submit is %s", shown, nodeKind(submit))
+		return submitRefusal(shown, "Set submit to an object with type and send, or remove it.", "submit is "+nodeKind(submit)+".")
 	}
 	seen := map[string]bool{}
 	for j := 0; j+1 < len(submit.Content); j += 2 {
 		key := submit.Content[j]
 		if key.Kind != yaml.ScalarNode || key.Value != "type" && key.Value != "send" {
-			return fmt.Errorf("%s: remove the key %s from submit: submit has only type and send", shown, scalarText(key))
+			return submitRefusal(shown, "Remove the key "+scalarText(key)+" from submit.", "submit has only type and send.")
 		}
 		if seen[key.Value] {
-			return fmt.Errorf("%s: remove the second %s from submit: submit has the key twice", shown, key.Value)
+			return submitRefusal(shown, "Remove the second "+key.Value+" from submit.", "submit has the key "+key.Value+" twice.")
 		}
 		seen[key.Value] = true
 	}
+	sends := strings.Join(submitSends, " or ")
 	typ, send := value(submit, "type"), value(submit, "send")
 	if typ == nil {
-		return fmt.Errorf("%s: add type to submit, the name of a structured entry of artifact_types: submit has no type", shown)
+		return submitRefusal(shown, "Add type to submit, the name of a structured entry of artifact_types.", "submit has no type.")
 	}
 	if typ.Kind == yaml.ScalarNode && typ.Tag != "!!str" && nodeKind(typ) == "a string" {
 		// A date or a value with an explicit tag: unquoted, YAML reads it as no string.
-		return fmt.Errorf("%s: set submit.type to a quoted string: YAML reads %s as a type that is not a string", shown, scalarText(typ))
+		return submitRefusal(shown, "Set submit.type to a quoted string.", "YAML reads "+scalarText(typ)+" as a type that is not a string.")
 	}
 	if typ.Kind != yaml.ScalarNode || typ.Tag != "!!str" {
-		return fmt.Errorf("%s: set submit.type to the name of a structured entry of artifact_types: submit.type is %s", shown, nodeKind(typ))
+		return submitRefusal(shown, "Set submit.type to the name of a structured entry of artifact_types.", "submit.type is "+nodeKind(typ)+".")
 	}
 	if !runapi.ArtifactName(typ.Value) {
-		return fmt.Errorf("%s: set submit.type to a name such as reply-draft, at most %d bytes: submit.type is %s", shown, runapi.MaxArtifactName, scalarText(typ))
+		return submitRefusal(shown, fmt.Sprintf("Set submit.type to a name such as reply-draft, at most %d bytes.", runapi.MaxArtifactName), "submit.type is "+scalarText(typ)+".")
 	}
 	if send == nil {
-		return fmt.Errorf("%s: add send to submit, %s: submit has no send", shown, strings.Join(submitSends, " or "))
+		return submitRefusal(shown, "Add send to submit, "+sends+".", "submit has no send.")
 	}
 	if send.Kind == yaml.ScalarNode && send.Tag != "!!str" && nodeKind(send) == "a string" {
 		// A value with an explicit tag, such as !foo end_of_run: YAML reads it as no string.
-		return fmt.Errorf("%s: set submit.send to a quoted string: YAML reads %s as a type that is not a string", shown, scalarText(send))
+		return submitRefusal(shown, "Set submit.send to a quoted string.", "YAML reads "+scalarText(send)+" as a type that is not a string.")
 	}
 	if send.Kind != yaml.ScalarNode || send.Tag != "!!str" {
-		return fmt.Errorf("%s: set submit.send to %s: submit.send is %s", shown, strings.Join(submitSends, " or "), nodeKind(send))
+		return submitRefusal(shown, "Set submit.send to "+sends+".", "submit.send is "+nodeKind(send)+".")
 	}
 	if !slices.Contains(submitSends, send.Value) {
-		return fmt.Errorf("%s: set submit.send to %s: submit.send is %s", shown, strings.Join(submitSends, " or "), scalarText(send))
+		return submitRefusal(shown, "Set submit.send to "+sends+".", "submit.send is "+scalarText(send)+".")
 	}
 	return checkSubmitType(shown, typ.Value, types)
 }
@@ -267,7 +276,7 @@ func checkSubmit(shown string, submit, types *yaml.Node) error {
 // passed or nothing, has a custom entry named name with base_view structured. The name
 // has the form of an artifact type name, so the message prints it bare.
 func checkSubmitType(shown, name string, types *yaml.Node) error {
-	const fix = "set submit.type to a structured type of artifact_types"
+	const fix = "Set submit.type to a structured type of artifact_types."
 	for _, entry := range types.Content {
 		if n := value(entry, "name"); n == nil || n.Value != name {
 			continue
@@ -275,13 +284,27 @@ func checkSubmitType(shown, name string, types *yaml.Node) error {
 		view := value(entry, "base_view")
 		switch {
 		case view == nil:
-			return fmt.Errorf("%s: %s: %s is a standard type", shown, fix, name)
+			return submitRefusal(shown, fix, name+" is a standard type.")
 		case view.Value != baseViewStructured:
-			return fmt.Errorf("%s: %s: %s has base_view %s", shown, fix, name, view.Value)
+			return submitRefusal(shown, fix, name+" has base_view "+view.Value+".")
 		}
 		return nil
 	}
-	return fmt.Errorf("%s: %s: no entry is named %s", shown, fix, name)
+	return submitRefusal(shown, fix, "No entry of artifact_types is named "+name+".")
+}
+
+// processRefusal is a refusal of the process.yaml shown, fix first: the fix, the cause,
+// and the file on the last line, so the first line stays within 100 characters whatever
+// the path.
+func processRefusal(shown, fix, cause string) error {
+	return fmt.Errorf("%s\n  %s\n  The file is %s.", fix, cause, shown)
+}
+
+// submitRefusal is a refusal of submit in the process.yaml shown, fix first: the fix,
+// the cause, and the file on the last line, so the first line stays within 100
+// characters whatever the path.
+func submitRefusal(shown, fix, cause string) error {
+	return fmt.Errorf("%s\n  %s\n  submit is in %s.", fix, cause, shown)
 }
 
 // checkWorkflows checks that every workflow the stages run is declared under workflows in
@@ -306,7 +329,7 @@ func (e *Exports) checkWorkflows(shown, stackName string, stages *yaml.Node) err
 		label := strconv.Itoa(i + 1)
 		if n := value(stage, "name"); n != nil && n.Kind == yaml.ScalarNode {
 			if why := notOneLine(n.Value); why != "" {
-				lines = append(lines, fmt.Sprintf("%s: set the name of stage %d to one line of text: %s", shown, i+1, why))
+				lines = append(lines, processRefusal(shown, fmt.Sprintf("Set the name of stage %d to one line of text.", i+1), "The name "+why+".").Error())
 			} else if strings.TrimSpace(n.Value) != "" {
 				label = accesskey.ShownName(n.Value, false)
 			}
@@ -314,7 +337,7 @@ func (e *Exports) checkWorkflows(shown, stackName string, stages *yaml.Node) err
 		seen := map[string]bool{}
 		for _, ref := range stageWorkflows(stage) {
 			if why := badWorkflow(ref.name); why != "" {
-				lines = append(lines, fmt.Sprintf("%s: set the workflow of %s in stage %s to a workflow name: %s", shown, ref.where, label, why))
+				lines = append(lines, processRefusal(shown, fmt.Sprintf("Set the workflow of %s in stage %s to a workflow name.", ref.where, label), "The workflow "+why+".").Error())
 				continue
 			}
 			name := ref.name.Value
@@ -322,8 +345,9 @@ func (e *Exports) checkWorkflows(shown, stackName string, stages *yaml.Node) err
 				continue
 			}
 			seen[name] = true
-			lines = append(lines, fmt.Sprintf("%s: declare %s under workflows in %s, or remove it from stage %s: stack %s does not declare it",
-				shown, accesskey.ShownName(name, false), HidePath(stackFile), label, accesskey.ShownName(stackName, false)))
+			workflow := accesskey.ShownName(name, false)
+			lines = append(lines, fmt.Sprintf("Declare %s in stack %s, or remove it from stage %s.\n  Stage %s of %s runs %s, and stack %s does not declare it under workflows.\n  The stack is in %s.",
+				workflow, accesskey.ShownName(stackName, false), label, label, shown, workflow, accesskey.ShownName(stackName, false), HidePath(stackFile)))
 		}
 	}
 	if len(lines) > 0 {
@@ -338,13 +362,13 @@ func (e *Exports) checkWorkflows(shown, stackName string, stages *yaml.Node) err
 func badWorkflow(n *yaml.Node) string {
 	switch {
 	case n.Tag == "!!null":
-		return "it is null"
+		return "is null"
 	case n.Kind != yaml.ScalarNode, n.Tag == "!!int", n.Tag == "!!float", n.Tag == "!!bool":
-		return "it is " + nodeKind(n)
+		return "is " + nodeKind(n)
 	case n.Tag != "!!str":
-		return "it is not a string"
+		return "is not a string"
 	case strings.TrimSpace(n.Value) == "":
-		return "it is empty"
+		return "is empty"
 	}
 	return notOneLine(n.Value)
 }
@@ -353,10 +377,10 @@ func badWorkflow(n *yaml.Node) string {
 // another control character; "" for one line.
 func notOneLine(v string) string {
 	if strings.ContainsAny(v, "\n\r") {
-		return "it has a line break"
+		return "has a line break"
 	}
 	if strings.IndexFunc(v, unicode.IsControl) >= 0 {
-		return "it has a control character"
+		return "has a control character"
 	}
 	return ""
 }

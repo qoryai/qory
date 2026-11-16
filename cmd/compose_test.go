@@ -260,12 +260,12 @@ func TestComposeRefuses(t *testing.T) {
 		{
 			name:    "a stack of another format",
 			fixture: "unknown-api-version",
-			wantErr: []string{"qory.yaml:", `apiVersion "qory.dev/v2" is not one this qory reads`},
+			wantErr: []string{"Set apiVersion to qory.dev/v1alpha1.", "qory.yaml.", `This qory reads qory.dev/v1alpha1, and apiVersion is "qory.dev/v2".`},
 		},
 		{
 			name:    "an exclude that selects nothing the module ships",
 			fixture: "exclude-names-nothing",
-			wantErr: []string{"module core: exclude skills/nope selects nothing the module ships"},
+			wantErr: []string{"Remove skills/nope from the exclude of module core.\n  Module core does not ship skills/nope."},
 		},
 		{
 			name:    "a directory under hooks",
@@ -275,7 +275,12 @@ func TestComposeRefuses(t *testing.T) {
 		{
 			name:    "an MCP server that is not an object",
 			fixture: "mcp-server-fails",
-			wantErr: []string{"mcp/db.json does not contain a JSON object"},
+			wantErr: []string{"Write mcp/db.json in module core as one JSON object.", "The file does not contain a JSON object"},
+		},
+		{
+			name:    "an MCP server with a key no runtime reads",
+			fixture: "mcp-server-key-fails",
+			wantErr: []string{"Remove the key \"comand\" from the MCP server file.", "The file is mcp/db.json in module core."},
 		},
 	}
 	for _, tc := range tests {

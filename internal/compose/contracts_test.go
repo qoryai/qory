@@ -71,7 +71,7 @@ func TestAnAgentThatMeetsTheContractComposes(t *testing.T) {
 
 // contractRefusal is the refusal of python-developer for the parts it lacks.
 func contractRefusal(parts ...string) string {
-	return "Complete agent python-developer of module python, or bind agents/developer to another agent.\n" +
+	return "Complete agent python-developer of module python, or bind agents.developer to another agent.\n" +
 		"  The contract roles/developer.yaml of module core requires these parts, which agents/python-developer.md lacks:\n  - " +
 		strings.Join(parts, "\n  - ")
 }
@@ -116,7 +116,7 @@ func TestTheBaseAgentIsCheckedToo(t *testing.T) {
 	files["modules/python/qory-module.yaml"] = "apiVersion: qory.dev/v1alpha1\nname: python\n"
 	files["modules/core/agents/core-developer.md"] = strings.Replace(strings.Replace(fullAgent, "python-developer", "core-developer", 1), "## Guardrails\n", "", 1)
 	_, err := composeTree(t, files)
-	want := "Complete agent core-developer of module core, or bind agents/developer to another agent.\n" +
+	want := "Complete agent core-developer of module core, or bind agents.developer to another agent.\n" +
 		"  The contract roles/developer.yaml of module core requires these parts, which agents/core-developer.md lacks:\n" +
 		`  - the heading "## Guardrails"`
 	if err == nil || err.Error() != want {
@@ -132,7 +132,7 @@ func TestTheAgentOfTheRolesNameIsChecked(t *testing.T) {
 	delete(files, "modules/python/agents/python-developer.md")
 	files["modules/python/agents/developer.md"] = "---\nname: developer\n---\n"
 	_, err := composeTree(t, files)
-	if err == nil || !strings.HasPrefix(err.Error(), "Complete agent developer of module python, or bind agents/developer to another agent.\n") {
+	if err == nil || !strings.HasPrefix(err.Error(), "Complete agent developer of module python, or bind agents.developer to another agent.\n") {
 		t.Fatalf("error: %v", err)
 	}
 }
@@ -146,7 +146,7 @@ func TestEachFailingAgentGetsABlock(t *testing.T) {
 	files["modules/core/agents/reviewer.md"] = "---\nname: reviewer\ntools: Grep\n---\n"
 	_, err := composeTree(t, files)
 	want := contractRefusal(`the heading "## Guardrails"`) + "\n" +
-		"Complete agent reviewer of module core, or bind agents/reviewer to another agent.\n" +
+		"Complete agent reviewer of module core, or bind agents.reviewer to another agent.\n" +
 		"  The contract roles/reviewer.yaml of module core requires these parts, which agents/reviewer.md lacks:\n" +
 		"  - the tool Read"
 	if err == nil || err.Error() != want {
@@ -161,7 +161,7 @@ func TestTwoContractsOfOneRoleAreEachChecked(t *testing.T) {
 	files["modules/python/qory-module.yaml"] = "apiVersion: qory.dev/v1alpha1\nname: python\nroles:\n  agents:\n    developer: {fill: one, contract: developer.yaml}\nprovides:\n  agents:\n    developer: python-developer\n"
 	files["modules/python/developer.yaml"] = "sections: [Tests]\n"
 	_, err := composeTree(t, files)
-	want := "Complete agent python-developer of module python, or bind agents/developer to another agent.\n" +
+	want := "Complete agent python-developer of module python, or bind agents.developer to another agent.\n" +
 		"  The contract developer.yaml of module python requires these parts, which agents/python-developer.md lacks:\n" +
 		`  - the heading "## Tests"`
 	if err == nil || err.Error() != want {
@@ -515,8 +515,8 @@ func TestAGroupCauseLineIsIndented(t *testing.T) {
 		files map[string]string
 		want  string
 	}{
-		{noMember, "Fill agents/reviewers, or remove it from skills/review/SKILL.md of module factory.\n  The group has no member."},
-		{frontMatter, "Remove ${qory:agents/reviewers} from the front matter of skills/review/SKILL.md of module factory.\n  A group resolves to a list."},
+		{noMember, "Fill agents/reviewers, or remove the reference to it.\n  The group has no member.\n  The reference is in skills/review/SKILL.md of module factory."},
+		{frontMatter, "Remove ${qory:agents/reviewers} from the front matter.\n  A group resolves to a list.\n  The reference is in the front matter of skills/review/SKILL.md of module factory."},
 		{unshipped, "Ship agent python-reviewer, or remove it from provides.agents.reviewers of module python.\n  No module ships agent python-reviewer."},
 	} {
 		if _, err := composeTree(t, c.files); err == nil || err.Error() != c.want {
@@ -885,7 +885,7 @@ func TestTheNoMemberFixLineFitsIn100Characters(t *testing.T) {
 	files["modules/software-factory/qory-module.yaml"] = "apiVersion: qory.dev/v1alpha1\nname: software-factory\nroles:\n  agents:\n    reviewers: many\n"
 	files["modules/software-factory/skills/review/SKILL.md"] = "---\nname: review\ndescription: review\n---\n\nStart ${qory:agents/reviewers}.\n"
 	files["modules/python/qory-module.yaml"] = "apiVersion: qory.dev/v1alpha1\nname: python\n"
-	want := "Fill agents/reviewers, or remove it from skills/review/SKILL.md of module software-factory.\n  The group has no member."
+	want := "Fill agents/reviewers, or remove the reference to it.\n  The group has no member.\n  The reference is in skills/review/SKILL.md of module software-factory."
 	_, err := composeTree(t, files)
 	if err == nil || err.Error() != want {
 		t.Fatalf("error:\n%v\nwant:\n%s", err, want)
@@ -938,7 +938,7 @@ func TestACheckoutDocumentWithAnEmptyGroupKeepsTheFillLine(t *testing.T) {
 	files["base/modules/factory/skills/review/SKILL.md"] = "---\nname: review\ndescription: review\n---\n\nReview.\n"
 	files["python/qory-module.yaml"] = "apiVersion: qory.dev/v1alpha1\nname: python\n"
 	files["python/skills/check/SKILL.md"] = "---\nname: check\ndescription: check\n---\n\nStart ${qory:agents/reviewers}.\n"
-	want := "Fill agents/reviewers, or remove it from skills/check/SKILL.md of module python.\n  The group has no member."
+	want := "Fill agents/reviewers, or remove the reference to it.\n  The group has no member.\n  The reference is in skills/check/SKILL.md of module python."
 	if _, err := composeExtending(t, writeTree(t, files)); err == nil || err.Error() != want {
 		t.Errorf("error:\n%v\nwant:\n%s", err, want)
 	}
@@ -1019,7 +1019,7 @@ func TestABaseModuleIsExcludedByTheNameQoryYamlListsItBy(t *testing.T) {
 	singleTree := tree(single)
 	singleTree["base/"+stack.FileName] = strings.Replace(singleTree["base/"+stack.FileName], "reviewers: [other, pr]", "reviewer: pr", 1)
 	_, err := composeExtending(t, writeTree(t, singleTree))
-	want := "Complete agent pr of module core, or bind agents/reviewer to another agent.\n" +
+	want := "Complete agent pr of module core, or bind agents.reviewer to another agent.\n" +
 		"  The contract roles/reviewer.yaml of module core requires these parts, which agents/pr.md lacks:\n" +
 		"  - the tool Read"
 	if err == nil || err.Error() != want {
@@ -1080,7 +1080,8 @@ func TestABaseModuleHasOneNameInEveryRefusal(t *testing.T) {
 			"modules/core/qory-module.yaml":        "apiVersion: qory.dev/v1alpha1\nname: core-x\n",
 			"modules/core/skills/release/SKILL.md": "---\nname: release\ndescription: d\n---\n\nUse ${qory:skills/missing}.\n",
 		}, "", "",
-			"module core: skill release references skill missing, which no module ships or provides and the stack does not bind"},
+			"Ship skill missing, bind skills.missing in qory.yaml, or remove the reference from skill release.\n" +
+				"  The skill release of module core references skill missing. No module ships or provides it, and the stack does not bind it."},
 		{"no member", map[string]string{
 			"modules/core/qory-module.yaml":       group,
 			"modules/core/skills/review/SKILL.md": review,

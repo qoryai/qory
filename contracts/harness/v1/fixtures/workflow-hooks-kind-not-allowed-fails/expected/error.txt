@@ -1,2 +1,2 @@
 Set hooks[1].kind to check or review.
-  after-review-round allows only those.
+  after-review-round allows only check and review, and hooks[1].kind is enrich.

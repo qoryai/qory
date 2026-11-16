@@ -27,7 +27,7 @@ func TestReferencesListsEachOnceSorted(t *testing.T) {
 // is not one segment: each refused naming the reference as written.
 func TestReferencesRefusesWhatIsNotOne(t *testing.T) {
 	for _, c := range [][2]string{
-		{"${qory:agent/coder}", "${qory:agent/coder} is not a reference; after ${qory: comes one of agents, commands, skills, then /<name>"},
+		{"${qory:agent/coder}", "Change ${qory:agent/coder} to a reference.\n  ${qory:agent/coder} is not a reference: after ${qory: comes one of agents, commands, skills, then /<name>.\n  The reference is in the file of the module."},
 		{"${qory:coder}", "${qory:coder} is not a reference"},
 		{"${qory:agents/}", `${qory:agents/} refers to "", which is not an entry name`},
 		{"${qory:agents/a/b}", `${qory:agents/a/b} refers to "a/b", which is not an entry name`},
@@ -89,7 +89,7 @@ func TestReadCollectsReferencesPerEntry(t *testing.T) {
 	})
 	m, _ = ReadManifest(dir)
 	_, err = Read("core", dir, m, "")
-	if err == nil || !strings.Contains(err.Error(), "module core: agents/reviewer.md: ${qory:agent/coder} is not a reference") {
+	if err == nil || !strings.Contains(err.Error(), "Change ${qory:agent/coder} to a reference.\n  ${qory:agent/coder} is not a reference") {
 		t.Fatalf("err = %v", err)
 	}
 }

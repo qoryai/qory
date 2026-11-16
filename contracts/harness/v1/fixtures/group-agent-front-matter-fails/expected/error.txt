@@ -1,2 +1,3 @@
-Remove ${qory:agents/reviewers} from the front matter of agents/lead.md of module factory.
+Remove ${qory:agents/reviewers} from the front matter.
   A group resolves to a list.
+  The reference is in the front matter of agents/lead.md of module factory.

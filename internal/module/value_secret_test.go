@@ -31,17 +31,17 @@ func containsSecret(text string) bool {
 func TestAnMCPServerValueWithASecretIsLeftOutOfItsRefusal(t *testing.T) {
 	isolate(t)
 	for _, c := range []struct{ server, want string }{
-		{`{"command": "x", "type": "qak_t"}`, "mcp/s.json: type " + accessKeyValuePhrase + " is not stdio, http or sse"},
-		{`{"command": "x", "type": ["QRK_t"]}`, "mcp/s.json: type " + runKeyValuePhrase + " is not stdio, http or sse"},
-		{`{"command": "x", "args": ["a", {"k": "qrk_a"}]}`, "mcp/s.json: args contains " + runKeyValuePhrase + ", which is not a string"},
-		{`{"url": "https://git.example", "headers": {"Authorization": ["Bearer qak_AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA"]}}`, "mcp/s.json: headers.Authorization is " + accessKeyValuePhrase + ", which is not a string"},
-		{`{"command": "x", "env": {"TOKEN": {"v": "qak_x"}}}`, "mcp/s.json: env.TOKEN is " + accessKeyValuePhrase + ", which is not a string"},
-		{`{"command": "x", "description": ["qrk_d"]}`, "mcp/s.json: description is " + runKeyValuePhrase + ", which is not a string"},
-		{`{"url": "https://git.example", "headers": {"Authorization": ["Bearer token-123"]}}`, "mcp/s.json: headers.Authorization is [Bearer token-123], which is not a string"},
+		{`{"command": "x", "type": "qak_t"}`, "Set type of the MCP server to stdio, http, or sse.\n  type is " + accessKeyValuePhrase + "."},
+		{`{"command": "x", "type": ["QRK_t"]}`, "Set type of the MCP server to stdio, http, or sse.\n  type is " + runKeyValuePhrase + "."},
+		{`{"command": "x", "args": ["a", {"k": "qrk_a"}]}`, "Set each item of args of the MCP server to a string.\n  args contains " + runKeyValuePhrase + ", which is not a string."},
+		{`{"url": "https://git.example", "headers": {"Authorization": ["Bearer qak_AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA"]}}`, "Set each value of headers of the MCP server to a string.\n  headers.Authorization is " + accessKeyValuePhrase + ", which is not a string."},
+		{`{"command": "x", "env": {"TOKEN": {"v": "qak_x"}}}`, "Set each value of env of the MCP server to a string.\n  env.TOKEN is " + accessKeyValuePhrase + ", which is not a string."},
+		{`{"command": "x", "description": ["qrk_d"]}`, "Set description of the MCP server to a string.\n  description is " + runKeyValuePhrase + ", which is not a string."},
+		{`{"url": "https://git.example", "headers": {"Authorization": ["Bearer token-123"]}}`, "Set each value of headers of the MCP server to a string.\n  headers.Authorization is [Bearer token-123], which is not a string."},
 	} {
 		dir := tree(t, map[string]string{"mcp/s.json": c.server})
 		_, err := Read("core", dir, nil, "")
-		if want := "module core: " + c.want; err == nil || err.Error() != want {
+		if want := c.want + "\n  The file is mcp/s.json in module core."; err == nil || err.Error() != want {
 			t.Errorf("%s: %v, want %q", c.server, err, want)
 		}
 	}
@@ -154,7 +154,7 @@ func TestAnEntryPathWithASecretIsLeftOutOfItsRefusal(t *testing.T) {
 		{map[string]string{"AGENTS.md": "x\n"}, Variant{"skills": "../qak_x"}, "variant v reads skills from " + accessKeyValuePhrase + ", which is not a directory inside the module"},
 		{map[string]string{"skills/qak_s/x.md": "x\n"}, nil, "add SKILL.md to skills/" + accessKeyPhrase + ": skills/" + accessKeyPhrase + " has no SKILL.md and no skill below it"},
 		{map[string]string{"qrk_d/s/x.md": "x\n"}, Variant{"skills": "qrk_d"}, "add SKILL.md to " + runKeyPhrase + "/s: " + runKeyPhrase + "/s has no SKILL.md and no skill below it"},
-		{map[string]string{"hooks/qak_d/x.sh": "x\n"}, nil, "hooks/" + accessKeyPhrase + " is a directory; a hook is one file. Keep its helpers elsewhere in the module, reached as $QORY_HARNESS_HOME/modules/core/<path>"},
+		{map[string]string{"hooks/qak_d/x.sh": "x\n"}, nil, "Move hooks/" + accessKeyPhrase + " out of the hooks directory of module core.\n  hooks/" + accessKeyPhrase + " is a directory, and a hook is one file.\n  A hook reads its helpers at $QORY_HARNESS_HOME/modules/core/<path>."},
 		{map[string]string{"files/qak_f.txt": "x\n"}, nil, "files/" + accessKeyPhrase + " is not under a runtime directory; a file ships as files/<runtime>/<path>"},
 		{map[string]string{"qrk_d/f.txt": "x\n"}, Variant{"files": "qrk_d"}, runKeyPhrase + "/f.txt is not under a runtime directory; a file ships as " + runKeyPhrase + "/<runtime>/<path>"},
 		{map[string]string{"settings/qak_rt/qrk_d/x.json": "{}"}, nil, "settings/" + accessKeyPhrase + "/" + runKeyPhrase + " is a directory; settings contains one fragment per target file, and a runtime's other files go under files/" + accessKeyPhrase + "/" + runKeyPhrase},
@@ -165,8 +165,8 @@ func TestAnEntryPathWithASecretIsLeftOutOfItsRefusal(t *testing.T) {
 		if c.v != nil {
 			m, variant = &Manifest{Variants: map[string]Variant{"v": c.v}}, "v"
 		}
-		if _, err := Read("core", dir, m, variant); err == nil || err.Error() != "module core: "+c.want {
-			t.Errorf("%v: %v, want %q", c.files, err, "module core: "+c.want)
+		if _, err := Read("core", dir, m, variant); err == nil || err.Error() != inModuleCore(c.want) {
+			t.Errorf("%v: %v, want %q", c.files, err, inModuleCore(c.want))
 		}
 	}
 }
@@ -255,8 +255,8 @@ func TestAManifestValueWithASecretIsLeftOutOfItsRefusal(t *testing.T) {
 	isolate(t)
 	head := "apiVersion: qory.dev/v1alpha1\nname: core\n"
 	for _, c := range []struct{ body, want string }{
-		{"apiVersion: qak_v1\nname: core\n", "apiVersion " + accessKeyValuePhrase + " is not one this qory reads; versions: qory.dev/v1alpha1"},
-		{"apiVersion: v1\nname: core\n", `apiVersion "v1" is not one this qory reads; versions: qory.dev/v1alpha1`},
+		{"apiVersion: qak_v1\nname: core\n", "Set apiVersion to qory.dev/v1alpha1.\n  This qory reads qory.dev/v1alpha1, and apiVersion is " + accessKeyValuePhrase + ".\n  apiVersion is in {path}."},
+		{"apiVersion: v1\nname: core\n", "Set apiVersion to qory.dev/v1alpha1.\n  This qory reads qory.dev/v1alpha1, and apiVersion is \"v1\".\n  apiVersion is in {path}."},
 		{head + "env:\n  BIN: /opt/qak_x\n", "env.BIN: " + accessKeyValuePhrase + " is not a path inside the module"},
 		{head + "egress: [QRK_x.example]\n", "egress: " + runKeyValuePhrase + " is not a lower-case host name or a *. suffix; no port, path or scheme"},
 		{head + "egress: [Git.example]\n", `egress: "Git.example" is not a lower-case host name or a *. suffix; no port, path or scheme`},
@@ -265,7 +265,11 @@ func TestAManifestValueWithASecretIsLeftOutOfItsRefusal(t *testing.T) {
 	} {
 		dir := tree(t, map[string]string{ManifestName: c.body})
 		_, err := ReadManifest(dir)
-		if want := filepath.Join(dir, ManifestName) + ": " + c.want; err == nil || err.Error() != want {
+		want := filepath.Join(dir, ManifestName) + ": " + c.want
+		if strings.Contains(c.want, "{path}") {
+			want = strings.ReplaceAll(c.want, "{path}", filepath.Join(dir, ManifestName))
+		}
+		if err == nil || err.Error() != want {
 			t.Errorf("%q: %v, want %q", c.body, err, want)
 		}
 		var typeErr *yaml.TypeError
@@ -285,9 +289,9 @@ func TestAReferenceWithASecretIsLeftOutOfItsRefusal(t *testing.T) {
 	isolate(t)
 	for _, c := range []struct{ file, body, want string }{
 		{"agents/a.md", "---\nmodel: ${qory:qak_t}\n---\n", "agents/a.md: model " + accessKeyValuePhrase + ": use one of the tiers light, fast and thinking; " + accessKeyPhrase + " is not a tier"},
-		{"skills/s/SKILL.md", "${qory:qrk_kind/x}\n", "skills/s/SKILL.md: " + runKeyValuePhrase + " is not a reference; after ${qory: comes one of agents, commands, skills, then /<name>"},
+		{"skills/s/SKILL.md", "${qory:qrk_kind/x}\n", "Change " + runKeyValuePhrase + " to a reference.\n  " + runKeyValuePhrase + " is not a reference: after ${qory: comes one of agents, commands, skills, then /<name>.\n  The reference is in skills/s/SKILL.md of module core."},
 		{"commands/c.md", "${qory:skills/qak_x y}\n", "commands/c.md: " + accessKeyValuePhrase + " refers to " + accessKeyPhrase + ", which is not an entry name; a name is one path segment"},
-		{"agents/qrk_a.md", "${qory:prompts/x}\n", "agents/" + runKeyPhrase + ": ${qory:prompts/x} is not a reference; after ${qory: comes one of agents, commands, skills, then /<name>"},
+		{"agents/qrk_a.md", "${qory:prompts/x}\n", "Change ${qory:prompts/x} to a reference.\n  ${qory:prompts/x} is not a reference: after ${qory: comes one of agents, commands, skills, then /<name>.\n  The reference is in agents/" + runKeyPhrase + " of module core."},
 		{"commands/c.md", "${qory:skills/a b}\n", `commands/c.md: ${qory:skills/a b} refers to "a b", which is not an entry name; a name is one path segment`},
 	} {
 		files := map[string]string{c.file: c.body}
@@ -295,8 +299,8 @@ func TestAReferenceWithASecretIsLeftOutOfItsRefusal(t *testing.T) {
 			files["skills/s/SKILL.md"] = "x\n"
 		}
 		dir := tree(t, files)
-		if _, err := Read("core", dir, nil, ""); err == nil || err.Error() != "module core: "+c.want {
-			t.Errorf("%s: %v, want %q", c.body, err, "module core: "+c.want)
+		if _, err := Read("core", dir, nil, ""); err == nil || err.Error() != inModuleCore(c.want) {
+			t.Errorf("%s: %v, want %q", c.body, err, inModuleCore(c.want))
 		}
 	}
 	if err := NotATier("--tier light=x", "QRK_t"); err == nil || err.Error() != "--tier light=x: use one of the tiers light, fast and thinking; "+runKeyPhrase+" is not a tier" {
@@ -363,4 +367,13 @@ func TestADocumentWithASecretInItsPathOrFrontmatterIsLeftOutOfItsRefusal(t *test
 			t.Errorf("%s: %v, want the suffix %q", c.name, err, c.want)
 		}
 	}
+}
+
+// inModuleCore is want, a refusal of module core: one written fix first, over several
+// lines, names the module inside it, and any other starts with "module core: ".
+func inModuleCore(want string) string {
+	if strings.Contains(want, "\n") {
+		return want
+	}
+	return "module core: " + want
 }

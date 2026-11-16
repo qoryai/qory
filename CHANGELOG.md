@@ -422,6 +422,9 @@ release may change what an existing document does, and states it under Upgrading
   `/qory/runtime/<runtime>`. `qory image check` checks no runtime and prints no runtime
   line; Forager checks the runtime when a run starts. A prebuild copies nothing from the
   agent image, and no image has `/qory/agent`.
+- The first line of each compose error shows the fix, in at most 100 characters, and the
+  indented lines after it show the cause and the values, as the errors of workflow hooks
+  do. Which input fails, and the exit status, stay the same.
 - A run with a run key or a run code, with no `--home` or `harness.home`, composes into
   `runs/<name>-<hash>/<run id>` under `qory/homes` in the cache directory, a home for that
   run alone, which qory removes when the run ends. Two runs of one checkout no longer

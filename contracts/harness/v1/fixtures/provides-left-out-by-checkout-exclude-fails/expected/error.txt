@@ -1,1 +1,3 @@
-remove agents/ts-developer from the exclude of module ts in qory.yaml, or ship it in a module of the repository: module core: skill deploy references agent developer, which module ts provides as agent ts-developer, which the exclude of module ts in qory.yaml leaves out
+Remove agents/ts-developer from the exclude of module ts, or ship it in a module of the repository.
+  The skill deploy of module core references agent developer, which module ts provides as agent ts-developer.
+  The exclude of module ts in qory.yaml leaves agent ts-developer out.

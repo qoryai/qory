@@ -1,1 +1,3 @@
-module core: skills/deploy/SKILL.md: ${qory:agent/coder} is not a reference; after ${qory: comes one of agents, commands, skills, then /<name>
+Change ${qory:agent/coder} to a reference.
+  ${qory:agent/coder} is not a reference: after ${qory: comes one of agents, commands, skills, then /<name>.
+  The reference is in skills/deploy/SKILL.md of module core.

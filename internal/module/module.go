@@ -12,6 +12,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/qoryai/forager/accesskey"
 	"gopkg.in/yaml.v3"
@@ -354,7 +355,7 @@ func parseManifest(dir string, data []byte, err error) (*Manifest, error) {
 	}
 	current, err := exports.ResolveAPIVersion(raw.APIVersion)
 	if err != nil {
-		return nil, fmt.Errorf("%s: %w", path, exports.HideValueError(err, ""))
+		return nil, exports.HideValueError(exports.AtPath(path, err), "")
 	}
 	if raw.Name == "" {
 		return nil, fmt.Errorf("%s: name is required", path)
@@ -421,9 +422,9 @@ func parseManifest(dir string, data []byte, err error) (*Manifest, error) {
 			continue
 		}
 		one, many, err := stack.ReadRoles(part.node, part.key, part.counts)
-		var re *stack.RolesError
-		if errors.As(err, &re) {
-			return nil, re.In(path)
+		var in exports.InFile
+		if errors.As(err, &in) {
+			return nil, in.In(path)
 		}
 		if err != nil {
 			return nil, fmt.Errorf("%s: %s: %w", path, part.key, exports.HideValueError(err, ""))
@@ -606,7 +607,7 @@ func ReadWith(name, dir string, m *Manifest, variant string, readFile func(path 
 	}
 	skills, err := readSkills(dirs["skills"], filepath.Join(abs, dirs["skills"]), variantSkillDirs(m))
 	if err != nil {
-		return nil, fmt.Errorf("module %s: %w", shown, err)
+		return nil, exports.Prefixed("module "+shown, err)
 	}
 	l.Entries = append(l.Entries, skills...)
 	for _, kind := range []string{"agents", "commands", "output-styles"} {
@@ -618,12 +619,12 @@ func ReadWith(name, dir string, m *Manifest, variant string, readFile func(path 
 	}
 	hooks, err := readHooks(shown, dirs["hooks"], filepath.Join(abs, dirs["hooks"]))
 	if err != nil {
-		return nil, fmt.Errorf("module %s: %w", shown, err)
+		return nil, exports.Prefixed("module "+shown, err)
 	}
 	l.Entries = append(l.Entries, hooks...)
 	servers, mcp, err := readMCP(dirs["mcp"], filepath.Join(abs, dirs["mcp"]), readFile)
 	if err != nil {
-		return nil, fmt.Errorf("module %s: %w", shown, err)
+		return nil, exports.Prefixed("module "+shown, err)
 	}
 	l.Entries = append(l.Entries, servers...)
 	l.MCP = mcp
@@ -657,7 +658,7 @@ func ReadWith(name, dir string, m *Manifest, variant string, readFile func(path 
 		}
 		refs, err := references(abs, e)
 		if err != nil {
-			return nil, fmt.Errorf("module %s: %w", shown, err)
+			return nil, exports.Prefixed("module "+shown, err)
 		}
 		l.Entries[i].References = refs.keys
 		l.Entries[i].Tier = refs.tier
@@ -694,7 +695,8 @@ func ReadWith(name, dir string, m *Manifest, variant string, readFile func(path 
 		for _, key := range sortedKeys(m.Requires) {
 			if !shipped[key] {
 				kind, entry, _ := strings.Cut(key, "/")
-				return nil, fmt.Errorf("module %s: requires lists %s, which the module does not ship", shown, Describe(kind, accesskey.ShownName(entry, false)))
+				needed := Describe(kind, accesskey.ShownName(entry, false))
+				return nil, exports.Errorf("Ship %s in module %s, or remove it from the requires of the module.\n  The requires of module %s lists %s, and the module does not ship it.", needed, shown, shown, needed)
 			}
 		}
 	}
@@ -753,7 +755,7 @@ func ReadThrough(root *os.Root, dir, realDir string) func(path string) ([]byte, 
 		}
 		rel, err := filepath.Rel(abs, path)
 		if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
-			return nil, fmt.Errorf("Move %s inside the module. It lies outside the module, and qory reads only the module's files.", exports.HidePath(path))
+			return nil, exports.Errorf("Move %s inside the module. It lies outside the module, and qory reads only the module's files.", exports.HidePath(path))
 		}
 		inner, err := ResolveIn(root, realDir, rel)
 		if err != nil {
@@ -1034,11 +1036,37 @@ func (r *skillReader) add(at, name, path string) error {
 		if filepath.Base(first) != name {
 			same = "these two names differ only in case"
 		}
-		return fmt.Errorf("rename %s or %s: each skill goes to skills/<name>, and %s", exports.HidePath(first), exports.HidePath(at), same)
+		a, b := exports.HidePath(first), exports.HidePath(at)
+		fix := fmt.Sprintf("Rename %s or %s in %s.", a, b, exports.ModulePlace)
+		lines := []string{fmt.Sprintf("Each skill goes to skills/<name>, and %s.", same)}
+		if !fits(fix) {
+			fix = "Rename one of two skills in " + exports.ModulePlace + "."
+			lines = append([]string{fmt.Sprintf("The skills are %s and %s.", a, b)}, lines...)
+		}
+		return exports.Refuse(fix, lines...)
 	}
 	r.seen[key] = at
 	r.entries = append(r.entries, Entry{Kind: "skills", Name: name, Path: path})
 	return nil
+}
+
+// fits reports whether line, the first line of a refusal, has at most 100 characters, with
+// [exports.ModulePlace] in it a module as long as a refusal prints one: "module " and a
+// name of [exports.NameMax] characters.
+func fits(line string) bool {
+	line = strings.ReplaceAll(line, exports.ModulePlace, strings.Repeat("m", len("module ")+exports.NameMax))
+	return utf8.RuneCountInString(line) <= 100
+}
+
+// jsonObjectRefusal is the refusal of the MCP server file, a path in the module as a
+// message prints it, whose content is no JSON object. The path moves to the second line
+// when it would push the first past 100 characters.
+func jsonObjectRefusal(file, cause string) error {
+	fix := fmt.Sprintf("Write %s in %s as one JSON object.", file, exports.ModulePlace)
+	if !fits(fix) {
+		return exports.Refuse("Write the MCP server file in "+exports.ModulePlace+" as one JSON object.", "The file is "+file+".", cause)
+	}
+	return exports.Refuse(fix, cause)
 }
 
 // checkGroup returns the stop for the folder at path, with no SKILL.md, printed as at, when
@@ -1295,7 +1323,13 @@ func readHooks(name, rel, dir string) ([]Entry, error) {
 		}
 		if info.IsDir() {
 			sub := exports.HidePath(filepath.ToSlash(filepath.Join(rel, it.Name())))
-			return nil, fmt.Errorf("%s is a directory; a hook is one file. Keep its helpers elsewhere in the module, reached as $QORY_HARNESS_HOME/modules/%s/<path>", sub, name)
+			fix := fmt.Sprintf("Move %s out of the hooks directory of module %s.", sub, name)
+			if !fits(fix) {
+				fix = fmt.Sprintf("Move the directory out of the hooks directory of module %s.", name)
+			}
+			return nil, exports.Refuse(fix,
+				fmt.Sprintf("%s is a directory, and a hook is one file.", sub),
+				fmt.Sprintf("A hook reads its helpers at $QORY_HARNESS_HOME/modules/%s/<path>.", name))
 		}
 		es = append(es, Entry{Kind: "hooks", Name: it.Name(), Path: path})
 	}
@@ -1346,13 +1380,13 @@ func readMCP(rel, dir string, readFile func(string) ([]byte, error)) ([]Entry, m
 		file := filepath.ToSlash(filepath.Join(rel, accesskey.ShownName(strings.TrimSuffix(it.Name(), ".json"), false)+".json"))
 		var server map[string]any
 		if err := json.Unmarshal(data, &server); err != nil {
-			return nil, nil, fmt.Errorf("%s does not contain a JSON object: %w", file, err)
+			return nil, nil, jsonObjectRefusal(file, "The file does not contain a JSON object: "+exports.HideValueError(err, "").Error())
 		}
 		if server == nil {
-			return nil, nil, fmt.Errorf("%s does not contain a JSON object", file)
+			return nil, nil, jsonObjectRefusal(file, "The file contains null, which is no JSON object.")
 		}
-		if err := checkServer(server); err != nil {
-			return nil, nil, fmt.Errorf("%s: %w", file, err)
+		if err := checkServer(file, server); err != nil {
+			return nil, nil, err
 		}
 		name := strings.TrimSuffix(it.Name(), ".json")
 		servers[name] = server
@@ -1368,38 +1402,43 @@ func readMCP(rel, dir string, readFile func(string) ([]byte, error)) ([]Entry, m
 // mcp.schema.json refuses: a key no runtime reads, no command and no url, both, a command
 // or url that is not a non-empty string, a type outside stdio, http and sse, an args
 // element or an env or headers value that is not a string, a description that is not a
-// string. A value the refusal prints is printed as [shownJSON] prints it.
-func checkServer(server map[string]any) error {
+// string. The refusal starts with its fix, and its last line has file, the path of the
+// server file in the module. A value the refusal prints is printed as [shownJSON] prints
+// it.
+func checkServer(file string, server map[string]any) error {
+	refuse := func(fix, cause string) error {
+		return exports.Refuse(fix, cause, "The file is "+file+" in "+exports.ModulePlace+".")
+	}
 	for k := range server {
 		if !serverKeys[k] {
-			return fmt.Errorf("key %s is not one of an MCP server's; keys: type, command, args, env, url, headers, description", accesskey.ShownName(k, true))
+			return refuse("Remove the key "+accesskey.ShownName(k, true)+" from the MCP server file.", "An MCP server has only type, command, args, env, url, headers, and description.")
 		}
 	}
 	command, hasCommand := server["command"]
 	url, hasURL := server["url"]
 	switch {
 	case hasCommand && hasURL:
-		return errors.New("sets both a command and a url; a server is one or the other")
+		return refuse("Remove command or url from the MCP server file.", "A server sets one of them, and the file sets both.")
 	case !hasCommand && !hasURL:
-		return errors.New("sets neither a command nor a url")
+		return refuse("Add command or url to the MCP server file.", "A server sets one of them, and the file sets neither.")
 	case hasCommand && !nonEmptyString(command):
-		return errors.New("command is not a non-empty string")
+		return refuse("Set command of the MCP server to a non-empty string.", "command is not a non-empty string.")
 	case hasURL && !nonEmptyString(url):
-		return errors.New("url is not a non-empty string")
+		return refuse("Set url of the MCP server to a non-empty string.", "url is not a non-empty string.")
 	}
 	if t, ok := server["type"]; ok {
 		if s, _ := t.(string); s != "stdio" && s != "http" && s != "sse" {
-			return fmt.Errorf("type %s is not stdio, http or sse", shownJSON(t))
+			return refuse("Set type of the MCP server to stdio, http, or sse.", "type is "+shownJSON(t)+".")
 		}
 	}
 	if args, ok := server["args"]; ok {
 		list, isList := args.([]any)
 		if !isList {
-			return errors.New("args is not a list")
+			return refuse("Set args of the MCP server to a list of strings.", "args is not a list.")
 		}
 		for _, a := range list {
 			if _, ok := a.(string); !ok {
-				return fmt.Errorf("args contains %s, which is not a string", shownJSON(a))
+				return refuse("Set each item of args of the MCP server to a string.", "args contains "+shownJSON(a)+", which is not a string.")
 			}
 		}
 	}
@@ -1410,17 +1449,17 @@ func checkServer(server map[string]any) error {
 		}
 		m, isMap := v.(map[string]any)
 		if !isMap {
-			return fmt.Errorf("%s is not an object", key)
+			return refuse("Set "+key+" of the MCP server to an object of strings.", key+" is not an object.")
 		}
 		for k, e := range m {
 			if _, ok := e.(string); !ok {
-				return fmt.Errorf("%s.%s is %s, which is not a string", key, accesskey.ShownName(k, false), shownJSON(e))
+				return refuse("Set each value of "+key+" of the MCP server to a string.", key+"."+accesskey.ShownName(k, false)+" is "+shownJSON(e)+", which is not a string.")
 			}
 		}
 	}
 	if d, ok := server["description"]; ok {
 		if _, isString := d.(string); !isString {
-			return fmt.Errorf("description is %s, which is not a string", shownJSON(d))
+			return refuse("Set description of the MCP server to a string.", "description is "+shownJSON(d)+", which is not a string.")
 		}
 	}
 	return nil

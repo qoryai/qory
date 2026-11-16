@@ -1,1 +1,3 @@
-qory.yaml: apiVersion "qory.dev/v2" is not one this qory reads; versions: qory.dev/v1alpha1
+Set apiVersion to qory.dev/v1alpha1.
+  This qory reads qory.dev/v1alpha1, and apiVersion is "qory.dev/v2".
+  apiVersion is in qory.yaml.

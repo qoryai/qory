@@ -1,2 +1,3 @@
-Write one name for bind.agents.developer in qory.yaml.
+Write one name for bind.agents.developer.
   No module declares agents/developer as many, so one agent fills it.
+  bind is in qory.yaml.

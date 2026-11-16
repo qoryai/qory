@@ -1,1 +1,2 @@
-Remove the push check for verdict from module core: a verdict is sent by qory run verdict, which push checks do not cover
+Remove the push check for verdict from module core.
+  qory run verdict sends a verdict, and push checks do not cover it.
