@@ -102,7 +102,7 @@ func checkArtifactTypes(shown string, list *yaml.Node) error {
 		name, why := checkArtifactType(entry, i, patterns)
 		at, twice := first[name]
 		switch {
-		case strings.Contains(why, FilePlace):
+		case why != "":
 			lines = append(lines, strings.ReplaceAll(why, FilePlace, shown))
 		case twice:
 			lines = append(lines, fmt.Sprintf("Rename or remove entry %d of artifact_types.\n  Entry %d has the name %s too.\n  The entry is in %s.", i+1, at+1, name, shown))

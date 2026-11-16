@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 )
 
@@ -87,11 +88,11 @@ func shortened(names []string) map[string]string {
 
 // longName matches, in a refusal's first line, a short quoted value, which stays as it is
 // and is matched first so that its closing quote does not open the next match; a quoted
-// value of more than 22 characters, whole from its opening quote to its closing quote,
+// value of more than 24 characters between its quotes, whole from its opening quote to its closing quote,
 // spaces included; or a run of letters, digits, dots, hyphens and underscores that does
 // not end with a dot, so the full stop of a sentence stays. A slash or a space ends a
 // run, so "agents/" in front of a role name stays.
-var longName = regexp.MustCompile(`"[^"\n]{0,22}"|"(?:[^"\\\n]|\\.){23,}"|[\p{L}\p{N}._-]{24,}[\p{L}\p{N}_-]`)
+var longName = regexp.MustCompile(`"[^"\n]{0,24}"|"(?:[^"\\\n]|\\.){25,}"|[\p{L}\p{N}._-]{24,}[\p{L}\p{N}_-]`)
 
 // keyPath matches the keys that start a dotted name in a refusal, such as the "bind." and
 // "agents." of bind.agents.<role>. [Fit] leaves them whole and shortens the name after them.
@@ -141,14 +142,14 @@ func Fit(text string) string {
 			}
 			var names []string
 			for _, match := range longName.FindAllString(line, -1) {
-				if _, name := nameOf(match); utf8.RuneCountInString(name) > NameMax && !slices.Contains(names, name) {
+				if _, name := nameOf(match); long(name) && !slices.Contains(names, name) {
 					names = append(names, name)
 				}
 			}
 			forms := shortened(names)
 			after := rest(i)
 			for _, name := range names {
-				if !strings.Contains(after, name) && forms[name] != name {
+				if !hasName(after, name) && forms[name] != name {
 					full = append(full, "  The full name of "+forms[name]+" is "+name+".")
 				}
 			}
@@ -164,6 +165,46 @@ func Fit(text string) string {
 	}
 	block()
 	return strings.Join(out, "\n")
+}
+
+// long reports whether name, a match of [longName] without its leading keys, has more than
+// [NameMax] characters, not counting the quotes of a quoted value.
+func long(name string) bool {
+	n := utf8.RuneCountInString(name)
+	if strings.HasPrefix(name, `"`) {
+		n -= 2
+	}
+	return n > NameMax
+}
+
+// nameChar reports whether r can be a character of a name that [longName] matches.
+func nameChar(r rune) bool {
+	return unicode.IsLetter(r) || unicode.IsDigit(r) || r == '.' || r == '_' || r == '-'
+}
+
+// hasName reports whether text has name as a whole name: the character before and the one
+// after it are not characters of a name.
+func hasName(text, name string) bool {
+	for from := 0; ; {
+		i := strings.Index(text[from:], name)
+		if i < 0 {
+			return false
+		}
+		start, end := from+i, from+i+len(name)
+		before, _ := utf8.DecodeLastRuneInString(text[:start])
+		after, size := utf8.DecodeRuneInString(text[end:])
+		if after == '.' {
+			// A full stop ends the name, as it ends a sentence, unless a name character follows.
+			next, _ := utf8.DecodeRuneInString(text[end+size:])
+			if end+size == len(text) || !nameChar(next) {
+				after = ' '
+			}
+		}
+		if (start == 0 || !nameChar(before) || strings.HasPrefix(name, `"`)) && (end == len(text) || !nameChar(after) || strings.HasPrefix(name, `"`)) {
+			return true
+		}
+		from = start + 1
+	}
 }
 
 // Errorf is an error of the formatted text, which [Fit] has fitted. A refusal written

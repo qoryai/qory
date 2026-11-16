@@ -133,7 +133,7 @@ func TestVerifyChecksTheProcessFields(t *testing.T) {
 		{with("process", "{schema: [a], stages: []}"), "Set process.schema to qory.process/v1.\n  process.schema is a list.\n  The file is {file}."},
 		{with("process", "{schema: qory.process/v1}"), "Add stages under process, the list of the process's stages.\n  process has no stages.\n  The file is {file}."},
 		{with("process", "{schema: qory.process/v1, stages: {a: 1}}"), "Set process.stages to a list of stages.\n  process.stages is an object.\n  The file is {file}."},
-		{process + "owner: acme\n", "Remove the key \"owner\" from line 15 of process.yaml.\n  The key is not one process.yaml reads.\n  The file is {file}."},
+		{process + "owner: acme\n", "Remove the key \"owner\" from line 15 of process.yaml.\n  process.yaml has no key `owner`.\n  The file is {file}."},
 	} {
 		e := factory(t, c.body)
 		file := filepath.Join(e.Root, "modules", "desk", exports.ProcessFileName)
@@ -444,7 +444,7 @@ func TestVerifyRefusesAProcessLinkOutside(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(folder, "real.yaml"), []byte(process+"owner: acme\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := e.Verify(); err == nil || err.Error() != "Remove the key \"owner\" from line 15 of process.yaml.\n  The key is not one process.yaml reads.\n  The file is "+file+"." {
+	if err := e.Verify(); err == nil || err.Error() != "Remove the key \"owner\" from line 15 of process.yaml.\n  process.yaml has no key `owner`.\n  The file is "+file+"." {
 		t.Errorf("a wrong file behind a link inside the module: %v", err)
 	}
 	// A link inside the folder to a file that is not there is no process.yaml.

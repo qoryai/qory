@@ -372,9 +372,9 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Changed
 
-- A compose refusal starts with the fix, on a first line of at most 100 characters, and
-  gives the cause and the values on the indented lines after it, as the refusals of
-  workflow hooks do. Which input fails, and the exit status, stay the same.
+- The first line of each compose error shows the fix, in at most 100 characters, and the
+  indented lines after it show the cause and the values, as the errors of workflow hooks
+  do. Which input fails, and the exit status, stay the same.
 - A run from a run code that may write the checkout needs a wall: with no wall, it stops
   after the compose, exit 1, and closes `failed` with `write_needs_wall`, since its agent
   would run as this machine's user. A run is such a run when neither `access` in its

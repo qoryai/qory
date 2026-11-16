@@ -191,3 +191,31 @@ func TestFitLeavesTwoShortQuotedValuesAlone(t *testing.T) {
 		t.Errorf("Fit changed the text between two short quoted values:\n%s", got)
 	}
 }
+
+// TestFitMatchesTheWholeNameOnALaterLine is a later line with a longer name that has the
+// shortened name inside it: that is not the whole name, so the last line is added. A name
+// that a later line has whole, before a full stop, adds none.
+func TestFitMatchesTheWholeNameOnALaterLine(t *testing.T) {
+	role := "role-" + strings.Repeat("r", 85)
+	first := "Remove agents/" + role + " from the exclude of the module, and keep it in one module only.\n"
+	if got := exports.Fit(first + "  The cause is " + role + "x."); !strings.Contains(got, "The full name of role-rrrr…rrrrrrrrrr is "+role+".") {
+		t.Errorf("a longer name on a later line counted:\n%s", got)
+	}
+	if got := exports.Fit(first + "  The cause is " + role + "."); strings.Contains(got, "The full name of") {
+		t.Errorf("the whole name on a later line was not found:\n%s", got)
+	}
+}
+
+// TestFitCountsAQuotedValueWithoutItsQuotes is a quoted value of 24 characters between its
+// quotes, which stays whole, and one of 25, which is shortened.
+func TestFitCountsAQuotedValueWithoutItsQuotes(t *testing.T) {
+	pad := " is not one of the values that the file may set here, and nothing else is allowed.\n  The cause."
+	a := `Set "` + strings.Repeat("a", 24) + `"` + pad
+	if got := exports.Fit(a); got != a {
+		t.Errorf("a quoted value of 24 characters changed:\n%s", got)
+	}
+	b := `Set "` + strings.Repeat("b", 25) + `"` + pad
+	if got := exports.Fit(b); !strings.Contains(got, "…") {
+		t.Errorf("a quoted value of 25 characters stayed whole:\n%s", got)
+	}
+}

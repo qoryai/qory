@@ -149,7 +149,7 @@ func (e *Exports) checkProcess(path string, data []byte) error {
 			if line := strings.TrimSuffix(m[1], ": "); line != "" {
 				at = line + " of " + ProcessFileName
 			}
-			return fmt.Errorf("Remove the key %q from %s.\n  The key is not one %s reads.\n  The file is %s.", m[2], at, ProcessFileName, shown)
+			return fmt.Errorf("Remove the key %q from %s.\n  %s has no key `%s`.\n  The file is %s.", m[2], at, ProcessFileName, m[2], shown)
 		}
 		return DecodeError(shown, err)
 	}

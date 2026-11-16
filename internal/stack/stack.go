@@ -608,7 +608,8 @@ func NewCompose(path string, p *Stack) (*Stack, error) {
 // inPath is err, an error about the document at path, with path in front, or, when err
 // itself is an [exports.InFile], with path inside its text, as [exports.AtPath] has it.
 func inPath(path string, err error) error {
-	if in, ok := err.(exports.InFile); ok {
+	var in exports.InFile
+	if errors.As(err, &in) {
 		return in.In(exports.HidePath(path))
 	}
 	return fmt.Errorf("%s: %w", path, err)

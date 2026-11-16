@@ -422,7 +422,8 @@ func parseManifest(dir string, data []byte, err error) (*Manifest, error) {
 			continue
 		}
 		one, many, err := stack.ReadRoles(part.node, part.key, part.counts)
-		if in, ok := err.(exports.InFile); ok {
+		var in exports.InFile
+		if errors.As(err, &in) {
 			return nil, in.In(path)
 		}
 		if err != nil {
@@ -1408,7 +1409,7 @@ func checkServer(file string, server map[string]any) error {
 	refuse := func(fix, cause string) error {
 		return exports.Refuse(fix, cause, "The file is "+file+" in "+exports.ModulePlace+".")
 	}
-	for _, k := range slices.Sorted(maps.Keys(server)) {
+	for k := range server {
 		if !serverKeys[k] {
 			return refuse("Remove the key "+accesskey.ShownName(k, true)+" from the MCP server file.", "An MCP server has only type, command, args, env, url, headers, and description.")
 		}
@@ -1450,9 +1451,9 @@ func checkServer(file string, server map[string]any) error {
 		if !isMap {
 			return refuse("Set "+key+" of the MCP server to an object of strings.", key+" is not an object.")
 		}
-		for _, k := range slices.Sorted(maps.Keys(m)) {
-			if _, ok := m[k].(string); !ok {
-				return refuse("Set each value of "+key+" of the MCP server to a string.", key+"."+accesskey.ShownName(k, false)+" is "+shownJSON(m[k])+", which is not a string.")
+		for k, e := range m {
+			if _, ok := e.(string); !ok {
+				return refuse("Set each value of "+key+" of the MCP server to a string.", key+"."+accesskey.ShownName(k, false)+" is "+shownJSON(e)+", which is not a string.")
 			}
 		}
 	}

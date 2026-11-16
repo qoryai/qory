@@ -1160,8 +1160,8 @@ An MCP server is one JSON object per file, in the shape Claude Code's `.mcp.json
 remote one, `type` for either, and `description` for a note to the module's readers, which
 the compose leaves out of every runtime's file. Exactly one of `command` and `url`, and
 no other key; the schema is [mcp.schema.json](mcp.schema.json). Every runtime with a project-level place for
-servers gets it there, rewritten where its shape differs (§Runtimes). A server file the schema
-refuses fails the compose with the fix first, such as `Remove the key "comand" from the MCP server
+servers gets it there, rewritten where its shape differs (§Runtimes). A server file that fails the check
+fails the compose with the fix first, such as `Remove the key "comand" from the MCP server
 file.`, then the cause, and `The file is mcp/db.json in module core.` on the last line. A directory under
 `hooks/`, or a link to one, fails the compose: a hook is one file, and a script's helpers
 live anywhere else in the module, such as under `scripts/`, reached through `modules/<name>` in
@@ -1398,7 +1398,7 @@ runtime: the resolution happens in the composed tree, per path.
 3. **An exclude or only that selects nothing fails**, so a module that stops shipping an
    entry, an instruction section, a fragment or a variable is noticed rather than silently
    composed. The fix line has the name, the block and the module, such as `Remove
-   skills/nope from the exclude of module core.`, and the next line says what the module
+   skills/nope from the exclude of module core.`, and the next line shows what the module
    lacks. An `only` brings in
    what its listed entries require from the module, transitively, and an `exclude` beside
    it may list only those; one listing anything else fails the same way.
