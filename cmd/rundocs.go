@@ -110,9 +110,9 @@ type codeRun struct {
 	minutes  int
 	hidden   bool
 	target   preparation.Target
-	// access is what the run may do on its target: [stack.AccessRead] or
-	// [stack.AccessWrite], from the documents' access. It is empty when the documents have
-	// no target.
+	// access is what the run may do on its target, from the documents' access: read,
+	// write, or write-no-push (a writable checkout with no push step). It is empty when
+	// the documents have no target.
 	access   string
 	workItem string
 

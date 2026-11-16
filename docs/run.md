@@ -4439,8 +4439,11 @@ Two values set what a run of a workflow from a run code may do on the checkout:
 - The workflow's access in the stack, `workflows.<name>.access`: `read` or `write`. A
   workflow that sets no access, and one the stack does not declare, is `read` (see
   `workflows` in `contracts/harness/v1/README.md`).
-- `access` in the run's documents, from Qory Apiary: `read` or `write`. Documents with no
-  target have no `access`, and the workflow's access applies alone.
+- `access` in the run's documents, from Qory Apiary: `read`, `write-no-push` or `write`.
+  Documents with no target have no `access`, and the workflow's access applies alone.
+  With `write-no-push` and a workflow declared `write`, the agent gets a writable
+  checkout, and qory runs no push step and stores no version of the artifact `branch`.
+  With no wall, such a run stops with `write_needs_wall`, as a write run does.
 
 A read run is a run where either value is `read`. A workflow declared `write` with
 `access: read` in the documents gives a read run, and so does a workflow declared `read`
