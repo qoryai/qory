@@ -16,7 +16,7 @@ runs may reach.
 brew install qoryai/tap/qory
 ```
 
-Or with the install script, which puts the binary in `~/.local/bin`. Or with Go 1.27 or
+Or with the install script, which puts the binary in `~/.local/bin`. Or with Go 1.27.4 or
 above:
 
 ```sh
