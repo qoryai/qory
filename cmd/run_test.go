@@ -1076,7 +1076,7 @@ func TestRunBehindAWall(t *testing.T) {
 		"--entrypoint /qory/qory example.com/agent:2 run exec --unset ",
 		" -- claude --settings "+runsDir(t, root),
 		" -p hi",
-		"env: MODEL_KEY=not-a-real-key", "env: FLAG_NAMED=goes in", "env: HTTPS_PROXY=http://qory:", "@qory-proxy:3128\n", "env: QORY_HOST_URL=http://host.qory.invalid\n",
+		"env: MODEL_KEY=not-a-real-key", "env: FLAG_NAMED=goes in", "env: HTTPS_PROXY=http://qory:", "@qory-proxy:3128\n", "env: QORY_HOST_URL=http://host.qory.invalid\n", "env: NO_PROXY=localhost,127.0.0.1,::1\n",
 		"network rm",
 	)
 	lacks(t, lines, "HOST_ONLY", "NOT_SET_HERE", "env: PATH=", "env: HOME=", ".qory/runs")
