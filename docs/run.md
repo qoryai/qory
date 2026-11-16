@@ -1638,7 +1638,7 @@ the work item. Then a run of the step explore:
   that copy when the run ends, also after a failure or a stop; a home for that run alone goes
   as a whole.
   A home that already has `inputs.json` stops the run with exit 1: `Remove inputs.json from
-  the run's home, or run without --home, then take the work item in again.` Inputs that
+  the home or unset --home and harness.home, then take the work item in again.` Inputs that
   have a member `qory` stop the run before
   it opens, with exit 1: `remove the input qory: qory adds that member to inputs.json; the
   code is used`, and so do inputs that are not a JSON object: `ask Qory Apiary's instance

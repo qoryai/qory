@@ -524,21 +524,39 @@ func (r *codeRun) writeInputs(in string, q qoryInputs) (string, []byte, error) {
 
 // copyInputs writes data, the bytes of the run's inputs.json, to inputs.json in home,
 // the composed home, mode 0644 whatever the umask, so the run's user can read it as
-// $QORY_HARNESS_HOME/inputs.json. A file of that name in the home stops the run.
+// $QORY_HARNESS_HOME/inputs.json. A file of that name in the home stops the run and stays
+// as it was. When a step after the file's creation fails, copyInputs removes the file it
+// created, so the next run in a given home finds none.
 func copyInputs(home string, data []byte) error {
-	f, err := os.OpenFile(filepath.Join(home, inputsFile), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+	return copyInputsVia(home, data, fillCopy)
+}
+
+// copyInputsVia is [copyInputs] with fill, the steps that set the mode of the new file f
+// and write data to it, as an argument, so a test can make them fail.
+func copyInputsVia(home string, data []byte, fill func(f *os.File, data []byte) error) error {
+	path := filepath.Join(home, inputsFile)
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
 	if err != nil {
 		return err
 	}
+	err = fill(f, data)
+	if closeErr := f.Close(); err == nil {
+		err = closeErr
+	}
+	if err != nil {
+		os.Remove(path)
+		return err
+	}
+	return nil
+}
+
+// fillCopy sets the mode of f to 0644 whatever the umask and writes data to it.
+func fillCopy(f *os.File, data []byte) error {
 	if err := f.Chmod(0o644); err != nil {
-		f.Close()
 		return err
 	}
-	if _, err := f.Write(data); err != nil {
-		f.Close()
-		return err
-	}
-	return f.Close()
+	_, err := f.Write(data)
+	return err
 }
 
 // withQoryMember is inputs, a JSON object, with the member [inputsMember] set to q added

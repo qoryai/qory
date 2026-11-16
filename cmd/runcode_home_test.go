@@ -291,3 +291,39 @@ func TestARunFromARunCodeWithAGivenHomeRemovesTheCopyOfItsInputs(t *testing.T) {
 		t.Errorf("the copy of the inputs stays in the given home: %v", err)
 	}
 }
+
+// TestARunFromARunCodeWithAGivenHomeRemovesTheCopyAfterAFailure is a run from a run code with
+// --home whose runtime, codex, runs no command by its name from a headless start, and whose
+// harness has the workflow only as a command: the run stops after qory composed the home and
+// wrote the copy of the inputs, exit 1 before the join, and the given home stays with no copy,
+// so the next run in it does not stop at inputs.json.
+func TestARunFromARunCodeWithAGivenHomeRemovesTheCopyAfterAFailure(t *testing.T) {
+	given := filepath.Join(tempDir(t), "homes")
+	r := codeHarness{
+		change: func(d map[string]any) { d["run_settings"] = map[string]any{"runtime": "codex"} },
+		before: func() []string { return []string{"--home", given} },
+	}.run(t)
+	if r.joined || r.err == nil || errors.Is(r.err, cmd.ErrJoinedNowhere) {
+		t.Fatalf("%v (exit %d), want a failure before the join\n%s", r.err, cmd.ExitCode(r.err), r.out)
+	}
+	wants(t, r.err.Error(), "codex runs no command by its name from a headless start")
+	var homes []string
+	entries, err := os.ReadDir(given)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if e.IsDir() {
+			homes = append(homes, filepath.Join(given, e.Name()))
+		}
+	}
+	if len(homes) != 1 {
+		t.Fatalf("the folders of %s are %v, want the one home of the run", given, homes)
+	}
+	if _, err := os.Stat(filepath.Join(homes[0], "AGENTS.md")); err != nil {
+		t.Errorf("the run did not compose the home before it failed: %v", err)
+	}
+	if _, err := os.Lstat(filepath.Join(homes[0], "inputs.json")); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("the copy of the inputs stays in the given home after the failure: %v", err)
+	}
+}

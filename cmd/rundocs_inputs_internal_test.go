@@ -1,6 +1,8 @@
 package cmd
 
 import (
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -129,7 +131,7 @@ func TestACopyOfTheInputsOverAFileInTheHomeStops(t *testing.T) {
 		t.Errorf("the file in the home is %q, want it as it was", data)
 	}
 	lines := strings.Split(inputsNotCopied(home, err).Error(), "\n")
-	want := "Remove inputs.json from the run's home, or run without --home, then take the work item in again."
+	want := "Remove inputs.json from the home or unset --home and harness.home, then take the work item in again."
 	if len(lines) != 2 || lines[0] != want || !strings.Contains(lines[1], home) || !strings.HasSuffix(lines[1], codeUsed) {
 		t.Errorf("the error's lines are %q, want %q, then a line with %s", lines, want, home)
 	}
@@ -141,5 +143,42 @@ func TestACopyOfTheInputsOverAFileInTheHomeStops(t *testing.T) {
 	}
 	if len(other) != 2 || !strings.Contains(other[1], path) {
 		t.Errorf("the lines of another failure are %q, want a second line with %s", other, path)
+	}
+}
+
+// TestACopyOfTheInputsThatFailsAfterItsCreationLeavesNoFile is a copy whose mode or write
+// fails once qory created inputs.json in the home: the file is gone, so the next run in a
+// given home does not stop at it. A file that was in the home before stays as it was.
+func TestACopyOfTheInputsThatFailsAfterItsCreationLeavesNoFile(t *testing.T) {
+	data := []byte(`{"qory":{"harness_extensions":{}}}` + "\n")
+	failing := errors.New("the disk is full")
+	for name, fill := range map[string]func(*os.File, []byte) error{
+		"the mode fails":  func(*os.File, []byte) error { return failing },
+		"the write fails": func(f *os.File, d []byte) error { f.Write(d[:4]); return failing },
+	} {
+		t.Run(name, func(t *testing.T) {
+			home := t.TempDir()
+			path := filepath.Join(home, inputsFile)
+			err := copyInputsVia(home, data, fill)
+			if !errors.Is(err, failing) {
+				t.Fatalf("the copy returned %v, want %v", err, failing)
+			}
+			if _, err := os.Lstat(path); !errors.Is(err, os.ErrNotExist) {
+				t.Errorf("the partial copy stays in the home: %v", err)
+			}
+		})
+	}
+	home := t.TempDir()
+	path := filepath.Join(home, inputsFile)
+	if err := os.WriteFile(path, []byte("{}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	called := false
+	err := copyInputsVia(home, data, func(*os.File, []byte) error { called = true; return failing })
+	if !errors.Is(err, fs.ErrExist) || called {
+		t.Errorf("the copy over a file returned %v (fill called: %v), want %v", err, called, fs.ErrExist)
+	}
+	if got, _ := os.ReadFile(path); string(got) != "{}\n" {
+		t.Errorf("the file that was in the home is %q, want it as it was", got)
 	}
 }

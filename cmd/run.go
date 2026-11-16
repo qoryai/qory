@@ -2033,7 +2033,7 @@ func inputsNotWritten(err error) error {
 
 // The lines of [inputsNotCopied]: the first line is the fix, the second the cause.
 const (
-	textInputsCopyExists = "Remove inputs.json from the run's home, or run without --home, then take the work item in again.\n" +
+	textInputsCopyExists = "Remove inputs.json from the home or unset --home and harness.home, then take the work item in again.\n" +
 		"The home %s has inputs.json, where qory writes the run's inputs. With no --home or harness.home, a run gets a home for that run alone"
 	textInputsNotCopied = "Make the run's home writable for qory, then take the work item in again in Qory Apiary.\n" +
 		"Writing the run's inputs to %s failed: %s"
