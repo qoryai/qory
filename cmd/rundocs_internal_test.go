@@ -587,6 +587,43 @@ func TestAHarnessDocumentThatDefinesAStackIsWrittenWithTheRunsRuntime(t *testing
 	}
 }
 
+// TestAHarnessDocumentsBindIsWrittenInItsForm is a harness document whose bind sets the
+// group role agents/reviewers to a list of two agents, the role agents/lead to one name
+// and the role skills/welcome to one name: qory writes each role to harness.yaml as the
+// documents have it, a list as a list and a name as a string, for a document that
+// extends a stack and for one that defines a stack.
+func TestAHarnessDocumentsBindIsWrittenInItsForm(t *testing.T) {
+	const documents = `{"harness":{%s,"bind":{"agents":{"reviewers":["code-reviewer","test-reviewer"],"lead":"review-lead"},"skills":{"welcome":"greet"}}}}`
+	want := map[string]map[string]any{
+		"agents": {"reviewers": []any{"code-reviewer", "test-reviewer"}, "lead": "review-lead"},
+		"skills": {"welcome": "greet"},
+	}
+	for name, source := range map[string]string{
+		"extends": `"extends":{"git":"https://code.example.com/team/stacks","ref":"release-7"}`,
+		"defines": `"modules":[{"name":"tools","source":{"git":"https://code.example.com/team/tools.git","ref":"main"}}],"workflows":{"example":{"access":"write"}}`,
+	} {
+		var h contracts.HarnessDocument
+		if err := json.Unmarshal(fmt.Appendf(nil, documents, source), &h); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		r, err := codeRunOf(contracts.Documents{Harness: &h, Workflow: "example"})
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		var doc struct {
+			Harness struct {
+				Bind map[string]map[string]any `json:"bind"`
+			} `json:"harness"`
+		}
+		if err := json.Unmarshal(r.harness, &doc); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if !reflect.DeepEqual(doc.Harness.Bind, want) {
+			t.Errorf("%s: harness.yaml has:\n%s\nwant the bind %v", name, r.harness, want)
+		}
+	}
+}
+
 // TestARunCodesWorkflowStartsOnEachRuntimesHeadlessStart is workflowArgs for a harness
 // with the skill or the command example, on each runtime: the runtime's headless start,
 // with the prompt that invokes the entry by its registered name; a runtime that runs

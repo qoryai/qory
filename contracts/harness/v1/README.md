@@ -8,7 +8,7 @@ What `qory harness compose` reads and what it writes.
 |---|---|---|
 | `qory-stack.yaml` | a directory that `extends` or `-f` selects; an ancestor directory covering several repositories; the root of the harness repository that delivers it | a stack delivered to be extended: the ordered modules, the excludes, what a checkout extending it may add and the runtimes and models it is written for |
 | `qory-module.yaml` | the root of a module | the module: its name, its variants per runtime, the variables it exports |
-| `process.yaml` | optional; the folder root of a module that `exports.modules` lists, which makes the module a factory | a process template: its name, summary and description, the workspace type, the exported stack its workflows run on, its `qory.process/v1` process, and optionally the artifact types its workspaces use. Every command that reads the configuration checks it; the compose does not read it (§Exports) |
+| `process.yaml` | optional; the folder root of a module that `exports.modules` lists, which makes the module a factory | a process template: its name, summary and description, the workspace type, the exported stack its workflows run on, its `qory.process/v1` process, and optionally the artifact types its workspaces use and the submit step of a run. Every command that reads the configuration checks it; the compose does not read it (§Exports) |
 | a role contract | optional; a file of a module that declares an agents role, at the path that `roles.agents.<role>.contract` in the module's `qory-module.yaml` is set to | the parts an agent needs to fill the role: level-2 headings, front-matter keys, tools, a tier, and the form of its report (§The role contract). The compose checks every agent that fills the role against it; the harness's checks read the report's form |
 | `qory.yaml`, or `harness.yaml` | the repository root, committed; the user's configuration directory and the checkout's ancestor directories, for the machine | the repository's document and the machine's: under `harness`, this repository's stack, its target and modules, or the stack it extends, the target it composes it for, the modules it appends and the workflow hooks it adds, and the runtime and model this machine composes for; under `worktree`, what a worktree of the repository needs and where the machine puts one; under `exports`, the stacks and modules this repository publishes for others, by name (§Exports); `git` and `env` (§The configuration) |
 | a branch document | the file of a version of a structured artifact type `branch` | a work item's branch and the commit in each repository (§The branch format). No compose reads it |
@@ -573,7 +573,7 @@ A module that `exports.modules` lists and that has a `process.yaml` at its folde
 a factory. The file is a process template: the texts, the workspace type, the stack and
 the process that a workspace made from it starts with
 ([process.schema.json](process.schema.json)). It may also list the artifact types its
-workspaces use. Every command that reads the
+workspaces use, and declare the submit step of a run. Every command that reads the
 configuration checks the file, once it finds each export. A module without the file is
 not checked for it.
 
@@ -627,8 +627,9 @@ artifact_types:                  # optional; the artifact types the workspaces u
 | `stack` | the stack the workspace's workflows run on, one that `exports.stacks` of the same repository lists |
 | `process` | the workspace's process, a `qory.process/v1` document. qory checks that it is an object with `schema: qory.process/v1` and a list of `stages`; that each `workflow` of a stage's `sequence`, a loop's `body` included, is a non-empty string of one line that the stack's `qory-stack.yaml` declares under `workflows`; and that each stage `name` has no line break or other control character. qory checks nothing else in it |
 | `artifact_types` | optional; the list of the artifact types the workspaces use, as [Artifact types](#artifact-types) has it. A list with no entries is valid |
+| `submit` | optional; the submit step of a run, as [The submit step](#the-submit-step) has it |
 
-Every key but `artifact_types` is required, and the file has no other key. A key left out, a text over its
+Every key but `artifact_types` and `submit` is required, and the file has no other key. A key left out, a text over its
 limit, a `stack` that `exports.stacks` does not list, and a `process` that is not such an
 object are refused with the file and the fix in the message. Each workflow that the
 stack does not declare is refused with one line, which has the stage, the workflow and
@@ -687,6 +688,30 @@ and then the fix:
 
 ```text
 /src/acme-harness/harness/modules/support-desk/process.yaml: add size_limit and max_files to artifact type reply-draft, or leave only its name: a custom type has base_view, size_limit and max_files
+```
+
+#### The submit step
+
+`submit` declares the submit step of a run of a workspace made from the template. A
+`process.yaml` has at most one `submit`, an object with `type` and `send` and no other
+key. Without `submit`, the step stores no submission.
+
+```yaml
+submit:
+  type: customer-facts           # a structured entry of artifact_types
+  send: after_gate               # or end_of_run
+```
+
+`type` is the artifact type of the submission: the name of a custom entry of
+`artifact_types` in the same file with `base_view: structured`. qory refuses a name that no
+entry has, a standard type (a name alone) and a custom type of another base view. `send`
+is when the step sends the submission: `end_of_run` sends it at the end of the run;
+`after_gate` sends it after the gate of the run's stage passes, and until then the step
+stores it and sends nothing. A `submit` that breaks a rule stops the command with one line,
+which starts with the file and then the fix:
+
+```text
+/src/acme-harness/harness/modules/support-desk/process.yaml: remove the key "command" from submit: submit has only type and send
 ```
 
 ## The branch format
@@ -954,7 +979,16 @@ absolute path in the home; a harness whose modules declare no check has no such 
 reaches Qory Apiary: for every push to the run API from inside the wall, through `qory
 artifact push` or any other request, and for the version that the push step stores after
 the agent. qory runs the program on the engine of the run's wall, in a new container from
-the run's image, as the run's user, with no network and no capability. The container has
+the wall's default image, as the run's user, with no network and no capability. The
+default image is `--image` or `wall.image` in `forager.yaml`, and not the image that the
+run's policy selects, so a change to the repository, such as one to its `.devcontainer/`,
+cannot turn the checks off. A run on a person's machine, with no run code, and with
+neither `--image` nor `wall.image`, whose policy selects the image, runs the checks in the
+run's image. A run from a run code with neither stops before the setup and the agent,
+with exit 2: `Set wall.image in forager.yaml, then take the work item in again in Qory Apiary: push
+checks run in the wall's default image; the code is used`. A run whose engine does not have the wall's default image stops before the setup and the agent,
+with exit 2: `Pull the wall's default image onto this machine, and run again: push checks
+run in it. The engine does not have the image <image>.` The container has
 no variable but the image's and those Docker sets: `HOME`, `HOSTNAME` and `PATH`. It has
 the wall's CPU and memory limits of the run's containers, the wall's process limit or 512
 processes, and the label of the run's containers, so the clean-up of the run removes a
@@ -962,8 +996,9 @@ container that a stopped qory left. The container gets three read-only folders:
 
 - the home, at its path, so the program's absolute path in `push-checks.json` is valid;
 - the working folder: the work item's artifact index, `index.json`, and the newest version
-  of each artifact of the type and of each `reads` type, in the layout of `qory artifact
-  pull`, `<type>/<name>/v<N>/<files>`; a type with no version has no folder;
+  of each artifact of the type and of each `reads` type that the index does not mark
+  `cancelled`, in the layout of `qory artifact pull`, `<type>/<name>/v<N>/<files>`; an
+  artifact with no such version has no folder;
 - the pushed files, under their names, whose paths follow the command's arguments.
 
 qory makes the last two in the run directory, in a folder that only its user can list,
@@ -978,14 +1013,14 @@ has a line, the one finding is `The check exited with <N> and printed nothing.` 
 finding is without control characters, with the run's secrets masked, and at most 1,000
 characters; a check has at most 200 findings. qory reads at most 64 KiB of each stream.
 
-A program that does not start stops the push with 422 too: `Install node, or run in an
-image built FROM qory-agent, and push again. The check for <type> could not start:
-<error>.` when its `#!` line is for `node`, else `Install the program <path>, and push
-again. The check for <type> could not start: <error>.` A program does not start when it
-exits with 126 or 127 and the last line of its standard error is the container's init's
-line for the program, or ends with `not found`, `No such file or directory` or
-`Permission denied` for the program or a word of its `#!` line, such as
-`/usr/bin/env: 'node': No such file or directory`. Any other exit with 126 or 127, such as
+A program that does not start stops the push with 422 too: `Set wall.image or --image to
+an image with node, such as one built FROM qory-agent, then run again. The check for
+<type> could not start: <error>.` when its `#!` line is for `node`, else `Install the
+program <path>, then run again. The check for <type> could not start: <error>.` A
+program does not start when it exits with 126 or 127 and the last line of its standard
+error is the container's init's line for the program, or ends with `not found`, `No
+such file or directory` or `Permission denied` for the program or a word of its `#!`
+line, such as `/usr/bin/env: 'node': No such file or directory`. Any other exit with 126 or 127, such as
 one for a program that the check runs, is a check that failed. A program still running
 after 30 seconds is stopped, with `Make the check for <type> finish within 30 s, and push
 again. It ran longer and was stopped.`
@@ -1010,8 +1045,8 @@ In a run whose home has push checks, a push that the check cannot read gets 422
 When qory cannot run the check, the push stops with 503 `push_check_unavailable`, and qory
 run writes the cause as a line on its stderr: the fetch of the artifacts fails, two files
 of a fetched version are one file on this machine, the engine is not reachable or does
-not create the container, the engine does not have the run's image, or a temporary
-folder cannot be made. Node is needed only by a check whose program uses it: Qory's agent
+not create the container, the engine does not have the image of the checks, or a
+temporary folder cannot be made. Node is needed only by a check whose program uses it: Qory's agent
 image, and every image built FROM it, has it. A run without a wall, or without a control
 plane, runs no check, and outside a run `qory artifact push` keeps the files in
 `.qory/artifacts` and runs no check.
