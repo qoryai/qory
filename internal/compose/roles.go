@@ -257,7 +257,7 @@ func groupRoles(opened []openedModule) (map[string]string, error) {
 			for _, role := range sortedKeys(o.m.Roles[kind]) {
 				key := kind + "/" + role
 				if by := out[key]; by != "" && o.m.Roles[kind][role] == "one" {
-					return out, fmt.Errorf("Declare %s as many in module %s, or remove it: module %s declares it many.", shown(key), shown(o.m.Name), shown(by))
+					return out, fmt.Errorf("Declare %s as many in module %s, or remove it.\n  Module %s declares it many.", shown(key), shown(o.m.Name), shown(by))
 				}
 			}
 		}

@@ -64,8 +64,8 @@ func TestLoadRefusesABrokenWorkflow(t *testing.T) {
 	for _, c := range []struct {
 		body, want string
 	}{
-		{"  Hello: {}\n", `name the workflow "Hello" with a lower-case letter, then up to 54 lower-case letters, digits and hyphens, 55 characters at most: workflows lists it`},
-		{"  hello_there: {}\n", `name the workflow "hello_there" with a lower-case letter, then up to 54 lower-case letters, digits and hyphens, 55 characters at most: workflows lists it`},
+		{"  Hello: {}\n", "Rename the workflow \"Hello\".\n  A workflow name is a lower-case letter, then up to 54 lower-case letters, digits, and hyphens, 55 characters at most.\n  workflows is in {path}."},
+		{"  hello_there: {}\n", "Rename the workflow \"hello_there\".\n  A workflow name is a lower-case letter, then up to 54 lower-case letters, digits, and hyphens, 55 characters at most.\n  workflows is in {path}."},
 		{"  hello:\n    time_limit: 7 hours\n", "to a duration above zero, such as 7h or 45m.\n  The value is \"7 hours\"."},
 		{"  hello:\n    time_limit: 0s\n", "to a duration above zero, such as 7h or 45m.\n  The value is \"0s\"."},
 		{"  hello:\n    time_limit: -1h\n", "to a duration above zero, such as 7h or 45m.\n  The value is \"-1h\"."},
@@ -186,7 +186,7 @@ func TestAWorkflowNameHasAtMost55Characters(t *testing.T) {
 		t.Errorf("the prefixed name has %d characters, want 64", got)
 	}
 	over := limit + "a"
-	want := `name the workflow "` + over + `" with a lower-case letter, then up to 54 lower-case letters, digits and hyphens, 55 characters at most: workflows lists it`
+	want := `Rename the workflow "` + over + "\".\n  A workflow name is a lower-case letter, then up to 54 lower-case letters, digits, and hyphens, 55 characters at most."
 	if _, err := Load(write(t, withWorkflows("  "+over+": {}\n"))); err == nil || !strings.Contains(err.Error(), want) {
 		t.Errorf("56 characters: %v\nwant %s", err, want)
 	}

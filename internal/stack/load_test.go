@@ -241,13 +241,13 @@ func TestLoadRefuses(t *testing.T) {
 		{
 			"a module named with a path",
 			"apiVersion: qory.dev/v1alpha1\nmodules:\n  - name: ../escaped\n    source: {path: modules/core}\n",
-			`modules[0]: name "../escaped" is not one path segment; a module name contains no slash, backslash, @ or leading dot`,
+			"Rename the name of modules[0] to one path segment.\n  A module name contains no slash, backslash, @, or leading dot, and the name is \"../escaped\".\n  modules is in {path}.",
 			false,
 		},
 		{
 			"a module named with an at sign",
 			"apiVersion: qory.dev/v1alpha1\nmodules:\n  - name: b@a\n    source: {path: modules/core}\n",
-			`modules[0]: name "b@a" is not one path segment; a module name contains no slash, backslash, @ or leading dot`,
+			"Rename the name of modules[0] to one path segment.\n  A module name contains no slash, backslash, @, or leading dot, and the name is \"b@a\".\n  modules is in {path}.",
 			false,
 		},
 		{

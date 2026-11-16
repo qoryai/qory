@@ -574,7 +574,7 @@ func addPushChecks(res *Result, checkers map[string]string, dir string, root *os
 			return fmt.Errorf("Add %s to module %s, or change its push check for %s.\n  Module %s has no file at %s.", shownProgram, shown(name), c.Type, shown(name), shownProgram)
 		}
 		if !info.Mode().IsRegular() {
-			return fmt.Errorf("Set the push check for %s of module %s to a program file: %s is not a file", c.Type, shown(name), shownProgram)
+			return fmt.Errorf("Set the push check for %s of module %s to a program file.\n  %s is not a file.", c.Type, shown(name), shownProgram)
 		}
 		for _, e := range res.Excludes {
 			if e.Module != name || e.Path == "" {
@@ -1287,7 +1287,7 @@ func applyCheckoutExclude(l *module.Module, pl stack.Module, res *Result, base *
 			if base != nil {
 				stackText += " " + base.String()
 			}
-			return fmt.Errorf("remove %s from the exclude of module %s in qory.yaml: %s composes no %s from module %s", shownKey(key), shown(pl.BaseName), stackText, shownKey(key), shown(l.Name))
+			return fmt.Errorf("Remove %s from the exclude of module %s in qory.yaml.\n  %s composes no %s from module %s.", shownKey(key), shown(pl.BaseName), upperFirst(stackText), shownKey(key), shown(l.Name))
 		}
 	}
 	var kept []module.Entry

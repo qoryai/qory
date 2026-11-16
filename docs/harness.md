@@ -299,7 +299,8 @@ These stop the compose with exit 2:
 
 ```
 Write provides.agents.reviewers in module python as a list: it is a group role.
-Declare agents/reviewers as many in module python, or remove it: module software-factory declares it many.
+Declare agents/reviewers as many in module python, or remove it.
+  Module software-factory declares it many.
 Fill agents/reviewers, or remove the reference to it.
   The group has no member.
   The reference is in skills/review/SKILL.md of module software-factory.
@@ -390,8 +391,8 @@ The rules:
 - The exclude lists entries of the kinds the stack's `extending` block lets your modules
   ship, and files under its `extending.files` prefixes. The delivered runtime hooks,
   MCP servers, instructions, settings and variables stay as they are.
-- An entry the delivered module does not compose fails the compose, `remove skills/x
-  from the exclude of module core in qory.yaml: …`.
+- An entry the delivered module does not compose fails the compose, `Remove skills/x
+  from the exclude of module core in qory.yaml.`.
 
 Without the exclude, the two skills collide. The compose fails, exit 3, and prints the
 entry to write. When `qory.yaml` lists the module already, it prints the whole entry to

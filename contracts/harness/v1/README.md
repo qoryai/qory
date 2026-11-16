@@ -235,12 +235,13 @@ checkout appends:
   `extending.files` prefixes; an instruction section, a settings fragment, a variable, a
   hook or an MCP server of a base module stays. Anything else on that entry fails with
   status 2, and `qory harness compose` prints the path of the `qory.yaml`, then the
-  message, which starts with its fix: `list module <module> with its name and exclude
-  only: …`, `add an exclude to module <module>, or remove its entry: …`, `remove <part>
-  from the exclude of module <module>: …`, or `remove <kind>/<entry> from the exclude of
-  module <module>: …`. An entry the base module does not compose fails with status 2 and
-  `remove <kind>/<entry> from the exclude of module <module> in qory.yaml: the base stack
-  <stack>@<pin> composes no <kind>/<entry> from module <manifest name>`.
+  message, which starts with its fix: `List module <module> with its name and exclude
+  only.`, `Add an exclude to module <module>, or remove its entry.`, `Remove <part>
+  from the exclude of module <module>.`, or `Remove <kind>/<entry> from the exclude of
+  module <module>.`, each with its cause on the next line. An entry the base module does
+  not compose fails with status 2 and `Remove <kind>/<entry> from the exclude of module
+  <module> in qory.yaml.`, then `The base stack <stack>@<pin> composes no <kind>/<entry>
+  from module <manifest name>.` on the next line.
 - The target is the document's. A delivered stack has none, and the checkout defines
   what it composes the base for under `target` beside `extends`; the runner's
   `harness.runtime` and `harness.model` override the document's, and `--runtime` and
@@ -939,7 +940,7 @@ the compose, `Set roles.agents.developer to one or many.` with `One entry fills 
 several fill a group, and the value is "two".` and `roles is in
 modules/core/qory-module.yaml.` on the next two lines, and so does a list. A module that sets a role to `one` while another
 sets it to `many` fails the compose: `Declare agents/reviewers as many in module python,
-or remove it: module software-factory declares it many.` An `agents` role may be a map
+or remove it.` and `Module software-factory declares it many.` on the next line. An `agents` role may be a map
 instead, `{fill: one, contract: roles/developer.yaml}`: `fill` is `one` or `many`, as
 above, and `contract`, optional, is the path of a role contract inside the module, with
 no `..` part (§The role contract). A map with another key fails, and so do a map without

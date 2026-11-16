@@ -186,7 +186,7 @@ func TestExtendSuggestsTheExcludeOfABaseEntry(t *testing.T) {
 func TestExtendRefusesAnExcludeOfNoBaseEntry(t *testing.T) {
 	dir := excludeBaseTree(t, "    - name: core\n      exclude: {skills: [explore-a-ticket, triage]}\n")
 	_, err := composeExtending(t, dir)
-	want := "remove skills/triage from the exclude of module core in qory.yaml: the base stack web@working-tree composes no skills/triage from module core"
+	want := "Remove skills/triage from the exclude of module core in qory.yaml.\n  The base stack web@working-tree composes no skills/triage from module core."
 	if err == nil || err.Error() != want {
 		t.Fatalf("a skill core does not ship: got %v\nwant %s", err, want)
 	}
@@ -198,7 +198,7 @@ func TestExtendRefusesAnExcludeOfNoBaseEntry(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = composeExtending(t, dir)
-	want = "remove skills/explore-a-ticket from the exclude of module core in qory.yaml: the base stack web@working-tree composes no skills/explore-a-ticket from module core"
+	want = "Remove skills/explore-a-ticket from the exclude of module core in qory.yaml.\n  The base stack web@working-tree composes no skills/explore-a-ticket from module core."
 	if err == nil || err.Error() != want {
 		t.Fatalf("a skill the base leaves out: got %v\nwant %s", err, want)
 	}
@@ -276,7 +276,7 @@ func TestExtendSuggestsTheExportNameOfABaseModule(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "app", config.FileName), []byte(app), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	want := "remove skills/triage from the exclude of module core in qory.yaml: the base stack web@working-tree composes no skills/triage from module core-x"
+	want := "Remove skills/triage from the exclude of module core in qory.yaml.\n  The base stack web@working-tree composes no skills/triage from module core-x."
 	if err := composeIt(); err == nil || err.Error() != want {
 		t.Fatalf("got %v\nwant %s", err, want)
 	}

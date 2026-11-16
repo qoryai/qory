@@ -704,7 +704,7 @@ func (p *Stack) validate(compose bool) error {
 	}
 	for _, name := range slices.Sorted(maps.Keys(p.Workflows)) {
 		if !workflowName.MatchString(name) {
-			return fmt.Errorf("name the workflow %s with a lower-case letter, then up to 54 lower-case letters, digits and hyphens, 55 characters at most: workflows lists it", accesskey.ShownName(name, true))
+			return exports.Refuse("Rename the workflow "+accesskey.ShownName(name, true)+".", "A workflow name is a lower-case letter, then up to 54 lower-case letters, digits, and hyphens, 55 characters at most.", "workflows is in "+exports.FilePlace+".")
 		}
 		w := p.Workflows[name]
 		if w.Access != "" && w.Access != AccessRead && w.Access != AccessWrite {
@@ -747,7 +747,7 @@ func (p *Stack) validate(compose bool) error {
 		if l.Name != "" {
 			who = "module " + accesskey.ShownName(l.Name, false)
 			if !segment(l.Name) {
-				return fmt.Errorf("modules[%d]: name %s is not one path segment; a module name contains no slash, backslash, @ or leading dot", i, accesskey.ShownName(l.Name, true))
+				return exports.Refuse(fmt.Sprintf("Rename the name of modules[%d] to one path segment.", i), "A module name contains no slash, backslash, @, or leading dot, and the name is "+accesskey.ShownName(l.Name, true)+".", "modules is in "+exports.FilePlace+".")
 			}
 			if seen[l.Name] {
 				return fmt.Errorf("module %s is listed twice", accesskey.ShownName(l.Name, false))
@@ -963,29 +963,29 @@ func baseName(l Module) string {
 func checkoutExclude(l Module, extending *Extending) error {
 	name := accesskey.ShownName(l.Name, false)
 	if l.Source.Path != "" || l.Source.Git != "" || l.Source.exported() || !l.Only.Empty() || l.Variant != "" || l.Link != "" {
-		return fmt.Errorf("list module %s with its name and exclude only: it belongs to the base stack, and a checkout's qory.yaml cannot change its source, only, variant or link", name)
+		return fmt.Errorf("List module %s with its name and exclude only.\n  It belongs to the base stack, and a checkout's qory.yaml cannot change its source, only, variant, or link.", name)
 	}
 	if l.Exclude.Empty() {
-		return fmt.Errorf("add an exclude to module %s, or remove its entry: it belongs to the base stack, and a checkout's qory.yaml lists a base module only to exclude entries from it", name)
+		return fmt.Errorf("Add an exclude to module %s, or remove its entry.\n  It belongs to the base stack, and a checkout's qory.yaml lists a base module only to exclude entries from it.", name)
 	}
 	for _, part := range []struct {
 		key string
 		set bool
 	}{{"instructions", l.Exclude.Instructions}, {"settings", l.Exclude.Settings.Set()}, {"env", l.Exclude.Env.Set()}} {
 		if part.set {
-			return fmt.Errorf("remove %s from the exclude of module %s: it belongs to the base stack, and a checkout's qory.yaml excludes entries from a base module, not its instructions, settings or env", part.key, name)
+			return fmt.Errorf("Remove %s from the exclude of module %s.\n  It belongs to the base stack, and a checkout's qory.yaml excludes entries from a base module, not its instructions, settings, or env.", part.key, name)
 		}
 	}
 	for _, kind := range l.Exclude.KindNames() {
 		for _, entry := range l.Exclude.Kinds[kind] {
 			if kind == "files" {
 				if !FileAllowed(entry, extending.Files) {
-					return fmt.Errorf("remove files/%s from the exclude of module %s: a checkout excludes from a base module only files where an extending module may ship them, and the base stack lets an extending module ship files under %s", exports.HidePath(entry), name, prefixesText(extending.Files))
+					return fmt.Errorf("Remove files/%s from the exclude of module %s.\n  A checkout excludes from a base module only files where an extending module may ship them, and the base stack lets an extending module ship files under %s.", exports.HidePath(entry), name, prefixesText(extending.Files))
 				}
 				continue
 			}
 			if !slices.Contains(extending.Kinds, kind) {
-				return fmt.Errorf("remove %s/%s from the exclude of module %s: a checkout excludes from a base module only entries of the kinds an extending module may ship, and the base stack lets an extending module ship %s", accesskey.ShownName(kind, false), accesskey.ShownName(entry, false), name, kindsListText(extending.Kinds))
+				return fmt.Errorf("Remove %s/%s from the exclude of module %s.\n  A checkout excludes from a base module only entries of the kinds an extending module may ship, and the base stack lets an extending module ship %s.", accesskey.ShownName(kind, false), accesskey.ShownName(entry, false), name, kindsListText(extending.Kinds))
 			}
 		}
 	}

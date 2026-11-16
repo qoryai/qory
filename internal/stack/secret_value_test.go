@@ -38,7 +38,7 @@ func TestAStackRefusalPrintsNoSecret(t *testing.T) {
 		{head + "bind:\n  skills:\n    qak_x: [a, b]\n" + core, "Write one name for bind.skills." + nameWithSecret + ".\n"},
 		{head + "bind:\n  agents:\n    qak_x: {a: b}\n" + core, "Set bind.agents." + nameWithSecret + " to the name of one entry"},
 		{head + "bind:\n  agents:\n    qak_x: qak_/y\n" + core, "Set bind.agents." + nameWithSecret + " to an entry's name"},
-		{head + "modules:\n  - name: qak_/m\n", "modules[0]: name " + nameWithSecret + " is not one path segment"},
+		{head + "modules:\n  - name: qak_/m\n", "Rename the name of modules[0] to one path segment.\n  A module name contains no slash, backslash, @, or leading dot, and the name is " + nameWithSecret + "."},
 		{head + "modules:\n  - name: qak_m\n  - name: qak_m\n", "module " + nameWithSecret + " is listed twice"},
 		{head + "modules:\n  - name: core\n    source: {path: x, stack: qak_s}\n", "module core: source selects stack " + nameWithSecret + ";"},
 		{head + "modules:\n  - name: core\n    link: qak_/l\n", "module core: link " + nameWithSecret + " is not one path segment"},

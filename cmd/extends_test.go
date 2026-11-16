@@ -323,7 +323,7 @@ func TestExtendsGovernsFilesByPrefix(t *testing.T) {
 	os.RemoveAll(filepath.Join(root, "modules", "app", "files", "claude", "rules-private"))
 	writeFile(t, compose, strings.Replace(consumerCompose(openBase), "    - name: app\n", "    - name: app\n    - name: core\n      source: {path: ./core}\n", 1))
 	_, err = run(t, "harness", "compose")
-	if err == nil || !strings.Contains(err.Error(), "list module core with its name and exclude only: it belongs to the base stack, and a checkout's qory.yaml cannot change its source, only, variant or link") || cmd.ExitCode(err) != cmd.ExitInput {
+	if err == nil || !strings.Contains(err.Error(), "List module core with its name and exclude only.\n  It belongs to the base stack, and a checkout's qory.yaml cannot change its source, only, variant, or link.") || cmd.ExitCode(err) != cmd.ExitInput {
 		t.Fatalf("a base module re-sourced: err = %v, exit %d", err, cmd.ExitCode(err))
 	}
 }
@@ -372,7 +372,7 @@ func TestExtendsExcludesABaseEntry(t *testing.T) {
 	}
 	writeFile(t, filepath.Join(root, "qory.yaml"), strings.Replace(consumerCompose(url), "    - name: app\n", "    - name: app\n    - name: core\n      exclude: {skills: [review, triage]}\n", 1))
 	_, err = run(t, "harness", "compose")
-	if err == nil || !strings.Contains(err.Error(), "remove skills/triage from the exclude of module core in qory.yaml: the base stack nextjs-15@") || cmd.ExitCode(err) != cmd.ExitInput {
+	if err == nil || !strings.Contains(err.Error(), "Remove skills/triage from the exclude of module core in qory.yaml.\n  The base stack nextjs-15@") || cmd.ExitCode(err) != cmd.ExitInput {
 		t.Fatalf("an entry core does not ship: err = %v, exit %d", err, cmd.ExitCode(err))
 	}
 }
