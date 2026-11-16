@@ -20,7 +20,10 @@ release may change what an existing document does, and states it under Upgrading
 
 - A run of a work item works on the branch `qory/<work item id>`, at the commit of the
   artifact `branch` that its stage starts from. The harness still comes from
-  `target_version`.
+  `target_version`. A commit on the branch reaches a run's harness after you merge the
+  branch into the target's default branch, the branch that its `HEAD` points to. Qory
+  Apiary reads `target_version` there, so the next run's `target_version` contains the
+  commit.
 - A write run of a work item ends with a push step: qory commits what the agent left,
   pushes each repository with new commits to `qory/<work item id>`, and stores a new
   version of the artifact `branch`. The next run in the same stage starts at that commit. A
@@ -48,6 +51,11 @@ release may change what an existing document does, and states it under Upgrading
   `size_limit`, `max_files` and, for `base_view: structured`, `json_schema`. Every command
   that reads the configuration checks each entry and compiles each `json_schema`. See
   Artifact types in `contracts/harness/v1/README.md`.
+- Declare a factory's submit step with `submit` in its `process.yaml`: `type`, the name
+  of a structured entry of `artifact_types`, and `send`, `end_of_run` or `after_gate`.
+  `process.schema.json` has `submit`. Every command that reads the configuration checks
+  its form, and that `artifact_types` has a custom structured entry named `type`. See The
+  submit step in `contracts/harness/v1/README.md`.
 - A module can declare checks for the files of an artifact type with `push_checks` in
   `qory-module.yaml`: each item has `type`, `command`, a program in the module and its
   arguments, and optional `reads`, the other artifact types the check reads. The checks
