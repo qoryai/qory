@@ -23,13 +23,13 @@ func TestAGitSourceWithAPasswordIsPrintedWithoutIt(t *testing.T) {
 		stack.FileName: "apiVersion: qory.dev/v1alpha1\nmodules:\n  - source: {git: \"" + url + "\", ref: main}\n",
 	})
 	var fetch *source.FetchError
-	if want := "module at " + shown + ": fetching " + shown + ": "; err == nil || !strings.HasPrefix(err.Error(), want) || !errors.As(err, &fetch) {
+	if want := "Check the source of a module in the stack.\n  The module is at " + shown + ".\n  fetching " + shown + ": "; err == nil || !strings.HasPrefix(err.Error(), want) || !errors.As(err, &fetch) {
 		t.Errorf("module: %v, want the prefix %q and a *source.FetchError", err, want)
 	}
 	noPasswordIn(t, err)
 	p := &stack.Stack{File: "/nowhere/" + stack.FileName, Extends: stack.Source{Git: url, Ref: "main"}}
 	_, _, err = compose.LoadBase(p, "", compose.Options{Cache: t.TempDir()})
-	if want := "the stack " + shown + " is not reachable from here: fetching " + shown + ": "; err == nil || !strings.HasPrefix(err.Error(), want) || !errors.As(err, &fetch) {
+	if want := "Run qory on a machine that can reach the base stack.\n  The stack " + shown + " is not reachable from here: fetching " + shown + ": "; err == nil || !strings.HasPrefix(err.Error(), want) || !errors.As(err, &fetch) {
 		t.Errorf("base: %v, want the prefix %q and a *source.FetchError", err, want)
 	}
 	noPasswordIn(t, err)
@@ -45,7 +45,7 @@ func TestAModuleWithAnotherNameHidesASecretNameAndPath(t *testing.T) {
 		stack.FileName:                 "apiVersion: qory.dev/v1alpha1\nmodules:\n  - name: qak_m\n    source: {path: lib/qak_dir}\n",
 		"lib/qak_dir/qory-module.yaml": "apiVersion: qory.dev/v1alpha1\nname: qrk_other\n",
 	})
-	want := "module (a name that contains an access key secret): the module at (a value that contains an access key secret) has the name (a name that contains a run key) in its qory-module.yaml"
+	want := "Use one name for the module in qory-stack.yaml and in its qory-module.yaml.\n  The module (a name that contains an access key secret) at (a value that contains an access key secret) has the name (a name that contains a run key) in its qory-module.yaml."
 	if err == nil || err.Error() != want {
 		t.Errorf("%v\nwant %q", err, want)
 	}
@@ -76,7 +76,7 @@ func TestAComposeRefusalPrintsNoSecretName(t *testing.T) {
 			"modules/a/bin/x":            "x",
 			"modules/b/qory-module.yaml": "apiVersion: qory.dev/v1alpha1\nname: b\nenv:\n  QAK_X: bin\n",
 			"modules/b/bin/x":            "x",
-		}, "env " + name + " is exported by modules a and b; set it in qory.yaml to decide"},
+		}, "Set env " + name + " in qory.yaml to decide its value.\n  Modules a and b export " + name + " with different values."},
 		{map[string]string{
 			stack.FileName:                   head + "  - name: core\n    only:\n      skills: [qak_s]\n",
 			"modules/core/skills/a/SKILL.md": "# a\n",
@@ -84,7 +84,7 @@ func TestAComposeRefusalPrintsNoSecretName(t *testing.T) {
 		{map[string]string{
 			stack.FileName:                  head + "  - name: core\n    exclude:\n      env: [QAK_X]\n",
 			"modules/core/qory-module.yaml": "apiVersion: qory.dev/v1alpha1\nname: core\nenv:\n  Y: .\n",
-		}, "module core: exclude env " + name + " selects nothing the module ships"},
+		}, "Remove env " + name + " from the exclude of module core.\n  Module core exports no variable " + name + "."},
 		{map[string]string{
 			stack.FileName:                    head + "  - name: a\n  - name: b\n",
 			"modules/a/skills/qak_s/SKILL.md": "# a\n",
@@ -135,7 +135,7 @@ func TestAnExtendingModuleRefusalPrintsNoSecretName(t *testing.T) {
 	}
 	_, err = compose.ComposeWith(merged, compose.Options{Base: base})
 	const name = "(a name that contains an access key secret)"
-	if want := "module " + name + " ships skills/" + name + ", and the base stack core@"; err == nil || !strings.Contains(err.Error(), want) {
+	if want := "Remove skills/" + name + " from module " + name + ".\n  Module " + name + " ships skills/" + name + ".\n  The base stack core@"; err == nil || !strings.Contains(err.Error(), want) {
 		t.Errorf("%v\nwant one that contains %q", err, want)
 	}
 	noSecretIn(t, err)

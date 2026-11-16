@@ -42,7 +42,7 @@ func TestTwoModulesExportingOneNameIsRefused(t *testing.T) {
 		"modules/a/qory-module.yaml": manifest("a", "HARNESS_HOME", "."),
 		"modules/b/qory-module.yaml": manifest("b", "HARNESS_HOME", "."),
 	})
-	if err == nil || err.Error() != "env HARNESS_HOME is exported by modules a and b; set it in qory.yaml to decide" {
+	if err == nil || err.Error() != "Set env HARNESS_HOME in qory.yaml to decide its value.\n  Modules a and b export HARNESS_HOME with different values." {
 		t.Fatalf("err = %v", err)
 	}
 	dir := writeTree(t, map[string]string{
@@ -173,7 +173,7 @@ func TestLaunchEnvReadsCodexsSet(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = res.LaunchEnv("codex", "config.toml", "shell_environment_policy", "set")
-	if want := "settings/codex/config.toml: shell_environment_policy.set.CI is not a string, a number or a boolean; a variable's value is text"; err == nil || err.Error() != want {
+	if want := "Set shell_environment_policy.set.CI to a string, a number, or a boolean.\n  A variable's value is text.\n  shell_environment_policy.set.CI is in settings/codex/config.toml."; err == nil || err.Error() != want {
 		t.Errorf("error %v, want %q", err, want)
 	}
 }

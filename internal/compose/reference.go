@@ -28,8 +28,8 @@ import (
 // lists with a git source are fetched as they are, with opts.Git when it is set.
 //
 // A fetch that fails is a [*source.FetchError], and a ref the remote does not have is
-// an error that contains the fix; a folder that is not in the tree, or contains no
-// stack file, is an error that starts with "check the folder".
+// an error that starts with the fix; a folder that is not in the tree, or contains no
+// stack file, is an error that starts with "Check the folder in -f.".
 func LoadReference(ref stack.Source, opts Options) (*stack.Stack, source.Resolved, error) {
 	sel := ref.Shown()
 	src, err := source.Resolve("", ref, source.Options{Update: opts.Update, Cache: opts.Cache, Timeout: opts.Timeout, Memo: opts.Memo, Git: opts.Git})
@@ -38,13 +38,14 @@ func LoadReference(ref stack.Source, opts Options) (*stack.Stack, source.Resolve
 	var pathErr *fs.PathError
 	switch {
 	case errors.As(err, &gone):
-		return nil, source.Resolved{}, fmt.Errorf("use a branch, tag or commit that %s has in -f %s: it has no branch or tag %s", exports.URL(gone.URL), sel, exports.Value(gone.Ref, false))
+		return nil, source.Resolved{}, exports.Refuse("Use a branch, tag or commit that the repository of -f has.",
+			fmt.Sprintf("%s has no branch or tag %s.", exports.URL(gone.URL), exports.Value(gone.Ref, false)), "-f is set to "+sel+".")
 	case errors.As(err, &fetch):
-		return nil, source.Resolved{}, fmt.Errorf("check the URL and the ref in -f %s: %w", sel, err)
+		return nil, source.Resolved{}, fmt.Errorf("Check the URL and the ref in -f.\n  %w\n  %s", err, "-f is set to "+sel+".")
 	case err != nil && errors.As(err, &pathErr):
 		return nil, source.Resolved{}, err
 	case err != nil:
-		return nil, source.Resolved{}, fmt.Errorf("check the folder in -f %s: %w", sel, exports.HideError(err))
+		return nil, source.Resolved{}, fmt.Errorf("Check the folder in -f.\n  %w\n  %s", exports.HideError(err), "-f is set to "+sel+".")
 	}
 	// The clone is the folder's directory with the folder's segments taken off, as
 	// [source.Resolve] joined them on.
@@ -59,7 +60,8 @@ func LoadReference(ref stack.Source, opts Options) (*stack.Stack, source.Resolve
 		return nil, source.Resolved{}, unreadable(clone, sel, err)
 	}
 	file := filepath.Join(src.Dir, stack.FileName)
-	noStack := fmt.Errorf("check the folder in -f %s: %s has no %s in %s at %s", sel, exports.URL(ref.Git), stack.FileName, folderShown(ref.Path), exports.Value(ref.Ref, false))
+	noStack := exports.Refuse("Check the folder in -f.",
+		fmt.Sprintf("%s has no %s in %s at %s.", exports.URL(ref.Git), stack.FileName, folderShown(ref.Path), exports.Value(ref.Ref, false)), "-f is set to "+sel+".")
 	// The stack file may be a link the repository contains; the file it leads to must
 	// still be in the fetched tree.
 	realFile, err := filepath.EvalSymlinks(file)
@@ -70,7 +72,8 @@ func LoadReference(ref stack.Source, opts Options) (*stack.Stack, source.Resolve
 		return nil, source.Resolved{}, unreadable(file, sel, err)
 	}
 	if outside(relTo(realClone, realFile)) {
-		return nil, source.Resolved{}, fmt.Errorf("check the folder in -f %s: %s in %s at %s links outside the repository", sel, path.Join(folderShown(ref.Path), stack.FileName), exports.URL(ref.Git), exports.Value(ref.Ref, false))
+		return nil, source.Resolved{}, exports.Refuse(fmt.Sprintf("Make the %s link in the folder of -f point inside the repository.", stack.FileName),
+			fmt.Sprintf("%s in %s at %s links outside the repository.", path.Join(folderShown(ref.Path), stack.FileName), exports.URL(ref.Git), exports.Value(ref.Ref, false)), "-f is set to "+sel+".")
 	}
 	// The repository's qory.yaml, which the stack reader reads at the root of the
 	// checkout that contains the stack file, must be in the fetched tree too.
@@ -80,7 +83,8 @@ func LoadReference(ref stack.Source, opts Options) (*stack.Stack, source.Resolve
 	}
 	if linked, err := configLinksOut(realClone, root, sel); err != nil || linked != "" {
 		if err == nil {
-			err = fmt.Errorf("check the %s in -f %s: %s in %s at %s links outside the repository", path.Base(linked), sel, linked, exports.URL(ref.Git), exports.Value(ref.Ref, false))
+			err = exports.Refuse(fmt.Sprintf("Make the %s link point inside the repository.", path.Base(linked)),
+				fmt.Sprintf("%s in %s at %s links outside the repository.", linked, exports.URL(ref.Git), exports.Value(ref.Ref, false)), "-f is set to "+sel+".")
 		}
 		return nil, source.Resolved{}, err
 	}
@@ -112,16 +116,20 @@ func LoadReference(ref stack.Source, opts Options) (*stack.Stack, source.Resolve
 				return nil, source.Resolved{}, err
 			}
 			if linked != "" {
-				return nil, source.Resolved{}, fmt.Errorf("check the export of module %s in the stack of -f %s: %s in %s at %s links outside the repository", shown(name), sel, linked, exports.URL(ref.Git), exports.Value(ref.Ref, false))
+				return nil, source.Resolved{}, exports.Refuse(fmt.Sprintf("Make the %s link point inside the repository.", path.Base(linked)),
+					fmt.Sprintf("%s in %s at %s links outside the repository.", linked, exports.URL(ref.Git), exports.Value(ref.Ref, false)),
+					fmt.Sprintf("It is the file of the export of module %s in the stack of -f.", shown(name)), "-f is set to "+sel+".")
 			}
 			r, err := source.Resolve(realClone, stack.Source{Path: rel, Module: l.Source.Module}, source.Options{})
 			if err != nil {
-				return nil, source.Resolved{}, fmt.Errorf("check the export of module %s in the stack of -f %s: %w", shown(name), sel, exports.HideError(err))
+				return nil, source.Resolved{}, fmt.Errorf("%s\n  %w\n  %s", exports.Fit(fmt.Sprintf("Check the export of module %s in the stack of -f.", shown(name))), exports.HideError(err), "-f is set to "+sel+".")
 			}
 			rel = relTo(realClone, r.Dir)
 		}
 		if outside(rel) {
-			return nil, source.Resolved{}, fmt.Errorf("give module %s a path inside the repository, or a git source, in the stack of -f %s: qory reads the modules of a stack fetched by reference from the fetched tree only, and %s is outside it", shown(name), sel, exports.Value(p.SourceOf(l).Path, false))
+			return nil, source.Resolved{}, exports.Refuse(fmt.Sprintf("Give module %s a path inside the repository, or a git source.", shown(name)),
+				fmt.Sprintf("qory reads the modules of a stack fetched by reference from the fetched tree only, and %s is outside it.", exports.Value(p.SourceOf(l).Path, false)),
+				fmt.Sprintf("The module is in the stack of -f %s.", sel))
 		}
 		sub := filepath.ToSlash(rel)
 		if sub == "." {
@@ -180,7 +188,7 @@ func outside(rel string) bool {
 // unreadable is the error for dir, a directory of the fetched tree of the reference sel
 // whose links could not be resolved, with err, the error the resolution returned.
 func unreadable(dir, sel string, err error) error {
-	return fmt.Errorf("check that you can read %s, in the fetched tree of -f %s: %w", exports.Value(dir, false), sel, exports.HideError(err))
+	return fmt.Errorf("Check that you can read the fetched tree of -f.\n  %s could not be read: %w\n  %s", exports.Value(dir, false), exports.HideError(err), "-f is set to "+sel+".")
 }
 
 // relTo is dir relative to root, ".." when no relative path leads there.

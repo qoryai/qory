@@ -118,7 +118,7 @@ func TestExportAgainstFragmentEnvCollides(t *testing.T) {
 		}
 	}
 	_, err := composeTree(t, files("/usr/local/bin"))
-	want := "settings/claude/settings.json: env.TOOLS is set by module a and exported by module b with different values"
+	want := "Set env TOOLS in qory.yaml to decide its value.\n  Module a sets env.TOOLS and module b exports it, with different values.\n  env.TOOLS is in settings/claude/settings.json."
 	if err == nil || err.Error() != want {
 		t.Fatalf("error %v, want %q", err, want)
 	}

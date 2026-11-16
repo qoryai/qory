@@ -245,10 +245,10 @@ func TestSettingsRefuseAFragmentQoryCannotRead(t *testing.T) {
 		body string
 		want string
 	}{
-		{"another extension", "settings.yaml", "model: opus\n", "settings fragments are .json or .toml"},
-		{"broken json", "settings.json", "{\n", "unexpected end of JSON input"},
-		{"broken toml", "settings.toml", "model = \n", "expected value but found"},
-		{"a json list", "settings.json", "[]\n", "cannot unmarshal array into Go value"},
+		{"another extension", "settings.yaml", "model: opus\n", "Rename the settings fragment of module a to end in .json or .toml."},
+		{"broken json", "settings.json", "{\n", "Correct the JSON in the settings fragment of module a.\n  unexpected end of JSON input"},
+		{"broken toml", "settings.toml", "model = \n", "Correct the TOML in the settings fragment of module a.\n  toml: line 1"},
+		{"a json list", "settings.json", "[]\n", "Correct the JSON in the settings fragment of module a.\n  json: cannot unmarshal array into Go value"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -260,11 +260,11 @@ func TestSettingsRefuseAFragmentQoryCannotRead(t *testing.T) {
 			if err == nil {
 				t.Fatalf("read %s without an error", c.file)
 			}
-			if !strings.HasPrefix(err.Error(), "module a: ") {
-				t.Fatalf("error %q does not name the module", err)
+			if !strings.HasPrefix(err.Error(), c.want) {
+				t.Fatalf("error %q does not start with %q", err, c.want)
 			}
-			if !strings.Contains(err.Error(), c.file) || !strings.Contains(err.Error(), c.want) {
-				t.Fatalf("error %q does not name %q", err, c.want)
+			if !strings.HasSuffix(err.Error(), c.file+".") {
+				t.Fatalf("error %q does not end with the file %q", err, c.file)
 			}
 		})
 	}
@@ -413,7 +413,7 @@ func TestComposeRecordsEveryModule(t *testing.T) {
 		"modules/a/qory-module.yaml": "apiVersion: qory.dev/v1alpha1\nname: acme-core\n",
 		"modules/a/commands/ship.md": "ship\n",
 	})
-	if err == nil || err.Error() != "module a: the module at modules/a has the name acme-core in its qory-module.yaml" {
+	if err == nil || err.Error() != "Use one name for the module in qory-stack.yaml and in its qory-module.yaml.\n  The module a at modules/a has the name acme-core in its qory-module.yaml." {
 		t.Fatalf("err = %v", err)
 	}
 	res, err := composeTree(t, map[string]string{
@@ -472,7 +472,7 @@ func TestComposeRefuses(t *testing.T) {
 		{
 			name:  "a source that is not there",
 			files: map[string]string{stack.FileName: twoModules, "modules/b/": ""},
-			want:  "module a: ",
+			want:  "Check the source of module a.\n  ",
 		},
 		{
 			// The module sits outside modules/, where writeTree adds no manifest of its own.
@@ -482,7 +482,7 @@ func TestComposeRefuses(t *testing.T) {
 				"bare/a/":      "",
 				"modules/b/":   "",
 			},
-			want: filepath.Join("bare", "a") + " has no qory-module.yaml; a module has one that defines its name",
+			want: "Add qory-module.yaml to the module directory.\n  ",
 		},
 		{
 			name: "one name composed from two sources",
@@ -491,7 +491,7 @@ func TestComposeRefuses(t *testing.T) {
 				"modules/a/":                   "",
 				"modules/dup/qory-module.yaml": "apiVersion: qory.dev/v1alpha1\nname: a\n",
 			},
-			want: "module a is composed twice, from modules/a and from modules/dup",
+			want: "Remove one of the two sources of module a.\n  Module a is composed from modules/a and from modules/dup.",
 		},
 		{
 			name: "a manifest qory turns down",
@@ -500,7 +500,7 @@ func TestComposeRefuses(t *testing.T) {
 				"modules/a/qory-module.yaml": "apiVersion: qory.dev/v1alpha1\n",
 				"modules/b/":                 "",
 			},
-			want: "name is required",
+			want: "Add name to qory-module.yaml.",
 		},
 		{
 			name: "a runtime no variant serves",
@@ -509,7 +509,7 @@ func TestComposeRefuses(t *testing.T) {
 				"modules/a/qory-module.yaml": "apiVersion: qory.dev/v1alpha1\nname: a\nvariants:\n  codex:\n    agents: agents/codex\n  default: fail\n",
 				"modules/b/":                 "",
 			},
-			want: "module a: the module has no variant for runtime claude and its default is fail; variants: codex",
+			want: "Select a variant of module a in qory.yaml.\n  The module has no variant for runtime claude, and its default is fail.\n  The variants are codex.",
 		},
 		{
 			name: "a forced variant the module has not",
@@ -518,7 +518,7 @@ func TestComposeRefuses(t *testing.T) {
 				"modules/a/qory-module.yaml": "apiVersion: qory.dev/v1alpha1\nname: a\nvariants:\n  codex:\n    agents: agents/codex\n",
 				"modules/b/":                 "",
 			},
-			want: `module a: variant "amp" is forced, and the module has no such variant; variants: codex`,
+			want: "Set the variant of module a in qory.yaml to one the module has.\n  Variant \"amp\" is forced, and the module has no such variant.\n  The variants are codex.",
 		},
 		{
 			name: "a skill without a SKILL.md",
@@ -527,7 +527,7 @@ func TestComposeRefuses(t *testing.T) {
 				"modules/a/skills/greet/x.md": "x\n",
 				"modules/b/":                  "",
 			},
-			want: "module a: add SKILL.md to skills/greet: skills/greet has no SKILL.md and no skill below it",
+			want: "Add SKILL.md to the folder.\n  skills/greet in module a has no SKILL.md and no skill below it.",
 		},
 	}
 	for _, c := range cases {

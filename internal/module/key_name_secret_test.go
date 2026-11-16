@@ -119,7 +119,7 @@ func TestAVariantNameWithASecretIsLeftOutOfItsRefusal(t *testing.T) {
 		t.Errorf("kind: %v", err)
 	}
 	m = &Manifest{Requires: map[string][]string{"skills/qak_x": {"agents/a"}}}
-	if _, err := Read("core", dir, m, ""); err == nil || err.Error() != "Ship skill "+accessKeyPhrase+" in module core, or remove it from the requires of the module.\n  The requires of module core lists skill "+accessKeyPhrase+", and the module does not ship it." {
+	if _, err := Read("core", dir, m, ""); err == nil || err.Error() != "Ship skill "+accessKeyPhrase+" in module core.\n  You can also remove it from the requires of the module.\n  The requires of module core lists skill "+accessKeyPhrase+", and the module does not ship it." {
 		t.Errorf("requires: %v", err)
 	}
 }
@@ -157,8 +157,8 @@ func TestAModuleNameWithASecretIsLeftOutOfItsRefusals(t *testing.T) {
 		want          string
 	}{
 		{"qak_m", "v", &Manifest{Variants: map[string]Variant{"v": {"prompts": "x"}}}, "Remove \"prompts\" from variant v of module " + accessKeyPhrase + ".\n  A variant sets the directory of one of skills, agents, commands, output-styles, hooks, mcp, or files."},
-		{"QRK_m", "v", &Manifest{Variants: map[string]Variant{"v": {"skills": "../x"}}}, "Set the skills directory of variant v of module " + runKeyPhrase + " to a directory inside the module.\n  Variant v reads skills from \"../x\", which is not one."},
-		{"qak_m", "", &Manifest{Requires: map[string][]string{"skills/absent": {"agents/a"}}}, "Ship skill absent in module " + accessKeyPhrase + ", or remove it from the requires of the module.\n  The requires of module " + accessKeyPhrase + " lists skill absent, and the module does not ship it."},
+		{"QRK_m", "v", &Manifest{Variants: map[string]Variant{"v": {"skills": "../x"}}}, "Set the skills directory of variant v to a directory inside the module.\n  Variant v of module " + runKeyPhrase + " reads skills from \"../x\", which is not one."},
+		{"qak_m", "", &Manifest{Requires: map[string][]string{"skills/absent": {"agents/a"}}}, "Ship skill absent in module " + accessKeyPhrase + ".\n  You can also remove it from the requires of the module.\n  The requires of module " + accessKeyPhrase + " lists skill absent, and the module does not ship it."},
 	} {
 		if _, err := Read(c.name, dir, c.m, c.variant); err == nil || err.Error() != c.want {
 			t.Errorf("%s: %v, want %q", c.name, err, c.want)

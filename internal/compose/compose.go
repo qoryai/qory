@@ -311,7 +311,11 @@ func ComposeWith(p *stack.Stack, opts Options) (_ *Result, err error) {
 		src, err := source.Resolve(p.DirOf(pl), ps, so)
 		if err != nil {
 			// The directory of a module listed by name is that name.
-			return nil, fmt.Errorf("%s: %w", who, exports.HideError(err))
+			fix := exports.Fit("Check the source of " + who + ".")
+			if pl.Name == "" {
+				fix = "Check the source of a module in the stack.\n  The module is at " + ps.Shown() + "."
+			}
+			return nil, fmt.Errorf("%s\n  %w", fix, exports.HideError(err))
 		}
 		o := openedModule{pl: pl, ps: ps, src: src}
 		if opts.Copies != nil {
@@ -335,10 +339,12 @@ func ComposeWith(p *stack.Stack, opts Options) (_ *Result, err error) {
 			afterManifest(src.Dir)
 		}
 		if pl.Name != "" && o.m.Name != pl.Name {
-			return nil, fmt.Errorf("module %s: the module at %s has the name %s in its %s", accesskey.ShownName(pl.Name, false), ps.Shown(), accesskey.ShownName(o.m.Name, false), module.ManifestName)
+			return nil, exports.Refuse(fmt.Sprintf("Use one name for the module in %s and in its %s.", stack.FileName, module.ManifestName),
+				fmt.Sprintf("The module %s at %s has the name %s in its %s.", accesskey.ShownName(pl.Name, false), ps.Shown(), accesskey.ShownName(o.m.Name, false), module.ManifestName))
 		}
 		if other, ok := dirs[o.m.Name]; ok {
-			return nil, fmt.Errorf("module %s is composed twice, from %s and from %s", accesskey.ShownName(o.m.Name, false), other, ps.Shown())
+			return nil, exports.Refuse(fmt.Sprintf("Remove one of the two sources of module %s.", accesskey.ShownName(o.m.Name, false)),
+				fmt.Sprintf("Module %s is composed from %s and from %s.", accesskey.ShownName(o.m.Name, false), other, ps.Shown()))
 		}
 		dirs[o.m.Name] = ps.Shown()
 		if !pl.Base && opts.Base != nil {
@@ -374,7 +380,7 @@ func ComposeWith(p *stack.Stack, opts Options) (_ *Result, err error) {
 		name := m.Name
 		variant, err := selectVariant(m, pl, p.Target.Runtimes, name)
 		if err != nil {
-			return nil, fmt.Errorf("module %s: %w", accesskey.ShownName(name, false), err)
+			return nil, exports.Prefixed("module "+accesskey.ShownName(name, false), err)
 		}
 		// A module read through a root reads every file's bytes through it, so a link on
 		// the way to its directory that leads elsewhere since the root opened changes
@@ -675,7 +681,8 @@ func exportEnv(res *Result, exporters map[string]string, module string, env, dec
 			continue
 		}
 		if other, ok := exporters[name]; ok && res.Env[name] != value {
-			return fmt.Errorf("env %s is exported by modules %s and %s; set it in qory.yaml to decide", shown(name), shown(other), shown(module))
+			return exports.Refuse(fmt.Sprintf("Set env %s in qory.yaml to decide its value.", shown(name)),
+				fmt.Sprintf("Modules %s and %s export %s with different values.", shown(other), shown(module), shown(name)))
 		}
 		exporters[name] = module
 		res.Env[name] = value
@@ -732,9 +739,11 @@ func (r *Result) LaunchEnv(runtime, file string, path ...string) ([]Var, error) 
 			if name == "QORY_HARNESS_HOME" {
 				continue
 			}
-			value, err := envValue(env[name])
-			if err != nil {
-				return nil, fmt.Errorf("%s: %s.%s %w", exports.HidePath(prefix), key, shown(name), err)
+			value, ok := envValue(env[name])
+			if !ok {
+				return nil, exports.Refuse(fmt.Sprintf("Set %s.%s to a string, a number, or a boolean.", key, shown(name)),
+					"A variable's value is text.",
+					fmt.Sprintf("%s.%s is in %s.", key, shown(name), exports.HidePath(prefix)))
 			}
 			vars[name] = Var{Name: name, Value: value, From: "module " + r.setBy[prefix+"/"+key+"."+name] + ", " + prefix}
 		}
@@ -754,19 +763,19 @@ func (r *Result) LaunchEnv(runtime, file string, path ...string) ([]Var, error) 
 }
 
 // envValue is a settings value as a variable's text: a string as it is, a number and a
-// boolean as they print.
-func envValue(v any) (string, error) {
+// boolean as they print. It is false for any other value.
+func envValue(v any) (string, bool) {
 	switch v := v.(type) {
 	case string:
-		return v, nil
+		return v, true
 	case bool:
-		return strconv.FormatBool(v), nil
+		return strconv.FormatBool(v), true
 	case float64:
-		return strconv.FormatFloat(v, 'f', -1, 64), nil
+		return strconv.FormatFloat(v, 'f', -1, 64), true
 	case int64:
-		return strconv.FormatInt(v, 10), nil
+		return strconv.FormatInt(v, 10), true
 	}
-	return "", fmt.Errorf("is not a string, a number or a boolean; a variable's value is text")
+	return "", false
 }
 
 // selectVariant picks the one variant of a module that serves every targeted runtime.
@@ -788,8 +797,8 @@ func selectVariant(m *module.Manifest, pl stack.Module, runtimes stack.Runtimes,
 			return "", err
 		}
 		if v != first {
-			return "", fmt.Errorf("module %s reads from %s for %s and from %s for %s; compose one runtime at a time, or select one variant of the module for both",
-				shown(name), variantName(first), shown(runtimes.First()), variantName(v), shown(r))
+			return "", exports.Refuse(altFix(fmt.Sprintf("Select one variant of module %s for both runtimes", shown(name)), "compose one runtime at a time"),
+				fmt.Sprintf("Module %s reads from %s for %s and from %s for %s.", shown(name), variantName(first), shown(runtimes.First()), variantName(v), shown(r)))
 		}
 	}
 	return first, nil
@@ -1206,7 +1215,7 @@ func applySelection(l *module.Module, pl stack.Module, env map[string]string, re
 	l.Entries = kept
 	// The instruction section: named means true in the block.
 	if sel.Instructions && l.Instructions == "" {
-		return nil, nil, fmt.Errorf("module %s: %s instructions selects nothing the module ships; it has no %s", shown(l.Name), block, module.InstructionsName)
+		return nil, nil, exports.Errorf("Remove instructions from the %s of module %s.\n  Module %s has no %s.", block, shown(l.Name), shown(l.Name), module.InstructionsName)
 	}
 	if l.Instructions != "" && sel.Instructions != only {
 		res.Excludes = append(res.Excludes, Exclude{Module: l.Name, Kind: "instructions", Name: module.InstructionsName, Path: l.Instructions})
@@ -1220,11 +1229,11 @@ func applySelection(l *module.Module, pl stack.Module, env map[string]string, re
 		}
 	}
 	if sel.Settings.All && len(fragments) == 0 {
-		return nil, nil, fmt.Errorf("module %s: %s settings selects nothing the module ships; it has no settings fragment", shown(l.Name), block)
+		return nil, nil, exports.Errorf("Remove settings from the %s of module %s.\n  Module %s has no settings fragment.", block, shown(l.Name), shown(l.Name))
 	}
 	for _, name := range sel.Settings.Names {
 		if !fragments[name] {
-			return nil, nil, fmt.Errorf("module %s: %s settings/%s selects nothing the module ships", shown(l.Name), block, exports.HidePath(name))
+			return nil, nil, exports.Errorf("Remove settings/%s from the %s of module %s.\n  Module %s does not ship settings/%s.", exports.HidePath(name), block, shown(l.Name), shown(l.Name), exports.HidePath(name))
 		}
 	}
 	for _, name := range sortedKeys(fragments) {
@@ -1246,7 +1255,7 @@ func applySelection(l *module.Module, pl stack.Module, env map[string]string, re
 	}
 	for _, name := range sel.Env.Names {
 		if _, ok := env[name]; !ok {
-			return nil, nil, fmt.Errorf("module %s: %s env %s selects nothing the module ships", shown(l.Name), block, shown(name))
+			return nil, nil, exports.Errorf("Remove env %s from the %s of module %s.\n  Module %s exports no variable %s.", shown(name), block, shown(l.Name), shown(l.Name), shown(name))
 		}
 	}
 	remaining := map[string]string{}
@@ -1533,21 +1542,24 @@ func collisions(owners map[string][]string, modules []Module, base *Base, checko
 func mergeFile(res *Result, runtime, file, path, module string, decided map[string]string, readFile func(string) ([]byte, error)) error {
 	data, err := readFile(path)
 	if err != nil {
-		return exports.HideError(err)
+		return exports.Prefixed("module "+shown(module), exports.HideError(err))
 	}
 	src := map[string]any{}
 	switch filepath.Ext(path) {
 	case ".json":
 		if err := json.Unmarshal(data, &src); err != nil {
-			return fmt.Errorf("%s: %w", exports.HidePath(path), exports.HideValueError(err, ""))
+			return exports.Refuse(fmt.Sprintf("Correct the JSON in the settings fragment of module %s.", shown(module)),
+				exports.HideValueError(err, "").Error(), "The file is "+exports.HidePath(path)+".")
 		}
 	case ".toml":
 		if err := toml.Unmarshal(data, &src); err != nil {
-			return fmt.Errorf("%s: %w", exports.HidePath(path), exports.HideValueError(err, ""))
+			return exports.Refuse(fmt.Sprintf("Correct the TOML in the settings fragment of module %s.", shown(module)),
+				exports.HideValueError(err, "").Error(), "The file is "+exports.HidePath(path)+".")
 		}
 		src = normalize(src).(map[string]any)
 	default:
-		return fmt.Errorf("%s: settings fragments are .json or .toml", exports.HidePath(path))
+		return exports.Refuse(fmt.Sprintf("Rename the settings fragment of module %s to end in .json or .toml.", shown(module)),
+			"The file is "+exports.HidePath(path)+".")
 	}
 	m := &merger{file: "settings/" + runtime + "/" + file, module: module, setBy: res.setBy}
 	dst := res.Settings[runtime][file]
@@ -1680,8 +1692,9 @@ func exportsAgainstSettings(res *Result, exporters map[string]string, decided ma
 					continue
 				}
 				prefix := "settings/" + runtime + "/" + file
-				return fmt.Errorf("%s: env.%s is set by module %s and exported by module %s with different values",
-					exports.HidePath(prefix), shown(name), shown(res.setBy[prefix+"/env."+name]), shown(exporter))
+				return exports.Refuse(fmt.Sprintf("Set env %s in qory.yaml to decide its value.", shown(name)),
+					fmt.Sprintf("Module %s sets env.%s and module %s exports it, with different values.", shown(res.setBy[prefix+"/env."+name]), shown(name), shown(exporter)),
+					fmt.Sprintf("env.%s is in %s.", shown(name), exports.HidePath(prefix)))
 			}
 		}
 	}

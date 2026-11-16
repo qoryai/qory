@@ -153,7 +153,7 @@ func TestAnEntryPathWithASecretIsLeftOutOfItsRefusal(t *testing.T) {
 		v     Variant
 		want  string
 	}{
-		{map[string]string{"AGENTS.md": "x\n"}, Variant{"skills": "../qak_x"}, "Set the skills directory of variant v of module core to a directory inside the module.\n  Variant v reads skills from " + accessKeyValuePhrase + ", which is not one."},
+		{map[string]string{"AGENTS.md": "x\n"}, Variant{"skills": "../qak_x"}, "Set the skills directory of variant v to a directory inside the module.\n  Variant v of module core reads skills from " + accessKeyValuePhrase + ", which is not one."},
 		{map[string]string{"skills/qak_s/x.md": "x\n"}, nil, "Add SKILL.md to the folder.\n  skills/" + accessKeyPhrase + " in module core has no SKILL.md and no skill below it."},
 		{map[string]string{"qrk_d/s/x.md": "x\n"}, Variant{"skills": "qrk_d"}, "Add SKILL.md to the folder.\n  " + runKeyPhrase + "/s in module core has no SKILL.md and no skill below it."},
 		{map[string]string{"hooks/qak_d/x.sh": "x\n"}, nil, "Move hooks/" + accessKeyPhrase + " out of the hooks directory of module core.\n  hooks/" + accessKeyPhrase + " is a directory, and a hook is one file.\n  A hook reads its helpers at $QORY_HARNESS_HOME/modules/core/<path>."},

@@ -649,8 +649,8 @@ func ReadWith(name, dir string, m *Manifest, variant string, readFile func(path 
 			}
 			clean := filepath.Clean(sub)
 			if sub == "" || clean == "." || filepath.IsAbs(clean) || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
-				return nil, exports.Refuse(fmt.Sprintf("Set the %s directory of variant %s of module %s to a directory inside the module.", kind, accesskey.ShownName(variant, false), shown),
-					fmt.Sprintf("Variant %s reads %s from %s, which is not one.", accesskey.ShownName(variant, false), kind, exports.Value(sub, true)))
+				return nil, exports.Refuse(fmt.Sprintf("Set the %s directory of variant %s to a directory inside the module.", kind, accesskey.ShownName(variant, false)),
+					fmt.Sprintf("Variant %s of module %s reads %s from %s, which is not one.", accesskey.ShownName(variant, false), shown, kind, exports.Value(sub, true)))
 			}
 			dirs[kind] = clean
 		}
@@ -746,7 +746,11 @@ func ReadWith(name, dir string, m *Manifest, variant string, readFile func(path 
 			if !shipped[key] {
 				kind, entry, _ := strings.Cut(key, "/")
 				needed := Describe(kind, accesskey.ShownName(entry, false))
-				return nil, exports.Errorf("Ship %s in module %s, or remove it from the requires of the module.\n  The requires of module %s lists %s, and the module does not ship it.", needed, shown, shown, needed)
+				fix := fmt.Sprintf("Ship %s in module %s, or remove it from the requires of the module.", needed, shown)
+				if !fits(fix) {
+					fix = fmt.Sprintf("Ship %s in module %s.\n  You can also remove it from the requires of the module.", needed, shown)
+				}
+				return nil, exports.Errorf("%s\n  The requires of module %s lists %s, and the module does not ship it.", fix, shown, needed)
 			}
 		}
 	}

@@ -26,7 +26,7 @@ func TestAModuleNameWithASecretIsLeftOutOfAVariantRefusal(t *testing.T) {
 		stack.FileName:                   "apiVersion: qory.dev/v1alpha1\nmodules:\n  - name: qak_m\n    source:\n      path: modules/qak_m\n",
 		"modules/qak_m/qory-module.yaml": "apiVersion: qory.dev/v1alpha1\nname: qak_m\nvariants:\n  codex:\n    agents: agents/codex\n  default: fail\n",
 	})
-	want := "module (a name that contains an access key secret): the module has no variant for runtime claude and its default is fail; variants: codex"
+	want := "Select a variant of module (a name that contains an access key secret) in qory.yaml.\n  The module has no variant for runtime claude, and its default is fail.\n  The variants are codex."
 	if err == nil || err.Error() != want {
 		t.Errorf("%v, want %q", err, want)
 	}
@@ -56,8 +56,8 @@ func TestAModuleNameWithASecretIsLeftOutOfAManifestRefusal(t *testing.T) {
 	isolateAll(t)
 	const access = "(a name that contains an access key secret)"
 	for _, c := range []struct{ manifest, want string }{
-		{"apiVersion: qory.dev/v1alpha1\nname: qak_m\nenv:\n  QAK_X: ../bin\n", ": env." + access + ": ../bin is not a path inside the module"},
-		{"apiVersion: qory.dev/v1alpha1\nname: qak_m\nvariants:\n  codex:\n    agents: agents/codex\n  default: qrk_v\n", ": variants.default selects (a name that contains a run key), which is not a variant"},
+		{"apiVersion: qory.dev/v1alpha1\nname: qak_m\nenv:\n  QAK_X: ../bin\n", "Set env." + access + " to a path inside the module.\n  ../bin is not a path inside the module."},
+		{"apiVersion: qory.dev/v1alpha1\nname: qak_m\nvariants:\n  codex:\n    agents: agents/codex\n  default: qrk_v\n", "Set variants.default to a variant the manifest declares, or fail.\n  variants.default is (a name that contains a run key), which is not a variant."},
 	} {
 		dir := writeTree(t, map[string]string{
 			stack.FileName:                   "apiVersion: qory.dev/v1alpha1\nmodules:\n  - name: qak_m\n",
@@ -68,7 +68,7 @@ func TestAModuleNameWithASecretIsLeftOutOfAManifestRefusal(t *testing.T) {
 			t.Fatal(err)
 		}
 		_, err = compose.Compose(p)
-		want := "module " + access + ": " + filepath.Join(p.Root, "modules", access, "qory-module.yaml") + c.want
+		want := c.want + "\n  The manifest is " + filepath.Join(p.Root, "modules", access, "qory-module.yaml") + "."
 		if err == nil || err.Error() != want {
 			t.Errorf("%v, want %q", err, want)
 		}
@@ -82,7 +82,7 @@ func TestAModuleNameWithASecretIsLeftOutOfAManifestRefusal(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = compose.Compose(p)
-	if err == nil || !strings.HasPrefix(err.Error(), "module "+access+": ") || strings.Contains(err.Error(), "qak_m") {
+	if err == nil || !strings.HasPrefix(err.Error(), "Check the source of module "+access+".\n  ") || strings.Contains(err.Error(), "qak_m") {
 		t.Errorf("a module directory that is not there: %v", err)
 	}
 }
@@ -115,7 +115,7 @@ func TestASecretIsLeftOutOfAModuleSourceRefusal(t *testing.T) {
 	const access = "(a name that contains an access key secret)"
 	listed := map[string]string{stack.FileName: "apiVersion: qory.dev/v1alpha1\nmodules:\n  - name: a qak_m\n"}
 	err := composeWritten(t, listed, "modules/a qak_m")
-	if want := "/modules/a " + access + " has no qory-module.yaml; a module has one that defines its name"; err == nil || !strings.HasSuffix(err.Error(), want) {
+	if want := "/modules/a " + access + " has no qory-module.yaml, and a module has one that defines its name."; err == nil || !strings.HasPrefix(err.Error(), "Add qory-module.yaml to the module directory.\n  ") || !strings.HasSuffix(err.Error(), want) {
 		t.Errorf("no manifest: %v, want the suffix %q", err, want)
 	}
 	noSecretIn(t, err)
@@ -129,7 +129,7 @@ func TestASecretIsLeftOutOfAModuleSourceRefusal(t *testing.T) {
 		"repo/qory.yaml": "apiVersion: qory.dev/v1alpha1\nexports:\n  dir: harness\n  modules: [core]\n",
 		"repo/harness/modules/core/qory-module.yaml": "apiVersion: qory.dev/v1alpha1\nname: core\n",
 	})
-	if want := " exports no module named " + access + "; modules: core"; err == nil || !strings.HasPrefix(err.Error(), "module core: ") || !strings.HasSuffix(err.Error(), want) {
+	if want := " exports no module named " + access + "; modules: core"; err == nil || !strings.HasPrefix(err.Error(), "Check the source of module core.\n  ") || !strings.HasSuffix(err.Error(), want) {
 		t.Errorf("export: %v, want the suffix %q", err, want)
 	}
 	noSecretIn(t, err)

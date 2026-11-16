@@ -197,15 +197,15 @@ func TestLoadReferenceErrors(t *testing.T) {
 		}
 	}
 	for _, c := range []struct{ folder, want string }{
-		{"stacks/missing", "check the folder in -f " + url + "#main:stacks/missing: " + url + " has no stacks/missing at main"},
-		{"stacks/empty", "check the folder in -f " + url + "#main:stacks/empty: " + url + " has no qory-stack.yaml in stacks/empty at main"},
-		{"stacks/file", "check the folder in -f " + url + "#main:stacks/file: stacks/file is not a directory in " + url + " at main"},
-		{"stacks/web", "give module web a path inside the repository, or a git source, in the stack of -f " + url + "#main:stacks/web: qory reads the modules of a stack fetched by reference from the fetched tree only, and ../../../outside is outside it"},
-		{"stacks/abs", "give module web a path inside the repository, or a git source, in the stack of -f " + url + "#main:stacks/abs: "},
-		{"stacks/linked", "give module web a path inside the repository, or a git source, in the stack of -f " + url + "#main:stacks/linked: "},
-		{"stacks/dirlink", "check the folder in -f " + url + "#main:stacks/dirlink: stacks/dirlink in " + url + " at main links outside the repository"},
-		{"stacks/filelink", "check the folder in -f " + url + "#main:stacks/filelink: stacks/filelink/qory-stack.yaml in " + url + " at main links outside the repository"},
-		{"stacks/shop", "check the export of module shop in the stack of -f " + url + "#main:stacks/shop: shop/qory.yaml in " + url + " at main links outside the repository"},
+		{"stacks/missing", "Check the folder in -f.\n  " + url + " has no stacks/missing at main\n  -f is set to " + url + "#main:stacks/missing."},
+		{"stacks/empty", "Check the folder in -f.\n  " + url + " has no qory-stack.yaml in stacks/empty at main.\n  -f is set to " + url + "#main:stacks/empty."},
+		{"stacks/file", "Check the folder in -f.\n  stacks/file is not a directory in " + url + " at main\n  -f is set to " + url + "#main:stacks/file."},
+		{"stacks/web", "Give module web a path inside the repository, or a git source.\n  qory reads the modules of a stack fetched by reference from the fetched tree only, and ../../../outside is outside it.\n  The module is in the stack of -f " + url + "#main:stacks/web."},
+		{"stacks/abs", "Give module web a path inside the repository, or a git source.\n  qory reads the modules of a stack fetched by reference from the fetched tree only, and "},
+		{"stacks/linked", "Give module web a path inside the repository, or a git source.\n  qory reads the modules of a stack fetched by reference from the fetched tree only, and web is outside it.\n  The module is in the stack of -f " + url + "#main:stacks/linked."},
+		{"stacks/dirlink", "Check the folder in -f.\n  stacks/dirlink in " + url + " at main links outside the repository\n  -f is set to " + url + "#main:stacks/dirlink."},
+		{"stacks/filelink", "Make the qory-stack.yaml link in the folder of -f point inside the repository.\n  stacks/filelink/qory-stack.yaml in " + url + " at main links outside the repository.\n  -f is set to " + url + "#main:stacks/filelink."},
+		{"stacks/shop", "Make the qory.yaml link point inside the repository.\n  shop/qory.yaml in " + url + " at main links outside the repository.\n  It is the file of the export of module shop in the stack of -f.\n  -f is set to " + url + "#main:stacks/shop."},
 	} {
 		_, _, err := compose.LoadReference(stack.Source{Git: url, Ref: "main", Path: c.folder}, compose.Options{Cache: t.TempDir()})
 		if err == nil || !strings.HasPrefix(err.Error(), c.want) {
@@ -239,7 +239,7 @@ func TestLoadReferenceRootConfigLinksOut(t *testing.T) {
 		}
 	}
 	p, _, err := compose.LoadReference(stack.Source{Git: url, Ref: "main", Path: "stacks/web"}, compose.Options{Cache: t.TempDir()})
-	want := "check the qory.yaml in -f " + url + "#main:stacks/web: qory.yaml in " + url + " at main links outside the repository"
+	want := "Make the qory.yaml link point inside the repository.\n  qory.yaml in " + url + " at main links outside the repository.\n  -f is set to " + url + "#main:stacks/web."
 	if err == nil || err.Error() != want {
 		t.Fatalf("got %+v, %v\nwant the error %q", p, err, want)
 	}

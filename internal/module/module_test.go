@@ -313,10 +313,10 @@ func TestReadRefusesAVariantThatLeavesTheModule(t *testing.T) {
 		want    string
 	}{
 		{"unknown kind", Variant{"prompts": "prompts"}, "Remove \"prompts\" from variant codex of module multi.\n  A variant sets the directory of one of skills, agents, commands, output-styles, hooks, mcp, or files."},
-		{"empty path", Variant{"agents": ""}, "Set the agents directory of variant codex of module multi to a directory inside the module.\n  Variant codex reads agents from \"\", which is not one."},
-		{"the module root", Variant{"agents": "."}, "Set the agents directory of variant codex of module multi to a directory inside the module.\n  Variant codex reads agents from \".\", which is not one."},
-		{"a parent", Variant{"agents": "../other"}, "Set the agents directory of variant codex of module multi to a directory inside the module.\n  Variant codex reads agents from \"../other\", which is not one."},
-		{"an absolute path", Variant{"agents": "/etc"}, "Set the agents directory of variant codex of module multi to a directory inside the module.\n  Variant codex reads agents from \"/etc\", which is not one."},
+		{"empty path", Variant{"agents": ""}, "Set the agents directory of variant codex to a directory inside the module.\n  Variant codex of module multi reads agents from \"\", which is not one."},
+		{"the module root", Variant{"agents": "."}, "Set the agents directory of variant codex to a directory inside the module.\n  Variant codex of module multi reads agents from \".\", which is not one."},
+		{"a parent", Variant{"agents": "../other"}, "Set the agents directory of variant codex to a directory inside the module.\n  Variant codex of module multi reads agents from \"../other\", which is not one."},
+		{"an absolute path", Variant{"agents": "/etc"}, "Set the agents directory of variant codex to a directory inside the module.\n  Variant codex of module multi reads agents from \"/etc\", which is not one."},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
