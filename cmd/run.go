@@ -888,6 +888,14 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				if in != nil {
 					said(installedLine(*in))
 					useInstalledRuntime(&spec, in)
+				} else if installStandIn != nil && name == installedRuntime {
+					stood, err := installStandIn(spec.Command)
+					if err != nil {
+						return &runLineError{codeLine(err)}
+					}
+					if stood != nil {
+						useInstalledRuntime(&spec, stood)
+					}
 				}
 				return nil
 			}

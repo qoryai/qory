@@ -227,7 +227,8 @@ func TestAnUnwalledRunInstallsFromNpmThroughTheHostProxy(t *testing.T) {
 
 // TestARunWithNoControlPlaneInstallsFromNpmDirectly runs claude in a checkout on a
 // person's machine, with no wall and no run key, so with no host proxy: the install
-// sends its three requests to npm directly, prints its line, and the fake runtime runs.
+// sends its three requests to npm directly, prints its line, and the session starts the
+// installed program, not the launch's.
 func TestARunWithNoControlPlaneInstallsFromNpmDirectly(t *testing.T) {
 	defer cmd.SetInstallRuntimes(true)()
 	npm := rt.StartNpm(t)
@@ -238,10 +239,11 @@ func TestARunWithNoControlPlaneInstallsFromNpmDirectly(t *testing.T) {
 	composedForFake(t, root, fakeRuntime(t))
 	t.Setenv("QORY_RUN_KEY", "")
 	out, err := run(t, "run", "claude", "--", "-p", "hi")
-	if cmd.ExitCode(err) != 3 {
+	if err != nil {
 		t.Fatalf("run returned %v (exit %d)\n%s", err, cmd.ExitCode(err), out)
 	}
-	wants(t, out, "qory run: installed claude 2.1.320\n", "hello from ")
+	wants(t, out, "qory run: installed claude 2.1.320\n", "claude 2.1.320 ")
+	lacks(t, out, "hello from ")
 	if len(npm.Paths()) != 3 || npm.TarballGets() != 1 {
 		t.Fatalf("npm requests %q", npm.Paths())
 	}

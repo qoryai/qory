@@ -80,8 +80,20 @@ func TestMain(m *testing.M) {
 		os.Exit(enginePull(args[0], args[1], args[2]))
 	}
 	cmd.ShortenSocketGrace(10 * time.Millisecond)
+	// Forager joins no session of Claude Code without an installed folder, so the
+	// program that such a test's launch names is copied into one.
+	standIns, err := os.MkdirTemp("", "qory-stand-in-")
+	if err != nil {
+		panic(err)
+	}
+	if err := os.Chmod(standIns, 0o755); err != nil {
+		panic(err)
+	}
+	cmd.SetInstallStandIn(standIns)
 	cmd.RunGitSessionsOnHost()
-	os.Exit(m.Run())
+	code := m.Run()
+	_ = os.RemoveAll(standIns)
+	os.Exit(code)
 }
 
 // fixtures is the contract fixture directory, resolved from the working directory the test

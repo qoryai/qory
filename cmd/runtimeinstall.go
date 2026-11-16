@@ -40,6 +40,10 @@ var (
 	npmRegistry     = runtimeinstall.NpmRegistry
 	installRuntimes = true
 	instanceOf      = instanceAddress
+	// installStandIn is nil outside the tests. A test sets it, with installRuntimes off,
+	// to give a session of Claude Code the folder of a program in place of an install:
+	// Forager joins no session of Claude Code without one. It gets the session's Command.
+	installStandIn func(command string) (*runtimeinstall.Installed, error)
 )
 
 // runtimeRegistry is the instance's registry, as the runtime's install reads it from

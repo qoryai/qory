@@ -29,6 +29,7 @@ import (
 	"github.com/qoryai/qory/internal/proxygit"
 	"github.com/qoryai/qory/internal/runapi"
 	"github.com/qoryai/qory/internal/runcopy"
+	"github.com/qoryai/qory/internal/runtimeinstall"
 )
 
 // SetWriteLabels makes qory run keep a checkout's labels with f, and returns what
@@ -916,6 +917,35 @@ func SetInstallRuntimes(on bool) func() {
 	before := installRuntimes
 	installRuntimes = on
 	return func() { installRuntimes = before }
+}
+
+// SetInstallStandIn makes a run of Claude Code that installs nothing start a copy of its
+// launch's program, from a new folder under root that others can read, as an install
+// makes one, and returns what restores the default. A launch whose Command is not the
+// absolute path of a file gets a program that exits 0.
+func SetInstallStandIn(root string) func() {
+	before := installStandIn
+	installStandIn = func(command string) (*runtimeinstall.Installed, error) {
+		data, err := os.ReadFile(command)
+		if err != nil || !filepath.IsAbs(command) {
+			data = []byte("#!/bin/sh\nexit 0\n")
+		}
+		folder, err := os.MkdirTemp(root, "claude-")
+		if err != nil {
+			return nil, err
+		}
+		if err := os.Chmod(folder, 0o755); err != nil {
+			return nil, err
+		}
+		if err := os.Mkdir(filepath.Join(folder, "bin"), 0o755); err != nil {
+			return nil, err
+		}
+		if err := os.WriteFile(filepath.Join(folder, "bin", "claude"), data, 0o755); err != nil {
+			return nil, err
+		}
+		return &runtimeinstall.Installed{Runtime: "claude", Version: "0", Dir: folder}, nil
+	}
+	return func() { installStandIn = before }
 }
 
 // SetNpmRegistry makes qory run install from the npm registry at url, and returns what
