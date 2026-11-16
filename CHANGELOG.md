@@ -381,7 +381,20 @@ release may change what an existing document does, and states it under Upgrading
   index without the field `cancelled` reads as no version cancelled.
 - qory builds with Forager c68503c1. A run keeps its wall only when a container of
   the run may still run; a network or folder of the wall that could not be removed no longer
-  keeps it.
+  keeps it. The same pin changes four more things you see:
+  - The gateway's proxy records each git push of a run as `dev.qory.run.target_write`
+    in the run's record and sends it to Qory Apiary, with the state `changed`, `refused`
+    or `cut`. A Qory Apiary built before the type stores the event and does not use it.
+  - `dev.qory.runtime.result` in the record has `usage`, the tokens of the launch so far:
+    `input`, `output`, `cache_read` and `cache_write`.
+  - The gateway sends `session`, the number of the open session, in each model keys
+    report. A Qory Apiary that does not accept `session` answers `400`, and the gateway
+    drops that report, cooldowns included, so deploy a Qory Apiary that accepts it
+    before the gateway.
+  - An image reference with a login, such as
+    `user:pw@registry.example/agent@sha256:…`, shows as `registry.example/agent@sha256:…`
+    in qory's lines, errors and the record. The manifest check no longer sends the
+    login as a path to Docker Hub's registry.
 - `qory gateway` keeps its runs when SIGINT or SIGTERM stops it: a gateway started again
   on the same directory within 120 seconds continues them, and the agent sessions behind
   it go on. Before, a run open at a gateway that stopped was over. The directory is
