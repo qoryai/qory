@@ -181,8 +181,8 @@ func specPush(t *testing.T) []byte {
 // TestTheAgentsPushIsCheckedBeforeItLeaves is a walled run whose harness declares a
 // check for spec: the run's open gets the check, a push of spec from behind the wall
 // gets 422 push_check_failed with the check's findings, a verdict passes unchecked, and
-// the check's container starts from the run's image, as the wall's user, with the
-// composed home read-only at its path.
+// the check's container starts from the wall's default image, as the wall's user, with
+// the composed home read-only at its path.
 func TestTheAgentsPushIsCheckedBeforeItLeaves(t *testing.T) {
 	docker, log := checkDocker(t, 1, "spec.md: the section Goal is missing\n")
 	p, home := newCheckedRepo(t, docker)
@@ -257,6 +257,105 @@ func TestTheAgentsPushIsCheckedBeforeItLeaves(t *testing.T) {
 		if !strings.Contains(created, want) {
 			t.Errorf("the check's container lacks %q:\n%s", want, created)
 		}
+	}
+}
+
+// devcontainerImage is a run's image that a change to the repository's .devcontainer/
+// built, in place of the wall's default image example.com/agent:1 of [walledBy].
+const devcontainerImage = "example.com/devcontainer:1"
+
+// imageCheckDocker is [checkDocker] for a check that exits 1 with out from a container
+// of the wall's default image, and exits 0 and prints nothing from a container of
+// [devcontainerImage], whose node is /bin/true. Each command of a check's container goes
+// to the log it returns.
+func imageCheckDocker(t *testing.T, out string) (string, string) {
+	t.Helper()
+	docker, _ := fakeDocker(t)
+	dir := tempDir(t)
+	log := filepath.Join(dir, "checks.log")
+	output := filepath.Join(dir, "output")
+	fromRun := filepath.Join(dir, "from-run-image")
+	writeFile(t, output, out)
+	script := filepath.Join(dir, "docker")
+	writeFile(t, script, `#!/bin/sh
+case "$*" in
+*qory-push-check-*)
+	echo "$*" >> `+log+`
+	case "$1" in
+	create)
+		case "$*" in
+		*" `+devcontainerImage+` "*) : > `+fromRun+` ;;
+		*) rm -f `+fromRun+` ;;
+		esac
+		echo c0ffee ;;
+	start) test -e `+fromRun+` && exit 0; cat `+output+`; exit 1 ;;
+	inspect)
+		code=1
+		test -e `+fromRun+` && code=0
+		echo '{"Status":"exited","ExitCode":'$code',"Error":""}' ;;
+	esac
+	exit 0 ;;
+esac
+exec `+docker+` "$@"
+`)
+	if err := os.Chmod(script, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return script, log
+}
+
+// TestAPushCheckRunsInTheWallsDefaultImage is a walled run whose policy selects
+// [devcontainerImage], whose node is /bin/true, as the run's image: the check of a push
+// of spec runs in the wall's default image, so a push with a finding is still refused.
+func TestAPushCheckRunsInTheWallsDefaultImage(t *testing.T) {
+	docker, log := imageCheckDocker(t, "spec.md: the section Goal is missing\n")
+	p, _ := newCheckedRepo(t, docker)
+	p.policyImage = devcontainerImage
+	var check func(context.Context, session.RunAPIRequest) (*session.RunAPIRefusal, error)
+	p.onSetCheck = func(c func(context.Context, session.RunAPIRequest) (*session.RunAPIRefusal, error)) error {
+		check = c
+		return nil
+	}
+	var refusal *session.RunAPIRefusal
+	var checkErr error
+	p.run(t, func(string) {
+		if check == nil {
+			t.Error("the walled run's open has no RunAPICheck")
+			return
+		}
+		refusal, checkErr = check(context.Background(), session.RunAPIRequest{Path: "/artifacts", Body: specPush(t)})
+	}, func() (*session.Result, error) { return &session.Result{State: event.StateFailed, ExitCode: 3}, nil })
+	if checkErr != nil || refusal == nil || refusal.Status != 422 || !slices.Equal(refusal.Findings, []string{"spec.md: the section Goal is missing"}) {
+		t.Fatalf("the push of spec got %+v, %v, want 422 with the finding\n%s", refusal, checkErr, checkLog(t, log))
+	}
+	created := checkLog(t, log)
+	if !strings.Contains(created, " example.com/agent:1 push spec ") || strings.Contains(created, devcontainerImage) {
+		t.Errorf("the check's container does not start from example.com/agent:1 alone:\n%s", created)
+	}
+}
+
+// TestAMissingDefaultImageStopsARunWithPushChecks is a walled run from a run code with
+// push checks on an engine that does not have the wall's default image: the run stops
+// before the setup and the agent, with exit 2 and the fix line, and sets no check.
+func TestAMissingDefaultImageStopsARunWithPushChecks(t *testing.T) {
+	docker, log := checkDocker(t, 0, "")
+	script := filepath.Join(tempDir(t), "docker")
+	writeFile(t, script, "#!/bin/sh\ncase \"$*\" in\n\"image inspect --format {{.Id}} example.com/agent:1\")\n\techo 'Error response from daemon: No such image: example.com/agent:1' >&2\n\texit 1 ;;\nesac\nexec "+docker+" \"$@\"\n")
+	if err := os.Chmod(script, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	p, _ := newCheckedRepo(t, script)
+	p.policyImage = devcontainerImage
+	setUp, joined := false, false
+	p.setup = func(string) { setUp = true }
+	r := p.run(t, func(string) { joined = true }, nil)
+	r.wantsClose(t, event.StateFailed, cmd.ExitInput)
+	if setUp || joined || slices.Contains(r.calls, "set run API check") {
+		t.Errorf("the run went on: %v, set up %v, joined %v", r.calls, setUp, joined)
+	}
+	wants(t, r.out, "qory run: Pull the wall's default image, then take the work item in again in Qory Apiary: push checks run in it, and the engine does not have the image example.com/agent:1; the code is used\n")
+	if got := checkLog(t, log); got != "" {
+		t.Errorf("a check's container ran:\n%s", got)
 	}
 }
 

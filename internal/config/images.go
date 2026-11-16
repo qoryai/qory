@@ -51,6 +51,11 @@ var (
 	runtimeName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]*$`)
 )
 
+// IsImageRef reports whether ref has the shape the wall takes on a command line for an
+// image's reference: a letter or a digit, then letters, digits and . _ / : @ -. A value
+// of another shape, such as one that starts with -, never reaches the engine.
+func IsImageRef(ref string) bool { return imageRef.MatchString(ref) }
+
 // imageKeys are the keys of an entry of wall.images.
 var imageKeys = []string{"ref", "runtime", "docker"}
 
