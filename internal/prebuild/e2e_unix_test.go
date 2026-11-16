@@ -39,11 +39,10 @@ func docker(t *testing.T, args ...string) string {
 
 // TestBuildWithDocker builds a tiny development container on this machine's engine with
 // the reference devcontainer command: an alpine image whose onCreateCommand writes a
-// file, with the environment image kept apart and then removed. The image keeps the file
-// under /qory/seed, the wall user's; it has nothing of the agent image, pushed to a
-// registry run for the test, which has a /qory/agent folder: no /qory/agent; its user is
-// the wall user, its working folder /workspace, empty, and it has nothing at
-// /qory/hooks. It runs only with QORY_TEST_DOCKER=1, docker and the devcontainer
+// file, with the environment image kept apart and then removed. The built image keeps
+// the file under /qory/seed, owned by the wall user, runs as the wall user in an empty
+// /workspace, and has nothing at /qory/hooks and no /qory/agent, though the agent image
+// the test pushes to its registry has that folder. It runs only with QORY_TEST_DOCKER=1, docker and the devcontainer
 // command at [prebuild.CLIVersion] on the PATH, and it pulls registry:2 and alpine, by digest.
 func TestBuildWithDocker(t *testing.T) {
 	if os.Getenv("QORY_TEST_DOCKER") != "1" {

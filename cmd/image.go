@@ -25,7 +25,7 @@ func newImage() *cobra.Command {
 
 Three are defined under images/ in qory's repository, for linux/amd64 and linux/arm64:
 
-  agent          Claude Code, git, gh, Chromium, and tools for media, documents and data
+  agent          git, gh, Chromium, and tools for media, documents and data
   agent-docker   agent, and nested Docker: a Docker daemon inside the wall, separate from the machine's
   prebuild       agent-docker, the devcontainer command and buildx: the image a prebuild runs in behind its wall
 

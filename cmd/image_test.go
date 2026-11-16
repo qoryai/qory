@@ -9,9 +9,9 @@ import (
 	"github.com/qoryai/qory/cmd"
 )
 
-// probeLines are the lines of a probe's report for each of its checks, around the git
-// line: the lines before it and after it, which pass, and the fact about Docker. No line
-// is about a runtime.
+// probeBefore and probeAfter are the lines of a probe's report before and after its git
+// line: the home, authorities, shell and gh lines, which pass, and the fact about Docker.
+// No line is about a runtime.
 const (
 	probeBefore = `{"name":"home","result":"pass","detail":"HOME is /home/agent, and the user 65532:65532 writes in it"},` +
 		`{"name":"authorities","result":"pass","detail":"the authorities are in /etc/ssl/certs/ca-certificates.crt, 1 certificates"},` +

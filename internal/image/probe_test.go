@@ -3,7 +3,6 @@ package image_test
 import (
 	"context"
 	"errors"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,7 +13,7 @@ import (
 
 // imageRoot is a directory laid out as an image's files: each path, relative to the
 // root, is written with its content, and made executable when it is under a bin
-// directory or is sh. Every folder has mode 0755, whatever the umask.
+// directory or is sh.
 func imageRoot(t *testing.T, files map[string]string) string {
 	t.Helper()
 	root := t.TempDir()
@@ -36,18 +35,6 @@ func imageRoot(t *testing.T, files map[string]string) string {
 		if err := os.WriteFile(full, []byte(content), mode); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.Chmod(full, mode); err != nil {
-			t.Fatal(err)
-		}
-	}
-	err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
-		if err != nil || !d.IsDir() {
-			return err
-		}
-		return os.Chmod(p, 0o755)
-	})
-	if err != nil {
-		t.Fatal(err)
 	}
 	return root
 }

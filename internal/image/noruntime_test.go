@@ -22,7 +22,7 @@ func TestNoImageContainsARuntime(t *testing.T) {
 			t.Fatal(err)
 		}
 		text := string(data)
-		for _, bad := range []string{"@anthropic-ai/claude-code", "@openai/codex", "CLAUDE_CODE_", "DISABLE_AUTOUPDATER", "/qory/agent"} {
+		for _, bad := range []string{"claude", "codex", "CLAUDE_CODE_", "DISABLE_AUTOUPDATER", "/qory/agent"} {
 			if strings.Contains(text, bad) {
 				t.Errorf("Remove %s from %s: no image contains a runtime, and Forager mounts it at run time.", bad, path)
 			}
