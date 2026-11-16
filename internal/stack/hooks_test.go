@@ -45,7 +45,7 @@ func TestLoadReadsTheHookPoints(t *testing.T) {
 // cause line with the file's path.
 func TestLoadRefusesABrokenHookPoint(t *testing.T) {
 	isolate(t)
-	const fixName = "Name the hook point with a lower-case letter, then up to 54 lower-case letters, digits and hyphens."
+	const fixName = "Name the hook point with a lower-case letter, then up to 54 lower-case letters, digits, and hyphens."
 	const fixAt = "Set at of the hook point to end, start, or inside."
 	const fixTimeout = "Set extending.hooks.timeout to whole seconds, 1s or more, such as 10m."
 	for _, tc := range []struct{ body, fix, cause string }{
@@ -110,7 +110,7 @@ func TestHookDefaults(t *testing.T) {
 // and sets the program, the agent and the timeout of a hook that breaks none. A key that
 // is present with an empty value is refused, not read as left out.
 func TestValidateRefusesABrokenHook(t *testing.T) {
-	const fixName = "Set hooks[0].name to letters, digits, dots, hyphens and underscores, 64 at most."
+	const fixName = "Set hooks[0].name to letters, digits, dots, hyphens, and underscores, 64 at most."
 	const fixTimeout = "Set hooks[0].timeout to whole seconds, 1s or more, such as 90s or 5m."
 	for _, tc := range []struct {
 		h          Hook

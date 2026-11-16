@@ -294,7 +294,7 @@ func (p *Stack) validateHookPoints() error {
 		for _, point := range slices.Sorted(maps.Keys(w.HookPoints)) {
 			hp := w.HookPoints[point]
 			if !workflowName.MatchString(point) {
-				return hookErrorf("Name the hook point with a lower-case letter, then up to 54 lower-case letters, digits and hyphens.", "{path} lists %s under workflows.%s.hook_points.", accesskey.ShownName(point, true), name)
+				return hookErrorf("Name the hook point with a lower-case letter, then up to 54 lower-case letters, digits, and hyphens.", "{path} lists %s under workflows.%s.hook_points.", accesskey.ShownName(point, true), name)
 			}
 			if other, ok := declared[point]; ok {
 				return hookErrorf("Rename one of the two hook points in {file}: a point name is unique in a stack.", "Workflows %s and %s both declare %s.", other, name, point)
@@ -405,9 +405,9 @@ func (h *Hook) validate(i int) error {
 	}
 	if name := h.Name(); !hookName.MatchString(name) {
 		if h.NameText != nil {
-			return hookErrorf("Set hooks[%d].name to letters, digits, dots, hyphens and underscores, 64 at most.", "{path} sets %s; a name starts with a letter or digit.", i, accesskey.ShownName(name, true))
+			return hookErrorf("Set hooks[%d].name to letters, digits, dots, hyphens, and underscores, 64 at most.", "{path} sets %s; a name starts with a letter or digit.", i, accesskey.ShownName(name, true))
 		}
-		return hookErrorf("Set hooks[%d].name to letters, digits, dots, hyphens and underscores, 64 at most.", "The hook has no name, and the program's file name %s is not one; a name starts with a letter or digit.", i, accesskey.ShownName(name, true))
+		return hookErrorf("Set hooks[%d].name to letters, digits, dots, hyphens, and underscores, 64 at most.", "The hook has no name, and the program's file name %s is not one; a name starts with a letter or digit.", i, accesskey.ShownName(name, true))
 	}
 	if h.TimeoutText != nil {
 		d, ok := wholeSeconds(*h.TimeoutText)
