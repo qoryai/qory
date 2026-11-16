@@ -52,14 +52,14 @@ func TestReadRefusesAPathThatLeavesTheModule(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, c := range []struct{ link, target, want string }{
-		{"AGENTS.md", filepath.Join(outside, "secret"), "module core: Remove the link AGENTS.md or point it inside the module. It links to "},
-		{"agents/reviewer.md", filepath.Join(outside, "secret"), "module core: Remove the link agents/reviewer or point it inside the module. It links to "},
-		{"hooks/guard.sh", filepath.Join(outside, "secret"), "module core: Remove the link hooks/guard.sh or point it inside the module. It links to "},
-		{"skills/s", filepath.Join(outside, "skill"), "module core: Remove the link skills/s or point it inside the module. It links to "},
-		{"skills/ok/notes.md", filepath.Join(outside, "secret"), "module core: Remove the link skills/ok/notes.md or point it inside the module. It links to "},
-		{"skills/ok/lib/helper.py", filepath.Join(outside, "secret"), "module core: Remove the link skills/ok/lib/helper.py or point it inside the module. It links to "},
-		{"skills/ok/vendor", outside, "module core: Remove the link skills/ok/vendor or point it inside the module. It links to "},
-		{"settings/claude/settings.json", filepath.Join(outside, "secret"), "module core: Remove the link settings/claude/settings.json or point it inside the module. It links to "},
+		{"AGENTS.md", filepath.Join(outside, "secret"), "Point the link inside module core, or remove it.\n  The link AGENTS.md leads to "},
+		{"agents/reviewer.md", filepath.Join(outside, "secret"), "Point the link inside module core, or remove it.\n  The link agents/reviewer leads to "},
+		{"hooks/guard.sh", filepath.Join(outside, "secret"), "Point the link inside module core, or remove it.\n  The link hooks/guard.sh leads to "},
+		{"skills/s", filepath.Join(outside, "skill"), "Point the link inside module core, or remove it.\n  The link skills/s leads to "},
+		{"skills/ok/notes.md", filepath.Join(outside, "secret"), "Point the link inside module core, or remove it.\n  The link skills/ok/notes.md leads to "},
+		{"skills/ok/lib/helper.py", filepath.Join(outside, "secret"), "Point the link inside module core, or remove it.\n  The link skills/ok/lib/helper.py leads to "},
+		{"skills/ok/vendor", outside, "Point the link inside module core, or remove it.\n  The link skills/ok/vendor leads to "},
+		{"settings/claude/settings.json", filepath.Join(outside, "secret"), "Point the link inside module core, or remove it.\n  The link settings/claude/settings.json leads to "},
 	} {
 		dir := tree(t, map[string]string{"skills/ok/SKILL.md": "# ok\n"})
 		if err := os.MkdirAll(filepath.Dir(filepath.Join(dir, c.link)), 0o755); err != nil {
@@ -94,7 +94,7 @@ func TestReadRefusesADanglingLinkInsideASkill(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err := Read("core", dir, nil, "")
-	if err == nil || !strings.HasPrefix(err.Error(), "module core: skills/ok/notes.md ") {
+	if err == nil || !strings.Contains(err.Error(), "skills/ok/notes.md ") || !strings.HasPrefix(err.Error(), "Check that you can read the files of module core.\n  ") {
 		t.Errorf("error %v, want it to name skills/ok/notes.md", err)
 	}
 }
@@ -128,7 +128,7 @@ func TestReadNamesTheVariantDirectoryInItsMessages(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = Read("core", dir, m, "codex")
-	if err == nil || err.Error() != "module core: add SKILL.md to codex/skills/x: codex/skills/x has no SKILL.md and no skill below it" {
+	if err == nil || err.Error() != "Add SKILL.md to the folder.\n  codex/skills/x in module core has no SKILL.md and no skill below it." {
 		t.Errorf("skills: %v", err)
 	}
 	dir = tree(t, map[string]string{"codex/mcp/db.json": "[]\n", "qory-module.yaml": manifest})

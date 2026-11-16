@@ -49,13 +49,13 @@ func TestReadManifestRefusesRequires(t *testing.T) {
 		yaml string
 		want string
 	}{
-		{"no entry", head + "  - commands: [ship]\n", "requires[0]: selects no entry"},
-		{"two entries", head + "  - skill: deploy\n    agent: reviewer\n    commands: [ship]\n", "requires[0]: selects two entries"},
-		{"an unknown key", head + "  - skill: deploy\n    scripts: [ship]\n", `requires[0]: key "scripts" is not one requires reads`},
-		{"an empty list", head + "  - skill: deploy\n    commands: []\n", "requires[0]: commands is empty"},
-		{"nothing needed", head + "  - skill: deploy\n", "requires[0]: lists nothing the entry needs"},
-		{"an empty entry name", head + "  - skill: \"\"\n    commands: [ship]\n", "requires[0]: skill selects no entry"},
-		{"an entry twice", head + "  - skill: deploy\n    commands: [ship]\n  - skill: deploy\n    agents: [reviewer]\n", "requires lists skill deploy twice"},
+		{"no entry", head + "  - commands: [ship]\n", "Select an entry in requires[0], as skill: <name>."},
+		{"two entries", head + "  - skill: deploy\n    agent: reviewer\n    commands: [ship]\n", "Remove one of the two entries from requires[0]."},
+		{"an unknown key", head + "  - skill: deploy\n    scripts: [ship]\n", `Remove the key "scripts" from requires[0].`},
+		{"an empty list", head + "  - skill: deploy\n    commands: []\n", "List the commands the entry needs under commands in requires[0], or remove commands.\n  commands in requires[0] is empty."},
+		{"nothing needed", head + "  - skill: deploy\n", "List what the entry needs in requires[0], under skills, agents, commands, output-styles, hooks, mcp, or files.\n  requires[0] lists nothing the entry needs."},
+		{"an empty entry name", head + "  - skill: \"\"\n    commands: [ship]\n", "Set skill in requires[0] to the entry's name, as skill: <name>."},
+		{"an entry twice", head + "  - skill: deploy\n    commands: [ship]\n  - skill: deploy\n    agents: [reviewer]\n", "Remove one of the two requires items for skill deploy.\n  The requires lists skill deploy twice."},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -65,8 +65,8 @@ func TestReadManifestRefusesRequires(t *testing.T) {
 				t.Fatalf("read %q without an error", c.yaml)
 			}
 			path := filepath.Join(dir, ManifestName)
-			if !strings.HasPrefix(err.Error(), path+": ") {
-				t.Fatalf("error %q does not start with %q", err, path)
+			if !strings.HasSuffix(err.Error(), "\n  The manifest is "+path+".") {
+				t.Fatalf("error %q does not end with the path %q", err, path)
 			}
 			if !strings.Contains(err.Error(), c.want) {
 				t.Fatalf("error %q does not name %q", err, c.want)

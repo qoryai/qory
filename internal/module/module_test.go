@@ -239,7 +239,7 @@ func TestReadRefusesASkillWithoutItsSkillFile(t *testing.T) {
 	if err == nil {
 		t.Fatal("read a skill directory without a SKILL.md")
 	}
-	if want := "module core: add SKILL.md to skills/review: skills/review has no SKILL.md and no skill below it"; err.Error() != want {
+	if want := "Add SKILL.md to the folder.\n  skills/review in module core has no SKILL.md and no skill below it."; err.Error() != want {
 		t.Fatalf("error %q, want %q", err, want)
 	}
 }
@@ -312,11 +312,11 @@ func TestReadRefusesAVariantThatLeavesTheModule(t *testing.T) {
 		variant Variant
 		want    string
 	}{
-		{"unknown kind", Variant{"prompts": "prompts"}, `module multi: variant codex sets kind "prompts"`},
-		{"empty path", Variant{"agents": ""}, `module multi: variant codex reads agents from "", which is not a directory inside the module`},
-		{"the module root", Variant{"agents": "."}, `module multi: variant codex reads agents from ".", which is not a directory inside the module`},
-		{"a parent", Variant{"agents": "../other"}, `module multi: variant codex reads agents from "../other", which is not a directory inside the module`},
-		{"an absolute path", Variant{"agents": "/etc"}, `module multi: variant codex reads agents from "/etc", which is not a directory inside the module`},
+		{"unknown kind", Variant{"prompts": "prompts"}, "Remove \"prompts\" from variant codex of module multi.\n  A variant sets the directory of one of skills, agents, commands, output-styles, hooks, mcp, or files."},
+		{"empty path", Variant{"agents": ""}, "Set the agents directory of variant codex of module multi to a directory inside the module.\n  Variant codex reads agents from \"\", which is not one."},
+		{"the module root", Variant{"agents": "."}, "Set the agents directory of variant codex of module multi to a directory inside the module.\n  Variant codex reads agents from \".\", which is not one."},
+		{"a parent", Variant{"agents": "../other"}, "Set the agents directory of variant codex of module multi to a directory inside the module.\n  Variant codex reads agents from \"../other\", which is not one."},
+		{"an absolute path", Variant{"agents": "/etc"}, "Set the agents directory of variant codex of module multi to a directory inside the module.\n  Variant codex reads agents from \"/etc\", which is not one."},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -340,7 +340,7 @@ func TestReadManifestRefusesADirectoryWithoutOne(t *testing.T) {
 	if err == nil {
 		t.Fatalf("read %+v from a directory without a manifest", m)
 	}
-	want := dir + " has no qory-module.yaml; a module has one that defines its name"
+	want := "Add qory-module.yaml to the module directory.\n  " + dir + " has no qory-module.yaml, and a module has one that defines its name."
 	if err.Error() != want {
 		t.Fatalf("error %q, want %q", err, want)
 	}
@@ -393,7 +393,7 @@ func TestReadManifestRefuses(t *testing.T) {
 		{
 			"missing name",
 			"apiVersion: qory.dev/v1alpha1\n",
-			"name is required",
+			"Add name to qory-module.yaml.",
 		},
 		{
 			"unknown field",
@@ -403,17 +403,17 @@ func TestReadManifestRefuses(t *testing.T) {
 		{
 			"a default that is not a variant",
 			"apiVersion: qory.dev/v1alpha1\nname: core\nvariants:\n  codex:\n    agents: agents/codex\n  default: claude\n",
-			`variants.default selects "claude", which is not a variant`,
+			"Set variants.default to a variant the manifest declares, or fail.\n  variants.default is \"claude\", which is not a variant.",
 		},
 		{
 			"a default that is not a string",
 			"apiVersion: qory.dev/v1alpha1\nname: core\nvariants:\n  default:\n    agents: agents/claude\n",
-			"variants.default:",
+			"Set variants.default to a variant name, or fail.",
 		},
 		{
 			"a variant that is not a map of kinds",
 			"apiVersion: qory.dev/v1alpha1\nname: core\nvariants:\n  codex: agents/codex\n",
-			"variants.codex:",
+			"Set variants.codex to a map of a kind to a directory.",
 		},
 		{
 			"broken yaml",
@@ -482,14 +482,14 @@ func TestReadManifestRefusesEnv(t *testing.T) {
 		env  string
 		want string
 	}{
-		{"a key with a dash", "  core-home: scripts\n", "env: core-home is not an environment variable name"},
-		{"a key starting with a digit", "  1CORE: scripts\n", "env: 1CORE is not an environment variable name"},
-		{"an empty key", `  "": scripts` + "\n", "env:  is not an environment variable name"},
-		{"qory's own variable", "  QORY_HARNESS_HOME: .\n", "env.QORY_HARNESS_HOME is qory's; a module exports another name"},
-		{"an empty value", `  CORE_HOME: ""` + "\n", "env.CORE_HOME:  is not a path inside the module"},
-		{"an absolute value", "  CORE_HOME: /etc\n", "env.CORE_HOME: /etc is not a path inside the module"},
-		{"the parent", "  CORE_HOME: ..\n", "env.CORE_HOME: .. is not a path inside the module"},
-		{"a path leaving the module", "  CORE_HOME: scripts/../../other\n", "env.CORE_HOME: scripts/../../other is not a path inside the module"},
+		{"a key with a dash", "  core-home: scripts\n", "Rename the key core-home in env of the manifest.\n  core-home is not an environment variable name."},
+		{"a key starting with a digit", "  1CORE: scripts\n", "Rename the key 1CORE in env of the manifest.\n  1CORE is not an environment variable name."},
+		{"an empty key", `  "": scripts` + "\n", "Rename the key  in env of the manifest.\n   is not an environment variable name."},
+		{"qory's own variable", "  QORY_HARNESS_HOME: .\n", "Remove env.QORY_HARNESS_HOME from the manifest.\n  qory sets QORY_HARNESS_HOME, so a module exports another name."},
+		{"an empty value", `  CORE_HOME: ""` + "\n", "Set env.CORE_HOME to a path inside the module.\n   is not a path inside the module."},
+		{"an absolute value", "  CORE_HOME: /etc\n", "Set env.CORE_HOME to a path inside the module.\n  /etc is not a path inside the module."},
+		{"the parent", "  CORE_HOME: ..\n", "Set env.CORE_HOME to a path inside the module.\n  .. is not a path inside the module."},
+		{"a path leaving the module", "  CORE_HOME: scripts/../../other\n", "Set env.CORE_HOME to a path inside the module.\n  scripts/../../other is not a path inside the module."},
 		{"a value that is not a string", "  CORE_HOME: [a]\n", "cannot unmarshal"},
 	}
 	for _, c := range cases {
@@ -542,19 +542,19 @@ func TestSelectVariantPicksTheForcedRuntimeOrDefaultOne(t *testing.T) {
 		{name: "the module root without a manifest", runtime: "claude", want: ""},
 		{
 			name: "a default of fail", manifest: failing, runtime: "gemini",
-			wantErr: "the module has no variant for runtime gemini and its default is fail; variants: claude, codex",
+			wantErr: "Select a variant of the module in qory.yaml.\n  The module has no variant for runtime gemini, and its default is fail.\n  The variants are claude and codex.",
 		},
 		{
 			name: "no default at all", manifest: two, runtime: "gemini",
-			wantErr: "the module has no variant for runtime gemini and declares no default; variants: claude, codex",
+			wantErr: "Select a variant of the module in qory.yaml.\n  The module has no variant for runtime gemini, and declares no default.\n  The variants are claude and codex.",
 		},
 		{
 			name: "a forced variant the module has not", manifest: two, forced: "amp", runtime: "claude",
-			wantErr: `variant "amp" is forced, and the module has no such variant; variants: claude, codex`,
+			wantErr: "Set the variant of the module in qory.yaml to one the module has.\n  Variant \"amp\" is forced, and the module has no such variant.\n  The variants are claude and codex.",
 		},
 		{
 			name: "a forced variant on a module without variants", manifest: &Manifest{Name: "core"}, forced: "codex", runtime: "claude",
-			wantErr: `variant "codex" is forced, and the module declares no variants`,
+			wantErr: "Remove variant \"codex\" from the module in qory.yaml.\n  Variant \"codex\" is forced, and the module declares no variants.",
 		},
 	}
 	for _, c := range cases {
@@ -597,8 +597,8 @@ func TestReadPropagatesADirectoryError(t *testing.T) {
 			if err == nil {
 				t.Fatalf("read %s without permission", kind)
 			}
-			if !strings.HasPrefix(err.Error(), "module core: ") {
-				t.Fatalf("error %q does not name the module", err)
+			if !strings.HasPrefix(err.Error(), "Check that you can read the files of module core.\n  ") {
+				t.Fatalf("error %q does not start with the fix that names the module", err)
 			}
 		})
 	}
@@ -628,7 +628,7 @@ func TestReadRefusesADanglingSkillLink(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err := Read("core", dir, nil, "")
-	if want := "module core: remove the link skills/review, or point it at a path that exists: it leads nowhere"; err == nil || err.Error() != want {
+	if want := "Point the link at a path that exists, or remove it.\n  The link skills/review in module core leads nowhere."; err == nil || err.Error() != want {
 		t.Fatalf("error %v, want %q", err, want)
 	}
 }

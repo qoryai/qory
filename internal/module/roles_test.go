@@ -48,7 +48,7 @@ func TestReadManifestRefusesRolesItDoesNotRead(t *testing.T) {
 		{"provides:\n  agents:\n    developer: qak_/x\n", "Set provides.agents.developer to an entry's name"},
 		{"provides:\n  skills:\n    qak_x: [a, b]\n", "Write one name for provides.skills.(a name that contains an access key secret).\n"},
 		{"roles:\n  skills:\n    qak_x: many\n", "Set roles.skills.(a name that contains an access key secret) of the module to one.\n  Only an agents role can be a group. The map is in {path}."},
-		{"provides:\n  agents:\n    qak_x: a\n    qak_x: b\n", "{path}: provides: "},
+		{"provides:\n  agents:\n    qak_x: a\n    qak_x: b\n", "Correct provides in the manifest.\n  "},
 	} {
 		dir := tree(t, map[string]string{ManifestName: head + c.body})
 		_, err := ReadManifest(dir)
