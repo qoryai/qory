@@ -185,7 +185,7 @@ func TestFileInHoldsOneOfTwoNames(t *testing.T) {
 	harness := filepath.Join(dir, "harness.yaml")
 	writeRaw(t, harness, "")
 	_, err = config.FileIn(dir)
-	want := dir + " contains both qory.yaml and harness.yaml; a directory contains one of the two"
+	want := "Remove qory.yaml or harness.yaml.\n  " + dir + " contains both, and a directory contains one of the two."
 	if err == nil || err.Error() != want {
 		t.Fatalf("both: err = %v, want %q", err, want)
 	}
@@ -227,7 +227,7 @@ func TestHarnessYamlIsReadAtEveryLevel(t *testing.T) {
 	}
 	write(t, filepath.Join(root, "qory.yaml"), "")
 	_, err = config.Load(root, true)
-	want := root + " contains both qory.yaml and harness.yaml; a directory contains one of the two"
+	want := "Remove qory.yaml or harness.yaml.\n  " + root + " contains both, and a directory contains one of the two."
 	if err == nil || err.Error() != want {
 		t.Fatalf("both names: err = %v, want %q", err, want)
 	}

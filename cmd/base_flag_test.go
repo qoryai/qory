@@ -157,7 +157,7 @@ func TestHarnessYamlIsTheDocumentsOtherName(t *testing.T) {
 	writeFile(t, filepath.Join(root, "qory.yaml"), "worktree: {base: main}\n")
 	for _, args := range [][]string{{"harness", "compose"}, {"config"}} {
 		_, err = run(t, args...)
-		if err == nil || !strings.Contains(err.Error(), root+" contains both qory.yaml and harness.yaml; a directory contains one of the two") {
+		if err == nil || !strings.Contains(err.Error(), "Remove qory.yaml or harness.yaml.\n  "+root+" contains both, and a directory contains one of the two.") {
 			t.Fatalf("%s with both names: %v", strings.Join(args, " "), err)
 		}
 	}

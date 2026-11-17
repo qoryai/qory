@@ -52,7 +52,7 @@ func File(dir string) (string, error) {
 			continue
 		}
 		if found != "" {
-			return "", fmt.Errorf("%s contains both %s and %s; a directory contains one of the two", dir, FileName, AltFileName)
+			return "", Refuse(fmt.Sprintf("Remove %s or %s.", FileName, AltFileName), HidePath(dir)+" contains both, and a directory contains one of the two.")
 		}
 		found = path
 	}

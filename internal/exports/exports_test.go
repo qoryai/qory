@@ -199,7 +199,7 @@ func TestReadTakesEitherNameAndNoAPIVersion(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = exports.Read(root)
-	if err == nil || !strings.Contains(err.Error(), "contains both qory.yaml and harness.yaml; a directory contains one of the two") {
+	if err == nil || !strings.Contains(err.Error(), "Remove qory.yaml or harness.yaml.\n  ") {
 		t.Fatalf("both names: %v", err)
 	}
 }

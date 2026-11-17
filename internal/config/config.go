@@ -649,7 +649,7 @@ func composeIn(dir string, owned bool) (string, error) {
 	case 1:
 		return found[0], nil
 	}
-	return "", exports.Refuse(fmt.Sprintf("Remove %s, or the harness section of %s.", stack.FileName, filepath.Base(path)), fmt.Sprintf("%s contains both, and a directory contains one of the two.", dir))
+	return "", exports.Refuse(fmt.Sprintf("Remove %s, or the harness section of %s.", stack.FileName, filepath.Base(path)), fmt.Sprintf("%s contains both, and a directory contains one of the two.", exports.HidePath(dir)))
 }
 
 // LoadStack reads the document at path as [DiscoverStack] or -f selected it: a
