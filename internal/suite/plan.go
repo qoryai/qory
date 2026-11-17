@@ -4,7 +4,7 @@
 // full suite's command on the clone through a [Runner], and keeps the state, the counts
 // and the last part of the output of each suite it started. The command and the file it
 // writes its result to come from the launch build plan, see [FullRow]; the counts come
-// from that file, see [ReadCounts].
+// from that file, see [ReadResult] and [ParseJUnit].
 package suite
 
 import (

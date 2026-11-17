@@ -2,6 +2,7 @@ package suite_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -103,7 +104,10 @@ func TestTheSuiteStatesFollowTheResultFile(t *testing.T) {
 		{"no result file", "", 0, suite.Passed, nil},
 		{"unreadable result file", "tests: 4 passed", 0, suite.Passed, nil},
 		{"totals do not match", `<testsuite tests="4"><testcase/></testsuite>`, 0, suite.Failed, nil},
-		{"command fails", pass, 1, suite.Failed, nil},
+		{"command fails and wrote counts", pass, 1, suite.Failed, &suite.Counts{Tests: 2}},
+		{"command fails with a failed test", `<testsuite><testcase name="a"/><testcase name="b"><failure/></testcase></testsuite>`, 1, suite.Failed, &suite.Counts{Tests: 2, Failed: 1}},
+		{"command fails with an unreadable file", "tests: 4 passed", 1, suite.Failed, nil},
+		{"command fails with totals that do not match", `<testsuite tests="4"><testcase/></testsuite>`, 1, suite.Failed, nil},
 		{"command fails with no file", "", 2, suite.Failed, nil},
 	} {
 		t.Run(c.name, func(t *testing.T) {
@@ -292,6 +296,43 @@ func TestCloseRemovesTheClones(t *testing.T) {
 	}
 	if entries, _ := os.ReadDir(root); len(entries) != 0 {
 		t.Errorf("%d folders left after the close", len(entries))
+	}
+}
+
+func TestNoSuiteStartsAfterClose(t *testing.T) {
+	root := t.TempDir()
+	r := newRegistry(t, context.Background(), writes("", 0), func(c *suite.Config) { c.Root = root })
+	if err := r.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := r.Start(context.Background(), commitA); !errors.Is(err, context.Canceled) {
+		t.Errorf("Start after Close returned %v, want context.Canceled", err)
+	}
+	if entries, _ := os.ReadDir(root); len(entries) != 0 {
+		t.Errorf("%d folders in the root after a Start that Close refused", len(entries))
+	}
+}
+
+// TestACloneThatCloseOvertookIsRemoved is a Close that runs while the commit is cloned: the suite
+// does not start, and its clone does not stay.
+func TestACloneThatCloseOvertookIsRemoved(t *testing.T) {
+	root := t.TempDir()
+	var r *suite.Registry
+	clone := fakeClone(map[string]string{"main.go": "package main"})
+	r = newRegistry(t, context.Background(), writes("", 0), func(c *suite.Config) {
+		c.Root = root
+		c.Clone = func(ctx context.Context, src, commit, dest string) error {
+			if err := clone(ctx, src, commit, dest); err != nil {
+				return err
+			}
+			return r.Close()
+		}
+	})
+	if _, _, err := r.Start(context.Background(), commitA); !errors.Is(err, context.Canceled) {
+		t.Errorf("Start returned %v, want context.Canceled", err)
+	}
+	if entries, _ := os.ReadDir(root); len(entries) != 0 {
+		t.Errorf("%d folders left in the root", len(entries))
 	}
 }
 

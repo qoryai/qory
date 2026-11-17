@@ -101,7 +101,9 @@ type Registry struct {
 	byID     map[string]*entry
 	byCommit map[string]*entry
 	newest   *entry
-	wg       sync.WaitGroup
+	// stopped is set by Close: no suite starts after it.
+	stopped bool
+	wg      sync.WaitGroup
 }
 
 // entry is one suite of a registry.
@@ -143,7 +145,11 @@ func (r *Registry) Start(ctx context.Context, commit string) (snap Snapshot, cre
 		r.mu.Unlock()
 		return snap, false, nil
 	}
+	stopped := r.stopped
 	r.mu.Unlock()
+	if stopped {
+		return Snapshot{}, false, context.Canceled
+	}
 	if err := r.ctx.Err(); err != nil {
 		return Snapshot{}, false, err
 	}
@@ -159,6 +165,13 @@ func (r *Registry) Start(ctx context.Context, commit string) (snap Snapshot, cre
 	runCtx, cancel := context.WithCancelCause(r.ctx)
 	e.cancel = cancel
 	r.mu.Lock()
+	if r.stopped {
+		// Close ran while the commit was cloned: nothing would remove the clone.
+		r.mu.Unlock()
+		cancel(nil)
+		_ = removeAll(dir)
+		return Snapshot{}, false, context.Canceled
+	}
 	for _, other := range r.byID {
 		if other.state == Running {
 			other.cancel(errSuperseded)
@@ -166,8 +179,8 @@ func (r *Registry) Start(ctx context.Context, commit string) (snap Snapshot, cre
 	}
 	r.byID[id], r.byCommit[commit], r.newest = e, e, e
 	snap = r.snapshot(e)
-	r.mu.Unlock()
 	r.wg.Add(1)
+	r.mu.Unlock()
 	go r.run(runCtx, e)
 	return snap, true, nil
 }
@@ -191,6 +204,7 @@ func (r *Registry) run(ctx context.Context, e *entry) {
 		fmt.Fprintf(e.out, "\nqory could not run the suite: %v\n", err)
 	case exit != 0:
 		fmt.Fprintf(e.out, "\nThe suite's command exited with status %d.\n", exit)
+		counts = r.countsOf(e, before)
 	default:
 		state, counts = r.judge(e, before)
 	}
@@ -231,6 +245,23 @@ func (r *Registry) judge(e *entry, before Stamp) (State, *Counts) {
 		return Failed, &counts
 	}
 	return Passed, &counts
+}
+
+// countsOf is the counts of the result file of a suite whose command exited other than 0: nil
+// when the command wrote no readable file, as for a suite that passed.
+func (r *Registry) countsOf(e *entry, before Stamp) *Counts {
+	if r.cfg.Full.ResultFile == "" {
+		return nil
+	}
+	after, data := ReadResult(e.dir, r.cfg.Full.ResultFile)
+	if !Fresh(before, after) {
+		return nil
+	}
+	counts, err := ParseJUnit(data)
+	if err != nil {
+		return nil
+	}
+	return &counts
 }
 
 // snapshot is e as a request reads it. The caller holds r.mu.
@@ -303,8 +334,12 @@ func (r *Registry) Stop() {
 	r.wg.Wait()
 }
 
-// Close stops every suite and removes the clones.
+// Close stops every suite and removes the clones. A Start after Close fails with
+// [context.Canceled].
 func (r *Registry) Close() error {
+	r.mu.Lock()
+	r.stopped = true
+	r.mu.Unlock()
 	r.Stop()
 	r.mu.Lock()
 	defer r.mu.Unlock()

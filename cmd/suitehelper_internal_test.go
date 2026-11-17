@@ -260,6 +260,19 @@ func TestARedSuitePostsChangesRequestedAfterTheSessionEnded(t *testing.T) {
 	}
 }
 
+// TestACommandThatExitsOtherThanZeroPostsTheCountsOfItsResultFile: a suite whose command wrote a
+// result file and exited 1 is red, and its point has the counts of the file.
+func TestACommandThatExitsOtherThanZeroPostsTheCountsOfItsResultFile(t *testing.T) {
+	h := newHelper(t, suiteWrites(redResult, 1))
+	h.start(t, suiteCommit)
+	if got, err := h.after(context.Background(), time.Time{}, succeeded); err != nil || got != succeeded {
+		t.Errorf("outcome %+v, error %v", got, err)
+	}
+	if posted := h.api.verdicts(); len(posted) != 1 || posted[0] != bodyChanges {
+		t.Errorf("posted %q, want one %s", posted, bodyChanges)
+	}
+}
+
 // TestAGreenSuitePostsNothingAndTheAgentsVerdictStands: a suite that passes posts no verdict, and
 // neither does a run that started no suite or a session that did not succeed.
 func TestAGreenSuitePostsNothingAndTheAgentsVerdictStands(t *testing.T) {

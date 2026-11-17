@@ -3363,7 +3363,8 @@ that the harness's checks read: each `testcase` element is a test; a `testcase` 
 `failure` or `error` element failed; one with a `skipped` element, and no failure, was
 skipped. The file needs a `testsuite` or `testsuites` element. A `testsuite` that states
 more tests, failures or skipped tests than its testcases have, or a `failure` outside every
-`testcase`, makes the suite `failed` with `counts` `null`.
+`testcase`, makes the suite `failed` with `counts` `null`. qory reads the file when the
+command exits other than 0 too, so a failed suite shows how many tests failed.
 
 **State.** The suite is `failed` when the command exits other than 0, when a test failed, and
 when it ran 0 tests. Skipped tests do not fail it: `counts.skipped` shows them. With exit
