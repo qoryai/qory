@@ -4231,8 +4231,8 @@ A workflow declared `write-no-push` with `access: read` gives a read run.
 
 A `write-no-push` run gets a writable checkout, and qory runs no push step for it: it
 pushes no commit, creates no branch on the forge, stores no version of the artifact
-`branch` and opens the host proxy for the fetch alone, so qory asks for no write token or
-push credential for it. qory has no submit step yet, and the run contract refuses `submit` on a
+`branch`. qory opens the host proxy for the fetch alone and closes it before the agent
+starts, so the agent's session has no push path. qory has no submit step yet, and the run contract refuses `submit` on a
 `write-no-push` run. With no wall, such a run stops with `write_needs_wall`, as a write
 run does.
 
