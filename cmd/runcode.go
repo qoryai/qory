@@ -141,7 +141,7 @@ func runCodeFlags(fileSet, gatewaySet, keyFD bool, gatewayURL string) error {
 		return input(fmt.Errorf("add --%s <file>, or leave out --%s: --%s is the gateway that a run code is redeemed through", runCodeFileFlag, gatewayFlag, gatewayFlag))
 	}
 	if err := config.CheckViaURL("--"+gatewayFlag, gatewayURL); err != nil {
-		return input(fmt.Errorf("set --%s to the gateway's https URL, a host and an optional port: %w", gatewayFlag, err))
+		return input(err)
 	}
 	return nil
 }
