@@ -223,17 +223,13 @@ func (r *suiteRun) close() {
 	if err := r.reg.Close(); err != nil {
 		r.said("remove the folders of the full suites under the run's folder: " + shownError(err))
 	}
+	// The folder is empty after Close; a folder that is not stays for the run's removal.
+	_ = os.Remove(filepath.Join(r.run.Dir(), suitesDir))
 }
 
-// after is the helper that runs once the session exited with out and before the push step: it
-// waits for the newest suite, if the session started one, until the suite ends, the run's time
-// limit passes or qory run is stopped, and posts the verdict that the suite sets: nothing for a
-// green suite, changes-requested for a red one over a passed verdict or none, and for an escalate
-// of the agent the same escalate with the red suite added as a point. A session that did not
-// succeed gets no wait, and its suites stop. It returns the outcome the run closes with, out
-// unless the wait was cut or the post failed, and the error of the status qory run exits with, nil
-// for none. A suite that a stop or the limit ends is red, and the wait's end closes the run as
-// the push step's does.
+// after waits for the newest suite once the session exited with out, before the push step, and
+// posts the verdict of a red suite: see [suiteRun.post]. It returns the outcome the run closes
+// with, and the error that sets the exit status; a cut wait or a failed post changes them.
 func (r *suiteRun) after(ctx, again context.Context, limit time.Time, stopNow func() stopRead, out session.Outcome) (session.Outcome, error) {
 	if r == nil || r.reg == nil {
 		return out, nil
@@ -249,8 +245,8 @@ func (r *suiteRun) after(ctx, again context.Context, limit time.Time, stopNow fu
 	if !limit.IsZero() {
 		wait, cancelWait = context.WithDeadline(ctx, limit)
 	}
-	snap, started, _ := r.reg.Wait(wait)
-	cut := wait.Err() != nil
+	snap, started, waitErr := r.reg.Wait(wait)
+	cut := waitErr != nil
 	cancelWait()
 	if !started {
 		return out, nil

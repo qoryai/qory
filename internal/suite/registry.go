@@ -101,7 +101,7 @@ type Registry struct {
 	byID     map[string]*entry
 	byCommit map[string]*entry
 	newest   *entry
-	// stopped is set by Close: no suite starts after it.
+	// stopped is set by Stop: no suite starts after it.
 	stopped bool
 	wg      sync.WaitGroup
 }
@@ -166,7 +166,7 @@ func (r *Registry) Start(ctx context.Context, commit string) (snap Snapshot, cre
 	e.cancel = cancel
 	r.mu.Lock()
 	if r.stopped {
-		// Close ran while the commit was cloned: nothing would remove the clone.
+		// Stop ran while the commit was cloned: no suite starts, and the clone goes.
 		r.mu.Unlock()
 		cancel(nil)
 		_ = removeAll(dir)
@@ -303,8 +303,8 @@ func (r *Registry) Newest() (Snapshot, bool) {
 	return r.snapshot(r.newest), true
 }
 
-// Wait returns the newest suite once it ended, or ctx's error when ctx ends first; false
-// when no suite started.
+// Wait returns the newest suite once it ended, or ctx's error when ctx ends before the
+// suite does; false when no suite started.
 func (r *Registry) Wait(ctx context.Context) (Snapshot, bool, error) {
 	r.mu.Lock()
 	e := r.newest
@@ -315,16 +315,23 @@ func (r *Registry) Wait(ctx context.Context) (Snapshot, bool, error) {
 	select {
 	case <-e.done:
 	case <-ctx.Done():
-		return Snapshot{}, true, ctx.Err()
+		// A suite that ended before ctx did is not cut, also when both are ready.
+		select {
+		case <-e.done:
+		default:
+			return Snapshot{}, true, ctx.Err()
+		}
 	}
 	snap, _ := r.Get(e.id)
 	return snap, true, nil
 }
 
 // Stop ends every suite that runs, as a stop of the run does, and returns once each
-// runner returned, so no process of a suite is left.
+// runner returned, so no process of a suite is left. A Start after Stop, also one that
+// is cloning its commit during Stop, starts no suite and fails with [context.Canceled].
 func (r *Registry) Stop() {
 	r.mu.Lock()
+	r.stopped = true
 	for _, e := range r.byID {
 		if e.state == Running {
 			e.cancel(errStopped)
@@ -334,12 +341,8 @@ func (r *Registry) Stop() {
 	r.wg.Wait()
 }
 
-// Close stops every suite and removes the clones. A Start after Close fails with
-// [context.Canceled].
+// Close stops every suite and removes the clones.
 func (r *Registry) Close() error {
-	r.mu.Lock()
-	r.stopped = true
-	r.mu.Unlock()
 	r.Stop()
 	r.mu.Lock()
 	defer r.mu.Unlock()

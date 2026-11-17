@@ -44,6 +44,7 @@ const (
 	textRouteCommitMissing  = "Send the field commit in the suite request: it has none."
 	textRouteBadCommit      = "Send commit as the 40 or 64 lower-case hex digits of a commit id: the commit is not one."
 	textRouteCommitNotTaken = "Send a commit of the session's checkout: qory could not take that commit from it."
+	textRouteCloneTime      = "Send the request again: qory ran out of time taking that commit from the session's checkout."
 	textRouteUnknownSuite   = "Use the suite id that POST /v1/suites returned: %s is unknown."
 	textRouteNoBuildPlan    = "Push a build plan before the next run: this run started with none, so qory has no suite command."
 	textRouteNoFullCommand  = "Add a full row with a command to Commands in the build plan: the plan of this run has none."
@@ -136,7 +137,11 @@ func (h *suiteHost) start(w http.ResponseWriter, r *http.Request) {
 		return
 	case err != nil:
 		h.said("the full suite did not start: " + shownError(err))
-		routeAnswer(w, http.StatusUnprocessableEntity, routeCommitNotTaken, textRouteCommitNotTaken)
+		text := textRouteCommitNotTaken
+		if errors.Is(err, suite.ErrCloneTime) {
+			text = textRouteCloneTime
+		}
+		routeAnswer(w, http.StatusUnprocessableEntity, routeCommitNotTaken, text)
 		return
 	}
 	state, status := string(snap.State), http.StatusOK

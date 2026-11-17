@@ -303,6 +303,17 @@ func TestASuiteWithNoCommandIsRefusedBeforeItStarts(t *testing.T) {
 			t.Errorf("lines %q, want one with git's reason", *said)
 		}
 	})
+	t.Run("a clone that ran out of time", func(t *testing.T) {
+		q, _, _ := suiteRoute(t, context.Background(), suiteWrites("", 0), func(c *suite.Config) {
+			c.Clone = func(context.Context, string, string, string) error {
+				return fmt.Errorf("git fetch: %w", suite.ErrCloneTime)
+			}
+		})
+		status, got, _ := suiteAsk(t, q, http.MethodPost, "/v1/suites", `{"commit":"`+suiteCommit+`"}`)
+		if status != http.StatusUnprocessableEntity || got["error"] != routeCommitNotTaken || got["message"] != textRouteCloneTime {
+			t.Errorf("%d %v, want 422 %s with %q", status, got, routeCommitNotTaken, textRouteCloneTime)
+		}
+	})
 	t.Run("a run that ends", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		q, _, _ := suiteRoute(t, ctx, suiteWrites("", 0))
@@ -320,7 +331,7 @@ func TestTheSuiteTextsStartWithTheFix(t *testing.T) {
 	name := strings.Repeat("n", suiteNameMax)
 	for _, text := range []string{
 		textRouteMethod, textRouteNotFoundSuites, textRouteBadBody, fmt.Sprintf(textRouteField, name), textRouteCommitMissing,
-		textRouteBadCommit, textRouteCommitNotTaken, fmt.Sprintf(textRouteUnknownSuite, name), textRouteNoBuildPlan, textRouteNoFullCommand, textRouteRunEnding, textRouteSuiteFolder,
+		textRouteBadCommit, textRouteCommitNotTaken, textRouteCloneTime, fmt.Sprintf(textRouteUnknownSuite, name), textRouteNoBuildPlan, textRouteNoFullCommand, textRouteRunEnding, textRouteSuiteFolder,
 	} {
 		if strings.Contains(text, "\n") || len(text) > 100 {
 			t.Errorf("%q is more than one line of 100 characters", text)

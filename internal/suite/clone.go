@@ -3,6 +3,7 @@ package suite
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -33,16 +34,21 @@ var checkoutLF = []string{"-c", "core.autocrlf=false", "-c", "core.eol=lf"}
 // cloneWait is the longest the clone of one commit may take.
 const cloneWait = 25 * time.Second
 
+// ErrCloneTime is the error of a clone that took longer than [cloneWait].
+var ErrCloneTime = errors.New("the clone ran out of time")
+
 // Clone writes the files of commit, a commit of the repository at src, into dest, a
 // folder that does not exist yet, with git as [hostgit] runs it: hooks and the file system
 // monitor off, no configuration file of the person's, no transport but a path on this
 // machine. The folder contains a repository whose HEAD is commit, so that nothing
-// in it points back to src. Submodules are not checked out. A failure leaves nothing
-// of dest.
+// in it points back to src. The clone is shallow: it has commit and no earlier commit.
+// Submodules are not checked out. A failure leaves nothing of dest, and a clone past
+// [cloneWait] fails with [ErrCloneTime].
 func Clone(ctx context.Context, src, commit, dest string) (err error) {
 	if !ValidCommit(commit) {
 		return fmt.Errorf("%q is not a full commit id", commit)
 	}
+	parent := ctx
 	ctx, cancel := context.WithTimeout(ctx, cloneWait)
 	defer cancel()
 	if err := os.Mkdir(dest, 0o700); err != nil {
@@ -55,11 +61,14 @@ func Clone(ctx context.Context, src, commit, dest string) (err error) {
 	}()
 	steps := [][]string{
 		{"init", "--quiet"},
-		{"fetch", "--quiet", "--no-tags", "--no-recurse-submodules", "--no-write-fetch-head", "--", src, commit},
+		{"fetch", "--quiet", "--no-tags", "--no-recurse-submodules", "--no-write-fetch-head", "--depth=1", "--", src, commit},
 		slices.Concat(checkoutLF, []string{"checkout", "--quiet", "--force", "--detach", commit}),
 	}
 	for _, step := range steps {
 		if err := git(ctx, dest, step...); err != nil {
+			if parent.Err() == nil && errors.Is(ctx.Err(), context.DeadlineExceeded) {
+				return fmt.Errorf("%w: %s", ErrCloneTime, err)
+			}
 			return err
 		}
 	}

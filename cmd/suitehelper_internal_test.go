@@ -435,6 +435,50 @@ func TestTheTimeLimitAndAStopEndTheWait(t *testing.T) {
 	})
 }
 
+// TestASuiteThatEndedBeforeTheLimitIsNotCut: a red suite that ended before the run's time limit
+// passed is judged as it ended, and the run's outcome stays the session's.
+func TestASuiteThatEndedBeforeTheLimitIsNotCut(t *testing.T) {
+	h := newHelper(t, suiteWrites(redResult, 0))
+	h.start(t, suiteCommit)
+	if _, ok, err := h.reg.Wait(context.Background()); !ok || err != nil {
+		t.Fatalf("Wait = %v, %v", ok, err)
+	}
+	got, err := h.after(context.Background(), time.Now().Add(-time.Second), succeeded)
+	if err != nil || got != succeeded {
+		t.Errorf("outcome %+v, error %v, want the session's outcome", got, err)
+	}
+	if posted := h.api.verdicts(); len(posted) != 1 || posted[0] != bodyChanges {
+		t.Errorf("posted %q, want one %s", posted, bodyChanges)
+	}
+}
+
+// TestCloseRemovesTheEmptyFolderOfTheSuites: the run's folder has no suites folder once the run's
+// suites are closed.
+func TestCloseRemovesTheEmptyFolderOfTheSuites(t *testing.T) {
+	api := newFakeAPI(t)
+	api.withPlan(buildPlanText)
+	source, commit := suiteSource(t)
+	was := runGitContainer
+	runGitContainer = func(context.Context, gitContainer) (int, error) { return 0, nil }
+	t.Cleanup(func() { runGitContainer = was })
+	run := apiRun{api: api, dir: t.TempDir()}
+	route := newQoryRoute()
+	suites := openSuites(context.Background(), suiteSetup{run: run, spec: &runSpec{}, route: route, runID: "r1", walled: true, source: source, said: func(string) {}})
+	closeRoute := route.open(1)
+	status, got, _ := suiteAsk(t, route, http.MethodPost, "/v1/suites", `{"commit":"`+commit+`"}`)
+	closeRoute()
+	if status != http.StatusCreated {
+		t.Fatalf("POST: %d %v", status, got)
+	}
+	if _, err := os.Stat(filepath.Join(run.dir, suitesDir)); err != nil {
+		t.Fatalf("the suites folder is not there while the suite exists: %v", err)
+	}
+	suites.close()
+	if _, err := os.Stat(filepath.Join(run.dir, suitesDir)); !os.IsNotExist(err) {
+		t.Errorf("the suites folder is still there after close: %v", err)
+	}
+}
+
 // TestASuiteOverItsCapIsStoppedAndRed: a suite past its cap ends timeout, and the post says so
 // with the cap's minutes.
 func TestASuiteOverItsCapIsStoppedAndRed(t *testing.T) {

@@ -336,6 +336,59 @@ func TestACloneThatCloseOvertookIsRemoved(t *testing.T) {
 	}
 }
 
+// TestAStopDuringTheCloneOfAStartStartsNoSuite is a Stop that runs while a request clones its
+// commit, as when the session exits with a request in flight: the suite does not start, and the
+// clone does not stay.
+func TestAStopDuringTheCloneOfAStartStartsNoSuite(t *testing.T) {
+	root := t.TempDir()
+	cloning, release := make(chan struct{}), make(chan struct{})
+	clone := fakeClone(map[string]string{"main.go": "package main"})
+	r := newRegistry(t, context.Background(), writes("", 0), func(c *suite.Config) {
+		c.Root = root
+		c.Clone = func(ctx context.Context, src, commit, dest string) error {
+			err := clone(ctx, src, commit, dest)
+			close(cloning)
+			<-release
+			return err
+		}
+	})
+	errc := make(chan error, 1)
+	go func() {
+		_, _, err := r.Start(context.Background(), commitA)
+		errc <- err
+	}()
+	<-cloning
+	r.Stop()
+	close(release)
+	if err := <-errc; !errors.Is(err, context.Canceled) {
+		t.Errorf("Start returned %v, want context.Canceled", err)
+	}
+	if _, ok := r.Newest(); ok {
+		t.Error("a suite started after Stop")
+	}
+	if entries, _ := os.ReadDir(root); len(entries) != 0 {
+		t.Errorf("%d folders left in the root", len(entries))
+	}
+	if _, _, err := r.Start(context.Background(), commitB); !errors.Is(err, context.Canceled) {
+		t.Errorf("Start after Stop returned %v, want context.Canceled", err)
+	}
+}
+
+// TestASuiteThatEndedBeforeTheContextIsNotCut is a Wait whose context is done and whose suite
+// ended: the suite is returned with no error, whichever case the select reaches first.
+func TestASuiteThatEndedBeforeTheContextIsNotCut(t *testing.T) {
+	r := newRegistry(t, context.Background(), writes("", 1))
+	finish(t, r, commitA)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	for range 200 {
+		snap, ok, err := r.Wait(ctx)
+		if err != nil || !ok || snap.State != suite.Failed {
+			t.Fatalf("Wait = %+v, %v, %v, want the ended suite and no error", snap, ok, err)
+		}
+	}
+}
+
 func TestEndedIsCalledOnceForEachSuiteWithItsEnd(t *testing.T) {
 	var mu sync.Mutex
 	var ended []suite.Snapshot

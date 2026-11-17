@@ -142,3 +142,53 @@ func TestValidCommit(t *testing.T) {
 		}
 	}
 }
+
+// TestCloneIsShallow: the clone has the commit and none of the commits before it.
+func TestCloneIsShallow(t *testing.T) {
+	src, _, second, _ := repo(t)
+	dest := filepath.Join(t.TempDir(), "clone")
+	if err := suite.Clone(context.Background(), src, second, dest); err != nil {
+		t.Fatal(err)
+	}
+	out, err := exec.Command("git", "-C", dest, "rev-list", "--count", "HEAD").CombinedOutput()
+	if err != nil || strings.TrimSpace(string(out)) != "1" {
+		t.Errorf("the clone has %q commits, %v, want 1", out, err)
+	}
+}
+
+// TestCloneIgnoresTheConfigurationAndTheAlternatesOfTheSource: a source whose repository
+// configuration includes a file that sets a hook for the transfer, and whose alternates name a
+// repository outside it, runs no command and gives the clone the files of the commit.
+func TestCloneIgnoresTheConfigurationAndTheAlternatesOfTheSource(t *testing.T) {
+	src, _, second, _ := repo(t)
+	outside := t.TempDir()
+	marker := filepath.Join(outside, "ran")
+	hook := filepath.Join(outside, "hook.sh")
+	write(t, hook, "#!/bin/sh\ntouch "+marker+"\nexec \"$@\"\n")
+	if err := os.Chmod(hook, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	extra := filepath.Join(outside, "extra.cfg")
+	write(t, extra, "[uploadpack]\n\tpackObjectsHook = "+hook+"\n[core]\n\thooksPath = "+outside+"\n\tfsmonitor = touch "+marker+"\n")
+	cfg, err := os.OpenFile(filepath.Join(src, ".git", "config"), os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := cfg.WriteString("[include]\n\tpath = " + extra + "\n"); err != nil {
+		t.Fatal(err)
+	}
+	cfg.Close()
+	other := filepath.Join(outside, "other")
+	write(t, filepath.Join(other, "objects", "x"), "x")
+	write(t, filepath.Join(src, ".git", "objects", "info", "alternates"), filepath.Join(other, "objects")+"\n")
+	dest := filepath.Join(t.TempDir(), "clone")
+	if err := suite.Clone(context.Background(), src, second, dest); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(marker); err == nil {
+		t.Error("a command of the source's configuration ran")
+	}
+	if got, err := os.ReadFile(filepath.Join(dest, "a.txt")); err != nil || string(got) != "two\n" {
+		t.Errorf("a.txt is %q, %v, want the file of the commit", got, err)
+	}
+}

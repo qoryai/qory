@@ -472,8 +472,8 @@ release may change what an existing document does, and states it under Upgrading
 - A script in a session starts the repository's full test suite outside the session with
   `POST /v1/suites {"commit": "<id>"}` on that route, and reads its state, counts and output
   with `GET /v1/suites/<id>`. qory runs the `full` command of the build plan that the work
-  item had when the run started, on a clone of the commit, in a container of the run's image
-  with no network, and reads the counts from the row's JUnit XML result file. The suite's
+  item had after the run's setup commands and before the session joined, on a shallow
+  clone of the commit, in a container of the run's image with no network, and reads the counts from the row's JUnit XML result file. The suite's
   limit is `command_limits_minutes.full_suite`, 60 minutes by default. After the session
   succeeded, qory waits for the suite, and posts `changes-requested` with one point for a
   red suite over a `passed` verdict or none, or adds the point to an `escalate`; a green

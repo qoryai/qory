@@ -3327,27 +3327,32 @@ These requests get an error:
 | `404` | `unknown_suite` | `Use the suite id that POST /v1/suites returned: <id> is unknown.` |
 | `409` | `no_build_plan` | the work item had no build plan when the run started, or qory could not read it |
 | `409` | `no_full_command` | the build plan has no `full` row with a command |
-| `422` | `commit_not_taken` | git could not take the commit from the session's checkout |
+| `422` | `commit_not_taken` | git could not take the commit from the session's checkout, or ran out of time: the clone has 25 seconds, and the text then says `Send the request again: qory ran out of time taking that commit from the session's checkout.` |
 | `500` | `suite_unavailable` | qory could not make the folder of the suites |
 | `503` | `run_ending` | the run is stopping |
 
 **Command.** The command is the `full` row of the table under `## Commands` in the build plan
-that the work item has when the run starts. qory reads the plan once, before the session
-joins, from the artifact `build-plan`: the name `main`, or the one name the work item has, at
-its newest version that is not cancelled. A build plan that the agent pushes during the
-session changes nothing. qory runs the command as `sh -c <command>` in the top folder of the
-clone. Its row has a `Result file`, a path below that folder, or `none`.
+of the artifact `build-plan`: the name `main`, or the one name the work item has, at its newest
+version that is not cancelled. qory reads the plan once, after the setup commands of
+`wall.setup: outside` (the default) and before the session joins. A setup command with
+`wall.setup: inside` and the agent run after the read, so a build plan that they push changes
+nothing. The read is one request for the artifact index, plus one to download the plan when
+the work item has one, for each run with a wall. qory runs the command as `sh -c <command>`
+in the top folder of the clone. Its row has a `Result file`, a path below that folder, or
+`none`.
 
 **Where it runs.** qory clones the commit from the session's checkout with git as `qory run`
 runs it on this machine (hooks, the file monitor and every configuration file of the person
 off, no transport but a path), into a new folder of `suites/` under the run's folder. The
+clone is shallow: it has the commit and no earlier commit, so `git log` in the suite shows one
+commit. The
 suite runs in a container of the run's image, started as the wall's user, with that folder as
 its only bind, the wall's limits of memory and processors, the label of the run, and
 `--network none`. The clone has the files of the commit and nothing else: no submodule, no
 variable of the session, and nothing that a setup command installed or wrote, so a suite that
 needs the network or such files fails. A write to the session's checkout after the
 request changes nothing in the clone. qory removes the container when the suite ends, is
-stopped or reaches its limit, and removes the clone when the run ends.
+stopped or reaches its limit, and removes the clones, and the `suites/` folder when it is empty, when the run ends.
 
 **Limit.** A suite may take 60 minutes. A repository sets another limit in `qory.yaml`, in
 `harness.extensions.software-factory.command_limits_minutes.full_suite`, a whole number from 1 to
