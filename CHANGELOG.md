@@ -487,6 +487,26 @@ release may change what an existing document does, and states it under Upgrading
   qory stops a run whose documents have one. A run whose documents set no
   `time_limit_minutes` keeps the limit of its workflow, else 3 hours. The documents can
   also contain `shared_run` and `full_suite`; qory reads them and changes nothing for them.
+- A prebuild started from Qory Apiary applies the instance's Largest prebuilt image
+  setting, which the run documents carry as `largest_prebuilt_image_bytes`, in decimal
+  bytes. The limit applies to the repository's image, before qory adds Chromium, ffmpeg
+  and the parsers. When that image is larger, the prebuild stops before the tools step with
+  `Make the image smaller, or contact support to raise Largest prebuilt image.` on line 1,
+  then the size and the limit in GB and in bytes, and removes an image the build made. An
+  image of exactly the limit is kept, and without the member any size is kept. The last
+  line of a successful prebuild still prints the final size. `qory prebuild` has no limit.
+  See `docs/run.md`.
+- A push check's container runs under the `runtime` of the `wall.images` entry that the
+  run's policy selects, such as `runsc` (gVisor), when that entry has one. Before, it ran
+  under the default image's `runtime` even when the run's container ran under another.
+- A run with push checks stops before its setup, with exit 2, when the engine's `docker
+  info` does not list the `runtime` that the checks' container runs under, such as
+  `runsc`: `Install the container runtime on the engine, and run again.`, and on the next
+  line the runtime. Before, the checks failed at the first push. An engine whose `docker
+  info` fails lets the run go on, and so does a runtime name that Docker starts as a
+  containerd shim: a `.` after a first part and no `/`, such as `io.containerd.runsc.v1`. A
+  runtime name with a `/` that the list omits stops the run with `Fix the runtime name in
+  wall.images, and run again.`
 - A prebuild keeps an image of any size, and the last line of the prebuild prints the size.
 - A prebuild stops, before it builds the image, when the base image is not Debian or
   Ubuntu 22.04 or 24.04, or has no `apt-get`: `use a Debian or Ubuntu image: the build
@@ -1150,7 +1170,7 @@ release may change what an existing document does, and states it under Upgrading
 ### Fixed
 
 - A push check's container runs under the `runtime` that `wall.images` sets for the
-  image it runs in, such as `runsc` (gVisor). Until now, it ran under the engine's
+  wall's default image, such as `runsc` (gVisor). Until now, it ran under the engine's
   default runtime.
 - A Copilot CLI session gets the harness's hooks in a repository that commits
   `.github/hooks/hooks.json`. qory links `settings/copilot/hooks.json` as

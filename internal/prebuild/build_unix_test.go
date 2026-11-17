@@ -127,7 +127,8 @@ image)
 	case "$2" in
 	inspect)
 		case "$*" in
-		*.Size*) if [ -f `+d+`/size ]; then cat `+d+`/size; else echo 1048576; fi ;;
+		*.Size*) ref=$(echo "$last" | tr ':/' '__')
+			if [ -f `+d+`/size-$ref ]; then cat `+d+`/size-$ref; elif [ -f `+d+`/size ]; then cat `+d+`/size; else echo 1048576; fi ;;
 		*RepoDigests*) name=$last; case "${last##*/}" in *:*) name=${last%:*} ;; esac
 			if [ -f `+d+`/digests ]; then cat `+d+`/digests; else echo "[\"$name@sha256:`+baseDigest+`\"]"; fi ;;
 		*) ref=$(echo "$last" | tr ':/' '__')
@@ -776,6 +777,137 @@ func TestBuildKeepsAnImageOfAnySize(t *testing.T) {
 		if strings.HasPrefix(l, "image rm") && strings.Contains(l, "acme/shop:prebuild") {
 			t.Errorf("the image is removed: docker %s", l)
 		}
+	}
+}
+
+// tooBig is line 1 of the refusal of a repository's image over the largest size.
+const tooBig = "Make the image smaller, or contact support to raise Largest prebuilt image."
+
+// sizeOf is the file of the fake docker that sets the size of image ref.
+func sizeOf(ref string) string { return "size-" + strings.NewReplacer(":", "_", "/", "_").Replace(ref) }
+
+// TestBuildRefusesARepositoryImageOverTheLargestSize is a repository's image, the base the
+// configuration builds, one byte over the run's limit while the final image is under it: the
+// build stops before the tools step, the images it made are removed, the refusal has the fix on
+// line 1, then the repository's image and the limit in GB and in bytes, and no program ran after
+// the image was measured.
+func TestBuildRefusesARepositoryImageOverTheLargestSize(t *testing.T) {
+	f := newFakes(t)
+	f.set(t, sizeOf(testName+":base"), "5000000001\n")
+	f.set(t, "size", "1000\n")
+	var out bytes.Buffer
+	o := options(t, repository(t, shopConfig), &out, io.Discard)
+	o.LargestImageBytes = 5000000000
+	_, err := prebuild.Build(t.Context(), o)
+	var refusal *prebuild.RefusedError
+	want := tooBig + "\nThe repository's image is 5.0 GB (5000000001 bytes), before qory adds Chromium, ffmpeg and the parsers.\nThe limit is 5.0 GB (5000000000 bytes). The image is removed."
+	if !errors.As(err, &refusal) || err.Error() != want {
+		t.Fatalf("Build: %v", err)
+	}
+	if line, _, _ := strings.Cut(err.Error(), "\n"); len(prebuild.Prefix+line) > 100 {
+		t.Errorf("line 1 with its prefix is %d characters", len(prebuild.Prefix+line))
+	}
+	for _, c := range []string{"run --rm", "build --tag", "tag ", "create", "commit"} {
+		if f.called("docker", c) {
+			t.Errorf("docker %s ran after the repository's image was measured\n%s", c, f.read("docker.log"))
+		}
+	}
+	if !f.called("docker", "image rm --force "+testName+":base") || f.called("docker", "image rm --force "+testName+":base "+testName+":tools") {
+		t.Errorf("the images removed are wrong:\n%s", f.read("docker.log"))
+	}
+	if strings.Contains(out.String(), "built acme/shop:prebuild") {
+		t.Error("the image is said built")
+	}
+}
+
+// TestBuildRefusesAPulledImageOverTheLargestSize is an environment image, the repository's image
+// the build starts from, over the limit: refused before the tools step as a built one is, and
+// the engine's image stays, since the engine may have held it before the build.
+func TestBuildRefusesAPulledImageOverTheLargestSize(t *testing.T) {
+	f := newFakes(t)
+	f.set(t, "size", "3000000001\n")
+	o := options(t, repository(t, shopConfig), io.Discard, io.Discard)
+	o.Registry, o.EnvironmentImage = testRegistry, testRegistry+"/acme/environments/0123456789abcdef@"+pinnedDigest
+	o.LargestImageBytes = 3000000000
+	_, err := prebuild.Build(t.Context(), o)
+	want := tooBig + "\nThe repository's image is 3.0 GB (3000000001 bytes), before qory adds Chromium, ffmpeg and the parsers.\nThe limit is 3.0 GB (3000000000 bytes)."
+	if err == nil || err.Error() != want {
+		t.Fatalf("Build: %v", err)
+	}
+	if f.called("docker", "run --rm") || f.called("docker", "build --tag") {
+		t.Errorf("the tools step ran\n%s", f.read("docker.log"))
+	}
+	for _, l := range f.calls("docker") {
+		if strings.HasPrefix(l, "image rm") && strings.Contains(l, "environments") {
+			t.Errorf("the pulled image is removed: docker %s", l)
+		}
+	}
+}
+
+// TestBuildRefusesAStandardImageOverTheLargestSize is a standard image, shared/<name>, the
+// configuration's image form, over the limit: refused right after the pull, before the tools
+// step, and the engine's image stays.
+func TestBuildRefusesAStandardImageOverTheLargestSize(t *testing.T) {
+	const standard = testRegistry + "/shared/factory"
+	f := newFakes(t)
+	f.set(t, sizeOf(standard+"@sha256:"+baseDigest), "3000000001\n")
+	f.set(t, "size", "1000\n")
+	o := options(t, repository(t, `{"image": "`+standard+`:1", "onCreateCommand": "make"}`), io.Discard, io.Discard)
+	o.Registry = testRegistry
+	o.LargestImageBytes = 3000000000
+	_, err := prebuild.Build(t.Context(), o)
+	want := tooBig + "\nThe repository's image is 3.0 GB (3000000001 bytes), before qory adds Chromium, ffmpeg and the parsers.\nThe limit is 3.0 GB (3000000000 bytes)."
+	if err == nil || err.Error() != want {
+		t.Fatalf("Build: %v", err)
+	}
+	if !f.called("docker", "pull "+standard+":1") || f.called("docker", "run --rm") || f.called("docker", "build --tag") {
+		t.Errorf("docker ran\n%s", f.read("docker.log"))
+	}
+	for _, l := range f.calls("docker") {
+		if strings.HasPrefix(l, "image rm") && strings.Contains(l, "shared/factory") {
+			t.Errorf("the pulled image is removed: docker %s", l)
+		}
+	}
+}
+
+// TestBuildKeepsAnImageWhoseToolsPutItOverTheLargestSize is a repository's image under the limit
+// whose final image, after the tools step, is over it: kept, and the last line has the final
+// size.
+func TestBuildKeepsAnImageWhoseToolsPutItOverTheLargestSize(t *testing.T) {
+	f := newFakes(t)
+	f.set(t, sizeOf(testName+":base"), "2900000000\n")
+	f.set(t, "size", "4400000000\n")
+	var out bytes.Buffer
+	o := options(t, repository(t, shopConfig), &out, io.Discard)
+	o.LargestImageBytes = 3000000000
+	res, err := prebuild.Build(t.Context(), o)
+	if err != nil || res.Target != "acme/shop:prebuild" {
+		t.Fatalf("Build: %v, %+v\n%s", err, res, out.String())
+	}
+	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+	if last := lines[len(lines)-1]; !strings.HasSuffix(last, ": 4.1 GiB (4400000000 bytes)") {
+		t.Errorf("the last line is %q", last)
+	}
+	for _, l := range f.calls("docker") {
+		if strings.HasPrefix(l, "image rm") && strings.Contains(l, "acme/shop:prebuild") {
+			t.Errorf("the image is removed: docker %s", l)
+		}
+	}
+}
+
+// TestBuildKeepsAnImageAtTheLargestSize is a repository's image of exactly the limit: kept.
+func TestBuildKeepsAnImageAtTheLargestSize(t *testing.T) {
+	f := newFakes(t)
+	f.set(t, sizeOf(testName+":base"), "5000000000\n")
+	var out bytes.Buffer
+	o := options(t, repository(t, shopConfig), &out, io.Discard)
+	o.LargestImageBytes = 5000000000
+	res, err := prebuild.Build(t.Context(), o)
+	if err != nil || res.Target != "acme/shop:prebuild" {
+		t.Fatalf("Build: %v, %+v\n%s", err, res, out.String())
+	}
+	if !f.called("docker", "build --tag "+testName+":tools") {
+		t.Error("the tools step did not run")
 	}
 }
 
