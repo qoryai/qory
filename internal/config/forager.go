@@ -1265,7 +1265,7 @@ func ForagersOwn(name string) bool {
 }
 
 // notAName is the fix and the cause of a refusal of session.instance.name.
-var notAName = [2]string{"Set session.instance.name to 1 to 64 of A-Z, a-z, 0-9, dot, underscore, and dash.", "The name starts with a letter or digit."}
+var notAName = [2]string{"Set session.instance.name to 1 to 64 of A-Z, a-z, 0-9, dot, underscore, and dash.", "A name starts with a letter or digit."}
 
 // enrolAsNode are the last lines of the refusal of a workspace access key: what to do instead.
 var enrolAsNode = []string{"Then connect this machine as a node: run qory access-key enrol <server> <code>, or generate a key on the node's page in Qory Apiary and set the QORY_ variables it shows.", "See https://github.com/qoryai/qory/blob/main/docs/run.md#the-access-key-and-the-instance."}
