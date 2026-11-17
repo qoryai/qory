@@ -324,3 +324,50 @@ func TestASubmitLineOf100CharactersStaysWholeAndOneOf101IsShortened(t *testing.T
 		})
 	}
 }
+
+// TestARunWhoseWorkflowLowersItBelowWriteKeepsNoSubmitAndPrintsNoLine is a run from a run
+// code whose documents have access write, with a submit or with none, whose composed
+// harness has a different submit, and whose stack declares the workflow hello
+// write-no-push, read or write. With write, the run keeps the documents' submit and
+// prints the one line, whether the documents have a submit or none. With write-no-push
+// or read, the run's level is below write: it keeps no submit and no submit_module, and
+// prints no submit line.
+func TestARunWhoseWorkflowLowersItBelowWriteKeepsNoSubmitAndPrintsNoLine(t *testing.T) {
+	for _, c := range []struct {
+		name, access string
+		docsSubmit   bool
+		write        bool
+	}{
+		{"a submit in the documents, workflow write", "write", true, true},
+		{"a submit in the documents, workflow write-no-push", "write-no-push", true, false},
+		{"a submit in the documents, workflow read", "read", true, false},
+		{"no submit in the documents, workflow write", "write", false, true},
+		{"no submit in the documents, workflow write-no-push", "write-no-push", false, false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			var change func(map[string]any)
+			if c.docsSubmit {
+				change = withSubmit("reply-draft", "end_of_run")
+			}
+			stack := func(s string) string { return s + "workflows:\n  hello:\n    access: " + c.access + "\n" }
+			r := codeHarness{change: change, files: harnessSubmit("reply-draft", "after_gate"), stack: stack}.run(t)
+			if !errors.Is(r.err, cmd.ErrJoinedNowhere) || !r.joined {
+				t.Fatalf("%v (exit %d), want the join\n%s", r.err, cmd.ExitCode(r.err), r.out)
+			}
+			want := 0
+			if c.write {
+				want = 1
+			}
+			if lines := submitLines(r.out); len(lines) != want {
+				t.Errorf("the run prints %q, want %d submit lines\n%s", lines, want, r.out)
+			}
+			submit, module, err := cmd.SubmitAt(codeDocuments(t, change), c.access)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if kept := submit != nil && module != nil; kept != (c.write && c.docsSubmit) {
+				t.Errorf("at level %s the run keeps submit %+v and submit_module %+v", c.access, submit, module)
+			}
+		})
+	}
+}

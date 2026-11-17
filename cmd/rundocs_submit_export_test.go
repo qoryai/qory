@@ -20,3 +20,18 @@ func SubmitOf(documents json.RawMessage) (*contracts.Submit, *contracts.SubmitMo
 	}
 	return r.submit, r.submitModule, nil
 }
+
+// SubmitAt is [SubmitOf] for a run whose level, [accessOf], is level: the submit and the
+// submit_module that the run keeps after [codeRun.limitSubmit], nil for none.
+func SubmitAt(documents json.RawMessage, level string) (*contracts.Submit, *contracts.SubmitModule, error) {
+	doc, err := codeDocumentsOf(documents)
+	if err != nil {
+		return nil, nil, err
+	}
+	r, err := codeRunOf(doc)
+	if err != nil {
+		return nil, nil, err
+	}
+	r.limitSubmit(level)
+	return r.submit, r.submitModule, nil
+}

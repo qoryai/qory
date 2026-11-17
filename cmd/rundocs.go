@@ -705,12 +705,21 @@ func entryKeys(rep report.Report) []string {
 	return keys
 }
 
+// limitSubmit keeps r's submit and submit_module only for a run whose level is
+// [stack.AccessWrite], the run's [accessOf] level: a run that the stack's workflow or the
+// documents lower to write-no-push or read has no submit settings.
+func (r *codeRun) limitSubmit(level string) {
+	if r != nil && level != stack.AccessWrite {
+		r.submit, r.submitModule = nil, nil
+	}
+}
+
 // submitLine is the line that shows the harness's submit, the first module's in stack
-// order, beside r's when they differ, or alone when r has none. It is "" for a run that
-// may not write, whose documents the contract allows no submit, and for r nil. Line 1 has at most
-// [submitLineMax] characters with the "qory run: " that the caller adds, so a type name
-// that does not fit is shortened there, and a second line has the full name.
-func (r *codeRun) submitLine(rep report.Report) string {
+// order, beside r's when they differ, or alone when r has none. It is "" for a run whose
+// level, its [accessOf] level, is not [stack.AccessWrite], and for r nil. Line 1 has at
+// most [submitLineMax] characters with the "qory run: " that the caller adds, so a type
+// name that does not fit is shortened there, and a second line has the full name.
+func (r *codeRun) submitLine(rep report.Report, level string) string {
 	if r == nil {
 		return ""
 	}
@@ -722,7 +731,7 @@ func (r *codeRun) submitLine(rep report.Report) string {
 		}
 	}
 	switch {
-	case !found, r.submit == nil && !r.writes():
+	case !found, level != stack.AccessWrite:
 		return ""
 	case r.submit == nil:
 		line := func(typ, _ string) string {
