@@ -200,7 +200,7 @@ func TestAWriteNoPushRunOfEachLevelPairPushesNothing(t *testing.T) {
 // workflow hello, which the stack declares write-no-push, from documents with access
 // write and a submit setting: the run joins, and it has no step of kind or name submit
 // and no push step, no branch on the forge and no POST. No code in qory reads the
-// documents' submit yet, so no level, lowered or not, starts a submit step.
+// documents' submit, so no level, lowered or not, starts a submit step.
 func TestAStackLoweredRunWithSubmitInItsDocumentsRunsNoSubmitStep(t *testing.T) {
 	p := newPushRepo(t, "write-no-push")
 	p.change = func(d map[string]any) {
