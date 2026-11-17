@@ -9,15 +9,15 @@ import (
 
 // pushGuardRuntime writes a program that stands in for a runtime: it sends the POST that
 // ends a git push, the request to git-receive-pack, to git.example.com through the
-// run's proxy, and prints the proxy's reply and then status=<code>. It prints whether
-// HTTPS_PROXY is set, not its value.
-func pushGuardRuntime(t *testing.T) string {
+// run's proxy with the curl at curl, and prints the proxy's reply and then
+// status=<code>. It prints whether HTTPS_PROXY is set, not its value.
+func pushGuardRuntime(t *testing.T, curl string) string {
 	t.Helper()
 	script := filepath.Join(t.TempDir(), "push-runtime")
 	body := "#!/bin/sh\n" +
 		"echo \"hello from $QORY_RUN_ID\"\n" +
 		"echo \"proxy=${HTTPS_PROXY:+set}\"\n" +
-		"reply=$(curl -sS -w '\\nstatus=%{http_code}' -X POST" +
+		"reply=$(" + shellQuote(curl) + " -sS --max-time 30 -w '\\nstatus=%{http_code}' -X POST" +
 		" -H 'Content-Type: application/x-git-receive-pack-request' --data-binary ''" +
 		" https://git.example.com/acme/site.git/git-receive-pack 2>/dev/null)\n" +
 		"echo \"$reply\"\n"
@@ -33,12 +33,13 @@ func pushGuardRuntime(t *testing.T) string {
 // a credential of that file has no push_ref. The POST of a git push through the run's
 // proxy gets a 403 from Forager's branch guard, and the request does not reach the host.
 func TestAPushThroughAForagerYamlCredentialIsForbidden(t *testing.T) {
-	if _, err := exec.LookPath("curl"); err != nil {
+	curl, err := exec.LookPath("curl")
+	if err != nil {
 		t.Skip("curl is not installed")
 	}
 	root := newCheckout(t)
 	copyFixture(t, "two-modules", root)
-	composedForFake(t, root, pushGuardRuntime(t))
+	composedForFake(t, root, pushGuardRuntime(t, curl))
 	t.Setenv("GIT_TOKEN", "forge-token-value-0123456789")
 	policy := filepath.Join(t.TempDir(), "policy.yaml")
 	writeFile(t, policy, "version: 1\negress:\n  mode: observe\ncredentials:\n  - {name: forge}\n")
