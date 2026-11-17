@@ -224,3 +224,51 @@ func TestTimeLimit(t *testing.T) {
 		t.Errorf("the fallback is %v", provisioner.FallbackTimeLimit)
 	}
 }
+
+// TestLargestPrebuiltImageBytes reads largest_prebuilt_image_bytes of a prebuild's
+// documents as an integer of 1 or more within int64, and nil when the member is absent,
+// which is no limit. A value that is 0, below 0, a string, a fraction or above int64,
+// and the member in the documents of another step, break the schema.
+func TestLargestPrebuiltImageBytes(t *testing.T) {
+	const broken = "it breaks documents.schema.json"
+	for _, c := range []struct {
+		name string
+		raw  json.RawMessage
+		want int64
+	}{
+		{"absent", documentsOf(t, "prebuild.json", nil), 0},
+		{"10 GB", documentsOf(t, "prebuild.json", func(d map[string]any) { d["largest_prebuilt_image_bytes"] = json.Number("10000000000") }), 10000000000},
+		{"1", documentsOf(t, "prebuild.json", func(d map[string]any) { d["largest_prebuilt_image_bytes"] = 1 }), 1},
+		{"the largest int64", documentsOf(t, "prebuild.json", func(d map[string]any) { d["largest_prebuilt_image_bytes"] = json.Number("9223372036854775807") }), 9223372036854775807},
+	} {
+		doc, err := provisioner.ReadDocuments(c.raw)
+		switch {
+		case err != nil:
+			t.Errorf("%s: %v", c.name, err)
+		case c.want == 0 && doc.LargestPrebuiltImageBytes != nil:
+			t.Errorf("%s: read %d, want none", c.name, *doc.LargestPrebuiltImageBytes)
+		case c.want != 0 && (doc.LargestPrebuiltImageBytes == nil || *doc.LargestPrebuiltImageBytes != c.want):
+			t.Errorf("%s: read %v, want %d", c.name, doc.LargestPrebuiltImageBytes, c.want)
+		}
+	}
+	for _, c := range []struct {
+		name  string
+		value any
+	}{
+		{"0", 0},
+		{"-1", -1},
+		{"a string", "10000000000"},
+		{"a fraction", 1.5},
+		{"above int64", json.Number("9223372036854775808")},
+		{"null", nil},
+	} {
+		raw := documentsOf(t, "prebuild.json", func(d map[string]any) { d["largest_prebuilt_image_bytes"] = c.value })
+		if _, err := provisioner.ReadDocuments(raw); err == nil || err.Error() != broken {
+			t.Errorf("%s: %v, want %q", c.name, err, broken)
+		}
+	}
+	raw := documentsOf(t, "explore-workflow.json", func(d map[string]any) { d["largest_prebuilt_image_bytes"] = 10000000000 })
+	if _, err := provisioner.ReadDocuments(raw); err == nil || err.Error() != broken {
+		t.Errorf("an explore run: %v, want %q", err, broken)
+	}
+}
