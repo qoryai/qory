@@ -115,6 +115,23 @@ func SetLaterSessions(sessions ...func()) func() {
 	return func() { pushAfterSession = before }
 }
 
+// SetStepAfterEnd makes the push step after a run's session stand in for a loop that calls
+// the step again after the run ended: when a step leaves the run ended, agent runs as a
+// later session would, and the step runs once more. again receives what that second call
+// returned. It returns what restores the default.
+func SetStepAfterEnd(agent func(), again func(session.Outcome, error)) func() {
+	before := pushAfterSession
+	pushAfterSession = func(p *sessionPush, ending *pushEnding, out session.Outcome) (session.Outcome, error) {
+		closed, err := before(p, ending, out)
+		if p.ended != "" {
+			agent()
+			again(before(p, ending, out))
+		}
+		return closed, err
+	}
+	return func() { pushAfterSession = before }
+}
+
 // hostGitFolder is the folder of this machine's git, for the PATH of a git session in a
 // test: the run's image has its git in other folders. The session's first argument after
 // the script file is that PATH.

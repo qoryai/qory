@@ -2767,9 +2767,12 @@ commit is a no-op, so a call is safe to send again. The report is also sent when
 repository's push failed: the repositories that landed are reported, and that push's line
 stays the run's line.
 
-Each send waits at most 65 s: the gateway waits 60 s for Qory Apiary, not counting a reopen of
-the run, and the 5 s more let the gateway's response arrive first. A send that got no response
-in that time, or a response with a status of 500 or above (the gateway's 502
+Each send waits at most 65 s: the gateway waits 60 s for Qory Apiary (`server.HostCallTime`),
+not counting a reopen of the run, and the 5 s more let the gateway's response arrive first.
+Forager's session waits up to 4 minutes for one call, a reopen of the run included, so a send
+that qory cuts at 65 s is still inside that wait. A cut send is sent again with the same body.
+A repeated report is safe: Qory Apiary records the same commit for the same run, system and
+path once, and returns 204 again. A send that got no response in that time, or a response with a status of 500 or above (the gateway's 502
 `control_plane_unavailable` and 503 among them) or 429, is sent again with the same body, 3
 times, after 1 s, 2 s and 4 s. The link has no `Retry-After`, so the waits do not change. Qory
 Apiary's 401 does not pass the gateway, and its 410 arrives as 502 `control_plane_unavailable`:
@@ -2781,7 +2784,10 @@ both are sent again. Then:
   ended this run, so qory pushes nothing more and no later session starts.` For a 410 that
   the gateway sent, whose code is `run_closed`, `stopped` (the run's starter ended the run),
   `session_lost` or `batch_refused`, it is `qory run: The run ended (<code>), so qory pushes
-  nothing more and no later session starts.` The step exits `succeeded`, and the run closes with the end that was recorded, as for a run that
+  nothing more and no later session starts.` A second line follows either one: `qory run: The
+  last push is on the branch, and Qory Apiary did not record it.` The push that the report was
+  about is on the forge, and Qory Apiary has no record of it. The step exits `succeeded`, and
+  the run closes with the end that was recorded, as for a run that
   Qory Apiary closed during its session. When a later repository's push failed too, qory
   prints that line as well, and the step fails with the push's error.
 - Any other 4xx status, the gateway's 413 `payload_too_large` among them, or the retries used

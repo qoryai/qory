@@ -20,7 +20,8 @@ import (
 // returned it, or the cause of a request with no response. No text has a retry step: qory has
 // sent the call again, or the run is stopped. textRunEndedLater is the line for a run that
 // Qory Apiary ended, textRunEndedAtGateway the line for any other end, with the gateway's
-// code, one of [server.EndCodes].
+// code, one of [server.EndCodes]. textLastPushUnrecorded follows either line: the push that
+// the report was about is on the forge, and Qory Apiary has no record of it.
 const (
 	textNotRecorded       = "Contact support: qory pushed %s to %s, and Qory Apiary did not record it.\n%s"
 	textRecordApiary      = "Qory Apiary returned %d: %s"
@@ -28,6 +29,8 @@ const (
 	textRecordNoReply     = "Qory Apiary sent no response: %s"
 	textRunEndedLater     = "qory run: Qory Apiary ended this run, so qory pushes nothing more and no later session starts."
 	textRunEndedAtGateway = "qory run: The run ended (%s), so qory pushes nothing more and no later session starts."
+	// textLastPushUnrecorded is the second line of the run's end, with the same prefix.
+	textLastPushUnrecorded = "qory run: The last push is on the branch, and Qory Apiary did not record it."
 )
 
 // The bounds of the report of a push: recordAttempts is the first send and the three that

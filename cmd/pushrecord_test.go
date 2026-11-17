@@ -13,6 +13,7 @@ import (
 
 	"github.com/qoryai/forager/event"
 	"github.com/qoryai/forager/server"
+	"github.com/qoryai/forager/session"
 
 	"github.com/qoryai/qory/cmd"
 	"github.com/qoryai/qory/internal/proxygit/proxygittest"
@@ -20,6 +21,10 @@ import (
 
 // recordBranch is the ref of the work item's branch, as the failure line names it.
 const recordBranch = "qory/" + workItem
+
+// lastPushUnrecorded is the line after the line of an ended run: the push that the report was
+// about is on the forge and Qory Apiary has no record of it.
+const lastPushUnrecorded = "qory run: The last push is on the branch, and Qory Apiary did not record it.\n"
 
 // failsRecord makes the reports of pushed commits from call from on get the status and
 // code, and Retry-After retry when it is not empty.
@@ -456,7 +461,7 @@ func TestAGatewayThatEndedTheRunStopsTheReport(t *testing.T) {
 			if posts, _, stored := p.api.counts(); posts != 0 || stored != 0 {
 				t.Errorf("%d POST and %d versions, want none", posts, stored)
 			}
-			line := "qory run: The run ended (" + code + "), so qory pushes nothing more and no later session starts.\n"
+			line := "qory run: The run ended (" + code + "), so qory pushes nothing more and no later session starts.\n" + lastPushUnrecorded
 			if got := strings.Count(r.out, line); got != 1 {
 				t.Errorf("the line of the ended run is in the output %d times, want 1\n%s", got, r.out)
 			}
@@ -490,11 +495,50 @@ func TestARunEndedInApiaryStartsNoLaterSession(t *testing.T) {
 	if posts, _, stored := p.api.counts(); posts != 0 || stored != 0 {
 		t.Errorf("%d POST and %d versions, want none", posts, stored)
 	}
-	if got := strings.Count(r.out, "qory run: Qory Apiary ended this run, so qory pushes nothing more and no later session starts.\n"); got != 1 {
+	if got := strings.Count(r.out, "qory run: Qory Apiary ended this run, so qory pushes nothing more and no later session starts.\n"+lastPushUnrecorded); got != 1 {
 		t.Errorf("the line of the ended run is in the output %d times, want 1\n%s", got, r.out)
 	}
 	if got := r.pushSteps(); len(got) != 1 || got[0] != event.StateSucceeded {
 		t.Errorf("the push steps exited %v, want one succeeded", got)
+	}
+}
+
+// TestAStepAfterTheRunEndedPushesAndReportsNothing is the push step called again after a
+// report found the run over, with a new commit in the working folder: it returns the session's
+// outcome with no error, and sends no push, no report and no version.
+func TestAStepAfterTheRunEndedPushesAndReportsNothing(t *testing.T) {
+	p := newPushRepo(t, "write")
+	failsRecord(p, 1, http.StatusConflict, "run_ended", "")
+	var dir, afterFirst string
+	var againErr error
+	called := false
+	t.Cleanup(cmd.SetStepAfterEnd(func() {
+		afterFirst = p.branchHead(t)
+		writeFile(t, filepath.Join(dir, "second.txt"), "second\n")
+		commitAll(t, dir, "Add a second file")
+	}, func(_ session.Outcome, err error) { called, againErr = true, err }))
+	r := p.run(t, func(d string) {
+		dir = d
+		commitFirst(t)(d)
+	}, nil)
+	r.wantsClose(t, event.StateSucceeded, 0)
+	if !called || againErr != nil {
+		t.Errorf("the second call ran: %v, with the error %v, want true and none", called, againErr)
+	}
+	if head := p.branchHead(t); afterFirst == "" || head != afterFirst {
+		t.Errorf("the branch is at %q, want the first push's %q", head, afterFirst)
+	}
+	if calls, _ := p.api.reports(); calls != 1 {
+		t.Errorf("%d reports, want 1", calls)
+	}
+	if posts, _, stored := p.api.counts(); posts != 0 || stored != 0 {
+		t.Errorf("%d POST and %d versions, want none", posts, stored)
+	}
+	if got := strings.Count(r.out, "no later session starts.\n"+lastPushUnrecorded); got != 1 {
+		t.Errorf("the line of the ended run is in the output %d times, want 1\n%s", got, r.out)
+	}
+	if got := r.pushSteps(); len(got) != 1 {
+		t.Errorf("the push steps exited %v, want one", got)
 	}
 }
 
@@ -571,7 +615,7 @@ func TestAPartialPushWhoseReportGetsRunEndedEndsTheRun(t *testing.T) {
 	}, nil)
 	r.wantsClose(t, event.StateFailed, 1)
 	wants(t, r.out, "the push of the next repository failed: change the rule on "+proxygittest.Host)
-	const ended = "qory run: Qory Apiary ended this run, so qory pushes nothing more and no later session starts.\n"
+	const ended = "qory run: Qory Apiary ended this run, so qory pushes nothing more and no later session starts.\n" + lastPushUnrecorded
 	if got := strings.Count(r.out, ended); got != 1 {
 		t.Errorf("the line of the ended run is in the output %d times, want 1\n%s", got, r.out)
 	}

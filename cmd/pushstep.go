@@ -220,6 +220,7 @@ func (p *sessionPush) after(ending *pushEnding, out session.Outcome) (session.Ou
 		// the end that the gateway recorded: out, as for a run that Qory Apiary closed
 		// during its session. No new exit status is added.
 		fmt.Fprintln(p.stderr, p.ended)
+		fmt.Fprintln(p.stderr, textLastPushUnrecorded)
 	}
 	if err != nil {
 		return ending.outcome(err), err
