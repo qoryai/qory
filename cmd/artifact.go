@@ -786,14 +786,11 @@ sends or keeps anything.
 
 Any verdict may propose a track for the work item. Pass --track with the id of a track that
 the gate of the run's stage offers, such as small-change, and --track-reason with the
-reason, one sentence on one line of 1 to 300 characters. Pass both or neither. The optional
---track-kind is the kind of the change, one line of 1 to 80 characters with a character
-other than a space; it needs the pair.
-qory checks the three before it sends or keeps anything. It exits ` + strconv.Itoa(ExitInput) + ` for a mistake
-in the id, the reason or the pair, and ` + strconv.Itoa(ExitArtifactRefused) + ` for a kind with no --track or a wrong kind. It also
-exits ` + strconv.Itoa(ExitArtifactRefused) + ` when Qory Apiary refuses the verdict with 422 invalid_artifact, which
-includes a track that the gate does not offer. Line 1 of the error is the fix, and Qory
-Apiary's text follows.
+reason, one sentence on one line of 1 to 300 characters. Pass both or neither.
+qory checks the two before it sends or keeps anything. It exits ` + strconv.Itoa(ExitInput) + ` for a mistake in
+the id, the reason or the pair. It exits ` + strconv.Itoa(ExitArtifactRefused) + ` when Qory Apiary refuses the verdict
+with 422 invalid_artifact, which includes a track that the gate does not offer. Line 1 of
+the error is the fix, and Qory Apiary's text follows.
 
 Outside a run, qory prints the verdict and keeps it in .qory/artifacts/verdict/; nothing
 acts on it.
@@ -848,18 +845,10 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md#commands-of-a-work-it
 	}
 	c.Flags().StringVar(&pointsFile, "points", "", "read the points of escalate, a JSON array, from this file")
 	c.Flags().String("track", "", "propose the track with this id, one that the gate of the run's stage offers; pass it with --track-reason")
-	c.Flags().String("track-kind", "", "give the kind of the change, one line of 1 to 80 characters; pass it with --track and --track-reason")
 	c.Flags().String("track-reason", "", "give the reason for --track, one sentence on one line of 1 to 300 characters; pass it with --track")
 
 	return c
 }
-
-// The line 1 of a kind that the verdict format refuses and qory's checks did not find, and
-// of a kind of spaces only.
-const (
-	textKindSpaces  = "Set --track-kind to text with a character other than a space. The kind has only spaces."
-	textKindRefused = "Set --track-kind to one line of 1 to 80 characters that the verdict format accepts."
-)
 
 // Line 1 of a refused verdict when the run API's line 1 is over [maxFirstLine] characters
 // or, for a track, has no flag.
@@ -868,8 +857,8 @@ const (
 	textVerdictRefused = "Fix the refused part of the verdict, then run the command again."
 )
 
-// verdictRefusedError is a verdict refused by 422 invalid_artifact or by qory (the kind).
-// [ExitCode] gives it [ExitArtifactRefused]. It unwraps to the run API's error, or nil.
+// verdictRefusedError is a verdict that the run API refused with 422 invalid_artifact.
+// [ExitCode] gives it [ExitArtifactRefused]. It unwraps to the run API's error.
 type verdictRefusedError struct {
 	text string
 	err  error
@@ -881,15 +870,12 @@ func (e verdictRefusedError) Error() string { return e.text }
 // Unwrap returns the run API's error.
 func (e verdictRefusedError) Unwrap() error { return e.err }
 
-// kindRefused returns err, a mistake in --track-kind, as a verdict that qory refuses.
-func kindRefused(err error) error { return verdictRefusedError{text: err.Error()} }
-
 // maxFirstLine is the most characters of line 1 of an error: the 2 that qory prints before
 // it ("✗ ") keep the line within 100.
 const maxFirstLine = 98
 
 // isTrackMember reports whether name is the member track of the verdict or one of its
-// members, such as track.kind. The name tracks is not.
+// members, such as track.reason. The name tracks is not.
 func isTrackMember(name string) bool { return name == "track" || strings.HasPrefix(name, "track.") }
 
 // verdictError returns a 422 invalid_artifact as a [verdictRefusedError] with a line 1 of
@@ -917,21 +903,16 @@ func verdictError(err error) error {
 }
 
 // readTrack returns the track of the flags of c, or nil for none. A wrong id, reason or pair
-// is an input error (exit 2); a kind with no --track or a wrong kind is [kindRefused] (exit 4).
+// is an input error (exit 2).
 func readTrack(c *cobra.Command) (*runapi.Track, error) {
 	flags := c.Flags()
 	id, _ := flags.GetString("track")
-	kind, _ := flags.GetString("track-kind")
 	reason, _ := flags.GetString("track-reason")
-	idGiven, kindGiven, reasonGiven := flags.Changed("track"), flags.Changed("track-kind"), flags.Changed("track-reason")
+	idGiven, reasonGiven := flags.Changed("track"), flags.Changed("track-reason")
 
 	switch {
-	case !idGiven && !kindGiven && !reasonGiven:
+	case !idGiven && !reasonGiven:
 		return nil, nil
-	case kindGiven && !idGiven && !reasonGiven:
-		return nil, kindRefused(errors.New("Pass --track <id> and --track-reason <text> with --track-kind: a kind belongs to a track."))
-	case kindGiven && !idGiven:
-		return nil, kindRefused(errors.New("Pass --track <id> with --track-kind: a kind belongs to a track."))
 	case !reasonGiven:
 		return nil, input(errors.New("Pass --track-reason <text> with --track: a track needs the reason for it."))
 	case !idGiven:
@@ -945,22 +926,8 @@ func readTrack(c *cobra.Command) (*runapi.Track, error) {
 		return nil, input(err)
 	}
 
-	if kindGiven {
-		if err := checkLine("--track-kind", "kind", "one line of text", kind, verdictformat.MaxKind); err != nil {
-			return nil, kindRefused(err)
-		}
-
-		if strings.Trim(kind, " ") == "" {
-			return nil, kindRefused(errors.New(textKindSpaces))
-		}
-	}
-
-	track := &runapi.Track{ID: id, Kind: kind, Reason: reason}
+	track := &runapi.Track{ID: id, Reason: reason}
 	if err := verdictformat.CheckTrack(*track); err != nil {
-		if kindGiven {
-			return nil, kindRefused(errors.New(textKindRefused))
-		}
-
 		return nil, input(err)
 	}
 

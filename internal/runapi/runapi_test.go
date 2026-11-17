@@ -649,8 +649,6 @@ func TestPushVerdictSendsTheTrack(t *testing.T) {
 		{runapi.VerdictChangesRequested, points, &runapi.Track{ID: "standard", Reason: "A person decides."},
 			`{"verdict":"changes-requested","points":[{"text":"The checks script failed.","action":"run_again"}],` +
 				`"track":{"id":"standard","reason":"A person decides."}}`},
-		{runapi.VerdictPassed, nil, &runapi.Track{ID: "small-change", Kind: "A text", Reason: "One file."},
-			`{"verdict":"passed","track":{"id":"small-change","kind":"A text","reason":"One file."}}`},
 		{runapi.VerdictPassed, nil, nil, `{"verdict":"passed"}`},
 	} {
 		client := serve(t, func(w http.ResponseWriter, r *http.Request) {
@@ -871,7 +869,7 @@ func TestACancelledContextIsNotAGatewayError(t *testing.T) {
 	}
 }
 
-func TestPushVerdictDocumentSendsTheBodyAsGiven(t *testing.T) {
+func TestPushVerdictSendsTheRunsRequest(t *testing.T) {
 	const body = `{"verdict":"escalate","points":[{"text":"The checks script failed.","action":"run_again"}],"track":{"id":"small","reason":"One file."}}`
 	var headers http.Header
 	client := serve(t, func(w http.ResponseWriter, r *http.Request) {
@@ -886,7 +884,9 @@ func TestPushVerdictDocumentSendsTheBodyAsGiven(t *testing.T) {
 			`{"version": 1, "artifact": {"type": "verdict", "name": "main", "version": {"id": "av_4", "number": 4}}}`)(w, r)
 	})
 
-	pushed, err := client.PushVerdictDocument(context.Background(), []byte(body))
+	pushed, err := client.PushVerdict(context.Background(), runapi.VerdictEscalate,
+		[]runapi.Point{{Text: "The checks script failed.", Action: runapi.ActionRunAgain}},
+		&runapi.Track{ID: "small", Reason: "One file."})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -898,7 +898,7 @@ func TestPushVerdictDocumentSendsTheBodyAsGiven(t *testing.T) {
 	}
 }
 
-func TestPushVerdictDocumentMapsTheErrorsOfThePost(t *testing.T) {
+func TestPushVerdictMapsTheErrorsOfThePost(t *testing.T) {
 	for _, c := range []struct {
 		name   string
 		status int
@@ -913,7 +913,7 @@ func TestPushVerdictDocumentMapsTheErrorsOfThePost(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			client := serve(t, respond(c.status, c.body))
 
-			_, err := client.PushVerdictDocument(context.Background(), []byte(`{"verdict":"passed"}`))
+			_, err := client.PushVerdict(context.Background(), runapi.VerdictPassed, nil, nil)
 
 			var apiError *runapi.Error
 			if !errors.As(err, &apiError) || apiError.Status != c.status || apiError.Code != c.code || apiError.Request != "POST /verdict" {
@@ -923,10 +923,23 @@ func TestPushVerdictDocumentMapsTheErrorsOfThePost(t *testing.T) {
 	}
 }
 
-func TestPushVerdictDocumentRefusesABodyOverTheVerdictLimit(t *testing.T) {
+// verdictOfBytes returns one point such that the body of an escalate verdict with it has
+// exactly size bytes.
+func verdictOfBytes(t *testing.T, size int) []runapi.Point {
+	t.Helper()
+
+	empty, err := runapi.VerdictBody(runapi.VerdictEscalate, []runapi.Point{{Action: runapi.ActionRunAgain}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	return []runapi.Point{{Text: strings.Repeat("a", size-len(empty)), Action: runapi.ActionRunAgain}}
+}
+
+func TestPushVerdictRefusesABodyOverTheVerdictLimit(t *testing.T) {
 	client := serve(t, func(http.ResponseWriter, *http.Request) { t.Error("a request went out") })
 
-	_, err := client.PushVerdictDocument(context.Background(), make([]byte, 64<<10+1))
+	_, err := client.PushVerdict(context.Background(), runapi.VerdictEscalate, verdictOfBytes(t, 64<<10+1), nil)
 
 	var apiError *runapi.Error
 	if !errors.As(err, &apiError) || apiError.Code != runapi.CodePayloadTooLarge || apiError.Limit != 64<<10 {
@@ -934,7 +947,7 @@ func TestPushVerdictDocumentRefusesABodyOverTheVerdictLimit(t *testing.T) {
 	}
 }
 
-func TestPushVerdictDocumentAcceptsABodyOfExactlyTheLimit(t *testing.T) {
+func TestPushVerdictAcceptsABodyOfExactlyTheLimit(t *testing.T) {
 	var got int
 	client := serve(t, func(w http.ResponseWriter, r *http.Request) {
 		raw, _ := io.ReadAll(r.Body)
@@ -943,7 +956,7 @@ func TestPushVerdictDocumentAcceptsABodyOfExactlyTheLimit(t *testing.T) {
 			`{"version": 1, "artifact": {"type": "verdict", "name": "main", "version": {"id": "av_4", "number": 4}}}`)(w, r)
 	})
 
-	if _, err := client.PushVerdictDocument(context.Background(), make([]byte, 64<<10)); err != nil {
+	if _, err := client.PushVerdict(context.Background(), runapi.VerdictEscalate, verdictOfBytes(t, 64<<10), nil); err != nil {
 		t.Fatal(err)
 	}
 	if got != 64<<10 {

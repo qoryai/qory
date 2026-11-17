@@ -58,52 +58,21 @@ func TestRunVerdictSendsTheTrack(t *testing.T) {
 	}
 }
 
-// TestRunVerdictSendsTheKindOfATrack sends --track-kind as the member kind of the track,
-// between id and reason, in a run, and keeps it outside a run.
-func TestRunVerdictSendsTheKindOfATrack(t *testing.T) {
-	root := inCheckout(t)
-	server := startRunAPI(t)
-	server.response = storedVerdict
-
-	args := []string{
-		"run", "verdict", "passed", "--track", "small-change", "--track-kind", "A text that the product shows",
-		"--track-reason", trackReason,
-	}
-	if _, err := run(t, args...); err != nil {
-		t.Fatal(err)
-	}
-
-	const want = `{"verdict":"passed","track":{"id":"small-change","kind":"A text that the product shows",` +
-		`"reason":"The change touches one file."}}`
-	if !slices.Equal(server.verdicts, []string{want}) {
-		t.Errorf("bodies = %q, want %q", server.verdicts, want)
-	}
-
-	t.Setenv("QORY_RUN_API", "")
-
-	if _, err := run(t, args...); err != nil {
-		t.Fatal(err)
-	}
-
-	wantFile(t, filepath.Join(root, ".qory", "artifacts", "verdict", "main", "v1", "verdict.json"), want)
-}
-
-// TestRunVerdictAcceptsTheLimitsOfATrack sends an id of 40 characters, a kind of 80 and a
-// reason of 300, in characters and not in bytes.
+// TestRunVerdictAcceptsTheLimitsOfATrack sends an id of 40 characters and a reason of 300,
+// in characters and not in bytes.
 func TestRunVerdictAcceptsTheLimitsOfATrack(t *testing.T) {
 	inCheckout(t)
 	server := startRunAPI(t)
 	server.response = storedVerdict
 
 	id := "a" + strings.Repeat("b", 19) + "-" + strings.Repeat("c", 19)
-	kind := strings.Repeat("é", 80)
 	reason := strings.Repeat("é", 300)
 
-	if _, err := run(t, "run", "verdict", "passed", "--track", id, "--track-kind", kind, "--track-reason", reason); err != nil {
+	if _, err := run(t, "run", "verdict", "passed", "--track", id, "--track-reason", reason); err != nil {
 		t.Fatal(err)
 	}
 
-	want := `{"verdict":"passed","track":{"id":"` + id + `","kind":"` + kind + `","reason":"` + reason + `"}}`
+	want := `{"verdict":"passed","track":{"id":"` + id + `","reason":"` + reason + `"}}`
 	if !slices.Equal(server.verdicts, []string{want}) {
 		t.Errorf("bodies = %q, want %q", server.verdicts, want)
 	}
@@ -168,8 +137,8 @@ func TestRunVerdictChecksItsTrack(t *testing.T) {
 			"Write --track-reason on one line. The reason has a tab (U+0009)."},
 		{"reason with a zero-width space", pair("small-change", "One​file."),
 			"Remove the character U+200B from --track-reason. The verdict format excludes it."},
-		{"kind with the id only", []string{"run", "verdict", "passed", "--track", "small-change", "--track-kind", "A comment"},
-			"Pass --track-reason <text> with --track: a track needs the reason for it."},
+		{"the flag --track-kind", []string{"run", "verdict", "passed", "--track", "small-change", "--track-reason", trackReason,
+			"--track-kind", "A comment"}, "unknown flag: --track-kind"},
 		{"track flag on another command", []string{"run", "verdict", "passed", "--track-id", "x"}, "unknown flag: --track-id"},
 		{"track flag on push", []string{"artifact", "push", "demo", "-", "--track", "small-change"}, "unknown flag: --track"},
 	} {
@@ -252,8 +221,6 @@ func TestRunVerdictExitsWith4ForARefusedVerdict(t *testing.T) {
 			[]string{"--track", "small-change", "--track-reason", trackReason}},
 		{"a point of a long text", "files[0]", notOpen, "Fix the refused part of the verdict, then run the command again.", nil},
 		{"a point of a short text", "files[0]", short, short, nil},
-		{"the member track.kind", "track.kind", "Set track.kind to one line of 1 to 80 characters, or leave track.kind out of the verdict.",
-			"Set --track to a track that the gate of the stage offers, or leave out the track flags.", nil},
 		{"the member track.id", "track.id", short, "Set --track to a track that the gate of the stage offers, or leave out the track flags.", nil},
 		{"a member called tracks", "tracks", short, short, nil},
 		{"a member called trackx", "trackx", short, short, nil},
@@ -317,84 +284,6 @@ func TestRunVerdictKeepsTheOtherExitStatuses(t *testing.T) {
 	}
 }
 
-// TestRunVerdictRefusesAWrongKind stops each kind that has no --track or breaks a rule with
-// exit 4 and an error whose line 1 has at most 98 characters and the fix, before anything
-// is sent or kept, in a run and outside it.
-func TestRunVerdictRefusesAWrongKind(t *testing.T) {
-	root := inCheckout(t)
-
-	for _, c := range []struct {
-		name string
-		args []string
-		want string
-	}{
-		{"kind alone", []string{"run", "verdict", "passed", "--track-kind", "A comment"},
-			"Pass --track <id> and --track-reason <text> with --track-kind: a kind belongs to a track."},
-		{"kind with the reason only", []string{"run", "verdict", "passed", "--track-reason", trackReason, "--track-kind", "A comment"},
-			"Pass --track <id> with --track-kind: a kind belongs to a track."},
-		{"empty kind with the reason only", []string{"run", "verdict", "passed", "--track-reason", trackReason, "--track-kind", ""},
-			"Pass --track <id> with --track-kind: a kind belongs to a track."},
-		{"empty kind alone", []string{"run", "verdict", "passed", "--track-kind", ""},
-			"Pass --track <id> and --track-reason <text> with --track-kind: a kind belongs to a track."},
-		{"empty kind", []string{"run", "verdict", "passed", "--track", "small-change", "--track-reason", trackReason, "--track-kind", ""},
-			"Set --track-kind to one line of text, 1 to 80 characters. The kind is empty."},
-		{"kind too long", []string{"run", "verdict", "passed", "--track", "small-change", "--track-reason", trackReason,
-			"--track-kind", strings.Repeat("a", 81)},
-			"Shorten --track-kind to at most 80 characters. The kind has 81."},
-		{"kind too long in multi-byte characters", []string{"run", "verdict", "passed", "--track", "small-change", "--track-reason", trackReason,
-			"--track-kind", strings.Repeat("é", 81)},
-			"Shorten --track-kind to at most 80 characters. The kind has 81."},
-		{"kind of spaces only", []string{"run", "verdict", "passed", "--track", "small-change", "--track-reason", trackReason,
-			"--track-kind", "   "},
-			"Set --track-kind to text with a character other than a space. The kind has only spaces."},
-		{"kind of one space", []string{"run", "verdict", "passed", "--track", "small-change", "--track-reason", trackReason,
-			"--track-kind", " "},
-			"Set --track-kind to text with a character other than a space. The kind has only spaces."},
-		{"kind with a tab", []string{"run", "verdict", "passed", "--track", "small-change", "--track-reason", trackReason,
-			"--track-kind", "A\ttext"},
-			"Write --track-kind on one line. The kind has a tab (U+0009)."},
-		{"kind of 82 characters", []string{"run", "verdict", "passed", "--track", "small-change", "--track-reason", trackReason,
-			"--track-kind", strings.Repeat("a", 82)},
-			"Shorten --track-kind to at most 80 characters. The kind has 82."},
-		{"kind with a line break", []string{"run", "verdict", "passed", "--track", "small-change", "--track-reason", trackReason,
-			"--track-kind", "A text\nthat the product shows"},
-			"Write --track-kind on one line. The kind has a line break (U+000A)."},
-		{"kind with a bidirectional control", []string{"run", "verdict", "passed", "--track", "small-change", "--track-reason", trackReason,
-			"--track-kind", "A text\u202e"},
-			"Remove the character U+202E from --track-kind. The verdict format excludes it."},
-	} {
-		for _, inRun := range []bool{true, false} {
-			t.Run(fmt.Sprintf("%s in a run %v", c.name, inRun), func(t *testing.T) {
-				var server *runAPIServer
-				if inRun {
-					server = startRunAPI(t)
-				} else {
-					t.Setenv("QORY_RUN_API", "")
-				}
-
-				_, err := run(t, c.args...)
-				wantExit(t, err, cmd.ExitArtifactRefused, c.want)
-
-				if err == nil {
-					return
-				}
-
-				if line := firstLine(err.Error()); line != c.want || utf8.RuneCountInString(line) > 98 {
-					t.Errorf("line 1 = %q (%d characters), want %q", line, utf8.RuneCountInString(line), c.want)
-				}
-
-				if server != nil && len(server.verdicts) != 0 {
-					t.Errorf("sent %q", server.verdicts)
-				}
-			})
-		}
-	}
-
-	if _, err := os.Stat(filepath.Join(root, ".qory", "artifacts", "verdict")); !os.IsNotExist(err) {
-		t.Errorf("the store has a verdict: %v", err)
-	}
-}
-
 // TestRunVerdictFirstLinesFitWithThePrefix measures every line 1 that qory writes for the
 // track flags: with the "✗ " that qory prints before it, each fits in 100 characters.
 func TestRunVerdictFirstLinesFitWithThePrefix(t *testing.T) {
@@ -404,20 +293,12 @@ func TestRunVerdictFirstLinesFitWithThePrefix(t *testing.T) {
 	for _, args := range [][]string{
 		{"--track", "small-change"},
 		{"--track-reason", reason},
-		{"--track-kind", "A comment"},
-		{"--track-reason", reason, "--track-kind", "A comment"},
-		{"--track", "small-change", "--track-kind", "A comment"},
 		{"--track", long, "--track-reason", reason},
 		{"--track", "small-change", "--track-reason", ""},
 		{"--track", "small-change", "--track-reason", strings.Repeat("a", 99999)},
 		{"--track", "small-change", "--track-reason", "a\nb"},
 		{"--track", "small-change", "--track-reason", "a\tb"},
 		{"--track", "small-change", "--track-reason", "a\u200bb"},
-		{"--track", "small-change", "--track-reason", reason, "--track-kind", ""},
-		{"--track", "small-change", "--track-reason", reason, "--track-kind", "   "},
-		{"--track", "small-change", "--track-reason", reason, "--track-kind", strings.Repeat("a", 99999)},
-		{"--track", "small-change", "--track-reason", reason, "--track-kind", "a\nb"},
-		{"--track", "small-change", "--track-reason", reason, "--track-kind", "a\u202eb"},
 	} {
 		inCheckout(t)
 		t.Setenv("QORY_RUN_API", "")
@@ -437,8 +318,6 @@ func TestRunVerdictFirstLinesFitWithThePrefix(t *testing.T) {
 	for _, line := range []string{
 		"Set --track to a track that the gate of the stage offers, or leave out the track flags.",
 		"Fix the refused part of the verdict, then run the command again.",
-		"Set --track-kind to text with a character other than a space. The kind has only spaces.",
-		"Set --track-kind to one line of 1 to 80 characters that the verdict format accepts.",
 	} {
 		if n := utf8.RuneCountInString("✗ " + line); n > 100 {
 			t.Errorf("%q has %d characters with the prefix", line, n)

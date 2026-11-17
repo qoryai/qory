@@ -176,11 +176,10 @@ type Point struct {
 }
 
 // Track is the track that a verdict proposes for the work item, with the reason. ID is
-// the id of a track that the gate of the run's stage offers. Kind is the kind of the
-// change, empty for none. The contract is contracts/harness/v1/verdict.schema.json.
+// the id of a track that the gate of the run's stage offers. The contract is
+// contracts/harness/v1/verdict.schema.json.
 type Track struct {
 	ID     string `json:"id"`
-	Kind   string `json:"kind,omitempty"`
 	Reason string `json:"reason"`
 }
 
@@ -424,19 +423,13 @@ func CheckVersion(artifactType string, sizes []int64) error {
 }
 
 // PushVerdict stores the run's verdict, one of the Verdict constants, with the body of
-// [VerdictBody].
+// [VerdictBody]. It sends nothing for a body over the limit of POST verdict.
 func (c *Client) PushVerdict(ctx context.Context, verdict string, points []Point, track *Track) (*Pushed, error) {
 	body, err := VerdictBody(verdict, points, track)
 	if err != nil {
 		return nil, err
 	}
 
-	return c.post(ctx, "/verdict", body)
-}
-
-// PushVerdictDocument stores body, a verdict document of the form of [VerdictBody], with a
-// track too when the verdict has one: [Client.PushVerdict] sends none.
-func (c *Client) PushVerdictDocument(ctx context.Context, body []byte) (*Pushed, error) {
 	if len(body) > maxVerdictBody {
 		return nil, &Error{Code: CodePayloadTooLarge, Request: "POST /verdict", Limit: maxVerdictBody}
 	}

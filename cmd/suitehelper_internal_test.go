@@ -432,7 +432,7 @@ func TestTheHostLineHasAtMost100CharactersAndAValidVerdict(t *testing.T) {
 		if len(hosts) > 1 && !strings.Contains(line, " and ") {
 			t.Errorf("the line %q has no count of the other hosts", line)
 		}
-		body, err := runapi.VerdictBody(runapi.VerdictChangesRequested, []runapi.Point{{Text: line, Action: "run_again", Fix: textPointDenied}})
+		body, err := runapi.VerdictBody(runapi.VerdictChangesRequested, []runapi.Point{{Text: line, Action: "run_again", Fix: textPointDenied}}, nil)
 		if err != nil {
 			t.Fatal(err)
 		}

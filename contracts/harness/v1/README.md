@@ -871,10 +871,9 @@ stores it as a version of the artifact type `verdict`. This is version 1 of the 
 | `action` | `answer`: a person answers the question in `question`, only with `escalate`; `run_again`: another round runs, and with `escalate` a person runs it |
 | `question` | the id of an open question in the work item's newest `questions` version, in the id form of the questions format: required with `answer`, and absent with `run_again` |
 | `fix` | what a person does to fix the point, in one plain sentence on one line, with the rules of `text`: optional with `run_again`, and absent with `answer`. Qory Apiary shows it in place of the sentence of the action `run_again` |
-| `track` | the track the run proposes for the work item: optional with a verdict of any kind, an object with the members `id`, `reason` and `kind` and no other. A verdict with no track proposes none. Qory Apiary returns 422 for a track that the gate of the run's stage does not offer |
+| `track` | the track the run proposes for the work item: optional with a verdict of any kind, an object with the members `id` and `reason` and no other. A verdict with no track proposes none. Qory Apiary returns 422 for a track that the gate of the run's stage does not offer |
 | `id` | the id of a track that the gate of the run's stage offers: one lower-case word, or lower-case words joined by hyphens, such as `small-change`, at most 40 characters. Required in a track |
 | `reason` | why the run proposes the track, in one plain sentence on one line, 1 to 300 characters, with the rules of `text`. Required in a track |
-| `kind` | the kind of work the track suits, shown as text, on one line of 1 to 80 characters with something other than spaces in it, with the rules of `text`. Optional in a track. Qory Apiary decides nothing by it |
 
 A `changes-requested` verdict may list what the next round fixes:
 
@@ -891,16 +890,15 @@ A verdict of any kind may propose a track:
 {"verdict": "passed", "track": {"id": "small-change", "reason": "The change touches one config file."}}
 ```
 
-`qory run verdict --track <id> --track-reason <text> [--track-kind <text>]` sends the track.
-It sends `id` and `reason` together or not at all, sends `kind` only with them, and checks
-all three against this schema before it sends or keeps anything. It exits 2 for an id, a
-reason or a pair that breaks a rule, and 4 for a kind with no `--track` or a kind that breaks a rule, and when Qory
-Apiary refuses the verdict with 422 `invalid_artifact`, such as for a track that the gate
-does not offer.
+`qory run verdict --track <id> --track-reason <text>` sends the track. It sends `id` and
+`reason` together or not at all, and checks both against this schema before it sends or
+keeps anything. It exits 2 for an id, a reason or a pair that breaks a rule. It exits 4
+when Qory Apiary refuses the verdict with 422 `invalid_artifact`, such as for a track that
+the gate does not offer.
 
 A document has no member other than `verdict`, `points` and `track`, a point has no member
 other than `text`, `action`, `question` and `fix`, and a track has no member other than
-`id`, `kind` and `reason`. A JSON Schema cannot check that the
+`id` and `reason`. A JSON Schema cannot check that the
 question is open, so the run pushes its questions before its verdict. Each of these
 documents fails the schema:
 
