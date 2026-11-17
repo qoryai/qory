@@ -265,6 +265,10 @@ type Options struct {
 // directory just before and just after the compose reads its manifest.
 var beforeManifest, afterManifest func(dir string)
 
+// beforeMerge, when a test sets it, runs with the path of each settings fragment just
+// before the compose reads it to merge it.
+var beforeMerge func(path string)
+
 // Compose is [ComposeWith] and the default options.
 func Compose(p *stack.Stack) (*Result, error) { return ComposeWith(p, Options{}) }
 
@@ -448,6 +452,9 @@ func ComposeWith(p *stack.Stack, opts Options) (_ *Result, err error) {
 			for file, path := range files {
 				if res.Settings[runtime][file] == nil {
 					res.Settings[runtime][file] = map[string]any{}
+				}
+				if beforeMerge != nil {
+					beforeMerge(path)
 				}
 				if err := mergeFile(res, runtime, file, path, name, opts.Env, readFile); err != nil {
 					return nil, module.Prefixed("module "+shown(name), err)
@@ -1542,9 +1549,7 @@ func collisions(owners map[string][]string, modules []Module, base *Base, checko
 func mergeFile(res *Result, runtime, file, path, modName string, decided map[string]string, readFile func(string) ([]byte, error)) error {
 	data, err := readFile(path)
 	if err != nil {
-		err = exports.HideError(err)
-		return module.Caused(err, fmt.Sprintf("Check that you can read the settings fragment of module %s.", shown(modName)),
-			err.Error(), "The file is "+exports.HidePath(path)+".")
+		return exports.ReadErrorOf("the settings fragment of module "+shown(modName), path, err)
 	}
 	src := map[string]any{}
 	switch filepath.Ext(path) {
