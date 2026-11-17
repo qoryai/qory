@@ -92,7 +92,7 @@ func fromAnswerOnly(cmd *cobra.Command, runtime string, extra []string) error {
 // codeRun is what a run from a run code takes from the documents of the answer to the
 // code, checked: the runtime and the compose flags its run settings map to, the
 // harness document, the workflow, the inputs as the documents have them, the run
-// settings' time_limit_minutes, 0 for none, and harness_hidden. named is set when
+// time_limit_minutes, 0 for none, and harness_hidden. named is set when
 // harness_hidden is true: no text of the run shows the address of a harness source.
 // target is the documents' target and target_version, which the fetch uses for the
 // target's repository. workItem is the id of the documents' work item, "" for none.
@@ -167,10 +167,6 @@ func codeRunOf(doc contracts.Documents) (*codeRun, error) {
 		return nil, err
 	}
 	hidden := doc.HarnessHidden != nil && *doc.HarnessHidden
-	var minutes int
-	if doc.RunSettings != nil {
-		minutes = doc.RunSettings.TimeLimitMinutes
-	}
 	runtime, settings := provisioner.Settings(doc.RunSettings)
 	// A runtime this qory does not render has no headless start either.
 	if rt, err := render.Lookup(runtime); err != nil {
@@ -198,7 +194,7 @@ func codeRunOf(doc contracts.Documents) (*codeRun, error) {
 	if doc.Target != nil {
 		target.System, target.Path, target.Version = doc.Target.System, doc.Target.Path, doc.TargetVersion
 	}
-	r := &codeRun{runtime: runtime, settings: settings, harness: harness, defines: defines, workflow: doc.Workflow, inputs: doc.Inputs, minutes: minutes, hidden: hidden, target: target, access: doc.Access}
+	r := &codeRun{runtime: runtime, settings: settings, harness: harness, defines: defines, workflow: doc.Workflow, inputs: doc.Inputs, minutes: doc.TimeLimitMinutes, hidden: hidden, target: target, access: doc.Access}
 	if doc.WorkItem != nil {
 		r.workItem = doc.WorkItem.ID
 	}

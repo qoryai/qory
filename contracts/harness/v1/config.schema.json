@@ -128,7 +128,7 @@
             "additionalProperties": false,
             "properties": {
               "time_limit": {
-                "description": "How long a dispatched run of the workflow may run, counted from the run's open, as a duration: 7h or 45m. The run's run_settings.time_limit_minutes, when Qory Apiary sets it, applies instead. A workflow without it runs for at most 3 hours.",
+                "description": "How long a dispatched run of the workflow may run, counted from the run's open, as a duration: 7h or 45m. The run's time_limit_minutes in its documents, when Qory Apiary sets it, applies instead. A workflow without it runs for at most 3 hours.",
                 "type": "string",
                 "pattern": "^([0-9]+(\\.[0-9]+)?(ns|us|ms|s|m|h))+$",
                 "not": {"pattern": "^([0.]+(ns|us|ms|s|m|h))+$"}

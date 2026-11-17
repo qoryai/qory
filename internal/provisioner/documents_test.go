@@ -94,12 +94,27 @@ func TestEveryDocumentsFixtureIsRead(t *testing.T) {
 		})
 	}
 	doc, err := provisioner.ReadDocuments(documentsOf(t, "explore-time-limit.json", nil))
-	if err != nil || doc.RunSettings == nil || doc.RunSettings.TimeLimitMinutes != 90 {
-		t.Errorf("the time limit: %+v %v", doc.RunSettings, err)
+	if err != nil || doc.TimeLimitMinutes != 90 {
+		t.Errorf("the time limit: %d %v", doc.TimeLimitMinutes, err)
 	}
 	spaced := append([]byte(" \n"), documentsOf(t, "explore-workflow.json", nil)...)
 	if _, err := provisioner.ReadDocuments(spaced); err != nil {
 		t.Errorf("documents after white space: %v", err)
+	}
+}
+
+// TestDocumentsWithSharedRunAndFullSuiteAreRead reads explore documents that set
+// time_limit_minutes, shared_run and full_suite: each member is read as set.
+func TestDocumentsWithSharedRunAndFullSuiteAreRead(t *testing.T) {
+	raw := documentsOf(t, "explore-run-settings.json", func(d map[string]any) {
+		d["time_limit_minutes"], d["shared_run"], d["full_suite"] = 45, true, true
+	})
+	doc, err := provisioner.ReadDocuments(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if doc.TimeLimitMinutes != 45 || !doc.SharedRun || !doc.FullSuite {
+		t.Errorf("read time_limit_minutes %d, shared_run %v, full_suite %v", doc.TimeLimitMinutes, doc.SharedRun, doc.FullSuite)
 	}
 }
 
@@ -172,8 +187,13 @@ func TestBrokenDocumentsAreRefused(t *testing.T) {
 		}), broken},
 		{"a runtime with a trailing line feed", withSettings(func(d map[string]any) { settings(d)["runtime"] = "claude\n" }), broken},
 		{"a key in the run settings", withSettings(func(d map[string]any) { settings(d)["api_key"] = "example-key" }), broken},
-		{"a time limit of 14 minutes", withSettings(func(d map[string]any) { settings(d)["time_limit_minutes"] = 14 }), broken},
-		{"a time limit with a fraction", withSettings(func(d map[string]any) { settings(d)["time_limit_minutes"] = 45.5 }), broken},
+		{"a time limit in the run settings", withSettings(func(d map[string]any) { settings(d)["time_limit_minutes"] = 45 }), broken},
+		{"a time limit of 14 minutes", withSettings(func(d map[string]any) { d["time_limit_minutes"] = 14 }), broken},
+		{"a time limit of 1441 minutes", withSettings(func(d map[string]any) { d["time_limit_minutes"] = 1441 }), broken},
+		{"a time limit with a fraction", withSettings(func(d map[string]any) { d["time_limit_minutes"] = 45.5 }), broken},
+		{"shared_run that is not a boolean", withSettings(func(d map[string]any) { d["shared_run"] = "yes" }), broken},
+		{"a prebuild with a time limit", documentsOf(t, "prebuild.json", func(d map[string]any) { d["time_limit_minutes"] = 45 }), broken},
+		{"a prebuild with full_suite", documentsOf(t, "prebuild.json", func(d map[string]any) { d["full_suite"] = true }), broken},
 		{"a model not listed", withSettings(func(d map[string]any) { settings(d)["model"] = "example-tiny" }), broken},
 		{"an effort not listed for the model", withSettings(func(d map[string]any) { settings(d)["effort"] = "huge" }), broken},
 		{"an effort for a model with none", withSettings(func(d map[string]any) {

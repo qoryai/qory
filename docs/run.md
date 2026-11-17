@@ -1071,7 +1071,7 @@ its files take on disk, at most 60 minutes.
 `--timeout 0` lifts the limit `forager.yaml` sets.
 
 A run from a run code takes its limit from elsewhere, in this order:
-`run_settings.time_limit_minutes` in Qory Apiary's response to the code, then
+`time_limit_minutes` in the run's documents, which are Qory Apiary's response to the code, then
 `workflows.<name>.time_limit` of the run's workflow in the stack that the harness
 defines, or in the `qory-stack.yaml` of the stack that it extends, then 3 hours.
 `--timeout` stops it with exit 2, and `session.run.timeout` does not

@@ -219,8 +219,8 @@ release may change what an existing document does, and states it under Upgrading
   in `docs/run.md` for what is not masked and Forager's limits.
 - Give a workflow of a stack a time limit with `workflows.<name>.time_limit` in its
   `qory-stack.yaml`, such as `workflows: {example: {time_limit: 45m}}`. A run from a run
-  code takes its time limit from Qory Apiary's `run_settings.time_limit_minutes`, else
-  from its workflow's `time_limit`, else 3 hours.
+  code takes its time limit from the `time_limit_minutes` of its documents, else from its
+  workflow's `time_limit`, else 3 hours.
 - Declare a workflow's access level with `workflows.<name>.access` in its
   `qory-stack.yaml`, `read` or `write`, and `read` when left out. qory stops on any
   other value.
@@ -482,6 +482,11 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Changed
 
+- A run from a run code reads its time limit from `time_limit_minutes` at the top of the
+  run's documents. The documents have no `run_settings.time_limit_minutes` any more, and
+  qory stops a run whose documents have one. A run whose documents set no
+  `time_limit_minutes` keeps the limit of its workflow, else 3 hours. The documents can
+  also contain `shared_run` and `full_suite`; qory reads them and changes nothing for them.
 - A prebuild keeps an image of any size, and the last line of the prebuild prints the size.
 - A prebuild stops, before it builds the image, when the base image is not Debian or
   Ubuntu 22.04 or 24.04, or has no `apt-get`: `use a Debian or Ubuntu image: the build
