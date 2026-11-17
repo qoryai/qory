@@ -378,6 +378,49 @@ func TestPushChecksRunInTheWallsDefaultImage(t *testing.T) {
 	}
 }
 
+// TestPushChecksRunUnderTheRunsRuntime is the runtime of a run's push checks, the one
+// Forager starts the run's container under: the runtime of the entry that the default
+// names, the run's image's for a run with no default, and none for a default that is a
+// reference.
+func TestPushChecksRunUnderTheRunsRuntime(t *testing.T) {
+	run := imageOnly{img: session.Image{Name: "devcontainer", Ref: "registry.example/devcontainer:1", Runtime: "runsc"}}
+	images := []session.Image{
+		{Name: "agent", Ref: "registry.example/agent:1", Runtime: "runsc"},
+		{Name: "plain", Ref: "registry.example/plain:1"},
+		{Name: "devcontainer", Ref: "registry.example/devcontainer:1", Runtime: "kata"},
+	}
+	for _, c := range []struct{ image, want string }{
+		{"agent", "runsc"},
+		{"devcontainer", "kata"},
+		{"plain", ""},
+		{"registry.example/other:2", ""},
+		{"", "runsc"},
+	} {
+		spec := &runSpec{}
+		spec.Image, spec.Images = c.image, images
+		if got := checkRuntime(run, spec); got != c.want {
+			t.Errorf("the default %q: runtime %q, want %q", c.image, got, c.want)
+		}
+	}
+}
+
+// TestTheLoadedCheckerHasTheRuntime is the checker that pushChecker returns for a default
+// that names an image of wall.images with a runtime, and for one with none.
+func TestTheLoadedCheckerHasTheRuntime(t *testing.T) {
+	stubChecks(t)
+	images := []session.Image{{Name: "agent", Ref: "registry.example/agent:1", Runtime: "runsc"}, {Name: "plain", Ref: "registry.example/plain:1"}}
+	for image, want := range map[string]string{"agent": "runsc", "plain": ""} {
+		docker, _ := loggingEngine(t, "")
+		spec := &runSpec{}
+		spec.Wall, spec.Image, spec.Images = &wall.Docker{Command: docker}, image, images
+		run := runAPIOnly{base: "http://run-api.qory.invalid/v1/runs/r1", dir: t.TempDir()}
+		checker, err := pushChecker(context.Background(), run, t.TempDir(), "r1", spec, true, false)
+		if err != nil || checker == nil || checker.Runtime != want {
+			t.Fatalf("the default %q: %v, %v, want a checker of runtime %q", image, checker, err, want)
+		}
+	}
+}
+
 // checkNotSet is an opened run whose SetRunAPICheck returns err.
 type checkNotSet struct {
 	openedRun

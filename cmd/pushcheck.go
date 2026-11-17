@@ -214,7 +214,7 @@ func pushChecker(ctx context.Context, run openedRun, home, runID string, spec *r
 		return nil, checksStop(fromCode, textChecksBadImage, textChecksBadImageFromCode, exports.Value(image, true))
 	}
 	checker := &pushcheck.Checker{
-		Home: home, Checks: checks, Image: image, User: user,
+		Home: home, Checks: checks, Image: image, Runtime: checkRuntime(run, spec), User: user,
 		Engine: engine,
 		Fetch:  artifactsForCheck(client),
 		Dir:    filepath.Join(run.Dir(), pushChecksDir),
@@ -268,6 +268,21 @@ func checkImage(run openedRun, spec *runSpec) string {
 		}
 	}
 	return spec.Image
+}
+
+// checkRuntime is the --runtime of the checks' container, as Forager sets it for the run's
+// (gateway/internal/run/config.go:435-437 an entry's runtime; :443-447 "" for a default that
+// is a bare reference; wall/docker.go:1222-1224 no flag for ""). No default: the run's image.
+func checkRuntime(run openedRun, spec *runSpec) string {
+	if spec.Image == "" {
+		return run.Image().Runtime
+	}
+	for _, i := range spec.Images {
+		if i.Name == spec.Image {
+			return i.Runtime
+		}
+	}
+	return ""
 }
 
 // checkEngine is the engine of the push checks of a run behind d: d's command, with the
