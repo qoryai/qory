@@ -74,6 +74,8 @@ type Config struct {
 	Run   Runner
 	// Mask replaces the secrets of the run in the output of a suite; nil leaves it as it is.
 	Mask func(string) string
+	// Ended, when not nil, is called once for each suite, after the suite ended.
+	Ended func(Snapshot)
 	// Now is time.Now when nil.
 	Now func() time.Time
 }
@@ -194,8 +196,12 @@ func (r *Registry) run(ctx context.Context, e *entry) {
 	}
 	r.mu.Lock()
 	e.state, e.counts, e.ended = state, counts, r.cfg.Now()
+	snap := r.snapshot(e)
 	r.mu.Unlock()
 	e.cancel(nil)
+	if r.cfg.Ended != nil {
+		r.cfg.Ended(snap)
+	}
 	close(e.done)
 }
 

@@ -989,3 +989,11 @@ func SetInstanceAddress(f func(*config.Forager) string) func() {
 
 // InstanceAddress is instanceAddress.
 var InstanceAddress = instanceAddress
+
+// SetSuiteMinute sets the length of a minute of the full suite's limit, and returns what
+// restores the default.
+func SetSuiteMinute(d time.Duration) func() {
+	before := suiteMinute
+	suiteMinute = d
+	return func() { suiteMinute = before }
+}

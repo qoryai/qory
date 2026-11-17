@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 
 	"github.com/qoryai/qory/internal/integration"
 	"github.com/qoryai/qory/internal/suite"
@@ -30,6 +31,7 @@ const (
 	routeNoBuildPlan     = "no_build_plan"
 	routeNoFullCommand   = "no_full_command"
 	routeRunEnding       = "run_ending"
+	routeSuiteFolder     = "suite_unavailable"
 )
 
 // The texts of the answers of the suite paths. Each starts with its fix, in a first line of at
@@ -43,14 +45,18 @@ const (
 	textRouteBadCommit      = "Send commit as the 40 or 64 lower-case hex digits of a commit id: the commit is not one."
 	textRouteCommitNotTaken = "Send a commit of the session's checkout: qory could not take that commit from it."
 	textRouteUnknownSuite   = "Use the suite id that POST /v1/suites returned: %s is unknown."
-	textRouteNoBuildPlan    = "Push a build plan before the next run: this run started with none, so qory knows no suite command."
+	textRouteNoBuildPlan    = "Push a build plan before the next run: this run started with none, so qory has no suite command."
 	textRouteNoFullCommand  = "Add a full row with a command to Commands in the build plan: the plan of this run has none."
 	textRouteRunEnding      = "Stop sending requests: the run is ending, and qory starts no suite."
+	textRouteSuiteFolder    = "Start the run again: qory could not make the folder that the suites of the run need."
 )
 
 // suiteNameMax is how many characters of a name that a request sent a text shows: with the words
 // around it, the first line stays within 100 characters.
 const suiteNameMax = 36
+
+// errSuiteFolder is why a run has no suite: qory could not make the folder that holds the clones.
+var errSuiteFolder = errors.New("the folder of the suites was not made")
 
 // errNoBuildPlan is why a run has no suite command: the run started with no build plan, or qory
 // could not read it.
@@ -63,6 +69,8 @@ type suiteHost struct {
 	// none is why reg is nil: [errNoBuildPlan], or an error of [suite.FullRow].
 	none error
 	said func(string)
+	// saidNone is whether the line about none was printed: it is printed once.
+	saidNone sync.Once
 }
 
 // serve answers a request of the route that passed the session's checks.
@@ -104,9 +112,19 @@ func (h *suiteHost) start(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if h.none != nil {
-		if errors.Is(h.none, errNoBuildPlan) {
+		h.saidNone.Do(func() {
+			text := textSuiteNotStarted
+			if errors.Is(h.none, errSuiteFolder) {
+				text = textSuiteNoFolder
+			}
+			h.said(fmt.Sprintf(text, shownError(h.none)))
+		})
+		switch {
+		case errors.Is(h.none, errSuiteFolder):
+			routeAnswer(w, http.StatusInternalServerError, routeSuiteFolder, textRouteSuiteFolder)
+		case errors.Is(h.none, errNoBuildPlan):
 			routeAnswer(w, http.StatusConflict, routeNoBuildPlan, textRouteNoBuildPlan)
-		} else {
+		default:
 			routeAnswer(w, http.StatusConflict, routeNoFullCommand, textRouteNoFullCommand)
 		}
 		return
@@ -135,7 +153,7 @@ func (h *suiteHost) start(w http.ResponseWriter, r *http.Request) {
 
 // suiteRequest reads the body of a suite request and returns its commit. It writes the answer of
 // a body that is no suite request and returns answered true. The first member that is not commit,
-// in the order of the body, is the field the answer names.
+// in the order of the body, is the field the answer shows.
 func suiteRequest(w http.ResponseWriter, body []byte) (commit string, answered bool) {
 	dec := json.NewDecoder(bytes.NewReader(body))
 	if tok, err := dec.Token(); err != nil || tok != json.Delim('{') {
