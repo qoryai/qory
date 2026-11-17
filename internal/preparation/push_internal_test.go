@@ -200,8 +200,8 @@ func TestPushFailed(t *testing.T) {
 		"error: RPC failed; HTTP 403 curl 22":               "qory run: Contact support: the push was refused (403).",
 		"fatal: unable to access 'x': returned error: 403":  "qory run: Contact support: the push was refused (403).",
 		"fatal: Authentication failed for 'https://x/'":     "qory run: give the run's credential for git.example.com write access to acme/shop",
-		"fatal: unable to access 'x': Could not resolve":    "qory run: check that the run's policy allows git.example.com",
-		"fatal: https://u:token-123@git.example.com/ fails": "qory run: check that the run's policy allows git.example.com",
+		"fatal: unable to access 'x': Could not resolve":    "qory run: check that the run's gateway can reach git.example.com",
+		"fatal: https://u:token-123@git.example.com/ fails": "qory run: check that the run's gateway can reach git.example.com",
 	} {
 		got := pushFailed(b, "acme/shop", &gitError{line: output, exit: 1, output: output}).Error()
 		if !strings.HasPrefix(got, want) || !strings.HasSuffix(got, "; the code is used") {
@@ -234,9 +234,9 @@ func TestAForbiddenPushNamesTheThreeCauses(t *testing.T) {
 		t.Errorf("the second line is %q, want %q", lines[1], want)
 	}
 	for i, want := range []string{
-		"  1. The run's gateway allows a push only to the run's branch, refs/heads/" + testRef + " (wall:push-ref).",
-		"  2. The connection's setup has no path rule for /" + path + ".git/git-receive-pack, or no credential with write access.",
-		"  3. The forge stopped the push: its permission for the run's credential, or a branch rule.",
+		"  1. The run's push proxy allows a push only to the push_ref of the push credential, and qory pushes to refs/heads/" + testRef + " (wall:push-ref).",
+		"  2. The run's push credential has no item for /" + path + ".git/git-receive-pack on git.example.com, and the push proxy refuses every other host and path.",
+		"  3. The forge stopped the push: its permission for the push credential, or a branch rule.",
 	} {
 		if lines[i+2] != want {
 			t.Errorf("line %d is %q, want %q", i+3, lines[i+2], want)

@@ -2599,17 +2599,17 @@ Each of these lines fails the step. `<commit>` is the commit's first 12 characte
   hook on the system stops the update
 - `Contact support: the push was refused (403).`, then lines indented by two spaces:
   `One of these stopped it:`, the three causes, and a last line with the error. The
-  causes are `1. The run's gateway allows a push only to the run's branch,
-  refs/heads/qory/<work item id> (wall:push-ref).`, `2. The connection's setup has no path rule for
-  /<path>.git/git-receive-pack, or no credential with write access.`, `3. The forge stopped
-  the push: its permission for the run's credential, or a branch rule.` The last line is
+  causes are `1. The run's push proxy allows a push only to the push_ref of the push
+  credential, and qory pushes to refs/heads/qory/<work item id> (wall:push-ref).`, `2. The run's
+  push credential has no item for /<path>.git/git-receive-pack on <system>, and the push
+  proxy refuses every other host and path.`, `3. The forge stopped the push: its permission
+  for the push credential, or a branch rule.` The last line is
   `The push of <path> to <system> returned 403: <error>; the code is used`
 - `give the run's credential for <system> write access to <path>, then take the work item in
   again: the push through the run's gateway failed: <error>; the code is used`
-- `check that the run's policy allows <system> and that <system> is reachable, then take
-  the work item in again: the push of <path> through the run's gateway failed: <error>;
-  the code is used`
-- `take the work item in again in Qory Apiary: the run's host proxy, through which qory
+- `check that the run's gateway can reach <system>, then take the work item in again: the
+  push of <path> through the run's push proxy failed: <error>; the code is used`
+- `take the work item in again in Qory Apiary: the run's push proxy, through which qory
   pushes the run's commits, did not open: <error>; the code is used`
 - `take the work item in again in Qory Apiary: the run API, which stores the version of the
   artifact branch, is not reachable from this run: <error>; the code is used`

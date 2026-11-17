@@ -956,8 +956,8 @@ func TestAHookOfTheForgeFailsTheStep(t *testing.T) {
 	wants(t, r.out, "qory run: change the rule on "+proxygittest.Host+" that stops a push to qory/"+workItem+" of acme/site, then take the work item in again: the push failed: ! [remote rejected]")
 }
 
-// TestAPushThatARuleRefusesSaysWhatToAllow is a run's proxy that returns 403 to the POST
-// of the push, as a policy with path rules does when no rule covers git-receive-pack.
+// TestAPushThatARuleRefusesSaysWhatToAllow is a push proxy that returns 403 to the POST
+// of the push, as it does for a path that no item of the push credential covers.
 func TestAPushThatARuleRefusesSaysWhatToAllow(t *testing.T) {
 	p := newPushRepo(t, "write")
 	p.h.server.Refuse("/acme/site.git/git-receive-pack")
@@ -965,9 +965,9 @@ func TestAPushThatARuleRefusesSaysWhatToAllow(t *testing.T) {
 	r.wantsClose(t, event.StateFailed, 1)
 	wants(t, r.out, "qory run: Contact support: the push was refused (403).\n"+
 		"  One of these stopped it:\n"+
-		"  1. The run's gateway allows a push only to the run's branch, refs/heads/qory/"+workItem+" (wall:push-ref).\n"+
-		"  2. The connection's setup has no path rule for /acme/site.git/git-receive-pack, or no credential with write access.\n"+
-		"  3. The forge stopped the push: its permission for the run's credential, or a branch rule.\n"+
+		"  1. The run's push proxy allows a push only to the push_ref of the push credential, and qory pushes to refs/heads/qory/"+workItem+" (wall:push-ref).\n"+
+		"  2. The run's push credential has no item for /acme/site.git/git-receive-pack on "+proxygittest.Host+", and the push proxy refuses every other host and path.\n"+
+		"  3. The forge stopped the push: its permission for the push credential, or a branch rule.\n"+
 		"  The push of acme/site to "+proxygittest.Host+" returned 403: ")
 	if got := p.branchHead(t); got != "" {
 		t.Errorf("the forge has the branch at %s", got)
