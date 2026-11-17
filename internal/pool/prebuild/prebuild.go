@@ -226,6 +226,11 @@ type Run struct {
 	// environment step. A run whose environment image is not in its registry closes
 	// failed with image_missing and -1.
 	EnvironmentImage string
+	// LargestImageBytes is the documents' largest_prebuilt_image_bytes: the largest size
+	// of the repository's image, before qory adds its tools, in decimal bytes, as docker
+	// image inspect reports it. A larger image stops the prebuild. 0 is no limit. Only
+	// the documents of a run code set it.
+	LargestImageBytes int64
 }
 
 // Opened is a run open at its gateway, as the prebuild uses it: a [*session.Run].
@@ -387,6 +392,9 @@ func (s Settings) step(ctx context.Context, run Opened, r Run, dir string) (step
 	st := Step{
 		Out: out, RunID: r.RunID, ImageDestination: r.ImageDestination, EnvironmentDestination: r.EnvironmentDestination,
 		EnvironmentImage: r.EnvironmentImage, User: s.User,
+	}
+	if r.LargestImageBytes > 0 {
+		st.LargestImageBytes = strconv.FormatInt(r.LargestImageBytes, 10)
 	}
 	// The session masks its output with s.Masker, so lines gets it as it is: a second
 	// pass would mask inside a placeholder, such as qory-proxy-password.

@@ -136,6 +136,8 @@ const (
 	textEnvImage     = "the image sets %s in its environment, which change what the agent does; the image is removed"
 	textProxyBaked   = "the final image sets %s in its environment to a value the image before the commands did not; the image is removed"
 	textSizeUnread   = "docker image inspect printed a size that does not read: %s"
+	textTooBig       = "Make the image smaller, or contact support to raise Largest prebuilt image.\nThe repository's image is %s, before qory adds Chromium, ffmpeg and the parsers.\nThe limit is %s.%s"
+	textTooBigGone   = " The image is removed."
 	textNotCopied    = "the repository could not be copied to " + Workspace + ": %s"
 	textConfigUnread = "docker image inspect printed a configuration that does not read"
 	textLimit        = "the build ran past its limit of 30 minutes and was stopped; what it started is removed"
@@ -248,6 +250,12 @@ type Options struct {
 	// EnvironmentTag is the name of the environment image the build keeps apart; ""
 	// is <Name>:environment.
 	EnvironmentTag string
+	// LargestImageBytes is the largest size of the repository's image, in decimal bytes,
+	// as docker image inspect reports it: the image the development container
+	// configuration builds, or the prebuilt image it names, which the build measures
+	// before the tools step adds Chromium, ffmpeg and the parsers. A larger image is
+	// refused, and removed when the build made it. 0 sets no limit.
+	LargestImageBytes int64
 
 	// Parsers is the folder of the Node parsers the tools step copies into the image, with
 	// package.json and node_modules; "" is [ParsersPath]. Node is the node program it
@@ -473,11 +481,17 @@ func (b *build) run(ctx context.Context) error {
 			return err
 		}
 		from = b.o.EnvironmentImage
+		if err := b.checkLargest(ctx, from, false); err != nil {
+			return err
+		}
 	case fromStandard:
 		if from, err = b.takePulled(ctx, b.cfg.Image, textStandard); err != nil {
 			return err
 		}
 		b.res.Base = from
+		if err := b.checkLargest(ctx, from, false); err != nil {
+			return err
+		}
 	default:
 		if err := b.checkMerged(ctx); err != nil {
 			return err
@@ -486,6 +500,9 @@ func (b *build) run(ctx context.Context) error {
 			return err
 		}
 		if err := b.buildBase(ctx, from); err != nil {
+			return err
+		}
+		if err := b.checkLargest(ctx, from, true); err != nil {
 			return err
 		}
 		if err := b.keepEnvironment(ctx, from); err != nil {
@@ -1165,13 +1182,9 @@ func (b *build) finish(ctx context.Context, start time.Time) error {
 		return refused(fmt.Errorf(textProxyBaked, printables(added)))
 	}
 	b.line(textCommitted, seconds(time.Since(at)))
-	out, err := b.e.output(ctx, "docker", "image", "inspect", "--format", "{{.Size}}", b.o.Tag)
+	size, err := b.imageSize(ctx, b.o.Tag)
 	if err != nil {
 		return err
-	}
-	size, err := strconv.ParseInt(strings.TrimSpace(string(out)), 10, 64)
-	if err != nil {
-		return fmt.Errorf(textSizeUnread, integration.Printable(strings.TrimSpace(string(out))))
 	}
 	b.images = slices.DeleteFunc(b.images, func(s string) bool { return s == b.o.Tag })
 	b.res.Target, b.res.Environment, b.environment = b.o.Tag, b.environment, ""
@@ -1193,6 +1206,49 @@ func humanSize(n int64) string {
 		return fmt.Sprintf("%.1f GiB (%d bytes)", float64(n)/(1<<30), n)
 	}
 	return fmt.Sprintf("%.1f MiB (%d bytes)", float64(n)/(1<<20), n)
+}
+
+// imageSize is the size docker image inspect reports for ref, in bytes.
+func (b *build) imageSize(ctx context.Context, ref string) (int64, error) {
+	out, err := b.e.output(ctx, "docker", "image", "inspect", "--format", "{{.Size}}", ref)
+	if err != nil {
+		return 0, err
+	}
+	size, err := strconv.ParseInt(strings.TrimSpace(string(out)), 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf(textSizeUnread, integration.Printable(strings.TrimSpace(string(out))))
+	}
+	return size, nil
+}
+
+// checkLargest refuses ref, the repository's image, the one the target step starts from,
+// when [Options.LargestImageBytes] is set and the image is larger. The build calls it as
+// soon as the image exists, before the tools step adds Chromium, ffmpeg and the parsers.
+// An image the build made, built is true, is removed with the others, as the build's
+// failures remove them. An image the engine pulled stays in the engine, which may have
+// held it before the build.
+func (b *build) checkLargest(ctx context.Context, ref string, built bool) error {
+	if b.o.LargestImageBytes <= 0 {
+		return nil
+	}
+	size, err := b.imageSize(ctx, ref)
+	if err != nil {
+		return err
+	}
+	if size <= b.o.LargestImageBytes {
+		return nil
+	}
+	gone := ""
+	if built {
+		gone = textTooBigGone
+	}
+	return refused(fmt.Errorf(textTooBig, humanDecimal(size), humanDecimal(b.o.LargestImageBytes), gone))
+}
+
+// humanDecimal is a size in decimal GB, as docker shows sizes, with one decimal, and in
+// bytes.
+func humanDecimal(n int64) string {
+	return fmt.Sprintf("%.1f GB (%d bytes)", float64(n)/1e9, n)
 }
 
 // clean removes the temporary container, the images the build made, o.Tag and the
