@@ -1125,8 +1125,9 @@ contains the `paths` of each member of a group role (§References), for a script
 starts the members a change needs. qory leaves the key and its whole value out of every
 agent file it writes for a runtime, since not every runtime accepts a key it does not
 know. The compose checks the `paths` of every agent, and any other value fails it:
-`module core: agents/python-reviewer.md: set paths to globs, such as ["**/*.py"], or
-remove it` with `the value is not a glob or a list of globs` on the next line.
+`Set paths to globs, such as ["**/*.py"], or remove it.` as line 1, then `The value is not
+a glob or a list of globs.` and `The agent is in agents/python-reviewer.md of module core.`
+on the lines after it.
 
 Below `skills`, a folder with `SKILL.md` is a skill, and everything below it is that skill's
 files, a nested `SKILL.md` included. A real folder with no `SKILL.md` and with a folder below
