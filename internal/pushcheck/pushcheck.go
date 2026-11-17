@@ -181,6 +181,9 @@ type Checker struct {
 	// Dir is the folder the check's temporary folders are made in; "" for the system's
 	// temporary folder.
 	Dir string
+	// Runtime is the container runtime the check's container runs under, the one of the
+	// run's container; "" for the engine's default, with no --runtime.
+	Runtime string
 	// Limits are the wall's limits of the run's containers. A check's container gets
 	// their CPUs and Memory, and their PIDs, or [PIDs] when it is 0.
 	Limits wall.Limits
@@ -507,6 +510,9 @@ func (c *Checker) run(ctx context.Context, program string, args []string, pulled
 	}
 	create = append(create, c.limits()...)
 	create = append(create, mounts...)
+	if c.Runtime != "" {
+		create = append(create, "--runtime", c.Runtime)
+	}
 	create = append(create, "--entrypoint", program, c.Image)
 	create = append(create, args...)
 	// The container is removed whole in every case, also once ctx has ended.

@@ -378,6 +378,84 @@ func TestPushChecksRunInTheWallsDefaultImage(t *testing.T) {
 	}
 }
 
+// TestPushChecksRunUnderTheRunsRuntime is the runtime of a run's push checks, the one
+// Forager starts the run's container under: the runtime of the entry that the default
+// names, the run's image's for a run with no default, and none for a default that is a
+// reference.
+func TestPushChecksRunUnderTheRunsRuntime(t *testing.T) {
+	run := imageOnly{img: session.Image{Name: "devcontainer", Ref: "registry.example/devcontainer:1", Runtime: "runsc"}}
+	images := []session.Image{
+		{Name: "agent", Ref: "registry.example/agent:1", Runtime: "runsc"},
+		{Name: "plain", Ref: "registry.example/plain:1"},
+		{Name: "devcontainer", Ref: "registry.example/devcontainer:1", Runtime: "kata"},
+	}
+	for _, c := range []struct{ image, want string }{
+		{"agent", "runsc"},
+		{"devcontainer", "kata"},
+		{"plain", ""},
+		{"registry.example/other:2", ""},
+		{"", "runsc"},
+	} {
+		spec := &runSpec{}
+		spec.Image, spec.Images = c.image, images
+		if got := checkRuntime(run, spec); got != c.want {
+			t.Errorf("the default %q: runtime %q, want %q", c.image, got, c.want)
+		}
+	}
+}
+
+// TestTheLoadedCheckerHasTheRuntime is the checker that pushChecker returns for a default
+// that names an image of wall.images with a runtime, and for one with none.
+func TestTheLoadedCheckerHasTheRuntime(t *testing.T) {
+	stubChecks(t)
+	images := []session.Image{{Name: "agent", Ref: "registry.example/agent:1", Runtime: "runsc"}, {Name: "plain", Ref: "registry.example/plain:1"}}
+	for image, want := range map[string]string{"agent": "runsc", "plain": ""} {
+		docker, _ := loggingEngine(t, "")
+		spec := &runSpec{}
+		spec.Wall, spec.Image, spec.Images = &wall.Docker{Command: docker}, image, images
+		run := runAPIOnly{base: "http://run-api.qory.invalid/v1/runs/r1", dir: t.TempDir()}
+		checker, err := pushChecker(context.Background(), run, t.TempDir(), "r1", spec, true, false)
+		if err != nil || checker == nil || checker.Runtime != want {
+			t.Fatalf("the default %q: %v, %v, want a checker of runtime %q", image, checker, err, want)
+		}
+	}
+}
+
+// TestTheLoadedCheckerOfARunWithNoDefaultHasTheRunsRuntime is a run with no default
+// image: pushChecker returns a checker of the run's image and of its runtime.
+func TestTheLoadedCheckerOfARunWithNoDefaultHasTheRunsRuntime(t *testing.T) {
+	stubChecks(t)
+	docker, _ := loggingEngine(t, "")
+	spec := &runSpec{}
+	spec.Wall = &wall.Docker{Command: docker}
+	run := imageOnlyAPI{imageAPI: imageAPI{runAPIOnly: runAPIOnly{base: "http://run-api.qory.invalid/v1/runs/r1", dir: t.TempDir()}}, img: session.Image{Name: "agent", Ref: "registry.example/agent:1", Runtime: "runsc"}}
+	checker, err := pushChecker(context.Background(), run, t.TempDir(), "r1", spec, true, false)
+	if err != nil || checker == nil || checker.Image != "registry.example/agent:1" || checker.Runtime != "runsc" {
+		t.Fatalf("with no default: %v, %v, want a checker of registry.example/agent:1 and runtime runsc", checker, err)
+	}
+}
+
+// imageOnlyAPI is [imageAPI] whose Image returns img, with its runtime.
+type imageOnlyAPI struct {
+	imageAPI
+	img session.Image
+}
+
+func (r imageOnlyAPI) Image() session.Image { return r.img }
+
+// TestAReferenceDefaultIgnoresTheRunsImageRuntime is a run whose policy selects an entry
+// with a runtime while the default is a reference: the checks run in the default, with no
+// runtime.
+func TestAReferenceDefaultIgnoresTheRunsImageRuntime(t *testing.T) {
+	run := imageOnly{img: session.Image{Name: "agent", Ref: "registry.example/agent:1", Runtime: "runsc"}}
+	spec := &runSpec{}
+	spec.Image = "registry.example/other:2"
+	spec.Images = []session.Image{{Name: "agent", Ref: "registry.example/agent:1", Runtime: "runsc"}}
+	if got := checkRuntime(run, spec); got != "" {
+		t.Errorf("runtime %q for a default that is a reference, want none", got)
+	}
+}
+
 // checkNotSet is an opened run whose SetRunAPICheck returns err.
 type checkNotSet struct {
 	openedRun

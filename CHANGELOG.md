@@ -1115,6 +1115,9 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Fixed
 
+- A push check's container runs under the `runtime` that `wall.images` sets for the
+  image it runs in, such as `runsc` (gVisor). Until now, it ran under the engine's
+  default runtime.
 - A Copilot CLI session gets the harness's hooks in a repository that commits
   `.github/hooks/hooks.json`. qory links `settings/copilot/hooks.json` as
   `.github/hooks/qory-hooks.json`, and Copilot CLI runs the hooks of both files. Until
