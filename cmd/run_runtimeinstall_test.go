@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -461,16 +462,19 @@ func endsWithin(t *testing.T, limit time.Duration, f func() installRun) installR
 }
 
 // pollUntil calls ok every 20 ms until it returns true, and returns true; it returns false
-// when ok has not returned true after limit. It takes no *testing.T, so a goroutine that
-// outlives its test cannot log to a finished test: the caller's test fails on its own
-// checks.
-func pollUntil(limit time.Duration, ok func() bool) bool {
-	deadline := time.Now().Add(limit)
+// when stop is closed or ok has not returned true after limit. It takes no *testing.T, so
+// a goroutine that outlives its test cannot log to a finished test: the caller's test
+// reports the failure.
+func pollUntil(limit time.Duration, stop <-chan struct{}, ok func() bool) bool {
+	deadline := time.After(limit)
 	for !ok() {
-		if time.Now().After(deadline) {
+		select {
+		case <-stop:
 			return false
+		case <-deadline:
+			return false
+		case <-time.After(20 * time.Millisecond):
 		}
-		time.Sleep(20 * time.Millisecond)
 	}
 	return true
 }
@@ -490,24 +494,26 @@ func TestARegistryThatKeepsReturning503StopsAtTheTimeLimit(t *testing.T) {
 	reg.PublishPlain("2.1.320")
 	reg.Unavailable(-1, "")
 	first := make(chan time.Time, 1)
+	ended := make(chan struct{})
+	defer close(ended)
 	r := endsWithin(t, 30*time.Second, func() installRun {
 		return runInstalling(t, installSetup{reg: reg, npm: rt.StartNpm(t), proxy: proxy, walled: true, args: []string{"--timeout", "3s"}, during: func() {
-			if pollUntil(30*time.Second, func() bool { return len(reg.Paths()) > 0 }) {
+			if pollUntil(30*time.Second, ended, func() bool { return len(reg.Paths()) > 0 }) {
 				first <- time.Now()
 			}
 		}})
 	})
-	ended := time.Now()
-	if cmd.ExitCode(r.err) != 124 || len(r.joins) != 0 {
-		t.Fatalf("%d joins, %v (exit %d)\n%s", len(r.joins), r.err, cmd.ExitCode(r.err), r.out)
-	}
+	endedAt := time.Now()
 	select {
 	case at := <-first:
-		if took := ended.Sub(at); took > 4500*time.Millisecond {
+		if took := endedAt.Sub(at); took > 4500*time.Millisecond {
 			t.Errorf("the run ended %s after the registry's first request, with a time limit of 3s", took)
 		}
 	default:
-		t.Error("the registry got no request within 30s")
+		t.Error("the registry got no request before the run ended")
+	}
+	if cmd.ExitCode(r.err) != 124 || len(r.joins) != 0 {
+		t.Fatalf("%d joins, %v (exit %d)\n%s", len(r.joins), r.err, cmd.ExitCode(r.err), r.out)
 	}
 	wants(t, r.out, "the run was cancelled at its time limit of 3s, before claude started", "qory run: "+reg.Host()+" has not returned Claude Code (503); check pool.registry\n")
 	if n := strings.Count(r.out, " has not returned Claude Code"); n != 1 {
@@ -523,13 +529,22 @@ func TestARegistryThatKeepsReturning503StopsAtSIGTERM(t *testing.T) {
 	reg, proxy := rt.StartRegistry(t), rt.StartProxy(t)
 	reg.PublishPlain("2.1.320")
 	reg.Unavailable(-1, "")
+	ended := make(chan struct{})
+	defer close(ended)
+	var sent atomic.Bool
+	t.Cleanup(func() {
+		if !sent.Load() {
+			t.Error("SIGTERM was not sent: the registry got no third /v2/ request before the run ended, or within 30s")
+		}
+	})
 	r := endsWithin(t, 30*time.Second, func() installRun {
 		return runInstalling(t, installSetup{reg: reg, npm: rt.StartNpm(t), proxy: proxy, walled: true, during: func() {
 			// The first try is 3 requests: newest with no token, which gets 401, the token,
 			// and newest with it, which gets 503. The third request to /v2/ is the first
 			// retry, 2 seconds later, and qory prints the waiting line before it sends it.
-			// With no retry in 30 seconds, the run gets no SIGTERM and endsWithin fails the test.
-			if !pollUntil(30*time.Second, func() bool {
+			// With no retry in 30 seconds, or before the run ends, the run gets no SIGTERM
+			// and the cleanup above fails the test.
+			if !pollUntil(30*time.Second, ended, func() bool {
 				n := 0
 				for _, p := range reg.Paths() {
 					if strings.HasPrefix(p, "/v2/") {
@@ -540,6 +555,7 @@ func TestARegistryThatKeepsReturning503StopsAtSIGTERM(t *testing.T) {
 			}) {
 				return
 			}
+			sent.Store(true)
 			syscall.Kill(os.Getpid(), syscall.SIGTERM)
 		}})
 	})
