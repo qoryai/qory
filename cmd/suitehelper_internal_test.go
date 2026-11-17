@@ -24,6 +24,7 @@ import (
 
 	"github.com/qoryai/qory/internal/runapi"
 	"github.com/qoryai/qory/internal/suite"
+	"github.com/qoryai/qory/internal/verdictformat"
 )
 
 const buildPlanText = "# Build plan\n\n## Commands\n\n| Kind | Command | Result file | Source |\n|---|---|---|---|\n" +
@@ -168,62 +169,77 @@ func (r apiRun) RunAPI() (*http.Client, string, error) { return http.DefaultClie
 func (r apiRun) Dir() string                           { return r.dir }
 func (r apiRun) Image() session.Image                  { return session.Image{Ref: "example.test/build:1"} }
 
-// helperRun is a suiteRun with a registry that runs run, the lines it said, and the api.
+// helperRun is a suiteRun for a workspace and a run folder, the lines it said, and the api.
 type helperRun struct {
 	*suiteRun
-	api  *fakeAPI
-	said *[]string
+	api       *fakeAPI
+	said      *[]string
+	workspace string
+	runDir    string
 }
 
-// newHelper makes the suites of a run whose session exited, with a fake run API and a fake
-// container, and the lines the helper said. mutate changes the configuration of the registry.
-func newHelper(t *testing.T, run suite.Runner, mutate ...func(*suite.Config)) helperRun {
+const (
+	suiteSHA    = "0123456789abcdef0123456789abcdef01234567"
+	redResult   = `<testsuite><testcase name="a"/><testcase name="b"><failure/></testcase></testsuite>`
+	greenResult = `<testsuite><testcase name="a"/><testcase name="b"/></testsuite>`
+	bodyChanges = `{"verdict":"changes-requested","points":[{"text":"The full suite failed: 1 of 2 tests failed.","action":"run_again"}]}`
+)
+
+// newHelper is the suiteRun of a run whose session exited, with a fake run API.
+func newHelper(t *testing.T) helperRun {
 	t.Helper()
 	api := newFakeAPI(t)
 	var said []string
 	var mu sync.Mutex
+	dir, runDir := t.TempDir(), t.TempDir()
 	r := &suiteRun{
-		run: apiRun{api: api, dir: t.TempDir()}, runID: "r1", limit: time.Minute, minutes: 1, timeout: time.Hour,
+		run: apiRun{api: api, dir: runDir}, runID: "r1", minutes: 7, dir: dir,
+		full: suite.Full{Command: "make test", ResultFile: "junit.xml"},
 		said: func(line string) { mu.Lock(); said = append(said, line); mu.Unlock() },
 	}
-	cfg := suite.Config{
-		Source: "source", Root: t.TempDir(), Full: suite.Full{Command: "make test", ResultFile: "junit.xml"},
-		Limit: r.limit, Clone: suiteClone, Run: run, Ended: r.ended,
+	return helperRun{r, api, &said, dir, runDir}
+}
+
+// state writes the files of the script's end to the workspace: the status file and, when
+// result is not "", the result copy.
+func (h helperRun) state(t *testing.T, status, result string) {
+	t.Helper()
+	folder := filepath.Join(h.workspace, suite.StateFolder)
+	if err := os.MkdirAll(folder, 0o755); err != nil {
+		t.Fatal(err)
 	}
-	for _, m := range mutate {
-		m(&cfg)
+	if err := os.WriteFile(filepath.Join(folder, "status"), []byte(status+"\n"), 0o644); err != nil {
+		t.Fatal(err)
 	}
-	r.reg = suite.New(context.Background(), cfg)
-	t.Cleanup(r.close)
-	return helperRun{r, api, &said}
+	if result != "" {
+		if err := os.WriteFile(filepath.Join(folder, "result"), []byte(result), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// after runs the helper as run.go does with the after step's end, no stop and no limit.
+func (h helperRun) after(end *session.AfterResult, out session.Outcome) (session.Outcome, error) {
+	var res *session.Result
+	if end != nil {
+		res = &session.Result{After: end}
+	}
+	return h.suiteRun.after(context.Background(), context.Background(), time.Time{}, res, out)
 }
 
 // succeeded is the outcome of a session that succeeded.
 var succeeded = session.Outcome{State: event.StateSucceeded}
 
-// start starts a suite of commit and returns when it runs.
-func (h helperRun) start(t *testing.T, commit string) {
-	t.Helper()
-	if _, _, err := h.reg.Start(context.Background(), commit); err != nil {
-		t.Fatal(err)
-	}
+// ranRed is the end of a suite whose command ran and wrote red counts and exited 1.
+func ranRed(t *testing.T, h helperRun) *session.AfterResult {
+	h.state(t, "ran "+suiteSHA, redResult)
+	return &session.AfterResult{Step: 2, State: event.StateFailed, ExitCode: 1}
 }
 
-// after runs the helper as run.go does, with no stop and the limit given.
-func (h helperRun) after(ctx context.Context, limit time.Time, out session.Outcome) (session.Outcome, error) {
-	return h.suiteRun.after(ctx, context.Background(), limit, func() stopRead { return stopRead{stopped: ctx.Err() != nil} }, out)
-}
-
-const (
-	redResult   = `<testsuite><testcase name="a"/><testcase name="b"><failure/></testcase></testsuite>`
-	greenResult = `<testsuite><testcase name="a"/><testcase name="b"/></testsuite>`
-	bodyChanges = `{"verdict":"changes-requested","points":[{"text":"The full suite failed on 0123456789ab: 1 of 2 tests failed.","action":"run_again"}]}`
-)
-
-// TestARedSuitePostsChangesRequestedAfterTheSessionEnded is the helper's work after the agent
-// exited: a suite that was started and that ends red after the session, posts one
-// changes-requested verdict with one point, over a passed verdict and over none.
-func TestARedSuitePostsChangesRequestedAfterTheSessionEnded(t *testing.T) {
+// TestARedSuitePostsChangesRequestedAfterTheSessionAndTheRunSucceeds: a suite that ends red
+// posts one changes-requested verdict with one point, over a passed verdict and over none, and
+// the run closes as its session did: it does not end failed, and qory run exits 0.
+func TestARedSuitePostsChangesRequestedAfterTheSessionAndTheRunSucceeds(t *testing.T) {
 	for _, c := range []struct {
 		name  string
 		agent []fakeVersion
@@ -238,18 +254,13 @@ func TestARedSuitePostsChangesRequestedAfterTheSessionEnded(t *testing.T) {
 		}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			release := make(chan struct{})
-			h := newHelper(t, func(_ context.Context, job suite.Job, out io.Writer) (int, error) {
-				<-release
-				return suiteWrites(redResult, 0)(context.Background(), job, out)
-			})
+			h := newHelper(t)
 			for _, v := range c.agent {
 				h.api.add(v)
 			}
-			h.start(t, suiteCommit)
-			// The suite outlasts the session: it still runs when the helper starts.
-			time.AfterFunc(50*time.Millisecond, func() { close(release) })
-			got, err := h.after(context.Background(), time.Time{}, succeeded)
+			// The run's events are local and the step had no refusal: the point has one line.
+			writeEvents(t, h.runDir, afterStarted(3, 2), afterExited(4, 2))
+			got, err := h.after(ranRed(t, h), succeeded)
 			if err != nil || got != succeeded {
 				t.Errorf("outcome %+v, error %v, want the session's outcome", got, err)
 			}
@@ -260,43 +271,176 @@ func TestARedSuitePostsChangesRequestedAfterTheSessionEnded(t *testing.T) {
 	}
 }
 
-// TestACommandThatExitsOtherThanZeroPostsTheCountsOfItsResultFile: a suite whose command wrote a
-// result file and exited 1 is red, and its point has the counts of the file.
-func TestACommandThatExitsOtherThanZeroPostsTheCountsOfItsResultFile(t *testing.T) {
-	h := newHelper(t, suiteWrites(redResult, 1))
-	h.start(t, suiteCommit)
-	if got, err := h.after(context.Background(), time.Time{}, succeeded); err != nil || got != succeeded {
-		t.Errorf("outcome %+v, error %v", got, err)
-	}
-	if posted := h.api.verdicts(); len(posted) != 1 || posted[0] != bodyChanges {
-		t.Errorf("posted %q, want one %s", posted, bodyChanges)
+// TestAGreenSuiteAndASkippedSuitePostNothing: neither reads the artifact index, and a suite
+// that did not run and a session that did not succeed post nothing either.
+func TestAGreenSuiteAndASkippedSuitePostNothing(t *testing.T) {
+	for _, c := range []struct {
+		name    string
+		status  string
+		result  string
+		end     *session.AfterResult
+		session session.Outcome
+	}{
+		{"green", "ran " + suiteSHA, greenResult, &session.AfterResult{Step: 2, State: event.StateSucceeded}, succeeded},
+		{"skipped", "skipped", "", &session.AfterResult{Step: 2, State: event.StateSucceeded}, succeeded},
+		{"skipped tests", "ran " + suiteSHA, `<testsuite><testcase name="a"><skipped/></testcase></testsuite>`, &session.AfterResult{Step: 2, State: event.StateSucceeded}, succeeded},
+		{"the after step did not run", "", "", nil, succeeded},
+		{"a failed session", "ran " + suiteSHA, redResult, &session.AfterResult{Step: 2, State: event.StateFailed, ExitCode: 1}, session.Outcome{State: event.StateFailed, ExitCode: 3}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			h := newHelper(t)
+			h.api.add(fakeVersion{artifact: "verdict", name: "main", number: 1, runID: "r1", file: "verdict.json", content: `{"verdict":"escalate","points":[{"text":"Pick one.","action":"answer","question":"q1"}]}`})
+			if c.status != "" {
+				h.state(t, c.status, c.result)
+			}
+			got, err := h.after(c.end, c.session)
+			if err != nil || got != c.session {
+				t.Errorf("outcome %+v, error %v", got, err)
+			}
+			if posted := h.api.verdicts(); len(posted) != 0 {
+				t.Errorf("posted %q", posted)
+			}
+			if h.api.indexCalls != 0 {
+				t.Errorf("the helper read the artifact index %d times", h.api.indexCalls)
+			}
+		})
 	}
 }
 
-// TestAGreenSuitePostsNothingAndTheAgentsVerdictStands: a suite that passes posts no verdict, and
-// neither does a run that started no suite or a session that did not succeed.
-func TestAGreenSuitePostsNothingAndTheAgentsVerdictStands(t *testing.T) {
-	h := newHelper(t, suiteWrites(greenResult, 0))
-	h.api.add(fakeVersion{artifact: "verdict", name: "main", number: 1, runID: "r1", file: "verdict.json", content: `{"verdict":"escalate","points":[{"text":"Pick one.","action":"answer","question":"q1"}]}`})
-	h.start(t, suiteCommit)
-	if got, err := h.after(context.Background(), time.Time{}, succeeded); err != nil || got != succeeded {
-		t.Errorf("outcome %+v, error %v", got, err)
+// TestTheFirstLineOfThePointFollowsHowTheSuiteEnded: each end of a red suite has its first line:
+// 0 tests, unreadable counts, totals that do not match, the cap and a script that never started.
+func TestTheFirstLineOfThePointFollowsHowTheSuiteEnded(t *testing.T) {
+	for _, c := range []struct {
+		name, status, result string
+		end                  session.AfterResult
+		want                 string
+	}{
+		{"0 tests", "ran " + suiteSHA, `<testsuite tests="0"/>`, session.AfterResult{State: event.StateSucceeded}, "The full suite ran 0 tests, so it proves nothing."},
+		{"unreadable counts", "ran " + suiteSHA, "tests: 4 passed", session.AfterResult{State: event.StateFailed, ExitCode: 2}, "The full suite failed: its command exited with status 2."},
+		{"no result file", "ran " + suiteSHA, "", session.AfterResult{State: event.StateFailed, ExitCode: 5}, "The full suite failed: its command exited with status 5."},
+		{"totals that do not match", "ran " + suiteSHA, `<testsuite tests="9"><testcase/></testsuite>`, session.AfterResult{State: event.StateSucceeded}, "The full suite failed: the totals of its result file do not match its testcases."},
+		{"the cap", "ran " + suiteSHA, "", session.AfterResult{State: event.StateCancelled, Reason: event.ReasonTimeout, ExitCode: 143}, "The full suite did not finish within 7 minutes, and qory stopped it."},
+		{"no start", "", "", session.AfterResult{State: event.StateFailed, ExitCode: 71}, "The full suite did not start: its script exited with status 71 before the command ran."},
+		{"the after step did not start", "", "", session.AfterResult{State: event.StateFailed, ExitCode: -1}, "The full suite did not start: its script exited with status -1 before the command ran."},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			h := newHelper(t)
+			if c.status != "" {
+				h.state(t, c.status, c.result)
+			}
+			end := c.end
+			end.Step = 2
+			writeEvents(t, h.runDir, afterStarted(3, 2), afterExited(4, 2))
+			got, err := h.after(&end, succeeded)
+			if err != nil || got != succeeded {
+				t.Errorf("outcome %+v, error %v, want the session's outcome", got, err)
+			}
+			want := `{"verdict":"changes-requested","points":[{"text":"` + c.want + `","action":"run_again"}]}`
+			if posted := h.api.verdicts(); len(posted) != 1 || posted[0] != want {
+				t.Errorf("posted %q, want %s", posted, want)
+			}
+		})
 	}
-	if posted := h.api.verdicts(); len(posted) != 0 {
-		t.Errorf("posted %q for a green suite", posted)
+}
+
+// afterStarted and afterExited are the lines of the events file for the after step number n.
+func afterStarted(seq, n int) string {
+	return fmt.Sprintf(`{"type":"dev.qory.run.step_started","sequence":"%010d","data":{"step":%d,"name":"after","kind":"after"}}`, seq, n)
+}
+
+func afterExited(seq, n int) string {
+	return fmt.Sprintf(`{"type":"dev.qory.run.step_exited","sequence":"%010d","data":{"step":%d,"state":"failed","exit_code":1}}`, seq, n)
+}
+
+func refusedEvent(seq int, host, decision string) string {
+	return fmt.Sprintf(`{"type":"dev.qory.run.egress","sequence":"%010d","data":{"host":%q,"port":443,"method":"CONNECT","decision":%q}}`, seq, host, decision)
+}
+
+func writeEvents(t *testing.T, runDir string, lines ...string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(runDir, "events.jsonl"), []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
+		t.Fatal(err)
 	}
-	if h.api.indexCalls != 0 {
-		t.Errorf("the helper read the artifact index %d times for a green suite", h.api.indexCalls)
+}
+
+// TestARefusedHostIsNamedInThePoint: the first line of the point of a red suite has the refused
+// host when the run's events have one in the after step, and the fix is the second line when
+// the step had a denial or the events are not local.
+func TestARefusedHostIsNamedInThePoint(t *testing.T) {
+	for _, c := range []struct {
+		name   string
+		events []string
+		text   string
+		fix    string
+	}{
+		{"one host", []string{afterStarted(3, 2), refusedEvent(4, "registry.example", "denied"), afterExited(5, 2)},
+			"Allow registry.example in the run's policy, or change the suite: it failed after reg... was refused.", textPointDenied},
+		{"three hosts", []string{afterStarted(3, 2), refusedEvent(4, "a.example", "denied"), refusedEvent(5, "b.example", "denied"), refusedEvent(6, "c.example", "denied"), afterExited(7, 2)},
+			"Allow a.e... and 2 more in the run's policy, or change the suite: it failed after a... were refused.", textPointDenied},
+		{"a refusal before the step", []string{refusedEvent(1, "early.example", "denied"), afterStarted(3, 2), afterExited(5, 2)},
+			"The full suite failed: 1 of 2 tests failed.", ""},
+		{"a refusal after the step", []string{afterStarted(3, 2), afterExited(5, 2), refusedEvent(6, "late.example", "denied")},
+			"The full suite failed: 1 of 2 tests failed.", ""},
+		{"an allowed connection", []string{afterStarted(3, 2), refusedEvent(4, "ok.example", "allowed"), afterExited(5, 2)},
+			"The full suite failed: 1 of 2 tests failed.", ""},
+		{"a denial of a host with no valid name", []string{afterStarted(3, 2), refusedEvent(4, "bad host", "denied"), afterExited(5, 2)},
+			"The full suite failed: 1 of 2 tests failed.", textPointDenied},
+		{"events that are not local", nil,
+			"The full suite failed: 1 of 2 tests failed.", textPointDenied},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			h := newHelper(t)
+			if c.events != nil {
+				writeEvents(t, h.runDir, c.events...)
+			}
+			if _, err := h.after(ranRed(t, h), succeeded); err != nil {
+				t.Fatal(err)
+			}
+			var v struct {
+				Points []runapi.Point `json:"points"`
+			}
+			posted := h.api.verdicts()
+			if len(posted) != 1 {
+				t.Fatalf("posted %q", posted)
+			}
+			if err := json.Unmarshal([]byte(posted[0]), &v); err != nil || len(v.Points) != 1 {
+				t.Fatalf("posted %q: %v", posted, err)
+			}
+			if v.Points[0].Text != c.text || v.Points[0].Fix != c.fix {
+				t.Errorf("point %+v, want text %q, fix %q", v.Points[0], c.text, c.fix)
+			}
+		})
 	}
-	none := newHelper(t, suiteWrites(redResult, 0))
-	if got, err := none.after(context.Background(), time.Time{}, succeeded); err != nil || got != succeeded || len(none.api.verdicts()) != 0 {
-		t.Errorf("no suite: %+v, %v, posted %q", got, err, none.api.verdicts())
+}
+
+// TestTheHostLineHasAtMost100CharactersAndAValidVerdict: a host of 253 characters is cut, with and
+// without "and N more", and the verdict passes the verdict format.
+func TestTheHostLineHasAtMost100CharactersAndAValidVerdict(t *testing.T) {
+	long := strings.Repeat("a", 60) + "." + strings.Repeat("b", 60) + "." + strings.Repeat("c", 60) + "." + strings.Repeat("d", 60) + ".example"
+	if len(long) < 250 || len(long) > 253 {
+		t.Fatalf("the test host has %d characters", len(long))
 	}
-	failedSession := session.Outcome{State: event.StateFailed, ExitCode: 3}
-	red := newHelper(t, suiteWrites(redResult, 0))
-	red.start(t, suiteCommit)
-	if got, err := red.after(context.Background(), time.Time{}, failedSession); err != nil || got != failedSession || len(red.api.verdicts()) != 0 {
-		t.Errorf("a failed session: %+v, %v, posted %q", got, err, red.api.verdicts())
+	for _, hosts := range [][]string{{long}, {long, "b.example"}, slices.Repeat([]string{long}, 12), {"a.example"}} {
+		line := hostsLine(hosts)
+		if len(line) > 100 {
+			t.Errorf("%d hosts: the line has %d characters: %q", len(hosts), len(line), line)
+		}
+		if !strings.HasPrefix(line, "Allow ") || !strings.Contains(line, "in the run's policy") {
+			t.Errorf("the line %q lost its words", line)
+		}
+		if len(hosts) > 1 && !strings.Contains(line, " and ") {
+			t.Errorf("the line %q has no count of the other hosts", line)
+		}
+		body, err := runapi.VerdictBody(runapi.VerdictChangesRequested, []runapi.Point{{Text: line, Action: "run_again", Fix: textPointDenied}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := verdictformat.Check(body); err != nil {
+			t.Errorf("the verdict for %q: %v", line, err)
+		}
+	}
+	if got := hostsLine([]string{long}); !strings.Contains(got, "...") {
+		t.Errorf("a long host is not shown cut: %q", got)
 	}
 }
 
@@ -312,7 +456,7 @@ func TestAnAgentsVerdictStandsOverARedSuite(t *testing.T) {
 		}
 		return strings.Join(p, ",")
 	}
-	suitePointText := `{"text":"The full suite failed on 0123456789ab: 1 of 2 tests failed.","action":"run_again"}`
+	suitePointText := `{"text":"The full suite failed: 1 of 2 tests failed.","action":"run_again"}`
 	for _, c := range []struct {
 		name, agent, want string
 	}{
@@ -325,10 +469,10 @@ func TestAnAgentsVerdictStandsOverARedSuite(t *testing.T) {
 		{"escalate with 20 points", `{"verdict":"escalate","points":[` + points(20) + `]}`, ""},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			h := newHelper(t, suiteWrites(redResult, 0))
+			h := newHelper(t)
 			h.api.add(fakeVersion{artifact: "verdict", name: "main", number: 1, runID: "r1", file: "verdict.json", content: c.agent})
-			h.start(t, suiteCommit)
-			if got, err := h.after(context.Background(), time.Time{}, succeeded); err != nil || got != succeeded {
+			writeEvents(t, h.runDir, afterStarted(3, 2), afterExited(4, 2))
+			if got, err := h.after(ranRed(t, h), succeeded); err != nil || got != succeeded {
 				t.Errorf("outcome %+v, error %v", got, err)
 			}
 			posted := h.api.verdicts()
@@ -355,16 +499,18 @@ func TestAFailedPostDoesNotEndTheRunPassed(t *testing.T) {
 	}{
 		{"the run API answers 503", func(h helperRun) { h.api.verdictStatus = http.StatusServiceUnavailable }, maxBranchTries},
 		{"the run API answers 409", func(h helperRun) { h.api.verdictStatus = http.StatusConflict }, 1},
+		{"the agent's verdict is no valid verdict", func(h helperRun) {
+			h.api.add(fakeVersion{artifact: "verdict", name: "main", number: 1, runID: "r1", file: "verdict.json", content: `{"verdict":"escalate","points":[{"text":"` + strings.Repeat("a", 600) + `","action":"run_again"}]}`})
+		}, 0},
 		{"the verdict file is no JSON", func(h helperRun) {
 			h.api.add(fakeVersion{artifact: "verdict", name: "main", number: 1, runID: "r1", file: "verdict.json", content: "passed"})
 		}, 0},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			h := newHelper(t, suiteWrites(redResult, 0))
+			h := newHelper(t)
 			c.setup(h)
-			h.start(t, suiteCommit)
-			got, err := h.after(context.Background(), time.Time{}, succeeded)
-			if got.State == event.StateSucceeded || got.State != event.StateFailed || got.ExitCode != 1 {
+			got, err := h.after(ranRed(t, h), succeeded)
+			if got.State != event.StateFailed || got.ExitCode != 1 {
 				t.Errorf("outcome %+v, want failed with 1", got)
 			}
 			if ExitCode(err) != 1 {
@@ -389,331 +535,197 @@ func TestAFailedPostDoesNotEndTheRunPassed(t *testing.T) {
 	}
 }
 
-// TestTheTimeLimitAndAStopEndTheWait: a suite that outlasts the run's time limit, or that a stop
-// reaches, is stopped and red, the verdict goes out, and the run ends cancelled as a cut push
-// step ends it.
-func TestTheTimeLimitAndAStopEndTheWait(t *testing.T) {
-	was := pushTimes
-	pushTimes.limit, pushTimes.signal = 5*time.Second, 5*time.Second
-	t.Cleanup(func() { pushTimes = was })
-	block := func(ctx context.Context, _ suite.Job, _ io.Writer) (int, error) {
-		<-ctx.Done()
-		return -1, ctx.Err()
-	}
-	t.Run("the time limit", func(t *testing.T) {
-		h := newHelper(t, block)
-		h.start(t, suiteCommit)
-		begin := time.Now()
-		got, err := h.after(context.Background(), time.Now().Add(60*time.Millisecond), succeeded)
-		if got.State != event.StateCancelled || got.Reason != event.ReasonTimeout || got.ExitCode != exitTimeout || ExitCode(err) != exitTimeout {
-			t.Errorf("outcome %+v, error %v, want cancelled with timeout", got, err)
-		}
-		if took := time.Since(begin); took > 3*time.Second {
-			t.Errorf("the wait took %s", took)
-		}
-		posted := h.api.verdicts()
-		if len(posted) != 1 || !strings.Contains(posted[0], `"changes-requested"`) || !strings.Contains(posted[0], "was stopped before it finished") {
-			t.Errorf("posted %q, want changes-requested for a stopped suite", posted)
-		}
-	})
-	t.Run("a stop", func(t *testing.T) {
-		h := newHelper(t, block)
-		h.start(t, suiteCommit)
-		ctx, cancel := context.WithCancel(context.Background())
-		time.AfterFunc(60*time.Millisecond, cancel)
-		begin := time.Now()
-		got, err := h.after(ctx, time.Time{}, succeeded)
-		if got.State != event.StateCancelled || got.Reason != event.ReasonInterrupted || ExitCode(err) != 1 {
-			t.Errorf("outcome %+v, error %v, want cancelled with interrupted", got, err)
-		}
-		if took := time.Since(begin); took > 3*time.Second {
-			t.Errorf("the wait took %s", took)
-		}
-		if posted := h.api.verdicts(); len(posted) != 1 || !strings.Contains(posted[0], `"changes-requested"`) {
-			t.Errorf("posted %q", posted)
-		}
-	})
-}
-
-// TestASuiteThatEndedBeforeTheLimitIsNotCut: a red suite that ended before the run's time limit
-// passed is judged as it ended, and the run's outcome stays the session's.
-func TestASuiteThatEndedBeforeTheLimitIsNotCut(t *testing.T) {
-	h := newHelper(t, suiteWrites(redResult, 0))
-	h.start(t, suiteCommit)
-	if _, ok, err := h.reg.Wait(context.Background()); !ok || err != nil {
-		t.Fatalf("Wait = %v, %v", ok, err)
-	}
-	got, err := h.after(context.Background(), time.Now().Add(-time.Second), succeeded)
-	if err != nil || got != succeeded {
-		t.Errorf("outcome %+v, error %v, want the session's outcome", got, err)
-	}
-	if posted := h.api.verdicts(); len(posted) != 1 || posted[0] != bodyChanges {
-		t.Errorf("posted %q, want one %s", posted, bodyChanges)
-	}
-}
-
-// TestCloseRemovesTheEmptyFolderOfTheSuites: the run's folder has no suites folder once the run's
-// suites are closed.
-func TestCloseRemovesTheEmptyFolderOfTheSuites(t *testing.T) {
-	api := newFakeAPI(t)
-	api.withPlan(buildPlanText)
-	source, commit := suiteSource(t)
-	was := runGitContainer
-	runGitContainer = func(context.Context, gitContainer) (int, error) { return 0, nil }
-	t.Cleanup(func() { runGitContainer = was })
-	run := apiRun{api: api, dir: t.TempDir()}
-	route := newQoryRoute()
-	suites := openSuites(context.Background(), suiteSetup{run: run, spec: &runSpec{}, route: route, runID: "r1", walled: true, source: source, said: func(string) {}})
-	closeRoute := route.open(1)
-	status, got, _ := suiteAsk(t, route, http.MethodPost, "/v1/suites", `{"commit":"`+commit+`"}`)
-	closeRoute()
-	if status != http.StatusCreated {
-		t.Fatalf("POST: %d %v", status, got)
-	}
-	if _, err := os.Stat(filepath.Join(run.dir, suitesDir)); err != nil {
-		t.Fatalf("the suites folder is not there while the suite exists: %v", err)
-	}
-	suites.close()
-	if _, err := os.Stat(filepath.Join(run.dir, suitesDir)); !os.IsNotExist(err) {
-		t.Errorf("the suites folder is still there after close: %v", err)
-	}
-}
-
-// TestASuiteOverItsCapIsStoppedAndRed: a suite past its cap ends timeout, and the post says so
-// with the cap's minutes.
-func TestASuiteOverItsCapIsStoppedAndRed(t *testing.T) {
-	h := newHelper(t, func(ctx context.Context, _ suite.Job, _ io.Writer) (int, error) {
-		<-ctx.Done()
-		return -1, ctx.Err()
-	}, func(c *suite.Config) { c.Limit = 40 * time.Millisecond })
-	h.minutes = 7
-	h.start(t, suiteCommit)
-	if got, err := h.after(context.Background(), time.Time{}, succeeded); err != nil || got != succeeded {
-		t.Errorf("outcome %+v, error %v", got, err)
-	}
-	posted := h.api.verdicts()
-	if len(posted) != 1 || !strings.Contains(posted[0], "did not finish on 0123456789ab within 7 minutes") {
-		t.Errorf("posted %q", posted)
-	}
-}
-
-// suiteSource is a git repository with one commit, and the commit's id.
-func suiteSource(t *testing.T) (dir, commit string) {
-	t.Helper()
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
-	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
-	t.Setenv("GIT_CEILING_DIRECTORIES", filepath.Dir(home))
-	dir = filepath.Join(home, "source")
-	if err := os.Mkdir(dir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	git := func(args ...string) string {
-		t.Helper()
-		c := exec.Command("git", append([]string{"-c", "user.name=t", "-c", "user.email=t@example.test", "-c", "commit.gpgsign=false"}, args...)...)
-		c.Dir = dir
-		out, err := c.CombinedOutput()
-		if err != nil {
-			t.Fatalf("git %v: %v: %s", args, err, out)
-		}
-		return strings.TrimSpace(string(out))
-	}
-	git("init", "--quiet")
-	git("add", ".")
-	git("commit", "--quiet", "-m", "one")
-	return dir, git("rev-parse", "HEAD")
-}
-
-// TestTheSuiteRunsTheCommandOfTheLaunchBuildPlan: the full row that openSuites reads when the run
-// starts is what a request runs, in a container with the clone's folder, also after the agent pushed
-// a newer build plan with another command.
-func TestTheSuiteRunsTheCommandOfTheLaunchBuildPlan(t *testing.T) {
-	api := newFakeAPI(t)
-	api.withPlan(buildPlanText)
-	source, commit := suiteSource(t)
-	var mu sync.Mutex
-	var ran []string
-	was := runGitContainer
-	runGitContainer = func(_ context.Context, c gitContainer) (int, error) {
-		mu.Lock()
-		defer mu.Unlock()
-		ran = append(ran, c.Session.Args[1])
-		return 0, nil
-	}
-	t.Cleanup(func() { runGitContainer = was })
-	route := newQoryRoute()
-	run := apiRun{api: api, dir: t.TempDir()}
-	suites := openSuites(context.Background(), suiteSetup{run: run, spec: &runSpec{}, route: route, runID: "r1", walled: true, source: source, said: func(string) {}})
-	t.Cleanup(suites.close)
-	// The agent pushes a newer build plan with another full command during the session.
-	api.add(fakeVersion{artifact: "build-plan", name: "main", number: 2, runID: "r1", file: "build-plan.md", content: strings.Replace(buildPlanText, "make test", "true", 1)})
-	closeRoute := route.open(1)
-	defer closeRoute()
-	status, got, _ := suiteAsk(t, route, http.MethodPost, "/v1/suites", `{"commit":"`+commit+`"}`)
-	if status != http.StatusCreated {
-		t.Fatalf("POST: %d %v", status, got)
-	}
-	suiteEnded(t, route, got["suite"].(string))
-	mu.Lock()
-	defer mu.Unlock()
-	if len(ran) != 1 || ran[0] != "make test" {
-		t.Errorf("the suite ran %q, want the launch plan's full command make test", ran)
-	}
-}
-
-// TestARunWithNoWallOrNoFullCommandHasNoSuite: no wall gives no suite and a route that serves no
-// path; a walled run whose launch plan has no full row, or no plan, answers each request with the
-// reason, and its helper does nothing.
-func TestARunWithNoWallOrNoFullCommandHasNoSuite(t *testing.T) {
-	api := newFakeAPI(t)
-	run := apiRun{api: api, dir: t.TempDir()}
-	route := newQoryRoute()
-	if suites := openSuites(context.Background(), suiteSetup{run: run, spec: &runSpec{}, route: route, runID: "r1", walled: false, said: func(string) {}}); suites != nil {
-		t.Error("a run with no wall has suites")
-	}
-	closeRoute := route.open(1)
-	if status, got, _ := suiteAsk(t, route, http.MethodPost, "/v1/suites", `{"commit":"`+suiteCommit+`"}`); status != http.StatusNotFound || got["error"] != routeNotFound {
-		t.Errorf("no wall: %d %v, want 404 not_found", status, got)
-	}
-	closeRoute()
-	for _, c := range []struct{ name, plan, code string }{
-		{"no plan", "", routeNoBuildPlan},
-		{"no full row", "## Commands\n\n| Kind | Command | Result file | Source |\n|---|---|---|---|\n| targeted | `x` | `r.xml` | s |\n", routeNoFullCommand},
+// TestAStopDuringTheAfterStepClosesTheRunCancelled: a stop of qory run cuts the after step of a
+// session that succeeded. The run does not close succeeded over a suite that did not finish: qory
+// posts the verdict of the red suite with one try, and closes the run cancelled with the reason
+// interrupted and exit status 1, also when that post fails.
+func TestAStopDuringTheAfterStepClosesTheRunCancelled(t *testing.T) {
+	for _, c := range []struct {
+		name   string
+		status int
+		posts  int
+	}{
+		{"the post goes through", 0, 1},
+		{"the post fails", http.StatusServiceUnavailable, 1},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			api := newFakeAPI(t)
-			if c.plan != "" {
-				api.withPlan(c.plan)
+			h := newHelper(t)
+			h.api.verdictStatus = c.status
+			h.state(t, "ran "+suiteSHA, "")
+			got, err := h.after(&session.AfterResult{Step: 2, State: event.StateCancelled, ExitCode: -1}, succeeded)
+			if got.State != event.StateCancelled || got.Reason != event.ReasonInterrupted || got.ExitCode != -1 {
+				t.Errorf("outcome %+v, want cancelled, interrupted, -1", got)
 			}
-			var said []string
-			route := newQoryRoute()
-			suites := openSuites(context.Background(), suiteSetup{run: apiRun{api: api, dir: t.TempDir()}, spec: &runSpec{}, route: route, runID: "r1", walled: true, said: func(l string) { said = append(said, l) }})
-			if suites == nil || suites.reg != nil {
-				t.Error("a run with no usable plan has a registry, or no record of why not")
+			if ExitCode(err) != 1 {
+				t.Errorf("exit status %d, want 1", ExitCode(err))
 			}
-			closeRoute := route.open(1)
-			defer closeRoute()
-			for range 2 {
-				if status, got, _ := suiteAsk(t, route, http.MethodPost, "/v1/suites", `{"commit":"`+suiteCommit+`"}`); status != http.StatusConflict || got["error"] != c.code {
-					t.Errorf("%d %v, want 409 %s", status, got, c.code)
-				}
-			}
-			if got, err := suites.after(context.Background(), context.Background(), time.Time{}, nil, succeeded); err != nil || got != succeeded {
-				t.Errorf("the helper changed the outcome: %+v, %v", got, err)
-			}
-			if len(said) != 1 || !strings.HasPrefix(said[0], "Add a full row to the build plan and take the work item in again: no suite started.\n  ") {
-				t.Errorf("lines %q, want one line for two requests", said)
+			posted := h.api.verdicts()
+			want := `{"verdict":"changes-requested","points":[{"text":"The full suite did not finish: the run was stopped.","action":"run_again"}]}`
+			if len(posted) != c.posts || posted[0] != want {
+				t.Errorf("posted %q, want %d of %s", posted, c.posts, want)
 			}
 		})
 	}
 }
 
-// TestAWriteToTheCheckoutAfterTheRequestLeavesTheSuitesFilesUnchanged: the commit is cloned before
-// the request returns, so the agent that rewrites the checkout, and its git folder, while the suite
-// runs changes nothing the suite sees.
-func TestAWriteToTheCheckoutAfterTheRequestLeavesTheSuitesFilesUnchanged(t *testing.T) {
-	source, commit := suiteSource(t)
-	release := make(chan struct{})
-	seen := make(chan string, 1)
-	run := func(_ context.Context, job suite.Job, _ io.Writer) (int, error) {
-		<-release
-		got, err := os.ReadFile(filepath.Join(job.Dir, "main.go"))
-		if err != nil {
-			seen <- err.Error()
-			return 1, nil
+// TestTheStateFolderIsRemovedAfterEveryEnd: after the helper judged, nothing of the script's
+// files stays in the workspace for the copy step and the push step, whatever the end was.
+func TestTheStateFolderIsRemovedAfterEveryEnd(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		end  *session.AfterResult
+		out  session.Outcome
+	}{
+		{"red", &session.AfterResult{Step: 2, State: event.StateFailed, ExitCode: 1}, succeeded},
+		{"green", &session.AfterResult{Step: 2, State: event.StateSucceeded}, succeeded},
+		{"no after step", nil, succeeded},
+		{"a failed session", &session.AfterResult{Step: 2, State: event.StateFailed, ExitCode: 1}, session.Outcome{State: event.StateFailed}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			h := newHelper(t)
+			h.state(t, "ran "+suiteSHA, redResult)
+			h.after(c.end, c.out)
+			if _, err := os.Lstat(filepath.Join(h.workspace, suite.StateFolder)); !errors.Is(err, os.ErrNotExist) {
+				t.Errorf("the state folder stays: %v", err)
+			}
+		})
+	}
+}
+
+// TestTheSuiteCapIsTheTimeLimitOfTheAfterStep: the cap of the repository, or 60 minutes, is the
+// after step's time limit.
+func TestTheSuiteCapIsTheTimeLimitOfTheAfterStep(t *testing.T) {
+	for _, c := range []struct {
+		name       string
+		extensions map[string]any
+		want       time.Duration
+	}{
+		{"no setting", nil, 60 * time.Minute},
+		{"a setting", map[string]any{"software-factory": map[string]any{"command_limits_minutes": map[string]any{"full_suite": 2}}}, 2 * time.Minute},
+		{"a setting above 60", map[string]any{"software-factory": map[string]any{"command_limits_minutes": map[string]any{"full_suite": 90}}}, 60 * time.Minute},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			dir := workspaceRepo(t)
+			api := newFakeAPI(t)
+			api.withPlan(buildPlanText)
+			spec := &runSpec{}
+			spec.Dir = dir
+			var said []string
+			defer func(f func() *nextSession) { nextSessionAnswer = f }(nextSessionAnswer)
+			nextSessionAnswer = func() *nextSession { return &nextSession{RunsSuite: true} }
+			r := openSuites(context.Background(), suiteSetup{
+				run: apiRun{api: api, dir: t.TempDir()}, spec: spec, runID: "r1", walled: true,
+				extensions: c.extensions, said: func(l string) { said = append(said, l) },
+			})
+			if r == nil {
+				t.Fatalf("no suite: %q", said)
+			}
+			if spec.AfterTimeout != c.want {
+				t.Errorf("AfterTimeout = %v, want %v", spec.AfterTimeout, c.want)
+			}
+		})
+	}
+}
+
+// workspaceRepo is a folder with a git repository with one commit.
+func workspaceRepo(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	for _, args := range [][]string{{"init", "--quiet"}, {"-c", "user.name=T", "-c", "user.email=t@example.com", "commit", "--quiet", "--allow-empty", "-m", "first"}} {
+		cmd := exec.Command("git", args...)
+		cmd.Dir, cmd.Env = dir, append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_NOSYSTEM=1")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
 		}
-		seen <- string(got)
-		return 0, nil
 	}
-	q, _, _ := suiteRoute(t, context.Background(), run, func(c *suite.Config) { c.Source, c.Clone = source, nil })
-	status, got, _ := suiteAsk(t, q, http.MethodPost, "/v1/suites", `{"commit":"`+commit+`"}`)
-	if status != http.StatusCreated {
-		t.Fatalf("POST: %d %v", status, got)
-	}
-	if err := os.WriteFile(filepath.Join(source, "main.go"), []byte("package changed\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.RemoveAll(filepath.Join(source, ".git")); err != nil {
-		t.Fatal(err)
-	}
-	close(release)
-	if content := <-seen; content != "package main\n" {
-		t.Errorf("the suite read %q, want the commit's file", content)
+	return dir
+}
+
+// TestOpenSuitesSetsTheAfterStepOnlyWhereTheSessionRunsTheSuite: with the answer yes, a walled write
+// run with a full row and a git folder gets After; each other case gets none, and the
+// answer decides: with no answer, or no, no run does.
+func TestOpenSuitesSetsTheAfterStepOnlyWhereTheSessionRunsTheSuite(t *testing.T) {
+	yes, no := &nextSession{RunsSuite: true}, &nextSession{}
+	for _, c := range []struct {
+		name      string
+		answer    *nextSession
+		walled    bool
+		readOnly  bool
+		plan      string
+		noGit     bool
+		wantAfter bool
+		line      string
+	}{
+		{"the answer says yes", yes, true, false, buildPlanText, false, true, ""},
+		{"no answer", nil, true, false, buildPlanText, false, false, ""},
+		{"the answer says no", no, true, false, buildPlanText, false, false, ""},
+		{"no wall", yes, false, false, buildPlanText, false, false, ""},
+		{"a read run", yes, true, true, buildPlanText, false, false, ""},
+		{"no full row", yes, true, false, "# Plan\n\n## Commands\n\n| Kind | Command | Result file | Source |\n|---|---|---|---|\n| fast | `a` | none | s |\n", false, false, "Add a full row to the build plan"},
+		{"no build plan", yes, true, false, "", false, false, "Add a full row to the build plan"},
+		{"no git folder", yes, true, false, buildPlanText, true, false, "Run the session in the top folder"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			dir := workspaceRepo(t)
+			if c.noGit {
+				if err := os.RemoveAll(filepath.Join(dir, ".git")); err != nil {
+					t.Fatal(err)
+				}
+			}
+			api := newFakeAPI(t)
+			if c.plan != "" {
+				api.withPlan(c.plan)
+			}
+			spec := &runSpec{}
+			spec.Dir = dir
+			var said []string
+			defer func(f func() *nextSession) { nextSessionAnswer = f }(nextSessionAnswer)
+			nextSessionAnswer = func() *nextSession { return c.answer }
+			r := openSuites(context.Background(), suiteSetup{
+				run: apiRun{api: api, dir: t.TempDir()}, spec: spec, runID: "r1", walled: c.walled, readOnly: c.readOnly,
+				said: func(l string) { said = append(said, l) },
+			})
+			if (r != nil) != c.wantAfter || (len(spec.After) > 0) != c.wantAfter {
+				t.Fatalf("suite %v, After %q, want After %v", r != nil, spec.After, c.wantAfter)
+			}
+			if c.line == "" && len(said) != 0 || c.line != "" && (len(said) != 1 || !strings.HasPrefix(said[0], c.line)) {
+				t.Errorf("lines %q, want one that starts %q", said, c.line)
+			}
+			if c.wantAfter {
+				if spec.After[4] != "make test" || spec.After[5] != "junit.xml" || len(spec.After[6]) != 40 {
+					t.Errorf("After = %q", spec.After)
+				}
+			}
+		})
 	}
 }
 
-// TestTheHelperJudgesTheNewestSuiteAndNotOneThatANewerCommitStopped: the older suite is red because
-// a newer commit replaced it, and the newer one is green: no verdict goes out.
-func TestTheHelperJudgesTheNewestSuiteAndNotOneThatANewerCommitStopped(t *testing.T) {
-	started := make(chan string, 2)
-	h := newHelper(t, func(ctx context.Context, job suite.Job, out io.Writer) (int, error) {
-		started <- job.Commit
-		if job.Commit == suiteCommit {
-			<-ctx.Done()
-			return -1, ctx.Err()
-		}
-		return suiteWrites(greenResult, 0)(ctx, job, out)
+// TestTheAfterCommandHasTheLaunchPlansCommandNotAPushedOne: the plan is read once at the launch;
+// a plan that the work item gets after it changes no word of After.
+func TestTheAfterCommandHasTheLaunchPlansCommandNotAPushedOne(t *testing.T) {
+	api := newFakeAPI(t)
+	api.withPlan(buildPlanText)
+	spec := &runSpec{}
+	spec.Dir = workspaceRepo(t)
+	defer func(f func() *nextSession) { nextSessionAnswer = f }(nextSessionAnswer)
+	nextSessionAnswer = func() *nextSession { return &nextSession{RunsSuite: true} }
+	r := openSuites(context.Background(), suiteSetup{
+		run: apiRun{api: api, dir: t.TempDir()}, spec: spec, runID: "r1", walled: true, said: func(string) {},
 	})
-	h.start(t, suiteCommit)
-	<-started
-	h.start(t, suiteCommit2)
-	got, err := h.after(context.Background(), time.Time{}, succeeded)
-	if err != nil || got != succeeded {
-		t.Errorf("outcome %+v, error %v", got, err)
+	if r == nil {
+		t.Fatal("no suite")
 	}
-	if posted := h.api.verdicts(); len(posted) != 0 {
-		t.Errorf("posted %q, want none: the newest suite passed", posted)
+	before := slices.Clone(spec.After)
+	// The agent pushes a plan with another command during the session.
+	api.add(fakeVersion{artifact: "build-plan", name: "main", number: 2, runID: "r1", file: "build-plan.md", content: strings.Replace(buildPlanText, "make test", "true", 1)})
+	if !slices.Equal(before, spec.After) || before[4] != "make test" {
+		t.Errorf("After = %q, want the launch plan's command", spec.After)
 	}
-}
-
-// TestASecondSignalEndsTheWaitAtOnce: the second signal cuts the post too, so the run closes
-// without a verdict, cancelled and interrupted.
-func TestASecondSignalEndsTheWaitAtOnce(t *testing.T) {
-	h := newHelper(t, func(ctx context.Context, _ suite.Job, _ io.Writer) (int, error) {
-		<-ctx.Done()
-		return -1, ctx.Err()
-	})
-	h.start(t, suiteCommit)
-	ctx, cancel := context.WithCancel(context.Background())
-	again, cancelAgain := context.WithCancel(context.Background())
-	cancel()
-	cancelAgain()
-	got, err := h.suiteRun.after(ctx, again, time.Time{}, func() stopRead { return stopRead{stopped: true, again: true, got: "interrupt"} }, succeeded)
-	if got.State != event.StateCancelled || got.Reason != event.ReasonInterrupted || ExitCode(err) != 1 {
-		t.Errorf("outcome %+v, error %v", got, err)
+	if r.full.Command != "make test" {
+		t.Errorf("the judged row is %q", r.full.Command)
 	}
-	var said []string
-	said = append(said, *h.said...)
-	if !slices.Contains(said, textSuiteCutSecond) {
-		t.Errorf("lines %q have no %q", said, textSuiteCutSecond)
-	}
-}
-
-// TestAPostAfterACutHasOneTry: a wait that the time limit cut posts its verdict once, even when the
-// run API answers 503, so the push step keeps its time.
-func TestAPostAfterACutHasOneTry(t *testing.T) {
-	was := branchWait
-	branchWait = func(context.Context, time.Duration) error { return nil }
-	t.Cleanup(func() { branchWait = was })
-	wasTimes := pushTimes
-	pushTimes.limit, pushTimes.signal = 5*time.Second, 5*time.Second
-	t.Cleanup(func() { pushTimes = wasTimes })
-	h := newHelper(t, func(ctx context.Context, _ suite.Job, _ io.Writer) (int, error) {
-		<-ctx.Done()
-		return -1, ctx.Err()
-	})
-	h.api.verdictStatus = http.StatusServiceUnavailable
-	h.start(t, suiteCommit)
-	got, err := h.after(context.Background(), time.Now().Add(50*time.Millisecond), succeeded)
-	if got.Reason != event.ReasonTimeout || ExitCode(err) != exitTimeout {
-		t.Errorf("outcome %+v, error %v, want the time limit's", got, err)
-	}
-	if n := len(h.api.verdicts()); n != 1 {
-		t.Errorf("%d posts after a cut, want 1", n)
+	if api.indexCalls != 1 {
+		t.Errorf("the plan was read %d times, want 1", api.indexCalls)
 	}
 }
 
@@ -760,12 +772,13 @@ func TestLaunchFullReadsTheNewestUsableVersionOfTheBuildPlan(t *testing.T) {
 // TestTheLinesOfTheSuiteStartWithTheFixInAtMost100Characters holds the first line of each line of qory
 // run about the full suite to 100 characters, with the longest values a line shows.
 func TestTheLinesOfTheSuiteStartWithTheFixInAtMost100Characters(t *testing.T) {
-	id, commit, state := "su_0123abcd", "0123456789ab", suite.Timeout
 	for _, line := range []string{
-		fmt.Sprintf(textSuiteNotStarted, "x"), fmt.Sprintf(textSuiteNoFolder, "x"), fmt.Sprintf(textSuiteStarted, id, commit),
-		fmt.Sprintf(textSuiteWaiting, id, commit), fmt.Sprintf(textSuiteEnded, id, commit, state, ", 100000 of 100000 tests failed"),
-		textSuiteGreen, fmt.Sprintf(textSuiteStands, "changes-requested"), fmt.Sprintf(textSuitePosted, "changes-requested"), textSuiteNoRoom,
-		fmt.Sprintf(textSuiteNoPost, "x"), fmt.Sprintf(textSuiteCutLimit, 1000*time.Hour), fmt.Sprintf(textSuiteCutStop, "SIGTERM"), textSuiteCutSecond,
+		fmt.Sprintf(textSuiteNotStarted, "x"), textSuiteNoGit, textSuiteSkipped, textSuiteNoAfter,
+		fmt.Sprintf(textSuiteEnded, " on 0123456789ab", suite.Timeout, ", 100000 of 100000 tests failed"),
+		textSuiteGreen, textSuiteCut, fmt.Sprintf(textSuiteStands, "changes-requested"), fmt.Sprintf(textSuitePosted, "changes-requested"), textSuiteNoRoom,
+		fmt.Sprintf(textSuiteNoPost, "x"),
+		textPointDenied, fmt.Sprintf(textPointFailed, 100000, 100000), fmt.Sprintf(textPointExit, -1), textPointNoTests, textPointMismatch,
+		fmt.Sprintf(textPointNoStart, -1), fmt.Sprintf(textPointTimeout, 60),
 	} {
 		first, _, _ := strings.Cut(line, "\n")
 		if len(first) > 100 {

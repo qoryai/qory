@@ -1,10 +1,11 @@
-// Package suite runs the full suite of a run's repository outside the agent's session.
+// Package suite runs the full suite of a run's repository after the agent's session.
 //
-// A [Registry] clones a commit of the session's checkout into a new folder, runs the
-// full suite's command on the clone through a [Runner], and keeps the state, the counts
-// and the last part of the output of each suite it started. The command and the file it
-// writes its result to come from the launch build plan, see [FullRow]; the counts come
-// from that file, see [ReadResult] and [ParseJUnit].
+// [Command] builds the after step of a session: a script that clones the commit that HEAD has
+// when the session ends and runs the full suite's command on the clone. [Judge] reads the files
+// that the script wrote and how the step ended, and [ReadRefused] reads the hosts that the
+// proxy refused while it ran. The command and the file it writes its result to come from the
+// launch build plan, see [FullRow]; the counts come from that file, see [ReadResult] and
+// [ParseJUnit].
 package suite
 
 import (

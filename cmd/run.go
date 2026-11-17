@@ -1296,18 +1296,16 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				}
 			}
 			// The agent's session is the run's first join, so the gateway numbers it 1.
-			suites := openSuites(ctx, suiteSetup{run: run, spec: &spec, route: route, runID: spec.RunID, walled: walled, source: spec.Dir, extensions: extensions, timeout: timeout, said: said})
-			defer suites.close()
+			suites := openSuites(ctx, suiteSetup{run: run, spec: &spec, runID: spec.RunID, walled: walled, readOnly: readOnly, extensions: extensions, said: said})
 			closeRoute := route.open(1)
 			res, err := joinSession(run, ctx, spec.SessionSpec)
 			closeRoute()
 			out := sessionOutcome(res, err)
-			stopNow := func() stopRead { return stopRead{ctx.Err() != nil, again.Err() != nil, got()} }
 			var suiteLimit time.Time
 			if timeout > 0 {
 				suiteLimit = opened.Add(timeout)
 			}
-			out, suiteErr := suites.after(ctx, again, suiteLimit, stopNow, out)
+			out, suiteErr := suites.after(ctx, again, suiteLimit, res, out)
 			// pushWork is the push step of a run with an agent session that may write, see
 			// [keepsWork], before the close: Qory Apiary takes no version of a run that ended.
 			// The step runs under [pushContext], since a stop has ended ctx or spent the time
@@ -1336,6 +1334,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			var pushErr, sessionErr error
 			pushes := keepsWork(fromCode, level, branch, res, err)
 			returns := copied != nil && !copied.readOnly && (err == nil && res != nil || joined)
+			stopNow := func() stopRead { return stopRead{ctx.Err() != nil, again.Err() != nil, got()} }
 			if copied != nil {
 				copied.cutBy = func() string { return ending.cutLine(stopNow(), returnAfterSignal) }
 			}

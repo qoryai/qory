@@ -2,14 +2,12 @@ package suite
 
 import (
 	"bytes"
-	"crypto/sha256"
 	"encoding/xml"
 	"errors"
 	"io"
 	"os"
 	"path"
 	"strings"
-	"time"
 )
 
 // Counts are the numbers of a suite's result file: the tests it ran, the ones that
@@ -130,14 +128,6 @@ func statedCounts(e xml.StartElement) Counts {
 	return Counts{Tests: number("tests"), Failed: number("failures") + number("errors"), Skipped: number("skipped")}
 }
 
-// Stamp separates a result file that the suite wrote from one that the commit had, by its
-// modification time and the SHA-256 of its content. The zero Stamp is no file.
-type Stamp struct {
-	ModTime time.Time
-	Sum     [sha256.Size]byte
-	Exists  bool
-}
-
 // CleanResultPath reports whether file is a path that a result file can have: relative,
 // with no .. part, and made of letters, digits and . _ / @ + - alone.
 func CleanResultPath(file string) bool {
@@ -160,38 +150,34 @@ func CleanResultPath(file string) bool {
 	return file[0] != '-'
 }
 
-// ReadResult reads the result file at file below dir, without a link on the way and
-// without a file that is not a regular one, so that a file the suite's code made does
-// not lead the read out of dir or block it. It returns the file's stamp and bytes; a
-// file that is missing, larger than [MaxResultBytes], a link or no regular file is the
-// zero Stamp and nil bytes, and not an error.
-func ReadResult(dir, file string) (Stamp, []byte) {
+// ReadResult reads the result file at file below dir: see [ReadBelow], with [MaxResultBytes].
+func ReadResult(dir, file string) []byte { return ReadBelow(dir, file, MaxResultBytes) }
+
+// ReadBelow reads the file at path file below dir, of at most limit bytes, without a link on
+// the way and without a file that is not a regular one, so that a file that the suite's code
+// made does not lead the read out of dir or block it. A file that is missing, larger than
+// limit, a link or no regular file is nil, and not an error.
+func ReadBelow(dir, file string, limit int64) []byte {
 	if !CleanResultPath(file) {
-		return Stamp{}, nil
+		return nil
 	}
 	root, err := os.OpenRoot(dir)
 	if err != nil {
-		return Stamp{}, nil
+		return nil
 	}
 	defer root.Close()
 	info, err := root.Lstat(file)
-	if err != nil || !info.Mode().IsRegular() || info.Size() > MaxResultBytes {
-		return Stamp{}, nil
+	if err != nil || !info.Mode().IsRegular() || info.Size() > limit {
+		return nil
 	}
 	f, err := root.Open(file)
 	if err != nil {
-		return Stamp{}, nil
+		return nil
 	}
 	defer f.Close()
-	data, err := io.ReadAll(io.LimitReader(f, MaxResultBytes+1))
-	if err != nil || len(data) > MaxResultBytes {
-		return Stamp{}, nil
+	data, err := io.ReadAll(io.LimitReader(f, limit+1))
+	if err != nil || int64(len(data)) > limit {
+		return nil
 	}
-	return Stamp{ModTime: info.ModTime(), Sum: sha256.Sum256(data), Exists: true}, data
-}
-
-// Fresh reports whether after is a file that the suite wrote: it exists, and it is not
-// the file the commit had, by modification time and content.
-func Fresh(before, after Stamp) bool {
-	return after.Exists && (!before.Exists || !after.ModTime.Equal(before.ModTime) || after.Sum != before.Sum)
+	return data
 }

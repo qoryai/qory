@@ -17,7 +17,7 @@ func TestReadResultDoesNotBlockOnAPipe(t *testing.T) {
 	if err := syscall.Mkfifo(filepath.Join(dir, "pipe.xml"), 0o600); err != nil {
 		t.Skipf("no fifo: %v", err)
 	}
-	if st, data := suite.ReadResult(dir, "pipe.xml"); st.Exists || data != nil {
-		t.Errorf("a pipe was read: exists %v, %d bytes", st.Exists, len(data))
+	if data := suite.ReadResult(dir, "pipe.xml"); data != nil {
+		t.Errorf("a pipe was read: %d bytes", len(data))
 	}
 }

@@ -46,10 +46,6 @@ const (
 	changesLeft   = "Changes left by run 57"
 )
 
-// launchReads is the reads of the index that a walled run makes before its session joins:
-// the read of the build plan for the full suite. The reads of the push step come after.
-const launchReads = 1
-
 // pushAPI is a run API that stores the versions of the artifact branch that a run posts.
 // post, when set, gets the number of each POST, from 1, and writes its response when it
 // returns true; store then says whether the POST stored its version. index does the same
@@ -526,7 +522,7 @@ func TestARunWithNoNewCommitsPushesNothing(t *testing.T) {
 	if head := p.branchHead(t); head != "" {
 		t.Errorf("the forge has the branch at %s", head)
 	}
-	if posts, reads, _ := p.api.counts(); posts != 0 || reads != launchReads+1 {
+	if posts, reads, _ := p.api.counts(); posts != 0 || reads != 1 {
 		t.Errorf("%d POST and %d reads of the index, want 0 and the read of the fetch", posts, reads)
 	}
 	wants(t, r.log(), "qory run: no new commits to push")
@@ -984,7 +980,7 @@ func TestARateLimitedPostWaitsAndSendsAgain(t *testing.T) {
 	}
 	r := p.run(t, writesAndCommits(t), nil)
 	r.wantsClose(t, event.StateSucceeded, 0)
-	if posts, reads, stored := p.api.counts(); posts != 3 || stored != 1 || reads != launchReads+1 {
+	if posts, reads, stored := p.api.counts(); posts != 3 || stored != 1 || reads != 1 {
 		t.Errorf("%d POST, %d reads, %d stored, want 3, the read of the fetch, 1", posts, reads, stored)
 	}
 	if want := []time.Duration{2 * time.Second, 2 * time.Second}; !slices.Equal(p.waits, want) {
@@ -1032,7 +1028,7 @@ func TestNoResponseToAStoredVersionSendsNothingAgain(t *testing.T) {
 			}
 			r := p.run(t, writesAndCommits(t), nil)
 			r.wantsClose(t, event.StateSucceeded, 0)
-			if posts, reads, stored := p.api.counts(); posts != 1 || stored != 1 || reads != launchReads+2 {
+			if posts, reads, stored := p.api.counts(); posts != 1 || stored != 1 || reads != 2 {
 				t.Errorf("%d POST, %d reads, %d stored, want 1, 2 and 1", posts, reads, stored)
 			}
 		})
@@ -1052,7 +1048,7 @@ func TestNoResponseWithNoVersionSendsAgain(t *testing.T) {
 	}
 	r := p.run(t, writesAndCommits(t), nil)
 	r.wantsClose(t, event.StateSucceeded, 0)
-	if posts, reads, stored := p.api.counts(); posts != 2 || stored != 1 || reads != launchReads+2 {
+	if posts, reads, stored := p.api.counts(); posts != 2 || stored != 1 || reads != 2 {
 		t.Errorf("%d POST, %d reads, %d stored, want 2, 2 and 1", posts, reads, stored)
 	}
 }
@@ -1066,7 +1062,7 @@ func TestNoResponseThatTheIndexDoesNotSettleFails(t *testing.T) {
 		return true, false
 	}
 	p.api.index = func(n int, w http.ResponseWriter) bool {
-		if n <= launchReads+1 {
+		if n == 1 {
 			return false
 		}
 		failing(w, http.StatusServiceUnavailable, "unavailable", "")
@@ -1074,7 +1070,7 @@ func TestNoResponseThatTheIndexDoesNotSettleFails(t *testing.T) {
 	}
 	r := p.run(t, writesAndCommits(t), nil)
 	r.wantsClose(t, event.StateFailed, 1)
-	if posts, reads, _ := p.api.counts(); posts != 1 || reads != launchReads+6 {
+	if posts, reads, _ := p.api.counts(); posts != 1 || reads != 6 {
 		t.Errorf("%d POST, %d reads, want 1, and the read of the fetch and 5", posts, reads)
 	}
 	wants(t, r.out, "qory run: check the artifact branch of the work item in Qory Apiary; with no version of this run, "+versionWays+"; then take the work item in again: qory pushed qory/"+workItem+
@@ -1096,7 +1092,7 @@ func TestAWorkspaceWithoutTheTypeFailsTheStep(t *testing.T) {
 	}
 	wants(t, r.out, "qory run: "+noType+"\n")
 	wants(t, r.log(), "qory run: "+noType+"\n")
-	if posts, reads, _ := p.api.counts(); posts != 1 || reads != launchReads+1 {
+	if posts, reads, _ := p.api.counts(); posts != 1 || reads != 1 {
 		t.Errorf("%d POST, %d reads, want 1 and the read of the fetch", posts, reads)
 	}
 	if p.branchHead(t) == "" {

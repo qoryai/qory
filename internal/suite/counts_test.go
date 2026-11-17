@@ -76,37 +76,18 @@ func TestReadResultReadsOnlyARegularFileBelowTheFolder(t *testing.T) {
 	if err := os.Symlink("ok.xml", filepath.Join(dir, "inside.xml")); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Symlink(t.TempDir(), filepath.Join(dir, "folder")); err != nil {
+	elsewhere := t.TempDir()
+	write(t, filepath.Join(elsewhere, "x.xml"), "<testsuite/>")
+	if err := os.Symlink(elsewhere, filepath.Join(dir, "folder")); err != nil {
 		t.Fatal(err)
 	}
-	if st, data := suite.ReadResult(dir, "ok.xml"); !st.Exists || string(data) != "<testsuite/>" {
-		t.Errorf("ok.xml: exists %v, data %q", st.Exists, data)
+	if data := suite.ReadResult(dir, "ok.xml"); string(data) != "<testsuite/>" {
+		t.Errorf("ok.xml: data %q", data)
 	}
 	for _, file := range []string{"link.xml", "inside.xml", "big.xml", "missing.xml", "folder/x.xml", "../outside.xml", "/etc/passwd"} {
-		if st, data := suite.ReadResult(dir, file); st.Exists || data != nil {
-			t.Errorf("ReadResult(%q) read a file: exists %v, %d bytes", file, st.Exists, len(data))
+		if data := suite.ReadResult(dir, file); data != nil {
+			t.Errorf("ReadResult(%q) read a file: %d bytes", file, len(data))
 		}
-	}
-}
-
-func TestFreshTellsAFileTheSuiteWroteFromOneTheCommitHad(t *testing.T) {
-	dir := t.TempDir()
-	file := filepath.Join(dir, "r.xml")
-	write(t, file, "<testsuite/>")
-	before, _ := suite.ReadResult(dir, "r.xml")
-	if again, _ := suite.ReadResult(dir, "r.xml"); suite.Fresh(before, again) {
-		t.Error("a file nobody wrote counts as fresh")
-	}
-	write(t, file, "<testsuite><testcase/></testsuite>")
-	after, _ := suite.ReadResult(dir, "r.xml")
-	if !suite.Fresh(before, after) {
-		t.Error("a rewritten file does not count as fresh")
-	}
-	if !suite.Fresh(suite.Stamp{}, after) {
-		t.Error("a new file does not count as fresh")
-	}
-	if suite.Fresh(before, suite.Stamp{}) {
-		t.Error("no file counts as fresh")
 	}
 }
 

@@ -990,10 +990,10 @@ func SetInstanceAddress(f func(*config.Forager) string) func() {
 // InstanceAddress is instanceAddress.
 var InstanceAddress = instanceAddress
 
-// SetSuiteMinute sets the length of a minute of the full suite's limit, and returns what
-// restores the default.
-func SetSuiteMinute(d time.Duration) func() {
-	before := suiteMinute
-	suiteMinute = d
-	return func() { suiteMinute = before }
+// SetNextSessionAnswer makes the next-session answer of each run say whether its session
+// runs the full suite, and returns what restores the default: no answer.
+func SetNextSessionAnswer(runsSuite bool) func() {
+	before := nextSessionAnswer
+	nextSessionAnswer = func() *nextSession { return &nextSession{RunsSuite: runsSuite} }
+	return func() { nextSessionAnswer = before }
 }

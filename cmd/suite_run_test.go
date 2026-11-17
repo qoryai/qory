@@ -1,7 +1,6 @@
 package cmd_test
 
 import (
-	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -9,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -16,14 +16,14 @@ import (
 	"time"
 
 	"github.com/qoryai/forager/event"
-	"github.com/qoryai/forager/link"
 	"github.com/qoryai/forager/session"
 
 	"github.com/qoryai/qory/cmd"
 )
 
-// suitePlan is a build plan with a full row whose result file is junit.xml.
-const suitePlan = "## Commands\n\n| Kind | Command | Result file | Source |\n|---|---|---|---|\n| full | `make test` | `junit.xml` | s |\n"
+// suitePlan is a build plan with a full row whose command writes the variable SUITE_RESULT to
+// its result file junit.xml and exits with SUITE_EXIT.
+const suitePlan = "## Commands\n\n| Kind | Command | Result file | Source |\n|---|---|---|---|\n| full | `printf '%s' \"$SUITE_RESULT\" > junit.xml; exit ${SUITE_EXIT:-0}` | `junit.xml` | s |\n"
 
 // suiteAPI is a run API for a work item with the build plan suitePlan and no verdict: it
 // answers the artifact index and the plan's file, and POST verdict with status, and keeps each
@@ -73,62 +73,71 @@ func (a *suiteAPI) posted() []string {
 	return append([]string(nil), a.verdicts...)
 }
 
-// suiteRun runs qory run behind the fake wall in a checkout whose agent asks the route for the full
-// suite of its commit; the container of the suite writes result and exits with exit. It returns
-// the output and error of qory run, and the outcome the run closed with.
-func suiteRun(t *testing.T, api *suiteAPI, result string, exit int) (string, error, session.Outcome) {
-	t.Helper()
-	return suiteRunWith(t, api, "", func(_ context.Context, spec session.SessionSpec) (*session.Result, error) {
-		if result != "" {
-			if err := os.WriteFile(filepath.Join(spec.Dir, "junit.xml"), []byte(result), 0o644); err != nil {
-				return nil, err
-			}
-		}
-		return &session.Result{ExitCode: exit}, nil
-	})
+// suiteEnd is what the fake session and its after step do.
+type suiteEnd struct {
+	// result is what the suite's command writes to its result file, exit its exit status.
+	result string
+	exit   int
+	// stay is whether the agent leaves HEAD where it started.
+	stay bool
+	// extensions are lines under harness.extensions in the checkout's qory.yaml, each
+	// indented 4 spaces or more.
+	extensions string
+	// noAnswer is whether qory has no next-session answer.
+	noAnswer bool
+	// after, when not nil, is the end of the after step in place of the script's.
+	after *session.AfterResult
+	// events are lines that the run's events file has, after the after step's start and before its exit.
+	events []string
+	// seen is what the fake join sees of the spec: After and AfterTimeout.
+	seen *session.SessionSpec
 }
 
-// suiteRunWith is [suiteRun] with the container of the suite as suite, and extensions, lines
-// under harness.extensions in the checkout's qory.yaml, each indented 4 spaces or more.
-func suiteRunWith(t *testing.T, api *suiteAPI, extensions string, suite func(context.Context, session.SessionSpec) (*session.Result, error)) (string, error, session.Outcome) {
+// suiteRun runs qory run behind the fake wall in a checkout whose agent commits and ends. The after
+// step runs on this machine as the script in spec.After says, with the environment that Forager
+// gives it, and the command it runs writes result and exits with exit. It returns the output and
+// error of qory run, and the outcome the run closed with.
+func suiteRun(t *testing.T, api *suiteAPI, e suiteEnd) (string, error, session.Outcome) {
 	t.Helper()
 	root := copyCheckout(t)
-	if extensions != "" {
+	if e.extensions != "" {
 		file := filepath.Join(root, "qory.yaml")
 		data, err := os.ReadFile(file)
 		if err != nil {
 			t.Fatal(err)
 		}
-		writeFile(t, file, string(data)+"  extensions:\n"+extensions)
+		writeFile(t, file, string(data)+"  extensions:\n"+e.extensions)
 		runGit(t, root, "commit", "--quiet", "-am", "extensions")
 	}
 	t.Chdir(root)
-	var route http.Handler
-	outcomes, _, restore := cmd.OpenNowhereWith(cmd.Nowhere{
-		RunAPI: api.srv.URL + "/v1/runs/r1", OnOpen: func(spec session.OpenSpec) { route = spec.QoryRoute },
-	})
+	runDir := t.TempDir()
+	outcomes, _, restore := cmd.OpenNowhereWith(cmd.Nowhere{RunAPI: api.srv.URL + "/v1/runs/r1", Dir: runDir})
 	t.Cleanup(restore)
-	t.Cleanup(cmd.SetGitSession(func(ctx context.Context, spec session.SessionSpec) (*session.Result, error) {
-		if spec.Command != "sh" {
-			return cmd.GitSessionOnHost(ctx, spec)
-		}
-		return suite(ctx, spec)
-	}))
+	if !e.noAnswer {
+		t.Cleanup(cmd.SetNextSessionAnswer(true))
+	}
 	t.Cleanup(cmd.SetJoinResult(func(spec session.SessionSpec) (*session.Result, error) {
 		if spec.OnVariables != nil {
 			spec.OnVariables(session.Applied{})
 		}
-		// The agent commits in its checkout, which is a copy: the commit is in no other folder.
-		gitOutput(t, spec.Dir, "-c", "user.name=Agent", "-c", "user.email=agent@example.com", "commit", "--quiet", "--allow-empty", "-m", "agent")
-		commit := strings.TrimSpace(gitOutput(t, spec.Dir, "rev-parse", "HEAD"))
-		r := httptest.NewRequest(http.MethodPost, link.QoryHostURL+"/v1/suites", strings.NewReader(`{"commit":"`+commit+`"}`))
-		r.Header.Set(link.QorySessionHeader, "1")
-		w := httptest.NewRecorder()
-		route.ServeHTTP(w, r)
-		if w.Code != http.StatusCreated {
-			t.Errorf("POST /v1/suites: %d %s", w.Code, w.Body)
+		if e.seen != nil {
+			*e.seen = spec
 		}
-		return &session.Result{State: event.StateSucceeded}, nil
+		if !e.stay {
+			gitOutput(t, spec.Dir, "-c", "user.name=Agent", "-c", "user.email=agent@example.com", "commit", "--quiet", "--allow-empty", "-m", "agent")
+		}
+		res := &session.Result{State: event.StateSucceeded}
+		if len(spec.After) == 0 {
+			return res, nil
+		}
+		res.After = e.after
+		if res.After == nil {
+			res.After = runAfter(t, spec, e)
+		}
+		lines := append([]string{afterLine("step_started", 3, "after")}, e.events...)
+		lines = append(lines, afterLine("step_exited", 90, ""))
+		writeFile(t, filepath.Join(runDir, "events.jsonl"), strings.Join(lines, "\n")+"\n")
+		return res, nil
 	}))
 	out, err := run(t, "run", "claude", "--", "-p", "hi")
 	got := outcomes()
@@ -138,48 +147,138 @@ func suiteRunWith(t *testing.T, api *suiteAPI, extensions string, suite func(con
 	return out, err, got[0]
 }
 
+// afterLine is a step event of the after step 2, with the sequence seq.
+func afterLine(typ string, seq int, kind string) string {
+	return fmt.Sprintf(`{"type":"dev.qory.run.%s","sequence":"%010d","data":{"step":2,"name":"after","kind":"after"}}`, typ, seq)
+}
+
+// runAfter runs spec.After in the workspace as Forager's after step does, and returns its end.
+func runAfter(t *testing.T, spec session.SessionSpec, e suiteEnd) *session.AfterResult {
+	t.Helper()
+	home := filepath.Join(t.TempDir(), "home")
+	if err := os.Mkdir(home, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	c := exec.Command(spec.After[0], spec.After[1:]...)
+	c.Dir = spec.Dir
+	c.Env = []string{
+		"PATH=" + os.Getenv("PATH"), "HOME=" + home, "TMPDIR=" + t.TempDir(),
+		"GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=/dev/null", "GIT_TERMINAL_PROMPT=0",
+		"GIT_CONFIG_COUNT=2", "GIT_CONFIG_KEY_0=core.hooksPath", "GIT_CONFIG_VALUE_0=/dev/null",
+		"GIT_CONFIG_KEY_1=protocol.allow", "GIT_CONFIG_VALUE_1=never",
+		"SUITE_RESULT=" + e.result, fmt.Sprintf("SUITE_EXIT=%d", e.exit),
+	}
+	out, err := c.CombinedOutput()
+	code := 0
+	if ee, ok := err.(*exec.ExitError); ok {
+		code = ee.ExitCode()
+	} else if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	state := event.StateSucceeded
+	if code != 0 {
+		state = event.StateFailed
+	}
+	return &session.AfterResult{Step: 2, State: state, ExitCode: code}
+}
+
 const (
 	suiteRed   = `<testsuite><testcase name="a"/><testcase name="b"><failure/></testcase></testsuite>`
 	suiteGreen = `<testsuite><testcase name="a"/><testcase name="b"/></testsuite>`
 )
 
-// TestARunWaitsForTheSuiteAfterItsSessionAndPostsTheVerdict is qory run with a session whose
-// script started the full suite: the suite is red after the session, qory posts one
-// changes-requested, and the run closes as its session did, succeeded.
-func TestARunWaitsForTheSuiteAfterItsSessionAndPostsTheVerdict(t *testing.T) {
+const changesRequested = `{"verdict":"changes-requested","points":[{"text":"The full suite failed: 1 of 2 tests failed.","action":"run_again"}]}`
+
+// TestARedSuiteAfterTheSessionPostsChangesRequestedAndTheRunSucceeds is qory run with a session that
+// moved HEAD: the suite runs in the after step, is red, qory posts one changes-requested, and the
+// run closes as its session did, succeeded, with exit status 0. The run does not end failed.
+func TestARedSuiteAfterTheSessionPostsChangesRequestedAndTheRunSucceeds(t *testing.T) {
 	api := newSuiteAPI(t, http.StatusCreated)
-	out, err, closed := suiteRun(t, api, suiteRed, 0)
+	var seen session.SessionSpec
+	out, err, closed := suiteRun(t, api, suiteEnd{result: suiteRed, exit: 1, seen: &seen})
 	if err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
-	if closed.State != event.StateSucceeded {
+	if closed.State != event.StateSucceeded || closed.ExitCode != 0 {
 		t.Errorf("the run closed %+v, want succeeded", closed)
 	}
-	posted := api.posted()
-	if len(posted) != 1 || !strings.HasPrefix(posted[0], `{"verdict":"changes-requested","points":[{"text":"The full suite failed on `) {
+	if posted := api.posted(); len(posted) != 1 || posted[0] != changesRequested {
 		t.Errorf("posted %q, want one changes-requested", posted)
 	}
-	wants(t, out, "started the full suite su_", "is failed, 1 of 2 tests failed")
+	if seen.AfterTimeout != time.Hour {
+		t.Errorf("AfterTimeout = %v, want 60 minutes", seen.AfterTimeout)
+	}
+	wants(t, out, "the full suite on ", " is failed, 1 of 2 tests failed")
 }
 
-// TestAGreenSuitePostsNothingAndTheRunSucceeds is the same run with a suite that passes.
+// TestAGreenSuitePostsNothingAndTheRunSucceeds is the same run with a suite that passes, one
+// that skips tests, and one with an unreadable result file.
 func TestAGreenSuitePostsNothingAndTheRunSucceeds(t *testing.T) {
+	for name, result := range map[string]string{
+		"green":          suiteGreen,
+		"skipped tests":  `<testsuite><testcase name="a"><skipped/></testcase><testcase name="b"/></testsuite>`,
+		"unreadable":     "tests: 4 passed",
+		"no result file": "",
+	} {
+		t.Run(name, func(t *testing.T) {
+			api := newSuiteAPI(t, http.StatusCreated)
+			out, err, closed := suiteRun(t, api, suiteEnd{result: result})
+			if err != nil || closed.State != event.StateSucceeded {
+				t.Fatalf("%v, closed %+v\n%s", err, closed, out)
+			}
+			if posted := api.posted(); len(posted) != 0 {
+				t.Errorf("posted %q for a green suite", posted)
+			}
+			wants(t, out, "the full suite passed, so qory posts no verdict")
+		})
+	}
+}
+
+// TestASuiteThatRanNoTestsIsFailed: a result file with 0 tests proves nothing.
+func TestASuiteThatRanNoTestsIsFailed(t *testing.T) {
 	api := newSuiteAPI(t, http.StatusCreated)
-	out, err, closed := suiteRun(t, api, suiteGreen, 0)
+	out, err, closed := suiteRun(t, api, suiteEnd{result: `<testsuite tests="0"/>`})
+	if err != nil || closed.State != event.StateSucceeded {
+		t.Fatalf("%v, closed %+v\n%s", err, closed, out)
+	}
+	if posted := api.posted(); len(posted) != 1 || !strings.Contains(posted[0], "The full suite ran 0 tests, so it proves nothing.") {
+		t.Errorf("posted %q", posted)
+	}
+}
+
+// TestASessionThatLeftHeadWhereItStartedPostsNothing is the skipped end: the script ends 0, no
+// suite runs, no verdict goes out and the run succeeds.
+func TestASessionThatLeftHeadWhereItStartedPostsNothing(t *testing.T) {
+	api := newSuiteAPI(t, http.StatusCreated)
+	out, err, closed := suiteRun(t, api, suiteEnd{result: suiteRed, exit: 1, stay: true})
 	if err != nil || closed.State != event.StateSucceeded {
 		t.Fatalf("%v, closed %+v\n%s", err, closed, out)
 	}
 	if posted := api.posted(); len(posted) != 0 {
-		t.Errorf("posted %q for a green suite", posted)
+		t.Errorf("posted %q for a session that changed nothing", posted)
 	}
-	wants(t, out, "the full suite passed, so qory posts no verdict")
+	wants(t, out, "the full suite did not run: the session left HEAD at the commit it started at")
+}
+
+// TestARunWithNoAnswerThatSaysYesRunsNoSuite: without a next-session answer, the session has no
+// after step and qory reads no build plan.
+func TestARunWithNoAnswerThatSaysYesRunsNoSuite(t *testing.T) {
+	api := newSuiteAPI(t, http.StatusCreated)
+	var seen session.SessionSpec
+	out, err, closed := suiteRun(t, api, suiteEnd{result: suiteRed, exit: 1, noAnswer: true, seen: &seen})
+	if err != nil || closed.State != event.StateSucceeded {
+		t.Fatalf("%v, closed %+v\n%s", err, closed, out)
+	}
+	if len(seen.After) != 0 || len(api.posted()) != 0 {
+		t.Errorf("After %q, posted %q", seen.After, api.posted())
+	}
 }
 
 // TestARunWhoseVerdictCannotBePostedDoesNotEndPassed: the run API refuses the verdict of the red
 // suite, so the run closes failed with exit status 1, and the output has the fix line first.
 func TestARunWhoseVerdictCannotBePostedDoesNotEndPassed(t *testing.T) {
 	api := newSuiteAPI(t, http.StatusNotFound)
-	out, err, closed := suiteRun(t, api, suiteRed, 0)
+	out, err, closed := suiteRun(t, api, suiteEnd{result: suiteRed, exit: 1})
 	if closed.State != event.StateFailed || closed.ExitCode != 1 {
 		t.Errorf("the run closed %+v, want failed with exit code 1", closed)
 	}
@@ -189,25 +288,28 @@ func TestARunWhoseVerdictCannotBePostedDoesNotEndPassed(t *testing.T) {
 	wants(t, out, "Take the work item in again in Qory Apiary: qory could not post the verdict of the red full suite.")
 }
 
-// TestTheRepositorysLimitReplacesSixtyMinutes is a suite that never ends: with no setting it is
-// stopped at 60 minutes, with command_limits_minutes.full_suite 2 at 2 minutes, in a minute that
-// the test makes 20 milliseconds long, and the verdict says which.
-func TestTheRepositorysLimitReplacesSixtyMinutes(t *testing.T) {
-	t.Cleanup(cmd.SetSuiteMinute(20 * time.Millisecond))
-	forever := func(ctx context.Context, _ session.SessionSpec) (*session.Result, error) {
-		<-ctx.Done()
-		return nil, ctx.Err()
-	}
-	for _, c := range []struct{ name, extensions, minutes string }{
-		{"no setting", "", "within 60 minutes"},
-		{"a setting", "    software-factory:\n      command_limits_minutes: {full_suite: 2}\n", "within 2 minutes"},
-		{"a setting above 60", "    software-factory:\n      command_limits_minutes: {full_suite: 90}\n", "within 60 minutes"},
+// TestTheRepositorysCapReplacesSixtyMinutes: the after step's time limit is the repository's
+// cap, and a step that the cap cut is red, with the cap in the point.
+func TestTheRepositorysCapReplacesSixtyMinutes(t *testing.T) {
+	for _, c := range []struct {
+		name, extensions string
+		limit            time.Duration
+		minutes          string
+	}{
+		{"no setting", "", 60 * time.Minute, "within 60 minutes"},
+		{"a setting", "    software-factory:\n      command_limits_minutes: {full_suite: 2}\n", 2 * time.Minute, "within 2 minutes"},
+		{"a setting above 60", "    software-factory:\n      command_limits_minutes: {full_suite: 90}\n", 60 * time.Minute, "within 60 minutes"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			api := newSuiteAPI(t, http.StatusCreated)
-			out, err, closed := suiteRunWith(t, api, c.extensions, forever)
+			var seen session.SessionSpec
+			cut := &session.AfterResult{Step: 2, State: event.StateCancelled, Reason: event.ReasonTimeout, ExitCode: 143}
+			out, err, closed := suiteRun(t, api, suiteEnd{extensions: c.extensions, after: cut, seen: &seen})
 			if err != nil || closed.State != event.StateSucceeded {
 				t.Fatalf("%v, closed %+v\n%s", err, closed, out)
+			}
+			if seen.AfterTimeout != c.limit {
+				t.Errorf("AfterTimeout = %v, want %v", seen.AfterTimeout, c.limit)
 			}
 			posted := api.posted()
 			if len(posted) != 1 || !strings.Contains(posted[0], c.minutes+", and qory stopped it.") {
@@ -215,5 +317,41 @@ func TestTheRepositorysLimitReplacesSixtyMinutes(t *testing.T) {
 			}
 			wants(t, out, "is timeout")
 		})
+	}
+}
+
+// TestARedSuiteThatFollowsARefusedHostNamesTheHost: the point's first line has the host that the
+// proxy refused while the after step ran, and no host that it refused before or after.
+func TestARedSuiteThatFollowsARefusedHostNamesTheHost(t *testing.T) {
+	api := newSuiteAPI(t, http.StatusCreated)
+	events := []string{
+		`{"type":"dev.qory.run.egress","sequence":"0000000004","data":{"host":"registry.example","port":443,"method":"CONNECT","decision":"denied"}}`,
+		`{"type":"dev.qory.run.egress","sequence":"0000000005","data":{"host":"cdn.example","port":443,"method":"CONNECT","decision":"denied"}}`,
+	}
+	out, err, closed := suiteRun(t, api, suiteEnd{result: suiteRed, exit: 1, events: events})
+	if err != nil || closed.State != event.StateSucceeded {
+		t.Fatalf("%v, closed %+v\n%s", err, closed, out)
+	}
+	want := `{"verdict":"changes-requested","points":[{"text":"Allow reg... and 1 more in the run's policy, or change the suite: it failed after r... were refused.","action":"run_again","fix":"Refused connections: the run's Connections tab, Denied."}]}`
+	if posted := api.posted(); len(posted) != 1 || posted[0] != want {
+		t.Errorf("posted %q, want %s", posted, want)
+	}
+}
+
+// TestAStopDuringTheAfterStepDoesNotLeaveTheRunSucceeded: a stop cuts the after step of a session that
+// succeeded. qory posts the verdict of the red suite and closes the run cancelled with the
+// reason interrupted, with exit status 1.
+func TestAStopDuringTheAfterStepDoesNotLeaveTheRunSucceeded(t *testing.T) {
+	api := newSuiteAPI(t, http.StatusCreated)
+	cut := &session.AfterResult{Step: 2, State: event.StateCancelled, ExitCode: -1}
+	out, err, closed := suiteRun(t, api, suiteEnd{after: cut})
+	if closed.State != event.StateCancelled || closed.Reason != event.ReasonInterrupted {
+		t.Errorf("the run closed %+v, want cancelled with the reason interrupted\n%s", closed, out)
+	}
+	if cmd.ExitCode(err) != 1 {
+		t.Errorf("qory run returned %v, exit status %d, want 1", err, cmd.ExitCode(err))
+	}
+	if posted := api.posted(); len(posted) != 1 || !strings.Contains(posted[0], "The full suite did not finish: the run was stopped.") {
+		t.Errorf("posted %q", posted)
 	}
 }
