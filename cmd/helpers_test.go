@@ -79,12 +79,12 @@ func TestMain(m *testing.M) {
 		args := os.Args[slices.Index(os.Args, "--")+1:]
 		os.Exit(enginePull(args[0], args[1], args[2]))
 	}
-	// The child of TestARealRunsPushGoesThroughItsPushProxyAlone, which that test starts
+	// The child of TestForagerRunKeepsThePushCredentialOnThePushProxyAlone, which that test starts
 	// with the marker and runs only that test, keeps the marker and the SSL_CERT_FILE of
 	// its parent through the fixed environment below. The marker without that argument
 	// keeps nothing.
 	realPush, certFile := "", os.Getenv("SSL_CERT_FILE")
-	if slices.Contains(os.Args, "-test.run=^TestARealRunsPushGoesThroughItsPushProxyAlone$") {
+	if slices.Contains(os.Args, "-test.run=^TestForagerRunKeepsThePushCredentialOnThePushProxyAlone$") {
 		realPush = os.Getenv("QORY_TEST_REAL_PUSH")
 	}
 	cmd.ShortenSocketGrace(10 * time.Millisecond)

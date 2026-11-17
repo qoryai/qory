@@ -144,7 +144,7 @@ func TestTheTestsStartWithTheSwitchesAndPathsTheyRead(t *testing.T) {
 }
 
 // TestTheMarkerOfTheRealPushTestKeepsTheFixedEnvironment starts this test binary with the
-// marker of TestARealRunsPushGoesThroughItsPushProxyAlone, SSL_CERT_FILE and a token in its
+// marker of TestForagerRunKeepsThePushCredentialOnThePushProxyAlone, SSL_CERT_FILE and a token in its
 // environment, as a developer's shell could set them, and without that test's argument:
 // the tests then start from the fixed environment, with neither the marker, nor the
 // certificate file nor the token.

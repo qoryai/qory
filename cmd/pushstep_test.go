@@ -1766,17 +1766,18 @@ func TestTheStepClosesItsProxyBeforeTheRunCloses(t *testing.T) {
 	p := newPushRepo(t, "write")
 	r := p.run(t, writesAndCommits(t), nil)
 	r.wantsClose(t, event.StateSucceeded, 0)
-	opened := 0
+	opens, open := 0, 0
 	for _, call := range r.calls {
 		switch call {
 		case "push proxy":
-			opened++
+			opens++
+			open++
 		case "push proxy closed":
-			opened--
+			open--
 		}
 	}
-	if opened != 0 {
-		t.Errorf("%d push proxies stayed open: %q", opened, r.calls)
+	if opens != 1 || open != 0 {
+		t.Errorf("%d push proxies opened and %d stayed open: %q, want 1 and 0", opens, open, r.calls)
 	}
 }
 

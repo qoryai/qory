@@ -40,7 +40,7 @@ import (
 	"github.com/qoryai/qory/internal/proxygit/proxygittest"
 )
 
-// envRealPush makes the test binary the child of [TestARealRunsPushGoesThroughItsPushProxyAlone]:
+// envRealPush makes the test binary the child of [TestForagerRunKeepsThePushCredentialOnThePushProxyAlone]:
 // the folder with the test authority and the forge's certificate.
 const envRealPush = "QORY_TEST_REAL_PUSH"
 
@@ -63,17 +63,20 @@ const realRunDocument = `{"version":1,"security_policy":{"version":1,"egress":{"
 	`{"name":"work-1","apply":[{"hosts":["localhost"],"scheme":"basic","username":"x-access-token","paths":["/acme/site.git/*"]}]},` +
 	`{"name":"push-1","purpose":"push","apply":[{"hosts":["localhost"],"scheme":"basic","username":"x-access-token","paths":["/acme/site.git/*"],"push_ref":"` + realBranch + `"}]}]}`
 
-// TestARealRunsPushGoesThroughItsPushProxyAlone is a run at a real Forager gateway, with a
-// stand-in control that serves a run configuration with a read credential and a push
-// credential, and a forge that is git over https. The agent's git push through the run's
-// proxy, which [foragerRun.HostProxy] reaches, fails and reaches the forge with no push
-// credential and as no push of the branch; the push through [foragerRun.PushProxy]
-// reaches the forge with the push credential and the branch is there.
+// TestForagerRunKeepsThePushCredentialOnThePushProxyAlone is a run at a real Forager
+// gateway, with a stand-in control that serves a run configuration with a read credential
+// and a push credential, and a forge that is git over https. It calls
+// [foragerRun.HostProxy] and [foragerRun.PushProxy] itself and runs git through each, so
+// it tests those two wrappers and Forager's gateway, not the push step: the tests with a
+// fake run, such as TestThePushGoesThroughThePushProxy, cover which of the two [pushWork]
+// calls. The git push through the run's proxy, which HostProxy reaches, fails and reaches
+// the forge with no push credential and as no push of the branch; the push through
+// PushProxy reaches the forge with the push credential and the branch is there.
 //
 // The gateway verifies the forge's certificate against this machine's authorities, which
 // Go reads from SSL_CERT_FILE on Linux alone, and reads once per process: the test starts
 // this binary again with SSL_CERT_FILE set to its authority, and the child runs the run.
-func TestARealRunsPushGoesThroughItsPushProxyAlone(t *testing.T) {
+func TestForagerRunKeepsThePushCredentialOnThePushProxyAlone(t *testing.T) {
 	if runtime.GOOS != "linux" {
 		t.Skip("Go reads the authorities of SSL_CERT_FILE on Linux alone, and the gateway must trust the test forge's")
 	}
@@ -87,7 +90,7 @@ func TestARealRunsPushGoesThroughItsPushProxyAlone(t *testing.T) {
 	}
 	t.Cleanup(func() { os.RemoveAll(dir) })
 	writeRealCertificates(t, dir)
-	child := exec.Command(os.Args[0], "-test.run=^TestARealRunsPushGoesThroughItsPushProxyAlone$", "-test.count=1")
+	child := exec.Command(os.Args[0], "-test.run=^TestForagerRunKeepsThePushCredentialOnThePushProxyAlone$", "-test.count=1")
 	child.Env = append(os.Environ(), envRealPush+"="+dir, "SSL_CERT_FILE="+filepath.Join(dir, "ca.pem"))
 	if out, err := child.CombinedOutput(); err != nil {
 		t.Fatalf("the child run failed: %v\n%s", err, out)
