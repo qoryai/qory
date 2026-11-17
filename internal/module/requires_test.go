@@ -3,8 +3,10 @@ package module
 import (
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 // TestReadManifestReadsRequires reads the requires items: each comes back keyed by the
@@ -53,7 +55,7 @@ func TestReadManifestRefusesRequires(t *testing.T) {
 		{"two entries", head + "  - skill: deploy\n    agent: reviewer\n    commands: [ship]\n", "Remove one of the two entries from requires[0]."},
 		{"an unknown key", head + "  - skill: deploy\n    scripts: [ship]\n", `Remove the key "scripts" from requires[0].`},
 		{"an empty list", head + "  - skill: deploy\n    commands: []\n", "List the commands the entry needs under commands in requires[0], or remove commands.\n  commands in requires[0] is empty."},
-		{"nothing needed", head + "  - skill: deploy\n", "List what the entry needs in requires[0], under skills, agents, commands, output-styles, hooks, mcp, or files.\n  requires[0] lists nothing the entry needs."},
+		{"nothing needed", head + "  - skill: deploy\n", "List what the entry needs in requires[0].\n  Use skills, agents, commands, output-styles, hooks, mcp, or files.\n  requires[0] lists nothing the entry needs."},
 		{"an empty entry name", head + "  - skill: \"\"\n    commands: [ship]\n", "Set skill in requires[0] to the entry's name, as skill: <name>."},
 		{"an entry twice", head + "  - skill: deploy\n    commands: [ship]\n  - skill: deploy\n    agents: [reviewer]\n", "Remove one of the two requires items for skill deploy.\n  The requires lists skill deploy twice."},
 	}
@@ -99,5 +101,31 @@ func TestReadRefusesARequirementOfAnEntryNotShipped(t *testing.T) {
 	m.Requires = map[string][]string{"skills/deploy": {"commands/ship"}, "files/claude/rules/one.md": {"hooks/guard.sh"}}
 	if _, err := Read("core", dir, m, ""); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// TestARequiresRefusalHasAFixLineOfAtMost100Characters is each refusal of a requires item,
+// read at an index of two digits: the first line has at most 100 characters.
+func TestARequiresRefusalHasAFixLineOfAtMost100Characters(t *testing.T) {
+	var items strings.Builder
+	for i := 0; i < 10; i++ {
+		items.WriteString("  - skill: s" + strconv.Itoa(i) + "\n    agents: [a]\n")
+	}
+	for name, item := range map[string]string{
+		"nothing needed":      "  - skill: deploy\n",
+		"an empty list":       "  - skill: deploy\n    output-styles: []\n",
+		"an empty entry name": "  - skill: deploy\n    output-styles: [\"\"]\n",
+		"two entries":         "  - skill: deploy\n    agent: reviewer\n    commands: [ship]\n",
+		"no entry":            "  - output-styles: [ship]\n",
+	} {
+		dir := tree(t, map[string]string{ManifestName: "apiVersion: qory.dev/v1alpha1\nname: core\nrequires:\n" + items.String() + item})
+		_, err := ReadManifest(dir)
+		if err == nil {
+			t.Errorf("%s: no refusal", name)
+			continue
+		}
+		if line, _, _ := strings.Cut(err.Error(), "\n"); utf8.RuneCountInString(line) > 100 {
+			t.Errorf("%s: the first line has %d characters: %s", name, utf8.RuneCountInString(line), line)
+		}
 	}
 }

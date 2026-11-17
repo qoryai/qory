@@ -38,7 +38,7 @@ func LoadReference(ref stack.Source, opts Options) (*stack.Stack, source.Resolve
 	var pathErr *fs.PathError
 	switch {
 	case errors.As(err, &gone):
-		return nil, source.Resolved{}, exports.Refuse("Use a branch, tag or commit that the repository of -f has.",
+		return nil, source.Resolved{}, exports.Refuse("Use a branch, tag, or commit that the repository of -f has.",
 			fmt.Sprintf("%s has no branch or tag %s.", exports.URL(gone.URL), exports.Value(gone.Ref, false)), "-f is set to "+sel+".")
 	case errors.As(err, &fetch):
 		return nil, source.Resolved{}, fmt.Errorf("Check the URL and the ref in -f.\n  %w\n  %s", err, "-f is set to "+sel+".")

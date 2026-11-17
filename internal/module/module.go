@@ -267,7 +267,8 @@ func readRequirement(item map[string]yaml.Node, i int) (entry string, needs []st
 			"An item selects one entry, as skill: <name>, and lists what it needs under "+kinds+".")
 	}
 	if len(needs) == 0 {
-		return "", nil, refuse(fmt.Sprintf("List what the entry needs in %s, under %s.", at, strings.Replace(kinds, "and files", "or files", 1)),
+		return "", nil, refuse(fmt.Sprintf("List what the entry needs in %s.", at),
+			"Use "+strings.Replace(kinds, "and files", "or files", 1)+".",
 			fmt.Sprintf("%s lists nothing the entry needs.", at))
 	}
 	sort.Strings(needs)

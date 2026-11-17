@@ -388,7 +388,7 @@ release may change what an existing document does, and states it under Upgrading
 - The first line of each compose error shows the fix, in at most 100 characters, and the
   indented lines after it show the cause and the values, as the errors of workflow hooks
   do. This holds for the errors of a module's manifest, push checks, variants, skills,
-  files, settings and tier placeholders, of a module's source and name, of a base stack,
+  files, settings, and tier placeholders, of a module's source and name, of a base stack,
   of a stack that `-f` fetches by reference, and of the URL checks of a run. A module that
   cannot be read starts with `Check that you can read the files of module <name>.`, and a
   tier list reads `light, fast, and thinking`. Which input fails, and the exit status,
