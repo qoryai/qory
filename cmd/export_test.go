@@ -1,7 +1,9 @@
 package cmd
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -9,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -100,11 +103,29 @@ func SetLaterSessions(sessions ...func()) func() {
 	pushAfterSession = func(p *sessionPush, ending *pushEnding, out session.Outcome) (session.Outcome, error) {
 		closed, err := before(p, ending, out)
 		for _, agent := range sessions {
-			if err != nil {
+			// A run that ended at Qory Apiary or the gateway starts no later session.
+			if err != nil || p.ended != "" {
 				break
 			}
 			agent()
 			closed, err = before(p, ending, out)
+		}
+		return closed, err
+	}
+	return func() { pushAfterSession = before }
+}
+
+// SetStepAfterEnd makes the push step after a run's session stand in for a loop that calls
+// the step again after the run ended: when a step leaves the run ended, agent runs as a
+// later session would, and the step runs once more. again receives what that second call
+// returned. It returns what restores the default.
+func SetStepAfterEnd(agent func(), again func(session.Outcome, error)) func() {
+	before := pushAfterSession
+	pushAfterSession = func(p *sessionPush, ending *pushEnding, out session.Outcome) (session.Outcome, error) {
+		closed, err := before(p, ending, out)
+		if p.ended != "" {
+			agent()
+			again(before(p, ending, out))
 		}
 		return closed, err
 	}
@@ -299,6 +320,14 @@ func SetBranchWait(f func(time.Duration)) func() {
 	return func() { branchWait = before }
 }
 
+// SetRecordAttemptLimit makes each send of the report of a push have d, and returns what
+// restores the default.
+func SetRecordAttemptLimit(d time.Duration) func() {
+	before := recordAttemptLimit
+	recordAttemptLimit = d
+	return func() { recordAttemptLimit = before }
+}
+
 // ErrJoinedNowhere is the error of the join of a run [OpenNowhere] opened.
 var ErrJoinedNowhere = errors.New("the run was opened nowhere, so no session joins it")
 
@@ -392,6 +421,10 @@ type Nowhere struct {
 	// SetRunAPICheck, when not nil, gets the check of each SetRunAPICheck, and its error
 	// is the call's; nil takes the check. A run at a gateway sets it on the run too.
 	SetRunAPICheck func(check func(context.Context, session.RunAPIRequest) (*session.RunAPIRefusal, error)) error
+	// PushedCommits, when not nil, is each PushedCommits of the run, as Forager's
+	// [session.Run.PushedCommits] sends the report over the link; nil sends it to RunAPI
+	// as [PushedThroughLink] does.
+	PushedCommits func(ctx context.Context, body []byte) ([]byte, error)
 }
 
 // StepEvent is one event of a host step of a run [OpenNowhereWith] opened: Type is
@@ -577,6 +610,95 @@ func (n *nowhere) RunAPI() (*http.Client, string, error) {
 		return http.DefaultClient, n.values.RunAPI, nil
 	}
 	return &http.Client{Transport: noRunAPI{}}, "http://run-api.qory.invalid/v1/runs/" + n.id, nil
+}
+
+// PushedCommits is [session.Run.PushedCommits] of the run: Nowhere.PushedCommits, else the
+// report goes to Nowhere.RunAPI as [PushedThroughLink] has it.
+func (n *nowhere) PushedCommits(ctx context.Context, body []byte) ([]byte, error) {
+	if n.ended {
+		return nil, errNowhereClosed
+	}
+	if n.values.PushedCommits != nil {
+		return n.values.PushedCommits(ctx, body)
+	}
+	if n.values.RunAPI == "" {
+		return nil, errors.New("Open the run with a control plane to send the pushed-commits request: this run has none.")
+	}
+	return PushedThroughLink(ctx, n.values.RunAPI, body)
+}
+
+// codeShape is the form of a code that the gateway passes on from Qory Apiary.
+var codeShape = regexp.MustCompile(`^[a-z][a-z0-9_]{0,63}$`)
+
+// PushedThroughLink is the report over the link of a gateway, as Forager's gateway and
+// [session.Run.PushedCommits] do it, with the run API at runAPI as Qory Apiary: POST body to
+// <runAPI>/pushed-commits, and then
+//   - a body over [server.MaxPushedCommitsRequest] returns the gateway's 413 payload_too_large,
+//     and sends nothing;
+//   - a 2xx returns its body;
+//   - a 5xx with the code internal is a [*server.StatusError] with the status, the code and the
+//     message, as Forager's link returns it;
+//   - a 4xx or 5xx with another code of Qory Apiary's, but 401 and 410, is a [*accesskey.Refusal]
+//     with the status, the code, From apiary and the message as Text;
+//   - any other response, Qory Apiary's 401 and 410 and a 5xx with no code among them, is the
+//     gateway's 502 control_plane_unavailable, From gateway.
+//
+// A request that fails returns its error. No response has a Retry-After.
+func PushedThroughLink(ctx context.Context, runAPI string, body []byte) ([]byte, error) {
+	if len(body) > server.MaxPushedCommitsRequest {
+		return nil, GatewayRefusal(http.StatusRequestEntityTooLarge, "payload_too_large")
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, runAPI+"/pushed-commits", bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	request.Header.Set("Content-Type", "application/json")
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		return nil, err
+	}
+	defer response.Body.Close()
+	raw, err := io.ReadAll(response.Body)
+	if err != nil {
+		return nil, err
+	}
+	if response.StatusCode >= 200 && response.StatusCode <= 299 {
+		return raw, nil
+	}
+	var doc struct {
+		Error   string `json:"error"`
+		Message string `json:"message"`
+	}
+	if response.StatusCode >= 400 && response.StatusCode != http.StatusUnauthorized && response.StatusCode != http.StatusGone &&
+		json.Unmarshal(raw, &doc) == nil && codeShape.MatchString(doc.Error) {
+		if response.StatusCode >= http.StatusInternalServerError && doc.Error == server.CodeInternal {
+			return nil, &server.StatusError{What: "the pushed-commits request", Status: response.StatusCode, Message: doc.Message, Code: doc.Error}
+		}
+		return nil, &accesskey.Refusal{Code: doc.Error, Status: response.StatusCode, From: accesskey.FromApiary, Text: doc.Message}
+	}
+	return nil, GatewayRefusal(http.StatusBadGateway, "control_plane_unavailable")
+}
+
+// GatewayRefusal is a refusal that the gateway returns itself, with status and code, as the link
+// gives it to [session.Run.PushedCommits]: From gateway, with the text of Forager's gateway
+// where it has one for the code. A 410 is the end of the run at the gateway, which
+// [server.Ended] reports.
+func GatewayRefusal(status int, code string) error {
+	text := map[string]string{
+		"control_plane_unavailable": "Send the pushed-commits request again: the gateway got no valid answer from the control plane.",
+		"payload_too_large":         "Send a pushed-commits body of at most 65536 bytes: this one is longer, so the gateway sent nothing.",
+		"not_found":                 "Open the run with a control plane to send the pushed-commits request: this run has none.",
+	}[code]
+	if text == "" {
+		text = fmt.Sprintf("the gateway returned %d: %s", status, code)
+	}
+	return &accesskey.Refusal{Code: code, Status: status, From: accesskey.FromGateway, Text: text}
+}
+
+// GatewayBusy is the gateway's 503 with no code, while it closes or reopens the run: a
+// [*server.StatusError].
+func GatewayBusy() error {
+	return &server.StatusError{What: "the pushed-commits request", Status: http.StatusServiceUnavailable, Message: "Send the pushed-commits request again."}
 }
 
 // noRunAPI is a transport that returns 404 with an error page to every request.

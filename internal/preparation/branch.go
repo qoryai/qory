@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/qoryai/qory/internal/branchformat"
@@ -50,7 +51,21 @@ type WorkBranch struct {
 	setupChanges map[string]map[string]string
 	// pushed is each repository the last [Push] pushed, as a line shows it.
 	pushed []string
+	// landed is each repository the last [Push] pushed, with the commit its branch is at.
+	landed []Landed
 }
+
+// Landed is a repository that a push moved: the commit its branch is at now, in full.
+type Landed struct {
+	System, Path, Commit string
+}
+
+// Landed is what the last [Push] moved, one entry for each repository, in the order it pushed
+// them: nil when it moved none. A failed Push lists the repositories that landed before the
+// failure. Qory Apiary's list of a run's pushed commits has what this returns, so a change
+// of what one push reports, such as each commit past the earlier tip, is a change of this
+// method alone.
+func (b *WorkBranch) Landed() []Landed { return slices.Clone(b.landed) }
 
 // VersionWays is the fix for a branch that [Push] pushed with no version stored: the next
 // run starts at the last version, so its push fails as a branch that moved.

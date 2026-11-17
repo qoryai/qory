@@ -439,6 +439,104 @@ func VerdictBody(verdict string, points []Point) ([]byte, error) {
 	return body, nil
 }
 
+// The limits of one pushed-commits call: MaxPushedCommits repositories, and a body of
+// MaxPushedCommitsBytes bytes. The gateway returns 413 `payload_too_large` for a larger
+// body, and the step fails with Contact support.
+const (
+	MaxPushedCommits      = 64
+	MaxPushedCommitsBytes = 64 * 1024
+)
+
+// PushedCommit is a repository that a push moved, and the commit its branch is at now: the
+// full id, 40 or 64 lowercase hexadecimal characters.
+type PushedCommit struct {
+	System string `json:"system"`
+	Path   string `json:"path"`
+	Commit string `json:"commit"`
+}
+
+// PushedCommitsBody is the body of one pushed-commits call, the report of the repositories
+// that a push moved, in the order the push moved them, as POST pushed-commits of the run
+// API reads it. The call goes over the link of the run's gateway, not through this client.
+// Qory Apiary takes a repeat of a commit it has as a no-op, so a caller may send the same
+// body again. A list with no repository, with more than [MaxPushedCommits], or with a commit
+// that is not a full lowercase commit id returns an [Error] with the code
+// [CodeInvalidRequest]. PushedCommitsBody does not check the size of the body: split a long
+// list with [SplitPushedCommits] first, one body for each list.
+func PushedCommitsBody(commits []PushedCommit) ([]byte, error) {
+	if len(commits) == 0 || len(commits) > MaxPushedCommits {
+		return nil, &Error{
+			Code: CodeInvalidRequest, Names: []string{"repositories"},
+			Message: fmt.Sprintf("Report 1 to %d repositories in one call. This call has %d.", MaxPushedCommits, len(commits)),
+		}
+	}
+
+	for i, commit := range commits {
+		if !fullCommit(commit.Commit) {
+			return nil, &Error{
+				Code: CodeInvalidRequest, Names: []string{fmt.Sprintf("repositories[%d].commit", i)},
+				Message: "Send each commit as a full id of 40 or 64 lowercase hex characters.",
+			}
+		}
+	}
+
+	body, err := encodePushedCommits(commits)
+	if err != nil {
+		return nil, fmt.Errorf("Check the pushed commits. Encoding the request failed: %w", err)
+	}
+
+	return body, nil
+}
+
+// encodePushedCommits is the body of a pushed-commits call for commits. It is the one
+// place that encodes the body, so the size that [SplitPushedCommits] measures is the size sent.
+func encodePushedCommits(commits []PushedCommit) ([]byte, error) {
+	return encode(struct {
+		Repositories []PushedCommit `json:"repositories"`
+	}{commits})
+}
+
+// SplitPushedCommits divides commits into the lists that [PushedCommitsBody] encodes, one call
+// each, in order: each list has at most [MaxPushedCommits] repositories and encodes to a body
+// of at most [MaxPushedCommitsBytes] bytes. A repository that alone exceeds the byte limit has
+// a list to itself. It returns nil for no commits.
+func SplitPushedCommits(commits []PushedCommit) [][]PushedCommit {
+	var calls [][]PushedCommit
+
+	for len(commits) > 0 {
+		n := 1
+
+		for n < len(commits) && n < MaxPushedCommits {
+			body, err := encodePushedCommits(commits[:n+1])
+			if err != nil || len(body) > MaxPushedCommitsBytes {
+				break
+			}
+
+			n++
+		}
+
+		calls = append(calls, commits[:n:n])
+		commits = commits[n:]
+	}
+
+	return calls
+}
+
+// fullCommit reports whether value is a commit id of 40 or 64 lowercase hexadecimal characters.
+func fullCommit(value string) bool {
+	if len(value) != 40 && len(value) != 64 {
+		return false
+	}
+
+	for _, r := range value {
+		if (r < '0' || r > '9') && (r < 'a' || r > 'f') {
+			return false
+		}
+	}
+
+	return true
+}
+
 func (c *Client) post(ctx context.Context, path string, body []byte) (*Pushed, error) {
 	var stored struct {
 		Artifact Pushed `json:"artifact"`
