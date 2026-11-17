@@ -1125,7 +1125,7 @@ func read(path string) (file, error) {
 	var f file
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return f, err
+		return f, exports.ReadError(path, err)
 	}
 	if err := exports.RefuseAliases(path, data); err != nil {
 		return f, err

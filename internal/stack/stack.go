@@ -581,7 +581,7 @@ func Load(path string) (*Stack, error) {
 func loadFile(path string) (*Stack, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, err
+		return nil, exports.ReadError(path, err)
 	}
 	p := &Stack{}
 	dec := yaml.NewDecoder(strings.NewReader(string(data)))

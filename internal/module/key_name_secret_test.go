@@ -233,7 +233,10 @@ func TestAManifestQoryCannotReadLeavesOutASecretInItsPath(t *testing.T) {
 	if !errors.As(err, &pathErr) {
 		t.Errorf("%v, want a *fs.PathError", err)
 	}
-	if want := filepath.Join(root, accessKeyPhrase, "qory-module.yaml") + ": permission denied"; err == nil || !strings.HasSuffix(err.Error(), want) || strings.Contains(err.Error(), "qak_") {
+	if want := filepath.Join(root, accessKeyPhrase, "qory-module.yaml") + ": permission denied."; err == nil || !strings.HasSuffix(err.Error(), want) || strings.Contains(err.Error(), "qak_") {
 		t.Errorf("%v, want the suffix %q", err, want)
+	}
+	if first := strings.SplitN(err.Error(), "\n", 2)[0]; first != "Check that you can read qory-module.yaml of the module." {
+		t.Errorf("line 1 is %q", first)
 	}
 }

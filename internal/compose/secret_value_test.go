@@ -2,6 +2,8 @@ package compose_test
 
 import (
 	"errors"
+	"io/fs"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -138,6 +140,39 @@ func TestTheModuleNameRefusalContainsTheFileThatDeclaresTheModule(t *testing.T) 
 	const want = "Use one name for the module in qory.yaml and in its qory-module.yaml.\n  The module m at modules/m has the name acme-core in its qory-module.yaml."
 	if err == nil || !strings.HasPrefix(err.Error(), want) {
 		t.Errorf("%v\nwant one that starts with %q", err, want)
+	}
+}
+
+// TestAnUnreadableManifestStartsWithTheFixAndNamesTheModule is a module whose
+// qory-module.yaml has mode 000: line 1 of the refusal is the fix with the module's name,
+// and the error still matches fs.ErrPermission.
+func TestAnUnreadableManifestStartsWithTheFixAndNamesTheModule(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root reads a file of mode 000")
+	}
+	isolateAll(t)
+	dir := writeTree(t, map[string]string{
+		stack.FileName:               "apiVersion: qory.dev/v1alpha1\nmodules:\n  - name: a\n    source:\n      path: modules/a\n",
+		"modules/a/qory-module.yaml": "apiVersion: qory.dev/v1alpha1\nname: a\n",
+	})
+	manifest := filepath.Join(dir, "modules", "a", "qory-module.yaml")
+	if err := os.Chmod(manifest, 0); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(manifest, 0o644) })
+	p, err := loadFor(filepath.Join(dir, stack.FileName), "claude")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = compose.Compose(p)
+	if err == nil {
+		t.Fatal("no refusal")
+	}
+	if first := strings.SplitN(err.Error(), "\n", 2)[0]; first != "Check that you can read qory-module.yaml of module a." {
+		t.Errorf("line 1 is %q", first)
+	}
+	if !errors.Is(err, fs.ErrPermission) {
+		t.Errorf("%v does not match fs.ErrPermission", err)
 	}
 }
 

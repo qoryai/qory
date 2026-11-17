@@ -45,15 +45,15 @@ func TestTheMachineLinesLeaveOutANameWithASecret(t *testing.T) {
 	if report.String() != want {
 		t.Errorf("report %q, want %q", report.String(), want)
 	}
-	if want := "forager.yaml: credential " + accessKeyPhrase + ": a token from env or file needs the hosts it is for"; err == nil || err.Error() != want {
+	if want := "Fix the credential " + accessKeyPhrase + " in forager.yaml.\n  credential " + accessKeyPhrase + ": a token from env or file needs the hosts it is for.\n  credential " + accessKeyPhrase + " is in forager.yaml."; err == nil || err.Error() != want {
 		t.Errorf("credential: %v, want %q", err, want)
 	}
 	_, err = machineTools(&config.Forager{Tools: []config.ForagerTool{{Name: "qrk_t"}}}, nil)
-	if want := "forager.yaml: tool " + runKeyPhrase + ": the command is empty"; err == nil || err.Error() != want {
+	if want := "Fix the tool " + runKeyPhrase + " in forager.yaml.\n  tool " + runKeyPhrase + ": the command is empty.\n  tool " + runKeyPhrase + " is in forager.yaml."; err == nil || err.Error() != want {
 		t.Errorf("tool: %v, want %q", err, want)
 	}
 	_, err = machineTools(&config.Forager{Tools: []config.ForagerTool{{Name: "qak_a b", Command: []string{"/opt/tool"}, Serves: []string{"a.example"}}}}, nil)
-	if want := "forager.yaml: the tool name " + accessKeyPhrase + " is not 1 to 64 of a-z, 0-9, underscore, dot and dash"; err == nil || err.Error() != want {
+	if want := "Fix the tool " + accessKeyPhrase + " in forager.yaml.\n  the tool name " + accessKeyPhrase + " is not 1 to 64 of a-z, 0-9, underscore, dot and dash.\n  tool " + accessKeyPhrase + " is in forager.yaml."; err == nil || err.Error() != want {
 		t.Errorf("tool name with a space: %v, want %q", err, want)
 	}
 	if got, want := shadowed("github"), "forager.yaml: gateway.credentials.github defines the credential github, and gateway.integrations.github defines none"; got != want {

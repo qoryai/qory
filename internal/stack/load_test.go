@@ -2,6 +2,7 @@ package stack
 
 import (
 	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -392,5 +393,33 @@ func TestASourcePathErrorHasItsModule(t *testing.T) {
 				t.Errorf("the hidden text is %q", hidden)
 			}
 		})
+	}
+}
+
+// TestAnUnreadableStackFileStartsWithTheFixAndMatchesTheOSError is a qory-stack.yaml of
+// mode 000: line 1 of the refusal is the fix, the path is in the text once, and the
+// error still matches fs.ErrPermission.
+func TestAnUnreadableStackFileStartsWithTheFixAndMatchesTheOSError(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root reads a file of mode 000")
+	}
+	isolate(t)
+	path := write(t, "apiVersion: qory.dev/v1alpha1\n")
+	if err := os.Chmod(path, 0); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(path, 0o644) })
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("no refusal")
+	}
+	if first := strings.SplitN(err.Error(), "\n", 2)[0]; first != "Check that you can read "+filepath.Base(path)+"." {
+		t.Errorf("line 1 is %q", first)
+	}
+	if n := strings.Count(err.Error(), path); n != 1 {
+		t.Errorf("the path is in the text %d times: %v", n, err)
+	}
+	if !errors.Is(err, fs.ErrPermission) {
+		t.Errorf("%v does not match fs.ErrPermission", err)
 	}
 }

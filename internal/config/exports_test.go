@@ -17,12 +17,12 @@ func TestExportsOfTheRootFileAreReadAndChecked(t *testing.T) {
 	root := t.TempDir()
 	write(t, filepath.Join(root, "qory.yaml"), "exports:\n  dir: harness\n  stacks: [nextjs]\n  modules: [core]\n")
 	_, err := config.Load(root, true)
-	if want := filepath.Join(root, "qory.yaml") + ": exports.stacks lists nextjs, and harness/stacks/nextjs contains no qory-stack.yaml"; err == nil || err.Error() != want {
+	if want := "Add qory-stack.yaml to the directory of an export, or remove the export from exports.stacks.\n  exports.stacks lists nextjs, and harness/stacks/nextjs contains no qory-stack.yaml.\n  exports.stacks is in " + filepath.Join(root, "qory.yaml") + "."; err == nil || err.Error() != want {
 		t.Fatalf("a missing stack: %v\nwant %s", err, want)
 	}
 	write(t, filepath.Join(root, "harness", "stacks", "nextjs", "qory-stack.yaml"), "")
 	_, err = config.Load(root, true)
-	if want := "exports.modules lists core, and harness/modules/core contains no qory-module.yaml"; err == nil || !strings.Contains(err.Error(), want) {
+	if want := "exports.modules lists core, and harness/modules/core contains no qory-module.yaml."; err == nil || !strings.Contains(err.Error(), want) {
 		t.Fatalf("a missing module: %v\nwant %s", err, want)
 	}
 	write(t, filepath.Join(root, "harness", "modules", "core", "qory-module.yaml"), "name: core\n")

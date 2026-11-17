@@ -1,6 +1,9 @@
 package config_test
 
 import (
+	"errors"
+	"io/fs"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -163,5 +166,35 @@ func TestAFolderWithBothFilesIsPrintedAsAPhraseWhenItsNameHasASecret(t *testing.
 	}
 	if strings.Contains(strings.ToLower(err.Error()), "qak_") || !strings.Contains(err.Error(), "(a name that contains an access key secret)") {
 		t.Errorf("the refusal does not print the folder as the phrase: %v", err)
+	}
+}
+
+// TestAnUnreadableConfigurationStartsWithTheFixAndMatchesTheOSError is a qory.yaml of mode
+// 000: line 1 of the refusal is the fix, the path is in the text once, and the error
+// still matches fs.ErrPermission.
+func TestAnUnreadableConfigurationStartsWithTheFixAndMatchesTheOSError(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root reads a file of mode 000")
+	}
+	hermetic(t)
+	root := t.TempDir()
+	path := filepath.Join(root, "qory.yaml")
+	write(t, path, "harness: {update: never}\n")
+	if err := os.Chmod(path, 0); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(path, 0o644) })
+	_, err := config.Load(root, true)
+	if err == nil {
+		t.Fatal("no refusal")
+	}
+	if first := strings.SplitN(err.Error(), "\n", 2)[0]; first != "Check that you can read qory.yaml." {
+		t.Errorf("line 1 is %q", first)
+	}
+	if n := strings.Count(err.Error(), path); n != 1 {
+		t.Errorf("the path is in the text %d times: %v", n, err)
+	}
+	if !errors.Is(err, fs.ErrPermission) {
+		t.Errorf("%v does not match fs.ErrPermission", err)
 	}
 }

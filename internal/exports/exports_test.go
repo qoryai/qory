@@ -164,12 +164,12 @@ func TestVerifyWantsEveryExportOnDisk(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := root + "/qory.yaml: exports.stacks lists nextjs, and harness/stacks/nextjs contains no qory-stack.yaml"
+	want := "Add qory-stack.yaml to the directory of an export, or remove the export from exports.stacks.\n  exports.stacks lists nextjs, and harness/stacks/nextjs contains no qory-stack.yaml.\n  exports.stacks is in " + root + "/qory.yaml."
 	if err := e.Verify(); err == nil || err.Error() != want {
 		t.Errorf("no stack: %v\nwant %s", err, want)
 	}
 	touch(t, filepath.Join(root, "harness", "stacks", "nextjs", "qory-stack.yaml"))
-	want = root + "/qory.yaml: exports.modules lists core, and harness/modules/core contains no qory-module.yaml"
+	want = "Add qory-module.yaml to the directory of an export, or remove the export from exports.modules.\n  exports.modules lists core, and harness/modules/core contains no qory-module.yaml.\n  exports.modules is in " + root + "/qory.yaml."
 	if err := e.Verify(); err == nil || err.Error() != want {
 		t.Errorf("no module: %v\nwant %s", err, want)
 	}

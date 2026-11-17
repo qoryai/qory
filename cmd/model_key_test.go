@@ -73,17 +73,17 @@ func TestGatewayStopsOnAModelKeyForagerRefuses(t *testing.T) {
 	t.Cleanup(cmd.SetStartGateway(func(gateway.Config) error { return errors.New("the gateway started") }))
 	for _, c := range []struct{ entry, want string }{
 		{"{env: MODEL_TOKEN, format: anthropic, endpoint: \"https://api.model.example\", auth: {scheme: bearer}}",
-			`forager.yaml: credential model: set format to anthropic-messages, openai-responses, openai-chat or gemini: "anthropic" is no API format Forager knows`},
+			"Fix the credential model in forager.yaml.\n  credential model: set format to anthropic-messages, openai-responses, openai-chat or gemini: \"anthropic\" is no API format Forager knows.\n  credential model is in forager.yaml."},
 		{"{env: MODEL_TOKEN, format: anthropic-messages, endpoint: \"http://api.model.example\", auth: {scheme: bearer}}",
-			"forager.yaml: credential model: set endpoint to an https URL with a host and no user, query or fragment: Forager reads no host from it"},
+			"Fix the credential model in forager.yaml.\n  credential model: set endpoint to an https URL with a host and no user, query or fragment: Forager reads no host from it.\n  credential model is in forager.yaml."},
 		{"{env: MODEL_TOKEN, format: anthropic-messages, endpoint: \"https://api.model.example\", hosts: [api.model.example], auth: {scheme: bearer}}",
-			"forager.yaml: credential model: remove hosts, paths and placeholders from the model key: the key is set on its endpoint's host, and the session gives the runtime the key's variable"},
+			"Fix the credential model in forager.yaml.\n  credential model: remove hosts, paths and placeholders from the model key: the key is set on its endpoint's host, and the session gives the runtime the key's variable.\n  credential model is in forager.yaml."},
 		{"{env: MODEL_TOKEN, format: anthropic-messages, endpoint: \"https://api.model.example\", auth: {scheme: header, header: x-api-key, oauth: true}}",
-			"forager.yaml: credential model: remove oauth, or set the scheme to bearer: oauth marks a bearer alone"},
+			"Fix the credential model in forager.yaml.\n  credential model: remove oauth, or set the scheme to bearer: oauth marks a bearer alone.\n  credential model is in forager.yaml."},
 		{"{env: MODEL_TOKEN, endpoint: \"https://api.model.example\", hosts: [api.model.example], auth: {scheme: bearer}}",
-			"forager.yaml: credential model: add format to the credential, or remove endpoint, oauth and key_prefixes: only a model key has them"},
+			"Fix the credential model in forager.yaml.\n  credential model: add format to the credential, or remove endpoint, oauth and key_prefixes: only a model key has them.\n  credential model is in forager.yaml."},
 		{"{env: MODEL_TOKEN, format: anthropic-messages, endpoint: \"https://api.model.example\", auth: {scheme: bearer}, key_prefixes: []}",
-			"forager.yaml: credential model: list 1 to 4 key prefixes, or none: the model key lists 0"},
+			"Fix the credential model in forager.yaml.\n  credential model: list 1 to 4 key prefixes, or none: the model key lists 0.\n  credential model is in forager.yaml."},
 	} {
 		serverFile(t, newGatewayServer(t), "  listen: 127.0.0.1:0\n"+gatewayTLS+"  credentials:\n    model: "+c.entry+"\n")
 		writeCertificate(t)

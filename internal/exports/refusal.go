@@ -3,6 +3,7 @@ package exports
 import (
 	"errors"
 	"fmt"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strings"
@@ -301,4 +302,24 @@ func (d *decodeRefusal) Unwrap() error { return d.cause }
 // In is the refusal with file at [FilePlace], and the same cause.
 func (d *decodeRefusal) In(file string) error {
 	return &decodeRefusal{d.Refusal.In(file).(*Refusal), d.cause}
+}
+
+// ReadError is err, the failure to read the file at path, as a refusal that unwraps to
+// err, so errors.Is and errors.As still match it: "Check that you can read <file>.", then
+// err's text, with a path that contains a secret as the phrase, then the file when that
+// text does not have it. file is the name of the file without its folders.
+func ReadError(path string, err error) error {
+	return ReadErrorOf(filepath.Base(path), path, err)
+}
+
+// ReadErrorOf is [ReadError] with what, the words after "Check that you can read", in
+// place of the file's name. what may contain [ModulePlace].
+func ReadErrorOf(what, path string, err error) error {
+	hidden := HideError(err)
+	cause := strings.TrimSuffix(hidden.Error(), ".") + "."
+	lines := []string{cause}
+	if shown := HidePath(path); !strings.Contains(cause, shown) {
+		lines = append(lines, "The file is "+shown+".")
+	}
+	return &decodeRefusal{Refuse("Check that you can read "+what+".", lines...), err}
 }

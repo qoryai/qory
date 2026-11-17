@@ -273,13 +273,17 @@ func (e *Exports) Verify() error {
 	for _, name := range e.Stacks {
 		dir, _ := e.Stack(name)
 		if !isFile(filepath.Join(e.Root, dir, StackFileName)) {
-			return fmt.Errorf("%s: exports.stacks lists %s, and %s contains no %s", e.File, accesskey.ShownName(name, false), HidePath(dir), StackFileName)
+			return Refuse(fmt.Sprintf("Add %s to the directory of an export, or remove the export from exports.stacks.", StackFileName),
+				fmt.Sprintf("exports.stacks lists %s, and %s contains no %s.", accesskey.ShownName(name, false), HidePath(dir), StackFileName),
+				"exports.stacks is in "+HidePath(e.File)+".")
 		}
 	}
 	for _, name := range e.Modules {
 		dir, _ := e.Module(name)
 		if !isFile(filepath.Join(e.Root, dir, ModuleFileName)) {
-			return fmt.Errorf("%s: exports.modules lists %s, and %s contains no %s", e.File, accesskey.ShownName(name, false), HidePath(dir), ModuleFileName)
+			return Refuse(fmt.Sprintf("Add %s to the directory of an export, or remove the export from exports.modules.", ModuleFileName),
+				fmt.Sprintf("exports.modules lists %s, and %s contains no %s.", accesskey.ShownName(name, false), HidePath(dir), ModuleFileName),
+				"exports.modules is in "+HidePath(e.File)+".")
 		}
 		data, file, err := e.readProcess(dir)
 		if err != nil {
@@ -344,7 +348,7 @@ func read(root string) (*document, string, error) {
 	}
 	data, err := os.ReadFile(file)
 	if err != nil {
-		return nil, "", err
+		return nil, "", ReadError(file, err)
 	}
 	if err := RefuseAliases(file, data); err != nil {
 		return nil, "", err

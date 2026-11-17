@@ -391,7 +391,7 @@ func parseManifest(dir string, data []byte, err error) (*Manifest, error) {
 	// The directory of a module listed by name is that name, which the errors print as
 	// exports.HidePath prints it.
 	if err != nil {
-		return nil, exports.HideError(err)
+		return nil, exports.ReadErrorOf(ManifestName+" of "+exports.ModulePlace, path, err)
 	}
 	path = exports.HidePath(path)
 	refuse := func(fix string, lines ...string) error {

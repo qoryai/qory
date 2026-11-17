@@ -1186,7 +1186,7 @@ func readForagerFile(dir string) (string, []byte, error) {
 		return path, nil, nil
 	}
 	if err != nil {
-		return path, nil, err
+		return path, nil, exports.ReadError(path, err)
 	}
 	if data == nil {
 		data = []byte{}
