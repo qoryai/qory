@@ -222,7 +222,12 @@ func (r Runtimes) Validate() error { return r.ValidateAs("target.runtime") }
 // ValidateAs is [Runtimes.Validate] for the runtimes that key sets, such as
 // harness.runtime in a machine's configuration, as the refusal names it.
 func (r Runtimes) ValidateAs(key string) error {
-	where := key + " is in " + exports.FilePlace + "."
+	return r.ValidateAt(key, key+" is in "+exports.FilePlace+".")
+}
+
+// ValidateAt is [Runtimes.ValidateAs] with where as the last line of the refusal, for a
+// list that a flag or the configuration set, which no file of the document contains.
+func (r Runtimes) ValidateAt(key, where string) error {
 	if len(r) == 0 {
 		return exports.Refuse("Set "+key+" to one runtime name or a list of names.", "No runtime is set.", where)
 	}
