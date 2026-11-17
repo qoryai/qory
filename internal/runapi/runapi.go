@@ -439,6 +439,76 @@ func VerdictBody(verdict string, points []Point) ([]byte, error) {
 	return body, nil
 }
 
+// MaxPushedCommits is the most repositories one [Client.PushedCommits] call may send.
+const MaxPushedCommits = 64
+
+// PushedCommit is a repository that a push moved, and the commit its branch is at now: the
+// full id, 40 or 64 lowercase hexadecimal characters.
+type PushedCommit struct {
+	System string `json:"system"`
+	Path   string `json:"path"`
+	Commit string `json:"commit"`
+}
+
+// PushedCommits reports the repositories that a push moved, in the order the push moved
+// them, to the run's list of pushed commits. Qory Apiary answers 204, and takes a repeat of a
+// commit it has as a no-op, so a caller may send the same call again. A list with no
+// repository, with more than [MaxPushedCommits], or with a commit that is not a full
+// lowercase commit id returns an [Error] with the code [CodeInvalidRequest] and sends nothing.
+func (c *Client) PushedCommits(ctx context.Context, commits []PushedCommit) error {
+	if len(commits) == 0 || len(commits) > MaxPushedCommits {
+		return &Error{
+			Status: 0, Code: CodeInvalidRequest, Names: []string{"repositories"},
+			Message: fmt.Sprintf("Report 1 to %d repositories in one call. This call has %d.", MaxPushedCommits, len(commits)),
+		}
+	}
+
+	for i, commit := range commits {
+		if !fullCommit(commit.Commit) {
+			return &Error{
+				Code: CodeInvalidRequest, Names: []string{fmt.Sprintf("repositories[%d].commit", i)},
+				Message: "Send each commit as a full id of 40 or 64 lowercase hex characters.",
+			}
+		}
+	}
+
+	body, err := encode(struct {
+		Repositories []PushedCommit `json:"repositories"`
+	}{commits})
+	if err != nil {
+		return fmt.Errorf("Check the pushed commits. Encoding the request failed: %w", err)
+	}
+
+	const path = "/pushed-commits"
+
+	response, err := c.send(ctx, http.MethodPost, path, body)
+	if err != nil {
+		return err
+	}
+	defer response.Body.Close()
+
+	if response.StatusCode != http.StatusNoContent {
+		return readError(response, http.MethodPost+" "+path)
+	}
+
+	return nil
+}
+
+// fullCommit reports whether value is a commit id of 40 or 64 lowercase hexadecimal characters.
+func fullCommit(value string) bool {
+	if len(value) != 40 && len(value) != 64 {
+		return false
+	}
+
+	for _, r := range value {
+		if (r < '0' || r > '9') && (r < 'a' || r > 'f') {
+			return false
+		}
+	}
+
+	return true
+}
+
 func (c *Client) post(ctx context.Context, path string, body []byte) (*Pushed, error) {
 	var stored struct {
 		Artifact Pushed `json:"artifact"`

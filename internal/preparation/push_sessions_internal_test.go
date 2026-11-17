@@ -3,6 +3,7 @@ package preparation
 import (
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -59,6 +60,9 @@ func TestEachSessionsCommitsAreOnTheBranchBeforeTheNext(t *testing.T) {
 	if b.PushedPaths() != "acme/shop" {
 		t.Errorf("the pushed paths are %q", b.PushedPaths())
 	}
+	if got, want := b.Landed(), []Landed{{System: b.system, Path: "acme/shop", Commit: second}}; !slices.Equal(got, want) {
+		t.Errorf("the landed repositories are %+v, want %+v", got, want)
+	}
 }
 
 // TestASessionWithNoCommitsPushesNothing is a session after one whose commit was pushed,
@@ -85,6 +89,9 @@ func TestASessionWithNoCommitsPushesNothing(t *testing.T) {
 	}
 	if b.PushedPaths() != "" {
 		t.Errorf("the pushed paths are %q, want none", b.PushedPaths())
+	}
+	if got := b.Landed(); len(got) != 0 {
+		t.Errorf("the landed repositories are %+v, want none", got)
 	}
 }
 

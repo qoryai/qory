@@ -2621,6 +2621,33 @@ Each of these lines fails the step. `<commit>` is the commit's first 12 characte
   id> on <path>, or delete that branch on <system>: qory pushed <path> and stored no version,
   because the push of the next repository failed: <line of that failure>`
 
+#### The report of a push
+
+After a push that moved a repository, and before it stores the version, the step reports
+the push to Qory Apiary with `POST /v1/runs/<run id>/pushed-commits`. The gateway signs the
+request. The body is `{"repositories": [{"system", "path", "commit"}]}`: the repositories
+that the push moved, the target first, each with its head commit as 40 or 64 lowercase hex
+characters. A push of more than 64 repositories is reported in calls of at most 64, one
+after the other, in that order. A push that moved no repository, as one after a session
+that committed nothing, sends no call. Qory Apiary lists each reported commit on the run,
+and a repeat of a commit is a no-op, so a call is safe to send again. The report is also
+sent when a later repository's push failed: the repositories that landed are reported, and
+that push's line stays the run's line.
+
+A call that got no response within 30 s, a 5xx or a 429 is sent again with the same body, 3
+times, after 1 s, 2 s and 4 s, or after the answer's `Retry-After` when it has one, at most
+30 s. Then:
+
+- 409 `run_ended`: qory pushes and reports nothing more, starts no later session, and
+  prints `qory run: Qory Apiary ended this run, so qory pushes nothing more and no later
+  session starts.` The step exits `succeeded`, and the run closes with the end that Qory
+  Apiary recorded, as for a run that Qory Apiary closed during its session.
+- Any other status, or the retries used up: the step fails, the run closes `failed` before
+  the next session, and qory prints `Contact support: qory pushed <commit> to qory/<work
+  item id>, and Qory Apiary did not record it.`, then `Qory Apiary returned <status>: <text>`,
+  or the error of a request with no response. `<commit>` is the first commit of the call
+  that failed. The pushed commits stay on the forge, and the version is not stored.
+
 A removal of the setup container that failed runs no step: qory commits nothing and pushes
 nothing, and the run ends as a failed step ends it, with this line:
 

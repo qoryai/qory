@@ -834,3 +834,59 @@ func TestACancelledContextIsNotAGatewayError(t *testing.T) {
 		t.Errorf("err = %q", err)
 	}
 }
+
+func TestPushedCommitsSendsTheBodyTheRunAPIReads(t *testing.T) {
+	const commit = "0123456789abcdef0123456789abcdef01234567"
+
+	client := serve(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/v1/runs/run-1/pushed-commits" {
+			t.Errorf("request = %s %s", r.Method, r.URL.Path)
+		}
+
+		raw, _ := io.ReadAll(r.Body)
+
+		want := `{"repositories":[{"system":"github.com","path":"acme/web","commit":"` + commit + `"}]}`
+		if string(raw) != want {
+			t.Errorf("body = %s", raw)
+		}
+
+		w.WriteHeader(http.StatusNoContent)
+	})
+
+	err := client.PushedCommits(context.Background(), []runapi.PushedCommit{{System: "github.com", Path: "acme/web", Commit: commit}})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestPushedCommitsReadsTheErrorAndRetryAfter(t *testing.T) {
+	client := serve(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Retry-After", "7")
+		w.WriteHeader(http.StatusConflict)
+		fmt.Fprint(w, `{"error":"run_ended","message":"Start a new run to record pushed commits. This run ended, so it records no more commits."}`)
+	})
+
+	err := client.PushedCommits(context.Background(), []runapi.PushedCommit{{System: "s", Path: "p", Commit: strings.Repeat("a", 64)}})
+
+	var apiError *runapi.Error
+	if !errors.As(err, &apiError) || apiError.Status != http.StatusConflict || apiError.Code != runapi.CodeRunEnded ||
+		apiError.RetryAfter != 7 || !strings.HasPrefix(apiError.Error(), "Start a new run") {
+		t.Errorf("err = %v (%+v)", err, apiError)
+	}
+}
+
+func TestPushedCommitsSendsNothingThatTheRunAPIRefuses(t *testing.T) {
+	client := serve(t, func(http.ResponseWriter, *http.Request) { t.Error("a request went out") })
+	good := runapi.PushedCommit{System: "s", Path: "p", Commit: strings.Repeat("a", 40)}
+
+	for name, commits := range map[string][]runapi.PushedCommit{
+		"none":      nil,
+		"65":        append(make([]runapi.PushedCommit, 64), good),
+		"short":     {{System: "s", Path: "p", Commit: "abc1234"}},
+		"uppercase": {{System: "s", Path: "p", Commit: strings.Repeat("A", 40)}},
+	} {
+		if err := client.PushedCommits(context.Background(), commits); !runapi.HasCode(err, runapi.CodeInvalidRequest) {
+			t.Errorf("%s: err = %v, want invalid_request", name, err)
+		}
+	}
+}

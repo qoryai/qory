@@ -100,7 +100,8 @@ func SetLaterSessions(sessions ...func()) func() {
 	pushAfterSession = func(p *sessionPush, ending *pushEnding, out session.Outcome) (session.Outcome, error) {
 		closed, err := before(p, ending, out)
 		for _, agent := range sessions {
-			if err != nil {
+			// A run that Qory Apiary ended starts no later session.
+			if err != nil || p.ended {
 				break
 			}
 			agent()
@@ -297,6 +298,14 @@ func SetBranchWait(f func(time.Duration)) func() {
 		return nil
 	}
 	return func() { branchWait = before }
+}
+
+// SetRecordAttemptLimit makes each send of the report of a push have d, and returns what
+// restores the default.
+func SetRecordAttemptLimit(d time.Duration) func() {
+	before := recordAttemptLimit
+	recordAttemptLimit = d
+	return func() { recordAttemptLimit = before }
 }
 
 // ErrJoinedNowhere is the error of the join of a run [OpenNowhere] opened.

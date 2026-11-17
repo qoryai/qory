@@ -1,6 +1,7 @@
 package cmd_test
 
 import (
+	"bytes"
 	"cmp"
 	"context"
 	"crypto/sha256"
@@ -9,12 +10,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"maps"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -66,7 +69,13 @@ type pushAPI struct {
 	posts     int
 	reads     int
 	post      func(n int, w http.ResponseWriter) (handled, store bool)
-	index     func(n int, w http.ResponseWriter) bool
+	// recorded is the report of pushed commits: each call's body, as it arrived, and the
+	// rows that its calls added, in order. record, when set, answers call n in place of 204,
+	// and returns whether it did.
+	recorded []string
+	rows     []recordedRow
+	record   func(n int, w http.ResponseWriter) bool
+	index    func(n int, w http.ResponseWriter) bool
 }
 
 // newPushAPI serves a run API whose work item has the id [workItem] and the stage st_a.
@@ -102,9 +111,53 @@ func (a *pushAPI) serve(w http.ResponseWriter, r *http.Request) {
 		w.Write(a.files[n-1])
 	case r.Method == http.MethodPost && r.URL.Path == "/v1/runs/r/artifacts":
 		a.posted(w, r)
+	case r.Method == http.MethodPost && r.URL.Path == "/v1/runs/r/pushed-commits":
+		a.recordedPush(w, r)
 	default:
 		http.NotFound(w, r)
 	}
+}
+
+// recordedRow is a row of the run's list of pushed commits.
+type recordedRow struct{ System, Path, Commit string }
+
+// recordedPush is POST pushed-commits as Qory Apiary answers it: 400 for a body that is not
+// the contract's, else a row for each commit not in the list yet, and 204.
+func (a *pushAPI) recordedPush(w http.ResponseWriter, r *http.Request) {
+	raw, _ := io.ReadAll(r.Body)
+	a.recorded = append(a.recorded, string(raw))
+	if a.record != nil && a.record(len(a.recorded), w) {
+		return
+	}
+	var body struct {
+		Repositories []recordedRow `json:"repositories"`
+	}
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.DisallowUnknownFields()
+	full := regexp.MustCompile(`^([0-9a-f]{40}|[0-9a-f]{64})$`)
+	if err := dec.Decode(&body); err != nil || len(body.Repositories) == 0 || len(body.Repositories) > 64 {
+		failing(w, http.StatusBadRequest, "invalid_request", "")
+		return
+	}
+	for _, row := range body.Repositories {
+		if !full.MatchString(row.Commit) || row.System == "" || row.Path == "" {
+			failing(w, http.StatusBadRequest, "invalid_request", "")
+			return
+		}
+	}
+	for _, row := range body.Repositories {
+		if !slices.Contains(a.rows, row) {
+			a.rows = append(a.rows, row)
+		}
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// reports is how many reports of pushed commits arrived, and the rows that the list has.
+func (a *pushAPI) reports() (calls int, rows []recordedRow) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return len(a.recorded), slices.Clone(a.rows)
 }
 
 // writeIndex writes the index of the versions stored so far.
