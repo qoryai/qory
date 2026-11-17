@@ -18,6 +18,11 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Added
 
+- The `agent` image has the Node packages `typescript` 5.9.3, `libpg-query` 18.2.4,
+  `parse5` 8.1.1, `postcss` 8.5.33 and `postcss-scss` 4.0.9 in `/opt/qory/parsers`. The
+  folder belongs to root and no other user can write to it. A script loads a package with
+  `require('/opt/qory/parsers/node_modules/<package>')`. See
+  Qory's images in `docs/run.md`.
 - Every run of Claude Code installs the runtime's program before its session: from the
   runtime cache of the pool's registry, or of `pool.registry`, or else from npm, through
   the run's host proxy when the run has one. qory reads the registry's `newest`, or npm's

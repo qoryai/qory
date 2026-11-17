@@ -4648,6 +4648,15 @@ What each of them does:
   Dutch, English, Estonian, Finnish, French, German, Greek, Hungarian, Irish, Italian,
   Latvian, Lithuanian, Maltese, Norwegian, Polish, Portuguese, Romanian, Russian,
   Serbian, Slovak, Slovenian, Spanish, Swedish and Ukrainian.
+- **Parsers.** `agent` has the Node packages `typescript` 5.9.3, `libpg-query` 18.2.4,
+  `parse5` 8.1.1, `postcss` 8.5.33 and `postcss-scss` 4.0.9 in `/opt/qory/parsers`, so a
+  script can parse code without running it. Load a package from there by its path, for
+  example `require('/opt/qory/parsers/node_modules/parse5')`. The folder belongs to root
+  and is read-only for every other user, so a session cannot change a parser. The
+  packages are installed from `images/agent/parsers/package-lock.json`, which has the
+  version and the sha512 sum of each package, and none runs a script at install.
+  `libpg-query` is WebAssembly, parses PostgreSQL's dialect only, and needs no network at
+  run time.
 
 To add what your agents need, build yours FROM one of them, and check it:
 
