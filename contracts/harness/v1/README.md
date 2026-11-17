@@ -859,6 +859,9 @@ stores it as a version of the artifact type `verdict`. This is version 1 of the 
 | `action` | `answer`: a person answers the question in `question`, only with `escalate`; `run_again`: another round runs, and with `escalate` a person runs it |
 | `question` | the id of an open question in the work item's newest `questions` version, in the id form of the questions format: required with `answer`, and absent with `run_again` |
 | `fix` | what a person does to fix the point, in one plain sentence on one line, with the rules of `text`: optional with `run_again`, and absent with `answer`. Qory Apiary shows it in place of the sentence of the action `run_again` |
+| `track` | the track the run proposes for the work item: optional with a verdict of any kind, an object with the members `id` and `reason` and no other. A verdict with no track proposes none. Qory Apiary returns 422 for a track that the gate of the run's stage does not offer |
+| `id` | the id of a track that the gate of the run's stage offers: one lower-case word, or lower-case words joined by hyphens, such as `small-change`, at most 40 characters. Required in a track |
+| `reason` | why the run proposes the track, in one plain sentence on one line, 1 to 300 characters, with the rules of `text`. Required in a track |
 
 A `changes-requested` verdict may list what the next round fixes:
 
@@ -869,7 +872,17 @@ A `changes-requested` verdict may list what the next round fixes:
 
 `qory run verdict` sends points only with `escalate`.
 
-A document and a point have no other member. A JSON Schema cannot check that the
+A verdict of any kind may propose a track:
+
+```json
+{"verdict": "passed", "track": {"id": "small-change", "reason": "The change touches one config file."}}
+```
+
+`qory run verdict` sends no track.
+
+A document has no member other than `verdict`, `points` and `track`, a point has no member
+other than `text`, `action`, `question` and `fix`, and a track has no member other than
+`id` and `reason`. A JSON Schema cannot check that the
 question is open, so the run pushes its questions before its verdict. Each of these
 documents fails the schema:
 
@@ -884,6 +897,10 @@ documents fails the schema:
 {"verdict": "changes-requested", "points": [{"text": "The spec does not say who sees the price.", "action": "answer", "question": "q4"}]}
 {"verdict": "escalate", "points": [{"text": "The spec does not say who sees the price.", "action": "answer", "question": "q4", "fix": "Answer q4."}]}
 {"verdict": "changes-requested", "gaps": "Add the empty cart."}
+{"verdict": "passed", "track": {"id": "small-change"}}
+{"verdict": "passed", "track": {"id": "Small-Change", "reason": "The change touches one config file."}}
+{"verdict": "passed", "track": {"id": "small-change", "reason": "The change touches one config file.", "stage": "build"}}
+{"verdict": "passed", "track": {"id": "small-change", "reason": "The change touches one config file.\nIt adds no code."}}
 ```
 
 ## The module manifest
