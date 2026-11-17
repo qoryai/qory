@@ -890,7 +890,8 @@ func (e *SourcePathError) Error() string { return e.text(true) }
 // shows.
 func (e *SourcePathError) Hidden() string { return e.text(false) }
 
-// text is the refusal: the fix, the cause with the path when shown, and the file.
+// text is the refusal: the fix, and the cause with the path and the file when path is set.
+// The hidden form has neither, as [SourcePathError.Hidden] says.
 func (e *SourcePathError) text(path bool) string {
 	of := "extends"
 	switch {
@@ -904,7 +905,7 @@ func (e *SourcePathError) text(path bool) string {
 		cause = "source.path is " + exports.Value(e.Path, true) + ", which is not a directory inside the repository: it is absolute, the repository's root, or leads out of it."
 	}
 	lines := []string{cause}
-	if e.file != "" {
+	if path && e.file != "" {
 		lines = append(lines, "source is in "+e.file+".")
 	}
 	return exports.Refuse("Set source.path of "+of+" to a folder inside its repository.", lines...).Error()

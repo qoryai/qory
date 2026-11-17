@@ -1,6 +1,7 @@
 package exports_test
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -259,5 +260,23 @@ func TestRangeIsTheQoryKeyAsWritten(t *testing.T) {
 	root = write(t, "qory: [0.5.0]\n")
 	if _, _, err = exports.Range(root); err == nil || !strings.HasSuffix(err.Error(), "The file is "+filepath.Join(root, exports.FileName)+".") {
 		t.Errorf("a key that is not a string: %v", err)
+	}
+}
+
+// TestADirErrorHiddenHasNeitherTheDirectoryNorTheFile is the error of an exports.dir that
+// leads out of the repository: its text has the directory and the file, and its hidden
+// form has neither.
+func TestADirErrorHiddenHasNeitherTheDirectoryNorTheFile(t *testing.T) {
+	root := write(t, "exports: {dir: ../shared, modules: [core]}\n")
+	_, err := exports.Read(root)
+	var de *exports.DirError
+	if !errors.As(err, &de) {
+		t.Fatalf("%v, want a DirError", err)
+	}
+	if text := de.Error(); !strings.Contains(text, "../shared") || !strings.Contains(text, root) {
+		t.Errorf("the text is %q, want the directory and the file", text)
+	}
+	if hidden := de.Hidden(); strings.Contains(hidden, "shared") || strings.Contains(hidden, root) {
+		t.Errorf("the hidden text is %q, want neither the directory nor the file", hidden)
 	}
 }

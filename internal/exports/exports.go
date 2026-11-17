@@ -162,14 +162,15 @@ func (e *DirError) Error() string { return e.text(true) }
 // shows.
 func (e *DirError) Hidden() string { return e.text(false) }
 
-// text is the refusal: the fix, the cause with the directory when shown, and the file.
+// text is the refusal: the fix, and the cause with the directory and the file when dir is
+// set. The hidden form has neither, as [DirError.Hidden] says.
 func (e *DirError) text(dir bool) string {
 	cause := "exports.dir " + e.Key + " is not a directory inside the repository."
 	if dir {
 		cause = "exports.dir " + e.Key + " is " + Value(e.Dir, true) + ", which is not a directory inside the repository."
 	}
 	lines := []string{cause}
-	if e.file != "" {
+	if dir && e.file != "" {
 		lines = append(lines, "exports.dir is in "+e.file+".")
 	}
 	return Refuse("Set the "+e.Key+" directory of exports.dir to a path inside the repository.", lines...).Error()

@@ -388,7 +388,7 @@ func TestASourcePathErrorHasItsModule(t *testing.T) {
 			if !strings.HasPrefix(err.Error(), want) {
 				t.Errorf("the text is %q, want it to start with %q", err, want)
 			}
-			if hidden := sp.Hidden(); strings.Contains(hidden, "../other") || !strings.HasPrefix(hidden, "Set source.path of ") {
+			if hidden := sp.Hidden(); strings.Contains(hidden, "../other") || strings.Contains(hidden, filepath.Dir(path)) || !strings.HasPrefix(hidden, "Set source.path of ") {
 				t.Errorf("the hidden text is %q", hidden)
 			}
 		})
