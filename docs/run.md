@@ -1886,6 +1886,8 @@ Qory Apiary's signed response to the code contains the run's documents beside th
 the step, the domain and the inputs; for the step explore, the work item, the run
 settings, the time limit, the harness, the workflow and `harness_hidden`; for the step prebuild, the target
 and the places of its images at a registry. qory runs the steps explore and prebuild.
+The documents of an explore can also contain `shared_run` and `full_suite`: qory accepts
+them and changes nothing for them.
 qory checks the documents as the run contract's `documents.schema.json`, and, for the
 step explore, checks that `inputs.domain` and `inputs.work_item.id` match the domain and
 the work item. Then a run of the step explore:
