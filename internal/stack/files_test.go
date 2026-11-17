@@ -175,3 +175,22 @@ func TestExtendKeepsTheDocumentsTarget(t *testing.T) {
 		t.Errorf("no target: %+v, %v", out.Target, err)
 	}
 }
+
+// TestExtendRefusalsContainHarnessYamlForACheckoutReadFromIt is a checkout read from
+// harness.yaml that lists core, the base's module, with a source, with no exclude, and
+// with the instructions in its exclude: each refusal has harness.yaml where it says which
+// file lists the module.
+func TestExtendRefusalsContainHarnessYamlForACheckoutReadFromIt(t *testing.T) {
+	base := &Stack{Modules: []Module{{Name: "core", Source: Source{Path: "modules/core"}}}, Extending: &Extending{Kinds: []string{"skills"}}, Root: "/repo", File: "/repo/qory-stack.yaml"}
+	for name, l := range map[string]Module{
+		"a source":         {Name: "core", Source: Source{Path: "./core"}},
+		"no exclude":       {Name: "core"},
+		"the instructions": {Name: "core", Exclude: Selection{Instructions: true}},
+	} {
+		p := &Stack{Extends: Source{Path: "../base"}, Modules: []Module{l}, File: "/app/harness.yaml"}
+		_, err := Extend(base, p)
+		if err == nil || !strings.Contains(err.Error(), "a checkout's harness.yaml ") {
+			t.Errorf("%s: err = %v, want one that contains \"a checkout's harness.yaml \"", name, err)
+		}
+	}
+}

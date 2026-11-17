@@ -1,6 +1,8 @@
 package compose_test
 
 import (
+	"errors"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -175,5 +177,45 @@ func TestLaunchEnvReadsCodexsSet(t *testing.T) {
 	_, err = res.LaunchEnv("codex", "config.toml", "shell_environment_policy", "set")
 	if want := "Set shell_environment_policy.set.CI to a string, a number, or a boolean.\n  A variable's value is text.\n  shell_environment_policy.set.CI is in settings/codex/config.toml."; err == nil || err.Error() != want {
 		t.Errorf("error %v, want %q", err, want)
+	}
+}
+
+// TestARefusalOfAHarnessYamlCheckoutContainsHarnessYaml is a checkout read from
+// harness.yaml whose two modules export one variable with different values, and whose two
+// modules ship one skill: the env refusal tells to set the variable in harness.yaml, and
+// the collision error has harness.yaml as the file that lists the modules.
+func TestARefusalOfAHarnessYamlCheckoutContainsHarnessYaml(t *testing.T) {
+	isolateAll(t)
+	dir := writeTree(t, map[string]string{
+		"qory-stack.yaml":                 twoModules,
+		"modules/a/qory-module.yaml":      manifest("a", "HARNESS_HOME", "."),
+		"modules/b/qory-module.yaml":      manifest("b", "HARNESS_HOME", "."),
+		"modules/a/skills/greet/SKILL.md": "# greet\n",
+		"modules/b/skills/greet/SKILL.md": "# greet\n",
+	})
+	p, err := loadFor(filepath.Join(dir, "qory-stack.yaml"), "claude")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The stack read from harness.yaml has that file as its File, in the same folder.
+	p.File = filepath.Join(dir, "harness.yaml")
+	_, err = compose.Compose(p)
+	if want := "Set env HARNESS_HOME in harness.yaml to decide its value.\n  Modules a and b export HARNESS_HOME with different values."; err == nil || err.Error() != want {
+		t.Errorf("env: %v, want %q", err, want)
+	}
+	dir = writeTree(t, map[string]string{
+		"qory-stack.yaml":                 twoModules,
+		"modules/a/skills/greet/SKILL.md": "# greet\n",
+		"modules/b/skills/greet/SKILL.md": "# greet\n",
+	})
+	p, err = loadFor(filepath.Join(dir, "qory-stack.yaml"), "claude")
+	if err != nil {
+		t.Fatal(err)
+	}
+	p.File = filepath.Join(dir, "harness.yaml")
+	_, err = compose.Compose(p)
+	var ce *compose.CollisionError
+	if !errors.As(err, &ce) || ce.File != "harness.yaml" {
+		t.Errorf("collision: %v, want a *compose.CollisionError with File harness.yaml", err)
 	}
 }

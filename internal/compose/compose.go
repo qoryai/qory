@@ -469,7 +469,7 @@ func ComposeWith(p *stack.Stack, opts Options) (_ *Result, err error) {
 			instructions = append(instructions, strings.TrimRight(string(data), "\n"))
 		}
 	}
-	if err := collisions(owners, res.Modules, opts.Base, checkoutExcludes); err != nil {
+	if err := collisions(owners, res.Modules, opts.Base, checkoutExcludes, p); err != nil {
 		return nil, err
 	}
 	if err := exportsAgainstSettings(res, exporters, opts.Env); err != nil {
@@ -688,7 +688,7 @@ func exportEnv(res *Result, exporters map[string]string, module string, env, dec
 			continue
 		}
 		if other, ok := exporters[name]; ok && res.Env[name] != value {
-			return exports.Refuse(fmt.Sprintf("Set env %s in qory.yaml to decide its value.", shown(name)),
+			return exports.Refuse(fmt.Sprintf("Set env %s in %s to decide its value.", shown(name), res.Stack.ConfigFile()),
 				fmt.Sprintf("Modules %s and %s export %s with different values.", shown(other), shown(module), shown(name)))
 		}
 		exporters[name] = module
@@ -992,7 +992,7 @@ func checkResolved(res *Result, requires map[string]map[string][]Need, dropped m
 			remove, items, _ := addedBy(lead, listsOf(res, r))
 			cause := fmt.Sprintf("Module %s leaves out %s.", checkoutName(res, by), described(kind, to))
 			if x := excludeOf(res, kind, to); x != nil && x.Listed != "" {
-				cause = fmt.Sprintf("The exclude of module %s in qory.yaml leaves out %s.", shown(x.Listed), described(kind, to))
+				cause = fmt.Sprintf("The exclude of module %s in %s leaves out %s.", shown(x.Listed), res.Stack.ConfigFile(), described(kind, to))
 			}
 			if items != "" {
 				cause += "\n  This list adds it:" + items
@@ -1042,7 +1042,7 @@ func checkResolved(res *Result, requires map[string]map[string][]Need, dropped m
 				drop = "remove the reference from " + described(e.Kind, e.Name)
 			}
 			if x := excludeOf(res, kind, name); x != nil && x.Listed != "" {
-				lines = append(lines, fmt.Sprintf("%s\n  %s.\n  The exclude of module %s in qory.yaml leaves %s out.", altFix(fmt.Sprintf("Remove %s from the exclude of module %s", shownKey(need.Key), shown(x.Listed)), "ship it in a module of the repository"), entry, shown(x.Listed), described(kind, name)))
+				lines = append(lines, fmt.Sprintf("%s\n  %s.\n  The exclude of module %s in %s leaves %s out.", altFix(fmt.Sprintf("Remove %s from the exclude of module %s", shownKey(need.Key), shown(x.Listed)), "ship it in a module of the repository"), entry, shown(x.Listed), res.Stack.ConfigFile(), described(kind, name)))
 				continue
 			}
 			if by := leftOut(kind, name); by != "" {
@@ -1053,7 +1053,7 @@ func checkResolved(res *Result, requires map[string]map[string][]Need, dropped m
 				for _, r := range ps {
 					provided := fmt.Sprintf("%s, which module %s provides as %s.", entry, checkoutName(res, r.Module), described(kind, r.Name))
 					if x := excludeOf(res, kind, r.Name); x != nil && x.Listed != "" {
-						lines = append(lines, fmt.Sprintf("%s\n  %s\n  The exclude of module %s in qory.yaml leaves %s out.", altFix(fmt.Sprintf("Remove %s from the exclude of module %s", shownKey(kind+"/"+r.Name), shown(x.Listed)), "ship it in a module of the repository"), provided, shown(x.Listed), described(kind, r.Name)))
+						lines = append(lines, fmt.Sprintf("%s\n  %s\n  The exclude of module %s in %s leaves %s out.", altFix(fmt.Sprintf("Remove %s from the exclude of module %s", shownKey(kind+"/"+r.Name), shown(x.Listed)), "ship it in a module of the repository"), provided, shown(x.Listed), res.Stack.ConfigFile(), described(kind, r.Name)))
 						continue
 					}
 					by := checkoutName(res, leftOut(kind, r.Name))
@@ -1303,7 +1303,7 @@ func applyCheckoutExclude(l *module.Module, pl stack.Module, res *Result, base *
 			if base != nil {
 				stackText += " " + base.String()
 			}
-			return exports.Errorf("Remove %s from the exclude of module %s in qory.yaml.\n  %s composes no %s from module %s.", shownKey(key), shown(pl.BaseName), upperFirst(stackText), shownKey(key), shown(l.Name))
+			return exports.Errorf("Remove %s from the exclude of module %s in %s.\n  %s composes no %s from module %s.", shownKey(key), shown(pl.BaseName), res.Stack.ConfigFile(), upperFirst(stackText), shownKey(key), shown(l.Name))
 		}
 	}
 	var kept []module.Entry
@@ -1375,6 +1375,9 @@ type CollisionError struct {
 	// Excluded is the exclude the checkout's qory.yaml lists for a base module, by the
 	// module's name, then by kind, absent for a module it lists none for.
 	Excluded map[string]map[string][]string
+	// File is the name of the file the checkout's modules are listed in, qory.yaml or
+	// harness.yaml; "" when the stack was not read from a file.
+	File string
 }
 
 // Suggest returns, per module, the excludes that resolve every collision by keeping the
@@ -1439,6 +1442,10 @@ func (e *CollisionError) ExcludeOf(l string, excludes map[string]map[string][]st
 // qory.yaml, the entries of every collision included.
 func (e *CollisionError) Error() string {
 	_, excludes := e.Suggest(e.Order)
+	file := e.File
+	if file == "" {
+		file = exports.FileName
+	}
 	var b strings.Builder
 	for i, c := range e.Collisions {
 		if i > 0 {
@@ -1471,9 +1478,9 @@ func (e *CollisionError) Error() string {
 			fmt.Fprintf(&b, "    %-*s exclude: %s\n", width, shown(e.ExcludeName(l))+":", block)
 		}
 		if c.Base != "" {
-			fmt.Fprintf(&b, "  write the exclude for a module of the base stack %s in qory.yaml, under harness.modules", shown(c.Base))
+			fmt.Fprintf(&b, "  write the exclude for a module of the base stack %s in %s, under harness.modules", shown(c.Base), file)
 			if len(replaced) > 0 {
-				fmt.Fprintf(&b, ", in place of the exclude qory.yaml lists for %s", strings.Join(replaced, ", "))
+				fmt.Fprintf(&b, ", in place of the exclude %s lists for %s", file, strings.Join(replaced, ", "))
 			}
 			b.WriteString("\n")
 		}
@@ -1495,7 +1502,7 @@ func flowBlock(kinds map[string][]string) string {
 // returns nil when no name is owned twice. checkoutExcludes is the exclude qory.yaml lists
 // for each base module, by module name. Keys are sorted, so the message does not follow
 // map order.
-func collisions(owners map[string][]string, modules []Module, base *Base, checkoutExcludes map[string]map[string][]string) error {
+func collisions(owners map[string][]string, modules []Module, base *Base, checkoutExcludes map[string]map[string][]string, p *stack.Stack) error {
 	pin := map[string]string{}
 	sources := map[string]string{}
 	inBase := map[string]bool{}
@@ -1523,6 +1530,9 @@ func collisions(owners map[string][]string, modules []Module, base *Base, checko
 	}
 	sort.Strings(keys)
 	e := &CollisionError{Pins: pin, Sources: sources, Order: order, InBase: listable, Listed: listed, Excluded: checkoutExcludes}
+	if p.File != "" {
+		e.File = p.ConfigFile()
+	}
 	for _, key := range keys {
 		kind, name, _ := strings.Cut(key, "/")
 		c := Collision{Kind: kind, Name: name, Modules: owners[key]}
@@ -1701,7 +1711,7 @@ func exportsAgainstSettings(res *Result, exporters map[string]string, decided ma
 					continue
 				}
 				prefix := "settings/" + runtime + "/" + file
-				return exports.Refuse(fmt.Sprintf("Set env %s in qory.yaml to decide its value.", shown(name)),
+				return exports.Refuse(fmt.Sprintf("Set env %s in %s to decide its value.", shown(name), res.Stack.ConfigFile()),
 					fmt.Sprintf("Module %s sets env.%s and module %s exports it, with different values.", shown(res.setBy[prefix+"/env."+name]), shown(name), shown(exporter)),
 					fmt.Sprintf("env.%s is in %s.", shown(name), exports.HidePath(prefix)))
 			}

@@ -33,7 +33,7 @@ func TestLoadRefusesAnExportWrittenWrong(t *testing.T) {
 	for _, c := range []struct{ module, want string }{
 		{"  - name: core\n    source: {git: https://h, ref: v1, stack: nextjs}\n", "Select a module in the source of module core, and move the stack to extends.\n  The source selects stack nextjs, and a module's source selects a module."},
 		{"  - name: core\n    source: {git: https://h, ref: v1, module: core, stack: nextjs}\n", "Remove source.module or source.stack from module core.\n  A source selects one export."},
-		{"  - name: core\n    source: {git: https://h, ref: v1, path: modules/core, module: core}\n", "Remove source.path or the export from module core.\n  Both select the directory, and an export's directory is what the repository's qory.yaml sets."},
+		{"  - name: core\n    source: {git: https://h, ref: v1, path: modules/core, module: core}\n", "Remove source.path or the export from module core.\n  Both select the directory, and an export's directory is what the repository's qory.yaml or harness.yaml sets."},
 		{"  - source: {module: core}\n", "Set source.path of modules[0] to the repository that exports it.\n  With an export selected, source.path is required."},
 		{"  - name: core\n    source: {git: https://h, ref: v1, module: a/b}\n", "Set source.module of module core to one path segment.\n  The value is \"a/b\"."},
 		{"  - name: core\n    source: {git: https://h, module: core}\n", "Set source.ref of module core to a branch, tag, or commit.\n  source.ref is required with source.git."},

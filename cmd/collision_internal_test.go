@@ -46,3 +46,32 @@ func TestPrintCollisionWritesTheEntryOfABaseModule(t *testing.T) {
 		t.Errorf("an entry qory.yaml cannot list:\n%s", out)
 	}
 }
+
+// TestPrintCollisionContainsHarnessYamlForACheckoutReadFromIt is the collision of
+// TestPrintCollisionWritesTheEntryOfABaseModule for a checkout whose modules are listed in
+// harness.yaml: the lines that point to the file contain harness.yaml, not qory.yaml.
+func TestPrintCollisionContainsHarnessYamlForACheckoutReadFromIt(t *testing.T) {
+	e := &compose.CollisionError{
+		Collisions: []compose.Collision{{Kind: "skills", Name: "explore-a-ticket", Modules: []string{"core-x", "app"}, Base: "web@abc"}},
+		Pins:       map[string]string{"core-x": "abc", "app": "working-tree"},
+		Sources:    map[string]string{"core-x": "base", "app": "modules/app"},
+		Order:      []string{"core-x", "app"},
+		InBase:     map[string]bool{"core-x": true},
+		Listed:     map[string]string{"core-x": "core"},
+		File:       "harness.yaml",
+	}
+	var b bytes.Buffer
+	printCollision(ui.New(&b), e, nil)
+	out := b.String()
+	for _, want := range []string{
+		"Module core-x belongs to the base stack web@abc; list it in harness.yaml as core.",
+		"For example, in harness.yaml, under harness.modules:",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output lacks %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "qory.yaml") {
+		t.Errorf("output contains qory.yaml:\n%s", out)
+	}
+}

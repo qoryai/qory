@@ -1000,7 +1000,7 @@ func TestAHiddenHarnessShowsNoFolderOfASourceOrAnExport(t *testing.T) {
 		}}, "set the path of " + checkoutBase + " to a folder inside its repository, then take the work item in again in Qory Apiary: the path is absolute, the repository's root, or leads out of the repository; the code is used\n"},
 		{"a base that extends another stack", codeHarness{stack: func(s string) string {
 			return s + "extends: {git: \"" + toolsURL + "\", ref: " + toolsRef + ", path: secret-folder-3}\n"
-		}}, "Remove extends from the stack file.\n  Only the harness section of a checkout's qory.yaml extends a stack.\n  extends is in qory-stack.yaml in " + workspaceBase},
+		}}, "Remove extends from the stack file.\n  Only the harness section of a checkout's qory.yaml or harness.yaml extends a stack.\n  extends is in qory-stack.yaml in " + workspaceBase},
 		{"the documents' base by its export", web(codeHarness{}), "It is at line 20 of qory-stack.yaml in " + workspaceBase + "; the code is used"},
 		{"the checkout's base by its export", web(codeHarness{checkout: true}), "It is at line 20 of qory-stack.yaml in " + checkoutBase + "; the code is used"},
 		{"an exported module with a manifest qory cannot read", tools("secret-folder-8", map[string]string{"qory-module.yaml": "name: [\n", "AGENTS.md": "# Tools\n"}),

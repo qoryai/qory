@@ -182,7 +182,7 @@ func TestLoadRefuses(t *testing.T) {
 		{
 			"a tier map",
 			"apiVersion: qory.dev/v1alpha1\ntiers:\n  light: claude-haiku-5-5\nmodules:\n  - name: core\n    source:\n      path: modules/core\n",
-			"Remove tiers from the stack file.\n  A repository maps tiers under harness.tiers in its qory.yaml, and a machine maps them in the user's qory.yaml.\n  tiers is in {path}.",
+			"Remove tiers from the stack file.\n  A repository maps tiers under harness.tiers in its qory.yaml or harness.yaml, and a machine maps them in the user's qory.yaml or harness.yaml.\n  tiers is in {path}.",
 			false,
 		},
 		{
@@ -194,7 +194,7 @@ func TestLoadRefuses(t *testing.T) {
 		{
 			"an extends",
 			"apiVersion: qory.dev/v1alpha1\nextends: {path: ../base}\nmodules:\n  - name: core\n    source:\n      path: modules/core\n",
-			"Remove extends from the stack file.\n  Only the harness section of a checkout's qory.yaml extends a stack.\n  extends is in {path}.",
+			"Remove extends from the stack file.\n  Only the harness section of a checkout's qory.yaml or harness.yaml extends a stack.\n  extends is in {path}.",
 			false,
 		},
 		{

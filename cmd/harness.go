@@ -1293,7 +1293,7 @@ func ownFileRows(own string, doc *stack.Stack, conf config.Config) [][2]string {
 		rows = append(rows, [2]string{"read", name + "  (" + strings.Join(read, ", ") + ")"})
 	}
 	if len(conf.Ignored) > 0 {
-		user := "your qory.yaml"
+		user := "your " + name
 		if dir, err := config.UserDir(); err == nil && dir != "" {
 			user = ui.Short(filepath.Join(dir, name), "")
 		}
@@ -1761,6 +1761,15 @@ func flagRefuses(force bool) string {
 	return "--force would not replace it either"
 }
 
+// collisionFile is the name of the file the checkout's modules are listed in, as the
+// compose read it: qory.yaml or harness.yaml.
+func collisionFile(e *compose.CollisionError) string {
+	if e.File == "" {
+		return config.FileName
+	}
+	return e.File
+}
+
 // printCollision prints what happened, the modules involved, and the stack lines that
 // resolve it by keeping the last module that ships each entry. A base module's lines
 // are the whole entry to write in qory.yaml, with the exclude qory.yaml lists for it.
@@ -1786,7 +1795,7 @@ func printCollision(u *ui.UI, e *compose.CollisionError, n *source.Named) {
 			}
 			line := "Module " + accesskey.ShownName(l, false) + " belongs to the base stack " + accesskey.ShownName(c.Base, false)
 			if e.ExcludeName(l) != l {
-				line += "; list it in qory.yaml as " + accesskey.ShownName(e.ExcludeName(l), false)
+				line += "; list it in " + collisionFile(e) + " as " + accesskey.ShownName(e.ExcludeName(l), false)
 			}
 			u.Text(line + ".")
 		}
@@ -1800,7 +1809,7 @@ func printCollision(u *ui.UI, e *compose.CollisionError, n *source.Named) {
 	where := "qory-stack.yaml"
 	for _, l := range modules {
 		if e.InBase[l] {
-			where = "qory.yaml, under harness.modules"
+			where = collisionFile(e) + ", under harness.modules"
 		}
 	}
 	u.Text("Keep one and exclude it from the others. For example, in " + where + ":")

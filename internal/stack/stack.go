@@ -555,6 +555,16 @@ func (p *Stack) SourceOf(l Module) Source {
 	return l.Source
 }
 
+// ConfigFile is the name of the configuration file p was read from, [exports.FileName] or
+// [exports.AltFileName], for a refusal that points to the checkout's document. A stack
+// read from a stack file, or in memory, has the first.
+func (p *Stack) ConfigFile() string {
+	if base := filepath.Base(p.File); p.File != "" && base == exports.AltFileName {
+		return base
+	}
+	return exports.FileName
+}
+
 // DirOf is the directory a module entry's relative path resolves against: the repository
 // root for an entry with a name alone, else the stack's directory.
 func (p *Stack) DirOf(l Module) string {
@@ -704,13 +714,13 @@ func (p *Stack) validate(compose bool) error {
 		}
 	} else {
 		if p.extends() {
-			return exports.Refuse("Remove extends from the stack file.", "Only the harness section of a checkout's qory.yaml extends a stack.", "extends is in "+exports.FilePlace+".")
+			return exports.Refuse("Remove extends from the stack file.", "Only the harness section of a checkout's "+exports.FileName+" or "+exports.AltFileName+" extends a stack.", "extends is in "+exports.FilePlace+".")
 		}
 		if len(p.Target.Runtimes) > 0 || p.Target.Model != "" {
 			return exports.Refuse("Remove target from the stack file.", "A stack is delivered to be extended, and the checkout extending it sets target under harness, beside extends.", "target is in "+exports.FilePlace+".")
 		}
 		if p.Tiers != nil {
-			return exports.Refuse("Remove tiers from the stack file.", "A repository maps tiers under harness.tiers in its qory.yaml, and a machine maps them in the user's qory.yaml.", "tiers is in "+exports.FilePlace+".")
+			return exports.Refuse("Remove tiers from the stack file.", "A repository maps tiers under harness.tiers in its "+exports.FileName+" or "+exports.AltFileName+", and a machine maps them in the user's "+exports.FileName+" or "+exports.AltFileName+".", "tiers is in "+exports.FilePlace+".")
 		}
 	}
 	if p.Extending != nil {
@@ -895,7 +905,7 @@ func (s Source) validate() error {
 		return exports.Refuse("Set source.ref of "+exports.ModulePlace+" to a branch, tag, or commit.", "source.ref is required with source.git.", "source is in "+exports.FilePlace+".")
 	}
 	if s.Path != "" && s.exported() {
-		return exports.Refuse("Remove source.path or the export from "+exports.ModulePlace+".", "Both select the directory, and an export's directory is what the repository's qory.yaml sets.", "source is in "+exports.FilePlace+".")
+		return exports.Refuse("Remove source.path or the export from "+exports.ModulePlace+".", "Both select the directory, and an export's directory is what the repository's "+exports.FileName+" or "+exports.AltFileName+" sets.", "source is in "+exports.FilePlace+".")
 	}
 	if s.Path != "" {
 		clean := filepath.Clean(s.Path)
@@ -1064,26 +1074,27 @@ func baseName(l Module) string {
 	return l.Source.Module
 }
 
-// checkoutExclude checks entry l of a checkout's qory.yaml, which lists a module of the
+// checkoutExclude checks entry l of a checkout's document, which file names, qory.yaml or
+// harness.yaml, and which lists a module of the
 // base by its name: the entry has an exclude and nothing beside it, and the exclude lists
 // entries of the kinds and under the file prefixes extending lets an appended module
 // ship, since a checkout leaves out only what its modules may replace. The base's
 // hooks, MCP servers, instructions, settings and variables stay as the base composes
 // them. Whether the base module composes each entry is the compose's check.
-func checkoutExclude(l Module, extending *Extending) error {
+func checkoutExclude(l Module, extending *Extending, file string) error {
 	name := accesskey.ShownName(l.Name, false)
 	if l.Source.Path != "" || l.Source.Git != "" || l.Source.exported() || !l.Only.Empty() || l.Variant != "" || l.Link != "" {
-		return exports.Errorf("List module %s with its name and exclude only.\n  It belongs to the base stack, and a checkout's qory.yaml cannot change its source, only, variant, or link.", name)
+		return exports.Errorf("List module %s with its name and exclude only.\n  It belongs to the base stack, and a checkout's %s cannot change its source, only, variant, or link.", name, file)
 	}
 	if l.Exclude.Empty() {
-		return exports.Errorf("Add an exclude to module %s, or remove its entry.\n  It belongs to the base stack, and a checkout's qory.yaml lists a base module only to exclude entries from it.", name)
+		return exports.Errorf("Add an exclude to module %s, or remove its entry.\n  It belongs to the base stack, and a checkout's %s lists a base module only to exclude entries from it.", name, file)
 	}
 	for _, part := range []struct {
 		key string
 		set bool
 	}{{"instructions", l.Exclude.Instructions}, {"settings", l.Exclude.Settings.Set()}, {"env", l.Exclude.Env.Set()}} {
 		if part.set {
-			return exports.Errorf("Remove %s from the exclude of module %s.\n  It belongs to the base stack, and a checkout's qory.yaml excludes entries from a base module, not its instructions, settings, or env.", part.key, name)
+			return exports.Errorf("Remove %s from the exclude of module %s.\n  It belongs to the base stack, and a checkout's %s excludes entries from a base module, not its instructions, settings, or env.", part.key, name, file)
 		}
 	}
 	for _, kind := range l.Exclude.KindNames() {
@@ -1187,7 +1198,7 @@ func Extend(base, p *Stack) (*Stack, error) {
 	}
 	for _, l := range p.Modules {
 		if i, ok := byName[l.Name]; ok {
-			if err := checkoutExclude(l, base.Extending); err != nil {
+			if err := checkoutExclude(l, base.Extending, p.ConfigFile()); err != nil {
 				return nil, err
 			}
 			out.Modules[i].CheckoutExclude = l.Exclude
