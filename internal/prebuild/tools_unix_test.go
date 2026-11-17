@@ -204,13 +204,16 @@ func TestBuildAddsChromiumToUbuntuFromTheDownload(t *testing.T) {
 				"amd64) archive=linux64/chrome-linux64.zip; sum=370601106c1b5619aae5f06f7a3fdc60836486135934779461e2a208d777f596 ;;",
 				"arm64) archive=linux-arm64/chrome-linux-arm64.zip; sum=4a9ea5f9422e268fff9df19908365b6d1e92da154607d0f90c7138cf6c42ce38 ;;",
 				"https://storage.googleapis.com/chrome-for-testing-public/159.0.8154.6/$archive", "sha256sum -c -",
-				"--proto '=https' --proto-redir '=https'", "ln -s /opt/qory/chromium/chrome /usr/bin/chromium",
+				"--proto '=https' --proto-redir '=https' --max-redirs 0", "--write-out '%{http_code}'", `test "$status" = 200`, "ln -s /opt/qory/chromium/chrome /usr/bin/chromium",
 				"apt-get clean", "rm -rf /var/lib/apt/lists/*"} {
 				if !strings.Contains(got, want) {
 					t.Errorf("the Dockerfile lacks %q:\n%s", want, got)
 				}
 			}
 			// The sum is checked before the archive is extracted.
+			if strings.Index(got, `test "$status" = 200`) > strings.Index(got, "sha256sum -c -") || strings.Contains(got, "--fail") {
+				t.Error("the status is not checked before the sum, or --fail hides a redirect")
+			}
 			if strings.Contains(got, "--location") || strings.Contains(got, "curl -L") || strings.Contains(got, "cdn.playwright.dev") {
 				t.Error("the download follows a redirect or uses Playwright's site")
 			}
