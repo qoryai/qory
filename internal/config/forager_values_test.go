@@ -204,7 +204,6 @@ func TestForagerRefusalsSayWhatIsWrongWithoutTheValue(t *testing.T) {
 		{"wall: {adapter: docker, env: [QORY_ACCESS_KEY_SECRET]}\n", "Remove wall.env[0].\n  It is a variable that is Forager's and never the agent's.\n  wall.env is in {path}."},
 		{"wall: {adapter: docker, images: {go: {ref: \"--" + marker + "\"}}}\n", "Set wall.images.go.ref to an image reference, such as ghcr.io/acme/agent@sha256:…\n  The value is not one.\n  wall.images.go is in {path}."},
 		{"wall: {adapter: docker, images: {go: {ref: a, runtime: \"--" + marker + "\"}}}\n", "Set wall.images.go.runtime to a container runtime's name, such as sysbox-runc.\n  The value is not one.\n  wall.images.go is in {path}."},
-		{"apiVersion: " + marker + "\n", "Set apiVersion to qory.dev/v1alpha1.\n  This qory reads qory.dev/v1alpha1.\n  apiVersion is in {path}."},
 		{"gateway:\n  server:\n    url: https://qory.example\n    via:\n      url: https://gateway.example\n      url: " + secret + "\n", "Remove one of the two keys gateway.server.via.url.\n  gateway.server.via.url is written twice; it was first written at line 5.\n  It is at line 6 of {path}."},
 		{"wall:\n  adapter: docker\n  adapter: " + secret + "\n", "Remove one of the two keys wall.adapter.\n  wall.adapter is written twice; it was first written at line 2.\n  It is at line 3 of {path}."},
 		{"session:\n  instance:\n    name: a\n    name: " + secret + "\n", "Remove one of the two keys session.instance.name.\n  session.instance.name is written twice; it was first written at line 3.\n  It is at line 4 of {path}."},
@@ -506,6 +505,28 @@ func TestForagerRefusesAKeyThatIsNotANameBesideAMerge(t *testing.T) {
 			if err != nil && (strings.Contains(err.Error(), marker) || strings.Contains(err.Error(), "qak_")) {
 				t.Errorf("%q: the refusal holds the value: %v", c.body, err)
 			}
+		}
+	}
+}
+
+// TestAForagerAPIVersionRefusalShowsTheValue is a forager.yaml whose apiVersion this qory
+// does not read: the refusal has the fix first and the value in the cause, as the
+// refusals of the other files have it, and prints a value that contains an access key
+// secret as the phrase.
+func TestAForagerAPIVersionRefusalShowsTheValue(t *testing.T) {
+	hermetic(t)
+	for _, c := range []struct{ body, value string }{
+		{"apiVersion: qory.dev/v2\n", `"qory.dev/v2"`},
+		{"apiVersion: qak_AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA\n", "(a value that contains an access key secret)"},
+	} {
+		path := foragerFile(t, c.body)
+		_, err := config.LoadForager()
+		want := "Set apiVersion to qory.dev/v1alpha1.\n  This qory reads qory.dev/v1alpha1, and apiVersion is " + c.value + ".\n  apiVersion is in " + path + "."
+		if err == nil || err.Error() != want {
+			t.Errorf("%q: %v, want %q", c.body, err, want)
+		}
+		if err != nil && strings.Contains(strings.ToLower(err.Error()), "qak_") {
+			t.Errorf("%q: the refusal prints the secret: %v", c.body, err)
 		}
 	}
 }

@@ -614,7 +614,8 @@ func LoadForagerIn(dir string) (*Forager, error) {
 		f.APIVersion = stack.APIVersion
 	}
 	if _, err := exports.ResolveAPIVersion(f.APIVersion); err != nil {
-		return nil, exports.Refuse("Set apiVersion to "+exports.APIVersion+".", "This qory reads "+exports.APIVersion+".", "apiVersion is in "+exports.HidePath(path)+".")
+		return nil, exports.AtPath(path, exports.Refuse("Set apiVersion to "+exports.APIVersion+".",
+			fmt.Sprintf("This qory reads %s, and apiVersion is %s.", exports.APIVersion, exports.Value(f.APIVersion, true)), "apiVersion is in "+exports.FilePlace+"."))
 	}
 	r := &Forager{File: path, Gateway: f.Gateway != nil, GatewayKeys: gatewayKeys(data)}
 	if f.Machine != nil {
