@@ -18,6 +18,7 @@ import (
 	"github.com/qoryai/integrations/contracts"
 	"github.com/spf13/cobra"
 
+	"github.com/qoryai/qory/internal/compose"
 	"github.com/qoryai/qory/internal/config"
 	"github.com/qoryai/qory/internal/exports"
 	"github.com/qoryai/qory/internal/integration"
@@ -701,6 +702,16 @@ func entryKeys(rep report.Report) []string {
 		keys = append(keys, e.Kind+"/"+e.Name)
 	}
 	return keys
+}
+
+// submitSource is the documents' submit_module as the compose takes it, nil for none. The
+// source's ref is the full commit that Qory Apiary pins.
+func (r *codeRun) submitSource() *compose.SubmitModule {
+	if r == nil || r.submitModule == nil {
+		return nil
+	}
+	src := r.submitModule.Source
+	return &compose.SubmitModule{Name: r.submitModule.Name, Source: stack.Source{Git: src.Git, Ref: src.Ref, Path: src.Path, Module: src.Module}}
 }
 
 // limitSubmit keeps r's submit and submit_module only for a run whose level is

@@ -1,6 +1,7 @@
 package compose
 
 import (
+	"cmp"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -205,6 +206,9 @@ type Result struct {
 	// SubmitProgram is the program of the submit step that a module declares; nil when no
 	// module declares one. [Result.SubmitProgramFor] renders it for a home.
 	SubmitProgram *SubmitProgram
+	// Replaced is the module of the stack that [Options.Submit] replaced the ref of; nil
+	// for none.
+	Replaced *Replacement
 	// Hooks are the workflow hooks of the checkout's qory.yaml, in its order, each
 	// checked against the base stack; nil when it lists none. A build writes them into
 	// hooks.json.
@@ -258,10 +262,37 @@ type Options struct {
 	// workflow hook is a file in the commit at HEAD of that checkout, and [Hook.Run] has
 	// its path in git from it; "" takes the directory of the stack's document.
 	Checkout string
+	// Submit, when set, is the module of the run's submit program, with the commit that
+	// Qory Apiary pins as its ref. The compose appends it after the modules of the stack,
+	// or, when a module of the stack has the same name in its manifest and the same git
+	// source, replaces that module's ref with the commit, see [Result.Replaced]; a module
+	// of the same name from another git source fails the compose.
+	Submit *SubmitModule
 	// StackAs, when set, is the stack as an error of the compose shows it in place of its
 	// file, for a stack whose file is a copy that the person does not edit, such as the
 	// workspace's harness in Qory Apiary.
 	StackAs string
+}
+
+// SubmitModule is the module of a run's submit program: the name its manifest declares,
+// optional, and its source, whose Ref is a full commit id.
+type SubmitModule struct {
+	Name   string
+	Source stack.Source
+}
+
+// Replacement is a module of the stack that the compose read at the commit of
+// [Options.Submit] in place of the ref the stack lists.
+type Replacement struct {
+	// Module is the module's name, Git its git source, Commit the commit it was read at,
+	// Ref the ref the stack lists, and Place where the stack lists it: qory.yaml,
+	// harness.yaml, the workspace's harness, or stack <name>@<ref>.
+	Module, Git, Commit, Ref, Place string
+}
+
+// Line is the line of qory run for the replacement.
+func (r Replacement) Line() string {
+	return fmt.Sprintf("%s from %s@%s, in place of %s in %s", r.Module, exports.URL(r.Git), r.Commit, exports.Value(r.Ref, false), r.Place)
 }
 
 // beforeManifest and afterManifest, when a test sets them, run with each module's
@@ -299,8 +330,9 @@ func ComposeWith(p *stack.Stack, opts Options) (_ *Result, err error) {
 	// declared is every entry, as <kind>/<name>, that the modules of the stack whose
 	// workflows the compose checks compose, see [workflowsShipped].
 	declared := map[string]bool{}
-	for _, pl := range p.Modules {
-		ps := p.SourceOf(pl)
+	// open resolves the module pl at ps and reads its manifest. who names the module in
+	// a message.
+	open := func(pl stack.Module, ps stack.Source) (openedModule, error) {
 		who := "module " + accesskey.ShownName(pl.Name, false)
 		if pl.Name == "" {
 			who = "module at " + ps.Shown()
@@ -322,7 +354,7 @@ func ComposeWith(p *stack.Stack, opts Options) (_ *Result, err error) {
 			if pl.Name == "" {
 				fix = "Check the source of a module in the stack.\n  The module is at " + ps.Shown() + "."
 			}
-			return nil, fmt.Errorf("%s\n  %w", fix, exports.HideError(err))
+			return openedModule{}, fmt.Errorf("%s\n  %w", fix, exports.HideError(err))
 		}
 		o := openedModule{pl: pl, ps: ps, src: src}
 		if opts.Copies != nil {
@@ -340,26 +372,61 @@ func ComposeWith(p *stack.Stack, opts Options) (_ *Result, err error) {
 			o.m, err = module.ReadManifest(src.Dir)
 		}
 		if err != nil {
-			return nil, module.Prefixed(who, err)
+			return openedModule{}, module.Prefixed(who, err)
 		}
 		if afterManifest != nil {
 			afterManifest(src.Dir)
 		}
 		if pl.Name != "" && o.m.Name != pl.Name {
-			return nil, exports.Refuse(fmt.Sprintf("Use one name for the module in %s and in its %s.", listedIn(p, pl), module.ManifestName),
+			return openedModule{}, exports.Refuse(fmt.Sprintf("Use one name for the module in %s and in its %s.", listedIn(p, pl), module.ManifestName),
 				fmt.Sprintf("The module %s at %s has the name %s in its %s.", accesskey.ShownName(pl.Name, false), ps.Shown(), accesskey.ShownName(o.m.Name, false), module.ManifestName))
 		}
+		return o, nil
+	}
+	// add checks the module o against the modules before it, and appends it.
+	add := func(o openedModule) error {
 		if other, ok := dirs[o.m.Name]; ok {
-			return nil, exports.Refuse(fmt.Sprintf("Remove one of the two sources of module %s.", accesskey.ShownName(o.m.Name, false)),
-				fmt.Sprintf("Module %s is composed from %s and from %s.", accesskey.ShownName(o.m.Name, false), other, ps.Shown()))
+			return exports.Refuse(fmt.Sprintf("Remove one of the two sources of module %s.", accesskey.ShownName(o.m.Name, false)),
+				fmt.Sprintf("Module %s is composed from %s and from %s.", accesskey.ShownName(o.m.Name, false), other, o.ps.Shown()))
 		}
-		dirs[o.m.Name] = ps.Shown()
-		if !pl.Base && opts.Base != nil {
+		dirs[o.m.Name] = o.ps.Shown()
+		if !o.pl.Base && opts.Base != nil {
 			if err := checkProvides(o.m, opts.Base); err != nil {
-				return nil, err
+				return err
 			}
 		}
 		opened = append(opened, o)
+		return nil
+	}
+	// The run's submit module is read first, to know the name its manifest declares.
+	var sub *openedModule
+	if opts.Submit != nil {
+		o, err := open(stack.Module{Name: opts.Submit.Name, Source: opts.Submit.Source}, opts.Submit.Source)
+		if err != nil {
+			return nil, err
+		}
+		sub = &o
+	}
+	for _, pl := range p.Modules {
+		o, err := open(pl, p.SourceOf(pl))
+		if err != nil {
+			return nil, err
+		}
+		if sub != nil && o.m.Name == sub.m.Name {
+			if o, err = submitInPlace(res, p, opts, o, sub, open); err != nil {
+				return nil, err
+			}
+			sub = nil
+		}
+		if err := add(o); err != nil {
+			return nil, err
+		}
+	}
+	// A submit module that no composed module has the name of comes after them all.
+	if sub != nil {
+		if err := add(*sub); err != nil {
+			return nil, err
+		}
 	}
 	// The roles before the selection: a provided entry that the providing module's exclude
 	// lists provides nothing, and a role that two modules provide keeps the name of the
@@ -1966,4 +2033,45 @@ func listedIn(p *stack.Stack, pl stack.Module) string {
 		return stack.FileName
 	}
 	return declaringFile(p)
+}
+
+// submitInPlace is the module o of the stack, whose manifest has the name of the submit
+// module sub, read at the submit module's commit when both have one git source as it is
+// written. open reads a module again at another source. A module from another git source,
+// or from no git source, fails the compose before any session: the person removes it.
+func submitInPlace(res *Result, p *stack.Stack, opts Options, o openedModule, sub *openedModule, open func(stack.Module, stack.Source) (openedModule, error)) (openedModule, error) {
+	place := listedIn(p, o.pl)
+	switch {
+	case opts.StackAs != "" && !o.pl.Base:
+		place = strings.TrimSuffix(opts.StackAs, " in Qory Apiary")
+	case o.pl.Base && opts.Base != nil:
+		place = "stack " + shown(opts.Base.Name) + "@" + cmp.Or(opts.Base.Ref, opts.Base.Pin)
+	}
+	name := accesskey.ShownName(o.m.Name, false)
+	adds := exports.URL(sub.ps.Git) + "@" + sub.ps.Ref
+	if o.ps.Git == "" || o.ps.Git != sub.ps.Git {
+		fix, cause := fmt.Sprintf("Remove module %s from %s", name, place), "the run adds it from "+adds
+		if o.pl.Base {
+			fix += ", or stop extending it"
+		}
+		var lines []string
+		first := fix + ": " + cause + "."
+		if !fits(first) {
+			first = fix + "."
+			lines = append(lines, "The run adds it from "+adds+".")
+		}
+		lines = append(lines, "The module in "+place+" is at "+o.ps.Shown()+".")
+		return openedModule{}, exports.Errorf("%s\n  %s", first, strings.Join(lines, "\n  "))
+	}
+	if o.ps.Ref == sub.ps.Ref {
+		return o, nil
+	}
+	ps := o.ps
+	ps.Ref = sub.ps.Ref
+	replaced, err := open(o.pl, ps)
+	if err != nil {
+		return openedModule{}, err
+	}
+	res.Replaced = &Replacement{Module: o.m.Name, Git: o.ps.Git, Commit: sub.ps.Ref, Ref: o.ps.Ref, Place: place}
+	return replaced, nil
 }

@@ -539,6 +539,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				// reads to mask the harness's text in the session's log and events.
 				composing.hidden, spec.HarnessHidden = fromCode.hidden, fromCode.hidden
 				composing.fromCode = true
+				composing.submit = fromCode.submitSource()
 				timeout = provisioner.TimeLimit(fromCode.minutes, 0)
 				var remove func()
 				in, remove, err = fromCode.inputsDir()
@@ -3907,6 +3908,9 @@ func composeForRun(stderr io.Writer, o composeOptions, at places, runtime string
 	}
 	for _, w := range c.warnings {
 		fmt.Fprintln(stderr, "qory run:", w)
+	}
+	if c.replaced != nil {
+		fmt.Fprintln(stderr, "qory run:", c.replaced.Line())
 	}
 	names := make([]string, 0, len(c.targets))
 	for _, rt := range c.targets {
