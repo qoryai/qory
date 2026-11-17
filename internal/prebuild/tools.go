@@ -193,8 +193,8 @@ func (b *build) checkParsers() error {
 // [build.addTools] writes: Dockerfile, parsers and, when copyNode is set, node. Debian's
 // apt installs [toolsPackages] from the sources the base has, so their versions are the
 // ones its suite serves on the day of the build; the last step prints them. The folder
-// of the parsers belongs to root, mode 0755 for folders and 0644 for files, so the wall
-// user reads it and cannot change it.
+// of the parsers belongs to root, mode 0755 for folders and 0644 for files, as the context
+// has them, so the wall user reads it and cannot change it.
 func toolsDockerfile(base string, u user, copyNode bool) string {
 	var d strings.Builder
 	d.WriteString("FROM " + base + "\nUSER 0:0\n")
@@ -206,9 +206,8 @@ func toolsDockerfile(base string, u user, copyNode bool) string {
  && export DEBIAN_FRONTEND=noninteractive \
  && apt-get update \
  && apt-get install -y --no-install-recommends ` + strings.Join(toolsPackages, " ") + ` \
- && rm -rf /var/lib/apt/lists/* \
- && find /opt/qory -type d -exec chmod 0755 {} + \
- && find /opt/qory -type f -exec chmod 0644 {} + \
+ && apt-get clean \
+ && rm -rf /var/lib/apt/lists/* /var/cache/apt \
  && find /usr/lib/chromium -xdev -type f \( -perm -4000 -o -perm -2000 \) -exec chmod ug-s {} +
 `)
 	d.WriteString("USER " + u.String() + "\n")
@@ -257,7 +256,10 @@ func copyToolsTree(src, dst string) error {
 		to := filepath.Join(dst, rel)
 		switch {
 		case d.IsDir():
-			return os.Mkdir(to, 0o755)
+			if err := os.Mkdir(to, 0o755); err != nil {
+				return err
+			}
+			return os.Chmod(to, 0o755)
 		case d.Type()&fs.ModeSymlink != 0:
 			target, err := os.Readlink(p)
 			if err != nil {
