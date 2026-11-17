@@ -176,10 +176,11 @@ type Point struct {
 }
 
 // Track is the track that a verdict proposes for the work item, with the reason. ID is
-// the id of a track that the gate of the run's stage offers. The contract is
-// contracts/harness/v1/verdict.schema.json.
+// the id of a track that the gate of the run's stage offers. Kind is the kind of the
+// change, empty for none. The contract is contracts/harness/v1/verdict.schema.json.
 type Track struct {
 	ID     string `json:"id"`
+	Kind   string `json:"kind,omitempty"`
 	Reason string `json:"reason"`
 }
 

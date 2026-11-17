@@ -33,6 +33,8 @@ const (
 	MaxTrackID = 40
 	// MaxReason is the most characters of a track's reason.
 	MaxReason = 300
+	// MaxKind is the most characters of a track's kind.
+	MaxKind = 80
 )
 
 // schemaURL is the schema's $id, which it is compiled under.

@@ -203,6 +203,9 @@ func TestCheck(t *testing.T) {
 		{`{"verdict": "maybe"}`, false},
 		{`{"verdict": "passed", "track": {"id": "small-change", "reason": "The change touches one file."}}`, true},
 		{`{"verdict": "escalate", "points": [` + answerPoint + `], "track": {"id": "standard", "reason": "A person decides."}}`, true},
+		{`{"verdict": "passed", "track": {"id": "small-change", "kind": "A text that the product shows", "reason": "One file."}}`, true},
+		{`{"verdict": "passed", "track": {"id": "small-change", "kind": "", "reason": "One file."}}`, false},
+		{`{"verdict": "passed", "track": {"id": "small-change", "kind": 3, "reason": "One file."}}`, false},
 		{`{"verdict": "passed", "track": {"id": "small-change"}}`, false},
 		{`{"verdict": "passed", "track": {"reason": "The change touches one file."}}`, false},
 		{`{"verdict": "passed", "track": {"id": "small-change", "reason": ""}}`, false},
@@ -271,6 +274,23 @@ func TestTrackLimitsAreTheSchemasLimits(t *testing.T) {
 		err := verdictformat.CheckTrack(runapi.Track{ID: "small-change", Reason: reason})
 		if want := valid(map[string]any{"id": "small-change", "reason": reason}); (err == nil) != want {
 			t.Errorf("reason %q: CheckTrack = %v, the schema passes it: %v", reason, err, want)
+		}
+	}
+}
+
+// TestTrackKindLimitsAreTheSchemasLimits keeps [verdictformat.MaxKind] and
+// [verdictformat.CheckTrack] in step with the schema for a kind.
+func TestTrackKindLimitsAreTheSchemasLimits(t *testing.T) {
+	schema := compiled(t)
+	for _, kind := range []string{
+		"a", "A text that the product shows", strings.Repeat("a", verdictformat.MaxKind), strings.Repeat("é", verdictformat.MaxKind),
+		strings.Repeat("a", verdictformat.MaxKind+1), "A text\nthat the product shows", "A text\tthat", "A text\u202e",
+	} {
+		track := map[string]any{"id": "small-change", "kind": kind, "reason": "One file."}
+		want := schema.Validate(map[string]any{"verdict": "passed", "track": track}) == nil
+		err := verdictformat.CheckTrack(runapi.Track{ID: "small-change", Kind: kind, Reason: "One file."})
+		if (err == nil) != want {
+			t.Errorf("kind %q: CheckTrack = %v, the schema passes it: %v", kind, err, want)
 		}
 	}
 }

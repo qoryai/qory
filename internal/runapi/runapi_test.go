@@ -648,6 +648,8 @@ func TestPushVerdictSendsTheTrack(t *testing.T) {
 		{runapi.VerdictChangesRequested, points, &runapi.Track{ID: "standard", Reason: "A person decides."},
 			`{"verdict":"changes-requested","points":[{"text":"The checks script failed.","action":"run_again"}],` +
 				`"track":{"id":"standard","reason":"A person decides."}}`},
+		{runapi.VerdictPassed, nil, &runapi.Track{ID: "small-change", Kind: "A text", Reason: "One file."},
+			`{"verdict":"passed","track":{"id":"small-change","kind":"A text","reason":"One file."}}`},
 		{runapi.VerdictPassed, nil, nil, `{"verdict":"passed"}`},
 	} {
 		client := serve(t, func(w http.ResponseWriter, r *http.Request) {

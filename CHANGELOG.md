@@ -21,8 +21,10 @@ release may change what an existing document does, and states it under Upgrading
 - `qory run verdict` proposes a track for the work item: `--track <id>` is the id of a
   track that the gate of the run's stage offers, and `--track-reason <text>` is the reason,
   one sentence on one line of 1 to 300 characters. Pass both or neither. A track's id is
-  lower-case words joined by hyphens, at most 40 characters. A mistake in either exits 2
-  with the fix on line 1, and nothing is sent or kept. Outside a run, the kept
+  lower-case words joined by hyphens, at most 40 characters. `--track-kind <text>` adds
+  the kind of the change, one line of 1 to 80 characters, and needs the pair. A mistake
+  in the id, the reason or the pair exits 2, and a mistake in the kind exits 4, with the
+  fix on line 1; nothing is sent or kept. Outside a run, the kept
   `verdict.json` has the track. `qory run verdict` exits 4 for every 422
   `invalid_artifact` from Qory Apiary, such as a track that the gate does not offer, a
   point that names a question that is not open, or a verdict that breaks the schema. Line 1
@@ -205,7 +207,7 @@ release may change what an existing document does, and states it under Upgrading
   each with the action `run_again`; `qory run verdict` sends points only with
   `escalate`. A verdict of any kind may have a `track`, with an `id` and a `reason` of 1
   to 300 characters, which Qory Apiary checks against the tracks of the run's stage;
-  `qory run verdict` sends one with `--track` and `--track-reason`. The text member `gaps` is gone. See The verdict format in
+  `qory run verdict` sends one with `--track` and `--track-reason`, and a `kind` with `--track-kind`. A track has the members `id`, `kind` and `reason`. The text member `gaps` is gone. See The verdict format in
   `contracts/harness/v1/README.md`.
 - `-f` on `qory harness compose`, `qory run` and `qory worktree add` takes a stack by
   reference, `<https URL>#<ref>:<folder>`: qory fetches the folder as it fetches a git

@@ -17,11 +17,13 @@ sends or keeps anything.
 
 Any verdict may propose a track for the work item. Pass --track with the id of a track that
 the gate of the run's stage offers, such as small-change, and --track-reason with the
-reason, one sentence on one line of 1 to 300 characters. Pass both or neither. qory
-checks the id and the reason before it sends or keeps anything, and exits 2 for a
-mistake in them. When Qory Apiary refuses the verdict with 422 invalid_artifact, which
-includes a track that the gate does not offer, qory exits 4: line 1 of the error is the
-fix, and Qory Apiary's text follows.
+reason, one sentence on one line of 1 to 300 characters. Pass both or neither. The optional
+--track-kind is the kind of the change, one line of 1 to 80 characters; it needs the pair.
+qory checks the three before it sends or keeps anything. It exits 2 for a mistake
+in the id, the reason or the pair, and 4 for a mistake in the kind. It also
+exits 4 when Qory Apiary refuses the verdict with 422 invalid_artifact, which
+includes a track that the gate does not offer. Line 1 of the error is the fix, and Qory
+Apiary's text follows.
 
 Outside a run, qory prints the verdict and keeps it in .qory/artifacts/verdict/; nothing
 acts on it.
@@ -48,6 +50,7 @@ qory run verdict passed|changes-requested|escalate [flags]
   -h, --help                  help for verdict
       --points string         read the points of escalate, a JSON array, from this file
       --track string          propose the track with this id, one that the gate of the run's stage offers; pass it with --track-reason
+      --track-kind string     give the kind of the change, one line of 1 to 80 characters; pass it with --track and --track-reason
       --track-reason string   give the reason for --track, one sentence on one line of 1 to 300 characters; pass it with --track
 ```
 

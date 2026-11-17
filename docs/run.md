@@ -3233,7 +3233,7 @@ works in a run and on a laptop. A wall mounts `qory` at `/qory/qory` and does no
 | `qory work-item show` | Prints the work item as JSON. | Prints `.qory/work-item.json`. With no file, exits 3. |
 | `qory artifact pull [<type>] [--version <N>]` | Fetches artifacts into the store, under `<type>/<name>/v<N>/`, writes `index.json` there, and prints the store's directory. | Fetches nothing, and says so. |
 | `qory artifact push <type> [<file>...] [--name <name>] [--note <text>] [--withdraw]` | Stores the files as one new version, keeps a copy in the store, and prints the version. With `--withdraw` and no files, stores a version with no files that withdraws the name. | Keeps the files, or the record of a withdrawal, in `.qory/artifacts`, and sends nothing. |
-| `qory run verdict passed\|changes-requested\|escalate [--points <file>] [--track <id> --track-reason <text>]` | Stores the verdict. Qory Apiary acts on it when the run ends. | Prints the verdict and keeps it in `.qory/artifacts/verdict/`. Nothing acts on it. |
+| `qory run verdict passed\|changes-requested\|escalate [--points <file>] [--track <id> --track-reason <text> [--track-kind <text>]]` | Stores the verdict. Qory Apiary acts on it when the run ends. | Prints the verdict and keeps it in `.qory/artifacts/verdict/`. Nothing acts on it. |
 
 In a run, the types `questions` and `review-comments` take only the name `main`.
 
@@ -3261,21 +3261,30 @@ format](../contracts/harness/v1/README.md#the-verdict-format):
 A `run_again` point may have `fix`, one line on how a person fixes the point; an
 `answer` point has none.
 
+qory checks the file before it sends or keeps the verdict. A file that breaks a rule
+stops the command with exit 2, and the first line of the error is the fix, such as
+`Write each point as {text, action}: point 2 has no action.` qory does not check that the
+question of an `answer` point is open; push the `questions` artifact with that question
+before the verdict.
+
 Any verdict may propose a track for the work item. `--track <id>` is the id of a track
 that the gate of the run's stage offers, in lower-case words joined by hyphens, at most 40
 characters, and `--track-reason <text>` is the reason, one sentence on one line of 1 to
-300 characters. Pass both or neither; a command line with one of them stops with exit 2,
-and so does an id or a reason that breaks a rule, with the fix on line 1 and nothing sent
-or kept:
+300 characters. Pass both or neither. `--track-kind <text>` adds the kind of the change, one
+line of 1 to 80 characters, and needs the pair. qory sends and keeps nothing for a mistake,
+and line 1 of the error is the fix. A command line with one of the pair, an id that breaks a
+rule, and a reason that breaks a rule stop with exit 2. A kind with no pair, and a kind that
+breaks a rule, stop with exit 4:
 
 ```text
-qory run verdict passed --track small-change --track-reason "The change touches one file."
+qory run verdict passed --track small-change --track-kind "a text that the product shows" \
+  --track-reason "The change touches one file."
 ```
 
 Outside a run, the kept `verdict.json` has the track.
 
 When Qory Apiary refuses the verdict with 422 `invalid_artifact`, `qory run verdict` exits
-4. This covers a track that the gate does not offer, an `answer` point that names a
+4. This covers a track that the gate does not offer, an `answer` point that refers to a
 question that is not open, and a verdict that breaks the schema. Line 1 of the error is
 the fix, at most 100 characters, and Qory Apiary's text follows on line 2:
 
@@ -3286,12 +3295,6 @@ the fix, at most 100 characters, and Qory Apiary's text follows on line 2:
 ```
 
 `qory artifact push` exits 1 for `invalid_artifact`, as before.
-
-qory checks the file before it sends or keeps the verdict. A file that breaks a rule
-stops the command with exit 2, and the first line of the error is the fix, such as
-`Write each point as {text, action}: point 2 has no action.` qory does not check that the
-question of an `answer` point is open; push the `questions` artifact with that question
-before the verdict.
 
 A run with a control plane sets `QORY_RUN_API` to
 `http://run-api.qory.invalid/v1/runs/<run id>`. The commands send their requests there
