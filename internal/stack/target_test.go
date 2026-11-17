@@ -113,10 +113,10 @@ func TestRuntimesValidateIsCalledOnTheFlagToo(t *testing.T) {
 	}
 }
 
-// TestARuntimeListTheDecoderRefusesKeepsTheDecoderError is a target.runtime that is a
+// TestAnInvalidRuntimeListKeepsTheDecoderError is a target.runtime that is a
 // mapping: the refusal starts with its fix, and errors.As still matches the decoder's
 // *yaml.TypeError under it.
-func TestARuntimeListTheDecoderRefusesKeepsTheDecoderError(t *testing.T) {
+func TestAnInvalidRuntimeListKeepsTheDecoderError(t *testing.T) {
 	_, err := Load(write(t, "apiVersion: qory.dev/v1alpha1\ntarget:\n  runtime: {claude: opus}\nmodules:\n  - name: core\n"))
 	if err == nil || !strings.HasPrefix(err.Error(), "Set target.runtime to one runtime name or a list of names.\n") {
 		t.Fatalf("%v", err)
