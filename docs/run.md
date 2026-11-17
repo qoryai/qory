@@ -2053,8 +2053,8 @@ is set to, with no agent:
    session gets none of this machine's variables and no model key.
 4. Behind the wall, the helper builds the development container configuration on the
    wall's nested Docker, in two steps: the environment image, tagged
-   `<environment_destination>:<run id>`, then the target image from it, with the agent
-   added, tagged `<image_destination>:<run id>`. The build keeps the environment image
+   `<environment_destination>:<run id>`, then the target image from it, with the tools
+   and the wall user added, tagged `<image_destination>:<run id>`. The build keeps the environment image
    apart only when the image depends on the configuration's bytes alone. When the
    documents set `environment_image`, the build starts the target image from that image
    and builds no environment image. The build's steps get the run's proxy as Docker's
@@ -2074,6 +2074,44 @@ is set to, with no agent:
    image its target step starts from, and none when the build started from
    `environment_image`, from scratch, or from an image it cannot resolve before it
    builds. Then qory closes the run as succeeded, and exits 0.
+
+The target step adds these tools to the image its target starts from, whether the image is a
+prebuilt one, such as `mcr.microsoft.com/devcontainers/base`, or one the configuration
+builds, and the run's session finds them without a download:
+
+- Chromium at `/usr/bin/chromium`, with Noto's fonts for Latin and other scripts, CJK and
+  color emoji, and `ffmpeg` with `ffprobe`. `apt-get` installs them, with no recommended
+  packages, from the apt sources the base image has. Their versions are the ones the
+  base image's Debian suite serves on the day of the build, so they differ between
+  builds: the log of the step prints each version.
+- The Node packages `typescript`, `libpg-query`, `parse5`, `postcss` and `postcss-scss` in
+  `/opt/qory/parsers`, as in the `agent` image: a copy of the folder of the same path in
+  the `prebuild` image, installed there from `images/agent/parsers/package-lock.json`. The
+  folder belongs to root and is read-only for every other user.
+- `node`, when the base image has none on its PATH: a copy of the `prebuild` image's
+  `/usr/local/bin/node`, Node 24. An image that has `node` keeps it, and the step checks
+  that it loads each parser, which needs Node 20.19 or later.
+
+The step runs the programs as the wall user and checks that Chromium starts, `ffmpeg` and
+`ffprobe` run, each parser loads at the version of `package.json`, and the wall user
+cannot write to `/opt/qory/parsers`. A failed check prints its fix first in the build's
+log. Behind the wall, `apt-get` reaches the base image's apt sources through the run's
+proxy, so the run's egress must include them.
+
+The step needs a base image with Debian's `apt-get`: it reads `ID` in `/etc/os-release`
+and `apt-get` on the PATH in a container with no network, and stops before it builds with
+`use a Debian base image: the build adds Chromium with apt, and this image's ID is
+"<ID>"`, or `use a Debian base image that has apt-get: the build adds Chromium and ffmpeg
+with it`. An Ubuntu or Alpine base stops the prebuild this way: Ubuntu's `chromium`
+package is a snap, which does not run in a container. A prebuild whose `prebuild` image is
+not built FROM the `agent` image stops with `build the prebuild image FROM Qory's agent
+image: it has no parsers in /opt/qory/parsers`.
+
+The step adds 1.6 GiB to the image, measured on `mcr.microsoft.com/devcontainers/base`
+for arm64 (1.3 GiB before, 3.0 GiB after), and the image's size counts toward its limit of
+4 GiB. A base image of more than about 2.4 GiB, such as
+`mcr.microsoft.com/devcontainers/typescript-node` (2.7 GiB, 4.1 GiB with the tools), stops
+with `the image is 4.1 GiB (<bytes> bytes), more than the limit of 4 GiB; it is removed`.
 
 The build takes the user from `wall.user` in `forager.yaml`. The wall's helper is
 `wall.helper`, or on Linux the `qory` you run. When `forager.yaml` sets `pool.registry`,

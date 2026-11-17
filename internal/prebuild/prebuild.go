@@ -18,8 +18,9 @@
 // set, and when the definition is a standard image, <registry>/shared/<name>, with no
 // feature and no Dockerfile. The build keeps the environment image apart, for other
 // targets with the same definition, only when it depends on the definition's bytes
-// alone, as [build.chooseSource] has it. The target step makes the wall user the image's
-// user, copies the target's files to [Workspace], runs onCreateCommand and
+// alone, as [build.chooseSource] has it. The target step first adds Chromium, ffmpeg and
+// the Node parsers to the image, [build.addTools]: apt installs the programs, so the base
+// image must be Debian. It then makes the wall user the image's user, copies the target's files to [Workspace], runs onCreateCommand and
 // updateContentCommand there in a container of the image as the wall user, moves the
 // tree to [SeedPath] and commits the container as the target image. The programs it
 // runs see only [AllowedEnv] of this process's environment, and the commands only the
@@ -253,6 +254,11 @@ type Options struct {
 	// is <Name>:environment.
 	EnvironmentTag string
 
+	// Parsers is the folder of the Node parsers the tools step copies into the image, with
+	// package.json and node_modules; "" is [ParsersPath]. Node is the node program it
+	// copies into an image that has none; "" is [NodePath].
+	Parsers, Node string
+
 	// Walled is true when the build runs behind the wall of its run, on the wall's nested
 	// Docker, whose containers reach the outside only through the run's proxy, set in the
 	// docker configuration of the folder DOCKER_CONFIG is set to. devcontainer build then
@@ -325,8 +331,9 @@ type build struct {
 	name    string
 	tmp     string
 	images  []string
-	// created says the container may exist: docker create ran.
-	created bool
+	// created says the container may exist: docker create ran. probed says the same of
+	// the container that reads the base image's facts.
+	created, probed bool
 	// buildEnv is the environment of devcontainer build, and proxyDir the folder bound
 	// at [ProxyPath] in the seed step's container, "" for none: [build.wallProxies].
 	buildEnv []string
@@ -414,6 +421,9 @@ func (b *build) run(ctx context.Context) error {
 	if err := b.checkConfig(); err != nil {
 		return err
 	}
+	if err := b.checkParsers(); err != nil {
+		return err
+	}
 	if err := checkTree(b.repo); err != nil {
 		return err
 	}
@@ -487,7 +497,11 @@ func (b *build) run(ctx context.Context) error {
 			return err
 		}
 	}
-	if err := b.addUser(ctx, from, top); err != nil {
+	tools := b.name + ":tools"
+	if err := b.addTools(ctx, from, tools); err != nil {
+		return err
+	}
+	if err := b.addUser(ctx, tools, top); err != nil {
 		return err
 	}
 	if err := b.runCommands(ctx, top); err != nil {
@@ -1193,6 +1207,9 @@ func humanSize(n int64) string {
 // environment image among them when the build made them and then failed, and the
 // temporary folder.
 func (b *build) clean(ctx context.Context) {
+	if b.probed {
+		b.e.clean(ctx, "rm", "--force", "--volumes", b.probeName())
+	}
 	if b.created {
 		b.e.clean(ctx, "rm", "--force", "--volumes", b.name)
 	}

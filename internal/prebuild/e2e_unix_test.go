@@ -21,6 +21,9 @@ import (
 // multi-platform index.
 const (
 	alpineImage = "alpine:3.20@sha256:d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc"
+	// debianImage is Debian 13 with no node program, the FETCH_IMAGE of images/agent.
+	debianImage = "public.ecr.aws/docker/library/debian:trixie-20260918-slim@sha256:a99cfc517144bc59b1978475ec53b46ecabec7e43635402ee5b77cc54cd1b20a"
+	debianBase  = "public.ecr.aws/docker/library/debian@sha256:a99cfc517144bc59b1978475ec53b46ecabec7e43635402ee5b77cc54cd1b20a"
 )
 
 // docker runs docker and returns its standard output, failing the test when it fails.
@@ -37,12 +40,12 @@ func docker(t *testing.T, args ...string) string {
 }
 
 // TestBuildWithDocker builds a tiny development container on this machine's engine with
-// the reference devcontainer command: an alpine image whose onCreateCommand writes a
+// the reference devcontainer command: a Debian image whose onCreateCommand writes a
 // file, with the environment image kept apart and then removed. The built image keeps
 // the file under /qory/seed, owned by the wall user, runs as the wall user in an empty
 // /workspace, and has nothing at /qory/hooks and no /qory/agent. It runs only with
 // QORY_TEST_DOCKER=1, docker and the devcontainer command at [prebuild.CLIVersion] on
-// the PATH, and it pulls alpine, by digest.
+// the PATH, and it pulls Debian and the images of the tools step, by digest.
 func TestBuildWithDocker(t *testing.T) {
 	if os.Getenv("QORY_TEST_DOCKER") != "1" {
 		t.Skip("QORY_TEST_DOCKER=1 runs it")
@@ -68,9 +71,10 @@ func TestBuildWithDocker(t *testing.T) {
 		t.Fatalf("go build: %v\n%s", err, out)
 	}
 
+	parsers, node := stageTools(t, dir)
 	repo := filepath.Join(dir, "repo")
 	for name, content := range map[string]string{
-		".devcontainer/devcontainer.json": `{"image": "` + alpineImage + `", "containerEnv": {"SHOP_MODE": "test"}, "onCreateCommand": "echo $SHOP_MODE > created.txt && echo home > ~/x"}`,
+		".devcontainer/devcontainer.json": `{"image": "` + debianImage + `", "containerEnv": {"SHOP_MODE": "test"}, "onCreateCommand": "echo $SHOP_MODE > created.txt && echo home > ~/x"}`,
 		".git/HEAD":                       "ref: refs/heads/main\n",
 		"README.md":                       "the shop\n",
 	} {
@@ -97,6 +101,7 @@ func TestBuildWithDocker(t *testing.T) {
 	res, err := prebuild.Build(t.Context(), prebuild.Options{
 		Repository: repo, User: "1234:2345", Tag: tag,
 		Helper: helper, SeedArgs: []string{"run", "seed"}, Env: append(os.Environ(), "DOCKER_CONFIG="+dockerConfigWithProxy), Out: &out, Log: &log,
+		Parsers: parsers, Node: node,
 	})
 	t.Logf("lines:\n%s", out.String())
 	if err != nil {
@@ -104,7 +109,7 @@ func TestBuildWithDocker(t *testing.T) {
 	}
 	// The image form keeps the environment image apart, for the caller to push or
 	// remove.
-	if res.Environment == "" || res.Target != tag || res.Base != "alpine@sha256:d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc" {
+	if res.Environment == "" || res.Target != tag || res.Base != debianBase {
 		t.Errorf("the result is %+v", res)
 	}
 	if res.Environment != "" {
@@ -140,7 +145,7 @@ func TestBuildWithDocker(t *testing.T) {
 	managed := filepath.Join(dir, "managed")
 	for name, content := range map[string]string{
 		".devcontainer/devcontainer.json": `{"build": {"dockerfile": "Dockerfile"}, "onCreateCommand": "true"}`,
-		".devcontainer/Dockerfile":        "FROM " + alpineImage + "\nRUN mkdir /etc/claude-code\n",
+		".devcontainer/Dockerfile":        "FROM " + debianImage + "\nRUN mkdir /etc/claude-code\n",
 	} {
 		p := filepath.Join(managed, filepath.FromSlash(name))
 		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
@@ -156,6 +161,7 @@ func TestBuildWithDocker(t *testing.T) {
 	_, err = prebuild.Build(t.Context(), prebuild.Options{
 		Repository: managed, User: "1234:2345", Tag: refusedTag,
 		Helper: helper, SeedArgs: []string{"run", "seed"}, Env: append(os.Environ(), "DOCKER_CONFIG="+dockerConfigWithProxy), Out: &out, Log: &log,
+		Parsers: parsers, Node: node,
 	})
 	t.Logf("lines:\n%s", out.String())
 	var shown *prebuild.ShownError

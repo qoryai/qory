@@ -23,6 +23,14 @@ release may change what an existing document does, and states it under Upgrading
   folder belongs to root and no other user can write to it. A script loads a package with
   `require('/opt/qory/parsers/node_modules/<package>')`. See
   Qory's images in `docs/run.md`.
+- The image of a prebuild has Chromium at `/usr/bin/chromium`, with Noto's fonts, `ffmpeg`
+  and `ffprobe`, and the same Node parsers in `/opt/qory/parsers`, whether the target
+  starts from a prebuilt development container image, such as
+  `mcr.microsoft.com/devcontainers/base`, or from one the configuration builds. The
+  prebuild installs Chromium, `ffmpeg` and the fonts with `apt-get` from the base image's
+  Debian sources, copies the parsers from the `prebuild` image, and copies `node` from it
+  when the base image has none. It prints `prebuild: added Chromium, ffmpeg and the
+  parsers in <time>`. See `docs/run.md`.
 - Every run of Claude Code installs the runtime's program before its session: from the
   runtime cache of the pool's registry, or of `pool.registry`, or else from npm, through
   the run's host proxy when the run has one. qory reads the registry's `newest`, or npm's
@@ -453,6 +461,10 @@ release may change what an existing document does, and states it under Upgrading
   `write_needs_wall`.
 
 ### Changed
+
+- A prebuild stops, before it builds the image, when the base image is not Debian or has
+  no `apt-get`: `use a Debian base image: the build adds Chromium with apt, and this
+  image's ID is "<ID>"`. Ubuntu and Alpine bases that built before are refused.
 
 - The `agent`, `agent-docker` and `prebuild` images contain no agent runtime. The machine
   installs the runtime at run time, and Forager mounts it read-only at
