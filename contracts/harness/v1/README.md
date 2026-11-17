@@ -1050,8 +1050,8 @@ the run directory, in a folder that only its user can list, and removes them aft
 check.
 
 A check that exits 0 lets the push go on with the bytes it checked. Any other exit stops
-the push with 422 `push_check_failed` and `Fix each finding below and push again. The check
-for <type> failed:`, with the findings: the lines of the program's standard output. When
+the push with 422 `push_check_failed` and `Fix each finding below and push again.`, and on
+the next line `The check for <type> failed:`, with the findings: the lines of the program's standard output. When
 standard output has none, the first finding is `The check exited with <N> and printed
 nothing on stdout. Its stderr:`, and the lines of standard error follow it. When neither
 has a line, the one finding is `The check exited with <N> and printed nothing.` Each
@@ -1059,33 +1059,35 @@ finding is without control characters, with the run's secrets masked, and at mos
 characters; a check has at most 200 findings. qory reads at most 64 KiB of each stream.
 
 A program that does not start stops the push with 422 too: `Set wall.image or --image to
-an image with node, such as one built FROM qory-agent, then run again. The check for
-<type> could not start: <error>.` when its `#!` line is for `node`, else `Install the
-program <path>, then run again. The check for <type> could not start: <error>.` A
+an image with node, such as one built FROM qory-agent, then run again.` and on the next
+line `The check for <type> could not start: <error>.` when its `#!` line is for `node`,
+else `Install the program of the check, then run again.`, then `The program is <path>.`
+and `The check for <type> could not start: <error>.` on the next lines. A
 program does not start when it exits with 126 or 127 and the last line of its standard
 error is the container's init's line for the program, or ends with `not found`, `No
 such file or directory` or `Permission denied` for the program or a word of its `#!`
 line, such as `/usr/bin/env: 'node': No such file or directory`. Any other exit with 126 or 127, such as
 one for a program that the check runs, is a check that failed. A program still running
 after 30 seconds is stopped, with `Make the check for <type> finish within 30 s, and push
-again. It ran longer and was stopped.`
+again.` and on the next line `It ran longer and was stopped.`
 
 In a run whose home has push checks, a push that the check cannot read gets 422
 `push_check_failed` too, before any check runs, whatever its type:
 
 - a body that is not a push in the run API's form: `Send the push as qory artifact push
-  sends it, and push again. The body is not a push: <cause>.`;
+  sends it, and push again.` and on the next line `The body is not a push: <cause>.`;
 - a member twice in one object, or one whose name differs from a member of the push only
   in case: `Send each member of the push once, in lower case, and push again.`;
 - of a type with a check, a file's name that is empty, `.` or `..`, longer than 255 bytes,
   or contains a slash, a backslash or a control character, or one that is there twice:
-  `Give each file a different name of at most 255 bytes, other than . and .., with no
-  slash, backslash or control character, and push again. <name> is not one.`, or `<name>
+  `Rename each file to a valid name, and push again.` and on the next line `<name> is not
+  one: a name has at most 255 bytes, is not . or .., and has no slash, backslash, or
+  control character.`, or `Give each file a different name, and push again.` and `<name>
   is the name of two files.`;
 - of a type with a check, two files whose names differ only in case or in the form of an
   accent, on a machine whose file system keeps them as one file, such as macOS: `Give each
-  file a different name, also when you ignore case and accents, and push again. <a> and <b>
-  are one file on this machine.`
+  file a different name, also when you ignore case and accents, and push again.` and on the
+  next line `<a> and <b> are one file on this machine.`
 
 When qory cannot run the check, the push stops with 503 `push_check_unavailable`, and qory
 run writes the cause as a line on its stderr: the fetch of the artifacts fails, two files

@@ -796,7 +796,8 @@ release may change what an existing document does, and states it under Upgrading
   otherwise it keeps the run and prints why. The pool section of `forager.yaml` takes
   `runs` (how many runs this host runs at once; 1 when not set), `registry` and
   `run_config`. With `prebuilds`, `harness_ref` or `harness_path` in it, qory stops
-  with `<file>: line <n>: key "<key>" is not one forager.yaml reads`.
+  with `Remove the key, or rename it to one forager.yaml reads.`, then `Key "<key>" is not
+  one forager.yaml reads.` and `It is at line <n> of <file>.`
 - qory treats an enrolment code, `qecn_`, `qecp_`, `qecg_` or `qeci_` in any letter case,
   as a secret, as it treats `qak_`, `qrk_` and `qecr_`. Where qory prints a phrase in
   place of a value or a name that contains one of those, it prints "(a value that

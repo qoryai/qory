@@ -2995,10 +2995,11 @@ In a walled run whose modules declare a push check for the type, the check runs 
 push reaches Qory Apiary (see Push checks in `contracts/harness/v1/README.md`). A check
 that does not pass stops the push with 422 `push_check_failed`, and `qory artifact push`
 exits 4. `qory artifact push` prints the fix line, such as `Fix each finding below and push
-again. The check for spec failed:`, then each finding of the check on a separate line:
+again.`, then `The check for spec failed:` and each finding of the check on a separate line:
 
 ```text
-✗ Fix each finding below and push again. The check for spec failed:
+✗ Fix each finding below and push again.
+  The check for spec failed:
   spec.md: the section Goal is missing
 ```
 
