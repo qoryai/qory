@@ -114,9 +114,9 @@ func TestAModuleRefusalKeepsTheFixLineShortWithNamesOf64Characters(t *testing.T)
 	}
 	m := &Manifest{Variants: map[string]Variant{variant: {}}}
 	for name, err := range map[string]error{
-		"a forced variant the module has not": func() error { _, err := SelectVariant(m, long("oth-"), "codex"); return err }(),
-		"a forced variant, none declared":     func() error { _, err := SelectVariant(&Manifest{}, variant, "codex"); return err }(),
-		"a runtime with no variant":           func() error { _, err := SelectVariant(m, "", long("run-")); return err }(),
+		"a forced variant the module has not": func() error { _, err := SelectVariant(m, long("oth-"), "codex", "qory.yaml"); return err }(),
+		"a forced variant, none declared":     func() error { _, err := SelectVariant(&Manifest{}, variant, "codex", "qory.yaml"); return err }(),
+		"a runtime with no variant":           func() error { _, err := SelectVariant(m, "", long("run-"), "qory.yaml"); return err }(),
 	} {
 		if err == nil {
 			t.Errorf("%s: no refusal", name)

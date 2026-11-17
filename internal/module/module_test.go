@@ -559,7 +559,7 @@ func TestSelectVariantPicksTheForcedRuntimeOrDefaultOne(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got, err := SelectVariant(c.manifest, c.forced, c.runtime)
+			got, err := SelectVariant(c.manifest, c.forced, c.runtime, "qory.yaml")
 			if c.wantErr != "" {
 				if err == nil {
 					t.Fatalf("selected %q, want an error", got)

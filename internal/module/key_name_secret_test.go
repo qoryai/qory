@@ -102,17 +102,17 @@ func TestAManifestNameWithASecretIsLeftOutOfItsRefusal(t *testing.T) {
 func TestAVariantNameWithASecretIsLeftOutOfItsRefusal(t *testing.T) {
 	isolate(t)
 	m := &Manifest{Variants: map[string]Variant{"qak_v": {}, "claude": {}}}
-	if _, err := SelectVariant(m, "QRK_f", "codex"); err == nil || err.Error() != "Set the variant of the module in qory.yaml to one the module has.\n  Variant "+runKeyPhrase+" is forced, and the module has no such variant.\n  The variants are claude and "+accessKeyPhrase+"." {
+	if _, err := SelectVariant(m, "QRK_f", "codex", "qory.yaml"); err == nil || err.Error() != "Set the variant of the module in qory.yaml to one the module has.\n  Variant "+runKeyPhrase+" is forced, and the module has no such variant.\n  The variants are claude and "+accessKeyPhrase+"." {
 		t.Errorf("forced: %v", err)
 	}
-	if _, err := SelectVariant(&Manifest{}, "qak_f", "codex"); err == nil || err.Error() != "Remove variant "+accessKeyPhrase+" from the module in qory.yaml.\n  Variant "+accessKeyPhrase+" is forced, and the module declares no variants." {
+	if _, err := SelectVariant(&Manifest{}, "qak_f", "codex", "qory.yaml"); err == nil || err.Error() != "Remove variant "+accessKeyPhrase+" from the module in qory.yaml.\n  Variant "+accessKeyPhrase+" is forced, and the module declares no variants." {
 		t.Errorf("forced without variants: %v", err)
 	}
-	if _, err := SelectVariant(m, "", "qrk_rt"); err == nil || err.Error() != "Select a variant of the module in qory.yaml.\n  The module has no variant for runtime "+runKeyPhrase+", and declares no default.\n  The variants are claude and "+accessKeyPhrase+"." {
+	if _, err := SelectVariant(m, "", "qrk_rt", "qory.yaml"); err == nil || err.Error() != "Select a variant of the module in qory.yaml.\n  The module has no variant for runtime "+runKeyPhrase+", and declares no default.\n  The variants are claude and "+accessKeyPhrase+"." {
 		t.Errorf("runtime: %v", err)
 	}
 	m.Default = "fail"
-	if _, err := SelectVariant(m, "", "qrk_rt"); err == nil || err.Error() != "Select a variant of the module in qory.yaml.\n  The module has no variant for runtime "+runKeyPhrase+", and its default is fail.\n  The variants are claude and "+accessKeyPhrase+"." {
+	if _, err := SelectVariant(m, "", "qrk_rt", "qory.yaml"); err == nil || err.Error() != "Select a variant of the module in qory.yaml.\n  The module has no variant for runtime "+runKeyPhrase+", and its default is fail.\n  The variants are claude and "+accessKeyPhrase+"." {
 		t.Errorf("runtime, default fail: %v", err)
 	}
 	dir := tree(t, map[string]string{"skills/deploy/SKILL.md": "---\nname: deploy\ndescription: d\n---\n"})

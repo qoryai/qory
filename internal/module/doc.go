@@ -21,7 +21,7 @@
 // tree:
 //
 //	m, err := module.ReadManifest(dir)
-//	variant, err := module.SelectVariant(m, forced, runtime)
+//	variant, err := module.SelectVariant(m, forced, runtime, "qory-stack.yaml")
 //	l, err := module.Read(name, dir, m, variant)
 //
 // [Read] takes the variant [SelectVariant] returned for that same manifest. It reads the

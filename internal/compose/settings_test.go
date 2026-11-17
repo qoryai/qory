@@ -509,7 +509,7 @@ func TestComposeRefuses(t *testing.T) {
 				"modules/a/qory-module.yaml": "apiVersion: qory.dev/v1alpha1\nname: a\nvariants:\n  codex:\n    agents: agents/codex\n  default: fail\n",
 				"modules/b/":                 "",
 			},
-			want: "Select a variant of module a in qory.yaml.\n  The module has no variant for runtime claude, and its default is fail.\n  The variants are codex.",
+			want: "Select a variant of module a in qory-stack.yaml.\n  The module has no variant for runtime claude, and its default is fail.\n  The variants are codex.",
 		},
 		{
 			name: "a forced variant the module has not",
@@ -518,7 +518,7 @@ func TestComposeRefuses(t *testing.T) {
 				"modules/a/qory-module.yaml": "apiVersion: qory.dev/v1alpha1\nname: a\nvariants:\n  codex:\n    agents: agents/codex\n",
 				"modules/b/":                 "",
 			},
-			want: "Set the variant of module a in qory.yaml to one the module has.\n  Variant \"amp\" is forced, and the module has no such variant.\n  The variants are codex.",
+			want: "Set the variant of module a in qory-stack.yaml to one the module has.\n  Variant \"amp\" is forced, and the module has no such variant.\n  The variants are codex.",
 		},
 		{
 			name: "a skill without a SKILL.md",

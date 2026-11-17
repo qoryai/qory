@@ -141,6 +141,42 @@ func TestTheModuleNameRefusalContainsTheFileThatDeclaresTheModule(t *testing.T) 
 	}
 }
 
+// TestTheVariantRefusalContainsTheFileThatListsTheModule is a module with variants and no
+// variant for the runtime, listed in the harness section of qory.yaml and in
+// qory-stack.yaml: line 1 contains the file that lists the module.
+func TestTheVariantRefusalContainsTheFileThatListsTheModule(t *testing.T) {
+	isolateAll(t)
+	const manifest = "apiVersion: qory.dev/v1alpha1\nname: m\nvariants:\n  codex:\n    agents: agents/codex\n  default: fail\n"
+	dir := writeTree(t, map[string]string{
+		"base/" + stack.FileName:          "apiVersion: qory.dev/v1alpha1\nname: core\nextending:\n  kinds: [commands]\nmodules:\n  - name: a\n    source:\n      path: modules/a\n",
+		"base/modules/a/qory-module.yaml": "apiVersion: qory.dev/v1alpha1\nname: a\n",
+		"app/" + config.FileName:          "apiVersion: qory.dev/v1alpha1\nharness:\n  extends: {path: ../base}\n  target:\n    runtime: claude\n  modules:\n    - name: m\n      source: {path: modules/m}\n",
+		"app/modules/m/qory-module.yaml":  manifest,
+		"app/modules/m/commands/ship.md":  "ship\n",
+	})
+	p, err := config.Compose(filepath.Join(dir, "app", config.FileName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	merged, base, err := compose.LoadBase(p, "", compose.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = compose.ComposeWith(merged, compose.Options{Base: base})
+	const want = "Select a variant of module m in qory.yaml.\n  The module has no variant for runtime claude, and its default is fail."
+	if err == nil || !strings.HasPrefix(err.Error(), want) {
+		t.Errorf("harness section: %v\nwant one that starts with %q", err, want)
+	}
+	_, err = composeTree(t, map[string]string{
+		stack.FileName:               "apiVersion: qory.dev/v1alpha1\nmodules:\n  - name: m\n    source:\n      path: modules/m\n",
+		"modules/m/qory-module.yaml": manifest,
+	})
+	const wantStack = "Select a variant of module m in qory-stack.yaml.\n  The module has no variant for runtime claude, and its default is fail."
+	if err == nil || !strings.HasPrefix(err.Error(), wantStack) {
+		t.Errorf("stack file: %v\nwant one that starts with %q", err, wantStack)
+	}
+}
+
 // TestAnExtendingModuleRefusalPrintsNoSecretName is an extending module whose name and
 // whose skill's name contain a secret, of a kind the base does not let it ship: the
 // refusal prints Forager's phrase in place of both.

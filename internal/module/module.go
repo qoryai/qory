@@ -578,19 +578,20 @@ func readPushChecks(path string, items []rawPushCheck) ([]PushCheck, error) {
 // It returns an error when the stack forces a variant the module does not have, or forces
 // one on a module that declares none, and when the module has no variant for the runtime
 // and its default is missing or "fail". Every message lists the variant names the module
-// has. A variant's name and the runtime's are printed as [accesskey.ShownName] prints
+// has. file is the name of the file whose modules entry lists the module, which the
+// refusals print. A variant's name and the runtime's are printed as [accesskey.ShownName] prints
 // them.
-func SelectVariant(m *Manifest, forced, runtime string) (string, error) {
+func SelectVariant(m *Manifest, forced, runtime, file string) (string, error) {
 	if m == nil || len(m.Variants) == 0 {
 		if forced != "" {
-			return "", exports.Refuse(fmt.Sprintf("Remove variant %s from %s in qory.yaml.", accesskey.ShownName(forced, true), exports.ModulePlace),
+			return "", exports.Refuse(fmt.Sprintf("Remove variant %s from %s in %s.", accesskey.ShownName(forced, true), exports.ModulePlace, file),
 				fmt.Sprintf("Variant %s is forced, and the module declares no variants.", accesskey.ShownName(forced, true)))
 		}
 		return "", nil
 	}
 	if forced != "" {
 		if _, ok := m.Variants[forced]; !ok {
-			return "", exports.Refuse(fmt.Sprintf("Set the variant of %s in qory.yaml to one the module has.", exports.ModulePlace),
+			return "", exports.Refuse(fmt.Sprintf("Set the variant of %s in %s to one the module has.", exports.ModulePlace, file),
 				fmt.Sprintf("Variant %s is forced, and the module has no such variant.", accesskey.ShownName(forced, true)),
 				"The variants are "+names(m.Variants)+".")
 		}
@@ -600,12 +601,12 @@ func SelectVariant(m *Manifest, forced, runtime string) (string, error) {
 		return runtime, nil
 	}
 	if m.Default == "fail" {
-		return "", exports.Refuse(fmt.Sprintf("Select a variant of %s in qory.yaml.", exports.ModulePlace),
+		return "", exports.Refuse(fmt.Sprintf("Select a variant of %s in %s.", exports.ModulePlace, file),
 			fmt.Sprintf("The module has no variant for runtime %s, and its default is fail.", accesskey.ShownName(runtime, false)),
 			"The variants are "+names(m.Variants)+".")
 	}
 	if m.Default == "" {
-		return "", exports.Refuse(fmt.Sprintf("Select a variant of %s in qory.yaml.", exports.ModulePlace),
+		return "", exports.Refuse(fmt.Sprintf("Select a variant of %s in %s.", exports.ModulePlace, file),
 			fmt.Sprintf("The module has no variant for runtime %s, and declares no default.", accesskey.ShownName(runtime, false)),
 			"The variants are "+names(m.Variants)+".")
 	}

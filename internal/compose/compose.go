@@ -378,7 +378,7 @@ func ComposeWith(p *stack.Stack, opts Options) (_ *Result, err error) {
 	for _, o := range opened {
 		pl, ps, src, root, rootInfo, realDir, copied, m := o.pl, o.ps, o.src, o.root, o.rootInfo, o.realDir, o.copied, o.m
 		name := m.Name
-		variant, err := selectVariant(m, pl, p.Target.Runtimes, name)
+		variant, err := selectVariant(m, pl, p.Target.Runtimes, name, declaringFile(p))
 		if err != nil {
 			return nil, exports.Prefixed("module "+accesskey.ShownName(name, false), err)
 		}
@@ -786,13 +786,17 @@ func envValue(v any) (string, bool) {
 // to render in that case: the compose refuses and lists both runtimes, the way it refuses
 // a collision. A module with no variants, or one whose variants resolve the same way for
 // every targeted runtime, composes for all of them.
-func selectVariant(m *module.Manifest, pl stack.Module, runtimes stack.Runtimes, name string) (string, error) {
-	first, err := module.SelectVariant(m, pl.Variant, runtimes.First())
+func selectVariant(m *module.Manifest, pl stack.Module, runtimes stack.Runtimes, name, declared string) (string, error) {
+	// A module of the base stack is listed in the base's stack file.
+	if pl.Base {
+		declared = stack.FileName
+	}
+	first, err := module.SelectVariant(m, pl.Variant, runtimes.First(), declared)
 	if err != nil {
 		return "", err
 	}
 	for _, r := range runtimes[1:] {
-		v, err := module.SelectVariant(m, pl.Variant, r)
+		v, err := module.SelectVariant(m, pl.Variant, r, declared)
 		if err != nil {
 			return "", err
 		}
