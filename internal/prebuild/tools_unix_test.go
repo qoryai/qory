@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -214,11 +215,8 @@ func TestBuildAddsChromiumToUbuntuFromTheDownload(t *testing.T) {
 			if strings.Index(got, `test "$status" = 200`) > strings.Index(got, "sha256sum -c -") || strings.Contains(got, "--fail") {
 				t.Error("the status is not checked before the sum, or --fail hides a redirect")
 			}
-			// Line 1 of the download's error is the fix alone, and stays under 100 characters
-			// with a 3-digit status and the longest archive name; line 2 has the URL and status.
-			const fix = "Check that the prebuild can reach storage.googleapis.com."
-			if !strings.Contains(got, `echo "`+fix+`" >&2; echo "the download of https://storage.googleapis.com/chrome-for-testing-public/159.0.8154.6/$archive returned status $status, not 200" >&2`) || len(fix) > 100 {
-				t.Errorf("the download's error is not the fix on line 1 and the status on line 2:\n%s", got)
+			if release == "24.04" {
+				checkDownloadErrors(t, got)
 			}
 			if strings.Contains(got, "--location") || strings.Contains(got, "curl -L") || strings.Contains(got, "cdn.playwright.dev") {
 				t.Error("the download follows a redirect or uses Playwright's site")
@@ -291,5 +289,40 @@ func TestBuildAddsTheToolsThroughTheWallsProxy(t *testing.T) {
 	}
 	if strings.Contains(f.read("dockerfiles"), "172.30.0.1") {
 		t.Errorf("a Dockerfile has the proxy:\n%s", f.read("dockerfiles"))
+	}
+}
+
+// checkDownloadErrors runs the download's status check of the Ubuntu Dockerfile under sh,
+// in a temporary folder with a fake curl that prints a status, for a redirect and for a
+// missing archive, with no network. Line 1 of stderr is the fix alone, at most 100
+// characters; line 2 has the URL and the status.
+func checkDownloadErrors(t *testing.T, dockerfile string) {
+	t.Helper()
+	start := strings.Index(dockerfile, `status="$(curl`)
+	end := strings.Index(dockerfile, "\n && { echo \"$sum")
+	if start < 0 || end < start {
+		t.Fatalf("the Dockerfile has no status check:\n%s", dockerfile)
+	}
+	fragment := strings.TrimSuffix(strings.TrimSpace(dockerfile[start:end]), `\`)
+	for _, status := range []string{"307", "404"} {
+		dir := t.TempDir()
+		writeFake(t, filepath.Join(dir, "curl"), "printf %s "+status+"\n")
+		script := "set -eu\narchive=linux64/chrome-linux64.zip\n" + fragment + "\n"
+		c := exec.Command("sh", "-c", script)
+		c.Env = []string{"PATH=" + dir + ":/usr/bin:/bin"}
+		var stdout, stderr bytes.Buffer
+		c.Stdout, c.Stderr = &stdout, &stderr
+		err := c.Run()
+		if ee, ok := err.(*exec.ExitError); !ok || ee.ExitCode() != 1 {
+			t.Fatalf("status %s: the check exited with %v, want status 1\nstderr: %s", status, err, stderr.String())
+		}
+		first, rest, _ := strings.Cut(strings.TrimSuffix(stderr.String(), "\n"), "\n")
+		if first != "Check that the prebuild can reach storage.googleapis.com." || len(first) > 100 {
+			t.Errorf("status %s: line 1 of stderr is %q (%d characters)", status, first, len(first))
+		}
+		want := "the download of https://storage.googleapis.com/chrome-for-testing-public/159.0.8154.6/linux64/chrome-linux64.zip returned status " + status + ", not 200"
+		if rest != want {
+			t.Errorf("status %s: line 2 of stderr is %q, want %q", status, rest, want)
+		}
 	}
 }
