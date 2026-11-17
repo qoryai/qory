@@ -202,9 +202,9 @@ func TestAnExportsRefusalPrintsNoSecret(t *testing.T) {
 	const name = "(a name that contains an access key secret)"
 	const value = "(a value that contains an access key secret)"
 	for _, c := range []struct{ body, want string }{
-		{"exports:\n  modules: [qak_/m]\n", "exports.modules lists " + name + ", which is not one path segment"},
-		{"exports:\n  modules: [qak_m, qak_m]\n", "exports.modules lists " + name + " twice"},
-		{"exports:\n  dir: {stacks: ../qak_s, modules: m}\n  modules: [core]\n", "exports.dir stacks " + value + " is not a directory inside the repository"},
+		{"exports:\n  modules: [qak_/m]\n", "Set each name in exports.modules to one path segment.\n  exports.modules lists " + name + "."},
+		{"exports:\n  modules: [qak_m, qak_m]\n", "List " + name + " once in exports.modules."},
+		{"exports:\n  dir: {stacks: ../qak_s, modules: m}\n  modules: [core]\n", "exports.dir stacks is " + value + ", which is not a directory inside the repository."},
 	} {
 		_, err := exports.Read(write(t, c.body))
 		if err == nil || !strings.Contains(err.Error(), c.want) {

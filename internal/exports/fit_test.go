@@ -219,3 +219,36 @@ func TestFitCountsAQuotedValueWithoutItsQuotes(t *testing.T) {
 		t.Errorf("a quoted value of 25 characters stayed whole:\n%s", got)
 	}
 }
+
+// TestFitKeepsTheKeysOfAGatewayName is a first line over 100 characters with a name of 64
+// characters under a key of forager.yaml: the keys stay whole and the name is shortened.
+func TestFitKeepsTheKeysOfAGatewayName(t *testing.T) {
+	name := "n" + strings.Repeat("x", 63)
+	for _, key := range []string{"gateway.credentials.", "gateway.tools.", "gateway.integrations.", "gateway.egress.paths.", "wall.images.", "harness.launch.", "harness.tiers."} {
+		text := "Set " + key + name + ".file to an absolute path, then say it is so, again and again, at length.\n  The value is not one."
+		got := exports.Fit(text)
+		if first := strings.SplitN(got, "\n", 2)[0]; !strings.Contains(first, key+name[:9]) || strings.Contains(first, name) {
+			t.Errorf("%s: %q, want the key whole and the name shortened", key, first)
+		}
+	}
+}
+
+// TestFitMovesAHiddenPhraseOutOfALongFirstLine is a first line over 100 characters with
+// the phrase of a name that contains an access key secret, which no shortening cuts: the
+// phrase moves to a later line, and a line over 100 characters is the only one that changes.
+func TestFitMovesAHiddenPhraseOutOfALongFirstLine(t *testing.T) {
+	const phrase = "(a name that contains an access key secret)"
+	long := "Remove gateway.integrations." + phrase + ", or give it a program that defines a credential."
+	got := exports.Fit(long + "\n  A cause.")
+	lines := strings.Split(got, "\n")
+	if n := utf8.RuneCountInString(lines[0]); n > 100 || strings.Contains(lines[0], phrase) {
+		t.Errorf("line 1 has %d characters and the phrase: %s", n, lines[0])
+	}
+	if !strings.Contains(got, "The hidden name is "+phrase+".") || !strings.Contains(got, "A cause.") {
+		t.Errorf("the refusal lost the phrase or its cause: %q", got)
+	}
+	short := "Remove " + phrase + " from the module."
+	if got := exports.Fit(short); got != short {
+		t.Errorf("a short line changed: %q", got)
+	}
+}

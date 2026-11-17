@@ -147,8 +147,8 @@ func TestResolveInWrapsItsSentinels(t *testing.T) {
 		rel, text string
 		sentinel  error
 	}{
-		{"../out", "../out leads out of the module", ErrLeadsOut},
-		{"l0", "l0 passes more than 40 links", ErrTooManyLinks},
+		{"../out", "Point the link inside the module, or remove it.\n  ../out leads out of the module.", ErrLeadsOut},
+		{"l0", "Shorten the chain of links on the path.\n  l0 passes more than 40 links.", ErrTooManyLinks},
 	} {
 		_, err := ResolveIn(root, dir, c.rel)
 		if !errors.Is(err, c.sentinel) || err.Error() != c.text {

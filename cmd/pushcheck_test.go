@@ -394,7 +394,7 @@ func TestTheAgentsPushIsCheckedBeforeItLeaves(t *testing.T) {
 	if checkErr != nil || refusal == nil {
 		t.Fatalf("the push of spec got %+v, %v, want a refusal\n%s", refusal, checkErr, checkLog(t, log))
 	}
-	if refusal.Status != 422 || refusal.Code != "push_check_failed" || refusal.Message != "Fix each finding below and push again. The check for spec failed:" ||
+	if refusal.Status != 422 || refusal.Code != "push_check_failed" || refusal.Message != "Fix each finding below and push again.\n  The check for spec failed:" ||
 		len(refusal.Findings) != 1 || refusal.Findings[0] != "spec.md: the section Goal is missing" {
 		t.Errorf("the refusal is %+v", refusal)
 	}
@@ -742,7 +742,7 @@ func TestAHomeWhosePushChecksDoNotReadStopsARunWithNoCode(t *testing.T) {
 	if cmd.ExitCode(err) != cmd.ExitInput || joined {
 		t.Errorf("exit %d (%v), the agent ran %v, want exit %d and no agent\n%s", cmd.ExitCode(err), err, joined, cmd.ExitInput, out)
 	}
-	wants(t, out, "qory run: Compose the harness again, and run again. The push checks in "+file+" could not be read: it is not JSON in the form the compose writes: unexpected end of JSON input.\n")
+	wants(t, out, "qory run: Compose the harness again, and run again.\n  The push checks in "+file+" could not be read: it is not JSON in the form the compose writes: unexpected end of JSON input.\n")
 }
 
 // TestACheckThatDidNotFinishIsAStatusLine is a push whose check's container the engine

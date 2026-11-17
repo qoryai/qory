@@ -127,9 +127,9 @@ workflows:                       # optional; the settings of the workflows a dis
 ```
 
 A stack has no `target`: it is delivered to be extended, and the checkout extending it
-defines what it composes the stack for. A stack file that sets one is refused, `target is
-not a stack's; a stack is delivered to be extended, and the checkout extending it sets
-target under harness, beside extends`.
+defines what it composes the stack for. A stack file that sets one is refused, `Remove target
+from the stack file.`, and on the next line `A stack is delivered to be extended, and the
+checkout extending it sets target under harness, beside extends.`
 
 A repository defines its stack in the `harness` section of its `qory.yaml`, with the same
 keys, or extends a stack delivered as a `qory-stack.yaml` and appends more modules
@@ -180,9 +180,9 @@ left out when `qory harness compose -f <stack>` selects the base (§Discovery); 
 with neither `target.runtime` nor `extends`, composed with no base from `-f`, is refused
 with status 2, and the message lists what the section contains instead. A document
 extending a stack, under `extends` or from `-f`, with no runtime from the document, the
-configuration or `--runtime` is refused with `target.runtime is required; the base stack
-<name>@<pin> defines no target, so the document sets one beside extends, or the
-configuration or --runtime does`. A section that extends a stack may list no modules and
+configuration or `--runtime` is refused with `Set target.runtime beside extends, or set
+the runtime in the configuration or with --runtime.`, and on the next line
+`target.runtime is required, and the base stack <name>@<pin> defines no target.` A section that extends a stack may list no modules and
 contain its target or its extensions alone; a stack lists at least one module.
 `apiVersion` is optional in this file (§The configuration). A `harness` section containing
 only the machine's keys, `runtime`, `model`, `force` and `update`, is not a document. The
@@ -246,15 +246,18 @@ checkout appends:
   what it composes the base for under `target` beside `extends`; the runner's
   `harness.runtime` and `harness.model` override the document's, and `--runtime` and
   `--model` override those. A compose with no runtime from any of the three is refused with
-  status 2, `target.runtime is required; the base stack <name>@<pin> defines no target,
-  so the document sets one beside extends, or the configuration or --runtime does`.
+  status 2, `Set target.runtime beside extends, or set the runtime in the configuration
+  or with --runtime.`, and on the next line `target.runtime is required, and the base
+  stack <name>@<pin> defines no target.`
 - The base's `extending.target`, when it has one, is the policy the resolved target is
   checked against, whichever of the three set it: a runtime the base does not list is
-  refused, `runtime <r> is not one the base stack <name>@<pin> is written for; runtimes:
-  <list>`; where the base lists models, the target selects one of them, or is refused with
-  `the target sets no model, and the base stack <name>@<pin> is written for one of
-  these; models: <list>`, and a model outside the list with `model <m> is not one the
-  base stack <name>@<pin> is written for; models: <list>`. A base without the block
+  refused, `Set the target runtime to one that the base stack lists.`, with `Runtime <r> is
+  not one the base stack <name>@<pin> is written for.` and `Runtimes: <list>.` on the next
+  lines; where the base lists models, the target selects one of them, or is refused with
+  `Set the target model to one that the base stack lists.`, `The target sets no model,
+  and the base stack <name>@<pin> is written for one of these.` and `Models: <list>.`, and
+  a model outside the list with the same first line, `Model <m> is not one the base stack
+  <name>@<pin> is written for.` and `Models: <list>.` A base without the block
   accepts every target. The check runs under `-f` and `extends` alike, and before
   `--dry-run` stops, since the target is resolved before the report is built.
 - The machine's keys of the checkout's `qory.yaml`, `harness.runtime`,
@@ -302,7 +305,8 @@ checkout appends:
   `extends`. The report records the base with `source` as the path of the stack's
   directory relative to the document and the pin `working-tree`.
 - A base that cannot be fetched, on a machine without access to its repository, fails
-  with status 1 and "the stack <source> is not reachable from here".
+  with status 1. The first line is "Run qory on a machine that can reach the base stack." and a later line is
+  "The stack <source> is not reachable from here: <error>".
 - A base does not extend another.
 
 The base's runtime hooks and deny rules reach every extending checkout unchanged: the
@@ -1052,8 +1056,8 @@ of its `wall.images` entry, such as `runsc`, or the engine's default for an entr
 and for an image that is a reference. A run from a run code with neither stops before the setup and the agent,
 with exit 2: `Set wall.image in forager.yaml, then take the work item in again in Qory Apiary: push
 checks run in the wall's default image; the code is used`. A run whose engine does not have the wall's default image stops before the setup and the agent,
-with exit 2: `Pull the wall's default image onto this machine, and run again: push checks
-run in it. The engine does not have the image <image>.` The container has
+with exit 2: `Pull the wall's default image onto this machine, and run again.`, and on the
+next line `Push checks run in it, and the engine does not have the image <image>.` The container has
 no variable but the image's and those Docker sets: `HOME`, `HOSTNAME` and `PATH`. It has
 the wall's CPU and memory limits of the run's containers, the wall's process limit or 512
 processes, and the label of the run's containers, so the clean-up of the run removes a
@@ -1084,8 +1088,8 @@ the run directory, in a folder that only its user can list, and removes them aft
 check.
 
 A check that exits 0 lets the push go on with the bytes it checked. Any other exit stops
-the push with 422 `push_check_failed` and `Fix each finding below and push again. The check
-for <type> failed:`, with the findings: the lines of the program's standard output. When
+the push with 422 `push_check_failed` and `Fix each finding below and push again.`, and on
+the next line `The check for <type> failed:`, with the findings: the lines of the program's standard output. When
 standard output has none, the first finding is `The check exited with <N> and printed
 nothing on stdout. Its stderr:`, and the lines of standard error follow it. When neither
 has a line, the one finding is `The check exited with <N> and printed nothing.` Each
@@ -1093,33 +1097,35 @@ finding is without control characters, with the run's secrets masked, and at mos
 characters; a check has at most 200 findings. qory reads at most 64 KiB of each stream.
 
 A program that does not start stops the push with 422 too: `Set wall.image or --image to
-an image with node, such as one built FROM qory-agent, then run again. The check for
-<type> could not start: <error>.` when its `#!` line is for `node`, else `Install the
-program <path>, then run again. The check for <type> could not start: <error>.` A
+an image with node, such as one built FROM qory-agent, then run again.` and on the next
+line `The check for <type> could not start: <error>.` when its `#!` line is for `node`,
+else `Install the program of the check, then run again.`, then `The program is <path>.`
+and `The check for <type> could not start: <error>.` on the next lines. A
 program does not start when it exits with 126 or 127 and the last line of its standard
 error is the container's init's line for the program, or ends with `not found`, `No
 such file or directory` or `Permission denied` for the program or a word of its `#!`
 line, such as `/usr/bin/env: 'node': No such file or directory`. Any other exit with 126 or 127, such as
 one for a program that the check runs, is a check that failed. A program still running
 after 30 seconds is stopped, with `Make the check for <type> finish within 30 s, and push
-again. It ran longer and was stopped.`
+again.` and on the next line `It ran longer and was stopped.`
 
 In a run whose home has push checks, a push that the check cannot read gets 422
 `push_check_failed` too, before any check runs, whatever its type:
 
 - a body that is not a push in the run API's form: `Send the push as qory artifact push
-  sends it, and push again. The body is not a push: <cause>.`;
+  sends it, and push again.` and on the next line `The body is not a push: <cause>.`;
 - a member twice in one object, or one whose name differs from a member of the push only
   in case: `Send each member of the push once, in lower case, and push again.`;
 - of a type with a check, a file's name that is empty, `.` or `..`, longer than 255 bytes,
   or contains a slash, a backslash or a control character, or one that is there twice:
-  `Give each file a different name of at most 255 bytes, other than . and .., with no
-  slash, backslash or control character, and push again. <name> is not one.`, or `<name>
+  `Rename each file to a valid name, and push again.` and on the next line `<name> is not
+  one: a name has at most 255 bytes, is not . or .., and has no slash, backslash, or
+  control character.`, or `Give each file a different name, and push again.` and `<name>
   is the name of two files.`;
 - of a type with a check, two files whose names differ only in case or in the form of an
   accent, on a machine whose file system keeps them as one file, such as macOS: `Give each
-  file a different name, also when you ignore case and accents, and push again. <a> and <b>
-  are one file on this machine.`
+  file a different name, also when you ignore case and accents, and push again.` and on the
+  next line `<a> and <b> are one file on this machine.`
 
 When qory cannot run the check, the push stops with 503 `push_check_unavailable`, and qory
 run writes the cause as a line on its stderr: the fetch of the artifacts fails, two files
@@ -1157,8 +1163,9 @@ contains the `paths` of each member of a group role (§References), for a script
 starts the members a change needs. qory leaves the key and its whole value out of every
 agent file it writes for a runtime, since not every runtime accepts a key it does not
 know. The compose checks the `paths` of every agent, and any other value fails it:
-`module core: agents/python-reviewer.md: set paths to globs, such as ["**/*.py"], or
-remove it` with `the value is not a glob or a list of globs` on the next line.
+`Set paths to globs, such as ["**/*.py"], or remove it.` as line 1, then `The value is not
+a glob or a list of globs.` and `The agent is in agents/python-reviewer.md of module core.`
+on the lines after it.
 
 Below `skills`, a folder with `SKILL.md` is a skill, and everything below it is that skill's
 files, a nested `SKILL.md` included. A real folder with no `SKILL.md` and with a folder below
@@ -1173,19 +1180,24 @@ resolves differently by how qory places the skill: as a link to the source folde
 A folder that a variant reads skills from composes when that variant is selected. These stop the
 compose with status 2, each with the full path below the module:
 
-- a folder with neither `SKILL.md` nor, apart from dot folders, a folder below it: `add SKILL.md
-  to skills/review: skills/review has no SKILL.md and no skill below it`
-- a group with no skill anywhere below it, by its topmost folder: `add SKILL.md to skills/review,
-  or put a skill in a folder below it: skills/review has no SKILL.md and no skill below it`
-- a folder named after a runtime, with no `SKILL.md`: `rename skills/tools/codex, or read it
-  through a variant: a folder named after a runtime is not a group`
-- a folder that another variant reads skills from, with no `SKILL.md`: `select the variant that
-  reads skills/modern, or change that variant's skills: a folder that a variant reads skills from
-  is not a group`
-- a link to a folder with no `SKILL.md`: `remove the link skills/g/docs, or point it at a skill:
-  it leads to a folder with no SKILL.md`
-- a link that leads nowhere: `remove the link skills/g/gone, or point it at a path that exists:
-  it leads nowhere`
+- a folder with neither `SKILL.md` nor, apart from dot folders, a folder below it: `Add SKILL.md
+  to the folder.` with `skills/review in module core has no SKILL.md and no skill below it.` on the
+  next line
+- a group with no skill anywhere below it, by its topmost folder: `Add SKILL.md to the
+  folder, or put a skill in a folder below it.` with `skills/review in module core has no SKILL.md
+  and no skill below it.` on the next line
+- a folder named after a runtime, with no `SKILL.md`: `Rename the folder, or read it
+  through a variant.` with `skills/tools/codex in module core is named after a runtime, and such a
+  folder is not a group.` on the next line
+- a folder that another variant reads skills from, with no `SKILL.md`: `Select the variant that
+  reads the folder, or change that variant's skills.` with `skills/modern in module core is a
+  folder that a variant reads skills from, and such a folder is not a group.` on the next line
+- a link to a folder with no `SKILL.md`: `Point the link at a skill, or
+  remove it.` with `The link skills/g/docs in module core leads to a folder with no SKILL.md.` on
+  the next line
+- a link that leads nowhere: `Point the link at a path that
+  exists, or remove it.` with `The link skills/g/gone in module core leads nowhere.` on the next
+  line
 - two skills of one module with one name: `Rename skills/a/review or skills/b/review in module
   core.` with `Each skill goes to skills/<name>, and both are the skill review.` on the next line
 - two skills of one module whose names differ only in case: `Rename skills/a/Review or

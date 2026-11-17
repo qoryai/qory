@@ -302,18 +302,20 @@ func TestRunPoolRefusesWhatItCannotRunBy(t *testing.T) {
 			writeFile(t, m.file, "apiVersion: qory.dev/v1alpha1\npool:\n  registry: localhost:5001/qory-env\n  run_config: "+m.runs+"\n")
 		}, func(*poolMachine) string { return "forager.yaml defines no server to claim the pool's runs from" }},
 		{"a relative run_config", []string{"registry: localhost:5001/qory-env", "run_config: runs"}, nil,
-			func(m *poolMachine) string { return m.file + ": pool.run_config is not an absolute path" }},
+			func(m *poolMachine) string {
+				return "Set pool.run_config to an absolute path.\n  The value is not one.\n  pool.run_config is in " + m.file + "."
+			}},
 		{"prebuilds", []string{"registry: localhost:5001/qory-env", "prebuilds: 1", "run_config: {runs}"}, nil,
 			func(m *poolMachine) string {
-				return m.file + ": line 9: key \"prebuilds\" is not one forager.yaml reads"
+				return "Remove the key, or rename it to one forager.yaml reads.\n  Key \"prebuilds\" is not one forager.yaml reads.\n  It is at line 9 of " + m.file + "."
 			}},
 		{"harness_ref", []string{"registry: localhost:5001/qory-env", "harness_ref: v1.2.3", "run_config: {runs}"}, nil,
 			func(m *poolMachine) string {
-				return m.file + ": line 9: key \"harness_ref\" is not one forager.yaml reads"
+				return "Remove the key, or rename it to one forager.yaml reads.\n  Key \"harness_ref\" is not one forager.yaml reads.\n  It is at line 9 of " + m.file + "."
 			}},
 		{"harness_path", []string{"registry: localhost:5001/qory-env", "harness_path: /src/qory-github", "run_config: {runs}"}, nil,
 			func(m *poolMachine) string {
-				return m.file + ": line 9: key \"harness_path\" is not one forager.yaml reads"
+				return "Remove the key, or rename it to one forager.yaml reads.\n  Key \"harness_path\" is not one forager.yaml reads.\n  It is at line 9 of " + m.file + "."
 			}},
 		{"an access key in run_config", nil, func(t *testing.T, m *poolMachine) {
 			if err := foragerdir.Dir(filepath.Join(m.runs, "qory")).WriteSecret(newKey(t)); err != nil {
@@ -340,7 +342,7 @@ func TestRunPoolRefusesWhatItCannotRunBy(t *testing.T) {
 		{"run_config's forager.yaml does not read", nil, func(t *testing.T, m *poolMachine) {
 			writeFile(t, filepath.Join(m.runs, "qory", "forager.yaml"), "apiVersion: qory.dev/v1alpha1\nwall: {}\n")
 		}, func(m *poolMachine) string {
-			return filepath.Join(m.runs, "qory", "forager.yaml") + ": wall.adapter is required, and docker is the one there is"
+			return "Set wall.adapter to docker.\n  wall.adapter is required, and docker is the one there is.\n  wall.adapter is in " + filepath.Join(m.runs, "qory", "forager.yaml") + "."
 		}},
 		{"run_config without forager.yaml", nil, func(t *testing.T, m *poolMachine) {
 			if err := os.Remove(filepath.Join(m.runs, "qory", "forager.yaml")); err != nil {

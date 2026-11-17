@@ -78,9 +78,9 @@ func TestComposeRefusesAModelIdWithALineEnd(t *testing.T) {
 		{[]string{"--tier", "light=a\nmodel: b"}, "", `--tier light=a\nmodel: b: write --tier <tier>=<model id>, such as --tier light=claude-haiku-5-5`},
 		{[]string{"--tier", "light=a\tb"}, "", `--tier light=a\tb: write --tier <tier>=<model id>, such as --tier light=claude-haiku-5-5`},
 		{[]string{"--tier", "light=a\x1b[2Jb"}, "", `--tier light=a\x1b[2Jb: write --tier <tier>=<model id>, such as --tier light=claude-haiku-5-5`},
-		{nil, `tiers: {light: "a\nb"}`, "harness.tiers.light: write a model id, or {model: <model id>, effort: <value>}"},
-		{nil, `tiers: {light: {model: a, effort: "max\r"}}`, "harness.tiers.light: write a model id, or {model: <model id>, effort: <value>}"},
-		{nil, `tiers: {light: "a b"}`, "harness.tiers.light: write a model id, or {model: <model id>, effort: <value>}"},
+		{nil, `tiers: {light: "a\nb"}`, "Set harness.tiers.light to a model id, or to {model: <model id>, effort: <value>}.\n  harness.tiers.light is in "},
+		{nil, `tiers: {light: {model: a, effort: "max\r"}}`, "Set harness.tiers.light to a model id, or to {model: <model id>, effort: <value>}.\n  harness.tiers.light is in "},
+		{nil, `tiers: {light: "a b"}`, "Set harness.tiers.light to a model id, or to {model: <model id>, effort: <value>}.\n  harness.tiers.light is in "},
 	} {
 		root := tierCheckout(t)
 		var harness []string
@@ -89,8 +89,8 @@ func TestComposeRefusesAModelIdWithALineEnd(t *testing.T) {
 		}
 		tierModule(t, root, "claude", tierAgents, harness...)
 		_, err := run(t, append([]string{"harness", "compose"}, c.args...)...)
-		if cmd.ExitCode(err) != 2 || err == nil || !strings.HasSuffix(err.Error(), c.want) {
-			t.Errorf("%q %s: exit %d, err %v\nwant suffix %s", c.args, c.harness, cmd.ExitCode(err), err, c.want)
+		if cmd.ExitCode(err) != 2 || err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%q %s: exit %d, err %v\nwant to contain %s", c.args, c.harness, cmd.ExitCode(err), err, c.want)
 		}
 	}
 }

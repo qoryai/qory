@@ -134,13 +134,13 @@ func TestAStackReferenceStopsWithExit2(t *testing.T) {
 	fakeLaunch(t, fakeRuntime(t))
 	t.Setenv("QORY_RUN_KEY", "")
 	for _, c := range []struct{ value, want string }{
-		{"ssh://git@git.example.com/example-org/harness#main:stacks/web", "use an https URL in -f ssh://git@git.example.com/example-org/harness#main:stacks/web, as <https URL>#<ref>:<folder>: "},
-		{refURL, "add the ref to -f " + refURL + ", as <https URL>#<ref>:<folder>: "},
-		{refURL + "#main", "add the folder to -f " + refURL + "#main, as <https URL>#<ref>:<folder>: "},
-		{refURL + "#main:/stacks/web", "write the folder in -f " + refURL + "#main:/stacks/web as a path from the repository's root: "},
-		{refURL + "#main:stacks/../web", "write the folder in -f " + refURL + "#main:stacks/../web without ..: "},
-		{refURL + "#main:stacks/missing", "check the folder in -f " + refURL + "#main:stacks/missing: " + refURL + " has no stacks/missing at main"},
-		{refURL + "#main:stacks/empty", "check the folder in -f " + refURL + "#main:stacks/empty: " + refURL + " has no qory-stack.yaml in stacks/empty at main"},
+		{"ssh://git@git.example.com/example-org/harness#main:stacks/web", "Set -f to an https URL, as <https URL>#<ref>:<folder>.\n  qory fetches a stack reference only over https, and ssh://git@git.example.com/example-org/harness is not an https URL with a host.\n  -f is ssh://git@git.example.com/example-org/harness#main:stacks/web."},
+		{refURL, "Add the ref to -f, as <https URL>#<ref>:<folder>.\n  The stack reference has no branch, tag, or commit after #.\n  -f is " + refURL + "."},
+		{refURL + "#main", "Add the folder to -f, as <https URL>#<ref>:<folder>.\n  The stack reference has no folder after the ref. The folder is the one that contains the qory-stack.yaml.\n  -f is " + refURL + "#main."},
+		{refURL + "#main:/stacks/web", "Write the folder in -f as a path from the repository's root.\n  The folder /stacks/web is an absolute path.\n  -f is " + refURL + "#main:/stacks/web."},
+		{refURL + "#main:stacks/../web", "Remove the .. segment from the folder in -f.\n  The folder stacks/../web has a .. segment, and the folder is a path from the repository's root.\n  -f is " + refURL + "#main:stacks/../web."},
+		{refURL + "#main:stacks/missing", "Check the folder in -f.\n  " + refURL + " has no stacks/missing at main\n  -f is set to " + refURL + "#main:stacks/missing."},
+		{refURL + "#main:stacks/empty", "Check the folder in -f.\n  " + refURL + " has no qory-stack.yaml in stacks/empty at main.\n  -f is set to " + refURL + "#main:stacks/empty."},
 	} {
 		for _, args := range [][]string{{"harness", "compose", "--runtime", "claude"}, {"run", "claude"}} {
 			out, err := run(t, append(args, "-f", c.value)...)
@@ -246,13 +246,13 @@ func TestARunWithARunKeyFetchesAStackReferenceThroughTheStackProxy(t *testing.T)
 // character outside ASCII: the run stops with exit 2 and an error that starts with the
 // fix in -f, before anything is fetched, and no line shows the user part.
 func TestARunKeyStopsAStackReferenceWithAnAddressFault(t *testing.T) {
-	const user = "remove the user name and password from the URL in -f: the run's stack proxy sets the harness credentials of the run configuration, so a source's URL needs none"
+	const user = "Remove the user name and password from the URL in -f.\n  The run's stack proxy sets the harness credentials of the run configuration, so a source's URL needs none."
 	files := helloFiles(t)
 	for _, c := range []struct{ name, url, want string }{
 		{"a user part", "https://reader:s3cret@" + proxygittest.Host + "/example-org/hello.git", user},
 		{"an @ after a port", "https://" + proxygittest.Host + ":443@evil.example/example-org/hello.git", user},
 		{"a fullwidth @ in the host", "https://u＠" + proxygittest.Host + "/example-org/hello.git",
-			"write the host of the URL in -f in ASCII, with the xn-- form for an international name: the host has a character outside ASCII, which git may map to another, such as a fullwidth @ to @"},
+			"Write the host of the URL in -f in ASCII.\n  Use the xn-- form for an international name.\n  The host has a character outside ASCII, which git may map to another, such as a fullwidth @ to @."},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			h := newHostFetch(t, "", "main")

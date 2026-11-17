@@ -96,16 +96,16 @@ func TestForagerReadsAModelKeyAndTheGatewayLimits(t *testing.T) {
 func TestForagerRefusesARunLimitOutsideItsRange(t *testing.T) {
 	hermetic(t)
 	for _, c := range []struct{ body, want string }{
-		{"connections: 0", "set gateway.run_limits.connections to a number from 1 to 65536, or remove it for the default of 256"},
-		{"connections: 65537", "set gateway.run_limits.connections to a number from 1 to 65536, or remove it for the default of 256"},
-		{"requests_per_second: -3", "set gateway.run_limits.requests_per_second to a number from 1 to 10000, or remove it for the default of 50"},
-		{"requests_per_second: 10001", "set gateway.run_limits.requests_per_second to a number from 1 to 10000, or remove it for the default of 50"},
-		{"burst: 0", "set gateway.run_limits.burst to a number from 1 to 100000, or remove it for the default of 200"},
-		{"burst: 100001", "set gateway.run_limits.burst to a number from 1 to 100000, or remove it for the default of 200"},
+		{"connections: 0", "Set gateway.run_limits.connections to a number from 1 to 65536, or remove it.\n  The default is 256.\n  gateway.run_limits.connections is in {path}."},
+		{"connections: 65537", "Set gateway.run_limits.connections to a number from 1 to 65536, or remove it.\n  The default is 256.\n  gateway.run_limits.connections is in {path}."},
+		{"requests_per_second: -3", "Set gateway.run_limits.requests_per_second to a number from 1 to 10000, or remove it.\n  The default is 50.\n  gateway.run_limits.requests_per_second is in {path}."},
+		{"requests_per_second: 10001", "Set gateway.run_limits.requests_per_second to a number from 1 to 10000, or remove it.\n  The default is 50.\n  gateway.run_limits.requests_per_second is in {path}."},
+		{"burst: 0", "Set gateway.run_limits.burst to a number from 1 to 100000, or remove it.\n  The default is 200.\n  gateway.run_limits.burst is in {path}."},
+		{"burst: 100001", "Set gateway.run_limits.burst to a number from 1 to 100000, or remove it.\n  The default is 200.\n  gateway.run_limits.burst is in {path}."},
 	} {
 		path := foragerFile(t, "gateway:\n  run_limits: {"+c.body+"}\n")
 		_, err := config.LoadForager()
-		if want := path + ": " + c.want; err == nil || err.Error() != want {
+		if want := strings.ReplaceAll(c.want, "{path}", path); err == nil || err.Error() != want {
 			t.Errorf("%s: %v, want %q", c.body, err, want)
 		}
 	}
@@ -116,7 +116,7 @@ func TestForagerRefusesARunLimitOutsideItsRange(t *testing.T) {
 		}
 	}
 	path := foragerFile(t, "gateway:\n  run_limits: {connection: 3}\n")
-	if _, err := config.LoadForager(); err == nil || !strings.HasPrefix(err.Error(), path+": ") || !strings.Contains(err.Error(), "connection") {
+	if _, err := config.LoadForager(); err == nil || !strings.Contains(err.Error(), path) || !strings.Contains(err.Error(), "connection") {
 		t.Errorf("a key that is not one: %v", err)
 	}
 }

@@ -38,8 +38,8 @@ func TestFileAllowedMatchesByPathSegment(t *testing.T) {
 func TestLoadRefusesExtendingFilesShapes(t *testing.T) {
 	head := "apiVersion: qory.dev/v1alpha1\nmodules:\n  - name: core\n"
 	cases := []struct{ yaml, want string }{
-		{head + "extending:\n  kinds: [files]\n", "extending.kinds lists files; the paths an extending module's files may sit under go in extending.files"},
-		{head + "extending:\n  files: [/claude/rules]\n", `extending.files lists "/claude/rules", which is not a <runtime>/<path> prefix`},
+		{head + "extending:\n  kinds: [files]\n", "Remove files from extending.kinds, and list the paths in extending.files.\n  extending.files contains the paths that an extending module's files may sit under."},
+		{head + "extending:\n  files: [/claude/rules]\n", "Set each entry of extending.files to a <runtime>/<path> prefix.\n  extending.files lists \"/claude/rules\"."},
 		{head + "extending:\n  files: [claude/../rules]\n", `extending.files lists "claude/../rules"`},
 		{head + "extending:\n  files: [\"\"]\n", `extending.files lists ""`},
 	}
@@ -173,5 +173,24 @@ func TestExtendKeepsTheDocumentsTarget(t *testing.T) {
 	p = &Stack{Extends: Source{Path: "../base"}, File: "/app/qory.yaml"}
 	if out, err = Extend(base, p); err != nil || len(out.Target.Runtimes) != 0 || out.Target.Model != "" {
 		t.Errorf("no target: %+v, %v", out.Target, err)
+	}
+}
+
+// TestExtendRefusalsContainHarnessYamlForACheckoutReadFromIt is a checkout read from
+// harness.yaml that lists core, the base's module, with a source, with no exclude, and
+// with the instructions in its exclude: each refusal has harness.yaml where it says which
+// file lists the module.
+func TestExtendRefusalsContainHarnessYamlForACheckoutReadFromIt(t *testing.T) {
+	base := &Stack{Modules: []Module{{Name: "core", Source: Source{Path: "modules/core"}}}, Extending: &Extending{Kinds: []string{"skills"}}, Root: "/repo", File: "/repo/qory-stack.yaml"}
+	for name, l := range map[string]Module{
+		"a source":         {Name: "core", Source: Source{Path: "./core"}},
+		"no exclude":       {Name: "core"},
+		"the instructions": {Name: "core", Exclude: Selection{Instructions: true}},
+	} {
+		p := &Stack{Extends: Source{Path: "../base"}, Modules: []Module{l}, File: "/app/harness.yaml"}
+		_, err := Extend(base, p)
+		if err == nil || !strings.Contains(err.Error(), "a checkout's harness.yaml ") {
+			t.Errorf("%s: err = %v, want one that contains \"a checkout's harness.yaml \"", name, err)
+		}
 	}
 }

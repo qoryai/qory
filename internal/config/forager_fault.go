@@ -8,6 +8,8 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/qoryai/forager/accesskey"
 	"gopkg.in/yaml.v3"
@@ -58,51 +60,127 @@ func quotedName(k *yaml.Node) string {
 	return fmt.Sprintf("%q", k.Value)
 }
 
+// renameKey is the fix of the refusal of a key that forager.yaml does not read.
+const renameKey = "Remove the key, or rename it to one " + ForagerFileName + " reads."
+
+// sentence is err as a sentence: its first letter in upper case, and a full stop at its
+// end when it has none.
+func sentence(err error) string {
+	s := err.Error()
+	if s == "" {
+		return s
+	}
+	r, n := utf8.DecodeRuneInString(s)
+	s = string(unicode.ToUpper(r)) + s[n:]
+	if !strings.HasSuffix(s, ".") {
+		s += "."
+	}
+	return s
+}
+
+// causedRefusal is a refusal that unwraps to the error that caused it, so errors.Is and
+// errors.As match the cause under the refusal's words.
+type causedRefusal struct {
+	refusal *exports.Refusal
+	err     error
+}
+
+func (e *causedRefusal) Error() string { return e.refusal.Error() }
+func (e *causedRefusal) Unwrap() error { return e.err }
+
+// caused is refusal as an error that unwraps to err.
+func caused(err error, refusal *exports.Refusal) error { return &causedRefusal{refusal, err} }
+
+// foundAt is the last line of a refusal of the file at path that is about the line line,
+// from the decoder's "line N: " prefix or a number: "It is at line N of path.", or "The
+// file is path." for none.
+func foundAt(path string, line int) string {
+	if line == 0 {
+		return "The file is " + exports.HidePath(path) + "."
+	}
+	return fmt.Sprintf("It is at line %d of %s.", line, exports.HidePath(path))
+}
+
 // keyNotOne is the refusal, in the file at path, of the key k of the entry at at that
 // the entry does not take: "key", the name quoted, "is not one" and rest, as
-// [exports.KeyNotRead] says it. When the name contains an access key secret or a run
-// key, the refusal leaves it out and starts with the key's line.
+// [exports.KeyNotRead] words it. When the name contains an access key secret or a run
+// key, the refusal leaves it out and shows the key's line.
 func keyNotOne(path, at string, k *yaml.Node, rest string) error {
 	text := exports.KeyNotRead(k.Value, rest)
 	if accesskey.ContainsSecret(k.Value) {
-		return fmt.Errorf("%s: line %d: %s: %s", path, k.Line, at, text)
+		return exports.Refuse(renameKey, at+": "+text+".", foundAt(path, k.Line))
 	}
-	return fmt.Errorf("%s: %s: %s", path, at, text)
+	return exports.Refuse(renameKey, at+": "+text+".", "The file is "+exports.HidePath(path)+".")
 }
 
-// fault is what is wrong at one place of forager.yaml: the line, and what follows it,
-// the key and what is wrong with what it holds, which never holds the value.
+// fault is what is wrong at one place of forager.yaml: the line, the step that mends it,
+// and the key and what is wrong with its value. The text never contains the value.
 type fault struct {
 	line int
+	fix  string
 	text string
 }
 
 // error is the fault as a refusal of the file at path; a fault of no line is one of the
 // file as a whole.
 func (f *fault) error(path string) error {
-	if f.line == 0 {
-		return fmt.Errorf("%s: %s", path, f.text)
-	}
-	return fmt.Errorf("%s: line %d: %s", path, f.line, f.text)
+	return exports.Refuse(f.fix, f.text+".", foundAt(path, f.line))
+}
+
+// faultFixes is the fix of each wrong that [keyFault] is given, with the key at its %s.
+var faultFixes = map[string]string{
+	"is not a mapping":                         "Set %s to a mapping.",
+	"is not a list of strings":                 "Set %s to a list of strings.",
+	"is not a list":                            "Set %s to a list.",
+	"is not a string":                          "Set %s to a string.",
+	"is not a whole number":                    "Set %s to a whole number.",
+	"is not true or false":                     "Set %s to true or false.",
+	"is not of the type it takes":              "Set %s to a value of the type it takes.",
+	"is not a number that JSON can represent":  "Set %s to a number that JSON can represent.",
+	"is an alias of a value that contains it":  "Remove the alias at %s, which stands for a value that contains it.",
+	"merges a mapping that contains the merge": "Remove the merge at %s, which merges a mapping that contains it.",
+	"has a tag its value is not of":            "Remove the tag of %s, or write a value that fits it.",
 }
 
 // keyFault is a fault of the value at key.
 func keyFault(line int, key, wrong string) *fault {
 	if key == "" {
-		return &fault{line, "the file is not a mapping of sections"}
+		return &fault{line, "Write " + ForagerFileName + " as a mapping of sections.", "The file is not a mapping of sections"}
 	}
-	return &fault{line, key + " " + wrong}
+	fix, ok := faultFixes[wrong]
+	if !ok {
+		fix = "Correct the value of %s."
+	}
+	return &fault{line, fmt.Sprintf(fix, key), key + " " + wrong}
 }
 
 // The decoder's refusals of the file's anchors, aliases and merges, which say nothing of
 // where in the file: each is said in words of qory's own, which name no anchor and no
 // value.
 const (
-	tooManyAliases = "its aliases expand to more values than qory reads"
-	anchorInItself = "an anchor's value holds an alias of that anchor"
-	mergeNotMaps   = "a merge, <<, holds a value that is not a mapping or a list of mappings"
-	unknownAnchor  = "an alias names an anchor that is not defined before it"
+	tooManyAliases = "The file's aliases expand to more values than qory reads."
+	anchorInItself = "An anchor's value contains an alias of that anchor."
+	mergeNotMaps   = "A merge, <<, has a value that is not a mapping or a list of mappings."
+	unknownAnchor  = "An alias refers to an anchor that is not defined before it."
 )
+
+// rewriteAliases is the fix of the refusal of anchors, aliases or merges that qory cannot read.
+const rewriteAliases = "Write the values out in full, in place of the aliases and merges that qory cannot read."
+
+// upper is s with its first letter in upper case.
+func upper(s string) string {
+	r, n := utf8.DecodeRuneInString(s)
+	return string(unicode.ToUpper(r)) + s[n:]
+}
+
+// foundAtPrefix is [foundAt] for the decoder's "line N: " prefix, or none.
+func foundAtPrefix(path, prefix string) string {
+	var line int
+	if _, err := fmt.Sscanf(prefix, "line %d: ", &line); err != nil {
+		return foundAt(path, 0)
+	}
+	return foundAt(path, line)
+}
 
 // aliasRefusals are the decoder's messages of the file's anchors, aliases and merges, and
 // what qory says of each.
@@ -132,7 +210,7 @@ func aliasRefusal(err error) (string, bool) {
 // [exports.DecodeError] says it.
 func foragerSyntaxError(path string, err error) error {
 	if text, ok := aliasRefusal(err); ok {
-		return fmt.Errorf("%s: %s", path, text)
+		return exports.Refuse(rewriteAliases, text, "The file is "+exports.HidePath(path)+".")
 	}
 	return exports.DecodeError(path, err)
 }
@@ -156,17 +234,17 @@ func foragerDecodeError(path string, n *yaml.Node, t reflect.Type, key string, k
 				// The decoder names a key by what it decodes into, which for a key
 				// written as an alias is a value written elsewhere in the file.
 				if a := aliasKeyAt(n, m[1], m[2]); a != nil {
-					return fmt.Errorf("%s: %s%s", path, m[1], aliasNotRead(a.Value))
+					return exports.Refuse(renameKey, upper(aliasNotRead(a.Value))+".", foundAtPrefix(path, m[1]))
 				}
-				return fmt.Errorf("%s: %s%s", path, m[1], exports.KeyNotRead(m[2], foragerReads))
+				return exports.Refuse(renameKey, upper(exports.KeyNotRead(m[2], foragerReads))+".", foundAtPrefix(path, m[1]))
 			}
 		}
 	}
 	if text, ok := aliasRefusal(err); ok {
 		if key != "" {
-			return fmt.Errorf("%s: %s: %s", path, key, text)
+			return exports.Refuse(rewriteAliases, "At "+key+": "+text, "The file is "+exports.HidePath(path)+".")
 		}
-		return fmt.Errorf("%s: %s", path, text)
+		return exports.Refuse(rewriteAliases, text, "The file is "+exports.HidePath(path)+".")
 	}
 	if te != nil || tagRefusal.MatchString(err.Error()) {
 		if f := findFault(n, t, key, known); f != nil && f != walkLimited {
@@ -178,12 +256,12 @@ func foragerDecodeError(path string, n *yaml.Node, t reflect.Type, key string, k
 	// such as a key that is a list or a mapping, so none of them is said: a failure of
 	// the decoder is said in qory's words, and any other as a fault without its place.
 	if errors.Is(err, errDecoderFailed) {
-		return fmt.Errorf("%s: %w", path, errDecoderFailed)
+		return &decoderFailed{path}
 	}
 	if key == "" {
-		return fmt.Errorf("%s: a value is not of the type its key takes", path)
+		return exports.Refuse("Set each value in the file to the type its key takes.", "A value is not of the type its key takes.", "The file is "+exports.HidePath(path)+".")
 	}
-	return fmt.Errorf("%s: %s holds a value that is not of the type its key takes", path, key)
+	return exports.Refuse(fmt.Sprintf("Set %s to the type its key takes.", key), key+" is not of the type its key takes.", "The file is "+exports.HidePath(path)+".")
 }
 
 // aliasKeyAt is a key under n written as an alias, on the line the decoder's "line <n>: "
@@ -250,7 +328,7 @@ const walkLimit = 100_000
 // fault in what it walked. It is no fault of the file, which the decoder may read
 // whatever its aliases expand to, so no refusal says it; the decoder's own refusal of
 // aliases that expand too far is [tooManyAliases], said by [aliasRefusal].
-var walkLimited = &fault{0, tooManyAliases}
+var walkLimited = &fault{0, rewriteAliases, strings.TrimSuffix(tooManyAliases, ".")}
 
 // walk is one walk of [findFault]. It walks each value once for each type it is read
 // as, so an alias read again is not walked again, and an alias inside the value it
@@ -316,6 +394,16 @@ func mergeKeyFault(n *yaml.Node, t reflect.Type, key string, known bool) *fault 
 // what the panic holds, which may quote a value.
 var errDecoderFailed = errors.New("the YAML decoder failed reading the file")
 
+// decoderFailed is [errDecoderFailed] said fix first for the file at path; it unwraps to
+// errDecoderFailed.
+type decoderFailed struct{ path string }
+
+func (d *decoderFailed) Error() string {
+	return exports.Refuse("Check the YAML of the file.", "The YAML decoder failed reading the file.", "The file is "+exports.HidePath(d.path)+".").Error()
+}
+
+func (d *decoderFailed) Unwrap() error { return errDecoderFailed }
+
 // safeDecode is decode, a decode of forager.yaml, with a panic of the decoder as
 // [errDecoderFailed].
 func safeDecode(decode func() error) (err error) {
@@ -357,7 +445,7 @@ func (w *walk) fault(n *yaml.Node, t reflect.Type, key string) *fault {
 		if w.keys {
 			return nil
 		}
-		return keyFault(line, key, "is an alias of a value that holds it")
+		return keyFault(line, key, "is an alias of a value that contains it")
 	case walked:
 		return nil
 	}
@@ -486,9 +574,9 @@ func (w *walk) structFault(n *yaml.Node, t reflect.Type, key string, merged map[
 		if !ok {
 			if w.known && !w.keys {
 				if raw := n.Content[i]; raw.Kind == yaml.AliasNode {
-					return &fault{raw.Line, aliasNotRead(raw.Value)}
+					return &fault{raw.Line, renameKey, upper(aliasNotRead(raw.Value))}
 				}
-				return &fault{k.Line, exports.KeyNotRead(k.Value, foragerReads)}
+				return &fault{k.Line, renameKey, upper(exports.KeyNotRead(k.Value, foragerReads))}
 			}
 			continue
 		}
@@ -571,16 +659,20 @@ func writtenTwice(key, name string, first, again int) *fault {
 			at = "a key of " + key
 		}
 	}
-	return &fault{again, fmt.Sprintf("%s is written twice; it was first written at line %d", at, first)}
+	fix := "Remove one of the two keys " + at + "."
+	if accesskey.ContainsSecret(name) {
+		fix = fmt.Sprintf("Remove the key that is written twice, at line %d.", again)
+	}
+	return &fault{again, fix, fmt.Sprintf("%s is written twice; it was first written at line %d", at, first)}
 }
 
 // keyNotAName is the fault of a key at line, of the mapping at key, that is a list or a
 // mapping and not a name.
 func keyNotAName(line int, key string) *fault {
 	if key == "" {
-		return &fault{line, "the file has a key that is not a name"}
+		return &fault{line, "Give each key of the file a name.", "The file has a key that is not a name"}
 	}
-	return &fault{line, key + " has a key that is not a name"}
+	return &fault{line, "Give each key of " + key + " a name.", key + " has a key that is not a name"}
 }
 
 // mergeFault is [structFault] of a mapping that a mapping at key merges, as t, merged
@@ -598,7 +690,7 @@ func (w *walk) mergeFault(n *yaml.Node, t reflect.Type, key string, merged map[s
 		if w.keys {
 			return nil
 		}
-		return keyFault(line, key, "merges a mapping that holds the merge")
+		return keyFault(line, key, "merges a mapping that contains the merge")
 	}
 	w.merging[k] = true
 	defer delete(w.merging, k)
@@ -656,7 +748,11 @@ func tagFault(n *yaml.Node, line int, key string) *fault {
 		return nil
 	}
 	if tag := n.ShortTag(); slices.Contains(yamlTags, tag) {
-		return keyFault(line, key, "is tagged "+tag+", and its value is not of that type")
+		if key == "" {
+			return &fault{line, fmt.Sprintf("Remove the tag %s, or write a value of that type.", tag), "A value is tagged " + tag + ", and it is not of that type"}
+		}
+		// The key is in the cause, which no name's length can push past 100 characters.
+		return &fault{line, fmt.Sprintf("Remove the tag %s, or write a value of that type.", tag), key + " is tagged " + tag + ", and its value is not of that type"}
 	}
 	return keyFault(line, key, "has a tag its value is not of")
 }

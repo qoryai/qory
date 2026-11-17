@@ -72,9 +72,9 @@ func TestANamedHarnessHidesItsAddresses(t *testing.T) {
 	if err.Error() != "read "+base {
 		t.Errorf("the error is %q", err)
 	}
-	path := fmt.Errorf("module more: %w", &stack.SourcePathError{Path: "../secret-folder-2"})
+	path := fmt.Errorf("extends: %w", &stack.SourcePathError{Path: "../secret-folder-2", Module: "more"})
 	var sp *stack.SourcePathError
-	if err := n.HideError(path); err.Error() != "module more: source.path is not a directory inside the repository" || !errors.As(err, &sp) {
+	if err := n.HideError(path); err.Error() != "extends: Set source.path of module more to a folder inside its repository.\n  source.path is not a directory inside the repository: it is absolute, the repository's root, or leads out of it." || !errors.As(err, &sp) {
 		t.Errorf("a source.path that leads out shows as %q", err)
 	}
 	other := "https://code.example.com/team/other-stacks"
@@ -83,7 +83,7 @@ func TestANamedHarnessHidesItsAddresses(t *testing.T) {
 	if extends == nil || !strings.Contains(extends.Error(), other) {
 		t.Fatalf("a base that extends another shows as %v, want its address when shown", extends)
 	}
-	if err := n.HideError(extends); err.Error() != "/stacks/qory-stack.yaml extends another stack, and a stack does not extend another" || !errors.As(err, &be) {
+	if err := n.HideError(extends); err.Error() != "Set extends to a stack that does not extend another.\n  /stacks/qory-stack.yaml extends another stack, and a stack does not extend another." || !errors.As(err, &be) {
 		t.Errorf("a base that extends another shows as %q", err)
 	}
 }

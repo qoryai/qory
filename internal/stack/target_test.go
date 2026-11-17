@@ -1,9 +1,12 @@
 package stack
 
 import (
+	"errors"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 // compose validates a document built in Go as the harness section of a checkout's
@@ -33,24 +36,24 @@ func TestNewComposeReadsTheCheckoutsOwnStack(t *testing.T) {
 		target Target
 		want   string
 	}{
-		{"no runtime", Target{Model: "opus"}, "target.runtime is required"},
-		{"an empty list", Target{Runtimes: Runtimes{}}, "target.runtime is required"},
-		{"an empty name", Target{Runtimes: Runtimes{"claude", ""}}, "target.runtime lists an empty runtime"},
-		{"the same runtime twice", Target{Runtimes: Runtimes{"claude", "codex", "claude"}}, "target.runtime lists claude twice"},
+		{"no runtime", Target{Model: "opus"}, "Set target.runtime to one runtime name or a list of names.\n  No runtime is set.\n  target.runtime is in {path}."},
+		{"an empty list", Target{Runtimes: Runtimes{}}, "Set target.runtime to one runtime name or a list of names.\n  No runtime is set.\n  target.runtime is in {path}."},
+		{"an empty name", Target{Runtimes: Runtimes{"claude", ""}}, "Remove the empty name from target.runtime.\n  A runtime name is not empty.\n  target.runtime is in {path}."},
+		{"the same runtime twice", Target{Runtimes: Runtimes{"claude", "codex", "claude"}}, "List claude once in target.runtime.\n  target.runtime lists it twice.\n  target.runtime is in {path}."},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			_, err := compose(t, &Stack{Target: c.target, Modules: []Module{{Name: "app"}}})
 			if err == nil {
 				t.Fatal("the document was accepted")
 			}
-			if !strings.HasSuffix(err.Error(), ": "+c.want) {
-				t.Errorf("error = %q, want it to end with %q", err, c.want)
+			if want := strings.TrimSuffix(c.want, "{path}."); !strings.HasPrefix(err.Error(), want) || !strings.HasSuffix(err.Error(), "qory.yaml.") {
+				t.Errorf("error = %q, want it to start with %q and end with the path of qory.yaml", err, want)
 			}
 		})
 	}
 	_, err = compose(t, &Stack{Target: Target{Runtimes: Runtimes{"claude"}}})
-	if want := "modules is empty; a stack lists at least one module"; err == nil || !strings.HasSuffix(err.Error(), want) {
-		t.Errorf("an own stack without modules: err = %v, want %q", err, want)
+	if want := "List at least one module under modules.\n  modules is empty"; err == nil || !strings.HasPrefix(err.Error(), want) {
+		t.Errorf("a stack with no base and no modules: err = %v, want it to start with %q", err, want)
 	}
 }
 
@@ -78,16 +81,16 @@ func TestNewComposeReadsATargetBesideExtends(t *testing.T) {
 		target Target
 		want   string
 	}{
-		{"an empty name", Target{Runtimes: Runtimes{"claude", ""}}, "target.runtime lists an empty runtime"},
-		{"the same runtime twice", Target{Runtimes: Runtimes{"claude", "claude"}}, "target.runtime lists claude twice"},
+		{"an empty name", Target{Runtimes: Runtimes{"claude", ""}}, "Remove the empty name from target.runtime.\n  A runtime name is not empty.\n  target.runtime is in {path}."},
+		{"the same runtime twice", Target{Runtimes: Runtimes{"claude", "claude"}}, "List claude once in target.runtime.\n  target.runtime lists it twice.\n  target.runtime is in {path}."},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			_, err := compose(t, &Stack{Extends: base, Target: c.target})
 			if err == nil {
 				t.Fatal("the document was accepted")
 			}
-			if !strings.HasSuffix(err.Error(), ": "+c.want) {
-				t.Errorf("error = %q, want it to end with %q", err, c.want)
+			if want := strings.TrimSuffix(c.want, "{path}."); !strings.HasPrefix(err.Error(), want) || !strings.HasSuffix(err.Error(), "qory.yaml.") {
+				t.Errorf("error = %q, want it to start with %q and end with the path of qory.yaml", err, want)
 			}
 		})
 	}
@@ -107,5 +110,19 @@ func TestRuntimesValidateIsCalledOnTheFlagToo(t *testing.T) {
 	}
 	if (Runtimes{}).First() != "" {
 		t.Error("First of an empty list is not empty")
+	}
+}
+
+// TestAnInvalidRuntimeListKeepsTheDecoderError is a target.runtime that is a
+// mapping: the refusal starts with its fix, and errors.As still matches the decoder's
+// *yaml.TypeError under it.
+func TestAnInvalidRuntimeListKeepsTheDecoderError(t *testing.T) {
+	_, err := Load(write(t, "apiVersion: qory.dev/v1alpha1\ntarget:\n  runtime: {claude: opus}\nmodules:\n  - name: core\n"))
+	if err == nil || !strings.HasPrefix(err.Error(), "Set target.runtime to one runtime name or a list of names.\n") {
+		t.Fatalf("%v", err)
+	}
+	var te *yaml.TypeError
+	if !errors.As(err, &te) {
+		t.Errorf("errors.As finds no *yaml.TypeError under %v", err)
 	}
 }

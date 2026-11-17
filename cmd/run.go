@@ -1530,13 +1530,14 @@ func machineCredentials(ctx context.Context, r *config.Forager, e config.Expansi
 		def := gateway.Credential{Name: c.Name, Env: c.Env, File: c.File, Adapter: c.Adapter, Argument: c.Argument, Hosts: c.Hosts, Scheme: c.Scheme, Username: c.Username, Header: c.Header, Paths: c.Paths, Placeholders: c.Placeholders,
 			Format: c.Format, Endpoint: c.Endpoint, OAuth: c.OAuth, KeyPrefixes: c.KeyPrefixes}
 		if err := def.Check(); err != nil {
-			return nil, input(foragerRefusal(c.Name, err))
+			return nil, input(foragerRefusal("credential", c.Name, err))
 		}
 		if c.Integration == "" && len(c.Adapter) > 0 {
 			// The gateway runs the adapter by the path checked here.
 			found, err := config.Program(c.Adapter[0], e.Workspace, "an adapter")
 			if err != nil {
-				return nil, input(fmt.Errorf("%s: gateway.credentials.%s.adapter: %w", config.ForagerFileName, accesskey.ShownName(c.Name, false), exports.HideValueError(err, c.Adapter[0])))
+				at := "gateway.credentials." + accesskey.ShownName(c.Name, false)
+				return nil, input(refuseProgram("Fix the adapter of "+at+".", at+".adapter", config.ForagerFileName, exports.HideValueError(err, c.Adapter[0])))
 			}
 			def.Adapter = append([]string{found}, c.Adapter[1:]...)
 		}
@@ -1552,14 +1553,15 @@ func gatewayRunLimits(r *config.Forager) gateway.RunLimits {
 }
 
 // foragerRefusal is err, Forager's refusal of the definition of the credential or the
-// tool name, after forager.yaml's name. When name contains an access key secret or a
-// run key, each word of err that contains name prints as [accesskey.ShownName] prints
-// it.
-func foragerRefusal(name string, err error) error {
+// tool name, as a refusal of forager.yaml: the fix, Forager's text, and the place. kind
+// is "credential" or "tool". When name contains an access key secret or a run key, each
+// word of err that contains name prints as [accesskey.ShownName] prints it.
+func foragerRefusal(kind, name string, err error) error {
+	at := kind + " " + accesskey.ShownName(name, false)
 	if accesskey.ContainsSecret(name) {
-		return fmt.Errorf("%s: %s", config.ForagerFileName, exports.HideName(err.Error(), name))
+		err = errors.New(exports.HideName(err.Error(), name))
 	}
-	return fmt.Errorf("%s: %w", config.ForagerFileName, err)
+	return refuseProgram("Fix the "+at+" in "+config.ForagerFileName+".", at, config.ForagerFileName, err)
 }
 
 // machineTools returns the tools forager.yaml defines, the machine's gateway's, each one
@@ -1572,13 +1574,14 @@ func machineTools(r *config.Forager, workspace []string) ([]gateway.Tool, error)
 	for _, t := range r.Tools {
 		def := gateway.Tool{Name: t.Name, Command: t.Command, Argument: t.Argument, Serves: t.Serves, Placeholders: t.Placeholders}
 		if err := def.Check(); err != nil {
-			return nil, input(foragerRefusal(t.Name, err))
+			return nil, input(foragerRefusal("tool", t.Name, err))
 		}
 		if len(t.Command) > 0 {
 			// The gateway runs the tool by the path checked here.
 			found, err := config.Program(t.Command[0], workspace, "a tool")
 			if err != nil {
-				return nil, input(fmt.Errorf("%s: gateway.tools.%s.command: %w", config.ForagerFileName, accesskey.ShownName(t.Name, false), exports.HideValueError(err, t.Command[0])))
+				at := "gateway.tools." + accesskey.ShownName(t.Name, false)
+				return nil, input(refuseProgram("Fix the command of "+at+".", at+".command", config.ForagerFileName, exports.HideValueError(err, t.Command[0])))
 			}
 			def.Command = append([]string{found}, t.Command[1:]...)
 		}
@@ -2266,10 +2269,10 @@ func enclose(spec *runSpec, r *config.Forager, o wallOptions, selected string, f
 	for _, v := range o.mounts {
 		m, err := config.ParseMount(v)
 		if err != nil {
-			return input(fmt.Errorf("--mount: %w", exports.HideValueError(err, v)))
+			return input(refuseFlag("--mount", exports.HideValueError(err, v)))
 		}
 		if _, err := os.Stat(m.Path); err != nil {
-			return input(fmt.Errorf("--mount: %w", exports.HideError(err)))
+			return input(exports.Refuse("Check the path of --mount.", strings.TrimSuffix(exports.HideError(err).Error(), ".")+"."))
 		}
 		more = append(more, wall.Mount{Path: m.Path, ReadOnly: m.ReadOnly})
 		spec.given = append(spec.given, givenMount{path: m.Path, from: "--mount"})

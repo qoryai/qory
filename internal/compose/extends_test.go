@@ -57,8 +57,8 @@ func TestExtendKeepsTheDocumentsTarget(t *testing.T) {
 // address, since the harness is shown.
 func TestLoadBaseStopsABaseLinkedOutOfItsClone(t *testing.T) {
 	for _, c := range []struct{ link, want string }{
-		{"stacks/web/" + stack.FileName, ": qory-stack.yaml links outside the repository"},
-		{config.FileName, ": qory.yaml at the root of its repository links outside the repository"},
+		{"stacks/web/" + stack.FileName, "Make the qory-stack.yaml link in the base stack point inside the repository.\n  qory-stack.yaml links outside the repository.\n  extends is {extends}."},
+		{config.FileName, "Make the qory.yaml link at the root of the base stack's repository point inside it.\n  qory.yaml at the root of its repository links outside the repository.\n  extends is {extends}."},
 	} {
 		t.Run(c.link, func(t *testing.T) {
 			isolateAll(t)
@@ -92,7 +92,7 @@ func TestLoadBaseStopsABaseLinkedOutOfItsClone(t *testing.T) {
 				t.Fatal(err)
 			}
 			_, _, err = compose.LoadBase(p, "", compose.Options{Cache: t.TempDir()})
-			if want := "extends " + url + "#main:stacks/web" + c.want; err == nil || err.Error() != want {
+			if want := strings.ReplaceAll(c.want, "{extends}", url+"#main:stacks/web"); err == nil || err.Error() != want {
 				t.Fatalf("got %v\nwant %s", err, want)
 			}
 		})

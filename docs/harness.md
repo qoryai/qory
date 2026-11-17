@@ -251,9 +251,12 @@ compose with exit 2, and so does a folder with no skill below it. The line shows
 such folder:
 
 ```
-module core: add SKILL.md to skills/review, or put a skill in a folder below it: skills/review has no SKILL.md and no skill below it
-module core: rename skills/tools/codex, or read it through a variant: a folder named after a runtime is not a group
-module core: remove the link skills/tools/gone, or point it at a path that exists: it leads nowhere
+Add SKILL.md to the folder, or put a skill in a folder below it.
+  skills/review in module core has no SKILL.md and no skill below it.
+Rename the folder, or read it through a variant.
+  skills/tools/codex in module core is named after a runtime, and such a folder is not a group.
+Point the link at a path that exists, or remove it.
+  The link skills/tools/gone in module core leads nowhere.
 ```
 
 Two skills of one module with one name stop the compose with exit 2, because an exclude

@@ -483,7 +483,18 @@ release may change what an existing document does, and states it under Upgrading
   withdrawal, so a later push of the name is checked against what it had before.
 - The first line of each compose error shows the fix, in at most 100 characters, and the
   indented lines after it show the cause and the values, as the errors of workflow hooks
-  do. Which input fails, and the exit status, stay the same.
+  do. This holds for the errors of a module's manifest, push checks, variants, skills,
+  files, settings, and tier placeholders, of a module's source and name, of a base stack,
+  of a stack that `-f` fetches by reference, and of the URL checks of a run. A module that
+  cannot be read starts with `Check that you can read the files of module <name>.`, and a
+  tier list reads `light, fast, and thinking`. Which input fails, and the exit status,
+  stay the same.
+- The first line of each error of a stack file, a stack reference (`-f`), a target, `qory.yaml`
+  and `forager.yaml` that `qory run` and `qory harness compose` print at start, of the
+  unknown or repeated key and the YAML alias that every file qory reads can have, of the
+  `exports` section, of the program of an adapter or a tool, and of the push checks, shows
+  the fix, in at most 100 characters, and the indented lines after it show the cause, as the
+  compose errors do. Which input fails, and the exit status, stay the same.
 - When the push of a run's work gets 403 from the run's gateway, the first line of the
   error is `Contact support: the push was refused (403).` The line `One of these stopped
   it:` follows, then one line for each possible cause: the gateway allows a push only to
@@ -871,7 +882,8 @@ release may change what an existing document does, and states it under Upgrading
   otherwise it keeps the run and prints why. The pool section of `forager.yaml` takes
   `runs` (how many runs this host runs at once; 1 when not set), `registry` and
   `run_config`. With `prebuilds`, `harness_ref` or `harness_path` in it, qory stops
-  with `<file>: line <n>: key "<key>" is not one forager.yaml reads`.
+  with `Remove the key, or rename it to one forager.yaml reads.`, then `Key "<key>" is not
+  one forager.yaml reads.` and `It is at line <n> of <file>.`
 - qory treats an enrolment code, `qecn_`, `qecp_`, `qecg_` or `qeci_` in any letter case,
   as a secret, as it treats `qak_`, `qrk_` and `qecr_`. Where qory prints a phrase in
   place of a value or a name that contains one of those, it prints "(a value that

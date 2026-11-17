@@ -409,9 +409,9 @@ func TestEnrolRefusesBeforeItMakesAKey(t *testing.T) {
 		{"another server's code, the pin from the environment", "session:\n  instance:\n    name: build-01\n", map[string]string{"QORY_APIARY_PUBLIC_KEY": `[{"alg":"ed25519","public_key":"` + other.PublicKey().String() + `"}]`}, []string{"--print", srv.URL, srv.code(1, false)}, "the enrolment code is for a server whose key this machine does not pin"},
 		{"another server", "gateway:\n  server:\n    url: https://apiary.example\n", nil, []string{srv.URL, srv.code(1, false)}, foragerFile() + " names the server https://apiary.example, and this command " + srv.URL + ": enrol with the server forager.yaml names, or change its gateway.server.url first"},
 		{"not a code", "", nil, []string{srv.URL, "qecn_F1XT0RE000000000000000000U." + srv.signer.Fingerprint()}, "which is not a character of Crockford's base32"},
-		{"plain http elsewhere", "", nil, []string{"http://apiary.example", srv.code(1, false)}, "gateway.server.url for http://apiary.example is http to a host that is not this machine: an https URL of a host and an optional port, or an http one to this machine, with nothing after"},
-		{"a path", "", nil, []string{"https://apiary.example/x", srv.code(1, false)}, "gateway.server.url for https://apiary.example has a path: an https URL of a host and an optional port, or an http one to this machine, with nothing after"},
-		{"a URL encoded too often", "", nil, []string{"https://apiary.example/%" + strings.Repeat("25", 8) + "41", srv.code(1, false)}, "gateway.server.url is percent-encoded more than 8 times: an https URL of a host and an optional port, or an http one to this machine, with nothing after"},
+		{"plain http elsewhere", "", nil, []string{"http://apiary.example", srv.code(1, false)}, "Set gateway.server.url to an https URL of a host and an optional port.\n  gateway.server.url for http://apiary.example is http to a host that is not this machine.\n  A server URL is an https URL of a host and an optional port, or an http one to this machine, with nothing after."},
+		{"a path", "", nil, []string{"https://apiary.example/x", srv.code(1, false)}, "Set gateway.server.url to an https URL of a host and an optional port.\n  gateway.server.url for https://apiary.example has a path.\n  A server URL is an https URL of a host and an optional port, or an http one to this machine, with nothing after."},
+		{"a URL encoded too often", "", nil, []string{"https://apiary.example/%" + strings.Repeat("25", 8) + "41", srv.code(1, false)}, "Set gateway.server.url to an https URL of a host and an optional port.\n  It is percent-encoded more than 8 times.\n  A server URL is an https URL of a host and an optional port, or an http one to this machine, with nothing after."},
 		{"http to another loopback address", "", nil, []string{"http://127.0.0.2:8080", srv.code(1, false)}, "the server http://127.0.0.2:8080 is http to a host other than localhost, 127.0.0.1 or [::1], which enrolment does not reach; use https"},
 		{"the id in the environment", "", map[string]string{"QORY_ACCESS_KEY_ID": "ak_0123456789abcdef"}, []string{srv.URL, srv.code(1, false)}, "QORY_ACCESS_KEY_ID is set, and qory access-key enrol keeps the key in this machine's files, which it would contradict: unset it, or use --print"},
 		{"the secret in the environment", "", map[string]string{"QORY_ACCESS_KEY_SECRET": newKey(t).Secret()}, []string{srv.URL, srv.code(1, false)}, "QORY_ACCESS_KEY_SECRET is set, and qory access-key enrol keeps the key in this machine's files, which it would contradict: unset it, or use --print"},
@@ -750,8 +750,8 @@ func TestEnrolAfterTheWorkspaceKeysAreRemoved(t *testing.T) {
 	emptyDir(t)
 	srv := newEnrolServer(t)
 	for i, c := range []struct{ keys, want string }{
-		{"    access_key: ak_f1xt0re000000000\n    secret: qak_AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA\n", "gateway.server.access_key is a workspace access key, which servers no longer accept; remove gateway.server.access_key and gateway.server.secret from forager.yaml, then connect this machine as a node: run qory access-key enrol <server> <code>"},
-		{"    secret: qak_AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA\n", "gateway.server.secret is a workspace access key's secret, which servers no longer accept; remove gateway.server.access_key and gateway.server.secret from forager.yaml, then connect this machine as a node: run qory access-key enrol <server> <code>"},
+		{"    access_key: ak_f1xt0re000000000\n    secret: qak_AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA\n", "Remove gateway.server.access_key and gateway.server.secret from forager.yaml.\n  gateway.server.access_key is a workspace access key, which servers no longer accept.\n  Then connect this machine as a node: run qory access-key enrol <server> <code>"},
+		{"    secret: qak_AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA\n", "Remove gateway.server.access_key and gateway.server.secret from forager.yaml.\n  gateway.server.secret is a workspace access key's secret, which servers no longer accept.\n  Then connect this machine as a node: run qory access-key enrol <server> <code>"},
 	} {
 		os.RemoveAll(string(configDir()))
 		writeFile(t, foragerFile(), "gateway:\n  server:\n    url: "+srv.URL+"\n"+c.keys+"session:\n  instance:\n    name: build-01\n")
@@ -759,7 +759,7 @@ func TestEnrolAfterTheWorkspaceKeysAreRemoved(t *testing.T) {
 		if err == nil || cmd.ExitCode(err) != cmd.ExitInput {
 			t.Fatalf("%d: %v", i, err)
 		}
-		wants(t, err.Error(), foragerFile()+": "+c.want)
+		wants(t, err.Error(), c.want, "is in "+foragerFile())
 		if exists(configDir().Path(foragerdir.SecretFile)) || exists(configDir().Path(foragerdir.NewSecretFile)) {
 			t.Errorf("%d: a key was made", i)
 		}
@@ -965,7 +965,7 @@ func TestEnrolPrintLeavesTheServerSectionUnread(t *testing.T) {
 
 	writeFile(t, foragerFile(), "session:\n  instance: [build-01\n")
 	_, _, err = runSplit(t, "", "access-key", "enrol", "--print", srv.URL, srv.code(2, false))
-	if cmd.ExitCode(err) != cmd.ExitInput || !strings.Contains(err.Error(), foragerFile()+": ") {
+	if cmd.ExitCode(err) != cmd.ExitInput || !strings.Contains(err.Error(), "The file is "+foragerFile()+".") {
 		t.Errorf("--print with a forager.yaml that is not YAML: %v", err)
 	}
 	if n := len(srv.sent()); n != 1 {
@@ -991,8 +991,8 @@ func TestEnrolGoesThroughVia(t *testing.T) {
 	}{
 		{[]string{"--via-ca-file", g.caFile}, "--via-ca-file needs --via, the gateway it is the trust of"},
 		{[]string{"--via-certificate-sha256", "47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU="}, "--via-certificate-sha256 needs --via, the gateway it is the trust of"},
-		{[]string{"--via", "http://gateway.example:8443"}, "--via for http://gateway.example:8443 is not https: an https URL of a host and an optional port, with nothing after"},
-		{[]string{"--via", "https://user:pass@gateway.example"}, "--via for https://gateway.example holds user information: an https URL of a host and an optional port, with nothing after"},
+		{[]string{"--via", "http://gateway.example:8443"}, "Set --via to an https URL of a host and an optional port.\n  --via for http://gateway.example:8443 is not https.\n  A via URL is an https URL of a host and an optional port, with nothing after."},
+		{[]string{"--via", "https://user:pass@gateway.example"}, "Set --via to an https URL of a host and an optional port.\n  --via for https://gateway.example contains user information.\n  A via URL is an https URL of a host and an optional port, with nothing after."},
 		{[]string{"--via", g.URL, "--via-ca-file", filepath.Join(dir, "none.pem")}, "--via-ca-file " + filepath.Join(dir, "none.pem") + ": no such file or directory"},
 		{[]string{"--via", g.URL, "--via-ca-file", foragerFile()}, "--via-ca-file " + foragerFile() + " holds no PEM certificate"},
 		{[]string{"--via", g.URL, "--via-certificate-sha256", "pin"}, "--via-certificate-sha256 is not the SHA-256 of a public key in standard base64 with padding, 44 characters ending in ="},

@@ -28,7 +28,7 @@ func walkFault(t *testing.T, body string, known bool) (*fault, time.Duration) {
 // fault, and merges that expand without end stop at the walk's limit, at once.
 func TestTheWalkEnds(t *testing.T) {
 	f, took := walkFault(t, "session: &s {<<: *s}\n", true)
-	if f == nil || f.line != 1 || f.text != "session merges a mapping that holds the merge" || took > 2*time.Second {
+	if f == nil || f.line != 1 || f.text != "session merges a mapping that contains the merge" || took > 2*time.Second {
 		t.Errorf("a mapping that merges itself: %+v in %v", f, took)
 	}
 	bomb := "gateway:\n  credentials:\n    c0: &m0 {k: v}\n"
@@ -36,7 +36,7 @@ func TestTheWalkEnds(t *testing.T) {
 		bomb += fmt.Sprintf("    c%d: &m%d {<<: [%s*m%d]}\n", i, i, strings.Repeat(fmt.Sprintf("*m%d, ", i-1), 9), i-1)
 	}
 	f, took = walkFault(t, bomb+"wall:\n  <<: *m8\n", false)
-	if f == nil || f.line != 0 || f.text != tooManyAliases || took > 2*time.Second {
+	if f == nil || f.line != 0 || f.text != strings.TrimSuffix(tooManyAliases, ".") || took > 2*time.Second {
 		t.Errorf("merges that expand without end: %+v in %v", f, took)
 	}
 }
@@ -56,8 +56,14 @@ func TestADecoderPanicIsARefusal(t *testing.T) {
 	if err := yaml.Unmarshal([]byte(body), &doc); err != nil {
 		t.Fatal(err)
 	}
-	if got := foragerDecodeError("forager.yaml", &doc, reflect.TypeFor[foragerFile](), "", true, err); got.Error() != "forager.yaml: the YAML decoder failed reading the file" {
+	if got := foragerDecodeError("forager.yaml", &doc, reflect.TypeFor[foragerFile](), "", true, err); got.Error() != "Check the YAML of the file.\n  The YAML decoder failed reading the file.\n  The file is forager.yaml." {
 		t.Errorf("%v", got)
+	}
+	// A file in a folder named with an access key secret is printed as the phrase.
+	folder := "/tmp/qak_AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA/forager.yaml"
+	got := foragerDecodeError(folder, &doc, reflect.TypeFor[foragerFile](), "", true, err).Error()
+	if strings.Contains(got, "qak_") || !strings.Contains(got, "(a name that contains an access key secret)") {
+		t.Errorf("the path of a decoder failure: %s", got)
 	}
 	if _, err := editEnrolment([]byte(body), Enrolment{URL: "https://apiary.example", AccessKeyID: "ak_0123456789abcdef"}); err != nil {
 		t.Errorf("the enrolment writer: %v", err)

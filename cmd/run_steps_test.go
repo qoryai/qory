@@ -232,7 +232,7 @@ func TestARunRecordsItsFailedComposeStep(t *testing.T) {
 		t.Fatalf("%v (exit %d), want 2\n%s", err, cmd.ExitCode(err), out)
 	}
 	got := recordedSteps(t, root)
-	if len(got) != 3 || got[0] != "1 started compose: compose the harness" || got[2] != "1 exited failed 2" {
+	if len(got) < 3 || got[0] != "1 started compose: compose the harness" || got[len(got)-1] != "1 exited failed 2" {
 		t.Fatalf("the steps:\n%s\nwant step 1, the compose, failed 2", strings.Join(got, "\n"))
 	}
 	text := strings.TrimPrefix(got[1], "1 log: qory run: ")

@@ -20,28 +20,28 @@ type foragerList struct {
 }
 
 // notAHost is the refusal of an entry of gateway.egress.allow or deny.
-const notAHost = " is not a lower-case host name or a *. suffix, or it ends in a number and is not an IPv4 address in canonical form; no port, path or scheme"
+const notAHost = "A host is a lower-case host name or a *. suffix. One that ends in a number is an IPv4 address in canonical form. It has no port, path, or scheme."
 
 // foragerLists are the lists of strings of forager.yaml, each written in one line.
 var foragerLists = []foragerList{
-	{"gateway: {egress: {mode: observe, allow: %s}}\n", "a.example", ": gateway.egress.allow[%d]" + notAHost, func(r *config.Forager) []string { return r.Egress.Allow }},
-	{"gateway: {egress: {mode: observe, deny: %s}}\n", "a.example", ": gateway.egress.deny[%d]" + notAHost, func(r *config.Forager) []string { return r.Egress.Deny }},
-	{"gateway: {credentials: {c: {adapter: %s}}}\n", "/opt/adapter", ": line 1: gateway.credentials.c.adapter[%d] is not a string", func(r *config.Forager) []string { return r.Credentials[0].Adapter }},
-	{"gateway: {credentials: {c: {env: X, hosts: %s}}}\n", "a.example", ": line 1: gateway.credentials.c.hosts[%d] is not a string", func(r *config.Forager) []string { return r.Credentials[0].Hosts }},
-	{"gateway: {credentials: {c: {env: X, paths: %s}}}\n", "/v1/*", ": line 1: gateway.credentials.c.paths[%d] is not a string", func(r *config.Forager) []string { return r.Credentials[0].Paths }},
-	{"gateway: {credentials: {c: {env: X, placeholders: %s}}}\n", "TOKEN", ": line 1: gateway.credentials.c.placeholders[%d] is not a string", func(r *config.Forager) []string { return r.Credentials[0].Placeholders }},
-	{"gateway: {tools: {t: {command: %s}}}\n", "/opt/tool", ": line 1: gateway.tools.t.command[%d] is not a string", func(r *config.Forager) []string { return r.Tools[0].Command }},
-	{"gateway: {tools: {t: {command: [/x], serves: %s}}}\n", "a.example", ": line 1: gateway.tools.t.serves[%d] is not a string", func(r *config.Forager) []string { return r.Tools[0].Serves }},
-	{"gateway: {tools: {t: {command: [/x], placeholders: %s}}}\n", "TOKEN", ": line 1: gateway.tools.t.placeholders[%d] is not a string", func(r *config.Forager) []string { return r.Tools[0].Placeholders }},
-	{"wall: {adapter: docker, env: %s}\n", "MODEL_KEY", ": wall.env[%d] is not a variable's name; the value comes from the environment, never from this file", func(r *config.Forager) []string { return r.Wall.Env }},
-	{"wall: {adapter: docker, mounts: %s}\n", "/srv", ": wall.mounts[%d] is not an absolute path, with :ro after it for a read-only one", func(r *config.Forager) []string {
+	{"gateway: {egress: {mode: observe, allow: %s}}\n", "a.example", "Set gateway.egress.allow[%[1]d] to a lower-case host name or a *. suffix.\n  " + notAHost + "\n  gateway.egress.allow is in {path}.", func(r *config.Forager) []string { return r.Egress.Allow }},
+	{"gateway: {egress: {mode: observe, deny: %s}}\n", "a.example", "Set gateway.egress.deny[%[1]d] to a lower-case host name or a *. suffix.\n  " + notAHost + "\n  gateway.egress.deny is in {path}.", func(r *config.Forager) []string { return r.Egress.Deny }},
+	{"gateway: {credentials: {c: {adapter: %s}}}\n", "/opt/adapter", "Set gateway.credentials.c.adapter[%[1]d] to a string.\n  gateway.credentials.c.adapter[%[1]d] is not a string.\n  It is at line 1 of {path}.", func(r *config.Forager) []string { return r.Credentials[0].Adapter }},
+	{"gateway: {credentials: {c: {env: X, hosts: %s}}}\n", "a.example", "Set gateway.credentials.c.hosts[%[1]d] to a string.\n  gateway.credentials.c.hosts[%[1]d] is not a string.\n  It is at line 1 of {path}.", func(r *config.Forager) []string { return r.Credentials[0].Hosts }},
+	{"gateway: {credentials: {c: {env: X, paths: %s}}}\n", "/v1/*", "Set gateway.credentials.c.paths[%[1]d] to a string.\n  gateway.credentials.c.paths[%[1]d] is not a string.\n  It is at line 1 of {path}.", func(r *config.Forager) []string { return r.Credentials[0].Paths }},
+	{"gateway: {credentials: {c: {env: X, placeholders: %s}}}\n", "TOKEN", "Set gateway.credentials.c.placeholders[%[1]d] to a string.\n  gateway.credentials.c.placeholders[%[1]d] is not a string.\n  It is at line 1 of {path}.", func(r *config.Forager) []string { return r.Credentials[0].Placeholders }},
+	{"gateway: {tools: {t: {command: %s}}}\n", "/opt/tool", "Set gateway.tools.t.command[%[1]d] to a string.\n  gateway.tools.t.command[%[1]d] is not a string.\n  It is at line 1 of {path}.", func(r *config.Forager) []string { return r.Tools[0].Command }},
+	{"gateway: {tools: {t: {command: [/x], serves: %s}}}\n", "a.example", "Set gateway.tools.t.serves[%[1]d] to a string.\n  gateway.tools.t.serves[%[1]d] is not a string.\n  It is at line 1 of {path}.", func(r *config.Forager) []string { return r.Tools[0].Serves }},
+	{"gateway: {tools: {t: {command: [/x], placeholders: %s}}}\n", "TOKEN", "Set gateway.tools.t.placeholders[%[1]d] to a string.\n  gateway.tools.t.placeholders[%[1]d] is not a string.\n  It is at line 1 of {path}.", func(r *config.Forager) []string { return r.Tools[0].Placeholders }},
+	{"wall: {adapter: docker, env: %s}\n", "MODEL_KEY", "Set wall.env[%d] to a variable's name.\n  The entry is not one. The value comes from the environment, never from this file.\n  wall.env is in {path}.", func(r *config.Forager) []string { return r.Wall.Env }},
+	{"wall: {adapter: docker, mounts: %s}\n", "/srv", "Set wall.mounts[%d] to an absolute path, with :ro after it for a read-only one.\n  The entry is not an absolute path.\n  wall.mounts is in {path}.", func(r *config.Forager) []string {
 		var out []string
 		for _, m := range r.Wall.Mounts {
 			out = append(out, m.Path)
 		}
 		return out
 	}},
-	{"wall: {adapter: docker, ca_env: %s}\n", "SSL_CERT_FILE", ": wall.ca_env[%d] is not a variable's name", func(r *config.Forager) []string { return r.Wall.CAEnv }},
+	{"wall: {adapter: docker, ca_env: %s}\n", "SSL_CERT_FILE", "Set wall.ca_env[%d] to a variable's name.\n  The entry is not one.\n  wall.ca_env is in {path}.", func(r *config.Forager) []string { return r.Wall.CAEnv }},
 }
 
 // TestForagerRefusesAListEntryThatIsNotAString writes into every list of strings of
@@ -72,9 +72,9 @@ func TestForagerRefusesAListEntryThatIsNotAString(t *testing.T) {
 			_, err := config.LoadForager()
 			notString := l.notString
 			if c.before != "" {
-				notString = strings.Replace(notString, ": line 1: ", ": line 2: ", 1)
+				notString = strings.Replace(notString, "at line 1 of", "at line 2 of", 1)
 			}
-			if want := path + fmt.Sprintf(notString, c.at); err == nil || err.Error() != want {
+			if want := strings.ReplaceAll(fmt.Sprintf(notString, c.at), "{path}", path); err == nil || err.Error() != want {
 				t.Errorf("%q: %v, want %q", body, err, want)
 			}
 			if err != nil && (strings.Contains(err.Error(), marker) || strings.Contains(err.Error(), "qak_")) {
@@ -154,10 +154,10 @@ func TestForagerReadsTheEgressHostsAsForagerDoes(t *testing.T) {
 			body := "gateway: {egress: {mode: enforce, " + list + ": [a.example, \"" + host + "\"]}}\n"
 			path := foragerFile(t, body)
 			_, err := config.LoadForager()
-			if want := path + ": gateway.egress." + list + "[1]" + notAHost; err == nil || err.Error() != want {
+			if want := "Set gateway.egress." + list + "[1] to a lower-case host name or a *. suffix.\n  " + notAHost + "\n  gateway.egress." + list + " is in " + path + "."; err == nil || err.Error() != want {
 				t.Errorf("%q: %v, want %q", body, err, want)
 			}
-			if err != nil && strings.Contains(strings.TrimPrefix(err.Error(), path), host) {
+			if err != nil && strings.Contains(strings.ReplaceAll(err.Error(), path, ""), host) {
 				t.Errorf("%q: the refusal holds the host: %v", body, err)
 			}
 		}
