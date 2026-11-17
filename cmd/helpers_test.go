@@ -79,6 +79,11 @@ func TestMain(m *testing.M) {
 		args := os.Args[slices.Index(os.Args, "--")+1:]
 		os.Exit(enginePull(args[0], args[1], args[2]))
 	}
+	// The child of TestARealRunsPushGoesThroughItsPushProxyAlone runs that one test with the
+	// SSL_CERT_FILE its parent set, which the fixed environment below would drop.
+	if os.Getenv("QORY_TEST_REAL_PUSH") != "" {
+		os.Exit(m.Run())
+	}
 	cmd.ShortenSocketGrace(10 * time.Millisecond)
 	// Forager joins no session of Claude Code without an installed folder, so the
 	// program that such a test's launch names is copied into one.
