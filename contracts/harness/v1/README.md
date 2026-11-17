@@ -667,7 +667,7 @@ module's other files (§The module manifest).
 #### Artifact types
 
 An artifact is a typed, versioned result of a work item. Each entry of `artifact_types`
-is a standard type, `name` alone, or a custom type, with these keys and no others:
+is a standard type, `name` alone or with `withdrawable`, or a custom type, with these keys and no others:
 
 | Key | Meaning |
 |---|---|
@@ -676,9 +676,17 @@ is a standard type, `name` alone, or a custom type, with these keys and no other
 | `size_limit` | the most bytes of all files of one version, a whole number from 1 to the base view's most: 10 MiB for `document`, 50 MiB for `image`, 2 GiB for `video`, 1 GiB for `file` and 1 MiB for `structured` |
 | `max_files` | the most files of one version, a whole number from 1 to 20; exactly 1 for `structured` |
 | `json_schema` | the JSON Schema of the file, exactly when `base_view` is `structured` |
+| `withdrawable` | optional, `true` or `false`, and `true` when the entry has none: whether a run may withdraw a name of the type with `qory artifact push --withdraw`. A standard type and a custom type may both set it. qory refuses any other value, such as `"no"`, with the fix on the first line and the file on the last |
 
 A custom type has `base_view`, `size_limit` and `max_files`. qory has no list of standard
-types: a name alone passes for any name of the right form.
+types: a name alone, or a name with `withdrawable` alone, passes for any name of the right
+form.
+
+```yaml
+artifact_types:
+  - name: acceptance-lock   # a standard type that a run cannot withdraw
+    withdrawable: false
+```
 
 With no `artifact_types`, a workspace made from the template shows every standard type. A
 list, also an empty one, hides each standard type it leaves out in a new workspace, except
@@ -1698,7 +1706,9 @@ Per runtime, the files written into its directory:
 - **codex**: `config.toml` with the model, the servers as `[mcp_servers.<name>]` tables,
   and any other `settings/codex/` file, without `shell_environment_policy.set`, whose
   variables are the launch's, one `agents/<name>.toml` per agent with the body as
-  `developer_instructions`, and for a launch the skills linked under `skills/` and the
+  `developer_instructions`, with `[features]` `shell_tool = false` when the agent's `tools`
+  key lists no `Bash` or `PowerShell` (an agent with no `tools` key keeps the shell; Codex
+  0.149.0 or later reads this setting), and for a launch the skills linked under `skills/` and the
   instructions as `AGENTS.md`, neither linked into the checkout (§Launching). Codex
   passes its environment to every command it runs. Codex 0.76.0 or later filters no
   name by default. An older Codex drops the names that contain `KEY`, `SECRET` or

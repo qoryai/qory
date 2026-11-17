@@ -1,3 +1,3 @@
 Remove the key "owner" from entry 1 of artifact_types.
-  An artifact type has only name, base_view, size_limit, max_files, and json_schema.
+  An artifact type has only name, base_view, size_limit, max_files, json_schema, and withdrawable.
   The entry is in modules/support-desk/process.yaml.

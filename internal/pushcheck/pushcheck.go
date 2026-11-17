@@ -283,19 +283,20 @@ func (c *Checker) For(artifactType string) *compose.PushCheck {
 // push in the run API's form, or whose members [readPush] cannot read one way only, such
 // as one with a member twice, is a refusal: nothing is stored that was not checked. Of a
 // push, only one of a type with a check runs the check, and a file's name that is not
-// [runapi.LocalFilename] or is there twice is a refusal. The check never changes the
-// body.
+// [runapi.LocalFilename] or is there twice is a refusal. A withdrawal, a push with
+// `withdraw` true and no files, runs no check: it has no file to check. With files, a push
+// with `withdraw` true takes the same path as any push. The check never changes the body.
 func (c *Checker) RunAPICheck(ctx context.Context, req session.RunAPIRequest) (*session.RunAPIRefusal, error) {
 	if req.Path != artifactsPath || len(c.Checks) == 0 {
 		return nil, nil
 	}
-	artifactType, files, err := readPush(req.Body)
+	artifactType, files, withdraw, err := readPush(req.Body)
 	switch {
 	case errors.Is(err, errAmbiguous):
 		return failure(textMembers, "").Refusal(), nil
 	case err != nil:
 		return failure(textNoPush, fmt.Sprintf(textNoPushCause, cut(cleanLine(strings.TrimSuffix(err.Error(), "."))))).Refusal(), nil
-	case c.For(artifactType) == nil:
+	case c.For(artifactType) == nil, withdraw && len(files) == 0:
 		return nil, nil
 	}
 	for i, f := range files {
