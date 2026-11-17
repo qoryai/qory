@@ -396,6 +396,53 @@ func TestModuleSchemaMatchesTheReaderOnPushChecks(t *testing.T) {
 	}
 }
 
+// TestModuleSchemaMatchesTheReaderOnSubmitProgram keeps the schema and module.ReadManifest
+// in step on submit_program: each value passes both or fails both.
+func TestModuleSchemaMatchesTheReaderOnSubmitProgram(t *testing.T) {
+	schema, err := jsonschema.NewCompiler().Compile("../../contracts/harness/v1/module.schema.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		value string
+		valid bool
+	}{
+		{`{"command": ["bin/open-draft"]}`, true},
+		{`{"command": ["./bin/open-draft", "--strict", ""]}`, true},
+		{`{"command": ["c.js", "--dir", "../x"]}`, true},
+		{`{"command": []}`, false},
+		{`{"command": [""]}`, false},
+		{`{"command": ["/usr/bin/node"]}`, false},
+		{`{"command": ["../c.js"]}`, false},
+		{`{"command": ["a/../c.js"]}`, false},
+		{`{"command": ["c.js", 3]}`, false},
+		{`{"command": "c.js"}`, false},
+		{`{}`, false},
+		{`{"command": ["c.js"], "timeout": 5}`, false},
+		{`["c.js"]`, false},
+	} {
+		var value any
+		if err := json.Unmarshal([]byte(c.value), &value); err != nil {
+			t.Fatal(err)
+		}
+		doc := map[string]any{"apiVersion": "qory.dev/v1alpha1", "name": "core", "submit_program": value}
+		if err := schema.Validate(doc); (err == nil) != c.valid {
+			t.Errorf("schema: %s valid=%v err=%v", c.value, c.valid, err)
+		}
+		dir := t.TempDir()
+		body, err := yaml.Marshal(doc)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, module.ManifestName), body, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := module.ReadManifest(dir); (err == nil) != c.valid {
+			t.Errorf("reader: %s valid=%v err=%v", c.value, c.valid, err)
+		}
+	}
+}
+
 // TestConfigSchemaKnowsTiers takes harness.tiers in both entry forms, with or beside a
 // document, and refuses a name that is not a tier, an empty model, an entry without a
 // model and a key the entry does not have. A stack has no tiers.

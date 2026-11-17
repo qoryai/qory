@@ -105,6 +105,23 @@
         }
       }
     },
+    "submit_program": {
+      "description": "The program of the submit step: it reads the submission and writes the forge's links and the draft into it. A composed harness has at most one. Optional: a module without the key adds none.",
+      "type": "object",
+      "required": ["command"],
+      "additionalProperties": false,
+      "properties": {
+        "command": {
+          "description": "The program, a relative path inside the module with no .. part, then its arguments.",
+          "type": "array",
+          "minItems": 1,
+          "prefixItems": [
+            {"type": "string", "minLength": 1, "pattern": "^[^/]", "not": {"pattern": "(^|/)\\.\\.(/|$)"}}
+          ],
+          "items": {"type": "string"}
+        }
+      }
+    },
     "variants": {
       "type": "object",
       "properties": {"default": {"type": "string", "minLength": 1}},

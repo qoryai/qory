@@ -202,6 +202,9 @@ type Result struct {
 	// sorted by type, one per type; nil when no module declares one. [Result.PushChecksFor]
 	// renders them for a home.
 	PushChecks []PushCheck
+	// SubmitProgram is the program of the submit step that a module declares; nil when no
+	// module declares one. [Result.SubmitProgramFor] renders it for a home.
+	SubmitProgram *SubmitProgram
 	// Hooks are the workflow hooks of the checkout's qory.yaml, in its order, each
 	// checked against the base stack; nil when it lists none. A build writes them into
 	// hooks.json.
@@ -430,6 +433,9 @@ func ComposeWith(p *stack.Stack, opts Options) (_ *Result, err error) {
 		if err := addPushChecks(res, checkers, l.Dir, root, name, m.PushChecks); err != nil {
 			return nil, err
 		}
+		if err := addSubmitProgram(res, l.Dir, root, name, m.SubmitProgram); err != nil {
+			return nil, err
+		}
 		res.Modules = append(res.Modules, rl)
 		for _, e := range l.Entries {
 			key := e.Kind + "/" + e.Name
@@ -604,6 +610,73 @@ func addPushChecks(res *Result, checkers map[string]string, dir string, root *os
 		res.PushChecks = append(res.PushChecks, PushCheck{Type: c.Type, Module: name, Command: command, Reads: c.Reads})
 	}
 	return nil
+}
+
+// SubmitProgram is the program of the submit step that the composed harness declares.
+type SubmitProgram struct {
+	// Module is the module that declares the program.
+	Module string `json:"module"`
+	// Command is the program and its arguments. The program is
+	// $QORY_HARNESS_HOME/modules/<module>/<path>, before substitution.
+	Command []string `json:"command"`
+}
+
+// addSubmitProgram sets the submit program of the module name at dir in the result. A
+// second module that declares one fails the compose, and so does a program that is not a
+// file in the module, read through root when it is not nil, and one in an entry the
+// module's exclude or only leaves out.
+func addSubmitProgram(res *Result, dir string, root *os.Root, name string, program *module.SubmitProgram) error {
+	if program == nil {
+		return nil
+	}
+	if res.SubmitProgram != nil {
+		return exports.Errorf("Remove submit_program from module %s or module %s.\n  A composed harness has one submit program, and both modules declare one.", shown(res.SubmitProgram.Module), shown(name))
+	}
+	if root == nil {
+		opened, err := os.OpenRoot(dir)
+		if err != nil {
+			return exports.HideError(err)
+		}
+		defer opened.Close()
+		root = opened
+	}
+	path := program.Command[0]
+	shownProgram := exports.Value(filepath.ToSlash(path), false)
+	info, err := root.Stat(path)
+	if err != nil {
+		return exports.Errorf("Add %s to module %s, or change its submit_program.\n  Module %s has no file at %s.", shownProgram, shown(name), shown(name), shownProgram)
+	}
+	if !info.Mode().IsRegular() {
+		return exports.Errorf("Set the submit_program of module %s to a program file.\n  %s is not a file.", shown(name), shownProgram)
+	}
+	for _, e := range res.Excludes {
+		if e.Module != name || e.Path == "" {
+			continue
+		}
+		entry, err := filepath.Rel(dir, e.Path)
+		if err != nil || entry != path && !strings.HasPrefix(path, entry+string(filepath.Separator)) {
+			continue
+		}
+		return exports.Errorf("%s\n  The submit_program of module %s is in %s/%s, and an exclude or only of module %s leaves %s/%s out.",
+			altFix(fmt.Sprintf("Keep %s/%s in module %s", e.Kind, shown(e.Name), shown(name)), "move "+shownProgram+" out of it"), shown(name), e.Kind, shown(e.Name), shown(name), e.Kind, shown(e.Name))
+	}
+	command := append([]string{"$QORY_HARNESS_HOME/modules/" + name + "/" + filepath.ToSlash(path)}, program.Command[1:]...)
+	res.SubmitProgram = &SubmitProgram{Module: name, Command: command}
+	return nil
+}
+
+// SubmitProgramFor is a copy of the submit program rendered for a home, with every
+// $QORY_HARNESS_HOME in the command replaced the way [Result.PushChecksFor] replaces it;
+// nil when no module declares one.
+func (r *Result) SubmitProgramFor(home string) *SubmitProgram {
+	if r.SubmitProgram == nil {
+		return nil
+	}
+	command := make([]string, len(r.SubmitProgram.Command))
+	for i, word := range r.SubmitProgram.Command {
+		command[i] = ForHome(word, home).(string)
+	}
+	return &SubmitProgram{Module: r.SubmitProgram.Module, Command: command}
 }
 
 // PushChecksFor is a copy of the push checks rendered for a home, with every

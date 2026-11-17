@@ -949,6 +949,8 @@ push_checks:                     # optional: a check for the files of one artifa
   - type: spec
     command: [scripts/checks.js, push, spec]  # a program in the module, then its arguments
     reads: [questions]           # optional: the other artifact types the check reads
+submit_program:                  # optional: the program of the submit step, one per composed harness
+  command: [bin/open-draft]      # a program in the module, then its arguments
 ```
 
 `description`, optional, describes what the module is for; the report contains it and `qory harness
@@ -1043,6 +1045,18 @@ out of it.` with `The program of the push check for spec is in skills/running, a
 exclude or only of module core leaves skills/running out.` The home contains
 `push-checks.json` with each check, sorted by type, with its `reads` and its program's
 absolute path in the home; a harness whose modules declare no check has no such file.
+
+`submit_program`, optional, declares the program of the submit step: a forge's module ships
+the program that opens or updates the draft pull request and writes the links of the
+commits. `command` is the program, a file in the module and a relative path with no `..`
+part, then its arguments. A composed harness has at most one: two modules that declare
+one fail the compose, `Remove submit_program from module core or module web.` with `A
+composed harness has one submit program, and both modules declare one.` on the next line.
+An empty command, a word that is not a string, and a program that is not a file in the
+module, or is in an entry an `exclude` or an `only` of the module leaves out, fail the
+compose as they do for a push check, with `submit_program` in place of the push check.
+qory runs the program at the end of each review round of a run that submits, see
+docs/run.md, §The submit step.
 
 **Push checks.** A push check runs in a run behind a wall, before a push of its type
 reaches Qory Apiary: for every push to the run API from inside the wall, through `qory

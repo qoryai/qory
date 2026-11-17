@@ -178,6 +178,15 @@ func TestFixtures(t *testing.T) {
 			if _, err := os.Stat("expected/push-checks.txt"); err == nil || b.Len() > 0 {
 				expectText(t, "expected/push-checks.txt", b.String())
 			}
+			// expected/submit-program.txt is the submit program's module and command, when a
+			// module declares one.
+			b.Reset()
+			if res.SubmitProgram != nil {
+				fmt.Fprintf(&b, "%s %s\n", res.SubmitProgram.Module, strings.Join(res.SubmitProgram.Command, " "))
+			}
+			if _, err := os.Stat("expected/submit-program.txt"); err == nil || b.Len() > 0 {
+				expectText(t, "expected/submit-program.txt", b.String())
+			}
 			// expected/hooks.txt is each workflow hook, in the order of harness.hooks, with
 			// its workflow, point, place in the session, kind, name, what it runs, whether
 			// it is required and its timeout in seconds, when the checkout lists any.
