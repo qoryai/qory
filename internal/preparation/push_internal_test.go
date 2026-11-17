@@ -193,12 +193,12 @@ func TestPushCause(t *testing.T) {
 // TestPushFailed is the line of each failure, by what git wrote, with no password of a
 // URL in it.
 func TestPushFailed(t *testing.T) {
-	b := &WorkBranch{Ref: testRef, system: "git.example.com"}
+	b := &WorkBranch{Ref: testRef, system: "git.example.com", RunID: "0192f0c1-7d4e-7a2b-8c3d-4e5f6a7b8c9d"}
 	for output, want := range map[string]string{
 		" ! [rejected] a -> b (non-fast-forward)":           "qory run: add a new version of the artifact branch",
 		" ! [remote rejected] a -> b (protected)":           "qory run: change the rule on git.example.com",
-		"error: RPC failed; HTTP 403 curl 22":               "qory run: Allow the push in Qory Apiary",
-		"fatal: unable to access 'x': returned error: 403":  "qory run: Allow the push in Qory Apiary",
+		"error: RPC failed; HTTP 403 curl 22":               "qory run: Contact support with run ",
+		"fatal: unable to access 'x': returned error: 403":  "qory run: Contact support with run ",
 		"fatal: Authentication failed for 'https://x/'":     "qory run: give the run's credential for git.example.com write access to acme/shop",
 		"fatal: unable to access 'x': Could not resolve":    "qory run: check that the run's policy allows git.example.com",
 		"fatal: https://u:token-123@git.example.com/ fails": "qory run: check that the run's policy allows git.example.com",
@@ -216,26 +216,32 @@ func TestPushFailed(t *testing.T) {
 	}
 }
 
-// TestAForbiddenPushStartsWithTheFix is the 403 of a push: the first line is the fix, at
-// most 100 characters with a long path and with the "qory run: " prefix, and the lines
-// after it, indented by two spaces, are the branch limit with the run's branch, then the
-// forge's output and the code's mark.
-func TestAForbiddenPushStartsWithTheFix(t *testing.T) {
-	b := &WorkBranch{Ref: testRef, system: "git.example.com"}
+// TestAForbiddenPushNamesTheRunAndTheThreeCauses is the 403 of a push of the run
+// 0192f0c1-7d4e-7a2b-8c3d-4e5f6a7b8c9d, with a long path: line 1 is exactly the text with
+// the run's id, at most 100 characters with "qory run: ", then the three causes, each on a
+// line indented by two spaces, and the forge's output with the code's mark.
+func TestAForbiddenPushNamesTheRunAndTheThreeCauses(t *testing.T) {
+	b := &WorkBranch{Ref: testRef, system: "git.example.com", RunID: "0192f0c1-7d4e-7a2b-8c3d-4e5f6a7b8c9d"}
 	path := "acme/" + strings.Repeat("long-repository-name-", 4)
 	err := pushFailed(b, path, &gitError{line: "x", exit: 1, output: "fatal: unable to access 'x': returned error: 403"})
 	lines := strings.Split(err.Error(), "\n")
-	if len(lines) != 3 {
-		t.Fatalf("the error has %d lines, want 3:\n%v", len(lines), err)
+	if len(lines) != 5 {
+		t.Fatalf("the error has %d lines, want 5:\n%v", len(lines), err)
 	}
-	if want := "qory run: Allow the push in Qory Apiary, then take the work item in again."; lines[0] != want || len(lines[0]) > 100 {
-		t.Errorf("the first line is %q, want %q", lines[0], want)
+	if want := "qory run: Contact support with run 0192f0c1-7d4e-7a2b-8c3d-4e5f6a7b8c9d: the push was refused (403)."; lines[0] != want || len(lines[0]) > 100 {
+		t.Errorf("the first line is %q (%d characters), want %q", lines[0], len(lines[0]), want)
 	}
-	if want := "  The run's gateway allows a push only to the run's branch, refs/heads/" + testRef + ", and only through a credential with write access to " + path + " and a path rule for /" + path + ".git/git-receive-pack."; lines[1] != want {
-		t.Errorf("the second line is %q, want %q", lines[1], want)
+	for i, want := range []string{
+		"  1. The run's gateway allows a push only to the run's branch, refs/heads/" + testRef + " (wall:push-ref).",
+		"  2. The connection's setup has no path rule for /" + path + ".git/git-receive-pack, or no credential with write access.",
+		"  3. The forge stopped the push: the App's permission or a branch rule.",
+	} {
+		if lines[i+1] != want {
+			t.Errorf("line %d is %q, want %q", i+2, lines[i+1], want)
+		}
 	}
-	if want := "  The push of " + path + " to git.example.com returned 403: "; !strings.HasPrefix(lines[2], want) || !strings.HasSuffix(lines[2], "; the code is used") {
-		t.Errorf("the third line is %q, want it to start with %q and end with the code's mark", lines[2], want)
+	if want := "  The push of " + path + " to git.example.com returned 403: "; !strings.HasPrefix(lines[4], want) || !strings.HasSuffix(lines[4], "; the code is used") {
+		t.Errorf("the last line is %q, want it to start with %q and end with the code's mark", lines[4], want)
 	}
 }
 
