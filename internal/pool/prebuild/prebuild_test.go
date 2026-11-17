@@ -31,6 +31,7 @@ import (
 	"github.com/qoryai/qory/internal/pool/prebuild"
 	devimage "github.com/qoryai/qory/internal/prebuild"
 	"github.com/qoryai/qory/internal/proxygit"
+	"github.com/qoryai/qory/internal/testenv"
 )
 
 // The fakes' script and reports are in the runs' configuration directory, the one
@@ -116,6 +117,9 @@ func fd3Pipe() bool {
 	return err == nil && flags&unix.FD_CLOEXEC == 0
 }
 
+// TestMain runs the fakes when the test binary is started as git or docker, and otherwise
+// the tests, from the environment of [testenv.FixedEnvironment]. A fake keeps the
+// environment its starter set.
 func TestMain(m *testing.M) {
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
@@ -125,6 +129,7 @@ func TestMain(m *testing.M) {
 			os.Exit(fakeDocker(fd3Pipe()))
 		}
 	}
+	testenv.StartFromFixedEnvironment()
 	os.Exit(m.Run())
 }
 

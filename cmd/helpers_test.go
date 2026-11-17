@@ -19,6 +19,7 @@ import (
 	"golang.org/x/sys/unix"
 
 	"github.com/qoryai/qory/cmd"
+	"github.com/qoryai/qory/internal/testenv"
 )
 
 // TestMain runs the package's tests with each run's socket draining for 10ms after the
@@ -92,7 +93,7 @@ func TestMain(m *testing.M) {
 	cmd.SetInstallStandIn(standIns)
 	cmd.RunGitSessionsOnHost()
 	// No variable of the developer's shell but the fixed ones reaches a session spec.
-	startFromFixedEnvironment()
+	testenv.StartFromFixedEnvironment()
 	code := m.Run()
 	_ = os.RemoveAll(standIns)
 	os.Exit(code)
