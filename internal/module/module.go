@@ -680,7 +680,7 @@ func ReadWith(name, dir string, m *Manifest, variant string, readFile func(path 
 		// A resolveError starts with a fix, which the line below would push down.
 		var resolve *resolveError
 		if errors.As(err, &resolve) {
-			return err
+			return fmt.Errorf("%w\n  The module is %s.", err, shown)
 		}
 		return fmt.Errorf("%s\n  %w", exports.Fit("Check that you can read the files of module "+shown+"."), err)
 	}

@@ -205,4 +205,7 @@ func TestAReadErrorHasTheCheckLineAndALinkErrorDoesNot(t *testing.T) {
 	if err == nil || !strings.HasPrefix(err.Error(), "Point the link inside the module, or remove it.\n  AGENTS.md leads out") || !errors.Is(err, ErrLeadsOut) {
 		t.Errorf("a link error: %v, want a fix first and the sentinel", err)
 	}
+	if err == nil || !strings.HasSuffix(err.Error(), "\n  The module is core.") {
+		t.Errorf("a link error: %v, want the module on the last line", err)
+	}
 }
