@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/qoryai/qory/internal/config"
+	"github.com/qoryai/qory/internal/exports"
 )
 
 // The phrases a message prints in place of a value that contains an access key secret
@@ -159,7 +160,7 @@ func TestConfigRefusalsPrintAPhraseForASecret(t *testing.T) {
 		path := filepath.Join(root, "qory.yaml")
 		write(t, path, c.body)
 		_, err := config.Load(root, true)
-		if want := strings.ReplaceAll(c.want, "{path}", path); err == nil || err.Error() != want {
+		if want := exports.Fit(strings.ReplaceAll(c.want, "{path}", path)); err == nil || err.Error() != want {
 			t.Errorf("%q: %v, want %q", c.body, err, want)
 		}
 	}

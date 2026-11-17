@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/qoryai/qory/internal/config"
+	"github.com/qoryai/qory/internal/exports"
 )
 
 // Key names that contain a secret: an access key secret and a run key.
@@ -428,7 +429,7 @@ func TestAnIntegrationKeyWithASecretIsLeftOutOfExpand(t *testing.T) {
 			t.Errorf("%s describe fails: %v", c.key, err)
 		}
 		fakeIntegration(t, dir, "qory-"+c.key, `{"version": 1, "name": "queue", "title": "Queue", "program_version": "1", "settings": {"type": "object"}, "roles": {"example_role": {}}}`)
-		if _, err := expand(t); err == nil || err.Error() != "Remove "+at+", or give it a program that defines a credential.\n  "+shown("qory-"+c.key)+" plays the role example_role, none of which qory expands, and defines nothing."+where {
+		if _, err := expand(t); err == nil || err.Error() != exports.Fit("Remove "+at+", or give it a program that defines a credential.\n  "+shown("qory-"+c.key)+" plays the role example_role, none of which qory expands, and defines nothing."+where) {
 			t.Errorf("%s plays no role: %v", c.key, err)
 		}
 		fakeIntegration(t, dir, "qory-"+c.key, strings.Replace(fixture(t, "acme-tracker.json"), `"argument": "[A-Z]+"`, `"argument": "("`, 1))

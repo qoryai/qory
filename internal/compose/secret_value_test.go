@@ -8,6 +8,7 @@ import (
 
 	"github.com/qoryai/qory/internal/compose"
 	"github.com/qoryai/qory/internal/config"
+	"github.com/qoryai/qory/internal/exports"
 	"github.com/qoryai/qory/internal/source"
 	"github.com/qoryai/qory/internal/stack"
 )
@@ -135,7 +136,7 @@ func TestAnExtendingModuleRefusalPrintsNoSecretName(t *testing.T) {
 	}
 	_, err = compose.ComposeWith(merged, compose.Options{Base: base})
 	const name = "(a name that contains an access key secret)"
-	if want := "Remove skills/" + name + " from module " + name + ".\n  Module " + name + " ships skills/" + name + ".\n  The base stack core@"; err == nil || !strings.Contains(err.Error(), want) {
+	if want := exports.Fit("Remove skills/" + name + " from module " + name + ".\n  Module " + name + " ships skills/" + name + ".\n  The base stack core@"); err == nil || !strings.Contains(err.Error(), want) {
 		t.Errorf("%v\nwant one that contains %q", err, want)
 	}
 	noSecretIn(t, err)
