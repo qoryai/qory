@@ -1,7 +1,6 @@
 package stack
 
 import (
-	"fmt"
 	"net/url"
 	"path"
 	"strings"
@@ -56,21 +55,21 @@ func ParseReference(value string) (s Source, ok bool, err error) {
 	shown := exports.URL(value)
 	raw, rest, hasRef := strings.Cut(value, "#")
 	if u, err := url.Parse(raw); err != nil || !strings.EqualFold(u.Scheme, "https") || u.Host == "" {
-		return Source{}, true, fmt.Errorf("use an https URL in -f %s, as %s: qory fetches a stack reference only over https, and %s is not an https URL with a host", shown, ReferenceForm, exports.URL(raw))
+		return Source{}, true, exports.Refuse("Set -f to an https URL, as "+ReferenceForm+".", "qory fetches a stack reference only over https, and "+exports.URL(raw)+" is not an https URL with a host.", "-f is "+shown+".")
 	}
 	ref, folder, hasFolder := strings.Cut(rest, ":")
 	if !hasRef || ref == "" {
-		return Source{}, true, fmt.Errorf("add the ref to -f %s, as %s: the stack reference has no branch, tag or commit after #", shown, ReferenceForm)
+		return Source{}, true, exports.Refuse("Add the ref to -f, as "+ReferenceForm+".", "The stack reference has no branch, tag, or commit after #.", "-f is "+shown+".")
 	}
 	if !hasFolder || folder == "" {
-		return Source{}, true, fmt.Errorf("add the folder to -f %s, as %s: the stack reference has no folder after the ref; the folder is the one that contains the %s", shown, ReferenceForm, FileName)
+		return Source{}, true, exports.Refuse("Add the folder to -f, as "+ReferenceForm+".", "The stack reference has no folder after the ref. The folder is the one that contains the "+FileName+".", "-f is "+shown+".")
 	}
 	if strings.HasPrefix(folder, "/") {
-		return Source{}, true, fmt.Errorf("write the folder in -f %s as a path from the repository's root: %s is an absolute path", shown, exports.Value(folder, false))
+		return Source{}, true, exports.Refuse("Write the folder in -f as a path from the repository's root.", "The folder "+exports.Value(folder, false)+" is an absolute path.", "-f is "+shown+".")
 	}
 	for _, seg := range strings.Split(folder, "/") {
 		if seg == ".." {
-			return Source{}, true, fmt.Errorf("write the folder in -f %s without ..: %s has a .. segment, and the folder is a path from the repository's root", shown, exports.Value(folder, false))
+			return Source{}, true, exports.Refuse("Remove the .. segment from the folder in -f.", "The folder "+exports.Value(folder, false)+" has a .. segment, and the folder is a path from the repository's root.", "-f is "+shown+".")
 		}
 	}
 	clean := path.Clean(folder)

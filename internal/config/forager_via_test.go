@@ -101,26 +101,26 @@ func TestGatewayServerViaReads(t *testing.T) {
 func TestGatewayServerViaRefuses(t *testing.T) {
 	hermetic(t)
 	for _, c := range []struct{ via, want string }{
-		{"", ": gateway.server.via is empty"},
-		{"{}", ": gateway.server.via.url is required"},
-		{"{ca_file: ca.pem}", ": gateway.server.via.url is required"},
-		{"{url: \"\"}", ": gateway.server.via.url is required"},
-		{"{url: gateway.example}", ": gateway.server.via.url is not a URL: an https URL of a host and an optional port, with nothing after"},
-		{"{url: \"http://gateway.example\"}", ": gateway.server.via.url for http://gateway.example is not https: an https URL of a host and an optional port, with nothing after"},
-		{"{url: \"https://" + marker + "@gateway.example\"}", ": gateway.server.via.url for https://gateway.example holds user information: an https URL of a host and an optional port, with nothing after"},
-		{"{url: \"https://gateway.example/" + marker + "\"}", ": gateway.server.via.url for https://gateway.example has a path: an https URL of a host and an optional port, with nothing after"},
-		{"{url: \"https://gateway.example?k=" + marker + "\"}", ": gateway.server.via.url for https://gateway.example has a query or a fragment: an https URL of a host and an optional port, with nothing after"},
-		{"{url: \"https://gateway.example?k=qrk_" + marker + "." + marker + "\"}", ": gateway.server.via.url: the document contains a run key, which belongs in QORY_RUN_KEY and nowhere else"},
-		{"{url: \"https://gateway.example?k=%71rk_" + marker + "\"}", ": gateway.server.via.url: the document contains a run key, which belongs in QORY_RUN_KEY and nowhere else"},
-		{"{url: \"https://gateway.example\", ca_file: \"\"}", ": gateway.server.via.ca_file is empty"},
-		{"{url: \"https://gateway.example\", certificate_sha256: \"\"}", ": gateway.server.via.certificate_sha256 is empty"},
-		{"{url: \"https://gateway.example\", certificate_sha256: null}", ": gateway.server.via.certificate_sha256 is empty"},
-		{"{url: \"https://gateway.example\", certificate_sha256: " + marker + "}", ": gateway.server.via.certificate_sha256 is not the SHA-256 of a public key in standard base64 with padding, 44 characters ending in ="},
+		{"", "Set gateway.server.via, or remove it.\n  gateway.server.via is empty.\n  gateway.server.via is in {path}."},
+		{"{}", "Set gateway.server.via.url.\n  gateway.server.via.url is required.\n  gateway.server.via.url is in {path}."},
+		{"{ca_file: ca.pem}", "Set gateway.server.via.url.\n  gateway.server.via.url is required.\n  gateway.server.via.url is in {path}."},
+		{"{url: \"\"}", "Set gateway.server.via.url.\n  gateway.server.via.url is required.\n  gateway.server.via.url is in {path}."},
+		{"{url: gateway.example}", "Set gateway.server.via.url to an https URL of a host and an optional port.\n  gateway.server.via.url is not a URL.\n  A via URL is an https URL of a host and an optional port, with nothing after.\n  gateway.server.via.url is in {path}."},
+		{"{url: \"http://gateway.example\"}", "Set gateway.server.via.url to an https URL of a host and an optional port.\n  gateway.server.via.url for http://gateway.example is not https.\n  A via URL is an https URL of a host and an optional port, with nothing after.\n  gateway.server.via.url is in {path}."},
+		{"{url: \"https://" + marker + "@gateway.example\"}", "Set gateway.server.via.url to an https URL of a host and an optional port.\n  gateway.server.via.url for https://gateway.example contains user information.\n  A via URL is an https URL of a host and an optional port, with nothing after.\n  gateway.server.via.url is in {path}."},
+		{"{url: \"https://gateway.example/" + marker + "\"}", "Set gateway.server.via.url to an https URL of a host and an optional port.\n  gateway.server.via.url for https://gateway.example has a path.\n  A via URL is an https URL of a host and an optional port, with nothing after.\n  gateway.server.via.url is in {path}."},
+		{"{url: \"https://gateway.example?k=" + marker + "\"}", "Set gateway.server.via.url to an https URL of a host and an optional port.\n  gateway.server.via.url for https://gateway.example has a query or a fragment.\n  A via URL is an https URL of a host and an optional port, with nothing after.\n  gateway.server.via.url is in {path}."},
+		{"{url: \"https://gateway.example?k=qrk_" + marker + "." + marker + "\"}", "Remove the secret from gateway.server.via.url.\n  The document contains a run key, which belongs in QORY_RUN_KEY and nowhere else.\n  gateway.server.via.url is in {path}."},
+		{"{url: \"https://gateway.example?k=%71rk_" + marker + "\"}", "Remove the secret from gateway.server.via.url.\n  The document contains a run key, which belongs in QORY_RUN_KEY and nowhere else.\n  gateway.server.via.url is in {path}."},
+		{"{url: \"https://gateway.example\", ca_file: \"\"}", "Set gateway.server.via.ca_file, or remove it.\n  gateway.server.via.ca_file is empty.\n  gateway.server.via.ca_file is in {path}."},
+		{"{url: \"https://gateway.example\", certificate_sha256: \"\"}", "Set gateway.server.via.certificate_sha256, or remove it.\n  gateway.server.via.certificate_sha256 is empty.\n  gateway.server.via.certificate_sha256 is in {path}."},
+		{"{url: \"https://gateway.example\", certificate_sha256: null}", "Set gateway.server.via.certificate_sha256, or remove it.\n  gateway.server.via.certificate_sha256 is empty.\n  gateway.server.via.certificate_sha256 is in {path}."},
+		{"{url: \"https://gateway.example\", certificate_sha256: " + marker + "}", "Set gateway.server.via.certificate_sha256 to the SHA-256 of a public key.\n  The value is not 44 characters of standard base64 with padding, ending in =.\n  gateway.server.via.certificate_sha256 is in {path}."},
 	} {
 		path := foragerFile(t, viaFile(c.via))
 		_, err := config.LoadForager()
-		if err == nil || err.Error() != path+c.want {
-			t.Errorf("via %s: %v, want %q", c.via, err, path+c.want)
+		if err == nil || err.Error() != strings.ReplaceAll(c.want, "{path}", path) {
+			t.Errorf("via %s: %v, want %q", c.via, err, strings.ReplaceAll(c.want, "{path}", path))
 		}
 		if err != nil && (strings.Contains(err.Error(), marker) || strings.Contains(err.Error(), "qrk_")) {
 			t.Errorf("via %s: the refusal holds the value: %v", c.via, err)
@@ -140,13 +140,13 @@ func TestCheckViaReadsTheCAFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := r.CheckVia(); err == nil || err.Error() != path+": gateway.server.via.ca_file "+ca+": no such file or directory" {
+	if err := r.CheckVia(); err == nil || err.Error() != "Make the file of gateway.server.via.ca_file readable, or set another file.\n  The file "+ca+" cannot be read: no such file or directory.\n  gateway.server.via.ca_file is in "+path+"." {
 		t.Errorf("a missing ca_file: %v", err)
 	}
 	if err := os.WriteFile(ca, []byte(marker+"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := r.CheckVia(); err == nil || err.Error() != path+": gateway.server.via.ca_file "+ca+" holds no PEM certificate" {
+	if err := r.CheckVia(); err == nil || err.Error() != "Set gateway.server.via.ca_file to a file with a PEM certificate.\n  The file "+ca+" contains no PEM certificate.\n  gateway.server.via.ca_file is in "+path+"." {
 		t.Errorf("a ca_file without a certificate: %v", err)
 	}
 	if err := os.WriteFile(ca, certificatePEM(t), 0o644); err != nil {

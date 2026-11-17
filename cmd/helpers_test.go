@@ -19,6 +19,7 @@ import (
 	"golang.org/x/sys/unix"
 
 	"github.com/qoryai/qory/cmd"
+	"github.com/qoryai/qory/internal/testenv"
 )
 
 // TestMain runs the package's tests with each run's socket draining for 10ms after the
@@ -79,6 +80,14 @@ func TestMain(m *testing.M) {
 		args := os.Args[slices.Index(os.Args, "--")+1:]
 		os.Exit(enginePull(args[0], args[1], args[2]))
 	}
+	// The child of TestForagerRunKeepsThePushCredentialOnThePushProxyAlone, which that test starts
+	// with the marker and runs only that test, keeps the marker and the SSL_CERT_FILE of
+	// its parent through the fixed environment below. The marker without that argument
+	// keeps nothing.
+	realPush, certFile := "", os.Getenv("SSL_CERT_FILE")
+	if slices.Contains(os.Args, "-test.run=^TestForagerRunKeepsThePushCredentialOnThePushProxyAlone$") {
+		realPush = os.Getenv("QORY_TEST_REAL_PUSH")
+	}
 	cmd.ShortenSocketGrace(10 * time.Millisecond)
 	// Forager joins no session of Claude Code without an installed folder, so the
 	// program that such a test's launch names is copied into one.
@@ -92,7 +101,11 @@ func TestMain(m *testing.M) {
 	cmd.SetInstallStandIn(standIns)
 	cmd.RunGitSessionsOnHost()
 	// No variable of the developer's shell but the fixed ones reaches a session spec.
-	startFromFixedEnvironment()
+	testenv.StartFromFixedEnvironment()
+	if realPush != "" {
+		os.Setenv("QORY_TEST_REAL_PUSH", realPush)
+		os.Setenv("SSL_CERT_FILE", certFile)
+	}
 	code := m.Run()
 	_ = os.RemoveAll(standIns)
 	os.Exit(code)

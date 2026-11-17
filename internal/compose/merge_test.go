@@ -1,6 +1,9 @@
 package compose_test
 
 import (
+	"errors"
+	"io/fs"
+	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -118,7 +121,7 @@ func TestExportAgainstFragmentEnvCollides(t *testing.T) {
 		}
 	}
 	_, err := composeTree(t, files("/usr/local/bin"))
-	want := "settings/claude/settings.json: env.TOOLS is set by module a and exported by module b with different values"
+	want := "Set env TOOLS in qory.yaml to decide its value.\n  Module a sets env.TOOLS and module b exports it, with different values.\n  env.TOOLS is in settings/claude/settings.json."
 	if err == nil || err.Error() != want {
 		t.Fatalf("error %v, want %q", err, want)
 	}
@@ -186,5 +189,47 @@ func TestOnlyBringsInWhatANamedEntryRequires(t *testing.T) {
 		if !reflect.DeepEqual(got, want) {
 			t.Errorf("%s: for = %v, want %v", fixture, got, want)
 		}
+	}
+}
+
+// TestAFailedReadOfASettingsFragmentPrintsTheModuleOnceWithItsFixFirst is a settings
+// fragment that becomes unreadable between the module's read and the merge, as after
+// another process changed the file: the compose returns the fix in line 1, "module core"
+// once, the path once, and an error that matches fs.ErrPermission.
+func TestAFailedReadOfASettingsFragmentPrintsTheModuleOnceWithItsFixFirst(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root reads a file of mode 000")
+	}
+	isolateAll(t)
+	dir := writeTree(t, map[string]string{
+		stack.FileName: "apiVersion: qory.dev/v1alpha1\nmodules:\n  - name: core\n",
+		"modules/core/settings/claude/settings.json": "{}",
+	})
+	p, err := loadFor(filepath.Join(dir, stack.FileName), "claude")
+	if err != nil {
+		t.Fatal(err)
+	}
+	compose.SetMergeHook(t, func(path string) {
+		if err := os.Chmod(path, 0); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = os.Chmod(path, 0o644) })
+	})
+	_, err = compose.Compose(p)
+	if err == nil {
+		t.Fatal("no refusal")
+	}
+	const fix = "Check that you can read the settings fragment of module core."
+	if first := strings.SplitN(err.Error(), "\n", 2)[0]; first != fix {
+		t.Errorf("line 1 is %q, want %q", first, fix)
+	}
+	if n := strings.Count(err.Error(), "module core"); n != 1 {
+		t.Errorf("module core is in the text %d times: %v", n, err)
+	}
+	if n := strings.Count(err.Error(), "settings.json"); n != 1 {
+		t.Errorf("the path is in the text %d times: %v", n, err)
+	}
+	if !errors.Is(err, fs.ErrPermission) {
+		t.Errorf("%v does not match fs.ErrPermission", err)
 	}
 }

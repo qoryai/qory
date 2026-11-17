@@ -218,7 +218,7 @@ func TestLoadReadsTheHomesPushChecks(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(home, render.PushChecksFile), []byte("{"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	want := "Compose the harness again, and run again. The push checks in " + filepath.Join(home, render.PushChecksFile) + " could not be read: it is not JSON in the form the compose writes: unexpected end of JSON input."
+	want := "Compose the harness again, and run again.\n  The push checks in " + filepath.Join(home, render.PushChecksFile) + " could not be read: it is not JSON in the form the compose writes: unexpected end of JSON input."
 	if _, err := pushcheck.Load(home); err == nil || err.Error() != want {
 		t.Errorf("Load of a broken file = %v, want %q", err, want)
 	}
@@ -269,7 +269,7 @@ func wantRefusal(t *testing.T, what string, r *session.RunAPIRefusal, err error,
 // its type, and runs no check; in a run whose home has none it passes.
 func TestABodyThatIsNoPushGets422(t *testing.T) {
 	f := newFixture(t, "#!/usr/bin/env node")
-	fix := "Send the push as qory artifact push sends it, and push again. The body is not a push: "
+	fix := "Send the push as qory artifact push sends it, and push again.\n  The body is not a push: "
 	for body, cause := range map[string]string{
 		``:                            "it is not a JSON object.",
 		`not json`:                    "it is not a JSON object.",
@@ -368,7 +368,7 @@ func TestAWithdrawalRunsNoCheck(t *testing.T) {
 // there twice, or is there in another case.
 func TestABodyWithABadWithdrawGets422(t *testing.T) {
 	f := newFixture(t, "#!/usr/bin/env node")
-	fix := "Send the push as qory artifact push sends it, and push again. The body is not a push: "
+	fix := "Send the push as qory artifact push sends it, and push again.\n  The body is not a push: "
 	r, err := f.post(t, "/artifacts", []byte(`{"type":"spec","withdraw":"yes","files":[]}`))
 	wantRefusal(t, "withdraw yes", r, err, fix+"withdraw is not true or false.")
 	for _, body := range []string{
@@ -724,7 +724,7 @@ func TestAFindingStopsThePush(t *testing.T) {
 	if r.Status != 422 || r.Code != "push_check_failed" {
 		t.Errorf("the refusal is %d %s, want 422 push_check_failed", r.Status, r.Code)
 	}
-	if want := "Fix each finding below and push again. The check for spec failed:"; r.Message != want {
+	if want := "Fix each finding below and push again.\n  The check for spec failed:"; r.Message != want {
 		t.Errorf("the message is %q, want %q", r.Message, want)
 	}
 	want := []string{"spec.md: the section Goal is missing", "  [31mred[0m lineend", "key ***", strings.Repeat("é", 1000)}
@@ -783,7 +783,7 @@ func TestThePushStepGetsItsLines(t *testing.T) {
 	}
 	f.e.exit(127, "", "/usr/bin/env: 'node': No such file or directory\n")
 	failed, err = f.c.Check(context.Background(), "spec", files)
-	if want := "Set wall.image or --image to an image with node, such as one built FROM qory-agent. The check for spec could not start: /usr/bin/env: 'node': No such file or directory."; err != nil || failed == nil || failed.Step != want {
+	if want := "Set wall.image or --image to an image with node, such as one built FROM qory-agent.\n  The check for spec could not start: /usr/bin/env: 'node': No such file or directory."; err != nil || failed == nil || failed.Step != want {
 		t.Errorf("a check that did not start: %+v, %v, want %q", failed, err, want)
 	}
 	f.c.Limit = 50 * time.Millisecond
@@ -792,7 +792,7 @@ func TestThePushStepGetsItsLines(t *testing.T) {
 		return ctx.Err()
 	}
 	failed, err = f.c.Check(context.Background(), "spec", files)
-	if want := "Make the check for spec finish within 30 s. It ran longer and was stopped."; err != nil || failed == nil || failed.Step != want {
+	if want := "Make the check for spec finish within 30 s.\n  It ran longer and was stopped."; err != nil || failed == nil || failed.Step != want {
 		t.Errorf("a check past its limit: %+v, %v, want %q", failed, err, want)
 	}
 }
@@ -819,19 +819,19 @@ func TestAProgramThatCannotStartStopsThePush(t *testing.T) {
 	}{
 		{"no node", "#!/usr/bin/env node", func(e *engine) {
 			e.exit(127, "", "/usr/bin/env: 'node': No such file or directory\n")
-		}, "Set wall.image or --image to an image with node, such as one built FROM qory-agent, then run again. The check for spec could not start: /usr/bin/env: 'node': No such file or directory."},
+		}, "Set wall.image or --image to an image with node, such as one built FROM qory-agent, then run again.\n  The check for spec could not start: /usr/bin/env: 'node': No such file or directory."},
 		{"no program", "#!/bin/sh", func(e *engine) {
 			e.exit(127, "", "[FATAL tini (7)] exec /home/c failed: No such file or directory\n")
-		}, "Install the program PROGRAM, then run again. The check for spec could not start: exec /home/c failed: No such file or directory."},
+		}, "Install the program of the check, then run again.\n  The program is PROGRAM.\n  The check for spec could not start: exec /home/c failed: No such file or directory."},
 		{"not executable", "#!/bin/sh", func(e *engine) {
 			e.exit(126, "", "[FATAL tini (7)] exec /home/c failed: Permission denied\n")
-		}, "Install the program PROGRAM, then run again. The check for spec could not start: exec /home/c failed: Permission denied."},
+		}, "Install the program of the check, then run again.\n  The program is PROGRAM.\n  The check for spec could not start: exec /home/c failed: Permission denied."},
 		{"busybox env", "#!/usr/bin/env node", func(e *engine) {
 			e.exit(127, "", "env: can't execute 'node': No such file or directory\n")
-		}, "Set wall.image or --image to an image with node, such as one built FROM qory-agent, then run again. The check for spec could not start: env: can't execute 'node': No such file or directory."},
+		}, "Set wall.image or --image to an image with node, such as one built FROM qory-agent, then run again.\n  The check for spec could not start: env: can't execute 'node': No such file or directory."},
 		{"interpreter", "#!/usr/local/bin/deno run", func(e *engine) {
 			e.exit(127, "", "sh: /usr/local/bin/deno: not found\n")
-		}, "Install the program PROGRAM, then run again. The check for spec could not start: sh: /usr/local/bin/deno: not found."},
+		}, "Install the program of the check, then run again.\n  The program is PROGRAM.\n  The check for spec could not start: sh: /usr/local/bin/deno: not found."},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -868,7 +868,7 @@ func TestAnExit126Or127OfTheCheckIsAFinding(t *testing.T) {
 		f := newFixture(t, "#!/bin/sh")
 		f.e.exit(tc.code, "", tc.stderr)
 		r, err := f.post(t, "/artifacts", pushBody(t, "spec", [2]string{"spec.md", "x"}))
-		if err != nil || r == nil || r.Message != "Fix each finding below and push again. The check for spec failed:" || len(r.Findings) == 0 || !strings.HasPrefix(r.Findings[0], fmt.Sprintf("The check exited with %d and printed nothing", tc.code)) {
+		if err != nil || r == nil || r.Message != "Fix each finding below and push again.\n  The check for spec failed:" || len(r.Findings) == 0 || !strings.HasPrefix(r.Findings[0], fmt.Sprintf("The check exited with %d and printed nothing", tc.code)) {
 			t.Errorf("%d %q: got %+v, %v, want a failed check", tc.code, tc.stderr, r, err)
 		}
 	}
@@ -887,7 +887,7 @@ func TestACheckPastItsLimitIsStopped(t *testing.T) {
 	if err != nil || r == nil {
 		t.Fatalf("got %+v, %v, want a refusal", r, err)
 	}
-	if want := "Make the check for spec finish within 30 s, and push again. It ran longer and was stopped."; r.Status != 422 || r.Code != "push_check_failed" || r.Message != want {
+	if want := "Make the check for spec finish within 30 s, and push again.\n  It ran longer and was stopped."; r.Status != 422 || r.Code != "push_check_failed" || r.Message != want {
 		t.Errorf("the refusal is %d %s %q, want %q", r.Status, r.Code, r.Message, want)
 	}
 	if want := []string{"create", "start", "rm"}; !slices.Equal(f.e.verbs(), want) {
@@ -960,22 +960,27 @@ func TestAFailureOfQorysWorkIsAnError(t *testing.T) {
 // the fix and the name.
 func TestAFileNameTheCheckCannotWriteGets422(t *testing.T) {
 	f := newFixture(t, "#!/usr/bin/env node")
-	fix := "Give each file a different name of at most 255 bytes, other than . and .., with no slash, backslash or control character, and push again. "
+	fix := "Rename each file to a valid name, and push again.\n  "
+	const bad = ": a name has at most 255 bytes, is not . or .., and has no slash, backslash, or control character."
 	long := strings.Repeat("a", 253) + ".md"
 	for _, tc := range []struct {
 		files [][2]string
 		cause string
 	}{
-		{[][2]string{{"../x.md", "x"}}, `"../x.md" is not one.`},
-		{[][2]string{{"a\\b.md", "x"}}, `"a\\b.md" is not one.`},
-		{[][2]string{{"..", "x"}}, `".." is not one.`},
-		{[][2]string{{"", "x"}}, `"" is not one.`},
-		{[][2]string{{"a\nb.md", "x"}}, `"a\nb.md" is not one.`},
-		{[][2]string{{long, "x"}}, `"` + long + `" is not one.`},
+		{[][2]string{{"../x.md", "x"}}, `"../x.md" is not one` + bad},
+		{[][2]string{{"a\\b.md", "x"}}, `"a\\b.md" is not one` + bad},
+		{[][2]string{{"..", "x"}}, `".." is not one` + bad},
+		{[][2]string{{"", "x"}}, `"" is not one` + bad},
+		{[][2]string{{"a\nb.md", "x"}}, `"a\nb.md" is not one` + bad},
+		{[][2]string{{long, "x"}}, `"` + long + `" is not one` + bad},
 		{[][2]string{{"a.md", "x"}, {"a.md", "y"}}, `"a.md" is the name of two files.`},
 	} {
 		r, err := f.post(t, "/artifacts", pushBody(t, "spec", tc.files...))
-		wantRefusal(t, fmt.Sprint(tc.files), r, err, fix+tc.cause)
+		fixed := fix
+		if strings.HasSuffix(tc.cause, "two files.") {
+			fixed = "Give each file a different name, and push again.\n  "
+		}
+		wantRefusal(t, fmt.Sprint(tc.files), r, err, fixed+tc.cause)
 	}
 	if len(f.e.commands) != 0 {
 		t.Errorf("ran %v, want nothing", f.e.commands)
@@ -1012,7 +1017,7 @@ func TestNamesThatAreOneFileHereGet422(t *testing.T) {
 			}
 			continue
 		}
-		wantRefusal(t, fmt.Sprintf("%q", pair), r, err, fmt.Sprintf("Give each file a different name, also when you ignore case and accents, and push again. %q and %q are one file on this machine.", pair[0], pair[1]))
+		wantRefusal(t, fmt.Sprintf("%q", pair), r, err, fmt.Sprintf("Give each file a different name, also when you ignore case and accents, and push again.\n  %q and %q are one file on this machine.", pair[0], pair[1]))
 		if len(f.e.commands) != 0 || len(f.fetched) != 0 {
 			t.Errorf("%q: fetched %v and ran %v, want nothing", pair, f.fetched, f.e.commands)
 		}
@@ -1157,26 +1162,85 @@ func TestARealCheckRunsInTheEngine(t *testing.T) {
 		t.Errorf("the failing check got %+v", r)
 	}
 	node := write("node", "#!/usr/bin/env node\n")
-	if r := check(checker(node)); r == nil || !strings.HasPrefix(r.Message, "Set wall.image or --image to an image with node, such as one built FROM qory-agent, then run again. The check for spec could not start: ") {
+	if r := check(checker(node)); r == nil || !strings.HasPrefix(r.Message, "Set wall.image or --image to an image with node, such as one built FROM qory-agent, then run again.\n  The check for spec could not start: ") {
 		t.Errorf("the check without node got %+v", r)
 	}
 	lint := write("lint", "#!/bin/sh\nnosuchlinter \"$2\"\n")
-	if r := check(checker(lint)); r == nil || r.Message != "Fix each finding below and push again. The check for spec failed:" || len(r.Findings) != 2 || r.Findings[0] != "The check exited with 127 and printed nothing on stdout. Its stderr:" || !strings.Contains(r.Findings[1], "nosuchlinter") {
+	if r := check(checker(lint)); r == nil || r.Message != "Fix each finding below and push again.\n  The check for spec failed:" || len(r.Findings) != 2 || r.Findings[0] != "The check exited with 127 and printed nothing on stdout. Its stderr:" || !strings.Contains(r.Findings[1], "nosuchlinter") {
 		t.Errorf("the check whose linter is not there got %+v", r)
 	}
 	missing := filepath.Join(home, "modules", "core", "missing")
-	if r := check(checker(missing)); r == nil || !strings.HasPrefix(r.Message, "Install the program "+missing+", then run again. The check for spec could not start: exec "+missing+" failed: No such file or directory.") {
+	if r := check(checker(missing)); r == nil || !strings.HasPrefix(r.Message, "Install the program of the check, then run again.\n  The program is "+missing+".\n  The check for spec could not start: exec "+missing+" failed: No such file or directory.") {
 		t.Errorf("the missing program got %+v", r)
 	}
 	slow := write("slow", "#!/bin/sh\nsleep 30\n")
 	c := checker(slow)
 	c.Limit = 2 * time.Second
-	if r := check(c); r == nil || r.Message != "Make the check for spec finish within 30 s, and push again. It ran longer and was stopped." {
+	if r := check(c); r == nil || r.Message != "Make the check for spec finish within 30 s, and push again.\n  It ran longer and was stopped." {
 		t.Errorf("the slow check got %+v", r)
 	}
 	out, err := exec.Command("docker", "ps", "--all", "--quiet", "--filter", "name=qory-push-check-").Output()
 	if err != nil || len(bytes.TrimSpace(out)) != 0 {
 		t.Errorf("containers of checks are left: %q, %v", out, err)
+	}
+}
+
+// TestHasRuntimeReadsTheEnginesRuntimes is the check that the engine has the checker's
+// runtime: docker info with the list of runtimes, true when the list has the name, false
+// with no error when it does not, true for a checker with no runtime without a command,
+// and an error for an info that fails or a list that does not read.
+func TestHasRuntimeReadsTheEnginesRuntimes(t *testing.T) {
+	for name, c := range map[string]struct {
+		runtime string
+		out     string
+		exitErr error
+		errOut  string
+		has     bool
+		wantErr string
+		asked   bool
+	}{
+		"present":    {runtime: "runsc", out: `{"runc":{"path":"runc"},"runsc":{"path":"runsc"}}`, has: true, asked: true},
+		"missing":    {runtime: "runsc", out: `{"runc":{"path":"runc"}}`, asked: true},
+		"no runtime": {has: true},
+		// Docker starts a container under a shim that its list does not have: a name with
+		// a "." after a non-empty part and no "/", see shimRuntimeName.
+		"shim not listed":         {runtime: "io.containerd.runsc.v1", out: `{"runc":{}}`, has: true},
+		"another shim not listed": {runtime: "com.example.shim.v1", out: `{"runc":{}}`, has: true},
+		"no dot":                  {runtime: "runsc2", out: `{"runc":{}}`, asked: true},
+		"starts with a dot":       {runtime: ".shim.v1", out: `{"runc":{}}`, asked: true},
+		"with a slash":            {runtime: "/x/runsc", out: `{"runc":{}}`, asked: true},
+		"dotted with a slash":     {runtime: "a.b/c", out: `{"runc":{}}`, asked: true},
+		"engine":                  {runtime: "runsc", exitErr: errors.New("exit status 1"), errOut: "Cannot connect to the Docker daemon\n", wantErr: "the inspect of the engine's runtimes failed: Cannot connect to the Docker daemon", asked: true},
+		"null":                    {runtime: "runsc", out: "null", wantErr: "the engine's list of runtimes does not read", asked: true},
+		"not a list":              {runtime: "runsc", out: "<no value>", wantErr: "the engine's list of runtimes does not read", asked: true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newFixture(t, "#!/usr/bin/env node")
+			f.c.Runtime = c.runtime
+			var argv []string
+			f.c.Engine.Run = func(_ context.Context, a []string, stdout, stderr io.Writer) error {
+				argv = a
+				io.WriteString(stdout, c.out+"\n")
+				io.WriteString(stderr, c.errOut)
+				return c.exitErr
+			}
+			has, err := f.c.HasRuntime(context.Background())
+			got := ""
+			if err != nil {
+				got = err.Error()
+			}
+			if has != c.has || got != c.wantErr {
+				t.Errorf("HasRuntime = %v, %q, want %v, %q", has, got, c.has, c.wantErr)
+			}
+			if (argv != nil) != c.asked {
+				t.Errorf("the engine ran %q, want a command: %v", argv, c.asked)
+			}
+			if c.asked {
+				if want := []string{"/usr/local/bin/docker", "info", "--format", "{{json .Runtimes}}"}; !slices.Equal(argv, want) {
+					t.Errorf("the engine ran %q, want %q", argv, want)
+				}
+			}
+		})
 	}
 }
 

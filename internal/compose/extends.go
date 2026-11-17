@@ -83,11 +83,11 @@ func LoadBase(p *stack.Stack, pin string, opts Options) (*stack.Stack, *Base, er
 	var fetch *source.FetchError
 	switch {
 	case errors.As(err, &fetch):
-		return nil, nil, fmt.Errorf("the stack %s is not reachable from here: %w", p.Extends.Shown(), err)
+		return nil, nil, fmt.Errorf("Run qory on a machine that can reach the base stack.\n  The stack %s is not reachable from here: %w", p.Extends.Shown(), err)
 	case err != nil && named != nil:
-		return nil, nil, fmt.Errorf("check %s: %w", named.Base(), exports.HideError(err))
+		return nil, nil, fmt.Errorf("Check %s.\n  %w", named.Base(), exports.HideError(err))
 	case err != nil:
-		return nil, nil, fmt.Errorf("extends %s: %w", p.Extends.Shown(), exports.HideError(err))
+		return nil, nil, fmt.Errorf("Check the stack in extends.\n  %w\n  extends is %s.", exports.HideError(err), p.Extends.Shown())
 	}
 	file := filepath.Join(src.Dir, stack.FileName)
 	if err := baseInClone(p, src, file, named); err != nil {
@@ -96,9 +96,10 @@ func LoadBase(p *stack.Stack, pin string, opts Options) (*stack.Stack, *Base, er
 	base, err := stack.Load(file)
 	switch {
 	case errors.Is(err, os.ErrNotExist) && named != nil:
-		return nil, nil, fmt.Errorf("check the folder of %s: its repository has no %s there", named.Base(), stack.FileName)
+		return nil, nil, exports.Refuse(fmt.Sprintf("Check the folder of %s.", named.Base()), fmt.Sprintf("Its repository has no %s there.", stack.FileName))
 	case errors.Is(err, os.ErrNotExist):
-		return nil, nil, fmt.Errorf("extends %s: %s contains no %s", p.Extends.Shown(), exports.Value(src.Dir, false), stack.FileName)
+		return nil, nil, exports.Refuse("Check the folder in extends.", fmt.Sprintf("%s contains no %s.", exports.Value(src.Dir, false), stack.FileName),
+			"extends is "+p.Extends.Shown()+".")
 	case err != nil:
 		return nil, nil, exports.HideError(err)
 	}
@@ -127,9 +128,11 @@ func baseInClone(p *stack.Stack, src source.Resolved, file string, named *source
 	case err != nil:
 		return err
 	case out && named != nil:
-		return fmt.Errorf("check the folder of %s: its %s links outside its repository", named.Base(), stack.FileName)
+		return exports.Refuse(fmt.Sprintf("Make the %s link in the folder of %s point inside its repository.", stack.FileName, named.Base()),
+			fmt.Sprintf("The %s links outside its repository.", stack.FileName))
 	case out:
-		return fmt.Errorf("extends %s: %s links outside the repository", p.Extends.Shown(), stack.FileName)
+		return exports.Refuse(fmt.Sprintf("Make the %s link in the base stack point inside the repository.", stack.FileName),
+			fmt.Sprintf("%s links outside the repository.", stack.FileName), "extends is "+p.Extends.Shown()+".")
 	}
 	config, err := exports.File(src.Clone)
 	if err != nil || config == "" {
@@ -141,9 +144,11 @@ func baseInClone(p *stack.Stack, src source.Resolved, file string, named *source
 	case err != nil:
 		return err
 	case out && named != nil:
-		return fmt.Errorf("check %s: the qory.yaml of its repository links outside its repository", named.Base())
+		return exports.Refuse(fmt.Sprintf("Make the %s link at the root of %s point inside its repository.", filepath.Base(config), named.Base()),
+			fmt.Sprintf("The %s of its repository links outside its repository.", filepath.Base(config)))
 	case out:
-		return fmt.Errorf("extends %s: %s at the root of its repository links outside the repository", p.Extends.Shown(), filepath.Base(config))
+		return exports.Refuse(fmt.Sprintf("Make the %s link at the root of the base stack's repository point inside it.", filepath.Base(config)),
+			fmt.Sprintf("%s at the root of its repository links outside the repository.", filepath.Base(config)), "extends is "+p.Extends.Shown()+".")
 	}
 	return nil
 }
@@ -156,7 +161,10 @@ func baseInClone(p *stack.Stack, src source.Resolved, file string, named *source
 func ExtendOn(p, base *stack.Stack, pin string) (*stack.Stack, *Base, error) {
 	merged, err := stack.Extend(base, p)
 	if err != nil {
-		return nil, nil, fmt.Errorf("%s: %w", p.File, err)
+		if p.File == "" {
+			return nil, nil, err
+		}
+		return nil, nil, fmt.Errorf("%w\n  The extending stack is in %s.", err, exports.HidePath(p.File))
 	}
 	b := &Base{Name: base.Name, Source: p.Extends.String(), Pin: pin, Extending: base.Extending, Qory: base.Qory, RetiredAPIVersion: base.RetiredAPIVersion}
 	if b.Name == "" {
@@ -177,16 +185,22 @@ func checkExtending(l *module.Module, base *Base) error {
 	for _, e := range l.Entries {
 		if e.Kind == "files" {
 			if !stack.FileAllowed(e.Name, base.Extending.Files) {
-				return fmt.Errorf("module %s ships files/%s, and the base stack %s lets an extending module ship files under %s", shown(l.Name), exports.HidePath(e.Name), base, filesText(base.Extending.Files))
+				return exports.Refuse(fmt.Sprintf("Remove the file from module %s.", shown(l.Name)),
+					fmt.Sprintf("Module %s ships files/%s.", shown(l.Name), exports.HidePath(e.Name)),
+					fmt.Sprintf("The base stack %s lets an extending module ship files under %s.", base, filesText(base.Extending.Files)))
 			}
 			continue
 		}
 		if !allowed[e.Kind] {
-			return fmt.Errorf("module %s ships %s/%s, and the base stack %s lets an extending module ship %s", shown(l.Name), shown(e.Kind), shown(e.Name), base, kindsText(base.Extending.Kinds))
+			return exports.Refuse(fmt.Sprintf("Remove %s/%s from module %s.", shown(e.Kind), shown(e.Name), shown(l.Name)),
+				fmt.Sprintf("Module %s ships %s/%s.", shown(l.Name), shown(e.Kind), shown(e.Name)),
+				fmt.Sprintf("The base stack %s lets an extending module ship %s.", base, kindsText(base.Extending.Kinds)))
 		}
 	}
 	if l.Instructions != "" && !base.Extending.Instructions {
-		return fmt.Errorf("module %s ships %s, and the base stack %s lets an extending module ship no instructions", shown(l.Name), module.InstructionsName, base)
+		return exports.Refuse(fmt.Sprintf("Remove %s from module %s.", module.InstructionsName, shown(l.Name)),
+			fmt.Sprintf("Module %s ships %s.", shown(l.Name), module.InstructionsName),
+			fmt.Sprintf("The base stack %s lets an extending module ship no instructions.", base))
 	}
 	runtimes := make([]string, 0, len(l.Settings))
 	for rt := range l.Settings {
@@ -202,11 +216,13 @@ func checkExtending(l *module.Module, base *Base) error {
 		for _, f := range files {
 			keys, err := leafKeys(l.Settings[rt][f])
 			if err != nil {
-				return fmt.Errorf("module %s: %w", shown(l.Name), err)
+				return module.Prefixed("module "+shown(l.Name), err)
 			}
 			for _, key := range keys {
 				if !settingAllowed(key, base.Extending.Settings) {
-					return fmt.Errorf("module %s sets %s in settings/%s/%s, and the base stack %s lets an extending module set %s", shown(l.Name), shown(key), shown(rt), exports.HidePath(f), base, settingsText(base.Extending.Settings))
+					return exports.Refuse(fmt.Sprintf("Remove %s from the settings of module %s.", shown(key), shown(l.Name)),
+						fmt.Sprintf("Module %s sets %s in settings/%s/%s.", shown(l.Name), shown(key), shown(rt), exports.HidePath(f)),
+						fmt.Sprintf("The base stack %s lets an extending module set %s.", base, settingsText(base.Extending.Settings)))
 				}
 			}
 		}
@@ -230,7 +246,8 @@ func settingAllowed(key string, allowed []string) bool {
 func leafKeys(path string) ([]string, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, exports.HideError(err)
+		err = exports.HideError(err)
+		return nil, module.Caused(err, "Check that you can read the settings fragment of "+exports.ModulePlace+".", err.Error())
 	}
 	doc := map[string]any{}
 	switch filepath.Ext(path) {
@@ -239,10 +256,11 @@ func leafKeys(path string) ([]string, error) {
 	case ".toml":
 		err = toml.Unmarshal(data, &doc)
 	default:
-		return nil, fmt.Errorf("%s: settings fragments are .json or .toml", exports.HidePath(path))
+		return nil, exports.Refuse("Rename the settings fragment of "+exports.ModulePlace+" to end in .json or .toml.", "The file is "+exports.HidePath(path)+".")
 	}
 	if err != nil {
-		return nil, fmt.Errorf("%s: %w", exports.HidePath(path), exports.HideValueError(err, ""))
+		err = exports.HideValueError(err, "")
+		return nil, module.Caused(err, "Correct the settings fragment of "+exports.ModulePlace+".", err.Error(), "The file is "+exports.HidePath(path)+".")
 	}
 	var keys []string
 	var walk func(prefix string, v any)

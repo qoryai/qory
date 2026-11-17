@@ -150,16 +150,15 @@ For a file outside these rules, it stops, exit 2, with one of these errors:
   <file> leads through a link`
 - `set gateway.server.enrolment_code_file to the file itself, not a link: <file> is a link`
 - `set gateway.server.enrolment_code_file to a regular file: <file> is not one`
-- `make root or the user running qory the owner of <path>: it is owned by <user>, and
-  only root and the user running qory may write gateway.server.enrolment_code_file and
-  its folders, except a folder that root owns with the sticky bit set`
-- `remove the group's write permission from <path>: the group <group> may write it, and
-  only root and the user running qory may write gateway.server.enrolment_code_file and
-  its folders, except a folder that root owns with the sticky bit set`, for any group,
-  root's included
-- `remove the write permission of other users from <path>: every user may write it, and
-  only root and the user running qory may write gateway.server.enrolment_code_file and
-  its folders, except a folder that root owns with the sticky bit set`
+- `Make root or the user running qory the owner of gateway.server.enrolment_code_file.`,
+  then `<path> is owned by <user>.` and `Only root and the user running qory may write
+  gateway.server.enrolment_code_file and its folders, except a folder that root owns with
+  the sticky bit set.`
+- `Remove the group's write permission from gateway.server.enrolment_code_file.`, then
+  `The group <group> may write <path>.` and the same last line, for any group, root's
+  included
+- `Remove the write permission of other users from gateway.server.enrolment_code_file.`,
+  then `Every user may write <path>.` and the same last line
 - `write the gateway's enrolment code (qecg_…) into <file>: the file is empty`
 - `write only the gateway's enrolment code into <file>, with at most one newline after
   it: the file contains more`, for anything else in the file, or more than 1 KiB
@@ -195,16 +194,22 @@ Stopping keeps the gateway's runs: a gateway started again on the same directory
 
 It refuses to start, before it listens:
 
-- `~/.config/qory/forager.yaml has no gateway section, so there is no gateway to run`
+- `Add a gateway section to forager.yaml.`, then `There is no gateway to run without one;
+  see <docs>.` and `The file is ~/.config/qory/forager.yaml.`
 - `<file>: gateway.server.via does nothing for qory gateway: a gateway reaches the server
   directly; remove gateway.server.via`
-- `<file>: gateway.listen is required to run the gateway as a service: the address the
-  other machines reach, such as 0.0.0.0:8443; or --listen`
-- `<file>: gateway.listen is not host:port, such as 0.0.0.0:8443`, and for `--listen`,
-  `--listen "<v>" is not host:port, such as 0.0.0.0:8443`
-- `<file>: gateway.server is required to run the gateway as a service: it reports every
-  run to Qory Apiary and takes the runs' policies from it`
-- `gateway.tls is required with gateway.listen: a gateway serves other machines`
+- `Set gateway.listen to the address that other machines reach, or pass --listen.`, then
+  `A gateway that runs as a service needs one, such as 0.0.0.0:8443.` and `The file is
+  <file>.`
+- `Set gateway.listen to host:port, such as 0.0.0.0:8443.`, then `The value is not
+  host:port.` and `gateway.listen is in <file>.`, and for `--listen`,
+  `Pass --listen as host:port, such as 0.0.0.0:8443.`, then `--listen is "<v>", which is not
+  host:port.`
+- `Add gateway.server, the server that the gateway reports to.`, then `A gateway that runs
+  as a service reports every run to Qory Apiary and takes the runs' policies from it.`
+  and `The file is <file>.`
+- `Add gateway.tls to forager.yaml.`, then `A gateway serves other machines, so it needs
+  gateway.tls.` and `The file is <file>.`
 
 An address it cannot listen on is `listen on <addr>: <err>`.
 

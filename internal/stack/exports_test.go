@@ -31,12 +31,12 @@ func TestSourceStringNamesAnExport(t *testing.T) {
 func TestLoadRefusesAnExportWrittenWrong(t *testing.T) {
 	head := "apiVersion: qory.dev/v1alpha1\nmodules:\n"
 	for _, c := range []struct{ module, want string }{
-		{"  - name: core\n    source: {git: https://h, ref: v1, stack: nextjs}\n", "module core: source selects stack nextjs; a module's source selects a module, and a stack goes under extends"},
-		{"  - name: core\n    source: {git: https://h, ref: v1, module: core, stack: nextjs}\n", "module core: source selects both a module and a stack; it selects one export"},
-		{"  - name: core\n    source: {git: https://h, ref: v1, path: modules/core, module: core}\n", "module core: source.path and an export both select the directory; an export's directory is what the repository's qory.yaml sets"},
-		{"  - source: {module: core}\n", "modules[0]: source.path is required; with an export selected, it is the repository exporting it"},
-		{"  - name: core\n    source: {git: https://h, ref: v1, module: a/b}\n", `module core: source.module "a/b" is not one path segment`},
-		{"  - name: core\n    source: {git: https://h, module: core}\n", "module core: source.ref is required with source.git"},
+		{"  - name: core\n    source: {git: https://h, ref: v1, stack: nextjs}\n", "Select a module in the source of module core, and move the stack to extends.\n  The source selects stack nextjs, and a module's source selects a module."},
+		{"  - name: core\n    source: {git: https://h, ref: v1, module: core, stack: nextjs}\n", "Remove source.module or source.stack from module core.\n  A source selects one export."},
+		{"  - name: core\n    source: {git: https://h, ref: v1, path: modules/core, module: core}\n", "Remove source.path or the export from module core.\n  Both select the directory, and an export's directory is what the repository's qory.yaml or harness.yaml sets."},
+		{"  - source: {module: core}\n", "Set source.path of modules[0] to the repository that exports it.\n  With an export selected, source.path is required."},
+		{"  - name: core\n    source: {git: https://h, ref: v1, module: a/b}\n", "Set source.module of module core to one path segment.\n  The value is \"a/b\"."},
+		{"  - name: core\n    source: {git: https://h, module: core}\n", "Set source.ref of module core to a branch, tag, or commit.\n  source.ref is required with source.git."},
 	} {
 		path := write(t, head+c.module)
 		_, err := Load(path)
@@ -47,12 +47,12 @@ func TestLoadRefusesAnExportWrittenWrong(t *testing.T) {
 	// extends names a stack; a module there is refused.
 	path := filepath.Join(t.TempDir(), "qory.yaml")
 	_, err := NewCompose(path, &Stack{APIVersion: APIVersion, Extends: Source{Git: "https://h", Ref: "v1", Module: "core"}, Modules: []Module{{Name: "app"}}})
-	if want := "extends selects module core; a checkout extends a stack, and a module goes under modules"; err == nil || !strings.HasSuffix(err.Error(), want) {
+	if want := "Move the module from extends to modules, and select a stack under extends.\n  extends selects module core, and a checkout extends a stack.\n  extends is in " + path + "."; err == nil || err.Error() != want {
 		t.Errorf("extends a module: err = %v, want %q", err, want)
 	}
 	// extends by an export alone is a compose document, and needs its repository.
 	_, err = NewCompose(path, &Stack{APIVersion: APIVersion, Extends: Source{Stack: "nextjs"}, Modules: []Module{{Name: "app"}}})
-	if want := "extends: source.path is required; with an export selected, it is the repository exporting it"; err == nil || !strings.HasSuffix(err.Error(), want) {
+	if want := "Set source.path of extends to the repository that exports it.\n  With an export selected, source.path is required.\n  source is in " + path + "."; err == nil || err.Error() != want {
 		t.Errorf("extends without a repository: err = %v, want %q", err, want)
 	}
 }

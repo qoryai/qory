@@ -23,9 +23,9 @@ func TestAProgramNotFoundPrintsNoSecret(t *testing.T) {
 		Tools:       []config.ForagerTool{{Name: "qak_files", Command: []string{"qak_acme", "serve"}, Serves: []string{"files.tools.internal"}}},
 	}
 	_, err := machineCredentials(context.Background(), r, config.Expansion{Workspace: workspace}, "run", io.Discard)
-	wantsHidden(t, err, "forager.yaml: gateway.credentials.(a name that contains an access key secret).adapter: ")
+	wantsHidden(t, err, "Fix the adapter of gateway.credentials.(a name that contains an access key secret).\n  ")
 	_, err = machineTools(r, workspace)
-	wantsHidden(t, err, "forager.yaml: gateway.tools.(a name that contains an access key secret).command: ")
+	wantsHidden(t, err, "Fix the command of gateway.tools.(a name that contains an access key secret).\n  ")
 }
 
 // wantsHidden fails the test unless err is an input error that starts with prefix,
@@ -66,13 +66,13 @@ func TestTierRefusalsPrintNoSecret(t *testing.T) {
 	_, err := tierFlags([]string{"qak_light"}, nil)
 	wantsText(t, err, "--tier "+value+": write --tier <tier>=<model id>, such as --tier light=claude-haiku-5-5")
 	_, err = tierFlags([]string{"qak_x=m"}, nil)
-	wantsText(t, err, "--tier "+value+": use one of the tiers light, fast and thinking; (a name that contains an access key secret) is not a tier")
+	wantsText(t, err, "Use one of the tiers light, fast, and thinking.\n  (a name that contains an access key secret) is not a tier.\n  The name is in --tier "+value+".")
 	_, err = tierFlags([]string{"light=${qory:qak_x}"}, nil)
 	wantsText(t, err, "--tier "+value+": write a model id; "+value+" is a tier placeholder, which goes only in an agent's model")
 	_, err = tierFlags(nil, []string{"qak_light"})
 	wantsText(t, err, "--tier-effort "+value+": write --tier-effort <tier>=<effort>, such as --tier-effort thinking=high")
 	_, err = tierFlags(nil, []string{"qak_x=low"})
-	wantsText(t, err, "--tier-effort "+value+": use one of the tiers light, fast and thinking; (a name that contains an access key secret) is not a tier")
+	wantsText(t, err, "Use one of the tiers light, fast, and thinking.\n  (a name that contains an access key secret) is not a tier.\n  The name is in --tier-effort "+value+".")
 	_, err = tierFlags(nil, []string{"light=qrk_low"})
 	wantsText(t, err, "--tier-effort (a value that contains a run key): give --tier light=<model id> as well; the effort is for the model that --tier maps the tier to")
 	err = mainModelTier(&stack.Stack{File: "/work/app/qory.yaml"}, config.Config{}, "${qory:qak_x}")

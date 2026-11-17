@@ -2,7 +2,6 @@ package module
 
 import (
 	"bytes"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -53,9 +52,9 @@ func IsTier(name string) bool {
 	return false
 }
 
-// TierList is the tiers for a message: "light, fast and thinking".
+// TierList is the tiers for a message: "light, fast, and thinking".
 func TierList() string {
-	return strings.Join(Tiers[:len(Tiers)-1], ", ") + " and " + Tiers[len(Tiers)-1]
+	return strings.Join(Tiers[:len(Tiers)-1], ", ") + ", and " + Tiers[len(Tiers)-1]
 }
 
 // HasControl reports whether a tier's model id or effort contains a line end or another
@@ -81,14 +80,21 @@ func Escape(value string) string {
 // "model ${qory:heavy}" or "harness.tiers.heavy", with control characters escaped. The
 // name prints as [accesskey.ShownName] prints it; the caller passes where with a name or
 // a value in it printed as a message prints one.
-func NotATier(where, name string) error {
-	return fmt.Errorf("%s: use one of the tiers %s; %s is not a tier", Escape(where), TierList(), Escape(accesskey.ShownName(name, false)))
+func NotATier(where, name string) error { return notATier(where, name) }
+
+// notATier is [NotATier] with the lines after the two that it always has.
+func notATier(where, name string, more ...string) error {
+	return exports.Refuse("Use one of the tiers "+TierList()+".",
+		append([]string{Escape(accesskey.ShownName(name, false)) + " is not a tier.", "The name is in " + Escape(where) + "."}, more...)...)
 }
 
 // misplacedTier is the refusal of a tier placeholder found where no tier goes; placeholder
-// is the placeholder as written.
+// is the placeholder as written. It has [exports.FilePlace] and [exports.ModulePlace] for
+// the file and the module that the caller fills in.
 func misplacedTier(placeholder string) error {
-	return fmt.Errorf("%s is a tier placeholder; a tier goes only in an agent's model, as model: %s", placeholder, placeholder)
+	return exports.Refuse("Move "+placeholder+" into the model of an agent, or remove it.",
+		"A tier placeholder goes only in an agent's model, as model: "+placeholder+".",
+		"The placeholder is in "+exports.FilePlace+" of "+exports.ModulePlace+".")
 }
 
 // NoTier refuses the first tier placeholder in text, for a document that may contain no
@@ -126,7 +132,10 @@ func References(text string) ([]string, error) {
 				fmt.Sprintf("The reference is in %s of %s.", exports.FilePlace, exports.ModulePlace))
 		}
 		if name == "" || strings.ContainsAny(name, `/\@ `) || strings.HasPrefix(name, ".") {
-			return nil, fmt.Errorf("%s refers to %s, which is not an entry name; a name is one path segment", exports.Value(m[0], false), accesskey.ShownName(name, true))
+			ref := exports.Value(m[0], false)
+			return nil, exports.Refuse(fmt.Sprintf("Change %s to a reference.", ref),
+				fmt.Sprintf("%s refers to %s, which is not an entry name: a name is one path segment.", ref, accesskey.ShownName(name, true)),
+				fmt.Sprintf("The reference is in %s of %s.", exports.FilePlace, exports.ModulePlace))
 		}
 		seen[key] = true
 	}
@@ -159,7 +168,7 @@ func agentTier(data []byte, name string) (string, []byte, error) {
 		return "", data, nil
 	}
 	if !IsTier(tier) {
-		return "", nil, NotATier("model "+exports.Value(model, false), tier)
+		return "", nil, notATier("model "+exports.Value(model, false), tier, "The model is in "+exports.FilePlace+" of "+exports.ModulePlace+".")
 	}
 	return tier, SetFront(data, "model", ""), nil
 }
@@ -259,10 +268,10 @@ func references(root string, e Entry) (documentRefs, error) {
 		shown := exports.HidePath(rel)
 		if e.Kind == "agents" {
 			if out.paths, err = agentPaths(data, rel); err != nil {
-				return out, fmt.Errorf("%s: %w", shown, err)
+				return out, exports.AtPath(shown, err)
 			}
 			if out.tier, data, err = agentTier(data, rel); err != nil {
-				return out, fmt.Errorf("%s: %w", shown, err)
+				return out, exports.AtPath(shown, err)
 			}
 		}
 		keys, err := References(string(data))
@@ -323,7 +332,8 @@ func agentPaths(data []byte, name string) ([]string, error) {
 	if !ok {
 		return nil, nil
 	}
-	notGlobs := errors.New("set paths to globs, such as [\"**/*.py\"], or remove it\n  the value is not a glob or a list of globs")
+	notGlobs := exports.Refuse("Set paths to globs, such as [\"**/*.py\"], or remove it.", "The value is not a glob or a list of globs.",
+		"The agent is in "+exports.FilePlace+" of "+exports.ModulePlace+".")
 	var globs []string
 	switch v := v.(type) {
 	case string:

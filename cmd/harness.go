@@ -1293,7 +1293,7 @@ func ownFileRows(own string, doc *stack.Stack, conf config.Config) [][2]string {
 		rows = append(rows, [2]string{"read", name + "  (" + strings.Join(read, ", ") + ")"})
 	}
 	if len(conf.Ignored) > 0 {
-		user := "your qory.yaml"
+		user := "your " + name
 		if dir, err := config.UserDir(); err == nil && dir != "" {
 			user = ui.Short(filepath.Join(dir, name), "")
 		}
@@ -1486,11 +1486,25 @@ func applyTarget(p *stack.Stack, base *compose.Base, conf config.Config, runtime
 		want.Model = model
 	}
 	want.Effort = effort
-	if err := want.Runtimes.Validate(); err != nil {
-		if len(want.Runtimes) == 0 && base != nil {
-			return fmt.Errorf("target.runtime is required; the base stack %s defines no target, so the document sets one beside extends, or the configuration or --runtime does", shownBase(base))
+	// The refusal shows where the list came from: the flag, the configuration, or the
+	// document, whose path is printed as a message prints one.
+	var invalid error
+	switch {
+	case runtime != "":
+		invalid = want.Runtimes.ValidateAt("--runtime", "--runtime sets it.")
+	case conf.Runtime != nil:
+		invalid = want.Runtimes.ValidateAt("harness.runtime", "harness.runtime in the configuration sets it.")
+	default:
+		invalid = want.Runtimes.Validate()
+		if invalid != nil && p.File != "" {
+			invalid = exports.AtPath(exports.HidePath(p.File), invalid)
 		}
-		return err
+	}
+	if invalid != nil {
+		if len(want.Runtimes) == 0 && base != nil {
+			return exports.Refuse("Set target.runtime beside extends, or set the runtime in the configuration or with --runtime.", fmt.Sprintf("target.runtime is required, and the base stack %s defines no target.", shownBase(base)))
+		}
+		return invalid
 	}
 	if base != nil && base.Extending != nil {
 		if err := base.Extending.Target.Check(want, shownBase(base)); err != nil {
@@ -1747,6 +1761,15 @@ func flagRefuses(force bool) string {
 	return "--force would not replace it either"
 }
 
+// collisionFile is the name of the file the checkout's modules are listed in, as the
+// compose read it: qory.yaml or harness.yaml.
+func collisionFile(e *compose.CollisionError) string {
+	if e.File == "" {
+		return config.FileName
+	}
+	return e.File
+}
+
 // printCollision prints what happened, the modules involved, and the stack lines that
 // resolve it by keeping the last module that ships each entry. A base module's lines
 // are the whole entry to write in qory.yaml, with the exclude qory.yaml lists for it.
@@ -1772,7 +1795,7 @@ func printCollision(u *ui.UI, e *compose.CollisionError, n *source.Named) {
 			}
 			line := "Module " + accesskey.ShownName(l, false) + " belongs to the base stack " + accesskey.ShownName(c.Base, false)
 			if e.ExcludeName(l) != l {
-				line += "; list it in qory.yaml as " + accesskey.ShownName(e.ExcludeName(l), false)
+				line += "; list it in " + collisionFile(e) + " as " + accesskey.ShownName(e.ExcludeName(l), false)
 			}
 			u.Text(line + ".")
 		}
@@ -1786,7 +1809,7 @@ func printCollision(u *ui.UI, e *compose.CollisionError, n *source.Named) {
 	where := "qory-stack.yaml"
 	for _, l := range modules {
 		if e.InBase[l] {
-			where = "qory.yaml, under harness.modules"
+			where = collisionFile(e) + ", under harness.modules"
 		}
 	}
 	u.Text("Keep one and exclude it from the others. For example, in " + where + ":")

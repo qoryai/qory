@@ -277,10 +277,11 @@ compose`. Given a run key, the run fetches the folder through the run's stack pr
 with a `qory run: fetched` line, and every git source of the fetched stack the same way.
 Its modules listed by a path are read from the fetched tree at the same commit. A
 reference whose URL has a user part or an `@` between `://` and the first `/` after it
-stops the run with exit 2 before anything is fetched: `remove the user name and password
-from the URL in -f: the run's stack proxy sets the harness credentials of the run
-configuration, so a source's URL needs none`. One whose host has a character outside
-ASCII stops it the same way: `write the host of the URL in -f in ASCII, …`. This run
+stops the run with exit 2 before anything is fetched: `Remove the user name and password
+from the URL in -f.`, with the line `The run's stack proxy sets the harness credentials of
+the run configuration, so a source's URL needs none.` after it. One whose host has a
+character outside ASCII stops it the same way: `Write the host of the URL in -f in
+ASCII.`, with two lines after it. This run
 composes the hello example at a commit of the qory repository:
 
 ```sh
@@ -305,34 +306,47 @@ home is under `qory` in your cache directory with `remove <path> from --mount: �
 is the checkout's, with `make the mount <path> read-only, …`, see [A run that may write
 works in a copy](#a-run-that-may-write-works-in-a-copy). A walled run whose home has a
 `push-checks.json` that qory cannot read stops before the setup and the agent, with exit
-2: `Compose the harness again, and run again. The push checks in <path> could not be read:
-<cause>.` It stops there with exit 2 too when the push checks would run on another engine
-than the run's containers, `Switch the engine back to the one the run started on, and run
-again. The push checks would run on the engine <id>, and the run's containers are on the
-engine <id>.`, and when the run API of a run from a control plane fails, `Open the run
-through a gateway that sends the run API address, and run again. The push checks read the
-artifacts through the run API, which failed: <cause>.`, or when the run API address is not
-an http or https URL: `Update the run's gateway, and run again. The run API address that
-the gateway sent is not one the push checks can use: <cause>.` The push checks run in a
-container of the wall's default image, `--image` or `wall.image`, and not of the image that
-the run's policy selects, so a change to the repository's `.devcontainer/` cannot turn them
-off. A run on a person's machine, with no run code, and with neither `--image` nor
-`wall.image`, whose policy selects the image, runs them in the run's image. The container
-runs under the runtime of the image it runs in: the `runtime` of its `wall.images` entry,
-such as `runsc`, or the engine's default for an entry with none and for an image that is a
-reference. A run from a
-run code with neither stops there with exit 2: `Set wall.image in forager.yaml, then take
-the work item in again in Qory Apiary.`, and on the next line `Push checks run in the wall's
-default image; the code is used`. The run stops there with exit 2 too when the engine does not have
-the wall's default image: `Pull the wall's default image onto this machine, and run again:
-push checks run in it. The engine does not have the image <image>.` It stops there with
-exit 2 before any command of the engine gets the image when the image is not a
-reference, such as a value that starts with `-`: `Set wall.image or --image to an image
-reference, and run again. Push checks cannot start from <value>: a reference starts with a
-letter or a digit and has only letters, digits and . _ / : @ -.` When Forager cannot turn on
-the check of the POSTs from behind the wall, the run stops there with exit 1: `Run again.
-Turning on the push checks for the POSTs from behind the wall failed, so the run stopped
-before the setup: <cause>.` A home without push checks, and a run with no control plane,
+2: `Compose the harness again, and run again.`, and on the next line `The push checks in
+<path> could not be read: <cause>.` It stops there with exit 2 too when the push checks
+would run on another engine than the run's containers, `Switch the engine back to the
+one the run started on, and run again.`, and on the next line `The push checks would run
+on the engine <id>, and the run's containers are on the engine <id>.`, and when the run
+API of a run from a control plane fails, `Open the run through a gateway that sends the
+run API address, and run again.`, and on the next line `The push checks read the
+artifacts through the run API, which failed: <cause>.`, or when the run API address is
+not an http or https URL: `Update the run's gateway, and run again.`, and on the next line
+`The run API address that the gateway sent is not one the push checks can use: <cause>.`
+The push checks run in a container of the wall's default image, `--image` or `wall.image`,
+and not of the image that the run's policy selects, so a change to the repository's
+`.devcontainer/` cannot turn them off. A run on a person's machine, with no run code, and
+with neither `--image` nor `wall.image`, whose policy selects the image, runs them in the
+run's image. The container runs under the `runtime` of the `wall.images` entry that the run's policy
+selects, such as `runsc`, when that entry has one, so a check never runs under a weaker
+runtime than the run's container. Otherwise it runs under the `runtime` of the default
+image's entry, or the engine's default for an entry with none and for a default that is a
+reference. A run from a run code with neither stops there with exit 2: `Set wall.image
+in forager.yaml, then take the work item in again in Qory Apiary.`, and on the next line
+`Push checks run in the wall's default image; the code is used`. The run stops there with
+exit 2 too when the engine does not have the wall's default image: `Pull the wall's
+default image onto this machine, and run again.`, and on the next line `Push checks run
+in it, and the engine does not have the image <image>.` The run stops there with exit 2
+when the engine's `docker info` does not list the runtime that the checks' container runs
+under, such as `runsc`: `Install the container runtime on the engine, and run again.`, and
+on the next line `The push checks' container runs under the runtime <runtime>, and the
+engine does not have it.` An engine whose `docker info` fails, or does not list runtimes
+as Docker does, lets the run go on, and so does a runtime name that Docker starts as a
+containerd shim although its list omits it: a name with a `.`, a part before the first
+`.`, and no `/`, such as `io.containerd.runsc.v1`. A runtime name with a `/` stops the run
+there with exit 2 when the engine's list omits it: `Fix the runtime name in wall.images, and run
+again.`, and on the next line `The push checks' container runs under the runtime <runtime>,
+and Docker accepts no runtime name with a "/".` It stops there with exit 2 before
+any command of the engine gets the image when the image is not a reference, such as a
+value that starts with `-`: `Set wall.image or --image to an image reference, and run
+again.`, and on the next line `Push checks cannot start from <value>. A reference starts
+with a letter or a digit and has only letters, digits, and . _ / : @ -.` When Forager
+cannot turn on the check of the POSTs from behind the wall, the run stops there with
+exit 1: `Run again.`, and on the next line `Turning on the push checks for the POSTs from
+behind the wall failed, so the run stopped before the setup: <cause>.` A home without push checks, and a run with no control plane,
 start as before, with no check turned on.
 
 A run from a run code stops at the same points of the push-check load and set with the same
@@ -352,6 +366,10 @@ Set wall.image in forager.yaml, then take the work item in again in Qory Apiary.
   Push checks run in the wall's default image; the code is used
 Pull the wall's default image, then take the work item in again in Qory Apiary.
   Push checks run in it, and the engine does not have the image <image>; the code is used
+Install the container runtime, then take the work item in again in Qory Apiary.
+  The push checks' container runs under the runtime <runtime>, and the engine does not have it; the code is used
+Fix the runtime name in wall.images, then take the work item in again in Qory Apiary.
+  The push checks' container runs under the runtime <runtime>, and Docker accepts no runtime name with a "/"; the code is used
 Set wall.image or --image to an image reference, then take the work item in again in Qory Apiary.
   Push checks cannot start from <value>; the code is used
 Take the work item in again in Qory Apiary.
@@ -382,8 +400,9 @@ When the run ends, qory says how, and its exit status goes with it:
   before <runtime> started`: the limit came before the runtime started, exit 124. The
   line contains `the agent` in place of `<runtime>` when the limit came during the fetch
   of the run's repositories, and when the compose failed after the limit.
-  A run from a run code, which takes no `--timeout`, prints `✗ set a longer
-  time_limit_minutes in Qory Apiary, or a longer workflows.<workflow>.time_limit in the
+  A run from a run code, which takes no `--timeout`, prints `✗ set a longer Time limit
+  for the workflow <workflow> on the Workflows page in Qory Apiary, or a longer
+  workflows.<workflow>.time_limit in the
   base of the workspace's harness: the run was cancelled at its time limit of <d>, before
   <runtime> started` instead. The line contains `the workspace's harness` for a harness
   that defines a stack, and `the checkout's harness or the base it extends` for a run
@@ -430,7 +449,7 @@ the value to the list:
   qory reads as it starts, in every run;
 - the access key's secret from `--access-key-secret-fd`, in every run, and from the
   `access-key-secret` file when qory signs its requests to the server with it;
-- the password of the run's host proxy, of its stack proxy and of
+- the password of the run's host proxy, of its push proxy, of its stack proxy, and of
   `wall.engine_proxy_file`;
 - for a run given a run key or a run code, the query values of each harness source's URL,
   before qory fetches the source through the stack proxy;
@@ -1069,7 +1088,7 @@ its files take on disk, at most 60 minutes.
 `--timeout 0` lifts the limit `forager.yaml` sets.
 
 A run from a run code takes its limit from elsewhere, in this order:
-`run_settings.time_limit_minutes` in Qory Apiary's response to the code, then
+`time_limit_minutes` in the run's documents, then
 `workflows.<name>.time_limit` of the run's workflow in the stack that the harness
 defines, or in the `qory-stack.yaml` of the stack that it extends, then 3 hours.
 `--timeout` stops it with exit 2, and `session.run.timeout` does not
@@ -1113,8 +1132,8 @@ gateway:
   `429 Too Many Requests`.
 - A field you leave out has its default: 256, 50 and 200.
 - A value outside its range stops every qory command that reads `forager.yaml`, with the
-  fix, such as `set gateway.run_limits.connections to a number from 1 to 65536, or remove
-  it for the default of 256`.
+  fix, such as `Set gateway.run_limits.connections to a number from 1 to 65536, or remove
+  it.`, and on the next line `The default is 256.`
 - The record has a `dev.qory.run.egress` with the rule `wall:connection-limit` or
   `wall:rate-limit` for a request that gets the `429`, at most one per limit and second.
 
@@ -1154,8 +1173,9 @@ gateway:
 - The stack proxy counts its connections and requests at the limits of
   `gateway.run_limits`, apart from the run's proxy.
 - An entry of another form stops every qory command that reads `forager.yaml`, with the
-  fix, such as `set gateway.stack_hosts[0] to a lower-case host name, an IPv4 address or
-  a *. suffix, such as git.example.com; no port, path or scheme`.
+  fix, such as `Set gateway.stack_hosts[0] to a lower-case host name, an IPv4 address, or
+  a *. suffix.`, and on the next line `An entry is a host such as git.example.com, with no
+  port, path, or scheme`.
 - For each request the stack proxy allows or denies, the gateway prints one line on
   standard error, and the record has a `dev.qory.run.egress` with `channel: stack`.
   When the run configuration sets `harness_hidden`, those records have no `path` and no
@@ -1865,8 +1885,10 @@ writes nothing more there; the run goes on. The descriptor works on Linux and ma
 
 Qory Apiary's signed response to the code contains the run's documents beside the run key:
 the step, the domain and the inputs; for the step explore, the work item, the run
-settings, the harness, the workflow and `harness_hidden`; for the step prebuild, the target
+settings, the time limit, the harness, the workflow and `harness_hidden`; for the step prebuild, the target
 and the places of its images at a registry. qory runs the steps explore and prebuild.
+The documents of an explore can also contain `shared_run` and `full_suite`: qory accepts
+them and changes nothing for them.
 qory checks the documents as the run contract's `documents.schema.json`, and, for the
 step explore, checks that `inputs.domain` and `inputs.work_item.id` match the domain and
 the work item. Then a run of the step explore:
@@ -1877,8 +1899,8 @@ the work item. Then a run of the step explore:
 - when `harness_hidden` is `true`, composes a home that contains no link, and has
   Forager mask text that matches the home's files in the session's log and events
   (see [A hidden harness](#a-hidden-harness));
-- runs the runtime of `run_settings.runtime`, `claude` when the response sets no run
-  settings, composed with the model, the effort and the tiers the run settings set, as
+- runs the runtime of `run_settings.runtime`, `claude` when the documents contain no
+  `run_settings`, composed with the model, the effort and the tiers the run settings set, as
   `--model`, `--effort`, `--tier` and `--tier-effort` set them;
 - writes the inputs to `inputs.json`, mode 0600, in a folder `in/`, mode 0700, of a new
   temporary folder, which qory removes when the run ends. Behind a wall, `in/` is mounted
@@ -2069,8 +2091,8 @@ is set to, with no agent:
    session gets none of this machine's variables and no model key.
 4. Behind the wall, the helper builds the development container configuration on the
    wall's nested Docker, in two steps: the environment image, tagged
-   `<environment_destination>:<run id>`, then the target image from it, with the agent
-   added, tagged `<image_destination>:<run id>`. The build keeps the environment image
+   `<environment_destination>:<run id>`, then the target image from it, with the tools
+   and the wall user added, tagged `<image_destination>:<run id>`. The build keeps the environment image
    apart only when the image depends on the configuration's bytes alone. When the
    documents set `environment_image`, the build starts the target image from that image
    and builds no environment image. The build's steps get the run's proxy as Docker's
@@ -2090,6 +2112,97 @@ is set to, with no agent:
    image its target step starts from, and none when the build started from
    `environment_image`, from scratch, or from an image it cannot resolve before it
    builds. Then qory closes the run as succeeded, and exits 0.
+
+The target step adds these tools to the image its target starts from, whether the image is a
+prebuilt one, such as `mcr.microsoft.com/devcontainers/base`, or one the configuration
+builds, and the run's session finds them without a download:
+
+- Chromium at `/usr/bin/chromium`, and `ffmpeg` with `ffprobe`, with Noto's fonts for
+  Latin and other scripts, CJK, and color emoji. Where Chromium comes from depends on the
+  base image:
+  - **Debian**, any release: `apt-get` installs the `chromium` package.
+  - **Ubuntu 22.04 and 24.04**, `amd64` and `arm64`: Ubuntu's `chromium` package is a
+    snap, which does not run in a container, so the step downloads Chrome for Testing
+    159.0.8154.6, the Chromium of Playwright 1.65.1 (browser revision 1255), from
+    `https://storage.googleapis.com/chrome-for-testing-public/159.0.8154.6/`, the
+    addresses Google lists for that version. `curl` allows `https` only and follows no
+    redirect. The step checks the archive's sha256 sum, which is in
+    `internal/prebuild/tools.go`, before it extracts it to `/opt/qory/chromium`, owned by
+    root, and links `/usr/bin/chromium` to it. It installs the libraries Playwright's
+    `install-deps` lists for the release, `curl`, and `unzip` with `apt-get`. A base that
+    has a file at `/usr/bin/chromium` stops the step.
+
+  `apt-get` installs `ffmpeg`, the fonts and the libraries with no recommended packages
+  from the apt sources the base image has, and removes its archives and lists in the same
+  layer. Their versions are the ones the base image's suite serves on the day of the
+  build, so they differ between builds: the log of the step prints each version.
+- The Node packages `typescript`, `libpg-query`, `parse5`, `postcss` and `postcss-scss` in
+  `/opt/qory/parsers`, as in the `agent` image: a copy of the folder of the same path in
+  the `prebuild` image, installed there from `images/agent/parsers/package-lock.json`. The
+  folder belongs to root and is read-only for every other user.
+- `node`, when the base image has none on its PATH: a copy of the `prebuild` image's
+  `/usr/local/bin/node`, Node 24. An image that has `node` keeps it, and the step checks
+  that it loads each parser, which needs Node 20.19 or later.
+
+The step runs the programs as the wall user and checks that Chromium starts, `ffmpeg` and
+`ffprobe` run, each parser loads at the version of `package.json`, and the wall user
+cannot write to `/opt/qory/parsers`. A failed check prints its fix first in the build's
+log. Behind the wall, `apt-get` reaches the base image's apt sources, and on Ubuntu `curl`
+reaches `storage.googleapis.com`, through the run's proxy, so the run's egress must
+include them. `storage.googleapis.com` is the one host of the download.
+
+The step reads `ID`, `VERSION_ID` and `apt-get` in a container of the base image with no
+network, and stops before it builds a layer when the base is none of the above. The first
+line of the error is the fix, and the second line has the image's value, at most 32
+characters of it:
+
+- `use a Debian or Ubuntu image: the build adds Chromium only to these`, then `this
+  image's ID is "<ID>"`;
+- `use Ubuntu 22.04 or 24.04, or Debian: the build adds Chromium only to these`, then
+  `this image is Ubuntu "<VERSION_ID>"`;
+- `use an amd64 or arm64 Ubuntu image: the build adds Chromium only for these`, then
+  `this image's architecture is "<architecture>"`;
+- `use a Debian or Ubuntu image that has apt-get: the build installs ffmpeg and fonts with
+  it`.
+
+An Alpine base, or an Ubuntu base of another release, stops the prebuild this way.
+A prebuild whose `prebuild` image is
+not built FROM the `agent` image stops with `build the prebuild image FROM Qory's agent
+image, which has the parsers`, then `the folder /opt/qory/parsers has none`.
+
+The step adds about 1.6 GiB to the image, measured on
+`mcr.microsoft.com/devcontainers/base` for arm64 (1.3 GiB before, 3.0 GiB after), and
+about 1.4 GiB on `mcr.microsoft.com/devcontainers/typescript-node` (2.7 GiB before, 4.1 GiB
+after). The build sets no limit on the image's size unless the run's documents have
+`largest_prebuilt_image_bytes`.
+
+When the documents of a prebuild have `largest_prebuilt_image_bytes`, an integer of 1 or
+more in decimal bytes, as `docker image ls` shows sizes (10 GB is `10000000000`), the
+build reads the size of the repository's image with `docker image inspect`. The
+repository's image is the one the development container configuration builds, or the
+prebuilt image it names or the environment image the build starts from, as it exists
+before qory adds Chromium, ffmpeg and the parsers. The limit does not count what qory
+adds. On `mcr.microsoft.com/devcontainers/typescript-node`, a repository image of 2.7
+GiB (2.9 GB) is under a limit of `3000000000`, and is kept although the final image is
+4.1 GiB. When the size is greater than the member, the build stops before the tools
+step. It removes an image it built, and leaves an image the engine pulled, which the
+engine may have held before the build. Nothing is pushed. The run closes as failed, and
+qory exits 1 with these lines, the first after the prefix `prebuild: `:
+
+```text
+prebuild: Make the image smaller, or contact support to raise Largest prebuilt image.
+The repository's image is 5.0 GB (5000000001 bytes), before qory adds Chromium, ffmpeg and the parsers.
+The limit is 5.0 GB (5000000000 bytes). The image is removed.
+```
+
+The last line has no `The image is removed.` when the engine pulled the image. A
+repository image of exactly the limit is kept. The last line of a successful prebuild
+prints the size of the final image. Without the member, the build keeps an image of any
+size. The member is set only for a prebuild started from Qory Apiary, from the
+instance's Largest prebuilt image setting. `qory prebuild` on this machine has no limit.
+qory refuses documents whose member is not an integer from 1 to 9223372036854775807, or
+that a run of another step has, as it refuses any member the run documents' schema does
+not define.
 
 The build takes the user from `wall.user` in `forager.yaml`. The wall's helper is
 `wall.helper`, or on Linux the `qory` you run. When `forager.yaml` sets `pool.registry`,
@@ -2277,25 +2390,28 @@ shows its addresses, so the fifth line applies to it. In place of the sixth, it 
 `run again: the run's stack proxy, through which qory fetches the run's harness, did not
 open: <error>`:
 
-- `remove the user name and password from the URL of the base of the checkout's harness:
-  the run's stack proxy sets the harness credentials of the run configuration, so a
-  source's URL needs none`, exit 2, before the base is fetched, for a checkout's file
-  whose `extends` has a URL with a user part or an `@` between `://` and the first `/`
-  after it; `correct the URL of the base of …: qory could not read it as a URL` and
-  `write the host in the URL of the base of … in ASCII, …` for the other two checks of a
+- `Remove the user name and password from the URL of the base of the checkout's harness.`,
+  with the line `The run's stack proxy sets the harness credentials of the run
+  configuration, so a source's URL needs none.` after it, exit 2, before the base is
+  fetched, for a checkout's file whose `extends` has a URL with a user part or an `@`
+  between `://` and the first `/` after it; `Correct the URL of the base of ….` and
+  `Write the host in the URL of the base of … in ASCII.` for the other two checks of a
   module source below
-- `remove the user name and password from the source of the module <module> in the base
-  of the workspace's harness: the run's stack proxy sets the harness credentials of the
-  run configuration, so a source's URL needs none`, exit 2, before any module is
-  fetched, for a module source in the stack's file whose URL has a user part or an `@`
-  between `://` and the first `/` after it, and `the source of modules[<n>]` for a
-  module listed without a name
-- `correct the URL in the source of the module <module> in the base of the workspace's
-  harness: qory could not read it as a URL`, exit 2, before any module is fetched
-- `write the host in the source of the module <module> in the base of the workspace's
-  harness in ASCII, with the xn-- form for an international name: the host has a
-  character outside ASCII, which git may map to another, such as a fullwidth @ to @`,
-  exit 2, before any module is fetched
+- `Remove the user name and password from the URL in the source of the module
+  <module>.`, with the lines `The run's stack proxy sets the harness credentials of the
+  run configuration, so a source's URL needs none.` and `The source of the module
+  <module> is in the base of the workspace's harness.` after it, exit 2, before any
+  module is fetched, for a module source in the stack's file whose URL has a user part
+  or an `@` between `://` and the first `/` after it, and `the source of modules[<n>]`
+  for a module listed without a name
+- `Correct the URL in the source of the module <module>.`, with the lines `qory could
+  not read it as a URL.` and `The source of the module <module> is in the base of the
+  workspace's harness.` after it, exit 2, before any module is fetched
+- `Write the host in the source of the module <module> in ASCII.`, with the lines `Use
+  the xn-- form for an international name.`, `The host has a character outside ASCII,
+  which git may map to another, such as a fullwidth @ to @.` and `The source of the
+  module <module> is in the base of the workspace's harness.` after it, exit 2, before
+  any module is fetched
 - `check that <url> has the branch, tag or commit <ref> and that gateway.stack_hosts in
   the gateway's forager.yaml or the run configuration's stack_hosts lists <host>, and,
   for a private repository, that the run configuration has a harness credential whose
@@ -2315,13 +2431,14 @@ The stack file of a git base, the `qory.yaml` of the base's repository, and the
 the repository contains. When such a link leads outside the clone, qory stops with
 exit 2 before it reads the file, for a run from a run code and for any other run:
 
-- `check the folder of <base>: its qory-stack.yaml links outside its repository`, where
-  `<base>` is `the base of the workspace's harness` or `the base of the checkout's
-  harness`, and `extends <url>#<ref>:<path>: qory-stack.yaml links outside the
-  repository` when the harness is shown
-- `check <base>: the qory.yaml of its repository links outside its repository`, and
-  `extends <url>#<ref>:<path>: qory.yaml at the root of its repository links outside the
-  repository` when the harness is shown
+- `Make the qory-stack.yaml link in the folder of <base> point inside its repository.`,
+  where `<base>` is `the base of the workspace's harness` or `the base of the checkout's
+  harness`, and `Make the qory-stack.yaml link in the base stack point inside the
+  repository.` with the line `extends is <url>#<ref>:<path>.` last when the harness is
+  shown
+- `Make the qory.yaml link at the root of <base> point inside its repository.`, and
+  `Make the qory.yaml link at the root of the base stack's repository point inside it.`
+  with the line `extends is <url>#<ref>:<path>.` last when the harness is shown
 - `the qory.yaml of the repository of <source> links outside its repository`, and
   `qory.yaml in <url> at <ref> links outside the repository` when the harness is shown
 
@@ -2381,8 +2498,9 @@ phrase:
   <harness>`.
 - `correct <harness>, then take the work item in again in Qory Apiary: <text>; the code
   is used`, for any other error of exit 2, where `<harness>` is the workspace's harness or
-  the checkout's harness. One such `<text>` is `module <module>: qory.yaml in <source>:
-  exports.dir <stacks or modules> is not a directory inside the repository`, for an
+  the checkout's harness. One such `<text>` is `module <module>: qory.yaml in <source>: Set the <stacks or
+  modules> directory of exports.dir to a path inside the repository.`, and on the next line
+  `exports.dir <stacks or modules> is not a directory inside the repository.`, for an
   `exports.dir` that is absolute or leads out of its repository.
 - `fix the cause, then take the work item in again in Qory Apiary: <text>; the code is
   used`, for any other error of any other exit status, which stays as it is
@@ -2492,7 +2610,7 @@ The step does this, in order:
 2. qory removes `.git/index.lock` of each repository, a file that an agent killed in a git
    command leaves behind, and prints `qory run: removed .git/index.lock of <path>, which the
    agent left when it stopped`. qory does this only for a walled run, whose container the
-   session removed: when it could not, the run's host proxy does not open, and the step
+   session removed: when it could not, the run's push proxy does not open, and the step
    runs no git. With an agent on the host, the stop of the agent is not proven, and a lock
    fails the step. qory removes only that file, and only as a regular file in a `.git`
    directory, so a link stops the check and any other lock stays.
@@ -2512,7 +2630,7 @@ The step does this, in order:
    The commits of all repositories come before the first push, so a failed commit pushes
    nothing.
 4. qory pushes each repository whose `HEAD` is past the commit the run started at to
-   `refs/heads/qory/<work item id>`, through the run's host proxy, with no force. It
+   `refs/heads/qory/<work item id>`, through the run's push proxy, with no force. It
    prints `qory run: pushed qory/<work item id> to <path> at <commit>`, where `<commit>`
    is the commit's first 12 characters. With no new commit in any repository, it prints
    `qory run: no new commits to push`, and the step ends with no push and no version.
@@ -2524,9 +2642,19 @@ The step does this, in order:
    with no answer, or with a status of 500 or above, qory reads the work item's artifacts
    first, and sends the request again only when no version of this run has the file.
 
-A run's policy with path rules must allow `/<path>.git/git-receive-pack` for the push. The
-run's gateway returns 403 to a push to any ref but the run's branch, and to every push
-through a credential that has no `push_ref`, as a credential in forager.yaml has none.
+The push proxy is the run's second proxy on the run's gateway. qory starts it for the push,
+after it removed the setup container, and closes it when the push returns. It sets only the
+run configuration's push credentials, on the hosts and paths of their items, and returns
+403 to every other host and path. The run's policy does not apply there. The run's gateway
+returns 403 to a push that is not a plain push to the credential's `push_ref`, which is the
+run's branch: a push to any other ref, a signed push, and a push with push options.
+
+A run whose run configuration has no push credential has no push proxy. The step fails with
+`qory run: Contact support: this run has no push credential, so qory pushed nothing.`,
+a second line with the cause, and `the code is used`, and qory pushes nothing. A credential
+in forager.yaml is never a push credential. The run's proxy, which the agent, the setup, the
+fetch, and the runtime's install go through, sets no push credential, so a push through it
+gets 403, as a credential with no `push_ref` does.
 
 The step counts toward the run's time limit, and has 120 seconds when the run has less left,
 also after the session used up the limit. The 120 seconds do not count the full suite's after
@@ -2590,18 +2718,20 @@ Each of these lines fails the step. `<commit>` is the commit's first 12 characte
   the work item in again: the push failed: <error>; the code is used`, when a rule or a
   hook on the system stops the update
 - `Contact support: the push was refused (403).`, then lines indented by two spaces:
-  `One of these stopped it:`, the three causes, and a last line with the error. The
-  causes are `1. The run's gateway allows a push only to the run's branch,
-  refs/heads/qory/<work item id> (wall:push-ref).`, `2. The connection's setup has no path rule for
-  /<path>.git/git-receive-pack, or no credential with write access.`, `3. The forge stopped
-  the push: its permission for the run's credential, or a branch rule.` The last line is
+  `One of these most likely stopped it:`, the three causes, and a last line with the error.
+  The causes are `1. The run's push proxy refuses a push that is not a plain push to the
+  push_ref of the push credential (for example a signed push or a push with push options),
+  and qory pushes to refs/heads/qory/<work item id> (wall:push-ref).`, `2. The run's
+  push credential has no item for /<path>.git/git-receive-pack on <system>, and the push
+  proxy refuses every other host and path.`, `3. The forge stopped the push: its permission
+  for the push credential, or a branch rule.` The last line is
   `The push of <path> to <system> returned 403: <error>; the code is used`
 - `give the run's credential for <system> write access to <path>, then take the work item in
   again: the push through the run's gateway failed: <error>; the code is used`
-- `check that the run's policy allows <system> and that <system> is reachable, then take
-  the work item in again: the push of <path> through the run's gateway failed: <error>;
-  the code is used`
-- `take the work item in again in Qory Apiary: the run's host proxy, through which qory
+- `Let the run's gateway reach <system>, then take the work item in again.`, then a line
+  indented by two spaces: `The push of <path> through the run's push proxy failed:
+  <error>; the code is used`
+- `take the work item in again in Qory Apiary: the run's push proxy, through which qory
   pushes the run's commits, did not open: <error>; the code is used`
 - `take the work item in again in Qory Apiary: the run API, which stores the version of the
   artifact branch, is not reachable from this run: <error>; the code is used`
@@ -3232,10 +3362,11 @@ In a walled run whose modules declare a push check for the type, the check runs 
 push reaches Qory Apiary (see Push checks in `contracts/harness/v1/README.md`). A check
 that does not pass stops the push with 422 `push_check_failed`, and `qory artifact push`
 exits 4. `qory artifact push` prints the fix line, such as `Fix each finding below and push
-again. The check for spec failed:`, then each finding of the check on a separate line:
+again.`, then `The check for spec failed:` and each finding of the check on a separate line:
 
 ```text
-✗ Fix each finding below and push again. The check for spec failed:
+✗ Fix each finding below and push again.
+  The check for spec failed:
   spec.md: the section Goal is missing
 ```
 
@@ -3494,6 +3625,9 @@ How it works:
   host is its endpoint's host.
 - Where a program wants a credential set, the container gets a placeholder. It never gets
   the token.
+- A push credential, `purpose: push` in the run configuration, is set only by the run's push
+  proxy, for qory's push step. The run's proxy never sets it, and no placeholder of it
+  reaches the container.
 
 Without a wall, the run gets the same placeholders, and the proxy sets the same tokens.
 Without a wall, qory and the agent run as the same user. So the agent can read the run's
@@ -4922,8 +5056,9 @@ image: go-docker
 - `ref` is the image. Pin it by digest to run the same image every time.
 - `runtime` is the container runtime the wall starts the image under. Your engine must
   have it. Without it, the engine's default runs the image. The push checks' container
-  runs under the runtime of the image it runs in, the default image: the `runtime` of its
-  entry, or the engine's default for an entry with none and for a reference.
+  runs under the `runtime` of the entry that the run's policy selects, when it has one,
+  and otherwise under the `runtime` of the default image's entry, or the engine's default
+  for an entry with none and for a reference.
 - `wall.image` sets the default, and `--image` sets another for one run: a name of
   `wall.images`, or a reference. A name is read as that image first.
 - A policy's selection wins over the default, `--image` included. A run whose policy

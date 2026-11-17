@@ -6,11 +6,11 @@ import (
 	"github.com/qoryai/integrations/contracts"
 )
 
-// FallbackTimeLimit is the time limit of a dispatched run whose run settings set no
+// FallbackTimeLimit is the time limit of a dispatched run whose documents set no
 // time_limit_minutes and whose workflow sets no time_limit, see [TimeLimit].
 const FallbackTimeLimit = 3 * time.Hour
 
-// TimeLimit is the time limit of a dispatched run: minutes, the run settings'
+// TimeLimit is the time limit of a dispatched run: minutes, the documents'
 // time_limit_minutes, when it is above 0; else workflow, the time_limit of the workflow
 // the run starts, when it is above 0; else [FallbackTimeLimit]. qory run sets it as the
 // session's time limit, which counts from the run's open.

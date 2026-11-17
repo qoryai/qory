@@ -80,8 +80,16 @@ func prebuildFromCodeWith(t *testing.T, documents json.RawMessage, wall string, 
 	return got, out, runErr, g.runKey()
 }
 
+// wantLargest is the documents' largest_prebuilt_image_bytes, 0 when they set none.
+func wantLargest(doc contracts.Documents) int64 {
+	if doc.LargestPrebuiltImageBytes == nil {
+		return 0
+	}
+	return *doc.LargestPrebuiltImageBytes
+}
+
 // TestARunCodeForAPrebuildRunsTheBuild is a run code whose documents have step
-// prebuild, with and without environment_image, on a machine whose forager.yaml sets
+// prebuild, with and without environment_image or largest_prebuilt_image_bytes, on a machine whose forager.yaml sets
 // machine, pool.registry and the wall's image by digest, user, helper and prebuild image:
 // qory run says which gateway the run goes through, and runs the prebuild once with the
 // documents' run, inputs and places, the run key, the machine, the registry and the wall
@@ -93,7 +101,7 @@ func TestARunCodeForAPrebuildRunsTheBuild(t *testing.T) {
 	docker, _ := fakeDocker(t)
 	helper := staticELF(t)
 	wall := "machine: aws-ec2\npool:\n  registry: registry.example.com/targets\n  run_config: /srv/pool/runs\nwall:\n  adapter: docker\n  image: " + prebuildAgent + "\n  images_allow: [registry.example.com/agents/]\n  command: " + docker + "\n  helper: " + helper + "\n  user: \"1000:1000\"\n  cpus: \"2\"\n  ca_env: [NODE_EXTRA_CA_CERTS]\n" + prebuildImages
-	for _, name := range []string{"prebuild.json", "prebuild-environment-image.json"} {
+	for _, name := range []string{"prebuild.json", "prebuild-environment-image.json", "prebuild-largest-image.json"} {
 		t.Run(name, func(t *testing.T) {
 			documents := prebuildDocuments(t, name)
 			var doc contracts.Documents
@@ -110,7 +118,7 @@ func TestARunCodeForAPrebuildRunsTheBuild(t *testing.T) {
 			}
 			r := got.run
 			if r.RunID != keyRunID || got.key != key || string(r.Inputs) != string(doc.Inputs) ||
-				r.ImageDestination != doc.ImageDestination || r.EnvironmentDestination != doc.EnvironmentDestination || r.EnvironmentImage != doc.EnvironmentImage {
+				r.ImageDestination != doc.ImageDestination || r.EnvironmentDestination != doc.EnvironmentDestination || r.EnvironmentImage != doc.EnvironmentImage || r.LargestImageBytes != wantLargest(doc) {
 				t.Errorf("the prebuild's run is %+v, by the run key %v; want the documents' %+v", r, got.key == key, doc)
 			}
 			s := got.settings

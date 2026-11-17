@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -60,6 +61,9 @@ type Step struct {
 	RunID, ImageDestination, EnvironmentDestination, EnvironmentImage string
 	// User is the build's, as [Settings] has it.
 	User string
+	// LargestImageBytes is the run's, as [Run] has it, in decimal digits; "" sets no
+	// limit.
+	LargestImageBytes string
 }
 
 // stepFlags are the flags of qory run prebuild-step, in the order [Step.Args] writes them,
@@ -74,7 +78,7 @@ func (s *Step) stepFlags() []struct {
 	}{
 		{"--out", &s.Out}, {"--run-id", &s.RunID}, {"--image-destination", &s.ImageDestination},
 		{"--environment-destination", &s.EnvironmentDestination}, {"--environment-image", &s.EnvironmentImage},
-		{"--user", &s.User},
+		{"--user", &s.User}, {"--largest-image-bytes", &s.LargestImageBytes},
 	}
 }
 
@@ -131,15 +135,32 @@ func stepFlagNames(flags []struct {
 	return strings.Join(names[:len(names)-1], ", ") + " and " + names[len(names)-1]
 }
 
+// largestBytes reads the flag --largest-image-bytes: "" is 0, no limit, and any other
+// value is decimal digits of an integer from 1 to 9223372036854775807.
+func largestBytes(v string) (int64, error) {
+	if v == "" {
+		return 0, nil
+	}
+	n, err := strconv.ParseInt(v, 10, 64)
+	if err != nil || n < 1 || strings.HasPrefix(v, "+") {
+		return 0, fmt.Errorf("give qory run prebuild-step --largest-image-bytes an integer from 1 to 9223372036854775807: it got %s", integration.Printable(exports.Value(v, true)))
+	}
+	return n, nil
+}
+
 // checkStep returns an error for a step for which [checkRun] returns one as a run, and for
 // an out folder that is not an absolute path.
 func checkStep(s Step) error {
 	if !filepath.IsAbs(s.Out) {
 		return errors.New("give qory run prebuild-step --out with an absolute path: it writes its result there")
 	}
-	_, err := checkRun(Settings{State: "/", RunConfig: "/", User: s.User},
+	largest, err := largestBytes(s.LargestImageBytes)
+	if err != nil {
+		return err
+	}
+	_, err = checkRun(Settings{State: "/", RunConfig: "/", User: s.User},
 		Run{RunID: s.RunID, Inputs: []byte(`{"version":1,"environment_ref":"step"}`), ImageDestination: s.ImageDestination,
-			EnvironmentDestination: s.EnvironmentDestination, EnvironmentImage: s.EnvironmentImage})
+			EnvironmentDestination: s.EnvironmentDestination, EnvironmentImage: s.EnvironmentImage, LargestImageBytes: largest})
 	return err
 }
 
@@ -245,6 +266,10 @@ func (s StepSettings) run(ctx context.Context, st Step, res *stepResult) (string
 			bundle = wall.BundlePath
 		}
 	}
+	largest, err := largestBytes(st.LargestImageBytes)
+	if err != nil {
+		return stoppedBuild, err
+	}
 	tag := st.ImageDestination + ":" + st.RunID
 	envTag := ""
 	if st.EnvironmentDestination != "" {
@@ -252,7 +277,7 @@ func (s StepSettings) run(ctx context.Context, st Step, res *stepResult) (string
 	}
 	built, err := build(ctx, devimage.Options{
 		Repository: s.Dir, User: st.User, Tag: tag, Helper: helper, SeedArgs: devimage.SeedArgs,
-		EnvironmentImage: st.EnvironmentImage, EnvironmentTag: envTag,
+		EnvironmentImage: st.EnvironmentImage, EnvironmentTag: envTag, LargestImageBytes: largest,
 		Env: s.Env, Out: s.Out, Log: s.Log, Walled: true, CABundle: bundle,
 	})
 	switch {
@@ -476,11 +501,12 @@ func readResult(out string) (stepResult, error) {
 	return res, nil
 }
 
-// shownError is a step's error as [Launch] returns it: printable, with what looks like
-// a secret or a URL's password hidden, and at most [maxResultError] characters.
+// shownError is a step's error as [Launch] returns it: printable, with its line feeds
+// kept, what looks like a secret or a URL's password hidden, and at most
+// [maxResultError] characters.
 func shownError(text string) string {
 	text = strings.Map(func(r rune) rune {
-		if !unicode.IsPrint(r) {
+		if r != '\n' && !unicode.IsPrint(r) {
 			return '?'
 		}
 		return r

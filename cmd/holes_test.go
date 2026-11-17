@@ -172,7 +172,7 @@ func TestAModuleLinkNameHoldsNoControlCharacter(t *testing.T) {
 	copyFixture(t, "two-modules", root)
 	writeOwnStack(t, root, strings.Replace(linkedStack, "link: harness", "link: \"harness\\n*\"", 1))
 	out, err := run(t, "harness", "compose")
-	if err == nil || !strings.HasSuffix(err.Error(), `: the link name "harness\n*" holds a control character`) {
+	if err == nil || !strings.HasPrefix(err.Error(), "Set the link of module core to a name without control characters.\n  The link name \"harness\\n*\" contains a control character.") {
 		t.Errorf("%v\n%s", err, out)
 	}
 }
@@ -251,20 +251,20 @@ func TestNoProgramFromTheCheckout(t *testing.T) {
 		t.Fatal(err)
 	}
 	shown := filepath.Join(real, "bin", "acme-tracker")
-	tail := ", inside " + real + ", which a run may write; qory runs %s from outside the checkout and the container's read-write mounts"
+	tail := ", inside " + real + ", which a run may write; qory runs %s from outside the checkout and the container's read-write mounts."
 	writeFile(t, file, "apiVersion: qory.dev/v1alpha1\ngateway:\n  integrations:\n    tracker: {program: "+program+"}\n")
 	out, err := run(t, "config")
-	if want := "gateway.integrations.tracker: " + shown + fmt.Sprintf(tail, "an integration"); err == nil || !strings.HasSuffix(err.Error(), want) {
-		t.Errorf("an integration: %v, want the suffix %q\n%s", err, want, out)
+	if want := "Fix the program of gateway.integrations.tracker.\n  " + shown + fmt.Sprintf(tail, "an integration") + "\n  gateway.integrations.tracker is in " + file + "."; err == nil || err.Error() != want {
+		t.Errorf("an integration: %v, want %q\n%s", err, want, out)
 	}
 	writeFile(t, file, "apiVersion: qory.dev/v1alpha1\ngateway:\n  credentials:\n    product:\n      adapter: ["+program+", \"${argument}\"]\n      argument: \"[a-z]+\"\n      hosts: [git.example.com]\n")
 	out, err = run(t, "run", "claude", "--local")
-	if want := "forager.yaml: gateway.credentials.product.adapter: " + program + fmt.Sprintf(tail, "an adapter"); err == nil || err.Error() != want || cmd.ExitCode(err) != cmd.ExitInput {
+	if want := "Fix the adapter of gateway.credentials.product.\n  " + program + fmt.Sprintf(tail, "an adapter") + "\n  gateway.credentials.product.adapter is in forager.yaml."; err == nil || err.Error() != want || cmd.ExitCode(err) != cmd.ExitInput {
 		t.Errorf("an adapter: %v, want %q\n%s", err, want, out)
 	}
 	writeFile(t, file, "apiVersion: qory.dev/v1alpha1\ngateway:\n  tools:\n    files:\n      command: ["+program+"]\n      serves: [files.tools.internal]\n")
 	out, err = run(t, "run", "claude", "--local")
-	if want := "forager.yaml: gateway.tools.files.command: " + program + fmt.Sprintf(tail, "a tool"); err == nil || err.Error() != want || cmd.ExitCode(err) != cmd.ExitInput {
+	if want := "Fix the command of gateway.tools.files.\n  " + program + fmt.Sprintf(tail, "a tool") + "\n  gateway.tools.files.command is in forager.yaml."; err == nil || err.Error() != want || cmd.ExitCode(err) != cmd.ExitInput {
 		t.Errorf("a tool: %v, want %q\n%s", err, want, out)
 	}
 	if ids := recorded(t, root); len(ids) != 0 {
@@ -282,7 +282,7 @@ func TestNoProgramFromTheCheckout(t *testing.T) {
 	}
 	writeFile(t, file, "apiVersion: qory.dev/v1alpha1\ngateway:\n  integrations:\n    tracker: {program: "+outside+", settings: {project: SHOP, token_file: keys/token}}\n")
 	out, err = run(t, "config")
-	if want := "gateway.integrations.tracker: settings.token_file is a relative path; qory takes the file by its absolute path, since a relative one moves with the working folder"; err == nil || !strings.HasSuffix(err.Error(), want) {
+	if want := "Set settings.token_file to an absolute path.\n  A relative path moves with the working folder, and qory takes the file by its absolute path.\n  gateway.integrations.tracker is in " + file + "."; err == nil || err.Error() != want {
 		t.Errorf("a relative token_file: %v, want %q\n%s", err, want, out)
 	}
 }

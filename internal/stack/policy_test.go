@@ -57,17 +57,17 @@ func TestLoadReadsExtendingTarget(t *testing.T) {
 // and a value that is neither a name nor a list.
 func TestLoadRefusesABadExtendingTarget(t *testing.T) {
 	for _, c := range []struct{ block, want string }{
-		{"{}", "extending.target lists no runtime and no model; it lists the runtimes, the models, or both, a checkout may compose for"},
-		{"runtime: []", "extending.target lists no runtime and no model; it lists the runtimes, the models, or both, a checkout may compose for"},
-		{"runtime: [claude, \"\"]", "extending.target.runtime lists an empty name"},
-		{"model: \"\"", "extending.target.model lists an empty name"},
-		{"runtime: [claude, codex, claude]", "extending.target.runtime lists claude twice"},
-		{"model: [opus, opus]", "extending.target.model lists opus twice"},
-		{"runtime: {claude: opus}", "one name or a list of them"},
+		{"{}", "List a runtime, a model, or both in extending.target.\n  The block lists neither."},
+		{"runtime: []", "List a runtime, a model, or both in extending.target.\n  The block lists neither."},
+		{"runtime: [claude, \"\"]", "Remove the empty name from extending.target.runtime.\n  A name is not empty."},
+		{"model: \"\"", "Remove the empty name from extending.target.model.\n  A name is not empty."},
+		{"runtime: [claude, codex, claude]", "List claude once in extending.target.runtime.\n  extending.target.runtime lists it twice."},
+		{"model: [opus, opus]", "List opus once in extending.target.model.\n  extending.target.model lists it twice."},
+		{"runtime: {claude: opus}", "Set extending.target.runtime and extending.target.model each to one name or a list of names.\n  The decoder reports: "},
 	} {
 		_, err := Load(write(t, policyStack(c.block)))
-		if err == nil || !strings.Contains(err.Error(), c.want) {
-			t.Errorf("%q: err = %v, want %q", c.block, err, c.want)
+		if err == nil || !strings.HasPrefix(err.Error(), c.want) {
+			t.Errorf("%q: err = %v, want it to start with %q", c.block, err, c.want)
 		}
 	}
 }
@@ -87,9 +87,9 @@ func TestTargetPolicyCheck(t *testing.T) {
 		target Target
 		want   string
 	}{
-		{"a runtime outside", Target{Runtimes: Runtimes{"claude", "codex"}, Model: "opus"}, "runtime codex is not one the base stack nextjs@v2.4.0 is written for; runtimes: claude"},
-		{"a model outside", Target{Runtimes: Runtimes{"claude"}, Model: "haiku"}, "model haiku is not one the base stack nextjs@v2.4.0 is written for; models: opus, sonnet"},
-		{"no model with models listed", Target{Runtimes: Runtimes{"claude"}}, "the target sets no model, and the base stack nextjs@v2.4.0 is written for one of these; models: opus, sonnet"},
+		{"a runtime outside", Target{Runtimes: Runtimes{"claude", "codex"}, Model: "opus"}, "Set the target runtime to one that the base stack lists.\n  Runtime codex is not one the base stack nextjs@v2.4.0 is written for.\n  Runtimes: claude."},
+		{"a model outside", Target{Runtimes: Runtimes{"claude"}, Model: "haiku"}, "Set the target model to one that the base stack lists.\n  Model haiku is not one the base stack nextjs@v2.4.0 is written for.\n  Models: opus, sonnet."},
+		{"no model with models listed", Target{Runtimes: Runtimes{"claude"}}, "Set the target model to one that the base stack lists.\n  The target sets no model, and the base stack nextjs@v2.4.0 is written for one of these.\n  Models: opus, sonnet."},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			err := policy.Check(c.target, base)

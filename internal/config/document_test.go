@@ -32,7 +32,7 @@ func TestDocumentIsTheRootsOwnComposeFile(t *testing.T) {
 	}
 	writeRaw(t, path, "harness: {nope: 1}\n")
 	_, err = config.Document(root)
-	want := path + `: line 1: key "nope" is not one harness.yaml reads`
+	want := "Remove the key, or rename it to one harness.yaml reads.\n  Key \"nope\" is not one harness.yaml reads.\n  It is at line 1 of " + path + "."
 	if err == nil || err.Error() != want {
 		t.Fatalf("a file that does not read: err = %v, want %q", err, want)
 	}
@@ -93,8 +93,8 @@ func TestOnBaseRefusesWhatIsNoDocument(t *testing.T) {
 	base := filepath.Join(tmp, "tree", stack.FileName)
 	path := filepath.Join(tmp, "app", "harness.yaml")
 	for _, c := range []struct{ body, want string }{
-		{"harness: {runtime: codex}\n", path + ": the harness section lists no modules, no stack to extend and no extensions"},
-		{"harness:\n  nope: 1\n", path + `: line 2: key "nope" is not one harness.yaml reads`},
+		{"harness: {runtime: codex}\n", "Add modules, a stack to extend, or extensions to the harness section.\n  The section lists none of them.\n  harness is in " + path + "."},
+		{"harness:\n  nope: 1\n", "Remove the key, or rename it to one harness.yaml reads.\n  Key \"nope\" is not one harness.yaml reads.\n  It is at line 2 of " + path + "."},
 	} {
 		writeRaw(t, path, c.body)
 		_, _, err := config.OnBase(path, base)
@@ -118,7 +118,7 @@ func TestOnBaseRefusesWorkflows(t *testing.T) {
 			"harness:\n  extends: {path: ../tree}\n  workflows:\n    fix: {time_limit: 45m}\n",
 		} {
 			writeRaw(t, path, body)
-			want := "remove workflows from " + name + " or leave out -f: -f selects the base, and its workflows apply"
+			want := "Remove workflows from " + name + ", or leave out -f.\n  -f selects the base, and its workflows apply.\n  harness.workflows is in " + path + "."
 			if _, _, err := config.OnBase(path, base); err == nil || err.Error() != want {
 				t.Errorf("%s %q: err = %v, want %q", name, body, err, want)
 			}

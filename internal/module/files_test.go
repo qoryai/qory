@@ -33,7 +33,7 @@ func TestReadListsFilesUnderTheirRuntime(t *testing.T) {
 func TestReadRefusesAFileDirectlyUnderFiles(t *testing.T) {
 	dir := tree(t, map[string]string{"files/rules.md": "rule\n"})
 	_, err := Read("core", dir, nil, "")
-	want := "module core: files/rules.md is not under a runtime directory; a file ships as files/<runtime>/<path>"
+	want := "Move the file into a runtime directory under files.\n  files/rules.md in module core is not under a runtime directory, and a file ships as files/<runtime>/<path>."
 	if err == nil || err.Error() != want {
 		t.Fatalf("error %v, want %q", err, want)
 	}
@@ -64,7 +64,7 @@ func TestReadRefusesADirectoryUnderASettingsRuntime(t *testing.T) {
 		"settings/claude/rules/a.md":    "a\n",
 	})
 	_, err := Read("core", dir, nil, "")
-	want := "module core: settings/claude/rules is a directory; settings contains one fragment per target file, and a runtime's other files go under files/claude/rules"
+	want := "Move the directory to files/<runtime>/, or replace it with a fragment file.\n  settings/claude/rules in module core is a directory, and settings has one fragment per target file.\n  A runtime's other files go under files/claude/rules."
 	if err == nil || !strings.Contains(err.Error(), want) {
 		t.Fatalf("error %v, want %q", err, want)
 	}

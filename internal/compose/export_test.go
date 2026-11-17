@@ -12,3 +12,10 @@ var (
 	AndList = andList
 	OrList  = orList
 )
+
+// SetMergeHook sets the function the compose runs with the path of each settings fragment
+// just before it reads the fragment to merge it, until the test ends.
+func SetMergeHook(t interface{ Cleanup(func()) }, before func(path string)) {
+	beforeMerge = before
+	t.Cleanup(func() { beforeMerge = nil })
+}
