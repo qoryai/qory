@@ -614,12 +614,12 @@ func LoadForagerIn(dir string) (*Forager, error) {
 		f.APIVersion = stack.APIVersion
 	}
 	if _, err := exports.ResolveAPIVersion(f.APIVersion); err != nil {
-		return nil, exports.Refuse("Set apiVersion to "+exports.APIVersion+".", "This qory reads "+exports.APIVersion+".", "apiVersion is in "+path+".")
+		return nil, exports.Refuse("Set apiVersion to "+exports.APIVersion+".", "This qory reads "+exports.APIVersion+".", "apiVersion is in "+exports.HidePath(path)+".")
 	}
 	r := &Forager{File: path, Gateway: f.Gateway != nil, GatewayKeys: gatewayKeys(data)}
 	if f.Machine != nil {
 		if !machineShape.MatchString(*f.Machine) {
-			return nil, exports.Refuse("Set machine to 1 to 64 of a-z, 0-9, and -, the first a letter, or remove it.", fmt.Sprintf("The value is %s. Examples are aws-ec2 and none.", exports.Value(*f.Machine, true)), "machine is in "+path+".")
+			return nil, exports.Refuse("Set machine to 1 to 64 of a-z, 0-9, and -, the first a letter, or remove it.", fmt.Sprintf("The value is %s. Examples are aws-ec2 and none.", exports.Value(*f.Machine, true)), "machine is in "+exports.HidePath(path)+".")
 		}
 		r.Machine = *f.Machine
 	}
@@ -632,10 +632,10 @@ func LoadForagerIn(dir string) (*Forager, error) {
 	}
 	if e := g.Egress; e != nil {
 		if e.Mode == nil {
-			return nil, exports.Refuse("Set gateway.egress.mode to observe or enforce.", "gateway.egress.mode is required.", "gateway.egress.mode is in "+path+".")
+			return nil, exports.Refuse("Set gateway.egress.mode to observe or enforce.", "gateway.egress.mode is required.", "gateway.egress.mode is in "+exports.HidePath(path)+".")
 		}
 		if *e.Mode != "observe" && *e.Mode != "enforce" {
-			return nil, exports.Refuse("Set gateway.egress.mode to observe or enforce.", "gateway.egress.mode is neither.", "gateway.egress.mode is in "+path+".")
+			return nil, exports.Refuse("Set gateway.egress.mode to observe or enforce.", "gateway.egress.mode is neither.", "gateway.egress.mode is in "+exports.HidePath(path)+".")
 		}
 		r.Egress = &ForagerEgress{Mode: *e.Mode}
 		if !egressAtOnce(e, r.Egress) {
@@ -645,7 +645,7 @@ func LoadForagerIn(dir string) (*Forager, error) {
 		}
 	}
 	if f.Webhook.Kind != 0 {
-		return nil, exports.Refuse("Replace webhook with gateway.server.", "qory 0.10.0 replaced the webhook section with gateway.server. The docs of "+ForagerFileName+" describe it.", "webhook is in "+path+".")
+		return nil, exports.Refuse("Replace webhook with gateway.server.", "qory 0.10.0 replaced the webhook section with gateway.server. The docs of "+ForagerFileName+" describe it.", "webhook is in "+exports.HidePath(path)+".")
 	}
 	if w := g.Server; w != nil {
 		if r.Server, err = readServer(path, w.URL, w.AccessKeyID, w.ApiaryPublicKey, &w.Secret, &w.AccessKey); err != nil {
@@ -661,14 +661,14 @@ func LoadForagerIn(dir string) (*Forager, error) {
 		}
 		if f := w.EnrolmentCodeFile; f != nil {
 			if *f == "" {
-				return nil, exports.Refuse("Set gateway.server.enrolment_code_file to the path of the gateway's enrolment code, or remove it.", "The value is empty.", "gateway.server.enrolment_code_file is in "+path+".")
+				return nil, exports.Refuse("Set gateway.server.enrolment_code_file to the path of the gateway's enrolment code, or remove it.", "The value is empty.", "gateway.server.enrolment_code_file is in "+exports.HidePath(path)+".")
 			}
 			r.Server.EnrolmentCodeFile = *f
 		}
 	}
 	if in := ses.Instance; in != nil && in.Name != nil {
 		if accesskey.CheckName(*in.Name) != nil {
-			return nil, exports.Refuse(notAName[0], notAName[1], "session.instance.name is in "+path+".")
+			return nil, exports.Refuse(notAName[0], notAName[1], "session.instance.name is in "+exports.HidePath(path)+".")
 		}
 		r.InstanceName = *in.Name
 	}
@@ -683,16 +683,16 @@ func LoadForagerIn(dir string) (*Forager, error) {
 			}
 			v, err := time.ParseDuration(*d.in)
 			if err != nil || v <= 0 {
-				return nil, exports.Refuse(fmt.Sprintf("Set %s to a duration above zero, such as 5h30m or 30s.", d.key), "The value is not one.", d.key+" is in "+path+".")
+				return nil, exports.Refuse(fmt.Sprintf("Set %s to a duration above zero, such as 5h30m or 30s.", d.key), "The value is not one.", d.key+" is in "+exports.HidePath(path)+".")
 			}
 			*d.out = v
 		}
 		if run.StopSignal != nil {
 			if *run.StopSignal == "" {
-				return nil, exports.Refuse("Set session.run.stop_signal to a signal, or remove it.", "session.run.stop_signal is empty.", "session.run.stop_signal is in "+path+".")
+				return nil, exports.Refuse("Set session.run.stop_signal to a signal, or remove it.", "session.run.stop_signal is empty.", "session.run.stop_signal is in "+exports.HidePath(path)+".")
 			}
 			if session.CheckStopSignal(*run.StopSignal) != nil {
-				return nil, exports.Refuse("Set session.run.stop_signal to SIGTERM, SIGINT, SIGHUP, SIGQUIT, SIGUSR1, or SIGUSR2.", "The value is none of them.", "session.run.stop_signal is in "+path+".")
+				return nil, exports.Refuse("Set session.run.stop_signal to SIGTERM, SIGINT, SIGHUP, SIGQUIT, SIGUSR1, or SIGUSR2.", "The value is none of them.", "session.run.stop_signal is in "+exports.HidePath(path)+".")
 			}
 			r.StopSignal = *run.StopSignal
 		}
@@ -714,13 +714,13 @@ func LoadForagerIn(dir string) (*Forager, error) {
 	}
 	if g.Listen != nil {
 		if !HostPort(*g.Listen) {
-			return nil, exports.Refuse("Set gateway.listen to host:port, such as 0.0.0.0:8443.", "The value is not host:port.", "gateway.listen is in "+path+".")
+			return nil, exports.Refuse("Set gateway.listen to host:port, such as 0.0.0.0:8443.", "The value is not host:port.", "gateway.listen is in "+exports.HidePath(path)+".")
 		}
 		r.Listen = *g.Listen
 	}
 	if t := g.TLS; t != nil {
 		if t.Certificate == nil || *t.Certificate == "" || t.Key == nil || *t.Key == "" {
-			return nil, exports.Refuse("Set gateway.tls.certificate and gateway.tls.key.", "gateway.tls needs both.", "gateway.tls is in "+path+".")
+			return nil, exports.Refuse("Set gateway.tls.certificate and gateway.tls.key.", "gateway.tls needs both.", "gateway.tls is in "+exports.HidePath(path)+".")
 		}
 		r.TLS = &ForagerTLS{Certificate: *t.Certificate, Key: *t.Key}
 	}
@@ -736,7 +736,7 @@ func LoadForagerIn(dir string) (*Forager, error) {
 				continue
 			}
 			if lim := runLimits[i]; *f.in < 1 || *f.in > lim.most {
-				return nil, exports.Refuse(fmt.Sprintf("Set gateway.run_limits.%s to a number from 1 to %d, or remove it.", lim.key, lim.most), fmt.Sprintf("The default is %d.", lim.normal), "gateway.run_limits."+lim.key+" is in "+path+".")
+				return nil, exports.Refuse(fmt.Sprintf("Set gateway.run_limits.%s to a number from 1 to %d, or remove it.", lim.key, lim.most), fmt.Sprintf("The default is %d.", lim.normal), "gateway.run_limits."+lim.key+" is in "+exports.HidePath(path)+".")
 			}
 			*f.out = *f.in
 		}
@@ -747,11 +747,11 @@ func LoadForagerIn(dir string) (*Forager, error) {
 		}
 	}
 	if g.Selects.Kind != 0 {
-		return nil, exports.Refuse("Remove gateway.selects.", "A run's policy selects its credentials.", "gateway.selects is in "+path+".")
+		return nil, exports.Refuse("Remove gateway.selects.", "A run's policy selects its credentials.", "gateway.selects is in "+exports.HidePath(path)+".")
 	}
 	if w := f.Wall; w != nil {
 		if w.Adapter == nil || *w.Adapter != WallDocker {
-			return nil, exports.Refuse("Set wall.adapter to "+WallDocker+".", "wall.adapter is required, and "+WallDocker+" is the one there is.", "wall.adapter is in "+path+".")
+			return nil, exports.Refuse("Set wall.adapter to "+WallDocker+".", "wall.adapter is required, and "+WallDocker+" is the one there is.", "wall.adapter is in "+exports.HidePath(path)+".")
 		}
 		r.Wall = &ForagerWall{Adapter: *w.Adapter}
 		if w.Image != nil {
@@ -775,7 +775,7 @@ func LoadForagerIn(dir string) (*Forager, error) {
 		}
 		if w.Helper != nil {
 			if !filepath.IsAbs(*w.Helper) {
-				return nil, exports.Refuse("Set wall.helper to an absolute path.", "The value is not one.", "wall.helper is in "+path+".")
+				return nil, exports.Refuse("Set wall.helper to an absolute path.", "The value is not one.", "wall.helper is in "+exports.HidePath(path)+".")
 			}
 			r.Wall.Helper = *w.Helper
 		}
@@ -783,7 +783,7 @@ func LoadForagerIn(dir string) (*Forager, error) {
 			r.Wall.User = *w.User
 		}
 		notMount := func(i, _ int) error {
-			return exports.Refuse(fmt.Sprintf("Set wall.mounts[%d] to an absolute path, with :ro after it for a read-only one.", i), "The entry is not an absolute path.", "wall.mounts is in "+path+".")
+			return exports.Refuse(fmt.Sprintf("Set wall.mounts[%d] to an absolute path, with :ro after it for a read-only one.", i), "The entry is not an absolute path.", "wall.mounts is in "+exports.HidePath(path)+".")
 		}
 		var mounts, caEnv, env []string
 		if mounts, err = stringList(path, "wall.mounts", &w.Mounts, notMount); err != nil {
@@ -804,7 +804,7 @@ func LoadForagerIn(dir string) (*Forager, error) {
 		}
 		if w.PIDs != nil {
 			if *w.PIDs < 1 {
-				return nil, exports.Refuse("Set wall.pids_limit to 1 or more.", "wall.pids_limit is below 1.", "wall.pids_limit is in "+path+".")
+				return nil, exports.Refuse("Set wall.pids_limit to 1 or more.", "wall.pids_limit is below 1.", "wall.pids_limit is in "+exports.HidePath(path)+".")
 			}
 			r.Wall.PIDs = *w.PIDs
 		}
@@ -813,18 +813,18 @@ func LoadForagerIn(dir string) (*Forager, error) {
 		}
 		if w.Setup != nil {
 			if *w.Setup != SetupOutside && *w.Setup != SetupInside {
-				return nil, exports.Refuse(fmt.Sprintf("Set wall.setup to %s or %s, or remove it.", SetupOutside, SetupInside), fmt.Sprintf("The value is %s, and %s is the default.", exports.Value(*w.Setup, true), SetupOutside), "wall.setup is in "+path+".")
+				return nil, exports.Refuse(fmt.Sprintf("Set wall.setup to %s or %s, or remove it.", SetupOutside, SetupInside), fmt.Sprintf("The value is %s, and %s is the default.", exports.Value(*w.Setup, true), SetupOutside), "wall.setup is in "+exports.HidePath(path)+".")
 			}
 			r.Wall.Setup = *w.Setup
 		}
 		if p := w.EngineProxyFile; p != nil {
 			if !filepath.IsAbs(*p) {
-				return nil, exports.Refuse("Set wall.engine_proxy_file to an absolute path, or remove it.", fmt.Sprintf("The value is %s.", exports.Value(*p, true)), "wall.engine_proxy_file is in "+path+".")
+				return nil, exports.Refuse("Set wall.engine_proxy_file to an absolute path, or remove it.", fmt.Sprintf("The value is %s.", exports.Value(*p, true)), "wall.engine_proxy_file is in "+exports.HidePath(path)+".")
 			}
 			r.Wall.EngineProxyFile = *p
 		}
 		notCAEnv := func(i, _ int) error {
-			return exports.Refuse(fmt.Sprintf("Set wall.ca_env[%d] to a variable's name.", i), "The entry is not one.", "wall.ca_env is in "+path+".")
+			return exports.Refuse(fmt.Sprintf("Set wall.ca_env[%d] to a variable's name.", i), "The entry is not one.", "wall.ca_env is in "+exports.HidePath(path)+".")
 		}
 		if caEnv, err = stringList(path, "wall.ca_env", &w.CAEnv, notCAEnv); err != nil {
 			return nil, err
@@ -836,14 +836,14 @@ func LoadForagerIn(dir string) (*Forager, error) {
 			r.Wall.CAEnv = append(r.Wall.CAEnv, name)
 		}
 		notEnv := func(i, _ int) error {
-			return exports.Refuse(fmt.Sprintf("Set wall.env[%d] to a variable's name.", i), "The entry is not one. The value comes from the environment, never from this file.", "wall.env is in "+path+".")
+			return exports.Refuse(fmt.Sprintf("Set wall.env[%d] to a variable's name.", i), "The entry is not one. The value comes from the environment, never from this file.", "wall.env is in "+exports.HidePath(path)+".")
 		}
 		if env, err = stringList(path, "wall.env", &w.Env, notEnv); err != nil {
 			return nil, err
 		}
 		for i, name := range env {
 			if ForagersOwn(name) {
-				return nil, exports.Refuse(fmt.Sprintf("Remove wall.env[%d].", i), "It is a variable that is Forager's and never the agent's.", "wall.env is in "+path+".")
+				return nil, exports.Refuse(fmt.Sprintf("Remove wall.env[%d].", i), "It is a variable that is Forager's and never the agent's.", "wall.env is in "+exports.HidePath(path)+".")
 			}
 			if !envName.MatchString(name) {
 				return nil, notEnv(i, 0)
@@ -959,7 +959,7 @@ func egressOneByOne(path string, e *egressSection, out *ForagerEgress) error {
 	}{{"allow", &e.Allow, &out.Allow}, {"deny", &e.Deny, &out.Deny}} {
 		key := "gateway.egress." + l.list
 		notHost := func(i, _ int) error {
-			return exports.Refuse(fmt.Sprintf("Set %s[%d] to a lower-case host name or a *. suffix.", key, i), notAPolicyHost, key+" is in "+path+".")
+			return exports.Refuse(fmt.Sprintf("Set %s[%d] to a lower-case host name or a *. suffix.", key, i), notAPolicyHost, key+" is in "+exports.HidePath(path)+".")
 		}
 		hosts, err := stringList(path, key, l.in, notHost)
 		if err != nil {
@@ -996,7 +996,7 @@ func viaNull(path string, data []byte) error {
 		return nil
 	}
 	if v := followAliases(&f.Gateway.Server.Via); v.Kind != 0 && v.ShortTag() == "!!null" {
-		return exports.Refuse("Set gateway.server.via, or remove it.", "gateway.server.via is empty.", "gateway.server.via is in "+path+".")
+		return exports.Refuse("Set gateway.server.via, or remove it.", "gateway.server.via is empty.", "gateway.server.via is in "+exports.HidePath(path)+".")
 	}
 	return nil
 }
@@ -1042,18 +1042,18 @@ func readVia(path string, v *viaSection) (*ForagerVia, error) {
 		}
 	}
 	if url == nil || *url == "" {
-		return nil, exports.Refuse("Set gateway.server.via.url.", "gateway.server.via.url is required.", "gateway.server.via.url is in "+path+".")
+		return nil, exports.Refuse("Set gateway.server.via.url.", "gateway.server.via.url is required.", "gateway.server.via.url is in "+exports.HidePath(path)+".")
 	}
 	// A URL encoded too many times to tell what it holds is refused for that, and the
 	// refusal holds no part of it.
 	switch tooDeep, secret := scanURL(*url); {
 	case secret != nil:
-		return nil, caused(secret, exports.Refuse("Remove the secret from gateway.server.via.url.", sentence(secret), "gateway.server.via.url is in "+path+"."))
+		return nil, caused(secret, exports.Refuse("Remove the secret from gateway.server.via.url.", sentence(secret), "gateway.server.via.url is in "+exports.HidePath(path)+"."))
 	case tooDeep:
-		return nil, exports.Refuse("Set gateway.server.via.url to an https URL of a host and an optional port.", fmt.Sprintf("It is percent-encoded more than %d times.", urlUnescapeLimit), "A via URL is "+viaShape+".", "gateway.server.via.url is in "+path+".")
+		return nil, exports.Refuse("Set gateway.server.via.url to an https URL of a host and an optional port.", fmt.Sprintf("It is percent-encoded more than %d times.", urlUnescapeLimit), "A via URL is "+viaShape+".", "gateway.server.via.url is in "+exports.HidePath(path)+".")
 	}
 	if wrong := gatewayURLWrong(*url); wrong != "" {
-		return nil, exports.Refuse("Set gateway.server.via.url to an https URL of a host and an optional port.", "gateway.server.via.url "+wrong+".", "A via URL is "+viaShape+".", "gateway.server.via.url is in "+path+".")
+		return nil, exports.Refuse("Set gateway.server.via.url to an https URL of a host and an optional port.", "gateway.server.via.url "+wrong+".", "A via URL is "+viaShape+".", "gateway.server.via.url is in "+exports.HidePath(path)+".")
 	}
 	out := &ForagerVia{URL: *url}
 	for _, k := range []struct {
@@ -1066,12 +1066,12 @@ func readVia(path string, v *viaSection) (*ForagerVia, error) {
 		}
 		// A key that is present holds a value: an empty pin would turn the pin off.
 		if *k.in == "" {
-			return nil, exports.Refuse(fmt.Sprintf("Set gateway.server.via.%s, or remove it.", k.key), fmt.Sprintf("gateway.server.via.%s is empty.", k.key), "gateway.server.via."+k.key+" is in "+path+".")
+			return nil, exports.Refuse(fmt.Sprintf("Set gateway.server.via.%s, or remove it.", k.key), fmt.Sprintf("gateway.server.via.%s is empty.", k.key), "gateway.server.via."+k.key+" is in "+exports.HidePath(path)+".")
 		}
 		*k.out = *k.in
 	}
 	if p := out.CertificateSHA256; p != "" && !CertificatePin(p) {
-		return nil, exports.Refuse("Set gateway.server.via.certificate_sha256 to the SHA-256 of a public key.", "The value is not 44 characters of standard base64 with padding, ending in =.", "gateway.server.via.certificate_sha256 is in "+path+".")
+		return nil, exports.Refuse("Set gateway.server.via.certificate_sha256 to the SHA-256 of a public key.", "The value is not 44 characters of standard base64 with padding, ending in =.", "gateway.server.via.certificate_sha256 is in "+exports.HidePath(path)+".")
 	}
 	return out, nil
 }
@@ -1108,10 +1108,10 @@ func (r *Forager) CheckVia() error {
 		if errors.As(err, &pe) {
 			err = pe.Err
 		}
-		return &caFileError{exports.Refuse("Make the file of gateway.server.via.ca_file readable, or set another file.", fmt.Sprintf("The file %s cannot be read: %s.", exports.Value(path, false), err), "gateway.server.via.ca_file is in "+r.File+"."), err}
+		return &caFileError{exports.Refuse("Make the file of gateway.server.via.ca_file readable, or set another file.", fmt.Sprintf("The file %s cannot be read: %s.", exports.Value(path, false), err), "gateway.server.via.ca_file is in "+exports.HidePath(r.File)+"."), err}
 	}
 	if !x509.NewCertPool().AppendCertsFromPEM(b) {
-		return exports.Refuse("Set gateway.server.via.ca_file to a file with a PEM certificate.", fmt.Sprintf("The file %s contains no PEM certificate.", exports.Value(path, false)), "gateway.server.via.ca_file is in "+r.File+".")
+		return exports.Refuse("Set gateway.server.via.ca_file to a file with a PEM certificate.", fmt.Sprintf("The file %s contains no PEM certificate.", exports.Value(path, false)), "gateway.server.via.ca_file is in "+exports.HidePath(r.File)+".")
 	}
 	return nil
 }
@@ -1233,7 +1233,7 @@ func LoadForagerInstance() (*Forager, error) {
 	}
 	if in := f.Session.Instance; in != nil && in.Name != nil {
 		if accesskey.CheckName(*in.Name) != nil {
-			return nil, exports.Refuse(notAName[0], notAName[1], "session.instance.name is in "+path+".")
+			return nil, exports.Refuse(notAName[0], notAName[1], "session.instance.name is in "+exports.HidePath(path)+".")
 		}
 		r.InstanceName = *in.Name
 	}
@@ -1283,29 +1283,29 @@ const removeKeys = "Remove gateway.server.access_key and gateway.server.secret f
 // access key's, are refused with what to do instead.
 func readServer(path string, rawURL, id *string, pin *[]pinEntry, secret, key *yaml.Node) (*ForagerServer, error) {
 	if key.Kind != 0 {
-		return nil, exports.Refuse(removeKeys, slices.Concat([]string{"gateway.server.access_key is a workspace access key, which servers no longer accept."}, enrolAsNode, []string{"gateway.server.access_key is in " + path + "."})...)
+		return nil, exports.Refuse(removeKeys, slices.Concat([]string{"gateway.server.access_key is a workspace access key, which servers no longer accept."}, enrolAsNode, []string{"gateway.server.access_key is in " + exports.HidePath(path) + "."})...)
 	}
 	if secret.Kind != 0 {
-		return nil, exports.Refuse(removeKeys, slices.Concat([]string{"gateway.server.secret is a workspace access key's secret, which servers no longer accept."}, enrolAsNode, []string{"gateway.server.secret is in " + path + "."})...)
+		return nil, exports.Refuse(removeKeys, slices.Concat([]string{"gateway.server.secret is a workspace access key's secret, which servers no longer accept."}, enrolAsNode, []string{"gateway.server.secret is in " + exports.HidePath(path) + "."})...)
 	}
 	env := TakenServerVariables()
 	if env.WorkspaceSecret != "" {
 		return nil, exports.Refuse("Unset "+envWorkspaceSecret+".", slices.Concat([]string{envWorkspaceSecret + " contains a workspace access key's secret, which servers no longer accept."}, enrolAsNode)...)
 	}
 	if rawURL == nil || *rawURL == "" {
-		return nil, exports.Refuse("Set gateway.server.url.", "gateway.server.url is required.", "gateway.server.url is in "+path+".")
+		return nil, exports.Refuse("Set gateway.server.url.", "gateway.server.url is required.", "gateway.server.url is in "+exports.HidePath(path)+".")
 	}
 	if fix, causes := serverURLWrong(*rawURL); fix != "" {
-		return nil, exports.Refuse(fix, append(causes, "gateway.server.url is in "+path+".")...)
+		return nil, exports.Refuse(fix, append(causes, "gateway.server.url is in "+exports.HidePath(path)+".")...)
 	}
 	s := &ForagerServer{URL: *rawURL}
 	envID, envPin := env.AccessKeyID, env.ApiaryPublicKey
 	switch {
 	case id != nil && envID != "":
-		return nil, exports.Refuse("Set gateway.server.access_key_id or "+accesskey.EnvID+", not both.", "Both are set.", "gateway.server.access_key_id is in "+path+".")
+		return nil, exports.Refuse("Set gateway.server.access_key_id or "+accesskey.EnvID+", not both.", "Both are set.", "gateway.server.access_key_id is in "+exports.HidePath(path)+".")
 	case id != nil:
 		if accesskey.CheckID(*id) != nil {
-			return nil, exports.Refuse("Set gateway.server.access_key_id to ak_ and 16 lower-case Crockford base32 characters.", "The value is not one.", "gateway.server.access_key_id is in "+path+".")
+			return nil, exports.Refuse("Set gateway.server.access_key_id to ak_ and 16 lower-case Crockford base32 characters.", "The value is not one.", "gateway.server.access_key_id is in "+exports.HidePath(path)+".")
 		}
 		s.AccessKeyID, s.AccessKeyIDFrom = *id, path
 	case envID != "":
@@ -1316,37 +1316,37 @@ func readServer(path string, rawURL, id *string, pin *[]pinEntry, secret, key *y
 	}
 	switch {
 	case pin != nil && envPin != "":
-		return nil, exports.Refuse("Set gateway.server.apiary_public_key or "+accesskey.EnvPin+", not both.", "Both are set.", "gateway.server.apiary_public_key is in "+path+".")
+		return nil, exports.Refuse("Set gateway.server.apiary_public_key or "+accesskey.EnvPin+", not both.", "Both are set.", "gateway.server.apiary_public_key is in "+exports.HidePath(path)+".")
 	case pin != nil:
 		seen := map[accesskey.PublicKey]bool{}
 		for i, e := range *pin {
 			if e.Alg == nil || e.PublicKey == nil {
-				return nil, exports.Refuse(fmt.Sprintf("Add alg and public_key to gateway.server.apiary_public_key[%d].", i), "An entry needs both.", "gateway.server.apiary_public_key is in "+path+".")
+				return nil, exports.Refuse(fmt.Sprintf("Add alg and public_key to gateway.server.apiary_public_key[%d].", i), "An entry needs both.", "gateway.server.apiary_public_key is in "+exports.HidePath(path)+".")
 			}
 			if err := accesskey.SecretInPinEntry(*e.Alg, *e.PublicKey); err != nil {
-				return nil, caused(err, exports.Refuse("Remove the secret from gateway.server.apiary_public_key.", sentence(err), "gateway.server.apiary_public_key is in "+path+"."))
+				return nil, caused(err, exports.Refuse("Remove the secret from gateway.server.apiary_public_key.", sentence(err), "gateway.server.apiary_public_key is in "+exports.HidePath(path)+"."))
 			}
 			// Each entry is checked here as [accesskey.Pin.Check] checks it, so the
 			// refusal names the entry and never quotes it.
 			at := fmt.Sprintf("gateway.server.apiary_public_key[%d]", i)
 			if *e.Alg != "ed25519" {
-				return nil, exports.Refuse(fmt.Sprintf("Set %s.alg to ed25519.", at), "ed25519 is the one there is.", at+" is in "+path+".")
+				return nil, exports.Refuse(fmt.Sprintf("Set %s.alg to ed25519.", at), "ed25519 is the one there is.", at+" is in "+exports.HidePath(path)+".")
 			}
 			pub, err := accesskey.ParsePublicKey(*e.PublicKey)
 			if err != nil {
-				return nil, exports.Refuse(fmt.Sprintf("Set %s.public_key to 32 bytes in base64url without padding.", at), "The value is not one.", at+" is in "+path+".")
+				return nil, exports.Refuse(fmt.Sprintf("Set %s.public_key to 32 bytes in base64url without padding.", at), "The value is not one.", at+" is in "+exports.HidePath(path)+".")
 			}
 			if err := pub.Check(); err != nil {
-				return nil, caused(err, exports.Refuse(fmt.Sprintf("Set %s.public_key to a key qory can verify under.", at), sentence(err), at+" is in "+path+"."))
+				return nil, caused(err, exports.Refuse(fmt.Sprintf("Set %s.public_key to a key qory can verify under.", at), sentence(err), at+" is in "+exports.HidePath(path)+"."))
 			}
 			if seen[pub] {
-				return nil, exports.Refuse("List each public key of gateway.server.apiary_public_key once.", at+".public_key is listed twice.", at+" is in "+path+".")
+				return nil, exports.Refuse("List each public key of gateway.server.apiary_public_key once.", at+".public_key is listed twice.", at+" is in "+exports.HidePath(path)+".")
 			}
 			seen[pub] = true
 			s.Pin = append(s.Pin, accesskey.ServerKey{Alg: *e.Alg, PublicKey: *e.PublicKey})
 		}
 		if err := checkPin(s.Pin); err != nil {
-			return nil, caused(err, exports.Refuse("Pin your server's keys in gateway.server.apiary_public_key.", sentence(err), "gateway.server.apiary_public_key is in "+path+"."))
+			return nil, caused(err, exports.Refuse("Pin your server's keys in gateway.server.apiary_public_key.", sentence(err), "gateway.server.apiary_public_key is in "+exports.HidePath(path)+"."))
 		}
 		s.PinFrom = path
 	case envPin != "":
@@ -1450,7 +1450,7 @@ type credentialFile struct {
 // asks it before a run.
 func readCredentials(path string, node *yaml.Node) ([]ForagerCredential, error) {
 	if node.Kind != yaml.MappingNode {
-		return nil, exports.Refuse("Set gateway.credentials to a mapping from a name to a credential.", "It is not a mapping.", "gateway.credentials is in "+path+".")
+		return nil, exports.Refuse("Set gateway.credentials to a mapping from a name to a credential.", "It is not a mapping.", "gateway.credentials is in "+exports.HidePath(path)+".")
 	}
 	var out []ForagerCredential
 	for i := 0; i+1 < len(node.Content); i += 2 {
@@ -1491,13 +1491,13 @@ func readCredentials(path string, node *yaml.Node) ([]ForagerCredential, error) 
 		}
 		if f.File != nil {
 			if !filepath.IsAbs(*f.File) {
-				return nil, exports.Refuse(fmt.Sprintf("Set %s.file to an absolute path.", at), "The value is not one.", at+" is in "+path+".")
+				return nil, exports.Refuse(fmt.Sprintf("Set %s.file to an absolute path.", at), "The value is not one.", at+" is in "+exports.HidePath(path)+".")
 			}
 			c.File = *f.File
 		}
 		if adapter != nil {
 			if len(adapter) == 0 || !filepath.IsAbs(adapter[0]) {
-				return nil, exports.Refuse(fmt.Sprintf("Set %s.adapter to a program's absolute path, then its arguments.", at), "The value is not one.", at+" is in "+path+".")
+				return nil, exports.Refuse(fmt.Sprintf("Set %s.adapter to a program's absolute path, then its arguments.", at), "The value is not one.", at+" is in "+exports.HidePath(path)+".")
 			}
 			c.Adapter = adapter
 		}
@@ -1537,7 +1537,7 @@ func readCredentials(path string, node *yaml.Node) ([]ForagerCredential, error) 
 func readPaths(path string, node *yaml.Node) (map[string][]string, error) {
 	node = unalias(node)
 	if node.Kind != yaml.MappingNode {
-		return nil, exports.Refuse("Set gateway.egress.paths to a mapping from a host to a list of paths.", "It is not a mapping.", "gateway.egress.paths is in "+path+".")
+		return nil, exports.Refuse("Set gateway.egress.paths to a mapping from a host to a list of paths.", "It is not a mapping.", "gateway.egress.paths is in "+exports.HidePath(path)+".")
 	}
 	values := map[string]*yaml.Node{}
 	// twice is a host written twice, by the lines of its first and its second key.
@@ -1548,7 +1548,7 @@ func readPaths(path string, node *yaml.Node) (map[string][]string, error) {
 		// value, not its name. A key that is not a string is not a host.
 		line, key := node.Content[i].Line, unalias(node.Content[i])
 		if key.Kind != yaml.ScalarNode || key.ShortTag() != "!!str" {
-			return nil, exports.Refuse("Set each key of gateway.egress.paths to a lower-case host name or a *. suffix.", notAPolicyHost, "gateway.egress.paths is in "+path+".")
+			return nil, exports.Refuse("Set each key of gateway.egress.paths to a lower-case host name or a *. suffix.", notAPolicyHost, "gateway.egress.paths is in "+exports.HidePath(path)+".")
 		}
 		if at, ok := first[key.Value]; ok {
 			if _, noted := twice[key.Value]; !noted {
@@ -1564,17 +1564,17 @@ func readPaths(path string, node *yaml.Node) (map[string][]string, error) {
 	out := map[string][]string{}
 	for _, host := range slices.Sorted(maps.Keys(values)) {
 		if !policyPaths(map[string][]string{host: {}}) {
-			return nil, exports.Refuse("Set each key of gateway.egress.paths to a lower-case host name or a *. suffix.", notAPolicyHost, "gateway.egress.paths is in "+path+".")
+			return nil, exports.Refuse("Set each key of gateway.egress.paths to a lower-case host name or a *. suffix.", notAPolicyHost, "gateway.egress.paths is in "+exports.HidePath(path)+".")
 		}
 		if lines, ok := twice[host]; ok {
-			return nil, exports.Refuse(fmt.Sprintf("Remove one of the two gateway.egress.paths.%s keys.", host), fmt.Sprintf("Line %d writes it again; it was first written at line %d.", lines[1], lines[0]), "gateway.egress.paths is in "+path+".")
+			return nil, exports.Refuse(fmt.Sprintf("Remove one of the two gateway.egress.paths.%s keys.", host), fmt.Sprintf("Line %d writes it again; it was first written at line %d.", lines[1], lines[0]), "gateway.egress.paths is in "+exports.HidePath(path)+".")
 		}
 		v := values[host]
 		if v.Kind != yaml.SequenceNode {
-			return nil, exports.Refuse(fmt.Sprintf("Set gateway.egress.paths.%s to a list of paths.", host), "The value is not a list.", "gateway.egress.paths is in "+path+".")
+			return nil, exports.Refuse(fmt.Sprintf("Set gateway.egress.paths.%s to a list of paths.", host), "The value is not a list.", "gateway.egress.paths is in "+exports.HidePath(path)+".")
 		}
 		notPath := func(i, _ int) error {
-			return exports.Refuse(fmt.Sprintf("Set gateway.egress.paths.%s[%d] to a path from /.", host, i), "The entry is not one. A path is matched whole or up to a final *.", "gateway.egress.paths is in "+path+".")
+			return exports.Refuse(fmt.Sprintf("Set gateway.egress.paths.%s[%d] to a path from /.", host, i), "The entry is not one. A path is matched whole or up to a final *.", "gateway.egress.paths is in "+exports.HidePath(path)+".")
 		}
 		list, err := stringEntries(v, notPath)
 		if err != nil {
@@ -1582,7 +1582,7 @@ func readPaths(path string, node *yaml.Node) (map[string][]string, error) {
 		}
 		for i, p := range list {
 			if slices.Index(list, p) != i {
-				return nil, exports.Refuse(fmt.Sprintf("List each path of gateway.egress.paths.%s once.", host), "The list has a path twice.", "gateway.egress.paths is in "+path+".")
+				return nil, exports.Refuse(fmt.Sprintf("List each path of gateway.egress.paths.%s once.", host), "The list has a path twice.", "gateway.egress.paths is in "+exports.HidePath(path)+".")
 			}
 		}
 		for i, p := range list {
@@ -1593,7 +1593,7 @@ func readPaths(path string, node *yaml.Node) (map[string][]string, error) {
 		out[host] = list
 	}
 	if !policyPaths(out) {
-		return nil, exports.Refuse("Set gateway.egress.paths to the egress.paths of a policy.", "A policy does not read it as it stands.", "gateway.egress.paths is in "+path+".")
+		return nil, exports.Refuse("Set gateway.egress.paths to the egress.paths of a policy.", "A policy does not read it as it stands.", "gateway.egress.paths is in "+exports.HidePath(path)+".")
 	}
 	return out, nil
 }
@@ -1744,7 +1744,7 @@ type toolFile struct {
 // run, as for the credentials.
 func readTools(path string, node *yaml.Node) ([]ForagerTool, error) {
 	if node.Kind != yaml.MappingNode {
-		return nil, exports.Refuse("Set gateway.tools to a mapping from a name to a tool.", "It is not a mapping.", "gateway.tools is in "+path+".")
+		return nil, exports.Refuse("Set gateway.tools to a mapping from a name to a tool.", "It is not a mapping.", "gateway.tools is in "+exports.HidePath(path)+".")
 	}
 	var out []ForagerTool
 	for i := 0; i+1 < len(node.Content); i += 2 {
@@ -1782,7 +1782,7 @@ func readTools(path string, node *yaml.Node) ([]ForagerTool, error) {
 		// A tool is its program, so a tool without one is refused as one not by its
 		// absolute path is.
 		if len(t.Command) == 0 || !filepath.IsAbs(t.Command[0]) {
-			return nil, exports.Refuse(fmt.Sprintf("Set %s.command to a program's absolute path, then its arguments.", at), "The value is not one.", at+" is in "+path+".")
+			return nil, exports.Refuse(fmt.Sprintf("Set %s.command to a program's absolute path, then its arguments.", at), "The value is not one.", at+" is in "+exports.HidePath(path)+".")
 		}
 		if f.Argument != nil {
 			t.Argument = *f.Argument

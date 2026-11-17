@@ -55,7 +55,7 @@ type ForagerIntegration struct {
 // program's description by [Forager.Expand], which runs the program.
 func readIntegrations(path string, node *yaml.Node) ([]ForagerIntegration, error) {
 	if node.Kind != yaml.MappingNode {
-		return nil, exports.Refuse("Set gateway.integrations to a mapping from a name to an integration.", "It is not a mapping.", "gateway.integrations is in "+path+".")
+		return nil, exports.Refuse("Set gateway.integrations to a mapping from a name to an integration.", "It is not a mapping.", "gateway.integrations is in "+exports.HidePath(path)+".")
 	}
 	var out []ForagerIntegration
 	seen := map[string]bool{}
@@ -63,10 +63,10 @@ func readIntegrations(path string, node *yaml.Node) ([]ForagerIntegration, error
 		key := node.Content[i].Value
 		at := entryAt("gateway.integrations", node.Content[i])
 		if !integrationKey.MatchString(key) {
-			return nil, exports.Refuse("Rename each integration of gateway.integrations to 1 to 64 of a-z, 0-9, underscore, and dash.", fmt.Sprintf("%s is not one. A name starts with a letter or a digit.", quotedName(node.Content[i])), "gateway.integrations is in "+path+".")
+			return nil, exports.Refuse("Rename each integration of gateway.integrations to 1 to 64 of a-z, 0-9, underscore, and dash.", fmt.Sprintf("%s is not one. A name starts with a letter or a digit.", quotedName(node.Content[i])), "gateway.integrations is in "+exports.HidePath(path)+".")
 		}
 		if seen[key] {
-			return nil, exports.Refuse(fmt.Sprintf("Declare %s once.", at), at+" is declared twice.", "gateway.integrations is in "+path+".")
+			return nil, exports.Refuse(fmt.Sprintf("Declare %s once.", at), at+" is declared twice.", "gateway.integrations is in "+exports.HidePath(path)+".")
 		}
 		seen[key] = true
 		in := ForagerIntegration{Key: key, Program: ProgramPrefix + key, Settings: []byte("{}")}
@@ -76,22 +76,22 @@ func readIntegrations(path string, node *yaml.Node) ([]ForagerIntegration, error
 			continue
 		}
 		if entry.Kind != yaml.MappingNode {
-			return nil, exports.Refuse(fmt.Sprintf("Set %s to a mapping of program and settings.", at), "It is not a mapping.", at+" is in "+path+".")
+			return nil, exports.Refuse(fmt.Sprintf("Set %s to a mapping of program and settings.", at), "It is not a mapping.", at+" is in "+exports.HidePath(path)+".")
 		}
 		for k := 0; k+1 < len(entry.Content); k += 2 {
 			value := entry.Content[k+1]
 			switch name := entry.Content[k].Value; name {
 			case "program":
 				if value.Kind != yaml.ScalarNode || value.ShortTag() != "!!str" || value.Value == "" {
-					return nil, exports.Refuse(fmt.Sprintf("Set %s.program to a path or a name on the PATH.", at), "The value is not one.", at+" is in "+path+".")
+					return nil, exports.Refuse(fmt.Sprintf("Set %s.program to a path or a name on the PATH.", at), "The value is not one.", at+" is in "+exports.HidePath(path)+".")
 				}
 				if strings.ContainsRune(value.Value, '/') && !filepath.IsAbs(value.Value) {
-					return nil, exports.Refuse(fmt.Sprintf("Set %s.program to an absolute path or a name on the PATH.", at), "The value is a relative path.", at+" is in "+path+".")
+					return nil, exports.Refuse(fmt.Sprintf("Set %s.program to an absolute path or a name on the PATH.", at), "The value is a relative path.", at+" is in "+exports.HidePath(path)+".")
 				}
 				in.Program = value.Value
 			case "settings":
 				if value.Kind != yaml.MappingNode {
-					return nil, exports.Refuse(fmt.Sprintf("Set %s.settings to a mapping, the settings document.", at), "It is not a mapping.", at+" is in "+path+".")
+					return nil, exports.Refuse(fmt.Sprintf("Set %s.settings to a mapping, the settings document.", at), "It is not a mapping.", at+" is in "+exports.HidePath(path)+".")
 				}
 				var b bytes.Buffer
 				if err := writeJSON(&b, value, at+".settings"); err != nil {
@@ -248,7 +248,7 @@ func (r *Forager) Expand(ctx context.Context, e Expansion) error {
 			for i := range causes {
 				causes[i] = hide(causes[i])
 			}
-			return exports.Refuse(hide(fix), append(causes, at+" is in "+r.File+".")...)
+			return exports.Refuse(hide(fix), append(causes, at+" is in "+exports.HidePath(r.File)+".")...)
 		}
 		found, err := program(in.Program, e.Workspace)
 		if err != nil {

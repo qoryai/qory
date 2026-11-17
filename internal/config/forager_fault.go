@@ -96,9 +96,9 @@ func caused(err error, refusal *exports.Refusal) error { return &causedRefusal{r
 // file is path." for none.
 func foundAt(path string, line int) string {
 	if line == 0 {
-		return "The file is " + path + "."
+		return "The file is " + exports.HidePath(path) + "."
 	}
-	return fmt.Sprintf("It is at line %d of %s.", line, path)
+	return fmt.Sprintf("It is at line %d of %s.", line, exports.HidePath(path))
 }
 
 // keyNotOne is the refusal, in the file at path, of the key k of the entry at at that
@@ -110,7 +110,7 @@ func keyNotOne(path, at string, k *yaml.Node, rest string) error {
 	if accesskey.ContainsSecret(k.Value) {
 		return exports.Refuse(renameKey, at+": "+text+".", foundAt(path, k.Line))
 	}
-	return exports.Refuse(renameKey, at+": "+text+".", "The file is "+path+".")
+	return exports.Refuse(renameKey, at+": "+text+".", "The file is "+exports.HidePath(path)+".")
 }
 
 // fault is what is wrong at one place of forager.yaml: the line, the step that mends it,
@@ -210,7 +210,7 @@ func aliasRefusal(err error) (string, bool) {
 // [exports.DecodeError] says it.
 func foragerSyntaxError(path string, err error) error {
 	if text, ok := aliasRefusal(err); ok {
-		return exports.Refuse(rewriteAliases, text, "The file is "+path+".")
+		return exports.Refuse(rewriteAliases, text, "The file is "+exports.HidePath(path)+".")
 	}
 	return exports.DecodeError(path, err)
 }
@@ -242,9 +242,9 @@ func foragerDecodeError(path string, n *yaml.Node, t reflect.Type, key string, k
 	}
 	if text, ok := aliasRefusal(err); ok {
 		if key != "" {
-			return exports.Refuse(rewriteAliases, "At "+key+": "+text, "The file is "+path+".")
+			return exports.Refuse(rewriteAliases, "At "+key+": "+text, "The file is "+exports.HidePath(path)+".")
 		}
-		return exports.Refuse(rewriteAliases, text, "The file is "+path+".")
+		return exports.Refuse(rewriteAliases, text, "The file is "+exports.HidePath(path)+".")
 	}
 	if te != nil || tagRefusal.MatchString(err.Error()) {
 		if f := findFault(n, t, key, known); f != nil && f != walkLimited {
@@ -259,9 +259,9 @@ func foragerDecodeError(path string, n *yaml.Node, t reflect.Type, key string, k
 		return &decoderFailed{path}
 	}
 	if key == "" {
-		return exports.Refuse("Set each value in the file to the type its key takes.", "A value is not of the type its key takes.", "The file is "+path+".")
+		return exports.Refuse("Set each value in the file to the type its key takes.", "A value is not of the type its key takes.", "The file is "+exports.HidePath(path)+".")
 	}
-	return exports.Refuse(fmt.Sprintf("Set %s to the type its key takes.", key), key+" is not of the type its key takes.", "The file is "+path+".")
+	return exports.Refuse(fmt.Sprintf("Set %s to the type its key takes.", key), key+" is not of the type its key takes.", "The file is "+exports.HidePath(path)+".")
 }
 
 // aliasKeyAt is a key under n written as an alias, on the line the decoder's "line <n>: "

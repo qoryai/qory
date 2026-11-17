@@ -587,7 +587,7 @@ func DiscoverStack(root string) (string, error) {
 			break
 		}
 	}
-	return "", exports.Refuse(fmt.Sprintf("Add a %s, or a harness section to %s or %s.", stack.FileName, FileName, AltFileName), fmt.Sprintf("%s has none of them, and no ancestor directory you own has a %s or a %s whose harness section lists modules or a stack to extend.", root, stack.FileName, FileName))
+	return "", exports.Refuse(fmt.Sprintf("Add a %s, or a harness section to %s or %s.", stack.FileName, FileName, AltFileName), fmt.Sprintf("%s has none of them, and no ancestor directory you own has a %s or a %s whose harness section lists modules or a stack to extend.", exports.HidePath(root), stack.FileName, FileName))
 }
 
 // Document returns the checkout root's own document: its [FileName] or [AltFileName]
@@ -617,7 +617,7 @@ func closedAtRoot(path string) error {
 		return err
 	}
 	if p.Extending == nil {
-		return exports.Refuse("Add an extending block to the stack, or move it under harness in "+FileName+".", "A stack at a repository root is delivered to be extended, and this one declares no extending block.", "A repository's stack goes under harness in "+FileName+", which qory setup repo writes.", "The stack is in "+path+".")
+		return exports.Refuse("Add an extending block to the stack, or move it under harness in "+FileName+".", "A stack at a repository root is delivered to be extended, and this one declares no extending block.", "A repository's stack goes under harness in "+FileName+", which qory setup repo writes.", "The stack is in "+exports.HidePath(path)+".")
 	}
 	return nil
 }
@@ -674,10 +674,10 @@ func Compose(path string) (*stack.Stack, error) {
 		return nil, err
 	}
 	if !f.Harness.composes() {
-		return nil, exports.Refuse("Add modules, a stack to extend, or extensions to the harness section.", "The section lists none of them.", "harness is in "+path+".")
+		return nil, exports.Refuse("Add modules, a stack to extend, or extensions to the harness section.", "The section lists none of them.", "harness is in "+exports.HidePath(path)+".")
 	}
 	if !f.Harness.extends() && len(f.Harness.Target.Runtimes) == 0 {
-		return nil, exports.Refuse("Set target.runtime in the harness section, or extend a stack.", "The section sets neither. It contains this repository's stack, a target and its modules, or it extends one, or it leaves extends out for the base that qory harness compose -f <stack> selects.", "harness is in "+path+".")
+		return nil, exports.Refuse("Set target.runtime in the harness section, or extend a stack.", "The section sets neither. It contains this repository's stack, a target and its modules, or it extends one, or it leaves extends out for the base that qory harness compose -f <stack> selects.", "harness is in "+exports.HidePath(path)+".")
 	}
 	return stack.NewCompose(path, f.document())
 }
@@ -696,12 +696,12 @@ func OnBase(path, base string) (*stack.Stack, stack.Source, error) {
 		return nil, stack.Source{}, err
 	}
 	if !f.Harness.composes() {
-		return nil, stack.Source{}, exports.Refuse("Add modules, a stack to extend, or extensions to the harness section.", "The section lists none of them.", "harness is in "+path+".")
+		return nil, stack.Source{}, exports.Refuse("Add modules, a stack to extend, or extensions to the harness section.", "The section lists none of them.", "harness is in "+exports.HidePath(path)+".")
 	}
 	// The stack -f selects is the base, so the document composes as one that extends a
 	// stack, and the base's workflows apply; the document's extends may be absent.
 	if len(f.Harness.Workflows) > 0 {
-		return nil, stack.Source{}, exports.Refuse(fmt.Sprintf("Remove workflows from %s, or leave out -f.", filepath.Base(path)), "-f selects the base, and its workflows apply.", "harness.workflows is in "+path+".")
+		return nil, stack.Source{}, exports.Refuse(fmt.Sprintf("Remove workflows from %s, or leave out -f.", filepath.Base(path)), "-f selects the base, and its workflows apply.", "harness.workflows is in "+exports.HidePath(path)+".")
 	}
 	abs, err := filepath.Abs(path)
 	if err != nil {
@@ -795,7 +795,7 @@ func (c *Config) apply(path string, machine, root bool) (file, error) {
 	if h := f.Harness; h != nil {
 		if h.Runtime != nil {
 			if len(*h.Runtime) == 0 {
-				return f, exports.Refuse("Set harness.runtime to one runtime or a list of them.", "harness.runtime is empty.", "harness.runtime is in "+path+".")
+				return f, exports.Refuse("Set harness.runtime to one runtime or a list of them.", "harness.runtime is empty.", "harness.runtime is in "+exports.HidePath(path)+".")
 			}
 			if err := h.Runtime.ValidateAs("harness.runtime"); err != nil {
 				return f, exports.HideValueError(exports.AtPath(path, err), "")
@@ -822,19 +822,19 @@ func (c *Config) apply(path string, machine, root bool) (file, error) {
 			case "never":
 				c.Update = false
 			default:
-				return f, exports.Refuse("Set harness.update to always or never.", fmt.Sprintf("The value is %s.", exports.Value(*h.Update, true)), "harness.update is in "+path+".")
+				return f, exports.Refuse("Set harness.update to always or never.", fmt.Sprintf("The value is %s.", exports.Value(*h.Update, true)), "harness.update is in "+exports.HidePath(path)+".")
 			}
 			c.origins["harness.update"] = path
 		}
 		if h.Home != nil {
 			dir := *h.Home
 			if dir == "" {
-				return f, exports.Refuse("Set harness.home to a path under the checkout, or to a directory outside it.", "harness.home is empty.", "harness.home is in "+path+".")
+				return f, exports.Refuse("Set harness.home to a path under the checkout, or to a directory outside it.", "harness.home is empty.", "harness.home is in "+exports.HidePath(path)+".")
 			}
 			if dir == "~" || strings.HasPrefix(dir, "~/") {
 				home, err := os.UserHomeDir()
 				if err != nil {
-					return f, caused(err, exports.Refuse("Set HOME, or write harness.home as an absolute path.", fmt.Sprintf("harness.home is %s, and the home directory is unknown: %s.", exports.Value(dir, false), err), "harness.home is in "+path+"."))
+					return f, caused(err, exports.Refuse("Set HOME, or write harness.home as an absolute path.", fmt.Sprintf("harness.home is %s, and the home directory is unknown: %s.", exports.Value(dir, false), err), "harness.home is in "+exports.HidePath(path)+"."))
 				}
 				dir = filepath.Join(home, dir[1:])
 			}
@@ -846,7 +846,7 @@ func (c *Config) apply(path string, machine, root bool) (file, error) {
 			case LinksCheckout, LinksNone:
 				c.Links = *h.Links
 			default:
-				return f, exports.Refuse(fmt.Sprintf("Set harness.links to %s or %s.", LinksCheckout, LinksNone), fmt.Sprintf("The value is %s.", exports.Value(*h.Links, true)), "harness.links is in "+path+".")
+				return f, exports.Refuse(fmt.Sprintf("Set harness.links to %s or %s.", LinksCheckout, LinksNone), fmt.Sprintf("The value is %s.", exports.Value(*h.Links, true)), "harness.links is in "+exports.HidePath(path)+".")
 			}
 			c.origins["harness.links"] = path
 		}
@@ -866,7 +866,7 @@ func (c *Config) apply(path string, machine, root bool) (file, error) {
 		if f.Git.Timeout != nil {
 			d, err := time.ParseDuration(*f.Git.Timeout)
 			if err != nil || d <= 0 {
-				return f, exports.Refuse("Set git.timeout to a duration above zero, such as 10m.", fmt.Sprintf("The value is %s.", exports.Value(*f.Git.Timeout, true)), "git.timeout is in "+path+".")
+				return f, exports.Refuse("Set git.timeout to a duration above zero, such as 10m.", fmt.Sprintf("The value is %s.", exports.Value(*f.Git.Timeout, true)), "git.timeout is in "+exports.HidePath(path)+".")
 			}
 			c.Git.Timeout = d
 			c.origins["git.timeout"] = path
@@ -874,7 +874,7 @@ func (c *Config) apply(path string, machine, root bool) (file, error) {
 		if f.Git.Cache != nil {
 			dir := *f.Git.Cache
 			if dir == "" {
-				return f, exports.Refuse("Set git.cache to a directory, or remove it.", "git.cache is empty.", "git.cache is in "+path+".")
+				return f, exports.Refuse("Set git.cache to a directory, or remove it.", "git.cache is empty.", "git.cache is in "+exports.HidePath(path)+".")
 			}
 			if !filepath.IsAbs(dir) {
 				dir = filepath.Join(filepath.Dir(path), dir)
@@ -885,10 +885,10 @@ func (c *Config) apply(path string, machine, root bool) (file, error) {
 	}
 	for name, value := range f.Env {
 		if !envName.MatchString(name) {
-			return f, exports.Refuse("Rename each variable in env to an environment variable name.", fmt.Sprintf("%s is not one.", accesskey.ShownName(name, false)), "env is in "+path+".")
+			return f, exports.Refuse("Rename each variable in env to an environment variable name.", fmt.Sprintf("%s is not one.", accesskey.ShownName(name, false)), "env is in "+exports.HidePath(path)+".")
 		}
 		if name == "QORY_HARNESS_HOME" {
-			return f, exports.Refuse("Remove env.QORY_HARNESS_HOME.", "QORY_HARNESS_HOME is qory's, so the configuration exports another name.", "env is in "+path+".")
+			return f, exports.Refuse("Remove env.QORY_HARNESS_HOME.", "QORY_HARNESS_HOME is qory's, so the configuration exports another name.", "env is in "+exports.HidePath(path)+".")
 		}
 		c.Env[name] = value
 		c.origins["env."+name] = path
@@ -909,15 +909,15 @@ func (c *Config) applyTiers(path string, tiers map[string]yaml.Node, root bool) 
 			for i := range lines[1:] {
 				lines[i+1] = strings.TrimPrefix(lines[i+1], "  ")
 			}
-			return exports.Refuse(lines[0], append(lines[1:], "The file is "+path+".")...)
+			return exports.Refuse(lines[0], append(lines[1:], "The file is "+exports.HidePath(path)+".")...)
 		}
 		node := tiers[name]
 		t, ok := tierEntry(&node)
 		if !ok {
-			return exports.Refuse(fmt.Sprintf("Set %s to a model id, or to {model: <model id>, effort: <value>}.", key), key+" is in "+path+".")
+			return exports.Refuse(fmt.Sprintf("Set %s to a model id, or to {model: <model id>, effort: <value>}.", key), key+" is in "+exports.HidePath(path)+".")
 		}
 		if _, placeholder := module.TierOf(t.Model); placeholder {
-			return exports.Refuse(fmt.Sprintf("Set %s to a model id.", key), fmt.Sprintf("%s is a tier placeholder, which goes only in an agent's model.", exports.Value(t.Model, false)), key+" is in "+path+".")
+			return exports.Refuse(fmt.Sprintf("Set %s to a model id.", key), fmt.Sprintf("%s is a tier placeholder, which goes only in an agent's model.", exports.Value(t.Model, false)), key+" is in "+exports.HidePath(path)+".")
 		}
 		t.From = path
 		if root {
@@ -1003,17 +1003,17 @@ func (c *Config) applyWorktree(path string, w *worktreeSection) error {
 	}
 	if w.Dir != nil {
 		if *w.Dir == "" {
-			return exports.Refuse("Set worktree.dir to a directory, or remove it.", "worktree.dir is empty. A directory is relative to the main checkout unless absolute.", "worktree.dir is in "+path+".")
+			return exports.Refuse("Set worktree.dir to a directory, or remove it.", "worktree.dir is empty. A directory is relative to the main checkout unless absolute.", "worktree.dir is in "+exports.HidePath(path)+".")
 		}
 		c.Worktree.Dir = *w.Dir
 		c.origins["worktree.dir"] = path
 	}
 	if w.Name != nil {
 		if !strings.Contains(*w.Name, "{branch}") {
-			return exports.Refuse("Add {branch} to worktree.name.", fmt.Sprintf("worktree.name is %s, and without {branch} two worktrees share one directory.", exports.Value(*w.Name, true)), "worktree.name is in "+path+".")
+			return exports.Refuse("Add {branch} to worktree.name.", fmt.Sprintf("worktree.name is %s, and without {branch} two worktrees share one directory.", exports.Value(*w.Name, true)), "worktree.name is in "+exports.HidePath(path)+".")
 		}
 		if strings.ContainsAny(*w.Name, `/\`) {
-			return exports.Refuse("Remove the slash from worktree.name.", fmt.Sprintf("worktree.name is %s. It is one directory name under worktree.dir.", exports.Value(*w.Name, true)), "worktree.name is in "+path+".")
+			return exports.Refuse("Remove the slash from worktree.name.", fmt.Sprintf("worktree.name is %s. It is one directory name under worktree.dir.", exports.Value(*w.Name, true)), "worktree.name is in "+exports.HidePath(path)+".")
 		}
 		c.Worktree.Name = *w.Name
 		c.origins["worktree.name"] = path
@@ -1024,14 +1024,14 @@ func (c *Config) applyWorktree(path string, w *worktreeSection) error {
 	}
 	if w.PR != nil {
 		if !strings.HasPrefix(*w.PR, "refs/") || !strings.Contains(*w.PR, "{n}") {
-			return exports.Refuse("Set worktree.pr to a ref under refs/ with {n}, as refs/pull/{n}/head.", fmt.Sprintf("worktree.pr is %s, and {n} stands for the pull request number.", exports.Value(*w.PR, true)), "worktree.pr is in "+path+".")
+			return exports.Refuse("Set worktree.pr to a ref under refs/ with {n}, as refs/pull/{n}/head.", fmt.Sprintf("worktree.pr is %s, and {n} stands for the pull request number.", exports.Value(*w.PR, true)), "worktree.pr is in "+exports.HidePath(path)+".")
 		}
 		c.Worktree.PR = *w.PR
 		c.origins["worktree.pr"] = path
 	}
 	if w.Branch != nil {
 		if *w.Branch != "delete" && *w.Branch != "keep" {
-			return exports.Refuse("Set worktree.branch to delete or keep.", fmt.Sprintf("The value is %s.", exports.Value(*w.Branch, true)), "worktree.branch is in "+path+".")
+			return exports.Refuse("Set worktree.branch to delete or keep.", fmt.Sprintf("The value is %s.", exports.Value(*w.Branch, true)), "worktree.branch is in "+exports.HidePath(path)+".")
 		}
 		c.Worktree.Branch = *w.Branch
 		c.origins["worktree.branch"] = path
@@ -1076,34 +1076,34 @@ func (c *Config) applyWorktree(path string, w *worktreeSection) error {
 func worktreePath(path, key string, e pathEntry) (Path, error) {
 	from := e.From
 	if from == "" {
-		return Path{}, exports.Refuse(fmt.Sprintf("Give every entry of %s a path.", key), "An entry is a path inside the checkout, or {from: <path>, to: <path in the worktree>}, and one has none.", key+" is in "+path+".")
+		return Path{}, exports.Refuse(fmt.Sprintf("Give every entry of %s a path.", key), "An entry is a path inside the checkout, or {from: <path>, to: <path in the worktree>}, and one has none.", key+" is in "+exports.HidePath(path)+".")
 	}
 	if from == "~" || strings.HasPrefix(from, "~/") {
 		home, err := os.UserHomeDir()
 		if err != nil {
-			return Path{}, caused(err, exports.Refuse(fmt.Sprintf("Set HOME, or write the entry of %s without ~.", key), fmt.Sprintf("%s lists %s, and the home directory is unknown: %s.", key, exports.Value(from, false), err), key+" is in "+path+"."))
+			return Path{}, caused(err, exports.Refuse(fmt.Sprintf("Set HOME, or write the entry of %s without ~.", key), fmt.Sprintf("%s lists %s, and the home directory is unknown: %s.", key, exports.Value(from, false), err), key+" is in "+exports.HidePath(path)+"."))
 		}
 		from = filepath.Join(home, from[1:])
 	}
 	to := e.To
 	switch {
 	case filepath.IsAbs(from) && !e.mapping:
-		return Path{}, exports.Refuse(fmt.Sprintf("Write the entry of %s as {from: %s, to: <path in the worktree>}.", key, exports.Value(e.From, false)), fmt.Sprintf("%s lists %s, which is not a path inside the checkout.", key, exports.Value(e.From, true)), key+" is in "+path+".")
+		return Path{}, exports.Refuse(fmt.Sprintf("Write the entry of %s as {from: %s, to: <path in the worktree>}.", key, exports.Value(e.From, false)), fmt.Sprintf("%s lists %s, which is not a path inside the checkout.", key, exports.Value(e.From, true)), key+" is in "+exports.HidePath(path)+".")
 	case filepath.IsAbs(from):
 		from = filepath.Clean(from)
 		if to == "" {
-			return Path{}, exports.Refuse(fmt.Sprintf("Add a to to the entry of %s, as {from: %s, to: <path in the worktree>}.", key, exports.Value(e.From, false)), fmt.Sprintf("%s lists %s with no to, and a path from outside the checkout sets where it goes.", key, exports.Value(e.From, false)), key+" is in "+path+".")
+			return Path{}, exports.Refuse(fmt.Sprintf("Add a to to the entry of %s, as {from: %s, to: <path in the worktree>}.", key, exports.Value(e.From, false)), fmt.Sprintf("%s lists %s with no to, and a path from outside the checkout sets where it goes.", key, exports.Value(e.From, false)), key+" is in "+exports.HidePath(path)+".")
 		}
 	default:
 		if !insideRel(from) {
-			return Path{}, exports.Refuse(fmt.Sprintf("Set the entry of %s to a path inside the checkout.", key), fmt.Sprintf("%s lists %s, which is not one.", key, exports.Value(from, true)), key+" is in "+path+".")
+			return Path{}, exports.Refuse(fmt.Sprintf("Set the entry of %s to a path inside the checkout.", key), fmt.Sprintf("%s lists %s, which is not one.", key, exports.Value(from, true)), key+" is in "+exports.HidePath(path)+".")
 		}
 		if to == "" {
 			to = from
 		}
 	}
 	if !insideRel(to) {
-		return Path{}, exports.Refuse(fmt.Sprintf("Set the to of the entry of %s to a path inside the worktree.", key), fmt.Sprintf("%s maps %s to %s, which is not one.", key, exports.Value(e.From, false), exports.Value(to, true)), key+" is in "+path+".")
+		return Path{}, exports.Refuse(fmt.Sprintf("Set the to of the entry of %s to a path inside the worktree.", key), fmt.Sprintf("%s maps %s to %s, which is not one.", key, exports.Value(e.From, false), exports.Value(to, true)), key+" is in "+exports.HidePath(path)+".")
 	}
 	return Path{From: from, To: to}, nil
 }
@@ -1136,7 +1136,7 @@ func read(path string) (file, error) {
 		return f, exports.DecodeError(path, err)
 	}
 	if err := dec.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
-		return f, exports.Refuse("Keep one YAML document in the configuration file.", "A configuration is one document, and the file contains more.", "The file is "+path+".")
+		return f, exports.Refuse("Keep one YAML document in the configuration file.", "A configuration is one document, and the file contains more.", "The file is "+exports.HidePath(path)+".")
 	}
 	if f.APIVersion == "" {
 		f.APIVersion = stack.APIVersion
@@ -1165,7 +1165,7 @@ func launchOf(path, name string, l launchSection) (Launch, error) {
 	var out Launch
 	if l.Command != nil {
 		if strings.TrimSpace(*l.Command) == "" {
-			return out, exports.Refuse(fmt.Sprintf("Set %s.command to the program, or remove it.", key), "An empty command is no program. Leave it out for the runtime's program.", key+" is in "+path+".")
+			return out, exports.Refuse(fmt.Sprintf("Set %s.command to the program, or remove it.", key), "An empty command is no program. Leave it out for the runtime's program.", key+" is in "+exports.HidePath(path)+".")
 		}
 		out.Command = *l.Command
 	}
@@ -1173,7 +1173,7 @@ func launchOf(path, name string, l launchSection) (Launch, error) {
 		out.Args = [][]string{}
 		for i, g := range *l.Args {
 			if len(g) == 0 {
-				return out, exports.Refuse(fmt.Sprintf("Set %s.args[%d] to a word or a list of words.", key, i), "The group is empty.", key+" is in "+path+".")
+				return out, exports.Refuse(fmt.Sprintf("Set %s.args[%d] to a word or a list of words.", key, i), "The group is empty.", key+" is in "+exports.HidePath(path)+".")
 			}
 			out.Args = append(out.Args, []string(g))
 		}
@@ -1182,10 +1182,10 @@ func launchOf(path, name string, l launchSection) (Launch, error) {
 		out.Env = map[string]string{}
 		for k, v := range l.Env {
 			if !envName.MatchString(k) {
-				return out, exports.Refuse(fmt.Sprintf("Rename each variable in %s.env to an environment variable name.", key), fmt.Sprintf("%s is not one.", accesskey.ShownName(k, false)), key+" is in "+path+".")
+				return out, exports.Refuse(fmt.Sprintf("Rename each variable in %s.env to an environment variable name.", key), fmt.Sprintf("%s is not one.", accesskey.ShownName(k, false)), key+" is in "+exports.HidePath(path)+".")
 			}
 			if k == "QORY_HARNESS_HOME" {
-				return out, exports.Refuse(fmt.Sprintf("Remove QORY_HARNESS_HOME from %s.env.", key), "Every launch sets it to the home.", key+" is in "+path+".")
+				return out, exports.Refuse(fmt.Sprintf("Remove QORY_HARNESS_HOME from %s.env.", key), "Every launch sets it to the home.", key+" is in "+exports.HidePath(path)+".")
 			}
 			out.Env[k] = v
 		}

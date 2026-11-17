@@ -63,7 +63,7 @@ func readPool(path string, p *poolSection) (*ForagerPool, error) {
 	out := &ForagerPool{Runs: DefaultPoolRuns}
 	if p.Runs != nil {
 		if *p.Runs < 1 {
-			return nil, exports.Refuse("Set pool.runs to 1 or more.", "pool.runs is below 1, and a pool runs at least 1 at once.", "pool.runs is in "+path+".")
+			return nil, exports.Refuse("Set pool.runs to 1 or more.", "pool.runs is below 1, and a pool runs at least 1 at once.", "pool.runs is in "+exports.HidePath(path)+".")
 		}
 		out.Runs, out.runsSet = *p.Runs, true
 	}
@@ -75,21 +75,21 @@ func readPool(path string, p *poolSection) (*ForagerPool, error) {
 			continue
 		}
 		if err := accesskey.SecretInDocument(*k.in); err != nil {
-			return nil, caused(err, exports.Refuse("Remove the secret from pool."+k.key+".", sentence(err), "pool."+k.key+" is in "+path+"."))
+			return nil, caused(err, exports.Refuse("Remove the secret from pool."+k.key+".", sentence(err), "pool."+k.key+" is in "+exports.HidePath(path)+"."))
 		}
 	}
 	if p.Registry == nil {
-		return nil, exports.Refuse("Set pool.registry to an image name.", "pool.registry is required.", "pool.registry is in "+path+".")
+		return nil, exports.Refuse("Set pool.registry to an image name.", "pool.registry is required.", "pool.registry is in "+exports.HidePath(path)+".")
 	}
 	if !poolRegistry(*p.Registry) {
-		return nil, exports.Refuse("Set pool.registry to an image name.", "The value is not one.", "pool.registry is in "+path+".")
+		return nil, exports.Refuse("Set pool.registry to an image name.", "The value is not one.", "pool.registry is in "+exports.HidePath(path)+".")
 	}
 	out.Registry = *p.Registry
 	if p.RunConfig == nil {
-		return nil, exports.Refuse("Set pool.run_config to an absolute path.", "pool.run_config is required.", "pool.run_config is in "+path+".")
+		return nil, exports.Refuse("Set pool.run_config to an absolute path.", "pool.run_config is required.", "pool.run_config is in "+exports.HidePath(path)+".")
 	}
 	if !filepath.IsAbs(*p.RunConfig) {
-		return nil, exports.Refuse("Set pool.run_config to an absolute path.", "The value is not one.", "pool.run_config is in "+path+".")
+		return nil, exports.Refuse("Set pool.run_config to an absolute path.", "The value is not one.", "pool.run_config is in "+exports.HidePath(path)+".")
 	}
 	out.RunConfig = filepath.Clean(*p.RunConfig)
 	return out, nil

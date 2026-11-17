@@ -87,3 +87,30 @@ func checkFixLine(t *testing.T, label string, err error, long, path string) {
 		t.Errorf("%s: the refusal does not name the file %s: %v", label, path, err)
 	}
 }
+
+// TestAPathWithASecretIsPrintedAsAPhraseByEveryRefusal is each refusal of a qory.yaml in a
+// folder whose name contains an access key secret: the refusal prints the folder as the
+// phrase and never prints the secret.
+func TestAPathWithASecretIsPrintedAsAPhraseByEveryRefusal(t *testing.T) {
+	for label, body := range map[string]string{
+		"a bad update":      "harness: {update: sometimes}\n",
+		"a bad tier":        "harness:\n  tiers:\n    heavy: m\n",
+		"a bad tier entry":  "harness:\n  tiers:\n    light: [a]\n",
+		"a bad exports":     "exports: {}\n",
+		"an unknown key":    "runtim: claude\n",
+		"a bad launch":      "harness: {launch: {claude: {command: \" \"}}}\n",
+		"a second document": "git: {cache: x}\n---\ngit: {cache: y}\n",
+	} {
+		hermetic(t)
+		root := filepath.Join(t.TempDir(), "qak_AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA")
+		write(t, filepath.Join(root, "qory.yaml"), body)
+		_, err := config.Load(root, true)
+		if err == nil {
+			t.Errorf("%s: no refusal", label)
+			continue
+		}
+		if strings.Contains(strings.ToLower(err.Error()), "qak_") || !strings.Contains(err.Error(), "(a name that contains an access key secret)") {
+			t.Errorf("%s: the refusal does not print the folder as the phrase: %v", label, err)
+		}
+	}
+}
