@@ -2079,11 +2079,23 @@ The target step adds these tools to the image its target starts from, whether th
 prebuilt one, such as `mcr.microsoft.com/devcontainers/base`, or one the configuration
 builds, and the run's session finds them without a download:
 
-- Chromium at `/usr/bin/chromium`, with Noto's fonts for Latin and other scripts, CJK and
-  color emoji, and `ffmpeg` with `ffprobe`. `apt-get` installs them, with no recommended
-  packages, from the apt sources the base image has. Their versions are the ones the
-  base image's Debian suite serves on the day of the build, so they differ between
-  builds: the log of the step prints each version.
+- Chromium at `/usr/bin/chromium`, and `ffmpeg` with `ffprobe`, with Noto's fonts for
+  Latin and other scripts, CJK and color emoji. Where Chromium comes from depends on the
+  base image:
+  - **Debian**, any release: `apt-get` installs the `chromium` package.
+  - **Ubuntu 22.04 and 24.04**, `amd64` and `arm64`: Ubuntu's `chromium` package is a
+    snap, which does not run in a container, so the step downloads Chrome for Testing
+    159.0.8154.6, the Chromium of Playwright 1.65.1 (browser revision 1255), from
+    `https://cdn.playwright.dev/builds/cft/159.0.8154.6/`. It checks the archive's
+    sha256 sum, which is in `internal/prebuild/tools.go`, before it extracts it to
+    `/opt/qory/chromium`, owned by root, and links `/usr/bin/chromium` to it. It installs
+    the libraries Playwright's `install-deps` lists for the release, `curl` and `unzip`
+    with `apt-get`. A base that has a file at `/usr/bin/chromium` stops the step.
+
+  `apt-get` installs `ffmpeg`, the fonts and the libraries with no recommended packages
+  from the apt sources the base image has, and removes its archives and lists in the same
+  layer. Their versions are the ones the base image's suite serves on the day of the
+  build, so they differ between builds: the log of the step prints each version.
 - The Node packages `typescript`, `libpg-query`, `parse5`, `postcss` and `postcss-scss` in
   `/opt/qory/parsers`, as in the `agent` image: a copy of the folder of the same path in
   the `prebuild` image, installed there from `images/agent/parsers/package-lock.json`. The
@@ -2095,23 +2107,27 @@ builds, and the run's session finds them without a download:
 The step runs the programs as the wall user and checks that Chromium starts, `ffmpeg` and
 `ffprobe` run, each parser loads at the version of `package.json`, and the wall user
 cannot write to `/opt/qory/parsers`. A failed check prints its fix first in the build's
-log. Behind the wall, `apt-get` reaches the base image's apt sources through the run's
-proxy, so the run's egress must include them.
+log. Behind the wall, `apt-get` reaches the base image's apt sources, and on Ubuntu `curl`
+reaches `cdn.playwright.dev`, through the run's proxy, so the run's egress must include
+them.
 
-The step needs a base image with Debian's `apt-get`: it reads `ID` in `/etc/os-release`
-and `apt-get` on the PATH in a container with no network, and stops before it builds with
-`use a Debian base image: the build adds Chromium with apt, and this image's ID is
-"<ID>"`, or `use a Debian base image that has apt-get: the build adds Chromium and ffmpeg
-with it`. An Ubuntu or Alpine base stops the prebuild this way: Ubuntu's `chromium`
-package is a snap, which does not run in a container. A prebuild whose `prebuild` image is
+The step reads `ID`, `VERSION_ID` and `apt-get` in a container of the base image with no
+network, and stops before it builds a layer when the base is none of the above, with
+`use a Debian or Ubuntu image: the build adds Chromium to these, and this image's ID is
+"<ID>"`, `use Ubuntu 22.04 or 24.04, or Debian: the build adds Chromium to these, and this
+is Ubuntu "<VERSION_ID>"`, `use an amd64 or arm64 Ubuntu image: the build adds Chromium for
+these, and this one is "<architecture>"`, or `use a Debian or Ubuntu image that has
+apt-get: the build installs ffmpeg and fonts with it`. An Alpine base, or an Ubuntu base
+of another release, stops the prebuild this way. A prebuild whose `prebuild` image is
 not built FROM the `agent` image stops with `build the prebuild image FROM Qory's agent
 image: it has no parsers in /opt/qory/parsers`.
 
-The step adds 1.6 GiB to the image, measured on `mcr.microsoft.com/devcontainers/base`
-for arm64 (1.3 GiB before, 3.0 GiB after), and the image's size counts toward its limit of
-4 GiB. A base image of more than about 2.4 GiB, such as
-`mcr.microsoft.com/devcontainers/typescript-node` (2.7 GiB, 4.1 GiB with the tools), stops
-with `the image is 4.1 GiB (<bytes> bytes), more than the limit of 4 GiB; it is removed`.
+The step adds about 1.6 GiB to the image, measured on
+`mcr.microsoft.com/devcontainers/base` for arm64 (1.3 GiB before, 3.0 GiB after), and the
+image's size counts toward its limit of 4 GiB. A base image of more than about 2.4 GiB,
+such as `mcr.microsoft.com/devcontainers/typescript-node` (2.7 GiB, 4.1 GiB with the
+tools), stops with `the image is 4.1 GiB (<bytes> bytes), more than the limit of 4 GiB; it
+is removed`.
 
 The build takes the user from `wall.user` in `forager.yaml`. The wall's helper is
 `wall.helper`, or on Linux the `qory` you run. When `forager.yaml` sets `pool.registry`,

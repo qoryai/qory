@@ -26,9 +26,11 @@ release may change what an existing document does, and states it under Upgrading
 - The image of a prebuild has Chromium at `/usr/bin/chromium`, with Noto's fonts, `ffmpeg`
   and `ffprobe`, and the same Node parsers in `/opt/qory/parsers`, whether the target
   starts from a prebuilt development container image, such as
-  `mcr.microsoft.com/devcontainers/base`, or from one the configuration builds. The
-  prebuild installs Chromium, `ffmpeg` and the fonts with `apt-get` from the base image's
-  Debian sources, copies the parsers from the `prebuild` image, and copies `node` from it
+  `mcr.microsoft.com/devcontainers/base`, or from one the configuration builds. On a
+  Debian base, `apt-get` installs Chromium. On Ubuntu 22.04 and 24.04, `amd64` and
+  `arm64`, qory downloads Chrome for Testing 159.0.8154.6, the Chromium of Playwright
+  1.65.1, checks its sha256 sum and extracts it to `/opt/qory/chromium`, because Ubuntu's
+  package is a snap. qory copies the parsers from the `prebuild` image, and `node` from it
   when the base image has none. It prints `prebuild: added Chromium, ffmpeg and the
   parsers in <time>`. See `docs/run.md`.
 - Every run of Claude Code installs the runtime's program before its session: from the
@@ -462,9 +464,10 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Changed
 
-- A prebuild stops, before it builds the image, when the base image is not Debian or has
-  no `apt-get`: `use a Debian base image: the build adds Chromium with apt, and this
-  image's ID is "<ID>"`. Ubuntu and Alpine bases that built before are refused.
+- A prebuild stops, before it builds the image, when the base image is not Debian or
+  Ubuntu 22.04 or 24.04, or has no `apt-get`: `use a Debian or Ubuntu image: the build
+  adds Chromium to these, and this image's ID is "<ID>"`. Alpine bases and other Ubuntu
+  releases that built before are refused.
 
 - The `agent`, `agent-docker` and `prebuild` images contain no agent runtime. The machine
   installs the runtime at run time, and Forager mounts it read-only at
