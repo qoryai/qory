@@ -404,7 +404,8 @@ release may change what an existing document does, and states it under Upgrading
 - `qory run` holds a lock on a home that is not for that run alone: your unwalled run's
   `.qory/harness`, and the home of a walled run with `--home` or `harness.home`. The lock is
   on the file `<home>.lock` beside the home, which records the run's id, qory's process id and
-  the start time, and the file stays after the run. A second run of that home stops before
+  the start time. The file stays after the run, empty: the run removes
+  its text when it lets go. A second run of that home stops before
   it redeems its run code and before its compose, with exit 1 and `Wait for the run that
   uses this home to end, or set another --home or harness.home.`, then the holder and the
   home on the second line. `qory harness compose` and `qory harness remove` take the same

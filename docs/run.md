@@ -60,16 +60,17 @@ set --home to a folder outside /work/app: /work/app/.qory/harness is inside /wor
 
 A home that is not for one run alone is held for the run's life: your unwalled run's
 `.qory/harness`, and the home of a walled run with `--home` or `harness.home`. Before it
-redeems a run code or composes, `qory run` takes a lock on the file `<home>.lock` beside the home,
-such as `.qory/harness.lock`, which records the run's id, `qory`'s process id and the start time.
-A home in the checkout is kept out of git first, so the lock file shows as no untracked file.
-The file stays after the run, and the lock ends with the run. A second run of that home stops
-with exit 1 before it redeems its run code, so the code stays unused, and before it composes, since
-its compose would replace the first run's home and its end would remove the first run's copy of
-`inputs.json`. `qory harness compose` and `qory harness remove` take the same lock and stop
-with the same lines. `qory harness remove` keeps the lock file, `.qory/harness.lock` for a home in the
-checkout, with its line in `.git/info/exclude`, and removes everything else, since a run that
-opened the file before the remove would lock the old file while a new run locked a new one:
+redeems a run code or composes, `qory run` takes a lock on the file `<home>.lock` beside the
+home, such as `.qory/harness.lock`. While a run holds the lock, the file contains the run's id,
+`qory`'s process id and the start time. After the run releases the lock, the file stays and is
+empty. A home in the checkout is kept out of git first, so the lock file shows as no untracked
+file. A second run of that home stops with exit 1 before it redeems its run code, so the code
+stays unused, and before it composes, since its compose would replace the first run's home and
+its end would remove the first run's copy of `inputs.json`. `qory harness compose` and
+`qory harness remove` take the same lock and stop with the same lines. `qory harness remove`
+keeps the lock file, `.qory/harness.lock` for a home in the checkout, with its line in
+`.git/info/exclude`, and removes everything else, since a run that opened the file before the
+remove would lock the old file while a new run locked a new one:
 
 ```text
 Wait for the run that uses this home to end, or set another --home or harness.home.

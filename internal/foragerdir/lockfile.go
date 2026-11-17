@@ -30,7 +30,7 @@ func LockFile(path string) (*Lock, error) {
 
 // LockFileText is [LockFile] that also writes text into the file, for the process that
 // finds the lock held to read, see [LockText]. The text replaces what an earlier holder
-// wrote.
+// wrote, and Release empties the file, so no text outlives its holder.
 func LockFileText(path, text string) (*Lock, error) {
 	l, err := LockFile(path)
 	if err != nil {
@@ -43,12 +43,13 @@ func LockFileText(path, text string) (*Lock, error) {
 	return l, nil
 }
 
-// SetText replaces the text of the lock file with text, for the holder. A nil Lock sets
-// nothing.
+// SetText replaces the text of the lock file with text, for the holder. [Lock.Release]
+// empties the file again. A nil Lock sets nothing.
 func (l *Lock) SetText(text string) error {
 	if l == nil || l.f == nil {
 		return nil
 	}
+	l.text = true
 	// The new text goes first and the file is cut to its length after, so a reader never finds
 	// the file empty.
 	if _, err := l.f.WriteAt([]byte(text), 0); err != nil {
