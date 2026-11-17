@@ -194,7 +194,8 @@ Stopping keeps the gateway's runs: a gateway started again on the same directory
 
 It refuses to start, before it listens:
 
-- `~/.config/qory/forager.yaml has no gateway section, so there is no gateway to run`
+- `Add a gateway section to forager.yaml.`, then `There is no gateway to run without one;
+  see <docs>.` and `The file is ~/.config/qory/forager.yaml.`
 - `<file>: gateway.server.via does nothing for qory gateway: a gateway reaches the server
   directly; remove gateway.server.via`
 - `Set gateway.listen to the address that other machines reach, or pass --listen.`, then
@@ -202,11 +203,13 @@ It refuses to start, before it listens:
   <file>.`
 - `Set gateway.listen to host:port, such as 0.0.0.0:8443.`, then `The value is not
   host:port.` and `gateway.listen is in <file>.`, and for `--listen`,
-  `--listen "<v>" is not host:port, such as 0.0.0.0:8443`
+  `Pass --listen as host:port, such as 0.0.0.0:8443.`, then `--listen is "<v>", which is not
+  host:port.`
 - `Add gateway.server, the server that the gateway reports to.`, then `A gateway that runs
   as a service reports every run to Qory Apiary and takes the runs' policies from it.`
   and `The file is <file>.`
-- `gateway.tls is required with gateway.listen: a gateway serves other machines`
+- `Add gateway.tls to forager.yaml.`, then `A gateway serves other machines, so it needs
+  gateway.tls.` and `The file is <file>.`
 
 An address it cannot listen on is `listen on <addr>: <err>`.
 

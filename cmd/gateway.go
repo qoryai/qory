@@ -89,7 +89,8 @@ More: ` + gatewayDocs,
 				return input(err)
 			}
 			if r == nil || !r.Gateway {
-				return input(fmt.Errorf("%s has no gateway section, so there is no gateway to run; see %s", foragerFileShown(), gatewayDocs))
+				return input(exports.Refuse("Add a gateway section to forager.yaml.",
+					"There is no gateway to run without one; see "+gatewayDocs+".", "The file is "+exports.HidePath(foragerFileShown())+"."))
 			}
 			if err := viaForGateway(r); err != nil {
 				return err
@@ -97,7 +98,8 @@ More: ` + gatewayDocs,
 			addr := r.Listen
 			if cmd.Flags().Changed("listen") {
 				if !config.HostPort(listen) {
-					return input(fmt.Errorf("--listen %s is not host:port, such as 0.0.0.0:8443", exports.Value(listen, true)))
+					return input(exports.Refuse("Pass --listen as host:port, such as 0.0.0.0:8443.",
+						"--listen is "+exports.Value(listen, true)+", which is not host:port."))
 				}
 				addr = listen
 			}
@@ -110,7 +112,8 @@ More: ` + gatewayDocs,
 					"A gateway that runs as a service reports every run to Qory Apiary and takes the runs' policies from it.", "The file is "+exports.HidePath(r.File)+"."))
 			}
 			if r.TLS == nil {
-				return input(errors.New("gateway.tls is required with gateway.listen: a gateway serves other machines"))
+				return input(exports.Refuse("Add gateway.tls to forager.yaml.",
+					"A gateway serves other machines, so it needs gateway.tls.", "The file is "+exports.HidePath(r.File)+"."))
 			}
 			tlsKey, err := checkServiceSecrets(r)
 			if err != nil {
