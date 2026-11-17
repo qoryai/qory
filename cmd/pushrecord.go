@@ -15,7 +15,9 @@ import (
 	"github.com/qoryai/qory/internal/runapi"
 )
 
-// The words of the report of a push to Qory Apiary. textNotRecorded has the commit and the
+// The words of the report of a push to Qory Apiary. textNotRecorded starts with the prefix
+// "qory run: ", which [pushEnding.ended] trims before it prints the line with the prefix once,
+// and which stays when the text follows another error. It has the commit and the
 // branch, then the status and the message or code of Qory Apiary or of the gateway, whichever
 // returned it, or the cause of a request with no response. No text has a retry step: qory has
 // sent the call again, or the run is stopped. textRunEndedLater is the line for a run that
@@ -23,7 +25,7 @@ import (
 // code, one of [server.EndCodes]. textLastPushUnrecorded follows either line: the push that
 // the report was about is on the forge, and Qory Apiary has no record of it.
 const (
-	textNotRecorded       = "Contact support: Qory Apiary did not record the last push.\n  qory pushed %s to %s.\n%s"
+	textNotRecorded       = "qory run: Contact support: Qory Apiary did not record the last push.\n  qory pushed %s to %s.\n%s"
 	textRecordApiary      = "Qory Apiary returned %d: %s"
 	textRecordGateway     = "The gateway returned %d: %s"
 	textRecordNoReply     = "Qory Apiary sent no response: %s"
