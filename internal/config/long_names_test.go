@@ -20,13 +20,15 @@ func TestRefusalsKeepTheFixLineShortForLongNames(t *testing.T) {
 		if n == 64 {
 			host = strings.Repeat("h", 60) + ".example"
 		}
-		longNameCases(t, name, host)
+		longNameCases(t, name, host, false)
 	}
+	// A name that contains an access key secret prints as a phrase, which no shortening cuts.
+	longNameCases(t, "qak_"+strings.Repeat("x", 60), "qak-"+strings.Repeat("h", 49)+".example", true)
 }
 
 // longNameCases checks each refusal that prints name, an entry's name, or host, a host of
 // gateway.egress.paths, in its first line.
-func longNameCases(t *testing.T, name, host string) {
+func longNameCases(t *testing.T, name, host string, hidden bool) {
 	t.Helper()
 	hermetic(t)
 	for label, c := range map[string]struct{ body, long string }{
@@ -52,7 +54,7 @@ func longNameCases(t *testing.T, name, host string) {
 			t.Errorf("%s: no refusal", label)
 			continue
 		}
-		checkFixLine(t, label, err, c.long, path)
+		checkFixLine(t, label, err, c.long, path, hidden)
 	}
 	for label, c := range map[string]struct{ body, long string }{
 		"a launch command":  {"harness: {launch: {" + name + ": {command: \" \"}}}\n", name},
@@ -68,19 +70,22 @@ func longNameCases(t *testing.T, name, host string) {
 			t.Errorf("%s: no refusal", label)
 			continue
 		}
-		checkFixLine(t, label, err, c.long, path)
+		checkFixLine(t, label, err, c.long, path, hidden)
 	}
 }
 
 // checkFixLine fails the test when the first line of err has more than 100 characters,
 // when no line has the whole name long, or when err does not name the file at path.
-func checkFixLine(t *testing.T, label string, err error, long, path string) {
+func checkFixLine(t *testing.T, label string, err error, long, path string, hidden bool) {
 	t.Helper()
 	lines := strings.Split(err.Error(), "\n")
 	if n := utf8.RuneCountInString(lines[0]); n > 100 {
 		t.Errorf("%s: the first line has %d characters: %s", label, n, lines[0])
 	}
-	if !strings.Contains(err.Error(), long) {
+	switch {
+	case hidden && strings.Contains(strings.ToLower(err.Error()), "qak_"):
+		t.Errorf("%s: the refusal prints the secret: %v", label, err)
+	case !hidden && !strings.Contains(err.Error(), long):
 		t.Errorf("%s: no line has the whole name: %v", label, err)
 	}
 	if !strings.Contains(err.Error(), path) {
@@ -112,5 +117,51 @@ func TestAPathWithASecretIsPrintedAsAPhraseByEveryRefusal(t *testing.T) {
 		if strings.Contains(strings.ToLower(err.Error()), "qak_") || !strings.Contains(err.Error(), "(a name that contains an access key secret)") {
 			t.Errorf("%s: the refusal does not print the folder as the phrase: %v", label, err)
 		}
+	}
+}
+
+// TestWorktreeRefusalsKeepTheFixLineShortForLongPaths is a worktree.link and worktree.copy
+// entry with an absolute path of 64 characters, a relative path outside the checkout, and a
+// to outside the worktree: the first line has at most 100 characters, and some line has the
+// path.
+func TestWorktreeRefusalsKeepTheFixLineShortForLongPaths(t *testing.T) {
+	long := "/" + strings.Repeat("p", 63)
+	relative := strings.Repeat("r", 62) + "/../.."
+	for label, body := range map[string]string{
+		"an absolute link":          "worktree: {link: [" + long + "]}\n",
+		"an absolute copy":          "worktree: {copy: [" + long + "]}\n",
+		"an absolute with no to":    "worktree: {link: [{from: " + long + "}]}\n",
+		"a relative path outside":   "worktree: {link: [" + relative + "x/../../" + relative + "]}\n",
+		"a to outside the worktree": "worktree: {link: [{from: " + long + ", to: ../" + strings.Repeat("t", 60) + "}]}\n",
+	} {
+		hermetic(t)
+		root := t.TempDir()
+		path := filepath.Join(root, "qory.yaml")
+		write(t, path, body)
+		_, err := config.Load(root, true)
+		if err == nil {
+			t.Errorf("%s: no refusal", label)
+			continue
+		}
+		if n := utf8.RuneCountInString(strings.SplitN(err.Error(), "\n", 2)[0]); n > 100 {
+			t.Errorf("%s: the first line has %d characters: %s", label, n, strings.SplitN(err.Error(), "\n", 2)[0])
+		}
+	}
+}
+
+// TestAFolderWithBothFilesIsPrintedAsAPhraseWhenItsNameHasASecret is a folder with
+// qory-stack.yaml and a qory.yaml harness section, named with an access key secret: the
+// refusal prints the folder as the phrase and never prints the secret.
+func TestAFolderWithBothFilesIsPrintedAsAPhraseWhenItsNameHasASecret(t *testing.T) {
+	hermetic(t)
+	root := filepath.Join(t.TempDir(), "qak_AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA")
+	write(t, filepath.Join(root, "qory-stack.yaml"), stackDoc)
+	write(t, filepath.Join(root, "qory.yaml"), composeDoc)
+	_, err := config.DiscoverStack(root)
+	if err == nil {
+		t.Fatal("no refusal")
+	}
+	if strings.Contains(strings.ToLower(err.Error()), "qak_") || !strings.Contains(err.Error(), "(a name that contains an access key secret)") {
+		t.Errorf("the refusal does not print the folder as the phrase: %v", err)
 	}
 }
