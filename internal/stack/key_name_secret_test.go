@@ -67,8 +67,8 @@ func TestADecoderRefusalWithASecretIsGivenByItsLines(t *testing.T) {
 		{head + "extends: qak_x\nmodules: qrk_x\n", "Set each value in the file to the type its key takes.\n  Line 2: " + cannotRead + "\n  Line 3: " + cannotRead},
 		{head + "extends: line 99\nmodules: qak_x\n", "Set each value in the file to the type its key takes.\n  Line 2: cannot unmarshal !!str `line 99` into stack.Source.\n  Line 3: " + cannotRead},
 		{head + "extends: \"line 99: field y\"\n\"qak_S\\nb\": 1\n", "Set each value in the file to the type its key takes.\n  Line 2: cannot unmarshal !!str `line 99...` into stack.Source.\n  Line 3: key is not one qory-stack.yaml reads."},
-		{head + "modules: *qak_x\n", "Correct the file.\n  " + cannotRead},
-		{head + "modules: !!int qak_x\n", "Correct the file.\n  " + cannotRead},
+		{head + "modules: *qak_x\n", "Correct qory-stack.yaml.\n  " + cannotRead},
+		{head + "modules: !!int qak_x\n", "Correct qory-stack.yaml.\n  " + cannotRead},
 	} {
 		path := filepath.Join(t.TempDir(), FileName)
 		if err := os.WriteFile(path, []byte(c.body), 0o644); err != nil {
@@ -106,7 +106,7 @@ func TestARefusalWithoutALineIsThePath(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err := Load(path)
-	want := "Correct the file.\n  qory cannot read the value here. The YAML decoder's message contains an access key secret, a run key, a run code, or an enrolment code, so qory does not print it.\n  The file is " + path + "."
+	want := "Correct qory-stack.yaml.\n  qory cannot read the value here. The YAML decoder's message contains an access key secret, a run key, a run code, or an enrolment code, so qory does not print it.\n  The file is " + path + "."
 	if err == nil || err.Error() != want {
 		t.Errorf("%v, want %q", err, want)
 	}

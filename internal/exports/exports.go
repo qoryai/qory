@@ -440,8 +440,11 @@ const (
 	fixTwice  = "Remove the key that is written twice."
 	fixSyntax = "Correct the YAML syntax of the file."
 	fixType   = "Set each value in the file to the type its key takes."
-	fixOther  = "Correct the file."
 )
+
+// fixOther is the fix of the refusal of an error that no other fix fits: correct the file,
+// by its name without the folders.
+func fixOther(path string) string { return "Correct " + filepath.Base(path) + "." }
 
 // fixKey is the fix of the refusal of a key that the file at path does not read.
 func fixKey(path string) string {
@@ -470,7 +473,7 @@ func decoderRefusal(path, text string, err error) *Refusal {
 			lines = append(lines, sentenceOf(l))
 		}
 	}
-	fix := fixOther
+	fix := fixOther(path)
 	switch {
 	case strings.Contains(text, "already defined at line"):
 		fix = fixTwice
@@ -535,7 +538,7 @@ func withoutSecrets(path, rest string, err error) error {
 		if m := syntaxLine.FindStringSubmatch(err.Error()); m != nil {
 			return refuse(fixSyntax, "Line "+m[1]+": "+cannotRead)
 		}
-		return refuse(fixOther, cannotRead)
+		return refuse(fixOther(path), cannotRead)
 	}
 	var entries, lines []string
 	unknown, kept := "", false
@@ -578,7 +581,7 @@ func withoutSecrets(path, rest string, err error) error {
 		}
 		return refuse(fixType, out...)
 	}
-	return refuse(fixOther, cannotRead)
+	return refuse(fixOther(path), cannotRead)
 }
 
 // KeyNotRead is the refusal of the key name where no key of that name is read: "key",

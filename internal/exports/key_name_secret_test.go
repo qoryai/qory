@@ -135,9 +135,9 @@ func TestADecoderPrefixWithASecretIsLeftOut(t *testing.T) {
 		err  error
 		want string
 	}{
-		{fmt.Errorf("qak_x is one name: %w", inner), "Correct the file.\n  " + cannotRead + "\n  The file is f.yaml."},
-		{fmt.Errorf("one name: %w", inner), "Correct the file.\n  One name.\n  " + cannotRead + "\n  The file is f.yaml."},
-		{fmt.Errorf("one name: %w", errors.New("yaml: cannot decode !!str `QeCg_y` as a !!int")), "Correct the file.\n  One name.\n  " + cannotRead + "\n  The file is f.yaml."},
+		{fmt.Errorf("qak_x is one name: %w", inner), "Correct f.yaml.\n  " + cannotRead + "\n  The file is f.yaml."},
+		{fmt.Errorf("one name: %w", inner), "Correct f.yaml.\n  One name.\n  " + cannotRead + "\n  The file is f.yaml."},
+		{fmt.Errorf("one name: %w", errors.New("yaml: cannot decode !!str `QeCg_y` as a !!int")), "Correct f.yaml.\n  One name.\n  " + cannotRead + "\n  The file is f.yaml."},
 	} {
 		if err := exports.DecodeError("f.yaml", c.err); err == nil || err.Error() != c.want {
 			t.Errorf("%v, want %q", err, c.want)
