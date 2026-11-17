@@ -1574,7 +1574,7 @@ func readPaths(path string, node *yaml.Node) (map[string][]string, error) {
 			return nil, exports.Refuse(fmt.Sprintf("Set gateway.egress.paths.%s to a list of paths.", host), "The value is not a list.", "gateway.egress.paths is in "+path+".")
 		}
 		notPath := func(i, _ int) error {
-			return exports.Refuse(fmt.Sprintf("Set gateway.egress.paths.%s[%d] to a path from /, matched whole or up to a final *.", host, i), "The entry is not one.", "gateway.egress.paths is in "+path+".")
+			return exports.Refuse(fmt.Sprintf("Set gateway.egress.paths.%s[%d] to a path from /.", host, i), "The entry is not one. A path is matched whole or up to a final *.", "gateway.egress.paths is in "+path+".")
 		}
 		list, err := stringEntries(v, notPath)
 		if err != nil {

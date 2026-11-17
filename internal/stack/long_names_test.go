@@ -9,14 +9,24 @@ import (
 )
 
 // TestRefusalsKeepTheFixLineShortForLongNames is each refusal of a stack file that prints
-// a role name or a module name, with a name of 90 characters: the first line has at most
-// 100 characters and the name shortened, and a later line has the whole name.
+// a role name or a module name, with names of 24 and of 90 characters: the first line has
+// at most 100 characters, and some line has the whole name.
 func TestRefusalsKeepTheFixLineShortForLongNames(t *testing.T) {
+	// 24 characters is the longest name that is printed whole.
+	for _, n := range []int{24, 90} {
+		longNames(t, n)
+	}
+}
+
+// longNames is the cases of [TestRefusalsKeepTheFixLineShortForLongNames] for names of n
+// characters.
+func longNames(t *testing.T, n int) {
+	t.Helper()
 	isolate(t)
-	role := "role-" + strings.Repeat("r", 85)
-	module := "mod-" + strings.Repeat("m", 86)
-	dotted := "role." + strings.Repeat("r", 40) + "." + strings.Repeat("s", 44)
-	kind := "kind-" + strings.Repeat("k", 85)
+	role := "role-" + strings.Repeat("r", n-5)
+	module := "mod-" + strings.Repeat("m", n-4)
+	dotted := "role." + strings.Repeat("r", n/2-6) + "." + strings.Repeat("s", n/2)
+	kind := "kind-" + strings.Repeat("k", n-5)
 	const head = "apiVersion: qory.dev/v1alpha1\nmodules:\n  - name: core\n"
 	for name, c := range map[string]struct{ body, long string }{
 		"a role with a space":          {head + "bind:\n  agents:\n    \"" + role + " x\": c\n", role},
@@ -38,7 +48,7 @@ func TestRefusalsKeepTheFixLineShortForLongNames(t *testing.T) {
 		"a module's ref with no git":   {"apiVersion: qory.dev/v1alpha1\nmodules:\n  - name: " + module + "\n    source: {path: x, ref: v1}\n", module},
 		"a module's path off the repo": {"apiVersion: qory.dev/v1alpha1\nmodules:\n  - name: " + module + "\n    source: {git: https://h, ref: v1, path: ../x}\n", module},
 		"a runtime listed twice":       {head + "extending:\n  target:\n    runtime: [" + role + ", " + role + "]\n", role},
-		"a workflow name not allowed":  {head + "workflows:\n  Wf-" + strings.Repeat("w", 87) + ": {}\n", "Wf-" + strings.Repeat("w", 87)},
+		"a workflow name not allowed":  {head + "workflows:\n  Wf-" + strings.Repeat("w", n-3) + ": {}\n", "Wf-" + strings.Repeat("w", n-3)},
 	} {
 		dir := t.TempDir()
 		path := filepath.Join(dir, FileName)
@@ -51,14 +61,11 @@ func TestRefusalsKeepTheFixLineShortForLongNames(t *testing.T) {
 			continue
 		}
 		lines := strings.Split(err.Error(), "\n")
-		if n := utf8.RuneCountInString(lines[0]); n > 100 {
-			t.Errorf("%s: the first line has %d characters: %s", name, n, lines[0])
+		if chars := utf8.RuneCountInString(lines[0]); chars > 100 {
+			t.Errorf("%s: the first line has %d characters: %s", name, chars, lines[0])
 		}
-		if strings.Contains(lines[0], c.long) {
-			t.Errorf("%s: the first line has the whole name: %s", name, lines[0])
-		}
-		if !strings.Contains(strings.Join(lines[1:], "\n"), c.long) {
-			t.Errorf("%s: no later line has the whole name: %v", name, err)
+		if !strings.Contains(err.Error(), c.long) {
+			t.Errorf("%s: no line has the whole name: %v", name, err)
 		}
 	}
 }

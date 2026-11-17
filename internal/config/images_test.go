@@ -193,8 +193,8 @@ func TestForagerFileReadsThePrebuildImage(t *testing.T) {
 	}
 	for _, c := range []struct{ name, want string }{
 		{"go-dokcer", "Set wall.prebuild_image to a name of wall.images.\n  wall.images defines no image \"go-dokcer\".\n  wall.prebuild_image is in {path}."},
-		{"go", "Set docker: true and a runtime on wall.images.go, or name another image in wall.prebuild_image.\n  A prebuild builds in the image's nested Docker. A runtime is such as sysbox-runc.\n  wall.prebuild_image is in {path}."},
-		{"plain.v2", "Set docker: true and a runtime on wall.images.plain.v2, or name another image in wall.prebuild_image.\n  A prebuild builds in the image's nested Docker. A runtime is such as sysbox-runc.\n  wall.prebuild_image is in {path}."},
+		{"go", "Set docker: true and a runtime on wall.images.go.\n  A prebuild builds in the image's nested Docker. A runtime is such as sysbox-runc.\n  Or name another image in wall.prebuild_image.\n  wall.prebuild_image is in {path}."},
+		{"plain.v2", "Set docker: true and a runtime on wall.images.plain.v2.\n  A prebuild builds in the image's nested Docker. A runtime is such as sysbox-runc.\n  Or name another image in wall.prebuild_image.\n  wall.prebuild_image is in {path}."},
 	} {
 		path := foragerFile(t, strings.Replace(imagesFile, "  image: go\n", "  image: go\n  prebuild_image: "+c.name+"\n", 1))
 		_, err := config.Load(t.TempDir(), true)

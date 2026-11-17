@@ -160,7 +160,7 @@ func readPrebuildImage(path, name string, images []ForagerImage) (string, error)
 	case i < 0:
 		return "", exports.Refuse("Set wall.prebuild_image to a name of wall.images.", "wall.images defines no image "+shown+".", "wall.prebuild_image is in "+path+".")
 	case !images[i].Docker:
-		return "", exports.Refuse(fmt.Sprintf("Set docker: true and a runtime on wall.images.%s, or name another image in wall.prebuild_image.", accesskey.ShownName(name, false)), "A prebuild builds in the image's nested Docker. A runtime is such as sysbox-runc.", "wall.prebuild_image is in "+path+".")
+		return "", exports.Refuse(fmt.Sprintf("Set docker: true and a runtime on wall.images.%s.", accesskey.ShownName(name, false)), "A prebuild builds in the image's nested Docker. A runtime is such as sysbox-runc.", "Or name another image in wall.prebuild_image.", "wall.prebuild_image is in "+path+".")
 	}
 	return name, nil
 }
