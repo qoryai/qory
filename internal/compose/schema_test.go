@@ -729,6 +729,14 @@ func TestQuestionsSchema(t *testing.T) {
 		{replace(`"follows": ["q1"]`, `"follows": ["q1", "q1"]`), false},
 		{replace(`"follows": ["q1"]`, `"follows": ["Q1"]`), false},
 		{replace(`"follows": ["q1"]`, `"follows": "q1"`), false},
+		// criterion
+		{replace(`"follows": ["q1"]`, `"follows": ["q1"], "criterion": "ac-3"`), true},
+		{replace(`"follows": ["q1"]`, `"follows": ["q1"], "criterion": "ac-9999"`), true},
+		{replace(`"follows": ["q1"]`, `"follows": ["q1"], "criterion": "AC-3"`), false},
+		{replace(`"follows": ["q1"]`, `"follows": ["q1"], "criterion": "ac-0"`), false},
+		{replace(`"follows": ["q1"]`, `"follows": ["q1"], "criterion": "ac-10000"`), false},
+		{replace(`"follows": ["q1"]`, `"follows": ["q1"], "criterion": "ac-03"`), false},
+		{replace(`"follows": ["q1"]`, `"follows": ["q1"], "criterion": 3`), false},
 		// history
 		{replace(`, "reopened": {"run": 2, "at": "2026-11-04T10:45:00Z"}`, ``), false},
 		{replace(`"reopened": {"run": 2, `, `"reopened": {"run": 0, `), false},
