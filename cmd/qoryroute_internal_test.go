@@ -31,9 +31,10 @@ func routeAsk(t *testing.T, q *qoryRoute, method, path string, sessions ...strin
 	return w.Code, w.Header().Get("Content-Type"), body.Error, body.Message
 }
 
-// TestTheRouteServesNoPath is a request of the session the route is open to: every path
-// and method gets 404 not_found.
-func TestTheRouteServesNoPath(t *testing.T) {
+// TestTheRouteOfARunWithNoWallServesNoPath is a request of the session the route is open to,
+// of a run whose route has no suites: every path and method gets 404 not_found, the suite
+// paths included.
+func TestTheRouteOfARunWithNoWallServesNoPath(t *testing.T) {
 	q := newQoryRoute()
 	done := q.open(1)
 	defer done()

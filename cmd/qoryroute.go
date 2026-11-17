@@ -27,17 +27,27 @@ const (
 // serves only the session that [qoryRoute.open] opened it to: a request of another
 // session gets 503, as the forwarder answers a request of a session that does not run, and
 // so does a request whose Qory-Session is missing or malformed, which Forager's forwarder
-// never sends. It serves no path, so every other request gets 404. Each answer it writes
-// is JSON, {"error":<code>,"message":<text>}, the form of the responses that Forager's
+// never sends. A walled run's route serves the suite paths, see [qoryRoute.useSuites]; every
+// other request gets 404, and so does each request of a run with no wall. Each answer it
+// writes is JSON, {"error":<code>,"message":<text>}, the form of the responses that Forager's
 // forwarder writes.
 type qoryRoute struct {
 	mu sync.Mutex
 	// session is the number of the session the route serves, 0 for none.
 	session int
+	// suites is the run's suites, nil for a run with no wall.
+	suites *suiteHost
 }
 
 // newQoryRoute is a run's route, open to no session.
 func newQoryRoute() *qoryRoute { return &qoryRoute{} }
+
+// useSuites makes the route serve the suite paths with host.
+func (q *qoryRoute) useSuites(host *suiteHost) {
+	q.mu.Lock()
+	q.suites = host
+	q.mu.Unlock()
+}
 
 // open opens the route to session n, whose join starts, and returns what closes it again
 // once the join returned.
@@ -58,7 +68,7 @@ func (q *qoryRoute) open(n int) (closeRoute func()) {
 func (q *qoryRoute) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	n, ok := sessionNumber(r.Header.Values(link.QorySessionHeader))
 	q.mu.Lock()
-	running := q.session
+	running, suites := q.session, q.suites
 	q.mu.Unlock()
 	if !ok {
 		routeAnswer(w, http.StatusServiceUnavailable, routeSessionNotRunning, textRouteNoNumber)
@@ -68,7 +78,11 @@ func (q *qoryRoute) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		routeAnswer(w, http.StatusServiceUnavailable, routeSessionNotRunning, fmt.Sprintf(textRouteNotRunning, n))
 		return
 	}
-	routeAnswer(w, http.StatusNotFound, routeNotFound, textRouteNotFound)
+	if suites == nil {
+		routeAnswer(w, http.StatusNotFound, routeNotFound, textRouteNotFound)
+		return
+	}
+	suites.serve(w, r)
 }
 
 // sessionNumber is the session number of a request's Qory-Session values: one value, a
