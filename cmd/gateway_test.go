@@ -19,6 +19,7 @@ import (
 	"syscall"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/qoryai/qory/cmd"
 )
@@ -125,7 +126,7 @@ func TestGatewayRefusesWhatItCannotServe(t *testing.T) {
 				return []string{"gateway"}
 			},
 			want: func() string {
-				return file() + ": gateway.listen is required to run the gateway as a service: the address the other machines reach, such as 0.0.0.0:8443; or --listen"
+				return "Set gateway.listen to the address that other machines reach, or pass --listen.\n  A gateway that runs as a service needs one, such as 0.0.0.0:8443.\n  The file is " + file() + "."
 			},
 		},
 		{
@@ -153,7 +154,7 @@ func TestGatewayRefusesWhatItCannotServe(t *testing.T) {
 				return []string{"gateway"}
 			},
 			want: func() string {
-				return file() + ": gateway.server is required to run the gateway as a service: it reports every run to Qory Apiary and takes the runs' policies from it"
+				return "Add gateway.server, the server that the gateway reports to.\n  A gateway that runs as a service reports every run to Qory Apiary and takes the runs' policies from it.\n  The file is " + file() + "."
 			},
 		},
 		{
@@ -628,5 +629,36 @@ func TestGatewayRefusesVia(t *testing.T) {
 	}
 	if relayed, targets := via.relayed(), srvTargets(srv); len(relayed) != 0 || len(targets) != 0 {
 		t.Errorf("a refused gateway sent %v through via, and the server got %v", relayed, targets)
+	}
+}
+
+// TestGatewayRefusalsOfAMissingListenAndServerStartWithTheFix is qory gateway with no
+// gateway.listen and with no gateway.server: line 1 is the fix, at most 86 characters so
+// that it fits in 100 with the prefix "qory gateway: ", and has no path in it, and a later
+// line has the file.
+func TestGatewayRefusalsOfAMissingListenAndServerStartWithTheFix(t *testing.T) {
+	for name, setup := range map[string]func(t *testing.T){
+		"no listen": func(t *testing.T) { serverFile(t, newFakeServer(t, ""), "") },
+		"no server": func(t *testing.T) {
+			writeFile(t, foragerFile(), "apiVersion: qory.dev/v1alpha1\ngateway:\n  listen: 127.0.0.1:0\n")
+		},
+	} {
+		emptyDir(t)
+		setup(t)
+		_, err := run(t, "gateway")
+		if err == nil || cmd.ExitCode(err) != cmd.ExitInput {
+			t.Errorf("%s: %v, want an input error", name, err)
+			continue
+		}
+		first := strings.SplitN(err.Error(), "\n", 2)[0]
+		if n := utf8.RuneCountInString(first); n > 86 {
+			t.Errorf("%s: line 1 has %d characters: %s", name, n, first)
+		}
+		if strings.Contains(first, foragerFile()) || strings.Contains(first, ": ") {
+			t.Errorf("%s: line 1 is not the fix alone: %s", name, first)
+		}
+		if !strings.Contains(err.Error(), "\n  The file is ") {
+			t.Errorf("%s: no later line has the file: %v", name, err)
+		}
 	}
 }

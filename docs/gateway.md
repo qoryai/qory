@@ -197,13 +197,15 @@ It refuses to start, before it listens:
 - `~/.config/qory/forager.yaml has no gateway section, so there is no gateway to run`
 - `<file>: gateway.server.via does nothing for qory gateway: a gateway reaches the server
   directly; remove gateway.server.via`
-- `<file>: gateway.listen is required to run the gateway as a service: the address the
-  other machines reach, such as 0.0.0.0:8443; or --listen`
+- `Set gateway.listen to the address that other machines reach, or pass --listen.`, then
+  `A gateway that runs as a service needs one, such as 0.0.0.0:8443.` and `The file is
+  <file>.`
 - `Set gateway.listen to host:port, such as 0.0.0.0:8443.`, then `The value is not
   host:port.` and `gateway.listen is in <file>.`, and for `--listen`,
   `--listen "<v>" is not host:port, such as 0.0.0.0:8443`
-- `<file>: gateway.server is required to run the gateway as a service: it reports every
-  run to Qory Apiary and takes the runs' policies from it`
+- `Add gateway.server, the server that the gateway reports to.`, then `A gateway that runs
+  as a service reports every run to Qory Apiary and takes the runs' policies from it.`
+  and `The file is <file>.`
 - `gateway.tls is required with gateway.listen: a gateway serves other machines`
 
 An address it cannot listen on is `listen on <addr>: <err>`.

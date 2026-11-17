@@ -102,10 +102,12 @@ More: ` + gatewayDocs,
 				addr = listen
 			}
 			if addr == "" {
-				return input(fmt.Errorf("%s: gateway.listen is required to run the gateway as a service: the address the other machines reach, such as 0.0.0.0:8443; or --listen", r.File))
+				return input(exports.Refuse("Set gateway.listen to the address that other machines reach, or pass --listen.",
+					"A gateway that runs as a service needs one, such as 0.0.0.0:8443.", "The file is "+exports.HidePath(r.File)+"."))
 			}
 			if r.Server == nil {
-				return input(fmt.Errorf("%s: gateway.server is required to run the gateway as a service: it reports every run to Qory Apiary and takes the runs' policies from it", r.File))
+				return input(exports.Refuse("Add gateway.server, the server that the gateway reports to.",
+					"A gateway that runs as a service reports every run to Qory Apiary and takes the runs' policies from it.", "The file is "+exports.HidePath(r.File)+"."))
 			}
 			if r.TLS == nil {
 				return input(errors.New("gateway.tls is required with gateway.listen: a gateway serves other machines"))
