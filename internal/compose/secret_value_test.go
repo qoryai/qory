@@ -114,10 +114,10 @@ func TestAComposeRefusalPrintsNoSecretName(t *testing.T) {
 	}
 }
 
-// TestTheModuleNameRefusalNamesTheFileThatDeclaresTheModule is a module whose manifest has
+// TestTheModuleNameRefusalContainsTheFileThatDeclaresTheModule is a module whose manifest has
 // another name than the one listed, listed in the harness section of qory.yaml: line 1
 // contains qory.yaml, not qory-stack.yaml.
-func TestTheModuleNameRefusalNamesTheFileThatDeclaresTheModule(t *testing.T) {
+func TestTheModuleNameRefusalContainsTheFileThatDeclaresTheModule(t *testing.T) {
 	isolateAll(t)
 	dir := writeTree(t, map[string]string{
 		"base/" + stack.FileName:          "apiVersion: qory.dev/v1alpha1\nname: core\nextending:\n  kinds: [commands]\nmodules:\n  - name: a\n    source:\n      path: modules/a\n",
