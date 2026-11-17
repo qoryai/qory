@@ -201,7 +201,7 @@ func TestBrokenDocumentsAreRefused(t *testing.T) {
 			s["model"] = "example-small"
 			s["tiers"] = map[string]any{"light": "example-small"}
 		}), broken},
-		{"a tier's model not listed", withSettings(func(d map[string]any) { settings(d)["tiers"].(map[string]any)["fast"] = "example-tiny" }), broken},
+		{"a tier's model not listed", withSettings(func(d map[string]any) { settings(d)["tiers"].(map[string]any)["balanced"] = "example-tiny" }), broken},
 		{"a tier's effort not listed", withSettings(func(d map[string]any) {
 			settings(d)["tiers"].(map[string]any)["thinking"] = map[string]any{"model": "example-large", "effort": "huge"}
 		}), broken},
