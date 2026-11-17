@@ -14,7 +14,7 @@ import (
 )
 
 // relativeLine is the refusal of a relative XDG_CONFIG_HOME.
-const relativeLine = "qory: XDG_CONFIG_HOME is not an absolute path; qory reads its configuration only from an absolute one, so that it does not change with the working folder"
+const relativeLine = "Set XDG_CONFIG_HOME to an absolute path.\n  qory reads its configuration only from an absolute path, so that it does not change with the working folder."
 
 // filesUnder lists the paths under dir, relative to it, with each file's content.
 func filesUnder(t *testing.T, dir string) []string {

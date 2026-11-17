@@ -3,6 +3,7 @@ package config_test
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/qoryai/qory/internal/config"
@@ -10,7 +11,7 @@ import (
 
 // moreThanOne is the refusal of a forager.yaml with a second YAML document, after the
 // file.
-const moreThanOne = ": holds more than one YAML document; forager.yaml is one document, and qory would read only the first"
+const moreThanOne = "Keep one YAML document in forager.yaml.\n  The file contains more than one, and qory would read only the first.\n  The file is {path}."
 
 // TestAForagerFileIsOneDocument is forager.yaml with --- at its start, at its end and in
 // its middle. A --- that starts the one document, and a ... that ends it, read; a second
@@ -58,14 +59,14 @@ func TestAForagerFileIsOneDocument(t *testing.T) {
 		instance + "---\n: [\n",
 	} {
 		path := foragerFile(t, body)
-		if _, err := config.LoadForager(); err == nil || err.Error() != path+moreThanOne {
-			t.Errorf("%q: %v, want %q", body, err, path+moreThanOne)
+		if _, err := config.LoadForager(); err == nil || err.Error() != strings.ReplaceAll(moreThanOne, "{path}", path) {
+			t.Errorf("%q: %v, want %q", body, err, strings.ReplaceAll(moreThanOne, "{path}", path))
 		}
-		if _, err := config.LoadForagerInstance(); err == nil || err.Error() != path+moreThanOne {
-			t.Errorf("%q: the instance alone: %v, want %q", body, err, path+moreThanOne)
+		if _, err := config.LoadForagerInstance(); err == nil || err.Error() != strings.ReplaceAll(moreThanOne, "{path}", path) {
+			t.Errorf("%q: the instance alone: %v, want %q", body, err, strings.ReplaceAll(moreThanOne, "{path}", path))
 		}
-		if _, err := config.Load(t.TempDir(), true); err == nil || err.Error() != path+moreThanOne {
-			t.Errorf("%q: the configuration: %v, want %q", body, err, path+moreThanOne)
+		if _, err := config.Load(t.TempDir(), true); err == nil || err.Error() != strings.ReplaceAll(moreThanOne, "{path}", path) {
+			t.Errorf("%q: the configuration: %v, want %q", body, err, strings.ReplaceAll(moreThanOne, "{path}", path))
 		}
 	}
 }
@@ -79,8 +80,8 @@ func TestWriteEnrolmentRefusesASecondDocument(t *testing.T) {
 	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := config.WriteEnrolment(path, enrolment); err == nil || err.Error() != path+moreThanOne {
-		t.Errorf("%v, want %q", err, path+moreThanOne)
+	if err := config.WriteEnrolment(path, enrolment); err == nil || err.Error() != strings.ReplaceAll(moreThanOne, "{path}", path) {
+		t.Errorf("%v, want %q", err, strings.ReplaceAll(moreThanOne, "{path}", path))
 	}
 	if b, err := os.ReadFile(path); err != nil || string(b) != body {
 		t.Errorf("the file holds %q, %v; want it as it was", b, err)

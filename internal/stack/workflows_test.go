@@ -113,7 +113,7 @@ func TestLoadRefusesABrokenWorkflow(t *testing.T) {
 			"  The levels are read, write-no-push, and write.\n  The value is \"Write\".\n" +
 			"  workflows.hello is in {path}."},
 		{"  hello:\n    access: write\n    time_limit: 0s\n", "Set workflows.hello.time_limit to a duration above zero"},
-		{"  hello:\n    prompt: x\n", `key "prompt" is not one qory-stack.yaml reads`},
+		{"  hello:\n    prompt: x\n", `Key "prompt" is not one qory-stack.yaml reads.`},
 	} {
 		path := write(t, withWorkflows(c.body))
 		_, err := Load(path)

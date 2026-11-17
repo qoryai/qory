@@ -11,47 +11,8 @@ import (
 	"github.com/qoryai/forager/session"
 
 	"github.com/qoryai/qory/cmd"
+	"github.com/qoryai/qory/internal/testenv"
 )
-
-// fixedEnvironment is every environment variable that the cmd tests start with, as set
-// in the process that starts them. [startFromFixedEnvironment] removes each variable that
-// is not listed, so a token in a developer's shell reaches no session spec and no test
-// output. GOWORK, GOPROXY and GOENV are not listed on purpose: the tests build against
-// go.mod alone, with no workspace file and no private proxy.
-var fixedEnvironment = []string{
-	// The programs the tests start (git, sh, the fake runtimes) are looked up in PATH.
-	"PATH",
-	// HOME and TMPDIR are the paths that git and the temporary directories start from,
-	// before emptyDir and t.TempDir set other paths.
-	"HOME", "TMPDIR",
-	// LANG and TERM select the language of git's messages and the result of the terminal
-	// checks, as in the developer's shell.
-	"LANG", "TERM",
-	// GOCOVERDIR is where a test binary built with -cover writes its coverage data.
-	"GOCOVERDIR",
-	// QORY_TEST_DOCKER=1 switches on the tests that start containers, and
-	// QORY_WALL_HELPER is the path of the Linux build of qory that TestRunBehindARealWall
-	// mounts. Without them those tests skip.
-	"QORY_TEST_DOCKER", "QORY_WALL_HELPER",
-	// The docker command reads the address of its engine and its configuration from these.
-	"DOCKER_HOST", "DOCKER_CONTEXT", "DOCKER_CONFIG",
-	// The go build in realWallImage reads the location of the toolchain, its caches and its
-	// settings from these; the default under HOME no longer applies once emptyDir has moved
-	// HOME.
-	"GOROOT", "GOPATH", "GOCACHE", "GOMODCACHE", "GOFLAGS", "GOTOOLCHAIN",
-}
-
-// startFromFixedEnvironment removes every variable of the process's environment that
-// [fixedEnvironment] does not list, so a session spec that qory run builds from the
-// process's environment (SessionSpec.Env) contains only those and the variables a test sets.
-func startFromFixedEnvironment() {
-	for _, kv := range os.Environ() {
-		name, _, _ := strings.Cut(kv, "=")
-		if !slices.Contains(fixedEnvironment, name) {
-			os.Unsetenv(name)
-		}
-	}
-}
 
 // sessionEnvChild is the argument that makes a test of this file run as the checked
 // process instead of starting it.
@@ -80,9 +41,9 @@ const valueFromTheParent = "value-from-the-parent"
 // TestNoParentTokenReachesASessionSpec starts this test binary with GITHUB_TOKEN,
 // ANTHROPIC_API_KEY and EXAMPLE_SETTING set to [valueFromTheParent], runs qory run claude
 // in that process and checks that neither an entry of the session spec nor the output of
-// qory run contains the value. The check fails when [startFromFixedEnvironment] is not
-// called, lists the name of one of the variables, or removes only the names that look
-// like a token.
+// qory run contains the value. The check fails when [testenv.StartFromFixedEnvironment]
+// is not called, lists the name of one of the variables, or removes only the names that
+// look like a token.
 func TestNoParentTokenReachesASessionSpec(t *testing.T) {
 	if !inSessionEnvChild() {
 		startWithEnvironment(t, "TestNoParentTokenReachesASessionSpec", "PATH="+os.Getenv("PATH"),
@@ -121,11 +82,11 @@ func TestNoParentTokenReachesASessionSpec(t *testing.T) {
 // with a token, QORY_TEST_DOCKER and GOCACHE in its environment, and in that process
 // checks that the tests start with the switch and the path and without the token, so an
 // opt-in test is not skipped for want of its switch. It also checks that no name in
-// [fixedEnvironment] contains a word that marks a credential.
+// [testenv.FixedEnvironment] contains a word that marks a credential.
 func TestTheTestsStartWithTheSwitchesAndPathsTheyRead(t *testing.T) {
 	const test = "TestTheTestsStartWithTheSwitchesAndPathsTheyRead"
 	if !inSessionEnvChild() {
-		for _, name := range fixedEnvironment {
+		for _, name := range testenv.FixedEnvironment {
 			for _, part := range []string{"TOKEN", "KEY", "SECRET", "PASS", "AUTH", "COOKIE", "CREDENTIAL"} {
 				if strings.Contains(name, part) {
 					t.Errorf("%s in the fixed environment contains %s, so its value may be a credential", name, part)
@@ -139,6 +100,25 @@ func TestTheTestsStartWithTheSwitchesAndPathsTheyRead(t *testing.T) {
 	for name, want := range map[string]string{"QORY_TEST_DOCKER": "1", "GOCACHE": "/cache/example", "GITHUB_TOKEN": ""} {
 		if got := os.Getenv(name); got != want {
 			t.Errorf("%s is %q at the start of the tests, want %q", name, got, want)
+		}
+	}
+}
+
+// TestTheMarkerOfTheRealPushTestKeepsTheFixedEnvironment starts this test binary with the
+// marker of TestForagerRunKeepsThePushCredentialOnThePushProxyAlone, SSL_CERT_FILE and a token in its
+// environment, as a developer's shell could set them, and without that test's argument:
+// the tests then start from the fixed environment, with neither the marker, nor the
+// certificate file nor the token.
+func TestTheMarkerOfTheRealPushTestKeepsTheFixedEnvironment(t *testing.T) {
+	const test = "TestTheMarkerOfTheRealPushTestKeepsTheFixedEnvironment"
+	if !inSessionEnvChild() {
+		startWithEnvironment(t, test, "PATH="+os.Getenv("PATH"), "QORY_TEST_REAL_PUSH=/example",
+			"SSL_CERT_FILE=/example/ca.pem", "GITHUB_TOKEN="+valueFromTheParent)
+		return
+	}
+	for _, name := range []string{"QORY_TEST_REAL_PUSH", "SSL_CERT_FILE", "GITHUB_TOKEN"} {
+		if got := os.Getenv(name); got != "" {
+			t.Errorf("%s is set at the start of the tests", name)
 		}
 	}
 }

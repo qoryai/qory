@@ -74,7 +74,7 @@ func TestLoadRefusesABrokenHookPoint(t *testing.T) {
 		}
 	}
 	_, err := Load(write(t, valid+"hooks:\n  - {at: after-plan, kind: check, run: x.sh}\n"))
-	if err == nil || !strings.Contains(err.Error(), `key "hooks" is not one qory-stack.yaml reads`) {
+	if err == nil || !strings.Contains(err.Error(), `Key "hooks" is not one qory-stack.yaml reads.`) {
 		t.Errorf("hooks in a stack file: %v", err)
 	}
 	p, err := Load(write(t, valid+"extending:\n  hooks: {timeout: 1m30s}\n"))

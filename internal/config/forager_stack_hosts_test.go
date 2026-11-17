@@ -97,7 +97,7 @@ func TestForagerTakesTheStackHostsForagerTakes(t *testing.T) {
 	for _, c := range stackHostCases {
 		path := foragerFile(t, "gateway:\n  stack_hosts: [a.example, "+strconv.Quote(c.host)+"]\n")
 		r, err := config.LoadForager()
-		want := path + ": " + stackHostFix(1)
+		want := stackHostFix(1, "The file is "+path+".")
 		switch {
 		case c.ok && err != nil:
 			t.Errorf("%q: %v, want it read", c.host, err)
@@ -131,16 +131,16 @@ func startStopsOnStackHost(t *testing.T, host string) bool {
 func TestForagerStopsOnAStackHostThatIsNoString(t *testing.T) {
 	hermetic(t)
 	for _, c := range []struct{ body, want string }{
-		{"gateway:\n  stack_hosts: git.example.com\n", ": line 2: gateway.stack_hosts is not a list of strings"},
-		{"gateway:\n  stack_hosts: {git.example.com: 443}\n", ": line 2: gateway.stack_hosts is not a list of strings"},
-		{"gateway:\n  stack_hosts: [a.example, 443]\n", ": line 2: " + stackHostFix(1)},
-		{"gateway:\n  stack_hosts:\n    - a.example\n    - [" + marker + "]\n", ": line 4: " + stackHostFix(1)},
-		{"gateway:\n  stack_hosts: [null]\n", ": line 2: " + stackHostFix(0)},
+		{"gateway:\n  stack_hosts: git.example.com\n", "Set gateway.stack_hosts to a list of strings.\n  gateway.stack_hosts is not a list of strings.\n  It is at line 2 of {path}."},
+		{"gateway:\n  stack_hosts: {git.example.com: 443}\n", "Set gateway.stack_hosts to a list of strings.\n  gateway.stack_hosts is not a list of strings.\n  It is at line 2 of {path}."},
+		{"gateway:\n  stack_hosts: [a.example, 443]\n", stackHostFix(1, "It is at line 2 of {path}.")},
+		{"gateway:\n  stack_hosts:\n    - a.example\n    - [" + marker + "]\n", stackHostFix(1, "It is at line 4 of {path}.")},
+		{"gateway:\n  stack_hosts: [null]\n", stackHostFix(0, "It is at line 2 of {path}.")},
 	} {
 		path := foragerFile(t, c.body)
 		_, err := config.LoadForager()
-		if err == nil || err.Error() != path+c.want {
-			t.Errorf("%q: %v, want %q", c.body, err, path+c.want)
+		if err == nil || err.Error() != strings.ReplaceAll(c.want, "{path}", path) {
+			t.Errorf("%q: %v, want %q", c.body, err, strings.ReplaceAll(c.want, "{path}", path))
 		}
 		if err != nil && strings.Contains(err.Error(), marker) {
 			t.Errorf("%q: the error contains the value: %v", c.body, err)
@@ -156,7 +156,7 @@ func TestAStackHostErrorPrintsNoValue(t *testing.T) {
 	for _, host := range []string{"https://oauth2:" + marker + "@git.example.com", "git.example.com/" + secret} {
 		path := foragerFile(t, "gateway:\n  stack_hosts: ["+strconv.Quote(host)+"]\n")
 		_, err := config.LoadForager()
-		want := path + ": " + stackHostFix(0)
+		want := stackHostFix(0, "The file is "+path+".")
 		if err == nil || err.Error() != want {
 			t.Errorf("%q: %v, want %q", host, err, want)
 		}
@@ -166,10 +166,10 @@ func TestAStackHostErrorPrintsNoValue(t *testing.T) {
 	}
 }
 
-// stackHostFix is the fix of an entry of gateway.stack_hosts that the reader does not
-// take, by its index i.
-func stackHostFix(i int) string {
-	return "set gateway.stack_hosts[" + strconv.Itoa(i) + "] to a lower-case host name, an IPv4 address or a *. suffix, such as git.example.com; no port, path or scheme"
+// stackHostFix is the refusal of an entry of gateway.stack_hosts that the reader does not
+// take, by its index i, ending in where.
+func stackHostFix(i int, where string) string {
+	return "Set gateway.stack_hosts[" + strconv.Itoa(i) + "] to a lower-case host name, an IPv4 address, or a *. suffix.\n  An entry is a host such as git.example.com, with no port, path, or scheme.\n  " + where
 }
 
 // TestTheForagerSchemaTakesTheStackHostsTheReaderTakes checks that forager.schema.json

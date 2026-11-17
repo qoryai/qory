@@ -19,6 +19,7 @@ import (
 	"syscall"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/qoryai/qory/cmd"
 )
@@ -105,7 +106,7 @@ func TestGatewayRefusesWhatItCannotServe(t *testing.T) {
 			name:  "no forager.yaml",
 			setup: func(*testing.T) []string { return []string{"gateway"} },
 			want: func() string {
-				return "~/.config/qory/forager.yaml has no gateway section, so there is no gateway to run; see https://github.com/qoryai/qory/blob/main/docs/gateway.md"
+				return "Add a gateway section to forager.yaml.\n  There is no gateway to run without one; see https://github.com/qoryai/qory/blob/main/docs/gateway.md.\n  The file is ~/.config/qory/forager.yaml."
 			},
 		},
 		{
@@ -115,7 +116,7 @@ func TestGatewayRefusesWhatItCannotServe(t *testing.T) {
 				return []string{"gateway", "--listen", "127.0.0.1:0"}
 			},
 			want: func() string {
-				return "~/.config/qory/forager.yaml has no gateway section, so there is no gateway to run; see https://github.com/qoryai/qory/blob/main/docs/gateway.md"
+				return "Add a gateway section to forager.yaml.\n  There is no gateway to run without one; see https://github.com/qoryai/qory/blob/main/docs/gateway.md.\n  The file is ~/.config/qory/forager.yaml."
 			},
 		},
 		{
@@ -125,7 +126,7 @@ func TestGatewayRefusesWhatItCannotServe(t *testing.T) {
 				return []string{"gateway"}
 			},
 			want: func() string {
-				return file() + ": gateway.listen is required to run the gateway as a service: the address the other machines reach, such as 0.0.0.0:8443; or --listen"
+				return "Set gateway.listen to the address that other machines reach, or pass --listen.\n  A gateway that runs as a service needs one, such as 0.0.0.0:8443.\n  The file is " + file() + "."
 			},
 		},
 		{
@@ -135,7 +136,7 @@ func TestGatewayRefusesWhatItCannotServe(t *testing.T) {
 				return []string{"gateway"}
 			},
 			want: func() string {
-				return file() + `: gateway.listen is not host:port, such as 0.0.0.0:8443`
+				return "Set gateway.listen to host:port, such as 0.0.0.0:8443.\n  The value is not host:port.\n  gateway.listen is in " + file() + "."
 			},
 		},
 		{
@@ -144,7 +145,9 @@ func TestGatewayRefusesWhatItCannotServe(t *testing.T) {
 				serverFile(t, newFakeServer(t, ""), "  listen: 127.0.0.1:0\n")
 				return []string{"gateway", "--listen", "127.0.0.1"}
 			},
-			want: func() string { return `--listen "127.0.0.1" is not host:port, such as 0.0.0.0:8443` },
+			want: func() string {
+				return "Pass --listen as host:port, such as 0.0.0.0:8443.\n  --listen is \"127.0.0.1\", which is not host:port."
+			},
 		},
 		{
 			name: "no server",
@@ -153,7 +156,7 @@ func TestGatewayRefusesWhatItCannotServe(t *testing.T) {
 				return []string{"gateway"}
 			},
 			want: func() string {
-				return file() + ": gateway.server is required to run the gateway as a service: it reports every run to Qory Apiary and takes the runs' policies from it"
+				return "Add gateway.server, the server that the gateway reports to.\n  A gateway that runs as a service reports every run to Qory Apiary and takes the runs' policies from it.\n  The file is " + file() + "."
 			},
 		},
 		{
@@ -162,7 +165,9 @@ func TestGatewayRefusesWhatItCannotServe(t *testing.T) {
 				serverFile(t, newFakeServer(t, ""), "  listen: 0.0.0.0:8443\n")
 				return []string{"gateway"}
 			},
-			want: func() string { return "gateway.tls is required with gateway.listen: a gateway serves other machines" },
+			want: func() string {
+				return "Add gateway.tls to forager.yaml.\n  A gateway serves other machines, so it needs gateway.tls.\n  The file is " + file() + "."
+			},
 		},
 		{
 			name: "no tls on loopback",
@@ -170,7 +175,9 @@ func TestGatewayRefusesWhatItCannotServe(t *testing.T) {
 				serverFile(t, newGatewayServer(t), "  listen: 127.0.0.1:0\n")
 				return []string{"gateway"}
 			},
-			want: func() string { return "gateway.tls is required with gateway.listen: a gateway serves other machines" },
+			want: func() string {
+				return "Add gateway.tls to forager.yaml.\n  A gateway serves other machines, so it needs gateway.tls.\n  The file is " + file() + "."
+			},
 		},
 		{
 			name: "no tls off loopback, by --listen",
@@ -178,7 +185,9 @@ func TestGatewayRefusesWhatItCannotServe(t *testing.T) {
 				serverFile(t, newFakeServer(t, ""), "  listen: 127.0.0.1:0\n")
 				return []string{"gateway", "--listen", ":8443"}
 			},
-			want: func() string { return "gateway.tls is required with gateway.listen: a gateway serves other machines" },
+			want: func() string {
+				return "Add gateway.tls to forager.yaml.\n  A gateway serves other machines, so it needs gateway.tls.\n  The file is " + file() + "."
+			},
 		},
 	}
 	for _, c := range cases {
@@ -411,7 +420,7 @@ func TestGatewayRefusesRunCredentials(t *testing.T) {
 	emptyDir(t)
 	serverFile(t, newFakeServer(t, ""), "  listen: 127.0.0.1:0\n  run_credentials:\n    - issuer: https://issuer.example\n")
 	_, err := run(t, "gateway")
-	if want := foragerFile() + `: line 8: key "run_credentials" is not one forager.yaml reads`; err == nil || err.Error() != want {
+	if want := "Remove the key, or rename it to one forager.yaml reads.\n  Key \"run_credentials\" is not one forager.yaml reads.\n  It is at line 8 of " + foragerFile() + "."; err == nil || err.Error() != want {
 		t.Errorf("error %v, want %q", err, want)
 	}
 	if code := cmd.ExitCode(err); code != cmd.ExitInput {
@@ -425,7 +434,7 @@ func TestGatewayRefusesRunCredentials(t *testing.T) {
 func TestCommandsStopOnGatewaySelects(t *testing.T) {
 	emptyDir(t)
 	serverFile(t, newFakeServer(t, ""), "  listen: 127.0.0.1:0\n  selects:\n    credentials:\n      - {name: secret-name-value, argument_label: secret-label-value, forge: github.com}\n")
-	want := "remove gateway.selects from " + foragerFile() + ": a run's policy selects its credentials"
+	want := "Remove gateway.selects.\n  A run's policy selects its credentials.\n  gateway.selects is in " + foragerFile() + "."
 	for _, args := range [][]string{{"gateway"}, {"run"}, {"run", "--local"}, {"config"}} {
 		out, err := run(t, args...)
 		if err == nil || err.Error() != want {
@@ -628,5 +637,47 @@ func TestGatewayRefusesVia(t *testing.T) {
 	}
 	if relayed, targets := via.relayed(), srvTargets(srv); len(relayed) != 0 || len(targets) != 0 {
 		t.Errorf("a refused gateway sent %v through via, and the server got %v", relayed, targets)
+	}
+}
+
+// TestGatewayRefusalsOfTheStartStartWithTheFix is qory gateway with no gateway section,
+// no gateway.listen, no gateway.server, no gateway.tls, and a --listen that is not
+// host:port: line 1 is the fix, at most 86 characters so that it fits in 100 with the
+// prefix "qory gateway: ", with no path and no cause in it, and a later line has the file,
+// except for --listen, which has no file.
+func TestGatewayRefusalsOfTheStartStartWithTheFix(t *testing.T) {
+	for _, c := range []struct {
+		name  string
+		setup func(t *testing.T)
+		args  []string
+		file  bool
+	}{
+		{"no gateway section", func(t *testing.T) {
+			writeFile(t, foragerFile(), "apiVersion: qory.dev/v1alpha1\nsession:\n  instance:\n    name: build-01\n")
+		}, nil, true},
+		{"no listen", func(t *testing.T) { serverFile(t, newFakeServer(t, ""), "") }, nil, true},
+		{"no server", func(t *testing.T) {
+			writeFile(t, foragerFile(), "apiVersion: qory.dev/v1alpha1\ngateway:\n  listen: 127.0.0.1:0\n")
+		}, nil, true},
+		{"no tls", func(t *testing.T) { serverFile(t, newFakeServer(t, ""), "  listen: 0.0.0.0:8443\n") }, nil, true},
+		{"a --listen that is not host:port", func(t *testing.T) { serverFile(t, newFakeServer(t, ""), "  listen: 127.0.0.1:0\n") }, []string{"--listen", "127.0.0.1"}, false},
+	} {
+		emptyDir(t)
+		c.setup(t)
+		_, err := run(t, append([]string{"gateway"}, c.args...)...)
+		if err == nil || cmd.ExitCode(err) != cmd.ExitInput {
+			t.Errorf("%s: %v, want an input error", c.name, err)
+			continue
+		}
+		first := strings.SplitN(err.Error(), "\n", 2)[0]
+		if n := utf8.RuneCountInString(first); n > 86 {
+			t.Errorf("%s: line 1 has %d characters: %s", c.name, n, first)
+		}
+		if strings.Contains(first, foragerFile()) || strings.Contains(first, "~/") || strings.Contains(first, " is required") || strings.Contains(first, "has no gateway") {
+			t.Errorf("%s: line 1 is not the fix alone: %s", c.name, first)
+		}
+		if c.file && !strings.Contains(err.Error(), "\n  The file is ") {
+			t.Errorf("%s: no later line has the file: %v", c.name, err)
+		}
 	}
 }

@@ -1302,7 +1302,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			// The step runs under [pushContext], since a stop has ended ctx or spent the time
 			// limit. A failed step changes the close only of a session that succeeded. The stop
 			// of a walled agent is proven: the join removes its container, and when it could
-			// not, [openedRun.RemoveSetup] and the step's [openedRun.HostProxy] fail, so the step
+			// not, [openedRun.RemoveSetup] and the step's [openedRun.PushProxy] fail, so the step
 			// runs no git. An unwalled agent's process leaves no proof that it stopped.
 			//
 			// A walled write run with no run code works in a copy, and the git session commits
@@ -1530,13 +1530,14 @@ func machineCredentials(ctx context.Context, r *config.Forager, e config.Expansi
 		def := gateway.Credential{Name: c.Name, Env: c.Env, File: c.File, Adapter: c.Adapter, Argument: c.Argument, Hosts: c.Hosts, Scheme: c.Scheme, Username: c.Username, Header: c.Header, Paths: c.Paths, Placeholders: c.Placeholders,
 			Format: c.Format, Endpoint: c.Endpoint, OAuth: c.OAuth, KeyPrefixes: c.KeyPrefixes}
 		if err := def.Check(); err != nil {
-			return nil, input(foragerRefusal(c.Name, err))
+			return nil, input(foragerRefusal("credential", c.Name, err))
 		}
 		if c.Integration == "" && len(c.Adapter) > 0 {
 			// The gateway runs the adapter by the path checked here.
 			found, err := config.Program(c.Adapter[0], e.Workspace, "an adapter")
 			if err != nil {
-				return nil, input(fmt.Errorf("%s: gateway.credentials.%s.adapter: %w", config.ForagerFileName, accesskey.ShownName(c.Name, false), exports.HideValueError(err, c.Adapter[0])))
+				at := "gateway.credentials." + accesskey.ShownName(c.Name, false)
+				return nil, input(refuseProgram("Fix the adapter of "+at+".", at+".adapter", config.ForagerFileName, exports.HideValueError(err, c.Adapter[0])))
 			}
 			def.Adapter = append([]string{found}, c.Adapter[1:]...)
 		}
@@ -1552,14 +1553,15 @@ func gatewayRunLimits(r *config.Forager) gateway.RunLimits {
 }
 
 // foragerRefusal is err, Forager's refusal of the definition of the credential or the
-// tool name, after forager.yaml's name. When name contains an access key secret or a
-// run key, each word of err that contains name prints as [accesskey.ShownName] prints
-// it.
-func foragerRefusal(name string, err error) error {
+// tool name, as a refusal of forager.yaml: the fix, Forager's text, and the place. kind
+// is "credential" or "tool". When name contains an access key secret or a run key, each
+// word of err that contains name prints as [accesskey.ShownName] prints it.
+func foragerRefusal(kind, name string, err error) error {
+	at := kind + " " + accesskey.ShownName(name, false)
 	if accesskey.ContainsSecret(name) {
-		return fmt.Errorf("%s: %s", config.ForagerFileName, exports.HideName(err.Error(), name))
+		err = errors.New(exports.HideName(err.Error(), name))
 	}
-	return fmt.Errorf("%s: %w", config.ForagerFileName, err)
+	return refuseProgram("Fix the "+at+" in "+config.ForagerFileName+".", at, config.ForagerFileName, err)
 }
 
 // machineTools returns the tools forager.yaml defines, the machine's gateway's, each one
@@ -1572,13 +1574,14 @@ func machineTools(r *config.Forager, workspace []string) ([]gateway.Tool, error)
 	for _, t := range r.Tools {
 		def := gateway.Tool{Name: t.Name, Command: t.Command, Argument: t.Argument, Serves: t.Serves, Placeholders: t.Placeholders}
 		if err := def.Check(); err != nil {
-			return nil, input(foragerRefusal(t.Name, err))
+			return nil, input(foragerRefusal("tool", t.Name, err))
 		}
 		if len(t.Command) > 0 {
 			// The gateway runs the tool by the path checked here.
 			found, err := config.Program(t.Command[0], workspace, "a tool")
 			if err != nil {
-				return nil, input(fmt.Errorf("%s: gateway.tools.%s.command: %w", config.ForagerFileName, accesskey.ShownName(t.Name, false), exports.HideValueError(err, t.Command[0])))
+				at := "gateway.tools." + accesskey.ShownName(t.Name, false)
+				return nil, input(refuseProgram("Fix the command of "+at+".", at+".command", config.ForagerFileName, exports.HideValueError(err, t.Command[0])))
 			}
 			def.Command = append([]string{found}, t.Command[1:]...)
 		}
@@ -1641,9 +1644,15 @@ type openedRun interface {
 	// StartStep starts a step of the run's host work, of kind fetch, compose, push, machine
 	// or copy.
 	StartStep(kind, name string) (hostStep, error)
-	// HostProxy starts the run's host proxy, for the fetch and the push of the run's
-	// repositories on this machine.
+	// HostProxy starts the run's host proxy, for the fetch of the run's repositories on
+	// this machine, the runtime's install, and a prebuild. It sets no push credential.
 	HostProxy() (hostProxy, error)
+	// PushProxy starts the run's push proxy, for the push step's git push. It sets the
+	// run configuration's push credentials alone. It returns an error while a session or a
+	// setup container runs and for a run with no push credential; see
+	// [session.Run.PushProxy]. It ends at the next Join, so the caller starts it at the
+	// push and never holds it across a Join.
+	PushProxy() (hostProxy, error)
 	// StackProxy starts the run's stack proxy, for the fetch of the run's harness on this
 	// machine, before the run's first Join.
 	StackProxy() (hostProxy, error)
@@ -1694,6 +1703,16 @@ func (r foragerRun) StartStep(kind, name string) (hostStep, error) {
 // HostProxy is [session.Run.HostProxy]: its ProxyURL and CABundle, and its Close.
 func (r foragerRun) HostProxy() (hostProxy, error) {
 	h, err := r.Run.HostProxy()
+	if err != nil {
+		return hostProxy{}, err
+	}
+	return hostProxy{proxy: proxygit.Proxy{URL: h.ProxyURL, CABundle: h.CABundle}, close: h.Close}, nil
+}
+
+// PushProxy is [session.Run.PushProxy]: its ProxyURL and CABundle, and its Close, as for
+// [foragerRun.HostProxy].
+func (r foragerRun) PushProxy() (hostProxy, error) {
+	h, err := r.Run.PushProxy()
 	if err != nil {
 		return hostProxy{}, err
 	}
@@ -2270,10 +2289,10 @@ func enclose(spec *runSpec, r *config.Forager, o wallOptions, selected string, f
 	for _, v := range o.mounts {
 		m, err := config.ParseMount(v)
 		if err != nil {
-			return input(fmt.Errorf("--mount: %w", exports.HideValueError(err, v)))
+			return input(refuseFlag("--mount", exports.HideValueError(err, v)))
 		}
 		if _, err := os.Stat(m.Path); err != nil {
-			return input(fmt.Errorf("--mount: %w", exports.HideError(err)))
+			return input(exports.Refuse("Check the path of --mount.", strings.TrimSuffix(exports.HideError(err).Error(), ".")+"."))
 		}
 		more = append(more, wall.Mount{Path: m.Path, ReadOnly: m.ReadOnly})
 		spec.given = append(spec.given, givenMount{path: m.Path, from: "--mount"})

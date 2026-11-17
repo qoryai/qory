@@ -69,7 +69,7 @@ func checkHooks(res *Result, p *stack.Stack, opts Options) error {
 	if len(p.Hooks) == 0 {
 		return nil
 	}
-	file := "qory.yaml"
+	file := exports.FileName
 	if p.File != "" {
 		file = filepath.Base(p.File)
 	}
@@ -412,7 +412,7 @@ func (f *programs) git(args ...string) (string, error) {
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-		return "", exports.Errorf("Run the compose again, or raise `git.timeout` in `qory.yaml`.\n  git %s in %s ran past %s and was stopped.", args[0], exports.HidePath(f.real), f.timeout)
+		return "", exports.Errorf("Run the compose again, or raise `git.timeout` in `%s`.\n  git %s in %s ran past %s and was stopped.", configName(f.file), args[0], exports.HidePath(f.real), f.timeout)
 	}
 	if exit, ok := errors.AsType[*exec.ExitError](err); ok {
 		line, _, _ := strings.Cut(strings.TrimSpace(stderr.String()), "\n")
@@ -437,3 +437,13 @@ func over(n int) string {
 
 // orList joins names for a message: "a", "a or b", "a, b, or c".
 func orList(names []string) string { return joinList(names, "or") }
+
+// configName is the name of the configuration file for a refusal about a setting of
+// qory.yaml, when the compose read the document file: harness.yaml when it read that,
+// else qory.yaml, as [stack.Stack.ConfigFile] says.
+func configName(file string) string {
+	if file == exports.AltFileName {
+		return file
+	}
+	return exports.FileName
+}

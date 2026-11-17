@@ -195,7 +195,7 @@ func TestComposeRefusesATierMistake(t *testing.T) {
 	}{
 		{[]string{"--tier", "light"}, nil, "--tier light: write --tier <tier>=<model id>, such as --tier light=claude-haiku-5-5"},
 		{[]string{"--tier", "light="}, nil, "--tier light=: write --tier <tier>=<model id>, such as --tier light=claude-haiku-5-5"},
-		{[]string{"--tier", "heavy=claude-haiku-5-5"}, nil, "--tier heavy=claude-haiku-5-5: use one of the tiers light, fast and thinking; heavy is not a tier"},
+		{[]string{"--tier", "heavy=claude-haiku-5-5"}, nil, "Use one of the tiers light, fast, and thinking.\n  heavy is not a tier.\n  The name is in --tier heavy=claude-haiku-5-5."},
 		{[]string{"--tier", "light=a", "--tier", "light=b"}, nil, "--tier light is given twice; give each tier once"},
 		{[]string{"--tier", "light=${qory:fast}"}, nil, "--tier light=${qory:fast}: write a model id; ${qory:fast} is a tier placeholder, which goes only in an agent's model"},
 		{[]string{"--model", "${qory:light}"}, nil, "--model ${qory:light} is a tier placeholder; set the main model by its id, and a tier only in an agent's model"},

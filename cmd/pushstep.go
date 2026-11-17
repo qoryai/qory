@@ -36,7 +36,8 @@ const (
 	textPushStep        = "push %s to %s"
 	textPushStepOne     = "push %s to %s and 1 further repository"
 	textPushStepMany    = "push %s to %s and %d further repositories"
-	textPushNoHostProxy = "take the work item in again in Qory Apiary: the run's host proxy, through which qory pushes the run's commits, did not open: %s" + codeUsed
+	textPushNoProxy     = "take the work item in again in Qory Apiary: the run's push proxy, through which qory pushes the run's commits, did not open: %s" + codeUsed
+	textPushNoCred      = "Contact support: this run has no push credential, so qory pushed nothing.\n  The run configuration has no credential with purpose push, so qory pushed nothing" + codeUsed
 	textPushNoRunAPI    = "take the work item in again in Qory Apiary: the run API, which stores the version of the artifact " + branchType + ", is not reachable from this run: %s" + codeUsed
 	textNoBranchType    = "Define the artifact type " + branchType + " in the workspace's Artifact types, then %s, then run the round again"
 	textNotStored       = "%s, then take the work item in again: qory pushed %s, and the version of the artifact " + branchType + " was not stored: %s" + codeUsed
@@ -235,7 +236,7 @@ var pushAfterSession = func(p *sessionPush, ending *pushEnding, out session.Outc
 // removeThenPush removes the setup container of a run that gets the push step, then runs
 // [pushWork], with ctx as the bound of both. A process in that container can write the
 // working folder, so the check of the step is valid only once the container is gone. After a
-// failed removal [openedRun.HostProxy] and [openedRun.StartStep] still work, so this
+// failed removal [openedRun.PushProxy] fails and [openedRun.StartStep] still works, so this
 // check alone stops the push, and the run has no step.
 func removeThenPush(ctx context.Context, run openedRun, stderr io.Writer, branch *preparation.WorkBranch, dir, runID string, runNumber int, out session.Outcome, agentStopped bool, checks *runPushChecks, ended *string) (noStep bool, err error) {
 	if err := run.RemoveSetup(ctx); err != nil {
@@ -245,7 +246,8 @@ func removeThenPush(ctx context.Context, run openedRun, stderr io.Writer, branch
 }
 
 // pushWork is the run's step of kind push: it pushes what the agent left, through the
-// run's host proxy, and stores the new version of the artifact type branch. The step
+// run's push proxy, which it starts at the push, after [openedRun.RemoveSetup], and closes
+// when the push returns, and stores the new version of the artifact type branch. The step
 // ends as [inStep] ends it, cancelled when ctx ended. out is how the session ended, which
 // the commit and the version show when it did not succeed, see [failedEnd]. agentStopped
 // is whether the agent's stop is proven, see [preparation.Push]. runNumber is the number
@@ -268,9 +270,9 @@ func pushWork(ctx context.Context, run openedRun, stderr io.Writer, branch *prep
 		if err != nil {
 			return &runLineError{fmt.Errorf(textPushNoRunAPI, shownError(err))}
 		}
-		h, err := run.HostProxy()
+		h, err := run.PushProxy()
 		if err != nil {
-			return &runLineError{fmt.Errorf(textPushNoHostProxy, shownError(err))}
+			return &runLineError{pushProxyError(err)}
 		}
 		secretmask.Default().AddURLPassword(h.proxy.URL)
 		defer h.close()
@@ -280,6 +282,8 @@ func pushWork(ctx context.Context, run openedRun, stderr io.Writer, branch *prep
 			message += "\n\n" + end
 		}
 		document, pushErr := preparation.Push(ctx, dir, os.Environ(), branch, message, h.proxy, agentStopped, w)
+		// The push proxy ends with the push: the check and the store that follow reach no forge.
+		h.close()
 		runEnded, recordErr := recordPushed(ctx, run, branch)
 		*ended = runEnded
 		switch {
@@ -302,6 +306,28 @@ func pushWork(ctx context.Context, run openedRun, stderr io.Writer, branch *prep
 		}
 		return nil
 	})
+}
+
+// noPushProxyWords is the part of Forager's error from [session.Run.PushProxy] for a run
+// with no push credential: "Add a push credential to the run configuration: this run has
+// no push proxy." Forager has no error value for it. qory prints [textPushNoCred] instead.
+const noPushProxyWords = "this run has no push proxy"
+
+// noPushCredential is [textPushNoCred] as an error that unwraps to Forager's error.
+type noPushCredential struct{ err error }
+
+func (e *noPushCredential) Error() string { return textPushNoCred }
+
+func (e *noPushCredential) Unwrap() error { return e.err }
+
+// pushProxyError is the push step's error for err, the error of PushProxy: a
+// [*noPushCredential] for a run with no push credential, [textPushNoProxy] with Forager's
+// error otherwise.
+func pushProxyError(err error) error {
+	if strings.Contains(err.Error(), noPushProxyWords) {
+		return &noPushCredential{err}
+	}
+	return fmt.Errorf(textPushNoProxy, shownError(err))
 }
 
 // shownError is err as a line shows it: printable, with every URL's password and every

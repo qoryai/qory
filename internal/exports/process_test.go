@@ -144,7 +144,7 @@ func TestVerifyChecksTheProcessFields(t *testing.T) {
 	}
 	// An alias is refused as in every file qory reads.
 	e := factory(t, strings.Replace(process, "summary: Agents", "summary: &s Agents", 1)+"x: *s\n")
-	if err := e.Verify(); err == nil || !strings.Contains(err.Error(), "*s is a YAML alias, which process.yaml may not contain") {
+	if err := e.Verify(); err == nil || !strings.Contains(err.Error(), "*s at line 15 is a YAML alias, which process.yaml may not contain.") {
 		t.Errorf("an alias: %v", err)
 	}
 	// A description of exactly 80 words, and a name of 60 characters, pass.

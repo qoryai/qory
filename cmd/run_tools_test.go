@@ -81,7 +81,7 @@ func TestRunRefusesAToolForagerRefuses(t *testing.T) {
 	copyFixture(t, "two-modules", root)
 	composedForFake(t, root, "claude")
 	writeFile(t, filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "forager.yaml"), "apiVersion: qory.dev/v1alpha1\ngateway:\n  tools:\n    files:\n      command: [/opt/tools/files]\n      serves: []\n")
-	want := "forager.yaml: tool files serves no host; a tool is reached by the hosts it serves"
+	want := "Fix the tool files in forager.yaml.\n  tool files serves no host; a tool is reached by the hosts it serves.\n  tool files is in forager.yaml."
 	if _, err := run(t, "run", "claude"); cmd.ExitCode(err) != cmd.ExitInput || err.Error() != want {
 		t.Errorf("qory run: %v (exit %d), want %q", err, cmd.ExitCode(err), want)
 	}
@@ -91,7 +91,7 @@ func TestRunRefusesAToolForagerRefuses(t *testing.T) {
 	emptyDir(t)
 	serverFile(t, newGatewayServer(t), "  listen: 127.0.0.1:0\n"+gatewayTLS+"  tools:\n    files:\n      command: [\"/opt/tools/${argument}\"]\n      serves: [files.tools.internal]\n")
 	writeCertificate(t)
-	want = `forager.yaml: tool files: the argument goes in the command's arguments, not in the program's name`
+	want = "Fix the tool files in forager.yaml.\n  tool files: the argument goes in the command's arguments, not in the program's name.\n  tool files is in forager.yaml."
 	// A gateway that started would wait for a signal: the test ends it at its start.
 	t.Cleanup(cmd.SetStartGateway(func(gateway.Config) error { return errors.New("the gateway started") }))
 	out, err := run(t, "gateway")

@@ -5,11 +5,16 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/qoryai/qory/internal/testenv"
 )
 
 // TestMain runs every test with HOME and the XDG folders in a new temporary folder, so
-// that no test reads the state or the configuration of the machine it runs on.
+// that no test reads the state or the configuration of the machine it runs on. It first
+// removes every variable of the developer's shell that [testenv.FixedEnvironment] does not
+// list.
 func TestMain(m *testing.M) {
+	testenv.StartFromFixedEnvironment()
 	home, err := os.MkdirTemp("", "prebuild-home-")
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)

@@ -47,10 +47,10 @@ func TestLoadReadsALinkAndExtensions(t *testing.T) {
 // directory's name, one name linked by two modules, and an extension that is not a map.
 func TestLoadRefusesABadLinkOrExtension(t *testing.T) {
 	for _, c := range []struct{ edit, want string }{
-		{"link: tools/bin", `module tree: link "tools/bin" is not one path segment`},
-		{"link: .harness", `module tree: link ".harness" is not one path segment`},
-		{"link: .qory", `module tree: link ".qory" is not one path segment`},
-		{"link: harness\n  - name: other\n    source: {path: modules/other}\n    link: harness", "module tree and module other both link harness"},
+		{"link: tools/bin", "Set the link of module tree to one path segment.\n  The link is \"tools/bin\"."},
+		{"link: .harness", "Set the link of module tree to one path segment.\n  The link is \".harness\"."},
+		{"link: .qory", "Set the link of module tree to one path segment.\n  The link is \".qory\"."},
+		{"link: harness\n  - name: other\n    source: {path: modules/other}\n    link: harness", "Give module tree and module other different links.\n  Both link harness."},
 	} {
 		_, err := load(t, strings.Replace(linked, "link: harness", c.edit, 1))
 		if err == nil || !strings.Contains(err.Error(), c.want) {

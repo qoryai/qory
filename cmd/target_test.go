@@ -42,14 +42,14 @@ func TestExtendingTargetHoldsTheCheckoutsTarget(t *testing.T) {
 		}
 	}
 	document("{runtime: codex, model: opus}")
-	refuse("a runtime outside", "runtime codex is not one the base stack ", " is written for; runtimes: claude")
+	refuse("a runtime outside", "Set the target runtime to one that the base stack lists.\n  Runtime codex is not one the base stack ", " is written for.\n  Runtimes: claude.")
 	document("{runtime: claude, model: haiku}")
-	refuse("a model outside", "model haiku is not one the base stack ", " is written for; models: opus, sonnet")
+	refuse("a model outside", "Set the target model to one that the base stack lists.\n  Model haiku is not one the base stack ", " is written for.\n  Models: opus, sonnet.")
 	document("{runtime: claude}")
-	refuse("no model", "the target sets no model, and the base stack ", " is written for one of these; models: opus, sonnet")
+	refuse("no model", "Set the target model to one that the base stack lists.\n  The target sets no model, and the base stack ", " is written for one of these.\n  Models: opus, sonnet.")
 	document("{runtime: claude, model: sonnet}")
-	refuse("--runtime outside", "runtime codex is not one the base stack ", " is written for; runtimes: claude", "--runtime", "codex")
-	refuse("--model outside", "model haiku is not one the base stack ", " is written for; models: opus, sonnet", "--model", "haiku")
+	refuse("--runtime outside", "Set the target runtime to one that the base stack lists.\n  Runtime codex is not one the base stack ", " is written for.\n  Runtimes: claude.", "--runtime", "codex")
+	refuse("--model outside", "Set the target model to one that the base stack lists.\n  Model haiku is not one the base stack ", " is written for.\n  Models: opus, sonnet.", "--model", "haiku")
 	for _, args := range [][]string{{"harness", "compose"}, {"harness", "compose", "-f", file}} {
 		out, err := run(t, args...)
 		if err != nil {
@@ -69,9 +69,9 @@ func TestAStackFileCarriesNoTarget(t *testing.T) {
 	writeManifest(t, filepath.Join(dir, "modules", "core"), "core")
 	writeManifest(t, filepath.Join(dir, "modules", "tools"), "tools")
 	root := newCheckout(t)
-	want := "qory-stack.yaml: target is not a stack's; a stack is delivered to be extended, and the checkout extending it sets target under harness, beside extends"
+	want := "Remove target from the stack file.\n  A stack is delivered to be extended, and the checkout extending it sets target under harness, beside extends."
 	out, err := run(t, "harness", "compose", "-f", file, "--runtime", "claude")
-	if err == nil || !strings.Contains(err.Error(), file+": target is not a stack's") || !strings.Contains(err.Error(), want) || cmd.ExitCode(err) != cmd.ExitInput {
+	if err == nil || !strings.Contains(err.Error(), "target is in "+file) || !strings.Contains(err.Error(), want) || cmd.ExitCode(err) != cmd.ExitInput {
 		t.Fatalf("-f: err = %v, exit %d\n%s", err, cmd.ExitCode(err), out)
 	}
 	writeFile(t, filepath.Join(root, "qory.yaml"), "apiVersion: qory.dev/v1alpha1\nharness:\n  extends: {path: "+dir+"}\n  target: {runtime: claude}\n  modules:\n    - name: app\n")

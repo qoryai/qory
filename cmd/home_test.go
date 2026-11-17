@@ -240,7 +240,7 @@ func TestHomeFromTheConfiguration(t *testing.T) {
 	}
 	wants(t, err.Error(), "a home inside the checkout is .qory/harness; build/harness is not it")
 	writeFile(t, user, "apiVersion: qory.dev/v1alpha1\nharness: {links: sometimes}\n")
-	if _, err = run(t, "harness", "compose"); err == nil || !strings.Contains(err.Error(), `harness.links "sometimes" is not checkout or none`) {
+	if _, err = run(t, "harness", "compose"); err == nil || !strings.Contains(err.Error(), "Set harness.links to checkout or none.\n  The value is \"sometimes\".") {
 		t.Errorf("links: sometimes: %v", err)
 	}
 	if !maps.Equal(snapshot(t, root), before) {
@@ -492,10 +492,10 @@ harness:
 	}
 	wants(t, out, "harness.launch.claude", "/opt/claude/bin/claude --plugin-dir ${dir}/plugin --append-system-prompt-file ${dir}/nothing.md --verbose", "harness.launch.codex", "CODEX_HOME=${home} OPENAI_API_KEY=it's secret")
 	for _, c := range []struct{ file, want string }{
-		{"harness: {launch: {claude: {command: \"\"}}}\n", "harness.launch.claude.command is empty"},
-		{"harness: {launch: {claude: {args: [[]]}}}\n", "harness.launch.claude.args[0] is empty"},
-		{"harness: {launch: {codex: {env: {1BAD: x}}}}\n", "harness.launch.codex.env: 1BAD is not an environment variable name"},
-		{"harness: {launch: {codex: {env: {QORY_HARNESS_HOME: x}}}}\n", "harness.launch.codex.env.QORY_HARNESS_HOME is qory's"},
+		{"harness: {launch: {claude: {command: \"\"}}}\n", "Set harness.launch.claude.command to the program, or remove it."},
+		{"harness: {launch: {claude: {args: [[]]}}}\n", "Set harness.launch.claude.args[0] to a word or a list of words."},
+		{"harness: {launch: {codex: {env: {1BAD: x}}}}\n", "Rename each variable in harness.launch.codex.env to an environment variable name.\n  1BAD is not one."},
+		{"harness: {launch: {codex: {env: {QORY_HARNESS_HOME: x}}}}\n", "Remove QORY_HARNESS_HOME from harness.launch.codex.env."},
 	} {
 		writeFile(t, user, "apiVersion: qory.dev/v1alpha1\n"+c.file)
 		if _, err := run(t, "config"); err == nil || !strings.Contains(err.Error(), c.want) || cmd.ExitCode(err) != cmd.ExitInput {

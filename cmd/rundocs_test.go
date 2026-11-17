@@ -113,8 +113,9 @@ func TestARunCodeWhoseAnswerQoryDoesNotRunStops(t *testing.T) {
 	}{
 		{"none", nil, "use another run code: the enrolment answer has no documents"},
 		{"an unknown member", codeDocuments(t, func(d map[string]any) { d["prompt"] = "x" }), broken},
-		{"a time limit under 15 minutes", codeDocuments(t, func(d map[string]any) {
-			d["run_settings"] = map[string]any{"runtime": "claude", "time_limit_minutes": 14}
+		{"a time limit under 15 minutes", codeDocuments(t, func(d map[string]any) { d["time_limit_minutes"] = 14 }), broken},
+		{"a time limit in the run settings", codeDocuments(t, func(d map[string]any) {
+			d["run_settings"] = map[string]any{"runtime": "claude", "time_limit_minutes": 45}
 		}), broken},
 		{"a run id", codeDocuments(t, func(d map[string]any) { d["run_id"] = keyRunID }), broken},
 		{"another domain in inputs", codeDocuments(t, func(d map[string]any) { d["inputs"].(map[string]any)["domain"] = "marketing" }),
@@ -357,6 +358,45 @@ func TestARunCodeWithoutAWorkflowTimeLimitRunsThreeHours(t *testing.T) {
 	}
 	if r.spec.Timeout <= 3*time.Hour-time.Minute || r.spec.Timeout > 3*time.Hour {
 		t.Errorf("the time limit left is %v, want 3h less the time before the join", r.spec.Timeout)
+	}
+}
+
+// TestARunCodesTimeLimitMinutesIsTheSessionsTimeLimit is a run from a run code whose
+// documents set time_limit_minutes at the top: the session's time limit is that many
+// minutes, whether or not the workflow sets a time_limit, which applies only when the
+// documents set none.
+func TestARunCodesTimeLimitMinutesIsTheSessionsTimeLimit(t *testing.T) {
+	for _, c := range []struct {
+		name  string
+		stack func(string) string
+	}{
+		{"no workflow time limit", writesHello},
+		{"a workflow time limit of 7h", func(s string) string { return s + "workflows:\n  hello:\n    time_limit: 7h\n    access: write\n" }},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			r := runFromCodeWith(t, behindAWall(t), nil, c.stack, func(d map[string]any) { d["time_limit_minutes"] = 45 })
+			if !r.joined {
+				t.Fatalf("%v (exit %d), want the join\n%s", r.err, cmd.ExitCode(r.err), r.out)
+			}
+			if r.spec.Timeout <= 45*time.Minute-time.Minute || r.spec.Timeout > 45*time.Minute {
+				t.Errorf("the time limit left is %v, want 45m less the time before the join", r.spec.Timeout)
+			}
+		})
+	}
+}
+
+// TestARunCodeWithSharedRunAndFullSuiteRunsOneSession is a run from a run code whose
+// documents set shared_run and full_suite to true: qory takes the documents and starts
+// the run as it does without them, with the time limit of the documents.
+func TestARunCodeWithSharedRunAndFullSuiteRunsOneSession(t *testing.T) {
+	r := runFromCodeWith(t, behindAWall(t), nil, writesHello, func(d map[string]any) {
+		d["time_limit_minutes"], d["shared_run"], d["full_suite"] = 60, true, true
+	})
+	if !r.joined {
+		t.Fatalf("%v (exit %d), want the join\n%s", r.err, cmd.ExitCode(r.err), r.out)
+	}
+	if r.spec.Timeout <= 60*time.Minute-time.Minute || r.spec.Timeout > 60*time.Minute {
+		t.Errorf("the time limit left is %v, want 60m less the time before the join", r.spec.Timeout)
 	}
 }
 

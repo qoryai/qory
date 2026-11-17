@@ -40,7 +40,7 @@ func TestEnrolmentCodeFileReads(t *testing.T) {
 	}
 	foragerFile(t, "gateway:\n  server:\n    url: https://apiary.example\n    enrolment_code_file: \"\"\n")
 	_, err = config.LoadForager()
-	if want := path + ": set gateway.server.enrolment_code_file to the path of the gateway's enrolment code, or remove it: the value is empty"; err == nil || err.Error() != want {
+	if want := "Set gateway.server.enrolment_code_file to the path of the gateway's enrolment code, or remove it.\n  The value is empty.\n  gateway.server.enrolment_code_file is in " + path + "."; err == nil || err.Error() != want {
 		t.Errorf("%v, want %q", err, want)
 	}
 }
@@ -93,14 +93,14 @@ func TestCheckWritersHoldsAFileAndItsFolders(t *testing.T) {
 	}
 	t.Cleanup(func() { os.Chmod(dir, 0o700) })
 	err = config.CheckWriters("gateway.server.enrolment_code_file", file)
-	if want := "remove the write permission of other users from " + dir + ": every user may write it, and only root and the user running qory may write gateway.server.enrolment_code_file and its folders, except a folder that root owns with the sticky bit set"; err == nil || err.Error() != want {
+	if want := "Remove the write permission of other users from gateway.server.enrolment_code_file.\n  Every user may write " + dir + ".\n  Only root and the user running qory may write gateway.server.enrolment_code_file and its folders, except a folder that root owns with the sticky bit set."; err == nil || err.Error() != want {
 		t.Errorf("%v, want %q", err, want)
 	}
 	if err := os.Chmod(dir, 0o770); err != nil {
 		t.Fatal(err)
 	}
 	err = config.CheckWriters("gateway.server.enrolment_code_file", file)
-	if want := "remove the group's write permission from " + dir + ": the group "; err == nil || !strings.HasPrefix(err.Error(), want) {
+	if want := "Remove the group's write permission from gateway.server.enrolment_code_file.\n  The group "; err == nil || !strings.HasPrefix(err.Error(), want) {
 		t.Errorf("a folder its group may write: %v, want %q", err, want)
 	}
 	if err := config.CheckWriters("gateway.server.enrolment_code_file", filepath.Join(dir, "none")); err == nil || !strings.Contains(err.Error(), "none") {

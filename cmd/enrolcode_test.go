@@ -251,7 +251,7 @@ func TestGatewayStopsOnACodeFileOutsideTheRules(t *testing.T) {
 			}
 			return filepath.Join(folder, "code")
 		}, func(folder, _ string) string {
-			return "remove the write permission of other users from " + folder + ": every user may write it, and only root and the user running qory may write gateway.server.enrolment_code_file and its folders, except a folder that root owns with the sticky bit set"
+			return "Remove the write permission of other users from gateway.server.enrolment_code_file.\n  Every user may write " + folder + ".\n  Only root and the user running qory may write gateway.server.enrolment_code_file and its folders, except a folder that root owns with the sticky bit set."
 		}},
 		{"an empty file", func(t *testing.T, folder, _ string) string {
 			writeCode(t, filepath.Join(folder, "code"), "")
@@ -376,7 +376,7 @@ func TestGatewayStopsOnACodeFileAGroupMayWrite(t *testing.T) {
 			codeGateway(t, srv, file)
 			startedGateway(t)
 			out, err := run(t, "gateway")
-			want := "remove the group's write permission from " + path + ": the group " + group + " may write it, and only root and the user running qory may write gateway.server.enrolment_code_file and its folders, except a folder that root owns with the sticky bit set"
+			want := "Remove the group's write permission from gateway.server.enrolment_code_file.\n  The group " + group + " may write " + path + ".\n  Only root and the user running qory may write gateway.server.enrolment_code_file and its folders, except a folder that root owns with the sticky bit set."
 			if err == nil || err.Error() != want || cmd.ExitCode(err) != cmd.ExitInput {
 				t.Errorf("%v (exit %d)\nwant %q", err, cmd.ExitCode(err), want)
 			}
@@ -403,7 +403,7 @@ func TestGatewayStopsOnACodeFileAnotherUserOwns(t *testing.T) {
 	codeGateway(t, srv, file)
 	startedGateway(t)
 	out, err := run(t, "gateway")
-	if err == nil || !strings.HasPrefix(err.Error(), "make root or the user running qory the owner of "+file+": it is owned by ") || cmd.ExitCode(err) != cmd.ExitInput {
+	if err == nil || !strings.HasPrefix(err.Error(), "Make root or the user running qory the owner of gateway.server.enrolment_code_file.\n  "+file+" is owned by ") || cmd.ExitCode(err) != cmd.ExitInput {
 		t.Errorf("%v (exit %d), want the error for the owner", err, cmd.ExitCode(err))
 	}
 	stoppedBeforeAKey(t, srv, out, err, code)

@@ -36,12 +36,12 @@ func TestReadManifestReadsEgress(t *testing.T) {
 func TestReadManifestRefusesEgress(t *testing.T) {
 	head := "apiVersion: qory.dev/v1alpha1\nname: core\negress:\n"
 	for _, c := range []struct{ name, item, want string }{
-		{"a port", "  - api.example.com:443\n", `egress: "api.example.com:443" is not a lower-case host name or a *. suffix`},
-		{"a path", "  - api.example.com/v1\n", `egress: "api.example.com/v1" is not`},
-		{"a scheme", "  - https://api.example.com\n", `egress: "https://api.example.com" is not`},
-		{"upper case", "  - API.example.com\n", `egress: "API.example.com" is not`},
-		{"a bare wildcard", "  - \"*\"\n", `egress: "*" is not`},
-		{"an empty host", "  - \"\"\n", `egress: "" is not`},
+		{"a port", "  - api.example.com:443\n", "Set each egress entry to a lower-case host name or a *. suffix.\n  \"api.example.com:443\" is not one, and an entry has no port, path, or scheme."},
+		{"a path", "  - api.example.com/v1\n", `"api.example.com/v1" is not one`},
+		{"a scheme", "  - https://api.example.com\n", `"https://api.example.com" is not one`},
+		{"upper case", "  - API.example.com\n", `"API.example.com" is not one`},
+		{"a bare wildcard", "  - \"*\"\n", `"*" is not one`},
+		{"an empty host", "  - \"\"\n", `"" is not one`},
 		{"not a string", "  - {host: a}\n", "cannot unmarshal"},
 	} {
 		dir := tree(t, map[string]string{ManifestName: head + c.item})

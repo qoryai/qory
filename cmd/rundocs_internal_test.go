@@ -25,7 +25,7 @@ import (
 // document that defines a stack, and in the checkout's harness or its base for a run
 // without a harness document.
 func TestARunCodesTimeLimitLineNamesWhereTheLimitIsSet(t *testing.T) {
-	const line = "set a longer time_limit_minutes in Qory Apiary, or a longer workflows.example.time_limit in %s: the run was cancelled at its time limit of 45m0s, before claude started"
+	const line = "set a longer Time limit for the workflow example on the Workflows page in Qory Apiary, or a longer workflows.example.time_limit in %s: the run was cancelled at its time limit of 45m0s, before claude started"
 	for _, c := range []struct {
 		harness string
 		defines bool

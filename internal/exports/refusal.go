@@ -3,11 +3,14 @@ package exports
 import (
 	"errors"
 	"fmt"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strings"
 	"unicode"
 	"unicode/utf8"
+
+	"github.com/qoryai/forager/accesskey"
 )
 
 // FilePlace and ModulePlace mark, in the text of a [Refusal], the place of the file and
@@ -95,8 +98,9 @@ func shortened(names []string) map[string]string {
 var longName = regexp.MustCompile(`"[^"\n]{0,24}"|"(?:[^"\\\n]|\\.){25,}"|[\p{L}\p{N}._-]{24,}[\p{L}\p{N}_-]`)
 
 // keyPath matches the keys that start a dotted name in a refusal, such as the "bind." and
-// "agents." of bind.agents.<role>. [Fit] leaves them whole and shortens the name after them.
-var keyPath = regexp.MustCompile(`^(?:(?:bind|provides|roles)\.)?(?:(?:agents|commands|skills|output-styles|hooks|mcp|files)\.)?`)
+// "agents." of bind.agents.<role>, or the "gateway.credentials." of
+// gateway.credentials.<name>. [Fit] leaves them whole and shortens the name after them.
+var keyPath = regexp.MustCompile(`^(?:(?:gateway\.(?:credentials|tools|integrations|egress\.paths|server\.via)|wall\.images|harness\.(?:launch|tiers)|workflows|exports\.(?:stacks|modules)|extending\.target\.(?:runtime|model))\.)?(?:(?:bind|provides|roles)\.)?(?:(?:agents|commands|skills|output-styles|hooks|mcp|files)\.)?`)
 
 // Fit is text, one refusal or several, in which each refusal whose first line, an
 // unindented line, has more than 100 characters has the names in that line of more than
@@ -160,11 +164,39 @@ func Fit(text string) string {
 				}
 				return match
 			})
+			// A name that contains a secret is a phrase of 40 characters or more that no
+			// shortening cuts: when the line is still long, the phrase moves to a later line.
+			if utf8.RuneCountInString(line) > 100 {
+				var moved []string
+				line, moved = movePhrases(line, rest(i))
+				full = append(full, moved...)
+			}
 		}
 		out = append(out, line)
 	}
 	block()
 	return strings.Join(out, "\n")
+}
+
+// hiddenPhrase matches the phrase that [accesskey.ShownName] and [Value] print in place of
+// a name or a value that contains an access key secret or a run key.
+var hiddenPhrase = regexp.MustCompile(`\(an? (name|value) that contains [^)]*\)`)
+
+// movePhrases is line with each hidden phrase in it printed as "a hidden name" or "a hidden
+// value", and, for each phrase that the lines after it, after, do not have, the line "The
+// hidden name is <phrase>." to add at the end of the refusal.
+func movePhrases(line, after string) (string, []string) {
+	var extra []string
+	line = hiddenPhrase.ReplaceAllStringFunc(line, func(phrase string) string {
+		kind := hiddenPhrase.FindStringSubmatch(phrase)[1]
+		if !strings.Contains(after, phrase) {
+			if sentence := "  The hidden " + kind + " is " + phrase + "."; !slices.Contains(extra, sentence) {
+				extra = append(extra, sentence)
+			}
+		}
+		return "a hidden " + kind
+	})
+	return line, extra
 }
 
 // long reports whether name, a match of [longName] without its leading keys, has more than
@@ -240,6 +272,9 @@ func Prefixed(prefix string, err error) error {
 	if r, ok := err.(*Refusal); ok {
 		return &Refusal{text: r.text, file: r.file, module: prefix}
 	}
+	if d, ok := err.(*decodeRefusal); ok {
+		return &decodeRefusal{Prefixed(prefix, d.Refusal).(*Refusal), d.cause}
+	}
 	return fmt.Errorf("%s: %w", prefix, err)
 }
 
@@ -247,8 +282,46 @@ func Prefixed(prefix string, err error) error {
 // itself is an [InFile], with path inside its text. An InFile under a wrapper gets the
 // path in front, for the reason [Prefixed] gives.
 func AtPath(path string, err error) error {
+	path = HidePath(path)
 	if in, ok := err.(InFile); ok {
 		return in.In(path)
 	}
 	return fmt.Errorf("%s: %w", path, err)
+}
+
+// decodeRefusal is the refusal of a value the decoder could not read, which unwraps to
+// the decoder's error, so errors.Is and errors.As still match it, a *yaml.TypeError
+// among them. Its text has the decoder's words, and only when they contain no access key
+// secret or run key. It is an [InFile] as a [Refusal] is.
+type decodeRefusal struct {
+	*Refusal
+	cause error
+}
+
+// Unwrap returns the decoder's error.
+func (d *decodeRefusal) Unwrap() error { return d.cause }
+
+// In is the refusal with file at [FilePlace], and the same cause.
+func (d *decodeRefusal) In(file string) error {
+	return &decodeRefusal{d.Refusal.In(file).(*Refusal), d.cause}
+}
+
+// ReadError is err, the failure to read the file at path, as a refusal that unwraps to
+// err, so errors.Is and errors.As still match it: "Check that you can read <file>.", then
+// err's text, with a path that contains a secret as the phrase, then the file when that
+// text does not have it. file is the name of the file without its folders.
+func ReadError(path string, err error) error {
+	return ReadErrorOf(accesskey.ShownName(filepath.Base(path), false), path, err)
+}
+
+// ReadErrorOf is [ReadError] with what, the words after "Check that you can read", in
+// place of the file's name. what may contain [ModulePlace].
+func ReadErrorOf(what, path string, err error) error {
+	hidden := HideError(err)
+	cause := strings.TrimSuffix(hidden.Error(), ".") + "."
+	lines := []string{cause}
+	if shown := HidePath(path); !strings.Contains(cause, shown) {
+		lines = append(lines, "The file is "+shown+".")
+	}
+	return &decodeRefusal{Refuse("Check that you can read "+what+".", lines...), err}
 }

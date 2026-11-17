@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/qoryai/qory/internal/exports"
 )
 
 // TestAnUnknownManifestKeyWithASecretInItsNameIsReportedByItsLine is an unknown key of
@@ -16,13 +18,13 @@ import (
 func TestAnUnknownManifestKeyWithASecretInItsNameIsReportedByItsLine(t *testing.T) {
 	isolate(t)
 	for _, c := range []struct{ name, secret, want string }{
-		{"qak_AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA", "qak_AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA", "line 3: key is not one qory-module.yaml reads"},
-		{"qrk_AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA x", "qrk_AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA", "line 3: key is not one qory-module.yaml reads"},
-		{"modules", "", `line 3: key "modules" is not one qory-module.yaml reads`},
+		{"qak_AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA", "qak_AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA", "Key is not one qory-module.yaml reads."},
+		{"qrk_AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA x", "qrk_AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA", "Key is not one qory-module.yaml reads."},
+		{"modules", "", `Key "modules" is not one qory-module.yaml reads.`},
 	} {
 		dir := tree(t, map[string]string{ManifestName: "apiVersion: qory.dev/v1alpha1\nname: core\n" + c.name + ": 1\n"})
 		_, err := ReadManifest(dir)
-		if want := filepath.Join(dir, ManifestName) + ": " + c.want; err == nil || err.Error() != want {
+		if want := "Remove the key, or rename it to one qory-module.yaml reads.\n  " + c.want + "\n  It is at line 3 of " + filepath.Join(dir, ManifestName) + "."; err == nil || err.Error() != want {
 			t.Errorf("%s: %v, want %q", c.name, err, want)
 		}
 		if c.secret != "" && err != nil && strings.Contains(err.Error(), c.secret) {
@@ -38,7 +40,7 @@ func TestAnUnknownManifestKeyWithANewlineInItsNameIsReportedByItsLine(t *testing
 	isolate(t)
 	dir := tree(t, map[string]string{ManifestName: "apiVersion: qory.dev/v1alpha1\nname: core\n\"qak_SECRET\\nb\": 1\n"})
 	_, err := ReadManifest(dir)
-	if want := filepath.Join(dir, ManifestName) + ": line 3: key is not one qory-module.yaml reads"; err == nil || err.Error() != want {
+	if want := "Remove the key, or rename it to one qory-module.yaml reads.\n  Line 3: key is not one qory-module.yaml reads.\n  The file is " + filepath.Join(dir, ManifestName) + "."; err == nil || err.Error() != want {
 		t.Errorf("%v, want %q", err, want)
 	}
 	if err != nil && strings.Contains(err.Error(), "qak_SECRET") {
@@ -73,19 +75,18 @@ func TestAManifestNameWithASecretIsLeftOutOfItsRefusal(t *testing.T) {
 	isolate(t)
 	head := "apiVersion: qory.dev/v1alpha1\nname: core\n"
 	for _, c := range []struct{ body, want string }{
-		{head + "env:\n  qak_x-y: bin\n", "env: " + accessKeyPhrase + " is not an environment variable name"},
-		{head + "env:\n  QAK_X: /bin\n", "env." + accessKeyPhrase + ": /bin is not a path inside the module"},
-		{head + "env:\n  QRK_X: ../bin\n", "env." + runKeyPhrase + ": ../bin is not a path inside the module"},
-		{head + "variants:\n  qak_v: [x]\n", "variants." + accessKeyPhrase + ": "},
-		{head + "variants:\n  claude: {skills: s}\n  default: qrk_v\n", "variants.default selects " + runKeyPhrase + ", which is not a variant"},
-		{head + "requires:\n  - skill: deploy\n    qak_x: [a]\n", "requires[0]: key " + accessKeyPhrase + " is not one requires reads; an item selects its entry as skill, agent, command, output-style, hook, mcp or file, and what it needs under skills, agents, commands, output-styles, hooks, mcp and files"},
-		{head + "requires:\n  - skill: qak_x\n    agents: [a]\n  - skill: qak_x\n    agents: [b]\n", "requires lists skill " + accessKeyPhrase + " twice"},
+		{head + "env:\n  qak_x-y: bin\n", "Rename the key " + accessKeyPhrase + " in env of the manifest.\n  " + accessKeyPhrase + " is not an environment variable name."},
+		{head + "env:\n  QAK_X: /bin\n", "Set env." + accessKeyPhrase + " to a path inside the module.\n  /bin is not a path inside the module."},
+		{head + "env:\n  QRK_X: ../bin\n", "Set env." + runKeyPhrase + " to a path inside the module.\n  ../bin is not a path inside the module."},
+		{head + "variants:\n  qak_v: [x]\n", "Set variants." + accessKeyPhrase + " to a map of a kind to a directory.\n  "},
+		{head + "variants:\n  claude: {skills: s}\n  default: qrk_v\n", "Set variants.default to a variant the manifest declares, or `fail`.\n  variants.default is " + runKeyPhrase + ", which is not a variant."},
+		{head + "requires:\n  - skill: deploy\n    qak_x: [a]\n", "Remove the key " + accessKeyPhrase + " from requires[0].\n  An item selects its entry as skill, agent, command, output-style, hook, mcp, or file, and lists what it needs under skills, agents, commands, output-styles, hooks, mcp, and files."},
+		{head + "requires:\n  - skill: qak_x\n    agents: [a]\n  - skill: qak_x\n    agents: [b]\n", "Remove one of the two requires items for skill " + accessKeyPhrase + ".\n  The requires lists skill " + accessKeyPhrase + " twice."},
 	} {
 		dir := tree(t, map[string]string{ManifestName: c.body})
 		_, err := ReadManifest(dir)
-		want := filepath.Join(dir, ManifestName) + ": " + c.want
-		if err == nil || !strings.HasPrefix(err.Error(), want) {
-			t.Errorf("%q: %v, want %q", c.body, err, want)
+		if err == nil || !strings.HasPrefix(err.Error(), c.want) || !strings.HasSuffix(err.Error(), "\n  The manifest is "+filepath.Join(dir, ManifestName)+".") {
+			t.Errorf("%q: %v, want it to start with %q and end with the path of the manifest", c.body, err, c.want)
 		}
 		if err != nil && (strings.Contains(strings.ToLower(err.Error()), "qak_") || strings.Contains(strings.ToLower(err.Error()), "qrk_")) {
 			t.Errorf("%q: the error contains the secret: %v", c.body, err)
@@ -101,26 +102,26 @@ func TestAManifestNameWithASecretIsLeftOutOfItsRefusal(t *testing.T) {
 func TestAVariantNameWithASecretIsLeftOutOfItsRefusal(t *testing.T) {
 	isolate(t)
 	m := &Manifest{Variants: map[string]Variant{"qak_v": {}, "claude": {}}}
-	if _, err := SelectVariant(m, "QRK_f", "codex"); err == nil || err.Error() != "variant "+runKeyPhrase+" is forced, and the module has no such variant; variants: claude, "+accessKeyPhrase {
+	if _, err := SelectVariant(m, "QRK_f", "codex", "qory.yaml"); err == nil || err.Error() != "Set the variant of the module in qory.yaml to one the module has.\n  Variant "+runKeyPhrase+" is forced, and the module has no such variant.\n  The variants are claude and "+accessKeyPhrase+"." {
 		t.Errorf("forced: %v", err)
 	}
-	if _, err := SelectVariant(&Manifest{}, "qak_f", "codex"); err == nil || err.Error() != "variant "+accessKeyPhrase+" is forced, and the module declares no variants" {
+	if _, err := SelectVariant(&Manifest{}, "qak_f", "codex", "qory.yaml"); err == nil || err.Error() != "Remove variant "+accessKeyPhrase+" from the module in qory.yaml.\n  Variant "+accessKeyPhrase+" is forced, and the module declares no variants." {
 		t.Errorf("forced without variants: %v", err)
 	}
-	if _, err := SelectVariant(m, "", "qrk_rt"); err == nil || err.Error() != "the module has no variant for runtime "+runKeyPhrase+" and declares no default; variants: claude, "+accessKeyPhrase {
+	if _, err := SelectVariant(m, "", "qrk_rt", "qory.yaml"); err == nil || err.Error() != "Select a variant of the module in qory.yaml.\n  The module has no variant for runtime "+runKeyPhrase+", and declares no default.\n  The variants are claude and "+accessKeyPhrase+"." {
 		t.Errorf("runtime: %v", err)
 	}
 	m.Default = "fail"
-	if _, err := SelectVariant(m, "", "qrk_rt"); err == nil || err.Error() != "the module has no variant for runtime "+runKeyPhrase+" and its default is fail; variants: claude, "+accessKeyPhrase {
+	if _, err := SelectVariant(m, "", "qrk_rt", "qory.yaml"); err == nil || err.Error() != "Select a variant of the module in qory.yaml.\n  The module has no variant for runtime "+runKeyPhrase+", and its default is `fail`.\n  The variants are claude and "+accessKeyPhrase+"." {
 		t.Errorf("runtime, default fail: %v", err)
 	}
 	dir := tree(t, map[string]string{"skills/deploy/SKILL.md": "---\nname: deploy\ndescription: d\n---\n"})
 	m = &Manifest{Variants: map[string]Variant{"qak_v": {"qrk_kind": "x"}}}
-	if _, err := Read("core", dir, m, "qak_v"); err == nil || err.Error() != "module core: variant "+accessKeyPhrase+" sets kind "+runKeyPhrase {
+	if _, err := Read("core", dir, m, "qak_v"); err == nil || err.Error() != exports.Fit("Remove "+runKeyPhrase+" from variant "+accessKeyPhrase+" of module core.\n  A variant sets the directory of one of skills, agents, commands, output-styles, hooks, mcp, or files.") {
 		t.Errorf("kind: %v", err)
 	}
 	m = &Manifest{Requires: map[string][]string{"skills/qak_x": {"agents/a"}}}
-	if _, err := Read("core", dir, m, ""); err == nil || err.Error() != "Ship skill "+accessKeyPhrase+" in module core, or remove it from the requires of the module.\n  The requires of module core lists skill "+accessKeyPhrase+", and the module does not ship it." {
+	if _, err := Read("core", dir, m, ""); err == nil || err.Error() != "Ship skill "+accessKeyPhrase+" in module core.\n  You can also remove it from the requires of the module.\n  The requires of module core lists skill "+accessKeyPhrase+", and the module does not ship it." {
 		t.Errorf("requires: %v", err)
 	}
 }
@@ -157,16 +158,16 @@ func TestAModuleNameWithASecretIsLeftOutOfItsRefusals(t *testing.T) {
 		m             *Manifest
 		want          string
 	}{
-		{"qak_m", "v", &Manifest{Variants: map[string]Variant{"v": {"prompts": "x"}}}, "module " + accessKeyPhrase + `: variant v sets kind "prompts"`},
-		{"QRK_m", "v", &Manifest{Variants: map[string]Variant{"v": {"skills": "../x"}}}, "module " + runKeyPhrase + `: variant v reads skills from "../x", which is not a directory inside the module`},
-		{"qak_m", "", &Manifest{Requires: map[string][]string{"skills/absent": {"agents/a"}}}, "Ship skill absent in module " + accessKeyPhrase + ", or remove it from the requires of the module.\n  The requires of module " + accessKeyPhrase + " lists skill absent, and the module does not ship it."},
+		{"qak_m", "v", &Manifest{Variants: map[string]Variant{"v": {"prompts": "x"}}}, "Remove \"prompts\" from variant v of module " + accessKeyPhrase + ".\n  A variant sets the directory of one of skills, agents, commands, output-styles, hooks, mcp, or files."},
+		{"QRK_m", "v", &Manifest{Variants: map[string]Variant{"v": {"skills": "../x"}}}, "Set the skills directory of variant v to a directory inside the module.\n  Variant v of module " + runKeyPhrase + " reads skills from \"../x\", which is not one."},
+		{"qak_m", "", &Manifest{Requires: map[string][]string{"skills/absent": {"agents/a"}}}, "Ship skill absent in module " + accessKeyPhrase + ".\n  You can also remove it from the requires of the module.\n  The requires of module " + accessKeyPhrase + " lists skill absent, and the module does not ship it."},
 	} {
 		if _, err := Read(c.name, dir, c.m, c.variant); err == nil || err.Error() != c.want {
 			t.Errorf("%s: %v, want %q", c.name, err, c.want)
 		}
 	}
 	bare := tree(t, map[string]string{"skills/greet/x.md": "x\n"})
-	if _, err := Read("qak_m", bare, nil, ""); err == nil || !strings.HasPrefix(err.Error(), "module "+accessKeyPhrase+": add SKILL.md to skills/") {
+	if _, err := Read("qak_m", bare, nil, ""); err == nil || !strings.HasPrefix(err.Error(), "Add SKILL.md to the folder.\n  skills/greet in module "+accessKeyPhrase+" has no SKILL.md") {
 		t.Errorf("a skill without SKILL.md: %v", err)
 	}
 	for _, c := range []struct{ body, want string }{
@@ -208,7 +209,7 @@ func TestAManifestThatIsNotThereLeavesOutASecretInItsDirectory(t *testing.T) {
 		root := tree(t, map[string]string{name + "/AGENTS.md": "# M\n"})
 		_, err := ReadManifest(filepath.Join(root, name))
 		shown := strings.Replace(name, "qak_m", accessKeyPhrase, 1)
-		if want := filepath.Join(root, shown) + " has no qory-module.yaml; a module has one that defines its name"; err == nil || err.Error() != want {
+		if want := "Add qory-module.yaml to the module directory.\n  " + filepath.Join(root, shown) + " has no qory-module.yaml, and a module has one that defines its name."; err == nil || err.Error() != want {
 			t.Errorf("%s: %v, want %q", name, err, want)
 		}
 	}
@@ -232,7 +233,10 @@ func TestAManifestQoryCannotReadLeavesOutASecretInItsPath(t *testing.T) {
 	if !errors.As(err, &pathErr) {
 		t.Errorf("%v, want a *fs.PathError", err)
 	}
-	if want := filepath.Join(root, accessKeyPhrase, "qory-module.yaml") + ": permission denied"; err == nil || !strings.HasSuffix(err.Error(), want) || strings.Contains(err.Error(), "qak_") {
+	if want := filepath.Join(root, accessKeyPhrase, "qory-module.yaml") + ": permission denied."; err == nil || !strings.HasSuffix(err.Error(), want) || strings.Contains(err.Error(), "qak_") {
 		t.Errorf("%v, want the suffix %q", err, want)
+	}
+	if first := strings.SplitN(err.Error(), "\n", 2)[0]; first != "Check that you can read qory-module.yaml of the module." {
+		t.Errorf("line 1 is %q", first)
 	}
 }

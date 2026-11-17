@@ -207,7 +207,7 @@ func TestWallSetupIsOutsideOrInside(t *testing.T) {
 	}
 	path := foragerFile(t, "wall:\n  adapter: docker\n  setup: Outside\n")
 	_, err = config.LoadForager()
-	want := path + `: set wall.setup to outside or inside, or remove it for outside: it is "Outside"`
+	want := "Set wall.setup to outside or inside, or remove it.\n  The value is \"Outside\", and outside is the default.\n  wall.setup is in " + path + "."
 	if err == nil || err.Error() != want {
 		t.Errorf("Outside: %v, want %s", err, want)
 	}
@@ -248,7 +248,7 @@ func TestMachineIsAnAdaptersName(t *testing.T) {
 		if v != `""` {
 			shown = `"` + v + `"`
 		}
-		want := path + ": set machine to 1 to 64 of a-z, 0-9 and -, the first a letter, such as aws-ec2 or none, or remove it: it is " + shown
+		want := "Set machine to 1 to 64 of a-z, 0-9, and -, the first a letter, or remove it.\n  The value is " + shown + ". Examples are aws-ec2 and none.\n  machine is in " + path + "."
 		if err == nil || err.Error() != want {
 			t.Errorf("%s: %v, want %s", v, err, want)
 		}
@@ -281,7 +281,7 @@ func TestWallEngineProxyFileIsAnAbsolutePath(t *testing.T) {
 	for v, shown := range map[string]string{"etc/qory/engine-proxy.json": `"etc/qory/engine-proxy.json"`, `""`: `""`} {
 		path := foragerFile(t, "wall:\n  adapter: docker\n  engine_proxy_file: "+v+"\n")
 		_, err := config.LoadForager()
-		want := path + ": set wall.engine_proxy_file to an absolute path, or remove it: it is " + shown
+		want := "Set wall.engine_proxy_file to an absolute path, or remove it.\n  The value is " + shown + ".\n  wall.engine_proxy_file is in " + path + "."
 		if err == nil || err.Error() != want {
 			t.Errorf("%s: %v, want %s", v, err, want)
 		}
@@ -340,21 +340,21 @@ func TestForagerFileRefusesTheIDAndThePinTwice(t *testing.T) {
 	envPin := `[{"alg":"ed25519","public_key":"` + signer.PublicKey().String() + `"}]`
 	path := foragerFile(t, "gateway:\n  server:\n    url: https://qory.example\n    access_key_id: ak_f1xt0re000000000\n    apiary_public_key: "+pin+"\n")
 	serverVariables(t, config.ServerVariables{AccessKeyID: "ak_0123456789abcdef"})
-	if _, err := config.Load(t.TempDir(), true); err == nil || err.Error() != path+": gateway.server.access_key_id is set, and so is QORY_ACCESS_KEY_ID; set one of them" {
+	if _, err := config.Load(t.TempDir(), true); err == nil || err.Error() != "Set gateway.server.access_key_id or QORY_ACCESS_KEY_ID, not both.\n  Both are set.\n  gateway.server.access_key_id is in "+path+"." {
 		t.Errorf("the id twice: %v", err)
 	}
 	serverVariables(t, config.ServerVariables{ApiaryPublicKey: envPin})
-	if _, err := config.Load(t.TempDir(), true); err == nil || err.Error() != path+": gateway.server.apiary_public_key is set, and so is QORY_APIARY_PUBLIC_KEY; set one of them" {
+	if _, err := config.Load(t.TempDir(), true); err == nil || err.Error() != "Set gateway.server.apiary_public_key or QORY_APIARY_PUBLIC_KEY, not both.\n  Both are set.\n  gateway.server.apiary_public_key is in "+path+"." {
 		t.Errorf("the pin twice: %v", err)
 	}
 	foragerFile(t, "gateway:\n  server:\n    url: https://qory.example\n")
 	const secret = "qak_AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA"
 	for _, c := range []struct{ id, pin, want string }{
-		{"AK_F1XT0RE000000000", "", `QORY_ACCESS_KEY_ID: the access key id "AK_F1XT0RE000000000" is not ak_`},
-		{secret, "", "QORY_ACCESS_KEY_ID: the access key id (a value that contains an access key secret)"},
-		{"", `{"alg":"ed25519"}`, "QORY_APIARY_PUBLIC_KEY: the pin is not a list"},
-		{"", `[{"alg":"ed25519","public_key":"` + secret + `"}]`, "QORY_APIARY_PUBLIC_KEY: the document contains an access key secret"},
-		{"", `[{"alg":"ed25519","public_key":"rcFAEfgtHFbZVqpPnXPYhYNhpgYEhSXg0Ixjjcdd2Mc"}]`, "QORY_APIARY_PUBLIC_KEY: it lists the Forager contract's published fixture key"},
+		{"AK_F1XT0RE000000000", "", "Set QORY_ACCESS_KEY_ID to an access key id.\n  The access key id \"AK_F1XT0RE000000000\" is not ak_"},
+		{secret, "", "Set QORY_ACCESS_KEY_ID to an access key id.\n  The access key id (a value that contains an access key secret)"},
+		{"", `{"alg":"ed25519"}`, "Pin your server's keys in QORY_APIARY_PUBLIC_KEY.\n  The pin is not a list"},
+		{"", `[{"alg":"ed25519","public_key":"` + secret + `"}]`, "Pin your server's keys in QORY_APIARY_PUBLIC_KEY.\n  The document contains an access key secret"},
+		{"", `[{"alg":"ed25519","public_key":"rcFAEfgtHFbZVqpPnXPYhYNhpgYEhSXg0Ixjjcdd2Mc"}]`, "Pin your server's keys in QORY_APIARY_PUBLIC_KEY.\n  It lists the Forager contract's published fixture key"},
 	} {
 		serverVariables(t, config.ServerVariables{AccessKeyID: c.id, ApiaryPublicKey: c.pin})
 		_, err := config.Load(t.TempDir(), true)
@@ -411,19 +411,19 @@ func TestForagerFileReadsAPinKeyThatContainsASecretPrefix(t *testing.T) {
 func TestForagerFileRefusesASecretInAPinsAlg(t *testing.T) {
 	hermetic(t)
 	for _, c := range []struct{ alg, key, want string }{
-		{"qrk_AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA", pinKeyQak, "the document contains a run key"},
-		{"qak_AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA", pinKeyQRK, "the document contains an access key secret"},
+		{"qrk_AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA", pinKeyQak, "The document contains a run key"},
+		{"qak_AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA", pinKeyQRK, "The document contains an access key secret"},
 	} {
 		serverVariables(t, config.ServerVariables{})
 		path := foragerFile(t, "gateway:\n  server:\n    url: https://qory.example\n    apiary_public_key: [{alg: "+c.alg+", public_key: "+c.key+"}]\n")
 		_, err := config.Load(t.TempDir(), true)
-		if want := path + ": gateway.server.apiary_public_key: " + c.want; err == nil || !strings.HasPrefix(err.Error(), want) || strings.Contains(err.Error(), "AQIDBAUG") {
+		if want := "Remove the secret from gateway.server.apiary_public_key.\n  " + c.want; err == nil || !strings.HasPrefix(err.Error(), want) || !strings.HasSuffix(err.Error(), "gateway.server.apiary_public_key is in "+path+".") || strings.Contains(err.Error(), "AQIDBAUG") {
 			t.Errorf("forager.yaml, alg %.4s: %v, want %q", c.alg, err, want)
 		}
 		foragerFile(t, "gateway:\n  server:\n    url: https://qory.example\n")
 		serverVariables(t, config.ServerVariables{ApiaryPublicKey: `[{"alg":"` + c.alg + `","public_key":"` + c.key + `"}]`})
 		_, err = config.Load(t.TempDir(), true)
-		if want := "QORY_APIARY_PUBLIC_KEY: " + c.want; err == nil || !strings.HasPrefix(err.Error(), want) || strings.Contains(err.Error(), "AQIDBAUG") {
+		if want := "Pin your server's keys in QORY_APIARY_PUBLIC_KEY.\n  " + c.want; err == nil || !strings.HasPrefix(err.Error(), want) || strings.Contains(err.Error(), "AQIDBAUG") {
 			t.Errorf("QORY_APIARY_PUBLIC_KEY, alg %.4s: %v, want %q", c.alg, err, want)
 		}
 	}
@@ -442,16 +442,16 @@ const pinKeyStartsQak = "qaK_juvG8Q7hwpuGkJe1opX7YF993TJbZMf-wnnoYG0"
 // contains an access key secret, and the refusal does not contain the key.
 func TestForagerFileRefusesAPinKeyThatStartsWithASecretPrefix(t *testing.T) {
 	hermetic(t)
-	const refusal = "the document contains an access key secret, which belongs in access-key-secret or QORY_ACCESS_KEY_SECRET and nowhere else"
+	const refusal = "The document contains an access key secret, which belongs in access-key-secret or QORY_ACCESS_KEY_SECRET and nowhere else."
 	path := foragerFile(t, "gateway:\n  server:\n    url: https://qory.example\n    apiary_public_key: [{alg: ed25519, public_key: "+pinKeyStartsQak+"}]\n")
 	_, err := config.Load(t.TempDir(), true)
-	if want := path + ": gateway.server.apiary_public_key: " + refusal; err == nil || err.Error() != want {
+	if want := "Remove the secret from gateway.server.apiary_public_key.\n  " + refusal + "\n  gateway.server.apiary_public_key is in " + path + "."; err == nil || err.Error() != want {
 		t.Errorf("forager.yaml: %v, want %q", err, want)
 	}
 	foragerFile(t, "gateway:\n  server:\n    url: https://qory.example\n")
 	serverVariables(t, config.ServerVariables{ApiaryPublicKey: `[{"alg":"ed25519","public_key":"` + pinKeyStartsQak + `"}]`})
 	_, err = config.Load(t.TempDir(), true)
-	if want := "QORY_APIARY_PUBLIC_KEY: " + refusal; err == nil || err.Error() != want {
+	if want := "Pin your server's keys in QORY_APIARY_PUBLIC_KEY.\n  " + refusal; err == nil || err.Error() != want {
 		t.Errorf("QORY_APIARY_PUBLIC_KEY: %v, want %q", err, want)
 	}
 }
@@ -465,7 +465,7 @@ func TestForagerFileRefusesTheWorkspaceSecretVariable(t *testing.T) {
 	foragerFile(t, "gateway:\n  server:\n    url: https://qory.example\n")
 	serverVariables(t, config.ServerVariables{WorkspaceSecret: "sixteen-characters-at-least"})
 	_, err := config.Load(t.TempDir(), true)
-	want := "QORY_SERVER_SECRET holds a workspace access key's secret, which servers no longer accept; unset it, and connect this machine as a node: run qory access-key enrol <server> <code>, or generate a key on the node's page in Qory Apiary and set the QORY_ variables it shows; see https://github.com/qoryai/qory/blob/main/docs/run.md#the-access-key-and-the-instance"
+	want := "Unset QORY_SERVER_SECRET.\n  QORY_SERVER_SECRET contains a workspace access key's secret, which servers no longer accept.\n  Then connect this machine as a node: run qory access-key enrol <server> <code>, or generate a key on the node's page in Qory Apiary and set the QORY_ variables it shows.\n  See https://github.com/qoryai/qory/blob/main/docs/run.md#the-access-key-and-the-instance."
 	if err == nil || err.Error() != want {
 		t.Errorf("QORY_SERVER_SECRET: %v, want %q", err, want)
 	}
@@ -475,68 +475,68 @@ func TestForagerFileRefusesTheWorkspaceSecretVariable(t *testing.T) {
 func TestForagerFileRefusesAMistake(t *testing.T) {
 	hermetic(t)
 	for _, c := range []struct{ body, want string }{
-		{"gateway: {egres: {mode: observe}}\n", `key "egres" is not one forager.yaml reads`},
-		{"egress: {mode: observe}\n", `key "egress" is not one forager.yaml reads`},
-		{"server: {url: \"https://qory.example\"}\n", `key "server" is not one forager.yaml reads`},
-		{"credentials: {}\n", `key "credentials" is not one forager.yaml reads`},
-		{"integrations: {}\n", `key "integrations" is not one forager.yaml reads`},
-		{"instance: {name: build-01}\n", `key "instance" is not one forager.yaml reads`},
-		{"run: {timeout: 1h}\n", `key "run" is not one forager.yaml reads`},
-		{"gateway: {wall: {adapter: docker}}\n", `key "wall" is not one forager.yaml reads`},
-		{"session: {egress: {mode: observe}}\n", `key "egress" is not one forager.yaml reads`},
-		{"gateway: [egress]\n", "gateway"},
+		{"gateway: {egres: {mode: observe}}\n", `Key "egres" is not one forager.yaml reads`},
+		{"egress: {mode: observe}\n", `Key "egress" is not one forager.yaml reads`},
+		{"server: {url: \"https://qory.example\"}\n", `Key "server" is not one forager.yaml reads`},
+		{"credentials: {}\n", `Key "credentials" is not one forager.yaml reads`},
+		{"integrations: {}\n", `Key "integrations" is not one forager.yaml reads`},
+		{"instance: {name: build-01}\n", `Key "instance" is not one forager.yaml reads`},
+		{"run: {timeout: 1h}\n", `Key "run" is not one forager.yaml reads`},
+		{"gateway: {wall: {adapter: docker}}\n", `Key "wall" is not one forager.yaml reads`},
+		{"session: {egress: {mode: observe}}\n", `Key "egress" is not one forager.yaml reads`},
+		{"gateway: [egress]\n", "Set gateway to a mapping."},
 		{"gateway: {egress: {allow: [a.example]}}\n", "gateway.egress.mode is required"},
-		{"gateway: {egress: {mode: log}}\n", `gateway.egress.mode is not observe or enforce`},
-		{"gateway: {egress: {mode: enforce, allow: [\"api.example.com:443\"]}}\n", `gateway.egress.allow[0] is not a lower-case host name or a *. suffix, or it ends in a number and is not an IPv4 address in canonical form; no port, path or scheme`},
-		{"gateway: {egress: {mode: observe, deny: [\"tracker.example:443\"]}}\n", `gateway.egress.deny[0] is not a lower-case host name or a *. suffix, or it ends in a number and is not an IPv4 address in canonical form; no port, path or scheme`},
+		{"gateway: {egress: {mode: log}}\n", "Set gateway.egress.mode to observe or enforce."},
+		{"gateway: {egress: {mode: enforce, allow: [\"api.example.com:443\"]}}\n", "Set gateway.egress.allow[0] to a lower-case host name or a *. suffix."},
+		{"gateway: {egress: {mode: observe, deny: [\"tracker.example:443\"]}}\n", "Set gateway.egress.deny[0] to a lower-case host name or a *. suffix."},
 		{"gateway: {server: {access_key_id: ak_f1xt0re000000000}}\n", "gateway.server.url is required"},
-		{"gateway: {server: {url: \"ftp://x\"}}\n", `gateway.server.url for ftp://x is not https or http: an https URL of a host and an optional port, or an http one to this machine, with nothing after`},
-		{"gateway: {server: {url: \"http://qory.example\"}}\n", `gateway.server.url for http://qory.example is http to a host that is not this machine: an https URL of a host and an optional port, or an http one to this machine, with nothing after`},
-		{"gateway: {server: {url: \"https://qory.example/v1/events\"}}\n", `gateway.server.url for https://qory.example has a path: an https URL of a host and an optional port, or an http one to this machine, with nothing after`},
-		{"gateway: {server: {url: \"https://qory.example/\"}}\n", `gateway.server.url for https://qory.example has a path: an https URL of a host and an optional port, or an http one to this machine, with nothing after`},
-		{"gateway: {server: {url: \"https://qory.example/?qak_AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA\"}}\n", "gateway.server.url: the document contains an access key secret"},
-		{"gateway: {server: {url: \"https://qory.example\", access_key_id: AK_F1XT0RE000000000}}\n", `gateway.server.access_key_id is not ak_ and 16 lower-case Crockford base32 characters`},
-		{"gateway: {server: {url: \"https://qory.example\", access_key_id: ak_f1xt0re0000000}}\n", `gateway.server.access_key_id is not ak_ and 16 lower-case Crockford base32 characters`},
-		{"gateway: {server: {url: \"https://qory.example\", access_key: ak_f1xt0re000000000}}\n", "gateway.server.access_key is a workspace access key, which servers no longer accept; remove gateway.server.access_key and gateway.server.secret from forager.yaml, then connect this machine as a node: run qory access-key enrol <server> <code>, or generate a key on the node's page in Qory Apiary and set the QORY_ variables it shows; see https://github.com/qoryai/qory/blob/main/docs/run.md#the-access-key-and-the-instance"},
-		{"gateway: {server: {url: \"https://qory.example\", secret: qak_AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA}}\n", "gateway.server.secret is a workspace access key's secret, which servers no longer accept; remove gateway.server.access_key and gateway.server.secret from forager.yaml, then connect this machine as a node: run qory access-key enrol <server> <code>, or generate a key on the node's page in Qory Apiary and set the QORY_ variables it shows; see https://github.com/qoryai/qory/blob/main/docs/run.md#the-access-key-and-the-instance"},
-		{"gateway: {server: {url: \"https://qory.example\", apiary_public_key: [{alg: ed25519}]}}\n", "gateway.server.apiary_public_key[0] needs both alg and public_key"},
-		{"gateway: {server: {url: \"https://qory.example\", apiary_public_key: [{alg: ed25519, public_key: abc}]}}\n", "gateway.server.apiary_public_key[0].public_key is not 32 bytes in base64url without padding"},
-		{"gateway: {server: {url: \"https://qory.example\", apiary_public_key: [{alg: rsa, public_key: rcFAEfgtHFbZVqpPnXPYhYNhpgYEhSXg0Ixjjcdd2Mc}]}}\n", "gateway.server.apiary_public_key[0].alg is not ed25519, the one there is"},
-		{"gateway: {server: {url: \"https://qory.example\", apiary_public_key: [{alg: ed25519, public_key: rcFAEfgtHFbZVqpPnXPYhYNhpgYEhSXg0Ixjjcdd2Mc}]}}\n", "gateway.server.apiary_public_key: it lists the Forager contract's published fixture key, whose secret anyone can read"},
-		{"gateway: {server: {url: \"https://qory.example\", apiary_public_key: [{alg: ed25519, public_key: rcFAEfgtHFbZVqpPnXPYhYNhpgYEhSXg0Ixjjcdd2Mc, kid: x}]}}\n", `key "kid" is not one`},
-		{"gateway: {server: {url: \"https://qory.example\", apiary_public_key: []}}\n", "gateway.server.apiary_public_key: the pin lists no key"},
-		{"gateway: {server: {url: \"https://qory.example\", events: [\"*\"]}}\n", `key "events" is not one`},
-		{"session: {instance: {name: \"-build\"}}\n", `session.instance.name is not 1 to 64 of A-Z, a-z, 0-9, dot, underscore and dash, starting with a letter or digit`},
-		{"session: {instance: {name: build-01, id: i_x}}\n", `key "id" is not one`},
-		{"webhook: {url: \"https://example.com/e\", secret: sixteen-characters-at-least}\n", "webhook: qory 0.10.0 replaced this section with gateway.server; see the docs of forager.yaml"},
-		{"wall: {image: i}\n", "wall.adapter is required, and docker is the one there is"},
-		{"wall: {adapter: bubblewrap}\n", "wall.adapter is required, and docker is the one there is"},
-		{"wall: {adapter: docker, helper: qory-linux}\n", `wall.helper is not an absolute path`},
-		{"wall: {adapter: docker, env: [\"KEY=value\"]}\n", `wall.env[0] is not a variable's name; the value comes from the environment, never from this file`},
-		{"wall: {adapter: docker, network: host}\n", `key "network" is not one`},
-		{"wall: {adapter: docker, mounts: [srv]}\n", `wall.mounts[0] is not an absolute path, with :ro after it for a read-only one`},
-		{"wall: {adapter: docker, pids_limit: 0}\n", `wall.pids_limit is below 1; a limit is at least 1`},
-		{"wall: {adapter: docker, env: [QORY_ACCESS_KEY_SECRET]}\n", `wall.env[0] names a variable that is Forager's and never the agent's`},
-		{"wall: {adapter: docker, env: [QORY_ACCESS_KEY_ID]}\n", `wall.env[0] names a variable that is Forager's and`},
-		{"wall: {adapter: docker, env: [QORY_APIARY_PUBLIC_KEY]}\n", `wall.env[0] names a variable that is Forager's and`},
-		{"wall: {adapter: docker, env: [QORY_SERVER_SECRET]}\n", `wall.env[0] names a variable that is Forager's and never the agent's`},
-		{"wall: {adapter: docker, env: [QORY_RUN_KEY]}\n", `wall.env[0] names a variable that is Forager's and never the agent's`},
-		{"gateway: {credentials: {product: {adapter: [git-host]}}}\n", `gateway.credentials.product.adapter is a program by its absolute path`},
+		{"gateway: {server: {url: \"ftp://x\"}}\n", "gateway.server.url for ftp://x is not https or http."},
+		{"gateway: {server: {url: \"http://qory.example\"}}\n", "gateway.server.url for http://qory.example is http to a host that is not this machine."},
+		{"gateway: {server: {url: \"https://qory.example/v1/events\"}}\n", "gateway.server.url for https://qory.example has a path."},
+		{"gateway: {server: {url: \"https://qory.example/\"}}\n", "gateway.server.url for https://qory.example has a path."},
+		{"gateway: {server: {url: \"https://qory.example/?qak_AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA\"}}\n", "Remove the secret from gateway.server.url."},
+		{"gateway: {server: {url: \"https://qory.example\", access_key_id: AK_F1XT0RE000000000}}\n", "Set gateway.server.access_key_id to ak_ and 16 lower-case Crockford base32 characters."},
+		{"gateway: {server: {url: \"https://qory.example\", access_key_id: ak_f1xt0re0000000}}\n", "Set gateway.server.access_key_id to ak_ and 16 lower-case Crockford base32 characters."},
+		{"gateway: {server: {url: \"https://qory.example\", access_key: ak_f1xt0re000000000}}\n", "Remove gateway.server.access_key and gateway.server.secret from forager.yaml.\n  gateway.server.access_key is a workspace access key, which servers no longer accept.\n  Then connect this machine as a node: run qory access-key enrol <server> <code>, or generate a key on the node's page in Qory Apiary and set the QORY_ variables it shows.\n  See https://github.com/qoryai/qory/blob/main/docs/run.md#the-access-key-and-the-instance."},
+		{"gateway: {server: {url: \"https://qory.example\", secret: qak_AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA}}\n", "Remove gateway.server.access_key and gateway.server.secret from forager.yaml.\n  gateway.server.secret is a workspace access key's secret, which servers no longer accept.\n  Then connect this machine as a node: run qory access-key enrol <server> <code>, or generate a key on the node's page in Qory Apiary and set the QORY_ variables it shows.\n  See https://github.com/qoryai/qory/blob/main/docs/run.md#the-access-key-and-the-instance."},
+		{"gateway: {server: {url: \"https://qory.example\", apiary_public_key: [{alg: ed25519}]}}\n", "Add alg and public_key to gateway.server.apiary_public_key[0]."},
+		{"gateway: {server: {url: \"https://qory.example\", apiary_public_key: [{alg: ed25519, public_key: abc}]}}\n", "Set gateway.server.apiary_public_key[0].public_key to 32 bytes in base64url without padding."},
+		{"gateway: {server: {url: \"https://qory.example\", apiary_public_key: [{alg: rsa, public_key: rcFAEfgtHFbZVqpPnXPYhYNhpgYEhSXg0Ixjjcdd2Mc}]}}\n", "Set gateway.server.apiary_public_key[0].alg to ed25519."},
+		{"gateway: {server: {url: \"https://qory.example\", apiary_public_key: [{alg: ed25519, public_key: rcFAEfgtHFbZVqpPnXPYhYNhpgYEhSXg0Ixjjcdd2Mc}]}}\n", "Pin your server's keys in gateway.server.apiary_public_key.\n  It lists the Forager contract's published fixture key, whose secret anyone can read"},
+		{"gateway: {server: {url: \"https://qory.example\", apiary_public_key: [{alg: ed25519, public_key: rcFAEfgtHFbZVqpPnXPYhYNhpgYEhSXg0Ixjjcdd2Mc, kid: x}]}}\n", `Key "kid" is not one`},
+		{"gateway: {server: {url: \"https://qory.example\", apiary_public_key: []}}\n", "Pin your server's keys in gateway.server.apiary_public_key."},
+		{"gateway: {server: {url: \"https://qory.example\", events: [\"*\"]}}\n", `Key "events" is not one`},
+		{"session: {instance: {name: \"-build\"}}\n", "Set session.instance.name to 1 to 64 of A-Z, a-z, 0-9, dot, underscore, and dash."},
+		{"session: {instance: {name: build-01, id: i_x}}\n", `Key "id" is not one`},
+		{"webhook: {url: \"https://example.com/e\", secret: sixteen-characters-at-least}\n", "Replace webhook with gateway.server.\n  qory 0.10.0 replaced the webhook section with gateway.server. The docs of forager.yaml describe it."},
+		{"wall: {image: i}\n", "Set wall.adapter to docker."},
+		{"wall: {adapter: bubblewrap}\n", "Set wall.adapter to docker."},
+		{"wall: {adapter: docker, helper: qory-linux}\n", "Set wall.helper to an absolute path."},
+		{"wall: {adapter: docker, env: [\"KEY=value\"]}\n", "Set wall.env[0] to a variable's name."},
+		{"wall: {adapter: docker, network: host}\n", `Key "network" is not one`},
+		{"wall: {adapter: docker, mounts: [srv]}\n", "Set wall.mounts[0] to an absolute path, with :ro after it for a read-only one."},
+		{"wall: {adapter: docker, pids_limit: 0}\n", "Set wall.pids_limit to 1 or more."},
+		{"wall: {adapter: docker, env: [QORY_ACCESS_KEY_SECRET]}\n", "Remove wall.env[0].\n  It is a variable that is Forager's and never the agent's."},
+		{"wall: {adapter: docker, env: [QORY_ACCESS_KEY_ID]}\n", "Remove wall.env[0]."},
+		{"wall: {adapter: docker, env: [QORY_APIARY_PUBLIC_KEY]}\n", "Remove wall.env[0]."},
+		{"wall: {adapter: docker, env: [QORY_SERVER_SECRET]}\n", "Remove wall.env[0].\n  It is a variable that is Forager's and never the agent's."},
+		{"wall: {adapter: docker, env: [QORY_RUN_KEY]}\n", "Remove wall.env[0].\n  It is a variable that is Forager's and never the agent's."},
+		{"gateway: {credentials: {product: {adapter: [git-host]}}}\n", "Set gateway.credentials.product.adapter to a program's absolute path, then its arguments."},
 		{"gateway: {credentials: {product: {command: [/x]}}}\n", `gateway.credentials.product: key "command" is not one`},
-		{"gateway: {credentials: [product]}\n", `gateway.credentials is a mapping`},
-		{"gateway: {tools: [files]}\n", `gateway.tools is a mapping from a name to a tool`},
+		{"gateway: {credentials: [product]}\n", "Set gateway.credentials to a mapping from a name to a credential."},
+		{"gateway: {tools: [files]}\n", "Set gateway.tools to a mapping from a name to a tool."},
 		{"gateway: {tools: {files: {command: [/opt/tools/files], adapter: [/x]}}}\n", `gateway.tools.files: key "adapter" is not one`},
-		{"gateway: {tools: {files: {command: [files-tool], serves: [files.tools.internal]}}}\n", `gateway.tools.files.command is a program by its absolute path, and its arguments`},
-		{"gateway: {tools: {files: {command: [], serves: [files.tools.internal]}}}\n", `gateway.tools.files.command is a program by its absolute path, and its arguments`},
-		{"gateway: {tools: {files: {serves: [files.tools.internal]}}}\n", `gateway.tools.files.command is a program by its absolute path, and its arguments`},
-		{"session: {run: {timeout: soon}}\n", `session.run.timeout is not a duration above zero, such as 5h30m or 30s`},
-		{"session: {run: {stop_grace: 0s}}\n", `session.run.stop_grace is not a duration above zero, such as 5h30m or 30s`},
-		{"session: {run: {stop_signal: SIGKILL}}\n", `session.run.stop_signal is not one of SIGTERM, SIGINT, SIGHUP, SIGQUIT, SIGUSR1, SIGUSR2`},
-		{"apiVersion: qory.dev/v9\n", "apiVersion is not one this qory reads; versions: qory.dev/v1alpha1"},
+		{"gateway: {tools: {files: {command: [files-tool], serves: [files.tools.internal]}}}\n", "Set gateway.tools.files.command to a program's absolute path, then its arguments."},
+		{"gateway: {tools: {files: {command: [], serves: [files.tools.internal]}}}\n", "Set gateway.tools.files.command to a program's absolute path, then its arguments."},
+		{"gateway: {tools: {files: {serves: [files.tools.internal]}}}\n", "Set gateway.tools.files.command to a program's absolute path, then its arguments."},
+		{"session: {run: {timeout: soon}}\n", "Set session.run.timeout to a duration above zero, such as 5h30m or 30s."},
+		{"session: {run: {stop_grace: 0s}}\n", "Set session.run.stop_grace to a duration above zero, such as 5h30m or 30s."},
+		{"session: {run: {stop_signal: SIGKILL}}\n", "Set session.run.stop_signal to SIGTERM, SIGINT, SIGHUP, SIGQUIT, SIGUSR1, or SIGUSR2."},
+		{"apiVersion: qory.dev/v9\n", "Set apiVersion to qory.dev/v1alpha1."},
 	} {
 		path := foragerFile(t, c.body)
 		_, err := config.Load(t.TempDir(), true)
-		if err == nil || !strings.Contains(err.Error(), c.want) || !strings.HasPrefix(err.Error(), path) {
+		if err == nil || !strings.Contains(err.Error(), c.want) || !strings.Contains(err.Error(), path) {
 			t.Errorf("%q: error %v, want one naming the file and %q", c.body, err, c.want)
 		}
 	}
@@ -559,7 +559,7 @@ func TestForagerFileStopsOnGatewaySelects(t *testing.T) {
 	} {
 		path := foragerFile(t, body)
 		_, err := config.LoadForager()
-		if want := "remove gateway.selects from " + path + ": a run's policy selects its credentials"; err == nil || err.Error() != want {
+		if want := "Remove gateway.selects.\n  A run's policy selects its credentials.\n  gateway.selects is in " + path + "."; err == nil || err.Error() != want {
 			t.Errorf("%q: error %v, want %q", body, err, want)
 		}
 		var doc any
