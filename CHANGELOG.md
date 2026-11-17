@@ -483,6 +483,17 @@ release may change what an existing document does, and states it under Upgrading
 - The first line of each compose error shows the fix, in at most 100 characters, and the
   indented lines after it show the cause and the values, as the errors of workflow hooks
   do. Which input fails, and the exit status, stay the same.
+- When the push of a run's work gets 403 from the run's gateway, the first line of the
+  error is `Contact support: the push was refused (403).` The line `One of these stopped
+  it:` follows, then one line for each possible cause: the gateway allows a push only to
+  the run's branch, `refs/heads/qory/<work item>`; the connection's setup has no path rule
+  for `/<repository>.git/git-receive-pack`, or no credential with write access; or the
+  forge stopped the push, by its permission for the run's credential or a branch rule. The
+  exit status stays the same.
+- qory uses Forager 3d4ec18a. Its gateway returns 403 for a git push through a credential
+  that has no push ref, so a `git push` through a credential that forager.yaml defines
+  with `env` or `file` gets 403. The push step's credential, which Qory Apiary applies,
+  has a push ref for the run's branch, so the push step is not affected.
 - A run with a run key or a run code, with no `--home` or `harness.home`, composes into
   `runs/<name>-<hash>/<run id>` under `qory/homes` in the cache directory, a home for that
   run alone, which qory removes when the run ends. Two runs of one checkout no longer

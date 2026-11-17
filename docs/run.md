@@ -2521,7 +2521,9 @@ The step does this, in order:
    with no answer, or with a status of 500 or above, qory reads the work item's artifacts
    first, and sends the request again only when no version of this run has the file.
 
-A run's policy with path rules must allow `/<path>.git/git-receive-pack` for the push.
+A run's policy with path rules must allow `/<path>.git/git-receive-pack` for the push. The
+run's gateway returns 403 to a push to any ref but the run's branch, and to every push
+through a credential that has no `push_ref`, as a credential in forager.yaml has none.
 
 The step counts toward the run's time limit, and has 120 seconds when the run has less left,
 also after the session used up the limit. A run can pass its time limit by up to 120
@@ -2583,9 +2585,13 @@ Each of these lines fails the step. `<commit>` is the commit's first 12 characte
 - `change the rule on <system> that stops a push to qory/<work item id> of <path>, then take
   the work item in again: the push failed: <error>; the code is used`, when a rule or a
   hook on the system stops the update
-- `add /<path>.git/git-receive-pack to the path rules of the run's policy for <system>, and
-  give the run's credential for <system> write access to <path>, then take the work item in
-  again: the push through the run's gateway returned 403: <error>; the code is used`
+- `Contact support: the push was refused (403).`, then lines indented by two spaces:
+  `One of these stopped it:`, the three causes, and a last line with the error. The
+  causes are `1. The run's gateway allows a push only to the run's branch,
+  refs/heads/qory/<work item id> (wall:push-ref).`, `2. The connection's setup has no path rule for
+  /<path>.git/git-receive-pack, or no credential with write access.`, `3. The forge stopped
+  the push: its permission for the run's credential, or a branch rule.` The last line is
+  `The push of <path> to <system> returned 403: <error>; the code is used`
 - `give the run's credential for <system> write access to <path>, then take the work item in
   again: the push through the run's gateway failed: <error>; the code is used`
 - `check that the run's policy allows <system> and that <system> is reachable, then take
