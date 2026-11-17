@@ -2585,13 +2585,13 @@ Each of these lines fails the step. `<commit>` is the commit's first 12 characte
 - `change the rule on <system> that stops a push to qory/<work item id> of <path>, then take
   the work item in again: the push failed: <error>; the code is used`, when a rule or a
   hook on the system stops the update
-- `Contact support: the push was refused (403).`, then three lines indented by two
-  spaces, one for each cause, and a last line with the error. The lines are:
-  `1. The run's gateway allows a push only to the run's branch, refs/heads/qory/<work item
-  id> (wall:push-ref).`, `2. The connection's setup has no path rule for
+- `Contact support: the push was refused (403).`, then lines indented by two spaces:
+  `One of these stopped it:`, the three causes, and a last line with the error. The
+  causes are `1. The run's gateway allows a push only to the run's branch,
+  refs/heads/qory/<work item id> (wall:push-ref).`, `2. The connection's setup has no path rule for
   /<path>.git/git-receive-pack, or no credential with write access.`, `3. The forge stopped
-  the push: the App's permission or a branch rule.`, and `The push of <path> to <system>
-  returned 403: <error>; the code is used`
+  the push: its permission for the run's credential, or a branch rule.` The last line is
+  `The push of <path> to <system> returned 403: <error>; the code is used`
 - `give the run's credential for <system> write access to <path>, then take the work item in
   again: the push through the run's gateway failed: <error>; the code is used`
 - `check that the run's policy allows <system> and that <system> is reachable, then take

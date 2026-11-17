@@ -224,23 +224,26 @@ func TestAForbiddenPushNamesTheThreeCauses(t *testing.T) {
 	path := "acme/" + strings.Repeat("long-repository-name-", 4)
 	err := pushFailed(b, path, &gitError{line: "x", exit: 1, output: "fatal: unable to access 'x': returned error: 403"})
 	lines := strings.Split(err.Error(), "\n")
-	if len(lines) != 5 {
-		t.Fatalf("the error has %d lines, want 5:\n%v", len(lines), err)
+	if len(lines) != 6 {
+		t.Fatalf("the error has %d lines, want 6:\n%v", len(lines), err)
 	}
 	if want := "qory run: Contact support: the push was refused (403)."; lines[0] != want {
 		t.Errorf("the first line is %q, want %q", lines[0], want)
 	}
+	if want := "  One of these stopped it:"; lines[1] != want {
+		t.Errorf("the second line is %q, want %q", lines[1], want)
+	}
 	for i, want := range []string{
 		"  1. The run's gateway allows a push only to the run's branch, refs/heads/" + testRef + " (wall:push-ref).",
 		"  2. The connection's setup has no path rule for /" + path + ".git/git-receive-pack, or no credential with write access.",
-		"  3. The forge stopped the push: the App's permission or a branch rule.",
+		"  3. The forge stopped the push: its permission for the run's credential, or a branch rule.",
 	} {
-		if lines[i+1] != want {
-			t.Errorf("line %d is %q, want %q", i+2, lines[i+1], want)
+		if lines[i+2] != want {
+			t.Errorf("line %d is %q, want %q", i+3, lines[i+2], want)
 		}
 	}
-	if want := "  The push of " + path + " to git.example.com returned 403: "; !strings.HasPrefix(lines[4], want) || !strings.HasSuffix(lines[4], "; the code is used") {
-		t.Errorf("the last line is %q, want it to start with %q and end with the code's mark", lines[4], want)
+	if want := "  The push of " + path + " to git.example.com returned 403: "; !strings.HasPrefix(lines[5], want) || !strings.HasSuffix(lines[5], "; the code is used") {
+		t.Errorf("the last line is %q, want it to start with %q and end with the code's mark", lines[5], want)
 	}
 }
 
