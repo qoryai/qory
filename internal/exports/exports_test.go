@@ -336,3 +336,20 @@ func TestAPathWithASecretIsPrintedAsAPhraseByEveryRead(t *testing.T) {
 		}
 	}
 }
+
+// TestAReadErrorOfAFileWithASecretInItsNameEndsLine1WithAPeriod is the read error of a
+// file whose name contains an access key secret: line 1 is the fix, ends with a period,
+// and has the phrase in place of the name.
+func TestAReadErrorOfAFileWithASecretInItsNameEndsLine1WithAPeriod(t *testing.T) {
+	for _, name := range []string{"qak_AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA", "qak_AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA.yaml"} {
+		path := "/tmp/" + name
+		err := exports.ReadError(path, errors.New("open "+path+": permission denied"))
+		first := strings.SplitN(err.Error(), "\n", 2)[0]
+		if want := "Check that you can read (a name that contains an access key secret)."; first != want {
+			t.Errorf("%s: line 1 is %q, want %q", name, first, want)
+		}
+		if strings.Contains(err.Error(), "qak_") {
+			t.Errorf("%s: the refusal prints the secret: %v", name, err)
+		}
+	}
+}

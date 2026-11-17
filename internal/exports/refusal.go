@@ -9,6 +9,8 @@ import (
 	"strings"
 	"unicode"
 	"unicode/utf8"
+
+	"github.com/qoryai/forager/accesskey"
 )
 
 // FilePlace and ModulePlace mark, in the text of a [Refusal], the place of the file and
@@ -309,7 +311,7 @@ func (d *decodeRefusal) In(file string) error {
 // err's text, with a path that contains a secret as the phrase, then the file when that
 // text does not have it. file is the name of the file without its folders.
 func ReadError(path string, err error) error {
-	return ReadErrorOf(filepath.Base(path), path, err)
+	return ReadErrorOf(accesskey.ShownName(filepath.Base(path), false), path, err)
 }
 
 // ReadErrorOf is [ReadError] with what, the words after "Check that you can read", in
