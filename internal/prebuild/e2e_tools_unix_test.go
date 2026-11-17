@@ -67,8 +67,8 @@ func stageTools(t *testing.T, dir string) (parsers, node string) {
 // by the digest of their index, as qory's probe of 2026-11-15 found them: none has a
 // browser or ffmpeg, and only typescript-node and universal have node. The test of the
 // tools step alone builds each of them without the devcontainer command, the seed step,
-// the commit and the final build, which add time and disk for an image of 2.9 GiB
-// (typescript-node) or 15 GiB (universal, run emulated). The test of a full build uses
+// the commit and the final build, which add time and disk for an image of 2.7 GiB
+// (typescript-node) or 14 GiB (universal, run emulated). The test of a full build uses
 // base alone.
 var toolsBases = map[string]toolsBaseImage{
 	"base":            {"mcr.microsoft.com/devcontainers/base@sha256:38f9e6c291f054e3c868d95a5477cbfcf76c0fa7c218dda65dc6aa3fbfe06871", "debian", ""},
