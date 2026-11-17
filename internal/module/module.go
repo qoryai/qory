@@ -670,8 +670,8 @@ func ReadWith(name, dir string, m *Manifest, variant string, readFile func(path 
 	// shown is the module's name as the errors print it.
 	shown := accesskey.ShownName(name, false)
 	// fail is err, an error of reading the module's files, as a refusal that starts with its
-	// fix: a refusal with the module at its place, and any other error under a line that
-	// asks the reader to check that the files can be read.
+	// fix: a refusal with the module at its place, and any other error under the line
+	// "Check that you can read the files of module <name>."
 	fail := func(err error) error {
 		if _, ok := err.(*exports.Refusal); ok {
 			return exports.Prefixed("module "+shown, err)

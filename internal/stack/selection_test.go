@@ -32,10 +32,10 @@ func TestSelectionReadsKindsAndParts(t *testing.T) {
 	}
 }
 
-// TestSelectionRefusesAMistake is the errors a block gives, each with a fix that contains the
+// TestSelectionStopsAtAMistake is the errors a block returns, each with a fix that contains the
 // module and the block, so a person finds the line, and the two ways an exclude beside an only
 // contradicts it.
-func TestSelectionRefusesAMistake(t *testing.T) {
+func TestSelectionStopsAtAMistake(t *testing.T) {
 	cases := map[string]string{
 		"exclude:\n  prompts: [greet]":                         "Rename \"prompts\" in the exclude of module core to a kind or a part.\n  Kinds: skills, agents, commands, output-styles, hooks, mcp, files.\n  Parts: instructions, settings, env.\n  The exclude is in {path}.",
 		"only:\n  skills: []":                                  "Set skills in the only of module core to a list of entry names.\n  The value is not a list, or the list is empty.\n  The only is in {path}.",
