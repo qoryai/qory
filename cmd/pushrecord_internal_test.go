@@ -169,7 +169,7 @@ func TestLongLabelsAreSplitBeforeABodyPasses64KiB(t *testing.T) {
 func TestALaterCallStopsWhenAnEarlierOneFails(t *testing.T) {
 	send, sizes := recordServer(t, func(int) int { return http.StatusBadRequest })
 	_, err := recordLanded(context.Background(), send, "qory/w-1", landedRepositories(65))
-	if err == nil || !strings.HasPrefix(err.Error(), "Contact support: qory pushed "+strings.Repeat("b", 40)+" to qory/w-1, and Qory Apiary did not record it.\nQory Apiary returned 400: ") {
+	if err == nil || !strings.HasPrefix(err.Error(), "Contact support: Qory Apiary did not record the last push.\n  qory pushed "+strings.Repeat("b", 40)+" to qory/w-1.\nQory Apiary returned 400: ") {
 		t.Errorf("err = %v", err)
 	}
 	if !slices.Equal(*sizes, []int{64}) {
@@ -182,7 +182,7 @@ func TestALaterCallStopsWhenAnEarlierOneFails(t *testing.T) {
 // request has no response, and while qory waits to send again. Each returns the whole Contact
 // support line, with no step to retry.
 func TestAReportCutDuringTheCallStillGivesTheContactSupportLine(t *testing.T) {
-	const head = "Contact support: qory pushed bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb to qory/w-1, and Qory Apiary did not record it.\n"
+	const head = "Contact support: Qory Apiary did not record the last push.\n  qory pushed bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb to qory/w-1.\n"
 	for name, c := range map[string]struct {
 		send func(ctx context.Context, cancel context.CancelFunc) ([]byte, error)
 		wait bool
@@ -275,7 +275,7 @@ func TestTheResponsesToAReportAreSortedByWhoReturnedThem(t *testing.T) {
 			t.Errorf("%s: sent again = %v, want %v", name, got, c.again)
 		}
 		if c.failure != "" {
-			want := "Contact support: qory pushed " + strings.Repeat("b", 40) + " to qory/w-1, and Qory Apiary did not record it.\n" + c.failure
+			want := "Contact support: Qory Apiary did not record the last push.\n  qory pushed " + strings.Repeat("b", 40) + " to qory/w-1.\n" + c.failure
 			if got := recordFailed("qory/w-1", strings.Repeat("b", 40), c.err).Error(); got != want {
 				t.Errorf("%s: the failure is %q, want %q", name, got, want)
 			}

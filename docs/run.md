@@ -2792,14 +2792,14 @@ both are sent again. Then:
   prints that line as well, and the step fails with the push's error.
 - Any other 4xx status, the gateway's 413 `payload_too_large` among them, or the retries used
   up: the step fails, the run closes `failed` before the next session, and qory prints
-  `Contact support: qory pushed <commit> to qory/<work item id>, and Qory Apiary did not
-  record it.`, then `Qory Apiary returned <status>: <message or code>`. For a status that
-  the gateway returned, not Qory Apiary, the second line is `The gateway returned <status>:
-  <code>`, with the name of the status in place of the code when the response has none, as
-  `Service Unavailable` for a 503 with no body. For a request with no response, or one that a
-  stop or the time limit cut, the second line is `Qory Apiary sent no response: <cause>`.
-  Neither line has a step to retry. `<commit>` is the first commit of the call that
-  failed. The pushed commits stay on the forge, and the version is not stored.
+  `qory run: Contact support: Qory Apiary did not record the last push.`, then
+  `  qory pushed <commit> to qory/<work item id>.`, then `Qory Apiary returned <status>:
+  <message or code>`. For a status that the gateway returned, not Qory Apiary, the last line is
+  `The gateway returned <status>: <code>`, with the name of the status in place of the code
+  when the response has none, as `Service Unavailable` for a 503 with no body. For a request
+  with no response, or one that a stop or the time limit cut, the last line is `Qory Apiary
+  sent no response: <cause>`. No line has a step to retry. `<commit>` is the first commit of the
+  call that failed. The pushed commits stay on the forge, and the version is not stored.
 
 A removal of the setup container that failed runs no step: qory commits nothing and pushes
 nothing, and the run ends as a failed step ends it, with this line:

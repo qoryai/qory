@@ -36,9 +36,9 @@ release may change what an existing document does, and states it under Upgrading
   line follows: `qory run: The last push is on the branch, and Qory Apiary did not record
   it.` On any
   other 4xx status, the gateway's 413 `payload_too_large` among them, or when the retries are
-  used up, the run ends `failed` before the next session with `Contact support: qory pushed
-  <commit> to qory/<work item id>, and Qory Apiary did not record it.`, then `Qory Apiary
-  returned <status>: <message or code>`, or `The gateway returned <status>: <code>` for a
+  used up, the run ends `failed` before the next session with `qory run: Contact support:
+  Qory Apiary did not record the last push.`, then `  qory pushed <commit> to qory/<work item
+  id>.`, then `Qory Apiary returned <status>: <message or code>`, or `The gateway returned <status>: <code>` for a
   status that the gateway returned.
 - The `agent` image has the Node packages `typescript` 5.9.3, `libpg-query` 18.2.4,
   `parse5` 8.1.1, `postcss` 8.5.33 and `postcss-scss` 4.0.9 in `/opt/qory/parsers`. The
