@@ -23,9 +23,9 @@ func TestAProgramNotFoundPrintsNoSecret(t *testing.T) {
 		Tools:       []config.ForagerTool{{Name: "qak_files", Command: []string{"qak_acme", "serve"}, Serves: []string{"files.tools.internal"}}},
 	}
 	_, err := machineCredentials(context.Background(), r, config.Expansion{Workspace: workspace}, "run", io.Discard)
-	wantsHidden(t, err, "forager.yaml: gateway.credentials.(a name that contains an access key secret).adapter: ")
+	wantsHidden(t, err, "Fix the adapter of gateway.credentials.(a name that contains an access key secret).\n  ")
 	_, err = machineTools(r, workspace)
-	wantsHidden(t, err, "forager.yaml: gateway.tools.(a name that contains an access key secret).command: ")
+	wantsHidden(t, err, "Fix the command of gateway.tools.(a name that contains an access key secret).\n  ")
 }
 
 // wantsHidden fails the test unless err is an input error that starts with prefix,

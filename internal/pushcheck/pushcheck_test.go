@@ -368,7 +368,7 @@ func TestAWithdrawalRunsNoCheck(t *testing.T) {
 // there twice, or is there in another case.
 func TestABodyWithABadWithdrawGets422(t *testing.T) {
 	f := newFixture(t, "#!/usr/bin/env node")
-	fix := "Send the push as qory artifact push sends it, and push again. The body is not a push: "
+	fix := "Send the push as qory artifact push sends it, and push again.\n  The body is not a push: "
 	r, err := f.post(t, "/artifacts", []byte(`{"type":"spec","withdraw":"yes","files":[]}`))
 	wantRefusal(t, "withdraw yes", r, err, fix+"withdraw is not true or false.")
 	for _, body := range []string{

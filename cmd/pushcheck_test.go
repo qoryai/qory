@@ -394,7 +394,7 @@ func TestTheAgentsPushIsCheckedBeforeItLeaves(t *testing.T) {
 	if checkErr != nil || refusal == nil {
 		t.Fatalf("the push of spec got %+v, %v, want a refusal\n%s", refusal, checkErr, checkLog(t, log))
 	}
-	if refusal.Status != 422 || refusal.Code != "push_check_failed" || refusal.Message != "Fix each finding below and push again. The check for spec failed:" ||
+	if refusal.Status != 422 || refusal.Code != "push_check_failed" || refusal.Message != "Fix each finding below and push again.\n  The check for spec failed:" ||
 		len(refusal.Findings) != 1 || refusal.Findings[0] != "spec.md: the section Goal is missing" {
 		t.Errorf("the refusal is %+v", refusal)
 	}

@@ -1008,7 +1008,7 @@ func TestAHiddenHarnessShowsNoFolderOfASourceOrAnExport(t *testing.T) {
 		{"an exported module without a manifest", tools("secret-folder-8", map[string]string{"AGENTS.md": "# Tools\n"}),
 			"the module tools has no qory-module.yaml"},
 		{"an exports.dir that leads out", tools("../secret-folder-6", nil),
-			"Check the source of module tools.\n  qory.yaml in the module tools: exports.dir stacks is not a directory inside the repository"},
+			"Check the source of module tools.\n  Set the stacks directory of exports.dir to a path inside the repository.\n  exports.dir stacks is not a directory inside the repository; the code is used"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			r := c.c.run(t)
