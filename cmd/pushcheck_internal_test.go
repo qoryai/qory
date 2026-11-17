@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -285,6 +286,221 @@ func TestAnInspectThatFailsLetsTheRunGoOn(t *testing.T) {
 	}
 }
 
+// runtimesEngine is a docker command that writes each command line to the log it returns
+// and answers `info --format {{json .Runtimes}}` with out on stdout and exit code code,
+// with errOut on stderr. Every other command exits 0 and prints nothing.
+func runtimesEngine(t *testing.T, out string, code int, errOut string) (string, string) {
+	t.Helper()
+	dir := t.TempDir()
+	log := filepath.Join(dir, "engine.log")
+	script := filepath.Join(dir, "docker")
+	body := "#!/bin/sh\necho \"$*\" >> " + log + "\ncase \"$1 $2\" in\n\"info --format\") echo '" + out + "'; echo '" + errOut + "' >&2; exit " + strconv.Itoa(code) + " ;;\nesac\n"
+	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return script, log
+}
+
+// runsc is the checks' runtime in the tests of the runtime's load check.
+const runsc = "runsc"
+
+// gvisorRun is an opened run of a walled run whose policy selected an image that runs
+// under runsc, while the default image of wall.images has no runtime.
+func gvisorRun(t *testing.T) (openedRun, *runSpec) {
+	t.Helper()
+	spec := &runSpec{}
+	spec.Image = "plain"
+	spec.Images = []session.Image{{Name: "plain", Ref: "registry.example/plain:1"}, {Name: "gvisor", Ref: "registry.example/gvisor:1", Runtime: runsc}}
+	run := imageOnlyAPI{imageAPI: imageAPI{runAPIOnly: runAPIOnly{base: "http://run-api.qory.invalid/v1/runs/r1", dir: t.TempDir()}}, img: spec.Images[1]}
+	return run, spec
+}
+
+// TestAMissingRuntimeStopsTheLoad is a run whose checks run under runsc on an engine whose
+// runtimes do not list it: the load stops with the fix line and the runtime on the next
+// line, for a run from a run code and for one with none, and no container of a check is
+// created.
+func TestAMissingRuntimeStopsTheLoad(t *testing.T) {
+	stubChecks(t)
+	for fromCode, want := range map[bool]string{
+		false: "Install the container runtime on the engine, and run again.\n  The push checks' container runs under the runtime runsc, and the engine does not have it.",
+		true:  "Install the container runtime, then take the work item in again in Qory Apiary.\n  The push checks' container runs under the runtime runsc, and the engine does not have it; the code is used",
+	} {
+		docker, log := runtimesEngine(t, `{"runc":{"path":"runc"},"sysbox-runc":{"path":"sysbox-runc"}}`, 0, "")
+		run, spec := gvisorRun(t)
+		spec.Wall = &wall.Docker{Command: docker}
+		checker, err := pushChecker(context.Background(), run, t.TempDir(), "r1", spec, true, fromCode)
+		if checker != nil || err == nil || err.Error() != want {
+			t.Errorf("from a run code %v: %v, %v, want no checker and %q", fromCode, checker != nil, err, want)
+		}
+		data, _ := os.ReadFile(log)
+		if !strings.Contains(string(data), "info --format {{json .Runtimes}}") {
+			t.Errorf("from a run code %v: the engine did not get the info:\n%s", fromCode, data)
+		}
+		if strings.Contains(string(data), "create") || strings.Contains(string(data), "start") {
+			t.Errorf("from a run code %v: a check's container was made:\n%s", fromCode, data)
+		}
+	}
+}
+
+// TestAMissingRuntimeOfTheDefaultStopsTheLoad is a default image with runtime runsc, which
+// the engine does not have, and a run whose selected image has no runtime: the checks run
+// under the default's runtime, and the load stops, not the first push.
+func TestAMissingRuntimeOfTheDefaultStopsTheLoad(t *testing.T) {
+	stubChecks(t)
+	docker, _ := runtimesEngine(t, `{"runc":{}}`, 0, "")
+	run, spec := gvisorRun(t)
+	spec.Wall, spec.Image = &wall.Docker{Command: docker}, "gvisor"
+	run = imageOnlyAPI{imageAPI: run.(imageOnlyAPI).imageAPI, img: spec.Images[0]}
+	checker, err := pushChecker(context.Background(), run, t.TempDir(), "r1", spec, true, false)
+	want := "Install the container runtime on the engine, and run again.\n  The push checks' container runs under the runtime runsc, and the engine does not have it."
+	if checker != nil || err == nil || err.Error() != want {
+		t.Errorf("pushChecker = %v, %v, want no checker and %q", checker != nil, err, want)
+	}
+}
+
+// TestAMissingRuntimeOfARunWithNoDefaultStopsTheLoad is the same stop for a run with no
+// default image, whose image of the policy has the runtime.
+func TestAMissingRuntimeOfARunWithNoDefaultStopsTheLoad(t *testing.T) {
+	stubChecks(t)
+	docker, _ := runtimesEngine(t, `{"runc":{}}`, 0, "")
+	run, spec := gvisorRun(t)
+	spec.Wall, spec.Image = &wall.Docker{Command: docker}, ""
+	checker, err := pushChecker(context.Background(), run, t.TempDir(), "r1", spec, true, false)
+	if checker != nil || err == nil || !strings.HasPrefix(err.Error(), "Install the container runtime on the engine, and run again.\n") {
+		t.Errorf("pushChecker = %v, %v, want no checker and the fix line", checker != nil, err)
+	}
+}
+
+// TestARuntimeTheEngineHasLetsTheLoadGoOn is a run whose checks run under runsc on an
+// engine that lists it: the load returns the checker.
+func TestARuntimeTheEngineHasLetsTheLoadGoOn(t *testing.T) {
+	stubChecks(t)
+	docker, log := runtimesEngine(t, `{"runc":{"path":"runc"},"runsc":{"path":"runsc"}}`, 0, "")
+	run, spec := gvisorRun(t)
+	spec.Wall = &wall.Docker{Command: docker}
+	checker, err := pushChecker(context.Background(), run, t.TempDir(), "r1", spec, true, false)
+	if err != nil || checker == nil || checker.Runtime != runsc {
+		t.Errorf("pushChecker = %v, %v, want a checker of runtime runsc", checker != nil, err)
+	}
+	if data, _ := os.ReadFile(log); !strings.Contains(string(data), "info --format {{json .Runtimes}}") {
+		t.Errorf("the engine did not get the info:\n%s", data)
+	}
+}
+
+// TestAnEngineInfoThatFailsLetsTheRunGoOn is an engine whose info fails, or whose runtimes
+// do not read as Docker's list, such as Podman's: the load returns the checker and no
+// error, as it does for an image inspect that fails, and a check that cannot start fails
+// its push later.
+func TestAnEngineInfoThatFailsLetsTheRunGoOn(t *testing.T) {
+	stubChecks(t)
+	for name, c := range map[string]struct {
+		out     string
+		code    int
+		errOut  string
+		wantErr bool
+	}{
+		"not reachable": {code: 1, errOut: "Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docker daemon running?"},
+		"no list":       {out: "null"},
+		"not a list":    {out: "<no value>"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			docker, log := runtimesEngine(t, c.out, c.code, c.errOut)
+			run, spec := gvisorRun(t)
+			spec.Wall = &wall.Docker{Command: docker}
+			checker, err := pushChecker(context.Background(), run, t.TempDir(), "r1", spec, true, false)
+			if err != nil || checker == nil {
+				t.Errorf("pushChecker = %v, %v, want a checker and no error", checker != nil, err)
+			}
+			if data, _ := os.ReadFile(log); !strings.Contains(string(data), "info --format {{json .Runtimes}}") {
+				t.Errorf("the engine did not get the info:\n%s", data)
+			}
+		})
+	}
+}
+
+// runtimeNamed is a run whose selected image, and so the checks, run under runtime, on an
+// engine whose list has runc alone, and the load of its checks for a run from a run code,
+// fromCode, or with none.
+func runtimeNamed(t *testing.T, runtime string, fromCode bool) (*pushcheck.Checker, error) {
+	t.Helper()
+	docker, _ := runtimesEngine(t, `{"runc":{}}`, 0, "")
+	run, spec := gvisorRun(t)
+	spec.Wall = &wall.Docker{Command: docker}
+	spec.Images[1].Runtime = runtime
+	run = imageOnlyAPI{imageAPI: run.(imageOnlyAPI).imageAPI, img: spec.Images[1]}
+	return pushChecker(context.Background(), run, t.TempDir(), "r1", spec, true, fromCode)
+}
+
+// TestADottedRuntimeNameTheListOmitsLetsTheLoadGoOn is a runtime that Docker starts as a
+// containerd shim, a name with a "." after a first part and no "/", that docker info does
+// not list: the load returns the checker.
+func TestADottedRuntimeNameTheListOmitsLetsTheLoadGoOn(t *testing.T) {
+	stubChecks(t)
+	for _, name := range []string{"io.containerd.runsc.v1", "com.example.shim.v1"} {
+		checker, err := runtimeNamed(t, name, false)
+		if err != nil || checker == nil {
+			t.Errorf("runtime %q: %v, %v, want a checker and no error", name, checker != nil, err)
+		}
+	}
+}
+
+// TestARuntimeNameWithASlashStopsTheLoad is a runtime named like a path: Docker refuses
+// the name, so the load stops with a line to fix the name when the list omits it.
+func TestARuntimeNameWithASlashStopsTheLoad(t *testing.T) {
+	stubChecks(t)
+	for fromCode, want := range map[bool]string{
+		false: "Fix the runtime name in wall.images, and run again.\n  The push checks' container runs under the runtime /x/runsc, and Docker accepts no runtime name with a \"/\".",
+		true:  "Fix the runtime name in wall.images, then take the work item in again in Qory Apiary.\n  The push checks' container runs under the runtime /x/runsc, and Docker accepts no runtime name with a \"/\"; the code is used",
+	} {
+		checker, err := runtimeNamed(t, "/x/runsc", fromCode)
+		if checker != nil || err == nil || err.Error() != want {
+			t.Errorf("from a run code %v: %v, %v, want no checker and %q", fromCode, checker != nil, err, want)
+		}
+	}
+}
+
+// TestARuntimeNameOfNoShimStopsWithTheInstallLine is a name with no "." that the
+// list omits, and one that starts with a ".": Docker has no such runtime, so the load
+// stops with the install line.
+func TestARuntimeNameOfNoShimStopsWithTheInstallLine(t *testing.T) {
+	stubChecks(t)
+	for _, name := range []string{"runsc2", ".shim.v1"} {
+		checker, err := runtimeNamed(t, name, false)
+		if checker != nil || err == nil || !strings.HasPrefix(err.Error(), "Install the container runtime on the engine, and run again.\n") {
+			t.Errorf("runtime %q: %v, %v, want no checker and the install line", name, checker != nil, err)
+		}
+	}
+}
+
+// TestARuntimeLineStartsWithAFixOf100Characters is the first line of the stop for a missing
+// runtime, with "qory run: " in front, as it reaches the terminal: at most 100 characters,
+// for a run with a run code and one with none, and whatever the runtime's name is.
+func TestARuntimeLineStartsWithAFixOf100Characters(t *testing.T) {
+	stubChecks(t)
+	for _, c := range []struct {
+		fromCode bool
+		runtime  string
+	}{
+		{false, "a-runtime-with-a-long-name-" + strings.Repeat("x", 60)},
+		{true, "a-runtime-with-a-long-name-" + strings.Repeat("x", 60)},
+		{false, "/a-runtime-with-a-long-name-" + strings.Repeat("x", 60)},
+		{true, "/a-runtime-with-a-long-name-" + strings.Repeat("x", 60)},
+	} {
+		fromCode := c.fromCode
+		_, err := runtimeNamed(t, c.runtime, fromCode)
+		if err == nil {
+			t.Fatalf("from a run code %v: no error", fromCode)
+		}
+		first, _, _ := strings.Cut(err.Error(), "\n")
+		if n := len("qory run: " + first); n > 100 {
+			t.Errorf("from a run code %v: the first line is %d characters: %q", fromCode, n, first)
+		}
+		if strings.Contains(first, "runtime-with-a-long-name") {
+			t.Errorf("from a run code %v: the first line has the runtime's name: %q", fromCode, first)
+		}
+	}
+}
+
 // TestACheckImageThatIsNoReferenceStops is a default image, or a run's image with no
 // default, whose value is no image reference, such as one that starts with -: the load
 // stops with the fix line, and no command of the engine gets the value.
@@ -379,29 +595,39 @@ func TestPushChecksRunInTheWallsDefaultImage(t *testing.T) {
 	}
 }
 
-// TestPushChecksRunUnderTheRunsRuntime is the runtime of a run's push checks, the one
-// Forager starts the run's container under: the runtime of the entry that the default
-// names, the run's image's for a run with no default, and none for a default that is a
-// reference.
+// TestPushChecksRunUnderTheRunsRuntime is the runtime of a run's push checks: the runtime
+// of the image that the run's policy selected, when it has one, so a check never runs
+// under a weaker runtime than the run's container; otherwise the one Forager gives the
+// default image, the runtime of the entry that the default names, none for a default that
+// is a reference, and the run's image's for a run with no default.
 func TestPushChecksRunUnderTheRunsRuntime(t *testing.T) {
-	run := imageOnly{img: session.Image{Name: "devcontainer", Ref: "registry.example/devcontainer:1", Runtime: "runsc"}}
 	images := []session.Image{
 		{Name: "agent", Ref: "registry.example/agent:1", Runtime: "runsc"},
 		{Name: "plain", Ref: "registry.example/plain:1"},
 		{Name: "devcontainer", Ref: "registry.example/devcontainer:1", Runtime: "kata"},
 	}
-	for _, c := range []struct{ image, want string }{
-		{"agent", "runsc"},
-		{"devcontainer", "kata"},
-		{"plain", ""},
-		{"registry.example/other:2", ""},
-		{"", "runsc"},
+	for _, c := range []struct {
+		name, image string
+		run         session.Image
+		want        string
+	}{
+		{"selected entry with a runtime, default with none", "plain", session.Image{Name: "gvisor", Ref: "registry.example/gvisor:1", Runtime: "runsc"}, "runsc"},
+		{"selected entry with a runtime, default with another", "devcontainer", session.Image{Name: "gvisor", Ref: "registry.example/gvisor:1", Runtime: "runsc"}, "runsc"},
+		{"selected entry with a runtime, default a reference", "registry.example/other:2", session.Image{Name: "gvisor", Ref: "registry.example/gvisor:1", Runtime: "runsc"}, "runsc"},
+		{"selected entry with a runtime, no default", "", session.Image{Name: "gvisor", Ref: "registry.example/gvisor:1", Runtime: "runsc"}, "runsc"},
+		{"selected entry with none, default with a runtime", "agent", session.Image{Name: "plain", Ref: "registry.example/plain:1"}, "runsc"},
+		{"selected entry with none, default with another", "devcontainer", session.Image{Name: "plain", Ref: "registry.example/plain:1"}, "kata"},
+		{"selected entry with none, default with none", "plain", session.Image{Name: "plain", Ref: "registry.example/plain:1"}, ""},
+		{"selected entry with none, default a reference", "registry.example/other:2", session.Image{Name: "plain", Ref: "registry.example/plain:1"}, ""},
+		{"selected entry with none, no default", "", session.Image{Name: "plain", Ref: "registry.example/plain:1"}, ""},
 	} {
-		spec := &runSpec{}
-		spec.Image, spec.Images = c.image, images
-		if got := checkRuntime(run, spec); got != c.want {
-			t.Errorf("the default %q: runtime %q, want %q", c.image, got, c.want)
-		}
+		t.Run(c.name, func(t *testing.T) {
+			spec := &runSpec{}
+			spec.Image, spec.Images = c.image, images
+			if got := checkRuntime(imageOnly{img: c.run}, spec); got != c.want {
+				t.Errorf("the default %q, the run's image %q: runtime %q, want %q", c.image, c.run.Name, got, c.want)
+			}
+		})
 	}
 }
 
@@ -436,6 +662,25 @@ func TestTheLoadedCheckerOfARunWithNoDefaultHasTheRunsRuntime(t *testing.T) {
 	}
 }
 
+// TestTheLoadedCheckerRunsUnderTheSelectedImagesRuntime is a run whose policy selects an
+// entry of wall.images with runsc while the default entry has no runtime: pushChecker
+// returns a checker of the default image and of runtime runsc.
+func TestTheLoadedCheckerRunsUnderTheSelectedImagesRuntime(t *testing.T) {
+	stubChecks(t)
+	docker, _ := loggingEngine(t, "")
+	spec := &runSpec{}
+	spec.Wall, spec.Image = &wall.Docker{Command: docker}, "plain"
+	spec.Images = []session.Image{{Name: "plain", Ref: "registry.example/plain:1"}, {Name: "gvisor", Ref: "registry.example/gvisor:1", Runtime: "runsc"}}
+	run := imageOnlyAPI{imageAPI: imageAPI{runAPIOnly: runAPIOnly{base: "http://run-api.qory.invalid/v1/runs/r1", dir: t.TempDir()}}, img: session.Image{Name: "gvisor", Ref: "registry.example/gvisor:1", Runtime: "runsc"}}
+	checker, err := pushChecker(context.Background(), run, t.TempDir(), "r1", spec, true, true)
+	if err != nil || checker == nil {
+		t.Fatalf("pushChecker = %v, %v, want a checker", checker != nil, err)
+	}
+	if checker.Image != "registry.example/plain:1" || checker.Runtime != "runsc" {
+		t.Errorf("the checker is of image %q and runtime %q, want registry.example/plain:1 and runsc", checker.Image, checker.Runtime)
+	}
+}
+
 // imageOnlyAPI is [imageAPI] whose Image returns img, with its runtime.
 type imageOnlyAPI struct {
 	imageAPI
@@ -443,19 +688,6 @@ type imageOnlyAPI struct {
 }
 
 func (r imageOnlyAPI) Image() session.Image { return r.img }
-
-// TestAReferenceDefaultIgnoresTheRunsImageRuntime is a run whose policy selects an entry
-// with a runtime while the default is a reference: the checks run in the default, with no
-// runtime.
-func TestAReferenceDefaultIgnoresTheRunsImageRuntime(t *testing.T) {
-	run := imageOnly{img: session.Image{Name: "agent", Ref: "registry.example/agent:1", Runtime: "runsc"}}
-	spec := &runSpec{}
-	spec.Image = "registry.example/other:2"
-	spec.Images = []session.Image{{Name: "agent", Ref: "registry.example/agent:1", Runtime: "runsc"}}
-	if got := checkRuntime(run, spec); got != "" {
-		t.Errorf("runtime %q for a default that is a reference, want none", got)
-	}
-}
 
 // checkNotSet is an opened run whose SetRunAPICheck returns err.
 type checkNotSet struct {
