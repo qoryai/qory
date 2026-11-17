@@ -2528,8 +2528,8 @@ The push proxy is the run's second proxy on the run's gateway. qory starts it fo
 after it removed the setup container, and closes it when the push returns. It sets only the
 run configuration's push credentials, on the hosts and paths of their items, and returns
 403 to every other host and path. The run's policy does not apply there. The run's gateway
-returns 403 to a push to any ref but the run's branch, as the credential's `push_ref` is the
-one ref a push may change.
+returns 403 to a push that is not a plain push to the credential's `push_ref`, which is the
+run's branch: a push to any other ref, a signed push, and a push with push options.
 
 A run whose run configuration has no push credential has no push proxy. The step fails with
 `qory run: Add a push credential to the run configuration: this run has no push proxy.`,
