@@ -459,6 +459,8 @@ type PushedCommit struct {
 // commit it has as a no-op, so a caller may send the same call again. A list with no
 // repository, with more than [MaxPushedCommits], or with a commit that is not a full
 // lowercase commit id returns an [Error] with the code [CodeInvalidRequest] and sends nothing.
+// PushedCommits does not check the size of the body: split a long list with [SplitPushedCommits]
+// first, and send one call for each list.
 func (c *Client) PushedCommits(ctx context.Context, commits []PushedCommit) error {
 	if len(commits) == 0 || len(commits) > MaxPushedCommits {
 		return &Error{
