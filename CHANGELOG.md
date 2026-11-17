@@ -466,9 +466,19 @@ release may change what an existing document does, and states it under Upgrading
   as with a run code.
 - Each run has a route from its session to `qory run`: a program in the session sends a
   plain HTTP request to `QORY_HOST_URL`, `http://host.qory.invalid`, through `HTTP_PROXY`.
-  qory serves no path on it, and answers `404` to a request of the session that runs. The
-  setup container of `wall.setup: outside` gets neither the variable nor the route. See The
-  route to qory in `docs/run.md`.
+  A run with a wall serves the two suite paths on it, and any other request gets `404`; a
+  run with no wall serves none. The setup container of `wall.setup: outside` gets neither the
+  variable nor the route. See The route to qory in `docs/run.md`.
+- A script in a session starts the repository's full test suite outside the session with
+  `POST /v1/suites {"commit": "<id>"}` on that route, and reads its state, counts and output
+  with `GET /v1/suites/<id>`. qory runs the `full` command of the build plan that the work
+  item had when the run started, on a clone of the commit, in a container of the run's image
+  with no network, and reads the counts from the row's JUnit XML result file. The suite's
+  limit is `command_limits_minutes.full_suite`, 60 minutes by default. After the session
+  succeeded, qory waits for the suite, and posts `changes-requested` with one point for a
+  red suite over a `passed` verdict or none, or adds the point to an `escalate`; a green
+  suite posts nothing. If the post fails, the run closes `failed`. See The full suite in
+  `docs/run.md`.
 
 ### Changed
 

@@ -2530,7 +2530,9 @@ through a credential that has no `push_ref`, as a credential in forager.yaml has
 
 The step counts toward the run's time limit, and has 120 seconds when the run has less left,
 also after the session used up the limit. A run can pass its time limit by up to 120
-seconds. A first signal, before or during the step, cuts the step to at most 15 seconds. A
+seconds, and by up to 125 seconds when [the wait for the full
+suite](#the-full-suite) came before the step and ran to the limit. A first signal, before or
+during the step, cuts the step to at most 15 seconds. A
 second signal ends the step at once. A step that one of these ended has the state
 `cancelled`, and the commits it made stay in the working folder.
 
@@ -3278,17 +3280,118 @@ walled or not, with the number of the session that sent it. The session's setup 
 with `wall.setup: inside` get `QORY_HOST_URL` too; the setup container of `wall.setup:
 outside` gets neither the variable nor the route.
 
-qory serves no path on the route. Each answer is JSON, `{"error": <code>, "message": <text>}`:
+A run with a wall serves two paths on the route, `POST /v1/suites` and `GET /v1/suites/<id>`,
+see [The full suite](#the-full-suite). A run with no wall serves none: each request of the
+session that runs gets `404 not_found`. Each answer is JSON, `{"error": <code>, "message": <text>}`:
 
 | Status | `error` | When |
 |---|---|---|
-| `404` | `not_found` | a request of the session that runs |
+| `404` | `not_found` | a path other than the two suite paths, or any path of a run with no wall |
+| `405` | `method_not_allowed` | a method other than `POST` on `/v1/suites` or `GET` on `/v1/suites/<id>` |
 | `503` | `session_not_running` | a request of another session of the run, or one with no valid session number |
 
 The run's proxy answers some requests itself, in the same form, such as `503` for a request
 outside a session's launch, `413` for a body over 1 MiB, and `429` for more than 10 requests
 of the run in a second. Each request of the route is a `dev.qory.run.egress` event with the
 channel `qory_host`.
+
+### The full suite
+
+A script in the session starts the repository's full test suite outside the session, and the
+agent cannot change the command, the limit or the files that the suite runs on.
+
+`POST /v1/suites` with the body `{"commit": "<id>"}` starts the suite on that commit. The
+commit is 40 or 64 lower-case hexadecimal digits, and the body has no other member. qory
+answers at once with `201` and `{"suite": "su_<8 hex digits>", "commit": "<id>", "state":
+"started"}`. A request for a commit that has a suite returns that suite with `200` and its
+state. A suite for a newer commit stops every suite that still runs; the older suite ends
+`stopped`.
+
+`GET /v1/suites/<id>` returns `suite`, `commit`, `state`, `counts`, `minutes` and `output`:
+
+| Member | Value |
+|---|---|
+| `state` | `running`, `passed`, `failed`, `timeout` or `stopped` |
+| `counts` | `{"tests": n, "failed": n, "skipped": n}` from the result file, or `null` when qory cannot read it |
+| `minutes` | the time the suite has run or ran, in whole minutes, at least 1 |
+| `output` | the last 64 KiB of what the command printed, with the run's secrets masked |
+
+These requests get an error:
+
+| Status | `error` | Cause |
+|---|---|---|
+| `400` | `field_not_allowed` | the body has a member other than `commit`: `Send only commit in the suite request: field <name> is not allowed.` |
+| `400` | `bad_request` | the body is not a JSON object |
+| `400` | `commit_missing` | the body has no `commit` |
+| `400` | `bad_commit` | `commit` is not 40 or 64 lower-case hexadecimal digits, or is there twice |
+| `404` | `unknown_suite` | `Use the suite id that POST /v1/suites returned: <id> is unknown.` |
+| `409` | `no_build_plan` | the work item had no build plan when the run started, or qory could not read it |
+| `409` | `no_full_command` | the build plan has no `full` row with a command |
+| `422` | `commit_not_taken` | git could not take the commit from the session's checkout |
+| `500` | `suite_unavailable` | qory could not make the folder of the suites |
+| `503` | `run_ending` | the run is stopping |
+
+**Command.** The command is the `full` row of the table under `## Commands` in the build plan
+that the work item has when the run starts. qory reads the plan once, before the session
+joins, from the artifact `build-plan`: the name `main`, or the one name the work item has, at
+its newest version that is not cancelled. A build plan that the agent pushes during the
+session changes nothing. qory runs the command as `sh -c <command>` in the top folder of the
+clone. Its row has a `Result file`, a path below that folder, or `none`.
+
+**Where it runs.** qory clones the commit from the session's checkout with git as `qory run`
+runs it on this machine (hooks, the file monitor and every configuration file of the person
+off, no transport but a path), into a new folder of `suites/` under the run's folder. The
+suite runs in a container of the run's image, started as the wall's user, with that folder as
+its only bind, the wall's limits of memory and processors, the label of the run, and
+`--network none`. The clone has the files of the commit and nothing else: no submodule, no
+variable of the session, and nothing that a setup command installed or wrote, so a suite that
+needs the network or such files fails. A write to the session's checkout after the
+request changes nothing in the clone. qory removes the container when the suite ends, is
+stopped or reaches its limit, and removes the clone when the run ends.
+
+**Limit.** A suite may take 60 minutes. A repository sets another limit in `qory.yaml`, in
+`harness.extensions.software-factory.command_limits_minutes.full_suite`, a whole number from 1 to
+60; qory reads it from the harness composed at `target_version`, so a commit on the work item's
+branch does not change it. Any other value is read as 60. A suite past its limit is stopped and ends
+`timeout`.
+
+**Result file.** After the command exits, qory reads the result file, if the command wrote it
+anew: a file with the content and the modification time that the commit had counts as none.
+qory reads only a regular file of at most 16 MiB at a path of letters, digits and `. _ / @ + -`,
+with no link on the way. The format is JUnit XML, the form that most test runners write and
+that the harness's checks read: each `testcase` element is a test; a `testcase` with a
+`failure` or `error` element failed; one with a `skipped` element, and no failure, was
+skipped. The file needs a `testsuite` or `testsuites` element. A `testsuite` that states
+more tests, failures or skipped tests than its testcases have, or a `failure` outside every
+`testcase`, makes the suite `failed` with `counts` `null`.
+
+**State.** The suite is `failed` when the command exits other than 0, when a test failed, and
+when it ran 0 tests. Skipped tests do not fail it: `counts.skipped` shows them. With exit
+status 0 and no readable result file, the suite is `passed` and `counts` is `null`.
+`stopped` is a suite that a newer commit's suite, the end of the run or a stop of `qory run`
+ended.
+
+**After the session.** When the session exits and succeeded, qory waits for the newest suite
+of the run, up to the run's `--timeout` and until `qory run` is stopped, then stops what still
+runs; a run with no suite has no wait. No agent runs during the wait, and the push step
+comes after it. A suite that passed posts nothing, and the agent's verdict stands. A suite
+that did not pass counts as red, and qory posts a verdict through the run API:
+
+| The run's newest verdict | What qory posts |
+|---|---|
+| none, or `passed` | `changes-requested` with one point, for example `The full suite failed on 0123456789ab: 2 of 140 tests failed.` |
+| `changes-requested` | nothing: the verdict stands |
+| `escalate` with up to 19 points | the same `escalate` and `track`, with that point added |
+| `escalate` with 20 points | nothing: the verdict stands |
+
+If the wait ends at the run's time limit or at a stop, qory stops the suite, posts the verdict
+for it with one request that has 5 seconds, and closes the run `cancelled`, with the reason
+`timeout` or `interrupted`, as it does for a push step that a limit ends. A second signal ends
+the post at once. In any other case the post has up to 5 requests. If qory cannot post the verdict, it closes the run
+`failed` and exits 1, so a verdict of `passed` that the agent posted does not stand over a red
+suite. `qory run` prints the lines `started the full suite <id> on <commit>`, `the full suite
+<id> on <commit> is <state>` and, for a post that failed, `Take the work item in again in Qory
+Apiary: qory could not post the verdict of the red full suite.`
 
 ## Credentials the agent never has
 
