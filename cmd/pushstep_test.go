@@ -223,10 +223,14 @@ type pushRepo struct {
 	onSetup      func(session.SetupSpec)
 	mask         string
 	// pushStarted, when set, runs as the push step starts. removeSetup, when set, is the
-	// run's RemoveSetup, and proxyErr the error of the run's HostProxy.
+	// run's RemoveSetup, and proxyErr the error of the run's HostProxy and PushProxy.
 	pushStarted func()
 	removeSetup func(context.Context) error
 	proxyErr    func() error
+	// pushVia, when set, is the run's push proxy, in place of its host proxy. noPush has
+	// a run with no push credential, whose PushProxy returns Forager's error for one.
+	pushVia proxygit.Proxy
+	noPush  bool
 	// mountsOf, when set, gets the spec of the agent's session.
 	mountsOf func(session.SessionSpec)
 	// onOpen, when set, gets the spec of each open. onSetCheck, when set, gets the check
@@ -332,7 +336,8 @@ func (p *pushRepo) run(t *testing.T, agent func(dir string), result func() (*ses
 	closes, calls, restore := cmd.OpenNowhereWith(cmd.Nowhere{
 		System: proxygittest.Host, Repositories: p.repositories, RunAPI: p.api.base(),
 		Proxy: p.h.server.Proxy.URL, CABundle: p.h.server.Proxy.CABundle, Dir: p.h.runDir,
-		RemoveSetup: p.removeSetup, HostProxyErr: p.proxyErr, AtGateway: p.real, Real: p.real,
+		RemoveSetup: p.removeSetup, HostProxyErr: p.proxyErr, PushProxyErr: p.proxyErr, NoPushProxy: p.noPush,
+		PushProxy: p.pushVia.URL, PushCABundle: p.pushVia.CABundle, AtGateway: p.real, Real: p.real,
 		SetRunAPICheck: p.onSetCheck, RunAPIErr: p.runAPIErr, PolicyImage: p.policyImage,
 		Setup: func(spec session.SetupSpec) error {
 			if p.setup != nil {
@@ -1753,8 +1758,8 @@ func TestAVersionOfAnotherRunOrContentIsNotStored(t *testing.T) {
 	}
 }
 
-// TestTheStepClosesItsProxyBeforeTheRunCloses is the host proxy of the step, which ends
-// before the close, and every run API and host proxy call before it, which fail after.
+// TestTheStepClosesItsProxyBeforeTheRunCloses is the push proxy of the step, which ends
+// before the close, and every run API and push proxy call before it, which fail after.
 func TestTheStepClosesItsProxyBeforeTheRunCloses(t *testing.T) {
 	p := newPushRepo(t, "write")
 	r := p.run(t, writesAndCommits(t), nil)
@@ -1762,14 +1767,14 @@ func TestTheStepClosesItsProxyBeforeTheRunCloses(t *testing.T) {
 	opened := 0
 	for _, call := range r.calls {
 		switch call {
-		case "host proxy":
+		case "push proxy":
 			opened++
-		case "host proxy closed":
+		case "push proxy closed":
 			opened--
 		}
 	}
 	if opened != 0 {
-		t.Errorf("%d host proxies stayed open: %q", opened, r.calls)
+		t.Errorf("%d push proxies stayed open: %q", opened, r.calls)
 	}
 }
 
@@ -1938,7 +1943,7 @@ func TestAFailedRemovalOfTheSetupContainerRunsNoPush(t *testing.T) {
 	}
 }
 
-// TestAWallThatStaysRunsNoGit is a HostProxy that fails because the wall of a session could
+// TestAWallThatStaysRunsNoGit is a PushProxy that fails because the wall of a session could
 // not be removed, for each end of the session: the agent may still run, so the step runs
 // no git, and a lock stays.
 func TestAWallThatStaysRunsNoGit(t *testing.T) {
