@@ -482,6 +482,15 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Changed
 
+- A prebuild started from Qory Apiary applies the instance's Largest prebuilt image
+  setting, which the run documents carry as `largest_prebuilt_image_bytes`, in decimal
+  bytes. The limit applies to the repository's image, before qory adds Chromium, ffmpeg
+  and the parsers. When that image is larger, the prebuild stops before the tools step with
+  `Make the image smaller, or contact support to raise Largest prebuilt image.` on line 1,
+  then the size and the limit in GB and in bytes, and removes an image the build made. An
+  image of exactly the limit is kept, and without the member any size is kept. The last
+  line of a successful prebuild still prints the final size. `qory prebuild` has no limit.
+  See `docs/run.md`.
 - A push check's container runs under the `runtime` of the `wall.images` entry that the
   run's policy selects, such as `runsc` (gVisor), when that entry has one. Before, it ran
   under the default image's `runtime` even when the run's container ran under another.

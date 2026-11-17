@@ -34,3 +34,6 @@ func PolicySource(record string) string { return policySource(record) }
 
 // ReadResult is readResult: the step's result in out, as Launch reads it.
 func ReadResult(out string) error { _, err := readResult(out); return err }
+
+// ShownError is shownError.
+func ShownError(text string) string { return shownError(text) }

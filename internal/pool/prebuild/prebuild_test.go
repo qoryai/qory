@@ -465,6 +465,8 @@ func (e *env) build(ctx context.Context, o devimage.Options) (devimage.Result, e
 		return devimage.Result{}, &devimage.RefusedError{Err: errors.New("set wall.user to uid:gid, two numbers, neither of them 0")}
 	case "limit":
 		return devimage.Result{}, devimage.ErrLimit
+	case "toobig":
+		return devimage.Result{}, &devimage.RefusedError{Err: errors.New(testTooBig)}
 	case "missing":
 		return devimage.Result{}, pullError{why: "Error response from daemon: manifest for r.example/env:1 not found: manifest unknown: manifest unknown", missing: true}
 	case "unreachable":
@@ -476,6 +478,10 @@ func (e *env) build(ctx context.Context, o devimage.Options) (devimage.Result, e
 	}
 	return devimage.Result{Target: o.Tag, Environment: e.script.Environment, Base: e.script.Base}, nil
 }
+
+// testTooBig is the build's refusal of an image over the run's largest size, as
+// internal/prebuild writes it.
+const testTooBig = "Make the image smaller, or contact support to raise Largest prebuilt image.\nThe image is 5.0 GB (5000000001 bytes).\nThe limit is 5.0 GB (5000000000 bytes). The image is removed."
 
 // cmpOr is s, or or when s is empty.
 func cmpOr(s, or string) string {
@@ -607,6 +613,8 @@ type env struct {
 	built   []devimage.Options
 	// joins are the join's specs.
 	joins []session.SessionSpec
+	// largest is the run's LargestImageBytes, 0 for none.
+	largest int64
 }
 
 func (e *env) log(line string) { e.mu.Lock(); e.logs = append(e.logs, line); e.mu.Unlock() }
@@ -694,7 +702,9 @@ func (e *env) launchIn(t *testing.T, parent context.Context, stop bool) (prebuil
 		}()
 	}
 	h := &holder{b: []byte(testKey)}
-	res, err := prebuild.Launch(ctx, e.settings, testRun(h, e.script.EnvironmentImage))
+	run := testRun(h, e.script.EnvironmentImage)
+	run.LargestImageBytes = e.largest
+	res, err := prebuild.Launch(ctx, e.settings, run)
 	if h.cleared == 0 || !bytes.Equal(h.b, make([]byte, len(testKey))) {
 		t.Error("the key's holder was not cleared")
 	}
