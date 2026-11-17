@@ -164,7 +164,7 @@ func TestAModuleNameWithASecretIsLeftOutOfAStackRefusal(t *testing.T) {
 	isolate(t)
 	body := "apiVersion: qory.dev/v1alpha1\nmodules:\n  - name: qak_m\n    exclude:\n      prompts: [greet]\n"
 	_, err := Load(write(t, body))
-	want := `Rename "prompts" in the exclude of module (a name that contains an access key secret) to a kind or a part.`
+	want := `Rename "prompts" in the exclude of module a hidden name to a kind or a part.`
 	if err == nil || !strings.Contains(err.Error(), want) || strings.Contains(err.Error(), "qak_") {
 		t.Errorf("%v, want one that contains %q", err, want)
 	}
