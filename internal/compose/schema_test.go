@@ -442,6 +442,48 @@ func TestConfigSchemaKnowsTiers(t *testing.T) {
 	}
 }
 
+// TestSchemasKnowTheThreeWorkflowAccessLevels is the config schema and the stack schema
+// with a workflow of each access level: read, write-no-push and write pass, and any other
+// value, such as write_no_push or admin, fails.
+func TestSchemasKnowTheThreeWorkflowAccessLevels(t *testing.T) {
+	c := jsonschema.NewCompiler()
+	composeSchema, err := c.Compile("../../contracts/harness/v1/config.schema.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	stackSchema, err := c.Compile("../../contracts/harness/v1/stack.schema.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		access string
+		valid  bool
+	}{
+		{"read", true}, {"write-no-push", true}, {"write", true},
+		{"write_no_push", false}, {"push", false}, {"admin", false}, {"", false},
+	} {
+		in := `"workflows": {"fix": {"access": "` + c.access + `"}}`
+		for name, schema := range map[string]struct {
+			schema *jsonschema.Schema
+			body   string
+		}{
+			"config": {composeSchema, `{"apiVersion": "qory.dev/v1alpha1", ` +
+				`"harness": {"target": {"runtime": "claude"}, ` +
+				`"modules": [{"name": "app"}], ` + in + `}}`},
+			"stack": {stackSchema, `{"apiVersion": "qory.dev/v1alpha1", ` +
+				`"modules": [{"name": "app"}], ` + in + `}`},
+		} {
+			var doc any
+			if err := json.Unmarshal([]byte(schema.body), &doc); err != nil {
+				t.Fatal(err)
+			}
+			if err := schema.schema.Validate(doc); (err == nil) != c.valid {
+				t.Errorf("%s schema, access %q: %v, want valid %t", name, c.access, err, c.valid)
+			}
+		}
+	}
+}
+
 // TestSchemasKnowWorkflowHooks takes harness.hooks with a program or an agent, and hook
 // points and extending.hooks in a stack, and refuses a hook with both or neither, a
 // review with a program, an unknown kind or key, a point outside end, start and inside,

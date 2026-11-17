@@ -201,8 +201,9 @@ func codeRunOf(doc contracts.Documents) (*codeRun, error) {
 	return r, nil
 }
 
-// writes reports whether the run r may write to its target: its access is
-// [stack.AccessWrite]. A run not from a run code has no access, and neither does a run
+// writes reports whether the documents of the run r give it the access to write and push
+// to its target: its access is [stack.AccessWrite]. The workflow's access can lower it,
+// see [accessOf]. A run not from a run code has no access, and neither does a run
 // whose documents have no target.
 func (r *codeRun) writes() bool {
 	return r != nil && r.access == stack.AccessWrite
