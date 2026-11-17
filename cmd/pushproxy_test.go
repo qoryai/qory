@@ -11,8 +11,8 @@ import (
 )
 
 // noPushCredentialLines are the lines of a push step whose run has no push credential.
-const noPushCredentialLines = "qory run: Contact support: this run has no push credential, so qory pushed nothing.\n" +
-	"  The run configuration has no credential with purpose push, so qory pushed nothing; the code is used"
+const noPushCredentialLines = "qory run: This run has no push credential, so qory pushed nothing.\n" +
+	"  The run configuration has no credential with purpose push."
 
 // TestThePushGoesThroughThePushProxy is a write run whose host proxy and push proxy are
 // two stand-in proxies to one forge, with a count of their tunnels each. The fetch opens
@@ -45,7 +45,7 @@ func TestThePushGoesThroughThePushProxy(t *testing.T) {
 
 // TestARunWithNoPushCredentialStopsAtThePush is a write run whose PushProxy returns
 // Forager's error for a run with no push credential: the push step fails with the line
-// that starts with the fix, in at most 100 characters, and no git runs against the forge
+// that has the cause, in at most 100 characters, and no git runs against the forge
 // from the push step on, so no tunnel opens, the forge has no branch and the run API gets
 // no POST.
 func TestARunWithNoPushCredentialStopsAtThePush(t *testing.T) {
@@ -60,7 +60,7 @@ func TestARunWithNoPushCredentialStopsAtThePush(t *testing.T) {
 	}
 	wants(t, r.out, noPushCredentialLines+"\n")
 	for _, line := range strings.Split(r.out, "\n") {
-		if strings.HasPrefix(line, "qory run: Contact support: this run has no push credential") && len(line) > 100 {
+		if strings.HasPrefix(line, "qory run: This run has no push credential") && len(line) > 100 {
 			t.Errorf("line 1 has %d characters, want at most 100: %q", len(line), line)
 		}
 	}

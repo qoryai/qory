@@ -136,7 +136,7 @@ const (
 	textEnvImage     = "the image sets %s in its environment, which change what the agent does; the image is removed"
 	textProxyBaked   = "the final image sets %s in its environment to a value the image before the commands did not; the image is removed"
 	textSizeUnread   = "docker image inspect printed a size that does not read: %s"
-	textTooBig       = "Make the image smaller, or contact support to raise Largest prebuilt image.\nThe repository's image is %s, before qory adds Chromium, ffmpeg and the parsers.\nThe limit is %s.%s"
+	textTooBig       = "The repository's image is over the limit for a prebuilt image.\n  The image is %s, before qory adds Chromium, ffmpeg and the parsers.\n  The limit is %s.%s"
 	textTooBigGone   = " The image is removed."
 	textNotCopied    = "the repository could not be copied to " + Workspace + ": %s"
 	textConfigUnread = "docker image inspect printed a configuration that does not read"

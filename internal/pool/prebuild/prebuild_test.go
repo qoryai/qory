@@ -481,7 +481,7 @@ func (e *env) build(ctx context.Context, o devimage.Options) (devimage.Result, e
 
 // testTooBig is the build's refusal of an image over the run's largest size, as
 // internal/prebuild writes it.
-const testTooBig = "Make the image smaller, or contact support to raise Largest prebuilt image.\nThe image is 5.0 GB (5000000001 bytes).\nThe limit is 5.0 GB (5000000000 bytes). The image is removed."
+const testTooBig = "The repository's image is over the limit for a prebuilt image.\n  The image is 5.0 GB (5000000001 bytes).\n  The limit is 5.0 GB (5000000000 bytes). The image is removed."
 
 // cmpOr is s, or or when s is empty.
 func cmpOr(s, or string) string {

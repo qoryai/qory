@@ -36,10 +36,10 @@ release may change what an existing document does, and states it under Upgrading
   `session_lost` or `batch_refused`. A second line follows: `qory run: The last push is on
   the branch, and Qory Apiary did not record it.` On any other 4xx status, the gateway's 413
   `payload_too_large` among them, or when the retries are used up, the run ends `failed`
-  before the next session with `qory run: Contact support: Qory Apiary did not record the
-  last push.`, then `  qory pushed <commit> to qory/<work item id>.`, then `Qory Apiary
-  returned <status>: <message or code>`, or `The gateway returned <status>: <code>` for a
-  status that the gateway returned.
+  before the next session with `qory run: Qory Apiary did not record the last push.`,
+  then `  qory pushed <commit> to qory/<work item id>.`, then `  Qory Apiary returned
+  <status>: <message or code>`, or `  The gateway returned <status>: <code>` for a status
+  that the gateway returned.
 - A stack's workflow may set `tier` to `light`, `fast` or `thinking`, which names the
   main session's model and effort for a dispatched run. Any other value refuses the
   stack. `qory run` does not read it.
@@ -517,9 +517,9 @@ release may change what an existing document does, and states it under Upgrading
   build plan that the agent wrote, such as no `full` row, it posts `changes-requested` with the
   point and a fix, and over an agent's `changes-requested` it adds the point. A session
   whose after step did not run posts `escalate` with `The full suite did not run: ...`, and so does
-  a run API that cannot be reached at the launch. A container that did not start posts `Contact
-  support: ...`, with the macOS case named. qory prints the same cause, and the fix first, as a line at
-  the launch, and the cause alone as the line at the end of the run. A step that reaches its limit
+  a run API that cannot be reached at the launch. A container that did not start posts the cause alone, `The full
+  suite did not start, because its container ...`, with the macOS case named. qory prints the
+  same cause as a line at the launch, and in fewer words as the line at the end of the run. A step that reaches its limit
   before the suite's command started posts `escalate`; one that reaches it after stays red. A green suite posts
   nothing. If qory cannot post the verdict, the run closes `failed`. A stop of `qory run` during
   the suite closes the run `cancelled`, with the reason `interrupted`. See The full suite in
@@ -536,14 +536,14 @@ release may change what an existing document does, and states it under Upgrading
   and changes nothing for it.
 - The push step of a write run pushes through the run's push proxy, which sets the run
   configuration's push credentials alone, and the run's proxy no longer adds push
-  credentials. A run with no push credential stops at the push with `Contact
-  support: this run has no push credential, so qory pushed nothing.` The fetch, the
+  credentials. A run with no push credential stops at the push with `This run
+  has no push credential, so qory pushed nothing.` The fetch, the
   runtime's install, and a prebuild stay on the run's proxy.
 - A prebuild started from Qory Apiary applies the instance's Largest prebuilt image
   setting, which the run documents carry as `largest_prebuilt_image_bytes`, in decimal
   bytes. The limit applies to the repository's image, before qory adds Chromium, ffmpeg
   and the parsers. When that image is larger, the prebuild stops before the tools step with
-  `Make the image smaller, or contact support to raise Largest prebuilt image.` on line 1,
+  `The repository's image is over the limit for a prebuilt image.` on line 1,
   then the size and the limit in GB and in bytes, and removes an image the build made. An
   image of exactly the limit is kept, and without the member any size is kept. The last
   line of a successful prebuild still prints the final size. `qory prebuild` has no limit.
@@ -588,7 +588,7 @@ release may change what an existing document does, and states it under Upgrading
   the fix, in at most 100 characters, and the indented lines after it show the cause, as the
   compose errors do. Which input fails, and the exit status, stay the same.
 - When the push of a run's work gets 403 from the run's push proxy, the first line of the
-  error is `Contact support: the push was refused (403).` The line `One of these most
+  error is `The push was refused (403).` The line `One of these most
   likely stopped it:` follows, then one line for each likely cause: the push proxy refuses
   a push that is not a plain push to the `push_ref` of the push credential (for example a
   signed push or a push with push options), and qory pushes to

@@ -37,7 +37,7 @@ const (
 	textPushStepOne     = "push %s to %s and 1 further repository"
 	textPushStepMany    = "push %s to %s and %d further repositories"
 	textPushNoProxy     = "take the work item in again in Qory Apiary: the run's push proxy, through which qory pushes the run's commits, did not open: %s" + codeUsed
-	textPushNoCred      = "Contact support: this run has no push credential, so qory pushed nothing.\n  The run configuration has no credential with purpose push, so qory pushed nothing" + codeUsed
+	textPushNoCred      = "This run has no push credential, so qory pushed nothing.\n  The run configuration has no credential with purpose push."
 	textPushNoRunAPI    = "take the work item in again in Qory Apiary: the run API, which stores the version of the artifact " + branchType + ", is not reachable from this run: %s" + codeUsed
 	textNoBranchType    = "Define the artifact type " + branchType + " in the workspace's Artifact types, then %s, then run the round again"
 	textNotStored       = "%s, then take the work item in again: qory pushed %s, and the version of the artifact " + branchType + " was not stored: %s" + codeUsed

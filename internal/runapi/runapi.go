@@ -451,7 +451,7 @@ func VerdictBody(verdict string, points []Point) ([]byte, error) {
 
 // The limits of one pushed-commits call: MaxPushedCommits repositories, and a body of
 // MaxPushedCommitsBytes bytes. The gateway returns 413 `payload_too_large` for a larger
-// body, and the step fails with Contact support.
+// body, and the step fails.
 const (
 	MaxPushedCommits      = 64
 	MaxPushedCommitsBytes = 64 * 1024

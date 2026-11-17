@@ -478,7 +478,7 @@ func TestASuiteThatCannotStartPostsAnEscalate(t *testing.T) {
 		end   session.AfterResult
 		want  string
 	}{
-		{"the after step could not run", "", session.AfterResult{State: event.StateFailed, ExitCode: -1}, `{"verdict":"escalate","points":[{"text":"Contact support: the full suite did not start, because its container did not start.","action":"run_again"}]}`},
+		{"the after step could not run", "", session.AfterResult{State: event.StateFailed, ExitCode: -1}, `{"verdict":"escalate","points":[{"text":"The full suite did not start, because its container did not start.","action":"run_again"}]}`},
 		{"no folder", "", session.AfterResult{State: event.StateFailed, ExitCode: 70}, `{"verdict":"escalate","points":[{"text":"The full suite did not start: the script could not make a folder it needs.","action":"run_again"}]}`},
 		{"no clone", "", session.AfterResult{State: event.StateFailed, ExitCode: 71}, `{"verdict":"escalate","points":[{"text":"The full suite did not start: git could not clone HEAD of the workspace.","action":"run_again"}]}`},
 		{"no HEAD", "", session.AfterResult{State: event.StateFailed, ExitCode: 72}, `{"verdict":"escalate","points":[{"text":"The full suite did not start: git could not read HEAD of the workspace.","action":"run_again"}]}`},
@@ -965,9 +965,9 @@ func TestTheTextForAContainerThatDidNotStart(t *testing.T) {
 	}{
 		{"darwin", -1, textPointNoStartMac},
 		{"darwin", 125, textPointNoStartMac},
-		{"linux", -1, "Contact support: the full suite did not start, because its container did not start."},
-		{"linux", 125, "Contact support: the full suite did not start, because its container exited with status 125."},
-		{"linux", 3, "Contact support: the full suite did not start, because its container exited with status 3."},
+		{"linux", -1, "The full suite did not start, because its container did not start."},
+		{"linux", 125, "The full suite did not start, because its container exited with status 125."},
+		{"linux", 3, "The full suite did not start, because its container exited with status 3."},
 		{"darwin", 71, textPointNoStartClone},
 		{"linux", 127, textPointNoStartShell},
 	} {
@@ -977,7 +977,7 @@ func TestTheTextForAContainerThatDidNotStart(t *testing.T) {
 			t.Errorf("%s, exit %d: %q, want %q", c.goos, c.exit, got, c.want)
 		}
 	}
-	if textPointNoStartMac != "Contact support: the full suite needs a Linux machine, and this run's machine runs Docker on macOS." {
+	if textPointNoStartMac != "The full suite needs a Linux machine, and this run's machine runs Docker on macOS." {
 		t.Errorf("the macOS text is %q", textPointNoStartMac)
 	}
 	// The line at the end of the run has the same cause in fewer words, to fit after "qory run: ".

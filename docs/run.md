@@ -2191,9 +2191,9 @@ engine may have held before the build. Nothing is pushed. The run closes as fail
 qory exits 1 with these lines, the first after the prefix `prebuild: `:
 
 ```text
-prebuild: Make the image smaller, or contact support to raise Largest prebuilt image.
-The repository's image is 5.0 GB (5000000001 bytes), before qory adds Chromium, ffmpeg and the parsers.
-The limit is 5.0 GB (5000000000 bytes). The image is removed.
+prebuild: The repository's image is over the limit for a prebuilt image.
+  The image is 5.0 GB (5000000001 bytes), before qory adds Chromium, ffmpeg and the parsers.
+  The limit is 5.0 GB (5000000000 bytes). The image is removed.
 ```
 
 The last line has no `The image is removed.` when the engine pulled the image. A
@@ -2651,8 +2651,8 @@ returns 403 to a push that is not a plain push to the credential's `push_ref`, w
 run's branch: a push to any other ref, a signed push, and a push with push options.
 
 A run whose run configuration has no push credential has no push proxy. The step fails with
-`qory run: Contact support: this run has no push credential, so qory pushed nothing.`,
-a second line with the cause, and `the code is used`, and qory pushes nothing. A credential
+`qory run: This run has no push credential, so qory pushed nothing.`,
+then `  The run configuration has no credential with purpose push.`, and qory pushes nothing. A credential
 in forager.yaml is never a push credential. The run's proxy, which the agent, the setup, the
 fetch, and the runtime's install go through, sets no push credential, so a push through it
 gets 403, as a credential with no `push_ref` does.
@@ -2718,7 +2718,7 @@ Each of these lines fails the step. `<commit>` is the commit's first 12 characte
 - `change the rule on <system> that stops a push to qory/<work item id> of <path>, then take
   the work item in again: the push failed: <error>; the code is used`, when a rule or a
   hook on the system stops the update
-- `Contact support: the push was refused (403).`, then lines indented by two spaces:
+- `The push was refused (403).`, then lines indented by two spaces:
   `One of these most likely stopped it:`, the three causes, and a last line with the error.
   The causes are `1. The run's push proxy refuses a push that is not a plain push to the
   push_ref of the push credential (for example a signed push or a push with push options),
@@ -2794,10 +2794,10 @@ gateway, and its 410 arrives as 502 `control_plane_unavailable`: both are sent a
   prints that line as well, and the step fails with the push's error.
 - Any other 4xx status, the gateway's 413 `payload_too_large` among them, or the retries used
   up: the step fails, the run closes `failed` before the next session, and qory prints
-  `qory run: Contact support: Qory Apiary did not record the last push.`, then
-  `  qory pushed <commit> to qory/<work item id>.`, then `Qory Apiary returned <status>:
+  `qory run: Qory Apiary did not record the last push.`, then
+  `  qory pushed <commit> to qory/<work item id>.`, then `  Qory Apiary returned <status>:
   <message or code>`. For a status that the gateway returned, not Qory Apiary, the last line is
-  `The gateway returned <status>: <code>`, with the name of the status in place of the code
+  `  The gateway returned <status>: <code>`, with the name of the status in place of the code
   when the response has none, as `Service Unavailable` for a 503 with no body. For a request
   with no response, or one that a stop or the time limit cut, the last line is `Qory Apiary
   sent no response: <cause>`. No line has a step to retry. `<commit>` is the first commit of the
@@ -3614,13 +3614,13 @@ order of preference:
   needs` (70), `git could not clone HEAD of the workspace` (71), `git could not read HEAD of the
   workspace` (72) or `the image may lack sh or git` (127).
 - For an after step whose container did not start or exited before the script (-1, 125 or another
-  status, including a status file that is missing or garbled), the text starts with `Contact
-  support:`. On a machine that runs macOS it is `Contact support: the full suite needs a Linux
-  machine, and this run's machine runs Docker on macOS.` Elsewhere it is `Contact support: the
-  full suite did not start, because its container exited with status <n>.`, or `... because its
-  container did not start.` for -1. The line at the end of the run has the same cause in fewer
-  words, so that it fits 100 characters with the prefix `qory run: `: on macOS `Contact support:
-  the full suite needs a Linux machine; this machine runs Docker on macOS.`, and for a result
+  status, including a status file that is missing or garbled), the text is the cause alone. On a
+  machine that runs macOS it is `The full suite needs a Linux machine, and this run's machine runs
+  Docker on macOS.` Elsewhere it is `The full suite did not start, because its container exited
+  with status <n>.`, or `... because its container did not start.` for -1. The line at the end
+  of the run has the same cause in fewer words, so that it fits 100 characters with the prefix
+  `qory run: `: on macOS `The full suite needs a Linux machine; this machine runs Docker on
+  macOS.`, and for a result
   file that is no path below the repository `The full suite did not start: the result file is no
   path below the repository.`
 - With a host that the proxy refused while the after step ran, `Allow <host> in the run's policy,

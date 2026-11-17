@@ -1042,7 +1042,7 @@ func TestAPushThatARuleRefusesSaysWhatToAllow(t *testing.T) {
 	p.h.server.Refuse("/acme/site.git/git-receive-pack")
 	r := p.run(t, writesAndCommits(t), nil)
 	r.wantsClose(t, event.StateFailed, 1)
-	wants(t, r.out, "qory run: Contact support: the push was refused (403).\n"+
+	wants(t, r.out, "qory run: The push was refused (403).\n"+
 		"  One of these most likely stopped it:\n"+
 		"  1. The run's push proxy refuses a push that is not a plain push to the push_ref of the push credential (for example a signed push or a push with push options), and qory pushes to refs/heads/qory/"+workItem+" (wall:push-ref).\n"+
 		"  2. The run's push credential has no item for /acme/site.git/git-receive-pack on "+proxygittest.Host+", and the push proxy refuses every other host and path.\n"+

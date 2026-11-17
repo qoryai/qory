@@ -407,7 +407,7 @@ func TestAFullSuiteThatCannotStartPostsAnEscalate(t *testing.T) {
 	if err != nil || closed.State != event.StateSucceeded {
 		t.Fatalf("%v, closed %+v\n%s", err, closed, out)
 	}
-	want := `{"verdict":"escalate","points":[{"text":"Contact support: the full suite did not start, because its container did not start.","action":"run_again"}]}`
+	want := `{"verdict":"escalate","points":[{"text":"The full suite did not start, because its container did not start.","action":"run_again"}]}`
 	if posted := api.posted(); len(posted) != 1 || posted[0] != want {
 		t.Errorf("posted %q, want %s", posted, want)
 	}

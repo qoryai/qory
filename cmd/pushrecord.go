@@ -25,7 +25,7 @@ import (
 // code, one of [server.EndCodes]. textLastPushUnrecorded follows either line: the push that
 // the report was about is on the forge, and Qory Apiary has no record of it.
 const (
-	textNotRecorded       = "qory run: Contact support: Qory Apiary did not record the last push.\n  qory pushed %s to %s.\n%s"
+	textNotRecorded       = "qory run: Qory Apiary did not record the last push.\n  qory pushed %s to %s.\n  %s"
 	textRecordApiary      = "Qory Apiary returned %d: %s"
 	textRecordGateway     = "The gateway returned %d: %s"
 	textRecordNoReply     = "Qory Apiary sent no response: %s"

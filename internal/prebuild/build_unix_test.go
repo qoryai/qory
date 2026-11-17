@@ -781,14 +781,14 @@ func TestBuildKeepsAnImageOfAnySize(t *testing.T) {
 }
 
 // tooBig is line 1 of the refusal of a repository's image over the largest size.
-const tooBig = "Make the image smaller, or contact support to raise Largest prebuilt image."
+const tooBig = "The repository's image is over the limit for a prebuilt image."
 
 // sizeOf is the file of the fake docker that sets the size of image ref.
 func sizeOf(ref string) string { return "size-" + strings.NewReplacer(":", "_", "/", "_").Replace(ref) }
 
 // TestBuildRefusesARepositoryImageOverTheLargestSize is a repository's image, the base the
 // configuration builds, one byte over the run's limit while the final image is under it: the
-// build stops before the tools step, the images it made are removed, the refusal has the fix on
+// build stops before the tools step, the images it made are removed, the refusal has the cause on
 // line 1, then the repository's image and the limit in GB and in bytes, and no program ran after
 // the image was measured.
 func TestBuildRefusesARepositoryImageOverTheLargestSize(t *testing.T) {
@@ -800,7 +800,7 @@ func TestBuildRefusesARepositoryImageOverTheLargestSize(t *testing.T) {
 	o.LargestImageBytes = 5000000000
 	_, err := prebuild.Build(t.Context(), o)
 	var refusal *prebuild.RefusedError
-	want := tooBig + "\nThe repository's image is 5.0 GB (5000000001 bytes), before qory adds Chromium, ffmpeg and the parsers.\nThe limit is 5.0 GB (5000000000 bytes). The image is removed."
+	want := tooBig + "\n  The image is 5.0 GB (5000000001 bytes), before qory adds Chromium, ffmpeg and the parsers.\n  The limit is 5.0 GB (5000000000 bytes). The image is removed."
 	if !errors.As(err, &refusal) || err.Error() != want {
 		t.Fatalf("Build: %v", err)
 	}
@@ -830,7 +830,7 @@ func TestBuildRefusesAPulledImageOverTheLargestSize(t *testing.T) {
 	o.Registry, o.EnvironmentImage = testRegistry, testRegistry+"/acme/environments/0123456789abcdef@"+pinnedDigest
 	o.LargestImageBytes = 3000000000
 	_, err := prebuild.Build(t.Context(), o)
-	want := tooBig + "\nThe repository's image is 3.0 GB (3000000001 bytes), before qory adds Chromium, ffmpeg and the parsers.\nThe limit is 3.0 GB (3000000000 bytes)."
+	want := tooBig + "\n  The image is 3.0 GB (3000000001 bytes), before qory adds Chromium, ffmpeg and the parsers.\n  The limit is 3.0 GB (3000000000 bytes)."
 	if err == nil || err.Error() != want {
 		t.Fatalf("Build: %v", err)
 	}
@@ -856,7 +856,7 @@ func TestBuildRefusesAStandardImageOverTheLargestSize(t *testing.T) {
 	o.Registry = testRegistry
 	o.LargestImageBytes = 3000000000
 	_, err := prebuild.Build(t.Context(), o)
-	want := tooBig + "\nThe repository's image is 3.0 GB (3000000001 bytes), before qory adds Chromium, ffmpeg and the parsers.\nThe limit is 3.0 GB (3000000000 bytes)."
+	want := tooBig + "\n  The image is 3.0 GB (3000000001 bytes), before qory adds Chromium, ffmpeg and the parsers.\n  The limit is 3.0 GB (3000000000 bytes)."
 	if err == nil || err.Error() != want {
 		t.Fatalf("Build: %v", err)
 	}
