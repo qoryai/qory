@@ -37,7 +37,7 @@ const (
 	textPushStepOne     = "push %s to %s and 1 further repository"
 	textPushStepMany    = "push %s to %s and %d further repositories"
 	textPushNoProxy     = "take the work item in again in Qory Apiary: the run's push proxy, through which qory pushes the run's commits, did not open: %s" + codeUsed
-	textPushNoCred      = "add a push credential to the run configuration: no push proxy" + codeUsed
+	textPushNoCred      = "Add a push credential to the run configuration: this run has no push proxy.\n  The run configuration has no credential with purpose push, so qory pushed nothing" + codeUsed
 	textPushNoRunAPI    = "take the work item in again in Qory Apiary: the run API, which stores the version of the artifact " + branchType + ", is not reachable from this run: %s" + codeUsed
 	textNoBranchType    = "Define the artifact type " + branchType + " in the workspace's Artifact types, then %s, then run the round again"
 	textNotStored       = "%s, then take the work item in again: qory pushed %s, and the version of the artifact " + branchType + " was not stored: %s" + codeUsed
@@ -285,11 +285,19 @@ func pushWork(ctx context.Context, run openedRun, stderr io.Writer, branch *prep
 // no push proxy." Forager has no error value for it.
 const noPushProxyWords = "this run has no push proxy"
 
-// pushProxyError is the push step's error for err, the error of PushProxy: [textPushNoCred]
-// for a run with no push credential, [textPushNoProxy] with Forager's error otherwise.
+// noPushCredential is [textPushNoCred] as an error that unwraps to Forager's error.
+type noPushCredential struct{ err error }
+
+func (e *noPushCredential) Error() string { return textPushNoCred }
+
+func (e *noPushCredential) Unwrap() error { return e.err }
+
+// pushProxyError is the push step's error for err, the error of PushProxy: a
+// [*noPushCredential] for a run with no push credential, [textPushNoProxy] with Forager's
+// error otherwise.
 func pushProxyError(err error) error {
 	if strings.Contains(err.Error(), noPushProxyWords) {
-		return errors.New(textPushNoCred)
+		return &noPushCredential{err}
 	}
 	return fmt.Errorf(textPushNoProxy, shownError(err))
 }

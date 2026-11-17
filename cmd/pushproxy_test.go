@@ -10,8 +10,9 @@ import (
 	"github.com/qoryai/forager/event"
 )
 
-// noPushCredentialLine is the line of a push step whose run has no push credential.
-const noPushCredentialLine = "qory run: add a push credential to the run configuration: no push proxy; the code is used"
+// noPushCredentialLines are the lines of a push step whose run has no push credential.
+const noPushCredentialLines = "qory run: Add a push credential to the run configuration: this run has no push proxy.\n" +
+	"  The run configuration has no credential with purpose push, so qory pushed nothing; the code is used"
 
 // TestThePushGoesThroughThePushProxy is a write run whose host proxy and push proxy are
 // two stand-in proxies to one forge, with a count of their tunnels each. The fetch opens
@@ -57,13 +58,12 @@ func TestARunWithNoPushCredentialStopsAtThePush(t *testing.T) {
 	if _, state := r.step(); state != event.StateFailed {
 		t.Errorf("the step ended %q, want failed\n%s", state, r.out)
 	}
-	wants(t, r.out, noPushCredentialLine+"\n")
+	wants(t, r.out, noPushCredentialLines+"\n")
 	for _, line := range strings.Split(r.out, "\n") {
-		if strings.HasPrefix(line, "qory run: add a push credential") && len(line) > 100 {
-			t.Errorf("the line has %d characters, want at most 100: %q", len(line), line)
+		if strings.HasPrefix(line, "qory run: Add a push credential") && len(line) > 100 {
+			t.Errorf("line 1 has %d characters, want at most 100: %q", len(line), line)
 		}
 	}
-	lacks(t, r.out, "Add a push credential")
 	if got := p.h.server.Tunnels(); got != hostAtPush {
 		t.Errorf("the host proxy opened %d tunnels from the push step on", got-hostAtPush)
 	}
