@@ -226,8 +226,8 @@ func TestAKeyWithASecretInItsNameWrittenTwiceIsReportedByItsLine(t *testing.T) {
 	isolate(t)
 	for _, name := range []string{accessKeySecretName, runKeyName} {
 		foragerRefusals(t, name, []struct{ body, want string }{
-			{foragerServer + "    " + name + ": 1\n    " + name + ": 2\n", "Remove the key that is written twice, at the line below.\n  a key of gateway.server is written twice; it was first written at line 4.\n  It is at line 5 of {path}."},
-			{name + ": 1\n" + name + ": 2\n", "Remove the key that is written twice, at the line below.\n  a key is written twice; it was first written at line 1.\n  It is at line 2 of {path}."},
+			{foragerServer + "    " + name + ": 1\n    " + name + ": 2\n", "Remove the key that is written twice, at line 5.\n  a key of gateway.server is written twice; it was first written at line 4.\n  It is at line 5 of {path}."},
+			{name + ": 1\n" + name + ": 2\n", "Remove the key that is written twice, at line 2.\n  a key is written twice; it was first written at line 1.\n  It is at line 2 of {path}."},
 		})
 	}
 	foragerRefusals(t, "", []struct{ body, want string }{

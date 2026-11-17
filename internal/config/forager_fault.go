@@ -661,7 +661,7 @@ func writtenTwice(key, name string, first, again int) *fault {
 	}
 	fix := "Remove one of the two keys " + at + "."
 	if accesskey.ContainsSecret(name) {
-		fix = "Remove the key that is written twice, at the line below."
+		fix = fmt.Sprintf("Remove the key that is written twice, at line %d.", again)
 	}
 	return &fault{again, fix, fmt.Sprintf("%s is written twice; it was first written at line %d", at, first)}
 }
