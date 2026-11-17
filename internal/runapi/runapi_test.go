@@ -12,6 +12,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 
@@ -912,5 +913,133 @@ func TestPushVerdictDocumentAcceptsABodyOfExactlyTheLimit(t *testing.T) {
 	}
 	if got != 64<<10 {
 		t.Errorf("the server read %d bytes, want %d", got, 64<<10)
+	}
+}
+
+func TestPushedCommitsBodyIsTheBodyTheRunAPIReads(t *testing.T) {
+	const commit = "0123456789abcdef0123456789abcdef01234567"
+
+	body, err := runapi.PushedCommitsBody([]runapi.PushedCommit{
+		{System: "github.com", Path: "acme/web", Commit: commit},
+		{System: "github.com", Path: "acme/lib", Commit: strings.Repeat("b", 64)},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	want := `{"repositories":[{"system":"github.com","path":"acme/web","commit":"` + commit +
+		`"},{"system":"github.com","path":"acme/lib","commit":"` + strings.Repeat("b", 64) + `"}]}`
+	if string(body) != want {
+		t.Errorf("body = %s, want %s", body, want)
+	}
+}
+
+func TestPushedCommitsBodyRejectsAnInvalidList(t *testing.T) {
+	good := runapi.PushedCommit{System: "s", Path: "p", Commit: strings.Repeat("a", 40)}
+
+	for name, commits := range map[string][]runapi.PushedCommit{
+		"none":      nil,
+		"65":        append(make([]runapi.PushedCommit, 64), good),
+		"short":     {{System: "s", Path: "p", Commit: "abc1234"}},
+		"uppercase": {{System: "s", Path: "p", Commit: strings.Repeat("A", 40)}},
+	} {
+		if body, err := runapi.PushedCommitsBody(commits); body != nil || !runapi.HasCode(err, runapi.CodeInvalidRequest) {
+			t.Errorf("%s: body = %s, err = %v, want invalid_request", name, body, err)
+		}
+	}
+}
+
+// pushedBody is the body that qory sends for commits.
+func pushedBody(t *testing.T, commits []runapi.PushedCommit) []byte {
+	t.Helper()
+
+	body, err := runapi.EncodePushedCommits(commits)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	return body
+}
+
+func TestSplitPushedCommitsKeepsOrderAndBothLimits(t *testing.T) {
+	quotes := strings.Repeat(`"`, 256)
+
+	var commits []runapi.PushedCommit
+	for i := range 128 {
+		commits = append(commits, runapi.PushedCommit{System: quotes, Path: quotes, Commit: fmt.Sprintf("%064x", i)})
+	}
+
+	// 64 of these rows encode to more than the byte limit, so the byte limit cuts first.
+	if got := len(pushedBody(t, commits[:runapi.MaxPushedCommits])); got <= runapi.MaxPushedCommitsBytes {
+		t.Fatalf("64 rows encode to %d bytes, want more than %d", got, runapi.MaxPushedCommitsBytes)
+	}
+
+	calls := runapi.SplitPushedCommits(commits)
+
+	if rowLimitCalls := (len(commits) + runapi.MaxPushedCommits - 1) / runapi.MaxPushedCommits; len(calls) <= rowLimitCalls {
+		t.Errorf("%d calls, want more than the %d that the row limit gives", len(calls), rowLimitCalls)
+	}
+
+	var joined []runapi.PushedCommit
+
+	for i, call := range calls {
+		size := len(pushedBody(t, call))
+		if len(call) == 0 || len(call) > runapi.MaxPushedCommits || size > runapi.MaxPushedCommitsBytes {
+			t.Errorf("call %d has %d repositories and %d bytes", i, len(call), size)
+		}
+
+		// Each call but the last is the longest that fits: the next row would break a limit.
+		if i < len(calls)-1 && len(call) < runapi.MaxPushedCommits {
+			next := slices.Concat(call, calls[i+1][:1])
+			if got := len(pushedBody(t, next)); got <= runapi.MaxPushedCommitsBytes {
+				t.Errorf("call %d has %d repositories and %d bytes, and the next row fits (%d bytes)", i, len(call), size, got)
+			}
+		}
+
+		joined = append(joined, call...)
+	}
+
+	if !slices.Equal(joined, commits) {
+		t.Errorf("the calls have %d repositories in another order than the %d given", len(joined), len(commits))
+	}
+
+	if got := runapi.SplitPushedCommits(nil); got != nil {
+		t.Errorf("no commits are the calls %v", got)
+	}
+
+	commit := strings.Repeat("a", 64)
+	huge := runapi.PushedCommit{System: strings.Repeat("x", 70000), Path: "p", Commit: commit}
+	if got := runapi.SplitPushedCommits([]runapi.PushedCommit{commits[0], huge, commits[1]}); len(got) != 3 {
+		t.Errorf("a repository over the limit alone gives %d calls, want 3", len(got))
+	}
+}
+
+func TestSplitPushedCommitsKeepsABodyOfExactlyTheLimitInOneCall(t *testing.T) {
+	commit := strings.Repeat("a", 64)
+	first := runapi.PushedCommit{System: "s", Path: "p", Commit: commit}
+
+	// The second row's system is padded with plain bytes until the body has the limit's size.
+	withPadding := func(n int) []runapi.PushedCommit {
+		return []runapi.PushedCommit{first, {System: strings.Repeat("x", n), Path: "p", Commit: commit}}
+	}
+
+	padding := runapi.MaxPushedCommitsBytes - len(pushedBody(t, withPadding(0)))
+
+	exact := withPadding(padding)
+	if got := len(pushedBody(t, exact)); got != runapi.MaxPushedCommitsBytes {
+		t.Fatalf("the list encodes to %d bytes, want %d", got, runapi.MaxPushedCommitsBytes)
+	}
+
+	if got := runapi.SplitPushedCommits(exact); len(got) != 1 || len(got[0]) != 2 {
+		t.Errorf("a body of %d bytes gives %d calls, want 1 call of 2 repositories", runapi.MaxPushedCommitsBytes, len(got))
+	}
+
+	over := withPadding(padding + 1)
+	if got := len(pushedBody(t, over)); got != runapi.MaxPushedCommitsBytes+1 {
+		t.Fatalf("the list encodes to %d bytes, want %d", got, runapi.MaxPushedCommitsBytes+1)
+	}
+
+	if got := runapi.SplitPushedCommits(over); len(got) != 2 || len(got[0]) != 1 || len(got[1]) != 1 {
+		t.Errorf("a body of %d bytes gives %d calls, want 2 calls of 1 repository", runapi.MaxPushedCommitsBytes+1, len(got))
 	}
 }

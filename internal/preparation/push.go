@@ -116,6 +116,7 @@ func stepGit(p *proxygit.Proxy, input string, env ...string) gitRunner {
 // the checks, [clearIndexLocks] removes that one file of each repository when
 // agentStopped is true, and stops the push when a lock is there and it is false.
 func Push(ctx context.Context, dir string, base []string, b *WorkBranch, message string, p proxygit.Proxy, agentStopped bool, report io.Writer) (*branchformat.Branch, error) {
+	b.landed = nil
 	ctx = hostgit.WithBase(ctx, proxygit.Env(base, nil))
 	dir, err := filepath.Abs(dir)
 	if err != nil {
@@ -158,6 +159,7 @@ func Push(ctx context.Context, dir string, base []string, b *WorkBranch, message
 			return nil, err
 		}
 		b.pushed = append(b.pushed, shownPath(r.Path))
+		b.landed = append(b.landed, Landed{System: b.system, Path: r.Path, Commit: heads[i]})
 		fmt.Fprintf(report, textPushed+"\n", b.Ref, shownPath(r.Path), shortCommit(heads[i]))
 		// The branch is at heads[i] now, so a later Push of the run starts there.
 		b.Repositories[i].Commit = heads[i]

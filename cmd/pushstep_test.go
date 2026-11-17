@@ -1,6 +1,7 @@
 package cmd_test
 
 import (
+	"bytes"
 	"cmp"
 	"context"
 	"crypto/sha256"
@@ -9,12 +10,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"maps"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -66,7 +69,13 @@ type pushAPI struct {
 	posts     int
 	reads     int
 	post      func(n int, w http.ResponseWriter) (handled, store bool)
-	index     func(n int, w http.ResponseWriter) bool
+	// recorded is the report of pushed commits: each call's body, as it arrived, and the
+	// rows that its calls added, in order. record, when set, responds to call n in place of 204,
+	// and returns whether it did.
+	recorded []string
+	rows     []recordedRow
+	record   func(n int, w http.ResponseWriter) bool
+	index    func(n int, w http.ResponseWriter) bool
 }
 
 // newPushAPI serves a run API whose work item has the id [workItem] and the stage st_a.
@@ -102,9 +111,53 @@ func (a *pushAPI) serve(w http.ResponseWriter, r *http.Request) {
 		w.Write(a.files[n-1])
 	case r.Method == http.MethodPost && r.URL.Path == "/v1/runs/r/artifacts":
 		a.posted(w, r)
+	case r.Method == http.MethodPost && r.URL.Path == "/v1/runs/r/pushed-commits":
+		a.recordedPush(w, r)
 	default:
 		http.NotFound(w, r)
 	}
+}
+
+// recordedRow is a row of the run's list of pushed commits.
+type recordedRow struct{ System, Path, Commit string }
+
+// recordedPush is POST pushed-commits as Qory Apiary handles it: 400 for a body that is not
+// the contract's, else a row for each commit not in the list yet, and 204.
+func (a *pushAPI) recordedPush(w http.ResponseWriter, r *http.Request) {
+	raw, _ := io.ReadAll(r.Body)
+	a.recorded = append(a.recorded, string(raw))
+	if a.record != nil && a.record(len(a.recorded), w) {
+		return
+	}
+	var body struct {
+		Repositories []recordedRow `json:"repositories"`
+	}
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.DisallowUnknownFields()
+	full := regexp.MustCompile(`^([0-9a-f]{40}|[0-9a-f]{64})$`)
+	if err := dec.Decode(&body); err != nil || len(body.Repositories) == 0 || len(body.Repositories) > 64 {
+		failing(w, http.StatusBadRequest, "invalid_request", "")
+		return
+	}
+	for _, row := range body.Repositories {
+		if !full.MatchString(row.Commit) || row.System == "" || row.Path == "" {
+			failing(w, http.StatusBadRequest, "invalid_request", "")
+			return
+		}
+	}
+	for _, row := range body.Repositories {
+		if !slices.Contains(a.rows, row) {
+			a.rows = append(a.rows, row)
+		}
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// reports is how many reports of pushed commits arrived, and the rows that the list has.
+func (a *pushAPI) reports() (calls int, rows []recordedRow) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return len(a.recorded), slices.Clone(a.rows)
 }
 
 // writeIndex writes the index of the versions stored so far.
@@ -247,6 +300,32 @@ type pushRepo struct {
 	// process. runID and runsDir are those of the last open.
 	real           bool
 	runID, runsDir string
+	// gateway, when set, is called by each report over the link with its number, from 1, before
+	// the call reaches Qory Apiary: a non-nil error is the gateway's response to the call, and the
+	// call goes no further. linkMu guards the numbers and the limits of the calls.
+	gateway    func(n int) error
+	linkMu     sync.Mutex
+	linkCalls  int
+	linkLimits []time.Duration
+}
+
+// viaLink is each report of the run over the link of its gateway: [pushRepo.gateway] first,
+// then the run API of [pushAPI] as Qory Apiary. It notes how long the call has, the time to the
+// context's deadline.
+func (p *pushRepo) viaLink(ctx context.Context, body []byte) ([]byte, error) {
+	p.linkMu.Lock()
+	p.linkCalls++
+	n := p.linkCalls
+	if deadline, ok := ctx.Deadline(); ok {
+		p.linkLimits = append(p.linkLimits, time.Until(deadline))
+	}
+	p.linkMu.Unlock()
+	if p.gateway != nil {
+		if err := p.gateway(n); err != nil {
+			return nil, err
+		}
+	}
+	return cmd.PushedThroughLink(ctx, p.api.base(), body)
 }
 
 // record is the path of the session's record of the last run.
@@ -340,7 +419,7 @@ func (p *pushRepo) run(t *testing.T, agent func(dir string), result func() (*ses
 		Proxy: p.h.server.Proxy.URL, CABundle: p.h.server.Proxy.CABundle, Dir: p.h.runDir,
 		RemoveSetup: p.removeSetup, HostProxyErr: p.proxyErr, PushProxyErr: p.proxyErr, NoPushProxy: p.noPush, OnCall: p.onCall,
 		PushProxy: p.pushVia.URL, PushCABundle: p.pushVia.CABundle, AtGateway: p.real, Real: p.real,
-		SetRunAPICheck: p.onSetCheck, RunAPIErr: p.runAPIErr, PolicyImage: p.policyImage,
+		SetRunAPICheck: p.onSetCheck, RunAPIErr: p.runAPIErr, PolicyImage: p.policyImage, PushedCommits: p.viaLink,
 		Setup: func(spec session.SetupSpec) error {
 			if p.setup != nil {
 				p.setup(spec.Dir)
