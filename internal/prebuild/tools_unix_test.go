@@ -214,6 +214,12 @@ func TestBuildAddsChromiumToUbuntuFromTheDownload(t *testing.T) {
 			if strings.Index(got, `test "$status" = 200`) > strings.Index(got, "sha256sum -c -") || strings.Contains(got, "--fail") {
 				t.Error("the status is not checked before the sum, or --fail hides a redirect")
 			}
+			// Line 1 of the download's error is the fix alone, and stays under 100 characters
+			// with a 3-digit status and the longest archive name; line 2 has the URL and status.
+			const fix = "Check that the prebuild can reach storage.googleapis.com."
+			if !strings.Contains(got, `echo "`+fix+`" >&2; echo "the download of https://storage.googleapis.com/chrome-for-testing-public/159.0.8154.6/$archive returned status $status, not 200" >&2`) || len(fix) > 100 {
+				t.Errorf("the download's error is not the fix on line 1 and the status on line 2:\n%s", got)
+			}
 			if strings.Contains(got, "--location") || strings.Contains(got, "curl -L") || strings.Contains(got, "cdn.playwright.dev") {
 				t.Error("the download follows a redirect or uses Playwright's site")
 			}

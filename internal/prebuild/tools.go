@@ -307,7 +307,7 @@ func toolsDockerfile(base string, kind toolsBase, u user, copyNode bool) string 
     esac \
  && status="$(curl --silent --show-error --proto '=https' --proto-redir '=https' --max-redirs 0 --retry 3 --output /tmp/chromium.zip --write-out '%{http_code}' "` + chromiumSiteURL + `$archive" || true)" \
  && { test "$status" = 200 \
-      || { echo "Allow https://storage.googleapis.com in the run's egress: the download of $archive answered status $status, not 200" >&2; exit 1; }; } \
+      || { echo "Check that the prebuild can reach storage.googleapis.com." >&2; echo "the download of ` + chromiumSiteURL + `$archive returned status $status, not 200" >&2; exit 1; }; } \
  && { echo "$sum  /tmp/chromium.zip" | sha256sum -c - \
       || { echo "Update the sums in internal/prebuild/tools.go: the download of $archive is not Chromium ` + ChromiumVersion + `" >&2; exit 1; }; } \
  && mkdir /tmp/chromium && unzip -q /tmp/chromium.zip -d /tmp/chromium \
