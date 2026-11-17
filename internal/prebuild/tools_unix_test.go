@@ -108,25 +108,40 @@ func TestBuildCopiesNodeIntoAnImageWithoutIt(t *testing.T) {
 // in a line of at most 100 characters before the first newline, and the tools step
 // builds nothing.
 func TestBuildRefusesABaseItCannotAddTheToolsTo(t *testing.T) {
+	deep := func(t *testing.T) string {
+		p := filepath.Join(t.TempDir(), strings.Repeat("deep-folder-", 12))
+		if err := os.Mkdir(p, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	longValue := strings.Repeat("x", 80)
+	const (
+		notServed = "use a Debian or Ubuntu image: the build adds Chromium only to these"
+		noApt     = "use a Debian or Ubuntu image that has apt-get: the build installs ffmpeg and fonts with it"
+	)
 	for name, tc := range map[string]struct {
-		probe, want string
-		noShell     bool
-		early       bool
-		prepare     func(o *prebuild.Options)
+		probe, first, second string
+		noShell              bool
+		early                bool
+		prepare              func(o *prebuild.Options)
 	}{
-		"ubuntu 20.04":  {probe: "id=ubuntu\nversion=20.04\narch=amd64\napt=yes\nnode=yes\n", want: `use Ubuntu 22.04 or 24.04, or Debian: the build adds Chromium to these, and this is Ubuntu "20.04"`},
-		"ubuntu arch":   {probe: "id=ubuntu\nversion=24.04\narch=s390x\napt=yes\nnode=yes\n", want: `use an amd64 or arm64 Ubuntu image: the build adds Chromium for these, and this one is "s390x"`},
-		"ubuntu no apt": {probe: "id=ubuntu\nversion=24.04\narch=amd64\napt=no\nnode=yes\n", want: "use a Debian or Ubuntu image that has apt-get: the build installs ffmpeg and fonts with it"},
-		"alpine":        {probe: "id=alpine\napt=no\nnode=no\n", want: `use a Debian or Ubuntu image: the build adds Chromium to these, and this image's ID is "alpine"`},
-		"no id":         {probe: "id=\napt=yes\nnode=yes\n", want: `use a Debian or Ubuntu image: the build adds Chromium to these, and this image's ID is empty`},
-		"no apt":        {probe: "id=debian\napt=no\nnode=yes\n", want: "use a Debian or Ubuntu image that has apt-get: the build installs ffmpeg and fonts with it"},
-		"odd id":        {probe: "id=\x1b[31mred\napt=yes\nnode=yes\n", want: `use a Debian or Ubuntu image: the build adds Chromium to these, and this image's ID is "`},
-		"no shell":      {noShell: true, want: "use a base image with sh and /etc/os-release: reading its system failed: "},
-		"no parsers": {early: true, want: "build the prebuild image FROM Qory's agent image: it has no parsers in ", prepare: func(o *prebuild.Options) {
-			o.Parsers = t.TempDir()
+		"ubuntu 20.04":     {probe: "id=ubuntu\nversion=20.04\narch=amd64\napt=yes\nnode=yes\n", first: "use Ubuntu 22.04 or 24.04, or Debian: the build adds Chromium only to these", second: `this image is Ubuntu "20.04"`},
+		"ubuntu long":      {probe: "id=ubuntu\nversion=" + longValue + "\narch=amd64\napt=yes\nnode=yes\n", first: "use Ubuntu 22.04 or 24.04, or Debian: the build adds Chromium only to these", second: `this image is Ubuntu "` + longValue[:32] + `"`},
+		"ubuntu arch":      {probe: "id=ubuntu\nversion=24.04\narch=s390x\napt=yes\nnode=yes\n", first: "use an amd64 or arm64 Ubuntu image: the build adds Chromium only for these", second: `this image's architecture is "s390x"`},
+		"ubuntu long arch": {probe: "id=ubuntu\nversion=24.04\narch=" + longValue + "\napt=yes\nnode=yes\n", first: "use an amd64 or arm64 Ubuntu image: the build adds Chromium only for these", second: `this image's architecture is "` + longValue[:32] + `"`},
+		"ubuntu no apt":    {probe: "id=ubuntu\nversion=24.04\narch=amd64\napt=no\nnode=yes\n", first: noApt},
+		"alpine":           {probe: "id=alpine\napt=no\nnode=no\n", first: notServed, second: `this image's ID is "alpine"`},
+		"long id":          {probe: "id=" + longValue + "\napt=yes\nnode=yes\n", first: notServed, second: `this image's ID is "` + longValue[:32] + `"`},
+		"no id":            {probe: "id=\napt=yes\nnode=yes\n", first: notServed, second: "this image's ID is empty"},
+		"no apt":           {probe: "id=debian\napt=no\nnode=yes\n", first: noApt},
+		"odd id":           {probe: "id=\x1b[31mred\napt=yes\nnode=yes\n", first: notServed, second: `this image's ID is "`},
+		"no shell":         {noShell: true, first: "use a base image with sh and /etc/os-release: the build could not read its system", second: "exec: sh: not found"},
+		"no parsers": {early: true, first: "build the prebuild image FROM Qory's agent image, which has the parsers", second: "the folder ", prepare: func(o *prebuild.Options) {
+			o.Parsers = deep(t)
 		}},
-		"no node": {probe: "id=debian\napt=yes\nnode=no\n", want: "build the prebuild image FROM Qory's agent image: it has no node program at ", prepare: func(o *prebuild.Options) {
-			o.Node = filepath.Join(t.TempDir(), "node")
+		"no node": {probe: "id=debian\napt=yes\nnode=no\n", first: "use a base image that has node, or build the prebuild image FROM Qory's agent image", second: "there is no node program at ", prepare: func(o *prebuild.Options) {
+			o.Node = filepath.Join(deep(t), "node")
 		}},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -143,11 +158,12 @@ func TestBuildRefusesABaseItCannotAddTheToolsTo(t *testing.T) {
 			}
 			_, err := prebuild.Build(t.Context(), o)
 			var refusal *prebuild.RefusedError
-			if !errors.As(err, &refusal) || !strings.HasPrefix(err.Error(), tc.want) {
+			if !errors.As(err, &refusal) || err == nil {
 				t.Fatalf("Build: %v", err)
 			}
-			if first, _, _ := strings.Cut(err.Error(), "\n"); len(first) > 100 && !tc.early && name != "no node" {
-				t.Errorf("the first line has %d characters: %q", len(first), first)
+			first, rest, _ := strings.Cut(err.Error(), "\n")
+			if first != tc.first || !strings.HasPrefix(rest, tc.second) || len(first) > 100 {
+				t.Errorf("the refusal is %q (%d characters in line 1), want line 1 %q and line 2 starting %q", err.Error(), len(first), tc.first, tc.second)
 			}
 			if strings.ContainsRune(err.Error(), 0x1b) {
 				t.Errorf("the refusal has an escape: %q", err.Error())
@@ -187,13 +203,17 @@ func TestBuildAddsChromiumToUbuntuFromTheDownload(t *testing.T) {
 			for _, want := range []string{lib, " ffmpeg ", " fonts-noto-cjk ", " unzip ", "--no-install-recommends",
 				"amd64) archive=linux64/chrome-linux64.zip; sum=370601106c1b5619aae5f06f7a3fdc60836486135934779461e2a208d777f596 ;;",
 				"arm64) archive=linux-arm64/chrome-linux-arm64.zip; sum=4a9ea5f9422e268fff9df19908365b6d1e92da154607d0f90c7138cf6c42ce38 ;;",
-				"https://cdn.playwright.dev/builds/cft/159.0.8154.6/$archive", "sha256sum -c -", "ln -s /opt/qory/chromium/chrome /usr/bin/chromium",
+				"https://storage.googleapis.com/chrome-for-testing-public/159.0.8154.6/$archive", "sha256sum -c -",
+				"--proto '=https' --proto-redir '=https'", "ln -s /opt/qory/chromium/chrome /usr/bin/chromium",
 				"apt-get clean", "rm -rf /var/lib/apt/lists/*"} {
 				if !strings.Contains(got, want) {
 					t.Errorf("the Dockerfile lacks %q:\n%s", want, got)
 				}
 			}
 			// The sum is checked before the archive is extracted.
+			if strings.Contains(got, "--location") || strings.Contains(got, "curl -L") || strings.Contains(got, "cdn.playwright.dev") {
+				t.Error("the download follows a redirect or uses Playwright's site")
+			}
 			if strings.Index(got, "sha256sum -c -") > strings.Index(got, "unzip -q") {
 				t.Error("the archive is extracted before its sum is checked")
 			}
@@ -228,8 +248,11 @@ func TestBuildFailsInTheToolsStepWithItsFix(t *testing.T) {
 	f.set(t, "build-fails", toolsTag)
 	var out bytes.Buffer
 	_, err := prebuild.Build(t.Context(), options(t, repository(t, shopConfig), &out, io.Discard))
-	if err == nil || !strings.HasPrefix(err.Error(), "read the build log for the step that failed: adding Chromium, ffmpeg and the parsers: ") {
+	if err == nil || !strings.HasPrefix(err.Error(), "read the build log for the step that failed, adding Chromium, ffmpeg and the parsers\nERROR: failed to solve") {
 		t.Fatalf("Build: %v", err)
+	}
+	if first, _, _ := strings.Cut(err.Error(), "\n"); len(first) > 100 {
+		t.Errorf("line 1 has %d characters", len(first))
 	}
 	if strings.Contains(out.String(), "added Chromium") || f.called("docker", "create") {
 		t.Errorf("printed\n%s\ndocker ran\n%s", out.String(), f.read("docker.log"))

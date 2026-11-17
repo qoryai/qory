@@ -25,32 +25,35 @@ const (
 	NodePath = "/usr/local/bin/node"
 )
 
-// The words of the tools step.
+// The words of the tools step. Line 1 of a refusal is the fix, at most 100 characters
+// whatever the values; the values follow on line 2.
 const (
 	textTools       = prefix + "added Chromium, ffmpeg and the parsers in %s"
-	textNoParsers   = "build the prebuild image FROM Qory's agent image: it has no parsers in %s"
-	textNoNode      = "build the prebuild image FROM Qory's agent image: it has no node program at %s, and the base image has none"
-	textNotServed   = "use a Debian or Ubuntu image: the build adds Chromium to these, and this image's ID is %s"
-	textUbuntuRel   = "use Ubuntu 22.04 or 24.04, or Debian: the build adds Chromium to these, and this is Ubuntu %s"
-	textUbuntuArch  = "use an amd64 or arm64 Ubuntu image: the build adds Chromium for these, and this one is %s"
+	textNoParsers   = "build the prebuild image FROM Qory's agent image, which has the parsers\nthe folder %s has none"
+	textNoNode      = "use a base image that has node, or build the prebuild image FROM Qory's agent image\nthere is no node program at %s"
+	textNotServed   = "use a Debian or Ubuntu image: the build adds Chromium only to these\nthis image's ID is %s"
+	textUbuntuRel   = "use Ubuntu 22.04 or 24.04, or Debian: the build adds Chromium only to these\nthis image is Ubuntu %s"
+	textUbuntuArch  = "use an amd64 or arm64 Ubuntu image: the build adds Chromium only for these\nthis image's architecture is %s"
 	textNoApt       = "use a Debian or Ubuntu image that has apt-get: the build installs ffmpeg and fonts with it"
-	textBaseUnread  = "use a base image with sh and /etc/os-release: reading its system failed: %s"
-	textToolsFailed = "read the build log for the step that failed: adding Chromium, ffmpeg and the parsers: %s"
+	textBaseUnread  = "use a base image with sh and /etc/os-release: the build could not read its system\n%s"
+	textToolsFailed = "read the build log for the step that failed, adding Chromium, ffmpeg and the parsers\n%s"
 )
 
-// The Chromium an Ubuntu base gets: Chrome for Testing, as Playwright installs it, from
-// Playwright's download site, because Ubuntu's chromium package is a snap. PlaywrightVersion
-// is the release of playwright-core whose browsers.json names revision ChromiumRevision,
-// Chrome for Testing ChromiumVersion. Both sums are of the zip archives, sha256: the amd64
-// one equals the sum of Google's own copy at
-// https://storage.googleapis.com/chrome-for-testing-public/159.0.8154.6/linux64/chrome-linux64.zip;
-// Google builds no arm64 archive for Linux, so the arm64 sum is one computed on 2026-11-17
-// from a download of Playwright's copy. The step checks the sum before it extracts.
+// The Chromium an Ubuntu base gets: Chrome for Testing, the build Playwright installs,
+// from Google's Chrome for Testing storage, because Ubuntu's chromium package is a snap.
+// PlaywrightVersion is the release of playwright-core whose browsers.json names revision
+// ChromiumRevision, Chrome for Testing ChromiumVersion. The URLs are the ones the
+// known-good-versions-with-downloads.json of Chrome for Testing lists for that version,
+// linux64 and linux-arm64. Google publishes no sha256 for them, only an MD5 in the object's
+// x-goog-hash header; both sums below are sha256 computed on 2026-11-17 from a download of
+// each archive, whose MD5 matches the header, and the same bytes come from Playwright's
+// download site. The step checks the sum before it extracts, follows no redirect and
+// allows https alone.
 const (
 	PlaywrightVersion = "1.65.1"
 	ChromiumRevision  = "1255"
 	ChromiumVersion   = "159.0.8154.6"
-	chromiumSiteURL   = "https://cdn.playwright.dev/builds/cft/" + ChromiumVersion + "/"
+	chromiumSiteURL   = "https://storage.googleapis.com/chrome-for-testing-public/" + ChromiumVersion + "/"
 	chromiumAMD64     = "linux64/chrome-linux64.zip"
 	chromiumAMD64Sum  = "370601106c1b5619aae5f06f7a3fdc60836486135934779461e2a208d777f596"
 	chromiumARM64     = "linux-arm64/chrome-linux-arm64.zip"
@@ -72,12 +75,12 @@ const (
 )
 
 // debianPackages are the packages the step installs on Debian: Chromium, ffmpeg with
-// ffprobe, and the Noto fonts of the agent image for Latin and other scripts, CJK and
+// ffprobe, and the Noto fonts of the agent image for Latin and other scripts, CJK, and
 // color emoji.
 var debianPackages = []string{"chromium", "ffmpeg", "fonts-noto-cjk", "fonts-noto-color-emoji", "fonts-noto-core"}
 
 // ubuntuPackages are the packages the step installs on Ubuntu release rel: ffmpeg and the
-// same fonts, what the download needs, curl, unzip and the authorities, and the libraries
+// same fonts, what the download needs (curl, unzip, and the authorities), and the libraries
 // of Chromium that Playwright's install-deps list names for the release, with
 // fontconfig and freetype.
 var ubuntuPackages = map[toolsBase][]string{
@@ -302,7 +305,7 @@ func toolsDockerfile(base string, kind toolsBase, u user, copyNode bool) string 
       arm64) archive=` + chromiumARM64 + `; sum=` + chromiumARM64Sum + ` ;; \
       *) echo "Use an amd64 or arm64 Ubuntu image: dpkg --print-architecture prints $(dpkg --print-architecture)" >&2; exit 1 ;; \
     esac \
- && curl --fail --silent --show-error --location --retry 3 --output /tmp/chromium.zip "` + chromiumSiteURL + `$archive" \
+ && curl --fail --silent --show-error --proto '=https' --proto-redir '=https' --retry 3 --output /tmp/chromium.zip "` + chromiumSiteURL + `$archive" \
  && { echo "$sum  /tmp/chromium.zip" | sha256sum -c - \
       || { echo "Update the sums in internal/prebuild/tools.go: the download of $archive is not Chromium ` + ChromiumVersion + `" >&2; exit 1; }; } \
  && mkdir /tmp/chromium && unzip -q /tmp/chromium.zip -d /tmp/chromium \
