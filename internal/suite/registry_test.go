@@ -294,3 +294,17 @@ func TestCloseRemovesTheClones(t *testing.T) {
 		t.Errorf("%d folders left after the close", len(entries))
 	}
 }
+
+func TestEndedIsCalledOnceForEachSuiteWithItsEnd(t *testing.T) {
+	var mu sync.Mutex
+	var ended []suite.Snapshot
+	r := newRegistry(t, context.Background(), writes(`<testsuite><testcase/></testsuite>`, 0), func(c *suite.Config) {
+		c.Ended = func(s suite.Snapshot) { mu.Lock(); ended = append(ended, s); mu.Unlock() }
+	})
+	snap := finish(t, r, commitA)
+	mu.Lock()
+	defer mu.Unlock()
+	if len(ended) != 1 || ended[0].ID != snap.ID || ended[0].State != suite.Passed || ended[0].Counts == nil || ended[0].Counts.Tests != 1 {
+		t.Errorf("Ended got %+v, want one passed suite %s with its counts", ended, snap.ID)
+	}
+}
