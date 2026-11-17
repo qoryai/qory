@@ -22,7 +22,9 @@ release may change what an existing document does, and states it under Upgrading
   where it closed with no reason before: `push_credential_missing` for a run configuration
   with no push credential, `push_refused` for a push that got 403, `push_not_recorded` for a
   push that Qory Apiary did not record, and `prebuilt_image_too_large` for a prebuild whose
-  repository image is over the limit. The codes are the end codes of the run outcome contract
+  repository image is over the limit. A prebuild whose environment image is not in its
+  registry closes `failed` with `environment_image_missing`, where it closed with
+  `image_missing`, which Forager takes only for a close before a join. The codes are the end codes of the run outcome contract
   of the integrations repository. The line qory prints has the cause alone.
 - After each push of its push step, qory reports the repositories the push moved to Qory
   Apiary, one entry for each repository with `system`, `path` and the full head commit, in
@@ -1019,7 +1021,7 @@ release may change what an existing document does, and states it under Upgrading
   An environment image or standard image that the build starts from must not set access
   to the host in its `devcontainer.metadata` label, nor the variables that change what
   the agent does. When the documents' `environment_image` is not in its registry, qory
-  closes the run as failed with the reason `image_missing`. qory stops a prebuild whose
+  closes the run as failed with the reason `environment_image_missing`. qory stops a prebuild whose
   policy is not the one of the run configuration Qory Apiary serves for the workspace,
   before anything is fetched, and, when `forager.yaml` sets `pool.registry`, one whose
   destinations are not under it. The build takes `wall.image`, pinned by its digest,

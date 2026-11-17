@@ -64,7 +64,6 @@ import (
 	"github.com/qoryai/forager/event"
 	"github.com/qoryai/forager/mask"
 	"github.com/qoryai/forager/policy"
-	"github.com/qoryai/forager/refusal"
 	"github.com/qoryai/forager/session"
 	"github.com/qoryai/forager/sink"
 	"github.com/qoryai/forager/wall"
@@ -225,7 +224,7 @@ type Run struct {
 	// EnvironmentImage is the documents' environment_image: the image the build's target
 	// step starts from, by digest, as [devimage.Options.EnvironmentImage]; "" builds the
 	// environment step. A run whose environment image is not in its registry closes
-	// failed with image_missing and -1.
+	// failed with environment_image_missing and -1.
 	EnvironmentImage string
 	// LargestImageBytes is the documents' largest_prebuilt_image_bytes: the largest size
 	// of the repository's image, before qory adds its tools, in decimal bytes, as docker
@@ -261,6 +260,13 @@ type Result struct {
 	Image session.Built
 }
 
+// EndCodeEnvironmentImageMissing is the reason of a run whose environment image is not in its
+// registry: the step's session has joined by then, and Forager takes image_missing only for a
+// close before a join.
+//
+// TODO: move to contracts.EndCode when integrations is pinned.
+const EndCodeEnvironmentImageMissing contracts.EndCode = "environment_image_missing"
+
 // Launch runs the prebuild r, until it ends or ctx ends; at ctx's end the step running
 // is stopped, behind the wall too. The error is why it did not succeed. Once the run is
 // open, it closes once, as Launch returns:
@@ -268,7 +274,7 @@ type Result struct {
 //	step                                     the run closes
 //	the fetch at its time limit              cancelled, timeout, 124
 //	ctx ended                                cancelled, interrupted, -1
-//	the build: environment image not in      failed, image_missing, -1
+//	the build: environment image not in      failed, environment_image_missing, -1
 //	  its registry
 //	the build: repository image over the     failed, prebuilt_image_too_large, -1
 //	  limit
@@ -362,7 +368,7 @@ func Launch(ctx context.Context, s Settings, r Run) (res Result, err error) {
 	got, err := s.step(ctx, run, r, dir)
 	switch {
 	case got.ImageMissing:
-		out = session.Outcome{State: event.StateFailed, Reason: refusal.ImageMissing, ExitCode: -1}
+		out = session.Outcome{State: event.StateFailed, Reason: string(EndCodeEnvironmentImageMissing), ExitCode: -1}
 	case got.ImageTooLarge:
 		out = session.Outcome{State: event.StateFailed, Reason: string(contracts.EndCodePrebuiltImageTooLarge), ExitCode: -1}
 	}

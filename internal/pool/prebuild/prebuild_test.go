@@ -841,9 +841,9 @@ var (
 	// closedTooLarge is the close of a repository image over the limit: failed,
 	// prebuilt_image_too_large and -1.
 	closedTooLarge = session.Outcome{State: "failed", Reason: "prebuilt_image_too_large", ExitCode: -1}
-	// closedImageMissing is the close Forager's Run.Close takes for an image not in its
-	// registry: failed, image_missing and -1, in a run no session joined.
-	closedImageMissing = session.Outcome{State: "failed", Reason: "image_missing", ExitCode: -1}
+	// closedImageMissing is the close Forager's Run.Close takes for an environment image not in
+	// its registry: failed, environment_image_missing and -1, after the step's session joined.
+	closedImageMissing = session.Outcome{State: "failed", Reason: "environment_image_missing", ExitCode: -1}
 )
 
 // testEnvImage is a run's environment image, by digest.

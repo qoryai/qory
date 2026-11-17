@@ -2238,7 +2238,7 @@ After the redemption, qory prints `qory run: through the gateway <host>, run <ru
 with `:<port>` after the host when the gateway's URL has a port. Then it prints each line
 of the fetch, and of the session behind the wall, after `qory run: <run id>: `. When the
 registry of `environment_image` has no such image, qory closes the run as failed with the
-reason `image_missing`. A fetch past its 15 minutes closes the run as cancelled with the
+reason `environment_image_missing`. A fetch past its 15 minutes closes the run as cancelled with the
 reason `timeout`, a signal as cancelled with the reason `interrupted`, and any other
 failure as failed. In each case qory exits 1. When events of the run did not reach the
 gateway at the close, qory keeps the run's folder under `pool/runs/<run id>`, the record

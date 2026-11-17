@@ -4,12 +4,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"slices"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/qoryai/forager/event"
 	"github.com/qoryai/forager/gateway"
 	"github.com/qoryai/forager/session"
 
@@ -17,8 +19,9 @@ import (
 )
 
 // closing is a run open at a gateway in this process, which records each close and
-// what Forager's Run.Close returned for it. Its join is the fake join of e: no wall runs
-// in a test.
+// what Forager's Run.Close returned for it. Its join is a real join of a command that
+// does nothing, so the gateway numbers a join of the run as it does for the step's session,
+// and then the fake join of e: no wall runs in a test.
 type closing struct {
 	*session.Run
 	e      *env
@@ -28,6 +31,9 @@ type closing struct {
 }
 
 func (c *closing) Join(ctx context.Context, spec session.SessionSpec) (*session.Result, error) {
+	if _, err := c.Run.Join(ctx, session.SessionSpec{Command: "/usr/bin/true", Dir: spec.Dir, Stdin: strings.NewReader(""), Stdout: io.Discard, Stderr: io.Discard}); err != nil {
+		return nil, err
+	}
 	return c.e.join(ctx, spec)
 }
 
@@ -126,8 +132,8 @@ func TestLaunchClosesAnImageOverTheLimitWithItsEndCode(t *testing.T) {
 
 // TestLaunchClosesAMissingEnvironmentImageAsForagerTakesIt is a prebuild from an
 // environment image that is not in its registry, through a gateway in this process:
-// Forager's Run.Close takes the close, failed with image_missing and -1 in a run no
-// session joined.
+// Forager's Run.Close takes the close, failed with environment_image_missing and -1, after the
+// step's session joined.
 func TestLaunchClosesAMissingEnvironmentImageAsForagerTakesIt(t *testing.T) {
 	e := newEnv(t)
 	_, opened := throughGateway(t, e)
@@ -142,7 +148,7 @@ func TestLaunchClosesAMissingEnvironmentImageAsForagerTakesIt(t *testing.T) {
 	if run.outs[0] != closedImageMissing || run.errs[0] != nil {
 		t.Fatalf("the close %+v: %v", run.outs[0], run.errs[0])
 	}
-	if c := run.closed[0]; c.State != "failed" || c.Reason != "image_missing" || c.ExitCode != -1 || c.RunClosed {
+	if c := run.closed[0]; c.State != "failed" || c.Reason != "environment_image_missing" || c.ExitCode != -1 || c.RunClosed {
 		t.Errorf("Run.Close returned %+v", c)
 	}
 }
@@ -205,5 +211,44 @@ func TestLaunchClosesOnceWithAFailedClose(t *testing.T) {
 				t.Errorf("the run closed as %+v", e.run)
 			}
 		})
+	}
+}
+
+// TestForagerTakesImageMissingOnlyBeforeAJoin is a run at a gateway in this process: after a
+// session joined, Run.Close refuses image_missing, which is for a close before a join, and takes
+// the end code of the prebuild, environment_image_missing, with the same state and exit code. A
+// close before a join takes image_missing, so the fetch's refusals keep it.
+func TestForagerTakesImageMissingOnlyBeforeAJoin(t *testing.T) {
+	ctx := context.Background()
+	g, err := gateway.Start(ctx, gateway.Config{Dir: t.TempDir(), NoLinkSocket: true, Version: "test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		closeCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		g.Close(closeCtx)
+	})
+	open := func() *session.Run {
+		r, err := session.Open(ctx, session.OpenSpec{RunID: event.NewRunID(), RunsDir: t.TempDir(), Report: func(string) {}, Gateway: session.LocalGateway(g.LocalLink())})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return r
+	}
+	missing := session.Outcome{State: "failed", Reason: "image_missing", ExitCode: -1}
+	before := open()
+	if _, err := before.Close(ctx, missing); err != nil {
+		t.Errorf("a close before a join refused image_missing: %v", err)
+	}
+	joined := open()
+	if _, err := joined.Join(ctx, session.SessionSpec{Command: "/usr/bin/true", Dir: t.TempDir(), Stdin: strings.NewReader(""), Stdout: io.Discard, Stderr: io.Discard}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := joined.Close(ctx, missing); err == nil || !strings.Contains(err.Error(), "no session joined") {
+		t.Errorf("a close after a join with image_missing returned %v, want the refusal", err)
+	}
+	if _, err := joined.Close(ctx, closedImageMissing); err != nil {
+		t.Errorf("a close after a join with %q refused it: %v", closedImageMissing.Reason, err)
 	}
 }
