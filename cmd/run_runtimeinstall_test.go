@@ -495,9 +495,17 @@ func TestARegistryThatKeepsReturning503StopsAtSIGTERM(t *testing.T) {
 	reg.Unavailable(-1, "")
 	r := endsWithin(t, 30*time.Second, func() installRun {
 		return runInstalling(t, installSetup{reg: reg, npm: rt.StartNpm(t), proxy: proxy, walled: true, during: func() {
-			// The second request is the first retry, 2 seconds after the first.
-			for len(reg.Paths()) < 2 {
-				time.Sleep(20 * time.Millisecond)
+			// The first try is 3 requests: newest with no token, which gets 401, the token,
+			// and newest with it, which gets 503. The third request to /v2/ is the first
+			// retry, 2 seconds later, and qory prints the waiting line before it sends it.
+			for retried := false; !retried; time.Sleep(20 * time.Millisecond) {
+				n := 0
+				for _, p := range reg.Paths() {
+					if strings.HasPrefix(p, "/v2/") {
+						n++
+					}
+				}
+				retried = n >= 3
 			}
 			syscall.Kill(os.Getpid(), syscall.SIGTERM)
 		}})
