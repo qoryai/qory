@@ -247,7 +247,7 @@ func gatewayURLWrong(v string) string {
 	case u.Scheme != "https":
 		return "for " + origin + " is not https"
 	case u.User != nil:
-		return "for " + origin + " holds user information"
+		return "for " + origin + " contains user information"
 	case u.Path != "" && u.Path != "/":
 		return "for " + origin + " has a path"
 	case u.RawQuery != "" || u.ForceQuery || u.Fragment != "":
@@ -1406,7 +1406,7 @@ func serverURLWrong(raw string) (fix string, causes []string) {
 	case u.Scheme == "http" && !loopback(u.Hostname()):
 		wrong = "is http to a host that is not this machine"
 	case u.User != nil:
-		wrong = "holds user information"
+		wrong = "contains user information"
 	case u.Path != "":
 		wrong = "has a path"
 	case u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || strings.HasSuffix(raw, "#"):

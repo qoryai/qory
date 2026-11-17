@@ -31,7 +31,7 @@ func TestAGatewayServerURLRefusalNamesWhatIsWrong(t *testing.T) {
 		{"mailto:ops@qory.example", refusal("gateway.server.url is not a URL.")},
 		{"ftp://qory.example/x", refusal("gateway.server.url for ftp://qory.example is not https or http.")},
 		{"http://qory.example:8080/x", refusal("gateway.server.url for http://qory.example:8080 is http to a host that is not this machine.")},
-		{"https://user@qory.example:8443/x", refusal("gateway.server.url for https://qory.example:8443 holds user information.")},
+		{"https://user@qory.example:8443/x", refusal("gateway.server.url for https://qory.example:8443 contains user information.")},
 		{"https://qory.example/v1/events", refusal("gateway.server.url for https://qory.example has a path.")},
 		{"https://qory.example/", refusal("gateway.server.url for https://qory.example has a path.")},
 		{"http://127.0.0.1:8080/v1", refusal("gateway.server.url for http://127.0.0.1:8080 has a path.")},
@@ -70,8 +70,8 @@ func TestAGatewayServerURLIsTaken(t *testing.T) {
 func TestAGatewayServerURLRefusalPrintsNoSecret(t *testing.T) {
 	hermetic(t)
 	for _, c := range []struct{ url, want string }{
-		{"https://TOKEN@qory.example", "gateway.server.url for https://qory.example holds user information"},
-		{"https://u:p@qory.example:8443", "gateway.server.url for https://qory.example:8443 holds user information"},
+		{"https://TOKEN@qory.example", "gateway.server.url for https://qory.example contains user information"},
+		{"https://u:p@qory.example:8443", "gateway.server.url for https://qory.example:8443 contains user information"},
 		{"http://u:p@qory.example", "gateway.server.url for http://qory.example is http to a host that is not this machine"},
 		{"ftp://u:p@qory.example/x?token=x#TOKEN", "gateway.server.url for ftp://qory.example is not https or http"},
 		{"https://qory.example?token=x", "gateway.server.url for https://qory.example has a query or a fragment"},

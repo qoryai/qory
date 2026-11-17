@@ -992,7 +992,7 @@ func TestEnrolGoesThroughVia(t *testing.T) {
 		{[]string{"--via-ca-file", g.caFile}, "--via-ca-file needs --via, the gateway it is the trust of"},
 		{[]string{"--via-certificate-sha256", "47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU="}, "--via-certificate-sha256 needs --via, the gateway it is the trust of"},
 		{[]string{"--via", "http://gateway.example:8443"}, "Set --via to an https URL of a host and an optional port.\n  --via for http://gateway.example:8443 is not https.\n  A via URL is an https URL of a host and an optional port, with nothing after."},
-		{[]string{"--via", "https://user:pass@gateway.example"}, "Set --via to an https URL of a host and an optional port.\n  --via for https://gateway.example holds user information.\n  A via URL is an https URL of a host and an optional port, with nothing after."},
+		{[]string{"--via", "https://user:pass@gateway.example"}, "Set --via to an https URL of a host and an optional port.\n  --via for https://gateway.example contains user information.\n  A via URL is an https URL of a host and an optional port, with nothing after."},
 		{[]string{"--via", g.URL, "--via-ca-file", filepath.Join(dir, "none.pem")}, "--via-ca-file " + filepath.Join(dir, "none.pem") + ": no such file or directory"},
 		{[]string{"--via", g.URL, "--via-ca-file", foragerFile()}, "--via-ca-file " + foragerFile() + " holds no PEM certificate"},
 		{[]string{"--via", g.URL, "--via-certificate-sha256", "pin"}, "--via-certificate-sha256 is not the SHA-256 of a public key in standard base64 with padding, 44 characters ending in ="},

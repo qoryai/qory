@@ -129,17 +129,17 @@ func (f *fault) error(path string) error {
 
 // faultFixes is the fix of each wrong that [keyFault] is given, with the key at its %s.
 var faultFixes = map[string]string{
-	"is not a mapping":                        "Set %s to a mapping.",
-	"is not a list of strings":                "Set %s to a list of strings.",
-	"is not a list":                           "Set %s to a list.",
-	"is not a string":                         "Set %s to a string.",
-	"is not a whole number":                   "Set %s to a whole number.",
-	"is not true or false":                    "Set %s to true or false.",
-	"is not of the type it takes":             "Set %s to a value of the type it takes.",
-	"is not a number that JSON can represent": "Set %s to a number that JSON can represent.",
-	"is an alias of a value that holds it":    "Remove the alias at %s, which stands for a value that holds it.",
-	"merges a mapping that holds the merge":   "Remove the merge at %s, which merges a mapping that holds it.",
-	"has a tag its value is not of":           "Remove the tag of %s, or write a value that fits it.",
+	"is not a mapping":                         "Set %s to a mapping.",
+	"is not a list of strings":                 "Set %s to a list of strings.",
+	"is not a list":                            "Set %s to a list.",
+	"is not a string":                          "Set %s to a string.",
+	"is not a whole number":                    "Set %s to a whole number.",
+	"is not true or false":                     "Set %s to true or false.",
+	"is not of the type it takes":              "Set %s to a value of the type it takes.",
+	"is not a number that JSON can represent":  "Set %s to a number that JSON can represent.",
+	"is an alias of a value that contains it":  "Remove the alias at %s, which stands for a value that contains it.",
+	"merges a mapping that contains the merge": "Remove the merge at %s, which merges a mapping that contains it.",
+	"has a tag its value is not of":            "Remove the tag of %s, or write a value that fits it.",
 }
 
 // keyFault is a fault of the value at key.
@@ -445,7 +445,7 @@ func (w *walk) fault(n *yaml.Node, t reflect.Type, key string) *fault {
 		if w.keys {
 			return nil
 		}
-		return keyFault(line, key, "is an alias of a value that holds it")
+		return keyFault(line, key, "is an alias of a value that contains it")
 	case walked:
 		return nil
 	}
@@ -690,7 +690,7 @@ func (w *walk) mergeFault(n *yaml.Node, t reflect.Type, key string, merged map[s
 		if w.keys {
 			return nil
 		}
-		return keyFault(line, key, "merges a mapping that holds the merge")
+		return keyFault(line, key, "merges a mapping that contains the merge")
 	}
 	w.merging[k] = true
 	defer delete(w.merging, k)

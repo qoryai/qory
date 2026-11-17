@@ -28,7 +28,7 @@ func walkFault(t *testing.T, body string, known bool) (*fault, time.Duration) {
 // fault, and merges that expand without end stop at the walk's limit, at once.
 func TestTheWalkEnds(t *testing.T) {
 	f, took := walkFault(t, "session: &s {<<: *s}\n", true)
-	if f == nil || f.line != 1 || f.text != "session merges a mapping that holds the merge" || took > 2*time.Second {
+	if f == nil || f.line != 1 || f.text != "session merges a mapping that contains the merge" || took > 2*time.Second {
 		t.Errorf("a mapping that merges itself: %+v in %v", f, took)
 	}
 	bomb := "gateway:\n  credentials:\n    c0: &m0 {k: v}\n"
