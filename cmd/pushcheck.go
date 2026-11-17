@@ -43,6 +43,7 @@ const (
 	textChecksBadImage   = "Set wall.image or --image to an image reference, and run again.\n  Push checks cannot start from %s. A reference starts with a letter or a digit and has only letters, digits, and . _ / : @ -."
 	textChecksNoImage    = "Pull the wall's default image onto this machine, and run again.\n  Push checks run in it, and the engine does not have the image %s."
 	textChecksNoRuntime  = "Install the container runtime on the engine, and run again.\n  The push checks' container runs under the runtime %s, and the engine does not have it."
+	textChecksBadRuntime = "Fix the runtime name in wall.images, and run again.\n  The push checks' container runs under the runtime %s, and Docker accepts no runtime name with a \"/\"."
 	textChecksNotSet     = "Run again.\n  Turning on the push checks for the POSTs from behind the wall failed, so the run stopped before the setup: %s."
 	textCheckNotFinished = "the check before a push did not finish, and the push was not stored (503 " + runapi.CodePushCheckUnavailable + "): %s"
 )
@@ -52,17 +53,18 @@ const (
 // work item in again makes. That run opens on the engine selected at its start, so switching
 // the engine back does not help this one.
 const (
-	textChecksNoWallFromCode    = "Set wall.adapter to docker, then take the work item in again in Qory Apiary.\n  The push checks of %s run in containers of the docker wall alone" + codeUsed
-	textChecksNoRunAPIFromCode  = "Take the work item in again in Qory Apiary, through a gateway that sends the run API address.\n  The push checks read the artifacts through the run API, which failed: %s" + codeUsed
-	textChecksBadRunAPIFromCode = "Update the run's gateway, then take the work item in again in Qory Apiary.\n  The run API address that the gateway sent is not one the push checks can use: %s" + codeUsed
-	textChecksEngineFromCode    = "Take the work item in again in Qory Apiary, and do not switch the engine while that run starts.\n  The push checks would run on the engine %s, and the run's containers are on the engine %s" + codeUsed
-	textChecksNoFolderFromCode  = "Check the folder of the push checks' files, then take the work item in again in Qory Apiary.\n  The folder is %s, and making it failed: %s" + codeUsed
-	textChecksBadImageFromCode  = "Set wall.image or --image to an image reference, then take the work item in again in Qory Apiary.\n  Push checks cannot start from %s" + codeUsed
-	textChecksNoDefaultFromCode = "Set wall.image in forager.yaml, then take the work item in again in Qory Apiary.\n  Push checks run in the wall's default image" + codeUsed
-	textChecksNoImageFromCode   = "Pull the wall's default image, then take the work item in again in Qory Apiary.\n  Push checks run in it, and the engine does not have the image %s" + codeUsed
-	textChecksNoRuntimeFromCode = "Install the container runtime, then take the work item in again in Qory Apiary.\n  The push checks' container runs under the runtime %s, and the engine does not have it" + codeUsed
-	textChecksNotSetFromCode    = "Take the work item in again in Qory Apiary.\n  Turning on the push checks for the POSTs from behind the wall failed, so the run stopped before the setup: %s" + codeUsed
-	textChecksUnreadFromCode    = "Take the work item in again in Qory Apiary, so that the new run composes the harness again.\n  The push checks in %s could not be read: %s" + codeUsed
+	textChecksNoWallFromCode     = "Set wall.adapter to docker, then take the work item in again in Qory Apiary.\n  The push checks of %s run in containers of the docker wall alone" + codeUsed
+	textChecksNoRunAPIFromCode   = "Take the work item in again in Qory Apiary, through a gateway that sends the run API address.\n  The push checks read the artifacts through the run API, which failed: %s" + codeUsed
+	textChecksBadRunAPIFromCode  = "Update the run's gateway, then take the work item in again in Qory Apiary.\n  The run API address that the gateway sent is not one the push checks can use: %s" + codeUsed
+	textChecksEngineFromCode     = "Take the work item in again in Qory Apiary, and do not switch the engine while that run starts.\n  The push checks would run on the engine %s, and the run's containers are on the engine %s" + codeUsed
+	textChecksNoFolderFromCode   = "Check the folder of the push checks' files, then take the work item in again in Qory Apiary.\n  The folder is %s, and making it failed: %s" + codeUsed
+	textChecksBadImageFromCode   = "Set wall.image or --image to an image reference, then take the work item in again in Qory Apiary.\n  Push checks cannot start from %s" + codeUsed
+	textChecksNoDefaultFromCode  = "Set wall.image in forager.yaml, then take the work item in again in Qory Apiary.\n  Push checks run in the wall's default image" + codeUsed
+	textChecksNoImageFromCode    = "Pull the wall's default image, then take the work item in again in Qory Apiary.\n  Push checks run in it, and the engine does not have the image %s" + codeUsed
+	textChecksNoRuntimeFromCode  = "Install the container runtime, then take the work item in again in Qory Apiary.\n  The push checks' container runs under the runtime %s, and the engine does not have it" + codeUsed
+	textChecksBadRuntimeFromCode = "Fix the runtime name in wall.images, then take the work item in again in Qory Apiary.\n  The push checks' container runs under the runtime %s, and Docker accepts no runtime name with a \"/\"" + codeUsed
+	textChecksNotSetFromCode     = "Take the work item in again in Qory Apiary.\n  Turning on the push checks for the POSTs from behind the wall failed, so the run stopped before the setup: %s" + codeUsed
+	textChecksUnreadFromCode     = "Take the work item in again in Qory Apiary, so that the new run composes the harness again.\n  The push checks in %s could not be read: %s" + codeUsed
 )
 
 // checksStop is the error of a line that stops a run with push checks, with args in it:
@@ -238,6 +240,11 @@ func pushChecker(ctx context.Context, run openedRun, home, runID string, spec *r
 	// The runtime that the checks' container needs, the same way: an info that fails or
 	// does not list runtimes as Docker does lets the run go on.
 	if has, err := checker.HasRuntime(ctx); err == nil && !has {
+		// Docker refuses a name with a "/", a path to a binary, that its list omits: the
+		// fix is the name, not an install.
+		if strings.Contains(checker.Runtime, "/") {
+			return nil, checksStop(fromCode, textChecksBadRuntime, textChecksBadRuntimeFromCode, exports.Value(checker.Runtime, false))
+		}
 		return nil, checksStop(fromCode, textChecksNoRuntime, textChecksNoRuntimeFromCode, exports.Value(checker.Runtime, false))
 	}
 	// The folder is qory's user's alone. For a run's user that is another user, its mode

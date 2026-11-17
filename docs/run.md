@@ -334,8 +334,12 @@ when the engine's `docker info` does not list the runtime that the checks' conta
 under, such as `runsc`: `Install the container runtime on the engine, and run again.`, and
 on the next line `The push checks' container runs under the runtime <runtime>, and the
 engine does not have it.` An engine whose `docker info` fails, or does not list runtimes
-as Docker does, lets the run go on, and so does a runtime named `io.containerd.*`, a
-containerd shim, which Docker starts although its list omits it. It stops there with exit 2 before
+as Docker does, lets the run go on, and so does a runtime name that Docker starts as a
+containerd shim although its list omits it: a name with a `.`, a part before the first
+`.`, and no `/`, such as `io.containerd.runsc.v1`. A runtime name with a `/` stops the run
+there with exit 2 when the engine's list omits it: `Fix the runtime name in wall.images, and run
+again.`, and on the next line `The push checks' container runs under the runtime <runtime>,
+and Docker accepts no runtime name with a "/".` It stops there with exit 2 before
 any command of the engine gets the image when the image is not a reference, such as a
 value that starts with `-`: `Set wall.image or --image to an image reference, and run
 again.`, and on the next line `Push checks cannot start from <value>. A reference starts
@@ -364,6 +368,8 @@ Pull the wall's default image, then take the work item in again in Qory Apiary.
   Push checks run in it, and the engine does not have the image <image>; the code is used
 Install the container runtime, then take the work item in again in Qory Apiary.
   The push checks' container runs under the runtime <runtime>, and the engine does not have it; the code is used
+Fix the runtime name in wall.images, then take the work item in again in Qory Apiary.
+  The push checks' container runs under the runtime <runtime>, and Docker accepts no runtime name with a "/"; the code is used
 Set wall.image or --image to an image reference, then take the work item in again in Qory Apiary.
   Push checks cannot start from <value>; the code is used
 Take the work item in again in Qory Apiary.

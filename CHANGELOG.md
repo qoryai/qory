@@ -489,7 +489,10 @@ release may change what an existing document does, and states it under Upgrading
   info` does not list the `runtime` that the checks' container runs under, such as
   `runsc`: `Install the container runtime on the engine, and run again.`, and on the next
   line the runtime. Before, the checks failed at the first push. An engine whose `docker
-  info` fails lets the run go on, and so does a runtime named `io.containerd.*`.
+  info` fails lets the run go on, and so does a runtime name that Docker starts as a
+  containerd shim: a `.` after a first part and no `/`, such as `io.containerd.runsc.v1`. A
+  runtime name with a `/` that the list omits stops the run with `Fix the runtime name in
+  wall.images, and run again.`
 - A prebuild keeps an image of any size, and the last line of the prebuild prints the size.
 - A prebuild stops, before it builds the image, when the base image is not Debian or
   Ubuntu 22.04 or 24.04, or has no `apt-get`: `use a Debian or Ubuntu image: the build

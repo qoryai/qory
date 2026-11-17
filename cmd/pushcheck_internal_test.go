@@ -418,18 +418,76 @@ func TestAnEngineInfoThatFailsLetsTheRunGoOn(t *testing.T) {
 	}
 }
 
+// runtimeNamed is a run whose selected image, and so the checks, run under runtime, on an
+// engine whose list has runc alone, and the load of its checks for a run from a run code,
+// fromCode, or with none.
+func runtimeNamed(t *testing.T, runtime string, fromCode bool) (*pushcheck.Checker, error) {
+	t.Helper()
+	docker, _ := runtimesEngine(t, `{"runc":{}}`, 0, "")
+	run, spec := gvisorRun(t)
+	spec.Wall = &wall.Docker{Command: docker}
+	spec.Images[1].Runtime = runtime
+	run = imageOnlyAPI{imageAPI: run.(imageOnlyAPI).imageAPI, img: spec.Images[1]}
+	return pushChecker(context.Background(), run, t.TempDir(), "r1", spec, true, fromCode)
+}
+
+// TestADottedRuntimeNameTheListOmitsLetsTheLoadGoOn is a runtime that Docker starts as a
+// containerd shim, a name with a "." after a first part and no "/", that docker info does
+// not list: the load returns the checker.
+func TestADottedRuntimeNameTheListOmitsLetsTheLoadGoOn(t *testing.T) {
+	stubChecks(t)
+	for _, name := range []string{"io.containerd.runsc.v1", "com.example.shim.v1"} {
+		checker, err := runtimeNamed(t, name, false)
+		if err != nil || checker == nil {
+			t.Errorf("runtime %q: %v, %v, want a checker and no error", name, checker != nil, err)
+		}
+	}
+}
+
+// TestARuntimeNameWithASlashStopsTheLoad is a runtime named like a path: Docker refuses
+// the name, so the load stops with a line to fix the name when the list omits it.
+func TestARuntimeNameWithASlashStopsTheLoad(t *testing.T) {
+	stubChecks(t)
+	for fromCode, want := range map[bool]string{
+		false: "Fix the runtime name in wall.images, and run again.\n  The push checks' container runs under the runtime /x/runsc, and Docker accepts no runtime name with a \"/\".",
+		true:  "Fix the runtime name in wall.images, then take the work item in again in Qory Apiary.\n  The push checks' container runs under the runtime /x/runsc, and Docker accepts no runtime name with a \"/\"; the code is used",
+	} {
+		checker, err := runtimeNamed(t, "/x/runsc", fromCode)
+		if checker != nil || err == nil || err.Error() != want {
+			t.Errorf("from a run code %v: %v, %v, want no checker and %q", fromCode, checker != nil, err, want)
+		}
+	}
+}
+
+// TestARuntimeNameOfNoShimStopsWithTheInstallLine is a name with no "." that the
+// list omits, and one that starts with a ".": Docker has no such runtime, so the load
+// stops with the install line.
+func TestARuntimeNameOfNoShimStopsWithTheInstallLine(t *testing.T) {
+	stubChecks(t)
+	for _, name := range []string{"runsc2", ".shim.v1"} {
+		checker, err := runtimeNamed(t, name, false)
+		if checker != nil || err == nil || !strings.HasPrefix(err.Error(), "Install the container runtime on the engine, and run again.\n") {
+			t.Errorf("runtime %q: %v, %v, want no checker and the install line", name, checker != nil, err)
+		}
+	}
+}
+
 // TestARuntimeLineStartsWithAFixOf100Characters is the first line of the stop for a missing
 // runtime, with "qory run: " in front, as it reaches the terminal: at most 100 characters,
 // for a run with a run code and one with none, and whatever the runtime's name is.
 func TestARuntimeLineStartsWithAFixOf100Characters(t *testing.T) {
 	stubChecks(t)
-	for _, fromCode := range []bool{false, true} {
-		docker, _ := runtimesEngine(t, `{"runc":{}}`, 0, "")
-		run, spec := gvisorRun(t)
-		spec.Wall = &wall.Docker{Command: docker}
-		spec.Images[1].Runtime = "a-runtime-with-a-long-name-" + strings.Repeat("x", 60)
-		run = imageOnlyAPI{imageAPI: run.(imageOnlyAPI).imageAPI, img: spec.Images[1]}
-		_, err := pushChecker(context.Background(), run, t.TempDir(), "r1", spec, true, fromCode)
+	for _, c := range []struct {
+		fromCode bool
+		runtime  string
+	}{
+		{false, "a-runtime-with-a-long-name-" + strings.Repeat("x", 60)},
+		{true, "a-runtime-with-a-long-name-" + strings.Repeat("x", 60)},
+		{false, "/a-runtime-with-a-long-name-" + strings.Repeat("x", 60)},
+		{true, "/a-runtime-with-a-long-name-" + strings.Repeat("x", 60)},
+	} {
+		fromCode := c.fromCode
+		_, err := runtimeNamed(t, c.runtime, fromCode)
 		if err == nil {
 			t.Fatalf("from a run code %v: no error", fromCode)
 		}

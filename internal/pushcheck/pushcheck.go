@@ -585,13 +585,12 @@ func (c *Checker) HasImage(ctx context.Context) (bool, error) {
 
 // HasRuntime reports whether the engine has the container runtime [Checker.Runtime],
 // with docker info, which starts nothing. A checker with no runtime has it, and so has
-// one whose runtime is a containerd shim name, io.containerd.*: Docker starts a
-// container under a shim that its list of runtimes does not have. An engine
-// whose runtimes do not list the name is false with no error; an info that fails, such
-// as one of an engine that is not reachable, or one that does not report its runtimes as
-// Docker does, is an error.
+// one whose runtime is a name that Docker starts as a containerd shim although its list
+// omits it, see shimRuntimeName. An engine whose runtimes do not list the name is false
+// with no error; an info that fails, such as one of an engine that is not reachable, or
+// one that does not report its runtimes as Docker does, is an error.
 func (c *Checker) HasRuntime(ctx context.Context) (bool, error) {
-	if c.Runtime == "" || strings.HasPrefix(c.Runtime, "io.containerd.") {
+	if c.Runtime == "" || shimRuntimeName(c.Runtime) {
 		return true, nil
 	}
 	var out, errOut bytes.Buffer
@@ -604,6 +603,14 @@ func (c *Checker) HasRuntime(ctx context.Context) (bool, error) {
 	}
 	_, has := runtimes[c.Runtime]
 	return has, nil
+}
+
+// shimRuntimeName reports whether Docker starts a container under the runtime name as a
+// containerd shim, although docker info does not list it. moby v28.0.0, daemon/runtime_unix.go:
+// "no '/' ... at least one '.' ... does not begin with a '.'" (isPermissibleC8dRuntimeName).
+func shimRuntimeName(name string) bool {
+	prefix, _, dotted := strings.Cut(name, ".")
+	return dotted && prefix != "" && !strings.Contains(name, "/")
 }
 
 // limits are the flags of the check container's limits.
