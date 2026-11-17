@@ -29,8 +29,8 @@ release may change what an existing document does, and states it under Upgrading
   `mcr.microsoft.com/devcontainers/base`, or from one the configuration builds. On a
   Debian base, `apt-get` installs Chromium. On Ubuntu 22.04 and 24.04, `amd64` and
   `arm64`, qory downloads Chrome for Testing 159.0.8154.6, the Chromium of Playwright
-  1.65.1, checks its sha256 sum and extracts it to `/opt/qory/chromium`, because Ubuntu's
-  package is a snap. qory copies the parsers from the `prebuild` image, and `node` from it
+  1.65.1, from `storage.googleapis.com`, checks its sha256 sum and extracts it to
+  `/opt/qory/chromium`, because Ubuntu's package is a snap. qory copies the parsers from the `prebuild` image, and `node` from it
   when the base image has none. It prints `prebuild: added Chromium, ffmpeg and the
   parsers in <time>`. See `docs/run.md`.
 - Every run of Claude Code installs the runtime's program before its session: from the
@@ -466,7 +466,7 @@ release may change what an existing document does, and states it under Upgrading
 
 - A prebuild stops, before it builds the image, when the base image is not Debian or
   Ubuntu 22.04 or 24.04, or has no `apt-get`: `use a Debian or Ubuntu image: the build
-  adds Chromium to these, and this image's ID is "<ID>"`. Alpine bases and other Ubuntu
+  adds Chromium only to these`. Alpine bases and other Ubuntu
   releases that built before are refused.
 
 - The `agent`, `agent-docker` and `prebuild` images contain no agent runtime. The machine

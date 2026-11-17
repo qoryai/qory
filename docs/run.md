@@ -2080,17 +2080,19 @@ prebuilt one, such as `mcr.microsoft.com/devcontainers/base`, or one the configu
 builds, and the run's session finds them without a download:
 
 - Chromium at `/usr/bin/chromium`, and `ffmpeg` with `ffprobe`, with Noto's fonts for
-  Latin and other scripts, CJK and color emoji. Where Chromium comes from depends on the
+  Latin and other scripts, CJK, and color emoji. Where Chromium comes from depends on the
   base image:
   - **Debian**, any release: `apt-get` installs the `chromium` package.
   - **Ubuntu 22.04 and 24.04**, `amd64` and `arm64`: Ubuntu's `chromium` package is a
     snap, which does not run in a container, so the step downloads Chrome for Testing
     159.0.8154.6, the Chromium of Playwright 1.65.1 (browser revision 1255), from
-    `https://cdn.playwright.dev/builds/cft/159.0.8154.6/`. It checks the archive's
-    sha256 sum, which is in `internal/prebuild/tools.go`, before it extracts it to
-    `/opt/qory/chromium`, owned by root, and links `/usr/bin/chromium` to it. It installs
-    the libraries Playwright's `install-deps` lists for the release, `curl` and `unzip`
-    with `apt-get`. A base that has a file at `/usr/bin/chromium` stops the step.
+    `https://storage.googleapis.com/chrome-for-testing-public/159.0.8154.6/`, the
+    addresses Google lists for that version. `curl` allows `https` only and follows no
+    redirect. The step checks the archive's sha256 sum, which is in
+    `internal/prebuild/tools.go`, before it extracts it to `/opt/qory/chromium`, owned by
+    root, and links `/usr/bin/chromium` to it. It installs the libraries Playwright's
+    `install-deps` lists for the release, `curl`, and `unzip` with `apt-get`. A base that
+    has a file at `/usr/bin/chromium` stops the step.
 
   `apt-get` installs `ffmpeg`, the fonts and the libraries with no recommended packages
   from the apt sources the base image has, and removes its archives and lists in the same
@@ -2108,19 +2110,27 @@ The step runs the programs as the wall user and checks that Chromium starts, `ff
 `ffprobe` run, each parser loads at the version of `package.json`, and the wall user
 cannot write to `/opt/qory/parsers`. A failed check prints its fix first in the build's
 log. Behind the wall, `apt-get` reaches the base image's apt sources, and on Ubuntu `curl`
-reaches `cdn.playwright.dev`, through the run's proxy, so the run's egress must include
-them.
+reaches `storage.googleapis.com`, through the run's proxy, so the run's egress must
+include them. `storage.googleapis.com` is the one host of the download.
 
 The step reads `ID`, `VERSION_ID` and `apt-get` in a container of the base image with no
-network, and stops before it builds a layer when the base is none of the above, with
-`use a Debian or Ubuntu image: the build adds Chromium to these, and this image's ID is
-"<ID>"`, `use Ubuntu 22.04 or 24.04, or Debian: the build adds Chromium to these, and this
-is Ubuntu "<VERSION_ID>"`, `use an amd64 or arm64 Ubuntu image: the build adds Chromium for
-these, and this one is "<architecture>"`, or `use a Debian or Ubuntu image that has
-apt-get: the build installs ffmpeg and fonts with it`. An Alpine base, or an Ubuntu base
-of another release, stops the prebuild this way. A prebuild whose `prebuild` image is
+network, and stops before it builds a layer when the base is none of the above. The first
+line of the error is the fix, and the second line has the image's value, at most 32
+characters of it:
+
+- `use a Debian or Ubuntu image: the build adds Chromium only to these`, then `this
+  image's ID is "<ID>"`;
+- `use Ubuntu 22.04 or 24.04, or Debian: the build adds Chromium only to these`, then
+  `this image is Ubuntu "<VERSION_ID>"`;
+- `use an amd64 or arm64 Ubuntu image: the build adds Chromium only for these`, then
+  `this image's architecture is "<architecture>"`;
+- `use a Debian or Ubuntu image that has apt-get: the build installs ffmpeg and fonts with
+  it`.
+
+An Alpine base, or an Ubuntu base of another release, stops the prebuild this way.
+A prebuild whose `prebuild` image is
 not built FROM the `agent` image stops with `build the prebuild image FROM Qory's agent
-image: it has no parsers in /opt/qory/parsers`.
+image, which has the parsers`, then `the folder /opt/qory/parsers has none`.
 
 The step adds about 1.6 GiB to the image, measured on
 `mcr.microsoft.com/devcontainers/base` for arm64 (1.3 GiB before, 3.0 GiB after), and the
