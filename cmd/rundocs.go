@@ -464,7 +464,7 @@ func (r *codeRun) timedOutLine(limit time.Duration, runtime string) string {
 	case r.defines:
 		where = r.phrase()
 	}
-	return fmt.Sprintf("set a longer time_limit_minutes in Qory Apiary, or a longer workflows.%s.time_limit in %s: the run was cancelled at its time limit of %s, before %s started", r.workflow, where, limit, agentName(runtime))
+	return fmt.Sprintf("set a longer Time limit for the workflow %s on the Workflows page in Qory Apiary, or a longer workflows.%s.time_limit in %s: the run was cancelled at its time limit of %s, before %s started", r.workflow, r.workflow, where, limit, agentName(runtime))
 }
 
 // startLine is the line qory run prints once the answer to the run code is read.

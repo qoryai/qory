@@ -400,8 +400,9 @@ When the run ends, qory says how, and its exit status goes with it:
   before <runtime> started`: the limit came before the runtime started, exit 124. The
   line contains `the agent` in place of `<runtime>` when the limit came during the fetch
   of the run's repositories, and when the compose failed after the limit.
-  A run from a run code, which takes no `--timeout`, prints `✗ set a longer
-  time_limit_minutes in Qory Apiary, or a longer workflows.<workflow>.time_limit in the
+  A run from a run code, which takes no `--timeout`, prints `✗ set a longer Time limit
+  for the workflow <workflow> on the Workflows page in Qory Apiary, or a longer
+  workflows.<workflow>.time_limit in the
   base of the workspace's harness: the run was cancelled at its time limit of <d>, before
   <runtime> started` instead. The line contains `the workspace's harness` for a harness
   that defines a stack, and `the checkout's harness or the base it extends` for a run
