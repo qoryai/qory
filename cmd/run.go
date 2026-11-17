@@ -1642,7 +1642,7 @@ type openedRun interface {
 	// or copy.
 	StartStep(kind, name string) (hostStep, error)
 	// HostProxy starts the run's host proxy, for the fetch of the run's repositories on
-	// this machine, the runtime's install and a prebuild. It sets no push credential.
+	// this machine, the runtime's install, and a prebuild. It sets no push credential.
 	HostProxy() (hostProxy, error)
 	// PushProxy starts the run's push proxy, for the push step's git push. It sets the
 	// run configuration's push credentials alone. It returns an error while a session or a

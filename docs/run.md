@@ -430,7 +430,7 @@ the value to the list:
   qory reads as it starts, in every run;
 - the access key's secret from `--access-key-secret-fd`, in every run, and from the
   `access-key-secret` file when qory signs its requests to the server with it;
-- the password of the run's host proxy, of its push proxy, of its stack proxy and of
+- the password of the run's host proxy, of its push proxy, of its stack proxy, and of
   `wall.engine_proxy_file`;
 - for a run given a run key or a run code, the query values of each harness source's URL,
   before qory fetches the source through the stack proxy;
@@ -2533,9 +2533,10 @@ one ref a push may change.
 
 A run whose run configuration has no push credential has no push proxy. The step fails with
 `qory run: Add a push credential to the run configuration: this run has no push proxy.`,
-a second line with the cause, and `the code is used`, and qory pushes nothing. A credential in forager.yaml is never a push credential. The run's
-proxy, which the agent, the setup, the fetch and the runtime's install go through, sets no
-push credential, so a push through it gets 403, as a credential with no `push_ref` does.
+a second line with the cause, and `the code is used`, and qory pushes nothing. A credential
+in forager.yaml is never a push credential. The run's proxy, which the agent, the setup, the
+fetch, and the runtime's install go through, sets no push credential, so a push through it
+gets 403, as a credential with no `push_ref` does.
 
 The step counts toward the run's time limit, and has 120 seconds when the run has less left,
 also after the session used up the limit. A run can pass its time limit by up to 120
