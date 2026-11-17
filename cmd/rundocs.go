@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/qoryai/forager/accesskey"
 	"github.com/qoryai/forager/session"
@@ -117,9 +118,8 @@ type codeRun struct {
 	workItem string
 	// submit is the documents' submit, the settings of the run's submit step, type and
 	// send: the one place qory takes them from, never the composed harness's
-	// process.yaml, see [codeRun.submitLine]. nil when the documents have no submit, and
-	// the run has no submit step. submitModule is the documents' submit_module, nil for
-	// none.
+	// process.yaml, see [codeRun.submitLine]. nil when the documents have no submit.
+	// submitModule is the documents' submit_module, nil for none.
 	submit       *contracts.Submit
 	submitModule *contracts.SubmitModule
 
@@ -705,8 +705,10 @@ func entryKeys(rep report.Report) []string {
 }
 
 // submitLine is the line that shows the harness's submit, the first module's in stack
-// order, beside r's when the two differ, or alone when r has none. It is "" for a run
-// that may not write, whose documents the contract allows no submit, and for r nil.
+// order, beside r's when they differ, or alone when r has none. It is "" for a run that
+// may not write, which the contract allows no submit, and for r nil. Line 1 has at most
+// [submitLineMax] characters with the "qory run: " that the caller adds, so a type name
+// that does not fit is shortened there, and a second line has the full name.
 func (r *codeRun) submitLine(rep report.Report) string {
 	if r == nil {
 		return ""
@@ -722,9 +724,59 @@ func (r *codeRun) submitLine(rep report.Report) string {
 	case !found, r.submit == nil && !r.writes():
 		return ""
 	case r.submit == nil:
-		return fmt.Sprintf("submit: the run documents have none, so the run has no submit step and does not use the harness's %s at %s", typ, send)
+		line := func(names ...string) string {
+			return fmt.Sprintf("submit: documents have no submit, so harness's %s at %s is unused", names[0], send)
+		}
+		return fitSubmit(line, []string{typ}, "The full type is "+typ+".")
 	case r.submit.Type == typ && r.submit.Send == send:
 		return ""
 	}
-	return fmt.Sprintf("submit: the run documents' %s at %s replaces the harness's %s at %s", r.submit.Type, r.submit.Send, typ, send)
+	line := func(names ...string) string {
+		return fmt.Sprintf("submit: documents' %s at %s replaces harness's %s at %s", names[0], r.submit.Send, names[1], send)
+	}
+	return fitSubmit(line, []string{r.submit.Type, typ}, "The full types are "+r.submit.Type+" in the documents and "+typ+" in the harness.")
+}
+
+// submitLineMax is the most characters of line 1 of the text of [codeRun.submitLine],
+// with the "qory run: " in front of it, as for a refusal.
+const submitLineMax = 100
+
+// fitSubmit is line of names, whole when line 1 has at most [submitLineMax] characters
+// after "qory run: ". Otherwise it is line of the names shortened to share what the
+// rest of line 1 leaves, each as [shortSubmitName] has it, then full on a second line.
+// [exports.Fit] cannot do this: it keeps 20 characters of a name, and the rest of this
+// line has 77 or more.
+func fitSubmit(line func(...string) string, names []string, full string) string {
+	const prefix = "qory run: "
+	text := line(names...)
+	if utf8.RuneCountInString(prefix+text) <= submitLineMax {
+		return text
+	}
+	left := submitLineMax - utf8.RuneCountInString(prefix+line(make([]string, len(names))...))
+	short := make([]string, len(names))
+	switch len(names) {
+	case 1:
+		short[0] = shortSubmitName(names[0], left)
+	default:
+		a, b := utf8.RuneCountInString(names[0]), utf8.RuneCountInString(names[1])
+		first := left / 2
+		if a <= first {
+			first = a
+		} else if b <= left/2 {
+			first = left - b
+		}
+		short[0], short[1] = shortSubmitName(names[0], first), shortSubmitName(names[1], left-first)
+	}
+	return line(short...) + "\n  " + full
+}
+
+// shortSubmitName is name with its middle replaced by "…" so that it has n characters,
+// and name as it is when it has at most n.
+func shortSubmitName(name string, n int) string {
+	r := []rune(name)
+	if len(r) <= n || n < 3 {
+		return name
+	}
+	head := n / 2
+	return string(r[:head]) + "…" + string(r[len(r)-(n-1-head):])
 }

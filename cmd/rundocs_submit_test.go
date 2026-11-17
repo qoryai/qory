@@ -4,6 +4,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/qoryai/qory/cmd"
 )
@@ -79,7 +80,7 @@ func TestARunWhoseHarnessHasAnotherSubmitUsesTheDocumentsAndPrintsBoth(t *testin
 	change := withSubmit("reply-draft", "end_of_run")
 	t.Run("another submit", func(t *testing.T) {
 		r := submitRun(t, change, harnessSubmit("reply-draft", "after_gate"))
-		want := "qory run: submit: the run documents' reply-draft at end_of_run replaces the harness's reply-draft at after_gate\n"
+		want := "qory run: submit: documents' reply-draft at end_of_run replaces harness's reply-draft at after_gate\n"
 		if lines := submitLines(r.out); len(lines) != 1 || lines[0] != want {
 			t.Errorf("the run prints %q, want the one line %q\n%s", lines, want, r.out)
 		}
@@ -105,10 +106,10 @@ func TestARunWhoseHarnessHasAnotherSubmitUsesTheDocumentsAndPrintsBoth(t *testin
 // TestARunWhoseDocumentsHaveNoSubmitHasNoSubmitStep is a run from a run code whose
 // documents have no submit, and whose composed harness has a process.yaml in the module
 // hello with submit reply-draft at after_gate: the run has no submit settings, and
-// prints one line that it has no submit step and does not use the harness's.
+// prints one line that shows the harness's submit as unused.
 func TestARunWhoseDocumentsHaveNoSubmitHasNoSubmitStep(t *testing.T) {
 	r := submitRun(t, nil, harnessSubmit("reply-draft", "after_gate"))
-	want := "qory run: submit: the run documents have none, so the run has no submit step and does not use the harness's reply-draft at after_gate\n"
+	want := "qory run: submit: documents have no submit, so harness's reply-draft at after_gate is unused\n"
 	if lines := submitLines(r.out); len(lines) != 1 || lines[0] != want {
 		t.Errorf("the run prints %q, want the one line %q\n%s", lines, want, r.out)
 	}
@@ -162,7 +163,7 @@ func TestARunWhoseHarnessSubmitDiffersInOneValueUsesTheDocumentsAndPrintsBoth(t 
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			r := submitRun(t, withSubmit("reply-draft", "end_of_run"), harnessSubmit(c.typ, c.send))
-			want := "qory run: submit: the run documents' reply-draft at end_of_run replaces the harness's " + c.typ + " at " + c.send + "\n"
+			want := "qory run: submit: documents' reply-draft at end_of_run replaces harness's " + c.typ + " at " + c.send + "\n"
 			if lines := submitLines(r.out); len(lines) != 1 || lines[0] != want {
 				t.Errorf("the run prints %q, want the one line %q\n%s", lines, want, r.out)
 			}
@@ -176,7 +177,7 @@ func TestARunWhoseHarnessSubmitDiffersInOneValueUsesTheDocumentsAndPrintsBoth(t 
 // submit, or a submit with a send that is neither end_of_run nor after_gate. The line
 // shows the second module's submit.
 func TestARunTakesTheHarnessSubmitFromTheFirstModuleThatHasAWellFormedOne(t *testing.T) {
-	want := "qory run: submit: the run documents have none, so the run has no submit step and does not use the harness's reply-draft at after_gate\n"
+	want := "qory run: submit: documents have no submit, so harness's reply-draft at after_gate is unused\n"
 	for _, c := range []struct{ name, first string }{
 		{"a first module with no submit", "summary: no submit here\n"},
 		{"a first module with a malformed submit", submitText("other-draft", "sometimes")},
@@ -207,7 +208,7 @@ func TestAWriteNoPushRunWhoseHarnessHasASubmitPrintsNoSubmitLine(t *testing.T) {
 // It shows the harness's type and send, which are values of the process.yaml and not
 // addresses.
 func TestAHiddenHarnessPrintsTheSameSubmitLineAsAVisibleOne(t *testing.T) {
-	want := "qory run: submit: the run documents' reply-draft at end_of_run replaces the harness's reply-draft at after_gate\n"
+	want := "qory run: submit: documents' reply-draft at end_of_run replaces harness's reply-draft at after_gate\n"
 	for _, c := range []struct {
 		name  string
 		shown bool
@@ -219,6 +220,62 @@ func TestAHiddenHarnessPrintsTheSameSubmitLineAsAVisibleOne(t *testing.T) {
 			}
 			if lines := submitLines(r.out); len(lines) != 1 || lines[0] != want {
 				t.Errorf("the run prints %q, want the one line %q\n%s", lines, want, r.out)
+			}
+		})
+	}
+}
+
+// The longest artifact type names the run contract allows, 64 characters each, for the
+// documents' submit and for the harness's.
+var (
+	longDocsType    = strings.Repeat("abcdefgh-", 7) + "x"
+	longHarnessType = strings.Repeat("stuvwxyz-", 7) + "y"
+)
+
+// TestTheSubmitLineHasAtMost100CharactersAndTheFullTypesOnASecondLine is a run from a
+// run code whose documents have a submit and whose composed harness has a different one,
+// with the types of reply-draft, then 64 characters in the documents' only, in the
+// harness's only, and in both; and a run whose documents have no submit and whose
+// harness's type has 64 characters. Line 1, with its "qory run: ", has at most 100
+// characters, a type that does not fit is shortened there, and a second line has the
+// full types. With reply-draft, line 1 is whole and there is no second line.
+func TestTheSubmitLineHasAtMost100CharactersAndTheFullTypesOnASecondLine(t *testing.T) {
+	for _, c := range []struct {
+		name, docs, harness string
+		full                string
+	}{
+		{"types of reply-draft", "reply-draft", "reply-draft", ""},
+		{"a long type in the documents", longDocsType, "reply-draft", "The full types are " + longDocsType + " in the documents and reply-draft in the harness."},
+		{"a long type in the harness", "reply-draft", longHarnessType, "The full types are reply-draft in the documents and " + longHarnessType + " in the harness."},
+		{"a long type in both", longDocsType, longHarnessType, "The full types are " + longDocsType + " in the documents and " + longHarnessType + " in the harness."},
+		{"a long type in the harness and no submit in the documents", "", longHarnessType, "The full type is " + longHarnessType + "."},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			var change func(map[string]any)
+			if c.docs != "" {
+				change = withSubmit(c.docs, "end_of_run")
+			}
+			r := submitRun(t, change, harnessSubmit(c.harness, "after_gate"))
+			lines := submitLines(r.out)
+			if len(lines) != 1 {
+				t.Fatalf("the run prints %q, want one submit line\n%s", lines, r.out)
+			}
+			if n := utf8.RuneCountInString(strings.TrimSuffix(lines[0], "\n")); n > 100 {
+				t.Errorf("line 1 has %d characters, want at most 100:\n%s", n, lines[0])
+			}
+			if c.full == "" {
+				if strings.Contains(r.out, "The full type") {
+					t.Errorf("the run prints a second line for types that fit:\n%s", r.out)
+				}
+				return
+			}
+			if !strings.Contains(r.out, "\n  "+c.full+"\n") {
+				t.Errorf("the output has no second line %q:\n%s", c.full, r.out)
+			}
+			for _, long := range []string{longDocsType, longHarnessType} {
+				if strings.Contains(lines[0], long) {
+					t.Errorf("line 1 has the whole type %s:\n%s", long, lines[0])
+				}
 			}
 		})
 	}
