@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/qoryai/qory/internal/config"
+	"github.com/qoryai/qory/internal/exports"
 )
 
 // Key names that contain a secret: an access key secret and a run key.
@@ -29,18 +30,18 @@ const (
 func TestAnUnknownForagerKeyWithASecretInItsNameIsReportedByItsLine(t *testing.T) {
 	isolate(t)
 	for _, c := range []struct{ name, body, want string }{
-		{accessKeySecretName, foragerServer + "    " + accessKeySecretName + ": 1\n", ": line 4: key is not one forager.yaml reads"},
-		{runKeyName, foragerServer + "    " + runKeyName + ": 1\n", ": line 4: key is not one forager.yaml reads"},
-		{accessKeySecretName, pinEntry + "        " + accessKeySecretName + ": 1\n", ": line 7: key is not one forager.yaml reads"},
-		{runKeyName, pinEntry + "        " + runKeyName + ": 1\n", ": line 7: key is not one forager.yaml reads"},
-		{accessKeySecretName, foragerServer + "    " + accessKeySecretName + " x: 1\n", ": line 4: key is not one forager.yaml reads"},
-		{accessKeySecretName, "gateway:\n  server:\n    url: &" + accessKeySecretName + " https://qory.example\n    *" + accessKeySecretName + " : 1\n", ": line 4: key is an alias of a key forager.yaml does not read"},
-		{runKeyName, "gateway:\n  server:\n    url: &" + runKeyName + " https://qory.example\n    *" + runKeyName + " : 1\n", ": line 4: key is an alias of a key forager.yaml does not read"},
+		{accessKeySecretName, foragerServer + "    " + accessKeySecretName + ": 1\n", "Remove the key, or rename it to one forager.yaml reads.\n  Key is not one forager.yaml reads.\n  It is at line 4 of {path}."},
+		{runKeyName, foragerServer + "    " + runKeyName + ": 1\n", "Remove the key, or rename it to one forager.yaml reads.\n  Key is not one forager.yaml reads.\n  It is at line 4 of {path}."},
+		{accessKeySecretName, pinEntry + "        " + accessKeySecretName + ": 1\n", "Remove the key, or rename it to one forager.yaml reads.\n  Key is not one forager.yaml reads.\n  It is at line 7 of {path}."},
+		{runKeyName, pinEntry + "        " + runKeyName + ": 1\n", "Remove the key, or rename it to one forager.yaml reads.\n  Key is not one forager.yaml reads.\n  It is at line 7 of {path}."},
+		{accessKeySecretName, foragerServer + "    " + accessKeySecretName + " x: 1\n", "Remove the key, or rename it to one forager.yaml reads.\n  Key is not one forager.yaml reads.\n  It is at line 4 of {path}."},
+		{accessKeySecretName, "gateway:\n  server:\n    url: &" + accessKeySecretName + " https://qory.example\n    *" + accessKeySecretName + " : 1\n", "Remove the key, or rename it to one forager.yaml reads.\n  Key is an alias of a key forager.yaml does not read.\n  It is at line 4 of {path}."},
+		{runKeyName, "gateway:\n  server:\n    url: &" + runKeyName + " https://qory.example\n    *" + runKeyName + " : 1\n", "Remove the key, or rename it to one forager.yaml reads.\n  Key is an alias of a key forager.yaml does not read.\n  It is at line 4 of {path}."},
 	} {
 		path := foragerFile(t, c.body)
 		_, err := config.LoadForager()
-		if err == nil || err.Error() != path+c.want {
-			t.Errorf("%q: %v, want %q", c.body, err, path+c.want)
+		if err == nil || err.Error() != strings.ReplaceAll(c.want, "{path}", path) {
+			t.Errorf("%q: %v, want %q", c.body, err, strings.ReplaceAll(c.want, "{path}", path))
 		}
 		if err != nil && strings.Contains(err.Error(), c.name) {
 			t.Errorf("%q: the error contains the secret: %v", c.body, err)
@@ -58,7 +59,7 @@ func TestAnUnknownKeyWithASecretInItsNameIsReportedByItsLine(t *testing.T) {
 	for _, name := range []string{accessKeySecretName, runKeyName} {
 		writeRaw(t, path, "harness:\n  "+name+": 1\n")
 		_, err := config.Document(root)
-		want := path + ": line 2: key is not one harness.yaml reads"
+		want := "Remove the key, or rename it to one harness.yaml reads.\n  Key is not one harness.yaml reads.\n  It is at line 2 of " + path + "."
 		if err == nil || err.Error() != want {
 			t.Errorf("%s: %v, want %q", name, err, want)
 		}
@@ -74,14 +75,14 @@ func TestAnUnknownKeyWithNoSecretIsNamed(t *testing.T) {
 	isolate(t)
 	path := foragerFile(t, foragerServer+"    events2: 1\n")
 	_, err := config.LoadForager()
-	if want := path + `: line 4: key "events2" is not one forager.yaml reads`; err == nil || err.Error() != want {
+	if want := "Remove the key, or rename it to one forager.yaml reads.\n  Key \"events2\" is not one forager.yaml reads.\n  It is at line 4 of " + path + "."; err == nil || err.Error() != want {
 		t.Errorf("forager.yaml: %v, want %q", err, want)
 	}
 	root := t.TempDir()
 	path = filepath.Join(root, "harness.yaml")
 	writeRaw(t, path, "harness:\n  events2: 1\n")
 	_, err = config.Document(root)
-	if want := path + `: line 2: key "events2" is not one harness.yaml reads`; err == nil || err.Error() != want {
+	if want := "Remove the key, or rename it to one harness.yaml reads.\n  Key \"events2\" is not one harness.yaml reads.\n  It is at line 2 of " + path + "."; err == nil || err.Error() != want {
 		t.Errorf("harness.yaml: %v, want %q", err, want)
 	}
 }
@@ -93,8 +94,8 @@ func foragerRefusals(t *testing.T, secret string, cases []struct{ body, want str
 	for _, c := range cases {
 		path := foragerFile(t, c.body)
 		_, err := config.LoadForager()
-		if err == nil || err.Error() != path+c.want {
-			t.Errorf("%q: %v, want %q", c.body, err, path+c.want)
+		if err == nil || err.Error() != strings.ReplaceAll(c.want, "{path}", path) {
+			t.Errorf("%q: %v, want %q", c.body, err, strings.ReplaceAll(c.want, "{path}", path))
 		}
 		if secret != "" && err != nil && strings.Contains(err.Error(), secret) {
 			t.Errorf("%q: the error contains the secret: %v", c.body, err)
@@ -114,17 +115,17 @@ func TestAnUnknownKeyOfAnEntryWithASecretInItsNameIsReportedByItsLine(t *testing
 	image := "wall:\n  adapter: docker\n  images:\n    go:\n      ref: a\n      "
 	for _, name := range []string{accessKeySecretName, runKeyName} {
 		foragerRefusals(t, name, []struct{ body, want string }{
-			{credential + name + ": 1\n", ": line 5: gateway.credentials.github: key is not one"},
-			{tool + name + ": 1\n", ": line 5: gateway.tools.gh: key is not one"},
-			{integration + name + ": 1\n", ": line 4: gateway.integrations.github: key is not one"},
-			{image + name + ": 1\n", ": line 6: wall.images.go: key is not one; an image has ref, runtime, docker"},
+			{credential + name + ": 1\n", "Remove the key, or rename it to one forager.yaml reads.\n  gateway.credentials.github: key is not one.\n  It is at line 5 of {path}."},
+			{tool + name + ": 1\n", "Remove the key, or rename it to one forager.yaml reads.\n  gateway.tools.gh: key is not one.\n  It is at line 5 of {path}."},
+			{integration + name + ": 1\n", "Remove the key, or rename it to one forager.yaml reads.\n  gateway.integrations.github: key is not one.\n  It is at line 4 of {path}."},
+			{image + name + ": 1\n", "Remove the key, or rename it to one forager.yaml reads.\n  wall.images.go: key is not one. An image has ref, runtime, docker.\n  It is at line 6 of {path}."},
 		})
 	}
 	foragerRefusals(t, "", []struct{ body, want string }{
-		{credential + "x: 1\n", `: gateway.credentials.github: key "x" is not one`},
-		{tool + "x: 1\n", `: gateway.tools.gh: key "x" is not one`},
-		{integration + "x: 1\n", `: gateway.integrations.github: key "x" is not one`},
-		{image + "x: 1\n", `: wall.images.go: key "x" is not one; an image has ref, runtime, docker`},
+		{credential + "x: 1\n", "Remove the key, or rename it to one forager.yaml reads.\n  gateway.credentials.github: key \"x\" is not one.\n  The file is {path}."},
+		{tool + "x: 1\n", "Remove the key, or rename it to one forager.yaml reads.\n  gateway.tools.gh: key \"x\" is not one.\n  The file is {path}."},
+		{integration + "x: 1\n", "Remove the key, or rename it to one forager.yaml reads.\n  gateway.integrations.github: key \"x\" is not one.\n  The file is {path}."},
+		{image + "x: 1\n", "Remove the key, or rename it to one forager.yaml reads.\n  wall.images.go: key \"x\" is not one. An image has ref, runtime, docker.\n  The file is {path}."},
 	})
 }
 
@@ -136,13 +137,13 @@ func TestAnEntryNameWithASecretIsReportedByItsLine(t *testing.T) {
 	isolate(t)
 	for _, name := range []string{accessKeySecretName, runKeyName} {
 		foragerRefusals(t, name, []struct{ body, want string }{
-			{"wall:\n  adapter: docker\n  images:\n    " + name + ":\n      ref: a\n", ": wall.images: the name at line 4 is not 1 to 64 of a-z, 0-9, underscore, dot and dash, starting with a letter or a digit"},
-			{"gateway:\n  integrations:\n    " + name + ":\n      program: x\n", ": gateway.integrations: the name at line 3 is not 1 to 64 of a-z, 0-9, underscore and dash, starting with a letter or a digit"},
+			{"wall:\n  adapter: docker\n  images:\n    " + name + ":\n      ref: a\n", "Rename each image of wall.images to 1 to 64 of a-z, 0-9, underscore, dot, and dash.\n  the name at line 4 is not one. A name starts with a letter or a digit.\n  wall.images is in {path}."},
+			{"gateway:\n  integrations:\n    " + name + ":\n      program: x\n", "Rename each integration of gateway.integrations to 1 to 64 of a-z, 0-9, underscore, and dash.\n  the name at line 3 is not one. A name starts with a letter or a digit.\n  gateway.integrations is in {path}."},
 		})
 	}
 	foragerRefusals(t, "", []struct{ body, want string }{
-		{"wall:\n  adapter: docker\n  images:\n    Go:\n      ref: a\n", `: wall.images: "Go" is not 1 to 64 of a-z, 0-9, underscore, dot and dash, starting with a letter or a digit`},
-		{"gateway:\n  integrations:\n    GitHub:\n      program: x\n", `: gateway.integrations: "GitHub" is not 1 to 64 of a-z, 0-9, underscore and dash, starting with a letter or a digit`},
+		{"wall:\n  adapter: docker\n  images:\n    Go:\n      ref: a\n", "Rename each image of wall.images to 1 to 64 of a-z, 0-9, underscore, dot, and dash.\n  \"Go\" is not one. A name starts with a letter or a digit.\n  wall.images is in {path}."},
+		{"gateway:\n  integrations:\n    GitHub:\n      program: x\n", "Rename each integration of gateway.integrations to 1 to 64 of a-z, 0-9, underscore, and dash.\n  \"GitHub\" is not one. A name starts with a letter or a digit.\n  gateway.integrations is in {path}."},
 	})
 }
 
@@ -156,24 +157,24 @@ func TestAnEntryWithASecretInItsNameIsPlacedByItsLine(t *testing.T) {
 	lower := []string{"qak_abc", "qrk_abc"}
 	for i, name := range []string{accessKeySecretName, runKeyName} {
 		foragerRefusals(t, name, []struct{ body, want string }{
-			{"gateway:\n  credentials:\n    " + name + ":\n      env: GH\n      x: 1\n", `: gateway.credentials (line 3): key "x" is not one`},
-			{"gateway:\n  credentials:\n    " + name + ":\n      file: relative\n", ": gateway.credentials (line 3).file is not an absolute path"},
-			{"gateway:\n  tools:\n    " + name + ":\n      command: gh\n      x: 1\n", `: gateway.tools (line 3): key "x" is not one`},
-			{"gateway:\n  tools:\n    " + name + ":\n      command: [gh]\n", ": gateway.tools (line 3).command is a program by its absolute path, and its arguments"},
+			{"gateway:\n  credentials:\n    " + name + ":\n      env: GH\n      x: 1\n", "Remove the key, or rename it to one forager.yaml reads.\n  gateway.credentials (line 3): key \"x\" is not one.\n  The file is {path}."},
+			{"gateway:\n  credentials:\n    " + name + ":\n      file: relative\n", "Set gateway.credentials (line 3).file to an absolute path.\n  The value is not one.\n  gateway.credentials (line 3) is in {path}."},
+			{"gateway:\n  tools:\n    " + name + ":\n      command: gh\n      x: 1\n", "Remove the key, or rename it to one forager.yaml reads.\n  gateway.tools (line 3): key \"x\" is not one.\n  The file is {path}."},
+			{"gateway:\n  tools:\n    " + name + ":\n      command: [gh]\n", "Set gateway.tools (line 3).command to a program's absolute path, then its arguments.\n  The value is not one.\n  gateway.tools (line 3) is in {path}."},
 		})
 		foragerRefusals(t, lower[i], []struct{ body, want string }{
-			{"gateway:\n  integrations:\n    " + lower[i] + ":\n      x: 1\n", `: gateway.integrations (line 3): key "x" is not one`},
-			{"gateway:\n  integrations:\n    " + lower[i] + ": 1\n", ": gateway.integrations (line 3) is a mapping: program and settings"},
-			{"wall:\n  adapter: docker\n  images:\n    " + lower[i] + ":\n      ref: a\n      x: 1\n", `: wall.images (line 4): key "x" is not one; an image has ref, runtime, docker`},
-			{"wall:\n  adapter: docker\n  images:\n    " + lower[i] + ":\n      runtime: runc\n", ": wall.images (line 4).ref is required: the image's reference"},
+			{"gateway:\n  integrations:\n    " + lower[i] + ":\n      x: 1\n", "Remove the key, or rename it to one forager.yaml reads.\n  gateway.integrations (line 3): key \"x\" is not one.\n  The file is {path}."},
+			{"gateway:\n  integrations:\n    " + lower[i] + ": 1\n", "Set gateway.integrations (line 3) to a mapping of program and settings.\n  It is not a mapping.\n  gateway.integrations (line 3) is in {path}."},
+			{"wall:\n  adapter: docker\n  images:\n    " + lower[i] + ":\n      ref: a\n      x: 1\n", "Remove the key, or rename it to one forager.yaml reads.\n  wall.images (line 4): key \"x\" is not one. An image has ref, runtime, docker.\n  The file is {path}."},
+			{"wall:\n  adapter: docker\n  images:\n    " + lower[i] + ":\n      runtime: runc\n", "Set wall.images (line 4).ref to the image's reference.\n  wall.images (line 4).ref is required.\n  wall.images (line 4) is in {path}."},
 		})
 	}
 	foragerRefusals(t, "", []struct{ body, want string }{
-		{"gateway:\n  credentials:\n    github:\n      env: GH\n      x: 1\n", `: gateway.credentials.github: key "x" is not one`},
-		{"gateway:\n  credentials:\n    github:\n      file: relative\n", ": gateway.credentials.github.file is not an absolute path"},
-		{"gateway:\n  tools:\n    gh:\n      command: [gh]\n", ": gateway.tools.gh.command is a program by its absolute path, and its arguments"},
-		{"gateway:\n  integrations:\n    github: 1\n", ": gateway.integrations.github is a mapping: program and settings"},
-		{"wall:\n  adapter: docker\n  images:\n    go:\n      runtime: runc\n", ": wall.images.go.ref is required: the image's reference"},
+		{"gateway:\n  credentials:\n    github:\n      env: GH\n      x: 1\n", "Remove the key, or rename it to one forager.yaml reads.\n  gateway.credentials.github: key \"x\" is not one.\n  The file is {path}."},
+		{"gateway:\n  credentials:\n    github:\n      file: relative\n", "Set gateway.credentials.github.file to an absolute path.\n  The value is not one.\n  gateway.credentials.github is in {path}."},
+		{"gateway:\n  tools:\n    gh:\n      command: [gh]\n", "Set gateway.tools.gh.command to a program's absolute path, then its arguments.\n  The value is not one.\n  gateway.tools.gh is in {path}."},
+		{"gateway:\n  integrations:\n    github: 1\n", "Set gateway.integrations.github to a mapping of program and settings.\n  It is not a mapping.\n  gateway.integrations.github is in {path}."},
+		{"wall:\n  adapter: docker\n  images:\n    go:\n      runtime: runc\n", "Set wall.images.go.ref to the image's reference.\n  wall.images.go.ref is required.\n  wall.images.go is in {path}."},
 	})
 }
 
@@ -186,13 +187,13 @@ func TestAnUnknownKeyWithASpaceInItsNameIsReportedAsAKey(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, "harness.yaml")
 	for _, c := range []struct{ name, want string }{
-		{accessKeySecretName + " x", "line 2: key is not one harness.yaml reads"},
-		{runKeyName + " x", "line 2: key is not one harness.yaml reads"},
-		{"a b", `line 2: key "a b" is not one harness.yaml reads`},
+		{accessKeySecretName + " x", "Key is not one harness.yaml reads."},
+		{runKeyName + " x", "Key is not one harness.yaml reads."},
+		{"a b", `Key "a b" is not one harness.yaml reads.`},
 	} {
 		writeRaw(t, path, "harness:\n  "+c.name+": 1\n")
 		_, err := config.Document(root)
-		if want := path + ": " + c.want; err == nil || err.Error() != want {
+		if want := "Remove the key, or rename it to one harness.yaml reads.\n  " + c.want + "\n  It is at line 2 of " + path + "."; err == nil || err.Error() != want {
 			t.Errorf("%s: %v, want %q", c.name, err, want)
 		}
 		if err != nil && c.name != "a b" && strings.Contains(err.Error(), strings.TrimSuffix(c.name, " x")) {
@@ -209,11 +210,11 @@ func TestAKeyWrittenAsAnAliasOfASecretIsReportedByItsLine(t *testing.T) {
 	isolate(t)
 	for _, name := range []string{accessKeySecretName, runKeyName} {
 		foragerRefusals(t, name, []struct{ body, want string }{
-			{"session:\n  instance:\n    name: &" + name + " build\n  *" + name + " : 1\n", ": line 4: key is an alias of a key forager.yaml does not read"},
+			{"session:\n  instance:\n    name: &" + name + " build\n  *" + name + " : 1\n", "Remove the key, or rename it to one forager.yaml reads.\n  Key is an alias of a key forager.yaml does not read.\n  It is at line 4 of {path}."},
 		})
 	}
 	foragerRefusals(t, "", []struct{ body, want string }{
-		{"session:\n  instance:\n    name: &a build\n  *a : 1\n", ": line 4: key *a is an alias of a key forager.yaml does not read"},
+		{"session:\n  instance:\n    name: &a build\n  *a : 1\n", "Remove the key, or rename it to one forager.yaml reads.\n  Key *a is an alias of a key forager.yaml does not read.\n  It is at line 4 of {path}."},
 	})
 }
 
@@ -225,23 +226,23 @@ func TestAKeyWithASecretInItsNameWrittenTwiceIsReportedByItsLine(t *testing.T) {
 	isolate(t)
 	for _, name := range []string{accessKeySecretName, runKeyName} {
 		foragerRefusals(t, name, []struct{ body, want string }{
-			{foragerServer + "    " + name + ": 1\n    " + name + ": 2\n", ": line 5: a key of gateway.server is written twice; it was first written at line 4"},
-			{name + ": 1\n" + name + ": 2\n", ": line 2: a key is written twice; it was first written at line 1"},
+			{foragerServer + "    " + name + ": 1\n    " + name + ": 2\n", "Remove the key that is written twice, at line 5.\n  a key of gateway.server is written twice; it was first written at line 4.\n  It is at line 5 of {path}."},
+			{name + ": 1\n" + name + ": 2\n", "Remove the key that is written twice, at line 2.\n  a key is written twice; it was first written at line 1.\n  It is at line 2 of {path}."},
 		})
 	}
 	foragerRefusals(t, "", []struct{ body, want string }{
-		{foragerServer + "    x: 1\n    x: 2\n", ": line 5: gateway.server.x is written twice; it was first written at line 4"},
+		{foragerServer + "    x: 1\n    x: 2\n", "Remove one of the two keys gateway.server.x.\n  gateway.server.x is written twice; it was first written at line 4.\n  It is at line 5 of {path}."},
 	})
 	root := t.TempDir()
 	path := filepath.Join(root, "harness.yaml")
 	for _, c := range []struct{ name, want string }{
-		{accessKeySecretName, "yaml: unmarshal errors:\n  line 3: mapping key already defined at line 2"},
-		{runKeyName, "yaml: unmarshal errors:\n  line 3: mapping key already defined at line 2"},
-		{"runtime", "yaml: unmarshal errors:\n  line 3: mapping key \"runtime\" already defined at line 2"},
+		{accessKeySecretName, "Line 3: mapping key already defined at line 2."},
+		{runKeyName, "Line 3: mapping key already defined at line 2."},
+		{"runtime", "Line 3: mapping key \"runtime\" already defined at line 2."},
 	} {
 		writeRaw(t, path, "harness:\n  "+c.name+": claude\n  "+c.name+": codex\n")
 		_, err := config.Document(root)
-		if want := path + ": " + c.want; err == nil || err.Error() != want {
+		if want := "Remove the key that is written twice.\n  " + c.want + "\n  The file is " + path + "."; err == nil || err.Error() != want {
 			t.Errorf("%s: %v, want %q", c.name, err, want)
 		}
 		if c.name != "runtime" && err != nil && strings.Contains(err.Error(), c.name) {
@@ -264,39 +265,39 @@ func TestEveryPlaceOfAnEntryWithASecretInItsNameIsItsLine(t *testing.T) {
 	image := "wall:\n  adapter: docker\n  images:\n    "
 	for i, name := range []string{accessKeySecretName, runKeyName} {
 		foragerRefusals(t, name, []struct{ body, want string }{
-			{credential(name, "      adapter: [relative]\n"), ": gateway.credentials (line 3).adapter is a program by its absolute path, and its arguments"},
-			{credential(name, "      hosts: x\n"), ": line 4: gateway.credentials (line 3).hosts is not a list of strings"},
-			{credential(name, "      auth:\n        <<: {scheme: basic}\n        [a]: 1\n"), ": line 6: gateway.credentials (line 3).auth has a key that is not a name"},
-			{credential(name, "      env: [x]\n"), ": line 4: gateway.credentials (line 3).env is not a string"},
-			{tool(name, "      command: gh\n"), ": line 4: gateway.tools (line 3).command is not a list of strings"},
-			{tool(name, "      command: [/bin/gh]\n      argument: [x]\n"), ": line 5: gateway.tools (line 3).argument is not a string"},
+			{credential(name, "      adapter: [relative]\n"), "Set gateway.credentials (line 3).adapter to a program's absolute path, then its arguments.\n  The value is not one.\n  gateway.credentials (line 3) is in {path}."},
+			{credential(name, "      hosts: x\n"), "Set gateway.credentials (line 3).hosts to a list of strings.\n  gateway.credentials (line 3).hosts is not a list of strings.\n  It is at line 4 of {path}."},
+			{credential(name, "      auth:\n        <<: {scheme: basic}\n        [a]: 1\n"), "Give each key of gateway.credentials (line 3).auth a name.\n  gateway.credentials (line 3).auth has a key that is not a name.\n  It is at line 6 of {path}."},
+			{credential(name, "      env: [x]\n"), "Set gateway.credentials (line 3).env to a string.\n  gateway.credentials (line 3).env is not a string.\n  It is at line 4 of {path}."},
+			{tool(name, "      command: gh\n"), "Set gateway.tools (line 3).command to a list of strings.\n  gateway.tools (line 3).command is not a list of strings.\n  It is at line 4 of {path}."},
+			{tool(name, "      command: [/bin/gh]\n      argument: [x]\n"), "Set gateway.tools (line 3).argument to a string.\n  gateway.tools (line 3).argument is not a string.\n  It is at line 5 of {path}."},
 		})
 		foragerRefusals(t, lower[i], []struct{ body, want string }{
-			{"gateway:\n  integrations:\n    " + lower[i] + ": {}\n    " + lower[i] + ": {}\n", ": gateway.integrations (line 4) is declared twice"},
-			{integration(lower[i], "      program: [x]\n"), ": gateway.integrations (line 3).program is a path or a name on the PATH"},
-			{integration(lower[i], "      program: bin/x\n"), ": gateway.integrations (line 3).program is not an absolute path; set program to an absolute path or a name on the PATH"},
-			{integration(lower[i], "      settings: x\n"), ": gateway.integrations (line 3).settings is a mapping, the settings document"},
-			{integration(lower[i], "      settings: {1: x}\n"), ": gateway.integrations (line 3).settings: line 4: a key that is not a string"},
-			{image + lower[i] + ":\n      ref: a\n    " + lower[i] + ":\n      ref: b\n", ": wall.images (line 6) is defined twice"},
+			{"gateway:\n  integrations:\n    " + lower[i] + ": {}\n    " + lower[i] + ": {}\n", "Declare gateway.integrations (line 4) once.\n  gateway.integrations (line 4) is declared twice.\n  gateway.integrations is in {path}."},
+			{integration(lower[i], "      program: [x]\n"), "Set gateway.integrations (line 3).program to a path or a name on the PATH.\n  The value is not one.\n  gateway.integrations (line 3) is in {path}."},
+			{integration(lower[i], "      program: bin/x\n"), "Set gateway.integrations (line 3).program to an absolute path or a name on the PATH.\n  The value is a relative path.\n  gateway.integrations (line 3) is in {path}."},
+			{integration(lower[i], "      settings: x\n"), "Set gateway.integrations (line 3).settings to a mapping, the settings document.\n  It is not a mapping.\n  gateway.integrations (line 3) is in {path}."},
+			{integration(lower[i], "      settings: {1: x}\n"), "Make each key of gateway.integrations (line 3).settings a string.\n  The key at line 4 is not a string.\n  The file is {path}."},
+			{image + lower[i] + ":\n      ref: a\n    " + lower[i] + ":\n      ref: b\n", "Define wall.images (line 6) once.\n  wall.images (line 6) is defined twice.\n  wall.images is in {path}."},
 		})
 		foragerRefusals(t, name, []struct{ body, want string }{
-			{aliasedTool(name), ": line 3: gateway.tools (line 6) has a key that is not a name"},
+			{aliasedTool(name), "Give each key of gateway.tools (line 6) a name.\n  gateway.tools (line 6) has a key that is not a name.\n  It is at line 3 of {path}."},
 		})
 	}
 	foragerRefusals(t, "", []struct{ body, want string }{
-		{credential("github", "      adapter: [relative]\n"), ": gateway.credentials.github.adapter is a program by its absolute path, and its arguments"},
-		{credential("github", "      hosts: x\n"), ": line 4: gateway.credentials.github.hosts is not a list of strings"},
-		{credential("github", "      auth:\n        <<: {scheme: basic}\n        [a]: 1\n"), ": line 6: gateway.credentials.github.auth has a key that is not a name"},
-		{credential("github", "      env: [x]\n"), ": line 4: gateway.credentials.github.env is not a string"},
-		{tool("gh", "      command: gh\n"), ": line 4: gateway.tools.gh.command is not a list of strings"},
-		{tool("gh", "      command: [/bin/gh]\n      argument: [x]\n"), ": line 5: gateway.tools.gh.argument is not a string"},
-		{"gateway:\n  integrations:\n    github: {}\n    github: {}\n", ": gateway.integrations.github is declared twice"},
-		{integration("github", "      program: [x]\n"), ": gateway.integrations.github.program is a path or a name on the PATH"},
-		{integration("github", "      program: bin/x\n"), ": gateway.integrations.github.program is not an absolute path; set program to an absolute path or a name on the PATH"},
-		{integration("github", "      settings: x\n"), ": gateway.integrations.github.settings is a mapping, the settings document"},
-		{integration("github", "      settings: {1: x}\n"), ": gateway.integrations.github.settings: line 4: a key that is not a string"},
-		{image + "go:\n      ref: a\n    go:\n      ref: b\n", ": wall.images.go is defined twice"},
-		{aliasedTool("gh"), ": line 3: gateway.tools.gh has a key that is not a name"},
+		{credential("github", "      adapter: [relative]\n"), "Set gateway.credentials.github.adapter to a program's absolute path, then its arguments.\n  The value is not one.\n  gateway.credentials.github is in {path}."},
+		{credential("github", "      hosts: x\n"), "Set gateway.credentials.github.hosts to a list of strings.\n  gateway.credentials.github.hosts is not a list of strings.\n  It is at line 4 of {path}."},
+		{credential("github", "      auth:\n        <<: {scheme: basic}\n        [a]: 1\n"), "Give each key of gateway.credentials.github.auth a name.\n  gateway.credentials.github.auth has a key that is not a name.\n  It is at line 6 of {path}."},
+		{credential("github", "      env: [x]\n"), "Set gateway.credentials.github.env to a string.\n  gateway.credentials.github.env is not a string.\n  It is at line 4 of {path}."},
+		{tool("gh", "      command: gh\n"), "Set gateway.tools.gh.command to a list of strings.\n  gateway.tools.gh.command is not a list of strings.\n  It is at line 4 of {path}."},
+		{tool("gh", "      command: [/bin/gh]\n      argument: [x]\n"), "Set gateway.tools.gh.argument to a string.\n  gateway.tools.gh.argument is not a string.\n  It is at line 5 of {path}."},
+		{"gateway:\n  integrations:\n    github: {}\n    github: {}\n", "Declare gateway.integrations.github once.\n  gateway.integrations.github is declared twice.\n  gateway.integrations is in {path}."},
+		{integration("github", "      program: [x]\n"), "Set gateway.integrations.github.program to a path or a name on the PATH.\n  The value is not one.\n  gateway.integrations.github is in {path}."},
+		{integration("github", "      program: bin/x\n"), "Set gateway.integrations.github.program to an absolute path or a name on the PATH.\n  The value is a relative path.\n  gateway.integrations.github is in {path}."},
+		{integration("github", "      settings: x\n"), "Set gateway.integrations.github.settings to a mapping, the settings document.\n  It is not a mapping.\n  gateway.integrations.github is in {path}."},
+		{integration("github", "      settings: {1: x}\n"), "Make each key of gateway.integrations.github.settings a string.\n  The key at line 4 is not a string.\n  The file is {path}."},
+		{image + "go:\n      ref: a\n    go:\n      ref: b\n", "Define wall.images.go once.\n  wall.images.go is defined twice.\n  wall.images is in {path}."},
+		{aliasedTool("gh"), "Give each key of gateway.tools.gh a name.\n  gateway.tools.gh has a key that is not a name.\n  It is at line 3 of {path}."},
 	})
 }
 
@@ -309,7 +310,7 @@ func TestAnUnknownKeyWithANewlineInItsNameIsReportedByItsLine(t *testing.T) {
 	path := filepath.Join(root, "harness.yaml")
 	writeRaw(t, path, "harness:\n  \"qak_SECRET\\nb\": 1\n")
 	_, err := config.Document(root)
-	if want := path + ": line 2: key is not one harness.yaml reads"; err == nil || err.Error() != want {
+	if want := "Remove the key, or rename it to one harness.yaml reads.\n  Line 2: key is not one harness.yaml reads.\n  The file is " + path + "."; err == nil || err.Error() != want {
 		t.Errorf("%v, want %q", err, want)
 	}
 	if err != nil && strings.Contains(err.Error(), "qak_SECRET") {
@@ -333,17 +334,17 @@ func TestASettingsKeyWithASecretInItsNameIsPlacedByItsLine(t *testing.T) {
 	settings := "gateway:\n  integrations:\n    github:\n      settings:\n"
 	for _, name := range []string{accessKeySecretName, runKeyName} {
 		foragerRefusals(t, name, []struct{ body, want string }{
-			{settings + "        " + name + ": 1\n        " + name + ": 2\n", ": gateway.integrations.github.settings: line 6: a key is written twice; it was first written at line 5"},
-			{settings + "        " + name + ": .inf\n", ": gateway.integrations.github.settings (line 5) is not a number that JSON can represent"},
-			{settings + "        " + name + ":\n          a: .inf\n", ": gateway.integrations.github.settings (line 5).a is not a number that JSON can represent"},
-			{settings + "        a: &" + name + " 1\n        b: *" + name + "\n", ": gateway.integrations.github.settings.b: line 6: the value is a YAML alias, which the settings may not contain; write the value out in full"},
+			{settings + "        " + name + ": 1\n        " + name + ": 2\n", "Remove one of the two keys of gateway.integrations.github.settings that are written twice.\n  Line 6 writes a key again; it was first written at line 5.\n  The file is {path}."},
+			{settings + "        " + name + ": .inf\n", "Set gateway.integrations.github.settings (line 5) to a number that JSON can represent.\n  The value is not one.\n  The file is {path}."},
+			{settings + "        " + name + ":\n          a: .inf\n", "Set gateway.integrations.github.settings (line 5).a to a number that JSON can represent.\n  The value is not one.\n  The file is {path}."},
+			{settings + "        a: &" + name + " 1\n        b: *" + name + "\n", "Write the value of gateway.integrations.github.settings.b out in full.\n  The value at line 6 is a YAML alias, which the settings may not contain.\n  The file is {path}."},
 		})
 	}
 	foragerRefusals(t, "", []struct{ body, want string }{
-		{settings + "        x: 1\n        x: 2\n", ": gateway.integrations.github.settings.x appears twice"},
-		{settings + "        x: .inf\n", ": gateway.integrations.github.settings.x is not a number that JSON can represent"},
-		{settings + "        x:\n          a: .inf\n", ": gateway.integrations.github.settings.x.a is not a number that JSON can represent"},
-		{settings + "        a: &x 1\n        b: *x\n", ": gateway.integrations.github.settings.b: line 6: *x is a YAML alias, which the settings may not contain; write the value out in full"},
+		{settings + "        x: 1\n        x: 2\n", "Remove one of the two gateway.integrations.github.settings.x keys.\n  The key appears twice.\n  The file is {path}."},
+		{settings + "        x: .inf\n", "Set gateway.integrations.github.settings.x to a number that JSON can represent.\n  The value is not one.\n  The file is {path}."},
+		{settings + "        x:\n          a: .inf\n", "Set gateway.integrations.github.settings.x.a to a number that JSON can represent.\n  The value is not one.\n  The file is {path}."},
+		{settings + "        a: &x 1\n        b: *x\n", "Write the value of gateway.integrations.github.settings.b out in full.\n  *x at line 6 is a YAML alias, which the settings may not contain.\n  The file is {path}."},
 	})
 }
 
@@ -356,7 +357,7 @@ func TestADecoderRefusalWithASecretKeepsTheOtherReasons(t *testing.T) {
 	path := filepath.Join(root, "harness.yaml")
 	writeRaw(t, path, "harness:\n  model: [x]\n  force: qak_x\n")
 	_, err := config.Document(root)
-	if want := path + ": yaml: unmarshal errors:\n  line 2: cannot unmarshal !!seq into string\n  line 3: qory cannot read the value here. The YAML decoder's message contains an access key secret, a run key, a run code or an enrolment code, so qory does not print it."; err == nil || err.Error() != want {
+	if want := "Set each value in the file to the type its key takes.\n  Line 2: cannot unmarshal !!seq into string.\n  Line 3: qory cannot read the value here. The YAML decoder's message contains an access key secret, a run key, a run code, or an enrolment code, so qory does not print it.\n  The file is " + path + "."; err == nil || err.Error() != want {
 		t.Errorf("%v, want %q", err, want)
 	}
 }
@@ -379,7 +380,7 @@ func TestARefusalIsPlacedByTheLineAtItsStart(t *testing.T) {
 	path := filepath.Join(root, "harness.yaml")
 	writeRaw(t, path, "harness:\n  force: !line%2099:%20field%20qak_x 1\n")
 	_, err := config.Document(root)
-	want := path + ": line 2: qory cannot read the value here. The YAML decoder's message contains an access key secret, a run key, a run code or an enrolment code, so qory does not print it."
+	want := "Set each value in the file to the type its key takes.\n  Line 2: qory cannot read the value here. The YAML decoder's message contains an access key secret, a run key, a run code, or an enrolment code, so qory does not print it.\n  The file is " + path + "."
 	if err == nil || err.Error() != want {
 		t.Errorf("%v, want %q", err, want)
 	}
@@ -409,9 +410,10 @@ func TestAnIntegrationKeyWithASecretIsLeftOutOfExpand(t *testing.T) {
 			}
 			return v
 		}
-		at := "gateway.integrations." + shown(c.key) + ": "
+		at := "gateway.integrations." + shown(c.key)
 		path := foragerFile(t, "gateway:\n  integrations:\n    "+c.key+": {}\n")
-		if _, err := expand(t); err == nil || err.Error() != path+": "+at+shown("qory-"+c.key)+" is not on the PATH; install it there, or set program to its path" {
+		fixProgram, where := "Fix the program of "+at+".\n  ", "\n  "+at+" is in "+path+"."
+		if _, err := expand(t); err == nil || err.Error() != fixProgram+shown("qory-"+c.key)+" is not on the PATH; install it there, or set program to its path."+where {
 			t.Errorf("%s not on the PATH: %v", c.key, err)
 		}
 		program := filepath.Join(dir, "qory-"+c.key)
@@ -423,15 +425,15 @@ func TestAnIntegrationKeyWithASecretIsLeftOutOfExpand(t *testing.T) {
 		if c.phrase != "" {
 			resolvedPath = strings.Replace(c.phrase, "name", "value", 1)
 		}
-		if _, err := expand(t); err == nil || err.Error() != path+": "+at+resolvedPath+" describe: exit status 3: the key file /k.pem is readable by others" {
+		if _, err := expand(t); err == nil || err.Error() != fixProgram+resolvedPath+" describe: exit status 3: the key file /k.pem is readable by others."+where {
 			t.Errorf("%s describe fails: %v", c.key, err)
 		}
 		fakeIntegration(t, dir, "qory-"+c.key, `{"version": 1, "name": "queue", "title": "Queue", "program_version": "1", "settings": {"type": "object"}, "roles": {"example_role": {}}}`)
-		if _, err := expand(t); err == nil || err.Error() != path+": "+at+shown("qory-"+c.key)+" plays the role example_role, none of which qory expands, and defines nothing" {
+		if _, err := expand(t); err == nil || err.Error() != exports.Fit("Remove "+at+", or give it a program that defines a credential.\n  "+shown("qory-"+c.key)+" plays the role example_role, none of which qory expands, and defines nothing."+where) {
 			t.Errorf("%s plays no role: %v", c.key, err)
 		}
 		fakeIntegration(t, dir, "qory-"+c.key, strings.Replace(fixture(t, "acme-tracker.json"), `"argument": "[A-Z]+"`, `"argument": "("`, 1))
-		if _, err := expand(t); err == nil || !strings.HasPrefix(err.Error(), path+": "+at+"credential "+shown(c.key)+": ") {
+		if _, err := expand(t); err == nil || !strings.HasPrefix(err.Error(), "Fix the credential that "+at+" defines.\n  Credential "+shown(c.key)+": ") || !strings.HasSuffix(err.Error(), where) {
 			t.Errorf("%s Forager refuses the credential: %v", c.key, err)
 		}
 	}

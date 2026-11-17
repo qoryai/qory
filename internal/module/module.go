@@ -214,10 +214,16 @@ type Module struct {
 	Instructions string
 }
 
-// readRequirement reads one requires item: the entry it names, as <kind>/<name>, and what
-// the entry needs, as sorted <kind>/<name> keys. The mcp key holds the entry's name when
-// it is a string and needed servers when it is a list.
-func readRequirement(item map[string]yaml.Node) (entry string, needs []string, err error) {
+// readRequirement reads one requires item, the item at index i of the list: the entry it
+// names, as <kind>/<name>, and what the entry needs, as sorted <kind>/<name> keys. The mcp
+// key is the entry's name when it is a string, and the needed servers when it is a list. A
+// refusal has [exports.FilePlace], for the manifest's path, and starts with its fix.
+func readRequirement(item map[string]yaml.Node, i int) (entry string, needs []string, err error) {
+	at := fmt.Sprintf("requires[%d]", i)
+	const kinds = "skills, agents, commands, output-styles, hooks, mcp, and files"
+	refuse := func(fix string, lines ...string) error {
+		return exports.Refuse(fix, append(lines, "The manifest is "+exports.FilePlace+".")...)
+	}
 	keys := make([]string, 0, len(item))
 	for k := range item {
 		keys = append(keys, k)
@@ -229,33 +235,41 @@ func readRequirement(item map[string]yaml.Node) (entry string, needs []string, e
 		if one && !(k == "mcp" && node.Kind == yaml.SequenceNode) {
 			var name string
 			if err := node.Decode(&name); err != nil || name == "" {
-				return "", nil, fmt.Errorf("%s selects no entry; it is the entry's name, as %s: <name>", k, k)
+				return "", nil, refuse(fmt.Sprintf("Set %s in %s to the entry's name, as %s: <name>.", k, at, k),
+					fmt.Sprintf("The value of %s in %s is empty or not a string.", k, at))
 			}
 			if entry != "" {
-				return "", nil, fmt.Errorf("selects two entries; an item selects one, as skill: <name>, and lists what it needs under skills, agents, commands, output-styles, hooks, mcp and files")
+				return "", nil, refuse(fmt.Sprintf("Remove one of the two entries from %s.", at),
+					"An item selects one entry, as skill: <name>, and lists what it needs under "+kinds+".")
 			}
 			entry = kind + "/" + name
 			continue
 		}
 		if !isKind(k) {
-			return "", nil, fmt.Errorf("key %s is not one requires reads; an item selects its entry as skill, agent, command, output-style, hook, mcp or file, and what it needs under skills, agents, commands, output-styles, hooks, mcp and files", accesskey.ShownName(k, true))
+			return "", nil, refuse(fmt.Sprintf("Remove the key %s from %s.", accesskey.ShownName(k, true), at),
+				"An item selects its entry as skill, agent, command, output-style, hook, mcp, or file, and lists what it needs under "+kinds+".")
 		}
 		var names []string
 		if err := node.Decode(&names); err != nil || len(names) == 0 {
-			return "", nil, fmt.Errorf("%s is empty; it lists the %s the entry needs", k, k)
+			return "", nil, refuse(fmt.Sprintf("List the %s the entry needs under %s in %s, or remove %s.", k, k, at, k),
+				fmt.Sprintf("%s in %s is empty.", k, at))
 		}
 		for _, name := range names {
 			if name == "" {
-				return "", nil, fmt.Errorf("%s lists an empty entry", k)
+				return "", nil, refuse(fmt.Sprintf("Remove the empty entry from %s in %s.", k, at),
+					fmt.Sprintf("%s in %s lists an empty entry.", k, at))
 			}
 			needs = append(needs, k+"/"+name)
 		}
 	}
 	if entry == "" {
-		return "", nil, fmt.Errorf("selects no entry; an item selects one, as skill: <name>, and lists what it needs under skills, agents, commands, output-styles, hooks, mcp and files")
+		return "", nil, refuse(fmt.Sprintf("Select an entry in %s, as skill: <name>.", at),
+			"An item selects one entry, as skill: <name>, and lists what it needs under "+kinds+".")
 	}
 	if len(needs) == 0 {
-		return "", nil, fmt.Errorf("lists nothing the entry needs under skills, agents, commands, output-styles, hooks, mcp or files")
+		return "", nil, refuse(fmt.Sprintf("List what the entry needs in %s.", at),
+			"Use "+strings.Replace(kinds, "and files", "or files", 1)+".",
+			fmt.Sprintf("%s lists nothing the entry needs.", at))
 	}
 	sort.Strings(needs)
 	return entry, needs, nil
@@ -334,19 +348,60 @@ func ReadManifestIn(root *os.Root, dir string) (*Manifest, error) {
 	return parseManifest(dir, data, err)
 }
 
+// CausedRefusal is a [exports.Refusal] that unwraps to the error that caused it, so a caller
+// still matches that error, such as a *yaml.TypeError, with errors.As. The refusal's text
+// has the cause only as the caller printed it, with any value that contains a secret left
+// out, and the cause under Unwrap is as [exports.HideValueError] returns it.
+type CausedRefusal struct {
+	*exports.Refusal
+	cause error
+}
+
+// Caused is a [CausedRefusal] of cause with the fix and the lines after it, as
+// [exports.Refuse] writes them.
+func Caused(cause error, fix string, lines ...string) error {
+	return &CausedRefusal{exports.Refuse(fix, lines...), cause}
+}
+
+// Unwrap returns the error that caused the refusal.
+func (c *CausedRefusal) Unwrap() error { return c.cause }
+
+// In is the refusal with file at [exports.FilePlace], as [exports.Refusal.In].
+func (c *CausedRefusal) In(file string) error {
+	return &CausedRefusal{c.Refusal.In(file).(*exports.Refusal), c.cause}
+}
+
+// Prefixed is err with prefix at [exports.ModulePlace] when err is a [CausedRefusal], and
+// otherwise as [exports.Prefixed] returns it.
+func Prefixed(prefix string, err error) error {
+	if c, ok := err.(*CausedRefusal); ok {
+		return &CausedRefusal{exports.Prefixed(prefix, c.Refusal).(*exports.Refusal), c.cause}
+	}
+	return exports.Prefixed(prefix, err)
+}
+
 // parseManifest is the manifest of the module directory dir in data, the bytes a read of
 // its qory-module.yaml returned, or the refusal of err, that read's error.
 func parseManifest(dir string, data []byte, err error) (*Manifest, error) {
 	path := filepath.Join(dir, ManifestName)
 	if errors.Is(err, os.ErrNotExist) {
-		return nil, fmt.Errorf("%s has no %s; a module has one that defines its name", exports.HidePath(dir), ManifestName)
+		return nil, exports.Refuse("Add "+ManifestName+" to the module directory.",
+			fmt.Sprintf("%s has no %s, and a module has one that defines its name.", exports.HidePath(dir), ManifestName))
 	}
 	// The directory of a module listed by name is that name, which the errors print as
 	// exports.HidePath prints it.
 	if err != nil {
-		return nil, exports.HideError(err)
+		return nil, exports.ReadErrorOf(ManifestName+" of "+exports.ModulePlace, path, err)
 	}
 	path = exports.HidePath(path)
+	refuse := func(fix string, lines ...string) error {
+		return exports.Refuse(fix, append(lines, "The manifest is "+path+".")...)
+	}
+	// caused is refuse for a refusal that unwraps to err, with its text as HideValueError prints it.
+	caused := func(err error, fix string) error {
+		err = exports.HideValueError(err, "")
+		return Caused(err, fix, err.Error(), "The manifest is "+path+".")
+	}
 	raw := rawManifest{}
 	dec := yaml.NewDecoder(strings.NewReader(string(data)))
 	dec.KnownFields(true)
@@ -358,7 +413,7 @@ func parseManifest(dir string, data []byte, err error) (*Manifest, error) {
 		return nil, exports.HideValueError(exports.AtPath(path, err), "")
 	}
 	if raw.Name == "" {
-		return nil, fmt.Errorf("%s: name is required", path)
+		return nil, refuse("Add name to "+ManifestName+".", "A manifest defines the module's name.")
 	}
 	m := &Manifest{APIVersion: current, Name: raw.Name, Description: raw.Description}
 	if current != raw.APIVersion {
@@ -366,14 +421,16 @@ func parseManifest(dir string, data []byte, err error) (*Manifest, error) {
 	}
 	for key, value := range raw.Env {
 		if key == "QORY_HARNESS_HOME" {
-			return nil, fmt.Errorf("%s: env.QORY_HARNESS_HOME is qory's; a module exports another name", path)
+			return nil, refuse("Remove env.QORY_HARNESS_HOME from the manifest.", "qory sets QORY_HARNESS_HOME, so a module exports another name.")
 		}
 		if !envName.MatchString(key) {
-			return nil, fmt.Errorf("%s: env: %s is not an environment variable name", path, accesskey.ShownName(key, false))
+			return nil, refuse(fmt.Sprintf("Rename the key %s in env of the manifest.", accesskey.ShownName(key, false)),
+				fmt.Sprintf("%s is not an environment variable name.", accesskey.ShownName(key, false)))
 		}
 		clean, ok := InsideModule(value)
 		if !ok {
-			return nil, fmt.Errorf("%s: env.%s: %s is not a path inside the module", path, accesskey.ShownName(key, false), exports.Value(value, false))
+			return nil, refuse(fmt.Sprintf("Set env.%s to a path inside the module.", accesskey.ShownName(key, false)),
+				fmt.Sprintf("%s is not a path inside the module.", exports.Value(value, false)))
 		}
 		if m.Env == nil {
 			m.Env = map[string]string{}
@@ -381,13 +438,14 @@ func parseManifest(dir string, data []byte, err error) (*Manifest, error) {
 		m.Env[key] = clean
 	}
 	for i, item := range raw.Requires {
-		entry, needs, err := readRequirement(item)
+		entry, needs, err := readRequirement(item, i)
 		if err != nil {
-			return nil, fmt.Errorf("%s: requires[%d]: %w", path, i, err)
+			return nil, exports.AtPath(path, err)
 		}
 		if _, dup := m.Requires[entry]; dup {
 			kind, name, _ := strings.Cut(entry, "/")
-			return nil, fmt.Errorf("%s: requires lists %s twice", path, Describe(kind, accesskey.ShownName(name, false)))
+			return nil, refuse(fmt.Sprintf("Remove one of the two requires items for %s.", Describe(kind, accesskey.ShownName(name, false))),
+				fmt.Sprintf("The requires lists %s twice.", Describe(kind, accesskey.ShownName(name, false))))
 		}
 		if m.Requires == nil {
 			m.Requires = map[string][]string{}
@@ -398,7 +456,8 @@ func parseManifest(dir string, data []byte, err error) (*Manifest, error) {
 		m.Egress = []string{}
 		for _, host := range *raw.Egress {
 			if !EgressHost.MatchString(host) {
-				return nil, fmt.Errorf("%s: egress: %s is not a lower-case host name or a *. suffix; no port, path or scheme", path, exports.Value(host, true))
+				return nil, refuse("Set each egress entry to a lower-case host name or a *. suffix.",
+					fmt.Sprintf("%s is not one, and an entry has no port, path, or scheme.", exports.Value(host, true)))
 			}
 			if !slices.Contains(m.Egress, host) {
 				m.Egress = append(m.Egress, host)
@@ -427,7 +486,7 @@ func parseManifest(dir string, data []byte, err error) (*Manifest, error) {
 			return nil, in.In(path)
 		}
 		if err != nil {
-			return nil, fmt.Errorf("%s: %s: %w", path, part.key, exports.HideValueError(err, ""))
+			return nil, caused(err, fmt.Sprintf("Correct %s in the manifest.", part.key))
 		}
 		if part.to == nil {
 			m.Roles = one
@@ -438,14 +497,14 @@ func parseManifest(dir string, data []byte, err error) (*Manifest, error) {
 	for name, node := range raw.Variants {
 		if name == "default" {
 			if err := node.Decode(&m.Default); err != nil {
-				return nil, fmt.Errorf("%s: variants.default: %w", path, err)
+				return nil, caused(err, "Set variants.default to a variant name, or `fail`.")
 			}
 			continue
 		}
 		v := Variant{}
 		if err := node.Decode(&v); err != nil {
 			// The decoder quotes up to ten characters of a value that is not a map.
-			return nil, fmt.Errorf("%s: variants.%s: %w", path, accesskey.ShownName(name, false), exports.HideValueError(err, ""))
+			return nil, caused(err, fmt.Sprintf("Set variants.%s to a map of a kind to a directory.", accesskey.ShownName(name, false)))
 		}
 		if m.Variants == nil {
 			m.Variants = map[string]Variant{}
@@ -454,7 +513,8 @@ func parseManifest(dir string, data []byte, err error) (*Manifest, error) {
 	}
 	if m.Default != "" && m.Default != "fail" {
 		if _, ok := m.Variants[m.Default]; !ok {
-			return nil, fmt.Errorf("%s: variants.default selects %s, which is not a variant", path, accesskey.ShownName(m.Default, true))
+			return nil, refuse("Set variants.default to a variant the manifest declares, or `fail`.",
+				fmt.Sprintf("variants.default is %s, which is not a variant.", accesskey.ShownName(m.Default, true)))
 		}
 	}
 	return m, nil
@@ -467,37 +527,41 @@ func parseManifest(dir string, data []byte, err error) (*Manifest, error) {
 func readPushChecks(path string, items []rawPushCheck) ([]PushCheck, error) {
 	var out []PushCheck
 	seen := map[string]bool{}
+	refuse := func(fix string, lines ...string) error {
+		return exports.Refuse(fix, append(lines, "The manifest is "+path+".")...)
+	}
+	const typeRule = "An artifact type is lowercase letters and digits in groups joined by single hyphens, at most 64 bytes."
 	for i, item := range items {
 		if !runapi.ArtifactName(item.Type) {
-			return nil, fmt.Errorf("%s: push_checks[%d].type: set it to an artifact type, lowercase letters and digits in groups joined by single hyphens, at most 64 bytes. The value is %s", path, i, exports.Value(item.Type, true))
+			return nil, refuse(fmt.Sprintf("Set push_checks[%d].type to an artifact type.", i), typeRule, "The value is "+exports.Value(item.Type, true)+".")
 		}
 		if seen[item.Type] {
-			return nil, fmt.Errorf("%s: push_checks: remove one of the two checks for %s. A module has one check per type", path, item.Type)
+			return nil, refuse(fmt.Sprintf("Remove one of the two push checks for %s.", item.Type), "A module has one check per type.")
 		}
 		seen[item.Type] = true
 		if len(item.Command) == 0 {
-			return nil, fmt.Errorf("%s: push_checks[%d].command: set it to the program's path inside the module, then its arguments. The list is empty", path, i)
+			return nil, refuse(fmt.Sprintf("Set push_checks[%d].command to the program's path inside the module, then its arguments.", i), "The list is empty.")
 		}
 		words := make([]string, len(item.Command))
 		for j, node := range item.Command {
 			if node.Kind != yaml.ScalarNode || node.Tag != "!!str" {
-				return nil, fmt.Errorf("%s: push_checks[%d].command[%d]: set it to a string, quoted when it reads as a number or a boolean", path, i, j)
+				return nil, refuse(fmt.Sprintf("Set push_checks[%d].command[%d] to a string, quoted when it reads as a number or a boolean.", i, j), "The item is not a string.")
 			}
 			words[j] = node.Value
 		}
 		// No .. part at all, as the schema has it, though a/../b would stay inside.
 		program, ok := InsideModule(words[0])
 		if !ok || slices.Contains(strings.Split(filepath.ToSlash(words[0]), "/"), "..") {
-			return nil, fmt.Errorf("%s: push_checks[%d].command: set the first item to a path inside the module. %s is not one", path, i, exports.Value(words[0], true))
+			return nil, refuse(fmt.Sprintf("Set the first item of push_checks[%d].command to a path inside the module.", i), exports.Value(words[0], true)+" is not one.")
 		}
 		command := append([]string{program}, words[1:]...)
 		var reads []string
 		for j, node := range item.Reads {
 			if node.Kind != yaml.ScalarNode || node.Tag != "!!str" || !runapi.ArtifactName(node.Value) {
-				return nil, fmt.Errorf("%s: push_checks[%d].reads[%d]: set it to an artifact type, lowercase letters and digits in groups joined by single hyphens, at most 64 bytes. The value is %s", path, i, j, exports.Value(node.Value, true))
+				return nil, refuse(fmt.Sprintf("Set push_checks[%d].reads[%d] to an artifact type.", i, j), typeRule, "The value is "+exports.Value(node.Value, true)+".")
 			}
 			if slices.Contains(reads, node.Value) {
-				return nil, fmt.Errorf("%s: push_checks[%d].reads: remove one of the two items %s. A type is listed once", path, i, node.Value)
+				return nil, refuse(fmt.Sprintf("Remove one of the two items %s from push_checks[%d].reads.", node.Value, i), "A type is listed once.")
 			}
 			reads = append(reads, node.Value)
 		}
@@ -514,18 +578,22 @@ func readPushChecks(path string, items []rawPushCheck) ([]PushCheck, error) {
 // It returns an error when the stack forces a variant the module does not have, or forces
 // one on a module that declares none, and when the module has no variant for the runtime
 // and its default is missing or "fail". Every message lists the variant names the module
-// has. A variant's name and the runtime's are printed as [accesskey.ShownName] prints
+// has. file is the name of the file whose modules entry lists the module, which the
+// refusals print. A variant's name and the runtime's are printed as [accesskey.ShownName] prints
 // them.
-func SelectVariant(m *Manifest, forced, runtime string) (string, error) {
+func SelectVariant(m *Manifest, forced, runtime, file string) (string, error) {
 	if m == nil || len(m.Variants) == 0 {
 		if forced != "" {
-			return "", fmt.Errorf("variant %s is forced, and the module declares no variants", accesskey.ShownName(forced, true))
+			return "", exports.Refuse(fmt.Sprintf("Remove variant %s from %s in %s.", accesskey.ShownName(forced, true), exports.ModulePlace, file),
+				fmt.Sprintf("Variant %s is forced, and the module declares no variants.", accesskey.ShownName(forced, true)))
 		}
 		return "", nil
 	}
 	if forced != "" {
 		if _, ok := m.Variants[forced]; !ok {
-			return "", fmt.Errorf("variant %s is forced, and the module has no such variant; variants: %s", accesskey.ShownName(forced, true), names(m.Variants))
+			return "", exports.Refuse(fmt.Sprintf("Set the variant of %s in %s to one the module has.", exports.ModulePlace, file),
+				fmt.Sprintf("Variant %s is forced, and the module has no such variant.", accesskey.ShownName(forced, true)),
+				"The variants are "+names(m.Variants)+".")
 		}
 		return forced, nil
 	}
@@ -533,10 +601,14 @@ func SelectVariant(m *Manifest, forced, runtime string) (string, error) {
 		return runtime, nil
 	}
 	if m.Default == "fail" {
-		return "", fmt.Errorf("the module has no variant for runtime %s and its default is fail; variants: %s", accesskey.ShownName(runtime, false), names(m.Variants))
+		return "", exports.Refuse(fmt.Sprintf("Select a variant of %s in %s.", exports.ModulePlace, file),
+			fmt.Sprintf("The module has no variant for runtime %s, and its default is `fail`.", accesskey.ShownName(runtime, false)),
+			"The variants are "+names(m.Variants)+".")
 	}
 	if m.Default == "" {
-		return "", fmt.Errorf("the module has no variant for runtime %s and declares no default; variants: %s", accesskey.ShownName(runtime, false), names(m.Variants))
+		return "", exports.Refuse(fmt.Sprintf("Select a variant of %s in %s.", exports.ModulePlace, file),
+			fmt.Sprintf("The module has no variant for runtime %s, and declares no default.", accesskey.ShownName(runtime, false)),
+			"The variants are "+names(m.Variants)+".")
 	}
 	return m.Default, nil
 }
@@ -552,7 +624,13 @@ func names(v map[string]Variant) string {
 	for i, n := range ns {
 		ns[i] = accesskey.ShownName(n, false)
 	}
-	return strings.Join(ns, ", ")
+	switch len(ns) {
+	case 0, 1:
+		return strings.Join(ns, "")
+	case 2:
+		return ns[0] + " and " + ns[1]
+	}
+	return strings.Join(ns[:len(ns)-1], ", ") + ", and " + ns[len(ns)-1]
 }
 
 // Read scans the module at dir for one variant and returns what it ships. The name is the
@@ -592,45 +670,61 @@ func ReadWith(name, dir string, m *Manifest, variant string, readFile func(path 
 	l := &Module{Name: name, Dir: abs, Manifest: m, Variant: variant}
 	// shown is the module's name as the errors print it.
 	shown := accesskey.ShownName(name, false)
+	// fail is err, an error of reading the module's files, as a refusal that starts with its
+	// fix: a refusal with the module at its place, a resolveError as it is, and any other
+	// error under the line "Check that you can read the files of module <name>."
+	fail := func(err error) error {
+		if _, ok := err.(*exports.Refusal); ok {
+			return exports.Prefixed("module "+shown, err)
+		}
+		// A resolveError starts with a fix, which the line below would push down.
+		var resolve *resolveError
+		if errors.As(err, &resolve) {
+			return fmt.Errorf("%w\n  The module is %s.", err, shown)
+		}
+		return fmt.Errorf("%s\n  %w", exports.Fit("Check that you can read the files of module "+shown+"."), err)
+	}
 	dirs := map[string]string{"skills": "skills", "agents": "agents", "commands": "commands", "output-styles": "output-styles", "hooks": "hooks", "mcp": "mcp", "files": "files"}
 	if m != nil && variant != "" {
 		for kind, sub := range m.Variants[variant] {
 			if _, ok := dirs[kind]; !ok {
-				return nil, fmt.Errorf("module %s: variant %s sets kind %s", shown, accesskey.ShownName(variant, false), accesskey.ShownName(kind, true))
+				return nil, exports.Refuse(fmt.Sprintf("Remove %s from variant %s of module %s.", accesskey.ShownName(kind, true), accesskey.ShownName(variant, false), shown),
+					"A variant sets the directory of one of skills, agents, commands, output-styles, hooks, mcp, or files.")
 			}
 			clean := filepath.Clean(sub)
 			if sub == "" || clean == "." || filepath.IsAbs(clean) || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
-				return nil, fmt.Errorf("module %s: variant %s reads %s from %s, which is not a directory inside the module", shown, accesskey.ShownName(variant, false), kind, exports.Value(sub, true))
+				return nil, exports.Refuse(fmt.Sprintf("Set the %s directory of variant %s to a directory inside the module.", kind, accesskey.ShownName(variant, false)),
+					fmt.Sprintf("Variant %s of module %s reads %s from %s, which is not one.", accesskey.ShownName(variant, false), shown, kind, exports.Value(sub, true)))
 			}
 			dirs[kind] = clean
 		}
 	}
 	skills, err := readSkills(dirs["skills"], filepath.Join(abs, dirs["skills"]), variantSkillDirs(m))
 	if err != nil {
-		return nil, exports.Prefixed("module "+shown, err)
+		return nil, fail(err)
 	}
 	l.Entries = append(l.Entries, skills...)
 	for _, kind := range []string{"agents", "commands", "output-styles"} {
 		es, err := readMarkdown(kind, filepath.Join(abs, dirs[kind]))
 		if err != nil {
-			return nil, fmt.Errorf("module %s: %w", shown, err)
+			return nil, fail(err)
 		}
 		l.Entries = append(l.Entries, es...)
 	}
 	hooks, err := readHooks(shown, dirs["hooks"], filepath.Join(abs, dirs["hooks"]))
 	if err != nil {
-		return nil, exports.Prefixed("module "+shown, err)
+		return nil, fail(err)
 	}
 	l.Entries = append(l.Entries, hooks...)
 	servers, mcp, err := readMCP(dirs["mcp"], filepath.Join(abs, dirs["mcp"]), readFile)
 	if err != nil {
-		return nil, exports.Prefixed("module "+shown, err)
+		return nil, fail(err)
 	}
 	l.Entries = append(l.Entries, servers...)
 	l.MCP = mcp
 	files, err := readFiles(dirs["files"], filepath.Join(abs, dirs["files"]))
 	if err != nil {
-		return nil, fmt.Errorf("module %s: %w", shown, err)
+		return nil, fail(err)
 	}
 	l.Entries = append(l.Entries, files...)
 	for i, e := range l.Entries {
@@ -643,22 +737,22 @@ func ReadWith(name, dir string, m *Manifest, variant string, readFile func(path 
 			}
 		}
 		if err := inside(abs, e.Path); err != nil {
-			if out := linkOut(shown, exports.HidePath(at), err); out != nil {
-				return nil, out
+			if out := linkOut(exports.HidePath(at), err); out != nil {
+				return nil, fail(out)
 			}
-			return nil, fmt.Errorf("module %s: %s %w", shown, exports.HidePath(at), err)
+			return nil, fail(fmt.Errorf("%s %w", exports.HidePath(at), err))
 		}
 		if e.Kind == "skills" {
 			if err := insideAll(abs, e.Path); err != nil {
-				if out := linkOut(shown, exports.HidePath(at), err); out != nil {
-					return nil, out
+				if out := linkOut(exports.HidePath(at), err); out != nil {
+					return nil, fail(out)
 				}
-				return nil, fmt.Errorf("module %s: %s/%w", shown, exports.HidePath(at), err)
+				return nil, fail(fmt.Errorf("%s/%w", exports.HidePath(at), err))
 			}
 		}
 		refs, err := references(abs, e)
 		if err != nil {
-			return nil, exports.Prefixed("module "+shown, err)
+			return nil, fail(err)
 		}
 		l.Entries[i].References = refs.keys
 		l.Entries[i].Tier = refs.tier
@@ -680,11 +774,11 @@ func ReadWith(name, dir string, m *Manifest, variant string, readFile func(path 
 		}
 		data, err := readFile(e.Path)
 		if err != nil {
-			return nil, exports.HideError(err)
+			return nil, fail(exports.HideError(err))
 		}
 		if err := NoTier(string(data)); err != nil {
 			rel, _ := filepath.Rel(abs, e.Path)
-			return nil, fmt.Errorf("module %s: %s: %w", shown, exports.HidePath(filepath.ToSlash(rel)), err)
+			return nil, fail(exports.AtPath(exports.HidePath(filepath.ToSlash(rel)), err))
 		}
 	}
 	if m != nil {
@@ -696,47 +790,51 @@ func ReadWith(name, dir string, m *Manifest, variant string, readFile func(path 
 			if !shipped[key] {
 				kind, entry, _ := strings.Cut(key, "/")
 				needed := Describe(kind, accesskey.ShownName(entry, false))
-				return nil, exports.Errorf("Ship %s in module %s, or remove it from the requires of the module.\n  The requires of module %s lists %s, and the module does not ship it.", needed, shown, shown, needed)
+				fix := fmt.Sprintf("Ship %s in module %s, or remove it from the requires of the module.", needed, shown)
+				if !fits(fix) {
+					fix = fmt.Sprintf("Ship %s in module %s.\n  You can also remove it from the requires of the module.", needed, shown)
+				}
+				return nil, exports.Errorf("%s\n  The requires of module %s lists %s, and the module does not ship it.", fix, shown, needed)
 			}
 		}
 	}
 	l.Settings, err = readSettings(filepath.Join(abs, "settings"))
 	if err != nil {
-		return nil, fmt.Errorf("module %s: %w", shown, err)
+		return nil, fail(err)
 	}
 	for _, runtime := range slices.Sorted(maps.Keys(l.Settings)) {
 		files := l.Settings[runtime]
 		for _, file := range slices.Sorted(maps.Keys(files)) {
 			path := files[file]
 			if err := inside(abs, path); err != nil {
-				if out := linkOut(shown, exports.HidePath("settings/"+runtime+"/"+file), err); out != nil {
-					return nil, out
+				if out := linkOut(exports.HidePath("settings/"+runtime+"/"+file), err); out != nil {
+					return nil, fail(out)
 				}
-				return nil, fmt.Errorf("module %s: %s %w", shown, exports.HidePath("settings/"+runtime+"/"+file), err)
+				return nil, fail(fmt.Errorf("%s %w", exports.HidePath("settings/"+runtime+"/"+file), err))
 			}
 			data, err := readFile(path)
 			if err != nil {
-				return nil, exports.HideError(err)
+				return nil, fail(exports.HideError(err))
 			}
 			if err := NoTier(string(data)); err != nil {
-				return nil, fmt.Errorf("module %s: %s: %w", shown, exports.HidePath("settings/"+runtime+"/"+file), err)
+				return nil, fail(exports.AtPath(exports.HidePath("settings/"+runtime+"/"+file), err))
 			}
 		}
 	}
 	if _, err := os.Stat(filepath.Join(abs, InstructionsName)); err == nil {
 		l.Instructions = filepath.Join(abs, InstructionsName)
 		if err := inside(abs, l.Instructions); err != nil {
-			if out := linkOut(shown, InstructionsName, err); out != nil {
-				return nil, out
+			if out := linkOut(InstructionsName, err); out != nil {
+				return nil, fail(out)
 			}
-			return nil, fmt.Errorf("module %s: %s %w", shown, InstructionsName, err)
+			return nil, fail(fmt.Errorf("%s %w", InstructionsName, err))
 		}
 		data, err := readFile(l.Instructions)
 		if err != nil {
-			return nil, exports.HideError(err)
+			return nil, fail(exports.HideError(err))
 		}
 		if err := NoTier(string(data)); err != nil {
-			return nil, fmt.Errorf("module %s: %s: %w", shown, InstructionsName, err)
+			return nil, fail(exports.AtPath(InstructionsName, err))
 		}
 	}
 	return l, nil
@@ -755,7 +853,7 @@ func ReadThrough(root *os.Root, dir, realDir string) func(path string) ([]byte, 
 		}
 		rel, err := filepath.Rel(abs, path)
 		if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
-			return nil, exports.Errorf("Move %s inside the module. It lies outside the module, and qory reads only the module's files.", exports.HidePath(path))
+			return nil, exports.Refuse("Move the file inside the module.", exports.HidePath(path)+" lies outside the module, and qory reads only the module's files.")
 		}
 		inner, err := ResolveIn(root, realDir, rel)
 		if err != nil {
@@ -797,7 +895,7 @@ func (e *resolveError) Unwrap() error { return e.err }
 // result contains no link, as root showed it.
 func ResolveIn(root *os.Root, realDir, rel string) (string, error) {
 	out := func() error {
-		return &resolveError{exports.HidePath(filepath.ToSlash(rel)) + " leads out of the module", ErrLeadsOut}
+		return &resolveError{"Point the link inside the module, or remove it.\n  " + exports.HidePath(filepath.ToSlash(rel)) + " leads out of the module.", ErrLeadsOut}
 	}
 	pending := splitPath(rel)
 	var cur []string
@@ -824,7 +922,7 @@ func ResolveIn(root *os.Root, realDir, rel string) (string, error) {
 			continue
 		}
 		if hops++; hops > maxLinks {
-			return "", &resolveError{fmt.Sprintf("%s passes more than %d links", exports.HidePath(filepath.ToSlash(rel)), maxLinks), ErrTooManyLinks}
+			return "", &resolveError{fmt.Sprintf("Shorten the chain of links on the path.\n  %s passes more than %d links.", exports.HidePath(filepath.ToSlash(rel)), maxLinks), ErrTooManyLinks}
 		}
 		target, err := root.Readlink(next)
 		if err != nil {
@@ -886,9 +984,9 @@ type outsideError struct {
 
 func (e *outsideError) Error() string { return "links to " + e.real + ", outside the module" }
 
-// linkOut is the refusal of the entry shown as name in the module shown when err is an
-// [outsideError], with its fix first, and nil for any other err.
-func linkOut(shown, name string, err error) error {
+// linkOut is the refusal of the entry shown as name, with [exports.ModulePlace] for the
+// module, when err is an [outsideError], with its fix first, and nil for any other err.
+func linkOut(name string, err error) error {
 	var out *outsideError
 	if !errors.As(err, &out) {
 		return nil
@@ -896,7 +994,8 @@ func linkOut(shown, name string, err error) error {
 	if out.under != "" {
 		name += "/" + out.under
 	}
-	return fmt.Errorf("module %s: Remove the link %s or point it inside the module. It links to %s, outside the module, and qory reads only the module's files.", shown, name, out.real)
+	return exports.Refuse("Point the link inside "+exports.ModulePlace+", or remove it.",
+		fmt.Sprintf("The link %s leads to %s, outside the module, and qory reads only the module's files.", name, out.real))
 }
 
 // insideAll walks the skill directory at dir and checks every file and directory in it
@@ -1000,7 +1099,7 @@ func (r *skillReader) read(rel, dir string, items []os.DirEntry) error {
 		info, err := os.Stat(path)
 		if err != nil {
 			if leadsNowhere(path, err) {
-				return fmt.Errorf("remove the link %s, or point it at a path that exists: it leads nowhere", exports.HidePath(at))
+				return exports.Refuse("Point the link at a path that exists, or remove it.", fmt.Sprintf("The link %s in %s leads nowhere.", exports.HidePath(at), exports.ModulePlace))
 			}
 			return exports.HideError(err)
 		}
@@ -1080,9 +1179,9 @@ func (r *skillReader) checkGroup(at, path string) error {
 	case !none:
 		return nil
 	case folders:
-		return fmt.Errorf("add SKILL.md to %[1]s, or put a skill in a folder below it: %[1]s has no SKILL.md and no skill below it", exports.HidePath(at))
+		return exports.Refuse("Add SKILL.md to the folder, or put a skill in a folder below it.", fmt.Sprintf("%s in %s has no SKILL.md and no skill below it.", exports.HidePath(at), exports.ModulePlace))
 	}
-	return fmt.Errorf("add SKILL.md to %[1]s: %[1]s has no SKILL.md and no skill below it", exports.HidePath(at))
+	return exports.Refuse("Add SKILL.md to the folder.", fmt.Sprintf("%s in %s has no SKILL.md and no skill below it.", exports.HidePath(at), exports.ModulePlace))
 }
 
 // notAGroup is the stop for a folder that is never a group whatever is below it, nil for
@@ -1090,17 +1189,17 @@ func (r *skillReader) checkGroup(at, path string) error {
 func (r *skillReader) notAGroup(at, path string) error {
 	shown := exports.HidePath(at)
 	if r.variants[at] {
-		return fmt.Errorf("select the variant that reads %s, or change that variant's skills: a folder that a variant reads skills from is not a group", shown)
+		return exports.Refuse("Select the variant that reads the folder, or change that variant's skills.", fmt.Sprintf("%s in %s is a folder that a variant reads skills from, and such a folder is not a group.", shown, exports.ModulePlace))
 	}
 	if slices.Contains(RuntimeFolders(), filepath.Base(path)) {
-		return fmt.Errorf("rename %s, or read it through a variant: a folder named after a runtime is not a group", shown)
+		return exports.Refuse("Rename the folder, or read it through a variant.", fmt.Sprintf("%s in %s is named after a runtime, and such a folder is not a group.", shown, exports.ModulePlace))
 	}
 	self, err := os.Lstat(path)
 	if err != nil {
 		return exports.HideError(err)
 	}
 	if !self.IsDir() {
-		return fmt.Errorf("remove the link %s, or point it at a skill: it leads to a folder with no SKILL.md", shown)
+		return exports.Refuse("Point the link at a skill, or remove it.", fmt.Sprintf("The link %s in %s leads to a folder with no SKILL.md.", shown, exports.ModulePlace))
 	}
 	return nil
 }
@@ -1205,7 +1304,8 @@ func readFiles(rel, dir string) ([]Entry, error) {
 			return nil, exports.HideError(err)
 		}
 		if !info.IsDir() {
-			return nil, fmt.Errorf("%s is not under a runtime directory; a file ships as %s/<runtime>/<path>", exports.HidePath(filepath.ToSlash(rel)+"/"+rt.Name()), exports.HidePath(filepath.ToSlash(rel)))
+			return nil, exports.Refuse("Move the file into a runtime directory under files.",
+				fmt.Sprintf("%s in %s is not under a runtime directory, and a file ships as %s/<runtime>/<path>.", exports.HidePath(filepath.ToSlash(rel)+"/"+rt.Name()), exports.ModulePlace, exports.HidePath(filepath.ToSlash(rel))))
 		}
 		err = filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 			if err != nil {
@@ -1285,7 +1385,9 @@ func readSettings(dir string) (map[string]map[string]string, error) {
 			}
 			if info.IsDir() {
 				sub := exports.HidePath(p.Name() + "/" + f.Name())
-				return nil, fmt.Errorf("settings/%s is a directory; settings contains one fragment per target file, and a runtime's other files go under files/%s", sub, sub)
+				return nil, exports.Refuse("Move the directory to files/<runtime>/, or replace it with a fragment file.",
+					fmt.Sprintf("settings/%s in %s is a directory, and settings has one fragment per target file.", sub, exports.ModulePlace),
+					fmt.Sprintf("A runtime's other files go under files/%s.", sub))
 			}
 			if out[p.Name()] == nil {
 				out[p.Name()] = map[string]string{}

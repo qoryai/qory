@@ -60,7 +60,7 @@ func TestTierEffortMistakes(t *testing.T) {
 		{[]string{"--tier-effort", "light"}, "--tier-effort light: write --tier-effort <tier>=<effort>, such as --tier-effort thinking=high"},
 		{[]string{"--tier-effort", "light="}, "--tier-effort light=: write --tier-effort <tier>=<effort>, such as --tier-effort thinking=high"},
 		{[]string{"--tier-effort", "light=lo\nw"}, `--tier-effort light=lo\nw: write --tier-effort <tier>=<effort>, such as --tier-effort thinking=high`},
-		{[]string{"--tier-effort", "heavy=low"}, "--tier-effort heavy=low: use one of the tiers light, fast and thinking; heavy is not a tier"},
+		{[]string{"--tier-effort", "heavy=low"}, "Use one of the tiers light, fast, and thinking.\n  heavy is not a tier.\n  The name is in --tier-effort heavy=low."},
 		{[]string{"--tier", "light=a", "--tier-effort", "light=low", "--tier-effort", "light=high"}, "--tier-effort light is given twice; give each tier once"},
 		{[]string{"--tier-effort", "light=low"}, "--tier-effort light=low: give --tier light=<model id> as well; the effort is for the model that --tier maps the tier to"},
 		{[]string{"--tier", "thinking=claude-opus-5-5", "--tier-effort", "thinking=ultra"}, "set tier thinking's effort to one of low, medium, high, xhigh, max for claude agents\nultra is not one (from --tier-effort)"},

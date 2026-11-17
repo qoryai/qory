@@ -139,13 +139,13 @@ func TestExtendsRefusesWhatTheBaseCloses(t *testing.T) {
 		}
 	}
 	writeFile(t, filepath.Join(root, "modules", "app", "hooks", "leak.sh"), "#!/bin/sh\n")
-	refuse("a hook", "module app ships hooks/leak.sh, and the base stack nextjs-15@", cmd.ExitInput)
+	refuse("a hook", "Remove hooks/leak.sh from module app.\n  Module app ships hooks/leak.sh.\n  The base stack nextjs-15@", cmd.ExitInput)
 	os.Remove(filepath.Join(root, "modules", "app", "hooks", "leak.sh"))
 	writeFile(t, filepath.Join(root, "modules", "app", "skills", "review", "SKILL.md"), "# mine\n")
 	refuse("a collision with the base", "2 modules provide skills/review", cmd.ExitCollision)
 	os.RemoveAll(filepath.Join(root, "modules", "app", "skills", "review"))
 	writeFile(t, filepath.Join(root, "modules", "app", "settings", "claude", "settings.json"), `{"permissions": {"deny": ["Read"]}}`)
-	refuse("a deny rule", "module app sets permissions.deny in settings/claude/settings.json, and the base stack nextjs-15@", cmd.ExitInput)
+	refuse("a deny rule", "Remove permissions.deny from the settings of module app.\n  Module app sets permissions.deny in settings/claude/settings.json.\n  The base stack nextjs-15@", cmd.ExitInput)
 	writeFile(t, filepath.Join(root, "modules", "app", "settings", "claude", "settings.json"), `{"permissions": {"allow": ["Bash(npm test)"]}}`)
 }
 
@@ -207,7 +207,7 @@ func TestExtendsNeedsARuntimeFromSomewhere(t *testing.T) {
 	if err == nil || cmd.ExitCode(err) != cmd.ExitInput {
 		t.Fatalf("err = %v, exit %d\n%s", err, cmd.ExitCode(err), out)
 	}
-	wants(t, err.Error(), "target.runtime is required; the base stack nextjs-15@", " defines no target, so the document sets one beside extends, or the configuration or --runtime does")
+	wants(t, err.Error(), "Set target.runtime beside extends, or set the runtime in the configuration or with --runtime.\n  target.runtime is required, and the base stack nextjs-15@", " defines no target.")
 	gone(t, root, ".qory", ".claude")
 	out, err = run(t, "harness", "compose", "--runtime", "claude")
 	if err != nil {
@@ -226,7 +226,7 @@ func TestExtendsNamesABaseThatIsNotReachable(t *testing.T) {
 	writeFile(t, filepath.Join(root, "qory.yaml"), consumerCompose("file:///nowhere/at/all"))
 	writeManifest(t, filepath.Join(root, "modules", "app"), "app")
 	_, err := run(t, "harness", "compose")
-	if err == nil || !strings.Contains(err.Error(), "the stack file:///nowhere/at/all#main:nextjs-15 is not reachable from here") || cmd.ExitCode(err) != 1 {
+	if err == nil || !strings.Contains(err.Error(), "The stack file:///nowhere/at/all#main:nextjs-15 is not reachable from here") || cmd.ExitCode(err) != 1 {
 		t.Fatalf("err = %v, exit %d", err, cmd.ExitCode(err))
 	}
 }
@@ -242,7 +242,7 @@ func TestExtendsRefusesAClosedBase(t *testing.T) {
 	writeFile(t, filepath.Join(root, "qory.yaml"), "apiVersion: qory.dev/v1alpha1\nharness:\n  extends: {path: "+base+"}\n  modules:\n    - name: app\n")
 	writeManifest(t, filepath.Join(root, "modules", "app"), "app")
 	_, err := run(t, "harness", "compose")
-	if err == nil || !strings.Contains(err.Error(), "is closed: it declares no extending block") || cmd.ExitCode(err) != cmd.ExitInput {
+	if err == nil || !strings.Contains(err.Error(), "Add an extending block to the base stack, or extend another stack.\n  The stack at ") || cmd.ExitCode(err) != cmd.ExitInput {
 		t.Fatalf("err = %v, exit %d", err, cmd.ExitCode(err))
 	}
 }
@@ -289,7 +289,7 @@ func TestExtendsGovernsFilesByPrefix(t *testing.T) {
 	}
 	writeFile(t, filepath.Join(root, "modules", "app", "files", "claude", "rules", "web.md"), "# web\n")
 	_, err = run(t, "harness", "compose")
-	want := "module app ships files/claude/rules/web.md, and the base stack nextjs-15@"
+	want := "Remove the file from module app.\n  Module app ships files/claude/rules/web.md.\n  The base stack nextjs-15@"
 	if err == nil || !strings.Contains(err.Error(), want) || !strings.Contains(err.Error(), "ship files under no path") || cmd.ExitCode(err) != cmd.ExitInput {
 		t.Fatalf("closed files: err = %v, exit %d", err, cmd.ExitCode(err))
 	}
@@ -317,7 +317,7 @@ func TestExtendsGovernsFilesByPrefix(t *testing.T) {
 	wants(t, out, "files/claude/rules/web.md  app")
 	writeFile(t, filepath.Join(root, "modules", "app", "files", "claude", "rules-private", "x.md"), "# x\n")
 	_, err = run(t, "harness", "compose")
-	if err == nil || !strings.Contains(err.Error(), "module app ships files/claude/rules-private/x.md, and the base stack nextjs-15@") || !strings.Contains(err.Error(), "ship files under claude/rules/") {
+	if err == nil || !strings.Contains(err.Error(), "Module app ships files/claude/rules-private/x.md.\n  The base stack nextjs-15@") || !strings.Contains(err.Error(), "ship files under claude/rules/") {
 		t.Fatalf("a longer segment: err = %v", err)
 	}
 	os.RemoveAll(filepath.Join(root, "modules", "app", "files", "claude", "rules-private"))

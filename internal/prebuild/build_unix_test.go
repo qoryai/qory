@@ -113,7 +113,16 @@ for l in contexts cli-plugins; do [ -L "$DOCKER_CONFIG/$l" ] && [ -d "$DOCKER_CO
 for last; do :; done
 case "$1" in
 version) if [ -f `+d+`/platform ]; then cat `+d+`/platform; else echo linux/amd64; fi ;;
-build) cat "$5" >> `+d+`/dockerfiles ;;
+build) if [ -f `+d+`/build-fails ] && [ "$3" = "$(cat `+d+`/build-fails)" ]; then
+		echo "ERROR: failed to solve: process did not complete successfully: exit code: 1" >&2; exit 1
+	fi
+	cat "$5" >> `+d+`/dockerfiles
+	ctx=$(dirname "$5"); key=$(echo "$3" | tr ':/' '__')
+	cp -Rp "$ctx" `+d+`/ctx-$key
+	(cd "$ctx" && find . ! -type d | sort) > `+d+`/context-$key
+	cat "$DOCKER_CONFIG/config.json" > `+d+`/build-config-$key ;;
+run) if [ -f `+d+`/probe-fail ]; then echo "exec: sh: not found" >&2; exit 126; fi
+	if [ -f `+d+`/probe ]; then cat `+d+`/probe; else printf 'id=debian\napt=yes\nnode=yes\n'; fi ;;
 image)
 	case "$2" in
 	inspect)
@@ -210,7 +219,46 @@ func options(t *testing.T, repo string, out, log io.Writer) prebuild.Options {
 		Out:        out,
 		Log:        log,
 		Name:       testName,
+		Parsers:    parsersFolder(t),
+		Node:       nodeProgram(t),
 	}
+}
+
+// parsersFolder writes a folder of parsers as the agent image has it: package.json, a
+// package in node_modules and a link, in a read-only folder.
+func parsersFolder(t *testing.T) string {
+	t.Helper()
+	dir := filepath.Join(t.TempDir(), "parsers")
+	for name, content := range map[string]string{
+		"package.json":                      `{"dependencies":{"parse5":"8.1.1"}}`,
+		"node_modules/parse5/package.json":  `{"version":"8.1.1"}`,
+		"node_modules/parse5/dist/index.js": "module.exports = {};\n",
+	} {
+		p := filepath.Join(dir, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "node_modules", ".bin"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("../parse5/dist/index.js", filepath.Join(dir, "node_modules", ".bin", "parse5")); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+// nodeProgram writes an executable file that stands for the node program.
+func nodeProgram(t *testing.T) string {
+	t.Helper()
+	p := filepath.Join(t.TempDir(), "node")
+	if err := os.WriteFile(p, []byte("node\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return p
 }
 
 // TestBuildFindsItsProgramsOnTheGivenPATH finds the devcontainer command and docker on
@@ -254,6 +302,7 @@ func TestBuildBuildsTheImage(t *testing.T) {
 		"prebuild: pulled the base image example.com/acme/shop-dev@sha256:" + baseDigest + " in ",
 		"prebuild: built the development container image in ",
 		"prebuild: kept the environment image as " + testName + ":environment",
+		"prebuild: added Chromium, ffmpeg and the parsers in ",
 		"prebuild: made the wall user the image's user in ",
 		"prebuild: copied the repository to /workspace in ",
 		"prebuild: ran onCreateCommand in 1.0s",
@@ -290,6 +339,8 @@ func TestBuildBuildsTheImage(t *testing.T) {
 		"image inspect --format {{json .RepoDigests}} example.com/acme/shop-dev:1",
 		"image inspect --format {{json .Config}} " + testName + ":base",
 		"tag " + testName + ":base " + testName + ":environment",
+		"run --rm --name " + testName + "-probe --pull never --network none --cap-drop ALL --security-opt no-new-privileges --entrypoint sh " + testName + ":base -c ",
+		"build --tag " + testName + ":tools",
 		"build --tag " + testName + ":top",
 		"image inspect --format {{json .Config}} " + testName + ":top",
 		create,
@@ -299,8 +350,9 @@ func TestBuildBuildsTheImage(t *testing.T) {
 		"build --tag acme/shop:prebuild",
 		"image inspect --format {{json .Config}} acme/shop:prebuild",
 		"image inspect --format {{.Size}} acme/shop:prebuild",
+		"rm --force --volumes " + testName + "-probe",
 		"rm --force --volumes " + testName,
-		"image rm --force " + testName + ":base " + testName + ":top " + testName + ":seeded",
+		"image rm --force " + testName + ":base " + testName + ":tools " + testName + ":top " + testName + ":seeded",
 	}
 	got := f.calls("docker")
 	if len(got) != len(wantDocker) {
@@ -312,13 +364,17 @@ func TestBuildBuildsTheImage(t *testing.T) {
 		}
 	}
 	for _, l := range got {
+		if strings.HasPrefix(l, "run ") {
+			l = strings.Replace(l, "--network none ", "", 1)
+		}
 		for _, bad := range []string{"--privileged", "docker.sock", "--network", "--cap-add", "--init", "push", "login", "-e ", "--env"} {
 			if strings.Contains(l, bad) {
 				t.Errorf("docker %s holds %q", l, bad)
 			}
 		}
 	}
-	wantFiles := "FROM " + testName + ":base\nUSER 1234:2345\nENV HOME=/home/agent\n" +
+	wantFiles := prebuild.ToolsDockerfile(testName+":base", "debian", "1234:2345", false) +
+		"FROM " + testName + ":tools\nUSER 1234:2345\nENV HOME=/home/agent\n" +
 		"FROM " + testName + ":seeded\nENTRYPOINT []\nCMD [\"/bin/sh\"]\n"
 	if got := f.read("dockerfiles"); got != wantFiles {
 		t.Errorf("the Dockerfiles are\n%s\nwant\n%s", got, wantFiles)
@@ -682,7 +738,7 @@ func TestBuildFailsWithTheSeedStepsLine(t *testing.T) {
 	if strings.Count(out.String(), "onCreateCommand exited with status 2") != 1 || strings.Contains(out.String(), "make setup") {
 		t.Errorf("printed\n%s", out.String())
 	}
-	if !f.called("docker", "rm --force --volumes "+testName) || !f.called("docker", "image rm --force "+testName+":base "+testName+":top") || f.called("docker", "commit") {
+	if !f.called("docker", "rm --force --volumes "+testName) || !f.called("docker", "image rm --force "+testName+":base "+testName+":tools "+testName+":top") || f.called("docker", "commit") {
 		t.Errorf("docker ran\n%s", f.read("docker.log"))
 	}
 }
@@ -698,22 +754,28 @@ func TestBuildFailsWhenTheContainerDies(t *testing.T) {
 	}
 }
 
-// TestBuildRefusesAnImageOverTheLimit is an image of more than 4 GiB: refused, and
-// removed with the temporary images.
-func TestBuildRefusesAnImageOverTheLimit(t *testing.T) {
+// TestBuildKeepsAnImageOfAnySize is an image that docker reports as 5 GiB: the build
+// finishes, keeps the tag, prints the size on its last line, and removes only the
+// temporary images.
+func TestBuildKeepsAnImageOfAnySize(t *testing.T) {
 	f := newFakes(t)
-	f.set(t, "size", strconv.Itoa(4<<30+1)+"\n")
+	f.set(t, "size", "5368709120\n")
 	var out bytes.Buffer
-	_, err := prebuild.Build(t.Context(), options(t, repository(t, shopConfig), &out, io.Discard))
-	var refusal *prebuild.RefusedError
-	if !errors.As(err, &refusal) || err.Error() != "the image is 4.0 GiB (4294967297 bytes), more than the limit of 4 GiB; it is removed" {
-		t.Fatalf("Build: %v", err)
+	res, err := prebuild.Build(t.Context(), options(t, repository(t, shopConfig), &out, io.Discard))
+	if err != nil {
+		t.Fatalf("Build: %v\n%s", err, out.String())
 	}
-	if !f.called("docker", "image rm --force "+testName+":base "+testName+":top "+testName+":seeded acme/shop:prebuild") {
-		t.Errorf("the image is not removed:\n%s", f.read("docker.log"))
+	if res.Target != "acme/shop:prebuild" {
+		t.Errorf("the result is %+v", res)
 	}
-	if strings.Contains(out.String(), "built acme/shop:prebuild") {
-		t.Error("the image is said built")
+	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+	if last := lines[len(lines)-1]; !strings.HasPrefix(last, "prebuild: built acme/shop:prebuild in ") || !strings.HasSuffix(last, ": 5.0 GiB (5368709120 bytes)") {
+		t.Errorf("the last line is %q", last)
+	}
+	for _, l := range f.calls("docker") {
+		if strings.HasPrefix(l, "image rm") && strings.Contains(l, "acme/shop:prebuild") {
+			t.Errorf("the image is removed: docker %s", l)
+		}
 	}
 }
 
@@ -761,7 +823,7 @@ wait
 		_ = syscall.Kill(pid, syscall.SIGKILL)
 		t.Error("the process docker start started is left running")
 	}
-	if !f.called("docker", "rm --force --volumes "+testName) || !f.called("docker", "image rm --force "+testName+":base "+testName+":top") {
+	if !f.called("docker", "rm --force --volumes "+testName) || !f.called("docker", "image rm --force "+testName+":base "+testName+":tools "+testName+":top") {
 		t.Errorf("docker ran\n%s", f.read("docker.log"))
 	}
 }
@@ -849,7 +911,7 @@ func TestBuildRefusesAnImageEnvironmentThatWidensTheAgent(t *testing.T) {
 			}
 			removed := "image rm --force " + testName + ":base"
 			if c.created {
-				removed = "image rm --force " + testName + ":base " + testName + ":top " + testName + ":seeded acme/shop:prebuild"
+				removed = "image rm --force " + testName + ":base " + testName + ":tools " + testName + ":top " + testName + ":seeded acme/shop:prebuild"
 			}
 			if !f.called("docker", removed) {
 				t.Errorf("the images are not removed:\n%s", f.read("docker.log"))
@@ -1065,7 +1127,7 @@ func TestBuildRefusesProxiesTheCommandsLeft(t *testing.T) {
 	if !errors.As(err, &refusal) || err.Error() != want {
 		t.Fatalf("Build: %v", err)
 	}
-	if !f.called("docker", "image rm --force "+testName+":base "+testName+":top "+testName+":seeded acme/shop:prebuild") {
+	if !f.called("docker", "image rm --force "+testName+":base "+testName+":tools "+testName+":top "+testName+":seeded acme/shop:prebuild") {
 		t.Errorf("the images are not removed:\n%s", f.read("docker.log"))
 	}
 	if strings.Contains(out.String(), secret) {

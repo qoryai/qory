@@ -25,7 +25,7 @@ func TestAComposeLineOfAHiddenHarnessEndsWithTheUsedCode(t *testing.T) {
 	n := source.NewNamed("the workspace's harness")
 	withUser := &stack.Stack{Extends: stack.Source{Git: "https://reader:pw@git.example/acme/stack.git", Ref: "main"}}
 	fix := compose.CheckBase(withUser, "the workspace's harness")
-	fixLine := "remove the user name and password from the URL of the base of the workspace's harness: the run's stack proxy sets the harness credentials of the run configuration, so a source's URL needs none"
+	fixLine := "Remove the user name and password from the URL of the base of the workspace's harness.\n  The run's stack proxy sets the harness credentials of the run configuration, so a source's URL needs none"
 	printed := reported(&compose.CollisionError{})
 	denied := &fs.PathError{Op: "open", Path: "/run/sources", Err: fs.ErrPermission}
 	for _, c := range []struct {

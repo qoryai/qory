@@ -75,7 +75,7 @@ func TestReadRefusesAModelThatNamesNoTier(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = Read("core", dir, m, "")
-	want := "module core: agents/explorer.md: model ${qory:heavy}: use one of the tiers light, fast and thinking; heavy is not a tier"
+	want := "Use one of the tiers light, fast, and thinking.\n  heavy is not a tier.\n  The name is in model ${qory:heavy}.\n  The model is in agents/explorer.md of module core."
 	if err == nil || err.Error() != want {
 		t.Fatalf("err = %v\nwant %s", err, want)
 	}
@@ -86,7 +86,7 @@ func TestReadRefusesAModelThatNamesNoTier(t *testing.T) {
 // with more text around the placeholder, a skill's and a command's model, and AGENTS.md.
 func TestReadRefusesATierOutsideAnAgentsModel(t *testing.T) {
 	isolate(t)
-	const tail = "${qory:light} is a tier placeholder; a tier goes only in an agent's model, as model: ${qory:light}"
+	const fix = "Move ${qory:light} into the model of an agent, or remove it.\n  A tier placeholder goes only in an agent's model, as model: ${qory:light}.\n  The placeholder is in "
 	for _, c := range []struct{ file, body, where string }{
 		{"agents/explorer.md", "---\nname: explorer\n---\nUse ${qory:light}.\n", "agents/explorer.md"},
 		{"agents/explorer.md", "---\nname: explorer\ndescription: on ${qory:light}\n---\nExplores.\n", "agents/explorer.md"},
@@ -108,7 +108,7 @@ func TestReadRefusesATierOutsideAnAgentsModel(t *testing.T) {
 			t.Fatal(err)
 		}
 		_, err = Read("core", dir, m, "")
-		want := "module core: " + c.where + ": " + tail
+		want := fix + c.where + " of module core."
 		if err == nil || err.Error() != want {
 			t.Errorf("%s:\n%q\nerr = %v\nwant %s", c.file, c.body, err, want)
 		}
@@ -169,7 +169,7 @@ func TestReadEscapesAControlCharacterInATierName(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = Read("core", dir, m, "")
-	want := `module core: agents/explorer.md: model ${qory:he\x1bavy}: use one of the tiers light, fast and thinking; he\x1bavy is not a tier`
+	want := "Use one of the tiers light, fast, and thinking.\n  he\\x1bavy is not a tier.\n  The name is in model ${qory:he\\x1bavy}.\n  The model is in agents/explorer.md of module core."
 	if err == nil || err.Error() != want {
 		t.Errorf("err = %q\nwant %q", err, want)
 	}

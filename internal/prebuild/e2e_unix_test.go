@@ -21,6 +21,9 @@ import (
 // multi-platform index.
 const (
 	alpineImage = "alpine:3.20@sha256:d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc"
+	// debianImage is Debian 13 with no node program, the FETCH_IMAGE of images/agent.
+	debianImage = "public.ecr.aws/docker/library/debian:trixie-20260918-slim@sha256:a99cfc517144bc59b1978475ec53b46ecabec7e43635402ee5b77cc54cd1b20a"
+	debianBase  = "public.ecr.aws/docker/library/debian@sha256:a99cfc517144bc59b1978475ec53b46ecabec7e43635402ee5b77cc54cd1b20a"
 )
 
 // docker runs docker and returns its standard output, failing the test when it fails.
@@ -37,12 +40,12 @@ func docker(t *testing.T, args ...string) string {
 }
 
 // TestBuildWithDocker builds a tiny development container on this machine's engine with
-// the reference devcontainer command: an alpine image whose onCreateCommand writes a
+// the reference devcontainer command: a Debian image whose onCreateCommand writes a
 // file, with the environment image kept apart and then removed. The built image keeps
 // the file under /qory/seed, owned by the wall user, runs as the wall user in an empty
 // /workspace, and has nothing at /qory/hooks and no /qory/agent. It runs only with
 // QORY_TEST_DOCKER=1, docker and the devcontainer command at [prebuild.CLIVersion] on
-// the PATH, and it pulls alpine, by digest.
+// the PATH, and it pulls Debian and the images of the tools step, by digest.
 func TestBuildWithDocker(t *testing.T) {
 	if os.Getenv("QORY_TEST_DOCKER") != "1" {
 		t.Skip("QORY_TEST_DOCKER=1 runs it")
@@ -57,6 +60,9 @@ func TestBuildWithDocker(t *testing.T) {
 	_, _ = rand.Read(r[:])
 	id := hex.EncodeToString(r[:])
 	dir := t.TempDir()
+	// The temporary containers and images are named after name, so the check at the end
+	// counts the ones this test made, not those of other builds on the same engine.
+	name := "qory-prebuild-e2e-" + id
 
 	platform := docker(t, "version", "--format", "{{.Server.Os}}/{{.Server.Arch}}")
 	_, arch, _ := strings.Cut(platform, "/")
@@ -68,9 +74,10 @@ func TestBuildWithDocker(t *testing.T) {
 		t.Fatalf("go build: %v\n%s", err, out)
 	}
 
+	parsers, node := stageTools(t, dir)
 	repo := filepath.Join(dir, "repo")
 	for name, content := range map[string]string{
-		".devcontainer/devcontainer.json": `{"image": "` + alpineImage + `", "containerEnv": {"SHOP_MODE": "test"}, "onCreateCommand": "echo $SHOP_MODE > created.txt && echo home > ~/x"}`,
+		".devcontainer/devcontainer.json": `{"image": "` + debianImage + `", "containerEnv": {"SHOP_MODE": "test"}, "onCreateCommand": "echo $SHOP_MODE > created.txt && echo home > ~/x"}`,
 		".git/HEAD":                       "ref: refs/heads/main\n",
 		"README.md":                       "the shop\n",
 	} {
@@ -95,8 +102,9 @@ func TestBuildWithDocker(t *testing.T) {
 	t.Cleanup(func() { _ = exec.Command("docker", "image", "rm", "--force", tag).Run() })
 	var out, log bytes.Buffer
 	res, err := prebuild.Build(t.Context(), prebuild.Options{
-		Repository: repo, User: "1234:2345", Tag: tag,
+		Repository: repo, User: "1234:2345", Tag: tag, Name: name,
 		Helper: helper, SeedArgs: []string{"run", "seed"}, Env: append(os.Environ(), "DOCKER_CONFIG="+dockerConfigWithProxy), Out: &out, Log: &log,
+		Parsers: parsers, Node: node,
 	})
 	t.Logf("lines:\n%s", out.String())
 	if err != nil {
@@ -104,7 +112,7 @@ func TestBuildWithDocker(t *testing.T) {
 	}
 	// The image form keeps the environment image apart, for the caller to push or
 	// remove.
-	if res.Environment == "" || res.Target != tag || res.Base != "alpine@sha256:d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc" {
+	if res.Environment == "" || res.Target != tag || res.Base != debianBase {
 		t.Errorf("the result is %+v", res)
 	}
 	if res.Environment != "" {
@@ -118,7 +126,7 @@ func TestBuildWithDocker(t *testing.T) {
 	if err := json.Unmarshal([]byte(docker(t, "image", "inspect", "--format", "{{json .Config}}", tag)), &cfg); err != nil {
 		t.Fatal(err)
 	}
-	if cfg.User != "1234:2345" || cfg.WorkingDir != "/workspace" || cfg.Entrypoint != nil || strings.Join(cfg.Cmd, " ") != "/bin/sh" {
+	if cfg.User != "1234:2345" || cfg.WorkingDir != "/workspace" || cfg.Entrypoint != nil || strings.Join(cfg.Cmd, " ") != "bash" {
 		t.Errorf("the image's configuration is %+v", cfg)
 	}
 	for _, args := range [][]string{{"image", "inspect", tag}, {"history", "--no-trunc", tag}} {
@@ -140,7 +148,7 @@ func TestBuildWithDocker(t *testing.T) {
 	managed := filepath.Join(dir, "managed")
 	for name, content := range map[string]string{
 		".devcontainer/devcontainer.json": `{"build": {"dockerfile": "Dockerfile"}, "onCreateCommand": "true"}`,
-		".devcontainer/Dockerfile":        "FROM " + alpineImage + "\nRUN mkdir /etc/claude-code\n",
+		".devcontainer/Dockerfile":        "FROM " + debianImage + "\nRUN mkdir /etc/claude-code\n",
 	} {
 		p := filepath.Join(managed, filepath.FromSlash(name))
 		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
@@ -154,8 +162,9 @@ func TestBuildWithDocker(t *testing.T) {
 	t.Cleanup(func() { _ = exec.Command("docker", "image", "rm", "--force", refusedTag).Run() })
 	out.Reset()
 	_, err = prebuild.Build(t.Context(), prebuild.Options{
-		Repository: managed, User: "1234:2345", Tag: refusedTag,
+		Repository: managed, User: "1234:2345", Tag: refusedTag, Name: name,
 		Helper: helper, SeedArgs: []string{"run", "seed"}, Env: append(os.Environ(), "DOCKER_CONFIG="+dockerConfigWithProxy), Out: &out, Log: &log,
+		Parsers: parsers, Node: node,
 	})
 	t.Logf("lines:\n%s", out.String())
 	var shown *prebuild.ShownError
@@ -186,7 +195,7 @@ func TestBuildWithDocker(t *testing.T) {
 	t.Cleanup(func() { _ = exec.Command("docker", "image", "rm", "--force", escapeTag).Run() })
 	out.Reset()
 	_, err = prebuild.Build(t.Context(), prebuild.Options{
-		Repository: escape, User: "1234:2345", Tag: escapeTag,
+		Repository: escape, User: "1234:2345", Tag: escapeTag, Name: name,
 		Helper: helper, SeedArgs: []string{"run", "seed"}, Env: append(os.Environ(), "DOCKER_CONFIG="+dockerConfigWithProxy), Out: &out, Log: &log,
 	})
 	var refusal *prebuild.RefusedError
@@ -197,10 +206,10 @@ func TestBuildWithDocker(t *testing.T) {
 		t.Error("the image with a context outside is tagged")
 	}
 
-	if left := docker(t, "ps", "--all", "--quiet", "--filter", "name=qory-prebuild-"); left != "" {
+	if left := docker(t, "ps", "--all", "--quiet", "--filter", "name="+name); left != "" {
 		t.Errorf("containers are left: %s", left)
 	}
-	if left := docker(t, "image", "ls", "--quiet", "--filter", "reference=qory-prebuild-*"); left != "" {
+	if left := docker(t, "image", "ls", "--quiet", "--filter", "reference="+name+"*"); left != "" {
 		t.Errorf("images are left: %s", left)
 	}
 }

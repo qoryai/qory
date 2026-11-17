@@ -47,7 +47,7 @@ func TestUserDirRefusesARelativeConfigHome(t *testing.T) {
 	}
 	t.Setenv("XDG_CONFIG_HOME", "cfg")
 	_, err := config.UserDir()
-	if want := "qory: XDG_CONFIG_HOME is not an absolute path; qory reads its configuration only from an absolute one, so that it does not change with the working folder"; err == nil || err.Error() != want {
+	if want := "Set XDG_CONFIG_HOME to an absolute path.\n  qory reads its configuration only from an absolute path, so that it does not change with the working folder."; err == nil || err.Error() != want {
 		t.Errorf("the refusal: %v, want %q", err, want)
 	}
 }

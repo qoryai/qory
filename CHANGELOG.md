@@ -23,6 +23,16 @@ release may change what an existing document does, and states it under Upgrading
   folder belongs to root and no other user can write to it. A script loads a package with
   `require('/opt/qory/parsers/node_modules/<package>')`. See
   Qory's images in `docs/run.md`.
+- The image of a prebuild has Chromium at `/usr/bin/chromium`, with Noto's fonts, `ffmpeg`
+  and `ffprobe`, and the same Node parsers in `/opt/qory/parsers`, whether the target
+  starts from a prebuilt development container image, such as
+  `mcr.microsoft.com/devcontainers/base`, or from one the configuration builds. On a
+  Debian base, `apt-get` installs Chromium. On Ubuntu 22.04 and 24.04, `amd64` and
+  `arm64`, qory downloads Chrome for Testing 159.0.8154.6, the Chromium of Playwright
+  1.65.1, from `storage.googleapis.com`, checks its sha256 sum and extracts it to
+  `/opt/qory/chromium`, because Ubuntu's package is a snap. qory copies the parsers from the `prebuild` image, and `node` from it
+  when the base image has none. It prints `prebuild: added Chromium, ffmpeg and the
+  parsers in <time>`. See `docs/run.md`.
 - A run takes the lower of its workflow's `access` and `access` in its documents, in
   the order `read`, `write-no-push`, `write`. A workflow's `access` in a stack takes
   `write-no-push` in both schemas and in the stack check, and documents may have it. A
@@ -477,6 +487,22 @@ release may change what an existing document does, and states it under Upgrading
   credentials. A run with no push credential stops at the push with `Add a push
   credential to the run configuration: this run has no push proxy.` The fetch, the
   runtime's install, and a prebuild stay on the run's proxy.
+- A push check's container runs under the `runtime` of the `wall.images` entry that the
+  run's policy selects, such as `runsc` (gVisor), when that entry has one. Before, it ran
+  under the default image's `runtime` even when the run's container ran under another.
+- A run with push checks stops before its setup, with exit 2, when the engine's `docker
+  info` does not list the `runtime` that the checks' container runs under, such as
+  `runsc`: `Install the container runtime on the engine, and run again.`, and on the next
+  line the runtime. Before, the checks failed at the first push. An engine whose `docker
+  info` fails lets the run go on, and so does a runtime name that Docker starts as a
+  containerd shim: a `.` after a first part and no `/`, such as `io.containerd.runsc.v1`. A
+  runtime name with a `/` that the list omits stops the run with `Fix the runtime name in
+  wall.images, and run again.`
+- A prebuild keeps an image of any size, and the last line of the prebuild prints the size.
+- A prebuild stops, before it builds the image, when the base image is not Debian or
+  Ubuntu 22.04 or 24.04, or has no `apt-get`: `use a Debian or Ubuntu image: the build
+  adds Chromium only to these`. Alpine bases and other Ubuntu
+  releases that built before are refused.
 - The `agent`, `agent-docker` and `prebuild` images contain no agent runtime. The machine
   installs the runtime at run time, and Forager mounts it read-only at
   `/qory/runtime/<runtime>`. `qory image check` checks no runtime and prints no runtime
@@ -488,7 +514,18 @@ release may change what an existing document does, and states it under Upgrading
   withdrawal, so a later push of the name is checked against what it had before.
 - The first line of each compose error shows the fix, in at most 100 characters, and the
   indented lines after it show the cause and the values, as the errors of workflow hooks
-  do. Which input fails, and the exit status, stay the same.
+  do. This holds for the errors of a module's manifest, push checks, variants, skills,
+  files, settings, and tier placeholders, of a module's source and name, of a base stack,
+  of a stack that `-f` fetches by reference, and of the URL checks of a run. A module that
+  cannot be read starts with `Check that you can read the files of module <name>.`, and a
+  tier list reads `light, fast, and thinking`. Which input fails, and the exit status,
+  stay the same.
+- The first line of each error of a stack file, a stack reference (`-f`), a target, `qory.yaml`
+  and `forager.yaml` that `qory run` and `qory harness compose` print at start, of the
+  unknown or repeated key and the YAML alias that every file qory reads can have, of the
+  `exports` section, of the program of an adapter or a tool, and of the push checks, shows
+  the fix, in at most 100 characters, and the indented lines after it show the cause, as the
+  compose errors do. Which input fails, and the exit status, stay the same.
 - When the push of a run's work gets 403 from the run's push proxy, the first line of the
   error is `Contact support: the push was refused (403).` The line `One of these most
   likely stopped it:` follows, then one line for each likely cause: the push proxy refuses
@@ -879,7 +916,8 @@ release may change what an existing document does, and states it under Upgrading
   otherwise it keeps the run and prints why. The pool section of `forager.yaml` takes
   `runs` (how many runs this host runs at once; 1 when not set), `registry` and
   `run_config`. With `prebuilds`, `harness_ref` or `harness_path` in it, qory stops
-  with `<file>: line <n>: key "<key>" is not one forager.yaml reads`.
+  with `Remove the key, or rename it to one forager.yaml reads.`, then `Key "<key>" is not
+  one forager.yaml reads.` and `It is at line <n> of <file>.`
 - qory treats an enrolment code, `qecn_`, `qecp_`, `qecg_` or `qeci_` in any letter case,
   as a secret, as it treats `qak_`, `qrk_` and `qecr_`. Where qory prints a phrase in
   place of a value or a name that contains one of those, it prints "(a value that
@@ -1125,7 +1163,7 @@ release may change what an existing document does, and states it under Upgrading
 ### Fixed
 
 - A push check's container runs under the `runtime` that `wall.images` sets for the
-  image it runs in, such as `runsc` (gVisor). Until now, it ran under the engine's
+  wall's default image, such as `runsc` (gVisor). Until now, it ran under the engine's
   default runtime.
 - A Copilot CLI session gets the harness's hooks in a repository that commits
   `.github/hooks/hooks.json`. qory links `settings/copilot/hooks.json` as

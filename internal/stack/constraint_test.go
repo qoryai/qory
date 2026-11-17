@@ -30,10 +30,10 @@ func TestConstraintReadsComparatorsOnly(t *testing.T) {
 	}
 	bad := map[string]string{
 		"0.3.0":        "Set qory to one or more comparators, such as >=0.3.0.\n  The value is \"0.3.0\".\n  qory is in the file.",
-		">=0.3":        `qory ">=0.3": "0.3" is not a version such as 0.3.0`,
+		">=0.3":        "Write each version in qory as three numbers, such as 0.3.0.\n  The value is \">=0.3\", and \"0.3\" is not a version.\n  qory is in the file.",
 		"~0.3.0":       "Set qory to one or more comparators, such as >=0.3.0.\n  The value is \"~0.3.0\".\n  qory is in the file.",
-		">=0.3.0+meta": `qory ">=0.3.0+meta": "0.3.0+meta" is not a version such as 0.3.0`,
-		"":             "qory is empty; it is one or more comparators such as >=0.3.0",
+		">=0.3.0+meta": "Write each version in qory as three numbers, such as 0.3.0.\n  The value is \">=0.3.0+meta\", and \"0.3.0+meta\" is not a version.\n  qory is in the file.",
+		"":             "Set qory to one or more comparators, such as >=0.3.0.\n  qory is empty.\n  qory is in the file.",
 	}
 	for in, want := range bad {
 		_, err := ParseConstraint(in)
@@ -109,7 +109,7 @@ func TestStackReadsTheQoryKey(t *testing.T) {
 	}
 	path = write(t, "apiVersion: qory.dev/v1alpha1\nqory: [0.3.0]\nmodules: [{name: core}]\n")
 	_, err = Load(path)
-	if err == nil || !strings.HasPrefix(err.Error(), path+": qory is one or more comparators such as >=0.3.0, as a string") {
+	if err == nil || !strings.HasPrefix(err.Error(), "Set qory to one or more comparators, such as >=0.3.0, as a string.\n  qory is in "+path+".") {
 		t.Errorf("err = %v", err)
 	}
 }

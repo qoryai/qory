@@ -73,9 +73,9 @@ func TestEverythingBelowASkillIsItsFiles(t *testing.T) {
 // below it, whose fix then has a second half.
 func noSkill(at string, withFolder bool) string {
 	if withFolder {
-		return "add SKILL.md to " + at + ", or put a skill in a folder below it: " + at + " has no SKILL.md and no skill below it"
+		return "Add SKILL.md to the folder, or put a skill in a folder below it.\n  " + at + " in module core has no SKILL.md and no skill below it."
 	}
-	return "add SKILL.md to " + at + ": " + at + " has no SKILL.md and no skill below it"
+	return "Add SKILL.md to the folder.\n  " + at + " in module core has no SKILL.md and no skill below it."
 }
 
 // TestAFolderThatIsNeitherASkillNorAGroupStops is each folder with no SKILL.md and no
@@ -98,7 +98,7 @@ func TestAFolderThatIsNeitherASkillNorAGroupStops(t *testing.T) {
 	} {
 		dir := tree(t, c.files)
 		_, err := Read("core", dir, nil, "")
-		if want := "module core: " + c.want; err == nil || err.Error() != want {
+		if want := c.want; err == nil || err.Error() != want {
 			t.Errorf("%s: %v\nwant %s", c.name, err, want)
 		}
 	}
@@ -114,7 +114,7 @@ func TestAFolderNamedAfterARuntimeIsNoGroup(t *testing.T) {
 			dir := tree(t, map[string]string{under + "/" + runtime + "/ship/SKILL.md": "# ship\n"})
 			_, err := Read("core", dir, nil, "")
 			at := under + "/" + runtime
-			if want := "module core: rename " + at + ", or read it through a variant: a folder named after a runtime is not a group"; err == nil || err.Error() != want {
+			if want := "Rename the folder, or read it through a variant.\n  " + at + " in module core is named after a runtime, and such a folder is not a group."; err == nil || err.Error() != want {
 				t.Errorf("%s: %v\nwant %s", at, err, want)
 			}
 		}
@@ -162,7 +162,7 @@ func TestAVariantsFolderIsNoGroupForAnotherVariant(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		want := "module core: select the variant that reads " + at + ", or change that variant's skills: a folder that a variant reads skills from is not a group"
+		want := "Select the variant that reads the folder, or change that variant's skills.\n  " + at + " in module core is a folder that a variant reads skills from, and such a folder is not a group."
 		if _, err := Read("core", dir, m, "base"); err == nil || err.Error() != want {
 			t.Errorf("the variant base, %s: %v\nwant %s", at, err, want)
 		}
@@ -194,7 +194,7 @@ func TestALinkIsNeverAGroup(t *testing.T) {
 		dir := skill()
 		linkIn(t, dir, link, target)
 		_, err := Read("core", dir, nil, "")
-		if want := "module core: remove the link " + link + ", or point it at a skill: it leads to a folder with no SKILL.md"; err == nil || err.Error() != want {
+		if want := "Point the link at a skill, or remove it.\n  The link " + link + " in module core leads to a folder with no SKILL.md."; err == nil || err.Error() != want {
 			t.Errorf("%s: %v\nwant %s", link, err, want)
 		}
 	}
@@ -217,7 +217,7 @@ func TestALinkThatLeadsNowhereStops(t *testing.T) {
 			dir := tree(t, c.files)
 			linkIn(t, dir, c.link, target)
 			_, err := Read("core", dir, nil, "")
-			if want := "module core: remove the link " + c.link + ", or point it at a path that exists: it leads nowhere"; err == nil || err.Error() != want {
+			if want := "Point the link at a path that exists, or remove it.\n  The link " + c.link + " in module core leads nowhere."; err == nil || err.Error() != want {
 				t.Errorf("%s to %s: %v\nwant %s", c.link, target, err, want)
 			}
 		}
@@ -289,7 +289,7 @@ func TestALinkOutOfAGroupedSkillShowsItsRealFolder(t *testing.T) {
 		dir := tree(t, map[string]string{"skills/group/ok/SKILL.md": "s\n", "skills/group/deep/ok2/SKILL.md": "s\n"})
 		linkIn(t, dir, link, target)
 		_, err := Read("core", dir, nil, "")
-		if want := "module core: Remove the link " + link + " or point it inside the module. It links to "; err == nil || !strings.HasPrefix(err.Error(), want) {
+		if want := "Point the link inside module core, or remove it.\n  The link " + link + " leads to "; err == nil || !strings.HasPrefix(err.Error(), want) {
 			t.Errorf("%s: %v\nwant it to start with %s", link, err, want)
 		}
 	}
@@ -299,7 +299,7 @@ func TestALinkOutOfAGroupedSkillShowsItsRealFolder(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Read("core", dir, m, "v"); err == nil || !strings.HasPrefix(err.Error(), "module core: Remove the link v/skills/ok/notes.md or point it") {
+	if _, err := Read("core", dir, m, "v"); err == nil || !strings.HasPrefix(err.Error(), "Point the link inside module core, or remove it.\n  The link v/skills/ok/notes.md leads to") {
 		t.Errorf("a variant's skill: %v", err)
 	}
 }

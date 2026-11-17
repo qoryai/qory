@@ -1,13 +1,13 @@
 package compose
 
 import (
-	"errors"
 	"fmt"
 	"net/url"
 	"strings"
 
 	"github.com/qoryai/forager/accesskey"
 
+	"github.com/qoryai/qory/internal/exports"
 	"github.com/qoryai/qory/internal/source"
 	"github.com/qoryai/qory/internal/stack"
 )
@@ -32,11 +32,11 @@ func CheckBase(p *stack.Stack, harness string) error {
 	base := "the base of " + harness
 	switch addressFault(p.Extends.Git) {
 	case faultUser:
-		return fmt.Errorf("remove the user name and password from the URL of %s: the run's stack proxy sets the harness credentials of the run configuration, so a source's URL needs none", base)
+		return exports.Refuse("Remove the user name and password from the URL of "+base+".", userCause)
 	case faultParse:
-		return fmt.Errorf("correct the URL of %s: qory could not read it as a URL", base)
+		return exports.Refuse("Correct the URL of "+base+".", parseCause)
 	case faultHost:
-		return fmt.Errorf("write the host in the URL of %s in ASCII, with the xn-- form for an international name: the host has a character outside ASCII, which git may map to another, such as a fullwidth @ to @", base)
+		return exports.Refuse("Write the host in the URL of "+base+" in ASCII.", hostFix, hostCause)
 	}
 	return nil
 }
@@ -46,14 +46,22 @@ func CheckBase(p *stack.Stack, harness string) error {
 func CheckReference(ref stack.Source) error {
 	switch addressFault(ref.Git) {
 	case faultUser:
-		return errors.New("remove the user name and password from the URL in -f: the run's stack proxy sets the harness credentials of the run configuration, so a source's URL needs none")
+		return exports.Refuse("Remove the user name and password from the URL in -f.", userCause)
 	case faultParse:
-		return errors.New("correct the URL in -f: qory could not read it as a URL")
+		return exports.Refuse("Correct the URL in -f.", parseCause)
 	case faultHost:
-		return errors.New("write the host of the URL in -f in ASCII, with the xn-- form for an international name: the host has a character outside ASCII, which git may map to another, such as a fullwidth @ to @")
+		return exports.Refuse("Write the host of the URL in -f in ASCII.", hostFix, hostCause)
 	}
 	return nil
 }
+
+// The cause and fix lines that the refusals of a git URL share.
+const (
+	userCause  = "The run's stack proxy sets the harness credentials of the run configuration, so a source's URL needs none."
+	parseCause = "qory could not read it as a URL."
+	hostFix    = "Use the xn-- form for an international name."
+	hostCause  = "The host has a character outside ASCII, which git may map to another, such as a fullwidth @ to @."
+)
 
 // The faults of a git URL that [CheckBase] and [CheckReference] stop.
 const (
@@ -103,14 +111,15 @@ func CheckAddresses(p *stack.Stack, harness string) error {
 		if l.Base {
 			in = "the base of " + harness
 		}
+		where := "The source of " + module + " is in " + in + "."
 		u, err := url.Parse(l.Source.Git)
 		switch {
 		case stack.AtBeforePath(l.Source.Git) || err == nil && u.User != nil:
-			return fmt.Errorf("remove the user name and password from the source of %s in %s: the run's stack proxy sets the harness credentials of the run configuration, so a source's URL needs none", module, in)
+			return exports.Refuse("Remove the user name and password from the URL in the source of "+module+".", userCause, where)
 		case err != nil:
-			return fmt.Errorf("correct the URL in the source of %s in %s: qory could not read it as a URL", module, in)
+			return exports.Refuse("Correct the URL in the source of "+module+".", parseCause, where)
 		case stack.NonASCIIHost(l.Source.Git):
-			return fmt.Errorf("write the host in the source of %s in %s in ASCII, with the xn-- form for an international name: the host has a character outside ASCII, which git may map to another, such as a fullwidth @ to @", module, in)
+			return exports.Refuse("Write the host in the source of "+module+" in ASCII.", hostFix, hostCause, where)
 		}
 	}
 	return nil

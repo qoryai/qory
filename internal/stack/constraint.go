@@ -1,8 +1,6 @@
 package stack
 
 import (
-	"errors"
-	"fmt"
 	"slices"
 	"strings"
 
@@ -41,7 +39,7 @@ var operators = []string{">=", "<=", ">", "<", "="}
 func ParseConstraint(s string) (Constraint, error) {
 	var c Constraint
 	if strings.TrimSpace(s) == "" {
-		return c, errors.New("qory is empty; it is one or more comparators such as >=0.3.0")
+		return c, exports.Refuse("Set qory to one or more comparators, such as >=0.3.0.", "qory is empty.", "qory is in "+exports.FilePlace+".")
 	}
 	for _, field := range strings.Fields(s) {
 		var op string
@@ -58,7 +56,7 @@ func ParseConstraint(s string) (Constraint, error) {
 		// A comparator names all three numbers and no build metadata, so that two
 		// people read the same range: "0.3" is refused, "0.3.0-rc.1" is read.
 		if !semver.IsValid(v) || semver.Canonical(v) != v {
-			return Constraint{}, fmt.Errorf("qory %s: %s is not a version such as 0.3.0", exports.Value(s, true), exports.Value(strings.TrimPrefix(field, op), true))
+			return Constraint{}, exports.Refuse("Write each version in qory as three numbers, such as 0.3.0.", "The value is "+exports.Value(s, true)+", and "+exports.Value(strings.TrimPrefix(field, op), true)+" is not a version.", "qory is in "+exports.FilePlace+".")
 		}
 		c.comparators = append(c.comparators, comparator{op, v})
 	}
@@ -135,7 +133,7 @@ func (c Constraint) Join(other Constraint) Constraint {
 func (c *Constraint) UnmarshalYAML(n *yaml.Node) error {
 	var s string
 	if err := n.Decode(&s); err != nil {
-		return errors.New("qory is one or more comparators such as >=0.3.0, as a string")
+		return exports.Refuse("Set qory to one or more comparators, such as >=0.3.0, as a string.", "qory is in "+exports.FilePlace+".")
 	}
 	parsed, err := ParseConstraint(s)
 	if err != nil {

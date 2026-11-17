@@ -810,11 +810,11 @@ func TestTheGatewayRunsAProgramByThePathChecked(t *testing.T) {
 		t.Errorf("the definitions changed: %v, %v", r.Credentials[0].Adapter, r.Tools[0].Command)
 	}
 	t.Setenv("PATH", t.TempDir())
-	want := "forager.yaml: gateway.credentials.product.adapter: acme is not on the PATH; install it there, or give its absolute path"
+	want := "Fix the adapter of gateway.credentials.product.\n  acme is not on the PATH; install it there, or give its absolute path.\n  gateway.credentials.product.adapter is in forager.yaml."
 	if _, err := machineCredentials(context.Background(), r, config.Expansion{Workspace: workspace}, "run", io.Discard); err == nil || err.Error() != want {
 		t.Errorf("an adapter not found: %v, want %q", err, want)
 	}
-	want = "forager.yaml: gateway.tools.files.command: acme is not on the PATH; install it there, or give its absolute path"
+	want = "Fix the command of gateway.tools.files.\n  acme is not on the PATH; install it there, or give its absolute path.\n  gateway.tools.files.command is in forager.yaml."
 	if _, err := machineTools(r, workspace); err == nil || err.Error() != want {
 		t.Errorf("a tool not found: %v, want %q", err, want)
 	}

@@ -141,12 +141,12 @@ func TestAnExportNotListedIsRefused(t *testing.T) {
 	writeFile(t, filepath.Join(root, "qory.yaml"), exportsCompose(url, "other"))
 	writeManifest(t, filepath.Join(root, "modules", "app"), "app")
 	_, err := run(t, "harness", "compose")
-	if want := "extends " + url + "#main stack other: " + url + " at main exports no stack named other; stacks: nextjs-15"; err == nil || !strings.Contains(err.Error(), want) || cmd.ExitCode(err) != cmd.ExitInput {
+	if want := "Check the stack in extends.\n  " + url + " at main exports no stack named other; stacks: nextjs-15\n  extends is " + url + "#main stack other."; err == nil || !strings.Contains(err.Error(), want) || cmd.ExitCode(err) != cmd.ExitInput {
 		t.Fatalf("a stack not exported: err = %v, exit %d; want %q", err, cmd.ExitCode(err), want)
 	}
 	writeFile(t, filepath.Join(root, "qory.yaml"), strings.Replace(exportsCompose(url, "nextjs-15"), "module: extra", "module: secret", 1))
 	_, err = run(t, "harness", "compose")
-	if want := "module extra: " + url + " at main exports no module named secret; modules: core, tools, extra"; err == nil || !strings.Contains(err.Error(), want) {
+	if want := "Check the source of module extra.\n  " + url + " at main exports no module named secret; modules: core, tools, extra"; err == nil || !strings.Contains(err.Error(), want) {
 		t.Fatalf("a module not exported: err = %v; want %q", err, want)
 	}
 }
@@ -181,7 +181,7 @@ func TestConfigPrintsThePublishersExports(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = run(t, "config")
-	if want := "qory.yaml: exports.modules lists extra, and harness/modules/extra contains no qory-module.yaml"; err == nil || !strings.Contains(err.Error(), want) || cmd.ExitCode(err) != cmd.ExitInput {
+	if want := "Add qory-module.yaml to the directory of an export, or remove the export from exports.modules.\n  exports.modules lists extra, and harness/modules/extra contains no qory-module.yaml."; err == nil || !strings.Contains(err.Error(), want) || cmd.ExitCode(err) != cmd.ExitInput {
 		t.Fatalf("a stale list: err = %v, exit %d; want %q", err, cmd.ExitCode(err), want)
 	}
 }

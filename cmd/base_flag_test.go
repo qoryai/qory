@@ -79,7 +79,7 @@ func TestDocumentLeavesExtendsOutForTheFlag(t *testing.T) {
 	if err == nil || cmd.ExitCode(err) != cmd.ExitInput {
 		t.Fatalf("without a base: err = %v, exit %d\n%s", err, cmd.ExitCode(err), out)
 	}
-	wants(t, err.Error(), "qory.yaml: harness sets no target.runtime and no stack to extend", "leaves extends out for the base that qory harness compose -f <stack> selects")
+	wants(t, err.Error(), "Set target.runtime in the harness section, or extend a stack.", "leaves extends out for the base that qory harness compose -f <stack> selects")
 	gone(t, root, ".qory", ".claude")
 	out, err = run(t, "harness", "compose", "-f", base, "--runtime", "claude")
 	if err != nil {
@@ -150,14 +150,14 @@ func TestHarnessYamlIsTheDocumentsOtherName(t *testing.T) {
 	}
 	writeFile(t, filepath.Join(root, "harness.yaml"), "harness:\n  nope: 1\n")
 	_, err = run(t, "harness", "compose")
-	if err == nil || !strings.Contains(err.Error(), `harness.yaml: line 2: key "nope" is not one harness.yaml reads`) {
+	if err == nil || !strings.Contains(err.Error(), `Key "nope" is not one harness.yaml reads.`) {
 		t.Fatalf("an unknown key: %v", err)
 	}
 	writeFile(t, filepath.Join(root, "harness.yaml"), "harness:\n  extends: {path: "+rel+"}\n")
 	writeFile(t, filepath.Join(root, "qory.yaml"), "worktree: {base: main}\n")
 	for _, args := range [][]string{{"harness", "compose"}, {"config"}} {
 		_, err = run(t, args...)
-		if err == nil || !strings.Contains(err.Error(), root+" contains both qory.yaml and harness.yaml; a directory contains one of the two") {
+		if err == nil || !strings.Contains(err.Error(), "Remove qory.yaml or harness.yaml.\n  "+root+" contains both, and a directory contains one of the two.") {
 			t.Fatalf("%s with both names: %v", strings.Join(args, " "), err)
 		}
 	}

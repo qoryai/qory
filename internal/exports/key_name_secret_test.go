@@ -18,13 +18,13 @@ import (
 func TestAnUnknownExportsKeyWithASecretInItsNameIsReportedByItsLine(t *testing.T) {
 	isolate(t)
 	for _, c := range []struct{ name, secret, want string }{
-		{"qak_AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA", "qak_AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA", "line 4: key is not one qory.yaml reads"},
-		{"qrk_AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA x", "qrk_AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA", "line 4: key is not one qory.yaml reads"},
-		{"stack", "", `line 4: key "stack" is not one qory.yaml reads`},
+		{"qak_AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA", "qak_AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA", "Key is not one qory.yaml reads.\n  It is at line 4 of {path}."},
+		{"qrk_AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA x", "qrk_AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA", "Key is not one qory.yaml reads.\n  It is at line 4 of {path}."},
+		{"stack", "", "Key \"stack\" is not one qory.yaml reads.\n  It is at line 4 of {path}."},
 	} {
 		root := write(t, "exports:\n  modules: [core]\n  "+c.name+": 1\n")
 		_, err := exports.Read(root)
-		if want := filepath.Join(root, exports.FileName) + ": " + c.want; err == nil || err.Error() != want {
+		if want := "Remove the key, or rename it to one qory.yaml reads.\n  " + strings.ReplaceAll(c.want, "{path}", filepath.Join(root, exports.FileName)); err == nil || err.Error() != want {
 			t.Errorf("%s: %v, want %q", c.name, err, want)
 		}
 		if c.secret != "" && err != nil && strings.Contains(err.Error(), c.secret) {
@@ -40,7 +40,7 @@ func TestAnUnknownExportsKeyWithANewlineInItsNameIsReportedByItsLine(t *testing.
 	isolate(t)
 	root := write(t, "exports:\n  modules: [core]\n  \"qak_SECRET\\nb\": 1\n")
 	_, err := exports.Read(root)
-	if want := filepath.Join(root, exports.FileName) + ": line 4: key is not one qory.yaml reads"; err == nil || err.Error() != want {
+	if want := "Remove the key, or rename it to one qory.yaml reads.\n  Line 4: key is not one qory.yaml reads.\n  The file is " + filepath.Join(root, exports.FileName) + "."; err == nil || err.Error() != want {
 		t.Errorf("%v, want %q", err, want)
 	}
 	if err != nil && strings.Contains(err.Error(), "qak_SECRET") {
@@ -89,13 +89,13 @@ func TestAnAliasOfASecretAnchorIsRefusedWithoutItsName(t *testing.T) {
 	isolate(t)
 	path := filepath.Join(t.TempDir(), exports.FileName)
 	for _, c := range []struct{ name, want string }{
-		{"qak_x", ": line 2: the value is a YAML alias, which qory.yaml may not contain; write the value out in full where it is used"},
-		{"QRK_ab", ": line 2: the value is a YAML alias, which qory.yaml may not contain; write the value out in full where it is used"},
-		{"m", ": line 2: *m is a YAML alias, which qory.yaml may not contain; write the value out in full where it is used"},
+		{"qak_x", "The value at line 2 is a YAML alias, which qory.yaml may not contain."},
+		{"QRK_ab", "The value at line 2 is a YAML alias, which qory.yaml may not contain."},
+		{"m", "*m at line 2 is a YAML alias, which qory.yaml may not contain."},
 	} {
 		err := exports.RefuseAliases(path, []byte("a: &"+c.name+" 1\nb: *"+c.name+"\n"))
-		if err == nil || err.Error() != path+c.want {
-			t.Errorf("%s: %v, want %q", c.name, err, path+c.want)
+		if err == nil || err.Error() != "Write the value out in full in place of the YAML alias.\n  "+c.want+"\n  The file is "+path+"." {
+			t.Errorf("%s: %v, want %q", c.name, err, c.want)
 		}
 	}
 }
@@ -129,15 +129,15 @@ func TestHideNameHidesEveryWordWithASecret(t *testing.T) {
 // mixed case, is left out too.
 func TestADecoderPrefixWithASecretIsLeftOut(t *testing.T) {
 	isolate(t)
-	const cannotRead = "qory cannot read the value here. The YAML decoder's message contains an access key secret, a run key, a run code or an enrolment code, so qory does not print it."
+	const cannotRead = "qory cannot read the value here. The YAML decoder's message contains an access key secret, a run key, a run code, or an enrolment code, so qory does not print it."
 	inner := errors.New("yaml: cannot decode !!str `qak_y` as a !!int")
 	for _, c := range []struct {
 		err  error
 		want string
 	}{
-		{fmt.Errorf("qak_x is one name: %w", inner), "f.yaml: " + cannotRead},
-		{fmt.Errorf("one name: %w", inner), "f.yaml: one name: " + cannotRead},
-		{fmt.Errorf("one name: %w", errors.New("yaml: cannot decode !!str `QeCg_y` as a !!int")), "f.yaml: one name: " + cannotRead},
+		{fmt.Errorf("qak_x is one name: %w", inner), "Correct f.yaml.\n  " + cannotRead + "\n  The file is f.yaml."},
+		{fmt.Errorf("one name: %w", inner), "Correct f.yaml.\n  One name.\n  " + cannotRead + "\n  The file is f.yaml."},
+		{fmt.Errorf("one name: %w", errors.New("yaml: cannot decode !!str `QeCg_y` as a !!int")), "Correct f.yaml.\n  One name.\n  " + cannotRead + "\n  The file is f.yaml."},
 	} {
 		if err := exports.DecodeError("f.yaml", c.err); err == nil || err.Error() != c.want {
 			t.Errorf("%v, want %q", err, c.want)

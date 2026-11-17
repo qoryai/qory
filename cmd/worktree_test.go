@@ -751,7 +751,7 @@ func TestWorktreeBranchSettingKeepsTheBranch(t *testing.T) {
 	wantsRow(t, out, "branch", "feature  (deleted; every commit of it is on the remote, in the main checkout or on its base)")
 	writeFile(t, user, "apiVersion: qory.dev/v1alpha1\nworktree: {branch: drop}\n")
 	_, err = run(t, "wa", "feature", "--no-compose")
-	if err == nil || !strings.Contains(err.Error(), `worktree.branch "drop" is not delete or keep`) {
+	if err == nil || !strings.Contains(err.Error(), "Set worktree.branch to delete or keep.\n  The value is \"drop\".") {
 		t.Fatalf("bad value: %v", err)
 	}
 	_ = root

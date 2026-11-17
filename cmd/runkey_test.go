@@ -478,7 +478,7 @@ func TestTheRunKeyIsNoAgentsVariable(t *testing.T) {
 		for _, k := range []string{"", key} {
 			t.Setenv("QORY_RUN_KEY", k)
 			out, err := run(t, "run")
-			if want := file + ": wall.env[0] names a variable that is Forager's and never the agent's"; cmd.ExitCode(err) != cmd.ExitInput || err == nil || err.Error() != want {
+			if want := "Remove wall.env[0].\n  It is a variable that is Forager's and never the agent's.\n  wall.env is in " + file + "."; cmd.ExitCode(err) != cmd.ExitInput || err == nil || err.Error() != want {
 				t.Errorf("wall.env [%s], key %v: %v (exit %d), want %q", name, k != "", err, cmd.ExitCode(err), want)
 			}
 			lacks(t, out, key[4:40], "hello from")

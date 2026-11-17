@@ -229,7 +229,7 @@ func TestGatewayListenPrintsNoSecret(t *testing.T) {
 	serverFile(t, newFakeServer(t, ""), "  listen: 127.0.0.1:0\n")
 	out, err := run(t, "gateway", "--listen", "qak_host")
 	printsNoKey(t, out, err)
-	if err == nil || err.Error() != "--listen "+valueShown+" is not host:port, such as 0.0.0.0:8443" || cmd.ExitCode(err) != cmd.ExitInput {
+	if err == nil || err.Error() != "Pass --listen as host:port, such as 0.0.0.0:8443.\n  --listen is "+valueShown+", which is not host:port." || cmd.ExitCode(err) != cmd.ExitInput {
 		t.Errorf("err = %v\n%s", err, out)
 	}
 }
