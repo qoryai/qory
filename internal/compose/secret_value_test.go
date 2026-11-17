@@ -223,7 +223,7 @@ func TestTheVariantRefusalContainsTheFileThatListsTheModule(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = compose.ComposeWith(merged, compose.Options{Base: base})
-	const want = "Select a variant of module m in qory.yaml.\n  The module has no variant for runtime claude, and its default is fail."
+	const want = "Select a variant of module m in qory.yaml.\n  The module has no variant for runtime claude, and its default is `fail`."
 	if err == nil || !strings.HasPrefix(err.Error(), want) {
 		t.Errorf("harness section: %v\nwant one that starts with %q", err, want)
 	}
@@ -231,7 +231,7 @@ func TestTheVariantRefusalContainsTheFileThatListsTheModule(t *testing.T) {
 		stack.FileName:               "apiVersion: qory.dev/v1alpha1\nmodules:\n  - name: m\n    source:\n      path: modules/m\n",
 		"modules/m/qory-module.yaml": manifest,
 	})
-	const wantStack = "Select a variant of module m in qory-stack.yaml.\n  The module has no variant for runtime claude, and its default is fail."
+	const wantStack = "Select a variant of module m in qory-stack.yaml.\n  The module has no variant for runtime claude, and its default is `fail`."
 	if err == nil || !strings.HasPrefix(err.Error(), wantStack) {
 		t.Errorf("stack file: %v\nwant one that starts with %q", err, wantStack)
 	}

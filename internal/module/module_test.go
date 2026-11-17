@@ -542,7 +542,7 @@ func TestSelectVariantPicksTheForcedRuntimeOrDefaultOne(t *testing.T) {
 		{name: "the module root without a manifest", runtime: "claude", want: ""},
 		{
 			name: "a default of fail", manifest: failing, runtime: "gemini",
-			wantErr: "Select a variant of the module in qory.yaml.\n  The module has no variant for runtime gemini, and its default is fail.\n  The variants are claude and codex.",
+			wantErr: "Select a variant of the module in qory.yaml.\n  The module has no variant for runtime gemini, and its default is `fail`.\n  The variants are claude and codex.",
 		},
 		{
 			name: "no default at all", manifest: two, runtime: "gemini",

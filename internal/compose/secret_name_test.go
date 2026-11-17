@@ -26,7 +26,7 @@ func TestAModuleNameWithASecretIsLeftOutOfAVariantRefusal(t *testing.T) {
 		stack.FileName:                   "apiVersion: qory.dev/v1alpha1\nmodules:\n  - name: qak_m\n    source:\n      path: modules/qak_m\n",
 		"modules/qak_m/qory-module.yaml": "apiVersion: qory.dev/v1alpha1\nname: qak_m\nvariants:\n  codex:\n    agents: agents/codex\n  default: fail\n",
 	})
-	want := "Select a variant of module (a name that contains an access key secret) in qory-stack.yaml.\n  The module has no variant for runtime claude, and its default is fail.\n  The variants are codex."
+	want := "Select a variant of module (a name that contains an access key secret) in qory-stack.yaml.\n  The module has no variant for runtime claude, and its default is `fail`.\n  The variants are codex."
 	if err == nil || err.Error() != want {
 		t.Errorf("%v, want %q", err, want)
 	}

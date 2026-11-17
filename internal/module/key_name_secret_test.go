@@ -112,7 +112,7 @@ func TestAVariantNameWithASecretIsLeftOutOfItsRefusal(t *testing.T) {
 		t.Errorf("runtime: %v", err)
 	}
 	m.Default = "fail"
-	if _, err := SelectVariant(m, "", "qrk_rt", "qory.yaml"); err == nil || err.Error() != "Select a variant of the module in qory.yaml.\n  The module has no variant for runtime "+runKeyPhrase+", and its default is fail.\n  The variants are claude and "+accessKeyPhrase+"." {
+	if _, err := SelectVariant(m, "", "qrk_rt", "qory.yaml"); err == nil || err.Error() != "Select a variant of the module in qory.yaml.\n  The module has no variant for runtime "+runKeyPhrase+", and its default is `fail`.\n  The variants are claude and "+accessKeyPhrase+"." {
 		t.Errorf("runtime, default fail: %v", err)
 	}
 	dir := tree(t, map[string]string{"skills/deploy/SKILL.md": "---\nname: deploy\ndescription: d\n---\n"})

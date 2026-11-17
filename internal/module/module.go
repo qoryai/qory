@@ -602,7 +602,7 @@ func SelectVariant(m *Manifest, forced, runtime, file string) (string, error) {
 	}
 	if m.Default == "fail" {
 		return "", exports.Refuse(fmt.Sprintf("Select a variant of %s in %s.", exports.ModulePlace, file),
-			fmt.Sprintf("The module has no variant for runtime %s, and its default is fail.", accesskey.ShownName(runtime, false)),
+			fmt.Sprintf("The module has no variant for runtime %s, and its default is `fail`.", accesskey.ShownName(runtime, false)),
 			"The variants are "+names(m.Variants)+".")
 	}
 	if m.Default == "" {

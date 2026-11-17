@@ -509,7 +509,7 @@ func TestComposeRefuses(t *testing.T) {
 				"modules/a/qory-module.yaml": "apiVersion: qory.dev/v1alpha1\nname: a\nvariants:\n  codex:\n    agents: agents/codex\n  default: fail\n",
 				"modules/b/":                 "",
 			},
-			want: "Select a variant of module a in qory-stack.yaml.\n  The module has no variant for runtime claude, and its default is fail.\n  The variants are codex.",
+			want: "Select a variant of module a in qory-stack.yaml.\n  The module has no variant for runtime claude, and its default is `fail`.\n  The variants are codex.",
 		},
 		{
 			name: "a forced variant the module has not",
