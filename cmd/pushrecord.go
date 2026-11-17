@@ -151,16 +151,15 @@ func linkResponse(err error) (status int, text, from string, ok bool) {
 // the call, or an error that wraps [session.ErrRunClosed], which the run returns when it sent
 // nothing because [session.Run.Close] began or the gateway closed the run. The line is
 // [textRunEndedLater] when Qory Apiary ended the run: a 409 run_ended that the link passes on
-// with From apiary, or a 410 whose From is apiary. Otherwise it is [textRunEndedAtGateway] with
-// the code of the end. The gateway's 410 has From gateway for each code of [server.EndCodes]:
-// run_closed, stopped (the run's starter ended it), session_lost and batch_refused. A 410 of Qory Apiary never arrives as a 410: the gateway returns it as 502
+// with From apiary, or a 410 whose From is apiary. Otherwise it is [textRunEndedAtGateway]
+// with the code of the end. The gateway's 410 has From gateway for each code of
+// [server.EndCodes]: run_closed, stopped (the run's starter ended it), session_lost and
+// batch_refused. A 410 of Qory Apiary never arrives as a 410: the gateway returns it as 502
 // control_plane_unavailable. A 409 run_ended with From gateway ends no run. An error that
-// wraps [session.ErrRunClosed] is the line with the code run_closed. An error of an open run
-// with no control plane does not wrap it, and is no end.
+// wraps [session.ErrRunClosed] is the line with the code run_closed, checked last, so the
+// code of a 410 or the line of a 409 run_ended wins. An error of an open run with no control
+// plane does not wrap it, and is no end.
 func runEndedLine(err error) (line string, ended bool) {
-	if errors.Is(err, session.ErrRunClosed) {
-		return fmt.Sprintf(textRunEndedAtGateway, accesskey.CodeRunClosed), true
-	}
 	if end, over := server.Ended(err); over {
 		if end.From == accesskey.FromApiary {
 			return textRunEndedLater, true
@@ -170,6 +169,9 @@ func runEndedLine(err error) (line string, ended bool) {
 	var refusal *accesskey.Refusal
 	if errors.As(err, &refusal) && refusal.Status == http.StatusConflict && refusal.Code == runapi.CodeRunEnded && refusal.From == accesskey.FromApiary {
 		return textRunEndedLater, true
+	}
+	if errors.Is(err, session.ErrRunClosed) {
+		return fmt.Sprintf(textRunEndedAtGateway, accesskey.CodeRunClosed), true
 	}
 	return "", false
 }
