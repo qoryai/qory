@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/qoryai/qory/internal/exports"
 )
 
 // TestAnUnknownManifestKeyWithASecretInItsNameIsReportedByItsLine is an unknown key of
@@ -115,7 +117,7 @@ func TestAVariantNameWithASecretIsLeftOutOfItsRefusal(t *testing.T) {
 	}
 	dir := tree(t, map[string]string{"skills/deploy/SKILL.md": "---\nname: deploy\ndescription: d\n---\n"})
 	m = &Manifest{Variants: map[string]Variant{"qak_v": {"qrk_kind": "x"}}}
-	if _, err := Read("core", dir, m, "qak_v"); err == nil || err.Error() != "Remove "+runKeyPhrase+" from variant "+accessKeyPhrase+" of module core.\n  A variant sets the directory of one of skills, agents, commands, output-styles, hooks, mcp, or files." {
+	if _, err := Read("core", dir, m, "qak_v"); err == nil || err.Error() != exports.Fit("Remove "+runKeyPhrase+" from variant "+accessKeyPhrase+" of module core.\n  A variant sets the directory of one of skills, agents, commands, output-styles, hooks, mcp, or files.") {
 		t.Errorf("kind: %v", err)
 	}
 	m = &Manifest{Requires: map[string][]string{"skills/qak_x": {"agents/a"}}}
