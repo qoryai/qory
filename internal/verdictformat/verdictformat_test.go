@@ -201,6 +201,12 @@ func TestCheck(t *testing.T) {
 		{`{"verdict": "passed", "points": [` + runAgainPoint + `]}`, false},
 		{`{"verdict": "passed", "gaps": "Add the empty cart."}`, false},
 		{`{"verdict": "maybe"}`, false},
+		{`{"verdict": "passed", "track": {"id": "small-change", "reason": "The change touches one file."}}`, true},
+		{`{"verdict": "escalate", "points": [` + answerPoint + `], "track": {"id": "standard", "reason": "A person decides."}}`, true},
+		{`{"verdict": "passed", "track": {"id": "small-change"}}`, false},
+		{`{"verdict": "passed", "track": {"reason": "The change touches one file."}}`, false},
+		{`{"verdict": "passed", "track": {"id": "small-change", "reason": ""}}`, false},
+		{`{"verdict": "passed", "track": {"id": "small-change", "reason": "One file.", "value": "short"}}`, false},
 	} {
 		err := verdictformat.Check([]byte(c.doc))
 		if (err == nil) != c.valid {
@@ -233,6 +239,38 @@ func TestExcludedIsTheSchemasCharacters(t *testing.T) {
 		}}
 		if passed := schema.Validate(doc) == nil; passed == verdictformat.Excluded(r) {
 			t.Errorf("%U: the schema passes it: %v, Excluded: %v", r, passed, verdictformat.Excluded(r))
+		}
+	}
+}
+
+// TestTrackLimitsAreTheSchemasLimits keeps [verdictformat.ValidTrackID], [verdictformat.MaxReason]
+// and [verdictformat.CheckTrack] in step with the schema: each id and reason is valid for
+// the one when it is for the other.
+func TestTrackLimitsAreTheSchemasLimits(t *testing.T) {
+	schema := compiled(t)
+	valid := func(track map[string]any) bool {
+		return schema.Validate(map[string]any{"verdict": "passed", "track": track}) == nil
+	}
+	for _, id := range []string{
+		"a", "small-change", "a1", "a-1", "a1-b2-c3", strings.Repeat("a", 40), strings.Repeat("a", 41),
+		"", "A", "small_change", "small--change", "small-", "-small", "1small", "small change", "small-é",
+	} {
+		track := map[string]any{"id": id, "reason": "One file."}
+		if got, want := verdictformat.ValidTrackID(id), valid(track); got != want {
+			t.Errorf("id %q: ValidTrackID = %v, the schema passes it: %v", id, got, want)
+		}
+		err := verdictformat.CheckTrack(runapi.Track{ID: id, Reason: "One file."})
+		if (err == nil) != valid(track) {
+			t.Errorf("id %q: CheckTrack = %v, the schema passes it: %v", id, err, valid(track))
+		}
+	}
+	for _, reason := range []string{
+		"a", strings.Repeat("a", verdictformat.MaxReason), strings.Repeat("é", verdictformat.MaxReason),
+		strings.Repeat("a", verdictformat.MaxReason+1), "", "One\nfile.", "One\tfile.", "One\u200bfile.",
+	} {
+		err := verdictformat.CheckTrack(runapi.Track{ID: "small-change", Reason: reason})
+		if want := valid(map[string]any{"id": "small-change", "reason": reason}); (err == nil) != want {
+			t.Errorf("reason %q: CheckTrack = %v, the schema passes it: %v", reason, err, want)
 		}
 	}
 }

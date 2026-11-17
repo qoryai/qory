@@ -17,6 +17,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/qoryai/forager/wall"
 	"github.com/spf13/cobra"
@@ -97,11 +98,13 @@ type noWorkItemError struct{}
 func (noWorkItemError) Error() string { return noWorkItemText }
 
 // artifactRefused reports whether err is a run API error for a type or a limit, for a
-// push check that did not pass, or a refused withdrawal ([withdrawRefusedError]).
+// push check that did not pass, a refused withdrawal ([withdrawRefusedError]), or a
+// refused verdict ([verdictRefusedError]).
 // [ExitCode] maps it to [ExitArtifactRefused].
 func artifactRefused(err error) bool {
 	var refused withdrawRefusedError
-	if errors.As(err, &refused) {
+	var verdict verdictRefusedError
+	if errors.As(err, &refused) || errors.As(err, &verdict) {
 		return true
 	}
 
@@ -765,7 +768,7 @@ func keepPush(c *cobra.Command, artifactType, name string, sources []pushSource)
 }
 
 func newRunVerdict() *cobra.Command {
-	var pointsFile string
+	var pointsFile, trackID, trackReason string
 
 	c := &cobra.Command{
 		Use:   "verdict passed|changes-requested|escalate",
@@ -781,6 +784,14 @@ run_again may have fix, one line of 1 to 500 characters on how a person fixes th
 point. qory checks the file against contracts/harness/v1/verdict.schema.json before it
 sends or keeps anything.
 
+Any verdict may propose a track for the work item. Pass --track with the id of a track that
+the gate of the run's stage offers, such as small-change, and --track-reason with the
+reason, one sentence on one line of 1 to 300 characters. Pass both or neither. qory
+checks the id and the reason before it sends or keeps anything, and exits ` + strconv.Itoa(ExitInput) + ` for a
+mistake in them. When Qory Apiary refuses the verdict with 422 invalid_artifact, which
+includes a track that the gate does not offer, qory exits ` + strconv.Itoa(ExitArtifactRefused) + `: line 1 of the error is the
+fix, and Qory Apiary's text follows.
+
 Outside a run, qory prints the verdict and keeps it in .qory/artifacts/verdict/; nothing
 acts on it.
 
@@ -788,6 +799,7 @@ acts on it.
 
 More: https://github.com/qoryai/qory/blob/main/docs/run.md#commands-of-a-work-item`,
 		Example: `  qory run verdict passed
+  qory run verdict passed --track small-change --track-reason "The change touches one file."
   qory run verdict escalate --points points.json`,
 		Args: func(c *cobra.Command, args []string) error {
 			if err := cobra.ExactArgs(1)(c, args); err != nil {
@@ -802,6 +814,11 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md#commands-of-a-work-it
 		},
 		Annotations: map[string]string{inWall: "true"},
 		RunE: func(c *cobra.Command, args []string) error {
+			track, err := readTrack(trackID, trackReason, c.Flags().Changed("track"), c.Flags().Changed("track-reason"))
+			if err != nil {
+				return err
+			}
+
 			points, err := readPoints(args[0], pointsFile, c.Flags().Changed("points"))
 			if err != nil {
 				return err
@@ -813,12 +830,12 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md#commands-of-a-work-it
 			}
 
 			if client == nil {
-				return keepVerdict(c, args[0], points)
+				return keepVerdict(c, args[0], points, track)
 			}
 
-			pushed, err := client.PushVerdict(c.Context(), args[0], points)
+			pushed, err := client.PushVerdict(c.Context(), args[0], points, track)
 			if err != nil {
-				return err
+				return verdictError(err)
 			}
 
 			_, err = fmt.Fprintf(c.OutOrStdout(), "Stored the verdict %s as version %d.\n", args[0], pushed.Version.Number)
@@ -827,8 +844,121 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md#commands-of-a-work-it
 		},
 	}
 	c.Flags().StringVar(&pointsFile, "points", "", "read the points of escalate, a JSON array, from this file")
+	c.Flags().StringVar(&trackID, "track", "", "propose the track with this id, one that the gate of the run's stage offers; pass it with --track-reason")
+	c.Flags().StringVar(&trackReason, "track-reason", "", "give the reason for --track, one sentence on one line of 1 to 300 characters; pass it with --track")
 
 	return c
+}
+
+// The first lines of a verdict that Qory Apiary refuses with 422 invalid_artifact. A line
+// 1 of Qory Apiary's text can be longer than 100 characters, and a track's refusal is
+// worded for the request, not for the flags.
+const (
+	textTrackRefused   = "Set --track to a track that the gate of the stage offers, or leave out the track flags."
+	textVerdictRefused = "Fix the refused part of the verdict, then run the command again."
+)
+
+// verdictRefusedError is a verdict that Qory Apiary refuses with 422 invalid_artifact.
+// [ExitCode] gives it [ExitArtifactRefused]. Its text is the line for the person, then
+// Qory Apiary's text. It unwraps to the run API's error.
+type verdictRefusedError struct {
+	text string
+	err  error
+}
+
+// Error returns the line for the person.
+func (e verdictRefusedError) Error() string { return e.text }
+
+// Unwrap returns the run API's error.
+func (e verdictRefusedError) Unwrap() error { return e.err }
+
+// verdictError returns err as the error of qory run verdict: a 422 invalid_artifact becomes
+// a [verdictRefusedError] whose line 1 has at most 100 characters and the fix, and any
+// other error stays as it is. Line 1 is Qory Apiary's own line when that is short enough,
+// except for a track, whose refusal names no flag; then Qory Apiary's text is line 2.
+func verdictError(err error) error {
+	var apiError *runapi.Error
+	if !errors.As(err, &apiError) || apiError.Code != runapi.CodeInvalidArtifact {
+		return err
+	}
+
+	text := apiError.Error()
+	first, _, _ := strings.Cut(text, "\n")
+
+	switch {
+	case slices.Contains(apiError.Names, "track"):
+		first = textTrackRefused
+	case utf8.RuneCountInString(first) > 100:
+		first = textVerdictRefused
+	default:
+		return verdictRefusedError{text, err}
+	}
+
+	return verdictRefusedError{first + "\n  " + strings.ReplaceAll(text, "\n", "\n  "), err}
+}
+
+// readTrack returns the track of the flags --track and --track-reason, or nil when the
+// command line has neither. A command line with one of the two, an id that has not the
+// form of a track's id, and a reason that is empty, longer than 300 characters or not on
+// one line are input errors, so nothing is sent or kept.
+func readTrack(id, reason string, idGiven, reasonGiven bool) (*runapi.Track, error) {
+	switch {
+	case !idGiven && !reasonGiven:
+		return nil, nil
+	case !reasonGiven:
+		return nil, input(errors.New("Pass --track-reason <text> with --track: a track needs the reason for it."))
+	case !idGiven:
+		return nil, input(errors.New("Pass --track <id> with --track-reason: a reason needs the track it is for."))
+	case !verdictformat.ValidTrackID(id):
+		return nil, input(fmt.Errorf("Set --track to lower-case words joined by hyphens, such as small-change, at most %d characters.\n"+
+			"  The value is %s.", verdictformat.MaxTrackID, shortValue(id)))
+	}
+
+	if err := checkLine("--track-reason", "reason", "one sentence on one line", reason, verdictformat.MaxReason); err != nil {
+		return nil, input(err)
+	}
+
+	track := &runapi.Track{ID: id, Reason: reason}
+	if err := verdictformat.CheckTrack(*track); err != nil {
+		return nil, input(err)
+	}
+
+	return track, nil
+}
+
+// checkLine checks the value of flag, which the message calls what and describes as want:
+// 1 to limit characters on one line, with none that the contract's line excludes.
+func checkLine(flag, what, want, value string, limit int) error {
+	length := utf8.RuneCountInString(value)
+
+	switch {
+	case length == 0:
+		return fmt.Errorf("Set %s to %s, 1 to %d characters. The %s is empty.", flag, want, limit, what)
+	case length > limit:
+		return fmt.Errorf("Shorten %s to at most %d characters. The %s has %d.", flag, limit, what, length)
+	}
+
+	for _, r := range value {
+		switch {
+		case r == '\t':
+			return fmt.Errorf("Write %s on one line. The %s has a tab (%U).", flag, what, r)
+		case r == '\n' || r == '\r':
+			return fmt.Errorf("Write %s on one line. The %s has a line break (%U).", flag, what, r)
+		case verdictformat.Excluded(r):
+			return fmt.Errorf("Remove the character %U from %s. The contract's line excludes it.", r, flag)
+		}
+	}
+
+	return nil
+}
+
+// shortValue returns value quoted, cut to 40 characters.
+func shortValue(value string) string {
+	if runes := []rune(value); len(runes) > 40 {
+		return strconv.Quote(string(runes[:40])) + " and more"
+	}
+
+	return strconv.Quote(value)
 }
 
 // readPoints returns the points of verdict from path, the file of --points; given is true
@@ -878,7 +1008,7 @@ func readPoints(verdict, path string, given bool) ([]runapi.Point, error) {
 }
 
 // keepVerdict keeps the verdict in the store as the run API stores it, outside a run.
-func keepVerdict(c *cobra.Command, verdict string, points []runapi.Point) error {
+func keepVerdict(c *cobra.Command, verdict string, points []runapi.Point, track *runapi.Track) error {
 	store, err := openArtifactStore()
 	if err != nil {
 		return err
@@ -889,7 +1019,7 @@ func keepVerdict(c *cobra.Command, verdict string, points []runapi.Point) error 
 		return err
 	}
 
-	content, err := runapi.VerdictBody(verdict, points)
+	content, err := runapi.VerdictBody(verdict, points, track)
 	if err != nil {
 		return err
 	}

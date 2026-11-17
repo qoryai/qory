@@ -578,7 +578,7 @@ func TestAnUnavailablePushSaysToReadTheIndexFirst(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			client := serve(t, respond(http.StatusServiceUnavailable, body))
 
-			_, err := client.PushVerdict(context.Background(), runapi.VerdictPassed, nil)
+			_, err := client.PushVerdict(context.Background(), runapi.VerdictPassed, nil, nil)
 
 			want := "Read the artifact index, and try again if the version is not there. " +
 				"POST /verdict may have stored it (503 unavailable)."
@@ -621,13 +621,46 @@ func TestPushVerdictSendsTheBodyTheRunAPIReads(t *testing.T) {
 				`{"version": 1, "artifact": {"type": "verdict", "name": "main", "version": {"id": "av_4", "number": 4}}}`)(w, r)
 		})
 
-		pushed, err := client.PushVerdict(context.Background(), c.verdict, c.points)
+		pushed, err := client.PushVerdict(context.Background(), c.verdict, c.points, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
 
 		if pushed.Type != "verdict" || pushed.Version.Number != 4 {
 			t.Errorf("pushed = %+v", pushed)
+		}
+	}
+}
+
+// TestPushVerdictSendsTheTrack sends track after points, as the member track, and sends no
+// member for a nil track.
+func TestPushVerdictSendsTheTrack(t *testing.T) {
+	points := []runapi.Point{{Text: "The checks script failed.", Action: runapi.ActionRunAgain}}
+
+	for _, c := range []struct {
+		verdict string
+		points  []runapi.Point
+		track   *runapi.Track
+		want    string
+	}{
+		{runapi.VerdictPassed, nil, &runapi.Track{ID: "small-change", Reason: "One file < two & more."},
+			`{"verdict":"passed","track":{"id":"small-change","reason":"One file < two & more."}}`},
+		{runapi.VerdictChangesRequested, points, &runapi.Track{ID: "standard", Reason: "A person decides."},
+			`{"verdict":"changes-requested","points":[{"text":"The checks script failed.","action":"run_again"}],` +
+				`"track":{"id":"standard","reason":"A person decides."}}`},
+		{runapi.VerdictPassed, nil, nil, `{"verdict":"passed"}`},
+	} {
+		client := serve(t, func(w http.ResponseWriter, r *http.Request) {
+			if raw, _ := io.ReadAll(r.Body); string(raw) != c.want {
+				t.Errorf("body = %s, want %s", raw, c.want)
+			}
+
+			respond(http.StatusCreated,
+				`{"version": 1, "artifact": {"type": "verdict", "name": "main", "version": {"id": "av_4", "number": 4}}}`)(w, r)
+		})
+
+		if _, err := client.PushVerdict(context.Background(), c.verdict, c.points, c.track); err != nil {
+			t.Fatal(err)
 		}
 	}
 }
@@ -746,7 +779,7 @@ func TestErrorsStartWithTheFix(t *testing.T) {
 func TestATooLargeVerdictHasTheVerdictLimit(t *testing.T) {
 	client := serve(t, respond(http.StatusRequestEntityTooLarge, `{"error":"payload_too_large"}`))
 
-	_, err := client.PushVerdict(context.Background(), runapi.VerdictPassed, nil)
+	_, err := client.PushVerdict(context.Background(), runapi.VerdictPassed, nil, nil)
 
 	want := "Shrink the request to at most 65536 bytes encoded. POST /verdict returned 413 payload_too_large."
 	if err == nil || err.Error() != want {
