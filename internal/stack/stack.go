@@ -469,12 +469,10 @@ const (
 
 // LowerAccess is the lower of the access levels a and b, in the order [AccessRead],
 // [AccessWriteNoPush], [AccessWrite]. The empty level of documents with no target does
-// not lower the other. Any other value, such as "Read", counts as [AccessRead], so a
-// value that no schema accepts never raises a run.
+// not lower the other, and two empty levels give "". Any other value, such as "Read",
+// counts as [AccessRead], also next to an empty level, so a value that no schema accepts
+// never raises a run.
 func LowerAccess(a, b string) string {
-	if a == "" || b == "" {
-		return a + b
-	}
 	rank := func(level string) int {
 		switch level {
 		case AccessWriteNoPush:
@@ -483,6 +481,12 @@ func LowerAccess(a, b string) string {
 			return 3
 		}
 		return 1
+	}
+	if a == "" && b == "" {
+		return ""
+	}
+	if a == "" || b == "" {
+		a, b = a+b, a+b
 	}
 	if rank(b) < rank(a) {
 		a, b = b, a

@@ -78,6 +78,8 @@ func TestLowerAccessTakesTheLowerOfTwoLevels(t *testing.T) {
 		{"Read", AccessWrite, AccessRead},
 		{AccessWriteNoPush, "bogus", AccessRead},
 		{"bogus", "Write", AccessRead},
+		{"", "bogus", AccessRead},
+		{"bogus", "", AccessRead},
 	} {
 		if got := LowerAccess(c.a, c.b); got != c.want {
 			t.Errorf("LowerAccess(%q, %q) is %q, want %q", c.a, c.b, got, c.want)
