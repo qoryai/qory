@@ -1884,7 +1884,7 @@ writes nothing more there; the run goes on. The descriptor works on Linux and ma
 
 Qory Apiary's signed response to the code contains the run's documents beside the run key:
 the step, the domain and the inputs; for the step explore, the work item, the run
-settings, the harness, the workflow and `harness_hidden`; for the step prebuild, the target
+settings, the time limit, the harness, the workflow and `harness_hidden`; for the step prebuild, the target
 and the places of its images at a registry. qory runs the steps explore and prebuild.
 qory checks the documents as the run contract's `documents.schema.json`, and, for the
 step explore, checks that `inputs.domain` and `inputs.work_item.id` match the domain and
@@ -1896,8 +1896,8 @@ the work item. Then a run of the step explore:
 - when `harness_hidden` is `true`, composes a home that contains no link, and has
   Forager mask text that matches the home's files in the session's log and events
   (see [A hidden harness](#a-hidden-harness));
-- runs the runtime of `run_settings.runtime`, `claude` when the response sets no run
-  settings, composed with the model, the effort and the tiers the run settings set, as
+- runs the runtime of `run_settings.runtime`, `claude` when the documents contain no
+  `run_settings`, composed with the model, the effort and the tiers the run settings set, as
   `--model`, `--effort`, `--tier` and `--tier-effort` set them;
 - writes the inputs to `inputs.json`, mode 0600, in a folder `in/`, mode 0700, of a new
   temporary folder, which qory removes when the run ends. Behind a wall, `in/` is mounted
