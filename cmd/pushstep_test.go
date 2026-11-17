@@ -964,8 +964,8 @@ func TestAPushThatARuleRefusesSaysWhatToAllow(t *testing.T) {
 	r := p.run(t, writesAndCommits(t), nil)
 	r.wantsClose(t, event.StateFailed, 1)
 	wants(t, r.out, "qory run: Contact support: the push was refused (403).\n"+
-		"  One of these stopped it:\n"+
-		"  1. The run's push proxy allows a push only to the push_ref of the push credential, and qory pushes to refs/heads/qory/"+workItem+" (wall:push-ref).\n"+
+		"  One of these most likely stopped it:\n"+
+		"  1. The run's push proxy refuses a push that is not a plain push to the push_ref of the push credential (for example a signed push or a push with push options), and qory pushes to refs/heads/qory/"+workItem+" (wall:push-ref).\n"+
 		"  2. The run's push credential has no item for /acme/site.git/git-receive-pack on "+proxygittest.Host+", and the push proxy refuses every other host and path.\n"+
 		"  3. The forge stopped the push: its permission for the push credential, or a branch rule.\n"+
 		"  The push of acme/site to "+proxygittest.Host+" returned 403: ")

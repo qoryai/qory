@@ -200,8 +200,8 @@ func TestPushFailed(t *testing.T) {
 		"error: RPC failed; HTTP 403 curl 22":               "qory run: Contact support: the push was refused (403).",
 		"fatal: unable to access 'x': returned error: 403":  "qory run: Contact support: the push was refused (403).",
 		"fatal: Authentication failed for 'https://x/'":     "qory run: give the run's credential for git.example.com write access to acme/shop",
-		"fatal: unable to access 'x': Could not resolve":    "qory run: check that the run's gateway can reach git.example.com",
-		"fatal: https://u:token-123@git.example.com/ fails": "qory run: check that the run's gateway can reach git.example.com",
+		"fatal: unable to access 'x': Could not resolve":    "qory run: Let the run's gateway reach git.example.com, then take the work item in again.",
+		"fatal: https://u:token-123@git.example.com/ fails": "qory run: Let the run's gateway reach git.example.com, then take the work item in again.",
 	} {
 		got := pushFailed(b, "acme/shop", &gitError{line: output, exit: 1, output: output}).Error()
 		if !strings.HasPrefix(got, want) || !strings.HasSuffix(got, "; the code is used") {
@@ -230,11 +230,11 @@ func TestAForbiddenPushNamesTheThreeCauses(t *testing.T) {
 	if want := "qory run: Contact support: the push was refused (403)."; lines[0] != want {
 		t.Errorf("the first line is %q, want %q", lines[0], want)
 	}
-	if want := "  One of these stopped it:"; lines[1] != want {
+	if want := "  One of these most likely stopped it:"; lines[1] != want {
 		t.Errorf("the second line is %q, want %q", lines[1], want)
 	}
 	for i, want := range []string{
-		"  1. The run's push proxy allows a push only to the push_ref of the push credential, and qory pushes to refs/heads/" + testRef + " (wall:push-ref).",
+		"  1. The run's push proxy refuses a push that is not a plain push to the push_ref of the push credential (for example a signed push or a push with push options), and qory pushes to refs/heads/" + testRef + " (wall:push-ref).",
 		"  2. The run's push credential has no item for /" + path + ".git/git-receive-pack on git.example.com, and the push proxy refuses every other host and path.",
 		"  3. The forge stopped the push: its permission for the push credential, or a branch rule.",
 	} {
@@ -244,6 +244,33 @@ func TestAForbiddenPushNamesTheThreeCauses(t *testing.T) {
 	}
 	if want := "  The push of " + path + " to git.example.com returned 403: "; !strings.HasPrefix(lines[5], want) || !strings.HasSuffix(lines[5], "; the code is used") {
 		t.Errorf("the last line is %q, want it to start with %q and end with the code's mark", lines[5], want)
+	}
+}
+
+// TestPushFailureFirstLinesAreShort is the first line of each text that Q-14 changed, with
+// a long host and a long path: at most 100 characters, a capital after "qory run: ", and
+// no path in it.
+func TestPushFailureFirstLinesAreShort(t *testing.T) {
+	b := &WorkBranch{Ref: testRef, system: "git.internal.example.com"}
+	path := "acme/" + strings.Repeat("long-repository-name-", 4)
+	for output, want := range map[string]string{
+		"fatal: unable to access 'x': returned error: 403": "qory run: Contact support: the push was refused (403).",
+		"fatal: unable to access 'x': Could not resolve":   "qory run: Let the run's gateway reach git.internal.example.com, then take the work item in again.",
+	} {
+		err := pushFailed(b, path, &gitError{line: output, exit: 1, output: output})
+		first, rest, _ := strings.Cut(err.Error(), "\n")
+		if first != want {
+			t.Errorf("pushFailed(%q) line 1 is %q, want %q", output, first, want)
+		}
+		if n := len(first); n > 100 {
+			t.Errorf("pushFailed(%q) line 1 has %d characters, want at most 100", output, n)
+		}
+		if !strings.HasPrefix(rest, "  ") || strings.Contains(first, path) {
+			t.Errorf("pushFailed(%q): the cause is not on an indented line after line 1: %q", output, err)
+		}
+	}
+	if got := pushFailed(b, path, &gitError{line: "x", exit: 1, output: "fatal: unable to access 'x': Could not resolve"}).Error(); !strings.Contains(got, "\n  The push of "+path+" through the run's push proxy failed: ") {
+		t.Errorf("the push-not-reached cause line is wrong: %q", got)
 	}
 }
 
