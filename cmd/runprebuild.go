@@ -25,8 +25,10 @@ import (
 // the code is redeemed. The documents set where the images go: the target image to
 // <image_destination>:<run_id>, and the environment image the build keeps apart to
 // <environment_destination>:<run_id>, unless the documents set environment_image, which
-// the build starts from. The build takes the user from the wall
-// section of forager.yaml, and runs in the image of wall.images that wall.prebuild_image is set to.
+// the build starts from. When the documents set largest_prebuilt_image_bytes, the build
+// removes a target image over that many bytes and the prebuild stops; without it, any
+// size is kept. The build takes the user from the wall section of forager.yaml, and runs
+// in the image of wall.images that wall.prebuild_image is set to.
 
 // textPrebuildWall is the line of a prebuild from a run code on a machine whose
 // forager.yaml does not set the wall settings the build takes.
@@ -52,6 +54,15 @@ func prebuildKeyed(dir foragerdir.Dir, id *serverIdentity) error {
 		where = accesskey.EnvSecret
 	}
 	return fmt.Errorf(textPrebuildKeyed, where)
+}
+
+// largestPrebuiltImage is the documents' largest_prebuilt_image_bytes, 0 when they set
+// none: the schema of the documents checked that it is 1 or more.
+func largestPrebuiltImage(doc contracts.Documents) int64 {
+	if doc.LargestPrebuiltImageBytes == nil {
+		return 0
+	}
+	return *doc.LargestPrebuiltImageBytes
 }
 
 // launchPrebuild runs a prebuild, [prebuild.Launch]; a test replaces it.
@@ -112,6 +123,7 @@ func runCodePrebuild(ctx context.Context, stderr, log io.Writer, r *config.Forag
 	}, prebuild.Run{
 		RunID: runID, Key: &heldRunKey{b: []byte(key.value)}, Inputs: doc.Inputs,
 		ImageDestination: doc.ImageDestination, EnvironmentDestination: doc.EnvironmentDestination, EnvironmentImage: doc.EnvironmentImage,
+		LargestImageBytes: largestPrebuiltImage(doc),
 	})
 	return err
 }
