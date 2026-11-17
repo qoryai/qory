@@ -734,9 +734,10 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			// freshHome is true for a dispatched walled run of a runtime that is a
 			// [render.AgentHomer], whose agent starts on a new, empty configuration
 			// directory.
-			// readOnly is set once the compose has the workflows: the run only reads the
-			// checkout, see [readsOnly].
+			// readOnly and level are set once the compose has the workflows: readOnly is whether
+			// the run only reads the checkout, see [readsOnly], and level is its [accessOf] level.
 			var readOnly bool
+			var level string
 			// link is the transcript link of a run whose agent starts on a fresh home, see
 			// [transcriptLinkFor].
 			var link transcriptLink
@@ -799,6 +800,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				}
 				// A run that only reads the checkout sees it read-only, or stops here, before
 				// the image's fetch and the setup.
+				level = accessOf(fromCode, workflows)
 				readOnly = readsOnly(fromCode, workflows)
 				if readOnly {
 					if err := readOnlyCheckout(&spec, at.root, fromCode.workflow, run.Image()); err != nil {
@@ -1037,9 +1039,9 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 						return &runLineError{err}
 					}
 				}
-				// Only the push step's commit uses the run number. readOnly is set by the
+				// Only the push step's commit uses the run number. level is set by the
 				// compose, so the check comes here, before the session.
-				if canPush(fromCode, readOnly, branch) && fromCode.runNumber < 1 {
+				if canPush(fromCode, level, branch) && fromCode.runNumber < 1 {
 					return &runLineError{errors.New(textNoRunNumber)}
 				}
 				if err := prepareSession(freshHome); err != nil {
@@ -1164,7 +1166,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				if prepErr == nil && readOnly {
 					prepErr = removeSetupWork()
 				}
-				if prepErr == nil && copied == nil && walled && spec.setupWhere != config.SetupInside && canPush(fromCode, readOnly, branch) {
+				if prepErr == nil && copied == nil && walled && spec.setupWhere != config.SetupInside && canPush(fromCode, level, branch) {
 					prepErr = recordSetupWork()
 				}
 				if prepErr == nil && copied != nil && !copied.plain && !copied.readOnly && run.Repositories() != "" && spec.setupWhere != config.SetupInside {
@@ -1270,7 +1272,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			// that no container is left.
 			ending := pushEnding{session: out, limit: timeout}
 			var pushErr, sessionErr error
-			pushes := keepsWork(fromCode, readOnly, branch, res, err)
+			pushes := keepsWork(fromCode, level, branch, res, err)
 			returns := copied != nil && !copied.readOnly && (err == nil && res != nil || joined)
 			stopNow := func() stopRead { return stopRead{ctx.Err() != nil, again.Err() != nil, got()} }
 			if copied != nil {

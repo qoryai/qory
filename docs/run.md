@@ -1726,7 +1726,8 @@ or links to it also stops the run, later, and the agent does not start. qory rem
 setup container of such a run before the agent starts, and closes the run `failed` with
 `read_needs_setup_removed` when the removal fails. Any other run from a run code may write
 the checkout: with no wall it stops after the compose, exit 1, and qory closes it `failed`
-with `write_needs_wall`. See [Read workflows](#read-workflows).
+with `write_needs_wall`. A run takes the lower of the two accesses, in the order `read`,
+`write-no-push`, `write`. See [Read workflows](#read-workflows).
 
 The documents of a run with a target may set `target_version`: the version at which Qory
 Apiary checked the target for a harness file. When the target's `system` is
@@ -4217,18 +4218,27 @@ make the mount /srv/data read-only, with :ro on --mount or in wall.mounts: a wal
 
 Two values set what a run of a workflow from a run code may do on the checkout:
 
-- The workflow's access in the stack, `workflows.<name>.access`: `read` or `write`. A
-  workflow that sets no access, and one the stack does not declare, is `read` (see
-  `workflows` in `contracts/harness/v1/README.md`).
+- The workflow's access in the stack, `workflows.<name>.access`: `read`, `write-no-push`
+  or `write`. A workflow that sets no access, and one the stack does not declare, is
+  `read` (see `workflows` in `contracts/harness/v1/README.md`).
 - `access` in the run's documents, from Qory Apiary: `read`, `write-no-push` or `write`.
   Documents with no target have no `access`, and the workflow's access applies alone.
-  With `write-no-push` and a workflow declared `write`, the agent gets a writable
-  checkout, and qory runs no push step and stores no version of the artifact `branch`.
-  With no wall, such a run stops with `write_needs_wall`, as a write run does.
 
-A read run is a run where either value is `read`. A workflow declared `write` with
-`access: read` in the documents gives a read run, and so does a workflow declared `read`
-with `access: write`. A read run sees the checkout read-only:
+A run takes the lower of the two, in the order `read`, `write-no-push`, `write`. A
+workflow declared `write` with `access: write-no-push` in the documents gives a
+`write-no-push` run, and so does a workflow declared `write-no-push` with `access: write`.
+A workflow declared `write-no-push` with `access: read` gives a read run.
+
+A `write-no-push` run gets a writable checkout, and qory runs no push step for it: it
+pushes no commit, creates no branch on the forge, stores no version of the artifact
+`branch` and opens the host proxy for the fetch alone, so qory asks for no write token or
+push credential for it. qory has no submit step yet, and the run contract refuses `submit` on a
+`write-no-push` run. With no wall, such a run stops with `write_needs_wall`, as a write
+run does.
+
+A read run is a run whose level is `read`: either value is `read`. A workflow declared
+`write` with `access: read` in the documents gives a read run, and so does a workflow
+declared `read` with `access: write`. A read run sees the checkout read-only:
 
 - Forager binds the workspace read-only in the agent's container, and the checkout's
   mount is read-only. A write into the checkout inside fails with `Read-only file

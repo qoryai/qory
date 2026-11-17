@@ -38,11 +38,11 @@ func TestLoadReadsTheWorkflows(t *testing.T) {
 // no access, or none listed, as read.
 func TestLoadReadsTheAccess(t *testing.T) {
 	isolate(t)
-	p, err := Load(write(t, withWorkflows("  fix:\n    access: write\n  review:\n    access: read\n  plain:\n    time_limit: 45m\n")))
+	p, err := Load(write(t, withWorkflows("  fix:\n    access: write\n  stage:\n    access: write-no-push\n  review:\n    access: read\n  plain:\n    time_limit: 45m\n")))
 	if err != nil {
 		t.Fatal(err)
 	}
-	for name, want := range map[string]string{"fix": AccessWrite, "review": AccessRead, "plain": AccessRead, "none": AccessRead} {
+	for name, want := range map[string]string{"fix": AccessWrite, "review": AccessRead, "plain": AccessRead, "none": AccessRead, "stage": AccessWriteNoPush} {
 		if got := p.AccessOf(name); got != want {
 			t.Errorf("%s: %q, want %q", name, got, want)
 		}
@@ -56,8 +56,33 @@ func TestLoadReadsTheAccess(t *testing.T) {
 	}
 }
 
+// TestLowerAccessTakesTheLowerOfTwoLevels is every pair of the three levels in the order
+// read, write-no-push, write, and a level outside the three, which does not lower the
+// other.
+func TestLowerAccessTakesTheLowerOfTwoLevels(t *testing.T) {
+	for _, c := range []struct{ a, b, want string }{
+		{AccessRead, AccessRead, AccessRead},
+		{AccessRead, AccessWriteNoPush, AccessRead},
+		{AccessRead, AccessWrite, AccessRead},
+		{AccessWriteNoPush, AccessRead, AccessRead},
+		{AccessWriteNoPush, AccessWriteNoPush, AccessWriteNoPush},
+		{AccessWriteNoPush, AccessWrite, AccessWriteNoPush},
+		{AccessWrite, AccessRead, AccessRead},
+		{AccessWrite, AccessWriteNoPush, AccessWriteNoPush},
+		{AccessWrite, AccessWrite, AccessWrite},
+		{AccessWrite, "", AccessWrite},
+		{AccessWriteNoPush, "", AccessWriteNoPush},
+		{"", AccessRead, AccessRead},
+	} {
+		if got := LowerAccess(c.a, c.b); got != c.want {
+			t.Errorf("LowerAccess(%q, %q) is %q, want %q", c.a, c.b, got, c.want)
+		}
+	}
+}
+
 // TestLoadRefusesABrokenWorkflow refuses a workflow name outside the contract's form, a
-// time_limit that is no duration or not above zero, an access other than read or write,
+// time_limit that is no duration or not above zero, an access other than read,
+// write-no-push or write,
 // and a key a workflow does not have.
 func TestLoadRefusesABrokenWorkflow(t *testing.T) {
 	isolate(t)
@@ -69,8 +94,8 @@ func TestLoadRefusesABrokenWorkflow(t *testing.T) {
 		{"  hello:\n    time_limit: 7 hours\n", "to a duration above zero, such as 7h or 45m.\n  The value is \"7 hours\"."},
 		{"  hello:\n    time_limit: 0s\n", "to a duration above zero, such as 7h or 45m.\n  The value is \"0s\"."},
 		{"  hello:\n    time_limit: -1h\n", "to a duration above zero, such as 7h or 45m.\n  The value is \"-1h\"."},
-		{"  hello:\n    access: admin\n", "Set workflows.hello.access to read or write.\n  The value is \"admin\".\n  workflows.hello is in {path}."},
-		{"  hello:\n    access: Write\n", "Set workflows.hello.access to read or write.\n  The value is \"Write\".\n  workflows.hello is in {path}."},
+		{"  hello:\n    access: admin\n", "Set workflows.hello.access to read, write-no-push, or write.\n  The value is \"admin\".\n  workflows.hello is in {path}."},
+		{"  hello:\n    access: Write\n", "Set workflows.hello.access to read, write-no-push, or write.\n  The value is \"Write\".\n  workflows.hello is in {path}."},
 		{"  hello:\n    access: write\n    time_limit: 0s\n", "Set workflows.hello.time_limit to a duration above zero"},
 		{"  hello:\n    prompt: x\n", `key "prompt" is not one qory-stack.yaml reads`},
 	} {
@@ -120,6 +145,7 @@ func TestTheSchemaTakesTheWorkflows(t *testing.T) {
 		{"  hello:\n    time_limit: 0.5s\n", true},
 		{"  hello:\n    access: read\n", true},
 		{"  hello:\n    access: write\n    time_limit: 7h\n", true},
+		{"  hello:\n    access: write-no-push\n", true},
 		{"  hello:\n    access: admin\n", false},
 		{"  hello:\n    access: Write\n", false},
 		{"  hello:\n    prompt: x\n", false},
@@ -152,7 +178,7 @@ func TestNewComposeReadsTheWorkflowsOfADefinedStack(t *testing.T) {
 		w    Workflow
 		want string
 	}{
-		{Workflow{Access: "admin"}, "to read or write.\n  The value is \"admin\".\n  workflows.fix is in "},
+		{Workflow{Access: "admin"}, "to read, write-no-push, or write.\n  The value is \"admin\".\n  workflows.fix is in "},
 		{Workflow{TimeLimitText: "7 hours"}, "to a duration above zero, such as 7h or 45m.\n  The value is \"7 hours\".\n  workflows.fix is in "},
 		{Workflow{TimeLimitText: "0s"}, "to a duration above zero, such as 7h or 45m.\n  The value is \"0s\".\n  workflows.fix is in "},
 	} {

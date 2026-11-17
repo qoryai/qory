@@ -29,14 +29,23 @@ const (
 // checkout, [readsOnly], and that has no wall, with the workflow's name.
 const textWriteNeedsWall = "run this workflow with a wall: this run of workflow %s writes to the checkout, and a run with no wall runs the agent as this machine's user"
 
-// readsOnly reports whether the run from the run code r only reads the checkout: the
-// access in its documents is read, or the access of its workflow in workflows, the
-// composed stack's, is read, which is also the access of a workflow the stack does not
-// declare. Either read is enough, so a write in one does not raise a read in the other.
-// Documents with no target have no access, and the workflow's access applies alone. A
-// run with no run code starts no workflow.
+// accessOf is the access level of the run from the run code r: the lower of the access in
+// its documents and the access of its workflow in workflows, the composed stack's, in
+// the order [stack.AccessRead], [stack.AccessWriteNoPush], [stack.AccessWrite]. A
+// workflow the stack does not declare is read. Documents with no target have no access,
+// and the workflow's access applies alone. A run with no run code starts no workflow, and
+// its level is "".
+func accessOf(r *codeRun, workflows map[string]stack.Workflow) string {
+	if r == nil {
+		return ""
+	}
+	return stack.LowerAccess((&stack.Stack{Workflows: workflows}).AccessOf(r.workflow), r.access)
+}
+
+// readsOnly reports whether the run from the run code r only reads the checkout: its
+// [accessOf] level is read, so either the documents or the workflow is read.
 func readsOnly(r *codeRun, workflows map[string]stack.Workflow) bool {
-	return r != nil && (r.access == stack.AccessRead || (&stack.Stack{Workflows: workflows}).AccessOf(r.workflow) == stack.AccessRead)
+	return accessOf(r, workflows) == stack.AccessRead
 }
 
 // readOnlyCheckout makes spec, a run that only reads the checkout at root, show the
