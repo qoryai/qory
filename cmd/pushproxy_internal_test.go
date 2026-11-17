@@ -52,8 +52,9 @@ func TestTheNoPushCredentialLineStartsWithTheFix(t *testing.T) {
 	if !found || !strings.HasPrefix(rest, "  ") || !strings.HasSuffix(rest, codeUsed) {
 		t.Errorf("the lines are %q, want the cause indented and ending with %q", err.Error(), codeUsed)
 	}
-	if len(first) > 100 || !strings.HasPrefix(first, "qory run: Add a push credential") {
-		t.Errorf("line 1 is %d characters: %q, want at most 100 and the fix first", len(first), first)
+	const want = "qory run: Contact support: this run has no push credential, so qory pushed nothing."
+	if len(first) > 100 || first != want {
+		t.Errorf("line 1 is %d characters: %q, want at most 100 and %q", len(first), first, want)
 	}
 	if !errors.Is(err, forager) {
 		t.Error("the error does not unwrap to Forager's")

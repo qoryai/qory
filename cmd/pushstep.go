@@ -37,7 +37,7 @@ const (
 	textPushStepOne     = "push %s to %s and 1 further repository"
 	textPushStepMany    = "push %s to %s and %d further repositories"
 	textPushNoProxy     = "take the work item in again in Qory Apiary: the run's push proxy, through which qory pushes the run's commits, did not open: %s" + codeUsed
-	textPushNoCred      = "Add a push credential to the run configuration: this run has no push proxy.\n  The run configuration has no credential with purpose push, so qory pushed nothing" + codeUsed
+	textPushNoCred      = "Contact support: this run has no push credential, so qory pushed nothing.\n  The run configuration has no credential with purpose push, so qory pushed nothing" + codeUsed
 	textPushNoRunAPI    = "take the work item in again in Qory Apiary: the run API, which stores the version of the artifact " + branchType + ", is not reachable from this run: %s" + codeUsed
 	textNoBranchType    = "Define the artifact type " + branchType + " in the workspace's Artifact types, then %s, then run the round again"
 	textNotStored       = "%s, then take the work item in again: qory pushed %s, and the version of the artifact " + branchType + " was not stored: %s" + codeUsed
@@ -282,7 +282,7 @@ func pushWork(ctx context.Context, run openedRun, stderr io.Writer, branch *prep
 
 // noPushProxyWords is the part of Forager's error from [session.Run.PushProxy] for a run
 // with no push credential: "Add a push credential to the run configuration: this run has
-// no push proxy." Forager has no error value for it.
+// no push proxy." Forager has no error value for it. qory prints [textPushNoCred] instead.
 const noPushProxyWords = "this run has no push proxy"
 
 // noPushCredential is [textPushNoCred] as an error that unwraps to Forager's error.

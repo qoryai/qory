@@ -484,8 +484,8 @@ release may change what an existing document does, and states it under Upgrading
 
 - The push step of a write run pushes through the run's push proxy, which sets the run
   configuration's push credentials alone, and the run's proxy no longer adds push
-  credentials. A run with no push credential stops at the push with `Add a push
-  credential to the run configuration: this run has no push proxy.` The fetch, the
+  credentials. A run with no push credential stops at the push with `Contact
+  support: this run has no push credential, so qory pushed nothing.` The fetch, the
   runtime's install, and a prebuild stay on the run's proxy.
 - A prebuild started from Qory Apiary applies the instance's Largest prebuilt image
   setting, which the run documents carry as `largest_prebuilt_image_bytes`, in decimal

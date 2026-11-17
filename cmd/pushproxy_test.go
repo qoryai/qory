@@ -11,7 +11,7 @@ import (
 )
 
 // noPushCredentialLines are the lines of a push step whose run has no push credential.
-const noPushCredentialLines = "qory run: Add a push credential to the run configuration: this run has no push proxy.\n" +
+const noPushCredentialLines = "qory run: Contact support: this run has no push credential, so qory pushed nothing.\n" +
 	"  The run configuration has no credential with purpose push, so qory pushed nothing; the code is used"
 
 // TestThePushGoesThroughThePushProxy is a write run whose host proxy and push proxy are
@@ -60,7 +60,7 @@ func TestARunWithNoPushCredentialStopsAtThePush(t *testing.T) {
 	}
 	wants(t, r.out, noPushCredentialLines+"\n")
 	for _, line := range strings.Split(r.out, "\n") {
-		if strings.HasPrefix(line, "qory run: Add a push credential") && len(line) > 100 {
+		if strings.HasPrefix(line, "qory run: Contact support: this run has no push credential") && len(line) > 100 {
 			t.Errorf("line 1 has %d characters, want at most 100: %q", len(line), line)
 		}
 	}

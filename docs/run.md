@@ -2647,7 +2647,7 @@ returns 403 to a push that is not a plain push to the credential's `push_ref`, w
 run's branch: a push to any other ref, a signed push, and a push with push options.
 
 A run whose run configuration has no push credential has no push proxy. The step fails with
-`qory run: Add a push credential to the run configuration: this run has no push proxy.`,
+`qory run: Contact support: this run has no push credential, so qory pushed nothing.`,
 a second line with the cause, and `the code is used`, and qory pushes nothing. A credential
 in forager.yaml is never a push credential. The run's proxy, which the agent, the setup, the
 fetch, and the runtime's install go through, sets no push credential, so a push through it
