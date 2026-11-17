@@ -12,6 +12,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 
@@ -888,5 +889,50 @@ func TestPushedCommitsSendsNothingForAnInvalidList(t *testing.T) {
 		if err := client.PushedCommits(context.Background(), commits); !runapi.HasCode(err, runapi.CodeInvalidRequest) {
 			t.Errorf("%s: err = %v, want invalid_request", name, err)
 		}
+	}
+}
+
+func TestSplitPushedCommitsKeepsOrderAndBothLimits(t *testing.T) {
+	quotes := strings.Repeat(`"`, 256)
+	commit := strings.Repeat("a", 64)
+
+	var commits []runapi.PushedCommit
+	for i := range 130 {
+		commits = append(commits, runapi.PushedCommit{System: fmt.Sprintf("s%03d", i), Path: quotes, Commit: commit})
+	}
+
+	calls := runapi.SplitPushedCommits(commits)
+
+	var joined []runapi.PushedCommit
+	for i, call := range calls {
+		body, err := json.Marshal(struct {
+			Repositories []runapi.PushedCommit `json:"repositories"`
+		}{call})
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if len(call) > runapi.MaxPushedCommits || len(body) > runapi.MaxPushedCommitsBytes {
+			t.Errorf("call %d has %d repositories and %d bytes", i, len(call), len(body))
+		}
+
+		joined = append(joined, call...)
+	}
+
+	if !slices.Equal(joined, commits) {
+		t.Errorf("the calls have %d repositories in another order than the %d given", len(joined), len(commits))
+	}
+
+	if len(calls) < 3 {
+		t.Errorf("%d calls, want more than the 3 that the row limit gives", len(calls))
+	}
+
+	if got := runapi.SplitPushedCommits(nil); got != nil {
+		t.Errorf("no commits are the calls %v", got)
+	}
+
+	huge := runapi.PushedCommit{System: strings.Repeat("x", 70000), Path: "p", Commit: commit}
+	if got := runapi.SplitPushedCommits([]runapi.PushedCommit{commits[0], huge, commits[1]}); len(got) != 3 {
+		t.Errorf("a repository over the limit alone gives %d calls, want 3", len(got))
 	}
 }

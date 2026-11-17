@@ -115,6 +115,62 @@ func TestSixtyFiveRepositoriesAreSentAs64ThenOne(t *testing.T) {
 	}
 }
 
+// TestLongLabelsAreSplitBeforeABodyPasses64KiB is a push of 64 repositories with system and
+// path labels of 256 bytes, mostly quotes, which the body escapes as 2 bytes each: the body
+// of one call would be about 72 KiB. The report is two calls, each body at most 65536 bytes,
+// with the 64 repositories in order and none twice. The bodies have `<`, `>` and `&` as they
+// are, not as the 6-byte escapes of a default JSON encoder.
+func TestLongLabelsAreSplitBeforeABodyPasses64KiB(t *testing.T) {
+	label := func(prefix string, i int) string {
+		return prefix + fmt.Sprintf("%02d", i) + "<>&" + strings.Repeat(`"`, 256-len(prefix)-5)
+	}
+	var landed []preparation.Landed
+	for i := range 64 {
+		landed = append(landed, preparation.Landed{System: label("s", i), Path: label("p", i), Commit: strings.Repeat("c", 64)})
+	}
+	var bodies [][]byte
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		bodies = append(bodies, raw)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	t.Cleanup(server.Close)
+	client, err := runapi.New(server.URL+"/v1/runs/r", server.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ended, err := recordLanded(context.Background(), client, "qory/w-1", landed); ended || err != nil {
+		t.Fatalf("ended = %v, err = %v", ended, err)
+	}
+	if len(bodies) != 2 {
+		t.Fatalf("the report is %d calls, want 2", len(bodies))
+	}
+	var got []runapi.PushedCommit
+	for i, raw := range bodies {
+		if len(raw) > runapi.MaxPushedCommitsBytes {
+			t.Errorf("body %d has %d bytes, want at most %d", i, len(raw), runapi.MaxPushedCommitsBytes)
+		}
+		if !strings.Contains(string(raw), "<>&") || strings.Contains(string(raw), `\u003c`) {
+			t.Errorf("body %d does not have `<>&` as it is", i)
+		}
+		var body struct {
+			Repositories []runapi.PushedCommit `json:"repositories"`
+		}
+		if err := json.Unmarshal(raw, &body); err != nil {
+			t.Fatal(err)
+		}
+		got = append(got, body.Repositories...)
+	}
+	if len(got) != 64 {
+		t.Fatalf("the calls have %d repositories, want 64", len(got))
+	}
+	for i, c := range got {
+		if c.System != landed[i].System || c.Path != landed[i].Path {
+			t.Fatalf("repository %d is %.5s %.5s, want %.5s %.5s", i, c.System, c.Path, landed[i].System, landed[i].Path)
+		}
+	}
+}
+
 // TestALaterCallStopsWhenAnEarlierOneFails is a push of 65 repositories whose first call gets
 // 400: the second call is not sent, and the failure line names the first commit.
 func TestALaterCallStopsWhenAnEarlierOneFails(t *testing.T) {

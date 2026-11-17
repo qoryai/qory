@@ -439,8 +439,12 @@ func VerdictBody(verdict string, points []Point) ([]byte, error) {
 	return body, nil
 }
 
-// MaxPushedCommits is the most repositories one [Client.PushedCommits] call may send.
-const MaxPushedCommits = 64
+// The limits of one [Client.PushedCommits] call: MaxPushedCommits repositories, and a body of
+// MaxPushedCommitsBytes bytes. Qory Apiary returns 413 for a larger body, which ends the run.
+const (
+	MaxPushedCommits      = 64
+	MaxPushedCommitsBytes = 64 * 1024
+)
 
 // PushedCommit is a repository that a push moved, and the commit its branch is at now: the
 // full id, 40 or 64 lowercase hexadecimal characters.
@@ -472,9 +476,7 @@ func (c *Client) PushedCommits(ctx context.Context, commits []PushedCommit) erro
 		}
 	}
 
-	body, err := encode(struct {
-		Repositories []PushedCommit `json:"repositories"`
-	}{commits})
+	body, err := encodePushedCommits(commits)
 	if err != nil {
 		return fmt.Errorf("Check the pushed commits. Encoding the request failed: %w", err)
 	}
@@ -492,6 +494,40 @@ func (c *Client) PushedCommits(ctx context.Context, commits []PushedCommit) erro
 	}
 
 	return nil
+}
+
+// encodePushedCommits is the body of a [Client.PushedCommits] call for commits. It is the one
+// place that encodes the body, so the size that [SplitPushedCommits] measures is the size sent.
+func encodePushedCommits(commits []PushedCommit) ([]byte, error) {
+	return encode(struct {
+		Repositories []PushedCommit `json:"repositories"`
+	}{commits})
+}
+
+// SplitPushedCommits divides commits into the lists that [Client.PushedCommits] sends, one call
+// each, in order: each list has at most [MaxPushedCommits] repositories and encodes to a body
+// of at most [MaxPushedCommitsBytes] bytes. A repository that alone exceeds the byte limit has
+// a list to itself. It returns nil for no commits.
+func SplitPushedCommits(commits []PushedCommit) [][]PushedCommit {
+	var calls [][]PushedCommit
+
+	for len(commits) > 0 {
+		n := 1
+
+		for n < len(commits) && n < MaxPushedCommits {
+			body, err := encodePushedCommits(commits[:n+1])
+			if err != nil || len(body) > MaxPushedCommitsBytes {
+				break
+			}
+
+			n++
+		}
+
+		calls = append(calls, commits[:n:n])
+		commits = commits[n:]
+	}
+
+	return calls
 }
 
 // fullCommit reports whether value is a commit id of 40 or 64 lowercase hexadecimal characters.

@@ -20,8 +20,8 @@ release may change what an existing document does, and states it under Upgrading
 
 - After each push of its push step, qory reports the repositories the push moved to Qory
   Apiary with `POST /v1/runs/<id>/pushed-commits`, one entry for each repository with
-  `system`, `path` and the full head commit, in push order, at most 64 in a call. A push
-  that moved no repository sends nothing. qory sends a call again after a network error, a
+  `system`, `path` and the full head commit, in push order, at most 64 in a call and at
+  most 65536 bytes in a body. A push that moved no repository sends nothing. qory sends a call again after a network error, a
   timeout of 30 s, a 5xx or a 429, 3 times, after 1 s, 2 s and 4 s, or after `Retry-After`,
   at most 30 s. On 409 `run_ended`, qory pushes nothing more and starts no later session,
   and the run closes with the end that Qory Apiary recorded. On any other 4xx status, or

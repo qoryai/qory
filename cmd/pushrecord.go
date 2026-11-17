@@ -37,12 +37,12 @@ var recordWaits = [recordAttempts - 1]time.Duration{time.Second, 2 * time.Second
 var recordAttemptLimit = 30 * time.Second
 
 // recordPushed reports what the last push of branch moved to Qory Apiary, with at most
-// [runapi.MaxPushedCommits] repositories in a call, one call after the other, in the order the
-// push moved them. A push that moved nothing sends no call. It returns ended true when Qory
-// Apiary returned run_ended: the run's end stands as Qory Apiary has it, and no call follows.
-// Any other 4xx status, retries used up, and a context that ended during the report return
-// the error that ends the run, see [recordFailed]. Qory Apiary takes a repeat of a commit as a no-op, so each call is sent
-// again with the same body.
+// [runapi.MaxPushedCommits] repositories and [runapi.MaxPushedCommitsBytes] bytes in a call, one
+// call after the other, in the order the push moved them. A push that moved nothing sends no
+// call. It returns ended true when Qory Apiary returned run_ended: the run's end stands as Qory
+// Apiary has it, and no call follows. Any other 4xx status, retries used up, and a context
+// that ended during the report return the error that ends the run, see [recordFailed]. Qory
+// Apiary takes a repeat of a commit as a no-op, so each call is sent again with the same body.
 func recordPushed(ctx context.Context, client *runapi.Client, branch *preparation.WorkBranch) (ended bool, err error) {
 	return recordLanded(ctx, client, branch.Ref, branch.Landed())
 }
@@ -62,20 +62,14 @@ func recordLanded(ctx context.Context, client *runapi.Client, ref string, landed
 	return false, nil
 }
 
-// pushedCalls is landed as the bodies of the calls that report it: at most
-// [runapi.MaxPushedCommits] repositories each, in the order they landed.
+// pushedCalls is landed as the bodies of the calls that report it, in the order they landed,
+// split as [runapi.SplitPushedCommits] has it.
 func pushedCalls(landed []preparation.Landed) [][]runapi.PushedCommit {
-	var calls [][]runapi.PushedCommit
-	for len(landed) > 0 {
-		chunk := landed[:min(len(landed), runapi.MaxPushedCommits)]
-		landed = landed[len(chunk):]
-		commits := make([]runapi.PushedCommit, len(chunk))
-		for i, l := range chunk {
-			commits[i] = runapi.PushedCommit{System: l.System, Path: l.Path, Commit: l.Commit}
-		}
-		calls = append(calls, commits)
+	commits := make([]runapi.PushedCommit, len(landed))
+	for i, l := range landed {
+		commits[i] = runapi.PushedCommit{System: l.System, Path: l.Path, Commit: l.Commit}
 	}
-	return calls
+	return runapi.SplitPushedCommits(commits)
 }
 
 // sendPushed sends commits, again after a failure that leaves open whether Qory Apiary has

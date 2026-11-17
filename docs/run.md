@@ -2627,12 +2627,13 @@ After a push that moved a repository, and before it stores the version, the step
 the push to Qory Apiary with `POST /v1/runs/<run id>/pushed-commits`. The gateway signs the
 request. The body is `{"repositories": [{"system", "path", "commit"}]}`: the repositories
 that the push moved, the target first, each with its head commit as 40 or 64 lowercase hex
-characters. A push of more than 64 repositories is reported in calls of at most 64, one
-after the other, in that order. A push that moved no repository, as one after a session
-that committed nothing, sends no call. Qory Apiary lists each reported commit on the run,
-and a repeat of a commit is a no-op, so a call is safe to send again. The report is also
-sent when a later repository's push failed: the repositories that landed are reported, and
-that push's line stays the run's line.
+characters. A push of more than 64 repositories, or a body of more than 65536 bytes (the
+limit of Qory Apiary), is reported in several calls of at most 64 repositories and 65536
+bytes each, one after the other, in that order. A push that moved no repository, as one
+after a session that committed nothing, sends no call. Qory Apiary lists each reported
+commit on the run, and a repeat of a commit is a no-op, so a call is safe to send again.
+The report is also sent when a later repository's push failed: the repositories that
+landed are reported, and that push's line stays the run's line.
 
 A call that got no response within 30 s, a 5xx or a 429 is sent again with the same body, 3
 times, after 1 s, 2 s and 4 s, or after the `Retry-After` of the response when it has one, at most
