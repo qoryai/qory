@@ -44,3 +44,81 @@ func TestLockFileIsHeldOnceAtATime(t *testing.T) {
 		t.Error("a link was taken as the lock file")
 	}
 }
+
+// TestLockFileTextIsReadWhileHeld is a lock file with text: a process that finds the lock
+// held reads the text of the holder, the release empties the file, a later holder writes a
+// new text, and a link or a missing file reads as no text.
+func TestLockFileTextIsReadWhileHeld(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "home.lock")
+	l, err := foragerdir.LockFileText(path, "run one, a long first text\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := foragerdir.LockFileText(path, "run two\n"); !errors.Is(err, foragerdir.ErrLocked) {
+		t.Errorf("a second take: %v, want ErrLocked", err)
+	}
+	if got := foragerdir.LockText(path); got != "run one, a long first text\n" {
+		t.Errorf("the text while held is %q", got)
+	}
+	l.Release()
+	if got := foragerdir.LockText(path); got != "" {
+		t.Errorf("the text after the release is %q, want none", got)
+	}
+	l, err = foragerdir.LockFileText(path, "run two\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Release()
+	if got := foragerdir.LockText(path); got != "run two\n" {
+		t.Errorf("the text of the later holder is %q, want it to replace the first", got)
+	}
+	if err := os.Symlink(path, filepath.Join(dir, "link.lock")); err != nil {
+		t.Fatal(err)
+	}
+	if got := foragerdir.LockText(filepath.Join(dir, "link.lock")); got != "" {
+		t.Errorf("the text through a link is %q, want none", got)
+	}
+	if got := foragerdir.LockText(filepath.Join(dir, "missing.lock")); got != "" {
+		t.Errorf("the text of a missing file is %q, want none", got)
+	}
+}
+
+// TestSetTextReplacesTheHoldersText is a holder that writes its run id once it is known: a
+// reader finds the new text, and a nil lock sets nothing.
+func TestSetTextReplacesTheHoldersText(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "home.lock")
+	l, err := foragerdir.LockFileText(path, "pid 1\nstarted later than the run id\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Release()
+	if err := l.SetText("run r1\npid 1\n"); err != nil {
+		t.Fatal(err)
+	}
+	if got := foragerdir.LockText(path); got != "run r1\npid 1\n" {
+		t.Errorf("the text after SetText is %q", got)
+	}
+	var none *foragerdir.Lock
+	if err := none.SetText("x"); err != nil {
+		t.Errorf("SetText of a nil lock: %v", err)
+	}
+}
+
+// TestSetTextWithAShorterTextLeavesNoTail is a holder that sets a text shorter than the
+// file holds: the file has exactly the new text, with no bytes of the old one after it.
+func TestSetTextWithAShorterTextLeavesNoTail(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "home.lock")
+	l, err := foragerdir.LockFileText(path, "run a-long-run-id\npid 12345\nstarted 2026-11-16T10:00:00Z\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Release()
+	if err := l.SetText("pid 1\n"); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil || string(data) != "pid 1\n" {
+		t.Errorf("the file holds %q (%v), want exactly %q", data, err, "pid 1\n")
+	}
+}

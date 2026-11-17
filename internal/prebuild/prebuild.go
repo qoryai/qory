@@ -18,8 +18,8 @@
 // set, and when the definition is a standard image, <registry>/shared/<name>, with no
 // feature and no Dockerfile. The build keeps the environment image apart, for other
 // targets with the same definition, only when it depends on the definition's bytes
-// alone, as [build.chooseSource] has it. The target step adds the agent image's
-// [AgentPath] on top, copies the target's files to [Workspace], runs onCreateCommand and
+// alone, as [build.chooseSource] has it. The target step makes the wall user the image's
+// user, copies the target's files to [Workspace], runs onCreateCommand and
 // updateContentCommand there in a container of the image as the wall user, moves the
 // tree to [SeedPath] and commits the container as the target image. The programs it
 // runs see only [AllowedEnv] of this process's environment, and the commands only the
@@ -70,8 +70,6 @@ const (
 	Workspace = "/workspace"
 	// SeedPath is where the image keeps the repository's tree, as the commands left it.
 	SeedPath = "/qory/seed"
-	// AgentPath is the agent image's folder the image takes whole.
-	AgentPath = "/qory/agent"
 	// AgentHome is the image's HOME when the image sets none.
 	AgentHome = "/home/agent"
 	// HooksPath is where a run mounts its hook socket's folder; the image has nothing
@@ -114,11 +112,10 @@ const (
 	textInitialize   = prefix + initializeMember + " is not run; the image is built without it"
 	textMerged       = prefix + "read the configuration merged with its features and base image in %s"
 	textBuilt        = prefix + "built the development container image in %s"
-	textAdded        = prefix + "added the agent image's " + AgentPath + " in %s"
+	textAdded        = prefix + "made the wall user the image's user in %s"
 	textCopied       = prefix + "copied the repository to " + Workspace + " in %s"
 	textCommitted    = prefix + "committed the image in %s"
 	textDone         = prefix + "built %s in %s: %s"
-	textNotDigest    = "pin wall.image by its digest, name@sha256: and 64 hexadecimal digits: the build takes the agent image by digest alone"
 	textNotUser      = "set wall.user to uid:gid, two numbers, neither of them 0"
 	textNotTag       = "set pool.registry to an image name with no tag and no digest: the name of the image to make is not one"
 	textNoRepo       = "the repository folder %s is not a folder"
@@ -222,8 +219,6 @@ func (e *ShownError) Error() string { return e.Line }
 type Options struct {
 	// Repository is the folder of the repository, fetched at a commit.
 	Repository string
-	// AgentImage is the agent image, name@sha256:digest.
-	AgentImage string
 	// User is the wall user, uid:gid, neither of them 0.
 	User string
 	// Tag is the name of the image to make.
@@ -492,7 +487,7 @@ func (b *build) run(ctx context.Context) error {
 			return err
 		}
 	}
-	if err := b.addAgent(ctx, from, top); err != nil {
+	if err := b.addUser(ctx, from, top); err != nil {
 		return err
 	}
 	if err := b.runCommands(ctx, top); err != nil {
@@ -508,9 +503,6 @@ func (b *build) line(format string, args ...any) {
 
 // checkOptions refuses options no image is built from.
 func (b *build) checkOptions() error {
-	if !digestRef.MatchString(b.o.AgentImage) {
-		return refused(errors.New(textNotDigest))
-	}
 	u, err := parseUser(b.o.User)
 	if err != nil {
 		return err
@@ -962,23 +954,23 @@ func printables(names []string) string {
 	return list(shown)
 }
 
-// addAgent builds top from base with a Dockerfile written to a temporary folder: it
-// copies the agent image's [AgentPath] whole, and makes the wall user the image's user.
-// When base sets no HOME, it sets HOME to [AgentHome], which the repository's copy
-// makes, the wall user's, with mode 0700, and the final image keeps: a run, which
-// passes no HOME, finds the caches the commands left there. The lifecycle commands run
+// addUser builds top from base with a Dockerfile written to a temporary folder: it makes
+// the wall user the image's user, and copies nothing from the agent image, which has no
+// runtime: Forager mounts the runtime at run time. When base sets no HOME, it sets HOME
+// to [AgentHome], which the repository's copy makes, the wall user's, with mode 0700,
+// and the final image keeps: a run, which passes no HOME, finds the caches the commands
+// left there. The lifecycle commands run
 // with it unless containerEnv or remoteEnv sets HOME; they then run with that one, as
 // [Seed] has it, and the image's environment keeps [AgentHome].
-func (b *build) addAgent(ctx context.Context, base, top string) error {
+func (b *build) addUser(ctx context.Context, base, top string) error {
 	start := time.Now()
 	b.images = append(b.images, top)
 	dockerfile := "FROM " + base + "\n" +
-		"COPY --from=" + b.o.AgentImage + " " + AgentPath + " " + AgentPath + "\n" +
 		"USER " + b.u.String() + "\n"
 	if !b.homeSet {
 		dockerfile += "ENV HOME=" + AgentHome + "\n"
 	}
-	if err := b.dockerBuild(ctx, "agent", top, dockerfile); err != nil {
+	if err := b.dockerBuild(ctx, "user", top, dockerfile); err != nil {
 		return err
 	}
 	c, err := b.inspectConfig(ctx, top)

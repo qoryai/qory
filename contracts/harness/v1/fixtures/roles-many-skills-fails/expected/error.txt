@@ -1,1 +1,2 @@
-module core: Set roles.skills.lint to one in modules/core/qory-module.yaml: only an agents role can be a group.
+Set roles.skills.lint of module core to one.
+  Only an agents role can be a group. The map is in modules/core/qory-module.yaml.

@@ -31,7 +31,8 @@ func declares(access string) func(string) string {
 }
 
 // writesHello is the stack file f with the workflow hello declared write, so a run from
-// a run code with no wall joins; a file that declares workflows stays as it is.
+// a run code behind a wall sees the checkout writable; a file that declares workflows
+// stays as it is.
 func writesHello(f string) string {
 	if strings.Contains(f, "\nworkflows:") {
 		return f
@@ -41,6 +42,9 @@ func writesHello(f string) string {
 
 // lowered sets access in a run's documents to read.
 func lowered(d map[string]any) { d["access"] = "read" }
+
+// noPush sets access in a run's documents to write-no-push.
+func noPush(d map[string]any) { d["access"] = "write-no-push" }
 
 // readRun is a walled run from a run code whose workflow hello the stack file, changed
 // by stackFile, declares, with the fake docker and the wall section of forager.yaml
@@ -85,10 +89,12 @@ func checkoutMounts(spec session.SessionSpec) []wall.Mount {
 // TestAReadRunSeesTheCheckoutReadOnly is a walled run from a run code that only reads:
 // its documents have access write and the stack declares its workflow with access read,
 // with no access, or not at all, or its documents have access read and the stack
-// declares its workflow write. The session binds the workspace read-only, the
-// checkout's mount is read-only, the checkout stays among the places the run may write,
-// and Claude Code's settings deny the edit tools, allow the commands of a work item on
-// /qory/qory in Bash and set defaultMode to dontAsk.
+// declares its workflow write or write-no-push, or its documents have access
+// write-no-push and the stack declares its workflow read or not at all. The session
+// binds the workspace read-only, the checkout's mount is read-only, the checkout stays
+// among the places the run may write, and Claude Code's settings deny the edit tools,
+// allow the commands of a work item on /qory/qory in Bash and set defaultMode to
+// dontAsk.
 func TestAReadRunSeesTheCheckoutReadOnly(t *testing.T) {
 	for _, c := range []struct {
 		name      string
@@ -99,6 +105,9 @@ func TestAReadRunSeesTheCheckoutReadOnly(t *testing.T) {
 		{"no access", declares(""), nil},
 		{"undeclared", nil, nil},
 		{"lowered by the documents", declares("write"), lowered},
+		{"write-no-push lowered by the documents", declares("write-no-push"), lowered},
+		{"read by the stack, write-no-push in the documents", declares("read"), noPush},
+		{"undeclared, write-no-push in the documents", nil, noPush},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			r, _ := readRunDocuments(t, nil, c.stackFile, c.change, readImage, "")
@@ -163,6 +172,96 @@ func TestAWriteWorkflowSeesTheCheckoutWritable(t *testing.T) {
 		t.Errorf("the mounts of the checkout are %+v, want %s writable alone", got, r.spec.Dir)
 	}
 	lacks(t, settingsOf(t, r.spec.Args), "/qory/qory", "dontAsk", "NotebookEdit", "additionalDirectories")
+}
+
+// noTarget leaves out the target of a run's documents, and with it access and
+// target_version, so the workflow's access in the stack applies alone.
+func noTarget(d map[string]any) {
+	delete(d, "target")
+	delete(d, "access")
+	delete(d, "target_version")
+}
+
+// writeRuns are the runs from a run code of the workflow hello that do not only read
+// the checkout, each with the access its stack file declares: one whose documents have
+// access write, one whose documents have no target, so no access, one whose documents
+// have access write-no-push, and the same with a workflow declared write-no-push.
+var writeRuns = []struct {
+	name, declared string
+	change         func(map[string]any)
+}{
+	{"access write", "write", nil},
+	{"no target", "write", noTarget},
+	{"documents write-no-push", "write", noPush},
+	{"workflow write-no-push, documents write", "write-no-push", nil},
+	{"workflow and documents write-no-push", "write-no-push", noPush},
+	{"workflow write-no-push, no target", "write-no-push", noTarget},
+}
+
+// writeNeedsWallLine is the line of a run of [writeRuns] with no wall.
+const writeNeedsWallLine = "run this workflow with a wall: this run of workflow hello writes to the checkout, and a run with no wall runs the agent as this machine's user (write_needs_wall); the code is used"
+
+// TestAWriteRunWithNoWallStops is each run of [writeRuns] with no wall: it stops after
+// the compose, before the image's fetch, the setup and the join, exit 1, with its line,
+// and closes failed with write_needs_wall and -1.
+func TestAWriteRunWithNoWallStops(t *testing.T) {
+	for _, c := range writeRuns {
+		t.Run(c.name, func(t *testing.T) {
+			r := runFromCode(t, declares(c.declared), c.change)
+			checkStopped(t, r, "", "write_needs_wall")
+			wants(t, r.out+r.err.Error(), writeNeedsWallLine)
+		})
+	}
+}
+
+// TestAGatewayTakesTheCloseOfAWriteRunWithNoWall is each run of
+// [TestAWriteRunWithNoWallStops] opened and closed at a gateway of Forager's in this
+// process: the gateway accepts the close, so the last run.exited of the gateway's record
+// and of the session's is failed with write_needs_wall and -1, and neither record
+// contains batch_refused.
+func TestAGatewayTakesTheCloseOfAWriteRunWithNoWall(t *testing.T) {
+	atGateway(t)
+	for _, c := range writeRuns {
+		t.Run(c.name, func(t *testing.T) {
+			r := runFromCode(t, declares(c.declared), c.change)
+			checkStopped(t, r, "", "write_needs_wall")
+			wants(t, r.out+r.err.Error(), "(write_needs_wall); the code is used")
+			checkGatewayRecord(t, r, "write_needs_wall")
+		})
+	}
+}
+
+// TestAWriteRunBehindAWallStarts is each run of [writeRuns] behind a wall: it joins, with
+// the workspace and the checkout's mount writable.
+func TestAWriteRunBehindAWallStarts(t *testing.T) {
+	for _, c := range writeRuns {
+		t.Run(c.name, func(t *testing.T) {
+			r, _ := readRunDocuments(t, nil, declares(c.declared), c.change, readImage, "")
+			if !r.joined {
+				t.Fatalf("%v (exit %d), want the join\n%s", r.err, cmd.ExitCode(r.err), r.out)
+			}
+			if r.spec.WorkspaceReadOnly {
+				t.Error("the session binds the workspace read-only")
+			}
+			if got := checkoutMounts(r.spec); len(got) != 1 || got[0] != (wall.Mount{Path: r.spec.Dir}) {
+				t.Errorf("the mounts of the checkout are %+v, want %s writable alone", got, r.spec.Dir)
+			}
+		})
+	}
+}
+
+// TestAPersonsRunWithNoWallStarts is a run you start yourself, with no run code and no
+// wall: it has no access, so the runtime starts and its exit status, 3, is the run's.
+func TestAPersonsRunWithNoWallStarts(t *testing.T) {
+	root := newCheckout(t)
+	copyFixture(t, "two-modules", root)
+	composedForFake(t, root, fakeRuntime(t))
+	out, err := run(t, "run", "claude")
+	if cmd.ExitCode(err) != 3 {
+		t.Fatalf("run returned %v (exit %d), want the runtime's exit 3\n%s", err, cmd.ExitCode(err), out)
+	}
+	wants(t, out, "hello from ")
+	lacks(t, out, "write_needs_wall")
 }
 
 // settingsOf is the value of --settings in args, Claude Code's settings as JSON.

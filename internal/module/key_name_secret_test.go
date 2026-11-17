@@ -120,7 +120,7 @@ func TestAVariantNameWithASecretIsLeftOutOfItsRefusal(t *testing.T) {
 		t.Errorf("kind: %v", err)
 	}
 	m = &Manifest{Requires: map[string][]string{"skills/qak_x": {"agents/a"}}}
-	if _, err := Read("core", dir, m, ""); err == nil || err.Error() != "module core: requires lists skill "+accessKeyPhrase+", which the module does not ship" {
+	if _, err := Read("core", dir, m, ""); err == nil || err.Error() != "Ship skill "+accessKeyPhrase+" in module core, or remove it from the requires of the module.\n  The requires of module core lists skill "+accessKeyPhrase+", and the module does not ship it." {
 		t.Errorf("requires: %v", err)
 	}
 }
@@ -131,8 +131,8 @@ func TestAVariantNameWithASecretIsLeftOutOfItsRefusal(t *testing.T) {
 func TestAnMCPServerKeyWithASecretIsLeftOutOfItsRefusal(t *testing.T) {
 	isolate(t)
 	for _, c := range []struct{ server, want string }{
-		{`{"command": "x", "qak_x": 1}`, "mcp/s.json: key " + accessKeyPhrase + " is not one of an MCP server's; keys: type, command, args, env, url, headers, description"},
-		{`{"command": "x", "env": {"QRK_X": 1}}`, "mcp/s.json: env." + runKeyPhrase + " is 1, which is not a string"},
+		{`{"command": "x", "qak_x": 1}`, "Remove the key " + accessKeyPhrase + " from the MCP server file.\n  An MCP server has only type, command, args, env, url, headers, and description.\n  The file is mcp/s.json in module core."},
+		{`{"command": "x", "env": {"QRK_X": 1}}`, "Set each value of env of the MCP server to a string.\n  env." + runKeyPhrase + " is 1, which is not a string.\n  The file is mcp/s.json in module core."},
 	} {
 		dir := tree(t, map[string]string{"mcp/s.json": c.server})
 		_, err := Read("core", dir, nil, "")
@@ -159,7 +159,7 @@ func TestAModuleNameWithASecretIsLeftOutOfItsRefusals(t *testing.T) {
 	}{
 		{"qak_m", "v", &Manifest{Variants: map[string]Variant{"v": {"prompts": "x"}}}, "module " + accessKeyPhrase + `: variant v sets kind "prompts"`},
 		{"QRK_m", "v", &Manifest{Variants: map[string]Variant{"v": {"skills": "../x"}}}, "module " + runKeyPhrase + `: variant v reads skills from "../x", which is not a directory inside the module`},
-		{"qak_m", "", &Manifest{Requires: map[string][]string{"skills/absent": {"agents/a"}}}, "module " + accessKeyPhrase + ": requires lists skill absent, which the module does not ship"},
+		{"qak_m", "", &Manifest{Requires: map[string][]string{"skills/absent": {"agents/a"}}}, "Ship skill absent in module " + accessKeyPhrase + ", or remove it from the requires of the module.\n  The requires of module " + accessKeyPhrase + " lists skill absent, and the module does not ship it."},
 	} {
 		if _, err := Read(c.name, dir, c.m, c.variant); err == nil || err.Error() != c.want {
 			t.Errorf("%s: %v, want %q", c.name, err, c.want)
@@ -170,9 +170,9 @@ func TestAModuleNameWithASecretIsLeftOutOfItsRefusals(t *testing.T) {
 		t.Errorf("a skill without SKILL.md: %v", err)
 	}
 	for _, c := range []struct{ body, want string }{
-		{"[1]", "module core: mcp/" + accessKeyPhrase + ".json does not contain a JSON object: "},
-		{"null", "module core: mcp/" + accessKeyPhrase + ".json does not contain a JSON object"},
-		{`{"command": "x", "bad": 1}`, "module core: mcp/" + accessKeyPhrase + `.json: key "bad" is not one of an MCP server's`},
+		{"[1]", "Write the MCP server file in module core as one JSON object.\n  The file is mcp/" + accessKeyPhrase + ".json.\n  The file does not contain a JSON object: "},
+		{"null", "Write the MCP server file in module core as one JSON object.\n  The file is mcp/" + accessKeyPhrase + ".json.\n  The file contains null, which is no JSON object."},
+		{`{"command": "x", "bad": 1}`, "Remove the key \"bad\" from the MCP server file.\n  An MCP server has only type, command, args, env, url, headers, and description.\n  The file is mcp/" + accessKeyPhrase + ".json in module core."},
 	} {
 		d := tree(t, map[string]string{"mcp/qak_srv.json": c.body})
 		if _, err := Read("core", d, nil, ""); err == nil || !strings.HasPrefix(err.Error(), c.want) {
@@ -191,7 +191,9 @@ func TestAHookDirectoryRefusalLeavesOutAModuleNameWithASecret(t *testing.T) {
 	dir := tree(t, map[string]string{"hooks/sub/x.sh": "#!/bin/sh\n"})
 	t.Setenv("GIT_CEILING_DIRECTORIES", filepath.Dir(dir))
 	_, err := Read("qak_mod", dir, nil, "")
-	want := "module " + accessKeyPhrase + ": hooks/sub is a directory; a hook is one file. Keep its helpers elsewhere in the module, reached as $QORY_HARNESS_HOME/modules/" + accessKeyPhrase + "/<path>"
+	want := "Move hooks/sub out of the hooks directory of module " + accessKeyPhrase + ".\n" +
+		"  hooks/sub is a directory, and a hook is one file.\n" +
+		"  A hook reads its helpers at $QORY_HARNESS_HOME/modules/" + accessKeyPhrase + "/<path>."
 	if err == nil || err.Error() != want {
 		t.Errorf("%v, want %q", err, want)
 	}

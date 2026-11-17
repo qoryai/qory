@@ -34,13 +34,13 @@ func TestAPersonsRunLoadsAsBefore(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wants(t, string(data), "/fake-runtime --settings ", " -p hi")
+	wants(t, string(data), "/qory/runtime/claude/bin/claude --settings ", " -p hi")
 	lacks(t, string(data), "--strict-mcp-config", "--mcp-config", "mcpServers", "--setting-sources", "CLAUDE_CONFIG_DIR=", "qory-agent-home", "agent-env")
 }
 
 // TestAWalledRunTakesAHomeWhereARunWithARunKeyComposes is a person's walled run on a
-// home under qory/homes in the cache directory, where a run with a run key composes when
-// no --home or harness.home sets its home: Forager mounts it read-only, and the agent
+// home under qory/homes in the cache directory, under which a run with a run key composes
+// when no --home or harness.home sets its home: Forager mounts it read-only, and the agent
 // starts in the container. A home under qory's state directory would stop the run, since that
 // directory contains the run records. That a run given a run key composes there is
 // [TestARunKeyComposesOutsideTheFolder]; that a home inside the checkout stops it is

@@ -64,6 +64,8 @@ type codeRelay struct {
 	requests  []accesskey.EnrolmentRequest
 	// redeeming, when a test sets it, runs as each request arrives, before the answer.
 	redeeming func()
+	// runID is the run's id in the answer and its run key, [keyRunID] when it is "".
+	runID string
 }
 
 // newCodeRelay serves until the test ends. Its CA file is in a directory that no other
@@ -115,8 +117,12 @@ func newCodeRelay(t *testing.T) *codeRelay {
 					keySigner = newKey(t)
 				}
 				issued := time.Now().UTC().Truncate(time.Second)
+				runID := keyRunID
+				if g.runID != "" {
+					runID = g.runID
+				}
 				key, err := runkey.Key{
-					RunID: keyRunID, Workspace: "ws_0123456789abcdef", NodeID: "np_0123456789abcdef",
+					RunID: runID, Workspace: "ws_0123456789abcdef", NodeID: "np_0123456789abcdef",
 					Gateway: testGatewayNode, InstanceID: "i_gYKDhIWGh4iJiouMjY6PkA", GatewayURL: gatewayURL,
 					GatewayKeys: []accesskey.PublicKey{newKey(t).PublicKey()},
 					Issued:      issued, AttachBy: issued.Add(600 * time.Second),
@@ -130,7 +136,7 @@ func newCodeRelay(t *testing.T) *codeRelay {
 				if g.documents != nil {
 					documents = `,"documents":` + string(g.documents)
 				}
-				g.body = []byte(`{"version":1,"run_id":"` + keyRunID + `","run_key":"` + key + `","apiary_public_key":` + keys() + documents + `}`)
+				g.body = []byte(`{"version":1,"run_id":"` + runID + `","run_key":"` + key + `","apiary_public_key":` + keys() + documents + `}`)
 			}
 			body = g.body
 		}
@@ -307,16 +313,16 @@ func TestARunCodeFileThatHoldsNoCodeIsRefused(t *testing.T) {
 		file, want string
 	}{
 		{missing, "give --run-code-file a file that qory can read: %s: no such file or directory"},
-		{fifo, "give --run-code-file a regular file: %s is not one"},
-		{dir, "give --run-code-file a regular file: %s is not one"},
-		{codeFile(t, ""), "write the run code into %s: the file is empty"},
-		{codeFile(t, "\n"), "write the run code into %s: the file is empty"},
-		{codeFile(t, g.code()+"\n\n"), "write only the run code into %s, with at most one newline after it: the file contains more"},
-		{codeFile(t, g.code()+"\r\n"), "write only the run code into %s, with at most one newline after it: the file contains more"},
-		{codeFile(t, " "+g.code()), "write only the run code into %s, with at most one newline after it: the file contains more"},
-		{codeFile(t, strings.Repeat("A", 1025)), "write only the run code into %s, with at most one newline after it: the file contains more"},
-		{codeFile(t, "qecr_F1XT-0RE0-0000.x"), "write a run code (qecr_…) into %s: the file does not contain an enrolment code of Qory Apiary"},
-		{codeFile(t, "qecn_F1XT-0RE0-0000-0000-0000-0000-00."+g.signer.Fingerprint()), "write a run code (qecr_…) into %s: the file contains the enrolment code of an access key of kind node"},
+		{fifo, "Give --run-code-file a regular file: %s is not one"},
+		{dir, "Give --run-code-file a regular file: %s is not one"},
+		{codeFile(t, ""), "Write the run code into %s: the file is empty"},
+		{codeFile(t, "\n"), "Write the run code into %s: the file is empty"},
+		{codeFile(t, g.code()+"\n\n"), "Write the run code, then at most the lines `registry <host>`, `apiary <url>` and `runtimes <folder>`\nThe file %s contains more than that."},
+		{codeFile(t, g.code()+"\r\n"), "Write the run code, then at most the lines `registry <host>`, `apiary <url>` and `runtimes <folder>`\nThe file %s contains more than that."},
+		{codeFile(t, " "+g.code()), "Write the run code, then at most the lines `registry <host>`, `apiary <url>` and `runtimes <folder>`\nThe file %s contains more than that."},
+		{codeFile(t, strings.Repeat("A", 1025)), "Write the run code, then at most the lines `registry <host>`, `apiary <url>` and `runtimes <folder>`\nThe file %s contains more than that."},
+		{codeFile(t, "qecr_F1XT-0RE0-0000.x"), "Write a run code (qecr_…) into the file\n%s does not contain an enrolment code of Qory Apiary"},
+		{codeFile(t, "qecn_F1XT-0RE0-0000-0000-0000-0000-00."+g.signer.Fingerprint()), "Write a run code (qecr_…) into the file\n%s contains the enrolment code of an access key of kind node"},
 	} {
 		want := strings.Replace(c.want, "%s", c.file, 1)
 		done := make(chan struct{})
@@ -622,7 +628,7 @@ func TestARunCodeOnStdinLeavesTheAgentNone(t *testing.T) {
 		}{{"pipe", stdinPipe}, {"regular file", stdinFile}} {
 			t.Run(form+" "+kind.name, func(t *testing.T) {
 				var in *os.File
-				r := runFromCodeGiven(t, nil, nil, writesHello, nil, nil, nil, func(code string) (string, io.Reader) {
+				r := runFromCodeGiven(t, behindAWall(t), nil, writesHello, nil, nil, nil, func(code string) (string, io.Reader) {
 					in = kind.open(t, code+"\n")
 					return form, in
 				})
@@ -651,8 +657,8 @@ func TestARunCodeOnStdinThatContainsNoCodeIsRefused(t *testing.T) {
 	for _, c := range []struct {
 		content, want string
 	}{
-		{"", "write the run code into /dev/stdin: the file is empty"},
-		{g.code() + "\n" + g.code() + "\n", "write only the run code into /dev/stdin, with at most one newline after it: the file contains more"},
+		{"", "Write the run code into /dev/stdin: the file is empty"},
+		{g.code() + "\n" + g.code() + "\n", "Write the run code, then at most the lines `registry <host>`, `apiary <url>` and `runtimes <folder>`\nThe file /dev/stdin contains more than that."},
 	} {
 		in := stdinPipe(t, c.content)
 		out, err := runReading(t, in, "run", "--run-code-file", "/dev/stdin", "--gateway", g.URL)
@@ -706,7 +712,7 @@ func TestARunCodeDescriptorIsClosedBeforeTheJoin(t *testing.T) {
 				flags, err := unix.FcntlInt(uintptr(n), unix.F_GETFD, 0)
 				open = err == nil && flags&unix.FD_CLOEXEC == 0
 			}))
-			r := runFromCodeGiven(t, nil, nil, writesHello, nil, nil, nil, func(code string) (string, io.Reader) {
+			r := runFromCodeGiven(t, behindAWall(t), nil, writesHello, nil, nil, nil, func(code string) (string, io.Reader) {
 				file := codeFile(t, code)
 				var err error
 				if n, err = syscall.Open(file, syscall.O_RDONLY, 0); err != nil {
@@ -757,7 +763,7 @@ func TestARunCodeInTheFileThatIsStdinLeavesTheAgentNone(t *testing.T) {
 			n := -1
 			open := true
 			t.Cleanup(cmd.SetJoinSession(func(session.SessionSpec) { open = openWithoutCloseOnExec(n) }))
-			r := runFromCodeGiven(t, nil, nil, writesHello, nil, nil, nil, func(code string) (string, io.Reader) {
+			r := runFromCodeGiven(t, behindAWall(t), nil, writesHello, nil, nil, nil, func(code string) (string, io.Reader) {
 				in = c.open(t, code+"\n")
 				n = inheritedCopy(t, in)
 				return c.path(t, in, n), in
@@ -833,7 +839,7 @@ func TestARunCodeOnTheRealStdinClosesItsCopy(t *testing.T) {
 // file too, stays open and is the session's stdin.
 func TestARunCodeFileThatIsNotStdinLeavesStdin(t *testing.T) {
 	var in *os.File
-	r := runFromCodeGiven(t, nil, nil, writesHello, nil, nil, nil, func(code string) (string, io.Reader) {
+	r := runFromCodeGiven(t, behindAWall(t), nil, writesHello, nil, nil, nil, func(code string) (string, io.Reader) {
 		in = stdinFile(t, "the agent's input\n")
 		return codeFile(t, code), in
 	})

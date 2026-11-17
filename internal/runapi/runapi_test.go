@@ -76,6 +76,7 @@ const (
           "id": "av_2",
           "number": 2,
           "writer": {"kind": "run", "run_id": "run-1"},
+          "cancelled": true,
           "stage_id": "st_1",
           "note": null,
           "at": "2026-10-31T09:00:00Z",
@@ -280,7 +281,7 @@ func TestArtifactsReadsTheIndex(t *testing.T) {
 	}
 
 	version := artifact.Versions[0]
-	if version.Writer.Kind != "run" || version.Writer.RunID != "run-1" || version.Note != nil ||
+	if version.Writer.Kind != "run" || version.Writer.RunID != "run-1" || !version.Cancelled || version.Note != nil ||
 		version.Files[0].Size != 1048576 || version.Approvals[0].By.Name != "dana" {
 		t.Errorf("version = %+v", version)
 	}
@@ -476,6 +477,52 @@ func TestPushArtifactLeavesOutAnEmptyNameAndNote(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+// TestProcessTypesAreTheFourThatApiaryReads pins the list: Qory Apiary's run API refuses a
+// withdrawal of these types with 422 type_not_withdrawable.
+func TestProcessTypesAreTheFourThatApiaryReads(t *testing.T) {
+	want := []string{"questions", "review-comments", "verdict", "proposal"}
+	if fmt.Sprint(runapi.ProcessTypes) != fmt.Sprint(want) {
+		t.Errorf("ProcessTypes = %v, want %v", runapi.ProcessTypes, want)
+	}
+}
+
+func TestPushArtifactSendsAWithdrawalWithNoFiles(t *testing.T) {
+	client := serve(t, func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+
+		want := `{"type":"demo-script","name":"scenario-2","withdraw":true,"files":[]}`
+		if string(raw) != want {
+			t.Errorf("body = %s", raw)
+		}
+
+		respond(http.StatusCreated, pushedExample)(w, r)
+	})
+
+	_, err := client.PushArtifact(context.Background(), runapi.Push{Type: "demo-script", Name: "scenario-2", Withdraw: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestArtifactsReadsAWithdrawnVersion(t *testing.T) {
+	index := `{"version":1,"artifacts":[{"type":"demo-script","name":"scenario-2","stage_id":null,"approved_version":null,` +
+		`"newest_version":2,"changed_after_approval":false,"versions":[` +
+		`{"id":"av_1","number":1,"writer":{"kind":"run","run_id":"r"},"cancelled":false,"withdrawn":false,"files":[],"approvals":[]},` +
+		`{"id":"av_2","number":2,"writer":{"kind":"run","run_id":"r"},"cancelled":false,"withdrawn":true,"files":[],"approvals":[]}]}]}`
+
+	client := serve(t, respond(http.StatusOK, index))
+
+	got, err := client.Artifacts(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	versions := got.Artifacts[0].Versions
+	if versions[0].Withdrawn || !versions[1].Withdrawn || len(versions[1].Files) != 0 {
+		t.Errorf("versions = %+v", versions)
 	}
 }
 

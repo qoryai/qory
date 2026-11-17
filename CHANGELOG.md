@@ -18,9 +18,64 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Added
 
+- The `agent` image has the Node packages `typescript` 5.9.3, `libpg-query` 18.2.4,
+  `parse5` 8.1.1, `postcss` 8.5.33 and `postcss-scss` 4.0.9 in `/opt/qory/parsers`. The
+  folder belongs to root and no other user can write to it. A script loads a package with
+  `require('/opt/qory/parsers/node_modules/<package>')`. See
+  Qory's images in `docs/run.md`.
+- A run takes the lower of its workflow's `access` and `access` in its documents, in
+  the order `read`, `write-no-push`, `write`. A workflow's `access` in a stack takes
+  `write-no-push` in both schemas and in the stack check, and documents may have it. A
+  `write-no-push` run has a writable checkout, no push step, no submit, and no version
+  of the artifact `branch`. With no wall, it stops with `write_needs_wall`. The error
+  for another workflow value now starts
+  `Set workflows.<name>.access to a valid level.`
+- Every run of Claude Code installs the runtime's program before its session: from the
+  runtime cache of the pool's registry, or of `pool.registry`, or else from npm, through
+  the run's host proxy when the run has one. qory reads the registry's `newest`, or npm's
+  `latest`, on every run, checks npm's sha512 checksum before it extracts only
+  `package/claude` into `<runtimes>/claude/<version>/bin/claude`, reuses a version's
+  folder, and prints `qory run: installed claude <version>`. The runs of a pool share one
+  runtimes folder in the pool's folder. Each run holds its version until it ends, and
+  each install removes older versions that an install made, and temporary entries, that
+  no run holds. It also keeps a version's folder that a running container mounts, listed
+  by the wall's engine program or else `docker`, and removes no version's folder when that
+  program fails; a machine with no `docker` has no running container. Two runs that need
+  one version read its tarball once. A 503 or 429 from the registry is retried until the
+  registry returns the file or the run ends, with its time limit, a cancel or SIGTERM. At
+  the first retry, and every 5 minutes after, `qory run` prints `<host> has not returned
+  Claude Code <version> (503); check pool.registry`, with `no response` in place of
+  the status when the request got none, and without the version while the run does not
+  know it yet. A request waits at most 30 seconds to
+  connect, 30 seconds for the TLS handshake, 60 seconds for the response's headers and
+  60 seconds for the next byte of a body. A run with no registry whose policy does not
+  allow `registry.npmjs.org` stops with the fix first. The run-code file of a pool has
+  the lines `registry <host>`, `apiary <url>` and `runtimes <folder>`, and `qory run`
+  stops for a host that is not letters, digits, `.` and `-` with an optional port. The
+  registry's token realm must be `/registry/token` on the scheme, host and port of the
+  instance, which a run from a run code reads from the line `apiary <url>` that `qory run
+  pool` writes from its `gateway.server.url`, and any other run from its
+  `gateway.server.url`. See The runtime's program in `docs/run.md`.
+  With a registry, `qory run pool` stops at start, before it claims a run, when
+  `gateway.server.url` is not an address a run takes: `https`, or `http` on loopback,
+  with a host and an optional port alone. The first line contains `gateway.server.url`.
+  Before an install, `qory run` stops with `Run chmod go-w <path>, then run again` for a
+  runtimes folder, or a `<runtimes>/claude` that existed, that its group or others can
+  write, with `Replace <path> with a folder` for a link at either, and with `Give <path>
+  to root or to the user that runs qory` for a folder that neither owns. It checks no
+  folder above the runtimes folder. An instance address with a path, such as
+  `https://apiary.example/base`, stops the run, and `qory run pool` at its start: the
+  token route is on the instance's host alone.
+- On Codex, an agent whose `tools` key lists no shell tool (`Bash` or `PowerShell`) gets
+  `[features]` `shell_tool = false` in its agent file, so it has no shell. An agent with no
+  `tools` key keeps the shell. An agent without write tools can still write files through Codex's
+  `apply_patch` tool.
 - A run of a work item works on the branch `qory/<work item id>`, at the commit of the
   artifact `branch` that its stage starts from. The harness still comes from
-  `target_version`.
+  `target_version`. A commit on the branch reaches a run's harness after you merge the
+  branch into the target's default branch, the branch that its `HEAD` points to. Qory
+  Apiary reads `target_version` there, so the next run's `target_version` contains the
+  commit.
 - A write run of a work item ends with a push step: qory commits what the agent left,
   pushes each repository with new commits to `qory/<work item id>`, and stores a new
   version of the artifact `branch`. The next run in the same stage starts at that commit. A
@@ -48,6 +103,18 @@ release may change what an existing document does, and states it under Upgrading
   `size_limit`, `max_files` and, for `base_view: structured`, `json_schema`. Every command
   that reads the configuration checks each entry and compiles each `json_schema`. See
   Artifact types in `contracts/harness/v1/README.md`.
+- Declare a factory's submit step with `submit` in its `process.yaml`: `type`, the name
+  of a structured entry of `artifact_types`, and `send`, `end_of_run` or `after_gate`.
+  `process.schema.json` has `submit`. Every command that reads the configuration checks
+  its form, and that `artifact_types` has a custom structured entry named `type`. See The
+  submit step in `contracts/harness/v1/README.md`.
+- A run from a run code whose level is `write` keeps its submit settings, `type` and
+  `send`, from `submit` of the run documents, and reads none from the composed harness's
+  `process.yaml`. When the composed harness has a different `submit`, `qory run` prints
+  one line after the compose: the documents' value and the harness's value, or only the
+  harness's value when the documents have no `submit`. A run at a lower level keeps no
+  submit settings and prints no line. See What the run takes from the response in
+  `docs/run.md`.
 - A module can declare checks for the files of an artifact type with `push_checks` in
   `qory-module.yaml`: each item has `type`, `command`, a program in the module and its
   arguments, and optional `reads`, the other artifact types the check reads. The checks
@@ -60,9 +127,19 @@ release may change what an existing document does, and states it under Upgrading
   `qory` in your cache directory, stops at the compose with exit 2 when a read-write
   mount is at or inside the home. In a walled run, the
   check of a type runs before each push of that type reaches Qory Apiary, from inside the
-  wall or from the push step: in a new container from the run's image, with no network,
-  the wall's limits and the run's label, the home and the newest versions of the type and
-  its `reads` read-only. A check that does not pass stops the push with 422
+  wall or from the push step: in a new container from the wall's default image,
+  `--image` or `wall.image`, with no network, the wall's limits and the run's label, the
+  home and the newest versions of the type and its `reads` read-only, beside the work
+  item's notes in `notes.json`, `[]` for none. The image that the
+  run's policy selects, such as one built from the repository's `.devcontainer/`, does not
+  run the checks, so a change to the repository cannot turn them off. A run on a person's
+  machine, with no run code, and with neither `--image` nor `wall.image` runs them in the
+  run's image. A run from a run code with neither stops before the agent starts with
+  exit 2: `Set wall.image in forager.yaml, then take the work item in again in Qory
+  Apiary`. A walled
+  run with push checks stops before the agent starts with exit 2 when the engine does not
+  have the wall's default image: `Pull the wall's default image onto this machine, and
+  run again: push checks run in it.` A check that does not pass stops the push with 422
   `push_check_failed`, its fix line and its findings, and `qory artifact push` exits 4;
   so does a push that the check cannot read, such as a body that is not a push or two
   files that are one file on the machine. A check that did not finish stops the push with
@@ -311,6 +388,9 @@ release may change what an existing document does, and states it under Upgrading
   globs stops the compose with exit 2.
 - A list in `bind` for a role that is not a group stops the compose with exit 2, where
   before qory refused it when it read `qory.yaml`.
+- The harness in a workspace's settings in Qory Apiary can bind a group role to a list,
+  as a checkout's `bind` can: a run from a run code composes the list as the group's
+  members.
 - A walled run whose read-write `--mount` or `wall.mounts` entry is your home folder or
   qory's state directory, or a folder that contains either, stops with exit 2 before
   anything starts, as `mount a narrower folder: the mount <path> is your home folder, and
@@ -347,12 +427,118 @@ release may change what an existing document does, and states it under Upgrading
   lists each missing part. A group role takes a contract with `fill: many`, and the
   compose checks each member. A contract file that is missing or malformed fails the
   same way. See The role contract in `contracts/harness/v1/README.md`.
+- `qory artifact push <type> --name <name> --withdraw` stores a version of `<type>/<name>`
+  with no files and the mark withdrawn, in place of uploading files. A gate, a stage input
+  and the work item's pages leave out a name whose newest version is withdrawn, and a later
+  push of files lists it again. qory exits 4 with a fix line, before it sends the push, for
+  a name with no version, for files given with `--withdraw`, for a name whose newest version
+  is already a withdrawal, for a name whose newest version a person uploaded, and for a name
+  whose newest version a member approved at a gate. A run cannot withdraw `questions`,
+  `review-comments`, `verdict` or `proposal`, which Qory Apiary reads itself, or a type whose
+  `artifact_types` entry in the process template has `withdrawable: false`. In a run, qory
+  sends the push, Qory Apiary refuses it with 422, and qory exits 4 with that refusal.
+  Outside a run, qory refuses those types itself and reads the template from the factory
+  modules that the checkout exports. Outside a run, qory also records a withdrawal as a
+  version folder with no files in `.qory/artifacts` and sends nothing; a refusal creates no
+  folder, and the store has no approvals to check.
+- An entry of `artifact_types` in a `process.yaml` may set `withdrawable` to `true` or
+  `false`, for a standard type and a custom type. Without it, a run may withdraw a name of
+  the type. Any other value fails with the file and the fix. `contracts/harness/v1/process.schema.json`
+  has the key.
+- A push check does not run for a withdrawal in a walled run: a push with `withdraw` true
+  and no files passes the check, because it has no file to check. A push with `withdraw`
+  true and files takes the same path as any push.
+- A run from Qory Apiary, with a run code or a run key, adds the member `qory` to
+  `inputs.json`: `{"harness_extensions": {…}}`, the harness report's `extensions`, `{}`
+  for none. A run with a run key and no run code has no inputs, so its file has the member
+  `qory` alone. A push check of such a run gets `--inputs <path>`, with a copy of the file
+  that the run's user can read mounted read-only at that path. Inputs of a run code that
+  already have a member `qory` stop the run before it opens, with exit 1: `remove the
+  input qory: qory adds that member to inputs.json; the code is used`. Inputs that are not
+  a JSON object stop it the same way: `ask Qory Apiary's instance admin: the run code's
+  inputs are not a JSON object; the code is used`. See The run key from a run code in
+  `docs/run.md`.
+- A run from Qory Apiary also writes `inputs.json` into the composed home, so a hook of
+  the harness reads the inputs at `$QORY_HARNESS_HOME/inputs.json`, with a run key as well
+  as with a run code.
+- Each run has a route from its session to `qory run`: a program in the session sends a
+  plain HTTP request to `QORY_HOST_URL`, `http://host.qory.invalid`, through `HTTP_PROXY`.
+  qory serves no path on it, and answers `404` to a request of the session that runs. The
+  setup container of `wall.setup: outside` gets neither the variable nor the route. See The
+  route to qory in `docs/run.md`.
 
 ### Changed
 
-- qory builds with Forager main 37dc0148. A run keeps its wall only when a container of
-  the run may still run; a network or folder of the wall that could not be removed no longer
-  keeps it.
+- The `agent`, `agent-docker` and `prebuild` images contain no agent runtime. The machine
+  installs the runtime at run time, and Forager mounts it read-only at
+  `/qory/runtime/<runtime>`. `qory image check` checks no runtime and prints no runtime
+  line; Forager checks the runtime when a run starts. A prebuild copies nothing from the
+  agent image, and no image has `/qory/agent`.
+- `qory artifact pull` and the commit that a run starts at take nothing of a name whose
+  newest version, not counting cancelled ones, is a withdrawal. The working folder of a
+  push check has, for such a name, the newest version that is neither cancelled nor a
+  withdrawal, so a later push of the name is checked against what it had before.
+- The first line of each compose error shows the fix, in at most 100 characters, and the
+  indented lines after it show the cause and the values, as the errors of workflow hooks
+  do. Which input fails, and the exit status, stay the same.
+- A run with a run key or a run code, with no `--home` or `harness.home`, composes into
+  `runs/<name>-<hash>/<run id>` under `qory/homes` in the cache directory, a home for that
+  run alone, which qory removes when the run ends. Two runs of one checkout no longer
+  compose into one home. The harness report moves to `runs/<name>-<hash>-report.json`
+  there, so the first such run takes each module's commit again. A relative `HOME` counts
+  from the folder qory runs in, so the home is an absolute path.
+- `qory run` holds a lock on a home that is not for that run alone: your unwalled run's
+  `.qory/harness`, and the home of a walled run with `--home` or `harness.home`. The lock is
+  on the file `<home>.lock` beside the home, which records the run's id, qory's process id and
+  the start time. The file stays after the run, empty: the run removes
+  its text when it lets go. A second run of that home stops before
+  it redeems its run code and before its compose, with exit 1 and `Wait for the run that
+  uses this home to end, or set another --home or harness.home.`, then the holder and the
+  home on the second line. `qory harness compose` and `qory harness remove` take the same
+  lock and stop the same way. `qory harness remove` keeps the lock file and, for a home in
+  the checkout, its line in `.git/info/exclude`, so `.qory/harness.lock` is all that stays
+  of `.qory`. A home in the checkout is kept out of git before the lock
+  file is made. Before, a second run's compose replaced the first run's home, its end
+  removed the first run's copy of `inputs.json`, and a run code was spent before the stop. A
+  run with a home for that run alone takes no lock. See `docs/run.md`.
+- A run from a run code that may write the checkout needs a wall: with no wall, it stops
+  after the compose, exit 1, and closes `failed` with `write_needs_wall`, since its agent
+  would run as this machine's user. A run is such a run when neither `access` in its
+  documents nor its workflow's access in the stack is `read`. A run you start yourself has
+  no run code and still runs without a wall. See §Read workflows in `docs/run.md`.
+- `qory artifact pull` and the working folder of a push check take, of each artifact, the
+  newest version that the run API's artifact index does not mark `cancelled`. A version
+  that a cancelled run made counts for no stage, and an artifact whose versions are all
+  cancelled gets no folder. The start commit of a run skips a cancelled version of the
+  artifact `branch` too. Before, all three took the newest version, cancelled or not. An
+  index without the field `cancelled` reads as no version cancelled.
+- qory builds with Forager f344b7a7.
+  - A run keeps its wall only when a container of the run may still run; a network or
+    folder of the wall that could not be removed no longer keeps it.
+  - A session of Claude Code starts the program that qory installed, from
+    `<runtimes>/claude/<version>`. Behind a wall, Forager mounts that folder read-only at
+    `/qory/runtime/claude`, and `dev.qory.session.started` has the installed version as
+    `runtime_version`. A session of Codex starts from the image as before.
+  - Forager sets `DISABLE_AUTOUPDATER=1` in every launch of Claude Code, so it does not
+    update itself. A value of it from the run, the machine or the harness no longer
+    applies.
+  - Forager denies 10 more variables of Claude Code, such as `CLAUDE_CODE_USE_GATEWAY`,
+    `CLAUDE_CODE_REMOTE` and `BUN_OPTIONS`, that move its endpoints, load code or change
+    its mode, and denies `BUN_OPTIONS` for every runtime. No value of the run's, the
+    machine's or the harness's reaches the runtime.
+  - For each git push over HTTP through its proxy, the gateway writes
+    `dev.qory.run.target_write` to the run's record twice: first with the state
+    `started`, then with one of `changed`, `refused` or `cut`.
+  - `dev.qory.runtime.result` in the record has `usage`, the tokens of the launch so far:
+    `input`, `output`, `cache_read` and `cache_write`.
+  - The gateway sends `session`, the number of the open session, in each model keys
+    report. A Qory Apiary that does not accept `session` answers `400`, and the gateway
+    drops that report, cooldowns included, so deploy a Qory Apiary that accepts it
+    before the gateway.
+  - An image reference with a login, such as
+    `user:pw@registry.example/agent@sha256:…`, shows as `registry.example/agent@sha256:…`
+    in qory's lines, errors and the record. The manifest check no longer sends the
+    login as a path to Docker Hub's registry.
 - `qory gateway` keeps its runs when SIGINT or SIGTERM stops it: a gateway started again
   on the same directory within 120 seconds continues them, and the agent sessions behind
   it go on. Before, a run open at a gateway that stopped was over. The directory is
@@ -908,6 +1094,12 @@ release may change what an existing document does, and states it under Upgrading
   that fills the role, or drop the workflow. The other failures of the same check follow
   it in the same error. Before, the line showed only the skill and the agent.
 
+### Removed
+
+- `--agent-image` of `qory run prebuild-step`, the helper that a prebuild runs behind its
+  wall. The step uses no agent image. A prebuild also no longer stops with `the agent
+  image is not pinned by digest`.
+
 ### Fixed
 
 - A Copilot CLI session gets the harness's hooks in a repository that commits
@@ -997,9 +1189,10 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Security
 
-- qory builds with Go 1.27.3, whose `crypto/x509` returns an error for the intermediate
-  certificates that Go no longer trusts (GO-2026-6809, CVE-2026-111943). go.mod requires
-  Go 1.27.3.
+- qory builds with Go 1.27.4, and go.mod requires Go 1.27.4. Go 1.27.4's `crypto/x509`
+  returns an error for the intermediate certificates that Go no longer trusts
+  (GO-2026-6809, CVE-2026-111943), a fix that came in Go 1.27.3. Go 1.27.4 adds security
+  fixes to cgo, the go command, the compiler, the linker, and `net/http`.
 - `qory run pool` starts each run with `--home <the run's folder>/home`, so the run
   composes its harness in the run's folder, outside `work/`, and the pool removes the
   harness with the folder once the run ends. Before, the harness home of a pool's run

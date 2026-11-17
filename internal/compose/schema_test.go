@@ -47,11 +47,13 @@ func TestSchemas(t *testing.T) {
 	dirs, _ := filepath.Glob(filepath.Join(fixtures, "*"))
 	for _, dir := range dirs {
 		errText, _ := os.ReadFile(filepath.Join(dir, "expected", "error.txt"))
+		// fix is the fix line of the first refusal; a later line names the file to edit.
+		fix, _, _ := strings.Cut(string(errText), "\n")
 		// A workflow hook of a kind its point does not take passes the schema, which
 		// knows the kinds and not the base stack's points.
 		badKind := strings.Contains(string(errText), "kind ") && !strings.Contains(string(errText), "hooks[")
-		wantInvalid := strings.Contains(string(errText), "apiVersion") || badKind || strings.Contains(string(errText), "qory \"") ||
-			strings.HasPrefix(string(errText), "qory.yaml: ") && strings.Contains(string(errText), "workflows") ||
+		wantInvalid := strings.Contains(string(errText), "apiVersion") || badKind || strings.HasPrefix(fix, "Set qory to ") ||
+			strings.Contains(string(errText), " in qory.yaml.") && (strings.Contains(fix, " workflows.") || strings.HasPrefix(fix, "Remove workflows ")) ||
 			strings.Contains(string(errText), "bind.") && strings.Contains(string(errText), " in qory.yaml") && !strings.Contains(string(errText), " as many, ")
 		err := composeSchema.Validate(document(t, filepath.Join(dir, "qory.yaml")))
 		if wantInvalid && err == nil {
@@ -61,7 +63,7 @@ func TestSchemas(t *testing.T) {
 			t.Errorf("%s: the document failed the schema: %v", dir, err)
 		}
 		if f := filepath.Join(dir, "stack", "qory-stack.yaml"); fileExists(f) {
-			wantBadStack := strings.HasPrefix(string(errText), "stack/qory-stack.yaml: ")
+			wantBadStack := strings.HasPrefix(fix, "Set workflows.") && strings.Contains(string(errText), " is in stack/qory-stack.yaml.")
 			err := stackSchema.Validate(document(t, f))
 			if wantBadStack && err == nil {
 				t.Errorf("%s passed the schema; want a failure", f)
@@ -90,12 +92,14 @@ func TestSchemas(t *testing.T) {
 		// A process template refused for a stack that exports.stacks does not list, or for
 		// a workflow its stack does not declare, passes the schema: the schema checks one
 		// file, and those refusals compare two. One refused for an artifact type name
-		// listed twice, or a json_schema that does not compile, passes it too: a JSON
-		// Schema cannot state either rule.
+		// listed twice, a json_schema that does not compile, or a submit.type that no
+		// structured entry of artifact_types has, passes it too: a JSON Schema cannot
+		// state those rules.
 		processes, _ := filepath.Glob(filepath.Join(dir, "modules", "*", "process.yaml"))
-		wantBadProcess := strings.Contains(string(errText), "process.yaml: ") &&
-			!strings.Contains(string(errText), "exports.stacks lists") && !strings.Contains(string(errText), " under workflows in ") &&
-			!strings.Contains(string(errText), " of artifact_types: entry ") && !strings.Contains(string(errText), " compiles as a JSON Schema: ")
+		wantBadProcess := strings.Contains(string(errText), "process.yaml") &&
+			!strings.Contains(string(errText), "exports.stacks lists") && !strings.Contains(string(errText), " does not declare it under workflows") &&
+			!strings.Contains(string(errText), " has the name ") && !strings.Contains(string(errText), " so that it compiles as a JSON Schema") &&
+			!strings.Contains(string(errText), "Set submit.type to a structured type of artifact_types.")
 		for _, f := range processes {
 			err := processSchema.Validate(document(t, f))
 			if wantBadProcess && err == nil {
@@ -434,6 +438,48 @@ func TestConfigSchemaKnowsTiers(t *testing.T) {
 		}
 		if err := c.schema.Validate(doc); (err == nil) != c.valid {
 			t.Errorf("%s: valid=%v, err=%v", c.body, c.valid, err)
+		}
+	}
+}
+
+// TestSchemasKnowTheThreeWorkflowAccessLevels is the config schema and the stack schema
+// with a workflow of each access level: read, write-no-push and write pass, and any other
+// value, such as write_no_push or admin, fails.
+func TestSchemasKnowTheThreeWorkflowAccessLevels(t *testing.T) {
+	c := jsonschema.NewCompiler()
+	composeSchema, err := c.Compile("../../contracts/harness/v1/config.schema.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	stackSchema, err := c.Compile("../../contracts/harness/v1/stack.schema.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		access string
+		valid  bool
+	}{
+		{"read", true}, {"write-no-push", true}, {"write", true},
+		{"write_no_push", false}, {"push", false}, {"admin", false}, {"", false},
+	} {
+		in := `"workflows": {"fix": {"access": "` + c.access + `"}}`
+		for name, schema := range map[string]struct {
+			schema *jsonschema.Schema
+			body   string
+		}{
+			"config": {composeSchema, `{"apiVersion": "qory.dev/v1alpha1", ` +
+				`"harness": {"target": {"runtime": "claude"}, ` +
+				`"modules": [{"name": "app"}], ` + in + `}}`},
+			"stack": {stackSchema, `{"apiVersion": "qory.dev/v1alpha1", ` +
+				`"modules": [{"name": "app"}], ` + in + `}`},
+		} {
+			var doc any
+			if err := json.Unmarshal([]byte(schema.body), &doc); err != nil {
+				t.Fatal(err)
+			}
+			if err := schema.schema.Validate(doc); (err == nil) != c.valid {
+				t.Errorf("%s schema, access %q: %v, want valid %t", name, c.access, err, c.valid)
+			}
 		}
 	}
 }

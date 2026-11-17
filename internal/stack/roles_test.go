@@ -1,10 +1,14 @@
 package stack
 
 import (
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
+	"github.com/qoryai/qory/internal/exports"
 	"gopkg.in/yaml.v3"
 )
 
@@ -58,22 +62,64 @@ func TestBindRefusesEachShapeItDoesNotRead(t *testing.T) {
 	const head = "apiVersion: qory.dev/v1alpha1\nmodules:\n  - name: core\nbind:\n"
 	// Each text has {path}, the stack file's path as Load was given it.
 	for _, c := range []struct{ body, want string }{
-		{"  agents/coder: rails-coder\n", "Write bind as bind.agents.coder: rails-coder in {path}: bind keys are kinds, and agents/coder is a kind and a role."},
-		{"  agents/coder: [a, b]\n", "Write bind as bind.agents.coder: <name> in {path}: bind keys are kinds, and agents/coder is a kind and a role."},
-		{"  coders:\n    a: b\n", `Use agents, commands or skills as a kind under bind in {path}: "coders" is none of them.`},
-		{"  agents: rails-coder\n", "Write bind.agents in {path} as a map of roles: bind.agents is not a map."},
-		{"  skills:\n    entry: [a, b]\n", "Write one name for bind.skills.entry in {path}.\n  Only an agents role can be a group, and the value is a list."},
-		{"  agents:\n    reviewers: []\n", "Write one name or more in bind.agents.reviewers in {path}.\n  The list is empty."},
-		{"  agents:\n    reviewers: [a, {b: c}]\n", "Write entry names in bind.agents.reviewers in {path}.\n  An entry's name is one path segment with no space, @ or leading dot, and an item is not a name."},
-		{"  agents:\n    reviewers: [a, b/c]\n", "Write entry names in bind.agents.reviewers in {path}.\n  An entry's name is one path segment with no space, @ or leading dot, and an item is \"b/c\"."},
-		{"  agents:\n    developer: {a: b}\n", "Set bind.agents.developer in {path} to the name of one entry: the value is empty or not a name."},
-		{"  agents:\n    developer:\n", "Set bind.agents.developer in {path} to the name of one entry: the value is empty or not a name."},
-		{"  - agents\n", "Write bind in {path} as a map of kinds, then roles: bind is not a map."},
+		{"  agents/coder: rails-coder\n", "Write bind as bind.agents.coder: rails-coder.\n  The keys of bind are kinds, and agents/coder is a kind and a role.\n  bind is in {path}."},
+		{"  agents/coder: [a, b]\n", "Write bind as bind.agents.coder: <name>.\n  The keys of bind are kinds, and agents/coder is a kind and a role.\n  bind is in {path}."},
+		{"  coders:\n    a: b\n", "Use agents, commands, or skills as a kind under bind: \"coders\" is none of them.\n  bind is in {path}."},
+		{"  agents: rails-coder\n", "Write bind.agents as a map of roles: bind.agents is not a map.\n  bind is in {path}."},
+		{"  skills:\n    entry: [a, b]\n", "Write one name for bind.skills.entry.\n  Only an agents role can be a group, and the value is a list.\n  bind is in {path}."},
+		{"  agents:\n    reviewers: []\n", "Write one name or more in bind.agents.reviewers.\n  The list is empty.\n  bind is in {path}."},
+		{"  agents:\n    reviewers: [a, {b: c}]\n", "Write entry names in bind.agents.reviewers.\n  An entry's name is one path segment with no space, @, or leading dot, and an item is not a name.\n  bind is in {path}."},
+		{"  agents:\n    reviewers: [a, b/c]\n", "Write entry names in bind.agents.reviewers.\n  An entry's name is one path segment with no space, @, or leading dot, and an item is \"b/c\".\n  bind is in {path}."},
+		{"  agents:\n    reviewer: a b\n", "Set bind.agents.reviewer to an entry's name.\n  An entry's name is one path segment with no space, @, or leading dot.\n  The value is \"a b\".\n  bind is in {path}."},
+		{"  agents:\n    developer: {a: b}\n", "Set bind.agents.developer to the name of one entry: the value is empty or not a name.\n  bind is in {path}."},
+		{"  agents:\n    developer:\n", "Set bind.agents.developer to the name of one entry: the value is empty or not a name.\n  bind is in {path}."},
+		{"  - agents\n", "Write bind as a map of kinds, then roles: bind is not a map.\n  bind is in {path}."},
 	} {
 		path := write(t, head+c.body)
 		_, err := Load(path)
 		if want := strings.ReplaceAll(c.want, "{path}", path); err == nil || err.Error() != want {
 			t.Errorf("%q: %v\nwant %q", c.body, err, want)
+		}
+	}
+}
+
+// TestBindRefusalsKeepTheFixLineShortUnderALongPath is each shape of bind that qory does
+// not read, in a stack file under a directory of 150 characters: the first line is the
+// fix, at most 100 characters and with no path, and the last line has the path.
+func TestBindRefusalsKeepTheFixLineShortUnderALongPath(t *testing.T) {
+	isolate(t)
+	const head = "apiVersion: qory.dev/v1alpha1\nmodules:\n  - name: core\nbind:\n"
+	for _, body := range []string{
+		"  agents/coder: rails-coder\n",
+		"  coders:\n    a: b\n",
+		"  agents: rails-coder\n",
+		"  skills:\n    entry: [a, b]\n",
+		"  agents:\n    reviewers: []\n",
+		"  agents:\n    reviewers: [a, b/c]\n",
+		"  agents:\n    reviewer: a b\n",
+		"  agents:\n    developer: {a: b}\n",
+		"  agents:\n    \"a b\": c\n",
+		"  - agents\n",
+	} {
+		dir := filepath.Join(t.TempDir(), strings.Repeat("d", 150))
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		path := filepath.Join(dir, FileName)
+		if err := os.WriteFile(path, []byte(head+body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		_, err := Load(path)
+		if err == nil {
+			t.Errorf("%q: no refusal", body)
+			continue
+		}
+		lines := strings.Split(err.Error(), "\n")
+		if n := utf8.RuneCountInString(lines[0]); n > 100 || strings.Contains(lines[0], dir) {
+			t.Errorf("%q: the first line has %d characters, or the path: %s", body, n, lines[0])
+		}
+		if last := lines[len(lines)-1]; !strings.HasSuffix(last, " is in "+path+".") {
+			t.Errorf("%q: the last line is %q, want it to end with the path", body, last)
 		}
 	}
 }
@@ -87,13 +133,13 @@ func TestReadRolesWithCountsTakesOneOrMany(t *testing.T) {
 		t.Fatalf("roles = %v, %v", r, err)
 	}
 	for _, c := range []struct{ body, want string }{
-		{"skills:\n  x: many\n", "Set roles.skills.x to one in m.yaml: only an agents role can be a group."},
-		{"agents:\n  developer: two\n", "Set roles.agents.developer to one or many in m.yaml.\n  One entry fills a role and several fill a group, and the value is \"two\"."},
-		{"agents:\n  developer: [one]\n", "Set roles.agents.developer to one or many in m.yaml.\n  One entry fills a role and several fill a group, and the value is a list."},
+		{"skills:\n  x: many\n", "Set roles.skills.x of the module to one.\n  Only an agents role can be a group. The map is in m.yaml."},
+		{"agents:\n  developer: two\n", "Set roles.agents.developer to one or many.\n  One entry fills a role and several fill a group, and the value is \"two\".\n  roles is in m.yaml."},
+		{"agents:\n  developer: [one]\n", "Set roles.agents.developer to one or many.\n  One entry fills a role and several fill a group, and the value is a list.\n  roles is in m.yaml."},
 	} {
 		_, _, err := ReadRoles(node(t, c.body), "roles", true)
-		re, ok := err.(*RolesError)
-		if !ok || re.In("m.yaml").Error() != c.want {
+		in, ok := err.(exports.InFile)
+		if !ok || in.In("m.yaml").Error() != c.want {
 			t.Errorf("%q: %v\nwant %q", c.body, err, c.want)
 		}
 	}
@@ -103,20 +149,25 @@ func TestReadRolesWithCountsTakesOneOrMany(t *testing.T) {
 // segment: validate returns an error with the file's path and no path in front.
 func TestCheckRolesChecksABuiltStack(t *testing.T) {
 	err := CheckRoles(Roles{"agents": {"a/b": "c"}}, "bind")
-	if err == nil || !strings.HasPrefix(err.(*RolesError).In("qory.yaml").Error(), "Rename role a/b of bind.agents in qory.yaml") {
+	if err == nil || !strings.HasPrefix(err.(*RolesError).In("qory.yaml").Error(), "Rename role \"a/b\" of bind.agents to one path segment") {
 		t.Fatalf("err = %v", err)
 	}
 	if err := CheckRoles(Roles{"agents": {"coder": "rails-coder"}}, "bind"); err != nil {
 		t.Fatal(err)
+	}
+	// A name with a space is refused with the fix alone on the first line.
+	want := "Set bind.agents.reviewer to an entry's name.\n  An entry's name is one path segment with no space, @, or leading dot.\n  The value is \"a b\".\n  bind is in qory.yaml."
+	if re, ok := CheckRoles(Roles{"agents": {"reviewer": "a b"}}, "bind").(*RolesError); !ok || re.In("qory.yaml").Error() != want {
+		t.Errorf("a name with a space: %v\nwant %q", re, want)
 	}
 	// A list is checked the way a file's is: only for agents, with one name or more.
 	for _, c := range []struct {
 		f    Fills
 		want string
 	}{
-		{Fills{Many: Groups{"skills": {"entry": {"a"}}}}, "Write one name for bind.skills.entry in qory.yaml.\n  Only an agents role can be a group, and the value is a list."},
-		{Fills{Many: Groups{"agents": {"reviewers": nil}}}, "Write one name or more in bind.agents.reviewers in qory.yaml.\n  The list is empty."},
-		{Fills{Many: Groups{"agents": {"reviewers": {"a b"}}}}, "Write entry names in bind.agents.reviewers in qory.yaml.\n  An entry's name is one path segment with no space, @ or leading dot, and an item is \"a b\"."},
+		{Fills{Many: Groups{"skills": {"entry": {"a"}}}}, "Write one name for bind.skills.entry.\n  Only an agents role can be a group, and the value is a list.\n  bind is in qory.yaml."},
+		{Fills{Many: Groups{"agents": {"reviewers": nil}}}, "Write one name or more in bind.agents.reviewers.\n  The list is empty.\n  bind is in qory.yaml."},
+		{Fills{Many: Groups{"agents": {"reviewers": {"a b"}}}}, "Write entry names in bind.agents.reviewers.\n  An entry's name is one path segment with no space, @, or leading dot, and an item is \"a b\".\n  bind is in qory.yaml."},
 	} {
 		err := CheckFills(c.f, "bind")
 		if re, ok := err.(*RolesError); !ok || re.In("qory.yaml").Error() != c.want {
@@ -128,7 +179,7 @@ func TestCheckRolesChecksABuiltStack(t *testing.T) {
 	}
 	// A role with an access key secret is printed as Forager's phrase.
 	err = CheckRoles(Roles{"agents": {"qak_x": "a/b"}}, "bind")
-	if err == nil || !strings.Contains(err.Error(), "Set bind.agents."+nameWithSecret+" in ") || strings.Contains(err.Error(), "qak_") {
+	if err == nil || !strings.Contains(err.Error(), "Set bind.agents."+nameWithSecret+" to an entry's name") || strings.Contains(err.Error(), "qak_") {
 		t.Fatalf("err = %v", err)
 	}
 }

@@ -352,6 +352,8 @@ func TestARunKeyReadsTheCheckoutsDocumentOnlyInsideTheCheckout(t *testing.T) {
 // and harness.model: a run given a run key composes the agent with the checkout's tier,
 // and with no model.
 func TestARunKeyReadsTheTiersOfTheCheckout(t *testing.T) {
+	// The test reads the run's home once the run is over.
+	t.Cleanup(cmd.KeepRunHomes())
 	root := tierCheckout(t)
 	fakeLaunch(t, fakeRuntime(t))
 	tierModule(t, root, "claude", map[string]string{"explorer": "---\nname: explorer\nmodel: ${qory:light}\n---\nExplores.\n"},
@@ -364,7 +366,7 @@ func TestARunKeyReadsTheTiersOfTheCheckout(t *testing.T) {
 	if !n.joined {
 		t.Errorf("the run did not go on to the join\n%s", out)
 	}
-	agent := filepath.Join(runKeyHome(t, root), "claude", "agents", "explorer.md")
+	agent := filepath.Join(runKeyRunHome(t, root), "claude", "agents", "explorer.md")
 	if got, want := readText(t, agent), "---\nname: explorer\nmodel: claude-haiku-5-5\n---\nExplores.\n"; got != want {
 		t.Errorf("agents/explorer.md:\n%s\nwant:\n%s", got, want)
 	}

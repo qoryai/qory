@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 	"slices"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/qoryai/forager/accesskey"
 	"github.com/qoryai/forager/session"
@@ -46,6 +48,13 @@ const codeUsedStartStage = codeUsed + ", so start the stage again from the work 
 
 // inputsFile is the file of a run code's inputs, in the run's inputs folder.
 const inputsFile = "inputs.json"
+
+// The lines of [checkInputs]: inputs that have the member [inputsMember], which qory
+// adds, and inputs that are not a JSON object, which qory cannot add it to.
+const (
+	textInputsHaveQory    = "remove the input " + inputsMember + ": qory adds that member to inputs.json"
+	textInputsNotAnObject = "ask Qory Apiary's instance admin: the run code's inputs are not a JSON object"
+)
 
 // runAnswerDocuments is the documents of the verified run answer ans, the bytes as the
 // server signed them.
@@ -102,11 +111,17 @@ type codeRun struct {
 	minutes  int
 	hidden   bool
 	target   preparation.Target
-	// access is what the run may do on its target: [stack.AccessRead] or
-	// [stack.AccessWrite], from the documents' access. It is empty when the documents have
-	// no target.
+	// access is what the run may do on its target, from the documents' access: read,
+	// write, or write-no-push (a writable checkout with no push step). It is empty when
+	// the documents have no target.
 	access   string
 	workItem string
+	// submit is the documents' submit, the run's submit settings, type and send: the one
+	// place qory takes them from, never the composed harness's process.yaml, see
+	// [codeRun.submitLine]. nil when the documents have no submit. submitModule is the
+	// documents' submit_module, nil for none.
+	submit       *contracts.Submit
+	submitModule *contracts.SubmitModule
 
 	// runNumber is the run's number on the server, set by [codeRun.readBranch].
 	runNumber int
@@ -148,6 +163,9 @@ func codeRunOf(doc contracts.Documents) (*codeRun, error) {
 	if doc.Workflow == "" {
 		return nil, errors.New("set a workflow for the workspace in Qory Apiary, then take the work item in again: the response to the run code has no workflow" + codeUsed)
 	}
+	if err := checkInputs(doc.Inputs); err != nil {
+		return nil, err
+	}
 	hidden := doc.HarnessHidden != nil && *doc.HarnessHidden
 	var minutes int
 	if doc.RunSettings != nil {
@@ -187,11 +205,13 @@ func codeRunOf(doc contracts.Documents) (*codeRun, error) {
 	if hidden {
 		r.named = source.NewNamed(r.phrase())
 	}
+	r.submit, r.submitModule = doc.Submit, doc.SubmitModule
 	return r, nil
 }
 
-// writes reports whether the run r may write to its target: its access is
-// [stack.AccessWrite]. A run not from a run code has no access, and neither does a run
+// writes reports whether the documents of the run r give it the access to write and push
+// to its target: its access is [stack.AccessWrite]. The workflow's access can lower it,
+// see [accessOf]. A run not from a run code has no access, and neither does a run
 // whose documents have no target.
 func (r *codeRun) writes() bool {
 	return r != nil && r.access == stack.AccessWrite
@@ -456,13 +476,15 @@ func (r *codeRun) startLine(runID string) string {
 	return fmt.Sprintf("qory run: the run %s starts the workflow %s of %s on %s", runID, r.workflow, r.phrase(), r.runtime)
 }
 
-// writeInputs writes r's inputs, unchanged, to inputs.json, mode 0600, in a new folder
-// in/, mode 0700, of a new temporary folder, and returns in/, links resolved, and what
-// removes the temporary folder. in/ is outside the state directory, which holds the run
-// records that no mount may reach. The temporary folder begins with qory-inputs-:
-// Forager reserves the qory-run-, qory-tool-, qory-wall- and qory-link- folders of the
-// system's temporary directory, and the wall stops a run that mounts one.
-func (r *codeRun) writeInputs() (string, func(), error) {
+// inputsDir makes a new folder in/, mode 0700, in a new temporary folder, for r's
+// inputs.json, which [codeRun.writeInputs] writes once the harness is composed, and
+// returns in/, links resolved, and what removes the temporary folder. in/ is outside the
+// state directory, which holds the run records that no mount may reach. A nil r, a run
+// with a run key and no run code, gets the same folder. The temporary
+// folder begins with qory-inputs-: Forager reserves the qory-run-, qory-tool-, qory-wall-
+// and qory-link- folders of the system's temporary directory, and the wall stops a run
+// that mounts one.
+func (r *codeRun) inputsDir() (string, func(), error) {
 	top, err := os.MkdirTemp("", "qory-inputs-")
 	if err != nil {
 		return "", func() {}, err
@@ -475,15 +497,122 @@ func (r *codeRun) writeInputs() (string, func(), error) {
 	if err := os.Mkdir(in, 0o700); err != nil {
 		return "", remove, err
 	}
-	f, err := os.OpenFile(filepath.Join(in, inputsFile), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	return in, remove, nil
+}
+
+// inputsMember is the member of inputs.json that qory adds to a run's inputs, with
+// [qoryInputs] as its value. Inputs that have it stop the run, see [codeRunOf].
+const inputsMember = "qory"
+
+// qoryInputs is the value of [inputsMember]: what qory adds to the inputs of a run from
+// a run code, and all that inputs.json has for a run with a run key and no run code. Each
+// field is one member, always written.
+type qoryInputs struct {
+	// HarnessExtensions is the harness report's extensions, {} for none.
+	HarnessExtensions map[string]any `json:"harness_extensions"`
+}
+
+// writeInputs writes inputs.json, mode 0600, into in, the folder of [codeRun.inputsDir]:
+// r's inputs as they came, with the member [inputsMember] set to q added after the
+// others. It returns the file's path and the bytes it wrote, which a copy of the file
+// takes from memory: a read of the file could return what something else wrote there. A nil
+// r, a run with a run key and no run code, has no inputs, so the file has the member qory
+// alone.
+func (r *codeRun) writeInputs(in string, q qoryInputs) (string, []byte, error) {
+	inputs := []byte("{}")
+	if r != nil {
+		inputs = r.inputs
+	}
+	data, err := withQoryMember(inputs, q)
 	if err != nil {
-		return "", remove, err
+		return "", nil, err
 	}
-	if _, err := f.Write(r.inputs); err != nil {
+	path := filepath.Join(in, inputsFile)
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return "", nil, err
+	}
+	if _, err := f.Write(data); err != nil {
 		f.Close()
-		return "", remove, err
+		return "", nil, err
 	}
-	return in, remove, f.Close()
+	return path, data, f.Close()
+}
+
+// copyInputs writes data, the bytes of the run's inputs.json, to inputs.json in home,
+// the composed home, mode 0644 whatever the umask, so the run's user can read it as
+// $QORY_HARNESS_HOME/inputs.json. A file of that name in the home stops the run and stays
+// as it was. When a step after the file's creation fails, copyInputs removes the file it
+// created, so the next run in a given home finds none.
+func copyInputs(home string, data []byte) error {
+	return copyInputsVia(home, data, fillCopy)
+}
+
+// copyInputsVia is [copyInputs] with fill, the steps that set the mode of the new file f
+// and write data to it, as an argument, so a test can make them fail.
+func copyInputsVia(home string, data []byte, fill func(f *os.File, data []byte) error) error {
+	path := filepath.Join(home, inputsFile)
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+	if err != nil {
+		return err
+	}
+	err = fill(f, data)
+	if closeErr := f.Close(); err == nil {
+		err = closeErr
+	}
+	if err != nil {
+		os.Remove(path)
+		return err
+	}
+	return nil
+}
+
+// fillCopy sets the mode of f to 0644 whatever the umask and writes data to it.
+func fillCopy(f *os.File, data []byte) error {
+	if err := f.Chmod(0o644); err != nil {
+		return err
+	}
+	_, err := f.Write(data)
+	return err
+}
+
+// withQoryMember is inputs, a JSON object, with the member [inputsMember] set to q added
+// after its last member. The bytes of inputs from its opening brace to its last member
+// stay as they came, and a nil map of q is written as {}.
+func withQoryMember(inputs []byte, q qoryInputs) ([]byte, error) {
+	if q.HarnessExtensions == nil {
+		q.HarnessExtensions = map[string]any{}
+	}
+	value, err := json.Marshal(q)
+	if err != nil {
+		return nil, err
+	}
+	trimmed := bytes.TrimSpace(inputs)
+	if !json.Valid(trimmed) || len(trimmed) < 2 || trimmed[0] != '{' || trimmed[len(trimmed)-1] != '}' {
+		return nil, errors.New("the inputs are not a JSON object")
+	}
+	body := trimmed[:len(trimmed)-1]
+	out := append([]byte{}, body...)
+	if len(bytes.TrimSpace(body[1:])) > 0 {
+		out = append(out, ',')
+	}
+	out = append(out, `"`+inputsMember+`":`...)
+	out = append(out, value...)
+	return append(out, '}', '\n'), nil
+}
+
+// checkInputs stops a run whose inputs are not a JSON object, or have a member
+// [inputsMember] at the top level, before the run opens. Each error ends with
+// [codeUsed].
+func checkInputs(inputs []byte) error {
+	var members map[string]json.RawMessage
+	if json.Unmarshal(inputs, &members) != nil || members == nil {
+		return errors.New(textInputsNotAnObject + codeUsed)
+	}
+	if _, ok := members[inputsMember]; ok {
+		return errors.New(textInputsHaveQory + codeUsed)
+	}
+	return nil
 }
 
 // reasonWorkflowNotInHarness is the reason a run from a run code closes with, failed,
@@ -574,4 +703,82 @@ func entryKeys(rep report.Report) []string {
 		keys = append(keys, e.Kind+"/"+e.Name)
 	}
 	return keys
+}
+
+// limitSubmit keeps r's submit and submit_module only for a run whose level is
+// [stack.AccessWrite], the run's [accessOf] level: a run that the stack's workflow or the
+// documents lower to write-no-push or read has no submit settings.
+func (r *codeRun) limitSubmit(level string) {
+	if r != nil && level != stack.AccessWrite {
+		r.submit, r.submitModule = nil, nil
+	}
+}
+
+// submitLine is the line that shows the harness's submit, the first module's in stack
+// order, beside r's when they differ, or alone when r has none. It is "" for a run whose
+// level, its [accessOf] level, is not [stack.AccessWrite], and for r nil. Line 1 has at
+// most [submitLineMax] characters with the "qory run: " that the caller adds, so a type
+// name that does not fit is shortened there, and a second line has the full name.
+func (r *codeRun) submitLine(rep report.Report, level string) string {
+	if r == nil {
+		return ""
+	}
+	var typ, send string
+	found := false
+	for _, m := range rep.Modules {
+		if typ, send, found = exports.ProcessSubmit(filepath.Join(rep.Home, "modules", m.Name)); found {
+			break
+		}
+	}
+	switch {
+	case !found, level != stack.AccessWrite:
+		return ""
+	case r.submit == nil:
+		line := func(typ, _ string) string {
+			return fmt.Sprintf("submit: documents have no submit, so harness's %s at %s is unused", typ, send)
+		}
+		return fitSubmit(line, typ, "", "The full type is "+typ+".")
+	case r.submit.Type == typ && r.submit.Send == send:
+		return ""
+	}
+	line := func(docs, harness string) string {
+		return fmt.Sprintf("submit: documents' %s at %s replaces harness's %s at %s", docs, r.submit.Send, harness, send)
+	}
+	return fitSubmit(line, r.submit.Type, typ, "The full types are "+r.submit.Type+" in the documents and "+typ+" in the harness.")
+}
+
+// submitLineMax is the most characters of line 1 of the text of [codeRun.submitLine],
+// with the "qory run: " in front of it, as for a refusal.
+const submitLineMax = 100
+
+// fitSubmit is line of a and b, whole when line 1 has at most [submitLineMax] characters
+// after "qory run: ". Otherwise it is line of a and b shortened to share what the rest
+// of line 1 leaves, each as [shortSubmitName] has it, then full on a second line. b is ""
+// for a line of one name. [exports.Fit] cannot do this: it keeps 20 characters of a
+// name, and the rest of this line has 77 or more.
+func fitSubmit(line func(a, b string) string, a, b, full string) string {
+	const prefix = "qory run: "
+	if text := line(a, b); utf8.RuneCountInString(prefix+text) <= submitLineMax {
+		return text
+	}
+	left := submitLineMax - utf8.RuneCountInString(prefix+line("", ""))
+	na, nb := utf8.RuneCountInString(a), utf8.RuneCountInString(b)
+	first := left / 2
+	if na <= first {
+		first = na
+	} else if nb <= left/2 {
+		first = left - nb
+	}
+	return line(shortSubmitName(a, first), shortSubmitName(b, left-first)) + "\n  " + full
+}
+
+// shortSubmitName is name with its middle replaced by "…" so that it has n characters,
+// and name as it is when it has at most n.
+func shortSubmitName(name string, n int) string {
+	r := []rune(name)
+	if len(r) <= n || n < 3 {
+		return name
+	}
+	head := n / 2
+	return string(r[:head]) + "…" + string(r[len(r)-(n-1-head):])
 }

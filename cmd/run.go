@@ -51,6 +51,7 @@ import (
 	"github.com/qoryai/qory/internal/render"
 	"github.com/qoryai/qory/internal/report"
 	"github.com/qoryai/qory/internal/runcopy"
+	"github.com/qoryai/qory/internal/runtimeinstall"
 	"github.com/qoryai/qory/internal/secretmask"
 	"github.com/qoryai/qory/internal/source"
 	"github.com/qoryai/qory/internal/statusfd"
@@ -99,10 +100,13 @@ qory run opens the run, then composes the harness, as qory harness compose does,
 the same home, and prints the result on stderr. -f, --model, --effort, --tier and
 --tier-effort mean what they mean there. With a run key or behind a wall, the home is
 outside the folder the run runs in, under qory/homes in the cache directory, unless --home
-or harness.home sets another, and a home inside the folder stops the run. A walled run with
-no run key, --home or harness.home gets a home for that run alone, which qory removes when
-the run ends: runs/<name>-<hash>/<run id> under qory/homes. The harness report stays per
-checkout, as runs/<name>-<hash>-report.json there.
+or harness.home sets another, and a home inside the folder stops the run. A run with a run
+key or a run code, and a walled run, with no --home or harness.home, gets a home for that
+run alone, which qory removes when the run ends: runs/<name>-<hash>/<run id> under
+qory/homes. The harness report stays per checkout, as runs/<name>-<hash>-report.json
+there. A run from Qory Apiary, with a run code or a run key, finds its inputs in
+$QORY_HARNESS_HOME/inputs.json. A run key's file has the member qory alone. A person's
+run, also one that registers itself through gateway.server.via, has no such file.
 
 The agent is the runtime of the stack's target. Name another first, and the run composes
 for it instead; name one when the target has several. Arguments after -- go to the
@@ -347,6 +351,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			}
 			ctx, again, got, stop := signalContext(cmd.Context())
 			defer stop()
+			route := newQoryRoute()
 			spec := runSpec{
 				OpenSpec: session.OpenSpec{
 					RunsDir:        runs,
@@ -357,6 +362,8 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					// The session masks the run's record, events and lines with the run's
 					// mask list, and adds the server's variables to it.
 					Masker: secretmask.Default().Masker(),
+					// Every run, walled or not, has the route from its session to qory.
+					QoryRoute: route,
 				},
 				SessionSpec: session.SessionSpec{
 					Env:         os.Environ(),
@@ -371,6 +378,12 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					SocketGrace: socketGrace,
 				},
 			}
+			// The run holds the version's folder of its runtime until it ends.
+			defer func() {
+				if spec.installed != nil {
+					spec.installed.Release()
+				}
+			}()
 			switch {
 			case spec.RunID == "" && key != nil:
 				spec.RunID = key.key.RunID
@@ -392,12 +405,15 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			if pol != nil {
 				selected = pol.Image
 			}
-			// A person's walled run with no --home and no harness.home composes into a home for
-			// this run alone, so a second run of the checkout leaves the first run's home as it
-			// is. The report stays per checkout, so a module keeps its pin between runs.
+			// A run given a run key or a run code, and a person's walled run, with no --home and
+			// no harness.home, composes into a home for this run alone, so a second run of the
+			// checkout leaves the first run's home as it is. The report stays per checkout, so a
+			// module keeps its pin between runs. A run code's run id is known once the code is
+			// redeemed, which moves the home there.
 			runHome := ""
 			homeGiven := h.home != "" || conf.Origin("harness.home") != config.Default
-			if !remote && !homeGiven && wallNamed(conf.Forager, o) {
+			perRun := !homeGiven && (remote || wallNamed(conf.Forager, o))
+			if perRun && spec.RunID != "" {
 				at = runHomeAt(at, spec.RunID)
 				runHome = at.home
 			}
@@ -448,6 +464,19 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			if err := makeRunsDir(state, spec.RunsDir); err != nil {
 				return err
 			}
+			// A home that is not for this run alone, a person's .qory/harness or one that --home
+			// or harness.home sets, is held for the run's life: a second run's compose would
+			// replace it, and its end would delete this run's copy of inputs.json. The lock is
+			// taken before a run code is redeemed, which a second run could not take back, and
+			// let go after every other cleanup. A run code's run id is written into it once
+			// known.
+			var homeLock *foragerdir.Lock
+			if !perRun {
+				if homeLock, err = lockHomeAt(at, spec.RunID); err != nil {
+					return err
+				}
+				defer homeLock.Release()
+			}
 			// A run from a run code takes its harness, runtime, compose flags, inputs and
 			// time limit from the documents of the answer to the code; its workflow's
 			// time_limit is known once the harness is composed, see prepareLaunch.
@@ -461,6 +490,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				secretmask.Default().Add(key.value)
 				if spec.RunID == "" {
 					spec.RunID = key.key.RunID
+					homeLock.SetText(homeLockText(spec.RunID))
 				}
 				var doc contracts.Documents
 				if doc, err = codeDocumentsOf(documents); err != nil {
@@ -488,6 +518,14 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				if fromCode, err = codeRunOf(doc); err != nil {
 					return err
 				}
+				// A run with no --run-id has no home for its run until the code's run id is
+				// known, so it takes that home here, and its mount moves with it.
+				if perRun && runHome == "" {
+					shared := at.home
+					at = runHomeAt(at, spec.RunID)
+					runHome = at.home
+					moveMount(spec.Mounts, shared, at.home)
+				}
 				if err := fromCode.apply(cmd); err != nil {
 					return err
 				}
@@ -503,10 +541,22 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				composing.fromCode = true
 				timeout = provisioner.TimeLimit(fromCode.minutes, 0)
 				var remove func()
-				in, remove, err = fromCode.writeInputs()
+				in, remove, err = fromCode.inputsDir()
 				defer remove()
 				if err != nil {
-					return fmt.Errorf("check the temporary folder %s: qory run could not write the run's inputs there: %w%s", exports.Value(os.TempDir(), false), exports.HideError(err), codeUsed)
+					return inputsNotWritten(err)
+				}
+				if spec.Wall != nil {
+					spec.Mounts = append(spec.Mounts, wall.Mount{Path: in, ReadOnly: true})
+				}
+			} else if key != nil {
+				// A run with a run key and no run code has no documents, so its inputs.json
+				// has the member qory alone, written once the harness is composed.
+				var remove func()
+				in, remove, err = fromCode.inputsDir()
+				defer remove()
+				if err != nil {
+					return keyedError(nil, inputsNotWritten(err))
 				}
 				if spec.Wall != nil {
 					spec.Mounts = append(spec.Mounts, wall.Mount{Path: in, ReadOnly: true})
@@ -691,9 +741,10 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			// freshHome is true for a dispatched walled run of a runtime that is a
 			// [render.AgentHomer], whose agent starts on a new, empty configuration
 			// directory.
-			// readOnly is set once the compose has the workflows: the run only reads the
-			// checkout, see [readsOnly].
+			// readOnly and level are set once the compose has the workflows: readOnly is whether
+			// the run only reads the checkout, see [readsOnly], and level is its [accessOf] level.
 			var readOnly bool
+			var level string
 			// link is the transcript link of a run whose agent starts on a fresh home, see
 			// [transcriptLinkFor].
 			var link transcriptLink
@@ -728,6 +779,25 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				if parts := c.checkoutOnly[name]; walled && !dispatched && len(parts) > 0 {
 					fmt.Fprintln(w, "qory run:", checkoutOnlyLine(name, parts, homeGiven || linksNone))
 				}
+				if dispatched {
+					// inputs.json has the inputs of a run code, if any, and what qory adds, which the
+					// report has.
+					var file string
+					var data []byte
+					if file, data, err = fromCode.writeInputs(in, qoryInputs{HarnessExtensions: rep.Extensions}); err != nil {
+						return false, keyedError(fromCode, inputsNotWritten(err))
+					}
+					checks.inputs, checks.inputsData = file, data
+					if err := copyInputs(at.home, data); err != nil {
+						return false, keyedError(fromCode, inputsNotCopied(at.home, err))
+					}
+					// A home that is not this run's alone, from --home or harness.home, keeps
+					// no copy once the run is over.
+					if runHome == "" {
+						copied := filepath.Join(at.home, inputsFile)
+						cleanups = append(cleanups, func() { removeInputsCopy(copied, said) })
+					}
+				}
 				if fromCode != nil {
 					if extra, err = fromCode.workflowArgs(name, rep, in, run.System()); err != nil {
 						return false, err
@@ -735,8 +805,16 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					// The time limit counts from the open, so the compose's time is in it.
 					timeout = provisioner.TimeLimit(fromCode.minutes, workflows[fromCode.workflow].TimeLimit)
 				}
+				// The documents' submit is the run's at level write, and a different one in the
+				// harness gets a line.
+				submitLevel := accessOf(fromCode, workflows)
+				fromCode.limitSubmit(submitLevel)
+				if line := fromCode.submitLine(rep, submitLevel); line != "" {
+					fmt.Fprintln(w, "qory run:", line)
+				}
 				// A run that only reads the checkout sees it read-only, or stops here, before
 				// the image's fetch and the setup.
+				level = accessOf(fromCode, workflows)
 				readOnly = readsOnly(fromCode, workflows)
 				if readOnly {
 					if err := readOnlyCheckout(&spec, at.root, fromCode.workflow, run.Image()); err != nil {
@@ -755,7 +833,11 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					if err := fromCode.readExposed(at.root, cwd, at.report); err != nil {
 						return false, err
 					}
-				} else if fromCode != nil && walled {
+				} else if fromCode != nil && !walled {
+					// A run from a run code that may write stops here with no wall, before the
+					// image's fetch and the setup: the agent would run as this machine's user.
+					return false, writeNeedsWall(fromCode.workflow)
+				} else if fromCode != nil {
 					// A write run from a run code gets no copy: it binds the checkout itself.
 					if err := bindsReserved(textCodeWriteBindsReserved, at.root, cwd, reserved); err != nil {
 						return false, err
@@ -858,6 +940,37 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				}
 				return nil
 			}
+			// installWork installs the program of the session's runtime, see [installRuntime],
+			// within the run's time limit, prints the installed version, and gives the
+			// session the install, see [useInstalledRuntime].
+			installWork := func() error {
+				installCtx, cancel := ctx, func() {}
+				if timeout > 0 {
+					installCtx, cancel = context.WithDeadline(ctx, opened.Add(timeout))
+				}
+				defer cancel()
+				var machine runtimeinstall.Machine
+				if code != nil {
+					machine = code.machine
+				}
+				in, err := installRuntime(installCtx, run, conf.Forager, machine, walled || remote, name, state, said)
+				if err != nil {
+					return &runLineError{codeLine(installFailed(err))}
+				}
+				if in != nil {
+					said(installedLine(*in))
+					useInstalledRuntime(&spec, in)
+				} else if installStandIn != nil && name == installedRuntime {
+					stood, err := installStandIn(spec.Command)
+					if err != nil {
+						return &runLineError{codeLine(err)}
+					}
+					if stood != nil {
+						useInstalledRuntime(&spec, stood)
+					}
+				}
+				return nil
+			}
 			// hostWork is the run's work on this machine before its session joins, in two
 			// steps of the run's record: the fetch, when the run configuration lists
 			// repositories, and the compose. When the run configuration lists repositories,
@@ -953,6 +1066,11 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				if err != nil {
 					return err
 				}
+				// A run installs its runtime once the compose named it, and before
+				// prepareSession wraps the session's command for the wall.
+				if err := installWork(); err != nil {
+					return err
+				}
 				// A home whose push checks qory cannot run stops the run here, before the
 				// setup and the agent. The run's forwarder checks the POSTs from behind the
 				// wall from here on: nothing behind the wall has run yet.
@@ -971,9 +1089,9 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 						return &runLineError{err}
 					}
 				}
-				// Only the push step's commit uses the run number. readOnly is set by the
+				// Only the push step's commit uses the run number. level is set by the
 				// compose, so the check comes here, before the session.
-				if canPush(fromCode, readOnly, branch) && fromCode.runNumber < 1 {
+				if canPush(fromCode, level, branch) && fromCode.runNumber < 1 {
 					return &runLineError{errors.New(textNoRunNumber)}
 				}
 				if err := prepareSession(freshHome); err != nil {
@@ -1098,7 +1216,8 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				if prepErr == nil && readOnly {
 					prepErr = removeSetupWork()
 				}
-				if prepErr == nil && copied == nil && walled && spec.setupWhere != config.SetupInside && canPush(fromCode, readOnly, branch) {
+				if prepErr == nil && copied == nil && walled &&
+					spec.setupWhere != config.SetupInside && canPush(fromCode, level, branch) {
 					prepErr = recordSetupWork()
 				}
 				if prepErr == nil && copied != nil && !copied.plain && !copied.readOnly && run.Repositories() != "" && spec.setupWhere != config.SetupInside {
@@ -1173,7 +1292,10 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					onVariables(a)
 				}
 			}
+			// The agent's session is the run's first join, so the gateway numbers it 1.
+			closeRoute := route.open(1)
 			res, err := joinSession(run, ctx, spec.SessionSpec)
+			closeRoute()
 			out := sessionOutcome(res, err)
 			// pushWork is the push step of a run with an agent session that may write, see
 			// [keepsWork], before the close: Qory Apiary takes no version of a run that ended.
@@ -1201,7 +1323,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			// that no container is left.
 			ending := pushEnding{session: out, limit: timeout}
 			var pushErr, sessionErr error
-			pushes := keepsWork(fromCode, readOnly, branch, res, err)
+			pushes := keepsWork(fromCode, level, branch, res, err)
 			returns := copied != nil && !copied.readOnly && (err == nil && res != nil || joined)
 			stopNow := func() stopRead { return stopRead{ctx.Err() != nil, again.Err() != nil, got()} }
 			if copied != nil {
@@ -1248,14 +1370,12 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				if timeout > 0 {
 					limit = opened.Add(timeout)
 				}
-				pushCtx, cancel := pushContext(ctx, again, limit, pushTimes.limit, pushTimes.signal)
-				ending.noStep, pushErr = removeThenPush(pushCtx, run, streams.errOut, branch, cwd, spec.RunID, fromCode.runNumber, out, walled, checks)
-				ending.settle(stopNow())
-				ending.cut = pushCtx.Err() != nil
-				cancel()
-				if pushErr != nil {
-					out = ending.outcome(pushErr)
+				push := &sessionPush{
+					ctx: ctx, again: again, limit: limit, stopNow: stopNow,
+					run: run, stderr: streams.errOut, branch: branch, dir: cwd, runID: spec.RunID,
+					runNumber: fromCode.runNumber, agentStopped: walled, checks: checks,
 				}
+				out, pushErr = pushAfterSession(push, &ending, out)
 			}
 			closed := closeRun(out)
 			// Nothing of the copy comes back when a process of the run could have written it past
@@ -1496,6 +1616,9 @@ type runSpec struct {
 	// engineProxyFile is wall.engine_proxy_file of a walled run with an engine proxy,
 	// whose engine lock the run holds around its image step: see [withEngineLock].
 	engineProxyFile string
+	// installed is the runtime qory run installed for the session, nil for none: see
+	// [useInstalledRuntime].
+	installed *runtimeinstall.Installed
 }
 
 // openedRun is a run open at its gateway, as qory run uses it: a [*session.Run], as
@@ -1996,6 +2119,58 @@ func withOrigin(labels map[string]string, origin foragerdir.Labels) map[string]s
 		out[k] = v
 	}
 	return out
+}
+
+// inputsNotWritten is the error of a run from Qory Apiary whose inputs.json, or its
+// folder, could not be written in the system's temporary folder.
+func inputsNotWritten(err error) error {
+	return fmt.Errorf("check the temporary folder %s: qory run could not write the run's inputs there: %w%s", exports.Value(os.TempDir(), false), exports.HideError(err), codeUsed)
+}
+
+// keyedError is err for a run with a run key and no run code, fromCode nil: without the
+// ending [codeUsed], which names a run code that this run was not given. A run from a run code
+// gets err as it is.
+func keyedError(fromCode *codeRun, err error) error {
+	if fromCode != nil || err == nil {
+		return err
+	}
+	return errors.New(strings.TrimSuffix(err.Error(), codeUsed))
+}
+
+// The lines of [inputsNotCopied]: the first line is the fix, the second the cause.
+const (
+	textInputsCopyExists = "Remove inputs.json from the home, or omit --home and harness.home, then take the work item in again.\n" +
+		"The home %s has inputs.json, where qory writes the run's inputs. With no --home or harness.home, a run gets a home for that run alone"
+	textInputsNotCopied = "Make the run's home writable for qory, then take the work item in again in Qory Apiary.\n" +
+		"Writing the run's inputs to %s failed: %s"
+)
+
+// inputsNotCopied is the error of a run from Qory Apiary whose copy of inputs.json could
+// not be written into the home at home, see [copyInputs].
+func inputsNotCopied(home string, err error) error {
+	if errors.Is(err, fs.ErrExist) {
+		return fmt.Errorf(textInputsCopyExists+codeUsed, exports.Value(home, false))
+	}
+	return fmt.Errorf(textInputsNotCopied+codeUsed, exports.Value(filepath.Join(home, inputsFile), false), exports.HideError(err))
+}
+
+// removeInputsCopy removes copied, the copy of inputs.json in a home that --home or
+// harness.home sets, when the run ends. report prints a line of qory run.
+func removeInputsCopy(copied string, report func(string)) {
+	if err := os.Remove(copied); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		report(fmt.Sprintf(textCopyNoRemove, exports.Value(copied, false), shownError(err)))
+	}
+}
+
+// moveMount sets the path of each read-only mount of from in mounts to to: the home of a
+// run from a run code, which the wall mounts before the code is redeemed, moves to the
+// home of the run's id.
+func moveMount(mounts []wall.Mount, from, to string) {
+	for i, m := range mounts {
+		if m.ReadOnly && m.Path == from {
+			mounts[i].Path = to
+		}
+	}
 }
 
 // wallOff is the --wall value that runs without the wall forager.yaml sets.

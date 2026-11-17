@@ -84,8 +84,8 @@ func (b *syncBuffer) String() string {
 // and sends a gateway that gateway.server.via sets nothing, though [loadPool] refuses that
 // setting first. It releases a claim that sets a machine type, drops a dispatch whose
 // dispatched returned 410, logs to stderr, and returns nil once its context ends. Each
-// qory run it would start is this binary, with the pool's folder and the runs'
-// configuration directory.
+// qory run it would start is this binary, with the pool's folder, the runs'
+// configuration directory, and the host of pool.registry.
 func TestRunPoolRunsTheLoop(t *testing.T) {
 	srv := provisionertest.New(t)
 	var viaCalls int
@@ -112,7 +112,7 @@ func TestRunPoolRunsTheLoop(t *testing.T) {
 		State: filepath.Join(root, "qory", "pool"), InstanceID: provisionertest.InstanceID, InstanceName: "pool-test", Stderr: &stderr,
 	}
 	p := poolLoop(s, srv.Pool, srv.Pin(), slog.New(slog.NewTextHandler(io.Discard, nil)))
-	want := pool.Settings{Runs: 2, State: s.State, RunConfig: s.Pool.RunConfig,
+	want := pool.Settings{Runs: 2, State: s.State, RunConfig: s.Pool.RunConfig, Registry: "localhost:5001", Instance: srv.URL,
 		Probe: pool.Probe{Docker: docker, Image: agentImageOf, User: "1000:1000"}}
 	if p.Settings != want {
 		t.Errorf("the loop's settings are %+v, want %+v", p.Settings, want)

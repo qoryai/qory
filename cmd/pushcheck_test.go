@@ -25,9 +25,10 @@ import (
 
 // TestAPushCheckReadsTheNewestVersionsInThePullLayout is the working folder of a push
 // check of spec that reads questions and design: index.json byte for byte as qory
-// artifact pull writes it, the newest version of each artifact of the three types under
-// <type>/<name>/v<N>/, no folder for design, which has no version, and nothing of notes,
-// which the check does not read.
+// artifact pull writes it, notes.json with [] for a work item whose snapshot has no
+// notes, the newest version of each artifact of the three types under
+// <type>/<name>/v<N>/, no folder for design, which has no version, and nothing of the
+// artifact type notes, which the check does not read.
 func TestAPushCheckReadsTheNewestVersionsInThePullLayout(t *testing.T) {
 	root := inCheckout(t)
 	server := startRunAPI(t)
@@ -58,6 +59,7 @@ func TestAPushCheckReadsTheNewestVersionsInThePullLayout(t *testing.T) {
 	}
 	want := map[string]string{
 		"index.json":                       server.index,
+		"notes.json":                       "[]",
 		"spec/main/v2/spec.md":             "new\n",
 		"spec/main/v2/notes.md":            "notes\n",
 		"spec/other/v1/spec.md":            "other\n",
@@ -91,6 +93,185 @@ func TestAPushCheckReadsTheNewestVersionsInThePullLayout(t *testing.T) {
 	}
 }
 
+// TestAPushCheckReadsTheWorkItemsNotes is notes.json in the working folder of a push
+// check: the notes of the work item's snapshot byte for byte as the run API returned
+// them, and [] for a work item with none or with null.
+func TestAPushCheckReadsTheWorkItemsNotes(t *testing.T) {
+	inCheckout(t)
+	given := `[{"kind":"answer","stage_id":"plan","by":{"name":"Dana"},"note":"Use the second option.",` +
+		`"artifact_version_id":"av_1","at":"2026-11-16T09:00:00Z"},` +
+		`{"kind":"check","stage_id":"plan","by":null,"note":"build-plan: no step","artifact_version_id":null,"at":"2026-11-16T10:00:00Z"}]`
+	for _, c := range []struct{ notes, want string }{
+		{`,"notes":` + given, given},
+		{`,"notes":[]`, "[]"},
+		{`,"notes":null`, "[]"},
+		{"", "[]"},
+	} {
+		server := startRunAPI(t)
+		server.snapshot = `{"version":1,"work_item":{"id":"wi_1","number":12},"inputs":[],"outputs":[]` + c.notes + `}`
+		fetch, err := cmd.ArtifactsForCheck(server.URL + "/v1/runs/run-1")
+		if err != nil {
+			t.Fatal(err)
+		}
+		dir := t.TempDir()
+		if err := fetch(context.Background(), dir, []string{"build-plan"}); err != nil {
+			t.Fatalf("notes %q: %v", c.notes, err)
+		}
+		got, err := os.ReadFile(filepath.Join(dir, "notes.json"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(got) != c.want {
+			t.Errorf("notes %q: notes.json is\n%s\nwant\n%s", c.notes, got, c.want)
+		}
+	}
+}
+
+// TestNotesThatAreNotAListStopTheFetch is a work item whose notes in the run API's
+// response are not a JSON array: the fetch of a push check fails with its fix, and
+// writes no notes.json.
+func TestNotesThatAreNotAListStopTheFetch(t *testing.T) {
+	inCheckout(t)
+	server := startRunAPI(t)
+	server.snapshot = `{"version":1,"work_item":{"id":"wi_1","number":12},"inputs":[],"outputs":[],"notes":{"note":"x"}}`
+	fetch, err := cmd.ArtifactsForCheck(server.URL + "/v1/runs/run-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	err = fetch(context.Background(), dir, []string{"build-plan"})
+	want := "Contact support: the notes in the run API's response are not a JSON array."
+	if err == nil || err.Error() != want {
+		t.Errorf("the fetch = %v, want %q", err, want)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "notes.json")); !os.IsNotExist(err) {
+		t.Errorf("notes.json is there: %v", err)
+	}
+}
+
+// TestAPushCheckSkipsCancelledVersions is the working folder of a push check of spec
+// when the index marks versions cancelled: spec/main has v2, its newest version that is
+// not cancelled, and spec/other, whose versions are all cancelled, has no folder.
+// index.json is the index byte for byte, cancelled versions included.
+func TestAPushCheckSkipsCancelledVersions(t *testing.T) {
+	inCheckout(t)
+	server := startRunAPI(t)
+	server.index = indexOf(
+		artifactEntry("spec", "main", "", 3,
+			versionEntry("av_1", 1, fileEntry("spec.md", "one\n")),
+			versionEntry("av_2", 2, fileEntry("spec.md", "two\n")),
+			cancelled(versionEntry("av_3", 3, fileEntry("spec.md", "three\n")))),
+		artifactEntry("spec", "other", "", 2,
+			cancelled(versionEntry("av_4", 1, fileEntry("spec.md", "four\n"))),
+			cancelled(versionEntry("av_5", 2, fileEntry("spec.md", "five\n")))),
+	)
+	server.files = map[string]string{
+		"/artifacts/av_1/files/spec.md": "one\n",
+		"/artifacts/av_2/files/spec.md": "two\n",
+		"/artifacts/av_3/files/spec.md": "three\n",
+		"/artifacts/av_4/files/spec.md": "four\n",
+		"/artifacts/av_5/files/spec.md": "five\n",
+	}
+	fetch, err := cmd.ArtifactsForCheck(server.URL + "/v1/runs/run-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	if err := fetch(context.Background(), dir, []string{"spec"}); err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{
+		"index.json":           server.index,
+		"notes.json":           "[]",
+		"spec/main/v2/spec.md": "two\n",
+	}
+	got := map[string]string{}
+	filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		rel, _ := filepath.Rel(dir, path)
+		data, _ := os.ReadFile(path)
+		got[filepath.ToSlash(rel)] = string(data)
+		return nil
+	})
+	if fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Errorf("the working folder has\n%v\nwant\n%v", got, want)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "spec", "other")); !os.IsNotExist(err) {
+		t.Errorf("spec/other has a folder: %v", err)
+	}
+}
+
+// TestAPushCheckMountsTheVersionBeforeAWithdrawal is the working folder of a push check
+// of demo-script when a name is withdrawn: demo-script/main has v1 with s-1 and s-2, v2
+// that adds s-3, and v3, a withdrawal, so a push of v4 is checked against v2, and the
+// folder has v2's files and index.json as the index is. A version of a cancelled run and a
+// withdrawal in between are skipped. A name whose versions are all withdrawals or
+// cancelled has no folder. qory artifact pull still leaves a withdrawn name out.
+func TestAPushCheckMountsTheVersionBeforeAWithdrawal(t *testing.T) {
+	root := inCheckout(t)
+	server := startRunAPI(t)
+	server.index = indexOf(
+		artifactEntry("demo-script", "main", "", 3,
+			versionEntry("av_1", 1, fileEntry("s-1.md", "s-1\ns-2\n")),
+			versionEntry("av_2", 2, fileEntry("s-1.md", "s-1\ns-2\ns-3\n")),
+			withdrawn(versionEntry("av_3", 3))),
+		artifactEntry("demo-script", "other", "", 4,
+			versionEntry("av_4", 1, fileEntry("s-1.md", "one\n")),
+			withdrawn(versionEntry("av_5", 2)),
+			cancelled(versionEntry("av_6", 3, fileEntry("s-1.md", "three\n"))),
+			withdrawn(versionEntry("av_7", 4))),
+		artifactEntry("demo-script", "gone", "", 1, withdrawn(versionEntry("av_8", 1))),
+	)
+	server.files = map[string]string{
+		"/artifacts/av_1/files/s-1.md": "s-1\ns-2\n",
+		"/artifacts/av_2/files/s-1.md": "s-1\ns-2\ns-3\n",
+		"/artifacts/av_4/files/s-1.md": "one\n",
+		"/artifacts/av_6/files/s-1.md": "three\n",
+	}
+	fetch, err := cmd.ArtifactsForCheck(server.URL + "/v1/runs/run-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	if err := fetch(context.Background(), dir, []string{"demo-script"}); err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{
+		"index.json":                  server.index,
+		"notes.json":                  "[]",
+		"demo-script/main/v2/s-1.md":  "s-1\ns-2\ns-3\n",
+		"demo-script/other/v1/s-1.md": "one\n",
+	}
+	got := map[string]string{}
+	filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		rel, _ := filepath.Rel(dir, path)
+		data, _ := os.ReadFile(path)
+		got[filepath.ToSlash(rel)] = string(data)
+		return nil
+	})
+	if fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Errorf("the working folder has\n%v\nwant\n%v", got, want)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "demo-script", "gone")); !os.IsNotExist(err) {
+		t.Errorf("demo-script/gone has a folder: %v", err)
+	}
+
+	// The pull leaves each withdrawn name out.
+	if _, err := run(t, "artifact", "pull"); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"main", "other", "gone"} {
+		if _, err := os.Stat(filepath.Join(root, ".qory", "artifacts", "demo-script", name)); !os.IsNotExist(err) {
+			t.Errorf("the pull made demo-script/%s: %v", name, err)
+		}
+	}
+}
+
 // checksModule is a module that declares a push check for branch and one for spec,
 // which reads questions; its program's #! line is for node.
 var checksModule = map[string]string{
@@ -103,7 +284,7 @@ var checksModule = map[string]string{
 
 // newCheckedRepo is [newPushRepoWith] whose harness has [checksModule] beside hello,
 // for a walled run with the engine docker and a home outside the checkout, which it
-// returns; with docker "", for an unwalled run.
+// returns; with docker "", for a run with no wall section in forager.yaml.
 func newCheckedRepo(t *testing.T, docker string) (*pushRepo, string) {
 	t.Helper()
 	files := map[string]string{}
@@ -115,6 +296,10 @@ func newCheckedRepo(t *testing.T, docker string) (*pushRepo, string) {
 	files["qory.yaml"] = ownStack(stack)
 	p := newPushRepoWith(t, "write", files)
 	if docker == "" {
+		if err := os.Remove(filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "forager.yaml")); err != nil {
+			t.Fatal(err)
+		}
+		p.flags = nil
 		return p, ""
 	}
 	walledBy(t, docker)
@@ -181,8 +366,9 @@ func specPush(t *testing.T) []byte {
 // TestTheAgentsPushIsCheckedBeforeItLeaves is a walled run whose harness declares a
 // check for spec: the run's open gets the check, a push of spec from behind the wall
 // gets 422 push_check_failed with the check's findings, a verdict passes unchecked, and
-// the check's container starts from the run's image, as the wall's user, with the
-// composed home read-only at its path.
+// the check's container starts from the wall's default image, as the wall's user, with
+// the composed home read-only at its path, a copy of the run's inputs.json read-only at
+// the file's path, and --inputs.
 func TestTheAgentsPushIsCheckedBeforeItLeaves(t *testing.T) {
 	docker, log := checkDocker(t, 1, "spec.md: the section Goal is missing\n")
 	p, home := newCheckedRepo(t, docker)
@@ -249,14 +435,119 @@ func TestTheAgentsPushIsCheckedBeforeItLeaves(t *testing.T) {
 	if _, err := os.Stat(parent); !os.IsNotExist(err) {
 		t.Errorf("%s is left after the run: %v", parent, err)
 	}
+	// A copy of the run's inputs.json, in the run directory's push-checks, is mounted
+	// read-only at the file's path, which follows --inputs.
+	inputs := regexp.MustCompile(`--mount type=bind,src=(\S+),dst=(\S+/in/inputs\.json),readonly`).FindStringSubmatch(created)
+	if inputs == nil || filepath.Dir(filepath.Dir(inputs[1])) != parent {
+		t.Fatalf("the check's container does not mount a copy of the run's inputs.json from %s read-only at the file's path:\n%s", parent, created)
+	}
 	for _, want := range []string{
 		"--label dev.qory.run=" + p.runID, "--pids-limit 512",
 		"--network none", "--user 1000:1000",
-		"--entrypoint " + program + " example.com/agent:1 push spec /qory-push-check/files/spec.md",
+		"--entrypoint " + program + " example.com/agent:1 push spec --inputs " + inputs[2] + " /qory-push-check/files/spec.md",
 	} {
 		if !strings.Contains(created, want) {
 			t.Errorf("the check's container lacks %q:\n%s", want, created)
 		}
+	}
+}
+
+// devcontainerImage is a run's image that a change to the repository's .devcontainer/
+// built, in place of the wall's default image example.com/agent:1 of [walledBy].
+const devcontainerImage = "example.com/devcontainer:1"
+
+// imageCheckDocker is [checkDocker] for a check that exits 1 with out from a container
+// of the wall's default image, and exits 0 and prints nothing from a container of
+// [devcontainerImage], whose node is /bin/true. Each command of a check's container goes
+// to the log it returns.
+func imageCheckDocker(t *testing.T, out string) (string, string) {
+	t.Helper()
+	docker, _ := fakeDocker(t)
+	dir := tempDir(t)
+	log := filepath.Join(dir, "checks.log")
+	output := filepath.Join(dir, "output")
+	fromRun := filepath.Join(dir, "from-run-image")
+	writeFile(t, output, out)
+	script := filepath.Join(dir, "docker")
+	writeFile(t, script, `#!/bin/sh
+case "$*" in
+*qory-push-check-*)
+	echo "$*" >> `+log+`
+	case "$1" in
+	create)
+		case "$*" in
+		*" `+devcontainerImage+` "*) : > `+fromRun+` ;;
+		*) rm -f `+fromRun+` ;;
+		esac
+		echo c0ffee ;;
+	start) test -e `+fromRun+` && exit 0; cat `+output+`; exit 1 ;;
+	inspect)
+		code=1
+		test -e `+fromRun+` && code=0
+		echo '{"Status":"exited","ExitCode":'$code',"Error":""}' ;;
+	esac
+	exit 0 ;;
+esac
+exec `+docker+` "$@"
+`)
+	if err := os.Chmod(script, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return script, log
+}
+
+// TestAPushCheckRunsInTheWallsDefaultImage is a walled run whose policy selects
+// [devcontainerImage], whose node is /bin/true, as the run's image: the check of a push
+// of spec runs in the wall's default image, so a push with a finding is still refused.
+func TestAPushCheckRunsInTheWallsDefaultImage(t *testing.T) {
+	docker, log := imageCheckDocker(t, "spec.md: the section Goal is missing\n")
+	p, _ := newCheckedRepo(t, docker)
+	p.policyImage = devcontainerImage
+	var check func(context.Context, session.RunAPIRequest) (*session.RunAPIRefusal, error)
+	p.onSetCheck = func(c func(context.Context, session.RunAPIRequest) (*session.RunAPIRefusal, error)) error {
+		check = c
+		return nil
+	}
+	var refusal *session.RunAPIRefusal
+	var checkErr error
+	p.run(t, func(string) {
+		if check == nil {
+			t.Error("the walled run's open has no RunAPICheck")
+			return
+		}
+		refusal, checkErr = check(context.Background(), session.RunAPIRequest{Path: "/artifacts", Body: specPush(t)})
+	}, func() (*session.Result, error) { return &session.Result{State: event.StateFailed, ExitCode: 3}, nil })
+	if checkErr != nil || refusal == nil || refusal.Status != 422 || !slices.Equal(refusal.Findings, []string{"spec.md: the section Goal is missing"}) {
+		t.Fatalf("the push of spec got %+v, %v, want 422 with the finding\n%s", refusal, checkErr, checkLog(t, log))
+	}
+	created := checkLog(t, log)
+	if !strings.Contains(created, " example.com/agent:1 push spec ") || strings.Contains(created, devcontainerImage) {
+		t.Errorf("the check's container does not start from example.com/agent:1 alone:\n%s", created)
+	}
+}
+
+// TestAMissingDefaultImageStopsARunWithPushChecks is a walled run from a run code with
+// push checks on an engine that does not have the wall's default image: the run stops
+// before the setup and the agent, with exit 2 and the fix line, and sets no check.
+func TestAMissingDefaultImageStopsARunWithPushChecks(t *testing.T) {
+	docker, log := checkDocker(t, 0, "")
+	script := filepath.Join(tempDir(t), "docker")
+	writeFile(t, script, "#!/bin/sh\ncase \"$*\" in\n\"image inspect --format {{.Id}} example.com/agent:1\")\n\techo 'Error response from daemon: No such image: example.com/agent:1' >&2\n\texit 1 ;;\nesac\nexec "+docker+" \"$@\"\n")
+	if err := os.Chmod(script, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	p, _ := newCheckedRepo(t, script)
+	p.policyImage = devcontainerImage
+	setUp, joined := false, false
+	p.setup = func(string) { setUp = true }
+	r := p.run(t, func(string) { joined = true }, nil)
+	r.wantsClose(t, event.StateFailed, cmd.ExitInput)
+	if setUp || joined || slices.Contains(r.calls, "set run API check") {
+		t.Errorf("the run went on: %v, set up %v, joined %v", r.calls, setUp, joined)
+	}
+	wants(t, r.out, "qory run: Pull the wall's default image, then take the work item in again in Qory Apiary.\n  Push checks run in it, and the engine does not have the image example.com/agent:1; the code is used\n")
+	if got := checkLog(t, log); got != "" {
+		t.Errorf("a check's container ran:\n%s", got)
 	}
 }
 
@@ -277,17 +568,21 @@ func TestAWalledRunWithoutPushChecksChecksNothing(t *testing.T) {
 	}
 }
 
-// TestAnUnwalledRunSetsNoCheck is an unwalled run whose harness declares push checks:
-// it sets no run API check, and its push step stores the version unchecked.
+// TestAnUnwalledRunSetsNoCheck is a write run with no wall whose harness declares push
+// checks: it stops before the join with write_needs_wall, sets no run API check, and
+// posts no version.
 func TestAnUnwalledRunSetsNoCheck(t *testing.T) {
 	p, _ := newCheckedRepo(t, "")
 	r := p.run(t, func(dir string) { writeFile(t, filepath.Join(dir, "left.txt"), "left\n") }, nil)
-	r.wantsClose(t, event.StateSucceeded, 0)
+	r.wantsClose(t, event.StateFailed, 1)
+	if want := []session.Outcome{{State: "failed", Reason: "write_needs_wall", ExitCode: -1}}; !slices.Equal(r.closes, want) {
+		t.Errorf("the run closed with %v, want %v", r.closes, want)
+	}
 	if slices.Contains(r.calls, "set run API check") {
 		t.Errorf("the unwalled run set a run API check: %v", r.calls)
 	}
-	if posts, _, stored := p.api.counts(); posts != 1 || stored != 1 {
-		t.Errorf("%d POST and %d versions, want 1 and 1\n%s", posts, stored, r.out)
+	if posts, _, stored := p.api.counts(); posts != 0 || stored != 0 {
+		t.Errorf("%d POST and %d versions, want none\n%s", posts, stored, r.out)
 	}
 }
 
@@ -353,7 +648,7 @@ func TestACheckThatCannotBeSetStopsTheRun(t *testing.T) {
 	if slices.Contains(r.calls, "setup") || joined {
 		t.Errorf("the run went on after the failed set: %v, joined %v", r.calls, joined)
 	}
-	wants(t, r.out, "qory run: Take the work item in again in Qory Apiary: turning on the push checks for the POSTs from behind the wall failed, so the run stopped before the setup: Call SetRunAPICheck before Setup: the setup started; the code is used\n")
+	wants(t, r.out, "qory run: Take the work item in again in Qory Apiary.\n  Turning on the push checks for the POSTs from behind the wall failed, so the run stopped before the setup: Call SetRunAPICheck before Setup: the setup started; the code is used\n")
 }
 
 // TestThePushStepChecksItsVersion is a walled run whose harness declares a check for
@@ -417,7 +712,7 @@ func TestAHomeWhosePushChecksDoNotReadStopsTheRun(t *testing.T) {
 	if setUp || joined {
 		t.Errorf("the setup ran %v, the agent ran %v, want neither", setUp, joined)
 	}
-	wants(t, r.out, "qory run: Take the work item in again in Qory Apiary, so that the new run composes the harness again: the push checks in "+file+" could not be read: it is not JSON in the form the compose writes: unexpected end of JSON input; the code is used\n")
+	wants(t, r.out, "qory run: Take the work item in again in Qory Apiary, so that the new run composes the harness again.\n  The push checks in "+file+" could not be read: it is not JSON in the form the compose writes: unexpected end of JSON input; the code is used\n")
 	if got := checkLog(t, log); got != "" {
 		t.Errorf("a check's container ran:\n%s", got)
 	}
@@ -532,7 +827,7 @@ func TestARunAPIThatFailsStopsARunWithPushChecks(t *testing.T) {
 	if joined || slices.Contains(r.calls, "setup") || slices.Contains(r.calls, "set run API check") {
 		t.Errorf("the run went on: %v, joined %v", r.calls, joined)
 	}
-	wants(t, r.out, "qory run: Take the work item in again in Qory Apiary, through a gateway that sends the run API address: the push checks read the artifacts through the run API, which failed: Open another run to reach the run API: this run is closed; the code is used\n")
+	wants(t, r.out, "qory run: Take the work item in again in Qory Apiary, through a gateway that sends the run API address.\n  The push checks read the artifacts through the run API, which failed: Open another run to reach the run API: this run is closed; the code is used\n")
 }
 
 // TestAWritableMountInTheHomeStopsARunCodeWithPushChecks is a walled run from a run code

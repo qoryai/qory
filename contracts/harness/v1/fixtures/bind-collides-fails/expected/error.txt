@@ -1,1 +1,2 @@
-bind agents/reviewer defines a role, and module core ships agent reviewer; a role's name is no entry's
+Rename role agents.reviewer in bind, or rename agent reviewer in module core.
+  The bind defines role agents.reviewer, and module core ships agent reviewer: a role and an entry cannot share a name.

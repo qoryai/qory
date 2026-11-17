@@ -101,7 +101,7 @@ func TestAWalledRunFromARunCodeWithAMountOfQorysCacheFolderStops(t *testing.T) {
 // set to hidden, as [codeRunOf] reads them.
 func codeRunHidden(t *testing.T, hidden bool) *codeRun {
 	t.Helper()
-	r, err := codeRunOf(contracts.Documents{Workflow: "example", HarnessHidden: &hidden, RunSettings: &contracts.RunSettings{Runtime: "claude"}})
+	r, err := codeRunOf(contracts.Documents{Inputs: json.RawMessage(`{}`), Workflow: "example", HarnessHidden: &hidden, RunSettings: &contracts.RunSettings{Runtime: "claude"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -425,7 +425,7 @@ func TestARunCodesLinesShowTheHarnessByItsPhrase(t *testing.T) {
 	doc := &contracts.HarnessDocument{Harness: contracts.HarnessSection{Extends: &contracts.HarnessBase{Git: "https://code.example.com/team/stacks", Ref: "release-7", Path: "stacks/core"}}}
 	for _, hidden := range []bool{true, false} {
 		for harness, phrase := range map[*contracts.HarnessDocument]string{doc: "the workspace's harness", nil: "the checkout's harness"} {
-			r, err := codeRunOf(contracts.Documents{Harness: harness, Workflow: "example", HarnessHidden: &hidden, RunSettings: &contracts.RunSettings{Runtime: "claude"}})
+			r, err := codeRunOf(contracts.Documents{Inputs: json.RawMessage(`{}`), Harness: harness, Workflow: "example", HarnessHidden: &hidden, RunSettings: &contracts.RunSettings{Runtime: "claude"}})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -468,7 +468,7 @@ func TestAMissingWorkflowEndsTheRunWithItsReason(t *testing.T) {
 		{nil, nil, "code.example.com", "the checkout's harness"},
 		{doc, target, "code.example.com", "the workspace's harness"},
 	} {
-		r, err := codeRunOf(contracts.Documents{Harness: c.harness, Target: c.target, Workflow: "example", RunSettings: &contracts.RunSettings{Runtime: "claude"}})
+		r, err := codeRunOf(contracts.Documents{Inputs: json.RawMessage(`{}`), Harness: c.harness, Target: c.target, Workflow: "example", RunSettings: &contracts.RunSettings{Runtime: "claude"}})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -561,7 +561,7 @@ func TestAHarnessDocumentThatDefinesAStackIsWrittenWithTheRunsRuntime(t *testing
 		t.Errorf("a module in a folder: %v", err)
 	}
 	for _, settings := range []*contracts.RunSettings{{Runtime: "claude"}, nil} {
-		r, err := codeRunOf(contracts.Documents{Harness: defined("https://code.example.com/team/tools.git"), Workflow: "example", RunSettings: settings})
+		r, err := codeRunOf(contracts.Documents{Inputs: json.RawMessage(`{}`), Harness: defined("https://code.example.com/team/tools.git"), Workflow: "example", RunSettings: settings})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -581,9 +581,46 @@ func TestAHarnessDocumentThatDefinesAStackIsWrittenWithTheRunsRuntime(t *testing
 			t.Errorf("run settings %+v: defines %v, harness.yaml has:\n%s", settings, r.defines, r.harness)
 		}
 	}
-	r, err := codeRunOf(contracts.Documents{Harness: &contracts.HarnessDocument{Harness: contracts.HarnessSection{Extends: &contracts.HarnessBase{Git: "https://code.example.com/team/stacks", Ref: "release-7"}}}, Workflow: "example"})
+	r, err := codeRunOf(contracts.Documents{Inputs: json.RawMessage(`{}`), Harness: &contracts.HarnessDocument{Harness: contracts.HarnessSection{Extends: &contracts.HarnessBase{Git: "https://code.example.com/team/stacks", Ref: "release-7"}}}, Workflow: "example"})
 	if err != nil || r.defines || strings.Contains(string(r.harness), "target") {
 		t.Errorf("a document with extends: %v, defines %v, harness.yaml has:\n%s", err, r != nil && r.defines, r.harness)
+	}
+}
+
+// TestAHarnessDocumentsBindIsWrittenInItsForm is a harness document whose bind sets the
+// group role agents/reviewers to a list of two agents, the role agents/lead to one name
+// and the role skills/welcome to one name: qory writes each role to harness.yaml as the
+// documents have it, a list as a list and a name as a string, for a document that
+// extends a stack and for one that defines a stack.
+func TestAHarnessDocumentsBindIsWrittenInItsForm(t *testing.T) {
+	const documents = `{"harness":{%s,"bind":{"agents":{"reviewers":["code-reviewer","test-reviewer"],"lead":"review-lead"},"skills":{"welcome":"greet"}}}}`
+	want := map[string]map[string]any{
+		"agents": {"reviewers": []any{"code-reviewer", "test-reviewer"}, "lead": "review-lead"},
+		"skills": {"welcome": "greet"},
+	}
+	for name, source := range map[string]string{
+		"extends": `"extends":{"git":"https://code.example.com/team/stacks","ref":"release-7"}`,
+		"defines": `"modules":[{"name":"tools","source":{"git":"https://code.example.com/team/tools.git","ref":"main"}}],"workflows":{"example":{"access":"write"}}`,
+	} {
+		var h contracts.HarnessDocument
+		if err := json.Unmarshal(fmt.Appendf(nil, documents, source), &h); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		r, err := codeRunOf(contracts.Documents{Inputs: json.RawMessage(`{}`), Harness: &h, Workflow: "example"})
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		var doc struct {
+			Harness struct {
+				Bind map[string]map[string]any `json:"bind"`
+			} `json:"harness"`
+		}
+		if err := json.Unmarshal(r.harness, &doc); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if !reflect.DeepEqual(doc.Harness.Bind, want) {
+			t.Errorf("%s: harness.yaml has:\n%s\nwant the bind %v", name, r.harness, want)
+		}
 	}
 }
 
@@ -593,7 +630,7 @@ func TestAHarnessDocumentThatDefinesAStackIsWrittenWithTheRunsRuntime(t *testing
 // that kind by no name, in either direction, one with no headless start, and one this
 // qory does not render, stop the run.
 func TestARunCodesWorkflowStartsOnEachRuntimesHeadlessStart(t *testing.T) {
-	r, err := codeRunOf(contracts.Documents{Workflow: "example", RunSettings: &contracts.RunSettings{Runtime: "claude"}})
+	r, err := codeRunOf(contracts.Documents{Inputs: json.RawMessage(`{}`), Workflow: "example", RunSettings: &contracts.RunSettings{Runtime: "claude"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -635,7 +672,7 @@ func TestARunCodesWorkflowStartsOnEachRuntimesHeadlessStart(t *testing.T) {
 		}
 	}
 	for _, runtime := range []string{"goose", "amp", "copilot", "any", "example"} {
-		_, err := codeRunOf(contracts.Documents{Workflow: "example", RunSettings: &contracts.RunSettings{Runtime: runtime}})
+		_, err := codeRunOf(contracts.Documents{Inputs: json.RawMessage(`{}`), Workflow: "example", RunSettings: &contracts.RunSettings{Runtime: runtime}})
 		if want := noHeadless(runtime); err == nil || err.Error() != want.Error() {
 			t.Errorf("%s: codeRunOf got %v, want %v", runtime, err, want)
 		}

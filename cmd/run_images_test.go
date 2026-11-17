@@ -53,7 +53,7 @@ func TestRunStartsTheImageTheMachineDefines(t *testing.T) {
 		"--runtime sysbox-runc --user 0:0 --security-opt no-new-privileges --init --mount type=volume,dst=/var/lib/docker ",
 		"src=" + helper + ",dst=/qory/qory,readonly",
 		"--entrypoint /qory/qory example.com/agent-go-docker:1 run nest --user 1000:1000 -- /qory/qory run exec --unset ",
-		" -- claude --settings " + runsDir(t, root),
+		" -- /qory/runtime/claude/bin/claude --settings " + runsDir(t, root),
 	}
 	for _, c := range []struct {
 		name    string
@@ -63,7 +63,7 @@ func TestRunStartsTheImageTheMachineDefines(t *testing.T) {
 		started map[string]any
 	}{
 		{"the default, by name", nil,
-			[]string{"--entrypoint /qory/qory example.com/agent-go:1 run exec --unset ", " -- claude --settings " + runsDir(t, root)},
+			[]string{"--entrypoint /qory/qory example.com/agent-go:1 run exec --unset ", " -- /qory/runtime/claude/bin/claude --settings " + runsDir(t, root)},
 			[]string{"--runtime", "run nest", "agent-go-docker", session.PreparationScript},
 			map[string]any{"image": "example.com/agent-go:1", "image_name": "go", "container_runtime": nil, "docker": nil}},
 		{"--image, by name", []string{"--image", "go-docker"}, nested, []string{"--entrypoint claude"},
@@ -75,7 +75,7 @@ func TestRunStartsTheImageTheMachineDefines(t *testing.T) {
 		{"--image over the policy's none", []string{"--image", "go-docker", "--policy", imagePolicy(t, "")}, nested, []string{"--entrypoint claude"},
 			map[string]any{"image": "example.com/agent-go-docker:1", "image_name": "go-docker", "container_runtime": "sysbox-runc", "docker": true}},
 		{"--image, a reference", []string{"--image", "example.com/other:3"},
-			[]string{"--entrypoint /qory/qory example.com/other:3 run exec --unset ", " -- claude --settings"},
+			[]string{"--entrypoint /qory/qory example.com/other:3 run exec --unset ", " -- /qory/runtime/claude/bin/claude --settings"},
 			[]string{"--runtime", "run nest"},
 			map[string]any{"image": "example.com/other:3", "image_name": nil, "container_runtime": nil, "docker": nil}},
 	} {

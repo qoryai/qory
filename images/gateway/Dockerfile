@@ -33,10 +33,10 @@
 # The image built from the Dockerfile at the root, of the same commit: by digest, or
 # qory, a local tag of it.
 ARG QORY_IMAGE=qory
-# Docker Hub's official golang image of Go 1.27.3, under the same digest as the root
+# Docker Hub's official golang image of Go 1.27.4, under the same digest as the root
 # Dockerfile's default, for its authorities only: those of the Debian package
 # ca-certificates.
-ARG GO_IMAGE=public.ecr.aws/docker/library/golang:1.27.3@sha256:f24164268fc1e741bbdc0066dbadcf1c8426c5a8489f0729c02c3905a53032fd
+ARG GO_IMAGE=public.ecr.aws/docker/library/golang:1.27.4@sha256:fe517acaa580cc7915457080f850c37e618b3c1e750f98b58fc6429b605147a1
 
 FROM ${QORY_IMAGE} AS qory
 

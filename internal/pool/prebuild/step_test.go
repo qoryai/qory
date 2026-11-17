@@ -20,7 +20,7 @@ import (
 func testStep(out string) prebuild.Step {
 	return prebuild.Step{
 		Out: out, RunID: testRunID, ImageDestination: testDestination, EnvironmentDestination: testEnvironmentDestination,
-		AgentImage: testAgent, User: "1000:1000",
+		User: "1000:1000",
 	}
 }
 
@@ -29,7 +29,7 @@ func testStep(out string) prebuild.Step {
 func TestStepArgsReadBack(t *testing.T) {
 	for _, st := range []prebuild.Step{
 		testStep("/w/out"),
-		{Out: "/w/out", RunID: testRunID, ImageDestination: testDestination, EnvironmentImage: testEnvImage, AgentImage: testAgent, User: "1000:1000"},
+		{Out: "/w/out", RunID: testRunID, ImageDestination: testDestination, EnvironmentImage: testEnvImage, User: "1000:1000"},
 	} {
 		got, err := prebuild.ParseStep(st.Args())
 		if err != nil || got != st {
@@ -50,14 +50,14 @@ func TestParseStepErrors(t *testing.T) {
 		args []string
 		want string
 	}{
-		{"unknown flag", append(slices.Clone(args), "--tag", "x"), "give qory run prebuild-step only --out, --run-id, --image-destination, --environment-destination, --environment-image, --agent-image and --user: it does not take "},
+		{"removed --agent-image", append(slices.Clone(args), "--agent-image", "x"), "give qory run prebuild-step only --out, --run-id, --image-destination, --environment-destination, --environment-image and --user: it does not take \"--agent-image\""},
+		{"unknown flag", append(slices.Clone(args), "--tag", "x"), "give qory run prebuild-step only --out, --run-id, --image-destination, --environment-destination, --environment-image and --user: it does not take "},
 		{"a flag twice", append(slices.Clone(args), "--user", "0:0"), "give --user once: qory run prebuild-step got it twice"},
 		{"no value", append(slices.Clone(args), "--environment-image"), "give a value after --environment-image: qory run prebuild-step got none"},
 		{"relative out", testStep("out").Args(), "give qory run prebuild-step --out with an absolute path: it writes its result there"},
 		{"no out", args[2:], "give qory run prebuild-step --out with an absolute path: it writes its result there"},
 		{"run id", append(slices.Clone(args[:2]), "--run-id", "../x"), "the run id is not a UUID"},
-		{"agent image by tag", prebuild.Step{Out: "/w", RunID: testRunID, ImageDestination: testDestination, EnvironmentDestination: testEnvironmentDestination, AgentImage: "a:1", User: "1:1"}.Args(), "the agent image is not pinned by digest"},
-		{"both environment members", prebuild.Step{Out: "/w", RunID: testRunID, ImageDestination: testDestination, EnvironmentDestination: testEnvironmentDestination, EnvironmentImage: testEnvImage, AgentImage: testAgent, User: "1:1"}.Args(), "ask Qory Apiary's instance admin: the run has both or neither"},
+		{"both environment members", prebuild.Step{Out: "/w", RunID: testRunID, ImageDestination: testDestination, EnvironmentDestination: testEnvironmentDestination, EnvironmentImage: testEnvImage, User: "1:1"}.Args(), "ask Qory Apiary's instance admin: the run has both or neither"},
 	} {
 		if _, err := prebuild.ParseStep(c.args); err == nil || !strings.HasPrefix(err.Error(), c.want) {
 			t.Errorf("%s: %v, want %q", c.name, err, c.want)
@@ -76,7 +76,7 @@ func TestRunStepWritesItsError(t *testing.T) {
 		t.Fatal(err)
 	}
 	out := t.TempDir()
-	st := prebuild.Step{Out: out, RunID: testRunID, ImageDestination: testDestination, EnvironmentImage: testEnvImage, AgentImage: testAgent, User: "1000:1000"}
+	st := prebuild.Step{Out: out, RunID: testRunID, ImageDestination: testDestination, EnvironmentImage: testEnvImage, User: "1000:1000"}
 	settings := prebuild.StepSettings{Dir: t.TempDir(), Env: e.stepEnv(), Docker: os.Args[0], Build: e.build}
 	err := prebuild.RunStep(context.Background(), st, settings)
 	if !errors.Is(err, devimage.ErrImageMissing) {

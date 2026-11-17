@@ -1,18 +1,23 @@
 # agent: the image the wall runs the agent in, the base every other agent image of
-# Qory's is built FROM. It contains what qory's harness launches and the tools a run may
-# need to deliver its work: Claude Code at the version Forager's descriptor for it sets,
+# Qory's is built FROM. It contains no agent runtime, such as Claude Code or Codex: the
+# machine installs the runtime at run time, and Forager mounts it read-only at
+# /qory/runtime/<runtime>. It contains the tools a run may need to deliver its work:
 # git, the GitHub command, Chromium with Noto's fonts for Latin and other scripts, CJK
 # and color emoji, ffmpeg and ffprobe, ImageMagick, poppler's pdftoppm (Claude Code
 # renders a PDF's pages with it), qpdf, rsvg-convert, Graphviz, Tesseract OCR with
 # 28 European languages, pandoc, Python 3 with PyYAML, Requests, Beautiful Soup, lxml,
 # cssselect, Pillow, openpyxl and python-docx, jq, yq, curl, ripgrep, SQLite, zip,
-# unzip, xz, file, tree, less, bc, envsubst, rsync, patch, and the system's authorities
-# where the wall reads them. It runs as any user the machine gives it, with HOME a
-# directory every user may write, and contains no setuid or setgid program. It sets no
-# entry point: the wall starts the launch command, or qory's helper, itself.
+# unzip, xz, file, tree, less, bc, envsubst, rsync, patch, the Node packages typescript,
+# libpg-query, parse5, postcss and postcss-scss, which parse code without running it,
+# and the system's authorities where the wall reads them. It runs as any user the machine
+# gives it, with HOME a directory every user may write, and contains no setuid or setgid
+# program. It sets no entry point: the wall starts the launch command, or qory's helper,
+# itself.
 #
-# Every version and every sum is a build argument, with its default below. Build it from
-# a checkout of qory at the commit qory version prints, for linux/amd64 or linux/arm64:
+# Every version and every sum is a build argument, with its default below, except those of
+# the Node packages, which are in parsers/package.json and parsers/package-lock.json. Build
+# it from a checkout of qory at the commit qory version prints, for linux/amd64 or
+# linux/arm64:
 #
 #	docker build -t qory-agent images/agent
 #	qory image check qory-agent
@@ -34,17 +39,6 @@ ARG DEBIAN_SNAPSHOT=20260918T000000Z
 ARG GH_VERSION=2.101.0
 ARG GH_SHA256_AMD64=9bca2d1c16825f109907a23307628a2f0698fbf99662b73a5cf0b020293072b8
 ARG GH_SHA256_ARM64=b57e8063f18862647c9d22727c32e9da1b963f8bf9db648fe123a6975695640f
-# Claude Code: the version contracts/forager/v1/runtimes/claude/descriptor.yaml names in
-# the Forager module qory's go.mod requires, which qory image check compares. The sums are
-# npm's dist.integrity, sha512 in hex, of @anthropic-ai/claude-code and of its native
-# build for each platform, @anthropic-ai/claude-code-linux-x64 and -linux-arm64.
-# Keep it at 2.1.257 or later: a harness module's settings use
-# permissions.blockReadsOutsideWorkingDirectories, which needs it.
-# Keep it at 2.1.280 or later: the model API requires that for claude-opus-5-5.
-ARG CLAUDE_CODE_VERSION=2.1.316
-ARG CLAUDE_CODE_SHA512=8b7069cf20e47023e7b1ad024a45a0c463eced632ccaa0e4c64a93d120f1c840b95cc2311267149a5b964471bd55278163c572bfe97d5f7e09bc9fc18f9e2705
-ARG CLAUDE_CODE_SHA512_AMD64=4500cce8ddbce488cd29c9a53d1ae26b2373a5390426b780c39fef054f95d11dea963910e73ebfa526f37155005ef6aca0e96fb9bd112266b7356bd2b9903c0a
-ARG CLAUDE_CODE_SHA512_ARM64=c6a9409218122c231d71a7a940d22cd7eca6e57f7ef9aa6211e39cd0b1d154e1e97cb96960a01a01705171c33a4152133744fdb172c221bcbb08ed4b733bac83
 
 FROM --platform=$BUILDPLATFORM ${FETCH_IMAGE} AS gh
 ARG TARGETARCH
@@ -61,30 +55,25 @@ RUN case "${TARGETARCH}" in \
  && mkdir /out \
  && tar -xzf /tmp/gh.tar.gz -C /out --strip-components=1 --no-same-owner
 
-FROM --platform=$BUILDPLATFORM ${FETCH_IMAGE} AS claude-amd64
-ARG CLAUDE_CODE_VERSION
-ARG CLAUDE_CODE_SHA512
-ARG CLAUDE_CODE_SHA512_AMD64
-ADD https://registry.npmjs.org/@anthropic-ai/claude-code/-/claude-code-${CLAUDE_CODE_VERSION}.tgz /out/claude-code.tgz
-ADD https://registry.npmjs.org/@anthropic-ai/claude-code-linux-x64/-/claude-code-linux-x64-${CLAUDE_CODE_VERSION}.tgz /out/claude-code-native.tgz
-RUN printf '%s  %s\n' "${CLAUDE_CODE_SHA512}" /out/claude-code.tgz "${CLAUDE_CODE_SHA512_AMD64}" /out/claude-code-native.tgz \
-    | sha512sum -c -
-
-FROM --platform=$BUILDPLATFORM ${FETCH_IMAGE} AS claude-arm64
-ARG CLAUDE_CODE_VERSION
-ARG CLAUDE_CODE_SHA512
-ARG CLAUDE_CODE_SHA512_ARM64
-ADD https://registry.npmjs.org/@anthropic-ai/claude-code/-/claude-code-${CLAUDE_CODE_VERSION}.tgz /out/claude-code.tgz
-ADD https://registry.npmjs.org/@anthropic-ai/claude-code-linux-arm64/-/claude-code-linux-arm64-${CLAUDE_CODE_VERSION}.tgz /out/claude-code-native.tgz
-RUN printf '%s  %s\n' "${CLAUDE_CODE_SHA512}" /out/claude-code.tgz "${CLAUDE_CODE_SHA512_ARM64}" /out/claude-code-native.tgz \
-    | sha512sum -c -
-
-FROM claude-${TARGETARCH} AS claude
+# The Node parsers, installed from parsers/package-lock.json, which has an exact version and
+# a sha512 sum for each package and each package it needs. No package runs a script at
+# install, and libpg-query is WebAssembly with no native code, so one install serves both
+# architectures and the build runs on the machine that builds, never under emulation. The
+# folder is owned by root, mode 0755 for folders and 0644 for files, so a session reads
+# it and cannot change it. This stage holds the npm cache; the image gets only the folder.
+# To change a version, edit parsers/package.json, then run npm install --package-lock-only
+# --ignore-scripts in parsers/ and check the diff of the lock.
+FROM --platform=$BUILDPLATFORM ${NODE_IMAGE} AS parsers
+COPY parsers/package.json parsers/package-lock.json /opt/qory/parsers/
+RUN cd /opt/qory/parsers \
+ && npm ci --ignore-scripts --no-audit --no-fund --cache /tmp/npm-cache \
+ && chown -R root:root /opt/qory \
+ && find /opt/qory -type d -exec chmod 0755 {} + \
+ && find /opt/qory -type f -exec chmod 0644 {} +
 
 FROM ${NODE_IMAGE}
 ARG NODE_IMAGE
 ARG DEBIAN_SNAPSHOT
-ARG CLAUDE_CODE_VERSION
 
 # From the snapshot, through a copy of the base's sources that names it; the image keeps
 # the base's apt sources, so what is built FROM it installs from Debian as usual. Retries
@@ -171,23 +160,17 @@ RUN apt="-o Dir::Etc::SourceList=/tmp/snapshot.sources -o Dir::Etc::SourceParts=
       zip \
  && rm -rf /var/lib/apt/lists/* /tmp/snapshot.sources
 
-# From the checked archives alone, with no registry: the package's install script, the
-# one script allowed, puts the native build in place of a stub. The version test fails a
-# build that kept the stub.
-RUN --mount=type=bind,from=claude,source=/out,target=/tmp/claude \
-    npm install --global --offline --omit=optional --no-fund --no-audit --no-update-notifier \
-      --strict-allow-scripts --allow-scripts=file:/tmp/claude/claude-code.tgz \
-      /tmp/claude/claude-code.tgz /tmp/claude/claude-code-native.tgz \
- && npm cache clean --force \
- && rm -rf /root/.npm \
- && test "$(claude --version | cut -d' ' -f1)" = "${CLAUDE_CODE_VERSION}"
-
 COPY --from=gh /out/bin/gh /usr/local/bin/gh
 
+# Not under /qory: Forager mounts /qory/runtime/<runtime> there.
+COPY --from=parsers --chown=0:0 /opt/qory/parsers /opt/qory/parsers
+
 # Each tool runs, Chromium from /usr/bin, Tesseract lists each language installed, and
-# fontconfig lists a font of each Noto package; a check that fails prints its fix. HOME
-# is one directory every user may write, with the sticky bit, because the wall runs the
-# agent as the machine's user id, which has no entry in this image.
+# fontconfig lists a font of each Noto package; a check that fails prints its fix. Each
+# Node parser loads from /opt/qory/parsers and has the version of parsers/package.json,
+# and the image's non-root user cannot write there. HOME is one directory every user may
+# write, with the sticky bit, because the wall runs the agent as the machine's user id,
+# which has no entry in this image.
 RUN gh --version \
  && git --version \
  && pdftoppm -v \
@@ -223,6 +206,21 @@ RUN gh --version \
  && envsubst --version \
  && rsync --version \
  && patch --version \
+ && for pkg in libpg-query parse5 postcss postcss-scss typescript; do \
+      dir="/opt/qory/parsers/node_modules/$pkg"; \
+      node -e "require('$dir')" \
+        || { echo "Fix parsers/: require of $pkg from /opt/qory/parsers fails" >&2; exit 1; }; \
+      want="$(node -p "require('/opt/qory/parsers/package.json').dependencies['$pkg']")"; \
+      have="$(node -p "require('$dir/package.json').version")"; \
+      [ "$have" = "$want" ] \
+        || { echo "Run npm ci in parsers/: $pkg is $have, not $want" >&2; exit 1; }; \
+    done \
+ && bad="$(find /opt/qory/parsers ! -type l \( -perm /022 -o ! -user root \) -print -quit)" \
+ && { test -z "$bad" || { echo "Set root and mode 0755 or 0644 in /opt/qory/parsers: $bad is not" >&2; exit 1; }; } \
+ && { ! runuser -u node -- sh -c ': > /opt/qory/parsers/node_modules/typescript/lib/b749-write' 2>/dev/null \
+      || { echo "Make /opt/qory/parsers read-only for every user but root: user node wrote there" >&2; exit 1; }; } \
+ && { ! runuser -u node -- sh -c ': >> /opt/qory/parsers/node_modules/typescript/package.json' 2>/dev/null \
+      || { echo "Make /opt/qory/parsers read-only for every user but root: user node changed a file there" >&2; exit 1; }; } \
  && { fc-list | grep -q 'Noto Sans Arabic' || { echo "Add fonts-noto-core: fontconfig lists no Noto Sans Arabic" >&2; exit 1; }; } \
  && { fc-list | grep -q 'Noto Sans CJK' || { echo "Add fonts-noto-cjk: fontconfig lists no Noto Sans CJK" >&2; exit 1; }; } \
  && { fc-list | grep -q 'Noto Color Emoji' || { echo "Add fonts-noto-color-emoji: fontconfig lists no Noto Color Emoji" >&2; exit 1; }; } \
@@ -230,11 +228,9 @@ RUN gh --version \
  && chmod 1777 /home/agent \
  && find / -xdev -type f \( -perm -4000 -o -perm -2000 \) -exec chmod ug-s {} +
 
-# The agent's programs neither update themselves nor ask a person: under enforce a check
-# for updates or a report is a denied connection, and nobody answers a prompt.
+# The image's tools, gh, git and npm, neither check for updates nor ask a person: under
+# enforce a check for updates is a denied connection, and nobody answers a prompt.
 ENV HOME=/home/agent \
-    DISABLE_AUTOUPDATER=1 \
-    CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 \
     GH_NO_UPDATE_NOTIFIER=1 \
     GH_PROMPT_DISABLED=1 \
     GIT_TERMINAL_PROMPT=0 \
@@ -244,6 +240,6 @@ ENTRYPOINT []
 CMD []
 
 LABEL org.opencontainers.image.title="agent" \
-      org.opencontainers.image.description="The image Qory's wall runs the agent in: Claude Code, git, gh, Chromium and the tools a run may need, for any user." \
+      org.opencontainers.image.description="The image Qory's wall runs the agent in: git, gh, Chromium and the tools a run may need, for any user, with no agent runtime." \
       org.opencontainers.image.source="https://github.com/qoryai/qory" \
       org.opencontainers.image.base.name="${NODE_IMAGE}"

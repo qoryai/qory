@@ -5,17 +5,14 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/qoryai/forager/accesskey"
-	"github.com/qoryai/forager/session/runtimes/catalog"
 	"github.com/spf13/cobra"
 
 	"github.com/qoryai/qory/internal/config"
 	"github.com/qoryai/qory/internal/exports"
 	"github.com/qoryai/qory/internal/image"
-	"github.com/qoryai/qory/internal/render"
 	"github.com/qoryai/qory/internal/ui"
 )
 
@@ -28,7 +25,7 @@ func newImage() *cobra.Command {
 
 Three are defined under images/ in qory's repository, for linux/amd64 and linux/arm64:
 
-  agent          Claude Code, git, gh, Chromium, and tools for media, documents and data
+  agent          git, gh, Chromium, and tools for media, documents and data
   agent-docker   agent, and nested Docker: a Docker daemon inside the wall, separate from the machine's
   prebuild       agent-docker, the devcontainer command and buildx: the image a prebuild runs in behind its wall
 
@@ -61,11 +58,13 @@ network, and qory's Linux build checks from inside:
   - HOME is a directory that user writes in
   - the system's authorities are where the wall reads them
   - /bin/sh is there, for the runtime's hooks and the session's API-key approval
-  - each runtime Forager describes is the version its descriptor sets
   - git and gh run, and git 2.25 or later, cat, chmod, comm, cp, find, grep, mkdir, mv,
     readlink, sleep, sort, stat and tr are in /usr/local/bin, /usr/bin or /bin, for the git
     session of a walled run that may write
   - dockerd, for nested Docker, and what it runs
+
+It checks no runtime, such as Claude Code: no image contains one. The machine installs
+the runtime, and Forager mounts it and checks it when a run starts.
 
 The Linux build is wall.helper, for the engine's architecture; on Linux, this binary
 when wall.helper is not set. The docker command is wall.command, or docker.
@@ -116,24 +115,6 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md#qorys-images`,
 			if err != nil {
 				return input(fmt.Errorf("qory's Linux build %s: %w", exports.Value(helper, false), exports.HideError(err)))
 			}
-			user, err := config.UserDir()
-			if err != nil {
-				return input(err)
-			}
-			listed, err := foragerRuntimes()
-			if err != nil {
-				return err
-			}
-			// Each runtime of Forager's list, at the version in its descriptor, a
-			// descriptor in the machine's runtimes folder first, as a run reads it.
-			probed := make([]image.Runtime, len(listed))
-			for i, name := range listed {
-				rt, err := catalog.Lookup(name, filepath.Join(user, DescriptorsDir))
-				if err != nil {
-					return input(err)
-				}
-				probed[i] = image.Runtime{Name: name, Version: rt.Version()}
-			}
 			engine := image.Engine{Command: section.Command}
 			platform, err := engine.Platform(cmd.Context())
 			if err != nil {
@@ -146,15 +127,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md#qorys-images`,
 
 			u := ui.New(cmd.OutOrStdout())
 			u.Title("qory image check", "engine "+platform)
-			fields := [][2]string{{"probe", exports.Value(ui.Short(helper, ""), false) + ", " + arch}}
-			for _, rt := range probed {
-				version := rt.Version + ", Forager's descriptor's"
-				if rt.Version == "" {
-					version = "any version; Forager's descriptor names none"
-				}
-				fields = append(fields, [2]string{rt.Name, version})
-			}
-			u.Fields(fields)
+			u.Fields([][2]string{{"probe", exports.Value(ui.Short(helper, ""), false) + ", " + arch}})
 			var failed []string
 			for i, ref := range refs {
 				u.Blank()
@@ -163,7 +136,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md#qorys-images`,
 				} else {
 					u.Heading(shownImage(names[i], ref) + " (" + exports.Value(ref, false) + ")")
 				}
-				checks := engine.Check(cmd.Context(), platform, image.Target{Ref: ref, Helper: helper, Runtimes: probed})
+				checks := engine.Check(cmd.Context(), platform, image.Target{Ref: ref, Helper: helper})
 				var facts [][2]string
 				for _, c := range checks {
 					switch c.Result {
@@ -223,44 +196,19 @@ func imageRef(section config.ForagerWall, name string) string {
 
 // newImageProbe builds the hidden probe verb, what qory image check runs as the entry
 // point of a container of the image: it checks the image from inside, as the user the
-// container runs as, for each runtime its arguments list as <name>=<version>, an empty
-// version taking any, and prints an [image.Report] as JSON on its standard output. It
+// container runs as, and prints an [image.Report] as JSON on its standard output. It
 // fails only when it cannot print.
 func newImageProbe() *cobra.Command {
 	return &cobra.Command{
-		Use:    "probe [runtime=version...]",
+		Use:    "probe",
 		Short:  "Check the image this runs in, from inside, and print the report as JSON",
 		Hidden: true,
-		RunE: func(cmd *cobra.Command, args []string) error {
+		RunE: func(cmd *cobra.Command, _ []string) error {
 			p := image.Probe{
-				Root:     "/",
-				Runtimes: probeRuntimes(args),
-				User:     fmt.Sprintf("%d:%d", os.Getuid(), os.Getgid()),
+				Root: "/",
+				User: fmt.Sprintf("%d:%d", os.Getuid(), os.Getgid()),
 			}
 			return json.NewEncoder(cmd.OutOrStdout()).Encode(p.Report(cmd.Context()))
 		},
 	}
-}
-
-// probeRuntimes are the runtimes of the probe's arguments, each <name>=<version>, with
-// the program each one's launch template starts and its [render.Installer] package. A
-// runtime this qory does not render, or renders with no launch template, has no
-// program, and its line fails.
-func probeRuntimes(args []string) []image.Runtime {
-	out := make([]image.Runtime, len(args))
-	for i, a := range args {
-		name, version, _ := strings.Cut(a, "=")
-		out[i] = image.Runtime{Name: name, Version: version}
-		rt, err := render.Lookup(name)
-		if err != nil {
-			continue
-		}
-		if l, ok := rt.(render.Launcher); ok {
-			out[i].Command = l.Template().Command
-		}
-		if in, ok := rt.(render.Installer); ok && version != "" {
-			out[i].Install = in.Install(version)
-		}
-	}
-	return out
 }

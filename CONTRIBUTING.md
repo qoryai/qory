@@ -42,7 +42,7 @@ Version 2.0 (see [LICENSE](LICENSE)) in addition to the CLA grant above.
 
 ## Development
 
-The toolchain is pinned in `mise.toml`; `mise install` provides it. Go 1.27 and, for a
+The toolchain is pinned in `mise.toml`; `mise install` provides it. Go 1.27.4 and, for a
 release, goreleaser.
 
 ```sh

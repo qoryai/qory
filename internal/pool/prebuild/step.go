@@ -58,8 +58,8 @@ type Step struct {
 	// <ImageDestination>:<RunID>, the environment image the build keeps apart as
 	// <EnvironmentDestination>:<RunID>.
 	RunID, ImageDestination, EnvironmentDestination, EnvironmentImage string
-	// AgentImage and User are the build's, as [Settings] has them.
-	AgentImage, User string
+	// User is the build's, as [Settings] has it.
+	User string
 }
 
 // stepFlags are the flags of qory run prebuild-step, in the order [Step.Args] writes them,
@@ -74,7 +74,7 @@ func (s *Step) stepFlags() []struct {
 	}{
 		{"--out", &s.Out}, {"--run-id", &s.RunID}, {"--image-destination", &s.ImageDestination},
 		{"--environment-destination", &s.EnvironmentDestination}, {"--environment-image", &s.EnvironmentImage},
-		{"--agent-image", &s.AgentImage}, {"--user", &s.User},
+		{"--user", &s.User},
 	}
 }
 
@@ -137,7 +137,7 @@ func checkStep(s Step) error {
 	if !filepath.IsAbs(s.Out) {
 		return errors.New("give qory run prebuild-step --out with an absolute path: it writes its result there")
 	}
-	_, err := checkRun(Settings{State: "/", RunConfig: "/", AgentImage: s.AgentImage, User: s.User},
+	_, err := checkRun(Settings{State: "/", RunConfig: "/", User: s.User},
 		Run{RunID: s.RunID, Inputs: []byte(`{"version":1,"environment_ref":"step"}`), ImageDestination: s.ImageDestination,
 			EnvironmentDestination: s.EnvironmentDestination, EnvironmentImage: s.EnvironmentImage})
 	return err
@@ -251,7 +251,7 @@ func (s StepSettings) run(ctx context.Context, st Step, res *stepResult) (string
 		envTag = st.EnvironmentDestination + ":" + st.RunID
 	}
 	built, err := build(ctx, devimage.Options{
-		Repository: s.Dir, AgentImage: st.AgentImage, User: st.User, Tag: tag, Helper: helper, SeedArgs: devimage.SeedArgs,
+		Repository: s.Dir, User: st.User, Tag: tag, Helper: helper, SeedArgs: devimage.SeedArgs,
 		EnvironmentImage: st.EnvironmentImage, EnvironmentTag: envTag,
 		Env: s.Env, Out: s.Out, Log: s.Log, Walled: true, CABundle: bundle,
 	})

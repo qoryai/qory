@@ -1,1 +1,2 @@
-Add checks/check.js to module core, or change its push check for spec: the module has no file at that path
+Add checks/check.js to module core, or change its push check for spec.
+  Module core has no file at checks/check.js.

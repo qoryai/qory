@@ -5,11 +5,15 @@ Remove the harness and its links from the checkout
 ### Synopsis
 
 Remove the composed harness and its links from the checkout. A home in the checkout goes with
-the whole .qory directory, also .qory/artifacts and .qory/work-item.json. --runtime does the
-same when it removes the last composed runtime.
+everything in the .qory directory, also .qory/artifacts and .qory/work-item.json, except
+.qory/harness.lock, the lock of the home, which stays with its line in .git/info/exclude.
+--runtime does the same when it removes the last composed runtime.
 
-A home outside the checkout, under --home or harness.home, is removed with its report.
-The checkout is not touched: nothing was written there.
+A home outside the checkout, under --home or harness.home, is removed with its report; its
+lock file, <home>.lock beside it, stays. The checkout is not touched: nothing was written there.
+
+While a qory run uses the home, remove stops with exit 1 and removes nothing: wait for
+that run to end.
 
 ```
 qory harness remove [flags]

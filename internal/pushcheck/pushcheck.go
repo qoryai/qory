@@ -1,10 +1,12 @@
 // Package pushcheck runs the push check that a composed harness declares for an artifact
 // type, before a version of that type reaches the run API: in a new container from the
-// run's image, with no network, as the run's user, with the home read-only at its path,
-// the newest versions of the work item's artifacts as the working folder and the pushed
-// files beside them. A check that exits 0 lets the version go on; any other end is a
-// [Failure] with the fix first, which a walled run's forwarder sends to the program that
-// pushed as a [session.RunAPIRefusal], and which the host's push step prints.
+// wall's default image, with no network, as the run's user, with the home read-only at
+// its path, and as the working folder, the work item's notes and, of each artifact of the
+// type and its reads types, the newest version that the index does not mark cancelled,
+// with the pushed files beside them. A check that exits 0 lets the version go on; any
+// other end is a [Failure] with the fix first, which a walled run's forwarder sends to
+// the program that pushed as a [session.RunAPIRefusal], and which the host's push step
+// prints.
 package pushcheck
 
 import (
@@ -51,8 +53,8 @@ const (
 	// the removal of its container, at most engineWait more, a check returns within 80
 	// seconds, within the 90-second limit of a walled run's forwarder.
 	Budget = 75 * time.Second
-	// fetchWait is how long the fetch of the artifacts may take, and engineWait one
-	// engine command other than the start.
+	// fetchWait is how long the fetch of the notes and the artifacts may take, and
+	// engineWait one engine command other than the start.
 	fetchWait  = 30 * time.Second
 	engineWait = 5 * time.Second
 	// maxOutput is the most read of the program's standard output, and of its standard
@@ -72,11 +74,12 @@ const (
 )
 
 // The texts of a check that did not pass. The program that pushed gets the fix, ", and
-// push again.", then the cause; the push step's line has the fix, then the cause.
+// push again.", or ", then run again." for textNoNode and textNoProgram, then the cause;
+// the push step's line has the fix, then the cause.
 const (
 	textFailed      = "The check for %s failed:"
 	textFailedFix   = "Fix each finding below and push again. "
-	textNoNode      = "Install node, or run in an image built FROM qory-agent"
+	textNoNode      = "Set wall.image or --image to an image with node, such as one built FROM qory-agent"
 	textNoProgram   = "Install the program %s"
 	textNotStarted  = "The check for %s could not start: %s."
 	textTimeLimit   = "Make the check for %s finish within 30 s"
@@ -131,10 +134,12 @@ type File struct {
 	Content []byte
 }
 
-// Fetch writes into dir, an empty folder, the work item's artifact index as index.json,
-// byte for byte as the run API returned it, and the newest version of each artifact of
-// the types, under <type>/<name>/v<N>/, as qory artifact pull lays them out. A type with
-// no version has no folder.
+// Fetch writes into dir, an empty folder, the work item's notes as notes.json, a JSON
+// array byte for byte as the run API returned it or [] for none; its artifact index as
+// index.json, byte for byte as the run API returned it; and, of each artifact of the
+// types, the newest version that the index does not mark cancelled, under
+// <type>/<name>/v<N>/, as qory artifact pull lays them out. An artifact with no such
+// version has no folder.
 type Fetch func(ctx context.Context, dir string, types []string) error
 
 // Engine is the container engine the check's container runs in: the one the run's wall
@@ -168,8 +173,8 @@ type Checker struct {
 	Home string
 	// Checks are the home's push checks, as [Load] reads them.
 	Checks []compose.PushCheck
-	// Image is the reference of the run's image, and User the uid:gid the run's
-	// containers run as.
+	// Image is the reference of the image the check's container starts from, the wall's
+	// default image, and User the uid:gid the run's containers run as.
 	Image, User string
 	Engine      Engine
 	Fetch       Fetch
@@ -184,6 +189,12 @@ type Checker struct {
 	Label string
 	// Mask replaces each secret value of the run in a text; nil leaves the text as it is.
 	Mask func(string) string
+	// Inputs is the path of the run's inputs.json, "" for a run with none, and InputsData
+	// the bytes qory wrote there. The check's container mounts a copy of InputsData
+	// read-only at Inputs, which the run's user can read, and the program gets
+	// --inputs <path> after the command's arguments, before the pushed files' paths.
+	Inputs     string
+	InputsData []byte
 	// Limit, when set, replaces [Limit]. Tests set it.
 	Limit time.Duration
 }
@@ -210,7 +221,14 @@ func (f *Failure) Refusal() *session.RunAPIRefusal {
 
 // failure is the failure with fix and cause, which may be "".
 func failure(fix, cause string) *Failure {
-	f := &Failure{Message: fix + ", and push again.", Step: fix + "."}
+	return failureThen(fix, ", and push again.", cause)
+}
+
+// failureThen is [failure] whose Message has then after the fix in place of ", and push
+// again.": for a fix that only a new run applies, such as a new image of the checks or
+// a new program in the harness home, which the run reads once at its start.
+func failureThen(fix, then, cause string) *Failure {
+	f := &Failure{Message: fix + then, Step: fix + "."}
 	if cause != "" {
 		f.Message += " " + cause
 		f.Step += " " + cause
@@ -260,19 +278,20 @@ func (c *Checker) For(artifactType string) *compose.PushCheck {
 // push in the run API's form, or whose members [readPush] cannot read one way only, such
 // as one with a member twice, is a refusal: nothing is stored that was not checked. Of a
 // push, only one of a type with a check runs the check, and a file's name that is not
-// [runapi.LocalFilename] or is there twice is a refusal. The check never changes the
-// body.
+// [runapi.LocalFilename] or is there twice is a refusal. A withdrawal, a push with
+// `withdraw` true and no files, runs no check: it has no file to check. With files, a push
+// with `withdraw` true takes the same path as any push. The check never changes the body.
 func (c *Checker) RunAPICheck(ctx context.Context, req session.RunAPIRequest) (*session.RunAPIRefusal, error) {
 	if req.Path != artifactsPath || len(c.Checks) == 0 {
 		return nil, nil
 	}
-	artifactType, files, err := readPush(req.Body)
+	artifactType, files, withdraw, err := readPush(req.Body)
 	switch {
 	case errors.Is(err, errAmbiguous):
 		return failure(textMembers, "").Refusal(), nil
 	case err != nil:
 		return failure(textNoPush, fmt.Sprintf(textNoPushCause, cut(cleanLine(strings.TrimSuffix(err.Error(), "."))))).Refusal(), nil
-	case c.For(artifactType) == nil:
+	case c.For(artifactType) == nil, withdraw && len(files) == 0:
 		return nil, nil
 	}
 	for i, f := range files {
@@ -312,6 +331,9 @@ func (c *Checker) Check(ctx context.Context, artifactType string, files []File) 
 	}
 	defer os.RemoveAll(pushed)
 	args := slices.Clone(check.Command[1:])
+	if c.Inputs != "" {
+		args = append(args, "--inputs", c.Inputs)
+	}
 	for i, f := range files {
 		err := writeNew(filepath.Join(pushed, f.Name), f.Content)
 		if errors.Is(err, fs.ErrExist) {
@@ -328,10 +350,23 @@ func (c *Checker) Check(ctx context.Context, artifactType string, files []File) 
 	if err != nil {
 		return nil, fmt.Errorf("the fetch of the artifacts for the check of %s failed: %w", artifactType, err)
 	}
-	if err := c.openTo(pulled, pushed); err != nil {
+	opened := []string{pulled, pushed}
+	inputs := ""
+	if c.Inputs != "" {
+		dir, err := c.tempFolder()
+		if err != nil {
+			return nil, err
+		}
+		defer os.RemoveAll(dir)
+		if inputs, err = copyInputs(c.Inputs, c.InputsData, dir); err != nil {
+			return nil, err
+		}
+		opened = append(opened, dir)
+	}
+	if err := c.openTo(opened...); err != nil {
 		return nil, err
 	}
-	end, err := c.run(ctx, check.Command[0], args, pulled, pushed)
+	end, err := c.run(ctx, check.Command[0], args, pulled, pushed, inputs)
 	if err != nil {
 		return nil, err
 	}
@@ -376,6 +411,19 @@ func (c *Checker) tempFolder() (string, error) {
 		return "", fmt.Errorf("making a temporary folder for the check failed: %w", exports.HideError(err))
 	}
 	return dir, nil
+}
+
+// copyInputs writes data, the bytes of the run's inputs.json at path, into dir, a folder
+// of [Checker.tempFolder], under the file's name, and returns the copy's path. The run's
+// file is mode 0600 in a folder of mode 0700, which a container that runs as another
+// user cannot read through a mount; [Checker.openTo] opens the copy to that user, and
+// the run's file keeps its mode.
+func copyInputs(path string, data []byte, dir string) (string, error) {
+	copied := filepath.Join(dir, filepath.Base(path))
+	if err := writeNew(copied, data); err != nil {
+		return "", fmt.Errorf("Free space in the check's folder or make it writable, then push again.\nCopying the run's inputs to %s for the check failed: %w", exports.Value(copied, false), exports.HideError(err))
+	}
+	return copied, nil
 }
 
 // otherUser reports whether the run's user is not this process's user.
@@ -429,16 +477,22 @@ type state struct {
 	Error    string
 }
 
-// run runs program with args in a new container and returns how it ended. The engine's
-// failures, such as an engine that is not reachable or that does not have the image,
-// are errors; a program that does not start is an end with startErr set.
-func (c *Checker) run(ctx context.Context, program string, args []string, pulled, pushed string) (ended, error) {
+// run runs program with args in a new container and returns how it ended. inputs, when
+// not "", is the copy of the run's inputs.json that the container mounts at
+// [Checker.Inputs]. The engine's failures, such as an engine that is not reachable or
+// that does not have the image, are errors; a program that does not start is an end
+// with startErr set.
+func (c *Checker) run(ctx context.Context, program string, args []string, pulled, pushed, inputs string) (ended, error) {
 	name, err := containerName()
 	if err != nil {
 		return ended{}, err
 	}
-	mounts := make([]string, 0, 3)
-	for _, m := range [][2]string{{c.Home, c.Home}, {pulled, WorkDir}, {pushed, FilesDir}} {
+	binds := [][2]string{{c.Home, c.Home}, {pulled, WorkDir}, {pushed, FilesDir}}
+	if inputs != "" {
+		binds = append(binds, [2]string{inputs, c.Inputs})
+	}
+	mounts := make([]string, 0, len(binds))
+	for _, m := range binds {
 		mount, err := bindMount(m[0], m[1])
 		if err != nil {
 			return ended{}, err
@@ -500,6 +554,22 @@ func (c *Checker) run(ctx context.Context, program string, args []string, pulled
 		}
 	}
 	return ended{exitCode: s.ExitCode, stdout: stdout.Bytes(), stderr: stderr.Bytes()}, nil
+}
+
+// HasImage reports whether the engine has the image [Checker.Image], with docker image
+// inspect, which pulls nothing. An engine that does not have it is false with no error;
+// an inspect that fails for another cause, such as an engine that is not reachable, is
+// an error.
+func (c *Checker) HasImage(ctx context.Context) (bool, error) {
+	var errOut bytes.Buffer
+	err := c.engine(ctx, engineWait, nil, &errOut, "image", "inspect", "--format", "{{.Id}}", c.Image)
+	switch {
+	case err == nil:
+		return true, nil
+	case noSuchImage(errOut.String()):
+		return false, nil
+	}
+	return false, fmt.Errorf("the inspect of the image %s failed: %s", exports.Value(c.Image, false), engineError(errOut.Bytes(), err))
 }
 
 // limits are the flags of the check container's limits.
@@ -605,9 +675,9 @@ func (c *Checker) failure(artifactType, program string, end ended) *Failure {
 	case end.startErr != "":
 		cause := fmt.Sprintf(textNotStarted, artifactType, strings.TrimSuffix(c.mask(cleanLine(end.startErr)), "."))
 		if namesNode(program) {
-			return failure(textNoNode, cause)
+			return failureThen(textNoNode, ", then run again.", cause)
 		}
-		return failure(fmt.Sprintf(textNoProgram, exports.Value(program, false)), cause)
+		return failureThen(fmt.Sprintf(textNoProgram, exports.Value(program, false)), ", then run again.", cause)
 	case end.exitCode == 0:
 		return nil
 	}
@@ -709,10 +779,13 @@ func shebang(program string) []string {
 // could not start.
 var tiniFatal = regexp.MustCompile(`^\[FATAL tini \(\d+\)\] `)
 
-// noSuchImage reports whether the engine's error is for an image it does not hold.
+// noSuchImage reports whether the engine's error is for an image it does not hold:
+// Docker's and nerdctl's "No such image" or "Unable to find image", Podman's "image not
+// known", such as "Error: example.com/agent:1: image not known".
 func noSuchImage(text string) bool {
 	text = strings.ToLower(text)
-	return strings.Contains(text, "no such image") || strings.Contains(text, "unable to find image")
+	return strings.Contains(text, "no such image") || strings.Contains(text, "unable to find image") ||
+		strings.Contains(text, "image not known")
 }
 
 // engineError is the last line the engine's command printed, or err with none.

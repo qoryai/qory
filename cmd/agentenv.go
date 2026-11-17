@@ -39,13 +39,14 @@ var wrapsAgentEnv = func(freshHome, walled bool) bool { return freshHome && wall
 // variables or the variables that point at authorities, which is why the verb drops
 // them. Forager's environment file wins over the image's value for every name it sets,
 // so the names it sets are the ones kept: the wall's, the session's, QORY_RUN_API for a
-// run with a run API (runAPI true), the runtime's declared and reserved variables and
-// the ones it reads a model key and its model endpoint from, the fixed variables of the
-// runtime's descriptor, the harness's fixed values, and the run's variables as
-// resolved, which are known once the gateway answered. They go, names alone, into a
-// file in a folder qory makes for it, outside the checkout and the run directory, which
-// the container sees read-only at the same path; the run's resolved names are added
-// when Forager resolves them, before the wall starts. A gateway's placeholder whose name qory does not know is kept by its value
+// run with a run API (runAPI true), QORY_HOST_URL for a run with a route to qory, the
+// runtime's declared and reserved variables and the ones it reads a model key and its
+// model endpoint from, the fixed variables of the runtime's descriptor, the harness's
+// fixed values, and the run's variables as resolved, which are known once the gateway
+// answered. They go, names alone, into a file in a folder qory makes for it, outside the
+// checkout and the run directory, which the container sees read-only at the same path;
+// the run's resolved names are added when Forager resolves them, before the wall starts.
+// A gateway's placeholder whose name qory does not know is kept by its value
 // when its name has one of [agentenv.Prefixes], see [preparation.AgentEnv]. This guards
 // against the values the image's environment leaves in place, not against the image's
 // programs or the repository's commands, which run as the agent's user in the agent's
@@ -119,8 +120,9 @@ func (l transcriptLink) args() []string {
 
 // keptNames are the names Forager sets for a walled run before the run's variables are
 // resolved: always, the wall's proxy and socket names, QORY_RUN_ID, QORY_HARNESS_HOME
-// with a harness home, QORY_RUN_API for a run with a run API (runAPI true), the
-// runtime's declared and reserved variables and the variables it reads a model key
+// with a harness home, QORY_RUN_API for a run with a run API (runAPI true),
+// QORY_HOST_URL for a run with a route to qory (OpenSpec.QoryRoute), the runtime's
+// declared and reserved variables and the variables it reads a model key
 // from, which Forager sets behind a wall to a placeholder or to a value passed for them,
 // or unsets them, the variable it reads its model endpoint from, which Forager sets to
 // the start key's endpoint or to a passed value its endpoint rule keeps, or unsets, the
@@ -143,6 +145,9 @@ func keptNames(spec *runSpec, d *wall.Docker, runAPI bool) (always, ca []string,
 	}
 	if runAPI {
 		always = append(always, session.EnvRunAPI)
+	}
+	if spec.QoryRoute != nil {
+		always = append(always, session.EnvQoryHost)
 	}
 	always = append(always, credentialVariables(spec.Runtime)...)
 	// The start key's endpoint, which Forager sets and the resolved variables list no

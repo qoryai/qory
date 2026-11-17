@@ -143,10 +143,10 @@ exports:
 A listed module with a `process.yaml` at its folder root is a factory. The file is a
 process template: a name, a summary, a description, a workspace type, a stack that
 `exports.stacks` lists, a `qory.process/v1` process, and optionally `artifact_types`, the
-artifact types the workspaces use. Every command that reads the
-configuration, `qory config` among them, checks the file, and checks that the stack
-declares under `workflows` each workflow that the process runs. The fields and their
-limits are in [the contract's section on a factory's
+artifact types the workspaces use, and `submit`, the submit step of a run. Every command
+that reads the configuration, `qory config` among them, checks the file, and checks that
+the stack declares under `workflows` each workflow that the process runs. The fields
+and their limits are in [the contract's section on a factory's
 process.yaml](../contracts/harness/v1/README.md#a-factorys-processyaml).
 
 The harness repository states the qory it needs once, in its `qory.yaml`:
@@ -169,7 +169,9 @@ When none of the stack's modules composes one, after their `exclude` and `only`,
 compose fails with exit 2:
 
 ```
-add a skill or command workflow-deploy to a module of the base stack core@4b8e2f1a9c7d, or remove deploy from the workflows of its qory-stack.yaml: the stack declares the workflow deploy, and none of its modules ships a skill or command workflow-deploy or deploy
+Add skill or command workflow-deploy to a module of core@4b8e2f1a9c7d, or remove workflow deploy.
+  The base stack core@4b8e2f1a9c7d declares the workflow deploy in its qory-stack.yaml.
+  No module of core@4b8e2f1a9c7d ships a skill or command workflow-deploy or deploy.
 ```
 
 A module that a checkout adds to the stack does not count, because the stack lists the
@@ -216,7 +218,7 @@ a tier in its model fails the compose with exit 2, and the message lists each pa
 lacks:
 
 ```
-Complete agent python-developer of module python, or bind agents/developer to another agent.
+Complete agent python-developer of module python, or bind agents.developer to another agent.
   The contract roles/developer.yaml of module core requires these parts, which agents/python-developer.md lacks:
   - the heading "## Stop conditions"
 ```
@@ -260,8 +262,13 @@ that ignores case, so qory stops them with exit 2 on every file system, and a mo
 alike everywhere:
 
 ```
-module core: rename skills/a/review or skills/b/review: each skill goes to skills/<name>, and both are the skill review
-module core: rename skills/a/Review or skills/b/review: each skill goes to skills/<name>, and these two names differ only in case
+Rename skills/a/review or skills/b/review in module core.
+  Each skill goes to skills/<name>, and both are the skill review.
+```
+
+```
+Rename skills/a/Review or skills/b/review in module core.
+  Each skill goes to skills/<name>, and these two names differ only in case.
 ```
 
 ### Let several modules add reviewers
@@ -292,9 +299,11 @@ These stop the compose with exit 2:
 
 ```
 Write provides.agents.reviewers in module python as a list: it is a group role.
-Declare agents/reviewers as many in module python, or remove it: module software-factory declares it many.
-Fill agents/reviewers, or remove it from skills/review/SKILL.md of module software-factory.
+Declare agents/reviewers as many in module python, or remove it.
+  Module software-factory declares it many.
+Fill agents/reviewers, or remove the reference to it.
   The group has no member.
+  The reference is in skills/review/SKILL.md of module software-factory.
 ```
 
 A reference to a group in front matter stops the compose as well, since a group resolves
@@ -382,8 +391,8 @@ The rules:
 - The exclude lists entries of the kinds the stack's `extending` block lets your modules
   ship, and files under its `extending.files` prefixes. The delivered runtime hooks,
   MCP servers, instructions, settings and variables stay as they are.
-- An entry the delivered module does not compose fails the compose, `remove skills/x
-  from the exclude of module core in qory.yaml: …`.
+- An entry the delivered module does not compose fails the compose, `Remove skills/x
+  from the exclude of module core in qory.yaml.`.
 
 Without the exclude, the two skills collide. The compose fails, exit 3, and prints the
 entry to write. When `qory.yaml` lists the module already, it prints the whole entry to
@@ -672,6 +681,14 @@ qory writes a tier into these keys of each runtime's agent file:
 | amp, `any`              | no agent files                         | no agent files                                                           |
 
 For claude and copilot, an effort outside the runtime's values stops the compose with exit 2. For cursor, opencode and goose, the compose prints a `skipped` row for a tier's effort, with the agents it concerns, and for codex and gemini a `skipped` row for a tier's model.
+
+## Agent tools on Codex
+
+An agent's `tools` key limits what the agent can use on Claude Code. An agent with no `tools` key can use every tool.
+
+On Codex, qory writes `[features]` with `shell_tool = false` into the agent's file `agents/<name>.toml` when the agent has a `tools` key that lists no shell tool. A shell tool is `Bash` or `PowerShell`, also with a rule such as `Bash(git:*)`. That agent has no shell. An agent with no `tools` key keeps the shell. Codex 0.149.0 or later reads this setting.
+
+Codex has no setting for any other tool of an agent. An agent without `Write` or `Edit` in its `tools` key can still write files with Codex's `apply_patch` tool, because Codex cannot turn that tool off for one agent. An agent's file [cannot set the agent's sandbox](https://learn.chatgpt.com/docs/agent-configuration/subagents) either.
 
 ## Removing the harness
 

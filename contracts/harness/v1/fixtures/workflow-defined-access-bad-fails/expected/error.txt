@@ -1,1 +1,4 @@
-qory.yaml: set workflows.fix.access to read or write: "admin" is neither
+Set workflows.fix.access to a valid level.
+  The levels are read, write-no-push, and write.
+  The value is "admin".
+  workflows.fix is in qory.yaml.

@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -324,6 +325,64 @@ func TestATypeWithoutACheckPasses(t *testing.T) {
 	}
 }
 
+// TestAWithdrawalRunsNoCheck is a body with withdraw true and no files, of a type whose
+// check exits 1: it passes with no fetch and no container. With files, with withdraw
+// false, and with no withdraw member, the check runs as for any push.
+func TestAWithdrawalRunsNoCheck(t *testing.T) {
+	for name, body := range map[string]string{
+		"files []":      `{"type":"spec","name":"main","withdraw":true,"files":[]}`,
+		"files null":    `{"type":"spec","name":"main","withdraw":true,"files":null}`,
+		"files missing": `{"type":"spec","name":"main","withdraw":true}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newFixture(t, "#!/usr/bin/env node")
+			f.e.exit(1, "", "The spec has no file.")
+			if r, err := f.post(t, "/artifacts", []byte(body)); r != nil || err != nil {
+				t.Fatalf("got %+v, %v, want nil, nil", r, err)
+			}
+			if len(f.fetched) != 0 || len(f.e.commands) != 0 {
+				t.Errorf("fetched %v and ran %v, want nothing", f.fetched, f.e.commands)
+			}
+		})
+	}
+	for name, body := range map[string]string{
+		"withdraw false and no files": `{"type":"spec","name":"main","withdraw":false,"files":[]}`,
+		"no withdraw and no files":    `{"type":"spec","name":"main","files":[]}`,
+		"withdraw with a file":        `{"type":"spec","name":"main","withdraw":true,"files":[{"filename":"spec.md","content_base64":"eA=="}]}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newFixture(t, "#!/usr/bin/env node")
+			f.e.exit(1, "", "The spec has no file.")
+			r, err := f.post(t, "/artifacts", []byte(body))
+			if err != nil || r == nil {
+				t.Fatalf("got %+v, %v, want a refusal of the check", r, err)
+			}
+			if len(f.e.commands) == 0 {
+				t.Errorf("the check did not run")
+			}
+		})
+	}
+}
+
+// TestABodyWithABadWithdrawGets422 is a body whose withdraw is not true or false, or is
+// there twice, or is there in another case.
+func TestABodyWithABadWithdrawGets422(t *testing.T) {
+	f := newFixture(t, "#!/usr/bin/env node")
+	fix := "Send the push as qory artifact push sends it, and push again. The body is not a push: "
+	r, err := f.post(t, "/artifacts", []byte(`{"type":"spec","withdraw":"yes","files":[]}`))
+	wantRefusal(t, "withdraw yes", r, err, fix+"withdraw is not true or false.")
+	for _, body := range []string{
+		`{"type":"spec","withdraw":true,"withdraw":false,"files":[]}`,
+		`{"type":"spec","Withdraw":true,"files":[]}`,
+	} {
+		r, err := f.post(t, "/artifacts", []byte(body))
+		wantRefusal(t, body, r, err, "Send each member of the push once, in lower case, and push again.")
+	}
+	if len(f.e.commands) != 0 {
+		t.Errorf("ran %v, want nothing", f.e.commands)
+	}
+}
+
 // TestAPassingCheckLetsThePushGoOn is a check that exits 0: nil, nil, the body as it
 // was, the pushed files decoded under their names, the fetch of the type and its reads,
 // and the container removed after the inspect.
@@ -352,7 +411,7 @@ func TestAPassingCheckLetsThePushGoOn(t *testing.T) {
 	}
 }
 
-// TestTheContainerIsClosedOff is the check's container: from the run's image, as the
+// TestTheContainerIsClosedOff is the check's container: from the checker's image, as the
 // run's user, with no network, no capability, no variable passed, the home read-only at
 // its path, the working folder and the files read-only, and the program with its
 // arguments and the files' paths.
@@ -423,6 +482,109 @@ func TestTheWallsLimitsAreTheChecks(t *testing.T) {
 	}
 	if strings.Contains(line, "--shm-size") {
 		t.Errorf("the create has --shm-size:\n%s", line)
+	}
+}
+
+// TestTheCheckGetsTheRunsInputs is a checker with Inputs: the check's container mounts a
+// copy of the run's inputs.json read-only at the file's path, and the
+// program gets --inputs and the path after the command's arguments, before the pushed
+// files' paths.
+func TestTheCheckGetsTheRunsInputs(t *testing.T) {
+	f := newFixture(t, "#!/usr/bin/env node")
+	inputs := filepath.Join(t.TempDir(), "in", "inputs.json")
+	if err := os.MkdirAll(filepath.Dir(inputs), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(inputs, []byte(`{"qory":{"harness_extensions":{}}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f.c.Inputs, f.c.InputsData = inputs, []byte(`{"qory":{"harness_extensions":{}}}`)
+	if _, err := f.post(t, "/artifacts", pushBody(t, "spec", [2]string{"spec.md", "x"})); err != nil {
+		t.Fatal(err)
+	}
+	line := strings.Join(f.e.created(t), " ")
+	if want := f.program + " " + f.c.Image + " push spec --inputs " + inputs + " " + pushcheck.FilesDir + "/spec.md"; !strings.HasSuffix(line, want) {
+		t.Errorf("the create does not end %q:\n%s", want, line)
+	}
+	src := ""
+	for _, m := range f.e.mounts {
+		if strings.HasSuffix(m, ",dst="+inputs+",readonly") {
+			src = strings.TrimPrefix(strings.Split(m, ",")[1], "src=")
+		}
+	}
+	if _, ok := f.e.modes[src]; src == "" || !ok {
+		t.Errorf("the mounts %v have no file the engine could read at %s at the create", f.e.mounts, inputs)
+	}
+}
+
+// TestTheRunsInputsThatCannotBeCopiedStopTheCheck is a checker whose copy of the run's
+// inputs cannot be written, since the path is the root, whose name is the copy's folder: the error starts with
+// its fix on a first line of at most 100 characters, and the second line has the copy's
+// path and the cause.
+func TestTheRunsInputsThatCannotBeCopiedStopTheCheck(t *testing.T) {
+	f := newFixture(t, "#!/usr/bin/env node")
+	f.c.Inputs, f.c.InputsData = string(os.PathSeparator), []byte(`{}`)
+	_, err := f.post(t, "/artifacts", pushBody(t, "spec", [2]string{"spec.md", "x"}))
+	if err == nil {
+		t.Fatal("a copy that cannot be written stopped nothing")
+	}
+	first, second, _ := strings.Cut(err.Error(), "\n")
+	if want := "Free space in the check's folder or make it writable, then push again."; first != want || len(first) > 100 {
+		t.Errorf("the first line is %q (%d characters), want %q", first, len(first), want)
+	}
+	if !strings.HasPrefix(second, "Copying the run's inputs to ") || !strings.Contains(second, " for the check failed: ") {
+		t.Errorf("the second line is %q, want the copy's path and the cause", second)
+	}
+}
+
+// TestAnotherUserCanReadTheRunsInputs is a check whose container runs as a user other
+// than this process's, with the run's inputs.json mode 0600 in a folder of mode 0700, as
+// qory run writes it: the file the container mounts at the path of inputs.json has the
+// bytes qory wrote, InputsData, mode 0644, in a folder of mode 755, so that user can read
+// it, and the run's file keeps mode 0600. The file on disk was changed after qory wrote
+// it, and the copy still has qory's bytes. The copy is gone after the check.
+func TestAnotherUserCanReadTheRunsInputs(t *testing.T) {
+	f := newFixture(t, "#!/usr/bin/env node")
+	f.c.User = strconv.Itoa(os.Getuid()+1) + ":" + strconv.Itoa(os.Getgid()+1)
+	f.c.Dir = t.TempDir()
+	const content = `{"version":1,"qory":{"harness_extensions":{}}}`
+	inputs := filepath.Join(t.TempDir(), "in", "inputs.json")
+	if err := os.MkdirAll(filepath.Dir(inputs), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(inputs, []byte(`{"changed":"on disk"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f.c.Inputs, f.c.InputsData = inputs, []byte(content)
+	var src, got string
+	var mode, folderMode fs.FileMode
+	f.e.create = func(io.Writer) error {
+		for _, m := range f.e.mounts {
+			if strings.Contains(m, ",dst="+inputs+",") {
+				src = strings.TrimPrefix(strings.Split(m, ",")[1], "src=")
+			}
+		}
+		if info, err := os.Stat(src); err == nil {
+			mode = info.Mode().Perm()
+		}
+		if info, err := os.Stat(filepath.Dir(src)); err == nil {
+			folderMode = info.Mode().Perm()
+		}
+		b, _ := os.ReadFile(src)
+		got = string(b)
+		return errors.New("stop after the create")
+	}
+	f.post(t, "/artifacts", pushBody(t, "spec", [2]string{"spec.md", "x"}))
+	if src == "" || got != content || mode != 0o644 || folderMode != 0o755 {
+		t.Errorf("the container mounts %q at %s, with %q, mode %o, in a folder of mode %o; want the content, mode 644, folder 755", src, inputs, got, mode, folderMode)
+	}
+	if info, err := os.Stat(inputs); err != nil || info.Mode().Perm() != 0o600 {
+		t.Errorf("the run's inputs.json changed: %v, %v", info, err)
+	}
+	if src != inputs {
+		if _, err := os.Stat(src); !errors.Is(err, fs.ErrNotExist) {
+			t.Errorf("the copy %s is left after the check: %v", src, err)
+		}
 	}
 }
 
@@ -564,7 +726,7 @@ func TestThePushStepGetsItsLines(t *testing.T) {
 	}
 	f.e.exit(127, "", "/usr/bin/env: 'node': No such file or directory\n")
 	failed, err = f.c.Check(context.Background(), "spec", files)
-	if want := "Install node, or run in an image built FROM qory-agent. The check for spec could not start: /usr/bin/env: 'node': No such file or directory."; err != nil || failed == nil || failed.Step != want {
+	if want := "Set wall.image or --image to an image with node, such as one built FROM qory-agent. The check for spec could not start: /usr/bin/env: 'node': No such file or directory."; err != nil || failed == nil || failed.Step != want {
 		t.Errorf("a check that did not start: %+v, %v, want %q", failed, err, want)
 	}
 	f.c.Limit = 50 * time.Millisecond
@@ -600,19 +762,19 @@ func TestAProgramThatCannotStartStopsThePush(t *testing.T) {
 	}{
 		{"no node", "#!/usr/bin/env node", func(e *engine) {
 			e.exit(127, "", "/usr/bin/env: 'node': No such file or directory\n")
-		}, "Install node, or run in an image built FROM qory-agent, and push again. The check for spec could not start: /usr/bin/env: 'node': No such file or directory."},
+		}, "Set wall.image or --image to an image with node, such as one built FROM qory-agent, then run again. The check for spec could not start: /usr/bin/env: 'node': No such file or directory."},
 		{"no program", "#!/bin/sh", func(e *engine) {
 			e.exit(127, "", "[FATAL tini (7)] exec /home/c failed: No such file or directory\n")
-		}, "Install the program PROGRAM, and push again. The check for spec could not start: exec /home/c failed: No such file or directory."},
+		}, "Install the program PROGRAM, then run again. The check for spec could not start: exec /home/c failed: No such file or directory."},
 		{"not executable", "#!/bin/sh", func(e *engine) {
 			e.exit(126, "", "[FATAL tini (7)] exec /home/c failed: Permission denied\n")
-		}, "Install the program PROGRAM, and push again. The check for spec could not start: exec /home/c failed: Permission denied."},
+		}, "Install the program PROGRAM, then run again. The check for spec could not start: exec /home/c failed: Permission denied."},
 		{"busybox env", "#!/usr/bin/env node", func(e *engine) {
 			e.exit(127, "", "env: can't execute 'node': No such file or directory\n")
-		}, "Install node, or run in an image built FROM qory-agent, and push again. The check for spec could not start: env: can't execute 'node': No such file or directory."},
+		}, "Set wall.image or --image to an image with node, such as one built FROM qory-agent, then run again. The check for spec could not start: env: can't execute 'node': No such file or directory."},
 		{"interpreter", "#!/usr/local/bin/deno run", func(e *engine) {
 			e.exit(127, "", "sh: /usr/local/bin/deno: not found\n")
-		}, "Install the program PROGRAM, and push again. The check for spec could not start: sh: /usr/local/bin/deno: not found."},
+		}, "Install the program PROGRAM, then run again. The check for spec could not start: sh: /usr/local/bin/deno: not found."},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -861,7 +1023,8 @@ func TestTheEngineRunsWithoutTheAccessKey(t *testing.T) {
 const realImage = "public.ecr.aws/docker/library/alpine:3.22"
 
 // TestARealCheckRunsInTheEngine runs checks in containers of this machine's engine: one
-// that reads the working folder and the pushed file and passes, one that prints a
+// that reads the working folder and the pushed file and passes, one that reads the run's
+// inputs.json through --inputs and cannot write it, one that prints a
 // finding, one whose node the image lacks, and one past its limit, whose container is
 // removed. It runs only with QORY_TEST_DOCKER=1, docker on the PATH and the image
 // present.
@@ -921,12 +1084,23 @@ func TestARealCheckRunsInTheEngine(t *testing.T) {
 	if r := check(checker(passes)); r != nil {
 		t.Errorf("the passing check got %+v", r)
 	}
+	// The run's inputs.json: the check reads it through --inputs and cannot change it.
+	inputs := filepath.Join(t.TempDir(), "inputs.json")
+	if err := os.WriteFile(inputs, []byte(`{"qory":{"harness_extensions":{}}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	reads := write("reads", "#!/bin/sh\nset -e\ntest \"$2\" = --inputs\ngrep -q harness_extensions \"$3\"\n! sh -c ': >> \"$3\"' 2>/dev/null\ngrep -q Spec \"$4\"\n")
+	withInputs := checker(reads)
+	withInputs.Inputs, withInputs.InputsData = inputs, []byte(`{"qory":{"harness_extensions":{}}}`)
+	if r := check(withInputs); r != nil {
+		t.Errorf("the check that reads the inputs got %+v", r)
+	}
 	finds := write("finds", "#!/bin/sh\necho \"$(basename \"$2\"): a finding\"\nexit 1\n")
 	if r := check(checker(finds)); r == nil || len(r.Findings) != 1 || r.Findings[0] != "spec.md: a finding" {
 		t.Errorf("the failing check got %+v", r)
 	}
 	node := write("node", "#!/usr/bin/env node\n")
-	if r := check(checker(node)); r == nil || !strings.HasPrefix(r.Message, "Install node, or run in an image built FROM qory-agent, and push again. The check for spec could not start: ") {
+	if r := check(checker(node)); r == nil || !strings.HasPrefix(r.Message, "Set wall.image or --image to an image with node, such as one built FROM qory-agent, then run again. The check for spec could not start: ") {
 		t.Errorf("the check without node got %+v", r)
 	}
 	lint := write("lint", "#!/bin/sh\nnosuchlinter \"$2\"\n")
@@ -934,7 +1108,7 @@ func TestARealCheckRunsInTheEngine(t *testing.T) {
 		t.Errorf("the check whose linter is not there got %+v", r)
 	}
 	missing := filepath.Join(home, "modules", "core", "missing")
-	if r := check(checker(missing)); r == nil || !strings.HasPrefix(r.Message, "Install the program "+missing+", and push again. The check for spec could not start: exec "+missing+" failed: No such file or directory.") {
+	if r := check(checker(missing)); r == nil || !strings.HasPrefix(r.Message, "Install the program "+missing+", then run again. The check for spec could not start: exec "+missing+" failed: No such file or directory.") {
 		t.Errorf("the missing program got %+v", r)
 	}
 	slow := write("slow", "#!/bin/sh\nsleep 30\n")
@@ -946,5 +1120,44 @@ func TestARealCheckRunsInTheEngine(t *testing.T) {
 	out, err := exec.Command("docker", "ps", "--all", "--quiet", "--filter", "name=qory-push-check-").Output()
 	if err != nil || len(bytes.TrimSpace(out)) != 0 {
 		t.Errorf("containers of checks are left: %q, %v", out, err)
+	}
+}
+
+// TestHasImageInspectsWithoutAPull is the check that the engine has the checker's image:
+// docker image inspect of the image, true when it succeeds, false with no error when the
+// engine, Docker or Podman, does not have the image, and an error for any other failure.
+func TestHasImageInspectsWithoutAPull(t *testing.T) {
+	for name, c := range map[string]struct {
+		errOut  string
+		exitErr error
+		has     bool
+		wantErr string
+	}{
+		"present": {has: true},
+		"missing": {errOut: "Error response from daemon: No such image: registry.example/agent\n", exitErr: errors.New("exit status 1")},
+		// Podman's answer, as Forager's wall reads it too.
+		"missing on podman": {errOut: "Error: registry.example/agent: image not known\n", exitErr: errors.New("exit status 125")},
+		"engine":            {errOut: "Cannot connect to the Docker daemon at unix:///var/run/docker.sock\n", exitErr: errors.New("exit status 1"), wantErr: "the inspect of the image registry.example/agent@sha256:" + strings.Repeat("a", 64) + " failed: Cannot connect to the Docker daemon at unix:///var/run/docker.sock"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newFixture(t, "#!/usr/bin/env node")
+			var argv []string
+			f.c.Engine.Run = func(_ context.Context, a []string, _, stderr io.Writer) error {
+				argv = a
+				io.WriteString(stderr, c.errOut)
+				return c.exitErr
+			}
+			has, err := f.c.HasImage(context.Background())
+			got := ""
+			if err != nil {
+				got = err.Error()
+			}
+			if has != c.has || got != c.wantErr {
+				t.Errorf("HasImage = %v, %q, want %v, %q", has, got, c.has, c.wantErr)
+			}
+			if want := []string{"/usr/local/bin/docker", "image", "inspect", "--format", "{{.Id}}", f.c.Image}; !slices.Equal(argv, want) {
+				t.Errorf("the engine ran %q, want %q", argv, want)
+			}
+		})
 	}
 }

@@ -25,6 +25,9 @@ import (
 // runtime exits, in place of Forager's 200 ms: the hooks of these tests' runtimes
 // forward their events before the runtime exits, so none needs the longer drain.
 func TestMain(m *testing.M) {
+	// No test reaches npm: qory run installs its runtime only in the tests of the
+	// install, which set a stub registry.
+	cmd.SetInstallRuntimes(false)
 	// A test that needs qory run prepare as a separate process starts this binary
 	// with QORY_TEST_PREPARE set, and the binary is that verb, which looks for the
 	// image's copy where QORY_TEST_PREPARE_SEED says when it is set.
@@ -77,8 +80,20 @@ func TestMain(m *testing.M) {
 		os.Exit(enginePull(args[0], args[1], args[2]))
 	}
 	cmd.ShortenSocketGrace(10 * time.Millisecond)
+	// Forager joins no session of Claude Code without an installed folder, so the
+	// program that such a test's launch names is copied into one.
+	standIns, err := os.MkdirTemp("", "qory-stand-in-")
+	if err != nil {
+		panic(err)
+	}
+	if err := os.Chmod(standIns, 0o755); err != nil {
+		panic(err)
+	}
+	cmd.SetInstallStandIn(standIns)
 	cmd.RunGitSessionsOnHost()
-	os.Exit(m.Run())
+	code := m.Run()
+	_ = os.RemoveAll(standIns)
+	os.Exit(code)
 }
 
 // fixtures is the contract fixture directory, resolved from the working directory the test

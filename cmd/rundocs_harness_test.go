@@ -87,6 +87,13 @@ type codeHarness struct {
 	// defines, when not nil, is the workflows of a harness document with no extends that
 	// defines a stack of one module, hello, from the folder of the base's repository.
 	defines map[string]any
+	// perRunHome, when set, adds no --home: the run composes into the home that qory makes for
+	// that run under the cache directory.
+	perRunHome bool
+	// relay, when not nil, gets the relay of the run code before the run; joined, when not
+	// nil, gets the session's spec at each join.
+	relay  func(*codeRelay)
+	joined func(session.SessionSpec)
 }
 
 // harnessRun is what a [codeHarness] run came to: the output with its error, the run's
@@ -194,7 +201,15 @@ func (c codeHarness) run(t *testing.T) harnessRun {
 			c.change(d)
 		}
 	})
-	t.Cleanup(cmd.SetJoinSession(func(s session.SessionSpec) { r.spec, r.joined = s, true }))
+	if c.relay != nil {
+		c.relay(g)
+	}
+	t.Cleanup(cmd.SetJoinSession(func(s session.SessionSpec) {
+		r.spec, r.joined = s, true
+		if c.joined != nil {
+			c.joined(s)
+		}
+	}))
 	t.Setenv("QORY_RUN_KEY", "")
 	nowhere := cmd.Nowhere{
 		System: proxygittest.Host, Proxy: deadProxy,
@@ -216,9 +231,16 @@ func (c codeHarness) run(t *testing.T) harnessRun {
 	if c.nowhere != nil {
 		c.nowhere(&nowhere)
 	}
+	// A run from a run code starts only behind a wall: the fake docker's, with a home
+	// outside the checkout, unless before sets another wall or home.
+	docker, _ := fakeDocker(t)
+	walledBy(t, docker)
 	args := []string{"run", "--run-code-file", codeFile(t, g.code()), "--gateway", g.URL}
 	if c.before != nil {
 		args = append(args, c.before()...)
+	}
+	if !c.perRunHome && !slices.Contains(args, "--home") {
+		args = append(args, "--home", filepath.Join(tempDir(t), "home"))
 	}
 	_, calls, restore := cmd.OpenNowhereWith(nowhere)
 	defer restore()
@@ -394,7 +416,9 @@ func TestARunCodesHarnessDocumentWithAWorkflowItsModulesLackStops(t *testing.T) 
 	if r.joined || cmd.ExitCode(r.err) != cmd.ExitInput {
 		t.Fatalf("%v (exit %d), want exit 2 before the join\n%s", r.err, cmd.ExitCode(r.err), r.out)
 	}
-	wants(t, r.out+r.err.Error(), "add a skill or command workflow-deploy to a module of "+workspaceHarness+" in Qory Apiary, or remove deploy from its workflows: the stack declares the workflow deploy, and none of its modules ships a skill or command workflow-deploy or deploy")
+	wants(t, r.out+r.err.Error(), "Add skill or command workflow-deploy to a module, or remove workflow deploy.\n"+
+		"  The workspace's harness in Qory Apiary declares the workflow deploy.\n"+
+		"  No module of "+workspaceHarness+" in Qory Apiary ships a skill or command workflow-deploy or deploy")
 	lacks(t, r.out+r.err.Error(), "harness.yaml")
 }
 
@@ -678,16 +702,18 @@ func TestARunCodeWithNoHarnessAnywhereStops(t *testing.T) {
 // a hidden harness document whose base, in the folder examples/greeter, sets no name:
 // the compose report records the base as base, not by its folder's name.
 func TestAHarnessDocumentWithNoNameInItsBaseIsTheBaseByAPhrase(t *testing.T) {
+	home := filepath.Join(tempDir(t), "home")
 	r := codeHarness{
 		folder: "examples/greeter",
 		stack:  func(s string) string { return strings.Replace(s, "\nname: hello\n", "\n", 1) },
+		before: func() []string { return []string{"--home", home} },
 	}.run(t)
 	if !r.joined {
 		t.Fatalf("%v (exit %d), want the join\n%s", r.err, cmd.ExitCode(r.err), r.out)
 	}
 	var reports []string
 	cache, _ := os.UserCacheDir()
-	for _, dir := range []string{r.runDir, ".", cache} {
+	for _, dir := range []string{r.runDir, ".", cache, filepath.Dir(home)} {
 		filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
 			if err == nil && strings.HasSuffix(path, "-report.json") {
 				reports = append(reports, path)
@@ -741,8 +767,11 @@ func TestAWalledRunOfAHiddenHarnessThatMountsTheFolderOfItsHomeStops(t *testing.
 	if data, err := os.ReadFile(log); err == nil {
 		t.Errorf("the wall ran a command:\n%s", data)
 	}
-	if entries, _ := os.ReadDir(homes); len(entries) != 0 {
-		t.Errorf("the run wrote into %s: %v", homes, entries)
+	// The lock file of the home is made before the run code is redeemed, and stays.
+	for _, e := range mustReadDir(t, homes) {
+		if !strings.HasSuffix(e.Name(), ".lock") {
+			t.Errorf("the run wrote %s into %s", e.Name(), homes)
+		}
 	}
 	r.noAddress(t)
 }
@@ -1047,7 +1076,7 @@ func TestAHarnessDocumentWhosePathLeadsOutStops(t *testing.T) {
 // pass qory's checks and the harness composes, so the session joins.
 func TestARunCodeWhoseHarnessBindsByKindComposes(t *testing.T) {
 	writes := func(s string) string { return s + "workflows:\n  hello:\n    access: write\n" }
-	r := runFromCode(t, writes, harnessBind(map[string]any{"commands": map[string]any{"greeting": "hello"}, "skills": map[string]any{"welcome": "greet"}}))
+	r := runFromCodeWith(t, behindAWall(t), nil, writes, harnessBind(map[string]any{"commands": map[string]any{"greeting": "hello"}, "skills": map[string]any{"welcome": "greet"}}))
 	if !errors.Is(r.err, cmd.ErrJoinedNowhere) || !r.joined {
 		t.Fatalf("%v (exit %d), want the join\n%s", r.err, cmd.ExitCode(r.err), r.out)
 	}
@@ -1065,9 +1094,67 @@ func TestARunCodeWhoseHarnessBindsFlatStops(t *testing.T) {
 	wants(t, r.err.Error(), "the response to the run code does not pass qory's checks")
 }
 
+// TestARunCodeWhoseHarnessBindsAGroupRoleToAListComposes is a run from a run code whose
+// harness document binds roles in agents of the module review, which the base's stack
+// lists and which provides code-reviewer to its group role reviewers: the group role to
+// a list of two agents and the role lead to one name, or the role lead alone. Each
+// passes qory's checks and the harness composes, so the session joins. The review skill
+// in the home starts with the group's members, the bind's list when the bind sets the
+// group and the module's code-reviewer otherwise, then the lead.
+func TestARunCodeWhoseHarnessBindsAGroupRoleToAListComposes(t *testing.T) {
+	// The test reads the run's home once the run is over.
+	t.Cleanup(cmd.KeepRunHomes())
+	stackFile := func(s string) string {
+		return s + "  - name: review\n    source: {path: modules/review}\nworkflows:\n  hello:\n    access: write\n"
+	}
+	agent := func(name string) string {
+		return "---\nname: " + name + "\ndescription: " + name + "\n---\n\nReviews the change.\n"
+	}
+	review := map[string]string{
+		"examples/hello/modules/review/qory-module.yaml":        "apiVersion: qory.dev/v1alpha1\nname: review\nroles:\n  agents:\n    reviewers: many\n    lead: one\nprovides:\n  agents:\n    reviewers: [code-reviewer]\n",
+		"examples/hello/modules/review/skills/review/SKILL.md":  "---\nname: review\ndescription: The review skill.\n---\n\nStart ${qory:agents/reviewers}, then give the result to ${qory:agents/lead}.\n",
+		"examples/hello/modules/review/agents/code-reviewer.md": agent("code-reviewer"),
+		"examples/hello/modules/review/agents/test-reviewer.md": agent("test-reviewer"),
+		"examples/hello/modules/review/agents/review-lead.md":   agent("review-lead"),
+	}
+	for _, c := range []struct {
+		name string
+		bind map[string]any
+		body string
+	}{
+		{"a group role bound to a list of two agents", map[string]any{"reviewers": []any{"code-reviewer", "test-reviewer"}, "lead": "review-lead"},
+			"Start code-reviewer, test-reviewer, then give the result to review-lead."},
+		{"a role bound to one name", map[string]any{"lead": "review-lead"},
+			"Start code-reviewer, then give the result to review-lead."},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			r := runFromCodeLinks(t, behindAWall(t), nil, stackFile, harnessBind(map[string]any{"agents": c.bind}), review, nil)
+			if !errors.Is(r.err, cmd.ErrJoinedNowhere) || !r.joined {
+				t.Fatalf("%v (exit %d), want the join\n%s", r.err, cmd.ExitCode(r.err), r.out)
+			}
+			wants(t, r.out, "qory run: composed ")
+			data, err := os.ReadFile(filepath.Join(r.spec.HarnessHome, "claude", "skills", "review", "SKILL.md"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			wants(t, string(data), c.body)
+		})
+	}
+}
+
 // harnessBind sets the bind of the harness document of a run code's documents to b.
 func harnessBind(b map[string]any) func(map[string]any) {
 	return func(d map[string]any) {
 		d["harness"].(map[string]any)["harness"].(map[string]any)["bind"] = b
 	}
+}
+
+// mustReadDir is the entries of the folder at dir, none when it is not there.
+func mustReadDir(t *testing.T, dir string) []os.DirEntry {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		t.Fatal(err)
+	}
+	return entries
 }

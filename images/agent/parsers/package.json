@@ -1,0 +1,14 @@
+{
+  "name": "qory-agent-parsers",
+  "version": "1.0.0",
+  "private": true,
+  "description": "The parsers the agent image holds at /opt/qory/parsers.",
+  "license": "UNLICENSED",
+  "dependencies": {
+    "libpg-query": "18.2.4",
+    "parse5": "8.1.1",
+    "postcss": "8.5.33",
+    "postcss-scss": "4.0.9",
+    "typescript": "5.9.3"
+  }
+}

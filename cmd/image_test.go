@@ -6,24 +6,24 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/qoryai/forager/session/runtimes/catalog"
-
 	"github.com/qoryai/qory/cmd"
 )
 
-// probeLines are the lines of a probe's report for each of its checks but claude, which
-// pass, and the fact about Docker.
-const probeLines = `{"name":"home","result":"pass","detail":"HOME is /home/agent, and the user 65532:65532 writes in it"},` +
-	`{"name":"authorities","result":"pass","detail":"the authorities are in /etc/ssl/certs/ca-certificates.crt, 1 certificates"},` +
-	`{"name":"shell","result":"pass","detail":"/bin/sh runs the runtime hooks and the API-key approval"},` +
-	`{"name":"git","result":"pass","detail":"git version 2.47.3"},` +
-	`{"name":"gh","result":"pass","detail":"gh version 2.101.0"},` +
-	`{"name":"docker","result":"info","detail":"no dockerd: the image carries no Docker of the agent own"}`
+// probeBefore and probeAfter are the lines of a probe's report before and after its git
+// line: the home, authorities, shell and gh lines, which pass, and the fact about Docker.
+// No line is about a runtime.
+const (
+	probeBefore = `{"name":"home","result":"pass","detail":"HOME is /home/agent, and the user 65532:65532 writes in it"},` +
+		`{"name":"authorities","result":"pass","detail":"the authorities are in /etc/ssl/certs/ca-certificates.crt, 1 certificates"},` +
+		`{"name":"shell","result":"pass","detail":"/bin/sh runs the runtime hooks and the API-key approval"},`
+	probeAfter = `,{"name":"gh","result":"pass","detail":"gh version 2.101.0"},` +
+		`{"name":"docker","result":"info","detail":"no dockerd: the image carries no nested Docker"}`
+)
 
 // fakeImageDocker puts a program named docker first on the PATH. It logs every command
 // line, runs an engine for linux/amd64 that holds every image but example.com/missing:1,
 // exports a container's files as a tar stream of one program, and answers a run with a
-// probe's report: one whose claude line fails for example.com/broken:1, one whose lines
+// probe's report: one whose git line fails for example.com/broken:1, one whose lines
 // pass otherwise.
 func fakeImageDocker(t *testing.T) string {
 	t.Helper()
@@ -46,8 +46,8 @@ export) tar -cf - -C `+files+` usr ;;
 rm) ;;
 run)
 	case "$*" in
-	*example.com/broken:1*) echo '{"version":1,"checks":[`+probeLines+`,{"name":"claude","result":"fail","detail":"no claude on the image PATH, /usr/bin"}]}' ;;
-	*) echo '{"version":1,"checks":[`+probeLines+`,{"name":"claude","result":"pass","detail":"claude at /usr/local/bin/claude is 2.1.316"}]}' ;;
+	*example.com/broken:1*) echo '{"version":1,"checks":[`+probeBefore+`{"name":"git","result":"fail","detail":"install git 2.25 or later in /usr/local/bin, /usr/bin, /bin: the git session of a walled run needs it, and /usr/bin/git prints git version 2.24.4"}`+probeAfter+`]}' ;;
+	*) echo '{"version":1,"checks":[`+probeBefore+`{"name":"git","result":"pass","detail":"git version 2.47.3"}`+probeAfter+`]}' ;;
 	esac ;;
 *) exit 64 ;;
 esac
@@ -72,8 +72,8 @@ func imageForager(t *testing.T, helper, image string) {
 
 // TestImageCheckChecksTheMachinesImage checks wall.image of forager.yaml with no
 // argument: the lines from outside and from the probe print, the fact that neither
-// passes nor fails prints as a field, and the probe runs as the wall runs an agent, with
-// the version Forager's descriptor for claude names.
+// passes nor fails prints as a field, the probe runs as the wall runs an agent, with no
+// argument, and no line is about a runtime, which no image contains.
 func TestImageCheckChecksTheMachinesImage(t *testing.T) {
 	emptyDir(t)
 	log := fakeImageDocker(t)
@@ -85,7 +85,7 @@ func TestImageCheckChecksTheMachinesImage(t *testing.T) {
 	}
 	wants(t, out,
 		"qory image check · engine linux/amd64",
-		"probe   "+helper+", amd64",
+		"probe  "+helper+", amd64",
 		"example.com/agent:1\n✓ the engine holds it, for linux/amd64",
 		"✓ the image sets HOME=/home/agent",
 		"✓ HOME is /home/agent, and the user 65532:65532 writes in it",
@@ -94,21 +94,17 @@ func TestImageCheckChecksTheMachinesImage(t *testing.T) {
 		"  docker     no dockerd",
 		"✓ example.com/agent:1 has what the wall needs",
 	)
-	rt, err := catalog.Lookup("claude", "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	wants(t, out, "claude  "+rt.Version()+", Forager's descriptor's")
+	lacks(t, out, "claude", "/qory/runtime", "descriptor")
 	data, err := os.ReadFile(log)
 	if err != nil {
 		t.Fatal(err)
 	}
-	wants(t, string(data), "create --pull never --network none --entrypoint /qory/qory example.com/agent:1\nexport c0ffee\nrm --force --volumes c0ffee\n", "run --rm --pull never --network none --user 65532:65532 --cap-drop ALL --security-opt no-new-privileges --init --mount type=bind,src="+helper+",dst=/qory/qory,readonly --entrypoint /qory/qory example.com/agent:1 image probe claude="+rt.Version()+"\n")
+	wants(t, string(data), "create --pull never --network none --entrypoint /qory/qory example.com/agent:1\nexport c0ffee\nrm --force --volumes c0ffee\n", "run --rm --pull never --network none --user 65532:65532 --cap-drop ALL --security-opt no-new-privileges --init --mount type=bind,src="+helper+",dst=/qory/qory,readonly --entrypoint /qory/qory example.com/agent:1 image probe\n")
 }
 
 // TestImageCheckFailsWhenOneImageFails checks three images, one the engine does not hold
-// and one whose probe finds no claude: each says what is wrong, the last line counts
-// them, and the exit status is 1.
+// and one whose probe finds a git that is too old: each says what is wrong, the last
+// line counts them, and the exit status is 1.
 func TestImageCheckFailsWhenOneImageFails(t *testing.T) {
 	emptyDir(t)
 	fakeImageDocker(t)
@@ -119,7 +115,7 @@ func TestImageCheckFailsWhenOneImageFails(t *testing.T) {
 	}
 	wants(t, out,
 		"✗ the engine does not hold example.com/missing:1; docker pull example.com/missing:1",
-		"✗ no claude on the image PATH",
+		"✗ install git 2.25 or later in /usr/local/bin, /usr/bin, /bin: ",
 		"✗ 2 of 3 images lack what the wall needs: example.com/missing:1, example.com/broken:1",
 	)
 }
