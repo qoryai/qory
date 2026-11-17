@@ -1337,7 +1337,7 @@ func readServer(path string, rawURL, id *string, pin *[]pinEntry, secret, key *y
 				return nil, exports.Refuse(fmt.Sprintf("Set %s.public_key to 32 bytes in base64url without padding.", at), "The value is not one.", at+" is in "+exports.HidePath(path)+".")
 			}
 			if err := pub.Check(); err != nil {
-				return nil, caused(err, exports.Refuse(fmt.Sprintf("Set %s.public_key to a key qory can verify under.", at), sentence(err), at+" is in "+exports.HidePath(path)+"."))
+				return nil, caused(err, exports.Refuse(fmt.Sprintf("Set %s.public_key to the gateway's public key.", at), sentence(err), at+" is in "+exports.HidePath(path)+"."))
 			}
 			if seen[pub] {
 				return nil, exports.Refuse("List each public key of gateway.server.apiary_public_key once.", at+".public_key is listed twice.", at+" is in "+exports.HidePath(path)+".")
