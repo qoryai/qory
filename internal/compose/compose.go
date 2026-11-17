@@ -339,7 +339,7 @@ func ComposeWith(p *stack.Stack, opts Options) (_ *Result, err error) {
 			afterManifest(src.Dir)
 		}
 		if pl.Name != "" && o.m.Name != pl.Name {
-			return nil, exports.Refuse(fmt.Sprintf("Use one name for the module in %s and in its %s.", stack.FileName, module.ManifestName),
+			return nil, exports.Refuse(fmt.Sprintf("Use one name for the module in %s and in its %s.", declaringFile(p), module.ManifestName),
 				fmt.Sprintf("The module %s at %s has the name %s in its %s.", accesskey.ShownName(pl.Name, false), ps.Shown(), accesskey.ShownName(o.m.Name, false), module.ManifestName))
 		}
 		if other, ok := dirs[o.m.Name]; ok {
@@ -1857,4 +1857,14 @@ func (r *Result) Close() {
 		root.Close()
 	}
 	r.roots = nil
+}
+
+// declaringFile is the name of the file that declares the stack p: qory-stack.yaml, or
+// qory.yaml for a harness section, as p was read from it. A stack with no file is the
+// stack file name.
+func declaringFile(p *stack.Stack) string {
+	if p.File == "" {
+		return stack.FileName
+	}
+	return filepath.Base(p.File)
 }
