@@ -52,6 +52,3 @@ func (claude) AgentHomeVariable() string { return "CLAUDE_CONFIG_DIR" }
 // projects/<slug of the working folder>/<session id>.jsonl in its configuration
 // directory.
 func (claude) TranscriptFolder() string { return "projects" }
-
-// Install is Claude Code's npm package at version.
-func (claude) Install(version string) string { return "@anthropic-ai/claude-code@" + version }

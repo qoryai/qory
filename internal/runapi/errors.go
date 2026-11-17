@@ -25,6 +25,12 @@ const (
 	CodeTooLarge        = "too_large"
 	CodeInvalidArtifact = "invalid_artifact"
 	CodeUnavailable     = "unavailable"
+	// The refusals of a withdrawal.
+	CodeTypeNotWithdrawable = "type_not_withdrawable"
+	CodeWithdrawalWithFiles = "withdrawal_with_files"
+	CodeNoVersion           = "no_version"
+	CodeAlreadyWithdrawn    = "already_withdrawn"
+	CodePersonVersion       = "person_version"
 	// CodeAnswerUnverified is the gateway's error for a response of Qory Apiary whose
 	// signature failed its check.
 	CodeAnswerUnverified = "answer_unverified"

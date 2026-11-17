@@ -27,6 +27,7 @@ import (
 	"strings"
 
 	"github.com/qoryai/qory/internal/compose"
+	"github.com/qoryai/qory/internal/module"
 	"github.com/qoryai/qory/internal/render"
 )
 
@@ -75,7 +76,9 @@ func (codex) Reserved() []render.Reserved {
 // mcp_servers, one table per server containing the object as the module wrote it, and any
 // other codex settings fragment without shell_environment_policy.set, whose variables are
 // the launch's, see [EnvAt], then one agents/<name>.toml per agent containing the agent's
-// name, description and its body as developer_instructions. The instructions written as AGENTS.md end with the names the
+// name, description and its body as developer_instructions, and a [features] table with
+// shell_tool = false for an agent that declares no shell tool, see [keepsShell]. The
+// instructions written as AGENTS.md end with the names the
 // session registers, see [render.Addressing]: a Codex home registers them as the modules
 // wrote them, and the file states that. Codex reads a project .codex only in a project
 // the user has marked trusted.
@@ -105,11 +108,15 @@ func (codex) Render(res *compose.Result, dir, home string) error {
 		if name == "" {
 			name = e.Name
 		}
-		data, err := render.EncodeTOML(map[string]any{
+		role := map[string]any{
 			"name":                   name,
 			"description":            doc.String("description"),
 			"developer_instructions": strings.TrimRight(doc.Body, "\n"),
-		})
+		}
+		if !keepsShell(doc.Front) {
+			role["features"] = map[string]any{"shell_tool": false}
+		}
+		data, err := render.EncodeTOML(role)
 		if err != nil {
 			return err
 		}
@@ -126,6 +133,24 @@ func (codex) Render(res *compose.Result, dir, home string) error {
 		}
 	}
 	return nil
+}
+
+// keepsShell reports whether a role keeps Codex's shell tool. A role with no tools key
+// keeps it, since Claude Code gives an agent with no tools key every tool. A role whose
+// tools key lists tools keeps it only when a listed tool is a shell: Bash or PowerShell,
+// alone or with a rule such as Bash(git:*). Codex has no setting for any other tool of a
+// role, and a role's file cannot set its sandbox.
+func keepsShell(front map[string]any) bool {
+	if v, ok := front["tools"]; !ok || v == nil {
+		return true
+	}
+	for _, t := range module.ToolsOf(front) {
+		name, _, _ := strings.Cut(t, "(")
+		if name = strings.TrimSpace(name); name == "Bash" || name == "PowerShell" {
+			return true
+		}
+	}
+	return false
 }
 
 // setKey is where a codex fragment sets variables, which Codex sets in every command it

@@ -614,7 +614,7 @@ func TestARunStartsFromItsCompose(t *testing.T) {
 	if err := c.Execute(); err != nil {
 		t.Fatalf("%v\n%s", err, out.String())
 	}
-	if !out.replaced || started != "claude" {
+	if !out.replaced || started != cmd.LastStandIn() {
 		t.Errorf("replaced %v, started %q\n%s", out.replaced, started, out.String())
 	}
 }

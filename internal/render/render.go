@@ -291,13 +291,6 @@ type TranscriptLinker interface {
 	TranscriptFolder() string
 }
 
-// Installer is a [Launcher] whose program installs at a version from one package, the
-// one qory image check names when an image has another version.
-type Installer interface {
-	// Install is the package at version, such as @anthropic-ai/claude-code@2.1.316.
-	Install(version string) string
-}
-
 // LaunchEnv is the variables the harness sets when the runtime's program starts, beside
 // the launch template's and QORY_HARNESS_HOME, see [compose.Result.LaunchEnv], with
 // override the configuration's harness.launch.<runtime>, nil when it has none. A variable

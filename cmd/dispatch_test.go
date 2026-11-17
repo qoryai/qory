@@ -34,7 +34,7 @@ func TestAPersonsRunLoadsAsBefore(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wants(t, string(data), "/fake-runtime --settings ", " -p hi")
+	wants(t, string(data), "/qory/runtime/claude/bin/claude --settings ", " -p hi")
 	lacks(t, string(data), "--strict-mcp-config", "--mcp-config", "mcpServers", "--setting-sources", "CLAUDE_CONFIG_DIR=", "qory-agent-home", "agent-env")
 }
 

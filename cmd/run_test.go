@@ -470,7 +470,7 @@ func TestRunRecordsTheSession(t *testing.T) {
 	if !strings.HasSuffix(out, "\nqory run: the record is in "+dir+"\n") {
 		t.Errorf("the last line does not name the record %s:\n%s", dir, out)
 	}
-	if session := sessionStarted(t, evs); session["command"] != script || session["interactive"] != false {
+	if session := sessionStarted(t, evs); session["command"] != cmd.LastStandIn() || session["interactive"] != false {
 		t.Errorf("session.started %v", session)
 	}
 	started := evs["dev.qory.run.started"]
@@ -508,7 +508,7 @@ func TestRunRecordsTheSession(t *testing.T) {
 	if err := json.Unmarshal(settings, &copied); err != nil {
 		t.Fatal(err)
 	}
-	if want := map[string]string{"CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1", "CLAUDE_CODE_DISABLE_OFFICIAL_MARKETPLACE_AUTOINSTALL": "1", "CLAUDE_CODE_MAX_RETRIES": "15"}; !maps.Equal(copied.Env, want) {
+	if want := map[string]string{"CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1", "CLAUDE_CODE_DISABLE_OFFICIAL_MARKETPLACE_AUTOINSTALL": "1", "CLAUDE_CODE_MAX_RETRIES": "15", "DISABLE_AUTOUPDATER": "1"}; !maps.Equal(copied.Env, want) {
 		t.Errorf("the settings copy's env is %v, want %v", copied.Env, want)
 	}
 	if !strings.Contains(string(settings), "\"timeout\"") {
@@ -965,14 +965,32 @@ case "$1 $2" in
 	shift 2
 	envfile=
 	entry=
+	runtimesrc=
+	runtimedst=
 	while [ $# -gt 0 ]; do
 		case "$1" in
 		--rm|--interactive|--tty|--init|--no-healthcheck) shift ;;
 		--env-file) envfile=$2; shift 2 ;;
+		--mount)
+			case "$2" in
+			*dst=/qory/runtime/*)
+				runtimesrc=${2#*src=}; runtimesrc=${runtimesrc%%,*}
+				runtimedst=${2#*dst=}; runtimedst=${runtimedst%%,*} ;;
+			esac
+			shift 2 ;;
 		--entrypoint) entry=$2; shift 3; break ;;
 		*) shift 2 ;;
 		esac
 	done
+	if [ -n "$runtimedst" ]; then
+		for a do
+			shift
+			case "$a" in
+			"$runtimedst"/*) a=$runtimesrc${a#"$runtimedst"} ;;
+			esac
+			set -- "$@" "$a"
+		done
+	fi
 	exec env -i PATH="$PATH" ${QORY_TEST_EXIT+QORY_TEST_EXIT=$QORY_TEST_EXIT} ${QORY_TEST_IMAGE_ENV+QORY_TEST_IMAGE_ENV=$QORY_TEST_IMAGE_ENV} /bin/sh `+enter+` "$envfile" "$entry" "$@" ;;
 esac
 `)
@@ -1074,7 +1092,8 @@ func TestRunBehindAWall(t *testing.T) {
 		"src="+helper+",dst=/qory/qory,readonly",
 		"--mount type=bind,src="+copyWork(t, lines)+",dst="+copyWork(t, lines)+" ",
 		"--entrypoint /qory/qory example.com/agent:2 run exec --unset ",
-		" -- claude --settings "+runsDir(t, root),
+		",dst=/qory/runtime/claude,readonly",
+		" -- /qory/runtime/claude/bin/claude --settings "+runsDir(t, root),
 		" -p hi",
 		"env: MODEL_KEY=not-a-real-key", "env: FLAG_NAMED=goes in", "env: HTTPS_PROXY=http://qory:", "@qory-proxy:3128\n", "env: QORY_HOST_URL=http://host.qory.invalid\n", "env: NO_PROXY=localhost,127.0.0.1,::1\n",
 		"network rm",
@@ -2134,7 +2153,6 @@ harness:
 
 	writeFile(t, filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", cmd.DescriptorsDir, "codex.yaml"), `version: 1
 runtime: codex
-runtime_version: "0.9"
 sources:
   output: {format: jsonl}
 stop: {signal: SIGHUP}
@@ -2151,7 +2169,7 @@ rules:
 		t.Fatalf("%v\n%s", err, out)
 	}
 	_, evs = events(t, root)
-	if started := sessionStarted(t, evs); started["runtime_version"] != "0.9" {
+	if started := sessionStarted(t, evs); started["runtime_version"] != nil {
 		t.Errorf("session.started %v", started)
 	}
 	if result := evs["dev.qory.runtime.result"]; len(result) != 1 || result[0]["outcome"] != "all good" {

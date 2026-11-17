@@ -8,6 +8,19 @@ import (
 	"github.com/qoryai/qory/internal/render"
 )
 
+// foragerRuntimes is the names in Forager's runtime list, in its order.
+func foragerRuntimes() ([]string, error) {
+	list, err := foragerList()
+	if err != nil {
+		return nil, err
+	}
+	names := make([]string, len(list))
+	for i, rt := range list {
+		names[i] = rt.Name
+	}
+	return names, nil
+}
+
 // runsBare are the runtimes qory starts that are not in Forager's runtimes.json: Forager
 // runs each as a bare runtime until its descriptor is added there.
 var runsBare = []string{"codex", "gemini", "opencode", "amp", "cursor", "copilot"}

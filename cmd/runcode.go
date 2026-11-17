@@ -25,6 +25,7 @@ import (
 
 	"github.com/qoryai/qory/internal/config"
 	"github.com/qoryai/qory/internal/exports"
+	"github.com/qoryai/qory/internal/runtimeinstall"
 )
 
 // A machine that a provisioner creates for one run gets a run code, qecr_, and the
@@ -75,6 +76,8 @@ type runCode struct {
 	gateway string
 	// stdin is set when the code was read from stdin, see [namesStdin].
 	stdin bool
+	// machine is where the run installs its runtime, from the lines after the code.
+	machine runtimeinstall.Machine
 }
 
 // String returns the run code's gateway, never its value.
@@ -89,9 +92,9 @@ func (c runCode) Format(f fmt.State, _ rune) { io.WriteString(f, c.String()) }
 // givenRunCode is the run code in file, the file of --run-code-file, nil when neither
 // flag is set. Neither flag goes with --run-key-fd, given when keyFD is true, or
 // QORY_RUN_KEY, and each needs the other. The file is read once, before anything is
-// sent: its content is the code, with at most one newline after it. A file that is
-// stdin is read from stdin, the reader qory has, see [readRunCode]. Every refusal is
-// input, and none contains the code. Each descriptor of 3 or above that qory inherited
+// sent: its content is the code, then at most the lines of [runtimeinstall.Machine]. A
+// file that is stdin is read from stdin, the reader qory has, see [readRunCode]. Every
+// refusal is input, and none contains the code. Each descriptor of 3 or above that qory inherited
 // open on the file, a regular file, is closed before givenRunCode returns, on every
 // path, see [closeRunCodeFD]: the file is the one qory read, or, when a refusal of the
 // flags comes first, the one that file leads to then.
@@ -103,7 +106,7 @@ func givenRunCode(fileSet, gatewaySet, keyFD bool, file, gatewayURL string, stdi
 		}
 		return nil, err
 	}
-	code, fromStdin, info, err := readRunCode(file, stdin)
+	code, machine, fromStdin, info, err := readRunCode(file, stdin)
 	// The descriptors are closed while stdin is open, so that their list, read from
 	// /dev/fd, does not take descriptor 0; stdin is closed after them.
 	closeRunCodeFD(info)
@@ -113,7 +116,7 @@ func givenRunCode(fileSet, gatewaySet, keyFD bool, file, gatewayURL string, stdi
 	if err != nil {
 		return nil, err
 	}
-	return &runCode{code: code, gateway: strings.TrimSuffix(gatewayURL, "/"), stdin: fromStdin}, nil
+	return &runCode{code: code, gateway: strings.TrimSuffix(gatewayURL, "/"), stdin: fromStdin, machine: machine}, nil
 }
 
 // runCodeFlags is the refusal of --run-code-file and --gateway, set when fileSet and
@@ -169,35 +172,36 @@ func runCodeFileInfo(file string, stdin io.Reader) fs.FileInfo {
 // matches, which qory does not open, or a file that, once opened, is the same file as
 // stdin, by device and inode, which qory then closes unread. Any other file is opened
 // without blocking and must be a regular file, so a named pipe or a device does not
-// stop qory. One newline after the code is left out; anything else in the file, and a
-// code that is not a run code, is refused as input, without the code. Each refusal
-// prints the path once.
-func readRunCode(file string, stdin io.Reader) (string, bool, fs.FileInfo, error) {
+// stop qory. One newline after the code is left out, and the lines of
+// [runtimeinstall.Machine] after it are read; anything else in the file, and a code that
+// is not a run code, is refused as input, without the code. Each refusal prints the path
+// once.
+func readRunCode(file string, stdin io.Reader) (string, runtimeinstall.Machine, bool, fs.FileInfo, error) {
 	if namesStdin(file) {
 		info := stdinInfo(stdin)
-		code, err := readRunCodeStdin(file, stdin)
-		return code, true, info, err
+		code, machine, err := readRunCodeStdin(file, stdin)
+		return code, machine, true, info, err
 	}
 	f, err := openRunCodeFile(file)
 	if err != nil {
-		return "", false, nil, unreadRunCode(file, err)
+		return "", runtimeinstall.Machine{}, false, nil, unreadRunCode(file, err)
 	}
 	info, err := f.Stat()
 	if err != nil {
 		f.Close()
-		return "", false, nil, unreadRunCode(file, err)
+		return "", runtimeinstall.Machine{}, false, nil, unreadRunCode(file, err)
 	}
 	if isStdin(info, stdin) {
 		f.Close()
-		code, err := readRunCodeStdin(file, stdin)
-		return code, true, info, err
+		code, machine, err := readRunCodeStdin(file, stdin)
+		return code, machine, true, info, err
 	}
 	defer f.Close()
 	if !info.Mode().IsRegular() {
-		return "", false, info, input(fmt.Errorf("give --%s a regular file: %s is not one", runCodeFileFlag, exports.Value(file, false)))
+		return "", runtimeinstall.Machine{}, false, info, input(fmt.Errorf("Give --%s a regular file: %s is not one", runCodeFileFlag, exports.Value(file, false)))
 	}
-	code, err := runCodeFrom(f, file)
-	return code, false, info, err
+	code, machine, err := runCodeFrom(f, file)
+	return code, machine, false, info, err
 }
 
 // isStdin reports whether info is the file that stdin is, as [os.SameFile] compares
@@ -229,7 +233,7 @@ func stdinInfo(stdin io.Reader) fs.FileInfo {
 // terminal, and is read from its current offset to its end, at most maxRunCodeFile
 // bytes and one more; a stdin with more is refused, and the run stops. The refusals are
 // [readRunCode]'s, with file as the path, but for the one of a file that is not regular.
-func readRunCodeStdin(file string, stdin io.Reader) (string, error) {
+func readRunCodeStdin(file string, stdin io.Reader) (string, runtimeinstall.Machine, error) {
 	return runCodeFrom(stdin, file)
 }
 
@@ -244,29 +248,36 @@ func unreadRunCode(file string, err error) error {
 }
 
 // runCodeFrom reads r, at most maxRunCodeFile bytes and one more, and returns the run
-// code in it, normalised, see [readRunCode]. Each refusal prints file once.
-func runCodeFrom(r io.Reader, file string) (string, error) {
+// code in it, normalised, see [readRunCode], and the machine's lines after it, which
+// qory run pool writes, see [runtimeinstall.Machine]. Each refusal prints file once.
+func runCodeFrom(r io.Reader, file string) (string, runtimeinstall.Machine, error) {
+	none := runtimeinstall.Machine{}
 	shown := exports.Value(file, false)
 	b, err := io.ReadAll(io.LimitReader(r, maxRunCodeFile+1))
 	defer clear(b)
 	if err != nil {
-		return "", unreadRunCode(file, err)
+		return "", none, unreadRunCode(file, err)
 	}
-	raw := bytes.TrimSuffix(b, []byte("\n"))
+	raw, rest, found := bytes.Cut(bytes.TrimSuffix(b, []byte("\n")), []byte("\n"))
+	machine, ok := runtimeinstall.Machine{}, true
+	if found {
+		machine, ok = runtimeinstall.ParseMachine(strings.Split(string(rest), "\n"))
+	}
 	switch {
-	case len(raw) == 0:
-		return "", input(fmt.Errorf("write the run code into %s: the file is empty", shown))
-	case len(b) > maxRunCodeFile || bytes.ContainsAny(raw, " \t\r\n\v\f"):
-		return "", input(fmt.Errorf("write only the run code into %s, with at most one newline after it: the file contains more", shown))
+	case len(raw) == 0 && !found:
+		return "", none, input(fmt.Errorf("Write the run code into %s: the file is empty", shown))
+	case len(b) > maxRunCodeFile || bytes.ContainsAny(raw, " \t\r\n\v\f") || !ok || len(raw) == 0:
+		return "", none, input(fmt.Errorf("Write the run code, then at most the lines `registry <host>`, `apiary <url>` and `runtimes <folder>`\n"+
+			"The file %s contains more than that.", shown))
 	}
 	code, err := accesskey.NormaliseCode(string(raw))
 	if err != nil {
-		return "", input(fmt.Errorf("write a run code (qecr_…) into %s: the file does not contain an enrolment code of Qory Apiary", shown))
+		return "", none, input(fmt.Errorf("Write a run code (qecr_…) into the file\n%s does not contain an enrolment code of Qory Apiary", shown))
 	}
 	if kind, _ := accesskey.CodeKind(code); kind != "run" {
-		return "", input(fmt.Errorf("write a run code (qecr_…) into %s: the file contains the enrolment code of an access key of kind %s", shown, kind))
+		return "", none, input(fmt.Errorf("Write a run code (qecr_…) into the file\n%s contains the enrolment code of an access key of kind %s", shown, kind))
 	}
-	return code, nil
+	return code, machine, nil
 }
 
 // namesStdin reports whether file, made absolute and clean, is a path that leads to

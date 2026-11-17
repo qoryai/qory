@@ -96,7 +96,7 @@ exec `+docker+` "$@"
 	wants(t, lines,
 		" -- "+wall.HelperPath+" run agent-env ",
 		"/kept -- ",
-		"/fake-runtime --settings "+runs,
+		"/qory/runtime/claude/bin/claude --settings "+runs,
 		"/settings.json -p hi",
 		"kept: HTTP_PROXY\n", "kept: QORY_RUN_ID\n", "kept: QORY_RUN_SOCKET\n", "kept: ANTHROPIC_API_KEY\n",
 		"kept: FLAG_NAMED\n", "kept: ca SSL_CERT_FILE\n",

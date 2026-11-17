@@ -1,6 +1,7 @@
 # agent: the image the wall runs the agent in, the base every other agent image of
-# Qory's is built FROM. It contains what qory's harness launches and the tools a run may
-# need to deliver its work: Claude Code at the version Forager's descriptor for it sets,
+# Qory's is built FROM. It contains no agent runtime, such as Claude Code or Codex: the
+# machine installs the runtime at run time, and Forager mounts it read-only at
+# /qory/runtime/<runtime>. It contains the tools a run may need to deliver its work:
 # git, the GitHub command, Chromium with Noto's fonts for Latin and other scripts, CJK
 # and color emoji, ffmpeg and ffprobe, ImageMagick, poppler's pdftoppm (Claude Code
 # renders a PDF's pages with it), qpdf, rsvg-convert, Graphviz, Tesseract OCR with
@@ -34,17 +35,6 @@ ARG DEBIAN_SNAPSHOT=20260918T000000Z
 ARG GH_VERSION=2.101.0
 ARG GH_SHA256_AMD64=9bca2d1c16825f109907a23307628a2f0698fbf99662b73a5cf0b020293072b8
 ARG GH_SHA256_ARM64=b57e8063f18862647c9d22727c32e9da1b963f8bf9db648fe123a6975695640f
-# Claude Code: the version contracts/forager/v1/runtimes/claude/descriptor.yaml names in
-# the Forager module qory's go.mod requires, which qory image check compares. The sums are
-# npm's dist.integrity, sha512 in hex, of @anthropic-ai/claude-code and of its native
-# build for each platform, @anthropic-ai/claude-code-linux-x64 and -linux-arm64.
-# Keep it at 2.1.257 or later: a harness module's settings use
-# permissions.blockReadsOutsideWorkingDirectories, which needs it.
-# Keep it at 2.1.280 or later: the model API requires that for claude-opus-5-5.
-ARG CLAUDE_CODE_VERSION=2.1.316
-ARG CLAUDE_CODE_SHA512=8b7069cf20e47023e7b1ad024a45a0c463eced632ccaa0e4c64a93d120f1c840b95cc2311267149a5b964471bd55278163c572bfe97d5f7e09bc9fc18f9e2705
-ARG CLAUDE_CODE_SHA512_AMD64=4500cce8ddbce488cd29c9a53d1ae26b2373a5390426b780c39fef054f95d11dea963910e73ebfa526f37155005ef6aca0e96fb9bd112266b7356bd2b9903c0a
-ARG CLAUDE_CODE_SHA512_ARM64=c6a9409218122c231d71a7a940d22cd7eca6e57f7ef9aa6211e39cd0b1d154e1e97cb96960a01a01705171c33a4152133744fdb172c221bcbb08ed4b733bac83
 
 FROM --platform=$BUILDPLATFORM ${FETCH_IMAGE} AS gh
 ARG TARGETARCH
@@ -61,30 +51,9 @@ RUN case "${TARGETARCH}" in \
  && mkdir /out \
  && tar -xzf /tmp/gh.tar.gz -C /out --strip-components=1 --no-same-owner
 
-FROM --platform=$BUILDPLATFORM ${FETCH_IMAGE} AS claude-amd64
-ARG CLAUDE_CODE_VERSION
-ARG CLAUDE_CODE_SHA512
-ARG CLAUDE_CODE_SHA512_AMD64
-ADD https://registry.npmjs.org/@anthropic-ai/claude-code/-/claude-code-${CLAUDE_CODE_VERSION}.tgz /out/claude-code.tgz
-ADD https://registry.npmjs.org/@anthropic-ai/claude-code-linux-x64/-/claude-code-linux-x64-${CLAUDE_CODE_VERSION}.tgz /out/claude-code-native.tgz
-RUN printf '%s  %s\n' "${CLAUDE_CODE_SHA512}" /out/claude-code.tgz "${CLAUDE_CODE_SHA512_AMD64}" /out/claude-code-native.tgz \
-    | sha512sum -c -
-
-FROM --platform=$BUILDPLATFORM ${FETCH_IMAGE} AS claude-arm64
-ARG CLAUDE_CODE_VERSION
-ARG CLAUDE_CODE_SHA512
-ARG CLAUDE_CODE_SHA512_ARM64
-ADD https://registry.npmjs.org/@anthropic-ai/claude-code/-/claude-code-${CLAUDE_CODE_VERSION}.tgz /out/claude-code.tgz
-ADD https://registry.npmjs.org/@anthropic-ai/claude-code-linux-arm64/-/claude-code-linux-arm64-${CLAUDE_CODE_VERSION}.tgz /out/claude-code-native.tgz
-RUN printf '%s  %s\n' "${CLAUDE_CODE_SHA512}" /out/claude-code.tgz "${CLAUDE_CODE_SHA512_ARM64}" /out/claude-code-native.tgz \
-    | sha512sum -c -
-
-FROM claude-${TARGETARCH} AS claude
-
 FROM ${NODE_IMAGE}
 ARG NODE_IMAGE
 ARG DEBIAN_SNAPSHOT
-ARG CLAUDE_CODE_VERSION
 
 # From the snapshot, through a copy of the base's sources that names it; the image keeps
 # the base's apt sources, so what is built FROM it installs from Debian as usual. Retries
@@ -171,17 +140,6 @@ RUN apt="-o Dir::Etc::SourceList=/tmp/snapshot.sources -o Dir::Etc::SourceParts=
       zip \
  && rm -rf /var/lib/apt/lists/* /tmp/snapshot.sources
 
-# From the checked archives alone, with no registry: the package's install script, the
-# one script allowed, puts the native build in place of a stub. The version test fails a
-# build that kept the stub.
-RUN --mount=type=bind,from=claude,source=/out,target=/tmp/claude \
-    npm install --global --offline --omit=optional --no-fund --no-audit --no-update-notifier \
-      --strict-allow-scripts --allow-scripts=file:/tmp/claude/claude-code.tgz \
-      /tmp/claude/claude-code.tgz /tmp/claude/claude-code-native.tgz \
- && npm cache clean --force \
- && rm -rf /root/.npm \
- && test "$(claude --version | cut -d' ' -f1)" = "${CLAUDE_CODE_VERSION}"
-
 COPY --from=gh /out/bin/gh /usr/local/bin/gh
 
 # Each tool runs, Chromium from /usr/bin, Tesseract lists each language installed, and
@@ -230,11 +188,9 @@ RUN gh --version \
  && chmod 1777 /home/agent \
  && find / -xdev -type f \( -perm -4000 -o -perm -2000 \) -exec chmod ug-s {} +
 
-# The agent's programs neither update themselves nor ask a person: under enforce a check
-# for updates or a report is a denied connection, and nobody answers a prompt.
+# The image's tools, gh, git and npm, neither check for updates nor ask a person: under
+# enforce a check for updates is a denied connection, and nobody answers a prompt.
 ENV HOME=/home/agent \
-    DISABLE_AUTOUPDATER=1 \
-    CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 \
     GH_NO_UPDATE_NOTIFIER=1 \
     GH_PROMPT_DISABLED=1 \
     GIT_TERMINAL_PROMPT=0 \
@@ -244,6 +200,6 @@ ENTRYPOINT []
 CMD []
 
 LABEL org.opencontainers.image.title="agent" \
-      org.opencontainers.image.description="The image Qory's wall runs the agent in: Claude Code, git, gh, Chromium and the tools a run may need, for any user." \
+      org.opencontainers.image.description="The image Qory's wall runs the agent in: git, gh, Chromium and the tools a run may need, for any user, with no agent runtime." \
       org.opencontainers.image.source="https://github.com/qoryai/qory" \
       org.opencontainers.image.base.name="${NODE_IMAGE}"

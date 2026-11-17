@@ -72,7 +72,7 @@ const typeSchemaURL = "https://qory.dev/contracts/harness/v1/artifact-type"
 const maxSchemaError = 300
 
 // typeKeys is every key an entry of artifact_types may have.
-var typeKeys = []string{"name", "base_view", "size_limit", "max_files", "json_schema"}
+var typeKeys = []string{"name", "base_view", "size_limit", "max_files", "json_schema", "withdrawable"}
 
 // typeSchemaDrafts is what $schema may be set to in a custom type's JSON Schema, each
 // with and without a # at its end.
@@ -119,9 +119,10 @@ func checkArtifactTypes(shown string, list *yaml.Node) error {
 
 // checkArtifactType checks entry i of artifact_types, counted from 0. An entry is a name
 // alone, or a name with base_view, size_limit and max_files, and with json_schema
-// exactly when base_view is structured. It returns the entry's name, "" for none of the
-// right form, and the first thing to fix in the entry, for a message, with [FilePlace]
-// for the file in one written fix first; "" for an entry
+// exactly when base_view is structured. Either also may have withdrawable, true or
+// false. It returns the entry's name, "" for none of the right form, and the first thing
+// to fix in the entry, for a message, with [FilePlace] for the file in one written fix
+// first; "" for an entry
 // that passes. qory has no list of standard types, so a name alone passes in any name
 // of the right form. patterns is the budget of the file's patterns.
 func checkArtifactType(entry *yaml.Node, i int, patterns *patternBudget) (name, why string) {
@@ -133,7 +134,7 @@ func checkArtifactType(entry *yaml.Node, i int, patterns *patternBudget) (name, 
 	for j := 0; j+1 < len(entry.Content); j += 2 {
 		key := entry.Content[j]
 		if key.Kind != yaml.ScalarNode || !slices.Contains(typeKeys, key.Value) {
-			return "", fmt.Sprintf("Remove the key %s from %s.\n  An artifact type has only name, base_view, size_limit, max_files, and json_schema.\n  The entry is in %s.", scalarText(key), label, FilePlace)
+			return "", fmt.Sprintf("Remove the key %s from %s.\n  An artifact type has only name, base_view, size_limit, max_files, json_schema, and withdrawable.\n  The entry is in %s.", scalarText(key), label, FilePlace)
 		}
 		if seen[key.Value] {
 			return "", fmt.Sprintf("Remove the second %s from %s.\n  The entry has the key twice.\n  The entry is in %s.", key.Value, label, FilePlace)
@@ -155,10 +156,17 @@ func checkArtifactType(entry *yaml.Node, i int, patterns *patternBudget) (name, 
 		return "", fmt.Sprintf("Rename %s.\n  A name is lowercase letters and digits in groups joined by single hyphens, at most %d bytes.\n  The name is %s.\n  The entry is in %s.", label, runapi.MaxArtifactName, scalarText(n), FilePlace)
 	}
 	name = n.Value
-	if len(entry.Content) == 2 {
+	label = "artifact type " + name
+	if w := value(entry, "withdrawable"); w != nil && !isBool(w) {
+		shown := scalarText(w)
+		if w.Tag == "!!null" {
+			shown = "null"
+		}
+		return name, fmt.Sprintf("Set withdrawable of %s to true or false.\n  withdrawable is %s.\n  The type is in %s.", label, shown, FilePlace)
+	}
+	if !seen["base_view"] && !seen["size_limit"] && !seen["max_files"] && !seen["json_schema"] {
 		return name, ""
 	}
-	label = "artifact type " + name
 	var missing []string
 	for _, key := range typeKeys[1:4] {
 		if !seen[key] {
@@ -550,4 +558,53 @@ func oneLine(text string) string {
 		n++
 	}
 	return b.String()
+}
+
+// NotWithdrawable returns the names of the artifact types that the process.yaml of any
+// exported module sets withdrawable: false for, in the order of the modules, each once. A
+// module with no process.yaml, or one with no artifact_types, adds none. A file that
+// [Exports.Verify] would refuse is an error, which starts with the file and the fix.
+func (e *Exports) NotWithdrawable() ([]string, error) {
+	var names []string
+	for _, module := range e.Modules {
+		dir, _ := e.Module(module)
+		data, file, err := e.readProcess(dir)
+		if err != nil {
+			return nil, err
+		}
+		if data == nil {
+			continue
+		}
+		if err := e.checkProcess(file, data); err != nil {
+			return nil, err
+		}
+		var process processFile
+		if err := yaml.Unmarshal(data, &process); err != nil {
+			return nil, DecodeError(file, err)
+		}
+		for _, entry := range process.ArtifactTypes.Content {
+			if flag := value(entry, "withdrawable"); flag != nil && isBool(flag) && !boolValue(flag) {
+				if name := value(entry, "name"); name != nil && !slices.Contains(names, name.Value) {
+					names = append(names, name.Value)
+				}
+			}
+		}
+	}
+	return names, nil
+}
+
+// isBool reports whether n is a YAML boolean that decodes as one: true, false, and their
+// capitalised forms. A scalar with the tag !!bool and a value that is no boolean, such as
+// !!bool no, is not.
+func isBool(n *yaml.Node) bool {
+	var b bool
+	return n.Kind == yaml.ScalarNode && n.Tag == "!!bool" && n.Decode(&b) == nil
+}
+
+// boolValue is the value of n, for which [isBool] is true.
+func boolValue(n *yaml.Node) bool {
+	var b bool
+	_ = n.Decode(&b)
+
+	return b
 }

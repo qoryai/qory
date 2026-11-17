@@ -1,9 +1,8 @@
 name: Images
 
 # The agent's images and the prebuild's are built here; this workflow publishes none of
-# them, and prerelease.yml publishes agent and prebuild. A change to them, to the check
-# and what it reads, or to the Forager module whose descriptor sets the version of
-# claude, builds all three and checks them with the qory of the same commit.
+# them, and prerelease.yml publishes agent and prebuild. A change to them, or to the check
+# and what it reads, builds all three and checks them with the qory of the same commit.
 on:
   push:
     branches: [main]
@@ -64,7 +63,8 @@ jobs:
 
       - name: Check them
         # On Linux the probe is qory itself, and a configuration directory with no
-        # forager.yaml leaves every setting its default.
+        # forager.yaml leaves every setting its default. No image contains a runtime, and
+        # the check has no runtime line.
         env:
           XDG_CONFIG_HOME: ${{ runner.temp }}/config
         run: '"$RUNNER_TEMP/qory" image check qory-agent qory-agent-docker qory-prebuild'
