@@ -3304,9 +3304,10 @@ version that is not cancelled. qory reads the plan once, after the setup command
 `wall.setup: outside` (the default) and before the session joins, with one request for the
 artifact index and one to download the plan. A plan that the agent pushes during the session
 changes nothing. The row's `Result file` is a path below the repository, or `none`. A work item
-with no build plan, or no `full` row with a command, gets the line `Add a full row to the build
-plan and take the work item in again: no suite starts.` and no after step; once the session
-succeeded, qory posts the cause as a verdict, see After the session.
+with no usable build plan, or no `full` row with a command, gets the line of the cause, such as
+`The full suite did not start: the build plan has no full row.` and, for a cause that the agent
+can fix, the fix on the next line, and no after step. Once the session succeeded, qory posts the
+cause as a verdict, see After the session.
 
 **Where it runs.** After the agent's container is removed, Forager starts a new container of the run's
 image with the workspace mounted for writing, on the run's network, with the run's
@@ -3404,7 +3405,7 @@ or the session succeeded and its after step did not run because the run closed.
 | `changes-requested` | `escalate` with the agent's points and `track`, and that point added |
 | 20 points already | nothing: the verdict stands |
 
-A suite that did not start for a cause in the build plan that the agent wrote (no build plan, no
+A suite that did not start for a cause in the build plan that the agent wrote (no usable build plan, one over 1 MiB, no
 `Commands` table, no `full` row, no command in it, a command that is too long or has a NUL, a
 result file that is no path below the repository): qory knows it at the launch, keeps it, and
 judges it once the session succeeded. The point has the cause in `text` and what to change in
@@ -3434,12 +3435,13 @@ order of preference:
 - For a session whose after step did not run, `The full suite did not run: the run closed before
   the after step.`
 - For a suite that did not start, `The full suite did not start: <cause>.` The causes at the launch
-  are `the work item has no build plan`, `the build plan has no table of commands`, `the build
+  are `the work item has no usable build plan` (no plan, several with none named `main`, or only
+  withdrawn versions), `the build plan is larger than 1 MiB`, `the build plan has no table of commands`, `the build
   plan has no full row`, `the full row of the build plan has no command`, `the command of the full
   row is too long or has a NUL`, `the result file of the full row is no path below the repository`
   (each with a `fix`), `qory could not read the build plan`, `the session's folder has no .git
   folder` and `qory could not read the commit the session started at`. The cause is `the after
-  step could not run` (-1), `the script could not make a folder it needs` (70), `git could not
+  step could not run` (-1), `the script could not make a folder it needs` (70), `the image may lack sh or git` (127), `git could not
   clone HEAD of the workspace` (71), `git could not read HEAD of the workspace` (72), or `its
   script did not record that it ran the command (exit <n>)`. This is also the text for a status file
   that is missing or garbled.

@@ -37,8 +37,10 @@ func (f *suiteFault) kind() suiteKind {
 // The points of a suite that did not start before the after step was set. The text is line 1,
 // the fix, when the agent can fix the cause, is the point's fix.
 const (
-	textFaultNoPlan   = "The full suite did not start: the work item has no build plan."
+	textFaultNoPlan   = "The full suite did not start: the work item has no usable build plan."
 	textFixNoPlan     = "Write a build plan with a full row in Commands, then push it."
+	textFaultTooBig   = "The full suite did not start: the build plan is larger than 1 MiB."
+	textFixTooBig     = "Cut the build plan below 1 MiB, then push it."
 	textFaultNoTable  = "The full suite did not start: the build plan has no table of commands."
 	textFixNoTable    = "Add the table Commands with the columns Kind, Command, Result file and Source."
 	textFaultNoFull   = "The full suite did not start: the build plan has no full row."
@@ -71,12 +73,22 @@ func faultOf(err error) *suiteFault {
 		return fixable(textFaultBadCmd, textFixBadCmd)
 	case errors.Is(err, suite.ErrBadResultFile):
 		return fixable(textFaultBadFile, textFixBadFile)
+	case errors.Is(err, errBuildPlanTooBig):
+		return fixable(textFaultTooBig, textFixTooBig)
 	case err == errNoBuildPlan:
 		return fixable(textFaultNoPlan, textFixNoPlan)
 	case errors.Is(err, suite.ErrBadStart):
 		return &suiteFault{point: runapi.Point{Text: textFaultBadStart, Action: "run_again"}}
 	}
 	return &suiteFault{point: runapi.Point{Text: textFaultPlanRead, Action: "run_again"}}
+}
+
+// line is the line of qory run for the fault: the point's text, and its fix on the next line.
+func (f *suiteFault) line() string {
+	if f.point.Fix == "" {
+		return f.point.Text
+	}
+	return f.point.Text + "\n  " + f.point.Fix
 }
 
 // noGitFault is the fault of a session's folder with no .git folder.

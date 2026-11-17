@@ -40,8 +40,10 @@ type fakeAPI struct {
 	versions []fakeVersion
 	// verdictStatus is the status POST verdict returns, 201 when 0.
 	verdictStatus int
-	posted        []string
-	indexCalls    int
+	// failFiles is whether a request for the file of a version answers 500.
+	failFiles  bool
+	posted     []string
+	indexCalls int
 }
 
 type fakeVersion struct {
@@ -128,6 +130,8 @@ func (f *fakeAPI) serve(w http.ResponseWriter, r *http.Request) {
 			out.Artifacts = append(out.Artifacts, by[key])
 		}
 		_ = json.NewEncoder(w).Encode(out)
+	case r.Method == http.MethodGet && strings.Contains(path, "/files/") && f.failFiles:
+		http.Error(w, "down", http.StatusInternalServerError)
 	case r.Method == http.MethodGet && strings.Contains(path, "/files/"):
 		for _, v := range f.versions {
 			if strings.HasPrefix(path, fmt.Sprintf("/artifacts/%s-%s-%d/files/", v.artifact, v.name, v.number)) {
@@ -462,7 +466,7 @@ func TestASuiteThatCannotStartPostsAnEscalate(t *testing.T) {
 		{"no folder", "", session.AfterResult{State: event.StateFailed, ExitCode: 70}, `{"verdict":"escalate","points":[{"text":"The full suite did not start: the script could not make a folder it needs.","action":"run_again"}]}`},
 		{"no clone", "", session.AfterResult{State: event.StateFailed, ExitCode: 71}, `{"verdict":"escalate","points":[{"text":"The full suite did not start: git could not clone HEAD of the workspace.","action":"run_again"}]}`},
 		{"no HEAD", "", session.AfterResult{State: event.StateFailed, ExitCode: 72}, `{"verdict":"escalate","points":[{"text":"The full suite did not start: git could not read HEAD of the workspace.","action":"run_again"}]}`},
-		{"no shell", "", session.AfterResult{State: event.StateFailed, ExitCode: 127}, `{"verdict":"escalate","points":[{"text":"The full suite did not start: the script did not record that it ran the command (exit 127).","action":"run_again"}]}`},
+		{"no shell", "", session.AfterResult{State: event.StateFailed, ExitCode: 127}, `{"verdict":"escalate","points":[{"text":"The full suite did not start: the image may lack sh or git (exit 127).","action":"run_again"}]}`},
 		{"over passed", `{"verdict":"passed"}`, session.AfterResult{State: event.StateFailed, ExitCode: 71}, `{"verdict":"escalate","points":[{"text":"The full suite did not start: git could not clone HEAD of the workspace.","action":"run_again"}]}`},
 		{"over an escalate", `{"verdict":"escalate","points":[{"text":"Pick one.","action":"answer","question":"q1"}]}`, session.AfterResult{State: event.StateFailed, ExitCode: 71},
 			`{"verdict":"escalate","points":[{"text":"Pick one.","action":"answer","question":"q1"},{"text":"The full suite did not start: git could not clone HEAD of the workspace.","action":"run_again"}]}`},
@@ -765,9 +769,9 @@ func TestOpenSuitesSetsTheAfterStepOnlyWhereTheSessionRunsTheSuite(t *testing.T)
 		{"full_suite is false", false, true, false, buildPlanText, false, false, false, ""},
 		{"no wall", true, false, false, buildPlanText, false, false, false, ""},
 		{"a read run", true, true, true, buildPlanText, false, false, false, ""},
-		{"no full row", true, true, false, "# Plan\n\n## Commands\n\n| Kind | Command | Result file | Source |\n|---|---|---|---|\n| fast | `a` | none | s |\n", false, false, true, "Add a full row to the build plan"},
-		{"no build plan", true, true, false, "", false, false, true, "Add a full row to the build plan"},
-		{"no git folder", true, true, false, buildPlanText, true, false, true, "Run the session in the top folder"},
+		{"no full row", true, true, false, "# Plan\n\n## Commands\n\n| Kind | Command | Result file | Source |\n|---|---|---|---|\n| fast | `a` | none | s |\n", false, false, true, "The full suite did not start: the build plan has no full row.\n  Add a row of kind full"},
+		{"no build plan", true, true, false, "", false, false, true, "The full suite did not start: the work item has no usable build plan.\n  Write a build plan"},
+		{"no git folder", true, true, false, buildPlanText, true, false, true, "The full suite did not start: the session's folder has no .git folder."},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			dir := workspaceRepo(t)
@@ -873,12 +877,12 @@ func TestLaunchFullReadsTheNewestUsableVersionOfTheBuildPlan(t *testing.T) {
 // run about the full suite to 100 characters, with the longest values a line shows.
 func TestTheLinesOfTheSuiteStartWithTheFixInAtMost100Characters(t *testing.T) {
 	for _, line := range []string{
-		fmt.Sprintf(textSuiteNotStarted, "x"), textSuiteNoGit, textSuiteSkipped, fmt.Sprintf(textSuiteFault, "x"),
+		textSuiteSkipped, fmt.Sprintf(textSuiteFault, "x"),
 		fmt.Sprintf(textSuiteEnded, " on 0123456789ab", suite.Timeout, ", 100000 of 100000 tests failed"),
 		textSuiteGreen, textSuiteCut, fmt.Sprintf(textSuiteStands, "changes-requested"), fmt.Sprintf(textSuitePosted, "changes-requested"), textSuiteNoRoom,
 		fmt.Sprintf(textSuiteNoPost, "x"),
 		textPointDenied, fmt.Sprintf(textPointFailed, 100000, 100000), fmt.Sprintf(textPointExit, -1), textPointNoTests, textPointMismatch,
-		fmt.Sprintf(textPointNoStartExit, -1), textPointNoStartStep, textPointNoStartFolder, textPointNoStartClone, textPointNoStartHead, fmt.Sprintf(textPointTimeout, 60),
+		fmt.Sprintf(textPointNoStartExit, -1), textPointNoStartShell, textFaultTooBig, textFaultNoPlan, textPointNoStartStep, textPointNoStartFolder, textPointNoStartClone, textPointNoStartHead, fmt.Sprintf(textPointTimeout, 60),
 	} {
 		first, _, _ := strings.Cut(line, "\n")
 		if len(first) > 100 {
@@ -887,7 +891,7 @@ func TestTheLinesOfTheSuiteStartWithTheFixInAtMost100Characters(t *testing.T) {
 	}
 	for _, f := range []*suiteFault{
 		faultOf(suite.ErrNoCommands), faultOf(suite.ErrNoFull), faultOf(suite.ErrNoCommand), faultOf(suite.ErrBadCommand),
-		faultOf(suite.ErrBadResultFile), faultOf(errNoBuildPlan), faultOf(suite.ErrBadStart), faultOf(errors.New("x")),
+		faultOf(suite.ErrBadResultFile), faultOf(errNoBuildPlan), faultOf(errBuildPlanTooBig), faultOf(suite.ErrBadStart), faultOf(errors.New("x")),
 		noGitFault(), noAfterFault(),
 	} {
 		if len(f.point.Text) > 100 || !validPoint(f.point) || f.fixable != (f.point.Fix != "") {

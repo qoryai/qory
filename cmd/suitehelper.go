@@ -31,17 +31,15 @@ const (
 // The lines of qory run about the full suite. A line with an instruction starts with the fix,
 // and has at most 100 characters in its first line.
 const (
-	textSuiteNotStarted = "Add a full row to the build plan and take the work item in again: no suite starts.\n  %s"
-	textSuiteNoGit      = "Run the session in the top folder of a git repository: no suite starts without a .git folder."
-	textSuiteSkipped    = "the full suite did not run: the session left HEAD at the commit it started at"
-	textSuiteFault      = "no full suite: %s"
-	textSuiteEnded      = "the full suite%s is %s%s"
-	textSuiteGreen      = "the full suite passed, so qory posts no verdict"
-	textSuiteCut        = "qory run was stopped while the full suite ran, so the run closes cancelled"
-	textSuiteStands     = "the verdict %s of the agent stands over the red full suite"
-	textSuitePosted     = "posted the verdict %s for the full suite"
-	textSuiteNoRoom     = "the verdict of the agent has 20 points already, so qory adds none for the full suite"
-	textSuiteNoPost     = "Take the work item in again in Qory Apiary: qory could not post the verdict of the full suite.\n  %s"
+	textSuiteSkipped = "the full suite did not run: the session left HEAD at the commit it started at"
+	textSuiteFault   = "no full suite: %s"
+	textSuiteEnded   = "the full suite%s is %s%s"
+	textSuiteGreen   = "the full suite passed, so qory posts no verdict"
+	textSuiteCut     = "qory run was stopped while the full suite ran, so the run closes cancelled"
+	textSuiteStands  = "the verdict %s of the agent stands over the red full suite"
+	textSuitePosted  = "posted the verdict %s for the full suite"
+	textSuiteNoRoom  = "the verdict of the agent has 20 points already, so qory adds none for the full suite"
+	textSuiteNoPost  = "Take the work item in again in Qory Apiary: qory could not post the verdict of the full suite.\n  %s"
 )
 
 // The lines of the point of the verdict that a red suite sets. Each is one sentence on one line
@@ -64,6 +62,7 @@ const (
 	textPointNoStartFolder = "The full suite did not start: the script could not make a folder it needs."
 	textPointNoStartClone  = "The full suite did not start: git could not clone HEAD of the workspace."
 	textPointNoStartHead   = "The full suite did not start: git could not read HEAD of the workspace."
+	textPointNoStartShell  = "The full suite did not start: the image may lack sh or git (exit 127)."
 	textPointNoStartExit   = "The full suite did not start: the script did not record that it ran the command (exit %d)."
 )
 
@@ -79,6 +78,9 @@ var errNoVerdictFile = errors.New("the run's verdict has no file")
 // errNoBuildPlan is why a run has no suite command: the run started with no build plan, or qory
 // could not read it.
 var errNoBuildPlan = errors.New("the run started with no build plan")
+
+// errBuildPlanTooBig is the error of a build plan whose file is over [maxBuildPlan] bytes.
+var errBuildPlanTooBig = errors.New("the build plan is too large")
 
 // suiteSetup is what [openSuites] needs from a run that has its session about to join.
 type suiteSetup struct {
@@ -135,19 +137,19 @@ func openSuites(ctx context.Context, s suiteSetup) *suiteRun {
 	r.full, err = launchFull(planCtx, s.run)
 	cancelPlan()
 	if err != nil {
-		s.said(fmt.Sprintf(textSuiteNotStarted, shownError(err)))
 		r.fault = faultOf(err)
+		s.said(r.fault.line())
 		return r
 	}
 	if info, err := os.Lstat(filepath.Join(s.spec.Dir, ".git")); err != nil || !info.IsDir() {
-		s.said(textSuiteNoGit)
 		r.fault = noGitFault()
+		s.said(r.fault.line())
 		return r
 	}
 	after, err := suite.Command(headCommit(ctx, s.spec.Dir), r.full)
 	if err != nil {
-		s.said(fmt.Sprintf(textSuiteNotStarted, shownError(err)))
 		r.fault = faultOf(err)
+		s.said(r.fault.line())
 		return r
 	}
 	s.spec.After, s.spec.AfterTimeout = after, afterLimit(r.minutes)
@@ -237,7 +239,7 @@ func readBuildPlan(ctx context.Context, client *runapi.Client) (string, error) {
 			continue
 		}
 		if file.Size > maxBuildPlan {
-			return "", fmt.Errorf("%w: %s is over %d bytes", errNoBuildPlan, buildPlanFile, maxBuildPlan)
+			return "", fmt.Errorf("%w: %s is over %d bytes", errBuildPlanTooBig, buildPlanFile, maxBuildPlan)
 		}
 		var text bytes.Buffer
 		if err := client.Download(ctx, version.ID, file, &text); err != nil {
@@ -475,6 +477,8 @@ func notStartedLine(exit int) string {
 		return textPointNoStartClone
 	case exit == suite.ExitNoHead:
 		return textPointNoStartHead
+	case exit == 127:
+		return textPointNoStartShell
 	}
 	return fmt.Sprintf(textPointNoStartExit, exit)
 }

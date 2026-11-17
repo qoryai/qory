@@ -51,6 +51,7 @@ func TestACauseInTheBuildPlanPostsChangesRequestedWithTheFix(t *testing.T) {
 		{"no table", "# Plan\n", textFaultNoTable, textFixNoTable},
 		{"no command", "## Commands\n\n| Kind | Command | Result file | Source |\n|---|---|---|---|\n| full | none | none | s |\n", textFaultNoCmd, textFixNoCmd},
 		{"no plan", "", textFaultNoPlan, textFixNoPlan},
+		{"a plan over 1 MiB", "## Commands\n" + strings.Repeat("x", maxBuildPlan), textFaultTooBig, textFixTooBig},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			h := newHelper(t)
@@ -196,5 +197,38 @@ func TestALaunchCauseWithAResultFileIsAFindingAndNoVerdict(t *testing.T) {
 	finding, _ := res["finding"].(map[string]any)
 	if res["state"] != "did_not_run" || finding["text"] != textFaultNoFull || finding["fix"] != textFixNoFull {
 		t.Errorf("the file has %v", res)
+	}
+}
+
+// TestAPlanThatCannotBeReadIsOutsideTheAgentsReach: a plan that the run API cannot send is
+// wrapped with errNoBuildPlan, not fixable, and posts escalate.
+func TestAPlanThatCannotBeReadIsOutsideTheAgentsReach(t *testing.T) {
+	h := newHelper(t)
+	h.api.failFiles = true
+	launchFaultRun(t, h, buildPlanText, false, "")
+	if h.fault.fixable {
+		t.Fatalf("the fault %+v is fixable", h.fault)
+	}
+	if _, err := h.after(nil, succeeded); err != nil {
+		t.Fatal(err)
+	}
+	want := `{"verdict":"escalate","points":[{"text":"` + textFaultPlanRead + `","action":"run_again"}]}`
+	if posted := h.api.verdicts(); len(posted) != 1 || posted[0] != want {
+		t.Errorf("posted %q, want %s", posted, want)
+	}
+}
+
+// TestAPassedVerdictKeepsItsTrackUnderACauseInTheBuildPlan.
+func TestAPassedVerdictKeepsItsTrackUnderACauseInTheBuildPlan(t *testing.T) {
+	const track = `"track":{"id":"small","reason":"One file."}`
+	h := newHelper(t)
+	h.api.add(fakeVersion{artifact: "verdict", name: "main", number: 1, runID: "r1", file: "verdict.json", content: `{"verdict":"passed",` + track + `}`})
+	launchFaultRun(t, h, planNoFull, false, "")
+	if _, err := h.after(nil, succeeded); err != nil {
+		t.Fatal(err)
+	}
+	want := `{"verdict":"changes-requested","points":[{"text":"` + textFaultNoFull + `","action":"run_again","fix":"` + textFixNoFull + `"}],` + track + `}`
+	if posted := h.api.verdicts(); len(posted) != 1 || posted[0] != want {
+		t.Errorf("posted %q, want %s", posted, want)
 	}
 }
