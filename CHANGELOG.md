@@ -177,7 +177,13 @@ release may change what an existing document does, and states it under Upgrading
   verdict, the file of the artifact type `verdict`. With `escalate`, `points` lists 1 to
   20 points for a person, each with `text`, one sentence on one line, 1 to 500
   characters, and `action`: `answer`, with `question`, the id of an open question, or
-  `run_again`. The text member `gaps` is gone. See The verdict format in
+  `run_again`. A `run_again` point may have `fix`, a line of 1 to 500 characters on
+  how a person fixes it, which Qory Apiary shows in place of the action's sentence; an
+  `answer` point has no `fix`. A `changes-requested` verdict may have 1 to 20 points,
+  each with the action `run_again`; `qory run verdict` sends points only with
+  `escalate`. A verdict of any kind may have a `track`, with an `id` and a `reason` of 1
+  to 300 characters, which Qory Apiary checks against the tracks of the run's stage;
+  `qory run verdict` sends none. The text member `gaps` is gone. See The verdict format in
   `contracts/harness/v1/README.md`.
 - `-f` on `qory harness compose`, `qory run` and `qory worktree add` takes a stack by
   reference, `<https URL>#<ref>:<folder>`: qory fetches the folder as it fetches a git

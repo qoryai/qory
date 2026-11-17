@@ -3175,8 +3175,12 @@ format](../contracts/harness/v1/README.md#the-verdict-format):
 
 ```json
 [{"text": "The spec does not say which customers see the new price.", "action": "answer", "question": "q4"},
- {"text": "The checks script failed on the spec's links.", "action": "run_again"}]
+ {"text": "The checks script failed on the spec's links.", "action": "run_again",
+  "fix": "Fix the link to /docs/start in the spec."}]
 ```
+
+A `run_again` point may have `fix`, one line on how a person fixes the point; an
+`answer` point has none.
 
 qory checks the file before it sends or keeps the verdict. A file that breaks a rule
 stops the command with exit 2, and the first line of the error is the fix, such as

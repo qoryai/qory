@@ -15,7 +15,7 @@ What `qory harness compose` reads and what it writes.
 | a questions document | the file of a version of the artifact type `questions` | a work item's questions, their answers and the decisions of its runs (§The questions format). No compose reads it |
 | a review comments document | the file of a version of the artifact type `review-comments` | a work item's review comments on its artifact versions and the replies to them (§The review comments format). No compose reads it |
 | a proposal sources document | the file `sources.json` of a version of the artifact type `proposal` | every source a run used to write the proposal, with the reason for each (§The proposal sources format). No compose reads it |
-| a verdict document | the file of a version of the artifact type `verdict`, which `qory run verdict` stores | a run's verdict, and for `escalate` the points a person acts on (§The verdict format). No compose reads it |
+| a verdict document | the file of a version of the artifact type `verdict`, which `qory run verdict` stores | a run's verdict, and its points: for `escalate` the points a person acts on, and for `changes-requested` what the next round fixes (§The verdict format). No compose reads it |
 
 Every module has a `qory-module.yaml`; it defines the module's name, and a directory
 without one is not a module. `qory.yaml` is optional: every setting has a default. It has
@@ -847,18 +847,42 @@ stores it as a version of the artifact type `verdict`. This is version 1 of the 
 ```json
 {"verdict": "escalate",
  "points": [{"text": "The spec does not say which customers see the new price.", "action": "answer", "question": "q4"},
-            {"text": "The checks script failed on the spec's links.", "action": "run_again"}]}
+            {"text": "The checks script failed on the spec's links.", "action": "run_again",
+             "fix": "Fix the link to /docs/start in the spec."}]}
 ```
 
 | Member | Meaning |
 |---|---|
 | `verdict` | `passed`: the work meets the bar; `changes-requested`: the work needs another round; `escalate`: a person must act |
-| `points` | what is wrong or missing and what a person can do, 1 to 20 points: required with `escalate`, and absent with the other verdicts |
+| `points` | what is wrong or missing, 1 to 20 points: required with `escalate`, optional with `changes-requested`, where each point has the action `run_again`, and absent with `passed` |
 | `text` | what is wrong or missing, in one plain sentence for a person on one line, 1 to 500 characters, with no action and no question id, because Qory Apiary adds the action from `action`: it has no control character, so no tab, line feed or carriage return, and the schema's `$defs` `line`, the `line` of the questions format, lists the format characters it cannot have |
-| `action` | `answer`: the person answers the question in `question`; `run_again`: the person runs another round |
+| `action` | `answer`: a person answers the question in `question`, only with `escalate`; `run_again`: another round runs, and with `escalate` a person runs it |
 | `question` | the id of an open question in the work item's newest `questions` version, in the id form of the questions format: required with `answer`, and absent with `run_again` |
+| `fix` | what a person does to fix the point, in one plain sentence on one line, with the rules of `text`: optional with `run_again`, and absent with `answer`. Qory Apiary shows it in place of the sentence of the action `run_again` |
+| `track` | the track the run proposes for the work item: optional with a verdict of any kind, an object with the members `id` and `reason` and no other. A verdict with no track proposes none. Qory Apiary returns 422 for a track that the gate of the run's stage does not offer |
+| `id` | the id of a track that the gate of the run's stage offers: one lower-case word, or lower-case words joined by hyphens, such as `small-change`, at most 40 characters. Required in a track |
+| `reason` | why the run proposes the track, in one plain sentence on one line, 1 to 300 characters, with the rules of `text`. Required in a track |
 
-A document and a point have no other member. A JSON Schema cannot check that the
+A `changes-requested` verdict may list what the next round fixes:
+
+```json
+{"verdict": "changes-requested",
+ "points": [{"text": "The checks script failed on the spec's links.", "action": "run_again"}]}
+```
+
+`qory run verdict` sends points only with `escalate`.
+
+A verdict of any kind may propose a track:
+
+```json
+{"verdict": "passed", "track": {"id": "small-change", "reason": "The change touches one config file."}}
+```
+
+`qory run verdict` sends no track.
+
+A document has no member other than `verdict`, `points` and `track`, a point has no member
+other than `text`, `action`, `question` and `fix`, and a track has no member other than
+`id` and `reason`. A JSON Schema cannot check that the
 question is open, so the run pushes its questions before its verdict. Each of these
 documents fails the schema:
 
@@ -870,7 +894,13 @@ documents fails the schema:
 {"verdict": "escalate", "points": [{"text": "The spec does not say who sees the price.", "action": "answer"}]}
 {"verdict": "escalate", "points": [{"text": "The checks script failed.", "action": "run_again", "question": "q4"}]}
 {"verdict": "escalate", "points": [{"text": "The checks script failed.\nThe spec's links are broken.", "action": "run_again"}]}
+{"verdict": "changes-requested", "points": [{"text": "The spec does not say who sees the price.", "action": "answer", "question": "q4"}]}
+{"verdict": "escalate", "points": [{"text": "The spec does not say who sees the price.", "action": "answer", "question": "q4", "fix": "Answer q4."}]}
 {"verdict": "changes-requested", "gaps": "Add the empty cart."}
+{"verdict": "passed", "track": {"id": "small-change"}}
+{"verdict": "passed", "track": {"id": "Small-Change", "reason": "The change touches one config file."}}
+{"verdict": "passed", "track": {"id": "small-change", "reason": "The change touches one config file.", "stage": "build"}}
+{"verdict": "passed", "track": {"id": "small-change", "reason": "The change touches one config file.\nIt adds no code."}}
 ```
 
 ## The module manifest
