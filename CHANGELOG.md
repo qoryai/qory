@@ -484,10 +484,13 @@ release may change what an existing document does, and states it under Upgrading
 
 - A prebuild started from Qory Apiary applies the instance's Largest prebuilt image
   setting, which the run documents carry as `largest_prebuilt_image_bytes`, in decimal
-  bytes. When the target image is larger, the build removes it and the prebuild stops with
+  bytes. The limit applies to the repository's image, before qory adds Chromium, ffmpeg
+  and the parsers. When that image is larger, the prebuild stops before the tools step with
   `Make the image smaller, or contact support to raise Largest prebuilt image.` on line 1,
-  then the size and the limit in GB and in bytes. An image of exactly the limit is kept,
-  and without the member any size is kept. `qory prebuild` has no limit. See `docs/run.md`.
+  then the size and the limit in GB and in bytes, and removes an image the build made. An
+  image of exactly the limit is kept, and without the member any size is kept. The last
+  line of a successful prebuild still prints the final size. `qory prebuild` has no limit.
+  See `docs/run.md`.
 - A prebuild keeps an image of any size, and the last line of the prebuild prints the size.
 - A prebuild stops, before it builds the image, when the base image is not Debian or
   Ubuntu 22.04 or 24.04, or has no `apt-get`: `use a Debian or Ubuntu image: the build
