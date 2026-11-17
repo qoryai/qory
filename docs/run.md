@@ -2655,8 +2655,9 @@ its 410 arrives as 502 `control_plane_unavailable`: both are sent again. Then:
   `Contact support: qory pushed <commit> to qory/<work item id>, and Qory Apiary did not
   record it.`, then `Qory Apiary returned <status>: <message or code>`. For a request with no
   answer, or one that a stop or the time limit cut, the second line is `Qory Apiary sent no
-  response: <cause>`. Neither line has a step to retry. `<commit>` is the first commit of the
-  call that failed. The pushed commits stay on the forge, and the version is not stored.
+  response: <cause>`. For a status that the gateway returned, not Qory Apiary, the text is the
+  code. Neither line has a step to retry. `<commit>` is the first commit of the call that
+  failed. The pushed commits stay on the forge, and the version is not stored.
 
 A removal of the setup container that failed runs no step: qory commits nothing and pushes
 nothing, and the run ends as a failed step ends it, with this line:

@@ -340,9 +340,9 @@ func TestWhatTheGatewayDoesNotPassOnIsA502AndIsSentAgain(t *testing.T) {
 	}
 }
 
-// TestAGatewayRefusalOfA4xxEndsTheRunAtOnce is a report that the gateway refuses before it
-// reaches Qory Apiary, with 413 payload_too_large or another 4xx: no second send, nothing at
-// Qory Apiary, and the run closes failed before session 2 with the status and the gateway's text.
+// TestAGatewayRefusalOfA4xxEndsTheRunAtOnce is a report that the gateway returns a 4xx for before it
+// reaches Qory Apiary, 413 payload_too_large or another: no second send, nothing at
+// Qory Apiary, and the run closes failed before session 2 with the status and the gateway's code.
 func TestAGatewayRefusalOfA4xxEndsTheRunAtOnce(t *testing.T) {
 	for name, c := range map[string]struct {
 		status int
@@ -359,7 +359,10 @@ func TestAGatewayRefusalOfA4xxEndsTheRunAtOnce(t *testing.T) {
 			t.Cleanup(cmd.SetLaterSessions(func() { secondRan = true }))
 			r := p.run(t, commitFirst(t), nil)
 			r.wantsClose(t, event.StateFailed, 1)
-			wants(t, r.out, "Contact support: qory pushed "+p.branchHead(t)+" to "+recordBranch+", and Qory Apiary did not record it.\n"+fmt.Sprintf("Qory Apiary returned %d: the gateway refused the call: %s\n", c.status, c.code))
+			wants(t, r.out, "Contact support: qory pushed "+p.branchHead(t)+" to "+recordBranch+", and Qory Apiary did not record it.\n"+fmt.Sprintf("Qory Apiary returned %d: %s\n", c.status, c.code))
+			if strings.Contains(r.out, "Send the") {
+				t.Errorf("the output has a step to send the call again\n%s", r.out)
+			}
 			if calls, _ := p.api.reports(); calls != 0 || p.linkCalls != 1 || len(p.waits) != 0 {
 				t.Errorf("%d reports at Qory Apiary, %d sends and the waits %v, want 0, 1 and none", calls, p.linkCalls, p.waits)
 			}
@@ -384,7 +387,11 @@ func TestAGatewayThatStaysDownEndsTheRunAfterFourSends(t *testing.T) {
 			t.Cleanup(cmd.SetLaterSessions(func() { secondRan = true }))
 			r := p.run(t, commitFirst(t), nil)
 			r.wantsClose(t, event.StateFailed, 1)
-			wants(t, r.out, "Contact support: qory pushed "+p.branchHead(t)+" to "+recordBranch+", and Qory Apiary did not record it.\nQory Apiary returned "+name+": ")
+			status := map[string]string{"502": "502: control_plane_unavailable", "503": "503: Service Unavailable"}[name]
+			wants(t, r.out, "Contact support: qory pushed "+p.branchHead(t)+" to "+recordBranch+", and Qory Apiary did not record it.\nQory Apiary returned "+status+"\n")
+			if strings.Contains(r.out, "Send the") {
+				t.Errorf("the output has a step to send the call again\n%s", r.out)
+			}
 			if p.linkCalls != 4 || !slices.Equal(p.waits, []time.Duration{time.Second, 2 * time.Second, 4 * time.Second}) {
 				t.Errorf("%d sends and the waits %v, want 4 and [1s 2s 4s]", p.linkCalls, p.waits)
 			}
@@ -417,9 +424,9 @@ func TestEachSendOfAReportHas65Seconds(t *testing.T) {
 	}
 }
 
-// TestAGatewayThatEndedTheRunStopsTheReport is a report that the gateway answers with 410, the run
+// TestAGatewayThatEndedTheRunStopsTheReport is a report that gets 410 from the gateway, because the run
 // ended while the call was open: the same as run_ended of Qory Apiary. qory sends no second
-// report, stores no version, starts no session 2, and says so in one line. The step succeeds.
+// report, stores no version, starts no session 2, and prints one line. The step succeeds.
 func TestAGatewayThatEndedTheRunStopsTheReport(t *testing.T) {
 	p := newPushRepo(t, "write")
 	p.gateway = func(int) error { return cmd.GatewayRefusal(http.StatusGone, "run_closed") }
@@ -445,7 +452,7 @@ func TestAGatewayThatEndedTheRunStopsTheReport(t *testing.T) {
 }
 
 // TestARunEndedInApiaryStartsNoLaterSession is a report that gets run_ended after session 1:
-// qory sends no second report, stores no version, starts no session 2, and says so in one line.
+// qory sends no second report, stores no version, starts no session 2, and prints one line.
 // The run closes with the session's outcome, as for a run that Qory Apiary closed, with exit
 // status 0 and no new status.
 func TestARunEndedInApiaryStartsNoLaterSession(t *testing.T) {

@@ -189,7 +189,8 @@ type sessionPush struct {
 	// [preparation.Push]: true for a walled run.
 	agentStopped bool
 	checks       *runPushChecks
-	// ended is whether Qory Apiary returned run_ended to a report of pushed commits: no
+	// ended is whether the report of pushed commits found the run over, Qory Apiary's run_ended
+	// or the gateway's 410: no
 	// later push and no later session of the run goes on. A loop over the run's sessions
 	// reads it after each [sessionPush.after].
 	ended bool

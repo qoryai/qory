@@ -270,7 +270,7 @@ func TestASendHas65SecondsAndTheWaitsAre1And2And4(t *testing.T) {
 	}
 }
 
-// TestASendThatGetsNoAnswerIsCutAtTheLimit is a send that the gateway never answers: the send ends
+// TestASendThatGetsNoAnswerIsCutAtTheLimit is a send that gets no answer from the gateway: the send ends
 // when its limit does, with the context's deadline error, and the second send follows.
 func TestASendThatGetsNoAnswerIsCutAtTheLimit(t *testing.T) {
 	before := recordAttemptLimit

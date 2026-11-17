@@ -28,7 +28,7 @@ const (
 
 // The bounds of the report of a push: recordAttempts is the first send and the three that
 // follow, after the waits of recordWaits. The link has no Retry-After, so the waits are the
-// same whatever the answer says.
+// same for every status.
 const recordAttempts = 4
 
 var recordWaits = [recordAttempts - 1]time.Duration{time.Second, 2 * time.Second, 4 * time.Second}
@@ -110,26 +110,31 @@ func sendPushedOnce(ctx context.Context, send pushedSender, body []byte) error {
 	return err
 }
 
-// linkAnswer is the status and the text of the answer to a report that is not a 2xx, read from
-// the error of [session.Run.PushedCommits]: a refusal of Qory Apiary's, passed on by the gateway
-// with From apiary, or the gateway's own, From gateway, and a status with no code, such as the
-// gateway's 503 while it closes or reopens the run. ok is false for an error with no status: a
-// transport failure, no answer in time, or a cancelled context.
+// linkAnswer is the status and the text of an answer to a report that is not a 2xx, read from
+// the error of [session.Run.PushedCommits]: a refusal of Qory Apiary's, which the gateway passes
+// on with From apiary, or a refusal or status that the gateway returns itself, such as its 503
+// while it closes or reopens the run. The text is the message of Qory Apiary's refusal, else its
+// code. For a status from the gateway it is the code alone, because the gateway's message can
+// tell the reader to send the call again, and a line of qory has no such step. ok is false for an
+// error with no status: a transport failure, no answer in time, or a cancelled context.
 func linkAnswer(err error) (status int, text string, ok bool) {
 	var refusal *accesskey.Refusal
 	var failure *server.StatusError
 	switch {
 	case errors.As(err, &refusal) && refusal.Status != 0:
-		return refusal.Status, cmp.Or(refusal.Text, refusal.Code), true
+		if refusal.From == accesskey.FromApiary {
+			return refusal.Status, cmp.Or(refusal.Text, refusal.Code), true
+		}
+		return refusal.Status, refusal.Code, true
 	case errors.As(err, &failure):
-		return failure.Status, cmp.Or(failure.Message, failure.Code), true
+		return failure.Status, failure.Code, true
 	}
 	return 0, "", false
 }
 
-// runEndedAnswer reports whether err says that the run is over: Qory Apiary's 409 run_ended, or
-// the gateway's 410, which the link sends when the run ended during the call. Qory Apiary's own
-// 410 never arrives as a 410: the gateway returns it as 502 control_plane_unavailable.
+// runEndedAnswer reports whether err shows that the run is over: Qory Apiary's 409 run_ended, or
+// the gateway's 410, which the link returns when the run ended during the call. A 410 of Qory
+// Apiary never arrives as a 410: the gateway returns it as 502 control_plane_unavailable.
 func runEndedAnswer(err error) bool {
 	if _, ended := server.Ended(err); ended {
 		return true

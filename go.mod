@@ -6,7 +6,7 @@ require (
 	github.com/BurntSushi/toml v1.6.0
 	github.com/charmbracelet/lipgloss v1.1.0
 	github.com/charmbracelet/x/term v0.2.1
-	github.com/qoryai/forager v0.7.1-0.20261117040841-3d4ec18a5662
+	github.com/qoryai/forager v0.7.1-0.20261117145511-b6bf9042ebb7
 	github.com/qoryai/integrations v0.3.1-0.20261116191236-55a22cb87e72
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3
 	github.com/spf13/cobra v1.10.2
@@ -36,5 +36,3 @@ require (
 	go.yaml.in/yaml/v3 v3.0.4 // indirect
 	golang.org/x/term v0.46.0 // indirect
 )
-
-replace github.com/qoryai/forager => /Users/voldy/code/qoryai/forager/wt-544-host-calls

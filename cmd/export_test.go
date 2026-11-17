@@ -635,17 +635,26 @@ func PushedThroughLink(ctx context.Context, runAPI string, body []byte) ([]byte,
 	return nil, GatewayRefusal(http.StatusBadGateway, "control_plane_unavailable")
 }
 
-// GatewayRefusal is a refusal that the gateway decides, with status and code, as the link
-// returns it to [session.Run.PushedCommits]: From gateway. A 410 is the end of the run at
-// the gateway, which [server.Ended] reports.
+// GatewayRefusal is a refusal that the gateway returns itself, with status and code, as the link
+// gives it to [session.Run.PushedCommits]: From gateway, with the text of Forager's gateway
+// where it has one for the code. A 410 is the end of the run at the gateway, which
+// [server.Ended] reports.
 func GatewayRefusal(status int, code string) error {
-	return &accesskey.Refusal{Code: code, Status: status, From: accesskey.FromGateway, Text: "the gateway refused the call: " + code}
+	text := map[string]string{
+		"control_plane_unavailable": "Send the pushed-commits request again: the gateway got no valid answer from the control plane.",
+		"payload_too_large":         "Send a pushed-commits body of at most 65536 bytes: this one is longer, so the gateway sent nothing.",
+		"not_found":                 "Open the run with a control plane to send the pushed-commits request: this run has none.",
+	}[code]
+	if text == "" {
+		text = "the gateway refused the call: " + code
+	}
+	return &accesskey.Refusal{Code: code, Status: status, From: accesskey.FromGateway, Text: text}
 }
 
 // GatewayBusy is the gateway's 503 with no code, while it closes or reopens the run: a
 // [*server.StatusError].
 func GatewayBusy() error {
-	return &server.StatusError{What: "the pushed-commits request", Status: http.StatusServiceUnavailable}
+	return &server.StatusError{What: "the pushed-commits request", Status: http.StatusServiceUnavailable, Message: "Send the pushed-commits request again."}
 }
 
 // noRunAPI is a transport that returns 404 with an error page to every request.
