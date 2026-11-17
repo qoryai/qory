@@ -239,7 +239,6 @@ func removeThenPush(ctx context.Context, run openedRun, stderr io.Writer, branch
 // checks the version before it is stored, see [checkBranchVersion].
 func pushWork(ctx context.Context, run openedRun, stderr io.Writer, branch *preparation.WorkBranch, dir, runID string, runNumber int, out session.Outcome, agentStopped bool, checks *runPushChecks) error {
 	cut := func() bool { return ctx.Err() != nil }
-	branch.RunID = runID
 	return inStep(run, stderr, event.StepPush, pushStepName(branch, run.System()), cut, func(w io.Writer) error {
 		httpClient, base, err := run.RunAPI()
 		if err != nil {

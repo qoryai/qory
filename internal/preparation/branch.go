@@ -34,10 +34,6 @@ const TargetRef = "refs/qory/target-version"
 type WorkBranch struct {
 	// Ref is the branch's name, the same in each repository: qory/<work item id>.
 	Ref string
-	// RunID is the id of the run, a lower-case UUID, as the run API has it. The text of a
-	// push that gets 403 shows it, so the reader can give it to support. The caller of
-	// [Push] sets it.
-	RunID string
 	// Version is the entries of the branch version the run read, nil with none, with the
 	// commit of each repository that a [Push] of the run pushed. It may have repositories
 	// that the run does not list, and those are not fetched.
