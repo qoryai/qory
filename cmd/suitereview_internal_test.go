@@ -1,12 +1,14 @@
 package cmd
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/qoryai/forager/event"
 	"github.com/qoryai/forager/session"
@@ -94,7 +96,7 @@ func TestTheResultFileHasTheStateOfEveryEnd(t *testing.T) {
 			suiteResult{State: "skipped"}},
 		{"the script never started", "", "", "", "", &session.AfterResult{Step: 2, State: event.StateFailed, ExitCode: 71}, succeeded,
 			suiteResult{State: "failed", Finding: finding("The full suite did not start: git could not clone HEAD of the workspace.")}},
-		{"the after step did not run", "", "", "", "", nil, succeeded, suiteResult{State: "did_not_run"}},
+		{"the after step did not run", "", "", "", "", nil, succeeded, suiteResult{State: "did_not_run", Finding: finding("The full suite did not run: the run closed before the after step.")}},
 		{"a session that failed", "ran " + suiteSHA, redResult, "FAIL\n", "5", &session.AfterResult{Step: 2, State: event.StateFailed, ExitCode: 1}, session.Outcome{State: event.StateFailed, ExitCode: 3},
 			suiteResult{Commit: suiteSHA, State: "failed", Counts: countsOf(2, 1, 0), Minutes: &one, Output: "FAIL\n", Finding: finding("The full suite failed: 1 of 2 tests failed.")}},
 	} {
@@ -196,6 +198,49 @@ func TestAResultFileThatCannotBeWrittenIsALine(t *testing.T) {
 			}
 			if len(h.api.verdicts()) != 0 {
 				t.Errorf("posted %q", h.api.verdicts())
+			}
+		})
+	}
+}
+
+// TestAResultPathThatQoryRefusesPostsNoVerdictAndFailsTheRun: inputs that name review.suite_result
+// with a relative path print the line at the launch, and the run then writes nothing, posts
+// nothing for any end, and closes failed with exit status 1 when its session succeeded.
+func TestAResultPathThatQoryRefusesPostsNoVerdictAndFailsTheRun(t *testing.T) {
+	for name, end := range map[string]session.AfterResult{
+		"green": {Step: 2, State: event.StateSucceeded},
+		"red":   {Step: 2, State: event.StateFailed, ExitCode: 1},
+		"stop":  {Step: 2, State: event.StateCancelled, ExitCode: -1},
+	} {
+		t.Run(name, func(t *testing.T) {
+			api := newFakeAPI(t)
+			api.withPlan(buildPlanText)
+			spec := &runSpec{}
+			spec.Dir = workspaceRepo(t)
+			var said []string
+			runDir := t.TempDir()
+			r := openSuites(context.Background(), suiteSetup{
+				run: apiRun{api: api, dir: runDir}, spec: spec, runID: "r1", walled: true, fullSuite: true,
+				inputs: []byte(`{"review":{"suite_result":"suite.json"}}`), said: func(l string) { said = append(said, l) },
+			})
+			if r == nil || len(said) != 1 || !strings.HasPrefix(said[0], "Set review.suite_result") {
+				t.Fatalf("suite %v, lines %q", r != nil, said)
+			}
+			r.said = func(l string) { said = append(said, l) }
+			status := "ran " + suiteSHA
+			folder := filepath.Join(spec.Dir, ".git/qory-suite")
+			os.MkdirAll(folder, 0o755)
+			os.WriteFile(filepath.Join(folder, "status"), []byte(status+"\n"), 0o644)
+			e := end
+			got, err := r.after(context.Background(), context.Background(), time.Time{}, &session.Result{After: &e}, succeeded)
+			if name != "stop" && (got.State != event.StateFailed || got.ExitCode != 1 || ExitCode(err) != 1) {
+				t.Errorf("outcome %+v, error %v, want failed with 1", got, err)
+			}
+			if name == "stop" && (got.State != event.StateCancelled || ExitCode(err) != 1) {
+				t.Errorf("outcome %+v, error %v, want cancelled with 1", got, err)
+			}
+			if posted := api.verdicts(); len(posted) != 0 {
+				t.Errorf("posted %q", posted)
 			}
 		})
 	}

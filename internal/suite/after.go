@@ -3,7 +3,6 @@ package suite
 import (
 	"bytes"
 	"errors"
-	"fmt"
 	"os"
 	"regexp"
 	"strconv"
@@ -100,6 +99,8 @@ var commitID = regexp.MustCompile(`^(?:[0-9a-f]{40}|[0-9a-f]{64})$`)
 var (
 	// ErrBadCommand is the error of a command that is longer than [MaxCommandBytes] or has a NUL.
 	ErrBadCommand = errors.New("the full row's command is too long or has a NUL")
+	// ErrBadResultFile is the error of a result file that is no path below the repository.
+	ErrBadResultFile = errors.New("the full row's result file is no path below the repository")
 	// ErrBadStart is the error of a start commit that is not a full commit id.
 	ErrBadStart = errors.New("the start commit is not a full commit id")
 )
@@ -114,7 +115,7 @@ func Command(start string, full Full) ([]string, error) {
 	case start != "" && !commitID.MatchString(start):
 		return nil, ErrBadStart
 	case full.ResultFile != "" && !CleanResultPath(full.ResultFile):
-		return nil, fmt.Errorf("%w: the result file %q is no path below the repository", ErrBadCommand, full.ResultFile)
+		return nil, ErrBadResultFile
 	}
 	return []string{"sh", "-c", script, "sh", full.Command, full.ResultFile, start}, nil
 }

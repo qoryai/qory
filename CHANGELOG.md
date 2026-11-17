@@ -478,7 +478,10 @@ release may change what an existing document does, and states it under Upgrading
   A suite that ran and failed posts `changes-requested` with one point over a `passed` verdict
   or none, or adds the point to an `escalate`, and does not end the run `failed`; when the
   proxy refused a host while the suite ran, the point has the host. A suite that did not start
-  posts `escalate` with the point `The full suite did not start: <cause>.` A green suite posts
+  posts `escalate` with the point `The full suite did not start: <cause>.`; for a cause in the
+  build plan that the agent wrote, such as no `full` row, it posts `changes-requested` with the
+  point and a fix, and over an agent's `changes-requested` it adds the point. A session
+  whose after step did not run posts `escalate` with `The full suite did not run: ...`. A green suite posts
   nothing. If qory cannot post the verdict, the run closes `failed`. A stop of `qory run` during
   the suite closes the run `cancelled`, with the reason `interrupted`. When the run's inputs have
   `review.suite_result`, qory writes the suite's result, with one finding for a suite that did

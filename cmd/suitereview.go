@@ -23,6 +23,10 @@ const (
 // stateNotRun is the state of a result for a session whose after step did not run.
 const stateNotRun = "did_not_run"
 
+// errResultPath is the error of a run whose inputs name a path that qory refuses; openSuites
+// printed the line for it.
+var errResultPath = errors.New("the path of review.suite_result is refused")
+
 // errResultFolder is why qory does not write the result file: its folder is no real folder.
 var errResultFolder = errors.New("the folder of the file is no folder, or a link")
 
@@ -66,7 +70,7 @@ type suiteResult struct {
 // run when ran is false. The cap is the minutes of a suite that the limit cut.
 func resultOf(got suite.Outcome, ran bool, capMinutes int, finding *runapi.Point) suiteResult {
 	if !ran {
-		return suiteResult{State: stateNotRun}
+		return suiteResult{State: stateNotRun, Finding: finding}
 	}
 	res := suiteResult{Commit: got.Commit, State: string(got.State), Counts: got.Counts, Output: secretmask.Default().Replace(got.Output), Finding: finding}
 	switch {
@@ -83,6 +87,9 @@ func resultOf(got suite.Outcome, ran bool, capMinutes int, finding *runapi.Point
 // suite that did not pass; with no such file it writes nothing. A failure is a line of qory run,
 // and the error: the reviewers find no file.
 func (r *suiteRun) writeResult(got suite.Outcome, ran bool, finding *runapi.Point) error {
+	if r.resultBad {
+		return errResultPath
+	}
 	if r.resultFile == "" {
 		return nil
 	}

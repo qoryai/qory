@@ -34,7 +34,7 @@ const (
 	textSuiteNotStarted = "Add a full row to the build plan and take the work item in again: no suite starts.\n  %s"
 	textSuiteNoGit      = "Run the session in the top folder of a git repository: no suite starts without a .git folder."
 	textSuiteSkipped    = "the full suite did not run: the session left HEAD at the commit it started at"
-	textSuiteNoAfter    = "the full suite did not run: the run was closed before the after step started"
+	textSuiteFault      = "no full suite: %s"
 	textSuiteEnded      = "the full suite%s is %s%s"
 	textSuiteGreen      = "the full suite passed, so qory posts no verdict"
 	textSuiteCut        = "qory run was stopped while the full suite ran, so the run closes cancelled"
@@ -64,7 +64,7 @@ const (
 	textPointNoStartFolder = "The full suite did not start: the script could not make a folder it needs."
 	textPointNoStartClone  = "The full suite did not start: git could not clone HEAD of the workspace."
 	textPointNoStartHead   = "The full suite did not start: git could not read HEAD of the workspace."
-	textPointNoStartExit   = "The full suite did not start: its script exited with status %d before the command ran."
+	textPointNoStartExit   = "The full suite did not start: the script did not record that it ran the command (exit %d)."
 )
 
 // suiteMinutes is the time the suite's cap counts in: the cap is limit minutes.
@@ -107,12 +107,16 @@ type suiteRun struct {
 	dir     string
 	full    suite.Full
 	minutes int
-	// resultFile is the path of review.suite_result, "" for none.
+	// resultFile is the path of review.suite_result, "" for none, and resultBad is whether the
+	// inputs name a path that qory refuses: then it writes nothing and posts no verdict either.
 	resultFile string
+	resultBad  bool
+	// fault is why no suite runs for this session, nil when the after step is set.
+	fault *suiteFault
 }
 
 // openSuites sets the after step of the full suite on the session's spec and returns the run that
-// judges it; nil when the session runs none. The command is the full row of the launch build plan.
+// judges it; nil when the session runs none. A cause that stops the step is kept as the run's fault.
 func openSuites(ctx context.Context, s suiteSetup) *suiteRun {
 	if !s.walled || s.readOnly || !s.fullSuite {
 		return nil
@@ -120,29 +124,34 @@ func openSuites(ctx context.Context, s suiteSetup) *suiteRun {
 	if _, _, err := s.run.RunAPI(); err != nil {
 		return nil
 	}
+	r := &suiteRun{run: s.run, runID: s.runID, said: s.said, dir: s.spec.Dir, minutes: suite.LimitMinutes(s.extensions)}
+	var err error
+	if r.resultFile, err = suiteResultFile(s.inputs); err != nil {
+		s.said(shownError(err))
+		r.resultBad = true
+	}
+	// A cause that no After step can show is kept, and judged once the session ends.
 	planCtx, cancelPlan := context.WithTimeout(ctx, suitePlanWait)
-	full, err := launchFull(planCtx, s.run)
+	r.full, err = launchFull(planCtx, s.run)
 	cancelPlan()
 	if err != nil {
 		s.said(fmt.Sprintf(textSuiteNotStarted, shownError(err)))
-		return nil
+		r.fault = faultOf(err)
+		return r
 	}
 	if info, err := os.Lstat(filepath.Join(s.spec.Dir, ".git")); err != nil || !info.IsDir() {
 		s.said(textSuiteNoGit)
-		return nil
+		r.fault = noGitFault()
+		return r
 	}
-	after, err := suite.Command(headCommit(ctx, s.spec.Dir), full)
+	after, err := suite.Command(headCommit(ctx, s.spec.Dir), r.full)
 	if err != nil {
 		s.said(fmt.Sprintf(textSuiteNotStarted, shownError(err)))
-		return nil
+		r.fault = faultOf(err)
+		return r
 	}
-	resultFile, err := suiteResultFile(s.inputs)
-	if err != nil {
-		s.said(shownError(err))
-	}
-	minutes := suite.LimitMinutes(s.extensions)
-	s.spec.After, s.spec.AfterTimeout = after, afterLimit(minutes)
-	return &suiteRun{run: s.run, runID: s.runID, said: s.said, dir: s.spec.Dir, full: full, minutes: minutes, resultFile: resultFile}
+	s.spec.After, s.spec.AfterTimeout = after, afterLimit(r.minutes)
+	return r
 }
 
 // afterLimit is the time limit of the after step: the suite's cap alone. The session's time
@@ -250,39 +259,45 @@ func (r *suiteRun) after(ctx, again context.Context, limit time.Time, res *sessi
 			r.said("remove " + suite.StateFolder + " in the workspace: " + shownError(err))
 		}
 	}()
-	ran := res != nil && res.After != nil
+	fault := r.fault
+	if fault == nil && (res == nil || res.After == nil) {
+		fault = noAfterFault()
+	}
 	var got suite.Outcome
-	var step int
-	if ran {
+	var point *runapi.Point
+	kind := kindRed
+	if fault != nil {
+		point, kind = &fault.point, fault.kind()
+	} else {
 		a := res.After
-		step = a.Step
 		got = suite.Judge(r.dir, r.full, suite.End{
 			Succeeded: a.State == event.StateSucceeded,
 			Cancelled: a.State == event.StateCancelled,
 			TimedOut:  a.Reason == event.ReasonTimeout,
 			ExitCode:  a.ExitCode,
 		})
-	}
-	// A suite that did not pass has one point: the finding in the result file, or the verdict.
-	var point *runapi.Point
-	if ran && got.State.Red() {
-		refused := suite.Refused{Local: true}
-		if got.Started && got.State != suite.Stopped {
-			refused = suite.ReadRefused(filepath.Join(r.run.Dir(), sink.EventsFile), step)
+		if got.State.Red() {
+			refused := suite.Refused{Local: true}
+			if got.Started && got.State != suite.Stopped {
+				refused = suite.ReadRefused(filepath.Join(r.run.Dir(), sink.EventsFile), a.Step)
+			}
+			p := suitePoint(got, refused, r.minutes)
+			point = &p
 		}
-		p := suitePoint(got, refused, r.minutes)
-		point = &p
+		if got.NotStarted() {
+			kind = kindUnfixable
+		}
 	}
-	writeErr := r.writeResult(got, ran, point)
+	writeErr := r.writeResult(got, fault == nil, point)
 	if out.State != event.StateSucceeded {
 		return out, nil
 	}
-	if got.State == suite.Stopped {
+	if fault == nil && got.State == suite.Stopped {
 		return r.cut(ctx, again, limit, *point)
 	}
 	switch {
-	case !ran:
-		r.said(textSuiteNoAfter)
+	case fault != nil:
+		r.said(fmt.Sprintf(textSuiteFault, point.Text))
 	case got.State == suite.Skipped:
 		r.said(textSuiteSkipped)
 	case got.State == suite.Passed:
@@ -296,12 +311,12 @@ func (r *suiteRun) after(ctx, again context.Context, limit time.Time, res *sessi
 	if writeErr != nil {
 		return session.Outcome{State: event.StateFailed, ExitCode: 1}, &exitError{code: 1}
 	}
-	if point == nil || r.resultFile != "" {
+	if point == nil || r.named() {
 		return out, nil
 	}
 	postCtx, cancelPost := pushContext(ctx, again, limit, pushTimes.limit, pushTimes.signal)
 	defer cancelPost()
-	posted, err := r.post(postCtx, *point, got.NotStarted(), maxBranchTries)
+	posted, err := r.post(postCtx, *point, kind, maxBranchTries)
 	if err != nil {
 		r.said(fmt.Sprintf(textSuiteNoPost, shownError(err)))
 		return session.Outcome{State: event.StateFailed, ExitCode: 1}, &exitError{code: 1}
@@ -320,12 +335,12 @@ const cutPostWait = 5 * time.Second
 // red verdict with one try (none with a result file) and closes the run cancelled, interrupted, exit 1.
 func (r *suiteRun) cut(ctx, again context.Context, limit time.Time, point runapi.Point) (session.Outcome, error) {
 	r.said(textSuiteCut)
-	if r.resultFile == "" {
+	if !r.named() {
 		postCtx, cancelPost := pushContext(ctx, again, limit, pushTimes.limit, pushTimes.signal)
 		defer cancelPost()
 		postCtx, cancelWait := context.WithTimeout(postCtx, cutPostWait)
 		defer cancelWait()
-		posted, err := r.post(postCtx, point, false, 1)
+		posted, err := r.post(postCtx, point, kindRed, 1)
 		switch {
 		case err != nil:
 			r.said(fmt.Sprintf(textSuiteNoPost, shownError(err)))
@@ -350,7 +365,7 @@ func countsSuffix(c *suite.Counts) string {
 
 // post posts the verdict for a suite that did not pass, with at most tries requests, and returns
 // the line for what it posted, "" for nothing. The rules by prior verdict are in docs/run.md.
-func (r *suiteRun) post(ctx context.Context, point runapi.Point, notStarted bool, tries int) (string, error) {
+func (r *suiteRun) post(ctx context.Context, point runapi.Point, kind suiteKind, tries int) (string, error) {
 	httpClient, base, err := r.run.RunAPI()
 	if err != nil {
 		return "", err
@@ -363,36 +378,43 @@ func (r *suiteRun) post(ctx context.Context, point runapi.Point, notStarted bool
 	if err != nil {
 		return "", err
 	}
-	send := func(body []byte, verdict string) (string, error) {
-		if err := postVerdict(ctx, client, body, tries); err != nil {
-			return "", err
-		}
-		return fmt.Sprintf(textSuitePosted, verdict), nil
-	}
+	// verdict is what qory posts over a prior verdict of the agent, and points the points it has.
+	verdict, points := runapi.VerdictChangesRequested, []runapi.Point{point}
 	switch {
 	case agent == nil || agent.Verdict == runapi.VerdictPassed:
-		verdict := runapi.VerdictChangesRequested
-		if notStarted {
+		if kind == kindUnfixable {
 			verdict = runapi.VerdictEscalate
 		}
-		body, err := runapi.VerdictBody(verdict, []runapi.Point{point})
-		if err != nil {
-			return "", err
+	case agent.Verdict == runapi.VerdictEscalate:
+		verdict, points = runapi.VerdictEscalate, append(agent.Points, point)
+	case kind == kindRed:
+		return fmt.Sprintf(textSuiteStands, agent.Verdict), nil
+	default:
+		verdict, points = runapi.VerdictChangesRequested, append(agent.Points, point)
+		if kind == kindUnfixable {
+			verdict = runapi.VerdictEscalate
 		}
-		return send(body, verdict)
-	case agent.Verdict == runapi.VerdictEscalate || notStarted:
-		if len(agent.Points) >= maxVerdictPoints {
-			return textSuiteNoRoom, nil
-		}
-		agent.Points = append(agent.Points, point)
-		body, err := encodeVerdict(agent)
-		if err != nil {
-			return "", err
-		}
-		return send(body, agent.Verdict)
 	}
-	return fmt.Sprintf(textSuiteStands, agent.Verdict), nil
+	if len(points) > maxVerdictPoints {
+		return textSuiteNoRoom, nil
+	}
+	doc := &verdictDocument{Verdict: verdict, Points: points}
+	if agent != nil {
+		doc.Track = agent.Track
+	}
+	body, err := encodeVerdict(doc)
+	if err != nil {
+		return "", err
+	}
+	if err := postVerdict(ctx, client, body, tries); err != nil {
+		return "", err
+	}
+	return fmt.Sprintf(textSuitePosted, verdict), nil
 }
+
+// named reports whether the run's inputs name review.suite_result, valid or not: a stage with
+// reviewers sends the verdict, so qory posts none.
+func (r *suiteRun) named() bool { return r.resultFile != "" || r.resultBad }
 
 // suitePoint is the one point for a suite that did not pass. A host text that the verdict format
 // refuses is left out of its first line.

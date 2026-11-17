@@ -284,7 +284,6 @@ func TestAGreenSuiteAndASkippedSuitePostNothing(t *testing.T) {
 		{"green", "ran " + suiteSHA, greenResult, &session.AfterResult{Step: 2, State: event.StateSucceeded}, succeeded},
 		{"skipped", "skipped", "", &session.AfterResult{Step: 2, State: event.StateSucceeded}, succeeded},
 		{"skipped tests", "ran " + suiteSHA, `<testsuite><testcase name="a"><skipped/></testcase></testsuite>`, &session.AfterResult{Step: 2, State: event.StateSucceeded}, succeeded},
-		{"the after step did not run", "", "", nil, succeeded},
 		{"a failed session", "ran " + suiteSHA, redResult, &session.AfterResult{Step: 2, State: event.StateFailed, ExitCode: 1}, session.Outcome{State: event.StateFailed, ExitCode: 3}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
@@ -445,8 +444,8 @@ func TestTheHostLineHasAtMost100CharactersAndAValidVerdict(t *testing.T) {
 // TestASuiteThatCannotStartPostsAnEscalate: a suite whose command never ran is a setup fault that
 // no change to the code mends. Over no verdict and over passed, qory posts escalate with the one
 // point; over an escalate of the agent it adds the point; over a changes-requested of the agent
-// it keeps that verdict and adds the point; over 20 points it posts nothing. The run closes as
-// its session did.
+// it posts escalate with the agent's points and track and the point; over 20 points it posts
+// nothing. The run closes as its session did.
 func TestASuiteThatCannotStartPostsAnEscalate(t *testing.T) {
 	point := func(i int) string { return fmt.Sprintf(`{"text":"Point %d.","action":"run_again"}`, i) }
 	twenty := make([]string, 20)
@@ -463,12 +462,12 @@ func TestASuiteThatCannotStartPostsAnEscalate(t *testing.T) {
 		{"no folder", "", session.AfterResult{State: event.StateFailed, ExitCode: 70}, `{"verdict":"escalate","points":[{"text":"The full suite did not start: the script could not make a folder it needs.","action":"run_again"}]}`},
 		{"no clone", "", session.AfterResult{State: event.StateFailed, ExitCode: 71}, `{"verdict":"escalate","points":[{"text":"The full suite did not start: git could not clone HEAD of the workspace.","action":"run_again"}]}`},
 		{"no HEAD", "", session.AfterResult{State: event.StateFailed, ExitCode: 72}, `{"verdict":"escalate","points":[{"text":"The full suite did not start: git could not read HEAD of the workspace.","action":"run_again"}]}`},
-		{"no shell", "", session.AfterResult{State: event.StateFailed, ExitCode: 127}, `{"verdict":"escalate","points":[{"text":"The full suite did not start: its script exited with status 127 before the command ran.","action":"run_again"}]}`},
+		{"no shell", "", session.AfterResult{State: event.StateFailed, ExitCode: 127}, `{"verdict":"escalate","points":[{"text":"The full suite did not start: the script did not record that it ran the command (exit 127).","action":"run_again"}]}`},
 		{"over passed", `{"verdict":"passed"}`, session.AfterResult{State: event.StateFailed, ExitCode: 71}, `{"verdict":"escalate","points":[{"text":"The full suite did not start: git could not clone HEAD of the workspace.","action":"run_again"}]}`},
 		{"over an escalate", `{"verdict":"escalate","points":[{"text":"Pick one.","action":"answer","question":"q1"}]}`, session.AfterResult{State: event.StateFailed, ExitCode: 71},
 			`{"verdict":"escalate","points":[{"text":"Pick one.","action":"answer","question":"q1"},{"text":"The full suite did not start: git could not clone HEAD of the workspace.","action":"run_again"}]}`},
-		{"over a changes-requested", `{"verdict":"changes-requested","points":[` + point(1) + `]}`, session.AfterResult{State: event.StateFailed, ExitCode: 71},
-			`{"verdict":"changes-requested","points":[` + point(1) + `,{"text":"The full suite did not start: git could not clone HEAD of the workspace.","action":"run_again"}]}`},
+		{"over a changes-requested", `{"verdict":"changes-requested","points":[` + point(1) + `],"track":{"id":"small","reason":"One file."}}`, session.AfterResult{State: event.StateFailed, ExitCode: 71},
+			`{"verdict":"escalate","points":[` + point(1) + `,{"text":"The full suite did not start: git could not clone HEAD of the workspace.","action":"run_again"}],"track":{"id":"small","reason":"One file."}}`},
 		{"over a changes-requested with 20 points", `{"verdict":"changes-requested","points":[` + strings.Join(twenty, ",") + `]}`, session.AfterResult{State: event.StateFailed, ExitCode: 71}, ""},
 	} {
 		t.Run(c.name, func(t *testing.T) {
@@ -487,6 +486,36 @@ func TestASuiteThatCannotStartPostsAnEscalate(t *testing.T) {
 			case c.want == "" && len(posted) != 0:
 				t.Errorf("posted %q, want nothing", posted)
 			case c.want != "" && (len(posted) != 1 || posted[0] != c.want):
+				t.Errorf("posted %q, want %s", posted, c.want)
+			}
+		})
+	}
+}
+
+// TestAPassedVerdictKeepsItsTrackUnderARedSuite: the verdict that qory posts over a passed verdict
+// of the agent has the agent's track, for a red suite and for one that did not start.
+func TestAPassedVerdictKeepsItsTrackUnderARedSuite(t *testing.T) {
+	const track = `"track":{"id":"small","reason":"One file."}`
+	for _, c := range []struct {
+		name string
+		end  session.AfterResult
+		want string
+	}{
+		{"red", session.AfterResult{Step: 2, State: event.StateFailed, ExitCode: 1}, `{"verdict":"changes-requested","points":[{"text":"The full suite failed: 1 of 2 tests failed.","action":"run_again"}],` + track + `}`},
+		{"not started", session.AfterResult{Step: 2, State: event.StateFailed, ExitCode: 71}, `{"verdict":"escalate","points":[{"text":"The full suite did not start: git could not clone HEAD of the workspace.","action":"run_again"}],` + track + `}`},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			h := newHelper(t)
+			h.api.add(fakeVersion{artifact: "verdict", name: "main", number: 1, runID: "r1", file: "verdict.json", content: `{"verdict":"passed",` + track + `}`})
+			if c.name == "red" {
+				h.state(t, "ran "+suiteSHA, redResult)
+			}
+			writeEvents(t, h.runDir, afterStarted(3, 2), afterExited(4, 2))
+			end := c.end
+			if _, err := h.after(&end, succeeded); err != nil {
+				t.Fatal(err)
+			}
+			if posted := h.api.verdicts(); len(posted) != 1 || posted[0] != c.want {
 				t.Errorf("posted %q, want %s", posted, c.want)
 			}
 		})
@@ -729,15 +758,16 @@ func TestOpenSuitesSetsTheAfterStepOnlyWhereTheSessionRunsTheSuite(t *testing.T)
 		plan      string
 		noGit     bool
 		wantAfter bool
+		fault     bool
 		line      string
 	}{
-		{"full_suite is true", true, true, false, buildPlanText, false, true, ""},
-		{"full_suite is false", false, true, false, buildPlanText, false, false, ""},
-		{"no wall", true, false, false, buildPlanText, false, false, ""},
-		{"a read run", true, true, true, buildPlanText, false, false, ""},
-		{"no full row", true, true, false, "# Plan\n\n## Commands\n\n| Kind | Command | Result file | Source |\n|---|---|---|---|\n| fast | `a` | none | s |\n", false, false, "Add a full row to the build plan"},
-		{"no build plan", true, true, false, "", false, false, "Add a full row to the build plan"},
-		{"no git folder", true, true, false, buildPlanText, true, false, "Run the session in the top folder"},
+		{"full_suite is true", true, true, false, buildPlanText, false, true, false, ""},
+		{"full_suite is false", false, true, false, buildPlanText, false, false, false, ""},
+		{"no wall", true, false, false, buildPlanText, false, false, false, ""},
+		{"a read run", true, true, true, buildPlanText, false, false, false, ""},
+		{"no full row", true, true, false, "# Plan\n\n## Commands\n\n| Kind | Command | Result file | Source |\n|---|---|---|---|\n| fast | `a` | none | s |\n", false, false, true, "Add a full row to the build plan"},
+		{"no build plan", true, true, false, "", false, false, true, "Add a full row to the build plan"},
+		{"no git folder", true, true, false, buildPlanText, true, false, true, "Run the session in the top folder"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			dir := workspaceRepo(t)
@@ -757,8 +787,8 @@ func TestOpenSuitesSetsTheAfterStepOnlyWhereTheSessionRunsTheSuite(t *testing.T)
 				run: apiRun{api: api, dir: t.TempDir()}, spec: spec, runID: "r1", walled: c.walled, readOnly: c.readOnly, fullSuite: c.fullSuite,
 				said: func(l string) { said = append(said, l) },
 			})
-			if (r != nil) != c.wantAfter || (len(spec.After) > 0) != c.wantAfter {
-				t.Fatalf("suite %v, After %q, want After %v", r != nil, spec.After, c.wantAfter)
+			if (r != nil) != (c.wantAfter || c.fault) || (len(spec.After) > 0) != c.wantAfter || (r != nil && r.fault != nil) != c.fault {
+				t.Fatalf("suite %v, After %q, want After %v and fault %v", r != nil, spec.After, c.wantAfter, c.fault)
 			}
 			if c.line == "" && len(said) != 0 || c.line != "" && (len(said) != 1 || !strings.HasPrefix(said[0], c.line)) {
 				t.Errorf("lines %q, want one that starts %q", said, c.line)
@@ -843,7 +873,7 @@ func TestLaunchFullReadsTheNewestUsableVersionOfTheBuildPlan(t *testing.T) {
 // run about the full suite to 100 characters, with the longest values a line shows.
 func TestTheLinesOfTheSuiteStartWithTheFixInAtMost100Characters(t *testing.T) {
 	for _, line := range []string{
-		fmt.Sprintf(textSuiteNotStarted, "x"), textSuiteNoGit, textSuiteSkipped, textSuiteNoAfter,
+		fmt.Sprintf(textSuiteNotStarted, "x"), textSuiteNoGit, textSuiteSkipped, fmt.Sprintf(textSuiteFault, "x"),
 		fmt.Sprintf(textSuiteEnded, " on 0123456789ab", suite.Timeout, ", 100000 of 100000 tests failed"),
 		textSuiteGreen, textSuiteCut, fmt.Sprintf(textSuiteStands, "changes-requested"), fmt.Sprintf(textSuitePosted, "changes-requested"), textSuiteNoRoom,
 		fmt.Sprintf(textSuiteNoPost, "x"),
@@ -853,6 +883,15 @@ func TestTheLinesOfTheSuiteStartWithTheFixInAtMost100Characters(t *testing.T) {
 		first, _, _ := strings.Cut(line, "\n")
 		if len(first) > 100 {
 			t.Errorf("the first line %q has %d characters", first, len(first))
+		}
+	}
+	for _, f := range []*suiteFault{
+		faultOf(suite.ErrNoCommands), faultOf(suite.ErrNoFull), faultOf(suite.ErrNoCommand), faultOf(suite.ErrBadCommand),
+		faultOf(suite.ErrBadResultFile), faultOf(errNoBuildPlan), faultOf(suite.ErrBadStart), faultOf(errors.New("x")),
+		noGitFault(), noAfterFault(),
+	} {
+		if len(f.point.Text) > 100 || !validPoint(f.point) || f.fixable != (f.point.Fix != "") {
+			t.Errorf("fault %+v: text of %d characters, valid %v", f, len(f.point.Text), validPoint(f.point))
 		}
 	}
 }
