@@ -219,3 +219,16 @@ func TestFitCountsAQuotedValueWithoutItsQuotes(t *testing.T) {
 		t.Errorf("a quoted value of 25 characters stayed whole:\n%s", got)
 	}
 }
+
+// TestFitKeepsTheKeysOfAGatewayName is a first line over 100 characters with a name of 64
+// characters under a key of forager.yaml: the keys stay whole and the name is shortened.
+func TestFitKeepsTheKeysOfAGatewayName(t *testing.T) {
+	name := "n" + strings.Repeat("x", 63)
+	for _, key := range []string{"gateway.credentials.", "gateway.tools.", "gateway.integrations.", "gateway.egress.paths.", "wall.images.", "harness.launch.", "harness.tiers."} {
+		text := "Set " + key + name + ".file to an absolute path, then say it is so, again and again, at length.\n  The value is not one."
+		got := exports.Fit(text)
+		if first := strings.SplitN(got, "\n", 2)[0]; !strings.Contains(first, key+name[:9]) || strings.Contains(first, name) {
+			t.Errorf("%s: %q, want the key whole and the name shortened", key, first)
+		}
+	}
+}

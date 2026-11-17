@@ -95,8 +95,9 @@ func shortened(names []string) map[string]string {
 var longName = regexp.MustCompile(`"[^"\n]{0,24}"|"(?:[^"\\\n]|\\.){25,}"|[\p{L}\p{N}._-]{24,}[\p{L}\p{N}_-]`)
 
 // keyPath matches the keys that start a dotted name in a refusal, such as the "bind." and
-// "agents." of bind.agents.<role>. [Fit] leaves them whole and shortens the name after them.
-var keyPath = regexp.MustCompile(`^(?:(?:bind|provides|roles)\.)?(?:(?:agents|commands|skills|output-styles|hooks|mcp|files)\.)?`)
+// "agents." of bind.agents.<role>, or the "gateway.credentials." of
+// gateway.credentials.<name>. [Fit] leaves them whole and shortens the name after them.
+var keyPath = regexp.MustCompile(`^(?:(?:gateway\.(?:credentials|tools|integrations|egress\.paths|server\.via)|wall\.images|harness\.(?:launch|tiers)|workflows|exports\.(?:stacks|modules)|extending\.target\.(?:runtime|model))\.)?(?:(?:bind|provides|roles)\.)?(?:(?:agents|commands|skills|output-styles|hooks|mcp|files)\.)?`)
 
 // Fit is text, one refusal or several, in which each refusal whose first line, an
 // unindented line, has more than 100 characters has the names in that line of more than
