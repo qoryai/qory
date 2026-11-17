@@ -485,7 +485,7 @@ func TestReadManifestRefusesEnv(t *testing.T) {
 		{"a key with a dash", "  core-home: scripts\n", "Rename the key core-home in env of the manifest.\n  core-home is not an environment variable name."},
 		{"a key starting with a digit", "  1CORE: scripts\n", "Rename the key 1CORE in env of the manifest.\n  1CORE is not an environment variable name."},
 		{"an empty key", `  "": scripts` + "\n", "Rename the key  in env of the manifest.\n   is not an environment variable name."},
-		{"qory's own variable", "  QORY_HARNESS_HOME: .\n", "Remove env.QORY_HARNESS_HOME from the manifest.\n  qory sets QORY_HARNESS_HOME, so a module exports another name."},
+		{"a variable that qory sets", "  QORY_HARNESS_HOME: .\n", "Remove env.QORY_HARNESS_HOME from the manifest.\n  qory sets QORY_HARNESS_HOME, so a module exports another name."},
 		{"an empty value", `  CORE_HOME: ""` + "\n", "Set env.CORE_HOME to a path inside the module.\n   is not a path inside the module."},
 		{"an absolute value", "  CORE_HOME: /etc\n", "Set env.CORE_HOME to a path inside the module.\n  /etc is not a path inside the module."},
 		{"the parent", "  CORE_HOME: ..\n", "Set env.CORE_HOME to a path inside the module.\n  .. is not a path inside the module."},

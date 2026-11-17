@@ -306,7 +306,7 @@ func TestADecodeErrorKeepsTheDecoderError(t *testing.T) {
 	}
 }
 
-// TestAPathWithASecretIsPrintedAsAPhraseByEveryRead is each read of qory.yaml that refuses
+// TestAPathWithASecretIsPrintedAsAPhraseByEveryRead is each read of qory.yaml that fails
 // in a folder whose name contains an access key secret: the refusal prints the folder as
 // the phrase, and never prints the secret.
 func TestAPathWithASecretIsPrintedAsAPhraseByEveryRead(t *testing.T) {

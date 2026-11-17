@@ -15,7 +15,7 @@ const (
 	secretRefusal  = "Remove the secret from gateway.server.url.\n  The document contains an access key secret, which belongs in access-key-secret or QORY_ACCESS_KEY_SECRET and nowhere else."
 )
 
-// refusal is the refusal of gateway.server.url for cause, without the line that names the file.
+// refusal is the refusal of gateway.server.url for cause, without the line that shows the file.
 func refusal(cause string) string { return serverURLFix + "\n  " + cause + "\n  " + serverURLShape }
 
 // TestAGatewayServerURLRefusalNamesWhatIsWrong is each refusal of gateway.server.url,

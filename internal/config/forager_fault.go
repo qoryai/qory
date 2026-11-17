@@ -103,8 +103,8 @@ func foundAt(path string, line int) string {
 
 // keyNotOne is the refusal, in the file at path, of the key k of the entry at at that
 // the entry does not take: "key", the name quoted, "is not one" and rest, as
-// [exports.KeyNotRead] says it. When the name contains an access key secret or a run
-// key, the refusal leaves it out and gives the key's line.
+// [exports.KeyNotRead] words it. When the name contains an access key secret or a run
+// key, the refusal leaves it out and shows the key's line.
 func keyNotOne(path, at string, k *yaml.Node, rest string) error {
 	text := exports.KeyNotRead(k.Value, rest)
 	if accesskey.ContainsSecret(k.Value) {
@@ -114,7 +114,7 @@ func keyNotOne(path, at string, k *yaml.Node, rest string) error {
 }
 
 // fault is what is wrong at one place of forager.yaml: the line, the step that mends it,
-// and the key and what is wrong with what it holds, which never holds the value.
+// and the key and what is wrong with its value. The text never contains the value.
 type fault struct {
 	line int
 	fix  string

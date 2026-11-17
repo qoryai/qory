@@ -53,7 +53,7 @@ func TestNewComposeReadsTheCheckoutsOwnStack(t *testing.T) {
 	}
 	_, err = compose(t, &Stack{Target: Target{Runtimes: Runtimes{"claude"}}})
 	if want := "List at least one module under modules.\n  modules is empty"; err == nil || !strings.HasPrefix(err.Error(), want) {
-		t.Errorf("an own stack without modules: err = %v, want it to start with %q", err, want)
+		t.Errorf("a stack with no base and no modules: err = %v, want it to start with %q", err, want)
 	}
 }
 

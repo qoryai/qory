@@ -1486,7 +1486,7 @@ func applyTarget(p *stack.Stack, base *compose.Base, conf config.Config, runtime
 		want.Model = model
 	}
 	want.Effort = effort
-	// The refusal says where the list came from: the flag, the configuration, or the
+	// The refusal shows where the list came from: the flag, the configuration, or the
 	// document, whose path is printed as a message prints one.
 	var invalid error
 	switch {

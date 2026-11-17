@@ -75,7 +75,7 @@ func longNameCases(t *testing.T, name, host string, hidden bool) {
 }
 
 // checkFixLine fails the test when the first line of err has more than 100 characters,
-// when no line has the whole name long, or when err does not name the file at path.
+// when no line has the whole name long, or when err does not contain the path of the file.
 func checkFixLine(t *testing.T, label string, err error, long, path string, hidden bool) {
 	t.Helper()
 	lines := strings.Split(err.Error(), "\n")

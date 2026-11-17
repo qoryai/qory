@@ -220,7 +220,7 @@ func (r Runtimes) String() string { return strings.Join(r, ", ") }
 func (r Runtimes) Validate() error { return r.ValidateAs("target.runtime") }
 
 // ValidateAs is [Runtimes.Validate] for the runtimes that key sets, such as
-// harness.runtime in a machine's configuration, as the refusal names it.
+// harness.runtime in a machine's configuration, which the refusal prints as key.
 func (r Runtimes) ValidateAs(key string) error {
 	return r.ValidateAt(key, key+" is in "+exports.FilePlace+".")
 }

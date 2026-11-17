@@ -24,7 +24,7 @@ func refuseProgram(fix, at, file string, err error) error {
 	return &programError{exports.Refuse(fix, cause, at+" is in "+file+"."), err}
 }
 
-// refuseFlag is err, the refusal of the value of flag, with a last line that names the
+// refuseFlag is err, the refusal of the value of flag, with a last line that shows the
 // flag and line 1 as err has it: the fix alone. It unwraps to err. err's text is as the
 // caller hides it.
 func refuseFlag(flag string, err error) error {

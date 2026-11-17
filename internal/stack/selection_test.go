@@ -32,7 +32,7 @@ func TestSelectionReadsKindsAndParts(t *testing.T) {
 	}
 }
 
-// TestSelectionRefusesAMistake is the errors a block gives, each with a fix that names the
+// TestSelectionRefusesAMistake is the errors a block gives, each with a fix that contains the
 // module and the block, so a person finds the line, and the two ways an exclude beside an only
 // contradicts it.
 func TestSelectionRefusesAMistake(t *testing.T) {

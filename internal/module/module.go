@@ -216,7 +216,7 @@ type Module struct {
 
 // readRequirement reads one requires item, the item at index i of the list: the entry it
 // names, as <kind>/<name>, and what the entry needs, as sorted <kind>/<name> keys. The mcp
-// key holds the entry's name when it is a string and needed servers when it is a list. A
+// key is the entry's name when it is a string, and the needed servers when it is a list. A
 // refusal has [exports.FilePlace], for the manifest's path, and starts with its fix.
 func readRequirement(item map[string]yaml.Node, i int) (entry string, needs []string, err error) {
 	at := fmt.Sprintf("requires[%d]", i)
@@ -671,7 +671,7 @@ func ReadWith(name, dir string, m *Manifest, variant string, readFile func(path 
 	shown := accesskey.ShownName(name, false)
 	// fail is err, an error of reading the module's files, as a refusal that starts with its
 	// fix: a refusal with the module at its place, and any other error under a line that
-	// tells the reader to check that the files can be read.
+	// asks the reader to check that the files can be read.
 	fail := func(err error) error {
 		if _, ok := err.(*exports.Refusal); ok {
 			return exports.Prefixed("module "+shown, err)

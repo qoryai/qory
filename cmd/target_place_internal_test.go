@@ -9,11 +9,11 @@ import (
 	"github.com/qoryai/qory/internal/stack"
 )
 
-// TestATargetRefusalNamesWhereTheRuntimeCameFrom is a runtime list that is not valid, set
-// by the document, by the configuration and by --runtime: the refusal names the one that
-// set it, prints the document's path with a folder whose name has an access key secret as
+// TestATargetRefusalShowsWhereTheRuntimeCameFrom is a runtime list that is not valid, set
+// by the document, by the configuration and by --runtime: the last line of the refusal is
+// the one that set it, prints the document's path with a folder whose name has an access key secret as
 // the phrase, and never prints the secret.
-func TestATargetRefusalNamesWhereTheRuntimeCameFrom(t *testing.T) {
+func TestATargetRefusalShowsWhereTheRuntimeCameFrom(t *testing.T) {
 	file := filepath.Join(t.TempDir(), "qak_AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA", "qory.yaml")
 	document := func() *stack.Stack {
 		return &stack.Stack{File: file, Target: stack.Target{Runtimes: stack.Runtimes{"claude", "claude"}}}

@@ -1416,7 +1416,8 @@ func serverURLWrong(raw string) (fix string, causes []string) {
 	return serverURLFix, []string{fmt.Sprintf("gateway.server.url for %s %s.", urlOrigin(u), wrong), serverURLShape}
 }
 
-// CheckServerURL refuses a server URL as [serverURLWrong] says it, with no file.
+// CheckServerURL returns the refusal of a server URL as [serverURLWrong] words it, with no
+// file.
 func CheckServerURL(raw string) error {
 	if fix, causes := serverURLWrong(raw); fix != "" {
 		return exports.Refuse(fix, causes...)
