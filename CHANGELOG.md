@@ -482,9 +482,7 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Changed
 
-- A prebuild keeps an image of any size. It stopped at 4 GiB before, with `the image is
-  <size>, more than the limit of 4 GiB; it is removed`. The last line of the prebuild
-  prints the size.
+- A prebuild keeps an image of any size, and the last line of the prebuild prints the size.
 - A prebuild stops, before it builds the image, when the base image is not Debian or
   Ubuntu 22.04 or 24.04, or has no `apt-get`: `use a Debian or Ubuntu image: the build
   adds Chromium only to these`. Alpine bases and other Ubuntu

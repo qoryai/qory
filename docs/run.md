@@ -2150,7 +2150,7 @@ image, which has the parsers`, then `the folder /opt/qory/parsers has none`.
 
 The step adds about 1.6 GiB to the image, measured on
 `mcr.microsoft.com/devcontainers/base` for arm64 (1.3 GiB before, 3.0 GiB after), and
-about 1.5 GiB on `mcr.microsoft.com/devcontainers/typescript-node` (2.7 GiB before, 4.1 GiB
+about 1.4 GiB on `mcr.microsoft.com/devcontainers/typescript-node` (2.7 GiB before, 4.1 GiB
 after). The build sets no limit on the image's size.
 
 The build takes the user from `wall.user` in `forager.yaml`. The wall's helper is
