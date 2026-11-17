@@ -259,3 +259,14 @@ func TestLaunchStopsAtAnImageOverTheLargestSize(t *testing.T) {
 		t.Errorf("reported %+v, closed %+v", e.reported(), e.closed())
 	}
 }
+
+// TestShownErrorKeepsLineFeedsAndMapsControlCharacters is a step's error with an escape,
+// a carriage return and a line feed: the line feed stays, so the lines of a refusal are
+// kept, and each other control character is shown as "?", so the error cannot move the
+// cursor or recolor a terminal.
+func TestShownErrorKeepsLineFeedsAndMapsControlCharacters(t *testing.T) {
+	const text, want = "a\x1b[31mb\rc\nd\x00e\x7ff\u0085g", "a?[31mb?c\nd?e?f?g"
+	if got := prebuild.ShownError(text); got != want {
+		t.Errorf("shown %q, want %q", got, want)
+	}
+}
