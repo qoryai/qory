@@ -98,28 +98,28 @@ func TestForagerFileRefusesAnImageItCannotRun(t *testing.T) {
 	hermetic(t)
 	wall := "wall:\n  adapter: docker\n  images:"
 	for _, c := range []struct{ body, want string }{
-		{wall + " [go]\n", "wall.images is a mapping from a name to an image"},
-		{wall + "\n", "wall.images is a mapping from a name to an image"},
-		{wall + " {Go: {ref: a}}\n", `wall.images: "Go" is not 1 to 64 of a-z, 0-9, underscore, dot and dash`},
-		{wall + " {-go: {ref: a}}\n", `wall.images: "-go" is not 1 to 64`},
-		{wall + " {" + strings.Repeat("a", 65) + ": {ref: a}}\n", "is not 1 to 64"},
-		{wall + " {go: {ref: a}, go: {ref: b}}\n", "wall.images.go is defined twice"},
-		{wall + " {go: example.com/agent:1}\n", "wall.images.go is a mapping: ref, and runtime and docker when it needs them"},
-		{wall + " {go: }\n", "wall.images.go is a mapping"},
-		{wall + " {go: {}}\n", "wall.images.go.ref is required"},
-		{wall + " {go: {runtime: sysbox-runc}}\n", "wall.images.go.ref is required"},
-		{wall + " {go: {ref: \"--privileged\"}}\n", `wall.images.go.ref is not an image reference, such as ghcr.io/acme/agent@sha256:…`},
-		{wall + " {go: {ref: [a]}}\n", `wall.images.go.ref is not an image reference, such as ghcr.io/acme/agent@sha256:…`},
-		{wall + " {go: {ref: a, runtime: \"--privileged\"}}\n", `wall.images.go.runtime is not a container runtime's name, such as sysbox-runc`},
-		{wall + " {go: {ref: a, docker: yes}}\n", "wall.images.go.docker is true or false"},
-		{wall + " {go: {ref: a, docker: true}}\n", "wall.images.go: docker needs a runtime that runs a daemon without privileges, such as runtime: sysbox-runc"},
-		{wall + " {go: {ref: a, privileged: true}}\n", `wall.images.go: key "privileged" is not one; an image has ref, runtime, docker`},
-		{wall + " {go: {ref: a, mounts: [/var/run/docker.sock]}}\n", `wall.images.go: key "mounts" is not one`},
-		{wall + " {go: {ref: a, ref: b}}\n", "wall.images.go.ref appears twice"},
+		{wall + " [go]\n", "Set wall.images to a mapping from a name to an image."},
+		{wall + "\n", "Set wall.images to a mapping from a name to an image."},
+		{wall + " {Go: {ref: a}}\n", "Rename each image of wall.images to 1 to 64 of a-z, 0-9, underscore, dot, and dash.\n  \"Go\" is not one."},
+		{wall + " {-go: {ref: a}}\n", "Rename each image of wall.images to 1 to 64 of a-z, 0-9, underscore, dot, and dash.\n  \"-go\" is not one."},
+		{wall + " {" + strings.Repeat("a", 65) + ": {ref: a}}\n", "Rename each image of wall.images to 1 to 64 of a-z, 0-9, underscore, dot, and dash."},
+		{wall + " {go: {ref: a}, go: {ref: b}}\n", "Define wall.images.go once."},
+		{wall + " {go: example.com/agent:1}\n", "Set wall.images.go to a mapping of ref, and runtime and docker when it needs them."},
+		{wall + " {go: }\n", "Set wall.images.go to a mapping of ref, and runtime and docker when it needs them."},
+		{wall + " {go: {}}\n", "Set wall.images.go.ref to the image's reference."},
+		{wall + " {go: {runtime: sysbox-runc}}\n", "Set wall.images.go.ref to the image's reference."},
+		{wall + " {go: {ref: \"--privileged\"}}\n", "Set wall.images.go.ref to an image reference, such as ghcr.io/acme/agent@sha256:…"},
+		{wall + " {go: {ref: [a]}}\n", "Set wall.images.go.ref to an image reference, such as ghcr.io/acme/agent@sha256:…"},
+		{wall + " {go: {ref: a, runtime: \"--privileged\"}}\n", "Set wall.images.go.runtime to a container runtime's name, such as sysbox-runc."},
+		{wall + " {go: {ref: a, docker: yes}}\n", "Set wall.images.go.docker to true or false."},
+		{wall + " {go: {ref: a, docker: true}}\n", "Set a runtime, such as sysbox-runc, on wall.images.go."},
+		{wall + " {go: {ref: a, privileged: true}}\n", "wall.images.go: key \"privileged\" is not one. An image has ref, runtime, docker."},
+		{wall + " {go: {ref: a, mounts: [/var/run/docker.sock]}}\n", "wall.images.go: key \"mounts\" is not one."},
+		{wall + " {go: {ref: a, ref: b}}\n", "Write wall.images.go.ref once."},
 	} {
 		path := foragerFile(t, c.body)
 		_, err := config.Load(t.TempDir(), true)
-		if err == nil || !strings.Contains(err.Error(), c.want) || !strings.HasPrefix(err.Error(), path) {
+		if err == nil || !strings.Contains(err.Error(), c.want) || !strings.Contains(err.Error(), path) {
 			t.Errorf("%q: error %v, want one naming the file and %q", c.body, err, c.want)
 		}
 	}
@@ -192,14 +192,14 @@ func TestForagerFileReadsThePrebuildImage(t *testing.T) {
 		t.Error("no row wall.prebuild_image")
 	}
 	for _, c := range []struct{ name, want string }{
-		{"go-dokcer", ": set wall.prebuild_image to a name of wall.images: wall.images defines no image \"go-dokcer\""},
-		{"go", ": set docker: true and a runtime, such as sysbox-runc, on wall.images.go, or name another image in wall.prebuild_image: a prebuild builds in the image's nested Docker"},
-		{"plain.v2", ": set docker: true and a runtime, such as sysbox-runc, on wall.images.plain.v2"},
+		{"go-dokcer", "Set wall.prebuild_image to a name of wall.images.\n  wall.images defines no image \"go-dokcer\".\n  wall.prebuild_image is in {path}."},
+		{"go", "Set docker: true and a runtime on wall.images.go.\n  A prebuild builds in the image's nested Docker. A runtime is such as sysbox-runc.\n  Or name another image in wall.prebuild_image.\n  wall.prebuild_image is in {path}."},
+		{"plain.v2", "Set docker: true and a runtime on wall.images.plain.v2.\n  A prebuild builds in the image's nested Docker. A runtime is such as sysbox-runc.\n  Or name another image in wall.prebuild_image.\n  wall.prebuild_image is in {path}."},
 	} {
 		path := foragerFile(t, strings.Replace(imagesFile, "  image: go\n", "  image: go\n  prebuild_image: "+c.name+"\n", 1))
 		_, err := config.Load(t.TempDir(), true)
-		if err == nil || !strings.HasPrefix(err.Error(), path+c.want) {
-			t.Errorf("%s: %v, want %q after the file", c.name, err, c.want)
+		if err == nil || err.Error() != strings.ReplaceAll(c.want, "{path}", path) {
+			t.Errorf("%s: %v, want %q", c.name, err, strings.ReplaceAll(c.want, "{path}", path))
 		}
 	}
 }

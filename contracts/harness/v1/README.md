@@ -127,9 +127,9 @@ workflows:                       # optional; the settings of the workflows a dis
 ```
 
 A stack has no `target`: it is delivered to be extended, and the checkout extending it
-defines what it composes the stack for. A stack file that sets one is refused, `target is
-not a stack's; a stack is delivered to be extended, and the checkout extending it sets
-target under harness, beside extends`.
+defines what it composes the stack for. A stack file that sets one is refused, `Remove target
+from the stack file.`, and on the next line `A stack is delivered to be extended, and the
+checkout extending it sets target under harness, beside extends.`
 
 A repository defines its stack in the `harness` section of its `qory.yaml`, with the same
 keys, or extends a stack delivered as a `qory-stack.yaml` and appends more modules
@@ -180,9 +180,9 @@ left out when `qory harness compose -f <stack>` selects the base (§Discovery); 
 with neither `target.runtime` nor `extends`, composed with no base from `-f`, is refused
 with status 2, and the message lists what the section contains instead. A document
 extending a stack, under `extends` or from `-f`, with no runtime from the document, the
-configuration or `--runtime` is refused with `target.runtime is required; the base stack
-<name>@<pin> defines no target, so the document sets one beside extends, or the
-configuration or --runtime does`. A section that extends a stack may list no modules and
+configuration or `--runtime` is refused with `Set target.runtime beside extends, or set
+the runtime in the configuration or with --runtime.`, and on the next line
+`target.runtime is required, and the base stack <name>@<pin> defines no target.` A section that extends a stack may list no modules and
 contain its target or its extensions alone; a stack lists at least one module.
 `apiVersion` is optional in this file (§The configuration). A `harness` section containing
 only the machine's keys, `runtime`, `model`, `force` and `update`, is not a document. The
@@ -246,15 +246,18 @@ checkout appends:
   what it composes the base for under `target` beside `extends`; the runner's
   `harness.runtime` and `harness.model` override the document's, and `--runtime` and
   `--model` override those. A compose with no runtime from any of the three is refused with
-  status 2, `target.runtime is required; the base stack <name>@<pin> defines no target,
-  so the document sets one beside extends, or the configuration or --runtime does`.
+  status 2, `Set target.runtime beside extends, or set the runtime in the configuration
+  or with --runtime.`, and on the next line `target.runtime is required, and the base
+  stack <name>@<pin> defines no target.`
 - The base's `extending.target`, when it has one, is the policy the resolved target is
   checked against, whichever of the three set it: a runtime the base does not list is
-  refused, `runtime <r> is not one the base stack <name>@<pin> is written for; runtimes:
-  <list>`; where the base lists models, the target selects one of them, or is refused with
-  `the target sets no model, and the base stack <name>@<pin> is written for one of
-  these; models: <list>`, and a model outside the list with `model <m> is not one the
-  base stack <name>@<pin> is written for; models: <list>`. A base without the block
+  refused, `Set the target runtime to one that the base stack lists.`, with `Runtime <r> is
+  not one the base stack <name>@<pin> is written for.` and `Runtimes: <list>.` on the next
+  lines; where the base lists models, the target selects one of them, or is refused with
+  `Set the target model to one that the base stack lists.`, `The target sets no model,
+  and the base stack <name>@<pin> is written for one of these.` and `Models: <list>.`, and
+  a model outside the list with the same first line, `Model <m> is not one the base stack
+  <name>@<pin> is written for.` and `Models: <list>.` A base without the block
   accepts every target. The check runs under `-f` and `extends` alike, and before
   `--dry-run` stops, since the target is resolved before the report is built.
 - The machine's keys of the checkout's `qory.yaml`, `harness.runtime`,
@@ -1007,8 +1010,8 @@ neither `--image` nor `wall.image`, whose policy selects the image, runs the che
 run's image. A run from a run code with neither stops before the setup and the agent,
 with exit 2: `Set wall.image in forager.yaml, then take the work item in again in Qory Apiary: push
 checks run in the wall's default image; the code is used`. A run whose engine does not have the wall's default image stops before the setup and the agent,
-with exit 2: `Pull the wall's default image onto this machine, and run again: push checks
-run in it. The engine does not have the image <image>.` The container has
+with exit 2: `Pull the wall's default image onto this machine, and run again.`, and on the
+next line `Push checks run in it, and the engine does not have the image <image>.` The container has
 no variable but the image's and those Docker sets: `HOME`, `HOSTNAME` and `PATH`. It has
 the wall's CPU and memory limits of the run's containers, the wall's process limit or 512
 processes, and the label of the run's containers, so the clean-up of the run removes a

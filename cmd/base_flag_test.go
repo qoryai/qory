@@ -150,7 +150,7 @@ func TestHarnessYamlIsTheDocumentsOtherName(t *testing.T) {
 	}
 	writeFile(t, filepath.Join(root, "harness.yaml"), "harness:\n  nope: 1\n")
 	_, err = run(t, "harness", "compose")
-	if err == nil || !strings.Contains(err.Error(), `harness.yaml: line 2: key "nope" is not one harness.yaml reads`) {
+	if err == nil || !strings.Contains(err.Error(), `Key "nope" is not one harness.yaml reads.`) {
 		t.Fatalf("an unknown key: %v", err)
 	}
 	writeFile(t, filepath.Join(root, "harness.yaml"), "harness:\n  extends: {path: "+rel+"}\n")

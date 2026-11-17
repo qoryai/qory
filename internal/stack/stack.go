@@ -204,7 +204,7 @@ func (r *Runtimes) UnmarshalYAML(n *yaml.Node) error {
 	}
 	var many []string
 	if err := n.Decode(&many); err != nil {
-		return fmt.Errorf("target.runtime is one runtime name or a list of them: %w", err)
+		return &decodeRefusal{exports.Refuse("Set target.runtime to one runtime name or a list of names.", append(decoderLines(err), "target.runtime is in "+exports.FilePlace+".")...), err}
 	}
 	*r = many
 	return nil
@@ -217,17 +217,27 @@ func (r Runtimes) String() string { return strings.Join(r, ", ") }
 // Validate refuses an empty target, an empty name in it, and the same runtime twice. It
 // is called on a loaded stack, and again by the command module after the --runtime flag
 // has replaced what the stack set.
-func (r Runtimes) Validate() error {
+func (r Runtimes) Validate() error { return r.ValidateAs("target.runtime") }
+
+// ValidateAs is [Runtimes.Validate] for the runtimes that key sets, such as
+// harness.runtime in a machine's configuration, as the refusal names it.
+func (r Runtimes) ValidateAs(key string) error {
+	return r.ValidateAt(key, key+" is in "+exports.FilePlace+".")
+}
+
+// ValidateAt is [Runtimes.ValidateAs] with where as the last line of the refusal, for a
+// list that a flag or the configuration set, which no file of the document contains.
+func (r Runtimes) ValidateAt(key, where string) error {
 	if len(r) == 0 {
-		return errors.New("target.runtime is required")
+		return exports.Refuse("Set "+key+" to one runtime name or a list of names.", "No runtime is set.", where)
 	}
 	seen := map[string]bool{}
 	for _, name := range r {
 		if name == "" {
-			return errors.New("target.runtime lists an empty runtime")
+			return exports.Refuse("Remove the empty name from "+key+".", "A runtime name is not empty.", where)
 		}
 		if seen[name] {
-			return fmt.Errorf("target.runtime lists %s twice", accesskey.ShownName(name, false))
+			return exports.Refuse(fmt.Sprintf("List %s once in %s.", accesskey.ShownName(name, false), key), key+" lists it twice.", where)
 		}
 		seen[name] = true
 	}
@@ -302,7 +312,7 @@ func (n *Names) UnmarshalYAML(node *yaml.Node) error {
 	}
 	var many []string
 	if err := node.Decode(&many); err != nil {
-		return fmt.Errorf("one name or a list of them: %w", err)
+		return &decodeRefusal{exports.Refuse("Set extending.target.runtime and extending.target.model each to one name or a list of names.", append(decoderLines(err), "extending.target is in "+exports.FilePlace+".")...), err}
 	}
 	*n = many
 	return nil
@@ -311,7 +321,7 @@ func (n *Names) UnmarshalYAML(node *yaml.Node) error {
 // validate refuses a policy naming nothing, an empty name and a name given twice.
 func (t *TargetPolicy) validate() error {
 	if len(t.Runtime) == 0 && len(t.Model) == 0 {
-		return errors.New("extending.target lists no runtime and no model; it lists the runtimes, the models, or both, a checkout may compose for")
+		return exports.Refuse("List a runtime, a model, or both in extending.target.", "The block lists neither. It lists the runtimes and the models a checkout may compose for.", "extending.target is in "+exports.FilePlace+".")
 	}
 	for _, l := range []struct {
 		key   string
@@ -321,10 +331,10 @@ func (t *TargetPolicy) validate() error {
 		seen := map[string]bool{}
 		for _, name := range l.names {
 			if name == "" {
-				return fmt.Errorf("extending.target.%s lists an empty name", l.key)
+				return exports.Refuse(fmt.Sprintf("Remove the empty name from extending.target.%s.", l.key), "A name is not empty.", "extending.target is in "+exports.FilePlace+".")
 			}
 			if seen[name] {
-				return fmt.Errorf("extending.target.%s lists %s twice", l.key, l.shown(name))
+				return exports.Refuse(fmt.Sprintf("List %s once in extending.target.%s.", l.shown(name), l.key), "extending.target."+l.key+" lists it twice.", "extending.target is in "+exports.FilePlace+".")
 			}
 			seen[name] = true
 		}
@@ -347,16 +357,16 @@ func (t *TargetPolicy) Check(target Target, base string) error {
 	if len(t.Runtime) > 0 {
 		for _, r := range target.Runtimes {
 			if !slices.Contains(t.Runtime, r) {
-				return fmt.Errorf("runtime %s is not one the base stack %s is written for; runtimes: %s", accesskey.ShownName(r, false), accesskey.ShownName(base, false), strings.Join(accesskey.ShownNames(t.Runtime), ", "))
+				return exports.Refuse("Set the target runtime to one that the base stack lists.", fmt.Sprintf("Runtime %s is not one the base stack %s is written for.", accesskey.ShownName(r, false), accesskey.ShownName(base, false)), "Runtimes: "+strings.Join(accesskey.ShownNames(t.Runtime), ", ")+".")
 			}
 		}
 	}
 	if len(t.Model) > 0 {
 		if target.Model == "" {
-			return fmt.Errorf("the target sets no model, and the base stack %s is written for one of these; models: %s", accesskey.ShownName(base, false), strings.Join(exports.Values(t.Model), ", "))
+			return exports.Refuse("Set the target model to one that the base stack lists.", fmt.Sprintf("The target sets no model, and the base stack %s is written for one of these.", accesskey.ShownName(base, false)), "Models: "+strings.Join(exports.Values(t.Model), ", ")+".")
 		}
 		if !slices.Contains(t.Model, target.Model) {
-			return fmt.Errorf("model %s is not one the base stack %s is written for; models: %s", exports.Value(target.Model, false), accesskey.ShownName(base, false), strings.Join(exports.Values(t.Model), ", "))
+			return exports.Refuse("Set the target model to one that the base stack lists.", fmt.Sprintf("Model %s is not one the base stack %s is written for.", exports.Value(target.Model, false), accesskey.ShownName(base, false)), "Models: "+strings.Join(exports.Values(t.Model), ", ")+".")
 		}
 	}
 	return nil
@@ -547,7 +557,7 @@ func loadFile(path string) (*Stack, error) {
 		return nil, exports.DecodeError(path, err)
 	}
 	if err := dec.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
-		return nil, fmt.Errorf("%s: contains more than one document; a stack is one", path)
+		return nil, exports.Refuse("Keep one YAML document in the stack file.", "A stack is one document, and the file contains more.", "The file is "+exports.FilePlace+".").In(path)
 	}
 	abs, err := filepath.Abs(path)
 	if err != nil {
@@ -640,14 +650,14 @@ func (p *Stack) validate(compose bool) error {
 	if compose {
 		if p.extends() {
 			if err := p.Extends.validate(); err != nil {
-				return fmt.Errorf("extends: %w", err)
+				return exports.Prefixed("extends", err)
 			}
 			if p.Extends.Module != "" {
-				return fmt.Errorf("extends selects module %s; a checkout extends a stack, and a module goes under modules", accesskey.ShownName(p.Extends.Module, false))
+				return exports.Refuse("Move the module from extends to modules, and select a stack under extends.", "extends selects module "+accesskey.ShownName(p.Extends.Module, false)+", and a checkout extends a stack.", "extends is in "+exports.FilePlace+".")
 			}
 		}
 		if p.Extending != nil {
-			return errors.New("extending is the base stack's; a harness section that extends a stack does not set it")
+			return exports.Refuse("Remove extending from the harness section.", "extending belongs to the base stack, and a harness section that extends a stack does not set it.", "extending is in "+exports.FilePlace+".")
 		}
 		if p.extends() && len(p.Workflows) > 0 {
 			return exports.Refuse("Remove workflows or extends.", "A harness section that extends a stack takes the workflows of its base.", "Both keys are in "+exports.FilePlace+".")
@@ -661,35 +671,35 @@ func (p *Stack) validate(compose bool) error {
 		}
 	} else {
 		if p.extends() {
-			return errors.New("extends is not a stack's; the harness section of a checkout's qory.yaml extends a stack")
+			return exports.Refuse("Remove extends from the stack file.", "Only the harness section of a checkout's qory.yaml extends a stack.", "extends is in "+exports.FilePlace+".")
 		}
 		if len(p.Target.Runtimes) > 0 || p.Target.Model != "" {
-			return errors.New("target is not a stack's; a stack is delivered to be extended, and the checkout extending it sets target under harness, beside extends")
+			return exports.Refuse("Remove target from the stack file.", "A stack is delivered to be extended, and the checkout extending it sets target under harness, beside extends.", "target is in "+exports.FilePlace+".")
 		}
 		if p.Tiers != nil {
-			return errors.New("A stack file does not set tiers; a repository maps tiers under harness.tiers in its qory.yaml, and a machine in the user's qory.yaml")
+			return exports.Refuse("Remove tiers from the stack file.", "A repository maps tiers under harness.tiers in its qory.yaml, and a machine maps them in the user's qory.yaml.", "tiers is in "+exports.FilePlace+".")
 		}
 	}
 	if p.Extending != nil {
 		for _, k := range p.Extending.Kinds {
 			if !isKind(k) {
-				return fmt.Errorf("extending.kinds lists kind %s; kinds: %s", accesskey.ShownName(k, true), strings.Join(Kinds, ", "))
+				return exports.Refuse("Set each entry of extending.kinds to a known kind.", "extending.kinds lists kind "+accesskey.ShownName(k, true)+".", "Kinds: "+strings.Join(Kinds, ", ")+".", "extending.kinds is in "+exports.FilePlace+".")
 			}
 			if k == "hooks" || k == "mcp" {
-				return fmt.Errorf("extending.kinds lists %s, which an extending module may never ship; the runtime executes those without the agent", k)
+				return exports.Refuse(fmt.Sprintf("Remove %s from extending.kinds.", k), "An extending module never ships it, because the runtime executes it without the agent.", "extending.kinds is in "+exports.FilePlace+".")
 			}
 			if k == "files" {
-				return errors.New("extending.kinds lists files; the paths an extending module's files may sit under go in extending.files")
+				return exports.Refuse("Remove files from extending.kinds, and list the paths in extending.files.", "extending.files contains the paths that an extending module's files may sit under.", "extending.kinds is in "+exports.FilePlace+".")
 			}
 		}
 		for _, key := range p.Extending.Settings {
 			if key == "" || strings.HasPrefix(key, ".") || strings.HasSuffix(key, ".") {
-				return fmt.Errorf("extending.settings lists %s, which is not a dotted key path", accesskey.ShownName(key, true))
+				return exports.Refuse("Set each entry of extending.settings to a dotted key path.", "extending.settings lists "+accesskey.ShownName(key, true)+", which is not one.", "extending.settings is in "+exports.FilePlace+".")
 			}
 		}
 		for _, prefix := range p.Extending.Files {
 			if !filePrefix(prefix) {
-				return fmt.Errorf("extending.files lists %s, which is not a <runtime>/<path> prefix; a prefix is relative, contains no dot segment and starts with the runtime", exports.Value(prefix, true))
+				return exports.Refuse("Set each entry of extending.files to a <runtime>/<path> prefix.", "extending.files lists "+exports.Value(prefix, true)+". A prefix is relative, contains no dot segment, and starts with the runtime.", "extending.files is in "+exports.FilePlace+".")
 			}
 		}
 		if p.Extending.Target != nil {
@@ -739,7 +749,7 @@ func (p *Stack) validate(compose bool) error {
 	// repository's own beside the base, its extensions say; a stack, and a document
 	// holding a checkout's own stack, names a module.
 	if len(p.Modules) == 0 && (!compose || !p.extends()) {
-		return errors.New("modules is empty; a stack lists at least one module")
+		return exports.Refuse("List at least one module under modules.", "modules is empty, and a stack lists one or more modules.", "modules is in "+exports.FilePlace+".")
 	}
 	seen := map[string]bool{}
 	links := map[string]string{}
@@ -751,7 +761,7 @@ func (p *Stack) validate(compose bool) error {
 				return exports.Refuse(fmt.Sprintf("Rename the name of modules[%d] to one path segment.", i), "A module name contains no slash, backslash, @, or leading dot, and the name is "+accesskey.ShownName(l.Name, true)+".", "modules is in "+exports.FilePlace+".")
 			}
 			if seen[l.Name] {
-				return fmt.Errorf("module %s is listed twice", accesskey.ShownName(l.Name, false))
+				return exports.Refuse(fmt.Sprintf("List module %s once in modules.", accesskey.ShownName(l.Name, false)), "modules lists it twice.", "modules is in "+exports.FilePlace+".")
 			}
 			seen[l.Name] = true
 		}
@@ -760,34 +770,35 @@ func (p *Stack) validate(compose bool) error {
 				var path *SourcePathError
 				if errors.As(err, &path) {
 					path.Module = strings.TrimPrefix(who, "module ")
+					return path
 				}
-				return fmt.Errorf("%s: %w", who, err)
+				return exports.Prefixed(who, err)
 			}
 			if l.Source.Stack != "" {
-				return fmt.Errorf("%s: source selects stack %s; a module's source selects a module, and a stack goes under extends", who, accesskey.ShownName(l.Source.Stack, false))
+				return exports.Prefixed(who, exports.Refuse("Select a module in the source of "+exports.ModulePlace+", and move the stack to extends.", "The source selects stack "+accesskey.ShownName(l.Source.Stack, false)+", and a module's source selects a module.", "modules is in "+exports.FilePlace+"."))
 			}
 		} else if l.Name == "" {
-			return fmt.Errorf("%s: a module has a name, a source, or both", who)
+			return exports.Prefixed(who, exports.Refuse("Add a name or a source to "+exports.ModulePlace+".", "A module has a name, a source, or both.", "modules is in "+exports.FilePlace+"."))
 		}
 		// The blocks are parsed on the stack's own entry, not on the loop's copy.
-		if err := p.Modules[i].Exclude.parse(); err != nil {
-			return fmt.Errorf("%s: exclude %w", who, err)
+		if err := p.Modules[i].Exclude.parse("exclude"); err != nil {
+			return exports.Prefixed(who, err)
 		}
-		if err := p.Modules[i].Only.parse(); err != nil {
-			return fmt.Errorf("%s: only %w", who, err)
+		if err := p.Modules[i].Only.parse("only"); err != nil {
+			return exports.Prefixed(who, err)
 		}
 		if err := p.Modules[i].besideOnly(); err != nil {
 			return exports.Prefixed(who, err)
 		}
 		if l.Link != "" {
 			if strings.ContainsFunc(l.Link, unicode.IsControl) {
-				return fmt.Errorf("%s: the link name %s holds a control character", who, accesskey.ShownName(l.Link, true))
+				return exports.Prefixed(who, exports.Refuse("Set the link of "+exports.ModulePlace+" to a name without control characters.", "The link name "+accesskey.ShownName(l.Link, true)+" contains a control character.", "modules is in "+exports.FilePlace+"."))
 			}
 			if !segment(l.Link) || l.Link == ".qory" {
-				return fmt.Errorf("%s: link %s is not one path segment; a link contains no slash, backslash, @ or leading dot", who, accesskey.ShownName(l.Link, true))
+				return exports.Prefixed(who, exports.Refuse("Set the link of "+exports.ModulePlace+" to one path segment.", "The link is "+accesskey.ShownName(l.Link, true)+". A link contains no slash, backslash, @, or leading dot.", "modules is in "+exports.FilePlace+"."))
 			}
 			if links[l.Link] != "" {
-				return fmt.Errorf("%s and %s both link %s", links[l.Link], who, accesskey.ShownName(l.Link, false))
+				return exports.Refuse(fmt.Sprintf("Give %s and %s different links.", links[l.Link], who), "Both link "+accesskey.ShownName(l.Link, false)+".", "modules is in "+exports.FilePlace+".")
 			}
 			links[l.Link] = who
 		}
@@ -804,7 +815,7 @@ func (l Module) besideOnly() error {
 		return nil
 	}
 	if l.Exclude.Instructions || l.Exclude.Settings.Set() || l.Exclude.Env.Set() {
-		return errors.New("exclude beside only selects a part; only leaves every part it does not select out, so exclude selects entries only brings in")
+		return exports.Refuse("Remove instructions, settings, and env from the exclude of "+exports.ModulePlace+".", "Only leaves every part it does not select out, so an exclude beside only selects entries that only brings in.", "The blocks are in "+exports.FilePlace+".")
 	}
 	for _, kind := range l.Exclude.KindNames() {
 		for _, name := range l.Exclude.Kinds[kind] {
@@ -823,30 +834,30 @@ func (l Module) besideOnly() error {
 // export or a path, not both.
 func (s Source) validate() error {
 	if s.Module != "" && s.Stack != "" {
-		return errors.New("source selects both a module and a stack; it selects one export")
+		return exports.Refuse("Remove source.module or source.stack from "+exports.ModulePlace+".", "A source selects one export.", "source is in "+exports.FilePlace+".")
 	}
 	for _, e := range []struct{ key, name string }{{"module", s.Module}, {"stack", s.Stack}} {
 		if e.name != "" && !segment(e.name) {
-			return fmt.Errorf("source.%s %s is not one path segment; an export's name contains no slash, backslash, @ or leading dot", e.key, accesskey.ShownName(e.name, true))
+			return exports.Refuse(fmt.Sprintf("Set source.%s of %s to one path segment.", e.key, exports.ModulePlace), "The value is "+accesskey.ShownName(e.name, true)+". An export's name contains no slash, backslash, @, or leading dot.", "source is in "+exports.FilePlace+".")
 		}
 	}
 	if s.Git == "" {
 		if s.Ref != "" {
-			return errors.New("source.ref needs source.git")
+			return exports.Refuse("Set source.git of "+exports.ModulePlace+", or remove source.ref.", "source.ref needs source.git.", "source is in "+exports.FilePlace+".")
 		}
 		if s.Path == "" {
 			if s.exported() {
-				return errors.New("source.path is required; with an export selected, it is the repository exporting it")
+				return exports.Refuse("Set source.path of "+exports.ModulePlace+" to the repository that exports it.", "With an export selected, source.path is required.", "source is in "+exports.FilePlace+".")
 			}
-			return errors.New("source.path is required")
+			return exports.Refuse("Set source.path of "+exports.ModulePlace+".", "source.path is required.", "source is in "+exports.FilePlace+".")
 		}
 		return nil
 	}
 	if s.Ref == "" {
-		return errors.New("source.ref is required with source.git")
+		return exports.Refuse("Set source.ref of "+exports.ModulePlace+" to a branch, tag, or commit.", "source.ref is required with source.git.", "source is in "+exports.FilePlace+".")
 	}
 	if s.Path != "" && s.exported() {
-		return errors.New("source.path and an export both select the directory; an export's directory is what the repository's qory.yaml sets")
+		return exports.Refuse("Remove source.path or the export from "+exports.ModulePlace+".", "Both select the directory, and an export's directory is what the repository's qory.yaml sets.", "source is in "+exports.FilePlace+".")
 	}
 	if s.Path != "" {
 		clean := filepath.Clean(s.Path)
@@ -861,16 +872,43 @@ func (s Source) validate() error {
 // repository: an absolute path, the repository's root, or a path that leads out of it.
 // Path is the path as written. Module is the module whose source it is, by its name or as
 // modules[i] with no name, and "" for the source of extends.
-type SourcePathError struct{ Path, Module string }
-
-func (e *SourcePathError) Error() string {
-	return fmt.Sprintf("source.path %s is not a directory inside the repository", exports.Value(e.Path, true))
+type SourcePathError struct {
+	Path, Module string
+	file         string
 }
+
+// In is the error with file as the path of the document it is about, see [exports.InFile].
+func (e *SourcePathError) In(file string) error {
+	c := *e
+	c.file = file
+	return &c
+}
+
+func (e *SourcePathError) Error() string { return e.text(true) }
 
 // Hidden is the error's text without the path, for a harness whose folders no text
 // shows.
-func (e *SourcePathError) Hidden() string {
-	return "source.path is not a directory inside the repository"
+func (e *SourcePathError) Hidden() string { return e.text(false) }
+
+// text is the refusal: the fix, and the cause with the path and the file when path is set.
+// The hidden form has neither, as [SourcePathError.Hidden] says.
+func (e *SourcePathError) text(path bool) string {
+	of := "extends"
+	switch {
+	case strings.HasPrefix(e.Module, "modules["):
+		of = e.Module
+	case e.Module != "":
+		of = "module " + accesskey.ShownName(e.Module, false)
+	}
+	cause := "source.path is not a directory inside the repository: it is absolute, the repository's root, or leads out of it."
+	if path {
+		cause = "source.path is " + exports.Value(e.Path, true) + ", which is not a directory inside the repository: it is absolute, the repository's root, or leads out of it."
+	}
+	lines := []string{cause}
+	if path && e.file != "" {
+		lines = append(lines, "source is in "+e.file+".")
+	}
+	return exports.Refuse("Set source.path of "+of+" to a folder inside its repository.", lines...).Error()
 }
 
 // BaseExtendsError is a base stack, read from File, that extends another stack,
@@ -881,13 +919,46 @@ type BaseExtendsError struct {
 }
 
 func (e *BaseExtendsError) Error() string {
-	return fmt.Sprintf("%s extends %s, and a stack does not extend another", exports.HidePath(e.File), e.Extends.Shown())
+	return exports.Refuse("Set extends to a stack that does not extend another.", fmt.Sprintf("%s extends %s, and a stack does not extend another.", exports.HidePath(e.File), e.Extends.Shown())).Error()
 }
 
 // Hidden is the error's text with the stack the base extends left out, for a harness
 // whose addresses no text shows.
 func (e *BaseExtendsError) Hidden() string {
-	return fmt.Sprintf("%s extends another stack, and a stack does not extend another", exports.HidePath(e.File))
+	return exports.Refuse("Set extends to a stack that does not extend another.", fmt.Sprintf("%s extends another stack, and a stack does not extend another.", exports.HidePath(e.File))).Error()
+}
+
+// decodeRefusal is a refusal of a value the decoder could not read, which unwraps to the
+// decoder's error, so errors.As still matches a *yaml.TypeError under it. It is an
+// [exports.InFile] as the refusal is.
+type decodeRefusal struct {
+	refusal *exports.Refusal
+	err     error
+}
+
+func (d *decodeRefusal) Error() string { return d.refusal.Error() }
+func (d *decodeRefusal) Unwrap() error { return d.err }
+
+// In is the refusal with file at its [exports.FilePlace], and the same cause.
+func (d *decodeRefusal) In(file string) error {
+	r, _ := d.refusal.In(file).(*exports.Refusal)
+	return &decodeRefusal{r, d.err}
+}
+
+// decoderLines is the cause lines of err, a decode error: what the decoder reports, one
+// line for each value. A report that contains an access key secret or a run key is left
+// out, and a line says so.
+func decoderLines(err error) []string {
+	if accesskey.ContainsSecret(err.Error()) {
+		return []string{"qory cannot read the value here. The YAML decoder's message contains an access key secret, a run key, a run code, or an enrolment code, so qory does not print it."}
+	}
+	var lines []string
+	for _, l := range strings.Split(err.Error(), "\n") {
+		if l = strings.TrimSpace(l); l != "" && l != "yaml: unmarshal errors:" {
+			lines = append(lines, "The decoder reports: "+strings.TrimSuffix(l, ".")+".")
+		}
+	}
+	return lines
 }
 
 // segment reports whether name is one plain path segment: no separator of either kind, no
@@ -1038,7 +1109,7 @@ func Extend(base, p *Stack) (*Stack, error) {
 		return nil, &BaseExtendsError{File: base.File, Extends: base.Extends}
 	}
 	if base.Extending == nil {
-		return nil, fmt.Errorf("the stack at %s is closed: it declares no extending block, so nothing may extend it", exports.HidePath(base.File))
+		return nil, exports.Refuse("Add an extending block to the base stack, or extend another stack.", "The stack at "+exports.HidePath(base.File)+" is closed: it declares no extending block, so nothing may extend it.")
 	}
 	out := *p
 	out.Modules = nil
@@ -1058,7 +1129,7 @@ func Extend(base, p *Stack) (*Stack, error) {
 			}
 			rel, err := filepath.Rel(base.Root, abs)
 			if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-				return nil, fmt.Errorf("%s: module %s is outside the base stack's repository", exports.HidePath(base.File), accesskey.ShownName(l.Name, false))
+				return nil, exports.Refuse(fmt.Sprintf("Move module %s into the base stack's repository.", accesskey.ShownName(l.Name, false)), "The base stack "+exports.HidePath(base.File)+" lists the module outside that repository.")
 			}
 			if p.Extends.Git != "" {
 				l.Source = Source{Git: p.Extends.Git, Ref: p.Extends.Ref, Path: filepath.ToSlash(rel)}

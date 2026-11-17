@@ -38,11 +38,11 @@ func writersRefusal(setting string, err error) error {
 	rule := "only root and the user running qory may write " + setting + " and its folders, except a folder that root owns with the sticky bit set"
 	switch {
 	case u.owner != "":
-		return fmt.Errorf("make root or the user running qory the owner of %s: it is owned by %s, and %s", shown, u.owner, rule)
+		return exports.Refuse("Make root or the user running qory the owner of "+setting+".", fmt.Sprintf("%s is owned by %s.", shown, u.owner), upper(rule)+".")
 	case u.group != "":
-		return fmt.Errorf("remove the group's write permission from %s: the group %s may write it, and %s", shown, u.group, rule)
+		return exports.Refuse("Remove the group's write permission from "+setting+".", fmt.Sprintf("The group %s may write %s.", u.group, shown), upper(rule)+".")
 	}
-	return fmt.Errorf("remove the write permission of other users from %s: every user may write it, and %s", shown, rule)
+	return exports.Refuse("Remove the write permission of other users from "+setting+".", fmt.Sprintf("Every user may write %s.", shown), upper(rule)+".")
 }
 
 // groupWriteChain is [noGroupWrite] with each path read by stat and each group named by

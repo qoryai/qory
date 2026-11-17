@@ -119,38 +119,38 @@ func TestNearerFilesWin(t *testing.T) {
 func TestLoadRefusesAMistake(t *testing.T) {
 	hermetic(t)
 	for _, c := range []struct{ body, want string }{
-		{"runtim: claude\n", `line 2: key "runtim" is not one qory.yaml reads`},
-		{"harness: {runtim: claude}\n", `line 2: key "runtim" is not one qory.yaml reads`},
-		{"harness: {update: sometimes}\n", `harness.update "sometimes" is not always or never`},
-		{"worktree: {name: wt}\n", `worktree.name "wt" contains no {branch}`},
-		{"worktree: {name: \"a/{branch}\"}\n", `worktree.name "a/{branch}" contains a slash`},
-		{"worktree: {dir: \"\"}\n", "worktree.dir is empty"},
-		{"worktree: {link: [../secrets]}\n", `worktree.link lists "../secrets", which is not a path inside the checkout`},
-		{"worktree: {copy: [/etc/hosts]}\n", `worktree.copy lists "/etc/hosts", which is not a path inside the checkout; a path from outside goes as {from: /etc/hosts, to: <path in the worktree>}`},
-		{"worktree: {link: [{from: /etc/hosts}]}\n", `worktree.link lists /etc/hosts with no to; a path from outside the checkout sets where it goes, as {from: /etc/hosts, to: <path in the worktree>}`},
-		{"worktree: {link: [{from: ~/secrets/app.env}]}\n", `worktree.link lists ~/secrets/app.env with no to`},
-		{"worktree: {link: [{from: /etc/hosts, to: /etc/hosts}]}\n", `worktree.link maps /etc/hosts to "/etc/hosts", which is not a path inside the worktree`},
-		{"worktree: {copy: [{from: /etc/hosts, to: ../hosts}]}\n", `worktree.copy maps /etc/hosts to "../hosts", which is not a path inside the worktree`},
-		{"worktree: {copy: [{from: /etc/hosts, to: .}]}\n", `worktree.copy maps /etc/hosts to ".", which is not a path inside the worktree`},
-		{"worktree: {link: [{from: ../shared/.env, to: .env}]}\n", `worktree.link lists "../shared/.env", which is not a path inside the checkout`},
-		{"worktree: {link: [{to: .env}]}\n", `worktree.link lists an entry with no path`},
-		{"worktree: {link: [\"\"]}\n", `worktree.link lists an entry with no path`},
-		{"worktree: {link: [{from: .env, to: ../.env}]}\n", `worktree.link maps .env to "../.env", which is not a path inside the worktree`},
-		{"worktree: {pr: \"pull/{n}\"}\n", `worktree.pr "pull/{n}" is not a ref under refs/ with {n} for the pull request number`},
-		{"git: {timeout: soon}\n", `git.timeout "soon" is not a duration above zero, such as 10m`},
-		{"git: {timeout: 0s}\n", `git.timeout "0s" is not a duration above zero`},
-		{"git: {cache: \"\"}\n", "git.cache is empty"},
-		{"env: {1A: x}\n", "env: 1A is not an environment variable name"},
-		{"env: {QORY_HARNESS_HOME: x}\n", "env.QORY_HARNESS_HOME is qory's"},
-		{"harness: {runtime: []}\n", "harness.runtime is empty"},
-		{"harness: {model: &m opus}\nworktree: {base: *m}\n", "line 3: *m is a YAML alias, which qory.yaml may not contain"},
-		{"env: &e {A: x}\nharness:\n  extensions:\n    ci:\n      <<: *e\n", "line 6: *e is a YAML alias"},
-		{"a: &a [x, x, x, x]\nb: &b [*a, *a, *a, *a]\nc: [*b, *b, *b, *b]\n", "line 3: *a is a YAML alias"},
+		{"runtim: claude\n", `Key "runtim" is not one qory.yaml reads.`},
+		{"harness: {runtim: claude}\n", `Key "runtim" is not one qory.yaml reads.`},
+		{"harness: {update: sometimes}\n", "Set harness.update to always or never.\n  The value is \"sometimes\"."},
+		{"worktree: {name: wt}\n", "Add {branch} to worktree.name.\n  worktree.name is \"wt\", and without {branch} two worktrees share one directory."},
+		{"worktree: {name: \"a/{branch}\"}\n", "Remove the slash from worktree.name.\n  worktree.name is \"a/{branch}\". It is one directory name under worktree.dir."},
+		{"worktree: {dir: \"\"}\n", "Set worktree.dir to a directory, or remove it.\n  worktree.dir is empty. A directory is relative to the main checkout unless absolute."},
+		{"worktree: {link: [../secrets]}\n", "Set the entry of worktree.link to a path inside the checkout.\n  worktree.link lists \"../secrets\", which is not one."},
+		{"worktree: {copy: [/etc/hosts]}\n", "Write the entry of worktree.copy as {from: /etc/hosts, to: <path in the worktree>}.\n  worktree.copy lists \"/etc/hosts\", which is not a path inside the checkout."},
+		{"worktree: {link: [{from: /etc/hosts}]}\n", "Add a to to the entry of worktree.link, as {from: /etc/hosts, to: <path in the worktree>}.\n  worktree.link lists /etc/hosts with no to, and a path from outside the checkout sets where it goes."},
+		{"worktree: {link: [{from: ~/secrets/app.env}]}\n", "Add a to to the entry of worktree.link, as {from: ~/secrets/app.env, to: <path in the worktree>}.\n  worktree.link lists ~/secrets/app.env with no to, and a path from outside the checkout sets where it goes."},
+		{"worktree: {link: [{from: /etc/hosts, to: /etc/hosts}]}\n", "Set the to of the entry of worktree.link to a path inside the worktree.\n  worktree.link maps /etc/hosts to \"/etc/hosts\", which is not one."},
+		{"worktree: {copy: [{from: /etc/hosts, to: ../hosts}]}\n", "Set the to of the entry of worktree.copy to a path inside the worktree.\n  worktree.copy maps /etc/hosts to \"../hosts\", which is not one."},
+		{"worktree: {copy: [{from: /etc/hosts, to: .}]}\n", "Set the to of the entry of worktree.copy to a path inside the worktree.\n  worktree.copy maps /etc/hosts to \".\", which is not one."},
+		{"worktree: {link: [{from: ../shared/.env, to: .env}]}\n", "Set the entry of worktree.link to a path inside the checkout.\n  worktree.link lists \"../shared/.env\", which is not one."},
+		{"worktree: {link: [{to: .env}]}\n", "Give every entry of worktree.link a path.\n  An entry is a path inside the checkout, or {from: <path>, to: <path in the worktree>}, and one has none."},
+		{"worktree: {link: [\"\"]}\n", "Give every entry of worktree.link a path.\n  An entry is a path inside the checkout, or {from: <path>, to: <path in the worktree>}, and one has none."},
+		{"worktree: {link: [{from: .env, to: ../.env}]}\n", "Set the to of the entry of worktree.link to a path inside the worktree.\n  worktree.link maps .env to \"../.env\", which is not one."},
+		{"worktree: {pr: \"pull/{n}\"}\n", "Set worktree.pr to a ref under refs/ with {n}, as refs/pull/{n}/head.\n  worktree.pr is \"pull/{n}\", and {n} stands for the pull request number."},
+		{"git: {timeout: soon}\n", "Set git.timeout to a duration above zero, such as 10m.\n  The value is \"soon\"."},
+		{"git: {timeout: 0s}\n", "Set git.timeout to a duration above zero, such as 10m.\n  The value is \"0s\"."},
+		{"git: {cache: \"\"}\n", "Set git.cache to a directory, or remove it.\n  git.cache is empty."},
+		{"env: {1A: x}\n", "Rename each variable in env to an environment variable name.\n  1A is not one."},
+		{"env: {QORY_HARNESS_HOME: x}\n", "Remove env.QORY_HARNESS_HOME.\n  QORY_HARNESS_HOME is qory's, so the configuration exports another name."},
+		{"harness: {runtime: []}\n", "Set harness.runtime to one runtime or a list of them.\n  harness.runtime is empty."},
+		{"harness: {model: &m opus}\nworktree: {base: *m}\n", "*m at line 3 is a YAML alias, which qory.yaml may not contain."},
+		{"env: &e {A: x}\nharness:\n  extensions:\n    ci:\n      <<: *e\n", "*e at line 6 is a YAML alias"},
+		{"a: &a [x, x, x, x]\nb: &b [*a, *a, *a, *a]\nc: [*b, *b, *b, *b]\n", "*a at line 3 is a YAML alias"},
 	} {
 		root := t.TempDir()
 		write(t, filepath.Join(root, "qory.yaml"), c.body)
 		_, err := config.Load(root, true)
-		if err == nil || !strings.Contains(err.Error(), c.want) || !strings.HasPrefix(err.Error(), root) {
+		if err == nil || !strings.Contains(err.Error(), c.want) || !strings.Contains(err.Error(), root) {
 			t.Errorf("%q: error %v, want one naming the file and %q", c.body, err, c.want)
 		}
 	}

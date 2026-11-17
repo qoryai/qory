@@ -90,22 +90,22 @@ func TestForagerFileRefusesAPoolSectionItCannotRun(t *testing.T) {
 		lines []string
 		want  string
 	}{
-		{[]string{"runs: 0", registry, runs}, "pool.runs is below 1; a pool runs at least 1 at once"},
+		{[]string{"runs: 0", registry, runs}, "Set pool.runs to 1 or more."},
 		{[]string{runs}, "pool.registry is required"},
-		{[]string{"registry: localhost:5001/qory-env:latest", runs}, "pool.registry is not an image name"},
-		{[]string{"registry: localhost:5001/Qory-Env", runs}, "pool.registry is not an image name"},
-		{[]string{"registry: localhost:5001", runs}, "pool.registry is not an image name"},
-		{[]string{"registry: localhost:5001/qory-env/", runs}, "pool.registry is not an image name"},
-		{[]string{"registry: \"localhost:5001/qory-env@sha256:0000000000000000000000000000000000000000000000000000000000000000\"", runs}, "pool.registry is not an image name"},
-		{[]string{"registry: \"\"", runs}, "pool.registry is not an image name"},
-		{[]string{"registry: registry.example/" + strings.Repeat("a", 222), runs}, "pool.registry is not an image name"},
-		{[]string{registry}, "pool.run_config is required"},
-		{[]string{registry, "run_config: runs"}, "pool.run_config is not an absolute path"},
+		{[]string{"registry: localhost:5001/qory-env:latest", runs}, "Set pool.registry to an image name."},
+		{[]string{"registry: localhost:5001/Qory-Env", runs}, "Set pool.registry to an image name."},
+		{[]string{"registry: localhost:5001", runs}, "Set pool.registry to an image name."},
+		{[]string{"registry: localhost:5001/qory-env/", runs}, "Set pool.registry to an image name."},
+		{[]string{"registry: \"localhost:5001/qory-env@sha256:0000000000000000000000000000000000000000000000000000000000000000\"", runs}, "Set pool.registry to an image name."},
+		{[]string{"registry: \"\"", runs}, "Set pool.registry to an image name."},
+		{[]string{"registry: registry.example/" + strings.Repeat("a", 222), runs}, "Set pool.registry to an image name."},
+		{[]string{registry}, "pool.run_config is required."},
+		{[]string{registry, "run_config: runs"}, "Set pool.run_config to an absolute path."},
 		{[]string{registry, runs, "harness: /src"}, "harness"},
 	} {
 		path := foragerFile(t, poolBody(c.lines...))
 		_, err := config.LoadForager()
-		if err == nil || !strings.HasPrefix(err.Error(), path+": ") || !strings.Contains(err.Error(), c.want) {
+		if err == nil || !strings.Contains(err.Error(), path) || !strings.Contains(err.Error(), c.want) {
 			t.Errorf("%q: error %v, want one naming the file and %q", c.lines, err, c.want)
 		}
 	}
@@ -116,7 +116,7 @@ func TestForagerFileRefusesAPoolSectionItCannotRun(t *testing.T) {
 	} {
 		path := foragerFile(t, poolBody(lines...))
 		_, err := config.LoadForager()
-		if err == nil || !strings.HasPrefix(err.Error(), path+": pool."+key+": ") || strings.Contains(err.Error(), "0123456789") {
+		if err == nil || !strings.Contains(err.Error(), "pool."+key+" is in "+path) || strings.Contains(err.Error(), "0123456789") {
 			t.Errorf("pool.%s: error %v, want one naming the key and containing no value", key, err)
 		}
 	}
@@ -132,7 +132,7 @@ func TestForagerFileStopsAtTheRemovedPoolKeys(t *testing.T) {
 		key, _, _ := strings.Cut(line, ":")
 		path := foragerFile(t, poolBody(registry, line, runs))
 		_, err := config.LoadForager()
-		if want := path + ": line 4: key \"" + key + "\" is not one forager.yaml reads"; err == nil || err.Error() != want {
+		if want := "Remove the key, or rename it to one forager.yaml reads.\n  Key \"" + key + "\" is not one forager.yaml reads.\n  It is at line 4 of " + path + "."; err == nil || err.Error() != want {
 			t.Errorf("pool.%s: error %v, want %q", key, err, want)
 		}
 	}
@@ -157,7 +157,7 @@ func TestLoadForagerInReadsAnotherDirectory(t *testing.T) {
 	if err := os.WriteFile(path, []byte("apiVersion: qory.dev/v1alpha1\nwall: {}\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := config.LoadForagerIn(dir); err == nil || !strings.HasPrefix(err.Error(), path+": wall.adapter is required") {
+	if _, err := config.LoadForagerIn(dir); err == nil || !strings.HasPrefix(err.Error(), "Set wall.adapter to docker.\n  wall.adapter is required") || !strings.Contains(err.Error(), path) {
 		t.Errorf("a file that does not read: %v", err)
 	}
 }

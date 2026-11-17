@@ -255,7 +255,7 @@ func TestComposeRefuses(t *testing.T) {
 	}{
 		{
 			name:    "no stack in the checkout or above it",
-			wantErr: []string{"no " + stack.FileName + ", and no qory.yaml or harness.yaml whose harness section lists modules or a stack to extend, in ", "ancestor directory you own"},
+			wantErr: []string{"Add a " + stack.FileName + ", or a harness section to qory.yaml or harness.yaml.", "ancestor directory you own"},
 		},
 		{
 			name:    "a stack of another format",
@@ -318,7 +318,7 @@ func TestComposeRefusesAClosedStackAtTheRoot(t *testing.T) {
 	if err == nil {
 		t.Fatalf("compose: no error\n%s", out)
 	}
-	wants(t, err.Error(), file+": a stack at a repository root is delivered to be extended, and this one declares no extending block", "goes under harness in qory.yaml, which qory setup repo writes")
+	wants(t, err.Error(), "Add an extending block to the stack, or move it under harness in qory.yaml.", "A stack at a repository root is delivered to be extended, and this one declares no extending block.", "A repository's stack goes under harness in qory.yaml, which qory setup repo writes.", "The stack is in "+file+".")
 	if cmd.ExitCode(err) != cmd.ExitInput {
 		t.Errorf("exit %d, want %d", cmd.ExitCode(err), cmd.ExitInput)
 	}

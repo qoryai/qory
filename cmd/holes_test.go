@@ -172,7 +172,7 @@ func TestAModuleLinkNameHoldsNoControlCharacter(t *testing.T) {
 	copyFixture(t, "two-modules", root)
 	writeOwnStack(t, root, strings.Replace(linkedStack, "link: harness", "link: \"harness\\n*\"", 1))
 	out, err := run(t, "harness", "compose")
-	if err == nil || !strings.HasSuffix(err.Error(), `: the link name "harness\n*" holds a control character`) {
+	if err == nil || !strings.HasPrefix(err.Error(), "Set the link of module core to a name without control characters.\n  The link name \"harness\\n*\" contains a control character.") {
 		t.Errorf("%v\n%s", err, out)
 	}
 }

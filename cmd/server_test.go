@@ -681,7 +681,7 @@ func TestRunChecksTheServersVia(t *testing.T) {
 	wantsConfigRow(t, rows, "gateway.server.via.certificate_sha256", "(none)", "default")
 	out, err = run(t, "run")
 	ca := filepath.Join(filepath.Dir(file), "gateway-ca.pem")
-	if want := file + ": gateway.server.via.ca_file " + ca + ": no such file or directory"; err == nil || err.Error() != want || cmd.ExitCode(err) != cmd.ExitInput {
+	if want := "Make the file of gateway.server.via.ca_file readable, or set another file.\n  The file " + ca + " cannot be read: no such file or directory.\n  gateway.server.via.ca_file is in " + file + "."; err == nil || err.Error() != want || cmd.ExitCode(err) != cmd.ExitInput {
 		t.Errorf("%v (exit %d)\nwant %q", err, cmd.ExitCode(err), want)
 	}
 	lacks(t, out, "qory run: node", "hello from")

@@ -1,13 +1,13 @@
 package stack
 
 import (
-	"errors"
 	"fmt"
 	"sort"
 	"strconv"
 	"strings"
 
 	"github.com/qoryai/forager/accesskey"
+	"github.com/qoryai/qory/internal/exports"
 	"gopkg.in/yaml.v3"
 )
 
@@ -85,16 +85,17 @@ func (s *Selection) UnmarshalYAML(n *yaml.Node) error {
 // parse reads the kept block: a mapping whose keys are kinds with a list of names,
 // instructions with true, and settings and env with true or a list of names. An unknown
 // key, a false, and an empty list are errors, each naming the key, or "the name at line
-// N" for an unknown key whose name contains an access key secret or a run key; the
-// caller prefixes the module and whether the block is exclude or only. A selection
+// N" for an unknown key whose name contains an access key secret or a run key. block is
+// exclude or only, and the caller prefixes the module, see [exports.Prefixed]. A selection
 // built in code, with no block kept, is left as it is.
-func (s *Selection) parse() error {
+func (s *Selection) parse(block string) error {
 	n := s.raw
 	if n == nil {
 		return nil
 	}
+	where := "The " + block + " is in " + exports.FilePlace + "."
 	if n.Kind != yaml.MappingNode {
-		return errors.New("is a mapping of kinds and parts to what they select")
+		return exports.Refuse(fmt.Sprintf("Set the %s of %s to a mapping of kinds and parts to what they select.", block, exports.ModulePlace), "The block is not a mapping.", where)
 	}
 	*s = Selection{}
 	for i := 0; i+1 < len(n.Content); i += 2 {
@@ -103,11 +104,11 @@ func (s *Selection) parse() error {
 		case isKind(key):
 			var names []string
 			if err := value.Decode(&names); err != nil || len(names) == 0 {
-				return fmt.Errorf("%s is a list of entry names", key)
+				return exports.Refuse(fmt.Sprintf("Set %s in the %s of %s to a list of entry names.", key, block, exports.ModulePlace), "The value is not a list, or the list is empty.", where)
 			}
 			for _, name := range names {
 				if name == "" {
-					return fmt.Errorf("%s lists an empty name", key)
+					return exports.Refuse(fmt.Sprintf("Remove the empty name from %s in the %s of %s.", key, block, exports.ModulePlace), "A name is not empty.", where)
 				}
 			}
 			if s.Kinds == nil {
@@ -117,11 +118,11 @@ func (s *Selection) parse() error {
 		case key == "instructions":
 			var all bool
 			if err := value.Decode(&all); err != nil || !all {
-				return errors.New("instructions is true, for the module's AGENTS.md: exclude leaves it out, only keeps it")
+				return exports.Refuse(fmt.Sprintf("Set instructions in the %s of %s to true.", block, exports.ModulePlace), "instructions stands for the module's AGENTS.md: exclude leaves it out, only keeps it.", where)
 			}
 			s.Instructions = true
 		case key == "settings", key == "env":
-			part, err := decodePart(key, value)
+			part, err := decodePart(key, block, value)
 			if err != nil {
 				return err
 			}
@@ -136,28 +137,29 @@ func (s *Selection) parse() error {
 				// The key's line places it, and its name is left out.
 				kind = fmt.Sprintf("the name at line %d", n.Content[i].Line)
 			}
-			return fmt.Errorf("selects kind %s; kinds: %s; parts: %s", kind, strings.Join(Kinds, ", "), strings.Join(Parts, ", "))
+			return exports.Refuse(fmt.Sprintf("Rename %s in the %s of %s to a kind or a part.", kind, block, exports.ModulePlace), "Kinds: "+strings.Join(Kinds, ", ")+".", "Parts: "+strings.Join(Parts, ", ")+".", where)
 		}
 	}
 	return nil
 }
 
 // decodePart reads true, or a non-empty list of names, for a settings or env key.
-func decodePart(key string, n *yaml.Node) (Part, error) {
+func decodePart(key, block string, n *yaml.Node) (Part, error) {
+	where := "The " + block + " is in " + exports.FilePlace + "."
 	var all bool
 	if err := n.Decode(&all); err == nil {
 		if !all {
-			return Part{}, fmt.Errorf("%s is true or a list of names", key)
+			return Part{}, exports.Refuse(fmt.Sprintf("Set %s in the %s of %s to true or a list of names.", key, block, exports.ModulePlace), "The value is false.", where)
 		}
 		return Part{All: true}, nil
 	}
 	var names []string
 	if err := n.Decode(&names); err != nil || len(names) == 0 {
-		return Part{}, fmt.Errorf("%s is true or a list of names", key)
+		return Part{}, exports.Refuse(fmt.Sprintf("Set %s in the %s of %s to true or a list of names.", key, block, exports.ModulePlace), "The value is not true, and not a list with a name in it.", where)
 	}
 	for _, name := range names {
 		if name == "" {
-			return Part{}, fmt.Errorf("%s lists an empty name", key)
+			return Part{}, exports.Refuse(fmt.Sprintf("Remove the empty name from %s in the %s of %s.", key, block, exports.ModulePlace), "A name is not empty.", where)
 		}
 	}
 	return Part{Names: names}, nil

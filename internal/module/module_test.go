@@ -398,7 +398,7 @@ func TestReadManifestRefuses(t *testing.T) {
 		{
 			"unknown field",
 			"apiVersion: qory.dev/v1alpha1\nname: core\nmodules: []\n",
-			`line 3: key "modules" is not one qory-module.yaml reads`,
+			`Key "modules" is not one qory-module.yaml reads.`,
 		},
 		{
 			"a default that is not a variant",
@@ -429,7 +429,7 @@ func TestReadManifestRefuses(t *testing.T) {
 				t.Fatalf("read %q without an error", c.yaml)
 			}
 			path := filepath.Join(dir, ManifestName)
-			if !strings.HasPrefix(err.Error(), path+": ") && !strings.HasSuffix(err.Error(), " "+path+".") {
+			if !strings.HasPrefix(err.Error(), path+": ") && !strings.Contains(err.Error(), " "+path+".") {
 				t.Fatalf("error %q does not start with %q", err, path)
 			}
 			if !strings.Contains(err.Error(), c.want) {
@@ -500,7 +500,7 @@ func TestReadManifestRefusesEnv(t *testing.T) {
 				t.Fatalf("read %q without an error", c.env)
 			}
 			path := filepath.Join(dir, ManifestName)
-			if !strings.HasPrefix(err.Error(), path+": ") && !strings.HasSuffix(err.Error(), " "+path+".") {
+			if !strings.HasPrefix(err.Error(), path+": ") && !strings.Contains(err.Error(), " "+path+".") {
 				t.Fatalf("error %q does not start with %q", err, path)
 			}
 			if !strings.Contains(err.Error(), c.want) {

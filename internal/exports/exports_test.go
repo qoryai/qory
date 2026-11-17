@@ -1,6 +1,7 @@
 package exports_test
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -98,20 +99,20 @@ func TestReadIsNilWithoutASection(t *testing.T) {
 // YAML alias anywhere in it is the file's to refuse.
 func TestReadRefuses(t *testing.T) {
 	for _, c := range []struct{ body, want string }{
-		{"exports: {}\n", "exports lists no stacks and no modules"},
-		{"exports: {stacks: [a/b]}\n", `exports.stacks lists "a/b", which is not one path segment`},
-		{"exports: {modules: [core, core]}\n", "exports.modules lists core twice"},
-		{"exports: {dir: ../shared, modules: [core]}\n", `exports.dir stacks "../shared/stacks" is not a directory inside the repository`},
-		{"exports: {dir: /srv/harness, modules: [core]}\n", `exports.dir stacks "/srv/harness/stacks" is not a directory inside the repository`},
-		{"exports: {dir: {stacks: ./s}, modules: [core]}\n", "exports.dir sets no modules directory; the map form sets both"},
-		{"exports: {dir: {stacks: ./s, module: ./m}}\n", `dir has the key "module", which a dir map does not have; its keys are stacks and modules`},
-		{"exports: {dir: \"\", modules: [core]}\n", "dir is empty; it is a directory relative to the repository root"},
-		{"exports: {dir: [a, b], modules: [core]}\n", "dir is one directory that contains stacks/ and modules/, or a map"},
-		{"exports: {stack: [nextjs]}\n", `key "stack" is not one qory.yaml reads`},
+		{"exports: {}\n", "List stacks or modules under exports, or set exports.dir.\n  exports lists no stacks and no modules."},
+		{"exports: {stacks: [a/b]}\n", "Set each name in exports.stacks to one path segment.\n  exports.stacks lists \"a/b\"."},
+		{"exports: {modules: [core, core]}\n", "List core once in exports.modules.\n  exports.modules lists it twice."},
+		{"exports: {dir: ../shared, modules: [core]}\n", "Set the stacks directory of exports.dir to a path inside the repository.\n  exports.dir stacks is \"../shared/stacks\", which is not a directory inside the repository."},
+		{"exports: {dir: /srv/harness, modules: [core]}\n", "Set the stacks directory of exports.dir to a path inside the repository.\n  exports.dir stacks is \"/srv/harness/stacks\", which is not a directory inside the repository."},
+		{"exports: {dir: {stacks: ./s}, modules: [core]}\n", "Set the modules directory of exports.dir.\n  exports.dir sets no modules directory, and the map form sets both."},
+		{"exports: {dir: {stacks: ./s, module: ./m}}\n", "Remove the key \"module\" from exports.dir.\n  A dir map has the keys stacks and modules."},
+		{"exports: {dir: \"\", modules: [core]}\n", "Set exports.dir to a directory relative to the repository root.\n  exports.dir is empty."},
+		{"exports: {dir: [a, b], modules: [core]}\n", "Set exports.dir to one directory, or to a map of the stacks and modules directories.\n  A directory contains stacks/ and modules/, and a map sets each directory."},
+		{"exports: {stack: [nextjs]}\n", "Key \"stack\" is not one qory.yaml reads."},
 	} {
 		root := write(t, c.body)
 		_, err := exports.Read(root)
-		if err == nil || !strings.Contains(err.Error(), c.want) || !strings.HasPrefix(err.Error(), root) {
+		if err == nil || !strings.Contains(err.Error(), c.want) || !strings.Contains(err.Error(), root) {
 			t.Errorf("%q: error %v, want one naming the file and %q", c.body, err, c.want)
 		}
 	}
@@ -131,7 +132,7 @@ func TestReadRefuses(t *testing.T) {
 	if err := os.WriteFile(file, []byte("harness:\n  extensions:\n    ci: &ci {ignore: [lint]}\n    cd: *ci\nexports: {modules: [core]}\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := exports.Read(root); err == nil || err.Error() != file+": line 4: *ci is a YAML alias, which harness.yaml may not contain; write the value out in full where it is used" {
+	if _, err := exports.Read(root); err == nil || err.Error() != "Write the value out in full in place of the YAML alias.\n  *ci at line 4 is a YAML alias, which harness.yaml may not contain.\n  The file is "+file+"." {
 		t.Errorf("an alias outside the section: %v", err)
 	}
 }
@@ -257,7 +258,25 @@ func TestRangeIsTheQoryKeyAsWritten(t *testing.T) {
 		t.Errorf("harness.yaml: %q from %q, %v", value, file, err)
 	}
 	root = write(t, "qory: [0.5.0]\n")
-	if _, _, err = exports.Range(root); err == nil || !strings.HasPrefix(err.Error(), filepath.Join(root, exports.FileName)+": ") {
+	if _, _, err = exports.Range(root); err == nil || !strings.HasSuffix(err.Error(), "The file is "+filepath.Join(root, exports.FileName)+".") {
 		t.Errorf("a key that is not a string: %v", err)
+	}
+}
+
+// TestADirErrorHiddenHasNeitherTheDirectoryNorTheFile is the error of an exports.dir that
+// leads out of the repository: its text has the directory and the file, and its hidden
+// form has neither.
+func TestADirErrorHiddenHasNeitherTheDirectoryNorTheFile(t *testing.T) {
+	root := write(t, "exports: {dir: ../shared, modules: [core]}\n")
+	_, err := exports.Read(root)
+	var de *exports.DirError
+	if !errors.As(err, &de) {
+		t.Fatalf("%v, want a DirError", err)
+	}
+	if text := de.Error(); !strings.Contains(text, "../shared") || !strings.Contains(text, root) {
+		t.Errorf("the text is %q, want the directory and the file", text)
+	}
+	if hidden := de.Hidden(); strings.Contains(hidden, "shared") || strings.Contains(hidden, root) {
+		t.Errorf("the hidden text is %q, want neither the directory nor the file", hidden)
 	}
 }

@@ -12,14 +12,14 @@ import (
 // words: another user's file, a group that may write it, and every user; any other
 // error is returned as it is. The integrations' texts of the same errors are unchanged.
 func TestWritersRefusalStartsWithTheFix(t *testing.T) {
-	const setting, rule = "gateway.server.enrolment_code_file", ", and only root and the user running qory may write gateway.server.enrolment_code_file and its folders, except a folder that root owns with the sticky bit set"
+	const setting, rule = "gateway.server.enrolment_code_file", "\n  Only root and the user running qory may write gateway.server.enrolment_code_file and its folders, except a folder that root owns with the sticky bit set."
 	for _, c := range []struct {
 		u           *untrusted
 		want, today string
 	}{
-		{&untrusted{path: "/run/code", owner: "nobody (65534)"}, "make root or the user running qory the owner of /run/code: it is owned by nobody (65534)" + rule, "/run/code is owned by nobody (65534), neither root nor the user running qory"},
-		{&untrusted{path: "/run", group: "builders (1002)"}, "remove the group's write permission from /run: the group builders (1002) may write it" + rule, "/run may be written by the group builders (1002), which is neither root's, wheel, admin nor its owner's primary group named as the owner"},
-		{&untrusted{path: "/run", every: true}, "remove the write permission of other users from /run: every user may write it" + rule, "/run may be written by every user; qory runs a program only root and its owner may change"},
+		{&untrusted{path: "/run/code", owner: "nobody (65534)"}, "Make root or the user running qory the owner of gateway.server.enrolment_code_file.\n  /run/code is owned by nobody (65534)." + rule, "/run/code is owned by nobody (65534), neither root nor the user running qory"},
+		{&untrusted{path: "/run", group: "builders (1002)"}, "Remove the group's write permission from gateway.server.enrolment_code_file.\n  The group builders (1002) may write /run." + rule, "/run may be written by the group builders (1002), which is neither root's, wheel, admin nor its owner's primary group named as the owner"},
+		{&untrusted{path: "/run", every: true}, "Remove the write permission of other users from gateway.server.enrolment_code_file.\n  Every user may write /run." + rule, "/run may be written by every user; qory runs a program only root and its owner may change"},
 	} {
 		if err := writersRefusal(setting, c.u); err == nil || err.Error() != c.want {
 			t.Errorf("%v, want %q", err, c.want)
@@ -76,11 +76,11 @@ func TestTheCodeFileRuleTakesTheDeployLayout(t *testing.T) {
 		want string
 	}{
 		{"a sticky /run root owns", "/run", fileOwner{0, 0, dir(0o1777) | os.ModeSticky}, ""},
-		{"/run/qory its group, root's, may write", "/run/qory", fileOwner{0, 0, dir(0o775)}, "remove the group's write permission from /run/qory: the group root (0) may write it"},
-		{"the folder its group, the owner's private one, may write", "/run/qory/enrolment", fileOwner{gw, gw, dir(0o770)}, "remove the group's write permission from /run/qory/enrolment: the group nonroot (65532) may write it"},
-		{"the file its group may write", "/run/qory/enrolment/code", fileOwner{gw, gw, 0o460}, "remove the group's write permission from /run/qory/enrolment/code: the group nonroot (65532) may write it"},
-		{"the file every user may write", "/run/qory/enrolment/code", fileOwner{gw, gw, 0o406}, "remove the write permission of other users from /run/qory/enrolment/code"},
-		{"the file another user owns", "/run/qory/enrolment/code", fileOwner{1000, gw, 0o400}, "make root or the user running qory the owner of /run/qory/enrolment/code: it is owned by 1000"},
+		{"/run/qory its group, root's, may write", "/run/qory", fileOwner{0, 0, dir(0o775)}, "Remove the group's write permission from gateway.server.enrolment_code_file.\n  The group root (0) may write /run/qory."},
+		{"the folder its group, the owner's private one, may write", "/run/qory/enrolment", fileOwner{gw, gw, dir(0o770)}, "Remove the group's write permission from gateway.server.enrolment_code_file.\n  The group nonroot (65532) may write /run/qory/enrolment."},
+		{"the file its group may write", "/run/qory/enrolment/code", fileOwner{gw, gw, 0o460}, "Remove the group's write permission from gateway.server.enrolment_code_file.\n  The group nonroot (65532) may write /run/qory/enrolment/code."},
+		{"the file every user may write", "/run/qory/enrolment/code", fileOwner{gw, gw, 0o406}, "Remove the write permission of other users from gateway.server.enrolment_code_file.\n  Every user may write /run/qory/enrolment/code."},
+		{"the file another user owns", "/run/qory/enrolment/code", fileOwner{1000, gw, 0o400}, "Make root or the user running qory the owner of gateway.server.enrolment_code_file.\n  /run/qory/enrolment/code is owned by 1000."},
 	} {
 		layout := maps.Clone(deploy)
 		layout[c.path] = c.o

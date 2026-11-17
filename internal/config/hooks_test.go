@@ -48,7 +48,7 @@ func TestComposeRefusesHooksOutsideAnExtension(t *testing.T) {
 		{"harness:\n  target: {runtime: claude}\n  modules: [{name: app}]\n  workflows:\n    build:\n      hook_points: {after-plan: {at: end, kinds: [check]}}\n",
 			"Remove hook_points from the workflows in qory.yaml.\n  A checkout adds workflow hooks to a stack it extends, so only a qory-stack.yaml declares hook points."},
 		{"harness:\n  extends: {path: ../base}\n  hooks:\n    - {at: after-plan, kind: check, run: x.sh, when: always}\n",
-			path + `: line 4: key "when" is not one qory.yaml reads`},
+			"Remove the key, or rename it to one qory.yaml reads.\n  Key \"when\" is not one qory.yaml reads.\n  It is at line 4 of " + path + "."},
 		{"harness:\n  extends: {path: ../base}\n  hooks:\n    - {at: after-plan, kind: review, run: x.sh}\n",
 			"Set hooks[0].agent in place of hooks[0].run.\n  A review hook runs an agent, and hooks[0] in " + path + " runs a program."},
 		{"harness:\n  extends: {path: ../base}\n  hooks:\n    - {at: after-plan, kind: review, agent: licence-reviewer, run: \"\"}\n",

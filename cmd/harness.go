@@ -1486,11 +1486,25 @@ func applyTarget(p *stack.Stack, base *compose.Base, conf config.Config, runtime
 		want.Model = model
 	}
 	want.Effort = effort
-	if err := want.Runtimes.Validate(); err != nil {
-		if len(want.Runtimes) == 0 && base != nil {
-			return fmt.Errorf("target.runtime is required; the base stack %s defines no target, so the document sets one beside extends, or the configuration or --runtime does", shownBase(base))
+	// The refusal names where the list came from: the flag, the configuration, or the
+	// document, whose path is printed as a message prints one.
+	var invalid error
+	switch {
+	case runtime != "":
+		invalid = want.Runtimes.ValidateAt("--runtime", "--runtime sets it.")
+	case conf.Runtime != nil:
+		invalid = want.Runtimes.ValidateAt("harness.runtime", "harness.runtime in the configuration sets it.")
+	default:
+		invalid = want.Runtimes.Validate()
+		if invalid != nil && p.File != "" {
+			invalid = exports.AtPath(exports.HidePath(p.File), invalid)
 		}
-		return err
+	}
+	if invalid != nil {
+		if len(want.Runtimes) == 0 && base != nil {
+			return exports.Refuse("Set target.runtime beside extends, or set the runtime in the configuration or with --runtime.", fmt.Sprintf("target.runtime is required, and the base stack %s defines no target.", shownBase(base)))
+		}
+		return invalid
 	}
 	if base != nil && base.Extending != nil {
 		if err := base.Extending.Target.Check(want, shownBase(base)); err != nil {

@@ -393,6 +393,12 @@ release may change what an existing document does, and states it under Upgrading
   cannot be read starts with `Check that you can read the files of module <name>.`, and a
   tier list reads `light, fast, and thinking`. Which input fails, and the exit status,
   stay the same.
+- The first line of each error of a stack file, a stack reference (`-f`), a target, `qory.yaml`
+  and `forager.yaml` that `qory run` and `qory harness compose` print at start, of the
+  unknown or repeated key and the YAML alias that every file qory reads can have, of the
+  `exports` section, of the program of an adapter or a tool, and of the push checks, shows
+  the fix, in at most 100 characters, and the indented lines after it show the cause, as the
+  compose errors do. Which input fails, and the exit status, stay the same.
 - A run with a run key or a run code, with no `--home` or `harness.home`, composes into
   `runs/<name>-<hash>/<run id>` under `qory/homes` in the cache directory, a home for that
   run alone, which qory removes when the run ends. Two runs of one checkout no longer

@@ -134,11 +134,11 @@ func TestAStackReferenceStopsWithExit2(t *testing.T) {
 	fakeLaunch(t, fakeRuntime(t))
 	t.Setenv("QORY_RUN_KEY", "")
 	for _, c := range []struct{ value, want string }{
-		{"ssh://git@git.example.com/example-org/harness#main:stacks/web", "use an https URL in -f ssh://git@git.example.com/example-org/harness#main:stacks/web, as <https URL>#<ref>:<folder>: "},
-		{refURL, "add the ref to -f " + refURL + ", as <https URL>#<ref>:<folder>: "},
-		{refURL + "#main", "add the folder to -f " + refURL + "#main, as <https URL>#<ref>:<folder>: "},
-		{refURL + "#main:/stacks/web", "write the folder in -f " + refURL + "#main:/stacks/web as a path from the repository's root: "},
-		{refURL + "#main:stacks/../web", "write the folder in -f " + refURL + "#main:stacks/../web without ..: "},
+		{"ssh://git@git.example.com/example-org/harness#main:stacks/web", "Set -f to an https URL, as <https URL>#<ref>:<folder>.\n  qory fetches a stack reference only over https, and ssh://git@git.example.com/example-org/harness is not an https URL with a host.\n  -f is ssh://git@git.example.com/example-org/harness#main:stacks/web."},
+		{refURL, "Add the ref to -f, as <https URL>#<ref>:<folder>.\n  The stack reference has no branch, tag, or commit after #.\n  -f is " + refURL + "."},
+		{refURL + "#main", "Add the folder to -f, as <https URL>#<ref>:<folder>.\n  The stack reference has no folder after the ref. The folder is the one that contains the qory-stack.yaml.\n  -f is " + refURL + "#main."},
+		{refURL + "#main:/stacks/web", "Write the folder in -f as a path from the repository's root.\n  The folder /stacks/web is an absolute path.\n  -f is " + refURL + "#main:/stacks/web."},
+		{refURL + "#main:stacks/../web", "Remove the .. segment from the folder in -f.\n  The folder stacks/../web has a .. segment, and the folder is a path from the repository's root.\n  -f is " + refURL + "#main:stacks/../web."},
 		{refURL + "#main:stacks/missing", "Check the folder in -f.\n  " + refURL + " has no stacks/missing at main\n  -f is set to " + refURL + "#main:stacks/missing."},
 		{refURL + "#main:stacks/empty", "Check the folder in -f.\n  " + refURL + " has no qory-stack.yaml in stacks/empty at main.\n  -f is set to " + refURL + "#main:stacks/empty."},
 	} {

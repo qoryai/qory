@@ -383,9 +383,9 @@ func TestAGitStacksModulesResolveInsideTheClone(t *testing.T) {
 	writeManifest(t, outside, "evil")
 	writeFile(t, filepath.Join(outside, "skills", "evil", "SKILL.md"), "# evil\n")
 	for _, c := range []struct{ name, path, link, want string }{
-		{"a path above the repository", "../../../../../../../../../../.." + outside, "", "is outside the base stack's repository"},
+		{"a path above the repository", "../../../../../../../../../../.." + outside, "", "lists the module outside that repository"},
 		{"a link the repository contains", "evil", filepath.Join("web", "evil"), "links outside the repository"},
-		{"an absolute path", outside, "", "is outside the base stack's repository"},
+		{"an absolute path", outside, "", "lists the module outside that repository"},
 		{"a path inside the repository", "inside", "", ""},
 	} {
 		stack := "apiVersion: qory.dev/v1alpha1\nname: web\nextending:\n  kinds: [skills]\nmodules:\n  - name: evil\n    source: {path: " + c.path + "}\n"

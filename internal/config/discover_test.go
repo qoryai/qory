@@ -57,7 +57,7 @@ func TestDiscoverStackRefusesAClosedStackAtTheRoot(t *testing.T) {
 	file := filepath.Join(checkout, stack.FileName)
 	writeRaw(t, file, stackDoc)
 	_, err := config.DiscoverStack(checkout)
-	want := file + ": a stack at a repository root is delivered to be extended, and this one declares no extending block; a repository's stack goes under harness in qory.yaml, which qory setup repo writes"
+	want := "Add an extending block to the stack, or move it under harness in qory.yaml.\n  A stack at a repository root is delivered to be extended, and this one declares no extending block.\n  A repository's stack goes under harness in qory.yaml, which qory setup repo writes.\n  The stack is in " + file + "."
 	if err == nil || err.Error() != want {
 		t.Fatalf("err = %v, want %q", err, want)
 	}
@@ -65,7 +65,7 @@ func TestDiscoverStackRefusesAClosedStackAtTheRoot(t *testing.T) {
 	// the mistake in the file rather than the missing block.
 	writeRaw(t, file, "apiVersion: qory.dev/v1alpha1\nmodules: []\n")
 	_, err = config.DiscoverStack(checkout)
-	if err == nil || !strings.Contains(err.Error(), "modules is empty; a stack lists at least one module") {
+	if err == nil || !strings.Contains(err.Error(), "List at least one module under modules.") {
 		t.Fatalf("a stack that does not load: %v", err)
 	}
 
@@ -112,14 +112,14 @@ func TestDiscoverStackRefusesBothAndNamesNone(t *testing.T) {
 	writeRaw(t, filepath.Join(dir, stack.FileName), stackDoc)
 	writeRaw(t, filepath.Join(dir, "qory.yaml"), composeDoc)
 	_, err := config.DiscoverStack(dir)
-	want := dir + " contains both qory-stack.yaml and a qory.yaml whose harness section lists modules; a directory contains one of the two"
+	want := "Remove qory-stack.yaml, or the harness section of qory.yaml.\n  " + dir + " contains both, and a directory contains one of the two."
 	if err == nil || err.Error() != want {
 		t.Fatalf("err = %v, want %q", err, want)
 	}
 	empty := t.TempDir()
 	t.Chdir(empty)
 	_, err = config.DiscoverStack(".")
-	if err == nil || !strings.HasPrefix(err.Error(), "no qory-stack.yaml, and no qory.yaml or harness.yaml whose harness section lists modules or a stack to extend, in ") {
+	if err == nil || !strings.HasPrefix(err.Error(), "Add a qory-stack.yaml, or a harness section to qory.yaml or harness.yaml.\n  ") {
 		t.Fatalf("err = %v", err)
 	}
 }
@@ -150,7 +150,7 @@ func TestLoadStackReadsTheHarnessSectionAsTheComposeDocument(t *testing.T) {
 	}
 	writeRaw(t, path, "apiVersion: qory.dev/v1alpha1\nharness:\n  modules:\n    - name: app\n")
 	_, err = config.LoadStack(path)
-	if err == nil || !strings.Contains(err.Error(), "harness sets no target.runtime and no stack to extend; the section contains this repository's stack") {
+	if err == nil || !strings.Contains(err.Error(), "Set target.runtime in the harness section, or extend a stack.\n  The section sets neither. It contains this repository's stack") {
 		t.Fatalf("without extends or a target: %v", err)
 	}
 	writeRaw(t, path, "apiVersion: qory.dev/v1alpha1\nharness:\n  target: {runtime: codex, model: o3}\n  modules:\n    - name: app\n")
@@ -163,7 +163,7 @@ func TestLoadStackReadsTheHarnessSectionAsTheComposeDocument(t *testing.T) {
 	}
 	writeRaw(t, path, "apiVersion: qory.dev/v1alpha1\nharness: {force: true}\n")
 	_, err = config.LoadStack(path)
-	if err == nil || !strings.Contains(err.Error(), "the harness section lists no modules, no stack to extend and no extensions") {
+	if err == nil || !strings.Contains(err.Error(), "Add modules, a stack to extend, or extensions to the harness section.") {
 		t.Fatalf("without a document: %v", err)
 	}
 }

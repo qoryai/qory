@@ -36,7 +36,7 @@ func TestTheWalkEnds(t *testing.T) {
 		bomb += fmt.Sprintf("    c%d: &m%d {<<: [%s*m%d]}\n", i, i, strings.Repeat(fmt.Sprintf("*m%d, ", i-1), 9), i-1)
 	}
 	f, took = walkFault(t, bomb+"wall:\n  <<: *m8\n", false)
-	if f == nil || f.line != 0 || f.text != tooManyAliases || took > 2*time.Second {
+	if f == nil || f.line != 0 || f.text != strings.TrimSuffix(tooManyAliases, ".") || took > 2*time.Second {
 		t.Errorf("merges that expand without end: %+v in %v", f, took)
 	}
 }
@@ -56,7 +56,7 @@ func TestADecoderPanicIsARefusal(t *testing.T) {
 	if err := yaml.Unmarshal([]byte(body), &doc); err != nil {
 		t.Fatal(err)
 	}
-	if got := foragerDecodeError("forager.yaml", &doc, reflect.TypeFor[foragerFile](), "", true, err); got.Error() != "forager.yaml: the YAML decoder failed reading the file" {
+	if got := foragerDecodeError("forager.yaml", &doc, reflect.TypeFor[foragerFile](), "", true, err); got.Error() != "Check the YAML of the file.\n  The YAML decoder failed reading the file.\n  The file is forager.yaml." {
 		t.Errorf("%v", got)
 	}
 	if _, err := editEnrolment([]byte(body), Enrolment{URL: "https://apiary.example", AccessKeyID: "ak_0123456789abcdef"}); err != nil {

@@ -3,7 +3,6 @@ package config
 import (
 	"bytes"
 	"errors"
-	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -13,6 +12,7 @@ import (
 	"github.com/qoryai/forager/accesskey"
 	"gopkg.in/yaml.v3"
 
+	"github.com/qoryai/qory/internal/exports"
 	"github.com/qoryai/qory/internal/stack"
 )
 
@@ -55,7 +55,7 @@ func WriteEnrolment(path string, e Enrolment) error {
 	}
 	out, err := editEnrolment(data, e)
 	if err != nil {
-		return fmt.Errorf("%s: %w", path, err)
+		return exports.AtPath(path, err)
 	}
 	return replaceFile(target, out, mode)
 }

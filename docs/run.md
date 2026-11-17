@@ -305,31 +305,33 @@ home is under `qory` in your cache directory with `remove <path> from --mount: â
 is the checkout's, with `make the mount <path> read-only, â€¦`, see [A run that may write
 works in a copy](#a-run-that-may-write-works-in-a-copy). A walled run whose home has a
 `push-checks.json` that qory cannot read stops before the setup and the agent, with exit
-2: `Compose the harness again, and run again. The push checks in <path> could not be read:
-<cause>.` It stops there with exit 2 too when the push checks would run on another engine
-than the run's containers, `Switch the engine back to the one the run started on, and run
-again. The push checks would run on the engine <id>, and the run's containers are on the
-engine <id>.`, and when the run API of a run from a control plane fails, `Open the run
-through a gateway that sends the run API address, and run again. The push checks read the
-artifacts through the run API, which failed: <cause>.`, or when the run API address is not
-an http or https URL: `Update the run's gateway, and run again. The run API address that
-the gateway sent is not one the push checks can use: <cause>.` The push checks run in a
-container of the wall's default image, `--image` or `wall.image`, and not of the image that
-the run's policy selects, so a change to the repository's `.devcontainer/` cannot turn them
-off. A run on a person's machine, with no run code, and with neither `--image` nor
-`wall.image`, whose policy selects the image, runs them in the run's image. A run from a
-run code with neither stops there with exit 2: `Set wall.image in forager.yaml, then take
-the work item in again in Qory Apiary.`, and on the next line `Push checks run in the wall's
-default image; the code is used`. The run stops there with exit 2 too when the engine does not have
-the wall's default image: `Pull the wall's default image onto this machine, and run again:
-push checks run in it. The engine does not have the image <image>.` It stops there with
-exit 2 before any command of the engine gets the image when the image is not a
-reference, such as a value that starts with `-`: `Set wall.image or --image to an image
-reference, and run again. Push checks cannot start from <value>: a reference starts with a
-letter or a digit and has only letters, digits and . _ / : @ -.` When Forager cannot turn on
-the check of the POSTs from behind the wall, the run stops there with exit 1: `Run again.
-Turning on the push checks for the POSTs from behind the wall failed, so the run stopped
-before the setup: <cause>.` A home without push checks, and a run with no control plane,
+2: `Compose the harness again, and run again.`, and on the next line `The push checks in
+<path> could not be read: <cause>.` It stops there with exit 2 too when the push checks
+would run on another engine than the run's containers, `Switch the engine back to the
+one the run started on, and run again.`, and on the next line `The push checks would run
+on the engine <id>, and the run's containers are on the engine <id>.`, and when the run
+API of a run from a control plane fails, `Open the run through a gateway that sends the
+run API address, and run again.`, and on the next line `The push checks read the
+artifacts through the run API, which failed: <cause>.`, or when the run API address is
+not an http or https URL: `Update the run's gateway, and run again.`, and on the next line
+`The run API address that the gateway sent is not one the push checks can use: <cause>.`
+The push checks run in a container of the wall's default image, `--image` or `wall.image`,
+and not of the image that the run's policy selects, so a change to the repository's
+`.devcontainer/` cannot turn them off. A run on a person's machine, with no run code, and
+with neither `--image` nor `wall.image`, whose policy selects the image, runs them in the
+run's image. A run from a run code with neither stops there with exit 2: `Set wall.image
+in forager.yaml, then take the work item in again in Qory Apiary.`, and on the next line
+`Push checks run in the wall's default image; the code is used`. The run stops there with
+exit 2 too when the engine does not have the wall's default image: `Pull the wall's
+default image onto this machine, and run again.`, and on the next line `Push checks run
+in it, and the engine does not have the image <image>.` It stops there with exit 2 before
+any command of the engine gets the image when the image is not a reference, such as a
+value that starts with `-`: `Set wall.image or --image to an image reference, and run
+again.`, and on the next line `Push checks cannot start from <value>. A reference starts
+with a letter or a digit and has only letters, digits, and . _ / : @ -.` When Forager
+cannot turn on the check of the POSTs from behind the wall, the run stops there with
+exit 1: `Run again.`, and on the next line `Turning on the push checks for the POSTs from
+behind the wall failed, so the run stopped before the setup: <cause>.` A home without push checks, and a run with no control plane,
 start as before, with no check turned on.
 
 A run from a run code stops at the same points of the push-check load and set with the same
@@ -896,8 +898,8 @@ gateway:
   `429 Too Many Requests`.
 - A field you leave out has its default: 256, 50 and 200.
 - A value outside its range stops every qory command that reads `forager.yaml`, with the
-  fix, such as `set gateway.run_limits.connections to a number from 1 to 65536, or remove
-  it for the default of 256`.
+  fix, such as `Set gateway.run_limits.connections to a number from 1 to 65536, or remove
+  it.`, and on the next line `The default is 256.`
 - The record has a `dev.qory.run.egress` with the rule `wall:connection-limit` or
   `wall:rate-limit` for a request that gets the `429`, at most one per limit and second.
 
@@ -937,8 +939,9 @@ gateway:
 - The stack proxy counts its connections and requests at the limits of
   `gateway.run_limits`, apart from the run's proxy.
 - An entry of another form stops every qory command that reads `forager.yaml`, with the
-  fix, such as `set gateway.stack_hosts[0] to a lower-case host name, an IPv4 address or
-  a *. suffix, such as git.example.com; no port, path or scheme`.
+  fix, such as `Set gateway.stack_hosts[0] to a lower-case host name, an IPv4 address, or
+  a *. suffix.`, and on the next line `An entry is a host such as git.example.com, with no
+  port, path, or scheme`.
 - For each request the stack proxy allows or denies, the gateway prints one line on
   standard error, and the record has a `dev.qory.run.egress` with `channel: stack`.
   When the run configuration sets `harness_hidden`, those records have no `path` and no
@@ -2150,8 +2153,9 @@ phrase:
   <harness>`.
 - `correct <harness>, then take the work item in again in Qory Apiary: <text>; the code
   is used`, for any other error of exit 2, where `<harness>` is the workspace's harness or
-  the checkout's harness. One such `<text>` is `module <module>: qory.yaml in <source>:
-  exports.dir <stacks or modules> is not a directory inside the repository`, for an
+  the checkout's harness. One such `<text>` is `module <module>: qory.yaml in <source>: Set the <stacks or
+  modules> directory of exports.dir to a path inside the repository.`, and on the next line
+  `exports.dir <stacks or modules> is not a directory inside the repository.`, for an
   `exports.dir` that is absolute or leads out of its repository.
 - `fix the cause, then take the work item in again in Qory Apiary: <text>; the code is
   used`, for any other error of any other exit status, which stays as it is
