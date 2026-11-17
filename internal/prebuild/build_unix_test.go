@@ -754,25 +754,6 @@ func TestBuildFailsWhenTheContainerDies(t *testing.T) {
 	}
 }
 
-// TestBuildRefusesAnImageOverTheLimit is an image of more than 4 GiB: refused, and
-// removed with the temporary images.
-func TestBuildRefusesAnImageOverTheLimit(t *testing.T) {
-	f := newFakes(t)
-	f.set(t, "size", strconv.Itoa(4<<30+1)+"\n")
-	var out bytes.Buffer
-	_, err := prebuild.Build(t.Context(), options(t, repository(t, shopConfig), &out, io.Discard))
-	var refusal *prebuild.RefusedError
-	if !errors.As(err, &refusal) || err.Error() != "the image is 4.0 GiB (4294967297 bytes), more than the limit of 4 GiB; it is removed" {
-		t.Fatalf("Build: %v", err)
-	}
-	if !f.called("docker", "image rm --force "+testName+":base "+testName+":tools "+testName+":top "+testName+":seeded acme/shop:prebuild") {
-		t.Errorf("the image is not removed:\n%s", f.read("docker.log"))
-	}
-	if strings.Contains(out.String(), "built acme/shop:prebuild") {
-		t.Error("the image is said built")
-	}
-}
-
 // TestBuildStopsAtItsLimit is a build still running at its limit: the program running
 // and what it started are ended, and the container and the images are removed. The
 // test ends the build's context with [prebuild.ErrLimit] as its cause once the

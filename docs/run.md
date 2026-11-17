@@ -2133,11 +2133,9 @@ not built FROM the `agent` image stops with `build the prebuild image FROM Qory'
 image, which has the parsers`, then `the folder /opt/qory/parsers has none`.
 
 The step adds about 1.6 GiB to the image, measured on
-`mcr.microsoft.com/devcontainers/base` for arm64 (1.3 GiB before, 3.0 GiB after), and the
-image's size counts toward its limit of 4 GiB. A base image of more than about 2.4 GiB,
-such as `mcr.microsoft.com/devcontainers/typescript-node` (2.7 GiB, 4.1 GiB with the
-tools), stops with `the image is 4.1 GiB (<bytes> bytes), more than the limit of 4 GiB; it
-is removed`.
+`mcr.microsoft.com/devcontainers/base` for arm64 (1.3 GiB before, 3.0 GiB after), and
+about 1.5 GiB on `mcr.microsoft.com/devcontainers/typescript-node` (2.7 GiB before, 4.1 GiB
+after). The build sets no limit on the image's size.
 
 The build takes the user from `wall.user` in `forager.yaml`. The wall's helper is
 `wall.helper`, or on Linux the `qory` you run. When `forager.yaml` sets `pool.registry`,

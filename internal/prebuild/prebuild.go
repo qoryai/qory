@@ -87,10 +87,6 @@ const (
 // proxyBundle is the run's bundle of authorities in [ProxyPath].
 const proxyBundle = "ca.pem"
 
-// MaxSize is the largest image the build keeps, as docker image inspect reports its
-// size: 4 GiB.
-const MaxSize = 4 << 30
-
 // Limit is how long the whole build may take.
 const Limit = 30 * time.Minute
 
@@ -139,7 +135,6 @@ const (
 	textEnvConfig    = "%s sets %s in %s, which change what the agent does; no image is built from it"
 	textEnvImage     = "the image sets %s in its environment, which change what the agent does; the image is removed"
 	textProxyBaked   = "the final image sets %s in its environment to a value the image before the commands did not; the image is removed"
-	textTooBig       = "the image is %s, more than the limit of 4 GiB; it is removed"
 	textSizeUnread   = "docker image inspect printed a size that does not read: %s"
 	textNotCopied    = "the repository could not be copied to " + Workspace + ": %s"
 	textConfigUnread = "docker image inspect printed a configuration that does not read"
@@ -1138,8 +1133,8 @@ func mountArg(helper string) string {
 // [Workspace], then makes o.Tag from the commit with a Dockerfile that restores the
 // entry point and the command top had before the container replaced them, which adds
 // no layer. docker commit --change keeps the container's entry point when it is
-// given an empty one, and a Dockerfile's ENTRYPOINT [] clears it. It refuses an image
-// over [MaxSize].
+// given an empty one, and a Dockerfile's ENTRYPOINT [] clears it. The build sets no limit
+// on the image's size, and the last line prints it.
 func (b *build) finish(ctx context.Context, start time.Time) error {
 	at := time.Now()
 	c := b.top
@@ -1177,9 +1172,6 @@ func (b *build) finish(ctx context.Context, start time.Time) error {
 	size, err := strconv.ParseInt(strings.TrimSpace(string(out)), 10, 64)
 	if err != nil {
 		return fmt.Errorf(textSizeUnread, integration.Printable(strings.TrimSpace(string(out))))
-	}
-	if size > MaxSize {
-		return refused(fmt.Errorf(textTooBig, humanSize(size)))
 	}
 	b.images = slices.DeleteFunc(b.images, func(s string) bool { return s == b.o.Tag })
 	b.res.Target, b.res.Environment, b.environment = b.o.Tag, b.environment, ""

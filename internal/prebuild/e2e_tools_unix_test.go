@@ -66,8 +66,8 @@ func stageTools(t *testing.T, dir string) (parsers, node string) {
 // toolsBases are the prebuilt development container images the tools step is tried on,
 // by the digest of their index, as qory's probe of 2026-11-15 found them: none has a
 // browser or ffmpeg, and only typescript-node and universal have node. The images of
-// typescript-node and universal with the tools are over [prebuild.MaxSize], so a build
-// refuses them: their test builds the tools step alone.
+// typescript-node and universal with the tools are over 4 GiB: their test builds the
+// tools step alone.
 var toolsBases = map[string]toolsBaseImage{
 	"base":            {"mcr.microsoft.com/devcontainers/base@sha256:38f9e6c291f054e3c868d95a5477cbfcf76c0fa7c218dda65dc6aa3fbfe06871", "debian", ""},
 	"typescript-node": {"mcr.microsoft.com/devcontainers/typescript-node@sha256:e1fd824e03c68d8f406ef45b574023a2d683a5acc98906743f8d60aaf78b0174", "debian", ""},
