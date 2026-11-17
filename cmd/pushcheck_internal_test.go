@@ -379,29 +379,39 @@ func TestPushChecksRunInTheWallsDefaultImage(t *testing.T) {
 	}
 }
 
-// TestPushChecksRunUnderTheRunsRuntime is the runtime of a run's push checks, the one
-// Forager starts the run's container under: the runtime of the entry that the default
-// names, the run's image's for a run with no default, and none for a default that is a
-// reference.
+// TestPushChecksRunUnderTheRunsRuntime is the runtime of a run's push checks: the runtime
+// of the image that the run's policy selected, when it has one, so a check never runs
+// under a weaker runtime than the run's container; otherwise the one Forager gives the
+// default image, the runtime of the entry that the default names, none for a default that
+// is a reference, and the run's image's for a run with no default.
 func TestPushChecksRunUnderTheRunsRuntime(t *testing.T) {
-	run := imageOnly{img: session.Image{Name: "devcontainer", Ref: "registry.example/devcontainer:1", Runtime: "runsc"}}
 	images := []session.Image{
 		{Name: "agent", Ref: "registry.example/agent:1", Runtime: "runsc"},
 		{Name: "plain", Ref: "registry.example/plain:1"},
 		{Name: "devcontainer", Ref: "registry.example/devcontainer:1", Runtime: "kata"},
 	}
-	for _, c := range []struct{ image, want string }{
-		{"agent", "runsc"},
-		{"devcontainer", "kata"},
-		{"plain", ""},
-		{"registry.example/other:2", ""},
-		{"", "runsc"},
+	for _, c := range []struct {
+		name, image string
+		run         session.Image
+		want        string
+	}{
+		{"selected entry with a runtime, default with none", "plain", session.Image{Name: "gvisor", Ref: "registry.example/gvisor:1", Runtime: "runsc"}, "runsc"},
+		{"selected entry with a runtime, default with another", "devcontainer", session.Image{Name: "gvisor", Ref: "registry.example/gvisor:1", Runtime: "runsc"}, "runsc"},
+		{"selected entry with a runtime, default a reference", "registry.example/other:2", session.Image{Name: "gvisor", Ref: "registry.example/gvisor:1", Runtime: "runsc"}, "runsc"},
+		{"selected entry with a runtime, no default", "", session.Image{Name: "gvisor", Ref: "registry.example/gvisor:1", Runtime: "runsc"}, "runsc"},
+		{"selected entry with none, default with a runtime", "agent", session.Image{Name: "plain", Ref: "registry.example/plain:1"}, "runsc"},
+		{"selected entry with none, default with another", "devcontainer", session.Image{Name: "plain", Ref: "registry.example/plain:1"}, "kata"},
+		{"selected entry with none, default with none", "plain", session.Image{Name: "plain", Ref: "registry.example/plain:1"}, ""},
+		{"selected entry with none, default a reference", "registry.example/other:2", session.Image{Name: "plain", Ref: "registry.example/plain:1"}, ""},
+		{"selected entry with none, no default", "", session.Image{Name: "plain", Ref: "registry.example/plain:1"}, ""},
 	} {
-		spec := &runSpec{}
-		spec.Image, spec.Images = c.image, images
-		if got := checkRuntime(run, spec); got != c.want {
-			t.Errorf("the default %q: runtime %q, want %q", c.image, got, c.want)
-		}
+		t.Run(c.name, func(t *testing.T) {
+			spec := &runSpec{}
+			spec.Image, spec.Images = c.image, images
+			if got := checkRuntime(imageOnly{img: c.run}, spec); got != c.want {
+				t.Errorf("the default %q, the run's image %q: runtime %q, want %q", c.image, c.run.Name, got, c.want)
+			}
+		})
 	}
 }
 
@@ -436,6 +446,25 @@ func TestTheLoadedCheckerOfARunWithNoDefaultHasTheRunsRuntime(t *testing.T) {
 	}
 }
 
+// TestTheLoadedCheckerRunsUnderTheSelectedImagesRuntime is a run whose policy selects an
+// entry of wall.images with runsc while the default entry has no runtime: pushChecker
+// returns a checker of the default image and of runtime runsc.
+func TestTheLoadedCheckerRunsUnderTheSelectedImagesRuntime(t *testing.T) {
+	stubChecks(t)
+	docker, _ := loggingEngine(t, "")
+	spec := &runSpec{}
+	spec.Wall, spec.Image = &wall.Docker{Command: docker}, "plain"
+	spec.Images = []session.Image{{Name: "plain", Ref: "registry.example/plain:1"}, {Name: "gvisor", Ref: "registry.example/gvisor:1", Runtime: "runsc"}}
+	run := imageOnlyAPI{imageAPI: imageAPI{runAPIOnly: runAPIOnly{base: "http://run-api.qory.invalid/v1/runs/r1", dir: t.TempDir()}}, img: session.Image{Name: "gvisor", Ref: "registry.example/gvisor:1", Runtime: "runsc"}}
+	checker, err := pushChecker(context.Background(), run, t.TempDir(), "r1", spec, true, true)
+	if err != nil || checker == nil {
+		t.Fatalf("pushChecker = %v, %v, want a checker", checker != nil, err)
+	}
+	if checker.Image != "registry.example/plain:1" || checker.Runtime != "runsc" {
+		t.Errorf("the checker is of image %q and runtime %q, want registry.example/plain:1 and runsc", checker.Image, checker.Runtime)
+	}
+}
+
 // imageOnlyAPI is [imageAPI] whose Image returns img, with its runtime.
 type imageOnlyAPI struct {
 	imageAPI
@@ -443,19 +472,6 @@ type imageOnlyAPI struct {
 }
 
 func (r imageOnlyAPI) Image() session.Image { return r.img }
-
-// TestAReferenceDefaultIgnoresTheRunsImageRuntime is a run whose policy selects an entry
-// with a runtime while the default is a reference: the checks run in the default, with no
-// runtime.
-func TestAReferenceDefaultIgnoresTheRunsImageRuntime(t *testing.T) {
-	run := imageOnly{img: session.Image{Name: "agent", Ref: "registry.example/agent:1", Runtime: "runsc"}}
-	spec := &runSpec{}
-	spec.Image = "registry.example/other:2"
-	spec.Images = []session.Image{{Name: "agent", Ref: "registry.example/agent:1", Runtime: "runsc"}}
-	if got := checkRuntime(run, spec); got != "" {
-		t.Errorf("runtime %q for a default that is a reference, want none", got)
-	}
-}
 
 // checkNotSet is an opened run whose SetRunAPICheck returns err.
 type checkNotSet struct {

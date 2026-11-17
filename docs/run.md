@@ -320,9 +320,11 @@ The push checks run in a container of the wall's default image, `--image` or `wa
 and not of the image that the run's policy selects, so a change to the repository's
 `.devcontainer/` cannot turn them off. A run on a person's machine, with no run code, and
 with neither `--image` nor `wall.image`, whose policy selects the image, runs them in the
-run's image. The container runs under the runtime of the image it runs in: the `runtime`
-of its `wall.images` entry, such as `runsc`, or the engine's default for an entry with none
-and for an image that is a reference. A run from a run code with neither stops there with exit 2: `Set wall.image
+run's image. The container runs under the `runtime` of the `wall.images` entry that the run's policy
+selects, such as `runsc`, when that entry has one, so a check never runs under a weaker
+runtime than the run's container. Otherwise it runs under the `runtime` of the default
+image's entry, or the engine's default for an entry with none and for a default that is a
+reference. A run from a run code with neither stops there with exit 2: `Set wall.image
 in forager.yaml, then take the work item in again in Qory Apiary.`, and on the next line
 `Push checks run in the wall's default image; the code is used`. The run stops there with
 exit 2 too when the engine does not have the wall's default image: `Pull the wall's
@@ -4834,8 +4836,9 @@ image: go-docker
 - `ref` is the image. Pin it by digest to run the same image every time.
 - `runtime` is the container runtime the wall starts the image under. Your engine must
   have it. Without it, the engine's default runs the image. The push checks' container
-  runs under the runtime of the image it runs in, the default image: the `runtime` of its
-  entry, or the engine's default for an entry with none and for a reference.
+  runs under the `runtime` of the entry that the run's policy selects, when it has one,
+  and otherwise under the `runtime` of the default image's entry, or the engine's default
+  for an entry with none and for a reference.
 - `wall.image` sets the default, and `--image` sets another for one run: a name of
   `wall.images`, or a reference. A name is read as that image first.
 - A policy's selection wins over the default, `--image` included. A run whose policy

@@ -271,12 +271,14 @@ func checkImage(run openedRun, spec *runSpec) string {
 	return spec.Image
 }
 
-// checkRuntime is the --runtime of the checks' container, the one Forager gives the default
-// image: the entry's runtime, "" for a default that is a bare reference, and for no default
-// the run's image's runtime.
+// checkRuntime is the --runtime of the checks' container: the runtime of the image that the
+// run's policy selected, run.Image(), when it has one, so a check never runs under a weaker
+// runtime than the run's container. Otherwise it is the one Forager gives the default
+// image: the entry's runtime, and "" for a default that is a bare reference or for no
+// default, whose run's image has no runtime.
 func checkRuntime(run openedRun, spec *runSpec) string {
-	if spec.Image == "" {
-		return run.Image().Runtime
+	if runtime := run.Image().Runtime; runtime != "" {
+		return runtime
 	}
 	for _, i := range spec.Images {
 		if i.Name == spec.Image {

@@ -1051,9 +1051,11 @@ default image is `--image` or `wall.image` in `forager.yaml`, and not the image 
 run's policy selects, so a change to the repository, such as one to its `.devcontainer/`,
 cannot turn the checks off. A run on a person's machine, with no run code, and with
 neither `--image` nor `wall.image`, whose policy selects the image, runs the checks in the
-run's image. The container runs under the runtime of the image it runs in: the `runtime`
-of its `wall.images` entry, such as `runsc`, or the engine's default for an entry with none
-and for an image that is a reference. A run from a run code with neither stops before the setup and the agent,
+run's image. The container runs under the `runtime` of the `wall.images` entry that the run's policy
+selects, such as `runsc`, when that entry has one, so a check never runs under a weaker
+runtime than the run's container. Otherwise it runs under the `runtime` of the default
+image's entry, or the engine's default for an entry with none and for a default that is a
+reference. A run from a run code with neither stops before the setup and the agent,
 with exit 2: `Set wall.image in forager.yaml, then take the work item in again in Qory Apiary: push
 checks run in the wall's default image; the code is used`. A run whose engine does not have the wall's default image stops before the setup and the agent,
 with exit 2: `Pull the wall's default image onto this machine, and run again.`, and on the
