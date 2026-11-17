@@ -463,21 +463,37 @@ func endsWithin(t *testing.T, limit time.Duration, f func() installRun) installR
 // TestARegistryThatKeepsReturning503StopsAtTheTimeLimit has the registry return 503 to
 // every request, and a run with a time limit of 3 seconds: the run waits with the
 // registry's tries, tells so once on stderr, and ends at the limit with the line of a run
-// that ran out of time, exit 124, a few seconds later at most, with no line that asks for
-// more time.
+// that ran out of time, exit 124, with no line that asks for more time. The run ends
+// within 4.5 seconds of the registry's first request. A run that ended at the limit took
+// 2.4 to 2.7 seconds from that request in 40 runs, 20 of them with 3 busy processes per
+// CPU. A run that kept its tries after the limit would finish the 4-second wait that
+// follows the second try, and end 6 seconds after the first request. The time from the
+// start of the test is no bound, because the setup of the run's folders and repositories
+// adds a time that varies with load.
 func TestARegistryThatKeepsReturning503StopsAtTheTimeLimit(t *testing.T) {
 	reg, proxy := rt.StartRegistry(t), rt.StartProxy(t)
 	reg.PublishPlain("2.1.320")
 	reg.Unavailable(-1, "")
-	start := time.Now()
+	first := make(chan time.Time, 1)
 	r := endsWithin(t, 30*time.Second, func() installRun {
-		return runInstalling(t, installSetup{reg: reg, npm: rt.StartNpm(t), proxy: proxy, walled: true, args: []string{"--timeout", "3s"}})
+		return runInstalling(t, installSetup{reg: reg, npm: rt.StartNpm(t), proxy: proxy, walled: true, args: []string{"--timeout", "3s"}, during: func() {
+			for len(reg.Paths()) == 0 {
+				time.Sleep(2 * time.Millisecond)
+			}
+			first <- time.Now()
+		}})
 	})
+	ended := time.Now()
 	if cmd.ExitCode(r.err) != 124 || len(r.joins) != 0 {
 		t.Fatalf("%d joins, %v (exit %d)\n%s", len(r.joins), r.err, cmd.ExitCode(r.err), r.out)
 	}
-	if took := time.Since(start); took > 3*time.Second+4*time.Second {
-		t.Errorf("the run took %s with a time limit of 3s", took)
+	select {
+	case at := <-first:
+		if took := ended.Sub(at); took > 4500*time.Millisecond {
+			t.Errorf("the run ended %s after the registry's first request, with a time limit of 3s", took)
+		}
+	default:
+		t.Error("the registry got no request")
 	}
 	wants(t, r.out, "the run was cancelled at its time limit of 3s, before claude started", "qory run: "+reg.Host()+" has not returned Claude Code (503); check pool.registry\n")
 	if n := strings.Count(r.out, " has not returned Claude Code"); n != 1 {
