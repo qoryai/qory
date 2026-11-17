@@ -90,10 +90,11 @@ func checkoutMounts(spec session.SessionSpec) []wall.Mount {
 // its documents have access write and the stack declares its workflow with access read,
 // with no access, or not at all, or its documents have access read and the stack
 // declares its workflow write or write-no-push, or its documents have access
-// write-no-push and the stack declares its workflow read or not at all. The session binds the workspace read-only, the
-// checkout's mount is read-only, the checkout stays among the places the run may write,
-// and Claude Code's settings deny the edit tools, allow the commands of a work item on
-// /qory/qory in Bash and set defaultMode to dontAsk.
+// write-no-push and the stack declares its workflow read or not at all. The session
+// binds the workspace read-only, the checkout's mount is read-only, the checkout stays
+// among the places the run may write, and Claude Code's settings deny the edit tools,
+// allow the commands of a work item on /qory/qory in Bash and set defaultMode to
+// dontAsk.
 func TestAReadRunSeesTheCheckoutReadOnly(t *testing.T) {
 	for _, c := range []struct {
 		name      string
@@ -181,10 +182,10 @@ func noTarget(d map[string]any) {
 	delete(d, "target_version")
 }
 
-// writeRuns are the runs from a run code of the workflow hello that do not only read the
-// checkout, each with the access its stack file declares: one whose documents have access
-// write, one whose documents have no target, so no access, one whose documents have access
-// write-no-push, and the same with a workflow declared write-no-push.
+// writeRuns are the runs from a run code of the workflow hello that do not only read
+// the checkout, each with the access its stack file declares: one whose documents have
+// access write, one whose documents have no target, so no access, one whose documents
+// have access write-no-push, and the same with a workflow declared write-no-push.
 var writeRuns = []struct {
 	name, declared string
 	change         func(map[string]any)

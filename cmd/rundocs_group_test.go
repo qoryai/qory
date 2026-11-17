@@ -129,13 +129,14 @@ func TestARunWithAccessWriteNoPushRunsTheAgentAndPushesNothing(t *testing.T) {
 }
 
 // TestAWriteNoPushRunOfEachLevelPairPushesNothing is a walled run of the workflow hello
-// whose lower level is write-no-push: the stack declares it write and the documents have
-// access write-no-push, the stack declares it write-no-push and the documents have access
-// write, or both are write-no-push. The agent commits a file and leaves another in the
-// checkout, which stays writable. The run opens the host proxy once, for the fetch, and
-// not for a push: it has no push step, the forge has no branch of the work item, and the
-// run API gets no POST, so no version of the artifact branch. A run of the level write, in
-// the same fixture, opens the host proxy a second time for its push.
+// whose lower level is write-no-push: the stack declares it write and the documents
+// have access write-no-push, the stack declares it write-no-push and the documents have
+// access write, or both are write-no-push. The agent commits a file and leaves another
+// in the checkout, which stays writable. The run opens the host proxy once, for the
+// fetch, and not for a push: it has no push step, the forge has no branch of the work
+// item, and the run API gets no POST, so no version of the artifact branch. A run of
+// the level write, in the same fixture, opens the host proxy a second time for its
+// push.
 func TestAWriteNoPushRunOfEachLevelPairPushesNothing(t *testing.T) {
 	for _, c := range []struct {
 		name, declared, access string
@@ -173,12 +174,14 @@ func TestAWriteNoPushRunOfEachLevelPairPushesNothing(t *testing.T) {
 			posts, _, _ := p.api.counts()
 			if c.pushes {
 				if proxies != 2 || name == "" || head == "" || posts != 1 {
-					t.Errorf("the write run opened the host proxy %d times, push step %q, branch %q, %d POST; want 2, a step, a branch and 1", proxies, name, head, posts)
+					t.Errorf("the write run opened the host proxy %d times, push step %q, "+
+						"branch %q, %d POST; want 2, a step, a branch and 1", proxies, name, head, posts)
 				}
 				return
 			}
 			if proxies != 1 {
-				t.Errorf("the run opened the host proxy %d times, want 1, for the fetch alone", proxies)
+				t.Errorf("the run opened the host proxy %d times, want 1, for the fetch alone",
+					proxies)
 			}
 			if name != "" {
 				t.Errorf("a push step %q", name)
@@ -190,5 +193,39 @@ func TestAWriteNoPushRunOfEachLevelPairPushesNothing(t *testing.T) {
 				t.Errorf("%d POST, want 0", posts)
 			}
 		})
+	}
+}
+
+// TestAStackLoweredRunWithSubmitInItsDocumentsRunsNoSubmitStep is a walled run of the
+// workflow hello, which the stack declares write-no-push, from documents with access
+// write and a submit setting: the run joins, and it has no step of kind or name submit
+// and no push step, no branch on the forge and no POST. No code in qory reads the
+// documents' submit yet, so no level, lowered or not, starts a submit step.
+func TestAStackLoweredRunWithSubmitInItsDocumentsRunsNoSubmitStep(t *testing.T) {
+	p := newPushRepo(t, "write-no-push")
+	p.change = func(d map[string]any) {
+		d["access"] = "write"
+		d["submit"] = map[string]any{"type": "code-change", "send": "after_gate"}
+	}
+	joined := false
+	p.mountsOf = func(session.SessionSpec) { joined = true }
+	r := p.run(t, writesAndCommits(t), nil)
+	r.wantsClose(t, event.StateSucceeded, 0)
+	if !joined {
+		t.Fatalf("the agent did not run\n%s", r.out)
+	}
+	for _, e := range r.steps {
+		if strings.Contains(strings.ToLower(e.Kind+" "+e.Name), "submit") {
+			t.Errorf("a submit step: %+v", e)
+		}
+	}
+	if name, _ := r.step(); name != "" {
+		t.Errorf("a push step %q", name)
+	}
+	if head := p.branchHead(t); head != "" {
+		t.Errorf("the forge has the branch at %s", head)
+	}
+	if posts, _, _ := p.api.counts(); posts != 0 {
+		t.Errorf("%d POST, want 0", posts)
 	}
 }

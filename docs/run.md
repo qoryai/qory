@@ -4450,8 +4450,8 @@ make the mount /srv/data read-only, with :ro on --mount or in wall.mounts: a wal
 Two values set what a run of a workflow from a run code may do on the checkout:
 
 - The workflow's access in the stack, `workflows.<name>.access`: `read`,
-  `write-no-push`, or `write`. A workflow that sets no access, and one the stack does not declare, is
-  `read` (see `workflows` in `contracts/harness/v1/README.md`).
+  `write-no-push`, or `write`. A workflow that sets no access, and one the stack does
+  not declare, is `read` (see `workflows` in `contracts/harness/v1/README.md`).
 - `access` in the run's documents, from Qory Apiary: `read`, `write-no-push`, or `write`.
   Documents with no target have no `access`, and the workflow's access applies alone.
 
@@ -4460,10 +4460,12 @@ workflow declared `write` with `access: write-no-push` in the documents gives a
 `write-no-push` run, and so does a workflow declared `write-no-push` with `access: write`.
 A workflow declared `write-no-push` with `access: read` gives a read run.
 
-A `write-no-push` run has a writable checkout, no push step, no submit, and no version of
-the artifact `branch`: qory pushes no commit and creates no branch on the forge. qory has
-no submit step yet, and the run contract refuses `submit` on a `write-no-push` run. With no wall, such a run stops with `write_needs_wall`, as a write
-run does.
+A `write-no-push` run has a writable checkout, no push step, no submit, and no
+version of the artifact `branch`: qory pushes no commit and creates no branch on the
+forge. qory has no submit step yet, so it runs none on such a run, including a run
+whose documents have `access: write` and `submit` and whose workflow is declared
+`write-no-push`. With no wall, such a run stops with `write_needs_wall`, as a write run
+does.
 
 A read run is a run whose level is `read`: either value is `read`. A workflow declared
 `write` with `access: read` in the documents gives a read run, and so does a workflow

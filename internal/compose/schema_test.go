@@ -467,8 +467,11 @@ func TestSchemasKnowTheThreeWorkflowAccessLevels(t *testing.T) {
 			schema *jsonschema.Schema
 			body   string
 		}{
-			"config": {composeSchema, `{"apiVersion": "qory.dev/v1alpha1", "harness": {"target": {"runtime": "claude"}, "modules": [{"name": "app"}], ` + in + `}}`},
-			"stack":  {stackSchema, `{"apiVersion": "qory.dev/v1alpha1", "modules": [{"name": "app"}], ` + in + `}`},
+			"config": {composeSchema, `{"apiVersion": "qory.dev/v1alpha1", ` +
+				`"harness": {"target": {"runtime": "claude"}, ` +
+				`"modules": [{"name": "app"}], ` + in + `}}`},
+			"stack": {stackSchema, `{"apiVersion": "qory.dev/v1alpha1", ` +
+				`"modules": [{"name": "app"}], ` + in + `}`},
 		} {
 			var doc any
 			if err := json.Unmarshal([]byte(schema.body), &doc); err != nil {

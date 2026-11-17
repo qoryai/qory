@@ -38,11 +38,16 @@ func TestLoadReadsTheWorkflows(t *testing.T) {
 // no access, or none listed, as read.
 func TestLoadReadsTheAccess(t *testing.T) {
 	isolate(t)
-	p, err := Load(write(t, withWorkflows("  fix:\n    access: write\n  stage:\n    access: write-no-push\n  review:\n    access: read\n  plain:\n    time_limit: 45m\n")))
+	p, err := Load(write(t, withWorkflows("  fix:\n    access: write\n"+
+		"  stage:\n    access: write-no-push\n  review:\n    access: read\n"+
+		"  plain:\n    time_limit: 45m\n")))
 	if err != nil {
 		t.Fatal(err)
 	}
-	for name, want := range map[string]string{"fix": AccessWrite, "review": AccessRead, "plain": AccessRead, "none": AccessRead, "stage": AccessWriteNoPush} {
+	for name, want := range map[string]string{
+		"fix": AccessWrite, "review": AccessRead, "plain": AccessRead, "none": AccessRead,
+		"stage": AccessWriteNoPush,
+	} {
 		if got := p.AccessOf(name); got != want {
 			t.Errorf("%s: %q, want %q", name, got, want)
 		}
@@ -101,8 +106,12 @@ func TestLoadRefusesABrokenWorkflow(t *testing.T) {
 		{"  hello:\n    time_limit: 7 hours\n", "to a duration above zero, such as 7h or 45m.\n  The value is \"7 hours\"."},
 		{"  hello:\n    time_limit: 0s\n", "to a duration above zero, such as 7h or 45m.\n  The value is \"0s\"."},
 		{"  hello:\n    time_limit: -1h\n", "to a duration above zero, such as 7h or 45m.\n  The value is \"-1h\"."},
-		{"  hello:\n    access: admin\n", "Set workflows.hello.access to a valid level.\n  The levels are read, write-no-push, and write.\n  The value is \"admin\".\n  workflows.hello is in {path}."},
-		{"  hello:\n    access: Write\n", "Set workflows.hello.access to a valid level.\n  The levels are read, write-no-push, and write.\n  The value is \"Write\".\n  workflows.hello is in {path}."},
+		{"  hello:\n    access: admin\n", "Set workflows.hello.access to a valid level.\n" +
+			"  The levels are read, write-no-push, and write.\n  The value is \"admin\".\n" +
+			"  workflows.hello is in {path}."},
+		{"  hello:\n    access: Write\n", "Set workflows.hello.access to a valid level.\n" +
+			"  The levels are read, write-no-push, and write.\n  The value is \"Write\".\n" +
+			"  workflows.hello is in {path}."},
 		{"  hello:\n    access: write\n    time_limit: 0s\n", "Set workflows.hello.time_limit to a duration above zero"},
 		{"  hello:\n    prompt: x\n", `key "prompt" is not one qory-stack.yaml reads`},
 	} {
@@ -185,7 +194,9 @@ func TestNewComposeReadsTheWorkflowsOfADefinedStack(t *testing.T) {
 		w    Workflow
 		want string
 	}{
-		{Workflow{Access: "admin"}, "to a valid level.\n  The levels are read, write-no-push, and write.\n  The value is \"admin\".\n  workflows.fix is in "},
+		{Workflow{Access: "admin"}, "to a valid level.\n" +
+			"  The levels are read, write-no-push, and write.\n" +
+			"  The value is \"admin\".\n  workflows.fix is in "},
 		{Workflow{TimeLimitText: "7 hours"}, "to a duration above zero, such as 7h or 45m.\n  The value is \"7 hours\".\n  workflows.fix is in "},
 		{Workflow{TimeLimitText: "0s"}, "to a duration above zero, such as 7h or 45m.\n  The value is \"0s\".\n  workflows.fix is in "},
 	} {
@@ -244,7 +255,8 @@ func TestTheAccessRefusalFirstLineFitsWithTheLongestName(t *testing.T) {
 		t.Fatal("no refusal")
 	}
 	first, _, _ := strings.Cut(err.Error(), "\n")
-	if want := "Set workflows." + name + ".access to a valid level."; first != want || len(first) > 100 {
+	want := "Set workflows." + name + ".access to a valid level."
+	if first != want || len(first) > 100 {
 		t.Errorf("first line %q (%d characters), want %q within 100", first, len(first), want)
 	}
 	if len(WorkflowEntry(name)) != 64 {

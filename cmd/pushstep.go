@@ -88,12 +88,15 @@ var pushTimes = struct{ limit, signal time.Duration }{pushAfterLimit, pushAfterS
 
 // keepsWork reports whether the run pushes what its agent left: a run from a run code
 // that may write and push its target, that no workflow or document limits to a lower
-// level, with a branch of its work item and an agent session, however that session ended.
-// A join that returned an error has no [session.Result], so nothing shows that an agent
-// ran. A run that Qory Apiary closed during the session takes no version. level is
-// [accessOf]: [codeRun.writes] alone is true for a workflow that declares read or
-// write-no-push in documents with access write.
-func keepsWork(fromCode *codeRun, level string, branch *preparation.WorkBranch, res *session.Result, joinErr error) bool {
+// level, with a branch of its work item and an agent session, however that session
+// ended. A join that returned an error has no [session.Result], so nothing shows that
+// an agent ran. A run that Qory Apiary closed during the session takes no version.
+// level is [accessOf]: [codeRun.writes] alone is true for a workflow that declares read
+// or write-no-push in documents with access write.
+func keepsWork(
+	fromCode *codeRun, level string, branch *preparation.WorkBranch, res *session.Result,
+	joinErr error,
+) bool {
 	return canPush(fromCode, level, branch) && joinErr == nil && res != nil && !res.RunClosed
 }
 
@@ -133,9 +136,9 @@ func failedEnd(out session.Outcome) string {
 	return fmt.Sprintf(textRunEnded, out.State, reason)
 }
 
-// canPush reports whether the run has a push step if its session succeeds: the documents'
-// access is write, and level, the run's [accessOf] level, is write too, so a workflow that
-// declares read or write-no-push gives a run with no push step.
+// canPush reports whether the run has a push step if its session succeeds: the
+// documents' access is write, and level, the run's [accessOf] level, is write too, so a
+// workflow that declares read or write-no-push gives a run with no push step.
 func canPush(fromCode *codeRun, level string, branch *preparation.WorkBranch) bool {
 	return fromCode.writes() && level == stack.AccessWrite && branch != nil
 }

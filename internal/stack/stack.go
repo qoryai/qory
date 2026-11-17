@@ -741,8 +741,13 @@ func (p *Stack) validate(compose bool) error {
 			return exports.Refuse("Rename the workflow "+accesskey.ShownName(name, true)+".", "A workflow name is a lower-case letter, then up to 54 lower-case letters, digits, and hyphens, 55 characters at most.", "workflows is in "+exports.FilePlace+".")
 		}
 		w := p.Workflows[name]
-		if w.Access != "" && w.Access != AccessRead && w.Access != AccessWriteNoPush && w.Access != AccessWrite {
-			return exports.Refuse(fmt.Sprintf("Set workflows.%s.access to a valid level.", name), "The levels are read, write-no-push, and write.", fmt.Sprintf("The value is %s.", exports.Value(w.Access, true)), fmt.Sprintf("workflows.%s is in %s.", name, exports.FilePlace))
+		if w.Access != "" && w.Access != AccessRead && w.Access != AccessWriteNoPush &&
+			w.Access != AccessWrite {
+			return exports.Refuse(
+				fmt.Sprintf("Set workflows.%s.access to a valid level.", name),
+				"The levels are read, write-no-push, and write.",
+				fmt.Sprintf("The value is %s.", exports.Value(w.Access, true)),
+				fmt.Sprintf("workflows.%s is in %s.", name, exports.FilePlace))
 		}
 		if w.TimeLimitText == "" {
 			continue

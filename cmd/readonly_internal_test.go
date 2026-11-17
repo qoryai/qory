@@ -12,12 +12,12 @@ import (
 )
 
 // TestARunTakesTheLowerOfItsTwoLevels is every combination of the workflow's access in
-// the stack, read, write-no-push, write or undeclared, and access in the run's documents,
-// read, write-no-push, write or empty as with no target. The run's level is the lower of
-// the two in the order read, write-no-push, write, and only the level read is a read run.
-// A level in the documents does not raise the workflow's, and one in the workflow does not
-// raise the documents'. Documents with no access leave the workflow's level alone. A run
-// not from a run code has no level and does not read only.
+// the stack, read, write-no-push, write or undeclared, and access in the run's
+// documents, read, write-no-push, write or empty as with no target. The run's level is
+// the lower of the two in the order read, write-no-push, write, and only the level read
+// is a read run. A level in the documents does not raise the workflow's, and one in the
+// workflow does not raise the documents'. Documents with no access leave the workflow's
+// level alone. A run not from a run code has no level and does not read only.
 func TestARunTakesTheLowerOfItsTwoLevels(t *testing.T) {
 	declared := map[string]map[string]stack.Workflow{
 		"declared read":          {"hello": {Access: stack.AccessRead}},
@@ -50,16 +50,19 @@ func TestARunTakesTheLowerOfItsTwoLevels(t *testing.T) {
 			if got := accessOf(r, declared[c.declared]); got != c.level {
 				t.Errorf("accessOf is %q, want %q", got, c.level)
 			}
-			if got, want := readsOnly(r, declared[c.declared]), c.level == stack.AccessRead; got != want {
+			got, want := readsOnly(r, declared[c.declared]), c.level == stack.AccessRead
+			if got != want {
 				t.Errorf("readsOnly is %v, want %v", got, want)
 			}
 			branch := &preparation.WorkBranch{}
-			if got, want := canPush(r, c.level, branch), c.access == stack.AccessWrite && c.level == stack.AccessWrite; got != want {
-				t.Errorf("canPush is %v, want %v", got, want)
+			wantPush := c.access == stack.AccessWrite && c.level == stack.AccessWrite
+			if got := canPush(r, c.level, branch); got != wantPush {
+				t.Errorf("canPush is %v, want %v", got, wantPush)
 			}
 		})
 	}
-	if readsOnly(nil, declared["declared read"]) || accessOf(nil, declared["declared write"]) != "" {
+	none := declared["declared read"]
+	if readsOnly(nil, none) || accessOf(nil, declared["declared write"]) != "" {
 		t.Error("a run not from a run code has a level")
 	}
 }

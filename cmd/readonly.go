@@ -39,7 +39,8 @@ func accessOf(r *codeRun, workflows map[string]stack.Workflow) string {
 	if r == nil {
 		return ""
 	}
-	return stack.LowerAccess((&stack.Stack{Workflows: workflows}).AccessOf(r.workflow), r.access)
+	declared := (&stack.Stack{Workflows: workflows}).AccessOf(r.workflow)
+	return stack.LowerAccess(declared, r.access)
 }
 
 // readsOnly reports whether the run from the run code r only reads the checkout: its

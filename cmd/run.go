@@ -1209,7 +1209,8 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				if prepErr == nil && readOnly {
 					prepErr = removeSetupWork()
 				}
-				if prepErr == nil && copied == nil && walled && spec.setupWhere != config.SetupInside && canPush(fromCode, level, branch) {
+				if prepErr == nil && copied == nil && walled &&
+					spec.setupWhere != config.SetupInside && canPush(fromCode, level, branch) {
 					prepErr = recordSetupWork()
 				}
 				if prepErr == nil && copied != nil && !copied.plain && !copied.readOnly && run.Repositories() != "" && spec.setupWhere != config.SetupInside {
