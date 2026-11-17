@@ -956,7 +956,7 @@ func TestAPushThatARuleRefusesSaysWhatToAllow(t *testing.T) {
 	p.h.server.Refuse("/acme/site.git/git-receive-pack")
 	r := p.run(t, writesAndCommits(t), nil)
 	r.wantsClose(t, event.StateFailed, 1)
-	wants(t, r.out, "qory run: Allow the push in the run's credential and path rules, then take the work item in again.\n"+
+	wants(t, r.out, "qory run: Allow the push in the credential and path rules in Qory Apiary, then take the work item in again.\n"+
 		"  The run's gateway allows a push only to the run's branch, refs/heads/qory/"+workItem+", and only through a credential with write access to acme/site and a path rule for /acme/site.git/git-receive-pack.\n"+
 		"  The push of acme/site to "+proxygittest.Host+" returned 403: ")
 	if got := p.branchHead(t); got != "" {

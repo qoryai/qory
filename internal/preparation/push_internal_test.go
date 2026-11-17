@@ -197,8 +197,8 @@ func TestPushFailed(t *testing.T) {
 	for output, want := range map[string]string{
 		" ! [rejected] a -> b (non-fast-forward)":           "qory run: add a new version of the artifact branch",
 		" ! [remote rejected] a -> b (protected)":           "qory run: change the rule on git.example.com",
-		"error: RPC failed; HTTP 403 curl 22":               "qory run: Allow the push in the run's credential and path rules",
-		"fatal: unable to access 'x': returned error: 403":  "qory run: Allow the push in the run's credential and path rules",
+		"error: RPC failed; HTTP 403 curl 22":               "qory run: Allow the push in the credential and path rules in Qory Apiary",
+		"fatal: unable to access 'x': returned error: 403":  "qory run: Allow the push in the credential and path rules in Qory Apiary",
 		"fatal: Authentication failed for 'https://x/'":     "qory run: give the run's credential for git.example.com write access to acme/shop",
 		"fatal: unable to access 'x': Could not resolve":    "qory run: check that the run's policy allows git.example.com",
 		"fatal: https://u:token-123@git.example.com/ fails": "qory run: check that the run's policy allows git.example.com",
@@ -228,7 +228,7 @@ func TestAForbiddenPushStartsWithTheFix(t *testing.T) {
 	if len(lines) != 3 {
 		t.Fatalf("the error has %d lines, want 3:\n%v", len(lines), err)
 	}
-	if want := "Allow the push in the run's credential and path rules, then take the work item in again."; lines[0] != want || len(lines[0]) > 100 {
+	if want := "Allow the push in the credential and path rules in Qory Apiary, then take the work item in again."; lines[0] != want || len(lines[0]) > 100 {
 		t.Errorf("the first line is %q, want %q", lines[0], want)
 	}
 	if want := "  The run's gateway allows a push only to the run's branch, refs/heads/" + testRef + ", and only through a credential with write access to " + path + " and a path rule for /" + path + ".git/git-receive-pack."; lines[1] != want {

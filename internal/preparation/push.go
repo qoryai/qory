@@ -45,7 +45,7 @@ const (
 	textBranchMoved      = "qory run: " + textVersionWays + ", then take the work item in again: the branch moved since the run fetched it, and the push failed: %[4]s; the code is used"
 	textPushedNoVersion  = "qory run: %s: qory pushed %s and stored no version, because the push of the next repository failed: %s"
 	textPushRefused      = "qory run: change the rule on %[3]s that stops a push to %[1]s of %[2]s, then take the work item in again: the push failed: %[4]s; the code is used"
-	textPushForbidden    = "qory run: Allow the push in the run's credential and path rules, then take the work item in again.\n  The run's gateway allows a push only to the run's branch, refs/heads/%[3]s, and only through a credential with write access to %[1]s and a path rule for /%[1]s.git/git-receive-pack.\n  The push of %[1]s to %[2]s returned 403: %[4]s; the code is used"
+	textPushForbidden    = "qory run: Allow the push in the credential and path rules in Qory Apiary, then take the work item in again.\n  The run's gateway allows a push only to the run's branch, refs/heads/%[3]s, and only through a credential with write access to %[1]s and a path rule for /%[1]s.git/git-receive-pack.\n  The push of %[1]s to %[2]s returned 403: %[4]s; the code is used"
 	textPushNoCredential = "qory run: give the run's credential for %[2]s write access to %[1]s, then take the work item in again: the push through the run's gateway failed: %[3]s; the code is used"
 	textPushNotReached   = "qory run: check that the run's policy allows %[2]s and that %[2]s is reachable, then take the work item in again: the push of %[1]s through the run's gateway failed: %[3]s; the code is used"
 )
