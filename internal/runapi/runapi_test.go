@@ -897,3 +897,20 @@ func TestPushVerdictDocumentRefusesABodyOverTheVerdictLimit(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 }
+
+func TestPushVerdictDocumentAcceptsABodyOfExactlyTheLimit(t *testing.T) {
+	var got int
+	client := serve(t, func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		got = len(raw)
+		respond(http.StatusCreated,
+			`{"version": 1, "artifact": {"type": "verdict", "name": "main", "version": {"id": "av_4", "number": 4}}}`)(w, r)
+	})
+
+	if _, err := client.PushVerdictDocument(context.Background(), make([]byte, 64<<10)); err != nil {
+		t.Fatal(err)
+	}
+	if got != 64<<10 {
+		t.Errorf("the server read %d bytes, want %d", got, 64<<10)
+	}
+}

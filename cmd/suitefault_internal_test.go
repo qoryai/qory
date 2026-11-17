@@ -310,3 +310,21 @@ func TestTheCapBeforeTheCommandIsNotStartedAndTheCapAfterItIsRed(t *testing.T) {
 		})
 	}
 }
+
+// TestAnUnreadableStatusFileUnderTheCapIsNotStarted: a status file that qory cannot read, here a
+// folder in its place, is no `ran` record, so a step cut at the cap fails closed as a suite that
+// did not start, with escalate.
+func TestAnUnreadableStatusFileUnderTheCapIsNotStarted(t *testing.T) {
+	h := newHelper(t)
+	if err := os.MkdirAll(filepath.Join(h.workspace, ".git/qory-suite/status"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cut := session.AfterResult{Step: 2, State: event.StateCancelled, Reason: event.ReasonTimeout, ExitCode: 143}
+	if got, err := h.after(&cut, succeeded); err != nil || got != succeeded {
+		t.Fatalf("outcome %+v, error %v", got, err)
+	}
+	want := `{"verdict":"escalate","points":[{"text":"The full suite did not start: the after step used its 7 minutes before the command.","action":"run_again"}]}`
+	if posted := h.api.verdicts(); len(posted) != 1 || posted[0] != want {
+		t.Errorf("posted %q, want %s", posted, want)
+	}
+}

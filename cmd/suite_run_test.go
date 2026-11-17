@@ -359,6 +359,26 @@ func TestTheCapBeforeTheCommandPostsAnEscalate(t *testing.T) {
 	}
 }
 
+// TestTheCapBeforeTheCommandNamesTheRepositorysLimit: with command_limits_minutes.full_suite 7, the
+// point for a step cut at the cap before the command says 7 minutes.
+func TestTheCapBeforeTheCommandNamesTheRepositorysLimit(t *testing.T) {
+	api := newSuiteAPI(t, http.StatusCreated)
+	cut := &session.AfterResult{Step: 2, State: event.StateCancelled, Reason: event.ReasonTimeout, ExitCode: 143}
+	var seen session.SessionSpec
+	extensions := "    software-factory:\n      command_limits_minutes: {full_suite: 7}\n"
+	out, err, closed := suiteRun(t, api, suiteEnd{after: cut, extensions: extensions, seen: &seen})
+	if err != nil || closed.State != event.StateSucceeded {
+		t.Fatalf("%v, closed %+v\n%s", err, closed, out)
+	}
+	if seen.AfterTimeout != 7*time.Minute {
+		t.Errorf("AfterTimeout = %v, want 7 minutes", seen.AfterTimeout)
+	}
+	want := `{"verdict":"escalate","points":[{"text":"The full suite did not start: the after step used its 7 minutes before the command.","action":"run_again"}]}`
+	if posted := api.posted(); len(posted) != 1 || posted[0] != want {
+		t.Errorf("posted %q, want %s", posted, want)
+	}
+}
+
 // TestAStopDuringTheAfterStepDoesNotLeaveTheRunSucceeded: a stop cuts the after step of a session that
 // succeeded. qory posts the verdict of the red suite and closes the run cancelled with the
 // reason interrupted, with exit status 1.

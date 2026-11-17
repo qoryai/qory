@@ -918,7 +918,7 @@ func allFaults() []*suiteFault {
 }
 
 // TestTheLinesOfQoryRunStartWithTheFixInAtMost100Characters: qory run prints each line after "qory run: ",
-// so the first line of each has at most 90 characters of its own. A fault with a fix prints the fix
+// so the first line of each, without the prefix "qory run: ", has at most 90 characters. A fault with a fix prints the fix
 // first and the cause on the next line, and a line shortens a point text that is longer.
 func TestTheLinesOfQoryRunStartWithTheFixInAtMost100Characters(t *testing.T) {
 	lines := []string{
