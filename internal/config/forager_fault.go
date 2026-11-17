@@ -751,7 +751,8 @@ func tagFault(n *yaml.Node, line int, key string) *fault {
 		if key == "" {
 			return &fault{line, fmt.Sprintf("Remove the tag %s, or write a value of that type.", tag), "A value is tagged " + tag + ", and it is not of that type"}
 		}
-		return &fault{line, fmt.Sprintf("Remove the tag %s from %s, or write a value of that type.", tag, key), key + " is tagged " + tag + ", and its value is not of that type"}
+		// The key is in the cause, which no name's length can push past 100 characters.
+		return &fault{line, fmt.Sprintf("Remove the tag %s, or write a value of that type.", tag), key + " is tagged " + tag + ", and its value is not of that type"}
 	}
 	return keyFault(line, key, "has a tag its value is not of")
 }

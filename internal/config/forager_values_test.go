@@ -148,7 +148,7 @@ func TestNoForagerRefusalPrintsAValue(t *testing.T) {
 func TestForagerRefusalsSayWhatIsWrongWithoutTheValue(t *testing.T) {
 	hermetic(t)
 	for _, c := range []struct{ body, want string }{
-		{"gateway: {server: {url: \"https://qory.example\", via: {url: !!int " + secret + "}}}\n", "Remove the tag !!int from gateway.server.via.url, or write a value of that type.\n  gateway.server.via.url is tagged !!int, and its value is not of that type.\n  It is at line 1 of {path}."},
+		{"gateway: {server: {url: \"https://qory.example\", via: {url: !!int " + secret + "}}}\n", "Remove the tag !!int, or write a value of that type.\n  gateway.server.via.url is tagged !!int, and its value is not of that type.\n  It is at line 1 of {path}."},
 		{"gateway:\n  server:\n    url: https://qory.example\n    via:\n      url: https://gateway.example\n      ca_file: [" + secret + "]\n", "Set gateway.server.via.ca_file to a string.\n  gateway.server.via.ca_file is not a string.\n  It is at line 6 of {path}."},
 		{"gateway:\n  server:\n    url: https://qory.example\n    via:\n      url: https://gateway.example\n      ca_file: &a {k: " + secret + "}\n      certificate_sha256: *a\n", "Set gateway.server.via.ca_file to a string.\n  gateway.server.via.ca_file is not a string.\n  It is at line 6 of {path}."},
 		{"gateway: {egress: {mode: {k: " + secret + "}}}\n", "Set gateway.egress.mode to a string.\n  gateway.egress.mode is not a string.\n  It is at line 1 of {path}."},
@@ -165,9 +165,9 @@ func TestForagerRefusalsSayWhatIsWrongWithoutTheValue(t *testing.T) {
 		{"session: " + secret + "\n", "Set session to a mapping.\n  session is not a mapping.\n  It is at line 1 of {path}."},
 		{"[" + secret + "]\n", "Write forager.yaml as a mapping of sections.\n  The file is not a mapping of sections.\n  It is at line 1 of {path}."},
 		{secret + "\n", "Write forager.yaml as a mapping of sections.\n  The file is not a mapping of sections.\n  It is at line 1 of {path}."},
-		{"apiVersion: !!binary " + secret + "\n", "Remove the tag !!binary from apiVersion, or write a value of that type.\n  apiVersion is tagged !!binary, and its value is not of that type.\n  It is at line 1 of {path}."},
+		{"apiVersion: !!binary " + secret + "\n", "Remove the tag !!binary, or write a value of that type.\n  apiVersion is tagged !!binary, and its value is not of that type.\n  It is at line 1 of {path}."},
 		{"gateway:\n  credentials:\n    c:\n      hosts: {k: " + secret + "}\n", "Set gateway.credentials.c.hosts to a list of strings.\n  gateway.credentials.c.hosts is not a list of strings.\n  It is at line 4 of {path}."},
-		{"gateway:\n  credentials:\n    c:\n      auth: {scheme: !!timestamp " + secret + "}\n", "Remove the tag !!timestamp from gateway.credentials.c.auth.scheme, or write a value of that type.\n  gateway.credentials.c.auth.scheme is tagged !!timestamp, and its value is not of that type.\n  It is at line 4 of {path}."},
+		{"gateway:\n  credentials:\n    c:\n      auth: {scheme: !!timestamp " + secret + "}\n", "Remove the tag !!timestamp, or write a value of that type.\n  gateway.credentials.c.auth.scheme is tagged !!timestamp, and its value is not of that type.\n  It is at line 4 of {path}."},
 		{"gateway: {egress: {mode: " + marker + "}}\n", "Set gateway.egress.mode to observe or enforce.\n  gateway.egress.mode is neither.\n  gateway.egress.mode is in {path}."},
 		{"gateway: {egress: {mode: enforce, allow: [a.example, \"" + marker + ":443\"]}}\n", "Set gateway.egress.allow[1] to a lower-case host name or a *. suffix.\n  A host is a lower-case host name or a *. suffix. One that ends in a number is an IPv4 address in canonical form. It has no port, path, or scheme.\n  gateway.egress.allow is in {path}."},
 		{"gateway: {egress: {mode: observe, deny: [\"" + marker + "\"]}}\n", "Set gateway.egress.deny[0] to a lower-case host name or a *. suffix.\n  A host is a lower-case host name or a *. suffix. One that ends in a number is an IPv4 address in canonical form. It has no port, path, or scheme.\n  gateway.egress.deny is in {path}."},
@@ -232,7 +232,7 @@ func TestForagerRefusalsSayWhatIsWrongWithoutTheValue(t *testing.T) {
 func TestTheInstanceAloneRefusesWithoutTheValue(t *testing.T) {
 	hermetic(t)
 	for _, c := range []struct{ body, want string }{
-		{"session: {instance: {name: !!int " + secret + "}}\n", "Remove the tag !!int from session.instance.name, or write a value of that type.\n  session.instance.name is tagged !!int, and its value is not of that type.\n  It is at line 1 of {path}."},
+		{"session: {instance: {name: !!int " + secret + "}}\n", "Remove the tag !!int, or write a value of that type.\n  session.instance.name is tagged !!int, and its value is not of that type.\n  It is at line 1 of {path}."},
 		{"session:\n  instance:\n    name: [" + secret + "]\n", "Set session.instance.name to a string.\n  session.instance.name is not a string.\n  It is at line 3 of {path}."},
 		{"session: {instance: {name: \"-" + marker + "\"}}\n", "Set session.instance.name to 1 to 64 of A-Z, a-z, 0-9, dot, underscore, and dash.\n  The name starts with a letter or digit.\n  session.instance.name is in {path}."},
 		{"session:\n  instance:\n    name: a\n    name: " + secret + "\n", "Remove one of the two keys session.instance.name.\n  session.instance.name is written twice; it was first written at line 3.\n  It is at line 4 of {path}."},
