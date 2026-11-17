@@ -1915,6 +1915,18 @@ the work item. Then a run of the step explore:
 
   `amp`, `copilot`, `goose` and `any` have no headless start, so a run from a run code
   does not start on them;
+- reads `submit` of the documents, the run's submit settings, `type` and `send`, and
+  keeps them for a run whose level is `write` (see [Read workflows](#read-workflows)); a
+  run at a lower level keeps none. qory takes these settings only from the documents,
+  never from a `process.yaml` of the composed harness. When the first module of the
+  composed harness, in stack order, whose `process.yaml` has a well-formed `submit` has a
+  different one, qory prints one line after the compose with both values: `qory run:
+  submit: documents' reply-draft at end_of_run replaces harness's reply-draft at
+  after_gate`. For documents with no `submit`, the line shows the harness's value alone:
+  `qory run: submit: documents have no submit, so harness's reply-draft at after_gate is
+  unused`. A run whose level is not `write` prints no such line. Line 1 has at most 100
+  characters with `qory run: `: a type name that does not fit is shortened there, and a
+  second line has the full type names;
 - takes its time limit as [Time limits](#time-limits) says.
 
 So the command line sets none of these. After the redemption, qory prints `qory run: the

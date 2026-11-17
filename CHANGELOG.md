@@ -108,6 +108,13 @@ release may change what an existing document does, and states it under Upgrading
   `process.schema.json` has `submit`. Every command that reads the configuration checks
   its form, and that `artifact_types` has a custom structured entry named `type`. See The
   submit step in `contracts/harness/v1/README.md`.
+- A run from a run code whose level is `write` keeps its submit settings, `type` and
+  `send`, from `submit` of the run documents, and reads none from the composed harness's
+  `process.yaml`. When the composed harness has a different `submit`, `qory run` prints
+  one line after the compose: the documents' value and the harness's value, or only the
+  harness's value when the documents have no `submit`. A run at a lower level keeps no
+  submit settings and prints no line. See What the run takes from the response in
+  `docs/run.md`.
 - A module can declare checks for the files of an artifact type with `push_checks` in
   `qory-module.yaml`: each item has `type`, `command`, a program in the module and its
   arguments, and optional `reads`, the other artifact types the check reads. The checks
