@@ -875,7 +875,7 @@ func TestPushedCommitsReadsTheErrorAndRetryAfter(t *testing.T) {
 	}
 }
 
-func TestPushedCommitsSendsNothingThatTheRunAPIRefuses(t *testing.T) {
+func TestPushedCommitsSendsNothingForAnInvalidList(t *testing.T) {
 	client := serve(t, func(http.ResponseWriter, *http.Request) { t.Error("a request went out") })
 	good := runapi.PushedCommit{System: "s", Path: "p", Commit: strings.Repeat("a", 40)}
 

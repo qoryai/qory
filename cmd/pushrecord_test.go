@@ -19,7 +19,7 @@ import (
 // recordBranch is the ref of the work item's branch, as the failure line names it.
 const recordBranch = "qory/" + workItem
 
-// failsRecord makes the reports of pushed commits from call from on answer with status and
+// failsRecord makes the reports of pushed commits from call from on get the status and
 // code, and Retry-After retry when it is not empty.
 func failsRecord(p *pushRepo, from, status int, code, retry string) {
 	p.api.record = func(n int, w http.ResponseWriter) bool {
@@ -226,7 +226,12 @@ func TestAReportThatIsNeverTakenEndsTheRun(t *testing.T) {
 	if head == "" || head == p.first {
 		t.Fatalf("the branch is at %q: the push did not land", head)
 	}
-	wants(t, r.out, "Contact support: qory pushed "+head+" to "+recordBranch+", and Qory Apiary did not record it.\nQory Apiary returned 503: ")
+	wants(t, r.out, "Contact support: qory pushed "+head+" to "+recordBranch+", and Qory Apiary did not record it.\nQory Apiary returned 503: unavailable\n")
+	for _, retry := range []string{"Try again", "Run the command again"} {
+		if strings.Contains(r.out, retry) {
+			t.Errorf("the output has %q, but qory has sent the report again 3 times\n%s", retry, r.out)
+		}
+	}
 	if calls, _ := p.api.reports(); calls != 4 {
 		t.Errorf("%d reports, want 4", calls)
 	}
@@ -244,19 +249,20 @@ func TestAReportThatIsNeverTakenEndsTheRun(t *testing.T) {
 	}
 }
 
-// TestARefusedReportEndsTheRunAtOnce is each other 4xx: no second send, and the run closes
+// TestAReportThatGetsAnother4xxEndsTheRunAtOnce is each other 4xx: no second send, and the run closes
 // failed before session 2.
-func TestARefusedReportEndsTheRunAtOnce(t *testing.T) {
+func TestAReportThatGetsAnother4xxEndsTheRunAtOnce(t *testing.T) {
 	for name, c := range map[string]struct {
 		status int
 		code   string
+		text   string
 	}{
-		"400":          {http.StatusBadRequest, "invalid_request"},
-		"401":          {http.StatusUnauthorized, "unauthorized"},
-		"403":          {http.StatusForbidden, ""},
-		"404":          {http.StatusNotFound, "not_found"},
-		"413":          {http.StatusRequestEntityTooLarge, "payload_too_large"},
-		"not_writable": {http.StatusConflict, "not_writable"},
+		"400":          {http.StatusBadRequest, "invalid_request", "invalid_request"},
+		"401":          {http.StatusUnauthorized, "unauthorized", "unauthorized"},
+		"403":          {http.StatusForbidden, "", "Forbidden"},
+		"404":          {http.StatusNotFound, "not_found", "not_found"},
+		"413":          {http.StatusRequestEntityTooLarge, "payload_too_large", "payload_too_large"},
+		"not_writable": {http.StatusConflict, "not_writable", "not_writable"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			p := newPushRepo(t, "write")
@@ -265,12 +271,12 @@ func TestARefusedReportEndsTheRunAtOnce(t *testing.T) {
 			t.Cleanup(cmd.SetLaterSessions(func() { secondRan = true }))
 			r := p.run(t, commitFirst(t), nil)
 			r.wantsClose(t, event.StateFailed, 1)
-			wants(t, r.out, "Contact support: qory pushed "+p.branchHead(t)+" to "+recordBranch+", and Qory Apiary did not record it.\n"+fmt.Sprintf("Qory Apiary returned %d: ", c.status))
+			wants(t, r.out, "Contact support: qory pushed "+p.branchHead(t)+" to "+recordBranch+", and Qory Apiary did not record it.\n"+fmt.Sprintf("Qory Apiary returned %d: %s\n", c.status, c.text))
 			if calls, _ := p.api.reports(); calls != 1 || len(p.waits) != 0 {
 				t.Errorf("%d reports and the waits %v, want 1 and none", calls, p.waits)
 			}
 			if secondRan {
-				t.Error("session 2 ran after the report was refused")
+				t.Error("session 2 ran after the report got a 4xx")
 			}
 		})
 	}
@@ -329,8 +335,8 @@ func TestAPushThatLandedBeforeASecondRepositoryFailedIsReported(t *testing.T) {
 	}
 }
 
-// TestAPartialPushWhoseReportFailsGivesBothLines is the run above with a report that is
-// refused: the line of the second push's failure comes first, then the Contact support line.
+// TestAPartialPushWhoseReportFailsGivesBothLines is the run above with a report that gets
+// 403: the line of the second push's failure comes first, then the Contact support line.
 func TestAPartialPushWhoseReportFailsGivesBothLines(t *testing.T) {
 	p := newPushRepo(t, "write")
 	failsRecord(p, 1, http.StatusForbidden, "", "")
@@ -351,5 +357,43 @@ func TestAPartialPushWhoseReportFailsGivesBothLines(t *testing.T) {
 	second := strings.Index(r.out, "Contact support: qory pushed "+p.branchHead(t))
 	if first < 0 || second < first {
 		t.Errorf("the lines are out of order or missing\n%s", r.out)
+	}
+}
+
+// TestAPartialPushWhoseReportGetsRunEndedEndsTheRun is a run of two repositories whose first
+// push landed and whose second failed, with a report that gets run_ended: the push's failure
+// is the run's line, the line of the ended run shows once, no version is stored and no session 2
+// starts.
+func TestAPartialPushWhoseReportGetsRunEndedEndsTheRun(t *testing.T) {
+	p := newPushRepo(t, "write")
+	failsRecord(p, 1, http.StatusConflict, "run_ended", "")
+	p.h.server.Repository(t, "acme/lib", "main", map[string]string{"lib.txt": "lib\n"})
+	bare := filepath.Join(p.h.server.Root, "acme", "lib.git")
+	proxygittest.Git(t, bare, "config", "http.receivepack", "true")
+	writeFile(t, filepath.Join(bare, "hooks", "pre-receive"), "#!/bin/sh\nexit 1\n")
+	if err := os.Chmod(filepath.Join(bare, "hooks", "pre-receive"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	p.repositories = "acme/site,acme/lib"
+	secondRan := false
+	t.Cleanup(cmd.SetLaterSessions(func() { secondRan = true }))
+	r := p.run(t, func(dir string) {
+		writeFile(t, filepath.Join(dir, "left.txt"), "left\n")
+		writeFile(t, filepath.Join(dir, ".qory", "repositories", "acme", "lib", "left.txt"), "left\n")
+	}, nil)
+	r.wantsClose(t, event.StateFailed, 1)
+	wants(t, r.out, "the push of the next repository failed: change the rule on "+proxygittest.Host)
+	const ended = "qory run: Qory Apiary ended this run, so qory pushes nothing more and no later session starts.\n"
+	if got := strings.Count(r.out, ended); got != 1 {
+		t.Errorf("the line of the ended run is in the output %d times, want 1\n%s", got, r.out)
+	}
+	if strings.Contains(r.out, "Contact support: qory pushed") {
+		t.Errorf("the output has the Contact support line, but Qory Apiary ended the run\n%s", r.out)
+	}
+	if secondRan {
+		t.Error("session 2 started after run_ended")
+	}
+	if posts, _, stored := p.api.counts(); posts != 0 || stored != 0 {
+		t.Errorf("%d POST and %d versions, want none", posts, stored)
 	}
 }

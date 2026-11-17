@@ -2635,18 +2635,21 @@ sent when a later repository's push failed: the repositories that landed are rep
 that push's line stays the run's line.
 
 A call that got no response within 30 s, a 5xx or a 429 is sent again with the same body, 3
-times, after 1 s, 2 s and 4 s, or after the answer's `Retry-After` when it has one, at most
+times, after 1 s, 2 s and 4 s, or after the `Retry-After` of the response when it has one, at most
 30 s. Then:
 
 - 409 `run_ended`: qory pushes and reports nothing more, starts no later session, and
   prints `qory run: Qory Apiary ended this run, so qory pushes nothing more and no later
   session starts.` The step exits `succeeded`, and the run closes with the end that Qory
-  Apiary recorded, as for a run that Qory Apiary closed during its session.
-- Any other status, or the retries used up: the step fails, the run closes `failed` before
-  the next session, and qory prints `Contact support: qory pushed <commit> to qory/<work
-  item id>, and Qory Apiary did not record it.`, then `Qory Apiary returned <status>: <text>`,
-  or the error of a request with no response. `<commit>` is the first commit of the call
-  that failed. The pushed commits stay on the forge, and the version is not stored.
+  Apiary recorded, as for a run that Qory Apiary closed during its session. When a later repository's push
+  failed too, qory prints that line as well, and the step fails with the push's error.
+- Any other 4xx status, or the retries used up: the step fails, the run closes `failed`
+  before the next session, and qory prints `Contact support: qory pushed <commit> to
+  qory/<work item id>, and Qory Apiary did not record it.`, then `Qory Apiary returned
+  <status>: <message or code>`. For a request with no response, or one that a stop or the
+  time limit cut, the second line is `Qory Apiary sent no response: <cause>`. Neither line
+  has a step to retry. `<commit>` is the first commit of the call that failed. The pushed
+  commits stay on the forge, and the version is not stored.
 
 A removal of the setup container that failed runs no step: qory commits nothing and pushes
 nothing, and the run ends as a failed step ends it, with this line:

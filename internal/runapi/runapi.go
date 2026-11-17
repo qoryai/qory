@@ -451,14 +451,14 @@ type PushedCommit struct {
 }
 
 // PushedCommits reports the repositories that a push moved, in the order the push moved
-// them, to the run's list of pushed commits. Qory Apiary answers 204, and takes a repeat of a
+// them, to the run's list of pushed commits. Qory Apiary responds with 204, and takes a repeat of a
 // commit it has as a no-op, so a caller may send the same call again. A list with no
 // repository, with more than [MaxPushedCommits], or with a commit that is not a full
 // lowercase commit id returns an [Error] with the code [CodeInvalidRequest] and sends nothing.
 func (c *Client) PushedCommits(ctx context.Context, commits []PushedCommit) error {
 	if len(commits) == 0 || len(commits) > MaxPushedCommits {
 		return &Error{
-			Status: 0, Code: CodeInvalidRequest, Names: []string{"repositories"},
+			Code: CodeInvalidRequest, Names: []string{"repositories"},
 			Message: fmt.Sprintf("Report 1 to %d repositories in one call. This call has %d.", MaxPushedCommits, len(commits)),
 		}
 	}

@@ -4,12 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"slices"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/qoryai/qory/internal/preparation"
 	"github.com/qoryai/qory/internal/runapi"
@@ -55,8 +57,8 @@ func TestTheWaitBeforeASecondSendIsRetryAfterAtMost30Seconds(t *testing.T) {
 	}
 }
 
-// recordServer serves POST pushed-commits and answers call n with answer(n), or 204 when it
-// is nil. It returns the client and the number of repositories of each call it got, in order.
+// recordServer serves POST pushed-commits and responds to call n with the status answer(n), or
+// 204 when it is nil. It returns the client and the number of repositories of each call it got, in order.
 func recordServer(t *testing.T, answer func(n int) int) (*runapi.Client, *[]int) {
 	t.Helper()
 	var mu sync.Mutex
@@ -113,8 +115,8 @@ func TestSixtyFiveRepositoriesAreSentAs64ThenOne(t *testing.T) {
 	}
 }
 
-// TestALaterCallStopsWhenAnEarlierOneFails is a push of 65 repositories whose first call is
-// refused with 400: the second call is not sent, and the failure line names the first commit.
+// TestALaterCallStopsWhenAnEarlierOneFails is a push of 65 repositories whose first call gets
+// 400: the second call is not sent, and the failure line names the first commit.
 func TestALaterCallStopsWhenAnEarlierOneFails(t *testing.T) {
 	client, sizes := recordServer(t, func(int) int { return http.StatusBadRequest })
 	_, err := recordLanded(context.Background(), client, "qory/w-1", landedRepositories(65))
@@ -123,5 +125,81 @@ func TestALaterCallStopsWhenAnEarlierOneFails(t *testing.T) {
 	}
 	if !slices.Equal(*sizes, []int{64}) {
 		t.Errorf("the calls had %v repositories, want [64]", *sizes)
+	}
+}
+
+// cancelAfterResponse is a transport that cancels cancel once the response of the server has
+// arrived, so a context ends while the report has its 503.
+type cancelAfterResponse struct {
+	http.RoundTripper
+	cancel context.CancelFunc
+}
+
+func (c cancelAfterResponse) RoundTrip(r *http.Request) (*http.Response, error) {
+	response, err := c.RoundTripper.RoundTrip(r)
+	c.cancel()
+	return response, err
+}
+
+// TestAReportCutDuringTheCallStillGivesTheContactSupportLine is a context that ends during the
+// report, as Ctrl-C or the time limit ends it: just after Qory Apiary returned 503, while the
+// request has no response, and while qory waits to send again. Each returns the whole Contact
+// support line, with no step to retry.
+func TestAReportCutDuringTheCallStillGivesTheContactSupportLine(t *testing.T) {
+	const head = "Contact support: qory pushed bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb to qory/w-1, and Qory Apiary did not record it.\n"
+	for name, c := range map[string]struct {
+		serve func(cancel context.CancelFunc, w http.ResponseWriter, r *http.Request)
+		wrap  bool
+		wait  bool
+		want  string
+	}{
+		"503 returned": {func(_ context.CancelFunc, w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusServiceUnavailable)
+		}, true, false, "Qory Apiary returned 503: Service Unavailable"},
+		"no response": {func(cancel context.CancelFunc, _ http.ResponseWriter, r *http.Request) {
+			_, _ = io.Copy(io.Discard, r.Body)
+			cancel()
+			<-r.Context().Done()
+		}, false, false, "Qory Apiary sent no response: context canceled"},
+		"wait before the second send": {func(_ context.CancelFunc, w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusServiceUnavailable)
+		}, false, true, "Qory Apiary sent no response: context canceled"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				c.serve(cancel, w, r)
+			}))
+			defer server.Close()
+			httpClient := server.Client()
+			if c.wrap {
+				httpClient.Transport = cancelAfterResponse{httpClient.Transport, cancel}
+			}
+			if c.wait {
+				before := branchWait
+				branchWait = func(ctx context.Context, _ time.Duration) error {
+					cancel()
+					return ctx.Err()
+				}
+				defer func() { branchWait = before }()
+			}
+			client, err := runapi.New(server.URL+"/v1/runs/r", httpClient)
+			if err != nil {
+				t.Fatal(err)
+			}
+			ended, err := recordLanded(ctx, client, "qory/w-1", landedRepositories(1))
+			if ended || err == nil {
+				t.Fatalf("ended = %v, err = %v", ended, err)
+			}
+			if got := err.Error(); got != head+c.want {
+				t.Errorf("err = %q, want %q", got, head+c.want)
+			}
+			for _, retry := range []string{"Try again", "Run the command again"} {
+				if strings.Contains(err.Error(), retry) {
+					t.Errorf("err has %q: %v", retry, err)
+				}
+			}
+		})
 	}
 }

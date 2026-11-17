@@ -70,7 +70,7 @@ type pushAPI struct {
 	reads     int
 	post      func(n int, w http.ResponseWriter) (handled, store bool)
 	// recorded is the report of pushed commits: each call's body, as it arrived, and the
-	// rows that its calls added, in order. record, when set, answers call n in place of 204,
+	// rows that its calls added, in order. record, when set, responds to call n in place of 204,
 	// and returns whether it did.
 	recorded []string
 	rows     []recordedRow
@@ -121,7 +121,7 @@ func (a *pushAPI) serve(w http.ResponseWriter, r *http.Request) {
 // recordedRow is a row of the run's list of pushed commits.
 type recordedRow struct{ System, Path, Commit string }
 
-// recordedPush is POST pushed-commits as Qory Apiary answers it: 400 for a body that is not
+// recordedPush is POST pushed-commits as Qory Apiary handles it: 400 for a body that is not
 // the contract's, else a row for each commit not in the list yet, and 204.
 func (a *pushAPI) recordedPush(w http.ResponseWriter, r *http.Request) {
 	raw, _ := io.ReadAll(r.Body)

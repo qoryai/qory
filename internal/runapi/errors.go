@@ -16,7 +16,6 @@ const (
 	CodeUnauthorized    = "unauthorized"
 	CodeNotFound        = "not_found"
 	CodeRunEnded        = "run_ended"
-	CodeNotWritable     = "not_writable"
 	CodeInputsInvalid   = "inputs_invalid"
 	CodeTicketGone      = "ticket_gone"
 	CodePayloadTooLarge = "payload_too_large"
@@ -74,8 +73,7 @@ type Error struct {
 // always gets the line below, in place of the gateway's retry line: the POST may have
 // stored the version. Each of the error's Findings follows Message on a separate line.
 func (e *Error) Error() string {
-	if e.Code == CodeUnavailable && strings.HasPrefix(e.Request, http.MethodPost) &&
-		!strings.HasSuffix(e.Request, "/pushed-commits") {
+	if e.Code == CodeUnavailable && strings.HasPrefix(e.Request, http.MethodPost) {
 		return fmt.Sprintf("Read the artifact index, and try again if the version is not there. "+
 			"%s may have stored it (%d %s).", e.Request, e.Status, e.Code)
 	}
