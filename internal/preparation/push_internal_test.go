@@ -197,8 +197,8 @@ func TestPushFailed(t *testing.T) {
 	for output, want := range map[string]string{
 		" ! [rejected] a -> b (non-fast-forward)":           "qory run: add a new version of the artifact branch",
 		" ! [remote rejected] a -> b (protected)":           "qory run: change the rule on git.example.com",
-		"error: RPC failed; HTTP 403 curl 22":               "qory run: Allow the push in the credential and path rules in Qory Apiary",
-		"fatal: unable to access 'x': returned error: 403":  "qory run: Allow the push in the credential and path rules in Qory Apiary",
+		"error: RPC failed; HTTP 403 curl 22":               "qory run: Allow the push in Qory Apiary",
+		"fatal: unable to access 'x': returned error: 403":  "qory run: Allow the push in Qory Apiary",
 		"fatal: Authentication failed for 'https://x/'":     "qory run: give the run's credential for git.example.com write access to acme/shop",
 		"fatal: unable to access 'x': Could not resolve":    "qory run: check that the run's policy allows git.example.com",
 		"fatal: https://u:token-123@git.example.com/ fails": "qory run: check that the run's policy allows git.example.com",
@@ -217,18 +217,18 @@ func TestPushFailed(t *testing.T) {
 }
 
 // TestAForbiddenPushStartsWithTheFix is the 403 of a push: the first line is the fix, at
-// most 100 characters with a long path and without the "qory run: " prefix, and the lines
+// most 100 characters with a long path and with the "qory run: " prefix, and the lines
 // after it, indented by two spaces, are the branch limit with the run's branch, then the
 // forge's output and the code's mark.
 func TestAForbiddenPushStartsWithTheFix(t *testing.T) {
 	b := &WorkBranch{Ref: testRef, system: "git.example.com"}
 	path := "acme/" + strings.Repeat("long-repository-name-", 4)
 	err := pushFailed(b, path, &gitError{line: "x", exit: 1, output: "fatal: unable to access 'x': returned error: 403"})
-	lines := strings.Split(strings.TrimPrefix(err.Error(), "qory run: "), "\n")
+	lines := strings.Split(err.Error(), "\n")
 	if len(lines) != 3 {
 		t.Fatalf("the error has %d lines, want 3:\n%v", len(lines), err)
 	}
-	if want := "Allow the push in the credential and path rules in Qory Apiary, then take the work item in again."; lines[0] != want || len(lines[0]) > 100 {
+	if want := "qory run: Allow the push in Qory Apiary, then take the work item in again."; lines[0] != want || len(lines[0]) > 100 {
 		t.Errorf("the first line is %q, want %q", lines[0], want)
 	}
 	if want := "  The run's gateway allows a push only to the run's branch, refs/heads/" + testRef + ", and only through a credential with write access to " + path + " and a path rule for /" + path + ".git/git-receive-pack."; lines[1] != want {

@@ -2585,7 +2585,7 @@ Each of these lines fails the step. `<commit>` is the commit's first 12 characte
 - `change the rule on <system> that stops a push to qory/<work item id> of <path>, then take
   the work item in again: the push failed: <error>; the code is used`, when a rule or a
   hook on the system stops the update
-- `Allow the push in the credential and path rules in Qory Apiary, then take the work item in again.`,
+- `Allow the push in Qory Apiary, then take the work item in again.`,
   then two lines indented by two spaces: `The run's gateway allows a push only to the
   run's branch, refs/heads/qory/<work item id>, and only through a credential with write
   access to <path> and a path rule for /<path>.git/git-receive-pack.`, and `The push of
