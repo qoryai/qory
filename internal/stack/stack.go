@@ -461,7 +461,7 @@ type Workflow struct {
 // The access levels a workflow declares, see [Workflow.Access].
 const (
 	AccessRead = "read"
-	// AccessWriteNoPush is a writable checkout with no push step and no write token.
+	// AccessWriteNoPush is a writable checkout with no push step.
 	AccessWriteNoPush = "write-no-push"
 	AccessWrite       = "write"
 )
