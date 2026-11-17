@@ -232,8 +232,8 @@ func removeThenPush(ctx context.Context, run openedRun, stderr io.Writer, branch
 }
 
 // pushWork is the run's step of kind push: it pushes what the agent left, through the
-// run's push proxy, which it starts at the push, after [openedRun.RemoveSetup], and stores
-// the new version of the artifact type branch. The step
+// run's push proxy, which it starts at the push, after [openedRun.RemoveSetup], and closes
+// when the push returns, and stores the new version of the artifact type branch. The step
 // ends as [inStep] ends it, cancelled when ctx ended. out is how the session ended, which
 // the commit and the version show when it did not succeed, see [failedEnd]. agentStopped
 // is whether the agent's stop is proven, see [preparation.Push]. runNumber is the number
@@ -262,6 +262,8 @@ func pushWork(ctx context.Context, run openedRun, stderr io.Writer, branch *prep
 			message += "\n\n" + end
 		}
 		document, err := preparation.Push(ctx, dir, os.Environ(), branch, message, h.proxy, agentStopped, w)
+		// The push proxy ends with the push: the check and the store that follow reach no forge.
+		h.close()
 		if err != nil {
 			return &runLineError{err}
 		}

@@ -93,7 +93,7 @@ func stepGit(p *proxygit.Proxy, input string, env ...string) gitRunner {
 
 // Push commits what the agent left in each repository of b, in dir, the working folder,
 // and pushes each repository whose HEAD is past its [WorkRepository.Commit] to the branch
-// b.Ref as a fast-forward, by the URL qory builds, through the run's host proxy p. It
+// b.Ref as a fast-forward, by the URL qory builds, through the run's push proxy p. It
 // returns the branch document of the new version, nil when no repository has new
 // commits: [WorkBranch.Version] with the commit of each repository pushed replaced, or
 // added for one with no entry. It prints a line on report for each repository pushed.

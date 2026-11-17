@@ -430,7 +430,7 @@ the value to the list:
   qory reads as it starts, in every run;
 - the access key's secret from `--access-key-secret-fd`, in every run, and from the
   `access-key-secret` file when qory signs its requests to the server with it;
-- the password of the run's host proxy, of its stack proxy and of
+- the password of the run's host proxy, of its push proxy, of its stack proxy and of
   `wall.engine_proxy_file`;
 - for a run given a run key or a run code, the query values of each harness source's URL,
   before qory fetches the source through the stack proxy;
@@ -2525,7 +2525,7 @@ The step does this, in order:
    first, and sends the request again only when no version of this run has the file.
 
 The push proxy is the run's second proxy on the run's gateway. qory starts it for the push,
-after it removed the setup container, and closes it when the step ends. It sets only the
+after it removed the setup container, and closes it when the push returns. It sets only the
 run configuration's push credentials, on the hosts and paths of their items, and returns
 403 to every other host and path. The run's policy does not apply there. The run's gateway
 returns 403 to a push to any ref but the run's branch, as the credential's `push_ref` is the

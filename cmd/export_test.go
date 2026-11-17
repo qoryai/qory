@@ -362,10 +362,12 @@ type Nowhere struct {
 	PushProxy, PushCABundle string
 	NoPushProxy             bool
 	PushProxyErr            func() error
-	AtGateway               bool
-	Real                    bool
-	PolicyImage             string
-	OnImage                 func(session.Image)
+	// OnCall, when not nil, gets each call [OpenNowhereWith] lists, as the call is made.
+	OnCall      func(call string)
+	AtGateway   bool
+	Real        bool
+	PolicyImage string
+	OnImage     func(session.Image)
 	// CloseErr, when not nil, is the error of the run's Close, which then returns no result.
 	CloseErr error
 	// WallKept is [session.Closed.WallKept] of the run's Close. A RemoveSetup that returns
@@ -416,8 +418,11 @@ func OpenNowhereWith(n Nowhere) (outcomes func() []session.Outcome, calls func()
 	var did []string
 	note := func(call string) {
 		mu.Lock()
-		defer mu.Unlock()
 		did = append(did, call)
+		mu.Unlock()
+		if n.OnCall != nil {
+			n.OnCall(call)
+		}
 	}
 	openRun = func(ctx context.Context, spec session.OpenSpec) (openedRun, error) {
 		if n.OnOpen != nil {

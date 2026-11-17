@@ -231,6 +231,8 @@ type pushRepo struct {
 	// a run with no push credential, whose PushProxy returns Forager's error for one.
 	pushVia proxygit.Proxy
 	noPush  bool
+	// onCall, when set, gets each call the run makes, as it is made.
+	onCall func(string)
 	// mountsOf, when set, gets the spec of the agent's session.
 	mountsOf func(session.SessionSpec)
 	// onOpen, when set, gets the spec of each open. onSetCheck, when set, gets the check
@@ -336,7 +338,7 @@ func (p *pushRepo) run(t *testing.T, agent func(dir string), result func() (*ses
 	closes, calls, restore := cmd.OpenNowhereWith(cmd.Nowhere{
 		System: proxygittest.Host, Repositories: p.repositories, RunAPI: p.api.base(),
 		Proxy: p.h.server.Proxy.URL, CABundle: p.h.server.Proxy.CABundle, Dir: p.h.runDir,
-		RemoveSetup: p.removeSetup, HostProxyErr: p.proxyErr, PushProxyErr: p.proxyErr, NoPushProxy: p.noPush,
+		RemoveSetup: p.removeSetup, HostProxyErr: p.proxyErr, PushProxyErr: p.proxyErr, NoPushProxy: p.noPush, OnCall: p.onCall,
 		PushProxy: p.pushVia.URL, PushCABundle: p.pushVia.CABundle, AtGateway: p.real, Real: p.real,
 		SetRunAPICheck: p.onSetCheck, RunAPIErr: p.runAPIErr, PolicyImage: p.policyImage,
 		Setup: func(spec session.SetupSpec) error {

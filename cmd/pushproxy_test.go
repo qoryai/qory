@@ -1,8 +1,10 @@
 package cmd_test
 
 import (
+	"net/http"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/qoryai/forager/event"
@@ -94,5 +96,32 @@ func TestThePushProxyOpensAfterTheSetupContainerIsRemoved(t *testing.T) {
 	}
 	if p.branchHead(t) == "" {
 		t.Errorf("the forge has no branch\n%s", r.out)
+	}
+}
+
+// TestThePushProxyEndsWhenThePushReturns is a write run whose run API reads the calls the
+// run made when it gets the POST that stores the version: the push proxy was opened and
+// closed by then, so the check and the store hold no proxy that reaches the forge.
+func TestThePushProxyEndsWhenThePushReturns(t *testing.T) {
+	p := walledPush(t)
+	var mu sync.Mutex
+	var seen []string
+	var atPost []string
+	p.onCall = func(call string) {
+		mu.Lock()
+		defer mu.Unlock()
+		seen = append(seen, call)
+	}
+	p.api.post = func(int, http.ResponseWriter) (handled, store bool) {
+		mu.Lock()
+		defer mu.Unlock()
+		atPost = slices.Clone(seen)
+		return false, true
+	}
+	r := p.run(t, writesAndCommits(t), nil)
+	r.wantsClose(t, event.StateSucceeded, 0)
+	open, closed := slices.Index(atPost, "push proxy"), slices.Index(atPost, "push proxy closed")
+	if open < 0 || closed < open {
+		t.Errorf("the calls at the POST were %q, want push proxy, then push proxy closed", atPost)
 	}
 }
