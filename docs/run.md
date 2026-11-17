@@ -1919,6 +1919,18 @@ the work item. Then a run of the step explore:
 
   `amp`, `copilot`, `goose` and `any` have no headless start, so a run from a run code
   does not start on them;
+- reads `submit` of the documents, the run's submit settings, `type` and `send`, and
+  keeps them for a run whose level is `write` (see [Read workflows](#read-workflows)); a
+  run at a lower level keeps none. qory takes these settings only from the documents,
+  never from a `process.yaml` of the composed harness. When the first module of the
+  composed harness, in stack order, whose `process.yaml` has a well-formed `submit` has a
+  different one, qory prints one line after the compose with both values: `qory run:
+  submit: documents' reply-draft at end_of_run replaces harness's reply-draft at
+  after_gate`. For documents with no `submit`, the line shows the harness's value alone:
+  `qory run: submit: documents have no submit, so harness's reply-draft at after_gate is
+  unused`. A run whose level is not `write` prints no such line. Line 1 has at most 100
+  characters with `qory run: `: a type name that does not fit is shortened there, and a
+  second line has the full type names;
 - takes its time limit as [Time limits](#time-limits) says.
 
 So the command line sets none of these. After the redemption, qory prints `qory run: the
@@ -3172,8 +3184,12 @@ format](../contracts/harness/v1/README.md#the-verdict-format):
 
 ```json
 [{"text": "The spec does not say which customers see the new price.", "action": "answer", "question": "q4"},
- {"text": "The checks script failed on the spec's links.", "action": "run_again"}]
+ {"text": "The checks script failed on the spec's links.", "action": "run_again",
+  "fix": "Fix the link to /docs/start in the spec."}]
 ```
+
+A `run_again` point may have `fix`, one line on how a person fixes the point; an
+`answer` point has none.
 
 qory checks the file before it sends or keeps the verdict. A file that breaks a rule
 stops the command with exit 2, and the first line of the error is the fix, such as
@@ -4667,6 +4683,15 @@ What each of them does:
   Dutch, English, Estonian, Finnish, French, German, Greek, Hungarian, Irish, Italian,
   Latvian, Lithuanian, Maltese, Norwegian, Polish, Portuguese, Romanian, Russian,
   Serbian, Slovak, Slovenian, Spanish, Swedish and Ukrainian.
+- **Parsers.** `agent` has the Node packages `typescript` 5.9.3, `libpg-query` 18.2.4,
+  `parse5` 8.1.1, `postcss` 8.5.33 and `postcss-scss` 4.0.9 in `/opt/qory/parsers`, so a
+  script can parse code without running it. Load a package from there by its path, for
+  example `require('/opt/qory/parsers/node_modules/parse5')`. The folder belongs to root
+  and is read-only for every other user, so a session cannot change a parser. The
+  packages are installed from `images/agent/parsers/package-lock.json`, which has the
+  version and the sha512 sum of each package, and none runs a script at install.
+  `libpg-query` is WebAssembly, parses PostgreSQL's dialect only, and needs no network at
+  run time.
 
 To add what your agents need, build yours FROM one of them, and check it:
 

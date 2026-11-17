@@ -69,10 +69,16 @@ jobs:
           XDG_CONFIG_HOME: ${{ runner.temp }}/config
         run: '"$RUNNER_TEMP/qory" image check qory-agent qory-agent-docker qory-prebuild'
 
+      - name: Check the parsers
+        # Each parser in /opt/qory/parsers loads and parses one small input, as a user
+        # with no entry in the image and with no network.
+        run: docker run --rm --network none --user 12345:12345 -v "$PWD/images/agent/parsers:/t:ro" qory-agent node /t/smoke.js /opt/qory/parsers
+
   arm64:
     name: Build the images for arm64
-    # Built, with no qory image check: what goes wrong for one architecture alone, a sum
-    # or a download, shows here. The runner is arm64, so every build step runs natively.
+    # Built, with no qory image check and with the parsers' check: what goes wrong for one
+    # architecture alone, a sum or a download, shows here. The runner is arm64, so every
+    # build step runs natively.
     runs-on: ubuntu-24.04-arm
     permissions:
       contents: read
@@ -88,6 +94,10 @@ jobs:
       # The engine's own builder, as for amd64: no builder image to pin.
       - name: Build agent
         run: docker build --platform linux/arm64 -t qory-agent --build-arg FETCH_IMAGE="$FETCH_IMAGE" --build-arg NODE_IMAGE="$NODE_IMAGE" images/agent
+
+      - name: Check the parsers
+        # libpg-query is WebAssembly: it must load and parse on arm64 too.
+        run: docker run --rm --network none --user 12345:12345 -v "$PWD/images/agent/parsers:/t:ro" qory-agent node /t/smoke.js /opt/qory/parsers
 
       - name: Build agent-docker
         run: docker build --platform linux/arm64 -t qory-agent-docker --build-arg BASE=qory-agent --build-arg FETCH_IMAGE="$FETCH_IMAGE" images/agent-docker

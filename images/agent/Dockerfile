@@ -7,13 +7,17 @@
 # renders a PDF's pages with it), qpdf, rsvg-convert, Graphviz, Tesseract OCR with
 # 28 European languages, pandoc, Python 3 with PyYAML, Requests, Beautiful Soup, lxml,
 # cssselect, Pillow, openpyxl and python-docx, jq, yq, curl, ripgrep, SQLite, zip,
-# unzip, xz, file, tree, less, bc, envsubst, rsync, patch, and the system's authorities
-# where the wall reads them. It runs as any user the machine gives it, with HOME a
-# directory every user may write, and contains no setuid or setgid program. It sets no
-# entry point: the wall starts the launch command, or qory's helper, itself.
+# unzip, xz, file, tree, less, bc, envsubst, rsync, patch, the Node packages typescript,
+# libpg-query, parse5, postcss and postcss-scss, which parse code without running it,
+# and the system's authorities where the wall reads them. It runs as any user the machine
+# gives it, with HOME a directory every user may write, and contains no setuid or setgid
+# program. It sets no entry point: the wall starts the launch command, or qory's helper,
+# itself.
 #
-# Every version and every sum is a build argument, with its default below. Build it from
-# a checkout of qory at the commit qory version prints, for linux/amd64 or linux/arm64:
+# Every version and every sum is a build argument, with its default below, except those of
+# the Node packages, which are in parsers/package.json and parsers/package-lock.json. Build
+# it from a checkout of qory at the commit qory version prints, for linux/amd64 or
+# linux/arm64:
 #
 #	docker build -t qory-agent images/agent
 #	qory image check qory-agent
@@ -50,6 +54,22 @@ RUN case "${TARGETARCH}" in \
  && echo "${sum}  /tmp/gh.tar.gz" | sha256sum -c - \
  && mkdir /out \
  && tar -xzf /tmp/gh.tar.gz -C /out --strip-components=1 --no-same-owner
+
+# The Node parsers, installed from parsers/package-lock.json, which has an exact version and
+# a sha512 sum for each package and each package it needs. No package runs a script at
+# install, and libpg-query is WebAssembly with no native code, so one install serves both
+# architectures and the build runs on the machine that builds, never under emulation. The
+# folder is owned by root, mode 0755 for folders and 0644 for files, so a session reads
+# it and cannot change it. This stage holds the npm cache; the image gets only the folder.
+# To change a version, edit parsers/package.json, then run npm install --package-lock-only
+# --ignore-scripts in parsers/ and check the diff of the lock.
+FROM --platform=$BUILDPLATFORM ${NODE_IMAGE} AS parsers
+COPY parsers/package.json parsers/package-lock.json /opt/qory/parsers/
+RUN cd /opt/qory/parsers \
+ && npm ci --ignore-scripts --no-audit --no-fund --cache /tmp/npm-cache \
+ && chown -R root:root /opt/qory \
+ && find /opt/qory -type d -exec chmod 0755 {} + \
+ && find /opt/qory -type f -exec chmod 0644 {} +
 
 FROM ${NODE_IMAGE}
 ARG NODE_IMAGE
@@ -142,10 +162,15 @@ RUN apt="-o Dir::Etc::SourceList=/tmp/snapshot.sources -o Dir::Etc::SourceParts=
 
 COPY --from=gh /out/bin/gh /usr/local/bin/gh
 
+# Not under /qory: Forager mounts /qory/runtime/<runtime> there.
+COPY --from=parsers --chown=0:0 /opt/qory/parsers /opt/qory/parsers
+
 # Each tool runs, Chromium from /usr/bin, Tesseract lists each language installed, and
-# fontconfig lists a font of each Noto package; a check that fails prints its fix. HOME
-# is one directory every user may write, with the sticky bit, because the wall runs the
-# agent as the machine's user id, which has no entry in this image.
+# fontconfig lists a font of each Noto package; a check that fails prints its fix. Each
+# Node parser loads from /opt/qory/parsers and has the version of parsers/package.json,
+# and the image's non-root user cannot write there. HOME is one directory every user may
+# write, with the sticky bit, because the wall runs the agent as the machine's user id,
+# which has no entry in this image.
 RUN gh --version \
  && git --version \
  && pdftoppm -v \
@@ -181,6 +206,21 @@ RUN gh --version \
  && envsubst --version \
  && rsync --version \
  && patch --version \
+ && for pkg in libpg-query parse5 postcss postcss-scss typescript; do \
+      dir="/opt/qory/parsers/node_modules/$pkg"; \
+      node -e "require('$dir')" \
+        || { echo "Fix parsers/: require of $pkg from /opt/qory/parsers fails" >&2; exit 1; }; \
+      want="$(node -p "require('/opt/qory/parsers/package.json').dependencies['$pkg']")"; \
+      have="$(node -p "require('$dir/package.json').version")"; \
+      [ "$have" = "$want" ] \
+        || { echo "Run npm ci in parsers/: $pkg is $have, not $want" >&2; exit 1; }; \
+    done \
+ && bad="$(find /opt/qory/parsers ! -type l \( -perm /022 -o ! -user root \) -print -quit)" \
+ && { test -z "$bad" || { echo "Set root and mode 0755 or 0644 in /opt/qory/parsers: $bad is not" >&2; exit 1; }; } \
+ && { ! runuser -u node -- sh -c ': > /opt/qory/parsers/node_modules/typescript/lib/b749-write' 2>/dev/null \
+      || { echo "Make /opt/qory/parsers read-only for every user but root: user node wrote there" >&2; exit 1; }; } \
+ && { ! runuser -u node -- sh -c ': >> /opt/qory/parsers/node_modules/typescript/package.json' 2>/dev/null \
+      || { echo "Make /opt/qory/parsers read-only for every user but root: user node changed a file there" >&2; exit 1; }; } \
  && { fc-list | grep -q 'Noto Sans Arabic' || { echo "Add fonts-noto-core: fontconfig lists no Noto Sans Arabic" >&2; exit 1; }; } \
  && { fc-list | grep -q 'Noto Sans CJK' || { echo "Add fonts-noto-cjk: fontconfig lists no Noto Sans CJK" >&2; exit 1; }; } \
  && { fc-list | grep -q 'Noto Color Emoji' || { echo "Add fonts-noto-color-emoji: fontconfig lists no Noto Color Emoji" >&2; exit 1; }; } \

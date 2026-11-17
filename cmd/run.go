@@ -805,6 +805,13 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					// The time limit counts from the open, so the compose's time is in it.
 					timeout = provisioner.TimeLimit(fromCode.minutes, workflows[fromCode.workflow].TimeLimit)
 				}
+				// The documents' submit is the run's at level write, and a different one in the
+				// harness gets a line.
+				submitLevel := accessOf(fromCode, workflows)
+				fromCode.limitSubmit(submitLevel)
+				if line := fromCode.submitLine(rep, submitLevel); line != "" {
+					fmt.Fprintln(w, "qory run:", line)
+				}
 				// A run that only reads the checkout sees it read-only, or stops here, before
 				// the image's fetch and the setup.
 				level = accessOf(fromCode, workflows)

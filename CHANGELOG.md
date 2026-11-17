@@ -18,6 +18,11 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Added
 
+- The `agent` image has the Node packages `typescript` 5.9.3, `libpg-query` 18.2.4,
+  `parse5` 8.1.1, `postcss` 8.5.33 and `postcss-scss` 4.0.9 in `/opt/qory/parsers`. The
+  folder belongs to root and no other user can write to it. A script loads a package with
+  `require('/opt/qory/parsers/node_modules/<package>')`. See
+  Qory's images in `docs/run.md`.
 - A run takes the lower of its workflow's `access` and `access` in its documents, in
   the order `read`, `write-no-push`, `write`. A workflow's `access` in a stack takes
   `write-no-push` in both schemas and in the stack check, and documents may have it. A
@@ -103,6 +108,13 @@ release may change what an existing document does, and states it under Upgrading
   `process.schema.json` has `submit`. Every command that reads the configuration checks
   its form, and that `artifact_types` has a custom structured entry named `type`. See The
   submit step in `contracts/harness/v1/README.md`.
+- A run from a run code whose level is `write` keeps its submit settings, `type` and
+  `send`, from `submit` of the run documents, and reads none from the composed harness's
+  `process.yaml`. When the composed harness has a different `submit`, `qory run` prints
+  one line after the compose: the documents' value and the harness's value, or only the
+  harness's value when the documents have no `submit`. A run at a lower level keeps no
+  submit settings and prints no line. See What the run takes from the response in
+  `docs/run.md`.
 - A module can declare checks for the files of an artifact type with `push_checks` in
   `qory-module.yaml`: each item has `type`, `command`, a program in the module and its
   arguments, and optional `reads`, the other artifact types the check reads. The checks
@@ -165,7 +177,13 @@ release may change what an existing document does, and states it under Upgrading
   verdict, the file of the artifact type `verdict`. With `escalate`, `points` lists 1 to
   20 points for a person, each with `text`, one sentence on one line, 1 to 500
   characters, and `action`: `answer`, with `question`, the id of an open question, or
-  `run_again`. The text member `gaps` is gone. See The verdict format in
+  `run_again`. A `run_again` point may have `fix`, a line of 1 to 500 characters on
+  how a person fixes it, which Qory Apiary shows in place of the action's sentence; an
+  `answer` point has no `fix`. A `changes-requested` verdict may have 1 to 20 points,
+  each with the action `run_again`; `qory run verdict` sends points only with
+  `escalate`. A verdict of any kind may have a `track`, with an `id` and a `reason` of 1
+  to 300 characters, which Qory Apiary checks against the tracks of the run's stage;
+  `qory run verdict` sends none. The text member `gaps` is gone. See The verdict format in
   `contracts/harness/v1/README.md`.
 - `-f` on `qory harness compose`, `qory run` and `qory worktree add` takes a stack by
   reference, `<https URL>#<ref>:<folder>`: qory fetches the folder as it fetches a git

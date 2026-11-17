@@ -23,6 +23,9 @@ const (
 	runAgainPoint = `{"text": "The checks script failed on the spec's links.", "action": "run_again"}`
 )
 
+// fixPoint is a point to run again with a fix, which passes.
+const fixPoint = `{"text": "The checks script failed on the spec's links.", "action": "run_again", "fix": "Fix the link to /docs/start in the spec."}`
+
 // compiled is the contract's file, compiled.
 func compiled(t *testing.T) *jsonschema.Schema {
 	t.Helper()
@@ -49,16 +52,17 @@ func TestEmbeddedSchemaIsTheContract(t *testing.T) {
 	}
 }
 
-// TestPointsReadsTheFile reads a file of two points into the points of the run API, in
-// their order.
+// TestPointsReadsTheFile reads a file of three points, one with a fix, into the points of
+// the run API, in their order.
 func TestPointsReadsTheFile(t *testing.T) {
-	points, err := verdictformat.Points([]byte("[\n " + answerPoint + ",\n " + runAgainPoint + "\n]\n"))
+	points, err := verdictformat.Points([]byte("[\n " + answerPoint + ",\n " + runAgainPoint + ",\n " + fixPoint + "\n]\n"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	want := []runapi.Point{
 		{Text: "The spec does not say which customers see the new price.", Action: runapi.ActionAnswer, Question: "q4"},
 		{Text: "The checks script failed on the spec's links.", Action: runapi.ActionRunAgain},
+		{Text: "The checks script failed on the spec's links.", Action: runapi.ActionRunAgain, Fix: "Fix the link to /docs/start in the spec."},
 	}
 	if !slices.Equal(points, want) {
 		t.Errorf("points = %+v", points)
@@ -76,6 +80,7 @@ func TestPointsStopsAtTheFirstBrokenRule(t *testing.T) {
 		return "[" + strings.TrimSuffix(strings.Repeat(runAgainPoint+", ", n), ", ") + "]"
 	}
 	text := func(s string) string { return two(`{"text": "` + s + `", "action": "run_again"}`) }
+	fix := func(s string) string { return two(`{"text": "a", "action": "run_again", "fix": "` + s + `"}`) }
 	for _, c := range []struct {
 		file, want string
 	}{
@@ -98,12 +103,12 @@ func TestPointsStopsAtTheFirstBrokenRule(t *testing.T) {
 		{two(`"The spec's links are broken."`), "Write each point as {text, action}: point 2 is a JSON string."},
 		{two(`{"text": "The checks script failed."}`), "Write each point as {text, action}: point 2 has no action."},
 		{two(`{"action": "run_again"}`), "Write each point as {text, action}: point 2 has no text."},
-		{two(`{"text": "a", "action": "run_again", "gaps": "Add the empty cart."}`), `Remove "gaps" from point 2: a point has only text, action and question.`},
+		{two(`{"text": "a", "action": "run_again", "gaps": "Add the empty cart."}`), `Remove "gaps" from point 2: a point has only text, action, question and fix.`},
 		{two(`{"text": 1, "action": "run_again"}`), "Write the text of point 2 as a JSON string. The text is a JSON number."},
 		{text(""), "Write the text of point 2: one sentence on one line, 1 to 500 characters. The text is empty."},
 		{text(strings.Repeat("a", 501)), "Shorten the text of point 2 to at most 500 characters. The text has 501."},
-		{text(`One\u0007sentence.`), "Remove the character U+0007 from the text of point 2. contracts/harness/v1/verdict.schema.json lists the characters a text cannot have."},
-		{text("One \u202esentence."), "Remove the character U+202E from the text of point 2. contracts/harness/v1/verdict.schema.json lists the characters a text cannot have."},
+		{text(`One\u0007sentence.`), "Remove the character U+0007 from the text of point 2: the contract's $defs line excludes it."},
+		{text("One \u202esentence."), "Remove the character U+202E from the text of point 2: the contract's $defs line excludes it."},
 		{two(`{"text": "a", "action": "ask"}`), `Set the action of point 2 to answer or run_again. The action is "ask".`},
 		{two(`{"text": "a", "action": 3}`), `Set the action of point 2 to answer or run_again. The action is 3.`},
 		{two(`{"text": "a", "action": "answer"}`), "Add question, the id of an open question, to point 2: a point with the action answer has one."},
@@ -111,6 +116,16 @@ func TestPointsStopsAtTheFirstBrokenRule(t *testing.T) {
 		{two(`{"text": "a", "action": "answer", "question": "Q 4"}`), `Set the question of point 2 to a question's id, such as q1: 1 to 32 lower-case letters, digits and hyphens. The id is "Q 4".`},
 		{two(`{"text": "a", "action": "answer", "question": null}`), `Set the question of point 2 to a question's id, such as q1: 1 to 32 lower-case letters, digits and hyphens. The id is null.`},
 		{two(`{"text": "a", "action": "answer", "question": "` + strings.Repeat("a", 33) + `"}`), `Set the question of point 2 to a question's id, such as q1: 1 to 32 lower-case letters, digits and hyphens. The id is "` + strings.Repeat("a", 33) + `".`},
+		{fix(strings.Repeat("é", 500)), ""},
+		{fix(`Fix the link to /docs/start.`), ""},
+		{two(`{"text": "a", "action": "answer", "question": "q4", "fix": "Answer q4."}`), "Remove fix from point 2: a point with the action answer has none."},
+		{two(`{"text": "a", "action": "run_again", "fix": 1}`), "Write the fix of point 2 as a JSON string. The fix is a JSON number."},
+		{two(`{"text": "a", "action": "run_again", "fix": null}`), "Write the fix of point 2 as a JSON string. The fix is a JSON null."},
+		{fix(""), "Write the fix of point 2: one sentence on one line, 1 to 500 characters. The fix is empty."},
+		{fix(strings.Repeat("a", 501)), "Shorten the fix of point 2 to at most 500 characters. The fix has 501."},
+		{fix(`One\nsentence.`), "Write the fix of point 2 on one line. It has a line break (U+000A)."},
+		{fix(`One\tsentence.`), "Write the fix of point 2 on one line. It has a tab (U+0009)."},
+		{fix("One \u202esentence."), "Remove the character U+202E from the fix of point 2: the contract's $defs line excludes it."},
 	} {
 		_, err := verdictformat.Points([]byte(c.file))
 		switch {
@@ -176,6 +191,11 @@ func TestCheck(t *testing.T) {
 	}{
 		{`{"verdict": "passed"}`, true},
 		{`{"verdict": "changes-requested"}`, true},
+		{`{"verdict": "changes-requested", "points": [` + runAgainPoint + `]}`, true},
+		{`{"verdict": "changes-requested", "points": [` + answerPoint + `]}`, false},
+		{`{"verdict": "changes-requested", "points": [` + fixPoint + `]}`, true},
+		{`{"verdict": "escalate", "points": [` + fixPoint + `, ` + answerPoint + `]}`, true},
+		{`{"verdict": "escalate", "points": [{"text": "a", "action": "answer", "question": "q4", "fix": "Answer q4."}]}`, false},
 		{`{"verdict": "escalate", "points": [` + answerPoint + `]}`, true},
 		{`{"verdict": "escalate"}`, false},
 		{`{"verdict": "passed", "points": [` + runAgainPoint + `]}`, false},

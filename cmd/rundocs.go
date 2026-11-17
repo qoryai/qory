@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/qoryai/forager/accesskey"
 	"github.com/qoryai/forager/session"
@@ -115,6 +116,12 @@ type codeRun struct {
 	// the documents have no target.
 	access   string
 	workItem string
+	// submit is the documents' submit, the run's submit settings, type and send: the one
+	// place qory takes them from, never the composed harness's process.yaml, see
+	// [codeRun.submitLine]. nil when the documents have no submit. submitModule is the
+	// documents' submit_module, nil for none.
+	submit       *contracts.Submit
+	submitModule *contracts.SubmitModule
 
 	// runNumber is the run's number on the server, set by [codeRun.readBranch].
 	runNumber int
@@ -198,6 +205,7 @@ func codeRunOf(doc contracts.Documents) (*codeRun, error) {
 	if hidden {
 		r.named = source.NewNamed(r.phrase())
 	}
+	r.submit, r.submitModule = doc.Submit, doc.SubmitModule
 	return r, nil
 }
 
@@ -695,4 +703,82 @@ func entryKeys(rep report.Report) []string {
 		keys = append(keys, e.Kind+"/"+e.Name)
 	}
 	return keys
+}
+
+// limitSubmit keeps r's submit and submit_module only for a run whose level is
+// [stack.AccessWrite], the run's [accessOf] level: a run that the stack's workflow or the
+// documents lower to write-no-push or read has no submit settings.
+func (r *codeRun) limitSubmit(level string) {
+	if r != nil && level != stack.AccessWrite {
+		r.submit, r.submitModule = nil, nil
+	}
+}
+
+// submitLine is the line that shows the harness's submit, the first module's in stack
+// order, beside r's when they differ, or alone when r has none. It is "" for a run whose
+// level, its [accessOf] level, is not [stack.AccessWrite], and for r nil. Line 1 has at
+// most [submitLineMax] characters with the "qory run: " that the caller adds, so a type
+// name that does not fit is shortened there, and a second line has the full name.
+func (r *codeRun) submitLine(rep report.Report, level string) string {
+	if r == nil {
+		return ""
+	}
+	var typ, send string
+	found := false
+	for _, m := range rep.Modules {
+		if typ, send, found = exports.ProcessSubmit(filepath.Join(rep.Home, "modules", m.Name)); found {
+			break
+		}
+	}
+	switch {
+	case !found, level != stack.AccessWrite:
+		return ""
+	case r.submit == nil:
+		line := func(typ, _ string) string {
+			return fmt.Sprintf("submit: documents have no submit, so harness's %s at %s is unused", typ, send)
+		}
+		return fitSubmit(line, typ, "", "The full type is "+typ+".")
+	case r.submit.Type == typ && r.submit.Send == send:
+		return ""
+	}
+	line := func(docs, harness string) string {
+		return fmt.Sprintf("submit: documents' %s at %s replaces harness's %s at %s", docs, r.submit.Send, harness, send)
+	}
+	return fitSubmit(line, r.submit.Type, typ, "The full types are "+r.submit.Type+" in the documents and "+typ+" in the harness.")
+}
+
+// submitLineMax is the most characters of line 1 of the text of [codeRun.submitLine],
+// with the "qory run: " in front of it, as for a refusal.
+const submitLineMax = 100
+
+// fitSubmit is line of a and b, whole when line 1 has at most [submitLineMax] characters
+// after "qory run: ". Otherwise it is line of a and b shortened to share what the rest
+// of line 1 leaves, each as [shortSubmitName] has it, then full on a second line. b is ""
+// for a line of one name. [exports.Fit] cannot do this: it keeps 20 characters of a
+// name, and the rest of this line has 77 or more.
+func fitSubmit(line func(a, b string) string, a, b, full string) string {
+	const prefix = "qory run: "
+	if text := line(a, b); utf8.RuneCountInString(prefix+text) <= submitLineMax {
+		return text
+	}
+	left := submitLineMax - utf8.RuneCountInString(prefix+line("", ""))
+	na, nb := utf8.RuneCountInString(a), utf8.RuneCountInString(b)
+	first := left / 2
+	if na <= first {
+		first = na
+	} else if nb <= left/2 {
+		first = left - nb
+	}
+	return line(shortSubmitName(a, first), shortSubmitName(b, left-first)) + "\n  " + full
+}
+
+// shortSubmitName is name with its middle replaced by "…" so that it has n characters,
+// and name as it is when it has at most n.
+func shortSubmitName(name string, n int) string {
+	r := []rune(name)
+	if len(r) <= n || n < 3 {
+		return name
+	}
+	head := n / 2
+	return string(r[:head]) + "…" + string(r[len(r)-(n-1-head):])
 }
