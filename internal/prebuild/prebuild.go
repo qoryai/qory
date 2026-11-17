@@ -136,6 +136,7 @@ const (
 	textEnvImage     = "the image sets %s in its environment, which change what the agent does; the image is removed"
 	textProxyBaked   = "the final image sets %s in its environment to a value the image before the commands did not; the image is removed"
 	textSizeUnread   = "docker image inspect printed a size that does not read: %s"
+	textTooBig       = "Make the image smaller, or contact support to raise Largest prebuilt image.\nThe image is %s.\nThe limit is %s. The image is removed."
 	textNotCopied    = "the repository could not be copied to " + Workspace + ": %s"
 	textConfigUnread = "docker image inspect printed a configuration that does not read"
 	textLimit        = "the build ran past its limit of 30 minutes and was stopped; what it started is removed"
@@ -248,6 +249,10 @@ type Options struct {
 	// EnvironmentTag is the name of the environment image the build keeps apart; ""
 	// is <Name>:environment.
 	EnvironmentTag string
+	// LargestImageBytes is the largest size of the target image, in decimal bytes, as
+	// docker image inspect reports it. An image over it is removed and refused. 0 sets
+	// no limit.
+	LargestImageBytes int64
 
 	// Parsers is the folder of the Node parsers the tools step copies into the image, with
 	// package.json and node_modules; "" is [ParsersPath]. Node is the node program it
@@ -1173,6 +1178,9 @@ func (b *build) finish(ctx context.Context, start time.Time) error {
 	if err != nil {
 		return fmt.Errorf(textSizeUnread, integration.Printable(strings.TrimSpace(string(out))))
 	}
+	if b.o.LargestImageBytes > 0 && size > b.o.LargestImageBytes {
+		return refused(fmt.Errorf(textTooBig, humanDecimal(size), humanDecimal(b.o.LargestImageBytes)))
+	}
 	b.images = slices.DeleteFunc(b.images, func(s string) bool { return s == b.o.Tag })
 	b.res.Target, b.res.Environment, b.environment = b.o.Tag, b.environment, ""
 	b.line(textDone, exports.Value(b.o.Tag, false), seconds(time.Since(start)), humanSize(size))
@@ -1193,6 +1201,12 @@ func humanSize(n int64) string {
 		return fmt.Sprintf("%.1f GiB (%d bytes)", float64(n)/(1<<30), n)
 	}
 	return fmt.Sprintf("%.1f MiB (%d bytes)", float64(n)/(1<<20), n)
+}
+
+// humanDecimal is a size in decimal GB, as docker shows sizes, with one decimal, and in
+// bytes.
+func humanDecimal(n int64) string {
+	return fmt.Sprintf("%.1f GB (%d bytes)", float64(n)/1e9, n)
 }
 
 // clean removes the temporary container, the images the build made, o.Tag and the

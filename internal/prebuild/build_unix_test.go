@@ -779,6 +779,53 @@ func TestBuildKeepsAnImageOfAnySize(t *testing.T) {
 	}
 }
 
+// tooBig is line 1 of the refusal of an image over the largest size.
+const tooBig = "Make the image smaller, or contact support to raise Largest prebuilt image."
+
+// TestBuildRefusesAnImageOverTheLargestSize is an image one byte over the limit of the
+// run's documents: removed with the temporary images, no "built" line, and the refusal
+// has the fix on line 1, then the size and the limit in GB and in bytes.
+func TestBuildRefusesAnImageOverTheLargestSize(t *testing.T) {
+	f := newFakes(t)
+	f.set(t, "size", "5000000001\n")
+	var out bytes.Buffer
+	o := options(t, repository(t, shopConfig), &out, io.Discard)
+	o.LargestImageBytes = 5000000000
+	_, err := prebuild.Build(t.Context(), o)
+	var refusal *prebuild.RefusedError
+	want := tooBig + "\nThe image is 5.0 GB (5000000001 bytes).\nThe limit is 5.0 GB (5000000000 bytes). The image is removed."
+	if !errors.As(err, &refusal) || err.Error() != want {
+		t.Fatalf("Build: %v", err)
+	}
+	if line, _, _ := strings.Cut(err.Error(), "\n"); len(prebuild.Prefix+line) > 100 {
+		t.Errorf("line 1 with its prefix is %d characters", len(prebuild.Prefix+line))
+	}
+	if !f.called("docker", "image rm --force "+testName+":base "+testName+":tools "+testName+":top "+testName+":seeded acme/shop:prebuild") {
+		t.Errorf("the image is not removed:\n%s", f.read("docker.log"))
+	}
+	if strings.Contains(out.String(), "built acme/shop:prebuild") {
+		t.Error("the image is said built")
+	}
+}
+
+// TestBuildKeepsAnImageAtTheLargestSize is an image of exactly the limit: kept.
+func TestBuildKeepsAnImageAtTheLargestSize(t *testing.T) {
+	f := newFakes(t)
+	f.set(t, "size", "5000000000\n")
+	var out bytes.Buffer
+	o := options(t, repository(t, shopConfig), &out, io.Discard)
+	o.LargestImageBytes = 5000000000
+	res, err := prebuild.Build(t.Context(), o)
+	if err != nil || res.Target != "acme/shop:prebuild" {
+		t.Fatalf("Build: %v, %+v\n%s", err, res, out.String())
+	}
+	for _, l := range f.calls("docker") {
+		if strings.HasPrefix(l, "image rm") && strings.Contains(l, "acme/shop:prebuild") {
+			t.Errorf("the image is removed: docker %s", l)
+		}
+	}
+}
+
 // TestBuildStopsAtItsLimit is a build still running at its limit: the program running
 // and what it started are ended, and the container and the images are removed. The
 // test ends the build's context with [prebuild.ErrLimit] as its cause once the
