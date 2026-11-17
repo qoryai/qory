@@ -780,7 +780,9 @@ the member chose an option and required when `option` is `null`.
 
 A question has the optional member `criterion`, the id of the acceptance criterion the
 question is about: `ac-` and a number from 1 to 9999 with no leading zero, such as `ac-3`.
-A question about no acceptance criterion has no `criterion`.
+A question about no acceptance criterion has no `criterion`. The criterion ids of the
+mockup schema of Qory Apiary, `mockup.schema.json`, have the same form. Qory does not ship
+that file.
 
 A run that chooses an option without asking a member records a decided question: its
 `state` is `decided`, so it is not open, and it has `decision`. A decided question has at
