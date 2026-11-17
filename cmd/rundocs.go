@@ -704,14 +704,9 @@ func entryKeys(rep report.Report) []string {
 	return keys
 }
 
-// submitLine is the line a run from a run code prints after the compose when the
-// composed harness has a submit other than r's: the run uses r's submit, the documents'
-// value, and the line shows both values, or, for documents with no submit, that the run
-// has no submit step. The harness's submit is that of the first module of rep, in stack
-// order, whose process.yaml in the home has one, as [exports.ProcessSubmit] reads it.
-// "" when the two are equal, when no composed module has a submit, for r nil, a run not
-// from a run code, and for documents with no submit of a run that may not write, which
-// the contract allows no submit.
+// submitLine is the line that shows the harness's submit, the first module's in stack
+// order, beside r's when the two differ, or alone when r has none. It is "" for a run
+// that may not write, whose documents the contract allows no submit, and for r nil.
 func (r *codeRun) submitLine(rep report.Report) string {
 	if r == nil {
 		return ""

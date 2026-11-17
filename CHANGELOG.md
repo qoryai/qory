@@ -57,9 +57,10 @@ release may change what an existing document does, and states it under Upgrading
   its form, and that `artifact_types` has a custom structured entry named `type`. See The
   submit step in `contracts/harness/v1/README.md`.
 - A run from a run code reads the settings of its submit step only from `submit` of the
-  run documents, never from the composed harness's `process.yaml`. When the two differ,
-  `qory run` prints one line with both values after the compose. See What the run takes
-  from the response in `docs/run.md`.
+  run documents, never from the composed harness's `process.yaml`. When the composed
+  harness has a different `submit`, `qory run` prints one line after the compose: the
+  harness's value and the documents' value, or only the harness's value when the documents
+  have no `submit`. See What the run takes from the response in `docs/run.md`.
 - A module can declare checks for the files of an artifact type with `push_checks` in
   `qory-module.yaml`: each item has `type`, `command`, a program in the module and its
   arguments, and optional `reads`, the other artifact types the check reads. The checks
