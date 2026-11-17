@@ -509,6 +509,14 @@ func (r pushed) wantsClose(t *testing.T, state string, code int) {
 	}
 }
 
+// wantsReason checks that the run closed with the end code why as its reason.
+func (r pushed) wantsReason(t *testing.T, why string) {
+	t.Helper()
+	if len(r.closes) != 1 || r.closes[0].Reason != why {
+		t.Errorf("the run closed with %+v, want the reason %q", r.closes, why)
+	}
+}
+
 // commitAll commits every file in dir, as an agent does.
 func commitAll(t *testing.T, dir, message string) {
 	t.Helper()
@@ -1042,6 +1050,7 @@ func TestAPushThatARuleRefusesSaysWhatToAllow(t *testing.T) {
 	p.h.server.Refuse("/acme/site.git/git-receive-pack")
 	r := p.run(t, writesAndCommits(t), nil)
 	r.wantsClose(t, event.StateFailed, 1)
+	r.wantsReason(t, "push_refused")
 	wants(t, r.out, "qory run: The push was refused (403).\n"+
 		"  One of these most likely stopped it:\n"+
 		"  1. The run's push proxy refuses a push that is not a plain push to the push_ref of the push credential (for example a signed push or a push with push options), and qory pushes to refs/heads/qory/"+workItem+" (wall:push-ref).\n"+

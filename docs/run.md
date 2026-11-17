@@ -2196,7 +2196,8 @@ prebuild: The repository's image is over the limit for a prebuilt image.
   The limit is 5.0 GB (5000000000 bytes). The image is removed.
 ```
 
-The last line has no `The image is removed.` when the engine pulled the image. A
+The run closes `failed` with the reason `prebuilt_image_too_large`. The last line has no
+`The image is removed.` when the engine pulled the image. A
 repository image of exactly the limit is kept. The last line of a successful prebuild
 prints the size of the final image. Without the member, the build keeps an image of any
 size. The member is set only for a prebuild started from Qory Apiary, from the
@@ -2652,7 +2653,8 @@ run's branch: a push to any other ref, a signed push, and a push with push optio
 
 A run whose run configuration has no push credential has no push proxy. The step fails with
 `qory run: This run has no push credential, so qory pushed nothing.`,
-then `  The run configuration has no credential with purpose push.`, and qory pushes nothing. A credential
+then `  The run configuration has no credential with purpose push.`, and qory pushes nothing. The run
+closes `failed` with the reason `push_credential_missing`. A credential
 in forager.yaml is never a push credential. The run's proxy, which the agent, the setup, the
 fetch, and the runtime's install go through, sets no push credential, so a push through it
 gets 403, as a credential with no `push_ref` does.
@@ -2727,6 +2729,8 @@ Each of these lines fails the step. `<commit>` is the commit's first 12 characte
   proxy refuses every other host and path.`, `3. The forge stopped the push: its permission
   for the push credential, or a branch rule.` The last line is
   `The push of <path> to <system> returned 403: <error>; the code is used`
+
+  A run whose push got this 403 closes `failed` with the reason `push_refused`.
 - `give the run's credential for <system> write access to <path>, then take the work item in
   again: the push through the run's gateway failed: <error>; the code is used`
 - `Let the run's gateway reach <system>, then take the work item in again.`, then a line
@@ -2801,7 +2805,8 @@ gateway, and its 410 arrives as 502 `control_plane_unavailable`: both are sent a
   when the response has none, as `Service Unavailable` for a 503 with no body. For a request
   with no response, or one that a stop or the time limit cut, the last line is `Qory Apiary
   sent no response: <cause>`. No line has a step to retry. `<commit>` is the first commit of the
-  call that failed. The pushed commits stay on the forge, and the version is not stored.
+  call that failed. The pushed commits stay on the forge, and the version is not stored. The run
+closes `failed` with the reason `push_not_recorded`.
 
 A removal of the setup container that failed runs no step: qory commits nothing and pushes
 nothing, and the run ends as a failed step ends it, with this line:

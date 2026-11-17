@@ -255,6 +255,7 @@ func TestAReportThatIsNeverTakenEndsTheRun(t *testing.T) {
 	t.Cleanup(cmd.SetLaterSessions(func() { secondRan = true }))
 	r := p.run(t, commitFirst(t), nil)
 	r.wantsClose(t, event.StateFailed, 1)
+	r.wantsReason(t, "push_not_recorded")
 	head := p.branchHead(t)
 	if head == "" || head == p.first {
 		t.Fatalf("the branch is at %q: the push did not land", head)

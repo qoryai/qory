@@ -14,6 +14,8 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/qoryai/integrations/contracts"
+
 	"github.com/qoryai/qory/internal/branchformat"
 	"github.com/qoryai/qory/internal/checkout"
 	"github.com/qoryai/qory/internal/exports"
@@ -583,12 +585,22 @@ func pushFailed(b *WorkBranch, path string, err error) error {
 	case pushRejected.MatchString(output):
 		return fmt.Errorf(textPushRefused, b.Ref, shown, host, cause)
 	case pushForbidden.MatchString(output):
-		return fmt.Errorf(textPushForbidden, shown, host, b.Ref, cause)
+		return &PushRefusedError{fmt.Sprintf(textPushForbidden, shown, host, b.Ref, cause)}
 	case answered.MatchString(output):
 		return fmt.Errorf(textPushNoCredential, shown, host, cause)
 	}
 	return fmt.Errorf(textPushNotReached, shown, host, cause)
 }
+
+// PushRefusedError is the error of a push that got 403: its text, and the end code
+// push_refused that a run closes with.
+type PushRefusedError struct{ text string }
+
+// Error is the text of the push's failure.
+func (e *PushRefusedError) Error() string { return e.text }
+
+// EndCode is push_refused.
+func (e *PushRefusedError) EndCode() contracts.EndCode { return contracts.EndCodePushRefused }
 
 // pushCause is the line of git's output with the reason a push failed, made printable: the
 // line of the ref, else the first error, else the first line. The first line of a

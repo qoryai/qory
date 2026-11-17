@@ -14,6 +14,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/qoryai/integrations/contracts"
+
 	"github.com/qoryai/qory/internal/branchformat"
 	"github.com/qoryai/qory/internal/hostgit"
 	"github.com/qoryai/qory/internal/proxygit"
@@ -223,6 +225,9 @@ func TestAForbiddenPushNamesTheThreeCauses(t *testing.T) {
 	b := &WorkBranch{Ref: testRef, system: "git.example.com"}
 	path := "acme/" + strings.Repeat("long-repository-name-", 4)
 	err := pushFailed(b, path, &gitError{line: "x", exit: 1, output: "fatal: unable to access 'x': returned error: 403"})
+	if coded, ok := err.(interface{ EndCode() contracts.EndCode }); !ok || coded.EndCode() != contracts.EndCodePushRefused {
+		t.Errorf("the error %T has no end code push_refused", err)
+	}
 	lines := strings.Split(err.Error(), "\n")
 	if len(lines) != 6 {
 		t.Fatalf("the error has %d lines, want 6:\n%v", len(lines), err)

@@ -18,6 +18,12 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Added
 
+- A run from a run code whose step fails closes `failed` with an end code as the reason,
+  where it closed with no reason before: `push_credential_missing` for a run configuration
+  with no push credential, `push_refused` for a push that got 403, `push_not_recorded` for a
+  push that Qory Apiary did not record, and `prebuilt_image_too_large` for a prebuild whose
+  repository image is over the limit. The codes are the end codes of the run outcome contract
+  of the integrations repository. The line qory prints has the cause alone.
 - After each push of its push step, qory reports the repositories the push moved to Qory
   Apiary, one entry for each repository with `system`, `path` and the full head commit, in
   push order, at most 64 in a call and at most 65536 bytes in a body. qory sends the report

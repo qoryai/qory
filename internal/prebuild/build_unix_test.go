@@ -804,6 +804,9 @@ func TestBuildRefusesARepositoryImageOverTheLargestSize(t *testing.T) {
 	if !errors.As(err, &refusal) || err.Error() != want {
 		t.Fatalf("Build: %v", err)
 	}
+	if !errors.Is(err, prebuild.ErrImageTooLarge) {
+		t.Errorf("Build: %v is not ErrImageTooLarge", err)
+	}
 	if line, _, _ := strings.Cut(err.Error(), "\n"); len(prebuild.Prefix+line) > 100 {
 		t.Errorf("line 1 with its prefix is %d characters", len(prebuild.Prefix+line))
 	}

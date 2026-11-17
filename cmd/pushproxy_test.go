@@ -58,6 +58,7 @@ func TestARunWithNoPushCredentialStopsAtThePush(t *testing.T) {
 	if _, state := r.step(); state != event.StateFailed {
 		t.Errorf("the step ended %q, want failed\n%s", state, r.out)
 	}
+	r.wantsReason(t, "push_credential_missing")
 	wants(t, r.out, noPushCredentialLines+"\n")
 	for _, line := range strings.Split(r.out, "\n") {
 		if strings.HasPrefix(line, "qory run: This run has no push credential") && len(line) > 100 {

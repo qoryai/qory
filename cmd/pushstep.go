@@ -16,6 +16,7 @@ import (
 
 	"github.com/qoryai/forager/event"
 	"github.com/qoryai/forager/session"
+	"github.com/qoryai/integrations/contracts"
 
 	"github.com/qoryai/qory/internal/branchformat"
 	"github.com/qoryai/qory/internal/exports"
@@ -321,6 +322,32 @@ func (e *noPushCredential) Error() string { return textPushNoCred }
 
 func (e *noPushCredential) Unwrap() error { return e.err }
 
+// EndCode is push_credential_missing.
+func (e *noPushCredential) EndCode() contracts.EndCode { return contracts.EndCodePushCredentialMissing }
+
+// endCoder is an error that says which end code a run that fails with it closes with.
+type endCoder interface{ EndCode() contracts.EndCode }
+
+// endCodeOf is the end code of the first error in err's tree that has one, "" for none. An
+// error that joins several errors gives the code of the first that has one, in the order
+// they were joined.
+func endCodeOf(err error) contracts.EndCode {
+	if c, ok := err.(endCoder); ok {
+		return c.EndCode()
+	}
+	switch u := err.(type) {
+	case interface{ Unwrap() []error }:
+		for _, e := range u.Unwrap() {
+			if code := endCodeOf(e); code != "" {
+				return code
+			}
+		}
+	case interface{ Unwrap() error }:
+		return endCodeOf(u.Unwrap())
+	}
+	return ""
+}
+
 // pushProxyError is the push step's error for err, the error of PushProxy: a
 // [*noPushCredential] for a run with no push credential, [textPushNoProxy] with Forager's
 // error otherwise.
@@ -521,7 +548,8 @@ func (e *pushEnding) settle(now stopRead) {
 // outcome is the outcome a run closes with after its push step failed with err. A session
 // that did not succeed keeps its end, whatever the step did. After a session that
 // succeeded, a cut step closes the run as a stop does, and a failed one closes it failed
-// with the status of err.
+// with the status of err, and with the end code of err as the reason when err has one:
+// push_credential_missing, push_refused or push_not_recorded, see [endCodeOf].
 func (e pushEnding) outcome(err error) session.Outcome {
 	switch {
 	case e.session.State != event.StateSucceeded:
@@ -531,7 +559,7 @@ func (e pushEnding) outcome(err error) session.Outcome {
 	case e.cut:
 		return session.Outcome{State: event.StateCancelled, Reason: event.ReasonTimeout, ExitCode: exitTimeout}
 	}
-	return session.Outcome{State: event.StateFailed, ExitCode: ExitCode(err)}
+	return session.Outcome{State: event.StateFailed, Reason: string(endCodeOf(err)), ExitCode: ExitCode(err)}
 }
 
 // copyOutcome is the outcome a run closes with when its copy step did not succeed or did not

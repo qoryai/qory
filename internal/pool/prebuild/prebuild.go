@@ -68,6 +68,7 @@ import (
 	"github.com/qoryai/forager/session"
 	"github.com/qoryai/forager/sink"
 	"github.com/qoryai/forager/wall"
+	"github.com/qoryai/integrations/contracts"
 
 	"github.com/qoryai/qory/internal/exports"
 	"github.com/qoryai/qory/internal/integration"
@@ -269,6 +270,8 @@ type Result struct {
 //	ctx ended                                cancelled, interrupted, -1
 //	the build: environment image not in      failed, image_missing, -1
 //	  its registry
+//	the build: repository image over the     failed, prebuilt_image_too_large, -1
+//	  limit
 //	any other failure                        failed, -1
 //	dev.qory.run.built written               succeeded, -1
 //
@@ -357,8 +360,11 @@ func Launch(ctx context.Context, s Settings, r Run) (res Result, err error) {
 	}
 	// The step, behind the wall.
 	got, err := s.step(ctx, run, r, dir)
-	if got.ImageMissing {
+	switch {
+	case got.ImageMissing:
 		out = session.Outcome{State: event.StateFailed, Reason: refusal.ImageMissing, ExitCode: -1}
+	case got.ImageTooLarge:
+		out = session.Outcome{State: event.StateFailed, Reason: string(contracts.EndCodePrebuiltImageTooLarge), ExitCode: -1}
 	}
 	if err != nil {
 		return res, err
@@ -422,7 +428,7 @@ func (s Settings) step(ctx context.Context, run Opened, r Run, dir string) (step
 	case readErr != nil:
 		return stepResult{}, readErr
 	case got.Error != "":
-		return stepResult{ImageMissing: got.ImageMissing}, errors.New(shownError(got.Error))
+		return stepResult{ImageMissing: got.ImageMissing, ImageTooLarge: got.ImageTooLarge}, errors.New(shownError(got.Error))
 	case joined != nil && joined.ExitCode != 0:
 		return stepResult{}, fmt.Errorf(textStepExited, ended(child.Result{ExitCode: joined.ExitCode}))
 	}

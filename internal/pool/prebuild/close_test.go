@@ -101,6 +101,29 @@ func throughGateway(t *testing.T, e *env) (*events, func() *closing) {
 	return evs, func() *closing { return run }
 }
 
+// TestLaunchClosesAnImageOverTheLimitWithItsEndCode is a prebuild whose repository image is over
+// the limit, through a gateway in this process: Forager's Run.Close takes the close, failed with
+// prebuilt_image_too_large and -1, as the session's check of the outcome has it.
+func TestLaunchClosesAnImageOverTheLimitWithItsEndCode(t *testing.T) {
+	e := newEnv(t)
+	e.largest = 5000000000
+	_, opened := throughGateway(t, e)
+	e.script.Build = "toobig"
+	if _, err := e.launch(t, false); err == nil {
+		t.Error("the launch succeeded")
+	}
+	run := opened()
+	if run == nil || len(run.outs) != 1 {
+		t.Fatalf("the run was closed as %+v", run)
+	}
+	if run.outs[0] != closedTooLarge || run.errs[0] != nil {
+		t.Fatalf("the close %+v: %v", run.outs[0], run.errs[0])
+	}
+	if c := run.closed[0]; c.State != "failed" || c.Reason != "prebuilt_image_too_large" || c.ExitCode != -1 {
+		t.Errorf("Run.Close returned %+v", c)
+	}
+}
+
 // TestLaunchClosesAMissingEnvironmentImageAsForagerTakesIt is a prebuild from an
 // environment image that is not in its registry, through a gateway in this process:
 // Forager's Run.Close takes the close, failed with image_missing and -1 in a run no

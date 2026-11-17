@@ -76,6 +76,33 @@ func TestParseStepErrors(t *testing.T) {
 	}
 }
 
+// TestRunStepWritesAnImageOverTheLimit writes the build's refusal of an image over the limit to
+// the result with image_too_large, which the run's close reads as prebuilt_image_too_large.
+func TestRunStepWritesAnImageOverTheLimit(t *testing.T) {
+	e := newEnv(t)
+	e.largest = 5000000000
+	e.script.Build = "toobig"
+	b, _ := json.Marshal(e.script)
+	if err := os.WriteFile(filepath.Join(e.settings.RunConfig, scriptFile), b, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out := t.TempDir()
+	st := prebuild.Step{Out: out, RunID: testRunID, ImageDestination: testDestination, EnvironmentDestination: testEnvironmentDestination, User: "1000:1000", LargestImageBytes: "5000000000"}
+	settings := prebuild.StepSettings{Dir: t.TempDir(), Env: e.stepEnv(), Docker: os.Args[0], Build: e.build}
+	err := prebuild.RunStep(context.Background(), st, settings)
+	if !errors.Is(err, devimage.ErrImageTooLarge) {
+		t.Fatalf("%v, want the image over the limit", err)
+	}
+	var res map[string]any
+	data, rerr := os.ReadFile(filepath.Join(out, prebuild.ResultFile))
+	if rerr != nil || json.Unmarshal(data, &res) != nil {
+		t.Fatalf("the result %q: %v", data, rerr)
+	}
+	if res["image_too_large"] != true || res["image_missing"] == true || res["target"] != nil {
+		t.Errorf("the result is %v", res)
+	}
+}
+
 // TestRunStepWritesItsError writes the build's error to the result, image_missing for
 // an environment image not in its registry, and a new result file alone: a result left
 // in out, or a link there, fails the step.
@@ -243,7 +270,7 @@ func TestLaunchPassesTheLargestImageToTheBuild(t *testing.T) {
 
 // TestLaunchStopsAtAnImageOverTheLargestSize is a build that refuses its image as over the
 // run's limit: the prebuild stops with the build's lines as they are, line 1 first, after
-// the prefix, and the run closes failed with nothing reported.
+// the prefix, and the run closes failed with prebuilt_image_too_large and nothing reported.
 func TestLaunchStopsAtAnImageOverTheLargestSize(t *testing.T) {
 	e := newEnv(t)
 	e.largest = 5000000000
@@ -255,7 +282,7 @@ func TestLaunchStopsAtAnImageOverTheLargestSize(t *testing.T) {
 	if line, _, _ := strings.Cut(err.Error(), "\n"); len(line) > 100 {
 		t.Errorf("line 1 is %d characters", len(line))
 	}
-	if len(e.reported()) != 0 || !slices.Equal(e.closed(), []session.Outcome{closedFailed}) {
+	if len(e.reported()) != 0 || !slices.Equal(e.closed(), []session.Outcome{closedTooLarge}) {
 		t.Errorf("reported %+v, closed %+v", e.reported(), e.closed())
 	}
 }
