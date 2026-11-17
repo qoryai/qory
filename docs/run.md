@@ -3491,7 +3491,9 @@ states more tests, failures or skipped tests than its testcases have, or a `fail
 **State.** The suite is `failed` when the script ends before the command ran, when the command
 exits other than 0, when a test failed, and when it ran 0 tests. Skipped tests do not fail it.
 With exit status 0 and no readable result file, the suite is `passed` and has no counts.
-`timeout` is a step that the limit cut. A step that a stop of `qory run` cut is `stopped`.
+`timeout` is a step that the limit cut. A `timeout` before the command started counts as a
+suite that did not start; a `timeout` after the command started is red. A step that a stop of
+`qory run` cut is `stopped`.
 
 **After the session.** When the session succeeded and the suite ended, qory prints one
 line: `the full suite passed on <short commit>: 2 tests`, `the full suite failed on <short commit>: 1
@@ -3566,7 +3568,11 @@ order of preference:
   support:`. On a machine that runs macOS it is `Contact support: the full suite needs a Linux
   machine, and this run's machine runs Docker on macOS.` Elsewhere it is `Contact support: the
   full suite did not start, because its container exited with status <n>.`, or `... because its
-  container did not start.` for -1. The line at the end of the run has the same words.
+  container did not start.` for -1. The line at the end of the run has the same cause in fewer
+  words, so that it fits 100 characters with the prefix `qory run: `: on macOS `Contact support:
+  the full suite needs a Linux machine; this machine runs Docker on macOS.`, and for a result
+  file that is no path below the repository `The full suite did not start: the result file is no
+  path below the repository.`
 - With a host that the proxy refused while the after step ran, `Allow <host> in the run's policy,
   or change the suite: it failed after the refusal.` With more hosts, `Allow <host> and N more in
   the run's policy, or change the suite: it failed after the refusals.` The words take 77
