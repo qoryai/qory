@@ -1095,9 +1095,6 @@ release may change what an existing document does, and states it under Upgrading
   workflow, such as `agents/demo-author` and `capture-demos`, and the fix: add a module
   that fills the role, or drop the workflow. The other failures of the same check follow
   it in the same error. Before, the line showed only the skill and the agent.
-- A push check's container runs under the `runtime` of the run's image in `wall.images`,
-  such as `runsc` (gVisor), as the run's container does. Before, it ran under the
-  engine's default runtime.
 
 ### Removed
 
@@ -1107,6 +1104,9 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Fixed
 
+- A push check's container runs under the `runtime` that `wall.images` sets for the
+  image it runs in, such as `runsc` (gVisor). Until now, it ran under the engine's
+  default runtime.
 - A Copilot CLI session gets the harness's hooks in a repository that commits
   `.github/hooks/hooks.json`. qory links `settings/copilot/hooks.json` as
   `.github/hooks/qory-hooks.json`, and Copilot CLI runs the hooks of both files. Until

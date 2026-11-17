@@ -421,6 +421,19 @@ func TestTheLoadedCheckerHasTheRuntime(t *testing.T) {
 	}
 }
 
+// TestAReferenceDefaultIgnoresTheRunsImageRuntime is a run whose policy selects an entry
+// with a runtime while the default is a reference: the checks run in the default, with no
+// runtime.
+func TestAReferenceDefaultIgnoresTheRunsImageRuntime(t *testing.T) {
+	run := imageOnly{img: session.Image{Name: "agent", Ref: "registry.example/agent:1", Runtime: "runsc"}}
+	spec := &runSpec{}
+	spec.Image = "registry.example/other:2"
+	spec.Images = []session.Image{{Name: "agent", Ref: "registry.example/agent:1", Runtime: "runsc"}}
+	if got := checkRuntime(run, spec); got != "" {
+		t.Errorf("runtime %q for a default that is a reference, want none", got)
+	}
+}
+
 // checkNotSet is an opened run whose SetRunAPICheck returns err.
 type checkNotSet struct {
 	openedRun

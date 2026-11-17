@@ -270,9 +270,9 @@ func checkImage(run openedRun, spec *runSpec) string {
 	return spec.Image
 }
 
-// checkRuntime is the --runtime of the checks' container, as Forager sets it for the run's
-// (gateway/internal/run/config.go:435-437 an entry's runtime; :443-447 "" for a default that
-// is a bare reference; wall/docker.go:1222-1224 no flag for ""). No default: the run's image.
+// checkRuntime is the --runtime of the checks' container, the one Forager gives the default
+// image: the entry's runtime, "" for a default that is a bare reference, and for no default
+// the run's image's runtime.
 func checkRuntime(run openedRun, spec *runSpec) string {
 	if spec.Image == "" {
 		return run.Image().Runtime
