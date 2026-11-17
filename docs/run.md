@@ -3272,9 +3272,10 @@ that the gate of the run's stage offers, in lower-case words joined by hyphens, 
 characters, and `--track-reason <text>` is the reason, one sentence on one line of 1 to
 300 characters. Pass both or neither. `--track-kind <text>` adds the kind of the change, one
 line of 1 to 80 characters, and needs the pair. qory sends and keeps nothing for a mistake,
-and line 1 of the error is the fix. A command line with one of the pair, an id that breaks a
-rule, and a reason that breaks a rule stop with exit 2. A kind with no pair, and a kind that
-breaks a rule, stop with exit 4:
+and line 1 of the error is the fix. A `--track` without `--track-reason`, a `--track-reason`
+without `--track`, an id that breaks a rule, and a reason that breaks a rule stop with exit 2. A
+`--track-kind` without `--track`, with or without `--track-reason`, and a kind that breaks a rule,
+stop with exit 4:
 
 ```text
 qory run verdict passed --track small-change --track-kind "a text that the product shows" \

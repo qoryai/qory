@@ -167,11 +167,9 @@ func TestRunVerdictChecksItsTrack(t *testing.T) {
 		{"reason with a tab", pair("small-change", "One\tfile."),
 			"Write --track-reason on one line. The reason has a tab (U+0009)."},
 		{"reason with a zero-width space", pair("small-change", "One​file."),
-			"Remove the character U+200B from --track-reason. The contract's line excludes it."},
+			"Remove the character U+200B from --track-reason. The verdict format excludes it."},
 		{"kind with the id only", []string{"run", "verdict", "passed", "--track", "small-change", "--track-kind", "A comment"},
 			"Pass --track-reason <text> with --track: a track needs the reason for it."},
-		{"kind with the reason only", []string{"run", "verdict", "passed", "--track-reason", trackReason, "--track-kind", "A comment"},
-			"Pass --track <id> with --track-reason: a reason needs the track it is for."},
 		{"track flag on another command", []string{"run", "verdict", "passed", "--track-id", "x"}, "unknown flag: --track-id"},
 		{"track flag on push", []string{"artifact", "push", "demo", "-", "--track", "small-change"}, "unknown flag: --track"},
 	} {
@@ -311,7 +309,7 @@ func TestRunVerdictKeepsTheOtherExitStatuses(t *testing.T) {
 	}
 }
 
-// TestRunVerdictRefusesAWrongKind stops each kind that has no pair or breaks a rule with
+// TestRunVerdictRefusesAWrongKind stops each kind that has no --track or breaks a rule with
 // exit 4 and an error whose line 1 has at most 100 characters and the fix, before anything
 // is sent or kept, in a run and outside it.
 func TestRunVerdictRefusesAWrongKind(t *testing.T) {
@@ -324,6 +322,10 @@ func TestRunVerdictRefusesAWrongKind(t *testing.T) {
 	}{
 		{"kind alone", []string{"run", "verdict", "passed", "--track-kind", "A comment"},
 			"Pass --track <id> and --track-reason <text> with --track-kind: a kind belongs to a track."},
+		{"kind with the reason only", []string{"run", "verdict", "passed", "--track-reason", trackReason, "--track-kind", "A comment"},
+			"Pass --track <id> with --track-kind: a kind belongs to a track."},
+		{"empty kind with the reason only", []string{"run", "verdict", "passed", "--track-reason", trackReason, "--track-kind", ""},
+			"Pass --track <id> with --track-kind: a kind belongs to a track."},
 		{"empty kind alone", []string{"run", "verdict", "passed", "--track-kind", ""},
 			"Pass --track <id> and --track-reason <text> with --track-kind: a kind belongs to a track."},
 		{"empty kind", []string{"run", "verdict", "passed", "--track", "small-change", "--track-reason", trackReason, "--track-kind", ""},
@@ -339,7 +341,7 @@ func TestRunVerdictRefusesAWrongKind(t *testing.T) {
 			"Write --track-kind on one line. The kind has a line break (U+000A)."},
 		{"kind with a bidirectional control", []string{"run", "verdict", "passed", "--track", "small-change", "--track-reason", trackReason,
 			"--track-kind", "A text\u202e"},
-			"Remove the character U+202E from --track-kind. The contract's line excludes it."},
+			"Remove the character U+202E from --track-kind. The verdict format excludes it."},
 	} {
 		for _, inRun := range []bool{true, false} {
 			t.Run(fmt.Sprintf("%s in a run %v", c.name, inRun), func(t *testing.T) {

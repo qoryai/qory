@@ -892,7 +892,7 @@ A verdict of any kind may propose a track:
 `qory run verdict --track <id> --track-reason <text> [--track-kind <text>]` sends the track.
 It sends `id` and `reason` together or not at all, sends `kind` only with them, and checks
 all three against this schema before it sends or keeps anything. It exits 2 for an id, a
-reason or a pair that breaks a rule, and 4 for a kind that breaks a rule, and when Qory
+reason or a pair that breaks a rule, and 4 for a kind with no `--track` or a kind that breaks a rule, and when Qory
 Apiary refuses the verdict with 422 `invalid_artifact`, such as for a track that the gate
 does not offer.
 

@@ -789,7 +789,7 @@ the gate of the run's stage offers, such as small-change, and --track-reason wit
 reason, one sentence on one line of 1 to 300 characters. Pass both or neither. The optional
 --track-kind is the kind of the change, one line of 1 to 80 characters; it needs the pair.
 qory checks the three before it sends or keeps anything. It exits ` + strconv.Itoa(ExitInput) + ` for a mistake
-in the id, the reason or the pair, and ` + strconv.Itoa(ExitArtifactRefused) + ` for a mistake in the kind. It also
+in the id, the reason or the pair, and ` + strconv.Itoa(ExitArtifactRefused) + ` for a kind with no --track or a wrong kind. It also
 exits ` + strconv.Itoa(ExitArtifactRefused) + ` when Qory Apiary refuses the verdict with 422 invalid_artifact, which
 includes a track that the gate does not offer. Line 1 of the error is the fix, and Qory
 Apiary's text follows.
@@ -901,7 +901,7 @@ func verdictError(err error) error {
 }
 
 // readTrack returns the track of the flags of c, or nil for none. A wrong id, reason or pair
-// is an input error (exit 2); a kind with no pair or a wrong kind is [kindRefused] (exit 4).
+// is an input error (exit 2); a kind with no --track or a wrong kind is [kindRefused] (exit 4).
 func readTrack(c *cobra.Command) (*runapi.Track, error) {
 	flags := c.Flags()
 	id, _ := flags.GetString("track")
@@ -912,8 +912,10 @@ func readTrack(c *cobra.Command) (*runapi.Track, error) {
 	switch {
 	case !idGiven && !kindGiven && !reasonGiven:
 		return nil, nil
-	case !idGiven && !reasonGiven:
+	case kindGiven && !idGiven && !reasonGiven:
 		return nil, kindRefused(errors.New("Pass --track <id> and --track-reason <text> with --track-kind: a kind belongs to a track."))
+	case kindGiven && !idGiven:
+		return nil, kindRefused(errors.New("Pass --track <id> with --track-kind: a kind belongs to a track."))
 	case !reasonGiven:
 		return nil, input(errors.New("Pass --track-reason <text> with --track: a track needs the reason for it."))
 	case !idGiven:
@@ -942,7 +944,7 @@ func readTrack(c *cobra.Command) (*runapi.Track, error) {
 }
 
 // checkLine checks the value of flag, which the message calls what and describes as want:
-// 1 to limit characters on one line, with none that the contract's line excludes.
+// 1 to limit characters on one line, with none that the verdict format excludes.
 func checkLine(flag, what, want, value string, limit int) error {
 	length := utf8.RuneCountInString(value)
 
@@ -960,7 +962,7 @@ func checkLine(flag, what, want, value string, limit int) error {
 		case r == '\n' || r == '\r':
 			return fmt.Errorf("Write %s on one line. The %s has a line break (%U).", flag, what, r)
 		case verdictformat.Excluded(r):
-			return fmt.Errorf("Remove the character %U from %s. The contract's line excludes it.", r, flag)
+			return fmt.Errorf("Remove the character %U from %s. The verdict format excludes it.", r, flag)
 		}
 	}
 
