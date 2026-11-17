@@ -92,6 +92,48 @@ func TestLowerAccessTakesTheLowerOfTwoLevels(t *testing.T) {
 	}
 }
 
+// TestLoadReadsTheTier reads each workflow's tier as written, and a workflow with no
+// tier, or none listed, as none.
+func TestLoadReadsTheTier(t *testing.T) {
+	isolate(t)
+	p, err := Load(write(t, withWorkflows("  deep:\n    tier: thinking\n"+
+		"  quick:\n    tier: fast\n  small:\n    tier: light\n"+
+		"  plain:\n    access: write\n    time_limit: 45m\n")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, want := range map[string]string{
+		"deep": "thinking", "quick": "fast", "small": "light", "plain": "", "none": "",
+	} {
+		if got := p.Workflows[name].Tier; got != want {
+			t.Errorf("%s: tier %q, want %q", name, got, want)
+		}
+	}
+	if p.AccessOf("plain") != AccessWrite || p.TimeLimitOf("plain") != 45*time.Minute {
+		t.Errorf("plain: %+v", p.Workflows["plain"])
+	}
+	p, err = Load(write(t, valid))
+	if err != nil || p.Workflows != nil {
+		t.Errorf("no workflows: %+v, %v", p, err)
+	}
+}
+
+// TestLoadRefusesATierThatIsNoTier refuses a tier that is not light, fast or thinking,
+// with the fix first and the file last.
+func TestLoadRefusesATierThatIsNoTier(t *testing.T) {
+	isolate(t)
+	for _, value := range []string{"fastest", "Thinking", "${qory:light}"} {
+		path := write(t, withWorkflows("  hello:\n    tier: \""+value+"\"\n"))
+		_, err := Load(path)
+		want := "Set workflows.hello.tier to a valid tier.\n" +
+			"  The tiers are light, fast, and thinking.\n  The value is \"" + value + "\".\n" +
+			"  workflows.hello is in " + path + "."
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%q: %v, want %q", value, err, want)
+		}
+	}
+}
+
 // TestLoadRefusesABrokenWorkflow refuses a workflow name outside the contract's form, a
 // time_limit that is no duration or not above zero, an access other than read,
 // write-no-push or write,
@@ -113,6 +155,9 @@ func TestLoadRefusesABrokenWorkflow(t *testing.T) {
 			"  The levels are read, write-no-push, and write.\n  The value is \"Write\".\n" +
 			"  workflows.hello is in {path}."},
 		{"  hello:\n    access: write\n    time_limit: 0s\n", "Set workflows.hello.time_limit to a duration above zero"},
+		{"  hello:\n    tier: fastest\n", "Set workflows.hello.tier to a valid tier.\n" +
+			"  The tiers are light, fast, and thinking.\n  The value is \"fastest\".\n" +
+			"  workflows.hello is in {path}."},
 		{"  hello:\n    prompt: x\n", `Key "prompt" is not one qory-stack.yaml reads.`},
 	} {
 		path := write(t, withWorkflows(c.body))
@@ -164,6 +209,11 @@ func TestTheSchemaTakesTheWorkflows(t *testing.T) {
 		{"  hello:\n    access: write-no-push\n", true},
 		{"  hello:\n    access: admin\n", false},
 		{"  hello:\n    access: Write\n", false},
+		{"  hello:\n    tier: light\n", true},
+		{"  hello:\n    tier: fast\n", true},
+		{"  hello:\n    tier: thinking\n    access: read\n", true},
+		{"  hello:\n    tier: fastest\n", false},
+		{"  hello:\n    tier: Thinking\n", false},
 		{"  hello:\n    prompt: x\n", false},
 	} {
 		var doc any
@@ -261,5 +311,22 @@ func TestTheAccessRefusalFirstLineFitsWithTheLongestName(t *testing.T) {
 	}
 	if len(WorkflowEntry(name)) != 64 {
 		t.Errorf("the entry name has %d characters, want 64", len(WorkflowEntry(name)))
+	}
+}
+
+// TestTheTierRefusalFirstLineFitsWithTheLongestName is a workflow named with 55
+// characters and a tier that is no tier: the first line of the refusal has at most 100
+// characters and starts with the fix.
+func TestTheTierRefusalFirstLineFitsWithTheLongestName(t *testing.T) {
+	isolate(t)
+	name := "a" + strings.Repeat("b", 54)
+	_, err := Load(write(t, withWorkflows("  "+name+":\n    tier: fastest\n")))
+	if err == nil {
+		t.Fatal("no refusal")
+	}
+	first, _, _ := strings.Cut(err.Error(), "\n")
+	want := "Set workflows." + name + ".tier to a valid tier."
+	if first != want || len(first) > 100 {
+		t.Errorf("first line %q (%d characters), want %q within 100", first, len(first), want)
 	}
 }

@@ -1185,6 +1185,65 @@ func TestARealCheckRunsInTheEngine(t *testing.T) {
 	}
 }
 
+// TestHasRuntimeReadsTheEnginesRuntimes is the check that the engine has the checker's
+// runtime: docker info with the list of runtimes, true when the list has the name, false
+// with no error when it does not, true for a checker with no runtime without a command,
+// and an error for an info that fails or a list that does not read.
+func TestHasRuntimeReadsTheEnginesRuntimes(t *testing.T) {
+	for name, c := range map[string]struct {
+		runtime string
+		out     string
+		exitErr error
+		errOut  string
+		has     bool
+		wantErr string
+		asked   bool
+	}{
+		"present":    {runtime: "runsc", out: `{"runc":{"path":"runc"},"runsc":{"path":"runsc"}}`, has: true, asked: true},
+		"missing":    {runtime: "runsc", out: `{"runc":{"path":"runc"}}`, asked: true},
+		"no runtime": {has: true},
+		// Docker starts a container under a shim that its list does not have: a name with
+		// a "." after a non-empty part and no "/", see shimRuntimeName.
+		"shim not listed":         {runtime: "io.containerd.runsc.v1", out: `{"runc":{}}`, has: true},
+		"another shim not listed": {runtime: "com.example.shim.v1", out: `{"runc":{}}`, has: true},
+		"no dot":                  {runtime: "runsc2", out: `{"runc":{}}`, asked: true},
+		"starts with a dot":       {runtime: ".shim.v1", out: `{"runc":{}}`, asked: true},
+		"with a slash":            {runtime: "/x/runsc", out: `{"runc":{}}`, asked: true},
+		"dotted with a slash":     {runtime: "a.b/c", out: `{"runc":{}}`, asked: true},
+		"engine":                  {runtime: "runsc", exitErr: errors.New("exit status 1"), errOut: "Cannot connect to the Docker daemon\n", wantErr: "the inspect of the engine's runtimes failed: Cannot connect to the Docker daemon", asked: true},
+		"null":                    {runtime: "runsc", out: "null", wantErr: "the engine's list of runtimes does not read", asked: true},
+		"not a list":              {runtime: "runsc", out: "<no value>", wantErr: "the engine's list of runtimes does not read", asked: true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newFixture(t, "#!/usr/bin/env node")
+			f.c.Runtime = c.runtime
+			var argv []string
+			f.c.Engine.Run = func(_ context.Context, a []string, stdout, stderr io.Writer) error {
+				argv = a
+				io.WriteString(stdout, c.out+"\n")
+				io.WriteString(stderr, c.errOut)
+				return c.exitErr
+			}
+			has, err := f.c.HasRuntime(context.Background())
+			got := ""
+			if err != nil {
+				got = err.Error()
+			}
+			if has != c.has || got != c.wantErr {
+				t.Errorf("HasRuntime = %v, %q, want %v, %q", has, got, c.has, c.wantErr)
+			}
+			if (argv != nil) != c.asked {
+				t.Errorf("the engine ran %q, want a command: %v", argv, c.asked)
+			}
+			if c.asked {
+				if want := []string{"/usr/local/bin/docker", "info", "--format", "{{json .Runtimes}}"}; !slices.Equal(argv, want) {
+					t.Errorf("the engine ran %q, want %q", argv, want)
+				}
+			}
+		})
+	}
+}
+
 // TestHasImageInspectsWithoutAPull is the check that the engine has the checker's image:
 // docker image inspect of the image, true when it succeeds, false with no error when the
 // engine, Docker or Podman, does not have the image, and an error for any other failure.

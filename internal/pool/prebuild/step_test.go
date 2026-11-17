@@ -30,15 +30,21 @@ func TestStepArgsReadBack(t *testing.T) {
 	for _, st := range []prebuild.Step{
 		testStep("/w/out"),
 		{Out: "/w/out", RunID: testRunID, ImageDestination: testDestination, EnvironmentImage: testEnvImage, User: "1000:1000"},
+		{Out: "/w/out", RunID: testRunID, ImageDestination: testDestination, EnvironmentDestination: testEnvironmentDestination, User: "1000:1000", LargestImageBytes: "9223372036854775807"},
 	} {
 		got, err := prebuild.ParseStep(st.Args())
 		if err != nil || got != st {
 			t.Errorf("%q read as %+v, %v; want %+v", st.Args(), got, err, st)
 		}
 	}
-	if args := testStep("/w/out").Args(); slices.Contains(args, "--environment-image") {
+	if args := testStep("/w/out").Args(); slices.Contains(args, "--environment-image") || slices.Contains(args, "--largest-image-bytes") {
 		t.Errorf("%q has an empty member", args)
 	}
+}
+
+// largestWant is the start of the error of a --largest-image-bytes of v.
+func largestWant(v string) string {
+	return "give qory run prebuild-step --largest-image-bytes an integer from 1 to 9223372036854775807: it got \"" + v + "\""
 }
 
 // TestParseStepErrors is an error for arguments the helper is not run with, and for a
@@ -50,13 +56,18 @@ func TestParseStepErrors(t *testing.T) {
 		args []string
 		want string
 	}{
-		{"removed --agent-image", append(slices.Clone(args), "--agent-image", "x"), "give qory run prebuild-step only --out, --run-id, --image-destination, --environment-destination, --environment-image and --user: it does not take \"--agent-image\""},
-		{"unknown flag", append(slices.Clone(args), "--tag", "x"), "give qory run prebuild-step only --out, --run-id, --image-destination, --environment-destination, --environment-image and --user: it does not take "},
+		{"removed --agent-image", append(slices.Clone(args), "--agent-image", "x"), "give qory run prebuild-step only --out, --run-id, --image-destination, --environment-destination, --environment-image, --user and --largest-image-bytes: it does not take \"--agent-image\""},
+		{"unknown flag", append(slices.Clone(args), "--tag", "x"), "give qory run prebuild-step only --out, --run-id, --image-destination, --environment-destination, --environment-image, --user and --largest-image-bytes: it does not take "},
 		{"a flag twice", append(slices.Clone(args), "--user", "0:0"), "give --user once: qory run prebuild-step got it twice"},
 		{"no value", append(slices.Clone(args), "--environment-image"), "give a value after --environment-image: qory run prebuild-step got none"},
 		{"relative out", testStep("out").Args(), "give qory run prebuild-step --out with an absolute path: it writes its result there"},
 		{"no out", args[2:], "give qory run prebuild-step --out with an absolute path: it writes its result there"},
 		{"run id", append(slices.Clone(args[:2]), "--run-id", "../x"), "the run id is not a UUID"},
+		{"largest 0", append(slices.Clone(args), "--largest-image-bytes", "0"), largestWant("0")},
+		{"largest -1", append(slices.Clone(args), "--largest-image-bytes", "-1"), largestWant("-1")},
+		{"largest +5", append(slices.Clone(args), "--largest-image-bytes", "+5"), largestWant("+5")},
+		{"largest a fraction", append(slices.Clone(args), "--largest-image-bytes", "1.5"), largestWant("1.5")},
+		{"largest above int64", append(slices.Clone(args), "--largest-image-bytes", "9223372036854775808"), largestWant("9223372036854775808")},
 		{"both environment members", prebuild.Step{Out: "/w", RunID: testRunID, ImageDestination: testDestination, EnvironmentDestination: testEnvironmentDestination, EnvironmentImage: testEnvImage, User: "1:1"}.Args(), "ask Qory Apiary's instance admin: the run has both or neither"},
 	} {
 		if _, err := prebuild.ParseStep(c.args); err == nil || !strings.HasPrefix(err.Error(), c.want) {
@@ -212,5 +223,50 @@ func TestLaunchNeedsTheRegistry(t *testing.T) {
 	e.script.EnvironmentImage = testEnvImage
 	if _, err := e.launch(t, false); err != nil {
 		t.Errorf("from an environment image: %v", err)
+	}
+}
+
+// TestLaunchPassesTheLargestImageToTheBuild is a run with LargestImageBytes: the step's
+// build is given it, and a run without it gives the build 0, no limit.
+func TestLaunchPassesTheLargestImageToTheBuild(t *testing.T) {
+	for _, largest := range []int64{10000000000, 1, 0} {
+		e := newEnv(t)
+		e.largest = largest
+		if _, err := e.launch(t, false); err != nil {
+			t.Fatalf("%d: %v", largest, err)
+		}
+		if len(e.built) != 1 || e.built[0].LargestImageBytes != largest {
+			t.Errorf("%d: the build was given %+v", largest, e.built)
+		}
+	}
+}
+
+// TestLaunchStopsAtAnImageOverTheLargestSize is a build that refuses its image as over the
+// run's limit: the prebuild stops with the build's lines as they are, line 1 first, after
+// the prefix, and the run closes failed with nothing reported.
+func TestLaunchStopsAtAnImageOverTheLargestSize(t *testing.T) {
+	e := newEnv(t)
+	e.largest = 5000000000
+	e.script.Build = "toobig"
+	_, err := e.launch(t, false)
+	if err == nil || err.Error() != "prebuild: "+testTooBig {
+		t.Fatalf("%q, want %q", err, "prebuild: "+testTooBig)
+	}
+	if line, _, _ := strings.Cut(err.Error(), "\n"); len(line) > 100 {
+		t.Errorf("line 1 is %d characters", len(line))
+	}
+	if len(e.reported()) != 0 || !slices.Equal(e.closed(), []session.Outcome{closedFailed}) {
+		t.Errorf("reported %+v, closed %+v", e.reported(), e.closed())
+	}
+}
+
+// TestShownErrorKeepsLineFeedsAndMapsControlCharacters is a step's error with an escape,
+// a carriage return and a line feed: the line feed stays, so the lines of a refusal are
+// kept, and each other control character is shown as "?", so the error cannot move the
+// cursor or recolor a terminal.
+func TestShownErrorKeepsLineFeedsAndMapsControlCharacters(t *testing.T) {
+	const text, want = "a\x1b[31mb\rc\nd\x00e\x7ff\u0085g", "a?[31mb?c\nd?e?f?g"
+	if got := prebuild.ShownError(text); got != want {
+		t.Errorf("shown %q, want %q", got, want)
 	}
 }

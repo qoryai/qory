@@ -31,6 +31,31 @@ release may change what an existing document does, and states it under Upgrading
   schema. Line 1 of the error is the fix, with at most 98 characters, and Qory Apiary's
   text follows on line 2. `qory artifact push` still exits 1 for `invalid_artifact`. See
   The verdict format in `contracts/harness/v1/README.md`.
+- After each push of its push step, qory reports the repositories the push moved to Qory
+  Apiary, one entry for each repository with `system`, `path` and the full head commit, in
+  push order, at most 64 in a call and at most 65536 bytes in a body. qory sends the report
+  over the link of the run's gateway, which forwards it to `POST
+  /v1/runs/<id>/pushed-commits`. A push that moved no repository sends nothing. Each send
+  waits at most 65 s (the gateway waits 60 s for each call to Qory Apiary), not counting a
+  reopen of the run. A repeated report is safe: Qory Apiary records the same commit for the
+  same run, system and path once. qory sends a call again after a send with no response, a
+  status of 500 or above (the gateway's 502 `control_plane_unavailable` and 503 among them)
+  or a 429, 3 times, after 1 s, 2 s and 4 s. On 409 `run_ended`, or when the gateway returns
+  410 because the run ended during the call, qory pushes nothing more and starts no later
+  session, and the run closes with the end that was recorded. qory prints `qory run: Qory
+  Apiary ended this run, so qory pushes nothing more and no later session starts.` when Qory
+  Apiary ended it, and `qory run: The run ended (<code>), so qory pushes nothing more and no
+  later session starts.` for a 410 of the gateway, with its code `run_closed`, `stopped`,
+  `session_lost` or `batch_refused`. A second line follows: `qory run: The last push is on
+  the branch, and Qory Apiary did not record it.` On any other 4xx status, the gateway's 413
+  `payload_too_large` among them, or when the retries are used up, the run ends `failed`
+  before the next session with `qory run: Contact support: Qory Apiary did not record the
+  last push.`, then `  qory pushed <commit> to qory/<work item id>.`, then `Qory Apiary
+  returned <status>: <message or code>`, or `The gateway returned <status>: <code>` for a
+  status that the gateway returned.
+- A stack's workflow may set `tier` to `light`, `fast` or `thinking`, which names the
+  main session's model and effort for a dispatched run. Any other value refuses the
+  stack. `qory run` does not read it.
 - The `agent` image has the Node packages `typescript` 5.9.3, `libpg-query` 18.2.4,
   `parse5` 8.1.1, `postcss` 8.5.33 and `postcss-scss` 4.0.9 in `/opt/qory/parsers`. The
   folder belongs to root and no other user can write to it. A script loads a package with
@@ -233,8 +258,8 @@ release may change what an existing document does, and states it under Upgrading
   in `docs/run.md` for what is not masked and Forager's limits.
 - Give a workflow of a stack a time limit with `workflows.<name>.time_limit` in its
   `qory-stack.yaml`, such as `workflows: {example: {time_limit: 45m}}`. A run from a run
-  code takes its time limit from Qory Apiary's `run_settings.time_limit_minutes`, else
-  from its workflow's `time_limit`, else 3 hours.
+  code takes its time limit from the `time_limit_minutes` of its documents, else from its
+  workflow's `time_limit`, else 3 hours.
 - Declare a workflow's access level with `workflows.<name>.access` in its
   `qory-stack.yaml`, `read` or `write`, and `read` when left out. qory stops on any
   other value.
@@ -493,15 +518,66 @@ release may change what an existing document does, and states it under Upgrading
   qory serves no path on it, and answers `404` to a request of the session that runs. The
   setup container of `wall.setup: outside` gets neither the variable nor the route. See The
   route to qory in `docs/run.md`.
+- A session runs the repository's full test suite when the run documents have `full_suite`
+  true. Forager's after step runs it after the agent's container is removed: when HEAD moved,
+  the `full` command of the build plan that the work item had at the launch runs in a fresh
+  clone of HEAD, in a container of the run's image on the run's network, so the run's egress
+  policy applies. A session that left HEAD where it started runs no suite. The limit is
+  `command_limits_minutes.full_suite`, 60 minutes by default, as the after step's time limit.
+  A suite that ran and failed posts `changes-requested` with one point over a `passed` verdict
+  or none, or adds the point to an `escalate`, and does not end the run `failed`; when the
+  proxy refused a host while the suite ran, the point has the host. A suite that did not start
+  posts `escalate` with the point `The full suite did not start: <cause>.`; for a cause in the
+  build plan that the agent wrote, such as no `full` row, it posts `changes-requested` with the
+  point and a fix, and over an agent's `changes-requested` it adds the point. A session
+  whose after step did not run posts `escalate` with `The full suite did not run: ...`, and so does
+  a run API that cannot be reached at the launch. A container that did not start posts `Contact
+  support: ...`, with the macOS case named. qory prints the same cause, and the fix first, as a line at
+  the launch, and the cause alone as the line at the end of the run. A step that reaches its limit
+  before the suite's command started posts `escalate`; one that reaches it after stays red. A green suite posts
+  nothing. If qory cannot post the verdict, the run closes `failed`. A stop of `qory run` during
+  the suite closes the run `cancelled`, with the reason `interrupted`. See The full suite in
+  `docs/run.md`.
 
 ### Changed
 
+- A run from a run code reads its time limit from `time_limit_minutes` at the top of the
+  run's documents. The documents have no `run_settings.time_limit_minutes` any more, and
+  qory stops a run whose documents have one. A run whose documents set no
+  `time_limit_minutes` keeps the limit of its workflow, else 3 hours. The documents can
+  also contain `shared_run` and `full_suite`. With `full_suite` true, the session runs the full
+  test suite when it ends, as The full suite in `docs/run.md` describes; qory reads `shared_run`
+  and changes nothing for it.
+- The push step of a write run pushes through the run's push proxy, which sets the run
+  configuration's push credentials alone, and the run's proxy no longer adds push
+  credentials. A run with no push credential stops at the push with `Contact
+  support: this run has no push credential, so qory pushed nothing.` The fetch, the
+  runtime's install, and a prebuild stay on the run's proxy.
+- A prebuild started from Qory Apiary applies the instance's Largest prebuilt image
+  setting, which the run documents carry as `largest_prebuilt_image_bytes`, in decimal
+  bytes. The limit applies to the repository's image, before qory adds Chromium, ffmpeg
+  and the parsers. When that image is larger, the prebuild stops before the tools step with
+  `Make the image smaller, or contact support to raise Largest prebuilt image.` on line 1,
+  then the size and the limit in GB and in bytes, and removes an image the build made. An
+  image of exactly the limit is kept, and without the member any size is kept. The last
+  line of a successful prebuild still prints the final size. `qory prebuild` has no limit.
+  See `docs/run.md`.
+- A push check's container runs under the `runtime` of the `wall.images` entry that the
+  run's policy selects, such as `runsc` (gVisor), when that entry has one. Before, it ran
+  under the default image's `runtime` even when the run's container ran under another.
+- A run with push checks stops before its setup, with exit 2, when the engine's `docker
+  info` does not list the `runtime` that the checks' container runs under, such as
+  `runsc`: `Install the container runtime on the engine, and run again.`, and on the next
+  line the runtime. Before, the checks failed at the first push. An engine whose `docker
+  info` fails lets the run go on, and so does a runtime name that Docker starts as a
+  containerd shim: a `.` after a first part and no `/`, such as `io.containerd.runsc.v1`. A
+  runtime name with a `/` that the list omits stops the run with `Fix the runtime name in
+  wall.images, and run again.`
 - A prebuild keeps an image of any size, and the last line of the prebuild prints the size.
 - A prebuild stops, before it builds the image, when the base image is not Debian or
   Ubuntu 22.04 or 24.04, or has no `apt-get`: `use a Debian or Ubuntu image: the build
   adds Chromium only to these`. Alpine bases and other Ubuntu
   releases that built before are refused.
-
 - The `agent`, `agent-docker` and `prebuild` images contain no agent runtime. The machine
   installs the runtime at run time, and Forager mounts it read-only at
   `/qory/runtime/<runtime>`. `qory image check` checks no runtime and prints no runtime
@@ -525,17 +601,20 @@ release may change what an existing document does, and states it under Upgrading
   `exports` section, of the program of an adapter or a tool, and of the push checks, shows
   the fix, in at most 100 characters, and the indented lines after it show the cause, as the
   compose errors do. Which input fails, and the exit status, stay the same.
-- When the push of a run's work gets 403 from the run's gateway, the first line of the
-  error is `Contact support: the push was refused (403).` The line `One of these stopped
-  it:` follows, then one line for each possible cause: the gateway allows a push only to
-  the run's branch, `refs/heads/qory/<work item>`; the connection's setup has no path rule
-  for `/<repository>.git/git-receive-pack`, or no credential with write access; or the
-  forge stopped the push, by its permission for the run's credential or a branch rule. The
-  exit status stays the same.
-- qory uses Forager 3d4ec18a. Its gateway returns 403 for a git push through a credential
+- When the push of a run's work gets 403 from the run's push proxy, the first line of the
+  error is `Contact support: the push was refused (403).` The line `One of these most
+  likely stopped it:` follows, then one line for each likely cause: the push proxy refuses
+  a push that is not a plain push to the `push_ref` of the push credential (for example a
+  signed push or a push with push options), and qory pushes to
+  `refs/heads/qory/<work item>`; the push credential has no item for
+  `/<repository>.git/git-receive-pack` on the host, and the push proxy refuses every other
+  host and path; or the forge stopped the push, by its permission for the push credential
+  or a branch rule. The exit status stays the same.
+- qory uses Forager 2052521e. Its gateway returns 403 for a git push through a credential
   that has no push ref, so a `git push` through a credential that forager.yaml defines
-  with `env` or `file` gets 403. The push step's credential, which Qory Apiary applies,
-  has a push ref for the run's branch, so the push step is not affected.
+  with `env` or `file` gets 403. The push step of a write run goes through the run's push
+  proxy, which sets only the run configuration's push credentials, so forager.yaml
+  credentials do not reach it.
 - A run with a run key or a run code, with no `--home` or `harness.home`, composes into
   `runs/<name>-<hash>/<run id>` under `qory/homes` in the cache directory, a home for that
   run alone, which qory removes when the run ends. Two runs of one checkout no longer
@@ -1159,7 +1238,7 @@ release may change what an existing document does, and states it under Upgrading
 ### Fixed
 
 - A push check's container runs under the `runtime` that `wall.images` sets for the
-  image it runs in, such as `runsc` (gVisor). Until now, it ran under the engine's
+  wall's default image, such as `runsc` (gVisor). Until now, it ran under the engine's
   default runtime.
 - A Copilot CLI session gets the harness's hooks in a repository that commits
   `.github/hooks/hooks.json`. qory links `settings/copilot/hooks.json` as

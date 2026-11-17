@@ -133,10 +133,10 @@ func TestARunWithAccessWriteNoPushRunsTheAgentAndPushesNothing(t *testing.T) {
 // have access write-no-push, the stack declares it write-no-push and the documents have
 // access write, or both are write-no-push. The agent commits a file and leaves another
 // in the checkout, which stays writable. The run opens the host proxy once, for the
-// fetch, and not for a push: it has no push step, the forge has no branch of the work
+// fetch, and no push proxy: it has no push step, the forge has no branch of the work
 // item, and the run API gets no POST, so no version of the artifact branch. A run of
-// the level write, in the same fixture, opens the host proxy a second time for its
-// push.
+// the level write, in the same fixture, opens the host proxy once, for the fetch, and
+// the push proxy once, for its push.
 func TestAWriteNoPushRunOfEachLevelPairPushesNothing(t *testing.T) {
 	for _, c := range []struct {
 		name, declared, access string
@@ -163,25 +163,29 @@ func TestAWriteNoPushRunOfEachLevelPairPushesNothing(t *testing.T) {
 			if _, err := os.Stat(filepath.Join(spec.Dir, "left.txt")); err != nil {
 				t.Errorf("the agent's file is not in the checkout: %v", err)
 			}
-			proxies := 0
+			proxies, pushProxies := 0, 0
 			for _, call := range r.calls {
-				if call == "host proxy" {
+				switch call {
+				case "host proxy":
 					proxies++
+				case "push proxy":
+					pushProxies++
 				}
 			}
 			name, _ := r.step()
 			head := p.branchHead(t)
 			posts, _, _ := p.api.counts()
 			if c.pushes {
-				if proxies != 2 || name == "" || head == "" || posts != 1 {
-					t.Errorf("the write run opened the host proxy %d times, push step %q, "+
-						"branch %q, %d POST; want 2, a step, a branch and 1", proxies, name, head, posts)
+				if proxies != 1 || pushProxies != 1 || name == "" || head == "" || posts != 1 {
+					t.Errorf("the write run opened the host proxy %d times and the push proxy %d times, "+
+						"push step %q, branch %q, %d POST; want 1, 1, a step, a branch and 1",
+						proxies, pushProxies, name, head, posts)
 				}
 				return
 			}
-			if proxies != 1 {
-				t.Errorf("the run opened the host proxy %d times, want 1, for the fetch alone",
-					proxies)
+			if proxies != 1 || pushProxies != 0 {
+				t.Errorf("the run opened the host proxy %d times and the push proxy %d times, want 1 and 0, "+
+					"the host proxy for the fetch alone", proxies, pushProxies)
 			}
 			if name != "" {
 				t.Errorf("a push step %q", name)

@@ -45,9 +45,9 @@ const (
 	textBranchMoved      = "qory run: " + textVersionWays + ", then take the work item in again: the branch moved since the run fetched it, and the push failed: %[4]s; the code is used"
 	textPushedNoVersion  = "qory run: %s: qory pushed %s and stored no version, because the push of the next repository failed: %s"
 	textPushRefused      = "qory run: change the rule on %[3]s that stops a push to %[1]s of %[2]s, then take the work item in again: the push failed: %[4]s; the code is used"
-	textPushForbidden    = "qory run: Contact support: the push was refused (403).\n  One of these stopped it:\n  1. The run's gateway allows a push only to the run's branch, refs/heads/%[3]s (wall:push-ref).\n  2. The connection's setup has no path rule for /%[1]s.git/git-receive-pack, or no credential with write access.\n  3. The forge stopped the push: its permission for the run's credential, or a branch rule.\n  The push of %[1]s to %[2]s returned 403: %[4]s; the code is used"
+	textPushForbidden    = "qory run: Contact support: the push was refused (403).\n  One of these most likely stopped it:\n  1. The run's push proxy refuses a push that is not a plain push to the push_ref of the push credential (for example a signed push or a push with push options), and qory pushes to refs/heads/%[3]s (wall:push-ref).\n  2. The run's push credential has no item for /%[1]s.git/git-receive-pack on %[2]s, and the push proxy refuses every other host and path.\n  3. The forge stopped the push: its permission for the push credential, or a branch rule.\n  The push of %[1]s to %[2]s returned 403: %[4]s; the code is used"
 	textPushNoCredential = "qory run: give the run's credential for %[2]s write access to %[1]s, then take the work item in again: the push through the run's gateway failed: %[3]s; the code is used"
-	textPushNotReached   = "qory run: check that the run's policy allows %[2]s and that %[2]s is reachable, then take the work item in again: the push of %[1]s through the run's gateway failed: %[3]s; the code is used"
+	textPushNotReached   = "qory run: Let the run's gateway reach %[2]s, then take the work item in again.\n  The push of %[1]s through the run's push proxy failed: %[3]s; the code is used"
 )
 
 // maxFailedPushLines is the most lines of the forge, and the most commits, that a failed
@@ -93,7 +93,7 @@ func stepGit(p *proxygit.Proxy, input string, env ...string) gitRunner {
 
 // Push commits what the agent left in each repository of b, in dir, the working folder,
 // and pushes each repository whose HEAD is past its [WorkRepository.Commit] to the branch
-// b.Ref as a fast-forward, by the URL qory builds, through the run's host proxy p. It
+// b.Ref as a fast-forward, by the URL qory builds, through the run's push proxy p. It
 // returns the branch document of the new version, nil when no repository has new
 // commits: [WorkBranch.Version] with the commit of each repository pushed replaced, or
 // added for one with no entry. It prints a line on report for each repository pushed.
@@ -116,6 +116,7 @@ func stepGit(p *proxygit.Proxy, input string, env ...string) gitRunner {
 // the checks, [clearIndexLocks] removes that one file of each repository when
 // agentStopped is true, and stops the push when a lock is there and it is false.
 func Push(ctx context.Context, dir string, base []string, b *WorkBranch, message string, p proxygit.Proxy, agentStopped bool, report io.Writer) (*branchformat.Branch, error) {
+	b.landed = nil
 	ctx = hostgit.WithBase(ctx, proxygit.Env(base, nil))
 	dir, err := filepath.Abs(dir)
 	if err != nil {
@@ -158,6 +159,7 @@ func Push(ctx context.Context, dir string, base []string, b *WorkBranch, message
 			return nil, err
 		}
 		b.pushed = append(b.pushed, shownPath(r.Path))
+		b.landed = append(b.landed, Landed{System: b.system, Path: r.Path, Commit: heads[i]})
 		fmt.Fprintf(report, textPushed+"\n", b.Ref, shownPath(r.Path), shortCommit(heads[i]))
 		// The branch is at heads[i] now, so a later Push of the run starts there.
 		b.Repositories[i].Commit = heads[i]

@@ -1,6 +1,7 @@
 package cmd_test
 
 import (
+	"bytes"
 	"cmp"
 	"context"
 	"crypto/sha256"
@@ -9,12 +10,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"maps"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -66,7 +69,13 @@ type pushAPI struct {
 	posts     int
 	reads     int
 	post      func(n int, w http.ResponseWriter) (handled, store bool)
-	index     func(n int, w http.ResponseWriter) bool
+	// recorded is the report of pushed commits: each call's body, as it arrived, and the
+	// rows that its calls added, in order. record, when set, responds to call n in place of 204,
+	// and returns whether it did.
+	recorded []string
+	rows     []recordedRow
+	record   func(n int, w http.ResponseWriter) bool
+	index    func(n int, w http.ResponseWriter) bool
 }
 
 // newPushAPI serves a run API whose work item has the id [workItem] and the stage st_a.
@@ -102,9 +111,53 @@ func (a *pushAPI) serve(w http.ResponseWriter, r *http.Request) {
 		w.Write(a.files[n-1])
 	case r.Method == http.MethodPost && r.URL.Path == "/v1/runs/r/artifacts":
 		a.posted(w, r)
+	case r.Method == http.MethodPost && r.URL.Path == "/v1/runs/r/pushed-commits":
+		a.recordedPush(w, r)
 	default:
 		http.NotFound(w, r)
 	}
+}
+
+// recordedRow is a row of the run's list of pushed commits.
+type recordedRow struct{ System, Path, Commit string }
+
+// recordedPush is POST pushed-commits as Qory Apiary handles it: 400 for a body that is not
+// the contract's, else a row for each commit not in the list yet, and 204.
+func (a *pushAPI) recordedPush(w http.ResponseWriter, r *http.Request) {
+	raw, _ := io.ReadAll(r.Body)
+	a.recorded = append(a.recorded, string(raw))
+	if a.record != nil && a.record(len(a.recorded), w) {
+		return
+	}
+	var body struct {
+		Repositories []recordedRow `json:"repositories"`
+	}
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.DisallowUnknownFields()
+	full := regexp.MustCompile(`^([0-9a-f]{40}|[0-9a-f]{64})$`)
+	if err := dec.Decode(&body); err != nil || len(body.Repositories) == 0 || len(body.Repositories) > 64 {
+		failing(w, http.StatusBadRequest, "invalid_request", "")
+		return
+	}
+	for _, row := range body.Repositories {
+		if !full.MatchString(row.Commit) || row.System == "" || row.Path == "" {
+			failing(w, http.StatusBadRequest, "invalid_request", "")
+			return
+		}
+	}
+	for _, row := range body.Repositories {
+		if !slices.Contains(a.rows, row) {
+			a.rows = append(a.rows, row)
+		}
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// reports is how many reports of pushed commits arrived, and the rows that the list has.
+func (a *pushAPI) reports() (calls int, rows []recordedRow) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return len(a.recorded), slices.Clone(a.rows)
 }
 
 // writeIndex writes the index of the versions stored so far.
@@ -223,10 +276,16 @@ type pushRepo struct {
 	onSetup      func(session.SetupSpec)
 	mask         string
 	// pushStarted, when set, runs as the push step starts. removeSetup, when set, is the
-	// run's RemoveSetup, and proxyErr the error of the run's HostProxy.
+	// run's RemoveSetup, and proxyErr the error of the run's HostProxy and PushProxy.
 	pushStarted func()
 	removeSetup func(context.Context) error
 	proxyErr    func() error
+	// pushVia, when set, is the run's push proxy, in place of its host proxy. noPush has
+	// a run with no push credential, whose PushProxy returns Forager's error for one.
+	pushVia proxygit.Proxy
+	noPush  bool
+	// onCall, when set, gets each call the run makes, as it is made.
+	onCall func(string)
 	// mountsOf, when set, gets the spec of the agent's session.
 	mountsOf func(session.SessionSpec)
 	// onOpen, when set, gets the spec of each open. onSetCheck, when set, gets the check
@@ -241,6 +300,32 @@ type pushRepo struct {
 	// process. runID and runsDir are those of the last open.
 	real           bool
 	runID, runsDir string
+	// gateway, when set, is called by each report over the link with its number, from 1, before
+	// the call reaches Qory Apiary: a non-nil error is the gateway's response to the call, and the
+	// call goes no further. linkMu guards the numbers and the limits of the calls.
+	gateway    func(n int) error
+	linkMu     sync.Mutex
+	linkCalls  int
+	linkLimits []time.Duration
+}
+
+// viaLink is each report of the run over the link of its gateway: [pushRepo.gateway] first,
+// then the run API of [pushAPI] as Qory Apiary. It notes how long the call has, the time to the
+// context's deadline.
+func (p *pushRepo) viaLink(ctx context.Context, body []byte) ([]byte, error) {
+	p.linkMu.Lock()
+	p.linkCalls++
+	n := p.linkCalls
+	if deadline, ok := ctx.Deadline(); ok {
+		p.linkLimits = append(p.linkLimits, time.Until(deadline))
+	}
+	p.linkMu.Unlock()
+	if p.gateway != nil {
+		if err := p.gateway(n); err != nil {
+			return nil, err
+		}
+	}
+	return cmd.PushedThroughLink(ctx, p.api.base(), body)
 }
 
 // record is the path of the session's record of the last run.
@@ -332,8 +417,9 @@ func (p *pushRepo) run(t *testing.T, agent func(dir string), result func() (*ses
 	closes, calls, restore := cmd.OpenNowhereWith(cmd.Nowhere{
 		System: proxygittest.Host, Repositories: p.repositories, RunAPI: p.api.base(),
 		Proxy: p.h.server.Proxy.URL, CABundle: p.h.server.Proxy.CABundle, Dir: p.h.runDir,
-		RemoveSetup: p.removeSetup, HostProxyErr: p.proxyErr, AtGateway: p.real, Real: p.real,
-		SetRunAPICheck: p.onSetCheck, RunAPIErr: p.runAPIErr, PolicyImage: p.policyImage,
+		RemoveSetup: p.removeSetup, HostProxyErr: p.proxyErr, PushProxyErr: p.proxyErr, NoPushProxy: p.noPush, OnCall: p.onCall,
+		PushProxy: p.pushVia.URL, PushCABundle: p.pushVia.CABundle, AtGateway: p.real, Real: p.real,
+		SetRunAPICheck: p.onSetCheck, RunAPIErr: p.runAPIErr, PolicyImage: p.policyImage, PushedCommits: p.viaLink,
 		Setup: func(spec session.SetupSpec) error {
 			if p.setup != nil {
 				p.setup(spec.Dir)
@@ -949,18 +1035,18 @@ func TestAHookOfTheForgeFailsTheStep(t *testing.T) {
 	wants(t, r.out, "qory run: change the rule on "+proxygittest.Host+" that stops a push to qory/"+workItem+" of acme/site, then take the work item in again: the push failed: ! [remote rejected]")
 }
 
-// TestAPushThatARuleRefusesSaysWhatToAllow is a run's proxy that returns 403 to the POST
-// of the push, as a policy with path rules does when no rule covers git-receive-pack.
+// TestAPushThatARuleRefusesSaysWhatToAllow is a push proxy that returns 403 to the POST
+// of the push, as it does for a path that no item of the push credential covers.
 func TestAPushThatARuleRefusesSaysWhatToAllow(t *testing.T) {
 	p := newPushRepo(t, "write")
 	p.h.server.Refuse("/acme/site.git/git-receive-pack")
 	r := p.run(t, writesAndCommits(t), nil)
 	r.wantsClose(t, event.StateFailed, 1)
 	wants(t, r.out, "qory run: Contact support: the push was refused (403).\n"+
-		"  One of these stopped it:\n"+
-		"  1. The run's gateway allows a push only to the run's branch, refs/heads/qory/"+workItem+" (wall:push-ref).\n"+
-		"  2. The connection's setup has no path rule for /acme/site.git/git-receive-pack, or no credential with write access.\n"+
-		"  3. The forge stopped the push: its permission for the run's credential, or a branch rule.\n"+
+		"  One of these most likely stopped it:\n"+
+		"  1. The run's push proxy refuses a push that is not a plain push to the push_ref of the push credential (for example a signed push or a push with push options), and qory pushes to refs/heads/qory/"+workItem+" (wall:push-ref).\n"+
+		"  2. The run's push credential has no item for /acme/site.git/git-receive-pack on "+proxygittest.Host+", and the push proxy refuses every other host and path.\n"+
+		"  3. The forge stopped the push: its permission for the push credential, or a branch rule.\n"+
 		"  The push of acme/site to "+proxygittest.Host+" returned 403: ")
 	if got := p.branchHead(t); got != "" {
 		t.Errorf("the forge has the branch at %s", got)
@@ -1753,23 +1839,24 @@ func TestAVersionOfAnotherRunOrContentIsNotStored(t *testing.T) {
 	}
 }
 
-// TestTheStepClosesItsProxyBeforeTheRunCloses is the host proxy of the step, which ends
-// before the close, and every run API and host proxy call before it, which fail after.
+// TestTheStepClosesItsProxyBeforeTheRunCloses is the push proxy of the step, which ends
+// before the close, and every run API and push proxy call before it, which fail after.
 func TestTheStepClosesItsProxyBeforeTheRunCloses(t *testing.T) {
 	p := newPushRepo(t, "write")
 	r := p.run(t, writesAndCommits(t), nil)
 	r.wantsClose(t, event.StateSucceeded, 0)
-	opened := 0
+	opens, open := 0, 0
 	for _, call := range r.calls {
 		switch call {
-		case "host proxy":
-			opened++
-		case "host proxy closed":
-			opened--
+		case "push proxy":
+			opens++
+			open++
+		case "push proxy closed":
+			open--
 		}
 	}
-	if opened != 0 {
-		t.Errorf("%d host proxies stayed open: %q", opened, r.calls)
+	if opens != 1 || open != 0 {
+		t.Errorf("%d push proxies opened and %d stayed open: %q, want 1 and 0", opens, open, r.calls)
 	}
 }
 
@@ -1938,7 +2025,7 @@ func TestAFailedRemovalOfTheSetupContainerRunsNoPush(t *testing.T) {
 	}
 }
 
-// TestAWallThatStaysRunsNoGit is a HostProxy that fails because the wall of a session could
+// TestAWallThatStaysRunsNoGit is a PushProxy that fails because the wall of a session could
 // not be removed, for each end of the session: the agent may still run, so the step runs
 // no git, and a lock stays.
 func TestAWallThatStaysRunsNoGit(t *testing.T) {

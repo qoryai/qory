@@ -25,7 +25,7 @@ import (
 // document that defines a stack, and in the checkout's harness or its base for a run
 // without a harness document.
 func TestARunCodesTimeLimitLineNamesWhereTheLimitIsSet(t *testing.T) {
-	const line = "set a longer time_limit_minutes in Qory Apiary, or a longer workflows.example.time_limit in %s: the run was cancelled at its time limit of 45m0s, before claude started"
+	const line = "set a longer Time limit for the workflow example on the Workflows page in Qory Apiary, or a longer workflows.example.time_limit in %s: the run was cancelled at its time limit of 45m0s, before claude started"
 	for _, c := range []struct {
 		harness string
 		defines bool
@@ -725,5 +725,28 @@ func TestARunWritesOnlyWithAccessWriteInItsDocuments(t *testing.T) {
 	var none *codeRun
 	if none.writes() {
 		t.Error("a run not from a run code writes")
+	}
+}
+
+// TestFullSuiteOfTheDocumentsIsTheRunsFullSuite: codeRunOf takes full_suite of the documents; a
+// document with false or none gives false.
+func TestFullSuiteOfTheDocumentsIsTheRunsFullSuite(t *testing.T) {
+	yes, no := true, false
+	for _, c := range []struct {
+		name string
+		full *bool
+		want bool
+	}{{"true", &yes, true}, {"false", &no, false}, {"absent", nil, false}} {
+		doc := contracts.Documents{Inputs: json.RawMessage(`{}`), Workflow: "example", RunSettings: &contracts.RunSettings{Runtime: "claude"}}
+		if c.full != nil {
+			doc.FullSuite = *c.full
+		}
+		r, err := codeRunOf(doc)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if r.fullSuite != c.want || fullSuiteOf(r) != c.want {
+			t.Errorf("%s: fullSuite %v, want %v", c.name, r.fullSuite, c.want)
+		}
 	}
 }

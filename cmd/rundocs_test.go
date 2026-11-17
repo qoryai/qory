@@ -7,6 +7,7 @@ import (
 	"io"
 	"io/fs"
 	"maps"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -113,8 +114,9 @@ func TestARunCodeWhoseAnswerQoryDoesNotRunStops(t *testing.T) {
 	}{
 		{"none", nil, "use another run code: the enrolment answer has no documents"},
 		{"an unknown member", codeDocuments(t, func(d map[string]any) { d["prompt"] = "x" }), broken},
-		{"a time limit under 15 minutes", codeDocuments(t, func(d map[string]any) {
-			d["run_settings"] = map[string]any{"runtime": "claude", "time_limit_minutes": 14}
+		{"a time limit under 15 minutes", codeDocuments(t, func(d map[string]any) { d["time_limit_minutes"] = 14 }), broken},
+		{"a time limit in the run settings", codeDocuments(t, func(d map[string]any) {
+			d["run_settings"] = map[string]any{"runtime": "claude", "time_limit_minutes": 45}
 		}), broken},
 		{"a run id", codeDocuments(t, func(d map[string]any) { d["run_id"] = keyRunID }), broken},
 		{"another domain in inputs", codeDocuments(t, func(d map[string]any) { d["inputs"].(map[string]any)["domain"] = "marketing" }),
@@ -191,6 +193,9 @@ var codeFetchImage func(context.Context) error
 // codeAtGateway, when set, has [runFromCodeGiven] open each run at a gateway of
 // Forager's in this process as well, as [cmd.Nowhere] AtGateway does. A test sets it.
 var codeAtGateway bool
+
+// codeRunAPI, when set, is the base URL of the run API of each run that [runFromCodeGiven] opens.
+var codeRunAPI string
 
 // codePolicyImage is the image the policy of each run [runFromCodeGiven] opens selects,
 // as [cmd.Nowhere] PolicyImage is; "" selects none. A test sets it.
@@ -286,6 +291,7 @@ func runFromCodeGiven(t *testing.T, before func(code string) []string, args []st
 		AtGateway:   codeAtGateway,
 		PolicyImage: codePolicyImage,
 		OnImage:     func(i session.Image) { r.image = i },
+		RunAPI:      codeRunAPI,
 	})
 	defer restore()
 	if given == nil {
@@ -357,6 +363,81 @@ func TestARunCodeWithoutAWorkflowTimeLimitRunsThreeHours(t *testing.T) {
 	}
 	if r.spec.Timeout <= 3*time.Hour-time.Minute || r.spec.Timeout > 3*time.Hour {
 		t.Errorf("the time limit left is %v, want 3h less the time before the join", r.spec.Timeout)
+	}
+}
+
+// TestARunCodesTimeLimitMinutesIsTheSessionsTimeLimit is a run from a run code whose
+// documents set time_limit_minutes at the top: the session's time limit is that many
+// minutes, whether or not the workflow sets a time_limit, which applies only when the
+// documents set none.
+func TestARunCodesTimeLimitMinutesIsTheSessionsTimeLimit(t *testing.T) {
+	for _, c := range []struct {
+		name  string
+		stack func(string) string
+	}{
+		{"no workflow time limit", writesHello},
+		{"a workflow time limit of 7h", func(s string) string { return s + "workflows:\n  hello:\n    time_limit: 7h\n    access: write\n" }},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			r := runFromCodeWith(t, behindAWall(t), nil, c.stack, func(d map[string]any) { d["time_limit_minutes"] = 45 })
+			if !r.joined {
+				t.Fatalf("%v (exit %d), want the join\n%s", r.err, cmd.ExitCode(r.err), r.out)
+			}
+			if r.spec.Timeout <= 45*time.Minute-time.Minute || r.spec.Timeout > 45*time.Minute {
+				t.Errorf("the time limit left is %v, want 45m less the time before the join", r.spec.Timeout)
+			}
+		})
+	}
+}
+
+// TestARunCodeWithSharedRunAndFullSuiteRunsOneSession is a run from a run code whose
+// documents set shared_run and full_suite to true: qory takes the documents and starts
+// the run as it does without them, with the time limit of the documents.
+func TestARunCodeWithSharedRunAndFullSuiteRunsOneSession(t *testing.T) {
+	r := runFromCodeWith(t, behindAWall(t), nil, writesHello, func(d map[string]any) {
+		d["time_limit_minutes"], d["shared_run"], d["full_suite"] = 60, true, true
+	})
+	if !r.joined {
+		t.Fatalf("%v (exit %d), want the join\n%s", r.err, cmd.ExitCode(r.err), r.out)
+	}
+	if r.spec.Timeout <= 60*time.Minute-time.Minute || r.spec.Timeout > 60*time.Minute {
+		t.Errorf("the time limit left is %v, want 60m less the time before the join", r.spec.Timeout)
+	}
+}
+
+// TestARunCodeWithFullSuiteSetsTheAfterStep: a run from a run code behind a wall, whose documents
+// have full_suite true and whose work item has a build plan with a full row, gives its session
+// the after step with the suite's cap as its time limit. Documents with full_suite false, or with
+// none, give none. No test seam sets the input.
+func TestARunCodeWithFullSuiteSetsTheAfterStep(t *testing.T) {
+	for _, c := range []struct {
+		name   string
+		change func(map[string]any)
+		after  bool
+	}{
+		{"full_suite true", func(d map[string]any) { d["full_suite"] = true }, true},
+		{"full_suite false", func(d map[string]any) { d["full_suite"] = false }, false},
+		{"no full_suite", nil, false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			api := newSuiteAPI(t, http.StatusCreated)
+			codeRunAPI = api.srv.URL + "/v1/runs/r1"
+			t.Cleanup(func() { codeRunAPI = "" })
+			r := runFromCodeWith(t, behindAWall(t), nil, writesHello, c.change)
+			if !r.joined {
+				t.Fatalf("%v (exit %d), want the join\n%s", r.err, cmd.ExitCode(r.err), r.out)
+			}
+			if got := len(r.spec.After) > 0; got != c.after {
+				t.Fatalf("After = %q, want it set: %v", r.spec.After, c.after)
+			}
+			if c.after {
+				if r.spec.AfterTimeout != 60*time.Minute || r.spec.After[4] == "" || r.spec.After[5] != "junit.xml" {
+					t.Errorf("After = %q, AfterTimeout = %v", r.spec.After, r.spec.AfterTimeout)
+				}
+			} else if r.spec.AfterTimeout != 0 {
+				t.Errorf("AfterTimeout = %v with no After", r.spec.AfterTimeout)
+			}
+		})
 	}
 }
 

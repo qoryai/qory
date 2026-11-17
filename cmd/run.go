@@ -745,6 +745,8 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			// the run only reads the checkout, see [readsOnly], and level is its [accessOf] level.
 			var readOnly bool
 			var level string
+			// extensions is the composed harness report's extensions, which the suite's time limit reads.
+			var extensions map[string]any
 			// link is the transcript link of a run whose agent starts on a fresh home, see
 			// [transcriptLinkFor].
 			var link transcriptLink
@@ -767,6 +769,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				}
 				// The report on disk can be another run's by now, so the run reads what it composed.
 				rep, harness, workflows := c.rep, c.harness, c.workflows
+				extensions = rep.Extensions
 				var launch render.Launch
 				if name, launch, err = resolveLaunch(rep, conf, runtime, at.home); err != nil {
 					return false, err
@@ -1293,16 +1296,22 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				}
 			}
 			// The agent's session is the run's first join, so the gateway numbers it 1.
+			suites := openSuites(ctx, suiteSetup{run: run, spec: &spec, runID: spec.RunID, walled: walled, readOnly: readOnly, fullSuite: fullSuiteOf(fromCode), extensions: extensions, said: said})
 			closeRoute := route.open(1)
 			res, err := joinSession(run, ctx, spec.SessionSpec)
 			closeRoute()
 			out := sessionOutcome(res, err)
+			var suiteLimit time.Time
+			if timeout > 0 {
+				suiteLimit = opened.Add(timeout)
+			}
+			out, suiteErr := suites.after(ctx, again, suiteLimit, res, out)
 			// pushWork is the push step of a run with an agent session that may write, see
 			// [keepsWork], before the close: Qory Apiary takes no version of a run that ended.
 			// The step runs under [pushContext], since a stop has ended ctx or spent the time
 			// limit. A failed step changes the close only of a session that succeeded. The stop
 			// of a walled agent is proven: the join removes its container, and when it could
-			// not, [openedRun.RemoveSetup] and the step's [openedRun.HostProxy] fail, so the step
+			// not, [openedRun.RemoveSetup] and the step's [openedRun.PushProxy] fail, so the step
 			// runs no git. An unwalled agent's process leaves no proof that it stopped.
 			//
 			// A walled write run with no run code works in a copy, and the git session commits
@@ -1438,6 +1447,9 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				u.Fail(fmt.Errorf("%d events did not reach the server; %s/undelivered contains them", delivery.Undelivered, ui.Short(res.Dir, at.root)))
 			}
 			ended := runEnded(u, res, end)
+			if suiteErr != nil && ExitCode(ended) == 0 {
+				ended = reported(suiteErr)
+			}
 			if pushErr != nil {
 				return ending.ended(u, said, pushErr, branch, ended)
 			}
@@ -1644,9 +1656,15 @@ type openedRun interface {
 	// StartStep starts a step of the run's host work, of kind fetch, compose, push, machine
 	// or copy.
 	StartStep(kind, name string) (hostStep, error)
-	// HostProxy starts the run's host proxy, for the fetch and the push of the run's
-	// repositories on this machine.
+	// HostProxy starts the run's host proxy, for the fetch of the run's repositories on
+	// this machine, the runtime's install, and a prebuild. It sets no push credential.
 	HostProxy() (hostProxy, error)
+	// PushProxy starts the run's push proxy, for the push step's git push. It sets the
+	// run configuration's push credentials alone. It returns an error while a session or a
+	// setup container runs and for a run with no push credential; see
+	// [session.Run.PushProxy]. It ends at the next Join, so the caller starts it at the
+	// push and never holds it across a Join.
+	PushProxy() (hostProxy, error)
 	// StackProxy starts the run's stack proxy, for the fetch of the run's harness on this
 	// machine, before the run's first Join.
 	StackProxy() (hostProxy, error)
@@ -1661,6 +1679,10 @@ type openedRun interface {
 	// RunAPI is the client and base URL of the run's run API on this machine, until the
 	// close.
 	RunAPI() (*http.Client, string, error)
+	// PushedCommits sends the report of a push, the body of POST pushed-commits, over the
+	// link of the run's gateway and returns the answer's body; see
+	// [session.Run.PushedCommits]. The run API's client does not reach this route.
+	PushedCommits(ctx context.Context, body []byte) ([]byte, error)
 	// Image is the image chosen at the run's open, the zero Image with no wall or when
 	// the gateway's run answer has no image; a walled run with no image fails at the open.
 	Image() session.Image
@@ -1693,6 +1715,16 @@ func (r foragerRun) StartStep(kind, name string) (hostStep, error) {
 // HostProxy is [session.Run.HostProxy]: its ProxyURL and CABundle, and its Close.
 func (r foragerRun) HostProxy() (hostProxy, error) {
 	h, err := r.Run.HostProxy()
+	if err != nil {
+		return hostProxy{}, err
+	}
+	return hostProxy{proxy: proxygit.Proxy{URL: h.ProxyURL, CABundle: h.CABundle}, close: h.Close}, nil
+}
+
+// PushProxy is [session.Run.PushProxy]: its ProxyURL and CABundle, and its Close, as for
+// [foragerRun.HostProxy].
+func (r foragerRun) PushProxy() (hostProxy, error) {
+	h, err := r.Run.PushProxy()
 	if err != nil {
 		return hostProxy{}, err
 	}

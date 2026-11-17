@@ -94,12 +94,27 @@ func TestEveryDocumentsFixtureIsRead(t *testing.T) {
 		})
 	}
 	doc, err := provisioner.ReadDocuments(documentsOf(t, "explore-time-limit.json", nil))
-	if err != nil || doc.RunSettings == nil || doc.RunSettings.TimeLimitMinutes != 90 {
-		t.Errorf("the time limit: %+v %v", doc.RunSettings, err)
+	if err != nil || doc.TimeLimitMinutes != 90 {
+		t.Errorf("the time limit: %d %v", doc.TimeLimitMinutes, err)
 	}
 	spaced := append([]byte(" \n"), documentsOf(t, "explore-workflow.json", nil)...)
 	if _, err := provisioner.ReadDocuments(spaced); err != nil {
 		t.Errorf("documents after white space: %v", err)
+	}
+}
+
+// TestDocumentsWithSharedRunAndFullSuiteAreRead reads explore documents that set
+// time_limit_minutes, shared_run and full_suite: each member is read as set.
+func TestDocumentsWithSharedRunAndFullSuiteAreRead(t *testing.T) {
+	raw := documentsOf(t, "explore-run-settings.json", func(d map[string]any) {
+		d["time_limit_minutes"], d["shared_run"], d["full_suite"] = 45, true, true
+	})
+	doc, err := provisioner.ReadDocuments(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if doc.TimeLimitMinutes != 45 || !doc.SharedRun || !doc.FullSuite {
+		t.Errorf("read time_limit_minutes %d, shared_run %v, full_suite %v", doc.TimeLimitMinutes, doc.SharedRun, doc.FullSuite)
 	}
 }
 
@@ -172,8 +187,13 @@ func TestBrokenDocumentsAreRefused(t *testing.T) {
 		}), broken},
 		{"a runtime with a trailing line feed", withSettings(func(d map[string]any) { settings(d)["runtime"] = "claude\n" }), broken},
 		{"a key in the run settings", withSettings(func(d map[string]any) { settings(d)["api_key"] = "example-key" }), broken},
-		{"a time limit of 14 minutes", withSettings(func(d map[string]any) { settings(d)["time_limit_minutes"] = 14 }), broken},
-		{"a time limit with a fraction", withSettings(func(d map[string]any) { settings(d)["time_limit_minutes"] = 45.5 }), broken},
+		{"a time limit in the run settings", withSettings(func(d map[string]any) { settings(d)["time_limit_minutes"] = 45 }), broken},
+		{"a time limit of 14 minutes", withSettings(func(d map[string]any) { d["time_limit_minutes"] = 14 }), broken},
+		{"a time limit of 1441 minutes", withSettings(func(d map[string]any) { d["time_limit_minutes"] = 1441 }), broken},
+		{"a time limit with a fraction", withSettings(func(d map[string]any) { d["time_limit_minutes"] = 45.5 }), broken},
+		{"shared_run that is not a boolean", withSettings(func(d map[string]any) { d["shared_run"] = "yes" }), broken},
+		{"a prebuild with a time limit", documentsOf(t, "prebuild.json", func(d map[string]any) { d["time_limit_minutes"] = 45 }), broken},
+		{"a prebuild with full_suite", documentsOf(t, "prebuild.json", func(d map[string]any) { d["full_suite"] = true }), broken},
 		{"a model not listed", withSettings(func(d map[string]any) { settings(d)["model"] = "example-tiny" }), broken},
 		{"an effort not listed for the model", withSettings(func(d map[string]any) { settings(d)["effort"] = "huge" }), broken},
 		{"an effort for a model with none", withSettings(func(d map[string]any) {
@@ -222,5 +242,53 @@ func TestTimeLimit(t *testing.T) {
 	}
 	if provisioner.FallbackTimeLimit != 3*time.Hour {
 		t.Errorf("the fallback is %v", provisioner.FallbackTimeLimit)
+	}
+}
+
+// TestLargestPrebuiltImageBytes reads largest_prebuilt_image_bytes of a prebuild's
+// documents as an integer of 1 or more within int64, and nil when the member is absent,
+// which is no limit. A value that is 0, below 0, a string, a fraction or above int64,
+// and the member in the documents of another step, break the schema.
+func TestLargestPrebuiltImageBytes(t *testing.T) {
+	const broken = "it breaks documents.schema.json"
+	for _, c := range []struct {
+		name string
+		raw  json.RawMessage
+		want int64
+	}{
+		{"absent", documentsOf(t, "prebuild.json", nil), 0},
+		{"10 GB", documentsOf(t, "prebuild.json", func(d map[string]any) { d["largest_prebuilt_image_bytes"] = json.Number("10000000000") }), 10000000000},
+		{"1", documentsOf(t, "prebuild.json", func(d map[string]any) { d["largest_prebuilt_image_bytes"] = 1 }), 1},
+		{"the largest int64", documentsOf(t, "prebuild.json", func(d map[string]any) { d["largest_prebuilt_image_bytes"] = json.Number("9223372036854775807") }), 9223372036854775807},
+	} {
+		doc, err := provisioner.ReadDocuments(c.raw)
+		switch {
+		case err != nil:
+			t.Errorf("%s: %v", c.name, err)
+		case c.want == 0 && doc.LargestPrebuiltImageBytes != nil:
+			t.Errorf("%s: read %d, want none", c.name, *doc.LargestPrebuiltImageBytes)
+		case c.want != 0 && (doc.LargestPrebuiltImageBytes == nil || *doc.LargestPrebuiltImageBytes != c.want):
+			t.Errorf("%s: read %v, want %d", c.name, doc.LargestPrebuiltImageBytes, c.want)
+		}
+	}
+	for _, c := range []struct {
+		name  string
+		value any
+	}{
+		{"0", 0},
+		{"-1", -1},
+		{"a string", "10000000000"},
+		{"a fraction", 1.5},
+		{"above int64", json.Number("9223372036854775808")},
+		{"null", nil},
+	} {
+		raw := documentsOf(t, "prebuild.json", func(d map[string]any) { d["largest_prebuilt_image_bytes"] = c.value })
+		if _, err := provisioner.ReadDocuments(raw); err == nil || err.Error() != broken {
+			t.Errorf("%s: %v, want %q", c.name, err, broken)
+		}
+	}
+	raw := documentsOf(t, "explore-workflow.json", func(d map[string]any) { d["largest_prebuilt_image_bytes"] = 10000000000 })
+	if _, err := provisioner.ReadDocuments(raw); err == nil || err.Error() != broken {
+		t.Errorf("an explore run: %v, want %q", err, broken)
 	}
 }

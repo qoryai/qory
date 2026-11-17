@@ -92,7 +92,7 @@ func fromAnswerOnly(cmd *cobra.Command, runtime string, extra []string) error {
 // codeRun is what a run from a run code takes from the documents of the answer to the
 // code, checked: the runtime and the compose flags its run settings map to, the
 // harness document, the workflow, the inputs as the documents have them, the run
-// settings' time_limit_minutes, 0 for none, and harness_hidden. named is set when
+// time_limit_minutes, 0 for none, and harness_hidden. named is set when
 // harness_hidden is true: no text of the run shows the address of a harness source.
 // target is the documents' target and target_version, which the fetch uses for the
 // target's repository. workItem is the id of the documents' work item, "" for none.
@@ -108,9 +108,11 @@ type codeRun struct {
 	named    *source.Named
 	workflow string
 	inputs   []byte
-	minutes  int
-	hidden   bool
-	target   preparation.Target
+	// fullSuite is the documents' full_suite: whether session 1 runs the full suite.
+	fullSuite bool
+	minutes   int
+	hidden    bool
+	target    preparation.Target
 	// access is what the run may do on its target, from the documents' access: read,
 	// write, or write-no-push (a writable checkout with no push step). It is empty when
 	// the documents have no target.
@@ -167,10 +169,6 @@ func codeRunOf(doc contracts.Documents) (*codeRun, error) {
 		return nil, err
 	}
 	hidden := doc.HarnessHidden != nil && *doc.HarnessHidden
-	var minutes int
-	if doc.RunSettings != nil {
-		minutes = doc.RunSettings.TimeLimitMinutes
-	}
 	runtime, settings := provisioner.Settings(doc.RunSettings)
 	// A runtime this qory does not render has no headless start either.
 	if rt, err := render.Lookup(runtime); err != nil {
@@ -198,7 +196,7 @@ func codeRunOf(doc contracts.Documents) (*codeRun, error) {
 	if doc.Target != nil {
 		target.System, target.Path, target.Version = doc.Target.System, doc.Target.Path, doc.TargetVersion
 	}
-	r := &codeRun{runtime: runtime, settings: settings, harness: harness, defines: defines, workflow: doc.Workflow, inputs: doc.Inputs, minutes: minutes, hidden: hidden, target: target, access: doc.Access}
+	r := &codeRun{runtime: runtime, settings: settings, harness: harness, defines: defines, workflow: doc.Workflow, inputs: doc.Inputs, minutes: doc.TimeLimitMinutes, fullSuite: doc.FullSuite, hidden: hidden, target: target, access: doc.Access}
 	if doc.WorkItem != nil {
 		r.workItem = doc.WorkItem.ID
 	}
@@ -468,7 +466,7 @@ func (r *codeRun) timedOutLine(limit time.Duration, runtime string) string {
 	case r.defines:
 		where = r.phrase()
 	}
-	return fmt.Sprintf("set a longer time_limit_minutes in Qory Apiary, or a longer workflows.%s.time_limit in %s: the run was cancelled at its time limit of %s, before %s started", r.workflow, where, limit, agentName(runtime))
+	return fmt.Sprintf("set a longer Time limit for the workflow %s on the Workflows page in Qory Apiary, or a longer workflows.%s.time_limit in %s: the run was cancelled at its time limit of %s, before %s started", r.workflow, r.workflow, where, limit, agentName(runtime))
 }
 
 // startLine is the line qory run prints once the answer to the run code is read.

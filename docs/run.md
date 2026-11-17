@@ -320,14 +320,26 @@ The push checks run in a container of the wall's default image, `--image` or `wa
 and not of the image that the run's policy selects, so a change to the repository's
 `.devcontainer/` cannot turn them off. A run on a person's machine, with no run code, and
 with neither `--image` nor `wall.image`, whose policy selects the image, runs them in the
-run's image. The container runs under the runtime of the image it runs in: the `runtime`
-of its `wall.images` entry, such as `runsc`, or the engine's default for an entry with none
-and for an image that is a reference. A run from a run code with neither stops there with exit 2: `Set wall.image
+run's image. The container runs under the `runtime` of the `wall.images` entry that the run's policy
+selects, such as `runsc`, when that entry has one, so a check never runs under a weaker
+runtime than the run's container. Otherwise it runs under the `runtime` of the default
+image's entry, or the engine's default for an entry with none and for a default that is a
+reference. A run from a run code with neither stops there with exit 2: `Set wall.image
 in forager.yaml, then take the work item in again in Qory Apiary.`, and on the next line
 `Push checks run in the wall's default image; the code is used`. The run stops there with
 exit 2 too when the engine does not have the wall's default image: `Pull the wall's
 default image onto this machine, and run again.`, and on the next line `Push checks run
-in it, and the engine does not have the image <image>.` It stops there with exit 2 before
+in it, and the engine does not have the image <image>.` The run stops there with exit 2
+when the engine's `docker info` does not list the runtime that the checks' container runs
+under, such as `runsc`: `Install the container runtime on the engine, and run again.`, and
+on the next line `The push checks' container runs under the runtime <runtime>, and the
+engine does not have it.` An engine whose `docker info` fails, or does not list runtimes
+as Docker does, lets the run go on, and so does a runtime name that Docker starts as a
+containerd shim although its list omits it: a name with a `.`, a part before the first
+`.`, and no `/`, such as `io.containerd.runsc.v1`. A runtime name with a `/` stops the run
+there with exit 2 when the engine's list omits it: `Fix the runtime name in wall.images, and run
+again.`, and on the next line `The push checks' container runs under the runtime <runtime>,
+and Docker accepts no runtime name with a "/".` It stops there with exit 2 before
 any command of the engine gets the image when the image is not a reference, such as a
 value that starts with `-`: `Set wall.image or --image to an image reference, and run
 again.`, and on the next line `Push checks cannot start from <value>. A reference starts
@@ -354,6 +366,10 @@ Set wall.image in forager.yaml, then take the work item in again in Qory Apiary.
   Push checks run in the wall's default image; the code is used
 Pull the wall's default image, then take the work item in again in Qory Apiary.
   Push checks run in it, and the engine does not have the image <image>; the code is used
+Install the container runtime, then take the work item in again in Qory Apiary.
+  The push checks' container runs under the runtime <runtime>, and the engine does not have it; the code is used
+Fix the runtime name in wall.images, then take the work item in again in Qory Apiary.
+  The push checks' container runs under the runtime <runtime>, and Docker accepts no runtime name with a "/"; the code is used
 Set wall.image or --image to an image reference, then take the work item in again in Qory Apiary.
   Push checks cannot start from <value>; the code is used
 Take the work item in again in Qory Apiary.
@@ -384,8 +400,9 @@ When the run ends, qory says how, and its exit status goes with it:
   before <runtime> started`: the limit came before the runtime started, exit 124. The
   line contains `the agent` in place of `<runtime>` when the limit came during the fetch
   of the run's repositories, and when the compose failed after the limit.
-  A run from a run code, which takes no `--timeout`, prints `✗ set a longer
-  time_limit_minutes in Qory Apiary, or a longer workflows.<workflow>.time_limit in the
+  A run from a run code, which takes no `--timeout`, prints `✗ set a longer Time limit
+  for the workflow <workflow> on the Workflows page in Qory Apiary, or a longer
+  workflows.<workflow>.time_limit in the
   base of the workspace's harness: the run was cancelled at its time limit of <d>, before
   <runtime> started` instead. The line contains `the workspace's harness` for a harness
   that defines a stack, and `the checkout's harness or the base it extends` for a run
@@ -432,7 +449,7 @@ the value to the list:
   qory reads as it starts, in every run;
 - the access key's secret from `--access-key-secret-fd`, in every run, and from the
   `access-key-secret` file when qory signs its requests to the server with it;
-- the password of the run's host proxy, of its stack proxy and of
+- the password of the run's host proxy, of its push proxy, of its stack proxy, and of
   `wall.engine_proxy_file`;
 - for a run given a run key or a run code, the query values of each harness source's URL,
   before qory fetches the source through the stack proxy;
@@ -1071,7 +1088,7 @@ its files take on disk, at most 60 minutes.
 `--timeout 0` lifts the limit `forager.yaml` sets.
 
 A run from a run code takes its limit from elsewhere, in this order:
-`run_settings.time_limit_minutes` in Qory Apiary's response to the code, then
+`time_limit_minutes` in the run's documents, then
 `workflows.<name>.time_limit` of the run's workflow in the stack that the harness
 defines, or in the `qory-stack.yaml` of the stack that it extends, then 3 hours.
 `--timeout` stops it with exit 2, and `session.run.timeout` does not
@@ -1868,8 +1885,11 @@ writes nothing more there; the run goes on. The descriptor works on Linux and ma
 
 Qory Apiary's signed response to the code contains the run's documents beside the run key:
 the step, the domain and the inputs; for the step explore, the work item, the run
-settings, the harness, the workflow and `harness_hidden`; for the step prebuild, the target
+settings, the time limit, the harness, the workflow and `harness_hidden`; for the step prebuild, the target
 and the places of its images at a registry. qory runs the steps explore and prebuild.
+The documents of an explore can also contain `shared_run` and `full_suite`. With `full_suite`
+true, the session runs the full test suite when it ends, see [The full suite](#the-full-suite).
+qory reads `shared_run` and changes nothing for it.
 qory checks the documents as the run contract's `documents.schema.json`, and, for the
 step explore, checks that `inputs.domain` and `inputs.work_item.id` match the domain and
 the work item. Then a run of the step explore:
@@ -1880,8 +1900,8 @@ the work item. Then a run of the step explore:
 - when `harness_hidden` is `true`, composes a home that contains no link, and has
   Forager mask text that matches the home's files in the session's log and events
   (see [A hidden harness](#a-hidden-harness));
-- runs the runtime of `run_settings.runtime`, `claude` when the response sets no run
-  settings, composed with the model, the effort and the tiers the run settings set, as
+- runs the runtime of `run_settings.runtime`, `claude` when the documents contain no
+  `run_settings`, composed with the model, the effort and the tiers the run settings set, as
   `--model`, `--effort`, `--tier` and `--tier-effort` set them;
 - writes the inputs to `inputs.json`, mode 0600, in a folder `in/`, mode 0700, of a new
   temporary folder, which qory removes when the run ends. Behind a wall, `in/` is mounted
@@ -2154,7 +2174,36 @@ image, which has the parsers`, then `the folder /opt/qory/parsers has none`.
 The step adds about 1.6 GiB to the image, measured on
 `mcr.microsoft.com/devcontainers/base` for arm64 (1.3 GiB before, 3.0 GiB after), and
 about 1.4 GiB on `mcr.microsoft.com/devcontainers/typescript-node` (2.7 GiB before, 4.1 GiB
-after). The build sets no limit on the image's size.
+after). The build sets no limit on the image's size unless the run's documents have
+`largest_prebuilt_image_bytes`.
+
+When the documents of a prebuild have `largest_prebuilt_image_bytes`, an integer of 1 or
+more in decimal bytes, as `docker image ls` shows sizes (10 GB is `10000000000`), the
+build reads the size of the repository's image with `docker image inspect`. The
+repository's image is the one the development container configuration builds, or the
+prebuilt image it names or the environment image the build starts from, as it exists
+before qory adds Chromium, ffmpeg and the parsers. The limit does not count what qory
+adds. On `mcr.microsoft.com/devcontainers/typescript-node`, a repository image of 2.7
+GiB (2.9 GB) is under a limit of `3000000000`, and is kept although the final image is
+4.1 GiB. When the size is greater than the member, the build stops before the tools
+step. It removes an image it built, and leaves an image the engine pulled, which the
+engine may have held before the build. Nothing is pushed. The run closes as failed, and
+qory exits 1 with these lines, the first after the prefix `prebuild: `:
+
+```text
+prebuild: Make the image smaller, or contact support to raise Largest prebuilt image.
+The repository's image is 5.0 GB (5000000001 bytes), before qory adds Chromium, ffmpeg and the parsers.
+The limit is 5.0 GB (5000000000 bytes). The image is removed.
+```
+
+The last line has no `The image is removed.` when the engine pulled the image. A
+repository image of exactly the limit is kept. The last line of a successful prebuild
+prints the size of the final image. Without the member, the build keeps an image of any
+size. The member is set only for a prebuild started from Qory Apiary, from the
+instance's Largest prebuilt image setting. `qory prebuild` on this machine has no limit.
+qory refuses documents whose member is not an integer from 1 to 9223372036854775807, or
+that a run of another step has, as it refuses any member the run documents' schema does
+not define.
 
 The build takes the user from `wall.user` in `forager.yaml`. The wall's helper is
 `wall.helper`, or on Linux the `qory` you run. When `forager.yaml` sets `pool.registry`,
@@ -2562,7 +2611,7 @@ The step does this, in order:
 2. qory removes `.git/index.lock` of each repository, a file that an agent killed in a git
    command leaves behind, and prints `qory run: removed .git/index.lock of <path>, which the
    agent left when it stopped`. qory does this only for a walled run, whose container the
-   session removed: when it could not, the run's host proxy does not open, and the step
+   session removed: when it could not, the run's push proxy does not open, and the step
    runs no git. With an agent on the host, the stop of the agent is not proven, and a lock
    fails the step. qory removes only that file, and only as a regular file in a `.git`
    directory, so a link stops the check and any other lock stays.
@@ -2582,7 +2631,7 @@ The step does this, in order:
    The commits of all repositories come before the first push, so a failed commit pushes
    nothing.
 4. qory pushes each repository whose `HEAD` is past the commit the run started at to
-   `refs/heads/qory/<work item id>`, through the run's host proxy, with no force. It
+   `refs/heads/qory/<work item id>`, through the run's push proxy, with no force. It
    prints `qory run: pushed qory/<work item id> to <path> at <commit>`, where `<commit>`
    is the commit's first 12 characters. With no new commit in any repository, it prints
    `qory run: no new commits to push`, and the step ends with no push and no version.
@@ -2594,12 +2643,23 @@ The step does this, in order:
    with no answer, or with a status of 500 or above, qory reads the work item's artifacts
    first, and sends the request again only when no version of this run has the file.
 
-A run's policy with path rules must allow `/<path>.git/git-receive-pack` for the push. The
-run's gateway returns 403 to a push to any ref but the run's branch, and to every push
-through a credential that has no `push_ref`, as a credential in forager.yaml has none.
+The push proxy is the run's second proxy on the run's gateway. qory starts it for the push,
+after it removed the setup container, and closes it when the push returns. It sets only the
+run configuration's push credentials, on the hosts and paths of their items, and returns
+403 to every other host and path. The run's policy does not apply there. The run's gateway
+returns 403 to a push that is not a plain push to the credential's `push_ref`, which is the
+run's branch: a push to any other ref, a signed push, and a push with push options.
+
+A run whose run configuration has no push credential has no push proxy. The step fails with
+`qory run: Contact support: this run has no push credential, so qory pushed nothing.`,
+a second line with the cause, and `the code is used`, and qory pushes nothing. A credential
+in forager.yaml is never a push credential. The run's proxy, which the agent, the setup, the
+fetch, and the runtime's install go through, sets no push credential, so a push through it
+gets 403, as a credential with no `push_ref` does.
 
 The step counts toward the run's time limit, and has 120 seconds when the run has less left,
-also after the session used up the limit. A run can pass its time limit by up to 120
+also after the session used up the limit. The 120 seconds do not count the full suite's after
+step, which ends before the push step starts. A run can pass its time limit by up to 120
 seconds. A first signal, before or during the step, cuts the step to at most 15 seconds. A
 second signal ends the step at once. A step that one of these ended has the state
 `cancelled`, and the commits it made stay in the working folder.
@@ -2659,18 +2719,20 @@ Each of these lines fails the step. `<commit>` is the commit's first 12 characte
   the work item in again: the push failed: <error>; the code is used`, when a rule or a
   hook on the system stops the update
 - `Contact support: the push was refused (403).`, then lines indented by two spaces:
-  `One of these stopped it:`, the three causes, and a last line with the error. The
-  causes are `1. The run's gateway allows a push only to the run's branch,
-  refs/heads/qory/<work item id> (wall:push-ref).`, `2. The connection's setup has no path rule for
-  /<path>.git/git-receive-pack, or no credential with write access.`, `3. The forge stopped
-  the push: its permission for the run's credential, or a branch rule.` The last line is
+  `One of these most likely stopped it:`, the three causes, and a last line with the error.
+  The causes are `1. The run's push proxy refuses a push that is not a plain push to the
+  push_ref of the push credential (for example a signed push or a push with push options),
+  and qory pushes to refs/heads/qory/<work item id> (wall:push-ref).`, `2. The run's
+  push credential has no item for /<path>.git/git-receive-pack on <system>, and the push
+  proxy refuses every other host and path.`, `3. The forge stopped the push: its permission
+  for the push credential, or a branch rule.` The last line is
   `The push of <path> to <system> returned 403: <error>; the code is used`
 - `give the run's credential for <system> write access to <path>, then take the work item in
   again: the push through the run's gateway failed: <error>; the code is used`
-- `check that the run's policy allows <system> and that <system> is reachable, then take
-  the work item in again: the push of <path> through the run's gateway failed: <error>;
-  the code is used`
-- `take the work item in again in Qory Apiary: the run's host proxy, through which qory
+- `Let the run's gateway reach <system>, then take the work item in again.`, then a line
+  indented by two spaces: `The push of <path> through the run's push proxy failed:
+  <error>; the code is used`
+- `take the work item in again in Qory Apiary: the run's push proxy, through which qory
   pushes the run's commits, did not open: <error>; the code is used`
 - `take the work item in again in Qory Apiary: the run API, which stores the version of the
   artifact branch, is not reachable from this run: <error>; the code is used`
@@ -2690,6 +2752,56 @@ Each of these lines fails the step. `<commit>` is the commit's first 12 characte
 - `add a new version of the artifact branch in Qory Apiary with the head of qory/<work item
   id> on <path>, or delete that branch on <system>: qory pushed <path> and stored no version,
   because the push of the next repository failed: <line of that failure>`
+
+#### The report of a push
+
+After a push that moved a repository, and before it stores the version, the step reports
+the push to Qory Apiary. qory sends the report over the link of the run's gateway, which
+forwards it to `POST /v1/runs/<run id>/pushed-commits` and signs the request. The run API
+client that the agent and the other steps use does not carry this report. The body is
+`{"repositories": [{"system", "path", "commit"}]}`: the repositories that the push moved, the
+target first, each with its head commit as 40 or 64 lowercase hex characters. A push of more
+than 64 repositories, or a body of more than 65536 bytes (the limit of Qory Apiary), is
+reported in several calls of at most 64 repositories and 65536 bytes each, one after the
+other, in that order. A push that moved no repository, as one after a session that committed
+nothing, sends no call. Qory Apiary lists each reported commit on the run, and a repeat of a
+commit is a no-op, so a call is safe to send again. The report is also sent when a later
+repository's push failed: the repositories that landed are reported, and that push's line
+stays the run's line.
+
+Each send waits at most 65 s: the gateway waits 60 s for Qory Apiary (`server.HostCallTime`),
+not counting a reopen of the run, and the 5 s more let the gateway's response arrive first.
+Forager's session waits up to 4 minutes for one call, a reopen of the run included, so a send
+that qory cuts at 65 s is still inside that wait. A cut send is sent again with the same body.
+A repeated report is safe: Qory Apiary records the same commit for the same run, system and
+path once, and returns 204 again. A send that got no response within its 65 s, or a response
+with a status of 500 or above (the gateway's 502 `control_plane_unavailable` and 503 among
+them) or 429, is sent again with the same body, 3 times, after 1 s, 2 s and 4 s. The link
+has no `Retry-After`, so the waits do not change. Qory Apiary's 401 does not pass the
+gateway, and its 410 arrives as 502 `control_plane_unavailable`: both are sent again. Then:
+
+- 409 `run_ended` from Qory Apiary, or 410 from the gateway (the run ended during the call):
+  qory pushes and reports nothing more, starts no later session, and prints one line. For
+  Qory Apiary's 409 `run_ended`, or a 410 that Qory Apiary sent, it is `qory run: Qory Apiary
+  ended this run, so qory pushes nothing more and no later session starts.` For a 410 that
+  the gateway sent, whose code is `run_closed`, `stopped` (the run's starter ended the run),
+  `session_lost` or `batch_refused`, it is `qory run: The run ended (<code>), so qory pushes
+  nothing more and no later session starts.` A second line follows either one: `qory run: The
+  last push is on the branch, and Qory Apiary did not record it.` The push that the report was
+  about is on the forge, and Qory Apiary has no record of it. The step exits `succeeded`, and
+  the run closes with the end that was recorded, as for a run that
+  Qory Apiary closed during its session. When a later repository's push failed too, qory
+  prints that line as well, and the step fails with the push's error.
+- Any other 4xx status, the gateway's 413 `payload_too_large` among them, or the retries used
+  up: the step fails, the run closes `failed` before the next session, and qory prints
+  `qory run: Contact support: Qory Apiary did not record the last push.`, then
+  `  qory pushed <commit> to qory/<work item id>.`, then `Qory Apiary returned <status>:
+  <message or code>`. For a status that the gateway returned, not Qory Apiary, the last line is
+  `The gateway returned <status>: <code>`, with the name of the status in place of the code
+  when the response has none, as `Service Unavailable` for a 503 with no body. For a request
+  with no response, or one that a stop or the time limit cut, the last line is `Qory Apiary
+  sent no response: <cause>`. No line has a step to retry. `<commit>` is the first commit of the
+  call that failed. The pushed commits stay on the forge, and the version is not stored.
 
 A removal of the setup container that failed runs no step: qory commits nothing and pushes
 nothing, and the run ends as a failed step ends it, with this line:
@@ -3391,6 +3503,177 @@ outside a session's launch, `413` for a body over 1 MiB, and `429` for more than
 of the run in a second. Each request of the route is a `dev.qory.run.egress` event with the
 channel `qory_host`.
 
+### The full suite
+
+qory runs the repository's full test suite after a session, in the session's after step, and
+posts a verdict for a suite that did not pass. A session runs the suite when the run documents
+have `full_suite` true, the run has a wall, the run may write, and the work item's build plan has
+a `full` row with a command. A session of such a run that does not move HEAD runs none.
+
+**Command.** The command is the `full` row of the table under `## Commands` in the build plan
+of the artifact `build-plan`: the name `main`, or the one name the work item has, at its newest
+version that is not cancelled. qory reads the plan once, after the setup commands of
+`wall.setup: outside` (the default) and before the session joins, with one request for the
+artifact index and one to download the plan. A plan that the agent pushes during the session
+changes nothing. The row's `Result file` is a path below the repository, or `none`. A work item
+with no usable build plan, or no `full` row with a command, gets the line of the cause, such as
+`The full suite did not start: the build plan has no full row.` and, for a cause that the agent
+can fix, the fix on the next line, and no after step. Once the session succeeded, qory posts the
+cause as a verdict, see After the session.
+
+**Where it runs.** After the agent's container is removed, Forager starts a new container of the run's
+image with the workspace mounted for writing, on the run's network, with the run's
+egress policy, none of the run's variables and no route to qory. The container runs a script
+of qory:
+
+1. It deletes `.git/qory-suite` in the workspace and makes it again.
+2. When git cannot read HEAD, or HEAD has no commit but the session started at one, it exits 72.
+3. When HEAD is still the commit that the session started at (or has no commit and the
+   session started at none), it writes `skipped` to `.git/qory-suite/status` and exits 0. The suite
+   is `skipped`: it runs no command, qory posts nothing and prints `the full suite did not run:
+   the session left HEAD at the commit it started at`.
+4. Otherwise it runs `git -c core.hooksPath=/dev/null -c protocol.file.allow=always clone
+   --no-local --no-hardlinks --no-checkout` of the workspace into a new folder of the container,
+   then checks out HEAD there. The setting `protocol.file.allow=always` is for that clone only:
+   the after step's environment sets `protocol.allow=never`, which refuses a clone from a path.
+   The clone does not copy the workspace's `.git/config`. A failure exits 71.
+5. It deletes the result file in the clone, writes `ran <commit>` to the status file, and runs
+   `sh -c <command>` in the clone with a home folder that the command can write, and with
+   `GIT_CONFIG_COUNT` unset, so the command's git has no limit on its transports. A file that the
+   agent left untracked or ignored in the workspace is not in the clone, and a result file that a
+   commit has does not count.
+6. It copies the result file of the clone, when the command wrote a regular file there, to
+   `.git/qory-suite`, and exits with the command's exit status.
+
+The image needs `sh`, `git`, `mktemp` and `cp`. The command and the result
+file are arguments of the script, not part of its text. The suite's code runs with the workspace
+mounted for writing, so it can write the files of `.git/qory-suite`, or move HEAD or a ref in the
+workspace. qory reads the files with a read that stays below the workspace, and removes the folder
+before the copy step and the push step.
+
+**Limit.** A suite may take 60 minutes. A repository sets another limit in `qory.yaml`, in
+`harness.extensions.software-factory.command_limits_minutes.full_suite`, a whole number from 1 to
+60; qory reads it from the harness composed at `target_version`, so a commit on the work item's
+branch does not change it. Any other value is read as 60. The limit is the time limit of the
+after step, which includes starting the step. The run's `--timeout` covers the agent's runtime
+alone, so a run can last `--timeout` plus the limit. A step past the limit is cut. When the
+script had written `ran <commit>`, the suite ends `timeout` and is red. When it had not, for
+example because a clone hung, the command never started, and the suite did not start.
+
+**Result file.** qory reads the copy of the result file only when the command wrote it. It reads a
+regular file of at most 16 MiB, with no link on the way. The format is JUnit XML, the form that
+most test runners write and that the harness's checks read: each `testcase` element is a test; a
+`testcase` with a `failure` or `error` element failed; one with a `skipped` element, and no
+failure, was skipped. The file needs a `testsuite` or `testsuites` element. A `testsuite` that
+states more tests, failures or skipped tests than its testcases have, or a `failure` outside every
+`testcase`, makes the suite `failed`. qory reads the counts also when the command exits other than 0.
+
+**State.** The suite is `failed` when the script ends before the command ran, when the command
+exits other than 0, when a test failed, and when it ran 0 tests. Skipped tests do not fail it.
+With exit status 0 and no readable result file, the suite is `passed` and has no counts.
+`timeout` is a step that the limit cut. A `timeout` before the command started counts as a
+suite that did not start; a `timeout` after the command started is red. A step that a stop of
+`qory run` cut is `stopped`.
+
+**After the session.** When the session succeeded and the suite ended, qory prints one
+line: `the full suite passed on <short commit>: 2 tests`, `the full suite failed on <short commit>: 1
+of 2 tests failed`, or `the full suite timed out on <short commit>`. For a suite that did not start
+or run it prints the cause alone, in the point's words or, when "qory run: " and the point's text would
+pass 100 characters, in fewer words with the same cause. A launch cause with a fix prints the fix on
+the first line and the cause on the next. A `passed` suite posts nothing, and the agent's verdict
+stands. A suite that did not pass makes qory post a verdict through the run API.
+
+A red suite, whose command ran (`failed` or `timeout`):
+
+| The agent's newest verdict in this run | What qory posts |
+|---|---|
+| none, or `passed` | `changes-requested` with one point |
+| `changes-requested` | nothing: the verdict stands |
+| `escalate` with up to 19 points | the same `escalate` and `track`, with that point added |
+| `escalate` with 20 points | nothing: the verdict stands |
+
+A suite that did not start or did not run, with a cause the agent cannot fix: the after step
+could not run or the script ended before the command (exit 70, 71, 72 or another status, or -1), or the step
+reached its limit before the script wrote `ran <commit>`,
+the session's folder has no `.git` folder, qory could not read the build plan or the start commit,
+qory cannot reach the run API, or the session succeeded and its after step did not run because the run closed.
+
+| The agent's newest verdict in this run | What qory posts |
+|---|---|
+| none, or `passed` | `escalate` with one point, and the agent's `track` |
+| `escalate` | the same `escalate` and `track`, with that point added |
+| `changes-requested` | `escalate` with the agent's points and `track`, and that point added |
+| 20 points already | nothing: the verdict stands, and qory prints `the verdict of the agent has 20 points already, so qory adds none for the full suite` |
+
+A suite that did not start for a cause in the build plan that the agent wrote (no usable build plan, one over 1 MiB, no
+`Commands` table, no `full` row, no command in it, a command that is too long or has a NUL, a
+result file that is no path below the repository): qory knows it at the launch, keeps it, and
+judges it once the session succeeded. The point has the cause in `text` and what to change in
+`fix`, and the verdict is `changes-requested`.
+
+| The agent's newest verdict in this run | What qory posts |
+|---|---|
+| none, or `passed` | `changes-requested` with one point, and the agent's `track` |
+| `escalate` | the same `escalate` and `track`, with that point added |
+| `changes-requested` | the same verdict and `track`, with that point added: one fix round covers both |
+| 20 points already | nothing: the verdict stands, and qory prints `the verdict of the agent has 20 points already, so qory adds none for the full suite` |
+
+A session that did not succeed posts nothing for a cause found at the launch.
+
+A red suite does not end the run `failed` and does not change its exit status: the run closes
+as its session did, and the verdict starts the next round in Qory Apiary. If qory cannot post
+the verdict, it closes the run `failed` and exits 1, so a verdict of `passed` that the agent
+posted does not stand over a suite that did not pass. A stop of `qory run` that cuts the step
+posts the red verdict with the point `The full suite did not finish: the run was stopped.`, with
+one request that has 5 seconds, and closes the run `cancelled` with the reason `interrupted` and
+exit status 1, whether or not the post worked. qory checks each verdict against the verdict format
+before it posts it.
+
+The point has a text and, for a red suite, sometimes a fix, each on one line. The text is, in this
+order of preference:
+
+- For a session whose after step did not run, `The full suite did not run: the run closed before
+  the after step.`
+- For a suite that did not start, `The full suite did not start: <cause>.` The causes at the launch
+  are `the work item has no usable build plan` (no plan, several with none named `main`, or only
+  withdrawn versions), `the build plan is larger than 1 MiB`, `the build plan has no table of commands`, `the build
+  plan has no full row`, `the full row of the build plan has no command`, `the command of the full
+  row is too long or has a NUL`, `the result file of the full row is no path below the repository`
+  (each with a `fix`), `qory could not read the build plan`, `qory cannot reach the run API`, `the session's folder has no .git
+  folder` and `qory could not read the commit the session started at`. For a script that ended before the command, the cause is `the script could not make a folder it
+  needs` (70), `git could not clone HEAD of the workspace` (71), `git could not read HEAD of the
+  workspace` (72) or `the image may lack sh or git` (127).
+- For an after step whose container did not start or exited before the script (-1, 125 or another
+  status, including a status file that is missing or garbled), the text starts with `Contact
+  support:`. On a machine that runs macOS it is `Contact support: the full suite needs a Linux
+  machine, and this run's machine runs Docker on macOS.` Elsewhere it is `Contact support: the
+  full suite did not start, because its container exited with status <n>.`, or `... because its
+  container did not start.` for -1. The line at the end of the run has the same cause in fewer
+  words, so that it fits 100 characters with the prefix `qory run: `: on macOS `Contact support:
+  the full suite needs a Linux machine; this machine runs Docker on macOS.`, and for a result
+  file that is no path below the repository `The full suite did not start: the result file is no
+  path below the repository.`
+- With a host that the proxy refused while the after step ran, `Allow <host> in the run's policy,
+  or change the suite: it failed after the refusal.` With more hosts, `Allow <host> and N more in
+  the run's policy, or change the suite: it failed after the refusals.` The words take 77
+  characters, so a host of up to 23 characters stays whole in line 1; qory cuts a longer host,
+  which ends in `...`, only when the line would pass 100 characters. qory reads the hosts from
+  `events.jsonl` in the run's folder: events `dev.qory.run.egress` with the decision `denied`
+  and no channel, between the after step's `dev.qory.run.step_started` and
+  `dev.qory.run.step_exited`. A host that is no name or address, or an address with a zone, is left
+  out.
+- `The full suite did not start: the after step used its <n> minutes before the command.` for a
+  step cut at the limit before the command started.
+- `The full suite did not finish: the after step reached its limit of <n> minutes.` for `timeout`
+  after the command started.
+- `The full suite ran 0 tests, so it proves nothing.`, `The full suite failed: <failed> of <tests>
+  tests failed.`, `The full suite failed: its command exited with status <n>.`, or `The full suite
+  failed: the totals of its result file do not match its testcases.`
+
+The fix is `Refused connections: the run's Connections tab, Denied.` for a red suite, when the run's
+events are not in the run's folder, as with a separate gateway, or when the after step had a
+refused connection.
+
 ## Credentials the agent never has
 
 Behind a wall, a run needs no credential inside the container. `forager.yaml` defines the
@@ -3436,6 +3719,9 @@ How it works:
   host is its endpoint's host.
 - Where a program wants a credential set, the container gets a placeholder. It never gets
   the token.
+- A push credential, `purpose: push` in the run configuration, is set only by the run's push
+  proxy, for qory's push step. The run's proxy never sets it, and no placeholder of it
+  reaches the container.
 
 Without a wall, the run gets the same placeholders, and the proxy sets the same tokens.
 Without a wall, qory and the agent run as the same user. So the agent can read the run's
@@ -4864,8 +5150,9 @@ image: go-docker
 - `ref` is the image. Pin it by digest to run the same image every time.
 - `runtime` is the container runtime the wall starts the image under. Your engine must
   have it. Without it, the engine's default runs the image. The push checks' container
-  runs under the runtime of the image it runs in, the default image: the `runtime` of its
-  entry, or the engine's default for an entry with none and for a reference.
+  runs under the `runtime` of the entry that the run's policy selects, when it has one,
+  and otherwise under the `runtime` of the default image's entry, or the engine's default
+  for an entry with none and for a reference.
 - `wall.image` sets the default, and `--image` sets another for one run: a name of
   `wall.images`, or a reference. A name is read as that image first.
 - A policy's selection wins over the default, `--image` included. A run whose policy
