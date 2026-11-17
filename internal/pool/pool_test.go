@@ -50,7 +50,8 @@ var allowed = []string{"PATH", "HOME", "TMPDIR", "LANG", "DOCKER_HOST", "DOCKER_
 // claim, dispatched, then qory run --run-code-file /dev/fd/3 --gateway <gateway_url>
 // --home <dispatch's folder>/home in an empty work/ of the dispatch's folder, with HOME
 // home-user/ of that folder, mode 0700, with the run code in a file, mode 0600, open
-// for reading alone, that no name links to, and the allow-listed environment alone. The
+// for reading alone, that no name links to, followed by the lines of the pool's registry
+// and its runtimes folder, and the allow-listed environment alone. The
 // pool releases nothing and posts no outcome; the dispatch's folder and the code's file
 // are gone, and the journal is empty. qory run's line with the run code is left out.
 func TestADispatchRunsQoryRun(t *testing.T) {
@@ -78,6 +79,9 @@ func TestADispatchRunsQoryRun(t *testing.T) {
 	}
 	if !rep.FD3File || rep.CodeSum != sum([]byte(d.Run.RunCode)) {
 		t.Errorf("descriptor 3 is a file that no name links to, open for reading alone, %v; it contains the run code %v", rep.FD3File, rep.CodeSum == sum([]byte(d.Run.RunCode)))
+	}
+	if want := "registry " + harnessRegistry + "\napiary " + harnessInstance + "\nruntimes " + filepath.Join(h.state, "runtimes") + "\n"; rep.Machine != want {
+		t.Errorf("the lines after the run code are %q, want %q", rep.Machine, want)
 	}
 	if rep.Dir != filepath.Join(dir, "work") || rep.DirEntries != 0 {
 		t.Errorf("qory run ran in %s, with %d entries, want the empty %s", rep.Dir, rep.DirEntries, filepath.Join(dir, "work"))
@@ -955,6 +959,10 @@ func TestAMalformedJournalIsRefused(t *testing.T) {
 	}
 }
 
+// hostFix starts the error of a registry host that the pool cannot pass to its runs: the
+// fix on the first line, and on the second the host in quotes.
+const hostFix = "Set pool.registry to an image name on a host of letters, digits, . and -\nThe host is \""
+
 // TestTheSettingsAreChecked refuses to run by settings it cannot.
 func TestTheSettingsAreChecked(t *testing.T) {
 	for _, c := range []struct {
@@ -965,6 +973,9 @@ func TestTheSettingsAreChecked(t *testing.T) {
 		{func(p *pool.Pool) { p.Settings.State = "pool" }, `the pool's folder "pool" is not an absolute path`},
 		{func(p *pool.Pool) { p.Settings.RunConfig = "runs" }, `set pool.run_config in forager.yaml to an absolute path: "runs" is not one`},
 		{func(p *pool.Pool) { p.Client = nil }, "the pool has no client of Qory Apiary"},
+		{func(p *pool.Pool) { p.Settings.Registry = "registry.example:0" }, hostFix + `registry.example:0"; a port, if any, is from 1 to 65535.`},
+		{func(p *pool.Pool) { p.Settings.Registry = "registry.example:65536" }, hostFix + `registry.example:65536"; a port, if any, is from 1 to 65535.`},
+		{func(p *pool.Pool) { p.Settings.Registry = "user@registry.example" }, hostFix + `user@registry.example"; a port, if any, is from 1 to 65535.`},
 	} {
 		h := newHarness(t, 1)
 		c.edit(h.pool)
@@ -1007,5 +1018,20 @@ func TestARunCodeFileIsRemovedWhereThePathHasPatternCharacters(t *testing.T) {
 				t.Errorf("another file of the folder was removed: %v", err)
 			}
 		})
+	}
+}
+
+// TestARegistryHostWithAPortStartsThePool starts the pool with the registry
+// registry.example:5000, a host and a port that its runs take: it claims, and stops with
+// no error.
+func TestARegistryHostWithAPortStartsThePool(t *testing.T) {
+	h := newHarness(t, 1)
+	h.pool.Settings.Registry = "registry.example:5000"
+	h.start()
+	h.waitFor("a claim", func() bool {
+		return slices.ContainsFunc(h.srv.Calls(), func(c provisionertest.Call) bool { return c.Route == provisionertest.RouteClaim })
+	})
+	if err := h.stop(); err != nil {
+		t.Fatalf("the pool stopped with %v", err)
 	}
 }

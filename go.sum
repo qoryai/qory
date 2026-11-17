@@ -30,8 +30,8 @@ github.com/mattn/go-runewidth v0.0.16 h1:E5ScNMtiwvlvB5paMFdw9p4kSQzbXFikJ5SQO6T
 github.com/mattn/go-runewidth v0.0.16/go.mod h1:Jdepj2loyihRzMpdS35Xk/zdY8IAYHsh153qUoGf23w=
 github.com/muesli/termenv v0.16.0 h1:S5AlUN9dENB57rsbnkPyfdGuWIlkmzJjbFf0Tf5FWUc=
 github.com/muesli/termenv v0.16.0/go.mod h1:ZRfOIKPFDYQoDFF4Olj7/QJbW60Ol/kL1pU3VfY/Cnk=
-github.com/qoryai/forager v0.7.1-0.20261116044227-449b7e27f442 h1:A/L8OTL1+xM1rfiPnWVYkRTjSJUa1AJ3wVkiDd6YbfI=
-github.com/qoryai/forager v0.7.1-0.20261116044227-449b7e27f442/go.mod h1:bawutvQpl4xH1hYlLMsTOkOq5IkIEiFHWJ9jhahf6Ac=
+github.com/qoryai/forager v0.7.1-0.20261116220933-f344b7a792e7 h1:+GlAzB+mdUPnxnOUq38aTebWc/mlm15aUvDuu4xfLGM=
+github.com/qoryai/forager v0.7.1-0.20261116220933-f344b7a792e7/go.mod h1:LQJoODbJS+dQDjDmpqU0oeTmnGU5qlT4jU0e/N9hHKQ=
 github.com/qoryai/integrations v0.3.1-0.20261116191236-55a22cb87e72 h1:id+qsAA0URo8MUrjO6Gz0bbuEKcGPGCQ40i2tUjavEg=
 github.com/qoryai/integrations v0.3.1-0.20261116191236-55a22cb87e72/go.mod h1:8wZP+FYKJRy8P+XaN/CSL74R2V+I2QqTwZ4JRsxz0TE=
 github.com/rivo/uniseg v0.2.0/go.mod h1:J6wj4VEh+S6ZtnVlnTBMWIodfgj8LQOQFoIToxlJtxc=

@@ -60,16 +60,17 @@ set --home to a folder outside /work/app: /work/app/.qory/harness is inside /wor
 
 A home that is not for one run alone is held for the run's life: your unwalled run's
 `.qory/harness`, and the home of a walled run with `--home` or `harness.home`. Before it
-redeems a run code or composes, `qory run` takes a lock on the file `<home>.lock` beside the home,
-such as `.qory/harness.lock`, which records the run's id, `qory`'s process id and the start time.
-A home in the checkout is kept out of git first, so the lock file shows as no untracked file.
-The file stays after the run, and the lock ends with the run. A second run of that home stops
-with exit 1 before it redeems its run code, so the code stays unused, and before it composes, since
-its compose would replace the first run's home and its end would remove the first run's copy of
-`inputs.json`. `qory harness compose` and `qory harness remove` take the same lock and stop
-with the same lines. `qory harness remove` keeps the lock file, `.qory/harness.lock` for a home in the
-checkout, with its line in `.git/info/exclude`, and removes everything else, since a run that
-opened the file before the remove would lock the old file while a new run locked a new one:
+redeems a run code or composes, `qory run` takes a lock on the file `<home>.lock` beside the
+home, such as `.qory/harness.lock`. While a run holds the lock, the file contains the run's id,
+`qory`'s process id and the start time. After the run releases the lock, the file stays and is
+empty. A home in the checkout is kept out of git first, so the lock file shows as no untracked
+file. A second run of that home stops with exit 1 before it redeems its run code, so the code
+stays unused, and before it composes, since its compose would replace the first run's home and
+its end would remove the first run's copy of `inputs.json`. `qory harness compose` and
+`qory harness remove` take the same lock and stop with the same lines. `qory harness remove`
+keeps the lock file, `.qory/harness.lock` for a home in the checkout, with its line in
+`.git/info/exclude`, and removes everything else, since a run that opened the file before the
+remove would lock the old file while a new run locked a new one:
 
 ```text
 Wait for the run that uses this home to end, or set another --home or harness.home.
@@ -820,6 +821,220 @@ describes another runtime, or replaces the one shipped.
 A runtime that nothing describes still runs. The run, its log and its egress are
 recorded. The session's events are not.
 
+### The runtime's program
+
+Every run of Claude Code, the runtime `claude`, walled or not, installs the runtime's
+program on the machine before its session starts: after the compose, and before the
+image step. A run of another runtime installs nothing, and a session of Codex starts the
+program from the image.
+
+The session starts the installed program, `<runtimes>/claude/<version>/bin/claude`. Behind
+a wall, Forager mounts the version's folder read-only at `/qory/runtime/claude`, so the
+agent starts `/qory/runtime/claude/bin/claude` and cannot change it, and the session's
+`dev.qory.session.started` has the installed version as `runtime_version`. Forager sets
+`DISABLE_AUTOUPDATER=1` for Claude Code, so it does not update itself.
+
+The program comes from the runtime cache of the instance's registry when the machine has
+one, and from npm otherwise:
+
+- A run that `qory run pool` starts installs from the pool's registry, the host of
+  `pool.registry` in the pool's `forager.yaml`. `qory run pool` writes the host after the
+  run code, see `--run-code-file`. The host is only letters, digits, `.` and `-`, with an
+  optional port from 1 to 65535. `qory run pool` checks `pool.registry` when it starts,
+  and stops before it claims a run when the host of the image name is another:
+
+  ```text
+  qory run: Set pool.registry to an image name on a host of letters, digits, . and -
+  The host is "registry.example:0"; a port, if any, is from 1 to 65535.
+  ```
+
+  With a registry, `qory run pool` also checks `gateway.server.url`, the address it writes
+  after each run code as the instance's, and stops before it claims a run when the address
+  is not `https`, or `http` on loopback, with a host and an optional port alone:
+
+  ```text
+  qory run: Set gateway.server.url in forager.yaml to an https URL of a host and an optional port alone
+  The address is "https://bad_host.example".
+  ```
+
+  `qory run` takes the same host from the run-code file only. The registry's host decides
+  which Claude Code program the agent runs, so the run-code file is as trusted as the
+  code that runs.
+- Any other run installs from the host of `pool.registry` in the run's `forager.yaml`.
+- Without either, the run installs from npm, `registry.npmjs.org`.
+
+A walled run, and a run with a control plane, reads through the run's host proxy. A run on
+a person's machine with neither sends its requests directly over HTTPS. The platform is
+`linux/amd64` or `linux/arm64`, as the machine is. A request follows no redirect, except
+that a request to npm follows one to the same scheme and host.
+
+A request waits at most 30 seconds to connect and 30 seconds to finish the TLS handshake,
+60 seconds for the response's headers, and 60 seconds for the next byte of a response's
+body. A run without a time limit stops with the error of the request that waited longer,
+for example:
+
+```text
+qory run: Run again
+The download of claude 2.1.320 stopped: the response sent no byte for 1m0s
+```
+
+From the registry, with a token for `repository:shared/runtimes/claude:pull`, `qory run`
+reads, in this order:
+
+1. `shared/runtimes/claude:newest`, and the manifest of the machine's platform by its
+   digest;
+2. `shared/runtimes/claude:<version>`, the version in the manifest, which must have the
+   same digest, and the manifest by its digest again;
+3. the manifest's one layer, npm's tarball, by its digest, when the version's folder does
+   not exist.
+
+The layer must match its size, its sha256 digest, and npm's sha512 checksum in its
+annotation `dev.qory.runtime.integrity`. That checksum comes from the registry's
+annotation, so it guards against corruption in transit and in storage, not against a
+compromised registry. If the registry returns 503 or 429, or the request gets no
+response, `qory run` sends the same request again after 2, 4 and 8 seconds, then every
+15 seconds, or after the response's `Retry-After` up to 30 seconds. The registry returns
+503 while it fills its cache of a new version. Only the end of the run
+stops the tries: `qory run` sends the request again until the registry returns the file, or
+until the run's time limit passes, you cancel it (SIGINT) or it gets SIGTERM. At the first
+retry, and every 5 minutes after that, `qory run` prints one line on stderr, with the
+status of the last response, or `no response`:
+
+```text
+qory run: registry.example.com has not returned Claude Code (503); check pool.registry
+```
+
+A run that ends while it waits ends as a run does before its session starts: at the time
+limit with `give the run a longer --timeout: the run was cancelled at its time limit of
+<limit>, before claude started` and exit 124, and at SIGINT or SIGTERM with `the run was
+cancelled: qory run got SIGTERM before claude started` and exit 1.
+
+When the registry returns 401 with a Bearer challenge, `qory run` gets a token from the
+challenge's realm. The realm must be the token route of the Qory Apiary instance that
+the run uses: the scheme, host and port of the instance's address, then the path
+`/registry/token`. The instance's address is the `apiary <url>` line of the run-code file
+for a run from a run code, which `qory run pool` writes from its `gateway.server.url`;
+otherwise it is `gateway.server.url` in the run's `forager.yaml`. When a run has both, the
+run-code file's line is the address, and it has no path: an address with a path stops the
+run with `Set gateway.server.url in forager.yaml to an address with no path`, and so does
+`qory run pool` at its start. The registry's host is never the realm, since the
+instance does not start with the same host for both. A realm with another scheme, host, port or
+path stops the run with:
+
+```text
+qory run: Ask Qory Apiary's instance admin to put the registry's token realm at https://apiary.example.com/registry/token
+It is https://registry.example.com/registry/token
+```
+
+A run with no address of the instance takes no realm. Its install stops with:
+
+```text
+qory run: Set gateway.server.url in forager.yaml to the address of Qory Apiary
+The realm is https://apiary.example.com/registry/token, and the run has no address of Qory Apiary to check it against.
+```
+
+A run that starts from a run key has no `gateway.server` section in the `forager.yaml`
+it reads, so it stops there when its `pool.registry` or run code sets a registry. Any
+other status stops the run at once. A registry whose cache never held Claude Code
+stops the run with:
+
+```text
+qory run: Check that the instance's registry reaches the publisher of claude, then run again
+```
+
+From npm, `qory run` reads, in this order:
+
+1. `/-/package/@anthropic-ai/claude-code/dist-tags`, whose `latest` is the version;
+2. `/@anthropic-ai/claude-code-linux-x64/<version>`, or `-arm64`, whose `dist.integrity`
+   is the sha512 checksum and whose `dist.tarball` is the tarball, which must be on
+   `registry.npmjs.org`;
+3. the tarball, when the version's folder does not exist.
+
+`qory run` reads the registry's `newest`, or npm's `latest`, on every run, and keeps no
+other record of the newest version: once either moves, the next run installs the new
+version. On this path, `dist.integrity` comes from a document on the same host as the
+tarball, so it too guards against corruption, not against a compromised host.
+
+A run with no registry that walls its agent needs npm's host in the run's policy. When
+the run's proxy returns 403 or 407 to the CONNECT to `registry.npmjs.org`, `qory run`
+stops with:
+
+```text
+qory run: Set up the instance's registry for this machine, or allow registry.npmjs.org in the run's policy.
+The run's proxy returned 403 to the CONNECT to registry.npmjs.org:443.
+```
+
+`qory run` keeps each version in `<runtimes>/claude/<version>/`. For a run that `qory run
+pool` starts, `<runtimes>` is `runtimes` in the pool's folder, which every run of the pool
+shares. For any other run, `<runtimes>` is `<state>/runtimes`, where `<state>` is
+`$XDG_STATE_HOME/qory`, or `~/.local/state/qory` without `XDG_STATE_HOME`. The folder
+contains `bin/claude`, mode `0755`, and `integrity`, the checksum of the tarball it came
+from.
+
+1. When the version's folder exists, the run uses it and reads no tarball: a later run on
+   the same machine with the same newest version downloads nothing.
+2. Otherwise qory reads the tarball into a temporary file in `<runtimes>/claude/`, at most
+   1 GiB, and checks it against the checksum before it extracts anything. It extracts
+   only the entry `package/claude`, a regular file of at most 1 GiB, into a temporary
+   folder; the tarball may unpack to at most 4 GiB. No other entry is written, and a link
+   at `package/claude` stops the run. qory then renames the temporary folder to the
+   version's folder, so a folder at that path is always a complete install.
+
+Every session of the run uses that one version, and the run holds the version's folder
+until it ends. Each install removes, in `<runtimes>/claude/`, the folders of versions
+older than the newest that no run holds, and the temporary entries `.download-*` and
+`.install-*` that no run is writing. It removes a version's folder only when the folder
+has the shape of an install: `bin/claude` and `integrity`, both regular files, in a real
+`bin` folder. A folder with another content, such as one that a person made, stays. It
+follows no link, and removes no other entry. A run takes its hold, and an install looks
+for what to remove, only while it has the lock `<runtimes>/claude/.lock`, so a run that
+starts during an install keeps its version. Each run holds its version with a shared
+lock on `<runtimes>/claude/.hold-<version>`, which ends when the run ends.
+
+A run that `qory run` killed may leave its container running without a hold. The install
+lists the mounts of the engine's running containers (`docker ps`, then `docker inspect`,
+through the wall's command in `forager.yaml`, else `docker`) and keeps each version's
+folder that a mount is, contains or lies in. A machine with no such program has no
+running container. When the program fails in another way, the install removes no
+version's folder.
+
+Two runs that need the same version do not both read its tarball. The run that finds no
+folder takes the lock `<runtimes>/claude/.lock-<version>` and reads the tarball; the other
+waits for that lock, as long as its time limit allows, and then uses the folder. The
+lock `.lock` is not held during a download.
+
+Forager checks only the version's folder, so before an install, `qory run` checks the
+runtimes folder and `<runtimes>/claude` too. A link at either stops the run with
+`Replace <path> with a folder`. A `<runtimes>/claude` that existed and a runtimes folder
+that its group or others can write stop the run with `Run chmod go-w <path>, then run
+again`, since they could replace a version's folder. A folder that `qory run` makes is set
+to mode 0755. A runtimes folder or `<runtimes>/claude` that neither root nor the user of
+`qory run` owns stops the run with `Give <path> to root or to the user that runs qory`. qory checks no folder above the runtimes folder, since a shared one such as
+`/tmp` is writable by others.
+
+Once the program is installed, `qory run` prints one line:
+
+```text
+qory run: installed claude 2.1.320
+```
+
+If the install fails, no session starts and `qory run` exits 1 with the error, whose first
+line is the fix; a run with a control plane closes `failed` with -1. A tarball that does
+not match its sha512 checksum stops the run with:
+
+```text
+qory run: Check the source of the runtime's releases
+The tarball of claude 2.1.320 does not match the checksum sha512-<checksum>
+```
+
+A version's folder that was not installed from the tarball with the release's checksum
+stops the run with:
+
+```text
+qory run: Remove the version's folder once no run uses it, then run again
+<runtimes>/claude/2.1.320 was not installed from the tarball with the checksum sha512-<checksum>
+```
+
 ## Hosts a module declares
 
 A module declares the hosts it reaches, under `egress` in its manifest. The compose
@@ -1536,7 +1751,13 @@ qory run --run-code-file /run/qory/run-code --gateway https://gateway.example:84
   run key must be for this gateway.
 
 Each flag needs the other, and neither goes with `--run-key-fd` or `QORY_RUN_KEY`. The file
-contains the code, with at most one newline after it.
+contains the code, then at most three lines, each once: `registry <host>`, the host of the
+pool's registry; `apiary <url>`, the address of the pool's Qory Apiary instance, `https`
+or `http` on loopback, a host and an optional port with no user, path, query or
+fragment; and `runtimes <folder>`, the pool's runtimes folder, an absolute path. `qory
+run pool` writes them, with the `apiary` line only when it writes a `registry` line, and
+the run installs its runtime from them, see The runtime's program. One newline after the
+last line is left out.
 
 To give the code on stdin, set `<file>` to `/dev/stdin`, `/dev/fd/0` or `/proc/self/fd/0`.
 qory then reads stdin to its end and closes it, as with `--run-key-fd 0`, and the agent's
@@ -1578,14 +1799,14 @@ Each of these errors stops the run before it starts, exit 2:
 - `set --gateway to a gateway that qory can reach: <error>`, when Forager's check of the
   URL or of its TLS settings fails
 - `give --run-code-file a file that qory can read: <file>: <error>`
-- `give --run-code-file a regular file: <file> is not one`, for a named pipe, a device or
+- `Give --run-code-file a regular file: <file> is not one`, for a named pipe, a device or
   a folder, which qory opens without waiting, unless it is the pipe or device that stdin is
-- `write the run code into <file>: the file is empty`
-- `write only the run code into <file>, with at most one newline after it: the file
-  contains more`
-- `write a run code (qecr_…) into <file>: the file does not contain an enrolment code of
-  Qory Apiary`, or `…: the file contains the enrolment code of an access key of kind
-  <kind>`
+- `Write the run code into <file>: the file is empty`
+- `Write the run code, then at most the lines `registry <host>`, `apiary <url>` and
+  `runtimes <folder>``, with `The file <file> contains more than that.` on the second line
+- `Write a run code (qecr_…) into the file`, with `<file> does not contain an enrolment
+  code of Qory Apiary` or `<file> contains the enrolment code of an access key of kind
+  <kind>` on the second line
 - `ask for a new run code: the redemption returned 401, so the code was used, has expired
   or was cancelled, or it was redeemed with another key first (unauthorized)`
 - `ask for a new run code, and give qory run the gateway that the run key is for: the run
@@ -1855,12 +2076,11 @@ is set to, with no agent:
    `environment_image`, from scratch, or from an image it cannot resolve before it
    builds. Then qory closes the run as succeeded, and exits 0.
 
-The build takes the agent image and the user from `wall.image`, pinned by its digest, and
-`wall.user` in `forager.yaml`. The wall's helper is `wall.helper`, or on Linux the `qory`
-you run. When `forager.yaml` sets `pool.registry`, qory stops a run whose
-`image_destination` or `environment_destination` is not under it, before anything is
-made, with `set pool.registry to the registry of Qory Apiary's QORY_REGISTRY, or ask its
-instance admin: the run's <member> is not under <registry>`.
+The build takes the user from `wall.user` in `forager.yaml`. The wall's helper is
+`wall.helper`, or on Linux the `qory` you run. When `forager.yaml` sets `pool.registry`,
+qory stops a run whose `image_destination` or `environment_destination` is not under it,
+before anything is made, with `set pool.registry to the registry of Qory Apiary's
+QORY_REGISTRY, or ask its instance admin: the run's <member> is not under <registry>`.
 
 The nested Docker's images, its build cache and the container the configuration's
 commands ran in go with the wall when the run closes. This machine's Docker engine
@@ -2921,10 +3141,21 @@ works in a run and on a laptop. A wall mounts `qory` at `/qory/qory` and does no
 | ------- | -------- | ------------- |
 | `qory work-item show` | Prints the work item as JSON. | Prints `.qory/work-item.json`. With no file, exits 3. |
 | `qory artifact pull [<type>] [--version <N>]` | Fetches artifacts into the store, under `<type>/<name>/v<N>/`, writes `index.json` there, and prints the store's directory. | Fetches nothing, and says so. |
-| `qory artifact push <type> <file>... [--name <name>] [--note <text>]` | Stores the files as one new version, keeps a copy in the store, and prints the version. | Keeps the files in `.qory/artifacts`, and sends nothing. |
+| `qory artifact push <type> [<file>...] [--name <name>] [--note <text>] [--withdraw]` | Stores the files as one new version, keeps a copy in the store, and prints the version. With `--withdraw` and no files, stores a version with no files that withdraws the name. | Keeps the files, or the record of a withdrawal, in `.qory/artifacts`, and sends nothing. |
 | `qory run verdict passed\|changes-requested\|escalate [--points <file>]` | Stores the verdict. Qory Apiary acts on it when the run ends. | Prints the verdict and keeps it in `.qory/artifacts/verdict/`. Nothing acts on it. |
 
 In a run, the types `questions` and `review-comments` take only the name `main`.
+
+`qory artifact push --withdraw` exits 4 with a fix line, and sends nothing, for a name with no
+version, a name whose newest version is already a withdrawal, an upload by a person, a
+version that a member approved at a gate, and files given with `--withdraw`.
+
+A run cannot withdraw `questions`, `review-comments`, `verdict` or `proposal`, which Qory
+Apiary reads itself, or a type that the process template sets `withdrawable: false` for. In
+a run, qory sends that push, Qory Apiary reads the template's artifact types and refuses it
+with 422, and qory exits 4 with that refusal. Outside a run, qory refuses those types
+itself, writes nothing, reads the template from the factory modules that the checkout
+exports, and has no approvals to read.
 
 `escalate` needs `--points <file>`, and `passed` and `changes-requested` take no
 `--points`. The file is a JSON array of 1 to 20 points for a person, in the [verdict
@@ -4373,7 +4604,7 @@ start the run from a folder that does not contain your home folder, qory's state
 runs in, for `linux/amd64` and `linux/arm64`. They are not published for you to pull: you build them, by hand as
 below, and a workflow of the repository builds and checks them on a change. Build them
 from a checkout of `qory` at the commit `qory version` prints, since each commit pins the
-runtime at the version the Forager it builds against is written for:
+versions of the images' tools:
 
 ```sh
 git clone https://github.com/qoryai/qory && cd qory
@@ -4385,7 +4616,7 @@ docker build -t qory-prebuild --build-arg BASE=qory-agent-docker images/prebuild
 
 | Image | What it holds |
 |---|---|
-| `agent` | Claude Code at the version Forager's descriptor sets, `git`, `gh`, Node, the system's authorities, Chromium, and the tools under **Tools** below |
+| `agent` | `git`, `gh`, Node, the system's authorities, Chromium, and the tools under **Tools** below |
 | `agent-docker` | `agent`, and Docker's daemon and command |
 | `prebuild` | `agent-docker`, the `devcontainer` command `@devcontainers/cli` 0.89.0, and Docker's `buildx` plugin: the image a prebuild runs in behind its wall |
 
@@ -4393,14 +4624,19 @@ Every version and every download's sum is a build argument, with its default in 
 Dockerfile. Debian's packages follow the snapshot date. A build checks each download against its sum, and installs Debian's packages
 from the snapshot the base image was built from.
 
+None of them contains an agent runtime, such as Claude Code or Codex. The machine installs
+the runtime at run time, and Forager mounts it read-only at `/qory/runtime/<runtime>`,
+with the program the launch starts in its `bin` folder, such as
+`/qory/runtime/claude/bin/claude`. An image you build FROM them needs no runtime either.
+
 What each of them does:
 
 - **Any user.** The container runs as your user, whom the image does not know. `HOME`
   is `/home/agent`, which every user may write.
 - **No setuid program.** None is needed, and none is there.
-- **Nothing runs by itself.** It has no entry point. Claude Code and `gh` neither update
-  themselves nor ask for input, and Claude Code sends no telemetry or error reports,
-  which a run under `enforce` would otherwise show as denied connections.
+- **Nothing runs by itself.** It has no entry point. `gh`, `git` and `npm` neither check
+  for updates nor ask for input, which a run under `enforce` would otherwise show as
+  denied connections.
 - **Docker.** `agent-docker` holds the daemon for nested Docker, under a
   runtime such as Sysbox. The image starts nothing: define it in `wall.images` with
   `runtime: sysbox-runc` and `docker: true`, and `qory run nest` starts the daemon. See
@@ -4431,7 +4667,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends make \
 
 ```sh
 docker build -t my-agent:1 .
-qory image check my-agent:1
+qory image check my-agent:1   # checks everything but a runtime, which the image does not need
 ```
 
 Push it to a registry of yours and name it by digest, in `wall.image` or as a `ref` of
@@ -4450,9 +4686,12 @@ one fails.
   does not know, with no capability and no network. `qory`'s Linux build then checks
   that `HOME` takes a file from that user, the authorities are where the wall reads
   them, `/bin/sh` is there for the runtime's hooks and the session's API-key approval,
-  each runtime of Forager's runtime list, `runtimes.json`, is on the `PATH` at the
-  version its descriptor sets, and `git` and `gh` run. It reports whether
-  `dockerd` is in a system directory, and checks that what the daemon runs is there too.
+  and `git` and `gh` run. It reports whether `dockerd` is in a system directory, and
+  checks that what the daemon runs is there too.
+
+`qory image check` checks no runtime, such as Claude Code, and prints no line for one:
+no image contains a runtime. The machine installs the runtime, and Forager mounts it at
+`/qory/runtime/<runtime>` and checks it when a run starts.
 
 The Linux build is the one the wall uses: `wall.helper`, for your engine's architecture,
 or on Linux the `qory` you run when `wall.helper` is not set.

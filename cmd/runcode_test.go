@@ -313,16 +313,16 @@ func TestARunCodeFileThatHoldsNoCodeIsRefused(t *testing.T) {
 		file, want string
 	}{
 		{missing, "give --run-code-file a file that qory can read: %s: no such file or directory"},
-		{fifo, "give --run-code-file a regular file: %s is not one"},
-		{dir, "give --run-code-file a regular file: %s is not one"},
-		{codeFile(t, ""), "write the run code into %s: the file is empty"},
-		{codeFile(t, "\n"), "write the run code into %s: the file is empty"},
-		{codeFile(t, g.code()+"\n\n"), "write only the run code into %s, with at most one newline after it: the file contains more"},
-		{codeFile(t, g.code()+"\r\n"), "write only the run code into %s, with at most one newline after it: the file contains more"},
-		{codeFile(t, " "+g.code()), "write only the run code into %s, with at most one newline after it: the file contains more"},
-		{codeFile(t, strings.Repeat("A", 1025)), "write only the run code into %s, with at most one newline after it: the file contains more"},
-		{codeFile(t, "qecr_F1XT-0RE0-0000.x"), "write a run code (qecr_…) into %s: the file does not contain an enrolment code of Qory Apiary"},
-		{codeFile(t, "qecn_F1XT-0RE0-0000-0000-0000-0000-00."+g.signer.Fingerprint()), "write a run code (qecr_…) into %s: the file contains the enrolment code of an access key of kind node"},
+		{fifo, "Give --run-code-file a regular file: %s is not one"},
+		{dir, "Give --run-code-file a regular file: %s is not one"},
+		{codeFile(t, ""), "Write the run code into %s: the file is empty"},
+		{codeFile(t, "\n"), "Write the run code into %s: the file is empty"},
+		{codeFile(t, g.code()+"\n\n"), "Write the run code, then at most the lines `registry <host>`, `apiary <url>` and `runtimes <folder>`\nThe file %s contains more than that."},
+		{codeFile(t, g.code()+"\r\n"), "Write the run code, then at most the lines `registry <host>`, `apiary <url>` and `runtimes <folder>`\nThe file %s contains more than that."},
+		{codeFile(t, " "+g.code()), "Write the run code, then at most the lines `registry <host>`, `apiary <url>` and `runtimes <folder>`\nThe file %s contains more than that."},
+		{codeFile(t, strings.Repeat("A", 1025)), "Write the run code, then at most the lines `registry <host>`, `apiary <url>` and `runtimes <folder>`\nThe file %s contains more than that."},
+		{codeFile(t, "qecr_F1XT-0RE0-0000.x"), "Write a run code (qecr_…) into the file\n%s does not contain an enrolment code of Qory Apiary"},
+		{codeFile(t, "qecn_F1XT-0RE0-0000-0000-0000-0000-00."+g.signer.Fingerprint()), "Write a run code (qecr_…) into the file\n%s contains the enrolment code of an access key of kind node"},
 	} {
 		want := strings.Replace(c.want, "%s", c.file, 1)
 		done := make(chan struct{})
@@ -657,8 +657,8 @@ func TestARunCodeOnStdinThatContainsNoCodeIsRefused(t *testing.T) {
 	for _, c := range []struct {
 		content, want string
 	}{
-		{"", "write the run code into /dev/stdin: the file is empty"},
-		{g.code() + "\n" + g.code() + "\n", "write only the run code into /dev/stdin, with at most one newline after it: the file contains more"},
+		{"", "Write the run code into /dev/stdin: the file is empty"},
+		{g.code() + "\n" + g.code() + "\n", "Write the run code, then at most the lines `registry <host>`, `apiary <url>` and `runtimes <folder>`\nThe file /dev/stdin contains more than that."},
 	} {
 		in := stdinPipe(t, c.content)
 		out, err := runReading(t, in, "run", "--run-code-file", "/dev/stdin", "--gateway", g.URL)

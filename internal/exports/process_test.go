@@ -541,6 +541,8 @@ func TestVerifyPassesArtifactTypes(t *testing.T) {
 	for _, body := range []string{
 		" []",
 		"\n  - name: mockup",
+		"\n  - {name: acceptance-lock, withdrawable: false}\n  - {name: build-ledger, withdrawable: true}",
+		custom("document", "size_limit: 10485760, max_files: 20, withdrawable: false"),
 		"\n  - name: \"123\"\n  - name: a-1-b",
 		"\n  - name: " + strings.Repeat("a", 64),
 		custom("document", "size_limit: 10485760, max_files: 20"),
@@ -588,8 +590,15 @@ func TestVerifyChecksArtifactTypes(t *testing.T) {
 		{"\n  - {name: -a}", "Rename entry 1 of artifact_types.\n  A name is lowercase letters and digits in groups joined by single hyphens, at most 64 bytes.\n  The name is " + `"-a"` + ".\n  The entry is in {file}."},
 		{"\n  - {name: \"a\\n\"}", "Rename entry 1 of artifact_types.\n  A name is lowercase letters and digits in groups joined by single hyphens, at most 64 bytes.\n  The name is " + `"a\n"` + ".\n  The entry is in {file}."},
 		{"\n  - {name: " + strings.Repeat("a", 65) + "}", "Rename entry 1 of artifact_types.\n  A name is lowercase letters and digits in groups joined by single hyphens, at most 64 bytes.\n  The name is " + `"` + strings.Repeat("a", 65) + `"` + ".\n  The entry is in {file}."},
-		{"\n  - {name: mockup, owner: acme}", "Remove the key \"owner\" from entry 1 of artifact_types.\n  An artifact type has only name, base_view, size_limit, max_files, and json_schema.\n  The entry is in {file}."},
-		{"\n  - {name: mockup, [a]: b}", "Remove the key a list from entry 1 of artifact_types.\n  An artifact type has only name, base_view, size_limit, max_files, and json_schema.\n  The entry is in {file}."},
+		{"\n  - {name: mockup, owner: acme}", "Remove the key \"owner\" from entry 1 of artifact_types.\n  An artifact type has only name, base_view, size_limit, max_files, json_schema, and withdrawable.\n  The entry is in {file}."},
+		{"\n  - {name: mockup, [a]: b}", "Remove the key a list from entry 1 of artifact_types.\n  An artifact type has only name, base_view, size_limit, max_files, json_schema, and withdrawable.\n  The entry is in {file}."},
+		{"\n  - {name: mockup, withdrawable: \"no\"}", "Set withdrawable of artifact type mockup to true or false.\n  withdrawable is \"no\".\n  The type is in {file}."},
+		{"\n  - {name: mockup, withdrawable: !!bool no}", "Set withdrawable of artifact type mockup to true or false.\n  withdrawable is \"no\".\n  The type is in {file}."},
+		{"\n  - {name: mockup, withdrawable: !!bool off}", "Set withdrawable of artifact type mockup to true or false.\n  withdrawable is \"off\".\n  The type is in {file}."},
+		{"\n  - {name: mockup, withdrawable: ~}", "Set withdrawable of artifact type mockup to true or false.\n  withdrawable is null.\n  The type is in {file}."},
+		{"\n  - {name: mockup, withdrawable: [a]}", "Set withdrawable of artifact type mockup to true or false.\n  withdrawable is a list.\n  The type is in {file}."},
+		{"\n  - {name: mockup, withdrawable: false, owner: acme}", "Remove the key \"owner\" from entry 1 of artifact_types.\n  An artifact type has only name, base_view, size_limit, max_files, json_schema, and withdrawable.\n  The entry is in {file}."},
+		{"\n  - {name: mockup, withdrawable: false, size_limit: 1}", "Add base_view and max_files to artifact type mockup, or leave only its name.\n  A custom type has base_view, size_limit, and max_files.\n  The type is in {file}."},
 		{"\n  - {name: mockup, name: screenshot}", "Remove the second name from entry 1 of artifact_types.\n  The entry has the key twice.\n  The entry is in {file}."},
 		{"\n  - {name: a-type, size_limit: 1}", "Add base_view and max_files to " + name + ", or leave only its name.\n  A custom type has base_view, size_limit, and max_files.\n  The type is in {file}."},
 		{"\n  - {name: a-type, base_view: file}", "Add size_limit and max_files to " + name + ", or leave only its name.\n  A custom type has base_view, size_limit, and max_files.\n  The type is in {file}."},
@@ -634,6 +643,32 @@ func TestVerifyChecksArtifactTypes(t *testing.T) {
 		if err := e.Verify(); err == nil || err.Error() != want {
 			t.Errorf("%q: %v\nwant %s", c.body, err, want)
 		}
+	}
+}
+
+// TestNotWithdrawable is the names that the process.yaml of an exported module sets
+// withdrawable: false for.
+func TestNotWithdrawable(t *testing.T) {
+	for body, want := range map[string]string{
+		process: "[]",
+		withTypes("\n  - {name: acceptance-lock, withdrawable: false}\n  - {name: build-ledger, withdrawable: false}\n  - {name: mockup}\n  - {name: screenshot, withdrawable: true}"): "[acceptance-lock build-ledger]",
+		withTypes("\n  - {name: acceptance-lock, withdrawable: False}\n  - {name: build-ledger, withdrawable: FALSE}\n  - {name: mockup, withdrawable: True}"):                         "[acceptance-lock build-ledger]",
+		withTypes(custom("document", "size_limit: 1, max_files: 1, withdrawable: false")):                                                                                              "[a-type]",
+	} {
+		got, err := factory(t, body).NotWithdrawable()
+		if err != nil || fmt.Sprint(got) != want {
+			t.Errorf("%s: got %v, %v, want %s", body[len(process):], got, err, want)
+		}
+	}
+	for _, value := range []string{`"no"`, "!!bool no", "!!bool off"} {
+		e := factory(t, withTypes("\n  - {name: mockup, withdrawable: "+value+"}"))
+		if _, err := e.NotWithdrawable(); err == nil || !strings.HasPrefix(err.Error(), "Set withdrawable of artifact type mockup to true or false.\n") {
+			t.Errorf("%s: %v", value, err)
+		}
+	}
+	e := factory(t, withTypes("\n  - {name: mockup, withdrawable: \"no\"}"))
+	if _, err := e.NotWithdrawable(); err == nil || !strings.HasPrefix(err.Error(), "Set withdrawable of artifact type mockup to true or false.\n") {
+		t.Errorf("a bad value: %v", err)
 	}
 }
 
@@ -1091,6 +1126,10 @@ func TestArtifactTypesSchemaMatchesTheReader(t *testing.T) {
 		{"\n  - name: " + strings.Repeat("a", 64), true},
 		{"\n  - name: " + strings.Repeat("a", 65), false},
 		{"\n  - {name: mockup, owner: acme}", false},
+		{"\n  - {name: mockup, withdrawable: false}", true},
+		{"\n  - {name: mockup, withdrawable: true}", true},
+		{"\n  - {name: mockup, withdrawable: \"no\"}", false},
+		{custom("document", limits+", withdrawable: false"), true},
 		{"\n  - {name: a-type, base_view: file}", false},
 		{"\n  - {name: a-type, size_limit: 1}", false},
 		{"\n  - {name: a-type, json_schema: {}}", false},

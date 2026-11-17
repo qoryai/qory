@@ -46,8 +46,8 @@ func TestLockFileIsHeldOnceAtATime(t *testing.T) {
 }
 
 // TestLockFileTextIsReadWhileHeld is a lock file with text: a process that finds the lock
-// held reads the text of the holder, a later holder replaces it, and a link or a missing
-// file reads as no text.
+// held reads the text of the holder, the release empties the file, a later holder writes a
+// new text, and a link or a missing file reads as no text.
 func TestLockFileTextIsReadWhileHeld(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "home.lock")
@@ -62,6 +62,9 @@ func TestLockFileTextIsReadWhileHeld(t *testing.T) {
 		t.Errorf("the text while held is %q", got)
 	}
 	l.Release()
+	if got := foragerdir.LockText(path); got != "" {
+		t.Errorf("the text after the release is %q, want none", got)
+	}
 	l, err = foragerdir.LockFileText(path, "run two\n")
 	if err != nil {
 		t.Fatal(err)
