@@ -709,8 +709,9 @@ func entryKeys(rep report.Report) []string {
 // value, and the line shows both values, or, for documents with no submit, that the run
 // has no submit step. The harness's submit is that of the first module of rep, in stack
 // order, whose process.yaml in the home has one, as [exports.ProcessSubmit] reads it.
-// "" when the two are equal, when no composed module has a submit, and for r nil, a run
-// not from a run code.
+// "" when the two are equal, when no composed module has a submit, for r nil, a run not
+// from a run code, and for documents with no submit of a run that may not write, which
+// the contract allows no submit.
 func (r *codeRun) submitLine(rep report.Report) string {
 	if r == nil {
 		return ""
@@ -723,7 +724,7 @@ func (r *codeRun) submitLine(rep report.Report) string {
 		}
 	}
 	switch {
-	case !found:
+	case !found, r.submit == nil && !r.writes():
 		return ""
 	case r.submit == nil:
 		return fmt.Sprintf("submit: the run documents have none, so the run has no submit step and does not use the harness's %s at %s", typ, send)

@@ -120,3 +120,14 @@ func TestARunWhoseDocumentsHaveNoSubmitHasNoSubmitStep(t *testing.T) {
 		t.Errorf("the run's submit is %+v and its submit_module %+v, want none", submit, module)
 	}
 }
+
+// TestAReadRunWhoseHarnessHasASubmitPrintsNoSubmitLine is a run from a run code whose
+// documents have access read, so no submit, and whose composed harness has a
+// process.yaml in the module hello with a submit: the run has no submit step by its
+// access, and prints no submit line.
+func TestAReadRunWhoseHarnessHasASubmitPrintsNoSubmitLine(t *testing.T) {
+	r := submitRun(t, lowered, harnessSubmit("reply-draft", "after_gate"))
+	if lines := submitLines(r.out); len(lines) != 0 {
+		t.Errorf("the run prints %q, want no submit line\n%s", lines, r.out)
+	}
+}
