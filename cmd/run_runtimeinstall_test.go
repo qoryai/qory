@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -460,24 +461,59 @@ func endsWithin(t *testing.T, limit time.Duration, f func() installRun) installR
 	}
 }
 
+// pollUntil calls ok every 20 ms until it returns true, and returns true; it returns false
+// when stop is closed or ok has not returned true after limit. It takes no *testing.T, so
+// a goroutine that outlives its test cannot log to a finished test: the caller's test
+// reports the failure.
+func pollUntil(limit time.Duration, stop <-chan struct{}, ok func() bool) bool {
+	deadline := time.After(limit)
+	for !ok() {
+		select {
+		case <-stop:
+			return false
+		case <-deadline:
+			return false
+		case <-time.After(20 * time.Millisecond):
+		}
+	}
+	return true
+}
+
 // TestARegistryThatKeepsReturning503StopsAtTheTimeLimit has the registry return 503 to
 // every request, and a run with a time limit of 3 seconds: the run waits with the
 // registry's tries, tells so once on stderr, and ends at the limit with the line of a run
-// that ran out of time, exit 124, a few seconds later at most, with no line that asks for
-// more time.
+// that ran out of time, exit 124, with no line that asks for more time. The run ends
+// within 4.5 seconds of the registry's first request. A run that ended at the limit took
+// 2.4 to 2.7 seconds from that request in 40 runs, 20 of them with 3 busy processes per
+// CPU. A run that kept its tries after the limit would finish the 4-second wait that
+// follows the second try, and end 6 seconds after the first request. The time from the
+// start of the test is no bound, because the setup of the run's folders and repositories
+// adds a time that varies with load.
 func TestARegistryThatKeepsReturning503StopsAtTheTimeLimit(t *testing.T) {
 	reg, proxy := rt.StartRegistry(t), rt.StartProxy(t)
 	reg.PublishPlain("2.1.320")
 	reg.Unavailable(-1, "")
-	start := time.Now()
+	first := make(chan time.Time, 1)
+	ended := make(chan struct{})
+	defer close(ended)
 	r := endsWithin(t, 30*time.Second, func() installRun {
-		return runInstalling(t, installSetup{reg: reg, npm: rt.StartNpm(t), proxy: proxy, walled: true, args: []string{"--timeout", "3s"}})
+		return runInstalling(t, installSetup{reg: reg, npm: rt.StartNpm(t), proxy: proxy, walled: true, args: []string{"--timeout", "3s"}, during: func() {
+			if pollUntil(30*time.Second, ended, func() bool { return len(reg.Paths()) > 0 }) {
+				first <- time.Now()
+			}
+		}})
 	})
+	endedAt := time.Now()
+	select {
+	case at := <-first:
+		if took := endedAt.Sub(at); took > 4500*time.Millisecond {
+			t.Errorf("the run ended %s after the registry's first request, with a time limit of 3s", took)
+		}
+	default:
+		t.Error("the registry got no request before the run ended")
+	}
 	if cmd.ExitCode(r.err) != 124 || len(r.joins) != 0 {
 		t.Fatalf("%d joins, %v (exit %d)\n%s", len(r.joins), r.err, cmd.ExitCode(r.err), r.out)
-	}
-	if took := time.Since(start); took > 3*time.Second+4*time.Second {
-		t.Errorf("the run took %s with a time limit of 3s", took)
 	}
 	wants(t, r.out, "the run was cancelled at its time limit of 3s, before claude started", "qory run: "+reg.Host()+" has not returned Claude Code (503); check pool.registry\n")
 	if n := strings.Count(r.out, " has not returned Claude Code"); n != 1 {
@@ -493,20 +529,33 @@ func TestARegistryThatKeepsReturning503StopsAtSIGTERM(t *testing.T) {
 	reg, proxy := rt.StartRegistry(t), rt.StartProxy(t)
 	reg.PublishPlain("2.1.320")
 	reg.Unavailable(-1, "")
+	ended := make(chan struct{})
+	defer close(ended)
+	var sent atomic.Bool
+	t.Cleanup(func() {
+		if !sent.Load() {
+			t.Error("SIGTERM was not sent: the registry got no third /v2/ request before the run ended, or within 30s")
+		}
+	})
 	r := endsWithin(t, 30*time.Second, func() installRun {
 		return runInstalling(t, installSetup{reg: reg, npm: rt.StartNpm(t), proxy: proxy, walled: true, during: func() {
 			// The first try is 3 requests: newest with no token, which gets 401, the token,
 			// and newest with it, which gets 503. The third request to /v2/ is the first
 			// retry, 2 seconds later, and qory prints the waiting line before it sends it.
-			for retried := false; !retried; time.Sleep(20 * time.Millisecond) {
+			// With no retry in 30 seconds, or before the run ends, the run gets no SIGTERM
+			// and the cleanup above fails the test.
+			if !pollUntil(30*time.Second, ended, func() bool {
 				n := 0
 				for _, p := range reg.Paths() {
 					if strings.HasPrefix(p, "/v2/") {
 						n++
 					}
 				}
-				retried = n >= 3
+				return n >= 3
+			}) {
+				return
 			}
+			sent.Store(true)
 			syscall.Kill(os.Getpid(), syscall.SIGTERM)
 		}})
 	})
