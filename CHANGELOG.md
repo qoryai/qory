@@ -18,6 +18,13 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Added
 
+- A run takes the lower of its workflow's `access` and `access` in its documents, in
+  the order `read`, `write-no-push`, `write`. A workflow's `access` in a stack takes
+  `write-no-push` in both schemas and in the stack check, and documents may have it. A
+  `write-no-push` run has a writable checkout, no push step, no submit, and no version
+  of the artifact `branch`. With no wall, it stops with `write_needs_wall`. The error
+  for another workflow value now starts
+  `Set workflows.<name>.access to a valid level.`
 - Every run of Claude Code installs the runtime's program before its session: from the
   runtime cache of the pool's registry, or of `pool.registry`, or else from npm, through
   the run's host proxy when the run has one. qory reads the registry's `newest`, or npm's
@@ -443,9 +450,6 @@ release may change what an existing document does, and states it under Upgrading
   qory serves no path on it, and answers `404` to a request of the session that runs. The
   setup container of `wall.setup: outside` gets neither the variable nor the route. See The
   route to qory in `docs/run.md`.
-- A run whose documents have `access: write-no-push` and whose workflow is declared `write`
-  gets a writable checkout and no push step. With no wall, that run stops with
-  `write_needs_wall`.
 
 ### Changed
 
