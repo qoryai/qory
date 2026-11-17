@@ -28,7 +28,7 @@ release may change what an existing document does, and states it under Upgrading
   kept `verdict.json` has the track. `qory run verdict` exits 4 for every 422
   `invalid_artifact` from Qory Apiary, such as a track that the gate does not offer, a
   point about a question that is not open, or a verdict that breaks the schema. Line 1 of
-  the error is the fix, with at most 100 characters, and Qory Apiary's text follows on
+  the error is the fix, with at most 98 characters, and Qory Apiary's text follows on
   line 2. `qory artifact push` still exits 1 for `invalid_artifact`. See The verdict
   format in `contracts/harness/v1/README.md`.
 - The `agent` image has the Node packages `typescript` 5.9.3, `libpg-query` 18.2.4,

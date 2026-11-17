@@ -123,7 +123,7 @@ func TestRunVerdictOutsideARunKeepsTheTrack(t *testing.T) {
 }
 
 // TestRunVerdictChecksItsTrack stops each wrong id, reason or pair of the track flags with
-// exit 2 and an error whose line 1 has at most 100 characters and the fix, before anything
+// exit 2 and an error whose line 1 has at most 98 characters and the fix, before anything
 // is sent: in a run, no verdict reaches the run API, and outside a run, the store keeps
 // none.
 func TestRunVerdictChecksItsTrack(t *testing.T) {
@@ -194,7 +194,7 @@ func TestRunVerdictChecksItsTrack(t *testing.T) {
 					t.Errorf("line 1 = %q, want %q", line, c.want)
 				}
 
-				if n := utf8.RuneCountInString(line); n > 100 {
+				if n := utf8.RuneCountInString(line); n > 98 {
 					t.Errorf("line 1 has %d characters: %q", n, line)
 				}
 
@@ -227,7 +227,7 @@ func TestRunVerdictShowsTheValueOfAWrongTrackID(t *testing.T) {
 }
 
 // TestRunVerdictExitsWith4ForARefusedVerdict gives each 422 invalid_artifact of the verdict
-// exit 4, with line 1 of at most 100 characters that has the fix, then Qory Apiary's text
+// exit 4, with line 1 of at most 98 characters that has the fix, then Qory Apiary's text
 // on an indented line. Every other error keeps its status.
 func TestRunVerdictExitsWith4ForARefusedVerdict(t *testing.T) {
 	notOffered := "Set track.id to a track that the gate of Explore offers (fast, standard), " +
@@ -235,6 +235,7 @@ func TestRunVerdictExitsWith4ForARefusedVerdict(t *testing.T) {
 	notOpen := "Push the questions first, or point at an open question in verdict.json: " +
 		"point 2 is about question q9, which is not open."
 	short := "Remove the point that has no question from verdict.json."
+	line98 := "Fix verdict.json: " + strings.Repeat("a", 98-len("Fix verdict.json: "))
 
 	for _, c := range []struct {
 		name     string
@@ -251,6 +252,13 @@ func TestRunVerdictExitsWith4ForARefusedVerdict(t *testing.T) {
 			[]string{"--track", "small-change", "--track-reason", trackReason}},
 		{"a point of a long text", "files[0]", notOpen, "Fix the refused part of the verdict, then run the command again.", nil},
 		{"a point of a short text", "files[0]", short, short, nil},
+		{"the member track.kind", "track.kind", "Set track.kind to one line of 1 to 80 characters, or leave track.kind out of the verdict.",
+			"Set --track to a track that the gate of the stage offers, or leave out the track flags.", nil},
+		{"the member track.id", "track.id", short, "Set --track to a track that the gate of the stage offers, or leave out the track flags.", nil},
+		{"a member called tracks", "tracks", short, short, nil},
+		{"a member called trackx", "trackx", short, short, nil},
+		{"a line 1 of 98 characters", "files[0]", line98, line98, nil},
+		{"a line 1 of 99 characters", "files[0]", line98 + "x", "Fix the refused part of the verdict, then run the command again.", nil},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			inCheckout(t)
@@ -270,7 +278,7 @@ func TestRunVerdictExitsWith4ForARefusedVerdict(t *testing.T) {
 				t.Errorf("line 1 = %q, want %q", line, c.wantLine)
 			}
 
-			if n := utf8.RuneCountInString(line); n > 100 {
+			if n := utf8.RuneCountInString(line); n > 98 {
 				t.Errorf("line 1 has %d characters: %q", n, line)
 			}
 
@@ -310,7 +318,7 @@ func TestRunVerdictKeepsTheOtherExitStatuses(t *testing.T) {
 }
 
 // TestRunVerdictRefusesAWrongKind stops each kind that has no --track or breaks a rule with
-// exit 4 and an error whose line 1 has at most 100 characters and the fix, before anything
+// exit 4 and an error whose line 1 has at most 98 characters and the fix, before anything
 // is sent or kept, in a run and outside it.
 func TestRunVerdictRefusesAWrongKind(t *testing.T) {
 	root := inCheckout(t)
@@ -359,7 +367,7 @@ func TestRunVerdictRefusesAWrongKind(t *testing.T) {
 					return
 				}
 
-				if line := firstLine(err.Error()); line != c.want || utf8.RuneCountInString(line) > 100 {
+				if line := firstLine(err.Error()); line != c.want || utf8.RuneCountInString(line) > 98 {
 					t.Errorf("line 1 = %q (%d characters), want %q", line, utf8.RuneCountInString(line), c.want)
 				}
 
@@ -372,5 +380,53 @@ func TestRunVerdictRefusesAWrongKind(t *testing.T) {
 
 	if _, err := os.Stat(filepath.Join(root, ".qory", "artifacts", "verdict")); !os.IsNotExist(err) {
 		t.Errorf("the store has a verdict: %v", err)
+	}
+}
+
+// TestRunVerdictFirstLinesFitWithThePrefix measures every line 1 that qory writes for the
+// track flags: with the "✗ " that qory prints before it, each fits in 100 characters.
+func TestRunVerdictFirstLinesFitWithThePrefix(t *testing.T) {
+	long := "A" + strings.Repeat("b", 99)
+	reason := "The change touches one file."
+
+	for _, args := range [][]string{
+		{"--track", "small-change"},
+		{"--track-reason", reason},
+		{"--track-kind", "A comment"},
+		{"--track-reason", reason, "--track-kind", "A comment"},
+		{"--track", "small-change", "--track-kind", "A comment"},
+		{"--track", long, "--track-reason", reason},
+		{"--track", "small-change", "--track-reason", ""},
+		{"--track", "small-change", "--track-reason", strings.Repeat("a", 99999)},
+		{"--track", "small-change", "--track-reason", "a\nb"},
+		{"--track", "small-change", "--track-reason", "a\tb"},
+		{"--track", "small-change", "--track-reason", "a\u200bb"},
+		{"--track", "small-change", "--track-reason", reason, "--track-kind", ""},
+		{"--track", "small-change", "--track-reason", reason, "--track-kind", strings.Repeat("a", 99999)},
+		{"--track", "small-change", "--track-reason", reason, "--track-kind", "a\nb"},
+		{"--track", "small-change", "--track-reason", reason, "--track-kind", "a\u202eb"},
+	} {
+		inCheckout(t)
+		t.Setenv("QORY_RUN_API", "")
+
+		_, err := run(t, append([]string{"run", "verdict", "passed"}, args...)...)
+		if err == nil {
+			t.Errorf("%q: no error", args)
+
+			continue
+		}
+
+		if line := firstLine(err.Error()); utf8.RuneCountInString("✗ "+line) > 100 {
+			t.Errorf("%q: line 1 has %d characters with the prefix: %q", args, utf8.RuneCountInString("✗ "+line), line)
+		}
+	}
+
+	for _, line := range []string{
+		"Set --track to a track that the gate of the stage offers, or leave out the track flags.",
+		"Fix the refused part of the verdict, then run the command again.",
+	} {
+		if n := utf8.RuneCountInString("✗ " + line); n > 100 {
+			t.Errorf("%q has %d characters with the prefix", line, n)
+		}
 	}
 }

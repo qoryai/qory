@@ -3287,7 +3287,7 @@ Outside a run, the kept `verdict.json` has the track.
 When Qory Apiary refuses the verdict with 422 `invalid_artifact`, `qory run verdict` exits
 4. This covers a track that the gate does not offer, an `answer` point that refers to a
 question that is not open, and a verdict that breaks the schema. Line 1 of the error is
-the fix, at most 100 characters, and Qory Apiary's text follows on line 2:
+the fix, at most 98 characters, and Qory Apiary's text follows on line 2:
 
 ```text
 ✗ Set --track to a track that the gate of the stage offers, or leave out the track flags.

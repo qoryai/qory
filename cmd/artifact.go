@@ -853,8 +853,8 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md#commands-of-a-work-it
 	return c
 }
 
-// Line 1 of a refused verdict when the run API's line 1 is over 100 characters or, for a
-// track, has no flag.
+// Line 1 of a refused verdict when the run API's line 1 is over [maxFirstLine] characters
+// or, for a track, has no flag.
 const (
 	textTrackRefused   = "Set --track to a track that the gate of the stage offers, or leave out the track flags."
 	textVerdictRefused = "Fix the refused part of the verdict, then run the command again."
@@ -876,8 +876,16 @@ func (e verdictRefusedError) Unwrap() error { return e.err }
 // kindRefused returns err, a mistake in --track-kind, as a verdict that qory refuses.
 func kindRefused(err error) error { return verdictRefusedError{text: err.Error()} }
 
+// maxFirstLine is the most characters of line 1 of an error: the 2 that qory prints before
+// it ("✗ ") keep the line within 100.
+const maxFirstLine = 98
+
+// isTrackMember reports whether name is the member track of the verdict or one of its
+// members, such as track.kind. The name tracks is not.
+func isTrackMember(name string) bool { return name == "track" || strings.HasPrefix(name, "track.") }
+
 // verdictError returns a 422 invalid_artifact as a [verdictRefusedError] with a line 1 of
-// at most 100 characters and the fix, then the run API's text on line 2. Another error
+// at most 98 characters and the fix, then the run API's text on line 2. Another error
 // stays as it is.
 func verdictError(err error) error {
 	var apiError *runapi.Error
@@ -889,9 +897,9 @@ func verdictError(err error) error {
 	first, _, _ := strings.Cut(text, "\n")
 
 	switch {
-	case slices.Contains(apiError.Names, "track"):
+	case slices.ContainsFunc(apiError.Names, isTrackMember):
 		first = textTrackRefused
-	case utf8.RuneCountInString(first) > 100:
+	case utf8.RuneCountInString(first) > maxFirstLine:
 		first = textVerdictRefused
 	default:
 		return verdictRefusedError{text, err}
