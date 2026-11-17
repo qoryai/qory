@@ -158,10 +158,10 @@ func keyFault(line int, key, wrong string) *fault {
 // where in the file: each is said in words of qory's own, which name no anchor and no
 // value.
 const (
-	tooManyAliases = "its aliases expand to more values than qory reads"
-	anchorInItself = "an anchor's value holds an alias of that anchor"
-	mergeNotMaps   = "a merge, <<, holds a value that is not a mapping or a list of mappings"
-	unknownAnchor  = "an alias names an anchor that is not defined before it"
+	tooManyAliases = "The file's aliases expand to more values than qory reads."
+	anchorInItself = "An anchor's value contains an alias of that anchor."
+	mergeNotMaps   = "A merge, <<, has a value that is not a mapping or a list of mappings."
+	unknownAnchor  = "An alias refers to an anchor that is not defined before it."
 )
 
 // rewriteAliases is the fix of the refusal of anchors, aliases or merges that qory cannot read.
@@ -210,7 +210,7 @@ func aliasRefusal(err error) (string, bool) {
 // [exports.DecodeError] says it.
 func foragerSyntaxError(path string, err error) error {
 	if text, ok := aliasRefusal(err); ok {
-		return exports.Refuse(rewriteAliases, "The decoder refuses the file: "+text+".", "The file is "+path+".")
+		return exports.Refuse(rewriteAliases, text, "The file is "+path+".")
 	}
 	return exports.DecodeError(path, err)
 }
@@ -242,9 +242,9 @@ func foragerDecodeError(path string, n *yaml.Node, t reflect.Type, key string, k
 	}
 	if text, ok := aliasRefusal(err); ok {
 		if key != "" {
-			return exports.Refuse(rewriteAliases, "The decoder refuses "+key+": "+text+".", "The file is "+path+".")
+			return exports.Refuse(rewriteAliases, "At "+key+": "+text, "The file is "+path+".")
 		}
-		return exports.Refuse(rewriteAliases, "The decoder refuses the file: "+text+".", "The file is "+path+".")
+		return exports.Refuse(rewriteAliases, text, "The file is "+path+".")
 	}
 	if te != nil || tagRefusal.MatchString(err.Error()) {
 		if f := findFault(n, t, key, known); f != nil && f != walkLimited {
@@ -328,7 +328,7 @@ const walkLimit = 100_000
 // fault in what it walked. It is no fault of the file, which the decoder may read
 // whatever its aliases expand to, so no refusal says it; the decoder's own refusal of
 // aliases that expand too far is [tooManyAliases], said by [aliasRefusal].
-var walkLimited = &fault{0, rewriteAliases, "The decoder refuses the file: " + tooManyAliases}
+var walkLimited = &fault{0, rewriteAliases, strings.TrimSuffix(tooManyAliases, ".")}
 
 // walk is one walk of [findFault]. It walks each value once for each type it is read
 // as, so an alias read again is not walked again, and an alias inside the value it

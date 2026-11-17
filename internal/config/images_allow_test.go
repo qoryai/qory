@@ -61,7 +61,7 @@ func TestForagerFileReadsTheImagesAllow(t *testing.T) {
 // digest in lower case up to a whole part of it, and what is not a list of strings.
 func TestForagerFileRefusesAnImagesAllowEntry(t *testing.T) {
 	hermetic(t)
-	const notPrefix = "to the start of an image reference pinned by digest, in lower case.\n  The start is a whole part of it: a registry, a name or a path ending in a slash, or a name and its @. The entry is not one.\n  wall.images_allow is in {path}."
+	const notPrefix = "to the start of an image reference pinned by digest, in lower case.\n  The start is a whole part of it: a registry, a name, or a path ending in a slash, or a name and its @. The entry is not one.\n  wall.images_allow is in {path}."
 	wall := "wall:\n  adapter: docker\n  image: example.com/agent:1\n  images_allow: "
 	for _, c := range []struct{ body, want string }{
 		{wall + "[registry.example/, \"\"]\n", "Set wall.images_allow[1] " + notPrefix},

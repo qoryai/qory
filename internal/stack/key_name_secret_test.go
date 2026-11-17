@@ -61,7 +61,7 @@ func TestAnUnknownStackKeyWithANewlineInItsNameIsReportedByItsLine(t *testing.T)
 func TestADecoderRefusalWithASecretIsGivenByItsLines(t *testing.T) {
 	isolate(t)
 	head := "apiVersion: qory.dev/v1alpha1\n"
-	const cannotRead = "qory cannot read the value here. The YAML decoder's message contains an access key secret, a run key, a run code or an enrolment code, so qory does not print it."
+	const cannotRead = "qory cannot read the value here. The YAML decoder's message contains an access key secret, a run key, a run code, or an enrolment code, so qory does not print it."
 	for _, c := range []struct{ body, want string }{
 		{head + "modules: qak_x\n", "Set each value in the file to the type its key takes.\n  Line 2: " + cannotRead},
 		{head + "extends: qak_x\nmodules: qrk_x\n", "Set each value in the file to the type its key takes.\n  Line 2: " + cannotRead + "\n  Line 3: " + cannotRead},
@@ -106,7 +106,7 @@ func TestARefusalWithoutALineIsThePath(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err := Load(path)
-	want := "Correct the file.\n  qory cannot read the value here. The YAML decoder's message contains an access key secret, a run key, a run code or an enrolment code, so qory does not print it.\n  The file is " + path + "."
+	want := "Correct the file.\n  qory cannot read the value here. The YAML decoder's message contains an access key secret, a run key, a run code, or an enrolment code, so qory does not print it.\n  The file is " + path + "."
 	if err == nil || err.Error() != want {
 		t.Errorf("%v, want %q", err, want)
 	}
@@ -119,7 +119,7 @@ func TestARefusalWithoutALineIsThePath(t *testing.T) {
 func TestARefusalOfARuntimeListWithASecretKeepsQorysWords(t *testing.T) {
 	isolate(t)
 	head := "apiVersion: qory.dev/v1alpha1\n"
-	const cannotRead = "qory cannot read the value here. The YAML decoder's message contains an access key secret, a run key, a run code or an enrolment code, so qory does not print it."
+	const cannotRead = "qory cannot read the value here. The YAML decoder's message contains an access key secret, a run key, a run code, or an enrolment code, so qory does not print it."
 	for _, c := range []struct{ body, want string }{
 		{head + "target:\n  runtime: [!!int qak_x]\n", "Set target.runtime to one runtime name or a list of names.\n  " + cannotRead + "\n  target.runtime is in %s."},
 		{head + "target:\n  runtime: [!!int QRK_ab]\n", "Set target.runtime to one runtime name or a list of names.\n  " + cannotRead + "\n  target.runtime is in %s."},

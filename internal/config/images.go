@@ -135,7 +135,7 @@ func readImages(path string, node *yaml.Node) ([]ForagerImage, error) {
 // not the start of such a reference in lower case, up to a whole part of it.
 func readImagesAllow(path string, node *yaml.Node) ([]string, error) {
 	notPrefix := func(i, _ int) error {
-		return exports.Refuse(fmt.Sprintf("Set wall.images_allow[%d] to the start of an image reference pinned by digest, in lower case.", i), "The start is a whole part of it: a registry, a name or a path ending in a slash, or a name and its @. The entry is not one.", "wall.images_allow is in "+path+".")
+		return exports.Refuse(fmt.Sprintf("Set wall.images_allow[%d] to the start of an image reference pinned by digest, in lower case.", i), "The start is a whole part of it: a registry, a name, or a path ending in a slash, or a name and its @. The entry is not one.", "wall.images_allow is in "+path+".")
 	}
 	allow, err := stringList(path, "wall.images_allow", node, notPrefix)
 	if err != nil {

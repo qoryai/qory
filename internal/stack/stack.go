@@ -689,7 +689,7 @@ func (p *Stack) validate(compose bool) error {
 				return exports.Refuse(fmt.Sprintf("Remove %s from extending.kinds.", k), "An extending module never ships it, because the runtime executes it without the agent.", "extending.kinds is in "+exports.FilePlace+".")
 			}
 			if k == "files" {
-				return exports.Refuse("Remove files from extending.kinds, and list the paths in extending.files.", "extending.files holds the paths that an extending module's files may sit under.", "extending.kinds is in "+exports.FilePlace+".")
+				return exports.Refuse("Remove files from extending.kinds, and list the paths in extending.files.", "extending.files contains the paths that an extending module's files may sit under.", "extending.kinds is in "+exports.FilePlace+".")
 			}
 		}
 		for _, key := range p.Extending.Settings {
@@ -950,7 +950,7 @@ func (d *decodeRefusal) In(file string) error {
 // out, and a line says so.
 func decoderLines(err error) []string {
 	if accesskey.ContainsSecret(err.Error()) {
-		return []string{"qory cannot read the value here. The YAML decoder's message contains an access key secret, a run key, a run code or an enrolment code, so qory does not print it."}
+		return []string{"qory cannot read the value here. The YAML decoder's message contains an access key secret, a run key, a run code, or an enrolment code, so qory does not print it."}
 	}
 	var lines []string
 	for _, l := range strings.Split(err.Error(), "\n") {

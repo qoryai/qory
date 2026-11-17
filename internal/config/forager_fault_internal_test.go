@@ -36,7 +36,7 @@ func TestTheWalkEnds(t *testing.T) {
 		bomb += fmt.Sprintf("    c%d: &m%d {<<: [%s*m%d]}\n", i, i, strings.Repeat(fmt.Sprintf("*m%d, ", i-1), 9), i-1)
 	}
 	f, took = walkFault(t, bomb+"wall:\n  <<: *m8\n", false)
-	if f == nil || f.line != 0 || f.text != "The decoder refuses the file: "+tooManyAliases || took > 2*time.Second {
+	if f == nil || f.line != 0 || f.text != strings.TrimSuffix(tooManyAliases, ".") || took > 2*time.Second {
 		t.Errorf("merges that expand without end: %+v in %v", f, took)
 	}
 }

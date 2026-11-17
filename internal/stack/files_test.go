@@ -38,7 +38,7 @@ func TestFileAllowedMatchesByPathSegment(t *testing.T) {
 func TestLoadRefusesExtendingFilesShapes(t *testing.T) {
 	head := "apiVersion: qory.dev/v1alpha1\nmodules:\n  - name: core\n"
 	cases := []struct{ yaml, want string }{
-		{head + "extending:\n  kinds: [files]\n", "Remove files from extending.kinds, and list the paths in extending.files.\n  extending.files holds the paths that an extending module's files may sit under."},
+		{head + "extending:\n  kinds: [files]\n", "Remove files from extending.kinds, and list the paths in extending.files.\n  extending.files contains the paths that an extending module's files may sit under."},
 		{head + "extending:\n  files: [/claude/rules]\n", "Set each entry of extending.files to a <runtime>/<path> prefix.\n  extending.files lists \"/claude/rules\"."},
 		{head + "extending:\n  files: [claude/../rules]\n", `extending.files lists "claude/../rules"`},
 		{head + "extending:\n  files: [\"\"]\n", `extending.files lists ""`},

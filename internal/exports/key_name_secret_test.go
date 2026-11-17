@@ -129,7 +129,7 @@ func TestHideNameHidesEveryWordWithASecret(t *testing.T) {
 // mixed case, is left out too.
 func TestADecoderPrefixWithASecretIsLeftOut(t *testing.T) {
 	isolate(t)
-	const cannotRead = "qory cannot read the value here. The YAML decoder's message contains an access key secret, a run key, a run code or an enrolment code, so qory does not print it."
+	const cannotRead = "qory cannot read the value here. The YAML decoder's message contains an access key secret, a run key, a run code, or an enrolment code, so qory does not print it."
 	inner := errors.New("yaml: cannot decode !!str `qak_y` as a !!int")
 	for _, c := range []struct {
 		err  error
