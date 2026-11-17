@@ -13,16 +13,19 @@ import (
 	"github.com/qoryai/qory/cmd"
 )
 
-// fixedEnvironment is every environment variable the cmd tests keep from the process
-// that starts them. A variable that is not listed is removed by [startFromFixedEnvironment],
-// so a token in a developer's shell reaches no session spec and no test output.
+// fixedEnvironment is every environment variable that the cmd tests start with, as set
+// in the process that starts them. [startFromFixedEnvironment] removes each variable that
+// is not listed, so a token in a developer's shell reaches no session spec and no test
+// output. GOWORK, GOPROXY and GOENV are not listed on purpose: the tests build against
+// go.mod alone, with no workspace file and no private proxy.
 var fixedEnvironment = []string{
-	// The programs the tests start (git, sh, the fake runtimes) are found through PATH.
+	// The programs the tests start (git, sh, the fake runtimes) are looked up in PATH.
 	"PATH",
-	// HOME and TMPDIR are the paths git and the temporary directories start from, before
-	// emptyDir and t.TempDir point the tests elsewhere.
+	// HOME and TMPDIR are the paths that git and the temporary directories start from,
+	// before emptyDir and t.TempDir set other paths.
 	"HOME", "TMPDIR",
-	// LANG and TERM keep the messages of git and the terminal checks the same as in a shell.
+	// LANG and TERM select the language of git's messages and the result of the terminal
+	// checks, as in the developer's shell.
 	"LANG", "TERM",
 	// GOCOVERDIR is where a test binary built with -cover writes its coverage data.
 	"GOCOVERDIR",
@@ -30,10 +33,11 @@ var fixedEnvironment = []string{
 	// QORY_WALL_HELPER is the path of the Linux build of qory that TestRunBehindARealWall
 	// mounts. Without them those tests skip.
 	"QORY_TEST_DOCKER", "QORY_WALL_HELPER",
-	// The docker command finds its engine and its configuration through these.
+	// The docker command reads the address of its engine and its configuration from these.
 	"DOCKER_HOST", "DOCKER_CONTEXT", "DOCKER_CONFIG",
-	// The go build in realWallImage finds the toolchain, its caches and its settings
-	// through these; HOME no longer leads to them once emptyDir has moved it.
+	// The go build in realWallImage reads the location of the toolchain, its caches and its
+	// settings from these; the default under HOME no longer applies once emptyDir has moved
+	// HOME.
 	"GOROOT", "GOPATH", "GOCACHE", "GOMODCACHE", "GOFLAGS", "GOTOOLCHAIN",
 }
 
@@ -75,9 +79,10 @@ const valueFromTheParent = "value-from-the-parent"
 
 // TestNoParentTokenReachesASessionSpec starts this test binary with GITHUB_TOKEN,
 // ANTHROPIC_API_KEY and EXAMPLE_SETTING set to [valueFromTheParent], runs qory run claude
-// in that process and checks that no entry of the session spec contains the value. The
-// check fails when [startFromFixedEnvironment] is not called, lists the name of one of the
-// variables, or removes only the names that look like a token.
+// in that process and checks that neither an entry of the session spec nor the output of
+// qory run contains the value. The check fails when [startFromFixedEnvironment] is not
+// called, lists the name of one of the variables, or removes only the names that look
+// like a token.
 func TestNoParentTokenReachesASessionSpec(t *testing.T) {
 	if !inSessionEnvChild() {
 		startWithEnvironment(t, "TestNoParentTokenReachesASessionSpec", "PATH="+os.Getenv("PATH"),
@@ -92,8 +97,12 @@ func TestNoParentTokenReachesASessionSpec(t *testing.T) {
 	defer cmd.SetJoinSession(func(s session.SessionSpec) { specs = append(specs, s) })()
 	_, _, restore := cmd.OpenNowhereWith(cmd.Nowhere{})
 	defer restore()
-	if out, err := run(t, "run", "claude"); !errors.Is(err, cmd.ErrJoinedNowhere) {
+	out, err := run(t, "run", "claude")
+	if !errors.Is(err, cmd.ErrJoinedNowhere) {
 		t.Fatalf("%v (exit %d)\n%s", err, cmd.ExitCode(err), out)
+	}
+	if strings.Contains(out, valueFromTheParent) {
+		t.Errorf("the output of qory run claude contains a value set in the parent process:\n%s", out)
 	}
 	if len(specs) == 0 {
 		t.Fatal("qory run claude built no session spec")
@@ -108,13 +117,13 @@ func TestNoParentTokenReachesASessionSpec(t *testing.T) {
 	}
 }
 
-// TestTheFixedEnvironmentKeepsTheSwitchesAndPathsTheTestsRead starts this test binary
+// TestTheTestsStartWithTheSwitchesAndPathsTheyRead starts this test binary
 // with a token, QORY_TEST_DOCKER and GOCACHE in its environment, and in that process
 // checks that the tests start with the switch and the path and without the token, so an
 // opt-in test is not skipped for want of its switch. It also checks that no name in
 // [fixedEnvironment] contains a word that marks a credential.
-func TestTheFixedEnvironmentKeepsTheSwitchesAndPathsTheTestsRead(t *testing.T) {
-	const test = "TestTheFixedEnvironmentKeepsTheSwitchesAndPathsTheTestsRead"
+func TestTheTestsStartWithTheSwitchesAndPathsTheyRead(t *testing.T) {
+	const test = "TestTheTestsStartWithTheSwitchesAndPathsTheyRead"
 	if !inSessionEnvChild() {
 		for _, name := range fixedEnvironment {
 			for _, part := range []string{"TOKEN", "KEY", "SECRET", "PASS", "AUTH", "COOKIE", "CREDENTIAL"} {
