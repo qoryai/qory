@@ -1088,11 +1088,11 @@ func worktreePath(path, key string, e pathEntry) (Path, error) {
 	to := e.To
 	switch {
 	case filepath.IsAbs(from) && !e.mapping:
-		return Path{}, exports.Refuse(fmt.Sprintf("Write the entry of %s as {from: %s, to: <path in the worktree>}.", key, exports.Value(e.From, false)), fmt.Sprintf("%s lists %s, which is not a path inside the checkout.", key, exports.Value(e.From, true)), key+" is in "+exports.HidePath(path)+".")
+		return Path{}, exports.Refuse(fmt.Sprintf("Write the entry of %s with a from and a to.", key), fmt.Sprintf("%s lists %s, which is not a path inside the checkout.", key, exports.Value(e.From, true)), fmt.Sprintf("Write it as {from: %s, to: <path in the worktree>}.", exports.Value(e.From, false)), key+" is in "+exports.HidePath(path)+".")
 	case filepath.IsAbs(from):
 		from = filepath.Clean(from)
 		if to == "" {
-			return Path{}, exports.Refuse(fmt.Sprintf("Add a to to the entry of %s, as {from: %s, to: <path in the worktree>}.", key, exports.Value(e.From, false)), fmt.Sprintf("%s lists %s with no to, and a path from outside the checkout sets where it goes.", key, exports.Value(e.From, false)), key+" is in "+exports.HidePath(path)+".")
+			return Path{}, exports.Refuse(fmt.Sprintf("Add a to to the entry of %s.", key), fmt.Sprintf("%s lists %s with no to, and a path from outside the checkout sets where it goes.", key, exports.Value(e.From, false)), fmt.Sprintf("Write it as {from: %s, to: <path in the worktree>}.", exports.Value(e.From, false)), key+" is in "+exports.HidePath(path)+".")
 		}
 	default:
 		if !insideRel(from) {
