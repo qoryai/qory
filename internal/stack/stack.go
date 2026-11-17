@@ -450,8 +450,8 @@ type Workflow struct {
 	// sets none. It is set as the stack is validated.
 	TimeLimit time.Duration `yaml:"-"`
 	// Access is access as written, the access level the workflow declares for what a
-	// dispatched run of the workflow works on: read or write, "" when the workflow sets
-	// none. [Stack.AccessOf] reads "" as read.
+	// dispatched run of the workflow works on: read, write-no-push, or write, "" when the
+	// workflow sets none. [Stack.AccessOf] reads "" as read.
 	Access string `yaml:"access,omitempty"`
 	// HookPoints are the points of the workflow where a checkout extending the stack
 	// may add workflow hooks, by the point's name; nil for none.
@@ -460,9 +460,42 @@ type Workflow struct {
 
 // The access levels a workflow declares, see [Workflow.Access].
 const (
-	AccessRead  = "read"
-	AccessWrite = "write"
+	AccessRead = "read"
+	// AccessWriteNoPush is a writable checkout, no push step, no submit, and no version of
+	// the artifact branch.
+	AccessWriteNoPush = "write-no-push"
+	AccessWrite       = "write"
 )
+
+// LowerAccess is the lower of the access levels a and b, in the order [AccessRead],
+// [AccessWriteNoPush], [AccessWrite]. The empty level of documents with no target does
+// not lower the other, and two empty levels give "". Any other value, such as "Read",
+// counts as [AccessRead], also next to an empty level, so a value that no schema accepts
+// never raises a run.
+func LowerAccess(a, b string) string {
+	rank := func(level string) int {
+		switch level {
+		case AccessWriteNoPush:
+			return 2
+		case AccessWrite:
+			return 3
+		}
+		return 1
+	}
+	if a == "" && b == "" {
+		return ""
+	}
+	if a == "" || b == "" {
+		a, b = a+b, a+b
+	}
+	if rank(b) < rank(a) {
+		a, b = b, a
+	}
+	if rank(a) == 1 {
+		return AccessRead
+	}
+	return a
+}
 
 // workflowName is a workflow's name: at most 55 characters, so that [WorkflowEntry] is at
 // most 64.
@@ -483,9 +516,9 @@ func (p *Stack) TimeLimitOf(name string) time.Duration {
 	return p.Workflows[name].TimeLimit
 }
 
-// AccessOf is the access level the workflow name declares, [AccessRead] or
-// [AccessWrite]; [AccessRead] when the stack has no such workflow or the workflow sets
-// none.
+// AccessOf is the access level the workflow name declares, [AccessRead],
+// [AccessWriteNoPush] or [AccessWrite]; [AccessRead] when the stack has no such workflow
+// or the workflow sets none.
 func (p *Stack) AccessOf(name string) string {
 	if a := p.Workflows[name].Access; a != "" {
 		return a
@@ -708,8 +741,13 @@ func (p *Stack) validate(compose bool) error {
 			return exports.Refuse("Rename the workflow "+accesskey.ShownName(name, true)+".", "A workflow name is a lower-case letter, then up to 54 lower-case letters, digits, and hyphens, 55 characters at most.", "workflows is in "+exports.FilePlace+".")
 		}
 		w := p.Workflows[name]
-		if w.Access != "" && w.Access != AccessRead && w.Access != AccessWrite {
-			return exports.Refuse(fmt.Sprintf("Set workflows.%s.access to read or write.", name), fmt.Sprintf("The value is %s.", exports.Value(w.Access, true)), fmt.Sprintf("workflows.%s is in %s.", name, exports.FilePlace))
+		if w.Access != "" && w.Access != AccessRead && w.Access != AccessWriteNoPush &&
+			w.Access != AccessWrite {
+			return exports.Refuse(
+				fmt.Sprintf("Set workflows.%s.access to a valid level.", name),
+				"The levels are read, write-no-push, and write.",
+				fmt.Sprintf("The value is %s.", exports.Value(w.Access, true)),
+				fmt.Sprintf("workflows.%s is in %s.", name, exports.FilePlace))
 		}
 		if w.TimeLimitText == "" {
 			continue

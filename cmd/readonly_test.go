@@ -43,6 +43,9 @@ func writesHello(f string) string {
 // lowered sets access in a run's documents to read.
 func lowered(d map[string]any) { d["access"] = "read" }
 
+// noPush sets access in a run's documents to write-no-push.
+func noPush(d map[string]any) { d["access"] = "write-no-push" }
+
 // readRun is a walled run from a run code whose workflow hello the stack file, changed
 // by stackFile, declares, with the fake docker and the wall section of forager.yaml
 // whose wall.image is image, with more after it; it returns the run and the fake
@@ -86,10 +89,12 @@ func checkoutMounts(spec session.SessionSpec) []wall.Mount {
 // TestAReadRunSeesTheCheckoutReadOnly is a walled run from a run code that only reads:
 // its documents have access write and the stack declares its workflow with access read,
 // with no access, or not at all, or its documents have access read and the stack
-// declares its workflow write. The session binds the workspace read-only, the
-// checkout's mount is read-only, the checkout stays among the places the run may write,
-// and Claude Code's settings deny the edit tools, allow the commands of a work item on
-// /qory/qory in Bash and set defaultMode to dontAsk.
+// declares its workflow write or write-no-push, or its documents have access
+// write-no-push and the stack declares its workflow read or not at all. The session
+// binds the workspace read-only, the checkout's mount is read-only, the checkout stays
+// among the places the run may write, and Claude Code's settings deny the edit tools,
+// allow the commands of a work item on /qory/qory in Bash and set defaultMode to
+// dontAsk.
 func TestAReadRunSeesTheCheckoutReadOnly(t *testing.T) {
 	for _, c := range []struct {
 		name      string
@@ -100,6 +105,9 @@ func TestAReadRunSeesTheCheckoutReadOnly(t *testing.T) {
 		{"no access", declares(""), nil},
 		{"undeclared", nil, nil},
 		{"lowered by the documents", declares("write"), lowered},
+		{"write-no-push lowered by the documents", declares("write-no-push"), lowered},
+		{"read by the stack, write-no-push in the documents", declares("read"), noPush},
+		{"undeclared, write-no-push in the documents", nil, noPush},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			r, _ := readRunDocuments(t, nil, c.stackFile, c.change, readImage, "")
@@ -174,15 +182,20 @@ func noTarget(d map[string]any) {
 	delete(d, "target_version")
 }
 
-// writeRuns are the runs from a run code of the workflow hello, which the stack declares
-// write, that do not only read the checkout: one whose documents have access write, and
-// one whose documents have no target, so no access.
+// writeRuns are the runs from a run code of the workflow hello that do not only read
+// the checkout, each with the access its stack file declares: one whose documents have
+// access write, one whose documents have no target, so no access, one whose documents
+// have access write-no-push, and the same with a workflow declared write-no-push.
 var writeRuns = []struct {
-	name   string
-	change func(map[string]any)
+	name, declared string
+	change         func(map[string]any)
 }{
-	{"access write", nil},
-	{"no target", noTarget},
+	{"access write", "write", nil},
+	{"no target", "write", noTarget},
+	{"documents write-no-push", "write", noPush},
+	{"workflow write-no-push, documents write", "write-no-push", nil},
+	{"workflow and documents write-no-push", "write-no-push", noPush},
+	{"workflow write-no-push, no target", "write-no-push", noTarget},
 }
 
 // writeNeedsWallLine is the line of a run of [writeRuns] with no wall.
@@ -194,7 +207,7 @@ const writeNeedsWallLine = "run this workflow with a wall: this run of workflow 
 func TestAWriteRunWithNoWallStops(t *testing.T) {
 	for _, c := range writeRuns {
 		t.Run(c.name, func(t *testing.T) {
-			r := runFromCode(t, declares("write"), c.change)
+			r := runFromCode(t, declares(c.declared), c.change)
 			checkStopped(t, r, "", "write_needs_wall")
 			wants(t, r.out+r.err.Error(), writeNeedsWallLine)
 		})
@@ -210,7 +223,7 @@ func TestAGatewayTakesTheCloseOfAWriteRunWithNoWall(t *testing.T) {
 	atGateway(t)
 	for _, c := range writeRuns {
 		t.Run(c.name, func(t *testing.T) {
-			r := runFromCode(t, declares("write"), c.change)
+			r := runFromCode(t, declares(c.declared), c.change)
 			checkStopped(t, r, "", "write_needs_wall")
 			wants(t, r.out+r.err.Error(), "(write_needs_wall); the code is used")
 			checkGatewayRecord(t, r, "write_needs_wall")
@@ -223,7 +236,7 @@ func TestAGatewayTakesTheCloseOfAWriteRunWithNoWall(t *testing.T) {
 func TestAWriteRunBehindAWallStarts(t *testing.T) {
 	for _, c := range writeRuns {
 		t.Run(c.name, func(t *testing.T) {
-			r, _ := readRunDocuments(t, nil, declares("write"), c.change, readImage, "")
+			r, _ := readRunDocuments(t, nil, declares(c.declared), c.change, readImage, "")
 			if !r.joined {
 				t.Fatalf("%v (exit %d), want the join\n%s", r.err, cmd.ExitCode(r.err), r.out)
 			}
