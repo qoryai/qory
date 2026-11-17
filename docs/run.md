@@ -3376,7 +3376,7 @@ A red suite, whose command ran (`failed` or `timeout`):
 A suite that did not start or did not run, with a cause the agent cannot fix: the after step
 could not run or the script ended before the command (exit 70, 71, 72 or another status, or -1),
 the session's folder has no `.git` folder, qory could not read the build plan or the start commit,
-or the session succeeded and its after step did not run because the run closed.
+qory cannot reach the run API, or the session succeeded and its after step did not run because the run closed.
 
 | The agent's newest verdict in this run | What qory posts |
 |---|---|
