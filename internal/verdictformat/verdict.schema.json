@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://qory.dev/contracts/harness/v1/verdict.schema.json",
   "title": "The verdict format, version 1",
-  "description": "A run's verdict on the work of its round: the file of a version of the artifact type verdict, which qory run verdict stores. passed: the work meets the bar. changes-requested: the work needs another round. escalate: a person must act, and points lists what is wrong or missing and what the person can do. changes-requested may have points too, each a run_again point: what is wrong or missing, for the next round. The question of an answer point is open in the work item's newest questions version, which a JSON Schema cannot check. No object has a member this schema does not define.",
+  "description": "A run's verdict on the work of its round: the file of a version of the artifact type verdict, which qory run verdict stores. passed: the work meets the bar. changes-requested: the work needs another round. escalate: a person must act, and points lists what is wrong or missing and what the person can do. changes-requested may have points too, each a run_again point: what is wrong or missing, for the next round. A verdict of any kind may have a track: the track the run proposes for the work item, where the gate of the run's stage offers tracks. A track the gate does not offer is rejected with 422. The question of an answer point is open in the work item's newest questions version, which a JSON Schema cannot check. No object has a member this schema does not define.",
   "type": "object",
   "required": ["verdict"],
   "additionalProperties": false,
@@ -14,7 +14,8 @@
       "minItems": 1,
       "maxItems": 20,
       "items": {"$ref": "#/$defs/point"}
-    }
+    },
+    "track": {"$ref": "#/$defs/track"}
   },
   "allOf": [
     {
@@ -31,6 +32,16 @@
     }
   ],
   "$defs": {
+    "track": {
+      "description": "The track the run proposes, with the reason in one sentence on one line. id is the id of a track that the gate of the run's stage offers: one lower-case word, or lower-case words joined by hyphens, such as small-change, at most 40 characters. A verdict with no track proposes none.",
+      "type": "object",
+      "required": ["id", "reason"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {"type": "string", "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$", "maxLength": 40},
+        "reason": {"description": "Why the run proposes this track, 1 to 300 characters.", "$ref": "#/$defs/line", "minLength": 1, "maxLength": 300}
+      }
+    },
     "point": {
       "description": "One point: what is wrong or missing and its action. question is required when action is answer, and absent when action is run_again. fix is optional when action is run_again, and absent when action is answer. An answer point comes only with escalate.",
       "type": "object",
@@ -43,8 +54,8 @@
         "fix": {"description": "What a person does to fix it, in one plain sentence on one line, 1 to 500 characters: Qory Apiary shows it in place of the sentence of the action run_again.", "$ref": "#/$defs/line", "minLength": 1, "maxLength": 500}
       },
       "if": {"required": ["action"], "properties": {"action": {"const": "answer"}}},
-      "then": {"required": ["question"], "not": {"required": ["fix"]}},
-      "else": {"not": {"required": ["question"]}}
+      "then": {"required": ["question"], "properties": {"fix": false}},
+      "else": {"properties": {"question": false}}
     },
     "line": {
       "description": "Text on one line: it has no control character, so none of U+0000 to U+001F, U+007F and U+0080 to U+009F, and no tab, line feed or carriage return. It has none of the bidirectional controls, the marks U+061C, U+200E and U+200F, the embeddings and overrides U+202A to U+202E and the isolates U+2066 to U+2069; the separators U+2028 and U+2029; and the format characters U+00AD, U+180E, U+200B, U+2060 to U+2064, U+FEFF and U+FFF9 to U+FFFB. This is the line of questions.schema.json.",
