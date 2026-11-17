@@ -492,6 +492,37 @@ func TestTheContainerRunsUnderTheChecksRuntime(t *testing.T) {
 	}
 }
 
+// TestARuntimeTheEngineLacksStopsThePush is a checker whose runtime the engine does not
+// have: the create fails as docker's does, the push check returns an error with the
+// engine's line, and the engine gets no start and no second create without --runtime.
+func TestARuntimeTheEngineLacksStopsThePush(t *testing.T) {
+	f := newFixture(t, "#!/usr/bin/env node")
+	f.c.Runtime = "nope"
+	f.e.create = func(stderr io.Writer) error {
+		if !slices.Contains(f.e.commands[len(f.e.commands)-1], "nope") {
+			return nil
+		}
+		io.WriteString(stderr, "docker: Error response from daemon: unknown or invalid runtime name: nope\n")
+		return errors.New("exit status 125")
+	}
+	r, err := f.post(t, "/artifacts", pushBody(t, "spec", [2]string{"spec.md", "x"}))
+	if err == nil || r != nil || !strings.Contains(err.Error(), "unknown or invalid runtime name: nope") {
+		t.Fatalf("got %+v, %v, want an error with the engine's line", r, err)
+	}
+	creates := 0
+	for _, c := range f.e.commands {
+		switch c[1] {
+		case "start":
+			t.Errorf("the engine got a start: %v", c)
+		case "create":
+			creates++
+		}
+	}
+	if creates != 1 {
+		t.Errorf("the engine got %d creates, want 1 with no fallback: %v", creates, f.e.verbs())
+	}
+}
+
 // TestTheWallsLimitsAreTheChecks is a wall with limits: the check's container gets its
 // CPUs, its memory and its PIDs.
 func TestTheWallsLimitsAreTheChecks(t *testing.T) {

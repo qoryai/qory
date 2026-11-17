@@ -421,6 +421,28 @@ func TestTheLoadedCheckerHasTheRuntime(t *testing.T) {
 	}
 }
 
+// TestTheLoadedCheckerOfARunWithNoDefaultHasTheRunsRuntime is a run with no default
+// image: pushChecker returns a checker of the run's image and of its runtime.
+func TestTheLoadedCheckerOfARunWithNoDefaultHasTheRunsRuntime(t *testing.T) {
+	stubChecks(t)
+	docker, _ := loggingEngine(t, "")
+	spec := &runSpec{}
+	spec.Wall = &wall.Docker{Command: docker}
+	run := imageOnlyAPI{imageAPI: imageAPI{runAPIOnly: runAPIOnly{base: "http://run-api.qory.invalid/v1/runs/r1", dir: t.TempDir()}}, img: session.Image{Name: "agent", Ref: "registry.example/agent:1", Runtime: "runsc"}}
+	checker, err := pushChecker(context.Background(), run, t.TempDir(), "r1", spec, true, false)
+	if err != nil || checker == nil || checker.Image != "registry.example/agent:1" || checker.Runtime != "runsc" {
+		t.Fatalf("with no default: %v, %v, want a checker of registry.example/agent:1 and runtime runsc", checker, err)
+	}
+}
+
+// imageOnlyAPI is [imageAPI] whose Image returns img, with its runtime.
+type imageOnlyAPI struct {
+	imageAPI
+	img session.Image
+}
+
+func (r imageOnlyAPI) Image() session.Image { return r.img }
+
 // TestAReferenceDefaultIgnoresTheRunsImageRuntime is a run whose policy selects an entry
 // with a runtime while the default is a reference: the checks run in the default, with no
 // runtime.
