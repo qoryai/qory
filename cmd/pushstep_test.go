@@ -491,6 +491,28 @@ func TestAWriteRunPushesWhatTheAgentLeft(t *testing.T) {
 	p.h.noPassword(t, r.out)
 }
 
+// TestThePushStepPushesRefsHeadsQoryAndTheWorkItemId is a write run of the work item
+// wi_01HZX: the only ref under refs/heads/qory/ on the forge is refs/heads/qory/wi_01HZX,
+// and the version's ref is qory/wi_01HZX. Qory Apiary's tests pin the same prefix, so a
+// change of the prefix on either side fails a test on both.
+func TestThePushStepPushesRefsHeadsQoryAndTheWorkItemId(t *testing.T) {
+	p := newPushRepo(t, "write")
+	p.change = func(d map[string]any) {
+		d["work_item"].(map[string]any)["id"] = "wi_01HZX"
+		if in, ok := d["inputs"].(map[string]any); ok && in["work_item"] != nil {
+			in["work_item"].(map[string]any)["id"] = "wi_01HZX"
+		}
+	}
+	r := p.run(t, writesAndCommits(t), nil)
+	r.wantsClose(t, event.StateSucceeded, 0)
+	if got := proxygittest.Git(t, p.bare, "for-each-ref", "--format=%(refname)", "refs/heads/qory/"); got != "refs/heads/qory/wi_01HZX" {
+		t.Errorf("the refs under refs/heads/qory/ on the forge are %q, want refs/heads/qory/wi_01HZX\n%s", got, r.out)
+	}
+	if doc := p.api.document(t, 1); doc.Ref != "qory/wi_01HZX" {
+		t.Errorf("the version's ref is %q, want qory/wi_01HZX", doc.Ref)
+	}
+}
+
 // TestARunWithNoNewCommitsPushesNothing is a write run whose agent changed nothing: the
 // step runs, and writes no branch and no version.
 func TestARunWithNoNewCommitsPushesNothing(t *testing.T) {
