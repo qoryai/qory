@@ -203,6 +203,75 @@ func TestAPushCheckSkipsCancelledVersions(t *testing.T) {
 	}
 }
 
+// TestAPushCheckMountsTheVersionBeforeAWithdrawal is the working folder of a push check
+// of demo-script when a name is withdrawn: demo-script/main has v1 with s-1 and s-2, v2
+// that adds s-3, and v3, a withdrawal, so a push of v4 is checked against v2, and the
+// folder has v2's files and index.json as the index is. A version of a cancelled run and a
+// withdrawal in between are skipped. A name whose versions are all withdrawals or
+// cancelled has no folder. qory artifact pull still leaves a withdrawn name out.
+func TestAPushCheckMountsTheVersionBeforeAWithdrawal(t *testing.T) {
+	root := inCheckout(t)
+	server := startRunAPI(t)
+	server.index = indexOf(
+		artifactEntry("demo-script", "main", "", 3,
+			versionEntry("av_1", 1, fileEntry("s-1.md", "s-1\ns-2\n")),
+			versionEntry("av_2", 2, fileEntry("s-1.md", "s-1\ns-2\ns-3\n")),
+			withdrawn(versionEntry("av_3", 3))),
+		artifactEntry("demo-script", "other", "", 4,
+			versionEntry("av_4", 1, fileEntry("s-1.md", "one\n")),
+			withdrawn(versionEntry("av_5", 2)),
+			cancelled(versionEntry("av_6", 3, fileEntry("s-1.md", "three\n"))),
+			withdrawn(versionEntry("av_7", 4))),
+		artifactEntry("demo-script", "gone", "", 1, withdrawn(versionEntry("av_8", 1))),
+	)
+	server.files = map[string]string{
+		"/artifacts/av_1/files/s-1.md": "s-1\ns-2\n",
+		"/artifacts/av_2/files/s-1.md": "s-1\ns-2\ns-3\n",
+		"/artifacts/av_4/files/s-1.md": "one\n",
+		"/artifacts/av_6/files/s-1.md": "three\n",
+	}
+	fetch, err := cmd.ArtifactsForCheck(server.URL + "/v1/runs/run-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	if err := fetch(context.Background(), dir, []string{"demo-script"}); err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{
+		"index.json":                  server.index,
+		"notes.json":                  "[]",
+		"demo-script/main/v2/s-1.md":  "s-1\ns-2\ns-3\n",
+		"demo-script/other/v1/s-1.md": "one\n",
+	}
+	got := map[string]string{}
+	filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		rel, _ := filepath.Rel(dir, path)
+		data, _ := os.ReadFile(path)
+		got[filepath.ToSlash(rel)] = string(data)
+		return nil
+	})
+	if fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Errorf("the working folder has\n%v\nwant\n%v", got, want)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "demo-script", "gone")); !os.IsNotExist(err) {
+		t.Errorf("demo-script/gone has a folder: %v", err)
+	}
+
+	// The pull leaves each withdrawn name out.
+	if _, err := run(t, "artifact", "pull"); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"main", "other", "gone"} {
+		if _, err := os.Stat(filepath.Join(root, ".qory", "artifacts", "demo-script", name)); !os.IsNotExist(err) {
+			t.Errorf("the pull made demo-script/%s: %v", name, err)
+		}
+	}
+}
+
 // checksModule is a module that declares a push check for branch and one for spec,
 // which reads questions; its program's #! line is for node.
 var checksModule = map[string]string{

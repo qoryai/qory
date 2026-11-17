@@ -1,0 +1,3 @@
+Set withdrawable of artifact type acceptance-lock to true or false.
+  withdrawable is "no".
+  The type is in modules/support-desk/process.yaml.
