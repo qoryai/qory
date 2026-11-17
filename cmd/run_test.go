@@ -1549,6 +1549,32 @@ func TestRunTakesEnvWithoutAWall(t *testing.T) {
 	}
 }
 
+// TestAMountRefusalStartsWithTheFixAndShowsTheFlag is a --mount value that is not an
+// absolute path, and one that is a path that does not exist: line 1 of each refusal is the
+// fix with no "--mount: " before it, and a later line shows that the value is from
+// --mount.
+func TestAMountRefusalStartsWithTheFixAndShowsTheFlag(t *testing.T) {
+	root := newCheckout(t)
+	copyFixture(t, "two-modules", root)
+	composedForFake(t, root, fakeRuntime(t))
+	for _, c := range []struct{ value, first, later string }{
+		{"srv", "Write the mount as an absolute path, with :ro after it for a read-only one.", "The value is from --mount."},
+		{filepath.Join(root, "no-such-folder"), "Check the path of --mount.", "no-such-folder"},
+	} {
+		_, err := run(t, "run", "--wall", "docker", "--image", "i", "--mount", c.value)
+		if err == nil || cmd.ExitCode(err) != cmd.ExitInput {
+			t.Errorf("--mount %s: %v, want exit %d", c.value, err, cmd.ExitInput)
+			continue
+		}
+		if first := strings.SplitN(err.Error(), "\n", 2)[0]; first != c.first {
+			t.Errorf("--mount %s: line 1 is %q, want %q", c.value, first, c.first)
+		}
+		if !strings.Contains(err.Error(), c.later) {
+			t.Errorf("--mount %s: %v, want a line with %q", c.value, err, c.later)
+		}
+	}
+}
+
 // TestRunRefusesAWallItCannotBuild pins the refusals before anything starts: a wall
 // that is not one, no image, a flag that means nothing without a wall.
 func TestRunRefusesAWallItCannotBuild(t *testing.T) {
