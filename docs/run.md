@@ -900,7 +900,7 @@ retry, and every 5 minutes after that, `qory run` prints one line on stderr, wit
 status of the last response, or `no response`:
 
 ```text
-qory run: registry.example.com has not returned Claude Code yet (503); check pool.registry
+qory run: registry.example.com has not returned Claude Code (503); check pool.registry
 ```
 
 A run that ends while it waits ends as a run does before its session starts: at the time

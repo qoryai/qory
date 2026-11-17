@@ -32,7 +32,7 @@ release may change what an existing document does, and states it under Upgrading
   one version read its tarball once. A 503 or 429 from the registry is retried until the
   registry returns the file or the run ends, with its time limit, a cancel or SIGTERM. At
   the first retry, and every 5 minutes after, `qory run` prints `<host> has not returned
-  Claude Code <version> yet (503); check pool.registry`, with `no response` in place of
+  Claude Code <version> (503); check pool.registry`, with `no response` in place of
   the status when the request got none, and without the version while the run does not
   know it yet. A request waits at most 30 seconds to
   connect, 30 seconds for the TLS handshake, 60 seconds for the response's headers and

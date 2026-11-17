@@ -451,7 +451,7 @@ func (r *registry) note(ctx context.Context, version, answer string) {
 	if version != "newest" {
 		subject += " " + version
 	}
-	report(fmt.Sprintf("%s has not returned %s yet (%s); check pool.registry", r.host, subject, answer))
+	report(fmt.Sprintf("%s has not returned %s (%s); check pool.registry", r.host, subject, answer))
 }
 
 // displayName is the runtime's name as a person reads it.
