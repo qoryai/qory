@@ -2258,10 +2258,10 @@ func enclose(spec *runSpec, r *config.Forager, o wallOptions, selected string, f
 	for _, v := range o.mounts {
 		m, err := config.ParseMount(v)
 		if err != nil {
-			return input(fmt.Errorf("--mount: %w", exports.HideValueError(err, v)))
+			return input(refuseFlag("--mount", exports.HideValueError(err, v)))
 		}
 		if _, err := os.Stat(m.Path); err != nil {
-			return input(fmt.Errorf("--mount: %w", exports.HideError(err)))
+			return input(exports.Refuse("Check the path of --mount.", strings.TrimSuffix(exports.HideError(err).Error(), ".")+"."))
 		}
 		more = append(more, wall.Mount{Path: m.Path, ReadOnly: m.ReadOnly})
 		spec.given = append(spec.given, givenMount{path: m.Path, from: "--mount"})
