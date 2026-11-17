@@ -2154,7 +2154,27 @@ image, which has the parsers`, then `the folder /opt/qory/parsers has none`.
 The step adds about 1.6 GiB to the image, measured on
 `mcr.microsoft.com/devcontainers/base` for arm64 (1.3 GiB before, 3.0 GiB after), and
 about 1.4 GiB on `mcr.microsoft.com/devcontainers/typescript-node` (2.7 GiB before, 4.1 GiB
-after). The build sets no limit on the image's size.
+after). The build sets no limit on the image's size unless the run's documents have
+`largest_prebuilt_image_bytes`.
+
+When the documents of a prebuild have `largest_prebuilt_image_bytes`, an integer of 1 or
+more in decimal bytes, as `docker image ls` shows sizes (10 GB is `10000000000`), the build
+reads the size of the target image with `docker image inspect` after its last step. When
+the size is greater than the member, the build removes the image and the prebuild stops,
+before anything is pushed. The run closes as failed, and qory exits 1 with these lines,
+the first after the prefix `prebuild: `:
+
+```text
+prebuild: Make the image smaller, or contact support to raise Largest prebuilt image.
+The image is 5.0 GB (5000000001 bytes).
+The limit is 5.0 GB (5000000000 bytes). The image is removed.
+```
+
+An image of exactly the limit is kept. Without the member, the build keeps an image of any
+size. The member is set only for a prebuild started from Qory Apiary, from the instance's
+Largest prebuilt image setting. `qory prebuild` on this machine has no limit. qory refuses
+documents whose member is not an integer from 1 to 9223372036854775807, or that a run of
+another step has, as it refuses any member the run documents' schema does not define.
 
 The build takes the user from `wall.user` in `forager.yaml`. The wall's helper is
 `wall.helper`, or on Linux the `qory` you run. When `forager.yaml` sets `pool.registry`,
