@@ -344,6 +344,18 @@ func TestRunVerdictRefusesAWrongKind(t *testing.T) {
 		{"kind too long in multi-byte characters", []string{"run", "verdict", "passed", "--track", "small-change", "--track-reason", trackReason,
 			"--track-kind", strings.Repeat("é", 81)},
 			"Shorten --track-kind to at most 80 characters. The kind has 81."},
+		{"kind of spaces only", []string{"run", "verdict", "passed", "--track", "small-change", "--track-reason", trackReason,
+			"--track-kind", "   "},
+			"Set --track-kind to text with a character other than a space. The kind has only spaces."},
+		{"kind of one space", []string{"run", "verdict", "passed", "--track", "small-change", "--track-reason", trackReason,
+			"--track-kind", " "},
+			"Set --track-kind to text with a character other than a space. The kind has only spaces."},
+		{"kind with a tab", []string{"run", "verdict", "passed", "--track", "small-change", "--track-reason", trackReason,
+			"--track-kind", "A\ttext"},
+			"Write --track-kind on one line. The kind has a tab (U+0009)."},
+		{"kind of 82 characters", []string{"run", "verdict", "passed", "--track", "small-change", "--track-reason", trackReason,
+			"--track-kind", strings.Repeat("a", 82)},
+			"Shorten --track-kind to at most 80 characters. The kind has 82."},
 		{"kind with a line break", []string{"run", "verdict", "passed", "--track", "small-change", "--track-reason", trackReason,
 			"--track-kind", "A text\nthat the product shows"},
 			"Write --track-kind on one line. The kind has a line break (U+000A)."},
@@ -402,6 +414,7 @@ func TestRunVerdictFirstLinesFitWithThePrefix(t *testing.T) {
 		{"--track", "small-change", "--track-reason", "a\tb"},
 		{"--track", "small-change", "--track-reason", "a\u200bb"},
 		{"--track", "small-change", "--track-reason", reason, "--track-kind", ""},
+		{"--track", "small-change", "--track-reason", reason, "--track-kind", "   "},
 		{"--track", "small-change", "--track-reason", reason, "--track-kind", strings.Repeat("a", 99999)},
 		{"--track", "small-change", "--track-reason", reason, "--track-kind", "a\nb"},
 		{"--track", "small-change", "--track-reason", reason, "--track-kind", "a\u202eb"},
@@ -424,6 +437,8 @@ func TestRunVerdictFirstLinesFitWithThePrefix(t *testing.T) {
 	for _, line := range []string{
 		"Set --track to a track that the gate of the stage offers, or leave out the track flags.",
 		"Fix the refused part of the verdict, then run the command again.",
+		"Set --track-kind to text with a character other than a space. The kind has only spaces.",
+		"Set --track-kind to one line of 1 to 80 characters that the verdict format accepts.",
 	} {
 		if n := utf8.RuneCountInString("✗ " + line); n > 100 {
 			t.Errorf("%q has %d characters with the prefix", line, n)

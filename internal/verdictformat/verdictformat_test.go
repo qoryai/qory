@@ -205,6 +205,7 @@ func TestCheck(t *testing.T) {
 		{`{"verdict": "escalate", "points": [` + answerPoint + `], "track": {"id": "standard", "reason": "A person decides."}}`, true},
 		{`{"verdict": "passed", "track": {"id": "small-change", "kind": "A text that the product shows", "reason": "One file."}}`, true},
 		{`{"verdict": "passed", "track": {"id": "small-change", "kind": "", "reason": "One file."}}`, false},
+		{`{"verdict": "passed", "track": {"id": "small-change", "kind": "   ", "reason": "One file."}}`, false},
 		{`{"verdict": "passed", "track": {"id": "small-change", "kind": 3, "reason": "One file."}}`, false},
 		{`{"verdict": "passed", "track": {"id": "small-change"}}`, false},
 		{`{"verdict": "passed", "track": {"reason": "The change touches one file."}}`, false},
@@ -285,6 +286,7 @@ func TestTrackKindLimitsAreTheSchemasLimits(t *testing.T) {
 	for _, kind := range []string{
 		"a", "A text that the product shows", strings.Repeat("a", verdictformat.MaxKind), strings.Repeat("é", verdictformat.MaxKind),
 		strings.Repeat("a", verdictformat.MaxKind+1), "A text\nthat the product shows", "A text\tthat", "A text\u202e",
+		" ", "   ", " a ", "\t",
 	} {
 		track := map[string]any{"id": "small-change", "kind": kind, "reason": "One file."}
 		want := schema.Validate(map[string]any{"verdict": "passed", "track": track}) == nil

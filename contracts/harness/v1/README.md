@@ -871,8 +871,8 @@ stores it as a version of the artifact type `verdict`. This is version 1 of the 
 | `fix` | what a person does to fix the point, in one plain sentence on one line, with the rules of `text`: optional with `run_again`, and absent with `answer`. Qory Apiary shows it in place of the sentence of the action `run_again` |
 | `track` | the track the run proposes for the work item: optional with a verdict of any kind, an object with the members `id`, `reason` and `kind` and no other. A verdict with no track proposes none. Qory Apiary returns 422 for a track that the gate of the run's stage does not offer |
 | `id` | the id of a track that the gate of the run's stage offers: one lower-case word, or lower-case words joined by hyphens, such as `small-change`, at most 40 characters. Required in a track |
-| `kind` | the kind of change that the run proposes the track for, in one plain line of 1 to 80 characters with the rules of `text`, such as `a text that the product shows`. Optional in a track. Qory Apiary shows it at the gate and reads nothing from it |
 | `reason` | why the run proposes the track, in one plain sentence on one line, 1 to 300 characters, with the rules of `text`. Required in a track |
+| `kind` | the kind of work the track suits, shown as text, on one line of 1 to 80 characters with something other than spaces in it, with the rules of `text`. Optional in a track. Qory Apiary decides nothing by it |
 
 A `changes-requested` verdict may list what the next round fixes:
 

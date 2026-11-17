@@ -22,15 +22,15 @@ release may change what an existing document does, and states it under Upgrading
   track that the gate of the run's stage offers, and `--track-reason <text>` is the
   reason, one sentence on one line of 1 to 300 characters. Pass both or neither. A track's
   id is lower-case words joined by hyphens, at most 40 characters. `--track-kind <text>`
-  adds the kind of the change, one line of 1 to 80 characters, and needs the pair. A
-  mistake in the id, the reason or the pair exits 2, and a kind with no `--track` or a
-  wrong kind exits 4, with the fix on line 1; nothing is sent or kept. Outside a run, the
-  kept `verdict.json` has the track. `qory run verdict` exits 4 for every 422
-  `invalid_artifact` from Qory Apiary, such as a track that the gate does not offer, a
-  point about a question that is not open, or a verdict that breaks the schema. Line 1 of
-  the error is the fix, with at most 98 characters, and Qory Apiary's text follows on
-  line 2. `qory artifact push` still exits 1 for `invalid_artifact`. See The verdict
-  format in `contracts/harness/v1/README.md`.
+  adds the kind of the change, one line of 1 to 80 characters with a character other than
+  a space, and needs the pair. A mistake in the id, the reason or the pair exits 2, and a
+  kind with no `--track` or a wrong kind exits 4, with the fix on line 1; nothing is sent
+  or kept. Outside a run, the kept `verdict.json` has the track. `qory run verdict` exits
+  4 for every 422 `invalid_artifact` from Qory Apiary, such as a track that the gate does
+  not offer, a point about a question that is not open, or a verdict that breaks the
+  schema. Line 1 of the error is the fix, with at most 98 characters, and Qory Apiary's
+  text follows on line 2. `qory artifact push` still exits 1 for `invalid_artifact`. See
+  The verdict format in `contracts/harness/v1/README.md`.
 - The `agent` image has the Node packages `typescript` 5.9.3, `libpg-query` 18.2.4,
   `parse5` 8.1.1, `postcss` 8.5.33 and `postcss-scss` 4.0.9 in `/opt/qory/parsers`. The
   folder belongs to root and no other user can write to it. A script loads a package with

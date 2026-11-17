@@ -787,7 +787,8 @@ sends or keeps anything.
 Any verdict may propose a track for the work item. Pass --track with the id of a track that
 the gate of the run's stage offers, such as small-change, and --track-reason with the
 reason, one sentence on one line of 1 to 300 characters. Pass both or neither. The optional
---track-kind is the kind of the change, one line of 1 to 80 characters; it needs the pair.
+--track-kind is the kind of the change, one line of 1 to 80 characters with a character
+other than a space; it needs the pair.
 qory checks the three before it sends or keeps anything. It exits ` + strconv.Itoa(ExitInput) + ` for a mistake
 in the id, the reason or the pair, and ` + strconv.Itoa(ExitArtifactRefused) + ` for a kind with no --track or a wrong kind. It also
 exits ` + strconv.Itoa(ExitArtifactRefused) + ` when Qory Apiary refuses the verdict with 422 invalid_artifact, which
@@ -852,6 +853,13 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md#commands-of-a-work-it
 
 	return c
 }
+
+// The line 1 of a kind that the verdict format refuses and qory's checks did not find, and
+// of a kind of spaces only.
+const (
+	textKindSpaces  = "Set --track-kind to text with a character other than a space. The kind has only spaces."
+	textKindRefused = "Set --track-kind to one line of 1 to 80 characters that the verdict format accepts."
+)
 
 // Line 1 of a refused verdict when the run API's line 1 is over [maxFirstLine] characters
 // or, for a track, has no flag.
@@ -941,10 +949,18 @@ func readTrack(c *cobra.Command) (*runapi.Track, error) {
 		if err := checkLine("--track-kind", "kind", "one line of text", kind, verdictformat.MaxKind); err != nil {
 			return nil, kindRefused(err)
 		}
+
+		if strings.Trim(kind, " ") == "" {
+			return nil, kindRefused(errors.New(textKindSpaces))
+		}
 	}
 
 	track := &runapi.Track{ID: id, Kind: kind, Reason: reason}
 	if err := verdictformat.CheckTrack(*track); err != nil {
+		if kindGiven {
+			return nil, kindRefused(errors.New(textKindRefused))
+		}
+
 		return nil, input(err)
 	}
 
