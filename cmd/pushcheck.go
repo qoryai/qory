@@ -240,8 +240,9 @@ func pushChecker(ctx context.Context, run openedRun, home, runID string, spec *r
 	// The runtime that the checks' container needs, the same way: an info that fails or
 	// does not list runtimes as Docker does lets the run go on.
 	if has, err := checker.HasRuntime(ctx); err == nil && !has {
-		// Docker refuses a name with a "/", a path to a binary, that its list omits: the
-		// fix is the name, not an install.
+		// Docker itself refuses an unlisted name with a "/" ("unknown or invalid runtime
+		// name"): moby v28.0.0 daemon/runtime_unix.go:218-220 and :266-268. The fix is
+		// the name, not an install.
 		if strings.Contains(checker.Runtime, "/") {
 			return nil, checksStop(fromCode, textChecksBadRuntime, textChecksBadRuntimeFromCode, exports.Value(checker.Runtime, false))
 		}
