@@ -59,6 +59,12 @@ func TestADecoderPanicIsARefusal(t *testing.T) {
 	if got := foragerDecodeError("forager.yaml", &doc, reflect.TypeFor[foragerFile](), "", true, err); got.Error() != "Check the YAML of the file.\n  The YAML decoder failed reading the file.\n  The file is forager.yaml." {
 		t.Errorf("%v", got)
 	}
+	// A file in a folder named with an access key secret is printed as the phrase.
+	folder := "/tmp/qak_AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA/forager.yaml"
+	got := foragerDecodeError(folder, &doc, reflect.TypeFor[foragerFile](), "", true, err).Error()
+	if strings.Contains(got, "qak_") || !strings.Contains(got, "(a name that contains an access key secret)") {
+		t.Errorf("the path of a decoder failure: %s", got)
+	}
 	if _, err := editEnrolment([]byte(body), Enrolment{URL: "https://apiary.example", AccessKeyID: "ak_0123456789abcdef"}); err != nil {
 		t.Errorf("the enrolment writer: %v", err)
 	}

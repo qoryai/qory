@@ -399,7 +399,7 @@ var errDecoderFailed = errors.New("the YAML decoder failed reading the file")
 type decoderFailed struct{ path string }
 
 func (d *decoderFailed) Error() string {
-	return exports.Refuse("Check the YAML of the file.", "The YAML decoder failed reading the file.", "The file is "+d.path+".").Error()
+	return exports.Refuse("Check the YAML of the file.", "The YAML decoder failed reading the file.", "The file is "+exports.HidePath(d.path)+".").Error()
 }
 
 func (d *decoderFailed) Unwrap() error { return errDecoderFailed }

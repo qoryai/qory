@@ -557,7 +557,7 @@ func loadFile(path string) (*Stack, error) {
 		return nil, exports.DecodeError(path, err)
 	}
 	if err := dec.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
-		return nil, exports.Refuse("Keep one YAML document in the stack file.", "A stack is one document, and the file contains more.", "The file is "+exports.FilePlace+".").In(path)
+		return nil, exports.Refuse("Keep one YAML document in the stack file.", "A stack is one document, and the file contains more.", "The file is "+exports.FilePlace+".").In(exports.HidePath(path))
 	}
 	abs, err := filepath.Abs(path)
 	if err != nil {
@@ -622,7 +622,7 @@ func inPath(path string, err error) error {
 	if errors.As(err, &in) {
 		return in.In(exports.HidePath(path))
 	}
-	return fmt.Errorf("%s: %w", path, err)
+	return fmt.Errorf("%s: %w", exports.HidePath(path), err)
 }
 
 // extends reports whether the document names a stack to extend.
