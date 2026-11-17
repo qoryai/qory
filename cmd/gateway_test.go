@@ -425,7 +425,7 @@ func TestGatewayRefusesRunCredentials(t *testing.T) {
 func TestCommandsStopOnGatewaySelects(t *testing.T) {
 	emptyDir(t)
 	serverFile(t, newFakeServer(t, ""), "  listen: 127.0.0.1:0\n  selects:\n    credentials:\n      - {name: secret-name-value, argument_label: secret-label-value, forge: github.com}\n")
-	want := "remove gateway.selects from " + foragerFile() + ": a run's policy selects its credentials"
+	want := "Remove gateway.selects.\n  A run's policy selects its credentials.\n  gateway.selects is in " + foragerFile() + "."
 	for _, args := range [][]string{{"gateway"}, {"run"}, {"run", "--local"}, {"config"}} {
 		out, err := run(t, args...)
 		if err == nil || err.Error() != want {

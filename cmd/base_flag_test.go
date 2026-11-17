@@ -79,7 +79,7 @@ func TestDocumentLeavesExtendsOutForTheFlag(t *testing.T) {
 	if err == nil || cmd.ExitCode(err) != cmd.ExitInput {
 		t.Fatalf("without a base: err = %v, exit %d\n%s", err, cmd.ExitCode(err), out)
 	}
-	wants(t, err.Error(), "qory.yaml: harness sets no target.runtime and no stack to extend", "leaves extends out for the base that qory harness compose -f <stack> selects")
+	wants(t, err.Error(), "Set target.runtime in the harness section, or extend a stack.", "leaves extends out for the base that qory harness compose -f <stack> selects")
 	gone(t, root, ".qory", ".claude")
 	out, err = run(t, "harness", "compose", "-f", base, "--runtime", "claude")
 	if err != nil {

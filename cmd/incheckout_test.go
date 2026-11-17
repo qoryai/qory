@@ -301,9 +301,9 @@ func TestARunKeyReadsNoSettingsOfTheCheckout(t *testing.T) {
 		harness, top  []string
 		personStopsAt string
 	}{
-		{"harness", []string{"update: sometimes"}, nil, "harness.update \"sometimes\" is not always or never"},
+		{"harness", []string{"update: sometimes"}, nil, "Set harness.update to always or never.\n  The value is \"sometimes\"."},
 		{"git", nil, []string{"git:\n  cache: \"\""}, "git.cache is empty"},
-		{"env", nil, []string{"env:\n  1BAD: x"}, "is not an environment variable name"},
+		{"env", nil, []string{"env:\n  1BAD: x"}, "Rename each variable in env to an environment variable name."},
 	} {
 		writeOwnStack(t, root, stack)
 		configure(t, root, c.harness, c.top)

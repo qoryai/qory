@@ -656,7 +656,7 @@ func TestRunExpandsTheIntegrationsTheMachineDeclares(t *testing.T) {
 	if err := os.RemoveAll(runsDir(t, root)); err != nil {
 		t.Fatal(err)
 	}
-	want := "forager.yaml: gateway.integrations.broken: " + broken + " describe: exit status 1: the settings file is missing"
+	want := "Fix the program of gateway.integrations.broken.\n  " + broken + " describe: exit status 1: the settings file is missing."
 	if _, err := run(t, "run", "--policy", policy("broken")); cmd.ExitCode(err) != cmd.ExitInput || !strings.Contains(err.Error(), want) {
 		t.Errorf("a run that selects broken: %v", err)
 	}
