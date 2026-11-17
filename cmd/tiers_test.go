@@ -198,15 +198,15 @@ func TestComposeRefusesATierMistake(t *testing.T) {
 		{[]string{"--tier", "heavy=claude-haiku-5-5"}, nil, "Use one of the tiers light, balanced, and thinking.\n  heavy is not a tier.\n  The name is in --tier heavy=claude-haiku-5-5."},
 		{[]string{"--tier", "fast=claude-haiku-5-5"}, nil, "Use one of the tiers light, balanced, and thinking.\n  fast is not a tier.\n  The name is in --tier fast=claude-haiku-5-5."},
 		{[]string{"--tier", "light=a", "--tier", "light=b"}, nil, "--tier light is given twice; give each tier once"},
-		{[]string{"--tier", "light=${qory:balanced}"}, nil, "--tier light=${qory:balanced}: write a model id; ${qory:balanced} is a tier placeholder, which goes only in an agent's model"},
-		{[]string{"--model", "${qory:light}"}, nil, "--model ${qory:light} is a tier placeholder; set the main model by its id, and a tier only in an agent's model"},
-		{nil, []string{"model: ${qory:light}"}, "harness.model ${qory:light} is a tier placeholder; set the main model by its id, and a tier only in an agent's model"},
+		{[]string{"--tier", "light=${qory:balanced}"}, nil, "--tier light=${qory:balanced}: write a model id, not a tier placeholder.\n  ${qory:balanced} goes only in an agent's model."},
+		{[]string{"--model", "${qory:light}"}, nil, "Set --model to a model id, not a tier placeholder.\n  ${qory:light} is a tier placeholder, which goes only in an agent's model."},
+		{nil, []string{"model: ${qory:light}"}, "Set harness.model to a model id, not a tier placeholder.\n  ${qory:light} is a tier placeholder, which goes only in an agent's model."},
 	} {
 		root := tierCheckout(t)
 		tierModule(t, root, "claude", tierAgents, c.harness...)
 		out, err := run(t, append([]string{"harness", "compose"}, c.args...)...)
-		if cmd.ExitCode(err) != 2 || err == nil || !strings.HasSuffix(err.Error(), c.want) {
-			t.Errorf("%v %v: exit %d, err %v\nwant suffix %s\n%s", c.args, c.harness, cmd.ExitCode(err), err, c.want, out)
+		if cmd.ExitCode(err) != 2 || err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%v %v: exit %d, err %v\nwant to contain %s\n%s", c.args, c.harness, cmd.ExitCode(err), err, c.want, out)
 		}
 		if _, err := os.Stat(filepath.Join(root, ".qory")); !errors.Is(err, os.ErrNotExist) {
 			t.Errorf("%v: .qory was written", c.args)
@@ -216,7 +216,7 @@ func TestComposeRefusesATierMistake(t *testing.T) {
 	writeFile(t, filepath.Join(root, "harness", "core", "qory-module.yaml"), "apiVersion: qory.dev/v1alpha1\nname: core\n")
 	writeOwnStack(t, root, "apiVersion: qory.dev/v1alpha1\ntarget:\n  runtime: claude\n  model: ${qory:light}\nmodules:\n  - name: core\n    source: {path: ./harness/core}\n")
 	_, err := run(t, "harness", "compose")
-	want := filepath.Join(root, "qory.yaml") + ": target.model ${qory:light} is a tier placeholder; set the main model by its id, and a tier only in an agent's model"
+	want := "Set target.model to a model id, not a tier placeholder.\n  ${qory:light} is a tier placeholder, which goes only in an agent's model.\n  target.model is in " + filepath.Join(root, "qory.yaml") + "."
 	if cmd.ExitCode(err) != 2 || err == nil || err.Error() != want {
 		t.Errorf("target.model: exit %d, err %v\nwant %s", cmd.ExitCode(err), err, want)
 	}
