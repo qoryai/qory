@@ -94,6 +94,11 @@ func New(baseURL string, client *http.Client) (*Client, error) {
 	return &Client{base: strings.TrimRight(baseURL, "/"), http: client}, nil
 }
 
+// ProcessTypes are the four artifact types that Qory Apiary reads itself to drive the
+// process: questions, review-comments, verdict and proposal. A run cannot withdraw a name
+// of these types.
+var ProcessTypes = []string{"questions", "review-comments", "verdict", "proposal"}
+
 // VersionRef is one version of an artifact.
 type VersionRef struct {
 	ID     string `json:"id"`
@@ -190,12 +195,15 @@ type Artifact struct {
 }
 
 // Version is one version of an artifact. Cancelled is true when a member cancelled the
-// run that wrote the version; an index without the field reads as false.
+// run that wrote the version, and Withdrawn when the version is a withdrawal: it has no
+// files and removes its name from gates, stage inputs and the work item's pages. An
+// index without either field reads it as false.
 type Version struct {
 	ID        string     `json:"id"`
 	Number    int        `json:"number"`
 	Writer    Writer     `json:"writer"`
 	Cancelled bool       `json:"cancelled"`
+	Withdrawn bool       `json:"withdrawn"`
 	StageID   *string    `json:"stage_id"`
 	Note      *string    `json:"note"`
 	At        string     `json:"at"`
@@ -219,22 +227,27 @@ type File struct {
 	SHA256      string `json:"sha256"`
 }
 
-// Approval is a gate's approval of a version.
+// Approval is a gate's approval of a version. Automatic is true for the approval that a
+// gate with no approver records when the stage passes it, and then By has no name; it is
+// false for the approval of a member. An index without the field reads as false.
 type Approval struct {
 	By struct {
 		Name string `json:"name"`
 	} `json:"by"`
-	StageID *string `json:"stage_id"`
-	At      string  `json:"at"`
+	Automatic bool    `json:"automatic"`
+	StageID   *string `json:"stage_id"`
+	At        string  `json:"at"`
 }
 
 // Push is the body of a new version of an artifact. Name and Note are left out of the
-// request when they are empty, and the run API then uses the name `main`.
+// request when they are empty, and the run API then uses the name `main`. Withdraw
+// makes the version a withdrawal, which has no Files.
 type Push struct {
-	Type  string     `json:"type"`
-	Name  string     `json:"name,omitempty"`
-	Note  string     `json:"note,omitempty"`
-	Files []PushFile `json:"files"`
+	Type     string     `json:"type"`
+	Name     string     `json:"name,omitempty"`
+	Note     string     `json:"note,omitempty"`
+	Withdraw bool       `json:"withdraw,omitempty"`
+	Files    []PushFile `json:"files"`
 }
 
 // PushFile is one file of a [Push]. encoding/json writes Content as standard base64 with

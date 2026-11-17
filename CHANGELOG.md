@@ -404,6 +404,27 @@ release may change what an existing document does, and states it under Upgrading
   lists each missing part. A group role takes a contract with `fill: many`, and the
   compose checks each member. A contract file that is missing or malformed fails the
   same way. See The role contract in `contracts/harness/v1/README.md`.
+- `qory artifact push <type> --name <name> --withdraw` stores a version of `<type>/<name>`
+  with no files and the mark withdrawn, in place of uploading files. A gate, a stage input
+  and the work item's pages leave out a name whose newest version is withdrawn, and a later
+  push of files lists it again. qory exits 4 with a fix line, before it sends the push, for
+  a name with no version, for files given with `--withdraw`, for a name whose newest version
+  is already a withdrawal, for a name whose newest version a person uploaded, and for a name
+  whose newest version a member approved at a gate. A run cannot withdraw `questions`,
+  `review-comments`, `verdict` or `proposal`, which Qory Apiary reads itself, or a type whose
+  `artifact_types` entry in the process template has `withdrawable: false`. In a run, qory
+  sends the push, Qory Apiary refuses it with 422, and qory exits 4 with that refusal.
+  Outside a run, qory refuses those types itself and reads the template from the factory
+  modules that the checkout exports. Outside a run, qory also records a withdrawal as a
+  version folder with no files in `.qory/artifacts` and sends nothing; a refusal creates no
+  folder, and the store has no approvals to check.
+- An entry of `artifact_types` in a `process.yaml` may set `withdrawable` to `true` or
+  `false`, for a standard type and a custom type. Without it, a run may withdraw a name of
+  the type. Any other value fails with the file and the fix. `contracts/harness/v1/process.schema.json`
+  has the key.
+- A push check does not run for a withdrawal in a walled run: a push with `withdraw` true
+  and no files passes the check, because it has no file to check. A push with `withdraw`
+  true and files takes the same path as any push.
 - A run from Qory Apiary, with a run code or a run key, adds the member `qory` to
   `inputs.json`: `{"harness_extensions": {…}}`, the harness report's `extensions`, `{}`
   for none. A run with a run key and no run code has no inputs, so its file has the member
@@ -433,6 +454,10 @@ release may change what an existing document does, and states it under Upgrading
   `/qory/runtime/<runtime>`. `qory image check` checks no runtime and prints no runtime
   line; Forager checks the runtime when a run starts. A prebuild copies nothing from the
   agent image, and no image has `/qory/agent`.
+- `qory artifact pull` and the commit that a run starts at take nothing of a name whose
+  newest version, not counting cancelled ones, is a withdrawal. The working folder of a
+  push check has, for such a name, the newest version that is neither cancelled nor a
+  withdrawal, so a later push of the name is checked against what it had before.
 - The first line of each compose error shows the fix, in at most 100 characters, and the
   indented lines after it show the cause and the values, as the errors of workflow hooks
   do. Which input fails, and the exit status, stay the same.
@@ -445,7 +470,8 @@ release may change what an existing document does, and states it under Upgrading
 - `qory run` holds a lock on a home that is not for that run alone: your unwalled run's
   `.qory/harness`, and the home of a walled run with `--home` or `harness.home`. The lock is
   on the file `<home>.lock` beside the home, which records the run's id, qory's process id and
-  the start time, and the file stays after the run. A second run of that home stops before
+  the start time. The file stays after the run, empty: the run removes
+  its text when it lets go. A second run of that home stops before
   it redeems its run code and before its compose, with exit 1 and `Wait for the run that
   uses this home to end, or set another --home or harness.home.`, then the holder and the
   home on the second line. `qory harness compose` and `qory harness remove` take the same

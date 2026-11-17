@@ -16,12 +16,19 @@ var errWouldBlock = errors.New("the lock is held")
 // Lock is a held flock on a file of the locks directory.
 type Lock struct {
 	f *os.File
+	// text is true once SetText wrote into the file, which Release empties.
+	text bool
 }
 
-// Release drops the lock and closes its file. A nil Lock releases nothing.
+// Release drops the lock and closes its file. A text that SetText wrote is removed first,
+// since after the release it is the text of a holder that is gone. A nil Lock releases
+// nothing.
 func (l *Lock) Release() error {
 	if l == nil || l.f == nil {
 		return nil
+	}
+	if l.text {
+		l.f.Truncate(0)
 	}
 	funlock(l.f)
 	err := l.f.Close()

@@ -60,16 +60,17 @@ set --home to a folder outside /work/app: /work/app/.qory/harness is inside /wor
 
 A home that is not for one run alone is held for the run's life: your unwalled run's
 `.qory/harness`, and the home of a walled run with `--home` or `harness.home`. Before it
-redeems a run code or composes, `qory run` takes a lock on the file `<home>.lock` beside the home,
-such as `.qory/harness.lock`, which records the run's id, `qory`'s process id and the start time.
-A home in the checkout is kept out of git first, so the lock file shows as no untracked file.
-The file stays after the run, and the lock ends with the run. A second run of that home stops
-with exit 1 before it redeems its run code, so the code stays unused, and before it composes, since
-its compose would replace the first run's home and its end would remove the first run's copy of
-`inputs.json`. `qory harness compose` and `qory harness remove` take the same lock and stop
-with the same lines. `qory harness remove` keeps the lock file, `.qory/harness.lock` for a home in the
-checkout, with its line in `.git/info/exclude`, and removes everything else, since a run that
-opened the file before the remove would lock the old file while a new run locked a new one:
+redeems a run code or composes, `qory run` takes a lock on the file `<home>.lock` beside the
+home, such as `.qory/harness.lock`. While a run holds the lock, the file contains the run's id,
+`qory`'s process id and the start time. After the run releases the lock, the file stays and is
+empty. A home in the checkout is kept out of git first, so the lock file shows as no untracked
+file. A second run of that home stops with exit 1 before it redeems its run code, so the code
+stays unused, and before it composes, since its compose would replace the first run's home and
+its end would remove the first run's copy of `inputs.json`. `qory harness compose` and
+`qory harness remove` take the same lock and stop with the same lines. `qory harness remove`
+keeps the lock file, `.qory/harness.lock` for a home in the checkout, with its line in
+`.git/info/exclude`, and removes everything else, since a run that opened the file before the
+remove would lock the old file while a new run locked a new one:
 
 ```text
 Wait for the run that uses this home to end, or set another --home or harness.home.
@@ -3139,10 +3140,21 @@ works in a run and on a laptop. A wall mounts `qory` at `/qory/qory` and does no
 | ------- | -------- | ------------- |
 | `qory work-item show` | Prints the work item as JSON. | Prints `.qory/work-item.json`. With no file, exits 3. |
 | `qory artifact pull [<type>] [--version <N>]` | Fetches artifacts into the store, under `<type>/<name>/v<N>/`, writes `index.json` there, and prints the store's directory. | Fetches nothing, and says so. |
-| `qory artifact push <type> <file>... [--name <name>] [--note <text>]` | Stores the files as one new version, keeps a copy in the store, and prints the version. | Keeps the files in `.qory/artifacts`, and sends nothing. |
+| `qory artifact push <type> [<file>...] [--name <name>] [--note <text>] [--withdraw]` | Stores the files as one new version, keeps a copy in the store, and prints the version. With `--withdraw` and no files, stores a version with no files that withdraws the name. | Keeps the files, or the record of a withdrawal, in `.qory/artifacts`, and sends nothing. |
 | `qory run verdict passed\|changes-requested\|escalate [--points <file>]` | Stores the verdict. Qory Apiary acts on it when the run ends. | Prints the verdict and keeps it in `.qory/artifacts/verdict/`. Nothing acts on it. |
 
 In a run, the types `questions` and `review-comments` take only the name `main`.
+
+`qory artifact push --withdraw` exits 4 with a fix line, and sends nothing, for a name with no
+version, a name whose newest version is already a withdrawal, an upload by a person, a
+version that a member approved at a gate, and files given with `--withdraw`.
+
+A run cannot withdraw `questions`, `review-comments`, `verdict` or `proposal`, which Qory
+Apiary reads itself, or a type that the process template sets `withdrawable: false` for. In
+a run, qory sends that push, Qory Apiary reads the template's artifact types and refuses it
+with 422, and qory exits 4 with that refusal. Outside a run, qory refuses those types
+itself, writes nothing, reads the template from the factory modules that the checkout
+exports, and has no approvals to read.
 
 `escalate` needs `--points <file>`, and `passed` and `changes-requested` take no
 `--points`. The file is a JSON array of 1 to 20 points for a person, in the [verdict
