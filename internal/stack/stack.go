@@ -450,7 +450,7 @@ type Workflow struct {
 	// sets none. It is set as the stack is validated.
 	TimeLimit time.Duration `yaml:"-"`
 	// Access is access as written, the access level the workflow declares for what a
-	// dispatched run of the workflow works on: read, write-no-push or write, "" when the
+	// dispatched run of the workflow works on: read, write-no-push, or write, "" when the
 	// workflow sets none. [Stack.AccessOf] reads "" as read.
 	Access string `yaml:"access,omitempty"`
 	// HookPoints are the points of the workflow where a checkout extending the stack
@@ -467,22 +467,27 @@ const (
 )
 
 // LowerAccess is the lower of the access levels a and b, in the order [AccessRead],
-// [AccessWriteNoPush], [AccessWrite]. A level that is not one of the three, such as the
-// empty level of documents with no target, does not lower the other.
+// [AccessWriteNoPush], [AccessWrite]. The empty level of documents with no target does
+// not lower the other. Any other value, such as "Read", counts as [AccessRead], so a
+// value that no schema accepts never raises a run.
 func LowerAccess(a, b string) string {
+	if a == "" || b == "" {
+		return a + b
+	}
 	rank := func(level string) int {
 		switch level {
-		case AccessRead:
-			return 1
 		case AccessWriteNoPush:
 			return 2
 		case AccessWrite:
 			return 3
 		}
-		return 4
+		return 1
 	}
 	if rank(b) < rank(a) {
-		return b
+		a, b = b, a
+	}
+	if rank(a) == 1 {
+		return AccessRead
 	}
 	return a
 }
@@ -732,7 +737,7 @@ func (p *Stack) validate(compose bool) error {
 		}
 		w := p.Workflows[name]
 		if w.Access != "" && w.Access != AccessRead && w.Access != AccessWriteNoPush && w.Access != AccessWrite {
-			return exports.Refuse(fmt.Sprintf("Set workflows.%s.access to read, write-no-push, or write.", name), fmt.Sprintf("The value is %s.", exports.Value(w.Access, true)), fmt.Sprintf("workflows.%s is in %s.", name, exports.FilePlace))
+			return exports.Refuse(fmt.Sprintf("Set workflows.%s.access to a valid level.", name), "The levels are read, write-no-push, and write.", fmt.Sprintf("The value is %s.", exports.Value(w.Access, true)), fmt.Sprintf("workflows.%s is in %s.", name, exports.FilePlace))
 		}
 		if w.TimeLimitText == "" {
 			continue

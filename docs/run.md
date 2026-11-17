@@ -4218,10 +4218,10 @@ make the mount /srv/data read-only, with :ro on --mount or in wall.mounts: a wal
 
 Two values set what a run of a workflow from a run code may do on the checkout:
 
-- The workflow's access in the stack, `workflows.<name>.access`: `read`, `write-no-push`
-  or `write`. A workflow that sets no access, and one the stack does not declare, is
+- The workflow's access in the stack, `workflows.<name>.access`: `read`,
+  `write-no-push`, or `write`. A workflow that sets no access, and one the stack does not declare, is
   `read` (see `workflows` in `contracts/harness/v1/README.md`).
-- `access` in the run's documents, from Qory Apiary: `read`, `write-no-push` or `write`.
+- `access` in the run's documents, from Qory Apiary: `read`, `write-no-push`, or `write`.
   Documents with no target have no `access`, and the workflow's access applies alone.
 
 A run takes the lower of the two, in the order `read`, `write-no-push`, `write`. A

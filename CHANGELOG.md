@@ -23,8 +23,8 @@ release may change what an existing document does, and states it under Upgrading
   its documents, in the order `read`, `write-no-push`, `write`. A `write-no-push` run
   gets a writable checkout and no push step: qory opens the host proxy for the fetch
   alone and closes it before the agent starts. With no wall, it stops with
-  `write_needs_wall`. The error for another value now reads
-  `Set workflows.<name>.access to read, write-no-push, or write.`
+  `write_needs_wall`. The error for another value now starts
+  `Set workflows.<name>.access to a valid level.`
 - A run of a work item works on the branch `qory/<work item id>`, at the commit of the
   artifact `branch` that its stage starts from. The harness still comes from
   `target_version`. A commit on the branch reaches a run's harness after you merge the
