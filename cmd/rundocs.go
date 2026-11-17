@@ -116,10 +116,10 @@ type codeRun struct {
 	// the documents have no target.
 	access   string
 	workItem string
-	// submit is the documents' submit, the settings of the run's submit step, type and
-	// send: the one place qory takes them from, never the composed harness's
-	// process.yaml, see [codeRun.submitLine]. nil when the documents have no submit.
-	// submitModule is the documents' submit_module, nil for none.
+	// submit is the documents' submit, the run's submit settings, type and send: the one
+	// place qory takes them from, never the composed harness's process.yaml, see
+	// [codeRun.submitLine]. nil when the documents have no submit. submitModule is the
+	// documents' submit_module, nil for none.
 	submit       *contracts.Submit
 	submitModule *contracts.SubmitModule
 
@@ -706,7 +706,7 @@ func entryKeys(rep report.Report) []string {
 
 // submitLine is the line that shows the harness's submit, the first module's in stack
 // order, beside r's when they differ, or alone when r has none. It is "" for a run that
-// may not write, which the contract allows no submit, and for r nil. Line 1 has at most
+// may not write, whose documents the contract allows no submit, and for r nil. Line 1 has at most
 // [submitLineMax] characters with the "qory run: " that the caller adds, so a type name
 // that does not fit is shortened there, and a second line has the full name.
 func (r *codeRun) submitLine(rep report.Report) string {
@@ -724,50 +724,42 @@ func (r *codeRun) submitLine(rep report.Report) string {
 	case !found, r.submit == nil && !r.writes():
 		return ""
 	case r.submit == nil:
-		line := func(names ...string) string {
-			return fmt.Sprintf("submit: documents have no submit, so harness's %s at %s is unused", names[0], send)
+		line := func(typ, _ string) string {
+			return fmt.Sprintf("submit: documents have no submit, so harness's %s at %s is unused", typ, send)
 		}
-		return fitSubmit(line, []string{typ}, "The full type is "+typ+".")
+		return fitSubmit(line, typ, "", "The full type is "+typ+".")
 	case r.submit.Type == typ && r.submit.Send == send:
 		return ""
 	}
-	line := func(names ...string) string {
-		return fmt.Sprintf("submit: documents' %s at %s replaces harness's %s at %s", names[0], r.submit.Send, names[1], send)
+	line := func(docs, harness string) string {
+		return fmt.Sprintf("submit: documents' %s at %s replaces harness's %s at %s", docs, r.submit.Send, harness, send)
 	}
-	return fitSubmit(line, []string{r.submit.Type, typ}, "The full types are "+r.submit.Type+" in the documents and "+typ+" in the harness.")
+	return fitSubmit(line, r.submit.Type, typ, "The full types are "+r.submit.Type+" in the documents and "+typ+" in the harness.")
 }
 
 // submitLineMax is the most characters of line 1 of the text of [codeRun.submitLine],
 // with the "qory run: " in front of it, as for a refusal.
 const submitLineMax = 100
 
-// fitSubmit is line of names, whole when line 1 has at most [submitLineMax] characters
-// after "qory run: ". Otherwise it is line of the names shortened to share what the
-// rest of line 1 leaves, each as [shortSubmitName] has it, then full on a second line.
-// [exports.Fit] cannot do this: it keeps 20 characters of a name, and the rest of this
-// line has 77 or more.
-func fitSubmit(line func(...string) string, names []string, full string) string {
+// fitSubmit is line of a and b, whole when line 1 has at most [submitLineMax] characters
+// after "qory run: ". Otherwise it is line of a and b shortened to share what the rest
+// of line 1 leaves, each as [shortSubmitName] has it, then full on a second line. b is ""
+// for a line of one name. [exports.Fit] cannot do this: it keeps 20 characters of a
+// name, and the rest of this line has 77 or more.
+func fitSubmit(line func(a, b string) string, a, b, full string) string {
 	const prefix = "qory run: "
-	text := line(names...)
-	if utf8.RuneCountInString(prefix+text) <= submitLineMax {
+	if text := line(a, b); utf8.RuneCountInString(prefix+text) <= submitLineMax {
 		return text
 	}
-	left := submitLineMax - utf8.RuneCountInString(prefix+line(make([]string, len(names))...))
-	short := make([]string, len(names))
-	switch len(names) {
-	case 1:
-		short[0] = shortSubmitName(names[0], left)
-	default:
-		a, b := utf8.RuneCountInString(names[0]), utf8.RuneCountInString(names[1])
-		first := left / 2
-		if a <= first {
-			first = a
-		} else if b <= left/2 {
-			first = left - b
-		}
-		short[0], short[1] = shortSubmitName(names[0], first), shortSubmitName(names[1], left-first)
+	left := submitLineMax - utf8.RuneCountInString(prefix+line("", ""))
+	na, nb := utf8.RuneCountInString(a), utf8.RuneCountInString(b)
+	first := left / 2
+	if na <= first {
+		first = na
+	} else if nb <= left/2 {
+		first = left - nb
 	}
-	return line(short...) + "\n  " + full
+	return line(shortSubmitName(a, first), shortSubmitName(b, left-first)) + "\n  " + full
 }
 
 // shortSubmitName is name with its middle replaced by "…" so that it has n characters,

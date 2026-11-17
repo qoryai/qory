@@ -1915,8 +1915,8 @@ the work item. Then a run of the step explore:
 
   `amp`, `copilot`, `goose` and `any` have no headless start, so a run from a run code
   does not start on them;
-- reads `submit` of the documents, the settings of the run's submit step, `type` and
-  `send`, and keeps them for the run. qory takes these settings only from the documents,
+- reads `submit` of the documents, the run's submit settings, `type` and `send`, and
+  keeps them for the run. qory takes these settings only from the documents,
   never from a `process.yaml` of the composed harness. When the first module of the
   composed harness, in stack order, whose `process.yaml` has a well-formed `submit` has a
   different one, qory prints one line after the compose with both values: `qory run:

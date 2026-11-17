@@ -497,9 +497,9 @@ func nodeKind(n *yaml.Node) string {
 // module folder dir, read through dir opened as an [os.Root], as [Exports.Verify] reads
 // it. ok is false when the folder has no such file, and when the file cannot be read or
 // decoded, has an alias, or has no submit whose type has the form of an artifact type
-// name and whose send is end_of_run or after_gate. A run takes the settings of its
-// submit step from its run documents and nothing from this file, so ProcessSubmit
-// returns no error; a caller prints typ and send as they are.
+// name and whose send is end_of_run or after_gate. A run takes its submit
+// settings from its run documents and nothing from this file, so ProcessSubmit returns
+// no error; a caller prints typ and send as they are.
 func ProcessSubmit(dir string) (typ, send string, ok bool) {
 	root, err := os.OpenRoot(dir)
 	if err != nil {

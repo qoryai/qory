@@ -49,11 +49,11 @@ func submitLines(out string) []string {
 	return lines
 }
 
-// TestARunSubmitsWithTheDocumentsSubmitWhenTheHarnessHasNone is a run from a run code
-// whose documents have submit reply-draft at end_of_run and a submit_module, and whose
-// composed harness has no process.yaml: the run takes the documents' submit and
-// submit_module as they are, and prints no submit line.
-func TestARunSubmitsWithTheDocumentsSubmitWhenTheHarnessHasNone(t *testing.T) {
+// TestARunKeepsTheDocumentsSubmitWhenTheHarnessHasNone is a run from a run code whose
+// documents have submit reply-draft at end_of_run and a submit_module, and whose
+// composed harness has no process.yaml: the run's submit and submit_module are the
+// documents', as they are, and the run prints no submit line.
+func TestARunKeepsTheDocumentsSubmitWhenTheHarnessHasNone(t *testing.T) {
 	change := withSubmit("reply-draft", "end_of_run")
 	r := submitRun(t, change, nil)
 	if lines := submitLines(r.out); len(lines) != 0 {
@@ -71,12 +71,12 @@ func TestARunSubmitsWithTheDocumentsSubmitWhenTheHarnessHasNone(t *testing.T) {
 	}
 }
 
-// TestARunWhoseHarnessHasAnotherSubmitUsesTheDocumentsAndPrintsBoth is a run from a run
-// code whose documents have submit reply-draft at end_of_run, and whose composed harness
-// has a process.yaml in the module hello with submit reply-draft at after_gate: the run
-// takes the documents' submit, and prints one line, in the compose step, with both
-// values. With the same submit in both, the run prints no submit line.
-func TestARunWhoseHarnessHasAnotherSubmitUsesTheDocumentsAndPrintsBoth(t *testing.T) {
+// TestARunWhoseHarnessHasAnotherSubmitKeepsTheDocumentsSubmitAndPrintsBoth is a run from
+// a run code whose documents have submit reply-draft at end_of_run, and whose composed
+// harness has a process.yaml in the module hello with submit reply-draft at after_gate:
+// the run's submit is the documents', and the run prints one line, in the compose step,
+// with both values. With the same submit in both, the run prints no submit line.
+func TestARunWhoseHarnessHasAnotherSubmitKeepsTheDocumentsSubmitAndPrintsBoth(t *testing.T) {
 	change := withSubmit("reply-draft", "end_of_run")
 	t.Run("another submit", func(t *testing.T) {
 		r := submitRun(t, change, harnessSubmit("reply-draft", "after_gate"))
@@ -103,11 +103,11 @@ func TestARunWhoseHarnessHasAnotherSubmitUsesTheDocumentsAndPrintsBoth(t *testin
 	})
 }
 
-// TestARunWhoseDocumentsHaveNoSubmitHasNoSubmitStep is a run from a run code whose
+// TestARunWhoseDocumentsHaveNoSubmitHasNoSubmitSettings is a run from a run code whose
 // documents have no submit, and whose composed harness has a process.yaml in the module
-// hello with submit reply-draft at after_gate: the run has no submit settings, and
-// prints one line that shows the harness's submit as unused.
-func TestARunWhoseDocumentsHaveNoSubmitHasNoSubmitStep(t *testing.T) {
+// hello with submit reply-draft at after_gate: the run's submit and submit_module are
+// nil, and the run prints one line that shows the harness's submit as unused.
+func TestARunWhoseDocumentsHaveNoSubmitHasNoSubmitSettings(t *testing.T) {
 	r := submitRun(t, nil, harnessSubmit("reply-draft", "after_gate"))
 	want := "qory run: submit: documents have no submit, so harness's reply-draft at after_gate is unused\n"
 	if lines := submitLines(r.out); len(lines) != 1 || lines[0] != want {
@@ -124,8 +124,8 @@ func TestARunWhoseDocumentsHaveNoSubmitHasNoSubmitStep(t *testing.T) {
 
 // TestAReadRunWhoseHarnessHasASubmitPrintsNoSubmitLine is a run from a run code whose
 // documents have access read, so no submit, and whose composed harness has a
-// process.yaml in the module hello with a submit: the run has no submit step by its
-// access, and prints no submit line.
+// process.yaml in the module hello with a submit: the contract allows the documents of
+// a run with that access no submit, and the run prints no submit line.
 func TestAReadRunWhoseHarnessHasASubmitPrintsNoSubmitLine(t *testing.T) {
 	r := submitRun(t, lowered, harnessSubmit("reply-draft", "after_gate"))
 	if lines := submitLines(r.out); len(lines) != 0 {
@@ -152,11 +152,11 @@ func submitText(typ, send string) string {
 	return "submit:\n  type: " + typ + "\n  send: " + send + "\n"
 }
 
-// TestARunWhoseHarnessSubmitDiffersInOneValueUsesTheDocumentsAndPrintsBoth is a run from
-// a run code whose documents have submit reply-draft at end_of_run, and whose composed
-// harness has a submit that differs only in type, or only in send: the run prints the
-// one line with both values.
-func TestARunWhoseHarnessSubmitDiffersInOneValueUsesTheDocumentsAndPrintsBoth(t *testing.T) {
+// TestARunWhoseHarnessSubmitDiffersInOneValueKeepsTheDocumentsSubmitAndPrintsBoth is a
+// run from a run code whose documents have submit reply-draft at end_of_run, and whose
+// composed harness has a submit that differs only in type, or only in send: the run
+// prints the one line with both values.
+func TestARunWhoseHarnessSubmitDiffersInOneValueKeepsTheDocumentsSubmitAndPrintsBoth(t *testing.T) {
 	for _, c := range []struct{ name, typ, send string }{
 		{"only the type", "other-draft", "end_of_run"},
 		{"only the send", "reply-draft", "after_gate"},
@@ -276,6 +276,50 @@ func TestTheSubmitLineHasAtMost100CharactersAndTheFullTypesOnASecondLine(t *test
 				if strings.Contains(lines[0], long) {
 					t.Errorf("line 1 has the whole type %s:\n%s", long, lines[0])
 				}
+			}
+			for _, name := range []string{c.docs, c.harness} {
+				if len(name) > 24 && (!strings.Contains(lines[0], name[:3]) || !strings.Contains(lines[0], name[len(name)-3:])) {
+					t.Errorf("line 1 keeps fewer than the first 3 and the last 3 characters of %s:\n%s", name, lines[0])
+				}
+			}
+		})
+	}
+}
+
+// TestASubmitLineOf100CharactersStaysWholeAndOneOf101IsShortened is a run from a run
+// code whose composed harness has a submit whose type makes line 1, with its
+// "qory run: ", exactly 100 characters, or 101: the line of 100 characters is whole and
+// has no second line, and the one of 101 is shortened to 100 and has a second line with
+// the full type. It is so for documents with no submit, and for documents with a
+// different submit of reply-draft.
+func TestASubmitLineOf100CharactersStaysWholeAndOneOf101IsShortened(t *testing.T) {
+	for _, c := range []struct {
+		name, docs, harness string
+		whole               bool
+	}{
+		{"no submit in the documents, 100 characters", "", strings.Repeat("a", 19), true},
+		{"no submit in the documents, 101 characters", "", strings.Repeat("a", 20), false},
+		{"a different submit, 100 characters", "reply-draft", strings.Repeat("a", 12), true},
+		{"a different submit, 101 characters", "reply-draft", strings.Repeat("a", 13), false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			var change func(map[string]any)
+			if c.docs != "" {
+				change = withSubmit(c.docs, "end_of_run")
+			}
+			r := submitRun(t, change, harnessSubmit(c.harness, "after_gate"))
+			lines := submitLines(r.out)
+			if len(lines) != 1 {
+				t.Fatalf("the run prints %q, want one submit line\n%s", lines, r.out)
+			}
+			if n := utf8.RuneCountInString(strings.TrimSuffix(lines[0], "\n")); n != 100 {
+				t.Errorf("line 1 has %d characters, want 100:\n%s", n, lines[0])
+			}
+			if whole := strings.Contains(lines[0], c.harness); whole != c.whole {
+				t.Errorf("line 1 has the whole type: %v, want %v:\n%s", whole, c.whole, lines[0])
+			}
+			if second := strings.Contains(r.out, "\n  The full type"); second == c.whole {
+				t.Errorf("the output has a second line: %v, want %v:\n%s", second, !c.whole, r.out)
 			}
 		})
 	}
