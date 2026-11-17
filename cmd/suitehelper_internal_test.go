@@ -375,9 +375,9 @@ func TestARefusedHostIsNamedInThePoint(t *testing.T) {
 		fix    string
 	}{
 		{"one host", []string{afterStarted(3, 2), refusedEvent(4, "registry.example", "denied"), afterExited(5, 2)},
-			"Allow registry.example in the run's policy, or change the suite: it failed after reg... was refused.", textPointDenied},
+			"Allow registry.example in the run's policy, or change the suite: it failed after the refusal.", textPointDenied},
 		{"three hosts", []string{afterStarted(3, 2), refusedEvent(4, "a.example", "denied"), refusedEvent(5, "b.example", "denied"), refusedEvent(6, "c.example", "denied"), afterExited(7, 2)},
-			"Allow a.e... and 2 more in the run's policy, or change the suite: it failed after a... were refused.", textPointDenied},
+			"Allow a.example and 2 more in the run's policy, or change the suite: it failed after the refusals.", textPointDenied},
 		{"a refusal before the step", []string{refusedEvent(1, "early.example", "denied"), afterStarted(3, 2), afterExited(5, 2)},
 			"The full suite failed: 1 of 2 tests failed.", ""},
 		{"a refusal after the step", []string{afterStarted(3, 2), afterExited(5, 2), refusedEvent(6, "late.example", "denied")},
@@ -440,8 +440,22 @@ func TestTheHostLineHasAtMost100CharactersAndAValidVerdict(t *testing.T) {
 			t.Errorf("the verdict for %q: %v", line, err)
 		}
 	}
-	if got := hostsLine([]string{long}); !strings.Contains(got, "...") {
-		t.Errorf("a long host is not shown cut: %q", got)
+	if got := hostsLine([]string{long}); !strings.Contains(got, "...") || len(got) != 100 {
+		t.Errorf("a long host is not shown cut to a line of 100 characters: %q", got)
+	}
+	// The words around the host take 77 characters, so a host of 23 fits whole and one of 24 or
+	// 30 is cut; with "and 1 more" and the plural the host has 12.
+	whole := strings.Repeat("a", 15) + ".example"
+	if got := hostsLine([]string{whole}); !strings.Contains(got, " "+whole+" ") || len(got) != 100 {
+		t.Errorf("a host of %d characters is cut: %q", len(whole), got)
+	}
+	for _, host := range []string{whole + "x", strings.Repeat("a", 22) + ".example"} {
+		if got := hostsLine([]string{host}); !strings.Contains(got, "...") || len(got) != 100 || strings.Contains(got, host) {
+			t.Errorf("a host of %d characters is not cut to 100: %q", len(host), got)
+		}
+	}
+	if got := hostsLine([]string{"a.example", "b", "c"}); got != "Allow a.example and 2 more in the run's policy, or change the suite: it failed after the refusals." {
+		t.Errorf("line %q", got)
 	}
 }
 
@@ -451,6 +465,8 @@ func TestTheHostLineHasAtMost100CharactersAndAValidVerdict(t *testing.T) {
 // it posts escalate with the agent's points and track and the point; over 20 points it posts
 // nothing. The run closes as its session did.
 func TestASuiteThatCannotStartPostsAnEscalate(t *testing.T) {
+	defer func(was string) { goos = was }(goos)
+	goos = "linux"
 	point := func(i int) string { return fmt.Sprintf(`{"text":"Point %d.","action":"run_again"}`, i) }
 	twenty := make([]string, 20)
 	for i := range twenty {
@@ -462,7 +478,7 @@ func TestASuiteThatCannotStartPostsAnEscalate(t *testing.T) {
 		end   session.AfterResult
 		want  string
 	}{
-		{"the after step could not run", "", session.AfterResult{State: event.StateFailed, ExitCode: -1}, `{"verdict":"escalate","points":[{"text":"The full suite did not start: the after step could not run.","action":"run_again"}]}`},
+		{"the after step could not run", "", session.AfterResult{State: event.StateFailed, ExitCode: -1}, `{"verdict":"escalate","points":[{"text":"Contact support: the full suite did not start, because its container did not start.","action":"run_again"}]}`},
 		{"no folder", "", session.AfterResult{State: event.StateFailed, ExitCode: 70}, `{"verdict":"escalate","points":[{"text":"The full suite did not start: the script could not make a folder it needs.","action":"run_again"}]}`},
 		{"no clone", "", session.AfterResult{State: event.StateFailed, ExitCode: 71}, `{"verdict":"escalate","points":[{"text":"The full suite did not start: git could not clone HEAD of the workspace.","action":"run_again"}]}`},
 		{"no HEAD", "", session.AfterResult{State: event.StateFailed, ExitCode: 72}, `{"verdict":"escalate","points":[{"text":"The full suite did not start: git could not read HEAD of the workspace.","action":"run_again"}]}`},
@@ -878,15 +894,18 @@ func TestLaunchFullReadsTheNewestUsableVersionOfTheBuildPlan(t *testing.T) {
 func TestTheLinesOfTheSuiteStartWithTheFixInAtMost100Characters(t *testing.T) {
 	for _, line := range []string{
 		textSuiteSkipped, fmt.Sprintf(textSuiteFault, "x"),
-		fmt.Sprintf(textSuiteEnded, " on 0123456789ab", suite.Timeout, ", 100000 of 100000 tests failed"),
+		endedLine(suite.Outcome{State: suite.Timeout, Commit: suiteSHA, Counts: &suite.Counts{Tests: 100000, Failed: 100000}}),
 		textSuiteGreen, textSuiteCut, fmt.Sprintf(textSuiteStands, "changes-requested"), fmt.Sprintf(textSuitePosted, "changes-requested"), textSuiteNoRoom,
 		fmt.Sprintf(textSuiteNoPost, "x"),
 		textPointDenied, fmt.Sprintf(textPointFailed, 100000, 100000), fmt.Sprintf(textPointExit, -1), textPointNoTests, textPointMismatch,
-		fmt.Sprintf(textPointNoStartExit, -1), textPointNoStartShell, textFaultTooBig, textFaultNoPlan, textPointNoStartStep, textPointNoStartFolder, textPointNoStartClone, textPointNoStartHead, fmt.Sprintf(textPointTimeout, 60),
+		fmt.Sprintf(textPointNoStartExit, 125), textPointNoStartShell, textFaultTooBig, textFaultNoPlan, textPointNoStartMac, textPointNoStartNone, textPointNoStartFolder, textPointNoStartClone, textPointNoStartHead, fmt.Sprintf(textPointTimeout, 60),
 	} {
 		first, _, _ := strings.Cut(line, "\n")
 		if len(first) > 100 {
 			t.Errorf("the first line %q has %d characters", first, len(first))
+		}
+		if strings.HasSuffix(strings.TrimSpace(line), "..") && !strings.HasSuffix(strings.TrimSpace(line), "...") || strings.Contains(line, ".. ") {
+			t.Errorf("the line %q has two full stops", line)
 		}
 	}
 	for _, f := range []*suiteFault{
@@ -897,5 +916,41 @@ func TestTheLinesOfTheSuiteStartWithTheFixInAtMost100Characters(t *testing.T) {
 		if len(f.point.Text) > 100 || !validPoint(f.point) || f.fixable != (f.point.Fix != "") {
 			t.Errorf("fault %+v: text of %d characters, valid %v", f, len(f.point.Text), validPoint(f.point))
 		}
+	}
+}
+
+// TestTheTextForAContainerThatDidNotStart: on macOS the point says that the full suite needs a Linux
+// machine; elsewhere it gives the exit status of the container, or says that it did not start. Each
+// first line has at most 100 characters, and no line ends with two full stops.
+func TestTheTextForAContainerThatDidNotStart(t *testing.T) {
+	defer func(was string) { goos = was }(goos)
+	for _, c := range []struct {
+		goos string
+		exit int
+		want string
+	}{
+		{"darwin", -1, textPointNoStartMac},
+		{"darwin", 125, textPointNoStartMac},
+		{"linux", -1, "Contact support: the full suite did not start, because its container did not start."},
+		{"linux", 125, "Contact support: the full suite did not start, because its container exited with status 125."},
+		{"linux", 3, "Contact support: the full suite did not start, because its container exited with status 3."},
+		{"darwin", 71, textPointNoStartClone},
+		{"linux", 127, textPointNoStartShell},
+	} {
+		goos = c.goos
+		got := notStartedLine(c.exit)
+		if got != c.want || len(got) > 100 || strings.HasSuffix(got, "..") {
+			t.Errorf("%s, exit %d: %q, want %q", c.goos, c.exit, got, c.want)
+		}
+	}
+	if textPointNoStartMac != "Contact support: the full suite needs a Linux machine, and this run's machine runs Docker on macOS." {
+		t.Errorf("the macOS text is %q", textPointNoStartMac)
+	}
+	// The line at the end of the run has the same words.
+	h := newHelper(t)
+	goos = "darwin"
+	h.after(&session.AfterResult{Step: 2, State: event.StateFailed, ExitCode: 125}, succeeded)
+	if len(*h.said) == 0 || (*h.said)[0] != "no full suite: "+textPointNoStartMac {
+		t.Errorf("lines %q", *h.said)
 	}
 }

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -33,7 +34,6 @@ const (
 const (
 	textSuiteSkipped = "the full suite did not run: the session left HEAD at the commit it started at"
 	textSuiteFault   = "no full suite: %s"
-	textSuiteEnded   = "the full suite%s is %s%s"
 	textSuiteGreen   = "the full suite passed, so qory posts no verdict"
 	textSuiteCut     = "qory run was stopped while the full suite ran, so the run closes cancelled"
 	textSuiteStands  = "the verdict %s of the agent stands over the red full suite"
@@ -45,7 +45,7 @@ const (
 // The lines of the point of the verdict that a red suite sets. Each is one sentence on one line
 // of at most 100 characters in its first line.
 const (
-	textPointHosts    = "Allow %s in the run's policy, or change the suite: it failed after %s %s refused."
+	textPointHosts    = "Allow %s in the run's policy, or change the suite: it failed after the refusal%s."
 	textPointDenied   = "Refused connections: the run's Connections tab, Denied."
 	textPointFailed   = "The full suite failed: %d of %d tests failed."
 	textPointExit     = "The full suite failed: its command exited with status %d."
@@ -58,12 +58,13 @@ const (
 
 // The points of a suite that did not start, which a person must see: the cause follows the colon.
 const (
-	textPointNoStartStep   = "The full suite did not start: the after step could not run."
+	textPointNoStartMac    = "Contact support: the full suite needs a Linux machine, and this run's machine runs Docker on macOS."
+	textPointNoStartNone   = "Contact support: the full suite did not start, because its container did not start."
 	textPointNoStartFolder = "The full suite did not start: the script could not make a folder it needs."
 	textPointNoStartClone  = "The full suite did not start: git could not clone HEAD of the workspace."
 	textPointNoStartHead   = "The full suite did not start: git could not read HEAD of the workspace."
 	textPointNoStartShell  = "The full suite did not start: the image may lack sh or git (exit 127)."
-	textPointNoStartExit   = "The full suite did not start: the script did not record that it ran the command (exit %d)."
+	textPointNoStartExit   = "Contact support: the full suite did not start, because its container exited with status %d."
 )
 
 // suiteMinutes is the time the suite's cap counts in: the cap is limit minutes.
@@ -285,10 +286,12 @@ func (r *suiteRun) after(ctx, again context.Context, limit time.Time, res *sessi
 	case got.State == suite.Skipped:
 		r.said(textSuiteSkipped)
 	case got.State == suite.Passed:
-		r.said(fmt.Sprintf(textSuiteEnded, onCommit(got.Commit), got.State, countsSuffix(got.Counts)))
+		r.said(endedLine(got))
 		r.said(textSuiteGreen)
+	case got.NotStarted():
+		r.said(fmt.Sprintf(textSuiteFault, point.Text))
 	default:
-		r.said(fmt.Sprintf(textSuiteEnded, onCommit(got.Commit), got.State, countsSuffix(got.Counts)))
+		r.said(endedLine(got))
 	}
 	if point == nil {
 		return out, nil
@@ -328,16 +331,19 @@ func (r *suiteRun) cut(ctx, again context.Context, limit time.Time, point runapi
 	return session.Outcome{State: event.StateCancelled, Reason: event.ReasonInterrupted, ExitCode: -1}, &exitError{code: 1}
 }
 
-// countsSuffix is the counts of a suite as the end of its line shows them: ", 2 of 140 tests
-// failed" or ", 140 tests", and "" for no counts.
-func countsSuffix(c *suite.Counts) string {
-	switch {
+// endedLine is the line of qory run for a suite that ended: "the full suite passed on 0123456789ab:
+// 140 tests" or "the full suite failed on 0123456789ab: 2 of 140 tests failed".
+func endedLine(got suite.Outcome) string {
+	verb := map[suite.State]string{suite.Passed: "passed", suite.Failed: "failed", suite.Timeout: "timed out", suite.Stopped: "was stopped"}[got.State]
+	line := "the full suite " + verb + onCommit(got.Commit)
+	switch c := got.Counts; {
 	case c == nil:
-		return ""
 	case c.Failed > 0:
-		return fmt.Sprintf(", %d of %d tests failed", c.Failed, c.Tests)
+		line += fmt.Sprintf(": %d of %d tests failed", c.Failed, c.Tests)
+	default:
+		line += fmt.Sprintf(": %d tests", c.Tests)
 	}
-	return fmt.Sprintf(", %d tests", c.Tests)
+	return line
 }
 
 // post posts the verdict for a suite that did not pass, with at most tries requests, and returns
@@ -436,12 +442,13 @@ func pointLine(got suite.Outcome, refused suite.Refused, minutes int) string {
 	return fmt.Sprintf(textPointExit, got.ExitCode)
 }
 
+// goos is the operating system that qory runs on; a test sets it.
+var goos = runtime.GOOS
+
 // notStartedLine is the first line of the point of a suite whose command never ran, by the exit
 // status of the script, or -1 for an after step that ended with none.
 func notStartedLine(exit int) string {
 	switch {
-	case exit < 0:
-		return textPointNoStartStep
 	case exit == suite.ExitNoState:
 		return textPointNoStartFolder
 	case exit == suite.ExitNoClone:
@@ -450,29 +457,24 @@ func notStartedLine(exit int) string {
 		return textPointNoStartHead
 	case exit == 127:
 		return textPointNoStartShell
+	case goos == "darwin":
+		return textPointNoStartMac
+	case exit < 0:
+		return textPointNoStartNone
 	}
 	return fmt.Sprintf(textPointNoStartExit, exit)
 }
 
 // hostsLine is the line for the refused hosts, at most [maxPointLine] characters: the first host
-// whole when it fits, the second mention cut first, and "..." ends a cut host.
+// whole when it fits, with "and N more" for the others, else cut, and "..." ends a cut host.
 func hostsLine(hosts []string) string {
-	host := hosts[0]
-	suffix, verb := "", "was"
+	host, suffix, end := hosts[0], "", ""
 	if more := len(hosts) - 1; more > 0 {
-		suffix, verb = fmt.Sprintf(" and %d more", more), "were"
+		suffix, end = fmt.Sprintf(" and %d more", more), "s"
 	}
-	build := func(first, second, tail string) string {
-		return fmt.Sprintf(textPointHosts, first+suffix, second+tail, verb)
-	}
-	for _, tail := range []string{suffix, ""} {
-		if room := maxPointLine - len(build("", "", tail)); room >= len(host)+minHostShown {
-			return build(host, cutHost(host, room-len(host)), tail)
-		}
-	}
-	room := maxPointLine - len(build("", "", ""))
-	first := max(room-minHostShown, minHostShown)
-	return build(cutHost(host, first), cutHost(host, max(room-first, minHostShown)), "")
+	build := func(h string) string { return fmt.Sprintf(textPointHosts, h+suffix, end) }
+	room := max(maxPointLine-len(build("")), minHostShown)
+	return build(cutHost(host, room))
 }
 
 // minHostShown is the fewest characters of a host that a line shows, "..." included.

@@ -997,3 +997,11 @@ func SetFullSuite(yes bool) func() {
 	fullSuiteOf = func(*codeRun) bool { return yes }
 	return func() { fullSuiteOf = before }
 }
+
+// SetGOOS makes qory take goos for the operating system that it runs on, as the point for a suite
+// whose container did not start reads it, and returns what restores the default.
+func SetGOOS(name string) func() {
+	before := goos
+	goos = name
+	return func() { goos = before }
+}

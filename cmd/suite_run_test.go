@@ -208,7 +208,7 @@ func TestARedSuiteAfterTheSessionPostsChangesRequestedAndTheRunSucceeds(t *testi
 	if seen.AfterTimeout != time.Hour {
 		t.Errorf("AfterTimeout = %v, want 60 minutes", seen.AfterTimeout)
 	}
-	wants(t, out, "the full suite on ", " is failed, 1 of 2 tests failed")
+	wants(t, out, "the full suite failed on ", ": 1 of 2 tests failed")
 }
 
 // TestAGreenSuitePostsNothingAndTheRunSucceeds is the same run with a suite that passes, one
@@ -314,7 +314,7 @@ func TestTheRepositorysCapReplacesSixtyMinutes(t *testing.T) {
 			if len(posted) != 1 || !strings.Contains(posted[0], c.minutes) {
 				t.Errorf("posted %q, want a point with %q", posted, c.minutes)
 			}
-			wants(t, out, "is timeout")
+			wants(t, out, "the full suite timed out")
 		})
 	}
 }
@@ -331,7 +331,7 @@ func TestARedSuiteThatFollowsARefusedHostNamesTheHost(t *testing.T) {
 	if err != nil || closed.State != event.StateSucceeded {
 		t.Fatalf("%v, closed %+v\n%s", err, closed, out)
 	}
-	want := `{"verdict":"changes-requested","points":[{"text":"Allow reg... and 1 more in the run's policy, or change the suite: it failed after r... were refused.","action":"run_again","fix":"Refused connections: the run's Connections tab, Denied."}]}`
+	want := `{"verdict":"changes-requested","points":[{"text":"Allow registry... and 1 more in the run's policy, or change the suite: it failed after the refusals.","action":"run_again","fix":"Refused connections: the run's Connections tab, Denied."}]}`
 	if posted := api.posted(); len(posted) != 1 || posted[0] != want {
 		t.Errorf("posted %q, want %s", posted, want)
 	}
@@ -359,12 +359,13 @@ func TestAStopDuringTheAfterStepDoesNotLeaveTheRunSucceeded(t *testing.T) {
 // the verdict escalate with the point, and the run still closes as its session did.
 func TestAFullSuiteThatCannotStartPostsAnEscalate(t *testing.T) {
 	api := newSuiteAPI(t, http.StatusCreated)
+	t.Cleanup(cmd.SetGOOS("linux"))
 	failed := &session.AfterResult{Step: 2, State: event.StateFailed, ExitCode: -1}
 	out, err, closed := suiteRun(t, api, suiteEnd{after: failed})
 	if err != nil || closed.State != event.StateSucceeded {
 		t.Fatalf("%v, closed %+v\n%s", err, closed, out)
 	}
-	want := `{"verdict":"escalate","points":[{"text":"The full suite did not start: the after step could not run.","action":"run_again"}]}`
+	want := `{"verdict":"escalate","points":[{"text":"Contact support: the full suite did not start, because its container did not start.","action":"run_again"}]}`
 	if posted := api.posted(); len(posted) != 1 || posted[0] != want {
 		t.Errorf("posted %q, want %s", posted, want)
 	}

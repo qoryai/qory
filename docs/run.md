@@ -3420,17 +3420,22 @@ order of preference:
   plan has no full row`, `the full row of the build plan has no command`, `the command of the full
   row is too long or has a NUL`, `the result file of the full row is no path below the repository`
   (each with a `fix`), `qory could not read the build plan`, `qory cannot reach the run API`, `the session's folder has no .git
-  folder` and `qory could not read the commit the session started at`. The cause is `the after
-  step could not run` (-1), `the script could not make a folder it needs` (70), `the image may lack sh or git` (127), `git could not
-  clone HEAD of the workspace` (71), `git could not read HEAD of the workspace` (72), or `its
-  script did not record that it ran the command (exit <n>)`. This is also the text for a status file
-  that is missing or garbled.
-- With a host that the proxy refused while the after step ran, `Allow <host> in the run's policy, or
-  change the suite: it failed after <host> was refused.` With more hosts, the first and `and N
-  more`. The words leave about 22 characters for the host named twice, so qory keeps the first
-  host whole when it fits, cuts the second mention, and ends a cut host with `...`. qory reads the
-  hosts from `events.jsonl` in the run's folder: events `dev.qory.run.egress` with the decision
-  `denied` and no channel, between the after step's `dev.qory.run.step_started` and
+  folder` and `qory could not read the commit the session started at`. For a script that ended before the command, the cause is `the script could not make a folder it
+  needs` (70), `git could not clone HEAD of the workspace` (71), `git could not read HEAD of the
+  workspace` (72) or `the image may lack sh or git` (127).
+- For an after step whose container did not start or exited before the script (-1, 125 or another
+  status, including a status file that is missing or garbled), the text starts with `Contact
+  support:`. On a machine that runs macOS it is `Contact support: the full suite needs a Linux
+  machine, and this run's machine runs Docker on macOS.` Elsewhere it is `Contact support: the
+  full suite did not start, because its container exited with status <n>.`, or `... because its
+  container did not start.` for -1. The line at the end of the run has the same words.
+- With a host that the proxy refused while the after step ran, `Allow <host> in the run's policy,
+  or change the suite: it failed after the refusal.` With more hosts, `Allow <host> and N more in
+  the run's policy, or change the suite: it failed after the refusals.` The words take 77
+  characters, so a host of up to 23 characters stays whole in line 1; qory cuts a longer host,
+  which ends in `...`, only when the line would pass 100 characters. qory reads the hosts from
+  `events.jsonl` in the run's folder: events `dev.qory.run.egress` with the decision `denied`
+  and no channel, between the after step's `dev.qory.run.step_started` and
   `dev.qory.run.step_exited`. A host that is no name or address, or an address with a zone, is left
   out.
 - `The full suite did not finish: the after step reached its limit of <n> minutes.` for `timeout`.
