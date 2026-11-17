@@ -26,8 +26,8 @@ import (
 // <image_destination>:<run_id>, and the environment image the build keeps apart to
 // <environment_destination>:<run_id>, unless the documents set environment_image, which
 // the build starts from. When the documents set largest_prebuilt_image_bytes, the build
-// removes a target image over that many bytes and the prebuild stops; without it, any
-// size is kept. The build takes the user from the wall section of forager.yaml, and runs
+// stops, before the tools step, for a repository image over that many bytes; without it,
+// any size is kept. The build takes the user from the wall section of forager.yaml, and runs
 // in the image of wall.images that wall.prebuild_image is set to.
 
 // textPrebuildWall is the line of a prebuild from a run code on a machine whose

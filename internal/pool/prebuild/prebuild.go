@@ -227,9 +227,9 @@ type Run struct {
 	// failed with image_missing and -1.
 	EnvironmentImage string
 	// LargestImageBytes is the documents' largest_prebuilt_image_bytes: the largest size
-	// the target image may have, in decimal bytes, as docker image inspect reports it. An
-	// image over it is removed and the prebuild stops. 0 is no limit. Only the documents
-	// of a run code set it.
+	// of the repository's image, before qory adds its tools, in decimal bytes, as docker
+	// image inspect reports it. A larger image stops the prebuild. 0 is no limit. Only
+	// the documents of a run code set it.
 	LargestImageBytes int64
 }
 
