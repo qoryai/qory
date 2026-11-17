@@ -727,3 +727,26 @@ func TestARunWritesOnlyWithAccessWriteInItsDocuments(t *testing.T) {
 		t.Error("a run not from a run code writes")
 	}
 }
+
+// TestFullSuiteOfTheDocumentsIsTheRunsFullSuite: codeRunOf takes full_suite of the documents; a
+// document with false or none gives false.
+func TestFullSuiteOfTheDocumentsIsTheRunsFullSuite(t *testing.T) {
+	yes, no := true, false
+	for _, c := range []struct {
+		name string
+		full *bool
+		want bool
+	}{{"true", &yes, true}, {"false", &no, false}, {"absent", nil, false}} {
+		doc := contracts.Documents{Inputs: json.RawMessage(`{}`), Workflow: "example", RunSettings: &contracts.RunSettings{Runtime: "claude"}}
+		if c.full != nil {
+			doc.FullSuite = *c.full
+		}
+		r, err := codeRunOf(doc)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if r.fullSuite != c.want || fullSuiteOf(r) != c.want {
+			t.Errorf("%s: fullSuite %v, want %v", c.name, r.fullSuite, c.want)
+		}
+	}
+}

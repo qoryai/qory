@@ -196,7 +196,7 @@ func codeRunOf(doc contracts.Documents) (*codeRun, error) {
 	if doc.Target != nil {
 		target.System, target.Path, target.Version = doc.Target.System, doc.Target.Path, doc.TargetVersion
 	}
-	r := &codeRun{runtime: runtime, settings: settings, harness: harness, defines: defines, workflow: doc.Workflow, inputs: doc.Inputs, minutes: doc.TimeLimitMinutes, hidden: hidden, target: target, access: doc.Access}
+	r := &codeRun{runtime: runtime, settings: settings, harness: harness, defines: defines, workflow: doc.Workflow, inputs: doc.Inputs, minutes: doc.TimeLimitMinutes, fullSuite: doc.FullSuite, hidden: hidden, target: target, access: doc.Access}
 	if doc.WorkItem != nil {
 		r.workItem = doc.WorkItem.ID
 	}

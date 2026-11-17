@@ -505,7 +505,9 @@ release may change what an existing document does, and states it under Upgrading
   run's documents. The documents have no `run_settings.time_limit_minutes` any more, and
   qory stops a run whose documents have one. A run whose documents set no
   `time_limit_minutes` keeps the limit of its workflow, else 3 hours. The documents can
-  also contain `shared_run` and `full_suite`; qory reads them and changes nothing for them.
+  also contain `shared_run` and `full_suite`. With `full_suite` true, the session runs the full
+  test suite when it ends, as The full suite in `docs/run.md` describes; qory reads `shared_run`
+  and changes nothing for it.
 - The push step of a write run pushes through the run's push proxy, which sets the run
   configuration's push credentials alone, and the run's proxy no longer adds push
   credentials. A run with no push credential stops at the push with `Contact
