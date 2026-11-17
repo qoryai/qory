@@ -33,7 +33,6 @@ const (
 // and has at most 100 characters in its first line.
 const (
 	textSuiteSkipped = "the full suite did not run: the session left HEAD at the commit it started at"
-	textSuiteFault   = "no full suite: %s"
 	textSuiteGreen   = "the full suite passed, so qory posts no verdict"
 	textSuiteCut     = "qory run was stopped while the full suite ran, so the run closes cancelled"
 	textSuiteStands  = "the verdict %s of the agent stands over the red full suite"
@@ -282,14 +281,14 @@ func (r *suiteRun) after(ctx, again context.Context, limit time.Time, res *sessi
 	}
 	switch {
 	case fault != nil:
-		r.said(fmt.Sprintf(textSuiteFault, point.Text))
+		r.said(point.Text)
 	case got.State == suite.Skipped:
 		r.said(textSuiteSkipped)
 	case got.State == suite.Passed:
 		r.said(endedLine(got))
 		r.said(textSuiteGreen)
 	case got.NotStarted():
-		r.said(fmt.Sprintf(textSuiteFault, point.Text))
+		r.said(point.Text)
 	default:
 		r.said(endedLine(got))
 	}
@@ -334,7 +333,7 @@ func (r *suiteRun) cut(ctx, again context.Context, limit time.Time, point runapi
 // endedLine is the line of qory run for a suite that ended: "the full suite passed on 0123456789ab:
 // 140 tests" or "the full suite failed on 0123456789ab: 2 of 140 tests failed".
 func endedLine(got suite.Outcome) string {
-	verb := map[suite.State]string{suite.Passed: "passed", suite.Failed: "failed", suite.Timeout: "timed out", suite.Stopped: "was stopped"}[got.State]
+	verb := map[suite.State]string{suite.Passed: "passed", suite.Failed: "failed", suite.Timeout: "timed out"}[got.State]
 	line := "the full suite " + verb + onCommit(got.Commit)
 	switch c := got.Counts; {
 	case c == nil:
@@ -480,12 +479,12 @@ func hostsLine(hosts []string) string {
 // minHostShown is the fewest characters of a host that a line shows, "..." included.
 const minHostShown = 4
 
-// cutHost is host in at most n characters, with "..." at the end of a host that was cut.
+// cutHost is host in at most n characters: a host that was cut ends in "...", after no "." or "-".
 func cutHost(host string, n int) string {
 	if len(host) <= n {
 		return host
 	}
-	return host[:n-3] + "..."
+	return strings.TrimRight(host[:n-3], ".-") + "..."
 }
 
 // onCommit is " on <commit>" for a suite that ran on a commit, and "" for one that never got to it.

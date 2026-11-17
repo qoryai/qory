@@ -3360,9 +3360,11 @@ exits other than 0, when a test failed, and when it ran 0 tests. Skipped tests d
 With exit status 0 and no readable result file, the suite is `passed` and has no counts.
 `timeout` is a step that the limit cut. A step that a stop of `qory run` cut is `stopped`.
 
-**After the session.** When the session succeeded and the suite ended, qory prints `the full
-suite on <commit> is <state>` with the counts. A `passed` suite posts nothing, and the agent's
-verdict stands. A suite that did not pass makes qory post a verdict through the run API.
+**After the session.** When the session succeeded and the suite ended, qory prints one
+line: `the full suite passed on <short commit>: 2 tests`, `the full suite failed on <short commit>: 1
+of 2 tests failed`, or `the full suite timed out on <short commit>`. For a suite that did not start
+or run it prints the point's text alone. A `passed` suite posts nothing, and the agent's verdict
+stands. A suite that did not pass makes qory post a verdict through the run API.
 
 A red suite, whose command ran (`failed` or `timeout`):
 

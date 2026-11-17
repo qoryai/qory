@@ -444,7 +444,7 @@ func TestTheHostLineHasAtMost100CharactersAndAValidVerdict(t *testing.T) {
 		t.Errorf("a long host is not shown cut to a line of 100 characters: %q", got)
 	}
 	// The words around the host take 77 characters, so a host of 23 fits whole and one of 24 or
-	// 30 is cut; with "and 1 more" and the plural the host has 12.
+	// 30 is cut; with "and 1 more" and the plural the host has 11.
 	whole := strings.Repeat("a", 15) + ".example"
 	if got := hostsLine([]string{whole}); !strings.Contains(got, " "+whole+" ") || len(got) != 100 {
 		t.Errorf("a host of %d characters is cut: %q", len(whole), got)
@@ -893,7 +893,7 @@ func TestLaunchFullReadsTheNewestUsableVersionOfTheBuildPlan(t *testing.T) {
 // run about the full suite to 100 characters, with the longest values a line shows.
 func TestTheLinesOfTheSuiteStartWithTheFixInAtMost100Characters(t *testing.T) {
 	for _, line := range []string{
-		textSuiteSkipped, fmt.Sprintf(textSuiteFault, "x"),
+		textSuiteSkipped,
 		endedLine(suite.Outcome{State: suite.Timeout, Commit: suiteSHA, Counts: &suite.Counts{Tests: 100000, Failed: 100000}}),
 		textSuiteGreen, textSuiteCut, fmt.Sprintf(textSuiteStands, "changes-requested"), fmt.Sprintf(textSuitePosted, "changes-requested"), textSuiteNoRoom,
 		fmt.Sprintf(textSuiteNoPost, "x"),
@@ -950,7 +950,63 @@ func TestTheTextForAContainerThatDidNotStart(t *testing.T) {
 	h := newHelper(t)
 	goos = "darwin"
 	h.after(&session.AfterResult{Step: 2, State: event.StateFailed, ExitCode: 125}, succeeded)
-	if len(*h.said) == 0 || (*h.said)[0] != "no full suite: "+textPointNoStartMac {
+	if len(*h.said) == 0 || (*h.said)[0] != textPointNoStartMac || len((*h.said)[0]) > 100 {
 		t.Errorf("lines %q", *h.said)
+	}
+}
+
+// TestTheHostLineAtTheBoundaryOfAndNMore: with "and N more" the host has 11 characters for N of one
+// digit and 10 for N of two digits; a host that fits stays whole, one character more is cut, and a cut
+// host never ends in "." or "-" before "...".
+func TestTheHostLineAtTheBoundaryOfAndNMore(t *testing.T) {
+	for _, c := range []struct {
+		more  int
+		fit   int
+		wants string
+	}{{1, 11, "and 1 more"}, {12, 10, "and 12 more"}} {
+		hosts := make([]string, c.more+1)
+		for i := range hosts {
+			hosts[i] = "other.example"
+		}
+		hosts[0] = strings.Repeat("a", c.fit)
+		whole := hostsLine(hosts)
+		if len(whole) != 100 || !strings.Contains(whole, " "+hosts[0]+" "+c.wants+" in the run's policy") {
+			t.Errorf("%d more, a host of %d characters: %q (%d)", c.more, c.fit, whole, len(whole))
+		}
+		hosts[0] += "a"
+		cut := hostsLine(hosts)
+		if len(cut) > 100 || !strings.Contains(cut, strings.Repeat("a", c.fit-3)+"... "+c.wants) {
+			t.Errorf("%d more, a host of %d characters: %q (%d)", c.more, c.fit+1, cut, len(cut))
+		}
+	}
+	for _, host := range []string{"a.example.com.example", "abcdefghijk-lm-nop.example"} {
+		got := hostsLine([]string{host})
+		if strings.Contains(got, ".... ") || strings.Contains(got, "-... ") || strings.Contains(got, ".... ") {
+			t.Errorf("the cut host in %q ends in a dot or a hyphen", got)
+		}
+	}
+	if got := cutHost("abc.def.example", 7); got != "abc..." {
+		t.Errorf("cutHost = %q", got)
+	}
+	if got := cutHost("abcd.efg.example", 8); got != "abcd..." {
+		t.Errorf("cutHost = %q", got)
+	}
+}
+
+// TestTheProgressLinesAreOneSentence: the line of a suite that ended names its state, the short commit
+// and the counts.
+func TestTheProgressLinesAreOneSentence(t *testing.T) {
+	for _, c := range []struct {
+		got  suite.Outcome
+		want string
+	}{
+		{suite.Outcome{State: suite.Passed, Commit: suiteSHA, Counts: &suite.Counts{Tests: 2}}, "the full suite passed on 0123456789ab: 2 tests"},
+		{suite.Outcome{State: suite.Failed, Commit: suiteSHA, Counts: &suite.Counts{Tests: 2, Failed: 1}}, "the full suite failed on 0123456789ab: 1 of 2 tests failed"},
+		{suite.Outcome{State: suite.Timeout, Commit: suiteSHA}, "the full suite timed out on 0123456789ab"},
+		{suite.Outcome{State: suite.Failed}, "the full suite failed"},
+	} {
+		if got := endedLine(c.got); got != c.want {
+			t.Errorf("endedLine = %q, want %q", got, c.want)
+		}
 	}
 }
