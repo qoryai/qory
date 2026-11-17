@@ -606,7 +606,7 @@ func (c *Checker) HasRuntime(ctx context.Context) (bool, error) {
 }
 
 // shimRuntimeName reports whether Docker starts a container under the runtime name as a
-// containerd shim, although docker info does not list it: moby v28.0.0 daemon/runtime_unix.go:253-277,
+// containerd shim, although docker info does not list it: moby v28.0.0 daemon/runtime_unix.go:253-279,
 // isPermissibleC8dRuntimeName, "no '/' ... at least one '.' ... does not begin with a '.'".
 func shimRuntimeName(name string) bool {
 	prefix, _, dotted := strings.Cut(name, ".")
