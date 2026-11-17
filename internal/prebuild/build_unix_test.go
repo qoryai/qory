@@ -754,6 +754,31 @@ func TestBuildFailsWhenTheContainerDies(t *testing.T) {
 	}
 }
 
+// TestBuildKeepsAnImageOfAnySize is an image that docker reports as 5 GiB: the build
+// finishes, keeps the tag, prints the size on its last line, and removes only the
+// temporary images.
+func TestBuildKeepsAnImageOfAnySize(t *testing.T) {
+	f := newFakes(t)
+	f.set(t, "size", "5368709120\n")
+	var out bytes.Buffer
+	res, err := prebuild.Build(t.Context(), options(t, repository(t, shopConfig), &out, io.Discard))
+	if err != nil {
+		t.Fatalf("Build: %v\n%s", err, out.String())
+	}
+	if res.Target != "acme/shop:prebuild" {
+		t.Errorf("the result is %+v", res)
+	}
+	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+	if last := lines[len(lines)-1]; !strings.HasPrefix(last, "prebuild: built acme/shop:prebuild in ") || !strings.HasSuffix(last, ": 5.0 GiB (5368709120 bytes)") {
+		t.Errorf("the last line is %q", last)
+	}
+	for _, l := range f.calls("docker") {
+		if strings.HasPrefix(l, "image rm") && strings.Contains(l, "acme/shop:prebuild") {
+			t.Errorf("the image is removed: docker %s", l)
+		}
+	}
+}
+
 // TestBuildStopsAtItsLimit is a build still running at its limit: the program running
 // and what it started are ended, and the container and the images are removed. The
 // test ends the build's context with [prebuild.ErrLimit] as its cause once the
