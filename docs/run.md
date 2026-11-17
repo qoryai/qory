@@ -329,7 +329,12 @@ in forager.yaml, then take the work item in again in Qory Apiary.`, and on the n
 `Push checks run in the wall's default image; the code is used`. The run stops there with
 exit 2 too when the engine does not have the wall's default image: `Pull the wall's
 default image onto this machine, and run again.`, and on the next line `Push checks run
-in it, and the engine does not have the image <image>.` It stops there with exit 2 before
+in it, and the engine does not have the image <image>.` The run stops there with exit 2
+when the engine's `docker info` does not list the runtime that the checks' container runs
+under, such as `runsc`: `Install the container runtime on the engine, and run again.`, and
+on the next line `The push checks' container runs under the runtime <runtime>, and the
+engine does not have it.` An engine whose `docker info` fails, or does not list runtimes
+as Docker does, lets the run go on. It stops there with exit 2 before
 any command of the engine gets the image when the image is not a reference, such as a
 value that starts with `-`: `Set wall.image or --image to an image reference, and run
 again.`, and on the next line `Push checks cannot start from <value>. A reference starts
@@ -356,6 +361,8 @@ Set wall.image in forager.yaml, then take the work item in again in Qory Apiary.
   Push checks run in the wall's default image; the code is used
 Pull the wall's default image, then take the work item in again in Qory Apiary.
   Push checks run in it, and the engine does not have the image <image>; the code is used
+Install the container runtime, then take the work item in again in Qory Apiary.
+  The push checks' container runs under the runtime <runtime>, and the engine does not have it; the code is used
 Set wall.image or --image to an image reference, then take the work item in again in Qory Apiary.
   Push checks cannot start from <value>; the code is used
 Take the work item in again in Qory Apiary.

@@ -485,6 +485,11 @@ release may change what an existing document does, and states it under Upgrading
 - A push check's container runs under the `runtime` of the `wall.images` entry that the
   run's policy selects, such as `runsc` (gVisor), when that entry has one. Before, it ran
   under the default image's `runtime` even when the run's container ran under another.
+- A run with push checks stops before its setup, with exit 2, when the engine's `docker
+  info` does not list the `runtime` that the checks' container runs under, such as
+  `runsc`: `Install the container runtime on the engine, and run again.`, and on the next
+  line the runtime. Before, the checks failed at the first push. An engine whose `docker
+  info` fails lets the run go on.
 - A prebuild keeps an image of any size, and the last line of the prebuild prints the size.
 - A prebuild stops, before it builds the image, when the base image is not Debian or
   Ubuntu 22.04 or 24.04, or has no `apt-get`: `use a Debian or Ubuntu image: the build

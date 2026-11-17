@@ -583,6 +583,27 @@ func (c *Checker) HasImage(ctx context.Context) (bool, error) {
 	return false, fmt.Errorf("the inspect of the image %s failed: %s", exports.Value(c.Image, false), engineError(errOut.Bytes(), err))
 }
 
+// HasRuntime reports whether the engine has the container runtime [Checker.Runtime],
+// with docker info, which starts nothing. A checker with no runtime has it. An engine
+// whose runtimes do not list the name is false with no error; an info that fails, such
+// as one of an engine that is not reachable, or one that does not report its runtimes as
+// Docker does, is an error.
+func (c *Checker) HasRuntime(ctx context.Context) (bool, error) {
+	if c.Runtime == "" {
+		return true, nil
+	}
+	var out, errOut bytes.Buffer
+	if err := c.engine(ctx, engineWait, &out, &errOut, "info", "--format", "{{json .Runtimes}}"); err != nil {
+		return false, fmt.Errorf("the inspect of the engine's runtimes failed: %s", engineError(errOut.Bytes(), err))
+	}
+	var runtimes map[string]json.RawMessage
+	if err := json.Unmarshal(bytes.TrimSpace(out.Bytes()), &runtimes); err != nil || runtimes == nil {
+		return false, errors.New("the engine's list of runtimes does not read")
+	}
+	_, has := runtimes[c.Runtime]
+	return has, nil
+}
+
 // limits are the flags of the check container's limits.
 func (c *Checker) limits() []string {
 	var out []string

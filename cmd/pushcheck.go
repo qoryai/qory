@@ -42,6 +42,7 @@ const (
 	textChecksNoFolder   = "Check the folder of the push checks' files, and run again.\n  The folder is %s, and making it failed: %s."
 	textChecksBadImage   = "Set wall.image or --image to an image reference, and run again.\n  Push checks cannot start from %s. A reference starts with a letter or a digit and has only letters, digits, and . _ / : @ -."
 	textChecksNoImage    = "Pull the wall's default image onto this machine, and run again.\n  Push checks run in it, and the engine does not have the image %s."
+	textChecksNoRuntime  = "Install the container runtime on the engine, and run again.\n  The push checks' container runs under the runtime %s, and the engine does not have it."
 	textChecksNotSet     = "Run again.\n  Turning on the push checks for the POSTs from behind the wall failed, so the run stopped before the setup: %s."
 	textCheckNotFinished = "the check before a push did not finish, and the push was not stored (503 " + runapi.CodePushCheckUnavailable + "): %s"
 )
@@ -59,6 +60,7 @@ const (
 	textChecksBadImageFromCode  = "Set wall.image or --image to an image reference, then take the work item in again in Qory Apiary.\n  Push checks cannot start from %s" + codeUsed
 	textChecksNoDefaultFromCode = "Set wall.image in forager.yaml, then take the work item in again in Qory Apiary.\n  Push checks run in the wall's default image" + codeUsed
 	textChecksNoImageFromCode   = "Pull the wall's default image, then take the work item in again in Qory Apiary.\n  Push checks run in it, and the engine does not have the image %s" + codeUsed
+	textChecksNoRuntimeFromCode = "Install the container runtime, then take the work item in again in Qory Apiary.\n  The push checks' container runs under the runtime %s, and the engine does not have it" + codeUsed
 	textChecksNotSetFromCode    = "Take the work item in again in Qory Apiary.\n  Turning on the push checks for the POSTs from behind the wall failed, so the run stopped before the setup: %s" + codeUsed
 	textChecksUnreadFromCode    = "Take the work item in again in Qory Apiary, so that the new run composes the harness again.\n  The push checks in %s could not be read: %s" + codeUsed
 )
@@ -155,7 +157,8 @@ func (p *runPushChecks) check(ctx context.Context, artifactType string, files []
 // from the wall's default image, see [checkImage], on the engine of the wall, as the
 // run's user, with the wall's limits and the run's label, and read the artifacts through
 // the run's run API on this machine. A run whose engine does not have the wall's default
-// image stops here, before the setup and the agent. Their temporary folders are in a
+// image, or the container runtime that the checks run under, see [checkRuntime], stops
+// here, before the setup and the agent. Their temporary folders are in a
 // folder of the run directory, which done removes. A home with no push check, and a run
 // with no control plane, controlPlane false, load nothing. An error starts with its fix.
 func (p *runPushChecks) load(ctx context.Context, run openedRun, home, runID string, spec *runSpec, controlPlane bool) (done func(), err error) {
@@ -231,6 +234,11 @@ func pushChecker(ctx context.Context, run openedRun, home, runID string, spec *r
 		if has, err := checker.HasImage(ctx); err == nil && !has {
 			return nil, checksStop(fromCode, textChecksNoImage, textChecksNoImageFromCode, exports.Value(checker.Image, false))
 		}
+	}
+	// The runtime that the checks' container needs, the same way: an info that fails or
+	// does not list runtimes as Docker does lets the run go on.
+	if has, err := checker.HasRuntime(ctx); err == nil && !has {
+		return nil, checksStop(fromCode, textChecksNoRuntime, textChecksNoRuntimeFromCode, exports.Value(checker.Runtime, false))
 	}
 	// The folder is qory's user's alone. For a run's user that is another user, its mode
 	// lets that user pass through to the folders of a check, which it cannot list.

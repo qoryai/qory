@@ -1059,7 +1059,12 @@ reference. A run from a run code with neither stops before the setup and the age
 with exit 2: `Set wall.image in forager.yaml, then take the work item in again in Qory Apiary: push
 checks run in the wall's default image; the code is used`. A run whose engine does not have the wall's default image stops before the setup and the agent,
 with exit 2: `Pull the wall's default image onto this machine, and run again.`, and on the
-next line `Push checks run in it, and the engine does not have the image <image>.` The container has
+next line `Push checks run in it, and the engine does not have the image <image>.` A run
+whose engine's `docker info` does not list the runtime that the container runs under
+stops there with exit 2 too: `Install the container runtime on the engine, and run again.`,
+and on the next line `The push checks' container runs under the runtime <runtime>, and
+the engine does not have it.` An engine whose `docker info` fails, or does not list
+runtimes as Docker does, lets the run go on. The container has
 no variable but the image's and those Docker sets: `HOME`, `HOSTNAME` and `PATH`. It has
 the wall's CPU and memory limits of the run's containers, the wall's process limit or 512
 processes, and the label of the run's containers, so the clean-up of the run removes a

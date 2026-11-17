@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -282,6 +283,147 @@ func TestAnInspectThatFailsLetsTheRunGoOn(t *testing.T) {
 	}
 	if data, _ := os.ReadFile(log); !strings.Contains(string(data), "image inspect --format {{.Id}} registry.example/agent:1") {
 		t.Errorf("the engine did not get the inspect:\n%s", data)
+	}
+}
+
+// runtimesEngine is a docker command that writes each command line to the log it returns
+// and answers `info --format {{json .Runtimes}}` with out on stdout and exit code code,
+// with errOut on stderr. Every other command exits 0 and prints nothing.
+func runtimesEngine(t *testing.T, out string, code int, errOut string) (string, string) {
+	t.Helper()
+	dir := t.TempDir()
+	log := filepath.Join(dir, "engine.log")
+	script := filepath.Join(dir, "docker")
+	body := "#!/bin/sh\necho \"$*\" >> " + log + "\ncase \"$1 $2\" in\n\"info --format\") echo '" + out + "'; echo '" + errOut + "' >&2; exit " + strconv.Itoa(code) + " ;;\nesac\n"
+	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return script, log
+}
+
+// runsc is the checks' runtime in the tests of the runtime's load check.
+const runsc = "runsc"
+
+// gvisorRun is an opened run of a walled run whose policy selected an image that runs
+// under runsc, while the default image of wall.images has no runtime.
+func gvisorRun(t *testing.T) (openedRun, *runSpec) {
+	t.Helper()
+	spec := &runSpec{}
+	spec.Image = "plain"
+	spec.Images = []session.Image{{Name: "plain", Ref: "registry.example/plain:1"}, {Name: "gvisor", Ref: "registry.example/gvisor:1", Runtime: runsc}}
+	run := imageOnlyAPI{imageAPI: imageAPI{runAPIOnly: runAPIOnly{base: "http://run-api.qory.invalid/v1/runs/r1", dir: t.TempDir()}}, img: spec.Images[1]}
+	return run, spec
+}
+
+// TestAMissingRuntimeStopsTheLoad is a run whose checks run under runsc on an engine whose
+// runtimes do not list it: the load stops with the fix line and the runtime on the next
+// line, for a run from a run code and for one with none, and no container of a check is
+// created.
+func TestAMissingRuntimeStopsTheLoad(t *testing.T) {
+	stubChecks(t)
+	for fromCode, want := range map[bool]string{
+		false: "Install the container runtime on the engine, and run again.\n  The push checks' container runs under the runtime runsc, and the engine does not have it.",
+		true:  "Install the container runtime, then take the work item in again in Qory Apiary.\n  The push checks' container runs under the runtime runsc, and the engine does not have it; the code is used",
+	} {
+		docker, log := runtimesEngine(t, `{"runc":{"path":"runc"},"sysbox-runc":{"path":"sysbox-runc"}}`, 0, "")
+		run, spec := gvisorRun(t)
+		spec.Wall = &wall.Docker{Command: docker}
+		checker, err := pushChecker(context.Background(), run, t.TempDir(), "r1", spec, true, fromCode)
+		if checker != nil || err == nil || err.Error() != want {
+			t.Errorf("from a run code %v: %v, %v, want no checker and %q", fromCode, checker != nil, err, want)
+		}
+		data, _ := os.ReadFile(log)
+		if !strings.Contains(string(data), "info --format {{json .Runtimes}}") {
+			t.Errorf("from a run code %v: the engine did not get the info:\n%s", fromCode, data)
+		}
+		if strings.Contains(string(data), "create") || strings.Contains(string(data), "start") {
+			t.Errorf("from a run code %v: a check's container was made:\n%s", fromCode, data)
+		}
+	}
+}
+
+// TestAMissingRuntimeOfARunWithNoDefaultStopsTheLoad is the same stop for a run with no
+// default image, whose image of the policy has the runtime.
+func TestAMissingRuntimeOfARunWithNoDefaultStopsTheLoad(t *testing.T) {
+	stubChecks(t)
+	docker, _ := runtimesEngine(t, `{"runc":{}}`, 0, "")
+	run, spec := gvisorRun(t)
+	spec.Wall, spec.Image = &wall.Docker{Command: docker}, ""
+	checker, err := pushChecker(context.Background(), run, t.TempDir(), "r1", spec, true, false)
+	if checker != nil || err == nil || !strings.HasPrefix(err.Error(), "Install the container runtime on the engine, and run again.\n") {
+		t.Errorf("pushChecker = %v, %v, want no checker and the fix line", checker != nil, err)
+	}
+}
+
+// TestARuntimeTheEngineHasLetsTheLoadGoOn is a run whose checks run under runsc on an
+// engine that lists it: the load returns the checker.
+func TestARuntimeTheEngineHasLetsTheLoadGoOn(t *testing.T) {
+	stubChecks(t)
+	docker, log := runtimesEngine(t, `{"runc":{"path":"runc"},"runsc":{"path":"runsc"}}`, 0, "")
+	run, spec := gvisorRun(t)
+	spec.Wall = &wall.Docker{Command: docker}
+	checker, err := pushChecker(context.Background(), run, t.TempDir(), "r1", spec, true, false)
+	if err != nil || checker == nil || checker.Runtime != runsc {
+		t.Errorf("pushChecker = %v, %v, want a checker of runtime runsc", checker != nil, err)
+	}
+	if data, _ := os.ReadFile(log); !strings.Contains(string(data), "info --format {{json .Runtimes}}") {
+		t.Errorf("the engine did not get the info:\n%s", data)
+	}
+}
+
+// TestAnEngineInfoThatFailsLetsTheRunGoOn is an engine whose info fails, or whose runtimes
+// do not read as Docker's list, such as Podman's: the load returns the checker and no
+// error, as it does for an image inspect that fails, and a check that cannot start fails
+// its push later.
+func TestAnEngineInfoThatFailsLetsTheRunGoOn(t *testing.T) {
+	stubChecks(t)
+	for name, c := range map[string]struct {
+		out     string
+		code    int
+		errOut  string
+		wantErr bool
+	}{
+		"not reachable": {code: 1, errOut: "Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docker daemon running?"},
+		"no list":       {out: "null"},
+		"not a list":    {out: "<no value>"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			docker, log := runtimesEngine(t, c.out, c.code, c.errOut)
+			run, spec := gvisorRun(t)
+			spec.Wall = &wall.Docker{Command: docker}
+			checker, err := pushChecker(context.Background(), run, t.TempDir(), "r1", spec, true, false)
+			if err != nil || checker == nil {
+				t.Errorf("pushChecker = %v, %v, want a checker and no error", checker != nil, err)
+			}
+			if data, _ := os.ReadFile(log); !strings.Contains(string(data), "info --format {{json .Runtimes}}") {
+				t.Errorf("the engine did not get the info:\n%s", data)
+			}
+		})
+	}
+}
+
+// TestARuntimeLineStartsWithAFixOf100Characters is the first line of the stop for a missing
+// runtime, with "qory run: " in front, as it reaches the terminal: at most 100 characters,
+// for a run with a run code and one with none, and whatever the runtime's name is.
+func TestARuntimeLineStartsWithAFixOf100Characters(t *testing.T) {
+	stubChecks(t)
+	for _, fromCode := range []bool{false, true} {
+		docker, _ := runtimesEngine(t, `{"runc":{}}`, 0, "")
+		run, spec := gvisorRun(t)
+		spec.Wall = &wall.Docker{Command: docker}
+		spec.Images[1].Runtime = "a-runtime-with-a-long-name-" + strings.Repeat("x", 60)
+		run = imageOnlyAPI{imageAPI: run.(imageOnlyAPI).imageAPI, img: spec.Images[1]}
+		_, err := pushChecker(context.Background(), run, t.TempDir(), "r1", spec, true, fromCode)
+		if err == nil {
+			t.Fatalf("from a run code %v: no error", fromCode)
+		}
+		first, _, _ := strings.Cut(err.Error(), "\n")
+		if n := len("qory run: " + first); n > 100 {
+			t.Errorf("from a run code %v: the first line is %d characters: %q", fromCode, n, first)
+		}
+		if strings.Contains(first, "runtime-with-a-long-name") {
+			t.Errorf("from a run code %v: the first line has the runtime's name: %q", fromCode, first)
+		}
 	}
 }
 
