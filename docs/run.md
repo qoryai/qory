@@ -2772,9 +2772,9 @@ not counting a reopen of the run, and the 5 s more let the gateway's response ar
 Forager's session waits up to 4 minutes for one call, a reopen of the run included, so a send
 that qory cuts at 65 s is still inside that wait. A cut send is sent again with the same body.
 A repeated report is safe: Qory Apiary records the same commit for the same run, system and
-path once, and returns 204 again. A send that got no response in that time, or a response with a status of 500 or above (the gateway's 502
-`control_plane_unavailable` and 503 among them) or 429, is sent again with the same body, 3
-times, after 1 s, 2 s and 4 s. The link has no `Retry-After`, so the waits do not change. Qory
+path once, and returns 204 again. A send that got no response within its 65 s, or a response
+with a status of 500 or above (the gateway's 502 `control_plane_unavailable` and 503 among
+them) or 429, is sent again with the same body, 3 times, after 1 s, 2 s and 4 s. The link has no `Retry-After`, so the waits do not change. Qory
 Apiary's 401 does not pass the gateway, and its 410 arrives as 502 `control_plane_unavailable`:
 both are sent again. Then:
 
