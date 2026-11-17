@@ -1542,7 +1542,9 @@ func collisions(owners map[string][]string, modules []Module, base *Base, checko
 func mergeFile(res *Result, runtime, file, path, modName string, decided map[string]string, readFile func(string) ([]byte, error)) error {
 	data, err := readFile(path)
 	if err != nil {
-		return exports.Prefixed("module "+shown(modName), exports.HideError(err))
+		err = exports.HideError(err)
+		return module.Caused(err, fmt.Sprintf("Check that you can read the settings fragment of module %s.", shown(modName)),
+			err.Error(), "The file is "+exports.HidePath(path)+".")
 	}
 	src := map[string]any{}
 	switch filepath.Ext(path) {
