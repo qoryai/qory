@@ -215,7 +215,7 @@ func pushChecker(ctx context.Context, run openedRun, home, runID string, spec *r
 		return nil, checksStop(fromCode, textChecksBadImage, textChecksBadImageFromCode, exports.Value(image, true))
 	}
 	checker := &pushcheck.Checker{
-		Home: home, Checks: checks, Image: image, User: user,
+		Home: home, Checks: checks, Image: image, Runtime: checkRuntime(run, spec), User: user,
 		Engine: engine,
 		Fetch:  artifactsForCheck(client),
 		Dir:    filepath.Join(run.Dir(), pushChecksDir),
@@ -269,6 +269,21 @@ func checkImage(run openedRun, spec *runSpec) string {
 		}
 	}
 	return spec.Image
+}
+
+// checkRuntime is the --runtime of the checks' container, the one Forager gives the default
+// image: the entry's runtime, "" for a default that is a bare reference, and for no default
+// the run's image's runtime.
+func checkRuntime(run openedRun, spec *runSpec) string {
+	if spec.Image == "" {
+		return run.Image().Runtime
+	}
+	for _, i := range spec.Images {
+		if i.Name == spec.Image {
+			return i.Runtime
+		}
+	}
+	return ""
 }
 
 // checkEngine is the engine of the push checks of a run behind d: d's command, with the

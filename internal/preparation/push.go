@@ -45,7 +45,7 @@ const (
 	textBranchMoved      = "qory run: " + textVersionWays + ", then take the work item in again: the branch moved since the run fetched it, and the push failed: %[4]s; the code is used"
 	textPushedNoVersion  = "qory run: %s: qory pushed %s and stored no version, because the push of the next repository failed: %s"
 	textPushRefused      = "qory run: change the rule on %[3]s that stops a push to %[1]s of %[2]s, then take the work item in again: the push failed: %[4]s; the code is used"
-	textPushForbidden    = "qory run: add /%[1]s.git/git-receive-pack to the path rules of the run's policy for %[2]s, and give the run's credential for %[2]s write access to %[1]s, then take the work item in again: the push through the run's gateway returned 403: %[3]s; the code is used"
+	textPushForbidden    = "qory run: Contact support: the push was refused (403).\n  One of these stopped it:\n  1. The run's gateway allows a push only to the run's branch, refs/heads/%[3]s (wall:push-ref).\n  2. The connection's setup has no path rule for /%[1]s.git/git-receive-pack, or no credential with write access.\n  3. The forge stopped the push: its permission for the run's credential, or a branch rule.\n  The push of %[1]s to %[2]s returned 403: %[4]s; the code is used"
 	textPushNoCredential = "qory run: give the run's credential for %[2]s write access to %[1]s, then take the work item in again: the push through the run's gateway failed: %[3]s; the code is used"
 	textPushNotReached   = "qory run: check that the run's policy allows %[2]s and that %[2]s is reachable, then take the work item in again: the push of %[1]s through the run's gateway failed: %[3]s; the code is used"
 )
@@ -581,7 +581,7 @@ func pushFailed(b *WorkBranch, path string, err error) error {
 	case pushRejected.MatchString(output):
 		return fmt.Errorf(textPushRefused, b.Ref, shown, host, cause)
 	case pushForbidden.MatchString(output):
-		return fmt.Errorf(textPushForbidden, shown, host, cause)
+		return fmt.Errorf(textPushForbidden, shown, host, b.Ref, cause)
 	case answered.MatchString(output):
 		return fmt.Errorf(textPushNoCredential, shown, host, cause)
 	}
