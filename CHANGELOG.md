@@ -21,9 +21,8 @@ release may change what an existing document does, and states it under Upgrading
 - A workflow's `access` in a stack takes a third value, `write-no-push`, in both schemas
   and in the stack check. A run takes the lower of the workflow's access and `access` in
   its documents, in the order `read`, `write-no-push`, `write`. A `write-no-push` run
-  gets a writable checkout and no push step: qory opens the host proxy for the fetch
-  alone and closes it before the agent starts. With no wall, it stops with
-  `write_needs_wall`. The error for another value now starts
+  has a writable checkout, no push step, no submit, and no version of the artifact
+  `branch`. With no wall, it stops with `write_needs_wall`. The error for another value now starts
   `Set workflows.<name>.access to a valid level.`
 - A run of a work item works on the branch `qory/<work item id>`, at the commit of the
   artifact `branch` that its stage starts from. The harness still comes from
