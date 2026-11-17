@@ -497,7 +497,7 @@ func parseManifest(dir string, data []byte, err error) (*Manifest, error) {
 	for name, node := range raw.Variants {
 		if name == "default" {
 			if err := node.Decode(&m.Default); err != nil {
-				return nil, caused(err, "Set variants.default to a variant name, or fail.")
+				return nil, caused(err, "Set variants.default to a variant name, or `fail`.")
 			}
 			continue
 		}
@@ -513,7 +513,7 @@ func parseManifest(dir string, data []byte, err error) (*Manifest, error) {
 	}
 	if m.Default != "" && m.Default != "fail" {
 		if _, ok := m.Variants[m.Default]; !ok {
-			return nil, refuse("Set variants.default to a variant the manifest declares, or fail.",
+			return nil, refuse("Set variants.default to a variant the manifest declares, or `fail`.",
 				fmt.Sprintf("variants.default is %s, which is not a variant.", accesskey.ShownName(m.Default, true)))
 		}
 	}

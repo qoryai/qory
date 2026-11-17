@@ -403,12 +403,12 @@ func TestReadManifestRefuses(t *testing.T) {
 		{
 			"a default that is not a variant",
 			"apiVersion: qory.dev/v1alpha1\nname: core\nvariants:\n  codex:\n    agents: agents/codex\n  default: claude\n",
-			"Set variants.default to a variant the manifest declares, or fail.\n  variants.default is \"claude\", which is not a variant.",
+			"Set variants.default to a variant the manifest declares, or `fail`.\n  variants.default is \"claude\", which is not a variant.",
 		},
 		{
 			"a default that is not a string",
 			"apiVersion: qory.dev/v1alpha1\nname: core\nvariants:\n  default:\n    agents: agents/claude\n",
-			"Set variants.default to a variant name, or fail.",
+			"Set variants.default to a variant name, or `fail`.",
 		},
 		{
 			"a variant that is not a map of kinds",

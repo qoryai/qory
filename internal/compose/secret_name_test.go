@@ -57,7 +57,7 @@ func TestAModuleNameWithASecretIsLeftOutOfAManifestRefusal(t *testing.T) {
 	const access = "(a name that contains an access key secret)"
 	for _, c := range []struct{ manifest, want string }{
 		{"apiVersion: qory.dev/v1alpha1\nname: qak_m\nenv:\n  QAK_X: ../bin\n", "Set env." + access + " to a path inside the module.\n  ../bin is not a path inside the module."},
-		{"apiVersion: qory.dev/v1alpha1\nname: qak_m\nvariants:\n  codex:\n    agents: agents/codex\n  default: qrk_v\n", "Set variants.default to a variant the manifest declares, or fail.\n  variants.default is (a name that contains a run key), which is not a variant."},
+		{"apiVersion: qory.dev/v1alpha1\nname: qak_m\nvariants:\n  codex:\n    agents: agents/codex\n  default: qrk_v\n", "Set variants.default to a variant the manifest declares, or `fail`.\n  variants.default is (a name that contains a run key), which is not a variant."},
 	} {
 		dir := writeTree(t, map[string]string{
 			stack.FileName:                   "apiVersion: qory.dev/v1alpha1\nmodules:\n  - name: qak_m\n",

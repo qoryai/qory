@@ -79,7 +79,7 @@ func TestAManifestNameWithASecretIsLeftOutOfItsRefusal(t *testing.T) {
 		{head + "env:\n  QAK_X: /bin\n", "Set env." + accessKeyPhrase + " to a path inside the module.\n  /bin is not a path inside the module."},
 		{head + "env:\n  QRK_X: ../bin\n", "Set env." + runKeyPhrase + " to a path inside the module.\n  ../bin is not a path inside the module."},
 		{head + "variants:\n  qak_v: [x]\n", "Set variants." + accessKeyPhrase + " to a map of a kind to a directory.\n  "},
-		{head + "variants:\n  claude: {skills: s}\n  default: qrk_v\n", "Set variants.default to a variant the manifest declares, or fail.\n  variants.default is " + runKeyPhrase + ", which is not a variant."},
+		{head + "variants:\n  claude: {skills: s}\n  default: qrk_v\n", "Set variants.default to a variant the manifest declares, or `fail`.\n  variants.default is " + runKeyPhrase + ", which is not a variant."},
 		{head + "requires:\n  - skill: deploy\n    qak_x: [a]\n", "Remove the key " + accessKeyPhrase + " from requires[0].\n  An item selects its entry as skill, agent, command, output-style, hook, mcp, or file, and lists what it needs under skills, agents, commands, output-styles, hooks, mcp, and files."},
 		{head + "requires:\n  - skill: qak_x\n    agents: [a]\n  - skill: qak_x\n    agents: [b]\n", "Remove one of the two requires items for skill " + accessKeyPhrase + ".\n  The requires lists skill " + accessKeyPhrase + " twice."},
 	} {
