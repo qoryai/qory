@@ -1,6 +1,8 @@
 package module
 
 import (
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -183,5 +185,24 @@ func TestParseDocumentReadsWindowsFiles(t *testing.T) {
 	}
 	if d.Front == nil || len(d.Front) != 0 || d.Body != "body\n" {
 		t.Fatalf("empty block: got %+v", d)
+	}
+}
+
+// TestAReadErrorHasTheCheckLineAndALinkErrorDoesNot is the read of a module whose
+// AGENTS.md read fails: an OS error comes under "Check that you can read the files of
+// module core.", and the error of a link that leads out of the module, whose text starts
+// with its own fix, does not.
+func TestAReadErrorHasTheCheckLineAndALinkErrorDoesNot(t *testing.T) {
+	dir := tree(t, map[string]string{"AGENTS.md": "# a\n"})
+	denied := &fs.PathError{Op: "open", Path: filepath.Join(dir, "AGENTS.md"), Err: errors.New("permission denied")}
+	_, err := ReadWith("core", dir, nil, "", func(string) ([]byte, error) { return nil, denied })
+	if err == nil || !strings.HasPrefix(err.Error(), "Check that you can read the files of module core.\n  ") || !errors.Is(err, denied) {
+		t.Errorf("an OS error: %v, want the check line and the cause", err)
+	}
+	_, err = ReadWith("core", dir, nil, "", func(string) ([]byte, error) {
+		return nil, &resolveError{"Point the link inside the module, or remove it.\n  AGENTS.md leads out of the module.", ErrLeadsOut}
+	})
+	if err == nil || !strings.HasPrefix(err.Error(), "Point the link inside the module, or remove it.\n  AGENTS.md leads out") || !errors.Is(err, ErrLeadsOut) {
+		t.Errorf("a link error: %v, want its own fix first and the sentinel", err)
 	}
 }
