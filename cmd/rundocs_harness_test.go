@@ -546,7 +546,7 @@ func TestARunCodeOfAHiddenHarnessThatFailsShowsNoAddress(t *testing.T) {
 		{"a module's ref is gone", codeHarness{stack: withTools(tools, "tools-gone"), tools: toolsModule()}, cmd.ExitInput,
 			[]string{"qory run: set the ref of the module tools to a branch, tag or commit its repository has, then take the work item in again in Qory Apiary: the repository of the module tools has no branch or tag by the ref it is set to; the code is used\n"}},
 		{"a module's manifest does not parse", codeHarness{files: map[string]string{"examples/hello/modules/world/qory-module.yaml": "apiVersion: [\n"}}, cmd.ExitInput,
-			[]string{"correct " + workspaceHarness + ", then take the work item in again in Qory Apiary: module world: qory-module.yaml in the module world: yaml: ", "; the code is used\n"}},
+			[]string{"correct " + workspaceHarness + ", then take the work item in again in Qory Apiary: Correct the YAML syntax of the file.\n  Line 1: did not find expected node content.\n  The file is qory-module.yaml in the module world; the code is used\n"}},
 		{"a module's source has a user part", codeHarness{stack: thenMore("https://reader:s3cret@" + proxygittest.Host + "/example-org/more.git"), tools: toolsModule()}, cmd.ExitInput,
 			[]string{userPart}},
 		{"a module's source has a user part that does not parse", codeHarness{stack: thenMore("https://reader:p%zzw@" + proxygittest.Host + "/example-org/more.git"), tools: toolsModule()}, cmd.ExitInput,
@@ -1001,14 +1001,14 @@ func TestAHiddenHarnessShowsNoFolderOfASourceOrAnExport(t *testing.T) {
 		{"a base that extends another stack", codeHarness{stack: func(s string) string {
 			return s + "extends: {git: \"" + toolsURL + "\", ref: " + toolsRef + ", path: secret-folder-3}\n"
 		}}, "Remove extends from the stack file.\n  Only the harness section of a checkout's qory.yaml extends a stack.\n  extends is in qory-stack.yaml in " + workspaceBase},
-		{"the documents' base by its export", web(codeHarness{}), "qory-stack.yaml in " + workspaceBase + ": line "},
-		{"the checkout's base by its export", web(codeHarness{checkout: true}), "qory-stack.yaml in " + checkoutBase + ": line "},
+		{"the documents' base by its export", web(codeHarness{}), "It is at line 20 of qory-stack.yaml in " + workspaceBase + "; the code is used"},
+		{"the checkout's base by its export", web(codeHarness{checkout: true}), "It is at line 20 of qory-stack.yaml in " + checkoutBase + "; the code is used"},
 		{"an exported module with a manifest qory cannot read", tools("secret-folder-8", map[string]string{"qory-module.yaml": "name: [\n", "AGENTS.md": "# Tools\n"}),
-			"module tools: qory-module.yaml in the module tools: "},
+			"Correct the YAML syntax of the file.\n  Line 1: did not find expected node content.\n  The file is qory-module.yaml in the module tools; the code is used"},
 		{"an exported module without a manifest", tools("secret-folder-8", map[string]string{"AGENTS.md": "# Tools\n"}),
 			"the module tools has no qory-module.yaml"},
 		{"an exports.dir that leads out", tools("../secret-folder-6", nil),
-			"module tools: qory.yaml in the module tools: exports.dir stacks is not a directory inside the repository"},
+			"module tools: Set the stacks directory of exports.dir to a path inside the repository.\n  exports.dir stacks is not a directory inside the repository.\n  exports.dir is in qory.yaml in the module tools; the code is used"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			r := c.c.run(t)

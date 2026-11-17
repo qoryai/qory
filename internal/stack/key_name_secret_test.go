@@ -15,9 +15,9 @@ import (
 func TestAnUnknownStackKeyWithASecretInItsNameIsReportedByItsLine(t *testing.T) {
 	isolate(t)
 	for _, c := range []struct{ name, secret, want string }{
-		{"qak_AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA", "qak_AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA", "line 2: key is not one qory-stack.yaml reads"},
-		{"qrk_AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA x", "qrk_AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA", "line 2: key is not one qory-stack.yaml reads"},
-		{"layrs", "", `line 2: key "layrs" is not one qory-stack.yaml reads`},
+		{"qak_AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA", "qak_AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA", "Key is not one qory-stack.yaml reads.\n  It is at line 2 of {path}."},
+		{"qrk_AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA x", "qrk_AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA", "Key is not one qory-stack.yaml reads.\n  It is at line 2 of {path}."},
+		{"layrs", "", "Key \"layrs\" is not one qory-stack.yaml reads.\n  It is at line 2 of {path}."},
 	} {
 		path := filepath.Join(t.TempDir(), FileName)
 		body := "apiVersion: qory.dev/v1alpha1\n" + c.name + ": 1\nmodules:\n  - name: core\n    source:\n      path: modules/core\n"
@@ -25,7 +25,7 @@ func TestAnUnknownStackKeyWithASecretInItsNameIsReportedByItsLine(t *testing.T) 
 			t.Fatal(err)
 		}
 		_, err := Load(path)
-		if want := path + ": " + c.want; err == nil || err.Error() != want {
+		if want := "Remove the key, or rename it to one qory-stack.yaml reads.\n  " + strings.ReplaceAll(c.want, "{path}", path); err == nil || err.Error() != want {
 			t.Errorf("%s: %v, want %q", c.name, err, want)
 		}
 		if c.secret != "" && err != nil && strings.Contains(err.Error(), c.secret) {
@@ -45,7 +45,7 @@ func TestAnUnknownStackKeyWithANewlineInItsNameIsReportedByItsLine(t *testing.T)
 		t.Fatal(err)
 	}
 	_, err := Load(path)
-	if want := path + ": line 2: key is not one qory-stack.yaml reads"; err == nil || err.Error() != want {
+	if want := "Remove the key, or rename it to one qory-stack.yaml reads.\n  Line 2: key is not one qory-stack.yaml reads.\n  The file is " + path + "."; err == nil || err.Error() != want {
 		t.Errorf("%v, want %q", err, want)
 	}
 	if err != nil && strings.Contains(err.Error(), "qak_SECRET") {
@@ -63,19 +63,19 @@ func TestADecoderRefusalWithASecretIsGivenByItsLines(t *testing.T) {
 	head := "apiVersion: qory.dev/v1alpha1\n"
 	const cannotRead = "qory cannot read the value here. The YAML decoder's message contains an access key secret, a run key, a run code or an enrolment code, so qory does not print it."
 	for _, c := range []struct{ body, want string }{
-		{head + "modules: qak_x\n", ": line 2: " + cannotRead},
-		{head + "extends: qak_x\nmodules: qrk_x\n", ": yaml: unmarshal errors:\n  line 2: " + cannotRead + "\n  line 3: " + cannotRead},
-		{head + "extends: line 99\nmodules: qak_x\n", ": yaml: unmarshal errors:\n  line 2: cannot unmarshal !!str `line 99` into stack.Source\n  line 3: " + cannotRead},
-		{head + "extends: \"line 99: field y\"\n\"qak_S\\nb\": 1\n", ": yaml: unmarshal errors:\n  line 2: cannot unmarshal !!str `line 99...` into stack.Source\n  line 3: key is not one qory-stack.yaml reads"},
-		{head + "modules: *qak_x\n", ": " + cannotRead},
-		{head + "modules: !!int qak_x\n", ": " + cannotRead},
+		{head + "modules: qak_x\n", "Set each value in the file to the type its key takes.\n  Line 2: " + cannotRead},
+		{head + "extends: qak_x\nmodules: qrk_x\n", "Set each value in the file to the type its key takes.\n  Line 2: " + cannotRead + "\n  Line 3: " + cannotRead},
+		{head + "extends: line 99\nmodules: qak_x\n", "Set each value in the file to the type its key takes.\n  Line 2: cannot unmarshal !!str `line 99` into stack.Source.\n  Line 3: " + cannotRead},
+		{head + "extends: \"line 99: field y\"\n\"qak_S\\nb\": 1\n", "Set each value in the file to the type its key takes.\n  Line 2: cannot unmarshal !!str `line 99...` into stack.Source.\n  Line 3: key is not one qory-stack.yaml reads."},
+		{head + "modules: *qak_x\n", "Correct the file.\n  " + cannotRead},
+		{head + "modules: !!int qak_x\n", "Correct the file.\n  " + cannotRead},
 	} {
 		path := filepath.Join(t.TempDir(), FileName)
 		if err := os.WriteFile(path, []byte(c.body), 0o644); err != nil {
 			t.Fatal(err)
 		}
 		_, err := Load(path)
-		if want := path + c.want; err == nil || err.Error() != want {
+		if want := c.want + "\n  The file is " + path + "."; err == nil || err.Error() != want {
 			t.Errorf("%q: %v, want %q", c.body, err, want)
 		}
 		if err != nil && (strings.Contains(err.Error(), "qak_") || strings.Contains(err.Error(), "qrk_")) {
@@ -106,7 +106,7 @@ func TestARefusalWithoutALineIsThePath(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err := Load(path)
-	want := path + ": qory cannot read the value here. The YAML decoder's message contains an access key secret, a run key, a run code or an enrolment code, so qory does not print it."
+	want := "Correct the file.\n  qory cannot read the value here. The YAML decoder's message contains an access key secret, a run key, a run code or an enrolment code, so qory does not print it.\n  The file is " + path + "."
 	if err == nil || err.Error() != want {
 		t.Errorf("%v, want %q", err, want)
 	}

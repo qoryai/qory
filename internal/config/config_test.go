@@ -119,8 +119,8 @@ func TestNearerFilesWin(t *testing.T) {
 func TestLoadRefusesAMistake(t *testing.T) {
 	hermetic(t)
 	for _, c := range []struct{ body, want string }{
-		{"runtim: claude\n", `line 2: key "runtim" is not one qory.yaml reads`},
-		{"harness: {runtim: claude}\n", `line 2: key "runtim" is not one qory.yaml reads`},
+		{"runtim: claude\n", `Key "runtim" is not one qory.yaml reads.`},
+		{"harness: {runtim: claude}\n", `Key "runtim" is not one qory.yaml reads.`},
 		{"harness: {update: sometimes}\n", "Set harness.update to always or never.\n  The value is \"sometimes\"."},
 		{"worktree: {name: wt}\n", "Add {branch} to worktree.name.\n  worktree.name is \"wt\", and without {branch} two worktrees share one directory."},
 		{"worktree: {name: \"a/{branch}\"}\n", "Remove the slash from worktree.name.\n  worktree.name is \"a/{branch}\". It is one directory name under worktree.dir."},
@@ -143,9 +143,9 @@ func TestLoadRefusesAMistake(t *testing.T) {
 		{"env: {1A: x}\n", "Rename each variable in env to an environment variable name.\n  1A is not one."},
 		{"env: {QORY_HARNESS_HOME: x}\n", "Remove env.QORY_HARNESS_HOME.\n  QORY_HARNESS_HOME is qory's, so the configuration exports another name."},
 		{"harness: {runtime: []}\n", "Set harness.runtime to one runtime or a list of them.\n  harness.runtime is empty."},
-		{"harness: {model: &m opus}\nworktree: {base: *m}\n", "line 3: *m is a YAML alias, which qory.yaml may not contain"},
-		{"env: &e {A: x}\nharness:\n  extensions:\n    ci:\n      <<: *e\n", "line 6: *e is a YAML alias"},
-		{"a: &a [x, x, x, x]\nb: &b [*a, *a, *a, *a]\nc: [*b, *b, *b, *b]\n", "line 3: *a is a YAML alias"},
+		{"harness: {model: &m opus}\nworktree: {base: *m}\n", "*m at line 3 is a YAML alias, which qory.yaml may not contain."},
+		{"env: &e {A: x}\nharness:\n  extensions:\n    ci:\n      <<: *e\n", "*e at line 6 is a YAML alias"},
+		{"a: &a [x, x, x, x]\nb: &b [*a, *a, *a, *a]\nc: [*b, *b, *b, *b]\n", "*a at line 3 is a YAML alias"},
 	} {
 		root := t.TempDir()
 		write(t, filepath.Join(root, "qory.yaml"), c.body)

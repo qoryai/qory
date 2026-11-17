@@ -965,7 +965,7 @@ func TestEnrolPrintLeavesTheServerSectionUnread(t *testing.T) {
 
 	writeFile(t, foragerFile(), "session:\n  instance: [build-01\n")
 	_, _, err = runSplit(t, "", "access-key", "enrol", "--print", srv.URL, srv.code(2, false))
-	if cmd.ExitCode(err) != cmd.ExitInput || !strings.Contains(err.Error(), foragerFile()+": ") {
+	if cmd.ExitCode(err) != cmd.ExitInput || !strings.Contains(err.Error(), "The file is "+foragerFile()+".") {
 		t.Errorf("--print with a forager.yaml that is not YAML: %v", err)
 	}
 	if n := len(srv.sent()); n != 1 {

@@ -2147,8 +2147,9 @@ phrase:
   <harness>`.
 - `correct <harness>, then take the work item in again in Qory Apiary: <text>; the code
   is used`, for any other error of exit 2, where `<harness>` is the workspace's harness or
-  the checkout's harness. One such `<text>` is `module <module>: qory.yaml in <source>:
-  exports.dir <stacks or modules> is not a directory inside the repository`, for an
+  the checkout's harness. One such `<text>` is `module <module>: qory.yaml in <source>: Set the <stacks or
+  modules> directory of exports.dir to a path inside the repository.`, and on the next line
+  `exports.dir <stacks or modules> is not a directory inside the repository.`, for an
   `exports.dir` that is absolute or leads out of its repository.
 - `fix the cause, then take the work item in again in Qory Apiary: <text>; the code is
   used`, for any other error of any other exit status, which stays as it is

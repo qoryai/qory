@@ -106,7 +106,7 @@ func TestAStackFileUnderASecretPathPrintsNoSecret(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = Load(file)
-	if !strings.Contains(errText(err), "/"+nameWithSecret+"/"+FileName+": line 2: ") {
+	if !strings.Contains(errText(err), "/"+nameWithSecret+"/"+FileName+".") {
 		t.Errorf("unknown key: %v, want the name phrase", err)
 	}
 	noSecret(t, err)

@@ -72,7 +72,7 @@ func TestLoadRefusesABrokenWorkflow(t *testing.T) {
 		{"  hello:\n    access: admin\n", "Set workflows.hello.access to read or write.\n  The value is \"admin\".\n  workflows.hello is in {path}."},
 		{"  hello:\n    access: Write\n", "Set workflows.hello.access to read or write.\n  The value is \"Write\".\n  workflows.hello is in {path}."},
 		{"  hello:\n    access: write\n    time_limit: 0s\n", "Set workflows.hello.time_limit to a duration above zero"},
-		{"  hello:\n    prompt: x\n", `key "prompt" is not one qory-stack.yaml reads`},
+		{"  hello:\n    prompt: x\n", `Key "prompt" is not one qory-stack.yaml reads.`},
 	} {
 		path := write(t, withWorkflows(c.body))
 		_, err := Load(path)

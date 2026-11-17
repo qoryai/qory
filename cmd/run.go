@@ -1483,7 +1483,8 @@ func machineCredentials(ctx context.Context, r *config.Forager, e config.Expansi
 			// The gateway runs the adapter by the path checked here.
 			found, err := config.Program(c.Adapter[0], e.Workspace, "an adapter")
 			if err != nil {
-				return nil, input(fmt.Errorf("%s: gateway.credentials.%s.adapter: %w", config.ForagerFileName, accesskey.ShownName(c.Name, false), exports.HideValueError(err, c.Adapter[0])))
+				at := "gateway.credentials." + accesskey.ShownName(c.Name, false)
+				return nil, input(refuseProgram("Fix the adapter of "+at+".", at+".adapter", config.ForagerFileName, exports.HideValueError(err, c.Adapter[0])))
 			}
 			def.Adapter = append([]string{found}, c.Adapter[1:]...)
 		}
@@ -1525,7 +1526,8 @@ func machineTools(r *config.Forager, workspace []string) ([]gateway.Tool, error)
 			// The gateway runs the tool by the path checked here.
 			found, err := config.Program(t.Command[0], workspace, "a tool")
 			if err != nil {
-				return nil, input(fmt.Errorf("%s: gateway.tools.%s.command: %w", config.ForagerFileName, accesskey.ShownName(t.Name, false), exports.HideValueError(err, t.Command[0])))
+				at := "gateway.tools." + accesskey.ShownName(t.Name, false)
+				return nil, input(refuseProgram("Fix the command of "+at+".", at+".command", config.ForagerFileName, exports.HideValueError(err, t.Command[0])))
 			}
 			def.Command = append([]string{found}, t.Command[1:]...)
 		}

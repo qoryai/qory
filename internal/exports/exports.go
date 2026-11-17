@@ -120,13 +120,13 @@ func (d *Dirs) UnmarshalYAML(n *yaml.Node) error {
 			return err
 		}
 		if one == "" {
-			return errors.New("dir is empty; it is a directory relative to the repository root")
+			return Refuse("Set exports.dir to a directory relative to the repository root.", "exports.dir is empty.", "exports.dir is in "+FilePlace+".")
 		}
 		*d = Dirs{Stacks: filepath.Join(one, DefaultStacksDir), Modules: filepath.Join(one, DefaultModulesDir)}
 		return nil
 	}
 	if n.Kind != yaml.MappingNode {
-		return errors.New("dir is one directory that contains stacks/ and modules/, or a map that sets the stacks and modules directories")
+		return Refuse("Set exports.dir to one directory, or to a map of the stacks and modules directories.", "A directory contains stacks/ and modules/, and a map sets each directory.", "exports.dir is in "+FilePlace+".")
 	}
 	type plain Dirs
 	var m plain
@@ -135,7 +135,7 @@ func (d *Dirs) UnmarshalYAML(n *yaml.Node) error {
 	}
 	for i := 0; i+1 < len(n.Content); i += 2 {
 		if k := n.Content[i].Value; k != "stacks" && k != "modules" {
-			return fmt.Errorf("dir has the key %s, which a dir map does not have; its keys are stacks and modules", accesskey.ShownName(k, true))
+			return Refuse("Remove the key "+accesskey.ShownName(k, true)+" from exports.dir.", "A dir map has the keys stacks and modules.", "exports.dir is in "+FilePlace+".")
 		}
 	}
 	*d = Dirs(m)
@@ -144,16 +144,35 @@ func (d *Dirs) UnmarshalYAML(n *yaml.Node) error {
 
 // DirError is a directory of exports.dir, Dir, for the exports Key, stacks or modules,
 // that is absolute or outside the repository.
-type DirError struct{ Key, Dir string }
-
-func (e *DirError) Error() string {
-	return fmt.Sprintf("exports.dir %s %s is not a directory inside the repository", e.Key, Value(e.Dir, true))
+type DirError struct {
+	Key, Dir string
+	file     string
 }
+
+// In is the error with file as the path of the document it is about, see [InFile].
+func (e *DirError) In(file string) error {
+	c := *e
+	c.file = file
+	return &c
+}
+
+func (e *DirError) Error() string { return e.text(true) }
 
 // Hidden is the error's text without the directory, for a harness whose folders no text
 // shows.
-func (e *DirError) Hidden() string {
-	return "exports.dir " + e.Key + " is not a directory inside the repository"
+func (e *DirError) Hidden() string { return e.text(false) }
+
+// text is the refusal: the fix, the cause with the directory when shown, and the file.
+func (e *DirError) text(dir bool) string {
+	cause := "exports.dir " + e.Key + " is not a directory inside the repository."
+	if dir {
+		cause = "exports.dir " + e.Key + " is " + Value(e.Dir, true) + ", which is not a directory inside the repository."
+	}
+	lines := []string{cause}
+	if e.file != "" {
+		lines = append(lines, "exports.dir is in "+e.file+".")
+	}
+	return Refuse("Set the "+e.Key+" directory of exports.dir to a path inside the repository.", lines...).Error()
 }
 
 // Section is the exports key as written. A configuration reader embeds it, so a
@@ -173,12 +192,12 @@ type Section struct {
 // outside the repository.
 func (s *Section) Validate() error {
 	if s.Dir == nil && len(s.Stacks) == 0 && len(s.Modules) == 0 {
-		return errors.New("exports lists no stacks and no modules")
+		return Refuse("List stacks or modules under exports, or set exports.dir.", "exports lists no stacks and no modules.", "exports is in "+FilePlace+".")
 	}
 	if s.Dir != nil {
 		for _, d := range []struct{ key, dir string }{{"stacks", s.Dir.Stacks}, {"modules", s.Dir.Modules}} {
 			if d.dir == "" {
-				return fmt.Errorf("exports.dir sets no %s directory; the map form sets both", d.key)
+				return Refuse("Set the "+d.key+" directory of exports.dir.", "exports.dir sets no "+d.key+" directory, and the map form sets both.", "exports.dir is in "+FilePlace+".")
 			}
 			clean := filepath.Clean(d.dir)
 			if filepath.IsAbs(d.dir) || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
@@ -193,10 +212,10 @@ func (s *Section) Validate() error {
 		seen := map[string]bool{}
 		for _, name := range list.names {
 			if !segment(name) {
-				return fmt.Errorf("exports.%s lists %s, which is not one path segment; a name contains no slash, backslash, @ or leading dot", list.key, accesskey.ShownName(name, true))
+				return Refuse("Set each name in exports."+list.key+" to one path segment.", "exports."+list.key+" lists "+accesskey.ShownName(name, true)+". A name contains no slash, backslash, @, or leading dot.", "exports."+list.key+" is in "+FilePlace+".")
 			}
 			if seen[name] {
-				return fmt.Errorf("exports.%s lists %s twice", list.key, accesskey.ShownName(name, false))
+				return Refuse("List "+accesskey.ShownName(name, false)+" once in exports."+list.key+".", "exports."+list.key+" lists it twice.", "exports."+list.key+" is in "+FilePlace+".")
 			}
 			seen[name] = true
 		}
@@ -296,7 +315,7 @@ func Read(root string) (*Exports, error) {
 		return nil, err
 	}
 	if err := doc.Exports.Validate(); err != nil {
-		return nil, fmt.Errorf("%s: %w", file, err)
+		return nil, AtPath(file, err)
 	}
 	return doc.Exports.At(root, file), nil
 }
@@ -399,16 +418,74 @@ func DecodeError(path string, err error) error {
 	text := err.Error()
 	rest := " " + filepath.Base(path) + " reads"
 	if m := UnknownKey.FindStringSubmatch(text); m != nil {
-		return fmt.Errorf("%s: %s%s", path, m[1], KeyNotRead(m[2], rest))
+		return unknownKeyRefusal(path, m[1], KeyNotRead(m[2], rest))
 	}
 	hidden := hideDefinedTwice(text)
 	if accesskey.ContainsSecret(hidden) {
 		return withoutSecrets(path, rest, err)
 	}
-	if hidden != text {
-		return fmt.Errorf("%s: %s", path, hidden)
+	return decoderRefusal(path, hidden, err)
+}
+
+// fixes of a refusal of a decode error: the key the file does not read, a key written
+// twice, the syntax of the file, a value of the wrong type, and any other.
+const (
+	fixTwice  = "Remove the key that is written twice."
+	fixSyntax = "Correct the YAML syntax of the file."
+	fixType   = "Set each value in the file to the type its key takes."
+	fixOther  = "Correct the file."
+)
+
+// fixKey is the fix of the refusal of a key that the file at path does not read.
+func fixKey(path string) string {
+	return "Remove the key, or rename it to one " + filepath.Base(path) + " reads."
+}
+
+// unknownKeyRefusal is the refusal of a key the file at path does not read, with text,
+// [KeyNotRead]'s words, as its cause, and the decoder's "line N: " prefix as its place.
+func unknownKeyRefusal(path, linePrefix, text string) error {
+	where := "The file is " + path + "."
+	if m := entryLine.FindStringSubmatch(linePrefix); m != nil {
+		where = "It is at line " + m[1] + " of " + path + "."
 	}
-	return fmt.Errorf("%s: %w", path, err)
+	return Refuse(fixKey(path), sentenceOf(text), where)
+}
+
+// decoderRefusal is the refusal of the decoder's error err, whose text with a secret
+// left out is text, for the file at path: the fix by the kind of the error, the
+// decoder's entries as the cause, and the file.
+func decoderRefusal(path, text string, err error) error {
+	var te *yaml.TypeError
+	typed := errors.As(err, &te)
+	var lines []string
+	for _, l := range strings.Split(text, "\n") {
+		if l = strings.TrimSpace(strings.TrimPrefix(l, "yaml: ")); l != "" && l != "unmarshal errors:" {
+			lines = append(lines, sentenceOf(l))
+		}
+	}
+	fix := fixOther
+	switch {
+	case strings.Contains(text, "already defined at line"):
+		fix = fixTwice
+	case typed:
+		fix = fixType
+	case syntaxLine.MatchString(text):
+		fix = fixSyntax
+	}
+	return Refuse(fix, append(lines, "The file is "+path+".")...)
+}
+
+// sentenceOf is s as a sentence: its first letter in upper case, and a full stop at its
+// end when it has none.
+func sentenceOf(s string) string {
+	if s == "" {
+		return s
+	}
+	s = strings.ToUpper(s[:1]) + s[1:]
+	if strings.HasSuffix(s, ".") {
+		return s
+	}
+	return s + "."
 }
 
 // hideDefinedTwice is text with each of the decoder's reports of a key written twice
@@ -437,24 +514,28 @@ const cannotRead = "qory cannot read the value here. The YAML decoder's message 
 // decoder's message in words of qory's own, as a list of runtimes does, the refusal keeps
 // those words in front, unless they contain an access key secret or a run key too.
 func withoutSecrets(path, rest string, err error) error {
+	var words []string
 	if inner := errors.Unwrap(err); inner != nil {
-		if words, ok := strings.CutSuffix(err.Error(), inner.Error()); ok && words != "" && !accesskey.ContainsSecret(words) {
-			path += ": " + strings.TrimSuffix(words, ": ")
+		if w, ok := strings.CutSuffix(err.Error(), inner.Error()); ok && w != "" && !accesskey.ContainsSecret(w) {
+			words = []string{sentenceOf(strings.TrimSuffix(w, ": "))}
 		}
+	}
+	refuse := func(fix string, lines ...string) error {
+		return Refuse(fix, append(append(words, lines...), "The file is "+path+".")...)
 	}
 	var te *yaml.TypeError
 	if !errors.As(err, &te) {
 		if m := syntaxLine.FindStringSubmatch(err.Error()); m != nil {
-			return fmt.Errorf("%s: line %s: %s", path, m[1], cannotRead)
+			return refuse(fixSyntax, "Line "+m[1]+": "+cannotRead)
 		}
-		return fmt.Errorf("%s: %s", path, cannotRead)
+		return refuse(fixOther, cannotRead)
 	}
 	var entries, lines []string
 	unknown, kept := "", false
 	for _, e := range te.Errors {
 		e = hideDefinedTwice(e)
 		if !accesskey.ContainsSecret(e) {
-			entries, kept = append(entries, e), true
+			entries, kept = append(entries, sentenceOf(e)), true
 			continue
 		}
 		if m := unknownKeyAt.FindStringSubmatch(e); m != nil {
@@ -469,20 +550,28 @@ func withoutSecrets(path, rest string, err error) error {
 		} else {
 			continue
 		}
-		entries = append(entries, e)
+		entries = append(entries, sentenceOf(e))
 	}
 	lines = slices.Compact(lines)
 	switch {
 	case kept:
-		return fmt.Errorf("%s: yaml: unmarshal errors:\n  %s", path, strings.Join(entries, "\n  "))
+		fix := fixType
+		if slices.ContainsFunc(entries, func(e string) bool { return strings.Contains(e, "already defined at line") }) {
+			fix = fixTwice
+		}
+		return refuse(fix, entries...)
 	case unknown != "":
-		return fmt.Errorf("%s: %s", path, unknown)
+		return refuse(fixKey(path), sentenceOf(unknown))
 	case len(lines) == 1:
-		return fmt.Errorf("%s: %s", path, lines[0])
+		return refuse(fixType, sentenceOf(lines[0]))
 	case len(lines) > 1:
-		return fmt.Errorf("%s: yaml: unmarshal errors:\n  %s", path, strings.Join(lines, "\n  "))
+		out := make([]string, len(lines))
+		for i, l := range lines {
+			out[i] = sentenceOf(l)
+		}
+		return refuse(fixType, out...)
 	}
-	return fmt.Errorf("%s: %s", path, cannotRead)
+	return refuse(fixOther, cannotRead)
 }
 
 // KeyNotRead is the refusal of the key name where no key of that name is read: "key",
@@ -583,9 +672,9 @@ func RefuseAliases(path string, data []byte) error {
 		alias := "*" + a.Value
 		if accesskey.ContainsSecret(a.Value) {
 			// The line places the alias, and the anchor's name is left out.
-			alias = "the value"
+			alias = "The value"
 		}
-		return fmt.Errorf("%s: line %d: %s is a YAML alias, which %s may not contain; write the value out in full where it is used", path, a.Line, alias, filepath.Base(path))
+		return Refuse("Write the value out in full in place of the YAML alias.", fmt.Sprintf("%s at line %d is a YAML alias, which %s may not contain.", alias, a.Line, filepath.Base(path)), "The file is "+path+".")
 	}
 	return nil
 }

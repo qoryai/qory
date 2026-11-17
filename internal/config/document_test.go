@@ -32,7 +32,7 @@ func TestDocumentIsTheRootsOwnComposeFile(t *testing.T) {
 	}
 	writeRaw(t, path, "harness: {nope: 1}\n")
 	_, err = config.Document(root)
-	want := path + `: line 1: key "nope" is not one harness.yaml reads`
+	want := "Remove the key, or rename it to one harness.yaml reads.\n  Key \"nope\" is not one harness.yaml reads.\n  It is at line 1 of " + path + "."
 	if err == nil || err.Error() != want {
 		t.Fatalf("a file that does not read: err = %v, want %q", err, want)
 	}
@@ -94,7 +94,7 @@ func TestOnBaseRefusesWhatIsNoDocument(t *testing.T) {
 	path := filepath.Join(tmp, "app", "harness.yaml")
 	for _, c := range []struct{ body, want string }{
 		{"harness: {runtime: codex}\n", "Add modules, a stack to extend, or extensions to the harness section.\n  The section lists none of them.\n  harness is in " + path + "."},
-		{"harness:\n  nope: 1\n", path + `: line 2: key "nope" is not one harness.yaml reads`},
+		{"harness:\n  nope: 1\n", "Remove the key, or rename it to one harness.yaml reads.\n  Key \"nope\" is not one harness.yaml reads.\n  It is at line 2 of " + path + "."},
 	} {
 		writeRaw(t, path, c.body)
 		_, _, err := config.OnBase(path, base)

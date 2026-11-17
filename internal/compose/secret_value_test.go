@@ -157,8 +157,8 @@ func TestABaseUnderASecretPathPrintsNoSecret(t *testing.T) {
 	}
 	_, _, err = compose.LoadBase(p, "", compose.Options{})
 	const name = "(a name that contains an access key secret)"
-	if want := "/" + name + "/" + stack.FileName + ": line 2: "; err == nil || !strings.Contains(err.Error(), want) {
-		t.Errorf("%v\nwant one that contains %q", err, want)
+	if want := "It is at line 2 of "; err == nil || !strings.Contains(err.Error(), "/"+name+"/"+stack.FileName+".") || !strings.Contains(err.Error(), want) {
+		t.Errorf("%v\nwant one that names the file and line 2", err)
 	}
 	noSecretIn(t, err)
 }

@@ -73,14 +73,16 @@ const (
 	FilesDir = "/qory-push-check/files"
 )
 
-// The texts of a check that did not pass. The program that pushed gets the fix, ", and
-// push again.", or ", then run again." for textNoNode and textNoProgram, then the cause;
-// the push step's line has the fix, then the cause.
+// The texts of a check that did not pass. The program that pushed gets the fix alone in
+// line 1, ", and push again.", or ", then run again." for textNoNode and textNoProgram,
+// then the cause on the next line; the push step's text has the fix, then the cause on
+// the next line.
 const (
 	textFailed      = "The check for %s failed:"
-	textFailedFix   = "Fix each finding below and push again. "
+	textFailedFix   = "Fix each finding below and push again.\n  "
 	textNoNode      = "Set wall.image or --image to an image with node, such as one built FROM qory-agent"
-	textNoProgram   = "Install the program %s"
+	textNoProgram   = "Install the program of the check"
+	textProgramIs   = "The program is %s."
 	textNotStarted  = "The check for %s could not start: %s."
 	textTimeLimit   = "Make the check for %s finish within 30 s"
 	textTimeCause   = "It ran longer and was stopped."
@@ -107,9 +109,10 @@ const (
 	textNoPush        = "Send the push as qory artifact push sends it"
 	textNoPushCause   = "The body is not a push: %s."
 	textMembers       = "Send each member of the push once, in lower case"
-	textFilename      = "Give each file a different name of at most 255 bytes, other than . and .., with no slash, backslash or control character"
-	textFilenameBad   = "%s is not one."
+	textFilename      = "Rename each file to a valid name"
+	textFilenameBad   = "%s is not one: a name has at most 255 bytes, is not . or .., and has no slash, backslash, or control character."
 	textFilenameTwice = "%s is the name of two files."
+	textTwiceFix      = "Give each file a different name"
 	textOneFile       = "Give each file a different name, also when you ignore case and accents"
 	textOneFileCause  = "%s and %s are one file on this machine."
 )
@@ -201,11 +204,11 @@ type Checker struct {
 
 // Failure is a check that did not pass, or a push that the check cannot read.
 type Failure struct {
-	// Message is the line for the program that pushed: the fix, then "push again", then
-	// the cause.
+	// Message is the text for the program that pushed: the fix, then "push again", and
+	// the cause on the next line.
 	Message string
-	// Step is the line for the push step: the fix without "push again", then the cause;
-	// for a check that failed, the cause alone.
+	// Step is the text for the push step: the fix without "push again", and the cause on
+	// the next line; for a check that failed, the cause alone.
 	Step string
 	// Findings are the lines of the check; nil for none.
 	Findings []string
@@ -230,9 +233,11 @@ func failure(fix, cause string) *Failure {
 func failureThen(fix, then, cause string) *Failure {
 	f := &Failure{Message: fix + then, Step: fix + "."}
 	if cause != "" {
-		f.Message += " " + cause
-		f.Step += " " + cause
+		f.Message += "\n  " + cause
+		f.Step += "\n  " + cause
 	}
+	// A name in the fix, such as the artifact type, is shortened when the line is long.
+	f.Message, f.Step = exports.Fit(f.Message), exports.Fit(f.Step)
 	return f
 }
 
@@ -298,7 +303,7 @@ func (c *Checker) RunAPICheck(ctx context.Context, req session.RunAPIRequest) (*
 		case !runapi.LocalFilename(f.Name):
 			return failure(textFilename, fmt.Sprintf(textFilenameBad, exports.Value(f.Name, true))).Refusal(), nil
 		case slices.ContainsFunc(files[:i], func(o File) bool { return o.Name == f.Name }):
-			return failure(textFilename, fmt.Sprintf(textFilenameTwice, exports.Value(f.Name, true))).Refusal(), nil
+			return failure(textTwiceFix, fmt.Sprintf(textFilenameTwice, exports.Value(f.Name, true))).Refusal(), nil
 		}
 	}
 	f, err := c.Check(ctx, artifactType, files)
@@ -676,7 +681,7 @@ func (c *Checker) failure(artifactType, program string, end ended) *Failure {
 		if namesNode(program) {
 			return failureThen(textNoNode, ", then run again.", cause)
 		}
-		return failureThen(fmt.Sprintf(textNoProgram, exports.Value(program, false)), ", then run again.", cause)
+		return failureThen(textNoProgram, ", then run again.", fmt.Sprintf(textProgramIs, exports.Value(program, false))+"\n  "+cause)
 	case end.exitCode == 0:
 		return nil
 	}

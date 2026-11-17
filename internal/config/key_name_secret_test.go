@@ -58,7 +58,7 @@ func TestAnUnknownKeyWithASecretInItsNameIsReportedByItsLine(t *testing.T) {
 	for _, name := range []string{accessKeySecretName, runKeyName} {
 		writeRaw(t, path, "harness:\n  "+name+": 1\n")
 		_, err := config.Document(root)
-		want := path + ": line 2: key is not one harness.yaml reads"
+		want := "Remove the key, or rename it to one harness.yaml reads.\n  Key is not one harness.yaml reads.\n  It is at line 2 of " + path + "."
 		if err == nil || err.Error() != want {
 			t.Errorf("%s: %v, want %q", name, err, want)
 		}
@@ -81,7 +81,7 @@ func TestAnUnknownKeyWithNoSecretIsNamed(t *testing.T) {
 	path = filepath.Join(root, "harness.yaml")
 	writeRaw(t, path, "harness:\n  events2: 1\n")
 	_, err = config.Document(root)
-	if want := path + `: line 2: key "events2" is not one harness.yaml reads`; err == nil || err.Error() != want {
+	if want := "Remove the key, or rename it to one harness.yaml reads.\n  Key \"events2\" is not one harness.yaml reads.\n  It is at line 2 of " + path + "."; err == nil || err.Error() != want {
 		t.Errorf("harness.yaml: %v, want %q", err, want)
 	}
 }
@@ -186,13 +186,13 @@ func TestAnUnknownKeyWithASpaceInItsNameIsReportedAsAKey(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, "harness.yaml")
 	for _, c := range []struct{ name, want string }{
-		{accessKeySecretName + " x", "line 2: key is not one harness.yaml reads"},
-		{runKeyName + " x", "line 2: key is not one harness.yaml reads"},
-		{"a b", `line 2: key "a b" is not one harness.yaml reads`},
+		{accessKeySecretName + " x", "Key is not one harness.yaml reads."},
+		{runKeyName + " x", "Key is not one harness.yaml reads."},
+		{"a b", `Key "a b" is not one harness.yaml reads.`},
 	} {
 		writeRaw(t, path, "harness:\n  "+c.name+": 1\n")
 		_, err := config.Document(root)
-		if want := path + ": " + c.want; err == nil || err.Error() != want {
+		if want := "Remove the key, or rename it to one harness.yaml reads.\n  " + c.want + "\n  It is at line 2 of " + path + "."; err == nil || err.Error() != want {
 			t.Errorf("%s: %v, want %q", c.name, err, want)
 		}
 		if err != nil && c.name != "a b" && strings.Contains(err.Error(), strings.TrimSuffix(c.name, " x")) {
@@ -235,13 +235,13 @@ func TestAKeyWithASecretInItsNameWrittenTwiceIsReportedByItsLine(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, "harness.yaml")
 	for _, c := range []struct{ name, want string }{
-		{accessKeySecretName, "yaml: unmarshal errors:\n  line 3: mapping key already defined at line 2"},
-		{runKeyName, "yaml: unmarshal errors:\n  line 3: mapping key already defined at line 2"},
-		{"runtime", "yaml: unmarshal errors:\n  line 3: mapping key \"runtime\" already defined at line 2"},
+		{accessKeySecretName, "Line 3: mapping key already defined at line 2."},
+		{runKeyName, "Line 3: mapping key already defined at line 2."},
+		{"runtime", "Line 3: mapping key \"runtime\" already defined at line 2."},
 	} {
 		writeRaw(t, path, "harness:\n  "+c.name+": claude\n  "+c.name+": codex\n")
 		_, err := config.Document(root)
-		if want := path + ": " + c.want; err == nil || err.Error() != want {
+		if want := "Remove the key that is written twice.\n  " + c.want + "\n  The file is " + path + "."; err == nil || err.Error() != want {
 			t.Errorf("%s: %v, want %q", c.name, err, want)
 		}
 		if c.name != "runtime" && err != nil && strings.Contains(err.Error(), c.name) {
@@ -309,7 +309,7 @@ func TestAnUnknownKeyWithANewlineInItsNameIsReportedByItsLine(t *testing.T) {
 	path := filepath.Join(root, "harness.yaml")
 	writeRaw(t, path, "harness:\n  \"qak_SECRET\\nb\": 1\n")
 	_, err := config.Document(root)
-	if want := path + ": line 2: key is not one harness.yaml reads"; err == nil || err.Error() != want {
+	if want := "Remove the key, or rename it to one harness.yaml reads.\n  Line 2: key is not one harness.yaml reads.\n  The file is " + path + "."; err == nil || err.Error() != want {
 		t.Errorf("%v, want %q", err, want)
 	}
 	if err != nil && strings.Contains(err.Error(), "qak_SECRET") {
@@ -356,7 +356,7 @@ func TestADecoderRefusalWithASecretKeepsTheOtherReasons(t *testing.T) {
 	path := filepath.Join(root, "harness.yaml")
 	writeRaw(t, path, "harness:\n  model: [x]\n  force: qak_x\n")
 	_, err := config.Document(root)
-	if want := path + ": yaml: unmarshal errors:\n  line 2: cannot unmarshal !!seq into string\n  line 3: qory cannot read the value here. The YAML decoder's message contains an access key secret, a run key, a run code or an enrolment code, so qory does not print it."; err == nil || err.Error() != want {
+	if want := "Set each value in the file to the type its key takes.\n  Line 2: cannot unmarshal !!seq into string.\n  Line 3: qory cannot read the value here. The YAML decoder's message contains an access key secret, a run key, a run code or an enrolment code, so qory does not print it.\n  The file is " + path + "."; err == nil || err.Error() != want {
 		t.Errorf("%v, want %q", err, want)
 	}
 }
@@ -379,7 +379,7 @@ func TestARefusalIsPlacedByTheLineAtItsStart(t *testing.T) {
 	path := filepath.Join(root, "harness.yaml")
 	writeRaw(t, path, "harness:\n  force: !line%2099:%20field%20qak_x 1\n")
 	_, err := config.Document(root)
-	want := path + ": line 2: qory cannot read the value here. The YAML decoder's message contains an access key secret, a run key, a run code or an enrolment code, so qory does not print it."
+	want := "Set each value in the file to the type its key takes.\n  Line 2: qory cannot read the value here. The YAML decoder's message contains an access key secret, a run key, a run code or an enrolment code, so qory does not print it.\n  The file is " + path + "."
 	if err == nil || err.Error() != want {
 		t.Errorf("%v, want %q", err, want)
 	}

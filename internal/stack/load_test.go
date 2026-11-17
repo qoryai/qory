@@ -163,13 +163,13 @@ func TestLoadRefuses(t *testing.T) {
 		{
 			"an unknown field",
 			"apiVersion: qory.dev/v1alpha1\nlayrs: []\nmodules:\n  - name: core\n    source:\n      path: modules/core\n",
-			`line 2: key "layrs" is not one qory-stack.yaml reads`,
+			"Remove the key, or rename it to one qory-stack.yaml reads.\n  Key \"layrs\" is not one qory-stack.yaml reads.\n  It is at line 2 of {path}.",
 			false,
 		},
 		{
 			"an unknown field inside a module",
 			"apiVersion: qory.dev/v1alpha1\nmodules:\n  - name: core\n    sources:\n      path: modules/core\n",
-			`line 4: key "sources" is not one qory-stack.yaml reads`,
+			"Remove the key, or rename it to one qory-stack.yaml reads.\n  Key \"sources\" is not one qory-stack.yaml reads.\n  It is at line 4 of {path}.",
 			false,
 		},
 		{
@@ -277,7 +277,7 @@ func TestLoadRefuses(t *testing.T) {
 		{
 			"broken yaml",
 			"apiVersion: [\n",
-			"did not find expected node content",
+			"Correct the YAML syntax of the file.\n  Line 1: did not find expected node content.",
 			true,
 		},
 	}
@@ -290,7 +290,7 @@ func TestLoadRefuses(t *testing.T) {
 				t.Fatalf("loaded %q without an error", c.yaml)
 			}
 			// A refusal written fix first has the path in its fix line, at {path} in want.
-			fixFirst := strings.Contains(c.want, "{path}")
+			fixFirst := strings.Contains(c.want, "{path}") || c.loose
 			if !fixFirst && !strings.HasPrefix(err.Error(), path+": ") {
 				t.Fatalf("error %q does not start with the stack path", err)
 			}

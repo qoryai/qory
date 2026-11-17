@@ -1146,7 +1146,7 @@ func read(path string) (file, error) {
 	}
 	if f.Exports != nil {
 		if err := f.Exports.Validate(); err != nil {
-			return f, fmt.Errorf("%s: %w", path, err)
+			return f, exports.AtPath(path, err)
 		}
 	}
 	return f, nil

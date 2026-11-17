@@ -16,13 +16,13 @@ import (
 func TestAnUnknownManifestKeyWithASecretInItsNameIsReportedByItsLine(t *testing.T) {
 	isolate(t)
 	for _, c := range []struct{ name, secret, want string }{
-		{"qak_AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA", "qak_AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA", "line 3: key is not one qory-module.yaml reads"},
-		{"qrk_AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA x", "qrk_AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA", "line 3: key is not one qory-module.yaml reads"},
-		{"modules", "", `line 3: key "modules" is not one qory-module.yaml reads`},
+		{"qak_AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA", "qak_AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA", "Key is not one qory-module.yaml reads."},
+		{"qrk_AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA x", "qrk_AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA", "Key is not one qory-module.yaml reads."},
+		{"modules", "", `Key "modules" is not one qory-module.yaml reads.`},
 	} {
 		dir := tree(t, map[string]string{ManifestName: "apiVersion: qory.dev/v1alpha1\nname: core\n" + c.name + ": 1\n"})
 		_, err := ReadManifest(dir)
-		if want := filepath.Join(dir, ManifestName) + ": " + c.want; err == nil || err.Error() != want {
+		if want := "Remove the key, or rename it to one qory-module.yaml reads.\n  " + c.want + "\n  It is at line 3 of " + filepath.Join(dir, ManifestName) + "."; err == nil || err.Error() != want {
 			t.Errorf("%s: %v, want %q", c.name, err, want)
 		}
 		if c.secret != "" && err != nil && strings.Contains(err.Error(), c.secret) {
@@ -38,7 +38,7 @@ func TestAnUnknownManifestKeyWithANewlineInItsNameIsReportedByItsLine(t *testing
 	isolate(t)
 	dir := tree(t, map[string]string{ManifestName: "apiVersion: qory.dev/v1alpha1\nname: core\n\"qak_SECRET\\nb\": 1\n"})
 	_, err := ReadManifest(dir)
-	if want := filepath.Join(dir, ManifestName) + ": line 3: key is not one qory-module.yaml reads"; err == nil || err.Error() != want {
+	if want := "Remove the key, or rename it to one qory-module.yaml reads.\n  Line 3: key is not one qory-module.yaml reads.\n  The file is " + filepath.Join(dir, ManifestName) + "."; err == nil || err.Error() != want {
 		t.Errorf("%v, want %q", err, want)
 	}
 	if err != nil && strings.Contains(err.Error(), "qak_SECRET") {
