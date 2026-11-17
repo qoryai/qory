@@ -98,6 +98,8 @@ func runInstalling(t *testing.T, s installSetup) installRun {
 	closes, calls, restore := cmd.OpenNowhereWith(cmd.Nowhere{
 		System: proxygittest.Host, Proxy: s.proxy.URL(), Dir: h.runDir,
 		StackProxy: h.server.Stack.URL, StackCABundle: h.server.Stack.CABundle,
+		// A push proxy that takes no connection: the install reads through the host proxy.
+		PushProxy: "http://qory:nowhere@127.0.0.1:9",
 		FetchImage: func(context.Context) error {
 			info, err := os.Lstat(program)
 			r.installFirst = err == nil && info.Mode() == 0o755
@@ -238,6 +240,9 @@ func TestAnUnwalledRunInstallsFromNpmThroughTheHostProxy(t *testing.T) {
 	r.joined(t)
 	if npm.TarballGets() != 1 || proxy.Passed() != 3 {
 		t.Fatalf("%d tarballs; the proxy passed %d", npm.TarballGets(), proxy.Passed())
+	}
+	if !slices.Contains(r.calls, "host proxy") || slices.Contains(r.calls, "push proxy") {
+		t.Errorf("the install opened the proxies %q, want the host proxy and no push proxy", r.calls)
 	}
 }
 

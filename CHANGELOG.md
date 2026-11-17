@@ -482,6 +482,11 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Changed
 
+- The push step of a write run pushes through the run's push proxy, which sets the run
+  configuration's push credentials alone, and the run's proxy no longer adds push
+  credentials. A run with no push credential stops at the push with `Contact
+  support: this run has no push credential, so qory pushed nothing.` The fetch, the
+  runtime's install, and a prebuild stay on the run's proxy.
 - A prebuild started from Qory Apiary applies the instance's Largest prebuilt image
   setting, which the run documents carry as `largest_prebuilt_image_bytes`, in decimal
   bytes. The limit applies to the repository's image, before qory adds Chromium, ffmpeg
@@ -507,7 +512,6 @@ release may change what an existing document does, and states it under Upgrading
   Ubuntu 22.04 or 24.04, or has no `apt-get`: `use a Debian or Ubuntu image: the build
   adds Chromium only to these`. Alpine bases and other Ubuntu
   releases that built before are refused.
-
 - The `agent`, `agent-docker` and `prebuild` images contain no agent runtime. The machine
   installs the runtime at run time, and Forager mounts it read-only at
   `/qory/runtime/<runtime>`. `qory image check` checks no runtime and prints no runtime
@@ -531,17 +535,20 @@ release may change what an existing document does, and states it under Upgrading
   `exports` section, of the program of an adapter or a tool, and of the push checks, shows
   the fix, in at most 100 characters, and the indented lines after it show the cause, as the
   compose errors do. Which input fails, and the exit status, stay the same.
-- When the push of a run's work gets 403 from the run's gateway, the first line of the
-  error is `Contact support: the push was refused (403).` The line `One of these stopped
-  it:` follows, then one line for each possible cause: the gateway allows a push only to
-  the run's branch, `refs/heads/qory/<work item>`; the connection's setup has no path rule
-  for `/<repository>.git/git-receive-pack`, or no credential with write access; or the
-  forge stopped the push, by its permission for the run's credential or a branch rule. The
-  exit status stays the same.
-- qory uses Forager 3d4ec18a. Its gateway returns 403 for a git push through a credential
+- When the push of a run's work gets 403 from the run's push proxy, the first line of the
+  error is `Contact support: the push was refused (403).` The line `One of these most
+  likely stopped it:` follows, then one line for each likely cause: the push proxy refuses
+  a push that is not a plain push to the `push_ref` of the push credential (for example a
+  signed push or a push with push options), and qory pushes to
+  `refs/heads/qory/<work item>`; the push credential has no item for
+  `/<repository>.git/git-receive-pack` on the host, and the push proxy refuses every other
+  host and path; or the forge stopped the push, by its permission for the push credential
+  or a branch rule. The exit status stays the same.
+- qory uses Forager 2052521e. Its gateway returns 403 for a git push through a credential
   that has no push ref, so a `git push` through a credential that forager.yaml defines
-  with `env` or `file` gets 403. The push step's credential, which Qory Apiary applies,
-  has a push ref for the run's branch, so the push step is not affected.
+  with `env` or `file` gets 403. The push step of a write run goes through the run's push
+  proxy, which sets only the run configuration's push credentials, so forager.yaml
+  credentials do not reach it.
 - A run with a run key or a run code, with no `--home` or `harness.home`, composes into
   `runs/<name>-<hash>/<run id>` under `qory/homes` in the cache directory, a home for that
   run alone, which qory removes when the run ends. Two runs of one checkout no longer

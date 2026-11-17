@@ -353,10 +353,21 @@ type Nowhere struct {
 	// HostProxyErr, when not nil, is called by each HostProxy, which returns its error, as
 	// Forager's returns one once a wall could not be removed.
 	HostProxyErr func() error
-	AtGateway    bool
-	Real         bool
-	PolicyImage  string
-	OnImage      func(session.Image)
+	// PushProxy and PushCABundle are the URL and CA bundle of the run's push proxy, as
+	// Proxy and CABundle are the host proxy's; each is the host proxy's value when "".
+	// NoPushProxy makes PushProxy return Forager's error for a run with no push
+	// credential. PushProxyErr, when not nil, is called by each PushProxy, which returns
+	// its error. Like Forager's, PushProxy also returns an error during a join or a copy
+	// step, while ContainerKept is true or the setup container is up, and after Close.
+	PushProxy, PushCABundle string
+	NoPushProxy             bool
+	PushProxyErr            func() error
+	// OnCall, when not nil, gets each call [OpenNowhereWith] lists, as the call is made.
+	OnCall      func(call string)
+	AtGateway   bool
+	Real        bool
+	PolicyImage string
+	OnImage     func(session.Image)
 	// CloseErr, when not nil, is the error of the run's Close, which then returns no result.
 	CloseErr error
 	// WallKept is [session.Closed.WallKept] of the run's Close. A RemoveSetup that returns
@@ -395,7 +406,8 @@ type StepEvent struct {
 // OpenNowhereWith is [OpenNowhere] for runs that have what n says. Each run's directory
 // is n.Dir, or a new temporary folder, which restore removes. Besides the outcomes, it
 // returns the calls the runs got, in order: "host proxy" for each HostProxy, "host
-// proxy closed" for each close of one, "stack proxy" and "stack proxy closed" for each
+// proxy closed" for each close of one, "push proxy" and "push proxy closed" for each
+// PushProxy and close of one, "stack proxy" and "stack proxy closed" for each
 // StackProxy and close of one, "set run API check", "fetch image", "setup", "remove setup"
 // and "join".
 func OpenNowhereWith(n Nowhere) (outcomes func() []session.Outcome, calls func() []string, restore func()) {
@@ -406,8 +418,11 @@ func OpenNowhereWith(n Nowhere) (outcomes func() []session.Outcome, calls func()
 	var did []string
 	note := func(call string) {
 		mu.Lock()
-		defer mu.Unlock()
 		did = append(did, call)
+		mu.Unlock()
+		if n.OnCall != nil {
+			n.OnCall(call)
+		}
 	}
 	openRun = func(ctx context.Context, spec session.OpenSpec) (openedRun, error) {
 		if n.OnOpen != nil {
@@ -473,6 +488,8 @@ type nowhere struct {
 	open    *nowhereStep
 	ended   bool
 	joining bool
+	// setupUp is whether the setup container is up: Setup starts it, RemoveSetup removes it.
+	setupUp bool
 }
 
 // startJoin checks a join of spec against Forager's rules of an open host step, and marks
@@ -604,6 +621,7 @@ func (n *nowhere) Setup(ctx context.Context, spec session.SetupSpec) error {
 		return fmt.Errorf("exit step %d before the setup", n.open.n)
 	}
 	n.note("setup")
+	n.setupUp = true
 	if n.values.Real {
 		return n.at.run.Setup(ctx, spec)
 	}
@@ -619,7 +637,9 @@ func (n *nowhere) RemoveSetup(ctx context.Context) error {
 	}
 	n.note("remove setup")
 	if n.values.Real {
-		return n.at.run.RemoveSetup(ctx)
+		err := n.at.run.RemoveSetup(ctx)
+		n.setupUp = n.setupUp && err != nil
+		return err
 	}
 	if n.values.RemoveSetup != nil {
 		if err := n.values.RemoveSetup(ctx); err != nil {
@@ -629,6 +649,7 @@ func (n *nowhere) RemoveSetup(ctx context.Context) error {
 			return err
 		}
 	}
+	n.setupUp = false
 	return nil
 }
 
@@ -712,6 +733,48 @@ func (n *nowhere) HostProxy() (hostProxy, error) {
 	var once sync.Once
 	return hostProxy{proxy: proxygit.Proxy{URL: n.values.Proxy, CABundle: n.values.CABundle}, close: func() error {
 		once.Do(func() { n.note("host proxy closed") })
+		return nil
+	}}, nil
+}
+
+// Forager's errors of [session.Run.PushProxy] that the fake keeps.
+const (
+	errNowhereNoPush         = "Add a push credential to the run configuration: this run has no push proxy."
+	errNowhereJoining        = "Call PushProxy after Join returns: a session of the run is still running."
+	errNowhereKept           = "Push only while ContainerKept is false: a container of the run may still write the run's binds."
+	errNowhereSetupUp        = "Call RemoveSetup before PushProxy: the setup container can still write the run's binds."
+	errNowhereClosedPushText = "Open another run: this run is closed."
+)
+
+// PushProxy is [Nowhere.PushProxy], with Forager's order of checks.
+func (n *nowhere) PushProxy() (hostProxy, error) {
+	n.note("push proxy")
+	switch {
+	case n.joining:
+		return hostProxy{}, errors.New(errNowhereJoining)
+	case n.ended:
+		return hostProxy{}, errors.New(errNowhereClosedPushText)
+	case n.values.NoPushProxy:
+		return hostProxy{}, errors.New(errNowhereNoPush)
+	case n.open != nil && n.open.kind == event.StepCopy:
+		return hostProxy{}, fmt.Errorf("Exit the copy step before you start the push proxy: a join during it closes the push proxy.\nThe copy step is step %d.", n.open.n)
+	case n.ContainerKept():
+		return hostProxy{}, errors.New(errNowhereKept)
+	case n.setupUp:
+		return hostProxy{}, errors.New(errNowhereSetupUp)
+	}
+	if n.values.PushProxyErr != nil {
+		if err := n.values.PushProxyErr(); err != nil {
+			return hostProxy{}, err
+		}
+	}
+	url, bundle := n.values.PushProxy, n.values.PushCABundle
+	if url == "" {
+		url, bundle = n.values.Proxy, n.values.CABundle
+	}
+	var once sync.Once
+	return hostProxy{proxy: proxygit.Proxy{URL: url, CABundle: bundle}, close: func() error {
+		once.Do(func() { n.note("push proxy closed") })
 		return nil
 	}}, nil
 }
