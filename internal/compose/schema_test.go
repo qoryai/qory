@@ -442,6 +442,48 @@ func TestConfigSchemaKnowsTiers(t *testing.T) {
 	}
 }
 
+// TestSchemasKnowTheThreeWorkflowAccessLevels is the config schema and the stack schema
+// with a workflow of each access level: read, write-no-push and write pass, and any other
+// value, such as write_no_push or admin, fails.
+func TestSchemasKnowTheThreeWorkflowAccessLevels(t *testing.T) {
+	c := jsonschema.NewCompiler()
+	composeSchema, err := c.Compile("../../contracts/harness/v1/config.schema.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	stackSchema, err := c.Compile("../../contracts/harness/v1/stack.schema.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		access string
+		valid  bool
+	}{
+		{"read", true}, {"write-no-push", true}, {"write", true},
+		{"write_no_push", false}, {"push", false}, {"admin", false}, {"", false},
+	} {
+		in := `"workflows": {"fix": {"access": "` + c.access + `"}}`
+		for name, schema := range map[string]struct {
+			schema *jsonschema.Schema
+			body   string
+		}{
+			"config": {composeSchema, `{"apiVersion": "qory.dev/v1alpha1", ` +
+				`"harness": {"target": {"runtime": "claude"}, ` +
+				`"modules": [{"name": "app"}], ` + in + `}}`},
+			"stack": {stackSchema, `{"apiVersion": "qory.dev/v1alpha1", ` +
+				`"modules": [{"name": "app"}], ` + in + `}`},
+		} {
+			var doc any
+			if err := json.Unmarshal([]byte(schema.body), &doc); err != nil {
+				t.Fatal(err)
+			}
+			if err := schema.schema.Validate(doc); (err == nil) != c.valid {
+				t.Errorf("%s schema, access %q: %v, want valid %t", name, c.access, err, c.valid)
+			}
+		}
+	}
+}
+
 // TestSchemasKnowWorkflowHooks takes harness.hooks with a program or an agent, and hook
 // points and extending.hooks in a stack, and refuses a hook with both or neither, a
 // review with a program, an unknown kind or key, a point outside end, start and inside,
@@ -687,6 +729,14 @@ func TestQuestionsSchema(t *testing.T) {
 		{replace(`"follows": ["q1"]`, `"follows": ["q1", "q1"]`), false},
 		{replace(`"follows": ["q1"]`, `"follows": ["Q1"]`), false},
 		{replace(`"follows": ["q1"]`, `"follows": "q1"`), false},
+		// criterion
+		{replace(`"follows": ["q1"]`, `"follows": ["q1"], "criterion": "ac-3"`), true},
+		{replace(`"follows": ["q1"]`, `"follows": ["q1"], "criterion": "ac-9999"`), true},
+		{replace(`"follows": ["q1"]`, `"follows": ["q1"], "criterion": "AC-3"`), false},
+		{replace(`"follows": ["q1"]`, `"follows": ["q1"], "criterion": "ac-0"`), false},
+		{replace(`"follows": ["q1"]`, `"follows": ["q1"], "criterion": "ac-10000"`), false},
+		{replace(`"follows": ["q1"]`, `"follows": ["q1"], "criterion": "ac-03"`), false},
+		{replace(`"follows": ["q1"]`, `"follows": ["q1"], "criterion": 3`), false},
 		// history
 		{replace(`, "reopened": {"run": 2, "at": "2026-11-04T10:45:00Z"}`, ``), false},
 		{replace(`"reopened": {"run": 2, `, `"reopened": {"run": 0, `), false},
@@ -740,11 +790,16 @@ func TestVerdictSchema(t *testing.T) {
 		return strings.Replace(verdictDocument, from, to, 1)
 	}
 	point := `{"text": "The checks script failed.", "action": "run_again"}`
-	points := func(n int) string {
-		return `{"verdict": "escalate", "points": [` + strings.TrimSuffix(strings.Repeat(point+", ", n), ", ") + `]}`
+	pointsOf := func(verdict string, n int) string {
+		return `{"verdict": "` + verdict + `", "points": [` + strings.TrimSuffix(strings.Repeat(point+", ", n), ", ") + `]}`
 	}
+	points := func(n int) string { return pointsOf("escalate", n) }
+	answer := `{"text": "The spec does not say who sees the price.", "action": "answer", "question": "q4"}`
 	text := func(s string) string {
 		return replace(`"text": "The checks script failed on the spec's links."`, `"text": "`+s+`"`)
+	}
+	fix := func(s string) string {
+		return replace(`"action": "run_again"`, `"action": "run_again", "fix": "`+s+`"`)
 	}
 	rlo := string(rune(0x202e)) // a right-to-left override, invisible
 	for _, c := range []struct {
@@ -757,16 +812,30 @@ func TestVerdictSchema(t *testing.T) {
 		{`{}`, false},
 		{`[]`, false},
 		{`{"verdict": "failed"}`, false},
-		// points is required with escalate and absent otherwise.
+		// points is required with escalate, optional with changes-requested, and absent
+		// with passed.
 		{`{"verdict": "escalate"}`, false},
 		{replace(`"verdict": "escalate"`, `"verdict": "passed"`), false},
-		{replace(`"verdict": "escalate"`, `"verdict": "changes-requested"`), false},
+		{pointsOf("passed", 1), false},
 		{`{"verdict": "passed", "points": []}`, false},
-		// 1 to 20 points
+		// with changes-requested, 1 to 20 points, each with the action run_again
+		{pointsOf("changes-requested", 1), true},
+		{pointsOf("changes-requested", 20), true},
+		{pointsOf("changes-requested", 0), false},
+		{pointsOf("changes-requested", 21), false},
+		{replace(`"verdict": "escalate"`, `"verdict": "changes-requested"`), false},
+		{`{"verdict": "changes-requested", "points": [` + answer + `]}`, false},
+		{`{"verdict": "changes-requested", "points": [` + point + `, ` + answer + `]}`, false},
+		{`{"verdict": "changes-requested", "points": [{"text": "The checks script failed.", "action": "ask"}]}`, false},
+		{`{"verdict": "changes-requested", "points": [{"text": "The checks script failed."}]}`, false},
+		{`{"verdict": "changes-requested", "points": [{"text": "The checks script failed.", "action": "run_again", "question": "q4"}]}`, false},
+		{`{"verdict": "changes-requested", "points": {}}`, false},
+		// with escalate, 1 to 20 points
 		{points(1), true},
 		{points(20), true},
 		{points(0), false},
 		{points(21), false},
+		{`{"verdict": "escalate", "points": [` + answer + `]}`, true},
 		{`{"verdict": "escalate", "points": {}}`, false},
 		{`{"verdict": "escalate", "points": ["The spec's links are broken."]}`, false},
 		// text and action are required.
@@ -793,6 +862,18 @@ func TestVerdictSchema(t *testing.T) {
 		{text(`One\u0007sentence.`), false},
 		{text(`One ` + rlo + `sentence.`), false},
 		{replace(`"text": "The checks script failed on the spec's links."`, `"text": 1`), false},
+		// fix: optional with run_again and absent with answer, with the rules of text
+		{fix(`Fix the link to /docs/start in the spec.`), true},
+		{`{"verdict": "changes-requested", "points": [{"text": "The checks script failed.", "action": "run_again", "fix": "Fix the link."}]}`, true},
+		{replace(`"question": "q4"`, `"question": "q4", "fix": "Answer q4."`), false},
+		{fix(strings.Repeat("a", 500)), true},
+		{fix(strings.Repeat("é", 500)), true},
+		{fix(strings.Repeat("a", 501)), false},
+		{fix(""), false},
+		{fix(`One\nsentence.`), false},
+		{fix(`One\tsentence.`), false},
+		{fix(`One ` + rlo + `sentence.`), false},
+		{replace(`"action": "run_again"`, `"action": "run_again", "fix": 1`), false},
 		// a member this schema does not define, at each level, and the old text gaps
 		{replace(`"verdict": "escalate", `, `"verdict": "escalate", "gaps": "Add the empty cart.", `), false},
 		{`{"verdict": "passed", "gaps": "Add the empty cart."}`, false},

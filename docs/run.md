@@ -317,7 +317,10 @@ the gateway sent is not one the push checks can use: <cause>.` The push checks r
 container of the wall's default image, `--image` or `wall.image`, and not of the image that
 the run's policy selects, so a change to the repository's `.devcontainer/` cannot turn them
 off. A run on a person's machine, with no run code, and with neither `--image` nor
-`wall.image`, whose policy selects the image, runs them in the run's image. A run from a
+`wall.image`, whose policy selects the image, runs them in the run's image. The container
+runs under the runtime of the image it runs in: the `runtime` of its `wall.images` entry,
+such as `runsc`, or the engine's default for an entry with none and for an image that is a
+reference. A run from a
 run code with neither stops there with exit 2: `Set wall.image in forager.yaml, then take
 the work item in again in Qory Apiary.`, and on the next line `Push checks run in the wall's
 default image; the code is used`. The run stops there with exit 2 too when the engine does not have
@@ -1915,6 +1918,18 @@ the work item. Then a run of the step explore:
 
   `amp`, `copilot`, `goose` and `any` have no headless start, so a run from a run code
   does not start on them;
+- reads `submit` of the documents, the run's submit settings, `type` and `send`, and
+  keeps them for a run whose level is `write` (see [Read workflows](#read-workflows)); a
+  run at a lower level keeps none. qory takes these settings only from the documents,
+  never from a `process.yaml` of the composed harness. When the first module of the
+  composed harness, in stack order, whose `process.yaml` has a well-formed `submit` has a
+  different one, qory prints one line after the compose with both values: `qory run:
+  submit: documents' reply-draft at end_of_run replaces harness's reply-draft at
+  after_gate`. For documents with no `submit`, the line shows the harness's value alone:
+  `qory run: submit: documents have no submit, so harness's reply-draft at after_gate is
+  unused`. A run whose level is not `write` prints no such line. Line 1 has at most 100
+  characters with `qory run: `: a type name that does not fit is shortened there, and a
+  second line has the full type names;
 - takes its time limit as [Time limits](#time-limits) says.
 
 So the command line sets none of these. After the redemption, qory prints `qory run: the
@@ -1947,7 +1962,8 @@ or links to it also stops the run, later, and the agent does not start. qory rem
 setup container of such a run before the agent starts, and closes the run `failed` with
 `read_needs_setup_removed` when the removal fails. Any other run from a run code may write
 the checkout: with no wall it stops after the compose, exit 1, and qory closes it `failed`
-with `write_needs_wall`. See [Read workflows](#read-workflows).
+with `write_needs_wall`. A run takes the lower of the two accesses, in the order `read`,
+`write-no-push`, `write`. See [Read workflows](#read-workflows).
 
 The documents of a run with a target may set `target_version`: the version at which Qory
 Apiary checked the target for a harness file. When the target's `system` is
@@ -2570,7 +2586,9 @@ The step does this, in order:
    with no answer, or with a status of 500 or above, qory reads the work item's artifacts
    first, and sends the request again only when no version of this run has the file.
 
-A run's policy with path rules must allow `/<path>.git/git-receive-pack` for the push.
+A run's policy with path rules must allow `/<path>.git/git-receive-pack` for the push. The
+run's gateway returns 403 to a push to any ref but the run's branch, and to every push
+through a credential that has no `push_ref`, as a credential in forager.yaml has none.
 
 The step counts toward the run's time limit, and has 120 seconds when the run has less left,
 also after the session used up the limit. A run can pass its time limit by up to 120
@@ -2632,9 +2650,13 @@ Each of these lines fails the step. `<commit>` is the commit's first 12 characte
 - `change the rule on <system> that stops a push to qory/<work item id> of <path>, then take
   the work item in again: the push failed: <error>; the code is used`, when a rule or a
   hook on the system stops the update
-- `add /<path>.git/git-receive-pack to the path rules of the run's policy for <system>, and
-  give the run's credential for <system> write access to <path>, then take the work item in
-  again: the push through the run's gateway returned 403: <error>; the code is used`
+- `Contact support: the push was refused (403).`, then lines indented by two spaces:
+  `One of these stopped it:`, the three causes, and a last line with the error. The
+  causes are `1. The run's gateway allows a push only to the run's branch,
+  refs/heads/qory/<work item id> (wall:push-ref).`, `2. The connection's setup has no path rule for
+  /<path>.git/git-receive-pack, or no credential with write access.`, `3. The forge stopped
+  the push: its permission for the run's credential, or a branch rule.` The last line is
+  `The push of <path> to <system> returned 403: <error>; the code is used`
 - `give the run's credential for <system> write access to <path>, then take the work item in
   again: the push through the run's gateway failed: <error>; the code is used`
 - `check that the run's policy allows <system> and that <system> is reachable, then take
@@ -3224,8 +3246,12 @@ format](../contracts/harness/v1/README.md#the-verdict-format):
 
 ```json
 [{"text": "The spec does not say which customers see the new price.", "action": "answer", "question": "q4"},
- {"text": "The checks script failed on the spec's links.", "action": "run_again"}]
+ {"text": "The checks script failed on the spec's links.", "action": "run_again",
+  "fix": "Fix the link to /docs/start in the spec."}]
 ```
+
+A `run_again` point may have `fix`, one line on how a person fixes the point; an
+`answer` point has none.
 
 qory checks the file before it sends or keeps the verdict. A file that breaks a rule
 stops the command with exit 2, and the first line of the error is the fix, such as
@@ -4510,18 +4536,26 @@ make the mount /srv/data read-only, with :ro on --mount or in wall.mounts: a wal
 
 Two values set what a run of a workflow from a run code may do on the checkout:
 
-- The workflow's access in the stack, `workflows.<name>.access`: `read` or `write`. A
-  workflow that sets no access, and one the stack does not declare, is `read` (see
-  `workflows` in `contracts/harness/v1/README.md`).
-- `access` in the run's documents, from Qory Apiary: `read`, `write-no-push` or `write`.
+- The workflow's access in the stack, `workflows.<name>.access`: `read`,
+  `write-no-push`, or `write`. A workflow that sets no access, and one the stack does
+  not declare, is `read` (see `workflows` in `contracts/harness/v1/README.md`).
+- `access` in the run's documents, from Qory Apiary: `read`, `write-no-push`, or `write`.
   Documents with no target have no `access`, and the workflow's access applies alone.
-  With `write-no-push` and a workflow declared `write`, the agent gets a writable
-  checkout, and qory runs no push step and stores no version of the artifact `branch`.
-  With no wall, such a run stops with `write_needs_wall`, as a write run does.
 
-A read run is a run where either value is `read`. A workflow declared `write` with
-`access: read` in the documents gives a read run, and so does a workflow declared `read`
-with `access: write`. A read run sees the checkout read-only:
+A run takes the lower of the two, in the order `read`, `write-no-push`, `write`. A
+workflow declared `write` with `access: write-no-push` in the documents gives a
+`write-no-push` run, and so does a workflow declared `write-no-push` with `access: write`.
+A workflow declared `write-no-push` with `access: read` gives a read run.
+
+A `write-no-push` run has a writable checkout, no push step, no submit, and no
+version of the artifact `branch`: qory pushes no commit and creates no branch on the
+forge. qory runs no submit step on such a run, including a run whose documents have
+`access: write` and `submit` and whose workflow is declared `write-no-push`. With no
+wall, such a run stops with `write_needs_wall`, as a write run does.
+
+A read run is a run whose level is `read`: either value is `read`. A workflow declared
+`write` with `access: read` in the documents gives a read run, and so does a workflow
+declared `read` with `access: write`. A read run sees the checkout read-only:
 
 - Forager binds the workspace read-only in the agent's container, and the checkout's
   mount is read-only. A write into the checkout inside fails with `Read-only file
@@ -4790,7 +4824,9 @@ image: go-docker
 
 - `ref` is the image. Pin it by digest to run the same image every time.
 - `runtime` is the container runtime the wall starts the image under. Your engine must
-  have it. Without it, the engine's default runs the image.
+  have it. Without it, the engine's default runs the image. The push checks' container
+  runs under the runtime of the image it runs in, the default image: the `runtime` of its
+  entry, or the engine's default for an entry with none and for a reference.
 - `wall.image` sets the default, and `--image` sets another for one run: a name of
   `wall.images`, or a reference. A name is read as that image first.
 - A policy's selection wins over the default, `--image` included. A run whose policy

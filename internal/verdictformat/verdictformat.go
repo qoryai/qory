@@ -1,5 +1,5 @@
 // Package verdictformat is version 1 of the verdict format: a run's verdict, and for
-// escalate the points that a person acts on. The contract is
+// escalate or changes-requested its points. The contract is
 // contracts/harness/v1/verdict.schema.json.
 package verdictformat
 
@@ -25,9 +25,9 @@ import (
 
 // The limits of the format.
 const (
-	// MaxPoints is the most points of an escalation.
+	// MaxPoints is the most points of a verdict.
 	MaxPoints = 20
-	// MaxText is the most characters of a point's text.
+	// MaxText is the most characters of a point's text, and of its fix.
 	MaxText = 500
 )
 
@@ -77,7 +77,7 @@ var (
 var questionID = regexp.MustCompile(`^[a-z0-9-]{1,32}$`)
 
 // pointMembers are the members a point has.
-var pointMembers = []string{"text", "action", "question"}
+var pointMembers = []string{"text", "action", "question", "fix"}
 
 // Check checks document, one verdict document, against the schema. The error starts
 // with the fix, and then has each rule the document breaks, with its place in the
@@ -224,14 +224,14 @@ func readPoint(n int, item any) (runapi.Point, error) {
 	}
 	if len(extra) > 0 {
 		sort.Strings(extra)
-		return runapi.Point{}, fmt.Errorf("Remove %s from point %d: a point has only text, action and question.", shown(extra[0]), n)
+		return runapi.Point{}, fmt.Errorf("Remove %s from point %d: a point has only text, action, question and fix.", shown(extra[0]), n)
 	}
 
 	text, ok := members["text"].(string)
 	if !ok {
 		return runapi.Point{}, fmt.Errorf("Write the text of point %d as a JSON string. The text is a JSON %s.", n, kind(members["text"]))
 	}
-	if err := checkText(n, text); err != nil {
+	if err := checkLine(n, "text", text); err != nil {
 		return runapi.Point{}, err
 	}
 
@@ -253,28 +253,53 @@ func readPoint(n int, item any) (runapi.Point, error) {
 			n, shown(value))
 	}
 
-	return runapi.Point{Text: text, Action: action, Question: question}, nil
+	fix, err := readFix(n, action, members)
+	if err != nil {
+		return runapi.Point{}, err
+	}
+
+	return runapi.Point{Text: text, Action: action, Question: question, Fix: fix}, nil
 }
 
-// checkText checks text, the text of point number n: 1 to [MaxText] characters on one
-// line, and none that the schema's $defs line excludes.
-func checkText(n int, text string) error {
-	length := utf8.RuneCountInString(text)
+// readFix checks the fix of point number n, which has members and action, and returns
+// it, empty for none. Only a point with the action run_again has a fix.
+func readFix(n int, action string, members map[string]any) (string, error) {
+	value, ok := members["fix"]
+	if !ok {
+		return "", nil
+	}
+	if action != runapi.ActionRunAgain {
+		return "", fmt.Errorf("Remove fix from point %d: a point with the action %s has none.", n, action)
+	}
+	fix, ok := value.(string)
+	if !ok {
+		return "", fmt.Errorf("Write the fix of point %d as a JSON string. The fix is a JSON %s.", n, kind(value))
+	}
+	if err := checkLine(n, "fix", fix); err != nil {
+		return "", err
+	}
+	return fix, nil
+}
+
+// checkLine checks line, the member name of point number n, a text or a fix: 1 to
+// [MaxText] characters on one line, and none that the schema's $defs line excludes.
+func checkLine(n int, name, line string) error {
+	length := utf8.RuneCountInString(line)
 	if length == 0 {
-		return fmt.Errorf("Write the text of point %d: one sentence on one line, 1 to %d characters. The text is empty.", n, MaxText)
+		return fmt.Errorf("Write the %s of point %d: one sentence on one line, 1 to %d characters. The %s is empty.", name, n, MaxText, name)
 	}
 	if length > MaxText {
-		return fmt.Errorf("Shorten the text of point %d to at most %d characters. The text has %d.", n, MaxText, length)
+		return fmt.Errorf("Shorten the %s of point %d to at most %d characters. The %s has %d.", name, n, MaxText, name, length)
 	}
-	for _, r := range text {
+	for _, r := range line {
 		switch r {
 		case '\t':
-			return fmt.Errorf("Write the text of point %d on one line. It has a tab (%U).", n, r)
+			return fmt.Errorf("Write the %s of point %d on one line. It has a tab (%U).", name, n, r)
 		case '\n', '\r':
-			return fmt.Errorf("Write the text of point %d on one line. It has a line break (%U).", n, r)
+			return fmt.Errorf("Write the %s of point %d on one line. It has a line break (%U).", name, n, r)
 		}
 		if Excluded(r) {
-			return fmt.Errorf("Remove the character %U from the text of point %d. %s lists the characters a text cannot have.", r, n, contractPath)
+			return fmt.Errorf("Remove the character %U from the %s of point %d: the contract's $defs line excludes it.", r, name, n)
 		}
 	}
 	return nil

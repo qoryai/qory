@@ -163,14 +163,16 @@ type GivenVerdict struct {
 	Version *VersionRef `json:"version"`
 }
 
-// Point is one point of an escalation that [Client.PushVerdict] sends: what is wrong or
-// missing, and what a person can do. Question is the id of a question for the action
-// answer, and empty for run_again. The contract is
-// contracts/harness/v1/verdict.schema.json.
+// Point is one point of a verdict that [Client.PushVerdict] sends: what is wrong or
+// missing, and its action. Question is the id of a question for the action
+// answer, and empty for run_again. Fix is what a person does to fix the point, for
+// run_again only: Qory Apiary shows it in place of the action's sentence. Fix is empty
+// for none. The contract is contracts/harness/v1/verdict.schema.json.
 type Point struct {
 	Text     string `json:"text"`
 	Action   string `json:"action"`
 	Question string `json:"question,omitempty"`
+	Fix      string `json:"fix,omitempty"`
 }
 
 // Index is the work item's artifacts with their versions. Raw is the whole response, as

@@ -491,6 +491,28 @@ func TestAWriteRunPushesWhatTheAgentLeft(t *testing.T) {
 	p.h.noPassword(t, r.out)
 }
 
+// TestThePushStepPushesRefsHeadsQoryAndTheWorkItemId is a write run of the work item
+// wi_01HZX: the only ref under refs/heads/qory/ on the forge is refs/heads/qory/wi_01HZX,
+// and the version's ref is qory/wi_01HZX. Qory Apiary's tests pin the same prefix, so a
+// change of the prefix on either side fails a test on both.
+func TestThePushStepPushesRefsHeadsQoryAndTheWorkItemId(t *testing.T) {
+	p := newPushRepo(t, "write")
+	p.change = func(d map[string]any) {
+		d["work_item"].(map[string]any)["id"] = "wi_01HZX"
+		if in, ok := d["inputs"].(map[string]any); ok && in["work_item"] != nil {
+			in["work_item"].(map[string]any)["id"] = "wi_01HZX"
+		}
+	}
+	r := p.run(t, writesAndCommits(t), nil)
+	r.wantsClose(t, event.StateSucceeded, 0)
+	if got := proxygittest.Git(t, p.bare, "for-each-ref", "--format=%(refname)", "refs/heads/qory/"); got != "refs/heads/qory/wi_01HZX" {
+		t.Errorf("the refs under refs/heads/qory/ on the forge are %q, want refs/heads/qory/wi_01HZX\n%s", got, r.out)
+	}
+	if doc := p.api.document(t, 1); doc.Ref != "qory/wi_01HZX" {
+		t.Errorf("the version's ref is %q, want qory/wi_01HZX", doc.Ref)
+	}
+}
+
 // TestARunWithNoNewCommitsPushesNothing is a write run whose agent changed nothing: the
 // step runs, and writes no branch and no version.
 func TestARunWithNoNewCommitsPushesNothing(t *testing.T) {
@@ -934,8 +956,12 @@ func TestAPushThatARuleRefusesSaysWhatToAllow(t *testing.T) {
 	p.h.server.Refuse("/acme/site.git/git-receive-pack")
 	r := p.run(t, writesAndCommits(t), nil)
 	r.wantsClose(t, event.StateFailed, 1)
-	wants(t, r.out, "qory run: add /acme/site.git/git-receive-pack to the path rules of the run's policy for "+proxygittest.Host+
-		", and give the run's credential for "+proxygittest.Host+" write access to acme/site, then take the work item in again: the push through the run's gateway returned 403: ")
+	wants(t, r.out, "qory run: Contact support: the push was refused (403).\n"+
+		"  One of these stopped it:\n"+
+		"  1. The run's gateway allows a push only to the run's branch, refs/heads/qory/"+workItem+" (wall:push-ref).\n"+
+		"  2. The connection's setup has no path rule for /acme/site.git/git-receive-pack, or no credential with write access.\n"+
+		"  3. The forge stopped the push: its permission for the run's credential, or a branch rule.\n"+
+		"  The push of acme/site to "+proxygittest.Host+" returned 403: ")
 	if got := p.branchHead(t); got != "" {
 		t.Errorf("the forge has the branch at %s", got)
 	}

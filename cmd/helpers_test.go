@@ -91,6 +91,8 @@ func TestMain(m *testing.M) {
 	}
 	cmd.SetInstallStandIn(standIns)
 	cmd.RunGitSessionsOnHost()
+	// No variable of the developer's shell but the fixed ones reaches a session spec.
+	startFromFixedEnvironment()
 	code := m.Run()
 	_ = os.RemoveAll(standIns)
 	os.Exit(code)

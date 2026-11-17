@@ -15,7 +15,7 @@ What `qory harness compose` reads and what it writes.
 | a questions document | the file of a version of the artifact type `questions` | a work item's questions, their answers and the decisions of its runs (§The questions format). No compose reads it |
 | a review comments document | the file of a version of the artifact type `review-comments` | a work item's review comments on its artifact versions and the replies to them (§The review comments format). No compose reads it |
 | a proposal sources document | the file `sources.json` of a version of the artifact type `proposal` | every source a run used to write the proposal, with the reason for each (§The proposal sources format). No compose reads it |
-| a verdict document | the file of a version of the artifact type `verdict`, which `qory run verdict` stores | a run's verdict, and for `escalate` the points a person acts on (§The verdict format). No compose reads it |
+| a verdict document | the file of a version of the artifact type `verdict`, which `qory run verdict` stores | a run's verdict, and its points: for `escalate` the points a person acts on, and for `changes-requested` what the next round fixes (§The verdict format). No compose reads it |
 
 Every module has a `qory-module.yaml`; it defines the module's name, and a directory
 without one is not a module. `qory.yaml` is optional: every setting has a default. It has
@@ -121,7 +121,7 @@ extensions:                      # optional; copied into the report, not read
 workflows:                       # optional; the settings of the workflows a dispatched run starts
   example:
     time_limit: 45m              # optional; a duration, such as 45m or 7h
-    access: write                # optional; read or write, read when left out
+    access: write                # optional; read, write-no-push, or write, read when left out
     hook_points:                 # optional; where a checkout extending the stack may add workflow hooks
       after-review-round: {at: end, kinds: [check, review]}
 ```
@@ -206,7 +206,7 @@ schema is [config.schema.json](config.schema.json).
 | `workflows` | no | the settings of each workflow of the stack, by its name: a lower-case letter, then up to 54 lower-case letters, digits, and hyphens, 55 characters at most, so `workflow-<name>` has at most 64 characters. A run that Qory Apiary dispatches from a run code starts the first of these that the runtime can start: the skill `workflow-<name>`, the command `workflow-<name>`, the skill `<name>`, the command `<name>` (docs/run.md, §The run key from a run code). A plain name works, and when a harness ships both names, the prefixed one runs. The compose fails with status 2 for each workflow that no module of the stack composes as a skill or command under either name, after the modules' `exclude` and `only`: `Add skill or command workflow-<name> to a module of <stack>, or remove workflow <name>.`, then `The base stack <stack> declares the workflow <name> in its qory-stack.yaml.` and `No module of <stack> ships a skill or command workflow-<name> or <name>.` on the next two lines, or, for a stack that extends none, `Add skill or command workflow-<name> to a module of the stack in <file>, or remove workflow <name>.`, then `The stack in <file> declares the workflow <name>.` and `No module of the stack in <file> ships …`, where `<file>` is the `qory-stack.yaml` or the `qory.yaml` that defines the stack. For a stack that the harness document of a run from a run code defines, the line has `the workspace's harness in Qory Apiary` in place of `the stack in <file>`. A module that a checkout adds to the stack it extends does not count, and neither does a checkout's exclude: the compose checks what the stack's modules ship before it applies that exclude. The harness section of a `qory.yaml` that defines a stack lists them with the same keys and checks; a section that extends a stack takes the base's and lists none |
 | `workflows.<name>.time_limit` | no | how long a dispatched run of the workflow may run, counted from the run's open, as a Go duration above zero, such as `7h`, `45m` or `1h30m`; qory stops with an error on any other value: `Set workflows.<name>.time_limit to a duration above zero, such as 7h or 45m.` with `The value is <value>.` and `workflows.<name> is in <file>.` on the next two lines. The run's `run_settings.time_limit_minutes`, when Qory Apiary sets it, applies instead, and a workflow without it runs for at most 3 hours |
 | `workflows.<name>.hook_points` | no | the points of the workflow where a checkout extending the stack may add workflow hooks, by the point's name: `{at: end, kinds: [check, review]}`. `at` is where the point sits in the workflow's session, `end`, `start` or `inside`; `kinds` is one or more of `check`, `review` and `enrich`, each once. A point's name has the form of a workflow's name, and is unique in the stack, since a hook selects a point by its name alone. Only a `qory-stack.yaml` declares points: a `qory.yaml` that defines a stack, which nothing extends, is refused with `Remove hook_points from the workflows in qory.yaml.` (§Workflow hooks) |
-| `workflows.<name>.access` | no | the access level the workflow declares for what a dispatched run of it works on, `read` or `write`, and `read` when left out; qory stops with an error on any other value: `Set workflows.<name>.access to read or write.` with `The value is <value>.` and `workflows.<name> is in <file>.` on the next two lines. A dispatched run from a run code sees the checkout read-only when this access is `read` or `access` in the run's documents is `read`, and on Claude Code its settings deny `Edit`, `Write` and `NotebookEdit`; such a run with no wall, with `wall.setup: inside`, or whose image chosen at the run's open has nested Docker, whichever way it was selected, stops before the agent starts (docs/run.md, §Read workflows). The run sees the checkout writable only when both are `write`, or when this access is `write` and the documents have no `access`, as documents with no target do |
+| `workflows.<name>.access` | no | the access level the workflow declares for what a dispatched run of it works on: `read`, `write-no-push`, or `write`, and `read` when left out; qory stops with an error on any other value: `Set workflows.<name>.access to a valid level.` with `The levels are read, write-no-push, and write.`, `The value is <value>.` and `workflows.<name> is in <file>.` on the next three lines. A run takes the lower of this access and `access` in the run's documents, in the order `read`, `write-no-push`, `write`; documents with no target have no `access`, and this access applies alone. A dispatched run from a run code sees the checkout read-only when that level is `read`, and on Claude Code its settings deny `Edit`, `Write` and `NotebookEdit`; such a run with no wall, with `wall.setup: inside`, or whose image chosen at the run's open has nested Docker, whichever way it was selected, stops before the agent starts (docs/run.md, §Read workflows). A `write-no-push` run has a writable checkout, no push step, no submit, and no version of the artifact `branch`. At `write` the checkout is writable and qory pushes what the agent left |
 | `extending` | no | what a module of a checkout extending this stack may ship: `kinds`, `instructions`, `settings`, `files` (§Extending a stack). A base without the block cannot be extended |
 | `extending.hooks` | no | lets a checkout extending the stack add workflow hooks at the points of its workflows: `per_point`, the most hooks one point takes, 3 when left out; `per_workflow`, the most the points of one workflow take together, 10 when left out; `timeout`, a duration in whole seconds, 1s or more, the longest a hook may run and the timeout of a hook that sets none, 10 minutes when left out. A count below 1 is refused. Without the block a checkout adds no workflow hook (§Workflow hooks) |
 | `extending.target` | no | the runtimes and the models the stack is written for, `runtime` and `model`, each one name or a list, one of the two at least. A checkout's resolved target outside either list fails the compose; listed models make the model required, since a target without one runs whatever the runtime defaults to, which is a model the stack did not list. Left out, every target is accepted, a model left out included (§Extending a stack) |
@@ -778,6 +778,12 @@ one option of a question. An answer has
 the chosen option, or the member's answer when `option` is `null`. `note` is optional when
 the member chose an option and required when `option` is `null`.
 
+A question has the optional member `criterion`, the id of the acceptance criterion the
+question is about: `ac-` and a number from 1 to 9999 with no leading zero, such as `ac-3`.
+A question about no acceptance criterion has no `criterion`. The criterion ids of the
+mockup schema of Qory Apiary, `mockup.schema.json`, have the same form. `qory` does not
+ship that file.
+
 A run that chooses an option without asking a member records a decided question: its
 `state` is `decided`, so it is not open, and it has `decision`. A decided question has at
 least one option, and none has `recommended`. `decision` has four members, all required:
@@ -847,18 +853,42 @@ stores it as a version of the artifact type `verdict`. This is version 1 of the 
 ```json
 {"verdict": "escalate",
  "points": [{"text": "The spec does not say which customers see the new price.", "action": "answer", "question": "q4"},
-            {"text": "The checks script failed on the spec's links.", "action": "run_again"}]}
+            {"text": "The checks script failed on the spec's links.", "action": "run_again",
+             "fix": "Fix the link to /docs/start in the spec."}]}
 ```
 
 | Member | Meaning |
 |---|---|
 | `verdict` | `passed`: the work meets the bar; `changes-requested`: the work needs another round; `escalate`: a person must act |
-| `points` | what is wrong or missing and what a person can do, 1 to 20 points: required with `escalate`, and absent with the other verdicts |
+| `points` | what is wrong or missing, 1 to 20 points: required with `escalate`, optional with `changes-requested`, where each point has the action `run_again`, and absent with `passed` |
 | `text` | what is wrong or missing, in one plain sentence for a person on one line, 1 to 500 characters, with no action and no question id, because Qory Apiary adds the action from `action`: it has no control character, so no tab, line feed or carriage return, and the schema's `$defs` `line`, the `line` of the questions format, lists the format characters it cannot have |
-| `action` | `answer`: the person answers the question in `question`; `run_again`: the person runs another round |
+| `action` | `answer`: a person answers the question in `question`, only with `escalate`; `run_again`: another round runs, and with `escalate` a person runs it |
 | `question` | the id of an open question in the work item's newest `questions` version, in the id form of the questions format: required with `answer`, and absent with `run_again` |
+| `fix` | what a person does to fix the point, in one plain sentence on one line, with the rules of `text`: optional with `run_again`, and absent with `answer`. Qory Apiary shows it in place of the sentence of the action `run_again` |
+| `track` | the track the run proposes for the work item: optional with a verdict of any kind, an object with the members `id` and `reason` and no other. A verdict with no track proposes none. Qory Apiary returns 422 for a track that the gate of the run's stage does not offer |
+| `id` | the id of a track that the gate of the run's stage offers: one lower-case word, or lower-case words joined by hyphens, such as `small-change`, at most 40 characters. Required in a track |
+| `reason` | why the run proposes the track, in one plain sentence on one line, 1 to 300 characters, with the rules of `text`. Required in a track |
 
-A document and a point have no other member. A JSON Schema cannot check that the
+A `changes-requested` verdict may list what the next round fixes:
+
+```json
+{"verdict": "changes-requested",
+ "points": [{"text": "The checks script failed on the spec's links.", "action": "run_again"}]}
+```
+
+`qory run verdict` sends points only with `escalate`.
+
+A verdict of any kind may propose a track:
+
+```json
+{"verdict": "passed", "track": {"id": "small-change", "reason": "The change touches one config file."}}
+```
+
+`qory run verdict` sends no track.
+
+A document has no member other than `verdict`, `points` and `track`, a point has no member
+other than `text`, `action`, `question` and `fix`, and a track has no member other than
+`id` and `reason`. A JSON Schema cannot check that the
 question is open, so the run pushes its questions before its verdict. Each of these
 documents fails the schema:
 
@@ -870,7 +900,13 @@ documents fails the schema:
 {"verdict": "escalate", "points": [{"text": "The spec does not say who sees the price.", "action": "answer"}]}
 {"verdict": "escalate", "points": [{"text": "The checks script failed.", "action": "run_again", "question": "q4"}]}
 {"verdict": "escalate", "points": [{"text": "The checks script failed.\nThe spec's links are broken.", "action": "run_again"}]}
+{"verdict": "changes-requested", "points": [{"text": "The spec does not say who sees the price.", "action": "answer", "question": "q4"}]}
+{"verdict": "escalate", "points": [{"text": "The spec does not say who sees the price.", "action": "answer", "question": "q4", "fix": "Answer q4."}]}
 {"verdict": "changes-requested", "gaps": "Add the empty cart."}
+{"verdict": "passed", "track": {"id": "small-change"}}
+{"verdict": "passed", "track": {"id": "Small-Change", "reason": "The change touches one config file."}}
+{"verdict": "passed", "track": {"id": "small-change", "reason": "The change touches one config file.", "stage": "build"}}
+{"verdict": "passed", "track": {"id": "small-change", "reason": "The change touches one config file.\nIt adds no code."}}
 ```
 
 ## The module manifest
@@ -1011,7 +1047,9 @@ default image is `--image` or `wall.image` in `forager.yaml`, and not the image 
 run's policy selects, so a change to the repository, such as one to its `.devcontainer/`,
 cannot turn the checks off. A run on a person's machine, with no run code, and with
 neither `--image` nor `wall.image`, whose policy selects the image, runs the checks in the
-run's image. A run from a run code with neither stops before the setup and the agent,
+run's image. The container runs under the runtime of the image it runs in: the `runtime`
+of its `wall.images` entry, such as `runsc`, or the engine's default for an entry with none
+and for an image that is a reference. A run from a run code with neither stops before the setup and the agent,
 with exit 2: `Set wall.image in forager.yaml, then take the work item in again in Qory Apiary: push
 checks run in the wall's default image; the code is used`. A run whose engine does not have the wall's default image stops before the setup and the agent,
 with exit 2: `Pull the wall's default image onto this machine, and run again: push checks

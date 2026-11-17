@@ -33,6 +33,13 @@ release may change what an existing document does, and states it under Upgrading
   `/opt/qory/chromium`, because Ubuntu's package is a snap. qory copies the parsers from the `prebuild` image, and `node` from it
   when the base image has none. It prints `prebuild: added Chromium, ffmpeg and the
   parsers in <time>`. See `docs/run.md`.
+- A run takes the lower of its workflow's `access` and `access` in its documents, in
+  the order `read`, `write-no-push`, `write`. A workflow's `access` in a stack takes
+  `write-no-push` in both schemas and in the stack check, and documents may have it. A
+  `write-no-push` run has a writable checkout, no push step, no submit, and no version
+  of the artifact `branch`. With no wall, it stops with `write_needs_wall`. The error
+  for another workflow value now starts
+  `Set workflows.<name>.access to a valid level.`
 - Every run of Claude Code installs the runtime's program before its session: from the
   runtime cache of the pool's registry, or of `pool.registry`, or else from npm, through
   the run's host proxy when the run has one. qory reads the registry's `newest`, or npm's
@@ -111,6 +118,13 @@ release may change what an existing document does, and states it under Upgrading
   `process.schema.json` has `submit`. Every command that reads the configuration checks
   its form, and that `artifact_types` has a custom structured entry named `type`. See The
   submit step in `contracts/harness/v1/README.md`.
+- A run from a run code whose level is `write` keeps its submit settings, `type` and
+  `send`, from `submit` of the run documents, and reads none from the composed harness's
+  `process.yaml`. When the composed harness has a different `submit`, `qory run` prints
+  one line after the compose: the documents' value and the harness's value, or only the
+  harness's value when the documents have no `submit`. A run at a lower level keeps no
+  submit settings and prints no line. See What the run takes from the response in
+  `docs/run.md`.
 - A module can declare checks for the files of an artifact type with `push_checks` in
   `qory-module.yaml`: each item has `type`, `command`, a program in the module and its
   arguments, and optional `reads`, the other artifact types the check reads. The checks
@@ -151,7 +165,8 @@ release may change what an existing document does, and states it under Upgrading
   push`, and the control plane writes the answers. At most one option of a question has
   `recommended` set to `true`. A decided question has `state: decided` and `decision`
   (`option`, `reason`, `run`, `at`), and at least one option and none with `recommended`;
-  `decision` stays when the state changes. See The questions format in
+  `decision` stays when the state changes. A question may have `criterion`, the id of
+  the acceptance criterion it is about, such as `ac-3`. See The questions format in
   `contracts/harness/v1/README.md`.
 - Version 1 of the review comments format,
   `contracts/harness/v1/review-comments.schema.json`: the members' review comments on a
@@ -173,7 +188,13 @@ release may change what an existing document does, and states it under Upgrading
   verdict, the file of the artifact type `verdict`. With `escalate`, `points` lists 1 to
   20 points for a person, each with `text`, one sentence on one line, 1 to 500
   characters, and `action`: `answer`, with `question`, the id of an open question, or
-  `run_again`. The text member `gaps` is gone. See The verdict format in
+  `run_again`. A `run_again` point may have `fix`, a line of 1 to 500 characters on
+  how a person fixes it, which Qory Apiary shows in place of the action's sentence; an
+  `answer` point has no `fix`. A `changes-requested` verdict may have 1 to 20 points,
+  each with the action `run_again`; `qory run verdict` sends points only with
+  `escalate`. A verdict of any kind may have a `track`, with an `id` and a `reason` of 1
+  to 300 characters, which Qory Apiary checks against the tracks of the run's stage;
+  `qory run verdict` sends none. The text member `gaps` is gone. See The verdict format in
   `contracts/harness/v1/README.md`.
 - `-f` on `qory harness compose`, `qory run` and `qory worktree add` takes a stack by
   reference, `<https URL>#<ref>:<folder>`: qory fetches the folder as it fetches a git
@@ -458,9 +479,6 @@ release may change what an existing document does, and states it under Upgrading
   qory serves no path on it, and answers `404` to a request of the session that runs. The
   setup container of `wall.setup: outside` gets neither the variable nor the route. See The
   route to qory in `docs/run.md`.
-- A run whose documents have `access: write-no-push` and whose workflow is declared `write`
-  gets a writable checkout and no push step. With no wall, that run stops with
-  `write_needs_wall`.
 
 ### Changed
 
@@ -484,6 +502,17 @@ release may change what an existing document does, and states it under Upgrading
 - The first line of each compose error shows the fix, in at most 100 characters, and the
   indented lines after it show the cause and the values, as the errors of workflow hooks
   do. Which input fails, and the exit status, stay the same.
+- When the push of a run's work gets 403 from the run's gateway, the first line of the
+  error is `Contact support: the push was refused (403).` The line `One of these stopped
+  it:` follows, then one line for each possible cause: the gateway allows a push only to
+  the run's branch, `refs/heads/qory/<work item>`; the connection's setup has no path rule
+  for `/<repository>.git/git-receive-pack`, or no credential with write access; or the
+  forge stopped the push, by its permission for the run's credential or a branch rule. The
+  exit status stays the same.
+- qory uses Forager 3d4ec18a. Its gateway returns 403 for a git push through a credential
+  that has no push ref, so a `git push` through a credential that forager.yaml defines
+  with `env` or `file` gets 403. The push step's credential, which Qory Apiary applies,
+  has a push ref for the run's branch, so the push step is not affected.
 - A run with a run key or a run code, with no `--home` or `harness.home`, composes into
   `runs/<name>-<hash>/<run id>` under `qory/homes` in the cache directory, a home for that
   run alone, which qory removes when the run ends. Two runs of one checkout no longer
@@ -1105,6 +1134,9 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Fixed
 
+- A push check's container runs under the `runtime` that `wall.images` sets for the
+  image it runs in, such as `runsc` (gVisor). Until now, it ran under the engine's
+  default runtime.
 - A Copilot CLI session gets the harness's hooks in a repository that commits
   `.github/hooks/hooks.json`. qory links `settings/copilot/hooks.json` as
   `.github/hooks/qory-hooks.json`, and Copilot CLI runs the hooks of both files. Until
