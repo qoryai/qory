@@ -295,7 +295,7 @@ type pushRepo struct {
 	real           bool
 	runID, runsDir string
 	// gateway, when set, is called by each report over the link with its number, from 1, before
-	// the call reaches Qory Apiary: a non-nil error is the gateway's answer to the call, and the
+	// the call reaches Qory Apiary: a non-nil error is the gateway's response to the call, and the
 	// call goes no further. linkMu guards the numbers and the limits of the calls.
 	gateway    func(n int) error
 	linkMu     sync.Mutex

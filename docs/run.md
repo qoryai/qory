@@ -2637,26 +2637,32 @@ commit is a no-op, so a call is safe to send again. The report is also sent when
 repository's push failed: the repositories that landed are reported, and that push's line
 stays the run's line.
 
-Each send waits at most 65 s: the gateway waits 60 s for Qory Apiary, and the 5 s more let the
-gateway's answer arrive first. A send that got no answer in that time, or an answer with a
-status of 500 or above (the gateway's 502 `control_plane_unavailable` and 503 among them) or
-429, is sent again with the same body, 3 times, after 1 s, 2 s and 4 s. The link has no
-`Retry-After`, so the waits do not change. Qory Apiary's 401 does not pass the gateway, and
-its 410 arrives as 502 `control_plane_unavailable`: both are sent again. Then:
+Each send waits at most 65 s: the gateway waits 60 s for Qory Apiary, not counting a reopen of
+the run, and the 5 s more let the gateway's response arrive first. A send that got no response
+in that time, or a response with a status of 500 or above (the gateway's 502
+`control_plane_unavailable` and 503 among them) or 429, is sent again with the same body, 3
+times, after 1 s, 2 s and 4 s. The link has no `Retry-After`, so the waits do not change. Qory
+Apiary's 401 does not pass the gateway, and its 410 arrives as 502 `control_plane_unavailable`:
+both are sent again. Then:
 
 - 409 `run_ended` from Qory Apiary, or 410 from the gateway (the run ended during the call):
-  qory pushes and reports nothing more, starts no later session, and prints `qory run: Qory
-  Apiary ended this run, so qory pushes nothing more and no later session starts.` The step
-  exits `succeeded`, and the run closes with the end that was recorded, as for a run that
+  qory pushes and reports nothing more, starts no later session, and prints one line. For
+  Qory Apiary's 409 `run_ended`, or a 410 that Qory Apiary sent, it is `qory run: Qory Apiary
+  ended this run, so qory pushes nothing more and no later session starts.` For a 410 that
+  the gateway sent, whose code is `run_closed`, `stopped` (the run's starter ended the run),
+  `session_lost` or `batch_refused`, it is `qory run: The run ended (<code>), so qory pushes
+  nothing more and no later session starts.` The step exits `succeeded`, and the run closes with the end that was recorded, as for a run that
   Qory Apiary closed during its session. When a later repository's push failed too, qory
   prints that line as well, and the step fails with the push's error.
 - Any other 4xx status, the gateway's 413 `payload_too_large` among them, or the retries used
   up: the step fails, the run closes `failed` before the next session, and qory prints
   `Contact support: qory pushed <commit> to qory/<work item id>, and Qory Apiary did not
-  record it.`, then `Qory Apiary returned <status>: <message or code>`. For a request with no
-  answer, or one that a stop or the time limit cut, the second line is `Qory Apiary sent no
-  response: <cause>`. For a status that the gateway returned, not Qory Apiary, the text is the
-  code. Neither line has a step to retry. `<commit>` is the first commit of the call that
+  record it.`, then `Qory Apiary returned <status>: <message or code>`. For a status that
+  the gateway returned, not Qory Apiary, the second line is `The gateway returned <status>:
+  <code>`, with the name of the status in place of the code when the response has none, as
+  `Service Unavailable` for a 503 with no body. For a request with no response, or one that a
+  stop or the time limit cut, the second line is `Qory Apiary sent no response: <cause>`.
+  Neither line has a step to retry. `<commit>` is the first commit of the call that
   failed. The pushed commits stay on the forge, and the version is not stored.
 
 A removal of the setup container that failed runs no step: qory commits nothing and pushes

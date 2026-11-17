@@ -189,11 +189,11 @@ type sessionPush struct {
 	// [preparation.Push]: true for a walled run.
 	agentStopped bool
 	checks       *runPushChecks
-	// ended is whether the report of pushed commits found the run over, Qory Apiary's run_ended
-	// or the gateway's 410: no
-	// later push and no later session of the run goes on. A loop over the run's sessions
-	// reads it after each [sessionPush.after].
-	ended bool
+	// ended is the line that says the report of pushed commits found the run over, Qory
+	// Apiary's run_ended or the gateway's 410, see [runEndedLine]: no later push and no later
+	// session of the run goes on. It is "" while the run goes on. A loop over the run's
+	// sessions reads it after each [sessionPush.after].
+	ended string
 }
 
 // after is the push step after a session that ended with out: [removeThenPush] under
@@ -205,7 +205,7 @@ type sessionPush struct {
 // returns the outcome the run closes with: out, or [pushEnding.outcome] of the step's
 // error, with that error.
 func (p *sessionPush) after(ending *pushEnding, out session.Outcome) (session.Outcome, error) {
-	if p.ended {
+	if p.ended != "" {
 		return out, nil
 	}
 	ctx, cancel := pushContext(p.ctx, p.again, p.limit, pushTimes.limit, pushTimes.signal)
@@ -214,11 +214,11 @@ func (p *sessionPush) after(ending *pushEnding, out session.Outcome) (session.Ou
 	ending.noStep, err = removeThenPush(ctx, p.run, p.stderr, p.branch, p.dir, p.runID, p.runNumber, out, p.agentStopped, p.checks, &p.ended)
 	ending.settle(p.stopNow())
 	ending.cut = ctx.Err() != nil
-	if p.ended {
+	if p.ended != "" {
 		// A push error alongside it stays the step's. Without one, the run closes with
 		// the end that the gateway recorded: out, as for a run that Qory Apiary closed
 		// during its session. No new exit status is added.
-		fmt.Fprintln(p.stderr, textRunEndedLater)
+		fmt.Fprintln(p.stderr, p.ended)
 	}
 	if err != nil {
 		return ending.outcome(err), err
@@ -237,7 +237,7 @@ var pushAfterSession = func(p *sessionPush, ending *pushEnding, out session.Outc
 // working folder, so the check of the step is valid only once the container is gone. After a
 // failed removal [openedRun.HostProxy] and [openedRun.StartStep] still work, so this
 // check alone stops the push, and the run has no step.
-func removeThenPush(ctx context.Context, run openedRun, stderr io.Writer, branch *preparation.WorkBranch, dir, runID string, runNumber int, out session.Outcome, agentStopped bool, checks *runPushChecks, ended *bool) (noStep bool, err error) {
+func removeThenPush(ctx context.Context, run openedRun, stderr io.Writer, branch *preparation.WorkBranch, dir, runID string, runNumber int, out session.Outcome, agentStopped bool, checks *runPushChecks, ended *string) (noStep bool, err error) {
 	if err := run.RemoveSetup(ctx); err != nil {
 		return true, fmt.Errorf(textSetupStays, shownError(err))
 	}
@@ -253,10 +253,11 @@ func removeThenPush(ctx context.Context, run openedRun, stderr io.Writer, branch
 // checks the version before it is stored, see [checkBranchVersion]. After the push, the
 // step reports what the push moved, see [recordPushed], before it stores the version, and
 // that also when a later repository's push failed: the repositories that landed are
-// reported, and the push's error stays the step's. *ended is set when the report found the
-// run over, Qory Apiary's run_ended or the gateway's 410, also when the push failed. The step
-// then stores no version, and ends with no error unless the push failed.
-func pushWork(ctx context.Context, run openedRun, stderr io.Writer, branch *preparation.WorkBranch, dir, runID string, runNumber int, out session.Outcome, agentStopped bool, checks *runPushChecks, ended *bool) error {
+// reported, and the push's error stays the step's. *ended is set to the line of
+// [runEndedLine] when the report found the run over, Qory Apiary's run_ended or the gateway's
+// 410, also when the push failed. The step then stores no version, and ends with no error
+// unless the push failed.
+func pushWork(ctx context.Context, run openedRun, stderr io.Writer, branch *preparation.WorkBranch, dir, runID string, runNumber int, out session.Outcome, agentStopped bool, checks *runPushChecks, ended *string) error {
 	cut := func() bool { return ctx.Err() != nil }
 	return inStep(run, stderr, event.StepPush, pushStepName(branch, run.System()), cut, func(w io.Writer) error {
 		httpClient, base, err := run.RunAPI()
@@ -288,7 +289,7 @@ func pushWork(ctx context.Context, run openedRun, stderr io.Writer, branch *prep
 			return &runLineError{pushErr}
 		case recordErr != nil:
 			return &runLineError{recordErr}
-		case runEnded:
+		case runEnded != "":
 			return nil
 		case document == nil:
 			return nil

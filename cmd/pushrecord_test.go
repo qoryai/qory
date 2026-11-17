@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/qoryai/forager/event"
+	"github.com/qoryai/forager/server"
 
 	"github.com/qoryai/qory/cmd"
 	"github.com/qoryai/qory/internal/proxygit/proxygittest"
@@ -133,35 +134,35 @@ func commitFirst(t *testing.T) func(string) {
 // link has no Retry-After, so a Retry-After of Qory Apiary's does not change the waits.
 func TestAReportThatMayNotHaveArrivedIsSentAgain(t *testing.T) {
 	for name, c := range map[string]struct {
-		answer  func(n int, w http.ResponseWriter) bool
+		respond func(n int, w http.ResponseWriter) bool
 		gateway func(n int) error
 		waits   []time.Duration
 		// atApiary is the reports that reach Qory Apiary, one more than the sends that fail
 		// before it.
 		atApiary int
 	}{
-		"503 twice": {answer: func(n int, w http.ResponseWriter) bool {
+		"503 twice": {respond: func(n int, w http.ResponseWriter) bool {
 			if n <= 2 {
 				failing(w, http.StatusServiceUnavailable, "unavailable", "")
 				return true
 			}
 			return false
 		}, waits: []time.Duration{time.Second, 2 * time.Second}, atApiary: 3},
-		"three failures": {answer: func(n int, w http.ResponseWriter) bool {
+		"three failures": {respond: func(n int, w http.ResponseWriter) bool {
 			if n <= 3 {
 				failing(w, http.StatusBadGateway, "", "")
 				return true
 			}
 			return false
 		}, waits: []time.Duration{time.Second, 2 * time.Second, 4 * time.Second}, atApiary: 4},
-		"429 after 1 s, whatever Retry-After says": {answer: func(n int, w http.ResponseWriter) bool {
+		"429 after 1 s, whatever Retry-After says": {respond: func(n int, w http.ResponseWriter) bool {
 			if n == 1 {
 				failing(w, http.StatusTooManyRequests, "rate_limited", "3")
 				return true
 			}
 			return false
 		}, waits: []time.Duration{time.Second}, atApiary: 2},
-		"503 with Retry-After over 30 s waits 1 s": {answer: func(n int, w http.ResponseWriter) bool {
+		"503 with Retry-After over 30 s waits 1 s": {respond: func(n int, w http.ResponseWriter) bool {
 			if n == 1 {
 				failing(w, http.StatusServiceUnavailable, "unavailable", "90")
 				return true
@@ -180,12 +181,6 @@ func TestAReportThatMayNotHaveArrivedIsSentAgain(t *testing.T) {
 			}
 			return nil
 		}, waits: []time.Duration{time.Second, 2 * time.Second, 4 * time.Second}, atApiary: 1},
-		"gateway 503 with a code": {gateway: func(n int) error {
-			if n == 1 {
-				return cmd.GatewayRefusal(http.StatusServiceUnavailable, "run_suspended")
-			}
-			return nil
-		}, waits: []time.Duration{time.Second}, atApiary: 1},
 		"an error with no status": {gateway: func(n int) error {
 			if n == 1 {
 				return errors.New("the pushed-commits request: the link closed")
@@ -195,7 +190,7 @@ func TestAReportThatMayNotHaveArrivedIsSentAgain(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			p := newPushRepo(t, "write")
-			p.api.record = c.answer
+			p.api.record = c.respond
 			p.gateway = c.gateway
 			r := p.run(t, commitFirst(t), nil)
 			r.wantsClose(t, event.StateSucceeded, 0)
@@ -282,6 +277,19 @@ func TestAReportThatIsNeverTakenEndsTheRun(t *testing.T) {
 	}
 }
 
+// TestAnInternalFailureOfTheRunAPIIsTheGatewaysLine is a 500 with the code internal, which the
+// link returns as a status with no refusal: sent 4 times, then the second line names the gateway.
+func TestAnInternalFailureOfTheRunAPIIsTheGatewaysLine(t *testing.T) {
+	p := newPushRepo(t, "write")
+	failsRecord(p, 1, http.StatusInternalServerError, "internal", "")
+	r := p.run(t, commitFirst(t), nil)
+	r.wantsClose(t, event.StateFailed, 1)
+	wants(t, r.out, "Contact support: qory pushed "+p.branchHead(t)+" to "+recordBranch+", and Qory Apiary did not record it.\nThe gateway returned 500: internal\n")
+	if calls, _ := p.api.reports(); calls != 4 {
+		t.Errorf("%d reports, want 4", calls)
+	}
+}
+
 // TestAReportThatGetsAnother4xxEndsTheRunAtOnce is each other 4xx: no second send, and the run closes
 // failed before session 2.
 func TestAReportThatGetsAnother4xxEndsTheRunAtOnce(t *testing.T) {
@@ -316,7 +324,7 @@ func TestAReportThatGetsAnother4xxEndsTheRunAtOnce(t *testing.T) {
 
 // TestWhatTheGatewayDoesNotPassOnIsA502AndIsSentAgain is Qory Apiary's 401 and 410: the gateway
 // returns each as 502 control_plane_unavailable, so the report is sent 4 times, after 1 s, 2 s and
-// 4 s, and the run closes failed with the status the gateway returned.
+// 4 s, and the run closes failed with the second line "The gateway returned 502".
 func TestWhatTheGatewayDoesNotPassOnIsA502AndIsSentAgain(t *testing.T) {
 	for name, status := range map[string]int{"401": http.StatusUnauthorized, "410": http.StatusGone} {
 		t.Run(name, func(t *testing.T) {
@@ -326,7 +334,7 @@ func TestWhatTheGatewayDoesNotPassOnIsA502AndIsSentAgain(t *testing.T) {
 			t.Cleanup(cmd.SetLaterSessions(func() { secondRan = true }))
 			r := p.run(t, commitFirst(t), nil)
 			r.wantsClose(t, event.StateFailed, 1)
-			wants(t, r.out, "Contact support: qory pushed "+p.branchHead(t)+" to "+recordBranch+", and Qory Apiary did not record it.\nQory Apiary returned 502: ")
+			wants(t, r.out, "Contact support: qory pushed "+p.branchHead(t)+" to "+recordBranch+", and Qory Apiary did not record it.\nThe gateway returned 502: ")
 			if calls, _ := p.api.reports(); calls != 4 {
 				t.Errorf("%d reports, want 4", calls)
 			}
@@ -342,7 +350,8 @@ func TestWhatTheGatewayDoesNotPassOnIsA502AndIsSentAgain(t *testing.T) {
 
 // TestAGatewayRefusalOfA4xxEndsTheRunAtOnce is a report that the gateway returns a 4xx for before it
 // reaches Qory Apiary, 413 payload_too_large or another: no second send, nothing at
-// Qory Apiary, and the run closes failed before session 2 with the status and the gateway's code.
+// Qory Apiary, and the run closes failed before session 2 with "The gateway returned", the status
+// and the gateway's code.
 func TestAGatewayRefusalOfA4xxEndsTheRunAtOnce(t *testing.T) {
 	for name, c := range map[string]struct {
 		status int
@@ -359,7 +368,7 @@ func TestAGatewayRefusalOfA4xxEndsTheRunAtOnce(t *testing.T) {
 			t.Cleanup(cmd.SetLaterSessions(func() { secondRan = true }))
 			r := p.run(t, commitFirst(t), nil)
 			r.wantsClose(t, event.StateFailed, 1)
-			wants(t, r.out, "Contact support: qory pushed "+p.branchHead(t)+" to "+recordBranch+", and Qory Apiary did not record it.\n"+fmt.Sprintf("Qory Apiary returned %d: %s\n", c.status, c.code))
+			wants(t, r.out, "Contact support: qory pushed "+p.branchHead(t)+" to "+recordBranch+", and Qory Apiary did not record it.\n"+fmt.Sprintf("The gateway returned %d: %s\n", c.status, c.code))
 			if strings.Contains(r.out, "Send the") {
 				t.Errorf("the output has a step to send the call again\n%s", r.out)
 			}
@@ -388,7 +397,7 @@ func TestAGatewayThatStaysDownEndsTheRunAfterFourSends(t *testing.T) {
 			r := p.run(t, commitFirst(t), nil)
 			r.wantsClose(t, event.StateFailed, 1)
 			status := map[string]string{"502": "502: control_plane_unavailable", "503": "503: Service Unavailable"}[name]
-			wants(t, r.out, "Contact support: qory pushed "+p.branchHead(t)+" to "+recordBranch+", and Qory Apiary did not record it.\nQory Apiary returned "+status+"\n")
+			wants(t, r.out, "Contact support: qory pushed "+p.branchHead(t)+" to "+recordBranch+", and Qory Apiary did not record it.\nThe gateway returned "+status+"\n")
 			if strings.Contains(r.out, "Send the") {
 				t.Errorf("the output has a step to send the call again\n%s", r.out)
 			}
@@ -403,7 +412,8 @@ func TestAGatewayThatStaysDownEndsTheRunAfterFourSends(t *testing.T) {
 }
 
 // TestEachSendOfAReportHas65Seconds is every send over the link: it has a limit of 65 s, 5 s more
-// than the 60 s that the gateway waits for Qory Apiary, so the gateway's answer arrives first.
+// than the 60 s that the gateway waits for Qory Apiary ([server.HostCallTime]), so the gateway's
+// response arrives first.
 func TestEachSendOfAReportHas65Seconds(t *testing.T) {
 	p := newPushRepo(t, "write")
 	p.gateway = func(n int) error {
@@ -418,36 +428,45 @@ func TestEachSendOfAReportHas65Seconds(t *testing.T) {
 		t.Fatalf("%d sends, want 2", len(p.linkLimits))
 	}
 	for i, limit := range p.linkLimits {
-		if limit > 65*time.Second || limit < 60*time.Second {
+		if limit > 65*time.Second || limit <= server.HostCallTime {
 			t.Errorf("send %d has %s left at its start, want just under 65s", i+1, limit)
 		}
 	}
 }
 
-// TestAGatewayThatEndedTheRunStopsTheReport is a report that gets 410 from the gateway, because the run
-// ended while the call was open: the same as run_ended of Qory Apiary. qory sends no second
-// report, stores no version, starts no session 2, and prints one line. The step succeeds.
+// TestAGatewayThatEndedTheRunStopsTheReport is a report that gets 410 from the gateway, because the
+// run ended while the call was open, with each code of [server.EndCodes]: qory sends no second
+// report, stores no version, starts no session 2, and prints one line that has the code and does
+// not say that Qory Apiary ended the run. The step succeeds.
 func TestAGatewayThatEndedTheRunStopsTheReport(t *testing.T) {
-	p := newPushRepo(t, "write")
-	p.gateway = func(int) error { return cmd.GatewayRefusal(http.StatusGone, "run_closed") }
-	secondRan := false
-	t.Cleanup(cmd.SetLaterSessions(func() { secondRan = true }))
-	r := p.run(t, commitFirst(t), nil)
-	r.wantsClose(t, event.StateSucceeded, 0)
-	if secondRan {
-		t.Error("session 2 started after the gateway's 410")
-	}
-	if p.linkCalls != 1 || len(p.waits) != 0 {
-		t.Errorf("%d sends and the waits %v, want 1 and none", p.linkCalls, p.waits)
-	}
-	if posts, _, stored := p.api.counts(); posts != 0 || stored != 0 {
-		t.Errorf("%d POST and %d versions, want none", posts, stored)
-	}
-	if got := strings.Count(r.out, "qory run: Qory Apiary ended this run, so qory pushes nothing more and no later session starts.\n"); got != 1 {
-		t.Errorf("the line of the ended run is in the output %d times, want 1\n%s", got, r.out)
-	}
-	if got := r.pushSteps(); len(got) != 1 || got[0] != event.StateSucceeded {
-		t.Errorf("the push steps exited %v, want one succeeded", got)
+	for _, code := range server.EndCodes {
+		t.Run(code, func(t *testing.T) {
+			p := newPushRepo(t, "write")
+			p.gateway = func(int) error { return cmd.GatewayRefusal(http.StatusGone, code) }
+			secondRan := false
+			t.Cleanup(cmd.SetLaterSessions(func() { secondRan = true }))
+			r := p.run(t, commitFirst(t), nil)
+			r.wantsClose(t, event.StateSucceeded, 0)
+			if secondRan {
+				t.Error("session 2 started after the gateway's 410")
+			}
+			if p.linkCalls != 1 || len(p.waits) != 0 {
+				t.Errorf("%d sends and the waits %v, want 1 and none", p.linkCalls, p.waits)
+			}
+			if posts, _, stored := p.api.counts(); posts != 0 || stored != 0 {
+				t.Errorf("%d POST and %d versions, want none", posts, stored)
+			}
+			line := "qory run: The run ended (" + code + "), so qory pushes nothing more and no later session starts.\n"
+			if got := strings.Count(r.out, line); got != 1 {
+				t.Errorf("the line of the ended run is in the output %d times, want 1\n%s", got, r.out)
+			}
+			if strings.Contains(r.out, "Qory Apiary ended this run") {
+				t.Errorf("the output says that Qory Apiary ended the run, but the gateway did\n%s", r.out)
+			}
+			if got := r.pushSteps(); len(got) != 1 || got[0] != event.StateSucceeded {
+				t.Errorf("the push steps exited %v, want one succeeded", got)
+			}
+		})
 	}
 }
 

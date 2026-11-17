@@ -16,14 +16,18 @@ import (
 )
 
 // The words of the report of a push to Qory Apiary. textNotRecorded has the commit and the
-// branch, then the status and Qory Apiary's message or code, or the cause of a request with
-// no response. No text has a retry step: qory has sent the call again, or the run is
-// stopped.
+// branch, then the status and the message or code of Qory Apiary or of the gateway, whichever
+// returned it, or the cause of a request with no response. No text has a retry step: qory has
+// sent the call again, or the run is stopped. textRunEndedLater is the line for a run that
+// Qory Apiary ended, textRunEndedAtGateway the line for any other end, with the gateway's
+// code, one of [server.EndCodes].
 const (
-	textNotRecorded   = "Contact support: qory pushed %s to %s, and Qory Apiary did not record it.\n%s"
-	textRecordStatus  = "Qory Apiary returned %d: %s"
-	textRecordNoReply = "Qory Apiary sent no response: %s"
-	textRunEndedLater = "qory run: Qory Apiary ended this run, so qory pushes nothing more and no later session starts."
+	textNotRecorded       = "Contact support: qory pushed %s to %s, and Qory Apiary did not record it.\n%s"
+	textRecordApiary      = "Qory Apiary returned %d: %s"
+	textRecordGateway     = "The gateway returned %d: %s"
+	textRecordNoReply     = "Qory Apiary sent no response: %s"
+	textRunEndedLater     = "qory run: Qory Apiary ended this run, so qory pushes nothing more and no later session starts."
+	textRunEndedAtGateway = "qory run: The run ended (%s), so qory pushes nothing more and no later session starts."
 )
 
 // The bounds of the report of a push: recordAttempts is the first send and the three that
@@ -34,43 +38,45 @@ const recordAttempts = 4
 var recordWaits = [recordAttempts - 1]time.Duration{time.Second, 2 * time.Second, 4 * time.Second}
 
 // recordAttemptLimit is the time one send of the report has. The gateway waits 60 s for each
-// call to Qory Apiary, so 65 s lets the gateway's answer arrive before qory cuts the send. A
-// test sets a shorter one.
+// call to Qory Apiary, not counting a reopen of the run, so 65 s lets the gateway's response
+// arrive before qory cuts the send. A test sets a shorter one.
 var recordAttemptLimit = 65 * time.Second
 
 // pushedSender sends the body of one report over the link of the run's gateway, and returns
-// the answer's body, empty for Qory Apiary's 204: [session.Run.PushedCommits].
+// the response's body, empty for Qory Apiary's 204: [session.Run.PushedCommits].
 type pushedSender func(ctx context.Context, body []byte) ([]byte, error)
 
 // recordPushed reports what the last push of branch moved to Qory Apiary, with at most
 // [runapi.MaxPushedCommits] repositories and [runapi.MaxPushedCommitsBytes] bytes in a call, one
 // call after the other, in the order the push moved them, through the run's link to the gateway.
-// A push that moved nothing sends no call. It returns ended true when the run is over: Qory
-// Apiary returned run_ended, or the gateway returned 410. The run's end stands as it was
-// recorded, and no call follows. Any other 4xx status, retries used up, and a context that
-// ended during the report return the error that ends the run, see [recordFailed]. Qory Apiary
-// takes a repeat of a commit as a no-op, so each call is sent again with the same body.
-func recordPushed(ctx context.Context, run openedRun, branch *preparation.WorkBranch) (ended bool, err error) {
+// A push that moved nothing sends no call. It returns ended, the line that says how the run
+// ended, when the run is over, and "" otherwise: Qory Apiary returned run_ended, or the gateway
+// returned 410, see [runEndedLine]. The run's end stands as it was recorded, and no call
+// follows. Any other 4xx status, retries used up, and a context that ended during the report
+// return the error that ends the run, see [recordFailed]. Qory Apiary takes a repeat of a
+// commit as a no-op, so each call is sent again with the same body.
+func recordPushed(ctx context.Context, run openedRun, branch *preparation.WorkBranch) (ended string, err error) {
 	return recordLanded(ctx, run.PushedCommits, branch.Ref, branch.Landed())
 }
 
 // recordLanded is [recordPushed] for the repositories landed, sent with send, with ref as the
 // branch the failure line names.
-func recordLanded(ctx context.Context, send pushedSender, ref string, landed []preparation.Landed) (ended bool, err error) {
+func recordLanded(ctx context.Context, send pushedSender, ref string, landed []preparation.Landed) (ended string, err error) {
 	for _, commits := range pushedCalls(landed) {
 		body, err := runapi.PushedCommitsBody(commits)
 		if err != nil {
-			return false, recordFailed(ref, commits[0].Commit, err)
+			return "", recordFailed(ref, commits[0].Commit, err)
 		}
-		switch err := sendPushed(ctx, send, body); {
-		case err == nil:
-		case runEndedAnswer(err):
-			return true, nil
-		default:
-			return false, recordFailed(ref, commits[0].Commit, err)
+		err = sendPushed(ctx, send, body)
+		if err == nil {
+			continue
 		}
+		if line, over := runEndedLine(err); over {
+			return line, nil
+		}
+		return "", recordFailed(ref, commits[0].Commit, err)
 	}
-	return false, nil
+	return "", nil
 }
 
 // pushedCalls is landed as the bodies of the calls that report it, in the order they landed,
@@ -84,7 +90,7 @@ func pushedCalls(landed []preparation.Landed) [][]runapi.PushedCommit {
 }
 
 // sendPushed sends body, again after a failure that leaves open whether Qory Apiary has it: a
-// request with no answer, a status of 500 or above, and 429. It waits as [recordWaits] has it.
+// request with no response, a status of 500 or above, and 429. It waits as [recordWaits] has it.
 // It returns the last error, also when ctx ended.
 func sendPushed(ctx context.Context, send pushedSender, body []byte) error {
 	var last error
@@ -110,57 +116,75 @@ func sendPushedOnce(ctx context.Context, send pushedSender, body []byte) error {
 	return err
 }
 
-// linkAnswer is the status and the text of an answer to a report that is not a 2xx, read from
-// the error of [session.Run.PushedCommits]: a refusal of Qory Apiary's, which the gateway passes
-// on with From apiary, or a refusal or status that the gateway returns itself, such as its 503
-// while it closes or reopens the run. The text is the message of Qory Apiary's refusal, else its
-// code. For a status from the gateway it is the code alone, because the gateway's message can
-// tell the reader to send the call again, and a line of qory has no such step. ok is false for an
-// error with no status: a transport failure, no answer in time, or a cancelled context.
-func linkAnswer(err error) (status int, text string, ok bool) {
+// linkResponse is the status and the text of a response to a report that is not a 2xx, read from
+// the error of [session.Run.PushedCommits], and who returned it, from: [accesskey.FromApiary]
+// for a refusal of Qory Apiary's, which the gateway passes on, and [accesskey.FromGateway] for a
+// refusal or status that the gateway returns itself, such as its 503 while it closes or reopens
+// the run, and for a [*server.StatusError], which has no body that says otherwise. The text is
+// the message of Qory Apiary's refusal, else its code. For a status from the gateway it is the
+// code alone, because the gateway's message can tell the reader to send the call again, and a
+// line of qory has no such step. ok is false for an error with no status: a transport failure,
+// no response in time, or a cancelled context.
+func linkResponse(err error) (status int, text, from string, ok bool) {
 	var refusal *accesskey.Refusal
 	var failure *server.StatusError
 	switch {
 	case errors.As(err, &refusal) && refusal.Status != 0:
 		if refusal.From == accesskey.FromApiary {
-			return refusal.Status, cmp.Or(refusal.Text, refusal.Code), true
+			return refusal.Status, cmp.Or(refusal.Text, refusal.Code), accesskey.FromApiary, true
 		}
-		return refusal.Status, refusal.Code, true
+		return refusal.Status, refusal.Code, accesskey.FromGateway, true
 	case errors.As(err, &failure):
-		return failure.Status, failure.Code, true
+		return failure.Status, failure.Code, accesskey.FromGateway, true
 	}
-	return 0, "", false
+	return 0, "", "", false
 }
 
-// runEndedAnswer reports whether err shows that the run is over: Qory Apiary's 409 run_ended, or
-// the gateway's 410, which the link returns when the run ended during the call. A 410 of Qory
-// Apiary never arrives as a 410: the gateway returns it as 502 control_plane_unavailable.
-func runEndedAnswer(err error) bool {
-	if _, ended := server.Ended(err); ended {
-		return true
+// runEndedLine reports whether err shows that the run is over, and the line that says it: Qory
+// Apiary's 409 run_ended, or the gateway's 410, which the link returns when the run ended during
+// the call. The line is [textRunEndedLater] when Qory Apiary ended the run: a 409 run_ended
+// that the link passes on with From apiary, or a 410 whose From is apiary. Otherwise it is
+// [textRunEndedAtGateway] with the code of the end. The gateway's 410 has From gateway for each
+// code of [server.EndCodes]: run_closed, stopped (the run's starter ended it), session_lost and
+// batch_refused. A 410 of Qory Apiary never arrives as a 410: the gateway returns it as 502
+// control_plane_unavailable. A 409 run_ended with From gateway ends no run.
+func runEndedLine(err error) (line string, ended bool) {
+	if end, over := server.Ended(err); over {
+		if end.From == accesskey.FromApiary {
+			return textRunEndedLater, true
+		}
+		return fmt.Sprintf(textRunEndedAtGateway, cmp.Or(end.Code, accesskey.CodeRunClosed)), true
 	}
 	var refusal *accesskey.Refusal
-	return errors.As(err, &refusal) && refusal.Status == http.StatusConflict && refusal.Code == runapi.CodeRunEnded
+	if errors.As(err, &refusal) && refusal.Status == http.StatusConflict && refusal.Code == runapi.CodeRunEnded && refusal.From == accesskey.FromApiary {
+		return textRunEndedLater, true
+	}
+	return "", false
 }
 
 // retryPushed reports whether err is one that a second send may not meet: no status came
-// back, a status of 500 or above did (the gateway's 502 and 503 among them, from either side
-// of it), or the status is 429.
+// back, a status of 500 or above did (the gateway's 502 and 503 among them, from the gateway or
+// passed on from Qory Apiary), or the status is 429.
 func retryPushed(err error) bool {
-	status, _, ok := linkAnswer(err)
+	status, _, _, ok := linkResponse(err)
 	return !ok || status >= http.StatusInternalServerError || status == http.StatusTooManyRequests
 }
 
 // recordFailed is the error that ends a run whose push Qory Apiary did not record: the
-// first commit of the call that failed, the branch ref, then the status and Qory Apiary's
-// message, or its code, or the cause of a request with no response. The text has no step to
+// first commit of the call that failed, the branch ref, then the status with the message or
+// code of Qory Apiary or of the gateway, whichever returned it, or the cause of a request with
+// no response. The text has no step to
 // retry, because qory has sent the call again, or ctx ended. The commits stay on the forge.
 func recordFailed(ref, commit string, err error) error {
 	var detail string
-	status, text, answered := linkAnswer(err)
+	status, text, from, responded := linkResponse(err)
 	switch {
-	case answered:
-		detail = fmt.Sprintf(textRecordStatus, status, shownError(errors.New(cmp.Or(text, http.StatusText(status)))))
+	case responded:
+		format := textRecordGateway
+		if from == accesskey.FromApiary {
+			format = textRecordApiary
+		}
+		detail = fmt.Sprintf(format, status, shownError(errors.New(cmp.Or(text, http.StatusText(status)))))
 	case errors.Is(err, context.Canceled):
 		detail = fmt.Sprintf(textRecordNoReply, context.Canceled)
 	case errors.Is(err, context.DeadlineExceeded):

@@ -103,8 +103,8 @@ func SetLaterSessions(sessions ...func()) func() {
 	pushAfterSession = func(p *sessionPush, ending *pushEnding, out session.Outcome) (session.Outcome, error) {
 		closed, err := before(p, ending, out)
 		for _, agent := range sessions {
-			// A run that Qory Apiary ended starts no later session.
-			if err != nil || p.ended {
+			// A run that ended at Qory Apiary or the gateway starts no later session.
+			if err != nil || p.ended != "" {
 				break
 			}
 			agent()
@@ -599,14 +599,21 @@ var codeShape = regexp.MustCompile(`^[a-z][a-z0-9_]{0,63}$`)
 // PushedThroughLink is the report over the link of a gateway, as Forager's gateway and
 // [session.Run.PushedCommits] do it, with the run API at runAPI as Qory Apiary: POST body to
 // <runAPI>/pushed-commits, and then
+//   - a body over [server.MaxPushedCommitsRequest] returns the gateway's 413 payload_too_large,
+//     and sends nothing;
 //   - a 2xx returns its body;
-//   - a 4xx or 5xx with a code of Qory Apiary's, but 401 and 410, is a [*accesskey.Refusal] with
-//     the status, the code, From apiary and the message as Text;
-//   - any other answer, Qory Apiary's 401 and 410 among them, is the gateway's 502
-//     control_plane_unavailable, From gateway.
+//   - a 5xx with the code internal is a [*server.StatusError] with the status, the code and the
+//     message, as Forager's link returns it;
+//   - a 4xx or 5xx with another code of Qory Apiary's, but 401 and 410, is a [*accesskey.Refusal]
+//     with the status, the code, From apiary and the message as Text;
+//   - any other response, Qory Apiary's 401 and 410 and a 5xx with no code among them, is the
+//     gateway's 502 control_plane_unavailable, From gateway.
 //
-// A request that fails returns its error. No answer has a Retry-After.
+// A request that fails returns its error. No response has a Retry-After.
 func PushedThroughLink(ctx context.Context, runAPI string, body []byte) ([]byte, error) {
+	if len(body) > server.MaxPushedCommitsRequest {
+		return nil, GatewayRefusal(http.StatusRequestEntityTooLarge, "payload_too_large")
+	}
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, runAPI+"/pushed-commits", bytes.NewReader(body))
 	if err != nil {
 		return nil, err
@@ -630,6 +637,9 @@ func PushedThroughLink(ctx context.Context, runAPI string, body []byte) ([]byte,
 	}
 	if response.StatusCode >= 400 && response.StatusCode != http.StatusUnauthorized && response.StatusCode != http.StatusGone &&
 		json.Unmarshal(raw, &doc) == nil && codeShape.MatchString(doc.Error) {
+		if response.StatusCode >= http.StatusInternalServerError && doc.Error == server.CodeInternal {
+			return nil, &server.StatusError{What: "the pushed-commits request", Status: response.StatusCode, Message: doc.Message, Code: doc.Error}
+		}
 		return nil, &accesskey.Refusal{Code: doc.Error, Status: response.StatusCode, From: accesskey.FromApiary, Text: doc.Message}
 	}
 	return nil, GatewayRefusal(http.StatusBadGateway, "control_plane_unavailable")
@@ -646,7 +656,7 @@ func GatewayRefusal(status int, code string) error {
 		"not_found":                 "Open the run with a control plane to send the pushed-commits request: this run has none.",
 	}[code]
 	if text == "" {
-		text = "the gateway refused the call: " + code
+		text = fmt.Sprintf("the gateway returned %d: %s", status, code)
 	}
 	return &accesskey.Refusal{Code: code, Status: status, From: accesskey.FromGateway, Text: text}
 }

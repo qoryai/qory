@@ -22,15 +22,21 @@ release may change what an existing document does, and states it under Upgrading
   Apiary, one entry for each repository with `system`, `path` and the full head commit, in
   push order, at most 64 in a call and at most 65536 bytes in a body. qory sends the report
   over the link of the run's gateway, which forwards it to `POST /v1/runs/<id>/pushed-commits`.
-  A push that moved no repository sends nothing. Each send waits at most 65 s. qory sends a
-  call again after a send with no answer, a status of 500 or above (the gateway's 502
-  `control_plane_unavailable` and 503 among them) or a 429, 3 times, after 1 s, 2 s and 4 s.
+  A push that moved no repository sends nothing. Each send waits at most 65 s, not counting a
+  reopen of the run. qory sends a call again after a send with no response, a status of 500
+  or above (the gateway's 502 `control_plane_unavailable` and 503 among them) or a 429, 3
+  times, after 1 s, 2 s and 4 s.
   On 409 `run_ended`, or when the gateway returns 410 because the run ended during the call,
   qory pushes nothing more and starts no later session, and the run closes with the end that
-  was recorded. On any other 4xx status, the gateway's 413 `payload_too_large` among them, or
-  when the retries are used up, the run ends `failed` before the next session with `Contact
-  support: qory pushed <commit> to qory/<work item id>, and Qory Apiary did not record it.`,
-  then the status and the message or code.
+  was recorded. qory prints `qory run: Qory Apiary ended this run, so qory pushes nothing more
+  and no later session starts.` when Qory Apiary ended it, and `qory run: The run ended
+  (<code>), so qory pushes nothing more and no later session starts.` for a 410 of the
+  gateway, with its code `run_closed`, `stopped`, `session_lost` or `batch_refused`. On any
+  other 4xx status, the gateway's 413 `payload_too_large` among them, or when the retries are
+  used up, the run ends `failed` before the next session with `Contact support: qory pushed
+  <commit> to qory/<work item id>, and Qory Apiary did not record it.`, then `Qory Apiary
+  returned <status>: <message or code>`, or `The gateway returned <status>: <code>` for a
+  status that the gateway returned.
 - The `agent` image has the Node packages `typescript` 5.9.3, `libpg-query` 18.2.4,
   `parse5` 8.1.1, `postcss` 8.5.33 and `postcss-scss` 4.0.9 in `/opt/qory/parsers`. The
   folder belongs to root and no other user can write to it. A script loads a package with
