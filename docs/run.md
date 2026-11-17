@@ -334,7 +334,8 @@ when the engine's `docker info` does not list the runtime that the checks' conta
 under, such as `runsc`: `Install the container runtime on the engine, and run again.`, and
 on the next line `The push checks' container runs under the runtime <runtime>, and the
 engine does not have it.` An engine whose `docker info` fails, or does not list runtimes
-as Docker does, lets the run go on. It stops there with exit 2 before
+as Docker does, lets the run go on, and so does a runtime named `io.containerd.*`, a
+containerd shim, which Docker starts although its list omits it. It stops there with exit 2 before
 any command of the engine gets the image when the image is not a reference, such as a
 value that starts with `-`: `Set wall.image or --image to an image reference, and run
 again.`, and on the next line `Push checks cannot start from <value>. A reference starts

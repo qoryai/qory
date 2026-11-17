@@ -584,12 +584,14 @@ func (c *Checker) HasImage(ctx context.Context) (bool, error) {
 }
 
 // HasRuntime reports whether the engine has the container runtime [Checker.Runtime],
-// with docker info, which starts nothing. A checker with no runtime has it. An engine
+// with docker info, which starts nothing. A checker with no runtime has it, and so has
+// one whose runtime is a containerd shim name, io.containerd.*: Docker starts a
+// container under a shim that its list of runtimes does not have. An engine
 // whose runtimes do not list the name is false with no error; an info that fails, such
 // as one of an engine that is not reachable, or one that does not report its runtimes as
 // Docker does, is an error.
 func (c *Checker) HasRuntime(ctx context.Context) (bool, error) {
-	if c.Runtime == "" {
+	if c.Runtime == "" || strings.HasPrefix(c.Runtime, "io.containerd.") {
 		return true, nil
 	}
 	var out, errOut bytes.Buffer

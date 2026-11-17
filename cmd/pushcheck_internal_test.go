@@ -342,6 +342,22 @@ func TestAMissingRuntimeStopsTheLoad(t *testing.T) {
 	}
 }
 
+// TestAMissingRuntimeOfTheDefaultStopsTheLoad is a default image with runtime runsc, which
+// the engine does not have, and a run whose selected image has no runtime: the checks run
+// under the default's runtime, and the load stops, not the first push.
+func TestAMissingRuntimeOfTheDefaultStopsTheLoad(t *testing.T) {
+	stubChecks(t)
+	docker, _ := runtimesEngine(t, `{"runc":{}}`, 0, "")
+	run, spec := gvisorRun(t)
+	spec.Wall, spec.Image = &wall.Docker{Command: docker}, "gvisor"
+	run = imageOnlyAPI{imageAPI: run.(imageOnlyAPI).imageAPI, img: spec.Images[0]}
+	checker, err := pushChecker(context.Background(), run, t.TempDir(), "r1", spec, true, false)
+	want := "Install the container runtime on the engine, and run again.\n  The push checks' container runs under the runtime runsc, and the engine does not have it."
+	if checker != nil || err == nil || err.Error() != want {
+		t.Errorf("pushChecker = %v, %v, want no checker and %q", checker != nil, err, want)
+	}
+}
+
 // TestAMissingRuntimeOfARunWithNoDefaultStopsTheLoad is the same stop for a run with no
 // default image, whose image of the policy has the runtime.
 func TestAMissingRuntimeOfARunWithNoDefaultStopsTheLoad(t *testing.T) {

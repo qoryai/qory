@@ -1064,7 +1064,8 @@ whose engine's `docker info` does not list the runtime that the container runs u
 stops there with exit 2 too: `Install the container runtime on the engine, and run again.`,
 and on the next line `The push checks' container runs under the runtime <runtime>, and
 the engine does not have it.` An engine whose `docker info` fails, or does not list
-runtimes as Docker does, lets the run go on. The container has
+runtimes as Docker does, lets the run go on, and so does a runtime named
+`io.containerd.*`, a containerd shim, which Docker starts although its list omits it. The container has
 no variable but the image's and those Docker sets: `HOME`, `HOSTNAME` and `PATH`. It has
 the wall's CPU and memory limits of the run's containers, the wall's process limit or 512
 processes, and the label of the run's containers, so the clean-up of the run removes a

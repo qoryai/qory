@@ -1202,9 +1202,11 @@ func TestHasRuntimeReadsTheEnginesRuntimes(t *testing.T) {
 		"present":    {runtime: "runsc", out: `{"runc":{"path":"runc"},"runsc":{"path":"runsc"}}`, has: true, asked: true},
 		"missing":    {runtime: "runsc", out: `{"runc":{"path":"runc"}}`, asked: true},
 		"no runtime": {has: true},
-		"engine":     {runtime: "runsc", exitErr: errors.New("exit status 1"), errOut: "Cannot connect to the Docker daemon\n", wantErr: "the inspect of the engine's runtimes failed: Cannot connect to the Docker daemon", asked: true},
-		"null":       {runtime: "runsc", out: "null", wantErr: "the engine's list of runtimes does not read", asked: true},
-		"not a list": {runtime: "runsc", out: "<no value>", wantErr: "the engine's list of runtimes does not read", asked: true},
+		// Docker starts a container under a shim that its list does not have.
+		"shim not listed": {runtime: "io.containerd.runsc.v1", out: `{"runc":{}}`, has: true},
+		"engine":          {runtime: "runsc", exitErr: errors.New("exit status 1"), errOut: "Cannot connect to the Docker daemon\n", wantErr: "the inspect of the engine's runtimes failed: Cannot connect to the Docker daemon", asked: true},
+		"null":            {runtime: "runsc", out: "null", wantErr: "the engine's list of runtimes does not read", asked: true},
+		"not a list":      {runtime: "runsc", out: "<no value>", wantErr: "the engine's list of runtimes does not read", asked: true},
 	} {
 		t.Run(name, func(t *testing.T) {
 			f := newFixture(t, "#!/usr/bin/env node")
