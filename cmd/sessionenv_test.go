@@ -103,3 +103,22 @@ func TestTheTestsStartWithTheSwitchesAndPathsTheyRead(t *testing.T) {
 		}
 	}
 }
+
+// TestTheMarkerOfTheRealPushTestKeepsTheFixedEnvironment starts this test binary with the
+// marker of TestForagerRunKeepsThePushCredentialOnThePushProxyAlone, SSL_CERT_FILE and a token in its
+// environment, as a developer's shell could set them, and without that test's argument:
+// the tests then start from the fixed environment, with neither the marker, nor the
+// certificate file nor the token.
+func TestTheMarkerOfTheRealPushTestKeepsTheFixedEnvironment(t *testing.T) {
+	const test = "TestTheMarkerOfTheRealPushTestKeepsTheFixedEnvironment"
+	if !inSessionEnvChild() {
+		startWithEnvironment(t, test, "PATH="+os.Getenv("PATH"), "QORY_TEST_REAL_PUSH=/example",
+			"SSL_CERT_FILE=/example/ca.pem", "GITHUB_TOKEN="+valueFromTheParent)
+		return
+	}
+	for _, name := range []string{"QORY_TEST_REAL_PUSH", "SSL_CERT_FILE", "GITHUB_TOKEN"} {
+		if got := os.Getenv(name); got != "" {
+			t.Errorf("%s is set at the start of the tests", name)
+		}
+	}
+}

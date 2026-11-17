@@ -449,7 +449,7 @@ the value to the list:
   qory reads as it starts, in every run;
 - the access key's secret from `--access-key-secret-fd`, in every run, and from the
   `access-key-secret` file when qory signs its requests to the server with it;
-- the password of the run's host proxy, of its stack proxy and of
+- the password of the run's host proxy, of its push proxy, of its stack proxy, and of
   `wall.engine_proxy_file`;
 - for a run given a run key or a run code, the query values of each harness source's URL,
   before qory fetches the source through the stack proxy;
@@ -2610,7 +2610,7 @@ The step does this, in order:
 2. qory removes `.git/index.lock` of each repository, a file that an agent killed in a git
    command leaves behind, and prints `qory run: removed .git/index.lock of <path>, which the
    agent left when it stopped`. qory does this only for a walled run, whose container the
-   session removed: when it could not, the run's host proxy does not open, and the step
+   session removed: when it could not, the run's push proxy does not open, and the step
    runs no git. With an agent on the host, the stop of the agent is not proven, and a lock
    fails the step. qory removes only that file, and only as a regular file in a `.git`
    directory, so a link stops the check and any other lock stays.
@@ -2630,7 +2630,7 @@ The step does this, in order:
    The commits of all repositories come before the first push, so a failed commit pushes
    nothing.
 4. qory pushes each repository whose `HEAD` is past the commit the run started at to
-   `refs/heads/qory/<work item id>`, through the run's host proxy, with no force. It
+   `refs/heads/qory/<work item id>`, through the run's push proxy, with no force. It
    prints `qory run: pushed qory/<work item id> to <path> at <commit>`, where `<commit>`
    is the commit's first 12 characters. With no new commit in any repository, it prints
    `qory run: no new commits to push`, and the step ends with no push and no version.
@@ -2642,9 +2642,19 @@ The step does this, in order:
    with no answer, or with a status of 500 or above, qory reads the work item's artifacts
    first, and sends the request again only when no version of this run has the file.
 
-A run's policy with path rules must allow `/<path>.git/git-receive-pack` for the push. The
-run's gateway returns 403 to a push to any ref but the run's branch, and to every push
-through a credential that has no `push_ref`, as a credential in forager.yaml has none.
+The push proxy is the run's second proxy on the run's gateway. qory starts it for the push,
+after it removed the setup container, and closes it when the push returns. It sets only the
+run configuration's push credentials, on the hosts and paths of their items, and returns
+403 to every other host and path. The run's policy does not apply there. The run's gateway
+returns 403 to a push that is not a plain push to the credential's `push_ref`, which is the
+run's branch: a push to any other ref, a signed push, and a push with push options.
+
+A run whose run configuration has no push credential has no push proxy. The step fails with
+`qory run: Contact support: this run has no push credential, so qory pushed nothing.`,
+a second line with the cause, and `the code is used`, and qory pushes nothing. A credential
+in forager.yaml is never a push credential. The run's proxy, which the agent, the setup, the
+fetch, and the runtime's install go through, sets no push credential, so a push through it
+gets 403, as a credential with no `push_ref` does.
 
 The step counts toward the run's time limit, and has 120 seconds when the run has less left,
 also after the session used up the limit. A run can pass its time limit by up to 120
@@ -2707,18 +2717,20 @@ Each of these lines fails the step. `<commit>` is the commit's first 12 characte
   the work item in again: the push failed: <error>; the code is used`, when a rule or a
   hook on the system stops the update
 - `Contact support: the push was refused (403).`, then lines indented by two spaces:
-  `One of these stopped it:`, the three causes, and a last line with the error. The
-  causes are `1. The run's gateway allows a push only to the run's branch,
-  refs/heads/qory/<work item id> (wall:push-ref).`, `2. The connection's setup has no path rule for
-  /<path>.git/git-receive-pack, or no credential with write access.`, `3. The forge stopped
-  the push: its permission for the run's credential, or a branch rule.` The last line is
+  `One of these most likely stopped it:`, the three causes, and a last line with the error.
+  The causes are `1. The run's push proxy refuses a push that is not a plain push to the
+  push_ref of the push credential (for example a signed push or a push with push options),
+  and qory pushes to refs/heads/qory/<work item id> (wall:push-ref).`, `2. The run's
+  push credential has no item for /<path>.git/git-receive-pack on <system>, and the push
+  proxy refuses every other host and path.`, `3. The forge stopped the push: its permission
+  for the push credential, or a branch rule.` The last line is
   `The push of <path> to <system> returned 403: <error>; the code is used`
 - `give the run's credential for <system> write access to <path>, then take the work item in
   again: the push through the run's gateway failed: <error>; the code is used`
-- `check that the run's policy allows <system> and that <system> is reachable, then take
-  the work item in again: the push of <path> through the run's gateway failed: <error>;
-  the code is used`
-- `take the work item in again in Qory Apiary: the run's host proxy, through which qory
+- `Let the run's gateway reach <system>, then take the work item in again.`, then a line
+  indented by two spaces: `The push of <path> through the run's push proxy failed:
+  <error>; the code is used`
+- `take the work item in again in Qory Apiary: the run's push proxy, through which qory
   pushes the run's commits, did not open: <error>; the code is used`
 - `take the work item in again in Qory Apiary: the run API, which stores the version of the
   artifact branch, is not reachable from this run: <error>; the code is used`
@@ -3454,6 +3466,9 @@ How it works:
   host is its endpoint's host.
 - Where a program wants a credential set, the container gets a placeholder. It never gets
   the token.
+- A push credential, `purpose: push` in the run configuration, is set only by the run's push
+  proxy, for qory's push step. The run's proxy never sets it, and no placeholder of it
+  reaches the container.
 
 Without a wall, the run gets the same placeholders, and the proxy sets the same tokens.
 Without a wall, qory and the agent run as the same user. So the agent can read the run's

@@ -6,7 +6,7 @@ require (
 	github.com/BurntSushi/toml v1.6.0
 	github.com/charmbracelet/lipgloss v1.1.0
 	github.com/charmbracelet/x/term v0.2.1
-	github.com/qoryai/forager v0.7.1-0.20261117040841-3d4ec18a5662
+	github.com/qoryai/forager v0.7.1-0.20261117102226-2052521ec3b9
 	github.com/qoryai/integrations v0.3.1-0.20261117115218-dc520f5ae79c
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3
 	github.com/spf13/cobra v1.10.2
