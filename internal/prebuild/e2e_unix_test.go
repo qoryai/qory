@@ -60,6 +60,9 @@ func TestBuildWithDocker(t *testing.T) {
 	_, _ = rand.Read(r[:])
 	id := hex.EncodeToString(r[:])
 	dir := t.TempDir()
+	// The temporary containers and images are named after name, so the check at the end
+	// counts the ones this test made, not those of other builds on the same engine.
+	name := "qory-prebuild-e2e-" + id
 
 	platform := docker(t, "version", "--format", "{{.Server.Os}}/{{.Server.Arch}}")
 	_, arch, _ := strings.Cut(platform, "/")
@@ -99,7 +102,7 @@ func TestBuildWithDocker(t *testing.T) {
 	t.Cleanup(func() { _ = exec.Command("docker", "image", "rm", "--force", tag).Run() })
 	var out, log bytes.Buffer
 	res, err := prebuild.Build(t.Context(), prebuild.Options{
-		Repository: repo, User: "1234:2345", Tag: tag,
+		Repository: repo, User: "1234:2345", Tag: tag, Name: name,
 		Helper: helper, SeedArgs: []string{"run", "seed"}, Env: append(os.Environ(), "DOCKER_CONFIG="+dockerConfigWithProxy), Out: &out, Log: &log,
 		Parsers: parsers, Node: node,
 	})
@@ -123,7 +126,7 @@ func TestBuildWithDocker(t *testing.T) {
 	if err := json.Unmarshal([]byte(docker(t, "image", "inspect", "--format", "{{json .Config}}", tag)), &cfg); err != nil {
 		t.Fatal(err)
 	}
-	if cfg.User != "1234:2345" || cfg.WorkingDir != "/workspace" || cfg.Entrypoint != nil || strings.Join(cfg.Cmd, " ") != "/bin/sh" {
+	if cfg.User != "1234:2345" || cfg.WorkingDir != "/workspace" || cfg.Entrypoint != nil || strings.Join(cfg.Cmd, " ") != "bash" {
 		t.Errorf("the image's configuration is %+v", cfg)
 	}
 	for _, args := range [][]string{{"image", "inspect", tag}, {"history", "--no-trunc", tag}} {
@@ -159,7 +162,7 @@ func TestBuildWithDocker(t *testing.T) {
 	t.Cleanup(func() { _ = exec.Command("docker", "image", "rm", "--force", refusedTag).Run() })
 	out.Reset()
 	_, err = prebuild.Build(t.Context(), prebuild.Options{
-		Repository: managed, User: "1234:2345", Tag: refusedTag,
+		Repository: managed, User: "1234:2345", Tag: refusedTag, Name: name,
 		Helper: helper, SeedArgs: []string{"run", "seed"}, Env: append(os.Environ(), "DOCKER_CONFIG="+dockerConfigWithProxy), Out: &out, Log: &log,
 		Parsers: parsers, Node: node,
 	})
@@ -192,7 +195,7 @@ func TestBuildWithDocker(t *testing.T) {
 	t.Cleanup(func() { _ = exec.Command("docker", "image", "rm", "--force", escapeTag).Run() })
 	out.Reset()
 	_, err = prebuild.Build(t.Context(), prebuild.Options{
-		Repository: escape, User: "1234:2345", Tag: escapeTag,
+		Repository: escape, User: "1234:2345", Tag: escapeTag, Name: name,
 		Helper: helper, SeedArgs: []string{"run", "seed"}, Env: append(os.Environ(), "DOCKER_CONFIG="+dockerConfigWithProxy), Out: &out, Log: &log,
 	})
 	var refusal *prebuild.RefusedError
@@ -203,10 +206,10 @@ func TestBuildWithDocker(t *testing.T) {
 		t.Error("the image with a context outside is tagged")
 	}
 
-	if left := docker(t, "ps", "--all", "--quiet", "--filter", "name=qory-prebuild-"); left != "" {
+	if left := docker(t, "ps", "--all", "--quiet", "--filter", "name="+name); left != "" {
 		t.Errorf("containers are left: %s", left)
 	}
-	if left := docker(t, "image", "ls", "--quiet", "--filter", "reference=qory-prebuild-*"); left != "" {
+	if left := docker(t, "image", "ls", "--quiet", "--filter", "reference="+name+"*"); left != "" {
 		t.Errorf("images are left: %s", left)
 	}
 }
