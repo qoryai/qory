@@ -15,6 +15,7 @@ import (
 	"github.com/qoryai/forager/accesskey"
 
 	"github.com/qoryai/qory/internal/exports"
+	"github.com/qoryai/qory/internal/stack"
 )
 
 // Referable are the kinds a reference may refer to: the entries a document dispatches by
@@ -28,7 +29,7 @@ var reference = regexp.MustCompile(`\$\{qory:([^}]*)\}`)
 
 // Tiers are the names an agent's model may set as a tier, which the compose replaces with
 // the model id the tier maps to.
-var Tiers = []string{"light", "fast", "thinking"}
+var Tiers = stack.Tiers
 
 // TierOf returns the name a value sets as a tier when the whole value is a tier
 // placeholder, ${qory:<name>}: the name not empty and with no slash, which tells it apart
@@ -44,17 +45,12 @@ func TierOf(value string) (string, bool) {
 
 // IsTier reports whether name is one of [Tiers].
 func IsTier(name string) bool {
-	for _, t := range Tiers {
-		if t == name {
-			return true
-		}
-	}
-	return false
+	return stack.IsTier(name)
 }
 
 // TierList is the tiers for a message: "light, fast, and thinking".
 func TierList() string {
-	return strings.Join(Tiers[:len(Tiers)-1], ", ") + ", and " + Tiers[len(Tiers)-1]
+	return stack.TierList()
 }
 
 // HasControl reports whether a tier's model id or effort contains a line end or another

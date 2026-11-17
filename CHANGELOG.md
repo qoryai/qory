@@ -18,6 +18,9 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Added
 
+- A stack's workflow may set `tier` to `light`, `fast` or `thinking`, which names the
+  main session's model and effort for a dispatched run. Any other value refuses the
+  stack. `qory run` does not read it.
 - The `agent` image has the Node packages `typescript` 5.9.3, `libpg-query` 18.2.4,
   `parse5` 8.1.1, `postcss` 8.5.33 and `postcss-scss` 4.0.9 in `/opt/qory/parsers`. The
   folder belongs to root and no other user can write to it. A script loads a package with
