@@ -108,9 +108,11 @@ type codeRun struct {
 	named    *source.Named
 	workflow string
 	inputs   []byte
-	minutes  int
-	hidden   bool
-	target   preparation.Target
+	// fullSuite is the documents' full_suite: whether session 1 runs the full suite.
+	fullSuite bool
+	minutes   int
+	hidden    bool
+	target    preparation.Target
 	// access is what the run may do on its target, from the documents' access: read,
 	// write, or write-no-push (a writable checkout with no push step). It is empty when
 	// the documents have no target.
@@ -194,7 +196,7 @@ func codeRunOf(doc contracts.Documents) (*codeRun, error) {
 	if doc.Target != nil {
 		target.System, target.Path, target.Version = doc.Target.System, doc.Target.Path, doc.TargetVersion
 	}
-	r := &codeRun{runtime: runtime, settings: settings, harness: harness, defines: defines, workflow: doc.Workflow, inputs: doc.Inputs, minutes: doc.TimeLimitMinutes, hidden: hidden, target: target, access: doc.Access}
+	r := &codeRun{runtime: runtime, settings: settings, harness: harness, defines: defines, workflow: doc.Workflow, inputs: doc.Inputs, minutes: doc.TimeLimitMinutes, fullSuite: doc.FullSuite, hidden: hidden, target: target, access: doc.Access}
 	if doc.WorkItem != nil {
 		r.workItem = doc.WorkItem.ID
 	}

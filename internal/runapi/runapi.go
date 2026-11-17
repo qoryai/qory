@@ -425,6 +425,16 @@ func (c *Client) PushVerdict(ctx context.Context, verdict string, points []Point
 	return c.post(ctx, "/verdict", body)
 }
 
+// PushVerdictDocument stores body, a verdict document of the form of [VerdictBody], with a
+// track too when the verdict has one: [Client.PushVerdict] sends none.
+func (c *Client) PushVerdictDocument(ctx context.Context, body []byte) (*Pushed, error) {
+	if len(body) > maxVerdictBody {
+		return nil, &Error{Code: CodePayloadTooLarge, Request: "POST /verdict", Limit: maxVerdictBody}
+	}
+
+	return c.post(ctx, "/verdict", body)
+}
+
 // VerdictBody is the document of a verdict, as POST verdict reads it and as the file of
 // a version of the artifact type verdict: verdict, and points when there are any.
 func VerdictBody(verdict string, points []Point) ([]byte, error) {

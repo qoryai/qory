@@ -504,6 +504,26 @@ release may change what an existing document does, and states it under Upgrading
   qory serves no path on it, and answers `404` to a request of the session that runs. The
   setup container of `wall.setup: outside` gets neither the variable nor the route. See The
   route to qory in `docs/run.md`.
+- A session runs the repository's full test suite when the run documents have `full_suite`
+  true. Forager's after step runs it after the agent's container is removed: when HEAD moved,
+  the `full` command of the build plan that the work item had at the launch runs in a fresh
+  clone of HEAD, in a container of the run's image on the run's network, so the run's egress
+  policy applies. A session that left HEAD where it started runs no suite. The limit is
+  `command_limits_minutes.full_suite`, 60 minutes by default, as the after step's time limit.
+  A suite that ran and failed posts `changes-requested` with one point over a `passed` verdict
+  or none, or adds the point to an `escalate`, and does not end the run `failed`; when the
+  proxy refused a host while the suite ran, the point has the host. A suite that did not start
+  posts `escalate` with the point `The full suite did not start: <cause>.`; for a cause in the
+  build plan that the agent wrote, such as no `full` row, it posts `changes-requested` with the
+  point and a fix, and over an agent's `changes-requested` it adds the point. A session
+  whose after step did not run posts `escalate` with `The full suite did not run: ...`, and so does
+  a run API that cannot be reached at the launch. A container that did not start posts `Contact
+  support: ...`, with the macOS case named. qory prints the same cause, and the fix first, as a line at
+  the launch, and the cause alone as the line at the end of the run. A step that reaches its limit
+  before the suite's command started posts `escalate`; one that reaches it after stays red. A green suite posts
+  nothing. If qory cannot post the verdict, the run closes `failed`. A stop of `qory run` during
+  the suite closes the run `cancelled`, with the reason `interrupted`. See The full suite in
+  `docs/run.md`.
 
 ### Changed
 
@@ -511,7 +531,9 @@ release may change what an existing document does, and states it under Upgrading
   run's documents. The documents have no `run_settings.time_limit_minutes` any more, and
   qory stops a run whose documents have one. A run whose documents set no
   `time_limit_minutes` keeps the limit of its workflow, else 3 hours. The documents can
-  also contain `shared_run` and `full_suite`; qory reads them and changes nothing for them.
+  also contain `shared_run` and `full_suite`. With `full_suite` true, the session runs the full
+  test suite when it ends, as The full suite in `docs/run.md` describes; qory reads `shared_run`
+  and changes nothing for it.
 - The push step of a write run pushes through the run's push proxy, which sets the run
   configuration's push credentials alone, and the run's proxy no longer adds push
   credentials. A run with no push credential stops at the push with `Contact
