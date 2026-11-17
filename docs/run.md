@@ -2072,8 +2072,8 @@ is set to, with no agent:
    session gets none of this machine's variables and no model key.
 4. Behind the wall, the helper builds the development container configuration on the
    wall's nested Docker, in two steps: the environment image, tagged
-   `<environment_destination>:<run id>`, then the target image from it, with the agent
-   added, tagged `<image_destination>:<run id>`. The build keeps the environment image
+   `<environment_destination>:<run id>`, then the target image from it, with the tools
+   and the wall user added, tagged `<image_destination>:<run id>`. The build keeps the environment image
    apart only when the image depends on the configuration's bytes alone. When the
    documents set `environment_image`, the build starts the target image from that image
    and builds no environment image. The build's steps get the run's proxy as Docker's
@@ -2093,6 +2093,68 @@ is set to, with no agent:
    image its target step starts from, and none when the build started from
    `environment_image`, from scratch, or from an image it cannot resolve before it
    builds. Then qory closes the run as succeeded, and exits 0.
+
+The target step adds these tools to the image its target starts from, whether the image is a
+prebuilt one, such as `mcr.microsoft.com/devcontainers/base`, or one the configuration
+builds, and the run's session finds them without a download:
+
+- Chromium at `/usr/bin/chromium`, and `ffmpeg` with `ffprobe`, with Noto's fonts for
+  Latin and other scripts, CJK, and color emoji. Where Chromium comes from depends on the
+  base image:
+  - **Debian**, any release: `apt-get` installs the `chromium` package.
+  - **Ubuntu 22.04 and 24.04**, `amd64` and `arm64`: Ubuntu's `chromium` package is a
+    snap, which does not run in a container, so the step downloads Chrome for Testing
+    159.0.8154.6, the Chromium of Playwright 1.65.1 (browser revision 1255), from
+    `https://storage.googleapis.com/chrome-for-testing-public/159.0.8154.6/`, the
+    addresses Google lists for that version. `curl` allows `https` only and follows no
+    redirect. The step checks the archive's sha256 sum, which is in
+    `internal/prebuild/tools.go`, before it extracts it to `/opt/qory/chromium`, owned by
+    root, and links `/usr/bin/chromium` to it. It installs the libraries Playwright's
+    `install-deps` lists for the release, `curl`, and `unzip` with `apt-get`. A base that
+    has a file at `/usr/bin/chromium` stops the step.
+
+  `apt-get` installs `ffmpeg`, the fonts and the libraries with no recommended packages
+  from the apt sources the base image has, and removes its archives and lists in the same
+  layer. Their versions are the ones the base image's suite serves on the day of the
+  build, so they differ between builds: the log of the step prints each version.
+- The Node packages `typescript`, `libpg-query`, `parse5`, `postcss` and `postcss-scss` in
+  `/opt/qory/parsers`, as in the `agent` image: a copy of the folder of the same path in
+  the `prebuild` image, installed there from `images/agent/parsers/package-lock.json`. The
+  folder belongs to root and is read-only for every other user.
+- `node`, when the base image has none on its PATH: a copy of the `prebuild` image's
+  `/usr/local/bin/node`, Node 24. An image that has `node` keeps it, and the step checks
+  that it loads each parser, which needs Node 20.19 or later.
+
+The step runs the programs as the wall user and checks that Chromium starts, `ffmpeg` and
+`ffprobe` run, each parser loads at the version of `package.json`, and the wall user
+cannot write to `/opt/qory/parsers`. A failed check prints its fix first in the build's
+log. Behind the wall, `apt-get` reaches the base image's apt sources, and on Ubuntu `curl`
+reaches `storage.googleapis.com`, through the run's proxy, so the run's egress must
+include them. `storage.googleapis.com` is the one host of the download.
+
+The step reads `ID`, `VERSION_ID` and `apt-get` in a container of the base image with no
+network, and stops before it builds a layer when the base is none of the above. The first
+line of the error is the fix, and the second line has the image's value, at most 32
+characters of it:
+
+- `use a Debian or Ubuntu image: the build adds Chromium only to these`, then `this
+  image's ID is "<ID>"`;
+- `use Ubuntu 22.04 or 24.04, or Debian: the build adds Chromium only to these`, then
+  `this image is Ubuntu "<VERSION_ID>"`;
+- `use an amd64 or arm64 Ubuntu image: the build adds Chromium only for these`, then
+  `this image's architecture is "<architecture>"`;
+- `use a Debian or Ubuntu image that has apt-get: the build installs ffmpeg and fonts with
+  it`.
+
+An Alpine base, or an Ubuntu base of another release, stops the prebuild this way.
+A prebuild whose `prebuild` image is
+not built FROM the `agent` image stops with `build the prebuild image FROM Qory's agent
+image, which has the parsers`, then `the folder /opt/qory/parsers has none`.
+
+The step adds about 1.6 GiB to the image, measured on
+`mcr.microsoft.com/devcontainers/base` for arm64 (1.3 GiB before, 3.0 GiB after), and
+about 1.4 GiB on `mcr.microsoft.com/devcontainers/typescript-node` (2.7 GiB before, 4.1 GiB
+after). The build sets no limit on the image's size.
 
 The build takes the user from `wall.user` in `forager.yaml`. The wall's helper is
 `wall.helper`, or on Linux the `qory` you run. When `forager.yaml` sets `pool.registry`,

@@ -23,6 +23,16 @@ release may change what an existing document does, and states it under Upgrading
   folder belongs to root and no other user can write to it. A script loads a package with
   `require('/opt/qory/parsers/node_modules/<package>')`. See
   Qory's images in `docs/run.md`.
+- The image of a prebuild has Chromium at `/usr/bin/chromium`, with Noto's fonts, `ffmpeg`
+  and `ffprobe`, and the same Node parsers in `/opt/qory/parsers`, whether the target
+  starts from a prebuilt development container image, such as
+  `mcr.microsoft.com/devcontainers/base`, or from one the configuration builds. On a
+  Debian base, `apt-get` installs Chromium. On Ubuntu 22.04 and 24.04, `amd64` and
+  `arm64`, qory downloads Chrome for Testing 159.0.8154.6, the Chromium of Playwright
+  1.65.1, from `storage.googleapis.com`, checks its sha256 sum and extracts it to
+  `/opt/qory/chromium`, because Ubuntu's package is a snap. qory copies the parsers from the `prebuild` image, and `node` from it
+  when the base image has none. It prints `prebuild: added Chromium, ffmpeg and the
+  parsers in <time>`. See `docs/run.md`.
 - A run takes the lower of its workflow's `access` and `access` in its documents, in
   the order `read`, `write-no-push`, `write`. A workflow's `access` in a stack takes
   `write-no-push` in both schemas and in the stack check, and documents may have it. A
@@ -471,6 +481,12 @@ release may change what an existing document does, and states it under Upgrading
   route to qory in `docs/run.md`.
 
 ### Changed
+
+- A prebuild keeps an image of any size, and the last line of the prebuild prints the size.
+- A prebuild stops, before it builds the image, when the base image is not Debian or
+  Ubuntu 22.04 or 24.04, or has no `apt-get`: `use a Debian or Ubuntu image: the build
+  adds Chromium only to these`. Alpine bases and other Ubuntu
+  releases that built before are refused.
 
 - The `agent`, `agent-docker` and `prebuild` images contain no agent runtime. The machine
   installs the runtime at run time, and Forager mounts it read-only at
