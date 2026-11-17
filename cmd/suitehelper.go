@@ -239,8 +239,8 @@ func readBuildPlan(ctx context.Context, client *runapi.Client) (string, error) {
 	return "", errNoBuildPlan
 }
 
-// after judges the suite, writes its result for the reviewers, and posts the verdict of a suite
-// that did not pass, before the push step. A red suite leaves the run's outcome as the session's.
+// after judges the suite, writes its result, and posts the verdict of a suite that did not pass
+// when no result file is named, before the push step. A red suite leaves the run's outcome.
 func (r *suiteRun) after(ctx, again context.Context, limit time.Time, res *session.Result, out session.Outcome) (session.Outcome, error) {
 	if r == nil {
 		return out, nil
@@ -263,32 +263,45 @@ func (r *suiteRun) after(ctx, again context.Context, limit time.Time, res *sessi
 			ExitCode:  a.ExitCode,
 		})
 	}
-	r.writeResult(got, ran)
+	// A suite that did not pass has one point: the finding in the result file, or the verdict.
+	var point *runapi.Point
+	if ran && got.State.Red() {
+		refused := suite.Refused{Local: true}
+		if got.Started && got.State != suite.Stopped {
+			refused = suite.ReadRefused(filepath.Join(r.run.Dir(), sink.EventsFile), step)
+		}
+		p := suitePoint(got, refused, r.minutes)
+		point = &p
+	}
+	writeErr := r.writeResult(got, ran, point)
 	if out.State != event.StateSucceeded {
 		return out, nil
+	}
+	if got.State == suite.Stopped {
+		return r.cut(ctx, again, limit, *point)
 	}
 	switch {
 	case !ran:
 		r.said(textSuiteNoAfter)
-		return out, nil
 	case got.State == suite.Skipped:
 		r.said(textSuiteSkipped)
-		return out, nil
 	case got.State == suite.Passed:
 		r.said(fmt.Sprintf(textSuiteEnded, onCommit(got.Commit), got.State, countsSuffix(got.Counts)))
 		r.said(textSuiteGreen)
-		return out, nil
-	case got.State == suite.Stopped:
-		return r.cut(ctx, again, limit, got)
+	default:
+		r.said(fmt.Sprintf(textSuiteEnded, onCommit(got.Commit), got.State, countsSuffix(got.Counts)))
 	}
-	r.said(fmt.Sprintf(textSuiteEnded, onCommit(got.Commit), got.State, countsSuffix(got.Counts)))
-	refused := suite.Refused{Local: true}
-	if got.Started {
-		refused = suite.ReadRefused(filepath.Join(r.run.Dir(), sink.EventsFile), step)
+	// A run with a result file posts no verdict: a stage with reviewers sends it. A result file
+	// that could not be written must not leave the run passed.
+	if writeErr != nil {
+		return session.Outcome{State: event.StateFailed, ExitCode: 1}, &exitError{code: 1}
+	}
+	if point == nil || r.resultFile != "" {
+		return out, nil
 	}
 	postCtx, cancelPost := pushContext(ctx, again, limit, pushTimes.limit, pushTimes.signal)
 	defer cancelPost()
-	posted, err := r.post(postCtx, suitePoint(got, refused, r.minutes), got.NotStarted(), maxBranchTries)
+	posted, err := r.post(postCtx, *point, got.NotStarted(), maxBranchTries)
 	if err != nil {
 		r.said(fmt.Sprintf(textSuiteNoPost, shownError(err)))
 		return session.Outcome{State: event.StateFailed, ExitCode: 1}, &exitError{code: 1}
@@ -304,19 +317,21 @@ func (r *suiteRun) after(ctx, again context.Context, limit time.Time, res *sessi
 const cutPostWait = 5 * time.Second
 
 // cut ends the run after a stop cut the after step of a session that succeeded: qory posts the
-// red verdict with one try and closes the run cancelled with the reason interrupted, exit 1.
-func (r *suiteRun) cut(ctx, again context.Context, limit time.Time, got suite.Outcome) (session.Outcome, error) {
+// red verdict with one try (none with a result file) and closes the run cancelled, interrupted, exit 1.
+func (r *suiteRun) cut(ctx, again context.Context, limit time.Time, point runapi.Point) (session.Outcome, error) {
 	r.said(textSuiteCut)
-	postCtx, cancelPost := pushContext(ctx, again, limit, pushTimes.limit, pushTimes.signal)
-	defer cancelPost()
-	postCtx, cancelWait := context.WithTimeout(postCtx, cutPostWait)
-	defer cancelWait()
-	posted, err := r.post(postCtx, suitePoint(got, suite.Refused{Local: true}, r.minutes), false, 1)
-	switch {
-	case err != nil:
-		r.said(fmt.Sprintf(textSuiteNoPost, shownError(err)))
-	case posted != "":
-		r.said(posted)
+	if r.resultFile == "" {
+		postCtx, cancelPost := pushContext(ctx, again, limit, pushTimes.limit, pushTimes.signal)
+		defer cancelPost()
+		postCtx, cancelWait := context.WithTimeout(postCtx, cutPostWait)
+		defer cancelWait()
+		posted, err := r.post(postCtx, point, false, 1)
+		switch {
+		case err != nil:
+			r.said(fmt.Sprintf(textSuiteNoPost, shownError(err)))
+		case posted != "":
+			r.said(posted)
+		}
 	}
 	return session.Outcome{State: event.StateCancelled, Reason: event.ReasonInterrupted, ExitCode: -1}, &exitError{code: 1}
 }

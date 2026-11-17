@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"encoding/json"
-	"net/http"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -12,6 +11,7 @@ import (
 	"github.com/qoryai/forager/event"
 	"github.com/qoryai/forager/session"
 
+	"github.com/qoryai/qory/internal/runapi"
 	"github.com/qoryai/qory/internal/secretmask"
 	"github.com/qoryai/qory/internal/suite"
 )
@@ -64,10 +64,12 @@ func readResult(t *testing.T, file string) map[string]any {
 }
 
 // TestTheResultFileHasTheStateOfEveryEnd: qory writes the file for each end of the suite, also for a
-// session that did not succeed, and before the verdict goes out: a post that fails leaves the file.
+// session that did not succeed. A suite that did not pass is one finding in it, and no verdict
+// goes out, whatever the end.
 func TestTheResultFileHasTheStateOfEveryEnd(t *testing.T) {
 	secretmask.Default().Add("s3cret-value-for-the-test")
 	one := 1
+	finding := func(text string) *runapi.Point { return &runapi.Point{Text: text, Action: "run_again"} }
 	for _, c := range []struct {
 		name    string
 		status  string
@@ -81,24 +83,23 @@ func TestTheResultFileHasTheStateOfEveryEnd(t *testing.T) {
 		{"green", "ran " + suiteSHA, greenResult, "ok\n", "95", &session.AfterResult{Step: 2, State: event.StateSucceeded}, succeeded,
 			suiteResult{Commit: suiteSHA, State: "passed", Counts: countsOf(2, 0, 0), Minutes: ptr(2), Output: "ok\n"}},
 		{"red", "ran " + suiteSHA, redResult, "FAIL\n", "5", &session.AfterResult{Step: 2, State: event.StateFailed, ExitCode: 1}, succeeded,
-			suiteResult{Commit: suiteSHA, State: "failed", Counts: countsOf(2, 1, 0), Minutes: &one, Output: "FAIL\n"}},
+			suiteResult{Commit: suiteSHA, State: "failed", Counts: countsOf(2, 1, 0), Minutes: &one, Output: "FAIL\n", Finding: finding("The full suite failed: 1 of 2 tests failed.")}},
 		{"a secret in the output", "ran " + suiteSHA, greenResult, "token s3cret-value-for-the-test\n", "5", &session.AfterResult{Step: 2, State: event.StateSucceeded}, succeeded,
 			suiteResult{Commit: suiteSHA, State: "passed", Counts: countsOf(2, 0, 0), Minutes: &one, Output: "token " + secretmask.Placeholder + "\n"}},
 		{"the cap", "ran " + suiteSHA, "", "", "", &session.AfterResult{Step: 2, State: event.StateCancelled, Reason: event.ReasonTimeout, ExitCode: 143}, succeeded,
-			suiteResult{Commit: suiteSHA, State: "timeout", Minutes: ptr(7)}},
+			suiteResult{Commit: suiteSHA, State: "timeout", Minutes: ptr(7), Finding: finding("The full suite did not finish: the after step reached its limit of 7 minutes.")}},
 		{"a stop", "ran " + suiteSHA, "", "", "", &session.AfterResult{Step: 2, State: event.StateCancelled, ExitCode: -1}, succeeded,
-			suiteResult{Commit: suiteSHA, State: "stopped"}},
+			suiteResult{Commit: suiteSHA, State: "stopped", Finding: finding("The full suite did not finish: the run was stopped.")}},
 		{"skipped", "skipped", "", "", "", &session.AfterResult{Step: 2, State: event.StateSucceeded}, succeeded,
 			suiteResult{State: "skipped"}},
 		{"the script never started", "", "", "", "", &session.AfterResult{Step: 2, State: event.StateFailed, ExitCode: 71}, succeeded,
-			suiteResult{State: "failed"}},
+			suiteResult{State: "failed", Finding: finding("The full suite did not start: git could not clone HEAD of the workspace.")}},
 		{"the after step did not run", "", "", "", "", nil, succeeded, suiteResult{State: "did_not_run"}},
 		{"a session that failed", "ran " + suiteSHA, redResult, "FAIL\n", "5", &session.AfterResult{Step: 2, State: event.StateFailed, ExitCode: 1}, session.Outcome{State: event.StateFailed, ExitCode: 3},
-			suiteResult{Commit: suiteSHA, State: "failed", Counts: countsOf(2, 1, 0), Minutes: &one, Output: "FAIL\n"}},
+			suiteResult{Commit: suiteSHA, State: "failed", Counts: countsOf(2, 1, 0), Minutes: &one, Output: "FAIL\n", Finding: finding("The full suite failed: 1 of 2 tests failed.")}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			h := newHelper(t)
-			h.api.verdictStatus = http.StatusServiceUnavailable
 			h.resultFile = filepath.Join(t.TempDir(), "suite.json")
 			if c.status != "" {
 				h.state(t, c.status, c.result)
@@ -112,6 +113,9 @@ func TestTheResultFileHasTheStateOfEveryEnd(t *testing.T) {
 			}
 			writeEvents(t, h.runDir, afterStarted(3, 2), afterExited(4, 2))
 			h.after(c.end, c.session)
+			if posted := h.api.verdicts(); len(posted) != 0 {
+				t.Errorf("posted %q with a result file", posted)
+			}
 			var want map[string]any
 			data, _ := json.Marshal(c.want)
 			json.Unmarshal(data, &want)
@@ -151,7 +155,8 @@ func TestARunWithNoResultFileWritesNone(t *testing.T) {
 }
 
 // TestAResultFileThatCannotBeWrittenIsALine: a folder that is gone, or a link, gives the line with
-// the fix first, writes nothing, and the verdict still goes out.
+// the fix first, writes nothing, posts nothing, and closes a run whose session succeeded
+// failed with exit status 1: the run is not left passed.
 func TestAResultFileThatCannotBeWrittenIsALine(t *testing.T) {
 	root := t.TempDir()
 	real := filepath.Join(root, "real")
@@ -170,7 +175,10 @@ func TestAResultFileThatCannotBeWrittenIsALine(t *testing.T) {
 			h := newHelper(t)
 			h.resultFile = file
 			writeEvents(t, h.runDir, afterStarted(3, 2), afterExited(4, 2))
-			h.after(ranRed(t, h), succeeded)
+			got, err := h.after(ranRed(t, h), succeeded)
+			if got.State != event.StateFailed || got.ExitCode != 1 || ExitCode(err) != 1 {
+				t.Errorf("outcome %+v, error %v, want failed with 1", got, err)
+			}
 			var line string
 			for _, l := range *h.said {
 				if strings.HasPrefix(l, "Check the folder of review.suite_result") {
@@ -186,9 +194,55 @@ func TestAResultFileThatCannotBeWrittenIsALine(t *testing.T) {
 			if entries, _ := os.ReadDir(real); len(entries) != 0 {
 				t.Errorf("a file in the folder the link leads to: %v", entries)
 			}
-			if len(h.api.verdicts()) != 1 {
+			if len(h.api.verdicts()) != 0 {
 				t.Errorf("posted %q", h.api.verdicts())
 			}
 		})
+	}
+}
+
+// TestAStopWithAResultFileClosesTheRunCancelledAndPostsNothing.
+func TestAStopWithAResultFileClosesTheRunCancelledAndPostsNothing(t *testing.T) {
+	h := newHelper(t)
+	h.resultFile = filepath.Join(t.TempDir(), "suite.json")
+	h.state(t, "ran "+suiteSHA, "")
+	got, err := h.after(&session.AfterResult{Step: 2, State: event.StateCancelled, ExitCode: -1}, succeeded)
+	if got.State != event.StateCancelled || got.Reason != event.ReasonInterrupted || ExitCode(err) != 1 {
+		t.Errorf("outcome %+v, error %v", got, err)
+	}
+	if posted := h.api.verdicts(); len(posted) != 0 {
+		t.Errorf("posted %q", posted)
+	}
+	if res := readResult(t, h.resultFile); res["state"] != "stopped" {
+		t.Errorf("the file has %v", res)
+	}
+}
+
+// TestWithAResultFileNoVerdictGoesOutForAnyEnd: green, red, did not start and the cap all write the
+// file and post nothing, over any prior verdict of the agent.
+func TestWithAResultFileNoVerdictGoesOutForAnyEnd(t *testing.T) {
+	for _, agent := range []string{"", `{"verdict":"passed"}`, `{"verdict":"escalate","points":[{"text":"x","action":"run_again"}]}`} {
+		for name, end := range map[string]session.AfterResult{
+			"green":     {Step: 2, State: event.StateSucceeded},
+			"red":       {Step: 2, State: event.StateFailed, ExitCode: 1},
+			"not start": {Step: 2, State: event.StateFailed, ExitCode: 71},
+			"cap":       {Step: 2, State: event.StateCancelled, Reason: event.ReasonTimeout, ExitCode: 143},
+		} {
+			h := newHelper(t)
+			h.resultFile = filepath.Join(t.TempDir(), "suite.json")
+			if agent != "" {
+				h.api.add(fakeVersion{artifact: "verdict", name: "main", number: 1, runID: "r1", file: "verdict.json", content: agent})
+			}
+			if name != "not start" {
+				h.state(t, "ran "+suiteSHA, "")
+			}
+			e := end
+			if got, err := h.after(&e, succeeded); err != nil || got != succeeded {
+				t.Errorf("%s: outcome %+v, error %v", name, got, err)
+			}
+			if posted := h.api.verdicts(); len(posted) != 0 {
+				t.Errorf("%s: posted %q", name, posted)
+			}
+		}
 	}
 }

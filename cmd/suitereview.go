@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/qoryai/qory/internal/integration"
+	"github.com/qoryai/qory/internal/runapi"
 	"github.com/qoryai/qory/internal/secretmask"
 	"github.com/qoryai/qory/internal/suite"
 )
@@ -56,15 +57,18 @@ type suiteResult struct {
 	Counts  *suite.Counts `json:"counts"`
 	Minutes *int          `json:"minutes"`
 	Output  string        `json:"output"`
+	// Finding is the one finding that qory writes for a suite that did not pass, as a verdict
+	// point; nil for a suite that passed or was skipped, or a session whose step did not run.
+	Finding *runapi.Point `json:"finding"`
 }
 
 // resultOf is the file's content for the suite got, or for a session whose after step did not
 // run when ran is false. The cap is the minutes of a suite that the limit cut.
-func resultOf(got suite.Outcome, ran bool, capMinutes int) suiteResult {
+func resultOf(got suite.Outcome, ran bool, capMinutes int, finding *runapi.Point) suiteResult {
 	if !ran {
 		return suiteResult{State: stateNotRun}
 	}
-	res := suiteResult{Commit: got.Commit, State: string(got.State), Counts: got.Counts, Output: secretmask.Default().Replace(got.Output)}
+	res := suiteResult{Commit: got.Commit, State: string(got.State), Counts: got.Counts, Output: secretmask.Default().Replace(got.Output), Finding: finding}
 	switch {
 	case got.State == suite.Timeout:
 		res.Minutes = &capMinutes
@@ -75,20 +79,21 @@ func resultOf(got suite.Outcome, ran bool, capMinutes int) suiteResult {
 	return res
 }
 
-// writeResult writes the result of the suite to the file of review.suite_result, before the verdict
-// goes out; with no such file it writes nothing. A failure is a line of qory run: the reviewers
-// find no file.
-func (r *suiteRun) writeResult(got suite.Outcome, ran bool) {
+// writeResult writes the result of the suite to the file of review.suite_result, with finding for a
+// suite that did not pass; with no such file it writes nothing. A failure is a line of qory run,
+// and the error: the reviewers find no file.
+func (r *suiteRun) writeResult(got suite.Outcome, ran bool, finding *runapi.Point) error {
 	if r.resultFile == "" {
-		return
+		return nil
 	}
-	body, err := json.Marshal(resultOf(got, ran, r.minutes))
+	body, err := json.Marshal(resultOf(got, ran, r.minutes, finding))
 	if err == nil {
 		err = writeSuiteResult(r.resultFile, append(body, '\n'))
 	}
 	if err != nil {
 		r.said(fmt.Sprintf(textSuiteNoResult, r.resultFile, shownError(err)))
 	}
+	return err
 }
 
 // writeSuiteResult writes data to file, mode 0644: whole or not at all, through a new file in

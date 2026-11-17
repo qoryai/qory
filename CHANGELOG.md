@@ -481,7 +481,8 @@ release may change what an existing document does, and states it under Upgrading
   posts `escalate` with the point `The full suite did not start: <cause>.` A green suite posts
   nothing. If qory cannot post the verdict, the run closes `failed`. A stop of `qory run` during
   the suite closes the run `cancelled`, with the reason `interrupted`. When the run's inputs have
-  `review.suite_result`, qory writes the suite's result to that file. See The full suite in
+  `review.suite_result`, qory writes the suite's result, with one finding for a suite that did
+  not pass, to that file and posts no verdict for it. See The full suite in
   `docs/run.md`.
 
 ### Changed

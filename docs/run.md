@@ -2529,7 +2529,8 @@ run's gateway returns 403 to a push to any ref but the run's branch, and to ever
 through a credential that has no `push_ref`, as a credential in forager.yaml has none.
 
 The step counts toward the run's time limit, and has 120 seconds when the run has less left,
-also after the session used up the limit. A run can pass its time limit by up to 120
+also after the session used up the limit. The 120 seconds do not count the full suite's after
+step, which ends before the push step starts. A run can pass its time limit by up to 120
 seconds. A first signal, before or during the step, cuts the step to at most 15 seconds. A
 second signal ends the step at once. A step that one of these ended has the state
 `cancelled`, and the commits it made stay in the working folder.
@@ -3359,19 +3360,23 @@ With exit status 0 and no readable result file, the suite is `passed` and has no
 `timeout` is a step that the limit cut. A step that a stop of `qory run` cut is `stopped`.
 
 **The file of `review.suite_result`.** When the run's inputs have `review.suite_result`, a clean
-absolute path, qory writes the suite's result there, mode 0644, before it posts a verdict, for
-every end and also after a session that did not succeed. The file is JSON with `commit`, `state`,
-`counts`, `minutes` and `output`. `state` is `passed`, `failed`, `timeout`, `stopped`, `skipped`
+absolute path, qory writes the suite's result there, mode 0644, for every end and also after a
+session that did not succeed, and posts no verdict for the suite: a stage with reviewers sends
+it. The file is JSON with `commit`, `state`, `counts`, `minutes`, `output` and `finding`.
+`finding` is the one point that the verdict would have, with `text`, `action` and `fix`, for a
+suite that did not pass or did not start, and `null` otherwise. `state` is `passed`, `failed`, `timeout`, `stopped`, `skipped`
 or `did_not_run`, for a session whose after step did not run. `counts` and `minutes` are `null`
 when qory cannot read them, `minutes` is the cap for a `timeout`, and `output` is the last 64 KiB
 of the command's output with the run's secrets masked. The folder of the file must exist and be
 no link. A file that qory cannot write gives the line `Check the folder of review.suite_result,
-then run the stage again.` and nothing else changes. With no `review.suite_result`, qory writes
-nothing.
+then run the stage again.` and closes a run whose session succeeded `failed`, with exit status 1.
+A stop of `qory run` during the suite still closes the run `cancelled`. With no
+`review.suite_result`, qory writes nothing and posts the verdict as below.
 
 **After the session.** When the session succeeded and the suite ended, qory prints `the full
 suite on <commit> is <state>` with the counts. A `passed` suite posts nothing, and the agent's
-verdict stands. A suite that did not pass makes qory post a verdict through the run API.
+verdict stands. With no `review.suite_result`, a suite that did not pass makes qory post a verdict through the
+run API.
 
 A red suite, whose command ran (`failed` or `timeout`):
 
@@ -3395,7 +3400,7 @@ A red suite does not end the run `failed` and does not change its exit status: t
 as its session did, and the verdict starts the next round in Qory Apiary. If qory cannot post
 the verdict, it closes the run `failed` and exits 1, so a verdict of `passed` that the agent
 posted does not stand over a suite that did not pass. A stop of `qory run` that cuts the step
-posts the red verdict with the point `The full suite did not finish: the run was stopped.`, with
+posts, with no `review.suite_result`, the red verdict with the point `The full suite did not finish: the run was stopped.`, with
 one request that has 5 seconds, and closes the run `cancelled` with the reason `interrupted` and
 exit status 1, whether or not the post worked. qory checks each verdict against the verdict format
 before it posts it.

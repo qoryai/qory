@@ -383,6 +383,12 @@ func TestTheFileOfReviewSuiteResultHasTheSuiteAfterTheSession(t *testing.T) {
 			if !strings.Contains(string(data), `"state":"`+c.state+`"`) {
 				t.Errorf("the file has %s, want state %s", data, c.state)
 			}
+			if posted := api.posted(); len(posted) != 0 {
+				t.Errorf("posted %q with a result file", posted)
+			}
+			if c.state == "failed" && !strings.Contains(string(data), `"finding":{"text":"The full suite failed: 1 of 2 tests failed."`) {
+				t.Errorf("the file has %s, want the finding", data)
+			}
 			if c.state == "failed" && !strings.Contains(string(data), `"counts":{"tests":2,"failed":1,"skipped":0}`) {
 				t.Errorf("the file has %s, want the counts", data)
 			}
