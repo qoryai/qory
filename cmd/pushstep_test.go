@@ -294,6 +294,32 @@ type pushRepo struct {
 	// process. runID and runsDir are those of the last open.
 	real           bool
 	runID, runsDir string
+	// gateway, when set, is called by each report over the link with its number, from 1, before
+	// the call reaches Qory Apiary: a non-nil error is the gateway's answer to the call, and the
+	// call goes no further. linkMu guards the numbers and the limits of the calls.
+	gateway    func(n int) error
+	linkMu     sync.Mutex
+	linkCalls  int
+	linkLimits []time.Duration
+}
+
+// viaLink is each report of the run over the link of its gateway: [pushRepo.gateway] first,
+// then the run API of [pushAPI] as Qory Apiary. It notes how long the call has, the time to the
+// context's deadline.
+func (p *pushRepo) viaLink(ctx context.Context, body []byte) ([]byte, error) {
+	p.linkMu.Lock()
+	p.linkCalls++
+	n := p.linkCalls
+	if deadline, ok := ctx.Deadline(); ok {
+		p.linkLimits = append(p.linkLimits, time.Until(deadline))
+	}
+	p.linkMu.Unlock()
+	if p.gateway != nil {
+		if err := p.gateway(n); err != nil {
+			return nil, err
+		}
+	}
+	return cmd.PushedThroughLink(ctx, p.api.base(), body)
 }
 
 // record is the path of the session's record of the last run.
@@ -386,7 +412,7 @@ func (p *pushRepo) run(t *testing.T, agent func(dir string), result func() (*ses
 		System: proxygittest.Host, Repositories: p.repositories, RunAPI: p.api.base(),
 		Proxy: p.h.server.Proxy.URL, CABundle: p.h.server.Proxy.CABundle, Dir: p.h.runDir,
 		RemoveSetup: p.removeSetup, HostProxyErr: p.proxyErr, AtGateway: p.real, Real: p.real,
-		SetRunAPICheck: p.onSetCheck, RunAPIErr: p.runAPIErr, PolicyImage: p.policyImage,
+		SetRunAPICheck: p.onSetCheck, RunAPIErr: p.runAPIErr, PolicyImage: p.policyImage, PushedCommits: p.viaLink,
 		Setup: func(spec session.SetupSpec) error {
 			if p.setup != nil {
 				p.setup(spec.Dir)

@@ -439,7 +439,7 @@ func VerdictBody(verdict string, points []Point) ([]byte, error) {
 	return body, nil
 }
 
-// The limits of one [Client.PushedCommits] call: MaxPushedCommits repositories, and a body of
+// The limits of one pushed-commits call: MaxPushedCommits repositories, and a body of
 // MaxPushedCommitsBytes bytes. Qory Apiary returns 413 for a larger body, which ends the run.
 const (
 	MaxPushedCommits      = 64
@@ -454,16 +454,17 @@ type PushedCommit struct {
 	Commit string `json:"commit"`
 }
 
-// PushedCommits reports the repositories that a push moved, in the order the push moved
-// them, to the run's list of pushed commits. Qory Apiary responds with 204, and takes a repeat of a
-// commit it has as a no-op, so a caller may send the same call again. A list with no
-// repository, with more than [MaxPushedCommits], or with a commit that is not a full
-// lowercase commit id returns an [Error] with the code [CodeInvalidRequest] and sends nothing.
-// PushedCommits does not check the size of the body: split a long list with [SplitPushedCommits]
-// first, and send one call for each list.
-func (c *Client) PushedCommits(ctx context.Context, commits []PushedCommit) error {
+// PushedCommitsBody is the body of one pushed-commits call, the report of the repositories
+// that a push moved, in the order the push moved them, as POST pushed-commits of the run
+// API reads it. The call goes over the link of the run's gateway, not through this client.
+// Qory Apiary takes a repeat of a commit it has as a no-op, so a caller may send the same
+// body again. A list with no repository, with more than [MaxPushedCommits], or with a commit
+// that is not a full lowercase commit id returns an [Error] with the code
+// [CodeInvalidRequest]. PushedCommitsBody does not check the size of the body: split a long
+// list with [SplitPushedCommits] first, one body for each list.
+func PushedCommitsBody(commits []PushedCommit) ([]byte, error) {
 	if len(commits) == 0 || len(commits) > MaxPushedCommits {
-		return &Error{
+		return nil, &Error{
 			Code: CodeInvalidRequest, Names: []string{"repositories"},
 			Message: fmt.Sprintf("Report 1 to %d repositories in one call. This call has %d.", MaxPushedCommits, len(commits)),
 		}
@@ -471,7 +472,7 @@ func (c *Client) PushedCommits(ctx context.Context, commits []PushedCommit) erro
 
 	for i, commit := range commits {
 		if !fullCommit(commit.Commit) {
-			return &Error{
+			return nil, &Error{
 				Code: CodeInvalidRequest, Names: []string{fmt.Sprintf("repositories[%d].commit", i)},
 				Message: "Send each commit as a full id of 40 or 64 lowercase hex characters.",
 			}
@@ -480,25 +481,13 @@ func (c *Client) PushedCommits(ctx context.Context, commits []PushedCommit) erro
 
 	body, err := encodePushedCommits(commits)
 	if err != nil {
-		return fmt.Errorf("Check the pushed commits. Encoding the request failed: %w", err)
+		return nil, fmt.Errorf("Check the pushed commits. Encoding the request failed: %w", err)
 	}
 
-	const path = "/pushed-commits"
-
-	response, err := c.send(ctx, http.MethodPost, path, body)
-	if err != nil {
-		return err
-	}
-	defer response.Body.Close()
-
-	if response.StatusCode != http.StatusNoContent {
-		return readError(response, http.MethodPost+" "+path)
-	}
-
-	return nil
+	return body, nil
 }
 
-// encodePushedCommits is the body of a [Client.PushedCommits] call for commits. It is the one
+// encodePushedCommits is the body of a pushed-commits call for commits. It is the one
 // place that encodes the body, so the size that [SplitPushedCommits] measures is the size sent.
 func encodePushedCommits(commits []PushedCommit) ([]byte, error) {
 	return encode(struct {
@@ -506,7 +495,7 @@ func encodePushedCommits(commits []PushedCommit) ([]byte, error) {
 	}{commits})
 }
 
-// SplitPushedCommits divides commits into the lists that [Client.PushedCommits] sends, one call
+// SplitPushedCommits divides commits into the lists that [PushedCommitsBody] encodes, one call
 // each, in order: each list has at most [MaxPushedCommits] repositories and encodes to a body
 // of at most [MaxPushedCommitsBytes] bytes. A repository that alone exceeds the byte limit has
 // a list to itself. It returns nil for no commits.

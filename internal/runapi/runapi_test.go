@@ -836,48 +836,25 @@ func TestACancelledContextIsNotAGatewayError(t *testing.T) {
 	}
 }
 
-func TestPushedCommitsSendsTheBodyTheRunAPIReads(t *testing.T) {
+func TestPushedCommitsBodyIsTheBodyTheRunAPIReads(t *testing.T) {
 	const commit = "0123456789abcdef0123456789abcdef01234567"
 
-	client := serve(t, func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost || r.URL.Path != "/v1/runs/run-1/pushed-commits" {
-			t.Errorf("request = %s %s", r.Method, r.URL.Path)
-		}
-
-		raw, _ := io.ReadAll(r.Body)
-
-		want := `{"repositories":[{"system":"github.com","path":"acme/web","commit":"` + commit + `"}]}`
-		if string(raw) != want {
-			t.Errorf("body = %s", raw)
-		}
-
-		w.WriteHeader(http.StatusNoContent)
+	body, err := runapi.PushedCommitsBody([]runapi.PushedCommit{
+		{System: "github.com", Path: "acme/web", Commit: commit},
+		{System: "github.com", Path: "acme/lib", Commit: strings.Repeat("b", 64)},
 	})
-
-	err := client.PushedCommits(context.Background(), []runapi.PushedCommit{{System: "github.com", Path: "acme/web", Commit: commit}})
 	if err != nil {
 		t.Fatal(err)
 	}
-}
 
-func TestPushedCommitsReadsTheErrorAndRetryAfter(t *testing.T) {
-	client := serve(t, func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Retry-After", "7")
-		w.WriteHeader(http.StatusConflict)
-		fmt.Fprint(w, `{"error":"run_ended","message":"Start a new run to record pushed commits. This run ended, so it records no more commits."}`)
-	})
-
-	err := client.PushedCommits(context.Background(), []runapi.PushedCommit{{System: "s", Path: "p", Commit: strings.Repeat("a", 64)}})
-
-	var apiError *runapi.Error
-	if !errors.As(err, &apiError) || apiError.Status != http.StatusConflict || apiError.Code != runapi.CodeRunEnded ||
-		apiError.RetryAfter != 7 || !strings.HasPrefix(apiError.Error(), "Start a new run") {
-		t.Errorf("err = %v (%+v)", err, apiError)
+	want := `{"repositories":[{"system":"github.com","path":"acme/web","commit":"` + commit +
+		`"},{"system":"github.com","path":"acme/lib","commit":"` + strings.Repeat("b", 64) + `"}]}`
+	if string(body) != want {
+		t.Errorf("body = %s, want %s", body, want)
 	}
 }
 
-func TestPushedCommitsSendsNothingForAnInvalidList(t *testing.T) {
-	client := serve(t, func(http.ResponseWriter, *http.Request) { t.Error("a request went out") })
+func TestPushedCommitsBodyRejectsAnInvalidList(t *testing.T) {
 	good := runapi.PushedCommit{System: "s", Path: "p", Commit: strings.Repeat("a", 40)}
 
 	for name, commits := range map[string][]runapi.PushedCommit{
@@ -886,13 +863,13 @@ func TestPushedCommitsSendsNothingForAnInvalidList(t *testing.T) {
 		"short":     {{System: "s", Path: "p", Commit: "abc1234"}},
 		"uppercase": {{System: "s", Path: "p", Commit: strings.Repeat("A", 40)}},
 	} {
-		if err := client.PushedCommits(context.Background(), commits); !runapi.HasCode(err, runapi.CodeInvalidRequest) {
-			t.Errorf("%s: err = %v, want invalid_request", name, err)
+		if body, err := runapi.PushedCommitsBody(commits); body != nil || !runapi.HasCode(err, runapi.CodeInvalidRequest) {
+			t.Errorf("%s: body = %s, err = %v, want invalid_request", name, body, err)
 		}
 	}
 }
 
-// pushedBody is the body that the client sends for commits.
+// pushedBody is the body that qory sends for commits.
 func pushedBody(t *testing.T, commits []runapi.PushedCommit) []byte {
 	t.Helper()
 

@@ -1658,6 +1658,10 @@ type openedRun interface {
 	// RunAPI is the client and base URL of the run's run API on this machine, until the
 	// close.
 	RunAPI() (*http.Client, string, error)
+	// PushedCommits sends the report of a push, the body of POST pushed-commits, over the
+	// link of the run's gateway and returns the answer's body; see
+	// [session.Run.PushedCommits]. The run API's client does not reach this route.
+	PushedCommits(ctx context.Context, body []byte) ([]byte, error)
 	// Image is the image chosen at the run's open, the zero Image with no wall or when
 	// the gateway's run answer has no image; a walled run with no image fails at the open.
 	Image() session.Image

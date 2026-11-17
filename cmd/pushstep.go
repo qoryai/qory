@@ -252,9 +252,9 @@ func removeThenPush(ctx context.Context, run openedRun, stderr io.Writer, branch
 // checks the version before it is stored, see [checkBranchVersion]. After the push, the
 // step reports what the push moved, see [recordPushed], before it stores the version, and
 // that also when a later repository's push failed: the repositories that landed are
-// reported, and the push's error stays the step's. *ended is set when Qory Apiary returned
-// run_ended, also when the push failed. The step then stores no version, and ends with no
-// error unless the push failed.
+// reported, and the push's error stays the step's. *ended is set when the report found the
+// run over, Qory Apiary's run_ended or the gateway's 410, also when the push failed. The step
+// then stores no version, and ends with no error unless the push failed.
 func pushWork(ctx context.Context, run openedRun, stderr io.Writer, branch *preparation.WorkBranch, dir, runID string, runNumber int, out session.Outcome, agentStopped bool, checks *runPushChecks, ended *bool) error {
 	cut := func() bool { return ctx.Err() != nil }
 	return inStep(run, stderr, event.StepPush, pushStepName(branch, run.System()), cut, func(w io.Writer) error {
@@ -278,7 +278,7 @@ func pushWork(ctx context.Context, run openedRun, stderr io.Writer, branch *prep
 			message += "\n\n" + end
 		}
 		document, pushErr := preparation.Push(ctx, dir, os.Environ(), branch, message, h.proxy, agentStopped, w)
-		runEnded, recordErr := recordPushed(ctx, client, branch)
+		runEnded, recordErr := recordPushed(ctx, run, branch)
 		*ended = runEnded
 		switch {
 		case pushErr != nil && recordErr != nil:
