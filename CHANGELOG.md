@@ -481,11 +481,10 @@ release may change what an existing document does, and states it under Upgrading
   posts `escalate` with the point `The full suite did not start: <cause>.`; for a cause in the
   build plan that the agent wrote, such as no `full` row, it posts `changes-requested` with the
   point and a fix, and over an agent's `changes-requested` it adds the point. A session
-  whose after step did not run posts `escalate` with `The full suite did not run: ...`. qory prints the same cause, and the fix, as a line at the launch. A green suite posts
+  whose after step did not run posts `escalate` with `The full suite did not run: ...`, and so does a run API that cannot be
+  reached at the launch. qory prints the same cause, and the fix, as a line at the launch. A green suite posts
   nothing. If qory cannot post the verdict, the run closes `failed`. A stop of `qory run` during
-  the suite closes the run `cancelled`, with the reason `interrupted`. When the run's inputs have
-  `review.suite_result`, qory writes the suite's result, with one finding for a suite that did
-  not pass, to that file and posts no verdict for it. See The full suite in
+  the suite closes the run `cancelled`, with the reason `interrupted`. See The full suite in
   `docs/run.md`.
 
 ### Changed

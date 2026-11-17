@@ -355,47 +355,6 @@ func TestAStopDuringTheAfterStepDoesNotLeaveTheRunSucceeded(t *testing.T) {
 	}
 }
 
-// TestTheFileOfReviewSuiteResultHasTheSuiteAfterTheSession: with review.suite_result in the run's
-// inputs, qory writes the suite's result there for a red suite, and state skipped for a session
-// that left HEAD where it started, and the file has the command's output.
-func TestTheFileOfReviewSuiteResultHasTheSuiteAfterTheSession(t *testing.T) {
-	for _, c := range []struct {
-		name  string
-		end   suiteEnd
-		state string
-	}{
-		{"red", suiteEnd{result: suiteRed, exit: 1}, "failed"},
-		{"green", suiteEnd{result: suiteGreen}, "passed"},
-		{"skipped", suiteEnd{result: suiteRed, exit: 1, stay: true}, "skipped"},
-	} {
-		t.Run(c.name, func(t *testing.T) {
-			file := filepath.Join(t.TempDir(), "suite.json")
-			t.Cleanup(cmd.SetRunInputs(`{"review":{"suite_result":` + fmt.Sprintf("%q", file) + `}}`))
-			api := newSuiteAPI(t, http.StatusCreated)
-			out, err, closed := suiteRun(t, api, c.end)
-			if err != nil || closed.State != event.StateSucceeded {
-				t.Fatalf("%v, closed %+v\n%s", err, closed, out)
-			}
-			data, rerr := os.ReadFile(file)
-			if rerr != nil {
-				t.Fatal(rerr)
-			}
-			if !strings.Contains(string(data), `"state":"`+c.state+`"`) {
-				t.Errorf("the file has %s, want state %s", data, c.state)
-			}
-			if posted := api.posted(); len(posted) != 0 {
-				t.Errorf("posted %q with a result file", posted)
-			}
-			if c.state == "failed" && !strings.Contains(string(data), `"finding":{"text":"The full suite failed: 1 of 2 tests failed."`) {
-				t.Errorf("the file has %s, want the finding", data)
-			}
-			if c.state == "failed" && !strings.Contains(string(data), `"counts":{"tests":2,"failed":1,"skipped":0}`) {
-				t.Errorf("the file has %s, want the counts", data)
-			}
-		})
-	}
-}
-
 // TestAFullSuiteThatCannotStartPostsAnEscalate: a script that ends before the command ran gives
 // the verdict escalate with the point, and the run still closes as its session did.
 func TestAFullSuiteThatCannotStartPostsAnEscalate(t *testing.T) {

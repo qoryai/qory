@@ -997,11 +997,3 @@ func SetFullSuite(yes bool) func() {
 	fullSuiteOf = func(*codeRun) bool { return yes }
 	return func() { fullSuiteOf = before }
 }
-
-// SetRunInputs makes every run's inputs, as the suite reads review.suite_result from them, the
-// JSON inputs, and returns what restores the default.
-func SetRunInputs(inputs string) func() {
-	before := inputsOf
-	inputsOf = func(*codeRun) []byte { return []byte(inputs) }
-	return func() { inputsOf = before }
-}

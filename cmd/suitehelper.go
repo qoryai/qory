@@ -92,9 +92,6 @@ type suiteSetup struct {
 	readOnly bool
 	// fullSuite is the run documents' full_suite: whether the session runs the full suite.
 	fullSuite bool
-	// inputs is the run's inputs as JSON, "" for none; its review.suite_result is the file
-	// that gets the suite's result, see [suiteResultFile].
-	inputs []byte
 	// extensions is the harness extensions of the report that the run composed.
 	extensions map[string]any
 	said       func(string)
@@ -109,10 +106,6 @@ type suiteRun struct {
 	dir     string
 	full    suite.Full
 	minutes int
-	// resultFile is the path of review.suite_result, "" for none, and resultBad is whether the
-	// inputs name a path that qory refuses: then it writes nothing and posts no verdict either.
-	resultFile string
-	resultBad  bool
 	// fault is why no suite runs for this session, nil when the after step is set.
 	fault *suiteFault
 }
@@ -123,17 +116,15 @@ func openSuites(ctx context.Context, s suiteSetup) *suiteRun {
 	if !s.walled || s.readOnly || !s.fullSuite {
 		return nil
 	}
-	if _, _, err := s.run.RunAPI(); err != nil {
-		return nil
-	}
 	r := &suiteRun{run: s.run, runID: s.runID, said: s.said, dir: s.spec.Dir, minutes: suite.LimitMinutes(s.extensions)}
-	var err error
-	if r.resultFile, err = suiteResultFile(s.inputs); err != nil {
-		s.said(shownError(err))
-		r.resultBad = true
-	}
 	// A cause that no After step can show is kept, and judged once the session ends.
+	if _, _, err := s.run.RunAPI(); err != nil {
+		r.fault = noRunAPIFault()
+		s.said(r.fault.line())
+		return r
+	}
 	planCtx, cancelPlan := context.WithTimeout(ctx, suitePlanWait)
+	var err error
 	r.full, err = launchFull(planCtx, s.run)
 	cancelPlan()
 	if err != nil {
@@ -163,14 +154,6 @@ func afterLimit(minutes int) time.Duration { return time.Duration(minutes) * sui
 // fullSuiteOf is whether the session of a run from Qory Apiary runs the full suite: the run
 // documents' full_suite, false for a run with no run code.
 var fullSuiteOf = func(c *codeRun) bool { return c != nil && c.fullSuite }
-
-// inputsOf is the run's inputs as JSON, nil for a run with no run code.
-var inputsOf = func(c *codeRun) []byte {
-	if c == nil {
-		return nil
-	}
-	return c.inputs
-}
 
 // suitePlanWait is the longest the read of the build plan at the run's start may take.
 const suitePlanWait = 15 * time.Second
@@ -290,7 +273,6 @@ func (r *suiteRun) after(ctx, again context.Context, limit time.Time, res *sessi
 			kind = kindUnfixable
 		}
 	}
-	writeErr := r.writeResult(got, fault == nil, point)
 	if out.State != event.StateSucceeded {
 		return out, nil
 	}
@@ -308,12 +290,7 @@ func (r *suiteRun) after(ctx, again context.Context, limit time.Time, res *sessi
 	default:
 		r.said(fmt.Sprintf(textSuiteEnded, onCommit(got.Commit), got.State, countsSuffix(got.Counts)))
 	}
-	// A run with a result file posts no verdict: a stage with reviewers sends it. A result file
-	// that could not be written must not leave the run passed.
-	if writeErr != nil {
-		return session.Outcome{State: event.StateFailed, ExitCode: 1}, &exitError{code: 1}
-	}
-	if point == nil || r.named() {
+	if point == nil {
 		return out, nil
 	}
 	postCtx, cancelPost := pushContext(ctx, again, limit, pushTimes.limit, pushTimes.signal)
@@ -334,21 +311,19 @@ func (r *suiteRun) after(ctx, again context.Context, limit time.Time, res *sessi
 const cutPostWait = 5 * time.Second
 
 // cut ends the run after a stop cut the after step of a session that succeeded: qory posts the
-// red verdict with one try (none with a result file) and closes the run cancelled, interrupted, exit 1.
+// red verdict with one try and closes the run cancelled, interrupted, exit 1.
 func (r *suiteRun) cut(ctx, again context.Context, limit time.Time, point runapi.Point) (session.Outcome, error) {
 	r.said(textSuiteCut)
-	if !r.named() {
-		postCtx, cancelPost := pushContext(ctx, again, limit, pushTimes.limit, pushTimes.signal)
-		defer cancelPost()
-		postCtx, cancelWait := context.WithTimeout(postCtx, cutPostWait)
-		defer cancelWait()
-		posted, err := r.post(postCtx, point, kindRed, 1)
-		switch {
-		case err != nil:
-			r.said(fmt.Sprintf(textSuiteNoPost, shownError(err)))
-		case posted != "":
-			r.said(posted)
-		}
+	postCtx, cancelPost := pushContext(ctx, again, limit, pushTimes.limit, pushTimes.signal)
+	defer cancelPost()
+	postCtx, cancelWait := context.WithTimeout(postCtx, cutPostWait)
+	defer cancelWait()
+	posted, err := r.post(postCtx, point, kindRed, 1)
+	switch {
+	case err != nil:
+		r.said(fmt.Sprintf(textSuiteNoPost, shownError(err)))
+	case posted != "":
+		r.said(posted)
 	}
 	return session.Outcome{State: event.StateCancelled, Reason: event.ReasonInterrupted, ExitCode: -1}, &exitError{code: 1}
 }
@@ -413,10 +388,6 @@ func (r *suiteRun) post(ctx context.Context, point runapi.Point, kind suiteKind,
 	}
 	return fmt.Sprintf(textSuitePosted, verdict), nil
 }
-
-// named reports whether the run's inputs name review.suite_result, valid or not: a stage with
-// reviewers sends the verdict, so qory posts none.
-func (r *suiteRun) named() bool { return r.resultFile != "" || r.resultBad }
 
 // suitePoint is the one point for a suite that did not pass. A host text that the verdict format
 // refuses is left out of its first line.

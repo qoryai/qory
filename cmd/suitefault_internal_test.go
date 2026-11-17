@@ -3,10 +3,12 @@ package cmd
 import (
 	"context"
 	"errors"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/qoryai/forager/event"
 	"github.com/qoryai/forager/session"
@@ -14,7 +16,7 @@ import (
 
 // launchFaultRun opens the suite of a walled write run with full_suite true, whose build plan is
 // plan ("" for none) and whose folder has a .git folder unless noGit, and returns the run.
-func launchFaultRun(t *testing.T, h helperRun, plan string, noGit bool, inputs string) {
+func launchFaultRun(t *testing.T, h helperRun, plan string, noGit bool) {
 	t.Helper()
 	dir := workspaceRepo(t)
 	if noGit {
@@ -29,7 +31,7 @@ func launchFaultRun(t *testing.T, h helperRun, plan string, noGit bool, inputs s
 	spec.Dir = dir
 	r := openSuites(context.Background(), suiteSetup{
 		run: apiRun{api: h.api, dir: h.runDir}, spec: spec, runID: "r1", walled: true, fullSuite: true,
-		inputs: []byte(inputs), said: func(string) {},
+		said: func(string) {},
 	})
 	if r == nil || r.fault == nil || len(spec.After) != 0 {
 		t.Fatalf("suite %v, After %q, want a fault and no After", r != nil, spec.After)
@@ -55,7 +57,7 @@ func TestACauseInTheBuildPlanPostsChangesRequestedWithTheFix(t *testing.T) {
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			h := newHelper(t)
-			launchFaultRun(t, h, c.plan, false, "")
+			launchFaultRun(t, h, c.plan, false)
 			got, err := h.after(nil, succeeded)
 			if err != nil || got != succeeded {
 				t.Errorf("outcome %+v, error %v, want the session's outcome", got, err)
@@ -72,7 +74,7 @@ func TestACauseInTheBuildPlanPostsChangesRequestedWithTheFix(t *testing.T) {
 // unreadable build plan and a start commit that cannot be read post escalate with the point.
 func TestACauseOutsideTheAgentsReachPostsEscalate(t *testing.T) {
 	h := newHelper(t)
-	launchFaultRun(t, h, buildPlanText, true, "")
+	launchFaultRun(t, h, buildPlanText, true)
 	if _, err := h.after(nil, succeeded); err != nil {
 		t.Fatal(err)
 	}
@@ -104,7 +106,7 @@ func TestACauseOutsideTheAgentsReachPostsEscalate(t *testing.T) {
 // the session's outcome.
 func TestASessionThatDidNotSucceedPostsNothingForALaunchCause(t *testing.T) {
 	h := newHelper(t)
-	launchFaultRun(t, h, planNoFull, false, "")
+	launchFaultRun(t, h, planNoFull, false)
 	failed := session.Outcome{State: event.StateFailed, ExitCode: 3}
 	if got, err := h.after(nil, failed); err != nil || got != failed || len(h.api.verdicts()) != 0 {
 		t.Errorf("outcome %+v, error %v, posted %q", got, err, h.api.verdicts())
@@ -180,32 +182,12 @@ func TestASessionWhoseAfterStepDidNotRunPostsEscalate(t *testing.T) {
 	}
 }
 
-// TestALaunchCauseWithAResultFileIsAFindingAndNoVerdict: with review.suite_result, a cause at the launch
-// and an after step that did not run write state did_not_run with the finding, and post nothing.
-func TestALaunchCauseWithAResultFileIsAFindingAndNoVerdict(t *testing.T) {
-	file := filepath.Join(t.TempDir(), "suite.json")
-	inputs := `{"review":{"suite_result":"` + file + `"}}`
-	h := newHelper(t)
-	launchFaultRun(t, h, planNoFull, false, inputs)
-	if got, err := h.after(nil, succeeded); err != nil || got != succeeded {
-		t.Fatalf("outcome %+v, error %v", got, err)
-	}
-	if posted := h.api.verdicts(); len(posted) != 0 {
-		t.Errorf("posted %q", posted)
-	}
-	res := readResult(t, file)
-	finding, _ := res["finding"].(map[string]any)
-	if res["state"] != "did_not_run" || finding["text"] != textFaultNoFull || finding["fix"] != textFixNoFull {
-		t.Errorf("the file has %v", res)
-	}
-}
-
 // TestAPlanThatCannotBeReadIsOutsideTheAgentsReach: a plan that the run API cannot send is
 // wrapped with errNoBuildPlan, not fixable, and posts escalate.
 func TestAPlanThatCannotBeReadIsOutsideTheAgentsReach(t *testing.T) {
 	h := newHelper(t)
 	h.api.failFiles = true
-	launchFaultRun(t, h, buildPlanText, false, "")
+	launchFaultRun(t, h, buildPlanText, false)
 	if h.fault.fixable {
 		t.Fatalf("the fault %+v is fixable", h.fault)
 	}
@@ -223,12 +205,66 @@ func TestAPassedVerdictKeepsItsTrackUnderACauseInTheBuildPlan(t *testing.T) {
 	const track = `"track":{"id":"small","reason":"One file."}`
 	h := newHelper(t)
 	h.api.add(fakeVersion{artifact: "verdict", name: "main", number: 1, runID: "r1", file: "verdict.json", content: `{"verdict":"passed",` + track + `}`})
-	launchFaultRun(t, h, planNoFull, false, "")
+	launchFaultRun(t, h, planNoFull, false)
 	if _, err := h.after(nil, succeeded); err != nil {
 		t.Fatal(err)
 	}
 	want := `{"verdict":"changes-requested","points":[{"text":"` + textFaultNoFull + `","action":"run_again","fix":"` + textFixNoFull + `"}],` + track + `}`
 	if posted := h.api.verdicts(); len(posted) != 1 || posted[0] != want {
 		t.Errorf("posted %q, want %s", posted, want)
+	}
+}
+
+// flakyRun is an apiRun whose RunAPI fails while down is true.
+type flakyRun struct {
+	apiRun
+	down *bool
+}
+
+func (r flakyRun) RunAPI() (*http.Client, string, error) {
+	if *r.down {
+		return nil, "", errors.New("the run API is closed")
+	}
+	return r.apiRun.RunAPI()
+}
+
+// TestARunAPIThatFailsAtTheLaunchIsACauseOutsideTheAgentsReach: openSuites keeps the cause and prints
+// its line. When the run API answers after the session, qory posts escalate with the point; when it
+// still fails, the run closes failed with exit status 1, as a failed post does.
+func TestARunAPIThatFailsAtTheLaunchIsACauseOutsideTheAgentsReach(t *testing.T) {
+	for _, c := range []struct {
+		name      string
+		stillDown bool
+	}{{"the post goes through", false}, {"the post fails", true}} {
+		t.Run(c.name, func(t *testing.T) {
+			h := newHelper(t)
+			down := true
+			var said []string
+			spec := &runSpec{}
+			spec.Dir = workspaceRepo(t)
+			r := openSuites(context.Background(), suiteSetup{
+				run: flakyRun{apiRun{api: h.api, dir: h.runDir}, &down}, spec: spec, runID: "r1", walled: true, fullSuite: true,
+				said: func(l string) { said = append(said, l) },
+			})
+			if r == nil || r.fault == nil || r.fault.fixable || len(spec.After) != 0 || len(said) != 1 || said[0] != textFaultNoRunAPI {
+				t.Fatalf("suite %v, After %q, lines %q", r != nil, spec.After, said)
+			}
+			down = c.stillDown
+			r.said = func(l string) { said = append(said, l) }
+			got, err := r.after(context.Background(), context.Background(), time.Time{}, nil, succeeded)
+			if c.stillDown {
+				if got.State != event.StateFailed || got.ExitCode != 1 || ExitCode(err) != 1 || len(h.api.verdicts()) != 0 {
+					t.Errorf("outcome %+v, error %v, posted %q", got, err, h.api.verdicts())
+				}
+				if len(said) < 2 || !strings.HasPrefix(said[len(said)-1], "Take the work item in again") {
+					t.Errorf("lines %q", said)
+				}
+				return
+			}
+			want := `{"verdict":"escalate","points":[{"text":"` + textFaultNoRunAPI + `","action":"run_again"}]}`
+			if err != nil || got != succeeded || len(h.api.verdicts()) != 1 || h.api.verdicts()[0] != want {
+				t.Errorf("outcome %+v, error %v, posted %q", got, err, h.api.verdicts())
+			}
+		})
 	}
 }

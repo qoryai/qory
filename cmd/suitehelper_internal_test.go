@@ -892,7 +892,7 @@ func TestTheLinesOfTheSuiteStartWithTheFixInAtMost100Characters(t *testing.T) {
 	for _, f := range []*suiteFault{
 		faultOf(suite.ErrNoCommands), faultOf(suite.ErrNoFull), faultOf(suite.ErrNoCommand), faultOf(suite.ErrBadCommand),
 		faultOf(suite.ErrBadResultFile), faultOf(errNoBuildPlan), faultOf(errBuildPlanTooBig), faultOf(suite.ErrBadStart), faultOf(errors.New("x")),
-		noGitFault(), noAfterFault(),
+		noGitFault(), noAfterFault(), noRunAPIFault(),
 	} {
 		if len(f.point.Text) > 100 || !validPoint(f.point) || f.fixable != (f.point.Fix != "") {
 			t.Errorf("fault %+v: text of %d characters, valid %v", f, len(f.point.Text), validPoint(f.point))

@@ -5,9 +5,7 @@ import (
 	"errors"
 	"os"
 	"regexp"
-	"strconv"
 	"strings"
-	"unicode/utf8"
 )
 
 // The files that the script of [Command] writes below the git folder of the workspace, and
@@ -18,12 +16,8 @@ const (
 	StateFolder = ".git/qory-suite"
 	statusFile  = StateFolder + "/status"
 	resultCopy  = StateFolder + "/result"
-	outputFile  = StateFolder + "/output"
-	secondsFile = StateFolder + "/seconds"
 	// maxStatus is the most bytes of the status file that qory reads.
 	maxStatus = 256
-	// MaxOutput is the most bytes of the command's output that [Outcome] has: the last ones.
-	MaxOutput = 64 << 10
 )
 
 // MaxCommandBytes is the longest command that [Command] takes: Linux limits one argument
@@ -51,8 +45,7 @@ const (
 // Otherwise it clones HEAD into a new folder of the container with git, hooks off and no hard
 // link, so no file that the agent left untracked or ignored reaches the suite. In the clone it
 // deletes the result file, writes "ran <commit>" to the status file and runs the command with
-// a home folder that the command can write, its output also kept. It copies the result file,
-// the last 64 KiB of the output and the seconds the command took to the folder, and exits
+// a home folder that the command can write. It copies the result file to the folder, and exits
 // with the command's status.
 const script = `cmd=$1; file=$2; start=$3
 d=` + StateFolder + `
@@ -81,11 +74,8 @@ if [ -n "$file" ]; then rm -f -- "$src/$file"; fi
 echo "ran $head" >"$d/status" || exit 70
 mkdir "$work/home" && HOME=$work/home && export HOME
 unset GIT_CONFIG_COUNT
-t0=$(date +%s)
-{ (cd "$src" && exec sh -c "$cmd"); echo $? >"$work/st"; } 2>&1 | tee "$work/out"
-st=$(cat "$work/st" 2>/dev/null || echo 1)
-echo $(( $(date +%s) - t0 )) >"$d/seconds"
-tail -c 65536 "$work/out" >"$d/output" 2>/dev/null
+(cd "$src" && exec sh -c "$cmd")
+st=$?
 if [ -n "$file" ] && [ -f "$src/$file" ] && [ ! -L "$src/$file" ]; then
   cp -- "$src/$file" "$d/result" 2>/dev/null
 fi
@@ -159,10 +149,6 @@ type Outcome struct {
 	Counts *Counts
 	// Mismatch is whether the result file's totals do not match its testcases.
 	Mismatch bool
-	// Seconds is the time the command took, -1 when the script did not write it.
-	Seconds int
-	// Output is the last [MaxOutput] bytes of what the command printed, "" for none.
-	Output string
 }
 
 // NotStarted reports whether the suite failed before its command ran: the script or the step
@@ -177,7 +163,7 @@ func (o Outcome) NotStarted() bool { return o.State == Failed && !o.Started }
 // tests. With exit status 0 and no readable result file the suite is Passed, with no counts.
 func Judge(workspace string, full Full, end End) Outcome {
 	kind, commit := readStatus(workspace)
-	out := Outcome{Commit: commit, Started: kind == "ran", ExitCode: end.ExitCode, Seconds: -1}
+	out := Outcome{Commit: commit, Started: kind == "ran", ExitCode: end.ExitCode}
 	if kind == "skipped" && end.Succeeded {
 		out.State = Skipped
 		return out
@@ -194,7 +180,6 @@ func Judge(workspace string, full Full, end End) Outcome {
 		return out
 	}
 	out.State = Failed
-	out.Output, out.Seconds = readOutput(workspace), readSeconds(workspace)
 	if full.ResultFile != "" {
 		counts, err := ParseJUnit(ReadResult(workspace, resultCopy))
 		switch {
@@ -208,24 +193,6 @@ func Judge(workspace string, full Full, end End) Outcome {
 		out.State = Passed
 	}
 	return out
-}
-
-// readOutput is the output file, cut to its last [MaxOutput] bytes at a whole UTF-8 character.
-func readOutput(workspace string) string {
-	b := ReadBelow(workspace, outputFile, MaxOutput)
-	for len(b) > 0 && !utf8.RuneStart(b[0]) {
-		b = b[1:]
-	}
-	return string(b)
-}
-
-// readSeconds is the whole number of seconds in the seconds file, -1 for a file with none.
-func readSeconds(workspace string) int {
-	n, err := strconv.Atoi(strings.TrimSpace(string(ReadBelow(workspace, secondsFile, 32))))
-	if err != nil || n < 0 {
-		return -1
-	}
-	return n
 }
 
 // readStatus is the first word of the status file, "ran" or "skipped", and the commit after

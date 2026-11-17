@@ -3330,11 +3330,10 @@ of qory:
    `GIT_CONFIG_COUNT` unset, so the command's git has no limit on its transports. A file that the
    agent left untracked or ignored in the workspace is not in the clone, and a result file that a
    commit has does not count.
-6. It copies the result file of the clone, when the command wrote a regular file there, the last
-   64 KiB of the command's output and the seconds the command took to `.git/qory-suite`, and
-   exits with the command's exit status.
+6. It copies the result file of the clone, when the command wrote a regular file there, to
+   `.git/qory-suite`, and exits with the command's exit status.
 
-The image needs `sh`, `git`, `mktemp`, `cp`, `tee`, `tail` and `date`. The command and the result
+The image needs `sh`, `git`, `mktemp` and `cp`. The command and the result
 file are arguments of the script, not part of its text. The suite's code runs with the workspace
 mounted for writing, so it can write the files of `.git/qory-suite`, or move HEAD or a ref in the
 workspace. qory reads the files with a read that stays below the workspace, and removes the folder
@@ -3361,28 +3360,9 @@ exits other than 0, when a test failed, and when it ran 0 tests. Skipped tests d
 With exit status 0 and no readable result file, the suite is `passed` and has no counts.
 `timeout` is a step that the limit cut. A step that a stop of `qory run` cut is `stopped`.
 
-**The file of `review.suite_result`.** When the run's inputs have `review.suite_result`, a clean
-absolute path, qory writes the suite's result there, mode 0644, for every end and also after a
-session that did not succeed, and posts no verdict for the suite: a stage with reviewers sends
-it. The file is JSON with `commit`, `state`, `counts`, `minutes`, `output` and `finding`.
-`finding` is the one point that the verdict would have, with `text`, `action` and `fix`, for a
-suite that did not pass, did not start or did not run, and `null` otherwise. `state` is `passed`,
-`failed`, `timeout`, `stopped`, `skipped` or `did_not_run`, for a session with no after step: one
-whose cause stopped the step at the launch, or whose step did not run. `counts` and `minutes` are `null`
-when qory cannot read them, `minutes` is the cap for a `timeout`, and `output` is the last 64 KiB
-of the command's output with the run's secrets masked. The folder of the file must exist and be
-no link. When qory cannot write the file, it prints the line `Check the folder of review.suite_result,
-then run the stage again.` and closes a run whose session succeeded `failed`, with exit status 1.
-A path that is not a clean absolute path gives the same close, with the line `Set
-review.suite_result in the run's inputs to a clean absolute path` at the launch; qory posts no
-verdict then either.
-A stop of `qory run` during the suite still closes the run `cancelled`. With no
-`review.suite_result`, qory writes nothing and posts the verdict as below.
-
 **After the session.** When the session succeeded and the suite ended, qory prints `the full
 suite on <commit> is <state>` with the counts. A `passed` suite posts nothing, and the agent's
-verdict stands. With no `review.suite_result`, a suite that did not pass makes qory post a verdict through the
-run API.
+verdict stands. A suite that did not pass makes qory post a verdict through the run API.
 
 A red suite, whose command ran (`failed` or `timeout`):
 
@@ -3403,7 +3383,7 @@ or the session succeeded and its after step did not run because the run closed.
 | none, or `passed` | `escalate` with one point, and the agent's `track` |
 | `escalate` | the same `escalate` and `track`, with that point added |
 | `changes-requested` | `escalate` with the agent's points and `track`, and that point added |
-| 20 points already | nothing: the verdict stands |
+| 20 points already | nothing: the verdict stands, and qory prints `the verdict of the agent has 20 points already, so qory adds none for the full suite` |
 
 A suite that did not start for a cause in the build plan that the agent wrote (no usable build plan, one over 1 MiB, no
 `Commands` table, no `full` row, no command in it, a command that is too long or has a NUL, a
@@ -3416,7 +3396,7 @@ judges it once the session succeeded. The point has the cause in `text` and what
 | none, or `passed` | `changes-requested` with one point, and the agent's `track` |
 | `escalate` | the same `escalate` and `track`, with that point added |
 | `changes-requested` | the same verdict and `track`, with that point added: one fix round covers both |
-| 20 points already | nothing: the verdict stands |
+| 20 points already | nothing: the verdict stands, and qory prints `the verdict of the agent has 20 points already, so qory adds none for the full suite` |
 
 A session that did not succeed posts nothing for a cause found at the launch.
 
@@ -3424,7 +3404,7 @@ A red suite does not end the run `failed` and does not change its exit status: t
 as its session did, and the verdict starts the next round in Qory Apiary. If qory cannot post
 the verdict, it closes the run `failed` and exits 1, so a verdict of `passed` that the agent
 posted does not stand over a suite that did not pass. A stop of `qory run` that cuts the step
-posts, with no `review.suite_result`, the red verdict with the point `The full suite did not finish: the run was stopped.`, with
+posts the red verdict with the point `The full suite did not finish: the run was stopped.`, with
 one request that has 5 seconds, and closes the run `cancelled` with the reason `interrupted` and
 exit status 1, whether or not the post worked. qory checks each verdict against the verdict format
 before it posts it.
@@ -3439,7 +3419,7 @@ order of preference:
   withdrawn versions), `the build plan is larger than 1 MiB`, `the build plan has no table of commands`, `the build
   plan has no full row`, `the full row of the build plan has no command`, `the command of the full
   row is too long or has a NUL`, `the result file of the full row is no path below the repository`
-  (each with a `fix`), `qory could not read the build plan`, `the session's folder has no .git
+  (each with a `fix`), `qory could not read the build plan`, `qory cannot reach the run API`, `the session's folder has no .git
   folder` and `qory could not read the commit the session started at`. The cause is `the after
   step could not run` (-1), `the script could not make a folder it needs` (70), `the image may lack sh or git` (127), `git could not
   clone HEAD of the workspace` (71), `git could not read HEAD of the workspace` (72), or `its

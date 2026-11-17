@@ -500,28 +500,3 @@ func TestTheCloneNeedsTheFileProtocolThatTheScriptAllowsForIt(t *testing.T) {
 		t.Fatalf("the script's clone failed: exit %d\n%s", exit, log)
 	}
 }
-
-// TestTheOutputAndTheSecondsOfTheCommandAreKept: the script keeps the last bytes of what the
-// command printed, and the seconds it took, for the result file of the reviewers.
-func TestTheOutputAndTheSecondsOfTheCommandAreKept(t *testing.T) {
-	dir, first := workspace(t)
-	commit(t, dir, "second.txt", "second\n")
-	full := suite.Full{Command: "echo out; echo err >&2; exit 4"}
-	exit, log := runScript(t, dir, first, full)
-	if exit != 4 {
-		t.Fatalf("exit %d, want 4\n%s", exit, log)
-	}
-	got := suite.Judge(dir, full, suite.End{ExitCode: exit})
-	if !strings.Contains(got.Output, "out\n") || !strings.Contains(got.Output, "err\n") || got.Seconds < 0 {
-		t.Errorf("Judge = output %q, seconds %d", got.Output, got.Seconds)
-	}
-	// A command that prints more than 64 KiB keeps the last bytes.
-	big := suite.Full{Command: "yes aaaaaaaaaaaaaaa | head -c 200000; echo END"}
-	if exit, log := runScript(t, dir, first, big); exit != 0 {
-		t.Fatalf("exit %d\n%s", exit, log)
-	}
-	got = suite.Judge(dir, big, suite.End{Succeeded: true})
-	if len(got.Output) > suite.MaxOutput || !strings.HasSuffix(got.Output, "END\n") {
-		t.Errorf("output of %d bytes ending %q", len(got.Output), got.Output[max(0, len(got.Output)-8):])
-	}
-}
