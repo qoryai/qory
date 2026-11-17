@@ -161,11 +161,39 @@ func Fit(text string) string {
 				}
 				return match
 			})
+			// A name that contains a secret is a phrase of 40 characters or more that no
+			// shortening cuts: when the line is still long, the phrase moves to a later line.
+			if utf8.RuneCountInString(line) > 100 {
+				var moved []string
+				line, moved = movePhrases(line, rest(i))
+				full = append(full, moved...)
+			}
 		}
 		out = append(out, line)
 	}
 	block()
 	return strings.Join(out, "\n")
+}
+
+// hiddenPhrase matches the phrase that [accesskey.ShownName] and [Value] print in place of
+// a name or a value that contains an access key secret or a run key.
+var hiddenPhrase = regexp.MustCompile(`\(an? (name|value) that contains [^)]*\)`)
+
+// movePhrases is line with each hidden phrase in it printed as "a hidden name" or "a hidden
+// value", and, for each phrase that the lines after it, after, do not have, the line "The
+// hidden name is <phrase>." to add at the end of the refusal.
+func movePhrases(line, after string) (string, []string) {
+	var extra []string
+	line = hiddenPhrase.ReplaceAllStringFunc(line, func(phrase string) string {
+		kind := hiddenPhrase.FindStringSubmatch(phrase)[1]
+		if !strings.Contains(after, phrase) {
+			if sentence := "  The hidden " + kind + " is " + phrase + "."; !slices.Contains(extra, sentence) {
+				extra = append(extra, sentence)
+			}
+		}
+		return "a hidden " + kind
+	})
+	return line, extra
 }
 
 // long reports whether name, a match of [longName] without its leading keys, has more than

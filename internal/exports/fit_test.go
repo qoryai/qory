@@ -232,3 +232,23 @@ func TestFitKeepsTheKeysOfAGatewayName(t *testing.T) {
 		}
 	}
 }
+
+// TestFitMovesAHiddenPhraseOutOfALongFirstLine is a first line over 100 characters with
+// the phrase of a name that contains an access key secret, which no shortening cuts: the
+// phrase moves to a later line, and a line over 100 characters is the only one that changes.
+func TestFitMovesAHiddenPhraseOutOfALongFirstLine(t *testing.T) {
+	const phrase = "(a name that contains an access key secret)"
+	long := "Remove gateway.integrations." + phrase + ", or give it a program that defines a credential."
+	got := exports.Fit(long + "\n  A cause.")
+	lines := strings.Split(got, "\n")
+	if n := utf8.RuneCountInString(lines[0]); n > 100 || strings.Contains(lines[0], phrase) {
+		t.Errorf("line 1 has %d characters and the phrase: %s", n, lines[0])
+	}
+	if !strings.Contains(got, "The hidden name is "+phrase+".") || !strings.Contains(got, "A cause.") {
+		t.Errorf("the refusal lost the phrase or its cause: %q", got)
+	}
+	short := "Remove " + phrase + " from the module."
+	if got := exports.Fit(short); got != short {
+		t.Errorf("a short line changed: %q", got)
+	}
+}
