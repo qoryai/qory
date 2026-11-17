@@ -182,6 +182,9 @@ func TestAHomeRefusalPrintsAPhraseForASecret(t *testing.T) {
 		if want := c.want; err == nil || !strings.HasPrefix(err.Error(), want) || !strings.Contains(err.Error(), path) || strings.Contains(err.Error(), "qak_") {
 			t.Errorf("%q: %v, want %q", c.body, err, want)
 		}
+		if cause := errors.Unwrap(err); cause == nil || !strings.Contains(cause.Error(), "HOME") {
+			t.Errorf("%q: the refusal unwraps to %v, want the error of the home directory", c.body, cause)
+		}
 	}
 }
 

@@ -834,7 +834,7 @@ func (c *Config) apply(path string, machine, root bool) (file, error) {
 			if dir == "~" || strings.HasPrefix(dir, "~/") {
 				home, err := os.UserHomeDir()
 				if err != nil {
-					return f, exports.Refuse("Set HOME, or write harness.home as an absolute path.", fmt.Sprintf("harness.home is %s, and the home directory is unknown: %s.", exports.Value(dir, false), err), "harness.home is in "+path+".")
+					return f, caused(err, exports.Refuse("Set HOME, or write harness.home as an absolute path.", fmt.Sprintf("harness.home is %s, and the home directory is unknown: %s.", exports.Value(dir, false), err), "harness.home is in "+path+"."))
 				}
 				dir = filepath.Join(home, dir[1:])
 			}
@@ -1077,7 +1077,7 @@ func worktreePath(path, key string, e pathEntry) (Path, error) {
 	if from == "~" || strings.HasPrefix(from, "~/") {
 		home, err := os.UserHomeDir()
 		if err != nil {
-			return Path{}, exports.Refuse(fmt.Sprintf("Set HOME, or write the entry of %s without ~.", key), fmt.Sprintf("%s lists %s, and the home directory is unknown: %s.", key, exports.Value(from, false), err), key+" is in "+path+".")
+			return Path{}, caused(err, exports.Refuse(fmt.Sprintf("Set HOME, or write the entry of %s without ~.", key), fmt.Sprintf("%s lists %s, and the home directory is unknown: %s.", key, exports.Value(from, false), err), key+" is in "+path+"."))
 		}
 		from = filepath.Join(home, from[1:])
 	}

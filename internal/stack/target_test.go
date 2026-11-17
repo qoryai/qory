@@ -1,9 +1,12 @@
 package stack
 
 import (
+	"errors"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 // compose validates a document built in Go as the harness section of a checkout's
@@ -107,5 +110,19 @@ func TestRuntimesValidateIsCalledOnTheFlagToo(t *testing.T) {
 	}
 	if (Runtimes{}).First() != "" {
 		t.Error("First of an empty list is not empty")
+	}
+}
+
+// TestARuntimeListTheDecoderRefusesKeepsTheDecoderError is a target.runtime that is a
+// mapping: the refusal starts with its fix, and errors.As still matches the decoder's
+// *yaml.TypeError under it.
+func TestARuntimeListTheDecoderRefusesKeepsTheDecoderError(t *testing.T) {
+	_, err := Load(write(t, "apiVersion: qory.dev/v1alpha1\ntarget:\n  runtime: {claude: opus}\nmodules:\n  - name: core\n"))
+	if err == nil || !strings.HasPrefix(err.Error(), "Set target.runtime to one runtime name or a list of names.\n") {
+		t.Fatalf("%v", err)
+	}
+	var te *yaml.TypeError
+	if !errors.As(err, &te) {
+		t.Errorf("errors.As finds no *yaml.TypeError under %v", err)
 	}
 }

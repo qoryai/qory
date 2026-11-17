@@ -75,7 +75,7 @@ func readPool(path string, p *poolSection) (*ForagerPool, error) {
 			continue
 		}
 		if err := accesskey.SecretInDocument(*k.in); err != nil {
-			return nil, exports.Refuse("Remove the secret from pool."+k.key+".", sentence(err), "pool."+k.key+" is in "+path+".")
+			return nil, caused(err, exports.Refuse("Remove the secret from pool."+k.key+".", sentence(err), "pool."+k.key+" is in "+path+"."))
 		}
 	}
 	if p.Registry == nil {

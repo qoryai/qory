@@ -204,7 +204,7 @@ func (r *Runtimes) UnmarshalYAML(n *yaml.Node) error {
 	}
 	var many []string
 	if err := n.Decode(&many); err != nil {
-		return exports.Refuse("Set target.runtime to one runtime name or a list of names.", append(decoderLines(err), "target.runtime is in "+exports.FilePlace+".")...)
+		return &decodeRefusal{exports.Refuse("Set target.runtime to one runtime name or a list of names.", append(decoderLines(err), "target.runtime is in "+exports.FilePlace+".")...), err}
 	}
 	*r = many
 	return nil
@@ -312,7 +312,7 @@ func (n *Names) UnmarshalYAML(node *yaml.Node) error {
 	}
 	var many []string
 	if err := node.Decode(&many); err != nil {
-		return exports.Refuse("Set extending.target.runtime and extending.target.model each to one name or a list of names.", append(decoderLines(err), "extending.target is in "+exports.FilePlace+".")...)
+		return &decodeRefusal{exports.Refuse("Set extending.target.runtime and extending.target.model each to one name or a list of names.", append(decoderLines(err), "extending.target is in "+exports.FilePlace+".")...), err}
 	}
 	*n = many
 	return nil
@@ -926,6 +926,23 @@ func (e *BaseExtendsError) Error() string {
 // whose addresses no text shows.
 func (e *BaseExtendsError) Hidden() string {
 	return exports.Refuse("Set extends to a stack that does not extend another.", fmt.Sprintf("%s extends another stack, and a stack does not extend another.", exports.HidePath(e.File))).Error()
+}
+
+// decodeRefusal is a refusal of a value the decoder could not read, which unwraps to the
+// decoder's error, so errors.As still matches a *yaml.TypeError under it. It is an
+// [exports.InFile] as the refusal is.
+type decodeRefusal struct {
+	refusal *exports.Refusal
+	err     error
+}
+
+func (d *decodeRefusal) Error() string { return d.refusal.Error() }
+func (d *decodeRefusal) Unwrap() error { return d.err }
+
+// In is the refusal with file at its [exports.FilePlace], and the same cause.
+func (d *decodeRefusal) In(file string) error {
+	r, _ := d.refusal.In(file).(*exports.Refusal)
+	return &decodeRefusal{r, d.err}
 }
 
 // decoderLines is the cause lines of err, a decode error: what the decoder reports, one

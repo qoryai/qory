@@ -1048,7 +1048,7 @@ func readVia(path string, v *viaSection) (*ForagerVia, error) {
 	// refusal holds no part of it.
 	switch tooDeep, secret := scanURL(*url); {
 	case secret != nil:
-		return nil, exports.Refuse("Remove the secret from gateway.server.via.url.", sentence(secret), "gateway.server.via.url is in "+path+".")
+		return nil, caused(secret, exports.Refuse("Remove the secret from gateway.server.via.url.", sentence(secret), "gateway.server.via.url is in "+path+"."))
 	case tooDeep:
 		return nil, exports.Refuse("Set gateway.server.via.url to an https URL of a host and an optional port.", fmt.Sprintf("It is percent-encoded more than %d times.", urlUnescapeLimit), "A via URL is "+viaShape+".", "gateway.server.via.url is in "+path+".")
 	}
@@ -1083,7 +1083,7 @@ func readVia(path string, v *viaSection) (*ForagerVia, error) {
 func CheckViaURL(flag, v string) error {
 	switch tooDeep, secret := scanURL(v); {
 	case secret != nil:
-		return exports.Refuse("Remove the secret from "+flag+".", sentence(secret))
+		return caused(secret, exports.Refuse("Remove the secret from "+flag+".", sentence(secret)))
 	case tooDeep:
 		return exports.Refuse("Set "+flag+" to an https URL of a host and an optional port.", fmt.Sprintf("It is percent-encoded more than %d times.", urlUnescapeLimit), "A via URL is "+viaShape+".")
 	}
@@ -1310,7 +1310,7 @@ func readServer(path string, rawURL, id *string, pin *[]pinEntry, secret, key *y
 		s.AccessKeyID, s.AccessKeyIDFrom = *id, path
 	case envID != "":
 		if err := accesskey.CheckID(envID); err != nil {
-			return nil, exports.Refuse("Set "+accesskey.EnvID+" to an access key id.", sentence(err))
+			return nil, caused(err, exports.Refuse("Set "+accesskey.EnvID+" to an access key id.", sentence(err)))
 		}
 		s.AccessKeyID, s.AccessKeyIDFrom = envID, EnvOrigin+accesskey.EnvID
 	}
@@ -1324,7 +1324,7 @@ func readServer(path string, rawURL, id *string, pin *[]pinEntry, secret, key *y
 				return nil, exports.Refuse(fmt.Sprintf("Add alg and public_key to gateway.server.apiary_public_key[%d].", i), "An entry needs both.", "gateway.server.apiary_public_key is in "+path+".")
 			}
 			if err := accesskey.SecretInPinEntry(*e.Alg, *e.PublicKey); err != nil {
-				return nil, exports.Refuse("Remove the secret from gateway.server.apiary_public_key.", sentence(err), "gateway.server.apiary_public_key is in "+path+".")
+				return nil, caused(err, exports.Refuse("Remove the secret from gateway.server.apiary_public_key.", sentence(err), "gateway.server.apiary_public_key is in "+path+"."))
 			}
 			// Each entry is checked here as [accesskey.Pin.Check] checks it, so the
 			// refusal names the entry and never quotes it.
@@ -1337,7 +1337,7 @@ func readServer(path string, rawURL, id *string, pin *[]pinEntry, secret, key *y
 				return nil, exports.Refuse(fmt.Sprintf("Set %s.public_key to 32 bytes in base64url without padding.", at), "The value is not one.", at+" is in "+path+".")
 			}
 			if err := pub.Check(); err != nil {
-				return nil, exports.Refuse(fmt.Sprintf("Set %s.public_key to a key qory can verify under.", at), sentence(err), at+" is in "+path+".")
+				return nil, caused(err, exports.Refuse(fmt.Sprintf("Set %s.public_key to a key qory can verify under.", at), sentence(err), at+" is in "+path+"."))
 			}
 			if seen[pub] {
 				return nil, exports.Refuse("List each public key of gateway.server.apiary_public_key once.", at+".public_key is listed twice.", at+" is in "+path+".")
@@ -1346,7 +1346,7 @@ func readServer(path string, rawURL, id *string, pin *[]pinEntry, secret, key *y
 			s.Pin = append(s.Pin, accesskey.ServerKey{Alg: *e.Alg, PublicKey: *e.PublicKey})
 		}
 		if err := checkPin(s.Pin); err != nil {
-			return nil, exports.Refuse("Pin your server's keys in gateway.server.apiary_public_key.", sentence(err), "gateway.server.apiary_public_key is in "+path+".")
+			return nil, caused(err, exports.Refuse("Pin your server's keys in gateway.server.apiary_public_key.", sentence(err), "gateway.server.apiary_public_key is in "+path+"."))
 		}
 		s.PinFrom = path
 	case envPin != "":
@@ -1355,7 +1355,7 @@ func readServer(path string, rawURL, id *string, pin *[]pinEntry, secret, key *y
 			err = checkPin(p)
 		}
 		if err != nil {
-			return nil, exports.Refuse("Pin your server's keys in "+accesskey.EnvPin+".", sentence(err))
+			return nil, caused(err, exports.Refuse("Pin your server's keys in "+accesskey.EnvPin+".", sentence(err)))
 		}
 		s.Pin, s.PinFrom = p, EnvOrigin+accesskey.EnvPin
 	}

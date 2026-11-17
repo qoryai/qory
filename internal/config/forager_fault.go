@@ -78,6 +78,19 @@ func sentence(err error) string {
 	return s
 }
 
+// causedRefusal is a refusal that unwraps to the error that caused it, so errors.Is and
+// errors.As match the cause under the refusal's words.
+type causedRefusal struct {
+	refusal *exports.Refusal
+	err     error
+}
+
+func (e *causedRefusal) Error() string { return e.refusal.Error() }
+func (e *causedRefusal) Unwrap() error { return e.err }
+
+// caused is refusal as an error that unwraps to err.
+func caused(err error, refusal *exports.Refusal) error { return &causedRefusal{refusal, err} }
+
 // foundAt is the last line of a refusal of the file at path that is about the line line,
 // from the decoder's "line N: " prefix or a number: "It is at line N of path.", or "The
 // file is path." for none.
