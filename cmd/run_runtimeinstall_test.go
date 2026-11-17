@@ -460,6 +460,21 @@ func endsWithin(t *testing.T, limit time.Duration, f func() installRun) installR
 	}
 }
 
+// pollUntil calls ok every 20 ms until it returns true, and returns true; it returns false
+// when ok has not returned true after limit. It takes no *testing.T, so a goroutine that
+// outlives its test cannot log to a finished test: the caller's test fails on its own
+// checks.
+func pollUntil(limit time.Duration, ok func() bool) bool {
+	deadline := time.Now().Add(limit)
+	for !ok() {
+		if time.Now().After(deadline) {
+			return false
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	return true
+}
+
 // TestARegistryThatKeepsReturning503StopsAtTheTimeLimit has the registry return 503 to
 // every request, and a run with a time limit of 3 seconds: the run waits with the
 // registry's tries, tells so once on stderr, and ends at the limit with the line of a run
@@ -477,10 +492,9 @@ func TestARegistryThatKeepsReturning503StopsAtTheTimeLimit(t *testing.T) {
 	first := make(chan time.Time, 1)
 	r := endsWithin(t, 30*time.Second, func() installRun {
 		return runInstalling(t, installSetup{reg: reg, npm: rt.StartNpm(t), proxy: proxy, walled: true, args: []string{"--timeout", "3s"}, during: func() {
-			for len(reg.Paths()) == 0 {
-				time.Sleep(2 * time.Millisecond)
+			if pollUntil(30*time.Second, func() bool { return len(reg.Paths()) > 0 }) {
+				first <- time.Now()
 			}
-			first <- time.Now()
 		}})
 	})
 	ended := time.Now()
@@ -493,7 +507,7 @@ func TestARegistryThatKeepsReturning503StopsAtTheTimeLimit(t *testing.T) {
 			t.Errorf("the run ended %s after the registry's first request, with a time limit of 3s", took)
 		}
 	default:
-		t.Error("the registry got no request")
+		t.Error("the registry got no request within 30s")
 	}
 	wants(t, r.out, "the run was cancelled at its time limit of 3s, before claude started", "qory run: "+reg.Host()+" has not returned Claude Code (503); check pool.registry\n")
 	if n := strings.Count(r.out, " has not returned Claude Code"); n != 1 {
@@ -514,14 +528,17 @@ func TestARegistryThatKeepsReturning503StopsAtSIGTERM(t *testing.T) {
 			// The first try is 3 requests: newest with no token, which gets 401, the token,
 			// and newest with it, which gets 503. The third request to /v2/ is the first
 			// retry, 2 seconds later, and qory prints the waiting line before it sends it.
-			for retried := false; !retried; time.Sleep(20 * time.Millisecond) {
+			// With no retry in 30 seconds, the run gets no SIGTERM and endsWithin fails the test.
+			if !pollUntil(30*time.Second, func() bool {
 				n := 0
 				for _, p := range reg.Paths() {
 					if strings.HasPrefix(p, "/v2/") {
 						n++
 					}
 				}
-				retried = n >= 3
+				return n >= 3
+			}) {
+				return
 			}
 			syscall.Kill(os.Getpid(), syscall.SIGTERM)
 		}})
