@@ -677,7 +677,7 @@ func ReadWith(name, dir string, m *Manifest, variant string, readFile func(path 
 		if _, ok := err.(*exports.Refusal); ok {
 			return exports.Prefixed("module "+shown, err)
 		}
-		// The text of a resolveError starts with its own fix, which the line below would push down.
+		// A resolveError starts with a fix, which the line below would push down.
 		var resolve *resolveError
 		if errors.As(err, &resolve) {
 			return err

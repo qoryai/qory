@@ -191,7 +191,7 @@ func TestParseDocumentReadsWindowsFiles(t *testing.T) {
 // TestAReadErrorHasTheCheckLineAndALinkErrorDoesNot is the read of a module whose
 // AGENTS.md read fails: an OS error comes under "Check that you can read the files of
 // module core.", and the error of a link that leads out of the module, whose text starts
-// with its own fix, does not.
+// with a fix, does not.
 func TestAReadErrorHasTheCheckLineAndALinkErrorDoesNot(t *testing.T) {
 	dir := tree(t, map[string]string{"AGENTS.md": "# a\n"})
 	denied := &fs.PathError{Op: "open", Path: filepath.Join(dir, "AGENTS.md"), Err: errors.New("permission denied")}
@@ -203,6 +203,6 @@ func TestAReadErrorHasTheCheckLineAndALinkErrorDoesNot(t *testing.T) {
 		return nil, &resolveError{"Point the link inside the module, or remove it.\n  AGENTS.md leads out of the module.", ErrLeadsOut}
 	})
 	if err == nil || !strings.HasPrefix(err.Error(), "Point the link inside the module, or remove it.\n  AGENTS.md leads out") || !errors.Is(err, ErrLeadsOut) {
-		t.Errorf("a link error: %v, want its own fix first and the sentinel", err)
+		t.Errorf("a link error: %v, want a fix first and the sentinel", err)
 	}
 }
