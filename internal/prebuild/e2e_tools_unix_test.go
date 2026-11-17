@@ -64,13 +64,29 @@ func stageTools(t *testing.T, dir string) (parsers, node string) {
 }
 
 // toolsBases are the prebuilt development container images the tools step is tried on,
-// by the digest of their index, as qory's probe of 2026-11-15 found them: neither has a
-// browser or ffmpeg, and only typescript-node has node. The image of typescript-node
-// with the tools is over [prebuild.MaxSize], so a build refuses it: its test builds the
-// tools step alone.
-var toolsBases = map[string]string{
-	"base":            "mcr.microsoft.com/devcontainers/base@sha256:38f9e6c291f054e3c868d95a5477cbfcf76c0fa7c218dda65dc6aa3fbfe06871",
-	"typescript-node": "mcr.microsoft.com/devcontainers/typescript-node@sha256:e1fd824e03c68d8f406ef45b574023a2d683a5acc98906743f8d60aaf78b0174",
+// by the digest of their index, as qory's probe of 2026-11-15 found them: none has a
+// browser or ffmpeg, and only typescript-node and universal have node. The images of
+// typescript-node and universal with the tools are over [prebuild.MaxSize], so a build
+// refuses them: their test builds the tools step alone.
+var toolsBases = map[string]toolsBaseImage{
+	"base":            {"mcr.microsoft.com/devcontainers/base@sha256:38f9e6c291f054e3c868d95a5477cbfcf76c0fa7c218dda65dc6aa3fbfe06871", "debian", ""},
+	"typescript-node": {"mcr.microsoft.com/devcontainers/typescript-node@sha256:e1fd824e03c68d8f406ef45b574023a2d683a5acc98906743f8d60aaf78b0174", "debian", ""},
+	"ubuntu-22.04":    {"mcr.microsoft.com/devcontainers/base@sha256:81380e4c9c14e8a629ff39029639e4b7893e67400246fa7782a0fe7dc193a02a", "ubuntu22.04", ""},
+	"ubuntu-24.04":    {"mcr.microsoft.com/devcontainers/base@sha256:d94c97dd9cacf183d0a6fd12a8e87b526e9e928307674ae9c94139139c0c6eae", "ubuntu24.04", ""},
+	// universal is published for amd64 alone, so an arm64 engine runs it emulated.
+	"universal": {"mcr.microsoft.com/devcontainers/universal@sha256:d7b342e610144566fdbe459a8d22322e3fffc511bf22b1083beea8d8f46d7c67", "ubuntu24.04", "linux/amd64"},
+}
+
+// toolsBaseImage is an image by digest, the kind of base the step takes it for, and the
+// platform to run it on, "" for the engine's.
+type toolsBaseImage struct{ ref, kind, platform string }
+
+// platformArgs are the arguments of docker build and docker run that select the platform.
+func (b toolsBaseImage) platformArgs() []string {
+	if b.platform == "" {
+		return nil
+	}
+	return []string{"--platform", b.platform}
 }
 
 // filmScript runs in the image as the wall user, with a writable HOME, which Chromium
@@ -111,14 +127,16 @@ func skipUnlessDocker(t *testing.T, needCLI bool) {
 // runFilm runs [filmScript] in the image tag as the wall user, with no capability, no
 // new privilege and no network, and checks what it printed: Chromium started, ffmpeg
 // wrote a film file, root owns the parsers and each parser loads.
-func runFilm(t *testing.T, tag string) {
+func runFilm(t *testing.T, tag string, platform []string) {
 	t.Helper()
 	smoke, err := os.ReadFile(filepath.Join("..", "..", "images", "agent", "parsers", "smoke.js"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	c := exec.Command("docker", "run", "--rm", "-i", "--user", "1234:2345", "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
+	args := append([]string{"run", "--rm", "-i"}, platform...)
+	args = append(args, "--user", "1234:2345", "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
 		"--network", "none", "--entrypoint", "/bin/sh", tag, "-c", filmScript)
+	c := exec.Command("docker", args...)
 	c.Stdin = bytes.NewReader(smoke)
 	var stdout, stderr bytes.Buffer
 	c.Stdout, c.Stderr = &stdout, &stderr
@@ -158,7 +176,7 @@ func TestBuildAddsTheToolsWithDocker(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(p, []byte(`{"image": "`+toolsBases["base"]+`", "onCreateCommand": "true"}`), 0o644); err != nil {
+	if err := os.WriteFile(p, []byte(`{"image": "`+toolsBases["base"].ref+`", "onCreateCommand": "true"}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.MkdirAll(filepath.Join(repo, ".git"), 0o755); err != nil {
@@ -184,7 +202,7 @@ func TestBuildAddsTheToolsWithDocker(t *testing.T) {
 	if !strings.Contains(out.String(), "prebuild: added Chromium, ffmpeg and the parsers in ") {
 		t.Errorf("the tools step printed no line:\n%s", out.String())
 	}
-	runFilm(t, tag)
+	runFilm(t, tag, nil)
 }
 
 // TestToolsStepWithDocker builds the tools step alone, as qory builds it, FROM each of
@@ -201,17 +219,17 @@ func TestToolsStepWithDocker(t *testing.T) {
 	for name, base := range toolsBases {
 		t.Run(name, func(t *testing.T) {
 			// Whether the base has node, as the step's probe reads it.
-			hasNode := exec.Command("docker", "run", "--rm", "--entrypoint", "sh", base, "-c", "command -v node").Run() == nil
+			hasNode := exec.Command("docker", append(append([]string{"run", "--rm"}, base.platformArgs()...), "--entrypoint", "sh", base.ref, "-c", "command -v node")...).Run() == nil
 			ctx := filepath.Join(dir, "ctx-"+name)
-			if err := prebuild.WriteToolsContext(ctx, base, "1234:2345", parsers, node, !hasNode); err != nil {
+			if err := prebuild.WriteToolsContext(ctx, base.ref, base.kind, "1234:2345", parsers, node, !hasNode); err != nil {
 				t.Fatal(err)
 			}
 			tag := "qory-test-tools:" + id + "-" + name
 			t.Cleanup(func() { _ = exec.Command("docker", "image", "rm", "--force", tag).Run() })
-			docker(t, "build", "--tag", tag, "--file", filepath.Join(ctx, "Dockerfile"), ctx)
+			docker(t, append(append([]string{"build"}, base.platformArgs()...), "--tag", tag, "--file", filepath.Join(ctx, "Dockerfile"), ctx)...)
 			t.Logf("node in the base: %v; size of the base %s, of the image %s", hasNode,
-				docker(t, "image", "inspect", "--format", "{{.Size}}", base), docker(t, "image", "inspect", "--format", "{{.Size}}", tag))
-			runFilm(t, tag)
+				docker(t, "image", "inspect", "--format", "{{.Size}}", base.ref), docker(t, "image", "inspect", "--format", "{{.Size}}", tag))
+			runFilm(t, tag, base.platformArgs())
 		})
 	}
 }

@@ -158,7 +158,7 @@ func TestBuildStartsFromAStandardImage(t *testing.T) {
 		if !f.called("docker", "pull "+standard+":1") || f.called("docker", "tag") {
 			t.Errorf("docker ran\n%s", f.read("docker.log"))
 		}
-		if !strings.HasPrefix(f.read("dockerfiles"), prebuild.ToolsDockerfile(base, "1234:2345", false)+"FROM "+testName+":tools\nUSER 1234:2345\n") {
+		if !strings.HasPrefix(f.read("dockerfiles"), prebuild.ToolsDockerfile(base, "debian", "1234:2345", false)+"FROM "+testName+":tools\nUSER 1234:2345\n") {
 			t.Errorf("the Dockerfiles are\n%s", f.read("dockerfiles"))
 		}
 		if !strings.Contains(out.String(), "prebuild: pulled the standard image "+base+" in ") ||
@@ -214,7 +214,7 @@ func TestBuildStartsFromAnEnvironmentImage(t *testing.T) {
 	if !f.called("docker", "pull "+env) || f.called("docker", "image inspect --format {{json .RepoDigests}}") || !f.called("docker", "image inspect --format {{json .Config}} "+env) {
 		t.Errorf("docker ran\n%s", f.read("docker.log"))
 	}
-	if !strings.HasPrefix(f.read("dockerfiles"), prebuild.ToolsDockerfile(env, "1234:2345", false)+"FROM "+testName+":tools\nUSER 1234:2345\n") {
+	if !strings.HasPrefix(f.read("dockerfiles"), prebuild.ToolsDockerfile(env, "debian", "1234:2345", false)+"FROM "+testName+":tools\nUSER 1234:2345\n") {
 		t.Errorf("the Dockerfiles are\n%s", f.read("dockerfiles"))
 	}
 	if want := "prebuild: pulled the environment image " + env + " in "; !strings.Contains(out.String(), want) || strings.Contains(out.String(), "rewrote") {

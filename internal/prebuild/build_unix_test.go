@@ -373,7 +373,7 @@ func TestBuildBuildsTheImage(t *testing.T) {
 			}
 		}
 	}
-	wantFiles := prebuild.ToolsDockerfile(testName+":base", "1234:2345", false) +
+	wantFiles := prebuild.ToolsDockerfile(testName+":base", "debian", "1234:2345", false) +
 		"FROM " + testName + ":tools\nUSER 1234:2345\nENV HOME=/home/agent\n" +
 		"FROM " + testName + ":seeded\nENTRYPOINT []\nCMD [\"/bin/sh\"]\n"
 	if got := f.read("dockerfiles"); got != wantFiles {

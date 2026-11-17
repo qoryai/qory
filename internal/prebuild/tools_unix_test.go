@@ -39,7 +39,7 @@ func TestBuildAddsTheToolsToTheImage(t *testing.T) {
 	if strings.Join(got, " ") != strings.Join(want, " ") {
 		t.Errorf("the tools step's context is %v, want %v", got, want)
 	}
-	dockerfile := prebuild.ToolsDockerfile(testName+":base", "1234:2345", false)
+	dockerfile := prebuild.ToolsDockerfile(testName+":base", "debian", "1234:2345", false)
 	if !strings.HasPrefix(f.read("dockerfiles"), dockerfile) {
 		t.Errorf("the Dockerfiles are\n%s", f.read("dockerfiles"))
 	}
@@ -94,10 +94,10 @@ func TestBuildCopiesNodeIntoAnImageWithoutIt(t *testing.T) {
 	if got := contextOf(f, toolsTag); !strings.Contains(strings.Join(got, " "), "./node ") {
 		t.Errorf("the context is %v", got)
 	}
-	if !strings.HasPrefix(f.read("dockerfiles"), prebuild.ToolsDockerfile(testName+":base", "1234:2345", true)) {
+	if !strings.HasPrefix(f.read("dockerfiles"), prebuild.ToolsDockerfile(testName+":base", "debian", "1234:2345", true)) {
 		t.Errorf("the Dockerfiles are\n%s", f.read("dockerfiles"))
 	}
-	if !strings.Contains(prebuild.ToolsDockerfile("base", "1234:2345", true), "\nCOPY --chown=0:0 --chmod=0755 node /usr/local/bin/node\n") {
+	if !strings.Contains(prebuild.ToolsDockerfile("base", "debian", "1234:2345", true), "\nCOPY --chown=0:0 --chmod=0755 node /usr/local/bin/node\n") {
 		t.Error("the Dockerfile does not copy node")
 	}
 }
@@ -114,12 +114,14 @@ func TestBuildRefusesABaseItCannotAddTheToolsTo(t *testing.T) {
 		early       bool
 		prepare     func(o *prebuild.Options)
 	}{
-		"ubuntu":   {probe: "id=ubuntu\napt=yes\nnode=yes\n", want: `use a Debian base image: the build adds Chromium with apt, and this image's ID is "ubuntu"`},
-		"alpine":   {probe: "id=alpine\napt=no\nnode=no\n", want: `use a Debian base image: the build adds Chromium with apt, and this image's ID is "alpine"`},
-		"no id":    {probe: "id=\napt=yes\nnode=yes\n", want: `use a Debian base image: the build adds Chromium with apt, and this image's ID is empty`},
-		"no apt":   {probe: "id=debian\napt=no\nnode=yes\n", want: "use a Debian base image that has apt-get: the build adds Chromium and ffmpeg with it"},
-		"odd id":   {probe: "id=\x1b[31mred\napt=yes\nnode=yes\n", want: `use a Debian base image: the build adds Chromium with apt, and this image's ID is "`},
-		"no shell": {noShell: true, want: "use a base image with sh and /etc/os-release: reading its system failed: "},
+		"ubuntu 20.04":  {probe: "id=ubuntu\nversion=20.04\narch=amd64\napt=yes\nnode=yes\n", want: `use Ubuntu 22.04 or 24.04, or Debian: the build adds Chromium to these, and this is Ubuntu "20.04"`},
+		"ubuntu arch":   {probe: "id=ubuntu\nversion=24.04\narch=s390x\napt=yes\nnode=yes\n", want: `use an amd64 or arm64 Ubuntu image: the build adds Chromium for these, and this one is "s390x"`},
+		"ubuntu no apt": {probe: "id=ubuntu\nversion=24.04\narch=amd64\napt=no\nnode=yes\n", want: "use a Debian or Ubuntu image that has apt-get: the build installs ffmpeg and fonts with it"},
+		"alpine":        {probe: "id=alpine\napt=no\nnode=no\n", want: `use a Debian or Ubuntu image: the build adds Chromium to these, and this image's ID is "alpine"`},
+		"no id":         {probe: "id=\napt=yes\nnode=yes\n", want: `use a Debian or Ubuntu image: the build adds Chromium to these, and this image's ID is empty`},
+		"no apt":        {probe: "id=debian\napt=no\nnode=yes\n", want: "use a Debian or Ubuntu image that has apt-get: the build installs ffmpeg and fonts with it"},
+		"odd id":        {probe: "id=\x1b[31mred\napt=yes\nnode=yes\n", want: `use a Debian or Ubuntu image: the build adds Chromium to these, and this image's ID is "`},
+		"no shell":      {noShell: true, want: "use a base image with sh and /etc/os-release: reading its system failed: "},
 		"no parsers": {early: true, want: "build the prebuild image FROM Qory's agent image: it has no parsers in ", prepare: func(o *prebuild.Options) {
 			o.Parsers = t.TempDir()
 		}},
@@ -161,6 +163,42 @@ func TestBuildRefusesABaseItCannotAddTheToolsTo(t *testing.T) {
 			}
 			if !f.called("docker", "image rm --force "+testName+":base") {
 				t.Errorf("the images are not removed:\n%s", f.read("docker.log"))
+			}
+		})
+	}
+}
+
+// TestBuildAddsChromiumToUbuntuFromTheDownload is an Ubuntu 22.04 and a 24.04 base, on
+// either architecture: Chromium is not installed with apt, which has a snap for it, but
+// downloaded, checked against the sum committed in the code before it is extracted, and
+// linked at /usr/bin/chromium, with the release's libraries and no chromium package.
+func TestBuildAddsChromiumToUbuntuFromTheDownload(t *testing.T) {
+	for release, lib := range map[string]string{"22.04": " libasound2 ", "24.04": " libasound2t64 "} {
+		t.Run(release, func(t *testing.T) {
+			f := newFakes(t)
+			f.set(t, "probe", "id=ubuntu\nversion="+release+"\narch=arm64\napt=yes\nnode=yes\n")
+			if _, err := prebuild.Build(t.Context(), options(t, repository(t, shopConfig), io.Discard, io.Discard)); err != nil {
+				t.Fatalf("Build: %v", err)
+			}
+			got := f.read("dockerfiles")
+			if !strings.HasPrefix(got, prebuild.ToolsDockerfile(testName+":base", "ubuntu"+release, "1234:2345", false)) {
+				t.Fatalf("the Dockerfiles are\n%s", got)
+			}
+			for _, want := range []string{lib, " ffmpeg ", " fonts-noto-cjk ", " unzip ", "--no-install-recommends",
+				"amd64) archive=linux64/chrome-linux64.zip; sum=370601106c1b5619aae5f06f7a3fdc60836486135934779461e2a208d777f596 ;;",
+				"arm64) archive=linux-arm64/chrome-linux-arm64.zip; sum=4a9ea5f9422e268fff9df19908365b6d1e92da154607d0f90c7138cf6c42ce38 ;;",
+				"https://cdn.playwright.dev/builds/cft/159.0.8154.6/$archive", "sha256sum -c -", "ln -s /opt/qory/chromium/chrome /usr/bin/chromium",
+				"apt-get clean", "rm -rf /var/lib/apt/lists/*"} {
+				if !strings.Contains(got, want) {
+					t.Errorf("the Dockerfile lacks %q:\n%s", want, got)
+				}
+			}
+			// The sum is checked before the archive is extracted.
+			if strings.Index(got, "sha256sum -c -") > strings.Index(got, "unzip -q") {
+				t.Error("the archive is extracted before its sum is checked")
+			}
+			if i := strings.Index(got, "apt-get install"); strings.Contains(got[i:i+strings.Index(got[i:], "apt-get clean")], "chromium") {
+				t.Errorf("the Dockerfile installs a chromium package:\n%s", got)
 			}
 		})
 	}

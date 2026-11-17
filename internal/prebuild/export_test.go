@@ -14,20 +14,20 @@ func ShortenGrace(t *testing.T, d time.Duration) {
 
 // ToolsDockerfile is the Dockerfile of the tools step for the wall user user, uid:gid,
 // which adds node from the context when copyNode is set.
-func ToolsDockerfile(base, user string, copyNode bool) string {
+func ToolsDockerfile(base, kind, user string, copyNode bool) string {
 	u, err := parseUser(user)
 	if err != nil {
 		panic(err)
 	}
-	return toolsDockerfile(base, u, copyNode)
+	return toolsDockerfile(base, toolsBase(kind), u, copyNode)
 }
 
 // WriteToolsContext writes the tools step's build context for the wall user user, uid:gid,
 // to the new folder dir, as the build does.
-func WriteToolsContext(dir, base, user, parsers, node string, copyNode bool) error {
+func WriteToolsContext(dir, base, kind, user, parsers, node string, copyNode bool) error {
 	u, err := parseUser(user)
 	if err != nil {
 		return err
 	}
-	return writeToolsContext(dir, base, u, parsers, node, copyNode)
+	return writeToolsContext(dir, base, toolsBase(kind), u, parsers, node, copyNode)
 }

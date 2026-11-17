@@ -30,28 +30,96 @@ const (
 	textTools       = prefix + "added Chromium, ffmpeg and the parsers in %s"
 	textNoParsers   = "build the prebuild image FROM Qory's agent image: it has no parsers in %s"
 	textNoNode      = "build the prebuild image FROM Qory's agent image: it has no node program at %s, and the base image has none"
-	textNotDebian   = "use a Debian base image: the build adds Chromium with apt, and this image's ID is %s"
-	textNoApt       = "use a Debian base image that has apt-get: the build adds Chromium and ffmpeg with it"
+	textNotServed   = "use a Debian or Ubuntu image: the build adds Chromium to these, and this image's ID is %s"
+	textUbuntuRel   = "use Ubuntu 22.04 or 24.04, or Debian: the build adds Chromium to these, and this is Ubuntu %s"
+	textUbuntuArch  = "use an amd64 or arm64 Ubuntu image: the build adds Chromium for these, and this one is %s"
+	textNoApt       = "use a Debian or Ubuntu image that has apt-get: the build installs ffmpeg and fonts with it"
 	textBaseUnread  = "use a base image with sh and /etc/os-release: reading its system failed: %s"
 	textToolsFailed = "read the build log for the step that failed: adding Chromium, ffmpeg and the parsers: %s"
 )
 
-// toolsPackages are the Debian packages the tools step installs: Chromium, ffmpeg with
+// The Chromium an Ubuntu base gets: Chrome for Testing, as Playwright installs it, from
+// Playwright's download site, because Ubuntu's chromium package is a snap. PlaywrightVersion
+// is the release of playwright-core whose browsers.json names revision ChromiumRevision,
+// Chrome for Testing ChromiumVersion. Both sums are of the zip archives, sha256: the amd64
+// one equals the sum of Google's own copy at
+// https://storage.googleapis.com/chrome-for-testing-public/159.0.8154.6/linux64/chrome-linux64.zip;
+// Google builds no arm64 archive for Linux, so the arm64 sum is one computed on 2026-11-17
+// from a download of Playwright's copy. The step checks the sum before it extracts.
+const (
+	PlaywrightVersion = "1.65.1"
+	ChromiumRevision  = "1255"
+	ChromiumVersion   = "159.0.8154.6"
+	chromiumSiteURL   = "https://cdn.playwright.dev/builds/cft/" + ChromiumVersion + "/"
+	chromiumAMD64     = "linux64/chrome-linux64.zip"
+	chromiumAMD64Sum  = "370601106c1b5619aae5f06f7a3fdc60836486135934779461e2a208d777f596"
+	chromiumARM64     = "linux-arm64/chrome-linux-arm64.zip"
+	chromiumARM64Sum  = "4a9ea5f9422e268fff9df19908365b6d1e92da154607d0f90c7138cf6c42ce38"
+	// ChromiumPath is where an Ubuntu image gets Chromium; /usr/bin/chromium is a link to
+	// its chrome program.
+	ChromiumPath = "/opt/qory/chromium"
+)
+
+// toolsBase is the kind of base the tools step serves.
+type toolsBase string
+
+// The bases: Debian, with Chromium from apt, and the Ubuntu releases that have a
+// Playwright build of Chromium and its libraries here, with Chromium from the download.
+const (
+	baseDebian     toolsBase = "debian"
+	baseUbuntu2204 toolsBase = "ubuntu22.04"
+	baseUbuntu2404 toolsBase = "ubuntu24.04"
+)
+
+// debianPackages are the packages the step installs on Debian: Chromium, ffmpeg with
 // ffprobe, and the Noto fonts of the agent image for Latin and other scripts, CJK and
 // color emoji.
-var toolsPackages = []string{"chromium", "ffmpeg", "fonts-noto-cjk", "fonts-noto-color-emoji", "fonts-noto-core"}
+var debianPackages = []string{"chromium", "ffmpeg", "fonts-noto-cjk", "fonts-noto-color-emoji", "fonts-noto-core"}
+
+// ubuntuPackages are the packages the step installs on Ubuntu release rel: ffmpeg and the
+// same fonts, what the download needs, curl, unzip and the authorities, and the libraries
+// of Chromium that Playwright's install-deps list names for the release, with
+// fontconfig and freetype.
+var ubuntuPackages = map[toolsBase][]string{
+	baseUbuntu2204: {"ffmpeg", "fonts-noto-cjk", "fonts-noto-color-emoji", "fonts-noto-core",
+		"ca-certificates", "curl", "unzip", "libfontconfig1", "libfreetype6",
+		"libasound2", "libatk-bridge2.0-0", "libatk1.0-0", "libatspi2.0-0", "libcairo2", "libcups2", "libdbus-1-3",
+		"libdrm2", "libgbm1", "libglib2.0-0", "libnspr4", "libnss3", "libpango-1.0-0", "libwayland-client0",
+		"libx11-6", "libxcb1", "libxcomposite1", "libxdamage1", "libxext6", "libxfixes3", "libxkbcommon0", "libxrandr2"},
+	baseUbuntu2404: {"ffmpeg", "fonts-noto-cjk", "fonts-noto-color-emoji", "fonts-noto-core",
+		"ca-certificates", "curl", "unzip", "libfontconfig1", "libfreetype6",
+		"libasound2t64", "libatk-bridge2.0-0t64", "libatk1.0-0t64", "libatspi2.0-0t64", "libcairo2", "libcups2t64", "libdbus-1-3",
+		"libdrm2", "libgbm1", "libglib2.0-0t64", "libnspr4", "libnss3", "libpango-1.0-0",
+		"libx11-6", "libxcb1", "libxcomposite1", "libxdamage1", "libxext6", "libxfixes3", "libxkbcommon0", "libxrandr2"},
+}
 
 // baseFacts is what the build reads of the image the target step starts from.
 type baseFacts struct {
 	// id is ID of its /etc/os-release, "" for none.
 	id string
+	// version is VERSION_ID, "" for none, and arch the output of dpkg --print-architecture.
+	version, arch string
 	// apt is whether it has apt-get on its PATH, and node whether it has node.
 	apt, node bool
 }
 
+// kind is the kind of base the facts describe, or "" for one the step does not serve:
+// Debian of any version, and Ubuntu 22.04 and 24.04.
+func (f baseFacts) kind() toolsBase {
+	switch {
+	case f.id == "debian":
+		return baseDebian
+	case f.id == "ubuntu" && f.version == "22.04":
+		return baseUbuntu2204
+	case f.id == "ubuntu" && f.version == "24.04":
+		return baseUbuntu2404
+	}
+	return ""
+}
+
 // probeScript prints the facts [readBase] reads, one name=value per line, as one line of
 // shell.
-const probeScript = `if [ -r /etc/os-release ]; then . /etc/os-release; fi; echo "id=${ID:-}"; ` +
+const probeScript = `if [ -r /etc/os-release ]; then . /etc/os-release; fi; echo "id=${ID:-}"; echo "version=${VERSION_ID:-}"; echo "arch=$(dpkg --print-architecture 2>/dev/null)"; ` +
 	`if command -v apt-get >/dev/null 2>&1; then echo apt=yes; else echo apt=no; fi; ` +
 	`if command -v node >/dev/null 2>&1; then echo node=yes; else echo node=no; fi`
 
@@ -75,6 +143,10 @@ func (b *build) readBase(ctx context.Context, ref string) (baseFacts, error) {
 		switch name {
 		case "id":
 			f.id = value
+		case "version":
+			f.version = value
+		case "arch":
+			f.arch = value
 		case "apt":
 			f.apt = value == "yes"
 		case "node":
@@ -111,11 +183,16 @@ func (b *build) addTools(ctx context.Context, base, tools string) error {
 	if err != nil {
 		return err
 	}
+	kind := facts.kind()
 	switch {
-	case facts.id != "debian":
-		return refused(fmt.Errorf(textNotDebian, shownID(facts.id)))
+	case facts.id == "ubuntu" && kind == "":
+		return refused(fmt.Errorf(textUbuntuRel, shownID(facts.version)))
+	case kind == "":
+		return refused(fmt.Errorf(textNotServed, shownID(facts.id)))
 	case !facts.apt:
 		return refused(errors.New(textNoApt))
+	case kind != baseDebian && facts.arch != "amd64" && facts.arch != "arm64":
+		return refused(fmt.Errorf(textUbuntuArch, shownID(facts.arch)))
 	}
 	node := b.nodePath()
 	if !facts.node {
@@ -124,7 +201,7 @@ func (b *build) addTools(ctx context.Context, base, tools string) error {
 		}
 	}
 	dir := filepath.Join(b.tmp, "tools")
-	if err := writeToolsContext(dir, base, b.u, b.parsersPath(), node, !facts.node); err != nil {
+	if err := writeToolsContext(dir, base, kind, b.u, b.parsersPath(), node, !facts.node); err != nil {
 		return err
 	}
 	b.images = append(b.images, tools)
@@ -146,7 +223,7 @@ func (b *build) addTools(ctx context.Context, base, tools string) error {
 // writeToolsContext writes the build context of the tools step to the new folder dir:
 // the Dockerfile, a copy of the folder parsers and, when copyNode is set, a copy of the
 // node program node.
-func writeToolsContext(dir, base string, u user, parsers, node string, copyNode bool) error {
+func writeToolsContext(dir, base string, kind toolsBase, u user, parsers, node string, copyNode bool) error {
 	if err := os.Mkdir(dir, 0o700); err != nil {
 		return err
 	}
@@ -158,7 +235,7 @@ func writeToolsContext(dir, base string, u user, parsers, node string, copyNode 
 			return err
 		}
 	}
-	return os.WriteFile(filepath.Join(dir, "Dockerfile"), []byte(toolsDockerfile(base, u, copyNode)), 0o600)
+	return os.WriteFile(filepath.Join(dir, "Dockerfile"), []byte(toolsDockerfile(base, kind, u, copyNode)), 0o600)
 }
 
 // parsersPath is the folder of the parsers the build copies.
@@ -195,21 +272,47 @@ func (b *build) checkParsers() error {
 // ones its suite serves on the day of the build; the last step prints them. The folder
 // of the parsers belongs to root, mode 0755 for folders and 0644 for files, as the context
 // has them, so the wall user reads it and cannot change it.
-func toolsDockerfile(base string, u user, copyNode bool) string {
+func toolsDockerfile(base string, kind toolsBase, u user, copyNode bool) string {
 	var d strings.Builder
 	d.WriteString("FROM " + base + "\nUSER 0:0\n")
 	if copyNode {
 		d.WriteString("COPY --chown=0:0 --chmod=0755 node /usr/local/bin/node\n")
 	}
 	d.WriteString("COPY --chown=0:0 parsers " + ParsersPath + "\n")
-	d.WriteString(`RUN set -eu \
+	if kind == baseDebian {
+		d.WriteString(`RUN set -eu \
  && export DEBIAN_FRONTEND=noninteractive \
  && apt-get update \
- && apt-get install -y --no-install-recommends ` + strings.Join(toolsPackages, " ") + ` \
+ && apt-get install -y --no-install-recommends ` + strings.Join(debianPackages, " ") + ` \
  && apt-get clean \
  && rm -rf /var/lib/apt/lists/* /var/cache/apt \
  && find /usr/lib/chromium -xdev -type f \( -perm -4000 -o -perm -2000 \) -exec chmod ug-s {} +
 `)
+	} else {
+		d.WriteString(`RUN set -eu \
+ && export DEBIAN_FRONTEND=noninteractive \
+ && apt-get update \
+ && apt-get install -y --no-install-recommends ` + strings.Join(ubuntuPackages[kind], " ") + ` \
+ && apt-get clean \
+ && rm -rf /var/lib/apt/lists/* /var/cache/apt \
+ && { test ! -e /usr/bin/chromium \
+      || { echo "Remove /usr/bin/chromium from the base image: the build links it to Chromium in ` + ChromiumPath + `" >&2; exit 1; }; } \
+ && case "$(dpkg --print-architecture)" in \
+      amd64) archive=` + chromiumAMD64 + `; sum=` + chromiumAMD64Sum + ` ;; \
+      arm64) archive=` + chromiumARM64 + `; sum=` + chromiumARM64Sum + ` ;; \
+      *) echo "Use an amd64 or arm64 Ubuntu image: dpkg --print-architecture prints $(dpkg --print-architecture)" >&2; exit 1 ;; \
+    esac \
+ && curl --fail --silent --show-error --location --retry 3 --output /tmp/chromium.zip "` + chromiumSiteURL + `$archive" \
+ && { echo "$sum  /tmp/chromium.zip" | sha256sum -c - \
+      || { echo "Update the sums in internal/prebuild/tools.go: the download of $archive is not Chromium ` + ChromiumVersion + `" >&2; exit 1; }; } \
+ && mkdir /tmp/chromium && unzip -q /tmp/chromium.zip -d /tmp/chromium \
+ && mv /tmp/chromium/chrome-linux* ` + ChromiumPath + ` \
+ && rm -rf /tmp/chromium /tmp/chromium.zip \
+ && chown -R 0:0 ` + ChromiumPath + ` \
+ && chmod -R go-w,ug-s ` + ChromiumPath + ` \
+ && ln -s ` + ChromiumPath + `/chrome /usr/bin/chromium
+`)
+	}
 	d.WriteString("USER " + u.String() + "\n")
 	d.WriteString(toolsCheck)
 	return d.String()
