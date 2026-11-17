@@ -844,6 +844,32 @@ func TestBuildRefusesAPulledImageOverTheLargestSize(t *testing.T) {
 	}
 }
 
+// TestBuildRefusesAStandardImageOverTheLargestSize is a standard image, shared/<name>, the
+// configuration's image form, over the limit: refused right after the pull, before the tools
+// step, and the engine's image stays.
+func TestBuildRefusesAStandardImageOverTheLargestSize(t *testing.T) {
+	const standard = testRegistry + "/shared/factory"
+	f := newFakes(t)
+	f.set(t, sizeOf(standard+"@sha256:"+baseDigest), "3000000001\n")
+	f.set(t, "size", "1000\n")
+	o := options(t, repository(t, `{"image": "`+standard+`:1", "onCreateCommand": "make"}`), io.Discard, io.Discard)
+	o.Registry = testRegistry
+	o.LargestImageBytes = 3000000000
+	_, err := prebuild.Build(t.Context(), o)
+	want := tooBig + "\nThe repository's image is 3.0 GB (3000000001 bytes), before qory adds Chromium, ffmpeg and the parsers.\nThe limit is 3.0 GB (3000000000 bytes)."
+	if err == nil || err.Error() != want {
+		t.Fatalf("Build: %v", err)
+	}
+	if !f.called("docker", "pull "+standard+":1") || f.called("docker", "run --rm") || f.called("docker", "build --tag") {
+		t.Errorf("docker ran\n%s", f.read("docker.log"))
+	}
+	for _, l := range f.calls("docker") {
+		if strings.HasPrefix(l, "image rm") && strings.Contains(l, "shared/factory") {
+			t.Errorf("the pulled image is removed: docker %s", l)
+		}
+	}
+}
+
 // TestBuildKeepsAnImageWhoseToolsPutItOverTheLargestSize is a repository's image under the limit
 // whose final image, after the tools step, is over it: kept, and the last line has the final
 // size.
