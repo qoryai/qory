@@ -2523,7 +2523,7 @@ The step does this, in order:
 
 A run's policy with path rules must allow `/<path>.git/git-receive-pack` for the push. The
 run's gateway returns 403 to a push to any ref but the run's branch, and to every push
-through a credential that has no `push_ref`, as each credential in forager.yaml has.
+through a credential that has no `push_ref`, as a credential in forager.yaml has none.
 
 The step counts toward the run's time limit, and has 120 seconds when the run has less left,
 also after the session used up the limit. A run can pass its time limit by up to 120

@@ -491,8 +491,8 @@ release may change what an existing document does, and states it under Upgrading
   same.
 - qory uses Forager 3d4ec18a. Its gateway returns 403 for a git push through a credential
   that has no push ref, so a `git push` through a credential that forager.yaml defines
-  with `env` or `file` gets 403. The credential that Qory Apiary applies to a run's push
-  has a push ref, so the push step is not affected.
+  with `env` or `file` gets 403. The push step's credential, which Qory Apiary applies,
+  has a push ref for the run's branch, so the push step is not affected.
 - A run with a run key or a run code, with no `--home` or `harness.home`, composes into
   `runs/<name>-<hash>/<run id>` under `qory/homes` in the cache directory, a home for that
   run alone, which qory removes when the run ends. Two runs of one checkout no longer
