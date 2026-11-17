@@ -463,9 +463,27 @@ type Workflow struct {
 	// dispatched run of the workflow works on: read, write-no-push, or write, "" when the
 	// workflow sets none. [Stack.AccessOf] reads "" as read.
 	Access string `yaml:"access,omitempty"`
+	// Tier is tier as written, the tier of [Tiers] that names the main session's model
+	// and effort for a dispatched run of the workflow, "" when the workflow sets none.
+	// Qory Apiary resolves it; qory reads it only to refuse a value that is no tier.
+	Tier string `yaml:"tier,omitempty"`
 	// HookPoints are the points of the workflow where a checkout extending the stack
 	// may add workflow hooks, by the point's name; nil for none.
 	HookPoints map[string]HookPoint `yaml:"hook_points,omitempty"`
+}
+
+// Tiers are the tier names: the names a tier placeholder, ${qory:<tier>}, may take in an
+// agent's model, and the values of a workflow's tier.
+var Tiers = []string{"light", "fast", "thinking"}
+
+// IsTier reports whether name is one of [Tiers].
+func IsTier(name string) bool {
+	return slices.Contains(Tiers, name)
+}
+
+// TierList is the tiers for a message: "light, fast, and thinking".
+func TierList() string {
+	return strings.Join(Tiers[:len(Tiers)-1], ", ") + ", and " + Tiers[len(Tiers)-1]
 }
 
 // The access levels a workflow declares, see [Workflow.Access].
@@ -767,6 +785,13 @@ func (p *Stack) validate(compose bool) error {
 				fmt.Sprintf("Set workflows.%s.access to a valid level.", name),
 				"The levels are read, write-no-push, and write.",
 				fmt.Sprintf("The value is %s.", exports.Value(w.Access, true)),
+				fmt.Sprintf("workflows.%s is in %s.", name, exports.FilePlace))
+		}
+		if w.Tier != "" && !IsTier(w.Tier) {
+			return exports.Refuse(
+				fmt.Sprintf("Set workflows.%s.tier to a valid tier.", name),
+				"The tiers are "+TierList()+".",
+				fmt.Sprintf("The value is %s.", exports.Value(w.Tier, true)),
 				fmt.Sprintf("workflows.%s is in %s.", name, exports.FilePlace))
 		}
 		if w.TimeLimitText == "" {
