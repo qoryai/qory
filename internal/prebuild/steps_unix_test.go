@@ -158,7 +158,7 @@ func TestBuildStartsFromAStandardImage(t *testing.T) {
 		if !f.called("docker", "pull "+standard+":1") || f.called("docker", "tag") {
 			t.Errorf("docker ran\n%s", f.read("docker.log"))
 		}
-		if !strings.HasPrefix(f.read("dockerfiles"), "FROM "+base+"\nCOPY --from="+agentImage+" /qory/agent /qory/agent\n") {
+		if !strings.HasPrefix(f.read("dockerfiles"), "FROM "+base+"\nUSER 1234:2345\n") {
 			t.Errorf("the Dockerfiles are\n%s", f.read("dockerfiles"))
 		}
 		if !strings.Contains(out.String(), "prebuild: pulled the standard image "+base+" in ") ||
@@ -193,7 +193,7 @@ func TestBuildStartsFromAStandardImage(t *testing.T) {
 }
 
 // TestBuildStartsFromAnEnvironmentImage is a build given an environment image: no
-// environment step and no rewrite, the target step from that image with the agent added
+// environment step and no rewrite, the target step from that image with the wall user set
 // there, no environment image kept and no base.
 func TestBuildStartsFromAnEnvironmentImage(t *testing.T) {
 	f := newFakes(t)
@@ -214,7 +214,7 @@ func TestBuildStartsFromAnEnvironmentImage(t *testing.T) {
 	if !f.called("docker", "pull "+env) || f.called("docker", "image inspect --format {{json .RepoDigests}}") || !f.called("docker", "image inspect --format {{json .Config}} "+env) {
 		t.Errorf("docker ran\n%s", f.read("docker.log"))
 	}
-	if !strings.HasPrefix(f.read("dockerfiles"), "FROM "+env+"\nCOPY --from="+agentImage+" /qory/agent /qory/agent\nUSER 1234:2345\n") {
+	if !strings.HasPrefix(f.read("dockerfiles"), "FROM "+env+"\nUSER 1234:2345\n") {
 		t.Errorf("the Dockerfiles are\n%s", f.read("dockerfiles"))
 	}
 	if want := "prebuild: pulled the environment image " + env + " in "; !strings.Contains(out.String(), want) || strings.Contains(out.String(), "rewrote") {

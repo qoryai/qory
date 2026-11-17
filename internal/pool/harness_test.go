@@ -79,6 +79,9 @@ type report struct {
 	// folder.
 	FD4Lock bool
 	CodeSum string
+	// Machine is the lines of the run code's file after the code: the registry and the
+	// runtimes folder that qory run installs the runtime with.
+	Machine string
 }
 
 func TestMain(m *testing.M) {
@@ -133,6 +136,12 @@ func fakeProbe() int {
 }
 
 // probeImage is the agent's image the harness's check runs, pinned by its digest.
+// harnessRegistry is the instance's registry the harness's pool passes each run.
+const harnessRegistry = "registry.example.com"
+
+// harnessInstance is the address of Qory Apiary that the harness's pool passes each run.
+const harnessInstance = "https://apiary.example.com"
+
 const probeImage = "registry.example.com/agent@sha256:2222222222222222222222222222222222222222222222222222222222222222"
 
 // fakeQory is qory run, as the script in $XDG_CONFIG_HOME sets it. It prints the run
@@ -165,7 +174,8 @@ func fakeQory() int {
 		_, werr := f.Write([]byte("x"))
 		code, _ = io.ReadAll(f)
 		rep.FD3File = werr != nil
-		rep.CodeSum = sum(code)
+		first, rest, _ := bytes.Cut(code, []byte("\n"))
+		rep.CodeSum, rep.Machine = sum(first), string(rest)
 	}
 	out, _ := json.Marshal(rep)
 	if err := os.WriteFile(filepath.Join(config, "report-"+id+".json"), out, 0o600); err != nil {
@@ -178,7 +188,8 @@ func fakeQory() int {
 	}
 	if !s.Quiet {
 		fmt.Println("hello")
-		fmt.Println("redeeming " + string(code))
+		first, _, _ := bytes.Cut(code, []byte("\n"))
+		fmt.Println("redeeming " + string(first))
 		for _, line := range s.Say {
 			fmt.Println(strings.ReplaceAll(line, "~", "_"))
 		}
@@ -421,7 +432,7 @@ func newHarness(t *testing.T, runs int) *harness {
 	log := slog.New(slog.NewJSONHandler(h.log, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	c.Log = log
 	h.pool = &pool.Pool{
-		Settings: pool.Settings{Runs: runs, State: h.state, RunConfig: h.runConfig, Qory: os.Args[0], Grace: 2 * time.Second,
+		Settings: pool.Settings{Runs: runs, State: h.state, RunConfig: h.runConfig, Registry: harnessRegistry, Instance: harnessInstance, Qory: os.Args[0], Grace: 2 * time.Second,
 			Probe: pool.Probe{Docker: os.Args[0], Image: probeImage, User: "1000:1000"}},
 		Client: c,
 		Log:    log,

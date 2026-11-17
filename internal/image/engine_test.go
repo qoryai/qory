@@ -97,7 +97,6 @@ const passingReport = `{"version":1,"checks":[` +
 	`{"name":"home","result":"pass","detail":"HOME is /home/agent"},` +
 	`{"name":"authorities","result":"pass","detail":"the authorities"},` +
 	`{"name":"shell","result":"pass","detail":"/bin/sh"},` +
-	`{"name":"claude","result":"pass","detail":"claude 2.1.316"},` +
 	`{"name":"git","result":"pass","detail":"git version 2.47.3"},` +
 	`{"name":"gh","result":"pass","detail":"gh version 2.101.0"},` +
 	`{"name":"docker","result":"info","detail":"no dockerd"}]}`
@@ -124,8 +123,8 @@ func TestEngineChecksTheImageAsTheWallRunsAnAgent(t *testing.T) {
 	if err != nil || platform != "linux/arm64" {
 		t.Fatalf("platform %q, %v", platform, err)
 	}
-	checks := e.Check(context.Background(), platform, image.Target{Ref: "example.com/agent:1", Helper: "/opt/qory/qory-linux", Runtimes: []image.Runtime{{Name: "claude", Version: "2.1.316"}}})
-	if got := lineNames(checks); got != "image pass, home pass, reference info, files pass, home pass, authorities pass, shell pass, claude pass, git pass, gh pass, docker info" {
+	checks := e.Check(context.Background(), platform, image.Target{Ref: "example.com/agent:1", Helper: "/opt/qory/qory-linux"})
+	if got := lineNames(checks); got != "image pass, home pass, reference info, files pass, home pass, authorities pass, shell pass, git pass, gh pass, docker info" {
 		t.Errorf("lines %s", got)
 	}
 	if want := "not pinned by digest; the engine holds the image as sha256:1111111111111111111111111111111111111111111111111111111111111111, which a registry serves only if the image was pulled from it or pushed to it"; checks[2].Detail != want {
@@ -138,7 +137,7 @@ func TestEngineChecksTheImageAsTheWallRunsAnAgent(t *testing.T) {
 		"podman create --pull never --network none --entrypoint /qory/qory example.com/agent:1",
 		"podman export c0ffee",
 		"podman rm --force --volumes c0ffee",
-		"podman run --rm --pull never --network none --user 65532:65532 --cap-drop ALL --security-opt no-new-privileges --init --mount type=bind,src=/opt/qory/qory-linux,dst=/qory/qory,readonly --entrypoint /qory/qory example.com/agent:1 image probe claude=2.1.316",
+		"podman run --rm --pull never --network none --user 65532:65532 --cap-drop ALL --security-opt no-new-privileges --init --mount type=bind,src=/opt/qory/qory-linux,dst=/qory/qory,readonly --entrypoint /qory/qory example.com/agent:1 image probe",
 	} {
 		if !strings.Contains(strings.Join(f.lines, "\n")+"\n", want+"\n") {
 			t.Errorf("did not run %s; ran:\n%s", want, strings.Join(f.lines, "\n"))
@@ -218,7 +217,7 @@ func TestEngineNamesWhatIsWrongFromOutside(t *testing.T) {
 	if lines["reference"].Detail != "not pinned by digest, and the engine holds no digest of it: a local build" {
 		t.Errorf("reference %q", lines["reference"].Detail)
 	}
-	if c, ok := lines["claude"]; !ok || c.Result != image.Pass {
+	if c, ok := lines["git"]; !ok || c.Result != image.Pass {
 		t.Errorf("the image of another platform was not probed: %s", lineNames(checks))
 	}
 
@@ -244,11 +243,11 @@ func TestEngineSaysWhyTheProbeDidNotRun(t *testing.T) {
 		t.Errorf("a probe that printed nonsense: %+v", last)
 	}
 	f.report = `{"version":1,"checks":[{"name":"home","result":"pass","detail":"HOME"},{"name":"shell","result":"maybe","detail":"/bin/sh"}]}`
-	checks = e.Check(context.Background(), "linux/arm64", image.Target{Ref: "a:1", Helper: "/q", Runtimes: []image.Runtime{{Name: "claude"}}})
+	checks = e.Check(context.Background(), "linux/arm64", image.Target{Ref: "a:1", Helper: "/q"})
 	if !image.Failed(checks) {
 		t.Errorf("a report that lacks checks passed: %+v", checks)
 	}
-	if last := checks[len(checks)-1]; !strings.Contains(last.Detail, "no line for authorities, claude, git, gh, docker") {
+	if last := checks[len(checks)-1]; !strings.Contains(last.Detail, "no line for authorities, git, gh, docker") {
 		t.Errorf("the lacking checks: %+v", last)
 	}
 	if c := checks[len(checks)-2]; c.Result != image.Fail || !strings.Contains(c.Detail, `the result "maybe"`) {

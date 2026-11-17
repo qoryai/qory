@@ -25,7 +25,7 @@ import (
 // the code is redeemed. The documents set where the images go: the target image to
 // <image_destination>:<run_id>, and the environment image the build keeps apart to
 // <environment_destination>:<run_id>, unless the documents set environment_image, which
-// the build starts from. The build takes the agent image and the user from the wall
+// the build starts from. The build takes the user from the wall
 // section of forager.yaml, and runs in the image of wall.images that wall.prebuild_image is set to.
 
 // textPrebuildWall is the line of a prebuild from a run code on a machine whose
@@ -73,7 +73,7 @@ func (k *heldRunKey) Format(f fmt.State, _ rune) { _, _ = io.WriteString(f, "[hi
 // runCodePrebuild runs the prebuild that doc, the documents of the answer to a run code
 // for the step prebuild, sets, as the run runID with the run key key: [prebuild.Launch]
 // with qory's state directory state, the configuration directory user, as
-// [config.UserDir] returns it, and machine, wall.image, wall.user and the wall of r,
+// [config.UserDir] returns it, and machine, wall.user and the wall of r,
 // the image of wall.prebuild_image its one image, with the helper [wallHelper] finds
 // from exe, wall.ca_env and the wall's limits. pool.registry of r, when r sets one, is
 // where the images must go. qory's line on the run's gateway goes to stderr, and each
@@ -104,7 +104,7 @@ func runCodePrebuild(ctx context.Context, stderr, log io.Writer, r *config.Forag
 	}
 	fmt.Fprintln(stderr, throughGatewayLine(key, runID))
 	_, err = launchPrebuild(ctx, prebuild.Settings{
-		State: state, RunConfig: filepath.Dir(user), AgentImage: w.Image, User: w.User, Version: build().title(),
+		State: state, RunConfig: filepath.Dir(user), User: w.User, Version: build().title(),
 		Wall:  &wall.Docker{Command: w.Command, Helper: helper, RelayArgs: relayArgs, NestArgs: nestArgs, HoldArgs: holdArgs, User: w.User, CAEnv: w.CAEnv},
 		Image: w.PrebuildImage, Images: images, CAEnv: w.CAEnv, Exec: append([]string{wall.HelperPath}, execArgs...),
 		Limits:   wall.Limits{CPUs: w.CPUs, Memory: w.Memory, PIDs: w.PIDs, ShmSize: w.ShmSize},
