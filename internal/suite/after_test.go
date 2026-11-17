@@ -56,6 +56,13 @@ func commit(t *testing.T, dir, name, content string) string {
 // further variables.
 func runScript(t *testing.T, dir, start string, full suite.Full, extra ...string) (int, string) {
 	t.Helper()
+	return runScriptWith(t, dir, start, full, true, extra...)
+}
+
+// runScriptWith is runScript with the setting core.hooksPath of Forager's environment left out
+// when hooksPath is false.
+func runScriptWith(t *testing.T, dir, start string, full suite.Full, hooksPath bool, extra ...string) (int, string) {
+	t.Helper()
 	words, err := suite.Command(start, full)
 	if err != nil {
 		t.Fatal(err)
@@ -71,6 +78,10 @@ func runScript(t *testing.T, dir, start string, full suite.Full, extra ...string
 		"GIT_CONFIG_KEY_0=core.hooksPath", "GIT_CONFIG_VALUE_0=/dev/null",
 		"GIT_CONFIG_KEY_1=protocol.allow", "GIT_CONFIG_VALUE_1=never",
 		"GIT_CONFIG_KEY_2=protocol.https.allow", "GIT_CONFIG_VALUE_2=always",
+	}
+	if !hooksPath {
+		env[len(env)-6] = "GIT_CONFIG_KEY_0=core.fsmonitor"
+		env[len(env)-5] = "GIT_CONFIG_VALUE_0=false"
 	}
 	cmd := exec.Command(words[0], words[1:]...)
 	cmd.Dir, cmd.Env = dir, append(env, extra...)
@@ -346,6 +357,7 @@ func TestJudge(t *testing.T) {
 		{name: "totals that do not match", status: "ran " + sha, result: `<testsuite tests="9"><testcase/></testsuite>`, end: suite.End{Succeeded: true}, state: suite.Failed, started: true, mismatch: true},
 		{name: "a result file that is a link", status: "ran " + sha, result: green, resultAsLink: true, end: suite.End{Succeeded: true}, state: suite.Passed, started: true},
 		{name: "cut at the cap", status: "ran " + sha, end: suite.End{Cancelled: true, TimedOut: true, ExitCode: 143}, state: suite.Timeout, started: true},
+		{name: "cut at the cap before the command", end: suite.End{Cancelled: true, TimedOut: true, ExitCode: 143}, state: suite.Timeout},
 		{name: "cut by a stop", status: "ran " + sha, end: suite.End{Cancelled: true, ExitCode: -1}, state: suite.Stopped, started: true},
 		{name: "the script never got to the command", end: suite.End{ExitCode: 71}, state: suite.Failed},
 		{name: "a status of another form", status: "ran nothing", end: suite.End{Succeeded: true}, state: suite.Failed},
@@ -498,5 +510,42 @@ func TestTheCloneNeedsTheFileProtocolThatTheScriptAllowsForIt(t *testing.T) {
 	}
 	if exit, log := runScript(t, dir, first, suite.Full{Command: "true"}); exit != 0 {
 		t.Fatalf("the script's clone failed: exit %d\n%s", exit, log)
+	}
+}
+
+// TestAHookOfTheCloneDoesNotRun: the clone's git folder gets hooks from a template folder that the
+// image's environment names, and the checkout would run post-checkout there. The script's
+// core.hooksPath turns the hook off, with no core.hooksPath in the environment, so its marker is
+// never written.
+func TestAHookOfTheCloneDoesNotRun(t *testing.T) {
+	dir, first := workspace(t)
+	commit(t, dir, "second.txt", "second\n")
+	marker := filepath.Join(t.TempDir(), "hook-ran")
+	template := t.TempDir()
+	hook := filepath.Join(template, "hooks", "post-checkout")
+	write(t, hook, "#!/bin/sh\ntouch "+marker+"\n")
+	if err := os.Chmod(hook, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if exit, log := runScriptWith(t, dir, first, suite.Full{Command: "true"}, false, "GIT_TEMPLATE_DIR="+template); exit != 0 {
+		t.Fatalf("exit %d\n%s", exit, log)
+	}
+	if exists(marker) {
+		t.Error("the hook of the clone ran")
+	}
+	// The same hook runs with no core.hooksPath, which shows that the test can fail.
+	probe := filepath.Join(t.TempDir(), "probe")
+	cmd := exec.Command("git", "clone", "--quiet", "--no-local", "--no-checkout", "--", dir, probe)
+	cmd.Env = append(gitEnv(), "GIT_TEMPLATE_DIR="+template)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	co := exec.Command("git", "checkout", "--quiet", "--detach", first)
+	co.Dir, co.Env = probe, append(gitEnv(), "GIT_TEMPLATE_DIR="+template)
+	if out, err := co.CombinedOutput(); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if !exists(marker) {
+		t.Error("the probe checkout ran no hook: the test does not show what core.hooksPath prevents")
 	}
 }

@@ -785,8 +785,8 @@ func TestOpenSuitesSetsTheAfterStepOnlyWhereTheSessionRunsTheSuite(t *testing.T)
 		{"full_suite is false", false, true, false, buildPlanText, false, false, false, ""},
 		{"no wall", true, false, false, buildPlanText, false, false, false, ""},
 		{"a read run", true, true, true, buildPlanText, false, false, false, ""},
-		{"no full row", true, true, false, "# Plan\n\n## Commands\n\n| Kind | Command | Result file | Source |\n|---|---|---|---|\n| fast | `a` | none | s |\n", false, false, true, "The full suite did not start: the build plan has no full row.\n  Add a row of kind full"},
-		{"no build plan", true, true, false, "", false, false, true, "The full suite did not start: the work item has no usable build plan.\n  Write a build plan"},
+		{"no full row", true, true, false, "# Plan\n\n## Commands\n\n| Kind | Command | Result file | Source |\n|---|---|---|---|\n| fast | `a` | none | s |\n", false, false, true, "Add a row of kind full to Commands in the build plan.\n  The full suite did not start: the build plan has no full row."},
+		{"no build plan", true, true, false, "", false, false, true, "Write a build plan with a full row in Commands, then push it.\n  The full suite did not start: the work item has no usable build plan."},
 		{"no git folder", true, true, false, buildPlanText, true, false, true, "The full suite did not start: the session's folder has no .git folder."},
 	} {
 		t.Run(c.name, func(t *testing.T) {
@@ -889,33 +889,67 @@ func TestLaunchFullReadsTheNewestUsableVersionOfTheBuildPlan(t *testing.T) {
 	}
 }
 
-// TestTheLinesOfTheSuiteStartWithTheFixInAtMost100Characters holds the first line of each line of qory
-// run about the full suite to 100 characters, with the longest values a line shows.
-func TestTheLinesOfTheSuiteStartWithTheFixInAtMost100Characters(t *testing.T) {
-	for _, line := range []string{
-		textSuiteSkipped,
-		endedLine(suite.Outcome{State: suite.Timeout, Commit: suiteSHA, Counts: &suite.Counts{Tests: 100000, Failed: 100000}}),
-		textSuiteGreen, textSuiteCut, fmt.Sprintf(textSuiteStands, "changes-requested"), fmt.Sprintf(textSuitePosted, "changes-requested"), textSuiteNoRoom,
-		fmt.Sprintf(textSuiteNoPost, "x"),
-		textPointDenied, fmt.Sprintf(textPointFailed, 100000, 100000), fmt.Sprintf(textPointExit, -1), textPointNoTests, textPointMismatch,
-		fmt.Sprintf(textPointNoStartExit, 125), textPointNoStartShell, textFaultTooBig, textFaultNoPlan, textPointNoStartMac, textPointNoStartNone, textPointNoStartFolder, textPointNoStartClone, textPointNoStartHead, fmt.Sprintf(textPointTimeout, 60),
+// TestThePointTextsHaveAtMost100Characters: each first line of a point that qory posts has at most
+// 100 characters, passes the verdict format, and does not end with two full stops.
+func TestThePointTextsHaveAtMost100Characters(t *testing.T) {
+	for _, text := range []string{
+		fmt.Sprintf(textPointFailed, 100000, 100000), fmt.Sprintf(textPointExit, -1), textPointNoTests, textPointMismatch,
+		fmt.Sprintf(textPointNoStartExit, 125), textPointNoStartShell, textPointNoStartMac, textPointNoStartNone, textPointNoStartFolder,
+		textPointNoStartClone, textPointNoStartHead, fmt.Sprintf(textPointNoStartCap, 60), fmt.Sprintf(textPointTimeout, 60), textPointStopped,
+		textPointDenied,
 	} {
+		if len(text) > 100 || !validPoint(runapi.Point{Text: text, Action: "run_again"}) || strings.HasSuffix(text, "..") {
+			t.Errorf("the point text %q has %d characters, valid %v", text, len(text), validPoint(runapi.Point{Text: text, Action: "run_again"}))
+		}
+	}
+	for _, f := range allFaults() {
+		if len(f.point.Text) > 100 || !validPoint(f.point) || f.fixable != (f.point.Fix != "") {
+			t.Errorf("fault %+v: text of %d characters, valid %v", f, len(f.point.Text), validPoint(f.point))
+		}
+	}
+}
+
+func allFaults() []*suiteFault {
+	return []*suiteFault{
+		faultOf(suite.ErrNoCommands), faultOf(suite.ErrNoFull), faultOf(suite.ErrNoCommand), faultOf(suite.ErrBadCommand),
+		faultOf(suite.ErrBadResultFile), faultOf(errNoBuildPlan), faultOf(errBuildPlanTooBig), faultOf(suite.ErrBadStart), faultOf(errors.New("x")),
+		noGitFault(), noAfterFault(), noRunAPIFault(),
+	}
+}
+
+// TestTheLinesOfQoryRunStartWithTheFixInAtMost100Characters: qory run prints each line after "qory run: ",
+// so the first line of each has at most 90 characters of its own. A fault with a fix prints the fix
+// first and the cause on the next line, and a line shortens a point text that is longer.
+func TestTheLinesOfQoryRunStartWithTheFixInAtMost100Characters(t *testing.T) {
+	lines := []string{
+		textSuiteSkipped, textSuiteGreen, textSuiteCut, fmt.Sprintf(textSuiteStands, "changes-requested"),
+		fmt.Sprintf(textSuitePosted, "changes-requested"), textSuiteNoRoom, fmt.Sprintf(textSuiteNoPost, "x"), fmt.Sprintf(textSuiteNoClear, "x"),
+		endedLine(suite.Outcome{State: suite.Timeout, Commit: suiteSHA, Counts: &suite.Counts{Tests: 100000, Failed: 100000}}),
+		endedLine(suite.Outcome{State: suite.Passed, Commit: suiteSHA, Counts: &suite.Counts{Tests: 100000}}),
+	}
+	for _, f := range allFaults() {
+		lines = append(lines, f.line(), shownLine(f.point.Text))
+		if f.fixable && !strings.HasPrefix(f.line(), f.point.Fix+"\n") {
+			t.Errorf("the line of the fault %q does not start with its fix: %q", f.point.Text, f.line())
+		}
+	}
+	for _, text := range []string{
+		fmt.Sprintf(textPointNoStartExit, 125), fmt.Sprintf(textPointNoStartExit, 100000), textPointNoStartMac, textPointNoStartNone,
+		textPointNoStartShell, textPointNoStartFolder, textPointNoStartClone, textPointNoStartHead, fmt.Sprintf(textPointNoStartCap, 60),
+	} {
+		lines = append(lines, shownLine(text))
+	}
+	for _, line := range lines {
 		first, _, _ := strings.Cut(line, "\n")
-		if len(first) > 100 {
-			t.Errorf("the first line %q has %d characters", first, len(first))
+		if len(first) > 90 {
+			t.Errorf("the first line %q has %d characters, want at most 90 before \"qory run: \"", first, len(first))
 		}
 		if strings.HasSuffix(strings.TrimSpace(line), "..") && !strings.HasSuffix(strings.TrimSpace(line), "...") || strings.Contains(line, ".. ") {
 			t.Errorf("the line %q has two full stops", line)
 		}
 	}
-	for _, f := range []*suiteFault{
-		faultOf(suite.ErrNoCommands), faultOf(suite.ErrNoFull), faultOf(suite.ErrNoCommand), faultOf(suite.ErrBadCommand),
-		faultOf(suite.ErrBadResultFile), faultOf(errNoBuildPlan), faultOf(errBuildPlanTooBig), faultOf(suite.ErrBadStart), faultOf(errors.New("x")),
-		noGitFault(), noAfterFault(), noRunAPIFault(),
-	} {
-		if len(f.point.Text) > 100 || !validPoint(f.point) || f.fixable != (f.point.Fix != "") {
-			t.Errorf("fault %+v: text of %d characters, valid %v", f, len(f.point.Text), validPoint(f.point))
-		}
+	if got := shownLine(textPointNoStartMac); got == textPointNoStartMac || !strings.Contains(got, "Linux") {
+		t.Errorf("the macOS line is %q", got)
 	}
 }
 
@@ -946,11 +980,11 @@ func TestTheTextForAContainerThatDidNotStart(t *testing.T) {
 	if textPointNoStartMac != "Contact support: the full suite needs a Linux machine, and this run's machine runs Docker on macOS." {
 		t.Errorf("the macOS text is %q", textPointNoStartMac)
 	}
-	// The line at the end of the run has the same words.
+	// The line at the end of the run has the same cause in fewer words, to fit after "qory run: ".
 	h := newHelper(t)
 	goos = "darwin"
 	h.after(&session.AfterResult{Step: 2, State: event.StateFailed, ExitCode: 125}, succeeded)
-	if len(*h.said) == 0 || (*h.said)[0] != textPointNoStartMac || len((*h.said)[0]) > 100 {
+	if len(*h.said) == 0 || (*h.said)[0] != textShownMac {
 		t.Errorf("lines %q", *h.said)
 	}
 }

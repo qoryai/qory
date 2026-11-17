@@ -268,3 +268,45 @@ func TestARunAPIThatFailsAtTheLaunchIsACauseOutsideTheAgentsReach(t *testing.T) 
 		})
 	}
 }
+
+// TestTheCapBeforeTheCommandIsNotStartedAndTheCapAfterItIsRed: a step cut at the cap with no `ran` status
+// file never reached the command: qory posts escalate with "The full suite did not start: ..." and, over
+// a changes-requested of the agent, escalate with the agent's points. A step cut at the cap after the
+// command started posts changes-requested with "did not finish".
+func TestTheCapBeforeTheCommandIsNotStartedAndTheCapAfterItIsRed(t *testing.T) {
+	cut := session.AfterResult{Step: 2, State: event.StateCancelled, Reason: event.ReasonTimeout, ExitCode: 143}
+	const notStarted = `{"text":"The full suite did not start: the after step used its 7 minutes before the command.","action":"run_again"}`
+	const red = `{"text":"The full suite did not finish: the after step reached its limit of 7 minutes.","action":"run_again"}`
+	for _, c := range []struct {
+		name, agent, want string
+		ran               bool
+	}{
+		{"before the command", "", `{"verdict":"escalate","points":[` + notStarted + `]}`, false},
+		{"before the command, over a changes-requested", `{"verdict":"changes-requested","points":[{"text":"x","action":"run_again"}]}`,
+			`{"verdict":"escalate","points":[{"text":"x","action":"run_again"},` + notStarted + `]}`, false},
+		{"after the command started", "", `{"verdict":"changes-requested","points":[` + red + `]}`, true},
+		{"after the command started, over a changes-requested", `{"verdict":"changes-requested","points":[{"text":"x","action":"run_again"}]}`, "", true},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			h := newHelper(t)
+			if c.agent != "" {
+				h.api.add(fakeVersion{artifact: "verdict", name: "main", number: 1, runID: "r1", file: "verdict.json", content: c.agent})
+			}
+			if c.ran {
+				h.state(t, "ran "+suiteSHA, "")
+			}
+			writeEvents(t, h.runDir, afterStarted(3, 2), afterExited(4, 2))
+			end := cut
+			if got, err := h.after(&end, succeeded); err != nil || got != succeeded {
+				t.Errorf("outcome %+v, error %v", got, err)
+			}
+			posted := h.api.verdicts()
+			switch {
+			case c.want == "" && len(posted) != 0:
+				t.Errorf("posted %q, want nothing", posted)
+			case c.want != "" && (len(posted) != 1 || posted[0] != c.want):
+				t.Errorf("posted %q, want %s", posted, c.want)
+			}
+		})
+	}
+}

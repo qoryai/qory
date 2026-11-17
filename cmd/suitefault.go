@@ -52,6 +52,7 @@ const (
 	textFaultBadFile  = "The full suite did not start: the result file of the full row is no path below the repository."
 	textFixBadFile    = "Write a relative path below the repository as the Result file, or none."
 	textFaultPlanRead = "The full suite did not start: qory could not read the build plan."
+	textShownBadFile  = "The full suite did not start: the result file is no path below the repository."
 	textFaultNoRunAPI = "The full suite did not start: qory cannot reach the run API."
 	textFaultNoGit    = "The full suite did not start: the session's folder has no .git folder."
 	textFaultBadStart = "The full suite did not start: qory could not read the commit the session started at."
@@ -84,12 +85,13 @@ func faultOf(err error) *suiteFault {
 	return &suiteFault{point: runapi.Point{Text: textFaultPlanRead, Action: "run_again"}}
 }
 
-// line is the line of qory run for the fault: the point's text, and its fix on the next line.
+// line is the line of qory run for the fault: the fix first, then the cause on the next line; a
+// fault with no fix is its cause alone.
 func (f *suiteFault) line() string {
 	if f.point.Fix == "" {
-		return f.point.Text
+		return shownLine(f.point.Text)
 	}
-	return f.point.Text + "\n  " + f.point.Fix
+	return f.point.Fix + "\n  " + shownLine(f.point.Text)
 }
 
 // noRunAPIFault is the fault of a run whose run API cannot be reached at the launch.

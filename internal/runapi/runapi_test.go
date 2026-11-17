@@ -834,3 +834,66 @@ func TestACancelledContextIsNotAGatewayError(t *testing.T) {
 		t.Errorf("err = %q", err)
 	}
 }
+
+func TestPushVerdictDocumentSendsTheBodyAsGiven(t *testing.T) {
+	const body = `{"verdict":"escalate","points":[{"text":"The checks script failed.","action":"run_again"}],"track":{"id":"small","reason":"One file."}}`
+	var headers http.Header
+	client := serve(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/v1/runs/run-1/verdict" {
+			t.Errorf("request = %s %s", r.Method, r.URL.Path)
+		}
+		headers = r.Header.Clone()
+		if raw, _ := io.ReadAll(r.Body); string(raw) != body {
+			t.Errorf("body = %s", raw)
+		}
+		respond(http.StatusCreated,
+			`{"version": 1, "artifact": {"type": "verdict", "name": "main", "version": {"id": "av_4", "number": 4}}}`)(w, r)
+	})
+
+	pushed, err := client.PushVerdictDocument(context.Background(), []byte(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pushed.Type != "verdict" || pushed.Version.Number != 4 {
+		t.Errorf("pushed = %+v", pushed)
+	}
+	if got := headers.Get("Content-Type"); got != "application/json" {
+		t.Errorf("Content-Type = %q", got)
+	}
+}
+
+func TestPushVerdictDocumentMapsTheErrorsOfThePost(t *testing.T) {
+	for _, c := range []struct {
+		name   string
+		status int
+		body   string
+		code   string
+	}{
+		{"a refused document", http.StatusUnprocessableEntity, `{"error":"invalid_verdict","message":"Fix the verdict."}`, "invalid_verdict"},
+		{"a missing run", http.StatusNotFound, `{"error":"unknown_run"}`, "unknown_run"},
+		{"a rate limit", http.StatusTooManyRequests, `{"error":"rate_limited"}`, runapi.CodeRateLimited},
+		{"an unavailable run API", http.StatusServiceUnavailable, `{"error":"unavailable"}`, "unavailable"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			client := serve(t, respond(c.status, c.body))
+
+			_, err := client.PushVerdictDocument(context.Background(), []byte(`{"verdict":"passed"}`))
+
+			var apiError *runapi.Error
+			if !errors.As(err, &apiError) || apiError.Status != c.status || apiError.Code != c.code || apiError.Request != "POST /verdict" {
+				t.Fatalf("err = %v, error = %+v", err, apiError)
+			}
+		})
+	}
+}
+
+func TestPushVerdictDocumentRefusesABodyOverTheVerdictLimit(t *testing.T) {
+	client := serve(t, func(http.ResponseWriter, *http.Request) { t.Error("a request went out") })
+
+	_, err := client.PushVerdictDocument(context.Background(), make([]byte, 64<<10+1))
+
+	var apiError *runapi.Error
+	if !errors.As(err, &apiError) || apiError.Code != runapi.CodePayloadTooLarge || apiError.Limit != 64<<10 {
+		t.Fatalf("err = %v", err)
+	}
+}

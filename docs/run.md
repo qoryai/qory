@@ -3476,8 +3476,9 @@ before the copy step and the push step.
 60; qory reads it from the harness composed at `target_version`, so a commit on the work item's
 branch does not change it. Any other value is read as 60. The limit is the time limit of the
 after step, which includes starting the step. The run's `--timeout` covers the agent's runtime
-alone, so a run can last `--timeout` plus the limit. A step past the limit is cut and the suite
-ends `timeout`.
+alone, so a run can last `--timeout` plus the limit. A step past the limit is cut. When the
+script had written `ran <commit>`, the suite ends `timeout` and is red. When it had not, for
+example because a clone hung, the command never started, and the suite did not start.
 
 **Result file.** qory reads the copy of the result file only when the command wrote it. It reads a
 regular file of at most 16 MiB, with no link on the way. The format is JUnit XML, the form that
@@ -3495,7 +3496,9 @@ With exit status 0 and no readable result file, the suite is `passed` and has no
 **After the session.** When the session succeeded and the suite ended, qory prints one
 line: `the full suite passed on <short commit>: 2 tests`, `the full suite failed on <short commit>: 1
 of 2 tests failed`, or `the full suite timed out on <short commit>`. For a suite that did not start
-or run it prints the point's text alone. A `passed` suite posts nothing, and the agent's verdict
+or run it prints the cause alone, in the point's words or, when "qory run: " and the point's text would
+pass 100 characters, in fewer words with the same cause. A launch cause with a fix prints the fix on
+the first line and the cause on the next. A `passed` suite posts nothing, and the agent's verdict
 stands. A suite that did not pass makes qory post a verdict through the run API.
 
 A red suite, whose command ran (`failed` or `timeout`):
@@ -3508,7 +3511,8 @@ A red suite, whose command ran (`failed` or `timeout`):
 | `escalate` with 20 points | nothing: the verdict stands |
 
 A suite that did not start or did not run, with a cause the agent cannot fix: the after step
-could not run or the script ended before the command (exit 70, 71, 72 or another status, or -1),
+could not run or the script ended before the command (exit 70, 71, 72 or another status, or -1), or the step
+reached its limit before the script wrote `ran <commit>`,
 the session's folder has no `.git` folder, qory could not read the build plan or the start commit,
 qory cannot reach the run API, or the session succeeded and its after step did not run because the run closed.
 
@@ -3572,7 +3576,10 @@ order of preference:
   and no channel, between the after step's `dev.qory.run.step_started` and
   `dev.qory.run.step_exited`. A host that is no name or address, or an address with a zone, is left
   out.
-- `The full suite did not finish: the after step reached its limit of <n> minutes.` for `timeout`.
+- `The full suite did not start: the after step used its <n> minutes before the command.` for a
+  step cut at the limit before the command started.
+- `The full suite did not finish: the after step reached its limit of <n> minutes.` for `timeout`
+  after the command started.
 - `The full suite ran 0 tests, so it proves nothing.`, `The full suite failed: <failed> of <tests>
   tests failed.`, `The full suite failed: its command exited with status <n>.`, or `The full suite
   failed: the totals of its result file do not match its testcases.`

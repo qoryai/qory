@@ -87,6 +87,9 @@ type suiteEnd struct {
 	noFullSuite bool
 	// after, when not nil, is the end of the after step in place of the script's.
 	after *session.AfterResult
+	// cutAfterStart runs the script, so the command starts, and then ends the step as this result
+	// says, as the cap does for a command that never ends.
+	cutAfterStart *session.AfterResult
 	// events are lines that the run's events file has, after the after step's start and before its exit.
 	events []string
 	// seen is what the fake join sees of the spec: After and AfterTimeout.
@@ -133,6 +136,9 @@ func suiteRun(t *testing.T, api *suiteAPI, e suiteEnd) (string, error, session.O
 		res.After = e.after
 		if res.After == nil {
 			res.After = runAfter(t, spec, e)
+			if e.cutAfterStart != nil {
+				res.After = e.cutAfterStart
+			}
 		}
 		lines := append([]string{afterLine("step_started", 3, "after")}, e.events...)
 		lines = append(lines, afterLine("step_exited", 90, ""))
@@ -284,7 +290,7 @@ func TestARunWhoseVerdictCannotBePostedDoesNotEndPassed(t *testing.T) {
 	if err == nil || cmd.ExitCode(err) != 1 {
 		t.Errorf("qory run returned %v, exit status %d, want 1", err, cmd.ExitCode(err))
 	}
-	wants(t, out, "Take the work item in again in Qory Apiary: qory could not post the verdict of the full suite.")
+	wants(t, out, "Take the work item in again in Qory Apiary: qory could not post the suite's verdict.")
 }
 
 // TestTheRepositorysCapReplacesSixtyMinutes: the after step's time limit is the repository's
@@ -303,7 +309,7 @@ func TestTheRepositorysCapReplacesSixtyMinutes(t *testing.T) {
 			api := newSuiteAPI(t, http.StatusCreated)
 			var seen session.SessionSpec
 			cut := &session.AfterResult{Step: 2, State: event.StateCancelled, Reason: event.ReasonTimeout, ExitCode: 143}
-			out, err, closed := suiteRun(t, api, suiteEnd{extensions: c.extensions, after: cut, seen: &seen})
+			out, err, closed := suiteRun(t, api, suiteEnd{extensions: c.extensions, cutAfterStart: cut, seen: &seen})
 			if err != nil || closed.State != event.StateSucceeded {
 				t.Fatalf("%v, closed %+v\n%s", err, closed, out)
 			}
@@ -332,6 +338,22 @@ func TestARedSuiteThatFollowsARefusedHostNamesTheHost(t *testing.T) {
 		t.Fatalf("%v, closed %+v\n%s", err, closed, out)
 	}
 	want := `{"verdict":"changes-requested","points":[{"text":"Allow registry... and 1 more in the run's policy, or change the suite: it failed after the refusals.","action":"run_again","fix":"Refused connections: the run's Connections tab, Denied."}]}`
+	if posted := api.posted(); len(posted) != 1 || posted[0] != want {
+		t.Errorf("posted %q, want %s", posted, want)
+	}
+}
+
+// TestTheCapBeforeTheCommandPostsAnEscalate: a step cut at the cap before the script wrote `ran`
+// never started the command: qory posts escalate with the point "did not start", and the run
+// closes as its session did.
+func TestTheCapBeforeTheCommandPostsAnEscalate(t *testing.T) {
+	api := newSuiteAPI(t, http.StatusCreated)
+	cut := &session.AfterResult{Step: 2, State: event.StateCancelled, Reason: event.ReasonTimeout, ExitCode: 143}
+	out, err, closed := suiteRun(t, api, suiteEnd{after: cut})
+	if err != nil || closed.State != event.StateSucceeded {
+		t.Fatalf("%v, closed %+v\n%s", err, closed, out)
+	}
+	want := `{"verdict":"escalate","points":[{"text":"The full suite did not start: the after step used its 60 minutes before the command.","action":"run_again"}]}`
 	if posted := api.posted(); len(posted) != 1 || posted[0] != want {
 		t.Errorf("posted %q, want %s", posted, want)
 	}

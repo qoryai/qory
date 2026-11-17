@@ -151,9 +151,10 @@ type Outcome struct {
 	Mismatch bool
 }
 
-// NotStarted reports whether the suite failed before its command ran: the script or the step
-// ended first, which no change to the repository's code mends.
-func (o Outcome) NotStarted() bool { return o.State == Failed && !o.Started }
+// NotStarted reports whether the suite ended before its command ran: the script failed, the step
+// failed, or the cap cut the step before the script wrote "ran". No change to the repository's
+// code mends it.
+func (o Outcome) NotStarted() bool { return (o.State == Failed || o.State == Timeout) && !o.Started }
 
 // Judge reads the files of the script below workspace, the folder the after step ran in,
 // and judges the suite that end describes, with the full row's result file. A suite is

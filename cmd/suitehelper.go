@@ -38,7 +38,8 @@ const (
 	textSuiteStands  = "the verdict %s of the agent stands over the red full suite"
 	textSuitePosted  = "posted the verdict %s for the full suite"
 	textSuiteNoRoom  = "the verdict of the agent has 20 points already, so qory adds none for the full suite"
-	textSuiteNoPost  = "Take the work item in again in Qory Apiary: qory could not post the verdict of the full suite.\n  %s"
+	textSuiteNoPost  = "Take the work item in again in Qory Apiary: qory could not post the suite's verdict.\n  %s"
+	textSuiteNoClear = "Remove .git/qory-suite from the session's folder: qory could not remove it.\n  %s"
 )
 
 // The lines of the point of the verdict that a red suite sets. Each is one sentence on one line
@@ -57,6 +58,10 @@ const (
 
 // The points of a suite that did not start, which a person must see: the cause follows the colon.
 const (
+	textShownMac           = "Contact support: the full suite needs a Linux machine; this machine runs Docker on macOS."
+	textShownNone          = "Contact support: the full suite's container did not start."
+	textShownExit          = "Contact support: the full suite's container exited with status "
+	textPointNoStartCap    = "The full suite did not start: the after step used its %d minutes before the command."
 	textPointNoStartMac    = "Contact support: the full suite needs a Linux machine, and this run's machine runs Docker on macOS."
 	textPointNoStartNone   = "Contact support: the full suite did not start, because its container did not start."
 	textPointNoStartFolder = "The full suite did not start: the script could not make a folder it needs."
@@ -241,7 +246,7 @@ func (r *suiteRun) after(ctx, again context.Context, limit time.Time, res *sessi
 	}
 	defer func() {
 		if err := suite.Clear(r.dir); err != nil {
-			r.said("remove " + suite.StateFolder + " in the workspace: " + shownError(err))
+			r.said(fmt.Sprintf(textSuiteNoClear, shownError(err)))
 		}
 	}()
 	fault := r.fault
@@ -281,14 +286,14 @@ func (r *suiteRun) after(ctx, again context.Context, limit time.Time, res *sessi
 	}
 	switch {
 	case fault != nil:
-		r.said(point.Text)
+		r.said(shownLine(point.Text))
 	case got.State == suite.Skipped:
 		r.said(textSuiteSkipped)
 	case got.State == suite.Passed:
 		r.said(endedLine(got))
 		r.said(textSuiteGreen)
 	case got.NotStarted():
-		r.said(point.Text)
+		r.said(shownLine(point.Text))
 	default:
 		r.said(endedLine(got))
 	}
@@ -425,6 +430,8 @@ func pointLine(got suite.Outcome, refused suite.Refused, minutes int) string {
 	switch c := got.Counts; {
 	case got.State == suite.Stopped:
 		return textPointStopped
+	case got.NotStarted() && got.State == suite.Timeout:
+		return fmt.Sprintf(textPointNoStartCap, minutes)
 	case got.NotStarted():
 		return notStartedLine(got.ExitCode)
 	case len(refused.Hosts) > 0:
@@ -439,6 +446,23 @@ func pointLine(got suite.Outcome, refused suite.Refused, minutes int) string {
 		return fmt.Sprintf(textPointFailed, c.Failed, c.Tests)
 	}
 	return fmt.Sprintf(textPointExit, got.ExitCode)
+}
+
+// shownLine is the line of qory run for the point text: the text itself, or a shorter one with the
+// same cause when "qory run: " and the text would pass 100 characters.
+func shownLine(text string) string {
+	switch {
+	case text == textPointNoStartMac:
+		return textShownMac
+	case text == textPointNoStartNone:
+		return textShownNone
+	case text == textFaultBadFile:
+		return textShownBadFile
+	}
+	if status, ok := strings.CutPrefix(text, strings.TrimSuffix(textPointNoStartExit, "%d.")); ok {
+		return textShownExit + status
+	}
+	return text
 }
 
 // goos is the operating system that qory runs on; a test sets it.
