@@ -897,8 +897,8 @@ gateway:
   `429 Too Many Requests`.
 - A field you leave out has its default: 256, 50 and 200.
 - A value outside its range stops every qory command that reads `forager.yaml`, with the
-  fix, such as `set gateway.run_limits.connections to a number from 1 to 65536, or remove
-  it for the default of 256`.
+  fix, such as `Set gateway.run_limits.connections to a number from 1 to 65536, or remove
+  it.`, and on the next line `The default is 256.`
 - The record has a `dev.qory.run.egress` with the rule `wall:connection-limit` or
   `wall:rate-limit` for a request that gets the `429`, at most one per limit and second.
 
@@ -938,8 +938,9 @@ gateway:
 - The stack proxy counts its connections and requests at the limits of
   `gateway.run_limits`, apart from the run's proxy.
 - An entry of another form stops every qory command that reads `forager.yaml`, with the
-  fix, such as `set gateway.stack_hosts[0] to a lower-case host name, an IPv4 address or
-  a *. suffix, such as git.example.com; no port, path or scheme`.
+  fix, such as `Set gateway.stack_hosts[0] to a lower-case host name, an IPv4 address, or
+  a *. suffix.`, and on the next line `An entry is a host such as git.example.com, with no
+  port, path, or scheme`.
 - For each request the stack proxy allows or denies, the gateway prints one line on
   standard error, and the record has a `dev.qory.run.egress` with `channel: stack`.
   When the run configuration sets `harness_hidden`, those records have no `path` and no
