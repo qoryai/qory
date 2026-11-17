@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	"gopkg.in/yaml.v3"
+
 	"github.com/qoryai/qory/internal/exports"
 )
 
@@ -278,5 +280,59 @@ func TestADirErrorHiddenHasNeitherTheDirectoryNorTheFile(t *testing.T) {
 	}
 	if hidden := de.Hidden(); strings.Contains(hidden, "shared") || strings.Contains(hidden, root) {
 		t.Errorf("the hidden text is %q, want neither the directory nor the file", hidden)
+	}
+}
+
+// TestADecodeErrorKeepsTheDecoderError is a value the decoder cannot read: the refusal
+// starts with its fix, and errors.As and errors.Is still match the decoder's error under
+// it, as they did when the error was prefixed with the path.
+func TestADecodeErrorKeepsTheDecoderError(t *testing.T) {
+	root := write(t, "qory: [0.5.0]\n")
+	_, _, err := exports.Range(root)
+	if err == nil || !strings.HasPrefix(err.Error(), "Set each value in the file to the type its key takes.\n") {
+		t.Fatalf("%v", err)
+	}
+	var te *yaml.TypeError
+	if !errors.As(err, &te) {
+		t.Errorf("errors.As finds no *yaml.TypeError under %v", err)
+	}
+	original := errors.New("yaml: line 3: did not find expected key")
+	err = exports.DecodeError("f.yaml", original)
+	if !errors.Is(err, original) || !strings.HasPrefix(err.Error(), "Correct the YAML syntax of the file.\n") {
+		t.Errorf("%v: errors.Is = %v", err, errors.Is(err, original))
+	}
+	if prefixed := exports.Prefixed("module core", err); !errors.Is(prefixed, original) {
+		t.Errorf("a prefixed refusal lost its cause: %v", prefixed)
+	}
+}
+
+// TestAPathWithASecretIsPrintedAsAPhraseByEveryRead is each read of qory.yaml that refuses
+// in a folder whose name contains an access key secret: the refusal prints the folder as
+// the phrase, and never prints the secret.
+func TestAPathWithASecretIsPrintedAsAPhraseByEveryRead(t *testing.T) {
+	for what, body := range map[string]string{
+		"an unknown key": "exports: {stack: [nextjs]}\n",
+		"a bad value":    "qory: [0.5.0]\n",
+		"a bad section":  "exports: {}\n",
+		"a bad dir":      "exports: {dir: ../x, modules: [core]}\n",
+		"a repeated key": "exports: {modules: [core]}\nexports: {modules: [core]}\n",
+		"an alias":       "a: &x 1\nb: *x\nexports: {modules: [core]}\n",
+		"a syntax error": "exports: [\n",
+	} {
+		root := filepath.Join(t.TempDir(), "qak_AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA")
+		if err := os.MkdirAll(root, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, exports.FileName), []byte("apiVersion: qory.dev/v1alpha1\n"+body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		_, err := exports.Read(root)
+		if err == nil {
+			t.Errorf("%s: no refusal", what)
+			continue
+		}
+		if strings.Contains(strings.ToLower(err.Error()), "qak_") || !strings.Contains(err.Error(), "(a name that contains an access key secret)") {
+			t.Errorf("%s: the refusal does not hide the folder: %v", what, err)
+		}
 	}
 }

@@ -240,6 +240,9 @@ func Prefixed(prefix string, err error) error {
 	if r, ok := err.(*Refusal); ok {
 		return &Refusal{text: r.text, file: r.file, module: prefix}
 	}
+	if d, ok := err.(*decodeRefusal); ok {
+		return &decodeRefusal{Prefixed(prefix, d.Refusal).(*Refusal), d.cause}
+	}
 	return fmt.Errorf("%s: %w", prefix, err)
 }
 
@@ -247,8 +250,26 @@ func Prefixed(prefix string, err error) error {
 // itself is an [InFile], with path inside its text. An InFile under a wrapper gets the
 // path in front, for the reason [Prefixed] gives.
 func AtPath(path string, err error) error {
+	path = HidePath(path)
 	if in, ok := err.(InFile); ok {
 		return in.In(path)
 	}
 	return fmt.Errorf("%s: %w", path, err)
+}
+
+// decodeRefusal is the refusal of a value the decoder could not read, which unwraps to
+// the decoder's error, so errors.Is and errors.As still match it, a *yaml.TypeError
+// among them. Its text has the decoder's words, and only when they contain no access key
+// secret or run key. It is an [InFile] as a [Refusal] is.
+type decodeRefusal struct {
+	*Refusal
+	cause error
+}
+
+// Unwrap returns the decoder's error.
+func (d *decodeRefusal) Unwrap() error { return d.cause }
+
+// In is the refusal with file at [FilePlace], and the same cause.
+func (d *decodeRefusal) In(file string) error {
+	return &decodeRefusal{d.Refusal.In(file).(*Refusal), d.cause}
 }

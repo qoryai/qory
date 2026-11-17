@@ -412,9 +412,10 @@ type InFile interface {
 // or a run key, as a key whose name has a newline in it does: then [withoutSecrets]
 // says it.
 func DecodeError(path string, err error) error {
+	path = HidePath(path)
 	var in InFile
 	if errors.As(err, &in) {
-		return in.In(HidePath(path))
+		return in.In(path)
 	}
 	text := err.Error()
 	rest := " " + filepath.Base(path) + " reads"
@@ -425,7 +426,12 @@ func DecodeError(path string, err error) error {
 	if accesskey.ContainsSecret(hidden) {
 		return withoutSecrets(path, rest, err)
 	}
-	return decoderRefusal(path, hidden, err)
+	r := decoderRefusal(path, hidden, err)
+	if hidden != text {
+		return r
+	}
+	// The text has the decoder's words as they are, so the error may unwrap to the decoder's.
+	return &decodeRefusal{r, err}
 }
 
 // fixes of a refusal of a decode error: the key the file does not read, a key written
@@ -455,7 +461,7 @@ func unknownKeyRefusal(path, linePrefix, text string) error {
 // decoderRefusal is the refusal of the decoder's error err, whose text with a secret
 // left out is text, for the file at path: the fix by the kind of the error, the
 // decoder's entries as the cause, and the file.
-func decoderRefusal(path, text string, err error) error {
+func decoderRefusal(path, text string, err error) *Refusal {
 	var te *yaml.TypeError
 	typed := errors.As(err, &te)
 	var lines []string
@@ -675,7 +681,7 @@ func RefuseAliases(path string, data []byte) error {
 			// The line places the alias, and the anchor's name is left out.
 			alias = "The value"
 		}
-		return Refuse("Write the value out in full in place of the YAML alias.", fmt.Sprintf("%s at line %d is a YAML alias, which %s may not contain.", alias, a.Line, filepath.Base(path)), "The file is "+path+".")
+		return Refuse("Write the value out in full in place of the YAML alias.", fmt.Sprintf("%s at line %d is a YAML alias, which %s may not contain.", alias, a.Line, filepath.Base(path)), "The file is "+HidePath(path)+".")
 	}
 	return nil
 }
